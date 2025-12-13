@@ -1,0 +1,224 @@
+#!/bin/bash
+# powos - PowOS CLI
+#
+# Main command interface for PowOS system management.
+
+set -e
+
+VERSION="0.2.0"
+OVERLAY_SCRIPT="/usr/lib/powos/ramfs/overlay-mount.sh"
+SYNC_DAEMON="/usr/lib/powos/ramfs/sync-daemon.py"
+
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+usage() {
+    cat << EOF
+PowOS - Portable Gaming Workstation
+
+Usage: powos <command> [options]
+
+Commands:
+  status          Show system status (USB, overlay, sync)
+  sync            Force sync RAM changes to USB
+  safe            Check if safe to unplug USB
+
+  overlay status  Show overlay details
+  overlay sync    Sync overlays to USB
+
+  hardware        Show detected hardware
+  profile         Show active hardware profile
+
+  version         Show version
+
+Examples:
+  powos status              # Quick status check
+  powos sync                # Force sync now
+  powos safe && echo "OK"   # Check before unplugging
+
+EOF
+}
+
+# Get USB status
+get_usb_status() {
+    if [[ -f /run/powos/usb-state ]]; then
+        source /run/powos/usb-state
+        echo "$USB_STATUS"
+    else
+        echo "unknown"
+    fi
+}
+
+# Get RAM overlay usage
+get_ram_usage() {
+    if mountpoint -q /run/powos/overlay 2>/dev/null; then
+        df -h /run/powos/overlay | tail -1 | awk '{print $3 "/" $2}'
+    else
+        echo "N/A"
+    fi
+}
+
+# Check if safe to unplug
+is_safe_to_unplug() {
+    # Check sync status
+    if [[ -f /run/powos/sync-status ]]; then
+        local pending
+        pending=$(python3 -c "import json; print(json.load(open('/run/powos/sync-status')).get('pending_changes', 0))" 2>/dev/null || echo "0")
+        [[ "$pending" == "0" ]]
+    else
+        return 0
+    fi
+}
+
+# Status command
+cmd_status() {
+    echo -e "${CYAN}PowOS Status${NC}"
+    echo "============"
+    echo ""
+
+    # USB Status
+    local usb_status
+    usb_status=$(get_usb_status)
+    case "$usb_status" in
+        connected)
+            echo -e "USB Drive:    ${GREEN}● Connected${NC}"
+            ;;
+        disconnected)
+            echo -e "USB Drive:    ${YELLOW}○ Disconnected${NC} (running from RAM)"
+            ;;
+        *)
+            echo -e "USB Drive:    ${RED}? Unknown${NC}"
+            ;;
+    esac
+
+    # RAM Usage
+    local ram_usage
+    ram_usage=$(get_ram_usage)
+    echo "RAM Overlay:  $ram_usage"
+
+    # Sync Status
+    if [[ -f /run/powos/sync-status ]]; then
+        local last_sync
+        last_sync=$(python3 -c "
+import json, time
+s = json.load(open('/run/powos/sync-status'))
+t = s.get('last_sync', 0)
+if t > 0:
+    delta = int(time.time() - t)
+    if delta < 60:
+        print(f'{delta}s ago')
+    elif delta < 3600:
+        print(f'{delta // 60}m ago')
+    else:
+        print(f'{delta // 3600}h ago')
+else:
+    print('Never')
+" 2>/dev/null || echo "Unknown")
+        echo "Last Sync:    $last_sync"
+    fi
+
+    # Safe to unplug?
+    echo ""
+    if is_safe_to_unplug; then
+        echo -e "Safe to unplug: ${GREEN}Yes${NC}"
+    else
+        echo -e "Safe to unplug: ${RED}No${NC} (sync in progress)"
+    fi
+
+    echo ""
+}
+
+# Sync command
+cmd_sync() {
+    echo "Syncing to USB..."
+
+    if [[ -x "$OVERLAY_SCRIPT" ]]; then
+        "$OVERLAY_SCRIPT" sync
+    else
+        # Fallback
+        bash /usr/lib/powos/ramfs/overlay-mount.sh sync 2>/dev/null || \
+            echo "Overlay script not available"
+    fi
+}
+
+# Safe check command
+cmd_safe() {
+    if is_safe_to_unplug; then
+        echo -e "${GREEN}✓ Safe to unplug USB${NC}"
+        exit 0
+    else
+        echo -e "${RED}✗ Not safe - sync in progress${NC}"
+        exit 1
+    fi
+}
+
+# Hardware command
+cmd_hardware() {
+    if [[ -f /run/powos/hardware ]]; then
+        cat /run/powos/hardware
+    else
+        echo "Hardware not detected yet"
+    fi
+}
+
+# Version command
+cmd_version() {
+    echo "PowOS version $VERSION"
+}
+
+# Overlay subcommand
+cmd_overlay() {
+    case "${1:-status}" in
+        status)
+            if [[ -x "$OVERLAY_SCRIPT" ]]; then
+                "$OVERLAY_SCRIPT" status
+            else
+                bash /usr/lib/powos/ramfs/overlay-mount.sh status 2>/dev/null || \
+                    echo "Overlay script not available"
+            fi
+            ;;
+        sync)
+            cmd_sync
+            ;;
+        *)
+            echo "Usage: powos overlay {status|sync}"
+            ;;
+    esac
+}
+
+# Main dispatch
+case "${1:-}" in
+    status)
+        cmd_status
+        ;;
+    sync)
+        cmd_sync
+        ;;
+    safe)
+        cmd_safe
+        ;;
+    overlay)
+        shift
+        cmd_overlay "$@"
+        ;;
+    hardware)
+        cmd_hardware
+        ;;
+    profile)
+        cmd_hardware | grep ACTIVE_PROFILE
+        ;;
+    version|--version|-v)
+        cmd_version
+        ;;
+    help|--help|-h|"")
+        usage
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Run 'powos help' for usage"
+        exit 1
+        ;;
+esac

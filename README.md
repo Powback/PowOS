@@ -1,6 +1,6 @@
 # PowOS - Portable Gaming Workstation
 
-A fully portable Linux workstation that runs from a USB SSD. Plug into any machine, boot, work. Unplug and take your entire environment with you.
+A fully portable Linux workstation that runs from a USB SSD. Plug into any machine, boot, work. **Unplug the USB and keep working from RAM.** Plug back in - changes sync automatically.
 
 ## Two Commands. That's It.
 
@@ -16,8 +16,28 @@ Then burn the ISO to your USB SSD and boot from it. Everything else is automatic
 
 ## What Makes This Special
 
-### Unplug Resilience (HomeFS)
-Working on your desktop, need to leave? **Just unplug the USB drive.** The system continues running from RAM cache. Plug back in later - changes sync automatically. No data loss.
+### Unplug Resilience (RAM Overlay)
+Working on your desktop, need to leave? **Just unplug the USB drive.** The system continues running from RAM. Plug back in later - changes sync automatically. No data loss, no crash.
+
+```
+USB plugged in:
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   Your App  │ ──── │ RAM Overlay │ ──── │  USB SSD    │
+│   (vim)     │      │  (cache)    │      │  (storage)  │
+└─────────────┘      └─────────────┘      └─────────────┘
+
+USB unplugged:
+┌─────────────┐      ┌─────────────┐
+│   Your App  │ ──── │ RAM Overlay │      (USB gone, don't care)
+│   (vim)     │      │ (all in RAM)│
+└─────────────┘      └─────────────┘
+
+USB replugged:
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   Your App  │ ──── │ RAM Overlay │ ───► │  USB SSD    │
+│   (vim)     │      │ (syncing)   │      │  (updated)  │
+└─────────────┘      └─────────────┘      └─────────────┘
+```
 
 ### Hardware Chameleon
 One drive works on ANY machine:
@@ -47,20 +67,20 @@ open http://localhost:6091/vnc.html
 # Password: powos
 
 # You'll see KDE Plasma desktop
-# HomeFS shows "Disabled (direct mode)" - that's correct for Docker
+# "RAM Overlay: Disabled" - that's correct for Docker (no USB)
 # On real hardware with USB, it enables automatically
 ```
 
 ## Creating the ISO
 
 ```bash
-# Build bootable ISO
+# Build bootable ISO (requires podman)
 just build-iso
 
 # Output: build/output/powos.iso
 ```
 
-Then use your preferred tool to write it:
+Then write to USB:
 - **Linux**: `sudo dd if=build/output/powos.iso of=/dev/sdX bs=4M status=progress`
 - **Windows**: Rufus, Etcher, or similar
 - **macOS**: `sudo dd if=build/output/powos.iso of=/dev/diskN bs=4m`
@@ -74,38 +94,36 @@ Then use your preferred tool to write it:
    → Power source (AC/Battery)
    → Form factor (Desktop/Laptop)
 3. Applies matching profile automatically
-4. HomeFS mounts your home directory
-   → Metadata cached to RAM for instant access
-   → Files lazy-loaded on demand
-   → Writes journaled for safety
+4. RAM Overlay activates
+   → USB mounted read-only as base layer
+   → RAM tmpfs as write layer (overlayfs)
+   → All writes go to RAM, synced to USB periodically
 5. KDE Plasma desktop starts
 6. You're ready to work
 
-When you unplug:
-- System keeps running from RAM cache
-- All writes saved to journal
-- Desktop notification shows "Running from cache"
+Unplugging USB:
+- System keeps running (everything in RAM overlay)
+- Desktop notification: "Running from RAM"
+- No interruption to your work
 
-When you replug:
-- Journal replays to USB automatically
+Replugging USB:
+- Sync daemon detects reconnection
+- RAM changes written to USB
 - "Sync complete" notification
-- Zero data loss
 ```
 
-## USB Drive Setup (Automatic on First Boot)
+## USB Drive Setup
 
-PowOS expects this partition layout (created automatically by installer):
+PowOS expects this partition layout:
 
 ```
 USB SSD (e.g., Lexar NM790 4TB)
 ├── Partition 1: EFI (512MB, FAT32)
 ├── Partition 2: PowOS System (100GB, BTRFS)
 │   └── Base OS, overlays, state
-└── Partition 3: HomeFS User Data (remainder, BTRFS)
-    └── /home - your files, lazy-loaded via FUSE
+└── Partition 3: User Data (remainder, BTRFS)
+    └── Label: POWOS-DATA (auto-detected)
 ```
-
-Label the home partition `POWOS-HOME` for auto-detection.
 
 ## Key Commands
 
@@ -113,40 +131,10 @@ Label the home partition `POWOS-HOME` for auto-detection.
 |---------|--------------|
 | `docker compose up` | Test PowOS in Docker |
 | `just build-iso` | Create bootable ISO |
-| `homefs status` | Show cache stats, sync status |
-| `homefs sync` | Force sync to USB |
+| `powos status` | Show USB, RAM overlay, sync status |
+| `powos sync` | Force sync RAM to USB |
+| `powos safe` | Check if safe to unplug |
 | `pinstall <pkg>` | Install package + commit to git |
-
-## How HomeFS Works
-
-HomeFS is a FUSE filesystem that makes your USB drive "unpluggable":
-
-```
-Normal operation:
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│ Application │ ──── │   HomeFS    │ ──── │  USB SSD    │
-│   (vim)     │      │ (FUSE+RAM)  │      │ /home/user  │
-└─────────────┘      └─────────────┘      └─────────────┘
-
-USB unplugged:
-┌─────────────┐      ┌─────────────┐      ┌ ─ ─ ─ ─ ─ ─┐
-│ Application │ ──── │   HomeFS    │      │  USB SSD    │
-│   (vim)     │      │  (RAM only) │       (unplugged)
-└─────────────┘      └─────────────┘      └ ─ ─ ─ ─ ─ ─┘
-                            │
-                     Writes go to journal
-                     Reads from RAM cache
-
-USB replugged:
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│ Application │ ──── │   HomeFS    │ ──── │  USB SSD    │
-│   (vim)     │      │ (syncing)   │      │ /home/user  │
-└─────────────┘      └─────────────┘      └─────────────┘
-                            │
-                     Journal replays to USB
-```
-
-**Cache limits**: 4GB RAM by default (configurable in `/etc/homefs/config.json`)
 
 ## Hardware Profiles
 
@@ -170,30 +158,25 @@ PowOS/
 │
 ├── bin/                       # User commands
 │   ├── powos-boot             # Main boot script
-│   ├── pinstall               # Install + git commit
-│   └── homefs-usb-notify      # USB hotplug handler
+│   ├── powos                  # CLI (status, sync, safe)
+│   └── pinstall               # Install + git commit
 │
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot
 │   ├── overlay-manager.sh     # systemd-sysext builder
-│   └── homefs/                # HomeFS FUSE filesystem
-│       ├── homefs.py          # Main FUSE driver
-│       ├── journal.py         # Write-ahead log
-│       ├── cache.py           # LRU cache manager
-│       └── sync.py            # USB sync daemon
+│   └── ramfs/                 # RAM overlay system
+│       ├── overlay-mount.sh   # overlayfs setup
+│       └── sync-daemon.py     # USB sync daemon
 │
 ├── config/
-│   ├── profiles/              # Hardware profiles
-│   ├── homefs/config.json     # HomeFS settings
-│   └── udev/                  # USB hotplug rules
+│   └── profiles/              # Hardware profiles
 │
 ├── build/
 │   ├── build-iso.sh           # ISO creation script
 │   └── output/                # Built ISOs go here
 │
 └── docs/
-    ├── HOMEFS-DESIGN.md       # HomeFS architecture
-    └── HOMEFS-INTEGRATION.md  # Boot integration details
+    └── RAMFS-DESIGN.md        # RAM overlay architecture
 ```
 
 ## Credentials
@@ -208,26 +191,26 @@ User login:   powos / powos
 **Desktop won't load in Docker?**
 ```bash
 docker compose logs powos | tail -50
-# Check for VNC errors
 ```
 
-**HomeFS not starting on real hardware?**
+**RAM overlay not activating on real hardware?**
 ```bash
 # Check if USB detected
-blkid | grep POWOS-HOME
+blkid | grep POWOS-DATA
 
-# Check HomeFS status
-homefs status
+# Check overlay status
+powos status
 
-# Check logs
-journalctl -u powos-homefs -f
+# Check powos boot logs
+journalctl -u powos-boot -f
 ```
 
 **Safe to unplug?**
 ```bash
-homefs status
-# Look for "Safe to unplug: Yes"
-# If "No", wait for sync to complete
+powos safe
+# ✓ Safe to unplug USB
+# or
+# ✗ Not safe - sync in progress
 ```
 
 ## Documentation
@@ -235,7 +218,7 @@ homefs status
 - [CLAUDE.md](CLAUDE.md) - Technical reference for AI/developers
 - [USER_STORIES.md](USER_STORIES.md) - Feature requirements and acceptance criteria
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture details
-- [docs/HOMEFS-DESIGN.md](docs/HOMEFS-DESIGN.md) - HomeFS deep dive
+- [docs/RAMFS-DESIGN.md](docs/RAMFS-DESIGN.md) - RAM overlay deep dive
 
 ## License
 

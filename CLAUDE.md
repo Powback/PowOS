@@ -34,88 +34,65 @@ Access desktop at `http://localhost:6091/vnc.html` (password: `powos`)
 
 ## Core Components
 
-### 1. HomeFS (Unplug Resilience)
+### 1. RAM Overlay (Unplug Resilience)
 
-FUSE-based filesystem that allows USB hot-unplug without data loss.
+Linux overlayfs with USB as read-only lower layer and RAM (tmpfs) as write layer.
 
 **How it works:**
 ```
-Normal operation:
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│ Application │ ──── │   HomeFS    │ ──── │  USB SSD    │
-│   (vim)     │      │ (FUSE+RAM)  │      │ /home/user  │
-└─────────────┘      └─────────────┘      └─────────────┘
+USB connected:
+┌─────────────┐      ┌─────────────────────────────┐      ┌─────────────┐
+│ Application │ ──── │       overlayfs             │ ──── │  USB SSD    │
+│   (vim)     │      │  upper: RAM (tmpfs)         │      │  (storage)  │
+└─────────────┘      │  lower: USB (read-only)     │      └─────────────┘
+                     └─────────────────────────────┘
+                              │
+                     Writes → RAM upper layer
+                     Reads → RAM first, then USB
 
 USB unplugged:
-┌─────────────┐      ┌─────────────┐      ┌ ─ ─ ─ ─ ─ ─┐
-│ Application │ ──── │   HomeFS    │      │  USB SSD    │
-│   (vim)     │      │  (RAM only) │       (unplugged)
-└─────────────┘      └─────────────┘      └ ─ ─ ─ ─ ─ ─┘
-                            │
-                     Writes go to journal
-                     Reads from RAM cache
+┌─────────────┐      ┌─────────────────────────────┐
+│ Application │ ──── │       overlayfs             │      (USB gone)
+│   (vim)     │      │  upper: RAM (all writes)    │
+└─────────────┘      │  lower: cached in RAM       │
+                     └─────────────────────────────┘
 
 USB replugged:
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│ Application │ ──── │   HomeFS    │ ──── │  USB SSD    │
-│   (vim)     │      │ (syncing)   │      │ /home/user  │
-└─────────────┘      └─────────────┘      └─────────────┘
-                            │
-                     Journal replays to USB
+┌─────────────┐      ┌─────────────────────────────┐      ┌─────────────┐
+│ Application │ ──── │       overlayfs             │ ───► │  USB SSD    │
+│   (vim)     │      │  (sync daemon active)       │      │  (updated)  │
+└─────────────┘      └─────────────────────────────┘      └─────────────┘
+                              │
+                     rsync RAM changes to USB
 ```
 
 **Key Features:**
-- Metadata cached in RAM for instant access
-- Files lazy-loaded from USB on first access
-- Writes go to write-ahead journal (WAL)
-- When USB unplugged: system continues from RAM cache
-- When USB replugged: journal replays, changes sync
-- Desktop notifications for plug/unplug events
+- Uses standard Linux overlayfs (no custom FUSE)
+- All writes go to RAM tmpfs (fast, survives USB unplug)
+- USB is read-only base layer (safe from corruption)
+- Sync daemon rsyncs changes to USB periodically
+- Desktop notifications for USB plug/unplug events
 
 **Files:**
 ```
-lib/homefs/
-├── homefs.py      # Main FUSE driver
-├── journal.py     # Write-ahead log
-├── cache.py       # LRU cache manager
-├── sync.py        # USB sync daemon
-└── cli.py         # User commands
+lib/ramfs/
+├── overlay-mount.sh   # overlayfs setup script
+└── sync-daemon.py     # Background rsync to USB
 
-config/homefs/config.json  # Cache size, sync interval, exclusions
-bin/homefs-usb-notify      # USB hotplug handler
-```
-
-**Configuration (`config/homefs/config.json`):**
-```json
-{
-  "cache": {
-    "max_size": "4G",              // RAM cache limit
-    "large_file_threshold": "100M" // Chunk large files
-  },
-  "sync": {
-    "strategy": "batched",         // Batch writes for performance
-    "batch_interval": 30           // Sync every 30 seconds
-  },
-  "preload": [                     // Always keep in RAM
-    ".bashrc", ".ssh/config"
-  ],
-  "exclude": [                     // Never cache
-    ".cache/**", "Downloads/**"
-  ]
-}
+bin/powos              # CLI for status, sync, safe-check
 ```
 
 **Commands:**
 ```bash
-homefs status       # Show cache stats, USB status, safe-to-unplug
-homefs sync         # Force sync to USB
-homefs cache stats  # Detailed cache statistics
+powos status    # Show USB status, RAM usage, last sync
+powos sync      # Force sync RAM to USB now
+powos safe      # Check if safe to unplug (exit 0 = yes)
 ```
 
 **Docker vs Real Hardware:**
-- In Docker: HomeFS runs in "direct mode" (no USB to detect)
-- On real hardware: Auto-detects USB with label `POWOS-HOME`
-- Status shows "Disabled (direct mode)" in Docker - this is correct
+- In Docker: RAM overlay disabled (no USB to detect)
+- On real hardware: Auto-detects USB with label `POWOS-DATA`
+- Status shows "RAM Overlay: Disabled" in Docker - this is correct
 
 ### 2. Chameleon Boot (Hardware Detection)
 
@@ -173,23 +150,18 @@ PowOS/
 │
 ├── bin/                       # User commands
 │   ├── powos-boot             # Main boot script
-│   ├── pinstall               # Install + git commit
-│   └── homefs-usb-notify      # USB hotplug handler
+│   ├── powos                  # CLI (status, sync, safe)
+│   └── pinstall               # Install + git commit
 │
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot
 │   ├── overlay-manager.sh     # systemd-sysext builder
-│   └── homefs/                # HomeFS FUSE filesystem
-│       ├── homefs.py          # Main FUSE driver
-│       ├── journal.py         # Write-ahead log
-│       ├── cache.py           # LRU cache manager
-│       ├── sync.py            # USB sync daemon
-│       └── cli.py             # CLI interface
+│   └── ramfs/                 # RAM overlay system
+│       ├── overlay-mount.sh   # overlayfs setup
+│       └── sync-daemon.py     # USB sync daemon
 │
 ├── config/
-│   ├── profiles/              # Hardware profiles
-│   ├── homefs/config.json     # HomeFS settings
-│   └── udev/                  # USB hotplug rules
+│   └── profiles/              # Hardware profiles
 │
 ├── build/
 │   ├── build-iso.sh           # ISO creation (uses podman + bootc)
@@ -295,23 +267,23 @@ docker compose logs powos | tail -50
 # Look for VNC or X11 errors
 ```
 
-**HomeFS not starting on real hardware:**
+**RAM overlay not starting on real hardware:**
 ```bash
 # Check if USB detected
-blkid | grep POWOS-HOME
+blkid | grep POWOS-DATA
 
-# Check HomeFS status
-homefs status
+# Check overlay status
+powos status
 
-# Check logs
-journalctl -u powos-homefs -f
+# Check boot logs
+journalctl -b | grep powos
 ```
 
 **Safe to unplug?**
 ```bash
-homefs status
-# Look for "Safe to unplug: Yes"
-# If "No", wait for sync to complete
+powos safe
+# ✓ Safe to unplug USB (exit code 0)
+# ✗ Not safe - sync in progress (exit code 1)
 ```
 
 **NVIDIA EGL crash:**

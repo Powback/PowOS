@@ -70,73 +70,50 @@ if [[ -d "/usr/lib/powos/overlays" ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-# 4. User Data / HomeFS
+# 4. RAM Overlay (Unplug Resilience)
 # ═══════════════════════════════════════════════════════════════════
-log "Setting up User Environment..."
+log "Setting up RAM Overlay..."
 
-# Check if HomeFS should be enabled
-HOMEFS_ENABLED="${POWOS_HOMEFS:-auto}"
-HOMEFS_USB_UUID="${POWOS_USB_UUID:-}"
+OVERLAY_ENABLED="${POWOS_OVERLAY:-auto}"
+OVERLAY_SCRIPT="/usr/lib/powos/ramfs/overlay-mount.sh"
 
-# Try to detect USB drive with POWOS-HOME label
-if [[ "$HOMEFS_ENABLED" == "auto" ]]; then
-    if blkid | grep -q "POWOS-HOME"; then
-        HOMEFS_ENABLED="true"
-        HOMEFS_USB_UUID=$(blkid -L POWOS-HOME -o value 2>/dev/null || true)
-        log "  Detected HomeFS USB drive: $HOMEFS_USB_UUID"
+# Check if we should enable overlay
+if [[ "$OVERLAY_ENABLED" == "auto" ]]; then
+    # Auto-detect: enable if USB with POWOS-DATA or POWOS-HOME label exists
+    if blkid | grep -qE "POWOS-(DATA|HOME)"; then
+        OVERLAY_ENABLED="true"
+        log "  Detected PowOS USB drive"
     else
-        HOMEFS_ENABLED="false"
-        log "  No HomeFS USB drive detected (running in direct mode)"
+        OVERLAY_ENABLED="false"
+        log "  No PowOS USB detected (direct mode)"
     fi
 fi
 
-if [[ "$HOMEFS_ENABLED" == "true" ]] && [[ -n "$HOMEFS_USB_UUID" ]]; then
-    log "  Starting HomeFS (lazy-load home filesystem)..."
+if [[ "$OVERLAY_ENABLED" == "true" ]]; then
+    log "  Setting up overlayfs (RAM cache + USB persistence)..."
 
-    # Mount USB if not mounted
-    USB_DEV="/dev/disk/by-uuid/$HOMEFS_USB_UUID"
-    if [[ -b "$USB_DEV" ]] && ! mountpoint -q /mnt/homefs-usb; then
-        mount "$USB_DEV" /mnt/homefs-usb 2>/dev/null || true
-    fi
+    if [[ -x "$OVERLAY_SCRIPT" ]]; then
+        "$OVERLAY_SCRIPT" setup 2>&1 | while read -r line; do log "    $line"; done
 
-    # Start HomeFS FUSE mount
-    if [[ -f /etc/homefs/config.json ]] && command -v homefs &>/dev/null; then
-        # Update config with detected UUID
-        python3 -c "
-import json
-with open('/etc/homefs/config.json', 'r+') as f:
-    cfg = json.load(f)
-    cfg['sync']['usb_uuid'] = '$HOMEFS_USB_UUID'
-    f.seek(0)
-    json.dump(cfg, f, indent=2)
-    f.truncate()
-" 2>/dev/null || true
-
-        # Start HomeFS in background
-        homefs mount /mnt/homefs-usb /home/powos --daemon &
-        sleep 2
-
-        if mountpoint -q /home/powos 2>/dev/null; then
-            log_ok "HomeFS mounted at /home/powos"
-
-            # Start sync daemon
-            homefs sync --daemon &
-            log "  HomeFS sync daemon started"
-        else
-            log_warn "HomeFS mount failed, using direct home"
-            mkdir -p /home/powos
+        # Start sync daemon
+        if [[ -x /usr/lib/powos/ramfs/sync-daemon.py ]]; then
+            python3 /usr/lib/powos/ramfs/sync-daemon.py &
+            log "  Sync daemon started"
         fi
+
+        log_ok "RAM overlay active - safe to unplug USB"
     else
-        log_warn "HomeFS not available, using direct home"
+        log_warn "Overlay script not found, using direct mode"
         mkdir -p /home/powos
     fi
 else
-    # Direct mode (no HomeFS)
-    log "  Using direct home directory (no lazy-load)"
+    # Direct mode (no overlay, no USB)
+    log "  Using direct home directory (no overlay)"
     mkdir -p /home/powos
 fi
 
-# Ensure permissions
+# Ensure home exists and has correct permissions
+mkdir -p /home/powos
 chown -R 1000:1000 /home/powos 2>/dev/null || true
 
 # ═══════════════════════════════════════════════════════════════════
@@ -202,12 +179,12 @@ echo "  noVNC Access:  http://localhost:6091/vnc.html"
 echo "  VNC Direct:    localhost:5901"
 echo "  Password:      powos"
 echo ""
-if [[ "$HOMEFS_ENABLED" == "true" ]]; then
-    echo -e "  ${CYAN}HomeFS:${NC}        Enabled (lazy-load from USB)"
-    echo "                 Run 'homefs status' for cache info"
-    echo "                 Safe to unplug when 'homefs status' shows ready"
+if [[ "$OVERLAY_ENABLED" == "true" ]]; then
+    echo -e "  ${CYAN}RAM Overlay:${NC}   Active (USB can be unplugged)"
+    echo "                 Run 'powos status' for sync info"
+    echo "                 Run 'powos safe' before unplugging"
 else
-    echo -e "  ${YELLOW}HomeFS:${NC}        Disabled (direct mode)"
+    echo -e "  ${YELLOW}RAM Overlay:${NC}   Disabled (no USB detected)"
 fi
 echo ""
 
