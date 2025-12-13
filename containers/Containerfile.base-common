@@ -1,0 +1,370 @@
+# PowOS Base Common Stage
+# This stage contains all shared components between Mesa and NVIDIA variants
+# Used as a base for both powos-base-mesa and powos-base-nvidia
+
+ARG FEDORA_VERSION="${FEDORA_VERSION:-43}"
+ARG ARCH="${ARCH:-x86_64}"
+ARG BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-kinoite}"
+ARG BASE_IMAGE="${BASE_IMAGE:-ghcr.io/ublue-os/${BASE_IMAGE_NAME}-main:${FEDORA_VERSION}}"
+ARG KERNEL_REF="${KERNEL_REF:-ghcr.io/bazzite-org/kernel-bazzite:latest-f${FEDORA_VERSION}-${ARCH}}"
+
+FROM ${KERNEL_REF} AS kernel
+
+FROM ${BASE_IMAGE} AS powos-base-common
+
+ARG IMAGE_NAME="${IMAGE_NAME:-powos-base}"
+ARG IMAGE_VENDOR="${IMAGE_VENDOR:-powos}"
+ARG IMAGE_BRANCH="${IMAGE_BRANCH:-stable}"
+ARG BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-kinoite}"
+ARG SHA_HEAD_SHORT="${SHA_HEAD_SHORT}"
+ARG VERSION_TAG="${VERSION_TAG}"
+ARG VERSION_PRETTY="${VERSION_PRETTY}"
+
+# Copy system files and build scripts
+COPY system_files/shared /
+COPY ./build_files/cleanup ./build_files/install-kernel ./build_files/ghcurl ./build_files/dnf5-setopt ./build_files/dnf5-search /ctx/
+
+# Setup Copr repos and base repositories
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    mkdir -p /var/roothome && \
+    dnf5 -y install dnf5-plugins && \
+    # Enable core Bazzite repositories
+    for copr in \
+        bazzite-org/bazzite \
+        bazzite-org/bazzite-multilib \
+        ublue-os/staging \
+        ublue-os/packages \
+        bazzite-org/obs-vkcapture \
+        ycollet/audinux \
+        bazzite-org/rom-properties \
+        bazzite-org/webapp-manager \
+        che/nerd-fonts; \
+    do \
+        echo "Enabling copr: $copr"; \
+        dnf5 -y copr enable $copr; \
+        dnf5 -y config-manager setopt copr:copr.fedorainfracloud.org:${copr////:}.priority=98 ;\
+    done && unset -v copr && \
+    # Add Terra repository
+    dnf5 -y install --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release{,-extras,-mesa} && \
+    # Add Tailscale repository
+    dnf5 -y config-manager addrepo --overwrite --from-repofile=https://pkgs.tailscale.com/stable/fedora/tailscale.repo && \
+    # Add RPM Fusion repositories
+    dnf5 -y install \
+        https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+        https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm && \
+    # Enable negativo17 multimedia and steam repos
+    sed -i 's@enabled=0@enabled=1@g' /etc/yum.repos.d/negativo17-fedora-multimedia.repo && \
+    dnf5 -y config-manager addrepo --from-repofile=https://negativo17.org/repos/fedora-steam.repo && \
+    dnf5 -y config-manager addrepo --from-repofile=https://negativo17.org/repos/fedora-rar.repo && \
+    # Set repository priorities
+    dnf5 -y config-manager setopt "*bazzite*".priority=1 && \
+    dnf5 -y config-manager setopt "*terra*".priority=3 "*terra*".exclude="nerd-fonts topgrade scx-tools scx-scheds steam python3-protobuf" && \
+    dnf5 -y config-manager setopt "terra-mesa".enabled=true && \
+    eval "$(/ctx/dnf5-setopt setopt '*negativo17*' priority=4 exclude='mesa-* *xone*')" && \
+    dnf5 -y config-manager setopt "*rpmfusion*".priority=5 "*rpmfusion*".exclude="mesa-*" && \
+    dnf5 -y config-manager setopt "*fedora*".exclude="mesa-* kernel-core-* kernel-modules-* kernel-uki-virt-*" && \
+    dnf5 -y config-manager setopt "*staging*".exclude="scx-tools scx-scheds kf6-* mesa* mutter*" && \
+    /ctx/cleanup
+
+# Install CachyOS kernel
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=bind,from=kernel,src=/,dst=/rpms/kernel \
+    /ctx/install-kernel && \
+    dnf5 -y config-manager setopt "*rpmfusion*".enabled=0 && \
+    dnf5 -y copr enable bieszczaders/kernel-cachyos-addons && \
+    dnf5 -y install \
+        scx-scheds \
+        scx-tools && \
+    dnf5 -y copr disable bieszczaders/kernel-cachyos-addons && \
+    # Swap packages from bazzite repo for better compatibility
+    declare -A toswap=( \
+        ["copr:copr.fedorainfracloud.org:bazzite-org:bazzite"]="bootc rpm-ostree plymouth" \
+    ) && \
+    for repo in "${!toswap[@]}"; do \
+        for package in ${toswap[$repo]}; do dnf5 -y swap --repo=$repo $package $package; done; \
+    done && unset -v toswap repo package && \
+    # Lock core system packages to prevent unwanted updates
+    dnf5 versionlock add \
+        bootc \
+        rpm-ostree \
+        plymouth \
+        plymouth-scripts \
+        plymouth-core-libs \
+        plymouth-graphics-libs \
+        plymouth-plugin-label \
+        plymouth-plugin-two-step \
+        plymouth-plugin-theme-spinner \
+        plymouth-system-theme && \
+    /ctx/cleanup
+
+# Install ALL firmware (so either image variant works on first boot before hardware detection)
+COPY ./build_files/install-firmware /ctx/
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    /ctx/install-firmware && \
+    /ctx/cleanup
+
+# Install Valve's patched Pipewire, Bluez, and Xwayland
+# Install patched fwupd
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    dnf5 -y remove \
+        pipewire-config-raop && \
+    declare -A toswap=( \
+        ["copr:copr.fedorainfracloud.org:bazzite-org:bazzite"]="wireplumber" \
+        ["copr:copr.fedorainfracloud.org:bazzite-org:bazzite-multilib"]="pipewire bluez xorg-x11-server-Xwayland" \
+        ["copr:copr.fedorainfracloud.org:ublue-os:staging"]="fwupd" \
+    ) && \
+    for repo in "${!toswap[@]}"; do \
+        for package in ${toswap[$repo]}; do dnf5 -y swap --repo=$repo $package $package; done; \
+    done && unset -v toswap repo package && \
+    # Lock patched packages
+    dnf5 versionlock add \
+        pipewire \
+        pipewire-alsa \
+        pipewire-gstreamer \
+        pipewire-jack-audio-connection-kit \
+        pipewire-jack-audio-connection-kit-libs \
+        pipewire-libs \
+        pipewire-plugin-libcamera \
+        pipewire-pulseaudio \
+        pipewire-utils \
+        wireplumber \
+        wireplumber-libs \
+        bluez \
+        bluez-cups \
+        bluez-libs \
+        bluez-obexd \
+        xorg-x11-server-Xwayland \
+        fwupd \
+        fwupd-plugin-flashrom \
+        fwupd-plugin-modem-manager \
+        fwupd-plugin-uefi-capsule-data && \
+    dnf5 -y install \
+        libfreeaptx && \
+    dnf5 -y install --enable-repo="*rpmfusion*" --disable-repo="*fedora-multimedia*" \
+        libaacs \
+        libbdplus \
+        libbluray \
+        libbluray-utils && \
+    /ctx/cleanup
+
+# Remove unneeded packages from base image
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    dnf5 -y remove \
+        ublue-os-update-services \
+        firefox \
+        firefox-langpacks \
+        toolbox \
+        htop && \
+    /ctx/cleanup
+
+# Install core system packages (hardware-agnostic utilities)
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    dnf5 -y install \
+        $(/ctx/ghcurl https://api.github.com/repos/bazzite-org/cicpoffs/releases/latest | jq -r '.assets[] | select(.name| test(".*rpm$")).browser_download_url') && \
+    dnf5 -y install \
+        bazaar \
+        iwd \
+        twitter-twemoji-fonts \
+        google-noto-sans-cjk-fonts \
+        lato-fonts \
+        fira-code-fonts \
+        nerd-fonts \
+        Sunshine \
+        python3-pip \
+        libadwaita \
+        duperemove \
+        cpulimit \
+        sqlite \
+        xwininfo \
+        xrandr \
+        compsize \
+        ddcutil \
+        libinput-utils \
+        i2c-tools \
+        lm_sensors \
+        udica \
+        ladspa-caps-plugins \
+        ladspa-noise-suppression-for-voice \
+        pipewire-module-filter-chain-sofa \
+        python3-icoextract \
+        tailscale \
+        webapp-manager \
+        btop \
+        duf \
+        fish \
+        lshw \
+        xdotool \
+        wmctrl \
+        libcec \
+        yad \
+        f3 \
+        pulseaudio-utils \
+        lzip \
+        p7zip \
+        p7zip-plugins \
+        rar \
+        libxcrypt-compat \
+        vulkan-tools \
+        xwiimote-ng \
+        fastfetch \
+        glow \
+        gum \
+        vim \
+        cockpit-networkmanager \
+        cockpit-podman \
+        cockpit-selinux \
+        cockpit-system \
+        cockpit-files \
+        cockpit-storaged \
+        topgrade \
+        ydotool \
+        stress-ng \
+        snapper \
+        btrfs-assistant \
+        edk2-ovmf \
+        qemu \
+        libvirt \
+        lsb_release \
+        uupd \
+        ds-inhibit \
+        waydroid \
+        cage \
+        wlr-randr && \
+    systemctl mask iscsi && \
+    mkdir -p /usr/lib/extest/ && \
+    /ctx/ghcurl "$(/ctx/ghcurl https://api.github.com/repos/bazzite-org/extest/releases/latest | jq -r '.assets[] | select(.name| test(".*so$")).browser_download_url')" -Lo /usr/lib/extest/libextest.so && \
+    /ctx/ghcurl "$(/ctx/ghcurl https://api.github.com/repos/FrameworkComputer/framework-system/releases/latest | jq -r '.assets[] | select(.name == "framework_tool").browser_download_url')" -Lo /usr/bin/framework_tool && \
+    chmod +x /usr/bin/framework_tool && \
+    /ctx/ghcurl "$(/ctx/ghcurl https://api.github.com/repos/HikariKnight/ls-iommu/releases/latest | jq -r '.assets[] | select(.name| test(".*x86_64.tar.gz$")).browser_download_url')" -Lo /tmp/ls-iommu.tar.gz && \
+    mkdir -p /tmp/ls-iommu && \
+    sed -i 's|uupd|& --disable-module-distrobox|' /usr/lib/systemd/system/uupd.service && \
+    setcap 'cap_sys_admin+p' $(readlink -f /usr/bin/sunshine) && \
+    mkdir -p /etc/xdg/autostart && \
+    sed -i~ -E 's/=.\$\(command -v (nft|ip6?tables-legacy).*/=/g' /usr/lib/waydroid/data/scripts/waydroid-net.sh && \
+    sed -i 's/ --xdg-runtime=\\"${XDG_RUNTIME_DIR}\\"//g' /usr/bin/btrfs-assistant-launcher && \
+    /ctx/ghcurl "https://raw.githubusercontent.com/bazzite-org/steam-proton-mf-wmv/master/installcab.py" -Lo /usr/bin/installcab && \
+    chmod +x /usr/bin/installcab && \
+    /ctx/ghcurl "https://raw.githubusercontent.com/bazzite-org/steam-proton-mf-wmv/refs/heads/master/install-mf-wmv.sh" -Lo /usr/bin/install-mf-wmv && \
+    chmod +x /usr/bin/install-mf-wmv && \
+    tar --no-same-owner --no-same-permissions --no-overwrite-dir -xvzf /tmp/ls-iommu.tar.gz -C /tmp/ls-iommu && \
+    rm -f /tmp/ls-iommu.tar.gz && \
+    cp -r /tmp/ls-iommu/ls-iommu /usr/bin/ && \
+    /ctx/ghcurl "https://github.com/HikariKnight/ScopeBuddy/archive/refs/tags/$(/ctx/ghcurl https://api.github.com/repos/HikariKnight/scopebuddy/releases/latest | jq -r '.tag_name').tar.gz" -Lo /tmp/scopebuddy.tar.gz && \
+    mkdir -p /tmp/scopebuddy && \
+    tar --no-same-owner --no-same-permissions --no-overwrite-dir -xvzf /tmp/scopebuddy.tar.gz -C /tmp/scopebuddy && \
+    rm -f /tmp/scopebuddy.tar.gz && \
+    cp -r /tmp/scopebuddy/ScopeBuddy-*/bin/* /usr/bin/ && \
+    /ctx/cleanup
+
+# Install Steam & Lutris, plus supporting packages
+# NOTE: Device-specific packages (input-remapper, ryzenadj, fw-ectool, fw-fanctrl) removed - will be in overlays
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    dnf5 versionlock add \
+        ibus && \
+    dnf5 -y install \
+        gamescope.x86_64 \
+        gamescope-libs.x86_64 \
+        gamescope-libs.i686 \
+        gamescope-shaders \
+        jupiter-sd-mounting-btrfs \
+        umu-launcher \
+        dbus-x11 \
+        xdg-user-dirs \
+        gobject-introspection \
+        libFAudio.x86_64 \
+        libFAudio.i686 \
+        vkBasalt.x86_64 \
+        vkBasalt.i686 \
+        mangohud.x86_64 \
+        mangohud.i686 \
+        libobs_vkcapture.x86_64 \
+        libobs_glcapture.x86_64 \
+        libobs_vkcapture.i686 \
+        libobs_glcapture.i686 \
+        VK_hdr_layer && \
+    dnf5 -y --setopt=install_weak_deps=False install \
+        steam \
+        lutris && \
+    dnf5 -y remove \
+        gamemode && \
+    /ctx/ghcurl "https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks" -Lo /usr/bin/winetricks && \
+    chmod +x /usr/bin/winetricks && \
+    /ctx/cleanup
+
+# Install yafti-go & ujust-picker
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    /ctx/ghcurl "$(/ctx/ghcurl "https://api.github.com/repos/bazzite-org/yafti-go/releases/latest" -s | jq -r '.assets[] | select(.name == "yafti-go").browser_download_url')" -sL -o /bin/yafti-go && \
+    chmod +x /bin/yafti-go && \
+    chmod +x /usr/libexec/bazzite-yafti-launcher && \
+    /ctx/ghcurl "$(/ctx/ghcurl "https://api.github.com/repos/xXJSONDeruloXx/bazzite-ujust-picker/releases/latest" -s | jq -r '.assets[] | select(.name | test("x86_64$")) | .browser_download_url')" -sL -o /usr/bin/ujust-picker && \
+    chmod +x /usr/bin/ujust-picker && \
+    /ctx/cleanup
+
+# Configure KDE Plasma (primary desktop for PowOS)
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    if grep -q "kinoite" <<< "${BASE_IMAGE_NAME}"; then \
+        dnf5 -y install \
+            qt \
+            krdp \
+            steamdeck-kde-presets-desktop \
+            kdeconnectd \
+            kdeplasma-addons \
+            rom-properties-kf6 \
+            fcitx5-mozc \
+            fcitx5-chinese-addons \
+            fcitx5-hangul \
+            kcm-fcitx5 \
+            gnome-disk-utility \
+            kio-extras \
+            krunner-bazaar \
+            ptyxis && \
+        dnf5 -y remove \
+            plasma-welcome \
+            plasma-welcome-fedora \
+            plasma-discover-kns \
+            kcharselect \
+            kde-partitionmanager \
+            plasma-discover \
+            konsole && \
+        sed -i '/<entry name="launchers" type="StringList">/,/<\/entry>/ s/<default>[^<]*<\/default>/<default>preferred:\/\/browser,applications:steam.desktop,applications:net.lutris.Lutris.desktop,applications:org.gnome.Ptyxis.desktop,applications:io.github.kolunmi.Bazaar.desktop,preferred:\/\/filemanager<\/default>/' /usr/share/plasma/plasmoids/org.kde.plasma.taskmanager/contents/config/main.xml && \
+        sed -i 's@\[Desktop Action new-window\]@\[Desktop Action new-window\]\nX-KDE-Shortcuts=Ctrl+Alt+T@g' /usr/share/applications/org.gnome.Ptyxis.desktop && \
+        sed -i '/^Comment/d' /usr/share/applications/org.gnome.Ptyxis.desktop && \
+        sed -i 's@Exec=ptyxis@Exec=kde-ptyxis@g' /usr/share/applications/org.gnome.Ptyxis.desktop && \
+        sed -i 's@Keywords=@Keywords=konsole;console;@g' /usr/share/applications/org.gnome.Ptyxis.desktop && \
+        cp /usr/share/applications/org.gnome.Ptyxis.desktop /usr/share/kglobalaccel/org.gnome.Ptyxis.desktop && \
+        setcap 'cap_net_raw+ep' /usr/libexec/ksysguard/ksgrd_network_helper && \
+        ln -sf /usr/share/wallpapers/convergence.jxl /usr/share/backgrounds/default.jxl && \
+        ln -sf /usr/share/wallpapers/convergence.jxl /usr/share/backgrounds/default-dark.jxl && \
+        rm -f /usr/share/backgrounds/default.xml \
+    ; fi && \
+    /ctx/cleanup
+
+# ublue-os packages
+# Homebrew & Bash Prexec
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    dnf5 install -y ublue-brew && \
+    /ctx/ghcurl "https://raw.githubusercontent.com/ublue-os/bash-preexec/master/bash-preexec.sh" -Lo /usr/share/bash-prexec && \
+    /ctx/cleanup
+
+# ublue-os-media-automount-udev
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    dnf5 install -y --enable-repo=copr:copr.fedorainfracloud.org:ublue-os:packages \
+        ublue-os-media-automount-udev && \
+    { systemctl enable ublue-os-media-automount.service || true; } && \
+    /ctx/cleanup

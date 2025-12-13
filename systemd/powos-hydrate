@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+# powos-hydrate - Full System Hydration from Git State
+#
+# This script restores a complete PowOS environment from git:
+# 1. Clone/update the state repository
+# 2. Build all overlays from sources
+# 3. Create distrobox containers
+# 4. Apply configuration
+#
+# Target: <15 minute full restoration
+
+set -euo pipefail
+
+LOG_TAG="powos-hydrate"
+POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
+POWOS_LIB="${POWOS_LIB:-/usr/lib/powos}"
+POWOS_STATE="${POWOS_ROOT}/state"
+HYDRATED_MARKER="${POWOS_STATE}/hydrated"
+
+log() {
+    logger -t "$LOG_TAG" "$*"
+    echo "[powos-hydrate] $*"
+}
+
+log_error() {
+    logger -t "$LOG_TAG" -p user.err "$*"
+    echo "[powos-hydrate] ERROR: $*" >&2
+}
+
+log_step() {
+    logger -t "$LOG_TAG" "STEP: $*"
+    echo ""
+    echo "════════════════════════════════════════════════════════════"
+    echo "[powos-hydrate] STEP: $*"
+    echo "════════════════════════════════════════════════════════════"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────
+
+# Git repository URL (set in /etc/powos/config or environment)
+POWOS_GIT_REPO="${POWOS_GIT_REPO:-}"
+POWOS_GIT_BRANCH="${POWOS_GIT_BRANCH:-main}"
+
+load_config() {
+    local config_file="/etc/powos/config"
+    if [[ -f "$config_file" ]]; then
+        source "$config_file"
+        log "Loaded config from $config_file"
+    fi
+
+    # Also check user config
+    local user_config="${HOME}/.config/powos/config"
+    if [[ -f "$user_config" ]]; then
+        source "$user_config"
+        log "Loaded user config from $user_config"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 1: Git State Repository
+# ─────────────────────────────────────────────────────────────────
+
+setup_git_state() {
+    log_step "Setting up Git state repository"
+
+    local git_dir="${POWOS_ROOT}/git"
+    mkdir -p "$git_dir"
+
+    # If git repo is configured, clone/update it
+    if [[ -n "$POWOS_GIT_REPO" ]]; then
+        if [[ -d "${git_dir}/.git" ]]; then
+            log "Updating existing state repository..."
+            cd "$git_dir"
+            git fetch origin "$POWOS_GIT_BRANCH" 2>&1 || log_error "Git fetch failed"
+            git reset --hard "origin/${POWOS_GIT_BRANCH}" 2>&1 || log_error "Git reset failed"
+        else
+            log "Cloning state repository: $POWOS_GIT_REPO"
+            git clone --branch "$POWOS_GIT_BRANCH" "$POWOS_GIT_REPO" "$git_dir" 2>&1 || {
+                log_error "Git clone failed"
+                return 1
+            }
+        fi
+        log "Git state repository ready"
+    else
+        log "No git repository configured - initializing local state"
+        if [[ ! -d "${git_dir}/.git" ]]; then
+            cd "$git_dir"
+            git init
+            git config user.email "powos@localhost"
+            git config user.name "PowOS"
+        fi
+    fi
+
+    # Sync git state to working directories
+    sync_from_git
+}
+
+sync_from_git() {
+    local git_dir="${POWOS_ROOT}/git"
+
+    if [[ ! -d "${git_dir}/.git" ]]; then
+        return
+    fi
+
+    log "Syncing from git state..."
+
+    # Sync sources
+    if [[ -d "${git_dir}/sources" ]]; then
+        mkdir -p "${POWOS_ROOT}/sources"
+        rsync -a --delete "${git_dir}/sources/" "${POWOS_ROOT}/sources/" 2>/dev/null || \
+            cp -a "${git_dir}/sources/"* "${POWOS_ROOT}/sources/" 2>/dev/null || true
+        log "  - Synced sources"
+    fi
+
+    # Sync container definitions
+    if [[ -d "${git_dir}/containers" ]]; then
+        mkdir -p "${POWOS_ROOT}/containers"
+        rsync -a --delete "${git_dir}/containers/" "${POWOS_ROOT}/containers/" 2>/dev/null || \
+            cp -a "${git_dir}/containers/"* "${POWOS_ROOT}/containers/" 2>/dev/null || true
+        log "  - Synced containers"
+    fi
+
+    # Sync configuration
+    if [[ -d "${git_dir}/config" ]]; then
+        mkdir -p "${HOME}/.config/powos"
+        rsync -a "${git_dir}/config/" "${HOME}/.config/powos/" 2>/dev/null || \
+            cp -a "${git_dir}/config/"* "${HOME}/.config/powos/" 2>/dev/null || true
+        log "  - Synced config"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 2: Build Overlays
+# ─────────────────────────────────────────────────────────────────
+
+build_overlays() {
+    log_step "Building overlays from sources"
+
+    local sources_dir="${POWOS_ROOT}/sources"
+    local overlay_manager="${POWOS_LIB}/overlay-manager.sh"
+
+    if [[ ! -d "$sources_dir" ]]; then
+        log "No sources directory - skipping overlay build"
+        return 0
+    fi
+
+    if [[ ! -x "$overlay_manager" ]]; then
+        log_error "Overlay manager not found: $overlay_manager"
+        return 1
+    fi
+
+    local count=0
+    local failed=0
+
+    for source_dir in "$sources_dir"/*/; do
+        if [[ -d "$source_dir" ]] && [[ -f "${source_dir}/build.sh" ]]; then
+            local name
+            name=$(basename "$source_dir")
+            log "Building overlay: $name"
+
+            # Set environment for overlay manager
+            export POWOS_ROOT="$POWOS_ROOT"
+
+            if bash "$overlay_manager" build "$name" 2>&1; then
+                ((count++)) || true
+                log "  - Built: $name"
+            else
+                ((failed++)) || true
+                log_error "  - Failed: $name"
+            fi
+        fi
+    done
+
+    log "Built $count overlays ($failed failed)"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 3: Create Distrobox Containers
+# ─────────────────────────────────────────────────────────────────
+
+create_containers() {
+    log_step "Creating distrobox containers"
+
+    local containers_dir="${POWOS_ROOT}/containers"
+    local distrobox_ini="${containers_dir}/distrobox.ini"
+
+    if [[ ! -f "$distrobox_ini" ]]; then
+        log "No distrobox.ini found - skipping container creation"
+        return 0
+    fi
+
+    if ! command -v distrobox &>/dev/null; then
+        log_error "Distrobox not installed"
+        return 1
+    fi
+
+    log "Assembling containers from: $distrobox_ini"
+
+    # Use distrobox assemble to create all containers
+    if distrobox assemble create --file "$distrobox_ini" 2>&1; then
+        log "Containers created successfully"
+    else
+        log_error "Container creation failed (some may already exist)"
+    fi
+
+    # List created containers
+    log "Active containers:"
+    distrobox list 2>/dev/null || true
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 4: Enable Overlays
+# ─────────────────────────────────────────────────────────────────
+
+enable_overlays() {
+    log_step "Enabling overlays"
+
+    local overlay_manager="${POWOS_LIB}/overlay-manager.sh"
+
+    if [[ ! -x "$overlay_manager" ]]; then
+        log_error "Overlay manager not found"
+        return 1
+    fi
+
+    export POWOS_ROOT="$POWOS_ROOT"
+
+    # Enable all built overlays
+    if bash "$overlay_manager" enable-all 2>&1; then
+        log "All overlays enabled"
+    else
+        log_error "Some overlays failed to enable"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 5: Post-Hydration Tasks
+# ─────────────────────────────────────────────────────────────────
+
+post_hydration() {
+    log_step "Running post-hydration tasks"
+
+    # Update flatpak if available
+    if command -v flatpak &>/dev/null; then
+        log "Updating flatpaks..."
+        flatpak update -y --noninteractive 2>/dev/null || true
+    fi
+
+    # Run any custom post-hydration scripts
+    local post_script="${POWOS_ROOT}/git/hooks/post-hydrate"
+    if [[ -x "$post_script" ]]; then
+        log "Running post-hydrate hook..."
+        bash "$post_script" 2>&1 || log_error "Post-hydrate hook failed"
+    fi
+
+    # Create hydration marker
+    mkdir -p "$POWOS_STATE"
+    date -Iseconds > "$HYDRATED_MARKER"
+    log "Hydration marker created: $HYDRATED_MARKER"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Progress Tracking
+# ─────────────────────────────────────────────────────────────────
+
+write_progress() {
+    local step="$1"
+    local status="$2"
+
+    mkdir -p "$POWOS_STATE"
+    echo "$step:$status:$(date -Iseconds)" >> "${POWOS_STATE}/hydration.log"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────
+
+main() {
+    local start_time
+    start_time=$(date +%s)
+
+    log "════════════════════════════════════════════════════════════"
+    log " PowOS HYDRATION STARTING"
+    log " Target: Complete system restoration in <15 minutes"
+    log "════════════════════════════════════════════════════════════"
+
+    # Check if already hydrated
+    if [[ -f "$HYDRATED_MARKER" ]]; then
+        local last_hydration
+        last_hydration=$(cat "$HYDRATED_MARKER")
+        log "System already hydrated at: $last_hydration"
+        log "To force re-hydration, remove: $HYDRATED_MARKER"
+        return 0
+    fi
+
+    # Load configuration
+    load_config
+
+    # Run hydration steps
+    write_progress "git" "started"
+    if setup_git_state; then
+        write_progress "git" "completed"
+    else
+        write_progress "git" "failed"
+    fi
+
+    write_progress "overlays_build" "started"
+    if build_overlays; then
+        write_progress "overlays_build" "completed"
+    else
+        write_progress "overlays_build" "failed"
+    fi
+
+    write_progress "containers" "started"
+    if create_containers; then
+        write_progress "containers" "completed"
+    else
+        write_progress "containers" "failed"
+    fi
+
+    write_progress "overlays_enable" "started"
+    if enable_overlays; then
+        write_progress "overlays_enable" "completed"
+    else
+        write_progress "overlays_enable" "failed"
+    fi
+
+    write_progress "post" "started"
+    if post_hydration; then
+        write_progress "post" "completed"
+    else
+        write_progress "post" "failed"
+    fi
+
+    # Calculate duration
+    local end_time duration_min
+    end_time=$(date +%s)
+    duration_min=$(( (end_time - start_time) / 60 ))
+
+    log ""
+    log "════════════════════════════════════════════════════════════"
+    log " PowOS HYDRATION COMPLETE"
+    log " Duration: ${duration_min} minutes"
+    log "════════════════════════════════════════════════════════════"
+
+    write_progress "complete" "$duration_min minutes"
+}
+
+main "$@"

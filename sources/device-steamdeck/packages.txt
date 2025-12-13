@@ -1,0 +1,32 @@
+# Steam Deck Jupiter (LCD) Hardware Packages
+# These packages provide Steam Deck-specific hardware support
+
+# Fan control daemon for Steam Deck
+jupiter-fan-control
+
+# Steam Deck hardware support (includes btrfs optimizations)
+jupiter-hw-support-btrfs
+
+# Virtual power device for battery reporting
+vpower
+
+# Steam Deck audio DSP profiles
+steamdeck-dsp
+
+# Power button handling daemon
+powerbuttond
+
+# Steam notification daemon for Steam Deck
+steam_notif_daemon
+
+# Gyroscope support daemon
+sdgyrodsu
+
+# ACPI tools for hardware control
+acpica-tools
+
+# Steam Deck patched UPower (NOTE: This might need special handling)
+# upower
+
+# Jupiter dock updater (installed via custom script, not dnf)
+# jupiter-dock-updater

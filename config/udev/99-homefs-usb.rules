@@ -1,0 +1,19 @@
+# HomeFS USB Hotplug Detection
+#
+# Detects when the HomeFS USB drive is connected/disconnected
+# and notifies the sync daemon.
+#
+# To use:
+# 1. Find your USB UUID: blkid /dev/sdX2
+# 2. Replace HOMEFS_UUID below with your UUID
+# 3. Copy to /etc/udev/rules.d/99-homefs-usb.rules
+# 4. Reload: udevadm control --reload-rules
+
+# Replace with your USB filesystem UUID
+ENV{HOMEFS_UUID}="REPLACE-WITH-YOUR-UUID"
+
+# Detect USB connect
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="$env{HOMEFS_UUID}", RUN+="/usr/local/bin/homefs-usb-notify connect %k"
+
+# Detect USB disconnect
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="$env{HOMEFS_UUID}", RUN+="/usr/local/bin/homefs-usb-notify disconnect %k"

@@ -1,0 +1,45 @@
+# PowOS
+# Run: docker compose up --build
+
+services:
+  powos:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: powos
+    hostname: powos
+    environment:
+      - POWOS_GPU=${POWOS_GPU:-auto}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    tty: true
+    volumes:
+      - powos-home:/home/powos:rw
+    privileged: true
+    ports:
+      - "6091:8443"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  test-runner:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: Containerfile
+    volumes:
+      - .:/powos:rw
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Running Tests..."
+        export POWOS_ROOT=/powos
+        bash /powos/test/tier1/test-hardware-detect.sh
+        bash /powos/test/tier1/test-pinstall.sh
+
+volumes:
+  powos-home:

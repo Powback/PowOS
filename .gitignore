@@ -1,0 +1,48 @@
+# PowOS .gitignore
+
+# Built extensions (regenerated from sources)
+extensions/*/
+
+# But keep the directory
+!extensions/.gitkeep
+
+# Secrets (encrypted versions are committed)
+secrets/*.yaml
+secrets/*.json
+secrets/age-key.txt
+!secrets/*.age
+!secrets/.sops.yaml
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Build output (ISOs are large, regenerated)
+build/output/*.iso
+build/output/*.log
+
+# Test artifacts
+test/tier2/*.qcow2
+test/tier2/*.iso
+/tmp/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Logs
+*.log
+logs/
+bazzite/
+containers/system_files/

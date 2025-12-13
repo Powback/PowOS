@@ -1,0 +1,18 @@
+[Unit]
+Description=PowOS Overlay Loading (systemd-sysext)
+Documentation=https://github.com/user/powos
+After=powos-hardware.service powos-init.service
+Requires=powos-init.service
+Before=multi-user.target
+ConditionPathExists=/usr/lib/powos/powos-overlay-load
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/run/powos/environment
+ExecStart=/usr/lib/powos/powos-overlay-load
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

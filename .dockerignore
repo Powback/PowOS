@@ -1,0 +1,23 @@
+# Exclude bazzite-fork (has symlinks that break on Windows)
+bazzite-fork/
+
+# Git
+.git/
+
+# Build artifacts
+*.raw
+*.iso
+*.img
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Temp
+*.tmp
+*.log

@@ -1,0 +1,18 @@
+[Unit]
+Description=PowOS Hardware Detection (Chameleon Boot)
+Documentation=https://github.com/user/powos
+After=powos-init.service
+Requires=powos-init.service
+Before=multi-user.target
+ConditionPathExists=/usr/lib/powos/powos-hardware-detect
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/run/powos/environment
+ExecStart=/usr/lib/powos/powos-hardware-detect
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

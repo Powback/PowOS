@@ -1,0 +1,116 @@
+# PowOS Container Build Justfile
+# Usage: just <recipe>
+
+# Default recipe - show available commands
+default:
+    @just --list
+
+# Build the Mesa variant (AMD/Intel GPUs)
+build-mesa:
+    @echo "Building PowOS Mesa variant..."
+    bash build.sh mesa
+
+# Build the NVIDIA variant
+build-nvidia:
+    @echo "Building PowOS NVIDIA variant..."
+    bash build.sh nvidia
+
+# Build both variants
+build-all:
+    @echo "Building all PowOS variants..."
+    bash build.sh all
+
+# Build with custom Fedora version
+build-fedora VERSION:
+    @echo "Building with Fedora {{VERSION}}..."
+    FEDORA_VERSION={{VERSION}} bash build.sh all
+
+# Clean up built images
+clean:
+    @echo "Removing PowOS container images..."
+    -podman rmi powos-base-common:latest
+    -podman rmi powos-base-common:dev
+    -podman rmi powos-base-mesa:latest
+    -podman rmi powos-base-mesa:dev
+    -podman rmi powos-base-nvidia:latest
+    -podman rmi powos-base-nvidia:dev
+    @echo "Cleanup complete"
+
+# Clean everything including build cache
+clean-all: clean
+    @echo "Cleaning build cache..."
+    podman system prune -a -f
+    @echo "All clean!"
+
+# List built PowOS images
+list:
+    @echo "PowOS container images:"
+    @podman images | grep powos || echo "No PowOS images found"
+
+# Test Mesa image
+test-mesa:
+    @echo "Testing Mesa image..."
+    podman run -it --rm powos-base-mesa:latest bash -c 'echo "PowOS Mesa Edition"; cat /etc/os-release'
+
+# Test NVIDIA image
+test-nvidia:
+    @echo "Testing NVIDIA image..."
+    podman run -it --rm powos-base-nvidia:latest bash -c 'echo "PowOS NVIDIA Edition"; cat /etc/os-release'
+
+# Inspect Mesa image
+inspect-mesa:
+    @echo "Inspecting Mesa image..."
+    podman inspect powos-base-mesa:latest
+
+# Inspect NVIDIA image
+inspect-nvidia:
+    @echo "Inspecting NVIDIA image..."
+    podman inspect powos-base-nvidia:latest
+
+# Show image sizes
+sizes:
+    @echo "Image sizes:"
+    @podman images --format "{{{{.Repository}}}}:{{{{.Tag}}}}\t{{{{.Size}}}}" | grep powos || echo "No PowOS images found"
+
+# Push Mesa image to registry (requires REGISTRY variable)
+push-mesa REGISTRY:
+    @echo "Pushing Mesa image to {{REGISTRY}}..."
+    podman tag powos-base-mesa:latest {{REGISTRY}}/powos-base-mesa:latest
+    podman push {{REGISTRY}}/powos-base-mesa:latest
+
+# Push NVIDIA image to registry (requires REGISTRY variable)
+push-nvidia REGISTRY:
+    @echo "Pushing NVIDIA image to {{REGISTRY}}..."
+    podman tag powos-base-nvidia:latest {{REGISTRY}}/powos-base-nvidia:latest
+    podman push {{REGISTRY}}/powos-base-nvidia:latest
+
+# Push both images to registry
+push-all REGISTRY: (push-mesa REGISTRY) (push-nvidia REGISTRY)
+
+# Validate Containerfiles
+validate:
+    @echo "Validating Containerfiles..."
+    @echo "Checking Containerfile.base-common..."
+    @grep -q "FROM.*AS powos-base-common" Containerfile.base-common && echo "  ✓ base-common stage found"
+    @echo "Checking Containerfile.mesa..."
+    @grep -q "FROM powos-base-common AS powos-base-mesa" Containerfile.mesa && echo "  ✓ mesa imports base-common"
+    @echo "Checking Containerfile.nvidia..."
+    @grep -q "FROM powos-base-common AS powos-base-nvidia" Containerfile.nvidia && echo "  ✓ nvidia imports base-common"
+    @echo "All Containerfiles validated!"
+
+# Check for required build files
+check-deps:
+    @echo "Checking build dependencies..."
+    @test -d build_files && echo "  ✓ build_files/ present" || echo "  ✗ build_files/ missing"
+    @test -d system_files/shared && echo "  ✓ system_files/shared/ present" || echo "  ✗ system_files/shared/ missing"
+    @test -d system_files/nvidia/shared && echo "  ✓ system_files/nvidia/shared/ present" || echo "  ✗ system_files/nvidia/shared/ missing"
+    @test -d system_files/overrides && echo "  ✓ system_files/overrides/ present" || echo "  ✗ system_files/overrides/ missing"
+    @test -f build_files/cleanup && echo "  ✓ cleanup script present" || echo "  ✗ cleanup script missing"
+    @test -f build_files/install-kernel && echo "  ✓ install-kernel script present" || echo "  ✗ install-kernel script missing"
+    @test -f build_files/install-nvidia && echo "  ✓ install-nvidia script present" || echo "  ✗ install-nvidia script missing"
+    @test -f build_files/install-firmware && echo "  ✓ install-firmware script present" || echo "  ✗ install-firmware script missing"
+
+# Show build file tree
+tree:
+    @echo "Build directory structure:"
+    @tree -L 3 -I '.git' . || ls -R

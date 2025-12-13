@@ -1,0 +1,32 @@
+{
+  "cache": {
+    "max_size": "4G",
+    "metadata_size": "100M",
+    "large_file_threshold": "100M",
+    "chunk_size": "4M",
+    "low_threshold": 0.8,
+    "critical_threshold": 0.9
+  },
+  "eviction": {
+    "enabled": true,
+    "low_threshold": 0.8,
+    "critical_threshold": 0.9
+  },
+  "journal": {
+    "path": "/var/lib/homefs/journal.wal",
+    "max_size": "1G",
+    "batch_size": 100
+  },
+  "sync": {
+    "usb_uuid": "YOUR-USB-UUID-HERE",
+    "usb_mount_point": "/mnt/homefs-usb",
+    "sync_strategy": "batched",
+    "batch_interval": 30,
+    "conflict_resolution": "last-write-wins",
+    "backup_conflicts": true
+  },
+  "security": {
+    "encrypt_cache": false,
+    "secure_erase": false
+  }
+}

@@ -1,0 +1,30 @@
+name: PowOS CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  tier1-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        run: |
+          sudo apt-get install -y shellcheck
+          shellcheck bin/* lib/*.sh build/*.sh
+
+      - name: Run Hardware Detect Tests
+        run: bash test/tier1/test-hardware-detect.sh
+
+      - name: Run Pinstall Tests
+        run: bash test/tier1/test-pinstall.sh
+
+      - name: Docker Compose Test
+        run: |
+          docker compose --profile test build
+          docker compose --profile test run --rm test-runner

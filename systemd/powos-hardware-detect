@@ -1,0 +1,353 @@
+#!/usr/bin/env bash
+# powos-hardware-detect - Chameleon Boot Hardware Detection
+#
+# This script runs at boot to:
+# 1. Detect current hardware (GPU, power source, virtualization)
+# 2. Select and apply appropriate profile
+# 3. Load hardware-specific kernel modules
+# 4. Configure power management
+#
+# This enables the same USB drive to boot on different machines
+# and automatically configure itself.
+
+set -euo pipefail
+
+LOG_TAG="powos-hardware"
+POWOS_LIB="${POWOS_LIB:-/usr/lib/powos}"
+POWOS_PROFILES="${POWOS_PROFILES:-/etc/powos/profiles}"
+POWOS_STATE="/run/powos/hardware"
+
+log() {
+    logger -t "$LOG_TAG" "$*"
+    echo "[powos-hardware] $*"
+}
+
+log_error() {
+    logger -t "$LOG_TAG" -p user.err "$*"
+    echo "[powos-hardware] ERROR: $*" >&2
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Hardware Detection Functions
+# ─────────────────────────────────────────────────────────────────
+
+detect_gpu() {
+    local gpu_type="unknown"
+
+    # Check for NVIDIA GPU
+    if lspci 2>/dev/null | grep -qi "nvidia"; then
+        gpu_type="nvidia"
+
+        # Check for specific NVIDIA models (for optimal driver selection)
+        if lspci 2>/dev/null | grep -qi "RTX 30\|RTX 40\|RTX 50"; then
+            gpu_type="nvidia-modern"
+        elif lspci 2>/dev/null | grep -qi "RTX 20\|GTX 16\|GTX 10"; then
+            gpu_type="nvidia-legacy"
+        fi
+    # Check for AMD GPU
+    elif lspci 2>/dev/null | grep -qi "AMD.*Radeon\|AMD.*Graphics"; then
+        gpu_type="amd"
+    # Check for Intel GPU
+    elif lspci 2>/dev/null | grep -qi "Intel.*Graphics\|Intel.*UHD\|Intel.*Iris"; then
+        gpu_type="intel"
+    # Check for virtual GPU
+    elif lspci 2>/dev/null | grep -qi "virtio\|vmware\|qxl\|bochs"; then
+        gpu_type="virtual"
+    fi
+
+    echo "$gpu_type"
+}
+
+detect_power_source() {
+    local power="unknown"
+
+    # Check AC adapter status
+    for ac in /sys/class/power_supply/AC* /sys/class/power_supply/ADP*; do
+        if [[ -f "${ac}/online" ]]; then
+            if [[ "$(cat "${ac}/online" 2>/dev/null)" == "1" ]]; then
+                power="ac"
+            else
+                power="battery"
+            fi
+            break
+        fi
+    done
+
+    # If no battery info, assume desktop (AC power)
+    if [[ "$power" == "unknown" ]]; then
+        if [[ ! -d /sys/class/power_supply/BAT0 ]] && \
+           [[ ! -d /sys/class/power_supply/BAT1 ]]; then
+            power="ac"
+        fi
+    fi
+
+    echo "$power"
+}
+
+detect_form_factor() {
+    local form="unknown"
+
+    # Check DMI chassis type
+    if [[ -f /sys/class/dmi/id/chassis_type ]]; then
+        local chassis
+        chassis=$(cat /sys/class/dmi/id/chassis_type 2>/dev/null || echo "0")
+        case "$chassis" in
+            3|4|5|6|7|15|16) form="desktop" ;;
+            8|9|10|14) form="laptop" ;;
+            11|12|13) form="handheld" ;;
+            17|18|19|20|21|22|23|24) form="server" ;;
+            30|31|32) form="tablet" ;;
+            *) form="unknown" ;;
+        esac
+    fi
+
+    # Also check for battery as laptop indicator
+    if [[ "$form" == "unknown" ]]; then
+        if [[ -d /sys/class/power_supply/BAT0 ]] || \
+           [[ -d /sys/class/power_supply/BAT1 ]]; then
+            form="laptop"
+        else
+            form="desktop"
+        fi
+    fi
+
+    echo "$form"
+}
+
+detect_virtualization() {
+    local virt="physical"
+
+    # Use systemd-detect-virt if available
+    if command -v systemd-detect-virt &>/dev/null; then
+        local detected
+        detected=$(systemd-detect-virt 2>/dev/null || echo "none")
+        if [[ "$detected" != "none" ]]; then
+            virt="$detected"
+        fi
+    else
+        # Fallback detection
+        if grep -qi "hypervisor" /proc/cpuinfo 2>/dev/null; then
+            virt="virtual"
+        elif [[ -f /sys/hypervisor/type ]]; then
+            virt=$(cat /sys/hypervisor/type 2>/dev/null || echo "virtual")
+        fi
+    fi
+
+    echo "$virt"
+}
+
+detect_cpu_features() {
+    local features=""
+
+    # Check for specific CPU features that affect profile selection
+    if grep -q "avx512" /proc/cpuinfo 2>/dev/null; then
+        features="${features}avx512,"
+    fi
+    if grep -q "avx2" /proc/cpuinfo 2>/dev/null; then
+        features="${features}avx2,"
+    fi
+
+    # Remove trailing comma
+    echo "${features%,}"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Profile Selection
+# ─────────────────────────────────────────────────────────────────
+
+select_profile() {
+    local gpu="$1"
+    local power="$2"
+    local form="$3"
+    local virt="$4"
+
+    local profile="default"
+
+    # Virtual machines get minimal profile
+    if [[ "$virt" != "physical" ]] && [[ "$virt" != "none" ]]; then
+        profile="virtual"
+        echo "$profile"
+        return
+    fi
+
+    # Select based on GPU and form factor
+    case "$gpu" in
+        nvidia|nvidia-modern|nvidia-legacy)
+            if [[ "$form" == "laptop" ]]; then
+                if [[ "$power" == "battery" ]]; then
+                    profile="laptop-nvidia-battery"
+                else
+                    profile="laptop-nvidia-performance"
+                fi
+            else
+                profile="desktop-nvidia-performance"
+            fi
+            ;;
+        amd)
+            if [[ "$form" == "laptop" ]]; then
+                if [[ "$power" == "battery" ]]; then
+                    profile="laptop-amd-battery"
+                else
+                    profile="laptop-amd-performance"
+                fi
+            else
+                profile="desktop-amd-performance"
+            fi
+            ;;
+        intel)
+            if [[ "$form" == "laptop" ]]; then
+                if [[ "$power" == "battery" ]]; then
+                    profile="laptop-intel-battery"
+                else
+                    profile="laptop-intel-performance"
+                fi
+            else
+                profile="desktop-intel"
+            fi
+            ;;
+        *)
+            if [[ "$form" == "laptop" ]]; then
+                profile="laptop-generic"
+            else
+                profile="desktop-generic"
+            fi
+            ;;
+    esac
+
+    echo "$profile"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Profile Application
+# ─────────────────────────────────────────────────────────────────
+
+apply_profile() {
+    local profile="$1"
+    local profile_file="${POWOS_PROFILES}/${profile}.conf"
+
+    # Check for exact profile match
+    if [[ ! -f "$profile_file" ]]; then
+        # Try fallback profiles
+        local fallback=""
+        case "$profile" in
+            *nvidia*performance*) fallback="desktop-performance" ;;
+            *nvidia*battery*) fallback="laptop-battery" ;;
+            *amd*performance*) fallback="desktop-performance" ;;
+            *amd*battery*) fallback="laptop-battery" ;;
+            *intel*performance*) fallback="desktop-performance" ;;
+            *intel*battery*) fallback="laptop-battery" ;;
+            laptop*) fallback="laptop-battery" ;;
+            desktop*) fallback="desktop-performance" ;;
+            virtual*) fallback="virtual" ;;
+            *) fallback="default" ;;
+        esac
+
+        profile_file="${POWOS_PROFILES}/${fallback}.conf"
+        log "Profile $profile not found, using fallback: $fallback"
+    fi
+
+    if [[ -f "$profile_file" ]]; then
+        log "Applying profile: $profile_file"
+        # Source the profile (it should set sysctl, load modules, etc.)
+        source "$profile_file" || log_error "Failed to apply profile: $profile_file"
+    else
+        log "Warning: No profile found for $profile"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# NVIDIA-Specific Setup
+# ─────────────────────────────────────────────────────────────────
+
+setup_nvidia() {
+    log "Setting up NVIDIA GPU..."
+
+    # Ensure nvidia modules are loaded
+    modprobe nvidia 2>/dev/null || true
+    modprobe nvidia_modeset 2>/dev/null || true
+    modprobe nvidia_uvm 2>/dev/null || true
+    modprobe nvidia_drm 2>/dev/null || true
+
+    # Enable persistence mode if nvidia-smi available
+    if command -v nvidia-smi &>/dev/null; then
+        nvidia-smi -pm 1 2>/dev/null || true
+        log "NVIDIA persistence mode enabled"
+    fi
+
+    # Configure power management for laptops
+    if [[ -f /sys/bus/pci/devices/*/power/control ]]; then
+        for dev in /sys/bus/pci/devices/*/; do
+            if [[ -f "${dev}vendor" ]] && grep -q "0x10de" "${dev}vendor" 2>/dev/null; then
+                echo "auto" > "${dev}power/control" 2>/dev/null || true
+            fi
+        done
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Write Hardware State
+# ─────────────────────────────────────────────────────────────────
+
+write_hardware_state() {
+    local gpu="$1"
+    local power="$2"
+    local form="$3"
+    local virt="$4"
+    local profile="$5"
+
+    mkdir -p "$(dirname "$POWOS_STATE")"
+
+    cat > "$POWOS_STATE" << EOF
+# PowOS Hardware State
+# Generated at boot by powos-hardware-detect
+# $(date -Iseconds)
+
+GPU_TYPE=$gpu
+POWER_SOURCE=$power
+FORM_FACTOR=$form
+VIRTUALIZATION=$virt
+ACTIVE_PROFILE=$profile
+EOF
+
+    log "Hardware state written to $POWOS_STATE"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────
+
+main() {
+    log "Chameleon Boot: Starting hardware detection..."
+
+    # Detect hardware
+    local gpu power form virt features
+    gpu=$(detect_gpu)
+    power=$(detect_power_source)
+    form=$(detect_form_factor)
+    virt=$(detect_virtualization)
+    features=$(detect_cpu_features)
+
+    log "Detected: GPU=$gpu, Power=$power, Form=$form, Virt=$virt"
+
+    # Select profile
+    local profile
+    profile=$(select_profile "$gpu" "$power" "$form" "$virt")
+    log "Selected profile: $profile"
+
+    # Apply profile
+    apply_profile "$profile"
+
+    # GPU-specific setup
+    case "$gpu" in
+        nvidia*)
+            setup_nvidia
+            ;;
+    esac
+
+    # Write state for other services
+    write_hardware_state "$gpu" "$power" "$form" "$virt" "$profile"
+
+    log "Chameleon Boot: Hardware detection complete"
+}
+
+main "$@"

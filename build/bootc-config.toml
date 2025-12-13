@@ -1,0 +1,27 @@
+# bootc-image-builder configuration for PowOS
+# This defines how to build the bootable ISO
+
+[image]
+# Base image - Bazzite with NVIDIA drivers
+base = "ghcr.io/ublue-os/bazzite-nvidia:stable"
+
+[customizations]
+# Hostname
+hostname = "powos"
+
+[customizations.user]
+name = "powos"
+password = "powos"
+groups = ["wheel"]
+
+[customizations.kernel]
+# Kernel arguments for NVIDIA and performance
+append = "nvidia-drm.modeset=1 rd.driver.blacklist=nouveau modprobe.blacklist=nouveau"
+
+[customizations.filesystem]
+# Root filesystem type
+root_fs_type = "btrfs"
+
+[customizations.installer]
+# Kickstart-style automation
+sudo_nopasswd = ["powos"]

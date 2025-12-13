@@ -1,0 +1,17 @@
+# HomeFS Python Dependencies
+
+# FUSE filesystem support
+fusepy>=3.0.1
+
+# System monitoring
+psutil>=5.9.0
+
+# USB device detection
+pyudev>=0.24.0
+
+# CLI formatting
+rich>=13.0.0
+
+# Testing (optional)
+pytest>=7.0.0
+pytest-cov>=4.0.0

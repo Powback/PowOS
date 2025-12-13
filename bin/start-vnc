@@ -1,0 +1,40 @@
+#!/bin/bash
+# start-vnc - Start VNC server with KDE desktop
+set -e
+
+export HOME=/home/powos
+export USER=powos
+export DISPLAY=:1
+
+# Create VNC directory
+mkdir -p $HOME/.vnc
+
+# Set VNC password (password: powos)
+echo "powos" | vncpasswd -f > $HOME/.vnc/passwd
+chmod 600 $HOME/.vnc/passwd
+
+# VNC xstartup - starts XFCE
+cat > $HOME/.vnc/xstartup << 'EOF'
+#!/bin/bash
+export XDG_SESSION_TYPE=x11
+export XDG_RUNTIME_DIR=/tmp/runtime-powos
+mkdir -p $XDG_RUNTIME_DIR
+chmod 700 $XDG_RUNTIME_DIR
+exec dbus-launch --exit-with-session startxfce4
+EOF
+chmod +x $HOME/.vnc/xstartup
+
+# Kill any existing VNC
+vncserver -kill :1 2>/dev/null || true
+
+# Start VNC server
+vncserver :1 -geometry 1920x1080 -depth 24 -localhost no
+
+# Start noVNC (websocket proxy for browser access)
+/usr/bin/novnc_proxy --vnc localhost:5901 --listen 6080 &
+
+echo "VNC started on :1 (port 5901)"
+echo "noVNC available at http://localhost:6080"
+
+# Keep running
+wait

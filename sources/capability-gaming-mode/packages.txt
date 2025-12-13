@@ -1,0 +1,35 @@
+# Gaming Mode Packages
+# These packages provide the console-like gaming interface
+
+# Gamescope session with Steam Big Picture integration
+gamescope-session-plus
+gamescope-session-steam
+
+# SteamOS-like system manager
+steamos-manager
+
+# Handheld Daemon for controller support (universal)
+hhd
+hhd-ui
+
+# Zenity for dialogs
+zenity
+
+# Newt for text-based UI
+newt
+
+# Qt virtual keyboard
+qt6-qtvirtualkeyboard
+
+# Xvfb for virtual framebuffer
+xorg-x11-server-Xvfb
+
+# Python utilities for Steam
+python-vdf
+python-crcmod
+
+# Socat for socket communication
+socat
+
+# Additional tools
+zstd

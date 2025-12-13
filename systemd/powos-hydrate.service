@@ -1,0 +1,21 @@
+[Unit]
+Description=PowOS System Hydration
+Documentation=https://github.com/user/powos
+After=network-online.target powos-overlay.service
+Wants=network-online.target
+Before=multi-user.target
+ConditionPathExists=/usr/lib/powos/powos-hydrate
+# Only run if hydration is needed
+ConditionPathExists=!/var/lib/powos/state/hydrated
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/run/powos/environment
+ExecStart=/usr/lib/powos/powos-hydrate
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

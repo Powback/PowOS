@@ -1,0 +1,3 @@
+#!/bin/bash
+# powos-heal - AI self-healing convenience wrapper
+exec /usr/lib/powos/ai-healer.sh "$@"

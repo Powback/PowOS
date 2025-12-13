@@ -1,0 +1,214 @@
+#!/bin/bash
+# PowOS Boot Entrypoint
+# Orchestrates the boot sequence: Init -> Hardware Detect -> Overlays -> Desktop
+
+set -e
+
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+MAGENTA='\033[0;35m'
+NC='\033[0m'
+
+log() { echo -e "${CYAN}[powos]${NC} $*"; }
+log_ok() { echo -e "${GREEN}[  OK  ]${NC} $*"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+
+clear
+echo -e "${MAGENTA}"
+cat << 'EOF'
+    ____                 ____  _____
+   / __ \____ _      __/ __ \/ ___/
+  / /_/ / __ \ | /| / / / / /\__ \
+ / ____/ /_/ / |/ |/ / /_/ /___/ /
+/_/    \____/|__/|__/\____//____/
+
+     Portable Gaming Workstation
+EOF
+echo -e "${NC}"
+
+# ═══════════════════════════════════════════════════════════════════
+# 1. Hardware Detection
+# ═══════════════════════════════════════════════════════════════════
+log "Running Chameleon Boot (Hardware Detection)..."
+
+# Run the specialized detection script
+if [[ -x /usr/lib/powos/powos-hardware-detect ]]; then
+    /usr/lib/powos/powos-hardware-detect
+else
+    # Fallback to local script if not installed in system path
+    bash lib/hardware-detect.sh detect
+fi
+
+# Display result
+if [[ -f /run/powos/hardware ]]; then
+    source /run/powos/hardware
+    log_ok "Hardware: $GPU_TYPE / $FORM_FACTOR / $POWER_SOURCE"
+else
+    log_warn "Hardware detection did not produce state file"
+fi
+
+# ═══════════════════════════════════════════════════════════════════
+# 2. Overlay Loading (System Extensions)
+# ═══════════════════════════════════════════════════════════════════
+log "Loading System Overlays..."
+
+# Run the specialized overlay loader
+if [[ -x /usr/lib/powos/powos-overlay-load ]]; then
+    /usr/lib/powos/powos-overlay-load
+else
+    log_warn "Overlay loader not found"
+fi
+
+# ═══════════════════════════════════════════════════════════════════
+# 3. Legacy Overlay Support (for overlays/ directory)
+# ═══════════════════════════════════════════════════════════════════
+# This handles the older "cp" style overlays if they exist and haven't been migrated
+if [[ -d "/usr/lib/powos/overlays" ]]; then
+    log "Checking for legacy overlays..."
+    # (Optional: Add logic here if strictly needed, but prefer sysext above)
+fi
+
+# ═══════════════════════════════════════════════════════════════════
+# 4. User Data / HomeFS
+# ═══════════════════════════════════════════════════════════════════
+log "Setting up User Environment..."
+
+# Check if HomeFS should be enabled
+HOMEFS_ENABLED="${POWOS_HOMEFS:-auto}"
+HOMEFS_USB_UUID="${POWOS_USB_UUID:-}"
+
+# Try to detect USB drive with POWOS-HOME label
+if [[ "$HOMEFS_ENABLED" == "auto" ]]; then
+    if blkid | grep -q "POWOS-HOME"; then
+        HOMEFS_ENABLED="true"
+        HOMEFS_USB_UUID=$(blkid -L POWOS-HOME -o value 2>/dev/null || true)
+        log "  Detected HomeFS USB drive: $HOMEFS_USB_UUID"
+    else
+        HOMEFS_ENABLED="false"
+        log "  No HomeFS USB drive detected (running in direct mode)"
+    fi
+fi
+
+if [[ "$HOMEFS_ENABLED" == "true" ]] && [[ -n "$HOMEFS_USB_UUID" ]]; then
+    log "  Starting HomeFS (lazy-load home filesystem)..."
+
+    # Mount USB if not mounted
+    USB_DEV="/dev/disk/by-uuid/$HOMEFS_USB_UUID"
+    if [[ -b "$USB_DEV" ]] && ! mountpoint -q /mnt/homefs-usb; then
+        mount "$USB_DEV" /mnt/homefs-usb 2>/dev/null || true
+    fi
+
+    # Start HomeFS FUSE mount
+    if [[ -f /etc/homefs/config.json ]] && command -v homefs &>/dev/null; then
+        # Update config with detected UUID
+        python3 -c "
+import json
+with open('/etc/homefs/config.json', 'r+') as f:
+    cfg = json.load(f)
+    cfg['sync']['usb_uuid'] = '$HOMEFS_USB_UUID'
+    f.seek(0)
+    json.dump(cfg, f, indent=2)
+    f.truncate()
+" 2>/dev/null || true
+
+        # Start HomeFS in background
+        homefs mount /mnt/homefs-usb /home/powos --daemon &
+        sleep 2
+
+        if mountpoint -q /home/powos 2>/dev/null; then
+            log_ok "HomeFS mounted at /home/powos"
+
+            # Start sync daemon
+            homefs sync --daemon &
+            log "  HomeFS sync daemon started"
+        else
+            log_warn "HomeFS mount failed, using direct home"
+            mkdir -p /home/powos
+        fi
+    else
+        log_warn "HomeFS not available, using direct home"
+        mkdir -p /home/powos
+    fi
+else
+    # Direct mode (no HomeFS)
+    log "  Using direct home directory (no lazy-load)"
+    mkdir -p /home/powos
+fi
+
+# Ensure permissions
+chown -R 1000:1000 /home/powos 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════════════════════
+# 5. KDE Plasma + KasmVNC
+# ═══════════════════════════════════════════════════════════════════
+log "Starting Desktop Environment..."
+
+# User setup
+if ! id powos &>/dev/null; then
+    useradd -m -G wheel -u 1000 powos
+    echo "powos:powos" | chpasswd
+fi
+echo "powos ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/powos
+
+# D-Bus
+mkdir -p /run/dbus /var/lib/dbus
+dbus-uuidgen > /var/lib/dbus/machine-id 2>/dev/null || true
+dbus-daemon --system --fork 2>/dev/null || true
+
+# Install TigerVNC, noVNC, and X11 KDE support
+log "  Installing VNC and KDE X11 support..."
+dnf install -y tigervnc-server novnc python3-websockify plasma-workspace-x11 2>&1 | tail -5
+
+# VNC config
+mkdir -p /home/powos/.vnc
+
+# Create xstartup for KDE Plasma X11
+cat > /home/powos/.vnc/xstartup << 'EOF'
+#!/bin/bash
+# Force software rendering to avoid NVIDIA driver conflicts
+export __EGL_VENDOR_LIBRARY_FILENAMES=/dev/null
+export LIBGL_ALWAYS_SOFTWARE=1
+export XDG_SESSION_TYPE=x11
+export XDG_RUNTIME_DIR=/tmp/runtime-powos
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+exec dbus-launch --exit-with-session startplasma-x11
+EOF
+chmod +x /home/powos/.vnc/xstartup
+
+# Create VNC password (password: powos)
+echo "powos" | vncpasswd -f > /home/powos/.vnc/passwd
+chmod 600 /home/powos/.vnc/passwd
+chown -R powos:powos /home/powos/.vnc
+
+# Kill any existing VNC
+vncserver -kill :1 2>/dev/null || true
+
+# Start TigerVNC (force software rendering to avoid NVIDIA EGL crash)
+log "  Starting KDE Plasma via TigerVNC..."
+su - powos -c "__EGL_VENDOR_LIBRARY_FILENAMES=/dev/null LIBGL_ALWAYS_SOFTWARE=1 vncserver :1 -geometry 1920x1080 -depth 24 -localhost no" 2>&1 || log_warn "VNC start issue"
+
+# Start noVNC (websocket proxy for browser access)
+log "  Starting noVNC web proxy..."
+/usr/bin/websockify --web=/usr/share/novnc 8443 localhost:5901 &
+
+echo ""
+echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  PowOS Ready!${NC}"
+echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo "  noVNC Access:  http://localhost:6091/vnc.html"
+echo "  VNC Direct:    localhost:5901"
+echo "  Password:      powos"
+echo ""
+if [[ "$HOMEFS_ENABLED" == "true" ]]; then
+    echo -e "  ${CYAN}HomeFS:${NC}        Enabled (lazy-load from USB)"
+    echo "                 Run 'homefs status' for cache info"
+    echo "                 Safe to unplug when 'homefs status' shows ready"
+else
+    echo -e "  ${YELLOW}HomeFS:${NC}        Disabled (direct mode)"
+fi
+echo ""
+
+exec tail -f /dev/null

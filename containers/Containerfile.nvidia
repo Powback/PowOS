@@ -1,0 +1,250 @@
+# PowOS Base - NVIDIA Edition
+# For NVIDIA GPUs using proprietary drivers
+# Includes CUDA support and nvidia-container-toolkit for GPU containers
+
+ARG FEDORA_VERSION="${FEDORA_VERSION:-43}"
+ARG ARCH="${ARCH:-x86_64}"
+ARG BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-kinoite}"
+ARG NVIDIA_REF="${NVIDIA_REF:-ghcr.io/bazzite-org/nvidia-drivers:latest-f${FEDORA_VERSION}-${ARCH}}"
+
+FROM ${NVIDIA_REF} AS nvidia
+
+# Import common base stage
+FROM powos-base-common AS powos-base-nvidia
+
+ARG IMAGE_NAME="${IMAGE_NAME:-powos-base-nvidia}"
+ARG IMAGE_VENDOR="${IMAGE_VENDOR:-powos}"
+ARG IMAGE_BRANCH="${IMAGE_BRANCH:-stable}"
+ARG BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-kinoite}"
+ARG SHA_HEAD_SHORT="${SHA_HEAD_SHORT}"
+ARG VERSION_TAG="${VERSION_TAG}"
+ARG VERSION_PRETTY="${VERSION_PRETTY}"
+
+# Copy system files and build scripts
+COPY system_files/nvidia/shared /
+COPY ./build_files/install-nvidia ./build_files/cleanup ./build_files/image-info \
+    ./build_files/build-initramfs ./build_files/finalize /ctx/
+
+# Remove AMD-specific packages that conflict with NVIDIA
+# Keep minimal Mesa for Zink/compatibility layer
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    dnf5 config-manager unsetopt skip_if_unavailable && \
+    dnf5 -y remove \
+        nvidia-gpu-firmware \
+        rocm-hip \
+        rocm-opencl \
+        rocm-clinfo \
+        rocm-smi && \
+    /ctx/cleanup
+
+# Install minimal Mesa for compatibility (Zink, some applications need it)
+# Mesa will coexist with NVIDIA drivers but NVIDIA will be primary
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    declare -A toswap=( \
+        ["terra-mesa"]="mesa-filesystem" \
+    ) && \
+    for repo in "${!toswap[@]}"; do \
+        for package in ${toswap[$repo]}; do dnf5 -y swap --repo=$repo $package $package; done; \
+    done && unset -v toswap repo package && \
+    # Lock Mesa packages (minimal set for compatibility)
+    dnf5 versionlock add \
+        mesa-dri-drivers \
+        mesa-filesystem \
+        mesa-libEGL \
+        mesa-libGL \
+        mesa-libgbm \
+        mesa-va-drivers \
+        mesa-vulkan-drivers && \
+    # Install 32-bit Mesa for gaming compatibility
+    dnf5 -y install \
+        mesa-va-drivers.i686 && \
+    /ctx/cleanup
+
+# Install NVIDIA proprietary drivers and supporting packages
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    --mount=type=bind,from=nvidia,src=/,dst=/rpms/nvidia \
+    dnf5 -y copr enable ublue-os/staging && \
+    # Install EGL Wayland support (critical for Wayland compositors)
+    dnf5 -y install \
+        egl-wayland.x86_64 \
+        egl-wayland.i686 \
+        egl-wayland2.x86_64 \
+        egl-wayland2.i686 && \
+    # Run NVIDIA driver installation script
+    /ctx/install-nvidia && \
+    # Remove nouveau (open-source NVIDIA driver) Vulkan ICD
+    rm -f /usr/share/vulkan/icd.d/nouveau_icd.*.json && \
+    # Create NVIDIA ML library symlink for compute workloads
+    ln -s libnvidia-ml.so.1 /usr/lib64/libnvidia-ml.so && \
+    dnf5 -y copr disable ublue-os/staging && \
+    /ctx/cleanup
+
+# Cleanup & Finalize
+COPY system_files/overrides /
+COPY ./build_files/finalize ./build_files/build-initramfs ./build_files/image-info ./build_files/dnf5-setopt ./build_files/dnf5-search /ctx/
+
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=secret,id=GITHUB_TOKEN \
+    rm -f /etc/profile.d/toolbox.sh && \
+    mkdir -p /var/tmp && chmod 1777 /var/tmp && \
+    # Create symlinks for libdrm (needed for some applications)
+    cp --no-dereference --preserve=links /usr/lib/libdrm.so.2 /usr/lib/libdrm.so && \
+    cp --no-dereference --preserve=links /usr/lib64/libdrm.so.2 /usr/lib64/libdrm.so && \
+    # Configure Steam launcher
+    sed -i 's@/usr/bin/steam@/usr/bin/bazzite-steam@g' /usr/share/applications/steam.desktop && \
+    sed -i 's@Exec=steam steam://open/bigpicture@Exec=/usr/bin/bazzite-steam-bpm@g' /usr/share/applications/steam.desktop && \
+    # Fix Lutris Python protocol buffers
+    sed -i 's|^Exec=lutris %U$|Exec=env PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python lutris %U|' /usr/share/applications/net.lutris.Lutris.desktop && \
+    # Setup Steam autostart (disabled by default, user can enable)
+    mkdir -p /etc/skel/.config/autostart/ && \
+    cp "/usr/share/applications/steam.desktop" "/etc/skel/.config/autostart/steam.desktop" && \
+    sed -i 's@/usr/bin/bazzite-steam %U@/usr/bin/bazzite-steam -silent %U@g' /etc/skel/.config/autostart/steam.desktop && \
+    # Hide some desktop entries
+    sed -i 's@\[Desktop Entry\]@\[Desktop Entry\]\nNoDisplay=true@g' /usr/share/applications/nvtop.desktop && \
+    sed -i 's@\[Desktop Entry\]@\[Desktop Entry\]\nNoDisplay=true@g' /usr/share/applications/btop.desktop && \
+    sed -i 's@\[Desktop Entry\]@\[Desktop Entry\]\nNoDisplay=true@g' /usr/share/applications/yad-icon-browser.desktop && \
+    # Bluetooth configuration
+    sed -i 's/#UserspaceHID.*/UserspaceHID=true/' /etc/bluetooth/input.conf && \
+    # GRUB fix for detection
+    sed -i "s|grub_probe\} --target=device /\`|grub_probe} --target=device /sysroot\`|g" /usr/bin/grub2-mkconfig && \
+    # Remove unnecessary systemd service overrides
+    rm -f /usr/lib/systemd/system/service.d/50-keep-warm.conf && \
+    # Import PowOS justfile recipes
+    echo "import \"/usr/share/ublue-os/just/80-bazzite.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/81-bazzite-fixes.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/82-bazzite-apps.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/82-bazzite-cdemu.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/82-bazzite-sunshine.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/82-bazzite-rmlint.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/82-bazzite-waydroid.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/83-bazzite-audio.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/84-bazzite-virt.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/85-bazzite-image.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/86-bazzite-windows.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/87-bazzite-framegen.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/88-bazzite-webapps.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/89-bazzite-mesa-git.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/90-bazzite-picker.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/90-bazzite-de.just\"" >> /usr/share/ublue-os/justfile && \
+    echo "import \"/usr/share/ublue-os/just/91-bazzite-decky.just\"" >> /usr/share/ublue-os/justfile && \
+    # Import NVIDIA-specific justfile
+    echo "import \"/usr/share/ublue-os/just/95-bazzite-nvidia.just\"" >> /usr/share/ublue-os/justfile && \
+    # KDE-specific configuration
+    if grep -q "kinoite" <<< "${BASE_IMAGE_NAME}"; then \
+      systemctl enable usr-share-sddm-themes.mount && \
+      mkdir -p "/usr/share/ublue-os/dconfs/desktop-kinoite/" && \
+      cp "/usr/share/glib-2.0/schemas/zz0-"*"-bazzite-desktop-kinoite-"*".gschema.override" "/usr/share/ublue-os/dconfs/desktop-kinoite/" 2>/dev/null || true && \
+      find "/etc/dconf/db/distro.d/" -maxdepth 1 -type f -exec cp {} "/usr/share/ublue-os/dconfs/desktop-kinoite/" \; 2>/dev/null || true && \
+      dconf-override-converter to-dconf "/usr/share/ublue-os/dconfs/desktop-kinoite/zz0-"*"-bazzite-desktop-kinoite-"*".gschema.override" 2>/dev/null || true && \
+      rm "/usr/share/ublue-os/dconfs/desktop-kinoite/zz0-"*"-bazzite-desktop-kinoite-"*".gschema.override" 2>/dev/null || true \
+    ; fi && \
+    # Validate gschema
+    mkdir -p /tmp/bazzite-schema-test && \
+    find "/usr/share/glib-2.0/schemas/" -type f ! -name "*.gschema.override" -exec cp {} "/tmp/bazzite-schema-test/" \; && \
+    cp "/usr/share/glib-2.0/schemas/zz0-"*".gschema.override" "/tmp/bazzite-schema-test/" 2>/dev/null || true && \
+    glib-compile-schemas --strict /tmp/bazzite-schema-test && \
+    glib-compile-schemas /usr/share/glib-2.0/schemas &>/dev/null && \
+    rm -r /tmp/bazzite-schema-test && \
+    # Configure rpm-ostreed
+    sed -i 's/stage/none/g' /etc/rpm-ostreed.conf && \
+    # Disable third-party repos (enabled on-demand by user)
+    for repo in \
+        fedora-cisco-openh264 \
+        fedora-steam \
+        fedora-rar \
+        google-chrome \
+        tailscale \
+        _copr_ublue-os-akmods \
+        terra \
+        terra-extras \
+        negativo17-fedora-multimedia; \
+    do \
+        sed -i 's@enabled=1@enabled=0@g' /etc/yum.repos.d/$repo.repo; \
+    done && \
+    # Disable copr repos
+    for copr in \
+        bazzite-org/bazzite \
+        bazzite-org/bazzite-multilib \
+        ublue-os/staging \
+        ublue-os/packages \
+        bazzite-org/obs-vkcapture \
+        ycollet/audinux \
+        bazzite-org/rom-properties \
+        bazzite-org/webapp-manager \
+        che/nerd-fonts; \
+    do \
+        dnf5 -y copr disable $copr; \
+    done && unset -v copr && \
+    eval "$(/ctx/dnf5-setopt setopt '*negativo17*' enabled=0)" && \
+    # Fix SELinux path
+    sed -i 's#/var/lib/selinux#/etc/selinux#g' /usr/lib/python3.*/site-packages/setroubleshoot/util.py && \
+    # rtkit daemon configuration
+    sed -i 's|^ExecStart=.*|ExecStart=/usr/libexec/rtkit-daemon --no-canary|' /usr/lib/systemd/system/rtkit-daemon.service && \
+    # Power profile daemon tuning
+    sed -i 's/power-saver=powersave$/power-saver=powersave-bazzite/' /etc/tuned/ppd.conf && \
+    sed -i 's/balanced=balanced$/balanced=balanced-bazzite/' /etc/tuned/ppd.conf && \
+    sed -i 's/performance=throughput-performance$/performance=throughput-performance-bazzite/' /etc/tuned/ppd.conf && \
+    sed -i 's/balanced=balanced-battery$/balanced=balanced-battery-bazzite\npower-saver=powersave-battery-bazzite/' /etc/tuned/ppd.conf && \
+    # Create pulseaudio compatibility symlink
+    ln -s /usr/bin/true /usr/bin/pulseaudio && \
+    # Setup Flatpak
+    mkdir -p /etc/flatpak/remotes.d && \
+    curl --retry 3 -Lo /etc/flatpak/remotes.d/flathub.flatpakrepo https://dl.flathub.org/repo/flathub.flatpakrepo && \
+    # Enable/disable systemd services
+    systemctl enable brew-setup.service && \
+    systemctl disable brew-upgrade.timer && \
+    systemctl disable brew-update.timer && \
+    systemctl disable scx_loader.service && \
+    systemctl enable bazzite-flatpak-manager.service && \
+    systemctl disable rpm-ostreed-automatic.timer && \
+    systemctl enable uupd.timer && \
+    systemctl enable incus-workaround.service && \
+    systemctl enable bazzite-hardware-setup.service && \
+    systemctl disable tailscaled.service && \
+    systemctl enable dev-hugepages1G.mount && \
+    systemctl enable ds-inhibit.service && \
+    systemctl --global enable bazzite-user-setup.service && \
+    systemctl --global enable podman.socket && \
+    systemctl --global enable systemd-tmpfiles-setup.service && \
+    systemctl --global disable sunshine.service && \
+    systemctl disable waydroid-container.service && \
+    systemctl disable force-wol.service && \
+    systemctl --global enable bazzite-dynamic-fixes.service && \
+    # Disable supergfxd by default (user can enable if needed for hybrid GPU)
+    systemctl disable supergfxd.service && \
+    # Download reference configs
+    /ctx/ghcurl "https://raw.githubusercontent.com/doitsujin/dxvk/master/dxvk.conf" -Lo /etc/dxvk-example.conf && \
+    /ctx/ghcurl "https://raw.githubusercontent.com/bazzite-org/waydroid-scripts/main/waydroid-choose-gpu.sh" -Lo /usr/bin/waydroid-choose-gpu && \
+    chmod +x /usr/bin/waydroid-choose-gpu && \
+    # Configure DNF to skip unavailable repos
+    dnf5 config-manager setopt skip_if_unavailable=1 && \
+    # Download distrobox configs
+    /ctx/ghcurl "https://github.com/ublue-os/toolboxes/raw/refs/heads/main/apps/docker/distrobox.ini" -Lo /etc/distrobox/docker.ini && \
+    /ctx/ghcurl "https://github.com/ublue-os/toolboxes/raw/refs/heads/main/apps/incus/distrobox.ini" -Lo /etc/distrobox/incus.ini && \
+    # Generate image metadata
+    /ctx/image-info && \
+    # Build initramfs
+    /ctx/build-initramfs && \
+    # Final cleanup
+    /ctx/finalize && \
+    rm -rf /ctx
+
+# Validate container with bootc
+RUN bootc container lint
+
+# Add PowOS-specific metadata
+LABEL org.opencontainers.image.title="PowOS Base - NVIDIA Edition" \
+      org.opencontainers.image.description="Portable, hardware-adaptive gaming OS based on Bazzite - NVIDIA GPU variant" \
+      org.opencontainers.image.vendor="PowOS Project" \
+      org.opencontainers.image.url="https://github.com/powos/powos" \
+      org.opencontainers.image.documentation="https://github.com/powos/powos/blob/main/README.md" \
+      io.powos.variant="nvidia" \
+      io.powos.gpu-support="nvidia" \
+      io.powos.graphics-stack="nvidia-proprietary" \
+      io.powos.compute-support="cuda" \
+      io.powos.container-support="nvidia-container-toolkit"

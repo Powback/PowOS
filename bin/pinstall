@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+# pinstall - Install packages and automatically record to infrastructure code
+#
+# Usage: pinstall <package> [package...]
+#
+# This script:
+# 1. Installs packages immediately (runtime)
+# 2. Records them to distrobox.ini (config)
+# 3. Commits the change to git (persistence)
+
+set -euo pipefail
+
+# ─────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────
+
+POWOS_ROOT="${POWOS_ROOT:-$HOME/powos}"
+DISTROBOX_INI="${POWOS_ROOT}/containers/distrobox.ini"
+LOG_PREFIX="[pinstall]"
+
+# Colors (disabled if not a terminal)
+if [[ -t 1 ]]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m' # No Color
+else
+    RED='' GREEN='' YELLOW='' BLUE='' NC=''
+fi
+
+# ─────────────────────────────────────────────────────────────────
+# Helper Functions
+# ─────────────────────────────────────────────────────────────────
+
+log_info() {
+    echo -e "${BLUE}${LOG_PREFIX}${NC} $*"
+}
+
+log_success() {
+    echo -e "${GREEN}${LOG_PREFIX}${NC} $*"
+}
+
+log_warn() {
+    echo -e "${YELLOW}${LOG_PREFIX}${NC} $*"
+}
+
+log_error() {
+    echo -e "${RED}${LOG_PREFIX}${NC} $*" >&2
+}
+
+# Detect which package manager is available
+detect_package_manager() {
+    if command -v pacman &>/dev/null; then
+        echo "pacman"
+    elif command -v dnf &>/dev/null; then
+        echo "dnf"
+    elif command -v apt-get &>/dev/null; then
+        echo "apt"
+    elif command -v apk &>/dev/null; then
+        echo "apk"
+    elif command -v zypper &>/dev/null; then
+        echo "zypper"
+    else
+        echo "unknown"
+    fi
+}
+
+# Install packages using the detected package manager
+install_packages() {
+    local pm="$1"
+    shift
+    local packages=("$@")
+
+    log_info "Installing with ${pm}: ${packages[*]}"
+
+    case "$pm" in
+        pacman)
+            sudo pacman -S --noconfirm --needed "${packages[@]}"
+            ;;
+        dnf)
+            sudo dnf install -y "${packages[@]}"
+            ;;
+        apt)
+            sudo apt-get update -qq
+            sudo apt-get install -y "${packages[@]}"
+            ;;
+        apk)
+            sudo apk add "${packages[@]}"
+            ;;
+        zypper)
+            sudo zypper install -y "${packages[@]}"
+            ;;
+        *)
+            log_error "Unknown package manager: $pm"
+            return 1
+            ;;
+    esac
+}
+
+# Ensure distrobox.ini exists with proper structure
+ensure_distrobox_ini() {
+    if [[ ! -f "$DISTROBOX_INI" ]]; then
+        log_info "Creating ${DISTROBOX_INI}"
+        mkdir -p "$(dirname "$DISTROBOX_INI")"
+        cat > "$DISTROBOX_INI" << 'EOF'
+# PowOS Distrobox Configuration
+# This file is automatically managed by pinstall/premove
+# Manual edits will be preserved
+
+[powos-dev]
+image=archlinux:latest
+additional_packages=
+init=false
+nvidia=false
+pull=true
+root=false
+replace=true
+start_now=false
+EOF
+    fi
+}
+
+# Add package to distrobox.ini
+record_package() {
+    local pkg="$1"
+    local ini_file="$DISTROBOX_INI"
+
+    # Ensure file exists
+    ensure_distrobox_ini
+
+    # Check if package already recorded
+    if grep -q "additional_packages=.*\b${pkg}\b" "$ini_file" 2>/dev/null; then
+        log_warn "Package '$pkg' already in config"
+        return 0
+    fi
+
+    # Find the additional_packages line and append
+    if grep -q "^additional_packages=" "$ini_file"; then
+        # Get current packages
+        local current
+        current=$(grep "^additional_packages=" "$ini_file" | head -1 | cut -d'=' -f2-)
+
+        if [[ -z "$current" ]]; then
+            # Empty, just add
+            sed -i "s/^additional_packages=$/additional_packages=${pkg}/" "$ini_file"
+        else
+            # Append with space
+            sed -i "s/^additional_packages=\(.*\)$/additional_packages=\1 ${pkg}/" "$ini_file"
+        fi
+    else
+        # No additional_packages line, add one
+        echo "additional_packages=${pkg}" >> "$ini_file"
+    fi
+
+    log_info "Recorded '$pkg' to config"
+}
+
+# Commit changes to git
+commit_changes() {
+    local packages=("$@")
+    local msg="install: ${packages[*]}"
+
+    cd "$POWOS_ROOT"
+
+    # Check if we're in a git repo
+    if ! git rev-parse --git-dir &>/dev/null; then
+        log_warn "Not a git repository, skipping commit"
+        return 0
+    fi
+
+    # Check if there are changes
+    if ! git diff --quiet "$DISTROBOX_INI" 2>/dev/null && \
+       ! git diff --cached --quiet "$DISTROBOX_INI" 2>/dev/null; then
+        git add "$DISTROBOX_INI"
+        git commit -m "$msg" || log_warn "Nothing to commit"
+        log_success "Committed: $msg"
+    else
+        log_warn "No changes to commit"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────
+
+main() {
+    local packages=("$@")
+
+    # Validate arguments
+    if [[ ${#packages[@]} -eq 0 ]]; then
+        echo "Usage: pinstall <package> [package...]"
+        echo ""
+        echo "Install packages and record to infrastructure code."
+        echo ""
+        echo "Examples:"
+        echo "  pinstall ripgrep"
+        echo "  pinstall node python go"
+        echo ""
+        echo "Environment variables:"
+        echo "  POWOS_ROOT       Root directory (default: \$HOME/powos)"
+        echo "  POWOS_SKIP_GIT   Skip git commit if set to 1"
+        exit 1
+    fi
+
+    log_info "Installing: ${packages[*]}"
+
+    # Step 1: Detect package manager
+    local pm
+    pm=$(detect_package_manager)
+
+    if [[ "$pm" == "unknown" ]]; then
+        log_error "No supported package manager found"
+        exit 1
+    fi
+
+    # Step 2: Install packages (runtime)
+    if ! install_packages "$pm" "${packages[@]}"; then
+        log_error "Installation failed"
+        exit 1
+    fi
+
+    # Step 3: Record to config
+    ensure_distrobox_ini
+    for pkg in "${packages[@]}"; do
+        record_package "$pkg"
+    done
+
+    # Step 4: Git commit (persistence)
+    if [[ "${POWOS_SKIP_GIT:-0}" != "1" ]]; then
+        commit_changes "${packages[@]}"
+    fi
+
+    log_success "Installed and recorded: ${packages[*]}"
+}
+
+main "$@"

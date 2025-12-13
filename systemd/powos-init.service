@@ -1,0 +1,18 @@
+[Unit]
+Description=PowOS System Initialization
+Documentation=https://github.com/user/powos
+DefaultDependencies=no
+Wants=local-fs.target
+After=local-fs.target
+Before=sysinit.target
+ConditionPathExists=/usr/lib/powos/powos-init
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/powos/powos-init
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sysinit.target

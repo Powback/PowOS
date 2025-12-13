@@ -1,0 +1,135 @@
+#!/bin/bash
+# PowOS Desktop Entrypoint
+# Runs full boot sequence then starts desktop
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+log() { echo -e "${BLUE}[powos]${NC} $*"; }
+log_success() { echo -e "${GREEN}[powos]${NC} $*"; }
+log_step() { echo -e "${CYAN}════════════════════════════════════════${NC}"; echo -e "${CYAN}[powos] $*${NC}"; }
+
+echo ""
+echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${MAGENTA}║         PowOS Desktop Environment Starting                 ║${NC}"
+echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# ─────────────────────────────────────────────────────────────────
+# Step 1: System Init
+# ─────────────────────────────────────────────────────────────────
+log_step "Step 1/6: System Initialization"
+sudo mkdir -p /var/lib/powos/{extensions,sources,containers,git,state}
+sudo mkdir -p /var/lib/extensions
+sudo mkdir -p /run/powos
+sudo chmod 777 /run/powos
+
+# Fix home directory ownership (volume may be created as root)
+sudo chown -R powos:powos /home/powos 2>/dev/null || true
+
+# Link project dirs from mounted volume
+POWOS_MOUNT="${POWOS_ROOT:-/powos}"
+for dir in extensions sources containers config; do
+    if [[ -d "${POWOS_MOUNT}/${dir}" ]]; then
+        sudo ln -sfn "${POWOS_MOUNT}/${dir}" "/var/lib/powos/${dir}" 2>/dev/null || true
+        log "Linked: ${dir}"
+    fi
+done
+log_success "System initialized"
+
+# ─────────────────────────────────────────────────────────────────
+# Step 2: Chameleon Boot (Hardware Detection)
+# ─────────────────────────────────────────────────────────────────
+log_step "Step 2/6: Chameleon Boot (Hardware Detection)"
+log "GPU: ${POWOS_MOCK_HARDWARE:-nvidia-desktop}"
+log "Power: ${POWOS_MOCK_POWER:-ac}"
+
+HW_DETECT="/usr/lib/powos/hardware-detect.sh"
+if [[ -f "$HW_DETECT" ]]; then
+    POWOS_ROOT="$POWOS_MOUNT" bash "$HW_DETECT" detect 2>&1 | head -20 || true
+fi
+log_success "Hardware profile applied"
+
+# ─────────────────────────────────────────────────────────────────
+# Step 3: Build Overlays
+# ─────────────────────────────────────────────────────────────────
+log_step "Step 3/6: Building Overlays (Frankenstein Mods)"
+OVERLAY_MGR="/usr/lib/powos/overlay-manager.sh"
+if [[ -d "${POWOS_MOUNT}/sources" ]] && [[ -f "$OVERLAY_MGR" ]]; then
+    for src in "${POWOS_MOUNT}/sources"/*/; do
+        if [[ -f "${src}/build.sh" ]]; then
+            name=$(basename "$src")
+            log "Building: $name"
+            POWOS_ROOT="$POWOS_MOUNT" bash "$OVERLAY_MGR" build "$name" 2>&1 | tail -5 || true
+        fi
+    done
+    POWOS_ROOT="$POWOS_MOUNT" bash "$OVERLAY_MGR" enable-all 2>&1 || true
+    log_success "Overlays built and enabled"
+else
+    log "No overlay sources found"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+# Step 4: Git State
+# ─────────────────────────────────────────────────────────────────
+log_step "Step 4/6: Git State Tracking"
+cd "$POWOS_MOUNT"
+if [[ ! -d .git ]]; then
+    git init -q
+    log "Initialized git repo"
+fi
+git config user.email "${GIT_AUTHOR_EMAIL:-powos@localhost}" 2>/dev/null || true
+git config user.name "${GIT_AUTHOR_NAME:-PowOS}" 2>/dev/null || true
+log_success "Git state tracking ready"
+
+# ─────────────────────────────────────────────────────────────────
+# Step 5: Distrobox Containers
+# ─────────────────────────────────────────────────────────────────
+log_step "Step 5/6: Distrobox Containers"
+if [[ -f "${POWOS_MOUNT}/containers/distrobox.ini" ]]; then
+    log "Found distrobox.ini - creating containers..."
+    distrobox assemble create --file "${POWOS_MOUNT}/containers/distrobox.ini" 2>&1 | tail -10 || log "Some containers may already exist"
+else
+    log "No distrobox.ini found"
+fi
+log_success "Container config ready"
+
+# ─────────────────────────────────────────────────────────────────
+# Step 6: Start Desktop
+# ─────────────────────────────────────────────────────────────────
+log_step "Step 6/6: Starting Desktop Environment"
+
+# Write boot state
+echo "ready" | sudo tee /var/lib/powos/state/boot-state > /dev/null
+date -Iseconds | sudo tee /var/lib/powos/state/boot-time > /dev/null
+
+echo ""
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║         PowOS Ready - Starting Desktop                     ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo "  Access desktop at: http://localhost:6090"
+echo "  VNC password: powos"
+echo ""
+echo "  Login credentials:"
+echo "    User: powos"
+echo "    Pass: powos"
+echo ""
+echo "  Hardware: ${POWOS_MOCK_HARDWARE:-nvidia-desktop}"
+echo "  Power:    ${POWOS_MOCK_POWER:-ac}"
+echo "  Project:  ${POWOS_MOUNT}"
+echo ""
+
+# Start VNC as powos user
+su - powos -c "/usr/bin/start-vnc"
+
+# Keep alive
+sleep infinity

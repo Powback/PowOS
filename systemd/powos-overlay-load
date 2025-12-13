@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# powos-overlay-load - Load systemd-sysext Overlays at Boot
+#
+# This script runs at boot to:
+# 1. Check for built overlays in persistent storage
+# 2. Symlink them to /var/lib/extensions
+# 3. Refresh systemd-sysext to activate
+#
+# This enables custom binaries (like patched dolphin) to be
+# automatically loaded without modifying the immutable base OS.
+
+set -euo pipefail
+
+LOG_TAG="powos-overlay"
+POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
+SYSEXT_DIR="/var/lib/extensions"
+
+log() {
+    logger -t "$LOG_TAG" "$*"
+    echo "[powos-overlay] $*"
+}
+
+log_error() {
+    logger -t "$LOG_TAG" -p user.err "$*"
+    echo "[powos-overlay] ERROR: $*" >&2
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Find Available Overlays
+# ─────────────────────────────────────────────────────────────────
+
+find_overlays() {
+    local extensions_dir="${POWOS_ROOT}/extensions"
+    local overlays=()
+
+    if [[ ! -d "$extensions_dir" ]]; then
+        log "No extensions directory found"
+        return
+    fi
+
+    # Find all built extensions (directories with extension-release file)
+    for ext_dir in "$extensions_dir"/*/; do
+        if [[ -d "$ext_dir" ]]; then
+            local name
+            name=$(basename "$ext_dir")
+
+            # Verify it's a valid sysext (has extension-release)
+            if [[ -f "${ext_dir}/usr/lib/extension-release.d/extension-release.${name}" ]]; then
+                overlays+=("$name")
+            else
+                log "Skipping $name - missing extension-release file"
+            fi
+        fi
+    done
+
+    printf '%s\n' "${overlays[@]}"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Enable Overlay
+# ─────────────────────────────────────────────────────────────────
+
+enable_overlay() {
+    local name="$1"
+    local source="${POWOS_ROOT}/extensions/${name}"
+    local target="${SYSEXT_DIR}/${name}"
+
+    if [[ ! -d "$source" ]]; then
+        log_error "Extension not found: $source"
+        return 1
+    fi
+
+    # Create sysext directory if needed
+    mkdir -p "$SYSEXT_DIR"
+
+    # Create symlink (remove existing if present)
+    if [[ -L "$target" ]] || [[ -e "$target" ]]; then
+        rm -rf "$target"
+    fi
+
+    ln -sf "$source" "$target"
+    log "Enabled overlay: $name -> $target"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Load All Overlays
+# ─────────────────────────────────────────────────────────────────
+
+load_all_overlays() {
+    log "Loading overlays from ${POWOS_ROOT}/extensions..."
+
+    local overlays
+    overlays=$(find_overlays)
+
+    if [[ -z "$overlays" ]]; then
+        log "No overlays to load"
+        return 0
+    fi
+
+    local count=0
+    local failed=0
+
+    while IFS= read -r name; do
+        if [[ -n "$name" ]]; then
+            if enable_overlay "$name"; then
+                ((count++)) || true
+            else
+                ((failed++)) || true
+            fi
+        fi
+    done <<< "$overlays"
+
+    log "Enabled $count overlays ($failed failed)"
+
+    # Refresh systemd-sysext to activate
+    if [[ $count -gt 0 ]]; then
+        refresh_sysext
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Refresh systemd-sysext
+# ─────────────────────────────────────────────────────────────────
+
+refresh_sysext() {
+    log "Refreshing systemd-sysext..."
+
+    if ! command -v systemd-sysext &>/dev/null; then
+        log "systemd-sysext not available (container mode)"
+        return 0
+    fi
+
+    # Unmerge first (in case of stale state)
+    systemd-sysext unmerge 2>/dev/null || true
+
+    # Merge/refresh extensions
+    # Note: This may fail in containers - that's expected and non-fatal
+    if systemd-sysext refresh 2>&1; then
+        log "systemd-sysext refreshed successfully"
+    else
+        log "systemd-sysext refresh skipped (container mode)"
+    fi
+
+    # Show status
+    systemd-sysext status 2>/dev/null || true
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Hardware-Specific Overlays
+# ─────────────────────────────────────────────────────────────────
+
+load_hardware_specific() {
+    # Read hardware state if available
+    local hardware_state="/run/powos/hardware"
+    if [[ ! -f "$hardware_state" ]]; then
+        return
+    fi
+
+    source "$hardware_state"
+
+    # Load GPU-specific overlays
+    case "${GPU_TYPE:-}" in
+        nvidia*)
+            # Enable nvidia-specific overlays if present
+            if [[ -d "${POWOS_ROOT}/extensions/gpu-nvidia" ]]; then
+                enable_overlay "gpu-nvidia"
+            fi
+            ;;
+        amd*)
+            if [[ -d "${POWOS_ROOT}/extensions/gpu-amd" ]]; then
+                enable_overlay "gpu-amd"
+            fi
+            ;;
+        intel*)
+             if [[ -d "${POWOS_ROOT}/extensions/gpu-intel" ]]; then
+                enable_overlay "gpu-intel"
+            fi
+            ;;
+    esac
+
+    # Load profile-specific overlays
+    if [[ -n "${ACTIVE_PROFILE:-}" ]]; then
+        if [[ -d "${POWOS_ROOT}/extensions/profile-${ACTIVE_PROFILE}" ]]; then
+            enable_overlay "profile-${ACTIVE_PROFILE}"
+        fi
+    fi
+
+    # Load Device-Specific Overlays (from detection)
+    if [[ -n "${DEVICE:-}" ]] && [[ "$DEVICE" != "generic" ]]; then
+        # Map detected device to overlay name
+        local device_overlay="device-${DEVICE}"
+        # Handle naming mismatch if any (e.g., steamdeck-jupiter -> device-steamdeck)
+        if [[ "$DEVICE" == steamdeck* ]]; then
+             device_overlay="device-steamdeck"
+        fi
+        
+        if [[ -d "${POWOS_ROOT}/extensions/${device_overlay}" ]]; then
+            enable_overlay "${device_overlay}"
+        fi
+        
+        # Load Gaming Mode if appropriate for device
+        if [[ "$DEVICE" == steamdeck* ]] || [[ "$DEVICE" == "legion-go" ]] || [[ "$DEVICE" == "rog-ally" ]]; then
+             if [[ -d "${POWOS_ROOT}/extensions/capability-gaming-mode" ]]; then
+                enable_overlay "capability-gaming-mode"
+            fi
+        fi
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Verify Overlays
+# ─────────────────────────────────────────────────────────────────
+
+verify_overlays() {
+    log "Verifying overlay activation..."
+
+    # Check if any extensions are active
+    local status
+    status=$(systemd-sysext status 2>/dev/null || echo "unavailable")
+
+    if [[ "$status" == *"No extensions"* ]] || [[ "$status" == "unavailable" ]]; then
+        log "No extensions currently active"
+    else
+        log "Active extensions:"
+        echo "$status"
+    fi
+
+    # Verify specific binaries exist
+    for ext_dir in "${POWOS_ROOT}/extensions"/*/; do
+        if [[ -d "$ext_dir" ]]; then
+            local name
+            name=$(basename "$ext_dir")
+
+            # Check for binaries that should now be in /usr/bin
+            for bin in "${ext_dir}/usr/bin"/*; do
+                if [[ -f "$bin" ]]; then
+                    local bin_name
+                    bin_name=$(basename "$bin")
+                    if command -v "$bin_name" &>/dev/null; then
+                        log "  - $bin_name: ACTIVE"
+                    else
+                        log "  - $bin_name: NOT IN PATH"
+                    fi
+                fi
+            done
+        fi
+    done
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────
+
+main() {
+    log "PowOS Overlay Loading: Starting..."
+
+    # Load all user overlays
+    load_all_overlays
+
+    # Load hardware-specific overlays
+    load_hardware_specific
+
+    # Final sysext refresh (if hardware-specific added any)
+    if [[ -d "$SYSEXT_DIR" ]] && [[ "$(ls -A "$SYSEXT_DIR" 2>/dev/null)" ]]; then
+        refresh_sysext
+    fi
+
+    # Verify
+    verify_overlays
+
+    log "PowOS Overlay Loading: Complete"
+}
+
+main "$@"

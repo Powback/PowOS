@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# powos-init - PowOS System Initialization
+#
+# This script runs at boot to:
+# 1. Mount persistent storage (if available)
+# 2. Set up PowOS directories
+# 3. Link user configuration
+# 4. Signal readiness for other services
+
+set -euo pipefail
+
+LOG_TAG="powos-init"
+
+log() {
+    logger -t "$LOG_TAG" "$*"
+    echo "[powos-init] $*"
+}
+
+log_error() {
+    logger -t "$LOG_TAG" -p user.err "$*"
+    echo "[powos-init] ERROR: $*" >&2
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────
+
+POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
+POWOS_PERSISTENT="${POWOS_PERSISTENT:-}"
+POWOS_STATE_FILE="${POWOS_ROOT}/state/boot-state"
+POWOS_CONFIG_FILE="/etc/powos/config"
+
+# ─────────────────────────────────────────────────────────────────
+# Detect Persistent Storage
+# ─────────────────────────────────────────────────────────────────
+
+detect_persistent_storage() {
+    log "Detecting persistent storage..."
+
+    # Check for explicitly configured storage
+    if [[ -f "$POWOS_CONFIG_FILE" ]]; then
+        source "$POWOS_CONFIG_FILE"
+        if [[ -n "${POWOS_PERSISTENT:-}" ]] && [[ -d "$POWOS_PERSISTENT" ]]; then
+            log "Using configured storage: $POWOS_PERSISTENT"
+            return 0
+        fi
+    fi
+
+    # Auto-detect PowOS storage by label or UUID
+    local powos_disk=""
+
+    # Look for disk labeled "POWOS"
+    if [[ -e /dev/disk/by-label/POWOS ]]; then
+        powos_disk="/dev/disk/by-label/POWOS"
+        log "Found POWOS labeled disk"
+    fi
+
+    # Look for disk labeled "powos-data"
+    if [[ -z "$powos_disk" ]] && [[ -e /dev/disk/by-label/powos-data ]]; then
+        powos_disk="/dev/disk/by-label/powos-data"
+        log "Found powos-data labeled disk"
+    fi
+
+    # Check for USB4/Thunderbolt NVMe (common for portable workstation)
+    if [[ -z "$powos_disk" ]]; then
+        for dev in /dev/nvme*n1; do
+            if [[ -b "$dev" ]]; then
+                # Check if it's a USB/Thunderbolt attached device
+                local dev_path
+                dev_path=$(udevadm info --query=path --name="$dev" 2>/dev/null || true)
+                if [[ "$dev_path" == *"usb"* ]] || [[ "$dev_path" == *"thunderbolt"* ]]; then
+                    log "Found USB/Thunderbolt NVMe: $dev"
+                    # Look for POWOS partition
+                    for part in "${dev}p"*; do
+                        if [[ -b "$part" ]]; then
+                            local label
+                            label=$(lsblk -no LABEL "$part" 2>/dev/null || true)
+                            if [[ "$label" == "POWOS"* ]] || [[ "$label" == "powos"* ]]; then
+                                powos_disk="$part"
+                                log "Using partition: $part ($label)"
+                                break 2
+                            fi
+                        fi
+                    done
+                fi
+            fi
+        done
+    fi
+
+    if [[ -n "$powos_disk" ]]; then
+        POWOS_PERSISTENT="/mnt/powos"
+
+        # Mount if not already mounted
+        if ! mountpoint -q "$POWOS_PERSISTENT" 2>/dev/null; then
+            mkdir -p "$POWOS_PERSISTENT"
+            mount "$powos_disk" "$POWOS_PERSISTENT"
+            log "Mounted persistent storage at $POWOS_PERSISTENT"
+        fi
+        return 0
+    fi
+
+    log "No persistent storage found, using volatile storage"
+    return 1
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Setup Directory Structure
+# ─────────────────────────────────────────────────────────────────
+
+setup_directories() {
+    log "Setting up PowOS directories..."
+
+    # Create base directories
+    mkdir -p "${POWOS_ROOT}/extensions"
+    mkdir -p "${POWOS_ROOT}/sources"
+    mkdir -p "${POWOS_ROOT}/state"
+    mkdir -p "${POWOS_ROOT}/containers"
+    mkdir -p "${POWOS_ROOT}/git"
+
+    # If persistent storage is available, link or bind mount
+    if [[ -n "$POWOS_PERSISTENT" ]] && [[ -d "$POWOS_PERSISTENT" ]]; then
+        log "Linking persistent storage..."
+
+        # Extensions (systemd-sysext overlays)
+        if [[ -d "${POWOS_PERSISTENT}/extensions" ]]; then
+            rm -rf "${POWOS_ROOT}/extensions"
+            ln -sf "${POWOS_PERSISTENT}/extensions" "${POWOS_ROOT}/extensions"
+        fi
+
+        # Sources (overlay source code)
+        if [[ -d "${POWOS_PERSISTENT}/sources" ]]; then
+            rm -rf "${POWOS_ROOT}/sources"
+            ln -sf "${POWOS_PERSISTENT}/sources" "${POWOS_ROOT}/sources"
+        fi
+
+        # Git state repository
+        if [[ -d "${POWOS_PERSISTENT}/git" ]]; then
+            rm -rf "${POWOS_ROOT}/git"
+            ln -sf "${POWOS_PERSISTENT}/git" "${POWOS_ROOT}/git"
+        fi
+
+        # Container definitions
+        if [[ -d "${POWOS_PERSISTENT}/containers" ]]; then
+            rm -rf "${POWOS_ROOT}/containers"
+            ln -sf "${POWOS_PERSISTENT}/containers" "${POWOS_ROOT}/containers"
+        fi
+    fi
+
+    log "Directory structure ready"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Check First Boot / Needs Hydration
+# ─────────────────────────────────────────────────────────────────
+
+check_needs_hydration() {
+    # Check if this is first boot or needs restoration
+    if [[ ! -f "$POWOS_STATE_FILE" ]]; then
+        log "First boot detected - hydration required"
+        return 0
+    fi
+
+    # Check if state file indicates incomplete hydration
+    local state
+    state=$(cat "$POWOS_STATE_FILE" 2>/dev/null || echo "unknown")
+
+    if [[ "$state" != "ready" ]]; then
+        log "Previous boot incomplete (state: $state) - hydration required"
+        return 0
+    fi
+
+    # Check if distrobox containers exist
+    if ! command -v distrobox &>/dev/null; then
+        log "Distrobox not available - skipping container check"
+        return 1
+    fi
+
+    # If distrobox.ini exists but no containers, need hydration
+    if [[ -f "${POWOS_ROOT}/containers/distrobox.ini" ]]; then
+        local container_count
+        container_count=$(distrobox list --no-color 2>/dev/null | grep -c "Up\|Created" || echo 0)
+        if [[ "$container_count" -eq 0 ]]; then
+            log "No containers found but config exists - hydration required"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Write Boot State
+# ─────────────────────────────────────────────────────────────────
+
+write_state() {
+    local state="$1"
+    mkdir -p "$(dirname "$POWOS_STATE_FILE")"
+    echo "$state" > "$POWOS_STATE_FILE"
+    log "Boot state: $state"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────
+
+main() {
+    log "PowOS initialization starting..."
+
+    write_state "initializing"
+
+    # Step 1: Detect and mount persistent storage
+    detect_persistent_storage || true
+
+    # Step 2: Setup directory structure
+    setup_directories
+
+    # Step 3: Export environment for other services
+    {
+        echo "POWOS_ROOT=$POWOS_ROOT"
+        echo "POWOS_PERSISTENT=${POWOS_PERSISTENT:-}"
+        echo "POWOS_NEEDS_HYDRATION=$(check_needs_hydration && echo 1 || echo 0)"
+    } > /run/powos/environment
+    mkdir -p /run/powos
+
+    # Also write to a systemd environment file
+    {
+        echo "POWOS_ROOT=$POWOS_ROOT"
+        echo "POWOS_PERSISTENT=${POWOS_PERSISTENT:-}"
+    } > /run/powos/environment
+
+    write_state "initialized"
+
+    log "PowOS initialization complete"
+}
+
+main "$@"

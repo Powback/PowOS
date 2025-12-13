@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# powos-entrypoint - Container entrypoint that runs FULL PowOS boot sequence
+#
+# This does EVERYTHING automatically:
+# 1. Initialize directories & persistent storage
+# 2. Chameleon Boot - detect hardware, apply profile
+# 3. Build & load all systemd-sysext overlays
+# 4. Full hydration - create distrobox containers, restore state from git
+# 5. Start the environment (desktop or shell)
+
+set -euo pipefail
+
+LOG_PREFIX="[powos]"
+POWOS_ROOT="${POWOS_ROOT:-/powos}"
+POWOS_LIB="${POWOS_LIB:-/usr/local/lib/powos}"
+POWOS_STATE_DIR="/var/lib/powos/state"
+FIRST_BOOT_MARKER="${POWOS_STATE_DIR}/initialized"
+HYDRATED_MARKER="${POWOS_STATE_DIR}/hydrated"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+log() { echo -e "${BLUE}${LOG_PREFIX}${NC} $*"; }
+log_success() { echo -e "${GREEN}${LOG_PREFIX}${NC} $*"; }
+log_warn() { echo -e "${YELLOW}${LOG_PREFIX}${NC} $*"; }
+log_error() { echo -e "${RED}${LOG_PREFIX}${NC} $*" >&2; }
+
+log_step() {
+    echo ""
+    echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}${LOG_PREFIX} $*${NC}"
+    echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
+}
+
+log_banner() {
+    echo ""
+    echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${MAGENTA}║  $*${NC}"
+    echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════╝${NC}"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 1: Initialize directories and persistent storage
+# ─────────────────────────────────────────────────────────────────
+init_system() {
+    log_step "Step 1/5: System Initialization"
+
+    # Create all required directories
+    log "Creating PowOS directories..."
+    sudo mkdir -p "$POWOS_STATE_DIR"
+    sudo mkdir -p /var/lib/powos/{extensions,sources,containers,git}
+    sudo mkdir -p /var/lib/extensions
+    sudo mkdir -p /run/powos
+    sudo chmod 777 /run/powos
+
+    # Link project directories
+    log "Linking project directories..."
+    for dir in extensions sources containers; do
+        if [[ -d "${POWOS_ROOT}/${dir}" ]]; then
+            sudo ln -sfn "${POWOS_ROOT}/${dir}" "/var/lib/powos/${dir}" 2>/dev/null || true
+            log "  Linked: ${dir}"
+        fi
+    done
+
+    # Setup git if needed
+    if [[ -d "${POWOS_ROOT}" ]]; then
+        cd "${POWOS_ROOT}"
+        if [[ ! -d ".git" ]]; then
+            log "Initializing git repository..."
+            git init -q
+        fi
+        git config user.email "${GIT_AUTHOR_EMAIL:-powos@localhost}" 2>/dev/null || true
+        git config user.name "${GIT_AUTHOR_NAME:-PowOS}" 2>/dev/null || true
+    fi
+
+    log_success "System initialized"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 2: Chameleon Boot - Hardware Detection & Profile
+# ─────────────────────────────────────────────────────────────────
+chameleon_boot() {
+    log_step "Step 2/5: Chameleon Boot (Hardware Detection)"
+
+    local hw_script="${POWOS_LIB}/hardware-detect.sh"
+
+    log "Detecting hardware..."
+    log "  GPU:   ${POWOS_MOCK_HARDWARE:-auto-detect}"
+    log "  Power: ${POWOS_MOCK_POWER:-auto-detect}"
+
+    if [[ -f "$hw_script" ]]; then
+        # Run detection
+        local output
+        output=$(bash "$hw_script" detect 2>&1) || true
+
+        # Parse and display results
+        local profile=""
+        while IFS= read -r line; do
+            if [[ "$line" == *"Profile:"* ]] || [[ "$line" == *"profile"* ]]; then
+                profile="$line"
+            fi
+            log "  $line"
+        done <<< "$output"
+
+        # Write state file
+        cat > /run/powos/hardware << EOF
+GPU_TYPE=${POWOS_MOCK_HARDWARE:-detected}
+POWER_SOURCE=${POWOS_MOCK_POWER:-detected}
+DETECTED_AT=$(date -Iseconds)
+EOF
+        log_success "Hardware profile applied"
+    else
+        log_warn "Hardware detection script not found - using defaults"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 3: Build and Load Overlays (Frankenstein Mods)
+# ─────────────────────────────────────────────────────────────────
+load_overlays() {
+    log_step "Step 3/5: Frankenstein Mods (systemd-sysext Overlays)"
+
+    local overlay_script="${POWOS_LIB}/overlay-manager.sh"
+    local sources_dir="${POWOS_ROOT}/sources"
+
+    if [[ ! -f "$overlay_script" ]]; then
+        log_warn "Overlay manager not found - skipping"
+        return 0
+    fi
+
+    # Count sources
+    local source_count=0
+    if [[ -d "$sources_dir" ]]; then
+        source_count=$(find "$sources_dir" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+    fi
+
+    if [[ $source_count -eq 0 ]]; then
+        log "No overlay sources found"
+        return 0
+    fi
+
+    log "Found $source_count overlay source(s)"
+
+    # Build each overlay
+    local built=0
+    local failed=0
+    for source_dir in "$sources_dir"/*/; do
+        if [[ -d "$source_dir" ]] && [[ -f "${source_dir}/build.sh" ]]; then
+            local name
+            name=$(basename "$source_dir")
+            log "Building: $name"
+
+            if bash "$overlay_script" build "$name" > /tmp/build-${name}.log 2>&1; then
+                ((built++)) || true
+                log_success "  Built: $name"
+            else
+                ((failed++)) || true
+                log_error "  Failed: $name (see /tmp/build-${name}.log)"
+            fi
+        fi
+    done
+
+    # Enable all overlays
+    if [[ $built -gt 0 ]]; then
+        log "Enabling $built overlay(s)..."
+        bash "$overlay_script" enable-all > /tmp/overlay-enable.log 2>&1 || true
+        log_success "Overlays enabled"
+    fi
+
+    # Show what's active
+    log "Active overlays:"
+    bash "$overlay_script" list 2>/dev/null | grep -E "^\s+-" | head -10 || log "  (none)"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 4: Full Hydration (Distrobox Containers)
+# ─────────────────────────────────────────────────────────────────
+hydrate_system() {
+    log_step "Step 4/5: System Hydration (Containers & State)"
+
+    local distrobox_ini="${POWOS_ROOT}/containers/distrobox.ini"
+
+    # Check if already hydrated this boot
+    if [[ -f "$HYDRATED_MARKER" ]] && [[ "${POWOS_FORCE_HYDRATE:-}" != "1" ]]; then
+        local last_hydrate
+        last_hydrate=$(cat "$HYDRATED_MARKER" 2>/dev/null || echo "unknown")
+        log "Already hydrated: $last_hydrate"
+        log "(set POWOS_FORCE_HYDRATE=1 to re-run)"
+        return 0
+    fi
+
+    # Create distrobox containers
+    if [[ -f "$distrobox_ini" ]]; then
+        log "Creating distrobox containers from: distrobox.ini"
+
+        if command -v distrobox &>/dev/null; then
+            # Parse container names from ini
+            local containers
+            containers=$(grep '^\[' "$distrobox_ini" | tr -d '[]' || true)
+
+            for container in $containers; do
+                log "  Creating: $container"
+                # Use assemble for declarative setup
+                distrobox assemble create --file "$distrobox_ini" --name "$container" > /tmp/distrobox-${container}.log 2>&1 || {
+                    # Container might already exist, that's ok
+                    log_warn "  $container: may already exist or failed (see /tmp/distrobox-${container}.log)"
+                }
+            done
+
+            log "Distrobox containers:"
+            distrobox list 2>/dev/null | head -10 || log "  (none)"
+        else
+            log_warn "Distrobox not available - skipping container creation"
+        fi
+    else
+        log "No distrobox.ini found - skipping container setup"
+    fi
+
+    # Mark as hydrated
+    date -Iseconds | sudo tee "$HYDRATED_MARKER" > /dev/null
+    log_success "Hydration complete"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Step 5: Start Environment
+# ─────────────────────────────────────────────────────────────────
+start_environment() {
+    log_step "Step 5/5: Starting Environment"
+
+    # Write final boot state
+    echo "ready" | sudo tee "${POWOS_STATE_DIR}/boot-state" > /dev/null
+
+    # Show summary
+    log_banner "PowOS Ready"
+    echo ""
+    echo "  Hardware:    ${POWOS_MOCK_HARDWARE:-auto-detected}"
+    echo "  Power:       ${POWOS_MOCK_POWER:-auto-detected}"
+    echo "  Overlays:    $(find "${POWOS_ROOT}/extensions" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l) built"
+    echo "  Containers:  $(distrobox list 2>/dev/null | grep -c "Up\|Created" || echo 0) ready"
+    echo ""
+
+    # If running interactively or with arguments, handle that
+    if [[ $# -gt 0 ]]; then
+        log "Running: $*"
+        exec "$@"
+    elif [[ -t 0 ]]; then
+        # Interactive terminal - drop to shell
+        log "Interactive mode - starting shell"
+        cd "${POWOS_ROOT}"
+        exec /bin/bash
+    else
+        # Non-interactive (docker compose up) - show how to connect and stay alive
+        echo "  Connect with:"
+        echo "    docker compose exec powos-dev bash"
+        echo ""
+        echo "  Or run commands directly:"
+        echo "    docker compose exec powos-dev just test"
+        echo "    docker compose exec powos-dev just list-overlays"
+        echo ""
+        log_success "Container running - waiting for connections..."
+
+        # Stay alive
+        exec sleep infinity
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Main - Run the FULL boot sequence
+# ─────────────────────────────────────────────────────────────────
+main() {
+    log_banner "PowOS Boot Sequence Starting"
+
+    local start_time
+    start_time=$(date +%s)
+
+    # Run ALL steps
+    init_system
+    chameleon_boot
+    load_overlays
+    hydrate_system
+
+    # Calculate boot time
+    local end_time duration
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
+
+    log "Boot completed in ${duration} seconds"
+
+    # Start environment (this doesn't return unless given a command)
+    start_environment "$@"
+}
+
+# Handle signals gracefully
+trap 'log "Shutting down..."; exit 0' SIGTERM SIGINT
+
+main "$@"

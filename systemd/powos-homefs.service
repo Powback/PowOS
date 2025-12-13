@@ -1,0 +1,29 @@
+[Unit]
+Description=PowOS HomeFS - Lazy-Load Home Filesystem
+Documentation=man:homefs(8)
+After=local-fs.target
+Before=systemd-user-sessions.service
+ConditionPathExists=/etc/homefs/config.json
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/homefs mount /dev/disk/by-uuid/%i /home
+ExecStop=/usr/bin/fusermount -u /home
+Restart=on-failure
+RestartSec=5s
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+MemoryHigh=8G
+MemoryMax=12G
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=homefs
+
+[Install]
+WantedBy=multi-user.target
