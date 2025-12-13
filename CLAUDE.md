@@ -20,14 +20,14 @@ Access desktop at `http://localhost:6091/vnc.html` (password: `powos`)
 ├────────────────────────────────────────────────────────────────────┤
 │  Base: Bazzite (Fedora Atomic + Gaming Optimizations + NVIDIA)     │
 │  + KDE Plasma Desktop (via TigerVNC + noVNC)                       │
-│  + HomeFS (FUSE filesystem for USB hot-unplug resilience)          │
+│  + RAM Overlay (overlayfs for USB hot-unplug resilience)           │
 │  + Chameleon Boot (hardware auto-detection)                        │
 │  + systemd-sysext overlays (custom binaries)                       │
 ├────────────────────────────────────────────────────────────────────┤
 │  Boot Sequence                                                      │
 │  ├─ 1. Hardware Detection (GPU/Power/Form Factor)                  │
 │  ├─ 2. Load System Overlays (systemd-sysext)                       │
-│  ├─ 3. HomeFS Setup (USB detection, FUSE mount)                    │
+│  ├─ 3. RAM Overlay Setup (overlayfs with USB + tmpfs)              │
 │  └─ 4. Start Desktop (TigerVNC + noVNC)                            │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -203,10 +203,10 @@ Bazzite is an immutable Fedora-based OS. Key quirks:
    └─ /usr/lib/powos/powos-overlay-load
    └─ Enables extensions in /var/lib/extensions
 
-3. HomeFS Setup
-   ├─ Check for USB with label "POWOS-HOME"
-   ├─ If found: Mount USB, start HomeFS FUSE, start sync daemon
-   └─ If not found: Direct mode (no lazy-load)
+3. RAM Overlay Setup
+   ├─ Check for USB with label "POWOS-DATA"
+   ├─ If found: Mount USB read-only, create tmpfs upper layer, start sync daemon
+   └─ If not found: Direct mode (no overlay)
 
 4. Desktop Environment
    ├─ Create user "powos" if needed
@@ -224,8 +224,8 @@ USB SSD (e.g., Lexar NM790 4TB)
 ├── Partition 1: EFI (512MB, FAT32)
 ├── Partition 2: PowOS System (100GB, BTRFS)
 │   └── Base OS, overlays, state
-└── Partition 3: HomeFS User Data (remainder, BTRFS)
-    └── Label: POWOS-HOME (auto-detected)
+└── Partition 3: User Data (remainder, BTRFS)
+    └── Label: POWOS-DATA (auto-detected for RAM overlay)
 ```
 
 ## Building the ISO
@@ -253,8 +253,7 @@ sudo dd if=build/output/powos.iso of=/dev/sdX bs=4M status=progress
 ## Environment Variables
 
 ```bash
-POWOS_HOMEFS=auto|true|false   # HomeFS mode (auto-detects USB)
-POWOS_USB_UUID=<uuid>          # Force specific USB UUID
+POWOS_OVERLAY=auto|true|false  # RAM overlay mode (auto-detects USB)
 POWOS_MOCK_HARDWARE=nvidia     # Simulate GPU for testing
 POWOS_MOCK_POWER=ac            # Simulate power source
 ```
@@ -304,10 +303,11 @@ User login:   powos / powos
 
 1. **TigerVNC over KasmVNC**: KasmVNC had too many issues (user prompts, certificates, segfaults)
 2. **Software rendering in container**: NVIDIA EGL crashes with hardware acceleration
-3. **FUSE-based HomeFS**: Allows intercepting all file ops for caching/journaling
-4. **Batched sync**: Better performance than immediate writes (30s intervals)
-5. **Auto-detection**: USB label "POWOS-HOME" triggers HomeFS automatically
-6. **Bazzite base**: Gaming-optimized, NVIDIA drivers included, immutable filesystem
+3. **overlayfs over FUSE**: Standard Linux kernel feature, no userspace daemon needed for file access
+4. **RAM upper layer**: All writes go to tmpfs, survives USB unplug instantly
+5. **Periodic sync (30s)**: Background rsync syncs RAM changes to USB without blocking I/O
+6. **Auto-detection**: USB label "POWOS-DATA" triggers RAM overlay automatically
+7. **Bazzite base**: Gaming-optimized, NVIDIA drivers included, immutable filesystem
 
 ## Development Workflow
 
