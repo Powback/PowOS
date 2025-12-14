@@ -975,19 +975,37 @@ cmd_source() {
             local name="${2:-}"
             if [[ -z "$name" ]]; then
                 echo "Usage: powos source get <name>"
+                echo "       powos source get kde           # Fetch all KDE apps"
+                echo "       powos source get kde:dolphin   # Fetch just Dolphin"
                 echo ""
                 echo "Fetch upstream source code for an app."
                 echo "Run 'powos source list' to see available sources."
                 return 1
             fi
 
-            local src_dir="$SOURCES_DIR/$name"
+            # Handle kde:app syntax
+            local base_name="${name%%:*}"
+            local app_name="${name#*:}"
+            [[ "$base_name" == "$app_name" ]] && app_name=""
+
+            local src_dir="$SOURCES_DIR/$base_name"
             local conf="$src_dir/source.conf"
 
             if [[ ! -f "$conf" ]]; then
-                echo -e "${RED}No source.conf for '$name'${NC}"
+                echo -e "${RED}No source.conf for '$base_name'${NC}"
                 echo "Create one at: $conf"
                 return 1
+            fi
+
+            # Special handling for kde - use fetch.sh
+            if [[ "$base_name" == "kde" ]] && [[ -x "$src_dir/fetch.sh" ]]; then
+                echo -e "${CYAN}Fetching KDE sources...${NC}"
+                if [[ -n "$app_name" ]]; then
+                    bash "$src_dir/fetch.sh" "$app_name"
+                else
+                    bash "$src_dir/fetch.sh"
+                fi
+                return $?
             fi
 
             source "$conf"
@@ -1070,18 +1088,24 @@ cmd_source() {
             local name="${2:-}"
             if [[ -z "$name" ]]; then
                 echo "Usage: powos source build <name>"
+                echo "       powos source build kde:dolphin   # Build Dolphin from KDE"
                 echo ""
                 echo "Build an overlay from source."
                 echo "The built overlay will override the system version."
                 return 1
             fi
 
-            local src_dir="$SOURCES_DIR/$name"
+            # Handle kde:app syntax
+            local base_name="${name%%:*}"
+            local app_name="${name#*:}"
+            [[ "$base_name" == "$app_name" ]] && app_name=""
+
+            local src_dir="$SOURCES_DIR/$base_name"
             local build_script="$src_dir/build.sh"
             local source_conf="$src_dir/source.conf"
 
             if [[ ! -f "$build_script" ]]; then
-                echo -e "${RED}No build.sh for '$name'${NC}"
+                echo -e "${RED}No build.sh for '$base_name'${NC}"
                 return 1
             fi
 
@@ -1103,22 +1127,27 @@ cmd_source() {
                 fi
             fi
 
-            # Use overlay-manager if available
-            if [[ -x /usr/lib/powos/overlay-manager.sh ]]; then
-                /usr/lib/powos/overlay-manager.sh build "$name"
-            else
-                local output_dir="$EXTENSIONS_DIR/$name"
-                mkdir -p "$output_dir/usr/bin" "$output_dir/usr/lib"
-                export OVERLAY_OUTPUT_DIR="$output_dir"
-                export OVERLAY_NAME="$name"
-                bash "$build_script" "$output_dir"
-            fi
+            # Set up output directory (use app name for kde:app)
+            local overlay_name="${app_name:-$base_name}"
+            local output_dir="$EXTENSIONS_DIR/$overlay_name"
+            mkdir -p "$output_dir/usr/bin" "$output_dir/usr/lib"
+
+            export OVERLAY_OUTPUT_DIR="$output_dir"
+            export OVERLAY_NAME="$name"
+
+            # Run build script
+            bash "$build_script" "$output_dir"
+
+            # Create extension-release file for systemd-sysext
+            local release_dir="$output_dir/usr/lib/extension-release.d"
+            mkdir -p "$release_dir"
+            echo "ID=fedora" > "$release_dir/extension-release.$overlay_name"
 
             echo ""
             echo -e "${GREEN}✓ Overlay built${NC}"
-            echo "  Location: $EXTENSIONS_DIR/$name"
+            echo "  Location: $output_dir"
             echo ""
-            echo "Enable with: powos source enable $name"
+            echo "Enable with: powos source enable $overlay_name"
             ;;
 
         enable)
