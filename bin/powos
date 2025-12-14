@@ -1078,6 +1078,7 @@ cmd_source() {
 
             local src_dir="$SOURCES_DIR/$name"
             local build_script="$src_dir/build.sh"
+            local source_conf="$src_dir/source.conf"
 
             if [[ ! -f "$build_script" ]]; then
                 echo -e "${RED}No build.sh for '$name'${NC}"
@@ -1085,6 +1086,22 @@ cmd_source() {
             fi
 
             echo -e "${CYAN}Building $name overlay...${NC}"
+
+            # Install build dependencies if source.conf exists
+            if [[ -f "$source_conf" ]]; then
+                source "$source_conf"
+                if [[ -n "${BUILD_DEPS:-}" ]]; then
+                    echo -e "${CYAN}Installing build dependencies...${NC}"
+                    if command -v dnf &>/dev/null; then
+                        sudo dnf install -y --skip-unavailable $BUILD_DEPS
+                    elif command -v apt-get &>/dev/null; then
+                        sudo apt-get install -y $BUILD_DEPS
+                    elif command -v pacman &>/dev/null; then
+                        sudo pacman -S --noconfirm --needed $BUILD_DEPS
+                    fi
+                    echo ""
+                fi
+            fi
 
             # Use overlay-manager if available
             if [[ -x /usr/lib/powos/overlay-manager.sh ]]; then
