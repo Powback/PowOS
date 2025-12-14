@@ -90,47 +90,89 @@ if [[ -f "$RAMBOOT_STATE" ]]; then
     fi
 
     OVERLAY_ENABLED="ramboot"
-else
-    # Not in ramboot mode - try legacy overlay for /home only
-    log "  Not in ramboot mode (add rd.powos.ramboot=1 to kernel cmdline)"
+fi
 
-    OVERLAY_ENABLED="${POWOS_OVERLAY:-auto}"
+# ═══════════════════════════════════════════════════════════════════
+# 5. CacheFS for User Data (Lazy-Loading)
+# ═══════════════════════════════════════════════════════════════════
+log "Setting up user data filesystem..."
 
-    # Check if we should enable overlay
-    if [[ "$OVERLAY_ENABLED" == "auto" ]]; then
-        # Auto-detect: enable if USB with POWOS-DATA or POWOS-HOME label exists
-        if blkid | grep -qE "POWOS-(DATA|HOME)"; then
-            OVERLAY_ENABLED="true"
-            log "  Detected PowOS USB drive"
-        else
-            OVERLAY_ENABLED="false"
-            log "  No PowOS USB detected (direct mode)"
-        fi
+CACHEFS_SCRIPT="/usr/lib/powos/cachefs/powos-cachefs.py"
+CACHEFS_SYNC="/usr/lib/powos/cachefs/cachefs-sync.py"
+USB_HOME_PATH="/mnt/powos-usb/home"
+CACHE_DIR="/run/powos/cachefs"
+CACHE_SIZE="${POWOS_CACHE_SIZE:-4G}"
+
+# Detect USB
+USB_DETECTED="false"
+if blkid | grep -qE "POWOS-(DATA|HOME)"; then
+    USB_DETECTED="true"
+    USB_DEV=$(blkid -L "POWOS-DATA" 2>/dev/null || blkid -L "POWOS-HOME" 2>/dev/null)
+    log "  Detected USB: $USB_DEV"
+
+    # Mount USB if not already mounted
+    if ! mountpoint -q /mnt/powos-usb 2>/dev/null; then
+        mkdir -p /mnt/powos-usb
+        mount "$USB_DEV" /mnt/powos-usb 2>/dev/null && log "  Mounted USB at /mnt/powos-usb"
     fi
+fi
 
-    if [[ "$OVERLAY_ENABLED" == "true" ]]; then
-        log "  Setting up overlayfs for /home (legacy mode)..."
-        log_warn "  Note: Only /home is protected. For full protection, use ramboot."
+if [[ "$USB_DETECTED" == "true" ]] && [[ -x "$CACHEFS_SCRIPT" ]]; then
+    log "  Starting CacheFS (lazy-loading with ${CACHE_SIZE} RAM cache)..."
 
-        if [[ -x "$OVERLAY_SCRIPT" ]]; then
-            "$OVERLAY_SCRIPT" setup 2>&1 | while read -r line; do log "    $line"; done
+    # Create cache directory
+    mkdir -p "$CACHE_DIR" /home/powos
 
-            # Start sync daemon
-            if [[ -x /usr/lib/powos/ramfs/sync-daemon.py ]]; then
-                python3 /usr/lib/powos/ramfs/sync-daemon.py &
-                log "  Sync daemon started"
-            fi
+    # Ensure USB home directory exists
+    mkdir -p "$USB_HOME_PATH"
 
-            log_ok "RAM overlay active for /home"
-        else
-            log_warn "Overlay script not found, using direct mode"
+    # Start CacheFS in background
+    python3 "$CACHEFS_SCRIPT" \
+        "$USB_HOME_PATH" \
+        /home/powos \
+        --cache-dir "$CACHE_DIR" \
+        --cache-size "$CACHE_SIZE" \
+        --foreground &
+    CACHEFS_PID=$!
+
+    sleep 2  # Give it time to mount
+
+    if mountpoint -q /home/powos 2>/dev/null; then
+        log_ok "CacheFS mounted at /home/powos"
+        log "  Metadata: always in RAM"
+        log "  Files: lazy-loaded on access, cached in RAM"
+        log "  USB can be unplugged - cached files remain accessible"
+
+        # Start sync daemon
+        if [[ -x "$CACHEFS_SYNC" ]]; then
+            python3 "$CACHEFS_SYNC" \
+                --cache-dir "$CACHE_DIR" \
+                --backing-path "$USB_HOME_PATH" &
+            log "  CacheFS sync daemon started"
+        fi
+
+        CACHEFS_ENABLED="true"
+    else
+        log_warn "CacheFS failed to mount, using direct mode"
+        kill $CACHEFS_PID 2>/dev/null || true
+        mkdir -p /home/powos
+        CACHEFS_ENABLED="false"
+    fi
+else
+    # No USB or no CacheFS - use direct mode
+    if [[ "$USB_DETECTED" == "true" ]]; then
+        log "  CacheFS not available, using direct USB access"
+        # Bind mount USB home directly
+        if [[ -d "$USB_HOME_PATH" ]]; then
             mkdir -p /home/powos
+            mount --bind "$USB_HOME_PATH" /home/powos 2>/dev/null || true
         fi
     else
-        # Direct mode (no overlay, no USB)
-        log "  Using direct home directory (no overlay)"
+        log "  No USB detected, using tmpfs for home"
         mkdir -p /home/powos
+        mount -t tmpfs -o size=2G tmpfs /home/powos 2>/dev/null || true
     fi
+    CACHEFS_ENABLED="false"
 fi
 
 # Ensure home exists and has correct permissions
@@ -201,17 +243,23 @@ echo "  VNC Direct:    localhost:5901"
 echo "  Password:      powos"
 echo ""
 if [[ "$OVERLAY_ENABLED" == "ramboot" ]]; then
-    echo -e "  ${GREEN}RAM Boot:${NC}      FULL - Entire OS in RAM"
-    echo "                 USB can be unplugged anytime!"
-    echo "                 Run 'powos status' for details"
-elif [[ "$OVERLAY_ENABLED" == "true" ]]; then
-    echo -e "  ${CYAN}RAM Overlay:${NC}   Partial (/home only)"
-    echo "                 Run 'powos status' for sync info"
-    echo -e "  ${YELLOW}WARNING:${NC}       Only /home protected from unplug"
+    echo -e "  ${GREEN}OS:${NC}            Running from RAM (full ramboot)"
 else
-    echo -e "  ${YELLOW}RAM Overlay:${NC}   Disabled (no USB detected)"
-    echo "                 In Docker this is expected"
+    echo -e "  ${YELLOW}OS:${NC}            Standard boot (no ramboot)"
 fi
+
+if [[ "$CACHEFS_ENABLED" == "true" ]]; then
+    echo -e "  ${GREEN}User Data:${NC}     CacheFS (lazy-load + ${CACHE_SIZE} cache)"
+    echo "                 Files load on access, stay in RAM"
+    echo "                 USB can be unplugged - cached files work"
+elif [[ "$USB_DETECTED" == "true" ]]; then
+    echo -e "  ${CYAN}User Data:${NC}     Direct USB (no lazy-load)"
+else
+    echo -e "  ${YELLOW}User Data:${NC}     tmpfs (no USB detected)"
+fi
+
+echo ""
+echo "  Run 'powos status' for details"
 echo ""
 
 exec tail -f /dev/null

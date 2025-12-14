@@ -88,91 +88,134 @@ get_ramboot_info() {
     fi
 }
 
+# Check if CacheFS is running
+is_cachefs_active() {
+    mountpoint -q /home/powos 2>/dev/null && \
+        [[ -f /run/powos/cachefs-status.json ]]
+}
+
+# Get CacheFS info
+get_cachefs_info() {
+    if [[ -f /run/powos/cachefs-status.json ]]; then
+        python3 -c "
+import json
+try:
+    s = json.load(open('/run/powos/cachefs-status.json'))
+    print(f\"USB: {'Connected' if s.get('usb_connected') else 'Disconnected'}\")
+    print(f\"Pending: {s.get('pending_changes', 0)} files\")
+except: pass
+" 2>/dev/null
+    fi
+}
+
 # Status command
 cmd_status() {
     echo -e "${CYAN}PowOS Status${NC}"
     echo "============"
     echo ""
 
-    # Boot Mode
+    # === OS Status ===
+    echo -e "${CYAN}Operating System${NC}"
     if is_ramboot; then
-        echo -e "Boot Mode:    ${GREEN}● FULL RAM BOOT${NC}"
-        echo -e "              Entire OS running from RAM"
-        echo -e "              USB can be unplugged anytime!"
-        echo ""
+        echo -e "  Mode:       ${GREEN}● FULL RAM BOOT${NC}"
+        echo "              Entire OS running from RAM"
         local ram_size
         ram_size=$(get_ramboot_info)
-        echo "RAM Allocated: $ram_size"
+        echo "  RAM:        $ram_size allocated"
+        if [[ -d /run/powos-overlay/upper ]]; then
+            local upper_used
+            upper_used=$(du -sh /run/powos-overlay/upper 2>/dev/null | cut -f1 || echo "0")
+            echo "  Used:       $upper_used (changes since boot)"
+        fi
     else
-        echo -e "Boot Mode:    ${YELLOW}○ Standard${NC}"
-        echo -e "              Only /home overlaid (if USB present)"
-        echo ""
+        echo -e "  Mode:       ${YELLOW}○ Standard${NC}"
+        echo "              OS running from USB (not in RAM)"
     fi
+    echo ""
 
-    # USB Status
+    # === User Data Status ===
+    echo -e "${CYAN}User Data (/home)${NC}"
+    if is_cachefs_active; then
+        echo -e "  Mode:       ${GREEN}● CacheFS (lazy-load)${NC}"
+        echo "              Files load on-demand, cached in RAM"
+        get_cachefs_info | while read -r line; do echo "  $line"; done
+
+        # Show cache usage
+        if [[ -d /run/powos/cachefs ]]; then
+            local cache_used
+            cache_used=$(du -sh /run/powos/cachefs 2>/dev/null | cut -f1 || echo "0")
+            echo "  Cache:      $cache_used in RAM"
+        fi
+    elif mountpoint -q /home/powos 2>/dev/null; then
+        echo -e "  Mode:       ${CYAN}○ Direct${NC}"
+        echo "              USB mounted directly (no caching)"
+    else
+        echo -e "  Mode:       ${YELLOW}○ tmpfs${NC}"
+        echo "              Temporary (no USB detected)"
+    fi
+    echo ""
+
+    # === USB Status ===
+    echo -e "${CYAN}USB Drive${NC}"
     local usb_status
     usb_status=$(get_usb_status)
     case "$usb_status" in
         connected)
-            echo -e "USB Drive:    ${GREEN}● Connected${NC}"
+            echo -e "  Status:     ${GREEN}● Connected${NC}"
             ;;
         disconnected)
-            if is_ramboot; then
-                echo -e "USB Drive:    ${CYAN}○ Disconnected${NC} (OK - running from RAM)"
-            else
-                echo -e "USB Drive:    ${YELLOW}○ Disconnected${NC} (running from RAM)"
+            echo -e "  Status:     ${YELLOW}○ Disconnected${NC}"
+            if is_ramboot || is_cachefs_active; then
+                echo "              (cached data still accessible)"
             fi
             ;;
         *)
-            echo -e "USB Drive:    ${RED}? Unknown${NC}"
+            echo -e "  Status:     ${RED}? Unknown${NC}"
             ;;
     esac
 
-    # RAM Usage
-    if is_ramboot; then
-        # In ramboot mode, show overlay usage
-        if [[ -d /run/powos-overlay/upper ]]; then
-            local upper_used
-            upper_used=$(du -sh /run/powos-overlay/upper 2>/dev/null | cut -f1 || echo "0")
-            echo "RAM Used:     $upper_used (changes since boot)"
-        fi
-    else
-        local ram_usage
-        ram_usage=$(get_ram_usage)
-        echo "RAM Overlay:  $ram_usage"
-    fi
-
     # Sync Status
-    if [[ -f /run/powos/sync-status ]]; then
+    if [[ -f /run/powos/cachefs-status.json ]] || [[ -f /run/powos/sync-status ]]; then
         local last_sync
         last_sync=$(python3 -c "
 import json, time
-s = json.load(open('/run/powos/sync-status'))
-t = s.get('last_sync', 0)
-if t > 0:
-    delta = int(time.time() - t)
-    if delta < 60:
-        print(f'{delta}s ago')
-    elif delta < 3600:
-        print(f'{delta // 60}m ago')
-    else:
-        print(f'{delta // 3600}h ago')
+for f in ['/run/powos/cachefs-status.json', '/run/powos/sync-status']:
+    try:
+        s = json.load(open(f))
+        t = s.get('last_sync', 0)
+        if t > 0:
+            delta = int(time.time() - t)
+            if delta < 60:
+                print(f'{delta}s ago')
+            elif delta < 3600:
+                print(f'{delta // 60}m ago')
+            else:
+                print(f'{delta // 3600}h ago')
+            break
+    except: pass
 else:
     print('Never')
 " 2>/dev/null || echo "Unknown")
-        echo "Last Sync:    $last_sync"
+        echo "  Last Sync:  $last_sync"
     fi
-
-    # Safe to unplug?
     echo ""
-    if is_ramboot; then
-        echo -e "Safe to unplug: ${GREEN}Always (full RAM boot)${NC}"
-    elif is_safe_to_unplug; then
-        echo -e "Safe to unplug: ${GREEN}Yes${NC}"
-    else
-        echo -e "Safe to unplug: ${RED}No${NC} (sync in progress)"
-    fi
 
+    # === Summary ===
+    echo -e "${CYAN}Unplug Safety${NC}"
+    if is_ramboot && is_cachefs_active; then
+        echo -e "  ${GREEN}✓ FULLY PROTECTED${NC}"
+        echo "    OS: in RAM, User data: cached"
+        echo "    USB can be unplugged anytime!"
+    elif is_ramboot; then
+        echo -e "  ${GREEN}✓ OS Protected${NC}"
+        echo "    OS in RAM, but user data may need USB"
+    elif is_cachefs_active; then
+        echo -e "  ${CYAN}◐ Partially Protected${NC}"
+        echo "    User data cached, OS still needs USB"
+    else
+        echo -e "  ${RED}✗ Not Protected${NC}"
+        echo "    USB required for operation"
+    fi
     echo ""
 }
 

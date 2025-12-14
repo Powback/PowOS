@@ -15,10 +15,10 @@ RUN dnf makecache || true
 
 # Install dependencies
 # Note: Bazzite doesn't have /usr/local by default, create it first
-RUN dnf install -y python3 python3-pip rsync && \
+RUN dnf install -y python3 python3-pip rsync fuse fuse-libs && \
     rm -f /usr/local 2>/dev/null || true && \
     mkdir -p /usr/local/lib /usr/local/bin && \
-    pip3 install --break-system-packages psutil rich && \
+    pip3 install --break-system-packages psutil rich fusepy && \
     dnf clean all
 
 # Copy PowOS boot system
@@ -34,8 +34,11 @@ COPY bin/powos /usr/bin/
 COPY config/ /etc/powos/
 COPY systemd/powos-* /usr/lib/powos/
 
-# Copy RAM overlay system (replaces HomeFS)
+# Copy RAM overlay system (for OS)
 COPY lib/ramfs/ /usr/lib/powos/ramfs/
+
+# Copy CacheFS (lazy-loading filesystem for user data)
+COPY lib/cachefs/ /usr/lib/powos/cachefs/
 
 # Install dracut module for full RAM boot
 # This allows the entire OS to run from RAM, USB can be unplugged
@@ -67,7 +70,8 @@ RUN rm -f /mnt 2>/dev/null || true && \
 # Set permissions
 RUN chmod +x /usr/bin/powos-boot /usr/bin/powos \
     /usr/lib/powos/*.sh /usr/lib/powos/boot/*.sh \
-    /usr/lib/powos/ramfs/*.sh /usr/lib/powos/ramfs/*.py 2>/dev/null || true
+    /usr/lib/powos/ramfs/*.sh /usr/lib/powos/ramfs/*.py \
+    /usr/lib/powos/cachefs/*.py 2>/dev/null || true
 
 EXPOSE 5901 6080
 ENTRYPOINT ["/usr/bin/powos-boot"]

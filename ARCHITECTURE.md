@@ -26,13 +26,19 @@
 │     ├─ Load extensions from /var/lib/extensions/                            │
 │     └─ Merge custom binaries into /usr (without modifying base OS)          │
 │                                    │                                         │
-│  3. RAM OVERLAY (Unplug Resilience)                                          │
-│     ├─ Mount USB data partition read-only as lower layer                    │
-│     ├─ Create tmpfs (RAM) as upper layer                                    │
-│     ├─ overlayfs combines them → all writes go to RAM                       │
-│     └─ Sync daemon: rsync RAM changes to USB every 30s                      │
+│  3. RAM OVERLAY (Unplug Resilience - OS)                                     │
+│     ├─ Dracut module sets up overlayfs in initramfs                         │
+│     ├─ USB root becomes read-only lower layer                               │
+│     ├─ tmpfs (RAM) becomes write upper layer                                │
+│     └─ Entire OS runs from RAM - USB optional after boot                    │
 │                                    │                                         │
-│  4. DESKTOP                                                                  │
+│  4. CACHEFS (Lazy-Load User Data)                                            │
+│     ├─ FUSE filesystem for /home/powos                                      │
+│     ├─ Metadata always in RAM (file names, sizes)                           │
+│     ├─ File contents lazy-loaded on access → cached in RAM                  │
+│     └─ USB can be unplugged - cached files still work                       │
+│                                    │                                         │
+│  5. DESKTOP                                                                  │
 │     └─ KDE Plasma via TigerVNC + noVNC                                      │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -264,7 +270,105 @@ powos safe      # Always safe in ramboot mode!
 For full protection, you need enough RAM to hold the OS + your working set.
 Recommended: 16GB+ for comfortable use, 32GB+ for heavy workloads.
 
-## Layer 4: Package Management (pinstall)
+## Layer 4: CacheFS (Lazy-Loading User Data)
+
+**Purpose:** User data (potentially terabytes) can't fit in RAM. CacheFS lazy-loads files on access.
+
+### The Problem
+
+```
+USB: 4TB of user data (documents, projects, media)
+RAM: 32GB max
+
+Can't copy 4TB to RAM!
+```
+
+### The Solution: Lazy Loading with Cache
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CacheFS Architecture                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   IN RAM (always):                                               │
+│   ├─ File METADATA (names, sizes, perms) ─── ~100MB for 1M files│
+│   └─ LRU CACHE of accessed files ─────────── 4GB default        │
+│                                                                  │
+│   ON USB (lazy-loaded):                                          │
+│   └─ Actual file contents ────────────────── 4TB                 │
+│                                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   User runs: cat ~/Documents/report.pdf                          │
+│                                                                  │
+│   1. Metadata lookup in RAM ─────────────── instant              │
+│   2. File not in cache?                                          │
+│      └─ Fetch from USB ──────────────────── ~100ms               │
+│      └─ Copy to RAM cache                                        │
+│   3. Serve from RAM cache ───────────────── instant              │
+│   4. File stays in cache (LRU eviction if full)                  │
+│                                                                  │
+│   USB unplugged:                                                 │
+│   - ls ~/Documents/ ─────────────────────── works (metadata RAM) │
+│   - cat cached-file.txt ─────────────────── works (in cache)     │
+│   - cat uncached-file.txt ───────────────── error "offline"      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### How It Works
+
+CacheFS is a FUSE filesystem that wraps the USB data partition:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                /home/powos (what you see)                        │
+│                         │                                        │
+│                    CacheFS FUSE                                  │
+│                    /           \                                 │
+│                   /             \                                │
+│         RAM Cache (4GB)    USB Backing Store (4TB)               │
+│         /run/powos/cachefs  /mnt/powos-usb/home                  │
+│                                                                  │
+│   - Metadata always in RAM                                       │
+│   - Contents lazy-loaded on first access                         │
+│   - LRU eviction when cache full                                 │
+│   - Dirty files synced back to USB                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Files
+
+```
+lib/cachefs/
+├── powos-cachefs.py    # FUSE filesystem implementation
+└── cachefs-sync.py     # Sync daemon for dirty files
+
+/run/powos/
+├── cachefs/            # RAM cache directory
+└── cachefs-status.json # Status for CLI
+```
+
+### Configuration
+
+```bash
+POWOS_CACHE_SIZE=4G     # RAM cache size (default 4G)
+```
+
+### Combined with RAM Boot
+
+On real hardware with full setup:
+
+| Component | Where | Size | Can Unplug? |
+|-----------|-------|------|-------------|
+| OS + Apps | RAM (overlayfs) | ~20GB | ✓ Yes |
+| User Metadata | RAM (CacheFS) | ~100MB | ✓ Yes |
+| User Cache | RAM (CacheFS) | 4GB | ✓ Yes |
+| User Data | USB (lazy-load) | 4TB | ✓ Cached files work |
+
+**Result:** Even with terabytes of data, USB can be unplugged and you keep working with cached files.
+
+## Layer 5: Package Management (pinstall)
 
 **Purpose:** Install packages AND track them in git for reproducibility.
 
@@ -446,5 +550,6 @@ PowOS/
 |-------|---------|-----------|----------|
 | 1. Hardware | Auto-configure for machine | `lib/hardware-detect.sh`, `config/profiles/` | `powos hardware` |
 | 2. Overlays | Custom binaries | `sources/*/build.sh`, `lib/overlay-manager.sh` | `just build <name>` |
-| 3. RAM | Unplug resilience | `lib/ramfs/`, `bin/powos` | `powos status`, `powos sync` |
-| 4. Packages | Tracked installs | `bin/pinstall`, `containers/distrobox.ini` | `pinstall <pkg>` |
+| 3. RAM Boot | OS unplug resilience | `lib/dracut/90powos-ramboot/` | `powos status` |
+| 4. CacheFS | User data lazy-load | `lib/cachefs/powos-cachefs.py` | `powos status` |
+| 5. Packages | Tracked installs | `bin/pinstall`, `containers/distrobox.ini` | `pinstall <pkg>` |
