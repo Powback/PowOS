@@ -59,13 +59,13 @@ Commands:
 
   build [path] [tag]  Build container from Dockerfile/Containerfile
 
-  source              List available source overlays
-  source new <name>   Create new source overlay template
-  source get <name>   Fetch upstream source code (supports kde:app syntax)
-  source build <name> Build overlay from source (builds your local edits)
-  source save <name>  Save local edits as patches (for backup)
-  source enable <name> Enable overlay (overrides system version)
-  source disable <name> Disable overlay (restore system version)
+  dev                 List all dev projects
+  dev new <name>      Create new project from scratch
+  dev fork <upstream> Fork existing app (e.g., kde:dolphin)
+  dev build <name>    Build project
+  dev enable <name>   Install to system (as overlay)
+  dev disable <name>  Remove from system
+  dev update <name>   Pull upstream changes (forks only)
 
   version             Show version
 
@@ -74,17 +74,24 @@ Examples:
   powos sync                          # Force sync now
   powos layers                        # See active layers
   powos rollback custom               # Skip custom layer on next boot
-  powos safe && echo "OK"             # Check before unplugging
 
   powos install neovim htop           # Install to host
   powos install -c dev nodejs npm     # Install to 'dev' container
   powos install -c arch -e firefox    # Install Firefox in Arch, export to host menu
 
+  # Create a new app:
+  powos dev new myapp
+  cd /var/lib/powos/projects/myapp/src
+  # write code
+  powos dev build myapp
+  powos dev enable myapp
+
   # Customize KDE apps:
-  powos source get kde:dolphin        # Fetch Dolphin source
-  # Edit files in sources/kde/upstream/dolphin/
-  powos source build kde:dolphin      # Build with your changes
-  powos source enable dolphin         # Use your custom Dolphin
+  powos dev fork kde:dolphin
+  cd /var/lib/powos/projects/dolphin/src
+  # edit files
+  powos dev build dolphin
+  powos dev enable dolphin
 
   powos containers create dev         # Create Fedora dev container
   powos containers enter dev          # Enter the container
@@ -935,8 +942,17 @@ cmd_build() {
 # ═══════════════════════════════════════════════════════════════════
 
 SOURCES_DIR="${POWOS_ROOT:-/var/lib/powos}/sources"
+PROJECTS_DIR="${POWOS_ROOT:-/var/lib/powos}/projects"
 EXTENSIONS_DIR="${POWOS_ROOT:-/var/lib/powos}/extensions"
 
+# Source the unified dev system
+if [[ -f /usr/lib/powos/dev-commands.sh ]]; then
+    source /usr/lib/powos/dev-commands.sh
+elif [[ -f "$(dirname "$0")/../lib/dev-commands.sh" ]]; then
+    source "$(dirname "$0")/../lib/dev-commands.sh"
+fi
+
+# Legacy source command (kept for backward compatibility)
 cmd_source() {
     local action="${1:-list}"
 
@@ -1685,9 +1701,15 @@ case "${1:-}" in
         shift
         cmd_build "$@"
         ;;
-    source|src|s)
+    dev|d)
         shift
-        cmd_source "$@"
+        cmd_dev "$@"
+        ;;
+    source|src|s)
+        # Deprecated - redirect to dev
+        echo -e "${YELLOW}Note: 'powos source' is deprecated. Use 'powos dev' instead.${NC}"
+        shift
+        cmd_dev "$@"
         ;;
     version|--version|-v)
         cmd_version

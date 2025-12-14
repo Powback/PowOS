@@ -62,6 +62,7 @@ RUN mkdir -p /var/lib/systemd/linger && \
 COPY lib/boot/ /usr/lib/powos/boot/
 COPY lib/hardware-detect.sh /usr/lib/powos/
 COPY lib/overlay-manager.sh /usr/lib/powos/
+COPY lib/dev-commands.sh /usr/lib/powos/
 COPY lib/build-helpers.sh /var/lib/powos/lib/
 COPY bazzite/system_files/ /tmp/bazzite/system_files/
 COPY overlays/ /usr/lib/powos/overlays/
