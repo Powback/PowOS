@@ -14,87 +14,124 @@ Access desktop at `http://localhost:6091/vnc.html` (password: `powos`)
 
 ## Architecture Overview
 
+PowOS has 5 layers that work together for full unplug resilience:
+
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │                         PowOS                                       │
 ├────────────────────────────────────────────────────────────────────┤
 │  Base: Bazzite (Fedora Atomic + Gaming Optimizations + NVIDIA)     │
-│  + KDE Plasma Desktop (via TigerVNC + noVNC)                       │
-│  + RAM Overlay (overlayfs for USB hot-unplug resilience)           │
-│  + Chameleon Boot (hardware auto-detection)                        │
-│  + systemd-sysext overlays (custom binaries)                       │
 ├────────────────────────────────────────────────────────────────────┤
-│  Boot Sequence                                                      │
-│  ├─ 1. Hardware Detection (GPU/Power/Form Factor)                  │
-│  ├─ 2. Load System Overlays (systemd-sysext)                       │
-│  ├─ 3. RAM Overlay Setup (overlayfs with USB + tmpfs)              │
-│  └─ 4. Start Desktop (TigerVNC + noVNC)                            │
+│                                                                     │
+│  Layer 1: Hardware Detection (Chameleon Boot)                       │
+│           Auto-configure for any machine's GPU/power/form           │
+│                                                                     │
+│  Layer 2: System Overlays (systemd-sysext)                          │
+│           Custom binaries without modifying immutable base OS       │
+│                                                                     │
+│  Layer 3: RAM Boot (dracut module)                                  │
+│           Entire OS runs from RAM - USB optional after boot         │
+│                                                                     │
+│  Layer 4: CacheFS (FUSE lazy-loader)                                │
+│           User data lazy-loaded on access, cached in RAM            │
+│                                                                     │
+│  Layer 5: Package Management (pinstall)                             │
+│           Tracked installs, reproducible via git                    │
+│                                                                     │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Components
 
-### 1. RAM Overlay (Unplug Resilience)
+### 1. RAM Boot (Layer 3) - OS Unplug Resilience
 
-Linux overlayfs with USB as read-only lower layer and RAM (tmpfs) as write layer.
+A dracut module sets up overlayfs during initramfs, BEFORE userspace starts.
 
 **How it works:**
 ```
-USB connected:
-┌─────────────┐      ┌─────────────────────────────┐      ┌─────────────┐
-│ Application │ ──── │       overlayfs             │ ──── │  USB SSD    │
-│   (vim)     │      │  upper: RAM (tmpfs)         │      │  (storage)  │
-└─────────────┘      │  lower: USB (read-only)     │      └─────────────┘
-                     └─────────────────────────────┘
-                              │
-                     Writes → RAM upper layer
-                     Reads → RAM first, then USB
+Boot sequence (in initramfs):
+1. Kernel loads, initramfs runs
+2. Dracut module 90powos-ramboot activates
+3. Creates tmpfs (8GB default) at /run/powos-overlay
+4. Mounts USB root as read-only lower layer
+5. Sets up overlayfs with RAM upper layer
+6. pivot_root to the overlay
+7. ENTIRE OS NOW RUNS FROM RAM
 
-USB unplugged:
-┌─────────────┐      ┌─────────────────────────────┐
-│ Application │ ──── │       overlayfs             │      (USB gone)
-│   (vim)     │      │  upper: RAM (all writes)    │
-└─────────────┘      │  lower: cached in RAM       │
-                     └─────────────────────────────┘
-
-USB replugged:
-┌─────────────┐      ┌─────────────────────────────┐      ┌─────────────┐
-│ Application │ ──── │       overlayfs             │ ───► │  USB SSD    │
-│   (vim)     │      │  (sync daemon active)       │      │  (updated)  │
-└─────────────┘      └─────────────────────────────┘      └─────────────┘
-                              │
-                     rsync RAM changes to USB
+Result:
+- All of /usr, /etc, /var → in RAM
+- All writes → go to RAM
+- USB can be unplugged → OS keeps running
 ```
 
-**Key Features:**
-- Uses standard Linux overlayfs (no custom FUSE)
-- All writes go to RAM tmpfs (fast, survives USB unplug)
-- USB is read-only base layer (safe from corruption)
-- Sync daemon rsyncs changes to USB periodically
-- Desktop notifications for USB plug/unplug events
+**Kernel cmdline args:**
+```
+rd.powos.ramboot=1      # Enable RAM boot
+rd.powos.ramsize=8G     # RAM allocation (default 8G)
+```
 
 **Files:**
 ```
-lib/ramfs/
-├── overlay-mount.sh   # overlayfs setup script
-└── sync-daemon.py     # Background rsync to USB
+lib/dracut/90powos-ramboot/
+├── module-setup.sh       # Dracut module definition
+├── ramboot-setup.sh      # Pre-pivot hook (sets up overlayfs)
+└── powos-overlay-init.sh # Userspace init (sync daemon)
 
-bin/powos              # CLI for status, sync, safe-check
+config/bootc/kargs.d/
+└── 50-powos-ramboot.toml # Kernel cmdline args for bootc
 ```
 
-**Commands:**
+### 2. CacheFS (Layer 4) - User Data Lazy Loading
+
+User data can be terabytes - can't fit in RAM. CacheFS solves this with lazy loading.
+
+**How it works:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                /home/powos (what you see)                        │
+│                         │                                        │
+│                    CacheFS FUSE                                  │
+│                    /           \                                 │
+│                   /             \                                │
+│         RAM Cache (4GB)    USB Backing Store (4TB)               │
+│         LRU eviction       Lazy-loaded on access                 │
+└─────────────────────────────────────────────────────────────────┘
+
+IN RAM (always):
+├─ File metadata (names, sizes, perms) ─── ~100MB for 1M files
+└─ LRU cache of accessed files ─────────── 4GB (configurable)
+
+ON USB (lazy-loaded):
+└─ Actual file contents ────────────────── up to 4TB
+
+Access pattern:
+  cat ~/Documents/report.pdf
+  1. Metadata lookup → instant (RAM)
+  2. Check cache → miss
+  3. Load from USB → ~100ms
+  4. Store in cache
+  5. Serve from RAM → instant
+  6. File stays cached (LRU eviction if full)
+
+USB unplugged:
+  ls ~/Documents/     → works (metadata in RAM)
+  cat cached.txt      → works (in RAM cache)
+  cat uncached.txt    → error "offline"
+```
+
+**Files:**
+```
+lib/cachefs/
+├── powos-cachefs.py    # FUSE filesystem implementation
+└── cachefs-sync.py     # Sync daemon for dirty files
+```
+
+**Configuration:**
 ```bash
-powos status    # Show USB status, RAM usage, last sync
-powos sync      # Force sync RAM to USB now
-powos safe      # Check if safe to unplug (exit 0 = yes)
+POWOS_CACHE_SIZE=4G     # RAM cache size (default 4G)
 ```
 
-**Docker vs Real Hardware:**
-- In Docker: RAM overlay disabled (no USB to detect)
-- On real hardware: Auto-detects USB with label `POWOS-DATA`
-- Status shows "RAM Overlay: Disabled" in Docker - this is correct
-
-### 2. Chameleon Boot (Hardware Detection)
+### 3. Chameleon Boot (Layer 1) - Hardware Detection
 
 Automatic hardware detection and profile application.
 
@@ -120,7 +157,7 @@ lib/hardware-detect.sh      # Detection logic
 config/profiles/*.conf      # Profile configurations
 ```
 
-### 3. System Overlays (Frankenstein Mods)
+### 4. System Overlays (Layer 2) - Custom Binaries
 
 Custom binaries via systemd-sysext without modifying base OS.
 
@@ -130,7 +167,8 @@ mkdir -p sources/my-tool
 cat > sources/my-tool/build.sh << 'EOF'
 #!/bin/bash
 mkdir -p "$OUTPUT_DIR/usr/bin"
-cp /path/to/my-tool "$OUTPUT_DIR/usr/bin/"
+curl -o "$OUTPUT_DIR/usr/bin/my-tool" https://example.com/my-tool
+chmod +x "$OUTPUT_DIR/usr/bin/my-tool"
 EOF
 ```
 
@@ -139,6 +177,14 @@ EOF
 bash lib/overlay-manager.sh build my-tool
 bash lib/overlay-manager.sh build-all
 ```
+
+**Existing overlays:**
+- `gpu-nvidia` - NVIDIA configuration, udev rules
+- `gpu-amd` - AMD configuration
+- `gpu-intel` - Intel configuration
+- `device-steamdeck` - Steam Deck support
+- `device-rog-ally` - ROG Ally support
+- `hello-powos` - Example overlay
 
 ## Directory Structure
 
@@ -150,74 +196,91 @@ PowOS/
 │
 ├── bin/                       # User commands
 │   ├── powos-boot             # Main boot script
-│   ├── powos                  # CLI (status, sync, safe)
+│   ├── powos                  # CLI (status, sync)
 │   └── pinstall               # Install + git commit
 │
 ├── lib/
-│   ├── hardware-detect.sh     # Chameleon Boot
-│   ├── overlay-manager.sh     # systemd-sysext builder
-│   └── ramfs/                 # RAM overlay system
-│       ├── overlay-mount.sh   # overlayfs setup
-│       └── sync-daemon.py     # USB sync daemon
+│   ├── hardware-detect.sh     # Chameleon Boot (Layer 1)
+│   ├── overlay-manager.sh     # systemd-sysext builder (Layer 2)
+│   ├── dracut/                # RAM boot (Layer 3)
+│   │   └── 90powos-ramboot/
+│   │       ├── module-setup.sh
+│   │       ├── ramboot-setup.sh
+│   │       └── powos-overlay-init.sh
+│   ├── cachefs/               # User data lazy-loader (Layer 4)
+│   │   ├── powos-cachefs.py
+│   │   └── cachefs-sync.py
+│   └── ramfs/                 # Legacy overlay system
 │
 ├── config/
-│   └── profiles/              # Hardware profiles
+│   ├── profiles/              # Hardware profiles
+│   ├── bootc/                 # Boot configuration
+│   └── ramboot.conf           # RAM boot config
 │
-├── build/
-│   ├── build-iso.sh           # ISO creation (uses podman + bootc)
-│   └── output/                # Built ISOs go here
-│
-├── overlays/                  # Built system extensions
 ├── sources/                   # Overlay source code
-└── systemd/                   # Boot services
-```
-
-## Container-Specific Notes
-
-**Base Image:** `ghcr.io/ublue-os/bazzite-nvidia:stable`
-
-Bazzite is an immutable Fedora-based OS. Key quirks:
-- `/usr/local` doesn't exist by default (we create it)
-- `/mnt` is a symlink (we remove and recreate it)
-- Use `--break-system-packages` for pip
-
-**VNC Setup:**
-- TigerVNC + noVNC (not KasmVNC - too many issues)
-- Software rendering forced (`LIBGL_ALWAYS_SOFTWARE=1`)
-- This avoids NVIDIA EGL crashes in container
-
-**Ports:**
-```
-5901: VNC direct (TigerVNC)
-6091: noVNC web interface (browser access)
+│   ├── gpu-nvidia/
+│   ├── gpu-amd/
+│   ├── device-steamdeck/
+│   └── ...
+│
+├── systemd/                   # Boot services
+│   └── powos-ramboot-init.service
+│
+└── build/
+    ├── build-iso.sh           # ISO creation
+    └── output/                # Built ISOs
 ```
 
 ## Boot Sequence Detail
 
 ```
-1. Hardware Detection
+1. UEFI loads kernel + initramfs from USB
+
+2. Dracut module (90powos-ramboot) runs:
+   └─ Creates 8GB tmpfs
+   └─ Mounts USB as read-only lower
+   └─ Sets up overlayfs
+   └─ Writes /run/powos/ramboot-state
+   └─ pivot_root to overlay
+   → OS NOW RUNS FROM RAM
+
+3. Hardware Detection
    └─ /usr/lib/powos/powos-hardware-detect
-   └─ Writes to /run/powos/hardware
+   └─ Applies profile from config/profiles/
 
-2. System Overlays
+4. System Overlays
    └─ /usr/lib/powos/powos-overlay-load
-   └─ Enables extensions in /var/lib/extensions
+   └─ Enables sysext from /var/lib/extensions
 
-3. RAM Overlay Setup
-   ├─ Check for USB with label "POWOS-DATA"
-   ├─ If found: Mount USB read-only, create tmpfs upper layer, start sync daemon
-   └─ If not found: Direct mode (no overlay)
+5. CacheFS for User Data
+   └─ Detects USB with label POWOS-DATA
+   └─ Starts CacheFS FUSE at /home/powos
+   └─ Scans metadata to RAM
+   └─ Starts sync daemon
 
-4. Desktop Environment
-   ├─ Create user "powos" if needed
-   ├─ Start D-Bus
-   ├─ Start TigerVNC on :1 (port 5901)
-   └─ Start noVNC websocket proxy (port 8443 → 6091)
+6. Desktop Environment
+   └─ Creates user "powos"
+   └─ Starts TigerVNC + noVNC
+   └─ KDE Plasma ready
 ```
 
-## USB Drive Layout
+## What's Protected When USB Unplugged
 
-PowOS expects this partition layout (created by installer):
+| Component | Location | Unplug Safe? |
+|-----------|----------|--------------|
+| Kernel | RAM | ✓ Always |
+| OS (/usr, /etc, /var) | RAM (overlayfs) | ✓ Always |
+| Running processes | RAM | ✓ Always |
+| User file metadata | RAM (CacheFS) | ✓ Always |
+| Recently accessed files | RAM (LRU cache) | ✓ Always |
+| Unaccessed user files | USB | ✗ Offline until reconnect |
+
+**Full protection requires:**
+- 8-20GB RAM for OS overlay
+- 4GB RAM for user file cache
+- Total: 16-32GB recommended
+
+## USB Drive Layout
 
 ```
 USB SSD (e.g., Lexar NM790 4TB)
@@ -225,71 +288,136 @@ USB SSD (e.g., Lexar NM790 4TB)
 ├── Partition 2: PowOS System (100GB, BTRFS)
 │   └── Base OS, overlays, state
 └── Partition 3: User Data (remainder, BTRFS)
-    └── Label: POWOS-DATA (auto-detected for RAM overlay)
+    └─ Label: POWOS-DATA (auto-detected)
 ```
-
-## Building the ISO
-
-ISO building requires **podman** (not docker) and uses bootc-image-builder.
-
-```bash
-# Build ISO
-just build-iso
-
-# Output: build/output/powos.iso
-
-# Write to USB (Linux)
-sudo dd if=build/output/powos.iso of=/dev/sdX bs=4M status=progress
-
-# Write to USB (Windows)
-# Use Rufus, Etcher, or similar
-```
-
-**Requirements:**
-- podman installed
-- ~20GB disk space
-- Root/sudo access
 
 ## Environment Variables
 
 ```bash
-POWOS_OVERLAY=auto|true|false  # RAM overlay mode (auto-detects USB)
-POWOS_MOCK_HARDWARE=nvidia     # Simulate GPU for testing
-POWOS_MOCK_POWER=ac            # Simulate power source
+# RAM Boot
+rd.powos.ramboot=1          # Enable (kernel cmdline)
+rd.powos.ramsize=8G         # RAM allocation (kernel cmdline)
+
+# CacheFS
+POWOS_CACHE_SIZE=4G         # User data cache size
+
+# Hardware simulation (testing)
+POWOS_MOCK_HARDWARE=nvidia  # Simulate GPU
+POWOS_MOCK_POWER=ac         # Simulate power source
+```
+
+## CLI Commands
+
+```bash
+powos status    # Full system status (OS mode, CacheFS, USB)
+powos sync      # Force sync to USB
+powos hardware  # Show detected hardware
+```
+
+**Example output:**
+```
+PowOS Status
+============
+
+Operating System
+  Mode:       ● FULL RAM BOOT
+              Entire OS running from RAM
+  RAM:        8G allocated
+  Used:       1.2G (changes since boot)
+
+User Data (/home)
+  Mode:       ● CacheFS (lazy-load)
+              Files load on-demand, cached in RAM
+  Cache:      847M in RAM
+
+USB Drive
+  Status:     ● Connected
+  Last Sync:  30s ago
+
+Unplug Safety
+  ✓ FULLY PROTECTED
+    USB can be unplugged anytime!
+```
+
+## Container-Specific Notes
+
+**Base Image:** `ghcr.io/ublue-os/bazzite-nvidia:stable`
+
+Bazzite quirks:
+- `/usr/local` doesn't exist by default (we create it)
+- `/mnt` is a symlink (we remove and recreate it)
+- Use `--break-system-packages` for pip
+
+**VNC Setup:**
+- TigerVNC + noVNC (not KasmVNC - too many issues)
+- Software rendering forced (`LIBGL_ALWAYS_SOFTWARE=1`)
+
+**Ports:**
+```
+5901: VNC direct (TigerVNC)
+6091: noVNC web interface
 ```
 
 ## Troubleshooting
 
-**Desktop won't load:**
+**Check system status:**
 ```bash
-docker compose logs powos | tail -50
-# Look for VNC or X11 errors
+powos status
 ```
 
-**RAM overlay not starting on real hardware:**
+**RAM boot not activating:**
 ```bash
-# Check if USB detected
+# Check kernel cmdline
+cat /proc/cmdline | grep powos
+# Should contain: rd.powos.ramboot=1
+
+# Check ramboot state
+cat /run/powos/ramboot-state
+```
+
+**CacheFS not working:**
+```bash
+# Check USB detection
 blkid | grep POWOS-DATA
 
-# Check overlay status
-powos status
+# Check FUSE mount
+mount | grep cachefs
 
-# Check boot logs
-journalctl -b | grep powos
+# Check CacheFS status
+cat /run/powos/cachefs-status.json
 ```
 
-**Safe to unplug?**
+**Desktop issues:**
 ```bash
-powos safe
-# ✓ Safe to unplug USB (exit code 0)
-# ✗ Not safe - sync in progress (exit code 1)
+docker compose logs powos | tail -50
 ```
 
-**NVIDIA EGL crash:**
-Already handled - software rendering forced. If still crashing:
+## Key Design Decisions
+
+1. **Dracut module for RAM boot**: Sets up overlayfs in initramfs before userspace, ensuring entire OS is in RAM from the start
+2. **CacheFS (FUSE) for user data**: Lazy-loading allows terabytes of data with only gigabytes of RAM
+3. **LRU cache eviction**: Hot files stay in RAM, cold files evicted automatically
+4. **Metadata always in RAM**: `ls` and `find` always work, even offline
+5. **Two-layer architecture**: OS overlay (kernel) + user data (FUSE) = complete coverage
+6. **Bazzite base**: Gaming-optimized, NVIDIA drivers, immutable filesystem
+
+## Development Workflow
+
 ```bash
-export LIBGL_ALWAYS_SOFTWARE=1
-export __EGL_VENDOR_LIBRARY_FILENAMES=/dev/null
+# 1. Make changes
+vim lib/cachefs/powos-cachefs.py
+
+# 2. Rebuild and test
+docker compose up --build
+
+# 3. Check status
+docker exec powos powos status
+
+# 4. Access desktop
+open http://localhost:6091/vnc.html
+
+# 5. Build ISO for real hardware
+just build-iso
 ```
 
 ## Credentials
@@ -297,33 +425,6 @@ export __EGL_VENDOR_LIBRARY_FILENAMES=/dev/null
 ```
 VNC Password: powos
 User login:   powos / powos
-```
-
-## Key Design Decisions
-
-1. **TigerVNC over KasmVNC**: KasmVNC had too many issues (user prompts, certificates, segfaults)
-2. **Software rendering in container**: NVIDIA EGL crashes with hardware acceleration
-3. **overlayfs over FUSE**: Standard Linux kernel feature, no userspace daemon needed for file access
-4. **RAM upper layer**: All writes go to tmpfs, survives USB unplug instantly
-5. **Periodic sync (30s)**: Background rsync syncs RAM changes to USB without blocking I/O
-6. **Auto-detection**: USB label "POWOS-DATA" triggers RAM overlay automatically
-7. **Bazzite base**: Gaming-optimized, NVIDIA drivers included, immutable filesystem
-
-## Development Workflow
-
-```bash
-# 1. Make changes to source files
-
-# 2. Rebuild and test
-docker compose up --build
-
-# 3. Access desktop
-open http://localhost:6091/vnc.html
-
-# 4. When ready for production
-just build-iso
-
-# 5. Burn and boot on any machine
 ```
 
 ## License

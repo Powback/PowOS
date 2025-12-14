@@ -1,6 +1,6 @@
 # PowOS - Portable Gaming Workstation
 
-A fully portable Linux workstation that runs from a USB SSD. Plug into any machine, boot, work. **Unplug the USB and keep working from RAM.** Plug back in - changes sync automatically.
+A fully portable Linux workstation that runs from a USB SSD. Plug into any machine, boot, work. **Unplug the USB and keep working.** Plug back in - changes sync automatically. No data loss, no crash.
 
 ## Two Commands. That's It.
 
@@ -16,43 +16,71 @@ Then burn the ISO to your USB SSD and boot from it. Everything else is automatic
 
 ## What Makes This Special
 
-### Unplug Resilience (RAM Overlay)
-Working on your desktop, need to leave? **Just unplug the USB drive.** The system continues running from RAM. Plug back in later - changes sync automatically. No data loss, no crash.
+### Unplug Resilience - The Killer Feature
+
+Working on your desktop, need to leave? **Just yank the USB drive out.** The system continues running. Plug back in later - changes sync automatically.
+
+**How is this possible?**
+
+PowOS uses a two-layer approach:
 
 ```
-USB plugged in:
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│   Your App  │ ──── │ RAM Overlay │ ──── │  USB SSD    │
-│   (vim)     │      │  (cache)    │      │  (storage)  │
-└─────────────┘      └─────────────┘      └─────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    LAYER 1: OS IN RAM (dracut + overlayfs)                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  During boot, a dracut module copies the entire OS to RAM:                   │
+│                                                                              │
+│    USB (read-only)  +  RAM (writes)  =  Running System                       │
+│         lower            upper            merged                             │
+│                                                                              │
+│  Result: All of /usr, /etc, /var, running processes → IN RAM                 │
+│  USB can be unplugged → OS keeps running                                     │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-USB unplugged:
-┌─────────────┐      ┌─────────────┐
-│   Your App  │ ──── │ RAM Overlay │      (USB gone, don't care)
-│   (vim)     │      │ (all in RAM)│
-└─────────────┘      └─────────────┘
-
-USB replugged:
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│   Your App  │ ──── │ RAM Overlay │ ───► │  USB SSD    │
-│   (vim)     │      │ (syncing)   │      │  (updated)  │
-└─────────────┘      └─────────────┘      └─────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    LAYER 2: USER DATA (CacheFS - lazy loading)               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Your 4TB of files can't fit in RAM. CacheFS solves this:                    │
+│                                                                              │
+│    IN RAM (always):                                                          │
+│    ├─ File metadata (names, sizes, permissions) ─── instant ls/find         │
+│    └─ LRU cache of accessed files ───────────────── 4GB of hot files        │
+│                                                                              │
+│    ON USB (lazy-loaded):                                                     │
+│    └─ Actual file contents ──────────────────────── 4TB                      │
+│                                                                              │
+│  Access pattern:                                                             │
+│    cat file.txt → in cache? serve instantly : load from USB, cache it       │
+│                                                                              │
+│  USB unplugged:                                                              │
+│    ls ~/Documents/     → works (metadata in RAM)                             │
+│    cat cached-file.txt → works (in RAM cache)                                │
+│    cat other-file.txt  → "offline" until USB reconnected                     │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Hardware Chameleon
+
 One drive works on ANY machine:
-- **Your desktop with dual RTX 3090s** → Loads NVIDIA drivers, performance mode
+- **Your desktop with RTX 3090s** → Loads NVIDIA drivers, performance mode
 - **Random laptop with Intel graphics** → Loads Mesa, battery saver mode
 - **Friend's AMD gaming rig** → Loads AMD drivers automatically
 
 Zero configuration. Boot and it figures it out.
 
 ### 15-Minute Phoenix Recovery
+
 Drive dies? Lost it? Stolen?
 ```bash
 # On any machine with a fresh USB drive:
 git clone https://github.com/YOU/powos ~/powos
 just hydrate
+just build-iso
+# Burn to new USB, boot - everything restored
 ```
 Your entire environment restored: tools, configs, custom binaries, everything.
 
@@ -66,10 +94,11 @@ docker compose up --build
 open http://localhost:6091/vnc.html
 # Password: powos
 
-# You'll see KDE Plasma desktop
-# "RAM Overlay: Disabled" - that's correct for Docker (no USB)
-# On real hardware with USB, it enables automatically
+# Check status
+docker exec powos powos status
 ```
+
+In Docker you'll see "Standard" boot mode and "tmpfs" for user data - that's correct because Docker doesn't have real hardware boot or USB. On real hardware, it enables full RAM boot and CacheFS automatically.
 
 ## Creating the ISO
 
@@ -89,28 +118,39 @@ Then write to USB:
 
 ```
 1. BIOS/UEFI loads PowOS from USB
-2. Chameleon Boot detects your hardware
+
+2. Dracut module activates RAM boot
+   → Creates 8GB+ tmpfs for OS overlay
+   → USB becomes read-only lower layer
+   → All writes go to RAM
+   → ENTIRE OS NOW IN RAM
+
+3. Chameleon Boot detects hardware
    → GPU type (NVIDIA/AMD/Intel)
    → Power source (AC/Battery)
-   → Form factor (Desktop/Laptop)
-3. Applies matching profile automatically
-4. RAM Overlay activates
-   → USB mounted read-only as base layer
-   → RAM tmpfs as write layer (overlayfs)
-   → All writes go to RAM, synced to USB periodically
+   → Applies matching profile
+
+4. CacheFS mounts user data
+   → Scans USB for file metadata → loads to RAM
+   → Sets up 4GB LRU cache for file contents
+   → Files lazy-load on first access
+
 5. KDE Plasma desktop starts
-6. You're ready to work
 
-Unplugging USB:
-- System keeps running (everything in RAM overlay)
-- Desktop notification: "Running from RAM"
-- No interruption to your work
-
-Replugging USB:
-- Sync daemon detects reconnection
-- RAM changes written to USB
-- "Sync complete" notification
+6. You're ready to work - USB is now OPTIONAL
 ```
+
+**Unplugging USB:**
+- OS keeps running (entire OS in RAM)
+- Cached files still accessible
+- New files you access will be "offline"
+- Desktop notification: "USB disconnected - running from cache"
+
+**Replugging USB:**
+- Sync daemon detects reconnection
+- Dirty files synced back to USB
+- Uncached files become accessible again
+- Desktop notification: "Sync complete"
 
 ## USB Drive Setup
 
@@ -131,10 +171,46 @@ USB SSD (e.g., Lexar NM790 4TB)
 |---------|--------------|
 | `docker compose up` | Test PowOS in Docker |
 | `just build-iso` | Create bootable ISO |
-| `powos status` | Show USB, RAM overlay, sync status |
-| `powos sync` | Force sync RAM to USB |
-| `powos safe` | Check if safe to unplug |
+| `powos status` | Show OS mode, user data mode, USB state |
+| `powos sync` | Force sync cached changes to USB |
 | `pinstall <pkg>` | Install package + commit to git |
+
+## powos status Output
+
+```
+PowOS Status
+============
+
+Operating System
+  Mode:       ● FULL RAM BOOT
+              Entire OS running from RAM
+  RAM:        8G allocated
+  Used:       1.2G (changes since boot)
+
+User Data (/home)
+  Mode:       ● CacheFS (lazy-load)
+              Files load on-demand, cached in RAM
+  USB:        Connected
+  Pending:    0 files
+  Cache:      847M in RAM
+
+USB Drive
+  Status:     ● Connected
+  Last Sync:  30s ago
+
+Unplug Safety
+  ✓ FULLY PROTECTED
+    OS: in RAM, User data: cached
+    USB can be unplugged anytime!
+```
+
+## RAM Requirements
+
+| Mode | RAM Needed | What's Protected |
+|------|------------|------------------|
+| OS only (ramboot) | 8-20 GB | Operating system |
+| User cache (CacheFS) | 4 GB | Recently accessed files |
+| **Total recommended** | **16-32 GB** | **Full unplug resilience** |
 
 ## Hardware Profiles
 
@@ -158,25 +234,32 @@ PowOS/
 │
 ├── bin/                       # User commands
 │   ├── powos-boot             # Main boot script
-│   ├── powos                  # CLI (status, sync, safe)
+│   ├── powos                  # CLI (status, sync)
 │   └── pinstall               # Install + git commit
 │
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot
 │   ├── overlay-manager.sh     # systemd-sysext builder
-│   └── ramfs/                 # RAM overlay system
-│       ├── overlay-mount.sh   # overlayfs setup
-│       └── sync-daemon.py     # USB sync daemon
+│   ├── dracut/                # RAM boot module
+│   │   └── 90powos-ramboot/   # Dracut module for full RAM boot
+│   ├── cachefs/               # User data lazy-loading
+│   │   ├── powos-cachefs.py   # FUSE filesystem
+│   │   └── cachefs-sync.py    # Sync daemon
+│   └── ramfs/                 # Legacy overlay system
 │
 ├── config/
-│   └── profiles/              # Hardware profiles
+│   ├── profiles/              # Hardware profiles
+│   └── bootc/                 # Boot configuration
 │
-├── build/
-│   ├── build-iso.sh           # ISO creation script
-│   └── output/                # Built ISOs go here
+├── sources/                   # Overlay source code
+│   ├── gpu-nvidia/
+│   ├── gpu-amd/
+│   ├── device-steamdeck/
+│   └── ...
 │
-└── docs/
-    └── RAMFS-DESIGN.md        # RAM overlay architecture
+└── build/
+    ├── build-iso.sh           # ISO creation script
+    └── output/                # Built ISOs go here
 ```
 
 ## Credentials
@@ -193,32 +276,33 @@ User login:   powos / powos
 docker compose logs powos | tail -50
 ```
 
-**RAM overlay not activating on real hardware?**
+**Check system status:**
+```bash
+powos status
+```
+
+**RAM boot not activating on real hardware?**
+```bash
+# Check kernel cmdline
+cat /proc/cmdline | grep powos
+
+# Should contain: rd.powos.ramboot=1
+```
+
+**CacheFS not working?**
 ```bash
 # Check if USB detected
 blkid | grep POWOS-DATA
 
-# Check overlay status
-powos status
-
-# Check powos boot logs
-journalctl -u powos-boot -f
-```
-
-**Safe to unplug?**
-```bash
-powos safe
-# ✓ Safe to unplug USB
-# or
-# ✗ Not safe - sync in progress
+# Check mounts
+mount | grep cachefs
 ```
 
 ## Documentation
 
-- [CLAUDE.md](CLAUDE.md) - Technical reference for AI/developers
-- [USER_STORIES.md](USER_STORIES.md) - Feature requirements and acceptance criteria
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture details
-- [docs/RAMFS-DESIGN.md](docs/RAMFS-DESIGN.md) - RAM overlay deep dive
+- [CLAUDE.md](CLAUDE.md) - Technical reference for developers
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Full system architecture (5 layers)
+- [USER_STORIES.md](USER_STORIES.md) - Feature requirements
 
 ## License
 
