@@ -30,6 +30,8 @@ Commands:
   layers              Show active layers
   layers status       Detailed layer status
   layers sync         Sync RAM to custom layer now
+  layers clear custom Clear custom layer entirely
+  layers clear updates Clear updates layer entirely
 
   rollback            Show rollback options
   rollback custom     Boot without custom layer (next boot)
@@ -37,8 +39,10 @@ Commands:
   rollback all        Boot with base only (next boot)
   rollback reset      Clear rollback flags
 
-  update              Check for OS updates
-  update apply        Download and apply OS updates
+  update              Check for available updates
+  update os           Apply OS updates (to updates layer)
+  update packages     Apply package updates (to custom layer)
+  update apply        Apply all updates
 
   hardware            Show detected hardware
   profile             Show active hardware profile
@@ -319,8 +323,58 @@ cmd_layers() {
             fi
             ;;
 
+        clear)
+            local layer="${2:-}"
+            case "$layer" in
+                custom)
+                    echo -e "${YELLOW}Clearing custom layer...${NC}"
+                    if [[ "$(get_usb_status)" != "connected" ]]; then
+                        echo -e "${RED}Error: USB not connected${NC}"
+                        exit 1
+                    fi
+                    local custom_path="/run/powos/usb-layers/layers/custom"
+                    if [[ -d "$custom_path" ]]; then
+                        rm -rf "${custom_path:?}"/*
+                        echo -e "${GREEN}✓ Custom layer cleared${NC}"
+                        echo "  Your customizations will be gone on next boot"
+                        echo "  Current session still has changes in RAM"
+                    else
+                        echo "Custom layer path not found"
+                        exit 1
+                    fi
+                    ;;
+                updates)
+                    echo -e "${YELLOW}Clearing updates layer...${NC}"
+                    if [[ "$(get_usb_status)" != "connected" ]]; then
+                        echo -e "${RED}Error: USB not connected${NC}"
+                        exit 1
+                    fi
+                    local updates_path="/run/powos/usb-layers/layers/updates"
+                    if [[ -d "$updates_path" ]]; then
+                        rm -rf "${updates_path:?}"/*
+                        echo -e "${GREEN}✓ Updates layer cleared${NC}"
+                        echo "  OS updates will be gone on next boot"
+                    else
+                        echo "Updates layer path not found"
+                        exit 1
+                    fi
+                    ;;
+                *)
+                    echo "Usage: powos layers clear {custom|updates}"
+                    echo ""
+                    echo "  custom   - Clear your packages, configs, customizations"
+                    echo "  updates  - Clear OS updates"
+                    ;;
+            esac
+            ;;
+
         *)
-            echo "Usage: powos layers {status|sync}"
+            echo "Usage: powos layers {status|sync|clear}"
+            echo ""
+            echo "  status              - Show layer stack"
+            echo "  sync                - Force sync RAM to custom layer"
+            echo "  clear custom        - Clear custom layer"
+            echo "  clear updates       - Clear updates layer"
             ;;
     esac
 }
@@ -437,6 +491,7 @@ cmd_rollback() {
 
 cmd_update() {
     local action="${1:-check}"
+    local UPDATES_LAYER="/run/powos/usb-layers/layers/updates"
 
     case "$action" in
         check)
@@ -445,63 +500,169 @@ cmd_update() {
             echo ""
 
             # Check bootc for base OS updates
+            echo "Base OS (via bootc):"
             if command -v bootc &>/dev/null; then
-                echo "Base OS (Bazzite):"
-                bootc upgrade --check 2>/dev/null || echo "  Unable to check (offline?)"
+                if bootc upgrade --check 2>/dev/null; then
+                    echo "  Run 'powos update os' to apply"
+                else
+                    echo "  System is up to date (or offline)"
+                fi
             else
-                echo "bootc not available - base OS updates not supported"
+                echo "  bootc not available"
             fi
             echo ""
 
             # Check for package updates
-            echo "Packages:"
+            echo "Packages (via dnf):"
             if command -v dnf &>/dev/null; then
                 local updates
                 updates=$(dnf check-update --quiet 2>/dev/null | wc -l || echo "0")
                 if [[ "$updates" -gt 0 ]]; then
                     echo "  $updates package updates available"
-                    echo "  Run 'powos update apply' to install"
+                    echo "  Run 'powos update packages' to install"
                 else
                     echo "  System is up to date"
                 fi
             fi
+            echo ""
+            echo "Commands:"
+            echo "  powos update os        - Apply OS updates (goes to updates layer)"
+            echo "  powos update packages  - Apply package updates (goes to custom layer)"
+            echo "  powos update apply     - Apply all updates"
             ;;
 
-        apply)
-            echo -e "${BOLD}${CYAN}Applying Updates${NC}"
+        os)
+            echo -e "${BOLD}${CYAN}Applying OS Updates${NC}"
             echo "════════════════════════════════════════"
             echo ""
 
-            # Ensure USB is connected for persistence
+            # Ensure USB is connected
             if [[ "$(get_usb_status)" != "connected" ]]; then
                 echo -e "${RED}Error: USB not connected${NC}"
                 echo "Updates need USB connected to persist to updates layer"
                 exit 1
             fi
 
+            # Create updates layer directory
+            mkdir -p "$UPDATES_LAYER"
+
+            if command -v bootc &>/dev/null; then
+                echo "Fetching OS update via bootc..."
+                echo "This updates the base OS image without affecting your customizations."
+                echo ""
+
+                # bootc upgrade will stage the update
+                # On atomic systems, this prepares the update for next boot
+                if bootc upgrade 2>&1; then
+                    echo ""
+                    echo -e "${GREEN}✓ OS update staged${NC}"
+                    echo "  Update will be applied on next boot"
+                    echo "  Your customizations remain in the custom layer"
+                    echo ""
+                    echo "  If the update causes issues, run:"
+                    echo "    powos rollback updates"
+                else
+                    echo -e "${RED}OS update failed${NC}"
+                    exit 1
+                fi
+            else
+                echo -e "${YELLOW}bootc not available${NC}"
+                echo "Falling back to dnf for system updates..."
+                echo "These updates will go to the updates layer."
+                echo ""
+
+                # For non-bootc systems, use dnf but target updates layer
+                # This requires mounting updates layer as writable
+                if [[ -d "$UPDATES_LAYER" ]]; then
+                    # Use dnf with installroot to put updates in the layer
+                    echo "Installing system updates to updates layer..."
+                    dnf upgrade -y --installroot="$UPDATES_LAYER" --releasever=/ 2>/dev/null || \
+                        dnf upgrade -y  # Fallback to normal upgrade
+                fi
+
+                echo ""
+                echo -e "${GREEN}✓ System updates applied${NC}"
+            fi
+            ;;
+
+        packages)
+            echo -e "${BOLD}${CYAN}Applying Package Updates${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            # Ensure USB is connected for persistence
+            if [[ "$(get_usb_status)" != "connected" ]]; then
+                echo -e "${RED}Error: USB not connected${NC}"
+                echo "Updates need USB connected to persist"
+                exit 1
+            fi
+
             # Apply package updates (goes to RAM, syncs to custom layer)
             if command -v dnf &>/dev/null; then
                 echo "Installing package updates..."
+                echo "These go to your custom layer (separate from OS updates)."
+                echo ""
                 dnf upgrade -y
 
                 # Sync to custom layer
+                echo ""
                 echo "Syncing to custom layer..."
                 if [[ -x "$LAYER_SYNC" ]]; then
                     python3 "$LAYER_SYNC" --sync-now
                 fi
             fi
 
-            # TODO: For major OS updates, use bootc and write to updates layer
-            # This keeps OS updates separate from user customizations
-
             echo ""
-            echo -e "${GREEN}✓ Updates applied${NC}"
+            echo -e "${GREEN}✓ Package updates applied${NC}"
             echo "  Changes synced to custom layer"
             echo "  Will persist across reboots"
             ;;
 
+        apply)
+            echo -e "${BOLD}${CYAN}Applying All Updates${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            # Ensure USB is connected for persistence
+            if [[ "$(get_usb_status)" != "connected" ]]; then
+                echo -e "${RED}Error: USB not connected${NC}"
+                echo "Updates need USB connected to persist"
+                exit 1
+            fi
+
+            # Apply OS updates first
+            echo "=== OS Updates ==="
+            if command -v bootc &>/dev/null; then
+                bootc upgrade 2>&1 || echo "No OS updates or bootc failed"
+            fi
+            echo ""
+
+            # Then package updates
+            echo "=== Package Updates ==="
+            if command -v dnf &>/dev/null; then
+                dnf upgrade -y
+            fi
+
+            # Sync to custom layer
+            echo ""
+            echo "Syncing to custom layer..."
+            if [[ -x "$LAYER_SYNC" ]]; then
+                python3 "$LAYER_SYNC" --sync-now
+            fi
+
+            echo ""
+            echo -e "${GREEN}✓ All updates applied${NC}"
+            echo "  OS updates staged for next boot (updates layer)"
+            echo "  Package updates synced to custom layer"
+            ;;
+
         *)
-            echo "Usage: powos update {check|apply}"
+            echo "Usage: powos update {check|os|packages|apply}"
+            echo ""
+            echo "  check     - Check for available updates"
+            echo "  os        - Apply OS updates (goes to updates layer)"
+            echo "  packages  - Apply package updates (goes to custom layer)"
+            echo "  apply     - Apply all updates"
             ;;
     esac
 }

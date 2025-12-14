@@ -198,6 +198,31 @@ setup_persistence() {
     mkdir -p "${mount_point}/@powos/git"
     mkdir -p "${mount_point}/@powos/state"
 
+    # ══════════════════════════════════════════════════════════════════
+    # LAYER DIRECTORIES (for layered persistence)
+    # ══════════════════════════════════════════════════════════════════
+    log "  Setting up layer directories..."
+
+    # Custom layer - your packages, configs, customizations
+    mkdir -p "${mount_point}/@powos/layers/custom/usr"
+    mkdir -p "${mount_point}/@powos/layers/custom/etc"
+    mkdir -p "${mount_point}/@powos/layers/custom/var"
+
+    # Updates layer - OS updates (separate from customizations)
+    mkdir -p "${mount_point}/@powos/layers/updates/usr"
+    mkdir -p "${mount_point}/@powos/layers/updates/etc"
+    mkdir -p "${mount_point}/@powos/layers/updates/var"
+
+    # Home directory for CacheFS
+    mkdir -p "${mount_point}/@powos/home/powos/Documents"
+    mkdir -p "${mount_point}/@powos/home/powos/Downloads"
+    mkdir -p "${mount_point}/@powos/home/powos/Projects"
+
+    log_success "Layer directories created:"
+    log "    layers/custom/   - Your packages, configs (syncs from RAM)"
+    log "    layers/updates/  - OS updates (via bootc/dnf)"
+    log "    home/            - User data (CacheFS source)"
+
     # Copy current sources if they exist
     if [[ -d "${POWOS_ROOT}/sources" ]]; then
         log "  Copying overlay sources..."
@@ -215,6 +240,19 @@ setup_persistence() {
     git init -q
     git config user.email "powos@localhost"
     git config user.name "PowOS"
+
+    # Create initial commit with layer structure
+    echo "# PowOS State Repository" > README.md
+    echo "" >> README.md
+    echo "This repository tracks your PowOS customizations." >> README.md
+    echo "" >> README.md
+    echo "## Layer Structure" >> README.md
+    echo "" >> README.md
+    echo "- \`layers/custom/\` - Your packages and configs" >> README.md
+    echo "- \`layers/updates/\` - OS updates" >> README.md
+    echo "- \`home/\` - User data" >> README.md
+    git add README.md
+    git commit -q -m "Initial PowOS setup"
 
     # Cleanup
     cd /
@@ -244,10 +282,23 @@ show_complete() {
     echo "    4. PowOS will auto-detect hardware and boot"
     echo ""
     echo "  First boot will:"
+    echo "    - Load entire OS into RAM (8GB+ required)"
     echo "    - Detect your GPU (NVIDIA/AMD/Intel)"
     echo "    - Apply appropriate performance profile"
-    echo "    - Build and enable your custom overlays"
-    echo "    - Create your distrobox dev containers"
+    echo "    - Start layer sync daemon (syncs changes every 60s)"
+    echo "    - Mount user data via CacheFS"
+    echo ""
+    echo "  Layer Structure:"
+    echo "    RAM Upper    → Instant writes (volatile)"
+    echo "    Custom Layer → Your packages, configs (syncs from RAM)"
+    echo "    Updates Layer → OS updates (separate)"
+    echo "    Base Layer   → Bazzite OS (read-only)"
+    echo ""
+    echo "  Key Commands:"
+    echo "    powos status        - Show system status"
+    echo "    powos layers        - View layer stack"
+    echo "    powos sync          - Force sync to USB"
+    echo "    powos rollback      - Rollback options"
     echo ""
     echo "  Default login:"
     echo "    User: powos"

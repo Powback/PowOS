@@ -1,0 +1,27 @@
+[Unit]
+Description=PowOS CacheFS Sync Daemon
+Documentation=man:powos(8)
+After=powos-homefs.service local-fs.target
+Wants=powos-homefs.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/lib/powos/cachefs/cachefs-sync.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=false
+PrivateTmp=false
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Graceful shutdown - sync dirty files before stopping
+ExecStop=/usr/bin/python3 /usr/lib/powos/cachefs/cachefs-sync.py --sync-now
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

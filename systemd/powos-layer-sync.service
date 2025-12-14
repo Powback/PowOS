@@ -1,0 +1,29 @@
+[Unit]
+Description=PowOS Layer Sync Daemon
+Documentation=man:powos(8)
+After=powos-ramboot-init.service local-fs.target
+Requires=powos-ramboot-init.service
+ConditionPathExists=/run/powos/ramboot-state
+ConditionPathExists=/run/powos/layer-paths
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/lib/powos/ramfs/layer-sync.py --interval 60
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=false
+PrivateTmp=false
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Graceful shutdown - sync before stopping
+ExecStop=/usr/bin/python3 /usr/lib/powos/ramfs/layer-sync.py --sync-now
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

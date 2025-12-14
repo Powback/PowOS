@@ -45,9 +45,13 @@ COPY lib/cachefs/ /usr/lib/powos/cachefs/
 COPY lib/dracut/90powos-ramboot/ /usr/lib/dracut/modules.d/90powos-ramboot/
 RUN chmod +x /usr/lib/dracut/modules.d/90powos-ramboot/*.sh
 
-# Install ramboot systemd service
+# Install systemd services
 COPY systemd/powos-ramboot-init.service /usr/lib/systemd/system/
-RUN systemctl enable powos-ramboot-init.service 2>/dev/null || true
+COPY systemd/powos-layer-sync.service /usr/lib/systemd/system/
+COPY systemd/powos-cachefs-sync.service /usr/lib/systemd/system/
+RUN systemctl enable powos-ramboot-init.service 2>/dev/null || true && \
+    systemctl enable powos-layer-sync.service 2>/dev/null || true && \
+    systemctl enable powos-cachefs-sync.service 2>/dev/null || true
 
 # Rebuild initramfs with our dracut module
 # This embeds the RAM overlay setup into the boot process

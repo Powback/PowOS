@@ -9,42 +9,171 @@
 │                              USB SSD (4TB)                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Partition 1: EFI (512MB)      │ UEFI bootloader                            │
-│  Partition 2: System (100GB)   │ Bazzite OS + PowOS                         │
-│  Partition 3: Data (remainder) │ /home, state, overlays (Label: POWOS-DATA) │
+│  Partition 2: System (100GB)   │ Bazzite OS base image                      │
+│  Partition 3: Data (remainder) │ Label: POWOS-DATA                          │
+│    ├─ layers/custom/           │ Your packages, configs (persistent)        │
+│    ├─ layers/updates/          │ OS updates (separate from custom)          │
+│    └─ home/                    │ User data (CacheFS source)                 │
 └─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
+```
+
+## Core Concept: Layered Persistence
+
+Unlike traditional "immutable" systems, PowOS uses **layered persistence with independent rollback**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         LAYER STACK (top to bottom)                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────┐                                                         │
+│  │   RAM (upper)   │ ← All writes go here first (instant, volatile)          │
+│  └────────┬────────┘                                                         │
+│           │ layer-sync daemon (every 60s)                                    │
+│           ▼                                                                  │
+│  ┌─────────────────┐                                                         │
+│  │  Custom Layer   │ ← Your packages, configs (persists across reboots)      │
+│  │  (read-only)    │   Location: /mnt/powos-usb/layers/custom/               │
+│  └────────┬────────┘   Rollback: rd.powos.skip.custom=1                      │
+│           │                                                                  │
+│  ┌─────────────────┐                                                         │
+│  │  Updates Layer  │ ← OS updates (separate from your stuff)                 │
+│  │  (read-only)    │   Location: /mnt/powos-usb/layers/updates/              │
+│  └────────┬────────┘   Rollback: rd.powos.skip.updates=1                     │
+│           │                                                                  │
+│  ┌─────────────────┐                                                         │
+│  │   Base Layer    │ ← Original Bazzite image (never modified)               │
+│  │  (read-only)    │   Location: System partition                            │
+│  └─────────────────┘                                                         │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+How overlayfs merges them:
+  - Read: Check RAM → Custom → Updates → Base (first match wins)
+  - Write: Always goes to RAM upper layer
+  - Result: You see a unified filesystem
+```
+
+## Boot Sequence
+
+```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           BOOT SEQUENCE                                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. HARDWARE DETECTION (Chameleon Boot)                                      │
+│  1. INITRAMFS (dracut module: 90powos-ramboot)                               │
+│     ├─ Create 8GB+ tmpfs for RAM upper layer                                 │
+│     ├─ Mount USB data partition                                              │
+│     ├─ Stack layers: custom:updates:base (skip if rollback flags set)        │
+│     ├─ Mount overlayfs as new root                                           │
+│     └─ ENTIRE OS NOW IN RAM                                                  │
+│                                    │                                         │
+│  2. HARDWARE DETECTION (Chameleon Boot)                                      │
 │     ├─ Detect: GPU (nvidia/amd/intel) + Power (ac/battery) + Form           │
 │     └─ Apply: config/profiles/desktop-nvidia-performance.conf               │
 │                                    │                                         │
-│  2. SYSTEM OVERLAYS (systemd-sysext)                                         │
+│  3. SYSTEM OVERLAYS (systemd-sysext)                                         │
 │     ├─ Load extensions from /var/lib/extensions/                            │
-│     └─ Merge custom binaries into /usr (without modifying base OS)          │
+│     └─ Merge custom binaries into /usr                                      │
 │                                    │                                         │
-│  3. RAM OVERLAY (Unplug Resilience - OS)                                     │
-│     ├─ Dracut module sets up overlayfs in initramfs                         │
-│     ├─ USB root becomes read-only lower layer                               │
-│     ├─ tmpfs (RAM) becomes write upper layer                                │
-│     └─ Entire OS runs from RAM - USB optional after boot                    │
+│  4. LAYER SYNC DAEMON                                                        │
+│     ├─ Start layer-sync.py (syncs RAM → custom layer)                       │
+│     └─ Runs every 60 seconds                                                │
 │                                    │                                         │
-│  4. CACHEFS (Lazy-Load User Data)                                            │
-│     ├─ FUSE filesystem for /home/powos                                      │
-│     ├─ Metadata always in RAM (file names, sizes)                           │
-│     ├─ File contents lazy-loaded on access → cached in RAM                  │
-│     └─ USB can be unplugged - cached files still work                       │
+│  5. CACHEFS (User Data)                                                      │
+│     ├─ Mount /home/powos via FUSE                                           │
+│     ├─ Metadata always in RAM                                                │
+│     └─ File contents lazy-loaded on access                                  │
 │                                    │                                         │
-│  5. DESKTOP                                                                  │
-│     └─ KDE Plasma via TigerVNC + noVNC                                      │
+│  6. DESKTOP                                                                  │
+│     └─ KDE Plasma                                                           │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Layer 1: Hardware Detection (Chameleon Boot)
+## Layer 1: Layered RAM Boot (Dracut Module)
+
+**Purpose:** Run entire OS from RAM with persistent layers that can be independently rolled back.
+
+### How It Works
+
+The dracut module (`90powos-ramboot`) runs during initramfs:
+
+```bash
+# Kernel command line options:
+rd.powos.ramboot=1        # Enable layered RAM boot
+rd.powos.ramsize=8G       # RAM allocation (default 8G)
+rd.powos.skip.custom=1    # ROLLBACK: Skip custom layer
+rd.powos.skip.updates=1   # ROLLBACK: Skip updates layer
+```
+
+### The Overlay Stack
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    OVERLAYFS CONFIGURATION                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  mount -t overlay overlay \                                      │
+│    -o lowerdir=custom:updates:base,\                             │
+│       upperdir=/run/powos-overlay/upper,\                        │
+│       workdir=/run/powos-overlay/work \                          │
+│    /merged                                                       │
+│                                                                  │
+│  Priority (highest to lowest):                                   │
+│    1. RAM upper     - writes land here                           │
+│    2. Custom layer  - your persistent changes                    │
+│    3. Updates layer - OS updates                                 │
+│    4. Base layer    - original Bazzite                           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Rollback Scenarios
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Normal Boot                                                     │
+│    Layers: RAM → Custom → Updates → Base                         │
+│    You see: All your customizations + updates + base OS          │
+├─────────────────────────────────────────────────────────────────┤
+│  powos rollback custom (rd.powos.skip.custom=1)                  │
+│    Layers: RAM → Updates → Base                                  │
+│    You see: Updates + base OS (your customizations hidden)       │
+│    Use when: A package you installed broke something             │
+├─────────────────────────────────────────────────────────────────┤
+│  powos rollback updates (rd.powos.skip.updates=1)                │
+│    Layers: RAM → Custom → Base                                   │
+│    You see: Your customizations + base OS (updates hidden)       │
+│    Use when: An OS update broke something                        │
+├─────────────────────────────────────────────────────────────────┤
+│  powos rollback all (both flags)                                 │
+│    Layers: RAM → Base                                            │
+│    You see: Clean base OS only                                   │
+│    Use when: Everything is broken, need clean slate              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Files
+
+```
+lib/dracut/90powos-ramboot/
+├── module-setup.sh       # Dracut module definition
+├── ramboot-setup.sh      # Sets up layered overlayfs
+└── powos-overlay-init.sh # Userspace initialization
+
+lib/ramfs/
+├── layer-sync.py         # Syncs RAM → custom layer (every 60s)
+└── overlay-mount.sh      # Legacy overlay utilities
+
+/run/powos/
+├── ramboot-state         # Current boot state (layers, RAM size)
+├── layer-paths           # Paths for sync daemon
+├── layer-sync-status.json # Sync daemon status
+└── rollback-kargs        # Pending rollback flags
+```
+
+## Layer 2: Hardware Detection (Chameleon Boot)
 
 **Purpose:** Automatically configure system based on detected hardware.
 
@@ -68,31 +197,17 @@ Boot in Docker/VM:
 **Files:**
 ```
 lib/hardware-detect.sh           # Detection logic
-config/profiles/*.conf           # Profile configurations
-/run/powos/hardware              # Runtime state (written at boot)
+config/profiles/*.conf           # Profile configurations (16 profiles)
+/run/powos/hardware              # Runtime state
 ```
 
-**How it works:**
-```bash
-# 1. Detect hardware
-GPU_TYPE=$(lspci | grep -qi nvidia && echo "nvidia" || echo "intel")
-POWER=$(cat /sys/class/power_supply/AC*/online | grep -q 1 && echo "ac" || echo "battery")
+## Layer 3: System Overlays (systemd-sysext)
 
-# 2. Select profile
-PROFILE="${FORM_FACTOR}-${GPU_TYPE}-${POWER_SOURCE}"
-
-# 3. Apply settings
-source /etc/powos/profiles/${PROFILE}.conf
-```
-
-## Layer 2: System Overlays (systemd-sysext)
-
-**Purpose:** Add custom binaries to immutable base OS without modifying it.
+**Purpose:** Add custom binaries to base OS without modifying it.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Base OS (Bazzite)                             │
-│                    /usr/bin/*, /usr/lib/*                        │
 │                    IMMUTABLE - cannot modify                     │
 └─────────────────────────────────────────────────────────────────┘
                               +
@@ -100,7 +215,6 @@ source /etc/powos/profiles/${PROFILE}.conf
 │                 System Extensions (sysext)                       │
 │  extensions/gpu-nvidia/usr/bin/nvidia-smi                       │
 │  extensions/hello-powos/usr/bin/hello-powos                     │
-│  extensions/device-steamdeck/usr/lib/...                        │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
               systemd-sysext merge
@@ -108,182 +222,24 @@ source /etc/powos/profiles/${PROFILE}.conf
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Merged /usr                                   │
 │  Base OS binaries + Extension binaries                          │
-│  /usr/bin/hello-powos now exists!                               │
 └─────────────────────────────────────────────────────────────────┘
-```
-
-**Creating an overlay:**
-```bash
-# 1. Create source
-mkdir -p sources/my-tool
-cat > sources/my-tool/build.sh << 'EOF'
-#!/bin/bash
-mkdir -p "$OUTPUT_DIR/usr/bin"
-curl -o "$OUTPUT_DIR/usr/bin/my-tool" https://example.com/my-tool
-chmod +x "$OUTPUT_DIR/usr/bin/my-tool"
-EOF
-
-# 2. Build
-bash lib/overlay-manager.sh build my-tool
-# Creates: extensions/my-tool/usr/bin/my-tool
-
-# 3. Enable (on real hardware, auto at boot)
-systemd-sysext merge
-# Now: /usr/bin/my-tool exists
 ```
 
 **Files:**
 ```
 sources/                         # Overlay source code
 ├── gpu-nvidia/build.sh
-├── hello-powos/build.sh
-└── device-steamdeck/build.sh
+├── gpu-amd/build.sh
+├── device-steamdeck/build.sh
+└── hello-powos/build.sh
 
 extensions/                      # Built overlays (gitignored)
-├── gpu-nvidia/usr/...
-├── hello-powos/usr/bin/hello-powos
-└── device-steamdeck/usr/...
-
 lib/overlay-manager.sh           # Build/enable/disable overlays
 ```
 
-## Layer 3: RAM Overlay (Unplug Resilience)
-
-**Purpose:** Run the ENTIRE OS from RAM so USB can be unplugged completely.
-
-### How It Works
-
-The magic happens during boot via a custom **dracut module**:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    BOOT SEQUENCE (initramfs)                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. UEFI loads kernel + initramfs from USB                       │
-│                                                                  │
-│  2. Dracut module (90powos-ramboot) activates:                   │
-│     ├─ Creates 8GB tmpfs at /run/powos-overlay                   │
-│     ├─ Mounts USB root as READ-ONLY lower layer                  │
-│     ├─ Uses tmpfs as WRITE upper layer                           │
-│     └─ Creates overlayfs as new root                             │
-│                                                                  │
-│  3. System switches to overlay root                              │
-│     └─ ENTIRE OS now runs from RAM!                              │
-│                                                                  │
-│  4. USB becomes optional - can be unplugged                      │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### The Overlay Structure
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    FULL SYSTEM OVERLAY                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   UPPER LAYER (tmpfs - RAM, 8GB default)                         │
-│   ├─ ALL writes go here: /usr, /etc, /home, /var, everything    │
-│   ├─ Survives USB unplug completely                             │
-│   └─ Location: /run/powos-overlay/upper/                         │
-│                                                                  │
-│   LOWER LAYER (USB - read-only)                                  │
-│   ├─ Original OS from USB                                        │
-│   ├─ Read-only, cached in RAM as accessed                        │
-│   └─ Can be disconnected after boot                              │
-│                                                                  │
-│   MERGED VIEW (what you see as /)                                │
-│   ├─ Reads: RAM first, USB if not in RAM                         │
-│   ├─ Writes: always go to RAM                                    │
-│   └─ Mount point: / (entire root filesystem)                     │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-
-Sync Daemon (background):
-  Every 30 seconds:
-    if USB connected:
-      rsync /run/powos-overlay/upper/ → USB persistence partition
-```
-
-### Unplug Scenario
-
-```
-1. You're running anything - vim, browser, compile job, whatever
-2. USB is unplugged (intentionally or accidentally)
-3. EVERYTHING keeps working - entire OS is in RAM
-4. New writes go to RAM upper layer
-5. Desktop notification: "USB disconnected - running from RAM"
-6. USB is replugged
-7. Sync daemon detects, rsyncs RAM changes → USB
-8. Desktop notification: "Changes synced to USB"
-9. Zero data loss, zero interruption
-```
-
-### Enabling Full RAM Boot
-
-RAM boot is enabled by kernel command line arguments:
-
-```
-rd.powos.ramboot=1      # Enable full RAM boot
-rd.powos.ramsize=8G     # RAM allocation (default 8G)
-```
-
-These are set automatically in the ISO. For custom installs, add to bootloader config.
-
-### Files
-
-```
-lib/dracut/90powos-ramboot/
-├── module-setup.sh      # Dracut module definition
-├── ramboot-setup.sh     # Hook that sets up overlayfs
-└── powos-overlay-init.sh # Userspace init (sync daemon, etc)
-
-lib/ramfs/
-├── overlay-mount.sh     # Legacy overlay for /home only
-└── sync-daemon.py       # Background rsync to USB
-
-bin/powos                # CLI: status, sync, safe
-
-config/bootc/kargs.d/
-└── 50-powos-ramboot.toml # Kernel cmdline args
-
-systemd/
-└── powos-ramboot-init.service # Userspace init service
-```
-
-### Commands
-
-```bash
-powos status    # Show boot mode, RAM usage, USB state
-powos sync      # Force sync to USB now
-powos safe      # Always safe in ramboot mode!
-```
-
-### RAM Requirements
-
-| Mode | RAM Needed | What's Protected |
-|------|------------|------------------|
-| Legacy (Phase 1) | 2-4 GB | Only /home |
-| **Full RAM Boot (Phase 2)** | **8-16 GB** | **ENTIRE OS** |
-
-For full protection, you need enough RAM to hold the OS + your working set.
-Recommended: 16GB+ for comfortable use, 32GB+ for heavy workloads.
-
 ## Layer 4: CacheFS (Lazy-Loading User Data)
 
-**Purpose:** User data (potentially terabytes) can't fit in RAM. CacheFS lazy-loads files on access.
-
-### The Problem
-
-```
-USB: 4TB of user data (documents, projects, media)
-RAM: 32GB max
-
-Can't copy 4TB to RAM!
-```
-
-### The Solution: Lazy Loading with Cache
+**Purpose:** User data (terabytes) can't fit in RAM. CacheFS lazy-loads files on access.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -299,15 +255,6 @@ Can't copy 4TB to RAM!
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│   User runs: cat ~/Documents/report.pdf                          │
-│                                                                  │
-│   1. Metadata lookup in RAM ─────────────── instant              │
-│   2. File not in cache?                                          │
-│      └─ Fetch from USB ──────────────────── ~100ms               │
-│      └─ Copy to RAM cache                                        │
-│   3. Serve from RAM cache ───────────────── instant              │
-│   4. File stays in cache (LRU eviction if full)                  │
-│                                                                  │
 │   USB unplugged:                                                 │
 │   - ls ~/Documents/ ─────────────────────── works (metadata RAM) │
 │   - cat cached-file.txt ─────────────────── works (in cache)     │
@@ -316,57 +263,12 @@ Can't copy 4TB to RAM!
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### How It Works
-
-CacheFS is a FUSE filesystem that wraps the USB data partition:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                /home/powos (what you see)                        │
-│                         │                                        │
-│                    CacheFS FUSE                                  │
-│                    /           \                                 │
-│                   /             \                                │
-│         RAM Cache (4GB)    USB Backing Store (4TB)               │
-│         /run/powos/cachefs  /mnt/powos-usb/home                  │
-│                                                                  │
-│   - Metadata always in RAM                                       │
-│   - Contents lazy-loaded on first access                         │
-│   - LRU eviction when cache full                                 │
-│   - Dirty files synced back to USB                               │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Files
-
+**Files:**
 ```
 lib/cachefs/
 ├── powos-cachefs.py    # FUSE filesystem implementation
 └── cachefs-sync.py     # Sync daemon for dirty files
-
-/run/powos/
-├── cachefs/            # RAM cache directory
-└── cachefs-status.json # Status for CLI
 ```
-
-### Configuration
-
-```bash
-POWOS_CACHE_SIZE=4G     # RAM cache size (default 4G)
-```
-
-### Combined with RAM Boot
-
-On real hardware with full setup:
-
-| Component | Where | Size | Can Unplug? |
-|-----------|-------|------|-------------|
-| OS + Apps | RAM (overlayfs) | ~20GB | ✓ Yes |
-| User Metadata | RAM (CacheFS) | ~100MB | ✓ Yes |
-| User Cache | RAM (CacheFS) | 4GB | ✓ Yes |
-| User Data | USB (lazy-load) | 4TB | ✓ Cached files work |
-
-**Result:** Even with terabytes of data, USB can be unplugged and you keep working with cached files.
 
 ## Layer 5: Package Management (pinstall)
 
@@ -377,70 +279,86 @@ On real hardware with full setup:
 │                         pinstall neovim                          │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│   1. INSTALL (runtime)                                           │
+│   1. INSTALL                                                     │
 │      └─ dnf install neovim                                       │
+│      └─ Goes to RAM upper layer → syncs to custom layer          │
 │                                                                  │
-│   2. RECORD (config)                                             │
+│   2. RECORD                                                      │
 │      └─ Add "neovim" to containers/distrobox.ini                │
 │                                                                  │
-│   3. COMMIT (persistence)                                        │
+│   3. COMMIT                                                      │
 │      └─ git commit -m "pinstall: neovim"                        │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
-
-On new machine (hydration):
-  git clone your-powos-repo
-  just hydrate
-  → Reads distrobox.ini, reinstalls all packages
-  → Rebuilds all overlays from sources/
-  → Full environment restored
 ```
 
-**Files:**
-```
-bin/pinstall             # Install + record + commit
-bin/premove              # Remove + record + commit
-containers/distrobox.ini # Package list (tracked in git)
+## CLI Commands
+
+### Status & Info
+```bash
+powos status          # Full system status (layers, RAM, USB, protection)
+powos layers          # Detailed layer stack view
+powos layers status   # Same as above
+powos hardware        # Show detected hardware
+powos version         # Show version and active layers
 ```
 
-## How Everything Connects
+### Layer Management
+```bash
+powos layers sync     # Force sync RAM → custom layer
+powos layers clear custom   # Clear custom layer entirely
+powos layers clear updates  # Clear updates layer entirely
+```
+
+### Rollback
+```bash
+powos rollback                # Show rollback options
+powos rollback custom         # Skip custom layer on next boot
+powos rollback updates        # Skip updates layer on next boot
+powos rollback all            # Boot with base only
+powos rollback reset          # Clear all rollback flags
+```
+
+### Updates
+```bash
+powos update          # Check for OS updates
+powos update apply    # Apply updates (to updates layer)
+```
+
+### Sync & Safety
+```bash
+powos sync            # Force sync all changes to USB
+powos safe            # Check if safe to unplug USB
+```
+
+## USB Storage Layout
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                           RUNTIME FLOW                                    │
-├──────────────────────────────────────────────────────────────────────────┤
-│                                                                           │
-│  YOU                                                                      │
-│   │                                                                       │
-│   ├─► Run application                                                     │
-│   │     └─► Binary from: Base OS OR System Extension (Layer 2)           │
-│   │           └─► Reads files from: RAM Overlay (Layer 3)                │
-│   │                 └─► Falls through to USB if not in RAM cache         │
-│   │                                                                       │
-│   ├─► Save a file                                                         │
-│   │     └─► Write goes to: RAM upper layer (Layer 3)                     │
-│   │           └─► Sync daemon: periodically rsyncs to USB                │
-│   │                                                                       │
-│   ├─► Install a package                                                   │
-│   │     └─► pinstall pkg (Layer 4)                                       │
-│   │           ├─► Installs immediately                                   │
-│   │           ├─► Records to distrobox.ini                               │
-│   │           └─► Git commits for persistence                            │
-│   │                                                                       │
-│   ├─► Create custom binary                                                │
-│   │     └─► sources/my-tool/build.sh (Layer 2)                           │
-│   │           └─► Build → extensions/ → systemd-sysext merge             │
-│   │                                                                       │
-│   ├─► Plug into different machine                                         │
-│   │     └─► Hardware detection runs (Layer 1)                            │
-│   │           └─► Applies correct profile for this hardware              │
-│   │                                                                       │
-│   └─► Unplug USB                                                          │
-│         └─► System keeps running (Layer 3 - RAM overlay)                 │
-│               └─► Replug → sync daemon writes changes to USB             │
-│                                                                           │
-└──────────────────────────────────────────────────────────────────────────┘
+POWOS-DATA partition (BTRFS):
+├── layers/
+│   ├── custom/           # Your packages, configs, customizations
+│   │   ├── usr/          # Modified system files
+│   │   ├── etc/          # Modified configs
+│   │   └── var/          # Modified state
+│   └── updates/          # OS updates (separate from custom)
+│       ├── usr/
+│       ├── etc/
+│       └── var/
+├── home/                 # User data (CacheFS source)
+│   └── powos/
+│       ├── Documents/
+│       ├── Projects/
+│       └── ...
+└── state/                # PowOS state files
 ```
+
+## RAM Requirements
+
+| Component | RAM | Purpose |
+|-----------|-----|---------|
+| OS overlay (tmpfs) | 8-20 GB | Running OS + writes |
+| CacheFS cache | 4 GB | Recently accessed files |
+| **Recommended** | **16-32 GB** | Full unplug resilience |
 
 ## Recovery Flow (15-Minute Phoenix)
 
@@ -450,58 +368,12 @@ USB drive dies/lost/stolen
          ▼
 ┌─────────────────────────────────────────┐
 │  1. Boot any Linux (live USB, etc)      │
+│  2. git clone github.com/YOU/powos      │
+│  3. just hydrate                        │
+│  4. just build-iso                      │
+│  5. dd to new USB                       │
+│  6. Boot - everything's back            │
 └─────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│  2. Clone your PowOS repo               │
-│     git clone github.com/YOU/powos      │
-└─────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│  3. Hydrate                             │
-│     just hydrate                        │
-│     ├─ Rebuild overlays from sources/   │
-│     ├─ Reinstall packages from config   │
-│     └─ Restore everything               │
-└─────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│  4. Build ISO & burn to new USB         │
-│     just build-iso                      │
-│     dd if=powos.iso of=/dev/sdX         │
-└─────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│  5. Boot - everything's back            │
-└─────────────────────────────────────────┘
-```
-
-## Testing Strategy
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    TIER 3: REAL HARDWARE                        │
-│                    Final validation only                        │
-│                    USB → Physical Machine                       │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│                    TIER 2: QEMU/KVM VM                          │
-│                    Boot testing, systemd                        │
-│                    just vm-boot                                 │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│                    TIER 1: DOCKER COMPOSE                       │
-│                    Fast iteration, 90% of dev time              │
-│                    docker compose up                            │
-└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## File Structure Summary
@@ -509,47 +381,55 @@ USB drive dies/lost/stolen
 ```
 PowOS/
 ├── Containerfile              # THE OS definition
-├── docker-compose.yml         # Tier 1 testing
+├── docker-compose.yml         # Development testing
 ├── justfile                   # Command runner
 │
 ├── bin/
-│   ├── powos                  # CLI (status, sync, safe)
+│   ├── powos                  # CLI (status, layers, rollback, update)
 │   ├── powos-boot             # Boot orchestrator
-│   └── pinstall               # Package + git commit
+│   ├── pinstall               # Package + git commit
+│   └── powos-init-usb         # Initialize USB drive
 │
 ├── lib/
-│   ├── hardware-detect.sh     # Layer 1: Chameleon Boot
-│   ├── overlay-manager.sh     # Layer 2: Build/enable sysext
-│   └── ramfs/                 # Layer 3: RAM overlay
-│       ├── overlay-mount.sh
-│       └── sync-daemon.py
+│   ├── hardware-detect.sh     # Chameleon Boot
+│   ├── overlay-manager.sh     # systemd-sysext builder
+│   ├── dracut/
+│   │   └── 90powos-ramboot/   # Layered RAM boot module
+│   ├── ramfs/
+│   │   └── layer-sync.py      # RAM → custom layer sync
+│   └── cachefs/
+│       ├── powos-cachefs.py   # FUSE filesystem
+│       └── cachefs-sync.py    # User data sync
 │
 ├── config/
-│   └── profiles/              # Hardware profiles
-│       ├── desktop-nvidia-performance.conf
-│       ├── laptop-intel-battery.conf
-│       └── virtual.conf
+│   ├── profiles/              # Hardware profiles (16)
+│   └── bootc/kargs.d/         # Kernel arguments
 │
-├── sources/                   # Overlay source code (Layer 2)
-│   ├── gpu-nvidia/build.sh
-│   └── hello-powos/build.sh
+├── sources/                   # Overlay source code
+│   ├── gpu-nvidia/
+│   ├── gpu-amd/
+│   └── ...
 │
-├── extensions/                # Built overlays (gitignored)
-│
-├── containers/
-│   └── distrobox.ini          # Package list (Layer 4)
+├── systemd/
+│   ├── powos-layer-sync.service  # Layer sync daemon
+│   └── powos-ramboot-init.service
 │
 └── build/
     ├── build-iso.sh           # Create bootable ISO
-    └── output/                # Built ISOs
+    └── powos-init-usb.sh      # USB initialization script
 ```
 
 ## Quick Reference
 
-| Layer | Purpose | Key Files | Commands |
-|-------|---------|-----------|----------|
-| 1. Hardware | Auto-configure for machine | `lib/hardware-detect.sh`, `config/profiles/` | `powos hardware` |
-| 2. Overlays | Custom binaries | `sources/*/build.sh`, `lib/overlay-manager.sh` | `just build <name>` |
-| 3. RAM Boot | OS unplug resilience | `lib/dracut/90powos-ramboot/` | `powos status` |
-| 4. CacheFS | User data lazy-load | `lib/cachefs/powos-cachefs.py` | `powos status` |
-| 5. Packages | Tracked installs | `bin/pinstall`, `containers/distrobox.ini` | `pinstall <pkg>` |
+| Feature | Command | Description |
+|---------|---------|-------------|
+| Check status | `powos status` | Layers, RAM, USB, protection level |
+| View layers | `powos layers` | Layer stack with sizes |
+| Force sync | `powos sync` | Sync RAM to USB immediately |
+| Rollback custom | `powos rollback custom` | Skip your customizations next boot |
+| Rollback updates | `powos rollback updates` | Skip OS updates next boot |
+| Clear rollback | `powos rollback reset` | Use all layers next boot |
+| Check updates | `powos update` | Check for available updates |
+| Apply updates | `powos update apply` | Download and apply updates |
+| Install package | `pinstall <pkg>` | Install + record + commit |
+| Init USB | `powos-init-usb /dev/sdX` | Prepare USB drive |
