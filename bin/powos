@@ -5,14 +5,15 @@
 
 set -e
 
-VERSION="0.2.0"
-OVERLAY_SCRIPT="/usr/lib/powos/ramfs/overlay-mount.sh"
-SYNC_DAEMON="/usr/lib/powos/ramfs/sync-daemon.py"
+VERSION="0.3.0"
+LAYER_SYNC="/usr/lib/powos/ramfs/layer-sync.py"
+STATE_DIR="/run/powos"
 
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 usage() {
@@ -22,136 +23,175 @@ PowOS - Portable Gaming Workstation
 Usage: powos <command> [options]
 
 Commands:
-  status          Show system status (USB, overlay, sync)
-  sync            Force sync RAM changes to USB
-  safe            Check if safe to unplug USB
+  status              Show full system status
+  sync                Force sync RAM changes to USB
+  safe                Check if safe to unplug USB
 
-  overlay status  Show overlay details
-  overlay sync    Sync overlays to USB
+  layers              Show active layers
+  layers status       Detailed layer status
+  layers sync         Sync RAM to custom layer now
 
-  hardware        Show detected hardware
-  profile         Show active hardware profile
+  rollback            Show rollback options
+  rollback custom     Boot without custom layer (next boot)
+  rollback updates    Boot without updates layer (next boot)
+  rollback all        Boot with base only (next boot)
+  rollback reset      Clear rollback flags
 
-  version         Show version
+  update              Check for OS updates
+  update apply        Download and apply OS updates
+
+  hardware            Show detected hardware
+  profile             Show active hardware profile
+
+  version             Show version
 
 Examples:
   powos status              # Quick status check
   powos sync                # Force sync now
+  powos layers              # See active layers
+  powos rollback custom     # Skip custom layer on next boot
   powos safe && echo "OK"   # Check before unplugging
 
 EOF
 }
 
+# ═══════════════════════════════════════════════════════════════════
+# Utility Functions
+# ═══════════════════════════════════════════════════════════════════
+
 # Get USB status
 get_usb_status() {
-    if [[ -f /run/powos/usb-state ]]; then
-        source /run/powos/usb-state
+    if [[ -f "$STATE_DIR/usb-state" ]]; then
+        source "$STATE_DIR/usb-state"
         echo "$USB_STATUS"
     else
         echo "unknown"
     fi
 }
 
-# Get RAM overlay usage
-get_ram_usage() {
-    if mountpoint -q /run/powos/overlay 2>/dev/null; then
-        df -h /run/powos/overlay | tail -1 | awk '{print $3 "/" $2}'
-    else
-        echo "N/A"
-    fi
-}
-
-# Check if safe to unplug
-is_safe_to_unplug() {
-    # Check sync status
-    if [[ -f /run/powos/sync-status ]]; then
-        local pending
-        pending=$(python3 -c "import json; print(json.load(open('/run/powos/sync-status')).get('pending_changes', 0))" 2>/dev/null || echo "0")
-        [[ "$pending" == "0" ]]
-    else
-        return 0
-    fi
-}
-
 # Check if running in full ramboot mode
 is_ramboot() {
-    [[ -f /run/powos/ramboot-state ]]
+    [[ -f "$STATE_DIR/ramboot-state" ]]
 }
 
 # Get ramboot info
 get_ramboot_info() {
-    if [[ -f /run/powos/ramboot-state ]]; then
-        source /run/powos/ramboot-state
+    if [[ -f "$STATE_DIR/ramboot-state" ]]; then
+        source "$STATE_DIR/ramboot-state"
         echo "$POWOS_RAM_SIZE"
     else
         echo "N/A"
     fi
 }
 
-# Check if CacheFS is running
-is_cachefs_active() {
-    mountpoint -q /home/powos 2>/dev/null && \
-        [[ -f /run/powos/cachefs-status.json ]]
-}
-
-# Get CacheFS info
-get_cachefs_info() {
-    if [[ -f /run/powos/cachefs-status.json ]]; then
-        python3 -c "
-import json
-try:
-    s = json.load(open('/run/powos/cachefs-status.json'))
-    print(f\"USB: {'Connected' if s.get('usb_connected') else 'Disconnected'}\")
-    print(f\"Pending: {s.get('pending_changes', 0)} files\")
-except: pass
-" 2>/dev/null
+# Get active layers
+get_active_layers() {
+    if [[ -f "$STATE_DIR/ramboot-state" ]]; then
+        source "$STATE_DIR/ramboot-state"
+        echo "$POWOS_LAYERS_ACTIVE"
+    else
+        echo "none"
     fi
 }
 
-# Status command
+# Check if CacheFS is running
+is_cachefs_active() {
+    mountpoint -q /home/powos 2>/dev/null && \
+        [[ -f "$STATE_DIR/cachefs-status.json" ]]
+}
+
+# Check if safe to unplug
+is_safe_to_unplug() {
+    local pending=0
+    for status_file in "$STATE_DIR/layer-sync-status.json" "$STATE_DIR/cachefs-status.json"; do
+        if [[ -f "$status_file" ]]; then
+            local p
+            p=$(python3 -c "import json; print(json.load(open('$status_file')).get('pending_changes', 0))" 2>/dev/null || echo "0")
+            pending=$((pending + p))
+        fi
+    done
+    [[ "$pending" == "0" ]]
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Status Command
+# ═══════════════════════════════════════════════════════════════════
+
 cmd_status() {
-    echo -e "${CYAN}PowOS Status${NC}"
-    echo "============"
+    echo -e "${BOLD}${CYAN}PowOS Status${NC}"
+    echo "════════════════════════════════════════"
     echo ""
 
-    # === OS Status ===
-    echo -e "${CYAN}Operating System${NC}"
+    # === Layers ===
+    echo -e "${CYAN}Active Layers${NC}"
+    local layers
+    layers=$(get_active_layers)
+    if [[ "$layers" != "none" ]]; then
+        echo -e "  Stack:      ${GREEN}$layers${NC}"
+        # Parse and show each layer
+        IFS=',' read -ra LAYER_ARR <<< "$layers"
+        for layer in "${LAYER_ARR[@]}"; do
+            case "$layer" in
+                custom)
+                    echo -e "              ├─ ${GREEN}●${NC} custom (your packages & configs)"
+                    ;;
+                updates)
+                    echo -e "              ├─ ${GREEN}●${NC} updates (OS updates)"
+                    ;;
+                base)
+                    echo -e "              └─ ${GREEN}●${NC} base (Bazzite)"
+                    ;;
+            esac
+        done
+    else
+        echo -e "  Stack:      ${YELLOW}Standard boot (no layers)${NC}"
+    fi
+
+    # Check for skipped layers
+    if [[ -f "$STATE_DIR/ramboot-state" ]]; then
+        source "$STATE_DIR/ramboot-state"
+        if [[ "$POWOS_SKIP_CUSTOM" == "1" ]]; then
+            echo -e "  ${YELLOW}⚠ Custom layer SKIPPED (rollback active)${NC}"
+        fi
+        if [[ "$POWOS_SKIP_UPDATES" == "1" ]]; then
+            echo -e "  ${YELLOW}⚠ Updates layer SKIPPED (rollback active)${NC}"
+        fi
+    fi
+    echo ""
+
+    # === RAM Status ===
+    echo -e "${CYAN}RAM Overlay${NC}"
     if is_ramboot; then
-        echo -e "  Mode:       ${GREEN}● FULL RAM BOOT${NC}"
-        echo "              Entire OS running from RAM"
+        echo -e "  Mode:       ${GREEN}● Running from RAM${NC}"
         local ram_size
         ram_size=$(get_ramboot_info)
-        echo "  RAM:        $ram_size allocated"
+        echo "  Allocated:  $ram_size"
         if [[ -d /run/powos-overlay/upper ]]; then
             local upper_used
             upper_used=$(du -sh /run/powos-overlay/upper 2>/dev/null | cut -f1 || echo "0")
             echo "  Used:       $upper_used (changes since boot)"
         fi
     else
-        echo -e "  Mode:       ${YELLOW}○ Standard${NC}"
-        echo "              OS running from USB (not in RAM)"
+        echo -e "  Mode:       ${YELLOW}○ Standard (no RAM overlay)${NC}"
     fi
     echo ""
 
-    # === User Data Status ===
+    # === User Data ===
     echo -e "${CYAN}User Data (/home)${NC}"
     if is_cachefs_active; then
         echo -e "  Mode:       ${GREEN}● CacheFS (lazy-load)${NC}"
-        echo "              Files load on-demand, cached in RAM"
-        get_cachefs_info | while read -r line; do echo "  $line"; done
-
-        # Show cache usage
-        if [[ -d /run/powos/cachefs ]]; then
-            local cache_used
-            cache_used=$(du -sh /run/powos/cachefs 2>/dev/null | cut -f1 || echo "0")
-            echo "  Cache:      $cache_used in RAM"
+        if [[ -f "$STATE_DIR/cachefs-status.json" ]]; then
+            python3 -c "
+import json
+s = json.load(open('$STATE_DIR/cachefs-status.json'))
+print(f\"  USB:        {'Connected' if s.get('usb_connected') else 'Disconnected'}\")
+print(f\"  Cached:     {s.get('cached_files', 0)} files\")
+" 2>/dev/null || true
         fi
     elif mountpoint -q /home/powos 2>/dev/null; then
-        echo -e "  Mode:       ${CYAN}○ Direct${NC}"
-        echo "              USB mounted directly (no caching)"
+        echo -e "  Mode:       ${CYAN}○ Direct USB${NC}"
     else
-        echo -e "  Mode:       ${YELLOW}○ tmpfs${NC}"
-        echo "              Temporary (no USB detected)"
+        echo -e "  Mode:       ${YELLOW}○ tmpfs (temporary)${NC}"
     fi
     echo ""
 
@@ -165,53 +205,42 @@ cmd_status() {
             ;;
         disconnected)
             echo -e "  Status:     ${YELLOW}○ Disconnected${NC}"
-            if is_ramboot || is_cachefs_active; then
-                echo "              (cached data still accessible)"
-            fi
             ;;
         *)
             echo -e "  Status:     ${RED}? Unknown${NC}"
             ;;
     esac
 
-    # Sync Status
-    if [[ -f /run/powos/cachefs-status.json ]] || [[ -f /run/powos/sync-status ]]; then
+    # Last sync
+    if [[ -f "$STATE_DIR/layer-sync-status.json" ]]; then
         local last_sync
         last_sync=$(python3 -c "
 import json, time
-for f in ['/run/powos/cachefs-status.json', '/run/powos/sync-status']:
-    try:
-        s = json.load(open(f))
-        t = s.get('last_sync', 0)
-        if t > 0:
-            delta = int(time.time() - t)
-            if delta < 60:
-                print(f'{delta}s ago')
-            elif delta < 3600:
-                print(f'{delta // 60}m ago')
-            else:
-                print(f'{delta // 3600}h ago')
-            break
-    except: pass
-else:
-    print('Never')
+s = json.load(open('$STATE_DIR/layer-sync-status.json'))
+t = s.get('last_sync', 0)
+if t > 0:
+    delta = int(time.time() - t)
+    if delta < 60: print(f'{delta}s ago')
+    elif delta < 3600: print(f'{delta // 60}m ago')
+    else: print(f'{delta // 3600}h ago')
+else: print('Never')
 " 2>/dev/null || echo "Unknown")
         echo "  Last Sync:  $last_sync"
     fi
     echo ""
 
-    # === Summary ===
+    # === Protection Summary ===
     echo -e "${CYAN}Unplug Safety${NC}"
     if is_ramboot && is_cachefs_active; then
         echo -e "  ${GREEN}✓ FULLY PROTECTED${NC}"
-        echo "    OS: in RAM, User data: cached"
+        echo "    OS in RAM, user data cached"
         echo "    USB can be unplugged anytime!"
     elif is_ramboot; then
         echo -e "  ${GREEN}✓ OS Protected${NC}"
-        echo "    OS in RAM, but user data may need USB"
+        echo "    OS in RAM, user data may need USB"
     elif is_cachefs_active; then
-        echo -e "  ${CYAN}◐ Partially Protected${NC}"
-        echo "    User data cached, OS still needs USB"
+        echo -e "  ${CYAN}◐ Partial${NC}"
+        echo "    User data cached, OS needs USB"
     else
         echo -e "  ${RED}✗ Not Protected${NC}"
         echo "    USB required for operation"
@@ -219,65 +248,318 @@ else:
     echo ""
 }
 
-# Sync command
-cmd_sync() {
-    echo "Syncing to USB..."
+# ═══════════════════════════════════════════════════════════════════
+# Layers Command
+# ═══════════════════════════════════════════════════════════════════
 
-    if [[ -x "$OVERLAY_SCRIPT" ]]; then
-        "$OVERLAY_SCRIPT" sync
-    else
-        # Fallback
-        bash /usr/lib/powos/ramfs/overlay-mount.sh sync 2>/dev/null || \
-            echo "Overlay script not available"
-    fi
+cmd_layers() {
+    local subcmd="${1:-status}"
+
+    case "$subcmd" in
+        status)
+            echo -e "${BOLD}${CYAN}Layer Stack${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+            echo "  Writes → [RAM Upper] → sync → [Custom Layer] → USB"
+            echo ""
+            echo "  Lower layers (read-only at runtime):"
+
+            local layers
+            layers=$(get_active_layers)
+
+            # Custom layer
+            if [[ "$layers" == *"custom"* ]]; then
+                echo -e "    ${GREEN}●${NC} custom    - Your packages, configs, customizations"
+                if [[ -d /run/powos/usb-layers/layers/custom ]]; then
+                    local size
+                    size=$(du -sh /run/powos/usb-layers/layers/custom 2>/dev/null | cut -f1 || echo "empty")
+                    echo "                  Size: $size"
+                fi
+            else
+                echo -e "    ${YELLOW}○${NC} custom    - (empty or skipped)"
+            fi
+
+            # Updates layer
+            if [[ "$layers" == *"updates"* ]]; then
+                echo -e "    ${GREEN}●${NC} updates   - OS updates"
+                if [[ -d /run/powos/usb-layers/layers/updates ]]; then
+                    local size
+                    size=$(du -sh /run/powos/usb-layers/layers/updates 2>/dev/null | cut -f1 || echo "empty")
+                    echo "                  Size: $size"
+                fi
+            else
+                echo -e "    ${YELLOW}○${NC} updates   - (empty or skipped)"
+            fi
+
+            # Base layer
+            echo -e "    ${GREEN}●${NC} base      - Bazzite OS image"
+            echo ""
+
+            # RAM upper stats
+            echo "  RAM Upper (writes since boot):"
+            if [[ -d /run/powos-overlay/upper ]]; then
+                local files count size
+                count=$(find /run/powos-overlay/upper -type f 2>/dev/null | wc -l)
+                size=$(du -sh /run/powos-overlay/upper 2>/dev/null | cut -f1 || echo "0")
+                echo "    Files changed: $count"
+                echo "    Size: $size"
+            else
+                echo "    (not available)"
+            fi
+            echo ""
+            ;;
+
+        sync)
+            echo "Syncing RAM changes to custom layer..."
+            if [[ -x "$LAYER_SYNC" ]]; then
+                python3 "$LAYER_SYNC" --sync-now
+            else
+                echo "Layer sync not available"
+                exit 1
+            fi
+            ;;
+
+        *)
+            echo "Usage: powos layers {status|sync}"
+            ;;
+    esac
 }
 
-# Safe check command
+# ═══════════════════════════════════════════════════════════════════
+# Rollback Command
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_rollback() {
+    local target="${1:-}"
+    local GRUB_CFG="/etc/default/grub"
+    local KARGS_FILE="/run/powos/rollback-kargs"
+
+    case "$target" in
+        "")
+            echo -e "${BOLD}${CYAN}Rollback Options${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+            echo "Rollback allows you to boot without specific layers."
+            echo "Useful when an update or customization breaks something."
+            echo ""
+            echo "Commands:"
+            echo "  powos rollback custom   - Skip custom layer (next boot)"
+            echo "  powos rollback updates  - Skip updates layer (next boot)"
+            echo "  powos rollback all      - Boot base only (next boot)"
+            echo "  powos rollback reset    - Clear rollback flags"
+            echo ""
+
+            # Show current rollback state
+            if [[ -f "$KARGS_FILE" ]]; then
+                echo -e "${YELLOW}Active rollback flags:${NC}"
+                cat "$KARGS_FILE"
+                echo ""
+            fi
+
+            # Show what layers are currently skipped
+            if [[ -f "$STATE_DIR/ramboot-state" ]]; then
+                source "$STATE_DIR/ramboot-state"
+                if [[ "$POWOS_SKIP_CUSTOM" == "1" ]] || [[ "$POWOS_SKIP_UPDATES" == "1" ]]; then
+                    echo -e "${YELLOW}Currently running with rollback:${NC}"
+                    [[ "$POWOS_SKIP_CUSTOM" == "1" ]] && echo "  - Custom layer skipped"
+                    [[ "$POWOS_SKIP_UPDATES" == "1" ]] && echo "  - Updates layer skipped"
+                fi
+            fi
+            ;;
+
+        custom)
+            echo "Setting rollback: skip custom layer on next boot"
+            mkdir -p "$(dirname "$KARGS_FILE")"
+            echo "rd.powos.skip.custom=1" >> "$KARGS_FILE"
+
+            # Try to update kernel cmdline for next boot
+            if command -v grubby &>/dev/null; then
+                grubby --update-kernel=ALL --args="rd.powos.skip.custom=1" 2>/dev/null || true
+            fi
+
+            echo -e "${GREEN}✓ Custom layer will be skipped on next boot${NC}"
+            echo "  Your customizations won't load - only base + updates"
+            echo "  Run 'powos rollback reset' to undo"
+            ;;
+
+        updates)
+            echo "Setting rollback: skip updates layer on next boot"
+            mkdir -p "$(dirname "$KARGS_FILE")"
+            echo "rd.powos.skip.updates=1" >> "$KARGS_FILE"
+
+            if command -v grubby &>/dev/null; then
+                grubby --update-kernel=ALL --args="rd.powos.skip.updates=1" 2>/dev/null || true
+            fi
+
+            echo -e "${GREEN}✓ Updates layer will be skipped on next boot${NC}"
+            echo "  System updates won't load - only base + custom"
+            echo "  Run 'powos rollback reset' to undo"
+            ;;
+
+        all)
+            echo "Setting rollback: boot with base only"
+            mkdir -p "$(dirname "$KARGS_FILE")"
+            echo "rd.powos.skip.custom=1" > "$KARGS_FILE"
+            echo "rd.powos.skip.updates=1" >> "$KARGS_FILE"
+
+            if command -v grubby &>/dev/null; then
+                grubby --update-kernel=ALL --args="rd.powos.skip.custom=1 rd.powos.skip.updates=1" 2>/dev/null || true
+            fi
+
+            echo -e "${GREEN}✓ Will boot with base layer only${NC}"
+            echo "  No customizations or updates will load"
+            echo "  Run 'powos rollback reset' to undo"
+            ;;
+
+        reset)
+            echo "Clearing rollback flags..."
+            rm -f "$KARGS_FILE"
+
+            if command -v grubby &>/dev/null; then
+                grubby --update-kernel=ALL --remove-args="rd.powos.skip.custom rd.powos.skip.updates" 2>/dev/null || true
+            fi
+
+            echo -e "${GREEN}✓ Rollback flags cleared${NC}"
+            echo "  All layers will load on next boot"
+            ;;
+
+        *)
+            echo "Unknown rollback target: $target"
+            echo "Valid options: custom, updates, all, reset"
+            exit 1
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Update Command
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_update() {
+    local action="${1:-check}"
+
+    case "$action" in
+        check)
+            echo -e "${BOLD}${CYAN}Checking for Updates${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            # Check bootc for base OS updates
+            if command -v bootc &>/dev/null; then
+                echo "Base OS (Bazzite):"
+                bootc upgrade --check 2>/dev/null || echo "  Unable to check (offline?)"
+            else
+                echo "bootc not available - base OS updates not supported"
+            fi
+            echo ""
+
+            # Check for package updates
+            echo "Packages:"
+            if command -v dnf &>/dev/null; then
+                local updates
+                updates=$(dnf check-update --quiet 2>/dev/null | wc -l || echo "0")
+                if [[ "$updates" -gt 0 ]]; then
+                    echo "  $updates package updates available"
+                    echo "  Run 'powos update apply' to install"
+                else
+                    echo "  System is up to date"
+                fi
+            fi
+            ;;
+
+        apply)
+            echo -e "${BOLD}${CYAN}Applying Updates${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            # Ensure USB is connected for persistence
+            if [[ "$(get_usb_status)" != "connected" ]]; then
+                echo -e "${RED}Error: USB not connected${NC}"
+                echo "Updates need USB connected to persist to updates layer"
+                exit 1
+            fi
+
+            # Apply package updates (goes to RAM, syncs to custom layer)
+            if command -v dnf &>/dev/null; then
+                echo "Installing package updates..."
+                dnf upgrade -y
+
+                # Sync to custom layer
+                echo "Syncing to custom layer..."
+                if [[ -x "$LAYER_SYNC" ]]; then
+                    python3 "$LAYER_SYNC" --sync-now
+                fi
+            fi
+
+            # TODO: For major OS updates, use bootc and write to updates layer
+            # This keeps OS updates separate from user customizations
+
+            echo ""
+            echo -e "${GREEN}✓ Updates applied${NC}"
+            echo "  Changes synced to custom layer"
+            echo "  Will persist across reboots"
+            ;;
+
+        *)
+            echo "Usage: powos update {check|apply}"
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Sync Command
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_sync() {
+    echo "Syncing all changes to USB..."
+
+    # Sync layer changes
+    if [[ -x "$LAYER_SYNC" ]]; then
+        python3 "$LAYER_SYNC" --sync-now
+    fi
+
+    # Sync CacheFS if active
+    if [[ -f "$STATE_DIR/cachefs-status.json" ]]; then
+        python3 /usr/lib/powos/cachefs/cachefs-sync.py --sync-now 2>/dev/null || true
+    fi
+
+    echo -e "${GREEN}✓ Sync complete${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Other Commands
+# ═══════════════════════════════════════════════════════════════════
+
 cmd_safe() {
     if is_safe_to_unplug; then
         echo -e "${GREEN}✓ Safe to unplug USB${NC}"
         exit 0
     else
         echo -e "${RED}✗ Not safe - sync in progress${NC}"
+        echo "  Run 'powos sync' first"
         exit 1
     fi
 }
 
-# Hardware command
 cmd_hardware() {
-    if [[ -f /run/powos/hardware ]]; then
-        cat /run/powos/hardware
+    if [[ -f "$STATE_DIR/hardware" ]]; then
+        cat "$STATE_DIR/hardware"
     else
         echo "Hardware not detected yet"
     fi
 }
 
-# Version command
 cmd_version() {
     echo "PowOS version $VERSION"
+    if is_ramboot; then
+        echo "Layers: $(get_active_layers)"
+    fi
 }
 
-# Overlay subcommand
-cmd_overlay() {
-    case "${1:-status}" in
-        status)
-            if [[ -x "$OVERLAY_SCRIPT" ]]; then
-                "$OVERLAY_SCRIPT" status
-            else
-                bash /usr/lib/powos/ramfs/overlay-mount.sh status 2>/dev/null || \
-                    echo "Overlay script not available"
-            fi
-            ;;
-        sync)
-            cmd_sync
-            ;;
-        *)
-            echo "Usage: powos overlay {status|sync}"
-            ;;
-    esac
-}
+# ═══════════════════════════════════════════════════════════════════
+# Main Dispatch
+# ═══════════════════════════════════════════════════════════════════
 
-# Main dispatch
 case "${1:-}" in
     status)
         cmd_status
@@ -288,9 +570,17 @@ case "${1:-}" in
     safe)
         cmd_safe
         ;;
-    overlay)
+    layers)
         shift
-        cmd_overlay "$@"
+        cmd_layers "$@"
+        ;;
+    rollback)
+        shift
+        cmd_rollback "$@"
+        ;;
+    update)
+        shift
+        cmd_update "$@"
         ;;
     hardware)
         cmd_hardware

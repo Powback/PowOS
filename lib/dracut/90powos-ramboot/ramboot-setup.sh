@@ -1,11 +1,14 @@
 #!/bin/bash
-# ramboot-setup.sh - Set up RAM overlay before pivot_root
+# ramboot-setup.sh - Set up layered RAM overlay before pivot_root
 #
 # This runs during initramfs, after root is mounted at $NEWROOT but
-# before the system switches to it. We intercept and wrap the root
-# in an overlayfs with RAM as the upper layer.
+# before the system switches to it. We set up a multi-layer overlayfs:
 #
-# Result: Entire OS runs from RAM overlay, USB can be unplugged.
+#   upper: RAM (tmpfs)     - all runtime writes go here
+#   lower: custom:updates:base  - stacked persistent layers
+#
+# Result: Entire OS runs from RAM, changes sync to custom layer,
+#         updates are separate, everything can be rolled back.
 
 type getarg >/dev/null 2>&1 || . /lib/dracut-lib.sh
 
@@ -18,28 +21,107 @@ fi
 RAM_SIZE=$(getarg rd.powos.ramsize=)
 RAM_SIZE=${RAM_SIZE:-8G}
 
-info "PowOS ramboot: Setting up RAM overlay (${RAM_SIZE})"
+# Rollback options (kernel cmdline)
+SKIP_CUSTOM=$(getargbool 0 rd.powos.skip.custom)
+SKIP_UPDATES=$(getargbool 0 rd.powos.skip.updates)
 
-# Directories
+info "PowOS ramboot: Setting up layered RAM overlay (${RAM_SIZE})"
+[[ "$SKIP_CUSTOM" == "1" ]] && info "PowOS ramboot: ROLLBACK - skipping custom layer"
+[[ "$SKIP_UPDATES" == "1" ]] && info "PowOS ramboot: ROLLBACK - skipping updates layer"
+
+# === Directory Setup ===
 OVERLAY_BASE="/run/powos-overlay"
-LOWER="${NEWROOT}"
+USB_LAYERS="/run/powos-usb-layers"
+
+# The original root from USB (will become base layer)
+BASE_LAYER="${NEWROOT}"
+
+# Create overlay structure
+mkdir -p "$OVERLAY_BASE" "$USB_LAYERS"
+
+# === Mount tmpfs for RAM upper layer ===
+info "PowOS ramboot: Creating tmpfs (${RAM_SIZE}) for overlay upper"
+mount -t tmpfs -o "size=${RAM_SIZE},mode=0755" tmpfs "$OVERLAY_BASE"
+
 UPPER="${OVERLAY_BASE}/upper"
 WORK="${OVERLAY_BASE}/work"
 MERGED="${OVERLAY_BASE}/merged"
+mkdir -p "$UPPER" "$WORK" "$MERGED"
 
-# Create overlay structure
-mkdir -p "$OVERLAY_BASE" "$UPPER" "$WORK" "$MERGED"
+# === Detect and mount USB data partition for layers ===
+# Look for POWOS-DATA partition which holds our layers
+USB_DATA_DEV=""
+for dev in /dev/sd* /dev/nvme*; do
+    if blkid "$dev" 2>/dev/null | grep -q "POWOS-DATA"; then
+        USB_DATA_DEV="$dev"
+        break
+    fi
+done
 
-# Create tmpfs for upper layer (this is our RAM storage)
-info "PowOS ramboot: Creating tmpfs (${RAM_SIZE}) for overlay upper"
-mount -t tmpfs -o "size=${RAM_SIZE},mode=0755" tmpfs "$OVERLAY_BASE"
-mkdir -p "$UPPER" "$WORK"
+LAYERS_AVAILABLE=""
 
-# Set up overlayfs
-# Lower = original root (USB), Upper = RAM, Merged = what system sees
-info "PowOS ramboot: Mounting overlayfs"
+if [[ -n "$USB_DATA_DEV" ]]; then
+    info "PowOS ramboot: Found USB data partition: $USB_DATA_DEV"
+    mkdir -p "$USB_LAYERS"
+
+    if mount "$USB_DATA_DEV" "$USB_LAYERS" 2>/dev/null; then
+        info "PowOS ramboot: USB layers mounted"
+
+        # Create layer directories if they don't exist
+        mkdir -p "$USB_LAYERS/layers/custom"
+        mkdir -p "$USB_LAYERS/layers/updates"
+
+        # Build lower layer string (order matters: first = highest priority)
+        # Format: custom:updates:base
+        LOWER_LAYERS=""
+
+        # Add custom layer (user customizations)
+        if [[ "$SKIP_CUSTOM" != "1" ]] && [[ -d "$USB_LAYERS/layers/custom" ]]; then
+            if [[ -n "$(ls -A "$USB_LAYERS/layers/custom" 2>/dev/null)" ]]; then
+                LOWER_LAYERS="$USB_LAYERS/layers/custom"
+                LAYERS_AVAILABLE="${LAYERS_AVAILABLE}custom,"
+                info "PowOS ramboot: + custom layer"
+            fi
+        fi
+
+        # Add updates layer (OS updates)
+        if [[ "$SKIP_UPDATES" != "1" ]] && [[ -d "$USB_LAYERS/layers/updates" ]]; then
+            if [[ -n "$(ls -A "$USB_LAYERS/layers/updates" 2>/dev/null)" ]]; then
+                if [[ -n "$LOWER_LAYERS" ]]; then
+                    LOWER_LAYERS="${LOWER_LAYERS}:$USB_LAYERS/layers/updates"
+                else
+                    LOWER_LAYERS="$USB_LAYERS/layers/updates"
+                fi
+                LAYERS_AVAILABLE="${LAYERS_AVAILABLE}updates,"
+                info "PowOS ramboot: + updates layer"
+            fi
+        fi
+
+        # Always add base layer last
+        if [[ -n "$LOWER_LAYERS" ]]; then
+            LOWER_LAYERS="${LOWER_LAYERS}:${BASE_LAYER}"
+        else
+            LOWER_LAYERS="${BASE_LAYER}"
+        fi
+        LAYERS_AVAILABLE="${LAYERS_AVAILABLE}base"
+        info "PowOS ramboot: + base layer"
+    else
+        warn "PowOS ramboot: Failed to mount USB layers, using base only"
+        LOWER_LAYERS="${BASE_LAYER}"
+        LAYERS_AVAILABLE="base"
+    fi
+else
+    info "PowOS ramboot: No USB data partition found, using base only"
+    LOWER_LAYERS="${BASE_LAYER}"
+    LAYERS_AVAILABLE="base"
+fi
+
+# === Mount the stacked overlayfs ===
+info "PowOS ramboot: Mounting overlayfs with layers: $LAYERS_AVAILABLE"
+info "PowOS ramboot: lowerdir=$LOWER_LAYERS"
+
 if mount -t overlay overlay \
-    -o "lowerdir=${LOWER},upperdir=${UPPER},workdir=${WORK}" \
+    -o "lowerdir=${LOWER_LAYERS},upperdir=${UPPER},workdir=${WORK}" \
     "$MERGED"; then
     info "PowOS ramboot: Overlay mounted successfully"
 else
@@ -47,23 +129,40 @@ else
     return 0
 fi
 
-# Move the original root mount to a subdirectory in the overlay
-# This allows us to access USB later for sync operations
+# === Make USB accessible in the new root ===
+# Bind mount the USB layers into the merged root for sync daemon access
+if [[ -d "$USB_LAYERS/layers" ]]; then
+    mkdir -p "${MERGED}/run/powos/usb-layers"
+    mount --bind "$USB_LAYERS" "${MERGED}/run/powos/usb-layers"
+fi
+
+# Keep reference to original USB root
 mkdir -p "${MERGED}/run/powos/usb-root"
 
-# The key trick: replace NEWROOT with our overlay
-# Dracut will pivot_root to NEWROOT, which is now our RAM overlay
+# === The key: replace NEWROOT with our overlay ===
 export NEWROOT="$MERGED"
 
-# Store state for userspace
+# === Store state for userspace ===
 mkdir -p "${MERGED}/run/powos"
 cat > "${MERGED}/run/powos/ramboot-state" << EOF
 POWOS_RAMBOOT=1
-POWOS_OVERLAY_LOWER=${LOWER}
+POWOS_OVERLAY_BASE=${OVERLAY_BASE}
 POWOS_OVERLAY_UPPER=${UPPER}
 POWOS_OVERLAY_MERGED=${MERGED}
 POWOS_RAM_SIZE=${RAM_SIZE}
+POWOS_LAYERS_ACTIVE=${LAYERS_AVAILABLE}
+POWOS_USB_LAYERS=${USB_LAYERS}
+POWOS_SKIP_CUSTOM=${SKIP_CUSTOM}
+POWOS_SKIP_UPDATES=${SKIP_UPDATES}
 EOF
 
-info "PowOS ramboot: Ready - system will run from RAM"
+# Store layer paths for sync daemon
+cat > "${MERGED}/run/powos/layer-paths" << EOF
+CUSTOM_LAYER=${USB_LAYERS}/layers/custom
+UPDATES_LAYER=${USB_LAYERS}/layers/updates
+RAM_UPPER=${UPPER}
+EOF
+
+info "PowOS ramboot: Ready - system will run from layered RAM overlay"
+info "PowOS ramboot: Active layers: $LAYERS_AVAILABLE"
 info "PowOS ramboot: USB can be safely unplugged after boot"

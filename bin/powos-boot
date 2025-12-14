@@ -70,12 +70,12 @@ if [[ -d "/usr/lib/powos/overlays" ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-# 4. RAM Overlay (Unplug Resilience)
+# 4. RAM Overlay (Unplug Resilience) + Layer Sync
 # ═══════════════════════════════════════════════════════════════════
 log "Checking RAM Overlay status..."
 
 RAMBOOT_STATE="/run/powos/ramboot-state"
-OVERLAY_SCRIPT="/usr/lib/powos/ramfs/overlay-mount.sh"
+LAYER_SYNC="/usr/lib/powos/ramfs/layer-sync.py"
 
 # Check if we booted with full RAM boot (dracut module set this up)
 if [[ -f "$RAMBOOT_STATE" ]]; then
@@ -83,8 +83,26 @@ if [[ -f "$RAMBOOT_STATE" ]]; then
     log_ok "Full RAM boot active (set up by initramfs)"
     log "  Entire OS running from RAM - USB can be unplugged anytime"
     log "  RAM allocated: ${POWOS_RAM_SIZE:-unknown}"
+    log "  Active layers: ${POWOS_LAYERS_ACTIVE:-base}"
 
-    # Run userspace init for sync daemon etc
+    # Show layer status
+    if [[ "$POWOS_SKIP_CUSTOM" == "1" ]]; then
+        log_warn "  ROLLBACK: Custom layer skipped"
+    fi
+    if [[ "$POWOS_SKIP_UPDATES" == "1" ]]; then
+        log_warn "  ROLLBACK: Updates layer skipped"
+    fi
+
+    # Start layer sync daemon (syncs RAM changes to custom layer on USB)
+    if [[ -x "$LAYER_SYNC" ]] && [[ -f /run/powos/layer-paths ]]; then
+        log "  Starting layer sync daemon..."
+        python3 "$LAYER_SYNC" --interval 60 &
+        LAYER_SYNC_PID=$!
+        log "  Layer sync daemon started (PID: $LAYER_SYNC_PID)"
+        log "  RAM changes will sync to custom layer every 60s"
+    fi
+
+    # Run userspace init for additional setup
     if [[ -x /usr/lib/powos/overlay-init.sh ]]; then
         /usr/lib/powos/overlay-init.sh 2>&1 | while read -r line; do log "    $line"; done
     fi
@@ -242,24 +260,44 @@ echo "  noVNC Access:  http://localhost:6091/vnc.html"
 echo "  VNC Direct:    localhost:5901"
 echo "  Password:      powos"
 echo ""
+
+# Layer status
 if [[ "$OVERLAY_ENABLED" == "ramboot" ]]; then
+    echo -e "  ${GREEN}Layers:${NC}        ${POWOS_LAYERS_ACTIVE:-base}"
     echo -e "  ${GREEN}OS:${NC}            Running from RAM (full ramboot)"
+    if [[ -n "$LAYER_SYNC_PID" ]]; then
+        echo "                 Changes sync to custom layer every 60s"
+    fi
 else
     echo -e "  ${YELLOW}OS:${NC}            Standard boot (no ramboot)"
 fi
 
+# User data status
 if [[ "$CACHEFS_ENABLED" == "true" ]]; then
     echo -e "  ${GREEN}User Data:${NC}     CacheFS (lazy-load + ${CACHE_SIZE} cache)"
     echo "                 Files load on access, stay in RAM"
-    echo "                 USB can be unplugged - cached files work"
 elif [[ "$USB_DETECTED" == "true" ]]; then
     echo -e "  ${CYAN}User Data:${NC}     Direct USB (no lazy-load)"
 else
     echo -e "  ${YELLOW}User Data:${NC}     tmpfs (no USB detected)"
 fi
 
+# Protection status
 echo ""
-echo "  Run 'powos status' for details"
+if [[ "$OVERLAY_ENABLED" == "ramboot" ]] && [[ "$CACHEFS_ENABLED" == "true" ]]; then
+    echo -e "  ${GREEN}✓ FULLY PROTECTED${NC} - USB can be unplugged anytime!"
+elif [[ "$OVERLAY_ENABLED" == "ramboot" ]]; then
+    echo -e "  ${GREEN}✓ OS Protected${NC} - OS in RAM, user data may need USB"
+else
+    echo -e "  ${YELLOW}○ Standard Mode${NC} - USB required"
+fi
+
+echo ""
+echo "  Commands:"
+echo "    powos status     - Full system status"
+echo "    powos layers     - View layer stack"
+echo "    powos sync       - Force sync to USB"
+echo "    powos rollback   - Rollback options"
 echo ""
 
 exec tail -f /dev/null

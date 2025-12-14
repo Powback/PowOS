@@ -20,40 +20,56 @@ Then burn the ISO to your USB SSD and boot from it. Everything else is automatic
 
 Working on your desktop, need to leave? **Just yank the USB drive out.** The system continues running. Plug back in later - changes sync automatically.
 
-**How is this possible?**
+### Layered Persistence - Install Anything, Rollback Anytime
 
-PowOS uses a two-layer approach:
+Unlike traditional "immutable" systems where you can't modify the OS, PowOS uses **layered persistence**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    LAYER 1: OS IN RAM (dracut + overlayfs)                   │
+│                         HOW LAYERS WORK                                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  During boot, a dracut module copies the entire OS to RAM:                   │
+│  ┌─────────────────┐                                                         │
+│  │   RAM (upper)   │ ← All writes go here first (instant)                    │
+│  └────────┬────────┘                                                         │
+│           │ syncs every 60s                                                  │
+│           ▼                                                                  │
+│  ┌─────────────────┐                                                         │
+│  │  Custom Layer   │ ← Your packages, configs, customizations                │
+│  └────────┬────────┘   (persists across reboots)                             │
+│           │                                                                  │
+│  ┌─────────────────┐                                                         │
+│  │  Updates Layer  │ ← OS updates (separate from your stuff)                 │
+│  └────────┬────────┘                                                         │
+│           │                                                                  │
+│  ┌─────────────────┐                                                         │
+│  │   Base (Bazzite)│ ← Original OS image                                     │
+│  └─────────────────┘                                                         │
 │                                                                              │
-│    USB (read-only)  +  RAM (writes)  =  Running System                       │
-│         lower            upper            merged                             │
-│                                                                              │
-│  Result: All of /usr, /etc, /var, running processes → IN RAM                 │
-│  USB can be unplugged → OS keeps running                                     │
+│  Install anything: dnf install neovim → goes to RAM → syncs to custom layer  │
+│  Update broke something? → powos rollback updates → skip that layer          │
+│  Your customization broke? → powos rollback custom → skip that layer         │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
+```
 
+**Key insight:** You're NOT locked into an immutable system. Install packages, change configs, do whatever - it all persists. But if something breaks, you can roll back individual layers without losing everything.
+
+### User Data - Lazy Loading for 4TB
+
+Your 4TB of files can't fit in RAM. CacheFS solves this:
+
+```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    LAYER 2: USER DATA (CacheFS - lazy loading)               │
+│                         USER DATA (CacheFS)                                  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  Your 4TB of files can't fit in RAM. CacheFS solves this:                    │
+│  IN RAM (always):                                                            │
+│  ├─ File metadata (names, sizes, permissions) ─── instant ls/find           │
+│  └─ LRU cache of accessed files ───────────────── 4GB of hot files          │
 │                                                                              │
-│    IN RAM (always):                                                          │
-│    ├─ File metadata (names, sizes, permissions) ─── instant ls/find         │
-│    └─ LRU cache of accessed files ───────────────── 4GB of hot files        │
-│                                                                              │
-│    ON USB (lazy-loaded):                                                     │
-│    └─ Actual file contents ──────────────────────── 4TB                      │
-│                                                                              │
-│  Access pattern:                                                             │
-│    cat file.txt → in cache? serve instantly : load from USB, cache it       │
+│  ON USB (lazy-loaded):                                                       │
+│  └─ Actual file contents ──────────────────────── 4TB                        │
 │                                                                              │
 │  USB unplugged:                                                              │
 │    ls ~/Documents/     → works (metadata in RAM)                             │
@@ -98,101 +114,43 @@ open http://localhost:6091/vnc.html
 docker exec powos powos status
 ```
 
-In Docker you'll see "Standard" boot mode and "tmpfs" for user data - that's correct because Docker doesn't have real hardware boot or USB. On real hardware, it enables full RAM boot and CacheFS automatically.
-
-## Creating the ISO
-
-```bash
-# Build bootable ISO (requires podman)
-just build-iso
-
-# Output: build/output/powos.iso
-```
-
-Then write to USB:
-- **Linux**: `sudo dd if=build/output/powos.iso of=/dev/sdX bs=4M status=progress`
-- **Windows**: Rufus, Etcher, or similar
-- **macOS**: `sudo dd if=build/output/powos.iso of=/dev/diskN bs=4m`
-
-## What Happens on Real Hardware Boot
-
-```
-1. BIOS/UEFI loads PowOS from USB
-
-2. Dracut module activates RAM boot
-   → Creates 8GB+ tmpfs for OS overlay
-   → USB becomes read-only lower layer
-   → All writes go to RAM
-   → ENTIRE OS NOW IN RAM
-
-3. Chameleon Boot detects hardware
-   → GPU type (NVIDIA/AMD/Intel)
-   → Power source (AC/Battery)
-   → Applies matching profile
-
-4. CacheFS mounts user data
-   → Scans USB for file metadata → loads to RAM
-   → Sets up 4GB LRU cache for file contents
-   → Files lazy-load on first access
-
-5. KDE Plasma desktop starts
-
-6. You're ready to work - USB is now OPTIONAL
-```
-
-**Unplugging USB:**
-- OS keeps running (entire OS in RAM)
-- Cached files still accessible
-- New files you access will be "offline"
-- Desktop notification: "USB disconnected - running from cache"
-
-**Replugging USB:**
-- Sync daemon detects reconnection
-- Dirty files synced back to USB
-- Uncached files become accessible again
-- Desktop notification: "Sync complete"
-
-## USB Drive Setup
-
-PowOS expects this partition layout:
-
-```
-USB SSD (e.g., Lexar NM790 4TB)
-├── Partition 1: EFI (512MB, FAT32)
-├── Partition 2: PowOS System (100GB, BTRFS)
-│   └── Base OS, overlays, state
-└── Partition 3: User Data (remainder, BTRFS)
-    └── Label: POWOS-DATA (auto-detected)
-```
+In Docker you'll see "Standard" boot mode - that's correct because Docker doesn't have real hardware boot. On real hardware, it enables full RAM boot with layers automatically.
 
 ## Key Commands
 
 | Command | What it does |
 |---------|--------------|
-| `docker compose up` | Test PowOS in Docker |
-| `just build-iso` | Create bootable ISO |
-| `powos status` | Show OS mode, user data mode, USB state |
-| `powos sync` | Force sync cached changes to USB |
+| `powos status` | Show layers, RAM usage, USB state |
+| `powos layers` | Detailed layer stack view |
+| `powos sync` | Force sync RAM changes to USB |
+| `powos rollback` | Show rollback options |
+| `powos rollback custom` | Skip custom layer next boot |
+| `powos rollback updates` | Skip updates layer next boot |
+| `powos rollback reset` | Clear rollback, use all layers |
+| `powos update` | Check for OS updates |
 | `pinstall <pkg>` | Install package + commit to git |
 
 ## powos status Output
 
 ```
 PowOS Status
-============
+════════════════════════════════════════
 
-Operating System
-  Mode:       ● FULL RAM BOOT
-              Entire OS running from RAM
-  RAM:        8G allocated
+Active Layers
+  Stack:      custom,updates,base
+              ├─ ● custom (your packages & configs)
+              ├─ ● updates (OS updates)
+              └─ ● base (Bazzite)
+
+RAM Overlay
+  Mode:       ● Running from RAM
+  Allocated:  8G
   Used:       1.2G (changes since boot)
 
 User Data (/home)
   Mode:       ● CacheFS (lazy-load)
-              Files load on-demand, cached in RAM
   USB:        Connected
-  Pending:    0 files
-  Cache:      847M in RAM
+  Cached:     142 files
 
 USB Drive
   Status:     ● Connected
@@ -200,15 +158,99 @@ USB Drive
 
 Unplug Safety
   ✓ FULLY PROTECTED
-    OS: in RAM, User data: cached
+    OS in RAM, user data cached
     USB can be unplugged anytime!
+```
+
+## powos layers Output
+
+```
+Layer Stack
+════════════════════════════════════════
+
+  Writes → [RAM Upper] → sync → [Custom Layer] → USB
+
+  Lower layers (read-only at runtime):
+    ● custom    - Your packages, configs, customizations
+                  Size: 2.1G
+    ● updates   - OS updates
+                  Size: 156M
+    ● base      - Bazzite OS image
+
+  RAM Upper (writes since boot):
+    Files changed: 47
+    Size: 89M
+```
+
+## Rollback Examples
+
+```bash
+# Something broke after installing a package?
+powos rollback custom
+# Reboot → runs without your custom layer
+# Fix the issue, then:
+powos rollback reset
+
+# OS update broke something?
+powos rollback updates
+# Reboot → runs without updates layer
+# Your customizations still work!
+
+# Everything broken? Go back to pure base:
+powos rollback all
+# Reboot → clean Bazzite, no customizations, no updates
+```
+
+## What Happens on Real Hardware Boot
+
+```
+1. BIOS/UEFI loads PowOS from USB
+
+2. Dracut module sets up layered overlay
+   → Mounts base image (read-only)
+   → Stacks updates layer (if present)
+   → Stacks custom layer (if present)
+   → Creates RAM upper layer (8GB+ tmpfs)
+   → ENTIRE OS NOW IN RAM
+
+3. Chameleon Boot detects hardware
+   → GPU type (NVIDIA/AMD/Intel)
+   → Power source (AC/Battery)
+   → Applies matching profile
+
+4. Layer sync daemon starts
+   → Syncs RAM changes to custom layer every 60s
+   → Changes persist across reboots
+
+5. CacheFS mounts user data
+   → Scans USB for file metadata → loads to RAM
+   → Sets up 4GB LRU cache for file contents
+
+6. KDE Plasma desktop starts
+
+7. You're ready to work - USB is now OPTIONAL
+```
+
+## USB Drive Layout
+
+```
+USB SSD (e.g., Lexar NM790 4TB)
+├── Partition 1: EFI (512MB, FAT32)
+├── Partition 2: PowOS System (100GB, BTRFS)
+│   └── Base OS image
+└── Partition 3: Data (remainder, BTRFS)
+    └── Label: POWOS-DATA
+        ├── layers/
+        │   ├── custom/     ← Your customizations
+        │   └── updates/    ← OS updates
+        └── home/           ← User data (CacheFS source)
 ```
 
 ## RAM Requirements
 
 | Mode | RAM Needed | What's Protected |
 |------|------------|------------------|
-| OS only (ramboot) | 8-20 GB | Operating system |
+| OS layers (ramboot) | 8-20 GB | Operating system + customizations |
 | User cache (CacheFS) | 4 GB | Recently accessed files |
 | **Total recommended** | **16-32 GB** | **Full unplug resilience** |
 
@@ -234,18 +276,19 @@ PowOS/
 │
 ├── bin/                       # User commands
 │   ├── powos-boot             # Main boot script
-│   ├── powos                  # CLI (status, sync)
+│   ├── powos                  # CLI (status, sync, layers, rollback)
 │   └── pinstall               # Install + git commit
 │
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot
 │   ├── overlay-manager.sh     # systemd-sysext builder
 │   ├── dracut/                # RAM boot module
-│   │   └── 90powos-ramboot/   # Dracut module for full RAM boot
-│   ├── cachefs/               # User data lazy-loading
-│   │   ├── powos-cachefs.py   # FUSE filesystem
-│   │   └── cachefs-sync.py    # Sync daemon
-│   └── ramfs/                 # Legacy overlay system
+│   │   └── 90powos-ramboot/   # Dracut module for layered RAM boot
+│   ├── ramfs/                 # Layer management
+│   │   └── layer-sync.py      # Syncs RAM to custom layer
+│   └── cachefs/               # User data lazy-loading
+│       ├── powos-cachefs.py   # FUSE filesystem
+│       └── cachefs-sync.py    # Sync daemon
 │
 ├── config/
 │   ├── profiles/              # Hardware profiles
@@ -254,13 +297,26 @@ PowOS/
 ├── sources/                   # Overlay source code
 │   ├── gpu-nvidia/
 │   ├── gpu-amd/
-│   ├── device-steamdeck/
 │   └── ...
 │
 └── build/
     ├── build-iso.sh           # ISO creation script
     └── output/                # Built ISOs go here
 ```
+
+## Creating the ISO
+
+```bash
+# Build bootable ISO (requires podman)
+just build-iso
+
+# Output: build/output/powos.iso
+```
+
+Then write to USB:
+- **Linux**: `sudo dd if=build/output/powos.iso of=/dev/sdX bs=4M status=progress`
+- **Windows**: Rufus, Etcher, or similar
+- **macOS**: `sudo dd if=build/output/powos.iso of=/dev/diskN bs=4m`
 
 ## Credentials
 
@@ -271,37 +327,34 @@ User login:   powos / powos
 
 ## Troubleshooting
 
-**Desktop won't load in Docker?**
-```bash
-docker compose logs powos | tail -50
-```
-
 **Check system status:**
 ```bash
 powos status
+powos layers
 ```
 
-**RAM boot not activating on real hardware?**
+**RAM boot not activating?**
 ```bash
-# Check kernel cmdline
 cat /proc/cmdline | grep powos
-
 # Should contain: rd.powos.ramboot=1
 ```
 
-**CacheFS not working?**
+**Rollback not working?**
 ```bash
-# Check if USB detected
-blkid | grep POWOS-DATA
+powos rollback
+# Shows current rollback state and options
+```
 
-# Check mounts
-mount | grep cachefs
+**Force sync before unplugging:**
+```bash
+powos sync
+powos safe  # Returns 0 if safe to unplug
 ```
 
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md) - Technical reference for developers
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Full system architecture (5 layers)
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Full system architecture
 - [USER_STORIES.md](USER_STORIES.md) - Feature requirements
 
 ## License
