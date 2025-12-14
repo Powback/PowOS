@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # build.sh - Build KDE applications from source
 #
-# Usage:
-#   OVERLAY_NAME=kde:dolphin ./build.sh    # Build Dolphin
-#   OVERLAY_NAME=kde:konsole ./build.sh    # Build Konsole
+# Workflow:
+#   1. powos source get kde:dolphin     # Fetch source
+#   2. Edit files in sources/kde/upstream/dolphin/
+#   3. powos source build kde:dolphin   # Build your modified version
+#   4. powos source save kde:dolphin    # (Optional) Save changes as patches
 #
-# This script builds individual KDE apps from the shared KDE source.
+# Your edits are built directly - no manual patch creation needed!
 
 set -euo pipefail
 
@@ -33,49 +35,55 @@ UPSTREAM_DIR="$SRC_DIR/upstream"
 APP_DIR="$UPSTREAM_DIR/$APP_NAME"
 PATCHES_DIR="$SRC_DIR/patches/$APP_NAME"
 
-# Check if app source exists
+# Check if app source exists - auto-fetch if not
 if [[ ! -d "$APP_DIR" ]]; then
-    echo "App source not found: $APP_DIR"
-    echo "Run 'powos source get kde' first, or fetching now..."
-
-    # Fetch just this app
+    echo "Source not found, fetching $APP_NAME..."
     mkdir -p "$UPSTREAM_DIR"
     source "$SRC_DIR/source.conf"
 
-    echo "Cloning $APP_NAME..."
-    case "$APP_NAME" in
-        dolphin|gwenview|spectacle|ark)
-            git clone --depth 1 "$KDE_INVENT_URL/system/$APP_NAME.git" "$APP_DIR"
-            ;;
-        konsole|kate|okular)
-            git clone --depth 1 "$KDE_INVENT_URL/utilities/$APP_NAME.git" "$APP_DIR"
-            ;;
-        *)
-            # Try system first, then utilities
-            git clone --depth 1 "$KDE_INVENT_URL/system/$APP_NAME.git" "$APP_DIR" 2>/dev/null || \
-            git clone --depth 1 "$KDE_INVENT_URL/utilities/$APP_NAME.git" "$APP_DIR"
-            ;;
-    esac
+    # Map apps to KDE Invent categories
+    declare -A APP_CATEGORIES=(
+        [dolphin]="system"
+        [gwenview]="graphics"
+        [spectacle]="graphics"
+        [ark]="utilities"
+        [konsole]="utilities"
+        [kate]="utilities"
+        [okular]="graphics"
+    )
+    local category="${APP_CATEGORIES[$APP_NAME]:-system}"
+
+    git clone "$KDE_INVENT_URL/$category/$APP_NAME.git" "$APP_DIR" 2>/dev/null || \
+    git clone "$KDE_INVENT_URL/system/$APP_NAME.git" "$APP_DIR" 2>/dev/null || \
+    git clone "$KDE_INVENT_URL/utilities/$APP_NAME.git" "$APP_DIR"
+
+    echo "✓ Source fetched"
+    echo ""
 fi
 
-# Apply patches if any exist
-if [[ -d "$PATCHES_DIR" ]] && ls "$PATCHES_DIR"/*.patch 1>/dev/null 2>&1; then
-    echo "Applying patches..."
-    cd "$APP_DIR"
+# Check for uncommitted changes (user's edits)
+cd "$APP_DIR"
+if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+    echo "📝 Building with your local modifications"
+    git status --short | head -10
+    echo ""
+fi
+
+# Apply saved patches only on fresh clone (no local changes)
+if [[ -z "$(git status --porcelain 2>/dev/null)" ]] && [[ -d "$PATCHES_DIR" ]] && ls "$PATCHES_DIR"/*.patch 1>/dev/null 2>&1; then
+    echo "Applying saved patches..."
     for patch in "$PATCHES_DIR"/*.patch; do
         [[ -f "$patch" ]] || continue
         echo "  $(basename "$patch")"
         git apply "$patch" 2>/dev/null || patch -p1 < "$patch" || true
     done
-    cd - >/dev/null
+    echo ""
 fi
 
 # Prepare output directories
 mkdir -p "$OUTPUT_DIR/usr/bin"
 mkdir -p "$OUTPUT_DIR/usr/lib64"
 mkdir -p "$OUTPUT_DIR/usr/share/applications"
-
-cd "$APP_DIR"
 
 # Create build directory
 rm -rf build
@@ -97,5 +105,8 @@ make -j$(nproc)
 echo "Installing to overlay..."
 make install DESTDIR="$OUTPUT_DIR"
 
+echo ""
 echo "✅ Built: KDE $APP_NAME"
 echo "   Location: $OUTPUT_DIR"
+echo ""
+echo "💡 To save your changes: powos source save kde:$APP_NAME"

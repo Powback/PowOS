@@ -61,9 +61,11 @@ Commands:
 
   source              List available source overlays
   source new <name>   Create new source overlay template
-  source get <name>   Fetch upstream source code
-  source build <name> Build overlay from source
+  source get <name>   Fetch upstream source code (supports kde:app syntax)
+  source build <name> Build overlay from source (builds your local edits)
+  source save <name>  Save local edits as patches (for backup)
   source enable <name> Enable overlay (overrides system version)
+  source disable <name> Disable overlay (restore system version)
 
   version             Show version
 
@@ -77,6 +79,12 @@ Examples:
   powos install neovim htop           # Install to host
   powos install -c dev nodejs npm     # Install to 'dev' container
   powos install -c arch -e firefox    # Install Firefox in Arch, export to host menu
+
+  # Customize KDE apps:
+  powos source get kde:dolphin        # Fetch Dolphin source
+  # Edit files in sources/kde/upstream/dolphin/
+  powos source build kde:dolphin      # Build with your changes
+  powos source enable dolphin         # Use your custom Dolphin
 
   powos containers create dev         # Create Fedora dev container
   powos containers enter dev          # Enter the container
@@ -1196,6 +1204,69 @@ cmd_source() {
 
             echo -e "${GREEN}✓ Overlay disabled${NC}"
             echo "  System $name restored"
+            ;;
+
+        save)
+            # Save local changes as patches (for backup/sharing)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos source save <name>"
+                echo "       powos source save kde:dolphin"
+                echo ""
+                echo "Saves your local edits as patch files."
+                echo "Useful for backup or sharing your modifications."
+                return 1
+            fi
+
+            # Handle kde:app syntax
+            local base_name="${name%%:*}"
+            local app_name="${name#*:}"
+            [[ "$base_name" == "$app_name" ]] && app_name=""
+
+            local src_dir="$SOURCES_DIR/$base_name"
+
+            if [[ -n "$app_name" ]]; then
+                # KDE app
+                local upstream_dir="$src_dir/upstream/$app_name"
+                local patches_dir="$src_dir/patches/$app_name"
+            else
+                # Regular source
+                local upstream_dir="$src_dir/upstream"
+                local patches_dir="$src_dir/patches"
+            fi
+
+            if [[ ! -d "$upstream_dir" ]]; then
+                echo -e "${RED}No source found at $upstream_dir${NC}"
+                return 1
+            fi
+
+            cd "$upstream_dir"
+
+            # Check for changes
+            if [[ -z "$(git status --porcelain 2>/dev/null)" ]]; then
+                echo "No local changes to save."
+                return 0
+            fi
+
+            mkdir -p "$patches_dir"
+
+            # Generate patch from uncommitted changes
+            local timestamp=$(date +%Y%m%d-%H%M%S)
+            local patch_file="$patches_dir/local-changes-$timestamp.patch"
+
+            echo -e "${CYAN}Saving changes to patch...${NC}"
+            git diff > "$patch_file"
+            git diff --staged >> "$patch_file"
+
+            # Show what was saved
+            local lines=$(wc -l < "$patch_file")
+            echo -e "${GREEN}✓ Changes saved${NC}"
+            echo "  Patch: $patch_file"
+            echo "  Lines: $lines"
+            echo ""
+            echo "Your edits are preserved. You can now:"
+            echo "  - Reset source: cd $upstream_dir && git checkout ."
+            echo "  - Patches auto-apply on fresh builds"
             ;;
 
         new)
