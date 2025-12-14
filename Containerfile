@@ -37,6 +37,25 @@ COPY systemd/powos-* /usr/lib/powos/
 # Copy RAM overlay system (replaces HomeFS)
 COPY lib/ramfs/ /usr/lib/powos/ramfs/
 
+# Install dracut module for full RAM boot
+# This allows the entire OS to run from RAM, USB can be unplugged
+COPY lib/dracut/90powos-ramboot/ /usr/lib/dracut/modules.d/90powos-ramboot/
+RUN chmod +x /usr/lib/dracut/modules.d/90powos-ramboot/*.sh
+
+# Install ramboot systemd service
+COPY systemd/powos-ramboot-init.service /usr/lib/systemd/system/
+RUN systemctl enable powos-ramboot-init.service 2>/dev/null || true
+
+# Rebuild initramfs with our dracut module
+# This embeds the RAM overlay setup into the boot process
+RUN dracut --force --add "powos-ramboot" --kver $(ls /lib/modules/ | head -1) 2>/dev/null || \
+    echo "Note: dracut rebuild skipped (will happen at ISO build time)"
+
+# Install bootc kernel arguments for RAM boot
+# These tell the kernel to enable our RAM overlay at boot
+RUN mkdir -p /usr/lib/bootc/kargs.d
+COPY config/bootc/kargs.d/ /usr/lib/bootc/kargs.d/
+
 # Build extensions
 RUN bash /usr/lib/powos/overlay-manager.sh build-all
 

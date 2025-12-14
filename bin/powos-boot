@@ -72,44 +72,65 @@ fi
 # ═══════════════════════════════════════════════════════════════════
 # 4. RAM Overlay (Unplug Resilience)
 # ═══════════════════════════════════════════════════════════════════
-log "Setting up RAM Overlay..."
+log "Checking RAM Overlay status..."
 
-OVERLAY_ENABLED="${POWOS_OVERLAY:-auto}"
+RAMBOOT_STATE="/run/powos/ramboot-state"
 OVERLAY_SCRIPT="/usr/lib/powos/ramfs/overlay-mount.sh"
 
-# Check if we should enable overlay
-if [[ "$OVERLAY_ENABLED" == "auto" ]]; then
-    # Auto-detect: enable if USB with POWOS-DATA or POWOS-HOME label exists
-    if blkid | grep -qE "POWOS-(DATA|HOME)"; then
-        OVERLAY_ENABLED="true"
-        log "  Detected PowOS USB drive"
-    else
-        OVERLAY_ENABLED="false"
-        log "  No PowOS USB detected (direct mode)"
+# Check if we booted with full RAM boot (dracut module set this up)
+if [[ -f "$RAMBOOT_STATE" ]]; then
+    source "$RAMBOOT_STATE"
+    log_ok "Full RAM boot active (set up by initramfs)"
+    log "  Entire OS running from RAM - USB can be unplugged anytime"
+    log "  RAM allocated: ${POWOS_RAM_SIZE:-unknown}"
+
+    # Run userspace init for sync daemon etc
+    if [[ -x /usr/lib/powos/overlay-init.sh ]]; then
+        /usr/lib/powos/overlay-init.sh 2>&1 | while read -r line; do log "    $line"; done
     fi
-fi
 
-if [[ "$OVERLAY_ENABLED" == "true" ]]; then
-    log "  Setting up overlayfs (RAM cache + USB persistence)..."
+    OVERLAY_ENABLED="ramboot"
+else
+    # Not in ramboot mode - try legacy overlay for /home only
+    log "  Not in ramboot mode (add rd.powos.ramboot=1 to kernel cmdline)"
 
-    if [[ -x "$OVERLAY_SCRIPT" ]]; then
-        "$OVERLAY_SCRIPT" setup 2>&1 | while read -r line; do log "    $line"; done
+    OVERLAY_ENABLED="${POWOS_OVERLAY:-auto}"
 
-        # Start sync daemon
-        if [[ -x /usr/lib/powos/ramfs/sync-daemon.py ]]; then
-            python3 /usr/lib/powos/ramfs/sync-daemon.py &
-            log "  Sync daemon started"
+    # Check if we should enable overlay
+    if [[ "$OVERLAY_ENABLED" == "auto" ]]; then
+        # Auto-detect: enable if USB with POWOS-DATA or POWOS-HOME label exists
+        if blkid | grep -qE "POWOS-(DATA|HOME)"; then
+            OVERLAY_ENABLED="true"
+            log "  Detected PowOS USB drive"
+        else
+            OVERLAY_ENABLED="false"
+            log "  No PowOS USB detected (direct mode)"
         fi
+    fi
 
-        log_ok "RAM overlay active - safe to unplug USB"
+    if [[ "$OVERLAY_ENABLED" == "true" ]]; then
+        log "  Setting up overlayfs for /home (legacy mode)..."
+        log_warn "  Note: Only /home is protected. For full protection, use ramboot."
+
+        if [[ -x "$OVERLAY_SCRIPT" ]]; then
+            "$OVERLAY_SCRIPT" setup 2>&1 | while read -r line; do log "    $line"; done
+
+            # Start sync daemon
+            if [[ -x /usr/lib/powos/ramfs/sync-daemon.py ]]; then
+                python3 /usr/lib/powos/ramfs/sync-daemon.py &
+                log "  Sync daemon started"
+            fi
+
+            log_ok "RAM overlay active for /home"
+        else
+            log_warn "Overlay script not found, using direct mode"
+            mkdir -p /home/powos
+        fi
     else
-        log_warn "Overlay script not found, using direct mode"
+        # Direct mode (no overlay, no USB)
+        log "  Using direct home directory (no overlay)"
         mkdir -p /home/powos
     fi
-else
-    # Direct mode (no overlay, no USB)
-    log "  Using direct home directory (no overlay)"
-    mkdir -p /home/powos
 fi
 
 # Ensure home exists and has correct permissions
@@ -179,12 +200,17 @@ echo "  noVNC Access:  http://localhost:6091/vnc.html"
 echo "  VNC Direct:    localhost:5901"
 echo "  Password:      powos"
 echo ""
-if [[ "$OVERLAY_ENABLED" == "true" ]]; then
-    echo -e "  ${CYAN}RAM Overlay:${NC}   Active (USB can be unplugged)"
+if [[ "$OVERLAY_ENABLED" == "ramboot" ]]; then
+    echo -e "  ${GREEN}RAM Boot:${NC}      FULL - Entire OS in RAM"
+    echo "                 USB can be unplugged anytime!"
+    echo "                 Run 'powos status' for details"
+elif [[ "$OVERLAY_ENABLED" == "true" ]]; then
+    echo -e "  ${CYAN}RAM Overlay:${NC}   Partial (/home only)"
     echo "                 Run 'powos status' for sync info"
-    echo "                 Run 'powos safe' before unplugging"
+    echo -e "  ${YELLOW}WARNING:${NC}       Only /home protected from unplug"
 else
     echo -e "  ${YELLOW}RAM Overlay:${NC}   Disabled (no USB detected)"
+    echo "                 In Docker this is expected"
 fi
 echo ""
 

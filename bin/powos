@@ -73,11 +73,41 @@ is_safe_to_unplug() {
     fi
 }
 
+# Check if running in full ramboot mode
+is_ramboot() {
+    [[ -f /run/powos/ramboot-state ]]
+}
+
+# Get ramboot info
+get_ramboot_info() {
+    if [[ -f /run/powos/ramboot-state ]]; then
+        source /run/powos/ramboot-state
+        echo "$POWOS_RAM_SIZE"
+    else
+        echo "N/A"
+    fi
+}
+
 # Status command
 cmd_status() {
     echo -e "${CYAN}PowOS Status${NC}"
     echo "============"
     echo ""
+
+    # Boot Mode
+    if is_ramboot; then
+        echo -e "Boot Mode:    ${GREEN}● FULL RAM BOOT${NC}"
+        echo -e "              Entire OS running from RAM"
+        echo -e "              USB can be unplugged anytime!"
+        echo ""
+        local ram_size
+        ram_size=$(get_ramboot_info)
+        echo "RAM Allocated: $ram_size"
+    else
+        echo -e "Boot Mode:    ${YELLOW}○ Standard${NC}"
+        echo -e "              Only /home overlaid (if USB present)"
+        echo ""
+    fi
 
     # USB Status
     local usb_status
@@ -87,7 +117,11 @@ cmd_status() {
             echo -e "USB Drive:    ${GREEN}● Connected${NC}"
             ;;
         disconnected)
-            echo -e "USB Drive:    ${YELLOW}○ Disconnected${NC} (running from RAM)"
+            if is_ramboot; then
+                echo -e "USB Drive:    ${CYAN}○ Disconnected${NC} (OK - running from RAM)"
+            else
+                echo -e "USB Drive:    ${YELLOW}○ Disconnected${NC} (running from RAM)"
+            fi
             ;;
         *)
             echo -e "USB Drive:    ${RED}? Unknown${NC}"
@@ -95,9 +129,18 @@ cmd_status() {
     esac
 
     # RAM Usage
-    local ram_usage
-    ram_usage=$(get_ram_usage)
-    echo "RAM Overlay:  $ram_usage"
+    if is_ramboot; then
+        # In ramboot mode, show overlay usage
+        if [[ -d /run/powos-overlay/upper ]]; then
+            local upper_used
+            upper_used=$(du -sh /run/powos-overlay/upper 2>/dev/null | cut -f1 || echo "0")
+            echo "RAM Used:     $upper_used (changes since boot)"
+        fi
+    else
+        local ram_usage
+        ram_usage=$(get_ram_usage)
+        echo "RAM Overlay:  $ram_usage"
+    fi
 
     # Sync Status
     if [[ -f /run/powos/sync-status ]]; then
@@ -122,7 +165,9 @@ else:
 
     # Safe to unplug?
     echo ""
-    if is_safe_to_unplug; then
+    if is_ramboot; then
+        echo -e "Safe to unplug: ${GREEN}Always (full RAM boot)${NC}"
+    elif is_safe_to_unplug; then
         echo -e "Safe to unplug: ${GREEN}Yes${NC}"
     else
         echo -e "Safe to unplug: ${RED}No${NC} (sync in progress)"

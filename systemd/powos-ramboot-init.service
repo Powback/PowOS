@@ -1,0 +1,13 @@
+[Unit]
+Description=PowOS RAM Boot Initialization
+After=local-fs.target
+Before=display-manager.service
+ConditionPathExists=/run/powos/ramboot-state
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/powos/overlay-init.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

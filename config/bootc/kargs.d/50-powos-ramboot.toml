@@ -1,0 +1,7 @@
+# PowOS RAM Boot Kernel Arguments
+# Enables the RAM overlay system at boot
+#
+# With these args, the entire OS runs from RAM after boot.
+# The USB drive becomes optional - you can unplug it and keep working.
+
+kargs = ["rd.powos.ramboot=1", "rd.powos.ramsize=8G"]

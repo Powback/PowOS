@@ -143,64 +143,126 @@ lib/overlay-manager.sh           # Build/enable/disable overlays
 
 ## Layer 3: RAM Overlay (Unplug Resilience)
 
-**Purpose:** Allow USB to be unplugged while system keeps running.
+**Purpose:** Run the ENTIRE OS from RAM so USB can be unplugged completely.
+
+### How It Works
+
+The magic happens during boot via a custom **dracut module**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         overlayfs                                │
+│                    BOOT SEQUENCE (initramfs)                     │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│   UPPER LAYER (tmpfs - RAM)                                      │
-│   ├─ All writes go here                                         │
-│   ├─ Survives USB unplug                                        │
-│   └─ Location: /run/powos/overlay/home-upper/                   │
+│  1. UEFI loads kernel + initramfs from USB                       │
+│                                                                  │
+│  2. Dracut module (90powos-ramboot) activates:                   │
+│     ├─ Creates 8GB tmpfs at /run/powos-overlay                   │
+│     ├─ Mounts USB root as READ-ONLY lower layer                  │
+│     ├─ Uses tmpfs as WRITE upper layer                           │
+│     └─ Creates overlayfs as new root                             │
+│                                                                  │
+│  3. System switches to overlay root                              │
+│     └─ ENTIRE OS now runs from RAM!                              │
+│                                                                  │
+│  4. USB becomes optional - can be unplugged                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### The Overlay Structure
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    FULL SYSTEM OVERLAY                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   UPPER LAYER (tmpfs - RAM, 8GB default)                         │
+│   ├─ ALL writes go here: /usr, /etc, /home, /var, everything    │
+│   ├─ Survives USB unplug completely                             │
+│   └─ Location: /run/powos-overlay/upper/                         │
 │                                                                  │
 │   LOWER LAYER (USB - read-only)                                  │
-│   ├─ Original data from USB                                     │
-│   ├─ Read-only, never modified directly                         │
-│   └─ Location: /mnt/powos-usb/home/                             │
+│   ├─ Original OS from USB                                        │
+│   ├─ Read-only, cached in RAM as accessed                        │
+│   └─ Can be disconnected after boot                              │
 │                                                                  │
-│   MERGED VIEW (what apps see)                                    │
-│   ├─ Reads: check upper first, then lower                       │
-│   ├─ Writes: always go to upper                                 │
-│   └─ Mount point: /home/powos                                   │
+│   MERGED VIEW (what you see as /)                                │
+│   ├─ Reads: RAM first, USB if not in RAM                         │
+│   ├─ Writes: always go to RAM                                    │
+│   └─ Mount point: / (entire root filesystem)                     │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 
 Sync Daemon (background):
   Every 30 seconds:
     if USB connected:
-      rsync /run/powos/overlay/home-upper/ → /mnt/powos-usb/home/
+      rsync /run/powos-overlay/upper/ → USB persistence partition
 ```
 
-**Unplug scenario:**
+### Unplug Scenario
+
 ```
-1. You're editing a file in vim
+1. You're running anything - vim, browser, compile job, whatever
 2. USB is unplugged (intentionally or accidentally)
-3. File is in RAM upper layer - vim keeps working
+3. EVERYTHING keeps working - entire OS is in RAM
 4. New writes go to RAM upper layer
-5. Desktop notification: "Running from RAM"
+5. Desktop notification: "USB disconnected - running from RAM"
 6. USB is replugged
-7. Sync daemon detects, rsyncs RAM → USB
-8. Desktop notification: "Sync complete"
-9. Zero data loss
+7. Sync daemon detects, rsyncs RAM changes → USB
+8. Desktop notification: "Changes synced to USB"
+9. Zero data loss, zero interruption
 ```
 
-**Files:**
+### Enabling Full RAM Boot
+
+RAM boot is enabled by kernel command line arguments:
+
 ```
+rd.powos.ramboot=1      # Enable full RAM boot
+rd.powos.ramsize=8G     # RAM allocation (default 8G)
+```
+
+These are set automatically in the ISO. For custom installs, add to bootloader config.
+
+### Files
+
+```
+lib/dracut/90powos-ramboot/
+├── module-setup.sh      # Dracut module definition
+├── ramboot-setup.sh     # Hook that sets up overlayfs
+└── powos-overlay-init.sh # Userspace init (sync daemon, etc)
+
 lib/ramfs/
-├── overlay-mount.sh     # Setup overlayfs at boot
+├── overlay-mount.sh     # Legacy overlay for /home only
 └── sync-daemon.py       # Background rsync to USB
 
 bin/powos                # CLI: status, sync, safe
+
+config/bootc/kargs.d/
+└── 50-powos-ramboot.toml # Kernel cmdline args
+
+systemd/
+└── powos-ramboot-init.service # Userspace init service
 ```
 
-**Commands:**
+### Commands
+
 ```bash
-powos status    # Show USB state, RAM usage, last sync
-powos sync      # Force sync now
-powos safe      # Check if OK to unplug (exit 0 = yes)
+powos status    # Show boot mode, RAM usage, USB state
+powos sync      # Force sync to USB now
+powos safe      # Always safe in ramboot mode!
 ```
+
+### RAM Requirements
+
+| Mode | RAM Needed | What's Protected |
+|------|------------|------------------|
+| Legacy (Phase 1) | 2-4 GB | Only /home |
+| **Full RAM Boot (Phase 2)** | **8-16 GB** | **ENTIRE OS** |
+
+For full protection, you need enough RAM to hold the OS + your working set.
+Recommended: 16GB+ for comfortable use, 32GB+ for heavy workloads.
 
 ## Layer 4: Package Management (pinstall)
 
