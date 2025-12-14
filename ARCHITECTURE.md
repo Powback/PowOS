@@ -476,17 +476,114 @@ PowOS/
     └── powos-init-usb.sh      # USB initialization script
 ```
 
+## Layer 7: Source Overlays (Custom App Builds)
+
+**Purpose:** Build custom versions of apps that override system versions.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Source Overlay Flow                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. powos source new myapp https://github.com/user/myapp        │
+│     → Creates sources/myapp/ with:                               │
+│        ├── source.conf     (upstream URL, deps)                 │
+│        ├── build.sh        (build script)                       │
+│        └── patches/        (your patches)                       │
+│                                                                  │
+│  2. powos source get myapp                                       │
+│     → Clones source to sources/myapp/upstream/                  │
+│                                                                  │
+│  3. powos source patch myapp                                     │
+│     → Applies patches/*.patch to upstream                       │
+│                                                                  │
+│  4. powos source build myapp                                     │
+│     → Runs build.sh                                              │
+│     → Output to extensions/myapp/usr/bin/...                    │
+│                                                                  │
+│  5. powos source enable myapp                                    │
+│     → Links to /var/lib/extensions/myapp                        │
+│     → systemd-sysext refresh                                     │
+│     → YOUR BUILD NOW OVERRIDES SYSTEM VERSION                   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Files:**
+```
+sources/
+├── neovim/
+│   ├── source.conf        # UPSTREAM_URL, BUILD_DEPS, etc.
+│   ├── build.sh           # Build script
+│   ├── patches/           # Your patches
+│   │   └── 01-feature.patch
+│   └── upstream/          # Fetched source (gitignored)
+├── btop/
+│   ├── source.conf
+│   └── build.sh
+└── hello-powos/           # Example overlay
+```
+
 ## Quick Reference
 
-| Feature | Command | Description |
-|---------|---------|-------------|
-| Check status | `powos status` | Layers, RAM, USB, protection level |
-| View layers | `powos layers` | Layer stack with sizes |
-| Force sync | `powos sync` | Sync RAM to USB immediately |
-| Rollback custom | `powos rollback custom` | Skip your customizations next boot |
-| Rollback updates | `powos rollback updates` | Skip OS updates next boot |
-| Clear rollback | `powos rollback reset` | Use all layers next boot |
-| Check updates | `powos update` | Check for available updates |
-| Apply updates | `powos update apply` | Download and apply updates |
-| Install package | `pinstall <pkg>` | Install + record + commit |
-| Init USB | `powos-init-usb /dev/sdX` | Prepare USB drive |
+### Status & Info
+| Command | Description |
+|---------|-------------|
+| `powos status` | Full system status (layers, RAM, USB, protection) |
+| `powos version` | Show version and active layers |
+| `powos hardware` | Show detected hardware |
+| `powos safe` | Check if safe to unplug (exit 0 = safe) |
+
+### Layers
+| Command | Description |
+|---------|-------------|
+| `powos layers` | Show layer stack with sizes |
+| `powos layers sync` | Force sync RAM → custom layer |
+| `powos layers clear custom` | Clear custom layer |
+| `powos layers clear updates` | Clear updates layer |
+
+### Rollback
+| Command | Description |
+|---------|-------------|
+| `powos rollback` | Show rollback options |
+| `powos rollback custom` | Skip custom layer next boot |
+| `powos rollback updates` | Skip updates layer next boot |
+| `powos rollback all` | Boot with base only |
+| `powos rollback reset` | Use all layers next boot |
+
+### Updates
+| Command | Description |
+|---------|-------------|
+| `powos update` | Check for updates |
+| `powos update os` | Apply OS updates (to updates layer) |
+| `powos update packages` | Apply package updates (to custom layer) |
+| `powos sync` | Force sync all changes to USB |
+
+### Installation
+| Command | Description |
+|---------|-------------|
+| `powos install <pkg>` | Install to host (custom layer) |
+| `powos install -c NAME <pkg>` | Install to container |
+| `powos install -c NAME -e <pkg>` | Install + export GUI to host |
+| `pinstall <pkg>` | Install + git commit |
+
+### Containers
+| Command | Description |
+|---------|-------------|
+| `powos containers` | List containers and images |
+| `powos containers create NAME [image]` | Create distrobox container |
+| `powos containers enter NAME` | Enter container |
+| `powos containers assemble` | Create all from distrobox.ini |
+| `powos containers export NAME APP` | Export app to host menu |
+| `powos build [path] [tag]` | Build from Dockerfile |
+
+### Source Overlays
+| Command | Description |
+|---------|-------------|
+| `powos source` | List available sources |
+| `powos source new NAME [url]` | Create source template |
+| `powos source get NAME` | Fetch upstream source |
+| `powos source patch NAME` | Apply patches |
+| `powos source build NAME` | Build overlay |
+| `powos source enable NAME` | Enable (override system) |
+| `powos source disable NAME` | Disable (restore system) |

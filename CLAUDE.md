@@ -86,6 +86,43 @@ powos sync            # Force sync all changes to USB
 powos safe            # Check if safe to unplug USB
 ```
 
+### Package Installation
+```bash
+powos install PKG...              # Install to custom layer
+powos install -c NAME PKG...      # Install to container NAME
+powos install -c NAME -e PKG...   # Install + export GUI apps to host
+```
+
+### Container Management
+```bash
+powos containers list             # List all containers
+powos containers create NAME IMG  # Create new container
+powos containers enter NAME       # Enter container shell
+powos containers remove NAME      # Remove container
+powos containers export NAME APP  # Export GUI app to host menu
+powos containers assemble         # Create from distrobox.ini
+powos containers prune            # Clean up unused images
+```
+
+### Build from Dockerfile
+```bash
+powos build                       # Build from ./Dockerfile
+powos build -f FILE               # Build from specific file
+powos build -t TAG                # Build with tag
+powos build -t myapp:v1 ./dir     # Full example
+```
+
+### Source Overlays
+```bash
+powos source list                 # List all source overlays
+powos source new NAME             # Create new source template
+powos source get NAME             # Fetch upstream source
+powos source patch NAME           # Apply patches to upstream
+powos source build NAME           # Build overlay from source
+powos source enable NAME          # Enable (override system version)
+powos source disable NAME         # Disable (restore system version)
+```
+
 ## Example Output
 
 **powos status:**
@@ -200,7 +237,7 @@ PowOS/
 ├── justfile                   # Build commands
 │
 ├── bin/
-│   ├── powos                  # CLI (status, layers, rollback, update)
+│   ├── powos                  # Main CLI (all commands below)
 │   ├── powos-boot             # Main boot script
 │   ├── pinstall               # Install + git commit
 │   └── powos-init-usb         # Initialize USB drive
@@ -223,10 +260,21 @@ PowOS/
 │   ├── profiles/              # Hardware profiles (16)
 │   └── bootc/kargs.d/         # Kernel arguments
 │
-├── sources/                   # Overlay source code
-│   ├── gpu-nvidia/
-│   ├── gpu-amd/
+├── containers/
+│   └── distrobox.ini          # Container definitions
+│
+├── sources/                   # Source overlay templates
+│   ├── neovim/
+│   │   ├── source.conf        # Upstream URL, build deps
+│   │   ├── build.sh           # Build script
+│   │   ├── upstream/          # Cloned source (gitignored)
+│   │   └── patches/           # Your patches
+│   ├── btop/
+│   │   ├── source.conf
+│   │   └── build.sh
 │   └── ...
+│
+├── extensions/                # Built overlays (gitignored)
 │
 ├── systemd/
 │   ├── powos-layer-sync.service
@@ -326,6 +374,127 @@ EOF
 bash lib/overlay-manager.sh build my-tool
 ```
 
+### 6. Container Development (Podman + Distrobox)
+
+Mutable dev containers on immutable base:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                 PowOS (immutable base)                       │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │  arch-dev   │  │ ubuntu-dev  │  │   fedora    │          │
+│  │ (Distrobox) │  │ (Distrobox) │  │  (Podman)   │          │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘          │
+│         │                │                │                  │
+│         └────────────────┼────────────────┘                  │
+│                          │                                   │
+│              Host integration (GUI export, /home share)      │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Distrobox containers** share your home directory and can export GUI apps:
+
+```bash
+# Create dev container
+powos containers create arch-dev archlinux:latest
+
+# Install dev tools inside
+powos install -c arch-dev neovim rust gcc
+
+# Install GUI app and export to host menu
+powos install -c arch-dev -e firefox gimp
+
+# Enter container for development
+powos containers enter arch-dev
+```
+
+**Container definitions** persist in `containers/distrobox.ini`:
+
+```ini
+[arch-dev]
+image=archlinux:latest
+additional_packages="base-devel git neovim"
+
+[ubuntu-dev]
+image=ubuntu:22.04
+additional_packages="build-essential git"
+```
+
+### 7. Source Overlays (Custom App Builds)
+
+Override system apps with custom builds:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Source Overlay Workflow                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  sources/neovim/                                                 │
+│  ├── source.conf      ← UPSTREAM_URL, BUILD_DEPS                 │
+│  ├── build.sh         ← Compile instructions                     │
+│  ├── upstream/        ← Git clone (powos source get)             │
+│  └── patches/         ← Your customizations                      │
+│        ├── 001-my-feature.patch                                  │
+│        └── 002-fix-something.patch                               │
+│                                                                  │
+│  powos source get neovim     →  Clone upstream                   │
+│  powos source patch neovim   →  Apply patches/                   │
+│  powos source build neovim   →  Run build.sh → extensions/       │
+│  powos source enable neovim  →  systemd-sysext merge             │
+│                                                                  │
+│  Result: Your custom neovim at /usr/bin/nvim                     │
+│          System version masked until disable                     │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Example source.conf:**
+```bash
+# sources/neovim/source.conf
+DESCRIPTION="Custom Neovim build with your patches"
+UPSTREAM_URL="https://github.com/neovim/neovim"
+UPSTREAM_BRANCH="stable"
+BUILD_DEPS="cmake make gcc g++ unzip gettext curl"
+RUNTIME_DEPS=""
+```
+
+**Example build.sh:**
+```bash
+#!/bin/bash
+OUTPUT_DIR="${1:-$OVERLAY_OUTPUT_DIR}"
+cd "$SRC_DIR/upstream"
+make CMAKE_BUILD_TYPE=Release CMAKE_INSTALL_PREFIX=/usr
+make install DESTDIR="$OUTPUT_DIR"
+```
+
+**Workflow:**
+```bash
+# 1. Create source template
+powos source new my-app
+
+# 2. Edit source.conf with upstream URL
+
+# 3. Fetch source
+powos source get my-app
+
+# 4. Make changes, create patches
+cd sources/my-app/upstream
+# edit files...
+git diff > ../patches/001-my-change.patch
+
+# 5. Build
+powos source build my-app
+
+# 6. Enable (overrides system version)
+powos source enable my-app
+
+# 7. Later: disable to restore system version
+powos source disable my-app
+```
+
 ## Rollback Scenarios
 
 | Command | What Happens | Use When |
@@ -389,6 +558,17 @@ just build-iso
 - 5901: VNC direct
 - 6091: noVNC web interface
 
+**Container Runtime:**
+- Podman (daemonless, rootless)
+- `podman-docker` provides Docker CLI compatibility
+- Distrobox for mutable dev containers
+- fuse-overlayfs for rootless storage
+
+**Registries (unqualified):**
+- docker.io
+- ghcr.io
+- quay.io
+
 ## Troubleshooting
 
 **Check system status:**
@@ -421,6 +601,37 @@ cat /run/powos/cachefs-status.json
 ```bash
 powos rollback
 # Shows current rollback flags
+```
+
+**Container issues:**
+```bash
+# List containers
+powos containers list
+
+# Check Podman storage
+podman system info
+
+# Reset Podman if corrupted
+podman system reset
+
+# Check Distrobox
+distrobox list
+```
+
+**Source overlay issues:**
+```bash
+# List overlays
+powos source list
+
+# Check if overlay is enabled
+ls -la /var/lib/extensions/
+
+# Rebuild overlay
+powos source build NAME
+
+# Check systemd-sysext
+systemd-sysext status
+systemd-sysext refresh
 ```
 
 ## Credentials

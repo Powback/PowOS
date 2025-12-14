@@ -116,22 +116,90 @@ docker exec powos powos status
 
 In Docker you'll see "Standard" boot mode - that's correct because Docker doesn't have real hardware boot. On real hardware, it enables full RAM boot with layers automatically.
 
-## Key Commands
+## Complete Command Reference
 
+### System Status
 | Command | What it does |
 |---------|--------------|
-| `powos status` | Show layers, RAM usage, USB state |
-| `powos layers` | Detailed layer stack view |
-| `powos sync` | Force sync RAM changes to USB |
-| `powos rollback` | Show rollback options |
-| `powos rollback custom` | Skip custom layer next boot |
-| `powos rollback updates` | Skip updates layer next boot |
-| `powos rollback reset` | Clear rollback, use all layers |
-| `powos update` | Check for OS updates |
-| `powos containers` | List containers and images |
-| `powos containers create <name>` | Create a new dev container |
-| `powos containers enter <name>` | Enter a container |
-| `pinstall <pkg>` | Install package + commit to git |
+| `powos status` | Full system status (layers, RAM, USB, protection) |
+| `powos version` | Show PowOS version and active layers |
+| `powos hardware` | Show detected hardware (GPU, power, form factor) |
+| `powos safe` | Check if safe to unplug USB (exit 0 = safe) |
+
+### Layer Management
+| Command | What it does |
+|---------|--------------|
+| `powos layers` | Show layer stack with sizes |
+| `powos layers status` | Detailed layer status |
+| `powos layers sync` | Force sync RAM → custom layer |
+| `powos layers clear custom` | Clear custom layer entirely |
+| `powos layers clear updates` | Clear updates layer entirely |
+
+### Rollback
+| Command | What it does |
+|---------|--------------|
+| `powos rollback` | Show rollback options and current state |
+| `powos rollback custom` | Skip custom layer on next boot |
+| `powos rollback updates` | Skip updates layer on next boot |
+| `powos rollback all` | Boot with base only (skip both layers) |
+| `powos rollback reset` | Clear all rollback flags |
+
+### Updates
+| Command | What it does |
+|---------|--------------|
+| `powos update` | Check for available updates |
+| `powos update os` | Apply OS updates (to updates layer) |
+| `powos update packages` | Apply package updates (to custom layer) |
+| `powos update apply` | Apply all updates |
+| `powos sync` | Force sync all changes to USB |
+
+### Package Installation
+| Command | What it does |
+|---------|--------------|
+| `powos install <pkg>` | Install package to host (custom layer) |
+| `powos install -c NAME <pkg>` | Install package to a container |
+| `powos install -c NAME -e <pkg>` | Install GUI app to container + export to host menu |
+| `pinstall <pkg>` | Install package + auto-commit to git |
+
+### Container Management
+| Command | What it does |
+|---------|--------------|
+| `powos containers` | List all containers and images |
+| `powos containers create <name> [image]` | Create a new distrobox container |
+| `powos containers enter <name>` | Enter a container shell |
+| `powos containers stop <name>` | Stop a running container |
+| `powos containers remove <name>` | Remove a container |
+| `powos containers assemble` | Create all predefined containers (from distrobox.ini) |
+| `powos containers export <name> <app>` | Export app from container to host menu |
+| `powos containers prune` | Clean up unused containers/images |
+| `powos containers podman <args>` | Pass through to podman directly |
+
+### Container Building
+| Command | What it does |
+|---------|--------------|
+| `powos build` | Build from ./Containerfile or ./Dockerfile |
+| `powos build . <tag>` | Build with a specific tag |
+| `powos build <path> [tag]` | Build from specific path |
+
+### Source Overlays (Custom App Builds)
+| Command | What it does |
+|---------|--------------|
+| `powos source` | List available source overlays |
+| `powos source list` | List all sources with build status |
+| `powos source new <name> [url]` | Create new source overlay template |
+| `powos source get <name>` | Fetch upstream source code |
+| `powos source patch <name>` | Apply patches from patches/ directory |
+| `powos source build <name>` | Build overlay from source |
+| `powos source enable <name>` | Enable overlay (overrides system version) |
+| `powos source disable <name>` | Disable overlay (restore system version) |
+
+### Shortcuts
+| Short | Full Command |
+|-------|--------------|
+| `powos c` | `powos containers` |
+| `powos i` | `powos install` |
+| `powos b` | `powos build` |
+| `powos s` | `powos source` |
 
 ## Container Development
 
@@ -429,32 +497,53 @@ PowOS/
 ├── justfile                   # Build commands
 │
 ├── bin/                       # User commands
-│   ├── powos-boot             # Main boot script
-│   ├── powos                  # CLI (status, sync, layers, rollback)
-│   └── pinstall               # Install + git commit
+│   ├── powos                  # Main CLI (all commands)
+│   ├── powos-boot             # Boot orchestrator
+│   ├── pinstall               # Install + git commit
+│   └── premove                # Remove + git commit
 │
 ├── lib/
-│   ├── hardware-detect.sh     # Chameleon Boot
-│   ├── overlay-manager.sh     # systemd-sysext builder
-│   ├── dracut/                # RAM boot module
-│   │   └── 90powos-ramboot/   # Dracut module for layered RAM boot
-│   ├── ramfs/                 # Layer management
-│   │   └── layer-sync.py      # Syncs RAM to custom layer
+│   ├── hardware-detect.sh     # Chameleon Boot (auto hardware config)
+│   ├── overlay-manager.sh     # systemd-sysext overlay builder
+│   ├── dracut/                # Initramfs modules
+│   │   └── 90powos-ramboot/   # Layered RAM boot module
+│   ├── ramfs/                 # RAM layer management
+│   │   └── layer-sync.py      # Syncs RAM → custom layer (60s)
 │   └── cachefs/               # User data lazy-loading
 │       ├── powos-cachefs.py   # FUSE filesystem
 │       └── cachefs-sync.py    # Sync daemon
 │
 ├── config/
-│   ├── profiles/              # Hardware profiles
-│   └── bootc/                 # Boot configuration
+│   ├── profiles/              # Hardware profiles (16 profiles)
+│   │   ├── desktop-nvidia-performance.conf
+│   │   ├── laptop-nvidia-battery.conf
+│   │   └── ...
+│   └── bootc/kargs.d/         # Kernel boot arguments
 │
-├── sources/                   # Overlay source code
-│   ├── gpu-nvidia/
-│   ├── gpu-amd/
-│   └── ...
+├── sources/                   # Source overlays (build custom apps)
+│   ├── neovim/                # Custom neovim build
+│   │   ├── source.conf        # Upstream URL, deps
+│   │   ├── build.sh           # Build script
+│   │   └── patches/           # Your patches
+│   ├── btop/                  # Custom btop build
+│   ├── hello-powos/           # Example overlay
+│   ├── gpu-nvidia/            # NVIDIA driver overlay
+│   ├── gpu-amd/               # AMD driver overlay
+│   └── gpu-intel/             # Intel driver overlay
+│
+├── extensions/                # Built overlays (gitignored)
+│
+├── containers/
+│   └── distrobox.ini          # Predefined container definitions
+│
+├── systemd/                   # System services
+│   ├── powos-layer-sync.service   # Layer sync daemon
+│   ├── powos-cachefs-sync.service # CacheFS sync daemon
+│   └── powos-ramboot-init.service # RAM boot init
 │
 └── build/
-    ├── build-iso.sh           # ISO creation script
+    ├── build-iso.sh           # Create bootable ISO
+    ├── install-to-usb.sh      # Install to USB drive
     └── output/                # Built ISOs go here
 ```
 
