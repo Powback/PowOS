@@ -68,6 +68,8 @@ COPY overlays/ /usr/lib/powos/overlays/
 COPY sources/ /var/lib/powos/sources/
 COPY bin/powos-boot /usr/bin/
 COPY bin/powos /usr/bin/
+COPY bin/pinstall /usr/bin/
+COPY bin/premove /usr/bin/
 COPY config/ /etc/powos/
 COPY systemd/powos-* /usr/lib/powos/
 
@@ -109,7 +111,7 @@ RUN rm -f /mnt 2>/dev/null || true && \
     mkdir -p /mnt/powos-usb /run/powos/overlay
 
 # Set permissions
-RUN chmod +x /usr/bin/powos-boot /usr/bin/powos \
+RUN chmod +x /usr/bin/powos-boot /usr/bin/powos /usr/bin/pinstall /usr/bin/premove \
     /usr/lib/powos/*.sh /usr/lib/powos/boot/*.sh \
     /usr/lib/powos/ramfs/*.sh /usr/lib/powos/ramfs/*.py \
     /usr/lib/powos/cachefs/*.py 2>/dev/null || true
