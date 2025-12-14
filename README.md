@@ -128,7 +128,161 @@ In Docker you'll see "Standard" boot mode - that's correct because Docker doesn'
 | `powos rollback updates` | Skip updates layer next boot |
 | `powos rollback reset` | Clear rollback, use all layers |
 | `powos update` | Check for OS updates |
+| `powos containers` | List containers and images |
+| `powos containers create <name>` | Create a new dev container |
+| `powos containers enter <name>` | Enter a container |
 | `pinstall <pkg>` | Install package + commit to git |
+
+## Container Development
+
+PowOS uses **Podman + Distrobox** for mutable development containers on top of the immutable base OS.
+
+```bash
+# Create a development container
+powos containers create dev              # Default Fedora
+powos containers create arch archlinux   # Arch Linux with AUR
+powos containers create ubuntu ubuntu:22.04
+
+# Enter and work inside the container
+powos containers enter dev
+# Now you're in a full Fedora environment - install anything!
+sudo dnf install neovim nodejs rust
+
+# Exit back to PowOS
+exit
+
+# Create all predefined containers from distrobox.ini
+powos containers assemble
+
+# Export an app from container to host desktop
+powos containers export dev code    # VSCode from container appears in host menu
+
+# Clean up unused containers/images
+powos containers prune
+
+# Direct podman access
+powos containers podman ps
+powos containers podman images
+```
+
+### Easy Install with GUI Export
+
+The magic command: install apps in containers, use them on your host desktop!
+
+```bash
+# Install Firefox from Arch (gets latest version + AUR access)
+powos install -c arch -e firefox
+
+# Install VSCode in a dev container, appears in your app menu
+powos install -c dev -e code
+
+# Install CLI tools to a container (no export needed)
+powos install -c dev nodejs npm rust cargo
+
+# Install to host (goes to custom layer, persists across reboots)
+powos install neovim htop
+```
+
+### Build from Dockerfile
+
+Podman reads Dockerfiles natively - no conversion needed!
+
+```bash
+# Build from current directory
+powos build
+
+# Build with a tag
+powos build . myapp:latest
+
+# Build from specific path
+powos build ./my-project myimage:v1
+
+# Run your image
+podman run -it myapp:latest
+```
+
+**Why Podman + Distrobox?**
+- **Rootless**: No daemon, no root required
+- **Mutable**: Install anything inside containers without touching base OS
+- **Integrated**: Containers share your home directory, GPU, audio, etc.
+- **Persistent**: Containers survive reboots, stored on USB
+- **Dockerfile compatible**: Build any Docker project with `powos build`
+
+## Source Overlays - Customize Any App
+
+Build custom versions of apps that **override the system version**. Your patches persist across updates!
+
+```bash
+# List available source templates
+powos source list
+
+# Create a new source overlay
+powos source new myapp https://github.com/user/myapp
+
+# Or use an existing template (neovim, btop, etc.)
+powos source get neovim
+powos source build neovim
+powos source enable neovim
+
+# Now YOUR custom neovim overrides the system version!
+```
+
+### Example: Custom Neovim with Patches
+
+```bash
+# Fetch source
+powos source get neovim
+
+# Add your patches
+cd /var/lib/powos/sources/neovim/upstream
+# Make your changes...
+git diff > ../patches/01-my-feature.patch
+
+# Rebuild with patches
+powos source patch neovim
+powos source build neovim
+powos source enable neovim
+
+# Your custom neovim is now active!
+nvim --version  # Shows your build
+```
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Source Overlay System                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  sources/neovim/                                                 │
+│  ├── source.conf        # Upstream URL, deps                    │
+│  ├── patches/           # Your patches (applied in order)       │
+│  │   └── 01-feature.patch                                       │
+│  ├── build.sh           # Build script                          │
+│  └── upstream/          # Fetched source code                   │
+│                                                                  │
+│  ↓ powos source build neovim                                    │
+│                                                                  │
+│  extensions/neovim/                                              │
+│  └── usr/bin/nvim       # Your custom build                     │
+│                                                                  │
+│  ↓ powos source enable neovim                                   │
+│                                                                  │
+│  systemd-sysext merges extension into /usr                      │
+│  Your nvim OVERRIDES system nvim!                               │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Included Source Templates
+
+| App | Description |
+|-----|-------------|
+| `neovim` | Custom Neovim editor build |
+| `btop` | btop++ system monitor |
+| `hello-powos` | Example overlay template |
+
+Create your own: `powos source new myapp https://github.com/...`
 
 ## powos status Output
 

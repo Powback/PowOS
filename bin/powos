@@ -47,14 +47,40 @@ Commands:
   hardware            Show detected hardware
   profile             Show active hardware profile
 
+  containers          List containers and images
+  containers create   Create a new distrobox container
+  containers enter    Enter a distrobox container
+  containers assemble Create all predefined containers
+  containers prune    Clean up unused resources
+
+  install <pkg>       Install package to host (custom layer)
+  install -c NAME <pkg>  Install package to container
+  install -c NAME -e <pkg>  Install GUI app to container + export to host
+
+  build [path] [tag]  Build container from Dockerfile/Containerfile
+
+  source              List available source overlays
+  source new <name>   Create new source overlay template
+  source get <name>   Fetch upstream source code
+  source build <name> Build overlay from source
+  source enable <name> Enable overlay (overrides system version)
+
   version             Show version
 
 Examples:
-  powos status              # Quick status check
-  powos sync                # Force sync now
-  powos layers              # See active layers
-  powos rollback custom     # Skip custom layer on next boot
-  powos safe && echo "OK"   # Check before unplugging
+  powos status                        # Quick status check
+  powos sync                          # Force sync now
+  powos layers                        # See active layers
+  powos rollback custom               # Skip custom layer on next boot
+  powos safe && echo "OK"             # Check before unplugging
+
+  powos install neovim htop           # Install to host
+  powos install -c dev nodejs npm     # Install to 'dev' container
+  powos install -c arch -e firefox    # Install Firefox in Arch, export to host menu
+
+  powos containers create dev         # Create Fedora dev container
+  powos containers enter dev          # Enter the container
+  powos build . myapp:latest          # Build from Dockerfile
 
 EOF
 }
@@ -718,6 +744,787 @@ cmd_version() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
+# Install Command - Unified package installation
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_install() {
+    local target=""
+    local packages=()
+    local export_gui=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --container|-c)
+                target="$2"
+                shift 2
+                ;;
+            --export|-e)
+                export_gui=true
+                shift
+                ;;
+            --help|-h)
+                echo "Usage: powos install [options] <packages...>"
+                echo ""
+                echo "Install packages to the host OS or a container."
+                echo ""
+                echo "Options:"
+                echo "  --container, -c NAME   Install to a distrobox container"
+                echo "  --export, -e           Export GUI apps to host menu (with -c)"
+                echo ""
+                echo "Examples:"
+                echo "  powos install neovim htop        # Install to host (custom layer)"
+                echo "  powos install -c dev nodejs      # Install nodejs in 'dev' container"
+                echo "  powos install -c dev -e code     # Install VSCode in container, export to host"
+                echo "  powos install -c arch -e firefox # Install Firefox in Arch, use on host"
+                return 0
+                ;;
+            *)
+                packages+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [[ ${#packages[@]} -eq 0 ]]; then
+        echo "Error: No packages specified"
+        echo "Run 'powos install --help' for usage"
+        return 1
+    fi
+
+    if [[ -n "$target" ]]; then
+        # Install to container
+        echo -e "${CYAN}Installing to container '$target':${NC} ${packages[*]}"
+
+        # Check if container exists
+        if ! distrobox list 2>/dev/null | grep -q "^$target"; then
+            echo -e "${YELLOW}Container '$target' doesn't exist. Create it first:${NC}"
+            echo "  powos containers create $target"
+            return 1
+        fi
+
+        # Run install inside container
+        distrobox enter "$target" -- bash -c "
+            if command -v apt &>/dev/null; then
+                sudo apt update && sudo apt install -y ${packages[*]}
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y ${packages[*]}
+            elif command -v pacman &>/dev/null; then
+                sudo pacman -Syu --noconfirm ${packages[*]}
+            elif command -v apk &>/dev/null; then
+                sudo apk add ${packages[*]}
+            else
+                echo 'Unknown package manager'
+                exit 1
+            fi
+        "
+
+        if [[ "$export_gui" == "true" ]]; then
+            echo ""
+            echo -e "${CYAN}Exporting GUI apps to host menu...${NC}"
+            for pkg in "${packages[@]}"; do
+                # Try to export the app (may fail if not a GUI app, that's ok)
+                distrobox-export --app "$pkg" 2>/dev/null && \
+                    echo -e "  ${GREEN}✓${NC} Exported: $pkg" || \
+                    echo -e "  ${YELLOW}○${NC} Not a GUI app: $pkg"
+            done
+        fi
+
+        echo ""
+        echo -e "${GREEN}✓ Installed to container '$target'${NC}"
+        if [[ "$export_gui" == "true" ]]; then
+            echo "  GUI apps are now in your application menu!"
+        else
+            echo "  Enter with: powos containers enter $target"
+        fi
+    else
+        # Install to host (use pinstall logic)
+        echo -e "${CYAN}Installing to host:${NC} ${packages[*]}"
+
+        # Detect package manager
+        if command -v dnf &>/dev/null; then
+            sudo dnf install -y "${packages[@]}"
+        elif command -v apt &>/dev/null; then
+            sudo apt update && sudo apt install -y "${packages[@]}"
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -Syu --noconfirm "${packages[@]}"
+        else
+            echo "No supported package manager found"
+            return 1
+        fi
+
+        # Sync to custom layer if ramboot active
+        if is_ramboot && [[ -x "$LAYER_SYNC" ]]; then
+            echo "Syncing to custom layer..."
+            python3 "$LAYER_SYNC" --sync-now 2>/dev/null || true
+        fi
+
+        echo ""
+        echo -e "${GREEN}✓ Installed to host${NC}"
+        echo "  Changes will persist in custom layer"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Build Command - Build containers from Dockerfile/Containerfile
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_build() {
+    local context="${1:-.}"
+    local tag="${2:-}"
+    local dockerfile=""
+
+    # Find Dockerfile or Containerfile
+    if [[ -f "$context/Containerfile" ]]; then
+        dockerfile="$context/Containerfile"
+    elif [[ -f "$context/Dockerfile" ]]; then
+        dockerfile="$context/Dockerfile"
+    elif [[ -f "$context" ]]; then
+        dockerfile="$context"
+        context=$(dirname "$dockerfile")
+    else
+        echo "Usage: powos build [context] [tag]"
+        echo ""
+        echo "Build a container image from Dockerfile or Containerfile."
+        echo ""
+        echo "Examples:"
+        echo "  powos build                        # Build from ./Containerfile or ./Dockerfile"
+        echo "  powos build . myapp:latest         # Build with tag"
+        echo "  powos build ./path/to/project      # Build from specific directory"
+        echo ""
+        echo "Note: Podman reads Dockerfiles natively - no conversion needed!"
+        return 1
+    fi
+
+    echo -e "${CYAN}Building from:${NC} $dockerfile"
+    [[ -n "$tag" ]] && echo -e "${CYAN}Tag:${NC} $tag"
+    echo ""
+
+    local cmd="podman build"
+    [[ -n "$tag" ]] && cmd="$cmd -t $tag"
+    cmd="$cmd -f $dockerfile $context"
+
+    echo -e "${YELLOW}Running:${NC} $cmd"
+    echo ""
+
+    eval "$cmd"
+    local result=$?
+
+    if [[ $result -eq 0 ]]; then
+        echo ""
+        echo -e "${GREEN}✓ Build successful${NC}"
+        [[ -n "$tag" ]] && echo "  Run with: podman run $tag"
+    else
+        echo ""
+        echo -e "${RED}✗ Build failed${NC}"
+    fi
+
+    return $result
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Source Commands - Build custom versions of apps
+# ═══════════════════════════════════════════════════════════════════
+
+SOURCES_DIR="${POWOS_ROOT:-/var/lib/powos}/sources"
+EXTENSIONS_DIR="${POWOS_ROOT:-/var/lib/powos}/extensions"
+
+cmd_source() {
+    local action="${1:-list}"
+
+    case "$action" in
+        list|ls)
+            echo -e "${BOLD}${CYAN}Available Sources${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            if [[ ! -d "$SOURCES_DIR" ]]; then
+                echo "No sources directory found"
+                return 1
+            fi
+
+            for src in "$SOURCES_DIR"/*/; do
+                local name=$(basename "$src")
+                [[ "$name" == "*" ]] && continue
+
+                local conf="$src/source.conf"
+                local desc="Custom overlay"
+                local upstream=""
+
+                if [[ -f "$conf" ]]; then
+                    source "$conf" 2>/dev/null || true
+                    desc="${DESCRIPTION:-$desc}"
+                    upstream="${UPSTREAM_URL:-}"
+                fi
+
+                # Check if built
+                local status="${YELLOW}○${NC}"
+                if [[ -d "$EXTENSIONS_DIR/$name" ]]; then
+                    status="${GREEN}●${NC}"
+                fi
+
+                echo -e "  $status $name"
+                echo "      $desc"
+                [[ -n "$upstream" ]] && echo "      Source: $upstream"
+            done
+            echo ""
+            echo "Legend: ${GREEN}●${NC} built  ${YELLOW}○${NC} not built"
+            ;;
+
+        get)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos source get <name>"
+                echo ""
+                echo "Fetch upstream source code for an app."
+                echo "Run 'powos source list' to see available sources."
+                return 1
+            fi
+
+            local src_dir="$SOURCES_DIR/$name"
+            local conf="$src_dir/source.conf"
+
+            if [[ ! -f "$conf" ]]; then
+                echo -e "${RED}No source.conf for '$name'${NC}"
+                echo "Create one at: $conf"
+                return 1
+            fi
+
+            source "$conf"
+
+            if [[ -z "${UPSTREAM_URL:-}" ]]; then
+                echo -e "${RED}No UPSTREAM_URL defined in source.conf${NC}"
+                return 1
+            fi
+
+            local src_code_dir="$src_dir/upstream"
+            echo -e "${CYAN}Fetching source for $name...${NC}"
+            echo "  URL: $UPSTREAM_URL"
+            echo "  Dir: $src_code_dir"
+            echo ""
+
+            mkdir -p "$src_code_dir"
+
+            if [[ "$UPSTREAM_URL" == *.git ]] || [[ "$UPSTREAM_URL" == *github.com* ]] || [[ "$UPSTREAM_URL" == *gitlab.com* ]]; then
+                # Git repo
+                if [[ -d "$src_code_dir/.git" ]]; then
+                    echo "Updating existing clone..."
+                    cd "$src_code_dir" && git pull
+                else
+                    rm -rf "$src_code_dir"
+                    git clone --depth 1 ${UPSTREAM_BRANCH:+--branch "$UPSTREAM_BRANCH"} "$UPSTREAM_URL" "$src_code_dir"
+                fi
+            elif [[ "$UPSTREAM_URL" == *.tar.* ]]; then
+                # Tarball
+                local tarball="$src_dir/$(basename "$UPSTREAM_URL")"
+                curl -L -o "$tarball" "$UPSTREAM_URL"
+                tar -xf "$tarball" -C "$src_code_dir" --strip-components=1
+                rm "$tarball"
+            else
+                echo -e "${RED}Unknown source type${NC}"
+                return 1
+            fi
+
+            echo ""
+            echo -e "${GREEN}✓ Source fetched${NC}"
+            echo "  Location: $src_code_dir"
+            echo "  Next: powos source patch $name  (apply patches)"
+            echo "        powos source build $name  (build overlay)"
+            ;;
+
+        patch)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos source patch <name>"
+                return 1
+            fi
+
+            local src_dir="$SOURCES_DIR/$name"
+            local patches_dir="$src_dir/patches"
+            local upstream_dir="$src_dir/upstream"
+
+            if [[ ! -d "$upstream_dir" ]]; then
+                echo -e "${RED}No upstream source. Run 'powos source get $name' first.${NC}"
+                return 1
+            fi
+
+            if [[ ! -d "$patches_dir" ]] || [[ -z "$(ls -A "$patches_dir" 2>/dev/null)" ]]; then
+                echo "No patches to apply for $name"
+                return 0
+            fi
+
+            echo -e "${CYAN}Applying patches to $name...${NC}"
+            cd "$upstream_dir"
+
+            for patch in "$patches_dir"/*.patch; do
+                [[ -f "$patch" ]] || continue
+                echo "  Applying: $(basename "$patch")"
+                git apply "$patch" 2>/dev/null || patch -p1 < "$patch"
+            done
+
+            echo ""
+            echo -e "${GREEN}✓ Patches applied${NC}"
+            ;;
+
+        build)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos source build <name>"
+                echo ""
+                echo "Build an overlay from source."
+                echo "The built overlay will override the system version."
+                return 1
+            fi
+
+            local src_dir="$SOURCES_DIR/$name"
+            local build_script="$src_dir/build.sh"
+
+            if [[ ! -f "$build_script" ]]; then
+                echo -e "${RED}No build.sh for '$name'${NC}"
+                return 1
+            fi
+
+            echo -e "${CYAN}Building $name overlay...${NC}"
+
+            # Use overlay-manager if available
+            if [[ -x /usr/lib/powos/overlay-manager.sh ]]; then
+                /usr/lib/powos/overlay-manager.sh build "$name"
+            else
+                local output_dir="$EXTENSIONS_DIR/$name"
+                mkdir -p "$output_dir/usr/bin" "$output_dir/usr/lib"
+                export OVERLAY_OUTPUT_DIR="$output_dir"
+                export OVERLAY_NAME="$name"
+                bash "$build_script" "$output_dir"
+            fi
+
+            echo ""
+            echo -e "${GREEN}✓ Overlay built${NC}"
+            echo "  Location: $EXTENSIONS_DIR/$name"
+            echo ""
+            echo "Enable with: powos source enable $name"
+            ;;
+
+        enable)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos source enable <name>"
+                return 1
+            fi
+
+            local ext_dir="$EXTENSIONS_DIR/$name"
+            if [[ ! -d "$ext_dir" ]]; then
+                echo -e "${RED}Overlay '$name' not built. Run 'powos source build $name' first.${NC}"
+                return 1
+            fi
+
+            echo -e "${CYAN}Enabling $name overlay...${NC}"
+
+            # Link to system extensions dir
+            sudo ln -sf "$ext_dir" "/var/lib/extensions/$name" 2>/dev/null || \
+                ln -sf "$ext_dir" "/var/lib/extensions/$name"
+
+            # Refresh sysext
+            if command -v systemd-sysext &>/dev/null; then
+                sudo systemd-sysext refresh 2>/dev/null || true
+            fi
+
+            echo -e "${GREEN}✓ Overlay enabled${NC}"
+            echo "  Custom $name now overrides system version!"
+            ;;
+
+        disable)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos source disable <name>"
+                return 1
+            fi
+
+            echo -e "${CYAN}Disabling $name overlay...${NC}"
+
+            sudo rm -f "/var/lib/extensions/$name" 2>/dev/null || \
+                rm -f "/var/lib/extensions/$name"
+
+            if command -v systemd-sysext &>/dev/null; then
+                sudo systemd-sysext refresh 2>/dev/null || true
+            fi
+
+            echo -e "${GREEN}✓ Overlay disabled${NC}"
+            echo "  System $name restored"
+            ;;
+
+        new)
+            local name="${2:-}"
+            local upstream="${3:-}"
+
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos source new <name> [upstream-url]"
+                echo ""
+                echo "Create a new source overlay template."
+                echo ""
+                echo "Examples:"
+                echo "  powos source new myapp"
+                echo "  powos source new firefox https://github.com/nicotine-plus/nicotine-plus"
+                return 1
+            fi
+
+            local src_dir="$SOURCES_DIR/$name"
+            if [[ -d "$src_dir" ]]; then
+                echo -e "${YELLOW}Source '$name' already exists${NC}"
+                return 1
+            fi
+
+            echo -e "${CYAN}Creating source template: $name${NC}"
+
+            mkdir -p "$src_dir/patches"
+
+            # Create source.conf
+            cat > "$src_dir/source.conf" << EOF
+# Source configuration for $name
+# Edit this file to configure how the source is fetched and built
+
+# Description shown in 'powos source list'
+DESCRIPTION="Custom build of $name"
+
+# Upstream source (git URL or tarball URL)
+UPSTREAM_URL="${upstream:-}"
+
+# Git branch (optional, for git sources)
+UPSTREAM_BRANCH=""
+
+# Build dependencies (space-separated)
+BUILD_DEPS=""
+
+# Runtime dependencies (space-separated)
+RUNTIME_DEPS=""
+EOF
+
+            # Create build.sh template
+            cat > "$src_dir/build.sh" << 'EOF'
+#!/usr/bin/env bash
+# build.sh - Build script for this overlay
+#
+# This script builds the custom version and installs to the overlay.
+#
+# Environment:
+#   OVERLAY_OUTPUT_DIR - Where to place built files
+#   OVERLAY_NAME       - Name of this overlay
+
+set -euo pipefail
+
+OUTPUT_DIR="${1:-$OVERLAY_OUTPUT_DIR}"
+NAME="${OVERLAY_NAME:-$(basename "$(dirname "$0")")}"
+SRC_DIR="$(dirname "$0")"
+UPSTREAM_DIR="$SRC_DIR/upstream"
+
+echo "Building: $NAME"
+echo "Output:   $OUTPUT_DIR"
+echo "Source:   $UPSTREAM_DIR"
+
+# Create output directories
+mkdir -p "$OUTPUT_DIR/usr/bin"
+mkdir -p "$OUTPUT_DIR/usr/lib"
+mkdir -p "$OUTPUT_DIR/usr/share/$NAME"
+
+# Load source config if exists
+[[ -f "$SRC_DIR/source.conf" ]] && source "$SRC_DIR/source.conf"
+
+# ─────────────────────────────────────────────────────────────────
+# BUILD YOUR APP HERE
+# ─────────────────────────────────────────────────────────────────
+
+if [[ -d "$UPSTREAM_DIR" ]]; then
+    cd "$UPSTREAM_DIR"
+
+    # Example: Build with make
+    # make
+    # make install DESTDIR="$OUTPUT_DIR" PREFIX=/usr
+
+    # Example: Build with cmake
+    # mkdir -p build && cd build
+    # cmake .. -DCMAKE_INSTALL_PREFIX=/usr
+    # make
+    # make install DESTDIR="$OUTPUT_DIR"
+
+    # Example: Build with meson
+    # meson setup build --prefix=/usr
+    # meson compile -C build
+    # meson install -C build --destdir="$OUTPUT_DIR"
+
+    # Example: Copy pre-built binary
+    # cp ./target/release/myapp "$OUTPUT_DIR/usr/bin/"
+
+    echo "TODO: Add build commands for $NAME"
+else
+    echo "No upstream source found. Run 'powos source get $NAME' first."
+    echo "Or add build commands that don't require upstream source."
+fi
+
+echo "✅ Built: $NAME"
+EOF
+
+            chmod +x "$src_dir/build.sh"
+
+            # Create README
+            cat > "$src_dir/README.md" << EOF
+# $name Source Overlay
+
+Custom build of $name for PowOS.
+
+## Quick Start
+
+\`\`\`bash
+# Fetch upstream source
+powos source get $name
+
+# Apply patches (if any)
+powos source patch $name
+
+# Build the overlay
+powos source build $name
+
+# Enable it (overrides system version)
+powos source enable $name
+\`\`\`
+
+## Adding Patches
+
+Put \`.patch\` files in the \`patches/\` directory.
+They'll be applied in alphabetical order.
+
+\`\`\`bash
+# Create a patch from your changes
+cd upstream
+git diff > ../patches/01-my-feature.patch
+\`\`\`
+
+## Files
+
+- \`source.conf\` - Source configuration
+- \`build.sh\` - Build script
+- \`patches/\` - Patches to apply
+- \`upstream/\` - Fetched source code (git-ignored)
+EOF
+
+            echo ""
+            echo -e "${GREEN}✓ Source template created${NC}"
+            echo "  Location: $src_dir"
+            echo ""
+            echo "Next steps:"
+            echo "  1. Edit $src_dir/source.conf (set UPSTREAM_URL)"
+            echo "  2. Edit $src_dir/build.sh (add build commands)"
+            echo "  3. powos source get $name"
+            echo "  4. powos source build $name"
+            echo "  5. powos source enable $name"
+            ;;
+
+        *)
+            echo "Usage: powos source <command>"
+            echo ""
+            echo "Manage source overlays - build custom versions of apps."
+            echo ""
+            echo "Commands:"
+            echo "  list                  List available sources"
+            echo "  new <name> [url]      Create new source template"
+            echo "  get <name>            Fetch upstream source code"
+            echo "  patch <name>          Apply patches to source"
+            echo "  build <name>          Build overlay from source"
+            echo "  enable <name>         Enable overlay (overrides system)"
+            echo "  disable <name>        Disable overlay (restore system)"
+            echo ""
+            echo "Examples:"
+            echo "  powos source new myapp https://github.com/user/myapp"
+            echo "  powos source get myapp"
+            echo "  powos source build myapp"
+            echo "  powos source enable myapp"
+            echo ""
+            echo "How it works:"
+            echo "  1. Source code lives in sources/<name>/"
+            echo "  2. Patches in sources/<name>/patches/ are applied"
+            echo "  3. build.sh compiles and installs to extensions/<name>/"
+            echo "  4. systemd-sysext merges extension over system files"
+            echo "  5. Your custom build overrides the system version!"
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Container Commands (Podman/Distrobox)
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_containers() {
+    local action="${1:-list}"
+    local DISTROBOX_CONFIG="/etc/powos/containers/distrobox.ini"
+
+    case "$action" in
+        list|ls)
+            echo -e "${BOLD}${CYAN}Containers${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            # Show Distrobox containers
+            echo -e "${CYAN}Distrobox Containers:${NC}"
+            if command -v distrobox &>/dev/null; then
+                distrobox list 2>/dev/null || echo "  (none created yet)"
+            else
+                echo "  distrobox not installed"
+            fi
+            echo ""
+
+            # Show Podman containers
+            echo -e "${CYAN}Podman Containers:${NC}"
+            if command -v podman &>/dev/null; then
+                podman ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null || echo "  (none)"
+            else
+                echo "  podman not installed"
+            fi
+            echo ""
+
+            # Show images
+            echo -e "${CYAN}Images:${NC}"
+            if command -v podman &>/dev/null; then
+                podman images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" 2>/dev/null | head -10
+                local count
+                count=$(podman images -q 2>/dev/null | wc -l)
+                if [[ "$count" -gt 10 ]]; then
+                    echo "  ... and $((count - 10)) more"
+                fi
+            fi
+            ;;
+
+        create)
+            local name="${2:-}"
+            local image="${3:-}"
+
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos containers create <name> [image]"
+                echo ""
+                echo "Examples:"
+                echo "  powos containers create dev              # Default Fedora container"
+                echo "  powos containers create arch archlinux   # Arch Linux container"
+                echo "  powos containers create ubuntu ubuntu:22.04"
+                echo ""
+                echo "Predefined containers (from distrobox.ini):"
+                echo "  powos containers assemble                # Create all predefined"
+                return 1
+            fi
+
+            image="${image:-fedora:latest}"
+            echo "Creating distrobox container: $name (image: $image)"
+            distrobox create --name "$name" --image "$image" --yes
+            echo ""
+            echo -e "${GREEN}✓ Container '$name' created${NC}"
+            echo "  Enter with: powos containers enter $name"
+            ;;
+
+        enter)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos containers enter <name>"
+                echo ""
+                echo "Available containers:"
+                distrobox list 2>/dev/null || echo "  (none)"
+                return 1
+            fi
+            distrobox enter "$name"
+            ;;
+
+        remove|rm)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos containers remove <name>"
+                return 1
+            fi
+            echo "Removing container: $name"
+            distrobox rm "$name" --yes
+            echo -e "${GREEN}✓ Container '$name' removed${NC}"
+            ;;
+
+        stop)
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos containers stop <name>"
+                return 1
+            fi
+            distrobox stop "$name" --yes
+            echo -e "${GREEN}✓ Container '$name' stopped${NC}"
+            ;;
+
+        assemble)
+            echo -e "${BOLD}${CYAN}Creating Predefined Containers${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            local config_file=""
+            # Find distrobox.ini
+            for path in "$DISTROBOX_CONFIG" "/var/lib/powos/containers/distrobox.ini" "containers/distrobox.ini"; do
+                if [[ -f "$path" ]]; then
+                    config_file="$path"
+                    break
+                fi
+            done
+
+            if [[ -z "$config_file" ]]; then
+                echo -e "${YELLOW}No distrobox.ini found${NC}"
+                echo "Create one at: containers/distrobox.ini"
+                return 1
+            fi
+
+            echo "Using config: $config_file"
+            echo ""
+            distrobox assemble create --file "$config_file"
+            echo ""
+            echo -e "${GREEN}✓ Predefined containers created${NC}"
+            ;;
+
+        export)
+            local name="${2:-}"
+            local app="${3:-}"
+            if [[ -z "$name" ]] || [[ -z "$app" ]]; then
+                echo "Usage: powos containers export <container> <app>"
+                echo ""
+                echo "Export an app from a container to the host menu"
+                echo "Example: powos containers export arch-dev code"
+                return 1
+            fi
+            distrobox-export --app "$app" --container "$name"
+            echo -e "${GREEN}✓ Exported '$app' from '$name'${NC}"
+            ;;
+
+        podman)
+            # Pass through to podman
+            shift
+            podman "$@"
+            ;;
+
+        prune)
+            echo "Cleaning up unused container resources..."
+            podman system prune -f
+            echo -e "${GREEN}✓ Cleanup complete${NC}"
+            ;;
+
+        *)
+            echo "Usage: powos containers <command>"
+            echo ""
+            echo "Commands:"
+            echo "  list                    List all containers and images"
+            echo "  create <name> [image]   Create a new distrobox container"
+            echo "  enter <name>            Enter a distrobox container"
+            echo "  stop <name>             Stop a container"
+            echo "  remove <name>           Remove a container"
+            echo "  assemble                Create all predefined containers"
+            echo "  export <name> <app>     Export app from container to host"
+            echo "  prune                   Clean up unused resources"
+            echo "  podman <args>           Pass through to podman"
+            echo ""
+            echo "Examples:"
+            echo "  powos containers create dev"
+            echo "  powos containers enter dev"
+            echo "  powos containers assemble"
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════
 # Main Dispatch
 # ═══════════════════════════════════════════════════════════════════
 
@@ -748,6 +1555,22 @@ case "${1:-}" in
         ;;
     profile)
         cmd_hardware | grep ACTIVE_PROFILE
+        ;;
+    containers|container|c)
+        shift
+        cmd_containers "$@"
+        ;;
+    install|i)
+        shift
+        cmd_install "$@"
+        ;;
+    build|b)
+        shift
+        cmd_build "$@"
+        ;;
+    source|src|s)
+        shift
+        cmd_source "$@"
         ;;
     version|--version|-v)
         cmd_version

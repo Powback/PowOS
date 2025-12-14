@@ -292,6 +292,48 @@ lib/cachefs/
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Layer 6: Container Development (Podman + Distrobox)
+
+**Purpose:** Mutable development environments on top of the immutable base OS.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Container Architecture                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  PowOS (Immutable Base)                                          │
+│  ├─ Bazzite + Layered Persistence                               │
+│  └─ Podman (rootless, daemonless)                               │
+│         │                                                        │
+│         ├─ Distrobox Containers (mutable dev environments)       │
+│         │   ├─ powos-dev (Arch Linux)                           │
+│         │   │   └─ Install anything: neovim, rust, go, etc.     │
+│         │   ├─ powos-node (Node.js 20)                          │
+│         │   ├─ powos-python (Python 3.12 + ML libs)             │
+│         │   └─ powos-build (Fedora build tools)                 │
+│         │                                                        │
+│         └─ OCI Containers (standard Podman)                      │
+│             └─ Run any Docker/OCI image                         │
+│                                                                  │
+│  Key Benefits:                                                   │
+│  ├─ Rootless: No daemon, no root required                       │
+│  ├─ Integrated: Containers share home, GPU, audio               │
+│  ├─ Persistent: Containers survive reboots                      │
+│  └─ Exportable: Apps from containers appear in host menu        │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Files:**
+```
+containers/
+└── distrobox.ini         # Predefined container configurations
+
+Config files installed:
+/etc/containers/registries.conf.d/00-powos.conf    # Registry config
+/etc/containers/storage.conf.d/00-powos.conf       # Storage config
+```
+
 ## CLI Commands
 
 ### Status & Info
@@ -322,7 +364,22 @@ powos rollback reset          # Clear all rollback flags
 ### Updates
 ```bash
 powos update          # Check for OS updates
-powos update apply    # Apply updates (to updates layer)
+powos update os       # Apply OS updates (to updates layer)
+powos update packages # Apply package updates (to custom layer)
+powos update apply    # Apply all updates
+```
+
+### Containers
+```bash
+powos containers              # List all containers and images
+powos containers create NAME  # Create new distrobox container
+powos containers enter NAME   # Enter a container
+powos containers stop NAME    # Stop a container
+powos containers remove NAME  # Remove a container
+powos containers assemble     # Create all predefined containers
+powos containers export NAME APP  # Export app to host menu
+powos containers prune        # Clean up unused resources
+powos containers podman ARGS  # Pass through to podman
 ```
 
 ### Sync & Safety

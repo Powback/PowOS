@@ -21,6 +21,43 @@ RUN dnf install -y python3 python3-pip rsync fuse fuse-libs && \
     pip3 install --break-system-packages psutil rich fusepy && \
     dnf clean all
 
+# ═══════════════════════════════════════════════════════════════════
+# Container Runtime: Podman + Distrobox
+# ═══════════════════════════════════════════════════════════════════
+# Podman is daemonless, rootless-capable, and native to Fedora
+# Distrobox creates mutable dev containers on top of immutable base
+RUN dnf install -y \
+        podman \
+        podman-docker \
+        buildah \
+        skopeo \
+        containernetworking-plugins \
+        slirp4netns \
+        fuse-overlayfs \
+        crun \
+    && dnf clean all
+
+# Install Distrobox (latest from git for best features)
+RUN curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- --prefix /usr/local
+
+# Configure Podman for rootless operation
+RUN mkdir -p /etc/containers && \
+    echo 'unqualified-search-registries = ["docker.io", "ghcr.io", "quay.io"]' > /etc/containers/registries.conf.d/00-powos.conf
+
+# Create storage config for rootless Podman
+RUN mkdir -p /etc/containers/storage.conf.d && \
+    cat > /etc/containers/storage.conf.d/00-powos.conf << 'EOF'
+[storage]
+driver = "overlay"
+
+[storage.options.overlay]
+mount_program = "/usr/bin/fuse-overlayfs"
+EOF
+
+# Enable lingering for powos user (allows user services to run at boot)
+RUN mkdir -p /var/lib/systemd/linger && \
+    touch /var/lib/systemd/linger/powos
+
 # Copy PowOS boot system
 COPY lib/boot/ /usr/lib/powos/boot/
 COPY lib/hardware-detect.sh /usr/lib/powos/
