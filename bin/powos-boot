@@ -94,7 +94,10 @@ if [[ -f "$RAMBOOT_STATE" ]]; then
     fi
 
     # Start layer sync daemon (syncs RAM changes to custom layer on USB)
-    if [[ -x "$LAYER_SYNC" ]] && [[ -f /run/powos/layer-paths ]]; then
+    # Skip if systemd service is already managing it (avoid duplicate daemons)
+    if systemctl is-active --quiet powos-layer-sync.service 2>/dev/null; then
+        log "  Layer sync active via systemd (powos-layer-sync.service)"
+    elif [[ -x "$LAYER_SYNC" ]] && [[ -f /run/powos/layer-paths ]]; then
         log "  Starting layer sync daemon..."
         python3 "$LAYER_SYNC" --interval 60 &
         LAYER_SYNC_PID=$!
@@ -114,6 +117,12 @@ fi
 # 5. CacheFS for User Data (Lazy-Loading)
 # ═══════════════════════════════════════════════════════════════════
 log "Setting up user data filesystem..."
+
+# Load system configuration (sets POWOS_CACHEFS_ENABLED, POWOS_CACHE_SIZE, etc.)
+if [[ -f /etc/powos/config ]]; then
+    # shellcheck source=/dev/null
+    source /etc/powos/config
+fi
 
 CACHEFS_SCRIPT="/usr/lib/powos/cachefs/powos-cachefs.py"
 CACHEFS_SYNC="/usr/lib/powos/cachefs/cachefs-sync.py"
@@ -135,7 +144,7 @@ if blkid | grep -qE "POWOS-(DATA|HOME)"; then
     fi
 fi
 
-if [[ "$USB_DETECTED" == "true" ]] && [[ -x "$CACHEFS_SCRIPT" ]]; then
+if [[ "$USB_DETECTED" == "true" ]] && [[ -x "$CACHEFS_SCRIPT" ]] && [[ "${POWOS_CACHEFS_ENABLED:-false}" == "true" ]]; then
     log "  Starting CacheFS (lazy-loading with ${CACHE_SIZE} RAM cache)..."
 
     # Create cache directory

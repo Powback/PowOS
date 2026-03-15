@@ -111,9 +111,10 @@ class LRUCache:
         with self.lock:
             cache_path = self._cache_path(rel_path)
 
-            # Evict until we have space
+            # Evict until we have space; stop if nothing can be evicted (all dirty)
             while self.current_size + size > self.max_size and self.items:
-                self._evict_one()
+                if not self._evict_one():
+                    raise FuseOSError(errno.ENOSPC)
 
             # Copy to cache
             shutil.copy2(source_path, cache_path)
@@ -130,35 +131,34 @@ class LRUCache:
             log.info(f"Cached: {rel_path} ({size} bytes, total: {self.current_size}/{self.max_size})")
             return cache_path
 
-    def _evict_one(self):
-        """Evict least recently used item."""
+    def _evict_one(self) -> bool:
+        """Evict least recently used non-dirty item. Returns True if evicted."""
         if not self.items:
-            return
+            return False
 
-        # Get oldest (first in OrderedDict)
-        rel_path, item = next(iter(self.items.items()))
+        # Find first non-dirty item (oldest first)
+        for rel_path, item in list(self.items.items()):
+            if not item.dirty:
+                cache_path = self._cache_path(rel_path)
+                if cache_path.exists():
+                    cache_path.unlink()
+                self.current_size -= item.size
+                del self.items[rel_path]
+                log.info(f"Evicted: {rel_path}")
+                return True
 
-        # Don't evict dirty files
-        if item.dirty:
-            # Move to end and try next
-            self.items.move_to_end(rel_path)
-            # Find first non-dirty
-            for path, itm in list(self.items.items()):
-                if not itm.dirty:
-                    rel_path, item = path, itm
-                    break
-            else:
-                log.warning("All cached files are dirty, cannot evict")
-                return
+        log.warning("All cached files are dirty, cannot evict")
+        return False
 
-        # Remove from cache
-        cache_path = self._cache_path(rel_path)
-        if cache_path.exists():
-            cache_path.unlink()
-
-        self.current_size -= item.size
-        del self.items[rel_path]
-        log.info(f"Evicted: {rel_path}")
+    def remove(self, rel_path: str):
+        """Remove a file from cache (e.g. after unlink)."""
+        with self.lock:
+            if rel_path in self.items:
+                cache_path = self._cache_path(rel_path)
+                if cache_path.exists():
+                    cache_path.unlink()
+                self.current_size -= self.items[rel_path].size
+                del self.items[rel_path]
 
     def mark_dirty(self, rel_path: str):
         """Mark file as having unsaved changes."""
@@ -409,11 +409,23 @@ class PowOSCacheFS(Operations):
         return fd
 
     def release(self, path, fh):
-        """Close file."""
+        """Close file, flushing dirty data to disk first."""
         if fh in self.open_files:
             rel_path, cache_path, real_fh = self.open_files[fh]
+            if self.cache.items.get(rel_path) and self.cache.items[rel_path].dirty:
+                os.fsync(real_fh)
             os.close(real_fh)
             del self.open_files[fh]
+        return 0
+
+    def fsync(self, path, datasync, fh):
+        """Flush file data to the cache storage layer."""
+        if fh in self.open_files:
+            rel_path, cache_path, real_fh = self.open_files[fh]
+            if datasync:
+                os.fdatasync(real_fh)
+            else:
+                os.fsync(real_fh)
         return 0
 
     def mkdir(self, path, mode):
@@ -459,7 +471,7 @@ class PowOSCacheFS(Operations):
             del self.metadata[path]
 
         # Remove from cache if present
-        # (implementation detail - would need cache.remove())
+        self.cache.remove(path)
 
         if self.usb_connected:
             full_path = self._full_path(path)
@@ -566,10 +578,13 @@ class PowOSCacheFS(Operations):
             cache_path = self.cache.get_path(rel_path)
             if cache_path and cache_path.exists():
                 full_path = self._full_path(rel_path)
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(cache_path, full_path)
-                self.cache.mark_clean(rel_path)
-                log.info(f"  Synced: {rel_path}")
+                try:
+                    full_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(cache_path, full_path)
+                    self.cache.mark_clean(rel_path)
+                    log.info(f"  Synced: {rel_path}")
+                except OSError as e:
+                    log.error(f"  Failed to sync {rel_path}: {e}")
 
         log.info("Sync complete")
 
