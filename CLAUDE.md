@@ -6,7 +6,8 @@
 # Test in Docker (opens KDE desktop in browser)
 docker compose up
 
-# Create bootable ISO (requires podman)
+# Create live USB image (requires podman)
+# Output: build/output/powos-live.raw (LIVE BOOT, not an installer)
 just build-iso
 ```
 
@@ -52,10 +53,118 @@ PowOS uses **layered persistence with independent rollback** - NOT a traditional
 ### Status & Info
 ```bash
 powos status          # Full status (layers, RAM, USB, protection)
+powos health          # System health check with issues/warnings
+powos health --ai     # Talk to health AI agent for troubleshooting
 powos layers          # Detailed layer stack with sizes
 powos layers status   # Same as above
 powos hardware        # Show detected hardware
 powos version         # Show version and active layers
+```
+
+### Sync (RAM ↔ USB)
+
+**Real-world scenario:** Your USB runs on Machine A, you unplug and use on Machine B, then return to Machine A. Both machines have changes in RAM - conflict!
+
+```bash
+powos sync                    # Sync RAM ↔ USB (detects conflicts)
+powos sync status             # Show sync status & conflicts
+powos sync resolve            # Interactive conflict resolution
+powos sync resolve --ai       # AI analyzes conflicts & recommends action
+powos sync --keep-ram         # Force RAM changes to USB (your work wins)
+powos sync --keep-usb         # Reload from USB (USB wins, reboot needed)
+powos sync --merge            # Attempt basic merge (may need manual intervention)
+powos sync diff               # Show differences between RAM and USB
+```
+
+**How conflict detection works:**
+- USB has a `.powos-sync` marker tracking which machine last wrote to it
+- If you're on Machine A but USB was last written by Machine B → CONFLICT
+- Choose to keep your RAM changes, USB changes, or merge manually
+- Use `--ai` to discuss the conflict with the health agent before deciding
+
+### Flush & Safety
+```bash
+powos flush           # Force flush RAM changes to USB now (no conflict check)
+powos safe            # Check if safe to unplug USB
+```
+
+### Mobile Mode (RAM-Only) — ⚠️ WIP
+
+Copy OS to RAM so USB can be unplugged. Everything included by default.
+
+> **Status:** Copying files to RAM layer works. **Live remount is not yet implemented** (`lib/mobile.sh:441`). `powos mobile enable` copies files but requires a reboot to activate the new layer. The `overlayfs remounted` step is a stub.
+
+```bash
+powos mobile                    # Enable mobile mode (copy all to RAM, reboot needed)
+powos mobile -c                 # Interactive menu to customize
+powos mobile status             # Show current mode
+powos mobile disable            # Return to USB-backed mode
+
+# Category management (non-interactive, for scripts/LLMs)
+powos mobile categories         # List all categories with sizes
+powos mobile exclude Games      # Exclude a category
+powos mobile include Games      # Include a category
+powos mobile include-all        # Reset to include everything
+powos mobile exclude-all        # Start fresh, include nothing
+```
+
+**How it works (current state):**
+- Categories detected from package manager (rpm groups)
+- Selected categories copied to a RAM layer on disk
+- **Reboot required** to activate the new overlay stack
+- After reboot with mobile layer: USB optional for OS operations
+- User data: still uses default USB bind-mount (or CacheFS if enabled)
+
+### Backup (USB → Cloud)
+
+Optional cloud backup of your USB state to a git repository:
+
+```bash
+powos backup status           # Show backup status (ahead/behind)
+powos backup push             # Push USB state to cloud
+powos backup push -m "msg"    # Push with custom commit message
+powos backup pull             # Pull from cloud (merge strategy)
+powos backup pull --theirs    # Pull and discard local changes
+powos backup setup <url>      # Configure cloud backup repository
+powos backup ignore           # Edit .syncignore in editor
+powos backup ignore "pattern" # Add pattern to .syncignore
+powos backup refresh          # Regenerate ignore rules
+powos backup export [file]    # Export state to tarball
+powos backup import <file>    # Import state from tarball
+powos backup machine init     # Create machine-specific branch
+```
+
+**What gets backed up:**
+- `projects/` - Your development projects
+- `sources/` - Overlay source code
+- `containers/distrobox.ini` - Container definitions
+- `config/` - PowOS configuration
+
+**Configuring what NOT to backup:**
+
+Edit `.syncignore` in your state repo (`/var/lib/powos/git/.syncignore`):
+
+```bash
+powos backup ignore             # Opens in editor
+powos backup ignore "big-data/" # Quick add a pattern
+```
+
+**Default exclusions** (in `.syncignore`):
+- `node_modules/`, `vendor/`, `.venv/` - Package managers
+- `dist/`, `build/`, `target/` - Build artifacts
+- `.env`, `secrets/`, `*.key` - Secrets
+- `.next/`, `.nuxt/`, `.cache/` - Framework caches
+- `*.iso`, `*.img`, `*.vmdk` - Large binaries
+- `.mozilla/`, `.config/chromium/` - Browser profiles
+
+### Updates
+```bash
+powos update              # Check for available updates
+powos update os           # Update Bazzite base OS
+powos update powos        # Update PowOS scripts
+powos update packages     # Update installed packages
+powos update overlays     # Rebuild overlays with latest upstream
+powos update apply        # Apply all updates (os + packages)
 ```
 
 ### Layer Management
@@ -74,17 +183,7 @@ powos rollback all          # Boot with base only
 powos rollback reset        # Clear all rollback flags
 ```
 
-### Updates
-```bash
-powos update          # Check for OS updates
-powos update apply    # Apply updates to updates layer
-```
-
-### Sync & Safety
-```bash
-powos sync            # Force sync all changes to USB
-powos safe            # Check if safe to unplug USB
-```
+**Limitation:** `powos rollback` uses `grubby` with `2>/dev/null || true`, so grubby failures are silent. Flags are also written to `/run/powos/rollback-kargs` as a fallback. If rollback isn't working, verify: `cat /run/powos/rollback-kargs` and check if `grubby` is installed.
 
 ### Package Installation
 ```bash
@@ -112,15 +211,148 @@ powos build -t TAG                # Build with tag
 powos build -t myapp:v1 ./dir     # Full example
 ```
 
-### Source Overlays
+### Development (powos dev)
 ```bash
-powos source list                 # List all source overlays
-powos source new NAME             # Create new source template
-powos source get NAME             # Fetch upstream source
-powos source patch NAME           # Apply patches to upstream
-powos source build NAME           # Build overlay from source
-powos source enable NAME          # Enable (override system version)
-powos source disable NAME         # Disable (restore system version)
+powos dev list                    # List all projects
+powos dev new NAME                # Create new project from scratch
+
+# AI Project Creator - generates full project from description
+powos dev new --ai mytool                              # Interactive mode
+powos dev new --ai "CLI that converts JSON to YAML" jsonyaml
+powos dev new --ai "async web scraper with Redis queue" scraper
+
+# Docker projects (AI-powered)
+powos dev new --docker myapi
+powos dev new --docker --desc "REST API with Redis" myapi
+
+# Fork existing repos
+powos dev fork kde:dolphin
+powos dev fork https://github.com/user/repo
+powos dev fork --docker URL       # Fork and auto-dockerize
+
+powos dev build NAME              # Build project
+powos dev enable NAME             # Install to system as overlay
+powos dev disable NAME            # Remove from system
+powos dev update NAME             # Pull upstream changes (forks only)
+```
+
+### AI Agent System (powos ai)
+
+The AI agent system provides configurable AI assistance with multiple clients, agent personalities, and specialized flavors.
+
+```bash
+# Basic prompts
+powos ai "help me set up this project"
+powos ai --agent coder "review this function"
+powos ai --agent health "is my system healthy?"
+
+# Agent flavors (specialized modes)
+powos ai --agent health:sync "help with this conflict"
+powos ai --agent health:layers "layer corruption issue"
+powos ai --agent containerizer:python "containerize this flask app"
+powos ai --agent containerizer:node "dockerize my next.js app"
+powos ai --agent coder:review "check this code for issues"
+
+# Agent aliases (multiple names for same agent)
+powos ai --agent docker "containerize this"     # → containerizer
+powos ai --agent pod "help with containers"     # → containerizer
+
+# Client selection
+powos ai --client claude "explain this"    # Default
+powos ai --client gemini "analyze this"
+powos ai --client ollama "local inference"
+
+# Interactive mode
+powos ai -i                               # Start chat session
+powos ai -i --agent coder                 # Chat with specific agent
+
+# Session management
+powos ai session new myproject            # Create named session
+powos ai -s myproject "hello"             # Use session
+powos ai -s myproject "continue..."       # Session maintains context
+powos ai --continue "what next?"          # Continue last conversation
+powos ai sessions                         # List all sessions
+powos ai session export myproject md      # Export as markdown
+
+# Output formats
+powos ai --json "hello"                   # Full JSON with session_id
+powos ai --verbose "create a todo"        # Verbose with tool use
+
+# List agents with their flavors
+powos ai agents
+```
+
+**Available Agents & Flavors:**
+
+| Agent | Description | Flavors |
+|-------|-------------|---------|
+| `assistant` | General purpose (default) | - |
+| `coder` | Coding assistance | `:review` - Code review specialist |
+| `devops` | System admin, containers | - |
+| `health` | PowOS diagnostics | `:sync` - RAM↔USB conflicts, `:layers` - Layer issues |
+| `creator` | Project generator | - |
+| `containerizer` | Container config generator | `:python`, `:node` |
+
+**Aliases:** `docker`, `pod`, `container` → `containerizer`
+
+**Agent Config Structure:**
+```
+config/ai/agents/
+├── health/
+│   ├── agent.conf        # Main agent config
+│   ├── sync.conf         # :sync flavor
+│   └── layers.conf       # :layers flavor
+├── containerizer/
+│   ├── agent.conf
+│   ├── python.conf
+│   └── node.conf
+├── coder/
+│   ├── agent.conf
+│   └── review.conf
+└── ...
+```
+
+**Library Usage (in scripts):**
+```bash
+source /usr/lib/powos/ai/agent.sh
+
+# Basic calls
+ai_call "what should I do?"
+ai_call --agent devops "diagnose this"
+ai_call --agent health:sync "help with conflict"
+
+# Interactive with context
+ai_interactive --agent health --context "$system_state"
+```
+
+**Creating Custom Agents:**
+
+1. Create agent directory and config:
+```bash
+mkdir -p config/ai/agents/myagent
+
+# config/ai/agents/myagent/agent.conf
+AGENT_NAME="myagent"
+AGENT_DESCRIPTION="My custom agent"
+AGENT_CLIENT="claude"  # or gemini, ollama
+AGENT_ALIASES="myalias otheralias"  # Optional aliases
+AGENT_SYSTEM_PROMPT="You are a specialist in..."
+```
+
+2. Add flavors (optional) - any .conf file except agent.conf:
+```bash
+# config/ai/agents/myagent/specialized.conf
+FLAVOR_NAME="specialized"
+FLAVOR_DESCRIPTION="Specialized mode for X"
+FLAVOR_PROMPT="## Specialized Mode
+
+Focus on X, Y, Z..."
+```
+
+3. Use it:
+```bash
+powos ai --agent myagent "help me"
+powos ai --agent myagent:specialized "detailed help"
 ```
 
 ## Example Output
@@ -142,16 +374,17 @@ RAM Overlay
   Used:       1.2G (changes since boot)
 
 User Data (/home)
-  Mode:       ● CacheFS (lazy-load)
-  Cached:     142 files
+  Mode:       ● USB bind-mount (direct)
+  CacheFS:    disabled (set POWOS_CACHEFS_ENABLED=true in /etc/powos/config)
 
 USB Drive
   Status:     ● Connected
   Last Sync:  30s ago
 
 Unplug Safety
-  ✓ FULLY PROTECTED
-    USB can be unplugged anytime!
+  ⚠ OS PROTECTED, HOME REQUIRES USB
+    OS runs from RAM (safe to unplug for OS)
+    /home is USB-mounted (enable CacheFS for full unplug resilience)
 ```
 
 **powos layers:**
@@ -195,10 +428,10 @@ Layer Stack
 5. Layer Sync Daemon starts
    └─ Syncs RAM → custom layer every 60s
 
-6. CacheFS for User Data
-   └─ FUSE mount at /home/powos
-   └─ Metadata always in RAM
-   └─ Contents lazy-loaded
+6. User Data Mount
+   └─ Default: direct USB bind-mount at /home/powos
+   └─ If POWOS_CACHEFS_ENABLED=true: FUSE mount (lazy-load)
+   └─ CacheFS is opt-in and experimental (disabled by default)
 
 7. Desktop Environment
    └─ KDE Plasma ready
@@ -245,6 +478,9 @@ PowOS/
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot
 │   ├── overlay-manager.sh     # systemd-sysext builder
+│   ├── sync.sh                # RAM ↔ USB sync with conflict detection
+│   ├── backup.sh              # USB ↔ cloud backup (git)
+│   ├── mobile.sh              # Mobile mode (copy OS to RAM)
 │   ├── dracut/
 │   │   └── 90powos-ramboot/
 │   │       ├── module-setup.sh
@@ -252,13 +488,28 @@ PowOS/
 │   │       └── powos-overlay-init.sh
 │   ├── ramfs/
 │   │   └── layer-sync.py      # Syncs RAM → custom layer
-│   └── cachefs/
-│       ├── powos-cachefs.py   # FUSE filesystem
-│       └── cachefs-sync.py    # User data sync
+│   ├── cachefs/
+│   │   ├── powos-cachefs.py   # FUSE filesystem
+│   │   └── cachefs-sync.py    # User data sync
+│   └── ai/
+│       ├── agent.sh           # Main agent dispatcher + library API
+│       ├── session.sh         # Session management
+│       └── clients/           # Client implementations
+│           ├── claude.sh
+│           ├── gemini.sh
+│           └── ollama.sh
 │
 ├── config/
 │   ├── profiles/              # Hardware profiles (16)
-│   └── bootc/kargs.d/         # Kernel arguments
+│   ├── bootc/kargs.d/         # Kernel arguments
+│   └── ai/
+│       ├── agent.conf         # Global AI settings
+│       ├── clients/           # Client configs (claude, gemini, ollama)
+│       └── agents/            # Agent directories
+│           ├── health/        # agent.conf + sync.conf, layers.conf
+│           ├── containerizer/ # agent.conf + python.conf, node.conf
+│           ├── coder/         # agent.conf + review.conf
+│           └── .../           # Each agent in own folder
 │
 ├── containers/
 │   └── distrobox.ini          # Container definitions
@@ -310,14 +561,18 @@ lib/dracut/90powos-ramboot/
 
 ### 2. Layer Sync Daemon
 
-Python daemon that syncs RAM changes to custom layer:
+Python daemon that syncs RAM changes to custom layer (`lib/ramfs/layer-sync.py`):
 
 ```
 lib/ramfs/layer-sync.py
 ├── Runs every 60 seconds
+├── Translates overlayfs whiteouts (file deletions) before rsync
 ├── Rsyncs RAM upper → custom layer on USB
 ├── Excludes temp files, caches
-└── Handles USB disconnect/reconnect
+├── Checks USB writable after sync (USB disconnect guard)
+├── Flush to disk (sync) after each successful sync
+├── Tracks consecutive failures, sends desktop notification at 3+
+└── Honest exit codes: rsync exit 23 (partial) = FAILURE, not success
 ```
 
 **State files:**
@@ -325,26 +580,33 @@ lib/ramfs/layer-sync.py
 /run/powos/
 ├── ramboot-state         # Boot state (layers, RAM size)
 ├── layer-paths           # Paths for sync daemon
-├── layer-sync-status.json
+├── layer-sync-status.json  # {last_sync, consecutive_failures, errors}
 └── rollback-kargs        # Pending rollback flags
 ```
 
-### 3. CacheFS (User Data)
+### 3. CacheFS (User Data) — ⚠️ Opt-In / Experimental
 
-FUSE filesystem for lazy-loading terabytes of user data:
+FUSE filesystem for lazy-loading user data. **Disabled by default.** Enable via `POWOS_CACHEFS_ENABLED=true` in `/etc/powos/config`.
+
+Known limitations: missing fsync, potential data loss on power failure. Default is direct USB bind-mount.
 
 ```
-IN RAM (always):
-├─ File metadata ─────── ~100MB for 1M files
-└─ LRU cache ─────────── 4GB (configurable)
+When enabled (POWOS_CACHEFS_ENABLED=true):
+  IN RAM:
+  ├─ File metadata ─────── ~100MB for 1M files
+  └─ LRU cache ─────────── 4GB (configurable)
 
-ON USB (lazy-loaded):
-└─ Actual contents ───── up to 4TB
+  ON USB (lazy-loaded):
+  └─ Actual contents ───── up to 4TB
 
-USB unplugged:
-  ls ~/Documents/     → works (metadata RAM)
-  cat cached.txt      → works (in cache)
-  cat uncached.txt    → error "offline"
+  USB unplugged:
+    ls ~/Documents/     → works (metadata RAM)
+    cat cached.txt      → works (in cache)
+    cat uncached.txt    → error "offline"
+
+Default (CacheFS disabled):
+  /home is direct bind-mount from USB
+  USB must be connected for home dir access
 ```
 
 ### 4. Chameleon Boot (Hardware Detection)
@@ -373,6 +635,15 @@ EOF
 # Build
 bash lib/overlay-manager.sh build my-tool
 ```
+
+**Overlay Types:**
+
+| Type | Example | Description |
+|------|---------|-------------|
+| Standard | `hello-powos`, `gpu-nvidia` | Self-contained, builds independently |
+| Meta-overlay | `kde` | Requires sub-argument: `kde:dolphin`, `kde:konsole` |
+
+Meta-overlays wrap multiple related apps. During `build-all`, they're skipped gracefully with helpful output showing available sub-options.
 
 ### 6. Container Development (Podman + Distrobox)
 
@@ -423,77 +694,55 @@ image=ubuntu:22.04
 additional_packages="build-essential git"
 ```
 
-### 7. Source Overlays (Custom App Builds)
+### 7. Development System (powos dev)
 
-Override system apps with custom builds:
+Unified system for creating new apps or customizing existing ones:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              Source Overlay Workflow                             │
+│              Project Structure                                   │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  sources/neovim/                                                 │
-│  ├── source.conf      ← UPSTREAM_URL, BUILD_DEPS                 │
-│  ├── build.sh         ← Compile instructions                     │
-│  ├── upstream/        ← Git clone (powos source get)             │
-│  └── patches/         ← Your customizations                      │
-│        ├── 001-my-feature.patch                                  │
-│        └── 002-fix-something.patch                               │
+│  projects/myapp/              (new project)                      │
+│  ├── src/              ← Your code (edit this)                   │
+│  ├── project.conf      ← Project metadata                        │
+│  └── build.sh          ← Build script                            │
 │                                                                  │
-│  powos source get neovim     →  Clone upstream                   │
-│  powos source patch neovim   →  Apply patches/                   │
-│  powos source build neovim   →  Run build.sh → extensions/       │
-│  powos source enable neovim  →  systemd-sysext merge             │
-│                                                                  │
-│  Result: Your custom neovim at /usr/bin/nvim                     │
-│          System version masked until disable                     │
+│  projects/dolphin/            (forked project)                   │
+│  ├── src/              ← Your modified version (edit this)       │
+│  ├── upstream/         ← Original KDE source (read-only)         │
+│  ├── project.conf      ← Fork metadata                           │
+│  └── build.sh          ← KDE build script                        │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Example source.conf:**
+**Create a new app:**
 ```bash
-# sources/neovim/source.conf
-DESCRIPTION="Custom Neovim build with your patches"
-UPSTREAM_URL="https://github.com/neovim/neovim"
-UPSTREAM_BRANCH="stable"
-BUILD_DEPS="cmake make gcc g++ unzip gettext curl"
-RUNTIME_DEPS=""
+powos dev new myapp
+cd /var/lib/powos/projects/myapp/src
+# write your code
+powos dev build myapp
+powos dev enable myapp
 ```
 
-**Example build.sh:**
+**Fork and customize KDE app:**
 ```bash
-#!/bin/bash
-OUTPUT_DIR="${1:-$OVERLAY_OUTPUT_DIR}"
-cd "$SRC_DIR/upstream"
-make CMAKE_BUILD_TYPE=Release CMAKE_INSTALL_PREFIX=/usr
-make install DESTDIR="$OUTPUT_DIR"
+powos dev fork kde:dolphin
+cd /var/lib/powos/projects/dolphin/src
+# make your changes
+powos dev build dolphin
+powos dev enable dolphin
+
+# Later: pull upstream updates
+powos dev update dolphin
 ```
 
-**Workflow:**
-```bash
-# 1. Create source template
-powos source new my-app
-
-# 2. Edit source.conf with upstream URL
-
-# 3. Fetch source
-powos source get my-app
-
-# 4. Make changes, create patches
-cd sources/my-app/upstream
-# edit files...
-git diff > ../patches/001-my-change.patch
-
-# 5. Build
-powos source build my-app
-
-# 6. Enable (overrides system version)
-powos source enable my-app
-
-# 7. Later: disable to restore system version
-powos source disable my-app
-```
+**Key concepts:**
+- `src/` is YOUR code - edit freely
+- `upstream/` is reference only (forks)
+- `powos dev update` pulls new upstream, you reapply changes
+- Same workflow for new apps and forks
 
 ## Rollback Scenarios
 
@@ -504,6 +753,8 @@ powos source disable my-app
 | `powos rollback all` | Base OS only | Everything is broken |
 | `powos rollback reset` | Use all layers | Ready to try again |
 
+**Rollback limitation:** grubby calls use `|| true` and suppress stderr, so failures are silent. Verify flags were applied: `cat /run/powos/rollback-kargs` and `grep powos /proc/cmdline` after reboot.
+
 ## Protection Matrix
 
 | Component | Location | USB Unplugged? |
@@ -511,8 +762,10 @@ powos source disable my-app
 | Kernel | RAM | ✅ Always works |
 | OS (/usr, /etc, /var) | RAM overlay | ✅ Always works |
 | Running processes | RAM | ✅ Always works |
-| User file metadata | RAM (CacheFS) | ✅ Always works |
-| Recently accessed files | RAM cache | ✅ Always works |
+| User file metadata | RAM (CacheFS, opt-in) | ✅ Works if CacheFS enabled |
+| Recently accessed files | kernel page cache | ✅ May work (kernel-dependent) |
+| Home dir access | USB bind-mount (default) | ❌ Needs USB reconnect |
+| Home dir access | CacheFS (opt-in) | ⚠️ Works for cached files only |
 | Unaccessed user files | USB | ⏸️ Offline until reconnect |
 
 ## RAM Requirements
@@ -520,11 +773,13 @@ powos source disable my-app
 | Component | RAM | Purpose |
 |-----------|-----|---------|
 | OS overlay | 8-20 GB | Running OS + writes |
-| CacheFS cache | 4 GB | Recently accessed files |
-| **Recommended** | **16-32 GB** | Full unplug resilience |
+| CacheFS cache | 4 GB | Recently accessed files (only when CacheFS enabled) |
+| **Minimum recommended** | **16 GB** | OS in RAM + comfortable headroom |
+| **With CacheFS** | **24-32 GB** | Full unplug resilience for home dir |
 
 ## Development Workflow
 
+### On Windows (Docker dev)
 ```bash
 # 1. Make changes
 vim bin/powos
@@ -534,7 +789,6 @@ docker compose up --build
 
 # 3. Check status
 docker exec powos powos status
-docker exec powos powos layers
 
 # 4. Access desktop
 open http://localhost:6091/vnc.html
@@ -542,6 +796,34 @@ open http://localhost:6091/vnc.html
 # 5. Build ISO for real hardware
 just build-iso
 ```
+
+### On Real Hardware (Live Updates)
+After booting from the ISO, the PowOS source is bundled at `/var/lib/powos/src`.
+Edit source directly and apply changes without rebuilding:
+
+```bash
+# Find the source (bundled or on mounted drive)
+cd /var/lib/powos/src        # Bundled source
+# OR mount your original dev disk
+cd /mnt/original-disk/Projects/PowOS
+
+# Make changes
+vim bin/powos
+
+# Apply to running system immediately
+powos update self
+# Or from custom path:
+powos update self --from /mnt/disk/Projects/PowOS
+
+# Track your changes
+git add -A && git commit -m "Fixed thing"
+git push  # Push back to your repo
+
+# Pull latest from remote
+powos update self --pull
+```
+
+This enables rapid iteration on real hardware without rebuilding the ISO.
 
 ## Container Notes
 
@@ -558,11 +840,13 @@ just build-iso
 - 5901: VNC direct
 - 6091: noVNC web interface
 
-**Container Runtime:**
-- Podman (daemonless, rootless)
+**Container Runtime (Podman, NOT Docker):**
+- **Podman** - Daemonless, rootless by default
 - `podman-docker` provides Docker CLI compatibility
 - Distrobox for mutable dev containers
 - fuse-overlayfs for rootless storage
+- Dockerfile/Containerfile both work (Podman reads both)
+- `powos ai --agent containerizer` for container help (aliases: docker, pod)
 
 **Registries (unqualified):**
 - docker.io
@@ -571,10 +855,18 @@ just build-iso
 
 ## Troubleshooting
 
+**AI-Assisted Troubleshooting:**
+```bash
+powos health --ai                    # General system diagnosis
+powos ai --agent health:sync "..."   # Sync conflict help
+powos ai --agent health:layers "..." # Layer/rollback issues
+```
+
 **Check system status:**
 ```bash
 powos status
 powos layers
+powos health                         # Health check with issues/warnings
 ```
 
 **RAM boot not activating:**
@@ -590,8 +882,13 @@ cat /run/powos/ramboot-state
 cat /run/powos/layer-sync-status.json
 ```
 
-**CacheFS not working:**
+**CacheFS (opt-in, disabled by default):**
 ```bash
+# Enable CacheFS:
+echo 'POWOS_CACHEFS_ENABLED=true' >> /etc/powos/config
+# Then reboot or restart powos-homefs.service
+
+# Debug when enabled:
 blkid | grep POWOS-DATA
 mount | grep cachefs
 cat /run/powos/cachefs-status.json
@@ -601,6 +898,40 @@ cat /run/powos/cachefs-status.json
 ```bash
 powos rollback
 # Shows current rollback flags
+
+# If rollback not working (grubby may have silently failed):
+cat /run/powos/rollback-kargs     # Verify flags were written
+grep powos /proc/cmdline          # After reboot: check flags active
+which grubby && grubby --info=DEFAULT  # Check if grubby is installed
+```
+
+**RAM ↔ USB sync issues:**
+```bash
+# Check sync status
+powos sync status
+
+# Conflict detected?
+powos sync resolve            # Interactive resolution
+powos sync resolve --ai       # AI-assisted conflict resolution
+powos sync --keep-ram         # Force your RAM changes to USB
+
+# Show what's different
+powos sync diff
+```
+
+**Cloud backup issues:**
+```bash
+# Check backup status
+powos backup status
+
+# If lock file error (interrupted backup):
+rm /run/powos/sync.lock
+
+# Check git state
+cd /var/lib/powos/git && git status
+
+# Force reset to remote:
+powos backup pull --theirs
 ```
 
 **Container issues:**
@@ -633,6 +964,41 @@ powos source build NAME
 systemd-sysext status
 systemd-sysext refresh
 ```
+
+## Testing
+
+### Tier 1 (Docker, fast)
+```bash
+# Run Docker test suite
+docker compose up --build -d
+docker exec powos bash /test/tier1/test-hardware-detect.sh
+docker exec powos bash /test/tier1/test-overlay.sh
+docker exec powos bash /test/tier1/test-pinstall.sh
+docker exec powos python3 /test/tier1/test-layer-sync.py   # Layer sync + whiteout tests
+docker exec powos python3 /test/tier1/test-cachefs.py      # CacheFS unit tests
+```
+
+**What Docker covers:** Hardware detection logic, overlay build/enable/disable, package install, layer sync logic (unit tests, not real overlayfs), CacheFS unit behavior.
+
+**What needs real hardware or VM:** Actual overlayfs RAM boot, real USB detection and sync, CacheFS FUSE mount, rollback across reboots, hardware profile application.
+
+> **Note:** Tier-2 VM testing infrastructure does not exist yet. There is no automated test suite for real-hardware behavior.
+
+## Feature Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Layered RAM boot | ✅ Implemented | OS in RAM, layers from USB |
+| Hardware detection (16 profiles) | ✅ Implemented | Auto-selects on boot |
+| Layer sync (RAM→USB, 60s) | ✅ Implemented | Whiteout translation, USB disconnect guard, failure notifications |
+| systemd-sysext overlays | ✅ Implemented | Custom binaries merged into /usr |
+| Container dev (Distrobox) | ✅ Implemented | Mutable dev containers |
+| Rollback | ✅ Implemented | grubby can silently fail — verify via `/run/powos/rollback-kargs` |
+| CacheFS | ⚠️ Opt-in/Experimental | `POWOS_CACHEFS_ENABLED=true` required; missing fsync, data loss risk |
+| Mobile mode | 🚧 WIP | Files copied to RAM but live remount not implemented; reboot needed |
+| Sync conflict detection | ⚠️ Partial | Detection works; `--merge` has basic implementation, may need manual help |
+| Cloud backup | 📋 Planned | git-based CLI structure exists |
+| Tier-2 VM testing | ❌ Missing | Only Docker/tier-1 tests exist |
 
 ## Credentials
 

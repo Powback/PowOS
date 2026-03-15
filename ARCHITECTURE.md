@@ -80,10 +80,11 @@ How overlayfs merges them:
 │     ├─ Start layer-sync.py (syncs RAM → custom layer)                       │
 │     └─ Runs every 60 seconds                                                │
 │                                    │                                         │
-│  5. CACHEFS (User Data)                                                      │
-│     ├─ Mount /home/powos via FUSE                                           │
-│     ├─ Metadata always in RAM                                                │
-│     └─ File contents lazy-loaded on access                                  │
+│  5. USER DATA MOUNT                                                          │
+│     ├─ Default: direct USB bind-mount of /home (USB must stay connected)    │
+│     └─ Optional (POWOS_CACHEFS_ENABLED=true): CacheFS FUSE mount            │
+│          ├─ Metadata in RAM, contents lazy-loaded                            │
+│          └─ Experimental — missing fsync, data loss risk on power failure   │
 │                                    │                                         │
 │  6. DESKTOP                                                                  │
 │     └─ KDE Plasma                                                           │
@@ -164,7 +165,13 @@ lib/dracut/90powos-ramboot/
 
 lib/ramfs/
 ├── layer-sync.py         # Syncs RAM → custom layer (every 60s)
+│                         # Whiteout translation, USB disconnect guard,
+│                         # disk flush after sync, consecutive failure notifications
 └── overlay-mount.sh      # Legacy overlay utilities
+
+test/tier1/
+├── test-layer-sync.py    # Layer sync unit tests (whiteouts, USB detection)
+└── test-cachefs.py       # CacheFS unit tests
 
 /run/powos/
 ├── ramboot-state         # Current boot state (layers, RAM size)
@@ -237,13 +244,17 @@ extensions/                      # Built overlays (gitignored)
 lib/overlay-manager.sh           # Build/enable/disable overlays
 ```
 
-## Layer 4: CacheFS (Lazy-Loading User Data)
+## Layer 4: User Data Mount
 
-**Purpose:** User data (terabytes) can't fit in RAM. CacheFS lazy-loads files on access.
+**Default:** Direct USB bind-mount of `/home`. Simple and reliable, but requires USB connection for home directory access.
+
+**CacheFS (opt-in, experimental):** FUSE filesystem for lazy-loading user data. Enable via `POWOS_CACHEFS_ENABLED=true` in `/etc/powos/config`.
+
+> ⚠️ **CacheFS is experimental.** Known issues: missing fsync, potential data loss on power failure. Disabled by default.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    CacheFS Architecture                          │
+│          CacheFS Architecture (when POWOS_CACHEFS_ENABLED=true)  │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │   IN RAM (always):                                               │
@@ -255,10 +266,14 @@ lib/overlay-manager.sh           # Build/enable/disable overlays
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│   USB unplugged:                                                 │
+│   USB unplugged (with CacheFS):                                  │
 │   - ls ~/Documents/ ─────────────────────── works (metadata RAM) │
 │   - cat cached-file.txt ─────────────────── works (in cache)     │
 │   - cat uncached-file.txt ───────────────── error "offline"      │
+│                                                                  │
+│   USB unplugged (default bind-mount):                            │
+│   - ls ~/Documents/ ─────────────────────── depends on kernel   │
+│   - cat any-file.txt ────────────────────── error/stale          │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -268,6 +283,8 @@ lib/overlay-manager.sh           # Build/enable/disable overlays
 lib/cachefs/
 ├── powos-cachefs.py    # FUSE filesystem implementation
 └── cachefs-sync.py     # Sync daemon for dirty files
+
+config/etc/powos.conf   # POWOS_CACHEFS_ENABLED=false (default)
 ```
 
 ## Layer 5: Package Management (pinstall)
@@ -414,8 +431,9 @@ POWOS-DATA partition (BTRFS):
 | Component | RAM | Purpose |
 |-----------|-----|---------|
 | OS overlay (tmpfs) | 8-20 GB | Running OS + writes |
-| CacheFS cache | 4 GB | Recently accessed files |
-| **Recommended** | **16-32 GB** | Full unplug resilience |
+| CacheFS cache | 4 GB | Recently accessed files (only if CacheFS enabled) |
+| **Minimum recommended** | **16 GB** | OS + comfortable headroom |
+| **With CacheFS** | **24-32 GB** | Full home-dir unplug resilience |
 
 ## Recovery Flow (15-Minute Phoenix)
 
@@ -450,6 +468,7 @@ PowOS/
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot
 │   ├── overlay-manager.sh     # systemd-sysext builder
+│   ├── dev-commands.sh        # Unified dev system
 │   ├── dracut/
 │   │   └── 90powos-ramboot/   # Layered RAM boot module
 │   ├── ramfs/
@@ -462,9 +481,12 @@ PowOS/
 │   ├── profiles/              # Hardware profiles (16)
 │   └── bootc/kargs.d/         # Kernel arguments
 │
-├── sources/                   # Overlay source code
+├── projects/                  # Development projects (gitignored)
+│   └── <name>/                # New or forked projects
+│
+├── sources/                   # Built-in overlays and configs
+│   ├── kde/dev.conf           # KDE app categories/deps
 │   ├── gpu-nvidia/
-│   ├── gpu-amd/
 │   └── ...
 │
 ├── systemd/
@@ -472,56 +494,101 @@ PowOS/
 │   └── powos-ramboot-init.service
 │
 └── build/
-    ├── build-iso.sh           # Create bootable ISO
-    └── powos-init-usb.sh      # USB initialization script
+    ├── build-iso.sh           # Create live USB image (raw-efi, NOT installer)
+    │                          # Output: build/output/powos-live.raw
+    └── install-to-usb.sh      # Write image to USB with safety checks
+                               # (blocks non-removable drives, warns on NVMe)
 ```
 
-## Layer 7: Source Overlays (Custom App Builds)
+## Layer 7: Development System (powos dev)
 
-**Purpose:** Build custom versions of apps that override system versions.
+**Purpose:** Unified system for building new apps AND forking existing apps.
+
+### Key Concept: Everything is a "Project"
+
+Whether you're building something new or customizing an existing app, the workflow is identical:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Source Overlay Flow                           │
+│                    Unified Development Flow                      │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  1. powos source new myapp https://github.com/user/myapp        │
-│     → Creates sources/myapp/ with:                               │
-│        ├── source.conf     (upstream URL, deps)                 │
-│        ├── build.sh        (build script)                       │
-│        └── patches/        (your patches)                       │
-│                                                                  │
-│  2. powos source get myapp                                       │
-│     → Clones source to sources/myapp/upstream/                  │
-│                                                                  │
-│  3. powos source patch myapp                                     │
-│     → Applies patches/*.patch to upstream                       │
-│                                                                  │
-│  4. powos source build myapp                                     │
-│     → Runs build.sh                                              │
-│     → Output to extensions/myapp/usr/bin/...                    │
-│                                                                  │
-│  5. powos source enable myapp                                    │
-│     → Links to /var/lib/extensions/myapp                        │
-│     → systemd-sysext refresh                                     │
-│     → YOUR BUILD NOW OVERRIDES SYSTEM VERSION                   │
+│  NEW PROJECT                      FORK EXISTING APP              │
+│  ────────────                     ─────────────────              │
+│  powos dev new myapp              powos dev fork kde:dolphin     │
+│        │                                │                        │
+│        ▼                                ▼                        │
+│  projects/myapp/                  projects/dolphin/              │
+│  ├── src/        ← edit this      ├── src/        ← edit this   │
+│  ├── project.conf                 ├── upstream/   ← reference   │
+│  └── build.sh                     ├── project.conf              │
+│                                   └── build.sh                   │
+│        │                                │                        │
+│        └────────────┬───────────────────┘                        │
+│                     ▼                                            │
+│              powos dev build <name>                              │
+│                     │                                            │
+│                     ▼                                            │
+│              extensions/<name>/usr/bin/...                       │
+│                     │                                            │
+│                     ▼                                            │
+│              powos dev enable <name>                             │
+│                     │                                            │
+│                     ▼                                            │
+│              systemd-sysext merges into /usr                     │
+│              YOUR BUILD OVERRIDES SYSTEM VERSION                 │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Fork Sources
+
+```bash
+# KDE Apps (auto-detected categories)
+powos dev fork kde:dolphin    # → https://invent.kde.org/system/dolphin.git
+powos dev fork kde:konsole    # → https://invent.kde.org/utilities/konsole.git
+powos dev fork kde:gwenview   # → https://invent.kde.org/graphics/gwenview.git
+
+# Direct Git URLs
+powos dev fork https://github.com/user/repo
+```
+
+### Project Structure
+
+```
+projects/<name>/
+├── src/              # YOUR editable source code (edit this!)
+│                     # For forks: starts as copy of upstream
+├── upstream/         # Original source (forks only, read-only reference)
+├── project.conf      # Metadata: PROJECT_TYPE, UPSTREAM_URL, BUILD_DEPS
+└── build.sh          # Build script (auto-generated, customizable)
+```
+
+### Update Workflow (Forks Only)
+
+```bash
+powos dev update dolphin
+# 1. Backs up your src/ to .backup-YYYYMMDD-HHMMSS/
+# 2. git pull in upstream/
+# 3. Copies new upstream to src/
+# 4. Reapply your changes manually (compare with backup)
+```
+
 **Files:**
 ```
-sources/
-├── neovim/
-│   ├── source.conf        # UPSTREAM_URL, BUILD_DEPS, etc.
-│   ├── build.sh           # Build script
-│   ├── patches/           # Your patches
-│   │   └── 01-feature.patch
-│   └── upstream/          # Fetched source (gitignored)
-├── btop/
-│   ├── source.conf
+lib/dev-commands.sh          # Unified dev command implementation
+sources/kde/dev.conf         # KDE app categories and build deps
+
+projects/                    # All development projects (gitignored)
+├── dolphin/                 # Forked from kde:dolphin
+│   ├── src/                 # Your modified version
+│   ├── upstream/            # Original KDE source
+│   ├── project.conf
 │   └── build.sh
-└── hello-powos/           # Example overlay
+└── myapp/                   # New custom project
+    ├── src/
+    ├── project.conf
+    └── build.sh
 ```
 
 ## Quick Reference
@@ -577,13 +644,14 @@ sources/
 | `powos containers export NAME APP` | Export app to host menu |
 | `powos build [path] [tag]` | Build from Dockerfile |
 
-### Source Overlays
+### Development
 | Command | Description |
 |---------|-------------|
-| `powos source` | List available sources |
-| `powos source new NAME [url]` | Create source template |
-| `powos source get NAME` | Fetch upstream source |
-| `powos source patch NAME` | Apply patches |
-| `powos source build NAME` | Build overlay |
-| `powos source enable NAME` | Enable (override system) |
-| `powos source disable NAME` | Disable (restore system) |
+| `powos dev` | List all projects |
+| `powos dev list` | List projects with status |
+| `powos dev new NAME` | Create new project |
+| `powos dev fork UPSTREAM` | Fork existing app (kde:app or URL) |
+| `powos dev build NAME` | Build project to overlay |
+| `powos dev enable NAME` | Enable (override system) |
+| `powos dev disable NAME` | Disable (restore system) |
+| `powos dev update NAME` | Pull upstream changes (forks) |

@@ -1,6 +1,8 @@
 # PowOS - Portable Gaming Workstation
 
-A fully portable Linux workstation that runs from a USB SSD. Plug into any machine, boot, work. **Unplug the USB and keep working.** Plug back in - changes sync automatically. No data loss, no crash.
+A fully portable Linux workstation that runs from a USB SSD. Plug into any machine, boot, work. The OS runs entirely from RAM — pulling the USB won't crash your session. Changes sync to USB every 60 seconds.
+
+> **Honest disclaimer:** PowOS is in active development. The OS RAM-boot and layer-sync are solid. CacheFS (lazy-loaded home data enabling true unplug while reading files) is **opt-in and experimental**. Mobile mode (copy OS to RAM for USB-free sessions) requires a reboot after enabling and is **not yet live-remountable**. See [Feature Status](#feature-status) for details.
 
 ## Two Commands. That's It.
 
@@ -16,9 +18,22 @@ Then burn the ISO to your USB SSD and boot from it. Everything else is automatic
 
 ## What Makes This Special
 
-### Unplug Resilience - The Killer Feature
+### Unplug Resilience
 
-Working on your desktop, need to leave? **Just yank the USB drive out.** The system continues running. Plug back in later - changes sync automatically.
+Working on your desktop, need to leave? **Yank the USB drive out.** The OS keeps running (it's in RAM). Changes you made since the last sync (up to 60s) stay in RAM.
+
+When you plug back in, unsaved RAM changes sync automatically.
+
+**What's protected without CacheFS (default):**
+- The entire OS and all running processes (in RAM) — always safe
+- Files you've already opened/written (in RAM page cache)
+- Any files in home dir that fit in kernel page cache
+
+**What requires CacheFS enabled (opt-in):**
+- Reliable `ls ~/Documents/` after unplug (metadata in RAM)
+- Opening files not in kernel cache after unplug
+
+Default setup uses a direct USB bind-mount for `/home`. CacheFS is opt-in via `POWOS_CACHEFS_ENABLED=true` in `/etc/powos/config`.
 
 ### Layered Persistence - Install Anything, Rollback Anytime
 
@@ -55,13 +70,15 @@ Unlike traditional "immutable" systems where you can't modify the OS, PowOS uses
 
 **Key insight:** You're NOT locked into an immutable system. Install packages, change configs, do whatever - it all persists. But if something breaks, you can roll back individual layers without losing everything.
 
-### User Data - Lazy Loading for 4TB
+### User Data
 
-Your 4TB of files can't fit in RAM. CacheFS solves this:
+By default, `/home` is a direct bind-mount from the USB drive. This is simple and reliable, but means some operations depend on the USB being connected.
+
+**CacheFS (opt-in, experimental):** For lazy-loading terabytes of user data with unplug resilience:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         USER DATA (CacheFS)                                  │
+│                    USER DATA (CacheFS - opt-in)                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  IN RAM (always):                                                            │
@@ -78,6 +95,8 @@ Your 4TB of files can't fit in RAM. CacheFS solves this:
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Enable CacheFS: set `POWOS_CACHEFS_ENABLED=true` in `/etc/powos/config`. Note: CacheFS has known limitations (missing fsync, potential data loss on power failure). Use at your own risk.
 
 ### Hardware Chameleon
 
@@ -181,17 +200,17 @@ In Docker you'll see "Standard" boot mode - that's correct because Docker doesn'
 | `powos build . <tag>` | Build with a specific tag |
 | `powos build <path> [tag]` | Build from specific path |
 
-### Source Overlays (Custom App Builds)
+### Development System (Build Custom Apps)
 | Command | What it does |
 |---------|--------------|
-| `powos source` | List available source overlays |
-| `powos source list` | List all sources with build status |
-| `powos source new <name> [url]` | Create new source overlay template |
-| `powos source get <name>` | Fetch upstream source code |
-| `powos source patch <name>` | Apply patches from patches/ directory |
-| `powos source build <name>` | Build overlay from source |
-| `powos source enable <name>` | Enable overlay (overrides system version) |
-| `powos source disable <name>` | Disable overlay (restore system version) |
+| `powos dev` | List all projects |
+| `powos dev list` | List all projects with status |
+| `powos dev new <name>` | Create a new project from scratch |
+| `powos dev fork <upstream>` | Fork existing app (e.g., `kde:dolphin`, `https://github.com/...`) |
+| `powos dev build <name>` | Build project to overlay |
+| `powos dev enable <name>` | Enable overlay (overrides system version) |
+| `powos dev disable <name>` | Disable overlay (restore system version) |
+| `powos dev update <name>` | Pull upstream changes (forks only) |
 
 ### Shortcuts
 | Short | Full Command |
@@ -199,7 +218,7 @@ In Docker you'll see "Standard" boot mode - that's correct because Docker doesn'
 | `powos c` | `powos containers` |
 | `powos i` | `powos install` |
 | `powos b` | `powos build` |
-| `powos s` | `powos source` |
+| `powos d` | `powos dev` |
 
 ## Container Development
 
@@ -276,81 +295,88 @@ podman run -it myapp:latest
 - **Persistent**: Containers survive reboots, stored on USB
 - **Dockerfile compatible**: Build any Docker project with `powos build`
 
-## Source Overlays - Customize Any App
+## Development System - Build & Customize Apps
 
-Build custom versions of apps that **override the system version**. Your patches persist across updates!
+The unified `powos dev` system lets you build new apps OR fork existing ones using the same workflow.
+
+### Create a New Project
 
 ```bash
-# List available source templates
-powos source list
-
-# Create a new source overlay
-powos source new myapp https://github.com/user/myapp
-
-# Or use an existing template (neovim, btop, etc.)
-powos source get neovim
-powos source build neovim
-powos source enable neovim
-
-# Now YOUR custom neovim overrides the system version!
+# Create a new project
+powos dev new myapp
+cd /var/lib/powos/projects/myapp/src
+# Write your code
+powos dev build myapp
+powos dev enable myapp
+# Your app is now in the system!
 ```
 
-### Example: Custom Neovim with Patches
+### Fork & Customize Existing Apps (e.g., KDE Dolphin)
 
 ```bash
-# Fetch source
-powos source get neovim
+# Fork Dolphin file manager
+powos dev fork kde:dolphin
 
-# Add your patches
-cd /var/lib/powos/sources/neovim/upstream
-# Make your changes...
-git diff > ../patches/01-my-feature.patch
+# Edit the source
+cd /var/lib/powos/projects/dolphin/src
+# Make your changes (add red sidebar, custom features, etc.)
 
-# Rebuild with patches
-powos source patch neovim
-powos source build neovim
-powos source enable neovim
+# Build and enable
+powos dev build dolphin
+powos dev enable dolphin
+# YOUR custom Dolphin now overrides the system version!
 
-# Your custom neovim is now active!
-nvim --version  # Shows your build
+# Later: pull upstream updates
+powos dev update dolphin
 ```
 
 ### How It Works
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Source Overlay System                         │
+│                    Development System                            │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  sources/neovim/                                                 │
-│  ├── source.conf        # Upstream URL, deps                    │
-│  ├── patches/           # Your patches (applied in order)       │
-│  │   └── 01-feature.patch                                       │
-│  ├── build.sh           # Build script                          │
-│  └── upstream/          # Fetched source code                   │
+│  projects/dolphin/                                               │
+│  ├── src/              # YOUR editable copy (edit this!)        │
+│  ├── upstream/         # Original source (forks only, for ref)  │
+│  ├── project.conf      # Project metadata                       │
+│  └── build.sh          # Build script (auto-generated)          │
 │                                                                  │
-│  ↓ powos source build neovim                                    │
+│  ↓ powos dev build dolphin                                      │
 │                                                                  │
-│  extensions/neovim/                                              │
-│  └── usr/bin/nvim       # Your custom build                     │
+│  extensions/dolphin/                                             │
+│  └── usr/bin/dolphin   # Your custom build                      │
 │                                                                  │
-│  ↓ powos source enable neovim                                   │
+│  ↓ powos dev enable dolphin                                     │
 │                                                                  │
 │  systemd-sysext merges extension into /usr                      │
-│  Your nvim OVERRIDES system nvim!                               │
+│  Your Dolphin OVERRIDES system Dolphin!                         │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Included Source Templates
+### Supported Fork Sources
 
-| App | Description |
-|-----|-------------|
-| `neovim` | Custom Neovim editor build |
-| `btop` | btop++ system monitor |
-| `hello-powos` | Example overlay template |
+| Source | Example |
+|--------|---------|
+| KDE Apps | `kde:dolphin`, `kde:konsole`, `kde:kate`, `kde:gwenview` |
+| Git URLs | `https://github.com/user/repo` |
 
-Create your own: `powos source new myapp https://github.com/...`
+### Project Status
+
+```bash
+powos dev list
+# Output:
+# Projects
+# ════════════════════════════════════════
+#   ★ dolphin (fork)
+#       ↳ https://invent.kde.org/system/dolphin.git
+#   ● myapp (custom)
+#   ○ experiment (custom)
+#
+# Legend: ★ enabled  ● built  ○ not built
+```
 
 ## powos status Output
 
@@ -370,18 +396,19 @@ RAM Overlay
   Used:       1.2G (changes since boot)
 
 User Data (/home)
-  Mode:       ● CacheFS (lazy-load)
+  Mode:       ● USB bind-mount (direct)
   USB:        Connected
-  Cached:     142 files
+  CacheFS:    disabled (opt-in, see /etc/powos/config)
 
 USB Drive
   Status:     ● Connected
   Last Sync:  30s ago
 
 Unplug Safety
-  ✓ FULLY PROTECTED
-    OS in RAM, user data cached
-    USB can be unplugged anytime!
+  ⚠ OS PROTECTED, HOME REQUIRES USB
+    OS runs from RAM (safe to unplug)
+    /home is USB-mounted (some ops need USB)
+    Enable CacheFS for full unplug resilience
 ```
 
 ## powos layers Output
@@ -423,6 +450,8 @@ powos rollback all
 # Reboot → clean Bazzite, no customizations, no updates
 ```
 
+**Rollback limitation:** `powos rollback` writes kernel args via `grubby`. If `grubby` is not installed or fails, the rollback flag is written to `/run/powos/rollback-kargs` instead — which the initramfs checks. The `grubby` call always exits 0 (`|| true`), so a failure is silent. Check `powos rollback` output and verify flags in `/run/powos/rollback-kargs`.
+
 ## What Happens on Real Hardware Boot
 
 ```
@@ -444,13 +473,15 @@ powos rollback all
    → Syncs RAM changes to custom layer every 60s
    → Changes persist across reboots
 
-5. CacheFS mounts user data
-   → Scans USB for file metadata → loads to RAM
-   → Sets up 4GB LRU cache for file contents
+5. User data mount
+   → Default: direct bind-mount of USB /home (USB must stay connected for full access)
+   → With CacheFS enabled: lazy-load FUSE mount (metadata in RAM, contents on-demand)
 
 6. KDE Plasma desktop starts
 
-7. You're ready to work - USB is now OPTIONAL
+7. You're ready to work
+   → OS is fully in RAM (USB can be yanked without crashing)
+   → Home dir access depends on mount mode (see step 5)
 ```
 
 ## USB Drive Layout
@@ -505,6 +536,7 @@ PowOS/
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot (auto hardware config)
 │   ├── overlay-manager.sh     # systemd-sysext overlay builder
+│   ├── dev-commands.sh        # Unified dev system (powos dev)
 │   ├── dracut/                # Initramfs modules
 │   │   └── 90powos-ramboot/   # Layered RAM boot module
 │   ├── ramfs/                 # RAM layer management
@@ -520,12 +552,16 @@ PowOS/
 │   │   └── ...
 │   └── bootc/kargs.d/         # Kernel boot arguments
 │
-├── sources/                   # Source overlays (build custom apps)
-│   ├── neovim/                # Custom neovim build
-│   │   ├── source.conf        # Upstream URL, deps
-│   │   ├── build.sh           # Build script
-│   │   └── patches/           # Your patches
-│   ├── btop/                  # Custom btop build
+├── projects/                  # Development projects (gitignored)
+│   └── <name>/                # Each project (new or forked)
+│       ├── src/               # Your editable source code
+│       ├── upstream/          # Original source (forks only)
+│       ├── project.conf       # Project metadata
+│       └── build.sh           # Build script
+│
+├── sources/                   # Built-in overlays and KDE config
+│   ├── kde/                   # KDE app configuration
+│   │   └── dev.conf           # App categories, build deps
 │   ├── hello-powos/           # Example overlay
 │   ├── gpu-nvidia/            # NVIDIA driver overlay
 │   ├── gpu-amd/               # AMD driver overlay
@@ -547,19 +583,28 @@ PowOS/
     └── output/                # Built ISOs go here
 ```
 
-## Creating the ISO
+## Creating the Live USB Image
+
+PowOS builds a **live boot image** (`powos-live.raw`), not an installer ISO. The image runs directly from USB without touching any other disk.
 
 ```bash
-# Build bootable ISO (requires podman)
+# Build live USB image (requires podman)
 just build-iso
 
-# Output: build/output/powos.iso
+# Output: build/output/powos-live.raw
 ```
 
-Then write to USB:
-- **Linux**: `sudo dd if=build/output/powos.iso of=/dev/sdX bs=4M status=progress`
-- **Windows**: Rufus, Etcher, or similar
-- **macOS**: `sudo dd if=build/output/powos.iso of=/dev/diskN bs=4m`
+Write to USB with the provided script (has safety checks):
+```bash
+sudo ./build/install-to-usb.sh /dev/sdX
+```
+
+Or write manually (be careful to use correct device):
+- **Linux**: `sudo dd if=build/output/powos-live.raw of=/dev/sdX bs=4M status=progress`
+- **Windows**: Rufus in DD mode, or balenaEtcher
+- **macOS**: `sudo dd if=build/output/powos-live.raw of=/dev/diskN bs=4m`
+
+**Safety:** `install-to-usb.sh` refuses to write to non-removable drives (internal SSDs). NVMe devices get a warning (some USB NVMe enclosures are detected as non-removable — use `POWOS_OVERRIDE_REMOVABLE=1` to bypass).
 
 ## Credentials
 
@@ -593,6 +638,54 @@ powos rollback
 powos sync
 powos safe  # Returns 0 if safe to unplug
 ```
+
+## Feature Status
+
+Honest assessment of what works:
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Layered RAM boot | ✅ Implemented | OS in RAM, layers from USB |
+| Hardware detection | ✅ Implemented | 16 hardware profiles |
+| Layer sync (RAM→USB) | ✅ Implemented | Every 60s, whiteout translation, USB disconnect detection |
+| systemd-sysext overlays | ✅ Implemented | Custom binaries merged into /usr |
+| Container dev (Distrobox) | ✅ Implemented | Mutable dev containers |
+| Rollback (custom/updates) | ✅ Implemented | grubby can silently fail — verify via `/run/powos/rollback-kargs` |
+| CacheFS lazy-loading | ⚠️ Opt-in/Experimental | Disabled by default; missing fsync, potential data loss on power failure |
+| Mobile mode (USB-free) | 🚧 WIP | Copies OS to RAM but live remount not implemented — requires reboot to take effect |
+| Sync conflict detection | ⚠️ Partial | Detection works; merge is manual |
+| Cloud backup | 📋 Planned | CLI structure exists but sync backend incomplete |
+| AI-assisted healing | 🧪 Experimental | Requires manual Ollama setup |
+| Tier-2 VM testing | ❌ Not yet | Only Docker/tier-1 tests exist |
+
+## Testing
+
+```bash
+# Docker tests (fast, no real hardware needed)
+docker compose up --build
+docker exec powos powos status
+docker exec powos bash /test/tier1/test-hardware-detect.sh
+docker exec powos bash /test/tier1/test-overlay.sh
+docker exec powos bash /test/tier1/test-pinstall.sh
+docker exec powos python3 /test/tier1/test-layer-sync.py
+docker exec powos python3 /test/tier1/test-cachefs.py
+```
+
+**What Docker tests cover:**
+- Hardware detection logic
+- Overlay build/enable/disable
+- Package install workflow
+- Layer sync logic (unit tests, not real overlayfs)
+- CacheFS unit tests
+
+**What requires real hardware or VM:**
+- Actual overlayfs RAM boot (Docker uses privileged mode, not real initramfs)
+- USB detection and real sync
+- CacheFS FUSE mount behavior
+- Rollback across reboots
+- Hardware profile application
+
+> **Note:** Tier-2 VM testing infrastructure does not exist yet. Pre-hardware testing checklist: (1) run all Docker tests, (2) verify `powos status` output, (3) check `powos layers` shows correct stack, (4) test `powos sync` manually before relying on auto-sync.
 
 ## Documentation
 
