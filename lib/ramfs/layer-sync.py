@@ -58,6 +58,8 @@ class LayerSync:
 
         self.running = True
         self.last_sync = 0
+        self.last_sync_success = False
+        self.consecutive_failures = 0
         self.pending_changes = 0
         self.sync_errors = []
 
@@ -80,9 +82,12 @@ class LayerSync:
             return 0
         count = 0
         for root, dirs, files in os.walk(self.ram_upper):
-            count += len(files)
-            # Don't count whiteout files (deleted files marker)
-            count -= sum(1 for f in files if f.startswith(".wh."))
+            whiteouts = [f for f in files if f.startswith(".wh.")]
+            regular = [f for f in files if not f.startswith(".wh.")]
+            count += len(regular)
+            # If whiteout files exist, they represent deletions that must be synced
+            if whiteouts:
+                count += len(whiteouts)
         return count
 
     def get_changed_files(self) -> list:
@@ -122,8 +127,8 @@ class LayerSync:
         # Build rsync command
         cmd = [
             "rsync", "-av",
-            "--delete",  # Remove files from custom that aren't in RAM
-            "--ignore-errors",  # Continue on errors
+            "--delete-after",  # Delete after transfer (safer than --delete)
+            "--partial",       # Keep partial files on interruption
         ]
 
         # Add exclude patterns
@@ -145,24 +150,55 @@ class LayerSync:
 
             if result.returncode == 0:
                 self.log("Sync completed successfully")
+                # Flush page cache to disk before updating state
+                try:
+                    subprocess.run(["sync"], timeout=30)
+                except Exception as e:
+                    self.log(f"Warning: sync flush failed: {e}")
                 self.last_sync = time.time()
+                self.last_sync_success = True
+                self.consecutive_failures = 0
                 self.sync_errors = []
                 return True
             else:
                 error = result.stderr.strip()
-                self.log(f"Sync had issues: {error}")
+                self.log(f"Sync failed (exit {result.returncode}): {error}")
                 self.sync_errors.append(error)
-                # Partial sync is still useful
-                self.last_sync = time.time()
-                return True
+                self.last_sync_success = False
+                self.consecutive_failures += 1
+                if self.consecutive_failures >= 3:
+                    self.log(f"Warning: {self.consecutive_failures} consecutive sync failures")
+                    send_notification(
+                        "PowOS Sync Error",
+                        f"Layer sync has failed {self.consecutive_failures} times. Changes may not be persisted.",
+                        urgency="critical"
+                    )
+                # Do NOT update self.last_sync on failure
+                return False
 
         except subprocess.TimeoutExpired:
             self.log("Sync timed out")
             self.sync_errors.append("Sync timed out")
+            self.last_sync_success = False
+            self.consecutive_failures += 1
+            if self.consecutive_failures >= 3:
+                send_notification(
+                    "PowOS Sync Error",
+                    f"Layer sync has failed {self.consecutive_failures} times. Changes may not be persisted.",
+                    urgency="critical"
+                )
             return False
         except Exception as e:
             self.log(f"Sync error: {e}")
             self.sync_errors.append(str(e))
+            self.last_sync_success = False
+            self.consecutive_failures += 1
+            if self.consecutive_failures >= 3:
+                send_notification(
+                    "PowOS Sync Error",
+                    f"Layer sync has failed {self.consecutive_failures} times. Changes may not be persisted.",
+                    urgency="critical"
+                )
             return False
 
     def write_status(self):
@@ -170,6 +206,8 @@ class LayerSync:
         status = {
             "last_sync": self.last_sync,
             "last_sync_human": datetime.fromtimestamp(self.last_sync).isoformat() if self.last_sync else "never",
+            "last_sync_success": self.last_sync_success,
+            "consecutive_failures": self.consecutive_failures,
             "pending_changes": self.count_changes(),
             "usb_connected": self.is_usb_connected(),
             "ram_upper": str(self.ram_upper),
@@ -193,8 +231,19 @@ class LayerSync:
         """Handle shutdown signals."""
         self.log(f"Received signal {signum}, shutting down...")
         self.running = False
-        # Final sync before exit
-        self.sync_to_custom_layer()
+        # Final sync before exit - write marker if it fails
+        success = self.sync_to_custom_layer()
+        if not success:
+            self.log("ERROR: Final sync on shutdown failed - writing marker file")
+            try:
+                STATE_DIR.mkdir(parents=True, exist_ok=True)
+                (STATE_DIR / "sync-failed-on-shutdown").write_text(
+                    f"Sync failed on shutdown at {datetime.now().isoformat()}\n"
+                    f"Consecutive failures: {self.consecutive_failures}\n"
+                    f"Last errors: {self.sync_errors[-3:]}\n"
+                )
+            except Exception as e:
+                self.log(f"Failed to write shutdown marker: {e}")
 
     def run(self):
         """Main daemon loop."""
