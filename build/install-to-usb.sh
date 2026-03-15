@@ -447,12 +447,31 @@ main() {
     check_system_disk "$device"
 
     if [[ $force -eq 1 ]]; then
+        # Even with --force, verify the device has USB transport.
+        # This prevents CI scripts with a wrong variable from silently
+        # targeting internal SATA/NVMe storage.
+        local tran
+        tran=$(lsblk -d -n -o TRAN "$device" 2>/dev/null | xargs || true)
+        if [[ "$tran" != "usb" ]]; then
+            echo ""
+            echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║  --force blocked: device is not USB transport              ║${NC}"
+            echo -e "${RED}║                                                            ║${NC}"
+            printf  "${RED}║  Device: %-50s ║${NC}\n" "$device"
+            printf  "${RED}║  Transport: %-47s ║${NC}\n" "${tran:-unknown}"
+            echo -e "${RED}║                                                            ║${NC}"
+            echo -e "${RED}║  --force only works with USB drives (transport=usb).       ║${NC}"
+            echo -e "${RED}║  Remove --force to proceed with interactive confirmation.  ║${NC}"
+            echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            exit 1
+        fi
         echo ""
         log_warn "╔════════════════════════════════════════════════════════════╗"
         log_warn "║  --force: skipping interactive confirmation                ║"
         log_warn "║  FOR AUTOMATED TESTING ONLY — data loss is irreversible    ║"
         log_warn "╚════════════════════════════════════════════════════════════╝"
-        log_warn "Target: $device"
+        log_warn "Target: $device (transport: $tran)"
         echo ""
     else
         confirm_destruction "$device"
