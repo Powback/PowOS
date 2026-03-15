@@ -150,6 +150,62 @@ class LayerSync:
                 return True
         return False
 
+    def translate_whiteouts(self) -> bool:
+        """Translate overlayfs whiteout files in RAM upper to actual deletions on custom layer.
+
+        Overlayfs represents deletions as whiteout files:
+          - .wh.FILENAME  : FILENAME was deleted in this layer
+          - .wh..wh..opq  : Directory is opaque (all lower-layer contents hidden)
+
+        Must be called before rsync so deleted files don't reappear after reboot.
+        Returns True if all whiteouts were handled successfully.
+        """
+        if not self.ram_upper.exists():
+            return True
+
+        success = True
+        for root, dirs, files in os.walk(self.ram_upper):
+            root_path = Path(root)
+            rel_dir = root_path.relative_to(self.ram_upper)
+            custom_dir = self.custom_layer / rel_dir
+
+            # Handle opaque directory whiteout: clear all pre-existing contents from the
+            # corresponding custom layer directory so lower-layer files don't bleed through.
+            if ".wh..wh..opq" in files and custom_dir.exists():
+                self.log(f"Opaque whiteout: clearing contents of {rel_dir} from custom layer")
+                try:
+                    for item in list(custom_dir.iterdir()):
+                        try:
+                            if item.is_dir() and not item.is_symlink():
+                                shutil.rmtree(item)
+                            else:
+                                item.unlink(missing_ok=True)
+                        except Exception as e:
+                            self.log(f"Warning: failed to remove {item}: {e}")
+                            success = False
+                except Exception as e:
+                    self.log(f"Warning: failed to clear {custom_dir}: {e}")
+                    success = False
+
+            # Handle per-file whiteouts
+            for f in files:
+                if not f.startswith(".wh.") or f == ".wh..wh..opq":
+                    continue
+                target_name = f[4:]  # Strip ".wh." prefix
+                target_path = custom_dir / target_name
+                if target_path.exists() or target_path.is_symlink():
+                    self.log(f"Whiteout: deleting {rel_dir / target_name} from custom layer")
+                    try:
+                        if target_path.is_dir() and not target_path.is_symlink():
+                            shutil.rmtree(target_path)
+                        else:
+                            target_path.unlink(missing_ok=True)
+                    except Exception as e:
+                        self.log(f"Warning: failed to delete {target_path}: {e}")
+                        success = False
+
+        return success
+
     def sync_to_custom_layer(self) -> bool:
         """Rsync RAM upper to custom layer."""
         if not self.is_usb_connected():
@@ -162,6 +218,11 @@ class LayerSync:
 
         # Ensure custom layer exists
         self.custom_layer.mkdir(parents=True, exist_ok=True)
+
+        # Translate overlayfs whiteouts to actual deletions before rsync.
+        # This ensures files deleted in RAM don't reappear in the custom layer.
+        self.log("Translating whiteout files...")
+        self.translate_whiteouts()
 
         # Build rsync command
         cmd = [
@@ -187,8 +248,27 @@ class LayerSync:
                 timeout=300  # 5 minute timeout
             )
 
-            if result.returncode == 0:
-                self.log("Sync completed successfully")
+            # Rsync exit code handling:
+            #   0  = success
+            #   23 = partial transfer (some files not transferred) -> FAILURE
+            #   24 = vanished files (files changed/disappeared during scan) -> WARNING only
+            #        This is normal for overlayfs where files can appear/disappear.
+            #   other non-zero -> FAILURE
+            if result.returncode == 0 or result.returncode == 24:
+                if result.returncode == 24:
+                    self.log("Warning: some files vanished during sync (normal for overlayfs)")
+                else:
+                    self.log("Sync completed successfully")
+
+                # Verify USB is still accessible after sync (race condition guard).
+                # The USB could have been disconnected mid-sync.
+                if not os.access(str(self.custom_layer), os.W_OK):
+                    self.log("ERROR: USB became inaccessible after sync (disconnected?)")
+                    self.sync_errors.append("USB disconnected during or after sync")
+                    self.last_sync_success = False
+                    self.consecutive_failures += 1
+                    return False
+
                 # Flush page cache to disk before updating state
                 try:
                     subprocess.run(["sync"], timeout=30)
@@ -200,9 +280,10 @@ class LayerSync:
                 self.sync_errors = []
                 return True
             else:
+                error_label = "partial transfer" if result.returncode == 23 else f"exit {result.returncode}"
                 error = result.stderr.strip()
-                self.log(f"Sync failed (exit {result.returncode}): {error}")
-                self.sync_errors.append(error)
+                self.log(f"Sync failed ({error_label}): {error}")
+                self.sync_errors.append(f"{error_label}: {error}")
                 self.last_sync_success = False
                 self.consecutive_failures += 1
                 if self.consecutive_failures >= 3:
