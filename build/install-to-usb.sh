@@ -40,6 +40,59 @@ check_root() {
     fi
 }
 
+check_steam_deck() {
+    # Detect if running ON a Steam Deck (Jupiter=LCD, Galileo=OLED)
+    local product_name=""
+    if [[ -f /sys/class/dmi/id/product_name ]]; then
+        product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)
+    fi
+
+    if [[ "$product_name" == "Jupiter" || "$product_name" == "Galileo" ]]; then
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║  BLOCKED: You are running this on a Steam Deck!            ║${NC}"
+        echo -e "${RED}║                                                            ║${NC}"
+        echo -e "${RED}║  This script installs PowOS to a USB drive. Running it    ║${NC}"
+        echo -e "${RED}║  on the Steam Deck itself WILL DESTROY SteamOS.           ║${NC}"
+        echo -e "${RED}║                                                            ║${NC}"
+        echo -e "${RED}║  Run this script on a separate PC/Mac instead.            ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        exit 1
+    fi
+}
+
+check_system_disk() {
+    local device="$1"
+
+    # Find the device backing the current root filesystem
+    local root_source root_device
+    root_source=$(findmnt -n -o SOURCE / 2>/dev/null || true)
+
+    if [[ -n "$root_source" ]]; then
+        # Strip partition number to get base device (e.g. /dev/sda1 → /dev/sda, /dev/nvme0n1p1 → /dev/nvme0n1)
+        if [[ "$root_source" == /dev/nvme* ]]; then
+            root_device=$(echo "$root_source" | sed 's/p[0-9]*$//')
+        else
+            root_device=$(echo "$root_source" | sed 's/[0-9]*$//')
+        fi
+
+        if [[ "$device" == "$root_device" ]]; then
+            echo ""
+            echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║  BLOCKED: Target is the system boot disk!                  ║${NC}"
+            echo -e "${RED}║                                                            ║${NC}"
+            echo -e "${RED}║  $device is the disk this system is running from.          ║${NC}"
+            echo -e "${RED}║  Writing to it WILL destroy your operating system.         ║${NC}"
+            echo -e "${RED}║                                                            ║${NC}"
+            echo -e "${RED}║  Connect a separate USB drive and target that instead.     ║${NC}"
+            echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            exit 1
+        fi
+    fi
+}
+
 check_device() {
     local device="$1"
 
@@ -56,9 +109,25 @@ check_device() {
         exit 1
     fi
 
-    # Warn about NVMe vs USB detection
+    # Hard block NVMe unless explicitly allowed
     if [[ "$device" == /dev/nvme* ]]; then
-        log_warn "Target appears to be NVMe - make sure this is your USB drive!"
+        if [[ "${ALLOW_NVME:-}" != "1" ]]; then
+            echo ""
+            echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║  BLOCKED: NVMe target requires explicit opt-in             ║${NC}"
+            echo -e "${RED}║                                                            ║${NC}"
+            echo -e "${RED}║  NVMe drives are typically internal system disks, not      ║${NC}"
+            echo -e "${RED}║  USB drives. Writing to an internal NVMe will destroy      ║${NC}"
+            echo -e "${RED}║  your operating system (e.g. SteamOS, Windows, Linux).    ║${NC}"
+            echo -e "${RED}║                                                            ║${NC}"
+            echo -e "${RED}║  If you genuinely have a USB NVMe enclosure, run:          ║${NC}"
+            echo -e "${RED}║    ALLOW_NVME=1 sudo $0 $device                            ║${NC}"
+            echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            exit 1
+        else
+            log_warn "NVMe target allowed via ALLOW_NVME=1 - proceeding with caution"
+        fi
     fi
 
     # Show device info
@@ -72,18 +141,23 @@ confirm_destruction() {
 
     echo ""
     echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║  WARNING: ALL DATA ON $device WILL BE DESTROYED  ║${NC}"
+    echo -e "${RED}║  WARNING: ALL DATA WILL BE PERMANENTLY DESTROYED           ║${NC}"
     echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
-    # Show what's on the drive
+    # Show device model and partitions
+    log "Target device: $device"
+    lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINT "$device" 2>/dev/null || true
+    echo ""
     log "Current partitions:"
     fdisk -l "$device" 2>/dev/null | head -20 || true
     echo ""
 
-    read -p "Type 'YES' to continue: " confirm
-    if [[ "$confirm" != "YES" ]]; then
-        log "Aborted"
+    echo -e "${RED}This will ERASE EVERYTHING on $device.${NC}"
+    echo -e "${YELLOW}Type the device path ($device) to confirm destruction:${NC}"
+    read -r confirm
+    if [[ "$confirm" != "$device" ]]; then
+        log "Aborted (input did not match $device)"
         exit 0
     fi
 }
@@ -329,7 +403,9 @@ main() {
     fi
 
     check_root
+    check_steam_deck
     check_device "$device"
+    check_system_disk "$device"
     confirm_destruction "$device"
 
     # If ISO exists, write it directly
