@@ -402,7 +402,26 @@ show_complete() {
 # Main
 # ─────────────────────────────────────────────────────────────────
 main() {
-    local device="${1:-}"
+    local device=""
+    local force=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force)
+                force=1
+                shift
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                log_error "Usage: sudo $0 [--force] /dev/sdX"
+                exit 1
+                ;;
+            *)
+                device="$1"
+                shift
+                ;;
+        esac
+    done
 
     echo ""
     echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════╗${NC}"
@@ -411,7 +430,9 @@ main() {
 
     if [[ -z "$device" ]]; then
         echo ""
-        echo "Usage: sudo $0 /dev/sdX"
+        echo "Usage: sudo $0 [--force] /dev/sdX"
+        echo ""
+        echo "  --force   Skip interactive confirmation (for automated testing only)"
         echo ""
         echo "Available drives:"
         lsblk -d -o NAME,SIZE,MODEL,TRAN | grep -E "usb|nvme" || lsblk -d -o NAME,SIZE,MODEL
@@ -424,7 +445,18 @@ main() {
     check_gaming_handheld
     check_device "$device"
     check_system_disk "$device"
-    confirm_destruction "$device"
+
+    if [[ $force -eq 1 ]]; then
+        echo ""
+        log_warn "╔════════════════════════════════════════════════════════════╗"
+        log_warn "║  --force: skipping interactive confirmation                ║"
+        log_warn "║  FOR AUTOMATED TESTING ONLY — data loss is irreversible    ║"
+        log_warn "╚════════════════════════════════════════════════════════════╝"
+        log_warn "Target: $device"
+        echo ""
+    else
+        confirm_destruction "$device"
+    fi
 
     # If ISO exists, write it directly
     if [[ -f "$ISO_PATH" ]]; then
