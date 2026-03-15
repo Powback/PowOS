@@ -40,6 +40,77 @@ services:
         export POWOS_ROOT=/powos
         bash /powos/test/tier1/test-hardware-detect.sh
         bash /powos/test/tier1/test-pinstall.sh
+        bash /powos/test/tier1/test-overlay.sh
+        bash /powos/test/tier1/test-sync.sh
+        bash /powos/test/tier1/test-ai-agent.sh
+
+  iso-builder:
+    profiles: ["build"]
+    build:
+      context: .
+      dockerfile: containers/Containerfile.iso-builder
+    volumes:
+      - .:/powos:rw
+      - /var/run/docker.sock:/var/run/docker.sock
+    privileged: true
+    working_dir: /powos
+    environment:
+      - POWOS_ROOT=/powos
+
+  # E2E test runner — covers ~80% of features including real overlayfs,
+  # layer sync to loop-device USB, FUSE CacheFS, USB disconnect simulation.
+  # Run: docker compose --profile e2e run --rm e2e-runner
+  e2e-runner:
+    profiles: ["e2e"]
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        INSTALL_E2E_DEPS: "1"
+    container_name: powos-e2e
+    hostname: powos-e2e
+    privileged: true
+    devices:
+      - /dev/fuse
+      - /dev/loop-control
+    volumes:
+      - .:/powos:ro
+      - powos-e2e-usb:/var/lib/powos-test
+    tmpfs:
+      - /run/powos
+      - /tmp
+    environment:
+      - POWOS_ROOT=/powos
+      - POWOS_E2E=1
+    entrypoint: ["/bin/bash", "/powos/test/e2e/run-e2e.sh"]
+
+  # QEMU tier — boots actual ISO in nested VM, covers remaining ~15%
+  # (dracut activation, layer rollback via real kargs, systemd-sysext loading).
+  # Requires: just build-iso  then  cp build/output/powos.iso test/e2e/
+  # Run: docker compose --profile e2e-full run --rm e2e-qemu
+  e2e-qemu:
+    profiles: ["e2e-full"]
+    build:
+      context: test/e2e
+      dockerfile: Containerfile.qemu
+    container_name: powos-e2e-qemu
+    hostname: powos-e2e-qemu
+    privileged: true
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    volumes:
+      - .:/powos:ro
+      - powos-qemu-disk:/disk
+    ports:
+      - "2222:2222"
+    environment:
+      - QEMU_MEM=4G
+      - QEMU_CPUS=4
+      - ISO_PATH=/powos/test/e2e/powos.iso
+    entrypoint: ["/bin/bash", "/powos/test/e2e/test-qemu-boot.sh"]
 
 volumes:
   powos-home:
+  powos-e2e-usb:
+  powos-qemu-disk:

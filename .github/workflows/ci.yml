@@ -24,7 +24,24 @@ jobs:
       - name: Run Pinstall Tests
         run: bash test/tier1/test-pinstall.sh
 
+      - name: Run Data Integrity Tests
+        run: |
+          pip install psutil rich 2>/dev/null || true
+          python3 test/tier1/test-layer-sync.py
+          python3 test/tier1/test-cachefs.py
+
       - name: Docker Compose Test
         run: |
           docker compose --profile test build
           docker compose --profile test run --rm test-runner
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    needs: tier1-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run E2E Tests
+        run: |
+          docker compose --profile e2e build
+          docker compose --profile e2e run --rm e2e-runner

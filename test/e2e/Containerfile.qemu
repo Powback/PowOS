@@ -1,0 +1,36 @@
+# PowOS QEMU Test Runner
+# Boots the actual PowOS ISO in a nested QEMU VM and verifies:
+#   - dracut module activates (RAM overlay boot)
+#   - Hardware detection picks "virtual" profile
+#   - layer-sync service starts
+#   - Layer rollback works via real kernel kargs (rd.powos.skip.custom=1)
+#   - systemd-sysext extensions load
+#
+# Requirements:
+#   - Host must have /dev/kvm (KVM hardware virtualization)
+#   - ISO must be present at test/e2e/powos.iso (run: just build-iso first)
+#
+# Build: docker compose --profile e2e-full build e2e-qemu
+# Run:   docker compose --profile e2e-full run --rm e2e-qemu
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+        qemu-system-x86 \
+        ovmf \
+        openssh-client \
+        sshpass \
+        curl \
+        jq \
+        netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# UEFI firmware path
+ENV OVMF_CODE=/usr/share/OVMF/OVMF_CODE.fd
+
+# Create disk image directory
+RUN mkdir -p /disk
+
+WORKDIR /powos

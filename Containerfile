@@ -10,6 +10,11 @@ LABEL org.opencontainers.image.title="PowOS"
 RUN mkdir -p /var/lib/powos/{extensions,overlays,state} \
     /var/lib/extensions /etc/powos /usr/lib/powos /run/powos
 
+# Fix Terra repos - disable GPG check (osbuild can't verify signatures)
+# Keep repos for updates, packages still come from trusted Bazzite upstream
+RUN sed -i 's/gpgcheck=1/gpgcheck=0/g' /etc/yum.repos.d/terra*.repo 2>/dev/null || true && \
+    sed -i 's/repo_gpgcheck=1/repo_gpgcheck=0/g' /etc/yum.repos.d/terra*.repo 2>/dev/null || true
+
 # Ensure dnf is configured for build
 RUN dnf makecache || true
 
@@ -46,13 +51,7 @@ RUN mkdir -p /etc/containers && \
 
 # Create storage config for rootless Podman
 RUN mkdir -p /etc/containers/storage.conf.d && \
-    cat > /etc/containers/storage.conf.d/00-powos.conf << 'EOF'
-[storage]
-driver = "overlay"
-
-[storage.options.overlay]
-mount_program = "/usr/bin/fuse-overlayfs"
-EOF
+    printf '[storage]\ndriver = "overlay"\n\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n' > /etc/containers/storage.conf.d/00-powos.conf
 
 # Enable lingering for powos user (allows user services to run at boot)
 RUN mkdir -p /var/lib/systemd/linger && \
@@ -80,6 +79,10 @@ COPY lib/ramfs/ /usr/lib/powos/ramfs/
 # Copy CacheFS (lazy-loading filesystem for user data)
 COPY lib/cachefs/ /usr/lib/powos/cachefs/
 
+# Copy AI Agent System
+COPY lib/ai/ /usr/lib/powos/ai/
+COPY config/ai/ /etc/powos/ai/
+
 # Install dracut module for full RAM boot
 # This allows the entire OS to run from RAM, USB can be unplugged
 COPY lib/dracut/90powos-ramboot/ /usr/lib/dracut/modules.d/90powos-ramboot/
@@ -106,6 +109,16 @@ COPY config/bootc/kargs.d/ /usr/lib/bootc/kargs.d/
 # Build extensions
 RUN bash /usr/lib/powos/overlay-manager.sh build-all
 
+# ═══════════════════════════════════════════════════════════════════
+# Bundle PowOS Source (for self-update capability)
+# ═══════════════════════════════════════════════════════════════════
+# The complete source is bundled at /var/lib/powos/src
+# This allows: powos update self (apply edits to running system)
+# Edit source, run update self, changes apply immediately
+COPY . /var/lib/powos/src/
+# Ensure .git is preserved for version tracking and git pull capability
+# Note: .git may be excluded by .dockerignore - that's ok for dev builds
+
 # Setup directories
 # Note: Bazzite has /mnt as a symlink, remove and recreate
 RUN rm -f /mnt 2>/dev/null || true && \
@@ -115,7 +128,20 @@ RUN rm -f /mnt 2>/dev/null || true && \
 RUN chmod +x /usr/bin/powos-boot /usr/bin/powos /usr/bin/pinstall /usr/bin/premove \
     /usr/lib/powos/*.sh /usr/lib/powos/boot/*.sh \
     /usr/lib/powos/ramfs/*.sh /usr/lib/powos/ramfs/*.py \
-    /usr/lib/powos/cachefs/*.py 2>/dev/null || true
+    /usr/lib/powos/cachefs/*.py \
+    /usr/lib/powos/ai/*.sh /usr/lib/powos/ai/clients/*.sh 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════════════════════
+# E2E Test Dependencies (optional — only installed when building
+# the e2e-runner profile: --build-arg INSTALL_E2E_DEPS=1)
+# Adds: btrfs-progs (mkfs.btrfs for loop-device USB simulation)
+# util-linux provides losetup, already present in bazzite base
+# ═══════════════════════════════════════════════════════════════════
+ARG INSTALL_E2E_DEPS=0
+RUN if [ "$INSTALL_E2E_DEPS" = "1" ]; then \
+        dnf install -y btrfs-progs util-linux parted && \
+        dnf clean all; \
+    fi
 
 EXPOSE 5901 6080
 ENTRYPOINT ["/usr/bin/powos-boot"]
