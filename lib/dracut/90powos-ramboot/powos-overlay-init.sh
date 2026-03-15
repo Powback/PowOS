@@ -51,12 +51,10 @@ else
     log "USB not detected - running from RAM only"
 fi
 
-# Start sync daemon if available
-if [[ -x /usr/lib/powos/ramfs/sync-daemon.py ]]; then
-    log "Starting sync daemon..."
-    python3 /usr/lib/powos/ramfs/sync-daemon.py &
-    log_ok "Sync daemon started"
-fi
+# NOTE: Layer sync is handled by powos-layer-sync.service (systemd),
+# which runs layer-sync.py on a 60s interval. sync-daemon.py has been
+# deprecated to eliminate the race condition where both daemons used
+# rsync --delete to the same USB directory simultaneously.
 
 # Set up udev rules for USB hotplug (if not already present)
 if [[ ! -f /etc/udev/rules.d/99-powos-usb.rules ]]; then

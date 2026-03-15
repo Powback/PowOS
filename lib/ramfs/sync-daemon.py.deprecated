@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 """
-PowOS Sync Daemon
+DEPRECATED — DO NOT USE.
 
-Periodically syncs RAM overlay changes to USB drive.
-Handles USB disconnect/reconnect gracefully.
+This file (sync-daemon.py) has been superseded by layer-sync.py.
+
+REASON: Both daemons ran rsync --delete to the same USB directory at
+different intervals (30s vs 60s), causing race conditions and potential
+data loss when one rsync deleted files the other had just written.
+
+REPLACEMENT: layer-sync.py is the authoritative sync daemon, managed by
+powos-layer-sync.service (systemd). It includes a PID file at
+/run/powos/layer-sync.pid to prevent duplicate instances.
+
+This file is kept for historical reference only and MUST NOT be executed.
 """
+
+import sys
+print("ERROR: sync-daemon.py is deprecated. Use layer-sync.py instead.")
+print("       Managed by systemd service: powos-layer-sync.service")
+sys.exit(1)
+
+# ---- Original archived code below ----
+
+# flake8: noqa
 
 import argparse
 import json

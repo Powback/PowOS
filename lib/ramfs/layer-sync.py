@@ -30,6 +30,45 @@ STATE_DIR = Path("/run/powos")
 LAYER_PATHS_FILE = STATE_DIR / "layer-paths"
 SYNC_STATUS_FILE = STATE_DIR / "layer-sync-status.json"
 USB_STATE_FILE = STATE_DIR / "usb-state"
+PID_FILE = STATE_DIR / "layer-sync.pid"
+
+
+def check_pid_file() -> bool:
+    """Return True if safe to start (no existing instance). Cleans stale PID files."""
+    if not PID_FILE.exists():
+        return True
+    try:
+        existing_pid = int(PID_FILE.read_text().strip())
+        os.kill(existing_pid, 0)  # Signal 0 = check existence only
+        print(f"[layer-sync] Another instance already running (PID: {existing_pid}), exiting.")
+        return False
+    except ProcessLookupError:
+        PID_FILE.unlink(missing_ok=True)  # Stale PID file
+        return True
+    except PermissionError:
+        print(f"[layer-sync] Another instance already running (PID: {existing_pid}), exiting.")
+        return False
+    except ValueError:
+        PID_FILE.unlink(missing_ok=True)  # Corrupt PID file
+        return True
+
+
+def write_pid_file():
+    """Write current PID to pid file."""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        PID_FILE.write_text(str(os.getpid()))
+    except Exception as e:
+        print(f"[layer-sync] Warning: could not write PID file: {e}")
+
+
+def remove_pid_file():
+    """Remove PID file on exit."""
+    try:
+        PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
 
 class LayerSync:
     """Syncs RAM overlay changes to persistent custom layer."""
@@ -342,8 +381,15 @@ def main():
         syncer.write_status()
         return 0 if success else 1
 
-    # Run as daemon
-    syncer.run()
+    # Run as daemon — guard against duplicate instances
+    if not check_pid_file():
+        return 1
+
+    write_pid_file()
+    try:
+        syncer.run()
+    finally:
+        remove_pid_file()
     return 0
 
 
