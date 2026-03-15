@@ -40,20 +40,38 @@ check_root() {
     fi
 }
 
-check_steam_deck() {
-    # Detect if running ON a Steam Deck (Jupiter=LCD, Galileo=OLED)
+check_gaming_handheld() {
+    # Detect if running ON a gaming handheld. These devices have internal NVMe
+    # that must never be targeted by this installer — running it here would
+    # destroy the device's OS (SteamOS, Windows, etc.).
     local product_name=""
     if [[ -f /sys/class/dmi/id/product_name ]]; then
         product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)
     fi
 
-    if [[ "$product_name" == "Jupiter" || "$product_name" == "Galileo" ]]; then
+    local handheld_name=""
+    case "$product_name" in
+        "Jupiter")       handheld_name="Steam Deck (LCD)" ;;
+        "Galileo")       handheld_name="Steam Deck (OLED)" ;;
+        RC71L*)          handheld_name="ASUS ROG Ally" ;;
+        RC72LA*)         handheld_name="ASUS ROG Ally X" ;;
+        "83E1")          handheld_name="Lenovo Legion Go" ;;
+        G1618-0*)        handheld_name="GPD Win 4" ;;
+        G1617-0*)        handheld_name="GPD Win Mini" ;;
+        AYANEO*)         handheld_name="AyaNeo Handheld" ;;
+        "ONE XPLAYER"*)  handheld_name="One XPlayer" ;;
+        ONEXPLAYER*)     handheld_name="One XPlayer" ;;
+    esac
+
+    if [[ -n "$handheld_name" ]]; then
         echo ""
         echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${RED}║  BLOCKED: You are running this on a Steam Deck!            ║${NC}"
+        echo -e "${RED}║  BLOCKED: Gaming handheld detected!                        ║${NC}"
+        echo -e "${RED}║                                                            ║${NC}"
+        printf  "${RED}║  Device: %-50s ║${NC}\n" "$handheld_name"
         echo -e "${RED}║                                                            ║${NC}"
         echo -e "${RED}║  This script installs PowOS to a USB drive. Running it    ║${NC}"
-        echo -e "${RED}║  on the Steam Deck itself WILL DESTROY SteamOS.           ║${NC}"
+        echo -e "${RED}║  on your handheld WILL DESTROY its operating system.      ║${NC}"
         echo -e "${RED}║                                                            ║${NC}"
         echo -e "${RED}║  Run this script on a separate PC/Mac instead.            ║${NC}"
         echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
@@ -403,7 +421,7 @@ main() {
     fi
 
     check_root
-    check_steam_deck
+    check_gaming_handheld
     check_device "$device"
     check_system_disk "$device"
     confirm_destruction "$device"
