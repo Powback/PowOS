@@ -1,27 +1,38 @@
-# bootc-image-builder configuration for PowOS
-# This defines how to build the bootable ISO
-
-[image]
-# Base image - Bazzite with NVIDIA drivers
-base = "ghcr.io/ublue-os/bazzite-nvidia:stable"
-
-[customizations]
-# Hostname
-hostname = "powos"
-
-[customizations.user]
+[[customizations.user]]
 name = "powos"
 password = "powos"
 groups = ["wheel"]
 
-[customizations.kernel]
-# Kernel arguments for NVIDIA and performance
-append = "nvidia-drm.modeset=1 rd.driver.blacklist=nouveau modprobe.blacklist=nouveau"
+# ─────────────────────────────────────────────────────────────────
+# Installer kickstart safety customizations
+# Only used when building with: ./build/build-iso.sh installer
+#
+# CRITICAL: The installer ISO will ERASE the selected drive.
+# Use ./build/build-iso.sh live-usb for safe live boot instead.
+# ─────────────────────────────────────────────────────────────────
+[customizations.installer.kickstart]
+contents = """
+# PowOS Installer Kickstart
+# WARNING: This installer ERASES the target drive.
+# For live boot (recommended), use build-iso.sh live-usb instead.
 
-[customizations.filesystem]
-# Root filesystem type
-root_fs_type = "btrfs"
+# Require interactive installation - user must select target disk
+# Remove 'text' and add 'graphical' for GUI installer
+text
 
-[customizations.installer]
-# Kickstart-style automation
-sudo_nopasswd = ["powos"]
+# Do NOT auto-select disks - user must confirm
+# ignoredisk and clearpart are left unset to require manual selection
+%pre
+#!/bin/bash
+# Safety: list all available disks for user to review
+echo "============================================"
+echo "AVAILABLE DISKS:"
+echo "============================================"
+lsblk -d -o NAME,SIZE,MODEL,TRAN,HOTPLUG 2>/dev/null || lsblk -d -o NAME,SIZE,MODEL
+echo "============================================"
+echo "WARNING: Only select your target USB drive!"
+echo "Internal drives (HOTPLUG=0) will be destroyed"
+echo "if selected."
+echo "============================================"
+%end
+"""
