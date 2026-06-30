@@ -1,0 +1,24 @@
+# ISO Builder - Builds PowOS ISOs using bootc-image-builder
+# Run via: docker compose run --rm iso-builder
+FROM quay.io/fedora/fedora:41
+
+# Install podman and build tools
+RUN dnf install -y \
+        podman \
+        buildah \
+        skopeo \
+        fuse-overlayfs \
+        qemu-img \
+    && dnf clean all
+
+# Configure podman for rootless-in-container
+RUN mkdir -p /etc/containers && \
+    echo 'unqualified-search-registries = ["docker.io", "ghcr.io", "quay.io"]' > /etc/containers/registries.conf
+
+WORKDIR /powos
+
+COPY build/build-iso.sh /usr/local/bin/build-iso
+RUN chmod +x /usr/local/bin/build-iso
+
+ENTRYPOINT ["/usr/local/bin/build-iso"]
+CMD ["full"]

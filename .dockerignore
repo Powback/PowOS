@@ -1,6 +1,10 @@
 # Exclude bazzite-fork (has symlinks that break on Windows)
 bazzite-fork/
 
+# Exclude containers build files (has symlinks that break on Windows)
+containers/system_files/
+containers/build_files/
+
 # Git
 .git/
 

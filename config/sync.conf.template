@@ -1,0 +1,94 @@
+# PowOS State Synchronization Configuration
+#
+# This file configures how PowOS syncs your state (projects, packages,
+# configurations) between your USB and a remote git repository.
+#
+# Copy this to ~/.config/powos/sync.conf and edit as needed.
+# Or run: powos state setup <remote-url>
+
+# ═══════════════════════════════════════════════════════════════════
+# Remote Repository
+# ═══════════════════════════════════════════════════════════════════
+
+# Remote git repository for state backup
+# Examples:
+#   git@github.com:username/powos-state.git
+#   https://github.com/username/powos-state.git
+#   git@gitlab.com:username/powos-state.git
+POWOS_SYNC_REMOTE=""
+
+# ═══════════════════════════════════════════════════════════════════
+# Sync Strategy
+# ═══════════════════════════════════════════════════════════════════
+
+# Branch strategy for multi-machine setups
+#
+# Options:
+#   single  - Single branch for all machines (simple, may conflict)
+#   machine - Per-machine branches with shared main (recommended)
+#   manual  - No auto-branching, full manual control
+#
+POWOS_SYNC_STRATEGY="single"
+
+# ═══════════════════════════════════════════════════════════════════
+# Auto-Sync Behavior
+# ═══════════════════════════════════════════════════════════════════
+
+# Automatically push changes after commits (pinstall, dev new, etc.)
+# Set to true for always-synced state, false for manual control
+POWOS_SYNC_AUTO_PUSH=false
+
+# Automatically pull on boot (during hydration)
+# Recommended true to get latest state on each boot
+POWOS_SYNC_AUTO_PULL=true
+
+# ═══════════════════════════════════════════════════════════════════
+# What to Sync
+# ═══════════════════════════════════════════════════════════════════
+
+# Overlay source code (sources/)
+# These are your custom overlay build scripts and patches
+POWOS_SYNC_SOURCES=true
+
+# Development projects (projects/)
+# These are projects created with 'powos dev new'
+POWOS_SYNC_PROJECTS=true
+
+# Container definitions (containers/)
+# This includes distrobox.ini and container configs
+POWOS_SYNC_CONTAINERS=true
+
+# User configuration (config/)
+# Your personal PowOS settings
+POWOS_SYNC_CONFIG=true
+
+# AI conversation sessions (state/ai/sessions/)
+# WARNING: Sessions may contain sensitive information
+# Set to true only if you trust your remote and want session history synced
+POWOS_SYNC_SESSIONS=false
+
+# ═══════════════════════════════════════════════════════════════════
+# Machine Identification
+# ═══════════════════════════════════════════════════════════════════
+
+# Unique identifier for this machine
+# Used for machine-specific branches when POWOS_SYNC_STRATEGY=machine
+# Leave empty to auto-detect from hostname
+POWOS_MACHINE_ID=""
+
+# ═══════════════════════════════════════════════════════════════════
+# Advanced Options
+# ═══════════════════════════════════════════════════════════════════
+
+# Git user name for commits (leave empty to use system default)
+POWOS_GIT_USER_NAME=""
+
+# Git user email for commits (leave empty to use system default)
+POWOS_GIT_USER_EMAIL=""
+
+# Default branch name for new repositories
+POWOS_DEFAULT_BRANCH="main"
+
+# Conflict resolution strategy for auto-pull
+# Options: merge, rebase, theirs (discard local)
+POWOS_PULL_STRATEGY="merge"

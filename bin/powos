@@ -24,8 +24,33 @@ Usage: powos <command> [options]
 
 Commands:
   status              Show full system status
-  sync                Force sync RAM changes to USB
+  health              System health check (layers, RAM, USB, sync)
+  health --ai         Talk to health AI agent for troubleshooting
   safe                Check if safe to unplug USB
+
+  sync                Sync RAM ↔ USB (with conflict detection)
+  sync status         Show sync status (pending changes, conflicts)
+  sync resolve        Resolve conflicts interactively
+  sync resolve --ai   Talk to AI about sync conflicts
+  sync --keep-ram     Force RAM changes to USB (your work wins)
+  sync --keep-usb     Reload from USB (USB wins)
+
+  flush               Force flush RAM → USB (no conflict check)
+
+  backup              Backup USB state to cloud (git)
+  backup status       Show backup status
+  backup push         Push to cloud backup
+  backup pull         Pull from cloud backup
+  backup setup <url>  Configure cloud backup
+
+  update              Check for available updates
+  update os           Update Bazzite base OS
+  update self         Apply PowOS source changes to running system
+  update self --from  Apply from custom source path
+  update self --pull  Pull from git remote first
+  update packages     Update installed packages
+  update overlays     Rebuild overlays with latest upstream
+  update apply        Apply all updates (os + packages)
 
   layers              Show active layers
   layers status       Detailed layer status
@@ -38,11 +63,6 @@ Commands:
   rollback updates    Boot without updates layer (next boot)
   rollback all        Boot with base only (next boot)
   rollback reset      Clear rollback flags
-
-  update              Check for available updates
-  update os           Apply OS updates (to updates layer)
-  update packages     Apply package updates (to custom layer)
-  update apply        Apply all updates
 
   hardware            Show detected hardware
   profile             Show active hardware profile
@@ -58,6 +78,8 @@ Commands:
   install -c NAME -e <pkg>  Install GUI app to container + export to host
 
   build [path] [tag]  Build container from Dockerfile/Containerfile
+  build iso           Build bootable PowOS ISO
+  build test          Build container image only (for testing)
 
   dev                 List all dev projects
   dev new <name>      Create new project from scratch
@@ -67,13 +89,22 @@ Commands:
   dev disable <name>  Remove from system
   dev update <name>   Pull upstream changes (forks only)
 
+  ai "prompt"         Ask AI for help (uses default agent)
+  ai --agent coder    Use coding assistant
+  ai --agent devops   Use devops assistant
+  ai --agent health   Use OS health/diagnostics assistant
+  ai -i               Interactive chat mode
+  ai --session <id>   Resume a conversation
+
   version             Show version
 
 Examples:
   powos status                        # Quick status check
-  powos sync                          # Force sync now
-  powos layers                        # See active layers
-  powos rollback custom               # Skip custom layer on next boot
+  powos sync                          # Smart sync with remote
+  powos sync push -m "backup"         # Push with message
+  powos flush                         # Force RAM → USB now
+  powos update os                     # Update Bazzite
+  powos update powos                  # Update PowOS scripts
 
   powos install neovim htop           # Install to host
   powos install -c dev nodejs npm     # Install to 'dev' container
@@ -697,23 +728,194 @@ cmd_update() {
             echo "  Package updates synced to custom layer"
             ;;
 
+        powos|self)
+            echo -e "${BOLD}${CYAN}Updating PowOS${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            # Default source location (bundled with PowOS)
+            local POWOS_SRC="${POWOS_SRC:-/var/lib/powos/src}"
+            local custom_src=""
+
+            # Parse --from argument
+            shift
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --from)
+                        custom_src="$2"
+                        shift 2
+                        ;;
+                    --pull)
+                        # Pull latest from remote first
+                        if [[ -d "$POWOS_SRC/.git" ]]; then
+                            echo "Pulling latest from remote..."
+                            cd "$POWOS_SRC"
+                            git pull --rebase || git pull
+                            echo ""
+                        fi
+                        shift
+                        ;;
+                    *)
+                        shift
+                        ;;
+                esac
+            done
+
+            # Use custom source if specified
+            [[ -n "$custom_src" ]] && POWOS_SRC="$custom_src"
+
+            if [[ ! -d "$POWOS_SRC" ]]; then
+                echo -e "${RED}PowOS source not found at: $POWOS_SRC${NC}"
+                echo ""
+                echo "Options:"
+                echo "  1. Specify source location:"
+                echo "     powos update self --from /mnt/disk/Projects/PowOS"
+                echo ""
+                echo "  2. The source should be bundled at /var/lib/powos/src"
+                echo "     (included in PowOS ISO builds)"
+                return 1
+            fi
+
+            echo "Source: $POWOS_SRC"
+
+            # Show what's changed (if git available)
+            if [[ -d "$POWOS_SRC/.git" ]]; then
+                local changes
+                changes=$(cd "$POWOS_SRC" && git status --porcelain 2>/dev/null | wc -l)
+                local commit
+                commit=$(cd "$POWOS_SRC" && git log -1 --format="%h %s" 2>/dev/null || echo "unknown")
+                echo "Commit: $commit"
+                [[ "$changes" -gt 0 ]] && echo "Uncommitted changes: $changes files"
+            fi
+            echo ""
+
+            # Install scripts
+            echo "Installing scripts..."
+
+            # bin/ -> /usr/bin/
+            if [[ -d "$POWOS_SRC/bin" ]]; then
+                for script in "$POWOS_SRC/bin"/*; do
+                    [[ -f "$script" ]] || continue
+                    local name=$(basename "$script")
+                    sudo cp "$script" "/usr/bin/$name"
+                    sudo chmod +x "/usr/bin/$name"
+                    echo "  /usr/bin/$name"
+                done
+            fi
+
+            # lib/ -> /usr/lib/powos/
+            if [[ -d "$POWOS_SRC/lib" ]]; then
+                sudo mkdir -p /usr/lib/powos
+                sudo cp -r "$POWOS_SRC/lib/"* /usr/lib/powos/
+                sudo chmod +x /usr/lib/powos/*.sh 2>/dev/null || true
+                sudo chmod +x /usr/lib/powos/**/*.sh 2>/dev/null || true
+                sudo chmod +x /usr/lib/powos/**/*.py 2>/dev/null || true
+                echo "  /usr/lib/powos/ (lib/*)"
+            fi
+
+            # config/ -> /etc/powos/
+            if [[ -d "$POWOS_SRC/config" ]]; then
+                sudo mkdir -p /etc/powos
+                sudo cp -r "$POWOS_SRC/config/"* /etc/powos/
+                echo "  /etc/powos/ (config/*)"
+            fi
+
+            # systemd/ -> /usr/lib/systemd/system/ and /usr/lib/powos/
+            if [[ -d "$POWOS_SRC/systemd" ]]; then
+                for file in "$POWOS_SRC/systemd"/*.service; do
+                    [[ -f "$file" ]] || continue
+                    sudo cp "$file" /usr/lib/systemd/system/
+                done
+                for file in "$POWOS_SRC/systemd"/powos-*; do
+                    [[ -f "$file" ]] && [[ ! "$file" == *.service ]] || continue
+                    sudo cp "$file" /usr/lib/powos/
+                    sudo chmod +x "/usr/lib/powos/$(basename "$file")"
+                done
+                echo "  /usr/lib/systemd/system/ (services)"
+                sudo systemctl daemon-reload 2>/dev/null || true
+            fi
+
+            # sources/ -> /var/lib/powos/sources/
+            if [[ -d "$POWOS_SRC/sources" ]]; then
+                sudo mkdir -p /var/lib/powos/sources
+                sudo cp -r "$POWOS_SRC/sources/"* /var/lib/powos/sources/
+                echo "  /var/lib/powos/sources/"
+            fi
+
+            # overlays/ -> /usr/lib/powos/overlays/
+            if [[ -d "$POWOS_SRC/overlays" ]]; then
+                sudo mkdir -p /usr/lib/powos/overlays
+                sudo cp -r "$POWOS_SRC/overlays/"* /usr/lib/powos/overlays/
+                echo "  /usr/lib/powos/overlays/"
+            fi
+
+            echo ""
+            echo -e "${GREEN}✓ PowOS updated from source${NC}"
+            echo ""
+            echo "Changes applied immediately. You may want to:"
+            echo "  - Restart your shell for PATH changes"
+            echo "  - Run 'powos dev build-all' to rebuild overlays"
+            echo ""
+            echo "Tip: Edit source at $POWOS_SRC, then run 'powos update self'"
+            ;;
+
+        overlays)
+            echo -e "${BOLD}${CYAN}Rebuilding Overlays with Latest Upstream${NC}"
+            echo "════════════════════════════════════════"
+            echo ""
+
+            if [[ ! -d "$PROJECTS_DIR" ]]; then
+                echo "No projects directory found"
+                return 0
+            fi
+
+            local updated=0
+            for proj_dir in "$PROJECTS_DIR"/*/; do
+                local name=$(basename "$proj_dir")
+                local conf="$proj_dir/project.conf"
+
+                [[ "$name" == "*" ]] && continue
+                [[ ! -f "$conf" ]] && continue
+
+                source "$conf"
+
+                # Only update if it's a fork with upstream
+                if [[ "${PROJECT_TYPE:-}" == "fork" ]] && [[ -n "${UPSTREAM_URL:-}" ]]; then
+                    echo "Updating $name..."
+                    if declare -f cmd_dev &>/dev/null; then
+                        cmd_dev update "$name" 2>/dev/null || echo "  Failed to update $name"
+                    fi
+                    ((updated++))
+                fi
+            done
+
+            if [[ "$updated" -eq 0 ]]; then
+                echo "No forked projects to update"
+            else
+                echo ""
+                echo -e "${GREEN}✓ Updated $updated overlay(s)${NC}"
+            fi
+            ;;
+
         *)
-            echo "Usage: powos update {check|os|packages|apply}"
+            echo "Usage: powos update {check|os|powos|packages|overlays|apply}"
             echo ""
             echo "  check     - Check for available updates"
-            echo "  os        - Apply OS updates (goes to updates layer)"
-            echo "  packages  - Apply package updates (goes to custom layer)"
-            echo "  apply     - Apply all updates"
+            echo "  os        - Update Bazzite base OS"
+            echo "  powos     - Update PowOS scripts"
+            echo "  packages  - Update installed packages"
+            echo "  overlays  - Rebuild overlays with latest upstream"
+            echo "  apply     - Apply all updates (os + packages)"
             ;;
     esac
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# Sync Command
+# Flush Command (RAM → USB)
 # ═══════════════════════════════════════════════════════════════════
 
-cmd_sync() {
-    echo "Syncing all changes to USB..."
+cmd_flush() {
+    echo "Flushing RAM changes to USB..."
 
     # Sync layer changes
     if [[ -x "$LAYER_SYNC" ]]; then
@@ -725,7 +927,7 @@ cmd_sync() {
         python3 /usr/lib/powos/cachefs/cachefs-sync.py --sync-now 2>/dev/null || true
     fi
 
-    echo -e "${GREEN}✓ Sync complete${NC}"
+    echo -e "${GREEN}✓ Flush complete${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -741,6 +943,462 @@ cmd_safe() {
         echo "  Run 'powos sync' first"
         exit 1
     fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Health Command - System health summary
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_health() {
+    local use_ai=false
+    local ai_prompt=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ai|-a)
+                use_ai=true
+                shift
+                ;;
+            --help|-h)
+                echo "Usage: powos health [options] [prompt]"
+                echo ""
+                echo "Show system health summary or talk to health AI agent."
+                echo ""
+                echo "Options:"
+                echo "  --ai, -a     Talk to health AI agent"
+                echo ""
+                echo "Examples:"
+                echo "  powos health                    # Show health summary"
+                echo "  powos health --ai               # Interactive health agent"
+                echo "  powos health --ai 'why is sync slow?'"
+                return 0
+                ;;
+            *)
+                ai_prompt="$*"
+                break
+                ;;
+        esac
+    done
+
+    if [[ "$use_ai" == "true" ]]; then
+        # Gather system context and pass to health agent
+        local context
+        context=$(get_health_context)
+
+        if [[ -n "$ai_prompt" ]]; then
+            # One-shot with context - prepend context to prompt
+            ai_call --agent health "SYSTEM CONTEXT:
+$context
+
+USER QUESTION: $ai_prompt"
+        else
+            # Interactive mode with health agent - pass context via --context
+            echo -e "${CYAN}Starting health agent...${NC}"
+            ai_interactive --agent health --context "$context"
+        fi
+        return
+    fi
+
+    # Non-AI: Show health summary
+    echo -e "${BOLD}${CYAN}PowOS Health Check${NC}"
+    echo "════════════════════════════════════════"
+    echo ""
+
+    local issues=0
+    local warnings=0
+    local POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
+
+    # --- Layers ---
+    echo -e "${CYAN}Layers${NC}"
+    local layers
+    layers=$(get_active_layers)
+    if [[ "$layers" != "none" ]] && [[ -n "$layers" ]]; then
+        echo -e "  ${GREEN}✓${NC} Layer stack active: $layers"
+    else
+        echo -e "  ${YELLOW}○${NC} Standard boot (no layers)"
+        ((warnings++))
+    fi
+
+    # Check for rollback flags
+    if [[ -f "$STATE_DIR/ramboot-state" ]]; then
+        source "$STATE_DIR/ramboot-state"
+        if [[ "${POWOS_SKIP_CUSTOM:-}" == "1" ]]; then
+            echo -e "  ${YELLOW}⚠${NC} Custom layer SKIPPED (rollback active)"
+            ((warnings++))
+        fi
+        if [[ "${POWOS_SKIP_UPDATES:-}" == "1" ]]; then
+            echo -e "  ${YELLOW}⚠${NC} Updates layer SKIPPED (rollback active)"
+            ((warnings++))
+        fi
+    fi
+    echo ""
+
+    # --- RAM Overlay ---
+    echo -e "${CYAN}RAM Overlay${NC}"
+    if is_ramboot; then
+        local ram_size
+        ram_size=$(get_ramboot_info)
+        echo -e "  ${GREEN}✓${NC} Running from RAM ($ram_size allocated)"
+
+        if [[ -d /run/powos-overlay/upper ]]; then
+            local upper_used upper_files
+            upper_used=$(du -sh /run/powos-overlay/upper 2>/dev/null | cut -f1 || echo "unknown")
+            upper_files=$(find /run/powos-overlay/upper -type f 2>/dev/null | wc -l || echo "0")
+            echo "    Used: $upper_used ($upper_files files changed)"
+        fi
+    else
+        echo -e "  ${YELLOW}○${NC} Not running from RAM overlay"
+        ((warnings++))
+    fi
+    echo ""
+
+    # --- USB ---
+    echo -e "${CYAN}USB Drive${NC}"
+    local usb_status
+    usb_status=$(get_usb_status)
+    case "$usb_status" in
+        connected)
+            echo -e "  ${GREEN}✓${NC} Connected"
+            ;;
+        disconnected)
+            echo -e "  ${YELLOW}○${NC} Disconnected (working from RAM)"
+            ((warnings++))
+            ;;
+        *)
+            echo -e "  ${RED}?${NC} Unknown status"
+            ((issues++))
+            ;;
+    esac
+    echo ""
+
+    # --- RAM ↔ USB Sync ---
+    echo -e "${CYAN}Sync (RAM ↔ USB)${NC}"
+    # Check for lock file (interrupted sync)
+    if [[ -f "/run/powos/sync.lock" ]]; then
+        echo -e "  ${RED}✗${NC} Sync lock exists (interrupted?)"
+        ((issues++))
+    else
+        echo -e "  ${GREEN}✓${NC} No sync locks"
+    fi
+
+    # Check for conflicts (if USB connected)
+    if [[ "$usb_status" == "connected" ]]; then
+        if declare -f check_for_conflicts &>/dev/null; then
+            local conflict_status
+            conflict_status=$(check_for_conflicts 2>/dev/null || echo "conflict")
+            if [[ "$conflict_status" == "conflict" ]]; then
+                echo -e "  ${RED}✗${NC} CONFLICT - USB modified by another machine"
+                echo "      Run: powos sync resolve"
+                ((issues++))
+            else
+                echo -e "  ${GREEN}✓${NC} No conflicts"
+            fi
+        fi
+    fi
+
+    # Layer sync daemon
+    if pgrep -f "layer-sync" &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} Layer sync daemon running"
+    elif [[ -f "$STATE_DIR/layer-sync-status.json" ]]; then
+        echo -e "  ${YELLOW}○${NC} Layer sync not running (status file exists)"
+    fi
+
+    # Last sync time
+    if [[ -f "$STATE_DIR/layer-sync-status.json" ]]; then
+        local last_sync
+        last_sync=$(python3 -c "
+import json, time
+try:
+    s = json.load(open('$STATE_DIR/layer-sync-status.json'))
+    t = s.get('last_sync', 0)
+    if t > 0:
+        delta = int(time.time() - t)
+        if delta < 60: print(f'{delta}s ago')
+        elif delta < 3600: print(f'{delta // 60}m ago')
+        else: print(f'{delta // 3600}h ago')
+    else: print('Never')
+except: print('Unknown')
+" 2>/dev/null || echo "Unknown")
+        echo "    Last sync: $last_sync"
+    fi
+    echo ""
+
+    # --- Cloud Backup ---
+    echo -e "${CYAN}Backup (USB → Cloud)${NC}"
+    local git_dir="$POWOS_ROOT/git"
+    if [[ -d "$git_dir/.git" ]]; then
+        echo -e "  ${GREEN}✓${NC} Git repo initialized"
+
+        # Check if remote configured
+        if git -C "$git_dir" remote get-url origin &>/dev/null; then
+            local remote_url
+            remote_url=$(git -C "$git_dir" remote get-url origin 2>/dev/null | sed 's/.*[:/]\([^/]*\/[^/]*\)\.git/\1/' | head -c 30)
+            echo "    Remote: $remote_url"
+
+            # Check ahead/behind
+            git -C "$git_dir" fetch origin --quiet 2>/dev/null || true
+            local ahead behind
+            ahead=$(git -C "$git_dir" rev-list --count origin/HEAD..HEAD 2>/dev/null || echo "?")
+            behind=$(git -C "$git_dir" rev-list --count HEAD..origin/HEAD 2>/dev/null || echo "?")
+            if [[ "$ahead" != "?" ]] && [[ "$behind" != "?" ]]; then
+                if [[ "$ahead" -gt 0 ]] && [[ "$behind" -gt 0 ]]; then
+                    echo -e "    ${YELLOW}⚠${NC} Diverged: $ahead ahead, $behind behind"
+                    ((warnings++))
+                elif [[ "$ahead" -gt 0 ]]; then
+                    echo -e "    ${YELLOW}○${NC} $ahead commits to push"
+                elif [[ "$behind" -gt 0 ]]; then
+                    echo -e "    ${YELLOW}○${NC} $behind commits to pull"
+                else
+                    echo -e "    ${GREEN}✓${NC} Up to date"
+                fi
+            fi
+        else
+            echo -e "  ${YELLOW}○${NC} No remote configured"
+            echo "      Run: powos backup setup <url>"
+        fi
+
+        # Check for uncommitted changes
+        local uncommitted
+        uncommitted=$(git -C "$git_dir" status --porcelain 2>/dev/null | wc -l || echo "0")
+        if [[ "$uncommitted" -gt 0 ]]; then
+            echo "    Uncommitted: $uncommitted files"
+        fi
+    else
+        echo -e "  ${YELLOW}○${NC} Not initialized"
+        echo "      Run: powos backup setup <url>"
+    fi
+    echo ""
+
+    # --- User Data (CacheFS) ---
+    echo -e "${CYAN}User Data (CacheFS)${NC}"
+    if is_cachefs_active; then
+        echo -e "  ${GREEN}✓${NC} CacheFS active"
+        if pgrep -f "cachefs" &>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} CacheFS daemon running"
+        fi
+        if [[ -f "$STATE_DIR/cachefs-status.json" ]]; then
+            python3 -c "
+import json
+try:
+    s = json.load(open('$STATE_DIR/cachefs-status.json'))
+    print(f\"    Cached: {s.get('cached_files', 0)} files\")
+    pending = s.get('pending_changes', 0)
+    if pending > 0:
+        print(f\"    Pending writes: {pending}\")
+except: pass
+" 2>/dev/null || true
+        fi
+    else
+        echo -e "  ${YELLOW}○${NC} CacheFS not active"
+    fi
+    echo ""
+
+    # --- Projects ---
+    echo -e "${CYAN}Projects${NC}"
+    local projects_dir="$POWOS_ROOT/projects"
+    if [[ -d "$projects_dir" ]]; then
+        local project_count enabled_count
+        project_count=$(find "$projects_dir" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l || echo "0")
+
+        if [[ "$project_count" -gt 0 ]]; then
+            echo "    Total: $project_count"
+
+            # Count enabled (those with extensions)
+            enabled_count=0
+            for proj in "$projects_dir"/*/; do
+                local name=$(basename "$proj")
+                [[ "$name" == "*" ]] && continue
+                if [[ -d "$POWOS_ROOT/extensions/$name" ]] || [[ -L "/var/lib/extensions/$name" ]]; then
+                    ((enabled_count++))
+                fi
+            done
+            if [[ "$enabled_count" -gt 0 ]]; then
+                echo "    Enabled: $enabled_count"
+            fi
+        else
+            echo -e "  ${YELLOW}○${NC} No projects"
+            echo "      Create with: powos dev new <name>"
+        fi
+    else
+        echo -e "  ${YELLOW}○${NC} Projects dir not found"
+    fi
+    echo ""
+
+    # --- Overlays/Extensions ---
+    echo -e "${CYAN}Overlays${NC}"
+    local extensions_dir="$POWOS_ROOT/extensions"
+    local system_ext_dir="/var/lib/extensions"
+    if [[ -d "$extensions_dir" ]]; then
+        local built_count enabled_count
+        built_count=$(find "$extensions_dir" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l || echo "0")
+
+        if [[ "$built_count" -gt 0 ]]; then
+            echo "    Built: $built_count"
+
+            # Count enabled
+            enabled_count=0
+            if [[ -d "$system_ext_dir" ]]; then
+                enabled_count=$(find "$system_ext_dir" -maxdepth 1 -type l 2>/dev/null | wc -l || echo "0")
+            fi
+            if [[ "$enabled_count" -gt 0 ]]; then
+                echo "    Enabled: $enabled_count"
+            fi
+        else
+            echo -e "  ${YELLOW}○${NC} No overlays built"
+        fi
+    else
+        echo -e "  ${YELLOW}○${NC} Extensions dir not found"
+    fi
+
+    # Check systemd-sysext status
+    if command -v systemd-sysext &>/dev/null; then
+        local sysext_status
+        sysext_status=$(systemd-sysext status 2>/dev/null | grep -c "active" || echo "0")
+        if [[ "$sysext_status" -gt 0 ]]; then
+            echo "    systemd-sysext: $sysext_status active"
+        fi
+    fi
+    echo ""
+
+    # --- Containers ---
+    echo -e "${CYAN}Containers${NC}"
+    if command -v distrobox &>/dev/null; then
+        local distrobox_count
+        distrobox_count=$(distrobox list --no-color 2>/dev/null | grep -c "Up\|Created" || echo "0")
+        echo "    Distrobox: $distrobox_count"
+    fi
+
+    if command -v podman &>/dev/null; then
+        local container_count image_count
+        container_count=$(podman ps -q 2>/dev/null | wc -l || echo "0")
+        image_count=$(podman images -q 2>/dev/null | wc -l || echo "0")
+        echo "    Podman running: $container_count"
+        echo "    Images: $image_count"
+    else
+        echo -e "  ${YELLOW}○${NC} Podman not available"
+    fi
+    echo ""
+
+    # --- AI System ---
+    echo -e "${CYAN}AI System${NC}"
+    local ai_available=false
+
+    # Check for AI clients
+    if command -v claude &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} Claude CLI available"
+        ai_available=true
+    fi
+    if command -v gemini &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} Gemini CLI available"
+        ai_available=true
+    fi
+    if command -v ollama &>/dev/null; then
+        if ollama list &>/dev/null 2>&1; then
+            local model_count
+            model_count=$(ollama list 2>/dev/null | tail -n +2 | wc -l || echo "0")
+            echo -e "  ${GREEN}✓${NC} Ollama available ($model_count models)"
+            ai_available=true
+        else
+            echo -e "  ${YELLOW}○${NC} Ollama installed but not running"
+        fi
+    fi
+
+    if [[ "$ai_available" == "false" ]]; then
+        echo -e "  ${YELLOW}○${NC} No AI clients found"
+        echo "      Install: claude, gemini, or ollama"
+    fi
+
+    # Check agent configs
+    local agents_dir="$POWOS_ROOT/../config/ai/agents"
+    [[ ! -d "$agents_dir" ]] && agents_dir="/etc/powos/ai/agents"
+    [[ ! -d "$agents_dir" ]] && agents_dir="$(dirname "$0")/../config/ai/agents"
+    if [[ -d "$agents_dir" ]]; then
+        local agent_count
+        agent_count=$(find "$agents_dir" -name "*.conf" 2>/dev/null | wc -l || echo "0")
+        if [[ "$agent_count" -gt 0 ]]; then
+            echo "    Agents configured: $agent_count"
+        fi
+    fi
+    echo ""
+
+    # --- Hardware Profile ---
+    echo -e "${CYAN}Hardware${NC}"
+    if [[ -f "$STATE_DIR/hardware" ]]; then
+        source "$STATE_DIR/hardware" 2>/dev/null || true
+        echo "    Profile: ${ACTIVE_PROFILE:-unknown}"
+        echo "    GPU: ${GPU_TYPE:-unknown}"
+        echo "    Power: ${POWER_SOURCE:-unknown}"
+    else
+        echo -e "  ${YELLOW}○${NC} Hardware not detected"
+    fi
+    echo ""
+
+    # --- Summary ---
+    echo "════════════════════════════════════════"
+    if [[ $issues -gt 0 ]]; then
+        echo -e "${RED}Issues: $issues${NC}  ${YELLOW}Warnings: $warnings${NC}"
+        echo ""
+        echo "Run 'powos health --ai' to troubleshoot."
+    elif [[ $warnings -gt 0 ]]; then
+        echo -e "${GREEN}No issues${NC}  ${YELLOW}Warnings: $warnings${NC}"
+    else
+        echo -e "${GREEN}✓ All systems healthy${NC}"
+    fi
+}
+
+# Get system context for AI health agent
+get_health_context() {
+    local ctx=""
+
+    ctx+="=== PowOS System Context ===\n\n"
+
+    # Layers
+    ctx+="LAYERS:\n"
+    ctx+="  Active: $(get_active_layers)\n"
+    ctx+="  RAM boot: $(is_ramboot && echo 'yes' || echo 'no')\n"
+    if [[ -f "$STATE_DIR/ramboot-state" ]]; then
+        source "$STATE_DIR/ramboot-state"
+        ctx+="  RAM size: ${POWOS_RAM_SIZE:-unknown}\n"
+        ctx+="  Skip custom: ${POWOS_SKIP_CUSTOM:-0}\n"
+        ctx+="  Skip updates: ${POWOS_SKIP_UPDATES:-0}\n"
+    fi
+    ctx+="\n"
+
+    # USB
+    ctx+="USB:\n"
+    ctx+="  Status: $(get_usb_status)\n"
+    ctx+="\n"
+
+    # Sync
+    ctx+="SYNC:\n"
+    ctx+="  Lock file: $(test -f /run/powos/sync.lock && echo 'EXISTS (possible interrupted sync)' || echo 'none')\n"
+    if declare -f check_for_conflicts &>/dev/null; then
+        ctx+="  Conflicts: $(check_for_conflicts 2>/dev/null && echo 'none' || echo 'DETECTED')\n"
+    fi
+    if declare -f read_sync_marker &>/dev/null; then
+        ctx+="  Last sync by: $(read_sync_marker 2>/dev/null || echo 'unknown')\n"
+    fi
+    ctx+="\n"
+
+    # RAM usage
+    ctx+="RAM OVERLAY:\n"
+    if [[ -d /run/powos-overlay/upper ]]; then
+        ctx+="  Files changed: $(find /run/powos-overlay/upper -type f 2>/dev/null | wc -l)\n"
+        ctx+="  Size: $(du -sh /run/powos-overlay/upper 2>/dev/null | cut -f1 || echo 'unknown')\n"
+    fi
+    ctx+="\n"
+
+    # Recent changes
+    ctx+="RECENT CHANGES (last 10 in RAM):\n"
+    if [[ -d /run/powos-overlay/upper ]]; then
+        find /run/powos-overlay/upper -type f -mmin -60 2>/dev/null | head -10 | while read -r f; do
+            ctx+="  $f\n"
+        done
+    fi
+    ctx+="\n"
+
+    echo -e "$ctx"
 }
 
 cmd_hardware() {
@@ -885,6 +1543,22 @@ cmd_install() {
 # ═══════════════════════════════════════════════════════════════════
 
 cmd_build() {
+    local subcmd="${1:-}"
+
+    # Handle subcommands
+    case "$subcmd" in
+        iso)
+            shift
+            cmd_build_iso "$@"
+            return
+            ;;
+        test)
+            shift
+            cmd_build_iso --test "$@"
+            return
+            ;;
+    esac
+
     local context="${1:-.}"
     local tag="${2:-}"
     local dockerfile=""
@@ -938,6 +1612,111 @@ cmd_build() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
+# Build ISO - Create bootable PowOS ISO
+# ═══════════════════════════════════════════════════════════════════
+
+cmd_build_iso() {
+    local test_only=false
+    [[ "${1:-}" == "--test" ]] && test_only=true
+
+    echo -e "${BOLD}${CYAN}PowOS ISO Builder${NC}"
+    echo "════════════════════════════════════════"
+    echo ""
+
+    local powos_src="${POWOS_SRC:-/var/lib/powos/src}"
+    [[ ! -d "$powos_src" ]] && powos_src="$POWOS_ROOT"
+    [[ ! -d "$powos_src" ]] && powos_src="."
+
+    local output_dir="$powos_src/build/output"
+    mkdir -p "$output_dir"
+
+    # Detect if we're inside container or on host
+    local in_container=false
+    [[ -f /.dockerenv ]] || [[ -f /run/.containerenv ]] && in_container=true
+
+    if $in_container; then
+        # Inside container - check if Docker image exists, import to podman
+        echo "Running inside container..."
+
+        if ! command -v podman &>/dev/null; then
+            echo -e "${RED}Error: podman not found${NC}"
+            return 1
+        fi
+
+        # Check if image already in podman
+        if podman image exists localhost/powos:latest 2>/dev/null; then
+            echo -e "${GREEN}✓ Image already in podman cache${NC}"
+        else
+            echo "Building with podman..."
+            if ! podman build -f "$powos_src/Containerfile" -t localhost/powos:latest "$powos_src"; then
+                echo -e "${RED}Build failed${NC}"
+                return 1
+            fi
+        fi
+
+        if $test_only; then
+            echo -e "${GREEN}✓ Test build complete${NC}"
+            return 0
+        fi
+
+        # Build ISO
+        echo -e "${CYAN}Building bootable ISO...${NC}"
+        podman run --rm -it --privileged \
+            --security-opt label=type:unconfined_t \
+            -v "$output_dir:/output" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type iso --rootfs btrfs --local \
+            localhost/powos:latest
+    else
+        # On host - use docker compose (cached!)
+        echo "Source: $powos_src"
+        echo ""
+
+        if command -v docker &>/dev/null; then
+            echo -e "${CYAN}Step 1: Building with Docker (using cache)...${NC}"
+            if docker compose -f "$powos_src/docker-compose.yml" build; then
+                echo -e "${GREEN}✓ Container image built${NC}"
+            else
+                echo -e "${RED}Build failed${NC}"
+                return 1
+            fi
+
+            if $test_only; then
+                echo ""
+                echo -e "${GREEN}✓ Test build complete${NC}"
+                echo "Run with: docker compose up"
+                return 0
+            fi
+
+            # For full ISO, run inside container with podman
+            echo ""
+            echo -e "${CYAN}Step 2: Building ISO inside container...${NC}"
+            docker compose run --rm --entrypoint bash powos -c "powos build iso"
+        else
+            echo -e "${RED}Error: docker not found${NC}"
+            return 1
+        fi
+    fi
+
+    # Check for ISO output
+    local iso_file
+    iso_file=$(find "$output_dir" -name "*.iso" -type f 2>/dev/null | head -1)
+    if [[ -n "$iso_file" ]]; then
+        echo ""
+        echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║  PowOS ISO Ready!                      ║${NC}"
+        echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+        echo ""
+        echo "  ISO: $iso_file"
+        echo "  Size: $(du -h "$iso_file" | cut -f1)"
+        echo ""
+        echo "  Write to USB:"
+        echo "    sudo dd if=$iso_file of=/dev/sdX bs=4M status=progress"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
 # Source Commands - Build custom versions of apps
 # ═══════════════════════════════════════════════════════════════════
 
@@ -950,6 +1729,27 @@ if [[ -f /usr/lib/powos/dev-commands.sh ]]; then
     source /usr/lib/powos/dev-commands.sh
 elif [[ -f "$(dirname "$0")/../lib/dev-commands.sh" ]]; then
     source "$(dirname "$0")/../lib/dev-commands.sh"
+fi
+
+# Source the AI agent system
+if [[ -f /usr/lib/powos/ai/agent.sh ]]; then
+    source /usr/lib/powos/ai/agent.sh
+elif [[ -f "$(dirname "$0")/../lib/ai/agent.sh" ]]; then
+    source "$(dirname "$0")/../lib/ai/agent.sh"
+fi
+
+# Source the RAM ↔ USB sync system
+if [[ -f /usr/lib/powos/sync.sh ]]; then
+    source /usr/lib/powos/sync.sh
+elif [[ -f "$(dirname "$0")/../lib/sync.sh" ]]; then
+    source "$(dirname "$0")/../lib/sync.sh"
+fi
+
+# Source the backup system (USB ↔ cloud)
+if [[ -f /usr/lib/powos/backup.sh ]]; then
+    source /usr/lib/powos/backup.sh
+elif [[ -f "$(dirname "$0")/../lib/backup.sh" ]]; then
+    source "$(dirname "$0")/../lib/backup.sh"
 fi
 
 # Legacy source command (kept for backward compatibility)
@@ -1666,7 +2466,15 @@ case "${1:-}" in
         cmd_status
         ;;
     sync)
-        cmd_sync
+        shift
+        cmd_sync "$@"
+        ;;
+    backup)
+        shift
+        cmd_backup "$@"
+        ;;
+    flush)
+        cmd_flush
         ;;
     safe)
         cmd_safe
@@ -1682,6 +2490,15 @@ case "${1:-}" in
     update)
         shift
         cmd_update "$@"
+        ;;
+    health)
+        shift
+        cmd_health "$@"
+        ;;
+    mobile)
+        shift
+        source "$POWOS_LIB/mobile.sh"
+        cmd_mobile "$@"
         ;;
     hardware)
         cmd_hardware
@@ -1705,11 +2522,76 @@ case "${1:-}" in
         shift
         cmd_dev "$@"
         ;;
+    ai)
+        shift
+        case "${1:-}" in
+            agents|list)
+                ai_list_agents
+                ;;
+            clients)
+                ai_list_clients
+                ;;
+            sessions)
+                ai_sessions
+                ;;
+            session)
+                shift
+                case "${1:-list}" in
+                    list)
+                        ai_sessions
+                        ;;
+                    new|create)
+                        shift
+                        ai_new_session "$@"
+                        ;;
+                    delete|rm)
+                        shift
+                        ai_delete_session "$1"
+                        ;;
+                    export)
+                        shift
+                        ai_export_session "$@"
+                        ;;
+                    clear)
+                        if declare -f ai_session_clear_all &>/dev/null; then
+                            ai_session_clear_all
+                        fi
+                        ;;
+                    *)
+                        echo -e "${RED}Unknown session command: $1${NC}" >&2
+                        echo "Usage: powos ai session {list|new|delete|export|clear}" >&2
+                        exit 1
+                        ;;
+                esac
+                ;;
+            help|--help|-h)
+                ai_help
+                ;;
+            "")
+                ai_help
+                ;;
+            *)
+                ai_call "$@"
+                ;;
+        esac
+        ;;
     source|src|s)
         # Deprecated - redirect to dev
         echo -e "${YELLOW}Note: 'powos source' is deprecated. Use 'powos dev' instead.${NC}"
         shift
         cmd_dev "$@"
+        ;;
+    remote)
+        # Legacy alias for backup
+        echo -e "${YELLOW}Note: 'powos remote' is now 'powos backup'${NC}"
+        shift
+        cmd_backup "$@"
+        ;;
+    state)
+        # Legacy alias for backup
+        echo -e "${YELLOW}Note: 'powos state' is now 'powos backup'${NC}"
+        shift
+        cmd_backup "$@"
         ;;
     version|--version|-v)
         cmd_version

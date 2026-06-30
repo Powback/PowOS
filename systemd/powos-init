@@ -150,6 +150,33 @@ setup_directories() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Check for Interrupted Sync Operations
+# ─────────────────────────────────────────────────────────────────
+
+check_interrupted_sync() {
+    local lock_file="/run/powos/sync.lock"
+
+    # Lock file in /run shouldn't persist across reboots, but check anyway
+    # More importantly, check for lock file on persistent storage
+    local persistent_lock=""
+    if [[ -n "${POWOS_PERSISTENT:-}" ]] && [[ -d "$POWOS_PERSISTENT" ]]; then
+        persistent_lock="${POWOS_PERSISTENT}/.sync.interrupted"
+    fi
+
+    if [[ -f "$lock_file" ]] || [[ -f "${persistent_lock:-/nonexistent}" ]]; then
+        log "WARNING: Previous sync operation may have been interrupted!"
+        log "Run 'powos remote status' to check state"
+        log "Run 'powos remote doctor' to verify integrity"
+
+        # Source sync.sh to get the detailed warning
+        if [[ -f "/usr/lib/powos/sync.sh" ]]; then
+            source "/usr/lib/powos/sync.sh"
+            sync_lock_check_stale || true
+        fi
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Check First Boot / Needs Hydration
 # ─────────────────────────────────────────────────────────────────
 
@@ -213,6 +240,9 @@ main() {
 
     # Step 2: Setup directory structure
     setup_directories
+
+    # Step 2.5: Check for interrupted sync operations
+    check_interrupted_sync
 
     # Step 3: Export environment for other services
     {

@@ -19,13 +19,11 @@ SRC_DIR="$(dirname "$0")"
 if [[ "$FULL_NAME" == *":"* ]]; then
     APP_NAME="${FULL_NAME#*:}"
 else
-    echo "Usage: powos source build kde:<app>"
-    echo ""
-    echo "Available apps:"
-    for app in dolphin konsole kate gwenview okular spectacle ark; do
-        echo "  kde:$app"
-    done
-    exit 1
+    # Called without app name (e.g., during build-all) - skip gracefully
+    echo "kde: meta-overlay (requires app name)"
+    echo "  Use: powos source build kde:<app>"
+    echo "  Apps: dolphin konsole kate gwenview okular spectacle ark"
+    exit 0  # Exit success - this isn't a failure
 fi
 
 echo "Building: KDE $APP_NAME"

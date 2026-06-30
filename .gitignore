@@ -21,8 +21,15 @@ secrets/age-key.txt
 *~
 
 # Build output (ISOs are large, regenerated)
-build/output/*.iso
-build/output/*.log
+build/output/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Windows / WSL cruft
+nul
+%USERPROFILE%*
 
 # Test artifacts
 test/tier2/*.qcow2
