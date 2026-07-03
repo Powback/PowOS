@@ -53,6 +53,11 @@ Commands:
   backup setup <url>  Configure cloud backup
 
   update              Check for available updates
+  reload              Apply your local PowOS changes LIVE (no reboot). Auto-finds
+                      your checkout & remembers it — just 'powos reload'.
+  reload --pull       git pull the checkout first, then apply
+  reload --build      Full local image build + switch (for base/package changes)
+
   upgrade             Pull+stage a base update, apply the lightest restart
                       (soft-reboot if the kernel's unchanged, else full reboot)
   upgrade --check     Just check if a base update is available
@@ -1516,6 +1521,12 @@ cmd_install() {
                 export_gui=true
                 shift
                 ;;
+            --host)
+                # Explicit host install (rpm-ostree layer) — the default path
+                # when no container is given; flag exists so the install router
+                # can force it unambiguously.
+                shift
+                ;;
             --help|-h)
                 echo "Usage: powos install [options] <packages...>"
                 echo ""
@@ -2605,6 +2616,11 @@ case "${1:-}" in
         source "$POWOS_LIB/upgrade.sh"
         cmd_upgrade "$@"
         ;;
+    reload|apply)
+        shift
+        source "$POWOS_LIB/reload.sh"
+        cmd_reload "$@"
+        ;;
     health)
         shift
         cmd_health "$@"
@@ -2626,7 +2642,11 @@ case "${1:-}" in
         ;;
     install|i)
         shift
-        cmd_install "$@"
+        # Route through the containment-first installer (probes flatpak/rpm/brew,
+        # defaults to the most contained backend). It calls back into cmd_install
+        # for the legacy container (-c) and host (--host) paths.
+        source "$POWOS_LIB/install-router.sh"
+        cmd_install_route "$@"
         ;;
     install-system|install-disk)
         shift

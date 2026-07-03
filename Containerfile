@@ -89,6 +89,7 @@ COPY lib/driver.sh /usr/lib/powos/
 COPY lib/registry.sh /usr/lib/powos/
 COPY lib/build-image.sh /usr/lib/powos/
 COPY lib/upgrade.sh /usr/lib/powos/
+COPY lib/reload.sh /usr/lib/powos/
 COPY lib/overview.sh /usr/lib/powos/
 COPY lib/services.sh /usr/lib/powos/
 COPY lib/build-helpers.sh /var/lib/powos/lib/

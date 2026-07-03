@@ -43,6 +43,9 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   to the bundled src in place (once), falling back to a one-shot clone when src
   isn't writable. Private repo needs git creds on the machine. ✅ (creds-dependent)
 - `powos update {os|packages|overlays|apply}` — base OS / packages / overlays.
+- `powos reload` — the easy button: auto-finds your source checkout (~/PowOS etc.),
+  remembers it, and hot-applies live (no reboot). `--pull` (git pull first),
+  `--build` (full local image build + switch), `--where`. Just `powos reload`.
 - `powos upgrade` — smart base update: `bootc upgrade` then the LIGHTEST restart —
   soft-reboot if the staged kernel is unchanged (~seconds, warm), full reboot if it
   changed, nothing if already current. `--check|--now|--soft|--reboot`. Soft-reboot
