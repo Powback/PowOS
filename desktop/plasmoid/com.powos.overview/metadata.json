@@ -12,7 +12,7 @@
         "Id": "com.powos.overview",
         "License": "MIT",
         "Name": "PowOS Overview",
-        "Version": "3.1"
+        "Version": "3.2"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }

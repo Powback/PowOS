@@ -45,9 +45,12 @@ PlasmoidItem {
         "podman stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}' 2>/dev/null; " +
         "echo __IO__; " +
         "T1=$(mktemp); T2=$(mktemp); " +
-        "awk '/^read_bytes|^write_bytes/{s[FILENAME]+=$2} END{for(f in s) print f, s[f]}' /proc/[0-9]*/io 2>/dev/null > $T1; " +
+        // grep -s (NOT awk on the files directly): gawk FATALS on the first
+        // unreadable/vanished /proc file (root-owned pids, exit races), which
+        // silently produced nothing. grep -s skips them and never aborts.
+        "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T1; " +
         "sleep 1; " +
-        "awk '/^read_bytes|^write_bytes/{s[FILENAME]+=$2} END{for(f in s) print f, s[f]}' /proc/[0-9]*/io 2>/dev/null > $T2; " +
+        "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T2; " +
         "awk 'NR==FNR{a[$1]=$2; next} ($1 in a) && ($2>a[$1]) {d=$2-a[$1]; split($1,p,\"/\"); pid=p[3]; cf=\"/proc/\"pid\"/comm\"; c=\"?\"; if((getline c < cf)>0) close(cf); print d, c}' $T1 $T2 | sort -rn | head -5 | awk '{printf \"%s %.2f\\n\", $2, $1/1048576}'; " +
         "rm -f $T1 $T2"
 
