@@ -54,11 +54,13 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   GitHub), optionally rebase this machine onto it. Self-hosted counterpart to CI. ✅
 
 ## Other subsystems
-- Settings (`powos config [name] [on|off]` / `--json`): one front door for system
-  toggles — currently `ssh` (applied immediately via systemd) and `cachefs`
-  (file-backed in /etc/powos/config, reboot to apply). Registry-based; adding a
-  setting is one entry + get/set pair in lib/config.sh. Intended substrate for a
-  future installer/GUI. ✅
+- Settings (`powos config [name] [value]` / `--json`): one front door for system
+  toggles AND value settings — ssh, driver (stable/testing channel), auto-update
+  (background staging via rpm-ostreed, never auto-reboots), ramsize (kernel arg,
+  reboot), sync-interval (layer-sync daemon, applied live), nvidia-persistence,
+  cachefs. Each shows WHEN it applies (now/reboot). Registry-based: adding a
+  setting is one line + get/set(/validate) pair in lib/config.sh. Intended
+  substrate for a future installer/GUI. ✅
 - Uninstall (`powos remove [--dry] <thing...>`): mirror of the install router —
   probes flatpak / powos-sandbox (rpm+pip) / brew / host rpm-ostree layer and
   removes from every backend the thing is found in. Honest about host-layer

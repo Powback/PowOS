@@ -8,7 +8,11 @@ ConditionPathExists=/run/powos/layer-paths
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /usr/lib/powos/ramfs/layer-sync.py --interval 60
+# Interval is configurable via `powos config sync-interval N` →
+# POWOS_SYNC_INTERVAL in /etc/powos/config (default below if unset).
+Environment=POWOS_SYNC_INTERVAL=60
+EnvironmentFile=-/etc/powos/config
+ExecStart=/usr/bin/python3 /usr/lib/powos/ramfs/layer-sync.py --interval ${POWOS_SYNC_INTERVAL}
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=10
