@@ -90,9 +90,13 @@ Commands:
   containers assemble Create all predefined containers
   containers prune    Clean up unused resources
 
-  install <pkg>       Install package to host (custom layer)
-  install -c NAME <pkg>  Install package to container
+  install <thing>     Find it everywhere, install the most CONTAINED way
+                      (flatpak → sandbox container → asks before touching OS)
+  install -m <be> <p> Force backend: flatpak|sandbox|brew|pip|container|host
+  install --dry <p>   Show where it was found + routing, install nothing
+  install -c NAME <pkg>  Install package to container NAME
   install -c NAME -e <pkg>  Install GUI app to container + export to host
+  install sandbox-share <dir>  Grant a real folder to the sandbox (explicit)
 
   install-system      Install PowOS to an internal disk (interactive)
   install-system --alongside   Dual-boot: install into free space, keep Windows

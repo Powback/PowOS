@@ -100,6 +100,15 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   (image, status, ports, gpu-access, dev-vs-service), container-backed systemd
   units (flags stale/failed), and GPU users (vram/util + compute processes).
   The "what are my gsplat/TTS/STT/dev boxes doing + who's on the GPU" panel.
+- Install router (`powos install <thing>`): ONE front door — probes flatpak/rpm/
+  brew, reports "found in N sources", installs the MOST CONTAINED by default:
+  flatpak (sandbox + portals prompt) → powos-sandbox container (own home, can't
+  see real $HOME — supply-chain containment) → brew only by explicit opt-in
+  (unsandboxed, warns) → host rpm-ostree layer last, always asks. `-m` forces a
+  backend; `-m pip` installs inside the sandbox; `--dry` reports only;
+  `sandbox-share <dir>` = explicit containment grant. Honesty: flatpak portals
+  give real runtime prompts; containers give denial-by-default (no per-syscall
+  prompts on Linux) — the sandbox simply cannot see your files.
 
 ## Key paths
 - `/usr/lib/powos/` scripts · `/etc/powos/` config · `/run/powos/` runtime state
