@@ -94,12 +94,14 @@ jobs:
         run: ./build/vendor-bazzite.sh
 
       # podman for the same layer-depth reason as tier1 (see comment there).
+      # ROOTFUL (sudo): layer-sync rsyncs overlayfs whiteouts (char devices) and
+      # mknod is denied in a rootless user namespace even with --privileged.
       # Mirrors the compose e2e-runner service definition.
       - name: Run E2E Tests (podman — replicates compose e2e-runner)
         run: |
-          podman build -f Containerfile --build-arg INSTALL_E2E_DEPS=1 -t powos-e2e .
-          podman volume create powos-e2e-usb
-          podman run --rm --privileged --hostname powos-e2e \
+          sudo podman build -f Containerfile --build-arg INSTALL_E2E_DEPS=1 -t powos-e2e .
+          sudo podman volume create powos-e2e-usb
+          sudo podman run --rm --privileged --hostname powos-e2e \
             --device /dev/fuse --device /dev/loop-control \
             -v "$PWD:/powos:ro" -v powos-e2e-usb:/var/lib/powos-test \
             --tmpfs /run/powos --tmpfs /tmp \

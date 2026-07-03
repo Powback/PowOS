@@ -231,7 +231,11 @@ ram_sync_now() {
 
     # Check for conflicts
     local conflict_status
-    conflict_status=$(check_for_conflicts || echo "conflict")
+    # check_for_conflicts prints its status AND returns non-zero on conflict —
+    # appending a fallback echo here corrupts the value ("conflict\nconflict"),
+    # which silently broke every == "conflict" check below. `|| true` only
+    # guards set -e against the non-zero return.
+    conflict_status=$(check_for_conflicts) || true
 
     if [[ "$conflict_status" == "conflict" ]]; then
         echo -e "${RED}CONFLICT DETECTED${NC}"
@@ -287,7 +291,11 @@ ram_sync_resolve() {
     fi
 
     local conflict_status
-    conflict_status=$(check_for_conflicts || echo "conflict")
+    # check_for_conflicts prints its status AND returns non-zero on conflict —
+    # appending a fallback echo here corrupts the value ("conflict\nconflict"),
+    # which silently broke every == "conflict" check below. `|| true` only
+    # guards set -e against the non-zero return.
+    conflict_status=$(check_for_conflicts) || true
 
     if [[ "$conflict_status" != "conflict" ]]; then
         echo -e "${GREEN}No conflicts to resolve.${NC}"
@@ -558,7 +566,11 @@ ram_sync_resolve_ai() {
     fi
 
     local conflict_status
-    conflict_status=$(check_for_conflicts || echo "conflict")
+    # check_for_conflicts prints its status AND returns non-zero on conflict —
+    # appending a fallback echo here corrupts the value ("conflict\nconflict"),
+    # which silently broke every == "conflict" check below. `|| true` only
+    # guards set -e against the non-zero return.
+    conflict_status=$(check_for_conflicts) || true
 
     if [[ "$conflict_status" != "conflict" ]]; then
         echo -e "${GREEN}No conflicts to resolve.${NC}"

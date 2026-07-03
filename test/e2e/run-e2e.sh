@@ -430,7 +430,9 @@ EOF
     fi
 
     local conflict_result
-    conflict_result=$(check_for_conflicts 2>/dev/null || echo "conflict")
+    # The function prints "conflict" AND exits non-zero — a fallback echo would
+    # double the output and break the exact match below.
+    conflict_result=$(check_for_conflicts 2>/dev/null) || true
     if [[ "$conflict_result" == "conflict" ]]; then
         e2e_pass "check_for_conflicts outputs 'conflict' for foreign machine"
     else
