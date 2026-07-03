@@ -299,6 +299,96 @@ add_install_boot_entry() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Multi-variant USB: copy build/output/base-<variant>/ rootfs dirs onto the
+# POWOS-DATA partition under layers/base-<variant>/, and add a boot-menu entry
+# per variant (rd.powos.variant=). At boot, ramboot-setup.sh selects one.
+# Assumes a base raw image is already written (it provides kernel + ESP +
+# initramfs). TODO(hw): boot-critical — validate in a VM.
+# ─────────────────────────────────────────────────────────────────
+add_base_variants() {
+    local device="$1"
+    local src_dir="${POWOS_ROOT}/build/output"
+
+    if ! ls -d "$src_dir"/base-*/ >/dev/null 2>&1; then
+        log_error "No base-*/ variant rootfs found in $src_dir"
+        log_error "Build them first: ./build/build-iso.sh variants"
+        return 1
+    fi
+
+    partprobe "$device" 2>/dev/null || true; sleep 1
+    local data_part mp
+    data_part=$(blkid -L "POWOS-DATA" 2>/dev/null || true)
+    [[ -z "$data_part" ]] && data_part=$(lsblk -ln -o NAME,LABEL "$device" | awk '/POWOS-DATA/{print "/dev/"$1; exit}')
+    if [[ -z "$data_part" ]]; then
+        log_error "POWOS-DATA partition not found — write the base image first."
+        return 1
+    fi
+
+    mp=$(mktemp -d)
+    mount "$data_part" "$mp" || { log_error "mount $data_part failed"; rmdir "$mp"; return 1; }
+    mkdir -p "$mp/layers"
+
+    local d name installed=""
+    for d in "$src_dir"/base-*/; do
+        name=$(basename "$d")   # base-<variant>
+        log "Copying $name → USB layers/$name ..."
+        rm -rf "${mp:?}/layers/$name"
+        cp -a "$d" "$mp/layers/$name"
+        installed="${installed}${name} "
+    done
+    sync
+    log_success "Base variants installed: ${installed}"
+    umount "$mp" 2>/dev/null || true
+    rmdir "$mp" 2>/dev/null || true
+
+    add_variant_boot_entries "$device"
+}
+
+# Add a boot-menu entry per available variant (auto + each base-<name>).
+add_variant_boot_entries() {
+    local device="$1"
+    partprobe "$device" 2>/dev/null || true; sleep 1
+
+    local mp entries_dir="" part
+    mp=$(mktemp -d)
+    while read -r part; do
+        [[ -b "$part" ]] || continue
+        if mount "$part" "$mp" 2>/dev/null; then
+            if [[ -d "$mp/loader/entries" ]]; then entries_dir="$mp/loader/entries"; break
+            elif [[ -d "$mp/boot/loader/entries" ]]; then entries_dir="$mp/boot/loader/entries"; break; fi
+            umount "$mp" 2>/dev/null || true
+        fi
+    done < <(lsblk -ln -o PATH "$device" 2>/dev/null | tail -n +2)
+
+    if [[ -z "$entries_dir" ]]; then
+        log_warn "BLS loader/entries not found — variant boot entries not added."
+        log_warn "Auto-detect still works; use rd.powos.variant= manually if needed."
+        umount "$mp" 2>/dev/null || true; rmdir "$mp" 2>/dev/null || true
+        return 0
+    fi
+
+    local template variants v
+    template=$(find "$entries_dir" -maxdepth 1 -name '*.conf' ! -name '*install*' ! -name '*variant*' | head -1)
+    [[ -z "$template" ]] && { log_warn "No BLS template — skipping variant entries."; umount "$mp" 2>/dev/null; rmdir "$mp"; return 0; }
+
+    variants="auto"
+    # Discover installed variants from the data partition (best-effort re-mount not needed;
+    # just offer the standard set plus auto).
+    for v in $variants nvidia-open nvidia main; do
+        awk -v val="$v" '
+            /^title / { print "title PowOS ("val")"; next }
+            /^options / { print $0 " rd.powos.variant="val; next }
+            { print }
+        ' "$template" > "${entries_dir}/powos-variant-${v}.conf"
+        grep -q "rd.powos.variant=$v" "${entries_dir}/powos-variant-${v}.conf" || \
+            echo "options rd.powos.variant=$v" >> "${entries_dir}/powos-variant-${v}.conf"
+    done
+    log_success "Added variant boot entries: auto, nvidia-open, nvidia, main"
+    sync
+    umount "$mp" 2>/dev/null || true; rmdir "$mp" 2>/dev/null || true
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Setup persistent data structure on POWOS-DATA partition
 # ─────────────────────────────────────────────────────────────────
 setup_persistence() {
@@ -440,6 +530,8 @@ usage() {
     echo "Options:"
     echo "  --setup-data-only   Only add POWOS-DATA partition (raw image already written)"
     echo "  --image PATH        Path to powos.raw image (default: build/output/powos.raw)"
+    echo "  --variants          Add multi-variant base rootfs + boot entries onto an"
+    echo "                      already-written USB (needs ./build/build-iso.sh variants)"
     echo ""
     echo "Available drives:"
     lsblk -d -o NAME,SIZE,MODEL,TRAN,HOTPLUG 2>/dev/null | grep -v "^loop" \
@@ -453,12 +545,17 @@ main() {
     local device=""
     local image="$RAW_PATH"
     local setup_data_only=0
+    local variants_only=0
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --setup-data-only)
                 setup_data_only=1
+                shift
+                ;;
+            --variants|--add-variants)
+                variants_only=1
                 shift
                 ;;
             --image)
@@ -493,6 +590,15 @@ main() {
 
     check_root
     check_device "$device"
+
+    # Multi-variant mode is additive (no full erase) — handle before confirm.
+    if [[ "$variants_only" == "1" ]]; then
+        log "Adding base variants to existing PowOS USB (no erase)"
+        add_base_variants "$device"
+        show_complete "$device"
+        return 0
+    fi
+
     confirm_usb_erase "$device"
 
     if [[ "$setup_data_only" == "1" ]]; then

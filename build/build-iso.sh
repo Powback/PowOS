@@ -291,6 +291,67 @@ show_installer_results() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Multi-variant build: produce a base rootfs per GPU variant so ONE USB can
+# auto-select the right stack at boot (see docs/MULTI-VARIANT-USB.md).
+# Output: build/output/base-<variant>/  (extracted rootfs, consumed by
+# install-to-usb.sh which places them under the USB's layers/base-<variant>/).
+#
+# Variants default to "nvidia-open main"; override with POWOS_VARIANTS.
+# TODO(hw): boot-critical + heavy — validate the produced layout in a VM before
+# trusting it. Extracting a bootc rootfs this way is experimental.
+# ─────────────────────────────────────────────────────────────────
+variant_base_image() {
+    case "$1" in
+        nvidia-open) echo "ghcr.io/ublue-os/bazzite-nvidia-open:stable" ;;
+        nvidia)      echo "ghcr.io/ublue-os/bazzite-nvidia:stable" ;;
+        main)        echo "ghcr.io/ublue-os/bazzite:stable" ;;
+        *)           return 1 ;;
+    esac
+}
+
+build_variants() {
+    log_step "Building multiple base variants for one-USB-many-GPUs"
+    mkdir -p "$OUTPUT_DIR"
+
+    local variants="${POWOS_VARIANTS:-nvidia-open main}"
+    log "Variants: $variants"
+
+    local v img cid dest
+    for v in $variants; do
+        img=$(variant_base_image "$v") || { log_error "Unknown variant: $v"; return 1; }
+        log_step "Variant '$v' (base: $img)"
+
+        if ! podman build -f Containerfile -t "localhost/powos-$v" \
+            --build-arg "BASE_IMAGE=$img" --layers . \
+            2>&1 | tee "${OUTPUT_DIR}/build-$v.log"; then
+            log_error "Build failed for variant '$v' — see build-$v.log"
+            return 1
+        fi
+
+        # Export the built image's rootfs into base-<variant>/.
+        dest="${OUTPUT_DIR}/base-$v"
+        rm -rf "$dest"; mkdir -p "$dest"
+        log "Exporting rootfs → $dest"
+        cid=$(podman create "localhost/powos-$v") || { log_error "podman create failed ($v)"; return 1; }
+        if podman export "$cid" | tar -x -C "$dest"; then
+            log_success "Variant '$v' rootfs ready: $dest"
+        else
+            log_error "rootfs export failed for '$v'"
+            podman rm "$cid" >/dev/null 2>&1 || true
+            return 1
+        fi
+        podman rm "$cid" >/dev/null 2>&1 || true
+    done
+
+    echo ""
+    log_success "Built variants: $variants"
+    echo "  Base rootfs dirs: ${OUTPUT_DIR}/base-*"
+    echo "  Write a multi-variant USB with:"
+    echo "    sudo ./build/install-to-usb.sh --variants /dev/sdX"
+    echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Alternative: Build without bootc (for testing)
 # ─────────────────────────────────────────────────────────────────
 build_test_image() {
@@ -342,6 +403,11 @@ main() {
             build_container_image
             build_installer_iso
             show_installer_results
+            ;;
+        variants|multi)
+            # Build a base rootfs per GPU variant for a multi-variant USB.
+            check_requirements
+            build_variants
             ;;
         test|container)
             check_requirements

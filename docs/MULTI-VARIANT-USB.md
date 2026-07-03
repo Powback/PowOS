@@ -49,18 +49,29 @@ GTX 900/1000) need the closed `nvidia` variant.
 - `variant_list_available` — discover `base-*/` variants present on the USB.
 - `variant_select_main` — wire the above to real GPU/cmdline/USB inputs.
 
-**🚧 Not yet wired (needs build + boot-layout work, hardware validation):**
-1. **Build multiple variants.** `build-iso.sh` builds one image; it needs to loop
-   and produce both (`POWOS_BASE_IMAGE=bazzite-nvidia` and `=bazzite`) — the base
-   image is already a build ARG.
-2. **USB layout.** `install-to-usb.sh` must place each variant's root under
-   `layers/base-<name>/` instead of a single root partition. This is the biggest
-   change — today the "base" is the raw image's root, not a selectable layer.
-3. **Dracut boot stage.** `ramboot-setup.sh` must call `variant_select_main` and
-   use the chosen `base-<variant>` as the overlay `lowerdir` base.
-4. **Boot menu entries.** Add BLS entries (like the installer entry) for
-   `auto` / `nvidia` / `main` via `rd.powos.variant=`.
+**🧩 Wired (code-complete, NOT hardware-validated — `TODO(hw)`):**
+1. **Build multiple variants.** `./build/build-iso.sh variants` builds a base
+   rootfs per variant (default `nvidia-open main`, override `POWOS_VARIANTS`) into
+   `build/output/base-<variant>/`.
+2. **USB layout.** `sudo ./build/install-to-usb.sh --variants /dev/sdX` copies each
+   `base-<variant>/` onto the USB under `layers/base-<variant>/` (additive — assumes
+   a base raw image is already written for kernel/ESP/initramfs).
+3. **Dracut boot stage.** `ramboot-setup.sh` selects the base variant (GPU
+   auto-detect + `rd.powos.variant=` override) — **guarded**: if no `base-*/` dirs
+   exist, it keeps the single NEWROOT base, so existing single-variant USBs are
+   unchanged. `module-setup.sh` adds `lspci` to the initramfs for detection.
+4. **Boot menu entries.** `--variants` adds BLS entries `PowOS (auto|nvidia-open|
+   nvidia|main)` via `rd.powos.variant=`.
 
-The decision engine is done and safe; the remaining work is boot-critical and
-must be validated on real hardware / a VM before it can be trusted. Until then,
-build a single-variant USB per machine with `POWOS_BASE_IMAGE`.
+**The workflow:**
+```bash
+./build/build-iso.sh variants                    # build base-nvidia-open/ + base-main/
+sudo ./build/install-to-usb.sh /dev/sdX          # write a base image first (kernel/ESP)
+sudo ./build/install-to-usb.sh --variants /dev/sdX   # add the variant rootfs + boot entries
+```
+
+⚠️ **All of this is boot-critical and unvalidated on hardware.** The selection
+engine and single-variant fallback are unit-tested, but the multi-base overlay
+assembly, rootfs export, and boot entries must be checked in a VM before trusting
+them. Until then, a single-variant USB per machine (`POWOS_BASE_IMAGE`) is the
+proven path.

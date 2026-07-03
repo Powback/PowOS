@@ -33,11 +33,53 @@ info "PowOS ramboot: Setting up layered RAM overlay (${RAM_SIZE})"
 OVERLAY_BASE="/run/powos-overlay"
 USB_LAYERS="/run/powos-usb-layers"
 
-# The original root from USB (will become base layer)
+# The original root from USB (will become base layer). If the USB carries
+# multiple base variants, this is replaced by the selected layers/base-<variant>.
 BASE_LAYER="${NEWROOT}"
 
 # Create overlay structure
 mkdir -p "$OVERLAY_BASE" "$USB_LAYERS"
+
+# --- Multi-variant base selection (guarded) -----------------------------------
+# A USB may carry several base variants under layers/base-<name>/ (e.g.
+# nvidia-open, nvidia, main). Pick one by GPU auto-detect or the boot menu's
+# rd.powos.variant= override. If NO base-*/ dirs exist, BASE_LAYER stays as
+# NEWROOT and single-variant boot behaves exactly as before.
+# TODO(hw): validate on real hardware / a VM — this is boot-critical.
+_powos_variant_in() { case " $2 " in *" $1 "*) return 0 ;; esac; return 1; }
+
+powos_select_base_variant() {
+    local override gpu mapped chosen avail="" d name
+    for d in "$USB_LAYERS"/layers/base-*/; do
+        [[ -d "$d" ]] || continue
+        name=$(basename "$d"); name="${name#base-}"
+        avail="${avail:+$avail }$name"
+    done
+    [[ -z "$avail" ]] && return 0   # single-variant USB — keep NEWROOT base
+
+    override=$(getarg rd.powos.variant=)
+    if command -v lspci >/dev/null 2>&1 && lspci 2>/dev/null | grep -qi nvidia; then
+        mapped="nvidia-open"        # open is the NVIDIA default (see variant-select.sh)
+    else
+        mapped="main"
+    fi
+
+    # Precedence: explicit override > GPU auto-detect > main > first available.
+    if [[ -n "$override" && "$override" != "auto" ]] && _powos_variant_in "$override" "$avail"; then
+        chosen="$override"
+    elif _powos_variant_in "$mapped" "$avail"; then
+        chosen="$mapped"
+    elif _powos_variant_in "main" "$avail"; then
+        chosen="main"
+    else
+        chosen="${avail%% *}"
+    fi
+
+    if [[ -n "$chosen" && -d "$USB_LAYERS/layers/base-$chosen" ]]; then
+        BASE_LAYER="$USB_LAYERS/layers/base-$chosen"
+        info "PowOS ramboot: base variant '$chosen' (available: $avail; override='${override:-auto}')"
+    fi
+}
 
 # === Mount tmpfs for RAM upper layer ===
 info "PowOS ramboot: Creating tmpfs (${RAM_SIZE}) for overlay upper"
@@ -66,6 +108,9 @@ if [[ -n "$USB_DATA_DEV" ]]; then
 
     if mount "$USB_DATA_DEV" "$USB_LAYERS" 2>/dev/null; then
         info "PowOS ramboot: USB layers mounted"
+
+        # Pick the base variant (no-op unless the USB carries base-*/ variants).
+        powos_select_base_variant
 
         # Create layer directories if they don't exist
         mkdir -p "$USB_LAYERS/layers/custom"
