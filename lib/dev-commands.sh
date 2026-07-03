@@ -20,14 +20,10 @@ elif [[ -f "$(dirname "${BASH_SOURCE[0]}")/ai/helpers.sh" ]]; then
     source "$(dirname "${BASH_SOURCE[0]}")/ai/helpers.sh"
 fi
 
-# Colors
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-BOLD='\033[1m'
-DIM='\033[2m'
-NC='\033[0m'
+# Shared helpers: colors + plog/pok/pwarn/perr/need_root/confirm (single source
+# of truth for every lib — see lib/common.sh).
+source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
+POWOS_TAG=dev
 
 cmd_dev() {
     local action="${1:-list}"
@@ -1189,19 +1185,18 @@ _dev_missing_files() {
     comm -23 <(sort -u "$1") <(sort -u "$2")
 }
 
+# Read a KEY="value" from a project.conf (portable; no PCRE).
+_dev_conf_get() { sed -n "s/^$2=\"\\(.*\\)\"/\\1/p" "$1" 2>/dev/null; }
+
 dev_override() {
     local app="${1:-}" name="${2:-}"
     if [[ -z "$app" ]]; then
-        echo "Usage: powos dev override <app|rpm-name> [name]"
-        echo "  Seed a complete, native override of an installed app so you can"
-        echo "  modify it and layer it over the base (disable to restore base)."
-        echo "  Example: powos dev override dolphin"
+        plog "Usage: powos dev override <app|rpm-name> [name]"
+        plog "Seed a complete native copy of an installed app, edit it, layer it"
+        plog "over the base (disable to restore).  e.g. powos dev override dolphin"
         return 1
     fi
-    if ! command -v rpm &>/dev/null; then
-        echo -e "${RED}rpm not available — override needs an rpm-based system.${NC}"
-        return 1
-    fi
+    command -v rpm &>/dev/null || { perr "override needs an rpm-based system (rpm not found)."; return 1; }
 
     # Resolve the owning package: by binary on PATH, else treat $app as the rpm.
     local pkg="" bin
@@ -1209,29 +1204,24 @@ dev_override() {
     [[ -n "$bin" ]] && pkg="$(rpm -qf --qf '%{NAME}\n' "$bin" 2>/dev/null | head -1)"
     [[ -z "$pkg" ]] && rpm -q "$app" &>/dev/null && pkg="$app"
     if [[ -z "$pkg" ]]; then
-        echo -e "${RED}Couldn't find the system package for '$app'.${NC}"
-        echo "Pass the rpm name directly: powos dev override <rpm-name>"
+        perr "Couldn't find the system package for '$app'."
+        plog "Pass the rpm name directly: powos dev override <rpm-name>"
         return 1
     fi
 
     name="${name:-$app}"
     local proj="$PROJECTS_DIR/$name"
-    if [[ -d "$proj" ]]; then
-        echo -e "${YELLOW}Project '$name' already exists${NC}"
-        return 1
-    fi
+    [[ -d "$proj" ]] && { pwarn "Project '$name' already exists."; return 1; }
 
-    echo -e "${CYAN}Overriding system app '$app'${NC} (package: ${BOLD}$pkg${NC})"
+    plog "Overriding system app '$app' (package: ${BOLD}$pkg${NC})"
     mkdir -p "$proj/src"
 
     # Seed src/ with the base package's /usr files = complete native copy.
     local f count=0
     while read -r f; do
-        [[ -e "$f" || -L "$f" ]] || continue
-        if [[ -f "$f" || -L "$f" ]]; then
-            mkdir -p "$proj/src$(dirname "$f")"
-            cp -a "$f" "$proj/src$f" 2>/dev/null && count=$((count+1))
-        fi
+        [[ -f "$f" || -L "$f" ]] || continue
+        mkdir -p "$proj/src$(dirname "$f")"
+        cp -a "$f" "$proj/src$f" 2>/dev/null && count=$((count+1))
     done < <(_dev_pkg_usr_files "$pkg")
 
     cat > "$proj/project.conf" << EOF
@@ -1253,33 +1243,28 @@ echo "Override built (native copy of $(basename "$(dirname "$0")"))"
 BUILD
     chmod +x "$proj/build.sh"
 
-    echo -e "${GREEN}✓ Seeded $count files from '$pkg'${NC} → $proj/src/usr"
-    echo ""
-    echo "  This override currently MATCHES the base app (a complete native copy)."
-    echo "  Edit files in $proj/src/usr to change it, then:"
-    echo -e "    ${BOLD}powos dev build $name && powos dev enable $name${NC}"
-    echo "  Turn it off anytime (base app returns):"
-    echo -e "    ${BOLD}powos dev disable $name${NC}"
+    pok "Seeded $count files from '$pkg' → $proj/src/usr (matches base for now)"
+    plog "Edit files there, then:  powos dev build $name && powos dev enable $name"
+    plog "Turn it off (base app returns):  powos dev disable $name"
 }
 
 dev_overrides() {
     echo -e "${BOLD}App overrides${NC}"
-    local found=0 proj name conf
+    local found=0 proj name conf pkg
     for proj in "$PROJECTS_DIR"/*/; do
-        conf="$proj/project.conf"
+        conf="${proj}project.conf"
         [[ -f "$conf" ]] || continue
-        # shellcheck disable=SC1090
-        ( source "$conf"; [[ "${PROJECT_TYPE:-}" == "override" ]] ) || continue
+        grep -q 'PROJECT_TYPE="override"' "$conf" || continue
         found=1
         name="$(basename "$proj")"
-        local pkg; pkg="$(grep -oP '(?<=OVERRIDE_PKG=")[^"]+' "$conf" 2>/dev/null)"
+        pkg="$(_dev_conf_get "$conf" OVERRIDE_PKG)"
         if [[ -L "/var/lib/extensions/$name" ]]; then
             echo -e "  ${GREEN}●${NC} $name ${DIM}(active — overriding $pkg)${NC}"
         else
             echo -e "  ○ $name ${DIM}(built, disabled — overrides $pkg)${NC}"
         fi
     done
-    [[ $found -eq 0 ]] && echo "  (none) — create one: powos dev override <app>"
+    [[ $found -eq 0 ]] && plog "(none) — create one: powos dev override <app>"
 }
 
 dev_enable() {
@@ -1302,25 +1287,24 @@ dev_enable() {
     # a partial override leaves a Frankenstein mix of your files + base files.
     local conf="$PROJECTS_DIR/$name/project.conf"
     if [[ -f "$conf" ]] && grep -q 'PROJECT_TYPE="override"' "$conf"; then
-        local pkg; pkg="$(grep -oP '(?<=OVERRIDE_PKG=")[^"]+' "$conf")"
+        local pkg; pkg="$(_dev_conf_get "$conf" OVERRIDE_PKG)"
         if [[ -n "$pkg" ]] && command -v rpm &>/dev/null; then
             local base_list ext_list missing
             base_list="$(mktemp)"; ext_list="$(mktemp)"
             _dev_pkg_usr_files "$pkg" | sort -u > "$base_list"
-            ( cd "$ext_dir" && find usr -type f -o -type l 2>/dev/null | sed 's|^|/|' ) | sort -u > "$ext_list"
-            missing="$(_dev_missing_files "$base_list" "$ext_list" | grep -cv 'extension-release')"
+            ( cd "$ext_dir" && find usr \( -type f -o -type l \) 2>/dev/null | sed 's|^|/|' ) | sort -u > "$ext_list"
+            missing="$(_dev_missing_files "$base_list" "$ext_list" | grep -vc 'extension-release')"
             if [[ "${missing:-0}" -gt 0 ]]; then
-                echo -e "${YELLOW}⚠ Override is INCOMPLETE:${NC} ${missing} of '$pkg's files are not in this"
-                echo "  extension — the base versions will still show (Frankenstein mix)."
-                echo "  Re-seed a complete copy with: powos dev override $pkg"
+                pwarn "Override INCOMPLETE: $missing of '$pkg's files aren't in this extension"
+                pwarn "— the base versions still show (Frankenstein). Re-seed: powos dev override $pkg"
             else
-                echo -e "${GREEN}✓ Override covers all of '$pkg's files${NC} (clean shadow)"
+                pok "Override covers all of '$pkg's files (clean shadow)"
             fi
             rm -f "$base_list" "$ext_list"
         fi
     fi
 
-    echo -e "${CYAN}Enabling: $name${NC}"
+    plog "Enabling: $name"
 
     sudo ln -sf "$ext_dir" "/var/lib/extensions/$name" 2>/dev/null || \
         ln -sf "$ext_dir" "/var/lib/extensions/$name"
