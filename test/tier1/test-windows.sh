@@ -44,6 +44,8 @@ reset_globals() {
     WIN_LOCALE="en-US"; WIN_KEYBOARD="en-US"
     WIN_PRODUCT_KEY=""; WIN_EDITION="Windows 11 Pro"; WIN_WITH_STEAM=0
     WIN_SIZE_GB=256; WIN_FIXED_VHD=0
+    WIN_DEST=""; WIN_HASH=""; WIN_SLIM=0; WIN_FETCH=0; WIN_OUT=""; WIN_FETCHED_ISO=""
+    WIN_GAMES_LETTER="G"; WIN_STEAM_AUTOSTART=0; WIN_NO_GAMES=0
 }
 
 # Mutating-call recorder: every mock that stands in for a destructive tool
@@ -830,14 +832,410 @@ check "no image → vm refused, points at create" \
 source "$LIB"
 
 # ══════════════════════════════════════════════════════════════════
+echo "== slim package list (curation + anti-cheat safety guard) =="
+# ══════════════════════════════════════════════════════════════════
+PKGLIST=$(win_slim_package_list)
+check "package list is non-empty" '[[ -n "$PKGLIST" ]]'
+check "removes Clipchamp" 'echo "$PKGLIST" | grep -q "Clipchamp"'
+check "removes a Bing app" 'echo "$PKGLIST" | grep -q "Microsoft.Bing"'
+check "removes Teams" 'echo "$PKGLIST" | grep -q "MicrosoftTeams"'
+check "removes Copilot" 'echo "$PKGLIST" | grep -qi "Copilot"'
+check "removes Widgets" 'echo "$PKGLIST" | grep -qi "Widgets"'
+# GUARD: nothing anti-cheat / servicing / security depends on may be stripped.
+# A break here would defeat the entire reason bare-metal Windows exists.
+check "GUARD: no Windows Update / servicing stack in the removal list" \
+    '! echo "$PKGLIST" | grep -qiE "windowsupdate|servicing|winsxs"'
+check "GUARD: no .NET / NetFx in the removal list" \
+    '! echo "$PKGLIST" | grep -qiE "netfx|dotnet|\.net"'
+check "GUARD: no VC runtime (VCLibs/vcredist) in the removal list" \
+    '! echo "$PKGLIST" | grep -qiE "vclibs|vcredist|vcruntime"'
+check "GUARD: no Defender / security stack in the removal list" \
+    '! echo "$PKGLIST" | grep -qiE "defender|securityhealth"'
+check "GUARD: Xbox Identity Provider is KEPT (multiplayer sign-in)" \
+    '! echo "$PKGLIST" | grep -qi "XboxIdentityProvider"'
+
+# ══════════════════════════════════════════════════════════════════
+echo "== Steam shared-library generators (mirror lib/games.sh) =="
+# ══════════════════════════════════════════════════════════════════
+VDF=$(win_steam_libraryfolders_vdf G)
+check "vdf points at <letter>:\\SteamLibrary (escaped backslashes)" \
+    'echo "$VDF" | grep -qF "G:\\\\SteamLibrary"'
+check "vdf keeps Steam's own install dir at index 0" \
+    'echo "$VDF" | grep -qF "C:\\\\Program Files (x86)\\\\Steam"'
+check "vdf is a well-formed libraryfolders block" \
+    'echo "$VDF" | head -1 | grep -q "\"libraryfolders\""'
+check "vdf is deterministic / idempotent" \
+    '[[ "$(win_steam_libraryfolders_vdf G)" == "$(win_steam_libraryfolders_vdf G)" ]]'
+VDF_X=$(win_steam_libraryfolders_vdf X)
+check "vdf honors a custom letter" \
+    'echo "$VDF_X" | grep -qF "X:\\\\SteamLibrary"'
+# GUARD: the Windows side NEVER touches Proton-only state.
+check "GUARD: vdf never references compatdata/shadercache" \
+    '! echo "$VDF" | grep -qiE "compatdata|shadercache"'
+
+PS1=$(win_build_steam_firstlogon_ps1 POWOS-GAMES G POWOSUNAT 0)
+check "ps1: matches POWOS-GAMES by FileSystemLabel (never a drive letter)" \
+    'echo "$PS1" | grep -q "FileSystemLabel .POWOS-GAMES."'
+check "ps1: assigns the stable letter via Add-PartitionAccessPath" \
+    'echo "$PS1" | grep -q "Add-PartitionAccessPath" && echo "$PS1" | grep -qF "G:"'
+check "ps1: prefers the OFFLINE SteamSetup.exe from the unattend volume" \
+    'echo "$PS1" | grep -q "FileSystemLabel .POWOSUNAT." && echo "$PS1" | grep -q "SteamSetup.exe"'
+check "ps1: installs Steam silently (/S)" \
+    'echo "$PS1" | grep -q "ArgumentList ./S."'
+check "ps1: CDN fallback uses the official Valve URL" \
+    'echo "$PS1" | grep -q "cdn.cloudflare.steamstatic.com"'
+check "ps1: seeds libraryfolders.vdf with the shared library" \
+    'echo "$PS1" | grep -q "libraryfolders.vdf" && echo "$PS1" | grep -qF "G:\\\\SteamLibrary"'
+check "ps1: no leftover __POWOS_ placeholders" \
+    '! echo "$PS1" | grep -q "__POWOS_"'
+# GUARD: compatdata is a Linux-only concern — never referenced on the Windows side.
+check "GUARD: ps1 never references compatdata/shadercache" \
+    '! echo "$PS1" | grep -qiE "compatdata|shadercache"'
+check "ps1: no autostart Run key by default" \
+    '! echo "$PS1" | grep -qi "CurrentVersion.\\+Run"'
+PS1_AUTO=$(win_build_steam_firstlogon_ps1 POWOS-GAMES G POWOSUNAT 1)
+check "ps1: --steam-autostart adds the Run key" \
+    'echo "$PS1_AUTO" | grep -qi "CurrentVersion.\\+Run" && echo "$PS1_AUTO" | grep -q "Steam.exe"'
+PS1_H=$(win_build_steam_firstlogon_ps1 POWOS-GAMES H POWOSUNAT 0)
+check "ps1: custom letter flows through both letter-assign and vdf" \
+    'echo "$PS1_H" | grep -qF "H:\\\\SteamLibrary"'
+
+# autounattend games block (default off; on when games_setup=1).
+xml_nogames=$(win_build_autounattend powos powos en-US en-US "" "Windows 11 Pro" 0)
+check "autounattend: NO games block by default (backward compatible)" \
+    '! echo "$xml_nogames" | grep -q "powos-first-logon"'
+check "autounattend: still exactly 9 FirstLogonCommands by default" \
+    '[[ $(echo "$xml_nogames" | grep -c "<SynchronousCommand") -eq 9 ]]'
+xml_games=$(win_build_autounattend powos powos en-US en-US "" "Windows 11 Pro" 0 '\PowOS-Windows\windows.vhdx' 1 POWOSUNAT)
+check "autounattend: games block invokes the first-logon ps1 by unattend label" \
+    'echo "$xml_games" | grep -q "powos-first-logon.ps1" && echo "$xml_games" | grep -q "FileSystemLabel .POWOSUNAT."'
+check "autounattend: games block adds exactly one command (10 total)" \
+    '[[ $(echo "$xml_games" | grep -c "<SynchronousCommand") -eq 10 ]]'
+check "autounattend: PowerShell call operator is XML-escaped (&amp;)" \
+    'echo "$xml_games" | grep -q "&amp;"'
+check "autounattend with games: <settings> still balanced" \
+    '[[ $(echo "$xml_games" | grep -c "<settings pass=") -eq $(echo "$xml_games" | grep -c "</settings>") ]]'
+check "autounattend with games: no leftover placeholders" \
+    '! echo "$xml_games" | grep -q "__POWOS_"'
+
+# ══════════════════════════════════════════════════════════════════
+echo "== fetch-iso (official MS ISO, verify, optional slim) =="
+# ══════════════════════════════════════════════════════════════════
+FI_D=$(mktemp -d)    # fake POWOS-DATA/windows/iso parent
+FI_DEST="$FI_D/Win11.iso"
+
+setup_fetch_mocks() {
+    source "$LIB"
+    win_data_mount()   { echo "$FI_D"; }
+    win_iso_dir()      { echo "$FI_D/windows/iso"; }
+    win_require_root() { return 0; }
+    win_fetch_official_iso() { rec "fetch $*"; printf 'x' > "${1}"; return 0; }
+    win_file_size_bytes()    { echo 4700000000; }   # ~4.7GB — passes the >3GB gate
+    win_iso_fstype()         { echo udf; }
+    win_sha256()             { echo "abc123deadbeef"; }
+    # slim seams recorded so we can assert slim never runs on a bad download.
+    xorriso()        { rec "xorriso $*"; return 0; }
+    wimlib-imagex()  { rec "wimlib $*"; return 0; }
+    mkdir()          { rec "mkdir $*"; command mkdir "$@" 2>/dev/null; return 0; }
+}
+
+# Dry-run: default dest lands under POWOS-DATA/windows/iso; ZERO mutations.
+setup_fetch_mocks
+reset_globals; WIN_DRY_RUN=1
+rec_reset
+out=$(win_fetch_iso 2>&1); rc=$?
+check "dry-run fetch succeeds (plan only)" '[[ $rc -eq 0 ]]'
+check "default dest is under POWOS-DATA/windows/iso" \
+    'echo "$out" | grep -q "windows/iso/Win11.iso"'
+check "dry-run fetch made ZERO mutating calls" 'rec_empty'
+
+# Missing --hash: prints the computed hash + a verify-it note, still succeeds.
+setup_fetch_mocks
+reset_globals; WIN_ASSUME_YES=1
+rec_reset
+out=$(win_fetch_iso 2>&1); rc=$?
+check "fetch without --hash succeeds" '[[ $rc -eq 0 ]]'
+check "…prints the computed SHA-256" 'echo "$out" | grep -q "abc123deadbeef"'
+check "…and a prominent verify-against-Microsoft note" \
+    'echo "$out" | grep -qi "VERIFY" && echo "$out" | grep -qi "Microsoft"'
+check "fetch actually invoked the (mock) downloader" 'rec_has "^fetch "'
+
+# --hash MATCH: verifies and proceeds.
+setup_fetch_mocks
+reset_globals; WIN_ASSUME_YES=1; WIN_HASH="ABC123DEADBEEF"    # case-insensitive match
+out=$(win_fetch_iso 2>&1); rc=$?
+check "matching --hash verifies and succeeds" \
+    '[[ $rc -eq 0 ]] && echo "$out" | grep -qi "verified"'
+
+# --hash MISMATCH: aborts, and MUST NOT proceed to slim.
+setup_fetch_mocks
+reset_globals; WIN_ASSUME_YES=1; WIN_HASH="0000000000000000"; WIN_SLIM=1
+rec_reset
+out=$(win_fetch_iso 2>&1); rc=$?
+check "hash mismatch aborts fetch" '[[ $rc -ne 0 ]]'
+check "hash mismatch reports MISMATCH" 'echo "$out" | grep -qi "MISMATCH"'
+check "hash mismatch does NOT proceed to slim (no xorriso/wimlib)" \
+    '! rec_has "^xorriso " && ! rec_has "^wimlib "'
+
+# Too-small download → rejected as partial.
+setup_fetch_mocks
+win_file_size_bytes() { echo 1000000; }   # 1MB
+reset_globals; WIN_ASSUME_YES=1
+out=$(win_fetch_iso 2>&1); rc=$?
+check "implausibly small download rejected" \
+    '[[ $rc -ne 0 ]] && echo "$out" | grep -qi "small"'
+
+# --slim chains after a verified download (fetch → slim seams run).
+setup_fetch_mocks
+reset_globals; WIN_ASSUME_YES=1; WIN_SLIM=1; WIN_HASH="abc123deadbeef"
+rec_reset
+out=$(win_fetch_iso 2>&1); rc=$?
+check "verified fetch --slim chains into the slim pipeline" \
+    '[[ $rc -eq 0 ]] && rec_has "^xorriso " && rec_has "^wimlib "'
+check "fetch --slim reports the slim output path" \
+    'echo "$out" | grep -q "Win11-slim.iso"'
+check "fetch --slim suggests --fixed-vhd (small install)" \
+    'echo "$out" | grep -q -- "--fixed-vhd"'
+
+unset -f win_fetch_official_iso win_file_size_bytes win_iso_fstype win_sha256 xorriso wimlib-imagex mkdir win_data_mount win_iso_dir
+source "$LIB"
+
+# ══════════════════════════════════════════════════════════════════
+echo "== slim (wimlib pipeline, order, dry-run, anti-cheat warning) =="
+# ══════════════════════════════════════════════════════════════════
+SL_SRC=$(mktemp); SL_OUT=$(mktemp -u)
+
+setup_slim_mocks() {
+    source "$LIB"
+    win_require_root() { return 0; }
+    xorriso()       { rec "xorriso $*"; return 0; }
+    wimlib-imagex() { rec "wimlib $*"; return 0; }
+    hivexregedit()  { rec "hivexregedit $*"; return 0; }
+    rm()            { rec "rm $*"; return 0; }
+    # command -v must find the tools:
+    command() { if [[ "$1" == "-v" ]]; then return 0; fi; builtin command "$@"; }
+}
+
+# Dry-run: full plan + the anti-cheat WARNING, ZERO mutating calls.
+setup_slim_mocks
+reset_globals; WIN_DRY_RUN=1
+rec_reset
+out=$(win_slim_iso "$SL_SRC" "$SL_OUT" 2>&1); rc=$?
+check "dry-run slim succeeds (plan only)" '[[ $rc -eq 0 ]]'
+check "slim prints the ANTI-CHEAT warning (EAC/BattlEye)" \
+    'echo "$out" | grep -qi "ANTI-CHEAT" && echo "$out" | grep -qi "BattlE"'
+check "slim notes it KEEPS servicing/.NET/VC/security stack" \
+    'echo "$out" | grep -qi "servicing" && echo "$out" | grep -qi "runtime"'
+check "slim is marked EXPERIMENTAL / TODO(hw)" \
+    'echo "$out" | grep -qi "EXPERIMENTAL"'
+check "dry-run slim made ZERO mutating calls" 'rec_empty'
+
+# Real (mocked) run: pipeline in the right order.
+setup_slim_mocks
+reset_globals; WIN_ASSUME_YES=1
+rec_reset
+out=$(win_slim_iso "$SL_SRC" "$SL_OUT" 2>&1); rc=$?
+check "mocked slim run succeeds" '[[ $rc -eq 0 ]]'
+check "slim extracts the ISO with xorriso (osirrox)" 'rec_has "xorriso.*osirrox"'
+check "slim mounts install.wim with wimlib (mountrw)" 'rec_has "wimlib mountrw"'
+check "slim removes provisioned appx (Clipchamp)" 'rec_has "rm.*Clipchamp"'
+check "slim removes Edge + OneDrive setup" 'rec_has "rm.*Edge" && rec_has "rm.*OneDriveSetup"'
+check "slim injects the bypass registry (hivexregedit)" 'rec_has "^hivexregedit "'
+check "slim commits + unmounts the wim" 'rec_has "wimlib unmount .*--commit"'
+check "slim rebuilds (optimize) the wim" 'rec_has "wimlib optimize"'
+check "slim repacks a bootable UEFI ISO with xorriso (mkisofs)" 'rec_has "xorriso.*mkisofs"'
+# Order: extract BEFORE mount; unmount BEFORE optimize; optimize BEFORE repack.
+check "order: xorriso-extract precedes wimlib-mount" \
+    '[[ "$(rec_line "xorriso.*osirrox")" -lt "$(rec_line "wimlib mountrw")" ]]'
+check "order: wimlib-unmount precedes wimlib-optimize" \
+    '[[ "$(rec_line "wimlib unmount")" -lt "$(rec_line "wimlib optimize")" ]]'
+check "order: wimlib-optimize precedes xorriso-repack" \
+    '[[ "$(rec_line "wimlib optimize")" -lt "$(rec_line "xorriso.*mkisofs")" ]]'
+
+# slim command wrapper: default out path, missing arg.
+setup_slim_mocks
+reset_globals; WIN_DRY_RUN=1
+out=$(win_slim_cmd "$SL_SRC" 2>&1); rc=$?
+check "slim wrapper: default out is <src>-slim.iso" \
+    '[[ $rc -eq 0 ]] && echo "$out" | grep -q "slim.iso"'
+out=$(win_slim_cmd "" 2>&1); rc=$?
+check "slim wrapper without a source refuses with usage" \
+    '[[ $rc -ne 0 ]] && echo "$out" | grep -q "Usage"'
+
+unset -f xorriso wimlib-imagex hivexregedit rm command win_require_root
+source "$LIB"
+
+# ══════════════════════════════════════════════════════════════════
+echo "== install: --fetch chains, Steam preinstall, --fixed-vhd hint =="
+# ══════════════════════════════════════════════════════════════════
+IS_G=$(mktemp -d); mkdir -p "$IS_G/PowOS-Windows"; : > "$IS_G/PowOS-Windows/windows.raw"
+IS_E=$(mktemp -d); : > "$IS_E/dummy"
+IS_D=$(mktemp -d)
+IS_F=$(mktemp -d); : > "$IS_F/CODE.fd"; : > "$IS_F/VARS.fd"
+IS_RUN=$(mktemp -d)
+IS_ISO="$IS_F/win11.iso"; : > "$IS_ISO"
+
+setup_install2_mocks() {
+    source "$LIB"
+    WIN_RUNDIR="$IS_RUN"
+    win_games_mount()     { echo "$IS_G"; }
+    win_powos_esp()       { echo "/dev/sdz1"; }
+    win_esp_mountpoint()  { echo "$IS_E"; }
+    win_backup_dir()      { echo "$IS_D"; }
+    win_require_root()    { return 0; }
+    win_is_block()        { return 0; }
+    win_image_in_use()    { return 1; }
+    win_find_first_existing() { echo "$IS_F/CODE.fd"; }
+    win_file_size_bytes() { echo 5000000000; }   # normal (non-slim) ISO ~5GB
+    tar()   { rec "tar $*"; printf 'x'; }
+    zstd()  { rec "zstd $*"; cat >/dev/null 2>&1 || true; printf 'x' > "${!#}"; }
+    mount() { rec "mount $*"; return 0; }
+    umount(){ rec "umount $*"; return 0; }
+    mkfs.vfat() { rec "mkfsvfat $*"; }
+    truncate()  { rec "truncate $*"; }
+    qemu-system-x86_64() { rec "qemu $*"; return 0; }
+    win_fetch_steam_setup() { rec "steamsetup $*"; printf 'x' > "${1}"; return 0; }
+}
+
+# --fetch chains fetch-iso → install (WIN_FETCHED_ISO becomes the install ISO).
+setup_install2_mocks
+win_fetch_iso() { rec "fetch_iso"; WIN_FETCHED_ISO="$IS_ISO"; return 0; }
+reset_globals; WIN_ASSUME_YES=1; WIN_FETCH=1; WIN_ISO=""
+rec_reset
+out=$(win_install 2>&1); rc=$?
+check "install --fetch runs fetch-iso first" 'rec_has "^fetch_iso"'
+check "install --fetch then installs the fetched ISO" \
+    '[[ $rc -eq 0 ]] && rec_has "file=$IS_ISO,media=cdrom" && echo "$out" | grep -q "fetched ISO"'
+
+# Default install PREINSTALLS Steam: labeled unattend volume + ps1 + SteamSetup.
+setup_install2_mocks
+reset_globals; WIN_ASSUME_YES=1; WIN_ISO="$IS_ISO"
+rec_reset
+out=$(win_install 2>&1); rc=$?
+check "default install: unattend volume gets the POWOSUNAT label" \
+    'rec_has "mkfsvfat.*-n POWOSUNAT"'
+check "default install: preloads SteamSetup.exe onto the unattend volume" \
+    'rec_has "^steamsetup .*SteamSetup.exe"'
+check "default install: plan announces the shared-library seeding" \
+    'echo "$out" | grep -q "shared library" && echo "$out" | grep -q "POWOS-GAMES"'
+check "default install: writes the first-logon ps1 onto the unattend volume" \
+    'echo "$out" | grep -q "powos-first-logon.ps1"'
+
+# --no-games: no Steam preload, no ps1.
+setup_install2_mocks
+reset_globals; WIN_ASSUME_YES=1; WIN_ISO="$IS_ISO"; WIN_NO_GAMES=1
+rec_reset
+out=$(win_install 2>&1); rc=$?
+check "--no-games skips the Steam preload" '! rec_has "^steamsetup "'
+
+# --fixed-vhd hint fires for a SMALL (slim) install, not for a normal one.
+setup_install2_mocks
+reset_globals; WIN_DRY_RUN=1; WIN_ISO="$IS_ISO"; WIN_SLIM=1
+out=$(win_install 2>&1)
+check "small (--slim) install suggests --fixed-vhd" \
+    'echo "$out" | grep -q -- "--fixed-vhd" && echo "$out" | grep -qi "small"'
+setup_install2_mocks
+reset_globals; WIN_DRY_RUN=1; WIN_ISO="$IS_ISO"; WIN_SLIM=1; WIN_FIXED_VHD=1
+out=$(win_install 2>&1)
+check "…but NOT when --fixed-vhd is already set" \
+    '! echo "$out" | grep -qi "looks like a SMALL"'
+
+unset -f tar zstd mount umount mkfs.vfat truncate qemu-system-x86_64 win_fetch_steam_setup win_fetch_iso win_file_size_bytes
+source "$LIB"
+
+# ══════════════════════════════════════════════════════════════════
 echo "== Dispatch =="
 # ══════════════════════════════════════════════════════════════════
 out=$(cmd_windows help 2>&1); rc=$?
 check "cmd_windows help works" '[[ $rc -eq 0 ]] && echo "$out" | grep -q "powos windows"'
-check "help documents the file design, not partitions" \
-    'echo "$out" | grep -q "virtual-disk FILE" && ! echo "$out" | grep -q "WIN-ESP"'
+check "help documents the default vhd file design" \
+    'echo "$out" | grep -q "virtual-disk FILE"'
+check "help documents both backends (vhd default + partition)" \
+    'echo "$out" | grep -q -- "--backend" && echo "$out" | grep -q "partition"'
+check "help documents fetch-iso" 'echo "$out" | grep -q "fetch-iso"'
+check "help documents slim" 'echo "$out" | grep -q -- "slim <src.iso>"'
+check "help documents --fetch / --hash / --slim / --no-games" \
+    'echo "$out" | grep -q -- "--fetch" && echo "$out" | grep -q -- "--hash" && echo "$out" | grep -q -- "--no-games"'
 out=$(cmd_windows bogus-subcommand 2>&1); rc=$?
 check "unknown subcommand fails with usage" '[[ $rc -ne 0 ]] && echo "$out" | grep -q "Unknown windows command"'
+
+# fetch-iso / slim dispatch (backend-agnostic — routed before the backend split).
+out=$(cmd_windows fetch-iso --dry-run --dest /tmp/x.iso 2>&1); rc=$?
+check "dispatch: fetch-iso routes to win_fetch_iso" \
+    '[[ $rc -eq 0 ]] && echo "$out" | grep -qi "official Windows 11 ISO"'
+out=$(cmd_windows slim 2>&1); rc=$?
+check "dispatch: slim without a source shows usage" \
+    '[[ $rc -ne 0 ]] && echo "$out" | grep -q "Usage"'
+out=$(cmd_windows --backend partition fetch-iso --dry-run --dest /tmp/x.iso 2>&1); rc=$?
+check "dispatch: fetch-iso works under --backend partition too" \
+    '[[ $rc -eq 0 ]] && echo "$out" | grep -qi "official Windows 11 ISO"'
+
+# ══════════════════════════════════════════════════════════════════
+echo "== Config file (WINDOWS_* → WIN_*, precedence default<file<flag) =="
+# ══════════════════════════════════════════════════════════════════
+CONF=$(mktemp)
+cat > "$CONF" <<'EOF'
+WINDOWS_EDITION="Windows 11 Home"
+WINDOWS_SIZE_GB=128
+WINDOWS_USERNAME="alice"
+WINDOWS_WITH_STEAM=1
+WINDOWS_ISO="/isos/from-config.iso"
+EOF
+
+# Direct loader: documented keys land on the WIN_* knobs.
+reset_globals; WIN_CONFIG="$CONF"; WIN_CONFIG_LOADED=""
+win_load_config
+check "config sets edition"         '[[ "$WIN_EDITION" == "Windows 11 Home" ]]'
+check "config sets size"            '[[ "$WIN_SIZE_GB" == "128" ]]'
+check "config sets username"        '[[ "$WIN_USERNAME" == "alice" ]]'
+check "config sets with-steam"      '[[ "$WIN_WITH_STEAM" == "1" ]]'
+check "config sets iso"             '[[ "$WIN_ISO" == "/isos/from-config.iso" ]]'
+check "config records loaded path"  '[[ "$WIN_CONFIG_LOADED" == "$CONF" ]]'
+# A key absent from the file keeps the built-in default.
+check "absent key keeps default"    '[[ "$WIN_PASSWORD" == "powos" ]]'
+
+# Missing/unreadable config is a silent no-op that leaves defaults intact.
+reset_globals; WIN_CONFIG="/no/such/windows.conf"; WIN_CONFIG_LOADED=""
+win_load_config
+check "missing config → no-op"       '[[ "$WIN_EDITION" == "Windows 11 Pro" && -z "$WIN_CONFIG_LOADED" ]]'
+
+# End-to-end via cmd_windows: --config seeds the knobs, a flag still wins.
+win_status() { return 0; }   # no-op stand-in so dispatch does no disk work
+cmd_windows --config "$CONF" --edition "Windows 11 Enterprise" status
+check "flag overrides file (edition)"  '[[ "$WIN_EDITION" == "Windows 11 Enterprise" ]]'
+check "file overrides default (size)"  '[[ "$WIN_SIZE_GB" == "128" ]]'
+check "file value applies w/o flag"    '[[ "$WIN_USERNAME" == "alice" ]]'
+rm -f "$CONF"
+
+# ══════════════════════════════════════════════════════════════════
+echo "== Backend toggle (WINDOWS_BACKEND vhd|partition) =="
+# ══════════════════════════════════════════════════════════════════
+win_status() { return 0; }   # vhd no-op stand-in (partition uses win_part_*)
+
+# Default backend is vhd.
+cmd_windows status
+check "default backend is vhd" '[[ "$WIN_BACKEND" == "vhd" ]]'
+
+# Config selects the partition backend. Its real behavior is covered in the
+# "== Partition backend ==" section; here we only verify ROUTING + precedence.
+# NOTE: run cmd_windows in the CURRENT shell when asserting WIN_BACKEND — a
+# $(...) capture mutates it only in a subshell.
+CONF2=$(mktemp); echo 'WINDOWS_BACKEND="partition"' > "$CONF2"
+cmd_windows --config "$CONF2" status >/dev/null 2>&1
+check "config selects partition backend"          '[[ "$WIN_BACKEND" == "partition" ]]'
+
+# --backend flag overrides the config (partition → vhd here, which runs).
+cmd_windows --config "$CONF2" --backend vhd status >/dev/null 2>&1; rc=$?
+check "flag overrides config backend (→vhd runs)"  '[[ "$WIN_BACKEND" == "vhd" && $rc -eq 0 ]]'
+
+# --backend can also select partition directly.
+cmd_windows --backend partition status >/dev/null 2>&1
+check "flag selects partition backend"             '[[ "$WIN_BACKEND" == "partition" ]]'
+
+# An unknown backend is rejected before any dispatch.
+out=$(cmd_windows --backend bogus status 2>&1); rc=$?
+check "invalid backend rejected"                   '[[ $rc -ne 0 ]] && echo "$out" | grep -q "Unknown WINDOWS_BACKEND"'
+rm -f "$CONF2"
 
 # ── Summary ───────────────────────────────────────────────────────
 rm -f "$REC"
