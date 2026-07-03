@@ -213,10 +213,11 @@ test_boot_state() {
 
     local state
     state=$(vm_ssh "cat /var/lib/powos/state/boot-state 2>/dev/null || echo missing")
-    if [[ "$state" == "ready" ]]; then
-        e2e_pass "Boot state = 'ready' (powos-boot ran to completion)"
+    # powos-init's final write_state is "initialized" (nothing writes "ready").
+    if [[ "$state" == "initialized" || "$state" == "ready" ]]; then
+        e2e_pass "Boot state = '$state' (powos-init ran to completion)"
     else
-        e2e_fail "Boot state = '$state' (expected 'ready')"
+        e2e_fail "Boot state = '$state' (expected 'initialized')"
     fi
 }
 
