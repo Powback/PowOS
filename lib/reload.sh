@@ -265,8 +265,14 @@ cmd_reload() {
 
     if (( do_build )); then
         plog "Baking $src into a local image + switch…"
-        reload_usr_ro && reload_drop_sysext   # image will carry it; drop overlay so it can't shadow the new base
-        POWOS_BUILD_CONTEXT="$src" source "${POWOS_LIB:-/usr/lib/powos}/build-image.sh"
+        # Source from the CHECKOUT (not the overlay) so this survives the drop.
+        local bimg="$src/lib/build-image.sh"
+        [[ -f "$bimg" ]] || bimg="${POWOS_LIB:-/usr/lib/powos}/build-image.sh"
+        [[ -f "$bimg" ]] || { perr "build-image.sh not found (looked in $src/lib and \$POWOS_LIB)."; return 1; }
+        POWOS_BUILD_CONTEXT="$src" source "$bimg"
+        # Now that the build functions are in memory, drop the overlay so it can't
+        # shadow the freshly-built base after reboot.
+        reload_usr_ro && reload_drop_sysext
         POWOS_BUILD_CONTEXT="$src" cmd_build_image --switch
         local rc=$?
         (( rc == 0 )) && reload_mark_applied "$src"
