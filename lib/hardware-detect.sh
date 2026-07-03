@@ -136,8 +136,8 @@ detect_power_source() {
         fi
     done
 
-    # Check for battery
-    if [[ -d /sys/class/power_supply/BAT* ]]; then
+    # Check for battery (globs don't expand inside [[ -d ]] — use compgen)
+    if compgen -G "/sys/class/power_supply/BAT*" > /dev/null; then
         echo "battery"
         return
     fi

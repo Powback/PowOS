@@ -132,8 +132,9 @@ build_overlay() {
     # Create extension-release file
     create_extension_release "$name" "$output_dir"
 
-    # Verify build produced something
-    if [[ ! -f "${output_dir}/usr/bin"/* ]] && [[ ! -f "${output_dir}/usr/lib"/* ]]; then
+    # Verify build produced something (globs don't expand inside [[ -f ]])
+    if ! compgen -G "${output_dir}/usr/bin/*" >/dev/null && \
+       ! compgen -G "${output_dir}/usr/lib/*" >/dev/null; then
         log_warn "Build completed but no files found in usr/bin or usr/lib"
     fi
 
