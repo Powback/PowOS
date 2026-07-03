@@ -43,6 +43,12 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   to the bundled src in place (once), falling back to a one-shot clone when src
   isn't writable. Private repo needs git creds on the machine. ✅ (creds-dependent)
 - `powos update {os|packages|overlays|apply}` — base OS / packages / overlays.
+- `powos upgrade` — smart base update: `bootc upgrade` then the LIGHTEST restart —
+  soft-reboot if the staged kernel is unchanged (~seconds, warm), full reboot if it
+  changed, nothing if already current. `--check|--now|--soft|--reboot`. Soft-reboot
+  into a staged bootc deployment is ⚠️ frontier (opt-in).
+- `powos build image [variant] [--switch|--push]` — build the OS image LOCALLY (no
+  GitHub), optionally rebase this machine onto it. Self-hosted counterpart to CI. ✅
 
 ## Other subsystems
 - Mobile mode `powos mobile` — copy OS to RAM so USB can unplug. 🚧 live remount not done; reboot needed.

@@ -53,8 +53,11 @@ Commands:
   backup setup <url>  Configure cloud backup
 
   update              Check for available updates
-  update os           Update Bazzite base OS
-  update self         Apply PowOS source changes to running system
+  upgrade             Pull+stage a base update, apply the lightest restart
+                      (soft-reboot if the kernel's unchanged, else full reboot)
+  upgrade --check     Just check if a base update is available
+  update os           Update Bazzite base OS (bootc upgrade; 'upgrade' is smarter)
+  update self         Apply PowOS source changes to running system (hot, no reboot)
   update self --from  Apply from custom source path
   update self --pull  Pull from git remote first
   update packages     Update installed packages
@@ -2596,6 +2599,11 @@ case "${1:-}" in
     update)
         shift
         cmd_update "$@"
+        ;;
+    upgrade)
+        shift
+        source "$POWOS_LIB/upgrade.sh"
+        cmd_upgrade "$@"
         ;;
     health)
         shift
