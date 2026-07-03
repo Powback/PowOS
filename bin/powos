@@ -1555,30 +1555,53 @@ cmd_install() {
             echo "  Enter with: powos containers enter $target"
         fi
     else
-        # Install to host (use pinstall logic)
+        # Install to host.
         echo -e "${CYAN}Installing to host:${NC} ${packages[*]}"
 
-        # Detect package manager
-        if command -v dnf &>/dev/null; then
-            sudo dnf install -y "${packages[@]}"
+        if [[ -f /run/ostree-booted ]] && command -v rpm-ostree &>/dev/null; then
+            # Atomic/composefs host (Bazzite/bootc): /usr is a read-only image
+            # and `dnf` is a guard stub that just errors. Layer via rpm-ostree —
+            # packages persist across base updates and roll back cleanly. Try to
+            # apply them live so no reboot is needed; otherwise they activate on
+            # the next boot.
+            echo -e "  ${YELLOW}atomic host — layering via rpm-ostree${NC}"
+            if ! sudo rpm-ostree install --idempotent --allow-inactive "${packages[@]}"; then
+                echo -e "${RED}✗ rpm-ostree install failed${NC}"
+                return 1
+            fi
+            echo ""
+            echo -e "${GREEN}✓ Layered: ${packages[*]}${NC}"
+            if sudo rpm-ostree apply-live --allow-replacement 2>/dev/null; then
+                echo -e "  ${GREEN}Applied live — available now, no reboot.${NC}"
+            else
+                echo -e "  Staged; activate with:  ${CYAN}systemctl reboot${NC}"
+            fi
+            return 0
+        fi
+
+        # Non-atomic hosts (traditional distros). Use the real dnf5 binary, not
+        # the atomic `dnf` guard wrapper.
+        if command -v dnf5 &>/dev/null; then
+            sudo dnf5 install -y "${packages[@]}"
         elif command -v apt &>/dev/null; then
             sudo apt update && sudo apt install -y "${packages[@]}"
         elif command -v pacman &>/dev/null; then
             sudo pacman -Syu --noconfirm "${packages[@]}"
         else
-            echo "No supported package manager found"
+            echo "No supported host package manager found"
             return 1
         fi
 
-        # Sync to custom layer if ramboot active
-        if is_ramboot && [[ -x "$LAYER_SYNC" ]]; then
+        # Layer-sync only applies on the writable-overlay (USB) variant, where
+        # /usr is a RAM overlay. On composefs bootc hosts rpm-ostree owns
+        # persistence (handled above), so this is skipped there.
+        if is_ramboot && [[ -w /usr ]] && [[ -x "$LAYER_SYNC" ]]; then
             echo "Syncing to custom layer..."
             python3 "$LAYER_SYNC" --sync-now 2>/dev/null || true
         fi
 
         echo ""
         echo -e "${GREEN}✓ Installed to host${NC}"
-        echo "  Changes will persist in custom layer"
     fi
 }
 

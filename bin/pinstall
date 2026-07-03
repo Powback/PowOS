@@ -51,7 +51,12 @@ log_error() {
 
 # Detect which package manager is available
 detect_package_manager() {
-    if command -v pacman &>/dev/null; then
+    # Atomic/composefs host (Bazzite/bootc): /usr is read-only and `dnf` is a
+    # guard stub — layer via rpm-ostree so packages persist. rpm-ostree is
+    # absent inside distrobox containers, so this correctly only fires on host.
+    if [[ -f /run/ostree-booted ]] && command -v rpm-ostree &>/dev/null; then
+        echo "rpm-ostree"
+    elif command -v pacman &>/dev/null; then
         echo "pacman"
     elif command -v dnf &>/dev/null; then
         echo "dnf"
@@ -75,6 +80,15 @@ install_packages() {
     log_info "Installing with ${pm}: ${packages[*]}"
 
     case "$pm" in
+        rpm-ostree)
+            # Layered package on an atomic host; try live-apply, else reboot.
+            sudo rpm-ostree install --idempotent --allow-inactive "${packages[@]}"
+            if sudo rpm-ostree apply-live --allow-replacement 2>/dev/null; then
+                log_success "Applied live — available now, no reboot."
+            else
+                log_warn "Staged; activate with: systemctl reboot"
+            fi
+            ;;
         pacman)
             sudo pacman -S --noconfirm --needed "${packages[@]}"
             ;;
