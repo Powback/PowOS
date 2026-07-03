@@ -86,6 +86,7 @@ COPY lib/boot-manager.sh /usr/lib/powos/
 COPY lib/cuda.sh /usr/lib/powos/
 COPY lib/driver.sh /usr/lib/powos/
 COPY lib/registry.sh /usr/lib/powos/
+COPY lib/build-image.sh /usr/lib/powos/
 COPY lib/overview.sh /usr/lib/powos/
 COPY lib/build-helpers.sh /var/lib/powos/lib/
 COPY bazzite/system_files/ /tmp/bazzite/system_files/

@@ -23,7 +23,7 @@ on:
         description: Which variant to build
         type: choice
         default: all
-        options: [ all, nvidia-open, nvidia-open-testing, nvidia, main ]
+        options: [ all, nvidia-open, nvidia-open-testing ]
   schedule:
     - cron: '0 6 * * 1'   # weekly rebuild to pick up new bazzite :stable
 
@@ -39,7 +39,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [ nvidia-open, nvidia-open-testing, nvidia, main ]
+        # Only the variants that support the RTX 50-series (Blackwell). The
+        # closed 'nvidia' and AMD 'main' variants are built on demand via
+        # workflow_dispatch, not on every push.
+        variant: [ nvidia-open, nvidia-open-testing ]
     steps:
       - name: Gate (manual runs can target one variant)
         id: gate
@@ -80,19 +83,24 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: ./build/vendor-bazzite.sh
 
+      - name: Log in to GHCR
+        if: steps.gate.outputs.run == 'true'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+
       - name: Build ${{ matrix.variant }}
         if: steps.gate.outputs.run == 'true'
         run: |
-          podman build \
+          # Registry layer cache: pull unchanged layers from the last build so a
+          # script-only change doesn't redo the whole ~15GB base + dnf/dracut.
+          # (Login above is required so --cache-from/--cache-to can pull/push.)
+          podman build --layers \
+            --cache-from ${{ env.IMAGE }}:cache-${{ matrix.variant }} \
+            --cache-to   ${{ env.IMAGE }}:cache-${{ matrix.variant }} \
             --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
             -f Containerfile \
             -t ${{ env.IMAGE }}:${{ matrix.variant }} \
             -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
             .
-
-      - name: Log in to GHCR
-        if: steps.gate.outputs.run == 'true'
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Push
         if: steps.gate.outputs.run == 'true'

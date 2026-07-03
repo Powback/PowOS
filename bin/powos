@@ -118,6 +118,8 @@ Commands:
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build bootable PowOS ISO
   build test          Build container image only (for testing)
+  build image [variant] [--switch]  Build the OS image LOCALLY (no GitHub);
+                      --switch rebases this machine onto it + offers reboot
 
   dev                 List all dev projects
   dev new <name>      Create new project from scratch
@@ -1651,6 +1653,12 @@ cmd_build() {
         test)
             shift
             cmd_build_iso --test "$@"
+            return
+            ;;
+        image)
+            shift
+            source "$POWOS_LIB/build-image.sh"
+            cmd_build_image "$@"
             return
             ;;
     esac
