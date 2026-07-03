@@ -54,6 +54,15 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   GitHub), optionally rebase this machine onto it. Self-hosted counterpart to CI. ✅
 
 ## Other subsystems
+- Settings (`powos config [name] [on|off]` / `--json`): one front door for system
+  toggles — currently `ssh` (applied immediately via systemd) and `cachefs`
+  (file-backed in /etc/powos/config, reboot to apply). Registry-based; adding a
+  setting is one entry + get/set pair in lib/config.sh. Intended substrate for a
+  future installer/GUI. ✅
+- Uninstall (`powos remove [--dry] <thing...>`): mirror of the install router —
+  probes flatpak / powos-sandbox (rpm+pip) / brew / host rpm-ostree layer and
+  removes from every backend the thing is found in. Honest about host-layer
+  config residue in /etc,/var. ✅
 - Mobile mode `powos mobile` — copy OS to RAM so USB can unplug. 🚧 live remount not done; reboot needed.
 - Cloud backup `powos backup {status|push|pull|setup}` — git-based USB state backup. ✅ CLI exists.
 - Sync conflicts `powos sync {status|resolve|--keep-ram|--keep-usb|--merge}` — detection ✅, `--merge` basic ⚠️.

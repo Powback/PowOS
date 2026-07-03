@@ -2652,6 +2652,20 @@ case "${1:-}" in
         source "$POWOS_LIB/install-router.sh"
         cmd_install_route "$@"
         ;;
+    remove|uninstall)
+        shift
+        # Mirror of the install router: probes every backend (flatpak, sandbox,
+        # brew, host layer), removes from each place the thing is found.
+        source "$POWOS_LIB/uninstall.sh"
+        cmd_remove "$@"
+        ;;
+    config)
+        shift
+        # One front door for system toggles (ssh, cachefs, ...): show state,
+        # flip on/off, apply immediately. --json for GUIs.
+        source "$POWOS_LIB/config.sh"
+        cmd_config "$@"
+        ;;
     install-system|install-disk)
         shift
         source "$POWOS_LIB/install-system.sh"

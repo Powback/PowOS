@@ -93,6 +93,8 @@ COPY lib/reload.sh /usr/lib/powos/
 COPY lib/overview.sh /usr/lib/powos/
 COPY lib/services.sh /usr/lib/powos/
 COPY lib/install-router.sh /usr/lib/powos/
+COPY lib/uninstall.sh /usr/lib/powos/
+COPY lib/config.sh /usr/lib/powos/
 COPY lib/build-helpers.sh /var/lib/powos/lib/
 COPY bazzite/system_files/ /tmp/bazzite/system_files/
 COPY overlays/ /usr/lib/powos/overlays/
