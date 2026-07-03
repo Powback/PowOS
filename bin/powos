@@ -756,12 +756,33 @@ cmd_update() {
                         shift 2
                         ;;
                     --pull)
-                        # Pull latest from remote first
+                        # Pull latest from remote first.
                         if [[ -d "$POWOS_SRC/.git" ]]; then
                             echo "Pulling latest from remote..."
                             cd "$POWOS_SRC"
                             git pull --rebase || git pull
                             echo ""
+                        else
+                            # The bundled source (/var/lib/powos/src) ships without
+                            # a .git dir, so there's nothing to pull. Clone upstream
+                            # fresh and deploy from that instead.
+                            local upstream="${POWOS_UPSTREAM:-https://github.com/Powback/PowOS.git}"
+                            echo "No .git in $POWOS_SRC — cloning latest from:"
+                            echo "  $upstream"
+                            local pull_tmp
+                            pull_tmp=$(mktemp -d)
+                            if git clone --depth 1 "$upstream" "$pull_tmp/PowOS"; then
+                                POWOS_SRC="$pull_tmp/PowOS"
+                                echo -e "${GREEN}Cloned latest source${NC} → deploying from $POWOS_SRC"
+                                echo ""
+                            else
+                                echo -e "${RED}Clone failed.${NC} A private repo needs git credentials on this machine."
+                                echo "  Set up auth (e.g. 'gh auth login' or a credential helper),"
+                                echo "  set POWOS_UPSTREAM in /etc/powos/config, or deploy locally with:"
+                                echo "    powos update self --from /path/to/PowOS"
+                                rm -rf "$pull_tmp"
+                                return 1
+                            fi
                         fi
                         shift
                         ;;

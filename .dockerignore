@@ -9,6 +9,7 @@ containers/build_files/
 .git/
 
 # Build artifacts
+build/output/
 *.raw
 *.iso
 *.img
