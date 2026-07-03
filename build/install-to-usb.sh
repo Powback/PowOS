@@ -17,6 +17,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POWOS_ROOT="$(dirname "$SCRIPT_DIR")"
 RAW_PATH="${POWOS_ROOT}/build/output/powos.raw"
 
+# Tail-of-disk reservations (GB). Set via --windows-gb / --games-gb.
+# POWOS-DATA takes everything EXCEPT these; see docs/WINDOWS.md.
+#   WINDOWS_GB: left UNALLOCATED — `powos windows create` later carves
+#               WIN-ESP + POWOS-WIN out of it for bare-metal Windows.
+#   GAMES_GB:   POWOS-GAMES NTFS partition, deliberately visible to Windows
+#               (shared game assets between PowOS and the Windows install).
+WINDOWS_GB=0
+GAMES_GB=0
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -219,13 +228,37 @@ add_data_partition() {
         exit 1
     fi
 
-    log "Adding POWOS-DATA partition starting at ${last_end}MiB..."
+    # POWOS-DATA end: 100% unless a tail is reserved for the games partition
+    # and/or the future Windows install (docs/WINDOWS.md). Reserved space is
+    # measured from the END of the disk so DATA gets everything else.
+    local data_end="100%"
+    local reserve_mib=$(( (WINDOWS_GB + GAMES_GB) * 1024 ))
+    if (( reserve_mib > 0 )); then
+        local disk_mib
+        disk_mib=$(parted "$device" unit MiB print 2>/dev/null \
+            | awk -F': ' '/^Disk \//{gsub("MiB","",$2); print int($2); exit}')
+        if ! [[ "$disk_mib" =~ ^[0-9]+$ ]]; then
+            log_error "Could not read the disk size to apply the ${reserve_mib}MiB reservation."
+            exit 1
+        fi
+        local data_end_mib=$(( disk_mib - reserve_mib ))
+        # DATA must keep a sane minimum (layers + /home) — 32GiB floor.
+        if (( data_end_mib < ${last_end%.*} + 32768 )); then
+            log_error "Reservation too large: --windows-gb ${WINDOWS_GB} + --games-gb ${GAMES_GB}"
+            log_error "leaves less than 32GiB for POWOS-DATA on this ${disk_mib}MiB disk."
+            exit 1
+        fi
+        data_end="${data_end_mib}MiB"
+        log "Reserving ${reserve_mib}MiB at the end of the disk (windows=${WINDOWS_GB}GB games=${GAMES_GB}GB)"
+    fi
 
-    parted "$device" --script mkpart POWOS-DATA btrfs "${last_end}MiB" 100% || {
+    log "Adding POWOS-DATA partition (${last_end}MiB → ${data_end})..."
+
+    parted "$device" --script mkpart POWOS-DATA btrfs "${last_end}MiB" "$data_end" || {
         log_error "Could not create the POWOS-DATA partition on $device."
         log_error "Without it the USB has NO persistence (layers, /home). Aborting."
         log_error "Inspect with: sudo parted $device unit MiB print free"
-        log_error "Then create it manually: sudo parted $device mkpart POWOS-DATA btrfs ${last_end}MiB 100%"
+        log_error "Then create it manually: sudo parted $device mkpart POWOS-DATA btrfs ${last_end}MiB ${data_end}"
         exit 1
     }
 
@@ -255,6 +288,12 @@ add_data_partition() {
     if [[ -n "$data_part" && -b "$data_part" ]]; then
         log "Formatting POWOS-DATA partition: $data_part"
         mkfs.btrfs -f -L "POWOS-DATA" "$data_part"
+        # Exposure contract (docs/WINDOWS.md): Linux partitions must carry the
+        # Linux-filesystem GPT type GUID (sgdisk 8300). Windows assigns no
+        # drive letter to that type — no "you need to format this disk"
+        # prompts, no accidental clicks. parted's type choice is fs-hint
+        # dependent, so set it explicitly.
+        set_part_type "$device" "$data_part" 8300 "POWOS-DATA (hidden from Windows)"
         log_success "POWOS-DATA partition created: $data_part"
     else
         log_error "POWOS-DATA partition was created but its device node was not found."
@@ -262,6 +301,84 @@ add_data_partition() {
         log_error "Re-run: sudo $0 --setup-data-only $device"
         exit 1
     fi
+
+    if (( GAMES_GB > 0 )); then
+        add_games_partition "$device" "$data_end"
+    fi
+    if (( WINDOWS_GB > 0 )); then
+        log_success "${WINDOWS_GB}GB left unallocated at the disk tail for Windows."
+        log "Carve it later from a booted PowOS:  sudo powos windows create"
+    fi
+}
+
+# Set the GPT partition type of $2 (a partition node on disk $1) via sgdisk.
+# $3 = sgdisk type code (8300 Linux fs, 0700 Microsoft basic data), $4 = label
+# for logging. Best-effort: without sgdisk we warn — the USB still works, but
+# Windows may show the partition as un-lettered RAW instead of ignoring it.
+set_part_type() {
+    local device="$1" part="$2" code="$3" desc="$4"
+    local pnum="${part##*[!0-9]}"
+    if [[ -z "$pnum" ]]; then
+        log_warn "Could not derive partition number of $part — leaving GPT type as-is."
+        return 0
+    fi
+    if command -v sgdisk &>/dev/null; then
+        if sgdisk -t "${pnum}:${code}" "$device" >/dev/null 2>&1; then
+            log "GPT type ${code} set: $desc"
+        else
+            log_warn "sgdisk could not set type ${code} on ${part} — leaving as-is."
+        fi
+    else
+        log_warn "sgdisk not installed — GPT type of ${part} left as parted chose it."
+        log_warn "For the Windows-exposure contract, run: sgdisk -t ${pnum}:${code} ${device}"
+    fi
+}
+
+# POWOS-GAMES: shared NTFS partition, deliberately visible to Windows (gets a
+# drive letter there). Sits right after POWOS-DATA in the reserved tail.
+add_games_partition() {
+    local device="$1" start="$2"
+    local games_end_spec
+    if (( WINDOWS_GB > 0 )); then
+        # Leave the final WINDOWS_GB unallocated after the games partition.
+        local disk_mib
+        disk_mib=$(parted "$device" unit MiB print 2>/dev/null \
+            | awk -F': ' '/^Disk \//{gsub("MiB","",$2); print int($2); exit}')
+        games_end_spec="$(( disk_mib - WINDOWS_GB * 1024 ))MiB"
+    else
+        games_end_spec="100%"
+    fi
+
+    log "Adding POWOS-GAMES partition (${start} → ${games_end_spec})..."
+    parted "$device" --script mkpart POWOS-GAMES ntfs "$start" "$games_end_spec" || {
+        log_warn "Could not create POWOS-GAMES — continuing without it."
+        log_warn "Create it later: sudo parted $device mkpart POWOS-GAMES ntfs ${start} ${games_end_spec}"
+        return 0
+    }
+    partprobe "$device" 2>/dev/null || true
+    sleep 2
+
+    local games_part
+    games_part=$(lsblk -ln -o PATH,PARTLABEL "$device" 2>/dev/null \
+        | awk '$2 == "POWOS-GAMES" {print $1; exit}')
+    if [[ -z "$games_part" || ! -b "$games_part" ]]; then
+        log_warn "POWOS-GAMES created but device node not found — format it manually (mkfs.ntfs -f -L POWOS-GAMES)."
+        return 0
+    fi
+
+    if command -v mkfs.ntfs &>/dev/null; then
+        log "Formatting POWOS-GAMES (NTFS): $games_part"
+        mkfs.ntfs -f -L "POWOS-GAMES" "$games_part" || {
+            log_warn "mkfs.ntfs failed — format $games_part manually."
+            return 0
+        }
+    else
+        log_warn "mkfs.ntfs not available (install ntfsprogs/ntfs-3g)."
+        log_warn "Format later: sudo mkfs.ntfs -f -L POWOS-GAMES $games_part"
+    fi
+    # Microsoft basic data type: Windows SHOULD see and letter this one.
+    set_part_type "$device" "$games_part" 0700 "POWOS-GAMES (visible to Windows)"
+    log_success "POWOS-GAMES partition ready: $games_part"
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -649,6 +766,10 @@ usage() {
     echo "  --image PATH        Path to powos.raw image (default: build/output/powos.raw)"
     echo "  --variants          Add multi-variant base rootfs + boot entries onto an"
     echo "                      already-written USB (needs ./build/build-iso.sh variants)"
+    echo "  --games-gb N        Create an N GB shared NTFS partition (POWOS-GAMES),"
+    echo "                      visible to Windows — game assets shared by both OSes"
+    echo "  --windows-gb N      Leave N GB unallocated at the disk tail for a future"
+    echo "                      bare-metal Windows ('powos windows create', docs/WINDOWS.md)"
     echo ""
     echo "Available drives:"
     lsblk -d -o NAME,SIZE,MODEL,TRAN,HOTPLUG 2>/dev/null | grep -v "^loop" \
@@ -677,6 +798,22 @@ main() {
                 ;;
             --image)
                 image="$2"
+                shift 2
+                ;;
+            --windows-gb)
+                WINDOWS_GB="${2:-0}"
+                if ! [[ "$WINDOWS_GB" =~ ^[0-9]+$ ]]; then
+                    log_error "--windows-gb needs a whole number of GB (got: '$WINDOWS_GB')"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --games-gb)
+                GAMES_GB="${2:-0}"
+                if ! [[ "$GAMES_GB" =~ ^[0-9]+$ ]]; then
+                    log_error "--games-gb needs a whole number of GB (got: '$GAMES_GB')"
+                    exit 1
+                fi
                 shift 2
                 ;;
             /dev/*)

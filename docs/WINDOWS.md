@@ -53,33 +53,42 @@ Windows never knows; PowOS manages it like a file.
 ## Disk layout
 
 ```
-USB (4TB)                          today            after `powos windows create`
-├── p1  EFI (PowOS)                512MB            512MB   (unchanged)
-├── p2  System (base image)        ~100GB           ~100GB  (unchanged)
-├── p3  POWOS-DATA (btrfs)         remainder        remainder − (win + 512MB)
-├── p4  WIN-ESP (FAT32)            —                512MB   ← Windows boot files, ISOLATED
-└── p5  POWOS-WIN (NTFS)           —                user-chosen (e.g. 256GB)
+USB (4TB), burned with:  install-to-usb.sh --games-gb 512 --windows-gb 256
+├── p1  EFI (PowOS)          512MB     Windows: ESP type → hidden, respected
+├── p2  System (base image)  ~100GB    Windows: Linux type GUID → no letter, ignored
+├── p3  POWOS-DATA (btrfs)   bulk      Windows: Linux type GUID → no letter, ignored
+├── p4  POWOS-GAMES (NTFS)   e.g 512GB Windows: basic-data type → VISIBLE (by design)
+├── (unallocated)            e.g 256GB reserved; `powos windows create` carves:
+│    p5  WIN-ESP (FAT32)     512MB     Windows boot files, isolated from PowOS's ESP
+│    p6  POWOS-WIN (NTFS)    rest      Windows itself (C:)
 ```
 
-**Dedicated WIN-ESP (p4), not the shared PowOS ESP.** Windows updates
+**The Windows-exposure contract, enforced at burn time:** Windows' scary
+"you need to format this disk" prompt only fires for partitions that receive
+a drive letter with an unreadable filesystem. Partitions carrying the *Linux
+filesystem* GPT type GUID (sgdisk `8300`) get no letter and no prompt —
+Windows silently ignores them. `install-to-usb.sh` sets `8300` on the btrfs
+partitions and `0700` (Microsoft basic data) on POWOS-GAMES explicitly, so
+the only things Windows ever sees are the games partition and (after
+`windows create`) its own C: — exactly the exposure the design intends.
+
+**Dedicated WIN-ESP (p5), not the shared PowOS ESP.** Windows updates
 occasionally rewrite boot files/entries on "their" ESP; giving Windows its own
 keeps the PowOS loader untouchable. UEFI handles multiple ESPs fine; the
-firmware entry for Windows points at p4's `EFI/Microsoft/Boot/bootmgfw.efi`.
-`hiberfil.sys` lives on p5 as normal — full hibernation support.
+firmware entry for Windows points at p5's `EFI/Microsoft/Boot/bootmgfw.efi`.
+`hiberfil.sys` lives on p6 as normal — full hibernation support.
 
-### The free-space problem (the hardest part of this spec)
+### Free space: reserved at flash time (re-burn, don't shrink)
 
-`install-to-usb.sh` currently gives POWOS-DATA `100%` of the remainder, so
-existing USBs have **zero free space**. Two paths:
-
-- **Fresh USBs**: `install-to-usb.sh --windows-gb N` reserves the tail at
-  creation time (trivial; do this regardless).
-- **Existing USBs**: online shrink — `btrfs filesystem resize` (btrfs shrinks
-  online) → `parted resizepart` p3 → create p4/p5 in the freed tail. This is
-  the single scariest operation in the plan and is gated accordingly:
-  **mandatory `powos backup push` (or export) first**, typed confirmation,
-  dry-run default, free-space sanity checks (shrink target must exceed used
-  bytes + 20% slack), and `partx -u` handling since the disk is live.
+`install-to-usb.sh` historically gave POWOS-DATA `100%` of the remainder, so
+older USBs have zero free space. The primary path is a **fresh burn**:
+`--games-gb N` creates POWOS-GAMES, `--windows-gb N` leaves the tail
+unallocated for `powos windows create` (both implemented). The current
+physical USB carries an outdated PowOS with nothing worth keeping — it gets
+re-burned with the new layout; state comes back via `powos backup pull`.
+An online-shrink path for non-reburnable USBs is possible but deliberately
+unscheduled — it's the scariest operation in the plan and re-burn beats it
+in every case that matters.
 
 ## Install flow: ISO-in-VM onto a synthetic disk
 
@@ -88,7 +97,7 @@ let Windows Setup do everything, inside a VM whose disk IS the real
 partitions:
 
 1. Assemble a **synthetic whole disk** with device-mapper linear targets:
-   `[generated GPT header][p4 WIN-ESP][p5 POWOS-WIN][backup GPT]` — the GPT
+   `[generated GPT header][p5 WIN-ESP][p6 POWOS-WIN][backup GPT]` — the GPT
    fragments are small loop-backed files; the data ranges map straight onto
    the real partitions. QEMU gets this dm device as a **raw AHCI disk**
    (AHCI, not virtio: identical storage stack in VM and on metal, no driver
@@ -103,7 +112,7 @@ partitions:
    registry), set RTC-local-time expectations, drop the **"Return to
    PowOS"** shortcut (below), enable "restart apps after sign-in".
 4. On the PowOS side: create the firmware boot entry
-   (`efibootmgr -c` → p4 bootmgfw), verify `powos boot windows` resolves it,
+   (`efibootmgr -c` → p5 bootmgfw), verify `powos boot windows` resolves it,
    add the BLS menu entry.
 
 The same synthetic-disk assembly is reused for **VM mode** later — Windows
@@ -116,8 +125,8 @@ USB is the live root and can never be handed to a guest whole.)
 PowOS → Windows:
 1. **Guards** (all enforced, none advisory):
    - layer-sync: flush + stop; USB filesystems synced.
-   - No VM currently attached to p5 (dm device not open).
-   - p5/shared NTFS not mounted, or unmounted now.
+   - No VM currently attached to p6 (dm device not open).
+   - p6/POWOS-GAMES not mounted, or unmounted now.
    - Windows Fast Startup verified OFF (read the registry hive from Linux
      via `hivex`, or NTFS dirty-flag heuristic) — refuse with instructions
      if on.
@@ -147,7 +156,7 @@ not at all.** Concretely:
 - PowOS hibernated → Windows physically can't hurt it: btrfs is unreadable
   to Windows, and the standing rule (never initialize disks in Disk
   Management) is stated in the install-time README on the shared partition.
-- Snapshots refuse to run against a hibernated/dirty p5.
+- Snapshots refuse to run against a hibernated/dirty p6.
 
 ## Snapshots / rollback
 
@@ -178,8 +187,8 @@ powos windows status     # partition, hibernation state, boot entries, guards
 | Failure | Outcome |
 |---|---|
 | Power loss during PowOS S4 write | Normal cold boot; layer-sync already flushed → persisted state intact, only the live session lost |
-| Power loss during btrfs shrink | The gated, backup-first operation; restore from backup. This is why the gate exists |
-| Windows Update rewrites boot entries | Only p4/NVRAM affected; `powos windows status` detects, `powos boot` repairs BootOrder; PowOS ESP untouched (dedicated-ESP payoff) |
+| Windows offered to format an unreadable partition | Can't happen for lettered-less Linux-GUID partitions (exposure contract); POWOS-GAMES/C: are real NTFS |
+| Windows Update rewrites boot entries | Only p5/NVRAM affected; `powos windows status` detects, `powos boot` repairs BootOrder; PowOS ESP untouched (dedicated-ESP payoff) |
 | USB unplugged while Windows runs | Same as any Windows losing its disk — but internal disks were never involved; snapshot restores |
 | Hibernated-Windows + VM start attempt | Refused by guard |
 | Activation flapping (VM↔metal hardware profiles) | Known behavior; digital license re-activates; documented |
@@ -199,19 +208,27 @@ powos windows status     # partition, hibernation state, boot entries, guards
    Windows install/licensing is manual-checklist (INSTALL-VALIDATION.md).
 3. **Phase 2:** the guarded switch + Return-to-PowOS + hibernation
    round-trip (hardware-only validation).
-4. **Phase 3:** online-shrink path for existing USBs (last, scariest,
-   backup-gated).
-5. **Phase 4:** snapshots/rollback; `powos windows vm` replacing raw
+4. **Phase 3:** snapshots/rollback; `powos windows vm` replacing raw
    passthrough for the on-USB case.
+   (Online shrink for non-reburnable USBs: unscheduled — see above.)
 
-## Open questions
+## Decisions & open questions
 
-1. **Windows partition size default** — 256GB? (Games are huge; shrinkable
-   later is hard, growable into POWOS-DATA is also hard. Oversize it.)
-2. **Reuse `--shared-gb` NTFS as game-asset overflow** alongside POWOS-WIN,
-   or drop the shared partition entirely now that Windows lives on the USB?
-3. Unattend automation depth for step 3 of install (full unattend.xml vs a
-   documented post-install one-liner) — unattend is nicer, more to maintain.
-4. Does Secure Boot need to stay off? (Bazzite unsigned kmods generally mean
+Decided:
+- **Games partition: YES** — `--games-gb` POWOS-GAMES NTFS, burned at USB
+  creation, deliberately visible to Windows. Everything else hidden via GPT
+  type GUIDs (exposure contract above).
+- **Existing USB: re-burn**, not shrink. Nothing on it worth keeping.
+- Burn-time reservation flags implemented in `install-to-usb.sh`
+  (`--games-gb`, `--windows-gb`).
+
+Still open:
+1. **Sizes** — suggestion for the 4TB stick: `--games-gb 512 --windows-gb
+   256` (Windows C: mostly holds the OS + AC titles; big assets live on
+   POWOS-GAMES which both OSes read).
+2. Unattend automation depth for the ISO-in-VM install (full unattend.xml vs
+   a documented post-install one-liner) — unattend is nicer, more to
+   maintain.
+3. Does Secure Boot need to stay off? (Bazzite unsigned kmods generally mean
    SB off; EAC/BattlEye don't require SB; Vanguard does — accept "no
    Vanguard" or document per-title.)
