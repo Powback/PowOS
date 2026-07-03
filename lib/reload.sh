@@ -199,7 +199,7 @@ cmd_reload() {
             --drop)     do_drop=1 ;;
             --once)     do_once=1 ;;
             --where)    where=1 ;;
-            -h|--help)  sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
+            -h|--help)  sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
             -*)         perr "Unknown flag: $1 (try: --pull --build --where)"; return 1 ;;
             *)          explicit="$1" ;;
         esac
