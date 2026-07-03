@@ -6,6 +6,21 @@ parsing. They **cannot** validate real partitioning or the boot menu. Everything
 below must be checked on a VM (QEMU/virt-manager) or a spare disk before the
 `TODO(hw)` markers in `lib/install-system.sh` come off.
 
+## One command first
+
+On a Linux box (PC, Steam Deck, or WSL2 w/ nested KVM), run the staged validator
+before the manual steps below — it runs unit tests → real deploy/disk → build →
+QEMU boot, skipping stages whose prerequisites are missing:
+
+```bash
+./build/validate.sh          # fast: unit + (as root) deploy/disk tests
+sudo ./build/validate.sh     # include update-self + loop-device disk ops
+sudo ./build/validate.sh --all   # + build image + QEMU boot smoke test
+```
+
+It ends by listing the manual checks (boot menu, installer, dual-boot, vm, base)
+that can't be automated — those are detailed below.
+
 ## Setup
 
 1. Build: `./build/build-iso.sh live-usb` (Linux/WSL + podman).
