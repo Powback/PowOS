@@ -27,6 +27,12 @@ on:
   schedule:
     - cron: '0 6 * * 1'   # weekly rebuild to pick up new bazzite :stable
 
+# Only the newest commit's images matter — cancel superseded builds instead of
+# queueing ~15-min runs for every push on a fast-moving master.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   IMAGE: ghcr.io/powback/powos
 

@@ -7,14 +7,24 @@ on:
     branches: [ master ]
   workflow_dispatch:
 
+# Master moves fast (multiple agents pushing) — a superseded commit's run is
+# wasted work, and every run costs ~15 min of image building. Newest run wins;
+# it contains all prior commits anyway.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  tier1-tests:
+  # One job, ONE image build shared by the container tests and e2e.
+  # (Previously two jobs each built the ~10GB image from scratch, doubling
+  # every run; e2e already ran strictly after tier1 via `needs`.)
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Run ShellCheck
-        # Gate on real errors only; the ~113 pre-existing info/style/warning
+        # Gate on real errors only; the pre-existing info/style/warning
         # findings are tracked debt (tighten to -S warning once cleaned up).
         run: |
           sudo apt-get install -y shellcheck
@@ -60,12 +70,18 @@ jobs:
 
       # podman, not docker: the bazzite base ships ~100 layers and docker's
       # overlay driver dies with "max depth exceeded"; podman builds it fine
-      # (same reason build-publish.yml uses podman). Mirrors the compose
-      # test-runner service definition.
-      - name: Container Test (podman — replicates compose test-runner)
+      # (same reason build-publish.yml uses podman).
+      # ROOTFUL (sudo): the e2e layer-sync test rsyncs overlayfs whiteouts
+      # (char devices) and mknod is denied in a rootless user namespace even
+      # with --privileged. One rootful build serves both test stages below.
+      # INSTALL_E2E_DEPS only adds btrfs-progs/util-linux/parted — harmless
+      # for the tier1 container tests.
+      - name: Build test image (single build for container tests + e2e)
+        run: sudo podman build -f Containerfile --build-arg INSTALL_E2E_DEPS=1 -t powos-ci .
+
+      - name: Container Tests (replicates compose test-runner)
         run: |
-          podman build -f Containerfile -t powos-ci .
-          podman run --rm -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
+          sudo podman run --rm -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
             --entrypoint /bin/bash powos-ci -c '
               set -e
               echo "Running Tests..."
@@ -76,34 +92,12 @@ jobs:
               bash /powos/test/tier1/test-ai-agent.sh
             '
 
-  e2e-tests:
-    runs-on: ubuntu-latest
-    needs: tier1-tests
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Free disk space (bazzite base is ~10GB; default runner has ~14GB)
+      - name: E2E Tests (replicates compose e2e-runner)
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
-                      /usr/share/swift /usr/local/.ghcup || true
-          sudo docker image prune --all --force || true
-          df -h /
-
-      - name: Vendor bazzite system_files (Containerfile COPYs it)
-        run: ./build/vendor-bazzite.sh
-
-      # podman for the same layer-depth reason as tier1 (see comment there).
-      # ROOTFUL (sudo): layer-sync rsyncs overlayfs whiteouts (char devices) and
-      # mknod is denied in a rootless user namespace even with --privileged.
-      # Mirrors the compose e2e-runner service definition.
-      - name: Run E2E Tests (podman — replicates compose e2e-runner)
-        run: |
-          sudo podman build -f Containerfile --build-arg INSTALL_E2E_DEPS=1 -t powos-e2e .
           sudo podman volume create powos-e2e-usb
           sudo podman run --rm --privileged --hostname powos-e2e \
             --device /dev/fuse --device /dev/loop-control \
             -v "$PWD:/powos:ro" -v powos-e2e-usb:/var/lib/powos-test \
             --tmpfs /run/powos --tmpfs /tmp \
             -e POWOS_ROOT=/powos -e POWOS_E2E=1 \
-            --entrypoint /bin/bash powos-e2e /powos/test/e2e/run-e2e.sh
+            --entrypoint /bin/bash powos-ci /powos/test/e2e/run-e2e.sh
