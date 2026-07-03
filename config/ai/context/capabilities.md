@@ -52,6 +52,15 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - Dev `powos dev {new|fork|build|enable}` incl. `--ai` project generation. ✅
 - Overlays (systemd-sysext) via `powos dev` / `overlay-manager.sh`. ✅
 
+## GPU / base image
+- Base is ONE image, default `bazzite-nvidia:stable` (NVIDIA proprietary driver + KDE).
+  Overridable via `POWOS_BASE_IMAGE` / `--build-arg BASE_IMAGE` → `bazzite` (AMD/Intel)
+  or `bazzite-nvidia-open` (RTX 20-series+). Driver stack is fixed by the image;
+  hardware profiles tune settings but can't swap nvidia↔amd at boot.
+- CUDA: base has the NVIDIA driver (CUDA *runtime* works). Full toolkit (nvcc/cuDNN)
+  is NOT in the base — use the `powos-cuda` distrobox (nvidia/cuda devel image) for
+  compiling CUDA. `powos-python` has GPU passthrough but no toolkit.
+
 ## Key paths
 - `/usr/lib/powos/` scripts · `/etc/powos/` config · `/run/powos/` runtime state
 - `/var/lib/powos/{src,projects,sources,extensions}` · USB label `POWOS-DATA`

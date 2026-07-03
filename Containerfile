@@ -1,5 +1,18 @@
 # PowOS - Based on Bazzite
-FROM ghcr.io/ublue-os/bazzite-nvidia:stable
+#
+# Base image is a build ARG so you can target your GPU. The default is the
+# NVIDIA proprietary-driver desktop variant. Override with:
+#   podman build --build-arg BASE_IMAGE=<image> ...
+# or set POWOS_BASE_IMAGE before ./build/build-iso.sh.
+#
+# Common choices:
+#   ghcr.io/ublue-os/bazzite-nvidia:stable       NVIDIA proprietary (default)
+#   ghcr.io/ublue-os/bazzite-nvidia-open:stable  NVIDIA open modules (RTX 20-series+, req. for 50-series)
+#   ghcr.io/ublue-os/bazzite:stable              AMD / Intel GPUs
+# NOTE: the GPU driver stack is fixed by this image; hardware profiles tune
+# settings but cannot swap nvidia<->amd at boot. Pick the image for your GPU.
+ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia:stable
+FROM ${BASE_IMAGE}
 
 ENV POWOS_ROOT=/var/lib/powos
 ENV TERM=xterm

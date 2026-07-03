@@ -88,10 +88,18 @@ build_container_image() {
     log "Building from Containerfile..."
     log "This pulls bazzite-nvidia (~5GB) and adds PowOS components"
 
+    # Base image is overridable for non-NVIDIA GPUs (see Containerfile ARG).
+    local base_arg=()
+    if [[ -n "${POWOS_BASE_IMAGE:-}" ]]; then
+        log "Using custom base image: ${POWOS_BASE_IMAGE}"
+        base_arg=(--build-arg "BASE_IMAGE=${POWOS_BASE_IMAGE}")
+    fi
+
     if podman build \
         -f Containerfile \
         -t "$IMAGE_NAME" \
         --layers \
+        "${base_arg[@]}" \
         . 2>&1 | tee "${OUTPUT_DIR}/container-build.log"; then
         log_success "Container image built: $IMAGE_NAME"
     else
