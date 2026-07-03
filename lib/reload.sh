@@ -75,6 +75,26 @@ reload_changed_files() {
 reload_needs_build() { reload_changed_files "$1" | grep -qE "$RELOAD_NEEDS_BUILD_RE"; }
 reload_mark_applied() { [[ -d "$1/.git" ]] && git -C "$1" rev-parse HEAD > "$RELOAD_APPLIED" 2>/dev/null || true; }
 
+# Warn (and offer to pull) when the checkout is behind its upstream, so a plain
+# 'powos reload' never silently applies stale code. Best-effort: a bounded fetch
+# that skips cleanly when offline / no remote.
+reload_check_behind() {
+    local src="$1" up behind
+    [[ -d "$src/.git" ]] || return 0
+    timeout 8 git -C "$src" fetch --quiet 2>/dev/null || return 0
+    up="$(git -C "$src" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
+    [[ -n "$up" ]] || up="origin/master"
+    behind="$(git -C "$src" rev-list --count "HEAD..$up" 2>/dev/null)"
+    [[ "$behind" =~ ^[0-9]+$ ]] && (( behind > 0 )) || return 0
+    pwarn "Checkout is $behind commit(s) behind $up — plain reload would apply STALE code."
+    if confirm "Pull latest first?"; then
+        git -C "$src" pull --rebase 2>&1 | tail -3 || \
+            pwarn "Pull failed (uncommitted changes?). Commit/stash then retry, or 'powos reload --live' to apply as-is."
+    else
+        pwarn "Applying your checkout as-is (still $behind behind $up)."
+    fi
+}
+
 # After a successful live apply, act on change-types that a file copy alone
 # doesn't finish: systemd units (daemon-reload/restart), distrobox.ini
 # (re-assemble), overlays/sources (rebuild). Each is an opt-in prompt.
@@ -217,6 +237,8 @@ cmd_reload() {
     fi
     reload_remember "$src"
     (( where )) && { pok "Local source: $src"; return 0; }
+
+    (( do_pull )) || reload_check_behind "$src"   # never silently apply stale code
 
     if (( do_pull )) && [[ -d "$src/.git" ]]; then
         plog "Pulling latest in $src…"
