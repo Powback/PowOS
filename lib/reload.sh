@@ -3,17 +3,18 @@
 # Auto-finds your source checkout, remembers it, and hot-applies live (no reboot).
 # The point: you never have to remember paths or flags — just `powos reload`.
 #
-#   powos reload            Apply local script/config changes LIVE (no reboot)
+#   powos reload            Apply local changes LIVE + PERSISTENT (survives reboot)
+#   powos reload --drop     Roll back — remove the overlay, back to the image's CLI
+#   powos reload --once     Apply live but ephemeral (cleared on next reboot)
 #   powos reload --pull     git pull the checkout first, then apply
-#   powos reload --build    Full local image build + bootc switch (base/pkg changes)
-#   powos reload --where    Just print which source it will use
-#   powos reload --drop     Remove the dev overlay (back to the image's CLI)
+#   powos reload --build    Bake into a local image + bootc switch (base/pkg changes)
+#   powos reload --where    Print which source it will use
 #   powos reload /path      Use (and remember) a specific checkout
 #
-# On a writable /usr (legacy USB overlay) it copies into /usr. On a read-only
-# /usr (bootc/composefs) it applies via an EPHEMERAL systemd-sysext overlay in
-# /run/extensions — live, no reboot, composefs untouched, gone on reboot. For a
-# durable change on bootc, use --build (image rebuild + switch).
+# On writable /usr (legacy USB overlay) it copies into /usr. On read-only /usr
+# (bootc/composefs) it applies via a systemd-sysext overlay — live, no reboot,
+# composefs untouched. Persistent by default (/var/lib/extensions, auto-merged at
+# boot); --once uses /run (ephemeral). Durable/shippable change → --build.
 #
 # First run auto-detects ~/PowOS (and friends) and saves it, so after that it's
 # literally just `powos reload`. Run it as your normal user — it sudo's only the
@@ -153,10 +154,13 @@ reload_usr_ro() {
 # composefs is never touched. One root shell. Exit: 0 ok · 3 refresh · 4 not
 # merged · 42 broken+reverted.
 reload_apply_sysext() {
+    # $1 = source checkout, $2 = extension base dir:
+    #   /run/extensions       ephemeral (default, cleared on reboot)
+    #   /var/lib/extensions   persistent (systemd-sysext auto-merges at boot)
     local runner=(sudo bash); [[ ${EUID:-$(id -u)} -eq 0 ]] && runner=(bash)
-    "${runner[@]}" -s -- "$1" <<'ROOT'
+    "${runner[@]}" -s -- "$1" "${2:-/run/extensions}" <<'ROOT'
 set -uo pipefail
-src="$1"; ext="/run/extensions/powos-dev"
+src="$1"; ext="$2/powos-dev"
 rm -rf "$ext"
 mkdir -p "$ext/usr/bin" "$ext/usr/lib/powos" "$ext/usr/lib/extension-release.d"
 for b in powos powos-boot pinstall premove; do
@@ -186,13 +190,14 @@ reload_drop_sysext() {
 }
 
 cmd_reload() {
-    local do_pull=0 do_build=0 where=0 force_live=0 do_drop=0 explicit=""
+    local do_pull=0 do_build=0 where=0 force_live=0 do_drop=0 do_once=0 explicit=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pull)     do_pull=1 ;;
             --build)    do_build=1 ;;
             --live)     force_live=1 ;;
             --drop)     do_drop=1 ;;
+            --once)     do_once=1 ;;
             --where)    where=1 ;;
             -h|--help)  sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
             -*)         perr "Unknown flag: $1 (try: --pull --build --where)"; return 1 ;;
@@ -237,7 +242,8 @@ cmd_reload() {
     fi
 
     if (( do_build )); then
-        plog "Full local image build + switch from $src…"
+        plog "Baking $src into a local image + switch…"
+        reload_usr_ro && reload_drop_sysext   # image will carry it; drop overlay so it can't shadow the new base
         POWOS_BUILD_CONTEXT="$src" source "${POWOS_LIB:-/usr/lib/powos}/build-image.sh"
         POWOS_BUILD_CONTEXT="$src" cmd_build_image --switch
         local rc=$?
@@ -245,11 +251,12 @@ cmd_reload() {
         return $rc
     fi
 
-    local rc ro=0
+    local rc ro=0 extbase=/var/lib/extensions
+    (( do_once )) && extbase=/run/extensions
     if reload_usr_ro; then
         ro=1
-        plog "Read-only /usr (bootc/composefs) → applying via systemd-sysext overlay…"
-        reload_apply_sysext "$src"; rc=$?
+        plog "Read-only /usr → systemd-sysext overlay ($([[ $extbase == /var/* ]] && echo 'persistent' || echo 'ephemeral'))…"
+        reload_apply_sysext "$src" "$extbase"; rc=$?
     else
         plog "Writable /usr → applying directly (no reboot)…"
         reload_apply_live "$src"; rc=$?
@@ -264,8 +271,12 @@ cmd_reload() {
     reload_post_apply "$src"      # systemd reload / distrobox reassemble / overlay rebuild
     reload_mark_applied "$src"
     if (( ro )); then
-        pok "Live via sysext overlay (ephemeral — cleared on reboot; composefs untouched)."
-        pok "Bake it into the image to persist: powos reload --build"
+        if (( do_once )); then
+            pok "Live via sysext overlay (ephemeral — cleared on reboot). composefs untouched."
+        else
+            pok "Live & PERSISTENT — auto-merged on every boot. composefs untouched."
+            pok "Roll back: powos reload --drop   ·   Bake into image: powos reload --build"
+        fi
     else
         pok "Live & persisted. For base/package changes: powos reload --build"
     fi
