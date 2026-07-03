@@ -125,9 +125,15 @@ vm_build_qemu_cmd() {
         -usb -device usb-tablet
     )
     if [[ "$gpu" == "1" ]]; then
-        # Placeholder — real passthrough needs a specific PCI address bound to
-        # vfio-pci and IOMMU on the kernel cmdline. Left explicit on purpose.
-        cmd+=( -device "vfio-pci,host=GPU_PCI_ADDR" )
+        # Real passthrough: hand every PCI function on the dGPU's slot (GPU + its
+        # HDMI-audio, e.g. 01:00.0 + 01:00.1) to the guest. The functions must
+        # already be bound to vfio-pci ('powos gpu to-vm', done at launch time).
+        local _dgpu _slot _bdf
+        _dgpu=$(lspci -Dn | awk '$2=="0300:" && $3 ~ /^10de:/{print $1; exit}')
+        _slot="${_dgpu%.*}."
+        for _bdf in $(lspci -Dn | awk -v s="$_slot" 'index($1,s)==1{print $1}'); do
+            cmd+=( -device "vfio-pci,host=${_bdf#0000:}" )
+        done
     else
         cmd+=( -display "gtk,gl=on" -device virtio-vga-gl )
     fi
@@ -216,8 +222,20 @@ vm_windows() {
     mkdir -p "$vars_dir"
     [[ -f "$ovmf_vars" ]] || cp "$src_vars" "$ovmf_vars"
 
+    if [[ "$VM_GPU" == 1 ]]; then
+        vm_step "Hotswapping the dGPU to the VM (powos gpu to-vm)"
+        powos gpu to-vm || { vm_err "GPU hotswap failed — see 'powos gpu status'. Aborting."; return 1; }
+    fi
+
     vm_ok "Launching Windows VM…"
     eval "$cmd"
+    local vmrc=$?
+
+    if [[ "$VM_GPU" == 1 ]]; then
+        vm_step "Reclaiming the dGPU for the host (powos gpu to-host)"
+        powos gpu to-host || vm_warn "Couldn't auto-reclaim — run 'powos gpu to-host' manually."
+    fi
+    return $vmrc
 }
 
 # ── Windows-setup script generation (pure — unit-testable) ────────
