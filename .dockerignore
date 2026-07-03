@@ -8,6 +8,15 @@ containers/build_files/
 # Git
 .git/
 
+# Never bake credentials into published images
+# (Containerfile does `COPY . /var/lib/powos/src/` — anything not excluded
+# here ships inside the OS image, which is pushed to GHCR)
+secrets/
+**/*.pem
+**/*.key
+**/.env
+**/.env.*
+
 # Build artifacts
 build/output/
 *.raw

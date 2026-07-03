@@ -39,8 +39,9 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - `powos update self` — deploy bin/lib/config/systemd from source into the live
   system; persists via layer sync. ✅
 - `powos update self --from /path` — deploy from a mounted checkout. ✅
-- `powos update self --pull` — clones POWOS_UPSTREAM fresh (bundled src has no
-  `.git`); private repo needs git creds on the machine. ✅ (creds-dependent)
+- `powos update self --pull` — pulls if src has `.git`; otherwise attaches git
+  to the bundled src in place (once), falling back to a one-shot clone when src
+  isn't writable. Private repo needs git creds on the machine. ✅ (creds-dependent)
 - `powos update {os|packages|overlays|apply}` — base OS / packages / overlays.
 
 ## Other subsystems

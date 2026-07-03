@@ -777,24 +777,38 @@ cmd_update() {
                             echo ""
                         else
                             # The bundled source (/var/lib/powos/src) ships without
-                            # a .git dir, so there's nothing to pull. Clone upstream
-                            # fresh and deploy from that instead.
+                            # a .git dir. Attach git to it IN PLACE (once) so every
+                            # future --pull is a normal fetch — no throwaway clones
+                            # that leave the canonical src permanently stale.
                             local upstream="${POWOS_UPSTREAM:-https://github.com/Powback/PowOS.git}"
-                            echo "No .git in $POWOS_SRC — cloning latest from:"
+                            echo "No .git in $POWOS_SRC — attaching git remote:"
                             echo "  $upstream"
-                            local pull_tmp
-                            pull_tmp=$(mktemp -d)
-                            if git clone --depth 1 "$upstream" "$pull_tmp/PowOS"; then
-                                POWOS_SRC="$pull_tmp/PowOS"
-                                echo -e "${GREEN}Cloned latest source${NC} → deploying from $POWOS_SRC"
+                            if [[ -w "$POWOS_SRC" ]] && \
+                               git -C "$POWOS_SRC" init -q 2>/dev/null && \
+                               git -C "$POWOS_SRC" remote add origin "$upstream" 2>/dev/null && \
+                               git -C "$POWOS_SRC" fetch --depth 1 origin master; then
+                                git -C "$POWOS_SRC" checkout -f -B master origin/master
+                                echo -e "${GREEN}Attached git to $POWOS_SRC${NC} — future --pull is a plain git pull"
                                 echo ""
                             else
-                                echo -e "${RED}Clone failed.${NC} A private repo needs git credentials on this machine."
-                                echo "  Set up auth (e.g. 'gh auth login' or a credential helper),"
-                                echo "  set POWOS_UPSTREAM in /etc/powos/config, or deploy locally with:"
-                                echo "    powos update self --from /path/to/PowOS"
-                                rm -rf "$pull_tmp"
-                                return 1
+                                # No write access (root-owned src, unprivileged run)
+                                # or fetch failed: fall back to a one-shot clone.
+                                rm -rf "$POWOS_SRC/.git" 2>/dev/null || true
+                                echo "In-place attach failed (permissions or network) — one-shot clone instead."
+                                local pull_tmp
+                                pull_tmp=$(mktemp -d)
+                                if git clone --depth 1 "$upstream" "$pull_tmp/PowOS"; then
+                                    POWOS_SRC="$pull_tmp/PowOS"
+                                    echo -e "${GREEN}Cloned latest source${NC} → deploying from $POWOS_SRC"
+                                    echo ""
+                                else
+                                    echo -e "${RED}Clone failed.${NC} A private repo needs git credentials on this machine."
+                                    echo "  Set up auth (e.g. 'gh auth login' or a credential helper),"
+                                    echo "  set POWOS_UPSTREAM in /etc/powos/config, or deploy locally with:"
+                                    echo "    powos update self --from /path/to/PowOS"
+                                    rm -rf "$pull_tmp"
+                                    return 1
+                                fi
                             fi
                         fi
                         shift
