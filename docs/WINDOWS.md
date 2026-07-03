@@ -1,7 +1,10 @@
 # Bare-Metal Windows on the PowOS USB — Design Spec
 
-**Status: SPEC / not implemented.** Companion to `docs/HIBERNATION.md` (the
-PowOS-side session-resume half) and `docs/DUAL-BOOT-VM.md` (the VM half).
+**Status: CLI implemented (`lib/games.sh`, `lib/windows.sh`), not yet
+hardware-validated.** The hibernation-based switch is blocked on
+`docs/HIBERNATION.md` shipping; until then `powos windows --reboot` is the
+fallback. Companion to `docs/HIBERNATION.md` (the PowOS-side session-resume
+half) and `docs/DUAL-BOOT-VM.md` (the VM half).
 
 ## Goal
 
@@ -90,6 +93,67 @@ An online-shrink path for non-reburnable USBs is possible but deliberately
 unscheduled — it's the scariest operation in the plan and re-burn beats it
 in every case that matters.
 
+## Games storage (`powos games`)
+
+POWOS-GAMES is a **first-class concept**, not a side effect of the Windows
+work: an NTFS partition, labeled `POWOS-GAMES`, *deliberately* visible to
+Windows — while every other PowOS partition is hidden from Windows via GPT
+type GUIDs (Linux-filesystem type = no drive letter = no "format this disk?"
+prompt). That hiding is the Windows-exposure contract documented above under
+"Disk layout" — the games partition is the one intentional exception to it.
+
+**Three creation paths** (all producing the same partition):
+
+1. **At USB flash time** — `install-to-usb.sh --games-gb N` (implemented).
+2. **By the disk installer** — `powos install-system --shared-gb N` now
+   labels the shared NTFS partition `POWOS-GAMES` (previously unlabeled
+   "shared data").
+3. **Later, on any existing system** — `powos games create --size N
+   [--disk D]`, against a PowOS-owned disk the user names.
+
+**Machine-local model:** games (and windows) partitions belong to a machine,
+not to the USB — see "Installed systems" below. Each machine creates its own
+on its own PowOS-owned disk.
+
+### Steam wiring (`powos games steam-setup`)
+
+The point of the partition is *one installed game serving both OSes*. The
+`steam-setup` command wires the PowOS side:
+
+- Mounts POWOS-GAMES at `/var/mnt/games` via the kernel **ntfs3** driver
+  (`uid`/`gid` mapping, `windows_names` to keep filenames Windows-legal).
+- Creates `SteamLibrary/steamapps` on the partition.
+- **The critical part:** keeps `compatdata` and `shadercache` on native
+  btrfs via symlinks — Proton prefixes break on NTFS (symlinks, case
+  handling, xattrs), so only the game *assets* live on the shared partition,
+  exactly as the dual-boot guidance has always said.
+- Adds the library to Steam's `libraryfolders.vdf` — only while Steam is
+  closed (Steam rewrites the file on exit and would clobber the edit).
+- Drops `GAMES-README.txt` at the partition root telling the Windows side to
+  add `<letter>:\SteamLibrary` as a Windows Steam library.
+
+Result: install a game once from either OS; both Steams see it.
+
+### Safety posture
+
+Nothing in `powos games` (or `powos windows`) touches a disk except when the
+user runs a command against a device they explicitly name — behind a printed
+plan, confirmations, and `--dry-run`. Development machines are never touched
+implicitly. Status: implemented, not yet hardware-validated.
+
+## Installed systems (USB unplugged after install)
+
+The USB is also an installer. After `powos install-system` puts PowOS on a
+desktop/laptop/Steam Deck SSD, the USB is unplugged — so games and windows
+partitions are **machine-local**: each machine creates its own on its own
+PowOS-owned disk, using the exact same commands (`powos games create`,
+`powos windows create`) targeting that machine's disk instead of the USB.
+
+Existing installs (e.g. a desktop that auto-updates via bootc/GHCR) receive
+the new command families through **normal OS updates** and then run them
+once — no reflash needed. Reflashing with `--games-gb`/`--windows-gb` is
+only the path for the USB itself.
+
 ## Install flow: ISO-in-VM onto a synthetic disk
 
 `bcdboot`/BCD creation requires Windows — so we don't do it from Linux. We
@@ -171,16 +235,26 @@ not at all.** Concretely:
 ## Command surface
 
 ```
-powos windows create [--size 256G] [--from-iso PATH]   # carve + VM install + boot entries
-powos windows            # the switch: guards → flush → BootNext → S4
-powos windows vm         # same instance as KVM guest (synthetic disk; refuses if hibernated)
-powos windows snapshot|rollback|snapshots
-powos windows status     # partition, hibernation state, boot entries, guards
+powos games status                       # partition, mount, Steam wiring state
+powos games create --size N [--disk D] [--dry-run] [--yes]   # create POWOS-GAMES
+powos games mount                        # mount at /var/mnt/games (ntfs3)
+powos games steam-setup                  # library + compatdata symlinks + vdf + README
+powos games resize                       # stub — not implemented
+
+powos windows status                     # partition, hibernation state, boot entries, guards
+powos windows create [--disk D]          # carve WIN-ESP + POWOS-WIN
+powos windows install --iso PATH         # ISO-in-VM install onto the real partitions
+powos windows finalize                   # boot entries + post-install wiring
+powos windows                            # the switch: flush + stop layer-sync → guards →
+                                         #   BootNext → hibernate (--reboot fallback
+                                         #   until hibernation ships)
+powos windows snapshot|snapshots|rollback
+powos windows vm                         # stub until hardware validation
 ```
 
 `powos boot windows` (existing) remains the low-level one-shot reboot;
 `powos windows` is the full guarded switch. `powos gpu to-vm` composes with
-`powos windows vm` as today.
+`powos windows vm` as today (once `vm` graduates from stub).
 
 ## Failure modes considered
 

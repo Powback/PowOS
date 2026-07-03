@@ -98,6 +98,8 @@ COPY lib/install-system.sh /usr/lib/powos/
 COPY lib/vm.sh /usr/lib/powos/
 COPY lib/base.sh /usr/lib/powos/
 COPY lib/boot-manager.sh /usr/lib/powos/
+COPY lib/games.sh /usr/lib/powos/
+COPY lib/windows.sh /usr/lib/powos/
 COPY lib/cuda.sh /usr/lib/powos/
 COPY lib/driver.sh /usr/lib/powos/
 COPY lib/registry.sh /usr/lib/powos/
@@ -137,6 +139,27 @@ COPY config/ai/ /etc/powos/ai/
 # Desktop widgets (KDE Plasma 6 plasmoids) — e.g. PowOS Overview panel,
 # which renders `powos overview --json` + `powos services --json` on the desktop.
 COPY desktop/plasmoid/ /usr/share/plasma/plasmoids/
+
+# ═══════════════════════════════════════════════════════════════════
+# PowOS Welcome (first-run onboarding) + "Install PowOS" desktop entry
+# ═══════════════════════════════════════════════════════════════════
+# powos-welcome: kdialog menu (terminal fallback) for first steps — default-
+# password warning, install-to-disk (live boots) / update check (installed),
+# games partition, Steam wiring, Windows setup, cloud backup. The autostart
+# entry self-disables via the per-user ~/.config/powos/welcome-done marker.
+COPY bin/powos-welcome /usr/bin/
+COPY desktop/welcome/powos-welcome.desktop /usr/share/applications/
+COPY desktop/welcome/powos-install.desktop /usr/share/applications/
+COPY desktop/welcome/powos-welcome-autostart.desktop /etc/xdg/autostart/powos-welcome.desktop
+# Put the "Install PowOS" icon on the live desktop: the powos user already
+# exists image-side (created above), so /etc/skel alone wouldn't reach it.
+# chmod +x on .desktop files = freedesktop launcher-trust hint.
+RUN chmod +x /usr/bin/powos-welcome && \
+    mkdir -p /etc/skel/Desktop /home/powos/Desktop && \
+    cp /usr/share/applications/powos-install.desktop /etc/skel/Desktop/ && \
+    cp /usr/share/applications/powos-install.desktop /home/powos/Desktop/ && \
+    chmod +x /etc/skel/Desktop/powos-install.desktop /home/powos/Desktop/powos-install.desktop && \
+    chown -R 1000:1000 /home/powos/Desktop
 
 # Install dracut module for full RAM boot
 # This allows the entire OS to run from RAM, USB can be unplugged

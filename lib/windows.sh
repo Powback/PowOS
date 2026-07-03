@@ -1,0 +1,1770 @@
+#!/bin/bash
+# windows.sh - bare-metal Windows from a VIRTUAL-DISK FILE (docs/WINDOWS.md,
+# revised design: no real partitions for Windows, ever).
+#
+# Windows lives in ONE file on the POWOS-GAMES NTFS partition:
+#
+#   <POWOS-GAMES>/PowOS-Windows/windows.vhdx   (thin/dynamic, canonical)
+#
+# and bare-metal boots via Windows NATIVE VHD BOOT: bootmgr on the (shared)
+# PowOS ESP mounts the file and boots the OS inside it. No partition table
+# changes, no carve step, one blast radius: the file.
+#
+# ── Windows-exposure recap ─────────────────────────────────────────
+# A metal Windows session sees EXACTLY:
+#   1. its own file-internal volumes (ESP/MSR/C: inside windows.vhdx),
+#   2. the POWOS-GAMES host volume (by design — it carries the image and
+#      shared game assets),
+#   3. the shared ESP's boot files,
+#   and NOTHING else: the btrfs partitions carry letterless Linux GPT type
+#   GUIDs and are invisible. The ESP is SHARED with PowOS — which is why
+#   `install` takes a mandatory ESP backup and `finalize` prints the
+#   one-line restore.
+#
+# ── Hibernation policy (the file edition of the hiberfile asymmetry) ─
+# winresume CANNOT read a hiberfil.sys inside a VHD/VHDX — a native-VHD
+# metal boot therefore ALWAYS COLD-BOOTS. Windows hibernation is a
+# VM-MODE-ONLY feature: a VM-hibernated image resumed in the VM is correct
+# (same virtual hardware); the same image booted on metal makes Windows
+# prompt-discard the resume image (session lost, no corruption). Encoded:
+#   - switch (metal): warn + confirm when the image is/may be hibernated,
+#   - vm: resuming a VM-hibernated image is fine, never refused for that.
+#
+# ── Image format lifecycle (three masters to satisfy) ──────────────
+#   (a) bootmgr native boot     → needs VHD or VHDX (fixed or dynamic),
+#   (b) safe qemu read-write    → raw is bulletproof; qemu's vhdx driver
+#                                 works but is less battle-tested,
+#   (c) thin on NTFS            → sparse raw / dynamic VHDX.
+# Chosen: INSTALL onto a raw SPARSE temp image (windows.raw — qemu raw is
+# the most reliable format for Setup's heavy I/O), then `finalize` converts
+# with `qemu-img convert -O vhdx -o subformat=dynamic` (thin AND native-
+# bootable) and deletes the raw. Steady-state VM sessions attach the VHDX
+# read-write through qemu's vhdx driver (maturity caveat: it is the least
+# exercised of the three; if it misbehaves, the `--fixed-vhd` escape hatch
+# converts to a fixed-subformat VHD instead — bootmgr's oldest, safest
+# native-boot format — created sparse so NTFS still stores only used
+# blocks; qemu reads/writes VHD (vpc) very reliably).
+#
+# EXPERIMENTAL: everything hardware-facing is TODO(hw). Destructive paths
+# are gated behind plan display + confirmations and fully skipped under
+# --dry-run (lib/install-system.sh run_step discipline).
+#
+# NOTE: this file is SOURCED into the powos CLI — it must NOT execute
+# set -e/-u/pipefail at file top level. Defensive ${var:-} defaults instead.
+
+# ── Presentation ──────────────────────────────────────────────────
+WIN_RED='\033[0;31m'; WIN_GREEN='\033[0;32m'; WIN_YELLOW='\033[0;33m'
+WIN_CYAN='\033[0;36m'; WIN_BOLD='\033[1m'; WIN_DIM='\033[2m'; WIN_NC='\033[0m'
+
+win_log()  { echo -e "${WIN_CYAN}[windows]${WIN_NC} $*"; }
+win_ok()   { echo -e "${WIN_GREEN}[windows]${WIN_NC} $*"; }
+win_warn() { echo -e "${WIN_YELLOW}[windows]${WIN_NC} $*"; }
+win_err()  { echo -e "${WIN_RED}[windows]${WIN_NC} $*" >&2; }
+win_step() { echo; echo -e "${WIN_BOLD}── $* ──${WIN_NC}"; }
+
+# ── Globals (set by cmd_windows option parsing) ───────────────────
+WIN_DRY_RUN=${WIN_DRY_RUN:-0}
+WIN_ASSUME_YES=${WIN_ASSUME_YES:-0}
+WIN_ISO=""                  # --iso for install
+WIN_RAM="8G"                # VM RAM (install + vm)
+WIN_CPUS="4"                # VM vCPUs
+WIN_REBOOT_FALLBACK=0       # --reboot: plain reboot if hibernate unavailable
+WIN_INTERACTIVE=0           # --interactive: no autounattend.xml
+WIN_USERNAME="powos"        # unattended: local admin account name
+WIN_PASSWORD="powos"        # unattended: account password (default gets a loud warning)
+WIN_LOCALE="en-US"          # unattended: Windows display/system locale
+WIN_KEYBOARD="en-US"        # unattended: keyboard/input locale
+WIN_PRODUCT_KEY=""          # unattended: optional product key (keyless is the default)
+WIN_EDITION="Windows 11 Pro"  # unattended: /IMAGE/NAME for keyless edition selection
+WIN_WITH_STEAM=0            # --with-steam: best-effort silent Steam install
+WIN_SIZE_GB=256             # --size: image MAX size in GB (thin — grows with use)
+WIN_FIXED_VHD=0             # --fixed-vhd: escape hatch (fixed VHD instead of dynamic VHDX)
+
+WIN_IMAGE_SUBDIR="PowOS-Windows"   # directory on POWOS-GAMES holding the image
+WIN_RUNDIR="${WIN_RUNDIR:-/run/powos/windows}"
+WIN_LAYER_SYNC="/usr/lib/powos/ramfs/layer-sync.py"
+
+# Unattend-volume teardown state (set by win_install, read by the trap).
+WIN_TD_UNATTEND_MNT=""
+
+# OVMF (UEFI firmware) search paths — same candidates as lib/vm.sh.
+WIN_OVMF_CODE_CANDIDATES=(
+    /usr/share/edk2/ovmf/OVMF_CODE.fd
+    /usr/share/edk2/x64/OVMF_CODE.4m.fd
+    /usr/share/OVMF/OVMF_CODE.fd
+    /usr/share/qemu/OVMF_CODE.fd
+)
+WIN_OVMF_VARS_CANDIDATES=(
+    /usr/share/edk2/ovmf/OVMF_VARS.fd
+    /usr/share/edk2/x64/OVMF_VARS.4m.fd
+    /usr/share/OVMF/OVMF_VARS.fd
+    /usr/share/qemu/OVMF_VARS.fd
+)
+
+# ── run_step / confirm (install-system.sh discipline) ─────────────
+# Executes a (destructive) command unless dry-run. Always echoes it first.
+win_run_step() {
+    local desc="${1:-}"; shift
+    echo -e "  ${WIN_DIM}\$ $*${WIN_NC}"
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_warn "dry-run: skipped ($desc)"
+        return 0
+    fi
+    "$@"
+}
+
+# win_confirm "prompt" [expected] — if expected is given the user must type it
+# exactly. Typed gates protect data-destroying operations (rollback overwrites
+# the image) and must NEVER be satisfiable by --yes alone.
+win_confirm() {
+    local prompt="${1:-Proceed?}" expected="${2:-}"
+    if [[ ${WIN_ASSUME_YES:-0} -eq 1 ]]; then
+        if [[ -n "$expected" ]]; then
+            win_err "--yes does not satisfy a typed confirmation."
+            win_err "Run this command interactively and type: $expected"
+            return 1
+        fi
+        win_warn "--yes: auto-confirming: $prompt"
+        return 0
+    fi
+    local answer
+    if [[ -n "$expected" ]]; then
+        read -r -p "$prompt " answer
+        [[ "$answer" == "$expected" ]]
+    else
+        read -r -p "$prompt [y/N] " answer
+        [[ "$answer" =~ ^[Yy]$ ]]
+    fi
+}
+
+# ── Environment seams (functions so tests can shadow them) ────────
+win_require_root() {
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+        win_err "This needs root:  sudo powos windows ${1:-}"
+        return 1
+    fi
+}
+
+win_require_efi() {
+    if [[ ! -d /sys/firmware/efi ]]; then
+        win_err "Not booted in UEFI mode — BootNext needs UEFI."
+        return 1
+    fi
+    if ! command -v efibootmgr &>/dev/null; then
+        win_err "efibootmgr not found (install efibootmgr)."
+        return 1
+    fi
+}
+
+# Is $1 a block device? Wrapped so tests can stub it ([[ -b ]] can't be mocked).
+win_is_block() { [[ -b "$1" ]]; }
+
+win_find_first_existing() {
+    local f
+    for f in "$@"; do [[ -f "$f" ]] && { echo "$f"; return 0; }; done
+    return 1
+}
+
+# Parent whole-disk of a partition node.
+win_parent_disk() {
+    local pk
+    pk=$(lsblk -no PKNAME "${1:?}" 2>/dev/null | head -1)
+    [[ -n "$pk" ]] && echo "/dev/$pk"
+}
+
+# Trailing digit run of a partition node = its partition number.
+win_part_number() {
+    local digits="${1##*[!0-9]}"
+    [[ -n "$digits" ]] && echo "$digits"
+}
+
+# ── Volume / path resolution ──────────────────────────────────────
+# POWOS-GAMES mountpoint: the image lives on it. Required for everything.
+win_games_mount() {
+    local dev mnt
+    dev=$(blkid -L POWOS-GAMES 2>/dev/null || true)
+    [[ -z "$dev" ]] && return 1
+    mnt=$(findmnt -n -o TARGET -S "$dev" 2>/dev/null | head -1)
+    [[ -z "$mnt" ]] && return 1
+    echo "$mnt"
+}
+
+# POWOS-DATA mountpoint: snapshots + ESP backups live on it.
+win_data_mount() {
+    local dev mnt
+    dev=$(blkid -L POWOS-DATA 2>/dev/null || true)
+    [[ -z "$dev" ]] && return 1
+    mnt=$(findmnt -n -o TARGET -S "$dev" 2>/dev/null | head -1)
+    [[ -z "$mnt" ]] && return 1
+    echo "$mnt"
+}
+
+# Snapshots + ESP backups are stored on POWOS-DATA (btrfs), NOT beside the
+# image on POWOS-GAMES: POWOS-DATA is letterless/invisible to Windows, so a
+# rogue or compromised metal session can never damage its own restore
+# points or the ESP backups. (Beside-the-image would be Windows-writable.)
+win_snapshot_dir() {
+    local mnt; mnt=$(win_data_mount) || return 1
+    echo "$mnt/windows/snapshots"
+}
+win_backup_dir() {
+    local mnt; mnt=$(win_data_mount) || return 1
+    echo "$mnt/windows"
+}
+
+# Canonical container extension / qemu format (dynamic VHDX by default,
+# fixed VHD with the --fixed-vhd escape hatch — see the header rationale).
+win_image_ext()  { [[ ${WIN_FIXED_VHD:-0} -eq 1 ]] && echo "vhd" || echo "vhdx"; }
+win_qemu_fmt()   { [[ ${WIN_FIXED_VHD:-0} -eq 1 ]] && echo "vpc" || echo "vhdx"; }
+
+win_image_dir()  {
+    local games; games=$(win_games_mount) || return 1
+    echo "$games/$WIN_IMAGE_SUBDIR"
+}
+win_raw_path()   {
+    local dir; dir=$(win_image_dir) || return 1
+    echo "$dir/windows.raw"
+}
+win_canon_path() {
+    local dir; dir=$(win_image_dir) || return 1
+    echo "$dir/windows.$(win_image_ext)"
+}
+
+# The REAL PowOS ESP (the ONLY real block device Windows ever sees, at
+# install time, for its native-boot files). Read from the mounted system.
+win_powos_esp() {
+    local src
+    src=$(findmnt -n -o SOURCE /boot/efi 2>/dev/null | head -1)
+    [[ "$src" == /dev/* ]] && { echo "$src"; return 0; }
+    return 1
+}
+win_esp_mountpoint() {
+    local esp="${1:?}" mnt
+    mnt=$(findmnt -n -o TARGET -S "$esp" 2>/dev/null | head -1)
+    [[ -n "$mnt" ]] && echo "$mnt"
+}
+
+# Is the image file open by anything (qemu, qemu-nbd, ...)? rc 0 = IN USE.
+# fuser -s: silent, exit 0 when at least one process has it open.
+win_image_in_use() {
+    fuser -s "${1:?}" 2>/dev/null
+}
+
+# ── Guards ────────────────────────────────────────────────────────
+# Flush RAM overlay → USB, then stop the sync daemon. A failed flush means
+# unsynced changes WOULD BE LOST across the switch — hard abort.
+win_guard_layer_sync() {
+    win_log "Flushing RAM overlay to USB (layer-sync --sync-now)…"
+    if ! win_run_step "flush RAM overlay to custom layer" \
+            python3 "$WIN_LAYER_SYNC" --sync-now; then
+        win_err "layer-sync flush FAILED — refusing to switch."
+        win_err "Unsynced RAM changes would be lost. Check: powos sync status"
+        return 1
+    fi
+    if ! win_run_step "stop layer-sync daemon" \
+            systemctl stop powos-layer-sync.service; then
+        win_err "Could not stop powos-layer-sync.service — refusing to switch"
+        win_err "(a sync racing the hibernation write risks a torn custom layer)."
+        return 1
+    fi
+    return 0
+}
+
+win_guard_image_free() {
+    local img="${1:?}"
+    if win_image_in_use "$img"; then
+        win_err "$img is OPEN by another process (qemu / qemu-nbd?)."
+        win_err "Two writers on one image guarantee corruption. Close the VM first."
+        return 1
+    fi
+    return 0
+}
+
+# Hibernation state INSIDE the image: present|absent|unknown.
+# Root-gated best effort via qemu-nbd (read-only attach, probe NTFS
+# partitions inside the file for hiberfil.sys). Heavy — every failure path
+# answers an honest "unknown"; callers warn on unknown.
+win_image_hibernated() {
+    local img="${1:?}"
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 || ${EUID:-$(id -u)} -ne 0 ]] \
+        || ! command -v qemu-nbd &>/dev/null; then
+        echo "unknown"; return 0
+    fi
+    local nbd="/dev/nbd7" state="unknown" mp part
+    modprobe nbd max_part=8 2>/dev/null || true
+    if qemu-nbd --read-only -c "$nbd" "$img" 2>/dev/null; then
+        partprobe "$nbd" 2>/dev/null || true
+        sleep 1
+        mp=$(mktemp -d)
+        for part in "${nbd}"p*; do
+            [[ -b "$part" ]] || continue
+            [[ "$(blkid -o value -s TYPE "$part" 2>/dev/null)" == "ntfs" ]] || continue
+            if mount -o ro "$part" "$mp" 2>/dev/null; then
+                if [[ -e "$mp/hiberfil.sys" ]]; then state="present"; else state="absent"; fi
+                umount "$mp" 2>/dev/null || true
+                [[ "$state" == "present" ]] && break
+            fi
+        done
+        rmdir "$mp" 2>/dev/null || true
+        qemu-nbd -d "$nbd" 2>/dev/null || true
+    fi
+    echo "$state"
+}
+
+# ── Firmware boot entry lookup (boot-manager.sh pattern, sed-free) ─
+# Find the 4-hex boot id whose entry label matches $1 (regex, case-insensitive)
+# in efibootmgr output $2. Echoes e.g. "0003"; rc 1 if not found.
+win_find_boot_entry() {
+    local re="${1:?}" out="${2:-}" line
+    line=$(echo "$out" | grep -iE "^Boot[0-9A-Fa-f]{4}\*?[[:space:]].*${re}" | head -1)
+    [[ -z "$line" ]] && return 1
+    line="${line#Boot}"
+    echo "${line:0:4}"
+}
+
+# Human label of boot id $1 in efibootmgr output $2 (for messages).
+win_boot_entry_label() {
+    local id="${1:?}" out="${2:-}" line
+    line=$(echo "$out" | grep -iE "^Boot${id}\*?[[:space:]]" | head -1)
+    [[ -z "$line" ]] && return 1
+    line="${line#Boot${id}}"; line="${line#\*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    echo "${line%%$'\t'*}"
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  Pure command builders
+# ══════════════════════════════════════════════════════════════════
+
+# PURE: ESP backup pipeline (display + docs; execution is inline so the
+# pipeline components stay mockable). $1 = ESP mountpoint, $2 = out file.
+win_build_esp_backup_cmd() {
+    printf "tar -C '%s' -cf - . | zstd -q -f -o '%s'" "${1:?}" "${2:?}"
+}
+
+# PURE: the ESP restore one-liner (printed by finalize; run it if a Windows
+# update ever damages the shared ESP). $1 = backup file, $2 = ESP mountpoint.
+win_build_esp_restore_cmd() {
+    printf "zstd -dc '%s' | tar -C '%s' -xf -" "${1:?}" "${2:?}"
+}
+
+# PURE: emit the QEMU command line.
+# AHCI, NOT virtio — identical storage stack VM ↔ metal (docs/WINDOWS.md):
+# what Setup installs in the VM must boot unmodified on metal.
+#
+# Args: disk_file disk_format esp_dev iso ram cpus ovmf_code ovmf_vars [unattend_img]
+#   disk_format  raw during install, vhdx (or vpc for --fixed-vhd) for VM mode
+#   esp_dev      "" to omit — install-only: the REAL PowOS ESP as a raw 2nd
+#                disk so Setup's first-logon bcdboot can lay native-boot files
+#   iso          "" to omit (VM mode boots the installed image directly)
+#   unattend_img "" to omit (--interactive, and always in VM mode)
+#
+# discard=unmap + detect-zeroes=unmap keep the image file THIN: guest TRIM
+# and zero-writes punch holes in the sparse raw / dynamic VHDX.
+win_build_qemu_cmd() {
+    local disk="${1:?}" fmt="${2:?}" esp="${3:-}" iso="${4:-}"
+    local ram="${5:?}" cpus="${6:?}" ovmf_code="${7:?}" ovmf_vars="${8:?}"
+    local unattend="${9:-}"
+    local -a cmd=(
+        qemu-system-x86_64
+        -enable-kvm
+        -machine "q35,smm=on"
+        -cpu host
+        -smp "$cpus"
+        -m "$ram"
+        -drive "if=pflash,format=raw,readonly=on,file=${ovmf_code}"
+        -drive "if=pflash,format=raw,file=${ovmf_vars}"
+        -drive "file=${disk},format=${fmt},if=none,id=windisk,discard=unmap,detect-zeroes=unmap"
+        -device "ahci,id=ahci"
+        -device "ide-hd,drive=windisk,bus=ahci.0"
+    )
+    if [[ -n "$esp" ]]; then
+        cmd+=(
+            -drive "file=${esp},format=raw,if=none,id=espdisk"
+            -device "ide-hd,drive=espdisk,bus=ahci.1"
+        )
+    fi
+    if [[ -n "$iso" ]]; then
+        cmd+=( -drive "file=${iso},media=cdrom,readonly=on" )
+    fi
+    if [[ -n "$unattend" ]]; then
+        cmd+=(
+            -drive "file=${unattend},format=raw,if=none,id=unattend"
+            -device "ide-hd,drive=unattend,bus=ahci.2"
+        )
+    fi
+    cmd+=(
+        -boot "menu=on"
+        -netdev "user,id=net0"
+        -device "virtio-net-pci,netdev=net0"
+        -usb -device usb-tablet
+        -display "gtk,gl=on" -device virtio-vga-gl
+    )
+    # Plain space-join: no arg contains spaces (vm.sh pattern), stays eval-safe.
+    printf '%s ' "${cmd[@]}"
+    echo
+}
+
+# PURE: XML-escape a value for use in element content ('&' first, or the
+# escapes themselves would get re-escaped).
+win_xml_escape() {
+    local s="${1-}"
+    # Replacements are QUOTED so they stay literal on every bash version
+    # (bash 5.2's patsub_replacement gives an unquoted '&' special meaning).
+    s=${s//&/"&amp;"}
+    s=${s//</"&lt;"}
+    s=${s//>/"&gt;"}
+    s=${s//\"/"&quot;"}
+    s=${s//\'/"&apos;"}
+    printf '%s' "$s"
+}
+
+# PURE: loose product-key shape check (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX).
+# Callers WARN on mismatch, never fail — OEM/volume formats vary.
+win_validate_product_key() {
+    [[ "${1:-}" =~ ^[A-Za-z0-9]{5}(-[A-Za-z0-9]{5}){4}$ ]]
+}
+
+# PURE: emit a complete autounattend.xml for a ZERO-TOUCH Windows Setup run.
+#
+# Args: username password [locale] [keyboard] [product_key] [edition]
+#       [with_steam] [vhd_bcd_path]
+#   product_key  "" = keyless (DEFAULT, fully supported: unactivated with a
+#                watermark only; digital licenses re-activate online)
+#   edition      /IMAGE/NAME when keyless (default "Windows 11 Pro")
+#   with_steam   "1" appends a best-effort silent Steam install
+#   vhd_bcd_path the image path INSIDE its host volume, backslash form,
+#                default \PowOS-Windows\windows.vhdx (matches win_canon_path)
+#
+# ASCII only, well-formed; user values XML-escaped; placeholders substituted
+# with bash parameter expansion, never sed (vm.sh pattern).
+win_build_autounattend() {
+    local user pass locale kbd pkey edition steam vhdpath
+    user=$(win_xml_escape "${1:?win_build_autounattend: username required}")
+    pass=$(win_xml_escape "${2:?win_build_autounattend: password required}")
+    locale=$(win_xml_escape "${3:-en-US}")
+    kbd=$(win_xml_escape "${4:-en-US}")
+    pkey=$(win_xml_escape "${5:-}")
+    edition=$(win_xml_escape "${6:-Windows 11 Pro}")
+    steam="${7:-0}"
+    vhdpath=$(win_xml_escape "${8:-\\PowOS-Windows\\windows.vhdx}")
+
+    # Optional <Key>: only when the user supplied one. Keyless default keeps
+    # WillShowUI=OnError so Setup never prompts either way.
+    local keyblock=""
+    [[ -n "$pkey" ]] && keyblock="<Key>${pkey}</Key>"
+
+    # Optional best-effort Steam install (order 10). Needs network during
+    # first logon; Steam self-updates on first launch. %TEMP% (cmd
+    # expansion) keeps bash and PowerShell dollar signs out of the XML.
+    local steamblock=""
+    if [[ "$steam" == "1" ]]; then
+        steamblock=$(cat <<'STEAMEOF'
+        <SynchronousCommand wcm:action="add">
+          <Order>10</Order>
+          <Description>PowOS (BEST EFFORT): silent Steam install (needs network)</Description>
+          <CommandLine>cmd /c powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe' -OutFile '%TEMP%\SteamSetup.exe'; Start-Process -Wait -FilePath '%TEMP%\SteamSetup.exe' -ArgumentList '/S'"</CommandLine>
+        </SynchronousCommand>
+STEAMEOF
+)
+    fi
+
+    local xml
+    xml=$(cat <<'XMLEOF'
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  autounattend.xml (generated by: powos windows install)
+  Zero-touch Windows Setup into the PowOS virtual-disk file.
+  The VM's disk 0 IS the (empty) image file; the REAL PowOS ESP rides
+  along as disk 1 for the native-boot files; every reference below is
+  deterministic. Setup never shows a disk picker.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <SetupUILanguage>
+        <UILanguage>__POWOS_LOCALE__</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>__POWOS_KEYBOARD__</InputLocale>
+      <SystemLocale>__POWOS_LOCALE__</SystemLocale>
+      <UILanguage>__POWOS_LOCALE__</UILanguage>
+      <UserLocale>__POWOS_LOCALE__</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <!--
+        LabConfig bypasses: the QEMU install VM has no TPM and no Secure
+        Boot, and Windows 11 Setup hard-refuses to install without them.
+        These registry switches gate Setup only; bare-metal boots of the
+        finished install are unaffected.
+      -->
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>cmd /c reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>cmd /c reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>cmd /c reg add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>cmd /c reg add HKLM\SYSTEM\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+      <!--
+        Disk 0 is the EMPTY image file: Setup creates the whole internal
+        layout (ESP + MSR + C:) inside it. Wiping disk 0 is safe BY
+        CONSTRUCTION - it is the file. The REAL PowOS ESP is disk 1 and is
+        not referenced by this DiskConfiguration at all.
+        TODO(hw): verify the VM enumerates the image as disk 0 and the ESP
+        as disk 1 (AHCI port order says yes); the mandatory ESP backup
+        taken before launch covers the failure case.
+      -->
+      <DiskConfiguration>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>EFI</Type>
+              <Size>300</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Type>MSR</Type>
+              <Size>16</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>3</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Format>FAT32</Format>
+              <Label>WINESP</Label>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>3</PartitionID>
+              <Format>NTFS</Format>
+              <Label>Windows</Label>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+      <ImageInstall>
+        <OSImage>
+          <!--
+            Keyless installs must still be zero-touch: without a product key,
+            multi-edition ISOs show an edition picker, so the edition is
+            selected explicitly by image name here.
+          -->
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/NAME</Key>
+              <Value>__POWOS_EDITION__</Value>
+            </MetaData>
+          </InstallFrom>
+          <!-- Partition 3 = the Primary partition created above (C:). -->
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <InstallToAvailablePartition>false</InstallToAvailablePartition>
+        </OSImage>
+      </ImageInstall>
+      <UserData>
+        <!--
+          User-supplied media and license; PowOS ships no Microsoft bits.
+          Installing KEYLESS is fully supported: Windows runs unactivated
+          (watermark + personalization lock only), machines with a digital
+          license auto-activate online, and a key can be added any time in
+          Settings. WillShowUI OnError keeps Setup from ever prompting.
+        -->
+        <AcceptEula>true</AcceptEula>
+        <ProductKey>
+          __POWOS_KEYBLOCK__
+          <WillShowUI>OnError</WillShowUI>
+        </ProductKey>
+      </UserData>
+    </component>
+  </settings>
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <ComputerName>POWOS-WIN</ComputerName>
+    </component>
+  </settings>
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <InputLocale>__POWOS_KEYBOARD__</InputLocale>
+      <SystemLocale>__POWOS_LOCALE__</SystemLocale>
+      <UILanguage>__POWOS_LOCALE__</UILanguage>
+      <UserLocale>__POWOS_LOCALE__</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>__POWOS_USER__</Name>
+            <DisplayName>__POWOS_USER__</DisplayName>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>__POWOS_PASS__</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+      <AutoLogon>
+        <!-- One automatic logon so FirstLogonCommands run unattended. -->
+        <Enabled>true</Enabled>
+        <LogonCount>1</LogonCount>
+        <Username>__POWOS_USER__</Username>
+        <Password>
+          <Value>__POWOS_PASS__</Value>
+          <PlainText>true</PlainText>
+        </Password>
+      </AutoLogon>
+      <!--
+        FirstLogonCommands replace the manual powos-windows-postinstall.cmd
+        run (that script remains the fallback artifact for interactive
+        installs).
+        Command 1 (powercfg /h on) is HARMLESS on metal: native-VHD boots
+        always cold-boot because winresume cannot read a hiberfil inside a
+        VHD - but it matters for VM-mode hibernation, which IS supported.
+        Command 2 (HiberbootEnabled=0, Fast Startup off) still matters on
+        metal: Fast Startup would leave the file-internal NTFS and the
+        POWOS-GAMES host volume dirty.
+        Command 3 (RealTimeIsUniversal) SUPERSEDES the Linux-side
+        set-local-rtc approach for this flow: both OSes agree the RTC is
+        UTC and neither fights over it.
+        Commands 6-9 are the NATIVE-BOOT SELF-REGISTRATION (zero-touch;
+        Linux cannot write a BCD, so Windows registers itself): mount the
+        REAL ESP (attached as disk 1), lay bootmgr + BCD onto it with
+        bcdboot, then repoint the BCD at the image file. vhd=[locate]
+        makes bootmgr SEARCH every volume at boot for the path - no
+        drive-letter assumption survives into metal boots, where the file
+        sits on POWOS-GAMES.
+        TODO(hw): mountvol /S mounts "the" EFI system partition; with two
+        ESPs visible (file-internal + real) verify it picks the REAL one,
+        else pin disk 1 via a diskpart script.
+        NOTE: the firmware NVRAM entry can NOT be created from inside the
+        VM (it has its own NVRAM) - `powos windows finalize` creates it
+        host-side with efibootmgr.
+      -->
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>PowOS: hibernation on (VM-mode sessions; metal always cold-boots)</Description>
+          <CommandLine>powercfg /h on</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>PowOS: Fast Startup off (keeps NTFS clean for PowOS)</Description>
+          <CommandLine>reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v HiberbootEnabled /t REG_DWORD /d 0 /f</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>PowOS: read the RTC as UTC (agrees with PowOS)</Description>
+          <CommandLine>reg add HKLM\SYSTEM\CurrentControlSet\Control\TimeZoneInformation /v RealTimeIsUniversal /t REG_DWORD /d 1 /f</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Description>PowOS: Return to PowOS desktop shortcut</Description>
+          <CommandLine>cmd /c &gt;"C:\Users\Public\Desktop\Return to PowOS.cmd" echo shutdown /r /fw /t 0</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Description>PowOS: restart apps after sign-in</Description>
+          <CommandLine>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v RestartApps /t REG_DWORD /d 1 /f</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Description>PowOS: mount the REAL ESP (disk 1) at S:</Description>
+          <CommandLine>mountvol S: /S</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <Description>PowOS: lay native-boot files + BCD onto the real ESP</Description>
+          <CommandLine>bcdboot C:\Windows /s S: /f UEFI</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>8</Order>
+          <Description>PowOS: BCD device = the VHD file (drive-letter independent)</Description>
+          <CommandLine>bcdedit /store S:\EFI\Microsoft\Boot\BCD /set {default} device vhd=[locate]__POWOS_VHDPATH__</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>9</Order>
+          <Description>PowOS: BCD osdevice = the VHD file</Description>
+          <CommandLine>bcdedit /store S:\EFI\Microsoft\Boot\BCD /set {default} osdevice vhd=[locate]__POWOS_VHDPATH__</CommandLine>
+        </SynchronousCommand>
+__POWOS_STEAMBLOCK__
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>
+XMLEOF
+)
+    # Replacements are QUOTED: bash 5.2's patsub_replacement would otherwise
+    # expand a '&' inside them (e.g. in an escaped password) to the matched
+    # pattern. Quoting keeps the replacement literal on every bash version.
+    xml=${xml//__POWOS_USER__/"$user"}
+    xml=${xml//__POWOS_PASS__/"$pass"}
+    xml=${xml//__POWOS_LOCALE__/"$locale"}
+    xml=${xml//__POWOS_KEYBOARD__/"$kbd"}
+    xml=${xml//__POWOS_EDITION__/"$edition"}
+    xml=${xml//__POWOS_KEYBLOCK__/"$keyblock"}
+    xml=${xml//__POWOS_VHDPATH__/"$vhdpath"}
+    xml=${xml//__POWOS_STEAMBLOCK__/"$steamblock"}
+    printf '%s\n' "$xml"
+}
+
+# PURE: emit the Windows-side post-install .cmd (plain cmd.exe batch, CRLF).
+# The FALLBACK artifact for --interactive installs (unattended installs
+# apply all of this via FirstLogonCommands). Run ONCE in Windows, elevated.
+# The shortcut uses `shutdown /r /fw` (reboot to firmware menu); the better
+# one-shot is `bcdedit /set {fwbootmgr} bootsequence {PowOS-entry-GUID}`,
+# addable once the PowOS entry GUID is known.
+win_build_postinstall_cmd() {
+    local body
+    body=$(cat <<'CMDEOF'
+@echo off
+rem powos-windows-postinstall.cmd -- run ONCE in Windows, from an ELEVATED prompt.
+rem Generated by: powos windows finalize
+rem (Unattended installs already did all of this at first logon.)
+rem
+rem 1) Hibernation ON: used by VM-mode sessions. Metal native-VHD boots
+rem    always cold-boot (winresume cannot read a hiberfil inside a VHD).
+powercfg /h on
+rem
+rem 2) Fast Startup OFF: it leaves NTFS partially-hibernated (dirty), which
+rem    forces PowOS to mount shared volumes read-only or not at all.
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v HiberbootEnabled /t REG_DWORD /d 0 /f
+rem
+rem 3) "Return to PowOS" desktop shortcut (firmware boot-menu fallback).
+rem    Better one-shot, once the PowOS firmware entry GUID is known:
+rem      bcdedit /set {fwbootmgr} bootsequence {PowOS-GUID}
+>"%USERPROFILE%\Desktop\Return to PowOS.cmd" echo shutdown /r /fw /t 0
+rem
+rem NEVER initialize disks in Disk Management: the volumes without drive
+rem letters are PowOS. You only ever see C: and POWOS-GAMES.
+echo Done: hibernation on, Fast Startup off, Return-to-PowOS shortcut created.
+pause
+CMDEOF
+)
+    # cmd.exe wants CRLF line endings — emit them explicitly.
+    local line
+    while IFS= read -r line; do printf '%s\r\n' "$line"; done <<< "$body"
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  create — the virtual disk file (NO partitioning, ever)
+# ══════════════════════════════════════════════════════════════════
+win_create() {
+    win_step "Create the Windows virtual disk (EXPERIMENTAL — TODO(hw))"
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
+        win_require_root "create" || return 1
+    fi
+    if ! [[ "${WIN_SIZE_GB:-}" =~ ^[0-9]+$ ]] || (( WIN_SIZE_GB < 40 )); then
+        win_err "--size must be a whole number of GB, at least 40 (got: '${WIN_SIZE_GB:-}')."
+        return 1
+    fi
+
+    local games
+    games=$(win_games_mount) || {
+        win_err "POWOS-GAMES is not mounted — the Windows image lives on it."
+        win_err "Mount it first:  powos games mount"
+        win_err "(No POWOS-GAMES partition? Re-burn the USB with --games-gb N.)"
+        return 1
+    }
+    local dir="$games/$WIN_IMAGE_SUBDIR"
+    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
+
+    if [[ -e "$canon" ]]; then
+        win_err "A Windows image already exists: $canon"
+        win_err "Boot it:  powos windows   (metal)  /  powos windows vm"
+        return 1
+    fi
+    if [[ -e "$raw" ]]; then
+        win_err "An installation image already exists: $raw"
+        win_err "Continue with:  powos windows install --iso <path>"
+        win_err "(or finish a completed install:  powos windows finalize)"
+        return 1
+    fi
+
+    win_step "Plan"
+    echo "  Image file : $raw"
+    echo "  Max size   : ${WIN_SIZE_GB}G  (THIN: sparse file — actual usage grows with use)"
+    echo "  Lifecycle  : raw (install target) → finalize converts to"
+    echo "               windows.$(win_image_ext) (native-bootable, stays thin)"
+    echo "  No partitions are created or modified — Windows lives in this file."
+    echo
+    win_confirm "Create the image file?" || {
+        win_log "Aborted. Nothing was changed."
+        return 1
+    }
+
+    win_run_step "create image directory" mkdir -p "$dir" || return 1
+    win_run_step "create sparse raw image (${WIN_SIZE_GB}G max)" \
+        truncate -s "${WIN_SIZE_GB}G" "$raw" || return 1
+
+    win_step "Done"
+    win_ok "Image file ready (0 bytes used until Windows writes)."
+    echo "  Next step — run Windows Setup (your own ISO) into it:"
+    echo
+    echo -e "    ${WIN_BOLD}powos windows install --iso /path/to/Win11.iso${WIN_NC}"
+    echo
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  install — Windows Setup in QEMU: disk 0 = the file, disk 1 = REAL ESP
+# ══════════════════════════════════════════════════════════════════
+
+# Teardown for the unattend volume (trap-safe, best-effort).
+win_install_teardown() {
+    if [[ -n "${WIN_TD_UNATTEND_MNT:-}" ]]; then
+        umount "$WIN_TD_UNATTEND_MNT" 2>/dev/null
+        rmdir "$WIN_TD_UNATTEND_MNT" 2>/dev/null
+        WIN_TD_UNATTEND_MNT=""
+    fi
+    return 0
+}
+
+# Root-gated ESP backup: tar the shared ESP's contents to POWOS-DATA before
+# Windows ever touches it. MANDATORY — install refuses to proceed without
+# it, because Setup's first-logon bcdboot writes onto the REAL ESP and this
+# backup is the one-restore-away safety net.
+# Executed inline (not via bash -c) so tar/zstd stay test-mockable.
+win_backup_esp() {
+    local src="${1:?}" out="${2:?}"
+    echo -e "  ${WIN_DIM}\$ $(win_build_esp_backup_cmd "$src" "$out")${WIN_NC}"
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_warn "dry-run: skipped (ESP backup)"
+        return 0
+    fi
+    if ! tar -C "$src" -cf - . | zstd -q -f -o "$out"; then
+        win_err "ESP backup FAILED."
+        return 1
+    fi
+    if [[ ! -s "$out" ]]; then
+        win_err "ESP backup file is empty: $out"
+        return 1
+    fi
+    win_ok "ESP backed up: $out"
+    return 0
+}
+
+win_install() {
+    win_step "Install Windows into the image (EXPERIMENTAL — TODO(hw))"
+
+    if [[ -z "$WIN_ISO" ]]; then
+        win_err "A user-supplied Windows ISO is required:"
+        win_err "  powos windows install --iso /path/to/Win11.iso"
+        win_err "(PowOS ships no Microsoft bits — your ISO, your license.)"
+        return 1
+    fi
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 && ! -f "$WIN_ISO" ]]; then
+        win_err "ISO not found: $WIN_ISO"
+        return 1
+    fi
+
+    local games
+    games=$(win_games_mount) || {
+        win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
+        return 1
+    }
+    local dir="$games/$WIN_IMAGE_SUBDIR"
+    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
+    if [[ -e "$canon" ]]; then
+        win_err "Windows is already installed ($canon)."
+        win_err "Boot it:  powos windows  /  powos windows vm"
+        win_err "To reinstall: snapshot/remove the image, then powos windows create."
+        return 1
+    fi
+    if [[ ! -e "$raw" ]]; then
+        win_err "No installation image found. Create it first:"
+        win_err "  powos windows create [--size N]"
+        return 1
+    fi
+    win_guard_image_free "$raw" || return 1
+
+    # The REAL PowOS ESP: the ONLY real block device the VM gets — Setup's
+    # first-logon bcdboot lays the native-boot files onto it.
+    local esp esp_mnt
+    esp=$(win_powos_esp) || {
+        win_err "Could not identify the PowOS ESP (nothing mounted at /boot/efi)."
+        win_err "The install VM needs it (as a 2nd disk) for the native-boot files."
+        return 1
+    }
+    esp_mnt=$(win_esp_mountpoint "$esp") || {
+        win_err "Could not resolve the ESP mountpoint for backup."
+        return 1
+    }
+
+    # Backup destination on POWOS-DATA.
+    local bdir bfile
+    bdir=$(win_backup_dir) || {
+        win_err "POWOS-DATA is not mounted — the mandatory ESP backup lives on it."
+        return 1
+    }
+    bfile="$bdir/esp-backup-$(date +%Y%m%d-%H%M%S).tar.zst"
+
+    win_step "Plan"
+    echo "  ISO (user-supplied): $WIN_ISO"
+    echo "  Disk 0 (target):     $raw  (raw sparse file — Setup creates its own"
+    echo "                       internal ESP+MSR+C: layout inside it)"
+    echo "  Disk 1 (REAL):       $esp  — the shared PowOS ESP, the ONLY real"
+    echo "                       device Windows sees; needed for metal boot files"
+    echo "  ESP backup (FIRST):  $bfile"
+    echo "                       (mandatory — install aborts if it fails)"
+    echo "  VM:                  ${WIN_RAM} RAM, ${WIN_CPUS} vCPUs, OVMF, AHCI, boot menu on"
+    if [[ ${WIN_INTERACTIVE:-0} -eq 1 ]]; then
+        echo "  Unattend:            no (--interactive: you click through Setup yourself)"
+    else
+        echo "  Unattend:            ZERO-TOUCH — autounattend.xml on a 64MiB FAT volume"
+        echo "                       (disk 2); wipes DISK 0 ONLY (the file), installs,"
+        echo "                       then self-registers native boot (mountvol S: /S;"
+        echo "                       bcdboot C:\\Windows /s S: /f UEFI; bcdedit device/"
+        echo "                       osdevice vhd=[locate]\\${WIN_IMAGE_SUBDIR}\\windows.$(win_image_ext))"
+        echo "                       account '${WIN_USERNAME}', edition '${WIN_EDITION}',"
+        echo "                       locale ${WIN_LOCALE}, keyboard ${WIN_KEYBOARD}"
+        if [[ -n "$WIN_PRODUCT_KEY" ]]; then
+            echo "                       product key: supplied"
+            if ! win_validate_product_key "$WIN_PRODUCT_KEY"; then
+                win_warn "Product key does not look like XXXXX-XXXXX-XXXXX-XXXXX-XXXXX —"
+                win_warn "proceeding anyway (OEM/volume formats vary), but double-check it."
+            fi
+        else
+            echo "                       product key: none (keyless install — Windows runs"
+            echo "                       unactivated; digital licenses re-activate online)"
+        fi
+        [[ ${WIN_WITH_STEAM:-0} -eq 1 ]] && \
+            echo "                       Steam: BEST-EFFORT silent install at first logon"
+        if [[ "$WIN_PASSWORD" == "powos" ]]; then
+            win_warn "DEFAULT PASSWORD 'powos' in use for the Windows account!"
+            win_warn "Change it in Windows after first logon, or pass --password now."
+        fi
+    fi
+    echo
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_warn "dry-run: stopping before the ESP backup and VM launch. Nothing was changed."
+        return 0
+    fi
+
+    win_require_root "install" || return 1
+    local t req_tools=(qemu-system-x86_64 tar zstd)
+    [[ ${WIN_INTERACTIVE:-0} -eq 0 ]] && req_tools+=(mkfs.vfat truncate)
+    for t in "${req_tools[@]}"; do
+        command -v "$t" &>/dev/null || { win_err "Required tool missing: $t"; return 1; }
+    done
+    if ! win_is_block "$esp"; then
+        win_err "$esp is not a block device."
+        return 1
+    fi
+
+    # OVMF firmware (vm.sh candidates) + per-run writable NVRAM copy.
+    local ovmf_code src_vars ovmf_vars
+    ovmf_code=$(win_find_first_existing "${WIN_OVMF_CODE_CANDIDATES[@]}") || {
+        win_err "OVMF UEFI firmware not found. Install edk2-ovmf."; return 1
+    }
+    src_vars=$(win_find_first_existing "${WIN_OVMF_VARS_CANDIDATES[@]}") || {
+        win_err "OVMF_VARS template not found (edk2-ovmf)."; return 1
+    }
+    ovmf_vars="${WIN_RUNDIR}/install_VARS.fd"
+
+    win_confirm "Back up the ESP and boot Windows Setup?" || {
+        win_log "Aborted. Nothing was changed."
+        return 1
+    }
+
+    mkdir -p "$WIN_RUNDIR" "$bdir" || return 1
+    [[ -f "$ovmf_vars" ]] || cp "$src_vars" "$ovmf_vars" || return 1
+
+    # ── 1. MANDATORY ESP backup — strictly BEFORE anything touches it ──
+    win_backup_esp "$esp_mnt" "$bfile" || {
+        win_err "Refusing to continue without an ESP backup."
+        return 1
+    }
+
+    # ── 2. Unmount the ESP: the VM gets it raw; a host rw-mount racing
+    #      guest writes is the classic mounted-disk corruption (vm.sh rule).
+    win_run_step "unmount host ESP ($esp_mnt)" umount "$esp_mnt" || {
+        win_err "Could not unmount $esp_mnt — refusing to hand a mounted"
+        win_err "filesystem to the VM."
+        return 1
+    }
+
+    trap 'win_install_teardown' EXIT INT TERM
+
+    # ── 3. Unattend volume: a tiny FAT disk carrying autounattend.xml ──
+    local unattend_img=""
+    if [[ ${WIN_INTERACTIVE:-0} -eq 0 ]]; then
+        local xml ump vhdpath
+        vhdpath="\\${WIN_IMAGE_SUBDIR}\\windows.$(win_image_ext)"
+        xml=$(win_build_autounattend "$WIN_USERNAME" "$WIN_PASSWORD" \
+                "$WIN_LOCALE" "$WIN_KEYBOARD" "$WIN_PRODUCT_KEY" \
+                "$WIN_EDITION" "$WIN_WITH_STEAM" "$vhdpath")
+        unattend_img="${WIN_RUNDIR}/unattend.img"
+        win_run_step "create unattend volume (64MiB, sparse)" \
+            truncate -s 64M "$unattend_img" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
+        win_run_step "format unattend volume (FAT)" \
+            mkfs.vfat "$unattend_img" >/dev/null || { trap - EXIT INT TERM; win_install_teardown; return 1; }
+        local ump_dir
+        ump_dir=$(mktemp -d) || { trap - EXIT INT TERM; win_install_teardown; return 1; }
+        WIN_TD_UNATTEND_MNT="$ump_dir"
+        win_run_step "mount unattend volume" \
+            mount -o loop "$unattend_img" "$ump_dir" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
+        echo -e "  ${WIN_DIM}\$ (write) ${ump_dir}/autounattend.xml${WIN_NC}"
+        if ! printf '%s\n' "$xml" > "$ump_dir/autounattend.xml"; then
+            win_err "Could not write autounattend.xml."
+            trap - EXIT INT TERM; win_install_teardown; return 1
+        fi
+        win_run_step "unmount unattend volume" umount "$ump_dir" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
+        WIN_TD_UNATTEND_MNT=""
+        rmdir "$ump_dir" 2>/dev/null || true
+    fi
+
+    # ── 4. Launch Setup ──
+    local qemu_cmd
+    qemu_cmd=$(win_build_qemu_cmd "$raw" raw "$esp" "$WIN_ISO" \
+                                  "$WIN_RAM" "$WIN_CPUS" \
+                                  "$ovmf_code" "$ovmf_vars" "$unattend_img")
+    if [[ ${WIN_INTERACTIVE:-0} -eq 1 ]]; then
+        win_ok "Launching Windows Setup (interactive — click through it in the VM)…"
+    else
+        win_ok "Launching Windows Setup (unattended — watch it install itself)…"
+    fi
+    echo -e "  ${WIN_DIM}${qemu_cmd}${WIN_NC}"
+    eval "$qemu_cmd"
+    local vmrc=$?
+
+    trap - EXIT INT TERM
+    win_install_teardown
+
+    # ── 5. Remount the ESP on the host (best effort). ──
+    win_run_step "remount host ESP" mount "$esp" "$esp_mnt" || \
+        win_warn "Could not remount $esp at $esp_mnt — remount it manually."
+
+    if [[ $vmrc -ne 0 ]]; then
+        win_warn "QEMU exited with status $vmrc."
+    fi
+    win_step "Next steps"
+    echo "  1. If Setup finished (Windows reached the desktop in the VM):"
+    echo -e "       ${WIN_BOLD}powos windows finalize${WIN_NC}"
+    echo "     converts raw → windows.$(win_image_ext) (thin, native-bootable), verifies"
+    echo "     the ESP boot files, and creates the host firmware entry."
+    echo "  2. Then switch with:  powos windows"
+    echo
+    echo "  ESP restore (if Windows ever damages the shared ESP):"
+    echo "    $(win_build_esp_restore_cmd "$bfile" "$esp_mnt")"
+    return 0
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  finalize — raw→VHDX conversion, ESP verification, firmware entry
+# ══════════════════════════════════════════════════════════════════
+win_finalize() {
+    win_step "Finalize the Windows install (EXPERIMENTAL — TODO(hw))"
+
+    local games
+    games=$(win_games_mount) || {
+        win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
+        return 1
+    }
+    local dir="$games/$WIN_IMAGE_SUBDIR"
+    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
+        win_require_root "finalize" || return 1
+        win_require_efi || return 1
+    fi
+
+    # ── 1. Pending raw → container conversion ──────────────────────
+    if [[ -e "$canon" ]]; then
+        win_ok "Container image present: $canon (conversion already done)."
+        if [[ -e "$raw" ]]; then
+            win_warn "Stale $raw still present — remove it once you've verified"
+            win_warn "the converted image boots:  rm '$raw'"
+        fi
+    elif [[ -e "$raw" ]]; then
+        win_guard_image_free "$raw" || return 1
+        # Dynamic VHDX: thin on NTFS AND native-bootable by bootmgr.
+        # --fixed-vhd: fixed-subformat VHD (vpc) — bootmgr's oldest, safest
+        # native-boot format; qemu-img writes it sparse so NTFS still only
+        # stores used blocks. See the header rationale.
+        if [[ ${WIN_FIXED_VHD:-0} -eq 1 ]]; then
+            win_run_step "convert raw → fixed VHD (sparse on disk)" \
+                qemu-img convert -O vpc -o subformat=fixed "$raw" "$canon" || return 1
+        else
+            win_run_step "convert raw → dynamic VHDX (thin, native-bootable)" \
+                qemu-img convert -O vhdx -o subformat=dynamic "$raw" "$canon" || return 1
+        fi
+        if [[ ${WIN_DRY_RUN:-0} -eq 0 && ! -s "$canon" ]]; then
+            win_err "Conversion produced no output — keeping $raw."
+            return 1
+        fi
+        win_run_step "delete the raw install image" rm -f "$raw" || true
+        win_ok "Converted: $canon"
+    else
+        win_err "No Windows image found under $dir."
+        win_err "Run:  powos windows create   then   powos windows install --iso <path>"
+        return 1
+    fi
+
+    # ── 2. Verify the ESP gained the native-boot files ─────────────
+    # BCD is binary; presence of EFI/Microsoft/Boot/BCD + bootmgfw.efi is
+    # the testable proxy for "bcdboot ran and the BCD points at
+    # vhd=[locate]" (Setup's first-logon self-registration).
+    local esp esp_mnt
+    esp=$(win_powos_esp) || {
+        win_err "Could not identify the PowOS ESP (nothing mounted at /boot/efi)."
+        return 1
+    }
+    esp_mnt=$(win_esp_mountpoint "$esp") || {
+        win_err "ESP is not mounted — mount it (e.g. at /boot/efi) and re-run."
+        return 1
+    }
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_warn "dry-run: skipping ESP boot-file verification."
+    elif [[ -e "$esp_mnt/EFI/Microsoft/Boot/BCD" && -e "$esp_mnt/EFI/Microsoft/Boot/bootmgfw.efi" ]]; then
+        win_ok "ESP carries EFI/Microsoft/Boot (BCD + bootmgfw.efi)."
+    else
+        win_err "ESP is missing EFI/Microsoft/Boot/BCD or bootmgfw.efi."
+        win_err "The install's first-logon self-registration did not complete —"
+        win_err "boot the VM once more (powos windows vm) and let first logon"
+        win_err "finish, or run bcdboot manually inside Windows."
+        return 1
+    fi
+
+    # ── 3. Host-side firmware entry ────────────────────────────────
+    # bcdboot inside the VM wrote the ESP FILES, but it can NOT create the
+    # host's NVRAM entry — the VM has its own NVRAM. Create it here.
+    local disk pnum efi_out entry_id
+    disk=$(win_parent_disk "$esp" || true)
+    pnum=$(win_part_number "$esp" || true)
+    if [[ -z "$disk" || -z "$pnum" ]]; then
+        win_err "Could not derive disk/partition number from $esp."
+        return 1
+    fi
+    efi_out=$(efibootmgr 2>/dev/null || true)
+    entry_id=$(win_find_boot_entry "windows|microsoft" "$efi_out" || true)
+    if [[ -n "$entry_id" ]]; then
+        win_ok "Firmware entry already exists: Boot${entry_id} ($(win_boot_entry_label "$entry_id" "$efi_out" || echo Windows))"
+    else
+        win_run_step "create firmware boot entry (ESP: $disk part $pnum)" \
+            efibootmgr -c -d "$disk" -p "$pnum" -L "Windows Boot Manager" \
+                -l '\EFI\Microsoft\Boot\bootmgfw.efi' || {
+            win_err "efibootmgr -c failed."
+            return 1
+        }
+        if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
+            efi_out=$(efibootmgr 2>/dev/null || true)
+            entry_id=$(win_find_boot_entry "windows|microsoft" "$efi_out" || true)
+            if [[ -z "$entry_id" ]]; then
+                win_err "Created the entry but 'powos boot windows' cannot resolve it."
+                win_err "Inspect with: efibootmgr -v"
+                return 1
+            fi
+            win_ok "Verified: 'powos boot windows' resolves Boot${entry_id}."
+        fi
+    fi
+
+    # ── 4. Fallback .cmd for interactive installs ──────────────────
+    local script target="$dir/powos-windows-postinstall.cmd"
+    script=$(win_build_postinstall_cmd)
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_warn "dry-run: would write the fallback post-install script to $target"
+    elif printf '%s' "$script" > "$target"; then
+        win_log "Fallback post-install script (interactive installs): $target"
+    else
+        win_warn "Could not write $target — not fatal (unattended installs don't need it)."
+    fi
+
+    # ── 5. ESP restore one-liner ───────────────────────────────────
+    local bdir latest=""
+    bdir=$(win_backup_dir 2>/dev/null || true)
+    if [[ -n "$bdir" ]]; then
+        local f
+        for f in "$bdir"/esp-backup-*.tar.zst; do
+            [[ -e "$f" ]] && latest="$f"   # glob sorts: last = newest timestamp
+        done
+    fi
+    win_step "Done"
+    if [[ -n "$latest" ]]; then
+        echo "  If a Windows update ever damages the shared ESP, restore it with:"
+        echo -e "    ${WIN_BOLD}$(win_build_esp_restore_cmd "$latest" "$esp_mnt")${WIN_NC}"
+    else
+        win_warn "No ESP backup found under ${bdir:-<POWOS-DATA>/windows} — one is taken"
+        win_warn "automatically by 'powos windows install'."
+    fi
+    echo -e "  Switch with:  ${WIN_BOLD}powos windows${WIN_NC}"
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  the switch — powos windows (no subcommand): metal COLD boot
+# ══════════════════════════════════════════════════════════════════
+win_switch() {
+    echo
+    echo -e "${WIN_YELLOW}${WIN_BOLD}╔══════════════════════════════════════════════════════════════╗${WIN_NC}"
+    echo -e "${WIN_YELLOW}${WIN_BOLD}║  EXPERIMENTAL: bare-metal OS switch (PowOS → Windows)        ║${WIN_NC}"
+    echo -e "${WIN_YELLOW}${WIN_BOLD}║  TODO(hw): not yet validated on real hardware                ║${WIN_NC}"
+    echo -e "${WIN_YELLOW}${WIN_BOLD}╚══════════════════════════════════════════════════════════════╝${WIN_NC}"
+    echo
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
+        win_require_root "" || return 1
+    fi
+    win_require_efi || return 1
+
+    local games
+    games=$(win_games_mount) || {
+        win_err "POWOS-GAMES is not mounted — the Windows image lives on it."
+        win_err "Mount it first:  powos games mount"
+        return 1
+    }
+    local dir="$games/$WIN_IMAGE_SUBDIR"
+    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
+    if [[ ! -e "$canon" ]]; then
+        if [[ -e "$raw" ]]; then
+            win_err "The image is still raw ($raw) — native boot needs the container."
+            win_err "Finish it first:  powos windows finalize"
+        else
+            win_err "No Windows image found — set it up first:  powos windows create"
+        fi
+        return 1
+    fi
+
+    # ── Guards (all enforced, none advisory) ──────────────────────
+    win_guard_image_free "$canon" || return 1
+
+    # Hibernation-inside-the-image policy (metal): metal native-VHD boots
+    # ALWAYS COLD-BOOT — winresume cannot read a hiberfil inside a VHD. If a
+    # VM session left a hibernation image, metal Windows will prompt to
+    # DISCARD it (that VM session is lost; no corruption). Warn before the
+    # confirmation gate so the user decides informed.
+    local hstate
+    hstate=$(win_image_hibernated "$canon")
+    case "$hstate" in
+        absent)
+            win_log "No hibernation image inside the file — clean cold boot." ;;
+        present)
+            win_warn "The image holds a VM-hibernated Windows session. A METAL boot"
+            win_warn "cold-boots and Windows will prompt to DISCARD that session"
+            win_warn "(resume it instead with: powos windows vm)." ;;
+        *)
+            win_warn "Could not determine the image's hibernation state. If a VM"
+            win_warn "session was hibernated inside it, a metal boot discards it." ;;
+    esac
+
+    # Firmware entry must exist before we flush anything.
+    local efi_out entry_id label
+    efi_out=$(efibootmgr 2>/dev/null || true)
+    entry_id=$(win_find_boot_entry "windows|microsoft" "$efi_out" || true)
+    if [[ -z "$entry_id" ]]; then
+        win_err "No Windows firmware boot entry found."
+        win_err "Create it with:  powos windows finalize"
+        return 1
+    fi
+    label=$(win_boot_entry_label "$entry_id" "$efi_out" || echo "Windows Boot Manager")
+    win_log "Firmware entry: Boot${entry_id} (${label})"
+
+    echo
+    echo "  Plan: flush layer-sync → stop daemon → unmount POWOS-GAMES →"
+    echo "        BootNext Boot${entry_id} → sync → hibernate PowOS"
+    echo "  Metal Windows always COLD-BOOTS (native-VHD design; hibernation is"
+    echo "  a VM-mode feature). Coming back: the 'Return to PowOS' shortcut."
+    echo
+    win_confirm "Switch to Windows now?" || {
+        win_log "Aborted. Nothing was changed."
+        return 1
+    }
+
+    # Flush + stop layer-sync — a failure here is a hard abort (see guard).
+    win_guard_layer_sync || return 1
+
+    # Unmount POWOS-GAMES: PowOS hibernates with its mounts FROZEN, and the
+    # metal Windows session writes this NTFS volume (it hosts the image).
+    # A frozen rw-mount under another OS's writes = corruption on resume —
+    # the one rule that keeps switching safe, file edition. Refuse if busy.
+    win_run_step "unmount POWOS-GAMES ($games)" umount "$games" || {
+        win_err "Could not unmount $games (busy?) — refusing to switch."
+        win_err "Close whatever uses it, or inspect:  fuser -vm '$games'"
+        return 1
+    }
+
+    win_run_step "set one-shot BootNext (Boot${entry_id})" \
+        efibootmgr --bootnext "$entry_id" || {
+        win_err "Failed to set BootNext."
+        return 1
+    }
+    win_run_step "flush filesystem buffers" sync
+
+    if win_run_step "hibernate PowOS (S4 — PowOS session preserved)" systemctl hibernate; then
+        # On a working setup we never get here awake; under dry-run we do.
+        win_ok "Hibernate requested. Windows cold-boots from the image file."
+        return 0
+    fi
+
+    # ── Hibernate failed: explain exactly what's missing ──────────
+    echo
+    win_err "systemctl hibernate FAILED. Likely causes (docs/HIBERNATION.md):"
+    win_err "  • no swap sized ≥ RAM on the USB (S4 writes the whole session there)"
+    win_err "  • no resume= kernel argument pointing at that swap"
+    win_err "  • kernel lockdown / secure boot restrictions"
+    echo
+    win_warn "Fallback: a PLAIN REBOOT into Windows loses the live PowOS session,"
+    win_warn "but nothing else — layer-sync already flushed all changes to USB."
+    if [[ ${WIN_REBOOT_FALLBACK:-0} -eq 1 ]]; then
+        win_run_step "reboot into Windows (BootNext is set)" systemctl reboot
+        return $?
+    fi
+    if [[ ${WIN_ASSUME_YES:-0} -eq 1 ]]; then
+        win_log "Not rebooting automatically (--yes given without --reboot)."
+        win_log "Re-run with --reboot, or:  systemctl reboot   (BootNext is already set)"
+        return 1
+    fi
+    local ans
+    read -r -p "Plain reboot into Windows instead? [y/N] " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+        win_run_step "reboot into Windows (BootNext is set)" systemctl reboot
+        return $?
+    fi
+    win_log "Not rebooting. BootNext is set — the NEXT reboot lands in Windows;"
+    win_log "clear it with:  efibootmgr --delete-bootnext"
+    return 1
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  snapshots — file-level: zstd copy of the image
+#  (Future work: differencing-VHDX children would make snapshots instant
+#   and rollback = drop-the-child; today's whole-file zstd copy is simple,
+#   format-agnostic and restore-proof.)
+# ══════════════════════════════════════════════════════════════════
+
+# Shared pre-flight: image exists and nothing has it open.
+win_snapshot_preflight() {
+    local canon
+    canon=$(win_canon_path 2>/dev/null || true)
+    if [[ -z "$canon" ]]; then
+        win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
+        return 1
+    fi
+    if [[ ! -e "$canon" ]]; then
+        local raw; raw=$(win_raw_path 2>/dev/null || true)
+        if [[ -n "$raw" && -e "$raw" ]]; then
+            win_err "The image is still raw (unfinalized) — run: powos windows finalize"
+        else
+            win_err "No Windows image found ($canon)."
+        fi
+        return 1
+    fi
+    win_guard_image_free "$canon" || return 1
+    echo "$canon"
+}
+
+win_snapshot() {
+    win_step "Snapshot the Windows image (zstd copy)"
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
+        win_require_root "snapshot" || return 1
+    fi
+
+    local img
+    img=$(win_snapshot_preflight) || return 1
+
+    local sdir
+    sdir=$(win_snapshot_dir) || {
+        win_err "POWOS-DATA is not mounted — snapshots live on it"
+        win_err "(<POWOS-DATA>/windows/snapshots; invisible to Windows by design)."
+        return 1
+    }
+    local name="${1:-$(date +%Y%m%d-%H%M%S)}"
+    local out="$sdir/${name}.$(win_image_ext).zst"
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 && -e "$out" ]]; then
+        win_err "Snapshot already exists: $out (pick another name)"
+        return 1
+    fi
+
+    echo "  Source:      $img"
+    echo "  Destination: $out"
+    echo "  (whole-file compress — minutes, not instant; differencing-VHDX"
+    echo "   snapshots are future work)"
+    echo
+    win_run_step "create snapshot directory" mkdir -p "$sdir" || return 1
+    win_run_step "snapshot image → ${name}.$(win_image_ext).zst" \
+        zstd -q -f "$img" -o "$out" || {
+        win_err "Snapshot failed."
+        return 1
+    }
+    win_ok "Snapshot '${name}' done."
+    return 0
+}
+
+win_snapshots() {
+    win_step "Windows snapshots"
+    local sdir
+    sdir=$(win_snapshot_dir 2>/dev/null || true)
+    if [[ -z "$sdir" || ! -d "$sdir" ]]; then
+        echo "  (none — POWOS-DATA unmounted or no snapshots taken yet)"
+        echo "  Take one with:  sudo powos windows snapshot [name]"
+        return 0
+    fi
+    local found=0 f
+    for f in "$sdir"/*.zst; do
+        [[ -e "$f" ]] || continue
+        found=1
+        ls -lh "$f" 2>/dev/null | while read -r l; do echo "  $l"; done
+    done
+    if [[ $found -eq 0 ]]; then
+        echo "  (none yet in $sdir)"
+        echo "  Take one with:  sudo powos windows snapshot [name]"
+    else
+        echo
+        echo "  Restore with:  sudo powos windows rollback <name>"
+    fi
+    return 0
+}
+
+win_rollback() {
+    win_step "Roll back the Windows image to a snapshot (OVERWRITES it)"
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        win_err "Usage:  powos windows rollback <name>"
+        win_snapshots
+        return 1
+    fi
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
+        win_require_root "rollback" || return 1
+    fi
+
+    local img
+    img=$(win_snapshot_preflight) || return 1
+
+    local sdir snap
+    sdir=$(win_snapshot_dir) || {
+        win_err "POWOS-DATA is not mounted — cannot reach the snapshots."
+        return 1
+    }
+    snap="$sdir/${name}.$(win_image_ext).zst"
+    if [[ ! -f "$snap" ]]; then
+        if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+            win_warn "dry-run: snapshot file not found ($snap) — showing the plan anyway."
+        else
+            win_err "Snapshot not found: $snap"
+            win_snapshots
+            return 1
+        fi
+    fi
+
+    echo
+    echo -e "  ${WIN_RED}${WIN_BOLD}THIS OVERWRITES the Windows image ($img)${WIN_NC}"
+    echo -e "  ${WIN_RED}with snapshot '${name}'. Everything newer than it is LOST.${WIN_NC}"
+    echo
+    win_confirm "Type the snapshot name to confirm the rollback:" "$name" || {
+        win_log "Confirmation failed — aborting. Nothing was changed."
+        return 1
+    }
+
+    # Decompress-replace. No process may hold the image (guarded above), and
+    # a live metal session is impossible while PowOS runs on this machine.
+    win_run_step "restore ${name} → image" \
+        zstd -d -q -f "$snap" -o "$img" || {
+        win_err "Restore FAILED — the image may be in a partial state."
+        win_err "Do NOT boot Windows; retry the rollback or restore another snapshot."
+        return 1
+    }
+    win_ok "Rolled back to '${name}'."
+    return 0
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  vm — the SAME image as a KVM guest (no reboot)
+# ══════════════════════════════════════════════════════════════════
+win_vm() {
+    win_step "Boot the Windows image as a KVM guest"
+
+    local games
+    games=$(win_games_mount) || {
+        win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
+        return 1
+    }
+    local dir="$games/$WIN_IMAGE_SUBDIR"
+    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
+    if [[ ! -e "$canon" ]]; then
+        if [[ -e "$raw" ]]; then
+            win_err "The image is still raw — finish the install first:"
+            win_err "  powos windows finalize"
+        else
+            win_err "No Windows image found — set it up first:  powos windows create"
+        fi
+        return 1
+    fi
+    win_guard_image_free "$canon" || return 1
+    # A live METAL session cannot be detected from here — and does not need
+    # to be: PowOS running on this machine means metal Windows is not, and
+    # the image lives on this USB, so no other machine can be booting it.
+
+    # VM-hibernated image resumed in the VM = SAME virtual hardware = the
+    # correct, supported resume path. Never refused here (only metal boots
+    # discard it — see win_switch).
+    local hstate
+    hstate=$(win_image_hibernated "$canon")
+    case "$hstate" in
+        present) win_log "VM-hibernated session found — the VM will resume it (correct hardware match)." ;;
+        absent)  win_log "No hibernated session — Windows cold-boots in the VM." ;;
+        *)       win_log "Hibernation state unknown — a VM boot resumes or cold-boots safely either way." ;;
+    esac
+
+    # OVMF + per-VM writable NVRAM (separate from the install VM's).
+    local ovmf_code src_vars ovmf_vars
+    ovmf_code=$(win_find_first_existing "${WIN_OVMF_CODE_CANDIDATES[@]}") || {
+        if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then ovmf_code="<OVMF_CODE.fd>"; else
+            win_err "OVMF UEFI firmware not found. Install edk2-ovmf."; return 1; fi
+    }
+    src_vars=$(win_find_first_existing "${WIN_OVMF_VARS_CANDIDATES[@]}") || {
+        if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then src_vars="<OVMF_VARS.fd>"; else
+            win_err "OVMF_VARS template not found (edk2-ovmf)."; return 1; fi
+    }
+    ovmf_vars="${WIN_RUNDIR}/vm_VARS.fd"
+
+    # qemu's vhdx driver is the least battle-tested piece here (see the
+    # header rationale); if it misbehaves, recreate the image with
+    # --fixed-vhd (qemu's 'vpc' driver is rock solid).
+    local qemu_cmd
+    qemu_cmd=$(win_build_qemu_cmd "$canon" "$(win_qemu_fmt)" "" "" \
+                                  "$WIN_RAM" "$WIN_CPUS" "$ovmf_code" "$ovmf_vars" "")
+
+    win_step "Plan"
+    echo "  Image:    $canon ($(win_qemu_fmt), read-write)"
+    echo "  VM:       ${WIN_RAM} RAM, ${WIN_CPUS} vCPUs, OVMF, AHCI (same stack as metal)"
+    echo "  The VM boots the image's INTERNAL boot files — the real ESP is not"
+    echo "  attached (it is only ever needed at install time)."
+    echo
+    echo -e "  ${WIN_DIM}${qemu_cmd}${WIN_NC}"
+    echo
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_warn "--dry-run: not launching."
+        return 0
+    fi
+
+    win_require_root "vm" || return 1
+    command -v qemu-system-x86_64 &>/dev/null || {
+        win_err "qemu not installed (dnf install qemu-kvm edk2-ovmf)."; return 1
+    }
+    win_confirm "Launch the Windows VM now?" || {
+        win_log "Aborted."
+        return 1
+    }
+    mkdir -p "$WIN_RUNDIR"
+    [[ -f "$ovmf_vars" ]] || cp "$src_vars" "$ovmf_vars" || return 1
+
+    win_ok "Launching Windows VM…"
+    eval "$qemu_cmd"
+    return $?
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  status
+# ══════════════════════════════════════════════════════════════════
+win_status() {
+    win_step "Windows on PowOS — status (virtual-disk file design)"
+
+    local games dir raw canon
+    games=$(win_games_mount 2>/dev/null || true)
+    echo
+    if [[ -z "$games" ]]; then
+        echo -e "  POWOS-GAMES : ${WIN_YELLOW}not mounted${WIN_NC} — the image lives on it"
+        echo "                (mount it:  powos games mount)"
+        echo
+        echo -e "  Next step   : mount POWOS-GAMES, then ${WIN_BOLD}powos windows status${WIN_NC}"
+        return 0
+    fi
+    echo "  POWOS-GAMES : mounted at $games"
+    dir="$games/$WIN_IMAGE_SUBDIR"
+    raw="$dir/windows.raw"; canon="$dir/windows.$(win_image_ext)"
+
+    local have_canon=0 have_raw=0
+    [[ -e "$canon" ]] && have_canon=1
+    [[ -e "$raw" ]] && have_raw=1
+    if [[ $have_canon -eq 1 ]]; then
+        echo -e "  Image       : ${WIN_GREEN}present${WIN_NC}  $canon"
+        local used=""
+        used=$(du -h "$canon" 2>/dev/null | while read -r a _; do echo "$a"; break; done)
+        [[ -n "$used" ]] && echo "                used on disk: $used (thin file — grows with use)"
+        if win_image_in_use "$canon"; then
+            echo -e "                ${WIN_YELLOW}OPEN by a process (VM running?)${WIN_NC}"
+        fi
+        local hstate; hstate=$(win_image_hibernated "$canon")
+        case "$hstate" in
+            present) echo "  Hibernated  : yes, INSIDE the image (resume with: powos windows vm;"
+                     echo "                a metal boot discards that session)" ;;
+            absent)  echo "  Hibernated  : no" ;;
+            *)       echo -e "  Hibernated  : unknown ${WIN_DIM}(root + qemu-nbd needed to probe;${WIN_NC}"
+                     echo -e "                ${WIN_DIM}metal boots always cold-boot regardless)${WIN_NC}" ;;
+        esac
+    elif [[ $have_raw -eq 1 ]]; then
+        echo -e "  Image       : ${WIN_YELLOW}raw install image${WIN_NC}  $raw"
+        echo "                (conversion pending: powos windows finalize)"
+    else
+        echo -e "  Image       : ${WIN_YELLOW}none${WIN_NC}"
+    fi
+
+    # Firmware entry (efibootmgr scan; absent on non-UEFI / test machines).
+    local entry_id="" efi_out=""
+    if command -v efibootmgr &>/dev/null && [[ -d /sys/firmware/efi ]]; then
+        efi_out=$(efibootmgr 2>/dev/null || true)
+        entry_id=$(win_find_boot_entry "windows|microsoft" "$efi_out" || true)
+        if [[ -n "$entry_id" ]]; then
+            echo -e "  Boot entry  : ${WIN_GREEN}Boot${entry_id}${WIN_NC} ($(win_boot_entry_label "$entry_id" "$efi_out" || echo Windows))"
+        else
+            echo -e "  Boot entry  : ${WIN_YELLOW}none${WIN_NC} (efibootmgr found no Windows entry)"
+        fi
+    else
+        echo -e "  Boot entry  : unknown ${WIN_DIM}(no UEFI/efibootmgr here)${WIN_NC}"
+    fi
+
+    # Snapshots
+    local sdir count=0 f
+    sdir=$(win_snapshot_dir 2>/dev/null || true)
+    if [[ -n "$sdir" && -d "$sdir" ]]; then
+        for f in "$sdir"/*.zst; do [[ -e "$f" ]] && count=$((count+1)); done
+        echo "  Snapshots   : $count ($sdir)"
+    else
+        echo "  Snapshots   : 0 (POWOS-DATA unmounted or none taken)"
+    fi
+
+    # What comes next?
+    echo
+    if [[ $have_canon -eq 0 && $have_raw -eq 0 ]]; then
+        echo -e "  Next step   : ${WIN_BOLD}sudo powos windows create${WIN_NC}"
+    elif [[ $have_canon -eq 0 ]]; then
+        echo -e "  Next step   : ${WIN_BOLD}sudo powos windows install --iso <path>${WIN_NC}"
+        echo -e "                then  ${WIN_BOLD}sudo powos windows finalize${WIN_NC}"
+    elif [[ -z "$entry_id" ]]; then
+        echo -e "  Next step   : ${WIN_BOLD}sudo powos windows finalize${WIN_NC}  (firmware entry missing)"
+    else
+        echo -e "  Ready       : metal (cold boot):  ${WIN_BOLD}sudo powos windows${WIN_NC}"
+        echo -e "                same instance, VM:  ${WIN_BOLD}sudo powos windows vm${WIN_NC}"
+    fi
+    return 0
+}
+
+# ── Usage / dispatch ──────────────────────────────────────────────
+win_usage() {
+    cat << EOF
+powos windows — bare-metal Windows from a virtual-disk FILE (docs/WINDOWS.md)
+
+Windows lives in <POWOS-GAMES>/PowOS-Windows/windows.vhdx and metal-boots
+via Windows native VHD boot. No real partitions are ever created for it.
+Metal boots always COLD-BOOT (hibernation is a VM-mode-only feature).
+
+Usage: powos windows [<command>] [options]
+
+Commands:
+  (none)              THE SWITCH: guards → layer-sync flush → unmount games
+                      → BootNext → hibernate PowOS; Windows cold-boots
+  status              Image, hibernation state, boot entry, snapshots
+  create              Create the thin image file (no partitioning at all)
+  install --iso PATH  Run YOUR Windows ISO's Setup in QEMU into the file;
+                      the REAL PowOS ESP rides along (2nd disk, backed up
+                      first) for the native-boot files. ZERO-TOUCH default
+  finalize            Convert raw → VHDX (thin, native-bootable), verify the
+                      ESP boot files, create the host firmware entry
+  snapshot [name]     zstd copy of the image → POWOS-DATA/windows/snapshots
+  snapshots           List snapshots
+  rollback <name>     Decompress-replace the image (typed confirmation)
+  vm                  Boot the SAME image as a KVM guest (VM-hibernation OK)
+
+Options:
+  --dry-run           Show every action, change NOTHING
+  --yes               Skip y/N confirmations (typed gates still refuse)
+  --iso PATH          install: the user-supplied Windows ISO (required)
+  --size N            create: image MAX size in GB (default: 256; thin file)
+  --fixed-vhd         use a fixed-subformat VHD instead of dynamic VHDX
+                      (escape hatch if qemu's vhdx driver misbehaves)
+  --ram SIZE          VM RAM (default: 8G)
+  --cpus N            VM vCPUs (default: 4)
+  --interactive       install: no autounattend.xml — click through Setup
+  --username NAME     install: local admin account (default: powos)
+  --password PW       install: account password (default: powos — CHANGE IT)
+  --locale LL-CC      install: Windows locale (default: en-US)
+  --keyboard LL-CC    install: keyboard/input locale (default: en-US)
+  --edition NAME      install: image name for keyless installs
+                      (default: "Windows 11 Pro")
+  --product-key KEY   install: embed a product key (default: keyless)
+  --with-steam        install: best-effort silent Steam install at first logon
+  --reboot            switch: if hibernate fails, plain-reboot into Windows
+  -h, --help          This help
+
+EXPERIMENTAL — TODO(hw): none of the hardware paths are validated yet.
+PowOS ships no Microsoft bits: you supply the ISO and the license.
+EOF
+}
+
+cmd_windows() {
+    # Reset per-invocation state (the lib is sourced into a fresh CLI process,
+    # but be defensive — tests call cmd_windows repeatedly).
+    WIN_DRY_RUN=0; WIN_ASSUME_YES=0; WIN_ISO=""
+    WIN_REBOOT_FALLBACK=0; WIN_RAM="8G"; WIN_CPUS="4"
+    WIN_INTERACTIVE=0; WIN_USERNAME="powos"; WIN_PASSWORD="powos"
+    WIN_LOCALE="en-US"; WIN_KEYBOARD="en-US"
+    WIN_PRODUCT_KEY=""; WIN_EDITION="Windows 11 Pro"; WIN_WITH_STEAM=0
+    WIN_SIZE_GB=256; WIN_FIXED_VHD=0
+
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)      WIN_DRY_RUN=1; shift ;;
+            --yes|-y)       WIN_ASSUME_YES=1; shift ;;
+            --iso)          WIN_ISO="${2:-}"; shift 2 ;;
+            --size)         WIN_SIZE_GB="${2:-256}"; shift 2 ;;
+            --fixed-vhd)    WIN_FIXED_VHD=1; shift ;;
+            --ram)          WIN_RAM="${2:-8G}"; shift 2 ;;
+            --cpus)         WIN_CPUS="${2:-4}"; shift 2 ;;
+            --interactive)  WIN_INTERACTIVE=1; shift ;;
+            --username)     WIN_USERNAME="${2:-powos}"; shift 2 ;;
+            --password)     WIN_PASSWORD="${2:-powos}"; shift 2 ;;
+            --locale)       WIN_LOCALE="${2:-en-US}"; shift 2 ;;
+            --keyboard)     WIN_KEYBOARD="${2:-en-US}"; shift 2 ;;
+            --edition)      WIN_EDITION="${2:-Windows 11 Pro}"; shift 2 ;;
+            --product-key)  WIN_PRODUCT_KEY="${2:-}"; shift 2 ;;
+            --with-steam)   WIN_WITH_STEAM=1; shift ;;
+            --reboot)       WIN_REBOOT_FALLBACK=1; shift ;;
+            -h|--help)      win_usage; return 0 ;;
+            *)              args+=("$1"); shift ;;
+        esac
+    done
+
+    local sub="${args[0]:-}"
+    case "$sub" in
+        "")             win_switch ;;
+        status)         win_status ;;
+        create)         win_create ;;
+        install)        win_install ;;
+        finalize)       win_finalize ;;
+        snapshot)       win_snapshot "${args[1]:-}" ;;
+        snapshots|list) win_snapshots ;;
+        rollback)       win_rollback "${args[1]:-}" ;;
+        vm)             win_vm ;;
+        help)           win_usage ;;
+        *)              win_err "Unknown windows command: $sub"; win_usage; return 1 ;;
+    esac
+}

@@ -2758,6 +2758,16 @@ case "${1:-}" in
         source "$POWOS_LIB/boot-manager.sh"
         cmd_boot "$@"
         ;;
+    games)
+        shift
+        source "$POWOS_LIB/games.sh"
+        cmd_games "$@"
+        ;;
+    windows|win)
+        shift
+        source "$POWOS_LIB/windows.sh"
+        cmd_windows "$@"
+        ;;
     cuda)
         shift
         source "$POWOS_LIB/cuda.sh"
