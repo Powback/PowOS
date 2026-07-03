@@ -7,12 +7,12 @@
             }
         ],
         "Category": "System Information",
-        "Description": "One-glance PowOS panel: base image, GPU/CUDA, deployments, containers, storage",
-        "Icon": "computer-symbolic",
-        "Id": "com.powos.overview",
+        "Description": "Live graphs: GPU util/VRAM/temp/power, CPU, RAM, network",
+        "Icon": "office-chart-line-stacked",
+        "Id": "com.powos.monitor",
         "License": "MIT",
-        "Name": "PowOS Overview",
-        "Version": "3.0"
+        "Name": "PowOS Monitor",
+        "Version": "1.0"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }
