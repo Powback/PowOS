@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Welcome
+GenericName=First-run setup
+Comment=First steps: change the default password, install to disk, shared games partition, Windows setup, cloud backup
+Exec=powos-welcome
+Icon=start-here
+Terminal=false
+Categories=System;Settings;

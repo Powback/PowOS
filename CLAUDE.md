@@ -204,7 +204,7 @@ sudo powos install-system                 # Interactive: pick disk + mode
 sudo powos install-system --dry-run       # Show the plan, change nothing
 sudo powos install-system --alongside     # Dual-boot: install into free space, keep Windows
 sudo powos install-system --whole-disk    # Erase target disk (must type disk model to confirm)
-sudo powos install-system --shared-gb 200 # Also create a shared NTFS data partition
+sudo powos install-system --shared-gb 200 # Also create a shared NTFS data partition (now labeled POWOS-GAMES)
 ```
 
 **Boot-menu mechanism:** the "Install PowOS" entry is a Boot Loader Spec entry
@@ -242,6 +242,60 @@ on exit (keeps CUDA on the host otherwise).
 > (`test/tier1/test-gpu.sh`). Hard prereqs: IOMMU on; **desktop on the iGPU**
 > (else releasing the dGPU freezes the session — `powos gpu to-vm` refuses while
 > the GPU is in use). Keep a TTY/SSH the first time.
+
+### Games Storage (powos games) — shared NTFS partition, both OSes
+
+POWOS-GAMES is a first-class partition: NTFS, labeled `POWOS-GAMES`,
+deliberately visible to Windows. Every other PowOS partition is hidden from
+Windows via GPT type GUIDs (Linux-filesystem type = no drive letter = no
+"format this disk?" prompts) — see the exposure contract in `docs/WINDOWS.md`.
+Created at USB flash time (`install-to-usb.sh --games-gb N`), by the disk
+installer (`--shared-gb`, now labeled POWOS-GAMES), or later on any existing
+system via the CLI. Machine-local: each machine creates its own on its own
+PowOS-owned disk.
+
+```bash
+powos games status                    # partition, mount, Steam wiring state
+powos games create --size N [--disk D] [--dry-run] [--yes]  # create POWOS-GAMES
+powos games mount                     # mount at /var/mnt/games (ntfs3)
+powos games steam-setup               # Steam library on the shared partition
+powos games resize                    # stub — not implemented
+```
+
+**Steam wiring (`steam-setup`):** mounts POWOS-GAMES at `/var/mnt/games` via
+ntfs3 (uid/gid, windows_names), creates `SteamLibrary/steamapps`, keeps
+`compatdata`/`shadercache` on native btrfs via symlinks (Proton prefixes break
+on NTFS), adds the library to `libraryfolders.vdf` when Steam is closed, and
+drops `GAMES-README.txt` at the partition root telling the Windows side to add
+`<letter>:\SteamLibrary` as a Windows Steam library. One installed game serves
+both OSes.
+
+> ⚠️ **Safety/status:** nothing touches a disk except a user-run command
+> against a device the user names, behind plan display + confirmations +
+> `--dry-run`. Implemented, not yet hardware-validated.
+
+### Bare-Metal Windows on USB (powos windows) — 🚧 EXPERIMENTAL, needs hardware validation
+
+Full design: `docs/WINDOWS.md`. Windows lives in its own partitions (WIN-ESP +
+POWOS-WIN) on a PowOS-owned disk; the user supplies their own ISO + license.
+
+```bash
+powos windows status              # partition, hibernation state, boot entries, guards
+powos windows create [--disk D]   # carve WIN-ESP + POWOS-WIN (plan + confirm) 🚧
+powos windows install --iso PATH  # ISO-in-VM install onto the real partitions 🚧
+powos windows finalize            # boot entries + post-install wiring
+powos windows                     # guarded switch: flush + stop layer-sync → guards →
+                                  #   BootNext → hibernate (--reboot fallback until
+                                  #   hibernation ships) 🚧
+powos windows snapshot|snapshots|rollback   # ntfsclone-based, refuses dirty/hibernated
+powos windows vm                  # stub until hardware validation
+```
+
+> 🚧 **Status:** the switch and `install` are EXPERIMENTAL — implemented, not
+> yet hardware-validated. The hibernation half is blocked on
+> `docs/HIBERNATION.md`; until it ships, `powos windows --reboot` is the
+> fallback. Same safety posture as `powos games`: named device, plan,
+> confirmations, `--dry-run`.
 
 ### Container Management
 ```bash

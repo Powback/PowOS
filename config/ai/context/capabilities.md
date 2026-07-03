@@ -35,6 +35,33 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   see docs/DUAL-BOOT-VM.md. Gaming in a guest needs GPU passthrough (2 GPUs + IOMMU).
 - PowOS cannot build/bundle Windows or a live Windows; Windows comes from normal MS install.
 
+## Games partition & bare-metal Windows (NEW)
+- `powos games {status|create|mount|steam-setup|resize}` — first-class shared NTFS
+  partition, label POWOS-GAMES, deliberately visible to Windows (all other PowOS
+  partitions hidden via Linux GPT type GUIDs — no drive letter, no format prompts).
+  Created at USB flash (`install-to-usb.sh --games-gb N`), by the installer
+  (`--shared-gb`, now labeled POWOS-GAMES), or later via
+  `powos games create --size N [--disk D] [--dry-run] [--yes]`. `steam-setup`
+  mounts at /var/mnt/games (ntfs3, uid/gid, windows_names), creates
+  SteamLibrary/steamapps, keeps Proton compatdata/shadercache on native btrfs via
+  symlinks (prefixes break on NTFS), registers in libraryfolders.vdf (Steam must
+  be closed), drops GAMES-README.txt for the Windows side. One installed game
+  serves both OSes. `resize` is a stub. ⚠️ implemented CLI, hardware validation
+  pending.
+- `powos windows {status|create [--disk D]|install --iso PATH|finalize|snapshot|
+  snapshots|rollback}` — Windows in its own WIN-ESP + POWOS-WIN partitions on a
+  PowOS-owned disk; user supplies ISO + license. Bare `powos windows` = the
+  guarded switch: flush + stop layer-sync → guards → BootNext → hibernate
+  (`--reboot` fallback until hibernation ships). `vm` is a stub until hardware
+  validation. 🚧 implemented CLI, hardware validation pending — do NOT present
+  the switch or install as proven; see docs/WINDOWS.md.
+- Machine-local model: the USB is also an installer and gets unplugged after
+  installing to a desktop/laptop/Steam Deck SSD — so games/windows partitions are
+  per-machine, created on that machine's own PowOS-owned disk. Installed systems
+  receive these commands via normal bootc updates and run create once (no reflash).
+- Safety: nothing touches a disk except a user-run command against a device the
+  user names, behind plan display + confirmations + `--dry-run`.
+
 ## Runtime updates (edit source → update running system)
 - Source is bundled at `/var/lib/powos/src` (no `.git` — excluded from image).
 - `powos update self` — deploy bin/lib/config/systemd from source into the live

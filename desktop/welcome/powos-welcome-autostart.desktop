@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Welcome
+Comment=First-run setup (self-disables after "Don't show this again")
+Exec=powos-welcome --autostart
+Icon=start-here
+Terminal=false
+OnlyShowIn=KDE;
+X-KDE-StartupNotify=false

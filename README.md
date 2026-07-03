@@ -654,6 +654,8 @@ Honest assessment of what works:
 | CacheFS lazy-loading | 🚫 Incomplete — keep disabled | Write-back to USB not implemented; written data is lost |
 | Mobile mode (USB-free) | 🚧 WIP | Copies OS to RAM but live remount not implemented — requires reboot to take effect |
 | Sync conflict detection | ⚠️ Partial | Detection works; merge is manual |
+| Shared games partition (`powos games`) | ⚠️ Implemented, not hardware-validated | NTFS POWOS-GAMES shared with Windows; Steam library wiring |
+| Bare-metal Windows on USB (`powos windows`) | 🚧 Experimental | Spec + CLI (docs/WINDOWS.md); hardware validation pending |
 | Cloud backup | ⚠️ Partial | git-based implementation exists; not fully validated |
 | AI-assisted healing | 🧪 Experimental | Requires manual Ollama setup |
 | Tier-2 VM testing | ❌ Not yet | Only Docker/tier-1 tests exist |
