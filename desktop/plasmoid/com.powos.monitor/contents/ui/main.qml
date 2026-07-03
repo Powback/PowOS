@@ -23,6 +23,8 @@ PlasmoidItem {
     property real curUtil: 0;   property real curVram: 0
     property real curTemp: 0;   property real curPower: 0
     property var histGpuTemp: []; property var histPower: []
+    property real gpuClk: 0;    property real gpuMemClk: 0     // MHz
+    property string ramInfo: ""                                 // "DDR5 6000 MT/s" from hwinfo cache
     // CPU
     property var histCpu: [];   property var histCpuTempS: []
     property real curCpu: 0;    property real curCpuTemp: 0
@@ -51,7 +53,7 @@ PlasmoidItem {
         "head -1 /proc/stat; " +
         "awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print t, a}' /proc/meminfo; " +
         "awk 'NR>2 {gsub(/:/,\" \"); rx+=$2; tx+=$10} END{print rx, tx}' /proc/net/dev; " +
-        "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null | head -1 || echo na; " +
+        "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.gr,clocks.mem --format=csv,noheader,nounits 2>/dev/null | head -1 || echo na; " +
         "sensors 2>/dev/null | awk '/^Tctl:/{gsub(/[+°C]/,\"\"); print $2; exit}' || echo 0; " +
         "awk '/^cpu MHz/{s+=$4; n++} END{if(n) printf \"%.2f\\n\", s/n/1000; else print 0}' /proc/cpuinfo; " +
         "cut -d' ' -f1 /proc/loadavg; " +
@@ -72,7 +74,9 @@ PlasmoidItem {
         // Per-process net BANDWIDTH needs root (nethogs); unprivileged proxy is
         // socket ownership — who's actively talking, by connection count.
         "echo __N__; " +
-        "ss -tunp 2>/dev/null | grep -oP 'users:\\(\\(\"\\K[^\"]+' | sort | uniq -c | sort -rn | head -3 | awk '{print $2, $1}'"
+        "ss -tunp 2>/dev/null | grep -oP 'users:\\(\\(\"\\K[^\"]+' | sort | uniq -c | sort -rn | head -3 | awk '{print $2, $1}'; " +
+        "echo __HW__; " +
+        "cat /var/lib/powos/state/hwinfo.json 2>/dev/null || echo '{}'"
 
     function pushHist(arr, v) { var a = arr.slice(); a.push(v); if (a.length > maxSamples) a.shift(); return a }
 
@@ -109,7 +113,16 @@ PlasmoidItem {
         if (rest.length < 2) return
         var tail = rest[1].split("__N__")
         topIo = parseOffenders(tail[0], " MB/s")
-        topNet = tail.length > 1 ? parseOffenders(tail[1], " conns") : []
+        if (tail.length < 2) return
+        var last = tail[1].split("__HW__")
+        topNet = parseOffenders(last[0], " conns")
+        if (last.length > 1) {
+            try {
+                var hw = JSON.parse(last[1].trim())
+                if (hw.ram_type && hw.ram_speed_mts)
+                    ramInfo = hw.ram_type + " " + hw.ram_speed_mts + " MT/s" + (hw.dimms ? " · " + hw.dimms + " DIMMs" : "")
+            } catch (e) { /* cache absent until powos-hwinfo runs once */ }
+        }
     }
 
     // Charts repaint themselves via onSeriesChanged — never reference chart ids
@@ -151,6 +164,7 @@ PlasmoidItem {
             var f = g.split(",").map(function(s){ return parseFloat(s.trim()) })
             if (f.length >= 5 && !isNaN(f[0])) {
                 curUtil = f[0]; curVram = f[1]; vramTotal = f[2]; curTemp = f[3]; curPower = f[4]
+                if (f.length >= 7) { gpuClk = f[5]; gpuMemClk = f[6] }
                 histUtil = pushHist(histUtil, f[0])
                 histVram = pushHist(histVram, f[1])
                 histGpuTemp = pushHist(histGpuTemp, f[3])
@@ -258,9 +272,16 @@ PlasmoidItem {
                 Kirigami.Heading { level: 3; text: "Monitor"; Layout.fillWidth: true }
             }
 
-            GraphHeader { label: "GPU " + root.curUtil.toFixed(0) + "%"; value: root.curTemp.toFixed(0) + "°C · " + root.curPower.toFixed(0) + " W" }
+            GraphHeader {
+                label: "GPU " + root.curUtil.toFixed(0) + "%" + (root.gpuClk > 0 ? " · " + root.gpuClk.toFixed(0) + " MHz" : "")
+                value: root.curTemp.toFixed(0) + "°C · " + root.curPower.toFixed(0) + " W"
+            }
             Spark { series: root.histUtil; maxValue: 100 }
-            GraphHeader { label: "VRAM " + fmtGiB(root.curVram) + " GiB"; value: root.vramTotal > 0 ? "of " + fmtGiB(root.vramTotal) + " GiB" : "" }
+            GraphHeader {
+                label: "VRAM " + fmtGiB(root.curVram) + " GiB"
+                value: (root.vramTotal > 0 ? "of " + fmtGiB(root.vramTotal) + " GiB" : "")
+                       + (root.gpuMemClk > 0 ? " · " + root.gpuMemClk.toFixed(0) + " MHz" : "")
+            }
             Spark { series: root.histVram; maxValue: root.vramTotal > 0 ? root.vramTotal : 1; lineColor: Kirigami.Theme.positiveTextColor }
             GraphHeader { label: "TEMP gpu " + root.curTemp.toFixed(0) + "°C"; value: "cpu " + root.curCpuTemp.toFixed(0) + "°C" }
             Spark { series: root.histGpuTemp; series2: root.histCpuTempS; maxValue: 100
@@ -276,7 +297,11 @@ PlasmoidItem {
             }
             Spark { series: root.histCpu; maxValue: 100; lineColor: Kirigami.Theme.textColor }
             Offenders { list: root.topCpu }
-            GraphHeader { label: "RAM " + root.curRam.toFixed(1) + " GiB"; value: root.ramTotal > 0 ? "of " + root.ramTotal.toFixed(0) + " GiB" : "" }
+            GraphHeader {
+                label: "RAM " + root.curRam.toFixed(1) + " GiB"
+                value: (root.ramTotal > 0 ? "of " + root.ramTotal.toFixed(0) + " GiB" : "")
+                       + (root.ramInfo !== "" ? " · " + root.ramInfo : "")
+            }
             Spark { series: root.histRam; maxValue: root.ramTotal > 0 ? root.ramTotal : 1; lineColor: Kirigami.Theme.positiveTextColor }
             Offenders { list: root.topMem }
             GraphHeader { label: "NET ↓ " + fmtRate(root.curRx); value: "↑ " + fmtRate(root.curTx) }

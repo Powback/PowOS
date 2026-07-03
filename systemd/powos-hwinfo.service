@@ -1,0 +1,23 @@
+[Unit]
+Description=PowOS: cache static hardware info (RAM speed/type) for unprivileged readers
+Documentation=man:powos(8)
+# RAM speed/type live in the SMBIOS/DMI tables, which are root-only to read
+# (dmidecode). They're STATIC per boot, so cache them once to a world-readable
+# JSON that widgets (PowOS Monitor plasmoid) and `powos overview` can consume.
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '\
+mkdir -p /var/lib/powos/state; \
+dmidecode -t 17 2>/dev/null | awk '"'"'\
+/^\tType: DDR/               {t=$2} \
+/Configured Memory Speed: [0-9]+/ {if ($4+0 > s) s=$4+0} \
+/^\tSpeed: [0-9]+/           {if (!s && $2+0 > sp) sp=$2+0} \
+/^\tSize: [0-9]+ (GB|MB)/    {n++} \
+END {if (!s) s=sp; printf "{\"ram_type\":\"%s\",\"ram_speed_mts\":%d,\"dimms\":%d}\n", t, s, n} \
+'"'"' > /var/lib/powos/state/hwinfo.json; \
+chmod 644 /var/lib/powos/state/hwinfo.json'
+
+[Install]
+WantedBy=multi-user.target

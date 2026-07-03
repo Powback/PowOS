@@ -130,10 +130,12 @@ COPY systemd/powos-ramboot-init.service /usr/lib/systemd/system/
 COPY systemd/powos-layer-sync.service /usr/lib/systemd/system/
 COPY systemd/powos-cachefs-sync.service /usr/lib/systemd/system/
 COPY systemd/powos-installer.service /usr/lib/systemd/system/
+COPY systemd/powos-hwinfo.service /usr/lib/systemd/system/
 RUN systemctl enable powos-ramboot-init.service 2>/dev/null || true && \
     systemctl enable powos-layer-sync.service 2>/dev/null || true && \
     systemctl enable powos-cachefs-sync.service 2>/dev/null || true && \
-    systemctl enable powos-installer.service 2>/dev/null || true
+    systemctl enable powos-installer.service 2>/dev/null || true && \
+    systemctl enable powos-hwinfo.service 2>/dev/null || true
 
 # Rebuild initramfs with our dracut module
 # This embeds the RAM overlay setup into the boot process
