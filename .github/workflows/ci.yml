@@ -36,6 +36,9 @@ jobs:
       - name: Run Base-Swap Tests
         run: bash test/tier1/test-base.sh
 
+      - name: Run Boot-Manager Tests
+        run: bash test/tier1/test-boot-manager.sh
+
       - name: Run Data Integrity Tests
         run: |
           pip install psutil rich 2>/dev/null || true

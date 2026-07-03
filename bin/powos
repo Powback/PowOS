@@ -96,6 +96,10 @@ Commands:
   base add <image>    Build+add a new base (newer/older ver, other bootc image)
   base remove <name>  Delete a base variant
 
+  boot list           Show UEFI boot entries
+  boot windows        Reboot into Windows once (for anti-cheat games), then back
+  boot next <name>    One-shot boot into any UEFI entry by name
+
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build bootable PowOS ISO
   build test          Build container image only (for testing)
@@ -2568,6 +2572,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/base.sh"
         cmd_base "$@"
+        ;;
+    boot)
+        shift
+        source "$POWOS_LIB/boot-manager.sh"
+        cmd_boot "$@"
         ;;
     build|b)
         shift
