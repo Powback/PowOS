@@ -639,16 +639,23 @@ cmd_update() {
             echo ""
 
             # Check for package updates
-            echo "Packages (via dnf):"
-            if command -v dnf &>/dev/null; then
+            echo "Packages:"
+            if [[ -f /run/ostree-booted ]]; then
+                # Atomic host: packages ride the base image (dnf is a guard
+                # stub here — piping it into wc used to produce a multi-line
+                # value and an arithmetic-syntax error on this exact screen).
+                echo "  Managed by the base image — 'powos upgrade' covers OS + packages"
+            elif command -v dnf5 &>/dev/null; then
                 local updates
-                updates=$(dnf check-update --quiet 2>/dev/null | wc -l || echo "0")
-                if [[ "$updates" -gt 0 ]]; then
+                updates=$(dnf5 check-update --quiet 2>/dev/null | grep -Ec '^[[:alnum:]]') || true
+                if [[ "${updates:-0}" -gt 0 ]]; then
                     echo "  $updates package updates available"
                     echo "  Run 'powos update packages' to install"
                 else
                     echo "  System is up to date"
                 fi
+            else
+                echo "  No supported package manager found"
             fi
             echo ""
             echo "Commands:"

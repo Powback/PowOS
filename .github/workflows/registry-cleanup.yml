@@ -1,0 +1,78 @@
+name: Registry Cleanup
+
+# GHCR retention: every push publishes multi-GB image versions (sha-tagged)
+# plus build-cache layers, and private-package storage counts against the
+# account quota — unbounded, that's real money. Weekly prune:
+#   powos           keep the newest 30 versions + drop untagged manifests.
+#                   Channel tags (:nvidia-open, :latest, ...) always point at
+#                   recent versions so they survive; only stale sha-pinned
+#                   history ages out. CAVEAT: a variant that stops being
+#                   built for a long time will eventually age out of the
+#                   newest-30 window — rebuild it via workflow_dispatch on
+#                   build-publish if you need it again.
+#   powos-cache-*   pure build cache, keep only the newest 5.
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: registry-cleanup
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Drop untagged manifests (powos)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: powos
+          package-type: container
+          delete-only-untagged-versions: 'true'
+
+      - name: Keep newest 30 versions (powos)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: powos
+          package-type: container
+          min-versions-to-keep: 30
+
+      - name: Prune build caches (keep newest 5 each)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: powos-cache-nvidia-open
+          package-type: container
+          min-versions-to-keep: 5
+
+      - name: Prune build caches (testing)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: powos-cache-nvidia-open-testing
+          package-type: container
+          min-versions-to-keep: 5
+
+      # Legacy caches from before the matrix was trimmed; harmless no-ops
+      # once fully emptied/deleted.
+      - name: Prune legacy caches (nvidia)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: powos-cache-nvidia
+          package-type: container
+          min-versions-to-keep: 1
+
+      - name: Prune legacy caches (main)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: powos-cache-main
+          package-type: container
+          min-versions-to-keep: 1
