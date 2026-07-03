@@ -30,6 +30,8 @@ Usage: powos <command> [options]
 Commands:
   overview            One-glance panel: model, image, GPU/CUDA, deploys, disk
   overview --json     Same, machine-readable (for widgets/plasmoids)
+  services            Running containers + container services + GPU users
+  services --json     Same, machine-readable
   status              Show full system status
   health              System health check (layers, RAM, USB, sync)
   health --ai         Talk to health AI agent for troubleshooting
@@ -2657,6 +2659,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/overview.sh"
         cmd_overview "$@"
+        ;;
+    services|svc)
+        shift
+        source "$POWOS_LIB/services.sh"
+        cmd_services "$@"
         ;;
     build|b)
         shift

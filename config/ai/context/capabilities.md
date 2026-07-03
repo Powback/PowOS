@@ -87,6 +87,10 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   (bootc-deployment vs USB overlay-stack), base image + channel, GPU/CUDA,
   deployment/rollback count, active services, containers, disk, safety posture.
   Read-only + non-root, so desktop widgets can poll `--json`.
+- Services (`powos services [--json]`): running podman/distrobox containers
+  (image, status, ports, gpu-access, dev-vs-service), container-backed systemd
+  units (flags stale/failed), and GPU users (vram/util + compute processes).
+  The "what are my gsplat/TTS/STT/dev boxes doing + who's on the GPU" panel.
 
 ## Key paths
 - `/usr/lib/powos/` scripts · `/etc/powos/` config · `/run/powos/` runtime state
