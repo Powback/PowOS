@@ -16,11 +16,13 @@
 # ── Pure decision logic ───────────────────────────────────────────
 
 # Map a detect_gpu() value to a base-variant name.
-#   nvidia-*            -> nvidia   (proprietary driver + CUDA build)
-#   amd*, intel, other  -> main     (mesa/open drivers; boots anywhere incl. Deck)
+#   nvidia-*            -> nvidia-open  (open kernel modules; DEFAULT for NVIDIA)
+#   amd*, intel, other  -> main         (mesa/open drivers; boots anywhere incl. Deck)
+# The closed proprietary NVIDIA driver is the "nvidia" variant — not auto-picked;
+# it's chosen explicitly (older Maxwell/Pascal cards) via rd.powos.variant=nvidia.
 variant_from_gpu() {
     case "$1" in
-        nvidia*) echo "nvidia" ;;
+        nvidia*) echo "nvidia-open" ;;
         *)       echo "main" ;;
     esac
 }

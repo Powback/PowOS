@@ -449,6 +449,15 @@ isv_last_partition() {
 isv_post_install() {
     isv_step "Post-install tuning (dual-boot friendliness)"
 
+    # 0) GPU driver variant: the install carries whatever variant you booted.
+    local booted_variant="nvidia-open (default)"
+    local vk
+    vk=$(grep -o 'rd.powos.variant=[^ ]*' /proc/cmdline 2>/dev/null | head -1)
+    [[ -n "$vk" ]] && booted_variant="${vk#rd.powos.variant=}"
+    isv_log "GPU driver variant installed: ${booted_variant}"
+    isv_log "  (installs the variant you booted; to switch open<->closed, reboot"
+    isv_log "   the live USB and pick a different entry, then re-install.)"
+
     # 1) Clock: Windows expects local-time RTC; matching it avoids clock skew.
     run_step "set RTC to local time (matches Windows)" \
         timedatectl set-local-rtc 1 --adjust-system-clock 2>/dev/null || \

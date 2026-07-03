@@ -53,18 +53,21 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - Overlays (systemd-sysext) via `powos dev` / `overlay-manager.sh`. ✅
 
 ## GPU / base image
+- **Default base is now the OPEN NVIDIA driver** (`bazzite-nvidia-open:stable`).
+  Closed proprietary (`bazzite-nvidia`) is selectable; AMD/Intel = `bazzite`.
+  Override at build: `POWOS_BASE_IMAGE` / `--build-arg BASE_IMAGE`.
 - One x86-64 USB, GPU variant auto-select at boot: `lib/boot/variant-select.sh`
-  picks base-nvidia vs base-main from the detected GPU, override via
-  `rd.powos.variant=nvidia|main|auto`. ⚠️ selection ENGINE done + unit-tested;
-  the multi-base USB layout + dracut wiring + build-both-variants are NOT wired
-  yet (see docs/MULTI-VARIANT-USB.md). x86-64 only — Mac/Android out of scope.
-- Base is ONE image, default `bazzite-nvidia:stable` (NVIDIA proprietary driver + KDE).
-  Overridable via `POWOS_BASE_IMAGE` / `--build-arg BASE_IMAGE` → `bazzite` (AMD/Intel)
-  or `bazzite-nvidia-open` (RTX 20-series+). Driver stack is fixed by the image;
-  hardware profiles tune settings but can't swap nvidia↔amd at boot.
+  picks `nvidia-open` (default for NVIDIA) vs `nvidia` (closed) vs `main` (AMD/Intel),
+  override via `rd.powos.variant=nvidia-open|nvidia|main|auto`. Install inherits the
+  booted variant. ⚠️ selection ENGINE done + unit-tested; multi-base USB layout +
+  dracut wiring + build-both-variants NOT wired yet (docs/MULTI-VARIANT-USB.md).
+  x86-64 only — Mac/Android out of scope. Open needs Turing/GTX-16+; older NVIDIA
+  (Maxwell/Pascal) needs closed.
+- Driver stack is fixed by the image; hardware profiles tune settings but can't
+  swap nvidia↔amd at boot.
 - CUDA: base has the NVIDIA driver (CUDA *runtime* works). Full toolkit (nvcc/cuDNN)
-  is NOT in the base — use the `powos-cuda` distrobox (nvidia/cuda devel image) for
-  compiling CUDA. `powos-python` has GPU passthrough but no toolkit.
+  is NOT in the base — use the `powos-cuda` distrobox (nvidia/cuda devel image).
+  `powos-python` has GPU passthrough but no toolkit.
 
 ## Key paths
 - `/usr/lib/powos/` scripts · `/etc/powos/` config · `/run/powos/` runtime state
