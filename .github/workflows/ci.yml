@@ -46,6 +46,9 @@ jobs:
       - name: Run VM Tests
         run: bash test/tier1/test-vm.sh
 
+      - name: Run GPU Hotswap Tests
+        run: bash test/tier1/test-gpu.sh
+
       - name: Run Variant-Select Tests
         run: bash test/tier1/test-variant-select.sh
 

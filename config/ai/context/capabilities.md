@@ -109,6 +109,19 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   Reboot to apply; old deployment = rollback. Counterpart to `powos base` (USB layers).
 - Private image pulls (`powos registry login [host]`): writes /etc/ostree/auth.json
   so bootc can pull private bases; reuses your `gh` token for ghcr.io.
+- GPU hotswap (`powos gpu status|to-vm|to-host`): dynamically bind the dGPU
+  between the host (nvidia → CUDA/native games) and vfio-pci (VM passthrough),
+  so it's NOT permanently dedicated to vfio and CUDA keeps working. `vm windows
+  --gpu` auto-does to-vm → launch → to-host. ⚠️ Hard prereqs: IOMMU on; the
+  DESKTOP must run on the OTHER GPU (iGPU) or releasing the dGPU freezes the
+  session (to-vm refuses while in use). Pure logic unit-tested; real bind/unbind
+  needs hardware. Whole IOMMU-group slot (GPU + HDMI-audio) moves together.
+- Anti-cheat reality (IMPORTANT, don't over-promise): kernel anti-cheats
+  (EAC/BattlEye/Vanguard — e.g. Arc Raiders) BLOCK VMs and may flag them, so
+  anti-cheat games CANNOT run in `vm windows` — they need BARE-METAL Windows
+  (`powos boot windows`, a reboot). Non-anti-cheat games should run NATIVE on
+  Linux (Steam/Proton) — no VM. The Windows VM is for productivity + non-AC
+  Windows-only titles. "Both OSes native at once, no VM" is physically impossible.
 - Overview (`powos overview [--json]`): one-glance panel — layer model
   (bootc-deployment vs USB overlay-stack), base image + channel, GPU/CUDA,
   deployment/rollback count, active services, containers, disk, safety posture.

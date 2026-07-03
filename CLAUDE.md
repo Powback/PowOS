@@ -222,6 +222,27 @@ keeping Steam Proton prefixes on native FS while sharing only assets on NTFS.
 > `bootc install to-filesystem`) is **EXPERIMENTAL** — see `TODO(hw)` markers
 > in `lib/install-system.sh`. Validate on a VM / spare disk before trusting it.
 
+### Windows: dual-boot, reciprocal VM, GPU hotswap
+```bash
+powos boot windows          # one-shot reboot into bare-metal Windows, back after
+powos vm windows [--gpu]    # run the installed Windows as a KVM guest (no reboot)
+powos gpu status            # where the dGPU is (host vs vfio/VM) + readiness
+powos gpu to-vm | to-host   # hotswap the dGPU between Linux (CUDA) and a VM
+```
+**Anti-cheat reality (see `docs/DUAL-BOOT-VM.md`):** kernel anti-cheats
+(EAC/BattlEye/Vanguard — e.g. Arc Raiders) **block VMs** → those games need
+**bare-metal Windows** (`powos boot windows`, a reboot). Non-anti-cheat games run
+**native on Linux/Proton** (no VM). The VM is for productivity + non-AC
+Windows-only titles. `--gpu` hotswaps the dGPU in for the session and reclaims it
+on exit (keeps CUDA on the host otherwise).
+
+> ⚠️ **Status / testability:** GPU hotswap + passthrough is **hardware-only** —
+> it can't be exercised in Docker/CI (no GPU, vfio, IOMMU, or Windows image). The
+> harness covers PowOS boot (`test/e2e`) + command/PCI-detection logic
+> (`test/tier1/test-gpu.sh`). Hard prereqs: IOMMU on; **desktop on the iGPU**
+> (else releasing the dGPU freezes the session — `powos gpu to-vm` refuses while
+> the GPU is in use). Keep a TTY/SSH the first time.
+
 ### Container Management
 ```bash
 powos containers list             # List all containers

@@ -29,6 +29,26 @@ reboot for a quick cross-OS task.
 5. **Sharing files while a guest runs:** use a network share (Samba/NFS) or virtiofs —
    NOT a partition mounted by both host and guest at once.
 
+## Which path for which game (READ THIS FIRST — anti-cheat reality)
+
+A VM is **not** a universal answer, because **kernel anti-cheats block VMs**:
+
+| What you're running | Where it goes | Why |
+|---|---|---|
+| **Anti-cheat games** (EAC/BattlEye/Vanguard — e.g. Arc Raiders) | **Bare-metal Windows** — `powos boot windows` (a reboot) | The anti-cheat **detects and blocks VMs**, and hiding the VM risks a ban. No way around it. |
+| **Non-anti-cheat games** | **Native Linux** (Steam/Proton) — no VM at all | Bazzite runs them natively at full speed; a passthrough VM is strictly worse. |
+| **Windows productivity / non-AC Windows-only apps** | The **VM below** (`powos vm windows`), optionally with `--gpu` | Seamless, no reboot. |
+
+"Both OSes native at the same time with no VM" is **physically impossible** on one
+machine — whichever isn't the hardware owner is either off (dual-boot) or a guest
+(VM). The closest to seamless is a passthrough VM + Looking Glass — but that's a
+VM, so anti-cheat still blocks it. **For anti-cheat titles, bare-metal + a
+one-click reboot (`powos boot windows`) is the ceiling.**
+
+**GPU for the VM:** use `powos gpu to-vm` / `vm windows --gpu` to hotswap the
+dGPU in for a session and `powos gpu to-host` to reclaim it (keeps CUDA on the
+host the rest of the time). Requires IOMMU on + your desktop running on the iGPU.
+
 ## Direction A — PowOS host → Windows guest (built in)
 
 ```bash
