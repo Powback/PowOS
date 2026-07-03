@@ -83,6 +83,10 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   Reboot to apply; old deployment = rollback. Counterpart to `powos base` (USB layers).
 - Private image pulls (`powos registry login [host]`): writes /etc/ostree/auth.json
   so bootc can pull private bases; reuses your `gh` token for ghcr.io.
+- Overview (`powos overview [--json]`): one-glance panel — layer model
+  (bootc-deployment vs USB overlay-stack), base image + channel, GPU/CUDA,
+  deployment/rollback count, active services, containers, disk, safety posture.
+  Read-only + non-root, so desktop widgets can poll `--json`.
 
 ## Key paths
 - `/usr/lib/powos/` scripts · `/etc/powos/` config · `/run/powos/` runtime state

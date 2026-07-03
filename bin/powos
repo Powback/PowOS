@@ -28,6 +28,8 @@ PowOS - Portable Gaming Workstation
 Usage: powos <command> [options]
 
 Commands:
+  overview            One-glance panel: model, image, GPU/CUDA, deploys, disk
+  overview --json     Same, machine-readable (for widgets/plasmoids)
   status              Show full system status
   health              System health check (layers, RAM, USB, sync)
   health --ai         Talk to health AI agent for troubleshooting
@@ -2642,6 +2644,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/registry.sh"
         cmd_registry "$@"
+        ;;
+    overview|ov)
+        shift
+        source "$POWOS_LIB/overview.sh"
+        cmd_overview "$@"
         ;;
     build|b)
         shift
