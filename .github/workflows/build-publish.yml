@@ -93,9 +93,11 @@ jobs:
           # Registry layer cache: pull unchanged layers from the last build so a
           # script-only change doesn't redo the whole ~15GB base + dnf/dracut.
           # (Login above is required so --cache-from/--cache-to can pull/push.)
+          # NOTE: podman requires a repo WITHOUT a tag here — it manages its own
+          # per-layer tags. A :tag makes every build fail at arg parsing.
           podman build --layers \
-            --cache-from ${{ env.IMAGE }}:cache-${{ matrix.variant }} \
-            --cache-to   ${{ env.IMAGE }}:cache-${{ matrix.variant }} \
+            --cache-from ${{ env.IMAGE }}-cache-${{ matrix.variant }} \
+            --cache-to   ${{ env.IMAGE }}-cache-${{ matrix.variant }} \
             --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
             -f Containerfile \
             -t ${{ env.IMAGE }}:${{ matrix.variant }} \
