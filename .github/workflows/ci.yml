@@ -47,6 +47,9 @@ jobs:
           python3 test/tier1/test-layer-sync.py
           python3 test/tier1/test-cachefs.py
 
+      - name: Vendor bazzite system_files (Containerfile COPYs it)
+        run: ./build/vendor-bazzite.sh
+
       - name: Docker Compose Test
         run: |
           docker compose --profile test build
@@ -57,6 +60,9 @@ jobs:
     needs: tier1-tests
     steps:
       - uses: actions/checkout@v4
+
+      - name: Vendor bazzite system_files (Containerfile COPYs it)
+        run: ./build/vendor-bazzite.sh
 
       - name: Run E2E Tests
         run: |
