@@ -31,6 +31,15 @@ _claude_is_uuid() {
     [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
 }
 
+# Append invocation-wide extra flags to the caller's args array (by nameref).
+# Currently: --dangerously-skip-permissions when the user passed --yolo. The
+# claude CLI won't run --dangerously-skip-permissions as root unless the guest
+# opts in, but that's the CLI's own guard — we just pass the flag through.
+_claude_add_common() {
+    local -n _a="$1"
+    [[ "${POWOS_AI_SKIP_PERMS:-}" == "1" ]] && _a+=("--dangerously-skip-permissions")
+}
+
 # Send a prompt and get a response
 # Returns: response text (and stores session_id in temp file for retrieval)
 client_call() {
@@ -40,6 +49,7 @@ client_call() {
 
     local cmd="${CLIENT_CMD:-claude}"
     local args=("--print")
+    _claude_add_common args
 
     # Check if user wants JSON output
     local user_wants_json="${CLAUDE_JSON_OUTPUT:-false}"
@@ -110,6 +120,7 @@ client_call_json() {
 
     local cmd="${CLIENT_CMD:-claude}"
     local args=("--print" "--output-format" "json")
+    _claude_add_common args
 
     if [[ -n "$system_prompt" ]]; then
         args+=("--system-prompt" "$system_prompt")
@@ -130,6 +141,7 @@ client_call_verbose() {
 
     local cmd="${CLIENT_CMD:-claude}"
     local args=("--print" "--output-format" "json" "--verbose")
+    _claude_add_common args
 
     if [[ -n "$system_prompt" ]]; then
         args+=("--system-prompt" "$system_prompt")
@@ -142,6 +154,50 @@ client_call_verbose() {
     "$cmd" "${args[@]}" "$prompt"
 }
 
+# Stream the response LIVE — print assistant text and tool-use as they arrive
+# (the "intermittent messages"), instead of buffering everything and showing
+# only the final result. MUST be called WITHOUT command substitution so output
+# reaches the terminal. Stashes the session id from the terminal 'result' event.
+client_call_stream() {
+    local prompt="$1"
+    local system_prompt="${2:-}"
+    local session_id="${3:-}"
+
+    local cmd="${CLIENT_CMD:-claude}"
+    local args=("--print" "--output-format" "stream-json" "--verbose")
+    _claude_add_common args
+    [[ -n "$system_prompt" ]] && args+=("--system-prompt" "$system_prompt")
+    if [[ -n "$session_id" ]] && _claude_is_uuid "$session_id"; then
+        args+=("--resume" "$session_id")
+    fi
+
+    # Without jq we can't parse events — stream the raw JSONL (still live).
+    if ! command -v jq &>/dev/null; then
+        "$cmd" "${args[@]}" "$prompt"
+        return "${PIPESTATUS[0]:-$?}"
+    fi
+
+    # Parse the event stream line by line: show assistant text + tool calls as
+    # they happen; capture the session id from the final 'result' event.
+    "$cmd" "${args[@]}" "$prompt" | while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        case "$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null)" in
+            assistant)
+                printf '%s' "$line" | jq -r '
+                    (.message.content // [])[]
+                    | if .type=="text" then .text
+                      elif .type=="tool_use" then "[2m⚙ "+.name+"[0m"
+                      else empty end' 2>/dev/null
+                ;;
+            result)
+                local sid; sid="$(printf '%s' "$line" | jq -r '.session_id // empty' 2>/dev/null)"
+                [[ -n "$sid" ]] && printf '%s' "$sid" > "$CLAUDE_SESSION_ID_FILE"
+                ;;
+        esac
+    done
+    return "${PIPESTATUS[0]:-0}"
+}
+
 # Continue the most recent conversation
 # $2 (optional): agent system prompt — passed through like the one-shot path
 client_continue() {
@@ -149,6 +205,7 @@ client_continue() {
     local system_prompt="${2:-}"
     local cmd="${CLIENT_CMD:-claude}"
     local args=("--print" "--continue")
+    _claude_add_common args
 
     if [[ -n "$system_prompt" ]]; then
         args+=("--system-prompt" "$system_prompt")

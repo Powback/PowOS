@@ -349,6 +349,7 @@ ai_call() {
     local opt_interactive=""
     local opt_json=""
     local opt_verbose=""
+    local opt_stream=""   # "", "true", or "false"; default resolved after parsing
     local prompt=""
 
     # Parse arguments
@@ -384,6 +385,19 @@ ai_call() {
                 ;;
             --verbose)
                 opt_verbose="true"
+                shift
+                ;;
+            --stream)
+                opt_stream="true"
+                shift
+                ;;
+            --no-stream)
+                opt_stream="false"
+                shift
+                ;;
+            --yolo|--dangerously-skip-permissions)
+                # Pass through to the underlying CLI (skips its permission prompts).
+                export POWOS_AI_SKIP_PERMS=1
                 shift
                 ;;
             --help|-h)
@@ -501,12 +515,28 @@ User request: $prompt"
         export CLAUDE_JSON_OUTPUT="true"
     fi
 
+    # Stream live by DEFAULT for a normal interactive prompt (so you see tool-use
+    # and progress, not just the final answer). Off for --json (machine output),
+    # --verbose, or when stdout isn't a TTY (piped/scripted). Force with --stream,
+    # disable with --no-stream.
+    if [[ -z "$opt_stream" ]]; then
+        if [[ -t 1 && -z "$opt_json" && -z "$opt_verbose" ]]; then
+            opt_stream="true"
+        else
+            opt_stream="false"
+        fi
+    fi
+
     # Call client with appropriate function. Capture the exit code
     # explicitly — an `x=$(...)` assignment would trip errexit in strict
     # shells before any error handling could run.
     local result=""
     local exit_code=0
-    if [[ -n "$opt_verbose" ]] && declare -f client_call_verbose &>/dev/null; then
+    if [[ "$opt_stream" == "true" ]] && declare -f client_call_stream &>/dev/null; then
+        # Stream live — NOT captured (command substitution would buffer it all
+        # and defeat the whole point). Output goes straight to the terminal.
+        client_call_stream "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session" || exit_code=$?
+    elif [[ -n "$opt_verbose" ]] && declare -f client_call_verbose &>/dev/null; then
         result=$(client_call_verbose "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || exit_code=$?
     elif [[ -n "$opt_json" ]] && declare -f client_call_json &>/dev/null; then
         result=$(client_call_json "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || exit_code=$?
@@ -520,8 +550,8 @@ User request: $prompt"
         return $exit_code
     fi
 
-    # Output result
-    echo "$result"
+    # Output result (streaming mode already printed it live).
+    [[ "$opt_stream" == "true" ]] || echo "$result"
 
     # Record the exchange in the PowOS session file (used by session export)
     if [[ -n "$opt_session" ]] && declare -f ai_session_add_message &>/dev/null; then
@@ -729,6 +759,11 @@ Options:
   --interactive, -i      Interactive chat mode
   --json                 Output JSON with session info
   --verbose              Verbose JSON output (shows tool use)
+  --stream               Stream the reply live — text + tool-use as they happen
+                         (default on a terminal; use --no-stream to disable)
+  --no-stream            Buffer and print only the final answer
+  --yolo                 Skip the client's permission prompts
+                         (alias: --dangerously-skip-permissions)
   --help, -h             Show this help
 
 Session Commands:
