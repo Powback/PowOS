@@ -5,8 +5,12 @@ Documentation=man:powos(8)
 # appends `powos.install=1` to the kernel command line. A normal "PowOS Live"
 # boot has no such arg, so this service stays inactive.
 ConditionKernelCommandLine=powos.install
-After=multi-user.target
-Conflicts=getty@tty1.service
+# On a KDE image graphical.target starts SDDM, which seizes tty1 and hides the
+# installer. Conflict with + order after the display manager so it is stopped
+# before we take the console. (Belt and braces: the BLS install entry also
+# forces systemd.unit=multi-user.target so the DM never starts.)
+After=multi-user.target display-manager.service
+Conflicts=getty@tty1.service display-manager.service
 
 [Service]
 Type=idle

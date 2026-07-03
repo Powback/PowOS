@@ -164,6 +164,28 @@ write_raw_image() {
 # The raw image has 2 partitions (EFI + root).
 # We add a 3rd partition for PowOS layer persistence.
 # ─────────────────────────────────────────────────────────────────
+# Repair the GPT so it spans the whole device. After dd'ing a raw image, the
+# backup GPT header sits at the end of the IMAGE (mid-disk); parted refuses to
+# allocate the space beyond it until the GPT is moved to the real end of disk.
+repair_gpt() {
+    local device="$1"
+
+    if command -v sgdisk &>/dev/null; then
+        log "Repairing GPT (moving backup header to end of disk with sgdisk)..."
+        if sgdisk -e "$device" >/dev/null 2>&1; then
+            partprobe "$device" 2>/dev/null || true
+            return 0
+        fi
+        log_warn "sgdisk -e failed — falling back to parted's GPT fix"
+    fi
+
+    # parted interactively offers to fix a mismatched backup GPT; feed it the
+    # answer. Harmless no-op if the GPT is already correct.
+    log "Repairing GPT with parted (answering its 'fix' prompt)..."
+    printf 'fix\nfix\n' | parted ---pretend-input-tty "$device" print >/dev/null 2>&1 || true
+    partprobe "$device" 2>/dev/null || true
+}
+
 add_data_partition() {
     local device="$1"
 
@@ -172,6 +194,10 @@ add_data_partition() {
     sleep 2
 
     log "Adding POWOS-DATA partition for persistent layers..."
+
+    # Without this, parted sees no usable free space after the dd'd image and
+    # every fresh USB would ship with NO data partition (no persistence).
+    repair_gpt "$device"
 
     # Find free space start after existing partitions
     local last_end
@@ -185,33 +211,56 @@ add_data_partition() {
     fi
 
     if [[ -z "$last_end" ]]; then
-        log_warn "Could not detect partition layout, skipping POWOS-DATA creation"
-        log_warn "Add manually: sudo parted $device mkpart POWOS-DATA btrfs <start>MiB 100%"
-        return 0
+        log_error "Could not detect the partition layout on $device."
+        log_error "The USB has NO persistence partition — layers and /home would be lost."
+        log_error "Fix the GPT and add it manually, then re-run with --setup-data-only:"
+        log_error "  sudo sgdisk -e $device"
+        log_error "  sudo parted $device mkpart POWOS-DATA btrfs <start>MiB 100%"
+        exit 1
     fi
 
     log "Adding POWOS-DATA partition starting at ${last_end}MiB..."
 
     parted "$device" --script mkpart POWOS-DATA btrfs "${last_end}MiB" 100% || {
-        log_warn "Could not add POWOS-DATA partition automatically"
-        log_warn "Add manually: sudo parted $device mkpart POWOS-DATA btrfs ${last_end}MiB 100%"
-        return 0
+        log_error "Could not create the POWOS-DATA partition on $device."
+        log_error "Without it the USB has NO persistence (layers, /home). Aborting."
+        log_error "Inspect with: sudo parted $device unit MiB print free"
+        log_error "Then create it manually: sudo parted $device mkpart POWOS-DATA btrfs ${last_end}MiB 100%"
+        exit 1
     }
 
     partprobe "$device" 2>/dev/null || true
     sleep 2
 
-    # Find the new partition (last one on device)
+    # Find the new partition by the GPT name we just gave it (lexicographic
+    # sort of device names breaks at partition 10).
     local data_part
-    data_part=$(lsblk -ln -o NAME "$device" | sort | tail -1)
-    data_part="/dev/${data_part}"
+    data_part=$(lsblk -ln -o PATH,PARTLABEL "$device" 2>/dev/null \
+        | awk '$2 == "POWOS-DATA" {print $1; exit}')
 
-    if [[ -b "$data_part" ]]; then
+    # Fallback: highest partition NUMBER from parted (numeric, not lexicographic)
+    if [[ -z "$data_part" ]]; then
+        local pnum
+        pnum=$(parted -m -s "$device" print 2>/dev/null \
+            | awk -F: '/^[0-9]+:/ {n=$1} END {print n}')
+        if [[ "$pnum" =~ ^[0-9]+$ ]]; then
+            if [[ "$device" =~ [0-9]$ ]]; then
+                data_part="${device}p${pnum}"
+            else
+                data_part="${device}${pnum}"
+            fi
+        fi
+    fi
+
+    if [[ -n "$data_part" && -b "$data_part" ]]; then
         log "Formatting POWOS-DATA partition: $data_part"
         mkfs.btrfs -f -L "POWOS-DATA" "$data_part"
         log_success "POWOS-DATA partition created: $data_part"
     else
-        log_warn "Could not find new partition, skipping format"
+        log_error "POWOS-DATA partition was created but its device node was not found."
+        log_error "The USB is NOT ready (no formatted persistence partition). Aborting."
+        log_error "Re-run: sudo $0 --setup-data-only $device"
+        exit 1
     fi
 }
 
@@ -271,27 +320,67 @@ add_install_boot_entry() {
         return 0
     fi
 
+    # The template must have an options line (kernel args incl. root=). Writing
+    # a bare `options powos.install=1` entry would be UNBOOTABLE — refuse.
+    if ! grep -q '^options ' "$template"; then
+        log_warn "BLS template $template has no 'options' line — cannot build a"
+        log_warn "bootable install entry. Skipping the 'Install PowOS' menu entry."
+        log_warn "You can still install after booting live:  sudo powos install-system"
+        umount "$mp" 2>/dev/null || true
+        rmdir "$mp" 2>/dev/null || true
+        return 0
+    fi
+
     local install_entry="${entries_dir}/powos-install.conf"
-    # Copy template; retitle; append the installer kernel arg to the options line.
+    # Copy template; retitle; append the installer kernel arg to the options
+    # line. systemd.unit=multi-user.target keeps the display manager (SDDM)
+    # from seizing tty1 and hiding the installer.
     awk '
         /^title / { print "title Install PowOS to disk"; next }
-        /^options / { print $0 " powos.install=1"; next }
+        /^options / { print $0 " powos.install=1 systemd.unit=multi-user.target"; next }
         { print }
     ' "$template" > "$install_entry"
-    # Ensure a title/options line existed; if not, append minimally.
+    # Ensure a title line existed; if not, add one (cosmetic only).
     grep -q '^title '   "$install_entry" || echo "title Install PowOS to disk" >> "$install_entry"
-    grep -q 'powos.install=1' "$install_entry" || echo "options powos.install=1" >> "$install_entry"
+    # Sanity: the karg injection must have landed on the options line.
+    if ! grep -q 'powos.install=1' "$install_entry"; then
+        log_warn "Failed to inject powos.install=1 into $install_entry — removing it."
+        rm -f "$install_entry"
+        umount "$mp" 2>/dev/null || true
+        rmdir "$mp" 2>/dev/null || true
+        return 0
+    fi
 
     log_success "Added boot entry: 'Install PowOS to disk'"
 
     # Make the menu actually visible (bootc images often hide it / 0s timeout).
+    # Fedora-family hosts ship grub2-editenv; Debian/Ubuntu ship grub-editenv.
+    local editenv=""
+    if command -v grub2-editenv &>/dev/null; then
+        editenv="grub2-editenv"
+    elif command -v grub-editenv &>/dev/null; then
+        editenv="grub-editenv"
+    fi
+
     local grubcfg
-    for grubcfg in "$mp/grub2/grubenv" "$mp/EFI"/*/grubenv "$mp/boot/grub2/grubenv"; do
-        [[ -f "$grubcfg" ]] || continue
-        if command -v grub2-editenv &>/dev/null; then
-            grub2-editenv "$grubcfg" set menu_auto_hide=0 2>/dev/null || true
-        fi
-    done
+    if [[ -n "$editenv" ]]; then
+        for grubcfg in "$mp/grub2/grubenv" "$mp/EFI"/*/grubenv "$mp/boot/grub2/grubenv"; do
+            [[ -f "$grubcfg" ]] || continue
+            "$editenv" "$grubcfg" set menu_auto_hide=0 2>/dev/null || true
+        done
+    else
+        echo ""
+        log_warn "═══════════════════════════════════════════════════════════════"
+        log_warn "Neither grub2-editenv nor grub-editenv is installed on this host."
+        log_warn "menu_auto_hide could NOT be cleared — the GRUB boot menu (with the"
+        log_warn "'Install PowOS' and variant entries) may be HIDDEN at boot."
+        log_warn "Fix: install GRUB tools (Fedora: grub2-tools; Debian/Ubuntu:"
+        log_warn "grub-common), then run on the USB's boot partition:"
+        log_warn "  grub-editenv <mount>/grub2/grubenv set menu_auto_hide=0"
+        log_warn "Workaround at boot: hold Esc or Shift to show the menu once."
+        log_warn "═══════════════════════════════════════════════════════════════"
+        echo ""
+    fi
 
     sync
     umount "$mp" 2>/dev/null || true
@@ -328,25 +417,31 @@ add_base_variants() {
     mount "$data_part" "$mp" || { log_error "mount $data_part failed"; rmdir "$mp"; return 1; }
     mkdir -p "$mp/layers"
 
-    local d name installed=""
+    local d name installed="" variant_names=()
     for d in "$src_dir"/base-*/; do
         name=$(basename "$d")   # base-<variant>
         log "Copying $name → USB layers/$name ..."
         rm -rf "${mp:?}/layers/$name"
         cp -a "$d" "$mp/layers/$name"
         installed="${installed}${name} "
+        variant_names+=("${name#base-}")
     done
     sync
     log_success "Base variants installed: ${installed}"
     umount "$mp" 2>/dev/null || true
     rmdir "$mp" 2>/dev/null || true
 
-    add_variant_boot_entries "$device"
+    # Only offer boot entries for variants that actually exist on the USB —
+    # a menu entry for an uncopied variant would silently boot a different one.
+    add_variant_boot_entries "$device" "${variant_names[@]}"
 }
 
-# Add a boot-menu entry per available variant (auto + each base-<name>).
+# Add a boot-menu entry per INSTALLED variant (passed as args by
+# add_base_variants, which enumerated layers/base-* on the data partition),
+# plus "auto" (hardware detect) and "main" (the raw image's own base).
 add_variant_boot_entries() {
-    local device="$1"
+    local device="$1"; shift
+    local requested=("$@")
     partprobe "$device" 2>/dev/null || true; sleep 1
 
     local mp entries_dir="" part
@@ -367,23 +462,39 @@ add_variant_boot_entries() {
         return 0
     fi
 
-    local template variants v
+    local template v
     template=$(find "$entries_dir" -maxdepth 1 -name '*.conf' ! -name '*install*' ! -name '*variant*' | head -1)
     [[ -z "$template" ]] && { log_warn "No BLS template — skipping variant entries."; umount "$mp" 2>/dev/null; rmdir "$mp"; return 0; }
 
-    variants="auto"
-    # Discover installed variants from the data partition (best-effort re-mount not needed;
-    # just offer the standard set plus auto).
-    for v in $variants nvidia-open nvidia main; do
+    # A template without an options line cannot yield bootable entries
+    # (a bare `options rd.powos.variant=x` entry has no root=/kernel args).
+    if ! grep -q '^options ' "$template"; then
+        log_warn "BLS template $template has no 'options' line — skipping variant entries."
+        umount "$mp" 2>/dev/null || true; rmdir "$mp" 2>/dev/null || true
+        return 0
+    fi
+
+    # Entries: auto (hardware detect), main (raw image's own base), and each
+    # variant actually installed on the data partition. NO phantom entries.
+    local variants=("auto" "main") seen r
+    for r in ${requested[@]+"${requested[@]}"}; do
+        seen=0
+        for v in "${variants[@]}"; do [[ "$v" == "$r" ]] && seen=1; done
+        [[ $seen -eq 0 ]] && variants+=("$r")
+    done
+
+    for v in "${variants[@]}"; do
         awk -v val="$v" '
             /^title / { print "title PowOS ("val")"; next }
             /^options / { print $0 " rd.powos.variant="val; next }
             { print }
         ' "$template" > "${entries_dir}/powos-variant-${v}.conf"
-        grep -q "rd.powos.variant=$v" "${entries_dir}/powos-variant-${v}.conf" || \
-            echo "options rd.powos.variant=$v" >> "${entries_dir}/powos-variant-${v}.conf"
+        if ! grep -q "rd.powos.variant=$v" "${entries_dir}/powos-variant-${v}.conf"; then
+            log_warn "Failed to inject rd.powos.variant=$v — removing broken entry."
+            rm -f "${entries_dir}/powos-variant-${v}.conf"
+        fi
     done
-    log_success "Added variant boot entries: auto, nvidia-open, nvidia, main"
+    log_success "Added variant boot entries: ${variants[*]}"
     sync
     umount "$mp" 2>/dev/null || true; rmdir "$mp" 2>/dev/null || true
 }
@@ -475,7 +586,13 @@ This repository tracks your PowOS customizations.
 - `home/` - User data
 EOF
     git add README.md
-    git commit -q -m "Initial PowOS setup"
+    # Re-runs regenerate an identical README; `git commit` would exit 1 with
+    # nothing to commit and set -e would kill the script. Only commit changes.
+    if [[ -n "$(git status --porcelain)" ]]; then
+        git commit -q -m "Initial PowOS setup"
+    else
+        log "State repo already initialized — nothing to commit"
+    fi
 
     cd /
     umount "$mount_point"
