@@ -21,7 +21,7 @@ fi
 source "$STATE_FILE"
 log "Running in RAM overlay mode"
 log "  RAM allocated: $POWOS_RAM_SIZE"
-log "  Lower (USB):   $POWOS_OVERLAY_LOWER"
+log "  Active layers: $POWOS_LAYERS_ACTIVE"
 log "  Upper (RAM):   $POWOS_OVERLAY_UPPER"
 
 # Detect and track USB
@@ -56,14 +56,17 @@ fi
 # deprecated to eliminate the race condition where both daemons used
 # rsync --delete to the same USB directory simultaneously.
 
-# Set up udev rules for USB hotplug (if not already present)
+# Set up udev rules for USB hotplug (if not already present).
+# Write /run/powos/usb-state directly — that's what the sync daemon reads.
+# (Do NOT invoke the powos CLI here: `powos usb-connected/-disconnected`
+# subcommands don't exist.)
 if [[ ! -f /etc/udev/rules.d/99-powos-usb.rules ]]; then
     cat > /etc/udev/rules.d/99-powos-usb.rules << 'EOF'
-# PowOS USB hotplug detection
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="POWOS-DATA", RUN+="/usr/bin/powos usb-connected"
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="POWOS-HOME", RUN+="/usr/bin/powos usb-connected"
-ACTION=="remove", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="POWOS-DATA", RUN+="/usr/bin/powos usb-disconnected"
-ACTION=="remove", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="POWOS-HOME", RUN+="/usr/bin/powos usb-disconnected"
+# PowOS USB hotplug detection - keeps /run/powos/usb-state current
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="POWOS-DATA", RUN+="/bin/sh -c 'mkdir -p /run/powos; echo USB_STATUS=connected > /run/powos/usb-state; echo USB_DEV=$env{DEVNAME} >> /run/powos/usb-state'"
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="POWOS-HOME", RUN+="/bin/sh -c 'mkdir -p /run/powos; echo USB_STATUS=connected > /run/powos/usb-state; echo USB_DEV=$env{DEVNAME} >> /run/powos/usb-state'"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="POWOS-DATA", RUN+="/bin/sh -c 'mkdir -p /run/powos; echo USB_STATUS=disconnected > /run/powos/usb-state'"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="POWOS-HOME", RUN+="/bin/sh -c 'mkdir -p /run/powos; echo USB_STATUS=disconnected > /run/powos/usb-state'"
 EOF
     udevadm control --reload-rules 2>/dev/null || true
 fi

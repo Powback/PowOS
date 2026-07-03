@@ -6,7 +6,10 @@ ConditionPathExists=/run/powos/ramboot-state
 
 [Service]
 Type=oneshot
-ExecStart=/usr/lib/powos/overlay-init.sh
+# NOTE: /usr/lib/powos/overlay-init.sh only exists inside the initramfs
+# (module-setup.sh inst_simple). On the real rootfs the script lives in the
+# dracut module directory installed by the Containerfile.
+ExecStart=/usr/lib/dracut/modules.d/90powos-ramboot/powos-overlay-init.sh
 RemainAfterExit=yes
 
 [Install]

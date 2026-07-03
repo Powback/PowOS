@@ -33,6 +33,10 @@ info "PowOS ramboot: Setting up layered RAM overlay (${RAM_SIZE})"
 OVERLAY_BASE="/run/powos-overlay"
 USB_LAYERS="/run/powos-usb-layers"
 
+# Under systemd-based dracut the switch-root target is fixed at /sysroot.
+# Make sure NEWROOT is set even if the hook environment didn't export it.
+NEWROOT="${NEWROOT:-/sysroot}"
+
 # The original root from USB (will become base layer). If the USB carries
 # multiple base variants, this is replaced by the selected layers/base-<variant>.
 BASE_LAYER="${NEWROOT}"
@@ -179,26 +183,67 @@ else
     return 0
 fi
 
-# === Make USB accessible in the new root ===
-# Bind mount the USB layers into the merged root for sync daemon access
+# === Make USB accessible in the real system ===
+# NOTE: at switch-root, systemd move-mounts the initramfs /run over the new
+# root's /run, so files and submounts created under the initramfs /run ARE
+# carried into the real system — while anything written under ${MERGED}/run
+# would be shadowed and lost. Everything below therefore uses /run/powos.
+mkdir -p /run/powos
+
+# Bind mount the USB layers at /run/powos/usb-layers for the sync daemon
+# and the powos CLI (both hardcode this path).
 if [[ -d "$USB_LAYERS/layers" ]]; then
-    mkdir -p "${MERGED}/run/powos/usb-layers"
-    mount --bind "$USB_LAYERS" "${MERGED}/run/powos/usb-layers"
+    mkdir -p /run/powos/usb-layers
+    if ! mount --bind "$USB_LAYERS" /run/powos/usb-layers; then
+        warn "PowOS ramboot: Failed to bind USB layers at /run/powos/usb-layers"
+    fi
 fi
 
-# Keep reference to original USB root
-mkdir -p "${MERGED}/run/powos/usb-root"
+# === The key: move the overlay onto $NEWROOT ===
+# Under systemd-based dracut, reassigning NEWROOT is a no-op (pre-pivot hooks
+# run in a child process and the switch-root target is fixed), so we
+# mount --move the assembled overlay on top of $NEWROOT instead.
 
-# === The key: replace NEWROOT with our overlay ===
-export NEWROOT="$MERGED"
+# First carry over any submounts already established under $NEWROOT (e.g. by
+# ostree-prepare-root: /sysroot/sysroot, /sysroot/etc). They would otherwise
+# be shadowed by the overlay and lost at switch-root.
+_powos_submounts=""
+while read -r _dev _mnt _rest; do
+    case "$_mnt" in
+        "$NEWROOT"/*) _powos_submounts="$_powos_submounts $_mnt" ;;
+    esac
+done < /proc/mounts
+
+for _mnt in $_powos_submounts; do
+    _sub="${_mnt#$NEWROOT}"
+    mkdir -p "${MERGED}${_sub}" 2>/dev/null
+    # Parents move before children (/proc/mounts order) and carry them along;
+    # a child already carried along simply fails here, which is fine.
+    mount --move "$_mnt" "${MERGED}${_sub}" 2>/dev/null || true
+done
+
+if mount --move "$MERGED" "$NEWROOT"; then
+    info "PowOS ramboot: Overlay moved onto ${NEWROOT} (switch-root target)"
+else
+    warn "PowOS ramboot: Failed to move overlay onto ${NEWROOT}, falling back to normal boot"
+    # Put any moved submounts back so normal boot still works
+    for _mnt in $_powos_submounts; do
+        _sub="${_mnt#$NEWROOT}"
+        mount --move "${MERGED}${_sub}" "$_mnt" 2>/dev/null || true
+    done
+    umount "$MERGED" 2>/dev/null || true
+    return 0
+fi
 
 # === Store state for userspace ===
-mkdir -p "${MERGED}/run/powos"
-cat > "${MERGED}/run/powos/ramboot-state" << EOF
+# Written to the initramfs /run (survives switch-root, see note above).
+# Only written after the overlay move succeeded — the systemd units are
+# gated on these files and must not run on a normal (fallback) boot.
+cat > /run/powos/ramboot-state << EOF
 POWOS_RAMBOOT=1
 POWOS_OVERLAY_BASE=${OVERLAY_BASE}
 POWOS_OVERLAY_UPPER=${UPPER}
-POWOS_OVERLAY_MERGED=${MERGED}
+POWOS_OVERLAY_MERGED=/
 POWOS_RAM_SIZE=${RAM_SIZE}
 POWOS_LAYERS_ACTIVE=${LAYERS_AVAILABLE}
 POWOS_USB_LAYERS=${USB_LAYERS}
@@ -207,7 +252,7 @@ POWOS_SKIP_UPDATES=${SKIP_UPDATES}
 EOF
 
 # Store layer paths for sync daemon
-cat > "${MERGED}/run/powos/layer-paths" << EOF
+cat > /run/powos/layer-paths << EOF
 CUSTOM_LAYER=${USB_LAYERS}/layers/custom
 UPDATES_LAYER=${USB_LAYERS}/layers/updates
 RAM_UPPER=${UPPER}

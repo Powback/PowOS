@@ -13,7 +13,8 @@ Type=simple
 Environment=POWOS_SYNC_INTERVAL=60
 EnvironmentFile=-/etc/powos/config
 ExecStart=/usr/bin/python3 /usr/lib/powos/ramfs/layer-sync.py --interval ${POWOS_SYNC_INTERVAL}
-ExecReload=/bin/kill -HUP $MAINPID
+# No ExecReload: the daemon handles only SIGTERM/SIGINT — SIGHUP would kill it
+# (Restart=on-failure would then respawn it mid-cycle).
 Restart=on-failure
 RestartSec=10
 
@@ -25,8 +26,10 @@ PrivateTmp=false
 # Environment
 Environment=PYTHONUNBUFFERED=1
 
-# Graceful shutdown - sync before stopping
-ExecStop=/usr/bin/python3 /usr/lib/powos/ramfs/layer-sync.py --sync-now
+# Graceful shutdown: systemd sends SIGTERM and the daemon performs its own
+# final sync before exiting. Deliberately NO ExecStop — spawning a second
+# --sync-now process here would race the daemon's shutdown sync on the same
+# destination (all syncs also serialize on /run/powos/layer-sync.lock).
 TimeoutStopSec=60
 
 [Install]

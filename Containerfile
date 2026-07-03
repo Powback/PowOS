@@ -79,6 +79,7 @@ COPY lib/hardware-detect.sh /usr/lib/powos/
 COPY lib/overlay-manager.sh /usr/lib/powos/
 COPY lib/dev-commands.sh /usr/lib/powos/
 COPY lib/mobile.sh /usr/lib/powos/
+COPY lib/sync.sh /usr/lib/powos/
 COPY lib/backup.sh /usr/lib/powos/
 COPY lib/install-system.sh /usr/lib/powos/
 COPY lib/vm.sh /usr/lib/powos/
@@ -97,7 +98,6 @@ COPY lib/uninstall.sh /usr/lib/powos/
 COPY lib/config.sh /usr/lib/powos/
 COPY lib/build-helpers.sh /var/lib/powos/lib/
 COPY bazzite/system_files/ /tmp/bazzite/system_files/
-COPY overlays/ /usr/lib/powos/overlays/
 COPY sources/ /var/lib/powos/sources/
 COPY bin/powos-boot /usr/bin/
 COPY bin/powos /usr/bin/
@@ -138,9 +138,16 @@ RUN systemctl enable powos-ramboot-init.service 2>/dev/null || true && \
     systemctl enable powos-hwinfo.service 2>/dev/null || true
 
 # Rebuild initramfs with our dracut module
-# This embeds the RAM overlay setup into the boot process
-RUN dracut --force --add "powos-ramboot" --kver $(ls /lib/modules/ | head -1) 2>/dev/null || \
-    echo "Note: dracut rebuild skipped (will happen at ISO build time)"
+# This embeds the RAM overlay setup into the boot process.
+# bootc boots /usr/lib/modules/<kver>/initramfs.img (NOT /boot), so write
+# there explicitly (same pattern as containers/build_files/build-initramfs).
+# A failed rebuild must fail the image build — a silently stale initramfs
+# means ramboot never activates on real hardware.
+RUN KVER="$(ls /lib/modules/ | head -1)" && \
+    dracut --force --no-hostonly --reproducible --zstd \
+        --add ostree --add fido2 --add powos-ramboot \
+        --kver "$KVER" "/usr/lib/modules/$KVER/initramfs.img" && \
+    chmod 0600 "/usr/lib/modules/$KVER/initramfs.img"
 
 # Install bootc kernel arguments for RAM boot
 # These tell the kernel to enable our RAM overlay at boot
