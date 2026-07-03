@@ -7,7 +7,13 @@
 #   powos reload --pull     git pull the checkout first, then apply
 #   powos reload --build    Full local image build + bootc switch (base/pkg changes)
 #   powos reload --where    Just print which source it will use
+#   powos reload --drop     Remove the dev overlay (back to the image's CLI)
 #   powos reload /path      Use (and remember) a specific checkout
+#
+# On a writable /usr (legacy USB overlay) it copies into /usr. On a read-only
+# /usr (bootc/composefs) it applies via an EPHEMERAL systemd-sysext overlay in
+# /run/extensions — live, no reboot, composefs untouched, gone on reboot. For a
+# durable change on bootc, use --build (image rebuild + switch).
 #
 # First run auto-detects ~/PowOS (and friends) and saves it, so after that it's
 # literally just `powos reload`. Run it as your normal user — it sudo's only the
@@ -133,20 +139,69 @@ rm -rf "$bk"
 ROOT
 }
 
+# Read-only /usr (bootc/composefs) → can't cp into /usr; use systemd-sysext.
+# Writable /usr (legacy RAM-overlay USB install) → direct copy is fine.
+reload_usr_ro() {
+    findmnt -no OPTIONS /usr 2>/dev/null | grep -qw ro && return 0
+    findmnt -no OPTIONS /    2>/dev/null | grep -qw ro && return 0
+    return 1
+}
+
+# Apply on a read-only /usr the sanctioned way: stage the dev CLI as a
+# systemd-sysext extension in /run/extensions (EPHEMERAL — gone on reboot, so it
+# never shadows a future image), merge it live, smoke-test, unmerge if broken.
+# composefs is never touched. One root shell. Exit: 0 ok · 3 refresh · 4 not
+# merged · 42 broken+reverted.
+reload_apply_sysext() {
+    local runner=(sudo bash); [[ ${EUID:-$(id -u)} -eq 0 ]] && runner=(bash)
+    "${runner[@]}" -s -- "$1" <<'ROOT'
+set -uo pipefail
+src="$1"; ext="/run/extensions/powos-dev"
+rm -rf "$ext"
+mkdir -p "$ext/usr/bin" "$ext/usr/lib/powos" "$ext/usr/lib/extension-release.d"
+for b in powos powos-boot pinstall premove; do
+    [[ -f "$src/bin/$b" ]] && install -m755 "$src/bin/$b" "$ext/usr/bin/$b"
+done
+# lib/ maps to /usr/lib/powos/ (dracut is boot-time, not a runtime CLI dep)
+rsync -a --exclude 'dracut/' "$src/lib/" "$ext/usr/lib/powos/"
+[[ -d "$src/overlays" ]] && rsync -a "$src/overlays/" "$ext/usr/lib/powos/overlays/"
+cp -a "$src"/systemd/powos-* "$ext/usr/lib/powos/" 2>/dev/null || true
+# ID=_any → matches any base version (survives bootc upgrades)
+printf 'ID=_any\n' > "$ext/usr/lib/extension-release.d/extension-release.powos-dev"
+# config lives on writable /etc — apply directly, not via sysext
+[[ -d "$src/config" ]] && cp -a "$src/config/." /etc/powos/ 2>/dev/null || true
+systemd-sysext refresh >/dev/null 2>&1 || { echo "sysext refresh failed" >&2; exit 3; }
+systemd-sysext status 2>/dev/null | grep -q powos-dev || { echo "sysext did not merge" >&2; exit 4; }
+if ! /usr/bin/powos version >/dev/null 2>&1 && ! /usr/bin/powos help >/dev/null 2>&1; then
+    rm -rf "$ext"; systemd-sysext refresh >/dev/null 2>&1 || true
+    echo "applied CLI broken — reverted" >&2; exit 42
+fi
+ROOT
+}
+
+reload_drop_sysext() {
+    local runner=(sudo bash); [[ ${EUID:-$(id -u)} -eq 0 ]] && runner=(bash)
+    "${runner[@]}" -c 'rm -rf /run/extensions/powos-dev /var/lib/extensions/powos-dev; systemd-sysext refresh >/dev/null 2>&1 || true'
+    pok "Dropped the powos-dev sysext overlay — back to the image's CLI."
+}
+
 cmd_reload() {
-    local do_pull=0 do_build=0 where=0 force_live=0 explicit=""
+    local do_pull=0 do_build=0 where=0 force_live=0 do_drop=0 explicit=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pull)     do_pull=1 ;;
             --build)    do_build=1 ;;
             --live)     force_live=1 ;;
+            --drop)     do_drop=1 ;;
             --where)    where=1 ;;
-            -h|--help)  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
+            -h|--help)  sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
             -*)         perr "Unknown flag: $1 (try: --pull --build --where)"; return 1 ;;
             *)          explicit="$1" ;;
         esac
         shift
     done
+
+    (( do_drop )) && { reload_drop_sysext; return 0; }
 
     local src
     if ! src="$(reload_find "$explicit")"; then
@@ -190,16 +245,28 @@ cmd_reload() {
         return $rc
     fi
 
-    plog "Applying $src live (no reboot)…"
-    reload_apply_live "$src"; local rc=$?
-    if [[ $rc -eq 42 ]]; then
-        perr "The applied CLI failed to run — I restored the previous version."
-        perr "Fix the error in $src, then 'powos reload' again."
-        return 1
-    elif [[ $rc -ne 0 ]]; then
-        perr "update self failed (rc=$rc)."; return "$rc"
+    local rc ro=0
+    if reload_usr_ro; then
+        ro=1
+        plog "Read-only /usr (bootc/composefs) → applying via systemd-sysext overlay…"
+        reload_apply_sysext "$src"; rc=$?
+    else
+        plog "Writable /usr → applying directly (no reboot)…"
+        reload_apply_live "$src"; rc=$?
     fi
+    case "$rc" in
+        0)  : ;;
+        42) perr "The applied CLI failed to run — reverted. Fix $src, then 'powos reload' again."; return 1 ;;
+        3)  perr "systemd-sysext refresh failed — see 'systemctl status systemd-sysext'."; return 1 ;;
+        4)  perr "sysext didn't merge (extension-release mismatch?). Inspect: systemd-sysext status"; return 1 ;;
+        *)  perr "apply failed (rc=$rc)."; return "$rc" ;;
+    esac
     reload_post_apply "$src"      # systemd reload / distrobox reassemble / overlay rebuild
     reload_mark_applied "$src"
-    pok "Live & verified. For base/package changes: powos reload --build"
+    if (( ro )); then
+        pok "Live via sysext overlay (ephemeral — cleared on reboot; composefs untouched)."
+        pok "Bake it into the image to persist: powos reload --build"
+    else
+        pok "Live & persisted. For base/package changes: powos reload --build"
+    fi
 }
