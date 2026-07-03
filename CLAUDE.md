@@ -1003,6 +1003,25 @@ systemd-sysext status
 systemd-sysext refresh
 ```
 
+## CI & GitHub API etiquette (agents: READ THIS)
+
+The GitHub REST API allows **5,000 requests/hour shared across every agent and
+tool on this account** — it has been exhausted by run-polling before. Rules:
+
+- **NEVER `gh run watch`** — it polls every ~3s (~1,200 req/h per watcher).
+- Don't poll `gh run list`/`gh run view` in loops. Check once, then wait
+  minutes (ScheduleWakeup or a long sleep), not seconds.
+- **"Did the build publish?" doesn't need the REST API at all.** The registry
+  API is separate and effectively unmetered:
+  ```bash
+  skopeo inspect --creds "Powback:$(gh auth token)" \
+      docker://ghcr.io/powback/powos:nvidia-open | jq -r '.Digest, .Created'
+  ```
+  New digest/timestamp = build landed. Prefer this for completion checks.
+- Reserve `gh run view --log-failed` for diagnosing a KNOWN failure, not for
+  discovering whether one happened.
+- `gh api rate_limit` is free (doesn't count) — check it if unsure.
+
 ## Testing
 
 ### Tier 1 (Docker, fast)
