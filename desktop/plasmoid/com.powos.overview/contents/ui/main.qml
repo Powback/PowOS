@@ -24,6 +24,7 @@ PlasmoidItem {
     property real diskUsed: 0;  property real diskTotal: 0     // GiB
     property var topProcs: []                                   // [{name,cpu,mem}]
     property var ctrStats: ({})                                 // name -> {cpu,mem,net}
+    property var topIO: []                                      // [{name,mbs}]
 
     readonly property string dataCmd:
         "if powos overview --json >/dev/null 2>&1; then " +
@@ -33,13 +34,22 @@ PlasmoidItem {
         "  source \"$HOME/PowOS/lib/services.sh\" 2>/dev/null; " +
         "  ov_json; echo __POWOS_SEP__; svc_json; " +
         "fi"
-    // disk | __PS__ | top-10 processes | __CTR__ | podman stats
+    // disk | __PS__ | top-10 processes | __CTR__ | podman stats | __IO__ | top disk I/O
+    // Per-process I/O (/proc/PID/io) is only readable for YOUR processes without
+    // root — that covers apps + rootless containers, not system daemons. 1s sample.
     readonly property string mediumCmd:
         "df -k --output=used,size /var 2>/dev/null | tail -1; " +
         "echo __PS__; " +
         "ps -eo comm,%cpu,%mem --sort=-%cpu --no-headers | head -10; " +
         "echo __CTR__; " +
-        "podman stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}' 2>/dev/null"
+        "podman stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}' 2>/dev/null; " +
+        "echo __IO__; " +
+        "T1=$(mktemp); T2=$(mktemp); " +
+        "awk '/^read_bytes|^write_bytes/{s[FILENAME]+=$2} END{for(f in s) print f, s[f]}' /proc/[0-9]*/io 2>/dev/null > $T1; " +
+        "sleep 1; " +
+        "awk '/^read_bytes|^write_bytes/{s[FILENAME]+=$2} END{for(f in s) print f, s[f]}' /proc/[0-9]*/io 2>/dev/null > $T2; " +
+        "awk 'NR==FNR{a[$1]=$2; next} ($1 in a) && ($2>a[$1]) {d=$2-a[$1]; split($1,p,\"/\"); pid=p[3]; cf=\"/proc/\"pid\"/comm\"; c=\"?\"; if((getline c < cf)>0) close(cf); print d, c}' $T1 $T2 | sort -rn | head -5 | awk '{printf \"%s %.2f\\n\", $2, $1/1048576}'; " +
+        "rm -f $T1 $T2"
 
     P5Support.DataSource {
         id: exec
@@ -78,13 +88,23 @@ PlasmoidItem {
         })
         topProcs = procs
         var stats = {}
+        var io = []
         if (rest.length > 1) {
-            rest[1].trim().split("\n").forEach(function(ln) {
+            var tail = rest[1].split("__IO__")
+            tail[0].trim().split("\n").forEach(function(ln) {
                 var f = ln.split("|")
                 if (f.length >= 4 && f[0]) stats[f[0]] = { cpu: f[1], mem: f[2], net: f[3] }
             })
+            if (tail.length > 1) {
+                tail[1].trim().split("\n").forEach(function(ln) {
+                    var f = ln.trim().split(/\s+/)
+                    if (f.length >= 2) io.push({ name: f.slice(0, f.length - 1).join(" "),
+                                                 mbs: parseFloat(f[f.length - 1]) || 0 })
+                })
+            }
         }
         ctrStats = stats
+        topIO = io
     }
 
     function field(o, k, dflt) { return (o && o[k] !== undefined && o[k] !== null && o[k] !== "") ? o[k] : (dflt || "—") }
@@ -201,6 +221,16 @@ PlasmoidItem {
                         elide: Text.ElideRight
                         Layout.fillWidth: col === 0
                     }
+                }
+            }
+            Kirigami.Separator { Layout.fillWidth: true; visible: root.topIO.length > 0 }
+            PC3.Label { visible: root.topIO.length > 0; text: "Top disk I/O"; opacity: 0.6 }
+            Repeater {
+                model: root.topIO
+                delegate: RowLayout {
+                    Layout.fillWidth: true
+                    PC3.Label { text: modelData.name; font.bold: true; font.pointSize: Kirigami.Theme.smallFont.pointSize; elide: Text.ElideRight; Layout.fillWidth: true }
+                    PC3.Label { text: modelData.mbs.toFixed(2) + " MB/s"; opacity: 0.65; font.pointSize: Kirigami.Theme.smallFont.pointSize }
                 }
             }
             Item { Layout.fillHeight: true }

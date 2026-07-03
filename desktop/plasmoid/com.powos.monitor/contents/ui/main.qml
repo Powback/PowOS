@@ -36,6 +36,11 @@ PlasmoidItem {
     property real curRx: 0;     property real curTx: 0
     property real prevRxB: -1;  property real prevTxB: -1
     property double prevNetMs: 0
+    // DISK I/O (MB/s, whole-disk totals from /proc/diskstats sectors × 512)
+    property var histDr: [];    property var histDw: []
+    property real curDr: 0;     property real curDw: 0
+    property real prevDrS: -1;  property real prevDwS: -1
+    property double prevDiskMs: 0
 
     // 7 fixed lines: cpu-stat | mem | net | gpu-csv | Tctl | freq | load1
     readonly property string fastCmd:
@@ -45,7 +50,8 @@ PlasmoidItem {
         "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null | head -1 || echo na; " +
         "sensors 2>/dev/null | awk '/^Tctl:/{gsub(/[+°C]/,\"\"); print $2; exit}' || echo 0; " +
         "awk '/^cpu MHz/{s+=$4; n++} END{if(n) printf \"%.2f\\n\", s/n/1000; else print 0}' /proc/cpuinfo; " +
-        "cut -d' ' -f1 /proc/loadavg"
+        "cut -d' ' -f1 /proc/loadavg; " +
+        "awk '$3 ~ /^(nvme[0-9]+n[0-9]+|sd[a-z]+)$/ {r+=$6; w+=$10} END{print r, w}' /proc/diskstats"
 
     function pushHist(arr, v) { var a = arr.slice(); a.push(v); if (a.length > maxSamples) a.shift(); return a }
 
@@ -109,6 +115,21 @@ PlasmoidItem {
         var t = parseFloat(L[4]); if (!isNaN(t) && t > 0) { curCpuTemp = t; histCpuTempS = pushHist(histCpuTempS, t) }
         var fq = parseFloat(L[5]); if (!isNaN(fq)) curFreq = fq
         var ld = parseFloat(L[6]); if (!isNaN(ld)) load1 = ld
+        // 8) DISK: cumulative sectors read/written across whole disks
+        if (L.length >= 8) {
+            var dk = L[7].trim().split(/\s+/).map(Number)
+            if (dk.length >= 2) {
+                var dnow = Date.now()
+                if (prevDrS >= 0 && dnow > prevDiskMs) {
+                    var ddt = (dnow - prevDiskMs) / 1000
+                    curDr = Math.max(0, (dk[0] - prevDrS) * 512 / ddt / 1048576)   // MB/s
+                    curDw = Math.max(0, (dk[1] - prevDwS) * 512 / ddt / 1048576)
+                    histDr = pushHist(histDr, curDr)
+                    histDw = pushHist(histDw, curDw)
+                }
+                prevDrS = dk[0]; prevDwS = dk[1]; prevDiskMs = dnow
+            }
+        }
     }
 
     function fmtGiB(mib) { return (mib / 1024).toFixed(1) }
@@ -205,6 +226,9 @@ PlasmoidItem {
             GraphHeader { label: "NET ↓ " + fmtRate(root.curRx); value: "↑ " + fmtRate(root.curTx) }
             Spark { series: root.histRx; series2: root.histTx; maxValue: 0
                     lineColor: Kirigami.Theme.highlightColor; lineColor2: Kirigami.Theme.neutralTextColor }
+            GraphHeader { label: "DISK r " + fmtRate(root.curDr); value: "w " + fmtRate(root.curDw) }
+            Spark { series: root.histDr; series2: root.histDw; maxValue: 0
+                    lineColor: Kirigami.Theme.positiveTextColor; lineColor2: Kirigami.Theme.negativeTextColor }
             Item { Layout.fillHeight: true }
         }
     }
