@@ -111,21 +111,28 @@ check "start of largest free block (120000)" '[[ "$start" == "120000" ]]'
 unset -f parted
 
 # ── Partition lookup by GPT label ─────────────────────────────────
+# The lookup enumerates partitions via `lsblk -o PATH` and reads the GPT label
+# via `blkid` (robust vs. udev). Stub all three seams: lsblk, blkid, is-block.
 echo "== Partition lookup by label =="
 lsblk() {
-    if [[ "$*" == *"PATH,PARTLABEL"* ]]; then
-        cat <<'LSBLK'
-/dev/sdz1
-/dev/sdz2 Basic data partition
-/dev/sdz5 PowOS
-/dev/sdz6 POWOS-SHARED
-LSBLK
+    if [[ "$*" == *"-o PATH"* ]]; then
+        printf '/dev/sdz\n/dev/sdz1\n/dev/sdz2\n/dev/sdz5\n/dev/sdz6\n'
     fi
 }
+blkid() {
+    # emulate `blkid -o value -s PARTLABEL <part>`
+    case "${!#}" in
+        /dev/sdz1) echo "" ;;
+        /dev/sdz2) echo "Basic data partition" ;;
+        /dev/sdz5) echo "PowOS" ;;
+        /dev/sdz6) echo "POWOS-SHARED" ;;
+    esac
+}
+isv_is_block() { return 0; }   # pretend every path is a block device
 check "finds PowOS root by partlabel"        '[[ "$(isv_part_by_partlabel /dev/sdz PowOS)" == "/dev/sdz5" ]]'
 check "finds POWOS-SHARED by partlabel"      '[[ "$(isv_part_by_partlabel /dev/sdz POWOS-SHARED)" == "/dev/sdz6" ]]'
 check "missing label returns empty"          '[[ -z "$(isv_part_by_partlabel /dev/sdz NOPE)" ]]'
-unset -f lsblk
+unset -f lsblk blkid isv_is_block
 
 # ── Live-disk exclusion ───────────────────────────────────────────
 echo "== Candidate disk exclusion =="

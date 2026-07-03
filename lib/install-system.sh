@@ -313,8 +313,7 @@ isv_install_alongside() {
 
     run_step "create PowOS root partition (${start}MiB → ${root_end})" \
         parted -s "$ISV_TARGET" mkpart PowOS "$ISV_FS" "${start}MiB" "$root_end" || return 1
-    run_step "settle partition table" partprobe "$ISV_TARGET" || true
-    run_step "wait for udev" bash -c 'sleep 1' || true
+    [[ $ISV_DRY_RUN -eq 0 ]] && isv_settle "$ISV_TARGET"
 
     # Identify the new root by its GPT label (robust vs. device enumeration order).
     local root
@@ -369,8 +368,7 @@ isv_create_shared_partition() {
         isv_warn "Could not create shared partition — continuing without it."
         return 0
     }
-    run_step "settle partition table" partprobe "$dev" || true
-    run_step "wait for udev" bash -c 'sleep 1' || true
+    isv_settle "$dev"
     local sp
     sp=$(isv_part_by_partlabel "$dev" "POWOS-SHARED")
     [[ -z "$sp" ]] && sp=$(isv_last_partition "$dev")
@@ -385,6 +383,23 @@ isv_create_shared_partition() {
     }
     isv_ok "Shared data partition ready: ${sp:-<dry-run>} (label POWOS-SHARED)"
     isv_log "Mount it in both Windows and PowOS for shared files / game assets."
+}
+
+# Re-read the partition table and ensure kernel partition device nodes exist
+# before we reference them. On a booted system udev creates the nodes; on
+# minimal/no-udev environments partprobe alone isn't enough, so fall back to
+# partx. Without this, a freshly-created partition may not have a /dev node yet.
+isv_settle() {
+    local dev="$1"
+    partprobe "$dev" 2>/dev/null || true
+    if command -v udevadm &>/dev/null; then
+        udevadm settle 2>/dev/null || true
+    fi
+    # Fallbacks for environments without a running udev (add new nodes, then
+    # refresh existing ones). Harmless if the nodes already exist.
+    partx -a "$dev" 2>/dev/null || true
+    partx -u "$dev" 2>/dev/null || true
+    sleep 1
 }
 
 isv_find_esp() {
@@ -409,11 +424,22 @@ isv_free_block_start() {
         END { if (max>0) print start }'
 }
 
-# Resolve a partition on $1 by its GPT partition label ($2).
+# Resolve a partition on $1 by its GPT partition label ($2). Reads the label
+# with blkid (straight from disk) rather than `lsblk -o PARTLABEL`, which comes
+# from the udev db and is empty in environments where udev hasn't populated it.
 isv_part_by_partlabel() {
-    lsblk -ln -o PATH,PARTLABEL "$1" 2>/dev/null \
-        | awk -v l="$2" '$2==l {print $1; exit}'
+    local dev="$1" want="$2" part
+    while read -r part; do
+        isv_is_block "$part" || continue
+        [[ "$(blkid -o value -s PARTLABEL "$part" 2>/dev/null)" == "$want" ]] || continue
+        echo "$part"; return 0
+    done < <(lsblk -ln -o PATH "$dev" 2>/dev/null | tail -n +2)
+    return 1
 }
+
+# Is $1 a block device? Wrapped in a function so tests can stub it (the `[[ -b ]]`
+# builtin can't be mocked, and unit tests run where /dev/sdX doesn't exist).
+isv_is_block() { [[ -b "$1" ]]; }
 
 isv_last_partition() {
     lsblk -ln -o PATH "$1" 2>/dev/null | tail -1
