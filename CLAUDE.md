@@ -863,7 +863,9 @@ This enables rapid iteration on real hardware without rebuilding the ISO.
 
 ## Container Notes
 
-**Base Image:** `ghcr.io/ublue-os/bazzite-nvidia:stable`
+**Base Image:** `ghcr.io/ublue-os/bazzite-nvidia-open:stable` (default — open NVIDIA
+modules, required for RTX 50-series; overridable via `BASE_IMAGE` build ARG:
+`bazzite-nvidia` = closed/older cards, `bazzite` = AMD/Intel)
 
 **Bazzite quirks:**
 - `/usr/local` doesn't exist (we create it)
