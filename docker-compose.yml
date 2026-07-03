@@ -18,13 +18,16 @@ services:
     privileged: true
     ports:
       - "6091:8443"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # NVIDIA GPU passthrough is OPTIONAL. A mandatory device reservation makes
+    # `docker compose up` fail on hosts without the NVIDIA container runtime.
+    # To enable GPU access on an NVIDIA host, uncomment the block below:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
   test-runner:
     profiles: ["test"]
@@ -36,6 +39,7 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
+        set -e
         echo "Running Tests..."
         export POWOS_ROOT=/powos
         bash /powos/test/tier1/test-hardware-detect.sh

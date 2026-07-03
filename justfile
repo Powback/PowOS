@@ -18,41 +18,10 @@ default:
 #  DEVELOPMENT & TESTING (Tier 1)
 # ═══════════════════════════════════════════════════════════════════
 
-# Start the development environment
-dev:
-    @echo "🚀 Starting PowOS development environment..."
-    docker compose up -d powos-dev arch-toolbox
-    @echo ""
-    @echo "Environment ready! Enter with:"
-    @echo "  just shell        # Main dev container"
-    @echo "  just shell-arch   # Arch toolbox"
-
-# Enter the main dev container
-shell:
-    docker compose exec powos-dev bash
-
-# Enter the Arch toolbox container
-shell-arch:
-    docker compose exec arch-toolbox bash
-
-# Start with AI support (Ollama)
-dev-ai:
-    @echo "🤖 Starting PowOS with AI support..."
-    docker compose --profile ai up -d
-    @echo "Waiting for Ollama to start..."
-    @sleep 5
-    docker compose exec ollama ollama pull codellama:7b || true
-    @echo "AI ready! Ollama available at http://localhost:11434"
-
 # Run all Tier 1 tests
 test:
     @echo "🧪 Running Tier 1 test suite..."
     docker compose --profile test run --rm test-runner
-
-# Test a specific component
-test-component component:
-    @echo "🧪 Testing: {{component}}"
-    docker compose exec powos-dev bash /powos/test/tier1/test-{{component}}.sh
 
 # Stop development environment
 down:
@@ -77,10 +46,10 @@ cache-stats:
     @echo "📊 Cache volume sizes:"
     @docker system df -v 2>/dev/null | grep -E "powos-" || echo "No PowOS volumes found"
 
-# Rebuild dev container from scratch
+# Rebuild the PowOS container from scratch
 rebuild:
-    docker compose build --no-cache powos-dev
-    just dev
+    docker compose build --no-cache powos
+    docker compose up -d powos
 
 # Show container status
 status:
@@ -278,8 +247,8 @@ build-iso:
     @mkdir -p build/output
     bash build/build-iso.sh full
     @echo ""
-    @echo "ISO should be at: build/output/powos.iso"
-    @ls -lh build/output/*.iso 2>/dev/null || echo "Check build/output/ for results"
+    @echo "Live USB image should be at: build/output/powos.raw"
+    @ls -lh build/output/*.raw 2>/dev/null || echo "Check build/output/ for results"
 
 # Build container image only (faster, for testing)
 build-iso-test:
@@ -289,8 +258,8 @@ build-iso-test:
 # Build container image only (for testing)
 build-image:
     @echo "🏗️ Building PowOS container image..."
-    podman build -f Containerfile.base -t localhost/powos:latest . || \
-    docker build -f Containerfile.base -t powos:latest .
+    podman build -f Containerfile -t localhost/powos:latest . || \
+    docker build -f Containerfile -t powos:latest .
     @echo "✅ Image built"
 
 # Install PowOS to USB drive
@@ -351,25 +320,10 @@ vm-ssh:
 #  AI INTEGRATION
 # ═══════════════════════════════════════════════════════════════════
 
-# Start Ollama service
-ai-start:
-    docker compose --profile ai up -d ollama
-    @echo "Waiting for Ollama..."
-    @sleep 5
-    @echo "Ollama available at http://localhost:11434"
-
-# Pull AI model for patching
-ai-pull model="codellama:7b":
-    docker compose exec ollama ollama pull {{model}}
-
-# Test AI connection
+# Test AI connection (expects a locally running Ollama)
 ai-test:
     @curl -s http://localhost:11434/api/tags | jq '.models[].name' 2>/dev/null || \
-        echo "Ollama not running. Start with: just ai-start"
-
-# Stop Ollama
-ai-stop:
-    docker compose --profile ai stop ollama
+        echo "Ollama not running at http://localhost:11434"
 
 # ═══════════════════════════════════════════════════════════════════
 #  UTILITIES
@@ -394,7 +348,7 @@ tree:
 setup:
     just init
     chmod +x bin/* lib/*.sh systemd/* 2>/dev/null || true
-    @echo "Setup complete! Run 'just dev' to start"
+    @echo "Setup complete! Run 'docker compose up' to start"
 
 # ═══════════════════════════════════════════════════════════════════
 #  PRODUCTION DEPLOYMENT
@@ -403,7 +357,7 @@ setup:
 # Build production OS container image
 build-prod:
     @echo "🏗️ Building PowOS production image..."
-    podman build -f Containerfile.base -t ghcr.io/user/powos:latest .
+    podman build -f Containerfile -t ghcr.io/user/powos:latest .
     @echo "✅ Production image built"
 
 # Deploy to bootc/ostree system

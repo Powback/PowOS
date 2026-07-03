@@ -40,20 +40,20 @@ sudo podman run --rm --privileged \
 
 # Rename output for clarity
 if [[ -f build/output/image/disk.raw ]]; then
-    mv build/output/image/disk.raw build/output/powos-live.raw
+    mv build/output/image/disk.raw build/output/powos.raw
     echo ""
     echo "═══════════════════════════════════════════════════════════════"
-    echo "Done! Live USB image: build/output/powos-live.raw"
+    echo "Done! Live USB image: build/output/powos.raw"
     echo ""
     echo "Write to USB with:"
-    echo "  Linux:   sudo dd if=build/output/powos-live.raw of=/dev/sdX bs=4M status=progress"
+    echo "  Linux:   sudo dd if=build/output/powos.raw of=/dev/sdX bs=4M status=progress"
     echo "  Windows: Use Rufus in DD mode, or balenaEtcher"
     echo "═══════════════════════════════════════════════════════════════"
 elif [[ -f build/output/disk.raw ]]; then
-    mv build/output/disk.raw build/output/powos-live.raw
+    mv build/output/disk.raw build/output/powos.raw
     echo ""
     echo "═══════════════════════════════════════════════════════════════"
-    echo "Done! Live USB image: build/output/powos-live.raw"
+    echo "Done! Live USB image: build/output/powos.raw"
     echo "═══════════════════════════════════════════════════════════════"
 else
     echo ""

@@ -157,15 +157,16 @@ build_live_usb() {
         exit 1
     fi
 
-    # Find the output raw file (bootc-image-builder names it based on image)
-    local raw_file
-    raw_file=$(find "$OUTPUT_DIR" -name "*.raw" -type f | head -1)
+    # bootc-image-builder writes the fresh image to a known path under the
+    # output dir (image/disk.raw). Do NOT use a recursive find here - it can
+    # pick up a stale artifact from a previous run.
+    local raw_file="${OUTPUT_DIR}/image/disk.raw"
 
-    if [[ -n "$raw_file" ]]; then
+    if [[ -f "$raw_file" ]]; then
         mv "$raw_file" "${OUTPUT_DIR}/${RAW_NAME}"
         log_success "Raw image ready: ${OUTPUT_DIR}/${RAW_NAME}"
     else
-        log_error "Raw image file not found in output directory"
+        log_error "Expected raw image not found: $raw_file"
         log_error "Check ${OUTPUT_DIR}/raw-build.log for details"
         exit 1
     fi
@@ -224,15 +225,16 @@ build_installer_iso() {
         exit 1
     fi
 
-    # Find the output ISO
-    local iso_file
-    iso_file=$(find "$OUTPUT_DIR" -name "*.iso" -type f | head -1)
+    # bootc-image-builder writes the fresh ISO to a known path under the
+    # output dir (bootiso/install.iso). Avoid recursive find - it can pick
+    # up a stale artifact from a previous run.
+    local iso_file="${OUTPUT_DIR}/bootiso/install.iso"
 
-    if [[ -n "$iso_file" ]]; then
+    if [[ -f "$iso_file" ]]; then
         mv "$iso_file" "${OUTPUT_DIR}/${ISO_NAME}"
         log_success "Installer ISO ready: ${OUTPUT_DIR}/${ISO_NAME}"
     else
-        log_error "ISO file not found in output directory"
+        log_error "Expected installer ISO not found: $iso_file"
         exit 1
     fi
 }
