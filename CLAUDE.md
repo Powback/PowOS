@@ -7,7 +7,7 @@
 docker compose up
 
 # Create live USB image (requires podman)
-# Output: build/output/powos-live.raw (LIVE BOOT, not an installer)
+# Output: build/output/powos.raw (LIVE BOOT, not an installer)
 just build-iso
 ```
 
@@ -183,7 +183,7 @@ powos rollback all          # Boot with base only
 powos rollback reset        # Clear all rollback flags
 ```
 
-**Limitation:** `powos rollback` uses `grubby` with `2>/dev/null || true`, so grubby failures are silent. Flags are also written to `/run/powos/rollback-kargs` as a fallback. If rollback isn't working, verify: `cat /run/powos/rollback-kargs` and check if `grubby` is installed.
+**Note:** rollback sets kernel args via `grubby`; grubby failures are reported loudly. `/run/powos/rollback-kargs` is informational only — nothing reads it at boot, so it is NOT a fallback. After reboot, verify with `grep powos /proc/cmdline`.
 
 ### Package Installation
 ```bash
@@ -508,8 +508,7 @@ PowOS/
 ├── bin/
 │   ├── powos                  # Main CLI (all commands below)
 │   ├── powos-boot             # Main boot script
-│   ├── pinstall               # Install + git commit
-│   └── powos-init-usb         # Initialize USB drive
+│   └── pinstall               # Install + git commit
 │
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot
@@ -536,7 +535,7 @@ PowOS/
 │           └── ollama.sh
 │
 ├── config/
-│   ├── profiles/              # Hardware profiles (16)
+│   ├── profiles/              # Hardware profiles (17)
 │   ├── bootc/kargs.d/         # Kernel arguments
 │   └── ai/
 │       ├── agent.conf         # Global AI settings
@@ -569,7 +568,7 @@ PowOS/
 │
 └── build/
     ├── build-iso.sh
-    └── powos-init-usb.sh
+    └── install-to-usb.sh      # Write image to USB drive
 ```
 
 ## Core Components
@@ -617,14 +616,12 @@ lib/ramfs/layer-sync.py
 ├── ramboot-state         # Boot state (layers, RAM size)
 ├── layer-paths           # Paths for sync daemon
 ├── layer-sync-status.json  # {last_sync, consecutive_failures, errors}
-└── rollback-kargs        # Pending rollback flags
+└── rollback-kargs        # Rollback flags (informational only — not read at boot)
 ```
 
-### 3. CacheFS (User Data) — ⚠️ Opt-In / Experimental
+### 3. CacheFS (User Data) — 🚫 Incomplete, must remain disabled
 
-FUSE filesystem for lazy-loading user data. **Disabled by default.** Enable via `POWOS_CACHEFS_ENABLED=true` in `/etc/powos/config`.
-
-Known limitations: missing fsync, potential data loss on power failure. Default is direct USB bind-mount.
+FUSE filesystem for lazy-loading user data. **Disabled by default and must stay disabled:** write-back to USB is NOT implemented — writes land in the RAM cache and are never persisted to the USB source, so any written data is lost on unmount/reboot. Do not enable (`POWOS_CACHEFS_ENABLED=true`) until write-back exists. Default is direct USB bind-mount.
 
 ```
 When enabled (POWOS_CACHEFS_ENABLED=true):
@@ -789,7 +786,7 @@ powos dev update dolphin
 | `powos rollback all` | Base OS only | Everything is broken |
 | `powos rollback reset` | Use all layers | Ready to try again |
 
-**Rollback limitation:** grubby calls use `|| true` and suppress stderr, so failures are silent. Verify flags were applied: `cat /run/powos/rollback-kargs` and `grep powos /proc/cmdline` after reboot.
+**Rollback note:** grubby failures are reported loudly. `/run/powos/rollback-kargs` is informational only — nothing reads it at boot. Verify flags took effect with `grep powos /proc/cmdline` after reboot.
 
 ## Protection Matrix
 
@@ -875,8 +872,8 @@ modules, required for RTX 50-series; overridable via `BASE_IMAGE` build ARG:
 **VNC:** TigerVNC + noVNC (software rendering)
 
 **Ports:**
-- 5901: VNC direct
-- 6091: noVNC web interface
+- 6091 (host) → 8443 (container): noVNC web interface (websockify)
+- 5901: VNC inside the container only (not published to the host)
 
 **Container Runtime (Podman, NOT Docker):**
 - **Podman** - Daemonless, rootless by default
@@ -920,11 +917,11 @@ cat /run/powos/ramboot-state
 cat /run/powos/layer-sync-status.json
 ```
 
-**CacheFS (opt-in, disabled by default):**
+**CacheFS (disabled by default — write-back to USB not implemented; keep disabled):**
 ```bash
-# Enable CacheFS:
-echo 'POWOS_CACHEFS_ENABLED=true' >> /etc/powos/config
-# Then reboot or restart powos-homefs.service
+# CacheFS is mounted directly by bin/powos-boot at boot when
+# POWOS_CACHEFS_ENABLED=true is set in /etc/powos/config (reboot to apply).
+# WARNING: writes are never persisted back to USB — do not enable.
 
 # Debug when enabled:
 blkid | grep POWOS-DATA
@@ -937,10 +934,10 @@ cat /run/powos/cachefs-status.json
 powos rollback
 # Shows current rollback flags
 
-# If rollback not working (grubby may have silently failed):
-cat /run/powos/rollback-kargs     # Verify flags were written
+# If rollback not working:
 grep powos /proc/cmdline          # After reboot: check flags active
 which grubby && grubby --info=DEFAULT  # Check if grubby is installed
+# Note: /run/powos/rollback-kargs is informational only — nothing reads it at boot
 ```
 
 **RAM ↔ USB sync issues:**
@@ -1028,11 +1025,12 @@ tool on this account** — it has been exhausted by run-polling before. Rules:
 ```bash
 # Run Docker test suite
 docker compose up --build -d
-docker exec powos bash /test/tier1/test-hardware-detect.sh
-docker exec powos bash /test/tier1/test-overlay.sh
-docker exec powos bash /test/tier1/test-pinstall.sh
-docker exec powos python3 /test/tier1/test-layer-sync.py   # Layer sync + whiteout tests
-docker exec powos python3 /test/tier1/test-cachefs.py      # CacheFS unit tests
+# Tests live in the bundled source at /var/lib/powos/src/test
+docker exec powos bash /var/lib/powos/src/test/tier1/test-hardware-detect.sh
+docker exec powos bash /var/lib/powos/src/test/tier1/test-overlay.sh
+docker exec powos bash /var/lib/powos/src/test/tier1/test-pinstall.sh
+docker exec powos python3 /var/lib/powos/src/test/tier1/test-layer-sync.py   # Layer sync + whiteout tests
+docker exec powos python3 /var/lib/powos/src/test/tier1/test-cachefs.py      # CacheFS unit tests
 ```
 
 **What Docker covers:** Hardware detection logic, overlay build/enable/disable, package install, layer sync logic (unit tests, not real overlayfs), CacheFS unit behavior.
@@ -1045,16 +1043,16 @@ docker exec powos python3 /test/tier1/test-cachefs.py      # CacheFS unit tests
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Layered RAM boot | ✅ Implemented | OS in RAM, layers from USB |
-| Hardware detection (16 profiles) | ✅ Implemented | Auto-selects on boot |
-| Layer sync (RAM→USB, 60s) | ✅ Implemented | Whiteout translation, USB disconnect guard, failure notifications |
+| Layered RAM boot | ✅ Implemented (hardware validation pending) | OS in RAM, layers from USB; previously broken on real hardware (NEWROOT no-op), fix awaiting validation |
+| Hardware detection (17 profiles) | ✅ Implemented | Auto-selects on boot |
+| Layer sync (RAM→USB, 60s) | ✅ Implemented (hardware validation pending) | Whiteout translation, USB disconnect guard, failure notifications; previously broken (`--delete-after` wipe), fix awaiting validation |
 | systemd-sysext overlays | ✅ Implemented | Custom binaries merged into /usr |
 | Container dev (Distrobox) | ✅ Implemented | Mutable dev containers |
 | Rollback | ✅ Implemented | grubby can silently fail — verify via `/run/powos/rollback-kargs` |
-| CacheFS | ⚠️ Opt-in/Experimental | `POWOS_CACHEFS_ENABLED=true` required; missing fsync, data loss risk |
+| CacheFS | 🚫 Incomplete — keep disabled | Write-back to USB NOT implemented; written data is lost. Must remain disabled |
 | Mobile mode | 🚧 WIP | Files copied to RAM but live remount not implemented; reboot needed |
 | Sync conflict detection | ⚠️ Partial | Detection works; `--merge` has basic implementation, may need manual help |
-| Cloud backup | 📋 Planned | git-based CLI structure exists |
+| Cloud backup | ⚠️ Partial | git-based implementation exists (`lib/backup.sh`); not fully validated |
 | Tier-2 VM testing | ❌ Missing | Only Docker/tier-1 tests exist |
 
 ## Credentials

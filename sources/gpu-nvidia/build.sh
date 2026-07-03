@@ -14,7 +14,6 @@ echo "Building: $NAME"
 
 # 1. Create directory structure
 mkdir -p "$OUTPUT_DIR/usr/lib/udev/rules.d"
-mkdir -p "$OUTPUT_DIR/etc/modprobe.d"
 mkdir -p "$OUTPUT_DIR/usr/bin"
 
 # 2. Add Power Management Udev Rules
@@ -29,14 +28,13 @@ ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x0300
 ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030200", TEST=="power/control", ATTR{power/control}="on"
 EOF
 
-# 3. Add Modprobe Configuration
-# Ensure modesetting is enabled (critical for Wayland/Gamescope)
-cat > "$OUTPUT_DIR/etc/modprobe.d/nvidia-modeset.conf" << 'EOF'
-options nvidia-drm modeset=1
-options nvidia "NVreg_DynamicPowerManagement=0x02"
-EOF
+# NOTE: systemd-sysext only merges /usr (and /opt) — files under etc/ in an
+# extension are silently ignored (see lib/build-helpers.sh:104-108). Modprobe
+# options (nvidia-drm modeset, NVreg_DynamicPowerManagement) therefore cannot
+# be shipped from this overlay; set them via kernel args (config/bootc/kargs.d/)
+# or the base image instead.
 
-# 4. Add a helper script
+# 3. Add a helper script
 cat > "$OUTPUT_DIR/usr/bin/powos-nvidia-status" << 'EOF'
 #!/bin/bash
 if command -v nvidia-smi &>/dev/null; then

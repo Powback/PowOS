@@ -1,5 +1,11 @@
 # Bazzite Build System Analysis for PowOS Modular Architecture
 
+> **⚠️ HISTORICAL / OUTDATED:** Parts of this analysis describe the legacy
+> `overlays/` build system and a `containers/` build path that no longer
+> exist. The live mechanism is `sources/<name>/` + `lib/overlay-manager.sh`
+> (systemd-sysext), and the OS is built from the root `Containerfile`.
+> Kept for background/research reference only.
+
 **Date:** 2025-12-12
 **Purpose:** Analyze Bazzite's build system to design a modular overlay-based architecture for PowOS
 

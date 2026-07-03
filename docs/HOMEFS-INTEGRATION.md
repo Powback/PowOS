@@ -1,5 +1,13 @@
 # HomeFS Integration with PowOS
 
+> **⚠️ HISTORICAL / CODE REMOVED:** The `lib/homefs/` code, its systemd units
+> (`powos-homefs.service`, `powos-homefs-sync.service`,
+> `powos-usb-monitor.service`), udev rule, and `homefs-usb-notify` helper
+> described here have been **deleted** — none of it was installed or
+> functional. The only implementation of this idea is `lib/cachefs/`
+> (opt-in, experimental, write-back to USB not implemented — must remain
+> disabled). Kept as a design document only.
+
 ## Overview
 
 This document describes how HomeFS integrates into the PowOS boot architecture and overlay system.

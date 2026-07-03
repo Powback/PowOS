@@ -132,10 +132,12 @@ build_overlay() {
     # Create extension-release file
     create_extension_release "$name" "$output_dir"
 
-    # Verify build produced something (globs don't expand inside [[ -f ]])
-    if ! compgen -G "${output_dir}/usr/bin/*" >/dev/null && \
-       ! compgen -G "${output_dir}/usr/lib/*" >/dev/null; then
-        log_warn "Build completed but no files found in usr/bin or usr/lib"
+    # Verify build produced something. Ignore the extension-release file we
+    # always create ourselves — a compgen over usr/lib/* would always match
+    # extension-release.d and the warning could never fire. (Globs don't
+    # expand inside [[ ]], so use find.)
+    if [[ -z "$(find "${output_dir}/usr" -type f -not -path '*/extension-release.d/*' -print -quit 2>/dev/null)" ]]; then
+        log_warn "Build completed but produced no files under usr/ (empty overlay)"
     fi
 
     log_success "Built overlay: $name -> $output_dir"
@@ -165,13 +167,14 @@ build_all_overlays() {
 
     log_info "Built $count overlays, $failed failed"
 
-    # Report which overlays failed
+    # Report which overlays failed and propagate failure
     if [[ $failed -gt 0 ]]; then
         log_warn "Failed overlays:"
         for fname in "${failed_names[@]}"; do
             log_warn "  - $fname"
         done
         log_warn "Check sources/<name>/build.sh and packages.txt for issues"
+        return 1
     fi
     return 0
 }

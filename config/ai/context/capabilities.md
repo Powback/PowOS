@@ -11,7 +11,8 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - Runs live from USB into a RAM overlay; OS in RAM, USB optional at runtime.
 - Layered persistence: RAM upper → custom → updates → base (Bazzite). ✅
 - Independent rollback per layer: `powos rollback {custom|updates|all|reset}`. ✅
-  (grubby can silently fail — verify via `/run/powos/rollback-kargs`.)
+  (grubby failures are reported loudly; `/run/powos/rollback-kargs` is
+  informational only — verify after reboot via `grep powos /proc/cmdline`.)
 - Layer sync RAM→USB every 60s (`powos sync`, `powos flush`). ✅
 
 ## Install to disk & dual-boot (NEW)
@@ -68,10 +69,14 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - Mobile mode `powos mobile` — copy OS to RAM so USB can unplug. 🚧 live remount not done; reboot needed.
 - Cloud backup `powos backup {status|push|pull|setup}` — git-based USB state backup. ✅ CLI exists.
 - Sync conflicts `powos sync {status|resolve|--keep-ram|--keep-usb|--merge}` — detection ✅, `--merge` basic ⚠️.
-- CacheFS (lazy user-data FUSE) — ❌ opt-in/experimental, off by default (`POWOS_CACHEFS_ENABLED`).
+- CacheFS (lazy user-data FUSE) — ❌ incomplete: write-back to USB NOT implemented (written data is lost); must remain disabled (`POWOS_CACHEFS_ENABLED`).
 - Containers `powos containers …` (Podman/Distrobox), install/export GUI apps. ✅
 - Dev `powos dev {new|fork|build|enable}` incl. `--ai` project generation. ✅
 - Overlays (systemd-sysext) via `powos dev` / `overlay-manager.sh`. ✅
+- Hibernation / session-resume (hop to Windows for anti-cheat games, resume the
+  Linux session on return) — ❌ SPEC ONLY, not built, blocked on persistence
+  validation. See docs/HIBERNATION.md. `powos boot windows` (UEFI BootNext,
+  one-shot reboot to Windows) IS built. ✅
 
 ## GPU / base image
 - **Default base is now the OPEN NVIDIA driver** (`bazzite-nvidia-open:stable`).
@@ -80,8 +85,9 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - One x86-64 USB, GPU variant auto-select at boot: `lib/boot/variant-select.sh`
   picks `nvidia-open` (default for NVIDIA) vs `nvidia` (closed) vs `main` (AMD/Intel),
   override via `rd.powos.variant=nvidia-open|nvidia|main|auto`. Install inherits the
-  booted variant. ⚠️ selection ENGINE done + unit-tested; multi-base USB layout +
-  dracut wiring + build-both-variants NOT wired yet (docs/MULTI-VARIANT-USB.md).
+  booted variant. ⚠️ selection engine done + unit-tested; multi-variant build,
+  USB layout, dracut selection, and boot menu are wired (docs/MULTI-VARIANT-USB.md)
+  — hardware validation pending.
   x86-64 only — Mac/Android out of scope. Open needs Turing/GTX-16+; older NVIDIA
   (Maxwell/Pascal) needs closed.
 - Driver stack is fixed by the image; hardware profiles tune settings but can't

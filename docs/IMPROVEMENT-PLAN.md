@@ -5,16 +5,16 @@ Based on architecture review with Gemini AI. Prioritized by impact and complexit
 ## Phase 1: Quick Wins (Naming & Safety) ✅ COMPLETED
 
 ### 1.1 Rename Commands for Clarity ✅
-- [x] Rename `powos state` → `powos remote`
+- [x] Rename `powos state` → `powos backup`
   - [x] Update `lib/sync.sh` - rename `cmd_sync` to `cmd_remote`
   - [x] Update `bin/powos` - change dispatch from `state` to `remote`
   - [x] Update usage docs in `bin/powos`
   - [x] Update `CLAUDE.md` documentation
 - [x] Rename internal commands:
-  - [x] `powos remote status` - show remote sync status
-  - [x] `powos remote push` - push to git remote
-  - [x] `powos remote pull` - pull from git remote
-  - [x] `powos remote setup` - configure remote
+  - [x] `powos backup status` - show remote sync status
+  - [x] `powos backup push` - push to git remote
+  - [x] `powos backup pull` - pull from git remote
+  - [x] `powos backup setup` - configure remote
 - [x] Keep `powos sync` for RAM→USB (it's clear enough)
 
 ### 1.2 Add Lock File Safety ✅
@@ -23,8 +23,8 @@ Based on architecture review with Gemini AI. Prioritized by impact and complexit
   - [x] `sync_lock_release()` - remove lock file
   - [x] `sync_lock_check_stale()` - check if lock exists (stale)
 - [x] Add lock to critical operations:
-  - [x] `powos remote push`
-  - [x] `powos remote pull`
+  - [x] `powos backup push`
+  - [x] `powos backup pull`
 - [x] Check for stale lock on boot
   - [x] Add to `systemd/powos-init`
   - [x] Warn user if previous sync was interrupted
@@ -44,7 +44,7 @@ Based on architecture review with Gemini AI. Prioritized by impact and complexit
   - [ ] Only apply if validation passes
   - [ ] Keep backup of previous state
 - [ ] Add rollback command:
-  - [ ] `powos remote rollback` - restore previous state
+  - [ ] `powos backup rollback` - restore previous state
 
 ### 2.2 Conflict Detection
 - [ ] Before pull, check for uncommitted local changes
@@ -53,10 +53,10 @@ Based on architecture review with Gemini AI. Prioritized by impact and complexit
   - [ ] `--merge` - try to merge (default)
   - [ ] `--theirs` - discard local, use remote
   - [ ] `--stash` - stash local, pull, re-apply
-- [ ] Add `powos remote conflicts` to show pending conflicts
+- [ ] Add `powos backup conflicts` to show pending conflicts
 
 ### 2.3 Git Repo Health Check
-- [ ] Add `powos remote doctor` command:
+- [ ] Add `powos backup doctor` command:
   - [ ] Check `.git` integrity
   - [ ] Check for uncommitted changes
   - [ ] Check for untracked files
@@ -121,7 +121,7 @@ Based on architecture review with Gemini AI. Prioritized by impact and complexit
   - [ ] Enable compression (zstd)
   - [ ] Document benefits (CoW, snapshots)
 - [ ] Add btrfs snapshot before risky operations:
-  - [ ] `powos remote pull` - snapshot before
+  - [ ] `powos backup pull` - snapshot before
   - [ ] `powos update` - snapshot before
 
 ### 5.2 Atomic Sync Operations
@@ -138,7 +138,7 @@ Based on architecture review with Gemini AI. Prioritized by impact and complexit
 - [ ] On first boot, prompt user:
   - [ ] "Set up remote backup? (recommended)"
   - [ ] Guide through SSH key setup
-  - [ ] Guide through `powos remote setup`
+  - [ ] Guide through `powos backup setup`
 - [ ] Add `powos setup` command for guided setup
 
 ### 6.2 Status Dashboard
@@ -202,7 +202,7 @@ Ongoing: Phase 7 (Testing)
 
 ## Questions to Resolve
 
-1. Should `powos remote` require explicit setup, or auto-init local git?
+1. Should `powos backup` require explicit setup, or auto-init local git?
 2. Should we support multiple remotes (backup + collaboration)?
 3. Should AI sessions sync by default or stay local?
 4. How to handle secrets that accidentally get committed?
@@ -216,7 +216,7 @@ Ongoing: Phase 7 (Testing)
 
 ### Completed
 - [x] Initial sync system (`lib/sync.sh`)
-- [x] State commands (`powos state` → renamed to `powos remote`)
+- [x] State commands (`powos state` → renamed to `powos backup`)
 - [x] Machine branch support
 - [x] Export/import functionality
 - [x] Test suite (32 tests)
@@ -232,4 +232,4 @@ Ongoing: Phase 7 (Testing)
 ### Notes
 - Gemini review completed, feedback incorporated into this plan
 - All existing tests passing (113/114)
-- Phase 1 completed: `powos state` renamed to `powos remote`, lock file safety added
+- Phase 1 completed: `powos state` renamed to `powos backup`, lock file safety added

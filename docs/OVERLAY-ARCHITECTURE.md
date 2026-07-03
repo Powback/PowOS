@@ -1,5 +1,11 @@
 # PowOS Overlay Architecture
 
+> **⚠️ HISTORICAL / OUTDATED:** This document describes the legacy `overlays/`
+> build system (Makefile, `build-overlay.sh`, `detect-and-enable.sh`), which
+> has been **removed** from the repo. The live overlay mechanism is
+> `sources/<name>/` built by `lib/overlay-manager.sh` (systemd-sysext), with
+> the OS built from the root `Containerfile`. Kept for design reference only.
+
 ## Overview
 
 PowOS uses a modular architecture with **two base images** and **systemd-sysext overlays** for device-specific functionality. This document explains what was removed from the base images and will be provided via overlays.

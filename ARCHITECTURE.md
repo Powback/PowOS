@@ -462,8 +462,7 @@ PowOS/
 ├── bin/
 │   ├── powos                  # CLI (status, layers, rollback, update)
 │   ├── powos-boot             # Boot orchestrator
-│   ├── pinstall               # Package + git commit
-│   └── powos-init-usb         # Initialize USB drive
+│   └── pinstall               # Package + git commit
 │
 ├── lib/
 │   ├── hardware-detect.sh     # Chameleon Boot
@@ -478,7 +477,7 @@ PowOS/
 │       └── cachefs-sync.py    # User data sync
 │
 ├── config/
-│   ├── profiles/              # Hardware profiles (16)
+│   ├── profiles/              # Hardware profiles (17)
 │   └── bootc/kargs.d/         # Kernel arguments
 │
 ├── projects/                  # Development projects (gitignored)
@@ -495,7 +494,7 @@ PowOS/
 │
 └── build/
     ├── build-iso.sh           # Create live USB image (raw-efi, NOT installer)
-    │                          # Output: build/output/powos-live.raw
+    │                          # Output: build/output/powos.raw
     └── install-to-usb.sh      # Write image to USB with safety checks
                                # (blocks non-removable drives, warns on NVMe)
 ```

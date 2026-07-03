@@ -49,7 +49,7 @@ if [[ ! -d "$APP_DIR" ]]; then
         [kate]="utilities"
         [okular]="graphics"
     )
-    local category="${APP_CATEGORIES[$APP_NAME]:-system}"
+    category="${APP_CATEGORIES[$APP_NAME]:-system}"
 
     git clone "$KDE_INVENT_URL/$category/$APP_NAME.git" "$APP_DIR" 2>/dev/null || \
     git clone "$KDE_INVENT_URL/system/$APP_NAME.git" "$APP_DIR" 2>/dev/null || \

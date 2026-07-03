@@ -1,5 +1,11 @@
 # PowOS Build Guide
 
+> **⚠️ HISTORICAL / OUTDATED:** This guide documents a legacy build path
+> (`containers/` images and the removed `overlays/` system). The current
+> build is the root `Containerfile` via `just build-iso`
+> (output: `build/output/powos.raw`), with overlays built from
+> `sources/<name>/` by `lib/overlay-manager.sh`.
+
 Quick reference for building PowOS base images.
 
 ## Prerequisites

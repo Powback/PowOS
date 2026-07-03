@@ -585,13 +585,13 @@ PowOS/
 
 ## Creating the Live USB Image
 
-PowOS builds a **live boot image** (`powos-live.raw`), not an installer ISO. The image runs directly from USB without touching any other disk.
+PowOS builds a **live boot image** (`powos.raw`), not an installer ISO. The image runs directly from USB without touching any other disk.
 
 ```bash
 # Build live USB image (requires podman)
 just build-iso
 
-# Output: build/output/powos-live.raw
+# Output: build/output/powos.raw
 ```
 
 Write to USB with the provided script (has safety checks):
@@ -600,9 +600,9 @@ sudo ./build/install-to-usb.sh /dev/sdX
 ```
 
 Or write manually (be careful to use correct device):
-- **Linux**: `sudo dd if=build/output/powos-live.raw of=/dev/sdX bs=4M status=progress`
+- **Linux**: `sudo dd if=build/output/powos.raw of=/dev/sdX bs=4M status=progress`
 - **Windows**: Rufus in DD mode, or balenaEtcher
-- **macOS**: `sudo dd if=build/output/powos-live.raw of=/dev/diskN bs=4m`
+- **macOS**: `sudo dd if=build/output/powos.raw of=/dev/diskN bs=4m`
 
 **Safety:** `install-to-usb.sh` refuses to write to non-removable drives (internal SSDs). NVMe devices get a warning (some USB NVMe enclosures are detected as non-removable — use `POWOS_OVERRIDE_REMOVABLE=1` to bypass).
 
@@ -645,16 +645,16 @@ Honest assessment of what works:
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Layered RAM boot | ✅ Implemented | OS in RAM, layers from USB |
-| Hardware detection | ✅ Implemented | 16 hardware profiles |
-| Layer sync (RAM→USB) | ✅ Implemented | Every 60s, whiteout translation, USB disconnect detection |
+| Layered RAM boot | ✅ Implemented (hardware validation pending) | OS in RAM, layers from USB |
+| Hardware detection | ✅ Implemented | 17 hardware profiles |
+| Layer sync (RAM→USB) | ✅ Implemented (hardware validation pending) | Every 60s, whiteout translation, USB disconnect detection |
 | systemd-sysext overlays | ✅ Implemented | Custom binaries merged into /usr |
 | Container dev (Distrobox) | ✅ Implemented | Mutable dev containers |
-| Rollback (custom/updates) | ✅ Implemented | grubby can silently fail — verify via `/run/powos/rollback-kargs` |
-| CacheFS lazy-loading | ⚠️ Opt-in/Experimental | Disabled by default; missing fsync, potential data loss on power failure |
+| Rollback (custom/updates) | ✅ Implemented | grubby failures reported loudly; verify after reboot via `grep powos /proc/cmdline` |
+| CacheFS lazy-loading | 🚫 Incomplete — keep disabled | Write-back to USB not implemented; written data is lost |
 | Mobile mode (USB-free) | 🚧 WIP | Copies OS to RAM but live remount not implemented — requires reboot to take effect |
 | Sync conflict detection | ⚠️ Partial | Detection works; merge is manual |
-| Cloud backup | 📋 Planned | CLI structure exists but sync backend incomplete |
+| Cloud backup | ⚠️ Partial | git-based implementation exists; not fully validated |
 | AI-assisted healing | 🧪 Experimental | Requires manual Ollama setup |
 | Tier-2 VM testing | ❌ Not yet | Only Docker/tier-1 tests exist |
 
@@ -664,11 +664,11 @@ Honest assessment of what works:
 # Docker tests (fast, no real hardware needed)
 docker compose up --build
 docker exec powos powos status
-docker exec powos bash /test/tier1/test-hardware-detect.sh
-docker exec powos bash /test/tier1/test-overlay.sh
-docker exec powos bash /test/tier1/test-pinstall.sh
-docker exec powos python3 /test/tier1/test-layer-sync.py
-docker exec powos python3 /test/tier1/test-cachefs.py
+docker exec powos bash /var/lib/powos/src/test/tier1/test-hardware-detect.sh
+docker exec powos bash /var/lib/powos/src/test/tier1/test-overlay.sh
+docker exec powos bash /var/lib/powos/src/test/tier1/test-pinstall.sh
+docker exec powos python3 /var/lib/powos/src/test/tier1/test-layer-sync.py
+docker exec powos python3 /var/lib/powos/src/test/tier1/test-cachefs.py
 ```
 
 **What Docker tests cover:**

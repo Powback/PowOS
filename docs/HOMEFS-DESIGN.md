@@ -1,5 +1,11 @@
 # HomeFS - Lazy-Load Home Filesystem for PowOS
 
+> **⚠️ HISTORICAL / CODE REMOVED:** The `lib/homefs/` implementation this
+> document describes has been **deleted** (it was never installed and did not
+> work). The only implementation of this idea is `lib/cachefs/` — opt-in,
+> experimental, and with **write-back to USB not implemented** (must remain
+> disabled). Kept as a design document only.
+
 ## Executive Summary
 
 HomeFS is a FUSE-based filesystem that enables PowOS to run entirely from RAM while providing transparent, on-demand access to user files stored on a USB drive. Users can unplug the USB drive after boot, work from RAM, and reconnect to sync changes back.

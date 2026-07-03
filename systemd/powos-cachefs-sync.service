@@ -1,20 +1,20 @@
 [Unit]
 Description=PowOS CacheFS Sync Daemon
 Documentation=man:powos(8)
-# After= on a missing unit is harmless; Wants= is NOT — it created a dangling
-# "not-found" powos-homefs ref on every install, because that unit is never
-# shipped (the homefs binary doesn't exist yet; CacheFS is experimental).
-# Re-add Wants= only when homefs actually ships.
-After=powos-homefs.service local-fs.target
+# homefs was removed entirely (dead unshipped generation), so no homefs refs.
+After=local-fs.target
 # Same guard layer-sync uses: this daemon syncs the USB overlay model's home.
 # Without it, fixed (bootc) installs ran the daemon forever, pointlessly
-# polling a /mnt/powos-usb path that never appears.
+# polling a USB path that never appears.
 ConditionPathExists=/run/powos/layer-paths
+# NOTE: CacheFS write-back is NOT implemented — this daemon currently finds no
+# dirty files to sync (the FUSE process and this daemon disagree on the cache
+# format). CacheFS must stay disabled until that is rebuilt; see CLAUDE.md.
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 /usr/lib/powos/cachefs/cachefs-sync.py
-ExecReload=/bin/kill -HUP $MAINPID
+# No ExecReload: the daemon handles only SIGTERM/SIGINT — SIGHUP would kill it.
 Restart=on-failure
 RestartSec=10
 
@@ -26,8 +26,8 @@ PrivateTmp=false
 # Environment
 Environment=PYTHONUNBUFFERED=1
 
-# Graceful shutdown - sync dirty files before stopping
-ExecStop=/usr/bin/python3 /usr/lib/powos/cachefs/cachefs-sync.py --sync-now
+# No ExecStop --sync-now: the daemon's argparse has no such flag (it exited 2
+# on every stop). Shutdown is SIGTERM, handled by the daemon.
 TimeoutStopSec=120
 
 [Install]
