@@ -16,6 +16,7 @@
 *.toml      text eol=lf
 *.ini       text eol=lf
 *.txt       text eol=lf
+*.desktop   text eol=lf
 *.env       text eol=lf
 Containerfile*  text eol=lf
 Dockerfile*     text eol=lf
