@@ -47,6 +47,14 @@ jobs:
           python3 test/tier1/test-layer-sync.py
           python3 test/tier1/test-cachefs.py
 
+      - name: Free disk space (bazzite base is ~10GB; default runner has ~14GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/share/swift /usr/local/.ghcup || true
+          sudo docker image prune --all --force || true
+          df -h /
+
       - name: Vendor bazzite system_files (Containerfile COPYs it)
         run: ./build/vendor-bazzite.sh
 
@@ -60,6 +68,14 @@ jobs:
     needs: tier1-tests
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space (bazzite base is ~10GB; default runner has ~14GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/share/swift /usr/local/.ghcup || true
+          sudo docker image prune --all --force || true
+          df -h /
 
       - name: Vendor bazzite system_files (Containerfile COPYs it)
         run: ./build/vendor-bazzite.sh
