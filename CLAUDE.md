@@ -325,6 +325,12 @@ powos ai agents
 
 **Aliases:** `docker`, `pod`, `container` → `containerizer`
 
+**Keeping agents current (single source of truth):** the system-facing agents
+(`assistant`, `health`, `devops`) inject `config/ai/context/capabilities.md`
+plus live `powos help` at call time via `AGENT_CONTEXT_CMD`. Edit that ONE doc
+when features change — do not re-describe features in individual agent prompts,
+which drift. Ships to `/etc/powos/ai/context/capabilities.md`.
+
 **Agent Config Structure:**
 ```
 config/ai/agents/
