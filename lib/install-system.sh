@@ -40,7 +40,14 @@ ISV_ASSUME_YES=0       # 1 = skip interactive confirmations (scripting; dangerou
 ISV_ERASE_CONFIRMED=0  # 1 = --i-understand-data-loss (with --yes: allows ERASE gates)
 ISV_MODE=""            # alongside | whole-disk | "" (ask)
 ISV_TARGET=""          # /dev/sdX chosen by user or flag
-ISV_SHARED_GB=""       # size of shared NTFS data partition, "" = ask, 0 = none
+# Tail reservations. DEFAULT IS "auto": a fresh install is future-proof BY
+# DEFAULT — games partition + Windows space sized from the disk, so the
+# machine never needs a reformat to add them later. Explicit GB overrides,
+# 0 disables. (Same policy as build/install-to-usb.sh resolve_reservations.)
+ISV_SHARED_GB="auto"   # shared NTFS games partition (label POWOS-GAMES), GB
+ISV_WINDOWS_GB="auto"  # unallocated tail for a future bare-metal Windows
+ISV_SHARED_AUTO=0      # 1 = value came from "auto" (may shrink to fit)
+ISV_WINDOWS_AUTO=0     # 1 = value came from "auto" (may shrink to fit)
 ISV_FS="btrfs"         # root filesystem
 
 # run_step "description" cmd args...
@@ -317,16 +324,99 @@ isv_free_block_start() {
     isv_free_block "${1:-$ISV_TARGET}" | awk '{print $1}'
 }
 
+# Whole-disk size of a device in MiB (0 if unreadable).
+isv_disk_size_mib() {
+    local b
+    b=$(lsblk -bdn -o SIZE "$1" 2>/dev/null | head -1 | tr -d '[:space:]')
+    [[ "$b" =~ ^[0-9]+$ ]] || { echo 0; return; }
+    echo $(( b / 1048576 ))
+}
+
+# PURE: auto-reservation policy — mirrors build/install-to-usb.sh's
+# resolve_reservations, so burned USBs and installed disks follow ONE policy.
+# $1 = disk size (MiB), $2 = games|windows. Echoes the reservation in GB.
+isv_auto_reserve_gb() {
+    local disk_mib="$1" kind="$2"
+    case "$kind" in
+        games)
+            if   (( disk_mib >= 3072*1024 )); then echo 512
+            elif (( disk_mib >= 1024*1024 )); then echo 256
+            elif (( disk_mib >=  512*1024 )); then echo 128
+            else echo 0; fi ;;
+        windows)
+            if   (( disk_mib >= 3072*1024 )); then echo 256
+            elif (( disk_mib >= 1024*1024 )); then echo 128
+            else echo 0; fi ;;
+        *) echo 0 ;;
+    esac
+}
+
+# Resolve "auto" reservations from the target disk size (call once the target
+# is known, before the plan is shown). Explicit flag values pass through.
+isv_resolve_reservations() {
+    [[ "$ISV_SHARED_GB" == "auto" ]] && ISV_SHARED_AUTO=1
+    [[ "$ISV_WINDOWS_GB" == "auto" ]] && ISV_WINDOWS_AUTO=1
+    (( ISV_SHARED_AUTO || ISV_WINDOWS_AUTO )) || return 0
+
+    local disk_mib
+    disk_mib=$(isv_disk_size_mib "$ISV_TARGET")
+    if (( disk_mib == 0 )); then
+        isv_warn "Could not read the size of $ISV_TARGET — auto reservations disabled."
+        [[ "$ISV_SHARED_GB"  == "auto" ]] && ISV_SHARED_GB=0
+        [[ "$ISV_WINDOWS_GB" == "auto" ]] && ISV_WINDOWS_GB=0
+        return 0
+    fi
+    if [[ "$ISV_SHARED_GB" == "auto" ]]; then
+        ISV_SHARED_GB=$(isv_auto_reserve_gb "$disk_mib" games)
+        isv_log "Auto games reservation: ${ISV_SHARED_GB}GB (--shared-gb N overrides, 0 disables)"
+    fi
+    if [[ "$ISV_WINDOWS_GB" == "auto" ]]; then
+        ISV_WINDOWS_GB=$(isv_auto_reserve_gb "$disk_mib" windows)
+        isv_log "Auto windows reservation: ${ISV_WINDOWS_GB}GB (--windows-gb N overrides, 0 disables)"
+    fi
+}
+
+# PURE: fit reservations into the space they may consume. $1 = available
+# space for reservations, $2 = shared, $3 = windows (all in the same unit).
+# Shrink order: WINDOWS first, then games (a runnable game library beats
+# space for a hypothetical Windows). Echoes "shared windows".
+isv_fit_reservations() {
+    local avail="$1" shared="$2" windows="$3"
+    (( avail < 0 )) && avail=0
+    if (( shared + windows > avail )); then
+        windows=$(( avail - shared ))
+        (( windows < 0 )) && windows=0
+        (( shared > avail )) && shared=$avail
+    fi
+    echo "$shared $windows"
+}
+
+# Does the shipped bootc support limiting the root partition? Probed from its
+# own help text — never assumed (bootc versions differ across base images).
+isv_bootc_supports_root_size() {
+    bootc install to-disk --help 2>/dev/null | grep -q -- '--root-size'
+}
+
 isv_choose_shared_size() {
-    [[ -n "$ISV_SHARED_GB" ]] && return 0
+    # Explicit --shared-gb → keep it, no prompt. "auto" (already resolved to
+    # a number by isv_resolve_reservations) → interactive default is the auto
+    # value, so pressing Enter keeps the future-proof layout.
+    [[ ${ISV_SHARED_AUTO:-0} -eq 1 ]] || return 0
+    [[ $ISV_ASSUME_YES -eq 1 ]] && return 0
     echo
-    echo "  A shared data partition (NTFS) is readable by BOTH Windows and PowOS —"
-    echo "  ideal for game assets, media, and projects you want in one place."
+    echo "  A shared games partition (NTFS, label POWOS-GAMES) is readable by BOTH"
+    echo "  Windows and PowOS — one game library serving both OSes ('powos games')."
     local ans
-    read -r -p "  Size of shared NTFS partition in GB (0 = none) [0]: " ans
-    ISV_SHARED_GB="${ans:-0}"
-    if ! [[ "$ISV_SHARED_GB" =~ ^[0-9]+$ ]]; then
-        isv_err "Invalid size."; return 1
+    # printf + read (not read -p): the prompt must show even when stdin is
+    # piped (read -p only prints on a tty).
+    printf '  Size of shared NTFS partition in GB (0 = none) [auto: %s]: ' "$ISV_SHARED_GB"
+    read -r ans
+    if [[ -n "$ans" ]]; then
+        if ! [[ "$ans" =~ ^[0-9]+$ ]]; then
+            isv_err "Invalid size."; return 1
+        fi
+        ISV_SHARED_GB="$ans"
+        ISV_SHARED_AUTO=0   # user's explicit answer must not silently shrink
     fi
 }
 
@@ -336,7 +426,8 @@ isv_show_plan() {
     echo -e "  Target disk : ${BOLD}$ISV_TARGET${NC}"
     echo -e "  Mode        : ${BOLD}$ISV_MODE${NC}"
     echo -e "  Root FS     : $ISV_FS"
-    echo -e "  Shared NTFS : $([[ "${ISV_SHARED_GB:-0}" == 0 ]] && echo none || echo "${ISV_SHARED_GB}GB")"
+    echo -e "  Games NTFS  : $([[ "${ISV_SHARED_GB:-0}" == "0" ]] && echo none || echo "${ISV_SHARED_GB}GB (label POWOS-GAMES — visible to Windows, by design)")"
+    echo -e "  Windows resv: $([[ "${ISV_WINDOWS_GB:-0}" == "0" ]] && echo none || echo "${ISV_WINDOWS_GB}GB unallocated (future 'powos windows create')")"
     echo
     if [[ "$ISV_MODE" == "whole-disk" ]]; then
         echo -e "  ${RED}${BOLD}THIS WILL ERASE ALL DATA ON $ISV_TARGET.${NC}"
@@ -358,6 +449,74 @@ isv_show_plan() {
 # ── Execution ─────────────────────────────────────────────────────
 isv_install_whole_disk() {
     isv_step "Installing (whole disk) to $ISV_TARGET"
+
+    # Tail reservations (games partition + unallocated Windows space).
+    # `bootc install to-disk` claims the ENTIRE disk unless it can limit the
+    # root partition, so probe its help for --root-size — never assume.
+    local shared_gb="${ISV_SHARED_GB:-0}" windows_gb="${ISV_WINDOWS_GB:-0}"
+    [[ "$shared_gb"  =~ ^[0-9]+$ ]] || shared_gb=0
+    [[ "$windows_gb" =~ ^[0-9]+$ ]] || windows_gb=0
+    local reserve_gb=$(( shared_gb + windows_gb ))
+    local -a size_args=()
+
+    if (( reserve_gb > 0 )); then
+        local supports=0
+        if command -v bootc &>/dev/null; then
+            isv_bootc_supports_root_size && supports=1
+        else
+            supports=1   # plan-only mode (no bootc): show the intended plan
+        fi
+        if (( supports == 1 )); then
+            local disk_gib
+            disk_gib=$(( $(isv_disk_size_mib "$ISV_TARGET") / 1024 ))
+            if (( disk_gib == 0 )); then
+                isv_err "Could not read the size of $ISV_TARGET — aborting before install."
+                return 1
+            fi
+            # Root gets disk − reservations − 2GiB (ESP/boot partitions bootc
+            # creates) and must keep at least 8GiB. Auto reservations SHRINK
+            # to fit (windows first, then games — never fail an install over
+            # a default); explicit flags that don't fit are a hard error.
+            local fit_shared fit_windows
+            read -r fit_shared fit_windows \
+                <<< "$(isv_fit_reservations $(( disk_gib - 2 - 8 )) "$shared_gb" "$windows_gb")"
+            if (( fit_windows < windows_gb )); then
+                if [[ ${ISV_WINDOWS_AUTO:-0} -eq 1 ]]; then
+                    isv_warn "Disk too small: windows reservation shrunk ${windows_gb}GB → ${fit_windows}GB."
+                else
+                    isv_err "Reservations too large: --shared-gb ${shared_gb} + --windows-gb ${windows_gb}"
+                    isv_err "leave less than 8GiB for the PowOS root on this ${disk_gib}GiB disk."
+                    isv_err "Nothing was changed. Reduce the reservations and re-run."
+                    return 1
+                fi
+            fi
+            if (( fit_shared < shared_gb )); then
+                if [[ ${ISV_SHARED_AUTO:-0} -eq 1 ]]; then
+                    isv_warn "Disk too small: games reservation shrunk ${shared_gb}GB → ${fit_shared}GB."
+                else
+                    isv_err "Reservation too large: --shared-gb ${shared_gb} leaves less than 8GiB"
+                    isv_err "for the PowOS root on this ${disk_gib}GiB disk. Nothing was changed."
+                    return 1
+                fi
+            fi
+            shared_gb=$fit_shared; windows_gb=$fit_windows
+            reserve_gb=$(( shared_gb + windows_gb ))
+            if (( reserve_gb > 0 )); then
+                local root_gib=$(( disk_gib - 2 - reserve_gb ))
+                # bootc's --root-size takes a human-readable size (e.g. 348G).
+                size_args=(--root-size "${root_gib}G")
+                isv_log "Root limited to ${root_gib}G — reserving ${shared_gb}GB POWOS-GAMES"
+                isv_log "+ ${windows_gb}GB unallocated (Windows) at the disk tail."
+            fi
+        else
+            isv_warn "This bootc has no --root-size: it claims the ENTIRE disk, so the"
+            isv_warn "games/windows reservations are impossible on a whole-disk install."
+            isv_warn "Install --alongside for reservations, or re-install after a bootc"
+            isv_warn "update. Continuing WITHOUT reservations."
+            shared_gb=0; windows_gb=0; reserve_gb=0
+        fi
+    fi
+
     # bootc lays down ESP + root + bootloader and wipes the disk for us.
     # rd.powos.ramboot=0: the image's kargs.d ships ramboot=1 for the live USB;
     # a DISK install must not run from a tmpfs upper (every write would vanish
@@ -365,11 +524,58 @@ isv_install_whole_disk() {
     # TODO(hw): validate exact bootc flags against the shipped bootc version.
     run_step "wipe + install PowOS" \
         bootc install to-disk --wipe --karg rd.powos.ramboot=0 \
-            --filesystem "$ISV_FS" "$ISV_TARGET" || {
+            --filesystem "$ISV_FS" ${size_args[@]+"${size_args[@]}"} "$ISV_TARGET" || {
         isv_err "bootc install failed."
         return 1
     }
     isv_ok "Base system installed."
+
+    if (( shared_gb > 0 )); then
+        # Non-fatal: the OS install already succeeded; a missing games
+        # partition can always be added later with `powos games create`.
+        isv_whole_disk_tail_partitions "$shared_gb" "$windows_gb" || true
+    elif (( windows_gb > 0 )); then
+        isv_ok "${windows_gb}GB left unallocated at the disk tail for Windows."
+        isv_log "Carve it later from the installed PowOS:  sudo powos windows create"
+    fi
+}
+
+# After a size-limited whole-disk install: create POWOS-GAMES in the tail
+# that --root-size freed. Bounds are explicit MiB positions from the free
+# block bootc left — NEVER 100%: when a Windows reservation exists that tail
+# must stay UNALLOCATED for `powos windows create`.
+isv_whole_disk_tail_partitions() {
+    local shared_gb="$1" windows_gb="$2"
+    isv_step "Creating the games partition in the reserved tail"
+
+    local fb_start fb_end fb_size
+    read -r fb_start fb_end fb_size <<< "$(isv_free_block "$ISV_TARGET")"
+    if [[ -z "$fb_start" || -z "$fb_end" ]]; then
+        isv_warn "No free block found after the install — cannot create POWOS-GAMES."
+        isv_warn "Create it later:  sudo powos games create --size ${shared_gb}"
+        return 0
+    fi
+
+    local games_end="$fb_end"
+    if (( windows_gb > 0 )); then
+        # LC_ALL=C: parted needs a period decimal separator, never a comma.
+        games_end=$(LC_ALL=C awk -v e="$fb_end" -v w="$(( windows_gb * 1024 ))" \
+            'BEGIN { printf "%.2f", e - w }')
+    fi
+    local expect_mib
+    expect_mib=$(LC_ALL=C awk -v s="$fb_start" -v e="$games_end" 'BEGIN { printf "%d", e - s }')
+    if (( expect_mib < 1024 )); then
+        isv_warn "Free tail too small for POWOS-GAMES (${expect_mib}MiB) — skipping."
+        isv_warn "Create it later:  sudo powos games create --size ${shared_gb}"
+        return 0
+    fi
+
+    isv_create_shared_partition "$ISV_TARGET" "${fb_start}MiB" "${games_end}MiB" "$expect_mib"
+
+    if (( windows_gb > 0 )); then
+        isv_ok "${windows_gb}GB left unallocated at the disk tail for Windows."
+        isv_log "Carve it later from the installed PowOS:  sudo powos windows create"
+    fi
 }
 
 isv_install_alongside() {
@@ -399,18 +605,46 @@ isv_install_alongside() {
         return 1
     fi
 
-    # If a shared partition was requested, reserve it at the tail of the FREE
-    # BLOCK so the PowOS root does not consume all remaining space.
-    local shared_mib=0 root_end="$fb_end"
-    if [[ "${ISV_SHARED_GB:-0}" != 0 ]]; then
-        shared_mib=$(( ISV_SHARED_GB * 1024 ))
-        if (( shared_mib + 8192 >= fb_size )); then
-            isv_err "Shared partition (${shared_mib}MiB) leaves no room for PowOS in"
-            isv_err "the ${fb_size}MiB free block. Reduce --shared-gb and re-run."
-            return 1
+    # Reservations at the tail of the FREE BLOCK (never the disk's tail):
+    #   [ PowOS root | POWOS-GAMES | unallocated Windows space ]
+    # Auto reservations SHRINK to fit (windows first, then games — an install
+    # must never fail over a default); explicit flags that don't fit error.
+    local sh_gb="${ISV_SHARED_GB:-0}" win_gb="${ISV_WINDOWS_GB:-0}"
+    [[ "$sh_gb"  =~ ^[0-9]+$ ]] || sh_gb=0
+    [[ "$win_gb" =~ ^[0-9]+$ ]] || win_gb=0
+    local req_shared=$(( sh_gb * 1024 )) req_windows=$(( win_gb * 1024 ))
+    local shared_mib=$req_shared windows_mib=$req_windows
+    if (( req_shared + req_windows > 0 )); then
+        # Root keeps at least 8GiB of the free block.
+        read -r shared_mib windows_mib \
+            <<< "$(isv_fit_reservations $(( fb_size - 8192 )) "$req_shared" "$req_windows")"
+        if (( windows_mib < req_windows )); then
+            if [[ ${ISV_WINDOWS_AUTO:-0} -eq 1 ]]; then
+                isv_warn "Free block too small: windows reservation shrunk ${req_windows}MiB → ${windows_mib}MiB."
+            else
+                isv_err "--windows-gb ${win_gb} does not fit in the ${fb_size}MiB free block"
+                isv_err "with an 8GiB root minimum. Reduce it and re-run."
+                return 1
+            fi
         fi
+        if (( shared_mib < req_shared )); then
+            if [[ ${ISV_SHARED_AUTO:-0} -eq 1 ]]; then
+                isv_warn "Free block too small: games reservation shrunk ${req_shared}MiB → ${shared_mib}MiB."
+            else
+                isv_err "Shared partition (${req_shared}MiB) leaves no room for PowOS in"
+                isv_err "the ${fb_size}MiB free block. Reduce --shared-gb and re-run."
+                return 1
+            fi
+        fi
+    fi
+    local root_end="$fb_end" games_end="$fb_end"
+    if (( windows_mib > 0 )); then
         # LC_ALL=C: parted needs a period decimal separator, never a comma.
-        root_end=$(LC_ALL=C awk -v e="$fb_end" -v s="$shared_mib" 'BEGIN { printf "%.2f", e - s }')
+        games_end=$(LC_ALL=C awk -v e="$fb_end" -v w="$windows_mib" 'BEGIN { printf "%.2f", e - w }')
+    fi
+    if (( shared_mib + windows_mib > 0 )); then
+        root_end=$(LC_ALL=C awk -v e="$fb_end" -v s="$shared_mib" -v w="$windows_mib" \
+            'BEGIN { printf "%.2f", e - s - w }')
     fi
 
     run_step "create PowOS root partition (${fb_start}MiB → ${root_end}MiB)" \
@@ -444,10 +678,15 @@ isv_install_alongside() {
     fi
     isv_log "New root partition: $root"
 
-    # Create the shared NTFS partition in the reserved tail (before formatting
-    # root), bounded by the free block's end — not the disk's.
+    # Create the games NTFS partition in the reserved tail (before formatting
+    # root), bounded INSIDE the free block — the Windows reservation (if any)
+    # stays unallocated after it.
     if [[ $shared_mib -gt 0 ]]; then
-        isv_create_shared_partition "$ISV_TARGET" "${root_end}MiB" "${fb_end}MiB" "$shared_mib"
+        isv_create_shared_partition "$ISV_TARGET" "${root_end}MiB" "${games_end}MiB" "$shared_mib"
+    fi
+    if (( windows_mib > 0 )); then
+        isv_ok "${windows_mib}MiB left unallocated inside the free block for Windows."
+        isv_log "Carve it later from the installed PowOS:  sudo powos windows create"
     fi
 
     # Format root, mount it + the shared ESP, hand off to bootc.
@@ -487,27 +726,29 @@ isv_install_alongside() {
 # user can add the partition later.
 isv_create_shared_partition() {
     local dev="$1" pstart="$2" pend="$3" expect_mib="${4:-}"
-    isv_step "Creating ${ISV_SHARED_GB}GB shared NTFS data partition"
+    isv_step "Creating shared NTFS games partition (${pstart} → ${pend})"
     if ! command -v mkfs.ntfs &>/dev/null; then
         isv_warn "mkfs.ntfs not available (install ntfsprogs) — skipping."
-        isv_warn "You can create POWOS-SHARED later from Windows Disk Management."
+        isv_warn "You can create POWOS-GAMES later:  sudo powos games create --size N"
         return 0
     fi
     run_step "create shared partition ($pstart → $pend)" \
-        parted -s "$dev" mkpart POWOS-SHARED ntfs "$pstart" "$pend" || {
+        parted -s "$dev" mkpart POWOS-GAMES ntfs "$pstart" "$pend" || {
         isv_warn "Could not create shared partition — continuing without it."
         return 0
     }
     if [[ $ISV_DRY_RUN -eq 1 ]]; then
         # mkpart was skipped — don't resolve a live device for the plan.
-        run_step "format shared NTFS (label POWOS-SHARED)" \
-            mkfs.ntfs -f -L POWOS-SHARED "<new POWOS-SHARED partition>"
-        isv_ok "Shared data partition planned (label POWOS-SHARED)."
+        run_step "format shared NTFS (label POWOS-GAMES)" \
+            mkfs.ntfs -f -L POWOS-GAMES "<new POWOS-GAMES partition>"
+        run_step "set GPT type 0700 (Microsoft basic data — visible to Windows)" \
+            sgdisk -t "N:0700" "$dev"
+        isv_ok "Shared games partition planned (label POWOS-GAMES)."
         return 0
     fi
     isv_settle "$dev"
     local sp used_fallback=0
-    sp=$(isv_part_by_partlabel "$dev" "POWOS-SHARED")
+    sp=$(isv_part_by_partlabel "$dev" "POWOS-GAMES")
     [[ -z "$sp" ]] && { sp=$(isv_last_partition "$dev"); used_fallback=1; }
     if [[ ! -b "$sp" ]]; then
         isv_warn "Shared partition created but not found for formatting — format it manually."
@@ -517,17 +758,30 @@ isv_create_shared_partition() {
         # Never mkfs a fallback-selected partition without proving it's the
         # one we just created (GPT can reuse a lower number for it).
         if ! isv_verify_new_partition "$sp" "$expect_mib"; then
-            isv_warn "Skipping format of $sp — format POWOS-SHARED manually after checking."
+            isv_warn "Skipping format of $sp — format POWOS-GAMES manually after checking."
             return 0
         fi
     fi
-    run_step "format shared NTFS (label POWOS-SHARED)" \
-        mkfs.ntfs -f -L POWOS-SHARED "$sp" || {
-        isv_warn "mkfs.ntfs failed — format POWOS-SHARED manually."
+    run_step "format shared NTFS (label POWOS-GAMES)" \
+        mkfs.ntfs -f -L POWOS-GAMES "$sp" || {
+        isv_warn "mkfs.ntfs failed — format POWOS-GAMES manually."
         return 0
     }
-    isv_ok "Shared data partition ready: $sp (label POWOS-SHARED)"
-    isv_log "Mount it in both Windows and PowOS for shared files / game assets."
+    # Exposure contract (docs/WINDOWS.md): 0700 = Microsoft basic data, so
+    # Windows letters the partition. Best-effort — without it the partition
+    # still works on PowOS, but Windows may show it as un-lettered RAW.
+    local pnum="${sp##*[!0-9]}"
+    if command -v sgdisk &>/dev/null && [[ -n "$pnum" ]]; then
+        run_step "set GPT type 0700 (Microsoft basic data — visible to Windows)" \
+            sgdisk -t "${pnum}:0700" "$dev" || \
+            isv_warn "sgdisk failed — fix later: sgdisk -t ${pnum}:0700 $dev"
+    else
+        isv_warn "sgdisk not available — set the GPT type later so Windows"
+        isv_warn "letters the partition:  sgdisk -t ${pnum:-N}:0700 $dev"
+    fi
+    isv_ok "Shared games partition ready: $sp (label POWOS-GAMES)"
+    isv_log "Wire it up on the PowOS side:  sudo powos games mount && sudo powos games steam-setup"
+    isv_log "On Windows it appears as a drive letter — see 'powos games' / GAMES-README.txt."
 }
 
 # Re-read the partition table and ensure kernel partition device nodes exist
@@ -699,7 +953,12 @@ Options:
   --alongside          Dual-boot: install into free space, keep other OSes
   --whole-disk         Erase the whole target disk (requires confirmation)
   --disk /dev/sdX      Preselect target disk (still shown for confirmation)
-  --shared-gb N        Create an N GB shared NTFS data partition (0 = none)
+  --shared-gb N|auto   Shared NTFS games partition (label POWOS-GAMES),
+                       visible to Windows — managed by 'powos games'.
+                       Default: auto (sized from the disk; 0 disables)
+  --windows-gb N|auto  Reserve N GB unallocated at the disk tail for a future
+                       bare-metal Windows ('powos windows create').
+                       Default: auto (sized from the disk; 0 disables)
   --fs btrfs|ext4      Root filesystem (default: btrfs)
   --dry-run            Show every action but change NOTHING on disk
   --yes                Skip y/N confirmations (SCRIPTING ONLY — dangerous).
@@ -723,7 +982,20 @@ isv_parse_args() {
             --alongside)   ISV_MODE="alongside"; shift ;;
             --whole-disk)  ISV_MODE="whole-disk"; shift ;;
             --disk)        ISV_TARGET="${2:-}"; shift 2 ;;
-            --shared-gb)   ISV_SHARED_GB="${2:-}"; shift 2 ;;
+            --shared-gb)
+                ISV_SHARED_GB="${2:-}"
+                if ! [[ "$ISV_SHARED_GB" =~ ^([0-9]+|auto)$ ]]; then
+                    isv_err "--shared-gb must be a whole number of GB or 'auto' (got: '${ISV_SHARED_GB}')"
+                    return 1
+                fi
+                shift 2 ;;
+            --windows-gb)
+                ISV_WINDOWS_GB="${2:-}"
+                if ! [[ "$ISV_WINDOWS_GB" =~ ^([0-9]+|auto)$ ]]; then
+                    isv_err "--windows-gb must be a whole number of GB or 'auto' (got: '${ISV_WINDOWS_GB}')"
+                    return 1
+                fi
+                shift 2 ;;
             --fs)
                 ISV_FS="${2:-btrfs}"
                 case "$ISV_FS" in
@@ -762,6 +1034,10 @@ cmd_install_system() {
 
     isv_choose_disk   || return 1
     isv_choose_mode   || return 1
+    # Resolve "auto" reservations from the target's size (default-on: a fresh
+    # install is future-proof without asking), then let the interactive
+    # alongside flow adjust the games size (default answer = the auto value).
+    isv_resolve_reservations
     [[ "$ISV_MODE" == "alongside" ]] && { isv_choose_shared_size || return 1; }
 
     isv_show_plan
@@ -783,14 +1059,11 @@ cmd_install_system() {
     fi
 
     if [[ "$ISV_MODE" == "whole-disk" ]]; then
-        if [[ "${ISV_SHARED_GB:-0}" != 0 ]]; then
-            isv_warn "--shared-gb is ignored with --whole-disk: 'bootc install to-disk'"
-            isv_warn "claims the entire disk. Install --alongside for a shared partition,"
-            isv_warn "or carve POWOS-SHARED afterward from Windows/Disk Management."
-        fi
+        # Whole-disk honors the reservations via bootc --root-size (probed;
+        # falls back to an honest warning on bootc versions without it).
         isv_install_whole_disk || return 1
     else
-        # Alongside mode creates the shared partition inline (reserved tail).
+        # Alongside mode creates the games partition inline (reserved tail).
         isv_install_alongside  || return 1
     fi
     isv_post_install

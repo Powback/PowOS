@@ -100,14 +100,14 @@ ISV_SHARED_GB=1
 # Reserve the last 1GiB as the shared partition (mirrors the alongside flow's tail).
 isv_create_shared_partition "$LOOP" "-1024MiB" "100%" >/dev/null 2>&1
 
-sp="$(isv_part_by_partlabel "$LOOP" "POWOS-SHARED")"
-if [[ -b "$sp" ]]; then pass "POWOS-SHARED partition created + found by label ($sp)"; else fail "POWOS-SHARED not found (got '$sp')"; fi
+sp="$(isv_part_by_partlabel "$LOOP" "POWOS-GAMES")"
+if [[ -b "$sp" ]]; then pass "POWOS-GAMES partition created + found by label ($sp)"; else fail "POWOS-GAMES not found (got '$sp')"; fi
 
 if [[ -b "$sp" ]]; then
     fstype="$(blkid -o value -s TYPE "$sp" 2>/dev/null)"
     label="$(blkid -o value -s LABEL "$sp" 2>/dev/null)"
     [[ "$fstype" == "ntfs" ]] && pass "shared partition is NTFS" || fail "shared fstype='$fstype'"
-    [[ "$label" == "POWOS-SHARED" ]] && pass "shared partition label is POWOS-SHARED" || fail "shared label='$label'"
+    [[ "$label" == "POWOS-GAMES" ]] && pass "shared partition label is POWOS-GAMES" || fail "shared label='$label'"
 fi
 
 # The original Windows partitions must be untouched.

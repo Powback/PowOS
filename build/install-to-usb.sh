@@ -17,14 +17,36 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POWOS_ROOT="$(dirname "$SCRIPT_DIR")"
 RAW_PATH="${POWOS_ROOT}/build/output/powos.raw"
 
-# Tail-of-disk reservations (GB). Set via --windows-gb / --games-gb.
-# POWOS-DATA takes everything EXCEPT these; see docs/WINDOWS.md.
+# Tail-of-disk reservations (GB). POWOS-DATA takes everything EXCEPT these;
+# see docs/WINDOWS.md.
 #   WINDOWS_GB: left UNALLOCATED — `powos windows create` later carves
 #               WIN-ESP + POWOS-WIN out of it for bare-metal Windows.
 #   GAMES_GB:   POWOS-GAMES NTFS partition, deliberately visible to Windows
 #               (shared game assets between PowOS and the Windows install).
-WINDOWS_GB=0
-GAMES_GB=0
+# DEFAULT IS "auto": reservations are ON by default, sized from the disk —
+# the whole point is that a fresh burn is future-proof and NEVER needs a
+# reformat to add games/Windows later. Override with explicit GB, 0 disables.
+WINDOWS_GB="auto"
+GAMES_GB="auto"
+
+# Resolve "auto" reservations from the disk size (MiB). Policy: big disks get
+# generous defaults, small ones scale down, tiny ones get nothing.
+resolve_reservations() {
+    local disk_mib="$1"
+    if [[ "$GAMES_GB" == "auto" ]]; then
+        if   (( disk_mib >= 3072*1024 )); then GAMES_GB=512
+        elif (( disk_mib >= 1024*1024 )); then GAMES_GB=256
+        elif (( disk_mib >=  512*1024 )); then GAMES_GB=128
+        else GAMES_GB=0; fi
+        log "Auto games reservation: ${GAMES_GB}GB (override with --games-gb N, 0 disables)"
+    fi
+    if [[ "$WINDOWS_GB" == "auto" ]]; then
+        if   (( disk_mib >= 3072*1024 )); then WINDOWS_GB=256
+        elif (( disk_mib >= 1024*1024 )); then WINDOWS_GB=128
+        else WINDOWS_GB=0; fi
+        log "Auto windows reservation: ${WINDOWS_GB}GB (override with --windows-gb N, 0 disables)"
+    fi
+}
 
 # Colors
 RED='\033[0;31m'
@@ -232,15 +254,18 @@ add_data_partition() {
     # and/or the future Windows install (docs/WINDOWS.md). Reserved space is
     # measured from the END of the disk so DATA gets everything else.
     local data_end="100%"
+    local disk_mib
+    disk_mib=$(parted "$device" unit MiB print 2>/dev/null \
+        | awk -F': ' '/^Disk \//{gsub("MiB","",$2); print int($2); exit}')
+    if [[ "$disk_mib" =~ ^[0-9]+$ ]]; then
+        resolve_reservations "$disk_mib"
+    else
+        # Can't size "auto" without the disk size; explicit GB would need it too.
+        log_warn "Could not read the disk size — skipping games/windows reservations."
+        WINDOWS_GB=0; GAMES_GB=0
+    fi
     local reserve_mib=$(( (WINDOWS_GB + GAMES_GB) * 1024 ))
     if (( reserve_mib > 0 )); then
-        local disk_mib
-        disk_mib=$(parted "$device" unit MiB print 2>/dev/null \
-            | awk -F': ' '/^Disk \//{gsub("MiB","",$2); print int($2); exit}')
-        if ! [[ "$disk_mib" =~ ^[0-9]+$ ]]; then
-            log_error "Could not read the disk size to apply the ${reserve_mib}MiB reservation."
-            exit 1
-        fi
         local data_end_mib=$(( disk_mib - reserve_mib ))
         # DATA must keep a sane minimum (layers + /home) — 32GiB floor.
         if (( data_end_mib < ${last_end%.*} + 32768 )); then
@@ -766,10 +791,12 @@ usage() {
     echo "  --image PATH        Path to powos.raw image (default: build/output/powos.raw)"
     echo "  --variants          Add multi-variant base rootfs + boot entries onto an"
     echo "                      already-written USB (needs ./build/build-iso.sh variants)"
-    echo "  --games-gb N        Create an N GB shared NTFS partition (POWOS-GAMES),"
-    echo "                      visible to Windows — game assets shared by both OSes"
-    echo "  --windows-gb N      Leave N GB unallocated at the disk tail for a future"
-    echo "                      bare-metal Windows ('powos windows create', docs/WINDOWS.md)"
+    echo "  --games-gb N        Shared NTFS partition (POWOS-GAMES), visible to Windows."
+    echo "                      DEFAULT: auto-sized from the disk (512GB on 3TB+ disks,"
+    echo "                      scaling down; 0 on tiny disks). Pass 0 to disable."
+    echo "  --windows-gb N      Unallocated tail for a future bare-metal Windows"
+    echo "                      ('powos windows create', docs/WINDOWS.md)."
+    echo "                      DEFAULT: auto-sized (256GB on 3TB+). Pass 0 to disable."
     echo ""
     echo "Available drives:"
     lsblk -d -o NAME,SIZE,MODEL,TRAN,HOTPLUG 2>/dev/null | grep -v "^loop" \

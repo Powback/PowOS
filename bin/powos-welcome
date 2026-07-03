@@ -1,0 +1,438 @@
+#!/bin/bash
+# powos-welcome - first-run onboarding menu for PowOS
+#
+# Auto-opens on first login (via /etc/xdg/autostart, self-disables after
+# "Don't show this again") and is always available as `powos-welcome` or
+# from the app menu. KDE-native via kdialog; falls back to a plain terminal
+# menu when kdialog or a display is absent (tty, SSH).
+#
+# Rules this script lives by:
+#   - It NEVER silently escalates. Privileged actions run in a visible
+#     terminal (konsole -e sudo ...) or behind an explicit sudo prompt.
+#   - It never reimplements installer/games/windows logic — every item just
+#     launches the corresponding `powos` command.
+#   - Older installs may predate newer command families (games/windows);
+#     those items degrade to an "arrives with the next update" notice.
+
+set -uo pipefail
+
+GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[0;33m'
+RED='\033[0;31m'; BOLD='\033[1m'; NC='\033[0m'
+
+TITLE="PowOS Welcome"
+TARGET_USER="${USER:-powos}"
+
+# Per-user state, NOT /etc: must survive per-user and work identically on
+# the live USB and installed systems. Since the marker lives in the user's
+# home, a freshly installed machine (same image, new home) shows the welcome
+# again on first login — intentional: install-time setup happens there.
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/powos"
+DONE_MARKER="$CONF_DIR/welcome-done"
+PASSWD_MARKER="$CONF_DIR/password-changed"
+
+# Boot-state dir; overridable so tests can inject a fake /run root.
+POWOS_RUN_DIR="${POWOS_RUN_DIR:-/run/powos}"
+
+# Installed images ship the powos libs in /usr/lib/powos; dev checkouts keep
+# them next to bin/. Overridable for tests.
+POWOS_LIB="${POWOS_LIB:-/usr/lib/powos}"
+
+# GUI mode: kdialog present AND a display to draw on. Only `command -v`
+# here — --autostart must be able to exit without ever invoking kdialog.
+HAS_GUI=0
+if command -v kdialog >/dev/null 2>&1 && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    HAS_GUI=1
+fi
+
+# ── Dialog helpers (kdialog or terminal) ──────────────────────────
+
+w_msg() {
+    if [[ $HAS_GUI -eq 1 ]]; then
+        kdialog --title "$TITLE" --msgbox "$1"
+    else
+        echo
+        echo -e "$1"
+        echo
+    fi
+}
+
+w_yesno() {
+    if [[ $HAS_GUI -eq 1 ]]; then
+        kdialog --title "$TITLE" --yesno "$1"
+    else
+        echo
+        echo -e "$1"
+        local answer
+        read -r -p "Continue? [y/N] " answer || return 1
+        [[ "$answer" =~ ^[Yy] ]]
+    fi
+}
+
+w_input() {
+    # Prints the entered value; returns nonzero on cancel/empty.
+    if [[ $HAS_GUI -eq 1 ]]; then
+        kdialog --title "$TITLE" --inputbox "$1"
+    else
+        local value
+        read -r -p "$1: " value || return 1
+        [[ -n "$value" ]] && printf '%s\n' "$value"
+    fi
+}
+
+w_textbox() {
+    if [[ $HAS_GUI -eq 1 ]]; then
+        kdialog --title "$TITLE" --textbox "$1" 700 500
+    else
+        echo
+        cat "$1"
+        echo
+    fi
+}
+
+# Privileged/interactive commands get a visible terminal in GUI mode so the
+# user sees exactly what runs (and sudo has a tty to prompt on).
+run_in_terminal() {
+    if [[ $HAS_GUI -eq 1 ]] && command -v konsole >/dev/null 2>&1; then
+        konsole -e "$@"
+    else
+        "$@"
+    fi
+}
+
+# Explicit sudo for the one non-terminal privileged path (chpasswd): use a
+# graphical askpass when available so the prompt is visible in GUI sessions.
+w_sudo() {
+    if [[ $HAS_GUI -eq 1 && -z "${SUDO_ASKPASS:-}" ]]; then
+        local askpass
+        for askpass in /usr/bin/ksshaskpass /usr/libexec/kf6/ksshaskpass \
+                       /usr/libexec/ssh/ksshaskpass; do
+            if [[ -x "$askpass" ]]; then
+                SUDO_ASKPASS="$askpass" sudo -A "$@"
+                return
+            fi
+        done
+    fi
+    sudo "$@"
+}
+
+# ── Boot context ──────────────────────────────────────────────────
+
+boot_context() {
+    # Live/USB boot = the ramboot dracut module wrote its state file.
+    # Anything else — including an ostree/bootc system booted from an
+    # internal disk (/run/ostree-booted present, no ramboot-state) — is an
+    # installed machine.
+    if [[ -f "$POWOS_RUN_DIR/ramboot-state" ]]; then
+        echo "live"
+    else
+        echo "installed"
+    fi
+}
+
+# ── Feature probes ────────────────────────────────────────────────
+
+powos_supports() {
+    # The powos dispatcher sources lib/<name>.sh on demand — presence of the
+    # lib is the honest "does this install have the command" check.
+    local sub="$1"
+    command -v powos >/dev/null 2>&1 || return 1
+    [[ -f "$POWOS_LIB/$sub.sh" ]] && return 0
+    local bindir
+    bindir="$(dirname "$(command -v powos)")"
+    [[ -f "$bindir/../lib/$sub.sh" ]]
+}
+
+not_yet() {
+    w_msg "'powos $1' isn't available on this install yet — it arrives with the next update.\n\nUpdate with:  powos upgrade"
+}
+
+password_is_default() {
+    # The image ships powos/powos. We can't read the password back, so track
+    # a marker written after a successful change; until then assume the
+    # stock user still has the stock password.
+    [[ -f "$PASSWD_MARKER" ]] && return 1
+    [[ "$TARGET_USER" == "powos" ]]
+}
+
+mark_password_changed() {
+    mkdir -p "$CONF_DIR"
+    date +%s > "$PASSWD_MARKER"
+}
+
+# ── Menu actions ──────────────────────────────────────────────────
+
+do_password() {
+    if [[ $HAS_GUI -eq 1 ]]; then
+        local newpass
+        newpass="$(kdialog --title "$TITLE" --newpassword \
+            "Choose a new password for '$TARGET_USER' (the image default is powos/powos):")" || return 0
+        if [[ -z "$newpass" ]]; then
+            w_msg "Empty password — nothing changed."
+            return 0
+        fi
+        if printf '%s:%s\n' "$TARGET_USER" "$newpass" | w_sudo chpasswd; then
+            newpass=""
+            mark_password_changed
+            w_msg "Password changed."
+        else
+            newpass=""
+            w_msg "Couldn't change the password here (sudo prompt unavailable?).\nRun 'passwd' in a terminal instead."
+        fi
+    else
+        echo
+        echo "Changing password for '$TARGET_USER' (the image default is 'powos')."
+        if passwd "$TARGET_USER"; then
+            mark_password_changed
+            echo -e "${GREEN}Password changed.${NC}"
+        else
+            echo -e "${YELLOW}Password not changed.${NC}"
+        fi
+    fi
+}
+
+do_install() {
+    powos_supports install-system || { not_yet "install-system"; return 0; }
+    w_yesno "This opens the interactive PowOS disk installer in a terminal.\n\nYou pick the target — nothing is wiped without an explicit choice and confirmation. Dual-boot alongside Windows is supported.\n\nOpen the installer now?" || return 0
+    run_in_terminal sudo powos install-system
+}
+
+do_games() {
+    powos_supports games || { not_yet "games"; return 0; }
+    local note=""
+    if [[ "$(boot_context)" == "installed" ]]; then
+        note="\n\nOn this installed machine the partition is carved from free space on this machine's disk — if the install reserved none, 'powos games create' will say so (expected on older installs)."
+    fi
+    w_yesno "Creates a shared games partition (POWOS-GAMES):\n\n  - NTFS, deliberately visible to Windows\n  - One Steam library both PowOS and Windows use\n  - Install a game once, play it from either OS\n\nThe command is interactive and prints its plan before touching anything.${note}\n\nCreate it now?" || return 0
+    run_in_terminal sudo powos games create
+}
+
+do_steam() {
+    powos_supports games || { not_yet "games"; return 0; }
+    w_yesno "Wires the shared games partition into Steam:\n\n  - Mounts POWOS-GAMES at /var/mnt/games\n  - Adds a Steam library there (game assets shared with Windows)\n  - Keeps Proton prefixes/shader cache on native disk (they break on NTFS)\n\nSteam must be closed while this runs.\n\nSet it up now?" || return 0
+    run_in_terminal powos games steam-setup
+}
+
+do_windows() {
+    powos_supports windows || { not_yet "windows"; return 0; }
+    local note=""
+    if [[ "$(boot_context)" == "installed" ]]; then
+        note="\n\nOn this installed machine the partitions are carved from free space on this machine's disk — if the install reserved none, the create command will say so (expected on older installs)."
+    fi
+    local sub=""
+    if [[ $HAS_GUI -eq 1 ]]; then
+        sub="$(kdialog --title "$TITLE" --menu \
+            "Bare-metal Windows on PowOS-managed storage (EXPERIMENTAL).\n\nWindows gets its own partitions — it never touches PowOS or your internal disks. You supply your own Windows ISO and license.\n\nNot yet hardware-validated: expect rough edges.${note}" \
+            status "Show Windows setup status" \
+            create "Create the Windows partitions (sudo powos windows create)")" || return 0
+    else
+        echo
+        echo -e "${BOLD}Bare-metal Windows (EXPERIMENTAL)${NC}"
+        echo "Windows gets its own partitions on PowOS-managed storage — it never"
+        echo "touches PowOS or your internal disks. You supply your own ISO/license."
+        echo "Not yet hardware-validated: expect rough edges."
+        if [[ -n "$note" ]]; then
+            echo -e "$note"
+        fi
+        echo
+        echo "  s) Show Windows setup status"
+        echo "  c) Create the Windows partitions"
+        local answer
+        read -r -p "Choose [s/c, Enter to go back]: " answer || return 0
+        case "$answer" in
+            s|S) sub="status" ;;
+            c|C) sub="create" ;;
+            *)   return 0 ;;
+        esac
+    fi
+    case "$sub" in
+        status)
+            local out
+            out="$(mktemp)"
+            powos windows status > "$out" 2>&1 || true
+            w_textbox "$out"
+            rm -f "$out"
+            ;;
+        create)
+            run_in_terminal sudo powos windows create
+            ;;
+    esac
+}
+
+do_update() {
+    # Installed machines only: new features (games/windows/...) arrive via
+    # normal OS updates, so surface the check where the install item was.
+    if ! command -v powos >/dev/null 2>&1; then
+        not_yet "update"
+        return 0
+    fi
+    run_in_terminal powos update
+}
+
+do_restore() {
+    # The "make this machine yours" flow: on a fresh install or live boot,
+    # one pull restores projects/, overlay sources, container definitions
+    # (distrobox.ini) and PowOS config from the user's backup repo.
+    powos_supports backup || { not_yet "backup"; return 0; }
+    w_yesno "Restore this machine from your cloud backup:\n\n  - projects/ (your development projects)\n  - sources/ (overlay source code)\n  - container definitions (distrobox.ini)\n  - PowOS config\n\nThis is how a fresh install becomes YOUR machine in minutes.\n\nRestore now?" || return 0
+
+    # Ask for the repo URL only when no remote is configured yet —
+    # `powos backup status` prints 'No remote configured' in that case.
+    if powos backup status 2>/dev/null | grep -qi "no remote configured"; then
+        local url
+        url="$(w_input "Git repository URL of your backup (e.g. git@github.com:you/powos-state.git)")" || return 0
+        [[ -z "$url" ]] && return 0
+        run_in_terminal powos backup setup "$url"
+    fi
+
+    run_in_terminal powos backup pull
+
+    if w_yesno "Recreate your dev containers from the restored definitions?\n\nRuns: powos containers assemble (reads containers/distrobox.ini)"; then
+        run_in_terminal powos containers assemble
+    fi
+}
+
+do_status() {
+    if ! command -v powos >/dev/null 2>&1; then
+        not_yet "status"
+        return 0
+    fi
+    local out
+    out="$(mktemp)"
+    powos status > "$out" 2>&1 || true
+    w_textbox "$out"
+    rm -f "$out"
+}
+
+do_done() {
+    mkdir -p "$CONF_DIR"
+    date +%s > "$DONE_MARKER"
+    w_msg "OK — the welcome screen won't open automatically anymore.\nRun 'powos-welcome' anytime to bring it back."
+}
+
+# ── Menu loop ─────────────────────────────────────────────────────
+
+menu_loop() {
+    # Item 2 (both contexts) is the cloud-backup restore — the step that
+    # turns a fresh machine into YOUR machine. Item 3 is context-dependent:
+    # on the live USB it's "Install to disk"; on an installed machine the
+    # install item is hidden and "Check for updates" takes its place —
+    # that's how new setup features (games/windows) arrive there.
+    local context
+    context="$(boot_context)"
+
+    while true; do
+        local pw_label intro
+        if password_is_default; then
+            pw_label="SECURITY: Change the default password (still powos/powos!)"
+            intro="Welcome to PowOS!\n\nSECURITY: this system still uses the default password (powos/powos). Changing it should be your first step."
+        else
+            pw_label="Change your password"
+            intro="Welcome to PowOS! A few things worth setting up:"
+        fi
+
+        local ctx_key ctx_label
+        if [[ "$context" == "live" ]]; then
+            ctx_key="install"
+            ctx_label="Install PowOS to a disk (dual-boot friendly)"
+        else
+            ctx_key="update"
+            ctx_label="Check for updates"
+        fi
+
+        local choice=""
+        if [[ $HAS_GUI -eq 1 ]]; then
+            choice="$(kdialog --title "$TITLE" --menu "$intro" \
+                passwd     "$pw_label" \
+                restore    "Restore this machine from cloud backup (make it yours)" \
+                "$ctx_key" "$ctx_label" \
+                games      "Create the shared games partition (PowOS + Windows)" \
+                steam      "Wire up the shared Steam library" \
+                windows    "Set up bare-metal Windows (EXPERIMENTAL)" \
+                status     "Show system status" \
+                done       "Don't show this again")" || return 0
+            [[ -z "$choice" ]] && return 0
+        else
+            echo
+            echo -e "${BOLD}${TITLE}${NC}"
+            echo "────────────────────────────────────────────────"
+            if password_is_default; then
+                echo -e "  ${RED}!${NC} 1) ${RED}${pw_label}${NC}"
+            else
+                echo "    1) $pw_label"
+            fi
+            echo "    2) Restore this machine from cloud backup (make it yours)"
+            echo "    3) $ctx_label"
+            echo "    4) Create the shared games partition (PowOS + Windows)"
+            echo "    5) Wire up the shared Steam library"
+            echo "    6) Set up bare-metal Windows (EXPERIMENTAL)"
+            echo "    7) Show system status"
+            echo "    8) Don't show this again"
+            echo "    q) Quit"
+            local sel
+            read -r -p "Choose [1-8/q]: " sel || return 0
+            case "$sel" in
+                1) choice="passwd" ;;
+                2) choice="restore" ;;
+                3) choice="$ctx_key" ;;
+                4) choice="games" ;;
+                5) choice="steam" ;;
+                6) choice="windows" ;;
+                7) choice="status" ;;
+                8) choice="done" ;;
+                q|Q|"") return 0 ;;
+                *) continue ;;
+            esac
+        fi
+
+        case "$choice" in
+            passwd)  do_password ;;
+            restore) do_restore ;;
+            install) do_install ;;
+            update)  do_update ;;
+            games)   do_games ;;
+            steam)   do_steam ;;
+            windows) do_windows ;;
+            status)  do_status ;;
+            done)    do_done; return 0 ;;
+        esac
+    done
+}
+
+usage() {
+    cat << EOF
+powos-welcome - PowOS first-run setup menu
+
+Usage: powos-welcome [--autostart]
+
+  --autostart   Used by the login autostart entry: exits silently if the
+                user already chose "Don't show this again"
+                (marker: ~/.config/powos/welcome-done)
+
+Menu items: change default password, restore from cloud backup, install
+to disk (live) / check updates (installed), shared games partition,
+Steam wiring, bare-metal Windows, system status.
+EOF
+}
+
+case "${1:-}" in
+    --autostart)
+        # Self-disable: marker check comes before ANY dialog work.
+        [[ -f "$DONE_MARKER" ]] && exit 0
+        # Autostart only makes sense in a graphical session; on a bare tty
+        # login the user runs powos-welcome by hand instead.
+        [[ $HAS_GUI -eq 1 ]] || exit 0
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
+menu_loop

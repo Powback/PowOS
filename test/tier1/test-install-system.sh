@@ -37,7 +37,8 @@ echo "== Argument parsing =="
 
 reset_globals() {
     ISV_DRY_RUN=0; ISV_ASSUME_YES=0; ISV_ERASE_CONFIRMED=0; ISV_MODE=""
-    ISV_TARGET=""; ISV_SHARED_GB=""; ISV_FS="btrfs"
+    ISV_TARGET=""; ISV_SHARED_GB=""; ISV_WINDOWS_GB=""; ISV_FS="btrfs"
+    ISV_SHARED_AUTO=0; ISV_WINDOWS_AUTO=0
 }
 
 reset_globals
@@ -184,7 +185,7 @@ out=$(isv_install_alongside 2>&1)
 check "root mkpart bounded by free-block end minus shared (377600)" \
     'echo "$out" | grep -q "mkpart PowOS btrfs 120000MiB 377600.00MiB"'
 check "shared mkpart carved inside free block (ends 480000, not 100%)" \
-    'echo "$out" | grep -q "mkpart POWOS-SHARED ntfs 377600.00MiB 480000MiB"'
+    'echo "$out" | grep -q "mkpart POWOS-GAMES ntfs 377600.00MiB 480000MiB"'
 check "no disk-end-relative specs (100% / -NMiB) in mkpart calls" \
     '! echo "$out" | grep "mkpart" | grep -Eq "100%|-[0-9]+MiB"'
 check "dry-run plan never targets an existing partition with mkfs" \
@@ -314,12 +315,12 @@ blkid() {
         /dev/sdz1) echo "" ;;
         /dev/sdz2) echo "Basic data partition" ;;
         /dev/sdz5) echo "PowOS" ;;
-        /dev/sdz6) echo "POWOS-SHARED" ;;
+        /dev/sdz6) echo "POWOS-GAMES" ;;
     esac
 }
 isv_is_block() { return 0; }   # pretend every path is a block device
 check "finds PowOS root by partlabel"        '[[ "$(isv_part_by_partlabel /dev/sdz PowOS)" == "/dev/sdz5" ]]'
-check "finds POWOS-SHARED by partlabel"      '[[ "$(isv_part_by_partlabel /dev/sdz POWOS-SHARED)" == "/dev/sdz6" ]]'
+check "finds POWOS-GAMES by partlabel"      '[[ "$(isv_part_by_partlabel /dev/sdz POWOS-GAMES)" == "/dev/sdz6" ]]'
 check "missing label returns empty"          '[[ -z "$(isv_part_by_partlabel /dev/sdz NOPE)" ]]'
 unset -f lsblk blkid isv_is_block
 
@@ -346,6 +347,217 @@ check "internal /dev/sda is a candidate"     'echo "$out" | grep -q "/dev/sda"'
 check "live USB /dev/sdb is excluded"        '! echo "$out" | grep -q "/dev/sdb"'
 check "loop device excluded"                 '! echo "$out" | grep -q "loop"'
 unset -f isv_live_device lsblk isv_detect_windows
+
+# ── --windows-gb parsing ──────────────────────────────────────────
+echo "== --windows-gb / reservation flag parsing =="
+
+reset_globals
+isv_parse_args --windows-gb 256 >/dev/null 2>&1
+check "--windows-gb captured"                 '[[ "$ISV_WINDOWS_GB" == "256" ]]'
+reset_globals
+isv_parse_args --windows-gb auto >/dev/null 2>&1
+check "--windows-gb auto accepted"            '[[ "$ISV_WINDOWS_GB" == "auto" ]]'
+reset_globals
+isv_parse_args --windows-gb abc >/dev/null 2>&1
+check "--windows-gb rejects non-numeric"      '[[ $? -eq 1 ]]'
+reset_globals
+isv_parse_args --shared-gb 12x >/dev/null 2>&1
+check "--shared-gb rejects non-numeric"       '[[ $? -eq 1 ]]'
+
+# ── Auto-reservation policy (mirrors install-to-usb.sh) ───────────
+echo "== Auto-reservation tiers =="
+
+check "4TiB disk → games 512"    '[[ "$(isv_auto_reserve_gb $((4096*1024)) games)" == "512" ]]'
+check "4TiB disk → windows 256"  '[[ "$(isv_auto_reserve_gb $((4096*1024)) windows)" == "256" ]]'
+check "2TiB disk → games 256"    '[[ "$(isv_auto_reserve_gb $((2048*1024)) games)" == "256" ]]'
+check "2TiB disk → windows 128"  '[[ "$(isv_auto_reserve_gb $((2048*1024)) windows)" == "128" ]]'
+check "800GiB disk → games 128"  '[[ "$(isv_auto_reserve_gb $((800*1024)) games)" == "128" ]]'
+check "800GiB disk → windows 0"  '[[ "$(isv_auto_reserve_gb $((800*1024)) windows)" == "0" ]]'
+check "256GiB disk → games 0"    '[[ "$(isv_auto_reserve_gb $((256*1024)) games)" == "0" ]]'
+check "256GiB disk → windows 0"  '[[ "$(isv_auto_reserve_gb $((256*1024)) windows)" == "0" ]]'
+
+# Resolution wiring: "auto" resolves from the target disk and sets the
+# auto markers; explicit values (including 0) pass through untouched.
+lsblk() { case "$*" in *"-bdn -o SIZE"*) echo $(( 2048 * 1024 * 1048576 )) ;; esac; }
+reset_globals; ISV_TARGET=/dev/sdz; ISV_SHARED_GB="auto"; ISV_WINDOWS_GB="auto"
+isv_resolve_reservations >/dev/null 2>&1
+check "auto games resolved from disk (256)"   '[[ "$ISV_SHARED_GB" == "256" ]]'
+check "auto windows resolved from disk (128)" '[[ "$ISV_WINDOWS_GB" == "128" ]]'
+check "shared auto marker set"                '[[ $ISV_SHARED_AUTO -eq 1 ]]'
+check "windows auto marker set"               '[[ $ISV_WINDOWS_AUTO -eq 1 ]]'
+
+reset_globals; ISV_TARGET=/dev/sdz; ISV_SHARED_GB=0; ISV_WINDOWS_GB=0
+isv_resolve_reservations >/dev/null 2>&1
+check "explicit 0 disables games"             '[[ "$ISV_SHARED_GB" == "0" ]]'
+check "explicit 0 disables windows"           '[[ "$ISV_WINDOWS_GB" == "0" ]]'
+check "explicit 0 keeps markers off"          '[[ $ISV_SHARED_AUTO -eq 0 && $ISV_WINDOWS_AUTO -eq 0 ]]'
+unset -f lsblk
+
+# ── Fit / shrink math (pure) ──────────────────────────────────────
+echo "== Reservation fit math (windows shrinks first) =="
+
+check "fits → unchanged"          '[[ "$(isv_fit_reservations 500000 100 200)" == "100 200" ]]'
+check "overflow shrinks windows"  '[[ "$(isv_fit_reservations 351808 307200 102400)" == "307200 44608" ]]'
+check "big overflow zeroes windows, caps games" \
+    '[[ "$(isv_fit_reservations 100000 409600 102400)" == "100000 0" ]]'
+check "negative available → all zero" '[[ "$(isv_fit_reservations -5 100 100)" == "0 0" ]]'
+
+# ── Interactive shared-size default = auto value ──────────────────
+echo "== Interactive games-size prompt =="
+
+TMP_ISV=$(mktemp -d)
+trap 'rm -rf "$TMP_ISV"' EXIT
+
+reset_globals; ISV_SHARED_GB=256; ISV_SHARED_AUTO=1
+isv_choose_shared_size > "$TMP_ISV/prompt.out" 2>&1 <<< ""
+check "empty answer keeps the auto value"     '[[ "$ISV_SHARED_GB" == "256" ]]'
+check "prompt shows the auto default"         'grep -q "auto: 256" "$TMP_ISV/prompt.out"'
+
+reset_globals; ISV_SHARED_GB=256; ISV_SHARED_AUTO=1
+isv_choose_shared_size > /dev/null 2>&1 <<< "64"
+check "typed answer overrides auto"           '[[ "$ISV_SHARED_GB" == "64" ]]'
+check "typed answer clears the auto marker"   '[[ $ISV_SHARED_AUTO -eq 0 ]]'
+
+reset_globals; ISV_SHARED_GB=100; ISV_SHARED_AUTO=0
+isv_choose_shared_size < /dev/null >/dev/null 2>&1
+check "explicit --shared-gb skips the prompt" '[[ $? -eq 0 && "$ISV_SHARED_GB" == "100" ]]'
+
+# ── Alongside: too-small free block shrinks auto reservations ─────
+# Free block 120000–480000 (360000MiB). Auto games 300GB + windows 100GB
+# don't fit with the 8GiB root minimum: windows must shrink FIRST
+# (102400 → 44608MiB), games stays whole, and the install proceeds.
+echo "== Alongside shrink-to-fit (auto reservations) =="
+
+parted() {
+    case "$*" in
+        -m*)
+            cat <<'PARTED'
+BYT;
+/dev/sdz:500000MiB:scsi:512:512:gpt:Fake Disk:;
+1:2.00MiB:202MiB:200MiB:fat32:EFI system partition:boot, esp;
+2:202MiB:120000MiB:119798MiB:ntfs:Basic data partition:msftdata;
+3:480000MiB:500000MiB:20000MiB:ntfs:Recovery:hidden, diag;
+PARTED
+            ;;
+        *"print free"*)
+            cat <<'PARTED'
+Model: Fake Disk (scsi)
+Disk /dev/sdz: 500000MiB
+Number  Start      End        Size       Type     File system  Flags
+ 1      2.00MiB    202MiB     200MiB     primary  fat32        boot, esp
+ 2      202MiB     120000MiB  119798MiB  primary  ntfs
+        120000MiB  480000MiB  360000MiB           Free Space
+ 3      480000MiB  500000MiB  20000MiB   primary  ntfs
+PARTED
+            ;;
+    esac
+    return 0
+}
+lsblk() { [[ "$*" == *"-o PATH"* ]] && printf '/dev/sdz\n/dev/sdz1\n/dev/sdz2\n/dev/sdz3\n'; }
+blkid() { echo ""; }
+mkfs.ntfs() { :; }
+
+reset_globals; ISV_DRY_RUN=1; ISV_TARGET=/dev/sdz
+ISV_SHARED_GB=300; ISV_WINDOWS_GB=100; ISV_SHARED_AUTO=1; ISV_WINDOWS_AUTO=1
+out=$(isv_install_alongside 2>&1); rc=$?
+check "auto shrink: install still succeeds"   '[[ $rc -eq 0 ]]'
+check "windows reservation shrunk first"      'echo "$out" | grep -q "windows reservation shrunk 102400MiB → 44608MiB"'
+check "games reservation NOT shrunk"          '! echo "$out" | grep -q "games reservation shrunk"'
+check "root bounded before both reservations (128192.00)" \
+    'echo "$out" | grep -q "mkpart PowOS btrfs 120000MiB 128192.00MiB"'
+check "games carved inside free block, windows tail kept (435392.00)" \
+    'echo "$out" | grep -q "mkpart POWOS-GAMES ntfs 128192.00MiB 435392.00MiB"'
+check "unallocated windows tail announced"    'echo "$out" | grep -q "unallocated inside the free block"'
+
+# Same overflow with EXPLICIT flags must refuse instead of silently shrinking.
+reset_globals; ISV_DRY_RUN=1; ISV_TARGET=/dev/sdz
+ISV_SHARED_GB=300; ISV_WINDOWS_GB=100   # markers stay 0 = explicit
+out=$(isv_install_alongside 2>&1); rc=$?
+check "explicit oversize → hard error"        '[[ $rc -ne 0 ]]'
+unset -f parted lsblk blkid mkfs.ntfs
+
+# ── Whole-disk reservations (bootc --root-size) ───────────────────
+echo "== Whole-disk reservations (--root-size) =="
+
+# bootc that ADVERTISES --root-size; 500GiB disk; after the size-limited
+# install the tail 358400–512000MiB is free.
+bootc() {
+    if [[ "$*" == *"--help"* ]]; then
+        echo "      --root-size <ROOT_SIZE>  Size of the root partition (e.g. 10G)"
+        return 0
+    fi
+    echo "BOOTC-RAN $*" >> "$TMP_ISV/bootc.log"
+}
+lsblk() { case "$*" in *"-bdn -o SIZE"*) echo $(( 500 * 1073741824 )) ;; *) echo "" ;; esac; }
+parted() {
+    case "$*" in
+        *"print free"*)
+            cat <<'PARTED'
+Disk /dev/sdz: 512000MiB
+Number  Start      End        Size       Type     File system  Flags
+ 1      1.00MiB    358400MiB  358399MiB  primary  btrfs
+        358400MiB  512000MiB  153600MiB           Free Space
+PARTED
+            ;;
+    esac
+    return 0
+}
+mkfs.ntfs() { :; }
+blkid() { echo ""; }
+: > "$TMP_ISV/bootc.log"
+
+reset_globals; ISV_DRY_RUN=1; ISV_TARGET=/dev/sdz; ISV_SHARED_GB=100; ISV_WINDOWS_GB=50
+out=$(isv_install_whole_disk 2>&1); rc=$?
+check "whole-disk with reservations succeeds" '[[ $rc -eq 0 ]]'
+check "bootc gets --root-size 348G (500-2-150)" 'echo "$out" | grep -q -- "--root-size 348G"'
+check "games partition carved in the freed tail" \
+    'echo "$out" | grep -q "mkpart POWOS-GAMES ntfs 358400MiB 460800.00MiB"'
+check "windows tail unallocated — no 100% mkpart" \
+    '! echo "$out" | grep "mkpart" | grep -q "100%"'
+check "GPT type 0700 in the plan"             'echo "$out" | grep -q "0700"'
+check "tail handed to powos windows create"   'echo "$out" | grep -q "powos windows create"'
+check "dry-run: mocked bootc never executed"  '[[ ! -s "$TMP_ISV/bootc.log" ]]'
+
+# Windows-only reservation: root shrinks, nothing formatted, tail stays free.
+reset_globals; ISV_DRY_RUN=1; ISV_TARGET=/dev/sdz; ISV_SHARED_GB=0; ISV_WINDOWS_GB=50
+out=$(isv_install_whole_disk 2>&1); rc=$?
+check "windows-only: --root-size 448G"        'echo "$out" | grep -q -- "--root-size 448G"'
+check "windows-only: no games mkpart"         '! echo "$out" | grep -q "mkpart POWOS-GAMES"'
+check "windows-only: tail announced"          'echo "$out" | grep -q "unallocated at the disk tail"'
+
+# bootc WITHOUT --root-size: honest warning, no reservation, no games mkpart.
+bootc() {
+    if [[ "$*" == *"--help"* ]]; then echo "no size flags in this bootc"; return 0; fi
+    echo "BOOTC-RAN $*" >> "$TMP_ISV/bootc.log"
+}
+reset_globals; ISV_DRY_RUN=1; ISV_TARGET=/dev/sdz; ISV_SHARED_GB=100; ISV_WINDOWS_GB=50
+out=$(isv_install_whole_disk 2>&1); rc=$?
+check "unsupported bootc: install still runs" '[[ $rc -eq 0 ]]'
+check "unsupported bootc: warns reservations impossible" 'echo "$out" | grep -qi "impossible"'
+check "unsupported bootc: no --root-size on the bootc command" \
+    '! echo "$out" | grep "install to-disk" | grep -q -- "--root-size"'
+check "unsupported bootc: no games mkpart"    '! echo "$out" | grep -q "mkpart POWOS-GAMES"'
+
+# EXPLICIT reservations too large for the disk: abort BEFORE bootc runs.
+bootc() {
+    if [[ "$*" == *"--help"* ]]; then echo "--root-size"; return 0; fi
+    echo "BOOTC-RAN $*" >> "$TMP_ISV/bootc.log"
+}
+: > "$TMP_ISV/bootc.log"
+reset_globals; ISV_DRY_RUN=0; ISV_TARGET=/dev/sdz; ISV_SHARED_GB=300; ISV_WINDOWS_GB=250
+out=$(isv_install_whole_disk 2>&1); rc=$?
+check "oversized explicit reservations abort" '[[ $rc -ne 0 ]]'
+check "abort happens BEFORE bootc runs"       '[[ ! -s "$TMP_ISV/bootc.log" ]]'
+
+# Same oversize but AUTO: shrink (windows first) and keep installing.
+: > "$TMP_ISV/bootc.log"
+reset_globals; ISV_DRY_RUN=1; ISV_TARGET=/dev/sdz
+ISV_SHARED_GB=300; ISV_WINDOWS_GB=250; ISV_SHARED_AUTO=1; ISV_WINDOWS_AUTO=1
+out=$(isv_install_whole_disk 2>&1); rc=$?
+check "auto oversize: install proceeds"       '[[ $rc -eq 0 ]]'
+check "auto oversize: windows shrunk first (250 → 190)" \
+    'echo "$out" | grep -q "windows reservation shrunk 250GB → 190GB"'
+unset -f bootc lsblk parted mkfs.ntfs blkid
 
 # ── Summary ───────────────────────────────────────────────────────
 echo
