@@ -12,6 +12,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POWOS_ROOT="${POWOS_ROOT:-$(dirname "$(dirname "$SCRIPT_DIR")")}"
+# setup() repoints POWOS_ROOT at the sandbox; keep the real repo root around
+REPO_ROOT="$POWOS_ROOT"
 TEST_DIR="/tmp/powos-ai-test-$$"
 
 # Colors
@@ -407,6 +409,214 @@ test_client_claude_source() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Tests: Shell-option Safety
+# ─────────────────────────────────────────────────────────────────
+
+test_sourcing_does_not_change_shell_opts() {
+    echo ""
+    echo "Test: Sourcing agent.sh does not enable strict mode in the caller"
+
+    ((TESTS_RUN++)) || true
+
+    local opts
+    opts=$(bash -c "source '$TEST_DIR/lib/ai/agent.sh'; echo \$-" 2>/dev/null || echo "SOURCE_FAILED")
+
+    if [[ "$opts" != "SOURCE_FAILED" && "$opts" != *e* && "$opts" != *u* ]]; then
+        echo -e "${GREEN}✓${NC} agent.sh does not set -e/-u when sourced (\$- = $opts)"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} sourcing agent.sh changed shell options (\$- = $opts)"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
+test_increment_crash_class() {
+    echo ""
+    echo "Test: ((var++)) crash-class regression"
+
+    # The guarded idiom must survive `set -e` starting from 0
+    # (bare ((var++)) returns 1 when var==0 and aborts the shell)
+    ((TESTS_RUN++)) || true
+    if bash -c 'set -euo pipefail; warnings=0; ((warnings++)) || true; ((warnings++)) || true; [[ $warnings -eq 2 ]]'; then
+        echo -e "${GREEN}✓${NC} Guarded increment survives set -e starting from zero"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Guarded increment failed under set -e"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    # No bare ((var++)) may remain in the CLI / healer
+    local offenders
+    offenders=$(grep -nE '\(\([A-Za-z_]+\+\+\)\)' \
+        "$REPO_ROOT/bin/powos" "$REPO_ROOT/lib/ai-healer.sh" 2>/dev/null \
+        | grep -v '|| true' || true)
+    assert_equals "" "$offenders" "No bare ((var++)) left in bin/powos / lib/ai-healer.sh"
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Tests: Name Validation (path traversal)
+# ─────────────────────────────────────────────────────────────────
+
+test_agent_name_validation() {
+    echo ""
+    echo "Test: Agent name validation rejects path traversal"
+
+    # Plant an "evil" agent config outside the agents dir; the traversal
+    # name '../../evil-agent' would resolve to it and get SOURCED.
+    mkdir -p "$TEST_DIR/evil-agent"
+    echo 'EVIL_MARKER=pwned' > "$TEST_DIR/evil-agent/agent.conf"
+
+    ((TESTS_RUN++)) || true
+    if bash -c "
+        source '$TEST_DIR/lib/ai/agent.sh'
+        _ai_ensure_config
+        if _ai_load_agent '../../evil-agent' 2>/dev/null; then
+            exit 1
+        fi
+        [[ -z \"\${EVIL_MARKER:-}\" ]] || exit 1
+        exit 0
+    "; then
+        echo -e "${GREEN}✓${NC} _ai_load_agent rejects '../' agent names (nothing sourced)"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} _ai_load_agent accepted a path-traversal agent name"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    # Flavor part of agent:flavor must be validated too
+    ((TESTS_RUN++)) || true
+    if bash -c "
+        source '$TEST_DIR/lib/ai/agent.sh'
+        _ai_ensure_config
+        ! _ai_load_agent 'coder:../../../evil-agent/agent' 2>/dev/null
+    "; then
+        echo -e "${GREEN}✓${NC} _ai_load_agent rejects '../' flavor names"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} _ai_load_agent accepted a path-traversal flavor name"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
+test_session_name_validation() {
+    echo ""
+    echo "Test: Session name validation rejects path traversal"
+
+    source "$TEST_DIR/lib/ai/session.sh" 2>/dev/null || true
+
+    ((TESTS_RUN++)) || true
+    if ai_session_start "../escape" >/dev/null 2>&1; then
+        echo -e "${RED}✗${NC} ai_session_start accepted '../escape'"
+        ((TESTS_FAILED++)) || true
+    else
+        echo -e "${GREEN}✓${NC} ai_session_start rejects '../' session names"
+        ((TESTS_PASSED++)) || true
+    fi
+
+    ((TESTS_RUN++)) || true
+    if [[ ! -f "$TEST_DIR/state/ai/escape.json" ]]; then
+        echo -e "${GREEN}✓${NC} No session file written outside the session dir"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Session file escaped the session dir"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    ((TESTS_RUN++)) || true
+    if ai_session_delete "../escape" >/dev/null 2>&1; then
+        echo -e "${RED}✗${NC} ai_session_delete accepted '../escape'"
+        ((TESTS_FAILED++)) || true
+    else
+        echo -e "${GREEN}✓${NC} ai_session_delete rejects '../' session names"
+        ((TESTS_PASSED++)) || true
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
+# Tests: ai_call round-trip with a stubbed claude binary
+# ─────────────────────────────────────────────────────────────────
+
+test_claude_stub_roundtrip() {
+    echo ""
+    echo "Test: ai_call round-trip with stubbed claude client"
+
+    if ! command -v jq &>/dev/null; then
+        ((TESTS_RUN++)) || true
+        echo -e "${YELLOW}⊘${NC} Skipping: jq not available"
+        return 0
+    fi
+
+    local stub_uuid="11111111-1111-1111-1111-111111111111"
+
+    # Stub 'claude' binary: records its args, returns fixed JSON
+    local stub_dir="$TEST_DIR/stub-bin"
+    local args_log="$TEST_DIR/claude-args.log"
+    mkdir -p "$stub_dir"
+    cat > "$stub_dir/claude" << EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >> "$args_log"
+echo '{"result":"stub response","session_id":"$stub_uuid"}'
+EOF
+    chmod +x "$stub_dir/claude"
+
+    # Point the global AI config at the sandbox session dir
+    cat > "$TEST_DIR/config/ai/agent.conf" << EOF
+AI_DEFAULT_CLIENT="claude"
+AI_DEFAULT_AGENT="assistant"
+AI_FALLBACK_CLIENT="claude"
+AI_SESSION_DIR="$TEST_DIR/state/ai/sessions"
+AI_ENABLED=true
+EOF
+
+    # First call: named session with no stored client id
+    local out
+    out=$(PATH="$stub_dir:$PATH" bash -c "
+        source '$TEST_DIR/lib/ai/agent.sh'
+        ai_call --session roundtrip 'hello world'
+    " 2>/dev/null || true)
+
+    assert_contains "$out" "stub response" "ai_call returns the stub response"
+
+    ((TESTS_RUN++)) || true
+    if [[ -f "$args_log" ]] && ! grep -q -- '--resume' "$args_log"; then
+        echo -e "${GREEN}✓${NC} First call does not pass --resume"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} First call passed --resume (or the stub never ran)"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    local stored
+    stored=$(jq -r '.client_session_id // empty' \
+        "$TEST_DIR/state/ai/sessions/roundtrip.json" 2>/dev/null || echo "")
+    assert_equals "$stub_uuid" "$stored" "Client session_id stored after first call"
+
+    # The exchange is recorded, and 'md' works as an export format alias
+    local exported
+    exported=$(bash -c "
+        source '$TEST_DIR/lib/ai/session.sh'
+        ai_session_export roundtrip md
+    " 2>/dev/null || echo "")
+    assert_contains "$exported" "hello world" "Session export (md) contains the recorded prompt"
+
+    # Second call: must resume with the stored UUID
+    : > "$args_log"
+    PATH="$stub_dir:$PATH" bash -c "
+        source '$TEST_DIR/lib/ai/agent.sh'
+        ai_call --session roundtrip 'again'
+    " >/dev/null 2>&1 || true
+
+    ((TESTS_RUN++)) || true
+    if grep -q -- '--resume' "$args_log" && grep -q "$stub_uuid" "$args_log"; then
+        echo -e "${GREEN}✓${NC} Second call resumes with the stored client UUID"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Second call did not resume the stored session"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────
 
@@ -443,6 +653,17 @@ main() {
     # Client tests
     test_client_base_source
     test_client_claude_source
+
+    # Shell-option safety
+    test_sourcing_does_not_change_shell_opts
+    test_increment_crash_class
+
+    # Name validation (path traversal)
+    test_agent_name_validation
+    test_session_name_validation
+
+    # Client round-trip with stubbed claude binary
+    test_claude_stub_roundtrip
 
     # Teardown
     teardown

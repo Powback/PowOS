@@ -18,6 +18,10 @@ POWOS_ROOT="${POWOS_ROOT:-$HOME/powos}"
 DISTROBOX_INI="${POWOS_ROOT}/containers/distrobox.ini"
 LOG_PREFIX="[pinstall]"
 
+# Container section in distrobox.ini that pinstall/premove manage.
+# Only this section's additional_packages= line is ever touched.
+POWOS_CONTAINER="${POWOS_CONTAINER:-powos-dev}"
+
 # Colors (disabled if not a terminal)
 if [[ -t 1 ]]; then
     RED='\033[0;31m'
@@ -135,37 +139,129 @@ EOF
     fi
 }
 
+# Check whether a package is already listed on the target section's
+# additional_packages= line. Whole-name match — no regex, so package names
+# with special characters ('g++', 'libstdc++') are handled correctly, and
+# 'dev' does not match 'dev-tools'. Other ini sections are ignored.
+package_recorded() {
+    local pkg="$1"
+    local ini_file="$DISTROBOX_INI"
+    local in_section=0 line value word
+
+    [[ -f "$ini_file" ]] || return 1
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            "[${POWOS_CONTAINER}]") in_section=1; continue ;;
+            "["*"]")                in_section=0; continue ;;
+        esac
+        if [[ $in_section -eq 1 && "$line" == additional_packages=* ]]; then
+            value="${line#additional_packages=}"
+            value="${value#\"}"
+            value="${value%\"}"
+            for word in $value; do
+                [[ "$word" == "$pkg" ]] && return 0
+            done
+        fi
+    done < "$ini_file"
+    return 1
+}
+
+# Rewrite distrobox.ini, adding or removing a package on the target
+# section's additional_packages= line ONLY. Pure bash — no sed, no regex on
+# package names, other sections are copied through untouched.
+# Usage: update_ini_packages {add|remove} <pkg>
+update_ini_packages() {
+    local action="$1"
+    local pkg="$2"
+    local ini_file="$DISTROBOX_INI"
+    local tmp
+    tmp=$(mktemp)
+
+    local in_section=0 section_seen=0 line_handled=0
+    local line value new_value word quoted
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            "[${POWOS_CONTAINER}]")
+                in_section=1
+                section_seen=1
+                printf '%s\n' "$line" >> "$tmp"
+                continue
+                ;;
+            "["*"]")
+                # Leaving the target section without having seen the line
+                if [[ $in_section -eq 1 && $line_handled -eq 0 && "$action" == "add" ]]; then
+                    printf 'additional_packages=%s\n' "$pkg" >> "$tmp"
+                    line_handled=1
+                fi
+                in_section=0
+                printf '%s\n' "$line" >> "$tmp"
+                continue
+                ;;
+        esac
+
+        if [[ $in_section -eq 1 && $line_handled -eq 0 && "$line" == additional_packages=* ]]; then
+            line_handled=1
+            value="${line#additional_packages=}"
+            quoted=0
+            if [[ "$value" == \"*\" ]]; then
+                quoted=1
+                value="${value#\"}"
+                value="${value%\"}"
+            fi
+            new_value=""
+            for word in $value; do
+                if [[ "$action" == "remove" && "$word" == "$pkg" ]]; then
+                    continue
+                fi
+                new_value+="${new_value:+ }${word}"
+            done
+            if [[ "$action" == "add" ]]; then
+                new_value+="${new_value:+ }${pkg}"
+            fi
+            if [[ $quoted -eq 1 ]]; then
+                printf 'additional_packages="%s"\n' "$new_value" >> "$tmp"
+            else
+                printf 'additional_packages=%s\n' "$new_value" >> "$tmp"
+            fi
+        else
+            printf '%s\n' "$line" >> "$tmp"
+        fi
+    done < "$ini_file"
+
+    # File ended while still inside the target section
+    if [[ $in_section -eq 1 && $line_handled -eq 0 && "$action" == "add" ]]; then
+        printf 'additional_packages=%s\n' "$pkg" >> "$tmp"
+        line_handled=1
+    fi
+
+    # Section missing entirely — create it (add only)
+    if [[ $section_seen -eq 0 && "$action" == "add" ]]; then
+        {
+            echo ""
+            echo "[${POWOS_CONTAINER}]"
+            echo "additional_packages=${pkg}"
+        } >> "$tmp"
+    fi
+
+    mv "$tmp" "$ini_file"
+}
+
 # Add package to distrobox.ini
 record_package() {
     local pkg="$1"
-    local ini_file="$DISTROBOX_INI"
 
     # Ensure file exists
     ensure_distrobox_ini
 
-    # Check if package already recorded
-    if grep -q "additional_packages=.*\b${pkg}\b" "$ini_file" 2>/dev/null; then
+    # Check if package already recorded (in the target section)
+    if package_recorded "$pkg"; then
         log_warn "Package '$pkg' already in config"
         return 0
     fi
 
-    # Find the additional_packages line and append
-    if grep -q "^additional_packages=" "$ini_file"; then
-        # Get current packages
-        local current
-        current=$(grep "^additional_packages=" "$ini_file" | head -1 | cut -d'=' -f2-)
-
-        if [[ -z "$current" ]]; then
-            # Empty, just add
-            sed -i "s/^additional_packages=$/additional_packages=${pkg}/" "$ini_file"
-        else
-            # Append with space
-            sed -i "s/^additional_packages=\(.*\)$/additional_packages=\1 ${pkg}/" "$ini_file"
-        fi
-    else
-        # No additional_packages line, add one
-        echo "additional_packages=${pkg}" >> "$ini_file"
-    fi
+    update_ini_packages add "$pkg"
 
     log_info "Recorded '$pkg' to config"
 }

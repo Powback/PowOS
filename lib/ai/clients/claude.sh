@@ -17,22 +17,19 @@ source "$(dirname "${BASH_SOURCE[0]}")/base.sh"
 # Claude Client Implementation
 # ═══════════════════════════════════════════════════════════════════
 
-# Temp file for session ID communication across subshells
-# Use cross-platform temp directory
-_claude_get_tmp_dir() {
-    if [[ -n "${TMPDIR:-}" ]]; then
-        echo "$TMPDIR"
-    elif [[ -d "/tmp" ]]; then
-        echo "/tmp"
-    elif [[ -n "${TEMP:-}" ]]; then
-        echo "$TEMP"
-    elif [[ -n "${TMP:-}" ]]; then
-        echo "$TMP"
-    else
-        echo "."
-    fi
+# Temp file for session ID communication across subshells.
+# Created securely with mktemp (a predictable /tmp/.claude_session_id.$$
+# name is a symlink-attack target). Created once per shell at source time
+# so the path is shared between command-substitution subshells (client_call)
+# and the parent (client_get_session_id).
+if [[ -z "${CLAUDE_SESSION_ID_FILE:-}" ]] || [[ ! -f "${CLAUDE_SESSION_ID_FILE:-}" ]]; then
+    CLAUDE_SESSION_ID_FILE="$(mktemp "${TMPDIR:-/tmp}/powos-claude-session.XXXXXX" 2>/dev/null || mktemp)"
+fi
+
+# Check whether a string is a client session UUID
+_claude_is_uuid() {
+    [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
 }
-CLAUDE_SESSION_ID_FILE="$(_claude_get_tmp_dir)/.claude_session_id.$$"
 
 # Send a prompt and get a response
 # Returns: response text (and stores session_id in temp file for retrieval)
@@ -55,51 +52,54 @@ client_call() {
         args+=("--system-prompt" "$system_prompt")
     fi
 
-    # Session handling
+    # Session handling: only resume with a real client UUID. The claude CLI
+    # errors on a non-UUID --resume argument (e.g. a PowOS session name), so
+    # anything else means "start fresh" — the new session_id is captured
+    # below and stored by the caller.
     if [[ -n "$session_id" ]]; then
-        # Check if it's a UUID (existing session) or name (resume search)
-        if [[ "$session_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-            # Valid UUID - use directly
-            args+=("--session-id" "$session_id")
-        else
-            # Name/search term - use resume
+        if _claude_is_uuid "$session_id"; then
             args+=("--resume" "$session_id")
+        else
+            _debug "Ignoring non-UUID session id '$session_id' (starting fresh)"
         fi
     fi
 
     _debug "Running: $cmd ${args[*]} \"${prompt:0:50}...\""
 
-    # Run claude
+    # Run claude. Don't suppress stderr — on failure the CLI's error message
+    # is the only clue the user gets.
     local output
-    output=$("$cmd" "${args[@]}" "$prompt" 2>/dev/null)
-    local exit_code=$?
+    local exit_code=0
+    output=$("$cmd" "${args[@]}" "$prompt") || exit_code=$?
 
-    if [[ $exit_code -eq 0 ]]; then
-        # Parse JSON to extract result and session_id
-        if command -v jq &>/dev/null; then
-            # Extract session ID and store in temp file for retrieval
-            local new_session_id
-            new_session_id=$(echo "$output" | jq -r '.session_id // empty' 2>/dev/null)
-            if [[ -n "$new_session_id" ]]; then
-                echo "$new_session_id" > "$CLAUDE_SESSION_ID_FILE"
-            fi
+    if [[ $exit_code -ne 0 ]]; then
+        echo "Error: '$cmd' exited with code $exit_code" >&2
+        [[ -n "$output" ]] && echo "$output" >&2
+        return $exit_code
+    fi
 
-            if [[ "$user_wants_json" == "true" ]]; then
-                # User wants full JSON output
-                echo "$output"
-            else
-                # Return just the result text
-                echo "$output" | jq -r '.result // .message.content[0].text // empty' 2>/dev/null
-            fi
-        else
-            # No jq - just output raw
+    # Parse JSON to extract result and session_id
+    if command -v jq &>/dev/null; then
+        # Extract session ID and store in temp file for retrieval
+        local new_session_id
+        new_session_id=$(echo "$output" | jq -r '.session_id // empty' 2>/dev/null)
+        if [[ -n "$new_session_id" ]]; then
+            echo "$new_session_id" > "$CLAUDE_SESSION_ID_FILE"
+        fi
+
+        if [[ "$user_wants_json" == "true" ]]; then
+            # User wants full JSON output
             echo "$output"
+        else
+            # Return just the result text
+            echo "$output" | jq -r '.result // .message.content[0].text // empty' 2>/dev/null
         fi
     else
+        # No jq - just output raw
         echo "$output"
     fi
 
-    return $exit_code
+    return 0
 }
 
 # Send prompt and get full JSON response (for detailed info)
@@ -115,15 +115,11 @@ client_call_json() {
         args+=("--system-prompt" "$system_prompt")
     fi
 
-    if [[ -n "$session_id" ]]; then
-        if [[ "$session_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-            args+=("--session-id" "$session_id")
-        else
-            args+=("--resume" "$session_id")
-        fi
+    if [[ -n "$session_id" ]] && _claude_is_uuid "$session_id"; then
+        args+=("--resume" "$session_id")
     fi
 
-    "$cmd" "${args[@]}" "$prompt" 2>/dev/null
+    "$cmd" "${args[@]}" "$prompt"
 }
 
 # Send prompt with verbose output (shows tool use, etc.)
@@ -139,23 +135,26 @@ client_call_verbose() {
         args+=("--system-prompt" "$system_prompt")
     fi
 
-    if [[ -n "$session_id" ]]; then
-        if [[ "$session_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-            args+=("--session-id" "$session_id")
-        else
-            args+=("--resume" "$session_id")
-        fi
+    if [[ -n "$session_id" ]] && _claude_is_uuid "$session_id"; then
+        args+=("--resume" "$session_id")
     fi
 
-    "$cmd" "${args[@]}" "$prompt" 2>/dev/null
+    "$cmd" "${args[@]}" "$prompt"
 }
 
 # Continue the most recent conversation
+# $2 (optional): agent system prompt — passed through like the one-shot path
 client_continue() {
     local prompt="$1"
+    local system_prompt="${2:-}"
     local cmd="${CLIENT_CMD:-claude}"
+    local args=("--print" "--continue")
 
-    "$cmd" --print --continue "$prompt" 2>/dev/null
+    if [[ -n "$system_prompt" ]]; then
+        args+=("--system-prompt" "$system_prompt")
+    fi
+
+    "$cmd" "${args[@]}" "$prompt"
 }
 
 # Resume a specific session
@@ -165,7 +164,7 @@ client_resume() {
     local cmd="${CLIENT_CMD:-claude}"
 
     if [[ -n "$prompt" ]]; then
-        "$cmd" --print --resume "$session_id" "$prompt" 2>/dev/null
+        "$cmd" --print --resume "$session_id" "$prompt"
     else
         # Interactive resume
         "$cmd" --resume "$session_id"
@@ -185,13 +184,10 @@ client_interactive() {
         args+=("--system-prompt" "$system_prompt")
     fi
 
-    # Add session
-    if [[ -n "$session_id" ]]; then
-        if [[ "$session_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-            args+=("--session-id" "$session_id")
-        else
-            args+=("--resume" "$session_id")
-        fi
+    # Add session — only resume a real client UUID; anything else (e.g. a
+    # fabricated first-use name) starts a new interactive conversation.
+    if [[ -n "$session_id" ]] && _claude_is_uuid "$session_id"; then
+        args+=("--resume" "$session_id")
     fi
 
     _debug "Running interactive: $cmd ${args[*]}"
@@ -205,15 +201,13 @@ client_available() {
     command -v "${CLIENT_CMD:-claude}" &>/dev/null
 }
 
-# Get last session ID (after any client_call)
+# Get last session ID (after any client_call).
+# The file is truncated after reading — inline cleanup instead of an EXIT
+# trap: registering `trap ... EXIT` from a sourced file would clobber any
+# EXIT trap already set by the calling shell (e.g. bin/powos).
 client_get_session_id() {
     if [[ -f "$CLAUDE_SESSION_ID_FILE" ]]; then
         cat "$CLAUDE_SESSION_ID_FILE"
+        : > "$CLAUDE_SESSION_ID_FILE"
     fi
 }
-
-# Cleanup temp file on exit
-_claude_cleanup() {
-    rm -f "$CLAUDE_SESSION_ID_FILE" 2>/dev/null || true
-}
-trap _claude_cleanup EXIT

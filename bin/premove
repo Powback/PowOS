@@ -18,6 +18,10 @@ POWOS_ROOT="${POWOS_ROOT:-$HOME/powos}"
 DISTROBOX_INI="${POWOS_ROOT}/containers/distrobox.ini"
 LOG_PREFIX="[premove]"
 
+# Container section in distrobox.ini that pinstall/premove manage.
+# Only this section's additional_packages= line is ever touched.
+POWOS_CONTAINER="${POWOS_CONTAINER:-powos-dev}"
+
 # Colors (disabled if not a terminal)
 if [[ -t 1 ]]; then
     RED='\033[0;31m'
@@ -99,30 +103,93 @@ remove_packages() {
     esac
 }
 
+# Check whether a package is listed on the target section's
+# additional_packages= line. Whole-name match — no regex, so package names
+# with special characters ('g++', 'libstdc++') are handled correctly, and
+# 'dev' does not match 'dev-tools'. Other ini sections are ignored.
+package_recorded() {
+    local pkg="$1"
+    local ini_file="$DISTROBOX_INI"
+    local in_section=0 line value word
+
+    [[ -f "$ini_file" ]] || return 1
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            "[${POWOS_CONTAINER}]") in_section=1; continue ;;
+            "["*"]")                in_section=0; continue ;;
+        esac
+        if [[ $in_section -eq 1 && "$line" == additional_packages=* ]]; then
+            value="${line#additional_packages=}"
+            value="${value#\"}"
+            value="${value%\"}"
+            for word in $value; do
+                [[ "$word" == "$pkg" ]] && return 0
+            done
+        fi
+    done < "$ini_file"
+    return 1
+}
+
+# Rewrite distrobox.ini, removing a package from the target section's
+# additional_packages= line ONLY. Pure bash — no sed, no regex on package
+# names, other sections are copied through untouched.
+remove_from_ini() {
+    local pkg="$1"
+    local ini_file="$DISTROBOX_INI"
+    local tmp
+    tmp=$(mktemp)
+
+    local in_section=0 line value new_value word quoted
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            "[${POWOS_CONTAINER}]") in_section=1 ;;
+            "["*"]")                in_section=0 ;;
+        esac
+
+        if [[ $in_section -eq 1 && "$line" == additional_packages=* ]]; then
+            value="${line#additional_packages=}"
+            quoted=0
+            if [[ "$value" == \"*\" ]]; then
+                quoted=1
+                value="${value#\"}"
+                value="${value%\"}"
+            fi
+            new_value=""
+            for word in $value; do
+                [[ "$word" == "$pkg" ]] && continue
+                new_value+="${new_value:+ }${word}"
+            done
+            if [[ $quoted -eq 1 ]]; then
+                printf 'additional_packages="%s"\n' "$new_value" >> "$tmp"
+            else
+                printf 'additional_packages=%s\n' "$new_value" >> "$tmp"
+            fi
+        else
+            printf '%s\n' "$line" >> "$tmp"
+        fi
+    done < "$ini_file"
+
+    mv "$tmp" "$ini_file"
+}
+
 # Remove package from distrobox.ini
 unrecord_package() {
     local pkg="$1"
-    local ini_file="$DISTROBOX_INI"
 
-    if [[ ! -f "$ini_file" ]]; then
-        log_warn "Config file not found: $ini_file"
+    if [[ ! -f "$DISTROBOX_INI" ]]; then
+        log_warn "Config file not found: $DISTROBOX_INI"
         return 0
     fi
 
-    # Check if package is in config
-    if ! grep -q "additional_packages=.*\b${pkg}\b" "$ini_file" 2>/dev/null; then
+    # Check if package is in config (target section only)
+    if ! package_recorded "$pkg"; then
         log_warn "Package '$pkg' not found in config"
         return 0
     fi
 
-    # Remove the package from additional_packages line
-    # Handle: "pkg1 pkg2 pkg3" -> remove pkg2 -> "pkg1 pkg3"
-    sed -i "s/\badditional_packages=\(.*\) ${pkg}\b/additional_packages=\1/" "$ini_file"
-    sed -i "s/\badditional_packages=${pkg} \(.*\)/additional_packages=\1/" "$ini_file"
-    sed -i "s/\badditional_packages=${pkg}$/additional_packages=/" "$ini_file"
-
-    # Clean up any double spaces
-    sed -i 's/additional_packages=  */additional_packages=/g' "$ini_file"
+    remove_from_ini "$pkg"
 
     log_info "Removed '$pkg' from config"
 }

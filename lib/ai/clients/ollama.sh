@@ -31,8 +31,9 @@ $prompt"
     _debug "Running: $cmd run $model \"$full_prompt\""
 
     # Ollama run for one-shot
-    # Use echo to pipe prompt to avoid issues with special characters
-    echo "$full_prompt" | "$cmd" run "$model" 2>/dev/null
+    # Use echo to pipe prompt to avoid issues with special characters.
+    # Don't suppress stderr — errors must be visible to the user.
+    echo "$full_prompt" | "$cmd" run "$model"
 }
 
 # Start an interactive session

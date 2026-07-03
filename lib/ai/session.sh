@@ -4,7 +4,8 @@
 # Handles conversation persistence and session management.
 # Sessions are stored as JSON files for portability.
 
-set -euo pipefail
+# NOTE: no `set -euo pipefail` here — this file is only ever SOURCED
+# (by agent.sh / bin/powos) and must not change the caller's shell options.
 
 AI_SESSION_DIR="${AI_SESSION_DIR:-/var/lib/powos/state/ai/sessions}"
 
@@ -17,6 +18,17 @@ _session_init() {
     mkdir -p "$AI_SESSION_DIR"
 }
 
+# Validate a session name before it is used in a filesystem path.
+# Session names become "$AI_SESSION_DIR/<name>.json" — a name like
+# '../../etc/foo' would read/write/delete files outside the session dir.
+_session_validate_name() {
+    local name="$1"
+    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo "Error: invalid session name '$name' (allowed: letters, digits, '-', '_')" >&2
+        return 1
+    fi
+}
+
 # Generate a session ID
 session_generate_id() {
     echo "session-$(date +%Y%m%d-%H%M%S)-$(head -c 4 /dev/urandom | xxd -p)"
@@ -27,6 +39,8 @@ ai_session_start() {
     local name="${1:-$(session_generate_id)}"
     local agent="${2:-assistant}"
     local client="${3:-claude}"
+
+    _session_validate_name "$name" || return 1
 
     _session_init
 
@@ -56,6 +70,8 @@ ai_session_set_client_id() {
     local session="$1"
     local client_id="$2"
 
+    _session_validate_name "$session" || return 1
+
     local session_file="$AI_SESSION_DIR/${session}.json"
 
     if [[ ! -f "$session_file" ]]; then
@@ -68,17 +84,20 @@ ai_session_set_client_id() {
            '.client_session_id = $client_id | .updated = (now | todate)' \
            "$session_file" > "$tmp" && mv "$tmp" "$session_file"
     elif command -v python3 &>/dev/null; then
-        python3 << PYEOF
-import json
+        # Pass data via environment — never interpolate into Python source
+        POWOS_SESSION_FILE="$session_file" POWOS_CLIENT_ID="$client_id" \
+        python3 << 'PYEOF'
+import json, os
 from datetime import datetime
 
-with open('$session_file', 'r') as f:
+path = os.environ['POWOS_SESSION_FILE']
+with open(path, 'r') as f:
     data = json.load(f)
 
-data['client_session_id'] = '$client_id'
+data['client_session_id'] = os.environ['POWOS_CLIENT_ID']
 data['updated'] = datetime.now().isoformat()
 
-with open('$session_file', 'w') as f:
+with open(path, 'w') as f:
     json.dump(data, f, indent=2)
 PYEOF
     fi
@@ -87,6 +106,9 @@ PYEOF
 # Get the client's native session ID
 ai_session_get_client_id() {
     local session="$1"
+
+    _session_validate_name "$session" || return 1
+
     local session_file="$AI_SESSION_DIR/${session}.json"
 
     if [[ ! -f "$session_file" ]]; then
@@ -96,9 +118,9 @@ ai_session_get_client_id() {
     if command -v jq &>/dev/null; then
         jq -r '.client_session_id // empty' "$session_file"
     elif command -v python3 &>/dev/null; then
-        python3 << PYEOF
-import json
-with open('$session_file', 'r') as f:
+        POWOS_SESSION_FILE="$session_file" python3 << 'PYEOF'
+import json, os
+with open(os.environ['POWOS_SESSION_FILE'], 'r') as f:
     data = json.load(f)
 print(data.get('client_session_id', ''))
 PYEOF
@@ -108,6 +130,8 @@ PYEOF
 # Resume an existing session
 ai_session_resume() {
     local name="$1"
+
+    _session_validate_name "$name" || return 1
 
     _session_init
 
@@ -140,6 +164,8 @@ ai_session_add_message() {
     local role="$2"  # user or assistant
     local content="$3"
 
+    _session_validate_name "$session" || return 1
+
     _session_init
 
     local session_file="$AI_SESSION_DIR/${session}.json"
@@ -155,21 +181,27 @@ ai_session_add_message() {
            '.messages += [{"role": $role, "content": $content, "timestamp": (now | todate)}] | .updated = (now | todate)' \
            "$session_file" > "$tmp" && mv "$tmp" "$session_file"
     elif command -v python3 &>/dev/null; then
-        python3 << PYEOF
-import json
+        # Pass data via environment — interpolating $content into Python
+        # source ('''$content''') is a code injection vector.
+        POWOS_SESSION_FILE="$session_file" \
+        POWOS_MSG_ROLE="$role" \
+        POWOS_MSG_CONTENT="$content" \
+        python3 << 'PYEOF'
+import json, os
 from datetime import datetime
 
-with open('$session_file', 'r') as f:
+path = os.environ['POWOS_SESSION_FILE']
+with open(path, 'r') as f:
     data = json.load(f)
 
 data['messages'].append({
-    'role': '$role',
-    'content': '''$content''',
+    'role': os.environ['POWOS_MSG_ROLE'],
+    'content': os.environ['POWOS_MSG_CONTENT'],
     'timestamp': datetime.now().isoformat()
 })
 data['updated'] = datetime.now().isoformat()
 
-with open('$session_file', 'w') as f:
+with open(path, 'w') as f:
     json.dump(data, f, indent=2)
 PYEOF
     else
@@ -180,6 +212,9 @@ PYEOF
 # Get session messages
 ai_session_get_messages() {
     local session="$1"
+
+    _session_validate_name "$session" || return 1
+
     local session_file="$AI_SESSION_DIR/${session}.json"
 
     if [[ ! -f "$session_file" ]]; then
@@ -189,9 +224,9 @@ ai_session_get_messages() {
     if command -v jq &>/dev/null; then
         jq -r '.messages[] | "\(.role): \(.content)"' "$session_file"
     elif command -v python3 &>/dev/null; then
-        python3 << PYEOF
-import json
-with open('$session_file', 'r') as f:
+        POWOS_SESSION_FILE="$session_file" python3 << 'PYEOF'
+import json, os
+with open(os.environ['POWOS_SESSION_FILE'], 'r') as f:
     data = json.load(f)
 for msg in data['messages']:
     print(f"{msg['role']}: {msg['content']}")
@@ -235,6 +270,8 @@ ai_session_list() {
 ai_session_delete() {
     local name="$1"
 
+    _session_validate_name "$name" || return 1
+
     local session_file="$AI_SESSION_DIR/${name}.json"
 
     if [[ -f "$session_file" ]]; then
@@ -263,6 +300,8 @@ ai_session_export() {
     local session="$1"
     local format="${2:-text}"
 
+    _session_validate_name "$session" || return 1
+
     local session_file="$AI_SESSION_DIR/${session}.json"
 
     if [[ ! -f "$session_file" ]]; then
@@ -277,7 +316,7 @@ ai_session_export() {
         text)
             ai_session_get_messages "$session"
             ;;
-        markdown)
+        markdown|md)
             echo "# Session: $session"
             echo ""
             if command -v jq &>/dev/null; then

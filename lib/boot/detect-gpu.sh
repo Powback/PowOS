@@ -13,7 +13,13 @@ set -euo pipefail
 VERBOSE="${1:-}"
 
 log() {
-    [[ "$VERBOSE" == "--verbose" || "$VERBOSE" == "-v" ]] && echo "[gpu-detect] $*" >&2
+    # Must always return 0: under `set -e` a failed `[[ ... ]] &&` as the
+    # last command in the function would abort the whole script when not
+    # running with --verbose.
+    if [[ "$VERBOSE" == "--verbose" || "$VERBOSE" == "-v" ]]; then
+        echo "[gpu-detect] $*" >&2
+    fi
+    return 0
 }
 
 # PCI Vendor IDs

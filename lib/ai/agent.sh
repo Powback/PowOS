@@ -12,7 +12,12 @@
 #   powos ai -i                          # Interactive mode
 #   powos ai --session myproject "prompt" # Use/resume session
 
-set -euo pipefail
+# Strict mode only when executed directly. This file is SOURCED by
+# bin/powos and other scripts — setting -u/pipefail here would flip the
+# entire calling shell into strict mode retroactively.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    set -euo pipefail
+fi
 
 # ═══════════════════════════════════════════════════════════════════
 # Configuration
@@ -59,6 +64,29 @@ _ai_load_config() {
     AI_FALLBACK_CLIENT="${AI_FALLBACK_CLIENT:-ollama}"
     AI_SESSION_DIR="${AI_SESSION_DIR:-$AI_STATE_DIR/sessions}"
     AI_ENABLED="${AI_ENABLED:-true}"
+
+    _AI_CONFIG_LOADED=1
+}
+
+# Lazily ensure the config has been loaded. Public ai_* entry points call
+# this so library consumers (which only `source` this file) get sane
+# defaults without having to call _ai_load_config themselves.
+_ai_ensure_config() {
+    if [[ -z "${_AI_CONFIG_LOADED:-}" ]]; then
+        _ai_load_config
+    fi
+}
+
+# Validate an agent/flavor/client/session name before it is used in a
+# filesystem path (these names select files that get SOURCED — a name like
+# '../../tmp/evil' would execute arbitrary code).
+_ai_validate_name() {
+    local kind="$1"
+    local name="$2"
+    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo -e "${RED}Error: invalid $kind name '$name' (allowed: letters, digits, '-', '_')${NC}" >&2
+        return 1
+    fi
 }
 
 _ai_resolve_agent_alias() {
@@ -98,6 +126,9 @@ _ai_resolve_agent_alias() {
 _ai_load_flavor() {
     local agent="$1"
     local flavor="$2"
+
+    _ai_validate_name "flavor" "$flavor" || return 1
+
     local flavor_conf="$AI_CONFIG_DIR/agents/${agent}/${flavor}.conf"
 
     if [[ -f "$flavor_conf" ]]; then
@@ -143,9 +174,29 @@ _ai_load_agent() {
         flavor="${agent_spec#*:}"
     fi
 
+    # Validate before any path use — agent configs are sourced.
+    _ai_validate_name "agent" "$base_agent" || return 1
+    if [[ -n "$flavor" ]]; then
+        _ai_validate_name "flavor" "$flavor" || return 1
+    fi
+
+    # Reset all agent vars so a previously loaded agent doesn't bleed
+    # through when the next agent.conf doesn't set every variable.
+    AGENT_NAME=""
+    AGENT_DESCRIPTION=""
+    AGENT_SYSTEM_PROMPT=""
+    AGENT_CLIENT=""
+    AGENT_TOOLS=""
+    AGENT_ALIASES=""
+    AGENT_CONTEXT_CMD=""
+    FLAVOR_NAME=""
+    FLAVOR_DESCRIPTION=""
+    FLAVOR_PROMPT=""
+
     # Resolve alias to actual agent name
     local resolved_agent
     resolved_agent=$(_ai_resolve_agent_alias "$base_agent")
+    _ai_validate_name "agent" "$resolved_agent" || return 1
 
     local agent_conf="$AI_CONFIG_DIR/agents/${resolved_agent}/agent.conf"
 
@@ -172,6 +223,9 @@ _ai_load_agent() {
 
 _ai_load_client() {
     local client="$1"
+
+    _ai_validate_name "client" "$client" || return 1
+
     local client_conf="$AI_CONFIG_DIR/clients/${client}.conf"
 
     if [[ -f "$client_conf" ]]; then
@@ -197,7 +251,7 @@ _ai_load_client() {
 
 # Check if AI is available
 ai_available() {
-    _ai_load_config
+    _ai_ensure_config
 
     if [[ "$AI_ENABLED" != "true" ]]; then
         return 1
@@ -216,6 +270,9 @@ ai_available() {
 # Check if specific client is available
 _ai_client_available() {
     local client="$1"
+
+    _ai_validate_name "client" "$client" 2>/dev/null || return 1
+
     local client_conf="$AI_CONFIG_DIR/clients/${client}.conf"
 
     if [[ ! -f "$client_conf" ]]; then
@@ -228,7 +285,7 @@ _ai_client_available() {
 
 # List available agents
 ai_list_agents() {
-    _ai_load_config
+    _ai_ensure_config
 
     echo -e "${BOLD}${CYAN}Available Agents${NC}"
     echo "════════════════════════════════════════"
@@ -261,7 +318,7 @@ ai_list_agents() {
 
 # List available clients
 ai_list_clients() {
-    _ai_load_config
+    _ai_ensure_config
 
     echo -e "${BOLD}${CYAN}Available Clients${NC}"
     echo "════════════════════════════════════════"
@@ -282,7 +339,7 @@ ai_list_clients() {
 
 # Main call function
 ai_call() {
-    _ai_load_config
+    _ai_ensure_config
 
     local opt_agent=""
     local opt_client=""
@@ -338,7 +395,13 @@ ai_call() {
                 return 1
                 ;;
             *)
-                prompt="$1"
+                # Join all positional args into the prompt so unquoted
+                # multi-word prompts work: `powos ai how do I sync`
+                if [[ -n "$prompt" ]]; then
+                    prompt="$prompt $1"
+                else
+                    prompt="$1"
+                fi
                 shift
                 ;;
         esac
@@ -351,7 +414,7 @@ ai_call() {
 
     # Resolve agent
     local agent="${opt_agent:-$AI_DEFAULT_AGENT}"
-    _ai_load_agent "$agent"
+    _ai_load_agent "$agent" || return 1
 
     # Resolve client (CLI override > agent preference > default)
     local client="${opt_client:-${AGENT_CLIENT:-$AI_DEFAULT_CLIENT}}"
@@ -370,13 +433,25 @@ ai_call() {
     # Load client
     _ai_load_client "$client" || return 1
 
-    # Resolve session - check if it's a PowOS session name with a stored client ID
-    local resolved_session="$opt_session"
-    if [[ -n "$opt_session" ]] && declare -f ai_session_get_client_id &>/dev/null; then
-        local client_session_id
-        client_session_id=$(ai_session_get_client_id "$opt_session" 2>/dev/null || true)
-        if [[ -n "$client_session_id" ]]; then
-            resolved_session="$client_session_id"
+    # Resolve session. Only pass the client a STORED client session ID (a
+    # real UUID from a previous call). On first use of a named session we
+    # start fresh and store the client's returned session ID afterwards —
+    # passing the PowOS session NAME as --resume breaks the claude CLI.
+    local resolved_session=""
+    if [[ -n "$opt_session" ]]; then
+        # Auto-create the PowOS session file on first use
+        if declare -f ai_session_start &>/dev/null && \
+           [[ ! -f "${AI_SESSION_DIR}/${opt_session}.json" ]]; then
+            ai_session_start "$opt_session" "$agent" "$client" >/dev/null || return 1
+        fi
+
+        if [[ -n "$opt_new_session" ]]; then
+            # --new-session: discard any stored client session, start fresh
+            if declare -f ai_session_set_client_id &>/dev/null; then
+                ai_session_set_client_id "$opt_session" "" 2>/dev/null || true
+            fi
+        elif declare -f ai_session_get_client_id &>/dev/null; then
+            resolved_session=$(ai_session_get_client_id "$opt_session" 2>/dev/null || true)
         fi
     fi
 
@@ -391,16 +466,6 @@ ai_call() {
         echo -e "${RED}Error: No prompt provided${NC}" >&2
         echo "Usage: powos ai [options] \"prompt\"" >&2
         return 1
-    fi
-
-    # Handle --continue (use client's continue feature)
-    if [[ -n "$opt_continue" ]]; then
-        if declare -f client_continue &>/dev/null; then
-            client_continue "$prompt"
-            return $?
-        else
-            echo -e "${YELLOW}Client doesn't support --continue, using regular call${NC}" >&2
-        fi
     fi
 
     # Gather context if agent has context command
@@ -420,24 +485,49 @@ $context
 User request: $prompt"
     fi
 
+    # Handle --continue (use client's continue feature).
+    # Pass the agent system prompt through, same as the one-shot path.
+    if [[ -n "$opt_continue" ]]; then
+        if declare -f client_continue &>/dev/null; then
+            client_continue "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}"
+            return $?
+        else
+            echo -e "${YELLOW}Client doesn't support --continue, using regular call${NC}" >&2
+        fi
+    fi
+
     # Set JSON output mode if requested
     if [[ -n "$opt_json" ]]; then
         export CLAUDE_JSON_OUTPUT="true"
     fi
 
-    # Call client with appropriate function
-    local result
+    # Call client with appropriate function. Capture the exit code
+    # explicitly — an `x=$(...)` assignment would trip errexit in strict
+    # shells before any error handling could run.
+    local result=""
+    local exit_code=0
     if [[ -n "$opt_verbose" ]] && declare -f client_call_verbose &>/dev/null; then
-        result=$(client_call_verbose "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session")
+        result=$(client_call_verbose "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || exit_code=$?
     elif [[ -n "$opt_json" ]] && declare -f client_call_json &>/dev/null; then
-        result=$(client_call_json "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session")
+        result=$(client_call_json "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || exit_code=$?
     else
-        result=$(client_call "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session")
+        result=$(client_call "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || exit_code=$?
     fi
-    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        echo -e "${RED}Error: AI client '$client' failed (exit code $exit_code)${NC}" >&2
+        [[ -n "$result" ]] && echo "$result" >&2
+        return $exit_code
+    fi
 
     # Output result
     echo "$result"
+
+    # Record the exchange in the PowOS session file (used by session export)
+    if [[ -n "$opt_session" ]] && declare -f ai_session_add_message &>/dev/null; then
+        ai_session_add_message "$opt_session" "user" "$prompt" 2>/dev/null || true
+        ai_session_add_message "$opt_session" "assistant" "$result" 2>/dev/null || true
+    fi
 
     # Save session ID mapping if we got a new one from the client
     if [[ -n "$opt_session" ]] && declare -f client_get_session_id &>/dev/null; then
@@ -448,12 +538,12 @@ User request: $prompt"
         fi
     fi
 
-    return $exit_code
+    return 0
 }
 
 # Interactive mode
 ai_interactive() {
-    _ai_load_config
+    _ai_ensure_config
 
     local agent=""
     local client=""
@@ -498,19 +588,28 @@ ai_interactive() {
 
     # Apply defaults
     agent="${agent:-$AI_DEFAULT_AGENT}"
-    client="${client:-$AI_DEFAULT_CLIENT}"
 
-    _ai_load_agent "$agent"
+    _ai_load_agent "$agent" || return 1
 
-    # Resolve client (agent preference > passed > default)
-    client="${AGENT_CLIENT:-$client}"
-    client="${client:-$AI_DEFAULT_CLIENT}"
+    # Resolve client (CLI flag > agent preference > default) — same
+    # precedence as the one-shot path.
+    if [[ -z "$client" ]]; then
+        client="${AGENT_CLIENT:-$AI_DEFAULT_CLIENT}"
+    fi
 
     _ai_load_client "$client" || return 1
 
-    # Generate session ID if not provided
+    # Generate a PowOS session name if not provided
     if [[ -z "$session" ]]; then
         session="session-$(date +%Y%m%d-%H%M%S)"
+    fi
+
+    # Only hand the client a STORED client session ID (UUID from a previous
+    # run). A fabricated/first-use name must NOT be passed as --resume —
+    # the client starts a fresh conversation instead.
+    local client_session_id=""
+    if declare -f ai_session_get_client_id &>/dev/null; then
+        client_session_id=$(ai_session_get_client_id "$session" 2>/dev/null || true)
     fi
 
     # Header
@@ -540,18 +639,18 @@ ${context}"
 
     # Check if client supports interactive
     if declare -f client_interactive &>/dev/null; then
-        client_interactive "$full_system_prompt" "$session"
+        client_interactive "$full_system_prompt" "$client_session_id"
     else
         # Fallback to manual loop (pass context via env for the loop)
         export _AI_CONTEXT="$context"
-        _ai_interactive_loop "$agent" "$client" "$session"
+        _ai_interactive_loop "$agent" "$client" "$client_session_id"
     fi
 }
 
 _ai_interactive_loop() {
     local agent="$1"
     local client="$2"
-    local session="$3"
+    local session="${3:-}"
 
     while true; do
         echo -ne "${GREEN}You:${NC} "
@@ -600,7 +699,13 @@ _ai_interactive_loop() {
                 ;;
             *)
                 echo -ne "${CYAN}AI:${NC} "
-                client_call "$input" "${AGENT_SYSTEM_PROMPT:-}" "$session"
+                client_call "$input" "${AGENT_SYSTEM_PROMPT:-}" "$session" || \
+                    echo -e "${RED}(client call failed)${NC}"
+                # Chain the conversation: pick up the client's session ID
+                # after the first call so following turns resume it.
+                if [[ -z "$session" ]] && declare -f client_get_session_id &>/dev/null; then
+                    session=$(client_get_session_id 2>/dev/null || true)
+                fi
                 echo ""
                 ;;
         esac
@@ -630,7 +735,7 @@ Session Commands:
   powos ai sessions                     List all sessions
   powos ai session new [name]           Create new session
   powos ai session delete <name>        Delete a session
-  powos ai session export <name> [fmt]  Export session (text/json/markdown)
+  powos ai session export <name> [fmt]  Export session (text/json/markdown|md)
   powos ai session clear                Delete all sessions
 
 Examples:
@@ -667,6 +772,7 @@ EOF
 
 # List sessions
 ai_sessions() {
+    _ai_ensure_config
     if declare -f ai_session_list &>/dev/null; then
         ai_session_list
     else
@@ -677,13 +783,14 @@ ai_sessions() {
 
 # Create new named session
 ai_new_session() {
+    _ai_ensure_config
     local name="${1:-}"
-    local agent="${2:-$AI_DEFAULT_AGENT}"
-    local client="${3:-$AI_DEFAULT_CLIENT}"
+    local agent="${2:-${AI_DEFAULT_AGENT:-assistant}}"
+    local client="${3:-${AI_DEFAULT_CLIENT:-claude}}"
 
     if declare -f ai_session_start &>/dev/null; then
         local session_id
-        session_id=$(ai_session_start "$name" "$agent" "$client")
+        session_id=$(ai_session_start "$name" "$agent" "$client") || return 1
         echo -e "${GREEN}Created session: ${BOLD}$session_id${NC}"
         echo "$session_id"
     else
@@ -694,7 +801,8 @@ ai_new_session() {
 
 # Delete a session
 ai_delete_session() {
-    local name="$1"
+    _ai_ensure_config
+    local name="${1:-}"
     if [[ -z "$name" ]]; then
         echo -e "${RED}Usage: powos ai session delete <name>${NC}" >&2
         return 1
@@ -710,7 +818,8 @@ ai_delete_session() {
 
 # Export a session
 ai_export_session() {
-    local name="$1"
+    _ai_ensure_config
+    local name="${1:-}"
     local format="${2:-text}"
 
     if [[ -z "$name" ]]; then
@@ -761,7 +870,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                     ;;
                 delete|rm)
                     shift
-                    ai_delete_session "$1"
+                    ai_delete_session "${1:-}"
                     ;;
                 export)
                     shift

@@ -39,12 +39,14 @@ User: $prompt"
     # Run gemini
     # Different gemini CLI tools have different interfaces
     # Try common patterns
+    # Don't suppress stderr — on failure the CLI's error message is the
+    # only clue the user gets.
     if [[ " ${args[*]} " =~ " -p " ]]; then
         # Uses -p for prompt
-        "$cmd" "${args[@]}" "$full_prompt" 2>/dev/null
+        "$cmd" "${args[@]}" "$full_prompt"
     else
         # Pipe prompt to stdin
-        echo "$full_prompt" | "$cmd" "${args[@]}" 2>/dev/null
+        echo "$full_prompt" | "$cmd" "${args[@]}"
     fi
 }
 

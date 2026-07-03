@@ -35,6 +35,47 @@ ai_ensure_loaded() {
 # Response Parsing
 # ═══════════════════════════════════════════════════════════════════
 
+# Validate an AI-emitted file path before writing under a target dir.
+# Rejects absolute paths, Windows drive/UNC forms, and any '..' component
+# so a marker like '--- ../../../.bashrc ---' cannot escape the target dir.
+_ai_safe_rel_path() {
+    local p="$1"
+
+    [[ -n "$p" ]] || return 1
+    [[ "$p" == /* ]] && return 1        # absolute
+    [[ "$p" == *":"* ]] && return 1     # drive letter / scheme
+    [[ "$p" == *"\\"* ]] && return 1    # backslash separators
+
+    local part
+    local IFS='/'
+    for part in $p; do
+        [[ "$part" == ".." ]] && return 1
+    done
+
+    return 0
+}
+
+# Write one parsed file under target_dir, refusing unsafe paths.
+# Usage: _ai_write_parsed_file <target_dir> <rel_path> <content> <verbose>
+# Returns 0 if the file was written, 1 if it was skipped.
+_ai_write_parsed_file() {
+    local target_dir="$1"
+    local rel_path="$2"
+    local content="$3"
+    local verbose="$4"
+
+    if ! _ai_safe_rel_path "$rel_path"; then
+        echo "  ✗ Skipped unsafe file path from AI response: $rel_path" >&2
+        return 1
+    fi
+
+    local file_path="$target_dir/$rel_path"
+    mkdir -p "$(dirname "$file_path")"
+    echo "$content" > "$file_path"
+    [[ "$verbose" == "true" ]] && echo "  ✓ $rel_path"
+    return 0
+}
+
 # Parse AI response with file markers and create files
 # Usage: ai_parse_files_to_dir "$response" "$target_dir"
 # Format expected:
@@ -57,11 +98,9 @@ ai_parse_files_to_dir() {
         if [[ "$line" =~ ^---[[:space:]]+(.*)[[:space:]]+---$ ]]; then
             # Save previous file if any
             if [[ -n "$current_file" && -n "$current_content" ]]; then
-                local file_path="$target_dir/$current_file"
-                mkdir -p "$(dirname "$file_path")"
-                echo "$current_content" > "$file_path"
-                [[ "$verbose" == "true" ]] && echo "  ✓ $current_file"
-                ((files_created++))
+                if _ai_write_parsed_file "$target_dir" "$current_file" "$current_content" "$verbose"; then
+                    ((files_created++)) || true || true
+                fi
             fi
 
             local match="${BASH_REMATCH[1]}"
@@ -85,11 +124,9 @@ ai_parse_files_to_dir() {
 
     # Save last file if any
     if [[ -n "$current_file" && -n "$current_content" ]]; then
-        local file_path="$target_dir/$current_file"
-        mkdir -p "$(dirname "$file_path")"
-        echo "$current_content" > "$file_path"
-        [[ "$verbose" == "true" ]] && echo "  ✓ $current_file"
-        ((files_created++))
+        if _ai_write_parsed_file "$target_dir" "$current_file" "$current_content" "$verbose"; then
+            ((files_created++)) || true || true
+        fi
     fi
 
     echo "$files_created"
@@ -146,7 +183,7 @@ ai_parse_markdown_to_dir() {
     if [[ -n "$readme_content" ]]; then
         echo "$readme_content" > "$target_dir/README.md"
         [[ "$verbose" == "true" ]] && echo "  ✓ README.md"
-        ((files_created++))
+        ((files_created++)) || true
     fi
 
     # Try to extract Python
@@ -156,7 +193,7 @@ ai_parse_markdown_to_dir() {
         mkdir -p "$target_dir/src"
         echo "$python_content" > "$target_dir/src/main.py"
         [[ "$verbose" == "true" ]] && echo "  ✓ src/main.py"
-        ((files_created++))
+        ((files_created++)) || true
     fi
 
     # Try to extract JavaScript
@@ -166,7 +203,7 @@ ai_parse_markdown_to_dir() {
         mkdir -p "$target_dir/src"
         echo "$js_content" > "$target_dir/src/index.js"
         [[ "$verbose" == "true" ]] && echo "  ✓ src/index.js"
-        ((files_created++))
+        ((files_created++)) || true
     fi
 
     # Try to extract Go
@@ -176,7 +213,7 @@ ai_parse_markdown_to_dir() {
         mkdir -p "$target_dir/src"
         echo "$go_content" > "$target_dir/src/main.go"
         [[ "$verbose" == "true" ]] && echo "  ✓ src/main.go"
-        ((files_created++))
+        ((files_created++)) || true
     fi
 
     # Try to extract Dockerfile
@@ -185,7 +222,7 @@ ai_parse_markdown_to_dir() {
     if [[ -n "$dockerfile_content" ]]; then
         echo "$dockerfile_content" > "$target_dir/Dockerfile"
         [[ "$verbose" == "true" ]] && echo "  ✓ Dockerfile"
-        ((files_created++))
+        ((files_created++)) || true
     fi
 
     # Try to extract YAML (docker-compose)
@@ -197,7 +234,7 @@ ai_parse_markdown_to_dir() {
     if [[ -n "$yaml_content" ]]; then
         echo "$yaml_content" > "$target_dir/docker-compose.yml"
         [[ "$verbose" == "true" ]] && echo "  ✓ docker-compose.yml"
-        ((files_created++))
+        ((files_created++)) || true
     fi
 
     # Try to extract bash (build.sh)
@@ -207,7 +244,7 @@ ai_parse_markdown_to_dir() {
         echo "$bash_content" > "$target_dir/build.sh"
         chmod +x "$target_dir/build.sh"
         [[ "$verbose" == "true" ]] && echo "  ✓ build.sh"
-        ((files_created++))
+        ((files_created++)) || true
     fi
 
     echo "$files_created"

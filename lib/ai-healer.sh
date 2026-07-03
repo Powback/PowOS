@@ -93,11 +93,11 @@ ollama_chat() {
 ensure_model() {
     local model="${1:-$OLLAMA_MODEL}"
 
-    if ! curl -s "${OLLAMA_HOST}/api/tags" | jq -e ".models[] | select(.name == \"$model\")" >/dev/null 2>&1; then
+    if ! curl -s "${OLLAMA_HOST}/api/tags" | jq -e --arg model "$model" '.models[] | select(.name == $model)' >/dev/null 2>&1; then
         log_info "Pulling model: $model (this may take a while)..."
         curl -s "${OLLAMA_HOST}/api/pull" \
             -H "Content-Type: application/json" \
-            -d "{\"name\": \"$model\"}" \
+            -d "$(jq -n --arg name "$model" '{name: $name}')" \
             | while read -r line; do
                 status=$(echo "$line" | jq -r '.status // empty')
                 [[ -n "$status" ]] && echo -ne "\r${CYAN}${LOG_PREFIX}${NC} $status                    "
@@ -271,7 +271,7 @@ auto_heal() {
     log_info "Checking for broken symlinks..."
     while IFS= read -r -d '' broken_link; do
         log_warn "Broken symlink: $broken_link"
-        ((issues_found++))
+        ((issues_found++)) || true
     done < <(find "$POWOS_ROOT" -xtype l -print0 2>/dev/null || true)
 
     # Check 2: Failed systemd services
@@ -282,7 +282,7 @@ auto_heal() {
         if [[ -n "$failed_services" ]]; then
             log_warn "Failed services found:"
             echo "$failed_services"
-            ((issues_found++))
+            ((issues_found++)) || true
         fi
     fi
 
@@ -292,7 +292,7 @@ auto_heal() {
     disk_usage=$(df / | awk 'NR==2 {print $5}' | tr -d '%')
     if [[ "$disk_usage" -gt 90 ]]; then
         log_warn "Disk usage critical: ${disk_usage}%"
-        ((issues_found++))
+        ((issues_found++)) || true
     fi
 
     # Check 4: Git state
@@ -301,7 +301,7 @@ auto_heal() {
         cd "$POWOS_ROOT"
         if ! git diff --quiet HEAD 2>/dev/null; then
             log_warn "Uncommitted changes in PowOS state"
-            ((issues_found++))
+            ((issues_found++)) || true
         fi
     fi
 

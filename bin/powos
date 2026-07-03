@@ -509,9 +509,54 @@ cmd_layers() {
 # Rollback Command
 # ═══════════════════════════════════════════════════════════════════
 
+# Print manual instructions for applying/removing rollback kernel args
+_rollback_manual_help() {
+    local mode="$1"   # add|remove
+    local kargs="$2"
+    echo "" >&2
+    echo "Apply the change manually with one of:" >&2
+    if [[ "$mode" == "add" ]]; then
+        echo "  sudo bootc kargs --append-if-missing='<karg>'   (one per karg: $kargs)" >&2
+        echo "  or edit the BLS entry in /boot/loader/entries/ and append: $kargs" >&2
+    else
+        echo "  sudo bootc kargs --delete='<karg>'   (one per karg: $kargs)" >&2
+        echo "  or edit the BLS entry in /boot/loader/entries/ and remove: $kargs" >&2
+    fi
+}
+
+# Update kernel args for the next boot via grubby.
+# Returns non-zero (with a clear FAILED message + grubby's stderr) when the
+# boot entry could not be updated — no silent success.
+_rollback_apply_kargs() {
+    local mode="$1"   # add|remove
+    shift
+    local kargs="$*"
+
+    if ! command -v grubby &>/dev/null; then
+        echo -e "${RED}✗ FAILED: 'grubby' not found — boot entry NOT updated${NC}" >&2
+        _rollback_manual_help "$mode" "$kargs"
+        return 1
+    fi
+
+    local out rc=0
+    if [[ "$mode" == "add" ]]; then
+        out=$(grubby --update-kernel=ALL --args="$kargs" 2>&1) || rc=$?
+    else
+        out=$(grubby --update-kernel=ALL --remove-args="$kargs" 2>&1) || rc=$?
+    fi
+
+    if [[ $rc -ne 0 ]]; then
+        echo -e "${RED}✗ FAILED: grubby exited with code $rc — boot entry NOT updated${NC}" >&2
+        [[ -n "$out" ]] && echo "$out" >&2
+        _rollback_manual_help "$mode" "$kargs"
+        return 1
+    fi
+
+    return 0
+}
+
 cmd_rollback() {
     local target="${1:-}"
-    local GRUB_CFG="/etc/default/grub"
     local KARGS_FILE="/run/powos/rollback-kargs"
 
     case "$target" in
@@ -531,8 +576,9 @@ cmd_rollback() {
 
             # Show current rollback state
             if [[ -f "$KARGS_FILE" ]]; then
-                echo -e "${YELLOW}Active rollback flags:${NC}"
+                echo -e "${YELLOW}Rollback flags requested this boot (informational record only):${NC}"
                 cat "$KARGS_FILE"
+                echo "  Verify the boot entry actually changed: grubby --info=DEFAULT"
                 echo ""
             fi
 
@@ -551,11 +597,9 @@ cmd_rollback() {
             echo "Setting rollback: skip custom layer on next boot"
             mkdir -p "$(dirname "$KARGS_FILE")"
             echo "rd.powos.skip.custom=1" >> "$KARGS_FILE"
+            echo "  (informational record written to $KARGS_FILE — nothing reads it at boot)"
 
-            # Try to update kernel cmdline for next boot
-            if command -v grubby &>/dev/null; then
-                grubby --update-kernel=ALL --args="rd.powos.skip.custom=1" 2>/dev/null || true
-            fi
+            _rollback_apply_kargs add "rd.powos.skip.custom=1" || exit 1
 
             echo -e "${GREEN}✓ Custom layer will be skipped on next boot${NC}"
             echo "  Your customizations won't load - only base + updates"
@@ -566,10 +610,9 @@ cmd_rollback() {
             echo "Setting rollback: skip updates layer on next boot"
             mkdir -p "$(dirname "$KARGS_FILE")"
             echo "rd.powos.skip.updates=1" >> "$KARGS_FILE"
+            echo "  (informational record written to $KARGS_FILE — nothing reads it at boot)"
 
-            if command -v grubby &>/dev/null; then
-                grubby --update-kernel=ALL --args="rd.powos.skip.updates=1" 2>/dev/null || true
-            fi
+            _rollback_apply_kargs add "rd.powos.skip.updates=1" || exit 1
 
             echo -e "${GREEN}✓ Updates layer will be skipped on next boot${NC}"
             echo "  System updates won't load - only base + custom"
@@ -581,10 +624,9 @@ cmd_rollback() {
             mkdir -p "$(dirname "$KARGS_FILE")"
             echo "rd.powos.skip.custom=1" > "$KARGS_FILE"
             echo "rd.powos.skip.updates=1" >> "$KARGS_FILE"
+            echo "  (informational record written to $KARGS_FILE — nothing reads it at boot)"
 
-            if command -v grubby &>/dev/null; then
-                grubby --update-kernel=ALL --args="rd.powos.skip.custom=1 rd.powos.skip.updates=1" 2>/dev/null || true
-            fi
+            _rollback_apply_kargs add "rd.powos.skip.custom=1 rd.powos.skip.updates=1" || exit 1
 
             echo -e "${GREEN}✓ Will boot with base layer only${NC}"
             echo "  No customizations or updates will load"
@@ -595,9 +637,7 @@ cmd_rollback() {
             echo "Clearing rollback flags..."
             rm -f "$KARGS_FILE"
 
-            if command -v grubby &>/dev/null; then
-                grubby --update-kernel=ALL --remove-args="rd.powos.skip.custom rd.powos.skip.updates" 2>/dev/null || true
-            fi
+            _rollback_apply_kargs remove "rd.powos.skip.custom rd.powos.skip.updates" || exit 1
 
             echo -e "${GREEN}✓ Rollback flags cleared${NC}"
             echo "  All layers will load on next boot"
@@ -673,6 +713,17 @@ cmd_update() {
             if [[ "$(get_usb_status)" != "connected" ]]; then
                 echo -e "${RED}Error: USB not connected${NC}"
                 echo "Updates need USB connected to persist to updates layer"
+                exit 1
+            fi
+
+            # Verify the USB layers dir is a real mount before staging.
+            # A bare mkdir here would fabricate a tmpfs directory and stage
+            # "updates" into RAM while claiming success.
+            if ! mountpoint -q /run/powos/usb-layers 2>/dev/null; then
+                echo -e "${RED}Error: /run/powos/usb-layers is not a mountpoint${NC}"
+                echo "The USB data partition is not bind-mounted — staging updates"
+                echo "here would write to RAM and be lost on reboot."
+                echo "Check 'powos status' and reconnect/remount the USB drive."
                 exit 1
             fi
 
@@ -938,13 +989,6 @@ cmd_update() {
                 echo "  /var/lib/powos/sources/"
             fi
 
-            # overlays/ -> /usr/lib/powos/overlays/
-            if [[ -d "$POWOS_SRC/overlays" ]]; then
-                sudo mkdir -p /usr/lib/powos/overlays
-                sudo cp -r "$POWOS_SRC/overlays/"* /usr/lib/powos/overlays/
-                echo "  /usr/lib/powos/overlays/"
-            fi
-
             echo ""
             echo -e "${GREEN}✓ PowOS updated from source${NC}"
             echo ""
@@ -981,7 +1025,7 @@ cmd_update() {
                     if declare -f cmd_dev &>/dev/null; then
                         cmd_dev update "$name" 2>/dev/null || echo "  Failed to update $name"
                     fi
-                    ((updated++))
+                    ((updated++)) || true
                 fi
             done
 
@@ -1035,8 +1079,9 @@ cmd_safe() {
         echo -e "${GREEN}✓ Safe to unplug USB${NC}"
         exit 0
     else
-        echo -e "${RED}✗ Not safe - sync in progress${NC}"
-        echo "  Run 'powos sync' first"
+        echo -e "${RED}✗ Not safe - unsynced changes pending${NC}"
+        echo "  There are changes since the last successful sync"
+        echo "  Run 'powos flush' (or 'powos sync') first"
         exit 1
     fi
 }
@@ -1113,7 +1158,7 @@ USER QUESTION: $ai_prompt"
         echo -e "  ${GREEN}✓${NC} Layer stack active: $layers"
     else
         echo -e "  ${YELLOW}○${NC} Standard boot (no layers)"
-        ((warnings++))
+        ((warnings++)) || true
     fi
 
     # Check for rollback flags
@@ -1121,11 +1166,11 @@ USER QUESTION: $ai_prompt"
         source "$STATE_DIR/ramboot-state"
         if [[ "${POWOS_SKIP_CUSTOM:-}" == "1" ]]; then
             echo -e "  ${YELLOW}⚠${NC} Custom layer SKIPPED (rollback active)"
-            ((warnings++))
+            ((warnings++)) || true
         fi
         if [[ "${POWOS_SKIP_UPDATES:-}" == "1" ]]; then
             echo -e "  ${YELLOW}⚠${NC} Updates layer SKIPPED (rollback active)"
-            ((warnings++))
+            ((warnings++)) || true
         fi
     fi
     echo ""
@@ -1145,7 +1190,7 @@ USER QUESTION: $ai_prompt"
         fi
     else
         echo -e "  ${YELLOW}○${NC} Not running from RAM overlay"
-        ((warnings++))
+        ((warnings++)) || true
     fi
     echo ""
 
@@ -1159,11 +1204,11 @@ USER QUESTION: $ai_prompt"
             ;;
         disconnected)
             echo -e "  ${YELLOW}○${NC} Disconnected (working from RAM)"
-            ((warnings++))
+            ((warnings++)) || true
             ;;
         *)
             echo -e "  ${RED}?${NC} Unknown status"
-            ((issues++))
+            ((issues++)) || true
             ;;
     esac
     echo ""
@@ -1173,7 +1218,7 @@ USER QUESTION: $ai_prompt"
     # Check for lock file (interrupted sync)
     if [[ -f "/run/powos/sync.lock" ]]; then
         echo -e "  ${RED}✗${NC} Sync lock exists (interrupted?)"
-        ((issues++))
+        ((issues++)) || true
     else
         echo -e "  ${GREEN}✓${NC} No sync locks"
     fi
@@ -1186,7 +1231,7 @@ USER QUESTION: $ai_prompt"
             if [[ "$conflict_status" == "conflict" ]]; then
                 echo -e "  ${RED}✗${NC} CONFLICT - USB modified by another machine"
                 echo "      Run: powos sync resolve"
-                ((issues++))
+                ((issues++)) || true
             else
                 echo -e "  ${GREEN}✓${NC} No conflicts"
             fi
@@ -1240,7 +1285,7 @@ except: print('Unknown')
             if [[ "$ahead" != "?" ]] && [[ "$behind" != "?" ]]; then
                 if [[ "$ahead" -gt 0 ]] && [[ "$behind" -gt 0 ]]; then
                     echo -e "    ${YELLOW}⚠${NC} Diverged: $ahead ahead, $behind behind"
-                    ((warnings++))
+                    ((warnings++)) || true
                 elif [[ "$ahead" -gt 0 ]]; then
                     echo -e "    ${YELLOW}○${NC} $ahead commits to push"
                 elif [[ "$behind" -gt 0 ]]; then
@@ -1306,7 +1351,7 @@ except: pass
                 local name=$(basename "$proj")
                 [[ "$name" == "*" ]] && continue
                 if [[ -d "$POWOS_ROOT/extensions/$name" ]] || [[ -L "/var/lib/extensions/$name" ]]; then
-                    ((enabled_count++))
+                    ((enabled_count++)) || true
                 fi
             done
             if [[ "$enabled_count" -gt 0 ]]; then
@@ -1470,7 +1515,7 @@ get_health_context() {
     ctx+="SYNC:\n"
     ctx+="  Lock file: $(test -f /run/powos/sync.lock && echo 'EXISTS (possible interrupted sync)' || echo 'none')\n"
     if declare -f check_for_conflicts &>/dev/null; then
-        ctx+="  Conflicts: $(check_for_conflicts 2>/dev/null && echo 'none' || echo 'DETECTED')\n"
+        ctx+="  Conflicts: $(check_for_conflicts 2>/dev/null || echo 'DETECTED')\n"
     fi
     if declare -f read_sync_marker &>/dev/null; then
         ctx+="  Last sync by: $(read_sync_marker 2>/dev/null || echo 'unknown')\n"
@@ -1485,12 +1530,14 @@ get_health_context() {
     fi
     ctx+="\n"
 
-    # Recent changes
+    # Recent changes (process substitution — a `| while read` pipeline runs
+    # in a subshell and its ctx+= updates would be lost)
     ctx+="RECENT CHANGES (last 10 in RAM):\n"
     if [[ -d /run/powos-overlay/upper ]]; then
-        find /run/powos-overlay/upper -type f -mmin -60 2>/dev/null | head -10 | while read -r f; do
+        local f
+        while IFS= read -r f; do
             ctx+="  $f\n"
-        done
+        done < <(find /run/powos-overlay/upper -type f -mmin -60 2>/dev/null | head -10)
     fi
     ctx+="\n"
 
@@ -1571,28 +1618,32 @@ cmd_install() {
         # Install to container
         echo -e "${CYAN}Installing to container '$target':${NC} ${packages[*]}"
 
-        # Check if container exists
-        if ! distrobox list 2>/dev/null | grep -q "^$target"; then
+        # Check if container exists (exact name match on the NAME column —
+        # a prefix grep would let 'dev' match 'dev-old')
+        if ! distrobox list --no-color 2>/dev/null | \
+             awk -F'|' -v n="$target" 'NR>1 { name=$2; gsub(/^[ \t]+|[ \t]+$/, "", name); if (name == n) found=1 } END { exit(found ? 0 : 1) }'; then
             echo -e "${YELLOW}Container '$target' doesn't exist. Create it first:${NC}"
             echo "  powos containers create $target"
             return 1
         fi
 
-        # Run install inside container
-        distrobox enter "$target" -- bash -c "
+        # Run install inside container. Packages are passed as arguments —
+        # splicing them into the command string would allow shell injection
+        # and break on names with special characters.
+        distrobox enter "$target" -- bash -c '
             if command -v apt &>/dev/null; then
-                sudo apt update && sudo apt install -y ${packages[*]}
+                sudo apt update && sudo apt install -y "$@"
             elif command -v dnf &>/dev/null; then
-                sudo dnf install -y ${packages[*]}
+                sudo dnf install -y "$@"
             elif command -v pacman &>/dev/null; then
-                sudo pacman -Syu --noconfirm ${packages[*]}
+                sudo pacman -Syu --noconfirm "$@"
             elif command -v apk &>/dev/null; then
-                sudo apk add ${packages[*]}
+                sudo apk add "$@"
             else
-                echo 'Unknown package manager'
+                echo "Unknown package manager"
                 exit 1
             fi
-        "
+        ' _ "${packages[@]}"
 
         if [[ "$export_gui" == "true" ]]; then
             echo ""
@@ -1655,11 +1706,21 @@ cmd_install() {
         # persistence (handled above), so this is skipped there.
         if is_ramboot && [[ -w /usr ]] && [[ -x "$LAYER_SYNC" ]]; then
             echo "Syncing to custom layer..."
-            python3 "$LAYER_SYNC" --sync-now 2>/dev/null || true
+            if python3 "$LAYER_SYNC" --sync-now; then
+                echo ""
+                echo -e "${GREEN}✓ Installed to host${NC}"
+                echo "  Changes synced to custom layer and will persist"
+            else
+                echo ""
+                echo -e "${YELLOW}⚠ Installed to host, but layer sync FAILED${NC}"
+                echo "  Persistence is NOT confirmed — changes may be lost on reboot"
+                echo "  Retry with: powos layers sync"
+            fi
+        else
+            echo ""
+            echo -e "${GREEN}✓ Installed to host${NC}"
+            echo "  Changes will persist in custom layer"
         fi
-
-        echo ""
-        echo -e "${GREEN}✓ Installed to host${NC}"
     fi
 }
 
@@ -2750,7 +2811,7 @@ case "${1:-}" in
                         ;;
                     delete|rm)
                         shift
-                        ai_delete_session "$1"
+                        ai_delete_session "${1:-}"
                         ;;
                     export)
                         shift
