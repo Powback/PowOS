@@ -77,6 +77,12 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   the `powos-cuda` distrobox (GPU passed through, nvcc exported to host). Image is
   CUDA 12.8 cuDNN — **≥12.8 is REQUIRED to compile for RTX 50-series (sm_120)**;
   12.4 silently can't target Blackwell. `powos-python` has passthrough but no toolkit.
+- Driver channel (`powos driver status|stable|testing`): rebases the installed
+  system between published image tags (:nvidia-open ↔ :nvidia-open-testing) for
+  tested vs newest drivers. Derives the repo from the booted image (fork-agnostic).
+  Reboot to apply; old deployment = rollback. Counterpart to `powos base` (USB layers).
+- Private image pulls (`powos registry login [host]`): writes /etc/ostree/auth.json
+  so bootc can pull private bases; reuses your `gh` token for ghcr.io.
 
 ## Key paths
 - `/usr/lib/powos/` scripts · `/etc/powos/` config · `/run/powos/` runtime state

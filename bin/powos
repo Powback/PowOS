@@ -106,6 +106,13 @@ Commands:
   cuda status         Container / toolkit / GPU visibility
   cuda disable        Remove the CUDA container
 
+  driver status       Show current NVIDIA driver channel (image tag)
+  driver stable       Switch to tested drivers (:nvidia-open), reboot to apply
+  driver testing      Switch to newest drivers (:nvidia-open-testing)
+
+  registry login [host]   Save pull creds for private images (default ghcr.io)
+  registry status         Show configured registry hosts
+
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build bootable PowOS ISO
   build test          Build container image only (for testing)
@@ -2625,6 +2632,16 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/cuda.sh"
         cmd_cuda "$@"
+        ;;
+    driver)
+        shift
+        source "$POWOS_LIB/driver.sh"
+        cmd_driver "$@"
+        ;;
+    registry)
+        shift
+        source "$POWOS_LIB/registry.sh"
+        cmd_registry "$@"
         ;;
     build|b)
         shift

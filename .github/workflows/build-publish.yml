@@ -23,7 +23,7 @@ on:
         description: Which variant to build
         type: choice
         default: all
-        options: [ all, nvidia-open, nvidia, main ]
+        options: [ all, nvidia-open, nvidia-open-testing, nvidia, main ]
   schedule:
     - cron: '0 6 * * 1'   # weekly rebuild to pick up new bazzite :stable
 
@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [ nvidia-open, nvidia, main ]
+        variant: [ nvidia-open, nvidia-open-testing, nvidia, main ]
     steps:
       - name: Gate (manual runs can target one variant)
         id: gate
@@ -69,8 +69,9 @@ jobs:
         id: base
         run: |
           case "${{ matrix.variant }}" in
-            nvidia-open) img=ghcr.io/ublue-os/bazzite-nvidia-open:stable ;;
-            nvidia)      img=ghcr.io/ublue-os/bazzite-nvidia:stable ;;
+            nvidia-open)         img=ghcr.io/ublue-os/bazzite-nvidia-open:stable ;;
+            nvidia-open-testing) img=ghcr.io/ublue-os/bazzite-nvidia-open:testing ;;
+            nvidia)              img=ghcr.io/ublue-os/bazzite-nvidia:stable ;;
             main)        img=ghcr.io/ublue-os/bazzite:stable ;;
           esac
           echo "image=$img" >> "$GITHUB_OUTPUT"
