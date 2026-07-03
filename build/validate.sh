@@ -42,16 +42,38 @@ run_test() { # name  command...
 }
 
 # ── Tier 1: unit tests (no root, no hardware) ─────────────────────
+# Every tier-1 suite runs here; glob so new suites are picked up automatically
+# and nothing is silently omitted (validate.sh predated games/windows/welcome).
 step "Tier 1 — unit tests"
-for t in test-install-system test-vm test-variant-select test-base \
-         test-hardware-detect test-pinstall test-overlay; do
-    if [[ -f "test/tier1/$t.sh" ]]; then run_test "$t" bash "test/tier1/$t.sh"; else skip "$t (missing)"; fi
+for t in test/tier1/*.sh; do
+    [[ -f "$t" ]] || continue
+    name="$(basename "$t" .sh)"
+    run_test "$name" bash "$t"
 done
 if command -v python3 >/dev/null; then
-    for t in test-layer-sync test-cachefs; do
-        if [[ -f "test/tier1/$t.py" ]]; then run_test "$t" python3 "test/tier1/$t.py"; else skip "$t (missing)"; fi
+    for t in test/tier1/*.py; do
+        [[ -f "$t" ]] || continue
+        run_test "$(basename "$t" .py)" python3 "$t"
     done
 else skip "python tests (no python3)"; fi
+
+# ── Tier 1.2: command dry-runs (no root, no hardware) ─────────────
+# Exercise the real CLIs end-to-end in --dry-run — proves wiring + plan output
+# without touching a device. This is the cheapest signal that games/windows
+# actually dispatch and parse before you commit hardware.
+step "Tier 1.2 — CLI dry-runs (wiring, no device touched)"
+POWOS_BIN="./bin/powos"
+if [[ -x "$POWOS_BIN" ]] || [[ -f "$POWOS_BIN" ]]; then
+    # help/status paths must not error; create/install must accept --dry-run.
+    run_test "powos games (help)"        bash "$POWOS_BIN" games --help
+    run_test "powos games create dry"    bash "$POWOS_BIN" games create --size 64 --dry-run
+    run_test "powos windows (help)"      bash "$POWOS_BIN" windows --help
+    run_test "powos windows create dry"  bash "$POWOS_BIN" windows create --size 64 --dry-run
+    run_test "powos windows install dry" bash "$POWOS_BIN" windows install --iso /nonexistent.iso --dry-run
+    run_test "powos windows fetch dry"   bash "$POWOS_BIN" windows fetch-iso --dry-run
+else
+    skip "CLI dry-runs (bin/powos not found)"
+fi
 
 # ── update-self + loop-device e2e (need root/privileged) ──────────
 step "Tier 1.5 — real deploy + disk (need root)"
@@ -89,8 +111,14 @@ echo
 echo -e "  ${B}Still MANUAL (can't be automated here) — see test/e2e/INSTALL-VALIDATION.md:${N}"
 echo "    • Boot the USB → menu shows PowOS Live + Install PowOS + variant entries"
 echo "    • sudo powos install-system --dry-run  → sane plan, changes nothing"
+echo "    • First login → PowOS Welcome appears (password/restore/games/windows)"
 echo "    • Dual-boot alongside a real Windows install"
-echo "    • sudo powos vm windows                → Windows actually boots as a guest"
+echo "    • powos games create + steam-setup     → POWOS-GAMES mounts, Steam library added"
+echo "    • powos windows fetch-iso --slim       → official ISO downloads + verifies + slims"
+echo "    • powos windows install --fetch        → zero-touch Windows into windows.vhdx"
+echo "    • powos windows (switch) → reboot      → native VHD boot reaches Windows"
+echo "    • ANTI-CHEAT: launch an EAC/BattlEye title on the slimmed install — MUST load"
+echo "    • sudo powos vm windows                → same image boots as a guest"
 echo "    • powos base switch <name>; reboot     → boots the selected base"
 echo
 [[ $STAGE_FAIL -eq 0 ]]

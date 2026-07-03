@@ -799,7 +799,7 @@ cmd_games() {
         mount)             gms_mount ;;
         steam-setup|steam) gms_steam_setup ;;
         resize)            gms_resize ;;
-        help)              gms_usage ;;
+        help|-h|--help)    gms_usage ;;
         *)                 gms_err "Unknown games command: $sub"; gms_usage; return 1 ;;
     esac
 }
