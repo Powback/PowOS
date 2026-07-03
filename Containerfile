@@ -105,6 +105,10 @@ COPY bin/pinstall /usr/bin/
 COPY bin/premove /usr/bin/
 COPY config/ /etc/powos/
 COPY systemd/powos-* /usr/lib/powos/
+# Exec bits can be stripped by Windows checkouts (see repo history) — the
+# boot-chain units ExecStart these directly, so force them executable.
+RUN chmod +x /usr/lib/powos/powos-init /usr/lib/powos/powos-hardware-detect \
+    /usr/lib/powos/powos-overlay-load /usr/lib/powos/powos-hydrate
 
 # Copy RAM overlay system (for OS)
 COPY lib/ramfs/ /usr/lib/powos/ramfs/
@@ -131,11 +135,21 @@ COPY systemd/powos-layer-sync.service /usr/lib/systemd/system/
 COPY systemd/powos-cachefs-sync.service /usr/lib/systemd/system/
 COPY systemd/powos-installer.service /usr/lib/systemd/system/
 COPY systemd/powos-hwinfo.service /usr/lib/systemd/system/
-RUN systemctl enable powos-ramboot-init.service 2>/dev/null || true && \
-    systemctl enable powos-layer-sync.service 2>/dev/null || true && \
-    systemctl enable powos-cachefs-sync.service 2>/dev/null || true && \
-    systemctl enable powos-installer.service 2>/dev/null || true && \
-    systemctl enable powos-hwinfo.service 2>/dev/null || true
+# Boot-time init chain: powos-init writes /run/powos/environment, hardware
+# detection (Chameleon Boot) picks the profile, overlay loads sysexts,
+# hydrate runs once. These were previously copied only as loose files under
+# /usr/lib/powos and never enabled — so no hardware detection or sysext
+# loading ever ran on a real image.
+COPY systemd/powos-init.service /usr/lib/systemd/system/
+COPY systemd/powos-hardware.service /usr/lib/systemd/system/
+COPY systemd/powos-overlay.service /usr/lib/systemd/system/
+COPY systemd/powos-hydrate.service /usr/lib/systemd/system/
+# A failed enable must fail the build — no 2>/dev/null || true.
+RUN systemctl enable powos-ramboot-init.service powos-layer-sync.service \
+        powos-cachefs-sync.service powos-installer.service \
+        powos-hwinfo.service \
+        powos-init.service powos-hardware.service powos-overlay.service \
+        powos-hydrate.service
 
 # Rebuild initramfs with our dracut module
 # This embeds the RAM overlay setup into the boot process.

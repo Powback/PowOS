@@ -244,18 +244,16 @@ main() {
     # Step 2.5: Check for interrupted sync operations
     check_interrupted_sync
 
-    # Step 3: Export environment for other services
+    # Step 3: Export environment for other services (EnvironmentFile= in the
+    # powos-hardware/overlay/hydrate units). The directory must exist BEFORE
+    # the redirect: /run is a fresh tmpfs on real hardware, and under set -e a
+    # failed redirect kills this service — which powos-hardware.service and
+    # powos-overlay.service Require.
+    mkdir -p /run/powos
     {
         echo "POWOS_ROOT=$POWOS_ROOT"
         echo "POWOS_PERSISTENT=${POWOS_PERSISTENT:-}"
         echo "POWOS_NEEDS_HYDRATION=$(check_needs_hydration && echo 1 || echo 0)"
-    } > /run/powos/environment
-    mkdir -p /run/powos
-
-    # Also write to a systemd environment file
-    {
-        echo "POWOS_ROOT=$POWOS_ROOT"
-        echo "POWOS_PERSISTENT=${POWOS_PERSISTENT:-}"
     } > /run/powos/environment
 
     write_state "initialized"
