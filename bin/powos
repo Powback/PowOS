@@ -9,6 +9,11 @@ VERSION="0.3.0"
 LAYER_SYNC="/usr/lib/powos/ramfs/layer-sync.py"
 STATE_DIR="/run/powos"
 
+# Location of PowOS shell libraries. Installed image ships them in
+# /usr/lib/powos; fall back to the repo's lib/ for dev/Docker runs.
+POWOS_LIB="/usr/lib/powos"
+[[ -f "$POWOS_LIB/hardware-detect.sh" ]] || POWOS_LIB="$(cd "$(dirname "$0")/../lib" && pwd)"
+
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
@@ -76,6 +81,11 @@ Commands:
   install <pkg>       Install package to host (custom layer)
   install -c NAME <pkg>  Install package to container
   install -c NAME -e <pkg>  Install GUI app to container + export to host
+
+  install-system      Install PowOS to an internal disk (interactive)
+  install-system --alongside   Dual-boot: install into free space, keep Windows
+  install-system --whole-disk  Erase target disk (requires confirmation)
+  install-system --dry-run     Show the plan, change nothing
 
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build bootable PowOS ISO
@@ -2513,6 +2523,11 @@ case "${1:-}" in
     install|i)
         shift
         cmd_install "$@"
+        ;;
+    install-system|install-disk)
+        shift
+        source "$POWOS_LIB/install-system.sh"
+        cmd_install_system "$@"
         ;;
     build|b)
         shift

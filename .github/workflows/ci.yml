@@ -24,6 +24,9 @@ jobs:
       - name: Run Pinstall Tests
         run: bash test/tier1/test-pinstall.sh
 
+      - name: Run Installer Tests
+        run: bash test/tier1/test-install-system.sh
+
       - name: Run Data Integrity Tests
         run: |
           pip install psutil rich 2>/dev/null || true

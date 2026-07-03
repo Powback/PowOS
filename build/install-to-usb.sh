@@ -216,6 +216,89 @@ add_data_partition() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Add a boot-menu "Install PowOS" entry (Boot Loader Spec)
+#
+# The live image ships one BLS entry (loader/entries/*.conf) that GRUB shows
+# as "PowOS Live". We add a second entry that is a copy of it plus the kernel
+# arg `powos.install=1`. GRUB auto-lists BLS entries, so the boot menu then
+# offers BOTH:  "PowOS Live" (default)  and  "Install PowOS to disk".
+# powos-installer.service sees powos.install=1 and launches the installer.
+#
+# This is the supported extension point — we do NOT hand-edit grub.cfg.
+# TODO(hw): validate against the real image's boot partition layout.
+# ─────────────────────────────────────────────────────────────────
+add_install_boot_entry() {
+    local device="$1"
+
+    partprobe "$device" 2>/dev/null || true
+    sleep 1
+    log "Adding 'Install PowOS' boot menu entry..."
+
+    local mp entries_dir="" part
+    mp=$(mktemp -d)
+
+    # Find the partition that holds loader/entries (boot or ESP, depending on layout)
+    while read -r part; do
+        [[ -b "$part" ]] || continue
+        if mount "$part" "$mp" 2>/dev/null; then
+            if [[ -d "$mp/loader/entries" ]]; then
+                entries_dir="$mp/loader/entries"
+                break
+            elif [[ -d "$mp/boot/loader/entries" ]]; then
+                entries_dir="$mp/boot/loader/entries"
+                break
+            fi
+            umount "$mp" 2>/dev/null || true
+        fi
+    done < <(lsblk -ln -o PATH "$device" 2>/dev/null | tail -n +2)
+
+    if [[ -z "$entries_dir" ]]; then
+        log_warn "Could not locate BLS loader/entries on $device."
+        log_warn "Boot menu will still work, but the 'Install PowOS' entry was not added."
+        log_warn "You can still install after booting live:  sudo powos install-system"
+        umount "$mp" 2>/dev/null || true
+        rmdir "$mp" 2>/dev/null || true
+        return 0
+    fi
+
+    # Pick the first existing entry as the template (the live boot entry).
+    local template
+    template=$(find "$entries_dir" -maxdepth 1 -name '*.conf' ! -name '*install*' | head -1)
+    if [[ -z "$template" ]]; then
+        log_warn "No BLS entry template found — skipping install menu entry."
+        umount "$mp" 2>/dev/null || true
+        rmdir "$mp" 2>/dev/null || true
+        return 0
+    fi
+
+    local install_entry="${entries_dir}/powos-install.conf"
+    # Copy template; retitle; append the installer kernel arg to the options line.
+    awk '
+        /^title / { print "title Install PowOS to disk"; next }
+        /^options / { print $0 " powos.install=1"; next }
+        { print }
+    ' "$template" > "$install_entry"
+    # Ensure a title/options line existed; if not, append minimally.
+    grep -q '^title '   "$install_entry" || echo "title Install PowOS to disk" >> "$install_entry"
+    grep -q 'powos.install=1' "$install_entry" || echo "options powos.install=1" >> "$install_entry"
+
+    log_success "Added boot entry: 'Install PowOS to disk'"
+
+    # Make the menu actually visible (bootc images often hide it / 0s timeout).
+    local grubcfg
+    for grubcfg in "$mp/grub2/grubenv" "$mp/EFI"/*/grubenv "$mp/boot/grub2/grubenv"; do
+        [[ -f "$grubcfg" ]] || continue
+        if command -v grub2-editenv &>/dev/null; then
+            grub2-editenv "$grubcfg" set menu_auto_hide=0 2>/dev/null || true
+        fi
+    done
+
+    sync
+    umount "$mp" 2>/dev/null || true
+    rmdir "$mp" 2>/dev/null || true
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Setup persistent data structure on POWOS-DATA partition
 # ─────────────────────────────────────────────────────────────────
 setup_persistence() {
@@ -415,10 +498,12 @@ main() {
     if [[ "$setup_data_only" == "1" ]]; then
         log "Setup data partition only mode"
         add_data_partition "$device"
+        add_install_boot_entry "$device"
         setup_persistence "$device"
     else
         write_raw_image "$device" "$image"
         add_data_partition "$device"
+        add_install_boot_entry "$device"
         setup_persistence "$device"
     fi
 

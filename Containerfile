@@ -62,6 +62,9 @@ COPY lib/boot/ /usr/lib/powos/boot/
 COPY lib/hardware-detect.sh /usr/lib/powos/
 COPY lib/overlay-manager.sh /usr/lib/powos/
 COPY lib/dev-commands.sh /usr/lib/powos/
+COPY lib/mobile.sh /usr/lib/powos/
+COPY lib/backup.sh /usr/lib/powos/
+COPY lib/install-system.sh /usr/lib/powos/
 COPY lib/build-helpers.sh /var/lib/powos/lib/
 COPY bazzite/system_files/ /tmp/bazzite/system_files/
 COPY overlays/ /usr/lib/powos/overlays/
@@ -92,9 +95,11 @@ RUN chmod +x /usr/lib/dracut/modules.d/90powos-ramboot/*.sh
 COPY systemd/powos-ramboot-init.service /usr/lib/systemd/system/
 COPY systemd/powos-layer-sync.service /usr/lib/systemd/system/
 COPY systemd/powos-cachefs-sync.service /usr/lib/systemd/system/
+COPY systemd/powos-installer.service /usr/lib/systemd/system/
 RUN systemctl enable powos-ramboot-init.service 2>/dev/null || true && \
     systemctl enable powos-layer-sync.service 2>/dev/null || true && \
-    systemctl enable powos-cachefs-sync.service 2>/dev/null || true
+    systemctl enable powos-cachefs-sync.service 2>/dev/null || true && \
+    systemctl enable powos-installer.service 2>/dev/null || true
 
 # Rebuild initramfs with our dracut module
 # This embeds the RAM overlay setup into the boot process

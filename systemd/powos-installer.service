@@ -1,0 +1,25 @@
+[Unit]
+Description=PowOS Interactive Installer (boot-menu "Install PowOS" entry)
+Documentation=man:powos(8)
+# Only runs when the USB boot menu's "Install PowOS" entry was chosen, which
+# appends `powos.install=1` to the kernel command line. A normal "PowOS Live"
+# boot has no such arg, so this service stays inactive.
+ConditionKernelCommandLine=powos.install
+After=multi-user.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=idle
+# Take over tty1 so the installer has a real interactive console.
+ExecStart=/usr/bin/powos install-system --auto
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+# If the user quits the installer, drop back to a login rather than looping.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

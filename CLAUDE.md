@@ -192,6 +192,36 @@ powos install -c NAME PKG...      # Install to container NAME
 powos install -c NAME -e PKG...   # Install + export GUI apps to host
 ```
 
+### Install to Disk (dual-boot) — 🚧 New / needs hardware validation
+
+The USB is a **single live image with a boot menu**: "PowOS Live" (default,
+runs from RAM) and "Install PowOS to disk". Choosing Install boots live and
+launches an interactive installer — nothing is wiped without an explicit
+target + confirmation. Always runnable by hand from the live system:
+
+```bash
+sudo powos install-system                 # Interactive: pick disk + mode
+sudo powos install-system --dry-run       # Show the plan, change nothing
+sudo powos install-system --alongside     # Dual-boot: install into free space, keep Windows
+sudo powos install-system --whole-disk    # Erase target disk (must type disk model to confirm)
+sudo powos install-system --shared-gb 200 # Also create a shared NTFS data partition
+```
+
+**Boot-menu mechanism:** the "Install PowOS" entry is a Boot Loader Spec entry
+(`loader/entries/powos-install.conf`) added by `install-to-usb.sh` — a copy of
+the live entry plus kernel arg `powos.install=1`. `powos-installer.service`
+(`ConditionKernelCommandLine=powos.install`) launches the installer on tty1.
+
+**Dual-boot notes automated by the installer:** sets RTC to local time (matches
+Windows), reminds to disable Windows Fast Startup/hibernation, recommends the
+UEFI boot menu (atomic Bazzite's GRUB won't auto-list Windows), and advises
+keeping Steam Proton prefixes on native FS while sharing only assets on NTFS.
+
+> ⚠️ **Status:** whole-disk uses `bootc install to-disk`; the dual-boot
+> "alongside" path (partition free space + reuse Windows ESP via
+> `bootc install to-filesystem`) is **EXPERIMENTAL** — see `TODO(hw)` markers
+> in `lib/install-system.sh`. Validate on a VM / spare disk before trusting it.
+
 ### Container Management
 ```bash
 powos containers list             # List all containers
