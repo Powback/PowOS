@@ -216,26 +216,28 @@ do_windows() {
     powos_supports windows || { not_yet "windows"; return 0; }
     local note=""
     if [[ "$(boot_context)" == "installed" ]]; then
-        note="\n\nOn this installed machine the partitions are carved from free space on this machine's disk — if the install reserved none, the create command will say so (expected on older installs)."
+        note="\n\nOn this installed machine the image file lives on this machine's POWOS-GAMES partition — if there's no games partition yet, 'powos games create' makes one first (expected on older installs)."
     fi
     local sub=""
     if [[ $HAS_GUI -eq 1 ]]; then
         sub="$(kdialog --title "$TITLE" --menu \
-            "Bare-metal Windows on PowOS-managed storage (EXPERIMENTAL).\n\nWindows gets its own partitions — it never touches PowOS or your internal disks. You supply your own Windows ISO and license.\n\nNot yet hardware-validated: expect rough edges.${note}" \
+            "Bare-metal Windows on PowOS-managed storage (EXPERIMENTAL).\n\nWindows installs as ONE file (PowOS-Windows/windows.vhdx) on the shared POWOS-GAMES partition — NO dedicated Windows partitions, and it never touches your internal disks. It bare-metal boots via native VHD boot, and the same file also runs as a KVM guest. You supply your own Windows ISO and license.\n\nNot yet hardware-validated: expect rough edges.${note}" \
             status "Show Windows setup status" \
-            create "Create the Windows partitions (sudo powos windows create)")" || return 0
+            create "Create the Windows image file (sudo powos windows create)")" || return 0
     else
         echo
         echo -e "${BOLD}Bare-metal Windows (EXPERIMENTAL)${NC}"
-        echo "Windows gets its own partitions on PowOS-managed storage — it never"
-        echo "touches PowOS or your internal disks. You supply your own ISO/license."
+        echo "Windows installs as ONE file (PowOS-Windows/windows.vhdx) on the shared"
+        echo "POWOS-GAMES partition — NO dedicated Windows partitions, and it never"
+        echo "touches your internal disks. It bare-metal boots via native VHD boot, and"
+        echo "the same file also runs as a KVM guest. You supply your own ISO/license."
         echo "Not yet hardware-validated: expect rough edges."
         if [[ -n "$note" ]]; then
             echo -e "$note"
         fi
         echo
         echo "  s) Show Windows setup status"
-        echo "  c) Create the Windows partitions"
+        echo "  c) Create the Windows image file"
         local answer
         read -r -p "Choose [s/c, Enter to go back]: " answer || return 0
         case "$answer" in

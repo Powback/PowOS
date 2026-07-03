@@ -44,8 +44,12 @@ ISV_TARGET=""          # /dev/sdX chosen by user or flag
 # DEFAULT — games partition + Windows space sized from the disk, so the
 # machine never needs a reformat to add them later. Explicit GB overrides,
 # 0 disables. (Same policy as build/install-to-usb.sh resolve_reservations.)
-ISV_SHARED_GB="auto"   # shared NTFS games partition (label POWOS-GAMES), GB
-ISV_WINDOWS_GB="auto"  # unallocated tail for a future bare-metal Windows
+ISV_SHARED_GB="auto"   # shared NTFS games partition (label POWOS-GAMES), GB.
+                       # The default 'vhd' Windows backend also keeps its image
+                       # file (<POWOS-GAMES>/PowOS-Windows/windows.vhdx) here.
+ISV_WINDOWS_GB="auto"  # unallocated tail (GB) reserved for the 'partition'
+                       # Windows backend (dedicated WIN-ESP + POWOS-WIN carved
+                       # from it). The default 'vhd' backend ignores this tail.
 ISV_SHARED_AUTO=0      # 1 = value came from "auto" (may shrink to fit)
 ISV_WINDOWS_AUTO=0     # 1 = value came from "auto" (may shrink to fit)
 ISV_FS="btrfs"         # root filesystem
@@ -372,7 +376,7 @@ isv_resolve_reservations() {
     fi
     if [[ "$ISV_WINDOWS_GB" == "auto" ]]; then
         ISV_WINDOWS_GB=$(isv_auto_reserve_gb "$disk_mib" windows)
-        isv_log "Auto windows reservation: ${ISV_WINDOWS_GB}GB (--windows-gb N overrides, 0 disables)"
+        isv_log "Auto Windows tail: ${ISV_WINDOWS_GB}GB unallocated for the 'partition' backend (--windows-gb N overrides, 0 disables)"
     fi
 }
 
@@ -426,8 +430,8 @@ isv_show_plan() {
     echo -e "  Target disk : ${BOLD}$ISV_TARGET${NC}"
     echo -e "  Mode        : ${BOLD}$ISV_MODE${NC}"
     echo -e "  Root FS     : $ISV_FS"
-    echo -e "  Games NTFS  : $([[ "${ISV_SHARED_GB:-0}" == "0" ]] && echo none || echo "${ISV_SHARED_GB}GB (label POWOS-GAMES — visible to Windows, by design)")"
-    echo -e "  Windows resv: $([[ "${ISV_WINDOWS_GB:-0}" == "0" ]] && echo none || echo "${ISV_WINDOWS_GB}GB unallocated (future 'powos windows create')")"
+    echo -e "  Games NTFS  : $([[ "${ISV_SHARED_GB:-0}" == "0" ]] && echo none || echo "${ISV_SHARED_GB}GB (label POWOS-GAMES — visible to Windows; also holds the 'vhd' backend's windows.vhdx)")"
+    echo -e "  Windows tail: $([[ "${ISV_WINDOWS_GB:-0}" == "0" ]] && echo none || echo "${ISV_WINDOWS_GB}GB unallocated (for the 'partition' backend: WIN-ESP + POWOS-WIN)")"
     echo
     if [[ "$ISV_MODE" == "whole-disk" ]]; then
         echo -e "  ${RED}${BOLD}THIS WILL ERASE ALL DATA ON $ISV_TARGET.${NC}"
@@ -450,7 +454,8 @@ isv_show_plan() {
 isv_install_whole_disk() {
     isv_step "Installing (whole disk) to $ISV_TARGET"
 
-    # Tail reservations (games partition + unallocated Windows space).
+    # Tail reservations (POWOS-GAMES partition + an unallocated Windows tail for
+    # the 'partition' backend's WIN-ESP + POWOS-WIN; the 'vhd' backend ignores it).
     # `bootc install to-disk` claims the ENTIRE disk unless it can limit the
     # root partition, so probe its help for --root-size — never assume.
     local shared_gb="${ISV_SHARED_GB:-0}" windows_gb="${ISV_WINDOWS_GB:-0}"
@@ -506,7 +511,7 @@ isv_install_whole_disk() {
                 # bootc's --root-size takes a human-readable size (e.g. 348G).
                 size_args=(--root-size "${root_gib}G")
                 isv_log "Root limited to ${root_gib}G — reserving ${shared_gb}GB POWOS-GAMES"
-                isv_log "+ ${windows_gb}GB unallocated (Windows) at the disk tail."
+                isv_log "+ ${windows_gb}GB unallocated (Windows 'partition' backend) at the disk tail."
             fi
         else
             isv_warn "This bootc has no --root-size: it claims the ENTIRE disk, so the"
@@ -535,15 +540,15 @@ isv_install_whole_disk() {
         # partition can always be added later with `powos games create`.
         isv_whole_disk_tail_partitions "$shared_gb" "$windows_gb" || true
     elif (( windows_gb > 0 )); then
-        isv_ok "${windows_gb}GB left unallocated at the disk tail for Windows."
-        isv_log "Carve it later from the installed PowOS:  sudo powos windows create"
+        isv_ok "${windows_gb}GB left unallocated at the disk tail for the Windows 'partition' backend."
+        isv_log "The 'vhd' backend needs no tail; for 'partition' carve it later:  sudo powos windows create"
     fi
 }
 
 # After a size-limited whole-disk install: create POWOS-GAMES in the tail
 # that --root-size freed. Bounds are explicit MiB positions from the free
-# block bootc left — NEVER 100%: when a Windows reservation exists that tail
-# must stay UNALLOCATED for `powos windows create`.
+# block bootc left — NEVER 100%: when a Windows reservation exists, that tail
+# stays UNALLOCATED for the 'partition' backend (WIN-ESP + POWOS-WIN).
 isv_whole_disk_tail_partitions() {
     local shared_gb="$1" windows_gb="$2"
     isv_step "Creating the games partition in the reserved tail"
@@ -573,8 +578,8 @@ isv_whole_disk_tail_partitions() {
     isv_create_shared_partition "$ISV_TARGET" "${fb_start}MiB" "${games_end}MiB" "$expect_mib"
 
     if (( windows_gb > 0 )); then
-        isv_ok "${windows_gb}GB left unallocated at the disk tail for Windows."
-        isv_log "Carve it later from the installed PowOS:  sudo powos windows create"
+        isv_ok "${windows_gb}GB left unallocated at the disk tail for the Windows 'partition' backend."
+        isv_log "The 'vhd' backend needs no tail; for 'partition' carve it later:  sudo powos windows create"
     fi
 }
 
@@ -606,9 +611,12 @@ isv_install_alongside() {
     fi
 
     # Reservations at the tail of the FREE BLOCK (never the disk's tail):
-    #   [ PowOS root | POWOS-GAMES | unallocated Windows space ]
-    # Auto reservations SHRINK to fit (windows first, then games — an install
-    # must never fail over a default); explicit flags that don't fit error.
+    #   [ PowOS root | POWOS-GAMES | unallocated Windows tail ]
+    # The Windows tail stays UNALLOCATED for the 'partition' backend (WIN-ESP +
+    # POWOS-WIN carved from it); the default 'vhd' backend ignores it and keeps
+    # windows.vhdx on POWOS-GAMES. Auto reservations SHRINK to fit (windows
+    # first, then games — an install must never fail over a default); explicit
+    # flags that don't fit error.
     local sh_gb="${ISV_SHARED_GB:-0}" win_gb="${ISV_WINDOWS_GB:-0}"
     [[ "$sh_gb"  =~ ^[0-9]+$ ]] || sh_gb=0
     [[ "$win_gb" =~ ^[0-9]+$ ]] || win_gb=0
@@ -679,14 +687,14 @@ isv_install_alongside() {
     isv_log "New root partition: $root"
 
     # Create the games NTFS partition in the reserved tail (before formatting
-    # root), bounded INSIDE the free block — the Windows reservation (if any)
-    # stays unallocated after it.
+    # root), bounded INSIDE the free block — the Windows tail (if any) stays
+    # unallocated after it for the 'partition' backend (WIN-ESP + POWOS-WIN).
     if [[ $shared_mib -gt 0 ]]; then
         isv_create_shared_partition "$ISV_TARGET" "${root_end}MiB" "${games_end}MiB" "$shared_mib"
     fi
     if (( windows_mib > 0 )); then
-        isv_ok "${windows_mib}MiB left unallocated inside the free block for Windows."
-        isv_log "Carve it later from the installed PowOS:  sudo powos windows create"
+        isv_ok "${windows_mib}MiB left unallocated inside the free block for the Windows 'partition' backend."
+        isv_log "The 'vhd' backend needs no tail; for 'partition' carve it later:  sudo powos windows create"
     fi
 
     # Format root, mount it + the shared ESP, hand off to bootc.
@@ -954,10 +962,14 @@ Options:
   --whole-disk         Erase the whole target disk (requires confirmation)
   --disk /dev/sdX      Preselect target disk (still shown for confirmation)
   --shared-gb N|auto   Shared NTFS games partition (label POWOS-GAMES),
-                       visible to Windows — managed by 'powos games'.
+                       visible to Windows — managed by 'powos games'. The
+                       default 'vhd' Windows backend also keeps its image
+                       file (windows.vhdx) here.
                        Default: auto (sized from the disk; 0 disables)
-  --windows-gb N|auto  Reserve N GB unallocated at the disk tail for a future
-                       bare-metal Windows ('powos windows create').
+  --windows-gb N|auto  Unallocated tail (GB) reserved for the 'partition'
+                       Windows backend (dedicated WIN-ESP + POWOS-WIN carved
+                       from it via 'powos windows create'). The default 'vhd'
+                       backend ignores this tail.
                        Default: auto (sized from the disk; 0 disables)
   --fs btrfs|ext4      Root filesystem (default: btrfs)
   --dry-run            Show every action but change NOTHING on disk

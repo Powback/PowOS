@@ -276,20 +276,30 @@ both OSes.
 
 ### Bare-Metal Windows on USB (powos windows) — 🚧 EXPERIMENTAL, needs hardware validation
 
-Full design: `docs/WINDOWS.md`. Windows lives in its own partitions (WIN-ESP +
-POWOS-WIN) on a PowOS-owned disk; the user supplies their own ISO + license.
+Full design: `docs/WINDOWS.md`. Windows lives in ONE file
+(`<POWOS-GAMES>/PowOS-Windows/windows.vhdx`, thin/dynamic) — NO real partitions
+for Windows, ever. It bare-metal boots via Windows native VHD boot (bootmgr on
+the SHARED PowOS ESP, backed up before install), and the same file also runs as
+a KVM guest. The user supplies their own ISO + license.
 
 ```bash
-powos windows status              # partition, hibernation state, boot entries, guards
-powos windows create [--disk D]   # carve WIN-ESP + POWOS-WIN (plan + confirm) 🚧
-powos windows install --iso PATH  # ISO-in-VM install onto the real partitions 🚧
-powos windows finalize            # boot entries + post-install wiring
+powos windows status              # image, hibernation state, boot entry, snapshots
+powos windows create [--size N] [--fixed-vhd]   # create the thin image file (no partitioning)
+powos windows install --iso PATH  # Windows Setup in QEMU into the file (real ESP rides along) 🚧
+powos windows finalize            # raw→VHDX convert + verify ESP boot files + host firmware entry
 powos windows                     # guarded switch: flush + stop layer-sync → guards →
-                                  #   BootNext → hibernate (--reboot fallback until
-                                  #   hibernation ships) 🚧
-powos windows snapshot|snapshots|rollback   # ntfsclone-based, refuses dirty/hibernated
-powos windows vm                  # stub until hardware validation
+                                  #   unmount POWOS-GAMES → BootNext → hibernate PowOS
+                                  #   (Windows COLD-BOOTS; --reboot fallback until hibernation ships) 🚧
+powos windows snapshot|snapshots|rollback   # whole-file zstd copy on POWOS-DATA (refuses if image open)
+powos windows vm                  # boot the SAME image as a KVM guest (VM-hibernation OK) 🚧
 ```
+
+**Metal Windows always COLD-BOOTS** — `winresume` can't read a `hiberfil.sys`
+inside a VHD, so bare-metal session resume is impossible (accepted: you quit the
+game to switch). PowOS's own session survives via PowOS-side S4 hibernation.
+Windows session resume exists only in `vm` mode. Costs of native-VHD boot: a
+dynamic image expands toward its full `--size` on first metal boot, and in-place
+feature updates are blocked (`--fixed-vhd` is the escape hatch; see WINDOWS.md).
 
 > 🚧 **Status:** the switch and `install` are EXPERIMENTAL — implemented, not
 > yet hardware-validated. The hibernation half is blocked on

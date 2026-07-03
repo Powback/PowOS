@@ -114,11 +114,16 @@ sessions — precisely the sessions with no live state worth resuming.** PowOS's
 *own* session always survives the switch via PowOS-side S4 hibernation
 (unaffected by any of the above — it's Linux writing its own RAM to swap).
 
-Net: zero partitions sacrificed, zero pre-committed space (thin VHDX grows on
-demand), Windows is one snapshottable/deletable file, seamless mode needs no
-reboot, and the metal path costs 20 seconds for anti-cheat only. The partition
-design's sole advantage — bare-metal hibernation — would have protected exactly
-the sessions that least need it.
+Net: zero partitions sacrificed, Windows is one snapshottable/deletable file,
+seamless mode needs no reboot, and the metal path costs 20 seconds for
+anti-cheat only. Two honest costs come with it: a *dynamic* VHDX is only thin
+under the VM — the first bare-metal boot expands it toward its full max size
+(Microsoft recommends fixed VHDs for native boot), so pre-committed space is
+"most of it, eventually" rather than zero; and native-VHD-boot installs can't
+take in-place feature updates (a feature-version jump means reinstalling into a
+fresh image). Both are the price of never partitioning, and both are cheap
+against the alternative. The partition design's sole advantage — bare-metal
+hibernation — would have protected exactly the sessions that least need it.
 
 ## If this ever changes
 

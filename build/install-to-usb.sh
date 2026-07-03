@@ -19,10 +19,13 @@ RAW_PATH="${POWOS_ROOT}/build/output/powos.raw"
 
 # Tail-of-disk reservations (GB). POWOS-DATA takes everything EXCEPT these;
 # see docs/WINDOWS.md.
-#   WINDOWS_GB: left UNALLOCATED — `powos windows create` later carves
-#               WIN-ESP + POWOS-WIN out of it for bare-metal Windows.
 #   GAMES_GB:   POWOS-GAMES NTFS partition, deliberately visible to Windows
-#               (shared game assets between PowOS and the Windows install).
+#               (shared game assets; the default 'vhd' Windows backend also
+#               stores its windows.vhdx image FILE here).
+#   WINDOWS_GB: left UNALLOCATED at the disk tail. The 'partition' Windows
+#               backend (WINDOWS_BACKEND=partition) carves a dedicated
+#               WIN-ESP + POWOS-WIN from it; the default 'vhd' backend does not
+#               use it (its image lives on POWOS-GAMES).
 # DEFAULT IS "auto": reservations are ON by default, sized from the disk —
 # the whole point is that a fresh burn is future-proof and NEVER needs a
 # reformat to add games/Windows later. Override with explicit GB, 0 disables.
@@ -44,7 +47,7 @@ resolve_reservations() {
         if   (( disk_mib >= 3072*1024 )); then WINDOWS_GB=256
         elif (( disk_mib >= 1024*1024 )); then WINDOWS_GB=128
         else WINDOWS_GB=0; fi
-        log "Auto windows reservation: ${WINDOWS_GB}GB (override with --windows-gb N, 0 disables)"
+        log "Auto Windows reservation: ${WINDOWS_GB}GB unallocated (for the 'partition' backend; override with --windows-gb N, 0 disables)"
     fi
 }
 
@@ -264,17 +267,19 @@ add_data_partition() {
         log_warn "Could not read the disk size — skipping games/windows reservations."
         WINDOWS_GB=0; GAMES_GB=0
     fi
+    # Reserve the tail: POWOS-GAMES (games) + an unallocated region the
+    # 'partition' Windows backend can later carve WIN-ESP + POWOS-WIN from.
     local reserve_mib=$(( (WINDOWS_GB + GAMES_GB) * 1024 ))
     if (( reserve_mib > 0 )); then
         local data_end_mib=$(( disk_mib - reserve_mib ))
         # DATA must keep a sane minimum (layers + /home) — 32GiB floor.
         if (( data_end_mib < ${last_end%.*} + 32768 )); then
-            log_error "Reservation too large: --windows-gb ${WINDOWS_GB} + --games-gb ${GAMES_GB}"
+            log_error "Reservation too large: --games-gb ${GAMES_GB} + --windows-gb ${WINDOWS_GB}"
             log_error "leaves less than 32GiB for POWOS-DATA on this ${disk_mib}MiB disk."
             exit 1
         fi
         data_end="${data_end_mib}MiB"
-        log "Reserving ${reserve_mib}MiB at the end of the disk (windows=${WINDOWS_GB}GB games=${GAMES_GB}GB)"
+        log "Reserving ${reserve_mib}MiB at the disk tail (games=${GAMES_GB}GB POWOS-GAMES + windows=${WINDOWS_GB}GB unallocated)"
     fi
 
     log "Adding POWOS-DATA partition (${last_end}MiB → ${data_end})..."
@@ -331,8 +336,9 @@ add_data_partition() {
         add_games_partition "$device" "$data_end"
     fi
     if (( WINDOWS_GB > 0 )); then
-        log_success "${WINDOWS_GB}GB left unallocated at the disk tail for Windows."
-        log "Carve it later from a booted PowOS:  sudo powos windows create"
+        log_success "${WINDOWS_GB}GB left unallocated at the disk tail for the 'partition' Windows backend."
+        log "The default 'vhd' backend ignores it (image goes on POWOS-GAMES). For partitions:"
+        log "  sudo powos windows create   (with WINDOWS_BACKEND=partition)"
     fi
 }
 
@@ -365,7 +371,8 @@ add_games_partition() {
     local device="$1" start="$2"
     local games_end_spec
     if (( WINDOWS_GB > 0 )); then
-        # Leave the final WINDOWS_GB unallocated after the games partition.
+        # Leave the final WINDOWS_GB unallocated after POWOS-GAMES — the
+        # 'partition' Windows backend carves WIN-ESP + POWOS-WIN from it.
         local disk_mib
         disk_mib=$(parted "$device" unit MiB print 2>/dev/null \
             | awk -F': ' '/^Disk \//{gsub("MiB","",$2); print int($2); exit}')
@@ -791,12 +798,14 @@ usage() {
     echo "  --image PATH        Path to powos.raw image (default: build/output/powos.raw)"
     echo "  --variants          Add multi-variant base rootfs + boot entries onto an"
     echo "                      already-written USB (needs ./build/build-iso.sh variants)"
-    echo "  --games-gb N        Shared NTFS partition (POWOS-GAMES), visible to Windows."
-    echo "                      DEFAULT: auto-sized from the disk (512GB on 3TB+ disks,"
+    echo "  --games-gb N        Shared NTFS partition (POWOS-GAMES), visible to Windows"
+    echo "                      (shared assets; the default 'vhd' Windows backend also"
+    echo "                      stores its image here). DEFAULT: auto (512GB on 3TB+,"
     echo "                      scaling down; 0 on tiny disks). Pass 0 to disable."
-    echo "  --windows-gb N      Unallocated tail for a future bare-metal Windows"
-    echo "                      ('powos windows create', docs/WINDOWS.md)."
-    echo "                      DEFAULT: auto-sized (256GB on 3TB+). Pass 0 to disable."
+    echo "  --windows-gb N      Unallocated tail for the 'partition' Windows backend"
+    echo "                      (dedicated WIN-ESP + POWOS-WIN; docs/WINDOWS.md). The"
+    echo "                      default 'vhd' backend ignores it. DEFAULT: auto (256GB"
+    echo "                      on 3TB+). Pass 0 to disable."
     echo ""
     echo "Available drives:"
     lsblk -d -o NAME,SIZE,MODEL,TRAN,HOTPLUG 2>/dev/null | grep -v "^loop" \

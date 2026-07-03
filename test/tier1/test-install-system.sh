@@ -518,7 +518,8 @@ check "GPT type 0700 in the plan"             'echo "$out" | grep -q "0700"'
 check "tail handed to powos windows create"   'echo "$out" | grep -q "powos windows create"'
 check "dry-run: mocked bootc never executed"  '[[ ! -s "$TMP_ISV/bootc.log" ]]'
 
-# Windows-only reservation: root shrinks, nothing formatted, tail stays free.
+# Windows-only reservation: root shrinks, nothing formatted, tail stays free
+# (unallocated for the 'partition' backend; the 'vhd' backend ignores it).
 reset_globals; ISV_DRY_RUN=1; ISV_TARGET=/dev/sdz; ISV_SHARED_GB=0; ISV_WINDOWS_GB=50
 out=$(isv_install_whole_disk 2>&1); rc=$?
 check "windows-only: --root-size 448G"        'echo "$out" | grep -q -- "--root-size 448G"'
