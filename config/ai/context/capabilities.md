@@ -48,17 +48,25 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   be closed), drops GAMES-README.txt for the Windows side. One installed game
   serves both OSes. `resize` is a stub. ⚠️ implemented CLI, hardware validation
   pending.
-- `powos windows {status|create [--disk D]|install --iso PATH|finalize|snapshot|
-  snapshots|rollback}` — Windows in its own WIN-ESP + POWOS-WIN partitions on a
-  PowOS-owned disk; user supplies ISO + license. Bare `powos windows` = the
-  guarded switch: flush + stop layer-sync → guards → BootNext → hibernate
-  (`--reboot` fallback until hibernation ships). `vm` is a stub until hardware
-  validation. 🚧 implemented CLI, hardware validation pending — do NOT present
-  the switch or install as proven; see docs/WINDOWS.md.
+- `powos windows {status|create [--size N] [--fixed-vhd]|install --iso PATH|
+  finalize|snapshot|snapshots|rollback|vm}` — Windows lives in ONE FILE
+  (`<POWOS-GAMES>/PowOS-Windows/windows.vhdx`, thin/dynamic), NO real partitions
+  for Windows ever; user supplies ISO + license. Bare-metal boots via native VHD
+  boot (bootmgr on the SHARED PowOS ESP, backed up before install); the same file
+  also boots as a KVM guest (`vm`, implemented — VM-hibernation is the supported
+  resume path). Bare `powos windows` = the guarded switch: flush + stop layer-sync
+  → guards → unmount POWOS-GAMES → BootNext → hibernate PowOS (`--reboot` fallback
+  until hibernation ships). **Metal Windows always COLD-BOOTS** (winresume can't
+  read a hiberfil inside a VHD — no bare-metal session resume; PowOS's own session
+  survives via S4). Snapshots = whole-file zstd copy on POWOS-DATA (NOT ntfsclone).
+  Native-VHD costs: dynamic image expands toward full --size on first metal boot,
+  and in-place feature updates are blocked. 🚧 implemented CLI, hardware validation
+  pending — do NOT present the switch or install as proven; see docs/WINDOWS.md.
 - Machine-local model: the USB is also an installer and gets unplugged after
-  installing to a desktop/laptop/Steam Deck SSD — so games/windows partitions are
-  per-machine, created on that machine's own PowOS-owned disk. Installed systems
-  receive these commands via normal bootc updates and run create once (no reflash).
+  installing to a desktop/laptop/Steam Deck SSD — so the POWOS-GAMES partition (and
+  the windows.vhdx file on it) is per-machine, created on that machine's own
+  PowOS-owned disk. Installed systems receive these commands via normal bootc
+  updates and run create once (no reflash).
 - Safety: nothing touches a disk except a user-run command against a device the
   user names, behind plan display + confirmations + `--dry-run`.
 
@@ -98,8 +106,22 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - Sync conflicts `powos sync {status|resolve|--keep-ram|--keep-usb|--merge}` — detection ✅, `--merge` basic ⚠️.
 - CacheFS (lazy user-data FUSE) — ❌ incomplete: write-back to USB NOT implemented (written data is lost); must remain disabled (`POWOS_CACHEFS_ENABLED`).
 - Containers `powos containers …` (Podman/Distrobox), install/export GUI apps. ✅
-- Dev `powos dev {new|fork|build|enable}` incl. `--ai` project generation. ✅
-- Overlays (systemd-sysext) via `powos dev` / `overlay-manager.sh`. ✅
+- Dev / modding — TWO paths, pick by whether you want it committed:
+  - **Runtime, per-machine** (`powos dev`): `new`/`fork`/`build`/`enable`/`disable`/
+    `update`, `--ai` gen, plus native app override — `override <app>` seeds a
+    COMPLETE sysext shadow of a base app (edit → `enable` auto-builds → `disable`
+    restores base), `overrides` lists them, `override --diff <n>` shows what changed.
+    Projects live in /var/lib/powos/projects — **NOT committable**. Override of a
+    base app is ⚠️ untested overlay-on-overlay (TODO(hw)).
+  - **Committable, baked into every build** (`sources/<name>/`): edit upstream
+    source, save a `.patch` under `sources/<name>/patches/<app>/` — upstream is
+    gitignored, patches are committed (Fedora-style); the image build applies them.
+    `powos dev patch <name> [desc]` generates the patch from a fork straight into
+    `sources/…` (KDE → `sources/kde/patches/<app>/`). **Use THIS, not `dev`, for
+    permanent/version-controlled mods** (e.g. patch Dolphin).
+  - KDE start menu (Kickoff) is Plasma, not a standalone app → config/widget, not override.
+- Overlays (systemd-sysext) via `powos dev` / `overlay-manager.sh`; extension-release
+  uses `ID=_any` so it merges on any host (Bazzite included). ✅
 - Hibernation / session-resume (hop to Windows for anti-cheat games, resume the
   Linux session on return) — ❌ SPEC ONLY, not built, blocked on persistence
   validation. See docs/HIBERNATION.md. `powos boot windows` (UEFI BootNext,
