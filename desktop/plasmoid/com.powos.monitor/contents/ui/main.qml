@@ -42,6 +42,10 @@ PlasmoidItem {
     property real prevDrS: -1;  property real prevDwS: -1
     property double prevDiskMs: 0
 
+    // Top offenders (10s poll): [{name,val}] each
+    property var topCpu: [];  property var topMem: [];  property var topIo: []
+    property var topNet: []   // by connection count (bandwidth needs root)
+
     // 7 fixed lines: cpu-stat | mem | net | gpu-csv | Tctl | freq | load1
     readonly property string fastCmd:
         "head -1 /proc/stat; " +
@@ -52,6 +56,23 @@ PlasmoidItem {
         "awk '/^cpu MHz/{s+=$4; n++} END{if(n) printf \"%.2f\\n\", s/n/1000; else print 0}' /proc/cpuinfo; " +
         "cut -d' ' -f1 /proc/loadavg; " +
         "awk '$3 ~ /^(nvme[0-9]+n[0-9]+|sd[a-z]+)$/ {r+=$6; w+=$10} END{print r, w}' /proc/diskstats"
+    // Top offenders per resource. Disk sampler uses grep -s (gawk fatals on
+    // unreadable/vanished /proc files); per-process io = own processes only.
+    readonly property string mediumCmd:
+        "ps -eo comm,%cpu --sort=-%cpu --no-headers | head -3; " +
+        "echo __M__; " +
+        "ps -eo comm,%mem --sort=-%mem --no-headers | head -3; " +
+        "echo __D__; " +
+        "T1=$(mktemp); T2=$(mktemp); " +
+        "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T1; " +
+        "sleep 1; " +
+        "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T2; " +
+        "awk 'NR==FNR{a[$1]=$2; next} ($1 in a) && ($2>a[$1]) {d=$2-a[$1]; split($1,p,\"/\"); pid=p[3]; cf=\"/proc/\"pid\"/comm\"; c=\"?\"; if((getline c < cf)>0) close(cf); print d, c}' $T1 $T2 | sort -rn | head -3 | awk '{printf \"%s %.2f\\n\", $2, $1/1048576}'; " +
+        "rm -f $T1 $T2; " +
+        // Per-process net BANDWIDTH needs root (nethogs); unprivileged proxy is
+        // socket ownership — who's actively talking, by connection count.
+        "echo __N__; " +
+        "ss -tunp 2>/dev/null | grep -oP 'users:\\(\\(\"\\K[^\"]+' | sort | uniq -c | sort -rn | head -3 | awk '{print $2, $1}'"
 
     function pushHist(arr, v) { var a = arr.slice(); a.push(v); if (a.length > maxSamples) a.shift(); return a }
 
@@ -61,11 +82,35 @@ PlasmoidItem {
         connectedSources: []
         onNewData: function(source, data) {
             disconnectSource(source)
-            root.parseFast(data.stdout || "")
+            if (source === root.mediumCmd) root.parseMedium(data.stdout || "")
+            else root.parseFast(data.stdout || "")
         }
     }
     Timer { interval: 3000; running: true; repeat: true; triggeredOnStart: true
             onTriggered: exec.connectSource(root.fastCmd) }
+    Timer { interval: 10000; running: true; repeat: true; triggeredOnStart: true
+            onTriggered: exec.connectSource(root.mediumCmd) }
+
+    function parseOffenders(txt, unit) {
+        var out = []
+        txt.trim().split("\n").forEach(function(ln) {
+            var f = ln.trim().split(/\s+/)
+            if (f.length >= 2) out.push({ name: f.slice(0, f.length - 1).join(" "),
+                                          val: (parseFloat(f[f.length - 1]) || 0).toFixed(1) + unit })
+        })
+        return out
+    }
+    function parseMedium(out) {
+        var seg = out.split("__M__")
+        topCpu = parseOffenders(seg[0], "%")
+        if (seg.length < 2) return
+        var rest = seg[1].split("__D__")
+        topMem = parseOffenders(rest[0], "%")
+        if (rest.length < 2) return
+        var tail = rest[1].split("__N__")
+        topIo = parseOffenders(tail[0], " MB/s")
+        topNet = tail.length > 1 ? parseOffenders(tail[1], " conns") : []
+    }
 
     // Charts repaint themselves via onSeriesChanged — never reference chart ids
     // from here (fullRepresentation is a separate component scope).
@@ -188,6 +233,15 @@ PlasmoidItem {
         Item { Layout.fillWidth: true }
         PC3.Label { id: r; opacity: 0.7; font.pointSize: Kirigami.Theme.smallFont.pointSize }
     }
+    // one-line "worst offenders" strip under a graph: "name val · name val · …"
+    component Offenders: PC3.Label {
+        property var list: []
+        visible: list.length > 0
+        text: "› " + list.map(function(p){ return p.name + " " + p.val }).join("  ·  ")
+        opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize
+        elide: Text.ElideRight
+        Layout.fillWidth: true
+    }
 
     fullRepresentation: Item {
         Layout.preferredWidth: Kirigami.Units.gridUnit * 18
@@ -221,14 +275,18 @@ PlasmoidItem {
                 value: "load " + root.load1.toFixed(2) + (root.curCpuTemp > 0 ? " · " + root.curCpuTemp.toFixed(0) + "°C" : "")
             }
             Spark { series: root.histCpu; maxValue: 100; lineColor: Kirigami.Theme.textColor }
+            Offenders { list: root.topCpu }
             GraphHeader { label: "RAM " + root.curRam.toFixed(1) + " GiB"; value: root.ramTotal > 0 ? "of " + root.ramTotal.toFixed(0) + " GiB" : "" }
             Spark { series: root.histRam; maxValue: root.ramTotal > 0 ? root.ramTotal : 1; lineColor: Kirigami.Theme.positiveTextColor }
+            Offenders { list: root.topMem }
             GraphHeader { label: "NET ↓ " + fmtRate(root.curRx); value: "↑ " + fmtRate(root.curTx) }
             Spark { series: root.histRx; series2: root.histTx; maxValue: 0
                     lineColor: Kirigami.Theme.highlightColor; lineColor2: Kirigami.Theme.neutralTextColor }
+            Offenders { list: root.topNet }
             GraphHeader { label: "DISK r " + fmtRate(root.curDr); value: "w " + fmtRate(root.curDw) }
             Spark { series: root.histDr; series2: root.histDw; maxValue: 0
                     lineColor: Kirigami.Theme.positiveTextColor; lineColor2: Kirigami.Theme.negativeTextColor }
+            Offenders { list: root.topIo }
             Item { Layout.fillHeight: true }
         }
     }
