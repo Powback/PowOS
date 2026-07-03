@@ -116,6 +116,10 @@ COPY lib/cachefs/ /usr/lib/powos/cachefs/
 COPY lib/ai/ /usr/lib/powos/ai/
 COPY config/ai/ /etc/powos/ai/
 
+# Desktop widgets (KDE Plasma 6 plasmoids) — e.g. PowOS Overview panel,
+# which renders `powos overview --json` + `powos services --json` on the desktop.
+COPY desktop/plasmoid/ /usr/share/plasma/plasmoids/
+
 # Install dracut module for full RAM boot
 # This allows the entire OS to run from RAM, USB can be unplugged
 COPY lib/dracut/90powos-ramboot/ /usr/lib/dracut/modules.d/90powos-ramboot/
