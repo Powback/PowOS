@@ -52,6 +52,10 @@ below must be checked on a VM (QEMU/virt-manager) or a spare disk before the
 ## Known gaps to close before calling this stable
 
 - Exact `bootc install to-filesystem` flags vs. the shipped bootc version.
-- Shared-partition placement relative to the new PowOS root (currently logged,
-  not created — see `isv_add_shared_partition`).
+- Shared partition is now created inline (root reserves the tail, then
+  `isv_create_shared_partition` runs mkpart + mkfs.ntfs) — but the parted
+  negative-offset placement and `mkfs.ntfs` have only been unit-tested at the
+  parsing level, never run against a real disk. Verify the layout end-to-end.
+- Partition identification uses GPT PARTLABEL (`isv_part_by_partlabel`) — confirm
+  labels survive on the real image's partitioning.
 - `grub2-editenv menu_auto_hide=0` path on the real image (menu visibility).

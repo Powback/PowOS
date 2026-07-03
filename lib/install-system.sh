@@ -284,8 +284,7 @@ isv_install_alongside() {
     isv_step "Installing (dual-boot) into free space on $ISV_TARGET"
     isv_warn "Dual-boot install is EXPERIMENTAL — TODO(hw): validate on real hardware/VM."
 
-    # Plan: create a new root partition in the largest free block, reuse the
-    # existing EFI System Partition (Windows') so both bootloaders coexist.
+    # Reuse the existing EFI System Partition (Windows') so both bootloaders coexist.
     local esp
     esp=$(isv_find_esp "$ISV_TARGET")
     if [[ -z "$esp" ]]; then
@@ -295,24 +294,50 @@ isv_install_alongside() {
     fi
     isv_log "Reusing EFI System Partition: $esp"
 
-    # Create the PowOS root partition in free space.
+    # Start of the largest free block (MiB).
     local start
-    start=$(parted "$ISV_TARGET" unit MiB print free 2>/dev/null \
-        | awk '/Free Space/ {gsub("MiB","",$1); s=$1} END{print s}')
-    run_step "create PowOS root partition" \
-        parted -s "$ISV_TARGET" mkpart PowOS "$ISV_FS" "${start}MiB" '100%' || return 1
+    start=$(isv_free_block_start)
+    if [[ -z "$start" ]]; then
+        isv_err "Could not find a free block on $ISV_TARGET. Shrink a partition from"
+        isv_err "Windows Disk Management first to make room, then re-run."
+        return 1
+    fi
+
+    # If a shared partition was requested, reserve it at the tail of the free
+    # block so the PowOS root does not consume all remaining space.
+    local shared_mib=0 root_end='100%'
+    if [[ "${ISV_SHARED_GB:-0}" != 0 ]]; then
+        shared_mib=$(( ISV_SHARED_GB * 1024 ))
+        root_end="-${shared_mib}MiB"   # parted: negative = measured from disk end
+    fi
+
+    run_step "create PowOS root partition (${start}MiB → ${root_end})" \
+        parted -s "$ISV_TARGET" mkpart PowOS "$ISV_FS" "${start}MiB" "$root_end" || return 1
     run_step "settle partition table" partprobe "$ISV_TARGET" || true
+    run_step "wait for udev" bash -c 'sleep 1' || true
 
-    local root; root=$(isv_last_partition "$ISV_TARGET")
-    isv_log "New root partition: $root"
+    # Identify the new root by its GPT label (robust vs. device enumeration order).
+    local root
+    root=$(isv_part_by_partlabel "$ISV_TARGET" "PowOS")
+    [[ -z "$root" ]] && root=$(isv_last_partition "$ISV_TARGET")
+    if [[ $ISV_DRY_RUN -eq 0 && ! -b "$root" ]]; then
+        isv_err "Could not locate the new PowOS partition after creation."
+        return 1
+    fi
+    isv_log "New root partition: ${root:-<dry-run>}"
 
-    # Mount target + shared ESP, hand off to bootc to-filesystem.
+    # Create the shared NTFS partition in the reserved tail (before formatting root).
+    if [[ $shared_mib -gt 0 ]]; then
+        isv_create_shared_partition "$ISV_TARGET" "-${shared_mib}MiB" '100%'
+    fi
+
+    # Format root, mount it + the shared ESP, hand off to bootc.
     local mnt; mnt=$(mktemp -d)
-    run_step "format root" mkfs."$ISV_FS" -f "$root" || return 1
+    run_step "format root ($ISV_FS)" mkfs."$ISV_FS" -f "$root" || return 1
     run_step "mount root" mount "$root" "$mnt" || return 1
     run_step "mount shared ESP" bash -c "mkdir -p '$mnt/boot/efi' && mount '$esp' '$mnt/boot/efi'" || return 1
-    # TODO(hw): confirm to-filesystem flags; --acknowledge-destructive refers to
-    # the target rootfs (empty here), not the whole disk.
+    # TODO(hw): confirm to-filesystem flags against the shipped bootc version;
+    # --acknowledge-destructive refers to the target rootfs (empty here), not the disk.
     run_step "install PowOS to filesystem" \
         bootc install to-filesystem --acknowledge-destructive "$mnt" || {
         isv_err "bootc install to-filesystem failed."
@@ -321,10 +346,45 @@ isv_install_alongside() {
     }
     run_step "unmount target" umount -R "$mnt" 2>/dev/null || true
     rmdir "$mnt" 2>/dev/null || true
+
     isv_ok "PowOS installed alongside existing OS."
     isv_warn "After reboot, if PowOS doesn't appear: use your motherboard's UEFI"
     isv_warn "boot menu (F-key) to pick it — atomic Bazzite's GRUB won't auto-list"
     isv_warn "Windows, and Windows updates can reset boot order."
+}
+
+# Create + format the shared NTFS data partition between $pstart and $pend
+# (parted position specs, e.g. "-200GiB" and "100%"). Non-fatal on failure —
+# the OS install already succeeded; the user can add the partition later.
+isv_create_shared_partition() {
+    local dev="$1" pstart="$2" pend="$3"
+    isv_step "Creating ${ISV_SHARED_GB}GB shared NTFS data partition"
+    if ! command -v mkfs.ntfs &>/dev/null; then
+        isv_warn "mkfs.ntfs not available (install ntfsprogs) — skipping."
+        isv_warn "You can create POWOS-SHARED later from Windows Disk Management."
+        return 0
+    fi
+    run_step "create shared partition ($pstart → $pend)" \
+        parted -s "$dev" mkpart POWOS-SHARED ntfs "$pstart" "$pend" || {
+        isv_warn "Could not create shared partition — continuing without it."
+        return 0
+    }
+    run_step "settle partition table" partprobe "$dev" || true
+    run_step "wait for udev" bash -c 'sleep 1' || true
+    local sp
+    sp=$(isv_part_by_partlabel "$dev" "POWOS-SHARED")
+    [[ -z "$sp" ]] && sp=$(isv_last_partition "$dev")
+    if [[ $ISV_DRY_RUN -eq 0 && ! -b "$sp" ]]; then
+        isv_warn "Shared partition created but not found for formatting — format it manually."
+        return 0
+    fi
+    run_step "format shared NTFS (label POWOS-SHARED)" \
+        mkfs.ntfs -f -L POWOS-SHARED "$sp" || {
+        isv_warn "mkfs.ntfs failed — format POWOS-SHARED manually."
+        return 0
+    }
+    isv_ok "Shared data partition ready: ${sp:-<dry-run>} (label POWOS-SHARED)"
+    isv_log "Mount it in both Windows and PowOS for shared files / game assets."
 }
 
 isv_find_esp() {
@@ -339,21 +399,24 @@ isv_find_esp() {
     return 1
 }
 
-isv_last_partition() {
-    lsblk -ln -o PATH "$1" 2>/dev/null | tail -1
+# Start (MiB) of the LARGEST free block on the target disk.
+isv_free_block_start() {
+    parted "$ISV_TARGET" unit MiB print free 2>/dev/null | awk '
+        /Free Space/ {
+            s=$1; sz=$3; gsub("MiB","",s); gsub("MiB","",sz)
+            if (sz+0 > max) { max=sz+0; start=s }
+        }
+        END { if (max>0) print start }'
 }
 
-isv_add_shared_partition() {
-    [[ "${ISV_SHARED_GB:-0}" == 0 ]] && return 0
-    isv_step "Creating ${ISV_SHARED_GB}GB shared NTFS data partition"
-    if ! command -v mkfs.ntfs &>/dev/null; then
-        isv_warn "mkfs.ntfs not available — skipping shared partition."
-        isv_warn "Create it later from Windows (Disk Management) or install ntfsprogs."
-        return 0
-    fi
-    # TODO(hw): compute placement relative to the just-created PowOS root.
-    isv_warn "Shared-partition placement needs the post-install layout — TODO(hw)."
-    isv_log "Planned: mkpart SHARED ntfs, mkfs.ntfs -L POWOS-SHARED, size ${ISV_SHARED_GB}GB"
+# Resolve a partition on $1 by its GPT partition label ($2).
+isv_part_by_partlabel() {
+    lsblk -ln -o PATH,PARTLABEL "$1" 2>/dev/null \
+        | awk -v l="$2" '$2==l {print $1; exit}'
+}
+
+isv_last_partition() {
+    lsblk -ln -o PATH "$1" 2>/dev/null | tail -1
 }
 
 # ── Post-install: automate the dual-boot footguns ─────────────────
@@ -463,11 +526,16 @@ cmd_install_system() {
     fi
 
     if [[ "$ISV_MODE" == "whole-disk" ]]; then
+        if [[ "${ISV_SHARED_GB:-0}" != 0 ]]; then
+            isv_warn "--shared-gb is ignored with --whole-disk: 'bootc install to-disk'"
+            isv_warn "claims the entire disk. Install --alongside for a shared partition,"
+            isv_warn "or carve POWOS-SHARED afterward from Windows/Disk Management."
+        fi
         isv_install_whole_disk || return 1
     else
+        # Alongside mode creates the shared partition inline (reserved tail).
         isv_install_alongside  || return 1
     fi
-    isv_add_shared_partition
     isv_post_install
 
     isv_step "Done"

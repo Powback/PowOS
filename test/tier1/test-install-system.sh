@@ -106,7 +106,26 @@ PARTED
 reset_globals; ISV_TARGET=/dev/sdz
 free=$(isv_free_space_mib)
 check "picks largest free block (380000)"    '[[ "$free" == "380000" ]]'
+start=$(isv_free_block_start)
+check "start of largest free block (120000)" '[[ "$start" == "120000" ]]'
 unset -f parted
+
+# ── Partition lookup by GPT label ─────────────────────────────────
+echo "== Partition lookup by label =="
+lsblk() {
+    if [[ "$*" == *"PATH,PARTLABEL"* ]]; then
+        cat <<'LSBLK'
+/dev/sdz1
+/dev/sdz2 Basic data partition
+/dev/sdz5 PowOS
+/dev/sdz6 POWOS-SHARED
+LSBLK
+    fi
+}
+check "finds PowOS root by partlabel"        '[[ "$(isv_part_by_partlabel /dev/sdz PowOS)" == "/dev/sdz5" ]]'
+check "finds POWOS-SHARED by partlabel"      '[[ "$(isv_part_by_partlabel /dev/sdz POWOS-SHARED)" == "/dev/sdz6" ]]'
+check "missing label returns empty"          '[[ -z "$(isv_part_by_partlabel /dev/sdz NOPE)" ]]'
+unset -f lsblk
 
 # ── Live-disk exclusion ───────────────────────────────────────────
 echo "== Candidate disk exclusion =="
