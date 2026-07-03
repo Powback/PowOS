@@ -15,12 +15,9 @@
 # it restarts userspace (your apps close/reopen) but not the kernel. It's opt-in;
 # the safe default is to just stage and let you reboot on your schedule.
 set -uo pipefail
+source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
+POWOS_TAG=upgrade
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-up_log()  { echo -e "${CYAN}[upgrade]${NC} $*"; }
-up_ok()   { echo -e "${GREEN}[upgrade]${NC} $*"; }
-up_warn() { echo -e "${YELLOW}[upgrade]${NC} $*"; }
-up_err()  { echo -e "${RED}[upgrade]${NC} $*" >&2; }
 
 # Is a non-booted deployment currently staged? (echo "yes"/"")
 up_has_staged() {
@@ -55,10 +52,10 @@ for dep in d.get("deployments",[]):
 
 up_apply() {   # $1 = mode: soft|reboot
     if [[ "$1" == "soft" ]]; then
-        up_warn "Soft-rebooting (experimental): userspace restarts, kernel stays. Apps will close."
+        pwarn "Soft-rebooting (experimental): userspace restarts, kernel stays. Apps will close."
         sudo systemctl soft-reboot
     else
-        up_log "Rebooting to apply…"
+        plog "Rebooting to apply…"
         sudo systemctl reboot
     fi
 }
@@ -73,45 +70,45 @@ cmd_upgrade() {
             --reboot)  mode="reboot" ;;
             --no-reboot) mode="none" ;;
             -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; return 0 ;;
-            *) up_err "Unknown arg: $1"; return 1 ;;
+            *) perr "Unknown arg: $1"; return 1 ;;
         esac
         shift
     done
 
-    command -v bootc >/dev/null 2>&1 || { up_err "bootc not found."; return 1; }
+    command -v bootc >/dev/null 2>&1 || { perr "bootc not found."; return 1; }
 
     if (( check )); then
-        up_log "Checking for a base update…"
+        plog "Checking for a base update…"
         sudo bootc upgrade --check
         return $?
     fi
 
-    up_log "Fetching + staging base update via bootc…"
-    if ! sudo bootc upgrade; then up_err "bootc upgrade failed."; return 1; fi
+    plog "Fetching + staging base update via bootc…"
+    if ! sudo bootc upgrade; then perr "bootc upgrade failed."; return 1; fi
 
     if [[ "$(up_has_staged)" != "yes" ]]; then
-        up_ok "Already up to date — nothing staged, nothing to restart."
+        pok "Already up to date — nothing staged, nothing to restart."
         return 0
     fi
 
     local delta; delta="$(up_kernel_delta)"
     echo
     case "$delta" in
-        same)    up_ok "Update staged. Kernel unchanged → a soft-reboot (~seconds) is enough." ;;
-        changed) up_warn "Update staged. Kernel CHANGED → a full reboot is required." ;;
-        *)       up_warn "Update staged. Couldn't tell if the kernel changed → full reboot is the safe choice." ;;
+        same)    pok "Update staged. Kernel unchanged → a soft-reboot (~seconds) is enough." ;;
+        changed) pwarn "Update staged. Kernel CHANGED → a full reboot is required." ;;
+        *)       pwarn "Update staged. Couldn't tell if the kernel changed → full reboot is the safe choice." ;;
     esac
-    up_log "Old deployment stays as rollback."
+    plog "Old deployment stays as rollback."
 
     # Decide what to do.
     local chosen=""
     if [[ "$mode" == "reboot" || "$mode" == "soft" ]]; then chosen="$mode"
-    elif [[ "$mode" == "none" ]]; then up_ok "Staged only. Apply when ready: powos upgrade --reboot"; return 0
+    elif [[ "$mode" == "none" ]]; then pok "Staged only. Apply when ready: powos upgrade --reboot"; return 0
     elif [[ "$delta" == "same" ]]; then chosen="soft"
     else chosen="reboot"; fi
 
     if (( now )); then up_apply "$chosen"; return; fi
 
     read -rp "Apply now with a ${chosen}? [y/N] " a
-    [[ "$a" =~ ^[Yy]$ ]] && up_apply "$chosen" || up_ok "Left staged — apply anytime: powos upgrade --now"
+    [[ "$a" =~ ^[Yy]$ ]] && up_apply "$chosen" || pok "Left staged — apply anytime: powos upgrade --now"
 }

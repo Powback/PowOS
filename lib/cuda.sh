@@ -21,13 +21,9 @@
 #   - The toolkit's CUDA version must be <= the host driver's CUDA (forward-compat).
 #     Driver 610 (CUDA 13.x) runs a 12.8 toolkit fine.
 set -uo pipefail
+source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
+POWOS_TAG=cuda
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-cuda_log()  { echo -e "${CYAN}[cuda]${NC} $*"; }
-cuda_ok()   { echo -e "${GREEN}[cuda]${NC} $*"; }
-cuda_warn() { echo -e "${YELLOW}[cuda]${NC} $*"; }
-cuda_err()  { echo -e "${RED}[cuda]${NC} $*" >&2; }
 
 # Fully-qualified on purpose: podman short-name resolution can't prompt in
 # non-interactive contexts (scripts, installer) and aborts otherwise.
@@ -46,39 +42,39 @@ cuda_x() { podman exec "$CUDA_CONTAINER" bash -c 'export PATH=/usr/local/cuda/bi
 
 cmd_cuda_enable() {
     if ! command -v distrobox >/dev/null 2>&1; then
-        cuda_err "distrobox not found (should ship with PowOS)."; return 1
+        perr "distrobox not found (should ship with PowOS)."; return 1
     fi
     if ! cuda_host_driver_ok; then
-        cuda_warn "No working NVIDIA driver on the host (nvidia-smi sees no GPU)."
-        cuda_warn "CUDA needs the driver on the host — fix that first (e.g. an nvidia base image)."
-        cuda_warn "Continuing anyway; the toolkit will install but GPU calls will fail."
+        pwarn "No working NVIDIA driver on the host (nvidia-smi sees no GPU)."
+        pwarn "CUDA needs the driver on the host — fix that first (e.g. an nvidia base image)."
+        pwarn "Continuing anyway; the toolkit will install but GPU calls will fail."
     fi
     if cuda_exists; then
-        cuda_ok "'$CUDA_CONTAINER' already exists — 'powos cuda enter'."
+        pok "'$CUDA_CONTAINER' already exists — 'powos cuda enter'."
         return 0
     fi
-    cuda_log "Creating '$CUDA_CONTAINER' from $CUDA_IMAGE"
-    cuda_log "(first run pulls ~6 GB; the toolkit lives in the container, not your OS)"
+    plog "Creating '$CUDA_CONTAINER' from $CUDA_IMAGE"
+    plog "(first run pulls ~6 GB; the toolkit lives in the container, not your OS)"
     if ! distrobox create --name "$CUDA_CONTAINER" --image "$CUDA_IMAGE" \
             --nvidia --additional-packages "$CUDA_PKGS" --yes; then
-        cuda_err "distrobox create failed."; return 1
+        perr "distrobox create failed."; return 1
     fi
     # First enter runs distrobox's init (user, home, exports). Do it once now.
     distrobox enter "$CUDA_CONTAINER" -- true >/dev/null 2>&1 || true
-    cuda_ok "CUDA ready."
+    pok "CUDA ready."
     echo "  powos cuda enter            # shell inside"
     echo "  powos cuda run nvcc --version"
     echo "  powos cuda status"
 }
 
 cmd_cuda_enter() {
-    cuda_exists || { cuda_err "Not set up. Run: powos cuda enable"; return 1; }
+    cuda_exists || { perr "Not set up. Run: powos cuda enable"; return 1; }
     distrobox enter "$CUDA_CONTAINER"
 }
 
 cmd_cuda_run() {
-    cuda_exists || { cuda_err "Not set up. Run: powos cuda enable"; return 1; }
-    [[ $# -gt 0 ]] || { cuda_err "Usage: powos cuda run <command...>"; return 1; }
+    cuda_exists || { perr "Not set up. Run: powos cuda enable"; return 1; }
+    [[ $# -gt 0 ]] || { perr "Usage: powos cuda run <command...>"; return 1; }
     distrobox enter "$CUDA_CONTAINER" -- "$@"
 }
 
@@ -102,9 +98,9 @@ cmd_cuda_status() {
 }
 
 cmd_cuda_disable() {
-    cuda_exists || { cuda_ok "Nothing to remove."; return 0; }
-    cuda_log "Removing '$CUDA_CONTAINER'…"
-    distrobox rm -f "$CUDA_CONTAINER" && cuda_ok "Removed. (Your OS was never touched.)"
+    cuda_exists || { pok "Nothing to remove."; return 0; }
+    plog "Removing '$CUDA_CONTAINER'…"
+    distrobox rm -f "$CUDA_CONTAINER" && pok "Removed. (Your OS was never touched.)"
 }
 
 cmd_cuda_usage() {
@@ -131,6 +127,6 @@ cmd_cuda() {
         status|info)              cmd_cuda_status "$@" ;;
         disable|off|rm|remove)    cmd_cuda_disable "$@" ;;
         help|-h|--help)           cmd_cuda_usage ;;
-        *) cuda_err "Unknown: cuda $sub"; cmd_cuda_usage; return 1 ;;
+        *) perr "Unknown: cuda $sub"; cmd_cuda_usage; return 1 ;;
     esac
 }

@@ -14,12 +14,9 @@
 #   - Private images need `powos registry login` first, or the pull 401s.
 #   - This is the installed-system counterpart to `powos base` (USB layer variants).
 set -uo pipefail
+source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
+POWOS_TAG=driver
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-drv_log()  { echo -e "${CYAN}[driver]${NC} $*"; }
-drv_ok()   { echo -e "${GREEN}[driver]${NC} $*"; }
-drv_warn() { echo -e "${YELLOW}[driver]${NC} $*"; }
-drv_err()  { echo -e "${RED}[driver]${NC} $*" >&2; }
 
 # Booted image reference (bare registry ref, or an oci:/… path we can't rebase).
 # Uses rpm-ostree (works without root; newer bootc's `status` requires root).
@@ -64,7 +61,7 @@ cmd_driver_status() {
     ref="$(drv_current_ref)"
     echo -e "${BOLD}NVIDIA driver channel${NC}"
     if [[ -z "$ref" ]]; then
-        drv_warn "Couldn't read the booted image (old bootc? not bootc?)."; return 0
+        pwarn "Couldn't read the booted image (old bootc? not bootc?)."; return 0
     fi
     tag="${ref##*:}"
     echo "  image:   $ref"
@@ -77,29 +74,29 @@ cmd_driver_status() {
 
 cmd_driver_switch() {
     local channel="$1" tag ref repo target
-    tag="$(drv_tag_for "$channel")" || { drv_err "Unknown channel '$channel' (use: stable|testing)"; return 1; }
+    tag="$(drv_tag_for "$channel")" || { perr "Unknown channel '$channel' (use: stable|testing)"; return 1; }
     ref="$(drv_current_ref)"
     if [[ -z "$ref" || "$ref" != *"/"*":"* || "$ref" == oci:* ]]; then
-        drv_err "Current install isn't tracking a registry image ('$ref')."
-        drv_err "First point it at your image, e.g.:"
-        drv_err "  powos registry login ghcr.io   # if private"
-        drv_err "  sudo bootc switch ghcr.io/<you>/powos:nvidia-open"
+        perr "Current install isn't tracking a registry image ('$ref')."
+        perr "First point it at your image, e.g.:"
+        perr "  powos registry login ghcr.io   # if private"
+        perr "  sudo bootc switch ghcr.io/<you>/powos:nvidia-open"
         return 1
     fi
     repo="${ref%:*}"; repo="${repo%@*}"
     target="$repo:$tag"
     if [[ "$ref" == "$target" ]]; then
-        drv_ok "Already on '$channel' ($target)."; return 0
+        pok "Already on '$channel' ($target)."; return 0
     fi
-    drv_log "Switching driver channel → $channel"
-    drv_log "  $ref"
-    drv_log "  → $target"
+    plog "Switching driver channel → $channel"
+    plog "  $ref"
+    plog "  → $target"
     if ! sudo bootc switch "$target"; then
-        drv_err "bootc switch failed. If it 401'd, run: powos registry login ghcr.io"
+        perr "bootc switch failed. If it 401'd, run: powos registry login ghcr.io"
         return 1
     fi
-    drv_ok "Staged. Review with 'sudo bootc status', then reboot to apply."
-    drv_ok "Old deployment stays as rollback (pick it at the boot menu if needed)."
+    pok "Staged. Review with 'sudo bootc status', then reboot to apply."
+    pok "Old deployment stays as rollback (pick it at the boot menu if needed)."
     read -rp "Reboot now? [y/N] " ans
     [[ "$ans" =~ ^[Yy]$ ]] && sudo systemctl reboot
 }
@@ -109,6 +106,6 @@ cmd_driver() {
     case "$sub" in
         status|"")        cmd_driver_status ;;
         stable|testing)   cmd_driver_switch "$sub" ;;
-        *) drv_err "Usage: powos driver {status|stable|testing}"; return 1 ;;
+        *) perr "Usage: powos driver {status|stable|testing}"; return 1 ;;
     esac
 }

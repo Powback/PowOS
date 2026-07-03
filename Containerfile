@@ -73,6 +73,7 @@ RUN mkdir -p /var/lib/systemd/linger && \
     touch /var/lib/systemd/linger/powos
 
 # Copy PowOS boot system
+COPY lib/common.sh /usr/lib/powos/
 COPY lib/boot/ /usr/lib/powos/boot/
 COPY lib/hardware-detect.sh /usr/lib/powos/
 COPY lib/overlay-manager.sh /usr/lib/powos/
