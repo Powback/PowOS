@@ -58,10 +58,23 @@ jobs:
       - name: Vendor bazzite system_files (Containerfile COPYs it)
         run: ./build/vendor-bazzite.sh
 
-      - name: Docker Compose Test
+      # podman, not docker: the bazzite base ships ~100 layers and docker's
+      # overlay driver dies with "max depth exceeded"; podman builds it fine
+      # (same reason build-publish.yml uses podman). Mirrors the compose
+      # test-runner service definition.
+      - name: Container Test (podman — replicates compose test-runner)
         run: |
-          docker compose --profile test build
-          docker compose --profile test run --rm test-runner
+          podman build -f Containerfile -t powos-ci .
+          podman run --rm -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
+            --entrypoint /bin/bash powos-ci -c '
+              set -e
+              echo "Running Tests..."
+              bash /powos/test/tier1/test-hardware-detect.sh
+              bash /powos/test/tier1/test-pinstall.sh
+              bash /powos/test/tier1/test-overlay.sh
+              bash /powos/test/tier1/test-sync.sh
+              bash /powos/test/tier1/test-ai-agent.sh
+            '
 
   e2e-tests:
     runs-on: ubuntu-latest
@@ -80,7 +93,15 @@ jobs:
       - name: Vendor bazzite system_files (Containerfile COPYs it)
         run: ./build/vendor-bazzite.sh
 
-      - name: Run E2E Tests
+      # podman for the same layer-depth reason as tier1 (see comment there).
+      # Mirrors the compose e2e-runner service definition.
+      - name: Run E2E Tests (podman — replicates compose e2e-runner)
         run: |
-          docker compose --profile e2e build
-          docker compose --profile e2e run --rm e2e-runner
+          podman build -f Containerfile --build-arg INSTALL_E2E_DEPS=1 -t powos-e2e .
+          podman volume create powos-e2e-usb
+          podman run --rm --privileged --hostname powos-e2e \
+            --device /dev/fuse --device /dev/loop-control \
+            -v "$PWD:/powos:ro" -v powos-e2e-usb:/var/lib/powos-test \
+            --tmpfs /run/powos --tmpfs /tmp \
+            -e POWOS_ROOT=/powos -e POWOS_E2E=1 \
+            --entrypoint /bin/bash powos-e2e /powos/test/e2e/run-e2e.sh
