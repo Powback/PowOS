@@ -23,10 +23,18 @@ NC='\033[0m'
 
 # Paths
 STATE_DIR="${POWOS_STATE_DIR:-/run/powos}"
-MOBILE_LAYER="/run/powos-mobile"
-MOBILE_STATE="$STATE_DIR/mobile-state"
-MOBILE_EXCLUDE="$STATE_DIR/mobile-exclude"
-USB_LAYERS="${POWOS_USB_MOUNT:-/mnt/powos-usb}/layers"
+# USB data partition mount point. The dracut module bind-mounts it at
+# /run/powos/usb-layers (the old /mnt/powos-usb default never existed).
+USB_MOUNT="${POWOS_USB_MOUNT:-/run/powos/usb-layers}"
+USB_LAYERS="${USB_MOUNT}/layers"
+# Mobile staging lives ON the USB data partition, NOT in tmpfs:
+# everything under /run vanishes at the reboot this feature requires, so a
+# future dracut consumer must be able to find the staged layer, state, and
+# exclusions on persistent storage.
+MOBILE_DIR="${USB_MOUNT}/mobile"
+MOBILE_LAYER="${MOBILE_DIR}/layer"
+MOBILE_STATE="${MOBILE_DIR}/state"
+MOBILE_EXCLUDE="${MOBILE_DIR}/exclude"
 
 # ═══════════════════════════════════════════════════════════════════
 # Package & Category Detection (from rpm, not hardcoded)
@@ -134,7 +142,10 @@ load_exclusions() {
 
 save_exclusions() {
     local exclusions="$1"
-    mkdir -p "$(dirname "$MOBILE_EXCLUDE")"
+    if ! mkdir -p "$(dirname "$MOBILE_EXCLUDE")" 2>/dev/null; then
+        echo -e "${RED}Error: cannot save exclusions - USB not mounted at $USB_MOUNT?${NC}" >&2
+        return 1
+    fi
     echo "$exclusions" > "$MOBILE_EXCLUDE"
 }
 
@@ -159,12 +170,20 @@ get_mobile_state() {
 
 set_mobile_state() {
     local state="$1"
-    mkdir -p "$(dirname "$MOBILE_STATE")"
+    if ! mkdir -p "$(dirname "$MOBILE_STATE")" 2>/dev/null; then
+        echo -e "${YELLOW}Warning: cannot write mobile state - USB not mounted at $USB_MOUNT?${NC}" >&2
+        return 1
+    fi
     echo "$state" > "$MOBILE_STATE"
 }
 
+# "staged" means files were copied but mobile mode is NOT active (live
+# remount / boot integration is not implemented). Both states count as
+# "already set up" for enable/disable purposes.
 is_mobile_enabled() {
-    [[ "$(get_mobile_state)" == "enabled" ]]
+    local state
+    state=$(get_mobile_state)
+    [[ "$state" == "enabled" || "$state" == "staged" ]]
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -311,8 +330,14 @@ show_simple_menu() {
                         exclusions=$(echo "$exclusions" | grep -vx "category:$category" || true)
                         echo "Enabled: $category"
                     else
-                        # Add to exclusions
-                        exclusions+="category:$category"$'\n'
+                        # Add to exclusions on its OWN line. load_exclusions
+                        # strips the trailing newline, so a plain += would glue
+                        # the new entry onto the last one
+                        # ("category:Gamescategory:Office") and break grep -qx.
+                        if [[ -n "$exclusions" ]]; then
+                            exclusions+=$'\n'
+                        fi
+                        exclusions+="category:$category"
                         echo "Disabled: $category"
                     fi
                     save_exclusions "$exclusions"
@@ -335,11 +360,16 @@ copy_layers_to_ram() {
     local exclusions
     exclusions=$(load_exclusions)
 
-    echo -e "${BOLD}${CYAN}Copying OS to RAM...${NC}"
+    echo -e "${BOLD}${CYAN}Staging OS files for mobile mode...${NC}"
+    echo "Target: $MOBILE_LAYER (on the USB data partition)"
     echo ""
 
-    # Create mobile layer directory
-    mkdir -p "$MOBILE_LAYER"
+    # Create mobile layer directory (lives on the USB data partition so it
+    # survives the reboot this feature needs)
+    if ! mkdir -p "$MOBILE_LAYER" 2>/dev/null; then
+        echo -e "${RED}Error: cannot create $MOBILE_LAYER - USB not mounted at $USB_MOUNT?${NC}"
+        return 1
+    fi
 
     # Get list of categories to include
     local included_categories=()
@@ -378,24 +408,39 @@ copy_layers_to_ram() {
 
     # Copy files for each included category
     local copied=0
+    local fail_count=0
     for category in "${included_categories[@]}"; do
         local display_name="${category##*/}"
         [[ -z "$display_name" ]] && display_name="$category"
 
         echo -ne "  ${display_name}: "
 
-        # Get packages in this category and copy their files
+        # Get packages in this category and copy their files.
+        # rpm -ql lists BOTH directories and files:
+        #  - directories are just created (never cp'd: `cp -a dir existing/`
+        #    would copy INTO it and nest duplicate trees)
+        #  - files are copied to their exact target path
         while IFS= read -r pkg; do
             [[ -z "$pkg" ]] && continue
             while IFS= read -r file; do
                 [[ -z "$file" ]] && continue
                 [[ ! -e "$file" ]] && continue
 
-                # Copy preserving directory structure
-                local dir
-                dir=$(dirname "$file")
-                mkdir -p "$MOBILE_LAYER$dir"
-                cp -a "$file" "$MOBILE_LAYER$file" 2>/dev/null || true
+                if [[ -d "$file" && ! -L "$file" ]]; then
+                    if ! mkdir -p "$MOBILE_LAYER$file" 2>/dev/null; then
+                        fail_count=$((fail_count + 1))
+                    fi
+                else
+                    local dir
+                    dir=$(dirname "$file")
+                    if ! mkdir -p "$MOBILE_LAYER$dir" 2>/dev/null; then
+                        fail_count=$((fail_count + 1))
+                        continue
+                    fi
+                    if ! cp -a "$file" "$MOBILE_LAYER$file" 2>/dev/null; then
+                        fail_count=$((fail_count + 1))
+                    fi
+                fi
             done < <(get_package_files "$pkg")
         done < <(get_packages_in_category "$category")
 
@@ -406,7 +451,13 @@ copy_layers_to_ram() {
     done
 
     echo ""
-    echo -e "${GREEN}✓ Copied $(format_size $copied) to RAM${NC}"
+    if [[ $fail_count -gt 0 ]]; then
+        echo -e "${YELLOW}Warning: $fail_count file(s)/dir(s) failed to copy.${NC}"
+        echo "The staged layer is incomplete - do not rely on it."
+    fi
+    echo -e "${GREEN}✓ Staged $(format_size $copied) to $MOBILE_LAYER${NC}"
+
+    [[ $fail_count -eq 0 ]]
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -434,12 +485,15 @@ remount_with_mobile() {
     # 1. Sync any pending writes
     # 2. Remount overlay with new lowerdir
 
-    # This is system-specific and may need adjustment
-    echo -e "${YELLOW}Live remount not yet implemented.${NC}"
-    echo "For now, the files are copied to $MOBILE_LAYER"
-    echo "A reboot with mobile mode would use these."
+    # NOT IMPLEMENTED: the overlay stack is untouched. Do NOT set state to
+    # "enabled" here - that previously made the tooling claim the USB was
+    # safe to unplug while custom/updates/base lowerdirs still lived on it.
+    echo -e "${YELLOW}Live remount not yet implemented (WIP).${NC}"
+    echo "Files are staged at: $MOBILE_LAYER"
+    echo "There is no boot integration for this layer yet either, so mobile"
+    echo "mode is NOT active - the OS still runs from USB-backed layers."
 
-    set_mobile_state "enabled"
+    set_mobile_state "staged"
     return 0
 }
 
@@ -451,10 +505,10 @@ remount_without_mobile() {
         return 1
     fi
 
-    # Free the mobile layer
+    # Remove the staged mobile layer
     if [[ -d "$MOBILE_LAYER" ]]; then
         rm -rf "$MOBILE_LAYER"
-        echo "Freed mobile layer RAM"
+        echo "Removed staged mobile layer ($MOBILE_LAYER)"
     fi
 
     set_mobile_state "disabled"
@@ -473,13 +527,26 @@ mobile_status() {
     local state
     state=$(get_mobile_state)
 
-    if [[ "$state" == "enabled" ]]; then
-        echo -e "Mode: ${GREEN}MOBILE (RAM-backed)${NC}"
-        echo "USB can be safely unplugged - OS fully in RAM."
-    else
-        echo -e "Mode: ${YELLOW}Normal (USB-backed)${NC}"
-        echo "USB required for full functionality."
-    fi
+    case "$state" in
+        staged)
+            echo -e "Mode: ${YELLOW}Staged (NOT active)${NC}"
+            echo "OS files have been copied for mobile mode, but live remount /"
+            echo "boot integration is not implemented yet (WIP)."
+            echo -e "${RED}USB is still required - do NOT unplug it.${NC}"
+            ;;
+        enabled)
+            # Legacy state from older builds that set "enabled" without ever
+            # remounting. Never claim the OS is fully in RAM.
+            echo -e "Mode: ${YELLOW}Marked enabled (UNVERIFIED)${NC}"
+            echo "Live remount is not implemented in this build; this state is"
+            echo "stale. Assume the OS still runs from USB-backed layers."
+            echo -e "${RED}Do NOT unplug the USB.${NC}"
+            ;;
+        *)
+            echo -e "Mode: ${YELLOW}Normal (USB-backed)${NC}"
+            echo "USB required for full functionality."
+            ;;
+    esac
     echo ""
 
     # USB and sync status
@@ -518,11 +585,11 @@ mobile_status() {
     fi
     echo ""
 
-    # Mobile layer
+    # Mobile layer (staged on the USB data partition)
     if [[ -d "$MOBILE_LAYER" ]]; then
         local mobile_size
         mobile_size=$(du -sb "$MOBILE_LAYER" 2>/dev/null | cut -f1)
-        echo "Mobile layer: $(format_size ${mobile_size:-0}) in RAM"
+        echo "Staged mobile layer: $(format_size ${mobile_size:-0}) at $MOBILE_LAYER"
     fi
 }
 
@@ -534,7 +601,13 @@ mobile_exclude() {
 
     for item in "${items[@]}"; do
         if ! echo "$exclusions" | grep -qx "category:$item" 2>/dev/null; then
-            exclusions+="category:$item"$'\n'
+            # Append on its own line: load_exclusions strips the trailing
+            # newline, so add the separator explicitly or entries get glued
+            # together ("category:Gamescategory:Office").
+            if [[ -n "$exclusions" ]]; then
+                exclusions+=$'\n'
+            fi
+            exclusions+="category:$item"
             echo "Excluded: $item"
         fi
     done
@@ -657,13 +730,15 @@ mobile_enable() {
         return 1
     fi
 
-    # Remount
+    # Remount (WIP: currently only records the staged state, see above)
     remount_with_mobile
 
     echo ""
-    echo -e "${GREEN}${BOLD}Mobile mode enabled!${NC}"
-    echo "USB can be safely unplugged."
-    echo "User files: CacheFS (cached files work, others show 'offline')"
+    echo -e "${YELLOW}${BOLD}Mobile mode is NOT active - this feature is WIP.${NC}"
+    echo -e "${RED}Do NOT unplug the USB: the OS still runs from USB-backed layers.${NC}"
+    echo ""
+    echo "OS files were staged to $MOBILE_LAYER for a future"
+    echo "boot integration. Run 'powos mobile disable' to free that space."
 }
 
 mobile_disable() {

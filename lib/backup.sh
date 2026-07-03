@@ -29,7 +29,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Lock file for safe operations
-SYNC_LOCK_FILE="/run/powos/sync.lock"
+SYNC_LOCK_FILE="${POWOS_SYNC_LOCK_FILE:-/run/powos/sync.lock}"
 SYNC_LOCK_TIMEOUT=300  # 5 minutes
 
 # ═══════════════════════════════════════════════════════════════════
@@ -53,16 +53,18 @@ POWOS_SYNC_CONFIG=true
 # shellcheck disable=SC2034
 POWOS_SYNC_SESSIONS=false
 POWOS_MACHINE_ID=""
+POWOS_GIT_USER_NAME=""
+POWOS_GIT_USER_EMAIL=""
 
 load_sync_config() {
-    if [[ -f "$SYNC_CONFIG" ]]; then
-        # shellcheck source=/dev/null
-        source "$SYNC_CONFIG"
-    fi
-
-    # Also check system config
+    # System config first, user config second: the USER's settings must win
+    # over system-wide defaults.
     if [[ -f "/etc/powos/sync.conf" ]]; then
         source "/etc/powos/sync.conf"
+    fi
+
+    if [[ -f "$SYNC_CONFIG" ]]; then
+        source "$SYNC_CONFIG"
     fi
 
     # Auto-detect machine ID if not set
@@ -82,20 +84,25 @@ sync_lock_acquire() {
     local lock_dir
     lock_dir=$(dirname "$SYNC_LOCK_FILE")
 
-    mkdir -p "$lock_dir" 2>/dev/null || true
+    if ! mkdir -p "$lock_dir" 2>/dev/null; then
+        echo -e "${RED}Error: Cannot create lock directory: $lock_dir${NC}"
+        echo "  ($lock_dir is usually root-owned - run as root, or set"
+        echo "   POWOS_SYNC_LOCK_FILE to a writable path)"
+        return 1
+    fi
 
     # Check for stale lock
     if [[ -f "$SYNC_LOCK_FILE" ]]; then
         local lock_time lock_age
-        lock_time=$(cat "$SYNC_LOCK_FILE" 2>/dev/null | head -1)
-        if [[ -n "$lock_time" ]]; then
+        lock_time=$(head -1 "$SYNC_LOCK_FILE" 2>/dev/null || true)
+        if [[ "$lock_time" =~ ^[0-9]+$ ]]; then
             lock_age=$(( $(date +%s) - lock_time ))
             if [[ "$lock_age" -gt "$SYNC_LOCK_TIMEOUT" ]]; then
                 echo -e "${YELLOW}Warning: Removing stale lock (${lock_age}s old)${NC}"
                 rm -f "$SYNC_LOCK_FILE"
             else
                 local lock_op
-                lock_op=$(cat "$SYNC_LOCK_FILE" 2>/dev/null | tail -1)
+                lock_op=$(tail -1 "$SYNC_LOCK_FILE" 2>/dev/null || true)
                 echo -e "${RED}Error: Another sync operation is in progress${NC}"
                 echo "  Operation: $lock_op"
                 echo "  Started: ${lock_age}s ago"
@@ -104,12 +111,23 @@ sync_lock_acquire() {
                 echo "  rm $SYNC_LOCK_FILE"
                 return 1
             fi
+        else
+            # First line isn't a timestamp: corrupt lock file. Treating it as
+            # valid would crash the arithmetic above; treat it as stale.
+            echo -e "${YELLOW}Warning: Removing corrupt lock file${NC}"
+            rm -f "$SYNC_LOCK_FILE"
         fi
     fi
 
-    # Create lock file
-    echo "$(date +%s)" > "$SYNC_LOCK_FILE"
-    echo "$operation" >> "$SYNC_LOCK_FILE"
+    # Create lock file. This MUST succeed - silently proceeding without a
+    # lock (e.g. non-root writing into root-owned /run/powos) defeats the
+    # entire point of locking.
+    if ! printf '%s\n%s\n' "$(date +%s)" "$operation" > "$SYNC_LOCK_FILE" 2>/dev/null; then
+        echo -e "${RED}Error: Cannot create lock file: $SYNC_LOCK_FILE${NC}"
+        echo "  Refusing to run '$operation' without a lock."
+        echo "  Run as root, or set POWOS_SYNC_LOCK_FILE to a writable path."
+        return 1
+    fi
 
     # Set trap to release lock on exit
     trap 'sync_lock_release' EXIT INT TERM
@@ -164,8 +182,10 @@ ensure_git_repo() {
         mkdir -p "$POWOS_STATE_DIR"
         cd "$POWOS_STATE_DIR"
         git init -q
-        git config user.email "powos@$(hostname)"
-        git config user.name "PowOS ($(hostname))"
+        # Identity: honor POWOS_GIT_USER_NAME/EMAIL from sync.conf, fall back
+        # to the previous hardcoded defaults.
+        git config user.email "${POWOS_GIT_USER_EMAIL:-powos@$(hostname)}"
+        git config user.name "${POWOS_GIT_USER_NAME:-PowOS ($(hostname))}"
 
         # Create initial structure
         mkdir -p sources projects containers config
@@ -330,6 +350,10 @@ create_default_syncignore() {
 # ══════════════════════════════════════════════════════════════
 extensions/
 state/ai/sessions/
+# sync.conf may embed the remote URL with credentials (https://user:TOKEN@...)
+# - it must NEVER be backed up to the remote it points at.
+sync.conf
+config/sync.conf
 
 # ══════════════════════════════════════════════════════════════
 # YOUR CUSTOM IGNORES (add below)
@@ -555,6 +579,10 @@ sync_push() {
         return 1
     fi
 
+    # Collect current working-dir state FIRST - otherwise the state repo is
+    # stale and we push (and later restore!) outdated copies of projects/.
+    sync_from_working_dirs
+
     # Commit any uncommitted changes
     if has_uncommitted || has_untracked; then
         echo "Committing local changes..."
@@ -621,9 +649,12 @@ sync_pull() {
         return 1
     fi
 
-    # Stash local changes if any
+    # Stash local changes only for merge/rebase (where we restore them after).
+    # --theirs means DISCARD local changes: stashing and popping them after
+    # 'git reset --hard' would re-apply exactly what the user asked to drop.
+    # --ours leaves the working tree untouched, so nothing to stash either.
     local had_changes=false
-    if has_uncommitted; then
+    if has_uncommitted && [[ "$strategy" == "merge" || "$strategy" == "rebase" ]]; then
         echo "Stashing local changes..."
         git stash -q
         had_changes=true
@@ -652,6 +683,9 @@ sync_pull() {
             }
             ;;
         theirs)
+            if has_uncommitted; then
+                echo -e "${YELLOW}Discarding local changes (--theirs)...${NC}"
+            fi
             git reset --hard "origin/$branch"
             ;;
         ours)
@@ -659,7 +693,7 @@ sync_pull() {
             ;;
     esac
 
-    # Restore stashed changes
+    # Restore stashed changes (only ever stashed for merge/rebase)
     if [[ "$had_changes" == "true" ]]; then
         echo "Restoring local changes..."
         git stash pop -q || {
@@ -667,8 +701,12 @@ sync_pull() {
         }
     fi
 
-    # Sync to working directories
-    sync_to_working_dirs
+    # Sync repo state out to working directories.
+    # Skipped for --ours: nothing was pulled, and restoring from a possibly
+    # stale state repo could clobber newer files in projects/ etc.
+    if [[ "$strategy" != "ours" ]]; then
+        sync_to_working_dirs
+    fi
 
     sync_lock_release
     echo -e "${GREEN}✓ Pull complete${NC}"
@@ -677,10 +715,15 @@ sync_pull() {
 sync_to_working_dirs() {
     echo "Syncing to working directories..."
 
+    # NOTE: deliberately NO --delete in this direction. The state repo can be
+    # staler than the working dirs; deleting working-dir files it doesn't
+    # know about would wipe local work. Resurrected files are recoverable,
+    # deletions are not.
+
     # Sync sources
     if [[ -d "${POWOS_STATE_DIR}/sources" && "$POWOS_SYNC_SOURCES" == "true" ]]; then
         mkdir -p "${POWOS_ROOT}/sources"
-        rsync -a --delete "${POWOS_STATE_DIR}/sources/" "${POWOS_ROOT}/sources/" 2>/dev/null || \
+        rsync -a "${POWOS_STATE_DIR}/sources/" "${POWOS_ROOT}/sources/" 2>/dev/null || \
             cp -a "${POWOS_STATE_DIR}/sources/"* "${POWOS_ROOT}/sources/" 2>/dev/null || true
         echo "  ✓ sources"
     fi
@@ -688,7 +731,7 @@ sync_to_working_dirs() {
     # Sync projects
     if [[ -d "${POWOS_STATE_DIR}/projects" && "$POWOS_SYNC_PROJECTS" == "true" ]]; then
         mkdir -p "${POWOS_ROOT}/projects"
-        rsync -a --delete "${POWOS_STATE_DIR}/projects/" "${POWOS_ROOT}/projects/" 2>/dev/null || \
+        rsync -a "${POWOS_STATE_DIR}/projects/" "${POWOS_ROOT}/projects/" 2>/dev/null || \
             cp -a "${POWOS_STATE_DIR}/projects/"* "${POWOS_ROOT}/projects/" 2>/dev/null || true
         echo "  ✓ projects"
     fi
@@ -701,10 +744,11 @@ sync_to_working_dirs() {
         echo "  ✓ containers"
     fi
 
-    # Sync config
+    # Sync config (never restore sync.conf over the user's local one - it
+    # should not be in the repo at all, but be defensive)
     if [[ -d "${POWOS_STATE_DIR}/config" && "$POWOS_SYNC_CONFIG" == "true" ]]; then
         mkdir -p "${POWOS_CONFIG_DIR}"
-        rsync -a "${POWOS_STATE_DIR}/config/" "${POWOS_CONFIG_DIR}/" 2>/dev/null || \
+        rsync -a --exclude='sync.conf' "${POWOS_STATE_DIR}/config/" "${POWOS_CONFIG_DIR}/" 2>/dev/null || \
             cp -a "${POWOS_STATE_DIR}/config/"* "${POWOS_CONFIG_DIR}/" 2>/dev/null || true
         echo "  ✓ config"
     fi
@@ -737,11 +781,14 @@ sync_from_working_dirs() {
         echo "  ✓ containers"
     fi
 
-    # Collect config
+    # Collect config - EXCLUDING sync.conf: it may embed the remote URL with
+    # credentials and must never enter the repo that gets pushed.
     if [[ -d "${POWOS_CONFIG_DIR}" && "$POWOS_SYNC_CONFIG" == "true" ]]; then
         mkdir -p "${POWOS_STATE_DIR}/config"
-        rsync -a "${POWOS_CONFIG_DIR}/" "${POWOS_STATE_DIR}/config/" 2>/dev/null || \
+        rsync -a --exclude='sync.conf' "${POWOS_CONFIG_DIR}/" "${POWOS_STATE_DIR}/config/" 2>/dev/null || \
             cp -a "${POWOS_CONFIG_DIR}/"* "${POWOS_STATE_DIR}/config/" 2>/dev/null || true
+        # The cp fallback has no exclude support - scrub afterwards
+        rm -f "${POWOS_STATE_DIR}/config/sync.conf" 2>/dev/null || true
         echo "  ✓ config"
     fi
 }
@@ -760,6 +807,17 @@ sync_setup() {
 
     load_sync_config
     ensure_git_repo
+
+    # Warn if the URL embeds credentials (https://user:TOKEN@host/...).
+    # It is stored in sync.conf, which is excluded from collection/export,
+    # but the user should know it sits on disk in plain text.
+    if [[ "$remote_url" =~ ://[^/@]+:[^/@]+@ ]]; then
+        echo -e "${YELLOW}Warning: this URL appears to embed credentials.${NC}"
+        echo "  It will be saved in plain text to: $SYNC_CONFIG"
+        echo "  (sync.conf is excluded from backups, but consider SSH keys"
+        echo "   or a git credential helper instead.)"
+        echo ""
+    fi
 
     # Set remote
     if has_remote; then
@@ -817,6 +875,13 @@ EOF
 sync_export() {
     local output="${1:-powos-state-$(date +%Y%m%d-%H%M%S).tar.gz}"
 
+    # Resolve relative paths against the caller's directory BEFORE any cd:
+    # the default export must land in the current directory, not inside the
+    # state repo itself.
+    if [[ "$output" != /* ]]; then
+        output="$(pwd)/$output"
+    fi
+
     load_sync_config
     ensure_git_repo
 
@@ -826,9 +891,27 @@ sync_export() {
     echo "Exporting state to: $output"
 
     cd "$POWOS_STATE_DIR"
+    # Exclude secrets explicitly: .gitignore only hides these from git; the
+    # files still sit in the state dir physically and a plain tar would
+    # happily archive them.
     tar -czf "$output" \
         --exclude='.git' \
         --exclude='*.tmp' \
+        --exclude='.env' \
+        --exclude='.env.*' \
+        --exclude='*.env' \
+        --exclude='secrets' \
+        --exclude='*.key' \
+        --exclude='*.pem' \
+        --exclude='*.p12' \
+        --exclude='*.pfx' \
+        --exclude='credentials*' \
+        --exclude='*secret*' \
+        --exclude='*password*' \
+        --exclude='token*' \
+        --exclude='.npmrc' \
+        --exclude='.pypirc' \
+        --exclude='sync.conf' \
         .
 
     local size
@@ -959,21 +1042,35 @@ machine_pull() {
     local current_branch
     current_branch=$(get_current_branch)
 
-    echo "Pulling shared changes from main..."
+    # Detect the shared base branch ONCE. Blindly trying 'rebase main ||
+    # rebase master' would start a second rebase in the middle of a failed
+    # first one and bury the real conflict message.
+    local base_branch=""
+    if git show-ref --verify --quiet refs/heads/main; then
+        base_branch="main"
+    elif git show-ref --verify --quiet refs/heads/master; then
+        base_branch="master"
+    else
+        echo -e "${RED}No main/master branch found to pull shared changes from.${NC}"
+        return 1
+    fi
+
+    echo "Pulling shared changes from $base_branch..."
 
     # Fetch latest
     if has_remote; then
         git fetch origin
-        git checkout main 2>/dev/null || git checkout master
-        git pull origin main --no-edit 2>/dev/null || git pull origin master --no-edit || true
+        git checkout "$base_branch"
+        git pull origin "$base_branch" --no-edit || \
+            echo -e "${YELLOW}Could not pull $base_branch from origin (continuing with local ${base_branch}).${NC}"
     fi
 
-    # Switch back and rebase
+    # Switch back and rebase - single attempt, errors surfaced
     git checkout "$current_branch"
-    git rebase main 2>/dev/null || git rebase master || {
-        echo -e "${RED}Rebase conflict! Resolve manually.${NC}"
+    if ! git rebase "$base_branch"; then
+        echo -e "${RED}Rebase conflict! Resolve manually, or run 'git rebase --abort' to cancel.${NC}"
         return 1
-    }
+    fi
 
     echo -e "${GREEN}✓ Pulled shared changes${NC}"
 
@@ -1032,8 +1129,9 @@ cmd_backup() {
             echo ""
             echo "Commands:"
             echo "  status        Show sync status (default)"
-            echo "  push          Push local changes to remote"
+            echo "  push          Push local changes to remote (collects working dirs first)"
             echo "  pull          Pull remote changes"
+            echo "  collect       Collect working dirs into the state repo (no push)"
             echo "  setup <url>   Configure remote repository"
             echo "  ignore [pat]  Edit .syncignore (or add pattern)"
             echo "  refresh       Regenerate ignore rules"

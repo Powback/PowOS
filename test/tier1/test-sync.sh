@@ -55,6 +55,11 @@ setup() {
     export POWOS_CONFIG_DIR="$TEST_DIR/config"
     export HOME="$TEST_DIR/home"
     export STATE_DIR="$TEST_DIR/run/powos"
+    # Lock file must be writable in the test env (real default is /run/powos)
+    export POWOS_SYNC_LOCK_FILE="$TEST_DIR/run/powos/sync.lock"
+    # Fake USB mount for RAM ↔ USB sync tests (sync.sh reads this at source time)
+    export POWOS_USB_MOUNT="$TEST_DIR/usb"
+    mkdir -p "$POWOS_USB_MOUNT"
     mkdir -p "$HOME/.config/powos"
 
     # Source backup script (for git operations)
@@ -191,6 +196,93 @@ test_ram_usb_sync_functions_exist() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Tests: Conflict Detection (RAM ↔ USB)
+# ─────────────────────────────────────────────────────────────────
+
+test_conflict_detection() {
+    echo ""
+    echo "Test: RAM ↔ USB conflict detection"
+
+    mkdir -p "$POWOS_USB_MOUNT"
+    local result
+
+    # Case 1: no marker → no conflict (first sync)
+    rm -f "$SYNC_MARKER"
+    result=$(check_for_conflicts || echo "conflict")
+    assert_equals "none" "$result" "No marker → no conflict"
+
+    # Case 2: marker from THIS machine → no conflict
+    cat > "$SYNC_MARKER" << EOF
+# PowOS Sync Marker - DO NOT EDIT
+SYNC_MACHINE_ID="$MACHINE_ID"
+SYNC_TIMESTAMP="1700000000"
+SYNC_DATE="2026-01-01T00:00:00+00:00"
+EOF
+    result=$(check_for_conflicts || echo "conflict")
+    assert_equals "none" "$result" "Same-machine marker → no conflict"
+
+    # Case 3: marker from ANOTHER machine → conflict MUST be detected.
+    # The capture pattern below is exactly what ram_sync_now / bin/powos use;
+    # it must yield exactly "conflict" (the old echo+return-1 bug produced
+    # "conflict\nconflict" and made real conflicts undetectable).
+    cat > "$SYNC_MARKER" << EOF
+# PowOS Sync Marker - DO NOT EDIT
+SYNC_MACHINE_ID="other-machine-deadbeef"
+SYNC_TIMESTAMP="1700000000"
+SYNC_DATE="2026-01-01T00:00:00+00:00"
+EOF
+    result=$(check_for_conflicts || echo "conflict")
+    assert_equals "conflict" "$result" "Mismatched machine marker → conflict detected"
+
+    # Return-code contract: non-zero on conflict
+    ((TESTS_RUN++)) || true
+    if ! check_for_conflicts >/dev/null; then
+        echo -e "${GREEN}✓${NC} check_for_conflicts returns non-zero on conflict"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} check_for_conflicts returned zero despite conflict"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    rm -f "$SYNC_MARKER"
+}
+
+test_sync_marker_not_sourced() {
+    echo ""
+    echo "Test: Sync marker is parsed, never executed"
+
+    mkdir -p "$POWOS_USB_MOUNT"
+    local canary="$TEST_DIR/marker-pwned"
+    rm -f "$canary"
+
+    # A hostile marker on removable media: sourcing it would run these lines
+    cat > "$SYNC_MARKER" << EOF
+SYNC_MACHINE_ID="evil-machine"
+touch "$canary"
+SYNC_INJECT="\$(touch "$canary")"
+SYNC_DATE="2026-01-01T00:00:00+00:00"
+EOF
+
+    local machine
+    machine=$(read_sync_marker)
+    assert_equals "evil-machine" "$machine" "Marker machine id parsed correctly"
+
+    get_conflict_details >/dev/null 2>&1 || true
+    check_for_conflicts >/dev/null 2>&1 || true
+
+    ((TESTS_RUN++)) || true
+    if [[ ! -f "$canary" ]]; then
+        echo -e "${GREEN}✓${NC} Marker content was not executed"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Marker content WAS EXECUTED (arbitrary code from USB!)"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    rm -f "$SYNC_MARKER" "$canary"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Tests: Git Repository
 # ─────────────────────────────────────────────────────────────────
 
@@ -311,10 +403,15 @@ test_sync_push() {
     ensure_git_repo
     sync_setup "$TEST_DIR/remote"
 
-    # Create some content
-    echo "test content" > "$POWOS_STATE_DIR/sources/test.txt"
+    # Create content in a WORKING dir: push must collect working dirs first
+    # (previously it pushed a stale state repo and never collected anything)
+    mkdir -p "$POWOS_ROOT/sources"
+    echo "push content" > "$POWOS_ROOT/sources/push-test.txt"
 
-    sync_push -m "Test push" 2>/dev/null || true
+    sync_push -m "Test push" || true
+
+    # Push must have collected the working-dir file into the state repo
+    assert_file_exists "$POWOS_STATE_DIR/sources/push-test.txt" "Push collected working dirs first"
 
     cd "$POWOS_STATE_DIR"
     local branch
@@ -328,7 +425,8 @@ test_sync_push() {
         echo -e "${GREEN}✓${NC} Changes pushed to remote"
         ((TESTS_PASSED++)) || true
     else
-        echo -e "${YELLOW}⊘${NC} Push test skipped (may need network or branch mismatch)"
+        echo -e "${RED}✗${NC} Changes not pushed to remote (local bare repo - no network needed)"
+        ((TESTS_FAILED++)) || true
     fi
 }
 
@@ -385,19 +483,79 @@ test_sync_export() {
     mkdir -p "$POWOS_STATE_DIR/sources/export-test"
     echo "export content" > "$POWOS_STATE_DIR/sources/export-test/file.txt"
 
+    # Plant secrets that physically sit in the state dir (gitignored, but a
+    # naive tar would archive them anyway) - they must NOT be exported
+    mkdir -p "$POWOS_STATE_DIR/config"
+    echo 'POWOS_SYNC_REMOTE="https://user:supersecrettoken@example.com/r.git"' \
+        > "$POWOS_STATE_DIR/config/sync.conf"
+    echo "API_KEY=leakme" > "$POWOS_STATE_DIR/.env"
+    echo "fakekey" > "$POWOS_STATE_DIR/leaked.key"
+
     local export_file="$TEST_DIR/test-export.tar.gz"
-    sync_export "$export_file" 2>/dev/null || true
+    sync_export "$export_file" || true
 
     assert_file_exists "$export_file" "Export file created"
 
-    # Check it contains expected content (check for sources directory)
+    local listing
+    listing=$(tar -tzf "$export_file" 2>/dev/null || true)
+
+    assert_contains "$listing" "sources" "Export contains sources content"
+
     ((TESTS_RUN++)) || true
-    if tar -tzf "$export_file" 2>/dev/null | grep -q "sources"; then
-        echo -e "${GREEN}✓${NC} Export contains expected content"
+    if [[ "$listing" != *"sync.conf"* ]]; then
+        echo -e "${GREEN}✓${NC} Export excludes sync.conf (may embed credentials)"
         ((TESTS_PASSED++)) || true
     else
-        echo -e "${YELLOW}⊘${NC} Export content check skipped (tar format may vary)"
+        echo -e "${RED}✗${NC} Export leaked sync.conf"
+        ((TESTS_FAILED++)) || true
     fi
+
+    ((TESTS_RUN++)) || true
+    if [[ "$listing" != *".env"* && "$listing" != *"leaked.key"* ]]; then
+        echo -e "${GREEN}✓${NC} Export excludes .env and *.key secrets"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Export leaked secrets (.env or *.key)"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    rm -f "$POWOS_STATE_DIR/config/sync.conf" "$POWOS_STATE_DIR/.env" "$POWOS_STATE_DIR/leaked.key"
+}
+
+test_sync_export_default_location() {
+    echo ""
+    echo "Test: Export default output lands outside the state dir"
+
+    ensure_git_repo
+
+    local outdir="$TEST_DIR/export-cwd"
+    mkdir -p "$outdir"
+    cd "$outdir"
+
+    sync_export || true
+
+    ((TESTS_RUN++)) || true
+    local produced
+    produced=$(find "$outdir" -maxdepth 1 -name 'powos-state-*.tar.gz' 2>/dev/null | head -1)
+    if [[ -n "$produced" ]]; then
+        echo -e "${GREEN}✓${NC} Default export written to caller's directory"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Default export not found in caller's directory"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    ((TESTS_RUN++)) || true
+    if ! find "$POWOS_STATE_DIR" -maxdepth 1 -name 'powos-state-*.tar.gz' 2>/dev/null | grep -q .; then
+        echo -e "${GREEN}✓${NC} No export tarball inside the state dir"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Export tarball landed inside the state dir"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    rm -f "$outdir"/powos-state-*.tar.gz
+    cd "$TEST_DIR"
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -546,6 +704,10 @@ main() {
     test_sync_functions_exist
     test_ram_usb_sync_functions_exist
 
+    # Conflict detection tests (RAM ↔ USB)
+    test_conflict_detection
+    test_sync_marker_not_sourced
+
     # Git repo tests
     test_ensure_git_repo
     test_gitignore_content
@@ -563,8 +725,9 @@ main() {
     test_sync_to_working_dirs
     test_sync_push
 
-    # Export test
+    # Export tests
     test_sync_export
+    test_sync_export_default_location
 
     # Machine branch tests
     test_get_machine_branch

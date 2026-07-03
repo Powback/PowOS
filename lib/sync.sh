@@ -22,10 +22,17 @@ NC='\033[0m'
 
 # Paths
 STATE_DIR="/run/powos"
-USB_MOUNT="${POWOS_USB_MOUNT:-/run/powos/usb}"
+# USB data partition mount point. The dracut module bind-mounts the USB
+# layers at /run/powos/usb-layers (see lib/dracut/90powos-ramboot).
+USB_MOUNT="${POWOS_USB_MOUNT:-/run/powos/usb-layers}"
+# The sync marker lives ON the USB filesystem (under the mounted data
+# partition) so it travels with the drive between machines.
 SYNC_MARKER="${USB_MOUNT}/.powos-sync"
 LAYER_SYNC="/usr/lib/powos/ramfs/layer-sync.py"
-CACHEFS_SYNC="/usr/lib/powos/cachefs/cachefs-sync.py"
+# Flag file: 'powos sync --keep-usb' was chosen; RAM state is stale and
+# must not be synced to USB until the machine reboots. Lives in tmpfs on
+# purpose - it should expire exactly at reboot.
+KEEP_USB_FLAG="$STATE_DIR/sync-keep-usb"
 
 # Get machine ID
 get_machine_id() {
@@ -42,12 +49,27 @@ MACHINE_ID=$(get_machine_id)
 # Sync Marker Management
 # ═══════════════════════════════════════════════════════════════════
 
+# Safely read a single KEY="value" entry from a marker/state file.
+# These files are NEVER sourced: the sync marker sits on removable media
+# and sourcing it would execute arbitrary code as root. Only the value of
+# the requested key is extracted; everything else is ignored.
+read_marker_value() {
+    local file="$1" key="$2" line
+    [[ -f "$file" ]] || return 1
+    line=$(grep -m1 "^${key}=" "$file" 2>/dev/null) || return 1
+    line="${line#*=}"
+    # Strip optional surrounding quotes
+    line="${line%\"}"
+    line="${line#\"}"
+    printf '%s\n' "$line"
+}
+
 # Read sync marker from USB
 read_sync_marker() {
     if [[ -f "$SYNC_MARKER" ]]; then
-        # shellcheck source=/dev/null
-        source "$SYNC_MARKER"
-        echo "${SYNC_MACHINE_ID:-unknown}"
+        local id
+        id=$(read_marker_value "$SYNC_MARKER" "SYNC_MACHINE_ID") || id=""
+        echo "${id:-unknown}"
     else
         echo "none"
     fi
@@ -84,7 +106,14 @@ get_ram_state_hash() {
 # Conflict Detection
 # ═══════════════════════════════════════════════════════════════════
 
-# Check if USB was modified by another machine
+# Check if USB was modified by another machine.
+#
+# Contract: prints "none" and returns 0 when there is no conflict;
+#           prints NOTHING and returns 1 on conflict.
+# Callers capture it as: status=$(check_for_conflicts || echo "conflict")
+# (Printing "conflict" AND returning 1 would make that capture yield
+# "conflict\nconflict", which never equals "conflict" - the old bug that
+# made real conflicts undetectable.)
 check_for_conflicts() {
     local last_machine
     last_machine=$(read_sync_marker)
@@ -102,7 +131,6 @@ check_for_conflicts() {
     fi
 
     # Different machine wrote to USB!
-    echo "conflict"
     return 1
 }
 
@@ -113,12 +141,13 @@ get_conflict_details() {
         return
     fi
 
-    # shellcheck source=/dev/null
-    source "$SYNC_MARKER"
+    local marker_machine marker_date
+    marker_machine=$(read_marker_value "$SYNC_MARKER" "SYNC_MACHINE_ID") || marker_machine=""
+    marker_date=$(read_marker_value "$SYNC_MARKER" "SYNC_DATE") || marker_date=""
 
     echo "USB was last modified by:"
-    echo "  Machine: ${SYNC_MACHINE_ID:-unknown}"
-    echo "  Date:    ${SYNC_DATE:-unknown}"
+    echo "  Machine: ${marker_machine:-unknown}"
+    echo "  Date:    ${marker_date:-unknown}"
     echo ""
     echo "This machine: $MACHINE_ID"
 }
@@ -145,10 +174,11 @@ is_usb_connected() {
         return 0
     fi
 
-    # Also check state file
+    # Also check state file (parsed, never sourced)
     if [[ -f "$STATE_DIR/usb-state" ]]; then
-        source "$STATE_DIR/usb-state"
-        [[ "${USB_STATUS:-}" == "connected" ]] && return 0
+        local usb_status
+        usb_status=$(read_marker_value "$STATE_DIR/usb-state" "USB_STATUS") || usb_status=""
+        [[ "$usb_status" == "connected" ]] && return 0
     fi
 
     return 1
@@ -208,11 +238,12 @@ ram_sync_status() {
 
     # Last sync time
     if [[ -f "$SYNC_MARKER" ]]; then
-        # shellcheck source=/dev/null
-        source "$SYNC_MARKER"
+        local last_date last_machine_id
+        last_date=$(read_marker_value "$SYNC_MARKER" "SYNC_DATE") || last_date=""
+        last_machine_id=$(read_marker_value "$SYNC_MARKER" "SYNC_MACHINE_ID") || last_machine_id=""
         echo -e "${CYAN}Last Sync:${NC}"
-        echo "  Time:    ${SYNC_DATE:-unknown}"
-        echo "  Machine: ${SYNC_MACHINE_ID:-unknown}"
+        echo "  Time:    ${last_date:-unknown}"
+        echo "  Machine: ${last_machine_id:-unknown}"
     fi
 }
 
@@ -220,6 +251,15 @@ ram_sync_now() {
     echo -e "${BOLD}${CYAN}Syncing RAM ↔ USB${NC}"
     echo "════════════════════════════════════════"
     echo ""
+
+    # Refuse to sync if the user chose --keep-usb: RAM is stale and syncing
+    # it would destroy the USB state they explicitly decided to keep.
+    if [[ -f "$KEEP_USB_FLAG" ]]; then
+        echo -e "${RED}Sync blocked:${NC} 'powos sync --keep-usb' is pending."
+        echo "RAM state is stale. Reboot to load the USB state before syncing again."
+        echo "(Or run 'powos sync --keep-ram' to change your mind.)"
+        return 1
+    fi
 
     # Check USB
     if ! is_usb_connected; then
@@ -256,20 +296,32 @@ ram_sync_now() {
     echo "No conflicts detected. Syncing..."
     echo ""
 
-    # Sync layer changes (OS customizations)
+    # Sync layer changes (OS customizations).
+    # "Script missing" and "sync failed" are different situations: a missing
+    # script is a skip, a failed sync must abort WITHOUT updating the marker
+    # (a clean marker over a failed sync would silently hide data loss).
     echo "Step 1/3: Syncing OS layer changes..."
-    if [[ -x "$LAYER_SYNC" ]]; then
-        python3 "$LAYER_SYNC" --sync-now 2>/dev/null || echo "  (layer sync not active)"
+    if [[ -f "$LAYER_SYNC" ]]; then
+        if ! python3 "$LAYER_SYNC" --sync-now; then
+            echo ""
+            echo -e "${RED}✗ Layer sync FAILED${NC}"
+            echo "  RAM changes were NOT (fully) written to USB."
+            echo "  The sync marker was left untouched. Fix the error above and retry."
+            return 1
+        fi
     else
-        echo "  (layer sync not available)"
+        echo "  (layer sync script not installed at $LAYER_SYNC - skipping)"
     fi
 
-    # Sync CacheFS (user data)
-    echo "Step 2/3: Syncing user data..."
-    if [[ -x "$CACHEFS_SYNC" ]]; then
-        python3 "$CACHEFS_SYNC" --sync-now 2>/dev/null || echo "  (cachefs sync not active)"
+    # User data (/home).
+    # NOTE: CacheFS write-back sync is not implemented upstream, so there is
+    # nothing to invoke here. Be honest about it instead of pretending.
+    echo "Step 2/3: User data (/home)..."
+    if grep -qs '^POWOS_CACHEFS_ENABLED=true' /etc/powos/config 2>/dev/null; then
+        echo -e "  ${YELLOW}Warning: CacheFS is enabled but its write-back sync is not${NC}"
+        echo -e "  ${YELLOW}implemented yet - cached user-data writes are NOT flushed here.${NC}"
     else
-        echo "  (cachefs sync not available)"
+        echo "  (direct USB bind-mount - writes go straight to USB, no flush needed)"
     fi
 
     # Update sync marker
@@ -358,14 +410,23 @@ ram_sync_force_ram() {
         return 0
     fi
 
-    # Force sync RAM to USB
-    if [[ -x "$LAYER_SYNC" ]]; then
-        python3 "$LAYER_SYNC" --sync-now --force 2>/dev/null || true
+    # Force sync RAM to USB. On failure, abort WITHOUT writing the marker.
+    if [[ -f "$LAYER_SYNC" ]]; then
+        if ! python3 "$LAYER_SYNC" --sync-now --force; then
+            echo ""
+            echo -e "${RED}✗ Layer sync FAILED - USB was not fully overwritten.${NC}"
+            echo "  The sync marker was left untouched."
+            return 1
+        fi
+    else
+        echo "  (layer sync script not installed at $LAYER_SYNC - skipping)"
     fi
 
-    if [[ -x "$CACHEFS_SYNC" ]]; then
-        python3 "$CACHEFS_SYNC" --sync-now --force 2>/dev/null || true
-    fi
+    # CacheFS write-back is not implemented; user data on the default
+    # bind-mount is already on USB. Nothing to force here.
+
+    # The user chose RAM as authoritative - clear any pending --keep-usb intent
+    rm -f "$KEEP_USB_FLAG" 2>/dev/null || true
 
     # Update marker
     write_sync_marker
@@ -386,21 +447,53 @@ ram_sync_force_usb() {
         return 0
     fi
 
-    # This is trickier - we need to reload from USB
-    # For now, just update the marker and let user know to reboot
-    echo ""
-    echo -e "${YELLOW}Note: Full reload requires reboot.${NC}"
-    echo ""
-    echo "Your options:"
-    echo "  1. Reboot now - cleanly load USB state"
-    echo "  2. Continue working - USB marker updated, but RAM still has old changes"
-    echo ""
+    # Keeping USB means the current RAM upper is now STALE. Two things must
+    # happen or the choice is meaningless:
+    #   1. Stop the layer-sync daemon, or its next 60s cycle would push the
+    #      stale RAM upper onto the USB state we just chose to keep.
+    #   2. Record the intent so nothing re-syncs RAM before the reboot that
+    #      actually loads the USB state.
 
-    # Update marker to indicate USB is authoritative
+    if command -v systemctl &>/dev/null; then
+        if systemctl is-active --quiet powos-layer-sync.service 2>/dev/null; then
+            echo "Stopping layer sync daemon (so RAM cannot overwrite USB)..."
+            if ! systemctl stop powos-layer-sync.service; then
+                echo -e "${RED}✗ Could not stop powos-layer-sync.service.${NC}"
+                echo "  Aborting: the running daemon would overwrite the USB state"
+                echo "  you want to keep. Stop it manually and retry."
+                return 1
+            fi
+        fi
+    fi
+
+    # Persist intent for the rest of this boot (tmpfs: expires at reboot,
+    # which is exactly when it stops being true). ram_sync_now honors this.
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
+    if ! cat > "$KEEP_USB_FLAG" << EOF
+# powos sync --keep-usb chosen at $(date -Iseconds)
+# Layer-sync daemon stopped; RAM changes are stale and must NOT be synced.
+KEEP_USB=1
+KEEP_USB_DATE="$(date -Iseconds)"
+EOF
+    then
+        echo -e "${YELLOW}Warning: could not write $KEEP_USB_FLAG (not root?).${NC}"
+        echo "The layer-sync daemon is stopped, but reboot promptly."
+    fi
+
+    # Mark that this machine has accepted the USB state (resolves the
+    # conflict marker). Safe now: the daemon is stopped and ram_sync_now
+    # refuses to run while the keep-usb flag exists.
     write_sync_marker
 
-    echo -e "${GREEN}✓ Marked USB as authoritative${NC}"
-    echo "Reboot recommended to fully load USB state."
+    echo ""
+    echo -e "${GREEN}✓ USB marked as authoritative${NC}"
+    echo ""
+    echo -e "${YELLOW}IMPORTANT:${NC}"
+    echo "  - The layer-sync daemon has been STOPPED and will not be restarted."
+    echo "  - RAM still contains your old changes; they will NOT be synced."
+    echo "  - A REBOOT IS REQUIRED to actually load the USB state."
+    echo ""
+    echo "Reboot now to complete: sudo reboot"
 }
 
 ram_sync_merge() {
@@ -462,16 +555,20 @@ ram_sync_show_diff() {
     echo -e "${CYAN}Differences between RAM and USB:${NC}"
     echo ""
 
-    if [[ -d /run/powos-overlay/upper ]] && [[ -d "$USB_MOUNT" ]]; then
-        # Show basic diff
+    local ram_upper="/run/powos-overlay/upper"
+    local usb_custom="$USB_MOUNT/layers/custom"
+
+    if [[ -d "$ram_upper" ]] && [[ -d "$usb_custom" ]]; then
+        # Match each side by its exact root: both roots live under /run, so a
+        # bare "Only in /run" would match BOTH sides and mislabel the diff.
         echo "Files only in RAM (your changes):"
-        diff -rq /run/powos-overlay/upper "$USB_MOUNT/layers/custom" 2>/dev/null | grep "Only in /run" | head -20 || echo "  (none or can't compare)"
+        diff -rq "$ram_upper" "$usb_custom" 2>/dev/null | grep -F "Only in $ram_upper" | head -20 || echo "  (none or can't compare)"
         echo ""
         echo "Files only on USB (other machine's changes):"
-        diff -rq /run/powos-overlay/upper "$USB_MOUNT/layers/custom" 2>/dev/null | grep "Only in $USB_MOUNT" | head -20 || echo "  (none or can't compare)"
+        diff -rq "$ram_upper" "$usb_custom" 2>/dev/null | grep -F "Only in $usb_custom" | head -20 || echo "  (none or can't compare)"
         echo ""
         echo "Files that differ:"
-        diff -rq /run/powos-overlay/upper "$USB_MOUNT/layers/custom" 2>/dev/null | grep "differ" | head -20 || echo "  (none or can't compare)"
+        diff -rq "$ram_upper" "$usb_custom" 2>/dev/null | grep "differ" | head -20 || echo "  (none or can't compare)"
     else
         echo "Cannot compare - paths not available"
     fi
@@ -493,10 +590,11 @@ get_diff_for_ai() {
     diff_output+="================\n"
     diff_output+="Current machine: $MACHINE_ID\n"
     if [[ -f "$SYNC_MARKER" ]]; then
-        # shellcheck source=/dev/null
-        source "$SYNC_MARKER"
-        diff_output+="USB last modified by: ${SYNC_MACHINE_ID:-unknown}\n"
-        diff_output+="USB last modified at: ${SYNC_DATE:-unknown}\n"
+        local marker_machine marker_date
+        marker_machine=$(read_marker_value "$SYNC_MARKER" "SYNC_MACHINE_ID") || marker_machine=""
+        marker_date=$(read_marker_value "$SYNC_MARKER" "SYNC_DATE") || marker_date=""
+        diff_output+="USB last modified by: ${marker_machine:-unknown}\n"
+        diff_output+="USB last modified at: ${marker_date:-unknown}\n"
     fi
     diff_output+="\n"
 
@@ -504,7 +602,9 @@ get_diff_for_ai() {
     diff_output+="FILES ONLY IN RAM (current machine's changes):\n"
     diff_output+="----------------------------------------------\n"
     local ram_only
-    ram_only=$(diff -rq "$ram_upper" "$usb_custom" 2>/dev/null | grep "Only in /run" | head -30 || true)
+    # Match by exact root: both roots are under /run, so "Only in /run" would
+    # match both sides and feed the AI advisor inverted facts.
+    ram_only=$(diff -rq "$ram_upper" "$usb_custom" 2>/dev/null | grep -F "Only in $ram_upper" | head -30 || true)
     if [[ -n "$ram_only" ]]; then
         diff_output+="$ram_only\n"
     else
@@ -516,7 +616,7 @@ get_diff_for_ai() {
     diff_output+="FILES ONLY ON USB (other machine's changes):\n"
     diff_output+="--------------------------------------------\n"
     local usb_only
-    usb_only=$(diff -rq "$ram_upper" "$usb_custom" 2>/dev/null | grep "Only in $USB_MOUNT" | head -30 || true)
+    usb_only=$(diff -rq "$ram_upper" "$usb_custom" 2>/dev/null | grep -F "Only in $usb_custom" | head -30 || true)
     if [[ -n "$usb_only" ]]; then
         diff_output+="$usb_only\n"
     else

@@ -4,7 +4,10 @@
 # configurations) between your USB and a remote git repository.
 #
 # Copy this to ~/.config/powos/sync.conf and edit as needed.
-# Or run: powos state setup <remote-url>
+# Or run: powos backup setup <remote-url>
+#
+# Precedence: /etc/powos/sync.conf is loaded first, then this file -
+# your user settings override system defaults.
 
 # ═══════════════════════════════════════════════════════════════════
 # Remote Repository
@@ -15,6 +18,11 @@
 #   git@github.com:username/powos-state.git
 #   https://github.com/username/powos-state.git
 #   git@gitlab.com:username/powos-state.git
+#
+# SECURITY: avoid embedding credentials in the URL
+# (https://user:TOKEN@host/...). This file is kept out of backups, but the
+# token still sits here in plain text - prefer SSH keys or a credential
+# helper.
 POWOS_SYNC_REMOTE=""
 
 # ═══════════════════════════════════════════════════════════════════
@@ -80,15 +88,10 @@ POWOS_MACHINE_ID=""
 # Advanced Options
 # ═══════════════════════════════════════════════════════════════════
 
-# Git user name for commits (leave empty to use system default)
+# Git user name for state-repo commits
+# (leave empty to use the default: "PowOS (<hostname>)")
 POWOS_GIT_USER_NAME=""
 
-# Git user email for commits (leave empty to use system default)
+# Git user email for state-repo commits
+# (leave empty to use the default: "powos@<hostname>")
 POWOS_GIT_USER_EMAIL=""
-
-# Default branch name for new repositories
-POWOS_DEFAULT_BRANCH="main"
-
-# Conflict resolution strategy for auto-pull
-# Options: merge, rebase, theirs (discard local)
-POWOS_PULL_STRATEGY="merge"
