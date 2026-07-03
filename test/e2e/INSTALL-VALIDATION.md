@@ -77,6 +77,45 @@ manual-only:
 - [ ] Post-install: RTC is local time (`timedatectl` — Windows clock matches).
 - [ ] Shared NTFS partition (`--shared-gb N`) is created, mountable by both OSes.
 
+## Games partition + Steam (`powos games`)
+
+- [ ] `powos games status` on a fresh install reports the POWOS-GAMES partition
+      (created by the installer's auto reservation, or by `powos games create`).
+- [ ] `powos games create --size N --dry-run` prints a plan bounded inside a real
+      free block and changes nothing; without `--dry-run` it creates + formats
+      NTFS (label POWOS-GAMES, GPT type 0700) and refuses if the label exists.
+- [ ] `powos games mount` mounts it at `/var/mnt/games` via ntfs3 (uid/gid,
+      windows_names).
+- [ ] `powos games steam-setup` adds the library to Steam and keeps Proton
+      `compatdata`/`shadercache` on native btrfs (symlinks), Steam closed.
+- [ ] Windows sees POWOS-GAMES as a lettered drive and NO "format this disk?"
+      prompt for any PowOS/Linux partition (GPT type-GUID exposure contract).
+
+## Bare-metal Windows on the USB (`powos windows`) — EXPERIMENTAL
+
+- [ ] `powos windows fetch-iso --slim` downloads the OFFICIAL MS ISO, SHA-256
+      verifies it (aborts on mismatch), and produces a slimmed ISO via wimlib.
+- [ ] `powos windows create --size N --dry-run` plans a thin `windows.vhdx` on
+      POWOS-GAMES with no partitioning.
+- [ ] `powos windows install --iso <slim.iso>` (or `--fetch --slim`) runs
+      zero-touch: the ESP is backed up first (abort if backup fails) and
+      host-unmounted; Windows Setup completes unattended into the VHDX.
+- [ ] `powos windows finalize` creates the host-side firmware entry; `powos boot
+      windows` resolves it.
+- [ ] Reboot → **native VHD boot reaches the Windows desktop** (cold boot by
+      design — no bare-metal resume with the `vhd` backend).
+- [ ] **ANTI-CHEAT (the load-bearing test): launch an EAC/BattlEye title on the
+      slimmed install — it MUST load.** If it fails, the slim removed something it
+      needs; the whole bare-metal path is pointless without this. See docs/PROBLEM.md.
+- [ ] Steam is preinstalled and its library points at `<letter>:\SteamLibrary`
+      (the same folder `powos games steam-setup` uses) — a game installed on one
+      OS appears on the other.
+- [ ] `WINDOWS_BACKEND=partition` (config/windows.conf): the alternate backend
+      installs into a dedicated WIN-ESP + POWOS-WIN carved from the burn-time
+      `--windows-gb` tail and gives Windows real hibernation. Validate separately.
+- [ ] ESP restore path works: after a Windows update that touches the shared ESP,
+      the printed restore one-liner recovers PowOS's boot files.
+
 ## Known gaps to close before calling this stable
 
 - Exact `bootc install to-filesystem` flags vs. the shipped bootc version.
