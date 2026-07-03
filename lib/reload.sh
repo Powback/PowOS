@@ -68,6 +68,30 @@ reload_changed_files() {
 reload_needs_build() { reload_changed_files "$1" | grep -qE "$RELOAD_NEEDS_BUILD_RE"; }
 reload_mark_applied() { [[ -d "$1/.git" ]] && git -C "$1" rev-parse HEAD > "$RELOAD_APPLIED" 2>/dev/null || true; }
 
+# After a successful live apply, act on change-types that a file copy alone
+# doesn't finish: systemd units (daemon-reload/restart), distrobox.ini
+# (re-assemble), overlays/sources (rebuild). Each is an opt-in prompt.
+# Call BEFORE reload_mark_applied so the change list is still accurate.
+reload_post_apply() {
+    local changed; changed="$(reload_changed_files "$1")"
+    [[ -n "$changed" ]] || return 0
+
+    if grep -qE '^systemd/.*\.(service|timer|socket)$' <<<"$changed"; then
+        plog "systemd units changed → daemon-reload"
+        sudo systemctl daemon-reload 2>/dev/null || true
+        local units u; units=$(grep -oE 'powos-[a-z-]+\.(service|timer|socket)' <<<"$changed" | sort -u | tr '\n' ' ')
+        if [[ -n "$units" ]] && confirm "Restart changed units? ($units)"; then
+            for u in $units; do sudo systemctl restart "$u" 2>/dev/null && pok "restarted $u" || pwarn "couldn't restart $u"; done
+        fi
+    fi
+    if grep -qE '^containers/distrobox\.ini$' <<<"$changed" && confirm "distrobox.ini changed — re-assemble containers now?"; then
+        powos containers assemble || pwarn "assemble reported issues."
+    fi
+    if grep -qE '^(overlays|sources)/' <<<"$changed" && confirm "overlays/sources changed — rebuild overlays now?"; then
+        powos update overlays || pwarn "overlay rebuild reported issues."
+    fi
+}
+
 # SAFETY #1: never apply a file with a syntax error — that can brick the CLI
 # live. bash -n every changed shell file, py_compile every changed .py. Returns
 # non-zero (and prints the errors) if anything is broken.
@@ -175,6 +199,7 @@ cmd_reload() {
     elif [[ $rc -ne 0 ]]; then
         perr "update self failed (rc=$rc)."; return "$rc"
     fi
+    reload_post_apply "$src"      # systemd reload / distrobox reassemble / overlay rebuild
     reload_mark_applied "$src"
     pok "Live & verified. For base/package changes: powos reload --build"
 }
