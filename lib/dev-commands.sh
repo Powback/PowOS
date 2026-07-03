@@ -45,6 +45,9 @@ cmd_dev() {
         overrides)
             dev_overrides "$@"
             ;;
+        patch)
+            dev_patch "$@"
+            ;;
         build)
             dev_build "$@"
             ;;
@@ -74,6 +77,8 @@ Commands:
   new [options] <name>  Create a new project from scratch
   fork <upstream>       Fork an existing app to modify (build from source)
                         Examples: kde:dolphin, kde:konsole, github:user/repo
+  patch <name> [desc]   Turn a fork's edits into a COMMITTABLE patch under
+                        sources/… (version-controlled, baked into every build)
   override <app>        Override an installed app NATIVELY: seed a complete copy
                         of its files, edit, layer over the base. Disable = base
                         returns. Example: powos dev override dolphin
@@ -1292,6 +1297,62 @@ dev_override_diff() {
         fi
     done < <(find "$proj/src/usr" -type f 2>/dev/null | sort)
     plog "vs base '$pkg':  ${mod} modified, ${add} added, ${same} unchanged"
+}
+
+# Turn a fork's edits (src vs upstream) into a COMMITTABLE patch under sources/,
+# so the change is version-controlled and baked into every image build. This is
+# the bridge from runtime `dev fork` (per-machine) to the committable sources/
+# overlay system. The patch is git-format (a/ b/) so `git apply`/`patch -p1`
+# both accept it — generated via a throwaway git repo (no text munging).
+dev_patch() {
+    local name="${1:-}" desc="${2:-changes}"
+    [[ -z "$name" ]] && { plog "Usage: powos dev patch <name> [description]"; return 1; }
+    local proj="$PROJECTS_DIR/$name"
+    if [[ ! -d "$proj/upstream" || ! -d "$proj/src" ]]; then
+        perr "'$name' is not a fork with upstream+src. Fork one: powos dev fork kde:$name"
+        return 1
+    fi
+    command -v git &>/dev/null || { perr "git is required to generate a patch."; return 1; }
+
+    # Repo sources dir: the bundled source on a running system, else the dev
+    # checkout that holds this lib.
+    local sources="${POWOS_SRC:-/var/lib/powos/src}/sources"
+    [[ -d "$sources" ]] || sources="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/sources"
+
+    # KDE forks share sources/kde/patches/<app>/; others get their own tree.
+    local utype dest
+    utype="$(_dev_conf_get "$proj/project.conf" UPSTREAM_TYPE)"
+    if [[ "$utype" == "kde" ]]; then dest="$sources/kde/patches/$name"
+    else dest="$sources/$name/patches/$name"; fi
+    mkdir -p "$dest"
+
+    # Diff src vs a pristine-upstream git base → clean a/ b/ patch (incl. deletions).
+    local tmp; tmp="$(mktemp -d)"
+    cp -a "$proj/upstream/." "$tmp/" 2>/dev/null
+    ( cd "$tmp" && git init -q && git add -A \
+        && git -c user.email=powos@localhost -c user.name=PowOS commit -qm base ) 2>/dev/null
+    if command -v rsync &>/dev/null; then
+        rsync -a --delete --exclude=.git "$proj/src/" "$tmp/"
+    else
+        cp -a "$proj/src/." "$tmp/"
+    fi
+    local patch; patch="$(cd "$tmp" && git add -A && git -c core.autocrlf=false diff --cached)"
+    rm -rf "$tmp"
+
+    if [[ -z "$patch" ]]; then
+        pwarn "No changes between src and upstream — nothing to patch."
+        return 0
+    fi
+
+    local count n out
+    count="$(find "$dest" -maxdepth 1 -name '*.patch' 2>/dev/null | wc -l)"
+    n="$(printf '%03d' "$((count + 1))")"
+    out="$dest/${n}-${desc}.patch"
+    printf '%s\n' "$patch" > "$out"
+
+    pok "Wrote committable patch → $out"
+    plog "Review it, then:  git add \"$out\" && git commit -m \"$name: $desc\""
+    plog "Every image build applies it to the app source (git apply / patch -p1)."
 }
 
 dev_enable() {
