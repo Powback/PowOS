@@ -77,6 +77,7 @@ Commands:
   override <app>        Override an installed app NATIVELY: seed a complete copy
                         of its files, edit, layer over the base. Disable = base
                         returns. Example: powos dev override dolphin
+  override --diff <n>   Show what your override changes vs the pristine base
   overrides             List app overrides (● = active) and what each shadows
   build <name>          Build a project
   enable <name>         Install project to system (as overlay). For overrides,
@@ -1189,9 +1190,11 @@ _dev_missing_files() {
 _dev_conf_get() { sed -n "s/^$2=\"\\(.*\\)\"/\\1/p" "$1" 2>/dev/null; }
 
 dev_override() {
+    if [[ "${1:-}" == "--diff" ]]; then shift; dev_override_diff "$@"; return $?; fi
     local app="${1:-}" name="${2:-}"
     if [[ -z "$app" ]]; then
         plog "Usage: powos dev override <app|rpm-name> [name]"
+        plog "       powos dev override --diff <name>   (what your override changes)"
         plog "Seed a complete native copy of an installed app, edit it, layer it"
         plog "over the base (disable to restore).  e.g. powos dev override dolphin"
         return 1
@@ -1265,6 +1268,38 @@ dev_overrides() {
         fi
     done
     [[ $found -eq 0 ]] && plog "(none) — create one: powos dev override <app>"
+}
+
+# Show what an override CHANGES vs the pristine base. Most accurate when the
+# override is DISABLED — then /usr holds the base files. If it's enabled, /usr
+# already IS your override, so we say so (the diff would show nothing).
+dev_override_diff() {
+    local name="${1:-}"
+    [[ -z "$name" ]] && { plog "Usage: powos dev override --diff <name>"; return 1; }
+    local proj="$PROJECTS_DIR/$name" conf="$PROJECTS_DIR/$name/project.conf"
+    if [[ ! -f "$conf" ]] || ! grep -q 'PROJECT_TYPE="override"' "$conf"; then
+        perr "'$name' is not an override project (make one: powos dev override <app>)."
+        return 1
+    fi
+    [[ -d "$proj/src/usr" ]] || { perr "No seeded files at $proj/src/usr."; return 1; }
+    local pkg; pkg="$(_dev_conf_get "$conf" OVERRIDE_PKG)"
+
+    if [[ -L "/var/lib/extensions/$name" ]]; then
+        pwarn "'$name' is ENABLED — /usr is your override, not the base."
+        pwarn "Disable it for an accurate diff:  powos dev disable $name"
+    fi
+
+    local f rel mod=0 add=0 same=0
+    while read -r f; do
+        rel="${f#"$proj/src"}"           # /usr/… path this file shadows
+        if [[ -e "$rel" ]]; then
+            if cmp -s "$f" "$rel"; then same=$((same+1))
+            else echo -e "  ${YELLOW}M${NC} $rel"; mod=$((mod+1)); fi
+        else
+            echo -e "  ${GREEN}+${NC} $rel"; add=$((add+1))
+        fi
+    done < <(find "$proj/src/usr" -type f 2>/dev/null | sort)
+    plog "vs base '$pkg':  ${mod} modified, ${add} added, ${same} unchanged"
 }
 
 dev_enable() {
