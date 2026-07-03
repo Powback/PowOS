@@ -100,6 +100,12 @@ Commands:
   boot windows        Reboot into Windows once (for anti-cheat games), then back
   boot next <name>    One-shot boot into any UEFI entry by name
 
+  cuda enable         Set up the CUDA toolkit in a GPU-passthrough container
+  cuda enter          Shell into the CUDA env (nvcc, python, gpu)
+  cuda run <cmd...>   Run one command inside (e.g. cuda run nvcc --version)
+  cuda status         Container / toolkit / GPU visibility
+  cuda disable        Remove the CUDA container
+
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build bootable PowOS ISO
   build test          Build container image only (for testing)
@@ -2614,6 +2620,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/boot-manager.sh"
         cmd_boot "$@"
+        ;;
+    cuda)
+        shift
+        source "$POWOS_LIB/cuda.sh"
+        cmd_cuda "$@"
         ;;
     build|b)
         shift

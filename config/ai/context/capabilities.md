@@ -72,9 +72,11 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   layers/base-<name>/), `remove`. Same-family swaps work (nvidia open/closed, amd,
   newer/older bazzite/ublue); non-bootc distro is NOT a drop-in. ⚠️ boot-critical,
   needs VM validation. Each base is several GB.
-- CUDA: base has the NVIDIA driver (CUDA *runtime* works). Full toolkit (nvcc/cuDNN)
-  is NOT in the base — use the `powos-cuda` distrobox (nvidia/cuda devel image).
-  `powos-python` has GPU passthrough but no toolkit.
+- CUDA (`powos cuda enable|enter|run|status|disable`): base has the NVIDIA driver
+  (CUDA *runtime* works). Full toolkit (nvcc/cuDNN) is NOT baked in — it lives in
+  the `powos-cuda` distrobox (GPU passed through, nvcc exported to host). Image is
+  CUDA 12.8 cuDNN — **≥12.8 is REQUIRED to compile for RTX 50-series (sm_120)**;
+  12.4 silently can't target Blackwell. `powos-python` has passthrough but no toolkit.
 
 ## Key paths
 - `/usr/lib/powos/` scripts · `/etc/powos/` config · `/run/powos/` runtime state
