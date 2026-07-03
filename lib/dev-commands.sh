@@ -26,6 +26,7 @@ CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 cmd_dev() {
@@ -41,6 +42,12 @@ cmd_dev() {
             ;;
         fork)
             dev_fork "$@"
+            ;;
+        override)
+            dev_override "$@"
+            ;;
+        overrides)
+            dev_overrides "$@"
             ;;
         build)
             dev_build "$@"
@@ -69,11 +76,16 @@ Usage: powos dev <command> [options]
 Commands:
   list                  List all projects
   new [options] <name>  Create a new project from scratch
-  fork <upstream>       Fork an existing app to modify
+  fork <upstream>       Fork an existing app to modify (build from source)
                         Examples: kde:dolphin, kde:konsole, github:user/repo
+  override <app>        Override an installed app NATIVELY: seed a complete copy
+                        of its files, edit, layer over the base. Disable = base
+                        returns. Example: powos dev override dolphin
+  overrides             List app overrides (● = active) and what each shadows
   build <name>          Build a project
-  enable <name>         Install project to system (as overlay)
-  disable <name>        Remove project from system
+  enable <name>         Install project to system (as overlay). For overrides,
+                        warns if it doesn't shadow the whole base app.
+  disable <name>        Remove project from system (restores base app)
   update <name>         Pull upstream changes (forks only)
 
 New/Fork Options:
@@ -1159,6 +1171,117 @@ dev_build() {
     echo "Enable with: powos dev enable $name"
 }
 
+# ── Native app override (seed from the base package's real files) ──────────
+# `dev fork` builds an app from source, which can produce an INCOMPLETE tree
+# (just the binary) and leave a Frankenstein mix with the base app. `dev
+# override` instead seeds a complete native copy of the installed app from
+# `rpm -ql`, so the sysext extension shadows EVERY base file. You edit what you
+# want; disable restores the base cleanly. TODO(hw): sysext override of a base
+# app is validated on real hardware — this is the untested overlay-on-overlay path.
+
+# List a package's /usr files (sysext only merges /usr + /opt). One per line.
+_dev_pkg_usr_files() {
+    rpm -ql "$1" 2>/dev/null | grep -E '^/usr/'
+}
+
+# Base files (list $1) not present in the extension (list $2). Pure/testable.
+_dev_missing_files() {
+    comm -23 <(sort -u "$1") <(sort -u "$2")
+}
+
+dev_override() {
+    local app="${1:-}" name="${2:-}"
+    if [[ -z "$app" ]]; then
+        echo "Usage: powos dev override <app|rpm-name> [name]"
+        echo "  Seed a complete, native override of an installed app so you can"
+        echo "  modify it and layer it over the base (disable to restore base)."
+        echo "  Example: powos dev override dolphin"
+        return 1
+    fi
+    if ! command -v rpm &>/dev/null; then
+        echo -e "${RED}rpm not available — override needs an rpm-based system.${NC}"
+        return 1
+    fi
+
+    # Resolve the owning package: by binary on PATH, else treat $app as the rpm.
+    local pkg="" bin
+    bin="$(command -v "$app" 2>/dev/null || true)"
+    [[ -n "$bin" ]] && pkg="$(rpm -qf --qf '%{NAME}\n' "$bin" 2>/dev/null | head -1)"
+    [[ -z "$pkg" ]] && rpm -q "$app" &>/dev/null && pkg="$app"
+    if [[ -z "$pkg" ]]; then
+        echo -e "${RED}Couldn't find the system package for '$app'.${NC}"
+        echo "Pass the rpm name directly: powos dev override <rpm-name>"
+        return 1
+    fi
+
+    name="${name:-$app}"
+    local proj="$PROJECTS_DIR/$name"
+    if [[ -d "$proj" ]]; then
+        echo -e "${YELLOW}Project '$name' already exists${NC}"
+        return 1
+    fi
+
+    echo -e "${CYAN}Overriding system app '$app'${NC} (package: ${BOLD}$pkg${NC})"
+    mkdir -p "$proj/src"
+
+    # Seed src/ with the base package's /usr files = complete native copy.
+    local f count=0
+    while read -r f; do
+        [[ -e "$f" || -L "$f" ]] || continue
+        if [[ -f "$f" || -L "$f" ]]; then
+            mkdir -p "$proj/src$(dirname "$f")"
+            cp -a "$f" "$proj/src$f" 2>/dev/null && count=$((count+1))
+        fi
+    done < <(_dev_pkg_usr_files "$pkg")
+
+    cat > "$proj/project.conf" << EOF
+PROJECT_NAME="$name"
+PROJECT_TYPE="override"
+OVERRIDE_PKG="$pkg"
+OVERRIDE_APP="$app"
+EOF
+
+    # build.sh: native copy of src/usr → extension (no compile).
+    cat > "$proj/build.sh" << 'BUILD'
+#!/bin/bash
+set -euo pipefail
+SRC="$(cd "$(dirname "$0")/src" && pwd)"
+OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename "$(dirname "$0")")}"
+mkdir -p "$OUTPUT_DIR"
+cp -a "$SRC/usr" "$OUTPUT_DIR/"
+echo "Override built (native copy of $(basename "$(dirname "$0")"))"
+BUILD
+    chmod +x "$proj/build.sh"
+
+    echo -e "${GREEN}✓ Seeded $count files from '$pkg'${NC} → $proj/src/usr"
+    echo ""
+    echo "  This override currently MATCHES the base app (a complete native copy)."
+    echo "  Edit files in $proj/src/usr to change it, then:"
+    echo -e "    ${BOLD}powos dev build $name && powos dev enable $name${NC}"
+    echo "  Turn it off anytime (base app returns):"
+    echo -e "    ${BOLD}powos dev disable $name${NC}"
+}
+
+dev_overrides() {
+    echo -e "${BOLD}App overrides${NC}"
+    local found=0 proj name conf
+    for proj in "$PROJECTS_DIR"/*/; do
+        conf="$proj/project.conf"
+        [[ -f "$conf" ]] || continue
+        # shellcheck disable=SC1090
+        ( source "$conf"; [[ "${PROJECT_TYPE:-}" == "override" ]] ) || continue
+        found=1
+        name="$(basename "$proj")"
+        local pkg; pkg="$(grep -oP '(?<=OVERRIDE_PKG=")[^"]+' "$conf" 2>/dev/null)"
+        if [[ -L "/var/lib/extensions/$name" ]]; then
+            echo -e "  ${GREEN}●${NC} $name ${DIM}(active — overriding $pkg)${NC}"
+        else
+            echo -e "  ○ $name ${DIM}(built, disabled — overrides $pkg)${NC}"
+        fi
+    done
+    [[ $found -eq 0 ]] && echo "  (none) — create one: powos dev override <app>"
+}
+
 dev_enable() {
     local name="${1:-}"
 
@@ -1173,6 +1296,28 @@ dev_enable() {
         echo -e "${RED}Project '$name' not built${NC}"
         echo "Build it first: powos dev build $name"
         return 1
+    fi
+
+    # For override projects, verify the extension shadows the WHOLE base app —
+    # a partial override leaves a Frankenstein mix of your files + base files.
+    local conf="$PROJECTS_DIR/$name/project.conf"
+    if [[ -f "$conf" ]] && grep -q 'PROJECT_TYPE="override"' "$conf"; then
+        local pkg; pkg="$(grep -oP '(?<=OVERRIDE_PKG=")[^"]+' "$conf")"
+        if [[ -n "$pkg" ]] && command -v rpm &>/dev/null; then
+            local base_list ext_list missing
+            base_list="$(mktemp)"; ext_list="$(mktemp)"
+            _dev_pkg_usr_files "$pkg" | sort -u > "$base_list"
+            ( cd "$ext_dir" && find usr -type f -o -type l 2>/dev/null | sed 's|^|/|' ) | sort -u > "$ext_list"
+            missing="$(_dev_missing_files "$base_list" "$ext_list" | grep -cv 'extension-release')"
+            if [[ "${missing:-0}" -gt 0 ]]; then
+                echo -e "${YELLOW}⚠ Override is INCOMPLETE:${NC} ${missing} of '$pkg's files are not in this"
+                echo "  extension — the base versions will still show (Frankenstein mix)."
+                echo "  Re-seed a complete copy with: powos dev override $pkg"
+            else
+                echo -e "${GREEN}✓ Override covers all of '$pkg's files${NC} (clean shadow)"
+            fi
+            rm -f "$base_list" "$ext_list"
+        fi
     fi
 
     echo -e "${CYAN}Enabling: $name${NC}"
