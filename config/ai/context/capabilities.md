@@ -26,7 +26,12 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   - Set RTC to local time to match Windows. Suspend BitLocker before repartitioning.
   - Use the UEFI boot menu (F-key) to pick OS — atomic Bazzite's GRUB won't auto-list Windows.
   - Share only large Steam *assets* on NTFS; keep Proton compatdata/prefixes on native FS.
-- Running both at once = virtualization (Windows VM w/ GPU passthrough needs 2 GPUs); not dual-boot. Reciprocal VMs boot the same physical partition. 🚧 roadmap
+- Reciprocal VMs (`powos vm`): boot the *other* installed OS as a VM off the same
+  physical partition, no reboot. `powos vm status`, `sudo powos vm windows`
+  (KVM/OVMF, AHCI passthrough), `--dry-run/--ram/--cpus/--gpu`. ⚠️ launch config
+  generated + safety-gated (refuses mounted disks); real boot/GPU passthrough
+  needs hardware validation. Reverse direction (Windows→PowOS guest) = manual,
+  see docs/DUAL-BOOT-VM.md. Gaming in a guest needs GPU passthrough (2 GPUs + IOMMU).
 - PowOS cannot build/bundle Windows or a live Windows; Windows comes from normal MS install.
 
 ## Runtime updates (edit source → update running system)

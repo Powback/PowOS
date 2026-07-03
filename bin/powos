@@ -87,6 +87,10 @@ Commands:
   install-system --whole-disk  Erase target disk (requires confirmation)
   install-system --dry-run     Show the plan, change nothing
 
+  vm status           Show installed OSes bootable as a VM
+  vm windows          Boot installed Windows as a VM (same partition, no reboot)
+  vm windows --dry-run  Print the plan + qemu command, launch nothing
+
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build bootable PowOS ISO
   build test          Build container image only (for testing)
@@ -2549,6 +2553,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/install-system.sh"
         cmd_install_system "$@"
+        ;;
+    vm)
+        shift
+        source "$POWOS_LIB/vm.sh"
+        cmd_vm "$@"
         ;;
     build|b)
         shift
