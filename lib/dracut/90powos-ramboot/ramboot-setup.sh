@@ -58,13 +58,18 @@ powos_select_base_variant() {
     [[ -z "$avail" ]] && return 0   # single-variant USB — keep NEWROOT base
 
     override=$(getarg rd.powos.variant=)
+    # Persistent default set by `powos base switch <name>` (below cmdline, above auto).
+    if [[ -z "$override" && -f "$USB_LAYERS/.powos-default-variant" ]]; then
+        override=$(cat "$USB_LAYERS/.powos-default-variant" 2>/dev/null)
+        [[ -n "$override" ]] && info "PowOS ramboot: persistent default variant '$override'"
+    fi
     if command -v lspci >/dev/null 2>&1 && lspci 2>/dev/null | grep -qi nvidia; then
         mapped="nvidia-open"        # open is the NVIDIA default (see variant-select.sh)
     else
         mapped="main"
     fi
 
-    # Precedence: explicit override > GPU auto-detect > main > first available.
+    # Precedence: explicit override/default > GPU auto-detect > main > first available.
     if [[ -n "$override" && "$override" != "auto" ]] && _powos_variant_in "$override" "$avail"; then
         chosen="$override"
     elif _powos_variant_in "$mapped" "$avail"; then

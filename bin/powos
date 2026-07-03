@@ -91,6 +91,11 @@ Commands:
   vm windows          Boot installed Windows as a VM (same partition, no reboot)
   vm windows --dry-run  Print the plan + qemu command, launch nothing
 
+  base list           List OS base variants on the USB (● = active)
+  base switch <name>  Boot into a different base next reboot (nvidia-open/nvidia/main)
+  base add <image>    Build+add a new base (newer/older ver, other bootc image)
+  base remove <name>  Delete a base variant
+
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build bootable PowOS ISO
   build test          Build container image only (for testing)
@@ -2558,6 +2563,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/vm.sh"
         cmd_vm "$@"
+        ;;
+    base)
+        shift
+        source "$POWOS_LIB/base.sh"
+        cmd_base "$@"
         ;;
     build|b)
         shift

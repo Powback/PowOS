@@ -81,6 +81,7 @@ COPY lib/mobile.sh /usr/lib/powos/
 COPY lib/backup.sh /usr/lib/powos/
 COPY lib/install-system.sh /usr/lib/powos/
 COPY lib/vm.sh /usr/lib/powos/
+COPY lib/base.sh /usr/lib/powos/
 COPY lib/build-helpers.sh /var/lib/powos/lib/
 COPY bazzite/system_files/ /tmp/bazzite/system_files/
 COPY overlays/ /usr/lib/powos/overlays/

@@ -65,6 +65,12 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   (Maxwell/Pascal) needs closed.
 - Driver stack is fixed by the image; hardware profiles tune settings but can't
   swap nvidia↔amd at boot.
+- **Runtime base swap** (`powos base`): `list`, `current`, `switch <name>` (persistent
+  default, reboot to apply), `add <bootc-image> [name]` (builds through PowOS's
+  Containerfile so the new base keeps the RAM-boot module, extracts to
+  layers/base-<name>/), `remove`. Same-family swaps work (nvidia open/closed, amd,
+  newer/older bazzite/ublue); non-bootc distro is NOT a drop-in. ⚠️ boot-critical,
+  needs VM validation. Each base is several GB.
 - CUDA: base has the NVIDIA driver (CUDA *runtime* works). Full toolkit (nvcc/cuDNN)
   is NOT in the base — use the `powos-cuda` distrobox (nvidia/cuda devel image).
   `powos-python` has GPU passthrough but no toolkit.

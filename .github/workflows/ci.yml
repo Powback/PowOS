@@ -33,6 +33,9 @@ jobs:
       - name: Run Variant-Select Tests
         run: bash test/tier1/test-variant-select.sh
 
+      - name: Run Base-Swap Tests
+        run: bash test/tier1/test-base.sh
+
       - name: Run Data Integrity Tests
         run: |
           pip install psutil rich 2>/dev/null || true
