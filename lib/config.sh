@@ -16,7 +16,7 @@
 # installer/GUI drives.
 set -uo pipefail
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
+RED='\033[0;31m'; GREEN='\033[0;32m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 clog()  { echo -e "${CYAN}[config]${NC} $*"; }
 cok()   { echo -e "${GREEN}[config]${NC} $*"; }

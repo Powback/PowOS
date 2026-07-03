@@ -51,6 +51,12 @@ jobs:
       - name: Run Boot-Manager Tests
         run: bash test/tier1/test-boot-manager.sh
 
+      - name: Run Config Tests
+        run: bash test/tier1/test-config.sh
+
+      - name: Run Uninstall Tests
+        run: bash test/tier1/test-uninstall.sh
+
       - name: Run Data Integrity Tests
         run: |
           pip install psutil rich 2>/dev/null || true
