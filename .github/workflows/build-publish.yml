@@ -1,0 +1,104 @@
+name: Build & Publish PowOS
+
+# Builds the PowOS OS images and publishes them to GHCR so machines can track
+# a variant with `bootc switch ghcr.io/powback/powos:<variant>` and then stay
+# current with `bootc upgrade` — no rebuilds, no reflashing.
+#
+# Variants:
+#   nvidia-open  NVIDIA open kernel modules  (DEFAULT; RTX 50-series REQUIRES this)
+#   nvidia       NVIDIA proprietary/closed   (older Maxwell/Pascal)
+#   main         AMD / Intel / mesa
+# nvidia-open is also tagged :latest.
+
+on:
+  push:
+    branches: [ master ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Which variant to build
+        type: choice
+        default: all
+        options: [ all, nvidia-open, nvidia, main ]
+  schedule:
+    - cron: '0 6 * * 1'   # weekly rebuild to pick up new bazzite :stable
+
+env:
+  IMAGE: ghcr.io/powback/powos
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ nvidia-open, nvidia, main ]
+    steps:
+      - name: Gate (manual runs can target one variant)
+        id: gate
+        run: |
+          sel='${{ github.event.inputs.variant }}'
+          if [[ -n "$sel" && "$sel" != "all" && "$sel" != "${{ matrix.variant }}" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true"  >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Free disk space (bazzite images are large)
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/share/swift /usr/local/.ghcup || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Resolve base image
+        if: steps.gate.outputs.run == 'true'
+        id: base
+        run: |
+          case "${{ matrix.variant }}" in
+            nvidia-open) img=ghcr.io/ublue-os/bazzite-nvidia-open:stable ;;
+            nvidia)      img=ghcr.io/ublue-os/bazzite-nvidia:stable ;;
+            main)        img=ghcr.io/ublue-os/bazzite:stable ;;
+          esac
+          echo "image=$img" >> "$GITHUB_OUTPUT"
+
+      - name: Vendor bazzite system_files
+        if: steps.gate.outputs.run == 'true'
+        run: ./build/vendor-bazzite.sh
+
+      - name: Build ${{ matrix.variant }}
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          podman build \
+            --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
+            -f Containerfile \
+            -t ${{ env.IMAGE }}:${{ matrix.variant }} \
+            -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
+            .
+
+      - name: Log in to GHCR
+        if: steps.gate.outputs.run == 'true'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          podman push ${{ env.IMAGE }}:${{ matrix.variant }}
+          podman push ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }}
+          if [[ "${{ matrix.variant }}" == "nvidia-open" ]]; then
+            podman tag  ${{ env.IMAGE }}:nvidia-open ${{ env.IMAGE }}:latest
+            podman push ${{ env.IMAGE }}:latest
+          fi

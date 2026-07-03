@@ -75,6 +75,12 @@ check_requirements() {
     fi
 
     log_success "Requirements met"
+
+    # Ensure the vendored upstream bazzite/ (system_files) is present — the
+    # Containerfile COPYs it and the handheld device overlays read from it.
+    # bazzite/ is gitignored, so a fresh checkout needs this bootstrap.
+    log_step "Vendoring upstream bazzite (system_files)"
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vendor-bazzite.sh"
 }
 
 # ─────────────────────────────────────────────────────────────────
