@@ -36,20 +36,27 @@ SYNC_LOCK_TIMEOUT=300  # 5 minutes
 # Configuration
 # ═══════════════════════════════════════════════════════════════════
 
-# Defaults (overridden by sync.conf)
+# Defaults (overridden by sync.conf). Some are config surface consumed by
+# sourced config files / future commands rather than read in this file yet.
+# shellcheck disable=SC2034
 POWOS_SYNC_REMOTE=""
+# shellcheck disable=SC2034
 POWOS_SYNC_STRATEGY="single"  # single, machine, manual
+# shellcheck disable=SC2034
 POWOS_SYNC_AUTO_PUSH=false
+# shellcheck disable=SC2034
 POWOS_SYNC_AUTO_PULL=true
 POWOS_SYNC_SOURCES=true
 POWOS_SYNC_PROJECTS=true
 POWOS_SYNC_CONTAINERS=true
 POWOS_SYNC_CONFIG=true
+# shellcheck disable=SC2034
 POWOS_SYNC_SESSIONS=false
 POWOS_MACHINE_ID=""
 
 load_sync_config() {
     if [[ -f "$SYNC_CONFIG" ]]; then
+        # shellcheck source=/dev/null
         source "$SYNC_CONFIG"
     fi
 
@@ -437,7 +444,7 @@ has_untracked() {
 
 local_ahead_count() {
     if has_remote; then
-        git rev-list --count origin/$(get_current_branch)..HEAD 2>/dev/null || echo "0"
+        git rev-list --count "origin/$(get_current_branch)..HEAD" 2>/dev/null || echo "0"
     else
         echo "0"
     fi
@@ -445,7 +452,7 @@ local_ahead_count() {
 
 remote_ahead_count() {
     if has_remote; then
-        git rev-list --count HEAD..origin/$(get_current_branch) 2>/dev/null || echo "0"
+        git rev-list --count "HEAD..origin/$(get_current_branch)" 2>/dev/null || echo "0"
     else
         echo "0"
     fi

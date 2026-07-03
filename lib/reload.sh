@@ -66,7 +66,7 @@ reload_changed_files() {
     } | sort -u | sed '/^$/d'
 }
 reload_needs_build() { reload_changed_files "$1" | grep -qE "$RELOAD_NEEDS_BUILD_RE"; }
-reload_mark_applied() { [[ -d "$1/.git" ]] && git -C "$1" rev-parse HEAD 2>/dev/null > "$RELOAD_APPLIED" 2>/dev/null || true; }
+reload_mark_applied() { [[ -d "$1/.git" ]] && git -C "$1" rev-parse HEAD > "$RELOAD_APPLIED" 2>/dev/null || true; }
 
 # SAFETY #1: never apply a file with a syntax error — that can brick the CLI
 # live. bash -n every changed shell file, py_compile every changed .py. Returns

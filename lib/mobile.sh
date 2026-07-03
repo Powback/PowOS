@@ -189,7 +189,6 @@ show_menu() {
 
 show_dialog_menu() {
     local dialog_cmd="$1"
-    local categories
     local checklist_items=()
     local exclusions
     exclusions=$(load_exclusions)
@@ -238,7 +237,6 @@ show_dialog_menu() {
 
 show_simple_menu() {
     # Fallback text-based menu
-    local categories
     local exclusions
     exclusions=$(load_exclusions)
 
@@ -404,7 +402,6 @@ copy_layers_to_ram() {
         local cat_size
         cat_size=$(get_category_size "$category")
         copied=$((copied + cat_size))
-        local percent=$((copied * 100 / total_size))
         echo -e "${GREEN}done${NC} ($(format_size $cat_size))"
     done
 

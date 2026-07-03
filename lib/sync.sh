@@ -45,6 +45,7 @@ MACHINE_ID=$(get_machine_id)
 # Read sync marker from USB
 read_sync_marker() {
     if [[ -f "$SYNC_MARKER" ]]; then
+        # shellcheck source=/dev/null
         source "$SYNC_MARKER"
         echo "${SYNC_MACHINE_ID:-unknown}"
     else
@@ -54,8 +55,9 @@ read_sync_marker() {
 
 # Write sync marker to USB
 write_sync_marker() {
-    local timestamp=$(date +%s)
-    local ram_hash=$(get_ram_state_hash)
+    local timestamp ram_hash
+    timestamp=$(date +%s)
+    ram_hash=$(get_ram_state_hash)
 
     cat > "$SYNC_MARKER" << EOF
 # PowOS Sync Marker - DO NOT EDIT
@@ -84,7 +86,8 @@ get_ram_state_hash() {
 
 # Check if USB was modified by another machine
 check_for_conflicts() {
-    local last_machine=$(read_sync_marker)
+    local last_machine
+    last_machine=$(read_sync_marker)
 
     if [[ "$last_machine" == "none" ]]; then
         # No marker = first sync, no conflict
@@ -110,6 +113,7 @@ get_conflict_details() {
         return
     fi
 
+    # shellcheck source=/dev/null
     source "$SYNC_MARKER"
 
     echo "USB was last modified by:"
@@ -175,7 +179,8 @@ ram_sync_status() {
 
     # RAM Changes
     echo -e "${CYAN}RAM Changes:${NC}"
-    local ram_changes=$(count_ram_changes)
+    local ram_changes
+    ram_changes=$(count_ram_changes)
     if [[ "$ram_changes" -gt 0 ]]; then
         echo -e "  Pending: ${YELLOW}$ram_changes files${NC} to sync to USB"
     else
@@ -185,7 +190,8 @@ ram_sync_status() {
 
     # Conflict Status
     echo -e "${CYAN}Conflict Detection:${NC}"
-    local last_machine=$(read_sync_marker)
+    local last_machine
+    last_machine=$(read_sync_marker)
 
     if [[ "$last_machine" == "none" ]]; then
         echo -e "  Status: ${GREEN}Clean${NC} (no previous sync marker)"
@@ -202,6 +208,7 @@ ram_sync_status() {
 
     # Last sync time
     if [[ -f "$SYNC_MARKER" ]]; then
+        # shellcheck source=/dev/null
         source "$SYNC_MARKER"
         echo -e "${CYAN}Last Sync:${NC}"
         echo "  Time:    ${SYNC_DATE:-unknown}"
@@ -223,7 +230,8 @@ ram_sync_now() {
     fi
 
     # Check for conflicts
-    local conflict_status=$(check_for_conflicts || echo "conflict")
+    local conflict_status
+    conflict_status=$(check_for_conflicts || echo "conflict")
 
     if [[ "$conflict_status" == "conflict" ]]; then
         echo -e "${RED}CONFLICT DETECTED${NC}"
@@ -278,7 +286,8 @@ ram_sync_resolve() {
         return 0
     fi
 
-    local conflict_status=$(check_for_conflicts || echo "conflict")
+    local conflict_status
+    conflict_status=$(check_for_conflicts || echo "conflict")
 
     if [[ "$conflict_status" != "conflict" ]]; then
         echo -e "${GREEN}No conflicts to resolve.${NC}"
@@ -476,6 +485,7 @@ get_diff_for_ai() {
     diff_output+="================\n"
     diff_output+="Current machine: $MACHINE_ID\n"
     if [[ -f "$SYNC_MARKER" ]]; then
+        # shellcheck source=/dev/null
         source "$SYNC_MARKER"
         diff_output+="USB last modified by: ${SYNC_MACHINE_ID:-unknown}\n"
         diff_output+="USB last modified at: ${SYNC_DATE:-unknown}\n"
@@ -547,7 +557,8 @@ ram_sync_resolve_ai() {
         return 0
     fi
 
-    local conflict_status=$(check_for_conflicts || echo "conflict")
+    local conflict_status
+    conflict_status=$(check_for_conflicts || echo "conflict")
 
     if [[ "$conflict_status" != "conflict" ]]; then
         echo -e "${GREEN}No conflicts to resolve.${NC}"
