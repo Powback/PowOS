@@ -53,6 +53,11 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - Overlays (systemd-sysext) via `powos dev` / `overlay-manager.sh`. ✅
 
 ## GPU / base image
+- One x86-64 USB, GPU variant auto-select at boot: `lib/boot/variant-select.sh`
+  picks base-nvidia vs base-main from the detected GPU, override via
+  `rd.powos.variant=nvidia|main|auto`. ⚠️ selection ENGINE done + unit-tested;
+  the multi-base USB layout + dracut wiring + build-both-variants are NOT wired
+  yet (see docs/MULTI-VARIANT-USB.md). x86-64 only — Mac/Android out of scope.
 - Base is ONE image, default `bazzite-nvidia:stable` (NVIDIA proprietary driver + KDE).
   Overridable via `POWOS_BASE_IMAGE` / `--build-arg BASE_IMAGE` → `bazzite` (AMD/Intel)
   or `bazzite-nvidia-open` (RTX 20-series+). Driver stack is fixed by the image;
