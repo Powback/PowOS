@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
 # test-qemu-boot.sh - PowOS QEMU Boot Smoke Tests
 #
-# Boots the actual PowOS ISO in a nested QEMU VM and verifies:
+# Boots the actual PowOS live image (powos.raw — a bootable DISK image, not an
+# ISO; that's what build/build-iso.sh produces) in a nested QEMU VM and verifies:
 #   TEST Q1: VM boots and SSH becomes reachable
-#   TEST Q2: Boot state file written (powos-boot ran to completion)
+#   TEST Q2: Boot state file written (powos-init ran to completion)
 #   TEST Q3: Hardware detection picked "virtual" profile
 #   TEST Q4: RAM boot active (rd.powos.ramboot=1 in /proc/cmdline)
 #   TEST Q5: Layer sync service running
 #   TEST Q6: Layer rollback (reboot with rd.powos.skip.custom=1)
 #
-# Requires: /dev/kvm, ISO at ISO_PATH (default: /powos/test/e2e/powos.iso)
+# Requires: /dev/kvm, image at IMG_PATH (default: build/output/powos.raw,
+# relative to the cwd — repo root locally, /powos in the e2e container).
 # Run: docker compose --profile e2e-full run --rm e2e-qemu
 
 set -uo pipefail
 
-ISO_PATH="${ISO_PATH:-/powos/test/e2e/powos.iso}"
-DISK_PATH="/disk/powos-test.qcow2"
+# IMG_PATH is the raw live image; ISO_PATH accepted as a legacy alias.
+IMG_PATH="${IMG_PATH:-${ISO_PATH:-build/output/powos.raw}}"
+# /disk is the e2e container's volume; outside it, fall back to a temp dir
+# so validate.sh can run this straight from a checkout.
+DISK_DIR="${DISK_DIR:-/disk}"
+[[ -d "$DISK_DIR" && -w "$DISK_DIR" ]] || DISK_DIR="$(mktemp -d /tmp/powos-qemu.XXXXXX)"
+DISK_PATH="$DISK_DIR/powos-test.qcow2"
 DISK_SIZE="${QEMU_DISK:-20G}"
 SSH_PORT=2222
 SSH_USER="powos"
@@ -82,16 +89,15 @@ preflight() {
     fi
     e2e_pass "/dev/kvm available (hardware virtualization)"
 
-    if [[ ! -f "$ISO_PATH" ]]; then
-        echo -e "${RED}ERROR: ISO not found at $ISO_PATH${NC}"
+    if [[ ! -f "$IMG_PATH" ]]; then
+        echo -e "${RED}ERROR: live image not found at $IMG_PATH${NC}"
         echo ""
-        echo "  Build the ISO first:"
-        echo "    just build-iso"
-        echo "    cp build/output/powos.iso test/e2e/"
+        echo "  Build it first:"
+        echo "    just build-iso        # produces build/output/powos.raw"
         echo ""
         exit 1
     fi
-    e2e_pass "ISO found: $ISO_PATH ($(du -sh "$ISO_PATH" | cut -f1))"
+    e2e_pass "Image found: $IMG_PATH ($(du -sh "$IMG_PATH" | cut -f1))"
 
     if ! command -v qemu-system-x86_64 &>/dev/null; then
         e2e_fail "qemu-system-x86_64 not found"
@@ -129,19 +135,27 @@ start_vm() {
         e2e_skip "OVMF not found — using legacy BIOS (may affect boot)"
     fi
 
-    echo "  Booting: $ISO_PATH"
+    echo "  Booting: $IMG_PATH"
     echo "  Memory:  $QEMU_MEM  CPUs: $QEMU_CPUS"
 
-    # Boot from ISO, disk available for install
+    # Boot the raw live image as the FIRST disk (it's a bootable disk image,
+    # not an ISO — -cdrom can never boot it). Guest writes go to a qcow2
+    # copy-on-write overlay so the build artifact stays pristine (and the
+    # source may be on a read-only mount). The blank qcow2 stays attached as
+    # a second disk: the install target for installer tests.
+    local live_overlay="${DISK_PATH%/*}/live-overlay.qcow2"
+    rm -f "$live_overlay"
+    qemu-img create -q -f qcow2 -b "$(readlink -f "$IMG_PATH")" -F raw "$live_overlay"
+    e2e_pass "COW overlay for live image: $live_overlay"
+
     # SSH forwarded: host:2222 → guest:22
     qemu-system-x86_64 \
         -enable-kvm \
         -m "$QEMU_MEM" \
         -smp "$QEMU_CPUS" \
         $bios_args \
-        -drive file="$DISK_PATH",format=qcow2,if=virtio \
-        -cdrom "$ISO_PATH" \
-        -boot d \
+        -drive file="$live_overlay",format=qcow2,if=virtio,index=0 \
+        -drive file="$DISK_PATH",format=qcow2,if=virtio,index=1 \
         -display none \
         -serial file:/tmp/qemu-serial.log \
         -device virtio-net-pci,netdev=net0 \
@@ -292,7 +306,7 @@ main() {
     echo -e "${CYAN}${BOLD}║         PowOS QEMU Boot Smoke Tests                        ║${NC}"
     echo -e "${CYAN}${BOLD}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo "  ISO:    $ISO_PATH"
+    echo "  Image:  $IMG_PATH"
     echo "  Memory: $QEMU_MEM  CPUs: $QEMU_CPUS"
     echo "  SSH:    localhost:$SSH_PORT"
 

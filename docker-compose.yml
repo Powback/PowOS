@@ -88,9 +88,9 @@ services:
       - POWOS_E2E=1
     entrypoint: ["/bin/bash", "/powos/test/e2e/run-e2e.sh"]
 
-  # QEMU tier — boots actual ISO in nested VM, covers remaining ~15%
-  # (dracut activation, layer rollback via real kargs, systemd-sysext loading).
-  # Requires: just build-iso  then  cp build/output/powos.iso test/e2e/
+  # QEMU tier — boots the actual live image (powos.raw) in a nested VM, covers
+  # the remaining ~15% (dracut activation, rollback via real kargs, sysext).
+  # Requires: just build-iso  (produces build/output/powos.raw, mounted via /powos)
   # Run: docker compose --profile e2e-full run --rm e2e-qemu
   e2e-qemu:
     profiles: ["e2e-full"]
@@ -111,7 +111,7 @@ services:
     environment:
       - QEMU_MEM=4G
       - QEMU_CPUS=4
-      - ISO_PATH=/powos/test/e2e/powos.iso
+      - IMG_PATH=/powos/build/output/powos.raw
     entrypoint: ["/bin/bash", "/powos/test/e2e/test-qemu-boot.sh"]
 
 volumes:
