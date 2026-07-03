@@ -31,7 +31,11 @@ on:
 # queueing ~15-min runs for every push on a fast-moving master.
 concurrency:
   group: publish-${{ github.ref }}
-  cancel-in-progress: true
+  # false, deliberately: with pushes landing every few minutes and runs
+  # taking ~15-20, cancel-in-progress starves the pipeline (nothing ever
+  # finishes). false = current run completes, only the NEWEST push waits
+  # (GitHub auto-cancels older pending runs in the group).
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/powback/powos

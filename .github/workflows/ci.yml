@@ -12,7 +12,11 @@ on:
 # it contains all prior commits anyway.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # false, deliberately: with pushes landing every few minutes and runs
+  # taking ~15-20, cancel-in-progress starves the pipeline (nothing ever
+  # finishes). false = current run completes, only the NEWEST push waits
+  # (GitHub auto-cancels older pending runs in the group).
+  cancel-in-progress: false
 
 jobs:
   # One job, ONE image build shared by the container tests and e2e.
