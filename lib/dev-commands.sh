@@ -198,7 +198,7 @@ dev_new() {
                 shift 2
                 ;;
             -*)
-                echo -e "${RED}Unknown option: $1${NC}"
+                perr "Unknown option: $1"
                 return 1
                 ;;
             *)
@@ -231,11 +231,11 @@ dev_new() {
     local proj_dir="$PROJECTS_DIR/$name"
 
     if [[ -d "$proj_dir" ]]; then
-        echo -e "${YELLOW}Project '$name' already exists${NC}"
+        pwarn "Project '$name' already exists."
         return 1
     fi
 
-    echo -e "${CYAN}Creating project: $name${NC}"
+    plog "Creating project: $name"
 
     mkdir -p "$proj_dir/src"
 
@@ -304,7 +304,7 @@ Edit build.sh to define how to compile your project.
 EOF
 
     echo ""
-    echo -e "${GREEN}✓ Project created${NC}"
+    pok "Project created"
     echo "  Location: $proj_dir"
     echo ""
     echo "Next steps:"
@@ -323,12 +323,12 @@ dev_new_docker() {
 
     # Check if AI is available
     if ! ai_ensure_loaded 2>/dev/null; then
-        echo -e "${YELLOW}AI not available. Creating basic Docker project...${NC}"
+        pwarn "AI not available — creating a basic Docker project…"
         dev_new_docker_basic "$name" "$proj_dir"
         return 0
     fi
 
-    echo -e "${CYAN}Using AI to generate Docker project...${NC}"
+    plog "Using AI to generate the Docker project…"
 
     # Create project.conf
     cat > "$proj_dir/project.conf" << EOF
@@ -352,7 +352,7 @@ Generate Dockerfile, docker-compose.yml, and .env.example files."
     ai_response=$(ai_call --agent dockerizer "$prompt" 2>/dev/null)
 
     if [[ -z "$ai_response" ]]; then
-        echo -e "${YELLOW}AI generation failed. Creating basic Docker project...${NC}"
+        pwarn "AI generation failed — creating a basic Docker project…"
         dev_new_docker_basic "$name" "$proj_dir"
         return 0
     fi
@@ -410,7 +410,7 @@ EOF
     fi
 
     echo ""
-    echo -e "${GREEN}✓ Docker project created${NC}"
+    pok "Docker project created"
     echo "  Location: $proj_dir"
     echo ""
     echo "Files generated:"
@@ -554,7 +554,7 @@ if __name__ == '__main__':
 EOF
 
     echo ""
-    echo -e "${GREEN}✓ Docker project created${NC}"
+    pok "Docker project created"
     echo "  Location: $proj_dir"
     echo ""
     echo "Next steps:"
@@ -572,27 +572,27 @@ dev_new_ai() {
 
     # Check if AI is available
     if ! ai_ensure_loaded 2>/dev/null; then
-        echo -e "${YELLOW}AI not available. Creating standard project...${NC}"
+        pwarn "AI not available — creating a standard project…"
         dev_new_standard "$name" "$proj_dir"
         return 0
     fi
 
     # If no description provided, ask for one
     if [[ -z "$desc" ]]; then
-        echo -e "${CYAN}Project Creator Agent${NC}"
+        plog "Project Creator Agent"
         echo ""
         echo "Describe what you want to build:"
         echo -n "> "
         read -r desc
         if [[ -z "$desc" ]]; then
-            echo -e "${YELLOW}No description provided. Creating standard project...${NC}"
+            pwarn "No description provided — creating a standard project…"
             dev_new_standard "$name" "$proj_dir"
             return 0
         fi
     fi
 
     echo ""
-    echo -e "${CYAN}AI is creating your project: $name${NC}"
+    plog "AI is creating your project: $name"
     echo "  Description: $desc"
     echo ""
 
@@ -609,7 +609,7 @@ Generate all necessary files including README.md, build.sh, source files, and de
     ai_response=$(ai_call --agent creator "$prompt" 2>/dev/null)
 
     if [[ -z "$ai_response" ]]; then
-        echo -e "${YELLOW}AI generation failed. Creating standard project...${NC}"
+        pwarn "AI generation failed — creating a standard project…"
         dev_new_standard "$name" "$proj_dir"
         return 0
     fi
@@ -700,7 +700,7 @@ EOF
     fi
 
     echo ""
-    echo -e "${GREEN}✓ Project created by AI${NC}"
+    pok "Project created by AI"
     echo "  Location: $proj_dir"
     echo "  Files: $files_created generated"
     echo ""
@@ -728,7 +728,7 @@ dev_fork() {
                 shift 2
                 ;;
             -*)
-                echo -e "${RED}Unknown option: $1${NC}"
+                perr "Unknown option: $1"
                 return 1
                 ;;
             *)
@@ -782,7 +782,7 @@ dev_fork() {
         name=$(basename "$upstream" .git)
         type="git"
     else
-        echo -e "${RED}Unknown upstream format: $upstream${NC}"
+        perr "Unknown upstream format: $upstream"
         echo "Use: kde:<app> or https://github.com/..."
         return 1
     fi
@@ -790,11 +790,11 @@ dev_fork() {
     local proj_dir="$PROJECTS_DIR/$name"
 
     if [[ -d "$proj_dir" ]]; then
-        echo -e "${YELLOW}Project '$name' already exists${NC}"
+        pwarn "Project '$name' already exists."
         return 1
     fi
 
-    echo -e "${CYAN}Forking: $upstream${NC}"
+    plog "Forking: $upstream"
     echo "  Name: $name"
     echo "  URL:  $url"
     echo ""
@@ -900,7 +900,7 @@ BUILDEOF
     fi
 
     echo ""
-    echo -e "${GREEN}✓ Project forked${NC}"
+    pok "Project forked"
     echo "  Location: $proj_dir"
     echo "  Source:   $proj_dir/src (edit this)"
     echo "  Upstream: $proj_dir/upstream (reference only)"
@@ -928,7 +928,7 @@ dev_dockerize() {
     local proj_dir="$2"
     local desc="${3:-}"
 
-    echo -e "${CYAN}Dockerizing project with AI...${NC}"
+    plog "Dockerizing project with AI…"
 
     # Analyze the project structure
     local src_dir="$proj_dir/src"
@@ -970,7 +970,7 @@ dev_dockerize() {
     echo "  Detected: ${detected_lang:-unknown} ${detected_framework:+($detected_framework)}"
 
     if ! ai_ensure_loaded 2>/dev/null; then
-        echo -e "${YELLOW}AI not available. Creating basic Docker files...${NC}"
+        pwarn "AI not available — creating basic Docker files…"
         dev_dockerize_basic "$name" "$proj_dir" "$detected_lang"
         return 0
     fi
@@ -991,7 +991,7 @@ Source code is in ./src directory."
     ai_response=$(ai_call --agent dockerizer "$prompt" 2>/dev/null)
 
     if [[ -z "$ai_response" ]]; then
-        echo -e "${YELLOW}AI generation failed. Creating basic Docker files...${NC}"
+        pwarn "AI generation failed — creating basic Docker files…"
         dev_dockerize_basic "$name" "$proj_dir" "$detected_lang"
         return 0
     fi
@@ -1368,16 +1368,16 @@ dev_update() {
     local conf="$proj_dir/project.conf"
 
     if [[ ! -d "$proj_dir" ]]; then
-        echo -e "${RED}Project '$name' not found${NC}"
+        perr "Project '$name' not found."
         return 1
     fi
 
     if [[ ! -d "$upstream_dir" ]]; then
-        echo -e "${YELLOW}Project '$name' has no upstream (not a fork)${NC}"
+        pwarn "Project '$name' has no upstream (not a fork)."
         return 1
     fi
 
-    echo -e "${CYAN}Updating: $name${NC}"
+    plog "Updating: $name"
 
     # Save current changes
     echo "Saving your changes..."
@@ -1398,7 +1398,7 @@ dev_update() {
     # Try to apply differences
     # (This is simplified - a real implementation might use git merge)
     echo ""
-    echo -e "${GREEN}✓ Updated${NC}"
+    pok "Updated"
     echo "  Your backup: $backup_dir"
     echo "  New source:  $src_dir"
     echo ""
