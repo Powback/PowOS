@@ -1111,61 +1111,49 @@ EOF
     echo "    ✓ .env.example"
 }
 
+# systemd-sysext only merges an extension whose extension-release matches the
+# host. ID=_any means "match any OS" — the robust choice for user overlays. The
+# old hardcoded ID=fedora is REFUSED on a host whose os-release ID differs (e.g.
+# Bazzite's ID=bazzite), which silently broke every `dev enable`.
+_dev_write_extension_release() {
+    local name="$1" output_dir="$2"
+    local rel_dir="$output_dir/usr/lib/extension-release.d"
+    mkdir -p "$rel_dir"
+    printf 'ID=_any\n' > "$rel_dir/extension-release.$name"
+}
+
 dev_build() {
     local name="${1:-}"
-
-    if [[ -z "$name" ]]; then
-        echo "Usage: powos dev build <name>"
-        return 1
-    fi
+    [[ -z "$name" ]] && { plog "Usage: powos dev build <name>"; return 1; }
 
     local proj_dir="$PROJECTS_DIR/$name"
-
     if [[ ! -d "$proj_dir" ]]; then
-        echo -e "${RED}Project '$name' not found${NC}"
-        echo "Create it with: powos dev new $name"
-        echo "Or fork with:   powos dev fork kde:$name"
+        perr "Project '$name' not found."
+        plog "Create it:  powos dev new $name  ·  fork kde:$name  ·  override $name"
         return 1
     fi
 
-    local conf="$proj_dir/project.conf"
-    local build_script="$proj_dir/build.sh"
+    local conf="$proj_dir/project.conf" build_script="$proj_dir/build.sh"
+    [[ -f "$build_script" ]] || { perr "No build.sh in $proj_dir."; return 1; }
 
-    if [[ ! -f "$build_script" ]]; then
-        echo -e "${RED}No build.sh found${NC}"
-        return 1
-    fi
-
-    echo -e "${CYAN}Building: $name${NC}"
-
-    # Install build deps
+    plog "Building: $name"
     if [[ -f "$conf" ]]; then
+        # shellcheck disable=SC1090
         source "$conf"
-        if [[ -n "${BUILD_DEPS:-}" ]]; then
-            echo "Installing build dependencies..."
-            if command -v dnf &>/dev/null; then
-                sudo dnf install -y --skip-unavailable $BUILD_DEPS 2>&1 | tail -3
-            fi
-            echo ""
+        if [[ -n "${BUILD_DEPS:-}" ]] && command -v dnf &>/dev/null; then
+            plog "Installing build deps: $BUILD_DEPS"
+            # shellcheck disable=SC2086
+            sudo dnf install -y --skip-unavailable $BUILD_DEPS 2>&1 | tail -3
         fi
     fi
 
-    # Build
     local output_dir="$EXTENSIONS_DIR/$name"
     mkdir -p "$output_dir"
-
     bash "$build_script" "$output_dir"
+    _dev_write_extension_release "$name" "$output_dir"
 
-    # Create extension-release for systemd-sysext
-    local release_dir="$output_dir/usr/lib/extension-release.d"
-    mkdir -p "$release_dir"
-    echo "ID=fedora" > "$release_dir/extension-release.$name"
-
-    echo ""
-    echo -e "${GREEN}✓ Build complete${NC}"
-    echo "  Output: $output_dir"
-    echo ""
-    echo "Enable with: powos dev enable $name"
+    pok "Build complete → $output_dir"
+    plog "Enable it:  powos dev enable $name"
 }
 
 # ── Native app override (seed from the base package's real files) ──────────
@@ -1176,9 +1164,13 @@ dev_build() {
 # want; disable restores the base cleanly. TODO(hw): sysext override of a base
 # app is validated on real hardware — this is the untested overlay-on-overlay path.
 
-# List a package's /usr files (sysext only merges /usr + /opt). One per line.
+# List a package's /usr FILES (not directories — rpm -ql includes dir entries,
+# which aren't files to shadow and would false-positive the coverage check).
+# sysext only merges /usr + /opt. One per line.
 _dev_pkg_usr_files() {
-    rpm -ql "$1" 2>/dev/null | grep -E '^/usr/'
+    rpm -ql "$1" 2>/dev/null | grep -E '^/usr/' | while IFS= read -r f; do
+        [[ -d "$f" && ! -L "$f" ]] || printf '%s\n' "$f"
+    done
 }
 
 # Base files (list $1) not present in the extension (list $2). Pure/testable.
@@ -1304,18 +1296,19 @@ dev_override_diff() {
 
 dev_enable() {
     local name="${1:-}"
-
-    if [[ -z "$name" ]]; then
-        echo "Usage: powos dev enable <name>"
-        return 1
-    fi
+    [[ -z "$name" ]] && { plog "Usage: powos dev enable <name>"; return 1; }
 
     local ext_dir="$EXTENSIONS_DIR/$name"
 
+    # One-step enable: if the project exists but isn't built yet, build it first.
     if [[ ! -d "$ext_dir" ]]; then
-        echo -e "${RED}Project '$name' not built${NC}"
-        echo "Build it first: powos dev build $name"
-        return 1
+        if [[ -d "$PROJECTS_DIR/$name" ]]; then
+            plog "Not built yet — building first…"
+            dev_build "$name" || return 1
+        else
+            perr "Project '$name' not found. Create it: powos dev new|fork|override $name"
+            return 1
+        fi
     fi
 
     # For override projects, verify the extension shadows the WHOLE base app —
@@ -1348,29 +1341,17 @@ dev_enable() {
         sudo systemd-sysext refresh 2>/dev/null || true
     fi
 
-    echo -e "${GREEN}✓ Enabled${NC}"
-    echo "  $name now overrides system version"
+    pok "Enabled — '$name' now overrides the system version"
 }
 
 dev_disable() {
     local name="${1:-}"
+    [[ -z "$name" ]] && { plog "Usage: powos dev disable <name>"; return 1; }
 
-    if [[ -z "$name" ]]; then
-        echo "Usage: powos dev disable <name>"
-        return 1
-    fi
-
-    echo -e "${CYAN}Disabling: $name${NC}"
-
-    sudo rm -f "/var/lib/extensions/$name" 2>/dev/null || \
-        rm -f "/var/lib/extensions/$name"
-
-    if command -v systemd-sysext &>/dev/null; then
-        sudo systemd-sysext refresh 2>/dev/null || true
-    fi
-
-    echo -e "${GREEN}✓ Disabled${NC}"
-    echo "  System version restored"
+    plog "Disabling: $name"
+    sudo rm -f "/var/lib/extensions/$name" 2>/dev/null || rm -f "/var/lib/extensions/$name"
+    command -v systemd-sysext &>/dev/null && { sudo systemd-sysext refresh 2>/dev/null || true; }
+    pok "Disabled — system version restored"
 }
 
 dev_update() {
