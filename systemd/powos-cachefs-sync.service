@@ -1,8 +1,15 @@
 [Unit]
 Description=PowOS CacheFS Sync Daemon
 Documentation=man:powos(8)
+# After= on a missing unit is harmless; Wants= is NOT — it created a dangling
+# "not-found" powos-homefs ref on every install, because that unit is never
+# shipped (the homefs binary doesn't exist yet; CacheFS is experimental).
+# Re-add Wants= only when homefs actually ships.
 After=powos-homefs.service local-fs.target
-Wants=powos-homefs.service
+# Same guard layer-sync uses: this daemon syncs the USB overlay model's home.
+# Without it, fixed (bootc) installs ran the daemon forever, pointlessly
+# polling a /mnt/powos-usb path that never appears.
+ConditionPathExists=/run/powos/layer-paths
 
 [Service]
 Type=simple
