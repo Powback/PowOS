@@ -129,6 +129,10 @@ Commands:
   registry login [host]   Save pull creds for private images (default ghcr.io)
   registry status         Show configured registry hosts
 
+  gpu status          Where the dGPU is (host vs VM) + passthrough readiness
+  gpu to-vm           Hotswap the dGPU to vfio-pci for a VM (refuses if in use)
+  gpu to-host         Reclaim the dGPU for Linux (CUDA / native games)
+
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build bootable PowOS ISO
   build test          Build container image only (for testing)
@@ -2768,6 +2772,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/registry.sh"
         cmd_registry "$@"
+        ;;
+    gpu)
+        shift
+        source "$POWOS_LIB/gpu.sh"
+        cmd_gpu "$@"
         ;;
     overview|ov)
         shift

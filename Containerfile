@@ -101,6 +101,7 @@ COPY lib/boot-manager.sh /usr/lib/powos/
 COPY lib/cuda.sh /usr/lib/powos/
 COPY lib/driver.sh /usr/lib/powos/
 COPY lib/registry.sh /usr/lib/powos/
+COPY lib/gpu.sh /usr/lib/powos/
 COPY lib/build-image.sh /usr/lib/powos/
 COPY lib/upgrade.sh /usr/lib/powos/
 COPY lib/reload.sh /usr/lib/powos/
