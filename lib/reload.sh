@@ -68,6 +68,47 @@ reload_changed_files() {
 reload_needs_build() { reload_changed_files "$1" | grep -qE "$RELOAD_NEEDS_BUILD_RE"; }
 reload_mark_applied() { [[ -d "$1/.git" ]] && git -C "$1" rev-parse HEAD 2>/dev/null > "$RELOAD_APPLIED" 2>/dev/null || true; }
 
+# SAFETY #1: never apply a file with a syntax error — that can brick the CLI
+# live. bash -n every changed shell file, py_compile every changed .py. Returns
+# non-zero (and prints the errors) if anything is broken.
+reload_syntax_check() {
+    local src="$1" bad=0 f err; err="$(mktemp)"
+    while IFS= read -r f; do
+        [[ -f "$src/$f" ]] || continue
+        case "$f" in
+            *.sh|bin/powos|bin/powos-boot|bin/pinstall|bin/premove)
+                bash -n "$src/$f" 2>"$err" || { perr "shell syntax error in $f:"; sed 's/^/      /' "$err"; bad=1; } ;;
+            *.py)
+                python3 -m py_compile "$src/$f" 2>"$err" || { perr "python syntax error in $f:"; sed 's/^/      /' "$err"; bad=1; } ;;
+        esac
+    done < <(reload_changed_files "$src")
+    rm -f "$err"
+    return "$bad"
+}
+
+# SAFETY #2: snapshot the live CLI, apply, then smoke-test that `powos` still
+# runs. If the applied version is broken, restore the snapshot — atomically, in
+# ONE root shell (so it's a single sudo prompt and can't half-apply). Exit codes:
+# 0 = applied OK · 42 = was broken, restored · other = update self failed.
+reload_apply_live() {
+    local runner=(sudo bash); [[ ${EUID:-$(id -u)} -eq 0 ]] && runner=(bash)
+    "${runner[@]}" -s -- "$1" <<'ROOT'
+set -uo pipefail
+src="$1"; bk="/run/powos/reload-backup.$$"
+mkdir -p "$bk"
+cp -a /usr/bin/powos "$bk/powos" 2>/dev/null || true
+cp -a /usr/lib/powos "$bk/lib"   2>/dev/null || true
+powos update self --from "$src"; rc=$?
+[[ $rc -ne 0 ]] && { rm -rf "$bk"; exit "$rc"; }
+if ! /usr/bin/powos version >/dev/null 2>&1 && ! /usr/bin/powos help >/dev/null 2>&1; then
+    cp -a "$bk/powos" /usr/bin/powos 2>/dev/null || true
+    [[ -d "$bk/lib" ]] && cp -a "$bk/lib/." /usr/lib/powos/ 2>/dev/null || true
+    rm -rf "$bk"; exit 42
+fi
+rm -rf "$bk"
+ROOT
+}
+
 cmd_reload() {
     local do_pull=0 do_build=0 where=0 force_live=0 explicit=""
     while [[ $# -gt 0 ]]; do
@@ -98,6 +139,12 @@ cmd_reload() {
         git -C "$src" pull --rebase 2>&1 | tail -2 || pwarn "git pull had issues (continuing with what's there)."
     fi
 
+    # SAFETY: refuse to apply anything with a syntax error (would brick the CLI).
+    if ! reload_syntax_check "$src"; then
+        perr "Refusing to apply until the syntax errors above are fixed."
+        return 1
+    fi
+
     # Auto-detect whether the local changes actually need a full build.
     if (( ! do_build && ! force_live )) && reload_needs_build "$src"; then
         pwarn "These changes are baked at build time — a live apply WON'T pick them up:"
@@ -120,11 +167,14 @@ cmd_reload() {
     fi
 
     plog "Applying $src live (no reboot)…"
-    if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
-        powos update self --from "$src"
-    else
-        sudo powos update self --from "$src"   # only the apply needs root
+    reload_apply_live "$src"; local rc=$?
+    if [[ $rc -eq 42 ]]; then
+        perr "The applied CLI failed to run — I restored the previous version."
+        perr "Fix the error in $src, then 'powos reload' again."
+        return 1
+    elif [[ $rc -ne 0 ]]; then
+        perr "update self failed (rc=$rc)."; return "$rc"
     fi
     reload_mark_applied "$src"
-    pok "Live. For base/package changes use: powos reload --build"
+    pok "Live & verified. For base/package changes: powos reload --build"
 }
