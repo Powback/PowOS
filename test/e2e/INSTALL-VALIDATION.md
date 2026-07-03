@@ -21,6 +21,19 @@ sudo ./build/validate.sh --all   # + build image + QEMU boot smoke test
 It ends by listing the manual checks (boot menu, installer, dual-boot, vm, base)
 that can't be automated — those are detailed below.
 
+**Now automated in the QEMU tier** (`test/e2e/test-qemu-boot.sh`) — no longer
+manual-only:
+
+- **Two-boot persistence** (TEST Q7): the runner creates a btrfs `POWOS-DATA`
+  data disk (needs `btrfs-progs`; skips cleanly without it), writes a marker in
+  the guest, flushes RAM upper → custom layer (`layer-sync.py --sync-now`),
+  reboots the guest, and asserts the marker survived and the custom layer is in
+  the active stack.
+- **Rollback across a reboot** (TEST Q6): `powos rollback custom`, real guest
+  reboot, then `rd.powos.skip.custom=1` asserted in `/proc/cmdline`. Skips (not
+  fails) when grubby can't update the boot entry on the live image — that case
+  still needs BLS/grubby validation on hardware.
+
 ## Setup
 
 1. Build: `./build/build-iso.sh live-usb` (Linux/WSL + podman).

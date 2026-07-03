@@ -72,6 +72,19 @@ RUN mkdir -p /etc/containers/storage.conf.d && \
 RUN mkdir -p /var/lib/systemd/linger && \
     touch /var/lib/systemd/linger/powos
 
+# Create the powos user IMAGE-SIDE and enable sshd.
+# Previously the user was created only by the Docker entrypoint (powos-boot),
+# which never runs on a real/QEMU boot of the bootc image — so the live image
+# had no login user and no SSH daemon at all. Credentials match the documented
+# live login in CLAUDE.md (powos/powos) and are required by the e2e QEMU tier
+# (test/e2e/test-qemu-boot.sh logs in over SSH as powos/powos and uses
+# `sudo -S` with that password — the user is in wheel, no NOPASSWD rule).
+# openssh-server ships with the Bazzite base; the rpm guard is just defensive.
+RUN rpm -q openssh-server >/dev/null 2>&1 || { dnf install -y openssh-server && dnf clean all; } && \
+    { id powos >/dev/null 2>&1 || useradd -m -G wheel -u 1000 powos; } && \
+    echo "powos:powos" | chpasswd && \
+    systemctl enable sshd.service
+
 # Copy PowOS boot system
 COPY lib/common.sh /usr/lib/powos/
 COPY lib/boot/ /usr/lib/powos/boot/

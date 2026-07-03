@@ -1,15 +1,20 @@
 # PowOS QEMU Test Runner
 # Boots the actual PowOS live image (powos.raw disk image) in a nested QEMU VM
 # and verifies:
-#   - dracut module activates (RAM overlay boot)
+#   - dracut module activates (RAM overlay boot; serial markers = TEST Q0)
 #   - Hardware detection picks "virtual" profile
 #   - layer-sync service starts
-#   - Layer rollback works via real kernel kargs (rd.powos.skip.custom=1)
-#   - systemd-sysext extensions load
+#   - Two-boot persistence (TEST Q7): a btrfs POWOS-DATA data disk is created
+#     on the fly (btrfs-progs below), a marker written + flushed to the custom
+#     layer, the guest rebooted, and the marker asserted to survive
+#   - Layer rollback works via real kernel kargs (rd.powos.skip.custom=1),
+#     verified in /proc/cmdline after an actual guest reboot (TEST Q6)
 #
 # Requirements:
 #   - Host must have /dev/kvm (KVM hardware virtualization)
 #   - Live image at build/output/powos.raw (run: just build-iso first)
+#   - Privileged container recommended (loop-mount fallback for the data disk;
+#     the primary mkfs.btrfs --rootdir path needs no privileges)
 #
 # Build: docker compose --profile e2e-full build e2e-qemu
 # Run:   docker compose --profile e2e-full run --rm e2e-qemu
@@ -20,12 +25,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
         qemu-system-x86 \
+        qemu-utils \
         ovmf \
         openssh-client \
         sshpass \
         curl \
         jq \
         netcat-openbsd \
+        btrfs-progs \
     && rm -rf /var/lib/apt/lists/*
 
 # UEFI firmware path
