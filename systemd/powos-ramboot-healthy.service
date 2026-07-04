@@ -1,0 +1,18 @@
+[Unit]
+Description=PowOS RAM-boot health — clear the self-heal attempt counter on a good boot
+Documentation=man:powos(8)
+# Reaching multi-user.target means this boot succeeded, so the initramfs
+# attempt counter (on the ESP) can be zeroed. A boot that FAILS reboots before
+# this runs, so the counter keeps climbing until ramboot-setup.sh auto-reverts
+# to a normal disk boot (self-heal). Harmless when RAM boot isn't in use.
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Zero the counter wherever the ESP is mounted (bootc: /boot/efi). No-op if
+# absent. Never fails the boot.
+ExecStart=/bin/sh -c 'for f in /boot/efi/powos/ramboot-attempts /efi/powos/ramboot-attempts; do [ -f "$f" ] && { echo 0 > "$f" && sync; }; done; exit 0'
+
+[Install]
+WantedBy=multi-user.target

@@ -181,10 +181,13 @@ COPY systemd/powos-init.service /usr/lib/systemd/system/
 COPY systemd/powos-hardware.service /usr/lib/systemd/system/
 COPY systemd/powos-overlay.service /usr/lib/systemd/system/
 COPY systemd/powos-hydrate.service /usr/lib/systemd/system/
+# Clears the RAM-boot self-heal counter once a boot succeeds (see
+# lib/dracut/90powos-ramboot/ramboot-setup.sh).
+COPY systemd/powos-ramboot-healthy.service /usr/lib/systemd/system/
 # A failed enable must fail the build — no 2>/dev/null || true.
 RUN systemctl enable powos-ramboot-init.service powos-layer-sync.service \
         powos-cachefs-sync.service powos-installer.service \
-        powos-hwinfo.service \
+        powos-hwinfo.service powos-ramboot-healthy.service \
         powos-init.service powos-hardware.service powos-overlay.service \
         powos-hydrate.service
 

@@ -18,6 +18,8 @@ depends() {
 install() {
     # Install required binaries
     inst_multiple rsync mount umount mkdir df
+    # cat/sync back the ESP self-heal counter; rsync (above) does copy-to-RAM.
+    inst_multiple cat sync
     # lspci enables GPU auto-detect for multi-variant base selection (optional;
     # -o = don't fail the build if absent — selection falls back to 'main').
     inst_multiple -o lspci blkid basename

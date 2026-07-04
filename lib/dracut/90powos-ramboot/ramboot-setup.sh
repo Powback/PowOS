@@ -12,11 +12,111 @@
 
 type getarg >/dev/null 2>&1 || . /lib/dracut-lib.sh
 
-# Check if ramboot is enabled (kernel cmdline: rd.powos.ramboot=1)
-if ! getargbool 0 rd.powos.ramboot; then
-    info "PowOS ramboot: disabled (add rd.powos.ramboot=1 to enable)"
+# Two independent triggers:
+#   rd.powos.ramboot=1           → USB layer model (overlay; needs POWOS-DATA)
+#   rd.powos.ramboot.installed=1 → installed bootc/composefs "OS in RAM" model
+#                                   (full copy-to-tmpfs; opt-in, self-heal-guarded)
+_RB_USB=0; _RB_INSTALLED=0
+getargbool 0 rd.powos.ramboot && _RB_USB=1
+getargbool 0 rd.powos.ramboot.installed && _RB_INSTALLED=1
+if [[ $_RB_USB -eq 0 && $_RB_INSTALLED -eq 0 ]]; then
+    info "PowOS ramboot: disabled (rd.powos.ramboot=1 for USB, or 'powos ramboot enable' on an installed system)"
     return 0
 fi
+
+# ── Self-heal boot counter (ESP-backed) ───────────────────────────
+# The one guarantee that makes RAM boot safe to ship even before a full
+# hardware pass: if a RAM boot fails to come up, it auto-reverts to a normal
+# disk boot after MAX attempts, so it can NEVER loop forever. The counter lives
+# on the ESP (FAT, writable from initramfs, persistent). A post-boot service
+# (powos-ramboot-healthy) resets it to 0 once the system is up.
+# FAIL-SAFE: every error path here returns "skip" → normal boot. We never
+# proceed into a pivot on a counter we couldn't read/increment.
+_RB_MAX_ATTEMPTS=3
+_rb_esp_dir=""
+_rb_find_esp() {
+    # Mount the ESP rw at /run/powos-esp and echo the dir; empty on any failure.
+    local dev
+    mkdir -p /run/powos-esp 2>/dev/null || return 1
+    for dev in $(blkid -o device -t TYPE=vfat 2>/dev/null); do
+        if mount -o rw "$dev" /run/powos-esp 2>/dev/null; then
+            if [ -d /run/powos-esp/EFI ]; then
+                echo /run/powos-esp; return 0
+            fi
+            umount /run/powos-esp 2>/dev/null || true
+        fi
+    done
+    return 1
+}
+# Returns 0 if we should PROCEED with ramboot, non-zero if we must skip it.
+# On proceed, the attempt counter has already been incremented + synced.
+_rb_attempt_ok() {
+    _rb_esp_dir=$(_rb_find_esp) || {
+        warn "PowOS ramboot: no writable ESP for the self-heal counter — booting normally (safe)."
+        return 1
+    }
+    local f="$_rb_esp_dir/powos/ramboot-attempts" n
+    mkdir -p "$_rb_esp_dir/powos" 2>/dev/null || { warn "PowOS ramboot: ESP not writable — booting normally."; return 1; }
+    n=$(cat "$f" 2>/dev/null); case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    if [ "$n" -ge "$_RB_MAX_ATTEMPTS" ]; then
+        warn "PowOS ramboot: $n failed attempts ≥ ${_RB_MAX_ATTEMPTS} — auto-reverting to normal boot."
+        warn "PowOS ramboot: fix config then run 'powos ramboot reset' to try again."
+        return 1
+    fi
+    n=$((n + 1))
+    echo "$n" > "$f" 2>/dev/null || { warn "PowOS ramboot: could not record attempt — booting normally."; return 1; }
+    sync
+    info "PowOS ramboot: attempt $n/${_RB_MAX_ATTEMPTS} (auto-reverts to normal boot if it fails)."
+    return 0
+}
+
+# Installed bootc/composefs system asked for OS-in-RAM (copy mode). This is the
+# ONLY safe method on composefs — a full copy into tmpfs, never an overlay of
+# the composefs root on itself (that is what caused the boot-loop incident).
+# EXPERIMENTAL / TODO(hw): validate in a VM. Counter-guarded so it self-heals.
+if [[ $_RB_INSTALLED -eq 1 && $_RB_USB -eq 0 ]]; then
+    RAM_SIZE=$(getarg rd.powos.ramsize=); RAM_SIZE=${RAM_SIZE:-16G}
+    NEWROOT="${NEWROOT:-/sysroot}"
+    info "PowOS ramboot: installed OS-in-RAM (copy mode, ${RAM_SIZE})"
+    if ! _rb_attempt_ok; then
+        return 0   # self-heal / no-ESP / max attempts → normal disk boot
+    fi
+    _rb_ram="/run/powos-ramroot"
+    if ! mount -t tmpfs -o "size=${RAM_SIZE},mode=0755" tmpfs "$_rb_ram" 2>/dev/null && ! { mkdir -p "$_rb_ram" && mount -t tmpfs -o "size=${RAM_SIZE},mode=0755" tmpfs "$_rb_ram"; }; then
+        warn "PowOS ramboot: could not allocate ${RAM_SIZE} tmpfs — booting normally."
+        return 0
+    fi
+    info "PowOS ramboot: copying the root into RAM (this takes a moment)…"
+    # rsync (already in the initramfs), NOT cp: -aAX preserves SELinux contexts,
+    # ACLs and caps — a cp -a copy would be mislabeled and fail to boot under
+    # enforcing SELinux. Exclude pseudo/volatile filesystems so we copy the OS,
+    # not /proc etc. On failure we unwind to a normal boot.
+    if ! rsync -aAXH \
+            --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' \
+            --exclude='/run/*'  --exclude='/tmp/*'  --exclude='/mnt/*' \
+            "$NEWROOT"/ "$_rb_ram"/ 2>/dev/null; then
+        warn "PowOS ramboot: copy-to-RAM failed — unwinding, booting normally."
+        umount "$_rb_ram" 2>/dev/null || true
+        return 0
+    fi
+    if mount --move "$_rb_ram" "$NEWROOT" 2>/dev/null; then
+        # State for the post-boot health/reset service + powos ramboot status.
+        mkdir -p /run/powos 2>/dev/null || true
+        {
+            echo "POWOS_RAMBOOT_MODE=installed-copy"
+            echo "POWOS_RAMBOOT_RAMSIZE=${RAM_SIZE}"
+            echo "POWOS_RAMBOOT_ESP=${_rb_esp_dir}"
+        } > /run/powos/ramboot-state 2>/dev/null || true
+        info "PowOS ramboot: running from a RAM copy of the OS. USB/disk not needed for /usr."
+        return 0
+    fi
+    warn "PowOS ramboot: could not move RAM root onto ${NEWROOT} — booting normally."
+    umount "$_rb_ram" 2>/dev/null || true
+    return 0
+fi
+
+# ── From here down: the USB overlay model (rd.powos.ramboot=1) — UNCHANGED ──
+# (Left exactly as-is: it is the proven live-USB path and must not be risked.)
 
 RAM_SIZE=$(getarg rd.powos.ramsize=)
 RAM_SIZE=${RAM_SIZE:-8G}
