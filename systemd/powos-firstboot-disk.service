@@ -1,0 +1,35 @@
+# powos-firstboot-disk.service - complete the disk on the FIRST boot from a
+# freshly flashed USB: create the POWOS-DATA persistence partition in the free
+# space after the raw image and add the Install/Recovery boot-menu entries.
+#
+# WHY: baking POWOS-DATA + boot entries into the raw at BUILD time needs loop
+# devices, whose partition nodes are unreliable in CI/Docker. Instead the raw
+# ships as a plain bootable OS and self-completes here, on real hardware where
+# partition scanning works. The wrapper (powos-firstboot-disk) invokes
+# install-to-usb.sh --self-complete, then drops a marker so this runs ONCE.
+#
+# Self-disabling: ConditionPathExists=! on the marker means once persistence is
+# set up the unit is skipped on every subsequent boot. Every step is
+# best-effort — the OS already booted, so this only ADDS persistence and must
+# never fail the boot.
+
+[Unit]
+Description=PowOS first-boot disk self-completion (create POWOS-DATA + boot entries)
+Documentation=man:powos-firstboot-disk
+ConditionPathExists=!/var/lib/powos/firstboot-disk-done
+# Needs all local filesystems (incl. /boot and /boot/efi) mounted so we can
+# resolve the boot disk and write BLS entries to the live loader dir.
+After=local-fs.target
+# Run before the user gets a session, but it is not required by those targets.
+Before=graphical.target multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/powos-firstboot-disk
+# The wrapper always exits 0; belt-and-suspenders so a nonzero can never fail
+# the boot transaction.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

@@ -444,6 +444,92 @@ add_games_partition() {
 # This is the supported extension point — we do NOT hand-edit grub.cfg.
 # TODO(hw): validate against the real image's boot partition layout.
 # ─────────────────────────────────────────────────────────────────
+
+# Write the Install + Recovery BLS entries into an ALREADY-KNOWN entries_dir.
+# Shared by two callers:
+#   * add_install_boot_entry   — mounts a target partition to FIND entries_dir
+#                                (flash-a-fresh-USB path), then calls us.
+#   * self_complete_boot_disk  — the boot dir is already mounted LIVE on first
+#                                boot, so it passes /boot/loader/entries directly.
+# Finds the live-boot entry as a template, then writes:
+#   powos-install.conf  (title "Install PowOS to disk"; +powos.install=1)
+#   powos-safe.conf     (Recovery — Safe mode;  +powos.mode=safe  rd.powos.ramboot=0)
+#   powos-aidebug.conf  (Recovery — AI Debug;   +powos.mode=aidebug rd.powos.ramboot=0)
+# All best-effort: warns and returns 0 on any problem so it NEVER bricks boot.
+write_bls_entries() {
+    local entries_dir="$1"
+
+    if [[ -z "$entries_dir" || ! -d "$entries_dir" ]]; then
+        log_warn "write_bls_entries: entries dir '$entries_dir' is missing — skipping."
+        return 0
+    fi
+
+    # Pick the first existing entry as the template (the live boot entry).
+    # Exclude entries WE generate so re-runs (self-complete) stay idempotent and
+    # never template off an install/variant/recovery entry.
+    local template
+    template=$(find "$entries_dir" -maxdepth 1 -name '*.conf' \
+        ! -name '*install*' ! -name '*variant*' \
+        ! -name 'powos-safe*' ! -name 'powos-aidebug*' | head -1)
+    if [[ -z "$template" ]]; then
+        log_warn "No BLS entry template found in $entries_dir — skipping install/recovery entries."
+        return 0
+    fi
+
+    # The template must have an options line (kernel args incl. root=). Writing
+    # a bare `options powos.install=1` entry would be UNBOOTABLE — refuse.
+    if ! grep -q '^options ' "$template"; then
+        log_warn "BLS template $template has no 'options' line — cannot build"
+        log_warn "bootable install/recovery entries. Skipping them."
+        log_warn "You can still install after booting live:  sudo powos install-system"
+        return 0
+    fi
+
+    local install_entry="${entries_dir}/powos-install.conf"
+    # Copy template; retitle; append the installer kernel arg to the options
+    # line. systemd.unit=multi-user.target keeps the display manager (SDDM)
+    # from seizing tty1 and hiding the installer.
+    awk '
+        /^title / { print "title Install PowOS to disk"; next }
+        /^options / { print $0 " powos.install=1 systemd.unit=multi-user.target"; next }
+        { print }
+    ' "$template" > "$install_entry"
+    # Ensure a title line existed; if not, add one (cosmetic only).
+    grep -q '^title '   "$install_entry" || echo "title Install PowOS to disk" >> "$install_entry"
+    # Sanity: the karg injection must have landed on the options line.
+    if ! grep -q 'powos.install=1' "$install_entry"; then
+        log_warn "Failed to inject powos.install=1 into $install_entry — removing it."
+        rm -f "$install_entry"
+    else
+        log_success "Added boot entry: 'Install PowOS to disk'"
+    fi
+
+    # ── Recovery entries (Safe mode + AI Debug) ───────────────────
+    # Both force RAM boot OFF (so they come up even when a ramboot/normal boot
+    # doesn't) and carry powos.mode=, which powos-safemode.service acts on:
+    #   safe    → recovery menu (offer AI debug, rollback, reset, shell)
+    #   aidebug → run `powos doctor --ai` straight away
+    # systemd.unit=multi-user.target keeps SDDM off tty1 so the console shows.
+    _write_recovery_entry() {
+        local name="$1" title="$2" mode="$3"
+        local out="${entries_dir}/${name}.conf"
+        awk -v t="$title" -v m="$mode" '
+            /^title / { print "title " t; next }
+            /^options / { print $0 " rd.powos.ramboot=0 powos.mode=" m " systemd.unit=multi-user.target"; next }
+            { print }
+        ' "$template" > "$out"
+        grep -q '^title ' "$out" || echo "title $title" >> "$out"
+        if grep -q "powos.mode=$mode" "$out"; then
+            log_success "Added boot entry: '$title'"
+        else
+            log_warn "Failed to build recovery entry '$title' — removing."
+            rm -f "$out"
+        fi
+    }
+    _write_recovery_entry "powos-safe"    "Recovery — Safe mode (RAM boot off)" "safe"
+    _write_recovery_entry "powos-aidebug" "Recovery — AI Debug (diagnose boot)" "aidebug"
+}
+
 add_install_boot_entry() {
     local device="$1"
 
@@ -478,72 +564,8 @@ add_install_boot_entry() {
         return 0
     fi
 
-    # Pick the first existing entry as the template (the live boot entry).
-    local template
-    template=$(find "$entries_dir" -maxdepth 1 -name '*.conf' ! -name '*install*' | head -1)
-    if [[ -z "$template" ]]; then
-        log_warn "No BLS entry template found — skipping install menu entry."
-        umount "$mp" 2>/dev/null || true
-        rmdir "$mp" 2>/dev/null || true
-        return 0
-    fi
-
-    # The template must have an options line (kernel args incl. root=). Writing
-    # a bare `options powos.install=1` entry would be UNBOOTABLE — refuse.
-    if ! grep -q '^options ' "$template"; then
-        log_warn "BLS template $template has no 'options' line — cannot build a"
-        log_warn "bootable install entry. Skipping the 'Install PowOS' menu entry."
-        log_warn "You can still install after booting live:  sudo powos install-system"
-        umount "$mp" 2>/dev/null || true
-        rmdir "$mp" 2>/dev/null || true
-        return 0
-    fi
-
-    local install_entry="${entries_dir}/powos-install.conf"
-    # Copy template; retitle; append the installer kernel arg to the options
-    # line. systemd.unit=multi-user.target keeps the display manager (SDDM)
-    # from seizing tty1 and hiding the installer.
-    awk '
-        /^title / { print "title Install PowOS to disk"; next }
-        /^options / { print $0 " powos.install=1 systemd.unit=multi-user.target"; next }
-        { print }
-    ' "$template" > "$install_entry"
-    # Ensure a title line existed; if not, add one (cosmetic only).
-    grep -q '^title '   "$install_entry" || echo "title Install PowOS to disk" >> "$install_entry"
-    # Sanity: the karg injection must have landed on the options line.
-    if ! grep -q 'powos.install=1' "$install_entry"; then
-        log_warn "Failed to inject powos.install=1 into $install_entry — removing it."
-        rm -f "$install_entry"
-        umount "$mp" 2>/dev/null || true
-        rmdir "$mp" 2>/dev/null || true
-        return 0
-    fi
-
-    log_success "Added boot entry: 'Install PowOS to disk'"
-
-    # ── Recovery entries (Safe mode + AI Debug) ───────────────────
-    # Both force RAM boot OFF (so they come up even when a ramboot/normal boot
-    # doesn't) and carry powos.mode=, which powos-safemode.service acts on:
-    #   safe    → recovery menu (offer AI debug, rollback, reset, shell)
-    #   aidebug → run `powos doctor --ai` straight away
-    # systemd.unit=multi-user.target keeps SDDM off tty1 so the console shows.
-    _write_recovery_entry() {
-        local name="$1" title="$2" mode="$3" out="${entries_dir}/${name}.conf"
-        awk -v t="$title" -v m="$mode" '
-            /^title / { print "title " t; next }
-            /^options / { print $0 " rd.powos.ramboot=0 powos.mode=" m " systemd.unit=multi-user.target"; next }
-            { print }
-        ' "$template" > "$out"
-        grep -q '^title ' "$out" || echo "title $title" >> "$out"
-        if grep -q "powos.mode=$mode" "$out"; then
-            log_success "Added boot entry: '$title'"
-        else
-            log_warn "Failed to build recovery entry '$title' — removing."
-            rm -f "$out"
-        fi
-    }
-    _write_recovery_entry "powos-safe"    "Recovery — Safe mode (RAM boot off)" "safe"
-    _write_recovery_entry "powos-aidebug" "Recovery — AI Debug (diagnose boot)" "aidebug"
+    # Write the Install + Recovery BLS entries into the mounted entries dir.
+    write_bls_entries "$entries_dir"
 
     # Make the menu actually visible (bootc images often hide it / 0s timeout).
     # Fedora-family hosts ship grub2-editenv; Debian/Ubuntu ship grub-editenv.
@@ -794,6 +816,110 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# First-boot self-completion (runs on REAL hardware, NOT in CI/Docker).
+#
+# THE PROBLEM: baking POWOS-DATA + boot entries into the raw at BUILD time
+# needs loop devices, whose partition nodes (/dev/loopXpN) appear unreliably in
+# CI/Docker (partprobe/partx don't always create them). THE FIX: ship a plain
+# bootable OS raw (bib makes that reliably) and SELF-COMPLETE here — on the
+# first boot from the flashed USB, on real hardware where partition scanning
+# works — creating POWOS-DATA in the free space (filling the ACTUAL device,
+# whatever its size) and adding the Install/Recovery boot entries.
+#
+# Everything is best-effort/logged: the OS has ALREADY booted, so a failure
+# here only means "no persistence yet", never a bricked boot.
+#
+# SAFETY INVARIANTS (read before touching this):
+#   * ONLY-ADD-IN-FREE-SPACE: add_data_partition merely `mkpart`s a new
+#     partition into the disk's FREE SPACE. It NEVER erases, shrinks, or
+#     rewrites an existing partition. No dd, no whole-disk parted, no mkfs on
+#     anything but the brand-new POWOS-DATA node.
+#   * SINGLE-DISK VERIFICATION: we operate ONLY on the disk we actually booted
+#     from — resolved from the partition backing /boot/efi (or /boot) and
+#     verified to (a) be a whole-disk block device and (b) actually contain
+#     that boot partition. We never guess a disk.
+#   * IDEMPOTENT: bail immediately if POWOS-DATA already exists. The service
+#     layer adds a once-only marker on top of this.
+# ─────────────────────────────────────────────────────────────────
+self_complete_boot_disk() {
+    log "First-boot self-completion: checking persistence partition..."
+
+    # Already completed (label present anywhere)? Nothing to do — idempotent.
+    if blkid -L POWOS-DATA >/dev/null 2>&1; then
+        log_success "POWOS-DATA already exists — self-completion not needed."
+        return 0
+    fi
+
+    # Resolve the partition backing /boot/efi (or /boot), then its parent disk.
+    # This is the device we BOOTED from — the only disk we are allowed to touch.
+    local src
+    src=$(findmnt -n -o SOURCE /boot/efi 2>/dev/null || true)
+    [[ -z "$src" ]] && src=$(findmnt -n -o SOURCE /boot 2>/dev/null || true)
+    if [[ -z "$src" || "$src" != /dev/* ]]; then
+        log_warn "Could not resolve the boot partition (/boot/efi or /boot)."
+        log_warn "Skipping self-completion (boot is unaffected)."
+        return 0
+    fi
+
+    local pk disk
+    pk=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)
+    if [[ -z "$pk" ]]; then
+        log_warn "Could not resolve the parent disk of boot source $src — skipping."
+        return 0
+    fi
+    disk="/dev/$pk"
+
+    # SAFETY: single-disk verification. The resolved node MUST be a real
+    # whole-disk block device that ACTUALLY contains the boot source partition.
+    # We gate on lsblk (the authoritative source of block topology — it reports
+    # nothing for a non-existent/non-block path) rather than the `[[ -b ]]`
+    # builtin, so this stays fully mockable in tests. If any check fails we
+    # refuse rather than guess.
+    if [[ "$(lsblk -dno TYPE "$disk" 2>/dev/null | head -1)" != "disk" ]]; then
+        log_warn "$disk is not a whole-disk block device — skipping self-completion."
+        return 0
+    fi
+    if ! lsblk -ln -o PATH "$disk" 2>/dev/null | grep -qxF "$src"; then
+        log_warn "Boot source $src is not a partition of $disk — refusing to guess."
+        return 0
+    fi
+
+    log "Resolved boot disk: $disk (backs $src)"
+
+    # The boot USB may report NON-removable, and it is legitimately mounted (it
+    # holds our live root/boot). Both would trip the guards on the flash path.
+    # We bypass them because SAFETY INVARIANT: add_data_partition only creates a
+    # partition in FREE SPACE — existing partitions are never touched.
+    export POWOS_OVERRIDE_REMOVABLE=1
+
+    # 1) Create POWOS-DATA in the free space. add_data_partition repair_gpt's
+    #    first (moves the backup GPT to the REAL end of disk, so a small raw
+    #    flashed onto a big USB exposes its free space), then fills it. Uses the
+    #    robust rescan_parts already in this file. Reservations auto-size.
+    add_data_partition "$disk" || log_warn "add_data_partition reported an issue — continuing."
+
+    # 2) Add Install/Recovery BLS entries to the ALREADY-MOUNTED live boot dir.
+    #    Do NOT re-mount — it is live. Prefer /boot/loader, then /boot/efi/loader.
+    local live_entries=""
+    if [[ -d /boot/loader/entries ]]; then
+        live_entries=/boot/loader/entries
+    elif [[ -d /boot/efi/loader/entries ]]; then
+        live_entries=/boot/efi/loader/entries
+    fi
+    if [[ -n "$live_entries" ]]; then
+        write_bls_entries "$live_entries"
+    else
+        log_warn "No live loader/entries dir found — boot menu entries not added (non-fatal)."
+    fi
+
+    # 3) Lay down the persistence structure (subvolumes, layer dirs, state repo).
+    setup_persistence "$disk" || log_warn "setup_persistence reported an issue — continuing."
+
+    log_success "First-boot self-completion finished."
+    return 0
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Show completion message
 # ─────────────────────────────────────────────────────────────────
 show_complete() {
@@ -838,6 +964,9 @@ usage() {
     echo ""
     echo "Options:"
     echo "  --setup-data-only   Only add POWOS-DATA partition (raw image already written)"
+    echo "  --self-complete     First-boot ADD-ONLY: resolve the disk we booted from,"
+    echo "                      create POWOS-DATA in its free space, add boot entries."
+    echo "                      Takes NO device arg (used by powos-firstboot-disk)."
     echo "  --image PATH        Path to powos.raw image (default: build/output/powos.raw)"
     echo "  --variants          Add multi-variant base rootfs + boot entries onto an"
     echo "                      already-written USB (needs ./build/build-iso.sh variants)"
@@ -863,12 +992,17 @@ main() {
     local image="$RAW_PATH"
     local setup_data_only=0
     local variants_only=0
+    local self_complete=0
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --setup-data-only)
                 setup_data_only=1
+                shift
+                ;;
+            --self-complete)
+                self_complete=1
                 shift
                 ;;
             --variants|--add-variants)
@@ -916,6 +1050,16 @@ main() {
     echo -e "${MAGENTA}║  PowOS USB Installer                                       ║${NC}"
     echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════╝${NC}"
 
+    # Self-completion resolves its OWN device (the disk we booted from) — it
+    # takes no /dev/ argument and runs an ADD-ONLY flow. Handle it before the
+    # device-required check and the erase confirmation.
+    if [[ "$self_complete" == "1" ]]; then
+        log "First-boot self-completion mode (resolve boot disk, add persistence)"
+        check_root
+        self_complete_boot_disk
+        return 0
+    fi
+
     if [[ -z "$device" ]]; then
         usage
         exit 1
@@ -954,4 +1098,11 @@ main() {
     show_complete "$device"
 }
 
-main "$@"
+# Only auto-run when executed directly. When SOURCED (e.g. the tier-1 tests, or
+# any consumer of write_bls_entries / self_complete_boot_disk) this is skipped
+# so sourcing does not kick off a real install. NOTE: powos-firstboot-disk runs
+# this file as a SUBPROCESS (bash install-to-usb.sh --self-complete), NOT by
+# sourcing, so the top-of-file `set -euo pipefail` never contaminates the caller.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

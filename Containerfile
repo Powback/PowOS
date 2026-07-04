@@ -195,12 +195,18 @@ COPY systemd/powos-safemode.service /usr/lib/systemd/system/
 COPY bin/powos-install-wizard /usr/bin/
 COPY bin/powos-firstboot-apply /usr/bin/
 COPY systemd/powos-firstboot.service /usr/lib/systemd/system/
+# First-boot disk self-completion: on the first boot from a flashed USB, create
+# POWOS-DATA in the free space and add the Install/Recovery boot entries (loop
+# devices make baking this at build time unreliable). Self-disables via marker.
+COPY bin/powos-firstboot-disk /usr/bin/
+COPY systemd/powos-firstboot-disk.service /usr/lib/systemd/system/
 # A failed enable must fail the build — no 2>/dev/null || true.
-RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powos-firstboot-apply && \
+RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powos-firstboot-apply /usr/bin/powos-firstboot-disk && \
     systemctl enable powos-ramboot-init.service powos-layer-sync.service \
         powos-cachefs-sync.service powos-installer.service \
         powos-hwinfo.service powos-ramboot-healthy.service \
         powos-safemode.service powos-firstboot.service \
+        powos-firstboot-disk.service \
         powos-init.service powos-hardware.service powos-overlay.service \
         powos-hydrate.service
 

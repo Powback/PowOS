@@ -1,0 +1,73 @@
+#!/bin/bash
+# powos-firstboot-disk - one-shot first-boot persistence self-completion.
+#
+# WHY THIS EXISTS: baking POWOS-DATA + boot entries into the raw image at BUILD
+# time requires loop devices, whose partition nodes (/dev/loopXpN) show up
+# unreliably in CI/Docker. So the raw ships as a plain bootable OS and we
+# COMPLETE it on the FIRST boot from the flashed USB — on real hardware where
+# partition scanning works. This wrapper is what powos-firstboot-disk.service
+# runs: it locates install-to-usb.sh and invokes its `--self-complete` flow
+# (which resolves the boot disk, adds POWOS-DATA in free space, and writes the
+# Install/Recovery boot entries — see that script for the safety invariants).
+#
+# DESIGN RULES:
+#   - Runs ONCE: a marker at /var/lib/powos/firstboot-disk-done gates it. Once
+#     the marker exists (or POWOS-DATA exists) we do nothing.
+#   - BEST-EFFORT: the OS has already booted; this only ADDS persistence. We
+#     never exit nonzero in a way that could fail the boot — always exit 0.
+#   - install-to-usb.sh is run as a SUBPROCESS (not sourced) so its
+#     `set -euo pipefail` never leaks into this wrapper.
+
+set -uo pipefail
+
+MARKER="${POWOS_FIRSTBOOT_DISK_MARKER:-/var/lib/powos/firstboot-disk-done}"
+
+log() { echo "[firstboot-disk] $*"; }
+
+# Already done? self-disable.
+if [[ -e "$MARKER" ]]; then
+    log "Marker present ($MARKER) — already completed, nothing to do."
+    exit 0
+fi
+
+# Locate install-to-usb.sh: prefer the bundled source, fall back to the
+# installed lib copy if one is shipped there.
+SCRIPT=""
+for cand in \
+    /var/lib/powos/src/build/install-to-usb.sh \
+    /usr/lib/powos/install-to-usb.sh \
+    /usr/lib/powos/build/install-to-usb.sh; do
+    if [[ -f "$cand" ]]; then
+        SCRIPT="$cand"
+        break
+    fi
+done
+
+if [[ -z "$SCRIPT" ]]; then
+    log "Could not find install-to-usb.sh (bundled or installed) — skipping."
+    log "Persistence can be added later: sudo powos install-to-usb --setup-data-only /dev/<usb>"
+    # No marker: leave the door open to retry on a later boot once source exists.
+    exit 0
+fi
+
+log "Running self-completion via: $SCRIPT --self-complete"
+# Subprocess (NOT sourced): keeps install-to-usb.sh's set -e out of here, and a
+# failure inside never propagates to fail the boot.
+if bash "$SCRIPT" --self-complete; then
+    log "Self-completion succeeded."
+else
+    log "Self-completion returned nonzero — continuing (boot is unaffected)."
+fi
+
+# Mark done ONCE if the work is actually complete (POWOS-DATA now exists) OR the
+# script ran to a definitive end. We treat a present POWOS-DATA label as the
+# success signal; if it exists, never run again.
+if blkid -L POWOS-DATA >/dev/null 2>&1; then
+    mkdir -p "$(dirname "$MARKER")" 2>/dev/null || true
+    touch "$MARKER" 2>/dev/null || true
+    log "POWOS-DATA present — marker written, will not run again."
+else
+    log "POWOS-DATA not present after run — will retry on next boot."
+fi
+
+exit 0
