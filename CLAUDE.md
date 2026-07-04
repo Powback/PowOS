@@ -221,23 +221,37 @@ powos install -c NAME -e PKG...   # Install + export GUI apps to host
 
 ### Install to Disk (dual-boot) — 🚧 New / needs hardware validation
 
-The USB is a **single live image with a boot menu**: "PowOS Live" (default,
-runs from RAM) and "Install PowOS to disk". Choosing Install boots live and
-launches an interactive installer — nothing is wiped without an explicit
-target + confirmation. Always runnable by hand from the live system:
+The USB is a **single live image with a 5-second visible boot menu**: "PowOS
+Live" (default, runs from RAM), "Install PowOS to disk", "Recovery — Safe mode",
+"Recovery — AI Debug". Choosing Install boots live and launches the **guided
+installer wizard** — nothing is wiped without an explicit target + confirmation.
+
+**Guided wizard** (`powos install` / `powos-install-wizard`, TUI or GUI): walks
+disk → mode → partition sizes → GPU flavor → hostname/user/password (hashed) →
+SSH → RAM boot → AI credentials → restore-from-backup URL, shows a review, then
+drives `powos install-system` with the mapped flags and writes
+`/etc/powos/install.conf`. `powos-firstboot.service` applies the rest on first
+boot (hostname, user, ssh, `powos ramboot enable`, AI creds, `powos backup pull`)
+then deletes the config and self-disables. The raw installer is still available:
 
 ```bash
-sudo powos install-system                 # Interactive: pick disk + mode
+sudo powos install                        # Guided wizard (default install flow)
+sudo powos install-system                 # Raw interactive installer
 sudo powos install-system --dry-run       # Show the plan, change nothing
 sudo powos install-system --alongside     # Dual-boot: install into free space, keep Windows
 sudo powos install-system --whole-disk    # Erase target disk (must type disk model to confirm)
-sudo powos install-system --shared-gb 200 # Also create a shared NTFS data partition (now labeled POWOS-GAMES)
+sudo powos install-system --shared-gb 200 # Shared NTFS data partition (labeled POWOS-GAMES)
 ```
 
-**Boot-menu mechanism:** the "Install PowOS" entry is a Boot Loader Spec entry
-(`loader/entries/powos-install.conf`) added by `install-to-usb.sh` — a copy of
-the live entry plus kernel arg `powos.install=1`. `powos-installer.service`
-(`ConditionKernelCommandLine=powos.install`) launches the installer on tty1.
+Reservations (games + Windows tail) are **default-on, auto-sized** from the disk
+so a fresh install never needs a reformat to add games/Windows later.
+
+**Boot-menu mechanism:** the "Install PowOS" and "Recovery" entries are Boot
+Loader Spec entries (`loader/entries/powos-*.conf`) added by `install-to-usb.sh`
+— copies of the live entry plus a kernel arg (`powos.install=1`, or
+`powos.mode=safe|aidebug` for recovery, both forcing `rd.powos.ramboot=0`).
+`powos-installer.service` (`ConditionKernelCommandLine=powos.install`) launches
+the wizard on tty1; `powos-safemode.service` (`powos.mode`) runs recovery.
 
 **Dual-boot notes automated by the installer:** sets RTC to local time (matches
 Windows), reminds to disable Windows Fast Startup/hibernation, recommends the
@@ -248,6 +262,32 @@ keeping Steam Proton prefixes on native FS while sharing only assets on NTFS.
 > "alongside" path (partition free space + reuse Windows ESP via
 > `bootc install to-filesystem`) is **EXPERIMENTAL** — see `TODO(hw)` markers
 > in `lib/install-system.sh`. Validate on a VM / spare disk before trusting it.
+
+### Recovery & Boot Debugging (`powos doctor`, Safe mode)
+
+A bad boot is **survivable and diagnosable**, not a brick (this is the direct
+answer to the composefs boot-loop incident):
+
+- **Self-heal:** RAM boot can never loop — after 3 failed attempts the initramfs
+  auto-reverts to a normal disk boot (see the ramboot section).
+- **Always-visible 5s boot menu:** pick the previous bootc deployment any time.
+- **Recovery boot entries:** *Safe mode* (recovery menu) and *AI Debug* (runs
+  `powos doctor --ai` on tty1) — both boot with RAM boot off.
+- **`powos doctor`** — the AI-native boot debugger:
+
+```bash
+powos doctor                 # collect a diagnostic bundle → /var/log/powos/
+powos doctor --ai            # + have the health agent diagnose it
+sudo powos doctor --target auto --ai   # from the Live USB: mount a broken
+                                       # install READ-ONLY and diagnose ITS logs
+powos doctor --offline       # save the bundle, no network/AI (re-run later)
+```
+
+`doctor` gathers the current + previous boot journal, failed units, dmesg,
+`/run/powos` state and the self-heal counter. AI credentials resolve
+try-all-with-fallback (the target install → this system → cloud backup →
+prompt); the secret is passed via env, never argv, never printed. Details:
+`docs/BOOT-ARCHITECTURE.md`.
 
 ### Windows: dual-boot, reciprocal VM, GPU hotswap
 ```bash
