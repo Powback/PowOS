@@ -32,10 +32,13 @@ jobs:
       packages: read
     steps:
       - name: Free disk space (bazzite images are large)
+        # Aggressive: the exported disk.raw (~25-30GB) lands on the root disk.
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
-                      /usr/share/swift /usr/local/.ghcup || true
+                      /opt/hostedtoolcache /usr/local/share/boost \
+                      /usr/share/swift /usr/local/.ghcup /usr/local/share/powershell \
+                      /usr/local/julia* /usr/lib/jvm /usr/local/share/chromium \
+                      /usr/local/lib/node_modules || true
           sudo docker image prune --all --force || true
           df -h / /mnt
 
@@ -57,27 +60,35 @@ jobs:
         run: sudo podman pull ${{ env.IMAGE }}:${{ inputs.variant }}
 
       - name: Build raw disk image
+        # Disk budget (learned from failed runs): /mnt (~65GB) holds the
+        # pulled image (~15GB) + bib's /store build tree (~15-20GB); the
+        # exported disk.raw (~25-30GB) goes to the root disk via /output.
         run: |
+          mkdir -p "$PWD/output"
+          sudo mkdir -p /mnt/store
           sudo podman run --rm --privileged \
             --security-opt label=type:unconfined_t \
-            -v /mnt/output:/output \
+            -v "$PWD/output:/output" \
+            -v /mnt/store:/store \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type raw --rootfs btrfs \
             ${{ env.IMAGE }}:${{ inputs.variant }}
-          ls -lh /mnt/output/image/
+          sudo ls -lh "$PWD/output/image/"
+          df -h / /mnt
 
       - name: Compress
         run: |
-          sudo mv /mnt/output/image/disk.raw /mnt/output/powos-${{ inputs.variant }}.raw
+          sudo mv "$PWD/output/image/disk.raw" "$PWD/output/powos-${{ inputs.variant }}.raw"
           # --rm deletes the raw as it compresses; the runner can't hold both.
-          sudo zstd -T0 --rm /mnt/output/powos-${{ inputs.variant }}.raw
-          ls -lh /mnt/output/
+          sudo zstd -T0 --sparse --rm "$PWD/output/powos-${{ inputs.variant }}.raw"
+          ls -lh "$PWD/output/"
+          df -h / /mnt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: powos-${{ inputs.variant }}-raw
-          path: /mnt/output/powos-${{ inputs.variant }}.raw.zst
+          path: output/powos-${{ inputs.variant }}.raw.zst
           retention-days: 7
           compression-level: 0  # already zstd-compressed
