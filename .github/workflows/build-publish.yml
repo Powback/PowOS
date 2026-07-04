@@ -17,6 +17,7 @@ on:
       - '**.md'
       - 'docs/**'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/build-disk-image.yml'
   workflow_dispatch:
     inputs:
       variant:

@@ -1,0 +1,83 @@
+name: Build Disk Image (USB)
+
+# Builds the flashable live-USB disk image (powos.raw) from an already-published
+# OS image using bootc-image-builder, and uploads it as a compressed artifact.
+#
+# Runs on demand only — the .raw is ~20GB uncompressed and most pushes don't
+# need one. Local builds on Apple Silicon are blocked by amd64 emulation
+# (crun memfd re-exec + libpod SHM-lock failures under Rosetta), so CI's
+# native amd64 runners are the supported path.
+#
+# NOTE: current bootc-image-builder renamed the type 'raw-efi' -> 'raw' and
+# no longer pulls images itself (requires a pre-pulled image in rootful
+# containers-storage). build/build-iso.sh predates both changes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Which published variant to build the disk image from
+        type: choice
+        default: nvidia-open
+        options: [ nvidia-open, nvidia, main ]
+
+env:
+  IMAGE: ghcr.io/powback/powos
+
+jobs:
+  disk-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Free disk space (bazzite images are large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/share/swift /usr/local/.ghcup || true
+          sudo docker image prune --all --force || true
+          df -h / /mnt
+
+      - name: Move containers storage to /mnt (scratch disk)
+        # Root disk keeps ~30GB free after cleanup; image (15GB) + osbuild
+        # store + raw output need more. /mnt has a separate ~60GB.
+        run: |
+          sudo mkdir -p /mnt/containers-storage /mnt/output
+          sudo sed -i 's|^graphroot = .*|graphroot = "/mnt/containers-storage"|' \
+            /etc/containers/storage.conf || \
+            printf '[storage]\ndriver = "overlay"\ngraphroot = "/mnt/containers-storage"\nrunroot = "/run/containers/storage"\n' | \
+            sudo tee /etc/containers/storage.conf
+          sudo podman info --format '{{.Store.GraphRoot}}'
+
+      - name: Log in to GHCR (rootful podman)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull OS image
+        run: sudo podman pull ${{ env.IMAGE }}:${{ inputs.variant }}
+
+      - name: Build raw disk image
+        run: |
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v /mnt/output:/output \
+            -v /mnt/containers-storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type raw --rootfs btrfs \
+            ${{ env.IMAGE }}:${{ inputs.variant }}
+          ls -lh /mnt/output/image/
+
+      - name: Compress
+        run: |
+          sudo mv /mnt/output/image/disk.raw /mnt/output/powos-${{ inputs.variant }}.raw
+          # --rm deletes the raw as it compresses; the runner can't hold both.
+          sudo zstd -T0 --rm /mnt/output/powos-${{ inputs.variant }}.raw
+          ls -lh /mnt/output/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: powos-${{ inputs.variant }}-raw
+          path: /mnt/output/powos-${{ inputs.variant }}.raw.zst
+          retention-days: 7
+          compression-level: 0  # already zstd-compressed
