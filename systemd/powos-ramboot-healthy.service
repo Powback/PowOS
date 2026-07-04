@@ -10,9 +10,12 @@ After=local-fs.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# Zero the counter wherever the ESP is mounted (bootc: /boot/efi). No-op if
-# absent. Never fails the boot.
-ExecStart=/bin/sh -c 'for f in /boot/efi/powos/ramboot-attempts /efi/powos/ramboot-attempts; do [ -f "$f" ] && { echo 0 > "$f" && sync; }; done; exit 0'
+# On a good boot: if the counter had hit the max (RAM boot failed and self-heal
+# reverted us to a normal disk boot), drop a flag so the desktop can offer AI
+# Debug ("RAM boot failed and was reverted — diagnose?"). Then zero the counter
+# wherever the ESP is mounted (bootc: /boot/efi). No-op if absent; never fails
+# the boot.
+ExecStart=/bin/sh -c 'for f in /boot/efi/powos/ramboot-attempts /efi/powos/ramboot-attempts; do [ -f "$f" ] || continue; n=$(cat "$f" 2>/dev/null); case "$n" in ""|*[!0-9]*) n=0 ;; esac; [ "$n" -ge 3 ] && { mkdir -p /var/lib/powos && echo "ramboot reverted after $n failed attempts" > /var/lib/powos/ramboot-reverted; }; echo 0 > "$f" && sync; done; exit 0'
 
 [Install]
 WantedBy=multi-user.target

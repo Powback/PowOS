@@ -1,0 +1,26 @@
+[Unit]
+Description=PowOS Recovery — Safe Mode / AI Debug console
+Documentation=man:powos(8)
+# Only when the boot carries a `powos.mode=` karg (the Recovery boot-menu
+# entries set powos.mode=safe or =aidebug). Takes over tty1 like the installer.
+ConditionKernelCommandLine=powos.mode
+After=multi-user.target network-online.target
+Wants=network-online.target
+Conflicts=getty@tty1.service
+Conflicts=display-manager.service
+After=display-manager.service
+
+[Service]
+Type=idle
+ExecStart=/usr/bin/powos-safemode
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+# Recovery must never be killed for taking a while at the AI/log step.
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

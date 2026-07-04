@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# powos-safemode - Safe Mode / AI Debug console
+#
+# Launched by powos-safemode.service on tty1 when the boot carries a
+# `powos.mode=` kernel arg (set by the Recovery boot-menu entries):
+#   powos.mode=safe     → present a recovery menu (offer AI debug)
+#   powos.mode=aidebug  → run `powos doctor --ai` straight away
+#
+# Safe mode boots with RAM boot forced off and verbose logging, so it comes up
+# even when a normal/ramboot boot doesn't. From here the AI debugger reads the
+# boot logs (and can target a broken install on an internal disk) to diagnose.
+
+set -uo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'
+BOLD='\033[1m'; NC='\033[0m'
+
+mode=""
+for a in $(cat /proc/cmdline 2>/dev/null); do
+    case "$a" in powos.mode=*) mode="${a#powos.mode=}" ;; esac
+done
+
+banner() {
+    echo
+    echo -e "${CYAN}${BOLD}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║              PowOS Recovery — Safe Mode                    ║${NC}"
+    echo -e "${CYAN}${BOLD}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "  Booted with RAM boot OFF and verbose logging."
+    echo
+}
+
+run_doctor_ai() {
+    echo -e "${CYAN}Starting AI Debug — collecting boot logs and diagnosing…${NC}"
+    echo "  (Needs network + AI credentials. It tries the install's creds, this"
+    echo "   system's, your cloud backup, then prompts. Offline → saves a bundle.)"
+    echo
+    if command -v powos >/dev/null 2>&1; then
+        powos doctor --ai --target auto
+    else
+        echo -e "${RED}powos not found on PATH.${NC}"
+    fi
+}
+
+# aidebug: no prompts, go straight to the AI diagnosis.
+if [[ "$mode" == "aidebug" ]]; then
+    banner
+    run_doctor_ai
+    echo
+    read -r -p "Press Enter for a recovery shell, or type 'reboot': " a
+    [[ "$a" == "reboot" ]] && systemctl reboot
+    exec /bin/bash -l
+fi
+
+# safe (or any other value): offer the recovery menu.
+banner
+while true; do
+    echo "  1) Run AI Debug (diagnose why boot failed)"
+    echo "  2) Collect logs to a file (no AI, for offline)"
+    echo "  3) Roll back to the previous system version"
+    echo "  4) Reset the RAM-boot self-heal counter"
+    echo "  5) Recovery shell"
+    echo "  6) Reboot"
+    echo
+    read -r -p "Choose [1-6]: " choice
+    case "$choice" in
+        1) run_doctor_ai ;;
+        2) command -v powos >/dev/null 2>&1 && powos doctor --offline --target auto \
+               || echo "powos not found." ;;
+        3) if command -v bootc >/dev/null 2>&1; then
+               echo -e "${YELLOW}Rolling back to the previous deployment…${NC}"
+               bootc rollback && { echo "Done — rebooting."; systemctl reboot; }
+           else echo "bootc not found."; fi ;;
+        4) command -v powos >/dev/null 2>&1 && powos ramboot reset \
+               || echo "powos not found." ;;
+        5) exec /bin/bash -l ;;
+        6) systemctl reboot ;;
+        *) echo "Pick 1-6." ;;
+    esac
+    echo
+done

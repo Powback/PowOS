@@ -502,6 +502,30 @@ add_install_boot_entry() {
 
     log_success "Added boot entry: 'Install PowOS to disk'"
 
+    # ── Recovery entries (Safe mode + AI Debug) ───────────────────
+    # Both force RAM boot OFF (so they come up even when a ramboot/normal boot
+    # doesn't) and carry powos.mode=, which powos-safemode.service acts on:
+    #   safe    → recovery menu (offer AI debug, rollback, reset, shell)
+    #   aidebug → run `powos doctor --ai` straight away
+    # systemd.unit=multi-user.target keeps SDDM off tty1 so the console shows.
+    _write_recovery_entry() {
+        local name="$1" title="$2" mode="$3" out="${entries_dir}/${name}.conf"
+        awk -v t="$title" -v m="$mode" '
+            /^title / { print "title " t; next }
+            /^options / { print $0 " rd.powos.ramboot=0 powos.mode=" m " systemd.unit=multi-user.target"; next }
+            { print }
+        ' "$template" > "$out"
+        grep -q '^title ' "$out" || echo "title $title" >> "$out"
+        if grep -q "powos.mode=$mode" "$out"; then
+            log_success "Added boot entry: '$title'"
+        else
+            log_warn "Failed to build recovery entry '$title' — removing."
+            rm -f "$out"
+        fi
+    }
+    _write_recovery_entry "powos-safe"    "Recovery — Safe mode (RAM boot off)" "safe"
+    _write_recovery_entry "powos-aidebug" "Recovery — AI Debug (diagnose boot)" "aidebug"
+
     # Make the menu actually visible (bootc images often hide it / 0s timeout).
     # Fedora-family hosts ship grub2-editenv; Debian/Ubuntu ship grub-editenv.
     local editenv=""
