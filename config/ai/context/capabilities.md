@@ -48,10 +48,20 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   be closed), drops GAMES-README.txt for the Windows side. One installed game
   serves both OSes. `resize` is a stub. ⚠️ implemented CLI, hardware validation
   pending.
-- `powos windows {status|create [--size N] [--fixed-vhd]|install --iso PATH|
-  finalize|snapshot|snapshots|rollback|vm}` — Windows lives in ONE FILE
-  (`<POWOS-GAMES>/PowOS-Windows/windows.vhdx`, thin/dynamic), NO real partitions
-  for Windows ever; user supplies ISO + license. Bare-metal boots via native VHD
+- `powos windows {status|create [--size N] [--fixed-vhd]|fetch-iso [--slim] [--hash]|
+  slim <iso>|install [--iso PATH] [--fetch] [--slim]|finalize|snapshot|snapshots|
+  rollback|vm}`, plus `--backend vhd|partition` (default vhd). DEFAULT BACKEND:
+  Windows lives in ONE FILE (`<POWOS-GAMES>/PowOS-Windows/windows.vhdx`,
+  thin/dynamic), no partition of its own. ALT BACKEND (`WINDOWS_BACKEND=partition`
+  in /etc/powos/windows.conf, or `--backend partition`): a dedicated WIN-ESP +
+  POWOS-WIN carved from the burn-time `--windows-gb` unallocated tail, giving
+  Windows plain metal + REAL hibernation (both backends keep every Linux partition
+  invisible to Windows via GPT type GUIDs). `fetch-iso` downloads the OFFICIAL MS
+  ISO (verified, never a prebuilt third-party image) and `--slim` debloats it
+  natively (wimlib, tiny11-style) — install `--fetch` chains this. Install is
+  zero-touch (autounattend: keyless edition-select, TPM/SB bypass, OOBE skipped)
+  and preloads Steam pointed at the shared POWOS-GAMES library. User supplies ISO
+  + license; PowOS ships no MS bits. Bare-metal boots via native VHD
   boot (bootmgr on the SHARED PowOS ESP, backed up before install); the same file
   also boots as a KVM guest (`vm`, implemented — VM-hibernation is the supported
   resume path). Bare `powos windows` = the guarded switch: flush + stop layer-sync

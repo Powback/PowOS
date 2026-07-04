@@ -16,10 +16,15 @@ One 4TB PowOS USB carries a full Windows that:
    detected and blocked; this is the only workload that needs metal).
 2. **Also boots as a KVM guest** from PowOS for non-anti-cheat Windows work —
    the *same image*, no second install.
-3. **Never touches internal disks, and never gets a partition of its own.**
-   No internal partitioning, no second SSD, no carve step even on the USB.
-   Windows is a single file; the worst it can ever do is damage that file (and
-   the POWOS-GAMES volume that holds it, which is Windows-visible by design).
+3. **Never touches internal disks.** The **default `vhd` backend** gives Windows
+   no partition of its own: it's a single file on POWOS-GAMES, so the worst it
+   can damage is that file (and the POWOS-GAMES volume that holds it, which is
+   Windows-visible by design) — no internal partitioning, no second SSD, no
+   carve step even on the USB. A `partition` backend is also selectable
+   (`WINDOWS_BACKEND=partition`) for anyone who wants Windows on plain metal with
+   real hibernation, carved from the burn-time `--windows-gb` tail; both backends
+   keep every Linux partition invisible to Windows. See "Backends" below and
+   `config/windows.conf`.
 4. Is **snapshottable and rollback-able** from PowOS, like every other PowOS
    layer.
 
@@ -479,10 +484,14 @@ Install options: `--interactive`, `--username`, `--password`, `--locale`,
 ## Decisions & open questions
 
 Decided:
-- **Windows is a FILE, not a partition** — `windows.vhdx` on POWOS-GAMES, native
-  VHD boot off the shared ESP. No WIN-ESP, no dedicated Windows partition, no
-  carve step. (The earlier partition-as-virtual-disk spec is superseded — see
-  `docs/PROBLEM.md` for the full comparison.)
+- **Default backend = FILE** (`WINDOWS_BACKEND=vhd`) — `windows.vhdx` on
+  POWOS-GAMES, native VHD boot off the shared ESP, no carve step; the no-partition
+  design the user chose. The **partition backend is retained as an option**
+  (`WINDOWS_BACKEND=partition`, `--backend partition`, or `config/windows.conf`):
+  dedicated WIN-ESP + POWOS-WIN from the burn-time `--windows-gb` tail, giving
+  plain-metal Windows with real hibernation. It is NOT superseded — it's the
+  hibernation-capable alternative; `docs/PROBLEM.md` explains the file-vs-partition
+  (cold-boot-vs-resume) trade so you can pick per machine.
 - **Games partition: YES** — `--games-gb` POWOS-GAMES NTFS, deliberately visible
   to Windows; it also hosts the image. Everything else hidden via GPT type GUIDs.
 - **Snapshots: whole-file zstd** now; differencing-VHDX later.
