@@ -38,6 +38,9 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Checkout (for build/install-to-usb.sh)
+        uses: actions/checkout@v4
+
       - name: Free disk space (bazzite images are large)
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
@@ -79,6 +82,19 @@ jobs:
             --type raw --rootfs btrfs \
             ${{ env.IMAGE }}:${{ inputs.variant }}
           sudo ls -lh /build/output/image/
+
+      - name: Bake POWOS-DATA + install/recovery boot entries into the image
+        # The flashed USB must be complete out of the box — no post-boot
+        # commands. Extend the raw by 6G of free tail, attach it as a loop
+        # device, and run the SAME setup that install-to-usb.sh does on real
+        # hardware: POWOS-DATA partition (triggers RAM boot), persistence
+        # structure, and the Install/Recovery BLS boot entries.
+        run: |
+          sudo apt-get install -y --no-install-recommends btrfs-progs >/dev/null
+          sudo truncate -s +6G /build/output/image/disk.raw
+          loop=$(sudo losetup -fP --show /build/output/image/disk.raw)
+          sudo bash build/install-to-usb.sh --setup-data-only "$loop"
+          sudo losetup -d "$loop"
 
       - name: Compress
         run: |
