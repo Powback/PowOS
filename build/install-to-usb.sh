@@ -198,6 +198,24 @@ write_raw_image() {
 # The raw image has 2 partitions (EFI + root).
 # We add a 3rd partition for PowOS layer persistence.
 # ─────────────────────────────────────────────────────────────────
+# Force the kernel to (re)read the partition table and create device nodes for
+# NEW partitions. `partprobe` alone is unreliable on LOOP devices — it often
+# fails to create /dev/loopXpN after a fresh `parted mkpart`; `partx -a` adds
+# the new-partition nodes reliably. `udevadm settle` waits for udev to finish.
+rescan_parts() {
+    local device="$1"
+    partprobe "$device" 2>/dev/null || true
+    partx -u "$device" 2>/dev/null || true   # refresh existing
+    partx -a "$device" 2>/dev/null || true   # add nodes for NEW partitions
+    # Loop devices: force a capacity + partition-table re-read.
+    [[ "$device" == /dev/loop* ]] && losetup -c "$device" 2>/dev/null || true
+    if command -v udevadm &>/dev/null; then
+        udevadm trigger --subsystem-match=block 2>/dev/null || true
+        udevadm settle --timeout=10 2>/dev/null || true
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Repair the GPT so it spans the whole device. After dd'ing a raw image, the
 # backup GPT header sits at the end of the IMAGE (mid-disk); parted refuses to
 # allocate the space beyond it until the GPT is moved to the real end of disk.
@@ -292,28 +310,29 @@ add_data_partition() {
         exit 1
     }
 
-    partprobe "$device" 2>/dev/null || true
-    sleep 2
-
-    # Find the new partition by the GPT name we just gave it (lexicographic
-    # sort of device names breaks at partition 10).
-    local data_part
-    data_part=$(lsblk -ln -o PATH,PARTLABEL "$device" 2>/dev/null \
-        | awk '$2 == "POWOS-DATA" {print $1; exit}')
-
-    # Fallback: highest partition NUMBER from parted (numeric, not lexicographic)
-    if [[ -z "$data_part" ]]; then
-        local pnum
-        pnum=$(parted -m -s "$device" print 2>/dev/null \
-            | awk -F: '/^[0-9]+:/ {n=$1} END {print n}')
-        if [[ "$pnum" =~ ^[0-9]+$ ]]; then
-            if [[ "$device" =~ [0-9]$ ]]; then
-                data_part="${device}p${pnum}"
-            else
-                data_part="${device}${pnum}"
+    # Re-read the partition table AND wait for the new partition's device node.
+    # On LOOP devices `parted` writes the partition into the GPT but `partprobe`
+    # frequently does NOT create /dev/loopXpN — so the -b check would abort on a
+    # partition that genuinely exists (this is what broke the baked-image build
+    # and the CI 'Build Disk Image' runs). rescan_parts() forces the node via
+    # `partx -a`; retry a few times for udev to catch up.
+    local data_part="" pnum _try
+    rescan_parts "$device"
+    for _try in $(seq 1 12); do
+        # By GPT label first (robust); else the highest partition number
+        # (lexicographic device sort breaks at partition 10).
+        data_part=$(lsblk -ln -o PATH,PARTLABEL "$device" 2>/dev/null \
+            | awk '$2 == "POWOS-DATA" {print $1; exit}')
+        if [[ -z "$data_part" ]]; then
+            pnum=$(parted -m -s "$device" print 2>/dev/null \
+                | awk -F: '/^[0-9]+:/ {n=$1} END {print n}')
+            if [[ "$pnum" =~ ^[0-9]+$ ]]; then
+                if [[ "$device" =~ [0-9]$ ]]; then data_part="${device}p${pnum}"; else data_part="${device}${pnum}"; fi
             fi
         fi
-    fi
+        [[ -n "$data_part" && -b "$data_part" ]] && break
+        rescan_parts "$device"; sleep 1
+    done
 
     if [[ -n "$data_part" && -b "$data_part" ]]; then
         log "Formatting POWOS-DATA partition: $data_part"
