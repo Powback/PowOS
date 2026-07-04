@@ -93,7 +93,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends btrfs-progs >/dev/null
           sudo truncate -s +6G /build/output/image/disk.raw
           loop=$(sudo losetup -fP --show /build/output/image/disk.raw)
-          sudo bash build/install-to-usb.sh --setup-data-only "$loop"
+          # OVERRIDE_REMOVABLE: a loop device is never "removable"; the safety
+          # check is for real internal drives, not a file we just created.
+          sudo POWOS_OVERRIDE_REMOVABLE=1 bash build/install-to-usb.sh --setup-data-only "$loop"
           sudo losetup -d "$loop"
 
       - name: Compress
