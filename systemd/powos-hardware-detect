@@ -119,8 +119,15 @@ detect_virtualization() {
 
     # Use systemd-detect-virt if available
     if command -v systemd-detect-virt &>/dev/null; then
+        # systemd-detect-virt EXITS 1 when nothing is detected but ALSO prints
+        # "none" to stdout — the `|| echo "none"` was doubling that up, so
+        # $detected ended up as "none\nnone" on any physical host. That
+        # multiline string then failed the != "none" test and was written into
+        # /run/powos/hardware, whose second line ("none") was later executed
+        # as a command by services that source the state file → boot broke.
         local detected
-        detected=$(systemd-detect-virt 2>/dev/null || echo "none")
+        detected=$(systemd-detect-virt 2>/dev/null | head -n1)
+        detected="${detected:-none}"
         if [[ "$detected" != "none" ]]; then
             virt="$detected"
         fi
