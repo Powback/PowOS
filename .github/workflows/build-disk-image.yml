@@ -48,7 +48,7 @@ jobs:
         run: |
           sudo mkdir -p /mnt/containers-storage /mnt/output /var/lib/containers/storage
           sudo mount --bind /mnt/containers-storage /var/lib/containers/storage
-          df -h /var/lib/containers/storage
+          sudo df -h /var/lib/containers/storage
 
       - name: Log in to GHCR (rootful podman)
         run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
