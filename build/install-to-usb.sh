@@ -913,19 +913,24 @@ main() {
         return 0
     fi
 
+    # Data-only mode is additive too: it appends POWOS-DATA in free space and
+    # writes boot entries — nothing is erased, so the erase prompt would be
+    # both wrong and a non-interactive (CI loopback bake) blocker.
+    if [[ "$setup_data_only" == "1" ]]; then
+        log "Setup data partition only mode (no erase)"
+        add_data_partition "$device"
+        add_install_boot_entry "$device"
+        setup_persistence "$device"
+        show_complete "$device"
+        return 0
+    fi
+
     confirm_usb_erase "$device"
 
-    if [[ "$setup_data_only" == "1" ]]; then
-        log "Setup data partition only mode"
-        add_data_partition "$device"
-        add_install_boot_entry "$device"
-        setup_persistence "$device"
-    else
-        write_raw_image "$device" "$image"
-        add_data_partition "$device"
-        add_install_boot_entry "$device"
-        setup_persistence "$device"
-    fi
+    write_raw_image "$device" "$image"
+    add_data_partition "$device"
+    add_install_boot_entry "$device"
+    setup_persistence "$device"
 
     show_complete "$device"
 }
