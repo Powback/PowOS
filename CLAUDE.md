@@ -185,6 +185,33 @@ powos rollback reset        # Clear all rollback flags
 
 **Note:** rollback sets kernel args via `grubby`; grubby failures are reported loudly. `/run/powos/rollback-kargs` is informational only — nothing reads it at boot, so it is NOT a fallback. After reboot, verify with `grep powos /proc/cmdline`.
 
+### OS in RAM (`powos ramboot`) — ⚠️ Installed opt-in is EXPERIMENTAL
+
+The **USB live** model already runs the whole OS from RAM automatically
+(`rd.powos.ramboot=1`, engaged by the dracut module when a `POWOS-DATA`
+partition is present). On an **installed** bootc/composefs system, OS-in-RAM is
+a deliberate, composefs-safe **copy-to-tmpfs** opt-in behind a *different* karg
+(`rd.powos.ramboot.installed=1`) — because overlaying a composefs root on itself
+loops the boot (that incident is why the two are now separate). The CLI never
+sets the USB auto karg on an installed system.
+
+```bash
+powos ramboot status                 # mode, RAM-vs-OS fit, self-heal counter
+sudo powos ramboot enable            # installed only; auto-sizes the tmpfs
+sudo powos ramboot enable --ram 20G  # explicit tmpfs size
+sudo powos ramboot enable --dry-run  # show the plan, change nothing
+sudo powos ramboot disable           # remove the installed opt-in kargs
+sudo powos ramboot reset             # clear the self-heal counter after a fix
+```
+
+`enable` refuses on the USB model ("already runs from RAM") and refuses unless
+the OS fits: `MemTotal > OS_estimate(du -sx /usr /etc) + 4 GiB`; default `--ram`
+= `min(OS + 4 GiB, MemTotal − 4 GiB)`. Kargs go through `rpm-ostree kargs`
+(preferred) or `bootc kargs` (fallback). Self-heal: after **3** failed boots the
+initramfs auto-skips ramboot (counter at `<esp>/powos/ramboot-attempts`); the
+5-second boot menu also offers the previous entry. `reset` clears the counter.
+Full contract + rationale: `docs/BOOT-ARCHITECTURE.md`.
+
 ### Package Installation
 ```bash
 powos install PKG...              # Install to custom layer
