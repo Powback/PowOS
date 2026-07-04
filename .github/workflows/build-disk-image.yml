@@ -3,7 +3,7 @@ name: Build Disk Image (USB)
 # Builds the flashable live-USB disk image (powos.raw) from an already-published
 # OS image using bootc-image-builder, and uploads it as a compressed artifact.
 #
-# Runs on demand only — the .raw is ~20GB uncompressed and most pushes don't
+# Runs on demand only — the .raw is ~30GB uncompressed and most pushes don't
 # need one. Local builds on Apple Silicon are blocked by amd64 emulation
 # (crun memfd re-exec + libpod SHM-lock failures under Rosetta), so CI's
 # native amd64 runners are the supported path.
@@ -11,6 +11,13 @@ name: Build Disk Image (USB)
 # NOTE: current bootc-image-builder renamed the type 'raw-efi' -> 'raw' and
 # no longer pulls images itself (requires a pre-pulled image in rootful
 # containers-storage). build/build-iso.sh predates both changes.
+#
+# Disk budget (ubuntu-24.04 runners have ONE 72GB disk, ~51GB free after
+# cleanup — /mnt is NOT a separate device anymore): the OS image needs 15GB
+# in containers-storage, disk.raw is ~30GB nominal, and osbuild's export is
+# a `cp --reflink=auto` of the whole thing. On ext4 that copy is a full
+# second 30GB — doesn't fit. Solution: /store and /output share an XFS
+# loopback volume, so the export reflinks for free.
 
 on:
   workflow_dispatch:
@@ -32,26 +39,28 @@ jobs:
       packages: read
     steps:
       - name: Free disk space (bazzite images are large)
-        # Aggressive: the exported disk.raw (~25-30GB) lands on the root disk.
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
                       /opt/hostedtoolcache /usr/local/share/boost \
                       /usr/share/swift /usr/local/.ghcup /usr/local/share/powershell \
                       /usr/local/julia* /usr/lib/jvm /usr/local/share/chromium \
-                      /usr/local/lib/node_modules || true
+                      /usr/local/lib/node_modules /usr/share/miniconda /opt/az \
+                      /usr/lib/google-cloud-sdk /opt/microsoft /usr/lib/firefox || true
           sudo docker image prune --all --force || true
-          df -h / /mnt
+          df -h /
 
-      - name: Back containers storage with /mnt (scratch disk)
-        # Root disk keeps ~30GB free after cleanup; image (15GB) + osbuild
-        # store + raw output need more. /mnt has a separate ~60GB.
-        # Bind-mount instead of moving graphroot: libpod records the storage
-        # path in its DB, so the path must be IDENTICAL on the host and
-        # inside the bib container ("database configuration mismatch" otherwise).
+      - name: Create reflink-capable scratch volume (XFS loopback)
+        # Sparse backing file: grows on demand, so containers-storage on the
+        # root fs and the scratch volume share the same free-space pool
+        # instead of each reserving worst-case upfront.
         run: |
-          sudo mkdir -p /mnt/containers-storage /mnt/output /var/lib/containers/storage
-          sudo mount --bind /mnt/containers-storage /var/lib/containers/storage
-          sudo df -h /var/lib/containers/storage
+          sudo truncate -s 45G /scratch.img
+          loop=$(sudo losetup -f --show /scratch.img)
+          sudo mkfs.xfs -q "$loop"
+          sudo mkdir -p /build
+          sudo mount "$loop" /build
+          sudo mkdir -p /build/store /build/output
+          df -h /build
 
       - name: Log in to GHCR (rootful podman)
         run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -60,35 +69,33 @@ jobs:
         run: sudo podman pull ${{ env.IMAGE }}:${{ inputs.variant }}
 
       - name: Build raw disk image
-        # Disk budget (learned from failed runs): /mnt (~65GB) holds the
-        # pulled image (~15GB) + bib's /store build tree (~15-20GB); the
-        # exported disk.raw (~25-30GB) goes to the root disk via /output.
         run: |
-          mkdir -p "$PWD/output"
-          sudo mkdir -p /mnt/store
           sudo podman run --rm --privileged \
             --security-opt label=type:unconfined_t \
-            -v "$PWD/output:/output" \
-            -v /mnt/store:/store \
+            -v /build/output:/output \
+            -v /build/store:/store \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type raw --rootfs btrfs \
             ${{ env.IMAGE }}:${{ inputs.variant }}
-          sudo ls -lh "$PWD/output/image/"
-          df -h / /mnt
+          sudo ls -lh /build/output/image/
 
       - name: Compress
         run: |
-          sudo mv "$PWD/output/image/disk.raw" "$PWD/output/powos-${{ inputs.variant }}.raw"
-          # --rm deletes the raw as it compresses; the runner can't hold both.
-          sudo zstd -T0 --sparse --rm "$PWD/output/powos-${{ inputs.variant }}.raw"
-          ls -lh "$PWD/output/"
-          df -h / /mnt
+          sudo mv /build/output/image/disk.raw /build/output/powos-${{ inputs.variant }}.raw
+          # Free the store's reflink twin first — zstd output needs real bytes.
+          sudo rm -rf /build/store
+          sudo zstd -T0 --sparse --rm /build/output/powos-${{ inputs.variant }}.raw
+          ls -lh /build/output/
+
+      - name: Disk telemetry (postmortem aid)
+        if: always()
+        run: df -h / /build 2>/dev/null || df -h /
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: powos-${{ inputs.variant }}-raw
-          path: output/powos-${{ inputs.variant }}.raw.zst
+          path: /build/output/powos-${{ inputs.variant }}.raw.zst
           retention-days: 7
           compression-level: 0  # already zstd-compressed
