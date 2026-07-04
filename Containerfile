@@ -100,6 +100,7 @@ COPY lib/base.sh /usr/lib/powos/
 COPY lib/boot-manager.sh /usr/lib/powos/
 COPY lib/games.sh /usr/lib/powos/
 COPY lib/ramboot.sh /usr/lib/powos/
+COPY lib/doctor.sh /usr/lib/powos/
 COPY lib/windows.sh /usr/lib/powos/
 COPY lib/cuda.sh /usr/lib/powos/
 COPY lib/driver.sh /usr/lib/powos/

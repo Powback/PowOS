@@ -2763,6 +2763,16 @@ case "${1:-}" in
         source "$POWOS_LIB/games.sh"
         cmd_games "$@"
         ;;
+    ramboot)
+        shift
+        source "$POWOS_LIB/ramboot.sh"
+        cmd_ramboot "$@"
+        ;;
+    doctor)
+        shift
+        source "$POWOS_LIB/doctor.sh"
+        cmd_doctor "$@"
+        ;;
     windows|win)
         shift
         source "$POWOS_LIB/windows.sh"
