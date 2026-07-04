@@ -39,16 +39,16 @@ jobs:
           sudo docker image prune --all --force || true
           df -h / /mnt
 
-      - name: Move containers storage to /mnt (scratch disk)
+      - name: Back containers storage with /mnt (scratch disk)
         # Root disk keeps ~30GB free after cleanup; image (15GB) + osbuild
         # store + raw output need more. /mnt has a separate ~60GB.
+        # Bind-mount instead of moving graphroot: libpod records the storage
+        # path in its DB, so the path must be IDENTICAL on the host and
+        # inside the bib container ("database configuration mismatch" otherwise).
         run: |
-          sudo mkdir -p /mnt/containers-storage /mnt/output
-          sudo sed -i 's|^graphroot = .*|graphroot = "/mnt/containers-storage"|' \
-            /etc/containers/storage.conf || \
-            printf '[storage]\ndriver = "overlay"\ngraphroot = "/mnt/containers-storage"\nrunroot = "/run/containers/storage"\n' | \
-            sudo tee /etc/containers/storage.conf
-          sudo podman info --format '{{.Store.GraphRoot}}'
+          sudo mkdir -p /mnt/containers-storage /mnt/output /var/lib/containers/storage
+          sudo mount --bind /mnt/containers-storage /var/lib/containers/storage
+          df -h /var/lib/containers/storage
 
       - name: Log in to GHCR (rootful podman)
         run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -61,7 +61,7 @@ jobs:
           sudo podman run --rm --privileged \
             --security-opt label=type:unconfined_t \
             -v /mnt/output:/output \
-            -v /mnt/containers-storage:/var/lib/containers/storage \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type raw --rootfs btrfs \
             ${{ env.IMAGE }}:${{ inputs.variant }}
