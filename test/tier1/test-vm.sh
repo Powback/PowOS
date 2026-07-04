@@ -28,9 +28,12 @@ check "requested RAM applied"              'echo "$cmd" | grep -q -- "-m 8G"'
 check "requested vCPUs applied"            'echo "$cmd" | grep -q -- "-smp 4"'
 check "no-GPU path uses virtio-vga"        'echo "$cmd" | grep -q "virtio-vga"'
 
-cmd_gpu=$(vm_build_qemu_cmd /dev/sdX 16G 8 /ovmf/CODE.fd /ovmf/VARS.fd 1)
-check "GPU path adds vfio-pci"             'echo "$cmd_gpu" | grep -q "vfio-pci"'
+cmd_gpu=$(POWOS_MOCK_DGPU="0000:01:00.0 0000:01:00.1" vm_build_qemu_cmd /dev/sdX 16G 8 /ovmf/CODE.fd /ovmf/VARS.fd 1)
+check "GPU path adds vfio-pci"             'echo "$cmd_gpu" | grep -q "vfio-pci,host=01:00.0"'
+check "GPU path passes whole slot (audio)" 'echo "$cmd_gpu" | grep -q "vfio-pci,host=01:00.1"'
 check "GPU path drops virtio-vga"          '! echo "$cmd_gpu" | grep -q "virtio-vga"'
+# PATH= hides lspci so "no dGPU" is reproducible on any machine, incl. real NVIDIA hosts
+check "GPU path without dGPU fails loudly" '! PATH= vm_build_qemu_cmd /dev/sdX 16G 8 /c.fd /v.fd 1 2>/dev/null'
 
 echo "== firmware discovery =="
 tmp="$(mktemp -d)"; touch "$tmp/second.fd"

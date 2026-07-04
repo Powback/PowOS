@@ -61,6 +61,11 @@ jobs:
           sel='${{ github.event.inputs.variant }}'
           if [[ -n "$sel" && "$sel" != "all" && "$sel" != "${{ matrix.variant }}" ]]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "push" && "${{ matrix.variant }}" == "nvidia-open-testing" ]]; then
+            # -testing tracks bazzite:testing — pushes don't change that input,
+            # so building it per-push doubles CI for no signal. Weekly cron +
+            # manual dispatch still cover it.
+            echo "run=false" >> "$GITHUB_OUTPUT"
           else
             echo "run=true"  >> "$GITHUB_OUTPUT"
           fi

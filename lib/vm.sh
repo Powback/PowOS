@@ -128,10 +128,21 @@ vm_build_qemu_cmd() {
         # Real passthrough: hand every PCI function on the dGPU's slot (GPU + its
         # HDMI-audio, e.g. 01:00.0 + 01:00.1) to the guest. The functions must
         # already be bound to vfio-pci ('powos gpu to-vm', done at launch time).
-        local _dgpu _slot _bdf
-        _dgpu=$(lspci -Dn | awk '$2=="0300:" && $3 ~ /^10de:/{print $1; exit}')
-        _slot="${_dgpu%.*}."
-        for _bdf in $(lspci -Dn | awk -v s="$_slot" 'index($1,s)==1{print $1}'); do
+        # POWOS_MOCK_DGPU (space-separated BDFs) bypasses lspci for unit tests
+        # and GPU-less environments.
+        local _dgpu _slot _bdf _bdfs
+        if [[ -n "${POWOS_MOCK_DGPU:-}" ]]; then
+            _bdfs="$POWOS_MOCK_DGPU"
+        else
+            _dgpu=$(lspci -Dn | awk '$2=="0300:" && $3 ~ /^10de:/{print $1; exit}')
+            if [[ -z "$_dgpu" ]]; then
+                echo "vm: no NVIDIA dGPU found — cannot build a GPU-passthrough command" >&2
+                return 1
+            fi
+            _slot="${_dgpu%.*}."
+            _bdfs=$(lspci -Dn | awk -v s="$_slot" 'index($1,s)==1{print $1}')
+        fi
+        for _bdf in $_bdfs; do
             cmd+=( -device "vfio-pci,host=${_bdf#0000:}" )
         done
     else
