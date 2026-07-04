@@ -299,6 +299,20 @@ win_games_mount() {
     echo "$mnt"
 }
 
+# Unmount the games volume for a switch. If it's held by the systemd mount unit
+# lib/games.sh installs (var-mnt-games.mount), stop THAT so the unit state stays
+# consistent and it doesn't auto-remount after resume; otherwise plain umount.
+# Returns the status of whichever unmount it performed (non-zero = still held).
+win_unmount_games() {
+    local mnt="$1" unit
+    unit=$(systemd-escape -p --suffix=mount "$mnt" 2>/dev/null || true)
+    if [[ -n "$unit" ]] && systemctl -q is-active "$unit" 2>/dev/null; then
+        systemctl stop "$unit"
+    else
+        umount "$mnt"
+    fi
+}
+
 # POWOS-DATA mountpoint: snapshots + ESP backups live on it.
 win_data_mount() {
     local dev mnt
@@ -1234,6 +1248,18 @@ win_install() {
         return 1
     fi
 
+    # --slim with a directly-supplied --iso: the --fetch path already slims its
+    # download, but a user-provided ISO would otherwise be installed FULL while
+    # the help/plan imply it was slimmed. Debloat it here so --slim always means
+    # slim, whatever the ISO source.
+    if [[ ${WIN_SLIM:-0} -eq 1 && ${WIN_FETCH:-0} -ne 1 ]]; then
+        local _slimout
+        _slimout=$(win_slim_default_out "$WIN_ISO")
+        win_log "--slim: debloating $WIN_ISO → $_slimout"
+        win_slim_iso "$WIN_ISO" "$_slimout" || { win_err "slim failed — not installing."; return 1; }
+        WIN_ISO="$_slimout"
+    fi
+
     local games
     games=$(win_games_mount) || {
         win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
@@ -1697,7 +1723,10 @@ win_switch() {
     # metal Windows session writes this NTFS volume (it hosts the image).
     # A frozen rw-mount under another OS's writes = corruption on resume —
     # the one rule that keeps switching safe, file edition. Refuse if busy.
-    win_run_step "unmount POWOS-GAMES ($games)" umount "$games" || {
+    # Stop the games mount unit if that's how it's mounted (clean unit state,
+    # and no auto-remount after resume); fall back to a plain umount otherwise.
+    win_run_step "unmount POWOS-GAMES ($games)" \
+        win_unmount_games "$games" || {
         win_err "Could not unmount $games (busy?) — refusing to switch."
         win_err "Close whatever uses it, or inspect:  fuser -vm '$games'"
         return 1
@@ -2091,7 +2120,9 @@ win_fetch_iso() {
 
     # ── Optional: chain into the slim pass (only after a verified download) ──
     if [[ ${WIN_SLIM:-0} -eq 1 ]]; then
-        local out; out=$(win_slim_default_out "$dest")
+        # Honor --out when given (the help advertises it generically); else the
+        # default <dest>-slim.iso.
+        local out; out="${WIN_OUT:-$(win_slim_default_out "$dest")}"
         win_slim_iso "$dest" "$out" || return 1
         WIN_FETCHED_ISO="$out"
         win_fixed_vhd_hint
@@ -2478,8 +2509,11 @@ win_load_config() {
 # USB without repartitioning), and switching is one file → not a single blast
 # radius. Snapshots use ntfsclone (used-blocks) instead of a whole-file copy.
 #
-# TODO(impl): full implementation in progress. These stubs keep the dispatch
-# coherent and FAIL SAFELY (touch nothing) until the real functions land.
+# WARNING: the functions below are REAL and DESTRUCTIVE — win_part_create runs
+# `parted mkpart` / `mkfs.vfat` / `mkfs.ntfs` / `sgdisk` against a real disk.
+# They are gated by win_run_step (dry-run) + confirmation like the installer,
+# but they are NOT no-op stubs. EXPERIMENTAL / TODO(hw): validate on a VM /
+# spare disk before trusting the partition backend.
 # ══════════════════════════════════════════════════════════════════
 # ── Partition-backend constants ───────────────────────────────────
 WIN_ESP_LABEL="WIN-ESP"          # dedicated Windows ESP (FAT32, GPT type EF00)
@@ -3264,7 +3298,7 @@ win_part_switch() {
     local games
     games=$(win_games_mount 2>/dev/null || true)
     if [[ -n "$games" ]]; then
-        win_run_step "unmount shared NTFS ($games)" umount "$games" || {
+        win_run_step "unmount shared NTFS ($games)" win_unmount_games "$games" || {
             win_err "Could not unmount $games (busy?) — refusing to switch."
             win_err "Close whatever uses it, or inspect:  fuser -vm '$games'"
             return 1

@@ -202,14 +202,22 @@ do_games() {
     if [[ "$(boot_context)" == "installed" ]]; then
         note="\n\nOn this installed machine the partition is carved from free space on this machine's disk — if the install reserved none, 'powos games create' will say so (expected on older installs)."
     fi
-    w_yesno "Creates a shared games partition (POWOS-GAMES):\n\n  - NTFS, deliberately visible to Windows\n  - One Steam library both PowOS and Windows use\n  - Install a game once, play it from either OS\n\nThe command is interactive and prints its plan before touching anything.${note}\n\nCreate it now?" || return 0
-    run_in_terminal sudo powos games create
+    w_yesno "Creates a shared games partition (POWOS-GAMES):\n\n  - NTFS, deliberately visible to Windows\n  - One Steam library both PowOS and Windows use\n  - Install a game once, play it from either OS\n\nThe command prints its plan before touching anything.${note}\n\nCreate it now?" || return 0
+    # `powos games create` requires --size (no interactive prompt of its own),
+    # so collect it here before handing off.
+    local size
+    size="$(w_input "Games partition size in GB (e.g. 512)")" || return 0
+    if ! [[ "$size" =~ ^[0-9]+$ ]] || (( size < 1 )); then
+        w_msg "Not a whole number of GB — cancelled."
+        return 0
+    fi
+    run_in_terminal sudo powos games create --size "$size"
 }
 
 do_steam() {
     powos_supports games || { not_yet "games"; return 0; }
     w_yesno "Wires the shared games partition into Steam:\n\n  - Mounts POWOS-GAMES at /var/mnt/games\n  - Adds a Steam library there (game assets shared with Windows)\n  - Keeps Proton prefixes/shader cache on native disk (they break on NTFS)\n\nSteam must be closed while this runs.\n\nSet it up now?" || return 0
-    run_in_terminal powos games steam-setup
+    run_in_terminal sudo powos games steam-setup
 }
 
 do_windows() {

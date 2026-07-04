@@ -657,13 +657,16 @@ out=$(win_switch 2>&1); rc=$?
 check "layer-sync stop failure → switch aborts, no BootNext" \
     '[[ $rc -ne 0 ]] && ! rec_has "bootnext"'
 
-# POWOS-GAMES busy → abort before BootNext.
+# POWOS-GAMES busy → abort before BootNext. win_unmount_games prefers the
+# systemd mount unit (stop) and falls back to umount — mock BOTH to fail so the
+# abort triggers whether or not systemd-escape resolves a unit in this env.
 setup_switch_mocks
-umount() { rec "umount $*"; return 1; }
+systemctl() { rec "systemctl $*"; [[ "${1:-}" == "stop" ]] && return 1; [[ "$*" == *is-active* ]] && return 0; return 0; }
+umount()    { rec "umount $*"; return 1; }
 reset_globals; WIN_ASSUME_YES=1
 rec_reset
 out=$(win_switch 2>&1); rc=$?
-check "games umount failure → switch aborts before BootNext" \
+check "games unmount failure → switch aborts before BootNext" \
     '[[ $rc -ne 0 ]] && ! rec_has "bootnext"'
 
 # No firmware entry → refuse before any flush.

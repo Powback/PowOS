@@ -156,13 +156,15 @@ run_welcome "$HOME_E" live "$LIBDIR" "3\ny\nq\n" > /dev/null
 check "install → sudo powos install-system" 'grep -qx "sudo powos install-system" "$CALLS"'
 
 : > "$CALLS"
-run_welcome "$HOME_E" live "$LIBDIR" "4\ny\nq\n" > /dev/null
-check "games → sudo powos games create"     'grep -qx "sudo powos games create" "$CALLS"'
+# item 4 (games) → confirm → size prompt (512) → quit. `games create` REQUIRES
+# --size, so welcome must collect and pass it.
+run_welcome "$HOME_E" live "$LIBDIR" "4\ny\n512\nq\n" > /dev/null
+check "games → sudo powos games create --size 512" 'grep -qx "sudo powos games create --size 512" "$CALLS"'
 
 : > "$CALLS"
 run_welcome "$HOME_E" live "$LIBDIR" "5\ny\nq\n" > /dev/null
-check "steam → powos games steam-setup"     'grep -qx "powos games steam-setup" "$CALLS"'
-check "steam-setup runs WITHOUT sudo"       '! grep -qx "sudo powos games steam-setup" "$CALLS"'
+# steam-setup needs root (writes native Proton dirs + the user vdf) → sudo.
+check "steam → sudo powos games steam-setup" 'grep -qx "sudo powos games steam-setup" "$CALLS"'
 
 : > "$CALLS"
 run_welcome "$HOME_E" live "$LIBDIR" "6\nc\nq\n" > /dev/null

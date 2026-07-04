@@ -709,6 +709,11 @@ gms_steam_setup() {
                 gms_run_step "back up libraryfolders.vdf" \
                     cp "$vdf" "${vdf}.powos-bak" || return 1
                 gms_write_file "update libraryfolders.vdf" "$vdf" <<< "$new" || return 1
+                # We ran as root; the vdf lives in the user's home. Hand it
+                # back to the user (and its backup) or Steam can't rewrite its
+                # own config on next launch.
+                gms_run_step "restore vdf ownership (uid $uid)" \
+                    chown "$uid:$gid" "$vdf" "${vdf}.powos-bak" || return 1
                 gms_ok "Library registered (backup: ${vdf}.powos-bak)."
             fi
         else
