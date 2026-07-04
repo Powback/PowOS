@@ -160,14 +160,34 @@ if [[ -n "$USB_DATA_DEV" ]]; then
         LAYERS_AVAILABLE="${LAYERS_AVAILABLE}base"
         info "PowOS ramboot: + base layer"
     else
-        warn "PowOS ramboot: Failed to mount USB layers, using base only"
-        LOWER_LAYERS="${BASE_LAYER}"
-        LAYERS_AVAILABLE="base"
+        # POWOS-DATA exists but won't mount — no persistence possible, and
+        # overlaying $NEWROOT-on-itself is pointless + risky. Boot normally.
+        warn "PowOS ramboot: Failed to mount USB layers — booting normally (no ramboot)."
+        umount "$OVERLAY_BASE" 2>/dev/null || true
+        return 0
     fi
 else
-    info "PowOS ramboot: No USB data partition found, using base only"
-    LOWER_LAYERS="${BASE_LAYER}"
-    LAYERS_AVAILABLE="base"
+    # No POWOS-DATA partition = NOT the USB live model (e.g. an installed
+    # bootc/composefs system). Naively overlaying the real root — which on an
+    # installed system is an ostree composefs mount — on top of ITSELF and
+    # pivoting into it corrupts the deployment → boot loop. That is what a
+    # plain `rd.powos.ramboot=1` (inherited from the image kargs) did on
+    # installed desktops.
+    #
+    # Installed "OS in RAM" is still WANTED (instant OS-side loads) but it needs
+    # a composefs-safe method (full copy-to-tmpfs, not overlay-on-self) and must
+    # be VALIDATED in a VM first — so it is an explicit opt-in, never triggered
+    # by the default karg. Until that safe path ships, opt-in also boots
+    # normally rather than risk a loop.
+    if getargbool 0 rd.powos.ramboot.installed; then
+        warn "PowOS ramboot: installed RAM boot requested (rd.powos.ramboot.installed=1)"
+        warn "PowOS ramboot: NOT YET IMPLEMENTED safely for composefs roots — booting"
+        warn "PowOS ramboot: normally to avoid a boot loop. Tracked as a validated opt-in."
+    else
+        info "PowOS ramboot: No POWOS-DATA partition — not the USB model, booting normally."
+    fi
+    umount "$OVERLAY_BASE" 2>/dev/null || true
+    return 0
 fi
 
 # === Mount the stacked overlayfs ===

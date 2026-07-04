@@ -205,6 +205,20 @@ RUN KVER="$(ls /lib/modules/ | head -1)" && \
 RUN mkdir -p /usr/lib/bootc/kargs.d
 COPY config/bootc/kargs.d/ /usr/lib/bootc/kargs.d/
 
+# ── Always-visible boot menu (safety net) ─────────────────────────
+# A boot-path change that bricks boot must be recoverable in seconds: show the
+# GRUB menu for 5s on every boot so you can always pick the PREVIOUS deployment
+# (bootc keeps it) or edit kargs. Menu-visibility only — does NOT change what
+# boots by default. Sets both the /etc/default/grub knobs and the grubenv var
+# uBlue/Bazzite uses to auto-hide the menu.
+# NOTE: like every boot change, validate in QEMU before trusting it.
+# /etc/default/grub is sourced as shell (last assignment wins), so appending
+# overrides any earlier values without editing in place.
+RUN { echo 'GRUB_TIMEOUT=5'; echo 'GRUB_TIMEOUT_STYLE=menu'; } >> /etc/default/grub 2>/dev/null || true; \
+    if command -v grub2-editenv >/dev/null 2>&1 && [ -f /boot/grub2/grubenv ]; then \
+        grub2-editenv /boot/grub2/grubenv set menu_auto_hide=0 || true; \
+    fi
+
 # Build extensions
 RUN bash /usr/lib/powos/overlay-manager.sh build-all
 
