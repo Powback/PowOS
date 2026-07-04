@@ -269,6 +269,100 @@ After building base images:
 3. Create hardware detection service
 4. Package for distribution
 
+## Guided Install Wizard
+
+The **guided install wizard** (`powos install-wizard`) is a friendly front end
+that WRAPS the raw disk installer (`powos install-system`). It never
+reimplements partitioning — it collects choices, writes one shared config file,
+and hands off to the installer. Anything the installer's flags can't express
+(hostname, user, password, SSH, RAM boot, AI creds, restore-from-backup) is
+applied on the installed system's **first boot** by `powos-firstboot-apply`.
+
+### Components
+
+| File | Role |
+|------|------|
+| `bin/powos-install-wizard` | Thin executable entry; sources the lib, runs `cmd_install_wizard`. |
+| `lib/install-wizard.sh` | Sourced lib: UI abstraction, guided collectors, `iwz_write_config` + `iwz_build_installer_args` (both pure), and the commit driver. |
+| `bin/powos-firstboot-apply` | Applies `/etc/powos/install.conf` once on first boot, then deletes it (it holds a password hash). |
+| `systemd/powos-firstboot.service` | `Type=oneshot`, `ConditionPathExists=/etc/powos/install.conf` (self-disabling), `After=network-online.target` for the restore step. |
+| `config/install.conf.template` | Documented example of every config key. |
+| `test/tier1/test-install-wizard.sh` | Mocked Tier-1 tests (Git Bash + Linux). |
+
+### Command surface
+
+```bash
+sudo powos install-wizard              # Guided install: pick disk/mode/… then install
+sudo powos install-wizard --dry-run    # Walk every step + show the plan, change NOTHING
+powos-install-wizard -h                # Help
+```
+
+The wizard's UI auto-selects a backend at runtime:
+
+1. **GUI** — `kdialog`, when `$DISPLAY`/`$WAYLAND_DISPLAY` is set (KDE-native).
+2. **TUI** — `whiptail` (or `dialog`) otherwise.
+3. **read** — plain terminal prompts when neither is present (tty/SSH).
+
+Force a backend with `IWZ_UI_FORCE=gui|tui|read` (used by the tests).
+
+### Shared config schema — `/etc/powos/install.conf`
+
+Shell `key=value`, single-quoted, mode `0600`. Written by the wizard; the
+disk keys become `install-system` flags, the rest is applied by firstboot.
+
+| Key | Values | Consumer |
+|-----|--------|----------|
+| `ISV_DISK` | `/dev/…` whole-disk device | → `--disk` |
+| `ISV_MODE` | `whole-disk` \| `alongside` | → `--whole-disk`+`--i-understand-data-loss` / `--alongside` |
+| `ISV_ROOT_GB` | GB or `auto` | informational (installer computes root) |
+| `ISV_GAMES_GB` | GB, `auto`, `0` | → `--shared-gb` |
+| `ISV_WINDOWS_GB` | GB, `auto`, `0` | → `--windows-gb` |
+| `ISV_FS` | `btrfs` \| `ext4` | → `--fs` |
+| `POWOS_GPU_FLAVOR` | `nvidia-open` \| `nvidia` \| `amd` \| `intel` | base image / variant (nvidia-open default) |
+| `POWOS_HOSTNAME` | string | firstboot: `hostnamectl set-hostname` |
+| `POWOS_USERNAME` | string | firstboot: `useradd` (wheel) |
+| `POWOS_PASSWORD_HASH` | `openssl passwd -6` hash — **never plaintext** | firstboot: `chpasswd -e` |
+| `POWOS_SSH_ENABLE` | `0` \| `1` | firstboot: `systemctl enable --now sshd` |
+| `POWOS_SSH_KEY` | authorized_keys line (optional) | firstboot: `~/.ssh/authorized_keys` |
+| `POWOS_RAMBOOT` | `off` \| `installed` | firstboot: `powos ramboot enable` (guarded) |
+| `POWOS_AI_PROVIDER` | `claude` \| `gemini` \| `ollama` \| `none` | firstboot: `/etc/powos/ai/provider.conf` |
+| `POWOS_AI_KEY` | string (optional) | firstboot: `/etc/powos/ai/credentials.conf` (0600) |
+| `POWOS_RESTORE_URL` | git URL (optional) | firstboot: `powos backup setup && powos backup pull` |
+
+The installer-flag mapping (pure function `iwz_build_installer_args`):
+
+```
+whole-disk → --disk D --whole-disk --fs F --shared-gb G --windows-gb W --yes --i-understand-data-loss
+alongside  → --disk D --alongside  --fs F --shared-gb G --windows-gb W --yes
+```
+
+The `--i-understand-data-loss` erase gate is emitted **only** for whole-disk —
+`--yes` alone can't satisfy `install-system`'s typed erase confirmation.
+
+### Safety
+
+- Nothing runs until the final REVIEW screen is confirmed.
+- Every destructive step routes through `iwz_run_step()` — a no-op under
+  `--dry-run` (which instead invokes `install-system --dry-run` to preview the
+  real partition plan while changing zero bytes).
+- The password is hashed with `openssl passwd -6` the moment it's entered; the
+  plaintext is never stored in a variable or the config.
+- `powos-firstboot-apply` is best-effort per step (a single failure never
+  bricks the boot) and **deletes** the config when done, so the hash doesn't
+  linger and the service never runs twice.
+
+### Testing
+
+```bash
+bash test/tier1/test-install-wizard.sh                 # dev checkout
+docker exec powos bash /test/tier1/test-install-wizard.sh
+```
+
+Covers: installer-arg mapping + erase gate, config write/read round-trip,
+password-is-hashed (no plaintext leak), firstboot per-key command dispatch +
+config deletion, dry-run zero-mutation, and UI backend selection. All external
+tools are shadowed by bash functions — no root, no disks, no network.
+
 ## Documentation
 
 - [OVERLAY-ARCHITECTURE.md](./OVERLAY-ARCHITECTURE.md) - Overlay system design

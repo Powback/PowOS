@@ -101,6 +101,7 @@ COPY lib/boot-manager.sh /usr/lib/powos/
 COPY lib/games.sh /usr/lib/powos/
 COPY lib/ramboot.sh /usr/lib/powos/
 COPY lib/doctor.sh /usr/lib/powos/
+COPY lib/install-wizard.sh /usr/lib/powos/
 COPY lib/windows.sh /usr/lib/powos/
 COPY lib/cuda.sh /usr/lib/powos/
 COPY lib/driver.sh /usr/lib/powos/
@@ -190,12 +191,16 @@ COPY systemd/powos-ramboot-healthy.service /usr/lib/systemd/system/
 # Recovery boot-menu entries). powos-safemode runs the recovery menu / AI doctor.
 COPY bin/powos-safemode /usr/bin/
 COPY systemd/powos-safemode.service /usr/lib/systemd/system/
+# Guided installer + first-boot config applier.
+COPY bin/powos-install-wizard /usr/bin/
+COPY bin/powos-firstboot-apply /usr/bin/
+COPY systemd/powos-firstboot.service /usr/lib/systemd/system/
 # A failed enable must fail the build — no 2>/dev/null || true.
-RUN chmod +x /usr/bin/powos-safemode && \
+RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powos-firstboot-apply && \
     systemctl enable powos-ramboot-init.service powos-layer-sync.service \
         powos-cachefs-sync.service powos-installer.service \
         powos-hwinfo.service powos-ramboot-healthy.service \
-        powos-safemode.service \
+        powos-safemode.service powos-firstboot.service \
         powos-init.service powos-hardware.service powos-overlay.service \
         powos-hydrate.service
 

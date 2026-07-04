@@ -2773,6 +2773,11 @@ case "${1:-}" in
         source "$POWOS_LIB/doctor.sh"
         cmd_doctor "$@"
         ;;
+    install-wizard|install)
+        shift
+        source "$POWOS_LIB/install-wizard.sh"
+        cmd_install_wizard "$@"
+        ;;
     windows|win)
         shift
         source "$POWOS_LIB/windows.sh"

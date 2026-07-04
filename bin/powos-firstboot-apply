@@ -1,0 +1,208 @@
+#!/bin/bash
+# powos-firstboot-apply - apply /etc/powos/install.conf on an installed
+# system's FIRST boot, then delete it.
+#
+# The guided installer (powos-install-wizard) records everything the raw
+# installer's flags can't express into /etc/powos/install.conf. install-system
+# lays down the OS + partitions; THIS script, run once on first boot by
+# powos-firstboot.service, applies the rest:
+#
+#   hostname, primary user + password (from a HASH), SSH key + sshd state,
+#   RAM boot, AI provider/key, and an optional restore-from-backup pull.
+#
+# DESIGN RULES:
+#   - Every step is BEST-EFFORT and independently logged. A single failure
+#     must NEVER brick the boot — we always reach the cleanup at the end.
+#   - The config holds a password HASH; we DELETE it when done so the hash
+#     doesn't linger. The systemd unit's ConditionPathExists makes this a
+#     one-shot: once the file is gone the service won't run again.
+#   - External commands are called by bare name so tests can shadow them with
+#     shell functions (source this file, define mocks, call fb_main).
+#
+# Usage:  powos-firstboot-apply        (normally launched by systemd)
+
+set -uo pipefail
+
+# Overridable so tests can point at a temp file instead of /etc.
+POWOS_INSTALL_CONF="${POWOS_INSTALL_CONF:-/etc/powos/install.conf}"
+POWOS_AI_CONF_DIR="${POWOS_AI_CONF_DIR:-/etc/powos/ai}"
+
+GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+fb_log()  { echo -e "${CYAN}[firstboot]${NC} $*"; }
+fb_ok()   { echo -e "${GREEN}[firstboot]${NC} $*"; }
+fb_warn() { echo -e "${YELLOW}[firstboot]${NC} $*" >&2; }
+fb_err()  { echo -e "${RED}[firstboot]${NC} $*" >&2; }
+
+# ── Individual best-effort steps ──────────────────────────────────
+# Each reads the sourced POWOS_* config values. Wrapped so a nonzero return
+# is logged, never propagated.
+
+fb_apply_hostname() {
+    local host="${POWOS_HOSTNAME:-}"
+    [[ -n "$host" ]] || { fb_log "no hostname configured — skipping"; return 0; }
+    if hostnamectl set-hostname "$host" 2>/dev/null; then
+        fb_ok "hostname set to '$host'"
+    else
+        # Fallback for environments without hostnamectl.
+        echo "$host" > /etc/hostname 2>/dev/null && fb_ok "hostname written to /etc/hostname" \
+            || fb_warn "could not set hostname"
+    fi
+}
+
+fb_apply_user() {
+    local user="${POWOS_USERNAME:-}" hash="${POWOS_PASSWORD_HASH:-}"
+    [[ -n "$user" ]] || { fb_log "no username configured — skipping user setup"; return 0; }
+
+    # Create the account if it doesn't exist yet (wheel for sudo).
+    if ! id "$user" >/dev/null 2>&1; then
+        if useradd -m -G wheel -s /bin/bash "$user" 2>/dev/null; then
+            fb_ok "created user '$user'"
+        else
+            fb_warn "could not create user '$user' (may already exist)"
+        fi
+    fi
+
+    # Set the password from the pre-computed hash (-e = value is encrypted).
+    if [[ -n "$hash" ]]; then
+        if printf '%s:%s\n' "$user" "$hash" | chpasswd -e 2>/dev/null; then
+            fb_ok "password set for '$user'"
+        else
+            fb_warn "could not set password for '$user'"
+        fi
+    else
+        fb_warn "no password hash present for '$user'"
+    fi
+}
+
+fb_apply_ssh() {
+    local user="${POWOS_USERNAME:-}" enable="${POWOS_SSH_ENABLE:-0}" key="${POWOS_SSH_KEY:-}"
+
+    # Install an authorized key regardless of the daemon state (harmless).
+    if [[ -n "$key" && -n "$user" ]]; then
+        local home; home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
+        [[ -z "$home" ]] && home="/home/$user"
+        if mkdir -p "$home/.ssh" 2>/dev/null; then
+            if printf '%s\n' "$key" >> "$home/.ssh/authorized_keys" 2>/dev/null; then
+                chmod 700 "$home/.ssh" 2>/dev/null || true
+                chmod 600 "$home/.ssh/authorized_keys" 2>/dev/null || true
+                chown -R "$user":"$user" "$home/.ssh" 2>/dev/null || true
+                fb_ok "installed SSH authorized key for '$user'"
+            else
+                fb_warn "could not write authorized_keys"
+            fi
+        fi
+    fi
+
+    # Enable/disable + start/stop the daemon (sshd is the common unit name).
+    if [[ "$enable" == "1" ]]; then
+        systemctl enable --now sshd 2>/dev/null && fb_ok "sshd enabled" \
+            || fb_warn "could not enable sshd"
+    else
+        systemctl disable --now sshd 2>/dev/null || true
+        fb_log "sshd left disabled"
+    fi
+}
+
+fb_apply_ramboot() {
+    local mode="${POWOS_RAMBOOT:-off}"
+    [[ "$mode" == "installed" ]] || { fb_log "RAM boot off — skipping"; return 0; }
+    # The 'powos ramboot' CLI is being built in parallel; guard on it.
+    if command -v powos >/dev/null 2>&1; then
+        if powos ramboot enable 2>/dev/null; then
+            fb_ok "installed-disk RAM boot enabled"
+        else
+            fb_warn "'powos ramboot enable' failed or is unavailable on this image"
+        fi
+    else
+        fb_warn "powos CLI not found — cannot enable RAM boot"
+    fi
+}
+
+fb_apply_ai() {
+    local provider="${POWOS_AI_PROVIDER:-none}" key="${POWOS_AI_KEY:-}"
+    [[ -n "$provider" && "$provider" != "none" ]] || { fb_log "no AI provider — skipping"; return 0; }
+
+    if mkdir -p "$POWOS_AI_CONF_DIR" 2>/dev/null; then
+        # Set the default client; keep the API key in a 600 file next to it.
+        {
+            echo "# Written by powos-firstboot-apply"
+            echo "AI_DEFAULT_CLIENT=\"$provider\""
+        } > "$POWOS_AI_CONF_DIR/provider.conf" 2>/dev/null \
+            && fb_ok "AI default provider set to '$provider'" \
+            || fb_warn "could not write AI provider config"
+
+        if [[ -n "$key" ]]; then
+            {
+                echo "# Written by powos-firstboot-apply — keep private."
+                case "$provider" in
+                    claude) echo "ANTHROPIC_API_KEY=\"$key\"" ;;
+                    gemini) echo "GEMINI_API_KEY=\"$key\"" ;;
+                    *)      echo "AI_API_KEY=\"$key\"" ;;
+                esac
+            } > "$POWOS_AI_CONF_DIR/credentials.conf" 2>/dev/null
+            chmod 600 "$POWOS_AI_CONF_DIR/credentials.conf" 2>/dev/null || true
+            fb_ok "AI API key stored (0600)"
+        fi
+    else
+        fb_warn "could not create $POWOS_AI_CONF_DIR"
+    fi
+}
+
+fb_apply_restore() {
+    local url="${POWOS_RESTORE_URL:-}"
+    [[ -n "$url" ]] || { fb_log "no restore URL — skipping"; return 0; }
+    if ! command -v powos >/dev/null 2>&1; then
+        fb_warn "powos CLI not found — cannot restore from backup"
+        return 0
+    fi
+    if powos backup setup "$url" 2>/dev/null; then
+        if powos backup pull 2>/dev/null; then
+            fb_ok "restored from backup: $url"
+        else
+            fb_warn "'powos backup pull' failed — restore later with 'powos backup pull'"
+        fi
+    else
+        fb_warn "'powos backup setup' failed for $url"
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────
+fb_main() {
+    if [[ ! -f "$POWOS_INSTALL_CONF" ]]; then
+        fb_log "no $POWOS_INSTALL_CONF — nothing to apply."
+        return 0
+    fi
+
+    fb_log "applying first-boot configuration from $POWOS_INSTALL_CONF"
+    # shellcheck disable=SC1090
+    source "$POWOS_INSTALL_CONF" 2>/dev/null || fb_warn "could not fully parse config"
+
+    # Best-effort: never let one failure stop the others (|| true belt-and-braces
+    # on top of each step's own guards).
+    fb_apply_hostname || true
+    fb_apply_user     || true
+    fb_apply_ssh      || true
+    fb_apply_ramboot  || true
+    fb_apply_ai       || true
+    fb_apply_restore  || true
+
+    # Always remove the config LAST — it carries the password hash, and its
+    # absence is what stops powos-firstboot.service running again.
+    if rm -f "$POWOS_INSTALL_CONF" 2>/dev/null; then
+        fb_ok "applied and removed $POWOS_INSTALL_CONF"
+    else
+        fb_warn "could not remove $POWOS_INSTALL_CONF — remove it manually (holds a hash)"
+    fi
+
+    # Belt-and-braces: disable the unit too (ConditionPathExists already makes
+    # it one-shot). Ignored if systemctl/the unit is absent.
+    systemctl disable powos-firstboot.service 2>/dev/null || true
+
+    return 0
+}
+
+# Run only when executed directly, not when sourced by the test harness.
+if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
+    fb_main "$@"
+fi

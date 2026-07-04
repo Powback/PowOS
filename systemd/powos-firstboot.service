@@ -1,0 +1,28 @@
+# powos-firstboot.service - apply the guided installer's choices once, on the
+# installed system's first boot.
+#
+# The wizard (powos-install-wizard) leaves /etc/powos/install.conf on the
+# freshly installed system. This unit runs powos-firstboot-apply once to apply
+# hostname/user/password/SSH/RAM-boot/AI/restore, then the applier DELETES the
+# config. ConditionPathExists makes it self-disabling: with the file gone the
+# unit is skipped on every subsequent boot.
+#
+# After=network-online.target so the optional restore-from-backup 'git pull'
+# has network. All steps are best-effort — a failure here never blocks boot.
+
+[Unit]
+Description=PowOS first-boot setup (apply install.conf)
+Documentation=man:powos-firstboot-apply
+ConditionPathExists=/etc/powos/install.conf
+After=network-online.target systemd-user-sessions.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/powos-firstboot-apply
+RemainAfterExit=no
+# Keep going even if the applier returns nonzero — never fail the boot on it.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

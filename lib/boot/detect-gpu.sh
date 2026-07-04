@@ -77,8 +77,9 @@ detect_from_lspci() {
         return 0
     fi
 
-    # Check for AMD
-    if echo "$pci_output" | grep -qi "VGA.*AMD\|VGA.*ATI\|VGA.*Radeon"; then
+    # Check for AMD. NOTE: never match a bare "ATI" — it matches "VGA
+    # compATIble controller" on EVERY card (a false AMD hit on NVIDIA/Intel).
+    if echo "$pci_output" | grep -qiE "VGA.*(AMD|Radeon|Advanced Micro Devices|ATI Technologies)"; then
         log "Found AMD via lspci"
         echo "amd"
         return 0

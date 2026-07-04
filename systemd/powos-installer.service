@@ -14,8 +14,11 @@ Conflicts=getty@tty1.service display-manager.service
 
 [Service]
 Type=idle
-# Take over tty1 so the installer has a real interactive console.
-ExecStart=/usr/bin/powos install-system --auto
+# Take over tty1 for the guided installer (TUI, or the GUI when a desktop is
+# up). The wizard collects disk/sizes/GPU/hostname/user/ssh/ramboot/AI/restore,
+# then drives `powos install-system` + firstboot config. (The raw
+# `powos install-system` is still available by hand.)
+ExecStart=/usr/bin/powos-install-wizard
 StandardInput=tty
 StandardOutput=tty
 StandardError=journal

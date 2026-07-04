@@ -1,0 +1,87 @@
+# PowOS install configuration — TEMPLATE / documentation
+# =========================================================================
+# The guided installer (powos-install-wizard) WRITES this file to
+# /etc/powos/install.conf. Two consumers read it:
+#
+#   1. powos install-system  — the disk/partition keys become CLI flags.
+#   2. powos-firstboot-apply — applies the rest on the installed system's
+#                              first boot, then DELETES the file.
+#
+# Format: shell key=value, single-quoted. It is `source`d, so values must be
+# valid shell. The wizard generates it for you — this template documents every
+# key and shows sane defaults.
+#
+# SECURITY: POWOS_PASSWORD_HASH is a crypt hash (openssl passwd -6), NEVER a
+# plaintext password. The whole file is mode 0600 and removed after firstboot.
+# =========================================================================
+
+# ── Disk / partitioning → 'powos install-system' flags ──────────────────
+
+# Target whole-disk block device. → --disk
+ISV_DISK='/dev/nvme0n1'
+
+# Install mode. → --whole-disk (erase all) or --alongside (dual-boot free space)
+#   whole-disk : also emits --i-understand-data-loss (the erase gate; --yes
+#                alone can't satisfy install-system's typed erase confirmation)
+#   alongside  : install into free space, keep Windows
+ISV_MODE='whole-disk'          # whole-disk | alongside
+
+# Root partition size in GB, or 'auto' (installer uses the remaining space
+# after games/windows reservations). Informational: install-system computes
+# the actual root size itself; no direct flag.
+ISV_ROOT_GB='auto'
+
+# Shared NTFS games partition (label POWOS-GAMES, visible to Windows) in GB.
+# → --shared-gb   ('auto' = size from disk; 0 = none)
+ISV_GAMES_GB='auto'
+
+# Unallocated tail reserved for the 'partition' Windows backend, in GB.
+# → --windows-gb  ('auto' = size from disk; 0 = none)
+ISV_WINDOWS_GB='auto'
+
+# Root filesystem. → --fs
+ISV_FS='btrfs'                 # btrfs | ext4
+
+# ── Identity / drivers → applied by powos-firstboot-apply ───────────────
+
+# GPU driver flavor. Maps to the base image / variant selection (nvidia-open
+# is the project default: open NVIDIA kernel modules). See docs.
+POWOS_GPU_FLAVOR='nvidia-open' # nvidia-open | nvidia | amd | intel
+
+# System hostname. → hostnamectl set-hostname
+POWOS_HOSTNAME='powos'
+
+# Primary user account (created if absent, added to wheel). → useradd
+POWOS_USERNAME='powos'
+
+# Password HASH from `openssl passwd -6 '<plaintext>'`. NEVER plaintext.
+# Applied with `chpasswd -e`. The example below is the hash of 'powos'.
+POWOS_PASSWORD_HASH='$6$examplesalt$exampleHASHreplacedByTheWizard0000000000000000000000000000000000000000000000000000'
+
+# ── Remote access → powos-firstboot-apply ───────────────────────────────
+
+# Enable the SSH server on the installed system. → systemctl enable --now sshd
+POWOS_SSH_ENABLE='0'           # 0 | 1
+
+# Optional SSH public key (a single authorized_keys line). Installed into the
+# primary user's ~/.ssh/authorized_keys even if the daemon stays disabled.
+POWOS_SSH_KEY=''
+
+# ── Runtime behaviour → powos-firstboot-apply ───────────────────────────
+
+# Run the installed OS from a RAM overlay. 'installed' is EXPERIMENTAL and
+# calls `powos ramboot enable` on first boot (guarded — no-op if unavailable).
+POWOS_RAMBOOT='off'            # off | installed
+
+# ── AI / restore → powos-firstboot-apply ────────────────────────────────
+
+# Default AI provider for 'powos ai'. 'none' skips AI setup.
+POWOS_AI_PROVIDER='none'       # claude | gemini | ollama | none
+
+# Optional API key for the provider (claude/gemini). Stored 0600 under
+# /etc/powos/ai/credentials.conf. Ollama needs none.
+POWOS_AI_KEY=''
+
+# Optional PowOS backup git URL. If set, firstboot runs
+# `powos backup setup <url> && powos backup pull` to restore projects/config.
+POWOS_RESTORE_URL=''
