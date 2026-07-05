@@ -201,7 +201,11 @@ COPY systemd/powos-firstboot.service /usr/lib/systemd/system/
 COPY bin/powos-firstboot-disk /usr/bin/
 COPY systemd/powos-firstboot-disk.service /usr/lib/systemd/system/
 # A failed enable must fail the build — no 2>/dev/null || true.
+# Unit files must be 0644: a build context from a Windows bind-mount reports
+# every file as 0755, and systemd warns "Configuration file ... is marked
+# executable" for each unit. Normalize so any build context yields clean units.
 RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powos-firstboot-apply /usr/bin/powos-firstboot-disk && \
+    chmod 0644 /usr/lib/systemd/system/powos-*.service && \
     systemctl enable powos-ramboot-init.service powos-layer-sync.service \
         powos-cachefs-sync.service powos-installer.service \
         powos-hwinfo.service powos-ramboot-healthy.service \
