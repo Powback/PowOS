@@ -1399,7 +1399,10 @@ except: pass
     # Check systemd-sysext status
     if command -v systemd-sysext &>/dev/null; then
         local sysext_status
-        sysext_status=$(systemd-sysext status 2>/dev/null | grep -c "active" || echo "0")
+        # grep -c always prints a count (0 for no matches) but exits 1 when
+        # count is 0. The old `|| echo "0"` then APPENDED a second "0" and
+        # the arithmetic `[[ $var -gt 0 ]]` blew up on the two-line value.
+        sysext_status=$(systemd-sysext status 2>/dev/null | grep -c "active" || true)
         if [[ "$sysext_status" -gt 0 ]]; then
             echo "    systemd-sysext: $sysext_status active"
         fi

@@ -50,8 +50,9 @@ load_config() {
         log "Loaded config from $config_file"
     fi
 
-    # Also check user config
-    local user_config="${HOME}/.config/powos/config"
+    # Also check user config. Under systemd (Type=oneshot, root, no PAM login)
+    # HOME is not automatically set, so ${HOME:-} avoids tripping `set -u`.
+    local user_config="${HOME:-/root}/.config/powos/config"
     if [[ -f "$user_config" ]]; then
         source "$user_config"
         log "Loaded user config from $user_config"

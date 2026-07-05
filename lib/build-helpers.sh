@@ -69,6 +69,17 @@ install_packages() {
     # We primarily want /usr
     if [[ -d "$temp_root/usr" ]]; then
         cp -r "$temp_root/usr/"* "$output_dir/usr/"
+        # A sysext MUST NOT ship its own /usr/lib/os-release — systemd-sysext
+        # refuses ("Extension contains '/usr/lib/os-release', which is not
+        # allowed") and, worse, aborts the ENTIRE sysext merge on the FIRST
+        # such extension, silently blocking every other overlay too. dnf's
+        # --installroot pulls in the base OS release file, so strip it here
+        # (plus any machine-id, which sysext also forbids).
+        rm -f "$output_dir/usr/lib/os-release" \
+              "$output_dir/usr/lib64/os-release" \
+              "$output_dir/etc/os-release" \
+              "$output_dir/usr/lib/machine-id" \
+              "$output_dir/etc/machine-id" 2>/dev/null || true
     fi
     
     # Also check for /etc configs and move them to /usr/share/<name>/etc for sysext compatibility

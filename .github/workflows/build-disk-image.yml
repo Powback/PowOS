@@ -98,6 +98,88 @@ jobs:
           sudo POWOS_OVERRIDE_REMOVABLE=1 bash build/install-to-usb.sh --setup-data-only "$loop"
           sudo losetup -d "$loop"
 
+      - name: E2E boot the raw image in QEMU and assert login screen appears
+        # The whole point of this workflow is to produce a disk image that
+        # ACTUALLY BOOTS. Everything below (compression, artifact upload)
+        # runs only if the image passes a real UEFI boot in a KVM VM and
+        # reaches a login prompt without wedging. Catches the class of bugs
+        # we've historically shipped (plasmalogin not enabled, sysext refusing
+        # to merge because an extension carries os-release, powos-hydrate
+        # crashing at unbound HOME, ctrl-alt-del=reboot loops, etc.) BEFORE
+        # anyone flashes the image.
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf expect >/dev/null
+          [ -e /dev/kvm ] && sudo chmod 666 /dev/kvm || echo "no KVM, will be slow"
+
+          # OVMF vars must be writable per-VM.
+          sudo mkdir -p /build/vm
+          sudo cp /usr/share/OVMF/OVMF_CODE_4M.fd /build/vm/CODE.fd 2>/dev/null \
+             || sudo cp /usr/share/OVMF/OVMF_CODE.fd /build/vm/CODE.fd
+          sudo cp /usr/share/OVMF/OVMF_VARS_4M.fd /build/vm/VARS.fd 2>/dev/null \
+             || sudo cp /usr/share/OVMF/OVMF_VARS.fd /build/vm/VARS.fd
+
+          # Serial console gives us the boot log to grep on. plymouth off so
+          # the console prints readable text, not a splash-screen framebuffer.
+          # Cap at 10 min: a healthy boot is under 3 min; longer means hung.
+          sudo timeout 600 qemu-system-x86_64 \
+            -enable-kvm -machine q35,smm=on -cpu host -smp 4 -m 8G \
+            -drive if=pflash,format=raw,readonly=on,file=/build/vm/CODE.fd \
+            -drive if=pflash,format=raw,file=/build/vm/VARS.fd \
+            -drive file=/build/output/image/disk.raw,format=raw,if=virtio \
+            -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+            -serial file:/build/vm/console.log \
+            -display none \
+            -no-reboot &
+          qemu_pid=$!
+
+          # Watch the serial console for the success marker OR any known
+          # failure signature. Success: SDDM/plasmalogin issues a Wayland/X
+          # session line or systemd reports 'Reached target Login Prompts'
+          # (getty on tty1 is also fine — this is a headless VM without a GPU,
+          # so plasmalogin may not render but SHOULD have tried to start).
+          success='Reached target Login Prompts|Started .*Login Manager|Started SDDM|Started Plasma Login|plasmalogin\.service.*Started'
+          fail='Failed to start plasmalogin|Failed to start SDDM|systemd.*Received SIGINT|Kernel panic|Emergency mode|systemd-sysext.service.*Failed|powos-overlay.service.*failed|Failed to merge|Extension contains|Reached target Emergency|Reached target Rescue'
+
+          got=""
+          for i in $(seq 1 60); do   # up to ~10 min at 10s/tick
+            sleep 10
+            sudo touch /build/vm/console.log
+            if sudo grep -qE "$fail" /build/vm/console.log; then
+              got=fail; break
+            fi
+            if sudo grep -qE "$success" /build/vm/console.log; then
+              got=success; break
+            fi
+            if ! kill -0 $qemu_pid 2>/dev/null; then
+              got="qemu-exited"; break
+            fi
+          done
+
+          # Always dump the console log so failures are debuggable.
+          echo "==================== BOOT CONSOLE LOG (tail) ===================="
+          sudo tail -c 20000 /build/vm/console.log || true
+          echo "==================== / BOOT CONSOLE LOG ========================="
+
+          sudo kill -9 $qemu_pid 2>/dev/null || true
+          wait $qemu_pid 2>/dev/null || true
+
+          case "$got" in
+            success)      echo "E2E boot passed — image reached a login prompt." ;;
+            fail)         echo "E2E boot FAILED — matched a known failure signature."; exit 1 ;;
+            qemu-exited)  echo "E2E boot FAILED — QEMU exited before reaching a login prompt."; exit 1 ;;
+            *)            echo "E2E boot FAILED — no login/failure marker within timeout."; exit 1 ;;
+          esac
+
+      - name: Upload boot console log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-console-${{ inputs.variant }}
+          path: /build/vm/console.log
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Compress
         run: |
           sudo mv /build/output/image/disk.raw /build/output/powos-${{ inputs.variant }}.raw
