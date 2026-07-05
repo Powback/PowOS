@@ -44,6 +44,14 @@ if ! mkdir -p /usr/lib/powos 2>/dev/null || [[ ! -w /usr/lib/powos ]]; then
     echo "== Results: $PASS passed, $FAIL failed, $SKIP skipped =="
     exit 0
 fi
+# `powos update self` deploys via `sudo cp` (unconditionally, even as root).
+# On a minimal CI/container image without sudo the copies fail silently (real
+# PowOS systems always have sudo), so skip rather than report a false failure.
+if ! command -v sudo >/dev/null 2>&1; then
+    skip "sudo not installed (update self uses 'sudo cp' to deploy)"
+    echo "== Results: $PASS passed, $FAIL failed, $SKIP skipped =="
+    exit 0
+fi
 
 # Build a minimal throwaway "source checkout" with uniquely-named probe files.
 SRC="$(mktemp -d)"
