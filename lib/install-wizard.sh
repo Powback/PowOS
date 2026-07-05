@@ -24,7 +24,7 @@
 # SHARED CONTRACT — /etc/powos/install.conf (shell key=value), written here,
 # consumed by install-system flags and by powos-firstboot-apply:
 #   ISV_DISK ISV_MODE(whole-disk|alongside) ISV_ROOT_GB(or 'auto') ISV_GAMES_GB
-#   ISV_WINDOWS_GB ISV_FS(btrfs|ext4)
+#   ISV_WINDOWS_GB ISV_FS(btrfs|ext4) ISV_GAMES_DISK(empty = same disk as PowOS)
 #   POWOS_GPU_FLAVOR(nvidia-open|nvidia|amd|intel) POWOS_HOSTNAME POWOS_USERNAME
 #   POWOS_PASSWORD_HASH(openssl passwd -6 — NEVER plaintext)
 #   POWOS_SSH_ENABLE(0|1) POWOS_SSH_KEY POWOS_RAMBOOT(off|installed)
@@ -47,6 +47,7 @@ IWZ_CONFIG_PATH="${IWZ_CONFIG_PATH:-/etc/powos/install.conf}"
 IWZ_TITLE="PowOS Install"
 
 IWZ_DISK=""
+IWZ_GAMES_DISK=""                  # separate disk for POWOS-GAMES; empty = same disk as PowOS
 IWZ_MODE="whole-disk"              # whole-disk | alongside
 IWZ_ROOT_GB="auto"                 # informational; installer computes root itself
 IWZ_GAMES_GB="auto"                # → --shared-gb
@@ -247,6 +248,7 @@ iwz_write_config() {
         echo ""
         echo "# ── Disk / partitioning (drives install-system flags) ──"
         echo "ISV_DISK=$(iwz__q "$IWZ_DISK")"
+        echo "ISV_GAMES_DISK=$(iwz__q "$IWZ_GAMES_DISK")"
         echo "ISV_MODE=$(iwz__q "$IWZ_MODE")"
         echo "ISV_ROOT_GB=$(iwz__q "$IWZ_ROOT_GB")"
         echo "ISV_GAMES_GB=$(iwz__q "$IWZ_GAMES_GB")"
@@ -282,6 +284,7 @@ iwz_load_config() {
     # shellcheck disable=SC1090
     source "$path"
     IWZ_DISK="${ISV_DISK:-$IWZ_DISK}"
+    IWZ_GAMES_DISK="${ISV_GAMES_DISK:-$IWZ_GAMES_DISK}"
     IWZ_MODE="${ISV_MODE:-$IWZ_MODE}"
     IWZ_ROOT_GB="${ISV_ROOT_GB:-$IWZ_ROOT_GB}"
     IWZ_GAMES_GB="${ISV_GAMES_GB:-$IWZ_GAMES_GB}"
@@ -318,6 +321,9 @@ iwz_build_installer_args() {
     [[ -n "$IWZ_FS" ]] && a+=(--fs "$IWZ_FS")
     [[ -n "$IWZ_GAMES_GB" ]]   && a+=(--shared-gb "$IWZ_GAMES_GB")
     [[ -n "$IWZ_WINDOWS_GB" ]] && a+=(--windows-gb "$IWZ_WINDOWS_GB")
+    # A separate games disk (different from the PowOS target) → --games-disk.
+    # Same disk or empty emits nothing, preserving the classic arg line exactly.
+    [[ -n "$IWZ_GAMES_DISK" && "$IWZ_GAMES_DISK" != "$IWZ_DISK" ]] && a+=(--games-disk "$IWZ_GAMES_DISK")
     a+=(--yes)
     [[ "$IWZ_MODE" == "whole-disk" ]] && a+=(--i-understand-data-loss)
     echo "${a[*]}"
@@ -346,6 +352,40 @@ iwz_step_disk() {
         IWZ_DISK="$pick"
     fi
     iwz_ok "Disk: $IWZ_DISK"
+}
+
+# Offer to put the shared games (POWOS-GAMES) partition on a DIFFERENT whole
+# disk than PowOS. Only meaningful with >1 installable disk; with a single disk
+# it silently keeps IWZ_GAMES_DISK="" (same disk, carve a tail).
+iwz_step_games_disk() {
+    IWZ_GAMES_DISK=""
+    # Collect disks as dev/size/model triples so we can count + list the others.
+    local -a disks=() dev size model
+    while IFS=$'\t' read -r dev size model; do
+        [[ -n "$dev" ]] || continue
+        disks+=("$dev" "$size" "$model")
+    done < <(iwz_list_disks)
+
+    local n=$(( ${#disks[@]} / 3 ))
+    (( n > 1 )) || return 0   # only one disk to choose from — stay same-disk
+
+    iwz_step "Shared games partition location"
+    local -a menu=(same "Same disk as PowOS (carve a partition)")
+    local i
+    for (( i=0; i<${#disks[@]}; i+=3 )); do
+        dev="${disks[i]}"; size="${disks[i+1]}"; model="${disks[i+2]}"
+        [[ "$dev" == "$IWZ_DISK" ]] && continue   # never the PowOS disk itself
+        menu+=("$dev" "Use $dev whole ($size  $model) for games")
+    done
+
+    local pick
+    pick=$(iwz_menu "Where should the shared games (POWOS-GAMES) partition live?" "${menu[@]}") || return 1
+    if [[ -z "$pick" || "$pick" == "same" ]]; then
+        IWZ_GAMES_DISK=""
+    else
+        IWZ_GAMES_DISK="$pick"
+    fi
+    iwz_ok "Games disk: $([[ -n "$IWZ_GAMES_DISK" ]] && echo "$IWZ_GAMES_DISK (separate whole disk)" || echo "same disk as PowOS")"
 }
 
 iwz_step_mode() {
@@ -484,6 +524,7 @@ iwz_review_text() {
 Review your install choices:
 
   Disk        : ${IWZ_DISK}
+  Games disk  : $([[ -n "$IWZ_GAMES_DISK" && "$IWZ_GAMES_DISK" != "$IWZ_DISK" ]] && echo "${IWZ_GAMES_DISK} (separate whole disk)" || echo "same disk (partition)")
   Mode        : ${IWZ_MODE}
   Root        : ${IWZ_ROOT_GB} GB
   Games (NTFS): ${IWZ_GAMES_GB} GB
@@ -601,8 +642,9 @@ cmd_install_wizard() {
         return 1
     fi
 
-    iwz_step_disk     || { iwz_warn "Cancelled."; return 1; }
-    iwz_step_mode     || { iwz_warn "Cancelled."; return 1; }
+    iwz_step_disk       || { iwz_warn "Cancelled."; return 1; }
+    iwz_step_games_disk || { iwz_warn "Cancelled."; return 1; }
+    iwz_step_mode       || { iwz_warn "Cancelled."; return 1; }
     iwz_step_sizes    || { iwz_warn "Cancelled."; return 1; }
     iwz_step_gpu      || { iwz_warn "Cancelled."; return 1; }
     iwz_step_identity || { iwz_warn "Cancelled."; return 1; }

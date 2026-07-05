@@ -37,7 +37,7 @@ echo "== Argument parsing =="
 
 reset_globals() {
     ISV_DRY_RUN=0; ISV_ASSUME_YES=0; ISV_ERASE_CONFIRMED=0; ISV_MODE=""
-    ISV_TARGET=""; ISV_SHARED_GB=""; ISV_WINDOWS_GB=""; ISV_FS="btrfs"
+    ISV_TARGET=""; ISV_GAMES_DISK=""; ISV_SHARED_GB=""; ISV_WINDOWS_GB=""; ISV_FS="btrfs"
     ISV_SHARED_AUTO=0; ISV_WINDOWS_AUTO=0
 }
 
@@ -71,6 +71,11 @@ check "--fs ext4 accepted"           '[[ "$ISV_FS" == "ext4" ]]'
 reset_globals
 isv_parse_args --i-understand-data-loss >/dev/null 2>&1
 check "--i-understand-data-loss sets flag" '[[ $ISV_ERASE_CONFIRMED -eq 1 ]]'
+
+reset_globals
+isv_parse_args --games-disk /dev/nvme1n1 >/dev/null 2>&1
+check "--games-disk captured"        '[[ "$ISV_GAMES_DISK" == "/dev/nvme1n1" ]]'
+check "--games-disk defaults empty"  'reset_globals; [[ -z "$ISV_GAMES_DISK" ]]'
 
 # ── Dry-run gates destructive commands ────────────────────────────
 echo "== Dry-run safety gate =="

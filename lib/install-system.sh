@@ -40,6 +40,8 @@ ISV_ASSUME_YES=0       # 1 = skip interactive confirmations (scripting; dangerou
 ISV_ERASE_CONFIRMED=0  # 1 = --i-understand-data-loss (with --yes: allows ERASE gates)
 ISV_MODE=""            # alongside | whole-disk | "" (ask)
 ISV_TARGET=""          # /dev/sdX chosen by user or flag
+ISV_GAMES_DISK=""      # separate disk for POWOS-GAMES; empty = same disk as
+                       # target (carve a tail, current behavior)
 # Tail reservations. DEFAULT IS "auto": a fresh install is future-proof BY
 # DEFAULT — games partition + Windows space sized from the disk, so the
 # machine never needs a reformat to add them later. Explicit GB overrides,
@@ -429,6 +431,8 @@ isv_show_plan() {
     echo
     echo -e "  Target disk : ${BOLD}$ISV_TARGET${NC}"
     echo -e "  Mode        : ${BOLD}$ISV_MODE${NC}"
+    [[ -n "$ISV_GAMES_DISK" ]] && \
+        echo -e "  Games disk  : ${BOLD}$ISV_GAMES_DISK${NC} (separate disk — whole-disk NTFS POWOS-GAMES)"
     echo -e "  Root FS     : $ISV_FS"
     echo -e "  Games NTFS  : $([[ "${ISV_SHARED_GB:-0}" == "0" ]] && echo none || echo "${ISV_SHARED_GB}GB (label POWOS-GAMES — visible to Windows; also holds the 'vhd' backend's windows.vhdx)")"
     echo -e "  Windows tail: $([[ "${ISV_WINDOWS_GB:-0}" == "0" ]] && echo none || echo "${ISV_WINDOWS_GB}GB unallocated (for the 'partition' backend: WIN-ESP + POWOS-WIN)")"
@@ -917,6 +921,30 @@ isv_last_partition() {
     lsblk -ln -o PATH "$1" 2>/dev/null | tail -1
 }
 
+# ── Separate games disk ───────────────────────────────────────────
+# After PowOS is installed on ISV_TARGET, create the shared POWOS-GAMES
+# partition filling the SEPARATE disk ISV_GAMES_DISK. Delegates to the sibling
+# `powos games create --whole` so there is ONE partition-creation code path
+# (plan + confirm + safety guards live there). Non-fatal: the OS install already
+# succeeded; a failure here just means the user re-runs `powos games create`.
+isv_create_games_on_separate_disk() {
+    isv_step "Creating POWOS-GAMES on the separate disk $ISV_GAMES_DISK"
+    if ! command -v powos &>/dev/null; then
+        isv_warn "'powos' is not on PATH — cannot create the games partition now."
+        isv_warn "After first boot, run:  sudo powos games create --disk $ISV_GAMES_DISK --whole"
+        return 0
+    fi
+    local -a gargs=(games create --disk "$ISV_GAMES_DISK" --whole --yes)
+    [[ $ISV_DRY_RUN -eq 1 ]] && gargs+=(--dry-run)
+    echo -e "  ${DIM}\$ powos ${gargs[*]}${NC}"
+    if powos "${gargs[@]}"; then
+        isv_ok "POWOS-GAMES created on $ISV_GAMES_DISK."
+    else
+        isv_warn "Could not create POWOS-GAMES on $ISV_GAMES_DISK (non-fatal)."
+        isv_warn "PowOS is installed; create it later:  sudo powos games create --disk $ISV_GAMES_DISK --whole"
+    fi
+}
+
 # ── Post-install: automate the dual-boot footguns ─────────────────
 isv_post_install() {
     isv_step "Post-install tuning (dual-boot friendliness)"
@@ -961,6 +989,13 @@ Options:
   --alongside          Dual-boot: install into free space, keep other OSes
   --whole-disk         Erase the whole target disk (requires confirmation)
   --disk /dev/sdX      Preselect target disk (still shown for confirmation)
+  --games-disk /dev/sdY
+                       Put the shared POWOS-GAMES partition on a SEPARATE disk
+                       (whole disk, NTFS) instead of a tail on the target.
+                       PowOS then takes the whole target (no games/Windows
+                       tail carved there). Created after the install succeeds
+                       via 'powos games create --disk /dev/sdY --whole'.
+                       Empty or equal to --disk = classic same-disk tail.
   --shared-gb N|auto   Shared NTFS games partition (label POWOS-GAMES),
                        visible to Windows — managed by 'powos games'. The
                        default 'vhd' Windows backend also keeps its image
@@ -994,6 +1029,7 @@ isv_parse_args() {
             --alongside)   ISV_MODE="alongside"; shift ;;
             --whole-disk)  ISV_MODE="whole-disk"; shift ;;
             --disk)        ISV_TARGET="${2:-}"; shift 2 ;;
+            --games-disk)  ISV_GAMES_DISK="${2:-}"; shift 2 ;;
             --shared-gb)
                 ISV_SHARED_GB="${2:-}"
                 if ! [[ "$ISV_SHARED_GB" =~ ^([0-9]+|auto)$ ]]; then
@@ -1046,6 +1082,22 @@ cmd_install_system() {
 
     isv_choose_disk   || return 1
     isv_choose_mode   || return 1
+
+    # Separate games disk: PowOS takes the WHOLE target (no games/Windows tail
+    # carved there); POWOS-GAMES is created on ISV_GAMES_DISK AFTER the install
+    # succeeds. An empty value — or one equal to the target — keeps the classic
+    # same-disk tail behavior (byte-for-byte unchanged). Force the reservations
+    # to 0 BEFORE isv_resolve_reservations so no "auto" tail is ever planned.
+    if [[ -n "$ISV_GAMES_DISK" && "$ISV_GAMES_DISK" == "$ISV_TARGET" ]]; then
+        ISV_GAMES_DISK=""
+    fi
+    if [[ -n "$ISV_GAMES_DISK" ]]; then
+        isv_log "Shared games partition goes on a SEPARATE disk: $ISV_GAMES_DISK"
+        isv_log "PowOS takes the whole target ($ISV_TARGET); no games/Windows tail carved there."
+        ISV_SHARED_GB=0
+        ISV_WINDOWS_GB=0
+    fi
+
     # Resolve "auto" reservations from the target's size (default-on: a fresh
     # install is future-proof without asking), then let the interactive
     # alongside flow adjust the games size (default answer = the auto value).
@@ -1078,6 +1130,11 @@ cmd_install_system() {
         # Alongside mode creates the games partition inline (reserved tail).
         isv_install_alongside  || return 1
     fi
+
+    # Separate games disk: now that PowOS is down, create POWOS-GAMES filling
+    # the other disk. Non-fatal — the OS install already succeeded.
+    [[ -n "$ISV_GAMES_DISK" ]] && isv_create_games_on_separate_disk
+
     isv_post_install
 
     isv_step "Done"

@@ -45,7 +45,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 reset_iwz() {
-    IWZ_DRY_RUN=0; IWZ_DISK=""; IWZ_MODE="whole-disk"; IWZ_ROOT_GB="auto"
+    IWZ_DRY_RUN=0; IWZ_DISK=""; IWZ_GAMES_DISK=""; IWZ_MODE="whole-disk"; IWZ_ROOT_GB="auto"
     IWZ_GAMES_GB="auto"; IWZ_WINDOWS_GB="auto"; IWZ_FS="btrfs"
     IWZ_GPU_FLAVOR="nvidia-open"; IWZ_HOSTNAME="powos"; IWZ_USERNAME="powos"
     IWZ_PASSWORD_HASH=""; IWZ_SSH_ENABLE=0; IWZ_SSH_KEY=""; IWZ_RAMBOOT="off"
@@ -79,6 +79,24 @@ check "alongside: NO --whole-disk"        '! echo "$ARGS" | grep -q -- "--whole-
 check "alongside: --fs ext4"              'echo "$ARGS" | grep -q -- "--fs ext4"'
 check "alongside: auto sizes pass through" 'echo "$ARGS" | grep -q -- "--shared-gb auto" && echo "$ARGS" | grep -q -- "--windows-gb auto"'
 check "alongside: still --yes"            'echo "$ARGS" | grep -q -- "--yes"'
+
+# ── Separate games disk → --games-disk flag mapping ───────────────
+echo "== Separate games disk flag mapping =="
+
+reset_iwz
+IWZ_DISK="/dev/nvme0n1"; IWZ_MODE="whole-disk"; IWZ_GAMES_DISK=""
+ARGS=$(iwz_build_installer_args)
+check "no games disk → NO --games-disk emitted"  '! echo "$ARGS" | grep -q -- "--games-disk"'
+
+reset_iwz
+IWZ_DISK="/dev/nvme0n1"; IWZ_MODE="whole-disk"; IWZ_GAMES_DISK="/dev/nvme1n1"
+ARGS=$(iwz_build_installer_args)
+check "separate games disk → --games-disk emitted" 'echo "$ARGS" | grep -q -- "--games-disk /dev/nvme1n1"'
+
+reset_iwz
+IWZ_DISK="/dev/nvme0n1"; IWZ_MODE="whole-disk"; IWZ_GAMES_DISK="/dev/nvme0n1"
+ARGS=$(iwz_build_installer_args)
+check "games disk == PowOS disk → NO --games-disk" '! echo "$ARGS" | grep -q -- "--games-disk"'
 
 # ── Password is hashed, never plaintext ───────────────────────────
 echo "== Password hashing (no plaintext leak) =="
@@ -140,6 +158,15 @@ reset_iwz
 iwz_load_config "$TMP/rt.conf" >/dev/null 2>&1
 check "iwz_load_config restores IWZ_MODE"    '[[ "$IWZ_MODE" == "alongside" ]]'
 check "iwz_load_config restores IWZ_AI_KEY"  '[[ "$IWZ_AI_KEY" == "sk-test-123" ]]'
+
+# IWZ_GAMES_DISK round-trips through write → source → load.
+reset_iwz
+IWZ_DISK="/dev/nvme0n1"; IWZ_GAMES_DISK="/dev/nvme1n1"
+iwz_write_config "$TMP/gd.conf"
+check "config carries ISV_GAMES_DISK"        'grep -q "ISV_GAMES_DISK=.\{0,\}/dev/nvme1n1" "$TMP/gd.conf"'
+reset_iwz
+iwz_load_config "$TMP/gd.conf" >/dev/null 2>&1
+check "iwz_load_config restores IWZ_GAMES_DISK" '[[ "$IWZ_GAMES_DISK" == "/dev/nvme1n1" ]]'
 
 # ── Dry-run gates every mutation ──────────────────────────────────
 echo "== Dry-run zero-mutation gate =="

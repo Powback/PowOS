@@ -36,7 +36,7 @@ check "sourcing does not enable errexit" '[[ $- != *e* ]]'
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-reset_gms() { GMS_DRY_RUN=0; GMS_ASSUME_YES=0; GMS_SIZE_GB=""; GMS_DISK=""; }
+reset_gms() { GMS_DRY_RUN=0; GMS_ASSUME_YES=0; GMS_SIZE_GB=""; GMS_WHOLE=0; GMS_DISK=""; }
 
 # Symlink capability probe: on Git Bash (MSYS) native symlinks need Developer
 # Mode; without them we skip only the strict link assertions.
@@ -167,6 +167,56 @@ check "plan: mkfs.ntfs with the label"       'grep -q "mkfs.ntfs -f -L POWOS-GAM
 check "plan: GPT type 0700 (Windows-visible)" 'grep -q "0700" "$TMP/create-dry.out"'
 check "no disk-end-relative specs (100% / -NMiB)" \
     '! grep "mkpart" "$TMP/create-dry.out" | grep -Eq "100%|-[0-9]+MiB"'
+unset -f parted mkfs.ntfs sgdisk partprobe udevadm partx blkid lsblk gms_is_block
+
+# ── create --whole: fill the free block ───────────────────────────
+echo "== create --whole: fills the disk's free space =="
+
+MUT_CALLS=()
+parted() {
+    case "$*" in
+        *"print free"*)   # free block 100000 → 500000 (400000 MiB)
+            cat <<'PARTED'
+Disk /dev/sdz: 500000MiB
+Number  Start      End        Size       Type     File system  Flags
+ 1      1.00MiB    100000MiB  99999MiB   primary  btrfs
+        100000MiB  500000MiB  400000MiB           Free Space
+PARTED
+            ;;
+        *) MUT_CALLS+=("parted $*") ;;
+    esac
+}
+mkfs.ntfs()    { MUT_CALLS+=("mkfs.ntfs $*"); }
+sgdisk()       { MUT_CALLS+=("sgdisk $*"); }
+partprobe()    { MUT_CALLS+=("partprobe $*"); }
+udevadm()      { MUT_CALLS+=("udevadm $*"); }
+partx()        { MUT_CALLS+=("partx $*"); }
+blkid()        { return 1; }
+lsblk()        { case "$*" in *"-dn -o TYPE"*) echo "disk" ;; *) echo "" ;; esac; }
+gms_is_block() { return 0; }
+
+# --whole flag is parsed into GMS_WHOLE.
+reset_gms
+cmd_games create --whole --disk /dev/sdz --dry-run > "$TMP/whole-dry.out" 2>&1; rc=$?
+check "--whole dry-run create succeeds"       '[[ $rc -eq 0 ]]'
+check "--whole: ZERO mutating tool calls"     '[[ ${#MUT_CALLS[@]} -eq 0 ]]'
+check "--whole: partition fills the free block (100000→500000)" \
+    'grep -q "mkpart POWOS-GAMES ntfs 100000.00MiB 500000.00MiB" "$TMP/whole-dry.out"'
+check "--whole: no disk-end-relative specs (100% / -NMiB)" \
+    '! grep "mkpart" "$TMP/whole-dry.out" | grep -Eq "100%|-[0-9]+MiB"'
+
+# --size and --whole are mutually exclusive.
+reset_gms
+out=$(cmd_games create --whole --size 100 --disk /dev/sdz --dry-run 2>&1); rc=$?
+check "--size + --whole → refused"            '[[ $rc -ne 0 ]]'
+check "explains mutual exclusion"             'echo "$out" | grep -qi "mutually exclusive"'
+
+# Neither --size nor --whole → the classic required-size error.
+reset_gms
+out=$(cmd_games create --disk /dev/sdz --dry-run 2>&1); rc=$?
+check "neither --size nor --whole → refused"  '[[ $rc -ne 0 ]]'
+check "still names --size as required"        'echo "$out" | grep -q -- "--size"'
+
 unset -f parted mkfs.ntfs sgdisk partprobe udevadm partx blkid lsblk gms_is_block
 
 # ── Partition located by PARTLABEL, not lsblk order ───────────────

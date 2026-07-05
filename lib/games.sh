@@ -40,6 +40,7 @@ gms_step() { echo; echo -e "${BOLD}── $* ──${NC}"; }
 GMS_DRY_RUN=0          # 1 = print destructive actions, never execute
 GMS_ASSUME_YES=0       # 1 = skip y/N confirmations (scripting)
 GMS_SIZE_GB=""         # requested partition size (whole GB)
+GMS_WHOLE=0            # 1 = fill the target disk's free space (mutually exclusive with --size)
 GMS_DISK=""            # explicit target disk override
 
 GMS_LABEL="POWOS-GAMES"
@@ -452,11 +453,21 @@ gms_status() {
 gms_create() {
     gms_step "Create the $GMS_LABEL shared partition"
 
-    if ! [[ "$GMS_SIZE_GB" =~ ^[0-9]+$ ]] || (( GMS_SIZE_GB < 1 )); then
-        gms_err "Required: --size N (whole GB, e.g. --size 512)"
+    # --size and --whole are mutually exclusive; exactly one is required.
+    if [[ $GMS_WHOLE -eq 1 && -n "$GMS_SIZE_GB" ]]; then
+        gms_err "--size and --whole are mutually exclusive — pick one."
         return 1
     fi
-    local want_mib=$(( GMS_SIZE_GB * 1024 ))
+    if [[ $GMS_WHOLE -eq 0 ]]; then
+        if ! [[ "$GMS_SIZE_GB" =~ ^[0-9]+$ ]] || (( GMS_SIZE_GB < 1 )); then
+            gms_err "Required: --size N (whole GB, e.g. --size 512), or --whole to fill the disk"
+            return 1
+        fi
+    fi
+    # In --size mode want_mib is fixed now; in --whole mode it is computed from
+    # the free block once we have it (below).
+    local want_mib=0
+    [[ $GMS_WHOLE -eq 0 ]] && want_mib=$(( GMS_SIZE_GB * 1024 ))
 
     local t missing=()
     for t in parted blkid lsblk mkfs.ntfs; do
@@ -504,8 +515,19 @@ gms_create() {
     if [[ -z "$fb_start" || -z "$fb_end" ]]; then
         gms_err "No free space found on $disk."
         gms_err "Shrink a partition first (Windows: Disk Management), or re-burn"
-        gms_err "the USB with:  install-to-usb.sh --games-gb $GMS_SIZE_GB"
+        gms_err "the USB with:  install-to-usb.sh --games-gb ${GMS_SIZE_GB:-N}"
         return 1
+    fi
+    # --whole: fill the free block. gms_part_bounds keeps end at start+want,
+    # never past fb_end, so flooring (e - s) to a whole MiB leaves the same
+    # alignment margin the size path relies on. Report it in whole GB.
+    if [[ $GMS_WHOLE -eq 1 ]]; then
+        want_mib=$(LC_ALL=C awk -v s="$fb_start" -v e="$fb_end" 'BEGIN { printf "%d", e - s }')
+        if (( want_mib < 1024 )); then
+            gms_err "Largest free block on $disk is only ${fb_size} MiB — too small to fill."
+            return 1
+        fi
+        GMS_SIZE_GB=$(( want_mib / 1024 ))
     fi
     local bounds p_start p_end
     if ! bounds=$(gms_part_bounds "$fb_start" "$fb_end" "$want_mib"); then
@@ -764,12 +786,14 @@ Usage: powos games <command> [options]
 Commands:
   status                 Show partition / mount / Steam-wiring state
   create --size N        Create the partition (N GB) on the PowOS-owned disk
+  create --whole         Create the partition filling the disk's free space
   mount                  Install + enable the systemd mount ($GMS_MOUNTPOINT)
   steam-setup            Shared Steam library + native-FS Proton-state symlinks
   resize                 Not implemented (create at the size you need)
 
 Options:
-  --size N               Partition size in GB (create; required)
+  --size N               Partition size in GB (create; required unless --whole)
+  --whole                Fill the target disk's free space (create; excludes --size)
   --disk /dev/sdX        Target disk override (create; default: PowOS disk)
   --dry-run              Show every action but change NOTHING
   --yes                  Skip y/N confirmations (scripting)
@@ -793,6 +817,7 @@ cmd_games() {
             --dry-run) GMS_DRY_RUN=1; shift ;;
             --yes|-y)  GMS_ASSUME_YES=1; shift ;;
             --size)    GMS_SIZE_GB="${2:-}"; shift 2 ;;
+            --whole)   GMS_WHOLE=1; shift ;;
             --disk)    GMS_DISK="${2:-}"; shift 2 ;;
             -h|--help) gms_usage; return 0 ;;
             *)         gms_err "Unknown option: $1"; gms_usage; return 1 ;;
