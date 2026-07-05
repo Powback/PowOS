@@ -44,13 +44,26 @@ install_packages() {
 
     # Use dnf to install into temp root
     # --nogpgcheck is added as a workaround for build failures with unsigned packages.
-    if dnf install -y --installroot="$temp_root" --releasever="$release_ver" --setopt=install_weak_deps=False --setopt=keepcache=False --nogpgcheck --skip-unavailable $packages; then
-        echo "Packages installed successfully to temp root."
-    else
-        echo "Failed to install packages."
-        rm -rf "$temp_root"
-        return 1
-    fi
+    # Retry on transient failures: DNS blips, mirror slowness, or the build host
+    # briefly losing network (e.g. session lock + WiFi power-save) cause a whole
+    # overlay to fail otherwise. Three attempts with backoff covers realistic
+    # flakes without hiding a genuinely misconfigured repo.
+    local attempt rc
+    for attempt in 1 2 3; do
+        if dnf install -y --installroot="$temp_root" --releasever="$release_ver" --setopt=install_weak_deps=False --setopt=keepcache=False --setopt=retries=5 --setopt=timeout=60 --nogpgcheck --skip-unavailable $packages; then
+            echo "Packages installed successfully to temp root (attempt $attempt)."
+            break
+        fi
+        rc=$?
+        if [[ $attempt -lt 3 ]]; then
+            echo "dnf install failed (attempt $attempt/3, exit $rc) — retrying after ${attempt}0s..."
+            sleep "${attempt}0"
+        else
+            echo "Failed to install packages after 3 attempts."
+            rm -rf "$temp_root"
+            return 1
+        fi
+    done
 
     # Move files from temp root to output dir
     # We primarily want /usr
