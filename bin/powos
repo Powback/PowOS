@@ -27,7 +27,10 @@ PowOS - Portable Gaming Workstation
 
 Usage: powos <command> [options]
 
+Tip: run 'powos menu' for a guided, categorized menu of everything below.
+
 Commands:
+  menu                Guided interactive menu (discoverable front door)
   overview            One-glance panel: model, image, GPU/CUDA, deploys, disk
   overview --json     Same, machine-readable (for widgets/plasmoids)
   services            Running containers + container services + GPU users
@@ -57,6 +60,11 @@ Commands:
                       your checkout & remembers it — just 'powos reload'.
   reload --pull       git pull the checkout first, then apply
   reload --build      Full local image build + switch (for base/package changes)
+
+  self status         Edit-loop: baked commit, git attach state, local edits
+  self test           Apply local /var/lib/powos/src edits to THIS system (transient)
+  self pull           SAFE update from upstream (never discards local edits)
+  self push           git add -A + commit + push (-m "message")
 
   upgrade             Pull+stage a base update, apply the lightest restart
                       (soft-reboot if the kernel's unchanged, else full reboot)
@@ -862,48 +870,12 @@ cmd_update() {
                         shift 2
                         ;;
                     --pull)
-                        # Pull latest from remote first.
-                        if [[ -d "$POWOS_SRC/.git" ]]; then
-                            echo "Pulling latest from remote..."
-                            cd "$POWOS_SRC"
-                            git pull --rebase || git pull
-                            echo ""
-                        else
-                            # The bundled source (/var/lib/powos/src) ships without
-                            # a .git dir. Attach git to it IN PLACE (once) so every
-                            # future --pull is a normal fetch — no throwaway clones
-                            # that leave the canonical src permanently stale.
-                            local upstream="${POWOS_UPSTREAM:-https://github.com/Powback/PowOS.git}"
-                            echo "No .git in $POWOS_SRC — attaching git remote:"
-                            echo "  $upstream"
-                            if [[ -w "$POWOS_SRC" ]] && \
-                               git -C "$POWOS_SRC" init -q 2>/dev/null && \
-                               git -C "$POWOS_SRC" remote add origin "$upstream" 2>/dev/null && \
-                               git -C "$POWOS_SRC" fetch --depth 1 origin master; then
-                                git -C "$POWOS_SRC" checkout -f -B master origin/master
-                                echo -e "${GREEN}Attached git to $POWOS_SRC${NC} — future --pull is a plain git pull"
-                                echo ""
-                            else
-                                # No write access (root-owned src, unprivileged run)
-                                # or fetch failed: fall back to a one-shot clone.
-                                rm -rf "$POWOS_SRC/.git" 2>/dev/null || true
-                                echo "In-place attach failed (permissions or network) — one-shot clone instead."
-                                local pull_tmp
-                                pull_tmp=$(mktemp -d)
-                                if git clone --depth 1 "$upstream" "$pull_tmp/PowOS"; then
-                                    POWOS_SRC="$pull_tmp/PowOS"
-                                    echo -e "${GREEN}Cloned latest source${NC} → deploying from $POWOS_SRC"
-                                    echo ""
-                                else
-                                    echo -e "${RED}Clone failed.${NC} A private repo needs git credentials on this machine."
-                                    echo "  Set up auth (e.g. 'gh auth login' or a credential helper),"
-                                    echo "  set POWOS_UPSTREAM in /etc/powos/config, or deploy locally with:"
-                                    echo "    powos update self --from /path/to/PowOS"
-                                    rm -rf "$pull_tmp"
-                                    return 1
-                                fi
-                            fi
-                        fi
+                        # SAFE pull: attach-in-place (bundled snapshot) or plain
+                        # rebase (existing checkout) WITHOUT ever discarding local
+                        # edits. Replaces the old `git checkout -f` that blindly
+                        # reset to master and nuked uncommitted work. See lib/self.sh.
+                        source "$POWOS_LIB/self.sh"
+                        self_safe_pull "$POWOS_SRC" || return 1
                         shift
                         ;;
                     *)
@@ -1561,6 +1533,13 @@ cmd_hardware() {
 
 cmd_version() {
     echo "PowOS version $VERSION"
+    # The commit the bundled source (/var/lib/powos/src) was built from, baked
+    # into the image so `powos self` knows its true base.
+    local marker="/var/lib/powos/.powos-src-commit"
+    if [[ -r "$marker" ]]; then
+        local sha; sha="$(tr -d '[:space:]' < "$marker" 2>/dev/null)"
+        [[ -n "$sha" ]] && echo "Source commit: $sha"
+    fi
     if is_ramboot; then
         echo "Layers: $(get_active_layers)"
     fi
@@ -2699,6 +2678,18 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/reload.sh"
         cmd_reload "$@"
+        ;;
+    self)
+        shift
+        # The edit → test → push dev loop (safe pull, transient live apply).
+        source "$POWOS_LIB/self.sh"
+        cmd_self "$@"
+        ;;
+    menu)
+        shift
+        # Guided, categorized TTY menu → dispatches to real commands.
+        source "$POWOS_LIB/menu.sh"
+        cmd_menu "$@"
         ;;
     health)
         shift

@@ -49,6 +49,14 @@ log_step() {
     echo -e "${MAGENTA}════════════════════════════════════════════════════════════${NC}"
 }
 
+# The commit this build's source snapshot came from. Baked into the image at
+# /var/lib/powos/.powos-src-commit (see Containerfile) so `powos self pull` knows
+# its TRUE base and never has to blindly reset to master. "unknown" when not in a
+# git checkout (e.g. a tarball build).
+powos_src_commit() {
+    git -C "$POWOS_ROOT" rev-parse HEAD 2>/dev/null || echo unknown
+}
+
 # ─────────────────────────────────────────────────────────────────
 # Check requirements
 # ─────────────────────────────────────────────────────────────────
@@ -105,6 +113,7 @@ build_container_image() {
         -f Containerfile \
         -t "$IMAGE_NAME" \
         --layers \
+        --build-arg "POWOS_SRC_COMMIT=$(powos_src_commit)" \
         "${base_arg[@]}" \
         . 2>&1 | tee "${OUTPUT_DIR}/container-build.log"; then
         log_success "Container image built: $IMAGE_NAME"
@@ -330,7 +339,8 @@ build_variants() {
         log_step "Variant '$v' (base: $img)"
 
         if ! podman build -f Containerfile -t "localhost/powos-$v" \
-            --build-arg "BASE_IMAGE=$img" --layers . \
+            --build-arg "BASE_IMAGE=$img" \
+            --build-arg "POWOS_SRC_COMMIT=$(powos_src_commit)" --layers . \
             2>&1 | tee "${OUTPUT_DIR}/build-$v.log"; then
             log_error "Build failed for variant '$v' — see build-$v.log"
             return 1
@@ -373,6 +383,7 @@ build_test_image() {
     if podman build \
         -f Containerfile \
         -t "$IMAGE_NAME" \
+        --build-arg "POWOS_SRC_COMMIT=$(powos_src_commit)" \
         . 2>&1 | tee "${OUTPUT_DIR}/container-build.log"; then
         log_success "Test image built: $IMAGE_NAME"
         echo ""

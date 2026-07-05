@@ -258,8 +258,10 @@ build-iso-test:
 # Build container image only (for testing)
 build-image:
     @echo "🏗️ Building PowOS container image..."
-    podman build -f Containerfile -t localhost/powos:latest . || \
-    docker build -f Containerfile -t powos:latest .
+    podman build -f Containerfile -t localhost/powos:latest \
+        --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" . || \
+    docker build -f Containerfile -t powos:latest \
+        --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" .
     @echo "✅ Image built"
 
 # Install PowOS to USB drive
@@ -357,7 +359,8 @@ setup:
 # Build production OS container image
 build-prod:
     @echo "🏗️ Building PowOS production image..."
-    podman build -f Containerfile -t ghcr.io/user/powos:latest .
+    podman build -f Containerfile -t ghcr.io/user/powos:latest \
+        --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" .
     @echo "✅ Production image built"
 
 # Deploy to bootc/ostree system

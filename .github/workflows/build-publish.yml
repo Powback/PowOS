@@ -115,6 +115,7 @@ jobs:
             --cache-from ${{ env.IMAGE }}-cache-${{ matrix.variant }} \
             --cache-to   ${{ env.IMAGE }}-cache-${{ matrix.variant }} \
             --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
+            --build-arg POWOS_SRC_COMMIT=${{ github.sha }} \
             -f Containerfile \
             -t ${{ env.IMAGE }}:${{ matrix.variant }} \
             -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \

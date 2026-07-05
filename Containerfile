@@ -261,6 +261,13 @@ COPY . /var/lib/powos/src/
 # Ensure .git is preserved for version tracking and git pull capability
 # Note: .git may be excluded by .dockerignore - that's ok for dev builds
 
+# Bake the exact commit this snapshot came from. .dockerignore strips .git, so
+# without this marker `powos self pull` has no TRUE base and would have to blindly
+# reset to master (discarding local edits). Build passes it via
+# --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD)". "unknown" if not provided.
+ARG POWOS_SRC_COMMIT=""
+RUN printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /var/lib/powos/.powos-src-commit
+
 # Setup directories
 # Note: Bazzite has /mnt as a symlink, remove and recreate
 RUN rm -f /mnt 2>/dev/null || true && \

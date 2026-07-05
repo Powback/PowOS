@@ -1,0 +1,322 @@
+#!/bin/bash
+# self.sh - the "edit PowOS → test → push" dev loop, made memorable and SAFE.
+#
+#   powos self status   What's baked, is git attached, local edits, ahead/behind
+#   powos self test     Apply your local /var/lib/powos/src edits to THIS running
+#                       system, transiently (auto-reverts on reboot on installed
+#                       composefs; direct on live/RAM). No commit needed.
+#   powos self pull     SAFE update from upstream — NEVER discards local edits.
+#   powos self push     git add -A + commit + push (helpful errors, not raw git).
+#
+# The bundled source (/var/lib/powos/src) ships as a plain FILE SNAPSHOT with no
+# .git. The image bakes the exact commit it came from into
+# /var/lib/powos/.powos-src-commit so `self pull` can attach to that TRUE base
+# and treat any bundle edits as pending changes — instead of the old
+# `git checkout -f` that blindly reset to master and nuked local work.
+set -uo pipefail
+source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
+POWOS_TAG=self
+
+SELF_SRC="${POWOS_SRC:-/var/lib/powos/src}"
+SELF_MARKER="${POWOS_SRC_COMMIT_FILE:-/var/lib/powos/.powos-src-commit}"
+SELF_UPSTREAM="${POWOS_UPSTREAM:-https://github.com/Powback/PowOS.git}"
+
+# Indent a stream by two spaces without sed (repo owner forbids sed).
+self_indent() { awk '{ print "  " $0 }'; }
+
+# The commit the bundled source was built from (baked into the image), or
+# "unknown" if the marker is missing/empty (e.g. an old image or a dev build).
+self_baked_sha() {
+    if [[ -r "$SELF_MARKER" ]]; then
+        local s; s="$(tr -d '[:space:]' < "$SELF_MARKER" 2>/dev/null)"
+        [[ -n "$s" ]] && { printf '%s\n' "$s"; return 0; }
+    fi
+    printf 'unknown\n'
+}
+
+self_git_dirty() { [[ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]]; }
+
+# Read-only /usr (installed bootc/composefs) → can't cp into /usr directly.
+self_usr_ro() {
+    findmnt -no OPTIONS /usr 2>/dev/null | grep -qw ro && return 0
+    findmnt -no OPTIONS /    2>/dev/null | grep -qw ro && return 0
+    return 1
+}
+
+# ══════════════════════════════════════════════════════════════════
+# SAFE pull — replaces the old `git checkout -f` footgun.
+#
+# Contract: this function NEVER discards uncommitted local edits and NEVER runs
+# `checkout -f` over a dirty tree.
+#
+#   A) $src/.git exists            → stash-if-dirty, `git pull --rebase`,
+#                                     stash pop (conflicts surfaced, not dropped).
+#   B) no .git (bundled snapshot):
+#      - git init + add origin
+#      - baked SHA known & fetchable → seed the index from the TRUE base so only
+#        real edits show as pending, stash-if-dirty, checkout origin/master,
+#        stash pop.
+#      - baked SHA unknown/unfetchable → align with origin/master ONLY if the
+#        tree is clean; otherwise REFUSE (tell the user to commit/copy first).
+# ══════════════════════════════════════════════════════════════════
+self_safe_pull() {
+    local src="${1:-$SELF_SRC}"
+    local upstream="${POWOS_UPSTREAM:-$SELF_UPSTREAM}"
+
+    if [[ ! -d "$src" ]]; then
+        perr "PowOS source not found at: $src"
+        return 1
+    fi
+
+    # ── Case A: already a git checkout → plain safe pull ──
+    if [[ -d "$src/.git" ]]; then
+        local stashed=0
+        if self_git_dirty "$src"; then
+            plog "Local edits present — stashing before pull…"
+            if git -C "$src" stash push -u -m "powos-self-pull" >/dev/null 2>&1; then
+                stashed=1
+            else
+                pwarn "git stash failed — not pulling (your edits are untouched)."
+                return 1
+            fi
+        fi
+        plog "Pulling latest (rebase) in $src…"
+        git -C "$src" pull --rebase 2>&1 | self_indent \
+            || git -C "$src" pull 2>&1 | self_indent \
+            || pwarn "git pull reported issues."
+        if (( stashed )); then
+            plog "Restoring your local edits…"
+            if ! git -C "$src" stash pop 2>&1 | self_indent; then
+                pwarn "Your edits are SAFE in 'git stash' but conflicted with upstream."
+                pwarn "Resolve in $src (git status), then 'git stash drop' when done."
+                return 2
+            fi
+        fi
+        pok "Up to date; local edits preserved."
+        return 0
+    fi
+
+    # ── Case B: bundled snapshot (no .git) ──
+    if [[ ! -w "$src" ]]; then
+        perr "Bundled source at $src is not writable — can't attach git."
+        perr "Re-run with sudo, or copy the source somewhere writable and use --from."
+        return 1
+    fi
+
+    local baked; baked="$(self_baked_sha)"
+    plog "No .git in $src — attaching to upstream:"
+    plog "  $upstream   (baked base: $baked)"
+
+    git -C "$src" init -q 2>/dev/null || { perr "git init failed."; return 1; }
+    git -C "$src" remote add origin "$upstream" 2>/dev/null \
+        || git -C "$src" remote set-url origin "$upstream" 2>/dev/null || true
+
+    # Always need origin/master to align onto.
+    local have_master=0
+    git -C "$src" fetch --depth 200 origin master 2>/dev/null && have_master=1
+
+    if [[ "$baked" != "unknown" && -n "$baked" ]]; then
+        # Ensure the baked base commit is present (depth fallback → master).
+        git -C "$src" cat-file -e "${baked}^{commit}" 2>/dev/null \
+            || git -C "$src" fetch --depth 200 origin "$baked" 2>/dev/null || true
+
+        if git -C "$src" cat-file -e "${baked}^{commit}" 2>/dev/null && (( have_master )); then
+            # Seed HEAD+index from the TRUE base: only genuine edits show as
+            # pending. (Spec said `reset --soft`; on a freshly-init'd repo the
+            # index is empty, so --soft would flag every bundle file as a change.
+            # `reset --mixed` seeds the index from the baked tree, correctly
+            # realizing the stated goal.)
+            git -C "$src" reset --mixed "$baked" >/dev/null 2>&1 || true
+            local stashed=0
+            if self_git_dirty "$src"; then
+                plog "Bundle carries local edits — stashing before checkout…"
+                git -C "$src" stash push -u -m "powos-bundle-edits" >/dev/null 2>&1 && stashed=1
+            fi
+            if ! git -C "$src" checkout -B master origin/master >/dev/null 2>&1; then
+                perr "checkout of origin/master failed."
+                (( stashed )) && git -C "$src" stash pop >/dev/null 2>&1 || true
+                return 1
+            fi
+            if (( stashed )); then
+                plog "Restoring your local edits…"
+                if ! git -C "$src" stash pop 2>&1 | self_indent; then
+                    pwarn "Edits are SAFE in 'git stash' but conflicted with upstream."
+                    pwarn "Resolve in $src, then 'git stash drop'."
+                    return 2
+                fi
+            fi
+            pok "Attached to upstream at baked base; local edits preserved."
+            return 0
+        fi
+    fi
+
+    # ── Fallback: baked SHA unknown/unfetchable. NEVER force over edits. ──
+    if (( ! have_master )); then
+        perr "Couldn't fetch upstream (network/auth?)."
+        perr "Set up auth (gh auth login) or deploy locally: powos update self --from /path"
+        return 1
+    fi
+    # Without the true base we can't perfectly separate edits from a pristine
+    # bundle. Seed the index from origin/master and REFUSE if anything differs.
+    git -C "$src" reset --mixed origin/master >/dev/null 2>&1 || true
+    if self_git_dirty "$src"; then
+        perr "Baked base commit is unknown and the tree differs from origin/master."
+        perr "Refusing to reset — that could discard local edits. Your files are UNTOUCHED."
+        perr "Commit or copy your changes out of $src first, then re-run:"
+        perr "  (cd $src && git add -A && git commit -m 'my edits')   # then: powos self pull"
+        return 1
+    fi
+    # Clean tree → safe to align with master (no data to lose).
+    if ! git -C "$src" checkout -B master origin/master >/dev/null 2>&1; then
+        perr "checkout of origin/master failed."
+        return 1
+    fi
+    pok "Attached to upstream (no local edits detected)."
+    return 0
+}
+
+# ══════════════════════════════════════════════════════════════════
+# status — read-only
+# ══════════════════════════════════════════════════════════════════
+self_status() {
+    local src="${1:-$SELF_SRC}"
+    echo -e "${BOLD}PowOS self — source status${NC}"
+    echo "════════════════════════════════════════"
+    echo "Source:        $src"
+    echo "Baked commit:  $(self_baked_sha)"
+    if [[ -d "$src/.git" ]]; then
+        echo "Git:           attached"
+        local head; head="$(git -C "$src" log -1 --format='%h %s' 2>/dev/null || echo unknown)"
+        echo "HEAD:          $head"
+        local changes; changes="$(git -C "$src" status --short 2>/dev/null)"
+        if [[ -n "$changes" ]]; then
+            echo "Local edits:"
+            printf '%s\n' "$changes" | self_indent
+        else
+            echo "Local edits:   none"
+        fi
+        local ab; ab="$(git -C "$src" rev-list --left-right --count 'origin/master...HEAD' 2>/dev/null)"
+        if [[ -n "$ab" ]]; then
+            local behind="${ab%%[[:space:]]*}" ahead="${ab##*[[:space:]]}"
+            echo "vs origin/master: $ahead ahead, $behind behind"
+        fi
+    else
+        echo "Git:           not attached (bundled snapshot)"
+        echo "Run 'powos self pull' once to attach to upstream."
+    fi
+}
+
+# ══════════════════════════════════════════════════════════════════
+# test — transient live apply of local edits to the running system
+# ══════════════════════════════════════════════════════════════════
+self_test() {
+    local src="${1:-$SELF_SRC}"
+    [[ -d "$src" ]] || { perr "Source not found: $src"; return 1; }
+
+    local powos_bin; powos_bin="$(command -v powos 2>/dev/null || echo powos)"
+
+    if self_usr_ro; then
+        pwarn "/usr is read-only (installed composefs) — enabling a writable overlay."
+        pwarn "This AUTO-REVERTS on the next reboot (bootc usr-overlay)."
+        if ! command -v bootc >/dev/null 2>&1; then
+            perr "bootc not found — can't make /usr writable transiently."
+            perr "Use a live/RAM system, or make it durable with 'powos reload'."
+            return 1
+        fi
+        if ! sudo bootc usr-overlay 2>&1 | self_indent; then
+            perr "bootc usr-overlay failed — /usr still read-only, nothing applied."
+            return 1
+        fi
+        if self_usr_ro; then
+            perr "/usr still read-only after usr-overlay — aborting (nothing applied)."
+            return 1
+        fi
+        pok "Writable /usr overlay engaged (transient)."
+    else
+        plog "/usr is writable (live/RAM) — applying directly."
+    fi
+
+    plog "Applying $src to the RUNNING system…"
+    if "$powos_bin" update self --from "$src"; then
+        pok "Applied live from $src."
+        pwarn "This is TRANSIENT: an installed composefs system reverts it on reboot."
+        pwarn "Make it durable: 'powos self push' then rebuild, or 'powos reload --build'."
+        return 0
+    fi
+    perr "Deploy failed — see output above."
+    return 1
+}
+
+# ══════════════════════════════════════════════════════════════════
+# push — add/commit/push with human-friendly errors
+# ══════════════════════════════════════════════════════════════════
+self_push() {
+    local src="${1:-$SELF_SRC}"; local msg="${2:-}"
+    if [[ ! -d "$src/.git" ]]; then
+        perr "No git attached at $src."
+        perr "Run 'powos self pull' once to attach to upstream, then push."
+        return 1
+    fi
+    [[ -n "$msg" ]] || msg="PowOS self: sync local changes"
+
+    git -C "$src" add -A || { perr "git add failed."; return 1; }
+    if git -C "$src" diff --cached --quiet 2>/dev/null; then
+        pwarn "Nothing staged — working tree already matches HEAD; pushing anyway."
+    else
+        # Let git stamp the commit date itself (no build-time timestamp baked in).
+        if ! git -C "$src" commit -m "$msg" 2>&1 | self_indent; then
+            perr "git commit failed."
+            return 1
+        fi
+    fi
+
+    plog "Pushing to remote…"
+    local out rc
+    out="$(git -C "$src" push 2>&1)"; rc=$?
+    if (( rc != 0 )); then
+        printf '%s\n' "$out" | self_indent
+        perr "Push failed. Common fixes:"
+        perr "  • No remote/upstream:  git -C $src remote -v   (or run 'powos self pull' to attach)"
+        perr "  • Not authenticated:   run 'gh auth login', or configure a git credential helper"
+        return 1
+    fi
+    printf '%s\n' "$out" | self_indent
+    pok "Pushed."
+    return 0
+}
+
+self_usage() {
+    cat <<EOF
+PowOS self — edit → test → push loop
+
+  powos self status   Baked commit, git attach state, local edits, ahead/behind
+  powos self test     Apply local /var/lib/powos/src edits to THIS running system
+                      (transient; auto-reverts on reboot on installed composefs)
+  powos self pull     SAFE update from upstream (never discards local edits)
+  powos self push     git add -A + commit + push  (-m "message")
+EOF
+}
+
+cmd_self() {
+    local sub="${1:-status}"; shift || true
+    case "$sub" in
+        status|st)  self_status "$SELF_SRC" ;;
+        test|t)     self_test "$SELF_SRC" ;;
+        pull)       self_safe_pull "$SELF_SRC" ;;
+        push)
+            local msg=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -m|--message) msg="${2:-}"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            if [[ -z "$msg" ]] && [[ -t 0 ]]; then
+                read -rp "Commit message [PowOS self: sync local changes]: " msg || true
+            fi
+            self_push "$SELF_SRC" "$msg"
+            ;;
+        help|-h|--help|"") self_usage ;;
+        *) perr "Unknown: powos self $sub"; self_usage; return 1 ;;
+    esac
+}
