@@ -246,6 +246,19 @@ sudo powos install-system --shared-gb 200 # Shared NTFS data partition (labeled 
 Reservations (games + Windows tail) are **default-on, auto-sized** from the disk
 so a fresh install never needs a reformat to add games/Windows later.
 
+**Flashing the raw + first-boot self-completion:** the built image (`bib` →
+`powos.raw`) ships as a **plain bootable OS** — POWOS-DATA and the boot-menu
+entries are NOT baked in (baking needs loop devices that fail unreliably in CI /
+Docker). Flash `powos.raw` to a USB with any tool (Balena Etcher / Rufus / dd);
+on the **first boot from the real device**, `powos-firstboot-disk.service` runs
+`install-to-usb.sh --self-complete`: it resolves the boot disk (verified via the
+`/boot/efi` source, never guessed), and — only if `POWOS-DATA` is absent —
+creates it filling the **whole device** (repairs the GPT to the real end so a
+30 GB raw on a 4 TB stick uses all 4 TB) plus the Install/Recovery boot entries.
+Add-only (existing partitions untouched), marker-gated (`/var/lib/powos/
+firstboot-disk-done`, runs once), and can't brick boot. Real hardware has
+working partition scanning; the build stays simple and small.
+
 **Boot-menu mechanism:** the "Install PowOS" and "Recovery" entries are Boot
 Loader Spec entries (`loader/entries/powos-*.conf`) added by `install-to-usb.sh`
 — copies of the live entry plus a kernel arg (`powos.install=1`, or
