@@ -185,14 +185,16 @@ entry. Off unless the user explicitly insists.
    *Accept:* QEMU (virtio-gpu, OVMF CODE+VARS) boot reaches `graphical.target` /
    plasmalogin paints a login. Delivered to `C:\Users\Pow\PowOS-USB\powos.raw`.
 
-2. **Multi-disk installer flow.**
-   Wizard: pick PowOS disk, pick games/Windows disk (default = same as PowOS disk),
-   sizes (Windows ~150GB default, games = rest). New `IWZ_GAMES_DISK` → new
-   `install-system --games-disk`. When games disk ≠ target, create POWOS-GAMES +
-   Windows slot on that disk (reuse `games.sh` create logic) instead of tail-carving
-   the PowOS disk. Single-disk behavior unchanged when games disk == target.
-   *Accept:* unit tests for `iwz_build_installer_args` (multi-disk) + layout
-   planning pass in Docker/tier-1; `--dry-run` prints correct plan for Layouts A & B.
+2. **✅ DONE (commit 75ccb94) — Multi-disk installer flow.**
+   Shipped: `install-system --games-disk /dev/sdY` (POWOS-GAMES on a SEPARATE disk;
+   forces target reservations to 0 so PowOS takes the whole target, then creates
+   games on the other disk after install via the sibling `powos games create`,
+   non-fatal on failure). `powos games create --whole` fills a disk's free block
+   (absolute-MiB bounds, mutually exclusive with `--size`). Wizard gained
+   `iwz_step_games_disk` (offered only with >1 disk) + `ISV_GAMES_DISK` in the
+   install.conf contract + arg-builder mapping + review line. Fully backward-
+   compatible (byte-for-byte identical args/layout when no separate games disk).
+   Tests: games 73, install-system 99, install-wizard 57 — all green.
 
 3. **"Install Windows" USB entry.**
    `powos windows fetch-iso --slim --to-usb` places slimmed official ISO +
