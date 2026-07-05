@@ -842,7 +842,12 @@ EOF
 #     layer adds a once-only marker on top of this.
 # ─────────────────────────────────────────────────────────────────
 self_complete_boot_disk() {
-    log "First-boot self-completion: checking persistence partition..."
+    # Visible, step-by-step progress: this runs on the FIRST boot from a freshly
+    # flashed USB (powos-firstboot-disk.service) and used to sit silent for a
+    # minute while it partitioned — looking hung. Echo each step so the user can
+    # see it is alive. Keep it dependency-free (plain log lines).
+    log "Preparing persistence on first boot — this can take a minute, please wait."
+    log "[1/4] Checking for an existing persistence partition..."
 
     # Already completed (label present anywhere)? Nothing to do — idempotent.
     if blkid -L POWOS-DATA >/dev/null 2>&1; then
@@ -850,6 +855,7 @@ self_complete_boot_disk() {
         return 0
     fi
 
+    log "[2/4] Resolving the boot disk we booted from..."
     # Resolve the partition backing /boot/efi (or /boot), then its parent disk.
     # This is the device we BOOTED from — the only disk we are allowed to touch.
     local src
@@ -896,8 +902,10 @@ self_complete_boot_disk() {
     #    first (moves the backup GPT to the REAL end of disk, so a small raw
     #    flashed onto a big USB exposes its free space), then fills it. Uses the
     #    robust rescan_parts already in this file. Reservations auto-size.
+    log "[3/4] Creating POWOS-DATA in the free space (partitioning — please wait)..."
     add_data_partition "$disk" || log_warn "add_data_partition reported an issue — continuing."
 
+    log "[4/4] Writing boot-menu entries and persistence layout..."
     # 2) Add Install/Recovery BLS entries to the ALREADY-MOUNTED live boot dir.
     #    Do NOT re-mount — it is live. Prefer /boot/loader, then /boot/efi/loader.
     local live_entries=""

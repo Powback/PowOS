@@ -129,6 +129,16 @@ check "add_data_partition called with resolved disk /dev/sdb" \
 check "setup_persistence called with resolved disk /dev/sdb" \
     'grep -qx "SP:/dev/sdb" "$CALLS"'
 
+# Progress output: the first-boot self-completion must emit visible step lines
+# so the user never faces a silent wait ("preparing system, may take a while").
+reset_calls; mock_happy
+PROGRESS="$(self_complete_boot_disk 2>&1)"
+check "self-complete announces it is preparing persistence" \
+    'echo "$PROGRESS" | grep -qi "preparing"'
+check "self-complete emits step [1/4]" 'echo "$PROGRESS" | grep -q "\[1/4\]"'
+check "self-complete emits step [3/4] (partitioning)" 'echo "$PROGRESS" | grep -q "\[3/4\]"'
+check "self-complete emits step [4/4] (boot entries)" 'echo "$PROGRESS" | grep -q "\[4/4\]"'
+
 # Idempotent no-op: POWOS-DATA already present → do nothing.
 reset_calls
 blkid() { echo /dev/sdb3; return 0; }    # label found

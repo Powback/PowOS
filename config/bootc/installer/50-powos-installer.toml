@@ -1,0 +1,26 @@
+# PowOS LEAN INSTALLER kernel arguments — installer variant ONLY.
+#
+# This file is deliberately NOT under config/bootc/kargs.d/, so the LIVE image
+# never bakes it in. The Containerfile swaps it into /usr/lib/bootc/kargs.d/
+# (in place of 50-powos-ramboot.toml) only when built with
+# --build-arg POWOS_INSTALLER=1.
+#
+# What each karg does:
+#   powos.install=1              -> powos-installer.service (ConditionKernelCommandLine)
+#                                   launches the guided install wizard on tty1.
+#   systemd.unit=multi-user.target -> stay text-mode so SDDM never seizes tty1
+#                                     and hides the wizard.
+#   audit_backlog_limit=8192     -> raise the audit backlog so an early flood of
+#                                   SELinux/audit records can't overflow it
+#                                   ("audit: backlog limit exceeded").
+#   enforcing=0                  -> belt-and-suspenders for a THROWAWAY installer
+#                                   environment: a stray SELinux denial can never
+#                                   block a first install. The build-time relabel
+#                                   (restorecon in the Containerfile) is meant to
+#                                   make this unnecessary; it is only here so an
+#                                   install is never wedged by a missed context.
+#
+# NOTE: there is deliberately NO rd.powos.ramboot=1 here. On the user's real
+# hardware the ramboot dracut step hangs in initramfs, so the installer must
+# boot a plain disk root and go straight to the wizard.
+kargs = ["powos.install=1", "systemd.unit=multi-user.target", "audit_backlog_limit=8192", "enforcing=0"]

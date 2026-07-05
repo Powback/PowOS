@@ -26,6 +26,11 @@ Before=graphical.target multi-user.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Mirror the wrapper's step-by-step progress to the SCREEN as well as the
+# journal: this is the "preparing system, may take a while" first-boot path and
+# a silent console reads as a hang. journal+console echoes each [N/4] line.
+StandardOutput=journal+console
+StandardError=journal+console
 ExecStart=/usr/bin/powos-firstboot-disk
 # The wrapper always exits 0; belt-and-suspenders so a nonzero can never fail
 # the boot transaction.

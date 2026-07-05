@@ -250,6 +250,18 @@ build-iso:
     @echo "Live USB image should be at: build/output/powos.raw"
     @ls -lh build/output/*.raw 2>/dev/null || echo "Check build/output/ for results"
 
+# Build the LEAN INSTALLER raw image (no ramboot → boots straight to wizard)
+build-installer:
+    @echo "🔧 Building PowOS lean installer image..."
+    @echo ""
+    @echo "NOTE: requires podman (not docker) and bootc-image-builder"
+    @echo ""
+    @mkdir -p build/output
+    bash build/build-iso.sh installer-usb
+    @echo ""
+    @echo "Installer image should be at: build/output/powos-installer.raw"
+    @ls -lh build/output/powos-installer.raw 2>/dev/null || echo "Check build/output/ for results"
+
 # Build container image only (faster, for testing)
 build-iso-test:
     @echo "🔥 Building PowOS container image only..."

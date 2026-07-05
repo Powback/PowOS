@@ -13,6 +13,7 @@
 # Usage:
 #   ./build/build-iso.sh              # Build live USB image (default, safe)
 #   ./build/build-iso.sh live-usb     # Same as above
+#   ./build/build-iso.sh installer-usb # Build LEAN INSTALLER raw (no ramboot → wizard)
 #   ./build/build-iso.sh installer    # Build Anaconda installer ISO (ERASES TARGET DISK!)
 #   ./build/build-iso.sh test         # Build container only (for testing)
 #
@@ -28,6 +29,11 @@ OUTPUT_DIR="${POWOS_ROOT}/build/output"
 IMAGE_NAME="localhost/powos:latest"
 RAW_NAME="powos.raw"
 ISO_NAME="powos-installer.iso"
+# Lean installer VARIANT (POWOS_INSTALLER=1): a separate image + raw that boots
+# with NO ramboot straight into the guided install wizard. Distinct from the
+# Anaconda installer ISO above (which uses ISO_NAME).
+INSTALLER_IMAGE_NAME="localhost/powos-installer:latest"
+INSTALLER_RAW_NAME="powos-installer.raw"
 
 # Colors
 RED='\033[0;31m'
@@ -249,6 +255,110 @@ build_installer_iso() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Lean installer VARIANT (POWOS_INSTALLER=1)
+# Builds a container that does NOT ramboot and boots straight into the guided
+# install wizard (powos.install=1), then a raw-efi disk image from it. Flashed
+# to a USB, it boots → wizard on tty1 → install to disk. No live-USB apparatus,
+# no first-boot self-completion. Keeps the default live path untouched.
+# ─────────────────────────────────────────────────────────────────
+build_installer_container() {
+    log_step "Step 1/3: Building LEAN INSTALLER container image (POWOS_INSTALLER=1)"
+
+    cd "$POWOS_ROOT"
+
+    log "Building installer variant from Containerfile..."
+    log "This image has NO ramboot kargs and boots straight to the wizard"
+
+    local base_arg=()
+    if [[ -n "${POWOS_BASE_IMAGE:-}" ]]; then
+        log "Using custom base image: ${POWOS_BASE_IMAGE}"
+        base_arg=(--build-arg "BASE_IMAGE=${POWOS_BASE_IMAGE}")
+    fi
+
+    if podman build \
+        -f Containerfile \
+        -t "$INSTALLER_IMAGE_NAME" \
+        --layers \
+        --build-arg "POWOS_INSTALLER=1" \
+        --build-arg "POWOS_SRC_COMMIT=$(powos_src_commit)" \
+        "${base_arg[@]}" \
+        . 2>&1 | tee "${OUTPUT_DIR}/installer-build.log"; then
+        log_success "Installer container image built: $INSTALLER_IMAGE_NAME"
+    else
+        log_error "Installer container build failed - see ${OUTPUT_DIR}/installer-build.log"
+        exit 1
+    fi
+}
+
+build_installer_raw() {
+    log_step "Step 2/3: Building lean installer raw disk image (raw-efi)"
+
+    mkdir -p "$OUTPUT_DIR"
+
+    log "Using bootc-image-builder to create the installer raw image..."
+    log "Output: ${OUTPUT_DIR}/${INSTALLER_RAW_NAME}"
+
+    if podman run \
+        --rm \
+        -it \
+        --privileged \
+        --pull=newer \
+        --security-opt label=type:unconfined_t \
+        -v "${OUTPUT_DIR}:/output" \
+        -v /var/lib/containers/storage:/var/lib/containers/storage \
+        quay.io/centos-bootc/bootc-image-builder:latest \
+        --type raw-efi \
+        --rootfs btrfs \
+        --local \
+        "$INSTALLER_IMAGE_NAME" 2>&1 | tee "${OUTPUT_DIR}/installer-raw-build.log"; then
+        log_success "Installer raw disk image built successfully"
+    else
+        log_error "Installer raw image build failed - see ${OUTPUT_DIR}/installer-raw-build.log"
+        exit 1
+    fi
+
+    # bib writes to the same well-known path (image/disk.raw); move it to the
+    # installer name immediately so it never collides with a live build.
+    local raw_file="${OUTPUT_DIR}/image/disk.raw"
+
+    if [[ -f "$raw_file" ]]; then
+        mv "$raw_file" "${OUTPUT_DIR}/${INSTALLER_RAW_NAME}"
+        log_success "Installer image ready: ${OUTPUT_DIR}/${INSTALLER_RAW_NAME}"
+    else
+        log_error "Expected installer raw image not found: $raw_file"
+        log_error "Check ${OUTPUT_DIR}/installer-raw-build.log for details"
+        exit 1
+    fi
+}
+
+show_installer_variant_results() {
+    log_step "Step 3/3: Build Complete"
+
+    local raw_path="${OUTPUT_DIR}/${INSTALLER_RAW_NAME}"
+    local raw_size
+    raw_size=$(du -h "$raw_path" 2>/dev/null | cut -f1 || echo "unknown")
+
+    echo ""
+    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║  PowOS Lean Installer Image Built Successfully              ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo "  Image File: $raw_path"
+    echo "  Size:       $raw_size"
+    echo ""
+    echo "  This variant boots with NO ramboot straight into the guided install"
+    echo "  wizard (powos.install=1). Flash it and boot to install PowOS to disk:"
+    echo ""
+    echo "    sudo dd if=${raw_path} of=/dev/sdX bs=4M status=progress conv=fsync"
+    echo ""
+    echo "  Differences from the live image:"
+    echo "    • no rd.powos.ramboot=1 karg (boots a plain disk root)"
+    echo "    • powos.install=1 + systemd.unit=multi-user.target (wizard on tty1)"
+    echo "    • powos-firstboot-disk.service masked (no self-completion)"
+    echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Step 3: Show results and next steps
 # ─────────────────────────────────────────────────────────────────
 show_live_results() {
@@ -423,6 +533,14 @@ main() {
             build_installer_iso
             show_installer_results
             ;;
+        installer-usb|lean-installer)
+            # Lean installer VARIANT: raw image that boots (no ramboot) straight
+            # into the guided install wizard. Output: powos-installer.raw
+            check_requirements
+            build_installer_container
+            build_installer_raw
+            show_installer_variant_results
+            ;;
         variants|multi)
             # Build a base rootfs per GPU variant for a multi-variant USB.
             check_requirements
@@ -439,6 +557,11 @@ main() {
             echo "  live-usb   - Build live USB image (DEFAULT, SAFE)"
             echo "               Boots directly, internal drives untouched"
             echo "               Output: build/output/powos.raw"
+            echo ""
+            echo "  installer-usb - Build LEAN INSTALLER raw image (SAFE to flash)"
+            echo "               Boots with NO ramboot straight into the install"
+            echo "               wizard on tty1. Nothing wiped without confirming."
+            echo "               Output: build/output/powos-installer.raw"
             echo ""
             echo "  installer  - Build Anaconda installer ISO (DANGEROUS)"
             echo "               WARNING: ERASES target drive on boot!"

@@ -50,6 +50,10 @@ if [[ -z "$SCRIPT" ]]; then
     exit 0
 fi
 
+log "════════════════════════════════════════════════════════════"
+log " PowOS first boot: preparing persistence on your USB drive."
+log " This runs ONCE and may take a minute — please do not unplug."
+log "════════════════════════════════════════════════════════════"
 log "Running self-completion via: $SCRIPT --self-complete"
 # Subprocess (NOT sourced): keeps install-to-usb.sh's set -e out of here, and a
 # failure inside never propagates to fail the boot.

@@ -234,6 +234,29 @@ RUN KVER="$(ls /lib/modules/ | head -1)" && \
 RUN mkdir -p /usr/lib/bootc/kargs.d
 COPY config/bootc/kargs.d/ /usr/lib/bootc/kargs.d/
 
+# ── Lean installer variant (behind a build flag; LIVE image unaffected) ──
+# Build with --build-arg POWOS_INSTALLER=1 to produce an installer image that:
+#   * does NOT ramboot — the ramboot dracut step hangs in initramfs on some real
+#     hardware, so the installer boots a plain disk root instead (removes
+#     50-powos-ramboot.toml so rd.powos.ramboot=1 is never baked in), and
+#   * boots STRAIGHT into the guided wizard via powos.install=1 (see
+#     config/bootc/installer/50-powos-installer.toml → powos-installer.service),
+#     and
+#   * does NOT run the live-USB first-boot self-completion (POWOS-DATA + boot
+#     menu dance) — powos-firstboot-disk.service is masked.
+# The installer-only kargs live OUTSIDE kargs.d so the default live image never
+# picks them up; they are swapped in here only when POWOS_INSTALLER=1.
+COPY config/bootc/installer/ /tmp/powos-installer-kargs/
+ARG POWOS_INSTALLER=0
+RUN if [ "$POWOS_INSTALLER" = "1" ]; then \
+        echo "[powos] Building INSTALLER variant: no ramboot, boot straight to the wizard"; \
+        rm -f /usr/lib/bootc/kargs.d/50-powos-ramboot.toml; \
+        cp /tmp/powos-installer-kargs/50-powos-installer.toml /usr/lib/bootc/kargs.d/; \
+        systemctl mask powos-firstboot-disk.service; \
+    else \
+        echo "[powos] Building LIVE variant (default)"; \
+    fi
+
 # ── Always-visible boot menu (safety net) ─────────────────────────
 # A boot-path change that bricks boot must be recoverable in seconds: show the
 # GRUB menu for 5s on every boot so you can always pick the PREVIOUS deployment
@@ -279,6 +302,27 @@ RUN chmod +x /usr/bin/powos-boot /usr/bin/powos /usr/bin/pinstall /usr/bin/premo
     /usr/lib/powos/ramfs/*.sh /usr/lib/powos/ramfs/*.py \
     /usr/lib/powos/cachefs/*.py \
     /usr/lib/powos/ai/*.sh /usr/lib/powos/ai/clients/*.sh 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════════════════════
+# SELinux hygiene (BOTH variants)
+# ═══════════════════════════════════════════════════════════════════
+# The base Bazzite image has no SELinux handling for the custom files we COPY
+# into /usr/{bin,lib}, /var/lib/powos, /etc/powos, etc. Those land with default/
+# wrong SELinux contexts, so on a real (enforcing) boot they generate a FLOOD of
+# denials — and the base image's setroubleshootd crash-loops trying to process
+# them ("Start request repeated too quickly" + "audit: backlog limit exceeded").
+#
+# Two fixes, applied AFTER every COPY/RUN that adds PowOS files:
+#   1) Mask setroubleshootd — a diagnostic daemon, not needed to run the system;
+#      masking stops the crash-loop and the "processing SELinux denials" spam.
+#   2) Relabel our files to the CORRECT contexts with restorecon, which reads
+#      the policy's file_contexts shipped in the base image (effective at build
+#      time). This removes the denials at the source, so the flood never starts.
+#      Guarded (|| true) so a base without a usable policy (e.g. a plain docker
+#      test build) cannot fail the image build; on a real bootc image the policy
+#      is present and the relabel takes effect.
+RUN systemctl mask setroubleshootd.service 2>/dev/null || true
+RUN restorecon -RF /usr /etc /var 2>/dev/null || true
 
 # ═══════════════════════════════════════════════════════════════════
 # E2E Test Dependencies (optional — only installed when building

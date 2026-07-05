@@ -168,12 +168,22 @@ iwz_menu() {
 # ══════════════════════════════════════════════════════════════════
 iwz_run_step() {
     local desc="$1"; shift
+    # Announce every step so long/destructive operations are never a silent
+    # wait — the user sees WHAT is running (desc) and the exact command.
+    iwz_log "$desc..."
     echo -e "  ${DIM}\$ $*${NC}"
     if [[ "${IWZ_DRY_RUN:-0}" -eq 1 ]]; then
         iwz_warn "dry-run: skipped ($desc)"
         return 0
     fi
     "$@"
+    local rc=$?
+    if [[ $rc -eq 0 ]]; then
+        iwz_ok "$desc — done"
+    else
+        iwz_err "$desc — failed (exit $rc)"
+    fi
+    return $rc
 }
 
 # ══════════════════════════════════════════════════════════════════
