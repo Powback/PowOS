@@ -211,8 +211,7 @@ RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powo
         powos-hydrate.service && \
     systemctl enable plasmalogin.service && \
     systemctl add-wants graphical.target plasmalogin.service && \
-    systemctl set-default graphical.target && \
-    ln -sf /dev/null /etc/systemd/system/ctrl-alt-del.target
+    systemctl set-default graphical.target
 
 # Rebuild initramfs with our dracut module
 # This embeds the RAM overlay setup into the boot process.
