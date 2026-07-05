@@ -174,7 +174,24 @@ build_all_overlays() {
             log_warn "  - $fname"
         done
         log_warn "Check sources/<name>/build.sh and packages.txt for issues"
-        return 1
+        # OPTIONAL overlays (Steam Deck / gaming-mode) may fail to build when
+        # network / third-party repos are unreachable at build time; the base
+        # OS (KDE, login manager, PowOS core) doesn't depend on them, so failing
+        # them shouldn't fail the entire image build. Any REQUIRED overlay
+        # failing (kde, gpu-*, hello-powos, user-config) still errors out.
+        local required=("kde" "gpu-amd" "gpu-intel" "gpu-nvidia" "hello-powos" "user-config" "device-legion-go" "device-rog-ally")
+        local required_failed=0 fname r
+        for fname in "${failed_names[@]}"; do
+            for r in "${required[@]}"; do
+                [[ "$fname" == "$r" ]] && required_failed=1 && break
+            done
+        done
+        if (( required_failed )); then
+            log_error "One or more REQUIRED overlays failed — aborting build."
+            return 1
+        fi
+        log_warn "All failures were OPTIONAL overlays — continuing."
+        return 0
     fi
     return 0
 }
