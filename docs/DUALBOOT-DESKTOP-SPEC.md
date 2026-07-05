@@ -237,14 +237,35 @@ entry. Off unless the user explicitly insists.
 
 ---
 
-## 10. Open decisions (need user input)
+## 10. Decisions / open items
 
-- **Layout A (buy 250GB SSD) vs B (two 4TB).** Installer supports both; A is cleaner
-  isolation, B is zero-cost. *Recommendation: A.*
-- **Windows install method first time:** burned Windows USB (recommended) vs the USB
-  "Install Windows" entry (experimental) vs `powos windows install` QEMU auto
-  (most experimental).
+- **RESOLVED — Layout: A, via a transplanted Windows disk.** The user will move a
+  **PCIe/NVMe SSD that already has Windows installed** from his old PC into the
+  desktop. So Windows needs NO fresh install:
+  ```
+  Transplanted PCIe SSD → Windows (already installed, its own ESP)
+  4TB NVMe #1           → PowOS (btrfs)
+  4TB NVMe #2           → Games (NTFS, whole disk)
+  ```
+  **Pre-move checks (do BEFORE pulling the drive):**
+  1. **BitLocker/device encryption** — if on (common on Win11 24H2), a hardware move
+     demands the 48-digit recovery key or you're locked out. Grab the key
+     (account.microsoft.com/devices/recoverykey) or decrypt first. Check via
+     `manage-bde -status` / Settings→Device encryption.
+  2. **Storage mode** — if the drive ran under Intel RST/VMD in the old PC it will
+     `INACCESSIBLE_BOOT_DEVICE` on the AHCI desktop; only move it from a plain
+     AHCI/NVMe setup (or prep the AHCI driver first).
+  3. Minor: activation may re-prompt (unactivated is fine for gaming); carries old
+     driver cruft (works; clean-install later if wanted).
+  Needs a **free M.2 slot** (or PCIe→M.2 adapter) — this is a 3rd NVMe.
+- **CONSEQUENCE — "Install Windows from USB" + stripped-ISO work is now
+  FUTURE/OPTIONAL**, not needed to get running (Windows arrives pre-installed on the
+  transplanted disk). Keep in the plan (§8.3–8.4) but deprioritize; focus the build
+  on the multi-disk PowOS installer (§8.2) + games wiring (§8.5).
 - **Live Windows:** rejected; reopen only if the user insists.
+- **Fallback if the transplant fails the pre-checks:** buy a cheap 250GB SATA SSD
+  (Layout A) and fresh-install Windows, or Layout B (Windows partition on the games
+  disk). Installer supports all three.
 
 ---
 
