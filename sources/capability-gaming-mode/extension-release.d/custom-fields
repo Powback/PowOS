@@ -1,0 +1,4 @@
+POWOS_MODE_NAME=Gaming Mode
+POWOS_MODE_TYPE=gaming
+POWOS_PROVIDES_UI=gamescope-session
+POWOS_CONFLICTS_WITH=desktop-mode
