@@ -85,43 +85,23 @@ RUN rpm -q openssh-server >/dev/null 2>&1 || { dnf install -y openssh-server && 
     echo "powos:powos" | chpasswd && \
     systemctl enable sshd.service
 
-# Copy PowOS boot system
-COPY lib/common.sh /usr/lib/powos/
-COPY lib/boot/ /usr/lib/powos/boot/
-COPY lib/hardware-detect.sh /usr/lib/powos/
-COPY lib/overlay-manager.sh /usr/lib/powos/
-COPY lib/dev-commands.sh /usr/lib/powos/
-COPY lib/mobile.sh /usr/lib/powos/
-COPY lib/sync.sh /usr/lib/powos/
-COPY lib/backup.sh /usr/lib/powos/
-COPY lib/install-system.sh /usr/lib/powos/
-COPY lib/vm.sh /usr/lib/powos/
-COPY lib/base.sh /usr/lib/powos/
-COPY lib/boot-manager.sh /usr/lib/powos/
-COPY lib/games.sh /usr/lib/powos/
-COPY lib/ramboot.sh /usr/lib/powos/
-COPY lib/doctor.sh /usr/lib/powos/
-COPY lib/install-wizard.sh /usr/lib/powos/
-COPY lib/windows.sh /usr/lib/powos/
-COPY lib/cuda.sh /usr/lib/powos/
-COPY lib/driver.sh /usr/lib/powos/
-COPY lib/registry.sh /usr/lib/powos/
-COPY lib/gpu.sh /usr/lib/powos/
-COPY lib/build-image.sh /usr/lib/powos/
-COPY lib/upgrade.sh /usr/lib/powos/
-COPY lib/reload.sh /usr/lib/powos/
-COPY lib/overview.sh /usr/lib/powos/
-COPY lib/services.sh /usr/lib/powos/
-COPY lib/install-router.sh /usr/lib/powos/
-COPY lib/uninstall.sh /usr/lib/powos/
-COPY lib/config.sh /usr/lib/powos/
-COPY lib/build-helpers.sh /var/lib/powos/lib/
+# Copy PowOS boot system.
+#
+# Layer-cache strategy: one COPY per top-level source dir (lib/, bin/, config/,
+# systemd/, sources/, bazzite/) instead of 30+ individual file COPYs. Each
+# separate COPY layer commits an overlay diff (~seconds of overhead × 30 was
+# adding minutes to every rebuild for zero cache benefit — a change to any lib
+# file invalidated all the layers below anyway).
+COPY lib/ /usr/lib/powos/
+# dracut modules live under /usr/lib/dracut, not /usr/lib/powos — clean up the
+# duplicate copy that the wildcard COPY above created.
+RUN rm -rf /usr/lib/powos/dracut
+# build-helpers.sh also expected at /var/lib/powos/lib/ (overlay-manager
+# sources it from there when building extensions).
+RUN mkdir -p /var/lib/powos/lib && cp /usr/lib/powos/build-helpers.sh /var/lib/powos/lib/
 COPY bazzite/system_files/ /tmp/bazzite/system_files/
 COPY sources/ /var/lib/powos/sources/
-COPY bin/powos-boot /usr/bin/
-COPY bin/powos /usr/bin/
-COPY bin/pinstall /usr/bin/
-COPY bin/premove /usr/bin/
+COPY bin/ /usr/bin/
 COPY config/ /etc/powos/
 COPY systemd/powos-* /usr/lib/powos/
 # Exec bits can be stripped by Windows checkouts (see repo history) — the
@@ -129,15 +109,8 @@ COPY systemd/powos-* /usr/lib/powos/
 RUN chmod +x /usr/lib/powos/powos-init /usr/lib/powos/powos-hardware-detect \
     /usr/lib/powos/powos-overlay-load /usr/lib/powos/powos-hydrate
 
-# Copy RAM overlay system (for OS)
-COPY lib/ramfs/ /usr/lib/powos/ramfs/
-
-# Copy CacheFS (lazy-loading filesystem for user data)
-COPY lib/cachefs/ /usr/lib/powos/cachefs/
-
-# Copy AI Agent System
-COPY lib/ai/ /usr/lib/powos/ai/
-COPY config/ai/ /etc/powos/ai/
+# lib/ramfs/, lib/cachefs/, lib/ai/ already came in via `COPY lib/ /usr/lib/powos/` above.
+# config/ai/ already came in via `COPY config/ /etc/powos/` (as /etc/powos/ai/).
 
 # Desktop widgets (KDE Plasma 6 plasmoids) — e.g. PowOS Overview panel,
 # which renders `powos overview --json` + `powos services --json` on the desktop.
@@ -150,7 +123,7 @@ COPY desktop/plasmoid/ /usr/share/plasma/plasmoids/
 # password warning, install-to-disk (live boots) / update check (installed),
 # games partition, Steam wiring, Windows setup, cloud backup. The autostart
 # entry self-disables via the per-user ~/.config/powos/welcome-done marker.
-COPY bin/powos-welcome /usr/bin/
+# bin/powos-welcome already came in via `COPY bin/ /usr/bin/` above.
 COPY desktop/welcome/powos-welcome.desktop /usr/share/applications/
 COPY desktop/welcome/powos-install.desktop /usr/share/applications/
 COPY desktop/welcome/powos-welcome-autostart.desktop /etc/xdg/autostart/powos-welcome.desktop
@@ -169,37 +142,18 @@ RUN chmod +x /usr/bin/powos-welcome && \
 COPY lib/dracut/90powos-ramboot/ /usr/lib/dracut/modules.d/90powos-ramboot/
 RUN chmod +x /usr/lib/dracut/modules.d/90powos-ramboot/*.sh
 
-# Install systemd services
-COPY systemd/powos-ramboot-init.service /usr/lib/systemd/system/
-COPY systemd/powos-layer-sync.service /usr/lib/systemd/system/
-COPY systemd/powos-cachefs-sync.service /usr/lib/systemd/system/
-COPY systemd/powos-installer.service /usr/lib/systemd/system/
-COPY systemd/powos-hwinfo.service /usr/lib/systemd/system/
-# Boot-time init chain: powos-init writes /run/powos/environment, hardware
-# detection (Chameleon Boot) picks the profile, overlay loads sysexts,
-# hydrate runs once. These were previously copied only as loose files under
-# /usr/lib/powos and never enabled — so no hardware detection or sysext
-# loading ever ran on a real image.
-COPY systemd/powos-init.service /usr/lib/systemd/system/
-COPY systemd/powos-hardware.service /usr/lib/systemd/system/
-COPY systemd/powos-overlay.service /usr/lib/systemd/system/
-COPY systemd/powos-hydrate.service /usr/lib/systemd/system/
-# Clears the RAM-boot self-heal counter once a boot succeeds (see
-# lib/dracut/90powos-ramboot/ramboot-setup.sh).
-COPY systemd/powos-ramboot-healthy.service /usr/lib/systemd/system/
-# Recovery: Safe mode / AI Debug console (fires on the powos.mode= karg from the
-# Recovery boot-menu entries). powos-safemode runs the recovery menu / AI doctor.
-COPY bin/powos-safemode /usr/bin/
-COPY systemd/powos-safemode.service /usr/lib/systemd/system/
-# Guided installer + first-boot config applier.
-COPY bin/powos-install-wizard /usr/bin/
-COPY bin/powos-firstboot-apply /usr/bin/
-COPY systemd/powos-firstboot.service /usr/lib/systemd/system/
-# First-boot disk self-completion: on the first boot from a flashed USB, create
-# POWOS-DATA in the free space and add the Install/Recovery boot entries (loop
-# devices make baking this at build time unreliable). Self-disables via marker.
-COPY bin/powos-firstboot-disk /usr/bin/
-COPY systemd/powos-firstboot-disk.service /usr/lib/systemd/system/
+# Install systemd services — one COPY covers everything under systemd/*.service
+# (previously 12 individual COPYs, each a new layer for zero cache benefit —
+# any .service change invalidates all subsequent layers regardless).
+# Boot-time init chain, ramboot infrastructure, sync daemons, installer/recovery
+# services, etc. Individual roles are documented in the .service files.
+COPY systemd/*.service /usr/lib/systemd/system/
+# Per-service drop-ins (e.g. plasmalogin WantedBy=graphical.target).
+COPY systemd/plasmalogin.service.d/ /usr/lib/systemd/system/plasmalogin.service.d/
+# bin/powos-safemode, powos-install-wizard, powos-firstboot-apply,
+# powos-firstboot-disk already came in via `COPY bin/ /usr/bin/` above.
+# Their .service units come in with the wildcard `COPY systemd/powos-*.service`
+# below.
 # A failed enable must fail the build — no 2>/dev/null || true.
 # Unit files must be 0644: a build context from a Windows bind-mount reports
 # every file as 0755, and systemd warns "Configuration file ... is marked
