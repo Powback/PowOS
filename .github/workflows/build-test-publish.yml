@@ -1,24 +1,30 @@
 name: Build, Test & Publish PowOS
 
-# Single pipeline: lint → build (SHA-tagged) → test → promote (channel tags).
+# Single pipeline: lint → build+test+publish (one runner, one image build).
 # Replaces the old separate `PowOS CI` + `Build & Publish PowOS` workflows,
-# which each did an independent podman build of the same Containerfile and
-# wasted ~6 min per push on duplicated work.
+# which each did an independent podman build of the same Containerfile on
+# separate runners and wasted ~6 min of duplicated work per push.
 #
-# Publish gate: the channel tags (:nvidia-open, :latest) only advance when the
-# SHA-tagged candidate for that commit passes E2E. `bootc upgrade` follows the
-# channel tag, so a red build never reaches a user's machine.
+# Design: build LOCAL to the runner (no push yet), run tests against the local
+# image, and only push once tests pass. No SHA-tagged candidates leak to the
+# registry when tests fail — clean history, no pull between jobs, no orphan
+# images to clean up.
+#
+# `bootc upgrade` follows channel tags (:nvidia-open, :latest), which are only
+# pushed if the build's test suite passed for that commit. Red builds never
+# reach a user's machine.
 #
 # Variants:
 #   nvidia-open          NVIDIA open kernel modules (DEFAULT; RTX 50-series REQUIRES this).
-#                         Built + tested + promoted on every push to master.
+#                         Built + tested + published on every push to master.
 #                         Also gets :latest.
 #   nvidia-open-testing  Tracks ghcr.io/ublue-os/bazzite-nvidia-open:testing.
-#                         Built weekly via cron (or on-demand via
-#                         workflow_dispatch); NOT E2E-tested (by intent — the
-#                         :testing base is by definition untested upstream),
-#                         and NEVER built on push (would double CI for zero
-#                         signal since master pushes don't change bazzite:testing).
+#                         Built weekly via cron (or workflow_dispatch). NOT
+#                         E2E-tested (by intent — the :testing base is by
+#                         definition experimental upstream), and NEVER built
+#                         on push (master pushes don't change bazzite:testing,
+#                         so a per-push rebuild would double CI for zero
+#                         signal).
 
 on:
   push:
@@ -42,8 +48,7 @@ on:
 
 # One in-flight run per ref. Do NOT cancel-in-progress — with pushes landing
 # every few minutes and runs taking ~10-15 min, cancel-in-progress starves the
-# pipeline (nothing ever finishes). GitHub auto-cancels older PENDING runs in
-# the group, keeping only the newest queued.
+# pipeline. GitHub auto-cancels older PENDING runs in the group.
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: false
@@ -82,11 +87,11 @@ jobs:
           python3 test/tier1/test-layer-sync.py
           python3 test/tier1/test-cachefs.py
 
-  # ─── STAGE 2: build the SHA-tagged candidate + push to GHCR ─────────────────
-  # Push it under the SHA tag ONLY. Channel tags (:nvidia-open, :latest) are
-  # not touched here — that's the promote job's responsibility after test
-  # passes, so a broken candidate can never be pulled by `bootc upgrade`.
-  build:
+  # ─── STAGE 2: build image locally, test against it, push on green ────────
+  # Everything happens on one runner in the runner's local podman store.
+  # No cross-job image transfer, no SHA-tagged candidates polluting GHCR on
+  # red builds — the image only leaves this runner if tests passed.
+  build-test-publish:
     needs: lint
     runs-on: ubuntu-latest
     permissions:
@@ -114,7 +119,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
 
-      - name: Free disk space (bazzite images are large)
+      - name: Free disk space (bazzite base + built image ≈ 15GB, runner has ~14GB free)
         if: steps.gate.outputs.run == 'true'
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
@@ -137,53 +142,30 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: ./build/vendor-bazzite.sh
 
-      - name: Log in to GHCR
+      - name: Log in to GHCR (rootful podman — layer-sync test needs root for mknod)
         if: steps.gate.outputs.run == 'true'
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Build ${{ matrix.variant }} (SHA-tagged candidate)
+      - name: Build ${{ matrix.variant }} (local only — not pushed yet)
         if: steps.gate.outputs.run == 'true'
         run: |
-          # Registry layer cache: pull unchanged layers from the last build so a
-          # script-only change doesn't redo the whole base + dnf/dracut.
+          # Registry layer cache lives in GHCR: pull unchanged layers from the
+          # previous build so a script-only change doesn't redo the whole base.
           # NOTE: podman requires cache repo WITHOUT a tag — it manages its own
           # per-layer tags. A :tag makes every build fail at arg parsing.
-          podman build --layers \
+          sudo podman build --layers \
             --cache-from ${{ env.IMAGE }}-cache-${{ matrix.variant }} \
             --cache-to   ${{ env.IMAGE }}-cache-${{ matrix.variant }} \
             --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
             --build-arg POWOS_SRC_COMMIT=${{ github.sha }} \
             -f Containerfile \
+            -t ${{ env.IMAGE }}:${{ matrix.variant }} \
             -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
+            -t powos-ci \
             .
 
-      - name: Push SHA-tagged candidate (channel tag untouched — promote job handles it)
-        if: steps.gate.outputs.run == 'true'
-        run: podman push ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }}
-
-  # ─── STAGE 3: E2E-test the SHA-tagged nvidia-open candidate ─────────────────
-  # Only nvidia-open is tested; -testing bypasses (by intent — it tracks an
-  # experimental base and gets promoted as "here be dragons"). The E2E suite
-  # covers the CLI/lib scripts, which are variant-agnostic anyway.
-  test:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Log in to GHCR (rootful podman — layer-sync test needs root for mknod)
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
-
-      - name: Pull candidate image
-        run: sudo podman pull ${{ env.IMAGE }}:nvidia-open-${{ github.sha }}
-
-      - name: Retag locally as powos-ci for the test wrappers
-        run: sudo podman tag ${{ env.IMAGE }}:nvidia-open-${{ github.sha }} powos-ci
-
-      - name: Container tests (tier1 inside the actual image)
+      - name: Container tests (tier1 inside the actual image) — nvidia-open only
+        if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
         run: |
           sudo podman run --rm -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
             --entrypoint /bin/bash powos-ci -c '
@@ -195,12 +177,13 @@ jobs:
               bash /powos/test/tier1/test-ai-agent.sh
             '
 
-      - name: E2E tests (loop-back USB, overlayfs, layer-sync, cachefs)
-        # fusepy is a test-only Python dep, so install it inside the ephemeral
-        # test container rather than baking it into the production image.
-        # --target /tmp/pypkg + PYTHONPATH: bulletproof against distro path
-        # quirks — Bazzite's ostree layout leaves /usr/local/lib absent inside
-        # a container so a plain `pip install --break-system-packages` errors.
+      - name: E2E tests (loop-back USB, overlayfs, layer-sync, cachefs) — nvidia-open only
+        # fusepy is a test-only Python dep, installed inside the ephemeral test
+        # container rather than baked into the production image. --target
+        # /tmp/pypkg + PYTHONPATH: bulletproof against Bazzite's ostree paths
+        # (e.g. /usr/local/lib absent inside a container), so pip writes to a
+        # path we own and Python auto-picks it up.
+        if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
         run: |
           sudo podman volume create powos-e2e-usb
           sudo podman run --rm --privileged --hostname powos-e2e \
@@ -216,58 +199,12 @@ jobs:
               exec /powos/test/e2e/run-e2e.sh
             '
 
-  # ─── STAGE 4: promote SHA → channel tags on green ───────────────────────────
-  # skopeo copies the manifest server-side — no bytes are re-uploaded. This
-  # keeps the layer identity intact so bootc treats the promoted image as the
-  # same as the SHA-tagged candidate (no delta computation, no re-relabel).
-  promote:
-    # nvidia-open only promotes if test passed. -testing runs in parallel
-    # (does NOT need: test) via a separate matrix condition below.
-    needs: [build, test]
-    if: |
-      always() &&
-      needs.build.result == 'success' &&
-      (needs.test.result == 'success' || needs.test.result == 'skipped')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [ nvidia-open, nvidia-open-testing ]
-    steps:
-      - name: Gate (mirror build's gating logic)
-        id: gate
-        run: |
-          sel='${{ github.event.inputs.variant }}'
-          if [[ -n "$sel" && "$sel" != "all" && "$sel" != "${{ matrix.variant }}" ]]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event_name }}" == "push" && "${{ matrix.variant }}" == "nvidia-open-testing" ]]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ matrix.variant }}" == "nvidia-open" && "${{ needs.test.result }}" != "success" ]]; then
-            # nvidia-open only promotes after test passes.
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install skopeo
+      - name: Push (only reached if all tests above passed)
         if: steps.gate.outputs.run == 'true'
-        run: sudo apt-get install -y --no-install-recommends skopeo >/dev/null
-
-      - name: Promote SHA → channel tag (server-side copy, no re-pull)
-        if: steps.gate.outputs.run == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_USER:  ${{ github.actor }}
         run: |
-          echo "$GH_TOKEN" | skopeo login --username "$GH_USER" --password-stdin ghcr.io
-          skopeo copy --all \
-            docker://${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
-            docker://${{ env.IMAGE }}:${{ matrix.variant }}
+          sudo podman push ${{ env.IMAGE }}:${{ matrix.variant }}
+          sudo podman push ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }}
           if [[ "${{ matrix.variant }}" == "nvidia-open" ]]; then
-            skopeo copy --all \
-              docker://${{ env.IMAGE }}:nvidia-open-${{ github.sha }} \
-              docker://${{ env.IMAGE }}:latest
+            sudo podman tag ${{ env.IMAGE }}:nvidia-open ${{ env.IMAGE }}:latest
+            sudo podman push ${{ env.IMAGE }}:latest
           fi
