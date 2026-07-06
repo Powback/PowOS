@@ -1,0 +1,27 @@
+# PowOS: KDE Plasma power-management defaults — NEVER auto-suspend.
+#
+# This is shipped as a system-wide default so screen locks NEVER take the
+# machine offline (killing SSH, network, running builds, etc.). Applies to AC,
+# battery, and low-battery profiles. Screen still locks on idle (KDE locker is
+# separate); dimming/DPMS-off/suspend are all disabled.
+#
+# Installed to /etc/xdg/ (KDE's system defaults location) — every user
+# inherits it unless they explicitly override.
+
+[AC][DimDisplay]
+_k_disabled=true
+
+[AC][SuspendSession]
+_k_disabled=true
+
+[AC][DPMSControl]
+_k_disabled=true
+
+[Battery][DimDisplay]
+_k_disabled=true
+
+[Battery][SuspendSession]
+_k_disabled=true
+
+[LowBattery][SuspendSession]
+_k_disabled=true

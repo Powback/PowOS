@@ -202,6 +202,16 @@ COPY config/bootc/kargs.d/ /usr/lib/bootc/kargs.d/
 # plasmalogin every boot (overrides any sddm alias left over from prior installs).
 COPY config/tmpfiles.d/powos-display-manager.conf /usr/lib/tmpfiles.d/
 
+# KDE Plasma power defaults: NEVER auto-suspend (kills network + SSH + builds).
+# Installed system-wide under /etc/xdg so it applies to every user, and mirrored
+# into /etc/skel so a new user gets it on first login too (needed because
+# ~/.config/powermanagementprofilesrc overrides /etc/xdg once created).
+COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
+RUN mkdir -p /etc/skel/.config /home/powos/.config && \
+    cp /etc/xdg/powermanagementprofilesrc /etc/skel/.config/powermanagementprofilesrc && \
+    cp /etc/xdg/powermanagementprofilesrc /home/powos/.config/powermanagementprofilesrc && \
+    chown -R 1000:1000 /home/powos/.config
+
 # ── Lean installer variant (behind a build flag; default image unaffected) ──
 # Build with --build-arg POWOS_INSTALLER=1 to produce an installer image that:
 #   * boots STRAIGHT into the guided wizard via powos.install=1 (see
