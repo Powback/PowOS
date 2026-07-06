@@ -444,13 +444,16 @@ EOF
     fi
 
     local conflict_result
-    # The function prints "conflict" AND exits non-zero — a fallback echo would
-    # double the output and break the exact match below.
-    conflict_result=$(check_for_conflicts 2>/dev/null) || true
+    # Per the documented contract in lib/sync.sh: check_for_conflicts prints
+    # NOTHING and returns 1 on conflict; callers turn that into the "conflict"
+    # sentinel with `|| echo "conflict"`. (Printing "conflict" AND returning 1
+    # would make the capture yield "conflict\nconflict" — that was the OLD bug
+    # this contract was written to prevent.)
+    conflict_result=$(check_for_conflicts 2>/dev/null || echo "conflict")
     if [[ "$conflict_result" == "conflict" ]]; then
-        e2e_pass "check_for_conflicts outputs 'conflict' for foreign machine"
+        e2e_pass "check_for_conflicts capture-with-fallback yields 'conflict'"
     else
-        e2e_fail "Expected 'conflict' in output, got: $conflict_result"
+        e2e_fail "Expected 'conflict' from ||-fallback capture, got: $conflict_result"
     fi
 }
 
