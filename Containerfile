@@ -244,6 +244,10 @@ RUN KVER="$(ls /lib/modules/ | head -1)" && \
 RUN mkdir -p /usr/lib/bootc/kargs.d
 COPY config/bootc/kargs.d/ /usr/lib/bootc/kargs.d/
 
+# tmpfiles.d: force /etc/systemd/system/display-manager.service to alias
+# plasmalogin every boot (overrides any sddm alias left over from prior installs).
+COPY config/tmpfiles.d/powos-display-manager.conf /usr/lib/tmpfiles.d/
+
 # ── Lean installer variant (behind a build flag; default image unaffected) ──
 # Build with --build-arg POWOS_INSTALLER=1 to produce an installer image that:
 #   * boots STRAIGHT into the guided wizard via powos.install=1 (see

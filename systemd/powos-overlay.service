@@ -3,7 +3,11 @@ Description=PowOS Overlay Loading (systemd-sysext)
 Documentation=https://github.com/user/powos
 After=powos-hardware.service powos-init.service
 Requires=powos-init.service
-Before=multi-user.target
+# Overlay sysext merge must complete BEFORE any display manager tries to start:
+# plasmalogin/SDDM binaries and libs may live in the kde overlay, and if they
+# resolve to base-image versions while the merge is still pending we get either
+# a crash or a silent no-op login. Ordering here is the guarantee.
+Before=multi-user.target graphical.target display-manager.service plasmalogin.service sddm.service
 ConditionPathExists=/usr/lib/powos/powos-overlay-load
 
 [Service]
