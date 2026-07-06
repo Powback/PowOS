@@ -1,12 +1,22 @@
-# PowOS console ordering — make the SCREEN (tty0) the PRIMARY console.
+# PowOS console + boot verbosity.
 #
-# bootc-image-builder bakes `rw console=tty0 console=ttyS0` as its base kernel
-# args. With multiple console= args the LAST one is the PRIMARY console, so
-# ttyS0 (a serial port — invisible on a real desktop) seizes the console and
-# the physical screen goes quiet during boot. That is a debugging leftover.
+# 1) Make the SCREEN (tty0) the PRIMARY console.
+#    bootc-image-builder bakes `rw console=tty0 console=ttyS0` as its base kernel
+#    args. With multiple console= args the LAST one is the PRIMARY console, so
+#    ttyS0 (a serial port — invisible on a real desktop) seizes the console and
+#    the physical screen goes quiet during boot. Re-adding console=tty0 here
+#    makes tty0 the last (= primary) console again: the screen shows boot
+#    messages. ttyS0 stays as a secondary console (so e2e serial-log tests
+#    still receive output).
 #
-# kargs.d entries are APPENDED after the bib defaults, so re-adding console=tty0
-# here makes tty0 the last (= primary) console again: the screen shows boot
-# messages. ttyS0 stays as a secondary console (kept so the e2e serial-log tier
-# still receives output). Applies to BOTH the live and installer variants.
-kargs = ["console=tty0"]
+# 2) Kill Plymouth's splash. `rhgb quiet` is Fedora's default and hides every
+#    boot message behind a spinner — great when boot is fast, catastrophic
+#    when it hangs (you get "stuck at boot spinner" with zero info). We prefer
+#    visible boot text: log_level=info surfaces service start/finish lines,
+#    plymouth.enable=0 disables the splash outright. `rhgb` isn't added here
+#    (bib doesn't set it, so no need to counter it).
+kargs = [
+  "console=tty0",
+  "plymouth.enable=0",
+  "systemd.log_level=info",
+]
