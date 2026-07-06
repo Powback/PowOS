@@ -164,41 +164,23 @@ COPY systemd/plasmalogin.service.d/ /usr/lib/systemd/system/plasmalogin.service.
 # every file as 0755, and systemd warns "Configuration file ... is marked
 # executable" for each unit. Normalize so any build context yields clean units.
 RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powos-firstboot-apply /usr/bin/powos-firstboot-disk && \
-    chmod 0644 /usr/lib/systemd/system/powos-*.service && \
-    # All PowOS boot-time services enabled. Each is either:
-    #   * always-needed (init, hardware, overlay, hwinfo)
-    #   * karg-gated (installer=powos.install, safemode=powos.mode,
-    #                 firstboot-disk=rd.powos.ramboot)
-    #   * ConditionPathExists-gated on /run/powos/{ramboot-state,layer-paths}
-    #     which the dracut ramboot module writes ONLY on a USB live boot
-    #     (ramboot-init, layer-sync, cachefs-sync, ramboot-healthy)
-    #   * ConditionPathExists-gated on /etc/powos/install.conf which the
-    #     guided installer writes once (firstboot).
-    # So enabling all of them on every image is safe: on an installed
-    # bootc deploy without the ramboot karg, the USB-only ones self-skip
-    # silently. On a USB live boot they all fire. One image supports both.
-    systemctl enable \
-        powos-init.service \
-        powos-hardware.service \
-        powos-overlay.service \
-        powos-hwinfo.service \
-        powos-ramboot-init.service \
-        powos-ramboot-healthy.service \
-        powos-layer-sync.service \
-        powos-cachefs-sync.service \
-        powos-installer.service \
-        powos-safemode.service \
-        powos-firstboot.service \
-        powos-firstboot-disk.service && \
-    # powos-hydrate.service is NOT enabled by default: it runs on every boot
-    # even when nothing is configured, adds seconds to boot time, and has
-    # historically been the source of "why did boot fail" incidents. It's
-    # shipped but must be `systemctl enable`'d explicitly by users who set
-    # POWOS_GIT_REPO and want git-based state hydration.
-    systemctl enable plasmalogin.service && \
-    systemctl add-wants graphical.target plasmalogin.service && \
-    systemctl set-default graphical.target && \
-    systemctl disable NetworkManager-wait-online.service
+    chmod 0644 /usr/lib/systemd/system/powos-*.service
+    #
+    # ═══════════════════════════════════════════════════════════════════
+    # DELIBERATELY: NO PowOS service is enabled at build time.
+    # ═══════════════════════════════════════════════════════════════════
+    # Every "bootc upgrade bricked the machine" incident this week was caused
+    # by a PowOS-added service running at boot and doing something the base
+    # Bazzite image didn't expect (firstboot-disk repartitioning the NVMe,
+    # sysext failing merges and blocking display-manager, powos-hydrate
+    # hanging network-online.target, ...). The unit files are shipped so a
+    # user who *wants* PowOS features can `systemctl enable` them explicitly,
+    # but the DEFAULT install experience is: Bazzite base + PowOS CLI on top,
+    # nothing else running unless invoked.
+    #
+    # Users who want the full PowOS live/hardware/overlay chain:
+    #   sudo systemctl enable powos-{init,hardware,overlay,hwinfo}.service
+    # For USB live builds, install-to-usb.sh flips those on separately.
 
 # The dracut ramboot module ships in the tree (lib/dracut/90powos-ramboot/) so
 # a POWOS_INSTALLER=1 or explicit USB-live build can add it; the DEFAULT
@@ -229,12 +211,19 @@ RUN if [ "$POWOS_BUILD_RAMBOOT" = "1" ]; then \
 # module ships in the initramfs (above) so the opt-in works; only the default
 # karg is gone. (Was config/bootc/kargs.d/50-powos-ramboot.toml, removed in the
 # scope-B streamline: install-to-disk is the primary story.)
+# NO kargs.d modifications in the default image. Bazzite base ships its own
+# kargs and altering them from a customization layer is a known bootc footgun
+# (kargs are per-deployment but applied at deploy time in ways that surprise
+# users on rollback). Advanced users who want plymouth off / verbose boot can
+# add their own /etc/bootc/kargs.d/ entries after install.
 RUN mkdir -p /usr/lib/bootc/kargs.d
-COPY config/bootc/kargs.d/ /usr/lib/bootc/kargs.d/
 
-# tmpfiles.d: force /etc/systemd/system/display-manager.service to alias
-# plasmalogin every boot (overrides any sddm alias left over from prior installs).
-COPY config/tmpfiles.d/powos-display-manager.conf /usr/lib/tmpfiles.d/
+# NOTE: previous versions shipped a tmpfiles.d L+ rule that force-recreated
+# /etc/systemd/system/display-manager.service on every boot. That was a foot-
+# gun with bootc's 3-way /etc merge — the alias would silently overwrite a
+# working display-manager symlink on rollback deployments and leave them
+# unbootable. Dropped. Bazzite base's own preset handles display-manager
+# selection now (kicks in on install-time).
 
 # KDE Plasma power defaults: NEVER auto-suspend (kills network + SSH + builds).
 # Installed system-wide under /etc/xdg so it applies to every user, and mirrored
@@ -281,8 +270,15 @@ RUN { echo 'GRUB_TIMEOUT=5'; echo 'GRUB_TIMEOUT_STYLE=menu'; } >> /etc/default/g
         grub2-editenv /boot/grub2/grubenv set menu_auto_hide=0 || true; \
     fi
 
-# Build extensions
-RUN bash /usr/lib/powos/overlay-manager.sh build-all
+# Overlays are shipped as sources under /var/lib/powos/sources/ but NOT
+# pre-built or auto-merged. Every "sysext blocked merge" incident (extensions
+# with /usr/lib/os-release, extensions with wrong SELinux labels, layer sync
+# failing halfway) came from PowOS activating overlays at boot. Advanced users
+# who want them can:
+#   sudo powos source build-all   # builds all under /var/lib/powos/extensions
+#   sudo systemctl enable powos-overlay.service   # merges at boot via sysext
+# but the default image is stock Bazzite with the powos CLI + widgets, nothing
+# more.
 
 # ═══════════════════════════════════════════════════════════════════
 # Bundle PowOS Source (for self-update capability)
