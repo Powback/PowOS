@@ -305,6 +305,37 @@ self_push() {
     return 0
 }
 
+# Force-refresh /var/lib/powos/src from the current image's /usr/lib/powos/src
+# snapshot. Necessary when a bootc-switch inherited a wildly-different /var
+# tree from an older PowOS install: `self pull` would then treat the entire
+# stale tree as "local edits" and preserve it, silently reverting real code.
+# Backs the old tree up under /var/lib/powos/src.stale-<sha>-<ts> so nothing
+# is destroyed — the user can rescue real edits from there.
+self_reseed() {
+    local src="$1"
+    local usr_src="/usr/lib/powos/src"
+    if [[ ! -d "$usr_src" ]]; then
+        perr "$usr_src doesn't exist — this image doesn't bundle a source snapshot."
+        return 1
+    fi
+    if [[ -d "$src" ]]; then
+        local backup="${src}.stale-$(self_baked_sha)-$(date +%s)"
+        plog "Backing up existing $src → $backup"
+        if ! mv "$src" "$backup" 2>/dev/null; then
+            perr "Backup move failed (permission?). Re-run with sudo."
+            return 1
+        fi
+    fi
+    plog "Copying $usr_src → $src …"
+    if ! cp -a "$usr_src" "$src" 2>/dev/null; then
+        perr "Copy failed (permission? disk full?). Try sudo."
+        return 1
+    fi
+    pok "Reseeded from image snapshot (commit $(self_baked_sha))."
+    plog "If the backup at ${src}.stale-* had real edits, cherry-pick them in."
+    return 0
+}
+
 self_usage() {
     cat <<EOF
 PowOS self — edit → test → push loop
@@ -314,6 +345,11 @@ PowOS self — edit → test → push loop
                       (transient; auto-reverts on reboot on installed composefs)
   powos self pull     SAFE update from upstream (never discards local edits)
   powos self push     git add -A + commit + push  (-m "message")
+  powos self reseed   Wipe /var/lib/powos/src and re-copy from the CURRENT image
+                      snapshot at /usr/lib/powos/src. Use after bootc-switch when
+                      the /var tree was inherited from an older PowOS install and
+                      self pull is misidentifying stale carry-over as local edits.
+                      Backs up the old tree to /var/lib/powos/src.stale-<sha>-<ts>.
 EOF
 }
 
@@ -323,6 +359,7 @@ cmd_self() {
         status|st)  self_status "$SELF_SRC" ;;
         test|t)     self_test "$SELF_SRC" ;;
         pull)       self_safe_pull "$SELF_SRC" ;;
+        reseed)     self_reseed "$SELF_SRC" ;;
         push)
             local msg=""
             while [[ $# -gt 0 ]]; do
