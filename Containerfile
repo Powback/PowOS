@@ -165,28 +165,34 @@ COPY systemd/plasmalogin.service.d/ /usr/lib/systemd/system/plasmalogin.service.
 # executable" for each unit. Normalize so any build context yields clean units.
 RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powos-firstboot-apply /usr/bin/powos-firstboot-disk && \
     chmod 0644 /usr/lib/systemd/system/powos-*.service && \
-    # Essentials for every deployment: init dirs, detect hardware, merge sysexts,
-    # cache hw info. Installer/safemode/firstboot are gated by kargs+condition
-    # so are safe to leave enabled — they're no-ops on a plain boot.
+    # All PowOS boot-time services enabled. Each is either:
+    #   * always-needed (init, hardware, overlay, hwinfo)
+    #   * karg-gated (installer=powos.install, safemode=powos.mode,
+    #                 firstboot-disk=rd.powos.ramboot)
+    #   * ConditionPathExists-gated on /run/powos/{ramboot-state,layer-paths}
+    #     which the dracut ramboot module writes ONLY on a USB live boot
+    #     (ramboot-init, layer-sync, cachefs-sync, ramboot-healthy)
+    #   * ConditionPathExists-gated on /etc/powos/install.conf which the
+    #     guided installer writes once (firstboot).
+    # So enabling all of them on every image is safe: on an installed
+    # bootc deploy without the ramboot karg, the USB-only ones self-skip
+    # silently. On a USB live boot they all fire. One image supports both.
     systemctl enable \
         powos-init.service \
         powos-hardware.service \
         powos-overlay.service \
         powos-hwinfo.service \
+        powos-ramboot-init.service \
+        powos-ramboot-healthy.service \
+        powos-layer-sync.service \
+        powos-cachefs-sync.service \
         powos-installer.service \
         powos-safemode.service \
-        powos-firstboot.service && \
-    # USB-live-only services (ramboot pipeline, layer-sync, cachefs-sync,
-    # firstboot-disk) are NOT enabled by default. They only make sense on the
-    # USB live image (rd.powos.ramboot=1) and running them on installed systems
-    # is either a no-op with noise, or actively destructive (firstboot-disk
-    # tried to repartition the boot NVMe on installed machines). The USB live
-    # image build (POWOS_INSTALLER=0 with the ramboot karg baked in) enables
-    # them separately.
-    #
-    # powos-hydrate.service is also NOT enabled by default: it runs on every
-    # boot even when nothing is configured, adds ~seconds to boot time, and
-    # has historically been the source of "why did boot fail" incidents. It's
+        powos-firstboot.service \
+        powos-firstboot-disk.service && \
+    # powos-hydrate.service is NOT enabled by default: it runs on every boot
+    # even when nothing is configured, adds seconds to boot time, and has
+    # historically been the source of "why did boot fail" incidents. It's
     # shipped but must be `systemctl enable`'d explicitly by users who set
     # POWOS_GIT_REPO and want git-based state hydration.
     systemctl enable plasmalogin.service && \
