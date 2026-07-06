@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# powos-widget-autoadd — add PowOS widgets to the Plasma panel on FIRST login.
+#
+# Runs via /etc/xdg/autostart/, i.e. once per KDE session. A per-user marker
+# file gates so we only touch the panel the first time; after that the user
+# owns their panel layout and we don't second-guess them.
+#
+# Uses Plasma's scripting API through DBus (evaluateScript). Works on both
+# Plasma 5 (qdbus) and 6 (qdbus6) — Bazzite 44 ships Plasma 6, but we probe
+# both so this survives a Plasma downgrade or a differently-configured base.
+
+set -uo pipefail
+
+marker="${XDG_STATE_HOME:-$HOME/.local/state}/powos/widgets-added"
+
+# Already added this session's widgets before? Nothing to do.
+[[ -f "$marker" ]] && exit 0
+
+# Wait for plasmashell to actually be up. On a fresh KDE start the autostart
+# entries fire in parallel with plasmashell coming online; DBus isn't ready
+# for scripting until then. Up to ~30s of wait, then give up quietly.
+QDBUS=""
+for _ in $(seq 1 30); do
+    for candidate in qdbus6 qdbus qdbus-qt6 qdbus-qt5; do
+        if command -v "$candidate" >/dev/null 2>&1 \
+           && "$candidate" org.kde.plasmashell / >/dev/null 2>&1; then
+            QDBUS="$candidate"
+            break 2
+        fi
+    done
+    sleep 1
+done
+[[ -z "$QDBUS" ]] && exit 0
+
+# Idempotent add: only add each PowOS widget if a panel doesn't already carry
+# it (protects any user who moved a widget between panels or hand-added it).
+# panels()/widgets() are the documented Plasma scripting entry points.
+script='
+var powosWidgets = ["com.powos.overview", "com.powos.monitor"];
+var alreadyThere = {};
+panels().forEach(function(p) {
+    p.widgets().forEach(function(w) {
+        alreadyThere[w.type] = true;
+    });
+});
+var targetPanel = panels()[0];
+if (targetPanel) {
+    powosWidgets.forEach(function(name) {
+        if (!alreadyThere[name]) {
+            targetPanel.addWidget(name);
+        }
+    });
+}
+'
+
+"$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$script" \
+    >/dev/null 2>&1 || true
+
+mkdir -p "$(dirname "$marker")"
+touch "$marker"

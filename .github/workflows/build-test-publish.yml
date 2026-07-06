@@ -142,6 +142,16 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: ./build/vendor-bazzite.sh
 
+      - name: Snapshot source tree (bundled into image as /usr/lib/powos/src)
+        # `git archive HEAD` gives us a clean, .git-free, .gitattributes-honoring
+        # snapshot of the exact commit being built. tmpfiles.d then seeds it into
+        # /var/lib/powos/src on first boot so `powos self test/pull/push` has a
+        # writable working copy.
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          mkdir -p .snapshot
+          git archive HEAD | tar -x -C .snapshot
+
       - name: Log in to GHCR (rootful podman — layer-sync test needs root for mknod)
         if: steps.gate.outputs.run == 'true'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin

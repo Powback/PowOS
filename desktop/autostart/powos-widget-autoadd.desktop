@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Widget Auto-Add
+Comment=Adds PowOS panel widgets to the Plasma panel on first login only
+Exec=/usr/bin/powos-widget-autoadd
+Icon=start-here-kde
+Terminal=false
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;
+NoDisplay=true

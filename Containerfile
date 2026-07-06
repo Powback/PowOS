@@ -4,12 +4,17 @@
 #   1. Create a `powos` user (password `powos`, wheel group)
 #   2. Enable sshd
 #   3. Ship the `powos` CLI + helper libraries in /usr/lib/powos
-#   4. Ship the two KDE Plasma widgets
-#   5. Ship a system-wide KDE no-auto-suspend default
+#   4. Ship a source-tree snapshot at /usr/lib/powos/src (immutable reference)
+#      + a tmpfiles.d rule that seeds a writable copy at /var/lib/powos/src on
+#      first boot — that's what `powos self test/pull/push` operates on.
+#   5. Ship the two KDE Plasma widgets + an XDG autostart script that adds
+#      them to the Plasma panel exactly ONCE per user on first login.
+#   6. Ship a system-wide KDE no-auto-suspend default
 #
 # That is EVERYTHING. No PowOS service is enabled. No sysext is pre-built.
-# No kargs.d is modified. No tmpfiles.d is added. No initramfs is rebuilt.
-# No podman/distrobox reinstall (Bazzite already has them).
+# No kargs.d is modified. No initramfs is rebuilt. No podman/distrobox
+# reinstall (Bazzite already has them). Only one tmpfiles.d entry, and it
+# just seeds /var from /usr — cannot break the boot path.
 #
 # The rationale: every previous "bootc upgrade bricked my machine" incident
 # came from PowOS layers doing things at boot that surprised Bazzite. This
@@ -31,11 +36,19 @@ ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia-open:stable
 # Staging stage — assemble every file drop into one scratch tree so the final
 # image gets a single COPY layer instead of one per source directory. Nothing
 # from this stage ships; it exists purely to consolidate layers.
+#
+# .snapshot/ is a `git archive HEAD` extraction produced by CI right before
+# `podman build`. Bundling it under /usr/lib/powos/src lets `powos self`
+# operate on the running box: tmpfiles.d seeds a writable copy at
+# /var/lib/powos/src on first boot, then the user edits there directly.
 FROM scratch AS staging
 COPY bin/                                 /usr/bin/
 COPY lib/                                 /usr/lib/powos/
+COPY .snapshot/                           /usr/lib/powos/src/
 COPY desktop/plasmoid/                    /usr/share/plasma/plasmoids/
+COPY desktop/autostart/                   /etc/xdg/autostart/
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
+COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
 
 FROM ${BASE_IMAGE}
 
@@ -63,7 +76,7 @@ COPY --from=staging / /
 # `bootc switch` or `bootc upgrade` from a machine with an existing /var
 # would silently keep the old (or missing) marker.
 ARG POWOS_SRC_COMMIT=""
-RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot 2>/dev/null || true && \
+RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-widget-autoadd 2>/dev/null || true && \
     find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
