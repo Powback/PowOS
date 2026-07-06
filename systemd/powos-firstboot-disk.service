@@ -17,6 +17,12 @@
 Description=PowOS first-boot disk self-completion (create POWOS-DATA + boot entries)
 Documentation=man:powos-firstboot-disk
 ConditionPathExists=!/var/lib/powos/firstboot-disk-done
+# Only fire on the USB live-boot path. On an INSTALLED system there is no
+# raw-image tail to expand, no need for POWOS-DATA persistence (the disk IS
+# persistent), and running install-to-usb.sh --self-complete against the boot
+# NVMe would repartition the wrong device. rd.powos.ramboot=1 is set only by
+# the live USB image's dracut module; installed deployments don't carry it.
+ConditionKernelCommandLine=rd.powos.ramboot
 # Needs all local filesystems (incl. /boot and /boot/efi) mounted so we can
 # resolve the boot disk and write BLS entries to the live loader dir.
 After=local-fs.target

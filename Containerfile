@@ -169,11 +169,8 @@ RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powo
         powos-hydrate.service && \
     systemctl enable plasmalogin.service && \
     systemctl add-wants graphical.target plasmalogin.service && \
-    systemctl enable fedora-kinoite-plasmalogin-workaround.service 2>/dev/null || true && \
-    systemctl preset plasmalogin.service 2>/dev/null || true && \
     systemctl set-default graphical.target && \
-    systemctl disable NetworkManager-wait-online.service && \
-    systemctl enable powos-rescue-network.service
+    systemctl disable NetworkManager-wait-online.service
 
 # Rebuild initramfs with our dracut module
 # This embeds the RAM overlay setup into the boot process.
