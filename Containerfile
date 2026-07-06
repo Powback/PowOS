@@ -79,14 +79,12 @@ RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
 # Native RPMs beat Flatpak here — Flatpak Piper alone pulls ~200MB of the
 # GNOME Platform runtime; RPMs total ~15-20MB and share Bazzite's Qt/KF6
 # runtime that Plasma already uses.
-# Add the kylegospo COPR .repo file directly rather than `dnf5 copr enable`
-# (which requires dnf5-plugins-core preinstalled — not guaranteed in every
-# Bazzite base variant). The .repo endpoint is the OFFICIAL COPR-served URL,
-# so this stays in lockstep with whatever kylegospo publishes. rpm -E %fedora
-# resolves 44 on Bazzite 44 base, forward-compatible when the base advances.
-RUN curl -fsSL "https://copr.fedorainfracloud.org/coprs/kylegospo/logiops/repo/fedora-$(rpm -E %fedora)/kylegospo-logiops-fedora-$(rpm -E %fedora).repo" \
-        -o /etc/yum.repos.d/_copr_kylegospo-logiops.repo && \
-    dnf5 -y install --setopt=install_weak_deps=False \
+# All three packages are in main Fedora repos on Bazzite 44 — no COPR
+# needed. Confirmed on the target: `dnf5 info logiops` returns 0.3.5-6.fc44
+# from the fedora repo (not updates-testing). Skipping the COPR path
+# entirely means one less external repo dependency and one less thing to
+# break when Fedora bumps.
+RUN dnf5 -y install --setopt=install_weak_deps=False \
         openrgb piper logiops && \
     dnf5 -y clean all && \
     systemctl enable ratbagd.service logid.service
