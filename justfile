@@ -238,23 +238,27 @@ secrets-keygen:
 #  ISO BUILDING (Production)
 # ═══════════════════════════════════════════════════════════════════
 
-# Build bootable PowOS ISO (the main goal!)
+# Build the PowOS disk image (PRIMARY: flash → boot → `powos install` to disk)
 build-iso:
-    @echo "🔥 Building PowOS bootable ISO..."
-    @echo ""
-    @echo "NOTE: ISO building requires podman (not docker) and bootc-image-builder"
-    @echo ""
-    @mkdir -p build/output
-    bash build/build-iso.sh full
-    @echo ""
-    @echo "Live USB image should be at: build/output/powos.raw"
-    @ls -lh build/output/*.raw 2>/dev/null || echo "Check build/output/ for results"
-
-# Build the LEAN INSTALLER raw image (no ramboot → boots straight to wizard)
-build-installer:
-    @echo "🔧 Building PowOS lean installer image..."
+    @echo "🔥 Building PowOS disk image..."
     @echo ""
     @echo "NOTE: requires podman (not docker) and bootc-image-builder"
+    @echo "Boots a normal desktop; install to disk with 'powos install' (dual-boot Windows)."
+    @echo "For a build that boots STRAIGHT to the install wizard: just build-installer"
+    @echo ""
+    @mkdir -p build/output
+    bash build/build-iso.sh default
+    @echo ""
+    @echo "Image should be at: build/output/powos.raw"
+    @echo "Flash it (sudo ./build/install-to-usb.sh /dev/sdX), boot, then: sudo powos install"
+    @ls -lh build/output/*.raw 2>/dev/null || echo "Check build/output/ for results"
+
+# Build the LEAN INSTALLER raw image (boots straight into the guided wizard)
+build-installer:
+    @echo "🔧 Building PowOS lean installer image (fastest path to install-to-disk)..."
+    @echo ""
+    @echo "NOTE: requires podman (not docker) and bootc-image-builder"
+    @echo "Boots STRAIGHT into the guided install wizard on tty1."
     @echo ""
     @mkdir -p build/output
     bash build/build-iso.sh installer-usb

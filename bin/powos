@@ -21,148 +21,138 @@ RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# One-line notice for EXPERIMENTAL (unvalidated) commands. These are half-built
+# or hardware-only features kept in the tree but NOT part of the primary
+# install-to-disk story. Warn on stderr so piped/scripted stdout is unaffected.
+experimental_warn() {
+    echo -e "${YELLOW}⚠ '$1' is EXPERIMENTAL (unvalidated — may not work as described).${NC}" >&2
+    echo -e "${YELLOW}  See the Feature Status table in CLAUDE.md.${NC}" >&2
+}
+
 usage() {
     cat << EOF
-PowOS - Portable Gaming Workstation
+PowOS - Install-to-disk daily-driver that dual-boots Windows
 
 Usage: powos <command> [options]
 
 Tip: run 'powos menu' for a guided, categorized menu of everything below.
 
-Commands:
+═══ CORE COMMANDS ═══════════════════════════════════════════════════
+
+Discover & status:
   menu                Guided interactive menu (discoverable front door)
   overview            One-glance panel: model, image, GPU/CUDA, deploys, disk
   overview --json     Same, machine-readable (for widgets/plasmoids)
   services            Running containers + container services + GPU users
-  services --json     Same, machine-readable
   status              Show full system status
   health              System health check (layers, RAM, USB, sync)
   health --ai         Talk to health AI agent for troubleshooting
-  safe                Check if safe to unplug USB
-
-  sync                Sync RAM ↔ USB (with conflict detection)
-  sync status         Show sync status (pending changes, conflicts)
-  sync resolve        Resolve conflicts interactively
-  sync resolve --ai   Talk to AI about sync conflicts
-  sync --keep-ram     Force RAM changes to USB (your work wins)
-  sync --keep-usb     Reload from USB (USB wins)
-
-  flush               Force flush RAM → USB (no conflict check)
-
-  backup              Backup USB state to cloud (git)
-  backup status       Show backup status
-  backup push         Push to cloud backup
-  backup pull         Pull from cloud backup
-  backup setup <url>  Configure cloud backup
-
-  update              Check for available updates
-  reload              Apply your local PowOS changes LIVE (no reboot). Auto-finds
-                      your checkout & remembers it — just 'powos reload'.
-  reload --pull       git pull the checkout first, then apply
-  reload --build      Full local image build + switch (for base/package changes)
-
-  self status         Edit-loop: baked commit, git attach state, local edits
-  self test           Apply local /var/lib/powos/src edits to THIS system (transient)
-  self pull           SAFE update from upstream (never discards local edits)
-  self push           git add -A + commit + push (-m "message")
-
-  upgrade             Pull+stage a base update, apply the lightest restart
-                      (soft-reboot if the kernel's unchanged, else full reboot)
-  upgrade --check     Just check if a base update is available
-  update os           Update Bazzite base OS (bootc upgrade; 'upgrade' is smarter)
-  update self         Apply PowOS source changes to running system (hot, no reboot)
-  update self --from  Apply from custom source path
-  update self --pull  Pull from git remote first
-  update packages     Update installed packages
-  update overlays     Rebuild overlays with latest upstream
-  update apply        Apply all updates (os + packages)
-
-  layers              Show active layers
-  layers status       Detailed layer status
-  layers sync         Sync RAM to custom layer now
-  layers clear custom Clear custom layer entirely
-  layers clear updates Clear updates layer entirely
-
-  rollback            Show rollback options
-  rollback custom     Boot without custom layer (next boot)
-  rollback updates    Boot without updates layer (next boot)
-  rollback all        Boot with base only (next boot)
-  rollback reset      Clear rollback flags
-
+  doctor              Collect a boot diagnostic bundle → /var/log/powos/
+  doctor --ai         + have the health agent diagnose it
   hardware            Show detected hardware
   profile             Show active hardware profile
+  version             Show version
 
-  containers          List containers and images
-  containers create   Create a new distrobox container
-  containers enter    Enter a distrobox container
-  containers assemble Create all predefined containers
-  containers prune    Clean up unused resources
-
+Install to disk (dual-boot Windows) — the primary path:
   install <thing>     Find it everywhere, install the most CONTAINED way
                       (flatpak → sandbox container → asks before touching OS)
   install -m <be> <p> Force backend: flatpak|sandbox|brew|pip|container|host
   install --dry <p>   Show where it was found + routing, install nothing
   install -c NAME <pkg>  Install package to container NAME
   install -c NAME -e <pkg>  Install GUI app to container + export to host
-  install sandbox-share <dir>  Grant a real folder to the sandbox (explicit)
-
   install-system      Install PowOS to an internal disk (interactive)
   install-system --alongside   Dual-boot: install into free space, keep Windows
   install-system --whole-disk  Erase target disk (requires confirmation)
   install-system --dry-run     Show the plan, change nothing
+  games status        Shared NTFS games partition (with Windows) — state
+  games create --size N        Create POWOS-GAMES (plan + confirm + --dry-run)
+  games steam-setup   Put a Steam library on the shared partition
 
-  vm status           Show installed OSes bootable as a VM
-  vm windows          Boot installed Windows as a VM (same partition, no reboot)
-  vm windows --dry-run  Print the plan + qemu command, launch nothing
-
-  base list           List OS base variants on the USB (● = active)
-  base switch <name>  Boot into a different base next reboot (nvidia-open/nvidia/main)
-  base add <image>    Build+add a new base (newer/older ver, other bootc image)
-  base remove <name>  Delete a base variant
-
+Boot / dual-boot:
   boot list           Show UEFI boot entries
-  boot windows        Reboot into Windows once (for anti-cheat games), then back
+  boot windows        Reboot into bare-metal Windows once (anti-cheat games), then back
   boot next <name>    One-shot boot into any UEFI entry by name
-
-  cuda enable         Set up the CUDA toolkit in a GPU-passthrough container
-  cuda enter          Shell into the CUDA env (nvcc, python, gpu)
-  cuda run <cmd...>   Run one command inside (e.g. cuda run nvcc --version)
-  cuda status         Container / toolkit / GPU visibility
-  cuda disable        Remove the CUDA container
-
+  base list           List OS base variants (● = active)
+  base switch <name>  Boot into a different base next reboot (nvidia-open/nvidia/main)
   driver status       Show current NVIDIA driver channel (image tag)
   driver stable       Switch to tested drivers (:nvidia-open), reboot to apply
-  driver testing      Switch to newest drivers (:nvidia-open-testing)
 
-  registry login [host]   Save pull creds for private images (default ghcr.io)
-  registry status         Show configured registry hosts
+  cuda enable         Set up the CUDA toolkit in a GPU-passthrough container
+  cuda status         Container / toolkit / GPU visibility
 
-  gpu status          Where the dGPU is (host vs VM) + passthrough readiness
-  gpu to-vm           Hotswap the dGPU to vfio-pci for a VM (refuses if in use)
-  gpu to-host         Reclaim the dGPU for Linux (CUDA / native games)
+Sync, flush & backup:
+  sync                Sync RAM ↔ USB (with conflict detection)
+  sync status         Show sync status (pending changes, conflicts)
+  sync resolve [--ai] Resolve conflicts interactively (--ai for help)
+  sync --keep-ram     Force RAM changes to USB (your work wins)
+  sync --keep-usb     Reload from USB (USB wins)
+  flush               Force flush RAM → USB (no conflict check)
+  safe                Check if safe to unplug USB
+  backup [status|push|pull|setup <url>]  Backup system state to cloud (git)
 
+Update & self (edit → test → push loop):
+  update              Check for available updates
+  update os           Update Bazzite base OS (bootc upgrade; 'upgrade' is smarter)
+  update packages     Update installed packages
+  update apply        Apply all updates (os + packages)
+  upgrade             Pull+stage a base update, apply the lightest restart
+  upgrade --check     Just check if a base update is available
+  reload              Apply your local PowOS changes LIVE (no reboot)
+  reload --pull       git pull the checkout first, then apply
+  reload --build      Full local image build + switch (base/package changes)
+  self status         Edit-loop: baked commit, git attach state, local edits
+  self test           Apply local /var/lib/powos/src edits to THIS system (transient)
+  self pull           SAFE update from upstream (never discards local edits)
+  self push           git add -A + commit + push (-m "message")
+
+Layers & rollback:
+  layers              Show active layers
+  layers status       Detailed layer status
+  layers sync         Sync RAM to custom layer now
+  layers clear custom|updates  Clear a layer entirely
+  rollback            Show rollback options
+  rollback custom|updates|all  Boot without a layer / base only (next boot)
+  rollback reset      Clear rollback flags
+
+Packages, containers & build:
+  containers          List containers and images
+  containers create   Create a new distrobox container
+  containers enter    Enter a distrobox container
+  containers assemble Create all predefined containers
+  containers prune    Clean up unused resources
   build [path] [tag]  Build container from Dockerfile/Containerfile
-  build iso           Build bootable PowOS ISO
+  build iso           Build the bootable PowOS image
   build test          Build container image only (for testing)
-  build image [variant] [--switch]  Build the OS image LOCALLY (no GitHub);
-                      --switch rebases this machine onto it + offers reboot
+  build image [variant] [--switch]  Build the OS image LOCALLY (no GitHub)
+  registry login [host]   Save pull creds for private images (default ghcr.io)
 
+Dev & AI:
   dev                 List all dev projects
   dev new <name>      Create new project from scratch
   dev fork <upstream> Fork existing app (e.g., kde:dolphin)
-  dev build <name>    Build project
-  dev enable <name>   Install to system (as overlay)
-  dev disable <name>  Remove from system
+  dev build|enable|disable <name>  Build / install (overlay) / remove a project
   dev update <name>   Pull upstream changes (forks only)
-
   ai "prompt"         Ask AI for help (uses default agent)
-  ai --agent coder    Use coding assistant
-  ai --agent devops   Use devops assistant
-  ai --agent health   Use OS health/diagnostics assistant
+  ai --agent coder|devops|health   Pick an agent
   ai -i               Interactive chat mode
   ai --session <id>   Resume a conversation
 
-  version             Show version
+═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
+These features are half-built or hardware-only and are NOT part of the
+primary install-to-disk story. They print a warning when run. See the
+Feature Status table in CLAUDE.md before relying on them.
+
+  ramboot status     OS-in-RAM opt-in (installed): mode, RAM-vs-OS fit
+  ramboot enable     Copy the OS to tmpfs (composefs-safe opt-in; installed only)
+  ramboot disable    Remove the installed OS-in-RAM opt-in kargs
+  mobile             Mobile mode: copy OS to RAM (WIP — needs reboot to activate)
+  windows status     Bare-metal Windows in a VHDX (experimental)
+  windows create|install|finalize|vm   VHDX lifecycle (not hardware-validated)
+  vm status          Show installed OSes bootable as a VM
+  vm windows         Boot installed Windows as a KVM guest (no reboot; non-AC only)
+  gpu status         Where the dGPU is (host vs VM) + passthrough readiness
+  gpu to-vm|to-host  Hotswap the dGPU between Linux (CUDA) and a VM
+  (CacheFS — lazy-load /home — remains DISABLED: write-back to USB not implemented)
 
 Examples:
   powos status                        # Quick status check
@@ -2697,6 +2687,7 @@ case "${1:-}" in
         ;;
     mobile)
         shift
+        experimental_warn mobile
         source "$POWOS_LIB/mobile.sh"
         cmd_mobile "$@"
         ;;
@@ -2739,6 +2730,7 @@ case "${1:-}" in
         ;;
     vm)
         shift
+        experimental_warn vm
         source "$POWOS_LIB/vm.sh"
         cmd_vm "$@"
         ;;
@@ -2759,6 +2751,7 @@ case "${1:-}" in
         ;;
     ramboot)
         shift
+        experimental_warn ramboot
         source "$POWOS_LIB/ramboot.sh"
         cmd_ramboot "$@"
         ;;
@@ -2774,6 +2767,7 @@ case "${1:-}" in
         ;;
     windows|win)
         shift
+        experimental_warn windows
         source "$POWOS_LIB/windows.sh"
         cmd_windows "$@"
         ;;
@@ -2794,6 +2788,7 @@ case "${1:-}" in
         ;;
     gpu)
         shift
+        experimental_warn gpu
         source "$POWOS_LIB/gpu.sh"
         cmd_gpu "$@"
         ;;

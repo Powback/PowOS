@@ -229,32 +229,36 @@ RUN KVER="$(ls /lib/modules/ | head -1)" && \
         --kver "$KVER" "/usr/lib/modules/$KVER/initramfs.img" && \
     chmod 0600 "/usr/lib/modules/$KVER/initramfs.img"
 
-# Install bootc kernel arguments for RAM boot
-# These tell the kernel to enable our RAM overlay at boot
+# Install bootc kernel arguments (console ordering only).
+# RAM boot is NOT baked into the default image: the ramboot dracut step hangs in
+# initramfs on real hardware, so the default image — whether flashed to a USB or
+# installed to disk — boots a normal disk root. RAM boot is an explicit OPT-IN
+# (`powos ramboot enable`, which sets rd.powos.ramboot.installed=1). The dracut
+# module ships in the initramfs (above) so the opt-in works; only the default
+# karg is gone. (Was config/bootc/kargs.d/50-powos-ramboot.toml, removed in the
+# scope-B streamline: install-to-disk is the primary story.)
 RUN mkdir -p /usr/lib/bootc/kargs.d
 COPY config/bootc/kargs.d/ /usr/lib/bootc/kargs.d/
 
-# ── Lean installer variant (behind a build flag; LIVE image unaffected) ──
+# ── Lean installer variant (behind a build flag; default image unaffected) ──
 # Build with --build-arg POWOS_INSTALLER=1 to produce an installer image that:
-#   * does NOT ramboot — the ramboot dracut step hangs in initramfs on some real
-#     hardware, so the installer boots a plain disk root instead (removes
-#     50-powos-ramboot.toml so rd.powos.ramboot=1 is never baked in), and
 #   * boots STRAIGHT into the guided wizard via powos.install=1 (see
 #     config/bootc/installer/50-powos-installer.toml → powos-installer.service),
 #     and
 #   * does NOT run the live-USB first-boot self-completion (POWOS-DATA + boot
 #     menu dance) — powos-firstboot-disk.service is masked.
-# The installer-only kargs live OUTSIDE kargs.d so the default live image never
-# picks them up; they are swapped in here only when POWOS_INSTALLER=1.
+# Neither variant bakes ramboot anymore, so the variants differ only in the
+# wizard kargs + the firstboot-disk masking. The installer-only kargs live
+# OUTSIDE kargs.d so the default image never picks them up; they are added here
+# only when POWOS_INSTALLER=1.
 COPY config/bootc/installer/ /tmp/powos-installer-kargs/
 ARG POWOS_INSTALLER=0
 RUN if [ "$POWOS_INSTALLER" = "1" ]; then \
-        echo "[powos] Building INSTALLER variant: no ramboot, boot straight to the wizard"; \
-        rm -f /usr/lib/bootc/kargs.d/50-powos-ramboot.toml; \
+        echo "[powos] Building INSTALLER variant: boot straight to the wizard"; \
         cp /tmp/powos-installer-kargs/50-powos-installer.toml /usr/lib/bootc/kargs.d/; \
         systemctl mask powos-firstboot-disk.service; \
     else \
-        echo "[powos] Building LIVE variant (default)"; \
+        echo "[powos] Building default variant: normal disk boot (installable)"; \
     fi
 
 # ── Always-visible boot menu (safety net) ─────────────────────────

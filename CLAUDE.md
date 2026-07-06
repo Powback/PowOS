@@ -1,17 +1,34 @@
 # PowOS - Technical Reference
 
+> **Primary story (scope B): install PowOS to disk as a daily-driver that
+> dual-boots Windows.** RAM boot is **OFF by default** — the `rd.powos.ramboot=1`
+> karg is no longer baked into the image (it hung the boot on real hardware), so
+> the image boots a normal disk root whether flashed to USB or installed. RAM boot
+> is now an explicit opt-in (`powos ramboot enable`). The live-USB / RAM /
+> CacheFS / mobile / Windows-VHDX / reciprocal-VM / GPU-hotswap features are kept
+> in the tree but are opt-in or EXPERIMENTAL, not the primary path.
+
 ## Quick Start
 
 ```bash
 # Test in Docker (opens KDE desktop in browser)
 docker compose up
 
-# Create live USB image (requires podman)
-# Output: build/output/powos.raw (LIVE BOOT, not an installer)
+# Build the PowOS disk image (requires podman). Boots a normal desktop; install
+# to disk with `powos install`. Output: build/output/powos.raw
 just build-iso
+
+# Or the LEAN INSTALLER image — boots STRAIGHT into the guided install wizard
+# (fastest path to install-to-disk). Output: build/output/powos-installer.raw
+just build-installer
 ```
 
 Access desktop at `http://localhost:6091/vnc.html` (password: `powos`)
+
+**Install path (canonical, collapsed):** flash either image → boot (non-destructive)
+→ `sudo powos install` → `install-system`. The dangerous Anaconda installer-ISO
+build path was removed; the live-USB first-boot self-completion
+(`powos-firstboot-disk`) is part of the opt-in live-USB model, not the install path.
 
 ## Core Concept: Layered Persistence
 
@@ -640,8 +657,15 @@ Layer Stack
 
 ## Kernel Command Line Args
 
+NOTE: `rd.powos.ramboot=1` is **no longer baked into the default image** (it hung
+the boot on real hardware). The default image boots a normal disk root. RAM boot
+is an opt-in: on an installed system `powos ramboot enable` sets
+`rd.powos.ramboot.installed=1`; the live-USB auto-karg (`rd.powos.ramboot=1`) is
+only ever set by hand.
+
 ```bash
-rd.powos.ramboot=1        # Enable layered RAM boot
+rd.powos.ramboot=1        # (opt-in) live-USB layered RAM boot — NOT a default
+rd.powos.ramboot.installed=1  # (opt-in) installed OS-in-RAM (powos ramboot enable)
 rd.powos.ramsize=8G       # RAM allocation (default 8G)
 rd.powos.skip.custom=1    # ROLLBACK: Skip custom layer
 rd.powos.skip.updates=1   # ROLLBACK: Skip updates layer
@@ -1208,7 +1232,7 @@ docker exec powos python3 /var/lib/powos/src/test/tier1/test-cachefs.py      # C
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Layered RAM boot | ✅ Implemented (hardware validation pending) | OS in RAM, layers from USB; previously broken on real hardware (NEWROOT no-op), fix awaiting validation |
+| Layered RAM boot | 🧪 Opt-in (off by default), HW validation pending | OS in RAM, layers from USB; **no longer baked on by default** (`powos ramboot enable`); previously broken on real hardware (NEWROOT no-op), fix awaiting validation |
 | Hardware detection (17 profiles) | ✅ Implemented | Auto-selects on boot |
 | Layer sync (RAM→USB, 60s) | ✅ Implemented (hardware validation pending) | Whiteout translation, USB disconnect guard, failure notifications; previously broken (`--delete-after` wipe), fix awaiting validation |
 | systemd-sysext overlays | ✅ Implemented | Custom binaries merged into /usr |

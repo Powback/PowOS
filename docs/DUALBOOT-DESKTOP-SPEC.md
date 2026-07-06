@@ -32,6 +32,15 @@ layered RAM boot, layer-sync daemon, CacheFS, mobile mode, Windows-in-a-VHDX,
 reciprocal VMs, GPU-to-VM hotswap. The 2026-07-04 boot-loop that bricked the
 desktop was live-USB ramboot machinery leaking into the installed composefs path.
 
+**Scope-B follow-through (done):** `rd.powos.ramboot=1` is no longer baked into
+the default image (`config/bootc/kargs.d/50-powos-ramboot.toml` was removed), so
+the image boots a normal disk root whether flashed to USB or installed — RAM boot
+only happens if the user runs `powos ramboot enable`. The shelved features above
+still exist in the tree but are quarantined under an "Experimental (unvalidated)"
+heading in `powos help` and print a warning when run. The dangerous Anaconda
+installer-ISO build path was dropped; the canonical install is `powos install` →
+`install-system` from the booted image.
+
 ---
 
 ## 2. Hardware (the desktop)

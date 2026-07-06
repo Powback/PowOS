@@ -17,7 +17,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 CF="$ROOT/Containerfile"
 KARGS_DIR="$ROOT/config/bootc/kargs.d"
 INSTALLER_TOML="$ROOT/config/bootc/installer/50-powos-installer.toml"
-RAMBOOT_TOML="$KARGS_DIR/50-powos-ramboot.toml"
 CONSOLE_TOML="$KARGS_DIR/45-powos-console.toml"
 BUILD="$ROOT/build/build-iso.sh"
 
@@ -38,22 +37,25 @@ check "installer kargs line does NOT bake ramboot" \
 check "installer toml is NOT under kargs.d (live never picks it up)" \
     '[[ ! -f "$KARGS_DIR/50-powos-installer.toml" ]]'
 
-echo "== live kargs.d stays intact =="
-check "live ramboot toml still present" '[[ -f "$RAMBOOT_TOML" ]]'
-check "live ramboot toml still enables ramboot" 'grep -q "rd.powos.ramboot=1" "$RAMBOOT_TOML"'
+echo "== default kargs.d does NOT bake ramboot (scope-B: ramboot is opt-in) =="
+# The default image — flashed to USB or installed — must boot a normal disk root.
+# RAM boot hangs the boot on real hardware, so it is a `powos ramboot enable`
+# opt-in and must NOT be baked into any file the default image picks up.
+check "no default kargs.d file bakes rd.powos.ramboot=1" \
+    '! grep -rq "rd.powos.ramboot=1" "$KARGS_DIR"'
+check "old 50-powos-ramboot.toml is gone from kargs.d" \
+    '[[ ! -f "$KARGS_DIR/50-powos-ramboot.toml" ]]'
 
 echo "== console ordering (both variants) =="
 check "console kargs.d exists" '[[ -f "$CONSOLE_TOML" ]]'
 check "console kargs makes tty0 the last/primary console" 'grep -q "console=tty0" "$CONSOLE_TOML"'
-# The console file must sort BEFORE the ramboot/installer files so tty0 lands
-# after bib's console=ttyS0 but our own kargs stay after that — 45- < 50-.
+# The console file must sort BEFORE the installer 50- file so tty0 lands after
+# bib's console=ttyS0 but our own kargs stay after that — 45- < 50-.
 check "console file sorts before the 50- kargs files" \
-    '[[ "$(basename "$CONSOLE_TOML")" < "50-powos-ramboot.toml" ]]'
+    '[[ "$(basename "$CONSOLE_TOML")" < "50-powos-installer.toml" ]]'
 
 echo "== Containerfile installer wiring =="
 check "Containerfile declares POWOS_INSTALLER arg" 'grep -q "ARG POWOS_INSTALLER" "$CF"'
-check "Containerfile removes ramboot toml when installer" \
-    'grep -q "rm -f /usr/lib/bootc/kargs.d/50-powos-ramboot.toml" "$CF"'
 check "Containerfile installs installer kargs when installer" \
     'grep -q "50-powos-installer.toml" "$CF"'
 check "Containerfile masks firstboot-disk in installer variant" \

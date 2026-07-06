@@ -35,16 +35,44 @@ bad update or a broken package never means a reinstall.
 
 ## Two ways to run PowOS
 
-PowOS is one image with two first-class personalities. Pick whichever fits — the
-same source, same CLI, same customization model backs both.
+PowOS's **primary story is install-to-disk**: a daily-driver desktop that
+dual-boots Windows. The live-USB "run from RAM anywhere" mode is the original
+vision, kept as an explicit opt-in. The same source, same CLI, same customization
+model backs both.
 
-### 1. Live USB — the OS runs from RAM
+> **RAM boot is OFF by default.** The `rd.powos.ramboot=1` karg used to be baked
+> into the image, but the ramboot dracut step hangs the boot on real hardware, so
+> it is no longer a default. Whether you flash the image to a USB or install it to
+> disk, it **boots a normal disk root**. RAM boot is an opt-in you enable
+> deliberately (`powos ramboot enable`). See [Feature Status](#feature-status).
 
-Flash the image to a USB SSD and boot it on any machine. On real hardware the
-dracut module copies the layered OS into a RAM overlay, so the whole system runs
-from memory: **pull the USB and your session keeps running** (the OS is in RAM).
-Changes you make land in RAM and sync to the USB's persistent layers every 60s, so
-they survive reboots — and you can roll back individual layers.
+### 1. Installed — a primary/daily-driver OS (the main path)
+
+Install PowOS to an internal disk and run it like any bootc desktop:
+
+- **Normal disk boot.** Boots straight to the desktop; nothing runs from RAM
+  unless you opt in with `powos ramboot enable` (a composefs-safe copy-to-tmpfs
+  behind `rd.powos.ramboot.installed=1` — deliberately *not* the live auto-karg,
+  because overlaying a composefs root on itself once caused a boot loop). That opt-in
+  is EXPERIMENTAL.
+- **Updates are a pull.** `bootc upgrade` / `powos upgrade` / `powos update os`
+  fetch a new base image; `powos update packages` handles layered packages.
+- **Config-as-code.** Your setup lives in the repo + your cloud backup, so a
+  reinstall restores your environment instead of a day of reconfiguring (the
+  "never configure this again" goal — restore loop is [partially implemented](#feature-status)).
+- **Dual-boots Windows** for the games Linux can't run (see below).
+
+Flash the image, boot it (non-destructive), then run `sudo powos install`. The
+installed dual-boot design, disk layouts, and rationale live in
+[`docs/DUALBOOT-DESKTOP-SPEC.md`](docs/DUALBOOT-DESKTOP-SPEC.md).
+
+### 2. Live USB — the OS runs from RAM (opt-in)
+
+Flash the image to a USB SSD and boot it on any machine. This mode is opt-in:
+enable RAM boot (`powos ramboot enable`) and the dracut module copies the layered
+OS into a RAM overlay, so the whole system runs from memory — **pull the USB and
+your session keeps running**. Changes land in RAM and sync to the USB's persistent
+layers every 60s, so they survive reboots — and you can roll back individual layers.
 
 - Take one drive between machines; hardware auto-detection reconfigures on each boot.
 - Your customizations persist to the USB; roll back per layer if something breaks.
@@ -53,27 +81,8 @@ they survive reboots — and you can roll back individual layers.
 
 > **Status:** layered RAM boot and layer-sync are **implemented but pending
 > hardware validation** — both were previously broken on real hardware and the
-> fixes have not yet been re-validated on metal. See [Feature Status](#feature-status).
-
-### 2. Installed — a primary/daily-driver OS
-
-Install PowOS to an internal disk and run it like any bootc desktop:
-
-- **Normal disk boot by default.** The live-USB RAM-boot machinery is a *live-USB*
-  thing. On an installed system it is **opt-in and EXPERIMENTAL**
-  (`powos ramboot enable`, a separate composefs-safe copy-to-tmpfs behind
-  `rd.powos.ramboot.installed=1` — deliberately *not* the live auto-karg, because
-  overlaying a composefs root on itself once caused a boot loop). Installed PowOS
-  boots normally unless you explicitly opt in.
-- **Updates are a pull.** `bootc upgrade` / `powos upgrade` / `powos update os`
-  fetch a new base image; `powos update packages` handles layered packages.
-- **Config-as-code.** Your setup lives in the repo + your cloud backup, so a
-  reinstall restores your environment instead of a day of reconfiguring (the
-  "never configure this again" goal — restore loop is [partially implemented](#feature-status)).
-- **Dual-boots Windows** for the games Linux can't run (see below).
-
-The installed dual-boot design, disk layouts, and rationale live in
-[`docs/DUALBOOT-DESKTOP-SPEC.md`](docs/DUALBOOT-DESKTOP-SPEC.md).
+> fixes have not yet been re-validated on metal. RAM boot is no longer baked on by
+> default. See [Feature Status](#feature-status).
 
 ---
 
@@ -159,10 +168,17 @@ initramfs. On real hardware the full RAM boot with layers engages automatically.
 ### Build the image
 
 ```bash
-just build-iso            # builds the live USB image → build/output/powos.raw
-                          # (requires podman + bootc-image-builder)
+just build-iso            # builds the PowOS disk image → build/output/powos.raw
+                          # boots a normal desktop; install with `powos install`
+just build-installer      # LEAN INSTALLER raw → boots STRAIGHT to the install
+                          # wizard (fastest path to install-to-disk)
 just build-image          # build the OS container image only (faster, for testing)
 ```
+
+Both images boot a normal disk root (no RAM boot by default) and are
+non-destructive to boot — nothing is installed until you run `powos install` and
+confirm a target. Flash **`powos.raw`** for a full desktop you install *from*, or
+**`powos-installer.raw`** to jump straight into the wizard.
 
 The base image is a build ARG (default `ghcr.io/ublue-os/bazzite-nvidia-open:stable`
 for RTX / GTX-16+ open modules). Override for other GPUs:
@@ -183,15 +199,17 @@ sudo ./build/install-to-usb.sh /dev/sdX          # has safety checks (refuses in
 # or: Balena Etcher / Rufus (DD mode) / dd
 ```
 
-On the **first boot from the real device**, `powos-firstboot-disk.service` runs
-`install-to-usb.sh --self-complete`: it creates POWOS-DATA filling the whole
-device and adds the Install/Recovery boot entries. Add-only, marker-gated, can't
-brick boot.
+On the **first boot from the real device** (live-USB model only),
+`powos-firstboot-disk.service` runs `install-to-usb.sh --self-complete`: it
+creates POWOS-DATA filling the whole device and adds the Install/Recovery boot
+entries. Add-only, marker-gated, can't brick boot. (The lean installer image
+skips this — it boots straight to the wizard.)
 
-### Install to disk
+### Install to disk (the primary path)
 
-The USB boots with a 5-second boot menu: **Live PowOS** (default), **Install
-PowOS**, and Recovery entries. Installing launches a guided wizard.
+Boot the flashed image (it boots a normal desktop, or straight to the wizard for
+`powos-installer.raw`). Booting is non-destructive; nothing is installed until you
+run the installer and confirm a target.
 
 ```bash
 sudo powos install                    # guided install wizard (TUI/GUI)
@@ -418,7 +436,7 @@ Adapted from [`CLAUDE.md`](CLAUDE.md) — the authoritative status source.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Layered RAM boot (live USB) | ✅ Implemented, HW validation pending | OS in RAM, layers from USB; previously broken on real hardware, fix awaiting validation |
+| Layered RAM boot (live USB) | 🧪 Opt-in, HW validation pending | OS in RAM, layers from USB; **no longer baked on by default** (`powos ramboot enable`); previously broken on real hardware, fix awaiting validation |
 | Hardware detection (17 profiles) | ✅ Implemented | Auto-selects on boot |
 | Layer sync (RAM→USB, 60s) | ✅ Implemented, HW validation pending | Whiteout translation, USB disconnect guard, failure notifications |
 | systemd-sysext overlays | ✅ Implemented | Custom binaries merged into /usr |

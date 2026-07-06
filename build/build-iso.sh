@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# build-iso.sh - Build bootable PowOS live USB image from Containerfile
+# build-iso.sh - Build a bootable PowOS raw disk image from the Containerfile
 #
-# IMPORTANT: PowOS uses a RAW DISK IMAGE (not an installer ISO) by default.
-# The raw image is written directly to a USB drive and boots as a live system.
-# NO INSTALLATION OCCURS - the OS runs from RAM, internal drives are untouched.
+# PRIMARY STORY: install PowOS to disk as a daily-driver that dual-boots Windows.
+# Both build modes produce a RAW DISK IMAGE you flash to a USB; booting it is
+# non-destructive (nothing is installed until you run `powos install` and confirm
+# a target). Neither mode RAM-boots by default — RAM boot is an opt-in
+# (`powos ramboot enable`). Flash the image, boot it, run `powos install`.
 #
 # This script:
 # 1. Builds the PowOS container image
@@ -11,10 +13,10 @@
 # 3. Outputs to build/output/powos.raw
 #
 # Usage:
-#   ./build/build-iso.sh              # Build live USB image (default, safe)
-#   ./build/build-iso.sh live-usb     # Same as above
-#   ./build/build-iso.sh installer-usb # Build LEAN INSTALLER raw (no ramboot → wizard)
-#   ./build/build-iso.sh installer    # Build Anaconda installer ISO (ERASES TARGET DISK!)
+#   ./build/build-iso.sh              # Build the PowOS image (default) — boots
+#                                     #   normally, run `powos install` to install
+#   ./build/build-iso.sh installer-usb # LEAN INSTALLER raw: boots STRAIGHT into
+#                                     #   the guided install wizard (fastest path)
 #   ./build/build-iso.sh test         # Build container only (for testing)
 #
 # Requirements:
@@ -28,10 +30,9 @@ POWOS_ROOT="$(dirname "$SCRIPT_DIR")"
 OUTPUT_DIR="${POWOS_ROOT}/build/output"
 IMAGE_NAME="localhost/powos:latest"
 RAW_NAME="powos.raw"
-ISO_NAME="powos-installer.iso"
 # Lean installer VARIANT (POWOS_INSTALLER=1): a separate image + raw that boots
-# with NO ramboot straight into the guided install wizard. Distinct from the
-# Anaconda installer ISO above (which uses ISO_NAME).
+# straight into the guided install wizard. This is the fastest path to an
+# install-to-disk; the default image installs too, just from a full desktop.
 INSTALLER_IMAGE_NAME="localhost/powos-installer:latest"
 INSTALLER_RAW_NAME="powos-installer.raw"
 
@@ -187,72 +188,11 @@ build_live_usb() {
     fi
 }
 
-# ─────────────────────────────────────────────────────────────────
-# Step 2b: Build Anaconda installer ISO (DANGEROUS - WIPES TARGET DISK)
-# WARNING: This creates an installer that will ERASE the target drive!
-# The installer auto-runs on boot and wipes ALL PARTITIONS.
-# Only use this if you intend to install PowOS permanently to a drive.
-# ─────────────────────────────────────────────────────────────────
-build_installer_iso() {
-    log_step "Step 2/3: Building Anaconda installer ISO"
-
-    echo ""
-    echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║  DANGER: INSTALLER ISO MODE                                ║${NC}"
-    echo -e "${RED}║                                                            ║${NC}"
-    echo -e "${RED}║  This creates an INSTALLER, not a live boot image.         ║${NC}"
-    echo -e "${RED}║  When booted, it will ERASE the target drive.              ║${NC}"
-    echo -e "${RED}║                                                            ║${NC}"
-    echo -e "${RED}║  For a safe live USB (recommended), use:                   ║${NC}"
-    echo -e "${RED}║    ./build/build-iso.sh live-usb                           ║${NC}"
-    echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-
-    read -p "Type 'INSTALL' to confirm you want an installer ISO: " confirm
-    if [[ "$confirm" != "INSTALL" ]]; then
-        log "Aborted. Use 'live-usb' mode for safe live boot image."
-        exit 0
-    fi
-
-    mkdir -p "$OUTPUT_DIR"
-
-    log "Using bootc-image-builder to create installer ISO..."
-    log "Output: ${OUTPUT_DIR}/${ISO_NAME}"
-
-    if podman run \
-        --rm \
-        -it \
-        --privileged \
-        --pull=newer \
-        --security-opt label=type:unconfined_t \
-        -v "${OUTPUT_DIR}:/output" \
-        -v "./build/bootc-config.toml:/config.toml:ro" \
-        -v /var/lib/containers/storage:/var/lib/containers/storage \
-        quay.io/centos-bootc/bootc-image-builder:latest \
-        --type anaconda-iso \
-        --rootfs btrfs \
-        --local \
-        --config /config.toml \
-        "$IMAGE_NAME" 2>&1 | tee "${OUTPUT_DIR}/iso-build.log"; then
-        log_success "Installer ISO built successfully"
-    else
-        log_error "ISO build failed - see ${OUTPUT_DIR}/iso-build.log"
-        exit 1
-    fi
-
-    # bootc-image-builder writes the fresh ISO to a known path under the
-    # output dir (bootiso/install.iso). Avoid recursive find - it can pick
-    # up a stale artifact from a previous run.
-    local iso_file="${OUTPUT_DIR}/bootiso/install.iso"
-
-    if [[ -f "$iso_file" ]]; then
-        mv "$iso_file" "${OUTPUT_DIR}/${ISO_NAME}"
-        log_success "Installer ISO ready: ${OUTPUT_DIR}/${ISO_NAME}"
-    else
-        log_error "Expected installer ISO not found: $iso_file"
-        exit 1
-    fi
-}
+# NOTE: The Anaconda installer-ISO path (bootc-image-builder --type anaconda-iso,
+# which auto-wipes the target disk) was REMOVED in the scope-B streamline. The
+# canonical install path is `powos install` → install-system, booted from the
+# image built here. The git history retains the old build_installer_iso() if it
+# is ever needed again.
 
 # ─────────────────────────────────────────────────────────────────
 # Lean installer VARIANT (POWOS_INSTALLER=1)
@@ -351,10 +291,10 @@ show_installer_variant_results() {
     echo ""
     echo "    sudo dd if=${raw_path} of=/dev/sdX bs=4M status=progress conv=fsync"
     echo ""
-    echo "  Differences from the live image:"
-    echo "    • no rd.powos.ramboot=1 karg (boots a plain disk root)"
+    echo "  Differences from the default image:"
     echo "    • powos.install=1 + systemd.unit=multi-user.target (wizard on tty1)"
     echo "    • powos-firstboot-disk.service masked (no self-completion)"
+    echo "  (Neither image RAM-boots by default — that is a `powos ramboot enable` opt-in.)"
     echo ""
 }
 
@@ -370,16 +310,20 @@ show_live_results() {
 
     echo ""
     echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║  PowOS Live USB Image Built Successfully                    ║${NC}"
+    echo -e "${GREEN}║  PowOS Image Built Successfully                             ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "  Image File: $raw_path"
     echo "  Size:       $raw_size"
     echo ""
-    echo "  SAFE: Booting is non-destructive. The USB boot menu offers:"
-    echo "    • PowOS Live         - run from RAM, internal drives untouched (default)"
-    echo "    • Install PowOS      - interactive installer (pick disk, dual-boot Windows)"
-    echo "  Nothing is installed unless you choose 'Install' and confirm a target."
+    echo "  PRIMARY PATH — install PowOS to disk (dual-boot Windows):"
+    echo "    1. Flash this image to a USB (below), boot it (non-destructive)"
+    echo "    2. Run:  sudo powos install"
+    echo "  Nothing is installed unless you run 'powos install' and confirm a target."
+    echo ""
+    echo "  The image boots a normal desktop (no RAM boot by default). RAM boot is"
+    echo "  an opt-in: 'powos ramboot enable'. For a build that jumps STRAIGHT to the"
+    echo "  install wizard on boot, use:  ./build/build-iso.sh installer-usb"
     echo ""
     echo "  Write to USB drive:"
     echo "    sudo ./build/install-to-usb.sh /dev/sdX"
@@ -389,31 +333,6 @@ show_live_results() {
     echo "    sudo ./build/install-to-usb.sh --setup-data-only /dev/sdX"
     echo ""
     echo "  Boot from the USB drive (select in BIOS/UEFI boot menu)"
-    echo ""
-}
-
-show_installer_results() {
-    log_step "Step 3/3: Build Complete"
-
-    local iso_path="${OUTPUT_DIR}/${ISO_NAME}"
-    local iso_size
-    iso_size=$(du -h "$iso_path" 2>/dev/null | cut -f1 || echo "unknown")
-
-    echo ""
-    echo -e "${YELLOW}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║  PowOS Installer ISO Built                                 ║${NC}"
-    echo -e "${YELLOW}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo "  ISO File: $iso_path"
-    echo "  Size:     $iso_size"
-    echo ""
-    echo -e "  ${RED}WARNING: This installer ERASES the target drive when booted!${NC}"
-    echo "  Internal drives, SD cards, and other storage will be wiped."
-    echo ""
-    echo "  Write to USB drive:"
-    echo "    sudo dd if=${iso_path} of=/dev/sdX bs=4M status=progress"
-    echo ""
-    echo "  When booted, Anaconda will install PowOS to the target drive."
     echo ""
 }
 
@@ -519,19 +438,22 @@ main() {
     mkdir -p "$OUTPUT_DIR"
 
     case "$mode" in
-        live-usb|full|usb)
-            # Default: build a safe live USB image (raw-efi)
+        live-usb|full|usb|default|desktop)
+            # Default: build the PowOS raw image (raw-efi). Boots a normal desktop
+            # (no RAM boot); install to disk with `powos install`.
             check_requirements
             build_container_image
             build_live_usb
             show_live_results
             ;;
         installer|iso)
-            # Dangerous: build an Anaconda installer ISO
-            check_requirements
-            build_container_image
-            build_installer_iso
-            show_installer_results
+            # The Anaconda installer-ISO path was removed (scope-B streamline).
+            # Use 'installer-usb' for a boot-straight-to-wizard raw image, or the
+            # default mode + `powos install`.
+            log_error "The Anaconda installer-ISO mode was removed."
+            log_error "Use './build/build-iso.sh installer-usb' (boots to the wizard)"
+            log_error "or the default mode + 'powos install' after booting."
+            exit 1
             ;;
         installer-usb|lean-installer)
             # Lean installer VARIANT: raw image that boots (no ramboot) straight
@@ -554,24 +476,21 @@ main() {
             echo ""
             echo "Usage: $0 [mode]"
             echo ""
-            echo "  live-usb   - Build live USB image (DEFAULT, SAFE)"
-            echo "               Boots directly, internal drives untouched"
+            echo "  (default)  - Build the PowOS image (raw-efi). Boots a normal"
+            echo "               desktop; install to disk with 'powos install'."
             echo "               Output: build/output/powos.raw"
             echo ""
             echo "  installer-usb - Build LEAN INSTALLER raw image (SAFE to flash)"
-            echo "               Boots with NO ramboot straight into the install"
-            echo "               wizard on tty1. Nothing wiped without confirming."
+            echo "               Boots STRAIGHT into the guided install wizard on"
+            echo "               tty1. Nothing wiped without confirming a target."
             echo "               Output: build/output/powos-installer.raw"
-            echo ""
-            echo "  installer  - Build Anaconda installer ISO (DANGEROUS)"
-            echo "               WARNING: ERASES target drive on boot!"
-            echo "               Output: build/output/powos-installer.iso"
             echo ""
             echo "  test       - Build container image only (for testing)"
             echo ""
-            echo "  Recommended workflow:"
-            echo "    ./build/build-iso.sh live-usb"
+            echo "  PRIMARY workflow (install to disk, dual-boot Windows):"
+            echo "    ./build/build-iso.sh              # or: installer-usb"
             echo "    sudo ./build/install-to-usb.sh /dev/sdX"
+            echo "    # boot the USB, then:  sudo powos install"
             exit 1
             ;;
     esac
