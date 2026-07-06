@@ -99,7 +99,12 @@ RUN rm -rf /usr/lib/powos/dracut
 # build-helpers.sh also expected at /var/lib/powos/lib/ (overlay-manager
 # sources it from there when building extensions).
 RUN mkdir -p /var/lib/powos/lib && cp /usr/lib/powos/build-helpers.sh /var/lib/powos/lib/
-COPY bazzite/system_files/ /tmp/bazzite/system_files/
+# bazzite/system_files/ was previously copied here only for the handheld
+# device overlays (steamdeck / rog-ally / legion-go) to source from — those
+# overlays have been dropped for the desktop image, so this ~100MB COPY (and
+# its vendor-bazzite.sh clone) is no longer needed. Vendor script is still
+# invoked by the ISO build (build/build-iso.sh) for the USB installer
+# variant, not by the default desktop container build.
 COPY sources/ /var/lib/powos/sources/
 COPY bin/ /usr/bin/
 COPY config/ /etc/powos/
@@ -160,29 +165,55 @@ COPY systemd/plasmalogin.service.d/ /usr/lib/systemd/system/plasmalogin.service.
 # executable" for each unit. Normalize so any build context yields clean units.
 RUN chmod +x /usr/bin/powos-safemode /usr/bin/powos-install-wizard /usr/bin/powos-firstboot-apply /usr/bin/powos-firstboot-disk && \
     chmod 0644 /usr/lib/systemd/system/powos-*.service && \
-    systemctl enable powos-ramboot-init.service powos-layer-sync.service \
-        powos-cachefs-sync.service powos-installer.service \
-        powos-hwinfo.service powos-ramboot-healthy.service \
-        powos-safemode.service powos-firstboot.service \
-        powos-firstboot-disk.service \
-        powos-init.service powos-hardware.service powos-overlay.service \
-        powos-hydrate.service && \
+    # Essentials for every deployment: init dirs, detect hardware, merge sysexts,
+    # cache hw info. Installer/safemode/firstboot are gated by kargs+condition
+    # so are safe to leave enabled — they're no-ops on a plain boot.
+    systemctl enable \
+        powos-init.service \
+        powos-hardware.service \
+        powos-overlay.service \
+        powos-hwinfo.service \
+        powos-installer.service \
+        powos-safemode.service \
+        powos-firstboot.service && \
+    # USB-live-only services (ramboot pipeline, layer-sync, cachefs-sync,
+    # firstboot-disk) are NOT enabled by default. They only make sense on the
+    # USB live image (rd.powos.ramboot=1) and running them on installed systems
+    # is either a no-op with noise, or actively destructive (firstboot-disk
+    # tried to repartition the boot NVMe on installed machines). The USB live
+    # image build (POWOS_INSTALLER=0 with the ramboot karg baked in) enables
+    # them separately.
+    #
+    # powos-hydrate.service is also NOT enabled by default: it runs on every
+    # boot even when nothing is configured, adds ~seconds to boot time, and
+    # has historically been the source of "why did boot fail" incidents. It's
+    # shipped but must be `systemctl enable`'d explicitly by users who set
+    # POWOS_GIT_REPO and want git-based state hydration.
     systemctl enable plasmalogin.service && \
     systemctl add-wants graphical.target plasmalogin.service && \
     systemctl set-default graphical.target && \
     systemctl disable NetworkManager-wait-online.service
 
-# Rebuild initramfs with our dracut module
-# This embeds the RAM overlay setup into the boot process.
-# bootc boots /usr/lib/modules/<kver>/initramfs.img (NOT /boot), so write
-# there explicitly (same pattern as containers/build_files/build-initramfs).
-# A failed rebuild must fail the image build — a silently stale initramfs
-# means ramboot never activates on real hardware.
-RUN KVER="$(ls /lib/modules/ | head -1)" && \
-    dracut --force --no-hostonly --reproducible --zstd \
-        --add ostree --add fido2 --add powos-ramboot \
-        --kver "$KVER" "/usr/lib/modules/$KVER/initramfs.img" && \
-    chmod 0600 "/usr/lib/modules/$KVER/initramfs.img"
+# The dracut ramboot module ships in the tree (lib/dracut/90powos-ramboot/) so
+# a POWOS_INSTALLER=1 or explicit USB-live build can add it; the DEFAULT
+# desktop-install image inherits Bazzite's ready-made initramfs and does NOT
+# do this rebuild. Reasons:
+#   * every rebuild is ~1–2 minutes of build time,
+#   * the ramboot module only fires on `rd.powos.ramboot=1` which we do not
+#     set as a default karg, so on installed systems the extra initramfs
+#     content is pure dead weight,
+#   * initramfs regeneration was one of the historical boot-hang triggers.
+# Rebuild is gated behind POWOS_BUILD_RAMBOOT=1 (opt-in for the USB variant).
+ARG POWOS_BUILD_RAMBOOT=0
+RUN if [ "$POWOS_BUILD_RAMBOOT" = "1" ]; then \
+        KVER="$(ls /lib/modules/ | head -1)" && \
+        dracut --force --no-hostonly --reproducible --zstd \
+            --add ostree --add fido2 --add powos-ramboot \
+            --kver "$KVER" "/usr/lib/modules/$KVER/initramfs.img" && \
+        chmod 0600 "/usr/lib/modules/$KVER/initramfs.img"; \
+    else \
+        echo "[powos] Skipping ramboot initramfs rebuild (install variant); base Bazzite initramfs stays."; \
+    fi
 
 # Install bootc kernel arguments (console ordering only).
 # RAM boot is NOT baked into the default image: the ramboot dracut step hangs in
