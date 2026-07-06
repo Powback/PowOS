@@ -27,6 +27,16 @@
 #   ghcr.io/ublue-os/bazzite-nvidia:stable       NVIDIA closed (Maxwell/Pascal)
 #   ghcr.io/ublue-os/bazzite:stable              AMD / Intel
 ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia-open:stable
+
+# Staging stage — assemble every file drop into one scratch tree so the final
+# image gets a single COPY layer instead of one per source directory. Nothing
+# from this stage ships; it exists purely to consolidate layers.
+FROM scratch AS staging
+COPY bin/                                 /usr/bin/
+COPY lib/                                 /usr/lib/powos/
+COPY desktop/plasmoid/                    /usr/share/plasma/plasmoids/
+COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
+
 FROM ${BASE_IMAGE}
 
 LABEL org.opencontainers.image.title="PowOS"
@@ -38,27 +48,19 @@ RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
     echo "powos:powos" | chpasswd && \
     systemctl enable sshd.service
 
-# PowOS CLI + helper libraries. Users run `powos ...` — nothing autoloads.
-COPY bin/  /usr/bin/
-COPY lib/  /usr/lib/powos/
+# One layer for every file we ship (CLI + libs + plasmoids + KDE default).
+COPY --from=staging / /
 
-# KDE Plasma widgets (users add them to their panel via KDE settings if wanted).
-COPY desktop/plasmoid/ /usr/share/plasma/plasmoids/
-
-# KDE Plasma default: no auto-suspend on idle. Screen lock still works.
-# System-wide default; users' explicit overrides in ~/.config still win.
-COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
-
-# Exec bits + SELinux relabel + silence setroubleshootd (which crash-loops
-# processing the initial denials from our /usr additions on first boot).
+# Exec bits + SELinux relabel + silence setroubleshootd (crash-loops processing
+# initial denials from our /usr additions on first boot) + src-commit marker,
+# all in a single layer so post-copy fixups don't multiply layers either.
+# POWOS_SRC_COMMIT is used by `powos self pull` to know the true base when
+# comparing local edits against upstream. Injected by CI:
+#   podman build --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD)" ...
+ARG POWOS_SRC_COMMIT=""
 RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot 2>/dev/null || true && \
     find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
-    restorecon -RF /usr /etc 2>/dev/null || true
-
-# Record the commit this image was built from (used by `powos self pull` to know
-# the true base when comparing local edits against upstream). Injected by CI:
-#   podman build --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD)" ...
-ARG POWOS_SRC_COMMIT=""
-RUN mkdir -p /var/lib/powos && \
+    restorecon -RF /usr /etc 2>/dev/null || true && \
+    mkdir -p /var/lib/powos && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /var/lib/powos/.powos-src-commit
