@@ -9,11 +9,17 @@
 #      first boot — that's what `powos self test/pull/push` operates on.
 #   5. Ship the two KDE Plasma widgets + an XDG autostart script that adds
 #      them to the Plasma panel exactly ONCE per user on first login.
-#   6. Ship a system-wide KDE no-auto-suspend default
+#   6. Ship a system-wide KDE no-auto-suspend default.
+#   7. Install a desktop peripheral stack: OpenRGB (motherboard/RAM/case),
+#      Piper (Logitech gaming mouse) with ratbagd, and LogiOps for Logitech
+#      G-key macros. Daemons enabled at boot; user launches OpenRGB/Piper
+#      GUIs from the app menu.
 #
-# That is EVERYTHING. No PowOS service is enabled. No sysext is pre-built.
-# No kargs.d is modified. No initramfs is rebuilt. No podman/distrobox
-# reinstall (Bazzite already has them). Only one tmpfiles.d entry, and it
+# All new services here are userspace-plus-config: ratbagd is DBus-activated
+# so enabling is a no-op until an app calls it; logid has a safe empty
+# device list so the daemon starts and idles. No initramfs is rebuilt.
+# No sysext is pre-built. No kargs.d is modified. No podman/distrobox
+# reinstall (Bazzite already has them). The only tmpfiles.d entry we add
 # just seeds /var from /usr — cannot break the boot path.
 #
 # The rationale: every previous "bootc upgrade bricked my machine" incident
@@ -48,6 +54,7 @@ COPY .snapshot/                           /usr/lib/powos/src/
 COPY desktop/plasmoid/                    /usr/share/plasma/plasmoids/
 COPY desktop/autostart/                   /etc/xdg/autostart/
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
+COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
 
 FROM ${BASE_IMAGE}
@@ -60,6 +67,29 @@ LABEL org.opencontainers.image.description="Minimal PowOS layer on Bazzite (CLI 
 RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
     echo "powos:powos" | chpasswd && \
     systemctl enable sshd.service
+
+# Desktop peripheral stack (OpenRGB, Piper, LogiOps).
+#   openrgb  motherboard/RAM/case RGB via SMBus (i2c_dev/i2c_piix4 already
+#            loaded in the kernel; udev rules already shipped by Bazzite)
+#   piper    Logitech gaming mouse config GUI; pulls libratbag + ratbagd
+#   logiops  Logitech G-key macros + advanced button mapping (COPR — not
+#            in main Fedora because upstream release cadence is slow); the
+#            kylegospo copr is the community-maintained build the ublue
+#            ecosystem uses.
+# Native RPMs beat Flatpak here — Flatpak Piper alone pulls ~200MB of the
+# GNOME Platform runtime; RPMs total ~15-20MB and share Bazzite's Qt/KF6
+# runtime that Plasma already uses.
+# Add the kylegospo COPR .repo file directly rather than `dnf5 copr enable`
+# (which requires dnf5-plugins-core preinstalled — not guaranteed in every
+# Bazzite base variant). The .repo endpoint is the OFFICIAL COPR-served URL,
+# so this stays in lockstep with whatever kylegospo publishes. rpm -E %fedora
+# resolves 44 on Bazzite 44 base, forward-compatible when the base advances.
+RUN curl -fsSL "https://copr.fedorainfracloud.org/coprs/kylegospo/logiops/repo/fedora-$(rpm -E %fedora)/kylegospo-logiops-fedora-$(rpm -E %fedora).repo" \
+        -o /etc/yum.repos.d/_copr_kylegospo-logiops.repo && \
+    dnf5 -y install --setopt=install_weak_deps=False \
+        openrgb piper logiops && \
+    dnf5 -y clean all && \
+    systemctl enable ratbagd.service logid.service
 
 # One layer for every file we ship (CLI + libs + plasmoids + KDE default).
 COPY --from=staging / /
