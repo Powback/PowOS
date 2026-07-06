@@ -48,10 +48,19 @@ self_baked_sha() {
 self_git_dirty() { [[ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]]; }
 
 # Read-only /usr (installed bootc/composefs) → can't cp into /usr directly.
+#
+# Kernel-authoritative writability probe. The old implementation compared
+# findmnt OPTIONS for `ro` on /usr OR /, but on bootc composefs the ROOT
+# composefs stays `ro` even after `bootc usr-overlay` adds a writable
+# overlay at /usr — so the fallthrough falsely reported "ro" and `powos
+# self test` aborted every time on installed systems.
 self_usr_ro() {
-    findmnt -no OPTIONS /usr 2>/dev/null | grep -qw ro && return 0
-    findmnt -no OPTIONS /    2>/dev/null | grep -qw ro && return 0
-    return 1
+    local probe="/usr/.self-usr-ro-probe.$$"
+    if : > "$probe" 2>/dev/null; then
+        rm -f "$probe" 2>/dev/null
+        return 1  # writable
+    fi
+    return 0  # read-only
 }
 
 # ══════════════════════════════════════════════════════════════════
