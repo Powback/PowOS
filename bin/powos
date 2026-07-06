@@ -1523,9 +1523,12 @@ cmd_hardware() {
 
 cmd_version() {
     echo "PowOS version $VERSION"
-    # The commit the bundled source (/var/lib/powos/src) was built from, baked
-    # into the image so `powos self` knows its true base.
-    local marker="/var/lib/powos/.powos-src-commit"
+    # The commit the running image was built from. Lives under /usr/lib/powos
+    # (part of the read-only OS image) so it always reflects the CURRENTLY
+    # booted image after a bootc upgrade/switch — /var was a bootc trap since
+    # it only gets seeded on the initial stateroot deploy.
+    local marker="/usr/lib/powos/.powos-src-commit"
+    [[ -r "$marker" ]] || marker="/var/lib/powos/.powos-src-commit"  # legacy fallback
     if [[ -r "$marker" ]]; then
         local sha; sha="$(tr -d '[:space:]' < "$marker" 2>/dev/null)"
         [[ -n "$sha" ]] && echo "Source commit: $sha"

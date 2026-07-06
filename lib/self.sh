@@ -10,15 +10,26 @@
 #
 # The bundled source (/var/lib/powos/src) ships as a plain FILE SNAPSHOT with no
 # .git. The image bakes the exact commit it came from into
-# /var/lib/powos/.powos-src-commit so `self pull` can attach to that TRUE base
+# /usr/lib/powos/.powos-src-commit so `self pull` can attach to that TRUE base
 # and treat any bundle edits as pending changes — instead of the old
 # `git checkout -f` that blindly reset to master and nuked local work.
+# Marker path note: was /var/lib/powos/... historically, moved to /usr/lib/...
+# because bootc doesn't re-seed /var on switch/upgrade so the /var marker went
+# stale (or missing) after any bootc operation. /usr is part of the OS image.
 set -uo pipefail
 source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
 POWOS_TAG=self
 
 SELF_SRC="${POWOS_SRC:-/var/lib/powos/src}"
-SELF_MARKER="${POWOS_SRC_COMMIT_FILE:-/var/lib/powos/.powos-src-commit}"
+# Prefer /usr (current-image truth); fall back to /var for images built
+# before the move — will disappear once every machine has upgraded past it.
+if [[ -n "${POWOS_SRC_COMMIT_FILE:-}" ]]; then
+    SELF_MARKER="$POWOS_SRC_COMMIT_FILE"
+elif [[ -r /usr/lib/powos/.powos-src-commit ]]; then
+    SELF_MARKER="/usr/lib/powos/.powos-src-commit"
+else
+    SELF_MARKER="/var/lib/powos/.powos-src-commit"
+fi
 SELF_UPSTREAM="${POWOS_UPSTREAM:-https://github.com/Powback/PowOS.git}"
 
 # Indent a stream by two spaces without sed (repo owner forbids sed).

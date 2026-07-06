@@ -57,10 +57,14 @@ COPY --from=staging / /
 # POWOS_SRC_COMMIT is used by `powos self pull` to know the true base when
 # comparing local edits against upstream. Injected by CI:
 #   podman build --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD)" ...
+# Marker lives under /usr/lib/powos/ (part of the read-only OS image) so it
+# ALWAYS reflects the currently-booted image. Writing it to /var was a bug:
+# bootc only seeds /var on the FIRST deployment of a stateroot, so a
+# `bootc switch` or `bootc upgrade` from a machine with an existing /var
+# would silently keep the old (or missing) marker.
 ARG POWOS_SRC_COMMIT=""
 RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot 2>/dev/null || true && \
     find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
-    restorecon -RF /usr /etc 2>/dev/null || true && \
-    mkdir -p /var/lib/powos && \
-    printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /var/lib/powos/.powos-src-commit
+    printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
+    restorecon -RF /usr /etc 2>/dev/null || true

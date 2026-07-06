@@ -63,7 +63,7 @@ log_step() {
 }
 
 # The commit this build's source snapshot came from. Baked into the image at
-# /var/lib/powos/.powos-src-commit (see Containerfile) so `powos self pull` knows
+# /usr/lib/powos/.powos-src-commit (see Containerfile) so `powos self pull` knows
 # its TRUE base and never has to blindly reset to master. "unknown" when not in a
 # git checkout (e.g. a tarball build).
 powos_src_commit() {

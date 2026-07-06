@@ -294,7 +294,7 @@ PowOS is built to be edited. Two loops: customize **PowOS itself**, and build/fo
 ### Edit PowOS → test → push (`powos self`)
 
 The complete source is baked into every image at `/var/lib/powos/src`, with the
-exact commit it was built from recorded in `/var/lib/powos/.powos-src-commit`.
+exact commit it was built from recorded in `/usr/lib/powos/.powos-src-commit`.
 
 ```bash
 powos self status    # baked commit, git attach state, local edits, ahead/behind
