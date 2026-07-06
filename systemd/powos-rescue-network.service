@@ -1,0 +1,42 @@
+# powos-rescue-network.service - "if boot hangs, at least come up on the network".
+#
+# Runs in parallel with normal boot. After 60s, checks if graphical.target has
+# reached ACTIVE. If it hasn't (i.e. boot is stuck at some earlier stage), this
+# service force-starts NetworkManager + sshd so an operator can SSH in and
+# diagnose instead of staring at a frozen screen.
+#
+# WHY it exists: PowOS booted correctly with no ability to debug it remotely
+# a bunch of times during dev. A hung graphical.target with no network is a
+# black-box freeze; a hung graphical.target WITH sshd is a "just SSH in and
+# fix it" incident. This service costs nothing on a healthy boot and turns a
+# brick into a debuggable machine on a broken one.
+#
+# The check runs on DefaultDependencies=no so it can start BEFORE most units,
+# and Type=simple with a sleep+conditional in ExecStart so nothing blocks it.
+
+[Unit]
+Description=PowOS boot-hang rescue — bring up network + sshd if graphical.target isn't reached in 60s
+Documentation=man:powos(8)
+DefaultDependencies=no
+Before=shutdown.target
+After=systemd-udevd.service systemd-tmpfiles-setup.service
+
+[Service]
+Type=simple
+# Fire and forget — no timeout on this unit, but the inner logic bounds itself.
+TimeoutStartSec=0
+ExecStart=/bin/bash -c '\
+    sleep 60; \
+    if ! systemctl is-active --quiet graphical.target; then \
+        echo "powos-rescue-network: graphical.target not reached in 60s — bringing up net+sshd for remote debug"; \
+        systemctl start NetworkManager.service 2>/dev/null || true; \
+        systemctl start sshd.service 2>/dev/null || true; \
+        /usr/sbin/sshd -D & \
+    else \
+        echo "powos-rescue-network: graphical.target reached in time — no-op."; \
+    fi'
+RemainAfterExit=yes
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=basic.target
