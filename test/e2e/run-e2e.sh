@@ -22,7 +22,11 @@ HW_DETECT="${POWOS_ROOT}/lib/hardware-detect.sh"
 SYNC_SH="${POWOS_ROOT}/lib/sync.sh"
 
 USB_IMG=/var/lib/powos-test/usb.img
-USB_MOUNT=/mnt/powos-e2e-usb
+# Keep the mountpoint under /tmp (a container tmpfs we own). Bazzite's ostree
+# layout leaves /mnt as a symlink pointing into an unpopulated /var target
+# inside a container, so `mkdir -p /mnt/anything` fails and mount then silently
+# has no mountpoint — which cascaded into every downstream USB test.
+USB_MOUNT=/tmp/powos-e2e-usb
 RAM_UPPER=/run/powos/ram-upper
 CUSTOM_LAYER=/run/powos/custom-layer
 WORK_DIR=/run/powos/work
@@ -178,8 +182,13 @@ setup_usb() {
     mkfs.btrfs -q -L POWOS-DATA "$LOOP"
     e2e_pass "Formatted BTRFS with label POWOS-DATA"
 
-    # Mount
-    mount "$LOOP" "$USB_MOUNT"
+    # Mount — gate loudly: previously this ran unconditionally-pass, so a
+    # silent mount failure cascaded through every USB-facing test as "USB gone".
+    mkdir -p "$USB_MOUNT"
+    if ! mount "$LOOP" "$USB_MOUNT"; then
+        e2e_fail "mount $LOOP -> $USB_MOUNT failed (see dmesg)"
+        exit 1
+    fi
     mkdir -p "$USB_MOUNT/layers/custom" "$USB_MOUNT/layers/updates"
     e2e_pass "Mounted at $USB_MOUNT"
 
@@ -292,9 +301,14 @@ test_usb_disconnect() {
         e2e_fail "layer-sync should not succeed when USB disconnected"
     fi
 
-    # Reconnect
+    # Reconnect — mkdir first because umount may have left USB_MOUNT gone if
+    # tmpfs GCed the empty dir; gate the mount so a silent failure is caught.
+    mkdir -p "$USB_MOUNT"
     LOOP=$(losetup --find --show "$USB_IMG")
-    mount "$LOOP" "$USB_MOUNT"
+    if ! mount "$LOOP" "$USB_MOUNT"; then
+        e2e_fail "reconnect mount $LOOP -> $USB_MOUNT failed"
+        return
+    fi
     echo "USB_STATUS=connected" > /run/powos/usb-state
     e2e_pass "USB reconnected"
 

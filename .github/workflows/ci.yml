@@ -106,6 +106,12 @@ jobs:
             '
 
       - name: E2E Tests (replicates compose e2e-runner)
+        # fusepy (Python FUSE bindings) is a test-only dep, installed inside
+        # the ephemeral container at test-time rather than baked into powos-ci
+        # so the production image stays minimal. --break-system-packages is
+        # required because Bazzite's Python is a distro-managed environment.
+        # -v is :rw so we can `pip install` even though the source tree is
+        # already RO-mounted at /powos — pip writes to /usr/lib, not /powos.
         run: |
           sudo podman volume create powos-e2e-usb
           sudo podman run --rm --privileged --hostname powos-e2e \
@@ -113,4 +119,8 @@ jobs:
             -v "$PWD:/powos:ro" -v powos-e2e-usb:/var/lib/powos-test \
             --tmpfs /run/powos --tmpfs /tmp \
             -e POWOS_ROOT=/powos -e POWOS_E2E=1 \
-            --entrypoint /bin/bash powos-ci /powos/test/e2e/run-e2e.sh
+            --entrypoint /bin/bash powos-ci -c '
+              set -e
+              pip3 install --break-system-packages --quiet fusepy
+              exec /powos/test/e2e/run-e2e.sh
+            '
