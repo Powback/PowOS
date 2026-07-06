@@ -130,6 +130,23 @@ refresh_sysext() {
         return 0
     fi
 
+    # Belt-and-braces sanitize each extension: systemd-sysext refuses to merge
+    # ANY extension that ships /usr/lib/os-release (or /usr/lib/machine-id) and
+    # aborts the WHOLE merge on the FIRST bad extension — so a single leftover
+    # os-release silently blocks every other overlay. The container build
+    # already strips these (lib/build-helpers.sh), but /var is persistent
+    # across bootc deploys, so a machine that ever saw a bad build keeps the
+    # dirty files forever until we clean them here.
+    local ext
+    for ext in "${POWOS_ROOT}/extensions"/*/; do
+        [[ -d "$ext" ]] || continue
+        rm -f "$ext/usr/lib/os-release" \
+              "$ext/usr/lib64/os-release" \
+              "$ext/etc/os-release" \
+              "$ext/usr/lib/machine-id" \
+              "$ext/etc/machine-id" 2>/dev/null || true
+    done
+
     # Unmerge first (in case of stale state)
     systemd-sysext unmerge 2>/dev/null || true
 
