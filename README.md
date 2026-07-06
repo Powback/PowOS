@@ -62,8 +62,9 @@ Install PowOS to an internal disk and run it like any bootc desktop:
   "never configure this again" goal — restore loop is [partially implemented](#feature-status)).
 - **Dual-boots Windows** for the games Linux can't run (see below).
 
-Flash the image, boot it (non-destructive), then run `sudo powos install`. The
-installed dual-boot design, disk layouts, and rationale live in
+Build the Anaconda installer ISO, flash it, boot it, and the graphical installer
+installs PowOS to disk (see [Build the image](#build-the-image)). The installed
+dual-boot design, disk layouts, and rationale live in
 [`docs/DUALBOOT-DESKTOP-SPEC.md`](docs/DUALBOOT-DESKTOP-SPEC.md).
 
 ### 2. Live USB — the OS runs from RAM (opt-in)
@@ -167,18 +168,30 @@ initramfs. On real hardware the full RAM boot with layers engages automatically.
 
 ### Build the image
 
+The canonical installer is an **Anaconda GUI ISO** (hardware-validated):
+
 ```bash
-just build-iso            # builds the PowOS disk image → build/output/powos.raw
-                          # boots a normal desktop; install with `powos install`
-just build-installer      # LEAN INSTALLER raw → boots STRAIGHT to the install
-                          # wizard (fastest path to install-to-disk)
+podman build -t localhost/powos .   # build the PowOS image
+./build/build-iso.sh                 # → build/output/bootiso/install.iso (Anaconda GUI installer)
+# flash install.iso → boot → Anaconda GUI installs PowOS to disk → reboot
+powos backup pull                    # restore your config
+
+# or via just:
+just installer            # same as above: PowOS image → Anaconda installer ISO
 just build-image          # build the OS container image only (faster, for testing)
 ```
 
-Both images boot a normal disk root (no RAM boot by default) and are
-non-destructive to boot — nothing is installed until you run `powos install` and
-confirm a target. Flash **`powos.raw`** for a full desktop you install *from*, or
-**`powos-installer.raw`** to jump straight into the wizard.
+`build/build-iso.sh` with no args builds the container image, then runs
+`bootc-image-builder --type anaconda-iso` to produce a proper Anaconda graphical
+installer. It lands at **`build/output/bootiso/install.iso`** (also copied to
+`build/output/powos-installer.iso`). Anaconda handles disk selection + GPU and
+confirms before writing — nothing is touched until you drive the installer.
+
+> **Legacy / experimental (not the supported install path):** the raw-efi
+> live/RAM-boot image (`just build-live-usb` → `powos.raw`) and the lean
+> custom-wizard installer (`just build-installer` → `powos-installer.raw`) still
+> build but are superseded by the Anaconda ISO. The custom wizard has a blind TUI
+> and stalls on the GPU; use the Anaconda ISO instead.
 
 The base image is a build ARG (default `ghcr.io/ublue-os/bazzite-nvidia-open:stable`
 for RTX / GTX-16+ open modules). Override for other GPUs:
@@ -188,43 +201,34 @@ podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite:stable ...   # AMD 
 podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia:stable ...  # older/closed NVIDIA
 ```
 
-### Flash to USB
+### Flash the ISO and install
 
-The built `powos.raw` ships as a **plain bootable OS** (POWOS-DATA and the
-Install/Recovery boot-menu entries are *not* baked in — baking them needs loop
-devices that fail unreliably in CI). Flash with any tool:
-
-```bash
-sudo ./build/install-to-usb.sh /dev/sdX          # has safety checks (refuses internal drives)
-# or: Balena Etcher / Rufus (DD mode) / dd
-```
-
-On the **first boot from the real device** (live-USB model only),
-`powos-firstboot-disk.service` runs `install-to-usb.sh --self-complete`: it
-creates POWOS-DATA filling the whole device and adds the Install/Recovery boot
-entries. Add-only, marker-gated, can't brick boot. (The lean installer image
-skips this — it boots straight to the wizard.)
-
-### Install to disk (the primary path)
-
-Boot the flashed image (it boots a normal desktop, or straight to the wizard for
-`powos-installer.raw`). Booting is non-destructive; nothing is installed until you
-run the installer and confirm a target.
+Flash **`build/output/bootiso/install.iso`** to a USB with any tool, boot it, and
+the Anaconda GUI installer walks you through the install:
 
 ```bash
-sudo powos install                    # guided install wizard (TUI/GUI)
-sudo powos install-system             # raw interactive installer
-sudo powos install-system --dry-run   # show the plan, change nothing
-sudo powos install-system --whole-disk    # erase target (type disk model to confirm)
-sudo powos install-system --alongside     # dual-boot into free space, keep Windows  🚧 EXPERIMENTAL
+sudo dd if=build/output/bootiso/install.iso of=/dev/sdX bs=4M status=progress conv=fsync
+# or: Balena Etcher / Rufus (DD mode)
 ```
 
-> **Status:** `--whole-disk` uses `bootc install to-disk`. The `--alongside`
-> dual-boot path is **experimental / not hardware-validated** (see `TODO(hw)`
-> markers in `lib/install-system.sh`). Validate on a VM or spare disk first.
+Boot the USB → Anaconda starts → pick your target disk → confirm → install →
+reboot. Anaconda handles disk selection, partitioning and GPU itself, with its
+own confirmations, so nothing is touched until you drive the graphical installer.
+After the first reboot into the installed system:
 
-After installing, future updates are just `bootc switch ghcr.io/powback/powos:nvidia-open`
-+ `powos upgrade`.
+```bash
+powos backup pull                     # restore your config-as-code
+```
+
+Future updates are just `bootc switch ghcr.io/powback/powos:nvidia-open` +
+`powos upgrade`.
+
+> **Legacy / experimental install paths (superseded by the Anaconda ISO):** the
+> in-system `powos install` guided wizard and `powos install-system` raw
+> installer still exist, and the raw-efi live image (`powos.raw`) still supports
+> a live-USB first-boot self-completion via `install-to-usb.sh --self-complete`.
+> These are the old custom paths (blind TUI, GPU stalls, slow boot) and are **not
+> the supported way to install** — use the Anaconda ISO above.
 
 ---
 

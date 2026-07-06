@@ -238,30 +238,43 @@ secrets-keygen:
 #  ISO BUILDING (Production)
 # ═══════════════════════════════════════════════════════════════════
 
-# Build the PowOS disk image (PRIMARY: flash → boot → `powos install` to disk)
-build-iso:
-    @echo "🔥 Building PowOS disk image..."
+# Build the CANONICAL PowOS installer: an Anaconda GUI ISO (flash → boot → install)
+installer:
+    @echo "🔥 Building PowOS Anaconda installer ISO..."
     @echo ""
     @echo "NOTE: requires podman (not docker) and bootc-image-builder"
-    @echo "Boots a normal desktop; install to disk with 'powos install' (dual-boot Windows)."
-    @echo "For a build that boots STRAIGHT to the install wizard: just build-installer"
+    @echo "Builds the PowOS image, then a proper Anaconda GUI installer ISO."
+    @echo "Flash the ISO → boot → Anaconda installs PowOS to disk → reboot."
     @echo ""
     @mkdir -p build/output
-    bash build/build-iso.sh default
+    bash build/build-iso.sh installer
+    @echo ""
+    @echo "Installer ISO should be at: build/output/bootiso/install.iso"
+    @echo "Flash it (Balena Etcher / Rufus DD / dd), boot, and Anaconda installs PowOS."
+    @echo "After reboot:  powos backup pull   (restore your config)"
+    @ls -lh build/output/bootiso/install.iso 2>/dev/null || echo "Check build/output/ for results"
+
+# The canonical installer build (kept for older muscle memory) → Anaconda ISO
+build-iso: installer
+
+# LEGACY / experimental: raw-efi live/RAM-boot USB image (NOT the supported install path)
+build-live-usb:
+    @echo "⚠️  LEGACY: building the raw-efi live USB image (experimental)..."
+    @echo "The supported installer is 'just installer' (Anaconda GUI ISO)."
+    @echo ""
+    @mkdir -p build/output
+    bash build/build-iso.sh live-usb
     @echo ""
     @echo "Image should be at: build/output/powos.raw"
-    @echo "Flash it (sudo ./build/install-to-usb.sh /dev/sdX), boot, then: sudo powos install"
     @ls -lh build/output/*.raw 2>/dev/null || echo "Check build/output/ for results"
 
-# Build the LEAN INSTALLER raw image (boots straight into the guided wizard)
+# LEGACY / experimental: lean raw image that boots the SUPERSEDED custom wizard
 build-installer:
-    @echo "🔧 Building PowOS lean installer image (fastest path to install-to-disk)..."
-    @echo ""
-    @echo "NOTE: requires podman (not docker) and bootc-image-builder"
-    @echo "Boots STRAIGHT into the guided install wizard on tty1."
+    @echo "⚠️  LEGACY: building the lean custom-wizard installer raw (experimental)..."
+    @echo "The supported installer is 'just installer' (Anaconda GUI ISO)."
     @echo ""
     @mkdir -p build/output
-    bash build/build-iso.sh installer-usb
+    bash build/build-iso.sh installer-raw
     @echo ""
     @echo "Installer image should be at: build/output/powos-installer.raw"
     @ls -lh build/output/powos-installer.raw 2>/dev/null || echo "Check build/output/ for results"

@@ -67,8 +67,18 @@ echo "== Containerfile SELinux hygiene (both variants) =="
 check "Containerfile masks setroubleshootd" 'grep -q "systemctl mask setroubleshootd.service" "$CF"'
 check "Containerfile relabels files with restorecon" 'grep -q "restorecon -RF /usr /etc /var" "$CF"'
 
-echo "== build-iso.sh installer path =="
-check "build-iso.sh has installer-usb mode" 'grep -q "installer-usb" "$BUILD"'
+echo "== build-iso.sh CANONICAL Anaconda installer ISO =="
+# The canonical, hardware-validated installer is an Anaconda GUI ISO. The default
+# build mode must produce it via bootc-image-builder --type anaconda-iso.
+check "build-iso.sh defines build_installer_iso()" 'grep -q "build_installer_iso()" "$BUILD"'
+check "build-iso.sh canonical path uses --type anaconda-iso" 'grep -q "type anaconda-iso" "$BUILD"'
+check "build-iso.sh default mode is the installer ISO" 'grep -q "local mode=\"\${1:-installer}\"" "$BUILD"'
+check "build-iso.sh installer/iso/default modes call build_installer_iso" \
+    'grep -Eq "installer\|iso\|anaconda\|default\)" "$BUILD"'
+check "build-iso.sh installer ISO lands at bootiso/install.iso" 'grep -q "bootiso/install.iso" "$BUILD"'
+
+echo "== build-iso.sh legacy paths still present (non-default) =="
+check "build-iso.sh keeps installer-raw/installer-usb mode" 'grep -q "installer-usb" "$BUILD"'
 check "build-iso.sh passes POWOS_INSTALLER=1 build-arg" 'grep -q "POWOS_INSTALLER=1" "$BUILD"'
 check "build-iso.sh produces powos-installer.raw" 'grep -q "powos-installer.raw" "$BUILD"'
 check "build-iso.sh keeps the live raw name" 'grep -q "RAW_NAME=\"powos.raw\"" "$BUILD"'

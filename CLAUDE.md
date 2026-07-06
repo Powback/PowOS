@@ -14,21 +14,32 @@
 # Test in Docker (opens KDE desktop in browser)
 docker compose up
 
-# Build the PowOS disk image (requires podman). Boots a normal desktop; install
-# to disk with `powos install`. Output: build/output/powos.raw
-just build-iso
+# Build the CANONICAL PowOS installer: an Anaconda GUI ISO (requires podman).
+# Output: build/output/bootiso/install.iso (also copied to powos-installer.iso)
+podman build -t localhost/powos .              # build the PowOS image
+./build/build-iso.sh                           # → build/output/bootiso/install.iso
+# flash install.iso → boot → Anaconda GUI installs PowOS to disk → reboot
+powos backup pull                              # restore your config
 
-# Or the LEAN INSTALLER image — boots STRAIGHT into the guided install wizard
-# (fastest path to install-to-disk). Output: build/output/powos-installer.raw
-just build-installer
+# Or via just:
+just installer                                 # PowOS image → Anaconda installer ISO
 ```
 
 Access desktop at `http://localhost:6091/vnc.html` (password: `powos`)
 
-**Install path (canonical, collapsed):** flash either image → boot (non-destructive)
-→ `sudo powos install` → `install-system`. The dangerous Anaconda installer-ISO
-build path was removed; the live-USB first-boot self-completion
-(`powos-firstboot-disk`) is part of the opt-in live-USB model, not the install path.
+**Install path (canonical, hardware-validated):** build the Anaconda ISO →
+flash `install.iso` → boot → the Anaconda GUI installer picks the disk and
+installs PowOS (its own confirmations). `bootc-image-builder --type anaconda-iso`
+is the whole mechanism.
+
+**Legacy / experimental (superseded, do NOT present as the way to install):** the
+raw-efi live image (`build-iso.sh live-usb` → `powos.raw`), the lean
+custom-wizard installer (`build-iso.sh installer-raw` → `powos-installer.raw`),
+the in-system `powos install` / `install-system` wizards, and the live-USB
+first-boot self-completion (`powos-firstboot-disk`). These custom paths have a
+blind TUI / GPU stalls / slow boot. Their services stay in the image (the
+Anaconda ISO never triggers `powos.install`, so they don't run) — but the
+Anaconda ISO is the supported installer.
 
 ## Core Concept: Layered Persistence
 
@@ -236,12 +247,26 @@ powos install -c NAME PKG...      # Install to container NAME
 powos install -c NAME -e PKG...   # Install + export GUI apps to host
 ```
 
-### Install to Disk (dual-boot) — 🚧 New / needs hardware validation
+### Install to Disk (dual-boot)
 
-The USB is a **single live image with a 5-second visible boot menu**: "PowOS
-Live" (default, runs from RAM), "Install PowOS to disk", "Recovery — Safe mode",
-"Recovery — AI Debug". Choosing Install boots live and launches the **guided
-installer wizard** — nothing is wiped without an explicit target + confirmation.
+**CANONICAL (hardware-validated): the Anaconda GUI installer ISO.** Build it with
+`./build/build-iso.sh` (→ `build/output/bootiso/install.iso`), flash, boot, and
+Anaconda picks the disk + installs PowOS with its own confirmations. After
+reboot, `powos backup pull` restores config. This is the supported install path.
+
+> ⚠️ **Everything below is the LEGACY / experimental custom install machinery**
+> (`powos install` / `powos-install-wizard` / `install-system`, the lean
+> `POWOS_INSTALLER` raw variant, and the live-USB first-boot self-completion). It
+> is superseded by the Anaconda ISO — blind TUI, GPU stalls, slow boot. Kept in
+> the tree and documented for reference, but NOT the way to install. The services
+> stay in the image but the Anaconda ISO never triggers `powos.install`, so they
+> don't run.
+
+The (legacy) raw live USB is a **single live image with a 5-second visible boot
+menu**: "PowOS Live" (default, runs from RAM), "Install PowOS to disk", "Recovery
+— Safe mode", "Recovery — AI Debug". Choosing Install boots live and launches the
+**guided installer wizard** — nothing is wiped without an explicit target +
+confirmation.
 
 **Guided wizard** (`powos install` / `powos-install-wizard`, TUI or GUI): walks
 disk → mode → partition sizes → GPU flavor → hostname/user/password (hashed) →
@@ -1015,8 +1040,8 @@ docker exec powos powos status
 # 4. Access desktop
 open http://localhost:6091/vnc.html
 
-# 5. Build ISO for real hardware
-just build-iso
+# 5. Build the Anaconda installer ISO for real hardware
+just installer      # → build/output/bootiso/install.iso
 ```
 
 ### On Real Hardware (Live Updates)

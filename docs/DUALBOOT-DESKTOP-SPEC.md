@@ -37,9 +37,18 @@ the default image (`config/bootc/kargs.d/50-powos-ramboot.toml` was removed), so
 the image boots a normal disk root whether flashed to USB or installed — RAM boot
 only happens if the user runs `powos ramboot enable`. The shelved features above
 still exist in the tree but are quarantined under an "Experimental (unvalidated)"
-heading in `powos help` and print a warning when run. The dangerous Anaconda
-installer-ISO build path was dropped; the canonical install is `powos install` →
-`install-system` from the booted image.
+heading in `powos help` and print a warning when run.
+
+**Canonical installer = the Anaconda GUI ISO (hardware-validated).** Build it with
+`./build/build-iso.sh` (default mode) — it builds the PowOS image, then
+`bootc-image-builder --type anaconda-iso` produces a proper Anaconda graphical
+installer at `build/output/bootiso/install.iso`. The user flashed this and it
+works (GUI, handles GPU + disks, its own confirmations). This supersedes the
+custom install machinery (`powos install` → `install-system`, the lean
+`POWOS_INSTALLER` raw variant, and the live-USB self-completion), which had a
+blind TUI / GPU stalls / slow boot and is now legacy/experimental. Those services
+remain in the image but the Anaconda ISO never triggers `powos.install`, so they
+don't run.
 
 ---
 
