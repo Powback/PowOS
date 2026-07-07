@@ -150,6 +150,33 @@ test_config_files_exist() {
     assert_file_exists "$TEST_DIR/config/ai/agents/coder/agent.conf" "coder agent config exists"
 }
 
+# Regression test for the backtick-in-system-prompt bug: every agent.conf must
+# source WITHOUT emitting errors. The bug was AGENT_SYSTEM_PROMPT being a
+# double-quoted string containing markdown backticks (`cmd <arg>`), which bash
+# runs as command substitution at source time — spraying "command substitution:
+# syntax error" to stderr and silently corrupting the prompt. That does NOT
+# change the exit code, so we assert stderr is EMPTY, not just rc==0.
+test_agent_configs_source_cleanly() {
+    echo ""
+    echo "Test: every agent.conf sources with no stderr (backtick regression)"
+    local conf name err
+    for conf in "$TEST_DIR"/config/ai/agents/*/agent.conf "$TEST_DIR"/config/ai/agent.conf; do
+        [[ -f "$conf" ]] || continue
+        name="$(basename "$(dirname "$conf")")/$(basename "$conf")"
+        ((TESTS_RUN++)) || true
+        # Source in a clean subshell; capture only stderr.
+        err="$(bash -c 'source "$1" 2>&1 >/dev/null' _ "$conf")"
+        if [[ -z "$err" ]]; then
+            echo -e "${GREEN}✓${NC} $name sources cleanly"
+            ((TESTS_PASSED++)) || true
+        else
+            echo -e "${RED}✗${NC} $name emitted errors on source:"
+            printf '      %s\n' "$err" | head -4
+            ((TESTS_FAILED++)) || true
+        fi
+    done
+}
+
 # ─────────────────────────────────────────────────────────────────
 # Tests: Helpers Module
 # ─────────────────────────────────────────────────────────────────
@@ -649,6 +676,7 @@ main() {
     # Config tests
     test_agent_config_load
     test_agent_base_config
+    test_agent_configs_source_cleanly
 
     # Client tests
     test_client_base_source

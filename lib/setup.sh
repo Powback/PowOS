@@ -59,6 +59,25 @@ setup_gh_cmd() {
         gh auth setup-git 2>&1 | tail -2 || true
     fi
 
+    # Give git an author identity so `powos self push` (which commits as
+    # whatever account runs it — often root via sudo) doesn't die with
+    # "author identity unknown" on a fresh install. Derived from the just-
+    # authenticated GitHub account; email uses GitHub's noreply form so we
+    # never leak or guess a private address. Idempotent — only sets if unset.
+    if command -v gh >/dev/null 2>&1; then
+        local ghlogin ghname
+        ghlogin="$(gh api user --jq .login 2>/dev/null)"
+        if [[ -n "$ghlogin" ]]; then
+            ghname="$(gh api user --jq '.name // .login' 2>/dev/null)"
+            git config --global user.name  >/dev/null 2>&1 || git config --global user.name  "${ghname:-$ghlogin}"
+            git config --global user.email >/dev/null 2>&1 || git config --global user.email "${ghlogin}@users.noreply.github.com"
+            # Root-owned source tree is safe to operate on, and exec-bit-only
+            # diffs (composefs carry-over) must not show up as changes.
+            git config --global --add safe.directory /var/lib/powos/src 2>/dev/null || true
+            plog "git identity: $(git config --global user.name) <$(git config --global user.email)>"
+        fi
+    fi
+
     pok "GitHub auth complete."
     plog "Test:  ssh -T git@github.com   OR   gh api user --jq .login"
 }

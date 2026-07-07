@@ -279,6 +279,33 @@ self_push() {
     fi
     [[ -n "$msg" ]] || msg="PowOS self: sync local changes"
 
+    # ── Self-heal repo hygiene so a fresh install can push without manual git
+    # setup. All idempotent; safe to run every push. ──────────────────────────
+    #   1. safe.directory: the src tree is root-owned; whoever runs `self push`
+    #      (often root via sudo) must be allowed to operate on it.
+    git config --global --add safe.directory "$src" 2>/dev/null || true
+    #   2. core.fileMode false: installed composefs flips exec bits on carry-over,
+    #      which otherwise show as dozens of phantom "modified" files and get
+    #      swept into `git add -A`.
+    git -C "$src" config core.fileMode false 2>/dev/null || true
+    #   3. author identity: if none is configured anywhere, derive it from the
+    #      gh-authenticated account so commit doesn't fail "author identity
+    #      unknown". `powos setup gh` normally sets this globally; this is a
+    #      last-resort, repo-local net.
+    if ! git -C "$src" config user.email >/dev/null 2>&1; then
+        local _gl _gn
+        if command -v gh >/dev/null 2>&1 && _gl="$(gh api user --jq .login 2>/dev/null)" && [[ -n "$_gl" ]]; then
+            _gn="$(gh api user --jq '.name // .login' 2>/dev/null)"
+            git -C "$src" config user.name  "${_gn:-$_gl}"
+            git -C "$src" config user.email "${_gl}@users.noreply.github.com"
+            plog "Set git identity from GitHub: ${_gn:-$_gl} <${_gl}@users.noreply.github.com>"
+        else
+            perr "No git author identity and no gh login to derive one."
+            perr "Run 'powos setup gh' (sets identity + credentials), then retry."
+            return 1
+        fi
+    fi
+
     git -C "$src" add -A || { perr "git add failed."; return 1; }
     if git -C "$src" diff --cached --quiet 2>/dev/null; then
         pwarn "Nothing staged — working tree already matches HEAD; pushing anyway."
