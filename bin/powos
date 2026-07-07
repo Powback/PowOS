@@ -2813,6 +2813,18 @@ case "${1:-}" in
         shift
         cmd_dev "$@"
         ;;
+    mods)
+        shift
+        source "$POWOS_LIB/mods/install.sh"
+        case "${1:-}" in
+            install)                    shift; mods_install_cmd "$@" ;;
+            uninstall|remove|rm)        shift; mods_uninstall_cmd "$@" ;;
+            installed|list|ls)          mods_installed_cmd ;;
+            launch|run|start)           shift; mods_launch_cmd "$@" ;;
+            help|--help|-h|"")          mods_help ;;
+            *)                          perr "Unknown: powos mods $1"; mods_help; exit 1 ;;
+        esac
+        ;;
     ai)
         shift
         case "${1:-}" in
