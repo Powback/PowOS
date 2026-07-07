@@ -137,6 +137,47 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
   validation. See docs/HIBERNATION.md. `powos boot windows` (UEFI BootNext,
   one-shot reboot to Windows) IS built. ✅
 
+## Game modding (`powos mods`)
+- Install mod managers on-demand: `powos mods install nexus-mods-app`
+  (AppImage, native Linux, Nexus's own — replaces old Vortex which was
+  Windows-only). Also `install vortex` (documents the Proton wrapper path,
+  doesn't auto-install). `mods installed` lists installed managers.
+- One-shot game modding prep: `powos mods setup <game>` — installs
+  protontricks, runs winetricks packages (`vcrun2022`, `d3dcompiler_47`)
+  into the game's Proton prefix, sets `WINEDLLOVERRIDES="winmm=n,b;version=n,b" %command%`
+  in Steam's per-user launch options. Requires Steam CLOSED for the config
+  edit. Short names: cyberpunk, skyrimse, skyrim-ae, fallout4, starfield,
+  witcher3, bg3 — plus any numeric appid. ✅
+- **Nexus Mods App CLI** (undocumented but exists): `powos mods` wraps
+  the AppImage's own `as-main` subcommands. Auth persists in the app's
+  data model — a GUI login is visible to all subsequent CLI calls, no
+  re-auth needed.
+  - `powos mods auth [api-key]`: key = save API key; no arg = OAuth login.
+  - `powos mods logout` / `games` / `tools <game>` / `run-tool <game> <tool>`.
+  - `powos mods install-collection <slug>`: installs a whole Nexus
+    collection headlessly. Slug is from the URL
+    `nexusmods.com/<game>/collections/<slug>`. **NMA GUI must be closed.**
+  - `powos mods install-mod <game> <mod-id> [file-id]`: constructs a
+    `nxm://` URL and uses `protocol-invoke` — works whether the GUI is
+    running or not (running instance receives it). Game accepts either a
+    short name (cyberpunk, skyrimse, bg3, …) or a Nexus URL slug.
+  - `powos mods raw <args>`: forward to `NexusModsApp as-main` for
+    subcommands PowOS hasn't wrapped (heartbeat, extract-archive,
+    datamodel, etc.).
+- Workflow for AI-driven collection install:
+  1. Ensure NMA installed: `powos mods install nexus-mods-app`.
+  2. Ensure game modding-prep done: `powos mods setup <game>` (once per
+     game). Requires Steam closed. On success, WINEDLLOVERRIDES is set.
+  3. Ensure NMA GUI is closed for `as-main` commands.
+  4. `powos mods install-collection <slug>` — hands-off collection install.
+  5. Relaunch Steam and the game; mods are deployed by NMA.
+- Cyberpunk specifics: mod framework stack is CET + RED4ext + REDscript.
+  The `setup` command installs the winetricks packages CET needs;
+  RED4ext/REDscript are managed by NMA once auth is in place.
+- Steam Workshop is deliberately separate — it's built into Steam
+  itself, no PowOS wrapper needed. `powos mods` covers off-Workshop
+  modding (Nexus + REDmod tooling).
+
 ## GPU / base image
 - **Default base is now the OPEN NVIDIA driver** (`bazzite-nvidia-open:stable`).
   Closed proprietary (`bazzite-nvidia`) is selectable; AMD/Intel = `bazzite`.

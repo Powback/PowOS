@@ -2817,13 +2817,23 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/mods/install.sh"
         case "${1:-}" in
-            install)                    shift; mods_install_cmd "$@" ;;
-            uninstall|remove|rm)        shift; mods_uninstall_cmd "$@" ;;
-            installed|list|ls)          mods_installed_cmd ;;
-            launch|run|start)           shift; mods_launch_cmd "$@" ;;
-            setup|prep|prepare)         shift; mods_setup_cmd "$@" ;;
-            help|--help|-h|"")          mods_help ;;
-            *)                          perr "Unknown: powos mods $1"; mods_help; exit 1 ;;
+            # Mod-manager lifecycle
+            install)                            shift; mods_install_cmd "$@" ;;
+            uninstall|remove|rm)                shift; mods_uninstall_cmd "$@" ;;
+            installed|list|ls)                  mods_installed_cmd ;;
+            launch|run|start)                   shift; mods_launch_cmd "$@" ;;
+            setup|prep|prepare)                 shift; mods_setup_cmd "$@" ;;
+            # Nexus Mods App CLI wrappers
+            auth|login|nexus-key)               shift; mods_auth_cmd "$@" ;;
+            logout)                             mods_logout_cmd ;;
+            games|list-games)                   shift; mods_games_cmd "$@" ;;
+            tools|list-tools)                   shift; mods_tools_cmd "$@" ;;
+            run-tool)                           shift; mods_run_tool_cmd "$@" ;;
+            install-collection|ic|collection)   shift; mods_install_collection_cmd "$@" ;;
+            install-mod|im|mod)                 shift; mods_install_mod_cmd "$@" ;;
+            raw|as-main)                        shift; mods_raw_cmd "$@" ;;
+            help|--help|-h|"")                  mods_help ;;
+            *)                                  perr "Unknown: powos mods $1"; mods_help; exit 1 ;;
         esac
         ;;
     ai)

@@ -310,6 +310,145 @@ EOF
     fi
 }
 
+# ─── Nexus Mods App CLI wrapper ──────────────────────────────────────────
+# NMA has an undocumented `as-main` CLI mode with rich subcommands
+# (install-collection, list-games, nexus-api-key, etc.). Two invocation
+# modes:
+#   • as-main <cmd>          takes exclusive RocksDB lock — GUI must be
+#                            CLOSED. Used for auth, list, and headless
+#                            install of collections/mods.
+#   • protocol-invoke <url>  sends a nxm:// URL to the running instance
+#                            (if any). Used to queue installs into a
+#                            running GUI, or launch a fresh install.
+# Auth persists in the app's data model, so if the user logged in via
+# GUI once, all subsequent CLI calls see the same session — no re-auth.
+
+mods_nma_binary() { echo "$MODS_APPS_DIR/NexusModsApp.AppImage"; }
+
+mods_nma_running() {
+    pgrep -f "NexusModsApp\.AppImage" >/dev/null 2>&1
+}
+
+mods_nma_ensure_installed() {
+    if [[ ! -x "$(mods_nma_binary)" ]]; then
+        perr "Nexus Mods App isn't installed. Run: ${BOLD}powos mods install nexus-mods-app${NC}"
+        return 1
+    fi
+}
+
+mods_nma_asmain() {
+    mods_nma_ensure_installed || return 1
+    if mods_nma_running; then
+        perr "Nexus Mods App GUI is currently running."
+        perr "This command needs the GUI closed (right-click tray → Quit, or 'pkill -f NexusModsApp')."
+        perr "Then re-run:  powos mods $POWOS_MODS_LAST_VERB $*"
+        return 1
+    fi
+    "$(mods_nma_binary)" as-main "$@"
+}
+
+mods_nma_invoke() {
+    mods_nma_ensure_installed || return 1
+    "$(mods_nma_binary)" "$@"
+}
+
+# Nexus URL slug (the identifier in nxm:// URLs and www.nexusmods.com/<slug>/mods/*)
+# — different from Steam appid or short name.
+mods_nexus_slug_of() {
+    case "$1" in
+        cyberpunk|cyberpunk2077|cp2077|1091500)   echo "cyberpunk2077" ;;
+        skyrim|skyrimspecialedition|489830)        echo "skyrimspecialedition" ;;
+        skyrim-le)                                  echo "skyrim" ;;
+        fallout4|fo4|377160)                        echo "fallout4" ;;
+        starfield|1716740)                          echo "starfield" ;;
+        witcher3|292030)                            echo "witcher3" ;;
+        bg3|baldursgate3|1086940)                   echo "baldursgate3" ;;
+        stardewvalley|sdv|413150)                   echo "stardewvalley" ;;
+        # Assume the input is already a Nexus slug — pass through.
+        *) echo "$1" ;;
+    esac
+}
+
+# ── Auth ─────────────────────────────────────────────────────────────
+mods_auth_cmd() {
+    local key="${1:-}"
+    POWOS_MODS_LAST_VERB="auth"
+    if [[ -z "$key" ]]; then
+        plog "Opening Nexus OAuth login flow (needs a browser)..."
+        mods_nma_asmain nexus-login
+    else
+        plog "Setting Nexus API key..."
+        mods_nma_asmain nexus-api-key "$key" \
+            && pok "API key saved. Persists across GUI/CLI runs."
+    fi
+}
+
+mods_logout_cmd() {
+    POWOS_MODS_LAST_VERB="logout"
+    mods_nma_asmain nexus-logout && pok "Logged out."
+}
+
+# ── Discovery ────────────────────────────────────────────────────────
+mods_games_cmd() {
+    POWOS_MODS_LAST_VERB="games"
+    mods_nma_asmain list-games "$@"
+}
+
+mods_tools_cmd() {
+    POWOS_MODS_LAST_VERB="tools"
+    local game="${1:?Usage: powos mods tools <game>}"
+    mods_nma_asmain list-tools -g "$game"
+}
+
+mods_run_tool_cmd() {
+    POWOS_MODS_LAST_VERB="run-tool"
+    local game="${1:?Usage: powos mods run-tool <game> <tool>}"
+    local tool="${2:?Usage: powos mods run-tool <game> <tool>}"
+    mods_nma_asmain run-tool -g "$game" -t "$tool"
+}
+
+# ── Install ──────────────────────────────────────────────────────────
+# Install a whole Nexus collection headlessly. Slug comes from the
+# collection URL: www.nexusmods.com/<game>/collections/<slug>.
+mods_install_collection_cmd() {
+    POWOS_MODS_LAST_VERB="install-collection"
+    local slug="${1:?Usage: powos mods install-collection <slug> [--game <slug>]}"
+    shift
+    plog "Installing collection '${BOLD}$slug${NC}' via Nexus Mods App..."
+    plog "  ${DIM}(this needs the GUI closed and Steam idle for the game)${NC}"
+    mods_nma_asmain install-collection "$slug" "$@"
+}
+
+# Install a single mod by mod-id (and optionally a specific file-id).
+# Uses the nxm:// protocol-invoke path so it works whether the GUI is
+# running or not — if it's running, install goes to that instance;
+# if not, NMA launches to handle the URL. Works for the "click download
+# with mod manager" button flow because that's the same URL scheme.
+mods_install_mod_cmd() {
+    POWOS_MODS_LAST_VERB="install-mod"
+    local game="${1:?Usage: powos mods install-mod <game> <mod-id> [file-id]}"
+    local mod_id="${2:?Usage: powos mods install-mod <game> <mod-id> [file-id]}"
+    local file_id="${3:-}"
+    local slug; slug="$(mods_nexus_slug_of "$game")"
+    local url
+    if [[ -z "$file_id" ]]; then
+        url="nxm://${slug}/mods/${mod_id}"
+        plog "Opening mod page URL: $url"
+    else
+        url="nxm://${slug}/mods/${mod_id}/files/${file_id}"
+        plog "Installing file $file_id of mod $mod_id: $url"
+    fi
+    mods_nma_invoke protocol-invoke "$url"
+}
+
+# Generic escape hatch: forward whatever args to `NexusModsApp as-main`
+# for subcommands PowOS hasn't wrapped yet (heartbeat, extract-archive,
+# datamodel, etc.). AI can use this to hit anything the app CLI exposes.
+mods_raw_cmd() {
+    POWOS_MODS_LAST_VERB="raw"
+    mods_nma_asmain "$@"
+}
+
 # ─── Commands ────────────────────────────────────────────────────────────
 
 mods_install_cmd() {
@@ -388,6 +527,7 @@ mods_help() {
     cat <<EOF
 ${BOLD}powos mods${NC} — manage game-modding tools
 
+Mod-manager lifecycle:
   powos mods install <tool>       Install a mod manager
   powos mods uninstall <tool>     Remove
   powos mods installed            List installed managers
@@ -396,6 +536,28 @@ ${BOLD}powos mods${NC} — manage game-modding tools
                                     (installs protontricks, winetricks
                                     packages, sets WINEDLLOVERRIDES).
                                     Requires Steam to be closed.
+
+Nexus Mods App CLI (headless mod management — needs nexus-mods-app installed):
+  powos mods auth [api-key]       Log in. With key = save it. Without = OAuth.
+  powos mods logout               Log out.
+  powos mods games                List detected games in NMA.
+  powos mods install-collection <slug>
+                                  Install a whole Nexus collection headlessly.
+                                  Slug is from www.nexusmods.com/<game>/collections/<slug>.
+                                  Requires NMA GUI to be closed.
+  powos mods install-mod <game> <mod-id> [file-id]
+                                  Install a single mod via nxm:// URL. Works
+                                  whether GUI is running or not. Game can be
+                                  a short name (cyberpunk, skyrimse, bg3, …)
+                                  or a Nexus slug.
+  powos mods tools <game>         List tools registered for a game.
+  powos mods run-tool <game> <tool>
+                                  Run a game tool via NMA.
+  powos mods raw <args...>        Forward raw args to `NexusModsApp as-main`
+                                  for any subcommand PowOS hasn't wrapped.
+
+Note: GUI-auth persists to NMA's data model. Log in once via the GUI, all
+subsequent CLI commands see the same session — no re-auth needed.
 
 Known tools:
   ${BOLD}nexus-mods-app${NC}   Nexus's native-Linux cross-platform manager
