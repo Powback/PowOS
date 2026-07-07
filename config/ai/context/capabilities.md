@@ -99,6 +99,52 @@ Status legend: ✅ stable · ⚠️ experimental/partial · 🚧 WIP · ❌ not 
 - `powos build image [variant] [--switch|--push]` — build the OS image LOCALLY (no
   GitHub), optionally rebase this machine onto it. Self-hosted counterpart to CI. ✅
 
+## PowOS self-development loop (for AI agents)
+The full round-trip an agent can drive to fix / improve PowOS itself:
+
+1. **Edit** — `/var/lib/powos/src` is a git checkout of `Powback/PowOS`
+   after the first `powos self pull`. Origin is SSH (`git@github.com:Powback/PowOS.git`),
+   push key at `~/.ssh/id_ed25519`. Agent edits files there directly.
+2. **Test transiently** — `powos self test`
+   Applies the /var/lib/powos/src edits to the RUNNING system via a
+   `bootc usr-overlay` (writable overlay on top of the composefs `/usr`).
+   Auto-reverts on next reboot. Agent can verify behavior immediately
+   without committing.
+3. **Commit + push** — `powos self push -m "<msg>"`
+   `git add -A && git commit && git push origin master`. Uses the
+   configured identity (`git config user.name/email`) and SSH key.
+   If push errors with permission-denied, the SSH pubkey at
+   ~/.ssh/id_ed25519.pub isn't added to the GitHub account yet — ask
+   the user to add it at https://github.com/settings/ssh/new.
+4. **CI runs** — Powback/PowOS's build-test-publish.yml runs lint +
+   Containerfile build + E2E tests + publishes to
+   `ghcr.io/powback/powos:nvidia-open`. Takes ~5-6 min. Agent can watch
+   via `gh run watch` if `gh` is installed AND authed (currently only I
+   have gh auth locally, not the box — install & auth if the agent
+   needs it: `dnf install gh; gh auth login`).
+5. **Deploy** — `powos upgrade --now` (or `sudo bootc upgrade`
+   directly, then reboot). Pulls the new channel-tagged image and
+   applies via `soft-reboot` if kernel is unchanged, full reboot
+   otherwise.
+
+Rules for agents driving this loop:
+- **NEVER `git push --force`** unless a) an isolated branch, b) the user
+  explicitly asks, c) confirms twice. Master is atomic-published — a
+  force push replaces the running channel for every user.
+- **NEVER skip hooks** (`--no-verify`) unless the user asked and knows why.
+- **Commit messages** should be actual descriptions. Two blank lines
+  between subject and body, subject <70 chars.
+- **`powos self test` first, then push.** Don't commit changes that
+  haven't been transiently applied and observed to work.
+
+Key facts an agent should CHECK before starting:
+- `git -C /var/lib/powos/src remote -v` → confirm SSH origin.
+- `git -C /var/lib/powos/src config user.email` → confirm identity is set.
+- `ssh -T git@github.com` → confirm push auth (returns "You've
+  successfully authenticated..." on success).
+- `powos ai install claude` if the agent needs Claude Code itself
+  (installed at `~/.local/bin/claude`; auth already in `~/.claude.json`).
+
 ## Other subsystems
 - Settings (`powos config [name] [value]` / `--json`): one front door for system
   toggles AND value settings — ssh, driver (stable/testing channel), auto-update
