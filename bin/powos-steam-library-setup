@@ -8,26 +8,32 @@
 # but /etc is root-owned config territory, not a games directory.
 #
 # Fix: create ~/Games/steamapps/ with the standard Steam library layout
-# and add it to Steam's libraryfolders.vdf. Once Steam sees a REAL user-
-# writable library, its install dialog defaults to that instead of /etc.
+# and register it in Steam's libraryfolders.vdf. Once Steam sees a REAL
+# user-writable library, its install dialog defaults to that instead of /etc.
+#
+# Correct file target: ~/.local/share/Steam/steamapps/libraryfolders.vdf is
+# the PRIMARY config Steam reads on startup. ~/.local/share/Steam/config/
+# libraryfolders.vdf is a legacy duplicate Steam writes to for older tools
+# but does NOT read from — writing there alone gets overwritten on next
+# Steam launch (v1 of this script had that bug). We write to BOTH so tools
+# that check either path stay consistent.
 #
 # STRICTLY ADDITIVE (per the additive-only rule for user-facing state):
 #   • never rewrites an existing libraryfolders.vdf entry
 #   • never reorders existing libraries
 #   • only touches Steam config if Steam isn't currently running
-#   • marker-gated so it only runs once per user
-#
-# If any of the guards trip (Steam is running, entry already exists, config
-# structure is unexpected) we exit cleanly and the user's next login retries.
+#   • marker-gated so it only runs once per user (v3 marker — v1 and v2
+#     targeted the wrong file)
 
 set -uo pipefail
 
-marker="${XDG_STATE_HOME:-$HOME/.local/state}/powos/steam-library-configured"
+marker="${XDG_STATE_HOME:-$HOME/.local/state}/powos/steam-library-configured-v3"
 [[ -f "$marker" ]] && exit 0
 
 GAMES_DIR="$HOME/Games"
 STEAM_ROOT="$HOME/.local/share/Steam"
-STEAM_CONFIG="$STEAM_ROOT/config/libraryfolders.vdf"
+STEAM_LIB_PRIMARY="$STEAM_ROOT/steamapps/libraryfolders.vdf"
+STEAM_LIB_LEGACY="$STEAM_ROOT/config/libraryfolders.vdf"
 
 # 1. Create the games directory + standard Steam subdirs. Idempotent.
 mkdir -p "$GAMES_DIR/steamapps/common" \
@@ -46,73 +52,66 @@ if [[ ! -f "$GAMES_DIR/steamapps/libraryfolder.vdf" ]]; then
 EOF
 fi
 
-# 3. If Steam has never run, seed a minimal libraryfolders.vdf so ~/Games
-#    is the default from Steam's very first launch. Steam will extend this
-#    file with its own default library on first run — that's expected and
-#    fine, both libraries will coexist.
-if [[ ! -f "$STEAM_CONFIG" ]]; then
-    mkdir -p "$STEAM_ROOT/config"
-    contentid=$(head -c 8 /dev/urandom | od -An -tu8 | tr -d ' ')
-    cat > "$STEAM_CONFIG" <<EOF
-"libraryfolders"
-{
-	"0"
-	{
-		"path"		"$GAMES_DIR"
-		"label"		""
-		"contentid"		"$contentid"
-		"totalsize"		"0"
-		"update_clean_bytes_tally"		"0"
-		"time_last_update_verified"		"0"
-		"apps"
-		{
-		}
-	}
-}
-EOF
-    mkdir -p "$(dirname "$marker")"
-    touch "$marker"
+# 3. If Steam has never run, we can't do the vdf edit yet — Steam creates
+#    those files on first launch. Bail cleanly; next login retries.
+if [[ ! -f "$STEAM_LIB_PRIMARY" ]]; then
     exit 0
 fi
 
-# 4. Steam config exists. Check if ~/Games is already registered — if so,
-#    nothing to do.
-if grep -qF "\"$GAMES_DIR\"" "$STEAM_CONFIG"; then
-    mkdir -p "$(dirname "$marker")"
-    touch "$marker"
-    exit 0
-fi
-
-# 5. Never edit a running Steam's config — the client may re-save the file
-#    from memory and clobber our change. Defer to a future session.
+# 4. Never edit a running Steam's config — the client re-saves the file
+#    from memory and clobbers our change. Defer to a future session.
 if pgrep -x steam >/dev/null 2>&1; then
     exit 0
 fi
 
-# 6. Backup the existing config before editing (belt and suspenders even
-#    though our edit is a single-line insertion before the closing brace).
-cp "$STEAM_CONFIG" "$STEAM_CONFIG.powos-backup-$(date +%Y%m%d-%H%M%S)"
-
-# 7. Compute the next library index. libraryfolders.vdf uses "0", "1", ...
-next_idx=$(awk -F'"' '/^\t"[0-9]+"/{if($2+0>=max) max=$2+1} END{print (max?max:0)+0}' "$STEAM_CONFIG")
-contentid=$(head -c 8 /dev/urandom | od -An -tu8 | tr -d ' ')
-
-# 8. Build the new library block. Note the file uses hard tabs (Steam does).
-new_block=$(printf '\t"%s"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"label"\t\t""\n\t\t"contentid"\t\t"%s"\n\t\t"totalsize"\t\t"0"\n\t\t"update_clean_bytes_tally"\t\t"0"\n\t\t"time_last_update_verified"\t\t"0"\n\t\t"apps"\n\t\t{\n\t\t}\n\t}' "$next_idx" "$GAMES_DIR" "$contentid")
-
-# 9. Insert new block before the top-level closing brace. Only the LAST
-#    line of the file should be a bare `}` at column 0 — if the file
-#    doesn't match that structure, bail without editing (something else
-#    is going on, don't corrupt it).
-if [[ "$(tail -n1 "$STEAM_CONFIG" | tr -d '[:space:]')" != "}" ]]; then
+# 5. Check if ~/Games is already registered in the primary file.
+if grep -qF "\"$GAMES_DIR\"" "$STEAM_LIB_PRIMARY"; then
+    mkdir -p "$(dirname "$marker")"
+    touch "$marker"
     exit 0
 fi
 
-# awk-based insertion: emit the new block right before the last `}`.
-awk -v block="$new_block" '
-    /^\}[[:space:]]*$/ && !done { print block; done=1 }
-    { print }
-' "$STEAM_CONFIG" > "$STEAM_CONFIG.tmp" && mv "$STEAM_CONFIG.tmp" "$STEAM_CONFIG"
+# 6. Delegate the edit to Python — VDF is ugly to parse in awk/sed and the
+#    exact tab layout matters for Steam's parser. The Python is inline and
+#    only ~30 lines; keeping it here avoids shipping a second helper file.
+python3 - "$STEAM_LIB_PRIMARY" "$STEAM_LIB_LEGACY" "$GAMES_DIR" <<'PY'
+import os, random, re, sys
+GAMES = sys.argv[3]
+for path in sys.argv[1:3]:
+    if not os.path.exists(path):
+        continue
+    with open(path) as f:
+        content = f.read()
+    if GAMES in content:
+        continue
+    max_idx = -1
+    for m in re.finditer(r'^\t"(\d+)"$', content, re.MULTILINE):
+        max_idx = max(max_idx, int(m.group(1)))
+    next_idx = max_idx + 1
+    contentid = str(random.randint(10**18, 10**19 - 1))
+    block = (
+        f'\t"{next_idx}"\n'
+        '\t{\n'
+        f'\t\t"path"\t\t"{GAMES}"\n'
+        '\t\t"label"\t\t""\n'
+        f'\t\t"contentid"\t\t"{contentid}"\n'
+        '\t\t"totalsize"\t\t"0"\n'
+        '\t\t"update_clean_bytes_tally"\t\t"0"\n'
+        '\t\t"time_last_update_verified"\t\t"0"\n'
+        '\t\t"apps"\n'
+        '\t\t{\n'
+        '\t\t}\n'
+        '\t}\n'
+    )
+    # Only replace the file's OWN closing brace, not any nested ones.
+    new_content = re.sub(r'^\}\s*$', block + '}', content, count=1, flags=re.MULTILINE)
+    # Refuse to write if regex didn't find the top-level close (means the
+    # file structure isn't what we expect — safer to bail than corrupt it).
+    if new_content == content:
+        continue
+    with open(path, 'w') as f:
+        f.write(new_content)
+PY
 
 mkdir -p "$(dirname "$marker")"
 touch "$marker"
