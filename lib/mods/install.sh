@@ -389,6 +389,13 @@ mods_download_link_cmd() {
 
 # Install ONE mod (main file by default, or a specific file-id).
 # Returns 0 on success. `_mods_install_one <game> <mod-id> [file-id]`
+#
+# The nxm:// URL passed to NMA is BARE (no ?key=&expires=&user_id=).
+# Discovered 2026-07-07: NMA's NXMUrl.Parse marks those query params
+# optional — the running NMA instance uses its own stored OAuth to auth
+# the download. So `download_link.json` (which returns https:// CDN URLs
+# NMA doesn't accept via protocol-invoke) is unnecessary — we only need
+# `files.json` to resolve mod-id → file-id, then dispatch a bare URL.
 _mods_install_one() {
     local game="$1" mod_id="$2" file_id="${3:-}"
     local slug; slug="$(mods_nexus_slug_of "$game")"
@@ -415,14 +422,13 @@ print(picked["file_id"] if picked else "")
         [[ -z "$file_id" ]] && { perr "  mod $mod_id: no downloadable file."; return 1; }
     fi
 
-    local dl url
-    dl="$(mods_api_get "/games/$slug/mods/$mod_id/files/$file_id/download_link.json")" \
-        || { perr "  mod $mod_id file $file_id: download_link.json failed (Premium only)."; return 1; }
-    url="$(printf '%s' "$dl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["URI"] if d else "")')"
-    [[ -z "$url" ]] && { perr "  mod $mod_id: Nexus returned no signed URL (rate limited?)"; return 1; }
-
-    mods_nma_invoke protocol-invoke -u "$url" >/dev/null 2>&1 \
-        || { perr "  mod $mod_id: NMA rejected URL."; return 1; }
+    local url="nxm://${slug}/mods/${mod_id}/files/${file_id}"
+    local out; out="$(mods_nma_invoke protocol-invoke -u "$url" 2>&1)"
+    if printf '%s' "$out" | grep -qE '^Error:|^An error occurred|Exception'; then
+        perr "  mod $mod_id: NMA rejected URL. Output:"
+        printf '%s\n' "$out" | head -3 >&2
+        return 1
+    fi
     printf '%s\n' "$file_id"
 }
 
