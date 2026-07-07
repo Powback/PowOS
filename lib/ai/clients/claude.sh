@@ -236,9 +236,14 @@ client_interactive() {
     local cmd="${CLIENT_CMD:-claude}"
     local args=()
 
-    # Add system prompt
+    # Add system prompt. Use --append-system-prompt (works in interactive
+    # AND print mode) rather than --system-prompt (which Claude Code 2.x
+    # treats as an implicit --print signal — the interactive TUI then
+    # errors with "Input must be provided either through stdin or as a
+    # prompt argument when using --print" the moment the user types
+    # something).
     if [[ -n "$system_prompt" ]]; then
-        args+=("--system-prompt" "$system_prompt")
+        args+=("--append-system-prompt" "$system_prompt")
     fi
 
     # Add session — only resume a real client UUID; anything else (e.g. a
