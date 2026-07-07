@@ -326,7 +326,23 @@ EOF
 mods_nma_binary() { echo "$MODS_APPS_DIR/NexusModsApp.AppImage"; }
 
 mods_nma_running() {
-    pgrep -f "NexusModsApp\.AppImage" >/dev/null 2>&1
+    # Authoritative check: someone holds NMA's RocksDB LOCK open. That's
+    # what actually blocks as-main commands (not GUI-window existence),
+    # and it beats string-matching cmdlines — the earlier `pgrep -f` was
+    # too loose and matched agent processes whose *prompt text* mentions
+    # "NexusModsApp.AppImage", producing false positives. Discovered
+    # during E2E agent test 2026-07-07.
+    local lock="$HOME/.local/share/NexusMods.App/DataModel/MnemonicDB.rocksdb/LOCK"
+    if [[ -f "$lock" ]] && command -v fuser >/dev/null 2>&1; then
+        # `fuser` prints holding PIDs to stderr and lists them on stdout.
+        # If nothing holds it, stdout is empty and grep -q . fails.
+        fuser "$lock" 2>/dev/null | grep -q . && return 0
+    fi
+    # Fallback: only match the executable at a path boundary — the
+    # AppImage's own cmdline starts with the full path to the binary,
+    # while cmdlines that merely MENTION the string (agents, docs, this
+    # very function's caller stack) don't start with `/…/NexusModsApp.AppImage`.
+    pgrep -f "/NexusModsApp\.AppImage($|[[:space:]])" >/dev/null 2>&1
 }
 
 mods_nma_ensure_installed() {
@@ -426,19 +442,46 @@ mods_install_collection_cmd() {
 # with mod manager" button flow because that's the same URL scheme.
 mods_install_mod_cmd() {
     POWOS_MODS_LAST_VERB="install-mod"
-    local game="${1:?Usage: powos mods install-mod <game> <mod-id> [file-id]}"
-    local mod_id="${2:?Usage: powos mods install-mod <game> <mod-id> [file-id]}"
+    local game="${1:?Usage: powos mods install-mod <game> <mod-id> <file-id>}"
+    local mod_id="${2:?Usage: powos mods install-mod <game> <mod-id> <file-id>}"
     local file_id="${3:-}"
     local slug; slug="$(mods_nexus_slug_of "$game")"
-    local url
+
+    # NMA's nxm:// protocol parser REQUIRES a file-id. `nxm://<game>/mods/<id>`
+    # (mod page URL) is rejected with "invalid url" — confirmed via E2E agent
+    # test 2026-07-07. Refuse cleanly if the caller only knows the mod-id.
     if [[ -z "$file_id" ]]; then
-        url="nxm://${slug}/mods/${mod_id}"
-        plog "Opening mod page URL: $url"
-    else
-        url="nxm://${slug}/mods/${mod_id}/files/${file_id}"
-        plog "Installing file $file_id of mod $mod_id: $url"
+        perr "install-mod needs a <file-id> too — NMA rejects bare mod-page URLs."
+        perr "Ways to get the file-id:"
+        perr "  1. Visit https://www.nexusmods.com/${slug}/mods/${mod_id}, click a"
+        perr "     file's 'Manual Download' or 'Mod Manager Download', and NMA will"
+        perr "     receive the full nxm:// URL directly (no CLI needed for this path)."
+        perr "  2. Query Nexus API for latest main file:"
+        perr "       curl -sS https://api.nexusmods.com/v1/games/${slug}/mods/${mod_id}/files.json \\"
+        perr "         -H 'apikey: <your-nexus-api-key>' \\"
+        perr "         | jq -r '.files[] | select(.category_name==\"MAIN\") | .file_id' | head -1"
+        perr "     Nexus API keys: https://www.nexusmods.com/users/myaccount?tab=api"
+        return 1
     fi
-    mods_nma_invoke protocol-invoke "$url"
+
+    local url="nxm://${slug}/mods/${mod_id}/files/${file_id}"
+    plog "Installing file $file_id of mod $mod_id: $url"
+
+    # NexusModsApp's protocol-invoke takes `-u <url>`, not a positional arg.
+    # Agent-driven E2E test caught this ("Option '-u' is required").
+    #
+    # Also: capture and inspect output. NMA's CLI prints "An error occurred
+    # while executing the command" then a stack trace on invalid URL / auth
+    # failure but its exit code is unreliable — surface any "Error:" line as
+    # a wrapper-level failure so callers (agents, scripts) see nonzero.
+    local out rc
+    out="$(mods_nma_invoke protocol-invoke -u "$url" 2>&1)"; rc=$?
+    printf '%s\n' "$out"
+    if [[ $rc -ne 0 ]] || printf '%s' "$out" | grep -q '^Error:\|^An error occurred'; then
+        perr "protocol-invoke reported an error (see output above)."
+        return 1
+    fi
+    pok "Dispatched to NMA."
 }
 
 # Generic escape hatch: forward whatever args to `NexusModsApp as-main`
@@ -553,7 +596,7 @@ Nexus Mods App CLI (headless mod management — needs nexus-mods-app installed):
   powos mods tools <game>         List tools registered for a game.
   powos mods run-tool <game> <tool>
                                   Run a game tool via NMA.
-  powos mods raw <args...>        Forward raw args to `NexusModsApp as-main`
+  powos mods raw <args...>        Forward raw args to \`NexusModsApp as-main\`
                                   for any subcommand PowOS hasn't wrapped.
 
 Note: GUI-auth persists to NMA's data model. Log in once via the GUI, all
