@@ -8,18 +8,6 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
 
 ## Open
 
-- [ ] **Root-owned source tree blocks direct edits.** `/var/lib/powos/src` is `root:root`,
-  so powai's editor can't write files — every change must be staged elsewhere and
-  `sudo cp`'d in. Proposal: seed the src checkout owned by the primary user (or a
-  group they're in) in the image, keeping `self test`/`push` (which touch `/usr`)
-  privileged. Low risk (it's a working copy); needs image-seeding change + testing.
-
-- [ ] **`sudo` prompts for a password on every `powos self`/`setup` call.** Deliberately
-  NOT auto-fixed: a blanket `NOPASSWD` for `powos self` is effectively user→root
-  escalation (`self test` writes into `/usr`), and shipping that to every install
-  weakens security for everyone. Needs an explicit product/security decision before
-  any default change. Local opt-in only until then.
-
 - [ ] **`powos ai --agent X --continue` continues the GLOBAL most-recent conversation,
   not agent X.** `--continue` → `client_continue` → `claude --print --continue`, which
   resumes whatever ran last in the cwd, then grafts X's system prompt on top. With
@@ -58,6 +46,15 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
 
 ## Fixed
 
+- [x] **Root-owned source tree / `sudo` needed for self push.** Turned out the fix
+  already ships: `/etc/tmpfiles.d/powos-self-src.conf` has a `Z` rule that recursively
+  re-chowns `/var/lib/powos/src` to `powos:powos` on every boot. The tree only went
+  root-owned MID-SESSION because `.git` was created by a `sudo powos self pull` (git
+  as root makes root-owned files). Resolution: **never `sudo` `self pull`/`push`** —
+  the powos user owns the tree and is git-authed as Powback with a credential helper,
+  so they run clean and unprivileged; edit source files directly (no `sudo cp`). Only
+  `self test` needs sudo (it writes the `/usr` overlay). A stray root-owned tree
+  self-heals on reboot, or `sudo chown -R powos:powos /var/lib/powos/src`.
 - [x] **`powos self push` (git add -A) can ship unrelated working-tree edits.**
   On 2026-07-07 a push meant for the `install.sh` mods-hang fix also carried a
   pre-existing uncommitted `lib/mods/vortex.sh` change (per-user Bottles install)
