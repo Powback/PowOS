@@ -416,7 +416,23 @@ print(picked["file_id"] if picked else "")
     fi
 
     local url="nxm://${slug}/mods/${mod_id}/files/${file_id}"
-    local out; out="$(mods_nma_invoke protocol-invoke -u "$url" 2>&1)"
+    # Fire the nxm:// at NMA and move on. A running NMA instance queues and
+    # prioritizes downloads internally, and its `protocol-invoke` process does
+    # NOT exit while the GUI is up — so capturing its output with $(...) blocks
+    # forever (observed 2026-07-07: a 6-mod batch hung on mod #1 for 8+ min and
+    # nothing downloaded). Bound the hand-off with `timeout`; a timeout here
+    # means "URL delivered, invoke just didn't self-exit", which is success.
+    # `timeout` can only exec a real binary, not the mods_nma_invoke shell
+    # function — so resolve the AppImage path and wrap that directly.
+    mods_nma_ensure_installed || return 1
+    local out rc bin; bin="$(mods_nma_binary)"
+    out="$(timeout -k 3 12 "$bin" protocol-invoke -u "$url" 2>&1)"; rc=$?
+    # rc 124 (SIGTERM at timeout) / 137 (SIGKILL via -k) = delivered-then-detached.
+    if [[ $rc -ne 0 && $rc -ne 124 && $rc -ne 137 ]]; then
+        perr "  mod $mod_id: protocol-invoke failed (rc=$rc)."
+        printf '%s\n' "$out" | head -3 >&2
+        return 1
+    fi
     if printf '%s' "$out" | grep -qE '^Error:|^An error occurred|Exception'; then
         perr "  mod $mod_id: NMA rejected URL. Output:"
         printf '%s\n' "$out" | head -3 >&2

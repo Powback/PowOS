@@ -54,6 +54,14 @@ VORTEX_DESKTOP_DIR="${VORTEX_DESKTOP_DIR:-$HOME/.local/share/applications}"
 VORTEX_ICONS_DIR="${VORTEX_ICONS_DIR:-$HOME/.local/share/icons/hicolor/256x256/apps}"
 VORTEX_LOCAL_BIN="${VORTEX_LOCAL_BIN:-$HOME/.local/bin}"
 
+# Bottles Flatpak's own writable scratch inside its sandbox. Staging the
+# NSIS installer here — instead of /tmp — is the only reliable way to
+# pass an .exe into `bottles-cli run`, since Flatpak sandboxes reject
+# arbitrary host paths (even /tmp) unless explicitly overridden.
+_vortex_bottles_temp() {
+    echo "$HOME/.var/app/$VORTEX_FLATPAK_ID/data/bottles/temp"
+}
+
 # Bottle drive_c path — where Vortex.exe ends up after install.
 # ($VORTEX_BOTTLE_NAME expanded at call time; --user data path is stable.)
 _vortex_bottle_dir() {
@@ -71,13 +79,23 @@ vortex_ensure_bottles() {
     if flatpak info "$VORTEX_FLATPAK_ID" >/dev/null 2>&1; then
         return 0
     fi
-    plog "Bottles Flatpak not installed. Installing (needs sudo)…"
-    if ! sudo flatpak install -y --system flathub "$VORTEX_FLATPAK_ID" 2>&1 \
-            | grep -E "Installing|Installation complete|already installed" | tail -3; then
+    plog "Bottles Flatpak not installed. Installing --user (no sudo)…"
+
+    # Bazzite ships a filtered SYSTEM flathub (whitelist). Bottles is on
+    # the whitelist so system install works, but we default to --user
+    # because it doesn't need sudo, keeps Vortex fully per-user, and
+    # avoids messing with the system stateroot. If flathub isn't
+    # registered per-user yet, add it (no sudo needed for --user remote).
+    flatpak remote-add --user --if-not-exists flathub \
+        https://flathub.org/repo/flathub.flatpakrepo 2>/dev/null || true
+
+    if ! flatpak install -y --user --noninteractive flathub \
+            "$VORTEX_FLATPAK_ID" 2>&1 | tail -5; then
         perr "Bottles install failed. Check network + flathub remote."
-        perr "  Add flathub remote first: sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo"
+        perr "  Manual add:  flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo"
         return 1
     fi
+    pok "Bottles installed (--user)."
 }
 
 # The Bottles Flatpak defaults to the standard xdg portals. To let Vortex
@@ -113,11 +131,65 @@ vortex_bottle_exists() {
         2>/dev/null
 }
 
+# Bottles CLI refuses `new` if no "managed" runner is installed, with
+# "Missing essential components. Installing… No managed runners found."
+# Bottles-cli has NO verb to download runners; only the GUI's first-run
+# wizard does it. Workaround: launch the GUI briefly headless into the
+# active KDE session, wait until a runner appears in ~/.var/app/.../runners,
+# then kill it. Deterministic once we can see a runner file drop.
+vortex_bootstrap_runners() {
+    local runners_dir="$HOME/.var/app/$VORTEX_FLATPAK_ID/data/bottles/runners"
+    # Already have a runner? Nothing to do.
+    if [[ -d "$runners_dir" ]] && \
+       find "$runners_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -q .; then
+        return 0
+    fi
+    plog "No Bottles runner installed. Kicking the GUI once so it downloads one…"
+    plog "  ${DIM}(This is a Bottles CLI limitation — it can't fetch runners itself.)${NC}"
+
+    # Find the KDE session's env from a running plasmashell so the GUI
+    # can actually paint (headless-from-ssh but shown-on-user's-screen).
+    local plasma_pid dbus display xauth wayland xdg
+    plasma_pid="$(pgrep -u "$USER" -x plasmashell | head -1)"
+    if [[ -z "$plasma_pid" ]]; then
+        perr "No plasmashell running — can't launch Bottles GUI headlessly."
+        perr "  Run 'flatpak run $VORTEX_FLATPAK_ID' once from your desktop, close it, and retry."
+        return 1
+    fi
+    dbus=$(tr '\0' '\n' </proc/"$plasma_pid"/environ | grep '^DBUS_SESSION_BUS_ADDRESS=')
+    display=$(tr '\0' '\n' </proc/"$plasma_pid"/environ | grep '^DISPLAY=')
+    xauth=$(tr '\0' '\n' </proc/"$plasma_pid"/environ | grep '^XAUTHORITY=')
+    wayland=$(tr '\0' '\n' </proc/"$plasma_pid"/environ | grep '^WAYLAND_DISPLAY=')
+    xdg=$(tr '\0' '\n' </proc/"$plasma_pid"/environ | grep '^XDG_RUNTIME_DIR=')
+
+    env "$dbus" "$display" "$xauth" "$wayland" "$xdg" \
+        flatpak run "$VORTEX_FLATPAK_ID" >/tmp/bottles-firstrun.log 2>&1 &
+    local gui_pid=$!
+
+    local i
+    for i in $(seq 1 60); do
+        sleep 5
+        if [[ -d "$runners_dir" ]] && \
+           find "$runners_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -q .; then
+            local names; names="$(find "$runners_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f ' 2>/dev/null)"
+            pok "  Runner installed: $names"
+            kill "$gui_pid" 2>/dev/null; pkill -f "$VORTEX_FLATPAK_ID" 2>/dev/null || true
+            sleep 2
+            return 0
+        fi
+    done
+
+    kill "$gui_pid" 2>/dev/null; pkill -f "$VORTEX_FLATPAK_ID" 2>/dev/null || true
+    perr "  Timed out waiting for a runner (5 min). See /tmp/bottles-firstrun.log."
+    return 1
+}
+
 vortex_create_bottle() {
     if vortex_bottle_exists; then
         pok "Bottle $VORTEX_BOTTLE_NAME already exists."
         return 0
     fi
+    vortex_bootstrap_runners || return 1
     plog "Creating Bottles bottle '$VORTEX_BOTTLE_NAME' (win64, application env)…"
     if ! vortex_bcli new \
             --bottle-name "$VORTEX_BOTTLE_NAME" \
@@ -132,17 +204,39 @@ vortex_create_bottle() {
 # .NET Desktop 6 is required for Vortex 1.8+. Bottles CLI has no first-
 # class dependency verb, but its bundled winetricks handles it. We shell
 # into the bottle and run winetricks against the bottle's Wine env.
+#
+# BEWARE: `winetricks -q dotnetdesktop6` prints "ShellExecuteEx failed"
+# during install and still exits 0 — the shell-exec chain in Wine hits
+# error paths that don't propagate to winetricks' exit code. So we DO
+# NOT trust the exit code. Verify by looking for the dotnet host binary
+# under the bottle's Program Files after install.
+vortex_dotnet_present() {
+    local pf="$(_vortex_bottle_dir)/drive_c/Program Files/dotnet"
+    [[ -x "$pf/dotnet.exe" ]]
+}
+
 vortex_install_dotnet6() {
-    plog "Installing .NET Desktop 6 into $VORTEX_BOTTLE_NAME (winetricks, several minutes)…"
-    # `bottles-cli shell -i` runs an arbitrary command inside the bottle's
-    # Wine environment. WINETRICKS + WINEPREFIX are already set.
-    if ! vortex_bcli shell -b "$VORTEX_BOTTLE_NAME" \
-            -i "winetricks -q dotnetdesktop6 corefonts" 2>&1 | tail -20; then
-        pwarn ".NET install non-zero — Vortex may prompt to install it on first run."
-        pwarn "  If Vortex won't start, re-run: powos mods vortex install-dotnet"
-        return 1
+    if vortex_dotnet_present; then
+        pok ".NET Desktop 6 already present in $VORTEX_BOTTLE_NAME."
+        return 0
     fi
-    pok ".NET Desktop 6 + corefonts installed."
+    plog "Installing .NET Desktop 6 into $VORTEX_BOTTLE_NAME (winetricks, ~5 min)…"
+    # Suppress winetricks' constant progress noise; we only care about
+    # the final state. `-i` runs a command in the bottle's Wine env
+    # with WINEPREFIX etc. preset.
+    vortex_bcli shell -b "$VORTEX_BOTTLE_NAME" \
+        -i "winetricks -q dotnetdesktop6 corefonts" \
+        >/tmp/vortex-dotnet-install.log 2>&1 || true
+
+    if vortex_dotnet_present; then
+        pok ".NET Desktop 6 + corefonts installed."
+        return 0
+    fi
+    pwarn ".NET Desktop 6 not detected under Program Files/dotnet after winetricks."
+    pwarn "  Vortex will prompt to install .NET on first launch — accept that dialog."
+    pwarn "  Log:  /tmp/vortex-dotnet-install.log"
+    # NOT fatal — Vortex CAN self-install .NET on first GUI launch. Continue.
+    return 0
 }
 
 # ─── Vortex installer download + silent install ──────────────────────────
@@ -151,12 +245,18 @@ vortex_download_installer() {
     local version="${1:-$VORTEX_DEFAULT_VERSION}" out="$2"
     local url
     url="$(printf "$VORTEX_INSTALLER_URL_TMPL" "$version" "$version")"
-    plog "Downloading Vortex v$version…"
+    plog "Downloading Vortex v$version (~344 MiB)…"
     plog "  ${DIM}$url${NC}"
-    if ! curl -fL --progress-bar "$url" -o "$out"; then
+    # -sS = silent transfer, still show errors. --progress-bar dumps
+    # thousands of bytes of \r-updated progress that fill the caller's
+    # stdout buffer with garbage. Better to just print elapsed time at
+    # the end.
+    local t0=$(date +%s)
+    if ! curl -fL -sS "$url" -o "$out"; then
         perr "Vortex installer download failed."
         return 1
     fi
+    local elapsed=$(( $(date +%s) - t0 ))
     # Sanity: NSIS-installers are ≥ 100MB. If it's small it's an HTML error page.
     local size; size=$(stat -c %s "$out" 2>/dev/null || stat -f %z "$out" 2>/dev/null || echo 0)
     if (( size < 100000000 )); then
@@ -164,17 +264,20 @@ vortex_download_installer() {
         rm -f "$out"
         return 1
     fi
-    pok "Installer downloaded ($((size / 1024 / 1024)) MiB)."
+    pok "Installer downloaded ($((size / 1024 / 1024)) MiB in ${elapsed}s)."
 }
 
 vortex_run_installer() {
     local installer="$1"
     plog "Running Vortex installer silently (NSIS /S, dest=$VORTEX_INSTALL_DRIVE_PATH)…"
+    plog "  ${DIM}(3–5 min inside Wine; no output unless it fails.)${NC}"
     # NSIS flags: /S = silent, /D=path (must be last, no quotes) = dest.
-    # Bottles' `run -a` splits on spaces so we pass one combined string.
+    # bottles-cli takes program args POSITIONALLY (verified 2026-07-07,
+    # bottles-cli v64) — no `-a` flag on this branch. Passing each NSIS
+    # switch as its own positional arg.
     if ! vortex_bcli run -b "$VORTEX_BOTTLE_NAME" \
             -e "$installer" \
-            -a "/S /D=$VORTEX_INSTALL_DRIVE_PATH" 2>&1 | tail -10; then
+            "/S" "/D=$VORTEX_INSTALL_DRIVE_PATH" 2>&1 | tail -10; then
         perr "Vortex installer failed inside the bottle."
         return 1
     fi
@@ -233,18 +336,14 @@ if [[ ! -f "$EXE" ]]; then
     exit 127
 fi
 
-# Join args into one space-separated string for bottles-cli -a.
-# Quoting single strings preserves things like "nxm://…?key=…&…".
-ARGS=""
-for a in "$@"; do
-    ARGS+=" $(printf '%q' "$a")"
-done
-ARGS="${ARGS# }"
+# bottles-cli v64+ takes Vortex-side args as POSITIONAL (after -e).
+# Passing them straight through preserves whitespace / URL query
+# strings without a re-quote pass.
 
 # Detach — Vortex owns its own event loop; we don't want to block a
 # terminal or a xdg-open call from the nxm:// handler.
 setsid nohup flatpak run --command=bottles-cli "$FLATPAK" \
-    run -b "$BOTTLE" -e "$EXE" ${ARGS:+-a "$ARGS"} \
+    run -b "$BOTTLE" -e "$EXE" "$@" \
     >/dev/null 2>&1 < /dev/null &
 disown
 EOF
@@ -354,15 +453,27 @@ vortex_install_cmd() {
     vortex_create_bottle           || return 1
     vortex_install_dotnet6         || pwarn "  Continuing — Vortex may self-install .NET on first run."
 
-    local tmp; tmp="$(mktemp -d)"
-    local installer="$tmp/vortex-setup-$version.exe"
-    if ! vortex_download_installer "$version" "$installer"; then
-        rm -rf "$tmp"; return 1
+    # Stage the installer INSIDE the Bottles Flatpak's data dir. Its
+    # sandbox blocks arbitrary host paths (even /tmp) — passing an .exe
+    # under /tmp to `bottles-cli run` fails with "Executable file path
+    # does not exist or is not accessible by the Flatpak". The temp
+    # subdir under bottles' own data is always readable inside the
+    # sandbox by design.
+    local bottles_temp; bottles_temp="$(_vortex_bottles_temp)"
+    mkdir -p "$bottles_temp"
+    local installer="$bottles_temp/vortex-setup-$version.exe"
+    if [[ ! -f "$installer" ]] || (( $(stat -c %s "$installer" 2>/dev/null || echo 0) < 100000000 )); then
+        if ! vortex_download_installer "$version" "$installer"; then
+            return 1
+        fi
+    else
+        pok "Installer already cached at $installer (skipping download)."
     fi
     if ! vortex_run_installer "$installer"; then
-        rm -rf "$tmp"; return 1
+        return 1
     fi
-    rm -rf "$tmp"
+    # Keep the installer around — Bottles cleans temp itself, and if the
+    # user re-runs `install`, we skip the 344 MiB download.
 
     vortex_extract_icon
     vortex_write_wrapper
