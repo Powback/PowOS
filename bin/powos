@@ -2825,7 +2825,7 @@ case "${1:-}" in
         source "$POWOS_LIB/mods/install.sh"
         case "${1:-}" in
             # Mod-manager lifecycle
-            install)                            shift; mods_install_cmd "$@" ;;
+            install-manager|install-mgr)        shift; mods_install_cmd "$@" ;;
             uninstall|remove|rm)                shift; mods_uninstall_cmd "$@" ;;
             installed|list|ls)                  mods_installed_cmd ;;
             launch|run|start)                   shift; mods_launch_cmd "$@" ;;
@@ -2838,6 +2838,12 @@ case "${1:-}" in
             run-tool)                           shift; mods_run_tool_cmd "$@" ;;
             install-collection|ic|collection)   shift; mods_install_collection_cmd "$@" ;;
             install-mod|im|mod)                 shift; mods_install_mod_cmd "$@" ;;
+            install|bulk|batch)                 shift; mods_install_smart_cmd "$@" ;;
+            install-file|if)                    shift; mods_install_file_cmd "$@" ;;
+            info)                               shift; mods_info_cmd "$@" ;;
+            files)                              shift; mods_files_cmd "$@" ;;
+            changelog|changes)                  shift; mods_changelog_cmd "$@" ;;
+            download-link|link)                 shift; mods_download_link_cmd "$@" ;;
             raw|as-main)                        shift; mods_raw_cmd "$@" ;;
             help|--help|-h|"")                  mods_help ;;
             *)                                  perr "Unknown: powos mods $1"; mods_help; exit 1 ;;

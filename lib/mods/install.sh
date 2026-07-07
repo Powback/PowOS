@@ -310,6 +310,200 @@ EOF
     fi
 }
 
+# ─── Nexus REST API helpers ──────────────────────────────────────────────
+# All commands here talk directly to https://api.nexusmods.com/v1/ with the
+# Personal API Key saved by `powos setup nexus`. Premium accounts get the
+# `download_link.json` endpoint that returns a signed nxm:// URL — that
+# URL is what NMA's `protocol-invoke` accepts. Free accounts can still use
+# `mod-info`, `mod-files`, and `mod-changelog` but not `download-link`.
+#
+# For AI agents: this is the vocabulary you use to look at a mod BEFORE
+# installing — read description + file list + categories + version → pick
+# the right main file → install.
+
+POWOS_NEXUS_KEY_FILE="${POWOS_NEXUS_KEY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/powos/nexus.key}"
+POWOS_NEXUS_UA="powos-mods/0.1"
+
+mods_nexus_key() {
+    [[ -f "$POWOS_NEXUS_KEY_FILE" ]] || {
+        perr "No Nexus API key at $POWOS_NEXUS_KEY_FILE."
+        perr "Run: powos setup nexus"
+        return 1
+    }
+    cat "$POWOS_NEXUS_KEY_FILE"
+}
+
+# Low-level curl wrapper: prints JSON body to stdout, returns nonzero on
+# HTTP error. Rate limited by Nexus (300/day free, 600/day Premium).
+mods_api_get() {
+    local path="$1"
+    local key; key="$(mods_nexus_key)" || return 1
+    curl -sS -f \
+        -H "apikey: $key" \
+        -H "User-Agent: $POWOS_NEXUS_UA" \
+        -H "Accept: application/json" \
+        "https://api.nexusmods.com/v1$path"
+}
+
+# powos mods info <game> <mod-id>   → mod summary (name, author, description,
+#                                      category, endorsements, version)
+mods_info_cmd() {
+    POWOS_MODS_LAST_VERB="info"
+    local game="${1:?Usage: powos mods info <game> <mod-id>}"
+    local mod_id="${2:?Usage: powos mods info <game> <mod-id>}"
+    local slug; slug="$(mods_nexus_slug_of "$game")"
+    mods_api_get "/games/$slug/mods/$mod_id.json"
+}
+
+# powos mods files <game> <mod-id>  → JSON file list. Category IDs:
+#                                      1 MAIN  2 UPDATE  3 OPTIONAL
+#                                      4 OLD_VERSION  5 MISCELLANEOUS
+mods_files_cmd() {
+    POWOS_MODS_LAST_VERB="files"
+    local game="${1:?Usage: powos mods files <game> <mod-id>}"
+    local mod_id="${2:?Usage: powos mods files <game> <mod-id>}"
+    local slug; slug="$(mods_nexus_slug_of "$game")"
+    mods_api_get "/games/$slug/mods/$mod_id/files.json"
+}
+
+# powos mods changelog <game> <mod-id>  → changelog JSON, keyed by version
+mods_changelog_cmd() {
+    POWOS_MODS_LAST_VERB="changelog"
+    local game="${1:?Usage: powos mods changelog <game> <mod-id>}"
+    local mod_id="${2:?Usage: powos mods changelog <game> <mod-id>}"
+    local slug; slug="$(mods_nexus_slug_of "$game")"
+    mods_api_get "/games/$slug/mods/$mod_id/changelogs.json"
+}
+
+# powos mods download-link <game> <mod-id> <file-id>
+#   Premium-only. Returns [{"URI": "nxm://…?key=…&expires=…&user_id=…"}].
+#   The URI is the signed nxm:// that NMA's protocol-invoke accepts.
+mods_download_link_cmd() {
+    POWOS_MODS_LAST_VERB="download-link"
+    local game="${1:?Usage: powos mods download-link <game> <mod-id> <file-id>}"
+    local mod_id="${2:?Usage: powos mods download-link <game> <mod-id> <file-id>}"
+    local file_id="${3:?Usage: powos mods download-link <game> <mod-id> <file-id>}"
+    local slug; slug="$(mods_nexus_slug_of "$game")"
+    mods_api_get "/games/$slug/mods/$mod_id/files/$file_id/download_link.json"
+}
+
+# Install ONE mod (main file by default, or a specific file-id).
+# Returns 0 on success. `_mods_install_one <game> <mod-id> [file-id]`
+_mods_install_one() {
+    local game="$1" mod_id="$2" file_id="${3:-}"
+    local slug; slug="$(mods_nexus_slug_of "$game")"
+
+    if [[ -z "$file_id" ]]; then
+        local files
+        files="$(mods_api_get "/games/$slug/mods/$mod_id/files.json")" || return 1
+        # Prefer primary + MAIN category. Fall back to newest MAIN, then newest.
+        file_id="$(printf '%s' "$files" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+files = d.get("files", []) or []
+mains = [f for f in files if f.get("category_id") == 1]
+picked = None
+for f in mains:
+    if f.get("is_primary"):
+        picked = f; break
+if not picked and mains:
+    picked = sorted(mains, key=lambda x: x.get("uploaded_timestamp", 0), reverse=True)[0]
+if not picked and files:
+    picked = sorted(files, key=lambda x: x.get("uploaded_timestamp", 0), reverse=True)[0]
+print(picked["file_id"] if picked else "")
+')"
+        [[ -z "$file_id" ]] && { perr "  mod $mod_id: no downloadable file."; return 1; }
+    fi
+
+    local dl url
+    dl="$(mods_api_get "/games/$slug/mods/$mod_id/files/$file_id/download_link.json")" \
+        || { perr "  mod $mod_id file $file_id: download_link.json failed (Premium only)."; return 1; }
+    url="$(printf '%s' "$dl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["URI"] if d else "")')"
+    [[ -z "$url" ]] && { perr "  mod $mod_id: Nexus returned no signed URL (rate limited?)"; return 1; }
+
+    mods_nma_invoke protocol-invoke -u "$url" >/dev/null 2>&1 \
+        || { perr "  mod $mod_id: NMA rejected URL."; return 1; }
+    printf '%s\n' "$file_id"
+}
+
+# powos mods install <game> <mod-id> [mod-id …]
+#   Bulk mod install by mod-id. Picks primary MAIN file for each. Also
+#   reads mod-ids from stdin if none given on the command line (one per
+#   line, `#` and blank lines ignored). Sleeps 1s between calls to stay
+#   inside Nexus's rate limits.
+#
+#   AI use: for each mod ID in your task list, run `powos mods install
+#   <game> <ids…>`. If a mod has multiple variants (HD vs SD, ENB
+#   presets, patch series), inspect `powos mods files <game> <mod-id>`
+#   first to pick the right file-id, then run `powos mods install-file
+#   <game> <mod-id> <file-id>` for THAT one (bypasses auto-pick).
+#
+#   Flags:
+#     --json   Emit one JSON line per mod: {"mod_id":..,"file_id":..,"ok":true/false,"error":".."}
+mods_install_smart_cmd() {
+    POWOS_MODS_LAST_VERB="install"
+    local json=false
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json)  json=true; shift ;;
+            *)       args+=("$1"); shift ;;
+        esac
+    done
+    set -- "${args[@]}"
+
+    local game="${1:?Usage: powos mods install <game> <mod-id> [mod-id ...] (or pipe IDs on stdin)}"
+    shift
+    local ids=("$@")
+    if [[ ${#ids[@]} -eq 0 ]]; then
+        # Read from stdin: strip # comments + blank lines + any trailing junk.
+        while IFS= read -r line; do
+            line="${line%%#*}"
+            line="$(echo "$line" | tr -d '[:space:]')"
+            [[ -n "$line" ]] && ids+=("$line")
+        done
+    fi
+    [[ ${#ids[@]} -eq 0 ]] && { perr "No mod-ids given. Pass as args or pipe on stdin."; return 1; }
+
+    local ok=0 fail=0 mod_id file_id
+    for mod_id in "${ids[@]}"; do
+        if ! $json; then plog "→ mod $mod_id"; fi
+        if file_id="$(_mods_install_one "$game" "$mod_id" 2>&1)"; then
+            if $json; then
+                printf '{"mod_id":%s,"file_id":%s,"ok":true}\n' "$mod_id" "${file_id##*$'\n'}"
+            else
+                pok "  mod $mod_id: dispatched (file $file_id)"
+            fi
+            ok=$((ok+1))
+        else
+            local err="${file_id//$'\n'/ }"
+            if $json; then
+                printf '{"mod_id":%s,"ok":false,"error":%s}\n' "$mod_id" "$(printf '%s' "$err" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))')"
+            fi
+            fail=$((fail+1))
+        fi
+        sleep 1  # Nexus rate limit: 600/day Premium, 300/day free.
+    done
+
+    if ! $json; then
+        pok "Done. $ok ok, $fail failed."
+    fi
+    [[ $fail -eq 0 ]]
+}
+
+# powos mods install-file <game> <mod-id> <file-id>
+#   Install a SPECIFIC file (bypasses the main-file auto-pick). Use this
+#   when you inspected `powos mods files <game> <mod-id>` and want a
+#   non-default variant (a patch, an optional file, etc.).
+mods_install_file_cmd() {
+    POWOS_MODS_LAST_VERB="install-file"
+    local game="${1:?Usage: powos mods install-file <game> <mod-id> <file-id>}"
+    local mod_id="${2:?Usage: powos mods install-file <game> <mod-id> <file-id>}"
+    local file_id="${3:?Usage: powos mods install-file <game> <mod-id> <file-id>}"
+    _mods_install_one "$game" "$mod_id" "$file_id" >/dev/null \
+        && pok "mod $mod_id file $file_id: dispatched to NMA."
+}
+
 # ─── Nexus Mods App CLI wrapper ──────────────────────────────────────────
 # NMA has an undocumented `as-main` CLI mode with rich subcommands
 # (install-collection, list-games, nexus-api-key, etc.). Two invocation
