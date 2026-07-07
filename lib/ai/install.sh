@@ -102,16 +102,21 @@ ai_installed_version() {
 
 # ─── Installers ──────────────────────────────────────────────────────────
 
-# Ensure bun exists on PATH. Bun is bundled in the OS image so this is a
-# safety net — only trips on a machine that removed it, or a live-boot
-# variant that stripped it.
+# Ensure bun exists on PATH. Bun is bundled in the OS image at
+# /usr/local/bin/bun so this is a safety net — only trips on a machine
+# where /usr/local was clobbered, or a live-boot variant that stripped it.
+# Falls back to the upstream install script (installs to $HOME/.bun/bin —
+# per-user, no sudo). bun is NOT in Fedora repos so we don't try dnf.
 ai_ensure_bun() {
     command -v bun >/dev/null 2>&1 && return 0
-    pwarn "bun not found. Trying dnf install bun (needs sudo)..."
-    sudo dnf5 -y install --setopt=install_weak_deps=False bun 2>&1 | tail -3
+    pwarn "bun not found — falling back to per-user install via bun.sh."
+    plog "  ${DIM}curl -fsSL https://bun.sh/install | bash${NC}"
+    if curl -fsSL https://bun.sh/install | bash; then
+        # bun installer writes to ~/.bun/bin; add it to PATH for THIS shell.
+        export PATH="$HOME/.bun/bin:$PATH"
+    fi
     command -v bun >/dev/null 2>&1 || {
-        perr "Could not install bun via dnf. Falling back to the upstream installer:"
-        perr "  curl -fsSL https://bun.sh/install | bash"
+        perr "bun install failed. Check network / write access to \$HOME."
         return 1
     }
 }

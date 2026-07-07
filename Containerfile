@@ -73,19 +73,25 @@ RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
 #            loaded in the kernel; udev rules already shipped by Bazzite)
 #   piper    Logitech gaming mouse config GUI; pulls libratbag + ratbagd
 #   logiops  Logitech G-key macros + advanced button mapping
-#   bun      JavaScript/TypeScript runtime + package manager. Backs
-#            `powos ai install claude|codex|gemini` (npm-scoped packages),
-#            and generally useful for any JS/TS dev work.
 #   uv       Astral's Python package/env manager. Backs `powos ai install
 #            aider` and other Python tools. Modern replacement for
 #            pip/venv/pipenv; single fast Rust binary.
-# All five packages are in main Fedora 44 repos on Bazzite — no COPR needed.
+# openrgb, piper, logiops, and uv are all in main Fedora 44 repos. bun is
+# NOT in Fedora repos, so we download the official Linux glibc build from
+# GitHub releases and install it to /usr/local/bin. Using bun.sh/install
+# would try to put it under $HOME/.bun which isn't the right layout for an
+# OS-image build.
 # Native RPMs beat Flatpak/curl-installers here: Flatpak Piper pulls ~200MB
 # of GNOME Platform, and vendor curl-installers bypass the OS package
-# manager entirely which makes rollback via bootc noisier. RPMs total
-# ~120MB combined and share Bazzite's existing Qt/KF6 + glibc runtime.
+# manager entirely which makes rollback via bootc noisier. Total install
+# ~120MB and everything shares Bazzite's existing Qt/KF6 + glibc runtime.
 RUN dnf5 -y install --setopt=install_weak_deps=False \
-        openrgb piper logiops bun uv && \
+        openrgb piper logiops uv unzip && \
+    curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip" \
+        -o /tmp/bun.zip && \
+    unzip -q -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/local/bin/ && \
+    chmod +x /usr/local/bin/bun && \
+    rm -f /tmp/bun.zip && \
     dnf5 -y clean all && \
     systemctl enable ratbagd.service logid.service
 
