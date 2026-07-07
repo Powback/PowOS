@@ -87,8 +87,12 @@ RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
 # of GNOME Platform, and vendor curl-installers bypass the OS package
 # manager entirely which makes rollback via bootc noisier. Total install
 # ~120MB and everything shares Bazzite's existing Qt/KF6 + glibc runtime.
+# podman-compose + podman-docker make `podman compose up` AND `docker compose up`
+# work out of the box on this Podman-native OS: podman-compose is the compose
+# provider, podman-docker ships /usr/bin/docker→podman plus the `nodocker` file
+# that silences the emulation notice. No Docker daemon, fully rootless.
 RUN dnf5 -y install --setopt=install_weak_deps=False \
-        openrgb piper logiops uv unzip && \
+        openrgb piper logiops uv unzip podman-compose podman-docker && \
     curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip" \
         -o /tmp/bun.zip && \
     unzip -q -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/bin/ && \
