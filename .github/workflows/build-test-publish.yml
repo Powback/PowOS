@@ -163,16 +163,41 @@ jobs:
           # previous build so a script-only change doesn't redo the whole base.
           # NOTE: podman requires cache repo WITHOUT a tag — it manages its own
           # per-layer tags. A :tag makes every build fail at arg parsing.
-          sudo podman build --layers \
-            --cache-from ${{ env.IMAGE }}-cache-${{ matrix.variant }} \
-            --cache-to   ${{ env.IMAGE }}-cache-${{ matrix.variant }} \
-            --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
-            --build-arg POWOS_SRC_COMMIT=${{ github.sha }} \
-            -f Containerfile \
-            -t ${{ env.IMAGE }}:${{ matrix.variant }} \
-            -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
-            -t powos-ci \
-            .
+          #
+          # Retry policy: podman's --cache-to has a known race with multi-stage
+          # `COPY --from=staging` where the synthetic stage image ID gets pruned
+          # before cache-push resolves it, failing with:
+          #   Error: reading blob …: locating image with ID …: image not known
+          # (podman/buildah#5148, reproduced repeatedly here — see
+          #  https://github.com/containers/buildah/issues/5148). The IMAGE
+          # itself is fine at that point; only the cache upload of the copy
+          # layer failed. So: try once with --cache-to; if that fails, retry
+          # WITHOUT --cache-to (still consumes cache-from, just doesn't update).
+          # Cache goes stale slower than the release cadence, and the weekly
+          # prune keeps things bounded either way.
+          CACHE=${{ env.IMAGE }}-cache-${{ matrix.variant }}
+          set -x
+          if ! sudo podman build --layers \
+              --cache-from "$CACHE" \
+              --cache-to   "$CACHE" \
+              --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
+              --build-arg POWOS_SRC_COMMIT=${{ github.sha }} \
+              -f Containerfile \
+              -t ${{ env.IMAGE }}:${{ matrix.variant }} \
+              -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
+              -t powos-ci \
+              . ; then
+              echo "::warning::--cache-to failed (likely podman/buildah#5148 race). Retrying without cache-to; image itself will still build."
+              sudo podman build --layers \
+                --cache-from "$CACHE" \
+                --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
+                --build-arg POWOS_SRC_COMMIT=${{ github.sha }} \
+                -f Containerfile \
+                -t ${{ env.IMAGE }}:${{ matrix.variant }} \
+                -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
+                -t powos-ci \
+                .
+          fi
 
       - name: Container tests (tier1 inside the actual image) — nvidia-open only
         if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
