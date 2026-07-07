@@ -312,6 +312,12 @@ self_push() {
     if git -C "$src" diff --cached --quiet 2>/dev/null; then
         pwarn "Nothing staged — working tree already matches HEAD; pushing anyway."
     else
+        # Transparency: `add -A` stages the ENTIRE tree, so a stray/unrelated edit
+        # can ride along under a single-purpose message (happened 2026-07-07 — an
+        # unrelated vortex.sh change shipped under a mods-fix commit). Always show
+        # exactly what's about to be committed so it's a choice, not a surprise.
+        plog "Committing these files:"
+        git -C "$src" diff --cached --name-status 2>/dev/null | self_indent
         # Let git stamp the commit date itself (no build-time timestamp baked in).
         if ! git -C "$src" commit -m "$msg" 2>&1 | self_indent; then
             perr "git commit failed."

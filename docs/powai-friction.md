@@ -40,6 +40,14 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
 
 ## Fixed
 
+- [x] **`powos self push` (git add -A) can ship unrelated working-tree edits.**
+  On 2026-07-07 a push meant for the `install.sh` mods-hang fix also carried a
+  pre-existing uncommitted `lib/mods/vortex.sh` change (per-user Bottles install)
+  under a single-purpose commit message (fc2c095) — unreviewed. Mitigation: `self
+  push` now prints the staged file list (`diff --cached --name-status`) before
+  committing, so a stray file is visible, not silent. Reviewers should still eyeball
+  it. (The vortex.sh change itself was valid and kept.)
+
 - [x] **`powos ai` sessions never persisted on fresh installs** — `AI_STATE_DIR`
   defaulted to root-owned `/var/lib/powos/state/ai`, so a normal user's `mkdir`
   failed and every session (incl. `--session <name>`) was silently lost. Moved
