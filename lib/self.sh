@@ -282,8 +282,10 @@ self_push() {
     # ── Self-heal repo hygiene so a fresh install can push without manual git
     # setup. All idempotent; safe to run every push. ──────────────────────────
     #   1. safe.directory: the src tree is root-owned; whoever runs `self push`
-    #      (often root via sudo) must be allowed to operate on it.
-    git config --global --add safe.directory "$src" 2>/dev/null || true
+    #      (often root via sudo) must be allowed to operate on it. Guard the add
+    #      so we don't append a duplicate line to ~/.gitconfig on every push.
+    git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$src" \
+        || git config --global --add safe.directory "$src" 2>/dev/null || true
     #   2. core.fileMode false: installed composefs flips exec bits on carry-over,
     #      which otherwise show as dozens of phantom "modified" files and get
     #      swept into `git add -A`.

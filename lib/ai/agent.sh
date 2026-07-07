@@ -502,6 +502,16 @@ User request: $prompt"
     # Handle --continue (use client's continue feature).
     # Pass the agent system prompt through, same as the one-shot path.
     if [[ -n "$opt_continue" ]]; then
+        # FOOTGUN GUARD: --continue resumes the client's most-recent conversation
+        # in THIS directory, regardless of --agent. If the user also named an
+        # agent, its system prompt is grafted onto whatever that last (possibly
+        # different-agent) conversation was — and with --yolo that prior context
+        # can run autonomously. Warn loudly and point at the correct mechanism.
+        if [[ -n "$opt_agent" ]]; then
+            echo -e "${YELLOW}Warning:${NC} --continue resumes the MOST-RECENT conversation in this directory," >&2
+            echo -e "  not agent '${opt_agent}'s own history. '${opt_agent}' instructions are layered onto" >&2
+            echo -e "  that prior context. For per-agent continuity use: powos ai --session <name> --agent ${opt_agent}" >&2
+        fi
         if declare -f client_continue &>/dev/null; then
             client_continue "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}"
             return $?
