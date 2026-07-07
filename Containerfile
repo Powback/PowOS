@@ -78,9 +78,11 @@ RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
 #            pip/venv/pipenv; single fast Rust binary.
 # openrgb, piper, logiops, and uv are all in main Fedora 44 repos. bun is
 # NOT in Fedora repos, so we download the official Linux glibc build from
-# GitHub releases and install it to /usr/local/bin. Using bun.sh/install
-# would try to put it under $HOME/.bun which isn't the right layout for an
-# OS-image build.
+# GitHub releases and drop it directly into /usr/bin. Can't use /usr/local
+# because on Fedora Atomic/Silverblue (and thus Bazzite) /usr/local is a
+# symlink into an unpopulated /var target — mkdir -p /usr/local/bin fails
+# during container build. Using bun.sh/install would try to put it under
+# $HOME/.bun which isn't the right layout for an OS-image build either.
 # Native RPMs beat Flatpak/curl-installers here: Flatpak Piper pulls ~200MB
 # of GNOME Platform, and vendor curl-installers bypass the OS package
 # manager entirely which makes rollback via bootc noisier. Total install
@@ -89,8 +91,8 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
         openrgb piper logiops uv unzip && \
     curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip" \
         -o /tmp/bun.zip && \
-    unzip -q -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/local/bin/ && \
-    chmod +x /usr/local/bin/bun && \
+    unzip -q -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/bin/ && \
+    chmod +x /usr/bin/bun && \
     rm -f /tmp/bun.zip && \
     dnf5 -y clean all && \
     systemctl enable ratbagd.service logid.service
