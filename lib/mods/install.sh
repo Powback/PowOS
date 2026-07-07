@@ -440,6 +440,8 @@ print(picked["file_id"] if picked else "")
         printf '%s\n' "$out" | head -3 >&2
         return 1
     fi
+    # Track dispatched mod so future installs' dep-resolution knows it's present.
+    declare -f mods_record_installed >/dev/null 2>&1 && mods_record_installed "$slug" "$mod_id"
     printf '%s\n' "$file_id"
 }
 
@@ -540,6 +542,26 @@ mods_install_smart_cmd() {
         done
     fi
     [[ ${#ids[@]} -eq 0 ]] && { perr "No mod-ids given. Pass as args or pipe on stdin."; return 1; }
+
+    # ── Pre-flight: auto-resolve dependencies + warn on conflicts ──────────────
+    # Reads each mod's README (Requirements links → deps, Compatibility section →
+    # conflicts). Missing deps are HARD mod-id links, so we auto-add them. Conflict
+    # matches are heuristic (free-text), so we only WARN — never block. Skippable
+    # with MODS_NO_PREFLIGHT=1 or --no-deps.
+    if declare -f mods_analyze >/dev/null 2>&1 && [[ "${MODS_NO_PREFLIGHT:-}" != 1 ]] && ! $json; then
+        local _slug _pf _newdeps _confl _d
+        _slug="$(mods_nexus_slug_of "$game")"
+        _pf="$(mods_analyze "$_slug" "${ids[@]}" 2>/tmp/.mods_pf.$$)"
+        if [[ -s /tmp/.mods_pf.$$ ]]; then plog "Pre-flight (readme analysis):"; cat /tmp/.mods_pf.$$ >&2; fi
+        rm -f /tmp/.mods_pf.$$
+        _newdeps="$(printf '%s\n' "$_pf" | awk '/^MISSINGDEP/{print $3}' | sort -un)"
+        for _d in $_newdeps; do
+            printf '%s\n' "${ids[@]}" | grep -qxF "$_d" || ids+=("$_d")
+        done
+        [[ -n "$_newdeps" ]] && plog "Auto-added missing dependencies: $(echo $_newdeps | tr '\n' ' ')"
+        _confl="$(printf '%s\n' "$_pf" | awk '/^CONFLICT/{print}')"
+        [[ -n "$_confl" ]] && pwarn "Conflicts flagged above — you probably want only ONE of each pair. Installing all; use 'powos mods remove' to drop one."
+    fi
 
     local ok=0 fail=0 mod_id file_id
     for mod_id in "${ids[@]}"; do

@@ -2823,6 +2823,7 @@ case "${1:-}" in
     mods)
         shift
         source "$POWOS_LIB/mods/install.sh"
+        source "$POWOS_LIB/mods/check.sh" 2>/dev/null || true
         case "${1:-}" in
             # Mod-manager lifecycle
             install-manager|install-mgr)        shift; mods_install_cmd "$@" ;;
@@ -2840,6 +2841,7 @@ case "${1:-}" in
             install-mod|im|mod)                 shift; mods_install_mod_cmd "$@" ;;
             install|bulk|batch)                 shift; mods_install_smart_cmd "$@" ;;
             install-file|if)                    shift; mods_install_file_cmd "$@" ;;
+            check|analyze|preflight)            shift; mods_check_cmd "$@" ;;
             info)                               shift; mods_info_cmd "$@" ;;
             files)                              shift; mods_files_cmd "$@" ;;
             changelog|changes)                  shift; mods_changelog_cmd "$@" ;;
