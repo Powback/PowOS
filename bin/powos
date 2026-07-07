@@ -2726,6 +2726,13 @@ case "${1:-}" in
         source "$POWOS_LIB/config.sh"
         cmd_config "$@"
         ;;
+    setup)
+        shift
+        # One-liner credential wiring: `powos setup gh` for GitHub auth,
+        # `powos setup nexus` for Nexus API key, `powos setup all` for both.
+        source "$POWOS_LIB/setup.sh"
+        cmd_setup "$@"
+        ;;
     install-system|install-disk)
         shift
         source "$POWOS_LIB/install-system.sh"
