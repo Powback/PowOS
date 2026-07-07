@@ -36,7 +36,7 @@ mods_known_tools() { echo "nexus-mods-app vortex"; }
 mods_binary_of() {
     case "$1" in
         nexus-mods-app|nexus|nma)  echo "$MODS_APPS_DIR/NexusModsApp.AppImage" ;;
-        vortex)                    echo "$MODS_APPS_DIR/Vortex.exe" ;;
+        vortex)                    echo "$HOME/.local/bin/vortex" ;;
         *) return 1 ;;
     esac
 }
@@ -110,30 +110,23 @@ EOF
     plog "  Auto-updates itself on next launch — no bootc / OS involvement needed."
 }
 
-# ─── Vortex (Windows, via Proton) ─────────────────────────────────────────
+# ─── Vortex (Windows, via Bottles Flatpak) ────────────────────────────────
+# Full setup lives in mods/vortex.sh — installs Bottles, creates a
+# dedicated bottle with .NET Desktop 6, runs Vortex's NSIS installer
+# silently, writes a `vortex` CLI wrapper, and registers an nxm:// handler.
+# Vortex covers all the games NMA doesn't (Skyrim SE/AE, FO4, Starfield,
+# BG3, Witcher 3, and every Bethesda title).
 
 mods_install_vortex() {
-    pwarn "Vortex has no native Linux build — Nexus's own recommendation for"
-    pwarn "Cyberpunk on Linux is the ${BOLD}Nexus Mods App${NC} (install it with"
-    pwarn "${DIM}powos mods install nexus-mods-app${NC}). Vortex-under-Proton has"
-    pwarn "known issues, especially with mod deployment paths."
-    echo
-    plog "If you still want Vortex under Proton, do it manually — it's"
-    plog "an interactive Windows installer that Steam+Proton handles best:"
-    echo
-    plog "  1. Download the installer:"
-    plog "     ${DIM}https://www.nexusmods.com/site/mods/1${NC}"
-    plog "  2. In Steam: ${BOLD}Games → Add a Non-Steam Game to My Library${NC},"
-    plog "     select ${BOLD}Vortex-*.exe${NC}."
-    plog "  3. Right-click the entry → ${BOLD}Properties → Compatibility${NC},"
-    plog "     ${BOLD}Force the use of a specific Steam Play tool → Proton Experimental${NC}."
-    plog "  4. Launch it — the installer prefixes itself into that game's"
-    plog "     Proton prefix. Launch again from Steam whenever you need Vortex."
-    echo
-    plog "  Mod deployment: point Vortex at your game's ${DIM}steamapps/common/<Game>${NC}"
-    plog "  path (Proton exposes it inside the prefix)."
-    return 0
+    source "$(dirname "${BASH_SOURCE[0]}")/vortex.sh"
+    vortex_install_cmd "$@"
 }
+
+# Vortex binary check — the top-level installer registry (mods_binary_of)
+# uses this to answer "is vortex installed?" via `powos mods installed`.
+# The Bottles-installed Vortex.exe lives inside the bottle's drive_c;
+# reflect the wrapper here so 'installed'/'launch' work uniformly.
+mods_vortex_bin() { echo "$HOME/.local/bin/vortex"; }
 
 # ─── `powos mods setup` — configure a Steam game for modding ─────────────
 # Wraps the standard Nexus Mods App / Cyberpunk-on-Linux fixes:
@@ -771,6 +764,16 @@ mods_uninstall_cmd() {
     local canonical
     canonical="$(mods_normalize_name "$tool")" \
         || { perr "Unknown mod manager: $tool"; return 1; }
+
+    # Vortex has a Bottles bottle + wrapper + two .desktop files + icon +
+    # state dir + nxm:// handler override. Let its own uninstall clean
+    # everything atomically rather than the generic remove-two-files path.
+    if [[ "$canonical" == "vortex" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/vortex.sh"
+        vortex_uninstall_cmd
+        return $?
+    fi
+
     local bin desktop icon
     bin="$(mods_binary_of "$canonical")"
     desktop="$MODS_DESKTOP_DIR/${canonical}.desktop"
@@ -861,13 +864,22 @@ Nexus Mods App CLI (headless mod management — needs nexus-mods-app installed):
 Note: GUI-auth persists to NMA's data model. Log in once via the GUI, all
 subsequent CLI commands see the same session — no re-auth needed.
 
+Vortex CLI (Bethesda / everything NMA doesn't yet support):
+  powos mods vortex install               Install Vortex into a Bottles bottle
+  powos mods vortex url <nxm://...>       Download + install a mod
+  powos mods vortex bulk <game> <ids...>  Bulk from Nexus mod-ids
+  powos mods vortex health-check          Verify install
+  powos mods vortex help                  Full Vortex verb list
+
 Known tools:
   ${BOLD}nexus-mods-app${NC}   Nexus's native-Linux cross-platform manager
                    (recommended for Cyberpunk 2077 on Linux). Aliases:
                    ${DIM}nexus${NC}, ${DIM}nma${NC}.
-  ${BOLD}vortex${NC}           Nexus's Windows-only manager — installs via
-                   Proton as a non-Steam game. Only pick this if you
-                   have a workflow that specifically requires it.
+  ${BOLD}vortex${NC}           Nexus's Vortex, headless via Bottles Flatpak.
+                   Handles every Nexus-tracked game NMA doesn't (Skyrim
+                   SE/AE, Fallout 4, Starfield, BG3, Witcher 3, Bethesda
+                   classics, …). Has a real CLI: 'vortex -i <nxm://…>'.
+                   See:  powos mods vortex help
 
 Note: Steam Workshop is built into Steam itself — no install needed. Subscribe
 to any workshop item and Steam auto-manages the mod for that game.

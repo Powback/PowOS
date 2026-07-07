@@ -2847,6 +2847,12 @@ case "${1:-}" in
             deploy|sync|synchronize)            shift; mods_deploy_cmd "$@" ;;
             loadouts)                           shift; mods_loadouts_cmd "$@" ;;
             raw|as-main)                        shift; mods_raw_cmd "$@" ;;
+            # Vortex CLI (via Bottles). See lib/mods/vortex.sh.
+            vortex)
+                shift
+                source "$POWOS_LIB/mods/vortex.sh"
+                vortex_dispatch "$@"
+                ;;
             help|--help|-h|"")                  mods_help ;;
             *)                                  perr "Unknown: powos mods $1"; mods_help; exit 1 ;;
         esac
