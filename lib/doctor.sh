@@ -395,12 +395,15 @@ doc_run_ai() {
     # line (doc_run_step echoes argv).
     [[ -n "${DOC_AI_CRED:-}" ]] && export ANTHROPIC_API_KEY="$DOC_AI_CRED"
 
-    local -a args=(--agent health)
+    # Always name the session explicitly. `powos ai --continue` is now
+    # per-agent/per-session (resolves the named session's stored UUID), not
+    # the client's directory-global most-recent chat — so --continue must be
+    # paired with --session to resume THIS doctor session.
+    local -a args=(--agent health --session "$DOC_SESSION_NAME")
     if doc_session_exists; then
         args+=(--continue)
         doc_log "Continuing prior doctor session."
     else
-        args+=(--session "$DOC_SESSION_NAME")
         doc_log "Starting a fresh health session ($DOC_SESSION_NAME)."
     fi
 

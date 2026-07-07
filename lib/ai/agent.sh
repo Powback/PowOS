@@ -450,24 +450,54 @@ ai_call() {
     # Load client
     _ai_load_client "$client" || return 1
 
+    # Every agent gets an implicit, per-agent session so that --continue and
+    # interactive resume THAT agent's own last conversation — via the client's
+    # stored session UUID (directory-independent) — instead of the client's
+    # global most-recent chat in the current directory (the old footgun).
+    local agent_session="_agent_${agent//[^A-Za-z0-9_-]/_}"
+
+    # When the user didn't name a session, fall back to the agent's implicit
+    # one. A bare one-shot call still starts fresh, but its resulting UUID is
+    # recorded into the implicit session so a later --continue can resume it.
+    local using_implicit_session=""
+    if [[ -z "$opt_session" ]]; then
+        opt_session="$agent_session"
+        using_implicit_session="true"
+    fi
+
     # Resolve session. Only pass the client a STORED client session ID (a
     # real UUID from a previous call). On first use of a named session we
     # start fresh and store the client's returned session ID afterwards —
     # passing the PowOS session NAME as --resume breaks the claude CLI.
     local resolved_session=""
-    if [[ -n "$opt_session" ]]; then
-        # Auto-create the PowOS session file on first use
-        if declare -f ai_session_start &>/dev/null && \
-           [[ ! -f "${AI_SESSION_DIR}/${opt_session}.json" ]]; then
-            ai_session_start "$opt_session" "$agent" "$client" >/dev/null || return 1
-        fi
 
-        if [[ -n "$opt_new_session" ]]; then
-            # --new-session: discard any stored client session, start fresh
-            if declare -f ai_session_set_client_id &>/dev/null; then
-                ai_session_set_client_id "$opt_session" "" 2>/dev/null || true
-            fi
-        elif declare -f ai_session_get_client_id &>/dev/null; then
+    # Auto-create the PowOS session file on first use
+    if declare -f ai_session_start &>/dev/null && \
+       [[ ! -f "${AI_SESSION_DIR}/${opt_session}.json" ]]; then
+        ai_session_start "$opt_session" "$agent" "$client" >/dev/null || return 1
+    fi
+
+    if [[ -n "$opt_continue" ]]; then
+        # --continue: resume this agent's (or the named session's) own last
+        # conversation by its stored client UUID — NOT the client's global
+        # most-recent chat. Works regardless of current directory.
+        if declare -f ai_session_get_client_id &>/dev/null; then
+            resolved_session=$(ai_session_get_client_id "$opt_session" 2>/dev/null || true)
+        fi
+        if [[ -z "$resolved_session" ]]; then
+            local _cont_label="agent '${agent}'"
+            [[ -z "$using_implicit_session" ]] && _cont_label="session '${opt_session}'"
+            echo -e "${YELLOW}No previous conversation for ${_cont_label} — starting a new one.${NC}" >&2
+        fi
+    elif [[ -n "$opt_new_session" ]]; then
+        # --new-session: discard any stored client session, start fresh
+        if declare -f ai_session_set_client_id &>/dev/null; then
+            ai_session_set_client_id "$opt_session" "" 2>/dev/null || true
+        fi
+    elif [[ -z "$using_implicit_session" ]]; then
+        # A named --session (without --continue) resumes its stored UUID. A
+        # bare call (implicit session) starts fresh but records afterwards.
+        if declare -f ai_session_get_client_id &>/dev/null; then
             resolved_session=$(ai_session_get_client_id "$opt_session" 2>/dev/null || true)
         fi
     fi
@@ -502,26 +532,10 @@ $context
 User request: $prompt"
     fi
 
-    # Handle --continue (use client's continue feature).
-    # Pass the agent system prompt through, same as the one-shot path.
-    if [[ -n "$opt_continue" ]]; then
-        # FOOTGUN GUARD: --continue resumes the client's most-recent conversation
-        # in THIS directory, regardless of --agent. If the user also named an
-        # agent, its system prompt is grafted onto whatever that last (possibly
-        # different-agent) conversation was — and with --yolo that prior context
-        # can run autonomously. Warn loudly and point at the correct mechanism.
-        if [[ -n "$opt_agent" ]]; then
-            echo -e "${YELLOW}Warning:${NC} --continue resumes the MOST-RECENT conversation in this directory," >&2
-            echo -e "  not agent '${opt_agent}'s own history. '${opt_agent}' instructions are layered onto" >&2
-            echo -e "  that prior context. For per-agent continuity use: powos ai --session <name> --agent ${opt_agent}" >&2
-        fi
-        if declare -f client_continue &>/dev/null; then
-            client_continue "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}"
-            return $?
-        else
-            echo -e "${YELLOW}Client doesn't support --continue, using regular call${NC}" >&2
-        fi
-    fi
+    # --continue is now handled uniformly through $resolved_session above
+    # (it resolves the agent's / named session's stored client UUID, so the
+    # normal call path below issues a --resume). No special client_continue
+    # branch — that used the client's directory-global most-recent chat.
 
     # Set JSON output mode if requested
     if [[ -n "$opt_json" ]]; then
@@ -642,9 +656,16 @@ ai_interactive() {
 
     _ai_load_client "$client" || return 1
 
-    # Generate a PowOS session name if not provided
+    # Default to the agent's implicit, per-agent session so relaunching
+    # `powos ai -i --agent <name>` resumes that agent's own last chat rather
+    # than starting a fresh timestamped one each time. Use --new-session (via
+    # ai_call, which clears the stored UUID) to start clean.
     if [[ -z "$session" ]]; then
-        session="session-$(date +%Y%m%d-%H%M%S)"
+        session="_agent_${agent//[^A-Za-z0-9_-]/_}"
+        if declare -f ai_session_start &>/dev/null && \
+           [[ ! -f "${AI_SESSION_DIR}/${session}.json" ]]; then
+            ai_session_start "$session" "$agent" "$client" >/dev/null || true
+        fi
     fi
 
     # Only hand the client a STORED client session ID (UUID from a previous
@@ -767,9 +788,11 @@ Options:
   --agent, -a <name>     Use specific agent (coder, devops, health, assistant)
   --client, -c <name>    Use specific client (claude, gemini, ollama)
   --session, -s <name>   Use/resume specific session by name or ID
-  --continue             Continue most recent conversation
+  --continue             Resume this agent's own last conversation
+                         (per-agent; with --session, that session's last)
   --new-session          Start new session (don't resume)
-  --interactive, -i      Interactive chat mode
+  --interactive, -i      Interactive chat mode (resumes the agent's last
+                         chat by default; --new-session for a clean start)
   --json                 Output JSON with session info
   --verbose              Verbose JSON output (shows tool use)
   --stream               Stream the reply live — text + tool-use as they happen
@@ -800,7 +823,7 @@ Examples:
   powos ai --agent health "is my system healthy?"
   powos ai --client ollama "explain this locally"
   powos ai -i                           # Interactive mode
-  powos ai --continue "what next?"      # Continue last conversation
+  powos ai --agent coder --continue "what next?"  # Resume coder's last chat
   powos ai --session myproject "hello"  # Use named session
   powos ai --json "hello"               # Get JSON with session_id
 
