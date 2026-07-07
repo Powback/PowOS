@@ -49,7 +49,7 @@ DOC_TS="${DOC_TS:-}"   # bundle timestamp; --ts / env override keeps tests stabl
 DOC_LOG_DIR="${DOC_LOG_DIR:-/var/log/powos}"        # where bundles are written
 DOC_RUN_DIR="${DOC_RUN_DIR:-/run/powos}"            # PowOS runtime state
 DOC_SESSION_NAME="${DOC_SESSION_NAME:-powos-doctor}"
-DOC_AI_SESSION_DIR="${DOC_AI_SESSION_DIR:-${AI_STATE_DIR:-/var/lib/powos/state/ai}/sessions}"
+DOC_AI_SESSION_DIR="${DOC_AI_SESSION_DIR:-${AI_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/powos/ai}/sessions}"
 
 # Credential file locations (all overridable for tests; never printed).
 DOC_LIVE_CRED_FILE="${DOC_LIVE_CRED_FILE:-/etc/powos/ai/credentials}"

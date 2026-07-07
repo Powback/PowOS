@@ -25,7 +25,10 @@ fi
 
 AI_LIB_DIR="${AI_LIB_DIR:-/usr/lib/powos/ai}"
 AI_CONFIG_DIR="${AI_CONFIG_DIR:-/etc/powos/ai}"
-AI_STATE_DIR="${AI_STATE_DIR:-/var/lib/powos/state/ai}"
+# Per-user AI state (chat sessions) lives in the user's XDG state home, which is
+# always user-writable. It used to default to /var/lib/powos/state/ai, but that
+# is root-owned on a fresh install, so `mkdir` failed and NO session ever saved.
+AI_STATE_DIR="${AI_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/powos/ai}"
 
 # Allow local development paths
 if [[ -f "$(dirname "${BASH_SOURCE[0]}")/session.sh" ]]; then

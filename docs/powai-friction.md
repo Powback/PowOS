@@ -40,6 +40,14 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
 
 ## Fixed
 
+- [x] **`powos ai` sessions never persisted on fresh installs** — `AI_STATE_DIR`
+  defaulted to root-owned `/var/lib/powos/state/ai`, so a normal user's `mkdir`
+  failed and every session (incl. `--session <name>`) was silently lost. Moved
+  per-user AI state to the XDG state home (`~/.local/state/powos/ai`), which is
+  always writable, plus a runtime fallback in `_session_init`. Fixed in the
+  session-dir commit. (Also unblocks resumable named sessions — the proper
+  alternative to the `--continue` footgun.)
+
 - [x] **modder agent.conf broke on load** — backticks in the double-quoted
   `AGENT_SYSTEM_PROMPT` ran as command substitution at source time. Escaped —
   fixed in `dd3c75a`; regression test guarding all agent.conf added in `ad071a6`.

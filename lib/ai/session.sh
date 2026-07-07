@@ -7,15 +7,26 @@
 # NOTE: no `set -euo pipefail` here — this file is only ever SOURCED
 # (by agent.sh / bin/powos) and must not change the caller's shell options.
 
-AI_SESSION_DIR="${AI_SESSION_DIR:-/var/lib/powos/state/ai/sessions}"
+# Default under the user's XDG state home (always writable). agent.sh normally
+# sets AI_STATE_DIR before sourcing us; fall back to the same XDG location if
+# session.sh is sourced standalone. (Was /var/lib/powos/state — root-owned on a
+# fresh install, which silently broke all session persistence.)
+AI_SESSION_DIR="${AI_SESSION_DIR:-${AI_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/powos/ai}/sessions}"
 
 # ═══════════════════════════════════════════════════════════════════
 # Session Management
 # ═══════════════════════════════════════════════════════════════════
 
-# Ensure session directory exists
+# Ensure session directory exists. If the configured dir can't be created
+# (e.g. AI_STATE_DIR was pointed at a root-owned system path), fall back to a
+# guaranteed user-writable XDG location so session persistence NEVER silently
+# breaks the way it did on fresh installs.
 _session_init() {
-    mkdir -p "$AI_SESSION_DIR"
+    if mkdir -p "$AI_SESSION_DIR" 2>/dev/null; then
+        return 0
+    fi
+    AI_SESSION_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/powos/ai/sessions"
+    mkdir -p "$AI_SESSION_DIR" 2>/dev/null
 }
 
 # Validate a session name before it is used in a filesystem path.
