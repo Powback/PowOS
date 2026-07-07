@@ -2816,6 +2816,20 @@ case "${1:-}" in
     ai)
         shift
         case "${1:-}" in
+            install)
+                shift
+                source "$POWOS_LIB/ai/install.sh"
+                ai_install_cmd "$@"
+                ;;
+            uninstall|remove|rm)
+                shift
+                source "$POWOS_LIB/ai/install.sh"
+                ai_uninstall_cmd "$@"
+                ;;
+            installed|list-installed)
+                source "$POWOS_LIB/ai/install.sh"
+                ai_installed_cmd
+                ;;
             agents|list)
                 ai_list_agents
                 ;;

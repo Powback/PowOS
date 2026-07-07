@@ -773,6 +773,14 @@ Session Commands:
   powos ai session export <name> [fmt]  Export session (text/json/markdown|md)
   powos ai session clear                Delete all sessions
 
+Install AI CLIs:
+  powos ai install <tool> [version]     Install claude|codex|gemini|aider
+                                         via the vendor-preferred path
+                                         (native binary for claude/codex,
+                                         bun for gemini, uv for aider)
+  powos ai uninstall <tool>             Remove
+  powos ai installed                    List installed CLIs + versions
+
 Examples:
   powos ai "help me set up this project"
   powos ai --agent coder "review this function"

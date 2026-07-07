@@ -68,24 +68,24 @@ RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
     echo "powos:powos" | chpasswd && \
     systemctl enable sshd.service
 
-# Desktop peripheral stack (OpenRGB, Piper, LogiOps).
+# Desktop peripheral + dev-runtime stack.
 #   openrgb  motherboard/RAM/case RGB via SMBus (i2c_dev/i2c_piix4 already
 #            loaded in the kernel; udev rules already shipped by Bazzite)
 #   piper    Logitech gaming mouse config GUI; pulls libratbag + ratbagd
-#   logiops  Logitech G-key macros + advanced button mapping (COPR — not
-#            in main Fedora because upstream release cadence is slow); the
-#            kylegospo copr is the community-maintained build the ublue
-#            ecosystem uses.
-# Native RPMs beat Flatpak here — Flatpak Piper alone pulls ~200MB of the
-# GNOME Platform runtime; RPMs total ~15-20MB and share Bazzite's Qt/KF6
-# runtime that Plasma already uses.
-# All three packages are in main Fedora repos on Bazzite 44 — no COPR
-# needed. Confirmed on the target: `dnf5 info logiops` returns 0.3.5-6.fc44
-# from the fedora repo (not updates-testing). Skipping the COPR path
-# entirely means one less external repo dependency and one less thing to
-# break when Fedora bumps.
+#   logiops  Logitech G-key macros + advanced button mapping
+#   bun      JavaScript/TypeScript runtime + package manager. Backs
+#            `powos ai install claude|codex|gemini` (npm-scoped packages),
+#            and generally useful for any JS/TS dev work.
+#   uv       Astral's Python package/env manager. Backs `powos ai install
+#            aider` and other Python tools. Modern replacement for
+#            pip/venv/pipenv; single fast Rust binary.
+# All five packages are in main Fedora 44 repos on Bazzite — no COPR needed.
+# Native RPMs beat Flatpak/curl-installers here: Flatpak Piper pulls ~200MB
+# of GNOME Platform, and vendor curl-installers bypass the OS package
+# manager entirely which makes rollback via bootc noisier. RPMs total
+# ~120MB combined and share Bazzite's existing Qt/KF6 + glibc runtime.
 RUN dnf5 -y install --setopt=install_weak_deps=False \
-        openrgb piper logiops && \
+        openrgb piper logiops bun uv && \
     dnf5 -y clean all && \
     systemctl enable ratbagd.service logid.service
 
