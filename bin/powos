@@ -2844,6 +2844,8 @@ case "${1:-}" in
             files)                              shift; mods_files_cmd "$@" ;;
             changelog|changes)                  shift; mods_changelog_cmd "$@" ;;
             download-link|link)                 shift; mods_download_link_cmd "$@" ;;
+            deploy|sync|synchronize)            shift; mods_deploy_cmd "$@" ;;
+            loadouts)                           shift; mods_loadouts_cmd "$@" ;;
             raw|as-main)                        shift; mods_raw_cmd "$@" ;;
             help|--help|-h|"")                  mods_help ;;
             *)                                  perr "Unknown: powos mods $1"; mods_help; exit 1 ;;

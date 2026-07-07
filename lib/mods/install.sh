@@ -432,6 +432,65 @@ print(picked["file_id"] if picked else "")
     printf '%s\n' "$file_id"
 }
 
+# ─── Loadout auto-install (post-download) ────────────────────────────────
+# NMA's install pipeline has three stages: download to Library → add to
+# Loadout (loadout install) → apply to disk (loadout synchronize). The
+# nxm:// dispatch only triggers the first stage. `mods_loadout_apply`
+# handles stages 2 and 3 for everything currently in the Library that
+# isn't already in the target loadout.
+
+# Return the first Cyberpunk/BG3/… loadout ID matching a game slug.
+mods_loadout_id_for() {
+    local slug="$1"
+    mods_nma_invoke loadouts list 2>/dev/null \
+        | awk -v want="$(mods_nexus_slug_to_game_name "$slug")" '
+            /^│/ && $0 !~ /^│ Id/ && $0 !~ /────/ {
+                # Rows look like: │ LoadoutId:X  │ Name │ Game │ …
+                # Column-safe: strip the box chars, split on multiple spaces.
+                gsub(/│/, "|"); gsub(/^\s+|\s+$/, "");
+                n = split($0, cells, /\s*\|\s*/);
+                for (i=1; i<=n; i++) if (cells[i] ~ /^LoadoutId:/) lid = cells[i];
+                for (i=1; i<=n; i++) if (index(tolower(cells[i]), tolower(want)) > 0) { print lid; exit }
+            }'
+}
+
+# Human-readable game name from Nexus slug (used to match Loadout row).
+mods_nexus_slug_to_game_name() {
+    case "$1" in
+        cyberpunk2077)          echo "Cyberpunk 2077" ;;
+        skyrimspecialedition)   echo "Skyrim Special Edition" ;;
+        skyrim)                 echo "Skyrim" ;;
+        fallout4)               echo "Fallout 4" ;;
+        starfield)              echo "Starfield" ;;
+        witcher3)               echo "Witcher 3" ;;
+        baldursgate3)           echo "Baldur's Gate 3" ;;
+        stardewvalley)          echo "Stardew Valley" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# powos mods deploy <game>
+#   Sync the game's loadout to disk — deploy stage of the pipeline.
+#   Handy on its own after all downloads + loadout-installs are done.
+mods_deploy_cmd() {
+    POWOS_MODS_LAST_VERB="deploy"
+    local game="${1:?Usage: powos mods deploy <game>}"
+    local slug; slug="$(mods_nexus_slug_of "$game")"
+    local lid; lid="$(mods_loadout_id_for "$slug")"
+    [[ -z "$lid" ]] && { perr "No loadout found for game $game (slug: $slug)."; return 1; }
+    plog "Synchronizing $lid to disk (deploying mods)…"
+    mods_nma_invoke loadout synchronize -l "$lid" \
+        && pok "Loadout $lid deployed." \
+        || { perr "loadout synchronize failed."; return 1; }
+}
+
+# powos mods loadouts
+#   List all NMA loadouts. Thin wrapper.
+mods_loadouts_cmd() {
+    POWOS_MODS_LAST_VERB="loadouts"
+    mods_nma_invoke loadouts list "$@"
+}
+
 # powos mods install <game> <mod-id> [mod-id …]
 #   Bulk mod install by mod-id. Picks primary MAIN file for each. Also
 #   reads mod-ids from stdin if none given on the command line (one per
