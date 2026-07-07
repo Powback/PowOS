@@ -30,7 +30,17 @@ set -uo pipefail
 marker="${XDG_STATE_HOME:-$HOME/.local/state}/powos/steam-library-configured-v3"
 [[ -f "$marker" ]] && exit 0
 
-GAMES_DIR="$HOME/Games"
+# Use the canonical /var/home path, not the /home symlink. Steam's own
+# default library uses /var/home and its label survives across writes;
+# using the /home symlink triggers Steam to re-normalize the entry and
+# blank the label on every save. The underlying directory is identical
+# (/home → /var/home is a symlink) — this is purely how Steam stores the
+# path in its config.
+if [[ -d /var/home ]]; then
+    GAMES_DIR="/var/home/$USER/Games"
+else
+    GAMES_DIR="$HOME/Games"
+fi
 STEAM_ROOT="$HOME/.local/share/Steam"
 STEAM_LIB_PRIMARY="$STEAM_ROOT/steamapps/libraryfolders.vdf"
 STEAM_LIB_LEGACY="$STEAM_ROOT/config/libraryfolders.vdf"
