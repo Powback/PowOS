@@ -88,7 +88,12 @@ for path in sys.argv[1:3]:
     for m in re.finditer(r'^\t"(\d+)"$', content, re.MULTILINE):
         max_idx = max(max_idx, int(m.group(1)))
     next_idx = max_idx + 1
-    contentid = str(random.randint(10**18, 10**19 - 1))
+    # int64 max — Steam parses contentid as SIGNED 64-bit. If we hand it
+    # a value above 2^63-1 the parse wraps to negative and Steam
+    # re-processes the entry on next write, blanking the "label" field
+    # as a side effect (visible symptom: dropdown shows /etc for our
+    # entry instead of "Games").
+    contentid = str(random.randint(10**18, (1 << 63) - 1))
     block = (
         f'\t"{next_idx}"\n'
         '\t{\n'
