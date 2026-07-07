@@ -135,6 +135,181 @@ mods_install_vortex() {
     return 0
 }
 
+# ─── `powos mods setup` — configure a Steam game for modding ─────────────
+# Wraps the standard Nexus Mods App / Cyberpunk-on-Linux fixes:
+#   1. Install protontricks (system Flatpak) if missing.
+#   2. Run the game's Proton prefix through winetricks with the packages
+#      most Windows-side loader mods need (vcrun2022 + d3dcompiler_47).
+#      Cyberpunk's Nexus health check specifically asks for these.
+#   3. Set the standard WINEDLLOVERRIDES for common mod injection points
+#      (winmm=n,b;version=n,b) in Steam's per-user launch options.
+#
+# Known games (short-name → appid). Adding a game here is a one-line change.
+mods_appid_of() {
+    case "$1" in
+        cyberpunk|cyberpunk2077|cp2077)  echo "1091500" ;;
+        skyrim|skyrimse)                  echo "489830"  ;;
+        skyrim-ae|skyrimae)               echo "489830"  ;;
+        fallout4|fo4)                     echo "377160"  ;;
+        starfield)                        echo "1716740" ;;
+        witcher3)                         echo "292030"  ;;
+        bg3|baldursgate3)                 echo "1086940" ;;
+        *) if [[ "$1" =~ ^[0-9]+$ ]]; then echo "$1"; else return 1; fi ;;
+    esac
+}
+
+mods_setup_steam_userid() {
+    # Steam userdata is per-account. Find the (usually only) numeric dir.
+    local base="$HOME/.steam/steam/userdata"
+    [[ -d "$base" ]] || return 1
+    find "$base" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' -printf '%f\n' 2>/dev/null | head -1
+}
+
+mods_ensure_protontricks() {
+    if flatpak info com.github.Matoking.protontricks >/dev/null 2>&1; then
+        return 0
+    fi
+    plog "Installing protontricks (system Flatpak, needs sudo)…"
+    if ! sudo flatpak install -y --system flathub com.github.Matoking.protontricks 2>&1 \
+            | grep -E "Installing|Installation complete|already installed" | tail -3; then
+        perr "protontricks install failed."
+        return 1
+    fi
+}
+
+# Set WINEDLLOVERRIDES in Steam's per-user localconfig.vdf for a specific
+# appid. Requires Steam to NOT be running (Steam re-saves the file from
+# memory on exit and would clobber our edit otherwise).
+mods_set_launch_options() {
+    local appid="$1" value="$2"
+    local uid; uid="$(mods_setup_steam_userid)" || {
+        perr "No Steam userdata found — has Steam been launched at least once?"
+        return 1
+    }
+    local vdf="$HOME/.steam/steam/userdata/$uid/config/localconfig.vdf"
+    [[ -f "$vdf" ]] || { perr "Steam localconfig.vdf not found at $vdf"; return 1; }
+
+    if pgrep -x steam >/dev/null 2>&1; then
+        perr "Steam is running — quit it first (Steam → Exit) so the config edit isn't overwritten."
+        return 1
+    fi
+
+    python3 - "$vdf" "$appid" "$value" <<'PY' 2>&1
+import os, re, shutil, sys
+vdf, appid, new_value = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(vdf) as f: text = f.read()
+
+# Locate Software/Valve/Steam/apps { ... } block by brace-matching from
+# the `"apps"` header (avoids matching binary ticket lines that mention
+# appids up top).
+m = re.search(r'(\n\s*"apps"\s*\{)', text)
+if not m:
+    print("no apps block found"); sys.exit(1)
+i = m.end(); depth = 1
+while i < len(text) and depth > 0:
+    if text[i] == '{': depth += 1
+    elif text[i] == '}': depth -= 1
+    i += 1
+apps_start, apps_end = m.end(), i
+apps_body = text[apps_start:apps_end]
+
+# Find the `"<appid>"` sub-block.
+sub_m = re.search(r'(\n\s*)"' + re.escape(appid) + r'"(\s*\n\s*)\{', apps_body)
+if not sub_m:
+    print(f"no {appid} sub-block found in apps"); sys.exit(1)
+sub_start = sub_m.end(); depth = 1
+j = sub_start
+while j < len(apps_body) and depth > 0:
+    if apps_body[j] == '{': depth += 1
+    elif apps_body[j] == '}': depth -= 1
+    j += 1
+sub_end = j - 1
+sub_body = apps_body[sub_start:sub_end]
+
+shutil.copy(vdf, vdf + ".powos-backup")
+
+new_lo = f'"LaunchOptions"\t\t"{new_value}"'
+if re.search(r'"LaunchOptions"\s+"[^"]*"', sub_body):
+    sub_body_new = re.sub(r'"LaunchOptions"\s+"[^"]*"', new_lo, sub_body, count=1)
+    action = "updated"
+else:
+    lp = re.search(r'\n(\s*)"LastPlayed"', sub_body)
+    indent = lp.group(1) if lp else '\t\t\t\t\t\t'
+    sub_body_new = f"\n{indent}{new_lo}" + sub_body
+    action = "added"
+
+new_apps = apps_body[:sub_start] + sub_body_new + apps_body[sub_end:]
+open(vdf, "w").write(text[:apps_start] + new_apps + text[apps_end:])
+print(f"LaunchOptions {action}: {new_value}")
+PY
+}
+
+mods_setup_cmd() {
+    local game="${1:-}"
+    if [[ -z "$game" ]]; then
+        cat <<EOF
+${BOLD}powos mods setup <game>${NC} — one-shot modding prep for a Steam game.
+
+Runs the standard Cyberpunk-on-Linux / Nexus Mods App fix:
+  1. Install protontricks (system Flatpak) if missing.
+  2. Install winetricks packages the game needs into its Proton prefix
+     (vcrun2022 + d3dcompiler_47 — the common Cyberpunk requirements).
+  3. Set WINEDLLOVERRIDES="winmm=n,b;version=n,b" %command% on the game's
+     Steam launch options so mod-provided loader DLLs actually load.
+
+Known games (add more in mods_appid_of):
+  cyberpunk / cp2077 (1091500)   skyrim / skyrimse (489830)
+  skyrim-ae (489830)             fallout4 / fo4 (377160)
+  starfield (1716740)            witcher3 (292030)
+  bg3 (1086940)                  <numeric appid>
+
+Examples:
+  powos mods setup cyberpunk
+  powos mods setup 1091500
+EOF
+        return 1
+    fi
+
+    local appid; appid="$(mods_appid_of "$game")" \
+        || { perr "Unknown game/appid: $game"; return 1; }
+
+    plog "Setting up modding for appid ${BOLD}$appid${NC}…"
+
+    mods_ensure_protontricks || return 1
+
+    # Grab the plasmashell env so protontricks can talk to a display when
+    # winetricks fires up wine dialogs — otherwise wine's window driver
+    # can't load and vcrun2022 install fails with "explorer failed to start".
+    local pp; pp="$(pgrep -x plasmashell | head -1)"
+    local env_prefix=""
+    if [[ -n "$pp" ]] && [[ -r "/proc/$pp/environ" ]]; then
+        local xa db
+        xa="$(tr '\0' '\n' </proc/$pp/environ | grep '^XAUTHORITY=' | head -1 | cut -d= -f2-)"
+        db="$(tr '\0' '\n' </proc/$pp/environ | grep '^DBUS_SESSION_BUS_ADDRESS=' | head -1 | cut -d= -f2-)"
+        env_prefix="env XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 XAUTHORITY=$xa DBUS_SESSION_BUS_ADDRESS=$db"
+    fi
+
+    plog "Running winetricks: vcrun2022 d3dcompiler_47 (may take a few minutes)…"
+    if ! $env_prefix flatpak run com.github.Matoking.protontricks \
+            --no-bwrap "$appid" -q vcrun2022 d3dcompiler_47; then
+        pwarn "protontricks reported a non-zero exit. If vcrun2022 was already installed"
+        pwarn "that's fine; check by running it again — the second run is idempotent."
+    fi
+
+    plog "Setting Steam launch options (WINEDLLOVERRIDES)…"
+    if pgrep -x steam >/dev/null 2>&1; then
+        pwarn "Steam is running. Please Steam → Exit fully, then re-run:"
+        pwarn "  powos mods setup $game"
+        return 1
+    fi
+    if mods_set_launch_options "$appid" \
+            'WINEDLLOVERRIDES=\"winmm=n,b;version=n,b\" %command%'; then
+        pok "Setup complete for appid $appid."
+        plog "  Relaunch Steam → the launch option is now active."
+        plog "  In Nexus Mods App, hit Refresh on the Health Check — all three errors should clear."
+    fi
+}
+
 # ─── Commands ────────────────────────────────────────────────────────────
 
 mods_install_cmd() {
@@ -217,6 +392,10 @@ ${BOLD}powos mods${NC} — manage game-modding tools
   powos mods uninstall <tool>     Remove
   powos mods installed            List installed managers
   powos mods launch <tool>        Launch (also available from KDE menu)
+  powos mods setup <game>         One-shot fix a Steam game for modding
+                                    (installs protontricks, winetricks
+                                    packages, sets WINEDLLOVERRIDES).
+                                    Requires Steam to be closed.
 
 Known tools:
   ${BOLD}nexus-mods-app${NC}   Nexus's native-Linux cross-platform manager

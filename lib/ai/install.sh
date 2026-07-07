@@ -147,11 +147,45 @@ ai_install_native() {
     # non-curl-piped path, use the version-pinned form which goes via bun.
     if curl -fsSL "$url" | bash; then
         pok "$tool installed."
+        ai_post_install "$tool"
         return 0
     else
         perr "Native installer for $tool failed."
         return 1
     fi
+}
+
+# Per-tool post-install fixups: things vendor installers don't do but
+# every headless user hits within their first two minutes.
+ai_post_install() {
+    local tool="$1"
+    case "$tool" in
+        claude)  ai_seed_claude_onboarding ;;
+    esac
+}
+
+# Claude Code shows a first-run onboarding screen (theme picker, welcome,
+# trust dialog) that blocks `claude --interactive` even when the user is
+# already authenticated. The screen is gated by ~/.claude.json's
+# `hasCompletedOnboarding` field — writing true there tells Claude to skip
+# it. Additive: only sets the key if missing/false, preserving anything
+# else the file already contained.
+ai_seed_claude_onboarding() {
+    local cfg="$HOME/.claude.json"
+    python3 - "$cfg" <<'PY' 2>/dev/null || return 0
+import json, os, sys
+p = sys.argv[1]
+d = {}
+if os.path.exists(p):
+    try: d = json.load(open(p))
+    except Exception: d = {}
+if d.get("hasCompletedOnboarding") is True:
+    sys.exit(0)
+d["hasCompletedOnboarding"] = True
+open(p, "w").write(json.dumps(d, indent=2))
+os.chmod(p, 0o600)
+PY
+    plog "  Set hasCompletedOnboarding=true in ${DIM}~/.claude.json${NC} (skips the welcome screen)."
 }
 
 ai_install_bun() {
