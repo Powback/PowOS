@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# powos-widget-autoadd — add PowOS widgets to the Plasma panel on FIRST login.
+# powos-widget-autoadd — add PowOS widgets to the Plasma DESKTOP on first login.
 #
 # Runs via /etc/xdg/autostart/, i.e. once per KDE session. A per-user marker
-# file gates so we only touch the panel the first time; after that the user
-# owns their panel layout and we don't second-guess them.
+# file gates so we only touch the desktop the first time; after that the user
+# owns their layout and we don't second-guess them.
+#
+# Marker filename bumped to widgets-added-v2 so machines that ran the v1 script
+# (which mistakenly added the widgets to the taskbar) re-run this once — the
+# script's first step removes any PowOS widgets from panels and then adds them
+# to the desktop background where they belong. After that the v2 marker gates
+# subsequent logins.
 #
 # Uses Plasma's scripting API through DBus (evaluateScript). Works on both
 # Plasma 5 (qdbus) and 6 (qdbus6) — Bazzite 44 ships Plasma 6, but we probe
@@ -11,7 +17,7 @@
 
 set -uo pipefail
 
-marker="${XDG_STATE_HOME:-$HOME/.local/state}/powos/widgets-added"
+marker="${XDG_STATE_HOME:-$HOME/.local/state}/powos/widgets-added-v2"
 
 # Already added this session's widgets before? Nothing to do.
 [[ -f "$marker" ]] && exit 0
@@ -32,22 +38,36 @@ for _ in $(seq 1 30); do
 done
 [[ -z "$QDBUS" ]] && exit 0
 
-# Idempotent add: only add each PowOS widget if a panel doesn't already carry
-# it (protects any user who moved a widget between panels or hand-added it).
-# panels()/widgets() are the documented Plasma scripting entry points.
+# 1. Remove any PowOS widgets accidentally left on panels by the v1 script.
+# 2. Add each widget to the primary desktop, only if not already present on
+#    any desktop (idempotent — respects users who moved them around).
+# w.remove() may throw on some Plasma builds; the try/catch keeps the script
+# advancing to the add step regardless.
 script='
 var powosWidgets = ["com.powos.overview", "com.powos.monitor"];
-var alreadyThere = {};
+var powosSet = {};
+powosWidgets.forEach(function(n) { powosSet[n] = true; });
+
+// Sweep panels: PowOS widgets are designed for the desktop, not the tray.
 panels().forEach(function(p) {
     p.widgets().forEach(function(w) {
-        alreadyThere[w.type] = true;
+        if (powosSet[w.type]) {
+            try { w.remove(); } catch (e) { }
+        }
     });
 });
-var targetPanel = panels()[0];
-if (targetPanel) {
+
+// Idempotent add: skip if already on ANY desktop (user may have moved them).
+var alreadyThere = {};
+desktops().forEach(function(d) {
+    d.widgets().forEach(function(w) { alreadyThere[w.type] = true; });
+});
+
+var targetDesktop = desktops()[0];
+if (targetDesktop) {
     powosWidgets.forEach(function(name) {
         if (!alreadyThere[name]) {
-            targetPanel.addWidget(name);
+            targetDesktop.addWidget(name);
         }
     });
 }
