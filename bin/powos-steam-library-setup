@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# powos-steam-library-setup — register ~/Games as a Steam library on first login.
+#
+# Why: Bazzite's ostree layout mounts /etc as a separate btrfs subvolume,
+# which shows up in /proc/mounts with the full disk's free space (7.3 TB).
+# Steam's install dialog reads /proc/mounts to build its "install location"
+# dropdown and offers /etc as a target — technically the mount has space,
+# but /etc is root-owned config territory, not a games directory.
+#
+# Fix: create ~/Games/steamapps/ with the standard Steam library layout
+# and add it to Steam's libraryfolders.vdf. Once Steam sees a REAL user-
+# writable library, its install dialog defaults to that instead of /etc.
+#
+# STRICTLY ADDITIVE (per the additive-only rule for user-facing state):
+#   • never rewrites an existing libraryfolders.vdf entry
+#   • never reorders existing libraries
+#   • only touches Steam config if Steam isn't currently running
+#   • marker-gated so it only runs once per user
+#
+# If any of the guards trip (Steam is running, entry already exists, config
+# structure is unexpected) we exit cleanly and the user's next login retries.
+
+set -uo pipefail
+
+marker="${XDG_STATE_HOME:-$HOME/.local/state}/powos/steam-library-configured"
+[[ -f "$marker" ]] && exit 0
+
+GAMES_DIR="$HOME/Games"
+STEAM_ROOT="$HOME/.local/share/Steam"
+STEAM_CONFIG="$STEAM_ROOT/config/libraryfolders.vdf"
+
+# 1. Create the games directory + standard Steam subdirs. Idempotent.
+mkdir -p "$GAMES_DIR/steamapps/common" \
+         "$GAMES_DIR/steamapps/downloading" \
+         "$GAMES_DIR/steamapps/workshop"
+
+# 2. Drop a libraryfolder.vdf marker — this is the file Steam looks for to
+#    confirm "yes, this directory really is a Steam library" (as opposed to
+#    a random folder that happens to have `steamapps` in it).
+if [[ ! -f "$GAMES_DIR/steamapps/libraryfolder.vdf" ]]; then
+    cat > "$GAMES_DIR/steamapps/libraryfolder.vdf" <<'EOF'
+"libraryfolder"
+{
+	"contentstatsid"		"1"
+}
+EOF
+fi
+
+# 3. If Steam has never run, seed a minimal libraryfolders.vdf so ~/Games
+#    is the default from Steam's very first launch. Steam will extend this
+#    file with its own default library on first run — that's expected and
+#    fine, both libraries will coexist.
+if [[ ! -f "$STEAM_CONFIG" ]]; then
+    mkdir -p "$STEAM_ROOT/config"
+    contentid=$(head -c 8 /dev/urandom | od -An -tu8 | tr -d ' ')
+    cat > "$STEAM_CONFIG" <<EOF
+"libraryfolders"
+{
+	"0"
+	{
+		"path"		"$GAMES_DIR"
+		"label"		""
+		"contentid"		"$contentid"
+		"totalsize"		"0"
+		"update_clean_bytes_tally"		"0"
+		"time_last_update_verified"		"0"
+		"apps"
+		{
+		}
+	}
+}
+EOF
+    mkdir -p "$(dirname "$marker")"
+    touch "$marker"
+    exit 0
+fi
+
+# 4. Steam config exists. Check if ~/Games is already registered — if so,
+#    nothing to do.
+if grep -qF "\"$GAMES_DIR\"" "$STEAM_CONFIG"; then
+    mkdir -p "$(dirname "$marker")"
+    touch "$marker"
+    exit 0
+fi
+
+# 5. Never edit a running Steam's config — the client may re-save the file
+#    from memory and clobber our change. Defer to a future session.
+if pgrep -x steam >/dev/null 2>&1; then
+    exit 0
+fi
+
+# 6. Backup the existing config before editing (belt and suspenders even
+#    though our edit is a single-line insertion before the closing brace).
+cp "$STEAM_CONFIG" "$STEAM_CONFIG.powos-backup-$(date +%Y%m%d-%H%M%S)"
+
+# 7. Compute the next library index. libraryfolders.vdf uses "0", "1", ...
+next_idx=$(awk -F'"' '/^\t"[0-9]+"/{if($2+0>=max) max=$2+1} END{print (max?max:0)+0}' "$STEAM_CONFIG")
+contentid=$(head -c 8 /dev/urandom | od -An -tu8 | tr -d ' ')
+
+# 8. Build the new library block. Note the file uses hard tabs (Steam does).
+new_block=$(printf '\t"%s"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"label"\t\t""\n\t\t"contentid"\t\t"%s"\n\t\t"totalsize"\t\t"0"\n\t\t"update_clean_bytes_tally"\t\t"0"\n\t\t"time_last_update_verified"\t\t"0"\n\t\t"apps"\n\t\t{\n\t\t}\n\t}' "$next_idx" "$GAMES_DIR" "$contentid")
+
+# 9. Insert new block before the top-level closing brace. Only the LAST
+#    line of the file should be a bare `}` at column 0 — if the file
+#    doesn't match that structure, bail without editing (something else
+#    is going on, don't corrupt it).
+if [[ "$(tail -n1 "$STEAM_CONFIG" | tr -d '[:space:]')" != "}" ]]; then
+    exit 0
+fi
+
+# awk-based insertion: emit the new block right before the last `}`.
+awk -v block="$new_block" '
+    /^\}[[:space:]]*$/ && !done { print block; done=1 }
+    { print }
+' "$STEAM_CONFIG" > "$STEAM_CONFIG.tmp" && mv "$STEAM_CONFIG.tmp" "$STEAM_CONFIG"
+
+mkdir -p "$(dirname "$marker")"
+touch "$marker"

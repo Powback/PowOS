@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Steam Library Setup
+Comment=Registers ~/Games as a Steam library so game installs default there instead of /etc (ostree quirk)
+Exec=/usr/bin/powos-steam-library-setup
+Icon=steam
+Terminal=false
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;GNOME;
+NoDisplay=true
