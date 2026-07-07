@@ -38,6 +38,24 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   (agent.conf); (b) product — non-interactive agents can't make tool calls without
   `--yolo` because of the permission model. (b) still open.
 
+- [ ] **`powos self test` aborts on an already-unlocked bootc deployment.** Its
+  `self_usr_ro` writability probe runs as the calling (non-root) user, so on a
+  deployment already in bootc `development`/unlocked state it still sees `/usr` as
+  read-only (root-writable, user not), then calls `bootc usr-overlay` which errors
+  "Deployment is already in unlocked state: development" and the whole test bails —
+  nothing applied. Worked around 2026-07-07 by invoking the underlying apply
+  directly: `sudo powos update self --from /var/lib/powos/src`. Fix: probe as root
+  (or treat "already unlocked" as success, and re-check writability with sudo).
+
+- [ ] **jackify-engine hangs indefinitely when CWD contains a slow/dead network
+  mount.** The Wabbajack engine (`lib/mods/modlist.sh`) walks its working directory
+  on startup; with CWD = the user's HOME containing a CIFS `~/NAS` automount, a
+  single `list-modlists` wedged 12+ min in uninterruptible IO (kernel stack:
+  `cifs_readdir → SMB2_query_directory → wait_for_response`). FIXED in the wrapper
+  (run the engine from a guaranteed-local CWD + a `timeout` bound on the gallery
+  call), so this is closed on the PowOS side — noted here as the diagnosis of a
+  "took forever" class of hang that also bit the old Bottles/Vortex path.
+
 ## Fixed
 
 - [x] **`powos self push` (git add -A) can ship unrelated working-tree edits.**

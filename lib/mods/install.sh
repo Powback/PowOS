@@ -31,12 +31,13 @@ MODS_ICONS_DIR="${MODS_ICONS_DIR:-$HOME/.local/share/icons/hicolor/512x512/apps}
 
 # ─── Tool registry ────────────────────────────────────────────────────────
 
-mods_known_tools() { echo "nexus-mods-app vortex"; }
+mods_known_tools() { echo "nexus-mods-app vortex mod-organizer-2"; }
 
 mods_binary_of() {
     case "$1" in
         nexus-mods-app|nexus|nma)  echo "$MODS_APPS_DIR/NexusModsApp.AppImage" ;;
         vortex)                    echo "$HOME/.local/bin/vortex" ;;
+        mod-organizer-2)           echo "$HOME/.local/bin/mod-organizer-2" ;;
         *) return 1 ;;
     esac
 }
@@ -45,6 +46,7 @@ mods_normalize_name() {
     case "$1" in
         nexus|nma|nexus-mods-app|"nexus mods app")  echo "nexus-mods-app" ;;
         vortex|vortex-mod-manager)                  echo "vortex" ;;
+        mo2|mod-organizer|mod-organizer-2|"mod organizer 2")  echo "mod-organizer-2" ;;
         *) return 1 ;;
     esac
 }
@@ -771,6 +773,9 @@ mods_install_cmd() {
     case "$canonical" in
         nexus-mods-app)  mods_install_nexus ;;
         vortex)          mods_install_vortex ;;
+        mod-organizer-2)
+            source "$(dirname "${BASH_SOURCE[0]}")/modlist.sh"
+            mo2_install ;;
     esac
 }
 
@@ -787,6 +792,14 @@ mods_uninstall_cmd() {
     if [[ "$canonical" == "vortex" ]]; then
         source "$(dirname "${BASH_SOURCE[0]}")/vortex.sh"
         vortex_uninstall_cmd
+        return $?
+    fi
+
+    # MO2 has a wrapper + desktop entry + install dir + Wine prefix — let its
+    # own uninstall clean everything rather than the generic two-file path.
+    if [[ "$canonical" == "mod-organizer-2" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/modlist.sh"
+        mo2_uninstall
         return $?
     fi
 
@@ -880,6 +893,16 @@ Nexus Mods App CLI (headless mod management — needs nexus-mods-app installed):
 Note: GUI-auth persists to NMA's data model. Log in once via the GUI, all
 subsequent CLI commands see the same session — no re-auth needed.
 
+Automated modlists — Genesis, Fallout London, Tale of Two Wastelands, Tuxborn…
+(the whole-list-in-one-command path; native engine + Steam+Proton, no Bottles):
+  powos mods modlist status               Is the toolchain ready?
+  powos mods modlist search [game]        Browse installable Wabbajack lists
+  powos mods modlist install <ref>        Install a list (.wabbajack | URL |
+                                            Author/Name | name). Lays down MO2
+                                            and wires up the Steam+Proton launcher.
+  powos mods modlist list                 Lists installed on this machine
+  powos mods modlist help                 Full modlist verb list
+
 Vortex CLI (Bethesda / everything NMA doesn't yet support):
   powos mods vortex install               Install Vortex into a Bottles bottle
   powos mods vortex url <nxm://...>       Download + install a mod
@@ -896,6 +919,9 @@ Known tools:
                    SE/AE, Fallout 4, Starfield, BG3, Witcher 3, Bethesda
                    classics, …). Has a real CLI: 'vortex -i <nxm://…>'.
                    See:  powos mods vortex help
+  ${BOLD}mod-organizer-2${NC}  MO2 (portable) under GE-Proton — no Bottles. For
+                   manual modlists. Aliases: ${DIM}mo2${NC}. For automated
+                   Wabbajack lists use 'powos mods modlist' instead.
 
 Note: Steam Workshop is built into Steam itself — no install needed. Subscribe
 to any workshop item and Steam auto-manages the mod for that game.

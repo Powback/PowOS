@@ -2853,6 +2853,13 @@ case "${1:-}" in
                 source "$POWOS_LIB/mods/vortex.sh"
                 vortex_dispatch "$@"
                 ;;
+            # Automated Wabbajack modlists (Genesis/Fallout London/TTW/…), native
+            # engine + Steam+Proton. See lib/mods/modlist.sh.
+            modlist|list-install|wabbajack|wj)
+                shift
+                source "$POWOS_LIB/mods/modlist.sh"
+                modlist_dispatch "$@"
+                ;;
             help|--help|-h|"")                  mods_help ;;
             *)                                  perr "Unknown: powos mods $1"; mods_help; exit 1 ;;
         esac
