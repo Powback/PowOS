@@ -108,13 +108,17 @@ jobs:
           # 2. Retention prune. Fetch all versions as ONE array (--slurp),
           # sort newest-first, drop the first KEEP, delete the tail in
           # batches of 100 up to PASSES times.
+          #
+          # BEWARE: don't chain `| head -100` after jq under `pipefail`.
+          # head closes its stdin after N lines; jq's next write hits
+          # EPIPE and exits non-zero → set -e kills the step. Do the
+          # truncation INSIDE jq with a slice: `.[k : k+100]`.
           echo "--- retention prune ---"
           deleted_total=0
           for pass in $(seq 1 "$PASSES"); do
             ids=$(gh api --paginate --jq '.[] | {id, created_at}' "$base" \
                   | jq -s --argjson k "$KEEP" -r \
-                    'sort_by(.created_at) | reverse | .[$k:] | .[].id' \
-                  | head -100)
+                    'sort_by(.created_at) | reverse | .[$k : $k+100] | .[].id')
             if [[ -z "$ids" ]]; then
               echo "pass $pass: nothing over retention — done"
               break
