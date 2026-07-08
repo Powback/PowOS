@@ -2,7 +2,9 @@ name: Registry Cleanup
 
 # GHCR retention: every push publishes multi-GB image versions (sha-tagged)
 # plus build-cache layers, and private-package storage counts against the
-# account quota — unbounded, that's real money. Weekly prune:
+# account quota — unbounded, that's real money.
+#
+# Retention policy:
 #   powos           keep the newest 30 versions + drop untagged manifests.
 #                   Channel tags (:nvidia-open, :latest, ...) always point at
 #                   recent versions so they survive; only stale sha-pinned
@@ -11,11 +13,27 @@ name: Registry Cleanup
 #                   newest-30 window — rebuild it via workflow_dispatch on
 #                   build-publish if you need it again.
 #   powos-cache-*   pure build cache, keep only the newest 5.
+#
+# WHY THIS RUNS DAILY (not weekly):
+# The GitHub Container Registry API used to be paginated at 100 versions per
+# call, and delete requests only accept one version at a time. When the cache
+# backlog grows into the thousands (we hit 1589 versions on
+# powos-cache-nvidia-open on 2026-07-06 and the weekly cron failed on
+# retention lag), one weekly run can't catch up. Daily + a per-run loop that
+# drains up to N pages keeps us at target even after a busy build week.
+#
+# Manual runs for catch-up: workflow_dispatch with passes=N walks up to N
+# pages of 100 deletions per package. Default 20 = up to 2000/run/package.
 
 on:
   schedule:
-    - cron: '0 5 * * 1'
+    - cron: '0 5 * * *'   # daily 05:00 UTC
   workflow_dispatch:
+    inputs:
+      passes:
+        description: 'Max delete-pages per package per run (100 versions each)'
+        required: false
+        default: '20'
 
 concurrency:
   group: registry-cleanup
@@ -26,53 +44,90 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: powos
+            keep: 30
+            drop-untagged: true
+          - name: powos-cache-nvidia-open
+            keep: 5
+            drop-untagged: false
+          - name: powos-cache-nvidia-open-testing
+            keep: 5
+            drop-untagged: false
+          # Legacy caches from before the matrix was trimmed. Harmless
+          # no-ops once fully drained.
+          - name: powos-cache-nvidia
+            keep: 1
+            drop-untagged: false
+          - name: powos-cache-main
+            keep: 1
+            drop-untagged: false
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PACKAGE: ${{ matrix.name }}
+      KEEP: ${{ matrix.keep }}
+      PASSES: ${{ github.event.inputs.passes || '20' }}
+      OWNER: ${{ github.repository_owner }}
     steps:
-      - name: Drop untagged manifests (powos)
-        uses: actions/delete-package-versions@v5
-        continue-on-error: true
-        with:
-          package-name: powos
-          package-type: container
-          delete-only-untagged-versions: 'true'
+      - name: Prune ${{ matrix.name }} (keep ${{ matrix.keep }})
+        run: |
+          set -euo pipefail
 
-      - name: Keep newest 30 versions (powos)
-        uses: actions/delete-package-versions@v5
-        continue-on-error: true
-        with:
-          package-name: powos
-          package-type: container
-          min-versions-to-keep: 30
+          # Package endpoint depends on ownership type. Try user first
+          # (Powback account), fall back to org. Cheap probe.
+          if gh api "/users/$OWNER/packages/container/$PACKAGE" >/dev/null 2>&1; then
+            base="/users/$OWNER/packages/container/$PACKAGE/versions"
+            del_base="/user/packages/container/$PACKAGE/versions"
+          else
+            base="/orgs/$OWNER/packages/container/$PACKAGE/versions"
+            del_base="$base"
+          fi
 
-      - name: Prune build caches (keep newest 5 each)
-        uses: actions/delete-package-versions@v5
-        continue-on-error: true
-        with:
-          package-name: powos-cache-nvidia-open
-          package-type: container
-          min-versions-to-keep: 5
+          # Count total.
+          total=$(gh api --paginate "$base" 2>/dev/null | jq 's = 0; length + s' \
+                  | awk '{s+=$1} END{print s+0}')
+          echo "package=$PACKAGE total=$total keep=$KEEP passes=$PASSES"
 
-      - name: Prune build caches (testing)
-        uses: actions/delete-package-versions@v5
-        continue-on-error: true
-        with:
-          package-name: powos-cache-nvidia-open-testing
-          package-type: container
-          min-versions-to-keep: 5
+          # 1. Untagged manifests (powos only).
+          if [[ "${{ matrix.drop-untagged }}" == "true" ]]; then
+            echo "--- dropping untagged manifests ---"
+            drop_count=0
+            while IFS= read -r id; do
+              [[ -z "$id" ]] && continue
+              gh api -X DELETE "$del_base/$id" >/dev/null 2>&1 && drop_count=$((drop_count+1))
+            done < <(gh api --paginate "$base" \
+                     | jq -r '.[] | select(.metadata.container.tags == []) | .id')
+            echo "untagged dropped: $drop_count"
+          fi
 
-      # Legacy caches from before the matrix was trimmed; harmless no-ops
-      # once fully emptied/deleted.
-      - name: Prune legacy caches (nvidia)
-        uses: actions/delete-package-versions@v5
-        continue-on-error: true
-        with:
-          package-name: powos-cache-nvidia
-          package-type: container
-          min-versions-to-keep: 1
+          # 2. Retention prune. Fetch versions newest-first, skip newest
+          # $KEEP, delete the rest — up to $PASSES × 100 per run.
+          echo "--- retention prune ---"
+          deleted_total=0
+          for pass in $(seq 1 "$PASSES"); do
+            ids=$(gh api --paginate "$base" \
+                  | jq -r --argjson k "$KEEP" \
+                    'sort_by(.created_at) | reverse | .[$k:] | .[].id' \
+                  | head -100)
+            if [[ -z "$ids" ]]; then
+              echo "pass $pass: nothing over retention — done"
+              break
+            fi
+            pass_deleted=0
+            while IFS= read -r id; do
+              [[ -z "$id" ]] && continue
+              gh api -X DELETE "$del_base/$id" >/dev/null 2>&1 && pass_deleted=$((pass_deleted+1))
+            done <<< "$ids"
+            deleted_total=$((deleted_total + pass_deleted))
+            echo "pass $pass: deleted $pass_deleted (running total: $deleted_total)"
+            # If a pass deleted less than 100, the tail is short — we're done.
+            [[ "$pass_deleted" -lt 100 ]] && { echo "queue drained"; break; }
+          done
 
-      - name: Prune legacy caches (main)
-        uses: actions/delete-package-versions@v5
-        continue-on-error: true
-        with:
-          package-name: powos-cache-main
-          package-type: container
-          min-versions-to-keep: 1
+          # Report final.
+          remaining=$(gh api --paginate "$base" 2>/dev/null \
+                      | jq 'length' | awk '{s+=$1} END{print s+0}')
+          echo "final: package=$PACKAGE remaining=$remaining (target: $KEEP)"
