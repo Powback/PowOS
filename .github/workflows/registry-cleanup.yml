@@ -86,9 +86,16 @@ jobs:
             del_base="$base"
           fi
 
-          # Count total.
-          total=$(gh api --paginate "$base" 2>/dev/null | jq 's = 0; length + s' \
-                  | awk '{s+=$1} END{print s+0}')
+          # NOTE on `gh api --paginate`: it concatenates one JSON array per
+          # page in the output stream — NOT a single flat JSON array. So a
+          # naive `jq 'length'` returns the length of ONE page.  Either:
+          #   (a) use `gh api --paginate --jq '.[]'` to emit one object per
+          #       line and re-slurp with `jq -s`, OR
+          #   (b) let jq count each page and sum with awk.
+          # We use (a) throughout for consistency.
+
+          # Count total (one line per version → wc -l).
+          total=$(gh api --paginate --jq '.[].id' "$base" 2>/dev/null | wc -l)
           echo "package=$PACKAGE total=$total keep=$KEEP passes=$PASSES"
 
           # 1. Untagged manifests (powos only).
@@ -98,18 +105,18 @@ jobs:
             while IFS= read -r id; do
               [[ -z "$id" ]] && continue
               gh api -X DELETE "$del_base/$id" >/dev/null 2>&1 && drop_count=$((drop_count+1))
-            done < <(gh api --paginate "$base" \
-                     | jq -r '.[] | select(.metadata.container.tags == []) | .id')
+            done < <(gh api --paginate --jq '.[] | select(.metadata.container.tags == []) | .id' "$base")
             echo "untagged dropped: $drop_count"
           fi
 
-          # 2. Retention prune. Fetch versions newest-first, skip newest
-          # $KEEP, delete the rest — up to $PASSES × 100 per run.
+          # 2. Retention prune. Fetch all versions as ONE array (--slurp),
+          # sort newest-first, drop the first KEEP, delete the tail in
+          # batches of 100 up to PASSES times.
           echo "--- retention prune ---"
           deleted_total=0
           for pass in $(seq 1 "$PASSES"); do
-            ids=$(gh api --paginate "$base" \
-                  | jq -r --argjson k "$KEEP" \
+            ids=$(gh api --paginate --jq '.[] | {id, created_at}' "$base" \
+                  | jq -s --argjson k "$KEEP" -r \
                     'sort_by(.created_at) | reverse | .[$k:] | .[].id' \
                   | head -100)
             if [[ -z "$ids" ]]; then
@@ -127,7 +134,6 @@ jobs:
             [[ "$pass_deleted" -lt 100 ]] && { echo "queue drained"; break; }
           done
 
-          # Report final.
-          remaining=$(gh api --paginate "$base" 2>/dev/null \
-                      | jq 'length' | awk '{s+=$1} END{print s+0}')
+          # Report final. Same one-id-per-line pattern as the count above.
+          remaining=$(gh api --paginate --jq '.[].id' "$base" 2>/dev/null | wc -l)
           echo "final: package=$PACKAGE remaining=$remaining (target: $KEEP)"
