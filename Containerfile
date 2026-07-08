@@ -56,6 +56,7 @@ COPY desktop/autostart/                   /etc/xdg/autostart/
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
+COPY config/sysctl.d/                     /etc/sysctl.d/
 
 FROM ${BASE_IMAGE}
 
