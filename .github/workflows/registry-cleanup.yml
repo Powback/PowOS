@@ -57,14 +57,12 @@ jobs:
           - name: powos-cache-nvidia-open-testing
             keep: 5
             drop-untagged: false
-          # Legacy caches from before the matrix was trimmed. Harmless
-          # no-ops once fully drained.
-          - name: powos-cache-nvidia
-            keep: 1
-            drop-untagged: false
-          - name: powos-cache-main
-            keep: 1
-            drop-untagged: false
+          # `powos-cache-nvidia` and `powos-cache-main` were listed here
+          # during the 2026-Q1 matrix trim to drain the last stragglers,
+          # but the packages themselves have been deleted from GHCR since
+          # (verified 2026-07-08 — both return 404). Dropped from the
+          # matrix so the workflow doesn't spend a job hitting a dead
+          # endpoint. If we ever spin up new variants, add them here.
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PACKAGE: ${{ matrix.name }}
@@ -76,15 +74,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Package endpoint depends on ownership type. Try user first
-          # (Powback account), fall back to org. Cheap probe.
-          if gh api "/users/$OWNER/packages/container/$PACKAGE" >/dev/null 2>&1; then
-            base="/users/$OWNER/packages/container/$PACKAGE/versions"
-            del_base="/user/packages/container/$PACKAGE/versions"
-          else
-            base="/orgs/$OWNER/packages/container/$PACKAGE/versions"
-            del_base="$base"
-          fi
+          # Powback is a user account (not an org). Endpoints:
+          #   read/list: /users/{user}/packages/container/{pkg}/versions
+          #   delete:    /user/packages/container/{pkg}/versions/{id}
+          # The delete path uses `/user/` (singular, current-token-holder)
+          # because a user can only delete their own packages.
+          base="/users/$OWNER/packages/container/$PACKAGE/versions"
+          del_base="/user/packages/container/$PACKAGE/versions"
 
           # NOTE on `gh api --paginate`: it concatenates one JSON array per
           # page in the output stream — NOT a single flat JSON array. So a
