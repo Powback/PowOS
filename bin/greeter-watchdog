@@ -1,0 +1,21 @@
+#!/bin/bash
+# Restarts plasmalogin when the greeter is in the known broken-QML state.
+# Never touches a live user session. Ships with powos; see powos repo.
+STAMP=/run/greeter-watchdog.last
+systemctl is-active --quiet plasmalogin.service || exit 0
+ACTIVE_USER_SESSION=0
+while read -r sid _; do
+  [ -n "$sid" ] || continue
+  INFO=$(loginctl show-session "$sid" -p Class -p State -p Type 2>/dev/null | tr '\n' ' ')
+  case "$INFO" in *Class=user*State=active*Type=wayland*) ACTIVE_USER_SESSION=1;; esac
+done < <(loginctl list-sessions --no-legend 2>/dev/null)
+[ "$ACTIVE_USER_SESSION" = 1 ] && exit 0
+START=$(systemctl show plasmalogin.service -p ActiveEnterTimestamp --value)
+[ -n "$START" ] || exit 0
+ERRS=$(journalctl --since "$START" --no-pager -t plasma-login-greeter 2>/dev/null | grep -c "not a function")
+[ "$ERRS" -ge 3 ] || exit 0
+NOW=$(date +%s); LAST=$(cat "$STAMP" 2>/dev/null || echo 0)
+[ $((NOW - LAST)) -ge 300 ] || exit 0
+echo "$NOW" > "$STAMP"
+logger -t greeter-watchdog "broken greeter detected ($ERRS QML errors) — restarting plasmalogin"
+systemctl restart plasmalogin.service

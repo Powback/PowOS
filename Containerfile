@@ -58,6 +58,17 @@ COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
 COPY config/sysctl.d/                     /etc/sysctl.d/
 COPY config/NetworkManager/conf.d/        /etc/NetworkManager/conf.d/
+# Login-availability fix (exception to zero-boot-services, deliberately):
+# Plasma Login Manager's greeter can wedge into a broken-QML state after a
+# session exit ("...not a function" TypeErrors, black frozen login screen —
+# hit on real hardware 2026-07-09). greeter-watchdog detects that signature
+# and bounces plasmalogin; it NEVER touches an active user session. The
+# plasmalogin.service.d drop-ins also gain Restart=on-failure for the
+# plain-crash case. A broken login screen is exactly the "bricked feeling"
+# the zero-boot-services rule exists to prevent — hence the exception.
+COPY systemd/greeter-watchdog.service     /usr/lib/systemd/system/greeter-watchdog.service
+COPY systemd/greeter-watchdog.timer       /usr/lib/systemd/system/greeter-watchdog.timer
+COPY systemd/plasmalogin.service.d/       /usr/lib/systemd/system/plasmalogin.service.d/
 
 FROM ${BASE_IMAGE}
 
@@ -118,8 +129,9 @@ COPY --from=staging / /
 # `bootc switch` or `bootc upgrade` from a machine with an existing /var
 # would silently keep the old (or missing) marker.
 ARG POWOS_SRC_COMMIT=""
-RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-widget-autoadd 2>/dev/null || true && \
+RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog 2>/dev/null || true && \
     find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
+    systemctl enable greeter-watchdog.timer && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true

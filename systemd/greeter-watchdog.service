@@ -1,0 +1,5 @@
+[Unit]
+Description=Detect and recover broken Plasma login greeter
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/greeter-watchdog
