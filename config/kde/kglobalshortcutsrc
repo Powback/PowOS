@@ -1,0 +1,29 @@
+# PowOS: KDE global-shortcut defaults — un-bind Sleep/Suspend.
+#
+# Installed to /etc/xdg/kglobalshortcutsrc so every fresh user session
+# inherits a Sleep-shortcut that goes nowhere. Users can still bind their
+# own if they want to.
+#
+# Why: on 2026-07-09 a PowOS box auto-suspended repeatedly despite the
+# powermanagementprofilesrc having _k_disabled=true across every profile.
+# The trigger turned out to be the KDE global "Sleep" shortcut bound to
+# an XF86Sleep key by KDE's default kglobalshortcutsrc. Something on
+# that box (bad HID, KVM switch, USB device) kept firing the Sleep
+# keycode, and kglobalaccel dutifully invoked org.kde.powerdevil's
+# Suspend action.
+#
+# Format of the three comma-separated values:
+#   1: key sequence  ("none" or a key like "XF86Sleep")
+#   2: default key   ("none" resets whatever KDE upstream defaults to)
+#   3: human label   (kept as "Suspend" for the KCM UI to show what the
+#                     shortcut *would* trigger if bound)
+
+[services/org.kde.plasma.powerdevil.desktop]
+Sleep=none,none,Suspend
+_k_friendly_name=Power Management
+
+[Screensaver]
+_k_friendly_name=Screensaver
+
+[services/org.kde.krunner.desktop]
+_k_friendly_name=KRunner

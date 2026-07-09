@@ -54,6 +54,7 @@ COPY .snapshot/                           /usr/lib/powos/src/
 COPY desktop/plasmoid/                    /usr/share/plasma/plasmoids/
 COPY desktop/autostart/                   /etc/xdg/autostart/
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
+COPY config/kde/kglobalshortcutsrc        /etc/xdg/kglobalshortcutsrc
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
 COPY config/sysctl.d/                     /etc/sysctl.d/
