@@ -44,7 +44,7 @@ done
 # script is strictly additive — it never removes or migrates widgets, so a
 # user who moved something to their preferred spot never gets it clobbered.
 script='
-var powosWidgets = ["com.powos.overview", "com.powos.monitor"];
+var powosWidgets = ["com.powos.overview", "com.powos.monitor", "com.powos.containers"];
 var alreadyPlaced = {};
 panels().forEach(function(p) {
     p.widgets().forEach(function(w) { alreadyPlaced[w.type] = true; });

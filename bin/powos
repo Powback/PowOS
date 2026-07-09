@@ -905,13 +905,18 @@ cmd_update() {
             # Install scripts
             echo "Installing scripts..."
 
-            # bin/ -> /usr/bin/
+            # bin/ -> /usr/bin/  (atomic: copy to a temp then mv, so we never
+            # truncate the currently-running script in place — an in-place cp
+            # over /usr/bin/powos corrupts this very bash process mid-run,
+            # which surfaced as a bogus "unexpected EOF" and a failed deploy.)
             if [[ -d "$POWOS_SRC/bin" ]]; then
                 for script in "$POWOS_SRC/bin"/*; do
                     [[ -f "$script" ]] || continue
-                    local name=$(basename "$script")
-                    sudo cp "$script" "/usr/bin/$name"
-                    sudo chmod +x "/usr/bin/$name"
+                    local name; name=$(basename "$script")
+                    local tmp="/usr/bin/.${name}.new.$$"
+                    sudo cp "$script" "$tmp"
+                    sudo chmod +x "$tmp"
+                    sudo mv -f "$tmp" "/usr/bin/$name"
                     echo "  /usr/bin/$name"
                 done
             fi
@@ -953,6 +958,22 @@ cmd_update() {
                 sudo mkdir -p /var/lib/powos/sources
                 sudo cp -r "$POWOS_SRC/sources/"* /var/lib/powos/sources/
                 echo "  /var/lib/powos/sources/"
+            fi
+
+            # desktop/plasmoid/ -> /usr/share/plasma/plasmoids/  (KDE widgets)
+            # The image build COPYs these; without it here, 'self test' could
+            # never apply widget changes live (they only showed up on a rebuild).
+            if [[ -d "$POWOS_SRC/desktop/plasmoid" ]]; then
+                sudo mkdir -p /usr/share/plasma/plasmoids
+                sudo cp -r "$POWOS_SRC/desktop/plasmoid/"* /usr/share/plasma/plasmoids/
+                echo "  /usr/share/plasma/plasmoids/ (widgets)"
+            fi
+
+            # desktop/autostart/ -> /etc/xdg/autostart/  (login-session entries)
+            if [[ -d "$POWOS_SRC/desktop/autostart" ]]; then
+                sudo mkdir -p /etc/xdg/autostart
+                sudo cp "$POWOS_SRC/desktop/autostart/"* /etc/xdg/autostart/ 2>/dev/null || true
+                echo "  /etc/xdg/autostart/"
             fi
 
             echo ""
@@ -2455,12 +2476,58 @@ EOF
 # Container Commands (Podman/Distrobox)
 # ═══════════════════════════════════════════════════════════════════
 
+# ── Podman app-container lifecycle (shared by the CLI + the Containers widget) ─
+# Lists ALL podman containers — running AND stopped — so a stopped container
+# never "disappears": it stays listed and can be started again. Covers this
+# user's rootless containers plus, best-effort, system/root ones we can read
+# without a password. Emitted as JSON for the plasmoid.
+_containers_json() {
+    command -v podman >/dev/null 2>&1 || { echo "[]"; return 0; }
+    command -v jq     >/dev/null 2>&1 || { echo "[]"; return 0; }
+    local map='[.[] | {name:(.Names[0] // .Names // ""), image:.Image, state:.State,
+                       status:.Status, running:(.State=="running"), scope:$scope}]'
+    local u s
+    u=$(podman ps -a --format json 2>/dev/null | jq -c --arg scope user "$map" 2>/dev/null)
+    [[ -n "$u" ]] || u='[]'
+    s='[]'
+    if sudo -n podman ps -a --format json >/dev/null 2>&1; then
+        s=$(sudo -n podman ps -a --format json 2>/dev/null | jq -c --arg scope system "$map" 2>/dev/null)
+        [[ -n "$s" ]] || s='[]'
+    fi
+    jq -c -n --argjson u "$u" --argjson s "$s" '$u + $s' 2>/dev/null || echo "$u"
+}
+
+# Start/stop/restart a podman container by NAME. Uses `podman <action>` (never
+# rm / compose down), so the container persists stopped and stays restartable.
+# Rootless first; a system/root container goes through the privileged helper
+# (needs the powos-container-ctl sudoers opt-in, else it reports missing perms).
+_container_lifecycle() {
+    local action="$1" name="${2:-}"
+    case "$action" in start|stop|restart) ;; *) echo "invalid action: $action" >&2; return 2 ;; esac
+    if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+        echo "invalid container name: $name" >&2; return 2
+    fi
+    if podman container exists "$name" 2>/dev/null; then
+        podman "$action" "$name"
+    elif sudo -n podman container exists "$name" 2>/dev/null; then
+        sudo -n /usr/bin/powos-container-ctl "$action" "$name"
+    else
+        echo "container not found (or system container needs the sudoers opt-in): $name" >&2
+        return 1
+    fi
+}
+
 cmd_containers() {
     local action="${1:-list}"
     local DISTROBOX_CONFIG="/etc/powos/containers/distrobox.ini"
 
     case "$action" in
         list|ls)
+            # Machine-readable list of all podman containers (for the widget).
+            if [[ "${2:-}" == "--json" ]]; then
+                _containers_json
+                return 0
+            fi
             echo -e "${BOLD}${CYAN}Containers${NC}"
             echo "════════════════════════════════════════"
             echo ""
@@ -2543,14 +2610,20 @@ cmd_containers() {
             echo -e "${GREEN}✓ Container '$name' removed${NC}"
             ;;
 
-        stop)
+        start|stop|restart)
+            # Podman lifecycle for ANY container (app/compose containers AND
+            # distrobox ones — distrobox containers are podman containers). Does
+            # NOT remove; a stopped container stays and can be started again.
             local name="${2:-}"
             if [[ -z "$name" ]]; then
-                echo "Usage: powos containers stop <name>"
+                echo "Usage: powos containers $action <name>"
                 return 1
             fi
-            distrobox stop "$name" --yes
-            echo -e "${GREEN}✓ Container '$name' stopped${NC}"
+            if _container_lifecycle "$action" "$name"; then
+                echo -e "${GREEN}✓ ${action}: ${name}${NC}"
+            else
+                return 1
+            fi
             ;;
 
         assemble)
@@ -2610,11 +2683,13 @@ cmd_containers() {
             echo "Usage: powos containers <command>"
             echo ""
             echo "Commands:"
-            echo "  list                    List all containers and images"
+            echo "  list [--json]           List all containers and images (--json for widgets)"
+            echo "  start <name>            Start a stopped container"
+            echo "  stop <name>             Stop a container (keeps it — restartable)"
+            echo "  restart <name>          Restart a container"
             echo "  create <name> [image]   Create a new distrobox container"
             echo "  enter <name>            Enter a distrobox container"
-            echo "  stop <name>             Stop a container"
-            echo "  remove <name>           Remove a container"
+            echo "  remove <name>           Remove a distrobox container"
             echo "  assemble                Create all predefined containers"
             echo "  export <name> <app>     Export app from container to host"
             echo "  prune                   Clean up unused resources"

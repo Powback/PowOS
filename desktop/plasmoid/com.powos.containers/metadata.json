@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PowOS"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Start, stop and restart your podman containers — stopped ones stay listed",
+        "Icon": "container",
+        "Id": "com.powos.containers",
+        "License": "MIT",
+        "Name": "PowOS Containers",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
