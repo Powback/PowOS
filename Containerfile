@@ -92,7 +92,8 @@ LABEL org.opencontainers.image.description="Minimal PowOS layer on Bazzite (CLI 
 # openssh-server is already in Bazzite base.
 RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
     echo "powos:powos" | chpasswd && \
-    systemctl enable sshd.service
+    systemctl enable sshd.service && \
+    mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/powos
 
 # Desktop peripheral + dev-runtime stack.
 #   openrgb  motherboard/RAM/case RGB via SMBus (i2c_dev/i2c_piix4 already
