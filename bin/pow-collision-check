@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+"""
+Podman OCI prestart hook: refuses to start a container whose Traefik
+`Host(`…`)` label already resolves to a different host on the LAN.
+
+WHY THIS EXISTS
+The user just types `docker compose up`. Under the hood that ends up
+calling `podman start`, which fires this hook before the container's
+first PID runs. Exit non-zero → podman aborts the start → compose reports
+the failure. No wrapper, no alias, no shim on PATH.
+
+WHY WE READ libpod'S SQLite DB DIRECTLY (NOT `podman inspect`)
+`podman inspect` deadlocks when called from inside a prestart hook:
+libpod holds an exclusive-ish lock across the create→prestart→start
+transaction, and any `podman` command spawned inside the hook waits on
+that same lock forever. libpod eventually gives up with:
+  Error: container creation timeout: internal libpod error
+
+Meanwhile SQLite in WAL mode (podman's default) allows concurrent reads
+during writes. We open the DB read-only, pull the container's labels
+straight from `ContainerConfig.JSON`, and never touch podman.
+
+WHY NOT MATCH ON OCI ANNOTATIONS
+Podman does not propagate container labels to the OCI spec's
+`.annotations`. Only libpod internals appear there (`io.container.manager`
+= `libpod`, etc.). So the hook's `when` clause can't filter on Traefik
+labels; we fire on every start (`when.always = true`) and short-circuit
+inside the script when no Host() label is found.
+
+GRACEFUL FAILURES
+Any exception in the hook exits 0. It is not this hook's job to break
+unrelated container starts because DNS momentarily failed or a podman
+schema field moved. pihole-sync's post-hoc auto-stop is the safety net.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sqlite3
+import sys
+
+
+# --- config ----------------------------------------------------------------
+
+def load_pow_conf() -> dict:
+    """Read POW_STATION_HOST etc. from /etc/pow-compose.conf (shell format)."""
+    out: dict[str, str] = {}
+    try:
+        with open("/etc/pow-compose.conf") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return out
+
+
+# --- DB access -------------------------------------------------------------
+
+def db_path() -> str:
+    """
+    Find libpod's SQLite DB for the calling user. Rootless podman keeps it
+    under $HOME/.local/share/containers/storage/db.sql; rootful under
+    /var/lib/containers/storage/db.sql. Fall back to XDG_DATA_HOME if set.
+    """
+    for candidate in (
+        os.environ.get("XDG_DATA_HOME", "") + "/containers/storage/db.sql",
+        os.path.expanduser("~/.local/share/containers/storage/db.sql"),
+        "/var/lib/containers/storage/db.sql",
+    ):
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def read_labels(cid: str) -> dict[str, str]:
+    """Read container labels from libpod DB. Returns {} if anything fails."""
+    p = db_path()
+    if not p:
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=2)
+        row = conn.execute(
+            "SELECT JSON FROM ContainerConfig WHERE ID = ? LIMIT 1", (cid,)
+        ).fetchone()
+        conn.close()
+        if not row:
+            return {}
+        cfg = json.loads(row[0])
+        return cfg.get("labels", {}) or {}
+    except Exception:
+        return {}
+
+
+# --- Traefik parsing -------------------------------------------------------
+
+_HOST_RE = re.compile(r"Host\(`([^`]+)`\)")
+
+
+def hosts_from_labels(labels: dict[str, str]) -> list[str]:
+    """Every hostname referenced by a `traefik.http.routers.*.rule` label."""
+    out: set[str] = set()
+    for k, v in labels.items():
+        if not k.startswith("traefik.http.routers.") or not k.endswith(".rule"):
+            continue
+        for m in _HOST_RE.finditer(str(v)):
+            out.add(m.group(1))
+    return sorted(out)
+
+
+# --- LAN awareness ---------------------------------------------------------
+
+def self_ip() -> str:
+    """
+    The IP the LAN sees this box on. `hostname -I`-equivalent but we ask
+    the kernel which src IP would be chosen for an outbound to 1.1.1.1
+    (which the routing table already knows how to reach). No packet is
+    actually sent.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("1.1.1.1", 1))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return ""
+
+
+def dig_a(host: str, timeout: int = 2) -> str:
+    """Local DNS lookup via `dig`. Empty string on failure/NXDOMAIN."""
+    if not shutil.which("dig"):
+        return ""
+    try:
+        out = subprocess.check_output(
+            ["dig", "+short", f"+time={timeout}", "+tries=1", "A", host],
+            stderr=subprocess.DEVNULL, timeout=timeout + 1,
+        ).decode().strip().splitlines()
+        for line in out:
+            if re.match(r"^\d+\.\d+\.\d+\.\d+$", line):
+                return line
+    except Exception:
+        pass
+    return ""
+
+
+def dig_a_via_ssh(host: str, target: str) -> str:
+    """
+    Fallback: run dig on POW_STATION_HOST via SSH. Used when this box's
+    resolver doesn't know .pow (default state on a fresh PowOS box).
+    """
+    try:
+        # -F /dev/null: don't read /etc/ssh/ssh_config or ~/.ssh/config.
+        # Some system-wide drop-ins (e.g. Bazzite's systemd-ssh-proxy) trip
+        # SSH's owner/permission check inside podman's user namespace, and
+        # aborting there defeats the hook. We give SSH exactly the settings
+        # we need and nothing else.
+        p = subprocess.run(
+            [
+                "ssh", "-F", "/dev/null",
+                "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", f"UserKnownHostsFile={os.path.expanduser('~/.ssh/known_hosts')}",
+                "-o", f"IdentityFile={os.path.expanduser('~/.ssh/id_ed25519')}",
+                target, f"dig +short +time=2 +tries=1 A '{host}'",
+            ],
+            capture_output=True, timeout=6,
+        )
+        for line in p.stdout.decode(errors="replace").strip().splitlines():
+            if re.match(r"^\d+\.\d+\.\d+\.\d+$", line):
+                return line
+    except Exception:
+        pass
+    return ""
+
+
+def resolve(host: str, station: str) -> str:
+    ip = dig_a(host)
+    if ip:
+        return ip
+    if station:
+        return dig_a_via_ssh(host, station)
+    return ""
+
+
+# --- main ------------------------------------------------------------------
+
+LOG_PATH = "/var/tmp/pow-collision-check.log"
+
+
+def dbg(msg: str) -> None:
+    """
+    Debug + failure reason logging. Podman only surfaces
+    `crun: error executing hook '/…' (exit code: 1)` to the user; the hook's
+    stderr is dropped. This log is the user-facing reason string — the
+    error the operator reads when a compose up fails.
+
+    /var/tmp is used deliberately: rootless podman doesn't sanitise
+    /var/tmp (unlike /tmp on some setups) and it persists across reboots.
+    """
+    try:
+        with open(LOG_PATH, "a") as f:
+            import time
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
+
+def main() -> int:
+    try:
+        state = json.loads(sys.stdin.read())
+    except Exception:
+        return 0
+    cid = state.get("id") or ""
+    if not cid:
+        return 0
+
+    labels = read_labels(cid)
+    if not labels:
+        return 0
+
+    hosts = hosts_from_labels(labels)
+    if not hosts:
+        return 0
+
+    me = self_ip()
+    if not me:
+        return 0
+
+    conf = load_pow_conf()
+    if conf.get("POW_COLLISION_CHECK_BYPASS") == "1":
+        return 0
+    station = conf.get("POW_STATION_HOST", "")
+
+    collisions: list[tuple[str, str]] = []
+    for h in hosts:
+        ip = resolve(h, station)
+        if ip and ip != me:
+            collisions.append((h, ip))
+
+    if not collisions:
+        return 0
+
+    lines = "\n".join(f"  {h} -> {ip}   (this host: {me})" for h, ip in collisions)
+    reason = (
+        f"REFUSING container {cid[:12]} — hostname already claimed on the LAN:\n"
+        f"{lines}\n"
+        f"Fix: drop the Traefik Host(`…`) label, stop the container on the\n"
+        f"other host, or set POW_COLLISION_CHECK_BYPASS=1 in /etc/pow-compose.conf."
+    )
+    dbg(reason)
+    # Podman surfaces `crun: error executing hook … (exit code: 1)` to the
+    # user but drops the hook's stderr. The log at /var/tmp/… is our
+    # channel for "why". Also try stderr in case a future podman shows it.
+    sys.stderr.write(reason + f"\n(See {LOG_PATH} for the full reason.)\n")
+    return 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception:
+        # Any bug in this hook must not break unrelated container starts.
+        sys.exit(0)

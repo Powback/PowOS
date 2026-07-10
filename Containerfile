@@ -63,7 +63,8 @@ COPY config/etc/containers/systemd/users/  /etc/containers/systemd/users/
 COPY config/etc/ssh/sshd_config.d/         /etc/ssh/sshd_config.d/
 COPY config/etc/ssh/authorized_keys.d/     /etc/ssh/authorized_keys.d/
 COPY config/etc/systemd/logind.conf.d/     /etc/systemd/logind.conf.d/
-COPY config/etc/profile.d/                 /etc/profile.d/
+COPY config/etc/containers/oci/hooks.d/     /etc/containers/oci/hooks.d/
+COPY config/etc/containers/containers.conf.d/ /etc/containers/containers.conf.d/
 # Mask all sleep-related systemd targets — no code path can suspend the box.
 # Complements config/etc/systemd/logind.conf.d/50-powos-no-suspend.conf which
 # blocks the trigger side (lid/keys/idle); this blocks the target side so a

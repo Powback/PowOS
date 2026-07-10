@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "hook": {
+    "path": "/usr/bin/pow-collision-check",
+    "args": ["pow-collision-check"]
+  },
+  "when": {
+    "always": true
+  },
+  "stages": ["prestart"]
+}
