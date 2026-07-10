@@ -132,67 +132,92 @@ your service can join the `traefik` network like any other HTTP service
 and route its signalling through Traefik normally. No more
 `network_mode: host` unless you have another reason to need it.
 
-## Browser CLI — one-shot Playwright commands
+## Browser CLI — `browser-use`
 
-The `cb-mcp-stdb` container (Powpanion-STDB compose) ships a real
-command-line Playwright inside it — the same engine the MCP server drives,
-but exposed as a shell CLI you can invoke for one-off jobs. No MCP, no
-JSON-RPC, no SSE session bookkeeping.
+Straight command-line browser control. No MCP server, no JSON-RPC, no
+lease management. Point it at any script you want the browser to run.
 
-The binary lives at `/app/node_modules/.bin/playwright` in the container.
-Use it via `docker exec`:
+Installed on demand via `uvx` — no persistent install needed:
 
 ```bash
-# Screenshot a page (writes into the container, copy out afterwards)
-docker exec cb-mcp-stdb /app/node_modules/.bin/playwright \
-  screenshot --wait-for-timeout 2000 https://example.com /tmp/shot.png
-docker cp cb-mcp-stdb:/tmp/shot.png ./shot.png
-
-# Same for a PDF
-docker exec cb-mcp-stdb /app/node_modules/.bin/playwright \
-  pdf https://example.com /tmp/page.pdf
-
-# Interactive record — actions get printed as Playwright JS/Python/etc.
-docker exec -it cb-mcp-stdb /app/node_modules/.bin/playwright \
-  codegen https://example.com
+uvx browser-use --help
 ```
 
-Handy flags on `screenshot`:
+### Usage shape
 
-| Flag                                | Purpose                                    |
-|-------------------------------------|--------------------------------------------|
-| `--browser chromium\|firefox\|webkit` | Which engine (default chromium)            |
-| `--viewport-size 1280,720`          | Set viewport before capture                |
-| `--full-page`                       | Whole scrollable page, not just viewport   |
-| `--wait-for-selector <sel>`         | Delay capture until the selector renders   |
-| `--wait-for-timeout <ms>`           | Fixed sleep before capture                 |
-| `--device "iPhone 15 Pro"`          | Emulate a device                           |
-| `-b chromium`                       | Short form of `--browser`                  |
-
-Full list: `docker exec cb-mcp-stdb /app/node_modules/.bin/playwright screenshot --help`.
-
-### One-line alias
-
-Save the friction — drop into `~/.bashrc` on any box running Powpanion-STDB:
+`browser-use` takes a Python script on stdin (heredoc). Helpers are
+pre-imported; the daemon auto-starts and attaches to the running Chrome
+over CDP:
 
 ```bash
-browser() { docker exec cb-mcp-stdb /app/node_modules/.bin/playwright "$@"; }
+uvx browser-use <<'PY'
+new_tab("https://powpanion-stdb.pow")
+wait_for_load()
+print(page_info())
+PY
 ```
 
-Then it's just:
+### The pre-imported helpers (what you'll actually call)
+
+| Helper                              | What it does                                         |
+|-------------------------------------|------------------------------------------------------|
+| `new_tab(url)`                      | Open a new tab. Use this instead of `goto_url` first. |
+| `wait_for_load()`                   | Block until the current tab finishes loading         |
+| `ensure_real_tab()`                 | Skip omnibox/DevTools/blank targets                  |
+| `page_info()`                       | URL, title, viewport, etc. — snapshot of tab state   |
+| `capture_screenshot()`              | Screenshot the visible viewport                      |
+| `click_at_xy(x, y)`                 | Coordinate click. Passes through iframes/shadow DOM  |
+| `js("document.title")`              | Arbitrary JS eval in page context, returns the value |
+| `cdp("Domain.method", …)`           | Raw CDP call — fallback when a helper is missing     |
+
+### Setup gotchas
+
+`browser-use --doctor` diagnoses the whole path (install → daemon →
+browser attach). On Linux with Snap Chromium, `browser-use doctor
+--fix-snap` prints the exact commands.
+
+Local Chrome needs remote debugging turned on — first run pops
+`chrome://inspect/#remote-debugging`; tick "Allow remote debugging for
+this browser instance." Once enabled, subsequent runs are silent.
+
+### Remote / cloud browsers
+
+For headless servers or parallel sub-agents, use a Browser Use Cloud
+daemon instead of the local Chrome:
 
 ```bash
-browser screenshot https://powpanion-stdb.pow /tmp/x.png
-browser pdf https://powpanion-stdb.pow /tmp/x.pdf
-browser codegen https://powpanion-stdb.pow
+# One-time auth
+uvx browser-use auth login
+# Or non-interactively:
+printf '%s' "$BROWSER_USE_API_KEY" | uvx browser-use auth login --api-key-stdin
+
+# Start a remote daemon under a short name
+uvx browser-use <<'PY'
+start_remote_daemon("r7k2")
+PY
+
+# Subsequent commands attach to it
+BU_NAME=r7k2 uvx browser-use <<'PY'
+new_tab("https://example.com")
+print(page_info())
+PY
 ```
 
-### When you actually want the MCP path
+Cloud daemons bill until you stop them — `stop_remote_daemon("r7k2")` or
+`PATCH /browsers/{id} {"action":"stop"}` when done.
 
-Only when you need session persistence, multi-step DOM interaction driven
-by a program, or the pooled instances the MCP server manages. For "give
-me a screenshot / PDF / recording of a URL," the Playwright CLI above is
-faster and simpler. The MCP-over-SSE path is documented below.
+### When to reach for the other browser stack (`cb-mcp-stdb`)
+
+`browser-use` is one-shot / interactive: you run a script, it acts on
+your Chrome. Reach for the Playwright-farm MCP server (`cb-mcp-stdb`,
+documented below) when you need:
+
+- Pooled, isolated instances (up to 25 concurrent, headless by default).
+- Long-lived session state managed by a program, not a shell.
+- Agent-driven multi-step DOM work through MCP tool calls.
+
+For "one screenshot" / "fetch and dump markdown" / "smoke-check a site",
+`uvx browser-use` is the shortest path.
 
 ## Concurrent browser (Playwright farm)
 
