@@ -55,6 +55,11 @@ next DNS query.
 
 ## Public with HTTPS: `foo.powback.com`
 
+**HTTP/3 (QUIC) is on automatically** — PowStation's Traefik has `http3: {}`
+on `websecure`, and every HTTPS response emits an `alt-svc: h3=":443"` header
+so modern browsers upgrade to QUIC on their second connection. Zero config on
+your side; falls back to HTTP/2 for older clients.
+
 Not currently self-served from this PowOS box. The public wildcard
 `*.powback.com` DNS record points at PowStation, and PowStation's
 Traefik is the only one with:
