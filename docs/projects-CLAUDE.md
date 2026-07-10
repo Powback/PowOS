@@ -84,6 +84,49 @@ happen:
    When this ships, a PowOS compose can add both label pairs and both
    just work.
 
+## WebRTC / RTC services — one line
+
+Any service that needs a TURN/STUN server (WebRTC, remote-desktop
+streamers, etc.) adds ONE line to its compose file:
+
+```yaml
+services:
+  my-webrtc-service:
+    env_file: /etc/powstation/turn.env
+```
+
+That injects three env vars into the container:
+
+| Variable            | What it is                                             |
+|---------------------|--------------------------------------------------------|
+| `TURN_URL`          | `turn.pow:3478` (LAN-only)                             |
+| `TURN_URL_PUBLIC`   | `turn.powback.com:3478` (public)                       |
+| `TURN_REALM`        | `powback.com`                                          |
+| `TURN_SECRET`       | HMAC-signing key for time-limited TURN credentials     |
+
+The service code mints per-user credentials by HMAC-signing
+`<username>:<expiry>` with `TURN_SECRET`, then hands the ICE config to
+the browser:
+
+```js
+const pc = new RTCPeerConnection({
+  iceServers: [
+    { urls: `turn:${TURN_URL}?transport=udp`, username, credential },
+    { urls: `turn:${TURN_URL_PUBLIC}?transport=udp`, username, credential },
+  ],
+});
+```
+
+The `/etc/powstation/turn.env` file gets installed on this box the
+first time you ran `powos containers sync <target>` — it fetches
+whatever the PowStation host is currently using. Rotating the secret
+on PowStation means re-running the sync command on each PowOS box.
+
+Bridge networking is fine — coturn is the LAN's shared TURN server, so
+your service can join the `traefik` network like any other HTTP service
+and route its signalling through Traefik normally. No more
+`network_mode: host` unless you have another reason to need it.
+
 ## What NOT to do
 
 - **Don't add `Host(`foo.powback.com`)` labels here yet.** They will be

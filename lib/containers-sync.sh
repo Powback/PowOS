@@ -145,6 +145,22 @@ REMOTE2_EOF
     echo "POW_STATION_HOST=\"$target\"" | sudo tee /etc/pow-compose.conf >/dev/null
     sudo chmod 644 /etc/pow-compose.conf
 
+    echo "→ Fetching /etc/powstation/turn.env so compose files can just add env_file..."
+    # Any WebRTC service on this box gets the shared TURN URL + HMAC
+    # secret by dropping one line in its compose:
+    #   env_file: /etc/powstation/turn.env
+    # File is 644 on both sides — the TURN secret is only useful to
+    # hosts on the LAN, which is our trust boundary.
+    turn_env=$(ssh "$target" "cat /etc/powstation/turn.env 2>/dev/null" 2>/dev/null || true)
+    if [[ -n "$turn_env" ]]; then
+        sudo mkdir -p /etc/powstation
+        echo "$turn_env" | sudo tee /etc/powstation/turn.env >/dev/null
+        sudo chmod 644 /etc/powstation/turn.env
+        echo "  installed /etc/powstation/turn.env"
+    else
+        echo "  (powstation has no /etc/powstation/turn.env yet — skip)"
+    fi
+
     echo "→ Restarting pihole-sync on powstation..."
     ssh "$target" "cd \$HOME/$POWSTATION_TREE && docker compose up -d pihole-sync" 2>&1 | tail -5
 
