@@ -132,7 +132,70 @@ your service can join the `traefik` network like any other HTTP service
 and route its signalling through Traefik normally. No more
 `network_mode: host` unless you have another reason to need it.
 
+## Browser CLI — one-shot Playwright commands
+
+The `cb-mcp-stdb` container (Powpanion-STDB compose) ships a real
+command-line Playwright inside it — the same engine the MCP server drives,
+but exposed as a shell CLI you can invoke for one-off jobs. No MCP, no
+JSON-RPC, no SSE session bookkeeping.
+
+The binary lives at `/app/node_modules/.bin/playwright` in the container.
+Use it via `docker exec`:
+
+```bash
+# Screenshot a page (writes into the container, copy out afterwards)
+docker exec cb-mcp-stdb /app/node_modules/.bin/playwright \
+  screenshot --wait-for-timeout 2000 https://example.com /tmp/shot.png
+docker cp cb-mcp-stdb:/tmp/shot.png ./shot.png
+
+# Same for a PDF
+docker exec cb-mcp-stdb /app/node_modules/.bin/playwright \
+  pdf https://example.com /tmp/page.pdf
+
+# Interactive record — actions get printed as Playwright JS/Python/etc.
+docker exec -it cb-mcp-stdb /app/node_modules/.bin/playwright \
+  codegen https://example.com
+```
+
+Handy flags on `screenshot`:
+
+| Flag                                | Purpose                                    |
+|-------------------------------------|--------------------------------------------|
+| `--browser chromium\|firefox\|webkit` | Which engine (default chromium)            |
+| `--viewport-size 1280,720`          | Set viewport before capture                |
+| `--full-page`                       | Whole scrollable page, not just viewport   |
+| `--wait-for-selector <sel>`         | Delay capture until the selector renders   |
+| `--wait-for-timeout <ms>`           | Fixed sleep before capture                 |
+| `--device "iPhone 15 Pro"`          | Emulate a device                           |
+| `-b chromium`                       | Short form of `--browser`                  |
+
+Full list: `docker exec cb-mcp-stdb /app/node_modules/.bin/playwright screenshot --help`.
+
+### One-line alias
+
+Save the friction — drop into `~/.bashrc` on any box running Powpanion-STDB:
+
+```bash
+browser() { docker exec cb-mcp-stdb /app/node_modules/.bin/playwright "$@"; }
+```
+
+Then it's just:
+
+```bash
+browser screenshot https://powpanion-stdb.pow /tmp/x.png
+browser pdf https://powpanion-stdb.pow /tmp/x.pdf
+browser codegen https://powpanion-stdb.pow
+```
+
+### When you actually want the MCP path
+
+Only when you need session persistence, multi-step DOM interaction driven
+by a program, or the pooled instances the MCP server manages. For "give
+me a screenshot / PDF / recording of a URL," the Playwright CLI above is
+faster and simpler. The MCP-over-SSE path is documented below.
+
 ## Concurrent browser (Playwright farm)
+
 
 The Powpanion-STDB compose stack ships `cb-mcp-stdb` — a Chromium/Firefox/WebKit
 farm behind an MCP-over-SSE endpoint. It's the fastest way to script real
