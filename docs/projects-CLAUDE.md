@@ -132,6 +132,133 @@ your service can join the `traefik` network like any other HTTP service
 and route its signalling through Traefik normally. No more
 `network_mode: host` unless you have another reason to need it.
 
+## Concurrent browser (Playwright farm)
+
+The Powpanion-STDB compose stack ships `cb-mcp-stdb` — a Chromium/Firefox/WebKit
+farm behind an MCP-over-SSE endpoint. It's the fastest way to script real
+browser work (headless page fetches, form fills, screenshots, DOM assertions)
+from any other service on this box. Up to 25 concurrent instances.
+
+### Endpoint
+
+From another container on the same compose network:
+```
+http://cb-mcp-stdb:3000/
+```
+
+From the host once Powpanion-STDB is up (`docker compose up -d` in
+`~/Projects/Powpanion-STDB`):
+```
+http://localhost:3000/
+```
+
+Three HTTP surfaces:
+
+| Path | Method | Purpose |
+|---|---|---|
+| `/health` | GET | JSON `{status, sessions, maxSessions}` — cheap liveness |
+| `/sse` | GET | Open an MCP session over Server-Sent Events. First `data:` line contains `sessionId=` |
+| `/message?sessionId=<id>` | POST | Send JSON-RPC 2.0 into an existing session |
+
+### Interactive: MCP Inspector (recommended)
+
+```
+npx @modelcontextprotocol/inspector http://localhost:3000/sse
+```
+Opens a browser UI on `http://localhost:5173` with a tool picker, form-based
+input, and live output. Use this to figure out what tools exist and what
+arguments they take — no JSON-RPC to hand-craft.
+
+### From another compose project on this box
+
+Point your container at the browser farm the same way any other cross-project
+service is reached — via the `traefik` network + Pi-hole DNS (see the
+"Rules of engagement" section for the pattern). The browser farm is a
+`.pow`-resolvable service; use `cb-mcp-stdb` as the hostname on the compose
+network, or configure via env:
+```yaml
+services:
+  my-tester:
+    environment:
+      BROWSER_MCP_URL: http://cb-mcp-stdb:3000
+    networks:
+      - default
+      - traefik
+      - powstation_dns   # so `.pow` names resolve inside the container
+```
+
+Inside your service, use an MCP client library (`@modelcontextprotocol/sdk`
+for Node, `mcp` for Python). It's the same API a Claude agent uses.
+
+### Scripted / one-shot: raw curl
+
+For shell scripts, the SSE + POST choreography works but is fiddly. Sketch:
+```bash
+mkfifo /tmp/cb.sse
+curl -sN http://localhost:3000/sse > /tmp/cb.sse &
+sid=$(grep -m1 'sessionId=' /tmp/cb.sse | sed 's|.*sessionId=||')
+
+post() {
+  curl -sf -X POST -H 'Content-Type: application/json' \
+    "http://localhost:3000/message?sessionId=$sid" -d "$1"
+}
+post '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"shell","version":"0"}}}'
+post '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_create_instance","arguments":{}}}'
+grep -m1 '"id":2' /tmp/cb.sse   # response arrives on the SSE stream
+```
+Wrap in a `browser-call` helper if you use it more than twice. `mcp-inspector`
+does the same choreography with a UI — worth using unless you specifically
+need the shell path (CI, cron, out-of-cluster jobs).
+
+### The tools you'll actually call
+
+Full list is baked into `mcp-server/browser/src/tools.ts` in the
+Powpanion-STDB tree (49 total in `--tools full`, 15 in `--tools agent`, ~39
+in `--tools standard`). The commonly-used ones:
+
+- **Session**: `browser_create_instance`, `browser_list_instances`,
+  `browser_close_instance`, `browser_close_all_instances`
+- **Navigation**: `browser_navigate`, `browser_go_back`, `browser_go_forward`
+- **Interaction**: `browser_click`, `browser_click_at`, `browser_fill`,
+  `browser_hover`, `browser_focus`, `browser_keyboard_press`,
+  `browser_keyboard_type`, `browser_drag_and_drop`
+- **Inspection**: `browser_get_page_info`, `browser_get_markdown`,
+  `browser_get_element_text`, `browser_get_element_attribute`,
+  `browser_get_console_logs`, `browser_get_cookies`
+- **Diagnostics**: `browser_screenshot`, `browser_annotate` (highlights
+  what a locator matched — great for debugging bad selectors),
+  `browser_evaluate` (arbitrary JS in the page context)
+- **Bookmarklets**: `browser_bookmarklet_save/list/run/delete` — persist
+  a JS snippet per profile and run it later without re-uploading
+
+Screenshots come back as base64 PNGs on the tool response — decode with:
+```
+jq -r '.result.content[0].data' | base64 -d > shot.png
+```
+
+### Config knobs (docker-compose command:)
+
+Change these in `~/Projects/Powpanion-STDB/docker-compose.yml`:
+```
+--max-instances 25          # concurrent cap; new SSE sessions get 503 past this
+--headless true             # false to see Chromium windows (needs X)
+--browser chromium          # or firefox / webkit
+--tools agent               # agent | standard | full — smaller surface = safer for automation
+--sse-port 3000
+--omniparser-url http://omniparser:8000       # optional UI-element detection sidecar
+--egress-proxy-url http://egress-proxy:8080   # domain-enforcement firewall for leased contexts
+```
+Env-var equivalents: `OMNIPARSER_URL`, `EGRESS_PROXY_URL`, `POWPANION_URL`,
+`BROWSER_MCP_TOKEN`. Set via the compose `.env`.
+
+### Ops
+
+- Sessions that never call `browser_close_instance` are reaped after
+  `--instance-timeout` (default 30 min). `curl /health` shows the live count.
+- `docker compose restart concurrent-browser` drops every open session.
+- If `/health` is 503-ing, you're at `--max-instances`. Bump the flag or
+  kill leaked sessions with `browser_close_all_instances`.
+
 ## What NOT to do
 
 - **Don't add `Host(`foo.powback.com`)` labels here yet.** They will be
