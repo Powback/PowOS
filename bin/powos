@@ -10,9 +10,18 @@ LAYER_SYNC="/usr/lib/powos/ramfs/layer-sync.py"
 STATE_DIR="/run/powos"
 
 # Location of PowOS shell libraries. Installed image ships them in
-# /usr/lib/powos; fall back to the repo's lib/ for dev/Docker runs.
+# /usr/lib/powos. When invoked from a repo checkout (bin/'s sibling lib/
+# has the expected file), prefer that so devs can iterate without
+# reinstalling. Users running the installed /usr/bin/powos always fall
+# through to /usr/lib/powos.
 POWOS_LIB="/usr/lib/powos"
-[[ -f "$POWOS_LIB/hardware-detect.sh" ]] || POWOS_LIB="$(cd "$(dirname "$0")/../lib" && pwd)"
+_powos_dev_lib="$(cd "$(dirname "$0")/../lib" 2>/dev/null && pwd)"
+if [[ -n "$_powos_dev_lib" ]] && [[ -f "$_powos_dev_lib/hardware-detect.sh" ]]; then
+    POWOS_LIB="$_powos_dev_lib"
+elif [[ ! -f "$POWOS_LIB/hardware-detect.sh" ]]; then
+    POWOS_LIB="$_powos_dev_lib"
+fi
+unset _powos_dev_lib
 
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -2673,6 +2682,15 @@ cmd_containers() {
             podman "$@"
             ;;
 
+        sync)
+            # Sync this box's labels into a PowStation pihole-sync — see
+            # lib/containers-sync.sh. Both sides get wired up in one shot,
+            # SSH-tunneled, key-restricted to podman socket only.
+            source "$POWOS_LIB/containers-sync.sh"
+            shift
+            cmd_containers_sync "$@"
+            ;;
+
         prune)
             echo "Cleaning up unused container resources..."
             podman system prune -f
@@ -2694,6 +2712,7 @@ cmd_containers() {
             echo "  export <name> <app>     Export app from container to host"
             echo "  prune                   Clean up unused resources"
             echo "  podman <args>           Pass through to podman"
+            echo "  sync <user@host>        Wire this box into a PowStation pihole-sync"
             echo ""
             echo "Examples:"
             echo "  powos containers create dev"

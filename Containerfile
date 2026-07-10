@@ -59,6 +59,18 @@ COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
 COPY config/sysctl.d/                     /etc/sysctl.d/
 COPY config/NetworkManager/conf.d/        /etc/NetworkManager/conf.d/
+COPY config/etc/containers/systemd/users/  /etc/containers/systemd/users/
+COPY config/etc/ssh/sshd_config.d/         /etc/ssh/sshd_config.d/
+COPY config/etc/ssh/authorized_keys.d/     /etc/ssh/authorized_keys.d/
+COPY config/etc/systemd/logind.conf.d/     /etc/systemd/logind.conf.d/
+# Mask all sleep-related systemd targets — no code path can suspend the box.
+# Complements config/etc/systemd/logind.conf.d/50-powos-no-suspend.conf which
+# blocks the trigger side (lid/keys/idle); this blocks the target side so a
+# rogue systemctl suspend or systemd-inhibit --shell suspend has no effect.
+RUN ln -sf /dev/null /etc/systemd/system/sleep.target && \
+    ln -sf /dev/null /etc/systemd/system/suspend.target && \
+    ln -sf /dev/null /etc/systemd/system/hibernate.target && \
+    ln -sf /dev/null /etc/systemd/system/hybrid-sleep.target
 # Login-availability fix (exception to zero-boot-services, deliberately):
 # Plasma Login Manager's greeter can wedge into a broken-QML state after a
 # session exit ("...not a function" TypeErrors, black frozen login screen —

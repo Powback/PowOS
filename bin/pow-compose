@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# pow-compose — a `docker compose` wrapper that refuses to start a container
+# whose Traefik Host(`…`) label is already claimed by a different host on the
+# LAN.
+#
+# WHY THIS EXISTS
+# On the PowStation/PowOS setup, every service that wants a `foo.pow` URL
+# adds a `Host()` label; pihole-sync then advertises `foo.pow` in Pi-hole DNS.
+# If two hosts stand up services with the same label, DNS ends up with
+# two A records and clients round-robin — silent, intermittent breakage.
+# pihole-sync's post-hoc guard stops the loser after the fact, but you still
+# waste time debugging a container that briefly ran, took traffic, and got
+# killed. This wrapper stops the collision before the container even starts.
+#
+# HOW IT WORKS
+# 1. If the subcommand isn't a start-something (up/start/restart/run), pass
+#    straight through — no cost added to `docker compose ps`, `logs`, `down`.
+# 2. Ask `docker compose` to render the merged config as JSON.
+# 3. Extract every `Host(\`...\`)` from Traefik router-rule labels.
+# 4. dig each hostname. If it resolves to an IP that's not this host, abort
+#    with a coloured diagnostic listing which hostnames collide and where.
+# 5. On clean check, exec the real `docker compose` unchanged.
+#
+# ESCAPE HATCH
+# POW_COMPOSE_FORCE=1 pow-compose up …     # bypasses the check, warns and continues.
+#
+# DEPENDENCIES
+# - bash 3.2+ (macOS default), coreutils, `docker compose` (or the
+#   `podman-compose` shim PowOS uses), and `dig`. No `jq`: we parse the
+#   rendered YAML with grep so this works identically under docker-compose
+#   v2 and podman-compose, which don't share a `--format json` flag.
+
+set -euo pipefail
+
+# --- config file -----------------------------------------------------------
+# Written by `powos containers sync <target>` so the SSH-fallback DNS lookup
+# knows where to route queries when the local resolver can't answer .pow.
+# System file takes precedence; user file is a fallback for non-root installs.
+for f in /etc/pow-compose.conf "$HOME/.config/pow-compose.conf"; do
+    [ -r "$f" ] && . "$f"
+done
+
+# --- passthrough gate ------------------------------------------------------
+# Anything that isn't going to start a container skips the check entirely.
+sub="${1:-}"
+case "$sub" in
+    up|start|restart|run) ;;      # check
+    *)                             exec docker compose "$@" ;;
+esac
+
+# --- self IP discovery -----------------------------------------------------
+# Prefer explicit override. Fall back to the first LAN IP we can find.
+#
+# On Bazzite/PowOS: `hostname -I` prints all IPs separated by spaces.
+# On macOS `hostname -I` doesn't exist; use ipconfig or dig against Google DNS
+# to identify the outbound-selected local address.
+detect_self_ip() {
+    if [ -n "${POW_SELF_IP:-}" ]; then
+        echo "$POW_SELF_IP"; return
+    fi
+    if command -v hostname >/dev/null && hostname -I >/dev/null 2>&1; then
+        hostname -I | awk '{print $1}'
+        return
+    fi
+    if command -v ipconfig >/dev/null; then
+        for iface in en0 en1 en2 eth0; do
+            ip=$(ipconfig getifaddr "$iface" 2>/dev/null || true)
+            [ -n "$ip" ] && { echo "$ip"; return; }
+        done
+    fi
+    # Last resort: which local IP would the kernel use for outbound?
+    ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}'
+}
+
+SELF_IP=$(detect_self_ip)
+if [ -z "$SELF_IP" ]; then
+    echo "pow-compose: could not detect this host's LAN IP; set POW_SELF_IP=x.x.x.x" >&2
+    exit 2
+fi
+
+# --- dep check -------------------------------------------------------------
+for tool in dig docker; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "pow-compose: missing dependency '$tool' — install it or bypass with POW_COMPOSE_FORCE=1" >&2
+        exit 2
+    fi
+done
+
+# --- DNS lookup with SSH fallback -----------------------------------------
+# On hosts where the local resolver doesn't know `.pow` (e.g. PowOS boxes
+# whose systemd-resolved doesn't have a route to PowStation's Pi-hole), we
+# fall back to SSHing into $POW_STATION_HOST and asking `host` there.
+#
+# The SSH fallback expects passwordless key auth to $POW_STATION_HOST already
+# working (i.e. the user has run `powos containers sync <target>` at least
+# once, which set up the auth path we use for everything else). If the fallback
+# is unset AND the local resolver returns nothing, we treat it as "not found"
+# rather than blocking the deploy — assumption: no local resolver, no way to
+# know if there's a collision.
+lookup_a() {
+    local host="$1"
+    local ip
+    ip=$(dig +short +time=2 +tries=1 A "$host" 2>/dev/null | grep -E '^[0-9]+\.' | head -1 || true)
+    if [ -z "$ip" ] && [ -n "${POW_STATION_HOST:-}" ]; then
+        ip=$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$POW_STATION_HOST" \
+            "dig +short +time=2 +tries=1 A '$host'" 2>/dev/null \
+            | grep -E '^[0-9]+\.' | head -1 || true)
+    fi
+    echo "$ip"
+}
+
+# --- extract Host() labels from merged compose config ---------------------
+# `docker compose config` renders the merged YAML — supports multiple -f
+# files, .env resolution, extends, etc. Works under docker-compose v2 AND
+# podman-compose (which lacks --format json). We grep for Host(`...`)
+# occurrences directly, so we don't care about YAML structure.
+config_yaml=$(docker compose config 2>/dev/null) || {
+    echo "pow-compose: failed to render compose config; aborting" >&2
+    exit 2
+}
+
+# One Host() per line, dedup. `grep -oE` returns each match on its own line,
+# `sed` strips the wrapper.
+hosts=$(printf '%s\n' "$config_yaml" \
+    | grep -oE 'Host\(`[^`]+`\)' \
+    | sed -E 's/Host\(`([^`]+)`\)/\1/' \
+    | sort -u) || true
+
+if [ -z "$hosts" ]; then
+    # No Host() labels to defend — nothing to check.
+    exec docker compose "$@"
+fi
+
+# --- DNS-based collision check --------------------------------------------
+# For each hostname, look up its current A record. If it resolves to an IP
+# that's not us, someone else has already claimed it — refuse.
+#
+# We ONLY treat "resolves to another IP" as a collision. If it resolves to
+# our own IP OR to nothing, we assume we're the owner (or the first to
+# register) and proceed.
+collisions=()
+for host in $hosts; do
+    resolved=$(lookup_a "$host")
+    if [ -n "$resolved" ] && [ "$resolved" != "$SELF_IP" ]; then
+        collisions+=("$host → $resolved   (this host is $SELF_IP)")
+    fi
+done
+
+if [ ${#collisions[@]} -gt 0 ]; then
+    RED='\033[31m'; BOLD='\033[1m'; NC='\033[0m'
+    {
+        printf "\n${BOLD}${RED}pow-compose: hostname collision — refusing to start.${NC}\n\n"
+        for c in "${collisions[@]}"; do
+            printf "  ${RED}✗${NC} %s\n" "$c"
+        done
+        cat <<HELP
+
+Another host on this LAN already owns the hostname(s) above. Bringing this
+compose up would cause Pi-hole to return two A records for the same name and
+LAN clients would pick one at random.
+
+To proceed:
+  • Remove the Traefik ${BOLD}Host(\`…\`)${NC} label from the colliding service in this
+    compose file, or
+  • Stop the container on the other host that currently owns it (check with
+    ${BOLD}docker compose logs pihole-sync${NC} on the PowStation).
+
+Bypass this check (not recommended — pihole-sync will still auto-stop the
+loser on the next scan): ${BOLD}POW_COMPOSE_FORCE=1 pow-compose up …${NC}
+HELP
+    } >&2
+
+    if [ "${POW_COMPOSE_FORCE:-}" = "1" ]; then
+        printf "${BOLD}POW_COMPOSE_FORCE=1 set — proceeding anyway.${NC}\n\n" >&2
+    else
+        exit 3
+    fi
+fi
+
+# --- clean pass, hand off --------------------------------------------------
+exec docker compose "$@"

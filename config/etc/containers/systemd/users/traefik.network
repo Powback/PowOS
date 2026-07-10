@@ -1,0 +1,20 @@
+# PowOS — user-owned podman bridge network for Traefik-routed services.
+#
+# WHY THIS FILE EXISTS
+# Traefik and every service it fronts (rate-limiter, stdb, powpanion-stdb, ...)
+# need to share a single network so Traefik can reach backends by container name.
+# Ad-hoc `docker network create traefik` on this box works today but breaks any
+# fresh PowOS install where the network wouldn't exist yet — Traefik's
+# `Network=traefik` reference would then fail to start.
+#
+# QUADLET GUARANTEES
+# podman-user-generator sees .network files, creates the network at
+# session start if missing, idempotent on subsequent boots. Reuses the same
+# bridge, so containers survive network re-creation and keep their labels.
+
+[Unit]
+Description=Bridge network for Traefik-routed services
+
+[Network]
+NetworkName=traefik
+Driver=bridge

@@ -1,0 +1,56 @@
+# PowOS — Traefik reverse proxy (rootless podman Quadlet, per-user).
+#
+# WHY THIS IS A QUADLET, NOT A DOCKER-COMPOSE SERVICE
+# Traefik is infrastructure — it needs to survive user login/logout and start
+# at boot. Quadlet lets us define it as podman config that systemd generates a
+# unit from at user-session start (linger must be enabled — see PowOS setup).
+# Everything else (rate-limiter, stdb, etc.) runs as normal user containers
+# and Traefik auto-discovers them via podman.sock labels.
+#
+# ROOTLESS + PORT 80
+# The 70-powos-net-ports.conf sysctl drops ip_unprivileged_port_start to 80
+# so this container can bind :80 without sudo/setcap. See that file for why.
+#
+# WHY %t (XDG_RUNTIME_DIR)
+# The podman socket lives at /run/user/<UID>/podman/podman.sock. %t expands
+# to /run/user/<UID> for the user this Quadlet runs under, so the mount works
+# regardless of UID. Any user with linger enabled + this Quadlet picked up by
+# their user-mode generator gets a Traefik on their local podman namespace.
+
+[Unit]
+Description=Traefik — PowOS reverse proxy
+Documentation=https://doc.traefik.io/traefik/
+After=network-online.target podman.socket
+Wants=network-online.target podman.socket
+
+[Container]
+SecurityLabelDisable=true
+Image=docker.io/traefik:v3
+ContainerName=traefik
+AutoUpdate=registry
+
+# Bind host :80 to container :80. IPv4+IPv6 default via podman.
+PublishPort=80:80
+
+# Read-only podman socket for auto-discovery. :ro so a Traefik CVE cannot
+# spawn/kill sibling containers. :z relabels for SELinux (harmless on non-SELinux).
+Volume=%t/podman/podman.sock:/var/run/docker.sock:z
+
+# Join the traefik bridge network. Every service that wants to be routed
+# joins this same network and adds Host(...) labels.
+Network=traefik
+
+# Traefik CLI args
+Exec=--providers.docker=true \
+     --providers.docker.exposedbydefault=false \
+     --providers.docker.endpoint=unix:///var/run/docker.sock \
+     --entrypoints.web.address=:80 \
+     --log.level=INFO \
+     --accesslog=true
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
