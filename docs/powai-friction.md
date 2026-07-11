@@ -77,3 +77,32 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
 - [x] **`powos self push` died with "author identity unknown" / phantom exec-bit
   files / dubious ownership on fresh installs** — self-healed in `setup gh` and
   `self push` — fixed in `ad071a6` (+ idempotency follow-up).
+
+- [x] **`powos self test` aborted with "/usr still read-only after usr-overlay"**
+  — `self_usr_ro()` wrote its probe file as the invoking user; root-owned /usr
+  returns EACCES even on a writable overlay, misread as "read-only". Probe now
+  runs via sudo — fixed in `cc9065e`.
+
+- [ ] **`powos update self` self-corrupts the running `powos` process** — the
+  bin/ deploy does a non-atomic `cp` over `/usr/bin/powos` while that very bash
+  is executing it → bogus "syntax error near unexpected token" / "unexpected
+  EOF" and a failed deploy (hit again 2026-07-11 during `self test`). A fix
+  (copy-to-temp + `mv`) ALREADY EXISTS in the `powos-bundle-edits` stash in
+  /var/lib/powos/src but never landed upstream — resolve the stash and ship it.
+
+- [ ] **`self test`/`update self` doesn't deploy `desktop/autostart/` or
+  `desktop/plasmoid/`** — the image build COPYs them but the live deploy skips
+  them, so autostart/widget changes can't be tested transiently (had to sudo cp
+  by hand for powos-panel-center). The same stash contains this deploy step too.
+
+- [ ] **`powos self pull` first git-attach left 41 phantom mode-only diffs +
+  a conflicted stash** — bundled src ships 755, repo has 644; every file shows
+  modified until `git config core.fileMode false` (now set locally — consider
+  setting it in the attach path). The stash `powos-bundle-edits` (real fixes:
+  atomic bin deploy, plasmoid/autostart deploy, containers JSON, plasma-setup
+  mask) conflicts with upstream and awaits manual resolution.
+
+- [ ] **SSH origin push is dead on this box** — ~/.ssh/id_ed25519.pub is not
+  added to the GitHub account (`Permission denied (publickey)`). Worked around
+  by pushing to the https:// URL with gh's credential helper. Either add the
+  pubkey at https://github.com/settings/ssh/new or flip origin to HTTPS.
