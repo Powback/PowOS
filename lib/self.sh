@@ -54,10 +54,16 @@ self_git_dirty() { [[ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]]; }
 # composefs stays `ro` even after `bootc usr-overlay` adds a writable
 # overlay at /usr — so the fallthrough falsely reported "ro" and `powos
 # self test` aborted every time on installed systems.
+#
+# Must probe AS ROOT: /usr is root-owned, so an unprivileged `: > probe`
+# fails with EACCES even on a writable overlay — which this function then
+# misreported as "read-only", aborting `self test` right after usr-overlay
+# succeeded. The actual deploy uses sudo cp anyway, so root is the right
+# identity to ask "can we write here?".
 self_usr_ro() {
     local probe="/usr/.self-usr-ro-probe.$$"
-    if : > "$probe" 2>/dev/null; then
-        rm -f "$probe" 2>/dev/null
+    if sudo sh -c ": > '$probe'" 2>/dev/null; then
+        sudo rm -f "$probe" 2>/dev/null
         return 1  # writable
     fi
     return 0  # read-only
