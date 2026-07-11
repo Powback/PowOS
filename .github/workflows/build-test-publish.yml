@@ -66,7 +66,11 @@ jobs:
       - name: ShellCheck (errors only — style/info are tracked debt)
         run: |
           sudo apt-get install -y shellcheck
-          shellcheck -S error bin/* lib/*.sh build/*.sh
+          # bin/ mixes shells with other interpreters (e.g. the python3
+          # pow-collision-check hook) — shellcheck hard-fails non-shell
+          # scripts with SC1071, so lint only files with a sh/bash shebang.
+          mapfile -t shell_bins < <(grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/*)
+          shellcheck -S error "${shell_bins[@]}" lib/*.sh build/*.sh
 
       - name: Tier1 dev-mode bash tests
         run: |
