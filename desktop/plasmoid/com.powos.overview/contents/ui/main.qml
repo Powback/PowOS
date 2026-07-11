@@ -22,7 +22,8 @@ PlasmoidItem {
     property var svc: ({})
     property string err: ""
     property real diskUsed: 0;  property real diskTotal: 0     // GiB
-    property var topProcs: []                                   // [{name,cpu,mem}]
+    property var topProcs: []                                   // [{name,cpu,mem,count}] grouped by name
+    property int procCount: 0                                   // total processes (before grouping)
     property var ctrStats: ({})                                 // name -> {cpu,mem,net}
     property var topIO: []                                      // [{name,mbs}]
 
@@ -82,13 +83,23 @@ PlasmoidItem {
         if (d.length >= 2 && d[1] > 0) { diskUsed = d[0] / 1048576; diskTotal = d[1] / 1048576 }
         if (seg.length < 2) return
         var rest = seg[1].split("__CTR__")
-        var procs = []
+        // group processes by name → one accumulated entry per family (e.g. the
+        // handful of "steam"/"claude" procs collapse into "steam ×5" with summed
+        // cpu/mem). procCount keeps the true total across all processes.
+        var agg = {}, total = 0
         rest[0].trim().split("\n").forEach(function(ln) {
             var f = ln.trim().split(/\s+/)
-            if (f.length >= 3) procs.push({ name: f.slice(0, f.length - 2).join(" "),
-                                            cpu: parseFloat(f[f.length - 2]) || 0,
-                                            mem: parseFloat(f[f.length - 1]) || 0 })
+            if (f.length < 3) return
+            var nm = f.slice(0, f.length - 2).join(" ")
+            var cpu = parseFloat(f[f.length - 2]) || 0
+            var mem = parseFloat(f[f.length - 1]) || 0
+            if (!agg[nm]) agg[nm] = { name: nm, cpu: 0, mem: 0, count: 0 }
+            agg[nm].cpu += cpu; agg[nm].mem += mem; agg[nm].count++
+            total++
         })
+        var procs = Object.keys(agg).map(function (k) { return agg[k] })
+        procs.sort(function (a, b) { return b.cpu - a.cpu || b.mem - a.mem })
+        procCount = total
         topProcs = procs
         var stats = {}
         var io = []
@@ -205,9 +216,12 @@ PlasmoidItem {
             }
             Kirigami.Separator { Layout.fillWidth: true }
 
-            PC3.Label { text: "Processes (" + root.topProcs.length + ")"; opacity: 0.6 }
-            // all processes, cpu-sorted, in a bounded scroll area (ListView
-            // virtualises, so hundreds of rows stay cheap).
+            PC3.Label {
+                text: "Processes (" + root.procCount + " in " + root.topProcs.length + " groups)"
+                opacity: 0.6
+            }
+            // all processes grouped by name, cpu-sorted, in a bounded scroll area
+            // (ListView virtualises, so hundreds of rows stay cheap).
             PC3.ScrollView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.min(root.topProcs.length * procList.rowH,
@@ -222,7 +236,8 @@ PlasmoidItem {
                         width: procList.width
                         spacing: Kirigami.Units.largeSpacing
                         PC3.Label {
-                            text: modelData.name || ""
+                            text: (modelData.name || "")
+                                  + (modelData.count > 1 ? " ×" + modelData.count : "")
                             font.pointSize: Kirigami.Theme.smallFont.pointSize
                             font.bold: true; opacity: 0.9
                             elide: Text.ElideRight; Layout.fillWidth: true
