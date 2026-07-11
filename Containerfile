@@ -65,14 +65,6 @@ COPY config/etc/ssh/authorized_keys.d/     /etc/ssh/authorized_keys.d/
 COPY config/etc/systemd/logind.conf.d/     /etc/systemd/logind.conf.d/
 COPY config/etc/containers/oci/hooks.d/     /etc/containers/oci/hooks.d/
 COPY config/etc/containers/containers.conf.d/ /etc/containers/containers.conf.d/
-# Mask all sleep-related systemd targets — no code path can suspend the box.
-# Complements config/etc/systemd/logind.conf.d/50-powos-no-suspend.conf which
-# blocks the trigger side (lid/keys/idle); this blocks the target side so a
-# rogue systemctl suspend or systemd-inhibit --shell suspend has no effect.
-RUN ln -sf /dev/null /etc/systemd/system/sleep.target && \
-    ln -sf /dev/null /etc/systemd/system/suspend.target && \
-    ln -sf /dev/null /etc/systemd/system/hibernate.target && \
-    ln -sf /dev/null /etc/systemd/system/hybrid-sleep.target
 # Login-availability fix (exception to zero-boot-services, deliberately):
 # Plasma Login Manager's greeter can wedge into a broken-QML state after a
 # session exit ("...not a function" TypeErrors, black frozen login screen —
@@ -132,6 +124,16 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
 
 # One layer for every file we ship (CLI + libs + plasmoids + KDE default).
 COPY --from=staging / /
+
+# Mask all sleep-related systemd targets — no code path can suspend the box.
+# Must run in the real base stage (not the scratch staging stage, which has no
+# shell). Complements config/etc/systemd/logind.conf.d/50-powos-no-suspend.conf
+# which blocks the trigger side (lid/keys/idle); this blocks the target side so
+# a rogue systemctl suspend or systemd-inhibit --shell suspend has no effect.
+RUN ln -sf /dev/null /etc/systemd/system/sleep.target && \
+    ln -sf /dev/null /etc/systemd/system/suspend.target && \
+    ln -sf /dev/null /etc/systemd/system/hibernate.target && \
+    ln -sf /dev/null /etc/systemd/system/hybrid-sleep.target
 
 # Exec bits + SELinux relabel + silence setroubleshootd (crash-loops processing
 # initial denials from our /usr additions on first boot) + src-commit marker,
