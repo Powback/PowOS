@@ -64,7 +64,7 @@ PlasmoidItem {
                  grouped: false, image: "", status: "", state: "", running: false,
                  scope: "user", run: 0, total: 0, cpu: 0, mem: 0,
                  net_rx: 0, net_tx: 0, blk_r: 0, blk_w: 0, hasStats: false,
-                 isOpen: false, ports: "", labelsText: "" }
+                 isOpen: false, ports: "", labelsJson: "{}" }
     }
 
     function parseList(txt) {
@@ -144,9 +144,7 @@ PlasmoidItem {
                 if (r.isOpen) {
                     var dr = blankRow()
                     dr.rowType = "detail"; dr.grouped = (key !== ""); dr.ports = ci.ports || ""
-                    var lbls = ci.labels || {}, ks = Object.keys(lbls).sort(), lines = []
-                    for (var q = 0; q < ks.length; q++) lines.push(ks[q] + " = " + lbls[ks[q]])
-                    dr.labelsText = lines.join("\n")
+                    dr.labelsJson = JSON.stringify(ci.labels || {})
                     rows.push(dr)
                 }
             }
@@ -168,6 +166,17 @@ PlasmoidItem {
         if (!dir) return
         opener.connectSource("xdg-open " + root.shellQuote(dir) + " >/dev/null 2>&1; echo done")
     }
+    // xdg-open handles both paths and http(s) URLs → default file manager / browser
+    function openUrl(u) {
+        if (!u) return
+        opener.connectSource("xdg-open " + root.shellQuote(u) + " >/dev/null 2>&1; echo done")
+    }
+    // http://localhost:<host-port> for the first published port ("80→80/tcp" → 80)
+    function portUrl(ports) {
+        var m = String(ports || "").match(/^\s*(\d+)/)
+        return m ? "http://localhost:" + m[1] : ""
+    }
+    function isUrl(s) { return /^https?:\/\//.test(String(s || "")) }
     function confirmDelete() {
         var n = root.confirmName
         root.confirmName = ""
@@ -321,7 +330,10 @@ PlasmoidItem {
                                      : (model.state === "exited" ? Kirigami.Theme.neutralTextColor
                                                                  : Kirigami.Theme.disabledTextColor)
                             }
-                            // name + stats; click to expand ports/labels detail
+                            // name + stats; click to expand ports/labels detail.
+                            // (TapHandler, not an anchored MouseArea — anchoring an
+                            // item inside a Layout is undefined behaviour and the
+                            // click area ends up zero-sized.)
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 0
@@ -333,11 +345,19 @@ PlasmoidItem {
                                         opacity: 0.5; font: Kirigami.Theme.smallFont
                                     }
                                     PC3.Label { text: model.label; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    // published ports — clickable → open http://localhost:<port>
                                     PC3.Label {
                                         visible: model.ports !== ""
                                         text: "⇄ " + model.ports
-                                        opacity: 0.6; font: Kirigami.Theme.smallFont
+                                        color: root.portUrl(model.ports) !== "" ? Kirigami.Theme.linkColor
+                                                                                : Kirigami.Theme.textColor
+                                        opacity: root.portUrl(model.ports) !== "" ? 1.0 : 0.6
+                                        font: Kirigami.Theme.smallFont
                                         elide: Text.ElideRight
+                                        TapHandler {
+                                            enabled: root.portUrl(model.ports) !== ""
+                                            onTapped: root.openUrl(root.portUrl(model.ports))
+                                        }
                                     }
                                 }
                                 PC3.Label {
@@ -348,11 +368,7 @@ PlasmoidItem {
                                     opacity: 0.6; elide: Text.ElideRight; Layout.fillWidth: true
                                     font: Kirigami.Theme.smallFont
                                 }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.toggleExpand(model.name)
-                                }
+                                TapHandler { onTapped: root.toggleExpand(model.name) }
                             }
                             PC3.ToolButton {
                                 icon.name: "media-playback-start"
@@ -377,6 +393,8 @@ PlasmoidItem {
                         }
 
                         // ── detail: ports + labels (shown when a container is expanded) ──
+                        // labelPairs turns the labels JSON into [{k, v, url}] so each
+                        // label renders on its own row and URL values become links.
                         ColumnLayout {
                             id: detailCol
                             visible: model.rowType === "detail"
@@ -384,23 +402,50 @@ PlasmoidItem {
                             anchors.top: parent.top
                             anchors.leftMargin: Kirigami.Units.gridUnit * 1.2
                             anchors.rightMargin: Kirigami.Units.smallSpacing
-                            spacing: 2
+                            spacing: 1
+
+                            property var labelPairs: {
+                                var o = {}
+                                try { o = JSON.parse(model.labelsJson || "{}") } catch (e) { o = {} }
+                                var ks = Object.keys(o).sort(), out = []
+                                for (var i = 0; i < ks.length; i++)
+                                    out.push({ k: ks[i], v: String(o[ks[i]]), url: root.isUrl(o[ks[i]]) })
+                                return out
+                            }
+
+                            // clickable published ports → open http://localhost:<port>
                             PC3.Label {
                                 visible: model.ports !== ""
-                                text: "Ports: " + model.ports
-                                font: Kirigami.Theme.smallFont; opacity: 0.85
+                                text: "Ports: " + model.ports + (root.portUrl(model.ports) !== "" ? "  ↗" : "")
+                                color: root.portUrl(model.ports) !== "" ? Kirigami.Theme.linkColor
+                                                                        : Kirigami.Theme.textColor
+                                font: Kirigami.Theme.smallFont
                                 Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                TapHandler {
+                                    enabled: root.portUrl(model.ports) !== ""
+                                    onTapped: root.openUrl(root.portUrl(model.ports))
+                                }
+                            }
+                            Repeater {
+                                model: detailCol.labelPairs
+                                delegate: PC3.Label {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WrapAnywhere
+                                    font.family: "monospace"
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    font.underline: modelData.url
+                                    color: modelData.url ? Kirigami.Theme.linkColor : Kirigami.Theme.textColor
+                                    opacity: modelData.url ? 1.0 : 0.7
+                                    text: modelData.k + " = " + modelData.v
+                                    TapHandler {
+                                        enabled: modelData.url
+                                        onTapped: root.openUrl(modelData.v)
+                                    }
+                                }
                             }
                             PC3.Label {
-                                visible: model.labelsText !== ""
-                                text: model.labelsText
-                                font.family: "monospace"
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                opacity: 0.7
-                                Layout.fillWidth: true; wrapMode: Text.WrapAnywhere
-                            }
-                            PC3.Label {
-                                visible: model.labelsText === "" && model.ports === ""
+                                visible: detailCol.labelPairs.length === 0 && model.ports === ""
                                 text: "no ports or labels"
                                 font: Kirigami.Theme.smallFont; opacity: 0.5
                             }
