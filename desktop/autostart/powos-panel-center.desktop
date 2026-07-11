@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Panel Center
+Comment=Center-aligns the panel launcher and task manager on first login only
+Exec=/usr/bin/powos-panel-center
+Icon=start-here-kde
+Terminal=false
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;
+NoDisplay=true

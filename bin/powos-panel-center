@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# powos-panel-center — center-align the Plasma panel's launcher + task manager
+# on first login (Windows-11-style: [spacer] kickoff · pager · tasks [spacer]
+# tray · clock), which reads far better on wide/ultrawide displays than the
+# stock left-aligned Bazzite layout.
+#
+# Runs via /etc/xdg/autostart/, i.e. once per KDE session. A per-user marker
+# file gates so we only touch the panel the first time; after that the user
+# owns their layout and we don't second-guess them.
+#
+# STRICTLY CONSERVATIVE: only acts on a panel that still looks stock —
+# an icon task manager present and NO panel spacers anywhere. A user who
+# already customized their panel (added spacers, rearranged) is left alone;
+# we just drop the marker and never come back.
+#
+# HOW (validated live on real hardware, 2026-07-11):
+# Plasma's scripting API can ADD widgets but its index setter does not
+# reliably reorder applets, so this is a two-step dance:
+#   1. evaluateScript: add two expanding panelspacers, collect applet IDs.
+#   2. Stop plasmashell (clean stop — it writes config on exit), rewrite
+#      the containment's AppletOrder so the spacers bracket
+#      kickoff/pager/icontasks, start plasmashell again.
+# The stop→edit→start order matters: editing the file while plasmashell
+# runs gets overwritten by its in-memory state.
+
+set -uo pipefail
+
+marker="${XDG_STATE_HOME:-$HOME/.local/state}/powos/panel-centered-v1"
+[[ -f "$marker" ]] && exit 0
+
+done_marker() {
+    mkdir -p "$(dirname "$marker")"
+    touch "$marker"
+}
+
+# Wait for plasmashell DBus, same probe as powos-widget-autoadd.
+QDBUS=""
+for _ in $(seq 1 30); do
+    for candidate in qdbus6 qdbus qdbus-qt6 qdbus-qt5; do
+        if command -v "$candidate" >/dev/null 2>&1 \
+           && "$candidate" org.kde.plasmashell / >/dev/null 2>&1; then
+            QDBUS="$candidate"
+            break 2
+        fi
+    done
+    sleep 1
+done
+[[ -z "$QDBUS" ]] && exit 0
+
+# Step 1 — inspect the panel; if stock, add two expanding spacers.
+# Prints "containmentId|orderedAppletIds|spacer1Id|spacer2Id|taskId" on
+# success, "SKIP:<reason>" when the panel isn't stock.
+script='
+var panel = null;
+for (var i in panels()) {
+    var p = panels()[i];
+    var hasTasks = false, hasSpacer = false;
+    p.widgets().forEach(function(w) {
+        if (w.type == "org.kde.plasma.icontasks") hasTasks = true;
+        if (w.type == "org.kde.plasma.panelspacer") hasSpacer = true;
+    });
+    if (hasSpacer) { print("SKIP:already-customized"); panel = null; break; }
+    if (hasTasks && !panel) panel = p;
+}
+if (panel) {
+    var ids = [], taskId = -1;
+    panel.widgets().forEach(function(w) {
+        ids.push(w.id);
+        if (w.type == "org.kde.plasma.icontasks") taskId = w.id;
+    });
+    var s1 = panel.addWidget("org.kde.plasma.panelspacer");
+    s1.currentConfigGroup = ["General"]; s1.writeConfig("expanding", true);
+    var s2 = panel.addWidget("org.kde.plasma.panelspacer");
+    s2.currentConfigGroup = ["General"]; s2.writeConfig("expanding", true);
+    print(panel.id + "|" + ids.join(";") + "|" + s1.id + "|" + s2.id + "|" + taskId);
+} else if (panels().length > 0) {
+    print("SKIP:no-stock-panel");
+} else {
+    print("SKIP:no-panels");
+}
+'
+
+out=$("$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$script" 2>/dev/null) || out=""
+out=$(echo "$out" | tr -d '[:space:]')
+
+case "$out" in
+    SKIP:*) done_marker; exit 0 ;;
+    "")     exit 0 ;;  # DBus hiccup — no marker, retry next login
+esac
+
+containment="${out%%|*}"; rest="${out#*|}"
+order="${rest%%|*}";      rest="${rest#*|}"
+s1="${rest%%|*}";         rest="${rest#*|}"
+s2="${rest%%|*}"
+task="${rest#*|}"
+
+# Sanity: everything numeric, task id present in the order list.
+for v in "$containment" "$s1" "$s2" "$task"; do
+    [[ "$v" =~ ^[0-9]+$ ]] || { done_marker; exit 0; }
+done
+[[ ";$order;" == *";$task;"* || "$order" == "$task" ]] || { done_marker; exit 0; }
+
+# Step 2 — new AppletOrder: spacer1, everything up to and including the task
+# manager (kickoff, pager, tasks on a stock panel), spacer2, the rest
+# (separator, tray, clock, show-desktop stay right-aligned).
+left=""; right=""; seen_task=0
+IFS=';' read -ra applets <<< "$order"
+for id in "${applets[@]}"; do
+    if [[ $seen_task -eq 0 ]]; then
+        left+="${left:+;}$id"
+        [[ "$id" == "$task" ]] && seen_task=1
+    else
+        right+="${right:+;}$id"
+    fi
+done
+new_order="$s1;$left;$s2${right:+;$right}"
+
+systemctl --user stop plasma-plasmashell.service 2>/dev/null || true
+kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+    --group Containments --group "$containment" --group General \
+    --key AppletOrder "$new_order" || true
+systemctl --user start plasma-plasmashell.service 2>/dev/null || true
+
+done_marker
