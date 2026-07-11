@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# powos-panel-multimon — give every monitor its own taskbar.
+#
+# Plasma does NOT auto-add panels to additional monitors: plug in a second
+# screen and it has no taskbar at all. This runs at each KDE login and, for
+# every screen it has never processed before, adds a full panel (centered
+# layout matching powos-panel-center: [spacer] kickoff · pager · tasks
+# [spacer] tray · clock · show-desktop). Whenever it creates a panel it also
+# sets "show only tasks from the current screen" on ALL icon task managers,
+# so each taskbar shows the windows on its own monitor.
+#
+# STRICTLY CONSERVATIVE, same philosophy as powos-panel-center:
+# - A screen is processed ONCE (per-user, per-screen marker). If the user
+#   deletes the panel we created, we never re-add it.
+# - A screen that already has a panel is marked processed and never touched.
+# - showOnlyCurrentScreen is only applied at the moment a new panel is
+#   created (i.e. a new monitor appeared) — a user who unchecks it later is
+#   not re-forced unless yet another new monitor shows up.
+#
+# Unlike the reordering dance in powos-panel-center, this needs no
+# plasmashell restart: addWidget() appends in call order, so building the
+# panel in the desired order directly gives the centered layout. Validated
+# live on real hardware (2026-07-11) via the same scripting calls.
+
+set -uo pipefail
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/powos/panel-multimon"
+mkdir -p "$state_dir"
+
+# Wait for plasmashell DBus, same probe as powos-widget-autoadd.
+QDBUS=""
+for _ in $(seq 1 30); do
+    for candidate in qdbus6 qdbus qdbus-qt6 qdbus-qt5; do
+        if command -v "$candidate" >/dev/null 2>&1 \
+           && "$candidate" org.kde.plasmashell / >/dev/null 2>&1; then
+            QDBUS="$candidate"
+            break 2
+        fi
+    done
+    sleep 1
+done
+[[ -z "$QDBUS" ]] && exit 0
+
+# Screens already processed (marker files: screen-<N>).
+handled_csv=""
+for f in "$state_dir"/screen-*; do
+    [[ -e "$f" ]] || continue
+    n="${f##*/screen-}"
+    [[ "$n" =~ ^[0-9]+$ ]] && handled_csv+="${handled_csv:+,}$n"
+done
+
+script_body='
+var seen = [], created = [];
+for (var s = 0; s < screenCount; s++) {
+    seen.push(s);
+    if (HANDLED.indexOf(s) > -1) continue;
+    var hasPanel = false;
+    for (var i in panels()) {
+        if (panels()[i].screen == s) hasPanel = true;
+    }
+    if (hasPanel) continue;
+    var p = new Panel;
+    p.screen = s;
+    p.location = "bottom";
+    p.height = 44;
+    var s1 = p.addWidget("org.kde.plasma.panelspacer");
+    s1.currentConfigGroup = ["General"]; s1.writeConfig("expanding", true);
+    p.addWidget("org.kde.plasma.kickoff");
+    p.addWidget("org.kde.plasma.pager");
+    p.addWidget("org.kde.plasma.icontasks");
+    var s2 = p.addWidget("org.kde.plasma.panelspacer");
+    s2.currentConfigGroup = ["General"]; s2.writeConfig("expanding", true);
+    p.addWidget("org.kde.plasma.marginsseparator");
+    p.addWidget("org.kde.plasma.systemtray");
+    p.addWidget("org.kde.plasma.digitalclock");
+    p.addWidget("org.kde.plasma.showdesktop");
+    created.push(s);
+}
+if (created.length > 0) {
+    for (var i in panels()) {
+        panels()[i].widgets().forEach(function(w) {
+            if (w.type == "org.kde.plasma.icontasks") {
+                w.currentConfigGroup = ["General"];
+                w.writeConfig("showOnlyCurrentScreen", true);
+                w.reloadConfig();
+            }
+        });
+    }
+}
+print("SEEN:" + seen.join(";"));
+'
+
+script="var HANDLED = [${handled_csv}];"$'\n'"$script_body"
+
+out=$("$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$script" 2>/dev/null) || out=""
+out=$(echo "$out" | tr -d '[:space:]')
+
+# Mark every screen plasmashell reported this session as processed.
+# On DBus hiccup ($out empty) mark nothing — retry next login.
+case "$out" in
+    SEEN:*)
+        seen_list="${out#SEEN:}"
+        IFS=';' read -ra screens <<< "$seen_list"
+        for s in "${screens[@]}"; do
+            [[ "$s" =~ ^[0-9]+$ ]] && touch "$state_dir/screen-$s"
+        done
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Panel Multi-Monitor
+Comment=Adds a taskbar to monitors that have none (once per screen)
+Exec=/usr/bin/powos-panel-multimon
+Icon=start-here-kde
+Terminal=false
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;
+NoDisplay=true
