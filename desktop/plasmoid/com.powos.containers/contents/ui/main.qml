@@ -33,8 +33,15 @@ PlasmoidItem {
 
     property var rawList: []             // last parsed structural list
     property var statsByName: ({})       // name -> stats object
+    property var expanded: ({})          // container name -> true when its detail is open
 
-    ListModel { id: rowModel }           // flat display rows (stack headers + containers)
+    ListModel { id: rowModel }           // flat display rows (stack headers + containers + details)
+
+    function toggleExpand(name) {
+        if (root.expanded[name]) delete root.expanded[name]
+        else root.expanded[name] = true
+        rebuild()
+    }
 
     function shellQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
     function refresh() { lister.connectSource(root.listCmd) }
@@ -56,7 +63,8 @@ PlasmoidItem {
         return { rowType: "", project: "", workdir: "", name: "", label: "",
                  grouped: false, image: "", status: "", state: "", running: false,
                  scope: "user", run: 0, total: 0, cpu: 0, mem: 0,
-                 net_rx: 0, net_tx: 0, blk_r: 0, blk_w: 0, hasStats: false }
+                 net_rx: 0, net_tx: 0, blk_r: 0, blk_w: 0, hasStats: false,
+                 isOpen: false, ports: "", labelsText: "" }
     }
 
     function parseList(txt) {
@@ -129,7 +137,18 @@ PlasmoidItem {
                     r.net_rx = cs.net_rx; r.net_tx = cs.net_tx
                     r.blk_r = cs.blk_r; r.blk_w = cs.blk_w; r.hasStats = true
                 }
+                r.ports = ci.ports || ""
+                r.isOpen = !!root.expanded[ci.name]
                 rows.push(r)
+                // when expanded, a detail row shows this container's ports + labels
+                if (r.isOpen) {
+                    var dr = blankRow()
+                    dr.rowType = "detail"; dr.grouped = (key !== ""); dr.ports = ci.ports || ""
+                    var lbls = ci.labels || {}, ks = Object.keys(lbls).sort(), lines = []
+                    for (var q = 0; q < ks.length; q++) lines.push(ks[q] + " = " + lbls[ks[q]])
+                    dr.labelsText = lines.join("\n")
+                    rows.push(dr)
+                }
             }
         }
         // sync into the model in place so scroll position survives the 5s refresh
@@ -218,7 +237,8 @@ PlasmoidItem {
                     delegate: Item {
                         width: view.width
                         implicitHeight: model.rowType === "stack" ? stackCol.implicitHeight
-                                                                  : ctrRow.implicitHeight
+                                      : model.rowType === "detail" ? detailCol.implicitHeight
+                                      : ctrRow.implicitHeight
 
                         // ── stack header ──────────────────────────
                         ColumnLayout {
@@ -301,10 +321,25 @@ PlasmoidItem {
                                      : (model.state === "exited" ? Kirigami.Theme.neutralTextColor
                                                                  : Kirigami.Theme.disabledTextColor)
                             }
+                            // name + stats; click to expand ports/labels detail
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 0
-                                PC3.Label { text: model.label; elide: Text.ElideRight; Layout.fillWidth: true }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Kirigami.Units.smallSpacing / 2
+                                    PC3.Label {
+                                        text: model.isOpen ? "▾" : "▸"
+                                        opacity: 0.5; font: Kirigami.Theme.smallFont
+                                    }
+                                    PC3.Label { text: model.label; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    PC3.Label {
+                                        visible: model.ports !== ""
+                                        text: "⇄ " + model.ports
+                                        opacity: 0.6; font: Kirigami.Theme.smallFont
+                                        elide: Text.ElideRight
+                                    }
+                                }
                                 PC3.Label {
                                     text: model.running
                                         ? (root.fmtPct(model.cpu) + " · " + root.fmtBytes(model.mem)
@@ -312,6 +347,11 @@ PlasmoidItem {
                                         : (model.status + (model.scope === "system" ? "  · system" : ""))
                                     opacity: 0.6; elide: Text.ElideRight; Layout.fillWidth: true
                                     font: Kirigami.Theme.smallFont
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.toggleExpand(model.name)
                                 }
                             }
                             PC3.ToolButton {
@@ -333,6 +373,36 @@ PlasmoidItem {
                                 icon.name: "edit-delete"
                                 enabled: !root.busy
                                 onClicked: root.confirmName = model.name
+                            }
+                        }
+
+                        // ── detail: ports + labels (shown when a container is expanded) ──
+                        ColumnLayout {
+                            id: detailCol
+                            visible: model.rowType === "detail"
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.leftMargin: Kirigami.Units.gridUnit * 1.2
+                            anchors.rightMargin: Kirigami.Units.smallSpacing
+                            spacing: 2
+                            PC3.Label {
+                                visible: model.ports !== ""
+                                text: "Ports: " + model.ports
+                                font: Kirigami.Theme.smallFont; opacity: 0.85
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            }
+                            PC3.Label {
+                                visible: model.labelsText !== ""
+                                text: model.labelsText
+                                font.family: "monospace"
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                opacity: 0.7
+                                Layout.fillWidth: true; wrapMode: Text.WrapAnywhere
+                            }
+                            PC3.Label {
+                                visible: model.labelsText === "" && model.ports === ""
+                                text: "no ports or labels"
+                                font: Kirigami.Theme.smallFont; opacity: 0.5
                             }
                         }
                     }

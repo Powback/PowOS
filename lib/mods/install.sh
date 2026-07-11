@@ -149,6 +149,13 @@ mods_appid_of() {
         starfield)                        echo "1716740" ;;
         witcher3)                         echo "292030"  ;;
         bg3|baldursgate3)                 echo "1086940" ;;
+        # GTA V: Rockstar split PC into two SKUs (Mar 2025). "Enhanced" is the
+        # current default install and a SEPARATE Nexus catalog (gta5enhanced);
+        # "Legacy" is the older build the classic mod scene targets (gta5).
+        # Bare gta/gta5 → Enhanced (what Steam installs now); -legacy for the old one.
+        gta|gta5|gtav|gta5-enhanced|gtav-enhanced|gta-enhanced)  echo "3240220" ;;
+        gta5-legacy|gtav-legacy|gta-legacy)                       echo "271590"  ;;
+        rdr2|reddead|reddeadredemption2|rdr)                      echo "1174180" ;;
         *) if [[ "$1" =~ ^[0-9]+$ ]]; then echo "$1"; else return 1; fi ;;
     esac
 }
@@ -249,14 +256,17 @@ Runs the standard Cyberpunk-on-Linux / Nexus Mods App fix:
   1. Install protontricks (system Flatpak) if missing.
   2. Install winetricks packages the game needs into its Proton prefix
      (vcrun2022 + d3dcompiler_47 — the common Cyberpunk requirements).
-  3. Set WINEDLLOVERRIDES="winmm=n,b;version=n,b" %command% on the game's
-     Steam launch options so mod-provided loader DLLs actually load.
+  3. Set WINEDLLOVERRIDES="winmm=n,b;version=n,b;dinput8=n,b" %command% on the
+     game's Steam launch options so mod-provided loader DLLs load — winmm/version
+     for CET/RED4ext/SKSE, dinput8 for Script Hook V / RDR2 + ASI loaders.
 
 Known games (add more in mods_appid_of):
   cyberpunk / cp2077 (1091500)   skyrim / skyrimse (489830)
   skyrim-ae (489830)             fallout4 / fo4 (377160)
   starfield (1716740)            witcher3 (292030)
-  bg3 (1086940)                  <numeric appid>
+  bg3 (1086940)                  gta / gta5 — Enhanced (3240220)
+  gta5-legacy (271590)           rdr2 (1174180)
+  <numeric appid>
 
 Examples:
   powos mods setup cyberpunk
@@ -297,8 +307,12 @@ EOF
         pwarn "  powos mods setup $game"
         return 1
     fi
+    # winmm/version cover CET, RED4ext, SKSE-style loaders; dinput8 covers
+    # Script Hook V / Script Hook RDR2 + most ASI loaders (GTA V, RDR2). All
+    # are native-then-builtin, so they're harmless for games that don't ship
+    # that DLL (wine just falls back to its builtin).
     if mods_set_launch_options "$appid" \
-            'WINEDLLOVERRIDES=\"winmm=n,b;version=n,b\" %command%'; then
+            'WINEDLLOVERRIDES=\"winmm=n,b;version=n,b;dinput8=n,b\" %command%'; then
         pok "Setup complete for appid $appid."
         plog "  Relaunch Steam → the launch option is now active."
         plog "  In Nexus Mods App, hit Refresh on the Health Check — all three errors should clear."
@@ -672,6 +686,13 @@ mods_nexus_slug_of() {
         witcher3|292030)                            echo "witcher3" ;;
         bg3|baldursgate3|1086940)                   echo "baldursgate3" ;;
         stardewvalley|sdv|413150)                   echo "stardewvalley" ;;
+        # GTA V has TWO Nexus catalogs: Enhanced (gta5enhanced, appid 3240220)
+        # and Legacy (gta5, appid 271590). They do NOT share mods. Keep bare
+        # gta/gta5 == Enhanced here to match mods_appid_of (Steam's current
+        # default install); the far-larger classic Legacy catalog is -legacy.
+        gta|gta5|gtav|gta5-enhanced|gtav-enhanced|gta-enhanced|3240220)  echo "gta5enhanced" ;;
+        gta5-legacy|gtav-legacy|gta-legacy|271590)                       echo "gta5" ;;
+        rdr2|reddead|reddeadredemption2|rdr|1174180)                     echo "reddeadredemption2" ;;
         # Assume the input is already a Nexus slug — pass through.
         *) echo "$1" ;;
     esac

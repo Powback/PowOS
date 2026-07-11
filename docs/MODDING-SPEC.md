@@ -54,7 +54,24 @@ manager owns that title:
   | Monster Hunter World / Rise | Vortex |
   | Mount & Blade: Bannerlord | Vortex |
   | Mass Effect LE | Vortex |
+  | GTA V (Enhanced `gta5enhanced` / Legacy `gta5`) | Vortex *(Nexus assets only — see note)* |
+  | Red Dead Redemption 2 | Vortex *(Nexus assets only — see note)* |
   | X-COM / everything else Nexus tracks | Vortex |
+
+**RAGE-engine games (GTA V, RDR2) are a special case.** Vortex only manages
+the *Nexus-hosted* layer (texture packs, Lenny's Mod Loader add-ons). The core
+loaders — Script Hook V / Script Hook RDR2, the ASI loader, Lenny's Mod Loader,
+ENB, ReShade — are distributed **off-Nexus** and drop straight into the game
+folder; no manager installs them. `powos mods setup gta|rdr2` sets the
+`dinput8=n,b` override Script Hook needs under Proton. For photorealism on
+Linux, **vkBasalt** (native Vulkan post-processing, `ENABLE_VKBASALT=1`) is the
+cleanest, ban-safe first move. GTA V Enhanced ships BattlEye — **story mode
+only**; RDR2 single-player has no kernel anti-cheat. GTA V **Enhanced and
+Legacy are separate Nexus catalogs** and do not share mods.
+
+**FiveM (GTA V) / RedM (RDR2) are multiplayer clients, not graphics loaders** —
+they connect to online servers and block client-side graphics mods. Never route
+a single-player "make it look better" request to them.
 
 Both managers install into their own worlds — you can have both running,
 but only one at a time can own `x-scheme-handler/nxm`. **Vortex takes the
@@ -71,9 +88,15 @@ handler` for the current owner.
 ## 2. Vortex-in-Bottles pipeline
 
 Since NMA only covers two titles, Vortex is the actual workhorse. Vortex is
-Windows-only, but it runs cleanly inside a Bottles Flatpak wine prefix, and
-its NSIS installer supports `/S` for silent install. `.NET Desktop 6` is a
-required dependency (Vortex 1.8+ needs it).
+Windows-only, but it runs cleanly inside a Bottles Flatpak wine prefix. Its
+NSIS installer's silent (`/S`) mode is **unreliable headless** — under a
+display-less Wine prefix it extracts its payload to `%TEMP%` but never copies
+to the install dir (it still tries to open a window; `xrandr` fails), exiting
+0 with nothing installed. Since electron-builder installers are just 7z
+self-extractors, PowOS instead pulls `$PLUGINSDIR/app-64.7z` straight out of
+the `.exe` with host `7z` and unpacks it into `C:\Vortex` — deterministic, no
+Wine, no display (diagnosed & fixed 2026-07-11). `.NET Desktop 6` is an
+optional dependency (Vortex self-installs it on first GUI run if absent).
 
 **Install pipeline** (`powos mods install vortex`):
 
@@ -88,8 +111,10 @@ required dependency (Vortex 1.8+ needs it).
      (Bottles CLI has no first-class dependency verb yet; winetricks
      inside the bottle shell is the workaround.)
   5. `curl -L github.com/Nexus-Mods/Vortex/releases/download/vN/vortex-setup-N.exe`
-  6. `bottles-cli run -b PowosVortex -e vortex-setup-N.exe -a "/S /D=C:\\Vortex"`
-     — NSIS silent install; installs to `drive_c\Vortex\Vortex.exe`.
+  6. `7z e vortex-setup-N.exe '$PLUGINSDIR/*.7z'` then `7z x app-64.7z -o…/drive_c/Vortex`
+     — direct payload extract (the headless NSIS `/S` install is broken; see
+     above). Falls back to the old `bottles-cli run … /S /D=C:\Vortex` only if
+     no host `7z` is available.
   7. Write `~/.local/bin/vortex` wrapper — dispatches to
      `bottles-cli run -b PowosVortex -e Vortex.exe -a "…"`, detached via
      `setsid nohup` so `xdg-open` returns immediately.

@@ -269,28 +269,60 @@ vortex_download_installer() {
 
 vortex_run_installer() {
     local installer="$1"
+    local exe; exe="$(_vortex_exe_path_in_bottle)"
+    local vdir; vdir="$(dirname "$exe")"
+
+    # PRIMARY: extract the app payload directly (no Wine, no display).
+    #
+    # Vortex ships an electron-builder NSIS installer. Run silently (/S)
+    # inside a headless Bottles/Wine prefix it FAILS: it decompresses its
+    # payload to %TEMP% but the copy-to-INSTDIR step still tries to spin up
+    # a window (xrandr "Failed to get adapters"), never completes, exits 0,
+    # and leaves nothing installed — only transient temp files that Wine then
+    # cleans. Diagnosed 2026-07-11. Since electron-builder installers are just
+    # 7z self-extractors ($PLUGINSDIR/app-64.7z = the entire app tree), we pull
+    # that archive straight out of the .exe and unpack it into C:\Vortex on the
+    # host. Deterministic, ~5s, and needs no display.
+    local sevenz
+    sevenz="$(command -v 7z 2>/dev/null || command -v 7za 2>/dev/null \
+              || command -v 7zz 2>/dev/null || command -v 7zr 2>/dev/null || true)"
+    if [[ -n "$sevenz" ]]; then
+        plog "Installing Vortex → $VORTEX_INSTALL_DRIVE_PATH (direct extract via ${sevenz##*/})…"
+        local tmp; tmp="$(mktemp -d)"
+        # Wildcard matches app-64.7z (x64) or app.7z, whatever this build ships.
+        "$sevenz" e -y "$installer" -o"$tmp" '$PLUGINSDIR/*.7z' >/dev/null 2>&1 || true
+        local apparc; apparc="$(find "$tmp" -maxdepth 1 -iname '*.7z' | head -1)"
+        if [[ -n "$apparc" ]]; then
+            rm -rf "$vdir"; mkdir -p "$vdir"
+            if "$sevenz" x -y "$apparc" -o"$vdir" >/dev/null 2>&1 && [[ -f "$exe" ]]; then
+                rm -rf "$tmp"
+                pok "Vortex installed ($(find "$vdir" -type f | wc -l) files)."
+                return 0
+            fi
+        fi
+        rm -rf "$tmp"
+        pwarn "Direct extract failed; falling back to the Wine NSIS installer."
+    else
+        pwarn "No 7z on host (install the 'p7zip'/'7zip' package for the fast path);"
+        pwarn "  falling back to the Wine NSIS installer, which may fail headless."
+    fi
+
+    # FALLBACK: the original silent Wine NSIS install. Kept for hosts without
+    # 7z; known to be unreliable headless (see above).
     plog "Running Vortex installer silently (NSIS /S, dest=$VORTEX_INSTALL_DRIVE_PATH)…"
     plog "  ${DIM}(3–5 min inside Wine; no output unless it fails.)${NC}"
-    # NSIS flags: /S = silent, /D=path (must be last, no quotes) = dest.
-    # bottles-cli takes program args POSITIONALLY (verified 2026-07-07,
-    # bottles-cli v64) — no `-a` flag on this branch. Passing each NSIS
-    # switch as its own positional arg.
     if ! vortex_bcli run -b "$VORTEX_BOTTLE_NAME" \
             -e "$installer" \
             "/S" "/D=$VORTEX_INSTALL_DRIVE_PATH" 2>&1 | tail -10; then
         perr "Vortex installer failed inside the bottle."
         return 1
     fi
-    # Verify Vortex.exe actually landed.
-    local exe; exe="$(_vortex_exe_path_in_bottle)"
     if [[ ! -f "$exe" ]]; then
-        # Fall back to searching drive_c — some NSIS releases ignore /D.
         exe="$(find "$(_vortex_bottle_dir)/drive_c" -name 'Vortex.exe' -type f 2>/dev/null | head -1)"
         if [[ -z "$exe" || ! -f "$exe" ]]; then
             perr "Vortex.exe not found under drive_c after install."
             return 1
         fi
-        # Record the actual path so the wrapper uses it.
         mkdir -p "$VORTEX_STATE_DIR"
         echo "$exe" > "$VORTEX_STATE_DIR/exe-path"
         pwarn "Vortex installed at non-default path: $exe"

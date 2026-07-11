@@ -2500,7 +2500,9 @@ _containers_json() {
                        status:.Status, running:(.State=="running"), scope:$scope,
                        project:($L["com.docker.compose.project"] // $L["io.podman.compose.project"] // ""),
                        service:($L["com.docker.compose.service"] // $L["io.podman.compose.service"] // ""),
-                       workdir:($L["com.docker.compose.project.working_dir"] // "")}]'
+                       workdir:($L["com.docker.compose.project.working_dir"] // ""),
+                       ports:([(.Ports // [])[] | (if (.host_port // 0) > 0 then ((.host_port|tostring)+"→") else "" end) + ((.container_port//0)|tostring) + "/" + (.protocol // "tcp")] | unique | join(", ")),
+                       labels:$L}]'
     local u s
     u=$(podman ps -a --format json 2>/dev/null | jq -c --arg scope user "$map" 2>/dev/null)
     [[ -n "$u" ]] || u='[]'
