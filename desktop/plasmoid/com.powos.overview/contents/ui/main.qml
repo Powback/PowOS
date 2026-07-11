@@ -34,13 +34,13 @@ PlasmoidItem {
         "  source \"$HOME/PowOS/lib/services.sh\" 2>/dev/null; " +
         "  ov_json; echo __POWOS_SEP__; svc_json; " +
         "fi"
-    // disk | __PS__ | top-10 processes | __CTR__ | podman stats | __IO__ | top disk I/O
+    // disk | __PS__ | ALL processes (cpu-sorted) | __CTR__ | podman stats | __IO__ | top disk I/O
     // Per-process I/O (/proc/PID/io) is only readable for YOUR processes without
     // root — that covers apps + rootless containers, not system daemons. 1s sample.
     readonly property string mediumCmd:
         "df -k --output=used,size /var 2>/dev/null | tail -1; " +
         "echo __PS__; " +
-        "ps -eo comm,%cpu,%mem --sort=-%cpu --no-headers | head -10; " +
+        "ps -eo comm,%cpu,%mem --sort=-%cpu --no-headers; " +
         "echo __CTR__; " +
         "podman stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}' 2>/dev/null; " +
         "echo __IO__; " +
@@ -205,24 +205,36 @@ PlasmoidItem {
             }
             Kirigami.Separator { Layout.fillWidth: true }
 
-            PC3.Label { text: "Top processes"; opacity: 0.6 }
-            GridLayout {
-                columns: 3; columnSpacing: Kirigami.Units.largeSpacing; rowSpacing: 0
+            PC3.Label { text: "Processes (" + root.topProcs.length + ")"; opacity: 0.6 }
+            // all processes, cpu-sorted, in a bounded scroll area (ListView
+            // virtualises, so hundreds of rows stay cheap).
+            PC3.ScrollView {
                 Layout.fillWidth: true
-                Repeater {
-                    model: root.topProcs.length * 3
-                    delegate: PC3.Label {
-                        readonly property int row: Math.floor(index / 3)
-                        readonly property int col: index % 3
-                        readonly property var p: root.topProcs[row] || {}
-                        text: col === 0 ? (p.name || "")
-                            : col === 1 ? ("cpu " + (p.cpu || 0).toFixed(1) + "%")
-                            :             ("mem " + (p.mem || 0).toFixed(1) + "%")
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        font.bold: col === 0
-                        opacity: col === 0 ? 0.9 : 0.65
-                        elide: Text.ElideRight
-                        Layout.fillWidth: col === 0
+                Layout.preferredHeight: Math.min(root.topProcs.length * procList.rowH,
+                                                 Kirigami.Units.gridUnit * 12)
+                ListView {
+                    id: procList
+                    readonly property int rowH: Math.round(Kirigami.Theme.smallFont.pixelSize * 1.35)
+                    model: root.topProcs
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    delegate: RowLayout {
+                        width: procList.width
+                        spacing: Kirigami.Units.largeSpacing
+                        PC3.Label {
+                            text: modelData.name || ""
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            font.bold: true; opacity: 0.9
+                            elide: Text.ElideRight; Layout.fillWidth: true
+                        }
+                        PC3.Label {
+                            text: "cpu " + (modelData.cpu || 0).toFixed(1) + "%"
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize; opacity: 0.65
+                        }
+                        PC3.Label {
+                            text: "mem " + (modelData.mem || 0).toFixed(1) + "%"
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize; opacity: 0.65
+                        }
                     }
                 }
             }
