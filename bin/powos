@@ -2493,8 +2493,14 @@ EOF
 _containers_json() {
     command -v podman >/dev/null 2>&1 || { echo "[]"; return 0; }
     command -v jq     >/dev/null 2>&1 || { echo "[]"; return 0; }
-    local map='[.[] | {name:(.Names[0] // .Names // ""), image:.Image, state:.State,
-                       status:.Status, running:(.State=="running"), scope:$scope}]'
+    # Also surface compose-stack metadata so the widget can group by stack and
+    # offer a clickable base dir: project / service / working_dir come from the
+    # docker-compose (and podman-compose) labels podman records on each member.
+    local map='[.[] | (.Labels // {}) as $L | {name:(.Names[0] // .Names // ""), image:.Image, state:.State,
+                       status:.Status, running:(.State=="running"), scope:$scope,
+                       project:($L["com.docker.compose.project"] // $L["io.podman.compose.project"] // ""),
+                       service:($L["com.docker.compose.service"] // $L["io.podman.compose.service"] // ""),
+                       workdir:($L["com.docker.compose.project.working_dir"] // "")}]'
     local u s
     u=$(podman ps -a --format json 2>/dev/null | jq -c --arg scope user "$map" 2>/dev/null)
     [[ -n "$u" ]] || u='[]'
@@ -2524,6 +2530,75 @@ _container_lifecycle() {
         echo "container not found (or system container needs the sudoers opt-in): $name" >&2
         return 1
     fi
+}
+
+# Delete a podman container by NAME (force: stops it first if running). Does NOT
+# touch volumes or images — only the container instance. The widget gates this
+# behind a confirmation dialog before ever calling it.
+_container_delete() {
+    local name="${1:-}"
+    if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+        echo "invalid container name: $name" >&2; return 2
+    fi
+    if podman container exists "$name" 2>/dev/null; then
+        podman rm -f "$name"
+    elif sudo -n podman container exists "$name" 2>/dev/null; then
+        sudo -n /usr/bin/powos-container-ctl delete "$name"
+    else
+        echo "container not found (or system container needs the sudoers opt-in): $name" >&2
+        return 1
+    fi
+}
+
+# Live per-container stats as clean JSON for the widget: cpu %, mem bytes, net
+# rx/tx bytes, block-io read/write bytes, pids. podman only reports RUNNING
+# containers (stopped ones simply won't appear → the widget shows them idle).
+# podman's --format json prints unit strings ("179.3MB", "1.2kB / 3.4kB") across
+# multiple lines, so we join the two scopes with a sentinel and parse each whole
+# chunk to raw numbers in python (widget aggregates per stack without re-parsing).
+_containers_stats_json() {
+    command -v podman  >/dev/null 2>&1 || { echo "[]"; return 0; }
+    command -v python3 >/dev/null 2>&1 || { echo "[]"; return 0; }
+    local u s
+    u=$(podman stats --no-stream --format json 2>/dev/null); [[ -n "$u" ]] || u='[]'
+    s='[]'
+    if sudo -n podman info >/dev/null 2>&1; then
+        s=$(sudo -n podman stats --no-stream --format json 2>/dev/null); [[ -n "$s" ]] || s='[]'
+    fi
+    { printf '%s' "$u"; printf '\n__POWOS_SEP__\n'; printf '%s' "$s"; } | python3 -c '
+import sys, json, re
+def to_bytes(x):
+    if not x: return 0
+    m = re.match(r"\s*([0-9.]+)\s*([A-Za-z]*)", str(x))
+    if not m: return 0
+    v = float(m.group(1)); unit = m.group(2).lower()
+    mult = {"":1,"b":1,"kb":1000,"mb":1000**2,"gb":1000**3,"tb":1000**4,
+            "kib":1024,"mib":1024**2,"gib":1024**3,"tib":1024**4}
+    return int(v * mult.get(unit, 1))
+def pct(x):
+    try: return round(float(str(x).replace("%","").strip() or 0), 2)
+    except Exception: return 0.0
+def pair(x):
+    p = str(x or "").split("/")
+    return (to_bytes(p[0]) if len(p) > 0 else 0,
+            to_bytes(p[1]) if len(p) > 1 else 0)
+out = []
+for chunk in sys.stdin.read().split("__POWOS_SEP__"):
+    chunk = chunk.strip()
+    if not chunk: continue
+    try: arr = json.loads(chunk)
+    except Exception: continue
+    for c in (arr or []):
+        nr, nt = pair(c.get("net_io"))
+        br, bw = pair(c.get("block_io"))
+        mu, _  = pair(c.get("mem_usage"))
+        try: pids = int(str(c.get("pids","0")).strip() or 0)
+        except Exception: pids = 0
+        out.append({"name": c.get("name",""), "cpu": pct(c.get("cpu_percent")),
+                    "mem": mu, "mem_pct": pct(c.get("mem_percent")),
+                    "net_rx": nr, "net_tx": nt, "blk_r": br, "blk_w": bw, "pids": pids})
+print(json.dumps(out))
+' 2>/dev/null || echo "[]"
 }
 
 cmd_containers() {
@@ -2619,6 +2694,16 @@ cmd_containers() {
             echo -e "${GREEN}✓ Container '$name' removed${NC}"
             ;;
 
+        stats)
+            # Live per-container resource stats. --json (numeric, for the widget)
+            # or a plain table.
+            if [[ "${2:-}" == "--json" ]]; then
+                _containers_stats_json
+            else
+                command -v podman >/dev/null 2>&1 && podman stats --no-stream 2>/dev/null
+            fi
+            ;;
+
         start|stop|restart)
             # Podman lifecycle for ANY container (app/compose containers AND
             # distrobox ones — distrobox containers are podman containers). Does
@@ -2630,6 +2715,22 @@ cmd_containers() {
             fi
             if _container_lifecycle "$action" "$name"; then
                 echo -e "${GREEN}✓ ${action}: ${name}${NC}"
+            else
+                return 1
+            fi
+            ;;
+
+        delete|destroy)
+            # Force-remove a podman container (stops it first). Keeps volumes and
+            # images. Distinct from 'remove'/'rm' below, which is distrobox-only.
+            # The widget confirms with the user before invoking this.
+            local name="${2:-}"
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos containers delete <name>"
+                return 1
+            fi
+            if _container_delete "$name"; then
+                echo -e "${GREEN}✓ deleted: ${name}${NC}"
             else
                 return 1
             fi
@@ -2933,7 +3034,19 @@ case "${1:-}" in
             run-tool)                           shift; mods_run_tool_cmd "$@" ;;
             install-collection|ic|collection)   shift; mods_install_collection_cmd "$@" ;;
             install-mod|im|mod)                 shift; mods_install_mod_cmd "$@" ;;
-            install|bulk|batch)                 shift; mods_install_smart_cmd "$@" ;;
+            install)
+                # `install <manager>` (mod-manager) and `install <game> <mod-ids…>`
+                # (bulk Nexus mods) collide on this verb. Disambiguate by the first
+                # arg: a known mod-manager name → manager install; anything else →
+                # bulk mod install. `install-manager` stays as an explicit alias.
+                shift
+                if [[ $# -ge 1 ]] && mods_normalize_name "${1:-}" >/dev/null 2>&1; then
+                    mods_install_cmd "$@"
+                else
+                    mods_install_smart_cmd "$@"
+                fi
+                ;;
+            bulk|batch)                         shift; mods_install_smart_cmd "$@" ;;
             install-file|if)                    shift; mods_install_file_cmd "$@" ;;
             check|analyze|preflight)            shift; mods_check_cmd "$@" ;;
             info)                               shift; mods_info_cmd "$@" ;;
