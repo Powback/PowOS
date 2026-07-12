@@ -3058,6 +3058,12 @@ case "${1:-}" in
             deploy|sync|synchronize)            shift; mods_deploy_cmd "$@" ;;
             loadouts)                           shift; mods_loadouts_cmd "$@" ;;
             raw|as-main)                        shift; mods_raw_cmd "$@" ;;
+            # ASI-loader stack for RAGE games (GTA V / RDR2). See lib/mods/asi.sh.
+            asi|rage)
+                shift
+                source "$POWOS_LIB/mods/asi.sh"
+                asi_dispatch "$@"
+                ;;
             # Vortex CLI (via Bottles). See lib/mods/vortex.sh.
             vortex)
                 shift

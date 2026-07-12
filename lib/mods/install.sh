@@ -953,6 +953,13 @@ Vortex CLI (Bethesda / everything NMA doesn't yet support):
   powos mods vortex health-check          Verify install
   powos mods vortex help                  Full Vortex verb list
 
+ASI-loader stack for RAGE games (GTA V / RDR2 — off-Nexus loaders + .asi plugins):
+  powos mods asi install-loader <game>    Fetch + arch-verify Ultimate ASI Loader
+  powos mods asi add <game> <ref>         Install an .asi (github/nexus/url), verified
+  powos mods asi list <game>              Show the managed ASI stack
+  powos mods asi check <game>             Health/staleness check (reads plugin logs)
+  powos mods asi help                     Full ASI verb list
+
 Known tools:
   ${BOLD}nexus-mods-app${NC}   Nexus's native-Linux cross-platform manager
                    (recommended for Cyberpunk 2077 on Linux). Aliases:
