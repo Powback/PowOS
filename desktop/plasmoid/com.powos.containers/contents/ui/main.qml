@@ -64,7 +64,20 @@ PlasmoidItem {
                  grouped: false, image: "", status: "", state: "", running: false,
                  scope: "user", run: 0, total: 0, cpu: 0, mem: 0,
                  net_rx: 0, net_tx: 0, blk_r: 0, blk_w: 0, hasStats: false,
-                 isOpen: false, ports: "", labelsJson: "{}" }
+                 isOpen: false, ports: "", labelsJson: "{}", traefikUrl: "" }
+    }
+
+    // Extract the first Host(`...`) value from traefik router labels → "http://host"
+    function traefikHost(labels) {
+        if (!labels) return ""
+        var ks = Object.keys(labels)
+        for (var i = 0; i < ks.length; i++) {
+            if (ks[i].indexOf("traefik.http.routers.") === 0 && ks[i].indexOf(".rule") > 0) {
+                var m = String(labels[ks[i]]).match(/Host\(\s*`([^`]+)`\s*\)/)
+                if (m) return "http://" + m[1]
+            }
+        }
+        return ""
     }
 
     function parseList(txt) {
@@ -138,6 +151,7 @@ PlasmoidItem {
                     r.blk_r = cs.blk_r; r.blk_w = cs.blk_w; r.hasStats = true
                 }
                 r.ports = ci.ports || ""
+                r.traefikUrl = root.traefikHost(ci.labels)
                 r.isOpen = !!root.expanded[ci.name]
                 rows.push(r)
                 // when expanded, a detail row shows this container's ports + labels
@@ -345,9 +359,18 @@ PlasmoidItem {
                                         opacity: 0.5; font: Kirigami.Theme.smallFont
                                     }
                                     PC3.Label { text: model.label; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    // traefik route — clickable → open http://foo.pow
+                                    PC3.Label {
+                                        visible: model.traefikUrl !== ""
+                                        text: model.traefikUrl.replace("http://", "")
+                                        color: Kirigami.Theme.linkColor
+                                        font: Kirigami.Theme.smallFont
+                                        elide: Text.ElideRight
+                                        TapHandler { onTapped: root.openUrl(model.traefikUrl) }
+                                    }
                                     // published ports — clickable → open http://localhost:<port>
                                     PC3.Label {
-                                        visible: model.ports !== ""
+                                        visible: model.ports !== "" && model.traefikUrl === ""
                                         text: "⇄ " + model.ports
                                         color: root.portUrl(model.ports) !== "" ? Kirigami.Theme.linkColor
                                                                                 : Kirigami.Theme.textColor
