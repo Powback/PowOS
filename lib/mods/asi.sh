@@ -175,17 +175,52 @@ print(urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""
 '
 }
 
-# Extract an archive (zip; rar via bsdtar if available) into $2.
+# Extract an archive into $2, using whatever extractor is present.
+asi_unpack_any() {   # archive dest — tries unzip/unar/7z/bsdtar
+    local a="$1" d="$2"
+    if command -v bsdtar >/dev/null 2>&1; then bsdtar -xf "$a" -C "$d" && return 0; fi
+    if command -v 7z >/dev/null 2>&1; then 7z x -y -o"$d" "$a" >/dev/null && return 0; fi
+    if command -v unar >/dev/null 2>&1; then unar -q -f -o "$d" "$a" >/dev/null && return 0; fi
+    return 1
+}
 asi_extract() {
     local archive="$1" dest="$2"
     mkdir -p "$dest"
     case "$archive" in
-        *.zip) unzip -oq "$archive" -d "$dest" ;;
-        *.rar|*.7z) if command -v bsdtar >/dev/null 2>&1; then bsdtar -xf "$archive" -C "$dest"
-                    else perr "  need bsdtar/unar to extract $(basename "$archive")."; return 1; fi ;;
-        *.asi|*.dll) cp "$archive" "$dest/" ;;
-        *) if command -v bsdtar >/dev/null 2>&1; then bsdtar -xf "$archive" -C "$dest"; else return 1; fi ;;
+        *.zip) unzip -oq "$archive" -d "$dest" 2>/dev/null || asi_unpack_any "$archive" "$dest" ;;
+        *.rar) command -v unar >/dev/null 2>&1 && unar -q -f -o "$dest" "$archive" >/dev/null \
+                   || (command -v unrar >/dev/null 2>&1 && unrar x -y "$archive" "$dest/" >/dev/null) \
+                   || asi_unpack_any "$archive" "$dest" ;;
+        *.7z)  asi_unpack_any "$archive" "$dest" ;;
+        *.asi|*.dll|*.ymt|*.bik) cp "$archive" "$dest/" ;;
+        *)     asi_unpack_any "$archive" "$dest" || { perr "  can't extract $(basename "$archive") (need unzip/unar/7z)."; return 1; } ;;
     esac
+}
+
+# gta5-mods: resolve a mod ref to its direct files.gta5-mods.com CDN URL.
+# ref = gta5mods:<category/slug> | gta5mods:<full-url> | a gta5-mods URL |
+#       a .../download/<id> interstitial URL. No login/Cloudflare (verified).
+asi_gta5mods_url() {
+    local ref="$1" page ua dl
+    ua="Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
+    case "$ref" in
+        gta5mods:http*) page="${ref#gta5mods:}" ;;
+        gta5mods:*)     page="https://www.gta5-mods.com/${ref#gta5mods:}" ;;
+        http*)          page="$ref" ;;
+        *)              page="https://www.gta5-mods.com/$ref" ;;
+    esac
+    # Already a download interstitial → pull the CDN link straight out.
+    if [[ "$page" == */download/* ]]; then
+        curl -sSL -A "$ua" -e "${page%/download/*}" "$page" 2>/dev/null \
+            | grep -oiE 'https://files\.gta5-mods\.com/[^"'"'"' ]+' | head -1
+        return
+    fi
+    # Mod page → find its /download/<id> link → resolve that interstitial.
+    dl="$(curl -sSL -A "$ua" "$page" 2>/dev/null \
+            | grep -oiE '/[a-z0-9._-]+/[a-z0-9._-]+/download/[0-9]+' | head -1)"
+    [[ -z "$dl" ]] && return 1
+    curl -sSL -A "$ua" -e "$page" "https://www.gta5-mods.com$dl" 2>/dev/null \
+        | grep -oiE 'https://files\.gta5-mods\.com/[^"'"'"' ]+' | head -1
 }
 
 # ── install / update the ASI loader (Ultimate ASI Loader, ThirteenAG) ────
@@ -221,7 +256,9 @@ asi_install_loader() {
 
 # ── add an ASI plugin ────────────────────────────────────────────────────
 # powos mods asi add <game> <ref>
-#   ref = github:owner/repo | owner/repo | nexus:<mod-id> | <mod-id> | https://…zip|.asi
+#   ref = github:owner/repo | owner/repo | nexus:<mod-id> | <mod-id>
+#       | gta5mods:<category/slug> | <gta5-mods URL> | https://…zip|.asi
+#       | a local path to a .asi or an archive containing one
 asi_add() {
     local game="${1:?Usage: powos mods asi add <game> <ref>}"
     local ref="${2:?Usage: powos mods asi add <game> <ref>}"
@@ -229,29 +266,45 @@ asi_add() {
     appid="$(mods_appid_of "$game")" || { perr "Unknown game: $game"; return 1; }
     gamedir="$(asi_game_dir "$appid")" || { perr "Can't find install dir for appid $appid."; return 1; }
 
-    local tmp; tmp="$(mktemp -d)"; local src url
+    local tmp; tmp="$(mktemp -d)"; mkdir -p "$tmp/x"
+    local src="" url="" localpath=""
+    # Order matters: check specific schemes/paths BEFORE the github catch-all.
     case "$ref" in
-        github:*|*/*[!0-9]*|*/*)
-            local repo="${ref#github:}"
-            src="github:$repo"
-            plog "Resolving GitHub release for ${BOLD}$repo${NC}…"
-            url="$(asi_github_asset_url "$repo")" || { perr "no release asset for $repo."; rm -rf "$tmp"; return 1; }
+        gta5mods:*|http*gta5-mods.com*)
+            src="$ref"
+            plog "Resolving gta5-mods download…"
+            url="$(asi_gta5mods_url "$ref")" || { perr "couldn't resolve a gta5-mods CDN URL for: $ref"; rm -rf "$tmp"; return 1; }
             ;;
-        http*://*)
-            src="url:$ref"; url="$ref" ;;
+        file:*)   localpath="${ref#file:}"; localpath="${localpath/#\~/$HOME}"; src="file:$localpath" ;;
+        /*|./*|../*|"~"/*) localpath="${ref/#\~/$HOME}"; src="file:$localpath" ;;
+        http*://*) src="url:$ref"; url="$ref" ;;
         nexus:*|[0-9]*)
             local mid="${ref#nexus:}"
             src="nexus:$(mods_nexus_slug_of "$game")/$mid"
             plog "Resolving Nexus mod ${BOLD}$mid${NC}…"
             url="$(asi_nexus_file_url "$game" "$mid")" || { rm -rf "$tmp"; return 1; }
             ;;
+        github:*|*/*)
+            local repo="${ref#github:}"
+            src="github:$repo"
+            plog "Resolving GitHub release for ${BOLD}$repo${NC}…"
+            url="$(asi_github_asset_url "$repo")" || { perr "no release asset for $repo."; rm -rf "$tmp"; return 1; }
+            ;;
         *) perr "Unrecognized ref: $ref"; rm -rf "$tmp"; return 1 ;;
     esac
 
-    plog "Downloading…"
-    local ext="zip"; case "$url" in *.asi) ext=asi ;; *.rar) ext=rar ;; *.7z) ext=7z ;; esac
-    curl -sSL -o "$tmp/dl.$ext" "$url" || { perr "download failed."; rm -rf "$tmp"; return 1; }
-    asi_extract "$tmp/dl.$ext" "$tmp/x" || { rm -rf "$tmp"; return 1; }
+    if [[ -n "$localpath" ]]; then
+        [[ -e "$localpath" ]] || { perr "local path not found: $localpath"; rm -rf "$tmp"; return 1; }
+        plog "Using local: $localpath"
+        if [[ -d "$localpath" ]]; then cp -r "$localpath/." "$tmp/x/"
+        else asi_extract "$localpath" "$tmp/x" || { rm -rf "$tmp"; return 1; }; fi
+    else
+        plog "Downloading…"
+        local ext="zip"; case "$url" in *.asi) ext=asi ;; *.rar) ext=rar ;; *.7z) ext=7z ;; *.dll) ext=dll ;; esac
+        curl -sSL -A "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0" \
+            -o "$tmp/dl.$ext" "$url" || { perr "download failed."; rm -rf "$tmp"; return 1; }
+        asi_extract "$tmp/dl.$ext" "$tmp/x" || { rm -rf "$tmp"; return 1; }
+    fi
 
     local asi; asi="$(find "$tmp/x" -iname '*.asi' | head -1)"
     [[ -z "$asi" ]] && { perr "no .asi found in download."; rm -rf "$tmp"; return 1; }
@@ -384,9 +437,12 @@ $(echo -e "${BOLD}powos mods asi${NC}") — manage the ASI-loader stack for RAGE
                                             proxy: version.dll).
   add <game> <ref>                          Install an .asi plugin. ref =
                                             github:owner/repo | owner/repo |
-                                            nexus:<mod-id> | <mod-id> | https URL.
-                                            Downloads, verifies it's 64-bit,
-                                            places it, records a manifest.
+                                            nexus:<mod-id> | <mod-id> |
+                                            gta5mods:<category/slug> | a gta5-mods
+                                            URL | https URL | a local file/dir.
+                                            Downloads (resolving the gta5-mods
+                                            CDN link automatically), verifies
+                                            it's 64-bit, places it, manifests it.
   list <game>                               Show the managed ASI stack.
   remove <game> <file>                      Remove a managed .asi (backs it up).
   check <game>                              Health/staleness check — flags wrong
