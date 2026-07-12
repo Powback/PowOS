@@ -106,3 +106,17 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   added to the GitHub account (`Permission denied (publickey)`). Worked around
   by pushing to the https:// URL with gh's credential helper. Either add the
   pubkey at https://github.com/settings/ssh/new or flip origin to HTTPS.
+
+- [x] **`powos dev patch` was broken for EVERY fork** — it copied `upstream/.`
+  (including its `.git`) into the temp diff repo, so `git init` was a no-op and
+  the base commit died with "nothing to commit", aborting under `set -e` before
+  writing any patch. Fixed in this commit (`rm -rf "$tmp/.git"` before init).
+  Couldn't hot-deploy the fix (`self test` unlock issue above) — generated the
+  plasma-desktop patch by running the fixed logic by hand.
+
+- [ ] **`sources/kde/source.conf` claims "the image build applies every patch
+  under patches/<app>/" but nothing in the Containerfile or CI builds
+  sources/kde apps** — committed KDE patches (e.g. plasma-desktop taskbar
+  force-close) are version-controlled but NOT baked into published images;
+  each machine must `powos source build kde:<app>` or `powos dev` it. Either
+  wire sources/ builds into the image build or fix the doc to match reality.

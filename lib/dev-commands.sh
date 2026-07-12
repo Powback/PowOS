@@ -1329,6 +1329,10 @@ dev_patch() {
     # Diff src vs a pristine-upstream git base → clean a/ b/ patch (incl. deletions).
     local tmp; tmp="$(mktemp -d)"
     cp -a "$proj/upstream/." "$tmp/" 2>/dev/null
+    # upstream/ is a clone and carries its own .git — drop it, or `git init` is
+    # a no-op and the base commit fails ("nothing to commit"), aborting under
+    # set -e before any patch is written.
+    rm -rf "$tmp/.git"
     ( cd "$tmp" && git init -q && git add -A \
         && git -c user.email=powos@localhost -c user.name=PowOS commit -qm base ) 2>/dev/null
     if command -v rsync &>/dev/null; then
