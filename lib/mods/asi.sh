@@ -270,6 +270,36 @@ asi_add() {
     plog "Verify after launch with: ${BOLD}powos mods asi check $game${NC}"
 }
 
+# ── generic entry point ──────────────────────────────────────────────────
+# `powos mods install <rage-game> [refs…]` routes here. Bootstraps the loader
+# if missing, then installs each ref as a plugin. This is the "install
+# whatever, figure out the backend by game" path — no Vortex, no NMA.
+asi_install_generic() {
+    local game="$1"; shift || true
+    local appid gamedir
+    appid="$(mods_appid_of "$game")" || { perr "Unknown game: $game"; return 1; }
+    gamedir="$(asi_game_dir "$appid")" || { perr "Can't find install dir for appid $appid (is it installed?)."; return 1; }
+    plog "RAGE game → ASI subsystem (game dir: ${BOLD}$gamedir${NC})"
+
+    # Bootstrap a loader if none present — otherwise plugins can't load.
+    if ! find "$gamedir" -maxdepth 1 \( -iname 'version.dll' -o -iname 'dinput8.dll' \) 2>/dev/null | grep -q .; then
+        plog "No ASI loader present — installing one first…"
+        asi_install_loader "$game" || return 1
+    fi
+
+    if [[ $# -eq 0 ]]; then
+        pok "ASI loader ready for $game. Add a plugin with:"
+        plog "  powos mods install $game <github:owner/repo | nexus:<id> | <mod-id> | url>"
+        return 0
+    fi
+
+    local ref rc=0
+    for ref in "$@"; do
+        asi_add "$game" "$ref" || rc=1
+    done
+    return $rc
+}
+
 # ── list managed ASI files ───────────────────────────────────────────────
 asi_list() {
     local game="${1:?Usage: powos mods asi list <game>}"

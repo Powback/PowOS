@@ -160,6 +160,18 @@ mods_appid_of() {
     esac
 }
 
+# RAGE-engine games (GTA V Enhanced/Legacy, RDR2) are NOT manager-deployable
+# on Linux — no NMA/Vortex backend puts an ASI loader + .asi into the Steam
+# game dir. `powos mods install <game> …` auto-routes these to the built-in
+# ASI subsystem (mods/asi.sh) instead of the Nexus/NMA path.
+mods_is_rage_game() {
+    local appid; appid="$(mods_appid_of "$1" 2>/dev/null)" || return 1
+    case "$appid" in
+        3240220|271590|1174180) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 mods_setup_steam_userid() {
     # Steam userdata is per-account. Find the (usually only) numeric dir.
     local base="$HOME/.steam/steam/userdata"
@@ -547,6 +559,16 @@ mods_install_smart_cmd() {
     local game="${1:?Usage: powos mods install <game> <mod-id> [mod-id ...] (or pipe IDs on stdin)}"
     shift
     local ids=("$@")
+
+    # RAGE-engine games have no manager backend — auto-route to the ASI
+    # subsystem (loader + .asi into the Steam game dir), no Vortex/NMA.
+    if mods_is_rage_game "$game"; then
+        source "$(dirname "${BASH_SOURCE[0]}")/asi.sh" 2>/dev/null \
+            || source "${POWOS_LIB:-}/mods/asi.sh" 2>/dev/null
+        asi_install_generic "$game" ${ids[@]+"${ids[@]}"}
+        return $?
+    fi
+
     if [[ ${#ids[@]} -eq 0 ]]; then
         # Read from stdin: strip # comments + blank lines + any trailing junk.
         while IFS= read -r line; do
