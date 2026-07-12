@@ -65,6 +65,7 @@ COPY config/etc/ssh/authorized_keys.d/     /etc/ssh/authorized_keys.d/
 COPY config/etc/systemd/logind.conf.d/     /etc/systemd/logind.conf.d/
 COPY config/etc/containers/oci/hooks.d/     /etc/containers/oci/hooks.d/
 COPY config/etc/containers/containers.conf.d/ /etc/containers/containers.conf.d/
+COPY config/etc/profile.d/                  /etc/profile.d/
 # Login-availability fix (exception to zero-boot-services, deliberately):
 # Plasma Login Manager's greeter can wedge into a broken-QML state after a
 # session exit ("...not a function" TypeErrors, black frozen login screen —
