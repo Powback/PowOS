@@ -176,11 +176,12 @@ print(urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""
 }
 
 # Extract an archive into $2, using whatever extractor is present.
-asi_unpack_any() {   # archive dest — tries unzip/unar/7z/bsdtar
+asi_unpack_any() {   # archive dest — tries extractors by CONTENT, quietly
     local a="$1" d="$2"
-    if command -v bsdtar >/dev/null 2>&1; then bsdtar -xf "$a" -C "$d" && return 0; fi
-    if command -v 7z >/dev/null 2>&1; then 7z x -y -o"$d" "$a" >/dev/null && return 0; fi
-    if command -v unar >/dev/null 2>&1; then unar -q -f -o "$d" "$a" >/dev/null && return 0; fi
+    command -v unar   >/dev/null 2>&1 && unar -q -f -o "$d" "$a" >/dev/null 2>&1 && return 0
+    command -v bsdtar >/dev/null 2>&1 && bsdtar -xf "$a" -C "$d"       2>/dev/null && return 0
+    command -v 7z     >/dev/null 2>&1 && 7z x -y -o"$d" "$a" >/dev/null 2>&1 && return 0
+    command -v unrar  >/dev/null 2>&1 && unrar x -y "$a" "$d/" >/dev/null 2>&1 && return 0
     return 1
 }
 asi_extract() {
@@ -254,14 +255,41 @@ asi_install_loader() {
     pwarn "(or: powos mods setup $game — sets the full override, Steam must be closed)"
 }
 
-# ── add an ASI plugin ────────────────────────────────────────────────────
-# powos mods asi add <game> <ref>
-#   ref = github:owner/repo | owner/repo | nexus:<mod-id> | <mod-id>
-#       | gta5mods:<category/slug> | <gta5-mods URL> | https://…zip|.asi
-#       | a local path to a .asi or an archive containing one
+ASI_OPENRPF_REF="gta5mods:tools/openrpf-openiv-asi-for-gta-v-enhanced"
+
+# Ensure an ASI loader (version.dll/dinput8.dll) exists; install if missing.
+asi_ensure_loader() {   # game gamedir
+    find "$2" -maxdepth 1 \( -iname 'version.dll' -o -iname 'dinput8.dll' \) 2>/dev/null | grep -q . && return 0
+    plog "No ASI loader present — installing Ultimate ASI Loader first…"
+    asi_install_loader "$1"
+}
+# Ensure OpenRPF (loads the mods/ folder for RPF data-file overrides) exists.
+asi_ensure_openrpf() {  # game gamedir
+    [[ -f "$2/OpenRPF.asi" ]] && return 0
+    plog "OpenRPF (mods/ folder support) not present — installing it…"
+    asi_add "$1" "$ASI_OPENRPF_REF"
+}
+
+# ── add a mod: a .asi plugin OR an RPF data-file override ─────────────────
+# powos mods asi add <game> <ref> [--rpf <internal/path> | --dest <rel/path>]
+#   ref  = github:owner/repo | owner/repo | nexus:<id> | <id>
+#          | gta5mods:<cat/slug> | gta5-mods URL | https URL | local file/dir
+#   --rpf  <p>  place the payload at mods/update/x64/<p> (OpenRPF loose
+#               override, e.g. --rpf data/ui/landing_page_deck.ymt). Auto-
+#               installs the loader + OpenRPF if missing.
+#   --dest <p>  place the payload at <gamedir>/<p> (full control).
+#   With neither, a .asi in the payload is installed as a plugin (default).
 asi_add() {
-    local game="${1:?Usage: powos mods asi add <game> <ref>}"
-    local ref="${2:?Usage: powos mods asi add <game> <ref>}"
+    local game="${1:?Usage: powos mods asi add <game> <ref> [--rpf p|--dest p]}"; shift
+    local ref="" rpf="" dest=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --rpf)  rpf="${2:-}"; shift 2 ;;
+            --dest) dest="${2:-}"; shift 2 ;;
+            *)      [[ -z "$ref" ]] && ref="$1"; shift ;;
+        esac
+    done
+    [[ -z "$ref" ]] && { perr "Usage: powos mods asi add <game> <ref> [--rpf p|--dest p]"; return 1; }
     local appid gamedir
     appid="$(mods_appid_of "$game")" || { perr "Unknown game: $game"; return 1; }
     gamedir="$(asi_game_dir "$appid")" || { perr "Can't find install dir for appid $appid."; return 1; }
@@ -306,15 +334,36 @@ asi_add() {
         asi_extract "$tmp/dl.$ext" "$tmp/x" || { rm -rf "$tmp"; return 1; }
     fi
 
-    local asi; asi="$(find "$tmp/x" -iname '*.asi' | head -1)"
-    [[ -z "$asi" ]] && { perr "no .asi found in download."; rm -rf "$tmp"; return 1; }
-    asi_require_x64 "$asi" "$(basename "$asi")" || { rm -rf "$tmp"; return 1; }
+    # ── placement ─────────────────────────────────────────────────────────
+    [[ -n "$rpf" ]] && dest="mods/update/x64/$rpf"
 
-    # Warn if there's no loader present — the .asi won't load without one.
-    if ! find "$gamedir" -maxdepth 1 -iname 'version.dll' -o -iname 'dinput8.dll' 2>/dev/null | grep -q .; then
-        pwarn "No ASI loader in game dir yet — run: powos mods asi install-loader $game"
+    if [[ -n "$dest" ]]; then
+        # RPF data-file override (ymt/bik/rpf/…) → loose file under mods/.
+        local want pf
+        want="$(basename "$dest")"
+        pf="$(find "$tmp/x" -type f -iname "$want" | head -1)"
+        [[ -z "$pf" ]] && pf="$(find "$tmp/x" -type f ! -iname '*.txt' ! -iname '*.md' ! -iname 'readme*' | head -1)"
+        [[ -z "$pf" ]] && { perr "no payload file for '$want' in the download."; rm -rf "$tmp"; return 1; }
+        asi_ensure_loader  "$game" "$gamedir"    # loader + OpenRPF are needed
+        asi_ensure_openrpf "$game" "$gamedir"    # to read the mods/ folder
+        mkdir -p "$gamedir/$(dirname "$dest")"
+        cp -f "$pf" "$gamedir/$dest" || { perr "couldn't write $gamedir/$dest"; rm -rf "$tmp"; return 1; }
+        asi_manifest_upsert "$appid" "$want" "$dest" "$src" "n/a" "rpf-override"
+        rm -rf "$tmp"
+        pok "Installed ${BOLD}$want${NC} → $dest (RPF override via OpenRPF)."
+        plog "Verify after launch with: ${BOLD}powos mods asi check $game${NC}"
+        return 0
     fi
 
+    # Default: install a .asi plugin.
+    local asi; asi="$(find "$tmp/x" -iname '*.asi' | head -1)"
+    if [[ -z "$asi" ]]; then
+        perr "No .asi in the payload, and no --rpf/--dest given."
+        perr "For a data-file mod (ymt/bik/rpf), pass: --rpf <internal/path>  or  --dest <rel/path>"
+        rm -rf "$tmp"; return 1
+    fi
+    asi_require_x64 "$asi" "$(basename "$asi")" || { rm -rf "$tmp"; return 1; }
+    asi_ensure_loader "$game" "$gamedir"
     local base; base="$(basename "$asi")"
     cp -f "$asi" "$gamedir/$base" || { perr "couldn't write $gamedir/$base"; rm -rf "$tmp"; return 1; }
     asi_manifest_upsert "$appid" "$base" "$base" "$src" "x64" "plugin"
@@ -376,7 +425,8 @@ asi_remove() {
     gamedir="$(asi_game_dir "$appid")" || { perr "Can't find install dir."; return 1; }
     if [[ -e "$gamedir/$file" ]]; then
         mkdir -p "$ASI_CACHE_DIR/removed"
-        mv -f "$gamedir/$file" "$ASI_CACHE_DIR/removed/$file.$(date -u +%s)" 2>/dev/null \
+        local bak; bak="${file//\//_}.$(date -u +%s)"
+        mv -f "$gamedir/$file" "$ASI_CACHE_DIR/removed/$bak" 2>/dev/null \
             || rm -f "$gamedir/$file"
         pok "Removed $file from game dir (backup in $ASI_CACHE_DIR/removed)."
     else
@@ -435,14 +485,19 @@ $(echo -e "${BOLD}powos mods asi${NC}") — manage the ASI-loader stack for RAGE
   install-loader <game> [version|dinput8]   Fetch + arch-verify Ultimate ASI
                                             Loader into the game dir (default
                                             proxy: version.dll).
-  add <game> <ref>                          Install an .asi plugin. ref =
-                                            github:owner/repo | owner/repo |
-                                            nexus:<mod-id> | <mod-id> |
-                                            gta5mods:<category/slug> | a gta5-mods
-                                            URL | https URL | a local file/dir.
-                                            Downloads (resolving the gta5-mods
-                                            CDN link automatically), verifies
-                                            it's 64-bit, places it, manifests it.
+  add <game> <ref> [--rpf p|--dest p]       Install a .asi plugin OR an RPF
+                                            data-file override. ref = github:
+                                            owner/repo | owner/repo | nexus:<id>
+                                            | <id> | gta5mods:<cat/slug> | a
+                                            gta5-mods URL | https URL | local
+                                            file/dir. Auto-resolves the gta5-mods
+                                            CDN link, verifies 64-bit (for .asi),
+                                            places it, manifests it.
+                                              --rpf  <p>  data-file → mods/update/
+                                                 x64/<p> (e.g. data/ui/landing_
+                                                 page_deck.ymt). Auto-installs the
+                                                 loader + OpenRPF if missing.
+                                              --dest <p>  place at <gamedir>/<p>.
   list <game>                               Show the managed ASI stack.
   remove <game> <file>                      Remove a managed .asi (backs it up).
   check <game>                              Health/staleness check — flags wrong
