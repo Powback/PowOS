@@ -45,16 +45,16 @@
 
 set -uo pipefail
 source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/..}/common.sh" 2>/dev/null || {
-    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
-    CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'
+    CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; NC=$'\033[0m'
     plog()  { echo -e "${CYAN}[modlist]${NC} $*"; }
     pok()   { echo -e "${GREEN}[modlist]${NC} $*"; }
     pwarn() { echo -e "${YELLOW}[modlist]${NC} $*"; }
     perr()  { echo -e "${RED}[modlist]${NC} $*" >&2; }
 }
-[[ -z "${BOLD:-}" ]] && BOLD='\033[1m'
-[[ -z "${DIM:-}"  ]] && DIM='\033[2m'
-[[ -z "${NC:-}"   ]] && NC='\033[0m'
+[[ -z "${BOLD:-}" ]] && BOLD=$'\033[1m'
+[[ -z "${DIM:-}"  ]] && DIM=$'\033[2m'
+[[ -z "${NC:-}"   ]] && NC=$'\033[0m'
 POWOS_TAG=modlist
 
 # mods_nexus_key / mods_setup_steam_userid / mods_ensure_protontricks live in

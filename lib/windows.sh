@@ -53,8 +53,8 @@
 # set -e/-u/pipefail at file top level. Defensive ${var:-} defaults instead.
 
 # ── Presentation ──────────────────────────────────────────────────
-WIN_RED='\033[0;31m'; WIN_GREEN='\033[0;32m'; WIN_YELLOW='\033[0;33m'
-WIN_CYAN='\033[0;36m'; WIN_BOLD='\033[1m'; WIN_DIM='\033[2m'; WIN_NC='\033[0m'
+WIN_RED=$'\033[0;31m'; WIN_GREEN=$'\033[0;32m'; WIN_YELLOW=$'\033[0;33m'
+WIN_CYAN=$'\033[0;36m'; WIN_BOLD=$'\033[1m'; WIN_DIM=$'\033[2m'; WIN_NC=$'\033[0m'
 
 win_log()  { echo -e "${WIN_CYAN}[windows]${WIN_NC} $*"; }
 win_ok()   { echo -e "${WIN_GREEN}[windows]${WIN_NC} $*"; }

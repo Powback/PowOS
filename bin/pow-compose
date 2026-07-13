@@ -147,7 +147,7 @@ for host in $hosts; do
 done
 
 if [ ${#collisions[@]} -gt 0 ]; then
-    RED='\033[31m'; BOLD='\033[1m'; NC='\033[0m'
+    RED=$'\033[31m'; BOLD=$'\033[1m'; NC=$'\033[0m'
     {
         printf "\n${BOLD}${RED}pow-compose: hostname collision — refusing to start.${NC}\n\n"
         for c in "${collisions[@]}"; do

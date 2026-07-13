@@ -27,7 +27,7 @@ set -uo pipefail
 POWOS_INSTALL_CONF="${POWOS_INSTALL_CONF:-/etc/powos/install.conf}"
 POWOS_AI_CONF_DIR="${POWOS_AI_CONF_DIR:-/etc/powos/ai}"
 
-GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
+GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'; RED=$'\033[0;31m'; CYAN=$'\033[0;36m'; NC=$'\033[0m'
 
 fb_log()  { echo -e "${CYAN}[firstboot]${NC} $*"; }
 fb_ok()   { echo -e "${GREEN}[firstboot]${NC} $*"; }

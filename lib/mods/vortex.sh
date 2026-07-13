@@ -31,17 +31,17 @@ set -uo pipefail
 # directly (for a unit test, or if the dispatcher path changes), fall
 # back to inline defs so `set -u` doesn't kill us.
 source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/..}/common.sh" 2>/dev/null || {
-    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
-    CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'
+    CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; NC=$'\033[0m'
     plog()  { echo -e "${CYAN}[vortex]${NC} $*"; }
     pok()   { echo -e "${GREEN}[vortex]${NC} $*"; }
     pwarn() { echo -e "${YELLOW}[vortex]${NC} $*"; }
     perr()  { echo -e "${RED}[vortex]${NC} $*" >&2; }
 }
 # Even when common.sh loaded, guarantee color vars exist (set -u is unforgiving).
-[[ -z "${BOLD:-}" ]] && BOLD='\033[1m'
-[[ -z "${DIM:-}"  ]] && DIM='\033[2m'
-[[ -z "${NC:-}"   ]] && NC='\033[0m'
+[[ -z "${BOLD:-}" ]] && BOLD=$'\033[1m'
+[[ -z "${DIM:-}"  ]] && DIM=$'\033[2m'
+[[ -z "${NC:-}"   ]] && NC=$'\033[0m'
 
 # ─── Constants ───────────────────────────────────────────────────────────
 VORTEX_BOTTLE_NAME="${VORTEX_BOTTLE_NAME:-PowosVortex}"

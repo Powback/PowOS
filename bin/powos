@@ -23,12 +23,12 @@ elif [[ ! -f "$POWOS_LIB/hardware-detect.sh" ]]; then
 fi
 unset _powos_dev_lib
 
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-BOLD='\033[1m'
-NC='\033[0m'
+GREEN=$'\033[0;32m'
+CYAN=$'\033[0;36m'
+YELLOW=$'\033[0;33m'
+RED=$'\033[0;31m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
 
 # One-line notice for EXPERIMENTAL (unvalidated) commands. These are half-built
 # or hardware-only features kept in the tree but NOT part of the primary

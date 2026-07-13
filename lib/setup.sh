@@ -9,8 +9,8 @@
 
 set -uo pipefail
 source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh" 2>/dev/null || {
-    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
-    CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'
+    CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; NC=$'\033[0m'
     plog()  { echo -e "${CYAN}[setup]${NC} $*"; }
     pok()   { echo -e "${GREEN}[setup]${NC} $*"; }
     pwarn() { echo -e "${YELLOW}[setup]${NC} $*"; }

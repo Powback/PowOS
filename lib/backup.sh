@@ -21,12 +21,12 @@ POWOS_CONFIG_DIR="${HOME}/.config/powos"
 SYNC_CONFIG="${POWOS_CONFIG_DIR}/sync.conf"
 
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
 
 # Lock file for safe operations
 SYNC_LOCK_FILE="${POWOS_SYNC_LOCK_FILE:-/run/powos/sync.lock}"
