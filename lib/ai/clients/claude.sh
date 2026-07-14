@@ -154,6 +154,45 @@ client_call_verbose() {
     "$cmd" "${args[@]}" "$prompt"
 }
 
+# Render a block of assistant markdown to the terminal. Uses `glow` for real
+# styling (headers, bold, code fences, lists) when available; falls back to raw
+# text. Honors NO_COLOR and POWOS_AI_NO_MARKDOWN=1 (plain passthrough).
+_claude_render_md() {
+    local text="$1"
+    [[ -z "$text" ]] && return 0
+    if [[ -z "${NO_COLOR:-}" && "${POWOS_AI_NO_MARKDOWN:-}" != "1" ]] \
+        && command -v glow &>/dev/null; then
+        local w; w="$(tput cols 2>/dev/null)"; [[ -n "$w" ]] || w="${COLUMNS:-100}"
+        # glow renders on EOF; feeding one block at a time keeps output live.
+        # -w matches the terminal; on any glow error, fall back to raw text.
+        printf '%s\n' "$text" | glow -w "$w" - 2>/dev/null || printf '%s\n' "$text"
+    else
+        printf '%s\n' "$text"
+    fi
+}
+
+# Render a tool_use block as a human-readable "what + why" panel: the tool name,
+# its target (file/path/pattern), the model's own plain-text description (WHY),
+# and the exact command being run (WHAT). $1 = base64-encoded tool_use JSON.
+_claude_render_tool() {
+    local json; json="$(printf '%s' "$1" | base64 -d 2>/dev/null)"
+    [[ -z "$json" ]] && return 0
+    local name desc cmd tgt
+    name="$(printf '%s' "$json" | jq -r '.name // "tool"' 2>/dev/null)"
+    desc="$(printf '%s' "$json" | jq -r '.input.description // empty' 2>/dev/null)"
+    cmd="$(printf '%s'  "$json" | jq -r '.input.command // empty' 2>/dev/null)"
+    tgt="$(printf '%s'  "$json" | jq -r '.input.file_path // .input.path // .input.pattern // .input.url // empty' 2>/dev/null)"
+
+    local C_HEAD=$'\033[1;36m' C_DIM=$'\033[2m' C_CMD=$'\033[0;33m' NC=$'\033[0m'
+    if [[ -n "${NO_COLOR:-}" ]]; then C_HEAD=""; C_DIM=""; C_CMD=""; NC=""; fi
+
+    printf '\n%s⚙ %s%s' "$C_HEAD" "$name" "$NC"
+    [[ -n "$tgt" ]] && printf ' %s%s%s' "$C_DIM" "$tgt" "$NC"
+    printf '\n'
+    [[ -n "$desc" ]] && printf '  %s%s%s\n' "$C_DIM" "$desc" "$NC"
+    [[ -n "$cmd" ]]  && printf '  %s$ %s%s\n' "$C_CMD" "$cmd" "$NC"
+}
+
 # Stream the response LIVE — print assistant text and tool-use as they arrive
 # (the "intermittent messages"), instead of buffering everything and showing
 # only the final result. MUST be called WITHOUT command substitution so output
@@ -183,11 +222,20 @@ client_call_stream() {
         [[ -z "$line" ]] && continue
         case "$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null)" in
             assistant)
-                printf '%s' "$line" | jq -r '
+                # Split the message into typed content blocks. Each block is
+                # emitted as "<type>\t<base64>" (base64 keeps newlines/tabs
+                # intact across the read loop). Text -> markdown renderer;
+                # tool_use -> the "what + why" panel.
+                while IFS=$'\t' read -r _btype _payload; do
+                    case "$_btype" in
+                        text) _claude_render_md "$(printf '%s' "$_payload" | base64 -d 2>/dev/null)" ;;
+                        tool) _claude_render_tool "$_payload" ;;
+                    esac
+                done < <(printf '%s' "$line" | jq -r '
                     (.message.content // [])[]
-                    | if .type=="text" then .text
-                      elif .type=="tool_use" then "[2m⚙ "+.name+"[0m"
-                      else empty end' 2>/dev/null
+                    | if .type=="text" then "text\t" + (.text | @base64)
+                      elif .type=="tool_use" then "tool\t" + (. | @base64)
+                      else empty end' 2>/dev/null)
                 ;;
             result)
                 local sid; sid="$(printf '%s' "$line" | jq -r '.session_id // empty' 2>/dev/null)"
