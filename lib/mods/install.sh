@@ -261,6 +261,8 @@ PY
 mods_setup_cmd() {
     local game="${1:-}"
     if [[ -z "$game" ]]; then
+        # cat heredoc won't interpret \033; use real ESC bytes for color.
+        local BOLD=$'\033[1m' NC=$'\033[0m'
         cat <<EOF
 ${BOLD}powos mods setup <game>${NC} — one-shot modding prep for a Steam game.
 
@@ -923,6 +925,9 @@ mods_launch_cmd() {
 }
 
 mods_help() {
+    # Heredocs (cat) do NOT interpret \033 escapes, so shadow the color vars
+    # with real ESC bytes (ANSI-C quoting) for correct rendering here.
+    local BOLD=$'\033[1m' DIM=$'\033[2m' NC=$'\033[0m'
     cat <<EOF
 ${BOLD}powos mods${NC} — manage game-modding tools
 

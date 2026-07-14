@@ -18,6 +18,7 @@ services:
     privileged: true
     ports:
       - "6091:8443"
+      - "3099:3099"
     # NVIDIA GPU passthrough is OPTIONAL. A mandatory device reservation makes
     # `docker compose up` fail on hosts without the NVIDIA container runtime.
     # To enable GPU access on an NVIDIA host, uncomment the block below:
