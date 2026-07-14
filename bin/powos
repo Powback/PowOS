@@ -94,6 +94,13 @@ Boot / dual-boot:
   cuda enable         Set up the CUDA toolkit in a GPU-passthrough container
   cuda status         Container / toolkit / GPU visibility
 
+Controllers (analog stick-drift fixer — any joystick/gamepad):
+  controller list                  Detected controllers + deadzone + idle drift
+  controller deadzone <dev> <pct>  Set & persist a driver-level deadzone (now)
+  controller deadzone <dev> auto   Measure idle drift, set just above it
+  controller clear <dev>           Remove stored deadzone (reset to default)
+  controller status                Stored config + hotplug reapply state
+
 Sync, flush & backup:
   sync                Sync RAM ↔ USB (with conflict detection)
   sync status         Show sync status (pending changes, conflicts)
@@ -2992,6 +2999,12 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/driver.sh"
         cmd_driver "$@"
+        ;;
+    controller|controllers|pad|gamepad|joystick)
+        shift
+        # Permanent, driver-level analog stick-drift fixer (any joystick/gamepad).
+        source "$POWOS_LIB/controller.sh"
+        cmd_controller "$@"
         ;;
     registry)
         shift

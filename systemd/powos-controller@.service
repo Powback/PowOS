@@ -1,0 +1,17 @@
+# PowOS: reapply a saved analog-stick deadzone when a joystick is plugged in.
+#
+# Started by the udev rule 60-powos-controller.rules (SYSTEMD_WANTS) with the
+# input event node as the instance name, e.g. powos-controller@event2.service.
+# The kernel forgets an evdev "flat"/deadzone across unplug, so this restores
+# the value stored in /etc/powos/controllers.conf on every hotplug and boot.
+#
+# Template unit: instantiated on demand by udev — no `systemctl enable` needed.
+[Unit]
+Description=PowOS: reapply saved controller deadzone for /dev/input/%I
+After=systemd-udevd.service
+# Only run when the config store exists (i.e. the user has saved a deadzone).
+ConditionPathExists=/etc/powos/controllers.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/powos/controller-apply.sh %I

@@ -30,6 +30,7 @@ menu_action() {
         # Games & Windows
         games)        echo "games status" ;;
         windows)      echo "windows status" ;;
+        controllers)  echo "controller list" ;;
         # Recovery
         doctor)       echo "doctor" ;;
         rollback)     echo "rollback" ;;
@@ -121,6 +122,7 @@ cmd_menu() {
             gaming)
                 local t; t="$(menu_pick "Games & Windows" \
                     games "Games storage status" \
+                    controllers "Controllers (fix analog stick drift)" \
                     windows "Windows (VHD) status" \
                     back "‹ Back")" || continue
                 [[ "$t" == back ]] && continue

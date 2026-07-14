@@ -1,0 +1,13 @@
+# PowOS controller deadzone — reapply saved deadzones on joystick hotplug.
+#
+# Managed by `powos controller`. When a joystick/gamepad event node appears,
+# start the oneshot powos-controller@<node>.service, which restores the deadzone
+# stored in /etc/powos/controllers.conf (the kernel forgets it across unplug).
+#
+# %k is the kernel name of the event node (e.g. event2), which becomes the
+# systemd template instance: powos-controller@event2.service.
+#
+# NOTE: `powos controller` also installs this rule at runtime under
+# /etc/udev/rules.d/ so the feature works before any image rebuild. If the OS
+# image ships it here (/usr/lib/udev/rules.d/), that copy takes precedence.
+ACTION=="add", SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_JOYSTICK}=="1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="powos-controller@%k.service"

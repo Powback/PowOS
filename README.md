@@ -504,6 +504,7 @@ test suite for real-hardware behavior.
 - [`docs/WINDOWS.md`](docs/WINDOWS.md) — Windows-on-USB VHDX design + exposure contract
 - [`docs/DUAL-BOOT-VM.md`](docs/DUAL-BOOT-VM.md) — reciprocal VM, GPU passthrough, anti-cheat reality
 - [`docs/PROBLEM.md`](docs/PROBLEM.md) — why seamless bare-metal Windows has a hard limit
+- [`docs/CONTROLLER.md`](docs/CONTROLLER.md) — `powos controller`: driver-level analog stick-drift fixer
 - Deeper design notes: [`docs/RAMFS-DESIGN.md`](docs/RAMFS-DESIGN.md), [`docs/SYNC-ARCHITECTURE.md`](docs/SYNC-ARCHITECTURE.md), [`docs/HOMEFS-DESIGN.md`](docs/HOMEFS-DESIGN.md), [`docs/OVERLAY-ARCHITECTURE.md`](docs/OVERLAY-ARCHITECTURE.md), [`docs/MULTI-VARIANT-USB.md`](docs/MULTI-VARIANT-USB.md)
 
 ## Credentials
