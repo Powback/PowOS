@@ -78,6 +78,17 @@ COPY systemd/greeter-watchdog.service     /usr/lib/systemd/system/greeter-watchd
 COPY systemd/greeter-watchdog.timer       /usr/lib/systemd/system/greeter-watchdog.timer
 COPY systemd/plasmalogin.service.d/       /usr/lib/systemd/system/plasmalogin.service.d/
 
+# KDE-builder stage — bakes sources/kde/patches/<app>/ into the image.
+# Built FROM THE SAME base image so the rebuilt bits match the shipped app's
+# exact version and ABI (the script clones the tag matching the installed
+# rpm). Only patch dirs + config are copied in (upstream/ is a gitignored
+# multi-GB clone cache — never part of the build context). A patch that no
+# longer applies/builds fails the image build loudly. Discarded after COPY.
+FROM ${BASE_IMAGE} AS kde-builder
+COPY sources/kde/dev.conf sources/kde/image-build.sh /tmp/kde/
+COPY sources/kde/patches/ /tmp/kde/patches/
+RUN chmod +x /tmp/kde/image-build.sh && /tmp/kde/image-build.sh /tmp/kde /kde-out
+
 FROM ${BASE_IMAGE}
 
 LABEL org.opencontainers.image.title="PowOS"
@@ -125,6 +136,9 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
 
 # One layer for every file we ship (CLI + libs + plasmoids + KDE default).
 COPY --from=staging / /
+
+# Version-matched rebuilds of patched KDE apps (sources/kde/patches/).
+COPY --from=kde-builder /kde-out/ /
 
 # Mask all sleep-related systemd targets — no code path can suspend the box.
 # Must run in the real base stage (not the scratch staging stage, which has no
