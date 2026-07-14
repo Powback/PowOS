@@ -114,9 +114,20 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   Couldn't hot-deploy the fix (`self test` unlock issue above) — generated the
   plasma-desktop patch by running the fixed logic by hand.
 
-- [ ] **`sources/kde/source.conf` claims "the image build applies every patch
+- [x] **`sources/kde/source.conf` claims "the image build applies every patch
   under patches/<app>/" but nothing in the Containerfile or CI builds
-  sources/kde apps** — committed KDE patches (e.g. plasma-desktop taskbar
-  force-close) are version-controlled but NOT baked into published images;
-  each machine must `powos source build kde:<app>` or `powos dev` it. Either
-  wire sources/ builds into the image build or fix the doc to match reality.
+  sources/kde apps** — fixed: Containerfile now has a `kde-builder` stage
+  (FROM the same base image, version-matched clone, applies patches, builds
+  targets from per-app `build.conf`, ships listed artifacts). A patch that
+  stops applying fails the image build loudly.
+
+- [ ] **PowStream GTA test loop leaks host RAM via nvidia driver (~120GiB
+  leaked, reboot-only reclaim)** — 2026-07-14: PowStream agents repeatedly
+  launch GTA V Enhanced (Proton/DXVK, `POWSTREAM_*` env) and the sessions get
+  SIGKILLed; the nvidia driver (610.43.02, RTX 5090) never returns the
+  host-side buffer pages. Memory is invisible to ps/cgroups (direct driver
+  allocs; DirectMap4k shattered to ~170GiB). Box was down to 37GiB available
+  of 186GiB. Fix ideas: PowStream test harness must exit GTA cleanly
+  (SIGTERM → wait → escalate, or Steam shutdown request) instead of
+  `pkill -9`; consider a `powos` helper for clean game teardown; file/track
+  upstream nvidia leak.
