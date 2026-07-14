@@ -790,6 +790,7 @@ Commands:
   mount                  Install + enable the systemd mount ($GMS_MOUNTPOINT)
   steam-setup            Shared Steam library + native-FS Proton-state symlinks
   resize                 Not implemented (create at the size you need)
+  sync                   Sync saves/mods between devices (run 'powos games sync help')
 
 Options:
   --size N               Partition size in GB (create; required unless --whole)
@@ -812,6 +813,15 @@ EOF
 
 cmd_games() {
     local sub="${1:-status}"; shift 2>/dev/null || true
+
+    # The sync sub-command has its own option parser — delegate immediately
+    # so its flags (--to, --from, --what, etc.) aren't consumed here.
+    if [[ "$sub" == "sync" ]]; then
+        source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/games-sync.sh"
+        cmd_games_sync "$@"
+        return
+    fi
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --dry-run) GMS_DRY_RUN=1; shift ;;

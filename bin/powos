@@ -23,6 +23,7 @@ elif [[ ! -f "$POWOS_LIB/hardware-detect.sh" ]]; then
 fi
 unset _powos_dev_lib
 
+# AND inside `cat` heredocs (plain '\033[..' leaks raw \033 through cat).
 GREEN=$'\033[0;32m'
 CYAN=$'\033[0;36m'
 YELLOW=$'\033[0;33m'
@@ -76,6 +77,10 @@ Install to disk (dual-boot Windows) — the primary path:
   games status        Shared NTFS games partition (with Windows) — state
   games create --size N        Create POWOS-GAMES (plan + confirm + --dry-run)
   games steam-setup   Put a Steam library on the shared partition
+  games sync status   Sync saves/mods between devices (PC ↔ Steam Deck)
+  games sync push --to DEVICE [--what saves|mods|all]
+  games sync pull --from DEVICE
+  games sync add-device NAME HOST [USER]   Register a sync peer
 
 Boot / dual-boot:
   boot list           Show UEFI boot entries
