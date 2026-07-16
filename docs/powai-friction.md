@@ -131,3 +131,23 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   (SIGTERM → wait → escalate, or Steam shutdown request) instead of
   `pkill -9`; consider a `powos` helper for clean game teardown; file/track
   upstream nvidia leak.
+
+- [ ] **Agent can't finish `overlay enable` / `update self` — sudo needs a
+  terminal** — 2026-07-16: `powos update self --pull` pulled fine but died at
+  "Installing scripts…" on sudo; `overlay-manager.sh enable` likewise. Known
+  friction, but the overlay path makes it acute: the whole
+  build→enable→cleanup flow is agent-driveable except one sudo call.
+  Consider a polkit rule or sudoers entry scoped to systemd-sysext
+  merge/refresh + the script-install step.
+
+- [ ] **`overlay-manager.sh` defaults `POWOS_ROOT=$HOME/powos`, which doesn't
+  exist on this box** — running the documented `bash lib/overlay-manager.sh
+  build powstream` from /var/lib/powos/src looks for sources in
+  /home/powos/powos/sources and fails. Had to prefix
+  `POWOS_ROOT=/var/lib/powos/src`. Default should be the repo the script
+  lives in (`$(dirname $BASH_SOURCE)/..`).
+
+- [ ] **powstream overlay run-sheet says `powos dev enable powstream`, but
+  `powos dev` only knows fork projects** — the working command is
+  `overlay-manager.sh enable powstream` (or wire overlays into a
+  `powos overlay <build|enable|…>` front door and update the docs).
