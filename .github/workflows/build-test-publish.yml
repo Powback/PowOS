@@ -238,6 +238,134 @@ jobs:
               exec /powos/test/e2e/run-e2e.sh
             '
 
+      # ─── Tier-2: VM boot-to-desktop test (blocks publish) ─────────
+      # Proves the image boots → SDDM → KDE desktop in a real QEMU-KVM VM.
+      # Budget: ~10-15 min (bib qcow2 build + QEMU boot + stages A-C).
+      # Stage D (Anaconda install) runs on schedule/dispatch only (nightly).
+
+      - name: Install tier-2 VM test dependencies
+        if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils ovmf sshpass
+
+      - name: Build test qcow2 (bootc-image-builder)
+        if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
+        timeout-minutes: 15
+        run: |
+          mkdir -p tier2-bib-output
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v "$PWD/tier2-bib-output:/output" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type qcow2 --rootfs btrfs --local \
+            powos-ci
+
+      - name: Tier-2 VM boot test (stages A-C)
+        id: tier2
+        if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
+        timeout-minutes: 15
+        run: |
+          chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
+          ARTIFACTS_DIR="$PWD/tier2-artifacts" \
+            bash test/tier2/run.sh --image tier2-bib-output/qcow2/disk.qcow2
+
+      - name: Tier-2 VM boot test (Stage D — nightly/dispatch only)
+        if: >-
+          steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open' &&
+          (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        timeout-minutes: 30
+        continue-on-error: true
+        run: |
+          # Stage D needs the Anaconda ISO — build it from the same image
+          mkdir -p tier2-iso-output
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v "$PWD/tier2-iso-output:/output" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type anaconda-iso --local \
+            powos-ci
+          chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
+          ARTIFACTS_DIR="$PWD/tier2-artifacts-stage-d" \
+            bash test/tier2/run.sh \
+              --stage d \
+              --image tier2-bib-output/qcow2/disk.qcow2 \
+              --iso tier2-iso-output/bootiso/install.iso
+
+      - name: Tier-2 VM boot test (Stage E — nightly/dispatch only)
+        id: tier2-e
+        if: >-
+          steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open' &&
+          (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        timeout-minutes: 45
+        continue-on-error: true
+        run: |
+          # Stage E needs the live-USB raw image — build it
+          # build-iso.sh live-usb uses bib --type raw-efi
+          mkdir -p tier2-live-output
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v "$PWD/tier2-live-output:/output" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type raw-efi --rootfs btrfs --local \
+            powos-ci
+          # bib puts raw at image/disk.raw
+          live_raw="tier2-live-output/image/disk.raw"
+          if [[ ! -f "$live_raw" ]]; then
+            echo "::error::Live-USB build failed (BUILD_FAILED)"
+            echo '{"stage":"e","verdict":"BUILD_FAILED","timestamp":"'$(date -Iseconds)'"}' \
+              > tier2-artifacts-stage-e/verdict-stage-e.json 2>/dev/null || true
+            exit 1
+          fi
+          # Also need sgdisk + btrfs-progs for POWOS-DATA creation inside VM
+          sudo apt-get install -y -qq gdisk btrfs-progs 2>/dev/null || true
+          chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
+          ARTIFACTS_DIR="$PWD/tier2-artifacts-stage-e" \
+            bash test/tier2/run.sh \
+              --stage e \
+              --live-raw "$live_raw"
+
+      - name: Upload tier-2 artifacts
+        if: always() && steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier2-boot-test-${{ github.sha }}
+          path: |
+            tier2-artifacts/
+            tier2-artifacts-stage-d/
+            tier2-artifacts-stage-e/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Tier-2 failure summary
+        if: failure() && (steps.tier2.outcome == 'failure' || steps.tier2-e.outcome == 'failure')
+        run: |
+          {
+            echo "## Tier-2 Boot-to-Desktop Test FAILED"
+            echo ""
+            # Collect serial logs and verdicts from all artifact dirs
+            for dir in tier2-artifacts tier2-artifacts-stage-d tier2-artifacts-stage-e; do
+              if [[ -f "$dir/serial.log" ]] || [[ -f "$dir/serial-live.log" ]]; then
+                echo "### Serial console from $dir (last 50 lines)"
+                echo '```'
+                tail -50 "$dir"/serial*.log 2>/dev/null | head -60
+                echo '```'
+                echo ""
+              fi
+              if ls "$dir"/verdict-stage-*.json &>/dev/null 2>&1; then
+                echo "### Stage verdicts ($dir)"
+                echo '```json'
+                cat "$dir"/verdict-stage-*.json
+                echo '```'
+                echo ""
+              fi
+            done
+            echo "Download the **tier2-boot-test** artifact for full serial logs and screenshots."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Push (only reached if all tests above passed)
         if: steps.gate.outputs.run == 'true'
         run: |
