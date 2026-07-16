@@ -1278,7 +1278,40 @@ docker exec powos python3 /var/lib/powos/src/test/tier1/test-cachefs.py      # C
 
 **What needs real hardware or VM:** Actual overlayfs RAM boot, real USB detection and sync, CacheFS FUSE mount, rollback across reboots, hardware profile application.
 
-> **Note:** Tier-2 VM testing infrastructure does not exist yet. There is no automated test suite for real-hardware behavior.
+### Tier 2 (QEMU-KVM, boot-to-desktop)
+
+Proves the image boots to a working KDE Plasma desktop. Runs in CI on every
+PR/push (stages A-C block publish). See `test/tier2/README.md` for full docs.
+
+```bash
+# With a pre-built disk image
+just test-e2e path/to/disk.qcow2
+
+# From a container image (runs bib to produce qcow2)
+just test-e2e-container localhost/powos:latest
+
+# With ramboot regression test
+just test-e2e-ramboot path/to/disk.qcow2
+
+# Direct invocation with all options
+./test/tier2/run.sh --image disk.qcow2 --ramboot --artifacts /tmp/results
+```
+
+**Stages:**
+| Stage | What | Per-PR | Nightly |
+|-------|------|--------|---------|
+| A | Boot: graphical.target reached, SSH reachable | yes | yes |
+| B | SDDM active, not crash-looping, screenshot non-blank | yes | yes |
+| C | Autologin -> plasmashell + kwin running, stable 5s | yes | yes |
+| D | Anaconda ISO unattended install, then A-C on result | no | yes |
+| R | Boot with `rd.powos.ramboot=1`, verify no hang | opt-in | yes |
+
+**Named regressions caught:** hang before graphical.target, SDDM crash-loop,
+session dies after login (plasmashell crash), historical ramboot hang.
+
+**Requires:** qemu-system-x86_64, OVMF, sshpass, python3. KVM recommended
+(falls back to TCG with warning). Each stage emits a verdict JSON + screenshots
++ serial log as artifacts.
 
 ## Feature Status
 
