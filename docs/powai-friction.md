@@ -34,6 +34,14 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   nothing applied. Worked around 2026-07-07 by invoking the underlying apply
   directly: `sudo powos update self --from /var/lib/powos/src`. Fix: probe as root
   (or treat "already unlocked" as success, and re-check writability with sudo).
+  2026-07-16 addendum: even probing with sudo isn't enough on its own — when
+  sysexts are merged, the ro `sysext` overlay sits ON TOP of the writable
+  dev-unlock overlay, so `/usr` is genuinely read-only to root too until
+  `systemd-sysext unmerge` runs. `self test`/`self_apply` runs its usr-overlay
+  pre-check BEFORE unmerging sysext (unlike `update self`, which unmerges first),
+  so it bails. Real fix: `self_apply` should reuse the `update self` ordering
+  (unmerge sysext → probe → apply → re-merge) instead of its own pre-check, or
+  just delegate the whole writability dance to `update self`.
 
 - [ ] **jackify-engine hangs indefinitely when CWD contains a slow/dead network
   mount.** The Wabbajack engine (`lib/mods/modlist.sh`) walks its working directory
