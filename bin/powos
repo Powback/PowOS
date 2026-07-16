@@ -125,6 +125,7 @@ Update & self (edit → test → push loop):
   self test           Apply local /var/lib/powos/src edits to THIS system (transient)
   self pull           SAFE update from upstream (never discards local edits)
   self push           git add -A + commit + push (-m "message")
+  stream              PowStream WebRTC status / start / stop / logs / setup
   overlay <cmd>       Sysext overlays: build|enable|disable|list|status|clean <name>
 
 Layers & rollback:
@@ -2960,6 +2961,11 @@ case "${1:-}" in
         source "$POWOS_LIB/self.sh"
         cmd_self "$@"
         ;;
+    stream)
+        shift
+        source "$POWOS_LIB/stream.sh"
+        cmd_stream "$@"
+        ;;
     overlay)
         shift
         # Sysext overlay front door: build/enable/disable/list/status/clean.
@@ -3156,6 +3162,17 @@ case "${1:-}" in
             deploy|sync|synchronize)            shift; mods_deploy_cmd "$@" ;;
             loadouts)                           shift; mods_loadouts_cmd "$@" ;;
             raw|as-main)                        shift; mods_raw_cmd "$@" ;;
+            # Headless mod-compat test harness. See lib/mods/harness.sh.
+            verify|test-boot)
+                shift
+                source "$POWOS_LIB/mods/harness.sh"
+                harness_verify_cmd "$@"
+                ;;
+            bisect|find-broken)
+                shift
+                source "$POWOS_LIB/mods/harness.sh"
+                harness_bisect_cmd "$@"
+                ;;
             # ASI-loader stack for RAGE games (GTA V / RDR2). See lib/mods/asi.sh.
             asi|rage)
                 shift
