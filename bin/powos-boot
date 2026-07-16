@@ -153,7 +153,7 @@ if [[ "$USB_DETECTED" == "true" ]] && [[ -x "$CACHEFS_SCRIPT" ]] && [[ "${POWOS_
     # Ensure USB home directory exists
     mkdir -p "$USB_HOME_PATH"
 
-    # Start CacheFS in background
+    # Start CacheFS in background (write-back engine runs in-process)
     python3 "$CACHEFS_SCRIPT" \
         "$USB_HOME_PATH" \
         /home/powos \
@@ -168,15 +168,8 @@ if [[ "$USB_DETECTED" == "true" ]] && [[ -x "$CACHEFS_SCRIPT" ]] && [[ "${POWOS_
         log_ok "CacheFS mounted at /home/powos"
         log "  Metadata: always in RAM"
         log "  Files: lazy-loaded on access, cached in RAM"
+        log "  Write-back: dirty files flushed to USB every 30s + on fsync/unmount"
         log "  USB can be unplugged - cached files remain accessible"
-
-        # Start sync daemon
-        if [[ -x "$CACHEFS_SYNC" ]]; then
-            python3 "$CACHEFS_SYNC" \
-                --cache-dir "$CACHE_DIR" \
-                --backing-path "$USB_HOME_PATH" &
-            log "  CacheFS sync daemon started"
-        fi
 
         CACHEFS_ENABLED="true"
     else
