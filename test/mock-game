@@ -1,0 +1,79 @@
+#!/bin/bash
+# mock-game — fake game binary for testing the mod-compat harness.
+#
+# Simulates three behaviors:
+#   --crash   Exit with code 139 (SIGSEGV) after a short delay
+#   --freeze  Stop consuming CPU (sleep forever), simulating a hang
+#   --boot    Run normally (consume CPU) until killed
+#
+# Also supports:
+#   --delay N      Delay N seconds before the behavior kicks in (default: 2)
+#   --write-dump   Write a fake .dmp file to PROTON_CRASH_REPORT_DIR
+#   --write-log    Write fake Proton log errors to /tmp/steam-mock.log
+#
+# Usage:
+#   ./mock-game --crash                    # exit 139 after 2s
+#   ./mock-game --freeze --delay 5         # freeze after 5s
+#   ./mock-game --boot                     # run until killed
+#   PROTON_CRASH_REPORT_DIR=/tmp/dumps ./mock-game --crash --write-dump
+
+set -uo pipefail
+
+MODE="boot"
+DELAY=2
+WRITE_DUMP=0
+WRITE_LOG=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --crash)      MODE="crash" ;;
+        --freeze)     MODE="freeze" ;;
+        --boot)       MODE="boot" ;;
+        --delay)      shift; DELAY="${1:-2}" ;;
+        --write-dump) WRITE_DUMP=1 ;;
+        --write-log)  WRITE_LOG=1 ;;
+        *) ;;
+    esac
+    shift
+done
+
+# Simulate startup work (burns CPU so the harness sees ticks advancing)
+burn_cpu() {
+    local i=0
+    while [[ $i -lt 100000 ]]; do
+        i=$((i + 1))
+    done
+}
+
+# Startup phase: burn some CPU
+burn_cpu
+
+# Delay before behavior
+sleep "$DELAY"
+
+case "$MODE" in
+    crash)
+        if [[ "$WRITE_DUMP" -eq 1 ]] && [[ -n "${PROTON_CRASH_REPORT_DIR:-}" ]]; then
+            mkdir -p "$PROTON_CRASH_REPORT_DIR"
+            echo "FAKE_MINIDUMP_DATA" > "$PROTON_CRASH_REPORT_DIR/crash-$(date +%s).dmp"
+        fi
+        if [[ "$WRITE_LOG" -eq 1 ]]; then
+            echo "err:seh:call_vectored_handlers Unhandled exception at 0xDEADBEEF" > /tmp/steam-mock.log
+        fi
+        exit 139
+        ;;
+    freeze)
+        # Stop doing anything — sleep in a way that consumes zero CPU.
+        # The harness should detect this via stalled CPU ticks + context switches.
+        while true; do
+            sleep 3600
+        done
+        ;;
+    boot)
+        # Simulate a running game: burn CPU in a loop
+        while true; do
+            burn_cpu
+            sleep 1
+        done
+        ;;
+esac
