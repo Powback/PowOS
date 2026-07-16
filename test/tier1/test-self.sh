@@ -124,6 +124,37 @@ for dangerous in "/usr/bin/cp " "/usr/bin/mv " "/usr/bin/chmod " "/usr/bin/mkdir
     fi
 done
 
+# ═══════════════════════════════════════════════════════════════════
+echo "== OCI hook integrity: binary + JSON must ship together =="
+# Incident 2026-07-14: the hook JSON shipped without its binary, breaking
+# EVERY container start with an opaque crun error. Both-or-neither must be
+# true in the source tree at all times — the Containerfile build guard
+# catches it at build time, this test catches it in CI/pre-commit.
+HOOK_JSON="$REPO/config/etc/containers/oci/hooks.d/pow-collision-check.json"
+HOOK_BIN="$REPO/bin/pow-collision-check"
+json_present=false; bin_present=false
+[[ -f "$HOOK_JSON" ]] && json_present=true
+[[ -f "$HOOK_BIN" ]] && bin_present=true
+if [[ "$json_present" == "true" ]] && [[ "$bin_present" == "true" ]]; then
+    ok "hook JSON and binary both present in source tree"
+    [[ -x "$HOOK_BIN" ]] && ok "hook binary is executable in source tree" \
+                          || bad "bin/pow-collision-check is NOT executable — chmod +x it"
+elif [[ "$json_present" == "false" ]] && [[ "$bin_present" == "false" ]]; then
+    ok "neither hook JSON nor binary (consistent — both removed)"
+elif [[ "$json_present" == "true" ]] && [[ "$bin_present" == "false" ]]; then
+    bad "hook JSON present but bin/pow-collision-check MISSING — this breaks every container start"
+else
+    bad "bin/pow-collision-check present but hook JSON MISSING — hook will never fire"
+fi
+# When running inside a built image (Docker tier), also verify installed paths.
+if [[ -f /etc/containers/oci/hooks.d/pow-collision-check.json ]]; then
+    if [[ -x /usr/bin/pow-collision-check ]]; then
+        ok "installed: /usr/bin/pow-collision-check present and executable"
+    else
+        bad "installed: hook JSON at /etc/containers/oci/hooks.d/pow-collision-check.json exists but /usr/bin/pow-collision-check is MISSING or not executable"
+    fi
+fi
+
 echo
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]

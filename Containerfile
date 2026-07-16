@@ -171,8 +171,18 @@ RUN ln -sf /dev/null /etc/systemd/system/sleep.target && \
 # `bootc switch` or `bootc upgrade` from a machine with an existing /var
 # would silently keep the old (or missing) marker.
 ARG POWOS_SRC_COMMIT=""
-RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog 2>/dev/null || true && \
+RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog /usr/bin/pow-collision-check 2>/dev/null || true && \
     find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
+    # Guard: OCI hook JSON must never ship without its binary. crun fails
+    # opaquely ("error executing hook … (exit code: 1)") on EVERY container
+    # start when the binary is missing — this broke docker compose for an
+    # agent on 2026-07-14. Fail the build here so the misalignment is caught
+    # before the image is published.
+    if [ -f /etc/containers/oci/hooks.d/pow-collision-check.json ] && \
+       [ ! -x /usr/bin/pow-collision-check ]; then \
+      echo "BUILD ERROR: OCI hook JSON shipped without /usr/bin/pow-collision-check" >&2; \
+      exit 1; \
+    fi && \
     systemctl enable greeter-watchdog.timer && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
     systemctl mask plasma-setup.service 2>/dev/null || true && \

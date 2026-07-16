@@ -175,7 +175,7 @@ Feature Status table in CLAUDE.md before relying on them.
   vm windows         Boot installed Windows as a KVM guest (no reboot; non-AC only)
   gpu status         Where the dGPU is (host vs VM) + passthrough readiness
   gpu to-vm|to-host  Hotswap the dGPU between Linux (CUDA) and a VM
-  (CacheFS — lazy-load /home — remains DISABLED: write-back to USB not implemented)
+  (CacheFS — lazy-load /home with write-back — opt-in via POWOS_CACHEFS_ENABLED=true)
 
 Examples:
   powos status                        # Quick status check
@@ -334,13 +334,20 @@ cmd_status() {
     # === User Data ===
     echo -e "${CYAN}User Data (/home)${NC}"
     if is_cachefs_active; then
-        echo -e "  Mode:       ${GREEN}● CacheFS (lazy-load)${NC}"
+        echo -e "  Mode:       ${GREEN}● CacheFS (lazy-load + write-back)${NC}"
         if [[ -f "$STATE_DIR/cachefs-status.json" ]]; then
             python3 -c "
 import json
 s = json.load(open('$STATE_DIR/cachefs-status.json'))
-print(f\"  USB:        {'Connected' if s.get('usb_connected') else 'Disconnected'}\")
-print(f\"  Cached:     {s.get('cached_files', 0)} files\")
+usb = 'Connected' if s.get('usb_connected') else 'DISCONNECTED'
+dirty = s.get('dirty_files', 0)
+dirty_h = s.get('dirty_bytes_human', '0B')
+cached = s.get('total_cached_files', 0)
+last = s.get('last_flush_human', 'never')
+print(f'  USB:        {usb}')
+print(f'  Cached:     {cached} files')
+print(f'  Dirty:      {dirty} files ({dirty_h} pending write-back)')
+print(f'  Last flush: {last}')
 " 2>/dev/null || true
         fi
     elif mountpoint -q /home/powos 2>/dev/null; then
@@ -1104,9 +1111,12 @@ cmd_flush() {
         python3 "$LAYER_SYNC" --sync-now
     fi
 
-    # Sync CacheFS if active
+    # Flush CacheFS dirty files if active
     if [[ -f "$STATE_DIR/cachefs-status.json" ]]; then
-        python3 /usr/lib/powos/cachefs/cachefs-sync.py --sync-now 2>/dev/null || true
+        echo "Flushing CacheFS dirty files..."
+        python3 /usr/lib/powos/cachefs/powos-cachefs.py --sync-now 2>/dev/null \
+            || python3 /usr/lib/powos/cachefs/cachefs-sync.py --sync-now 2>/dev/null \
+            || true
     fi
 
     echo -e "${GREEN}✓ Flush complete${NC}"
@@ -1356,24 +1366,31 @@ except: print('Unknown')
     # --- User Data (CacheFS) ---
     echo -e "${CYAN}User Data (CacheFS)${NC}"
     if is_cachefs_active; then
-        echo -e "  ${GREEN}✓${NC} CacheFS active"
-        if pgrep -f "cachefs" &>/dev/null; then
-            echo -e "  ${GREEN}✓${NC} CacheFS daemon running"
+        echo -e "  ${GREEN}✓${NC} CacheFS active (write-back enabled)"
+        if pgrep -f "powos-cachefs" &>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} CacheFS FUSE process running"
         fi
         if [[ -f "$STATE_DIR/cachefs-status.json" ]]; then
             python3 -c "
 import json
 try:
     s = json.load(open('$STATE_DIR/cachefs-status.json'))
-    print(f\"    Cached: {s.get('cached_files', 0)} files\")
-    pending = s.get('pending_changes', 0)
-    if pending > 0:
-        print(f\"    Pending writes: {pending}\")
+    cached = s.get('total_cached_files', 0)
+    dirty = s.get('dirty_files', 0)
+    dirty_h = s.get('dirty_bytes_human', '0B')
+    failures = s.get('consecutive_failures', 0)
+    print(f'    Cached: {cached} files')
+    if dirty > 0:
+        print(f'    ⚠ Dirty: {dirty} files ({dirty_h}) pending write-back')
+    else:
+        print(f'    Clean: all files flushed to USB')
+    if failures >= 3:
+        print(f'    ✗ {failures} consecutive flush failures!')
 except: pass
 " 2>/dev/null || true
         fi
     else
-        echo -e "  ${YELLOW}○${NC} CacheFS not active"
+        echo -e "  ${YELLOW}○${NC} CacheFS not active (opt-in: POWOS_CACHEFS_ENABLED=true)"
     fi
     echo ""
 
@@ -1446,6 +1463,22 @@ except: pass
         fi
     fi
     echo ""
+
+    # --- OCI hook integrity ---
+    # Incident 2026-07-14: hook JSON present without binary → every container
+    # start fails with an opaque crun error. Flag it loudly.
+    if [[ -f /etc/containers/oci/hooks.d/pow-collision-check.json ]] && \
+       [[ ! -x /usr/bin/pow-collision-check ]]; then
+        echo -e "${CYAN}OCI Hooks${NC}"
+        echo -e "  ${RED}✗${NC} Hook JSON present but binary MISSING"
+        echo "      /etc/containers/oci/hooks.d/pow-collision-check.json exists"
+        echo "      but /usr/bin/pow-collision-check is missing or not executable."
+        echo "      Effect: every 'docker compose up' / 'podman start' fails with"
+        echo "        crun: error executing hook '/usr/bin/pow-collision-check'"
+        echo "      Fix: sudo cp /var/lib/powos/src/bin/pow-collision-check /usr/bin/ && sudo chmod +x /usr/bin/pow-collision-check"
+        echo ""
+        ((issues++)) || true
+    fi
 
     # --- Containers ---
     echo -e "${CYAN}Containers${NC}"
