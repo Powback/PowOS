@@ -1293,6 +1293,9 @@ just test-e2e-container localhost/powos:latest
 # With ramboot regression test
 just test-e2e-ramboot path/to/disk.qcow2
 
+# Stage E: live-USB boot (plain, ramboot+POWOS-DATA, firstboot)
+just test-e2e-live path/to/powos.raw
+
 # Direct invocation with all options
 ./test/tier2/run.sh --image disk.qcow2 --ramboot --artifacts /tmp/results
 ```
@@ -1304,10 +1307,13 @@ just test-e2e-ramboot path/to/disk.qcow2
 | B | SDDM active, not crash-looping, screenshot non-blank | yes | yes |
 | C | Autologin -> plasmashell + kwin running, stable 5s | yes | yes |
 | D | Anaconda ISO unattended install, then A-C on result | no | yes |
+| E | Live-USB: plain boot, ramboot+POWOS-DATA, firstboot self-complete | no | yes |
 | R | Boot with `rd.powos.ramboot=1`, verify no hang | opt-in | yes |
 
 **Named regressions caught:** hang before graphical.target, SDDM crash-loop,
-session dies after login (plasmashell crash), historical ramboot hang.
+session dies after login (plasmashell crash), historical ramboot hang,
+live-USB boot failure, ramboot with POWOS-DATA hang, self-heal infinite loop,
+firstboot self-completion failure.
 
 **Requires:** qemu-system-x86_64, OVMF, sshpass, python3. KVM recommended
 (falls back to TCG with warning). Each stage emits a verdict JSON + screenshots

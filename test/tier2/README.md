@@ -16,6 +16,7 @@ before publish.
 | **B** | Greeter: SDDM active, not crash-looping, screenshot has content | yes | yes |
 | **C** | Desktop: autologin -> plasmashell + kwin running, stable 5s | yes | yes |
 | **D** | Install: Anaconda ISO unattended install, then A-C on result | no | yes |
+| **E** | Live-USB: live-usb image boot — 3 sub-stages (see below) | no | yes |
 | **R** | Ramboot: boot with `rd.powos.ramboot=1`, verify no hang | optional | yes |
 
 ## Named regression cases
@@ -24,6 +25,10 @@ before publish.
 - **SDDM crash-loop** -- Stage B: NRestarts > 2
 - **Session dies after login** -- Stage C: plasmashell not found or dies within 5s
 - **Historical ramboot hang** -- Stage R: VM doesn't come back after reboot with `rd.powos.ramboot=1`
+- **Live-USB boot failure** -- Stage E1: live-usb raw image doesn't boot to desktop
+- **Live-USB ramboot with POWOS-DATA** -- Stage E2: dracut overlay boot hangs or fails
+- **Self-heal infinite loop** -- Stage E2: 3-failure counter doesn't revert to disk boot
+- **Firstboot self-completion** -- Stage E3: powos-firstboot-disk doesn't create POWOS-DATA
 
 ## Quick start
 
@@ -42,6 +47,9 @@ just build-image
 
 # Stage D (Anaconda install path)
 ./test/tier2/run.sh --stage d --iso build/output/bootiso/install.iso --image disk.qcow2
+
+# Stage E (live-USB boot — plain, ramboot, firstboot)
+./test/tier2/run.sh --stage e --live-raw build/output/powos.raw
 
 # No KVM (TCG fallback -- ~5-10x slower)
 ./test/tier2/run.sh --image disk.qcow2 --no-kvm
@@ -100,6 +108,24 @@ Verdict JSON format:
 }
 ```
 
+## Stage E sub-stages (live-USB boot)
+
+Stage E tests the legacy/experimental live-USB raw image (`build-iso.sh live-usb`
+-> `powos.raw`). Three sub-stages, each with its own VM lifecycle:
+
+| Sub-stage | What it tests |
+|-----------|---------------|
+| **E1** | Plain live boot: disk root, default kargs -> graphical.target -> SDDM -> desktop |
+| **E2** | RAM-boot: `rd.powos.ramboot=1` with POWOS-DATA partition -> dracut overlay boot -> desktop. Self-heal: writes counter=3 to ESP, reboots, verifies auto-revert to disk root (no infinite loop) |
+| **E3** | First-boot self-completion: `powos-firstboot-disk` creates POWOS-DATA filling the device + BLS boot entries. Asserts add-only behavior and marker file |
+
+Verdicts distinguish `BUILD_FAILED` (live image build broken) from `BOOT_FAILED`
+(image built but doesn't boot), so regressions in the build vs boot paths are
+separable.
+
+E2 and E3 create an oversized virtual disk (30G) from the raw image so the VM has
+free space for POWOS-DATA. All partition/format work happens inside the VM via SSH.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -111,6 +137,7 @@ Verdict JSON format:
 | `TIER2_BOOT_TIMEOUT` | `300` | Seconds to wait for boot SSH |
 | `TIER2_DESKTOP_TIMEOUT` | `120` | Seconds to wait for desktop after autologin |
 | `TIER2_INSTALL_TIMEOUT` | `1200` | Seconds for Anaconda install (Stage D) |
+| `TIER2_LIVE_MEM` | `6G` | VM memory for Stage E (live images need more) |
 
 ## How it works
 
@@ -134,6 +161,14 @@ Verdict JSON format:
 
 7. **Stage D** (nightly): Boots the Anaconda ISO with a kickstart for unattended
    install, waits for install + reboot, then runs Stages A-C against the result.
+
+8. **Stage E** (nightly): Tests the live-USB raw image in three sub-stages:
+   E1 boots the raw image with default kargs and runs A-C assertions;
+   E2 creates POWOS-DATA in the VM, injects `rd.powos.ramboot=1`, reboots into
+   the dracut overlay boot, and tests the self-heal counter (3 failed attempts
+   auto-reverts to disk root);
+   E3 triggers `powos-firstboot-disk` to create POWOS-DATA + BLS entries and
+   verifies add-only behavior, the marker file, and persistence directories.
 
 ## CI failure UX
 

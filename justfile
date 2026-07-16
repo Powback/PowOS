@@ -334,6 +334,11 @@ test-e2e-container container="localhost/powos:latest":
     chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
     bash test/tier2/run.sh --from-container {{container}}
 
+# Run tier-2 Stage E: live-USB boot (plain + ramboot + firstboot)
+test-e2e-live live_raw:
+    chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
+    bash test/tier2/run.sh --stage e --live-raw {{live_raw}}
+
 # Run tier-2 with ramboot regression test
 test-e2e-ramboot image:
     chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
