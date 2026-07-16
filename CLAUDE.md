@@ -396,7 +396,7 @@ powos games status                    # partition, mount, Steam wiring state
 powos games create --size N [--disk D] [--dry-run] [--yes]  # create POWOS-GAMES
 powos games mount                     # mount at /var/mnt/games (ntfs3)
 powos games steam-setup               # Steam library on the shared partition
-powos games resize                    # stub — not implemented
+powos games resize                    # grow/shrink POWOS-GAMES partition (ntfsresize + parted)
 ```
 
 **Steam wiring (`steam-setup`):** mounts POWOS-GAMES at `/var/mnt/games` via
@@ -1325,7 +1325,8 @@ session dies after login (plasmashell crash), historical ramboot hang.
 | Rollback | ✅ Implemented | grubby can silently fail — verify via `/run/powos/rollback-kargs` |
 | CacheFS | ⚠️ Implemented — opt-in, HW validation pending | Write-back engine flushes dirty files to USB (temp+rename crash-safe, 30s interval + fsync + unmount). Opt-in: `POWOS_CACHEFS_ENABLED=true` in `/etc/powos/config` |
 | Mobile mode | ✅ Implemented (hardware validation pending) | Live bind mounts: tmpfs + per-directory bind over `/usr` `/opt` `/libexec`. No reboot. `/etc`/`var` still USB-backed. Binds lost on reboot (re-run enable). |
-| Sync conflict detection | ⚠️ Partial | Detection works; `--merge` has basic implementation, may need manual help |
+| Sync conflict detection | ✅ Implemented (HW validation pending) | Detection works; `--merge` does 3-way resolve: base manifest tracks last sync, changed-on-one-side taken, both-changed → newer mtime wins + `.powos-conflict-<machine>` copy; `sync resolve` lists conflicts |
+| Games resize | ✅ Implemented (HW validation pending) | Grow/shrink POWOS-GAMES via ntfsresize + parted; plan display + `--dry-run`; safety: refuses if mounted, shrink requires `--yes` + ntfsfix pre-check |
 | Cloud backup | ⚠️ Partial | git-based implementation exists (`lib/backup.sh`); not fully validated |
 | Tier-2 VM testing | ✅ Implemented | QEMU-KVM boot-to-desktop: stages A (boot), B (SDDM), C (desktop), D (Anaconda install), R (ramboot regression). CI blocks publish on A-C. |
 
