@@ -10,7 +10,14 @@ set -euo pipefail
 # Configuration
 # ─────────────────────────────────────────────────────────────────
 
-POWOS_ROOT="${POWOS_ROOT:-$HOME/powos}"
+# Default POWOS_ROOT to the repo this script lives in (lib/ → repo root).
+# When installed to /usr/lib/powos (no sources/ sibling), fall back to the
+# bundled source tree. The old $HOME/powos default existed on no known box.
+_omgr_self_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ ! -d "$_omgr_self_root/sources" && -d /var/lib/powos/src/sources ]]; then
+    _omgr_self_root="/var/lib/powos/src"
+fi
+POWOS_ROOT="${POWOS_ROOT:-$_omgr_self_root}"
 EXTENSIONS_DIR="${POWOS_ROOT}/extensions"
 SOURCES_DIR="${POWOS_ROOT}/sources"
 SYSEXT_DIR="/var/lib/extensions"

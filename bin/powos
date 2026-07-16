@@ -125,6 +125,7 @@ Update & self (edit → test → push loop):
   self test           Apply local /var/lib/powos/src edits to THIS system (transient)
   self pull           SAFE update from upstream (never discards local edits)
   self push           git add -A + commit + push (-m "message")
+  overlay <cmd>       Sysext overlays: build|enable|disable|list|status|clean <name>
 
 Layers & rollback:
   layers              Show active layers
@@ -885,6 +886,15 @@ cmd_update() {
                         # rebase (existing checkout) WITHOUT ever discarding local
                         # edits. Replaces the old `git checkout -f` that blindly
                         # reset to master and nuked uncommitted work. See lib/self.sh.
+                        local _src_owner
+                        _src_owner=$(stat -c %U "$POWOS_SRC" 2>/dev/null || echo root)
+                        if [[ $EUID -eq 0 && "$_src_owner" != "root" ]]; then
+                            # git-as-root leaves root-owned .git files that break
+                            # the owner's pushes until the next boot re-chown.
+                            echo -e "${RED}Refusing --pull as root over the ${_src_owner}-owned tree.${NC}"
+                            echo "Run 'powos update self --pull' as $_src_owner, then 'sudo powos update self'."
+                            return 1
+                        fi
                         source "$POWOS_LIB/self.sh"
                         self_safe_pull "$POWOS_SRC" || return 1
                         shift
@@ -915,13 +925,38 @@ cmd_update() {
             # Show what's changed (if git available)
             if [[ -d "$POWOS_SRC/.git" ]]; then
                 local changes
-                changes=$(cd "$POWOS_SRC" && git status --porcelain 2>/dev/null | wc -l)
+                # GIT_OPTIONAL_LOCKS=0: read-only status must not refresh the
+                # index — when run under sudo that writes a root-owned .git/index.
+                changes=$(cd "$POWOS_SRC" && GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | wc -l)
                 local commit
-                commit=$(cd "$POWOS_SRC" && git log -1 --format="%h %s" 2>/dev/null || echo "unknown")
+                commit=$(cd "$POWOS_SRC" && GIT_OPTIONAL_LOCKS=0 git log -1 --format="%h %s" 2>/dev/null || echo "unknown")
                 echo "Commit: $commit"
                 [[ "$changes" -gt 0 ]] && echo "Uncommitted changes: $changes files"
             fi
             echo ""
+
+            # Writability pre-flight (installed composefs boxes). Two traps:
+            #  - merged systemd-sysext extensions sit as a READ-ONLY overlay on
+            #    /usr, so every cp below fails with EROFS → unmerge first,
+            #    re-merge after the install;
+            #  - the base /usr itself is read-only → engage the transient
+            #    bootc usr-overlay (same mechanism as 'powos self test';
+            #    reverts on reboot). bootc usr-overlay also silently drops
+            #    merged sysexts, which the re-merge below repairs.
+            source "$POWOS_LIB/self.sh"
+            local _sysext_merged
+            _sysext_merged=$(systemd-sysext status 2>/dev/null | awk '$1=="/usr"{print $2}')
+            if [[ -n "$_sysext_merged" && "$_sysext_merged" != "none" ]]; then
+                echo "Unmerging systemd-sysext extensions for the install..."
+                sudo systemd-sysext unmerge 2>/dev/null || true
+            fi
+            if self_usr_ro; then
+                echo "/usr is read-only — engaging transient bootc usr-overlay (reverts on reboot)..."
+                if ! sudo bootc usr-overlay >/dev/null 2>&1 || self_usr_ro; then
+                    echo -e "${RED}/usr still read-only — cannot install scripts.${NC}"
+                    return 1
+                fi
+            fi
 
             # Install scripts
             echo "Installing scripts..."
@@ -995,6 +1030,16 @@ cmd_update() {
                 sudo mkdir -p /etc/xdg/autostart
                 sudo cp "$POWOS_SRC/desktop/autostart/"* /etc/xdg/autostart/ 2>/dev/null || true
                 echo "  /etc/xdg/autostart/"
+            fi
+
+            # Re-merge sysext extensions (unmerged above and/or dropped by a
+            # fresh usr-overlay). Present in /var/lib/extensions == enabled.
+            if [[ -n "$(ls -A /var/lib/extensions 2>/dev/null)" ]]; then
+                if sudo systemd-sysext refresh 2>/dev/null; then
+                    echo "  systemd-sysext extensions re-merged"
+                else
+                    echo -e "  ${YELLOW}sysext refresh failed — run 'sudo systemd-sysext refresh'${NC}"
+                fi
             fi
 
             echo ""
@@ -2886,6 +2931,13 @@ case "${1:-}" in
         # The edit → test → push dev loop (safe pull, transient live apply).
         source "$POWOS_LIB/self.sh"
         cmd_self "$@"
+        ;;
+    overlay)
+        shift
+        # Sysext overlay front door: build/enable/disable/list/status/clean.
+        # Delegates to overlay-manager.sh, which resolves POWOS_ROOT itself
+        # (repo the script lives in, else the bundled /var/lib/powos/src).
+        bash "$POWOS_LIB/overlay-manager.sh" "$@"
         ;;
     menu)
         shift

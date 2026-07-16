@@ -132,27 +132,39 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   `pkill -9`; consider a `powos` helper for clean game teardown; file/track
   upstream nvidia leak.
 
-- [ ] **Agent can't finish `overlay enable` / `update self` — sudo needs a
-  terminal** — 2026-07-16: `powos update self --pull` pulled fine but died at
+- [x] **Agent can't finish `overlay enable` / `update self` — sudo needs a
+  terminal** — FIXED locally 2026-07-16: scoped NOPASSWD rule at
+  /etc/sudoers.d/powos-dev (powos update self / powos overlay / systemd-sysext
+  / bootc usr-overlay; root-equivalent by design on this single-admin box —
+  NOT shipped in the repo; shipping needs an opt-in `powos setup` step).
+  Original: — 2026-07-16: `powos update self --pull` pulled fine but died at
   "Installing scripts…" on sudo; `overlay-manager.sh enable` likewise. Known
   friction, but the overlay path makes it acute: the whole
   build→enable→cleanup flow is agent-driveable except one sudo call.
   Consider a polkit rule or sudoers entry scoped to systemd-sysext
   merge/refresh + the script-install step.
 
-- [ ] **`overlay-manager.sh` defaults `POWOS_ROOT=$HOME/powos`, which doesn't
-  exist on this box** — running the documented `bash lib/overlay-manager.sh
+- [x] **`overlay-manager.sh` defaults `POWOS_ROOT=$HOME/powos`, which doesn't
+  exist on this box** — FIXED: defaults to the repo the script lives in, else
+  /var/lib/powos/src. Original: — running the documented `bash lib/overlay-manager.sh
   build powstream` from /var/lib/powos/src looks for sources in
   /home/powos/powos/sources and fails. Had to prefix
   `POWOS_ROOT=/var/lib/powos/src`. Default should be the repo the script
   lives in (`$(dirname $BASH_SOURCE)/..`).
 
-- [ ] **powstream overlay run-sheet says `powos dev enable powstream`, but
-  `powos dev` only knows fork projects** — the working command is
+- [x] **powstream overlay run-sheet says `powos dev enable powstream`, but
+  `powos dev` only knows fork projects** — FIXED: new `powos overlay
+  build|enable|disable|list|status|clean` front door delegates to
+  overlay-manager.sh. Original: — the working command is
   `overlay-manager.sh enable powstream` (or wire overlays into a
   `powos overlay <build|enable|…>` front door and update the docs).
 
-- [ ] **`bootc usr-overlay` silently unmerges ALL systemd-sysext extensions**
+- [x] **`bootc usr-overlay` silently unmerges ALL systemd-sysext extensions**
+  — FIXED: `update self` now unmerges sysexts before installing (they're a
+  read-only overlay on /usr), auto-engages bootc usr-overlay when /usr is ro,
+  and re-merges extensions at the end. Also: `--pull` refuses to run as root
+  (git-as-root .git pollution) and git reads use GIT_OPTIONAL_LOCKS=0.
+  Original:
   — 2026-07-16: after `update self` enabled the writable /usr overlay, the
   powstream AND plasma-desktop sysexts vanished from /usr until a manual
   `systemd-sysext refresh`. `powos update self` / `self test` should run
