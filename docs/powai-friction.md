@@ -194,3 +194,33 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   user manager** — including the plasmalogin greeter (which then owned host
   :80 and spammed failed podman pulls on every greeter start). FIXED: moved
   to users/1000/ (source + live), traefik now runs under the powos manager.
+
+## PowStream "connect" friction (2026-07-16) — hours lost, real asks below
+
+- [x] **Stream hung at "Negotiating" — host missing `libnice-gstreamer1`**
+  (the GStreamer libnice/ICE plugin). webrtcbin couldn't link rtph264pay →
+  "Your GStreamer installation is missing a plug-in", so no video track ever
+  formed. nvh264enc/webrtcbin/srtp/dtls were present; only `nicesink`/`nicesrc`
+  were absent. Fixed live (dropped libgstnice.so into the usr-overlay + sysext
+  refresh) and staged persistently via rpm-ostree. The portal/token was a red
+  herring — it worked and saved ~/.config/powstream/portal-restore-token.
+
+### What PowOS should change so this is trivial next time
+- [ ] **Bake the PowStream runtime deps into the base image** — at minimum
+  `libnice-gstreamer1` (+ verify nvh264enc/webrtcbin/srtp/dtls). PowStream is a
+  first-party feature; its server should never fail on a missing distro plugin.
+- [ ] **`powos install` must apply-live under an active usr-overlay/sysext** —
+  `rpm-ostree apply-live` failed EROFS because bootc usr-overlay + merged
+  sysext sit on /usr read-only. Need: unmerge sysext → apply-live → re-merge,
+  wrapped in `powos install --live`.
+- [ ] **First-class `powos stream` command** — start server+sidecar, ensure the
+  screencast restore-token exists (bootstrap the one-time approval, or use a
+  dialog-free capture path), print URL + creds. No hand-starting binaries.
+- [ ] **Dialog-free capture for headless/remote** — the KDE screencast portal
+  renders its consent dialog only on the physical monitor (invisible to a
+  remote user). Either pre-seed the restore token at setup, or capture via
+  zkde_screencast/NvFBC so a remote box needs zero local clicks ever.
+- [ ] **Broaden the scoped dev sudoers** to cover `rpm-ostree`/`powos install`
+  and `systemctl --user` service ops — kept hitting the password wall mid-task.
+- [ ] **overlays should declare package deps** (or `powos overlay` pulls a
+  feature's rpm deps) so shipping the powstream sysext also ensures libnice etc.
