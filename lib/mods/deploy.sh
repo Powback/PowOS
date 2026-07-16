@@ -8,13 +8,19 @@
 # Mount methods (in priority order):
 #   1. powos-mods-mount (scoped sudoers helper) — real kernel mount, visible
 #      system-wide, survives Steam restarts, works with pressure-vessel.
+#      Uses /run/powos-mods (root-owned tmpfs, auto-clean on reboot).
 #   2. fuse-overlayfs — persistent FUSE daemon, no root needed, ~2x I/O.
+#      Uses /tmp/powos-mods (user-writable).
 #
 # Requires: core.sh sourced first (manifest helpers, game dir resolution).
 
 set -uo pipefail
 
-MODS_MOUNT_BASE="${MODS_MOUNT_BASE:-/tmp/powos-mods}"
+# Mount base differs by method:
+#   kernel → /run/powos-mods  (root-owned, constructed by the helper)
+#   fuse   → /tmp/powos-mods  (user-writable, no root needed)
+MODS_MOUNT_BASE_KERNEL="/run/powos-mods"
+MODS_MOUNT_BASE_FUSE="${MODS_MOUNT_BASE:-/tmp/powos-mods}"
 MODS_MOUNT_HELPER="${MODS_MOUNT_HELPER:-/usr/lib/powos/powos-mods-mount}"
 
 # ── mount method detection ──────────────────────────────────────────────
@@ -39,11 +45,22 @@ mods_deploy_method() {
 }
 
 # ── overlay paths ───────────────────────────────────────────────────────
+# These return the EXPECTED paths. For kernel method, the helper constructs
+# the actual dirs under /run/powos-mods. For fuse, we create them ourselves.
 
-_mods_mount_dir()  { echo "$MODS_MOUNT_BASE/$1"; }       # game
-_mods_merged_dir() { echo "$MODS_MOUNT_BASE/$1/merged"; }
-_mods_upper_dir()  { echo "$MODS_MOUNT_BASE/$1/upper"; }
-_mods_work_dir()   { echo "$MODS_MOUNT_BASE/$1/work"; }
+_mods_mount_base() {
+    local method
+    method="$(mods_deploy_method 2>/dev/null)" || method="fuse"
+    case "$method" in
+        kernel) echo "$MODS_MOUNT_BASE_KERNEL" ;;
+        *)      echo "$MODS_MOUNT_BASE_FUSE" ;;
+    esac
+}
+
+_mods_mount_dir()  { echo "$(_mods_mount_base)/$1"; }
+_mods_merged_dir() { echo "$(_mods_mount_base)/$1/merged"; }
+_mods_upper_dir()  { echo "$(_mods_mount_base)/$1/upper"; }
+_mods_work_dir()   { echo "$(_mods_mount_base)/$1/work"; }
 
 # ── mount ───────────────────────────────────────────────────────────────
 
@@ -100,11 +117,6 @@ mods_deploy_mount() {
         pwarn "lowerdir string is ${opts_len} chars (limit ~4096). Consider pre-merge staging for >30 mods."
     fi
 
-    # Prepare mount dirs
-    local upper; upper="$(_mods_upper_dir "$game")"
-    local work; work="$(_mods_work_dir "$game")"
-    mkdir -p "$merged" "$upper" "$work"
-
     # Detect method and mount
     local method
     method="$(mods_deploy_method)" || return 1
@@ -112,13 +124,18 @@ mods_deploy_mount() {
     case "$method" in
         kernel)
             plog "Mounting overlay (kernel, via mount helper)..."
-            sudo "$MODS_MOUNT_HELPER" mount \
-                "$lowerdir" "$upper" "$work" "$merged" || {
+            # New interface: helper takes slug + lowerdir, constructs everything else
+            sudo "$MODS_MOUNT_HELPER" mount "$game" "$lowerdir" || {
                 perr "Kernel overlay mount failed."
                 return 1
             }
             ;;
         fuse)
+            local upper; upper="$(_mods_upper_dir "$game")"
+            local work; work="$(_mods_work_dir "$game")"
+            merged="$(_mods_merged_dir "$game")"
+            mkdir -p "$merged" "$upper" "$work"
+
             plog "Mounting overlay (fuse-overlayfs)..."
             fuse-overlayfs \
                 -o "lowerdir=${lowerdir},upperdir=${upper},workdir=${work}" \
@@ -151,7 +168,8 @@ mods_deploy_unmount() {
 
     case "$method" in
         kernel)
-            sudo "$MODS_MOUNT_HELPER" umount "$merged" || {
+            # New interface: helper takes slug only
+            sudo "$MODS_MOUNT_HELPER" umount "$game" || {
                 perr "Unmount failed. Game may be running — close it first."
                 return 1
             }

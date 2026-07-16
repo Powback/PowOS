@@ -28,7 +28,9 @@ PID_FILE="/run/powos/verify/${APPID}.pid"
 # The manifest → game mapping is resolved by scanning manifests for appid.
 MODS_STATE_DIR="${MODS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/powos/mods}"
 MODS_MANIFEST_DIR="$MODS_STATE_DIR/manifests"
-MODS_MOUNT_BASE="${MODS_MOUNT_BASE:-/tmp/powos-mods}"
+# Check both mount bases — kernel helper uses /run, fuse uses /tmp
+MODS_MOUNT_BASE_KERNEL="/run/powos-mods"
+MODS_MOUNT_BASE_FUSE="${MODS_MOUNT_BASE:-/tmp/powos-mods}"
 
 if [[ -d "$MODS_MANIFEST_DIR" ]] && [[ "$APPID" != "unknown" ]]; then
     # Find the manifest for this appid
@@ -43,9 +45,17 @@ if [[ -d "$MODS_MANIFEST_DIR" ]] && [[ "$APPID" != "unknown" ]]; then
     done
 
     if [[ -n "$_game" ]]; then
-        _merged="$MODS_MOUNT_BASE/$_game/merged"
-        # Check if overlay should be mounted but isn't
-        if ! mountpoint -q "$_merged" 2>/dev/null; then
+        # Try kernel mount base first, then fuse
+        _merged=""
+        for _base in "$MODS_MOUNT_BASE_KERNEL" "$MODS_MOUNT_BASE_FUSE"; do
+            if mountpoint -q "$_base/$_game/merged" 2>/dev/null; then
+                _merged="$_base/$_game/merged"
+                break
+            fi
+        done
+
+        # If not mounted anywhere, try to mount via powos CLI
+        if [[ -z "$_merged" ]]; then
             # Try to mount via powos CLI (which sources deploy.sh)
             _powos="${POWOS_BIN:-$(command -v powos 2>/dev/null || echo /usr/bin/powos)}"
             if [[ -x "$_powos" ]]; then
@@ -53,13 +63,23 @@ if [[ -d "$MODS_MANIFEST_DIR" ]] && [[ "$APPID" != "unknown" ]]; then
             fi
         fi
 
-        # If overlay is mounted, rewrite STEAM_COMPAT_INSTALL_PATH and
-        # game dir to point at merged view so Proton sees modded files
-        if mountpoint -q "$_merged" 2>/dev/null; then
+        # After deploy attempt, re-check both bases for the mounted overlay
+        if [[ -z "$_merged" ]]; then
+            for _base in "$MODS_MOUNT_BASE_KERNEL" "$MODS_MOUNT_BASE_FUSE"; do
+                if mountpoint -q "$_base/$_game/merged" 2>/dev/null; then
+                    _merged="$_base/$_game/merged"
+                    break
+                fi
+            done
+        fi
+
+        # If overlay is mounted, rewrite STEAM_COMPAT_INSTALL_PATH so
+        # Proton sees modded files
+        if [[ -n "$_merged" ]] && mountpoint -q "$_merged" 2>/dev/null; then
             export STEAM_COMPAT_INSTALL_PATH="$_merged"
         fi
     fi
-    unset _game _merged _powos _mf_appid
+    unset _game _merged _powos _mf_appid _base
 fi
 
 # ── Phase 2: Source verify env sentinel ────────────────────────────────

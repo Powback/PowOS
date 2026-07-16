@@ -1,101 +1,158 @@
 #!/bin/bash
 # powos-mods-mount — Scoped sudoers helper for mod overlay mounts.
 #
-# This binary is called via sudo from deploy.sh. It validates all arguments
-# to prevent injection attacks — only mounts/unmounts at approved paths.
+# Runs as root via sudoers. Caller supplies ONLY a game slug and the
+# lowerdir string — upper/work/merged paths are CONSTRUCTED by this
+# script under a root-owned base. The caller cannot influence them.
 #
-# Allowed operations:
-#   powos-mods-mount check                        — validate sudoers access
-#   powos-mods-mount mount <lowerdir> <upper> <work> <merged>
-#   powos-mods-mount umount <mountpoint>
+# Interface:
+#   powos-mods-mount check                    — validate sudoers access
+#   powos-mods-mount mount <slug> <lowerdir>  — mount overlay for game
+#   powos-mods-mount umount <slug>            — unmount overlay for game
 #
-# Security constraints:
-#   - merged must be under /tmp/powos-mods/*/merged
-#   - upper/work must be under /tmp/powos-mods/
-#   - lowerdir components must be under common Steam library paths or staging
-#   - no semicolons, backticks, pipes, $() in any argument (injection guard)
-#   - this script runs as root via sudoers — minimal surface
+# Security model:
+#   - Base dir is /run/powos-mods (root-owned, tmpfs, auto-clean on reboot)
+#   - Slug is validated: ^[a-z0-9-]{1,64}$ — no path traversal possible
+#   - upper/work/merged are constructed, never user-supplied
+#   - After mkdir, every path is realpath'd and re-verified to be under base
+#   - Symlinks at any level under base are rejected (lstat check)
+#   - lowerdir components are realpath'd THEN allowlisted; owner must be
+#     the invoking user (SUDO_UID) or root — kills cross-user reads
 
 set -euo pipefail
 
-MOUNT_BASE="/tmp/powos-mods"
+MOUNT_BASE="/run/powos-mods"
 
 die() { echo "powos-mods-mount: ERROR: $*" >&2; exit 1; }
 
-# ── injection guard ────────────────────────────────────────────────────
-# Reject any argument containing shell metacharacters
-validate_no_injection() {
-    local arg="$1" label="$2"
-    if [[ "$arg" =~ [\;\|\&\$\`\\!\{\}\(\)] ]]; then
-        die "rejected $label: contains shell metacharacters"
-    fi
-    # No null bytes
-    if [[ "$arg" == *$'\0'* ]]; then
-        die "rejected $label: contains null bytes"
+# ── slug validation ───────────────────────────────────────────────────
+# Only lowercase alphanumerics and hyphens, 1-64 chars. No dots, no
+# slashes, no path traversal — period.
+validate_slug() {
+    local slug="$1"
+    if [[ ! "$slug" =~ ^[a-z0-9-]{1,64}$ ]]; then
+        die "invalid slug: '$slug' (must be ^[a-z0-9-]{1,64}\$)"
     fi
 }
 
-# ── path validation ────────────────────────────────────────────────────
-
-validate_merged() {
-    local path="$1"
-    validate_no_injection "$path" "merged"
-    # Must be under /tmp/powos-mods/<game>/merged
-    if [[ "$path" != "$MOUNT_BASE"/*/merged ]]; then
-        die "merged path must be $MOUNT_BASE/<game>/merged, got: $path"
+# ── ensure root-owned base ────────────────────────────────────────────
+# Create /run/powos-mods if missing. Refuse if it exists and is not a
+# root-owned real directory (reject symlinks, reject non-root owner).
+ensure_base() {
+    if [[ -L "$MOUNT_BASE" ]]; then
+        die "base $MOUNT_BASE is a symlink — refusing"
     fi
-}
 
-validate_mount_subdir() {
-    local path="$1" label="$2"
-    validate_no_injection "$path" "$label"
-    # Must be under /tmp/powos-mods/
-    local real
-    # Allow path to not exist yet (mkdir -p happens before mount)
-    if [[ -e "$path" ]]; then
-        real="$(realpath "$path")"
+    if [[ -e "$MOUNT_BASE" ]]; then
+        # Must be a directory owned by root
+        if [[ ! -d "$MOUNT_BASE" ]]; then
+            die "base $MOUNT_BASE exists but is not a directory"
+        fi
+        local owner
+        owner="$(stat -c %u "$MOUNT_BASE")"
+        if [[ "$owner" != "0" ]]; then
+            die "base $MOUNT_BASE not owned by root (owner=$owner)"
+        fi
     else
-        real="$path"
-    fi
-    if [[ "$real" != "$MOUNT_BASE"/* ]]; then
-        die "$label must be under $MOUNT_BASE, got: $real"
+        mkdir -p "$MOUNT_BASE"
+        chmod 0755 "$MOUNT_BASE"
+        chown root:root "$MOUNT_BASE"
     fi
 }
 
+# ── symlink-safe path verification ────────────────────────────────────
+# After creating a directory, verify that its realpath is still under
+# the expected parent and that no component is a symlink.
+verify_path_under_base() {
+    local path="$1" label="$2"
+
+    # Must exist
+    if [[ ! -e "$path" ]]; then
+        die "$label does not exist: $path"
+    fi
+
+    # Reject if the path itself is a symlink
+    if [[ -L "$path" ]]; then
+        die "$label is a symlink: $path"
+    fi
+
+    # Resolve and verify under MOUNT_BASE
+    local resolved
+    resolved="$(realpath "$path")"
+    local base_resolved
+    base_resolved="$(realpath "$MOUNT_BASE")"
+
+    if [[ "$resolved" != "$base_resolved"/* ]]; then
+        die "$label resolved to $resolved — not under $base_resolved"
+    fi
+
+    # Walk each component between base and path, reject any symlink
+    local relative="${resolved#"$base_resolved"/}"
+    local check="$base_resolved"
+    IFS='/' read -ra parts <<< "$relative"
+    for part in "${parts[@]}"; do
+        check="$check/$part"
+        if [[ -L "$check" ]]; then
+            die "$label has symlink component at: $check"
+        fi
+    done
+}
+
+# ── lowerdir validation ───────────────────────────────────────────────
+# Each component is realpath'd, then checked against the allowlist.
+# Owner must be the invoking user or root.
 validate_lowerdir() {
     local lowerdir="$1"
-    validate_no_injection "$lowerdir" "lowerdir"
 
-    # Split on : and validate each component
+    # Reject shell metacharacters
+    if [[ "$lowerdir" =~ [\;\|\&\$\`\\!\{\}\(\)] ]]; then
+        die "lowerdir contains shell metacharacters"
+    fi
+
+    # Get the real invoking user's UID (before sudo)
+    local caller_uid="${SUDO_UID:-0}"
+
     IFS=: read -ra components <<< "$lowerdir"
     for comp in "${components[@]}"; do
         [[ -z "$comp" ]] && continue
 
-        # Each lowerdir component must be:
-        # - A Steam library path (contains /steamapps/common/)
-        # - A staging dir (under MODS_STATE_DIR or /tmp/)
-        # - Under /home/ (user home dirs)
-        # - Under /var/mnt/ (mounted partitions)
+        # Must be an existing directory
+        if [[ ! -d "$comp" ]]; then
+            die "lowerdir component is not a directory: $comp"
+        fi
+
+        # Reject if it's a symlink at the top level
+        if [[ -L "$comp" ]]; then
+            die "lowerdir component is a symlink: $comp"
+        fi
+
+        # Resolve to real path
+        local resolved
+        resolved="$(realpath "$comp")"
+
+        # Allowlist check on RESOLVED path
         local allowed=false
-        case "$comp" in
+        case "$resolved" in
             */steamapps/common/*) allowed=true ;;
             /home/*)              allowed=true ;;
-            /tmp/*)               allowed=true ;;
             /var/mnt/*)           allowed=true ;;
             /run/media/*)         allowed=true ;;
         esac
 
         if ! $allowed; then
-            die "lowerdir component not in allowed path: $comp"
+            die "lowerdir component not in allowed path (resolved): $resolved"
         fi
 
-        if [[ ! -d "$comp" ]]; then
-            die "lowerdir component is not a directory: $comp"
+        # Owner check: must be owned by the invoking user or root
+        local comp_owner
+        comp_owner="$(stat -c %u "$resolved")"
+        if [[ "$comp_owner" != "$caller_uid" && "$comp_owner" != "0" ]]; then
+            die "lowerdir component owner=$comp_owner, expected $caller_uid or 0: $resolved"
         fi
     done
 }
 
-# ── commands ───────────────────────────────────────────────────────────
+# ── commands ──────────────────────────────────────────────────────────
 
 cmd_check() {
     echo "ok"
@@ -103,17 +160,33 @@ cmd_check() {
 }
 
 cmd_mount() {
-    local lowerdir="${1:?mount requires: <lowerdir> <upper> <work> <merged>}"
-    local upper="${2:?mount requires: <lowerdir> <upper> <work> <merged>}"
-    local work="${3:?mount requires: <lowerdir> <upper> <work> <merged>}"
-    local merged="${4:?mount requires: <lowerdir> <upper> <work> <merged>}"
+    local slug="${1:?mount requires: <slug> <lowerdir>}"
+    local lowerdir="${2:?mount requires: <slug> <lowerdir>}"
 
+    validate_slug "$slug"
     validate_lowerdir "$lowerdir"
-    validate_mount_subdir "$upper" "upper"
-    validate_mount_subdir "$work" "work"
-    validate_merged "$merged"
+    ensure_base
 
+    # Construct paths — caller never supplies these
+    local game_dir="$MOUNT_BASE/$slug"
+    local merged="$game_dir/merged"
+    local upper="$game_dir/upper"
+    local work="$game_dir/work"
+
+    # Create directories as root
     mkdir -p "$merged" "$upper" "$work"
+
+    # Verify all created paths are safe (post-mkdir symlink check)
+    verify_path_under_base "$game_dir" "game_dir"
+    verify_path_under_base "$merged" "merged"
+    verify_path_under_base "$upper" "upper"
+    verify_path_under_base "$work" "work"
+
+    # Already mounted?
+    if mountpoint -q "$merged" 2>/dev/null; then
+        echo "already mounted: $merged"
+        exit 0
+    fi
 
     mount -t overlay overlay \
         -o "lowerdir=${lowerdir},upperdir=${upper},workdir=${work}" \
@@ -123,8 +196,15 @@ cmd_mount() {
 }
 
 cmd_umount() {
-    local merged="${1:?umount requires: <mountpoint>}"
-    validate_merged "$merged"
+    local slug="${1:?umount requires: <slug>}"
+    validate_slug "$slug"
+
+    local merged="$MOUNT_BASE/$slug/merged"
+
+    # Verify the path is real (not symlinked)
+    if [[ -L "$MOUNT_BASE/$slug" ]]; then
+        die "game dir is a symlink: $MOUNT_BASE/$slug"
+    fi
 
     if ! mountpoint -q "$merged" 2>/dev/null; then
         echo "not mounted: $merged"
@@ -135,7 +215,7 @@ cmd_umount() {
     echo "unmounted: $merged"
 }
 
-# ── dispatch ───────────────────────────────────────────────────────────
+# ── dispatch ──────────────────────────────────────────────────────────
 
 case "${1:-}" in
     check)  cmd_check ;;
@@ -143,8 +223,8 @@ case "${1:-}" in
     umount) shift; cmd_umount "$@" ;;
     *)
         echo "Usage: powos-mods-mount {check|mount|umount}" >&2
-        echo "  mount  <lowerdir> <upper> <work> <merged>" >&2
-        echo "  umount <mountpoint>" >&2
+        echo "  mount  <slug> <lowerdir>" >&2
+        echo "  umount <slug>" >&2
         exit 1
         ;;
 esac

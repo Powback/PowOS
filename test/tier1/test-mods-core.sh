@@ -468,7 +468,7 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════
-# 10. MOUNT HELPER (syntax check)
+# 10. MOUNT HELPER (syntax + security validation)
 # ═══════════════════════════════════════════════════════════════════════
 echo "== Mount helper =="
 
@@ -477,8 +477,50 @@ if [[ -f "$MOUNT_HELPER" ]]; then
     check "mount helper syntax" 'bash -n "$MOUNT_HELPER"'
     check "mount helper is executable" '[[ -x "$MOUNT_HELPER" ]]'
     check "mount helper check subcommand" 'bash "$MOUNT_HELPER" check >/dev/null 2>&1'
-    # Injection test (should fail)
-    check "mount helper rejects injection" '! bash "$MOUNT_HELPER" umount "/tmp/powos-mods/test;rm -rf /merged" 2>/dev/null'
+
+    # ── Slug validation ──
+    check "rejects bad slug (path traversal)" \
+        '! bash "$MOUNT_HELPER" umount "../etc" 2>/dev/null'
+    check "rejects bad slug (dots)" \
+        '! bash "$MOUNT_HELPER" umount "a.b" 2>/dev/null'
+    check "rejects bad slug (slash)" \
+        '! bash "$MOUNT_HELPER" umount "a/b" 2>/dev/null'
+    check "rejects bad slug (uppercase)" \
+        '! bash "$MOUNT_HELPER" umount "CyberPunk" 2>/dev/null'
+    check "rejects bad slug (metacharacters)" \
+        '! bash "$MOUNT_HELPER" umount "test;rm" 2>/dev/null'
+    check "rejects bad slug (too long)" \
+        '! bash "$MOUNT_HELPER" umount "$(printf "a%.0s" {1..65})" 2>/dev/null'
+    check "rejects empty slug" \
+        '! bash "$MOUNT_HELPER" umount "" 2>/dev/null'
+    check "accepts valid slug" \
+        'bash "$MOUNT_HELPER" umount "cyberpunk2077" 2>/dev/null'
+
+    # ── Lowerdir injection (mount subcommand, will fail at mount(2) but
+    #    validation runs first — test that invalid paths are rejected) ──
+    # Lowerdir with metacharacters
+    check "rejects lowerdir with semicolon" \
+        '! bash "$MOUNT_HELPER" mount "test" "/home/x;/etc/shadow" 2>/dev/null'
+    check "rejects lowerdir with backtick" \
+        '! bash "$MOUNT_HELPER" mount "test" "/home/x:\`id\`" 2>/dev/null'
+
+    # Lowerdir outside allowlist (resolved path)
+    check "rejects lowerdir outside allowlist" \
+        '! bash "$MOUNT_HELPER" mount "test" "/etc/passwd" 2>/dev/null'
+    check "rejects lowerdir /usr" \
+        '! bash "$MOUNT_HELPER" mount "test" "/usr/bin" 2>/dev/null'
+
+    # Lowerdir that is a symlink (create temp symlink to test)
+    LINK_TEST="$TMP/symlink-lowerdir-test"
+    mkdir -p "$TMP/real-dir"
+    ln -sf "$TMP/real-dir" "$LINK_TEST"
+    check "rejects symlinked lowerdir" \
+        '! bash "$MOUNT_HELPER" mount "test" "$LINK_TEST" 2>/dev/null'
+    rm -f "$LINK_TEST"
+
+    # Lowerdir that doesn't exist
+    check "rejects nonexistent lowerdir" \
+        '! bash "$MOUNT_HELPER" mount "test" "/home/nonexistent/dir" 2>/dev/null'
 else
     skip "mount helper (not found)"
 fi
