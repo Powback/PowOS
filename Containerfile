@@ -124,8 +124,17 @@ RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
 # work out of the box on this Podman-native OS: podman-compose is the compose
 # provider, podman-docker ships /usr/bin/docker→podman plus the `nodocker` file
 # that silences the emulation notice. No Docker daemon, fully rootless.
+#
+# PowStream runtime deps (first-party streaming — must not fail on a fresh
+# install). Bazzite already ships gstreamer1, -plugins-base, -plugins-good,
+# -plugins-bad-free (webrtcbin/dtls/srtp), -plugin-pipewire (pipewiresrc),
+# and nvcodec (nvh264enc) via the NVIDIA image. The ONE package it omits is
+# libnice-gstreamer1 — the GStreamer plugin for ICE (nicesink/nicesrc), which
+# webrtcbin needs at runtime to negotiate WebRTC connections. Without it the
+# stream hangs at "Negotiating" with "missing a plug-in" in the server log.
 RUN dnf5 -y install --setopt=install_weak_deps=False \
-        openrgb piper logiops uv unzip podman-compose podman-docker && \
+        openrgb piper logiops uv unzip podman-compose podman-docker \
+        libnice-gstreamer1 && \
     curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip" \
         -o /tmp/bun.zip && \
     unzip -q -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/bin/ && \
