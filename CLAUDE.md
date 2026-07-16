@@ -1327,7 +1327,7 @@ session dies after login (plasmashell crash), historical ramboot hang.
 | Mobile mode | ✅ Implemented (hardware validation pending) | Live bind mounts: tmpfs + per-directory bind over `/usr` `/opt` `/libexec`. No reboot. `/etc`/`var` still USB-backed. Binds lost on reboot (re-run enable). |
 | Sync conflict detection | ⚠️ Partial | Detection works; `--merge` has basic implementation, may need manual help |
 | Cloud backup | ⚠️ Partial | git-based implementation exists (`lib/backup.sh`); not fully validated |
-| Tier-2 VM testing | ❌ Missing | Only Docker/tier-1 tests exist |
+| Tier-2 VM testing | ✅ Implemented | QEMU-KVM boot-to-desktop: stages A (boot), B (SDDM), C (desktop), D (Anaconda install), R (ramboot regression). CI blocks publish on A-C. |
 
 ## Credentials
 

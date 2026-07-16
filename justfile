@@ -305,40 +305,55 @@ push registry="ghcr.io/user/powos":
     @echo "Pushed to {{registry}}"
 
 # ═══════════════════════════════════════════════════════════════════
-#  VM TESTING (Tier 2)
+#  VM TESTING (Tier 2) — Boot-to-Desktop E2E
 # ═══════════════════════════════════════════════════════════════════
 
-# Create QEMU disk image for testing
+# Run tier-2 boot-to-desktop tests (stages A-C: boot, SDDM, desktop)
+# Needs: qemu, ovmf, sshpass, python3. KVM recommended (TCG fallback).
+test-e2e image="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    img='{{image}}'
+    if [[ -z "$img" ]]; then
+        # Try common locations
+        for candidate in build/output/qcow2/disk.qcow2 build/output/image/disk.raw build/output/powos.raw; do
+            [[ -f "$candidate" ]] && img="$candidate" && break
+        done
+    fi
+    if [[ -z "$img" ]]; then
+        echo "No image found. Either:"
+        echo "  just test-e2e path/to/disk.qcow2"
+        echo "  just test-e2e-container"
+        exit 1
+    fi
+    chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
+    bash test/tier2/run.sh --image "$img"
+
+# Run tier-2 tests from a container image (builds qcow2 via bib first)
+test-e2e-container container="localhost/powos:latest":
+    chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
+    bash test/tier2/run.sh --from-container {{container}}
+
+# Run tier-2 with ramboot regression test
+test-e2e-ramboot image:
+    chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
+    bash test/tier2/run.sh --image {{image}} --ramboot
+
+# Create QEMU disk image for manual testing
 vm-create-disk size="20G":
     @mkdir -p test/tier2
     qemu-img create -f qcow2 test/tier2/powos-test.qcow2 {{size}}
     @echo "Created: test/tier2/powos-test.qcow2 ({{size}})"
 
-# Boot VM for testing (requires ISO)
-vm-boot:
-    @if [ ! -f test/tier2/powos.iso ]; then \
-        echo "Error: test/tier2/powos.iso not found"; \
-        echo "Place a bootable ISO there first"; \
-        exit 1; \
-    fi
+# Boot VM interactively (GUI, for manual testing)
+vm-boot image:
     qemu-system-x86_64 \
         -enable-kvm \
         -m 4G \
         -smp 4 \
-        -drive file=test/tier2/powos-test.qcow2,format=qcow2 \
-        -cdrom test/tier2/powos.iso \
-        -boot d \
-        -display gtk \
-        -device virtio-net-pci,netdev=net0 \
-        -netdev user,id=net0,hostfwd=tcp::2222-:22
-
-# Boot VM from disk only (after install)
-vm-boot-installed:
-    qemu-system-x86_64 \
-        -enable-kvm \
-        -m 4G \
-        -smp 4 \
-        -drive file=test/tier2/powos-test.qcow2,format=qcow2 \
+        -drive file={{image}},if=virtio \
+        -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+        -vga std \
         -display gtk \
         -device virtio-net-pci,netdev=net0 \
         -netdev user,id=net0,hostfwd=tcp::2222-:22
