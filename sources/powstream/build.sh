@@ -115,7 +115,11 @@ ConditionUser=!@system
 
 [Service]
 ExecStartPre=/usr/bin/mkdir -p /tmp/depthcap
-ExecStart=/usr/lib/powstream/bin/powstream-webrtc-server --web-root /usr/lib/powstream/web
+# 120fps halves the pacer's frame-quantization latency vs 60 (~16ms→~8ms) on
+# high-refresh displays; 20Mbps keeps per-frame quality since bits/frame
+# otherwise halve at 120fps. Both overridable via a drop-in.
+Environment=POWSTREAM_FPS=120 POWSTREAM_BITRATE=20000
+ExecStart=/usr/lib/powstream/bin/powstream-webrtc-server --web-root /usr/lib/powstream/web --fps ${POWSTREAM_FPS} --bitrate ${POWSTREAM_BITRATE}
 Restart=on-failure
 RestartSec=3
 
