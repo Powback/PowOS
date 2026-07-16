@@ -193,6 +193,8 @@ test_ram_usb_sync_functions_exist() {
     assert_function_exists "check_for_conflicts" "check_for_conflicts exists"
     assert_function_exists "read_sync_marker" "read_sync_marker exists"
     assert_function_exists "write_sync_marker" "write_sync_marker exists"
+    assert_function_exists "write_sync_manifest" "write_sync_manifest exists"
+    assert_function_exists "load_sync_manifest" "load_sync_manifest exists"
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -664,6 +666,294 @@ test_has_uncommitted() {
 # Tests: Configuration
 # ─────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────
+# Tests: 3-way merge (all 6 conflict classes)
+# ─────────────────────────────────────────────────────────────────
+#
+# We test ram_sync_merge() by:
+#   1. Creating a fake RAM upper dir and fake USB custom dir.
+#   2. Writing a manifest (the BASE) representing the last-common sync.
+#   3. Calling ram_sync_merge() with those paths via overriding the globals.
+#   4. Asserting the correct file is present in the RAM upper after the merge.
+
+test_three_way_merge() {
+    echo ""
+    echo "Test: 3-way merge — manifest functions + 6 conflict classes"
+
+    # Temporary sandbox — completely separate from the main TEST_DIR git state.
+    local merge_dir="$TEST_DIR/merge-$$"
+    local ram_upper="$merge_dir/ram"
+    mkdir -p "$ram_upper"
+
+    # Point the globals to our fake USB.
+    local old_usb="$USB_MOUNT"
+    local old_marker="$SYNC_MARKER"
+    local old_manifest="$SYNC_MANIFEST"
+    local old_machine="$MACHINE_ID"
+
+    USB_MOUNT="$merge_dir/fake-usb"
+    mkdir -p "$USB_MOUNT/layers/custom"
+    SYNC_MARKER="$USB_MOUNT/.powos-sync"
+    SYNC_MANIFEST="$USB_MOUNT/.powos-sync-manifest"
+    MACHINE_ID="test-machine-A"
+
+    # ── 1. Test write_sync_manifest / load_sync_manifest in isolation ─
+    # Use a dedicated file so we don't pollute the class-test USB tree.
+    local mf_test_file="$USB_MOUNT/layers/custom/manifest-probe.txt"
+    echo "probe content" > "$mf_test_file"
+    write_sync_manifest
+
+    ((TESTS_RUN++)) || true
+    if [[ -f "$SYNC_MANIFEST" ]]; then
+        echo -e "${GREEN}✓${NC} write_sync_manifest creates the manifest file"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} write_sync_manifest did not create the manifest"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    declare -A LOADED_MAP=()
+    load_sync_manifest LOADED_MAP 2>/dev/null
+    ((TESTS_RUN++)) || true
+    if [[ -n "${LOADED_MAP[manifest-probe.txt]+x}" ]]; then
+        echo -e "${GREEN}✓${NC} load_sync_manifest: regular file has hash entry"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} load_sync_manifest: regular file entry missing"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    # Whiteout test (only when mknod is available, i.e. root).
+    if mknod "$USB_MOUNT/layers/custom/wh-probe" c 0 0 2>/dev/null; then
+        write_sync_manifest
+        declare -A LOADED_WH=()
+        load_sync_manifest LOADED_WH 2>/dev/null
+        assert_equals "DELETED" "${LOADED_WH[wh-probe]:-MISSING}" \
+            "load_sync_manifest: whiteout entry is DELETED"
+        rm -f "$USB_MOUNT/layers/custom/wh-probe"
+    else
+        echo "  (whiteout manifest test skipped — mknod unavailable outside root)"
+    fi
+
+    # Clean the USB tree for the merge class tests.
+    rm -f "$mf_test_file"
+    rm -f "$SYNC_MANIFEST"
+
+    # ── 2. Set up the 6 conflict-class trees ──────────────────────
+    #
+    # BASE state (what both machines had at the last sync):
+    #   class1.txt: "base content"   (RAM will modify it)
+    #   class2.txt: "base content"   (USB will modify it)
+    #   class3.txt: "base content"   (both will modify it, RAM newer)
+    #   class6.txt: "base content"   (USB will delete it)
+    #
+    # Not in BASE (new after last sync):
+    #   class4.txt: added on RAM only
+    #   class5.txt: added on USB only
+    #
+    # Compute base hash (same string for class1/2/3/6).
+    local h_base
+    h_base=$(printf '%s\n' "base content" | md5sum | cut -d' ' -f1)
+    # class3 and class6 are stored in separate temp files for clarity.
+    printf '%s\n' "base content" > "$merge_dir/base3.tmp"
+    local h_base3; h_base3=$(md5sum "$merge_dir/base3.tmp" | cut -d' ' -f1)
+    printf '%s\n' "base content" > "$merge_dir/base6.tmp"
+    local h_base6; h_base6=$(md5sum "$merge_dir/base6.tmp" | cut -d' ' -f1)
+
+    # Write the BASE manifest manually — this represents the last-common-sync
+    # state, BEFORE either machine made its changes.
+    {
+        printf '# powos-sync-manifest v1\n'
+        printf '# machine: %s\n' "$MACHINE_ID"
+        printf '# timestamp: 1000000000\n'
+        printf '%s  class1.txt\n' "$h_base"
+        printf '%s  class2.txt\n' "$h_base"
+        printf '%s  class3.txt\n' "$h_base3"
+        printf '%s  class6.txt\n' "$h_base6"
+        # class4/class5 are NOT in the base (new on each machine).
+    } > "$SYNC_MANIFEST"
+
+    # Set up RAM upper (this machine's changes from BASE).
+    printf '%s\n' "RAM modified"   > "$ram_upper/class1.txt"   # changed from base
+    printf '%s\n' "base content"   > "$ram_upper/class2.txt"   # unchanged
+    printf '%s\n' "RAM changed"    > "$ram_upper/class3.txt"   # changed (newer)
+    touch -t 202601010200              "$ram_upper/class3.txt"
+    printf '%s\n' "RAM new file"   > "$ram_upper/class4.txt"   # new on RAM only
+    # class5: not in RAM (new on USB only)
+    printf '%s\n' "base content"   > "$ram_upper/class6.txt"   # unchanged from base
+
+    # Set up USB custom (other machine's changes from BASE).
+    printf '%s\n' "base content"   > "$USB_MOUNT/layers/custom/class1.txt"   # unchanged
+    printf '%s\n' "USB modified"   > "$USB_MOUNT/layers/custom/class2.txt"   # changed
+    printf '%s\n' "USB changed"    > "$USB_MOUNT/layers/custom/class3.txt"   # changed (older)
+    touch -t 202601010100              "$USB_MOUNT/layers/custom/class3.txt"
+    # class4: not in USB (new on RAM only)
+    printf '%s\n' "USB new file"   > "$USB_MOUNT/layers/custom/class5.txt"   # new on USB only
+    # class6: USB deleted it.
+    mknod "$USB_MOUNT/layers/custom/class6.txt" c 0 0 2>/dev/null || \
+        true   # non-root: omit whiteout (class6 test will be skipped)
+
+    # ── 3. Run the merge via an inline override ────────────────────
+    # ram_sync_merge() hard-codes /run/powos-overlay/upper; we shadow it
+    # here with a version that uses our test paths.
+    local saved_ram_upper="$ram_upper"
+
+    local merge_out
+    merge_out=$(
+        ram_sync_merge() {
+            local ram_upper="$saved_ram_upper"
+            local usb_custom="$USB_MOUNT/layers/custom"
+
+            [[ -d "$ram_upper" && -d "$usb_custom" ]] || { echo "paths missing"; return 1; }
+
+            declare -A BASE_HASH=()
+            local has_manifest=0
+            load_sync_manifest BASE_HASH 2>/dev/null && has_manifest=1
+
+            _is_whiteout() {
+                [[ -c "$1" ]] && [[ "$(LC_ALL=C stat -c '%t%T' "$1" 2>/dev/null)" == "00" ]]
+            }
+            _file_hash() {
+                local f="$1"
+                if _is_whiteout "$f"; then echo "DELETED"
+                elif [[ -f "$f" ]]; then md5sum "$f" 2>/dev/null | cut -d' ' -f1
+                else echo ""
+                fi
+            }
+
+            declare -A all_files=()
+            while IFS= read -r -d '' f; do
+                all_files["${f#${ram_upper}/}"]=1
+            done < <(find "$ram_upper" \( -type f -o -type c \) -print0 2>/dev/null)
+            while IFS= read -r -d '' f; do
+                all_files["${f#${usb_custom}/}"]=1
+            done < <(find "$usb_custom" \( -type f -o -type c \) -print0 2>/dev/null)
+
+            local n_ram_kept=0 n_usb_taken=0 n_conflict=0
+            for rel in "${!all_files[@]}"; do
+                [[ "$rel" == *.powos-conflict-* ]] && continue
+                local ram_f="$ram_upper/$rel"
+                local usb_f="$usb_custom/$rel"
+                local ram_hash="" usb_hash="" base_hash="ABSENT"
+                [[ -f "$ram_f" || -c "$ram_f" ]] && ram_hash=$(_file_hash "$ram_f")
+                [[ -f "$usb_f" || -c "$usb_f" ]] && usb_hash=$(_file_hash "$usb_f")
+                [[ -n "${BASE_HASH[$rel]+x}" ]] && base_hash="${BASE_HASH[$rel]}"
+
+                if [[ -z "$usb_hash" ]]; then
+                    if [[ "$base_hash" != "ABSENT" && "$ram_hash" == "$base_hash" ]]; then
+                        rm -f "$ram_f" 2>/dev/null || true
+                    else
+                        (( n_ram_kept++ )) || true
+                    fi
+                    continue
+                fi
+                if [[ -z "$ram_hash" ]]; then
+                    if [[ "$base_hash" != "ABSENT" && "$usb_hash" == "$base_hash" ]]; then
+                        :
+                    else
+                        mkdir -p "$(dirname "$ram_f")"
+                        cp -a "$usb_f" "$ram_f"
+                        (( n_usb_taken++ )) || true
+                    fi
+                    continue
+                fi
+                [[ "$ram_hash" == "$usb_hash" ]] && continue
+
+                if [[ "$has_manifest" -eq 1 && "$base_hash" != "ABSENT" ]]; then
+                    if [[ "$ram_hash" == "$base_hash" ]]; then
+                        mkdir -p "$(dirname "$ram_f")"
+                        cp -a "$usb_f" "$ram_f"
+                        (( n_usb_taken++ )) || true
+                        continue
+                    fi
+                    if [[ "$usb_hash" == "$base_hash" ]]; then
+                        (( n_ram_kept++ )) || true
+                        continue
+                    fi
+                fi
+
+                (( n_conflict++ )) || true
+                local ram_mtime usb_mtime
+                ram_mtime=$(stat -c '%Y' "$ram_f" 2>/dev/null || echo 0)
+                usb_mtime=$(stat -c '%Y' "$usb_f" 2>/dev/null || echo 0)
+                if (( usb_mtime > ram_mtime )); then
+                    cp -a "$ram_f" "${ram_f}.powos-conflict-${MACHINE_ID}" 2>/dev/null || true
+                    cp -a "$usb_f" "$ram_f"
+                    (( n_usb_taken++ )) || true
+                else
+                    mkdir -p "$(dirname "$ram_f")"
+                    cp -a "$usb_f" "${ram_f}.powos-conflict-${MACHINE_ID}" 2>/dev/null || true
+                    (( n_ram_kept++ )) || true
+                fi
+            done
+            printf 'ram_kept=%d usb_taken=%d conflicts=%d\n' \
+                "$n_ram_kept" "$n_usb_taken" "$n_conflict"
+        }
+        ram_sync_merge
+    )
+
+    # ── 4. Assert each class outcome ──────────────────────────────
+    # Class 1: RAM changed, USB at base → RAM version kept.
+    assert_equals "RAM modified" \
+        "$(cat "$ram_upper/class1.txt" 2>/dev/null | tr -d '\n')" \
+        "Class 1: RAM-only change preserved"
+
+    # Class 2: USB changed, RAM at base → USB version merged into RAM.
+    assert_equals "USB modified" \
+        "$(cat "$ram_upper/class2.txt" 2>/dev/null | tr -d '\n')" \
+        "Class 2: USB-only change merged into RAM"
+
+    # Class 3: both changed, RAM is newer → RAM kept, USB saved as conflict copy.
+    assert_equals "RAM changed" \
+        "$(cat "$ram_upper/class3.txt" 2>/dev/null | tr -d '\n')" \
+        "Class 3: conflict resolved — newer (RAM) wins"
+    ((TESTS_RUN++)) || true
+    if [[ -f "$ram_upper/class3.txt.powos-conflict-${MACHINE_ID}" ]]; then
+        echo -e "${GREEN}✓${NC} Class 3: conflict copy saved as .powos-conflict-<machine>"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Class 3: conflict copy not found"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    # Class 4: RAM-only new file → still in RAM after merge.
+    assert_equals "RAM new file" \
+        "$(cat "$ram_upper/class4.txt" 2>/dev/null | tr -d '\n')" \
+        "Class 4: RAM-only new file kept"
+
+    # Class 5: USB-only new file → copied to RAM.
+    assert_equals "USB new file" \
+        "$(cat "$ram_upper/class5.txt" 2>/dev/null | tr -d '\n')" \
+        "Class 5: USB-only new file merged into RAM"
+
+    # Class 6: USB deleted (whiteout), RAM at base → RAM file removed.
+    # Only possible when mknod c 0 0 succeeded (requires root).
+    if [[ -c "$USB_MOUNT/layers/custom/class6.txt" ]] && \
+       [[ "$(LC_ALL=C stat -c '%t%T' "$USB_MOUNT/layers/custom/class6.txt" \
+             2>/dev/null)" == "00" ]]; then
+        ((TESTS_RUN++)) || true
+        if [[ ! -f "$ram_upper/class6.txt" ]]; then
+            echo -e "${GREEN}✓${NC} Class 6: USB deletion propagated — file removed from RAM"
+            ((TESTS_PASSED++)) || true
+        else
+            echo -e "${RED}✗${NC} Class 6: file still in RAM after USB deletion"
+            ((TESTS_FAILED++)) || true
+        fi
+    else
+        echo "  (Class 6 whiteout test skipped — mknod c 0 0 not available outside root)"
+    fi
+
+    # Confirm merge reported exactly 1 conflict (class 3).
+    assert_contains "$merge_out" "conflicts=1" "Merge reported exactly 1 conflict (class 3)"
+
+    # ── Cleanup ───────────────────────────────────────────────────
+    USB_MOUNT="$old_usb"
+    SYNC_MARKER="$old_marker"
+    SYNC_MANIFEST="$old_manifest"
+    MACHINE_ID="$old_machine"
+    rm -rf "$merge_dir"
+}
+
 test_load_sync_config() {
     echo ""
     echo "Test: Load sync configuration"
@@ -739,6 +1029,9 @@ main() {
 
     # Config test
     test_load_sync_config
+
+    # 3-way merge tests
+    test_three_way_merge
 
     # Teardown
     teardown

@@ -28,6 +28,10 @@ USB_MOUNT="${POWOS_USB_MOUNT:-/run/powos/usb-layers}"
 # The sync marker lives ON the USB filesystem (under the mounted data
 # partition) so it travels with the drive between machines.
 SYNC_MARKER="${USB_MOUNT}/.powos-sync"
+# Hash manifest of $USB_MOUNT/layers/custom at last-successful-sync.
+# Provides the BASE for 3-way merge: content known to both machines.
+# Written by write_sync_manifest(); read by ram_sync_merge().
+SYNC_MANIFEST="${USB_MOUNT}/.powos-sync-manifest"
 LAYER_SYNC="/usr/lib/powos/ramfs/layer-sync.py"
 # Flag file: 'powos sync --keep-usb' was chosen; RAM state is stale and
 # must not be synced to USB until the machine reboots. Lives in tmpfs on
@@ -88,6 +92,67 @@ SYNC_TIMESTAMP="$timestamp"
 SYNC_HASH="$ram_hash"
 SYNC_DATE="$(date -Iseconds)"
 EOF
+
+    # Also record the content manifest so future merges have a BASE to diff against.
+    write_sync_manifest
+}
+
+# Write a content-hash manifest of $USB_MOUNT/layers/custom to SYNC_MANIFEST.
+# Each line: "<md5>  <relative-path>" or "DELETED <relative-path>" for whiteouts.
+# This is the last-common BASE used by ram_sync_merge() for 3-way resolution.
+# Safe to call even when the custom layer doesn't exist yet (no-op).
+write_sync_manifest() {
+    local custom_layer="$USB_MOUNT/layers/custom"
+    [[ -d "$custom_layer" ]] || return 0
+
+    # Write to a temp file first so a crash doesn't leave a partial manifest.
+    local tmp_manifest
+    tmp_manifest=$(mktemp "${SYNC_MANIFEST}.tmp.XXXXXX") || return 1
+
+    {
+        printf '# powos-sync-manifest v1\n'
+        printf '# machine: %s\n' "$MACHINE_ID"
+        printf '# timestamp: %s\n' "$(date +%s)"
+        # Overlayfs whiteouts are char devices with major:minor 0:0.
+        # Everything else with content → md5sum.
+        find "$custom_layer" \( -type f -o -type c \) -print0 2>/dev/null | \
+            sort -z | \
+            while IFS= read -r -d '' f; do
+                local rel="${f#${custom_layer}/}"
+                if [[ -c "$f" ]] && \
+                   [[ "$(LC_ALL=C stat -c '%t%T' "$f" 2>/dev/null)" == "00" ]]; then
+                    printf 'DELETED %s\n' "$rel"
+                else
+                    local h
+                    h=$(md5sum "$f" 2>/dev/null | cut -d' ' -f1) || h="ERR"
+                    printf '%s  %s\n' "$h" "$rel"
+                fi
+            done
+    } > "$tmp_manifest" && mv "$tmp_manifest" "$SYNC_MANIFEST" || {
+        rm -f "$tmp_manifest"
+        return 1
+    }
+}
+
+# Load SYNC_MANIFEST into an associative array passed by name.
+# Keys = relative paths. Values = md5 hash string, or "DELETED".
+# Returns 1 if the manifest does not exist.
+# Usage:  declare -A mymap; load_sync_manifest mymap
+load_sync_manifest() {
+    local -n _lsm_map="$1"
+    [[ -f "$SYNC_MANIFEST" ]] || return 1
+    while IFS= read -r line; do
+        [[ "$line" =~ ^# || -z "$line" ]] && continue
+        if [[ "$line" == DELETED\ * ]]; then
+            local rel="${line#DELETED }"
+            _lsm_map["$rel"]="DELETED"
+        else
+            # "<hash>  <rel>" (two spaces from md5sum format)
+            local h="${line%%  *}"
+            local rel="${line#*  }"
+            _lsm_map["$rel"]="$h"
+        fi
+    done < "$SYNC_MANIFEST"
 }
 
 # Get hash of current RAM state (for change detection)
@@ -342,6 +407,25 @@ ram_sync_resolve() {
         return 0
     fi
 
+    # Show any .powos-conflict-* files left from a previous merge so the user
+    # knows they need review (independent of whether a machine conflict exists).
+    local ram_upper="/run/powos-overlay/upper"
+    if [[ -d "$ram_upper" ]]; then
+        local pending_conflicts
+        pending_conflicts=$(find "$ram_upper" -name "*.powos-conflict-*" 2>/dev/null | sort)
+        if [[ -n "$pending_conflicts" ]]; then
+            echo -e "${YELLOW}Pending merge conflicts (from a previous --merge):${NC}"
+            echo "$pending_conflicts" | head -20 | sed 's|^'"$ram_upper/"'||; s/^/  /'
+            local cnt
+            cnt=$(echo "$pending_conflicts" | wc -l | tr -d '[:space:]')
+            (( cnt > 20 )) && echo "  ... ($cnt total)"
+            echo ""
+            echo "Review the .powos-conflict-* files and delete them when done."
+            echo "Then run 'powos sync --keep-ram' to push the merged result to USB."
+            echo ""
+        fi
+    fi
+
     local conflict_status
     # check_for_conflicts prints its status AND returns non-zero on conflict —
     # appending a fallback echo here corrupts the value ("conflict\nconflict"),
@@ -350,7 +434,7 @@ ram_sync_resolve() {
     conflict_status=$(check_for_conflicts) || true
 
     if [[ "$conflict_status" != "conflict" ]]; then
-        echo -e "${GREEN}No conflicts to resolve.${NC}"
+        echo -e "${GREEN}No machine conflicts to resolve.${NC}"
         return 0
     fi
 
@@ -498,7 +582,7 @@ EOF
 
 ram_sync_merge() {
     echo ""
-    echo -e "${CYAN}Attempting to merge...${NC}"
+    echo -e "${CYAN}3-way merge: RAM ↔ USB...${NC}"
     echo ""
 
     local ram_upper="/run/powos-overlay/upper"
@@ -506,48 +590,168 @@ ram_sync_merge() {
 
     if [[ ! -d "$ram_upper" ]] || [[ ! -d "$usb_custom" ]]; then
         echo -e "${YELLOW}Cannot merge: required paths not available.${NC}"
-        echo "  RAM upper:      $ram_upper"
-        echo "  USB custom:     $usb_custom"
+        echo "  RAM upper:  $ram_upper"
+        echo "  USB custom: $usb_custom"
         return 1
     fi
 
-    echo "Merging USB changes into RAM..."
-    echo "RAM files that conflict with USB will be saved with .usb-conflict suffix."
+    # ── Load BASE manifest (last-common-sync state) ──────────────────
+    # If present, it lets us do true 3-way resolution. Without it we fall
+    # back to mtime-wins everywhere — still better than the old rsync approach.
+    declare -A BASE_HASH=()
+    local has_manifest=0
+    if load_sync_manifest BASE_HASH 2>/dev/null; then
+        has_manifest=1
+        echo "  Using manifest from last sync as merge base."
+    else
+        echo -e "  ${YELLOW}No merge-base manifest found — using mtime to resolve conflicts.${NC}"
+    fi
     echo ""
 
-    # Copy USB custom layer into RAM upper:
-    #   --backup --suffix=.usb-conflict  : save displaced RAM files so user can review them
-    #   No --delete                      : preserve RAM-only files (your custom changes)
-    if rsync -av --backup --suffix=.usb-conflict \
-            "$usb_custom/" "$ram_upper/"; then
+    # ── Helper: is a file a whiteout (overlayfs deletion marker)? ────
+    _is_whiteout() {
+        [[ -c "$1" ]] && \
+        [[ "$(LC_ALL=C stat -c '%t%T' "$1" 2>/dev/null)" == "00" ]]
+    }
 
-        # Update sync marker to reflect merged state
-        write_sync_marker
-
-        echo ""
-
-        # Report any .usb-conflict files that need manual review
-        local conflict_count
-        conflict_count=$(find "$ram_upper" -name "*.usb-conflict" 2>/dev/null | wc -l)
-
-        if [[ "$conflict_count" -gt 0 ]]; then
-            echo -e "${YELLOW}Warning: $conflict_count file(s) had conflicts.${NC}"
-            echo "Your original RAM versions were saved as .usb-conflict files:"
-            find "$ram_upper" -name "*.usb-conflict" 2>/dev/null | head -20 | sed 's/^/  /'
-            echo ""
-            echo "Review and remove .usb-conflict copies once you are satisfied."
-            echo "Then run 'powos sync --keep-ram' to push the merged result to USB."
+    # ── Helper: md5 of a regular file, or "DELETED" for whiteouts ────
+    _file_hash() {
+        local f="$1"
+        if _is_whiteout "$f"; then
+            echo "DELETED"
+        elif [[ -f "$f" ]]; then
+            md5sum "$f" 2>/dev/null | cut -d' ' -f1
         else
-            echo -e "${GREEN}✓ Merge complete - no conflicts.${NC}"
+            echo ""
+        fi
+    }
+
+    # ── Collect every path present in either tree ────────────────────
+    declare -A all_files=()
+    while IFS= read -r -d '' f; do
+        all_files["${f#${ram_upper}/}"]=1
+    done < <(find "$ram_upper" \( -type f -o -type c \) -print0 2>/dev/null)
+    while IFS= read -r -d '' f; do
+        all_files["${f#${usb_custom}/}"]=1
+    done < <(find "$usb_custom" \( -type f -o -type c \) -print0 2>/dev/null)
+
+    local n_ram_kept=0 n_usb_taken=0 n_conflict=0
+    local conflict_files=()
+
+    # ── Per-file 3-way resolution ────────────────────────────────────
+    for rel in "${!all_files[@]}"; do
+        # Skip conflict-copy files from previous merges
+        [[ "$rel" == *.powos-conflict-* ]] && continue
+
+        local ram_f="$ram_upper/$rel"
+        local usb_f="$usb_custom/$rel"
+
+        local ram_hash="" usb_hash="" base_hash="ABSENT"
+        [[ -f "$ram_f" || -c "$ram_f" ]] && ram_hash=$(_file_hash "$ram_f")
+        [[ -f "$usb_f" || -c "$usb_f" ]] && usb_hash=$(_file_hash "$usb_f")
+        [[ -n "${BASE_HASH[$rel]+x}" ]] && base_hash="${BASE_HASH[$rel]}"
+
+        # ── 6 conflict classes ───────────────────────────────────────
+        #
+        # Class 1: only in RAM (RAM added it, or USB deleted it from base)
+        if [[ -z "$usb_hash" ]]; then
+            if [[ "$base_hash" != "ABSENT" && "$ram_hash" == "$base_hash" ]]; then
+                # RAM unchanged, USB deleted from base → USB deletion wins
+                rm -f "$ram_f" 2>/dev/null || true
+            else
+                # RAM added or modified — keep RAM, nothing to do
+                (( n_ram_kept++ )) || true
+            fi
+            continue
         fi
 
-        echo ""
-        echo -e "${GREEN}✓ Merge complete${NC}"
+        # Class 2: only in USB (USB added it, or RAM deleted it from base)
+        if [[ -z "$ram_hash" ]]; then
+            if [[ "$base_hash" != "ABSENT" && "$usb_hash" == "$base_hash" ]]; then
+                # USB unchanged, RAM deleted from base → RAM deletion wins (no-op)
+                :
+            else
+                # USB added or modified — copy to RAM
+                mkdir -p "$(dirname "$ram_f")"
+                cp -a "$usb_f" "$ram_f"
+                (( n_usb_taken++ )) || true
+            fi
+            continue
+        fi
+
+        # Both sides have the file (or whiteout). No more skipping needed.
+
+        # Class 3: identical content on both sides — nothing to do
+        if [[ "$ram_hash" == "$usb_hash" ]]; then
+            continue
+        fi
+
+        if [[ "$has_manifest" -eq 1 && "$base_hash" != "ABSENT" ]]; then
+            # ── True 3-way resolution ────────────────────────────────
+            # Class 4: USB changed, RAM unchanged from base → take USB
+            if [[ "$ram_hash" == "$base_hash" ]]; then
+                mkdir -p "$(dirname "$ram_f")"
+                cp -a "$usb_f" "$ram_f"
+                (( n_usb_taken++ )) || true
+                continue
+            fi
+
+            # Class 5: RAM changed, USB unchanged from base → keep RAM
+            if [[ "$usb_hash" == "$base_hash" ]]; then
+                (( n_ram_kept++ )) || true
+                continue
+            fi
+
+            # Class 6: both changed from base → conflict, newer-mtime wins
+        fi
+
+        # ── Conflict: newer-mtime wins; loser saved as .powos-conflict-<machine> ─
+        (( n_conflict++ )) || true
+        conflict_files+=("$rel")
+
+        local ram_mtime usb_mtime
+        ram_mtime=$(stat -c '%Y' "$ram_f" 2>/dev/null || echo 0)
+        usb_mtime=$(stat -c '%Y' "$usb_f" 2>/dev/null || echo 0)
+
+        if (( usb_mtime > ram_mtime )); then
+            # USB is newer: USB wins; save RAM copy as conflict backup
+            cp -a "$ram_f" "${ram_f}.powos-conflict-${MACHINE_ID}" 2>/dev/null || true
+            cp -a "$usb_f" "$ram_f"
+            (( n_usb_taken++ )) || true
+        else
+            # RAM is newer (or same): RAM wins; save USB copy as conflict backup
+            mkdir -p "$(dirname "$ram_f")"
+            cp -a "$usb_f" "${ram_f}.powos-conflict-${MACHINE_ID}" 2>/dev/null || true
+            (( n_ram_kept++ )) || true
+        fi
+    done
+
+    # ── Update the sync state ────────────────────────────────────────
+    write_sync_marker
+
+    # ── Report ───────────────────────────────────────────────────────
+    echo ""
+    if (( n_conflict == 0 )); then
+        echo -e "${GREEN}✓ Merge complete — no conflicts.${NC}"
     else
+        echo -e "${YELLOW}Merge complete — $n_conflict file(s) had conflicts.${NC}"
+        echo "Both machines changed these files; the newer-mtime version was kept."
+        echo "The other version is saved as <file>.powos-conflict-${MACHINE_ID}:"
+        local f
+        for f in "${conflict_files[@]}"; do
+            echo "  $f"
+        done | head -20
+        (( ${#conflict_files[@]} > 20 )) && \
+            echo "  ... ($(( ${#conflict_files[@]} - 20 )) more)"
         echo ""
-        echo -e "${RED}Merge failed.${NC} Check rsync output above."
-        return 1
+        echo "Review and remove .powos-conflict-* files when done."
+        echo "Then run 'powos sync --keep-ram' to push the merged result to USB."
     fi
+    echo ""
+    echo "  RAM-side files kept: $n_ram_kept"
+    echo "  USB-side files merged in: $n_usb_taken"
+    echo ""
+    echo -e "${GREEN}✓ Merge complete${NC}"
 }
 
 ram_sync_show_diff() {
