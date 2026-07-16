@@ -153,6 +153,11 @@ build_overlay() {
         log_warn "Build completed but produced no files under usr/ (empty overlay)"
     fi
 
+    # Align SELinux labels immediately: an already-enabled overlay is
+    # re-merged with whatever labels the rebuild left behind (see
+    # relabel_overlay), without passing through enable_overlay again.
+    relabel_overlay "$output_dir"
+
     log_success "Built overlay: $name -> $output_dir"
 }
 
@@ -214,6 +219,29 @@ build_all_overlays() {
 # ─────────────────────────────────────────────────────────────────
 
 # Enable an overlay (make it active)
+# SELinux: extension trees built under /var (or inside containers) carry
+# var_lib_t / container_file_t labels. When systemd-sysext merges them,
+# overlayfs surfaces the EXTENSION dir's label as the label of the merged
+# /usr/<dir> — container_file_t on /usr/lib locks confined domains out of
+# /usr/lib/passwd (altfiles NSS), which kills PAM for system users and
+# black-screens the greeter on the next boot. Relabel to match the real /usr
+# before the extension is (re)merged.
+relabel_overlay() {
+    local ext="$1" d base
+    command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled 2>/dev/null || return 0
+    [[ -d "$ext/usr" ]] || return 0
+    sudo chcon -R --reference=/usr "$ext/usr" 2>/dev/null || {
+        log_warn "SELinux relabel failed for $ext — merged /usr may break confined domains"
+        return 0
+    }
+    for d in "$ext/usr"/*; do
+        [[ -d "$d" ]] || continue
+        base="/usr/$(basename "$d")"
+        [[ -d "$base" ]] && sudo chcon -R --reference="$base" "$d" 2>/dev/null
+    done
+    log_detail "SELinux labels aligned with /usr"
+}
+
 enable_overlay() {
     local name="$1"
     local source="${EXTENSIONS_DIR}/${name}"
@@ -236,7 +264,8 @@ enable_overlay() {
         return 0
     fi
 
-    # Production: create symlink and refresh
+    # Production: relabel, create symlink, refresh
+    relabel_overlay "$source"
     sudo mkdir -p "$SYSEXT_DIR"
     sudo ln -sfn "$source" "$target"
 

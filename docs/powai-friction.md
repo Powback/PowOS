@@ -170,3 +170,19 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   `systemd-sysext refresh`. `powos update self` / `self test` should run
   `systemd-sysext refresh` after enabling usr-overlay (and overlay-manager
   enable/disable should warn when a usr-overlay is active).
+
+- [x] **Sysext extensions with /var-born SELinux labels black-screened the
+  greeter after reboot** — 2026-07-16: overlayfs surfaces the extension dir's
+  label as the merged /usr/<dir> label; the powstream extension carried
+  container_file_t (built via container, cp -a preserved it), so /usr/lib
+  went container_file_t → confined domains (unix_chkpwd, xdm_t, auditd)
+  couldn't read /usr/lib/passwd (altfiles NSS) → PAM "user not known" for
+  plasmalogin → user@967 dead → startplasma waited forever, black screen.
+  FIXED: overlay-manager now relabels extension trees to match the real /usr
+  (chcon --reference) after build and before enable. Recovered live by
+  relabeling + sysext refresh + clean greeter cycle.
+
+- [x] **traefik quadlet in /etc/containers/systemd/users/ ran under EVERY
+  user manager** — including the plasmalogin greeter (which then owned host
+  :80 and spammed failed podman pulls on every greeter start). FIXED: moved
+  to users/1000/ (source + live), traefik now runs under the powos manager.
