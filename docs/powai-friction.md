@@ -151,3 +151,10 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   `powos dev` only knows fork projects** — the working command is
   `overlay-manager.sh enable powstream` (or wire overlays into a
   `powos overlay <build|enable|…>` front door and update the docs).
+
+- [ ] **`bootc usr-overlay` silently unmerges ALL systemd-sysext extensions**
+  — 2026-07-16: after `update self` enabled the writable /usr overlay, the
+  powstream AND plasma-desktop sysexts vanished from /usr until a manual
+  `systemd-sysext refresh`. `powos update self` / `self test` should run
+  `systemd-sysext refresh` after enabling usr-overlay (and overlay-manager
+  enable/disable should warn when a usr-overlay is active).
