@@ -65,6 +65,69 @@ cat > "$ENV_DIR/powstream.conf" <<'CONF'
 POWSTREAM_CAPTURE=1
 CONF
 
+# ── Runtime services: WebRTC server + detector sidecar ──────────────
+# Ship the binaries and user units so the pipeline is up after login —
+# nobody should have to hand-start these to connect (friction 2026-07-16).
+BIN_OUT="$OUTPUT_DIR/usr/lib/powstream/bin"
+UNIT_DIR="$OUTPUT_DIR/usr/lib/systemd/user"
+WANTS_DIR="$UNIT_DIR/default.target.wants"
+mkdir -p "$BIN_OUT" "$UNIT_DIR" "$WANTS_DIR"
+
+ship_bin() { # <name>  (looks in target/release, then host-bins — the Docker
+    # build writes target/ into a named volume, so host-side copies land in
+    # host-bins/ via scripts/build-rust.sh or a manual container cp)
+    local p
+    for p in "$SRC/target/release/$1" "$SRC/host-bins/$1"; do
+        [[ -f "$p" ]] && { install -m 0755 "$p" "$BIN_OUT/$1"; return 0; }
+    done
+    echo "WARN: $1 not built — service skipped" >&2
+    return 1
+}
+
+# Browser client (ATW viewer + dashboards) — the server serves this via --web-root.
+if [[ -d "$SRC/web/webrtc" ]]; then
+    mkdir -p "$OUTPUT_DIR/usr/lib/powstream/web"
+    cp -r "$SRC/web/webrtc/." "$OUTPUT_DIR/usr/lib/powstream/web/"
+fi
+
+if ship_bin powstream-webrtc-server; then
+    cat > "$UNIT_DIR/powstream-webrtc-server.service" <<'UNIT'
+[Unit]
+Description=PowStream WebRTC streaming server (depth + camera ATW)
+# Real login sessions only — never the plasmalogin greeter or other
+# system-user managers (see the traefik users/ lesson, 2026-07-16).
+ConditionUser=!@system
+
+[Service]
+ExecStartPre=/usr/bin/mkdir -p /tmp/depthcap
+ExecStart=/usr/lib/powstream/bin/powstream-webrtc-server --web-root /usr/lib/powstream/web
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+UNIT
+    ln -sfn ../powstream-webrtc-server.service "$WANTS_DIR/powstream-webrtc-server.service"
+fi
+
+if ship_bin powlens-detector-sidecar; then
+    cat > "$UNIT_DIR/powlens-sidecar.service" <<'UNIT'
+[Unit]
+Description=PowLens detector sidecar (FOV/VP detection, :8791)
+ConditionUser=!@system
+
+[Service]
+ExecStartPre=/usr/bin/mkdir -p /tmp/depthcap
+ExecStart=/usr/lib/powstream/bin/powlens-detector-sidecar /tmp/depthcap
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+UNIT
+    ln -sfn ../powlens-sidecar.service "$WANTS_DIR/powlens-sidecar.service"
+fi
+
 echo "✅ Built: powstream overlay"
 echo "   /usr/lib/powstream/libvklayer_powstream_capture.so"
 echo "   /usr/share/vulkan/implicit_layer.d/VkLayer_POWSTREAM_capture.json"
