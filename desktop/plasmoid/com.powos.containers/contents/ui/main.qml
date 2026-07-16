@@ -80,6 +80,64 @@ PlasmoidItem {
     }
     function fmtPct(x) { return (Number(x) || 0).toFixed(1) + "%" }
 
+    // ── ANSI → HTML ─────────────────────────────────────────────
+    // Container logs (traefik, most apps) carry ANSI SGR color codes. A plain
+    // TextEdit shows them as literal "[32m" noise, so convert the common subset
+    // to RichText spans and strip the rest. Colors are picked to stay legible on
+    // both light and dark log backgrounds.
+    function ansi256(idx) {
+        idx = Number(idx)
+        if (idx < 16) {
+            var base = ["#555","#e53935","#43a047","#c9a227","#1e88e5","#8e24aa","#00acc1","#cfcfcf",
+                        "#777","#ff6f60","#76d275","#ffd54f","#6ab7ff","#c158dc","#5ddef4","#ffffff"]
+            return base[idx] || ""
+        }
+        if (idx >= 232) { var g = 8 + (idx - 232) * 10; return Qt.rgba(g/255, g/255, g/255, 1) }
+        idx -= 16
+        var r = Math.floor(idx / 36), gg = Math.floor((idx % 36) / 6), b = idx % 6
+        var conv = function (v) { return v === 0 ? 0 : 55 + v * 40 }
+        return Qt.rgba(conv(r)/255, conv(gg)/255, conv(b)/255, 1)
+    }
+    function ansiToHtml(s) {
+        if (s === undefined || s === null) return ""
+        s = String(s).replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+        // drop OSC (window-title etc.) and every CSI that isn't a color (SGR = final 'm')
+        s = s.replace(/\][^]*(?:|\\)/g, "")
+        s = s.replace(/\[[0-9;?]*[@-ln-~]/g, "")
+        var fg = { "30":"#555","31":"#e53935","32":"#43a047","33":"#c9a227","34":"#1e88e5",
+                   "35":"#8e24aa","36":"#00acc1","37":"#cfcfcf","90":"#777","91":"#ff6f60",
+                   "92":"#76d275","93":"#ffd54f","94":"#6ab7ff","95":"#c158dc","96":"#5ddef4","97":"#ffffff" }
+        function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+        var re = /\[([0-9;]*)m/g, out = "", last = 0, m, open = false
+        var color = "", bold = false
+        function span() {
+            var st = (color ? "color:" + color + ";" : "") + (bold ? "font-weight:bold;" : "")
+            return st ? '<span style="' + st + '">' : ""
+        }
+        while ((m = re.exec(s)) !== null) {
+            out += esc(s.substring(last, m.index)); last = re.lastIndex
+            if (open) { out += "</span>"; open = false }
+            var codes = (m[1] === "") ? ["0"] : m[1].split(";")
+            for (var i = 0; i < codes.length; i++) {
+                var c = codes[i]
+                if (c === "0" || c === "") { color = ""; bold = false }
+                else if (c === "1") bold = true
+                else if (c === "22") bold = false
+                else if (c === "39") color = ""
+                else if (c === "38" || c === "48") {
+                    var isFg = (c === "38")
+                    if (codes[i + 1] === "5") { if (isFg) color = "" + ansi256(codes[i + 2]); i += 2 }
+                    else if (codes[i + 1] === "2") { if (isFg) color = "rgb(" + [codes[i+2],codes[i+3],codes[i+4]].join(",") + ")"; i += 4 }
+                } else if (fg[c] !== undefined) color = fg[c]
+            }
+            var sp = span()
+            if (sp) { out += sp; open = true }
+        }
+        out += esc(s.substring(last))
+        if (open) out += "</span>"
+        return '<pre style="font-family:monospace; white-space:pre-wrap; margin:0;">' + out + '</pre>'
+    }
+
     // Every row carries the same full role set — ListModel fixes its schema from
     // the first item, so stack rows and container rows must share all keys.
     function blankRow() {
@@ -537,8 +595,13 @@ PlasmoidItem {
                                     TextEdit {
                                         readOnly: true
                                         selectByMouse: true
-                                        wrapMode: TextEdit.NoWrap
-                                        text: model.logText !== "" ? model.logText : "loading…"
+                                        wrapMode: TextEdit.Wrap
+                                        // render ANSI colors as rich text; the loading
+                                        // placeholder stays plain so it dims correctly
+                                        textFormat: model.logText !== "" ? TextEdit.RichText
+                                                                         : TextEdit.PlainText
+                                        text: model.logText !== "" ? root.ansiToHtml(model.logText)
+                                                                    : "loading…"
                                         color: model.logText !== "" ? Kirigami.Theme.textColor
                                                                     : Qt.rgba(Kirigami.Theme.textColor.r,
                                                                               Kirigami.Theme.textColor.g,
