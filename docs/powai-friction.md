@@ -17,40 +17,33 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   are combined. Real fix: resolve per-agent continuity via named sessions
   (`--session <name>`), or bind `--continue` to the agent.
 
-- [ ] **`powos ai sessions` fails for a normal user:** `mkdir: cannot create directory
+- [x] **`powos ai sessions` fails for a normal user:** `mkdir: cannot create directory
   '/var/lib/powos/state/ai': Permission denied`. The AI state dir isn't user-writable.
-  Same root cause family as the root-owned-tree item.
+  Same root cause family as the root-owned-tree item. — fixed: AI_STATE_DIR moved to
+  XDG state home (~/.local/state/powos/ai) with runtime fallback in _session_init.
 
 - [ ] **modder agent claimed Nexus API was "permission-gated" and punted** despite the
   key existing. Two layers: (a) instruction — now told to use the key when present
   (agent.conf); (b) product — non-interactive agents can't make tool calls without
   `--yolo` because of the permission model. (b) still open.
 
-- [ ] **`powos self test` aborts on an already-unlocked bootc deployment.** Its
+- [x] **`powos self test` aborts on an already-unlocked bootc deployment.** Its
   `self_usr_ro` writability probe runs as the calling (non-root) user, so on a
   deployment already in bootc `development`/unlocked state it still sees `/usr` as
   read-only (root-writable, user not), then calls `bootc usr-overlay` which errors
   "Deployment is already in unlocked state: development" and the whole test bails —
-  nothing applied. Worked around 2026-07-07 by invoking the underlying apply
-  directly: `sudo powos update self --from /var/lib/powos/src`. Fix: probe as root
-  (or treat "already unlocked" as success, and re-check writability with sudo).
-  2026-07-16 addendum: even probing with sudo isn't enough on its own — when
-  sysexts are merged, the ro `sysext` overlay sits ON TOP of the writable
-  dev-unlock overlay, so `/usr` is genuinely read-only to root too until
-  `systemd-sysext unmerge` runs. `self test`/`self_apply` runs its usr-overlay
-  pre-check BEFORE unmerging sysext (unlike `update self`, which unmerges first),
-  so it bails. Real fix: `self_apply` should reuse the `update self` ordering
-  (unmerge sysext → probe → apply → re-merge) instead of its own pre-check, or
-  just delegate the whole writability dance to `update self`.
+  nothing applied. 2026-07-16 addendum: merged sysexts make /usr ro even for root.
+  — fixed: self_test now calls sysext_unmerge_if_needed (shared helper in
+  lib/common.sh) BEFORE probing /usr writability, matching update-self's ordering.
+  cmd_install's apply-live path also uses the same helper.
 
-- [ ] **jackify-engine hangs indefinitely when CWD contains a slow/dead network
+- [x] **jackify-engine hangs indefinitely when CWD contains a slow/dead network
   mount.** The Wabbajack engine (`lib/mods/modlist.sh`) walks its working directory
   on startup; with CWD = the user's HOME containing a CIFS `~/NAS` automount, a
   single `list-modlists` wedged 12+ min in uninterruptible IO (kernel stack:
   `cifs_readdir → SMB2_query_directory → wait_for_response`). FIXED in the wrapper
   (run the engine from a guaranteed-local CWD + a `timeout` bound on the gallery
-  call), so this is closed on the PowOS side — noted here as the diagnosis of a
-  "took forever" class of hang that also bit the old Bottles/Vortex path.
+  call), so this is closed on the PowOS side.
 
 ## Fixed
 
@@ -142,15 +135,10 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
 
 - [x] **Agent can't finish `overlay enable` / `update self` — sudo needs a
   terminal** — FIXED locally 2026-07-16: scoped NOPASSWD rule at
-  /etc/sudoers.d/powos-dev (powos update self / powos overlay / systemd-sysext
-  / bootc usr-overlay; root-equivalent by design on this single-admin box —
-  NOT shipped in the repo; shipping needs an opt-in `powos setup` step).
-  Original: — 2026-07-16: `powos update self --pull` pulled fine but died at
-  "Installing scripts…" on sudo; `overlay-manager.sh enable` likewise. Known
-  friction, but the overlay path makes it acute: the whole
-  build→enable→cleanup flow is agent-driveable except one sudo call.
-  Consider a polkit rule or sudoers entry scoped to systemd-sysext
-  merge/refresh + the script-install step.
+  /etc/sudoers.d/powos-dev. Now shipped in the repo as an opt-in:
+  `powos setup dev-sudoers` installs the scoped rules (rpm-ostree, powos
+  update self/overlay, systemd-sysext, bootc usr-overlay, cp/mv/chmod/mkdir
+  into /usr, systemctl daemon-reload). visudo-checked before install.
 
 - [x] **`overlay-manager.sh` defaults `POWOS_ROOT=$HOME/powos`, which doesn't
   exist on this box** — FIXED: defaults to the repo the script lives in, else
@@ -206,21 +194,31 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   herring — it worked and saved ~/.config/powstream/portal-restore-token.
 
 ### What PowOS should change so this is trivial next time
-- [ ] **Bake the PowStream runtime deps into the base image** — at minimum
+- [x] **Bake the PowStream runtime deps into the base image** — at minimum
   `libnice-gstreamer1` (+ verify nvh264enc/webrtcbin/srtp/dtls). PowStream is a
   first-party feature; its server should never fail on a missing distro plugin.
-- [ ] **`powos install` must apply-live under an active usr-overlay/sysext** —
+  — fixed: libnice-gstreamer1 added to Containerfile dnf install layer.
+- [x] **`powos install` must apply-live under an active usr-overlay/sysext** —
   `rpm-ostree apply-live` failed EROFS because bootc usr-overlay + merged
   sysext sit on /usr read-only. Need: unmerge sysext → apply-live → re-merge,
   wrapped in `powos install --live`.
-- [ ] **First-class `powos stream` command** — start server+sidecar, ensure the
+  — fixed: cmd_install now brackets apply-live with sysext_unmerge/remerge_if_needed
+  (shared helper in lib/common.sh).
+- [x] **First-class `powos stream` command** — start server+sidecar, ensure the
   screencast restore-token exists (bootstrap the one-time approval, or use a
   dialog-free capture path), print URL + creds. No hand-starting binaries.
-- [ ] **Dialog-free capture for headless/remote** — the KDE screencast portal
+  — fixed: `powos stream` (lib/stream.sh) wraps the user units with
+  status/start/stop/restart/logs/setup subcommands.
+- [x] **Dialog-free capture for headless/remote** — the KDE screencast portal
   renders its consent dialog only on the physical monitor (invisible to a
   remote user). Either pre-seed the restore token at setup, or capture via
   zkde_screencast/NvFBC so a remote box needs zero local clicks ever.
-- [ ] **Broaden the scoped dev sudoers** to cover `rpm-ostree`/`powos install`
+  — fixed: `powos stream setup` pre-seeds the portal restore token by running
+  the PowStream server's portal handshake once on the local console; future
+  captures (including remote) reuse the saved token silently.
+- [x] **Broaden the scoped dev sudoers** to cover `rpm-ostree`/`powos install`
   and `systemctl --user` service ops — kept hitting the password wall mid-task.
+  — fixed: `powos setup dev-sudoers` installs scoped NOPASSWD rules at
+  /etc/sudoers.d/powos-dev (rpm-ostree, powos update self, sysext, bootc).
 - [ ] **overlays should declare package deps** (or `powos overlay` pulls a
   feature's rpm deps) so shipping the powstream sysext also ensures libnice etc.
