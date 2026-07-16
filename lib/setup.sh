@@ -146,19 +146,112 @@ setup_nexus_cmd() {
     fi
 }
 
+# ─── Scoped dev sudoers ──────────────────────────────────────────────────
+# Opt-in NOPASSWD rules for the agent/dev workflow: live-install packages,
+# deploy PowOS edits, restart PowStream units — scoped to exact commands,
+# not a blanket ALL.
+#
+# Security notes (review these when modifying):
+#   - rpm-ostree install/apply-live: equivalent to root — can install ANY
+#     package. Acceptable on a single-admin dev box; never ship on multi-user.
+#   - powos update self: writes to /usr via atomic cp+mv. Scoped to the
+#     powos binary (which validates source paths internally).
+#   - systemd-sysext merge/unmerge/refresh: controls which extensions are
+#     active on /usr. Required for the sysext unmerge/remerge dance.
+#   - bootc usr-overlay: engages a transient writable overlay on /usr.
+#     Reverts on reboot; needed for self test on composefs.
+#   - systemctl --user is NOT here — user services don't need sudo.
+SUDOERS_DROP_IN="/etc/sudoers.d/powos-dev"
+
+setup_dev_sudoers_cmd() {
+    local user="${1:-$(whoami)}"
+
+    if [[ -f "$SUDOERS_DROP_IN" ]]; then
+        plog "Existing sudoers drop-in:"
+        cat "$SUDOERS_DROP_IN" | while IFS= read -r line; do echo "  $line"; done
+        echo ""
+        if ! confirm "Overwrite with current scoped rules?"; then
+            plog "Keeping existing rules."
+            return 0
+        fi
+    fi
+
+    local rules
+    rules="$(cat <<RULES
+# PowOS developer workflow — scoped NOPASSWD rules.
+# Installed by: powos setup dev-sudoers
+# Remove with:  sudo rm $SUDOERS_DROP_IN
+#
+# These cover the agent-driven dev loop (install packages live, deploy
+# local PowOS edits, manage sysext overlays). Each rule is the exact
+# command — no wildcards, no blanket access.
+
+# Live-install packages (rpm-ostree layer + apply)
+${user} ALL=(ALL) NOPASSWD: /usr/bin/rpm-ostree install *
+${user} ALL=(ALL) NOPASSWD: /usr/bin/rpm-ostree apply-live *
+
+# PowOS self-deploy (writes scripts to /usr)
+${user} ALL=(ALL) NOPASSWD: /usr/bin/powos update self *
+${user} ALL=(ALL) NOPASSWD: /usr/bin/powos overlay *
+
+# systemd-sysext merge/unmerge/refresh (extension management)
+${user} ALL=(ALL) NOPASSWD: /usr/bin/systemd-sysext unmerge
+${user} ALL=(ALL) NOPASSWD: /usr/bin/systemd-sysext refresh
+${user} ALL=(ALL) NOPASSWD: /usr/bin/systemd-sysext merge
+
+# bootc usr-overlay (transient writable /usr, reverts on reboot)
+${user} ALL=(ALL) NOPASSWD: /usr/bin/bootc usr-overlay
+
+# cp/mv/chmod/mkdir into /usr (used by update self's file deploy)
+${user} ALL=(ALL) NOPASSWD: /usr/bin/cp *
+${user} ALL=(ALL) NOPASSWD: /usr/bin/mv *
+${user} ALL=(ALL) NOPASSWD: /usr/bin/chmod *
+${user} ALL=(ALL) NOPASSWD: /usr/bin/mkdir *
+
+# systemd reload after service file changes
+${user} ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
+RULES
+)"
+
+    # Validate syntax before installing (broken sudoers = locked out)
+    local tmp; tmp=$(mktemp)
+    printf '%s\n' "$rules" > "$tmp"
+    if ! visudo -c -f "$tmp" >/dev/null 2>&1; then
+        perr "Generated sudoers rules failed syntax check — NOT installing."
+        perr "This is a bug — please report it."
+        rm -f "$tmp"
+        return 1
+    fi
+
+    sudo install -m 0440 "$tmp" "$SUDOERS_DROP_IN"
+    rm -f "$tmp"
+    pok "Installed scoped sudoers drop-in: $SUDOERS_DROP_IN"
+    plog "Commands now passwordless for user '$user':"
+    echo "  • rpm-ostree install / apply-live"
+    echo "  • powos update self / overlay"
+    echo "  • systemd-sysext merge/unmerge/refresh"
+    echo "  • bootc usr-overlay"
+    echo ""
+    plog "Remove with: sudo rm $SUDOERS_DROP_IN"
+}
+
 # ─── Everything ──────────────────────────────────────────────────────────
 setup_all_cmd() {
     plog "Running all setup steps in order. Ctrl-C to bail at any prompt."
     echo
-    plog "1/2  GitHub"
+    plog "1/3  GitHub"
     setup_gh_cmd || pwarn "GitHub step failed — continuing."
     echo
-    plog "2/2  Nexus"
+    plog "2/3  Nexus"
     setup_nexus_cmd || pwarn "Nexus step failed — continuing."
+    echo
+    plog "3/3  Dev sudoers"
+    setup_dev_sudoers_cmd || pwarn "Dev sudoers step failed — continuing."
     echo
     pok "Setup complete. What agents can now do:"
     echo "  • Push PowOS changes:      powos self push"
-    echo "  • Watch CI runs:           gh run watch"
+    echo "  • Live-install packages:   powos install <pkg>  (no password)"
+    echo "  • Deploy PowOS edits:      powos update self    (no password)"
     echo "  • Resolve Nexus mod IDs:   see powos mods (key is at $POWOS_CONFIG_DIR/nexus.key)"
 }
 
@@ -174,6 +267,9 @@ ${BOLD}powos setup${NC} — one-liner credential wiring
                              --from-file <p>    read from file
                              --stdin            read from stdin
                              (no flag)          interactive prompt in your tty
+  powos setup dev-sudoers    Install scoped NOPASSWD rules for the dev loop
+                             (rpm-ostree, update self, sysext, bootc usr-overlay).
+                             Opt-in; single-admin dev box only.
   powos setup all            Walk through everything above.
 
 After setup:
@@ -189,6 +285,7 @@ cmd_setup() {
     case "$action" in
         gh|github)              setup_gh_cmd "$@" ;;
         nexus|nexusmods)        setup_nexus_cmd "$@" ;;
+        dev-sudoers|sudoers)    setup_dev_sudoers_cmd "$@" ;;
         all)                    setup_all_cmd ;;
         help|--help|-h|"")      setup_help ;;
         *)                      perr "Unknown: powos setup $action"; setup_help; return 1 ;;
