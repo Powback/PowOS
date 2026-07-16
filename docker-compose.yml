@@ -50,6 +50,7 @@ services:
         bash /powos/test/tier1/test-ai-agent.sh
         bash /powos/test/tier1/test-install-usb.sh
         bash /powos/test/tier1/test-installer-variant.sh
+        bash /powos/test/tier1/test-mobile.sh
 
   iso-builder:
     profiles: ["build"]

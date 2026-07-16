@@ -116,32 +116,47 @@ powos flush           # Force flush RAM changes to USB now (no conflict check)
 powos safe            # Check if safe to unplug USB
 ```
 
-### Mobile Mode (RAM-Only) — ⚠️ WIP
+### Mobile Mode (RAM-Only)
 
-Copy OS to RAM so USB can be unplugged. Everything included by default.
+Copy selected OS packages to a RAM tmpfs, then bind-mount the populated directories
+over their USB-backed paths. **No reboot required** — paths are served from RAM
+immediately after `sudo powos mobile enable` completes.
 
-> **Status:** Copying files to RAM layer works. **Live remount is not yet implemented** (`lib/mobile.sh:441`). `powos mobile enable` copies files but requires a reboot to activate the new layer. The `overlayfs remounted` step is a stub.
+> **How it works:** overlayfs `mount -o remount,lowerdir=…` is rejected by the kernel
+> (EINVAL) — you cannot add lowerdirs to a live overlayfs. Instead, mobile mode:
+> 1. Creates a tmpfs at `/run/powos/mobile-ram` (sized to fit selected packages + 20%)
+> 2. Copies selected RPM-category files from the current merged FS into the tmpfs
+> 3. Bind-mounts each populated safe directory (`/usr`, `/opt`, `/libexec`) from the
+>    tmpfs over the corresponding system path — those paths are now served from RAM
+>
+> `/etc` and `/var` are intentionally excluded (live auth/service config — risky to bind).
+>
+> **After reboot:** the tmpfs and binds live in `/run` and are lost. `powos mobile status`
+> detects the stale state automatically. Re-run `sudo powos mobile enable` to re-activate.
+>
+> **Writes to bound paths** while mobile is active go to the RAM tmpfs only; they are
+> not persisted to the overlayfs upper layer or USB.
 
 ```bash
-powos mobile                    # Enable mobile mode (copy all to RAM, reboot needed)
-powos mobile -c                 # Interactive menu to customize
-powos mobile status             # Show current mode
-powos mobile disable            # Return to USB-backed mode
+sudo powos mobile                # Enable mobile mode (live bind mounts, no reboot)
+sudo powos mobile -c             # Interactive menu to customize categories first
+powos mobile status              # Show active binds / stale-state detection
+sudo powos mobile disable        # Unmount binds + free tmpfs, return to USB-backed
 
 # Category management (non-interactive, for scripts/LLMs)
-powos mobile categories         # List all categories with sizes
-powos mobile exclude Games      # Exclude a category
-powos mobile include Games      # Include a category
-powos mobile include-all        # Reset to include everything
-powos mobile exclude-all        # Start fresh, include nothing
+powos mobile categories          # List all categories with sizes
+powos mobile exclude Games       # Exclude a category
+powos mobile include Games       # Include a category
+powos mobile include-all         # Reset to include everything
+powos mobile exclude-all         # Start fresh, include nothing
 ```
 
-**How it works (current state):**
+**How it works:**
 - Categories detected from package manager (rpm groups)
-- Selected categories copied to a RAM layer on disk
-- **Reboot required** to activate the new overlay stack
-- After reboot with mobile layer: USB optional for OS operations
-- User data: still uses default USB bind-mount (or CacheFS if enabled)
+- Selected categories copied to a tmpfs in RAM (`/run/powos/mobile-ram`)
+- Populated safe dirs bind-mounted from tmpfs over USB-backed paths — live, no reboot
+- USB data partition can be unplugged for bound paths (`/usr`, `/opt`, `/libexec`)
+- `/etc` and `/var` remain USB-backed; user data still uses default USB bind-mount
 
 ### Backup (USB → Cloud)
 
@@ -674,7 +689,7 @@ Layer Stack
 6. User Data Mount
    └─ Default: direct USB bind-mount at /home/powos
    └─ If POWOS_CACHEFS_ENABLED=true: FUSE mount (lazy-load)
-   └─ CacheFS is opt-in and experimental (disabled by default)
+   └─ CacheFS is opt-in (write-back to USB every 30s + fsync + unmount)
 
 7. Desktop Environment
    └─ KDE Plasma ready
@@ -833,9 +848,18 @@ lib/ramfs/layer-sync.py
 └── rollback-kargs        # Rollback flags (informational only — not read at boot)
 ```
 
-### 3. CacheFS (User Data) — 🚫 Incomplete, must remain disabled
+### 3. CacheFS (User Data) — opt-in, hardware validation pending
 
-FUSE filesystem for lazy-loading user data. **Disabled by default and must stay disabled:** write-back to USB is NOT implemented — writes land in the RAM cache and are never persisted to the USB source, so any written data is lost on unmount/reboot. Do not enable (`POWOS_CACHEFS_ENABLED=true`) until write-back exists. Default is direct USB bind-mount.
+FUSE filesystem for lazy-loading user data with write-back to USB. **Opt-in** via `POWOS_CACHEFS_ENABLED=true` in `/etc/powos/config`. Default is direct USB bind-mount.
+
+**Write-back engine** (in-process, no separate daemon):
+- Dirty files flushed to USB every 30s via background thread
+- `fsync()` from apps flushes that file to USB synchronously (durability guarantee)
+- Unmount (`destroy()`) flushes all dirty files before exit
+- Crash-safe: writes go to temp file + atomic rename on USB
+- USB disconnect: dirty files queued in RAM, flushed on reconnect
+- Desktop notifications on USB disconnect and consecutive flush failures
+- Status at `/run/powos/cachefs-status.json` (dirty bytes, file count, last flush)
 
 ```
 When enabled (POWOS_CACHEFS_ENABLED=true):
@@ -843,13 +867,15 @@ When enabled (POWOS_CACHEFS_ENABLED=true):
   ├─ File metadata ─────── ~100MB for 1M files
   └─ LRU cache ─────────── 4GB (configurable)
 
-  ON USB (lazy-loaded):
+  ON USB (write-back):
   └─ Actual contents ───── up to 4TB
+  └─ Dirty files flushed every 30s + on fsync + on unmount
 
   USB unplugged:
-    ls ~/Documents/     → works (metadata RAM)
+    ls ~/Documents/     → works (metadata in RAM)
     cat cached.txt      → works (in cache)
     cat uncached.txt    → error "offline"
+    echo > file.txt     → works (cached, queued for USB write-back on reconnect)
 
 Default (CacheFS disabled):
   /home is direct bind-mount from USB
@@ -1131,16 +1157,17 @@ cat /run/powos/ramboot-state
 cat /run/powos/layer-sync-status.json
 ```
 
-**CacheFS (disabled by default — write-back to USB not implemented; keep disabled):**
+**CacheFS (opt-in via POWOS_CACHEFS_ENABLED=true):**
 ```bash
-# CacheFS is mounted directly by bin/powos-boot at boot when
+# CacheFS is mounted by bin/powos-boot at boot when
 # POWOS_CACHEFS_ENABLED=true is set in /etc/powos/config (reboot to apply).
-# WARNING: writes are never persisted back to USB — do not enable.
+# Write-back engine flushes dirty files to USB every 30s + on fsync + on unmount.
 
-# Debug when enabled:
+# Debug:
 blkid | grep POWOS-DATA
 mount | grep cachefs
-cat /run/powos/cachefs-status.json
+cat /run/powos/cachefs-status.json    # dirty files, last flush, errors
+powos flush                           # force immediate flush of all dirty files
 ```
 
 **Rollback state:**
@@ -1263,8 +1290,8 @@ docker exec powos python3 /var/lib/powos/src/test/tier1/test-cachefs.py      # C
 | systemd-sysext overlays | ✅ Implemented | Custom binaries merged into /usr |
 | Container dev (Distrobox) | ✅ Implemented | Mutable dev containers |
 | Rollback | ✅ Implemented | grubby can silently fail — verify via `/run/powos/rollback-kargs` |
-| CacheFS | 🚫 Incomplete — keep disabled | Write-back to USB NOT implemented; written data is lost. Must remain disabled |
-| Mobile mode | 🚧 WIP | Files copied to RAM but live remount not implemented; reboot needed |
+| CacheFS | ⚠️ Implemented — opt-in, HW validation pending | Write-back engine flushes dirty files to USB (temp+rename crash-safe, 30s interval + fsync + unmount). Opt-in: `POWOS_CACHEFS_ENABLED=true` in `/etc/powos/config` |
+| Mobile mode | ✅ Implemented (hardware validation pending) | Live bind mounts: tmpfs + per-directory bind over `/usr` `/opt` `/libexec`. No reboot. `/etc`/`var` still USB-backed. Binds lost on reboot (re-run enable). |
 | Sync conflict detection | ⚠️ Partial | Detection works; `--merge` has basic implementation, may need manual help |
 | Cloud backup | ⚠️ Partial | git-based implementation exists (`lib/backup.sh`); not fully validated |
 | Tier-2 VM testing | ❌ Missing | Only Docker/tier-1 tests exist |

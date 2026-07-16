@@ -27,14 +27,28 @@ STATE_DIR="${POWOS_STATE_DIR:-/run/powos}"
 # /run/powos/usb-layers (the old /mnt/powos-usb default never existed).
 USB_MOUNT="${POWOS_USB_MOUNT:-/run/powos/usb-layers}"
 USB_LAYERS="${USB_MOUNT}/layers"
-# Mobile staging lives ON the USB data partition, NOT in tmpfs:
-# everything under /run vanishes at the reboot this feature requires, so a
-# future dracut consumer must be able to find the staged layer, state, and
-# exclusions on persistent storage.
+# USB staging dir for potential future boot integration (not used for live mode).
 MOBILE_DIR="${USB_MOUNT}/mobile"
 MOBILE_LAYER="${MOBILE_DIR}/layer"
 MOBILE_STATE="${MOBILE_DIR}/state"
 MOBILE_EXCLUDE="${MOBILE_DIR}/exclude"
+
+# Live-mode paths (runtime, in /run — lost on reboot by design).
+# The tmpfs is mounted here; bind-mount record tracks which paths are live.
+MOBILE_RAM_DIR="${STATE_DIR}/mobile-ram"
+MOBILE_BIND_RECORD="${STATE_DIR}/mobile-bind-record"
+
+# Top-level directories that are safe to bind-mount over.
+# Excluded (never bind):
+#   /proc /sys /dev /run /tmp  — virtual/runtime filesystems
+#   /home                      — user data
+#   /mnt /media                — removable media mount points
+#   /boot                      — boot partition
+#   /etc                       — live auth/service config (bind risks breakage)
+#   /var                       — mixed runtime state and data
+# On modern Fedora/Bazzite /bin, /lib, /lib64, /sbin are symlinks into /usr,
+# so binding /usr covers them automatically.
+BIND_SAFE_TOPLEVEL=( /usr /opt /libexec )
 
 # ═══════════════════════════════════════════════════════════════════
 # Package & Category Detection (from rpm, not hardcoded)
@@ -177,13 +191,11 @@ set_mobile_state() {
     echo "$state" > "$MOBILE_STATE"
 }
 
-# "staged" means files were copied but mobile mode is NOT active (live
-# remount / boot integration is not implemented). Both states count as
-# "already set up" for enable/disable purposes.
 is_mobile_enabled() {
-    local state
-    state=$(get_mobile_state)
-    [[ "$state" == "enabled" || "$state" == "staged" ]]
+    # Mobile is truly active only when bind mounts are in place.
+    # The state file persists across reboots but the bind record lives in /run
+    # (lost on reboot). Trust the bind record over the state file.
+    [[ -f "$MOBILE_BIND_RECORD" ]]
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -356,22 +368,16 @@ show_simple_menu() {
 # Copy to RAM
 # ═══════════════════════════════════════════════════════════════════
 
-copy_layers_to_ram() {
+# ─── internal: copy selected RPM-category files to a given destination dir ────
+# dest_dir must already exist or be creatable.
+# Returns: 0 on success, non-zero if copy was incomplete.
+# Prints progress; caller sets up tmpfs / staging dir first.
+_copy_categories_to_dir() {
+    local dest_dir="$1"
     local exclusions
     exclusions=$(load_exclusions)
 
-    echo -e "${BOLD}${CYAN}Staging OS files for mobile mode...${NC}"
-    echo "Target: $MOBILE_LAYER (on the USB data partition)"
-    echo ""
-
-    # Create mobile layer directory (lives on the USB data partition so it
-    # survives the reboot this feature needs)
-    if ! mkdir -p "$MOBILE_LAYER" 2>/dev/null; then
-        echo -e "${RED}Error: cannot create $MOBILE_LAYER - USB not mounted at $USB_MOUNT?${NC}"
-        return 1
-    fi
-
-    # Get list of categories to include
+    # Enumerate included categories
     local included_categories=()
     while IFS= read -r category; do
         [[ -z "$category" ]] && continue
@@ -380,46 +386,20 @@ copy_layers_to_ram() {
         fi
     done < <(get_categories)
 
-    # Calculate total size
-    local total_size=0
-    for category in "${included_categories[@]}"; do
-        local cat_size
-        cat_size=$(get_category_size "$category")
-        total_size=$((total_size + cat_size))
-    done
-
     echo "Categories to copy: ${#included_categories[@]}"
-    echo "Total size: $(format_size $total_size)"
     echo ""
 
-    # Check RAM
-    local available
-    available=$(get_available_ram)
-    local needed=$((total_size + 1073741824))  # Add 1GB buffer
-
-    if [[ $needed -gt $available ]]; then
-        echo -e "${RED}Not enough RAM!${NC}"
-        echo "  Need: $(format_size $needed)"
-        echo "  Available: $(format_size $available)"
-        echo ""
-        echo "Try excluding some categories with: powos mobile -c"
-        return 1
-    fi
-
-    # Copy files for each included category
+    # Copy files for each included category.
+    # rpm -ql lists BOTH directories and regular files:
+    #  - directories: mkdir -p (never cp'd — cp -a dir existing/ would nest)
+    #  - files/symlinks: copied to exact target path under dest_dir
     local copied=0
     local fail_count=0
     for category in "${included_categories[@]}"; do
         local display_name="${category##*/}"
         [[ -z "$display_name" ]] && display_name="$category"
-
         echo -ne "  ${display_name}: "
 
-        # Get packages in this category and copy their files.
-        # rpm -ql lists BOTH directories and files:
-        #  - directories are just created (never cp'd: `cp -a dir existing/`
-        #    would copy INTO it and nest duplicate trees)
-        #  - files are copied to their exact target path
         while IFS= read -r pkg; do
             [[ -z "$pkg" ]] && continue
             while IFS= read -r file; do
@@ -427,17 +407,17 @@ copy_layers_to_ram() {
                 [[ ! -e "$file" ]] && continue
 
                 if [[ -d "$file" && ! -L "$file" ]]; then
-                    if ! mkdir -p "$MOBILE_LAYER$file" 2>/dev/null; then
+                    if ! mkdir -p "${dest_dir}${file}" 2>/dev/null; then
                         fail_count=$((fail_count + 1))
                     fi
                 else
                     local dir
                     dir=$(dirname "$file")
-                    if ! mkdir -p "$MOBILE_LAYER$dir" 2>/dev/null; then
+                    if ! mkdir -p "${dest_dir}${dir}" 2>/dev/null; then
                         fail_count=$((fail_count + 1))
                         continue
                     fi
-                    if ! cp -a "$file" "$MOBILE_LAYER$file" 2>/dev/null; then
+                    if ! cp -a "$file" "${dest_dir}${file}" 2>/dev/null; then
                         fail_count=$((fail_count + 1))
                     fi
                 fi
@@ -447,17 +427,165 @@ copy_layers_to_ram() {
         local cat_size
         cat_size=$(get_category_size "$category")
         copied=$((copied + cat_size))
-        echo -e "${GREEN}done${NC} ($(format_size $cat_size))"
+        echo -e "${GREEN}done${NC} ($(format_size "$cat_size"))"
     done
 
     echo ""
     if [[ $fail_count -gt 0 ]]; then
         echo -e "${YELLOW}Warning: $fail_count file(s)/dir(s) failed to copy.${NC}"
-        echo "The staged layer is incomplete - do not rely on it."
     fi
-    echo -e "${GREEN}✓ Staged $(format_size $copied) to $MOBILE_LAYER${NC}"
+    echo -e "${GREEN}✓ Copied $(format_size "$copied") to ${dest_dir}${NC}"
 
     [[ $fail_count -eq 0 ]]
+}
+
+# ─── calculate selected-category total size (bytes) ──────────────────────────
+calculate_mobile_size() {
+    local exclusions
+    exclusions=$(load_exclusions)
+    local total=0
+    while IFS= read -r category; do
+        [[ -z "$category" ]] && continue
+        if ! echo "$exclusions" | grep -qx "category:$category" 2>/dev/null; then
+            total=$((total + $(get_category_size "$category")))
+        fi
+    done < <(get_categories)
+    echo "$total"
+}
+
+# ─── mount a tmpfs sized for the mobile RAM layer ────────────────────────────
+# $1 = size in bytes (tmpfs will be sized at 120% of this)
+create_mobile_tmpfs() {
+    local size_bytes="$1"
+    # 20% headroom over the RPM-reported size (actual on-disk may differ)
+    local tmpfs_size=$(( size_bytes * 12 / 10 ))
+    [[ $tmpfs_size -lt 67108864 ]] && tmpfs_size=67108864  # 64 MB floor
+
+    mkdir -p "$MOBILE_RAM_DIR"
+    if mountpoint -q "$MOBILE_RAM_DIR" 2>/dev/null; then
+        echo -e "${YELLOW}tmpfs already mounted at $MOBILE_RAM_DIR${NC}"
+        return 0
+    fi
+    if ! mount -t tmpfs -o "size=${tmpfs_size}" tmpfs "$MOBILE_RAM_DIR"; then
+        echo -e "${RED}Failed to mount tmpfs at $MOBILE_RAM_DIR${NC}"
+        return 1
+    fi
+    echo "Mounted ${tmpfs_size}-byte tmpfs at $MOBILE_RAM_DIR"
+}
+
+# ─── copy selected categories into the RAM tmpfs ─────────────────────────────
+copy_to_mobile_tmpfs() {
+    echo -e "${BOLD}${CYAN}Copying OS files to RAM...${NC}"
+    echo "Target: $MOBILE_RAM_DIR (tmpfs)"
+    echo ""
+    _copy_categories_to_dir "$MOBILE_RAM_DIR"
+}
+
+# ─── bind-mount populated safe dirs from tmpfs over system paths ──────────────
+#
+# DESIGN: overlayfs `mount -o remount,lowerdir=…` is rejected by the kernel
+# (EINVAL) — you cannot add lowerdirs to a live overlayfs. Per-directory bind
+# mounts are the only way to serve specific paths from RAM without a reboot.
+#
+# For each directory in BIND_SAFE_TOPLEVEL that is populated in the tmpfs,
+# we bind-mount the tmpfs copy over the system path. The system path was
+# previously served by the overlayfs (custom:updates:base lowerdir stack on
+# USB); after the bind it is served from RAM. The overlayfs upper layer (RAM
+# writes) is also in RAM already, so it is not lost — but it IS hidden by
+# the bind. Writes to bound paths after enabling mobile mode go to the tmpfs
+# (RAM) and are not persisted to the overlayfs upper or the USB.
+do_live_binds() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Root required for bind mounts.${NC}" >&2
+        echo "Run: sudo powos mobile enable" >&2
+        return 1
+    fi
+
+    local bound=()
+    for safe_dir in "${BIND_SAFE_TOPLEVEL[@]}"; do
+        local src="${MOBILE_RAM_DIR}${safe_dir}"
+        [[ -d "$src" ]] || continue        # not populated in tmpfs — skip
+        [[ -d "$safe_dir" ]] || continue   # target doesn't exist on system — skip
+        if mountpoint -q "$safe_dir" 2>/dev/null; then
+            echo -e "${YELLOW}  Skipping $safe_dir (already a mountpoint)${NC}"
+            continue
+        fi
+        if mount --bind "$src" "$safe_dir"; then
+            echo -e "  ${GREEN}✓${NC} Bound $safe_dir from RAM"
+            bound+=("$safe_dir")
+        else
+            echo -e "  ${RED}✗${NC} Failed to bind $safe_dir" >&2
+        fi
+    done
+
+    if [[ ${#bound[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}No directories were bound (nothing safe to bind in tmpfs).${NC}"
+        echo "Mobile mode is NOT active."
+        return 1
+    fi
+
+    # Record active binds for cleanup
+    printf '%s\n' "${bound[@]}" > "$MOBILE_BIND_RECORD"
+    echo ""
+    echo -e "${GREEN}${#bound[@]} path(s) now served from RAM: ${bound[*]}${NC}"
+    return 0
+}
+
+# ─── undo live bind mounts and free the tmpfs ────────────────────────────────
+undo_live_binds() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Root required to unmount binds.${NC}" >&2
+        return 1
+    fi
+
+    local paths=()
+    if [[ -f "$MOBILE_BIND_RECORD" ]]; then
+        while IFS= read -r path; do
+            [[ -n "$path" ]] && paths+=("$path")
+        done < "$MOBILE_BIND_RECORD"
+    fi
+
+    # Unmount binds in reverse order (deepest first, though typically /usr etc are flat)
+    local failed=0
+    for (( i=${#paths[@]}-1; i>=0; i-- )); do
+        local p="${paths[$i]}"
+        if mountpoint -q "$p" 2>/dev/null; then
+            if umount "$p" 2>/dev/null; then
+                echo -e "  ${GREEN}✓${NC} Unbound $p"
+            else
+                echo -e "  ${YELLOW}⚠${NC} Could not unmount $p (busy?)" >&2
+                failed=$((failed + 1))
+            fi
+        fi
+    done
+
+    rm -f "$MOBILE_BIND_RECORD"
+
+    # Unmount the tmpfs (only possible once all binds from it are gone)
+    if mountpoint -q "$MOBILE_RAM_DIR" 2>/dev/null; then
+        if umount "$MOBILE_RAM_DIR" 2>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} Freed mobile RAM tmpfs"
+            rmdir "$MOBILE_RAM_DIR" 2>/dev/null || true
+        else
+            echo -e "  ${YELLOW}⚠${NC} tmpfs still busy (lazy unmount scheduled)" >&2
+            umount --lazy "$MOBILE_RAM_DIR" 2>/dev/null || true
+        fi
+    fi
+
+    [[ $failed -eq 0 ]]
+}
+
+# Keep this for potential future boot-integration (USB staging), not called
+# by the live flow anymore.
+copy_layers_to_ram() {
+    echo -e "${BOLD}${CYAN}Staging OS files to USB for boot integration...${NC}"
+    echo "Target: $MOBILE_LAYER (on the USB data partition)"
+    echo ""
+    if ! mkdir -p "$MOBILE_LAYER" 2>/dev/null; then
+        echo -e "${RED}Error: cannot create $MOBILE_LAYER - USB not mounted at $USB_MOUNT?${NC}"
+        return 1
+    fi
+    _copy_categories_to_dir "$MOBILE_LAYER"
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -465,54 +593,17 @@ copy_layers_to_ram() {
 # ═══════════════════════════════════════════════════════════════════
 
 remount_with_mobile() {
-    echo -e "${CYAN}Remounting with mobile layer...${NC}"
-
-    # This is the tricky part - need to insert mobile layer
-    # For now, we'll note that this requires root and possibly
-    # stopping services
-
-    # Check if we can remount
-    if [[ $EUID -ne 0 ]]; then
-        echo -e "${YELLOW}Note: Remounting requires root.${NC}"
-        echo "Run: sudo powos mobile enable"
+    echo -e "${CYAN}Activating live bind mounts...${NC}"
+    if ! do_live_binds; then
         return 1
     fi
-
-    # The mobile layer should be inserted between upper and lower layers
-    # New stack: upper (RAM writes) + mobile (RAM copy) + USB layers
-
-    # For a live remount, we may need to:
-    # 1. Sync any pending writes
-    # 2. Remount overlay with new lowerdir
-
-    # NOT IMPLEMENTED: the overlay stack is untouched. Do NOT set state to
-    # "enabled" here - that previously made the tooling claim the USB was
-    # safe to unplug while custom/updates/base lowerdirs still lived on it.
-    echo -e "${YELLOW}Live remount not yet implemented (WIP).${NC}"
-    echo "Files are staged at: $MOBILE_LAYER"
-    echo "There is no boot integration for this layer yet either, so mobile"
-    echo "mode is NOT active - the OS still runs from USB-backed layers."
-
-    set_mobile_state "staged"
-    return 0
+    set_mobile_state "live"
 }
 
 remount_without_mobile() {
-    echo -e "${CYAN}Returning to USB-backed mode...${NC}"
-
-    if [[ $EUID -ne 0 ]]; then
-        echo -e "${YELLOW}Note: Remounting requires root.${NC}"
-        return 1
-    fi
-
-    # Remove the staged mobile layer
-    if [[ -d "$MOBILE_LAYER" ]]; then
-        rm -rf "$MOBILE_LAYER"
-        echo "Removed staged mobile layer ($MOBILE_LAYER)"
-    fi
-
+    echo -e "${CYAN}Releasing live bind mounts...${NC}"
+    undo_live_binds
     set_mobile_state "disabled"
-    return 0
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -524,38 +615,57 @@ mobile_status() {
     echo "════════════════════════════════════════"
     echo ""
 
+    # Ground truth: is the bind record present and do the mounts exist?
+    local live=false
+    if [[ -f "$MOBILE_BIND_RECORD" ]]; then
+        # Verify at least one bind is still mounted
+        while IFS= read -r path; do
+            if [[ -n "$path" ]] && mountpoint -q "$path" 2>/dev/null; then
+                live=true
+                break
+            fi
+        done < "$MOBILE_BIND_RECORD"
+    fi
+
+    # The state file persists across reboots; detect stale "live" state.
     local state
     state=$(get_mobile_state)
-
-    case "$state" in
-        staged)
-            echo -e "Mode: ${YELLOW}Staged (NOT active)${NC}"
-            echo "OS files have been copied for mobile mode, but live remount /"
-            echo "boot integration is not implemented yet (WIP)."
-            echo -e "${RED}USB is still required - do NOT unplug it.${NC}"
-            ;;
-        enabled)
-            # Legacy state from older builds that set "enabled" without ever
-            # remounting. Never claim the OS is fully in RAM.
-            echo -e "Mode: ${YELLOW}Marked enabled (UNVERIFIED)${NC}"
-            echo "Live remount is not implemented in this build; this state is"
-            echo "stale. Assume the OS still runs from USB-backed layers."
-            echo -e "${RED}Do NOT unplug the USB.${NC}"
-            ;;
-        *)
-            echo -e "Mode: ${YELLOW}Normal (USB-backed)${NC}"
-            echo "USB required for full functionality."
-            ;;
-    esac
+    if [[ "$state" == "live" && "$live" == false ]]; then
+        # Bind mounts did not survive reboot (tmpfs and /run are transient).
+        echo -e "Mode: ${YELLOW}Inactive (did not survive reboot)${NC}"
+        echo "Mobile mode was active before reboot but the RAM tmpfs and bind"
+        echo "mounts are gone. Run 'powos mobile enable' to re-activate."
+        echo -e "${RED}USB paths are in use. Do not unplug.${NC}"
+        # Auto-correct stale state
+        set_mobile_state "disabled" 2>/dev/null || true
+    elif [[ "$live" == true ]]; then
+        echo -e "Mode: ${GREEN}● LIVE — OS paths served from RAM${NC}"
+        echo ""
+        echo "Active bind mounts (paths now in RAM):"
+        while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            if mountpoint -q "$path" 2>/dev/null; then
+                echo -e "  ${GREEN}✓${NC} $path"
+            else
+                echo -e "  ${YELLOW}?${NC} $path (unmounted?)"
+            fi
+        done < "$MOBILE_BIND_RECORD"
+        echo ""
+        echo -e "${GREEN}USB data partition can be unplugged for bound paths.${NC}"
+        echo "NOTE: /etc and /var are still USB-backed. Writes to bound paths"
+        echo "go to RAM only — they are not persisted to USB."
+    else
+        echo -e "Mode: ${YELLOW}Normal (USB-backed)${NC}"
+        echo "USB required — run 'sudo powos mobile enable' to activate."
+    fi
     echo ""
 
     # USB and sync status
     echo -e "${CYAN}Sync:${NC}"
     if [[ -d "${USB_LAYERS%/layers}" ]] && mountpoint -q "${USB_LAYERS%/layers}" 2>/dev/null; then
-        echo -e "  USB: ${GREEN}Connected${NC} - changes syncing to USB"
+        echo -e "  USB: ${GREEN}Connected${NC}"
     else
-        echo -e "  USB: ${YELLOW}Disconnected${NC} - changes queued in RAM"
-        echo "       (Will sync automatically when USB reconnects)"
+        echo -e "  USB: ${YELLOW}Disconnected${NC}"
     fi
     echo ""
 
@@ -564,14 +674,19 @@ mobile_status() {
     total_ram=$(get_total_ram)
     available_ram=$(get_available_ram)
     echo "RAM:"
-    echo "  Total:     $(format_size $total_ram)"
-    echo "  Available: $(format_size $available_ram)"
+    echo "  Total:     $(format_size "$total_ram")"
+    echo "  Available: $(format_size "$available_ram")"
+    if mountpoint -q "$MOBILE_RAM_DIR" 2>/dev/null; then
+        local ram_used
+        ram_used=$(du -sb "$MOBILE_RAM_DIR" 2>/dev/null | cut -f1 || echo 0)
+        echo "  Mobile RAM layer: $(format_size "${ram_used:-0}")"
+    fi
     echo ""
 
     # OS size
     local os_size
     os_size=$(get_total_size)
-    echo "OS Size: $(format_size $os_size)"
+    echo "OS Size: $(format_size "$os_size")"
     echo ""
 
     # Exclusions
@@ -582,14 +697,6 @@ mobile_status() {
         echo "$exclusions" | sed 's/^category:/  - /' | grep -v "^$" || true
     else
         echo "All categories included."
-    fi
-    echo ""
-
-    # Mobile layer (staged on the USB data partition)
-    if [[ -d "$MOBILE_LAYER" ]]; then
-        local mobile_size
-        mobile_size=$(du -sb "$MOBILE_LAYER" 2>/dev/null | cut -f1)
-        echo "Staged mobile layer: $(format_size ${mobile_size:-0}) at $MOBILE_LAYER"
     fi
 }
 
@@ -694,30 +801,27 @@ mobile_enable() {
     local customize=false
     local force=false
 
-    # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -c|--customize)
-                customize=true
-                shift
-                ;;
-            -f|--force)
-                force=true
-                shift
-                ;;
-            *)
-                shift
-                ;;
+            -c|--customize) customize=true; shift ;;
+            -f|--force)     force=true;     shift ;;
+            *)              shift ;;
         esac
     done
 
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Mobile mode enable requires root.${NC}"
+        echo "Run: sudo powos mobile enable"
+        return 1
+    fi
+
     if is_mobile_enabled && [[ "$force" != true ]]; then
-        echo -e "${YELLOW}Mobile mode already enabled.${NC}"
-        echo "Run 'powos mobile disable' first, or use --force"
+        echo -e "${YELLOW}Mobile mode is already active.${NC}"
+        echo "Run 'sudo powos mobile disable' first, or use --force to re-enable."
         return 0
     fi
 
-    # Show menu if customizing (interactive)
+    # Customize category selection interactively
     if [[ "$customize" == true ]]; then
         if ! show_menu; then
             echo "Cancelled."
@@ -725,25 +829,64 @@ mobile_enable() {
         fi
     fi
 
-    # Copy layers
-    if ! copy_layers_to_ram; then
+    # ── Step 1: calculate required size and check RAM ─────────────────────────
+    echo -e "${BOLD}${CYAN}Enabling mobile mode (live bind mounts)...${NC}"
+    echo ""
+    local total_size
+    total_size=$(calculate_mobile_size)
+    local needed=$(( total_size + 1073741824 ))  # +1 GiB headroom
+    local available
+    available=$(get_available_ram)
+
+    echo "OS content to copy: $(format_size "$total_size")"
+    echo "RAM available:       $(format_size "$available")"
+    echo ""
+
+    if [[ $needed -gt $available ]]; then
+        echo -e "${RED}Not enough RAM.${NC}"
+        echo "  Need:      $(format_size "$needed") (content + 1 GiB buffer)"
+        echo "  Available: $(format_size "$available")"
+        echo "Try excluding categories: powos mobile -c"
         return 1
     fi
 
-    # Remount (WIP: currently only records the staged state, see above)
-    remount_with_mobile
+    # ── Step 2: create tmpfs ──────────────────────────────────────────────────
+    if ! create_mobile_tmpfs "$total_size"; then
+        return 1
+    fi
+
+    # ── Step 3: copy OS files from merged view into tmpfs ────────────────────
+    if ! copy_to_mobile_tmpfs; then
+        umount "$MOBILE_RAM_DIR" 2>/dev/null || true
+        return 1
+    fi
+
+    # ── Step 4: bind-mount from tmpfs over USB-backed system paths ───────────
+    if ! remount_with_mobile; then
+        umount "$MOBILE_RAM_DIR" 2>/dev/null || true
+        return 1
+    fi
 
     echo ""
-    echo -e "${YELLOW}${BOLD}Mobile mode is NOT active - this feature is WIP.${NC}"
-    echo -e "${RED}Do NOT unplug the USB: the OS still runs from USB-backed layers.${NC}"
-    echo ""
-    echo "OS files were staged to $MOBILE_LAYER for a future"
-    echo "boot integration. Run 'powos mobile disable' to free that space."
+    echo -e "${GREEN}${BOLD}Mobile mode ACTIVE.${NC}"
+    echo "Bound OS paths are now served from RAM."
+    echo "Note: /etc and /var are still USB-backed (not bound)."
+    echo "Run 'sudo powos mobile disable' to return to normal mode."
 }
 
 mobile_disable() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Mobile mode disable requires root.${NC}"
+        echo "Run: sudo powos mobile disable"
+        return 1
+    fi
+
     if ! is_mobile_enabled; then
-        echo -e "${YELLOW}Mobile mode not enabled.${NC}"
+        echo -e "${YELLOW}Mobile mode is not active.${NC}"
+        # Clean up stale state file if needed
+        local state
+        state=$(get_mobile_state)
+        [[ "$state" != "disabled" ]] && set_mobile_state "disabled" 2>/dev/null || true
         return 0
     fi
 
