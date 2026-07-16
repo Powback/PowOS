@@ -36,12 +36,13 @@ fi
 echo "PowStream source: $SRC"
 
 # ── Build the layer ─────────────────────────────────────────────────
-command -v cargo >/dev/null 2>&1 || {
-    echo "ERROR: cargo not found. Install rust (powos install rust) and retry." >&2
-    exit 1
-}
 SO="$SRC/target/release/libvklayer_powstream_capture.so"
 if [[ ! -f "$SO" ]]; then
+    command -v cargo >/dev/null 2>&1 || {
+        echo "ERROR: no prebuilt $SO and cargo not found." >&2
+        echo "Either build it in the repo (./scripts/build-rust.sh, Docker) or install rust (powos install rust) and retry." >&2
+        exit 1
+    }
     (cd "$SRC" && cargo build --release -p powstream-vklayer-capture)
 fi
 [[ -f "$SO" ]] || { echo "ERROR: build produced no $SO" >&2; exit 1; }
