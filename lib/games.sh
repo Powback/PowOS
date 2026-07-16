@@ -763,13 +763,287 @@ gms_steam_setup() {
     echo "            Full notes: GAMES-README.txt at the partition root."
 }
 
+# PURE: find the free block immediately adjacent to (after) partition $2 on disk $1.
+# Prints "START END SIZE" in MiB. Returns 1 if there is no adjacent free block.
+gms_adjacent_free_block() {
+    local disk="${1:?}" partnum="${2:?}"
+    parted "$disk" unit MiB print free 2>/dev/null | awk -v p="$partnum" '
+        # Record the end of the target partition.
+        /^[ \t]*[0-9]/ {
+            n=$1; e=$3
+            gsub("MiB","",e)
+            if (n+0 == p+0) { part_end = e }
+        }
+        /Free Space/ {
+            s=$1; e=$2; sz=$3
+            gsub("MiB","",s); gsub("MiB","",e); gsub("MiB","",sz)
+            # A free block is "adjacent" when it starts within 2 MiB of the
+            # partition end (alignment rounding).
+            if (part_end != "" && s+0 >= part_end+0 - 2 && sz+0 > 0) {
+                printf "%s %s %d\n", s, e, sz; exit
+            }
+        }'
+}
+
+# PURE: given the parted-print-free table, find the current end of partition $2.
+# Prints end in MiB (possibly fractional). Returns 1 if not found.
+gms_part_end() {
+    local disk="${1:?}" partnum="${2:?}"
+    parted "$disk" unit MiB print free 2>/dev/null | awk -v p="$partnum" '
+        /^[ \t]*[0-9]/ {
+            n=$1; e=$3
+            gsub("MiB","",e)
+            if (n+0 == p+0) { print e; exit }
+        }'
+}
+
+# PURE: given the parted-print-free table, find the current start of partition $2.
+# Prints start in MiB (possibly fractional). Returns 1 if not found.
+gms_part_start() {
+    local disk="${1:?}" partnum="${2:?}"
+    parted "$disk" unit MiB print free 2>/dev/null | awk -v p="$partnum" '
+        /^[ \t]*[0-9]/ {
+            n=$1; s=$2
+            gsub("MiB","",s)
+            if (n+0 == p+0) { print s; exit }
+        }'
+}
+
 # ── powos games resize ────────────────────────────────────────────
 gms_resize() {
-    gms_err "Not implemented: resizing an NTFS partition in place is the"
-    gms_err "riskiest disk operation there is, and we won't pretend otherwise."
-    gms_log "Create the partition at the size you need (powos games create --size N),"
-    gms_log "or back up its contents, delete it, and re-create it bigger."
-    return 1
+    gms_step "Resize the $GMS_LABEL partition"
+
+    # ── Validate --size ───────────────────────────────────────────
+    if ! [[ "$GMS_SIZE_GB" =~ ^[0-9]+$ ]] || (( GMS_SIZE_GB < 1 )); then
+        gms_err "Required: --size N (new size in GB)"
+        gms_err "Usage: sudo powos games resize --size 1024"
+        return 1
+    fi
+    local want_mib=$(( GMS_SIZE_GB * 1024 ))
+
+    # ── Locate the partition + current size ───────────────────────
+    # These use only blkid/lsblk (always available) and are needed for
+    # the no-op check and policy gates that run BEFORE requiring root or tools.
+    local part
+    part=$(blkid -L "$GMS_LABEL" 2>/dev/null || true)
+    if [[ -z "$part" ]]; then
+        gms_err "No $GMS_LABEL partition found. Create it first:"
+        gms_err "    sudo powos games create --size N"
+        return 1
+    fi
+
+    local pk disk
+    pk=$(lsblk -no PKNAME "$part" 2>/dev/null | head -1)
+    [[ -n "$pk" ]] || { gms_err "Cannot determine the disk for $part."; return 1; }
+    disk="/dev/$pk"
+
+    local pnum="${part##*[!0-9]}"
+    [[ -n "$pnum" ]] || { gms_err "Cannot determine partition number from $part."; return 1; }
+
+    local cur_bytes cur_mib
+    cur_bytes=$(lsblk -bnd -o SIZE "$part" 2>/dev/null | head -1 | tr -d '[:space:]')
+    if ! [[ "$cur_bytes" =~ ^[0-9]+$ ]]; then
+        gms_err "Cannot read current size of $part."
+        return 1
+    fi
+    cur_mib=$(( cur_bytes / 1048576 ))
+
+    # ── No-op: same size → exit 0 early ──────────────────────────
+    if (( want_mib == cur_mib )); then
+        gms_ok "Already at the requested size (${GMS_SIZE_GB}GB). Nothing to do."
+        return 0
+    fi
+
+    local is_shrink=0
+    (( want_mib < cur_mib )) && is_shrink=1
+    local diff_mib=$(( want_mib - cur_mib ))
+    (( is_shrink )) && diff_mib=$(( cur_mib - want_mib ))
+
+    # ── Safety: refuse if mounted (prerequisite for all resize ops) ─
+    local mounted
+    mounted=$(findmnt -n -o TARGET -S "$part" 2>/dev/null | head -1 || true)
+    if [[ -n "$mounted" ]]; then
+        gms_err "$part is currently mounted at $mounted."
+        gms_err "Unmount it first:"
+        gms_err "    sudo systemctl stop $GMS_UNIT_NAME"
+        gms_err "    sudo umount $mounted"
+        return 1
+    fi
+
+    # ── Policy gate for shrink: require --yes before proceeding ───
+    # Checked here (before root check) so the user gets a clear message even
+    # when not root — don't make them sudo just to be told to also add --yes.
+    if (( is_shrink )) && [[ $GMS_ASSUME_YES -eq 0 && $GMS_DRY_RUN -eq 0 ]]; then
+        gms_warn "Shrinking an NTFS partition is the riskiest disk operation."
+        gms_warn "Back up your data, then re-run with --yes to confirm:"
+        gms_err  "    sudo powos games resize --size $GMS_SIZE_GB --yes"
+        return 1
+    fi
+
+    # ── Grow: check free space adjacent to the partition ──────────
+    # (Only now do we call parted for the free-block check.)
+    if (( !is_shrink )); then
+        local need_mib=$(( want_mib - cur_mib ))
+        local adj_start adj_end adj_size
+        read -r adj_start adj_end adj_size <<< "$(gms_adjacent_free_block "$disk" "$pnum")"
+        if [[ -z "$adj_start" ]]; then
+            gms_err "No free space immediately after $part on $disk."
+            gms_err "Cannot grow the partition without adjacent free space."
+            gms_err "Use Windows Disk Management or 'parted' to free space after the partition."
+            return 1
+        fi
+        if (( adj_size < need_mib )); then
+            gms_err "Not enough adjacent free space to grow by ${need_mib}MiB."
+            gms_err "  Adjacent free block: ${adj_size}MiB"
+            gms_err "  Need:                ${need_mib}MiB more"
+            return 1
+        fi
+    fi
+
+    # ── Required tools ────────────────────────────────────────────
+    local t missing=()
+    for t in ntfsresize ntfsfix parted blkid lsblk; do
+        command -v "$t" &>/dev/null || missing+=("$t")
+    done
+    if (( ${#missing[@]} > 0 )); then
+        gms_err "Missing required tools: ${missing[*]}"
+        gms_err "(ntfsresize/ntfsfix ship in ntfs-3g/ntfsprogs)"
+        return 1
+    fi
+
+    # ── Plan ──────────────────────────────────────────────────────
+    local cur_gb=$(( cur_mib / 1024 ))
+    local op_label="GROW"
+    (( is_shrink )) && op_label="${YELLOW}SHRINK${NC}"
+    gms_step "Plan"
+    echo "  Partition:  $part  (partition $pnum on $disk)"
+    echo "  Current:    ${cur_mib}MiB (${cur_gb}GB)"
+    echo "  Target:     ${want_mib}MiB (${GMS_SIZE_GB}GB)"
+    echo -e "  Operation:  $op_label  (delta: ${diff_mib}MiB)"
+    (( is_shrink )) && echo "  Sequence:   ntfsfix -d → ntfsresize --check → ntfsresize (FS) → parted resizepart"
+    (( !is_shrink )) && echo "  Sequence:   parted resizepart (partition) → ntfsresize (FS fills)"
+    echo
+
+    # ── Dry-run: print plan, exit ─────────────────────────────────
+    if [[ $GMS_DRY_RUN -eq 1 ]]; then
+        if (( is_shrink )); then
+            gms_warn "dry-run: would run ntfsfix -d $part"
+            gms_warn "dry-run: would run ntfsresize --check $part"
+            gms_warn "dry-run: would run ntfsresize --no-action --size ${want_mib}M $part"
+            gms_warn "dry-run: would run ntfsresize --size ${want_mib}M $part"
+            gms_warn "dry-run: would run parted -s $disk resizepart $pnum <new_end>MiB"
+        else
+            gms_warn "dry-run: would run parted -s $disk resizepart $pnum <new_end>MiB"
+            gms_warn "dry-run: would run ntfsresize $part"
+        fi
+        gms_warn "dry-run complete — nothing was changed."
+        return 0
+    fi
+
+    # ── Root check ────────────────────────────────────────────────
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+        gms_err "Resizing needs root:  sudo powos games resize --size $GMS_SIZE_GB"
+        return 1
+    fi
+
+    # ── Shrink: warning + final confirmation ──────────────────────
+    if (( is_shrink )); then
+        echo -e "${YELLOW}WARNING: shrinking an NTFS partition is the riskiest disk operation.${NC}"
+        echo "  - Filesystem integrity check will run first; any errors abort."
+        echo ""
+    fi
+
+    gms_confirm "Resize $GMS_LABEL from ${cur_mib}MiB to ${want_mib}MiB on $disk?" || {
+        gms_log "Aborted. Nothing was changed."
+        return 1
+    }
+
+    # ── Resize ────────────────────────────────────────────────────
+    if (( is_shrink )); then
+        # 1. Clear dirty bit so ntfsresize can access the filesystem.
+        gms_run_step "clear dirty bit" ntfsfix -d "$part" || {
+            gms_err "ntfsfix failed — the filesystem may have errors. Aborting."
+            return 1
+        }
+
+        # 2. Check filesystem integrity — refuse if errors.
+        gms_log "Checking filesystem integrity..."
+        local chk_out
+        if ! chk_out=$(ntfsresize --check "$part" 2>&1); then
+            gms_err "NTFS filesystem has errors — refusing to shrink."
+            echo "$chk_out" | sed 's/^/  /' >&2
+            gms_err "Fix errors first:  ntfsfix $part"
+            return 1
+        fi
+        gms_ok "Filesystem check passed."
+
+        # 3. Dry-run of ntfsresize to confirm the shrink is possible.
+        local want_bytes=$(( want_mib * 1048576 ))
+        gms_run_step "check ntfsresize feasibility (--no-action)" \
+            ntfsresize --no-action --size "${want_bytes}" "$part" || {
+            gms_err "ntfsresize reports it cannot shrink $part to this size."
+            gms_err "(Data may extend beyond the target size.)"
+            return 1
+        }
+
+        # 4. Shrink the NTFS filesystem inside the current partition.
+        gms_run_step "shrink NTFS filesystem to ${want_bytes} bytes" \
+            ntfsresize --size "${want_bytes}" "$part" || {
+            gms_err "ntfsresize failed — filesystem was not changed."
+            return 1
+        }
+
+        # 5. Shrink the partition itself.
+        local p_start new_end
+        p_start=$(gms_part_start "$disk" "$pnum")
+        if [[ -z "$p_start" ]]; then
+            gms_err "Cannot determine partition start — partition not shrunk."
+            gms_err "Shrink manually:  parted $disk resizepart $pnum <end>MiB"
+            return 1
+        fi
+        new_end=$(LC_ALL=C awk -v s="$p_start" -v w="$want_mib" \
+            'BEGIN { printf "%.2f", s + w }')
+        gms_run_step "shrink partition to ${new_end}MiB" \
+            parted -s "$disk" resizepart "$pnum" "${new_end}MiB" || {
+            gms_err "parted resizepart failed."
+            gms_err "The NTFS filesystem was already shrunk; the partition boundary"
+            gms_err "still needs to be updated:  parted $disk resizepart $pnum ${new_end}MiB"
+            return 1
+        }
+    else
+        # ── Grow ──────────────────────────────────────────────────
+        # 1. Expand the partition to the new size first.
+        local p_start new_end
+        p_start=$(gms_part_start "$disk" "$pnum")
+        if [[ -z "$p_start" ]]; then
+            gms_err "Cannot determine partition start."
+            return 1
+        fi
+        new_end=$(LC_ALL=C awk -v s="$p_start" -v w="$want_mib" \
+            'BEGIN { printf "%.2f", s + w }')
+        gms_run_step "grow partition to ${new_end}MiB" \
+            parted -s "$disk" resizepart "$pnum" "${new_end}MiB" || {
+            gms_err "parted resizepart failed."
+            return 1
+        }
+
+        gms_settle "$disk"
+
+        # 2. Grow the NTFS filesystem to fill the enlarged partition.
+        gms_run_step "grow NTFS filesystem to fill partition" \
+            ntfsresize "$part" || {
+            gms_err "ntfsresize failed — the partition was enlarged but the"
+            gms_err "filesystem still needs to be expanded:  ntfsresize $part"
+            return 1
+        }
+    fi
+
+    gms_settle "$disk"
+
+    local new_bytes new_mib_real
+    new_bytes=$(lsblk -bnd -o SIZE "$part" 2>/dev/null | head -1 | tr -d '[:space:]')
+    new_mib_real=$(( ${new_bytes:-0} / 1048576 ))
+    gms_ok "Resize complete: $part is now ~${new_mib_real}MiB (${GMS_SIZE_GB}GB requested)."
 }
 
 # ── Usage / entry ─────────────────────────────────────────────────
@@ -789,7 +1063,7 @@ Commands:
   create --whole         Create the partition filling the disk's free space
   mount                  Install + enable the systemd mount ($GMS_MOUNTPOINT)
   steam-setup            Shared Steam library + native-FS Proton-state symlinks
-  resize                 Not implemented (create at the size you need)
+  resize --size N        Grow or shrink POWOS-GAMES to N GB (NTFS in-place)
   sync                   Sync saves/mods between devices (run 'powos games sync help')
 
 Options:

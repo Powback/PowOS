@@ -389,6 +389,180 @@ check "same games serve both OSes"           'grep -qi "both operating systems" 
 check "warns about Fast Startup/hibernation" 'grep -qi "fast startup" <<< "$readme"'
 check "warns to leave the symlinks alone"    'grep -qi "leave them alone" <<< "$readme"'
 
+# ── resize: pure helpers ─────────────────────────────────────────
+echo "== resize: gms_adjacent_free_block (pure) =="
+
+# Partition 2 ends at 120000MiB; adjacent free block starts at 120000MiB.
+parted() {
+    cat <<'PARTED'
+Model: Fake Disk (scsi)
+Disk /dev/sdz: 500000MiB
+Number  Start      End        Size       Type     File system  Flags
+ 1      1.00MiB    102400MiB  102399MiB  primary  fat32        boot, esp
+ 2      102400MiB  120000MiB  17600MiB   primary  ntfs
+        120000MiB  500000MiB  380000MiB           Free Space
+PARTED
+}
+read -r adj_s adj_e adj_sz <<< "$(gms_adjacent_free_block /dev/sdz 2)"
+check "adjacent free block start" '[[ "$adj_s" == "120000" ]]'
+check "adjacent free block end"   '[[ "$adj_e" == "500000" ]]'
+check "adjacent free block size"  '[[ "$adj_sz" == "380000" ]]'
+
+# No adjacent free block (partition is at the disk end).
+parted() {
+    cat <<'PARTED'
+Disk /dev/sdz: 120000MiB
+Number  Start      End        Size       Type     File system  Flags
+ 1      1.00MiB    120000MiB  119999MiB  primary  ntfs
+PARTED
+}
+out=$(gms_adjacent_free_block /dev/sdz 1)
+check "no adjacent free block → empty output" '[[ -z "$out" ]]'
+unset -f parted
+
+# ── resize: gms_part_start / gms_part_end ────────────────────────
+echo "== resize: gms_part_start / gms_part_end (pure) =="
+
+parted() {
+    cat <<'PARTED'
+Disk /dev/sdz: 500000MiB
+Number  Start      End        Size       Type
+ 1      1.00MiB    102400MiB  102399MiB  primary
+ 3      120000MiB  300000MiB  180000MiB  primary
+PARTED
+}
+check "gms_part_start finds partition 3"  '[[ "$(gms_part_start /dev/sdz 3)" == "120000" ]]'
+check "gms_part_end finds partition 3"    '[[ "$(gms_part_end /dev/sdz 3)" == "300000" ]]'
+check "gms_part_start: non-existent part → empty" '[[ -z "$(gms_part_start /dev/sdz 9)" ]]'
+unset -f parted
+
+# ── resize: refusal paths ─────────────────────────────────────────
+echo "== resize: refusal paths =="
+
+# Missing --size.
+reset_gms
+out=$(cmd_games resize 2>&1); rc=$?
+check "resize without --size → refused"   '[[ $rc -ne 0 ]]'
+check "error mentions --size"             'echo "$out" | grep -q -- "--size"'
+
+# No POWOS-GAMES partition found.
+blkid()   { return 1; }
+reset_gms
+out=$(cmd_games resize --size 512 2>&1); rc=$?
+check "resize: no partition → refused"    '[[ $rc -ne 0 ]]'
+unset -f blkid
+
+# Partition is mounted.
+blkid()   { case "$*" in *"-L POWOS-GAMES"*) echo "/dev/sdz2"; return 0 ;; *) return 1 ;; esac; }
+lsblk()   { case "$*" in *PKNAME*) echo "sdz" ;; *"-dn -o TYPE"*) echo "disk" ;;
+             *"-bnd -o SIZE"*) echo $(( 200 * 1024 * 1048576 )) ;; *) echo "" ;; esac; }
+findmnt() { case "$*" in *"-S /dev/sdz2"*) echo "/var/mnt/games" ;; *) return 1 ;; esac; }
+gms_is_block() { return 0; }
+reset_gms
+out=$(cmd_games resize --size 400 2>&1); rc=$?
+check "resize: partition mounted → refused" '[[ $rc -ne 0 ]]'
+check "resize: mentions unmount"            'echo "$out" | grep -qi "mount"'
+unset -f blkid lsblk findmnt gms_is_block
+
+# Shrink without --yes is refused.
+blkid()   { case "$*" in *"-L POWOS-GAMES"*) echo "/dev/sdz2"; return 0 ;; *) return 1 ;; esac; }
+lsblk()   { case "$*" in *PKNAME*) echo "sdz" ;; *"-dn -o TYPE"*) echo "disk" ;;
+             *"-bnd -o SIZE"*) echo $(( 500 * 1024 * 1048576 )) ;; *) echo "" ;; esac; }
+findmnt() { return 1; }   # not mounted
+gms_is_block() { return 0; }
+reset_gms
+out=$(cmd_games resize --size 200 2>&1); rc=$?   # shrink: 500→200GB, no --yes
+check "shrink without --yes → refused"      '[[ $rc -ne 0 ]]'
+check "shrink error mentions --yes"         'echo "$out" | grep -q "\-\-yes"'
+unset -f blkid lsblk findmnt gms_is_block
+
+# Grow: not enough adjacent free space.
+blkid()   { case "$*" in *"-L POWOS-GAMES"*) echo "/dev/sdz2"; return 0 ;; *) return 1 ;; esac; }
+lsblk()   { case "$*" in *PKNAME*) echo "sdz" ;; *"-dn -o TYPE"*) echo "disk" ;;
+             *"-bnd -o SIZE"*) echo $(( 200 * 1024 * 1048576 )) ;; *) echo "" ;; esac; }
+findmnt() { return 1; }
+gms_is_block() { return 0; }
+parted() {
+    # Partition 2 ends at 204800MiB; only 10 MiB free adjacent — not enough to grow by 300 GB.
+    cat <<'PARTED'
+Disk /dev/sdz: 204810MiB
+Number  Start      End        Size       Type     File system  Flags
+ 1      1.00MiB    102400MiB  102399MiB  primary  fat32
+ 2      102400MiB  204800MiB  102400MiB  primary  ntfs
+        204800MiB  204810MiB  10MiB              Free Space
+PARTED
+}
+reset_gms
+out=$(cmd_games resize --size 500 2>&1); rc=$?   # grow: 200→500GB, only 10MiB free
+check "grow: insufficient adjacent free space → refused" '[[ $rc -ne 0 ]]'
+check "grow: error mentions free space"     'echo "$out" | grep -qi "free space"'
+unset -f blkid lsblk findmnt gms_is_block parted
+
+# Already at the requested size → no-op, success.
+blkid()   { case "$*" in *"-L POWOS-GAMES"*) echo "/dev/sdz2"; return 0 ;; *) return 1 ;; esac; }
+lsblk()   { case "$*" in *PKNAME*) echo "sdz" ;;
+             *"-bnd -o SIZE"*) echo $(( 512 * 1024 * 1048576 )) ;; *) echo "" ;; esac; }
+findmnt() { return 1; }
+gms_is_block() { return 0; }
+reset_gms
+out=$(cmd_games resize --size 512 2>&1); rc=$?
+check "resize to current size → 0 (no-op)"   '[[ $rc -eq 0 ]]'
+check "resize to current size → says already" 'echo "$out" | grep -qi "already"'
+unset -f blkid lsblk findmnt gms_is_block
+
+# ── resize: dry-run shows plan for grow ───────────────────────────
+echo "== resize: dry-run plan (grow) =="
+
+MUT_CALLS=()
+blkid()      { case "$*" in *"-L POWOS-GAMES"*) echo "/dev/sdz2"; return 0 ;; *) return 1 ;; esac; }
+lsblk()      { case "$*" in *PKNAME*) echo "sdz" ;;
+               *"-bnd -o SIZE"*) echo $(( 200 * 1024 * 1048576 )) ;; *) echo "" ;; esac; }
+findmnt()    { return 1; }
+gms_is_block() { return 0; }
+ntfsresize() { MUT_CALLS+=("ntfsresize $*"); }
+ntfsfix()    { MUT_CALLS+=("ntfsfix $*"); }
+parted() {
+    case "$*" in
+        *"print free"*)
+            cat <<'PARTED'
+Disk /dev/sdz: 700000MiB
+Number  Start      End        Size       Type     File system  Flags
+ 1      1.00MiB    102400MiB  102399MiB  primary  fat32
+ 2      102400MiB  204800MiB  102400MiB  primary  ntfs
+        204800MiB  700000MiB  495200MiB           Free Space
+PARTED
+            ;;
+        *) MUT_CALLS+=("parted $*") ;;
+    esac
+}
+reset_gms
+cmd_games resize --size 500 --disk /dev/sdz --dry-run > "$TMP/resize-dry.out" 2>&1; rc=$?
+check "resize dry-run succeeds (grow)"               '[[ $rc -eq 0 ]]'
+check "dry-run: zero mutating tool calls"            '[[ ${#MUT_CALLS[@]} -eq 0 ]]'
+check "dry-run: mentions parted resizepart"          'grep -qi "parted.*resizepart" "$TMP/resize-dry.out"'
+check "dry-run: mentions ntfsresize"                 'grep -qi "ntfsresize" "$TMP/resize-dry.out"'
+check "dry-run: shows GROW operation"                'grep -qi "grow" "$TMP/resize-dry.out"'
+unset -f blkid lsblk findmnt gms_is_block ntfsresize ntfsfix parted
+
+# ── resize: ntfsfix failure aborts shrink ─────────────────────────
+echo "== resize: ntfsfix failure aborts shrink =="
+
+ntfsfix_rc=1   # global to control mock return code
+MUT_CALLS=()
+blkid()      { case "$*" in *"-L POWOS-GAMES"*) echo "/dev/sdz2"; return 0 ;; *) return 1 ;; esac; }
+lsblk()      { case "$*" in *PKNAME*) echo "sdz" ;;
+               *"-bnd -o SIZE"*) echo $(( 500 * 1024 * 1048576 )) ;; *) echo "" ;; esac; }
+findmnt()    { return 1; }
+gms_is_block() { return 0; }
+ntfsfix()    { return $ntfsfix_rc; }
+ntfsresize() { MUT_CALLS+=("ntfsresize $*"); }
+parted()     { :; }
+reset_gms
+out=$(cmd_games resize --size 200 --yes 2>&1); rc=$?
+check "shrink: ntfsfix failure → refused (rc != 0)" '[[ $rc -ne 0 ]]'
+check "shrink: ntfsresize never called after ntfsfix failure" '[[ ${#MUT_CALLS[@]} -eq 0 ]]'
+unset -f blkid lsblk findmnt gms_is_block ntfsfix ntfsresize parted
+
 # ── Summary ───────────────────────────────────────────────────────
 echo
 echo "== Results: $PASS passed, $FAIL failed =="
