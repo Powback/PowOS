@@ -47,6 +47,21 @@ if [[ ! -f "$SO" ]]; then
 fi
 [[ -f "$SO" ]] || { echo "ERROR: build produced no $SO" >&2; exit 1; }
 
+# ── Build the runtime binaries (best-effort) ────────────────────────
+# The server + sidecar need GStreamer/pipewire dev libs at build time. When
+# those are present (CI image build, dev container) compile them so the image
+# ships a complete pipeline; otherwise fall back to any prebuilt binaries
+# (target/release or host-bins) and let ship_bin warn. Never fail the overlay
+# build over these — the capture layer above is the hard requirement.
+if command -v cargo >/dev/null 2>&1; then
+    for pkg in powstream-webrtc-server powlens-detector-sidecar; do
+        [[ -f "$SRC/target/release/$pkg" || -f "$SRC/host-bins/$pkg" ]] && continue
+        echo "Building $pkg (best-effort)…"
+        (cd "$SRC" && cargo build --release -p "$pkg") \
+            || echo "WARN: $pkg build failed (missing gstreamer/pipewire dev libs?) — will use prebuilt if available" >&2
+    done
+fi
+
 # ── Lay out the overlay ─────────────────────────────────────────────
 LIB_DIR="$OUTPUT_DIR/usr/lib/powstream"
 MANIFEST_DIR="$OUTPUT_DIR/usr/share/vulkan/implicit_layer.d"
