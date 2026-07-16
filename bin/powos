@@ -3125,14 +3125,88 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/mods/install.sh"
         source "$POWOS_LIB/mods/check.sh" 2>/dev/null || true
+        # Native PowOS mod manager (v2). See docs/MODDING-V2.md.
+        source "$POWOS_LIB/mods/nexus-api.sh" 2>/dev/null || true
+        source "$POWOS_LIB/mods/core.sh" 2>/dev/null || true
+        source "$POWOS_LIB/mods/deploy.sh" 2>/dev/null || true
+        source "$POWOS_LIB/mods/verify.sh" 2>/dev/null || true
+        source "$POWOS_LIB/mods/snapshot.sh" 2>/dev/null || true
         case "${1:-}" in
-            # Mod-manager lifecycle
+            # ── Native mod manager verbs (v2) ────────────────────────────
+            status)                             shift; mods_status_cmd "$@" ;;
+            install)
+                shift
+                # v2 native path: `install <game> <mod-ids…>`
+                # Legacy path: `install <manager-name>` (NMA/Vortex)
+                if [[ $# -ge 1 ]] && mods_normalize_name "${1:-}" >/dev/null 2>&1; then
+                    mods_install_cmd "$@"
+                elif [[ $# -ge 2 ]] && type -t mods_install_mod &>/dev/null; then
+                    local _game="$1"; shift
+                    mods_load_game_conf "$_game" 2>/dev/null && {
+                        # Has a v2 game config → native install path
+                        if ! mods_check_frameworks "$_game" 2>/dev/null; then
+                            plog "Installing required frameworks first..."
+                            mods_install_frameworks "$_game" || exit 1
+                        fi
+                        for _mod in "$@"; do
+                            mods_install_mod "$_game" "$_mod" || exit 1
+                        done
+                        exit 0
+                    }
+                    # No game config → fall back to legacy bulk install
+                    mods_install_smart_cmd "$_game" "$@"
+                else
+                    mods_install_smart_cmd "$@"
+                fi
+                ;;
+            remove|rm|uninstall)
+                shift
+                if [[ $# -ge 2 ]] && type -t mods_remove_mod &>/dev/null; then
+                    local _game="$1"; shift
+                    for _mod in "$@"; do
+                        mods_remove_mod "$_game" "$_mod"
+                    done
+                else
+                    mods_uninstall_cmd "$@"
+                fi
+                ;;
+            list|ls|installed)
+                shift
+                if [[ -n "${1:-}" ]] && type -t mods_manifest_list &>/dev/null; then
+                    echo -e "${BOLD}Mods: $1${NC}"
+                    mods_manifest_list "$1"
+                else
+                    mods_installed_cmd
+                fi
+                ;;
+            enable)
+                shift
+                local _game="${1:?Usage: powos mods enable <game> <mod-id>}"; shift
+                for _mod in "$@"; do mods_enable_mod "$_game" "$_mod"; done
+                ;;
+            disable)
+                shift
+                local _game="${1:?Usage: powos mods disable <game> <mod-id>}"; shift
+                for _mod in "$@"; do mods_disable_mod "$_game" "$_mod"; done
+                ;;
+            deploy)                             shift; mods_deploy_cmd "$@" ;;
+            undeploy)                           shift; mods_undeploy_cmd "$@" ;;
+            verify|test-boot)
+                shift
+                if [[ -n "${1:-}" ]] && type -t mods_verify_cmd &>/dev/null; then
+                    mods_verify_cmd "$@"
+                else
+                    source "$POWOS_LIB/mods/harness.sh"
+                    harness_verify_cmd "$@"
+                fi
+                ;;
+            doctor)                             shift; mods_doctor_cmd "$@" ;;
+            rollback)                           shift; mods_rollback_cmd "$@" ;;
+
+            # ── Legacy / escape hatch verbs ──────────────────────────────
             install-manager|install-mgr)        shift; mods_install_cmd "$@" ;;
-            uninstall|remove|rm)                shift; mods_uninstall_cmd "$@" ;;
-            installed|list|ls)                  mods_installed_cmd ;;
             launch|run|start)                   shift; mods_launch_cmd "$@" ;;
             setup|prep|prepare)                 shift; mods_setup_cmd "$@" ;;
-            # Nexus Mods App CLI wrappers
             auth|login|nexus-key)               shift; mods_auth_cmd "$@" ;;
             logout)                             mods_logout_cmd ;;
             games|list-games)                   shift; mods_games_cmd "$@" ;;
@@ -3140,18 +3214,6 @@ case "${1:-}" in
             run-tool)                           shift; mods_run_tool_cmd "$@" ;;
             install-collection|ic|collection)   shift; mods_install_collection_cmd "$@" ;;
             install-mod|im|mod)                 shift; mods_install_mod_cmd "$@" ;;
-            install)
-                # `install <manager>` (mod-manager) and `install <game> <mod-ids…>`
-                # (bulk Nexus mods) collide on this verb. Disambiguate by the first
-                # arg: a known mod-manager name → manager install; anything else →
-                # bulk mod install. `install-manager` stays as an explicit alias.
-                shift
-                if [[ $# -ge 1 ]] && mods_normalize_name "${1:-}" >/dev/null 2>&1; then
-                    mods_install_cmd "$@"
-                else
-                    mods_install_smart_cmd "$@"
-                fi
-                ;;
             bulk|batch)                         shift; mods_install_smart_cmd "$@" ;;
             install-file|if)                    shift; mods_install_file_cmd "$@" ;;
             check|analyze|preflight)            shift; mods_check_cmd "$@" ;;
@@ -3159,34 +3221,41 @@ case "${1:-}" in
             files)                              shift; mods_files_cmd "$@" ;;
             changelog|changes)                  shift; mods_changelog_cmd "$@" ;;
             download-link|link)                 shift; mods_download_link_cmd "$@" ;;
-            deploy|sync|synchronize)            shift; mods_deploy_cmd "$@" ;;
             loadouts)                           shift; mods_loadouts_cmd "$@" ;;
             raw|as-main)                        shift; mods_raw_cmd "$@" ;;
-            # Headless mod-compat test harness. See lib/mods/harness.sh.
-            verify|test-boot)
-                shift
-                source "$POWOS_LIB/mods/harness.sh"
-                harness_verify_cmd "$@"
-                ;;
             bisect|find-broken)
                 shift
                 source "$POWOS_LIB/mods/harness.sh"
                 harness_bisect_cmd "$@"
                 ;;
-            # ASI-loader stack for RAGE games (GTA V / RDR2). See lib/mods/asi.sh.
             asi|rage)
                 shift
                 source "$POWOS_LIB/mods/asi.sh"
                 asi_dispatch "$@"
                 ;;
-            # Vortex CLI (via Bottles). See lib/mods/vortex.sh.
+            # Legacy backends (escape hatches)
+            legacy)
+                shift
+                case "${1:-}" in
+                    nma|nexus) shift; mods_launch_cmd "nexus-mods-app" "$@" ;;
+                    vortex)
+                        shift
+                        source "$POWOS_LIB/mods/vortex.sh"
+                        vortex_dispatch "$@"
+                        ;;
+                    jackify|modlist|wabbajack|wj)
+                        shift
+                        source "$POWOS_LIB/mods/modlist.sh"
+                        modlist_dispatch "$@"
+                        ;;
+                    *) perr "Unknown legacy backend: ${1:-}. Use: nma, vortex, jackify" ;;
+                esac
+                ;;
             vortex)
                 shift
                 source "$POWOS_LIB/mods/vortex.sh"
                 vortex_dispatch "$@"
                 ;;
-            # Automated Wabbajack modlists (Genesis/Fallout London/TTW/…), native
-            # engine + Steam+Proton. See lib/mods/modlist.sh.
             modlist|list-install|wabbajack|wj)
                 shift
                 source "$POWOS_LIB/mods/modlist.sh"
