@@ -214,12 +214,31 @@ echo "== Verdict JSON structure =="
 valid_json="$(echo "$crash_json" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
-required = ["game", "appid", "verdict", "seconds", "exit_code", "signals"]
+required = ["game", "appid", "verdict", "seconds", "exit_code", "confidence", "launch_mode", "signals"]
 sig_required = ["crash_dumps", "proton_log_errors", "cpu_frozen", "mangohud_frozen", "game_logs"]
 ok = all(k in d for k in required) and all(k in d["signals"] for k in sig_required)
 print("valid" if ok else "invalid")
 ' 2>/dev/null)"
 check "verdict JSON has all fields"  '[[ "$valid_json" == "valid" ]]'
+
+# ── Test: confidence and launch_mode fields ─────────────────────────────
+echo ""
+echo "== Confidence and launch_mode fields =="
+
+crash_confidence="$(echo "$crash_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["confidence"])')"
+crash_launch_mode="$(echo "$crash_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["launch_mode"])')"
+check "crash confidence is high"        '[[ "$crash_confidence" == "high" ]]'
+check "crash launch_mode is mock"       '[[ "$crash_launch_mode" == "mock" ]]'
+
+boot_confidence="$(echo "$boot_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["confidence"])')"
+boot_launch_mode="$(echo "$boot_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["launch_mode"])')"
+check "boot confidence is high"         '[[ "$boot_confidence" == "high" ]]'
+check "boot launch_mode is mock"        '[[ "$boot_launch_mode" == "mock" ]]'
+
+freeze_confidence="$(echo "$freeze_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["confidence"])')"
+freeze_launch_mode="$(echo "$freeze_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["launch_mode"])')"
+check "freeze confidence is high"       '[[ "$freeze_confidence" == "high" ]]'
+check "freeze launch_mode is mock"      '[[ "$freeze_launch_mode" == "mock" ]]'
 
 # ── Test: kill tree (simple process) ─────────────────────────────────────
 echo ""
@@ -235,6 +254,22 @@ sleep 1
 kill -0 "$sleeper_pid" 2>/dev/null && sleeper_dead=false || sleeper_dead=true
 check "sleeper killed"               '[[ "$sleeper_dead" == "true" ]]'
 
+# ── Test: game-running safety check ─────────────────────────────────────
+echo ""
+echo "== Game-running safety check =="
+
+# harness_game_running should return 1 (not running) for a fake appid
+harness_game_running "999999999" && game_was_running=true || game_was_running=false
+check "unknown game is not running"  '[[ "$game_was_running" == "false" ]]'
+
+# Verify harness_run refuses if game is "running" (mock the check)
+# We test this by temporarily overriding harness_game_running
+_orig_harness_game_running="$(declare -f harness_game_running)"
+harness_game_running() { return 0; }  # pretend game is running
+refuse_out="$(HARNESS_MOCK="" harness_run "mock" 2>&1)" && refused=false || refused=true
+eval "$_orig_harness_game_running"   # restore original
+check "refuses when game running"    '[[ "$refused" == "true" ]]'
+
 # ── Test: help text ──────────────────────────────────────────────────────
 echo ""
 echo "== Help text =="
@@ -243,6 +278,10 @@ help_out="$(harness_help 2>&1)"
 check "help mentions verify"         '[[ "$help_out" == *"verify"* ]]'
 check "help mentions bisect"         '[[ "$help_out" == *"bisect"* ]]'
 check "help mentions verdict"        '[[ "$help_out" == *"verdict"* ]]'
+check "help mentions setup"          '[[ "$help_out" == *"setup"* ]]'
+check "help mentions --no-steam"     '[[ "$help_out" == *"no-steam"* ]]'
+check "help mentions confidence"     '[[ "$help_out" == *"onfidence"* ]]'
+check "help mentions shim"           '[[ "$help_out" == *"shim"* ]]'
 
 # ── Results ──────────────────────────────────────────────────────────────
 echo ""

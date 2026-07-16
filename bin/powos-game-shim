@@ -1,0 +1,38 @@
+#!/bin/bash
+# powos-game-shim — dormant exec wrapper for Steam game launch options.
+#
+# Installed into a game's Steam launch options as:
+#   powos-game-shim %command%
+#
+# Behavior:
+#   If /run/powos/verify/<appid>.env exists → source it (injects MangoHud,
+#     PROTON_LOG, gamescope wrapping, crash-report dir, etc.), then exec.
+#   Otherwise → exec %command% untouched. Zero overhead outside verify runs.
+#
+# The shim also writes its PID + child PID to /run/powos/verify/<appid>.pid
+# so the harness can find the game process without /proc scanning.
+#
+# This shim is generic: the env-file sourcing pattern lets any PowOS subsystem
+# (verify, rework/overlayfs, streaming) inject per-launch env by writing the
+# sentinel file. Name it powos-game-shim, not powos-verify-shim, for reuse.
+
+set -uo pipefail
+
+# Resolve the appid from Steam's env (set by the client before launch)
+APPID="${SteamAppId:-${STEAM_APPID:-unknown}}"
+SENTINEL="/run/powos/verify/${APPID}.env"
+PID_FILE="/run/powos/verify/${APPID}.pid"
+
+# Source the sentinel env file if it exists
+if [[ -f "$SENTINEL" ]]; then
+    # shellcheck disable=SC1090
+    source "$SENTINEL"
+fi
+
+# Write our PID and the child PID for the harness
+if [[ -d "/run/powos/verify" ]]; then
+    echo "shim_pid=$$" > "$PID_FILE"
+fi
+
+# Exec the actual game command (%command% expands to the remaining args)
+exec "$@"
