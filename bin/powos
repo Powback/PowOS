@@ -2609,6 +2609,27 @@ _container_delete() {
     fi
 }
 
+# Last N lines of a container's log (read-only). Tries the user's own podman
+# first, then falls back to the system scope via `sudo -n podman logs` (no ctl
+# wrapper needed — logs never mutate the container). --tail bounds the output so
+# the widget never has to swallow a giant log; stderr is folded into stdout so
+# crash output shows up too.
+_container_logs() {
+    local name="${1:-}" lines="${2:-200}"
+    if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+        echo "invalid container name: $name" >&2; return 2
+    fi
+    [[ "$lines" =~ ^[0-9]+$ ]] || lines=200
+    if podman container exists "$name" 2>/dev/null; then
+        podman logs --tail "$lines" "$name" 2>&1
+    elif sudo -n podman container exists "$name" 2>/dev/null; then
+        sudo -n podman logs --tail "$lines" "$name" 2>&1
+    else
+        echo "container not found (or system container needs the sudoers opt-in): $name" >&2
+        return 1
+    fi
+}
+
 # Live per-container stats as clean JSON for the widget: cpu %, mem bytes, net
 # rx/tx bytes, block-io read/write bytes, pids. podman only reports RUNNING
 # containers (stopped ones simply won't appear → the widget shows them idle).
@@ -2763,6 +2784,19 @@ cmd_containers() {
             fi
             ;;
 
+        logs)
+            # Last N lines of a container's log (read-only), for the widget's
+            # Logs tab and the CLI. Defaults to the newest 200 lines.
+            #   powos containers logs <name> [--lines N]
+            local name="${2:-}" lines=200
+            if [[ "${3:-}" == "--lines" && -n "${4:-}" ]]; then lines="$4"; fi
+            if [[ -z "$name" ]]; then
+                echo "Usage: powos containers logs <name> [--lines N]"
+                return 1
+            fi
+            _container_logs "$name" "$lines"
+            ;;
+
         start|stop|restart)
             # Podman lifecycle for ANY container (app/compose containers AND
             # distrobox ones — distrobox containers are podman containers). Does
@@ -2865,6 +2899,7 @@ cmd_containers() {
             echo "  start <name>            Start a stopped container"
             echo "  stop <name>             Stop a container (keeps it — restartable)"
             echo "  restart <name>          Restart a container"
+            echo "  logs <name> [--lines N] Show the last N log lines (default 200)"
             echo "  create <name> [image]   Create a new distrobox container"
             echo "  enter <name>            Enter a distrobox container"
             echo "  remove <name>           Remove a distrobox container"

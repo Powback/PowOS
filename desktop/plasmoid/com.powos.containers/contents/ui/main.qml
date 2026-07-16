@@ -34,13 +34,36 @@ PlasmoidItem {
     property var rawList: []             // last parsed structural list
     property var statsByName: ({})       // name -> stats object
     property var expanded: ({})          // container name -> true when its detail is open
+    property var detailTab: ({})         // name -> "logs" | "details" (default "logs")
+    property var logsByName: ({})        // name -> last fetched log text
+    property var pendingLog: ({})        // in-flight log command -> container name
 
     ListModel { id: rowModel }           // flat display rows (stack headers + containers + details)
 
     function toggleExpand(name) {
-        if (root.expanded[name]) delete root.expanded[name]
-        else root.expanded[name] = true
+        if (root.expanded[name]) {
+            delete root.expanded[name]
+        } else {
+            root.expanded[name] = true
+            // default to the Logs tab and fetch it as soon as the row opens
+            if (!root.detailTab[name]) root.detailTab[name] = "logs"
+            if (root.detailTab[name] === "logs") root.fetchLogs(name)
+        }
         rebuild()
+    }
+
+    // switch a container's detail tab; fetch logs on first view of that tab
+    function setDetailTab(name, tab) {
+        root.detailTab[name] = tab
+        if (tab === "logs" && root.logsByName[name] === undefined) root.fetchLogs(name)
+        rebuild()
+    }
+
+    // pull the last log lines for one container; keyed back by the exact command
+    function fetchLogs(name) {
+        var cmd = "powos containers logs " + root.shellQuote(name) + " --lines 300"
+        root.pendingLog[cmd] = name
+        logger.connectSource(cmd)
     }
 
     function shellQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
@@ -64,7 +87,8 @@ PlasmoidItem {
                  grouped: false, image: "", status: "", state: "", running: false,
                  scope: "user", run: 0, total: 0, cpu: 0, mem: 0,
                  net_rx: 0, net_tx: 0, blk_r: 0, blk_w: 0, hasStats: false,
-                 isOpen: false, ports: "", labelsJson: "{}", traefikUrl: "" }
+                 isOpen: false, ports: "", labelsJson: "{}", traefikUrl: "",
+                 activeTab: "logs", logText: "" }
     }
 
     // Extract the first Host(`...`) value from traefik router labels → "http://host"
@@ -154,11 +178,17 @@ PlasmoidItem {
                 r.traefikUrl = root.traefikHost(ci.labels)
                 r.isOpen = !!root.expanded[ci.name]
                 rows.push(r)
-                // when expanded, a detail row shows this container's ports + labels
+                // when expanded, a detail row shows a tabbed panel (Logs / Details)
                 if (r.isOpen) {
                     var dr = blankRow()
                     dr.rowType = "detail"; dr.grouped = (key !== ""); dr.ports = ci.ports || ""
+                    dr.name = ci.name
                     dr.labelsJson = JSON.stringify(ci.labels || {})
+                    dr.activeTab = root.detailTab[ci.name] || "logs"
+                    // logsByName is refreshed asynchronously; read the cache here so
+                    // the periodic rebuild keeps whatever log text has arrived
+                    dr.logText = (root.logsByName[ci.name] !== undefined)
+                        ? root.logsByName[ci.name] : ""
                     rows.push(dr)
                 }
             }
@@ -212,6 +242,18 @@ PlasmoidItem {
     P5Support.DataSource {
         id: opener; engine: "executable"; connectedSources: []
         onNewData: function (s, d) { disconnectSource(s) }
+    }
+    P5Support.DataSource {
+        id: logger; engine: "executable"; connectedSources: []
+        onNewData: function (s, d) {
+            disconnectSource(s)
+            var name = root.pendingLog[s]
+            delete root.pendingLog[s]
+            if (!name) return
+            var out = ((d.stdout || "") + (d.stderr || "")).replace(/\s+$/, "")
+            root.logsByName[name] = out === "" ? "(no output)" : out
+            root.rebuild()
+        }
     }
 
     Timer { interval: 5000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
@@ -415,9 +457,10 @@ PlasmoidItem {
                             }
                         }
 
-                        // ── detail: ports + labels (shown when a container is expanded) ──
-                        // labelPairs turns the labels JSON into [{k, v, url}] so each
-                        // label renders on its own row and URL values become links.
+                        // ── detail: tabbed panel (Logs / Details) shown when expanded ──
+                        // Logs is the default tab (last ~300 log lines); Details keeps
+                        // the ports + labels view. labelPairs turns the labels JSON into
+                        // [{k, v, url}] so each label renders on its own row.
                         ColumnLayout {
                             id: detailCol
                             visible: model.rowType === "detail"
@@ -425,7 +468,9 @@ PlasmoidItem {
                             anchors.top: parent.top
                             anchors.leftMargin: Kirigami.Units.gridUnit * 1.2
                             anchors.rightMargin: Kirigami.Units.smallSpacing
-                            spacing: 1
+                            spacing: Kirigami.Units.smallSpacing
+
+                            property bool onLogs: model.activeTab !== "details"
 
                             property var labelPairs: {
                                 var o = {}
@@ -436,41 +481,116 @@ PlasmoidItem {
                                 return out
                             }
 
-                            // clickable published ports → open http://localhost:<port>
-                            PC3.Label {
-                                visible: model.ports !== ""
-                                text: "Ports: " + model.ports + (root.portUrl(model.ports) !== "" ? "  ↗" : "")
-                                color: root.portUrl(model.ports) !== "" ? Kirigami.Theme.linkColor
-                                                                        : Kirigami.Theme.textColor
-                                font: Kirigami.Theme.smallFont
-                                Layout.fillWidth: true; wrapMode: Text.WordWrap
-                                TapHandler {
-                                    enabled: root.portUrl(model.ports) !== ""
-                                    onTapped: root.openUrl(root.portUrl(model.ports))
+                            // ── tab bar ──
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.largeSpacing
+                                PC3.Label {
+                                    text: "Logs"
+                                    font.bold: detailCol.onLogs
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    color: detailCol.onLogs ? Kirigami.Theme.highlightColor
+                                                            : Kirigami.Theme.textColor
+                                    opacity: detailCol.onLogs ? 1.0 : 0.7
+                                    TapHandler { onTapped: root.setDetailTab(model.name, "logs") }
+                                }
+                                PC3.Label {
+                                    text: "Details"
+                                    font.bold: !detailCol.onLogs
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    color: !detailCol.onLogs ? Kirigami.Theme.highlightColor
+                                                             : Kirigami.Theme.textColor
+                                    opacity: !detailCol.onLogs ? 1.0 : 0.7
+                                    TapHandler { onTapped: root.setDetailTab(model.name, "details") }
+                                }
+                                Item { Layout.fillWidth: true }
+                                PC3.ToolButton {
+                                    visible: detailCol.onLogs
+                                    icon.name: "view-refresh"
+                                    display: PC3.AbstractButton.IconOnly
+                                    implicitHeight: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+                                    onClicked: root.fetchLogs(model.name)
+                                    PC3.ToolTip.text: "Refresh logs"
+                                    PC3.ToolTip.visible: hovered
+                                    PC3.ToolTip.delay: 600
                                 }
                             }
-                            Repeater {
-                                model: detailCol.labelPairs
-                                delegate: PC3.Label {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.WrapAnywhere
-                                    font.family: "monospace"
-                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                    font.underline: modelData.url
-                                    color: modelData.url ? Kirigami.Theme.linkColor : Kirigami.Theme.textColor
-                                    opacity: modelData.url ? 1.0 : 0.7
-                                    text: modelData.k + " = " + modelData.v
-                                    TapHandler {
-                                        enabled: modelData.url
-                                        onTapped: root.openUrl(modelData.v)
+
+                            // ── Logs tab ──
+                            Rectangle {
+                                visible: detailCol.onLogs
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 9
+                                radius: Kirigami.Units.smallSpacing
+                                color: Kirigami.Theme.alternateBackgroundColor
+                                border.width: 1
+                                border.color: Qt.rgba(Kirigami.Theme.textColor.r,
+                                                      Kirigami.Theme.textColor.g,
+                                                      Kirigami.Theme.textColor.b, 0.15)
+
+                                PC3.ScrollView {
+                                    anchors.fill: parent
+                                    anchors.margins: Kirigami.Units.smallSpacing
+                                    clip: true
+                                    contentWidth: availableWidth
+
+                                    TextEdit {
+                                        readOnly: true
+                                        selectByMouse: true
+                                        wrapMode: TextEdit.NoWrap
+                                        text: model.logText !== "" ? model.logText : "loading…"
+                                        color: model.logText !== "" ? Kirigami.Theme.textColor
+                                                                    : Qt.rgba(Kirigami.Theme.textColor.r,
+                                                                              Kirigami.Theme.textColor.g,
+                                                                              Kirigami.Theme.textColor.b, 0.5)
+                                        font.family: "monospace"
+                                        font.pointSize: Kirigami.Theme.smallFont.pointSize
                                     }
                                 }
                             }
-                            PC3.Label {
-                                visible: detailCol.labelPairs.length === 0 && model.ports === ""
-                                text: "no ports or labels"
-                                font: Kirigami.Theme.smallFont; opacity: 0.5
+
+                            // ── Details tab: ports + labels ──
+                            ColumnLayout {
+                                visible: !detailCol.onLogs
+                                Layout.fillWidth: true
+                                spacing: 1
+
+                                // clickable published ports → open http://localhost:<port>
+                                PC3.Label {
+                                    visible: model.ports !== ""
+                                    text: "Ports: " + model.ports + (root.portUrl(model.ports) !== "" ? "  ↗" : "")
+                                    color: root.portUrl(model.ports) !== "" ? Kirigami.Theme.linkColor
+                                                                            : Kirigami.Theme.textColor
+                                    font: Kirigami.Theme.smallFont
+                                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                    TapHandler {
+                                        enabled: root.portUrl(model.ports) !== ""
+                                        onTapped: root.openUrl(root.portUrl(model.ports))
+                                    }
+                                }
+                                Repeater {
+                                    model: detailCol.labelPairs
+                                    delegate: PC3.Label {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WrapAnywhere
+                                        font.family: "monospace"
+                                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                        font.underline: modelData.url
+                                        color: modelData.url ? Kirigami.Theme.linkColor : Kirigami.Theme.textColor
+                                        opacity: modelData.url ? 1.0 : 0.7
+                                        text: modelData.k + " = " + modelData.v
+                                        TapHandler {
+                                            enabled: modelData.url
+                                            onTapped: root.openUrl(modelData.v)
+                                        }
+                                    }
+                                }
+                                PC3.Label {
+                                    visible: detailCol.labelPairs.length === 0 && model.ports === ""
+                                    text: "no ports or labels"
+                                    font: Kirigami.Theme.smallFont; opacity: 0.5
+                                }
                             }
                         }
                     }
