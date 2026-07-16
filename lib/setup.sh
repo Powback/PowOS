@@ -209,6 +209,9 @@ ${user} ALL=(ALL) NOPASSWD: /usr/bin/bootc usr-overlay
 
 # systemd reload after service file changes
 ${user} ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
+
+# Mod overlay mounts (scoped helper — validates paths, rejects injection)
+${user} ALL=(ALL) NOPASSWD: /usr/lib/powos/powos-mods-mount *
 RULES
 )"
 

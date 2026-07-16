@@ -1,0 +1,150 @@
+#!/bin/bash
+# powos-mods-mount — Scoped sudoers helper for mod overlay mounts.
+#
+# This binary is called via sudo from deploy.sh. It validates all arguments
+# to prevent injection attacks — only mounts/unmounts at approved paths.
+#
+# Allowed operations:
+#   powos-mods-mount check                        — validate sudoers access
+#   powos-mods-mount mount <lowerdir> <upper> <work> <merged>
+#   powos-mods-mount umount <mountpoint>
+#
+# Security constraints:
+#   - merged must be under /tmp/powos-mods/*/merged
+#   - upper/work must be under /tmp/powos-mods/
+#   - lowerdir components must be under common Steam library paths or staging
+#   - no semicolons, backticks, pipes, $() in any argument (injection guard)
+#   - this script runs as root via sudoers — minimal surface
+
+set -euo pipefail
+
+MOUNT_BASE="/tmp/powos-mods"
+
+die() { echo "powos-mods-mount: ERROR: $*" >&2; exit 1; }
+
+# ── injection guard ────────────────────────────────────────────────────
+# Reject any argument containing shell metacharacters
+validate_no_injection() {
+    local arg="$1" label="$2"
+    if [[ "$arg" =~ [\;\|\&\$\`\\!\{\}\(\)] ]]; then
+        die "rejected $label: contains shell metacharacters"
+    fi
+    # No null bytes
+    if [[ "$arg" == *$'\0'* ]]; then
+        die "rejected $label: contains null bytes"
+    fi
+}
+
+# ── path validation ────────────────────────────────────────────────────
+
+validate_merged() {
+    local path="$1"
+    validate_no_injection "$path" "merged"
+    # Must be under /tmp/powos-mods/<game>/merged
+    if [[ "$path" != "$MOUNT_BASE"/*/merged ]]; then
+        die "merged path must be $MOUNT_BASE/<game>/merged, got: $path"
+    fi
+}
+
+validate_mount_subdir() {
+    local path="$1" label="$2"
+    validate_no_injection "$path" "$label"
+    # Must be under /tmp/powos-mods/
+    local real
+    # Allow path to not exist yet (mkdir -p happens before mount)
+    if [[ -e "$path" ]]; then
+        real="$(realpath "$path")"
+    else
+        real="$path"
+    fi
+    if [[ "$real" != "$MOUNT_BASE"/* ]]; then
+        die "$label must be under $MOUNT_BASE, got: $real"
+    fi
+}
+
+validate_lowerdir() {
+    local lowerdir="$1"
+    validate_no_injection "$lowerdir" "lowerdir"
+
+    # Split on : and validate each component
+    IFS=: read -ra components <<< "$lowerdir"
+    for comp in "${components[@]}"; do
+        [[ -z "$comp" ]] && continue
+
+        # Each lowerdir component must be:
+        # - A Steam library path (contains /steamapps/common/)
+        # - A staging dir (under MODS_STATE_DIR or /tmp/)
+        # - Under /home/ (user home dirs)
+        # - Under /var/mnt/ (mounted partitions)
+        local allowed=false
+        case "$comp" in
+            */steamapps/common/*) allowed=true ;;
+            /home/*)              allowed=true ;;
+            /tmp/*)               allowed=true ;;
+            /var/mnt/*)           allowed=true ;;
+            /run/media/*)         allowed=true ;;
+        esac
+
+        if ! $allowed; then
+            die "lowerdir component not in allowed path: $comp"
+        fi
+
+        if [[ ! -d "$comp" ]]; then
+            die "lowerdir component is not a directory: $comp"
+        fi
+    done
+}
+
+# ── commands ───────────────────────────────────────────────────────────
+
+cmd_check() {
+    echo "ok"
+    exit 0
+}
+
+cmd_mount() {
+    local lowerdir="${1:?mount requires: <lowerdir> <upper> <work> <merged>}"
+    local upper="${2:?mount requires: <lowerdir> <upper> <work> <merged>}"
+    local work="${3:?mount requires: <lowerdir> <upper> <work> <merged>}"
+    local merged="${4:?mount requires: <lowerdir> <upper> <work> <merged>}"
+
+    validate_lowerdir "$lowerdir"
+    validate_mount_subdir "$upper" "upper"
+    validate_mount_subdir "$work" "work"
+    validate_merged "$merged"
+
+    mkdir -p "$merged" "$upper" "$work"
+
+    mount -t overlay overlay \
+        -o "lowerdir=${lowerdir},upperdir=${upper},workdir=${work}" \
+        "$merged"
+
+    echo "mounted: $merged"
+}
+
+cmd_umount() {
+    local merged="${1:?umount requires: <mountpoint>}"
+    validate_merged "$merged"
+
+    if ! mountpoint -q "$merged" 2>/dev/null; then
+        echo "not mounted: $merged"
+        exit 0
+    fi
+
+    umount "$merged"
+    echo "unmounted: $merged"
+}
+
+# ── dispatch ───────────────────────────────────────────────────────────
+
+case "${1:-}" in
+    check)  cmd_check ;;
+    mount)  shift; cmd_mount "$@" ;;
+    umount) shift; cmd_umount "$@" ;;
+    *)
+        echo "Usage: powos-mods-mount {check|mount|umount}" >&2
+        echo "  mount  <lowerdir> <upper> <work> <merged>" >&2
+        echo "  umount <mountpoint>" >&2
+        exit 1
+        ;;
+esac
