@@ -241,19 +241,28 @@ self_test() {
 
     local powos_bin; powos_bin="$(command -v powos 2>/dev/null || echo powos)"
 
+    # Merged sysext extensions sit as a READ-ONLY overlay on /usr — they must
+    # be unmerged BEFORE we probe writability or engage bootc usr-overlay, or
+    # the probe falsely reports "read-only" even on an unlocked deployment.
+    # Same ordering as `powos update self` (which already did this right).
+    sysext_unmerge_if_needed
+
     if self_usr_ro; then
         pwarn "/usr is read-only (installed composefs) — enabling a writable overlay."
         pwarn "This AUTO-REVERTS on the next reboot (bootc usr-overlay)."
         if ! command -v bootc >/dev/null 2>&1; then
+            sysext_remerge_if_needed
             perr "bootc not found — can't make /usr writable transiently."
             perr "Use a live/RAM system, or make it durable with 'powos reload'."
             return 1
         fi
         if ! sudo bootc usr-overlay 2>&1 | self_indent; then
+            sysext_remerge_if_needed
             perr "bootc usr-overlay failed — /usr still read-only, nothing applied."
             return 1
         fi
         if self_usr_ro; then
+            sysext_remerge_if_needed
             perr "/usr still read-only after usr-overlay — aborting (nothing applied)."
             return 1
         fi
@@ -263,12 +272,16 @@ self_test() {
     fi
 
     plog "Applying $src to the RUNNING system…"
+    # `update self` does its own sysext unmerge/remerge internally, but we
+    # already unmerged above — it will see "none" and skip the unmerge, then
+    # re-merge at the end. That's correct and idempotent.
     if "$powos_bin" update self --from "$src"; then
         pok "Applied live from $src."
         pwarn "This is TRANSIENT: an installed composefs system reverts it on reboot."
         pwarn "Make it durable: 'powos self push' then rebuild, or 'powos reload --build'."
         return 0
     fi
+    sysext_remerge_if_needed
     perr "Deploy failed — see output above."
     return 1
 }

@@ -944,12 +944,8 @@ cmd_update() {
             #    reverts on reboot). bootc usr-overlay also silently drops
             #    merged sysexts, which the re-merge below repairs.
             source "$POWOS_LIB/self.sh"
-            local _sysext_merged
-            _sysext_merged=$(systemd-sysext status 2>/dev/null | awk '$1=="/usr"{print $2}')
-            if [[ -n "$_sysext_merged" && "$_sysext_merged" != "none" ]]; then
-                echo "Unmerging systemd-sysext extensions for the install..."
-                sudo systemd-sysext unmerge 2>/dev/null || true
-            fi
+            source "$POWOS_LIB/common.sh"
+            sysext_unmerge_if_needed
             if self_usr_ro; then
                 echo "/usr is read-only — engaging transient bootc usr-overlay (reverts on reboot)..."
                 if ! sudo bootc usr-overlay >/dev/null 2>&1 || self_usr_ro; then
@@ -1032,15 +1028,7 @@ cmd_update() {
                 echo "  /etc/xdg/autostart/"
             fi
 
-            # Re-merge sysext extensions (unmerged above and/or dropped by a
-            # fresh usr-overlay). Present in /var/lib/extensions == enabled.
-            if [[ -n "$(ls -A /var/lib/extensions 2>/dev/null)" ]]; then
-                if sudo systemd-sysext refresh 2>/dev/null; then
-                    echo "  systemd-sysext extensions re-merged"
-                else
-                    echo -e "  ${YELLOW}sysext refresh failed — run 'sudo systemd-sysext refresh'${NC}"
-                fi
-            fi
+            sysext_remerge_if_needed
 
             echo ""
             echo -e "${GREEN}✓ PowOS updated from source${NC}"
@@ -1746,11 +1734,16 @@ cmd_install() {
             fi
             echo ""
             echo -e "${GREEN}✓ Layered: ${packages[*]}${NC}"
+            # apply-live fails EROFS when merged sysext extensions sit on /usr.
+            # Unmerge first, apply, then re-merge (same dance as update-self).
+            source "$POWOS_LIB/common.sh"
+            sysext_unmerge_if_needed
             if sudo rpm-ostree apply-live --allow-replacement 2>/dev/null; then
                 echo -e "  ${GREEN}Applied live — available now, no reboot.${NC}"
             else
                 echo -e "  Staged; activate with:  ${CYAN}systemctl reboot${NC}"
             fi
+            sysext_remerge_if_needed
             return 0
         fi
 
