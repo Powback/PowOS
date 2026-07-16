@@ -18,7 +18,13 @@ if [[ ! -d "$_omgr_self_root/sources" && -d /var/lib/powos/src/sources ]]; then
     _omgr_self_root="/var/lib/powos/src"
 fi
 POWOS_ROOT="${POWOS_ROOT:-$_omgr_self_root}"
-EXTENSIONS_DIR="${POWOS_ROOT}/extensions"
+EXTENSIONS_DIR="${POWOS_EXTENSIONS_DIR:-${POWOS_ROOT}/extensions}"
+# /var/lib/powos/src is RESET to the baked snapshot on every boot, so built
+# extensions there (and the /var/lib/extensions symlinks pointing at them)
+# dangle after a reboot. Build into the persistent extension store instead.
+if [[ "$EXTENSIONS_DIR" == /var/lib/powos/src/* ]]; then
+    EXTENSIONS_DIR="/var/lib/powos/extensions"
+fi
 SOURCES_DIR="${POWOS_ROOT}/sources"
 SYSEXT_DIR="/var/lib/extensions"
 LOG_PREFIX="[overlay]"
