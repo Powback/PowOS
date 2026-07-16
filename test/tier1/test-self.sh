@@ -109,6 +109,21 @@ grep -q 'ARG POWOS_SRC_COMMIT' "$REPO/Containerfile" && ok "Containerfile declar
 grep -q '.powos-src-commit' "$REPO/Containerfile" && ok "Containerfile writes the marker file" || bad "Containerfile marker RUN missing"
 grep -q 'POWOS_SRC_COMMIT=' "$REPO/build/build-iso.sh" && ok "build-iso.sh passes the build-arg" || bad "build-iso.sh build-arg missing"
 
+# ═══════════════════════════════════════════════════════════════════
+echo "== dev-sudoers: no unrestricted file-ops rules =="
+# The sudoers drop-in must NEVER contain NOPASSWD rules for raw cp, mv,
+# chmod, or mkdir — those are unrestricted root file operations that
+# defeat the scoping purpose entirely. `powos update self` already runs
+# as root and handles its own deploy internally.
+SETUP_SH="$REPO/lib/setup.sh"
+for dangerous in "/usr/bin/cp " "/usr/bin/mv " "/usr/bin/chmod " "/usr/bin/mkdir "; do
+    if grep -q "NOPASSWD:.*${dangerous}" "$SETUP_SH" 2>/dev/null; then
+        bad "setup.sh contains unrestricted NOPASSWD rule for ${dangerous%% *}"
+    else
+        ok "no NOPASSWD rule for ${dangerous%% *}"
+    fi
+done
+
 echo
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]

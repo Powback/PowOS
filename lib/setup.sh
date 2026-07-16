@@ -147,20 +147,25 @@ setup_nexus_cmd() {
 }
 
 # ─── Scoped dev sudoers ──────────────────────────────────────────────────
-# Opt-in NOPASSWD rules for the agent/dev workflow: live-install packages,
-# deploy PowOS edits, restart PowStream units — scoped to exact commands,
-# not a blanket ALL.
+# Opt-in NOPASSWD rules for the agent/dev workflow on a SINGLE-ADMIN dev
+# box. Never ship on multi-user systems.
 #
 # Security notes (review these when modifying):
-#   - rpm-ostree install/apply-live: equivalent to root — can install ANY
-#     package. Acceptable on a single-admin dev box; never ship on multi-user.
-#   - powos update self: writes to /usr via atomic cp+mv. Scoped to the
-#     powos binary (which validates source paths internally).
+#   - rpm-ostree install/apply-live: ROOT-EQUIVALENT — can install any
+#     package, which can contain arbitrary scripts. This is the stated
+#     purpose (passwordless package layering) and the tradeoff the user
+#     accepts by running `powos setup dev-sudoers`. Inappropriate for
+#     shared / multi-user / production systems.
+#   - powos update self: writes to /usr via the powos binary's own deploy
+#     logic (atomic cp+mv internally). The binary validates source paths.
 #   - systemd-sysext merge/unmerge/refresh: controls which extensions are
 #     active on /usr. Required for the sysext unmerge/remerge dance.
 #   - bootc usr-overlay: engages a transient writable overlay on /usr.
 #     Reverts on reboot; needed for self test on composefs.
 #   - systemctl --user is NOT here — user services don't need sudo.
+#   - Raw cp/mv/chmod/mkdir are NOT here — unrestricted root file ops
+#     would defeat the scoping. `powos update self` already runs as root
+#     and handles its own file deploy internally.
 SUDOERS_DROP_IN="/etc/sudoers.d/powos-dev"
 
 setup_dev_sudoers_cmd() {
@@ -178,19 +183,19 @@ setup_dev_sudoers_cmd() {
 
     local rules
     rules="$(cat <<RULES
-# PowOS developer workflow — scoped NOPASSWD rules.
+# PowOS developer workflow — scoped NOPASSWD rules for a single-admin box.
 # Installed by: powos setup dev-sudoers
 # Remove with:  sudo rm $SUDOERS_DROP_IN
 #
-# These cover the agent-driven dev loop (install packages live, deploy
-# local PowOS edits, manage sysext overlays). Each rule is the exact
-# command — no wildcards, no blanket access.
+# rpm-ostree is ROOT-EQUIVALENT (can install arbitrary packages). The user
+# accepts this tradeoff by running the setup command. Not appropriate for
+# multi-user or production systems.
 
-# Live-install packages (rpm-ostree layer + apply)
+# Live-install packages (rpm-ostree layer + apply — root-equivalent)
 ${user} ALL=(ALL) NOPASSWD: /usr/bin/rpm-ostree install *
 ${user} ALL=(ALL) NOPASSWD: /usr/bin/rpm-ostree apply-live *
 
-# PowOS self-deploy (writes scripts to /usr)
+# PowOS self-deploy (writes scripts to /usr via powos's own logic)
 ${user} ALL=(ALL) NOPASSWD: /usr/bin/powos update self *
 ${user} ALL=(ALL) NOPASSWD: /usr/bin/powos overlay *
 
@@ -201,12 +206,6 @@ ${user} ALL=(ALL) NOPASSWD: /usr/bin/systemd-sysext merge
 
 # bootc usr-overlay (transient writable /usr, reverts on reboot)
 ${user} ALL=(ALL) NOPASSWD: /usr/bin/bootc usr-overlay
-
-# cp/mv/chmod/mkdir into /usr (used by update self's file deploy)
-${user} ALL=(ALL) NOPASSWD: /usr/bin/cp *
-${user} ALL=(ALL) NOPASSWD: /usr/bin/mv *
-${user} ALL=(ALL) NOPASSWD: /usr/bin/chmod *
-${user} ALL=(ALL) NOPASSWD: /usr/bin/mkdir *
 
 # systemd reload after service file changes
 ${user} ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload

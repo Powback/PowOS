@@ -275,7 +275,9 @@ self_test() {
     # `update self` does its own sysext unmerge/remerge internally, but we
     # already unmerged above — it will see "none" and skip the unmerge, then
     # re-merge at the end. That's correct and idempotent.
-    if "$powos_bin" update self --from "$src"; then
+    # Run via sudo so the sudoers rule for `powos update self` covers us —
+    # the deploy writes to /usr via cp/mv/chmod/mkdir which need root.
+    if sudo "$powos_bin" update self --from "$src"; then
         pok "Applied live from $src."
         pwarn "This is TRANSIENT: an installed composefs system reverts it on reboot."
         pwarn "Make it durable: 'powos self push' then rebuild, or 'powos reload --build'."
