@@ -222,3 +222,12 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   /etc/sudoers.d/powos-dev (rpm-ostree, powos update self, sysext, bootc).
 - [ ] **overlays should declare package deps** (or `powos overlay` pulls a
   feature's rpm deps) so shipping the powstream sysext also ensures libnice etc.
+
+- [ ] **PowStream can't stream with physical monitors OFF (KDE Virtual portal
+  hangs)** — 2026-07-17: streaming needs an always-present capture target when
+  the user's monitors are off. Added POWSTREAM_SOURCE=virtual (portal
+  SourceType::Virtual) but KDE 6.7.1 advertises Virtual yet hangs on it (no
+  dialog/output/error). Options: (a) hardware DP/HDMI dummy plug, (b) kernel
+  EDID-forced always-connected connector on an unused output, (c) wait for KDE
+  portal fix. Meanwhile monitors-ON streaming works via POWSTREAM_FIT_MODESET=0
+  (stops the client re-moding the real monitors, which trashed the layout).
