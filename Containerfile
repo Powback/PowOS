@@ -55,6 +55,8 @@ COPY desktop/plasmoid/                    /usr/share/plasma/plasmoids/
 COPY desktop/autostart/                   /etc/xdg/autostart/
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
 COPY config/kde/kglobalshortcutsrc        /etc/xdg/kglobalshortcutsrc
+COPY config/kde/kwinrc                    /etc/xdg/kwinrc
+COPY config/zones/                        /etc/powos/zones/
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
 COPY config/sysctl.d/                     /etc/sysctl.d/
@@ -140,6 +142,11 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
     unzip -q -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/bin/ && \
     chmod +x /usr/bin/bun && \
     rm -f /tmp/bun.zip && \
+    curl -fsSL "https://github.com/gerritdevriese/kzones/releases/download/v0.9.2/kzones.kwinscript" \
+        -o /tmp/kzones.kwinscript && \
+    mkdir -p /usr/share/kwin/scripts && \
+    unzip -q /tmp/kzones.kwinscript -d /usr/share/kwin/scripts/kzones && \
+    rm -f /tmp/kzones.kwinscript && \
     dnf5 -y clean all && \
     systemctl enable ratbagd.service logid.service
 

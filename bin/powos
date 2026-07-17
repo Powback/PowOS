@@ -127,6 +127,7 @@ Update & self (edit → test → push loop):
   self push           git add -A + commit + push (-m "message")
   stream              PowStream WebRTC status / start / stop / logs / setup
   overlay <cmd>       Sysext overlays: build|enable|disable|list|status|clean <name>
+  zones               KZones window snapping: status / list layouts / edit
 
 Layers & rollback:
   layers              Show active layers
@@ -3086,6 +3087,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/games.sh"
         cmd_games "$@"
+        ;;
+    zones)
+        shift
+        source "$POWOS_LIB/zones.sh"
+        cmd_zones "$@"
         ;;
     ramboot)
         shift

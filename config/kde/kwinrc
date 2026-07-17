@@ -1,0 +1,29 @@
+# PowOS KWin system-wide defaults.
+# Installed to /etc/xdg/kwinrc — KDE reads this as the system-level baseline
+# for every user. User overrides in ~/.config/kwinrc take precedence.
+
+# Enable KZones window-snapping script for all users.
+# The script is installed at /usr/share/kwin/scripts/kzones/ (baked into the
+# image by the Containerfile; also rebuildable via `powos overlay build powzones`).
+[Plugins]
+kzonesEnabled=true
+
+# KZones behaviour defaults.
+# See `powos zones` for a description of each option and the activation UX.
+# Users can override these in System Settings → Window Management → KWin Scripts
+# → KZones → Configure, or by editing ~/.config/kwinrc.
+#
+# // [powos.zones.activation]
+# zoneOverlayShowWhen=0 → auto-show zone overlay when you start dragging a window.
+# This is the closest equivalent to FancyZones: no modifier key required.
+# (Right-click during drag is not available: the KWin scripting API on Wayland
+#  does not expose pointer-button events during compositor-managed interactive
+#  moves. Auto-show on drag is the recommended substitute.)
+[Script-kzones]
+zoneOverlayShowWhen=0
+enableZoneSelector=true
+zoneSelectorTriggerDistance=1
+zoneOverlayHighlightTarget=1
+rememberWindowGeometries=true
+showOsdMessages=true
+fadeWindowsWhileMoving=false

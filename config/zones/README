@@ -1,0 +1,70 @@
+PowOS Window Zones — Default Layouts
+=====================================
+
+This directory ships PowOS's default KZones layouts. KZones is a KWin script
+that brings FancyZones-style window snapping to KDE Plasma.
+
+See also: `powos zones list` (shows all layouts with zone coordinates)
+          `powos zones edit` (opens the config for customization)
+
+
+Bundled Layouts
+---------------
+
+1. Halves                          — Left 50% | Right 50%
+2. Thirds                          — Left 33% | Center 34% | Right 33%
+3. Priority Center                 — Side 25% | Center 50% | Side 25%
+4. Priority Left                   — Main 67% | Stack 33%
+5. Ultrawide: 3-Col Balanced       — Side 25% | Center 50% | Side 25%
+6. Ultrawide: Big Center + Side Stacks — Center 50% + 4 stacked side zones
+
+Column detents used: ¼ (25%), ⅓ (33%), ½ (50%), ⅔ (67%), ¾ (75%)
+
+The "Ultrawide" layouts are identical in proportions to their 16:9 counterparts
+but are named separately so you can tell the active layout from the KZones OSD.
+
+
+Activation UX
+-------------
+
+Zones appear automatically when you begin dragging any window.
+Drop the window onto a highlighted zone — it snaps to fill that zone.
+
+Shortcuts:
+  Ctrl+Alt+C           Toggle zone overlay on/off manually
+  Ctrl+Alt+0-9         Snap the active window to zone N directly
+  Meta+Arrow keys      Move window between zones directionally
+  Ctrl+Alt+D           Cycle through layouts
+
+Note: right-click during drag is NOT supported on Wayland. The KWin scripting
+API does not expose pointer-button events during compositor-managed interactive
+moves. Auto-show on drag is used instead (identical feel, no modifier needed).
+
+
+Customising Layouts
+-------------------
+
+Layouts are JSON: an array of layout objects, each with a "name", "padding"
+(pixels), and "zones" (array of {x, y, width, height} in screen-percent).
+
+Option A — system-wide (affects all users; requires sudo or a rebuilt image):
+  Edit /etc/xdg/kwinrc, section [Script-kzones], key layoutsJson.
+  Paste the JSON array as a single line. After saving:
+    qdbus org.kde.KWin /KWin reconfigure
+
+Option B — per-user (overrides A):
+  Open System Settings → Window Management → KWin Scripts → KZones → Configure
+  Paste your layout JSON in the "Layouts" field.
+
+Option C — CLI helper:
+  powos zones edit     (opens System Settings KZones config page, or kwinrc)
+
+Zone coordinate system:
+  (0,0) is top-left of the screen.
+  x, y, width, height are all percentages of the screen dimensions.
+
+Example — left-third + right-two-thirds:
+  {"name": "My Layout", "padding": 4, "zones": [
+    {"x": 0,  "y": 0, "width": 33, "height": 100},
+    {"x": 33, "y": 0, "width": 67, "height": 100}
+  ]}
