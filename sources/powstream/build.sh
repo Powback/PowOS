@@ -118,10 +118,15 @@ ExecStartPre=/usr/bin/mkdir -p /tmp/depthcap
 # 120fps halves the pacer's frame-quantization latency vs 60 (~16ms→~8ms) on
 # high-refresh displays; 20Mbps keeps per-frame quality since bits/frame
 # otherwise halve at 120fps.
-# TOUCH_ROT=ccw corrects touch/cursor rotation on a portrait (Fit) output.
+# FIT_MODESET=0: Fit LETTERBOXES on the client instead of re-moding/rotating the
+#   physical monitor. The modeset is the root cause of "stuck at Negotiating" —
+#   the capture rebuild after a mode change comes up dead on KDE 6.7.1 + NVIDIA
+#   and never self-heals. Default OFF for a stable stream; opt back in per-box
+#   with a drop-in (POWSTREAM_FIT_MODESET=1) if your compositor handles it.
+# TOUCH_ROT=none: with no modeset the output stays landscape, so no correction.
 # NO_AUTH=1 skips the login gate for trusted LAN use.
 # All overridable via a drop-in.
-Environment=POWSTREAM_FPS=120 POWSTREAM_BITRATE=20000 POWSTREAM_TOUCH_ROT=ccw POWSTREAM_NO_AUTH=1
+Environment=POWSTREAM_FPS=120 POWSTREAM_BITRATE=20000 POWSTREAM_FIT_MODESET=0 POWSTREAM_TOUCH_ROT=none POWSTREAM_NO_AUTH=1
 ExecStart=/usr/lib/powstream/bin/powstream-webrtc-server --web-root /usr/lib/powstream/web --fps ${POWSTREAM_FPS} --bitrate ${POWSTREAM_BITRATE}
 Restart=on-failure
 RestartSec=3
