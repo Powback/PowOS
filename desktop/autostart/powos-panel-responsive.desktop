@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Panel Responsive
+Comment=Collapses panel padding and overflows tray icons on narrow (portrait/streamed) panels
+Exec=/usr/bin/powos-panel-responsive --watch
+Icon=start-here-kde
+Terminal=false
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;
+NoDisplay=true

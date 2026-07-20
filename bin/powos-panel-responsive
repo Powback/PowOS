@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+# powos-panel-responsive — make the Plasma panel usable on NARROW panels.
+#
+# PowOS streams the desktop to phones (PowStream), which reshapes a monitor
+# into a portrait / phone-shaped mode (e.g. 1440x2560, 1080x1920, or even
+# 768x1368). The stock centered layout that powos-panel-center ships —
+# [expanding spacer] kickoff · pager · tasks [expanding spacer] · tray · clock
+# — reads great on wide/ultrawide displays but falls apart when the panel is
+# only ~1000-1400px wide:
+#
+#   1. The LEFT expanding spacer eats half the panel → a huge empty gap on
+#      the left, wasting the space the task manager needs.
+#   2. The task manager shows no running programs: partly it is squeezed
+#      between the two expanding spacers, but the real killer is that
+#      powos-panel-multimon sets showOnlyCurrentScreen=true on every
+#      taskbar — so the panel the user is viewing on the phone lists only
+#      windows physically on THAT output, while their apps live on another.
+#   3. Every system-tray icon stays inline and overflows the right end.
+#
+# This helper reacts to a panel's *screen width* and, per panel:
+#   - NARROW (width < THRESHOLD): collapse the LEFT bracketing spacer
+#     (expanding=false, length=0) so the launcher + task manager left-align
+#     and the task manager gets the whole middle (the RIGHT spacer stays
+#     expanding, keeping tray + clock pinned to the right, Windows-taskbar
+#     style); set the task manager to show ALL windows
+#     (showOnlyCurrentScreen=false) so the streamed taskbar actually lists
+#     running programs; and push all non-essential tray icons into the "^"
+#     hidden popup (KDE has no automatic width overflow — we curate it),
+#     keeping only volume / network / battery / notifications inline.
+#   - WIDE (width >= THRESHOLD): restore the centered layout (left spacer
+#     expanding again), restore the per-screen task filter, and clear the
+#     tray overrides WE set. All reverts are marker-gated, so a user who
+#     hand-customized these applets is never clobbered.
+#
+# Everything is applied live through plasmashell's scripting API
+# (writeConfig + reloadConfig) — no plasmashell restart, no flicker. Every
+# pass is idempotent and self-guarding: it only writes when a value actually
+# changes, so it is cheap to poll.
+#
+# Builds ON TOP of powos-panel-center / powos-panel-multimon: it toggles the
+# spacers those scripts created, it never adds or removes applets, and if no
+# bracketing spacer exists (uncentered panel) it simply leaves the layout
+# alone and only manages the tray.
+#
+# USAGE:
+#   powos-panel-responsive            # one idempotent pass, then exit
+#   powos-panel-responsive --once     # same
+#   powos-panel-responsive --watch    # poll forever (autostart uses this)
+#
+# TUNABLES (env):
+#   POWOS_PANEL_NARROW_PX   width below which a panel is "narrow" (default 1920,
+#                           i.e. anything narrower than a 1080p display — so a
+#                           normal 1080p+ or ultrawide monitor stays centered and
+#                           only phone/portrait stream outputs get the compact layout)
+#   POWOS_PANEL_POLL_SEC    --watch poll interval in seconds     (default 3)
+#
+# Wayland gives output-geometry changes to Qt over the wl_output protocol,
+# NOT over a DBus broadcast (plasmashell repositions panels but nothing is
+# emitted on the bus), so --watch polls — resolution changes are rare and
+# each poll is a single cheap DBus round-trip that no-ops when nothing moved.
+
+set -uo pipefail
+
+THRESHOLD="${POWOS_PANEL_NARROW_PX:-1920}"
+INTERVAL="${POWOS_PANEL_POLL_SEC:-3}"
+
+# Wait for plasmashell DBus, same probe as the other panel helpers.
+QDBUS=""
+for _ in $(seq 1 30); do
+    for candidate in qdbus6 qdbus qdbus-qt6 qdbus-qt5; do
+        if command -v "$candidate" >/dev/null 2>&1 \
+           && "$candidate" org.kde.plasmashell / >/dev/null 2>&1; then
+            QDBUS="$candidate"
+            break 2
+        fi
+    done
+    sleep 1
+done
+[[ -z "$QDBUS" ]] && exit 0
+
+# The adjust pass. Runs entirely inside plasmashell via evaluateScript so it
+# can read AppletOrder + applet types and writeConfig/reloadConfig live.
+# THRESHOLD is prepended as a JS var (same trick as powos-panel-multimon).
+script_body='
+// Tray items kept INLINE at narrow width; everything else goes to the "^".
+var KEEP = {
+  "org.kde.plasma.volume": 1,
+  "org.kde.plasma.networkmanagement": 1,
+  "org.kde.plasma.battery": 1,
+  "org.kde.plasma.notifications": 1
+};
+
+function isTrue(v){ return v === true || v === "true"; }
+
+var changed = [];
+for (var i in panels()) {
+  var p = panels()[i];
+  var g = screenGeometry(p.screen);
+  var width = g ? g.width : 999999;
+  var narrow = width < THRESHOLD;
+
+  // id -> widget, and the visual order from AppletOrder (widgets() is unsorted).
+  var byId = {};
+  p.widgets().forEach(function(w){ byId[w.id] = w; });
+  p.currentConfigGroup = ["General"];
+  var order = String(p.readConfig("AppletOrder")).split(";");
+
+  // Locate the task manager, then the spacer just BEFORE it (left) and the
+  // first spacer AFTER it (right).
+  var taskIdx = -1, taskWidget = null;
+  for (var k = 0; k < order.length; k++) {
+    var w = byId[order[k]];
+    if (w && w.type == "org.kde.plasma.icontasks") { taskIdx = k; taskWidget = w; break; }
+  }
+
+  // (2) Task manager: powos-panel-multimon sets showOnlyCurrentScreen=true so
+  // each monitor lists only its own windows. On a narrow / streamed portrait
+  // output the user is looking at ONE taskbar while apps live on the other
+  // screen, so that filter leaves the taskbar empty. Show ALL windows when
+  // narrow; restore the per-screen filter (marker-gated) when wide.
+  if (taskWidget) {
+    taskWidget.currentConfigGroup = ["General"];
+    var mineT = isTrue(taskWidget.readConfig("powosResponsive"));
+    if (narrow) {
+      if (isTrue(taskWidget.readConfig("showOnlyCurrentScreen")) || !mineT) {
+        taskWidget.writeConfig("showOnlyCurrentScreen", false);
+        taskWidget.writeConfig("powosResponsive", true);
+        taskWidget.reloadConfig();
+        changed.push("panel" + p.id + " tasks.showOnlyCurrentScreen=false");
+      }
+    } else if (mineT) {
+      taskWidget.writeConfig("showOnlyCurrentScreen", true);
+      taskWidget.writeConfig("powosResponsive", false);
+      taskWidget.reloadConfig();
+      changed.push("panel" + p.id + " tasks.showOnlyCurrentScreen=true");
+    }
+  }
+  var leftSpacer = null, rightSpacer = null;
+  if (taskIdx >= 0) {
+    for (var k = 0; k < order.length; k++) {
+      var w = byId[order[k]];
+      if (!w || w.type != "org.kde.plasma.panelspacer") continue;
+      if (k < taskIdx) leftSpacer = w;                        // last before tasks
+      else if (k > taskIdx && !rightSpacer) rightSpacer = w;  // first after tasks
+    }
+  }
+
+  // (1)+(2) Left spacer: collapse when narrow, expand when wide.
+  if (leftSpacer) {
+    leftSpacer.currentConfigGroup = ["General"];
+    var have = isTrue(leftSpacer.readConfig("expanding"));
+    var want = !narrow;
+    if (have != want) {
+      leftSpacer.writeConfig("expanding", want);
+      if (!want) leftSpacer.writeConfig("length", 0);
+      leftSpacer.reloadConfig();
+      changed.push("panel" + p.id + " leftSpacer.expanding=" + want + " (w=" + width + ")");
+    }
+  }
+  // Right spacer must stay expanding so tray + clock hug the right edge.
+  if (rightSpacer) {
+    rightSpacer.currentConfigGroup = ["General"];
+    if (!isTrue(rightSpacer.readConfig("expanding"))) {
+      rightSpacer.writeConfig("expanding", true);
+      rightSpacer.reloadConfig();
+      changed.push("panel" + p.id + " rightSpacer.expanding=true");
+    }
+  }
+
+  // (3) System tray overflow.
+  p.widgets().forEach(function(tray){
+    if (tray.type != "org.kde.plasma.systemtray") return;
+    tray.currentConfigGroup = ["General"];
+    var known = String(tray.readConfig("knownItems")).split(",").filter(function(s){ return s.length; });
+    if (known.length == 0) return;
+    var mine = isTrue(tray.readConfig("powosResponsive"));
+
+    if (narrow) {
+      var hide = [], show = [];
+      known.forEach(function(it){ (KEEP[it] ? show : hide).push(it); });
+      var want = hide.join(",");
+      if (!mine || String(tray.readConfig("hiddenItems")) != want) {
+        tray.writeConfig("hiddenItems", hide);
+        tray.writeConfig("shownItems", show);
+        tray.writeConfig("powosResponsive", true);
+        tray.reloadConfig();
+        changed.push("panel" + p.id + " trayHidden=" + hide.length);
+      }
+    } else if (mine) {
+      // Only revert what WE set; a hand-customized tray has no marker.
+      tray.writeConfig("hiddenItems", []);
+      tray.writeConfig("shownItems", []);
+      tray.writeConfig("powosResponsive", false);
+      tray.reloadConfig();
+      changed.push("panel" + p.id + " trayRestored");
+    }
+  });
+}
+print(changed.length ? changed.join("\n") : "no-change");
+'
+
+script="var THRESHOLD = ${THRESHOLD};"$'\n'"$script_body"
+
+apply() {
+    "$QDBUS" org.kde.plasmashell /PlasmaShell \
+        org.kde.PlasmaShell.evaluateScript "$script" 2>/dev/null || true
+}
+
+case "${1:-}" in
+    --watch)
+        while true; do
+            apply >/dev/null
+            sleep "$INTERVAL"
+        done
+        ;;
+    ""|--once)
+        apply
+        ;;
+    *)
+        echo "usage: powos-panel-responsive [--once|--watch]" >&2
+        exit 2
+        ;;
+esac
