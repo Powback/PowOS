@@ -1,0 +1,18 @@
+[Unit]
+Description=PowOS G-key mapper (Logitech G915/G913/G815 HID++ diversion)
+Documentation=https://github.com/Powback/PowOS
+# Runs as a USER unit: /dev/uinput and /dev/hidraw* are granted to the logged-in
+# user via uaccess ACLs (42-logitech-unify-permissions.rules), so no root needed.
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/powos/gkeys/powos-gkeysd.py
+Restart=on-failure
+RestartSec=5
+# The keyboard is wireless: it sleeps, roams between hosts, and re-enumerates.
+# Restart rather than give up if the device vanishes.
+StartLimitBurst=0
+
+[Install]
+WantedBy=graphical-session.target

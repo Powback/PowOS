@@ -1,0 +1,4 @@
+# PowOS G-key mappings — G<n>=KEY_NAME
+# Only G-keys listed here do anything; while the daemon runs, unmapped
+# G-keys are inert (they no longer emit their default F-key).
+#G1=KEY_ESC
