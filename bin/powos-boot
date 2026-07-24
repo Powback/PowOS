@@ -206,7 +206,7 @@ log "Starting Desktop Environment..."
 
 # User setup
 if ! id powos &>/dev/null; then
-    useradd -m -G wheel -u 1000 powos
+    useradd -m -d /home/powos -G wheel -u 1000 powos
     echo "powos:powos" | chpasswd
 fi
 echo "powos ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/powos

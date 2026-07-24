@@ -56,6 +56,8 @@ COPY desktop/autostart/                   /etc/xdg/autostart/
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
 COPY config/kde/kglobalshortcutsrc        /etc/xdg/kglobalshortcutsrc
 COPY config/kde/kwinrc                    /etc/xdg/kwinrc
+COPY config/kde/konsolerc                 /etc/xdg/konsolerc
+COPY config/kde/konsole/                  /usr/share/konsole/
 COPY config/zones/                        /etc/powos/zones/
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
@@ -98,7 +100,7 @@ LABEL org.opencontainers.image.description="Minimal PowOS layer on Bazzite (CLI 
 
 # powos user (uid 1000, wheel), default password, sshd enabled.
 # openssh-server is already in Bazzite base.
-RUN useradd -m -G wheel -u 1000 powos 2>/dev/null || true && \
+RUN useradd -m -d /home/powos -G wheel -u 1000 powos 2>/dev/null || true && \
     echo "powos:powos" | chpasswd && \
     systemctl enable sshd.service && \
     mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/powos
