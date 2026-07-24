@@ -340,6 +340,150 @@ ai_list_clients() {
     done
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Interactive session picker — fzf menu matching the tmux SSH resume pattern.
+# Prints the selected session name to stdout; returns 1 if no sessions exist,
+# 0 with empty output when the user cancels (Esc / no selection).
+# ─────────────────────────────────────────────────────────────────────────────
+_ai_resume_picker() {
+    _ai_ensure_config
+    if declare -f _session_init &>/dev/null; then
+        _session_init 2>/dev/null || true
+    fi
+
+    local session_dir="$AI_SESSION_DIR"
+
+    # Bail early if there are no session files
+    local _has=0
+    for _f in "$session_dir"/*.json; do [[ -f "$_f" ]] && { _has=1; break; }; done
+    if [[ $_has -eq 0 ]]; then
+        echo -e "${YELLOW}No AI sessions found.${NC}" >&2
+        return 1
+    fi
+
+    # Emit tab-delimited rows: name \t updated \t display-label
+    _ai_picker_rows() {
+        local f name agent client updated msg_count ts display
+        for f in "$session_dir"/*.json; do
+            [[ -f "$f" ]] || continue
+            name=$(basename "$f" .json)
+            if command -v jq &>/dev/null; then
+                read -r agent client updated msg_count < <(
+                    jq -r '[(.agent // "?"), (.client // "?"),
+                            (.updated // .created // "?"),
+                            (.messages | length | tostring)] | @tsv' \
+                        "$f" 2>/dev/null || echo -e "?\t?\t?\t0")
+            elif command -v python3 &>/dev/null; then
+                read -r agent client updated msg_count < <(
+                    POWOS_SESSION_FILE="$f" python3 -c "
+import json, os
+try:
+    with open(os.environ['POWOS_SESSION_FILE']) as fh:
+        d = json.load(fh)
+    print('\t'.join([d.get('agent','?'), d.get('client','?'),
+                     d.get('updated', d.get('created','?')),
+                     str(len(d.get('messages',[])))]))
+except Exception:
+    print('?\t?\t?\t0')
+" 2>/dev/null)
+            else
+                agent="?"; client="?"; updated="?"; msg_count="0"
+            fi
+            ts="${updated:0:16}"; ts="${ts/T/ }"
+            display=$(printf '%-24s %-12s %-8s  %4s msg  %s' \
+                              "$name" "$agent" "$client" "$msg_count" "$ts")
+            printf '%s\t%s\t%s\n' "$name" "$updated" "$display"
+        done
+    }
+
+    # Write preview script to temp file to avoid quoting gymnastics.
+    # The outer heredoc is single-quoted so nothing expands at write time;
+    # the inner python3 heredoc 'PYEOF' is also single-quoted so the preview
+    # shell won't expand $-expressions in the Python source.
+    local _ptmp
+    _ptmp=$(mktemp --suffix=.sh 2>/dev/null || mktemp /tmp/ai-picker-XXXXXX)
+    export _POWOS_AI_SESSION_DIR="$session_dir"
+    cat > "$_ptmp" << 'PREVIEW_SCRIPT'
+#!/bin/bash
+name="$1"
+f="${_POWOS_AI_SESSION_DIR}/${name}.json"
+[[ -f "$f" ]] || { echo "  (session not found)"; exit 0; }
+if command -v python3 &>/dev/null; then
+    python3 - "$f" << 'PYEOF'
+import json, sys
+with open(sys.argv[1]) as fh:
+    d = json.load(fh)
+agent   = d.get('agent', '?')
+client  = d.get('client', '?')
+created = d.get('created', '?')[:19].replace('T', ' ')
+updated = d.get('updated', '?')[:19].replace('T', ' ')
+msgs    = d.get('messages', [])
+print(f"  Agent:    {agent}")
+print(f"  Client:   {client}")
+print(f"  Created:  {created}")
+print(f"  Updated:  {updated}")
+print(f"  Messages: {len(msgs)}")
+print("  " + "\u2500" * 44)
+for m in msgs[-4:]:
+    role    = m.get('role', '?')
+    content = m.get('content', '')[:300].replace('\n', ' ')
+    print(f"  [{role}]: {content}")
+PYEOF
+elif command -v jq &>/dev/null; then
+    jq -r '
+      "  Agent:    " + (.agent // "?"),
+      "  Client:   " + (.client // "?"),
+      "  Created:  " + ((.created // "?")[:19] | gsub("T"; " ")),
+      "  Updated:  " + ((.updated // "?")[:19] | gsub("T"; " ")),
+      "  Messages: " + (.messages | length | tostring),
+      "  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+      (.messages[-4:] | .[] | "  [" + .role + "]: " + .content[:300])
+    ' "$f" 2>/dev/null
+else
+    cat "$f"
+fi
+PREVIEW_SCRIPT
+    chmod +x "$_ptmp"
+
+    local _picked=""
+    if command -v fzf &>/dev/null; then
+        local _choice
+        _choice=$(
+            _ai_picker_rows | sort -t$'\t' -k2 -r | \
+            fzf --ansi --reverse --height='80%' \
+                --delimiter=$'\t' --with-nth=3 \
+                --prompt='resume ▶ ' \
+                --header='AI Sessions   ·   Enter = resume   ·   Esc = cancel' \
+                --preview="bash $_ptmp {1}" \
+                --preview-window='right,58%,border-left,wrap'
+        ) || true
+        _picked="${_choice%%$'\t'*}"
+    else
+        # Fallback: numbered list + read from /dev/tty
+        local -a _names=()
+        local _i=0
+        while IFS=$'\t' read -r _n _u _l; do
+            _i=$((_i + 1))
+            printf "  %2d) %s\n" "$_i" "$_l" >&2
+            _names+=("$_n")
+        done < <(_ai_picker_rows | sort -t$'\t' -k2 -r)
+
+        if [[ $_i -eq 0 ]]; then
+            echo "No sessions available." >&2
+            rm -f "$_ptmp"; unset -f _ai_picker_rows 2>/dev/null; return 1
+        fi
+        printf "\nSelect (1-%d, Enter = cancel): " "$_i" >&2
+        local _sel; read -r _sel </dev/tty
+        if [[ -n "$_sel" && "$_sel" =~ ^[0-9]+$ && "$_sel" -ge 1 && "$_sel" -le "$_i" ]]; then
+            _picked="${_names[$((_sel - 1))]}"
+        fi
+    fi
+
+    rm -f "$_ptmp"
+    unset -f _ai_picker_rows 2>/dev/null
+    echo "$_picked"
+}
+
 # Main call function
 ai_call() {
     _ai_ensure_config
@@ -348,6 +492,7 @@ ai_call() {
     local opt_client=""
     local opt_session=""
     local opt_continue=""
+    local opt_resume=""
     local opt_new_session=""
     local opt_interactive=""
     local opt_json=""
@@ -373,6 +518,15 @@ ai_call() {
             --continue)
                 opt_continue="true"
                 shift
+                ;;
+            --resume)
+                opt_resume="true"
+                shift
+                # Accept optional session name as next positional arg
+                if [[ $# -gt 0 && "${1:0:1}" != "-" && -n "${1:-}" ]]; then
+                    opt_session="$1"
+                    shift
+                fi
                 ;;
             --new-session)
                 opt_new_session="true"
@@ -423,6 +577,17 @@ ai_call() {
                 ;;
         esac
     done
+
+    # --resume: show fzf picker if no explicit session was given
+    if [[ -n "$opt_resume" ]]; then
+        if [[ -z "$opt_session" ]]; then
+            local _picked
+            _picked=$(_ai_resume_picker) || return 0   # no sessions → exit clean
+            [[ -n "$_picked" ]] || return 0            # cancelled (Esc) → exit clean
+            opt_session="$_picked"
+        fi
+        opt_continue="true"
+    fi
 
     # Read from stdin if no prompt and not interactive
     if [[ -z "$prompt" && -z "$opt_interactive" && ! -t 0 ]]; then
@@ -707,7 +872,22 @@ ${context}"
     else
         # Fallback to manual loop (pass context via env for the loop)
         export _AI_CONTEXT="$context"
-        _ai_interactive_loop "$agent" "$client" "$client_session_id"
+        # Pass the PowOS session name as arg 4 so the loop can persist the
+        # client UUID to the session JSON after each turn.
+        _ai_interactive_loop "$agent" "$client" "$client_session_id" "$session"
+    fi
+
+    # After either interactive path exits, check for a newly captured UUID and
+    # persist it. client_interactive (TUI mode) doesn't write CLAUDE_SESSION_ID_FILE,
+    # so this is a no-op there — but it catches the fallback loop's final UUID if the
+    # loop itself somehow didn't persist it, and future client implementations that DO
+    # emit the UUID on exit will benefit automatically.
+    if [[ -n "$session" ]] && declare -f client_get_session_id &>/dev/null; then
+        local post_uuid
+        post_uuid=$(client_get_session_id 2>/dev/null || true)
+        if [[ -n "$post_uuid" ]] && declare -f ai_session_set_client_id &>/dev/null; then
+            ai_session_set_client_id "$session" "$post_uuid" 2>/dev/null || true
+        fi
     fi
 }
 
@@ -715,6 +895,7 @@ _ai_interactive_loop() {
     local agent="$1"
     local client="$2"
     local session="${3:-}"
+    local powos_session="${4:-}"   # PowOS session name for UUID persistence
 
     while true; do
         echo -ne "${GREEN}You:${NC} "
@@ -765,10 +946,19 @@ _ai_interactive_loop() {
                 echo -ne "${CYAN}AI:${NC} "
                 client_call "$input" "${AGENT_SYSTEM_PROMPT:-}" "$session" || \
                     echo -e "${RED}(client call failed)${NC}"
-                # Chain the conversation: pick up the client's session ID
-                # after the first call so following turns resume it.
-                if [[ -z "$session" ]] && declare -f client_get_session_id &>/dev/null; then
-                    session=$(client_get_session_id 2>/dev/null || true)
+                # After every call, pick up the client UUID (assigned on the
+                # first turn, unchanged on subsequent turns) and persist it to
+                # the PowOS session file so --continue and future -i invocations
+                # can resume this conversation.
+                if declare -f client_get_session_id &>/dev/null; then
+                    local new_uuid
+                    new_uuid=$(client_get_session_id 2>/dev/null || true)
+                    if [[ -n "$new_uuid" ]]; then
+                        session="$new_uuid"
+                        if [[ -n "$powos_session" ]] && declare -f ai_session_set_client_id &>/dev/null; then
+                            ai_session_set_client_id "$powos_session" "$session" 2>/dev/null || true
+                        fi
+                    fi
                 fi
                 echo ""
                 ;;
@@ -790,6 +980,9 @@ Options:
   --session, -s <name>   Use/resume specific session by name or ID
   --continue             Resume this agent's own last conversation
                          (per-agent; with --session, that session's last)
+  --resume [name]        Interactive fzf picker of all sessions — select to
+                         resume.  If a session name is given, resume it directly
+                         (same as --session <name> --continue).
   --new-session          Start new session (don't resume)
   --interactive, -i      Interactive chat mode (resumes the agent's last
                          chat by default; --new-session for a clean start)
@@ -805,6 +998,7 @@ Options:
 Session Commands:
   powos ai sessions                     List all sessions
   powos ai session new [name]           Create new session
+  powos ai session resume               Interactive fzf picker → resume selected
   powos ai session delete <name>        Delete a session
   powos ai session export <name> [fmt]  Export session (text/json/markdown|md)
   powos ai session clear                Delete all sessions
@@ -823,6 +1017,7 @@ Examples:
   powos ai --agent health "is my system healthy?"
   powos ai --client ollama "explain this locally"
   powos ai -i                           # Interactive mode
+  powos ai --resume                      # fzf picker of all sessions → resume
   powos ai --agent coder --continue "what next?"  # Resume coder's last chat
   powos ai --session myproject "hello"  # Use named session
   powos ai --json "hello"               # Get JSON with session_id
@@ -955,6 +1150,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                     shift
                     ai_export_session "$@"
                     ;;
+                resume)
+                    shift
+                    _sess=""
+                    _sess=$(_ai_resume_picker) || exit 0
+                    if [[ -n "$_sess" ]]; then
+                        ai_call --session "$_sess" --continue "$@"
+                    fi
+                    ;;
                 clear)
                     if declare -f ai_session_clear_all &>/dev/null; then
                         ai_session_clear_all
@@ -962,7 +1165,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                     ;;
                 *)
                     echo -e "${RED}Unknown session command: $1${NC}" >&2
-                    echo "Usage: powos ai session {list|new|delete|export|clear}" >&2
+                    echo "Usage: powos ai session {list|new|delete|export|resume|clear}" >&2
                     exit 1
                     ;;
             esac
