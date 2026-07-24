@@ -183,13 +183,22 @@ _claude_render_tool() {
     cmd="$(printf '%s'  "$json" | jq -r '.input.command // empty' 2>/dev/null)"
     tgt="$(printf '%s'  "$json" | jq -r '.input.file_path // .input.path // .input.pattern // .input.url // empty' 2>/dev/null)"
 
-    local C_HEAD=$'\033[1;36m' C_DIM=$'\033[2m' C_CMD=$'\033[0;33m' NC=$'\033[0m'
-    if [[ -n "${NO_COLOR:-}" ]]; then C_HEAD=""; C_DIM=""; C_CMD=""; NC=""; fi
+    local C_HEAD=$'\033[1;36m' C_DESC=$'\033[0;37m' C_CMD=$'\033[0;33m' C_DIM=$'\033[2m' NC=$'\033[0m'
+    if [[ -n "${NO_COLOR:-}" ]]; then C_HEAD=""; C_DESC=""; C_CMD=""; C_DIM=""; NC=""; fi
 
+    # Fallback: if description is empty and this is a Bash call, use a
+    # truncated version of the command so the user always sees *what* is running.
+    if [[ -z "$desc" && -n "$cmd" ]]; then
+        desc="${cmd:0:80}"
+        [[ "${#cmd}" -gt 80 ]] && desc="${desc}…"
+    fi
+
+    # Header line: "⚙ ToolName — description  target"
     printf '\n%s⚙ %s%s' "$C_HEAD" "$name" "$NC"
-    [[ -n "$tgt" ]] && printf ' %s%s%s' "$C_DIM" "$tgt" "$NC"
+    [[ -n "$desc" ]] && printf ' — %s%s%s' "$C_DESC" "$desc" "$NC"
+    [[ -n "$tgt"  ]] && printf '  %s%s%s' "$C_DIM" "$tgt" "$NC"
     printf '\n'
-    [[ -n "$desc" ]] && printf '  %s%s%s\n' "$C_DIM" "$desc" "$NC"
+    # Command line (only shown when there is an actual command to display)
     [[ -n "$cmd" ]]  && printf '  %s$ %s%s\n' "$C_CMD" "$cmd" "$NC"
 }
 
