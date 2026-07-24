@@ -26,9 +26,10 @@ PlasmoidItem {
     Layout.minimumWidth: Kirigami.Units.gridUnit * 18
     Layout.minimumHeight: Kirigami.Units.gridUnit * 12
 
-    property string listCmd: "powos containers list --json"
-    property string statsCmd: "powos containers stats --json"
+    property string listCmd: "/usr/bin/powos containers list --json"
+    property string statsCmd: "/usr/bin/powos containers stats --json"
     property bool busy: false
+    property string lastError: ""
     property string confirmName: ""      // pending delete target (empty = dialog hidden)
 
     property var rawList: []             // last parsed structural list
@@ -61,7 +62,7 @@ PlasmoidItem {
 
     // pull the last log lines for one container; keyed back by the exact command
     function fetchLogs(name) {
-        var cmd = "powos containers logs " + root.shellQuote(name) + " --lines 300"
+        var cmd = "/usr/bin/powos containers logs " + root.shellQuote(name) + " --lines 300"
         root.pendingLog[cmd] = name
         logger.connectSource(cmd)
     }
@@ -164,8 +165,18 @@ PlasmoidItem {
 
     function parseList(txt) {
         var arr
-        try { arr = JSON.parse(txt) } catch (e) { return }
-        if (!Array.isArray(arr)) return
+        try { arr = JSON.parse(txt) } catch (e) {
+            // Non-JSON output (help text, error message, version mismatch)
+            root.lastError = txt.length > 0
+                ? txt.substring(0, 400)
+                : "No output from /usr/bin/powos containers list --json"
+            return
+        }
+        if (!Array.isArray(arr)) {
+            root.lastError = "Expected JSON array, got: " + txt.substring(0, 100)
+            return
+        }
+        root.lastError = ""
         root.rawList = arr
         rebuild()
     }
@@ -262,7 +273,7 @@ PlasmoidItem {
     function runAction(name, action) {
         if (root.busy) return
         root.busy = true
-        actor.connectSource("powos containers " + action + " " + root.shellQuote(name) + " >/dev/null 2>&1; echo done")
+        actor.connectSource("/usr/bin/powos containers " + action + " " + root.shellQuote(name) + " >/dev/null 2>&1; echo done")
     }
     function openDir(dir) {
         if (!dir) return
@@ -662,11 +673,15 @@ PlasmoidItem {
 
             PC3.Label {
                 visible: rowModel.count === 0
-                text: "No containers found"
-                opacity: 0.6
-                Layout.alignment: Qt.AlignHCenter
+                text: root.lastError !== "" ? root.lastError : "No containers found"
+                opacity: root.lastError !== "" ? 0.8 : 0.6
+                wrapMode: Text.Wrap
+                font.family: root.lastError !== "" ? "monospace" : font.family
+                font.pointSize: root.lastError !== "" ? Kirigami.Theme.smallFont.pointSize
+                                                      : font.pointSize
+                Layout.alignment: root.lastError !== "" ? Qt.AlignLeft : Qt.AlignHCenter
                 Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
+                horizontalAlignment: root.lastError !== "" ? Text.AlignLeft : Text.AlignHCenter
             }
         }
 
