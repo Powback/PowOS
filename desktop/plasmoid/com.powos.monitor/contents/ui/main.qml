@@ -30,6 +30,9 @@ PlasmoidItem {
     property real curCpu: 0;    property real curCpuTemp: 0
     property real curFreq: 0;   property real load1: 0
     property real prevCpuTotal: 0; property real prevCpuIdle: 0
+    // Per-core: [{pct}] current utilization for the bar background
+    property var coreUtils: []
+    property var prevCores: []   // [{total, idle}] from last tick
     // RAM
     property var histRam: []
     property real ramTotal: 0;  property real curRam: 0        // GiB
@@ -48,9 +51,10 @@ PlasmoidItem {
     property var topCpu: [];  property var topMem: [];  property var topIo: []
     property var topNet: []   // by connection count (bandwidth needs root)
 
-    // 7 fixed lines: cpu-stat | mem | net | gpu-csv | Tctl | freq | load1
+    // Line 1: aggregate cpu, lines 2..N+1: per-core cpuN, then __END_CPU__
+    // then mem | net | gpu-csv | Tctl | freq | load1 | diskstats
     readonly property string fastCmd:
-        "head -1 /proc/stat; " +
+        "grep '^cpu' /proc/stat; echo __END_CPU__; " +
         "awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print t, a}' /proc/meminfo; " +
         "awk 'NR>2 {gsub(/:/,\" \"); rx+=$2; tx+=$10} END{print rx, tx}' /proc/net/dev; " +
         "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.gr,clocks.mem --format=csv,noheader,nounits 2>/dev/null | head -1 || echo na; " +
@@ -128,26 +132,59 @@ PlasmoidItem {
     // Charts repaint themselves via onSeriesChanged — never reference chart ids
     // from here (fullRepresentation is a separate component scope).
     function parseFast(out) {
-        var L = out.split("\n")
+        // Split at the sentinel — everything before __END_CPU__ is cpu lines,
+        // after it is the 7 fixed lines (mem, net, gpu, Tctl, freq, load, disk).
+        var parts = out.split("__END_CPU__")
+        if (parts.length < 2) return
+        var cpuLines = parts[0].trim().split("\n")
+        var L = parts[1].trim().split("\n")
         if (L.length < 7) return
-        var c = L[0].trim().split(/\s+/).slice(1).map(Number)
-        if (c.length >= 5) {
-            var total = c.reduce(function(a,b){ return a+b }, 0)
-            var idle = c[3] + (c[4] || 0)
-            if (prevCpuTotal > 0 && total > prevCpuTotal) {
-                var dT = total - prevCpuTotal, dI = idle - prevCpuIdle
-                curCpu = Math.max(0, Math.min(100, 100 * (dT - dI) / dT))
-                histCpu = pushHist(histCpu, curCpu)
+
+        // Aggregate cpu (first "cpu " line)
+        if (cpuLines.length > 0) {
+            var c = cpuLines[0].trim().split(/\s+/).slice(1).map(Number)
+            if (c.length >= 5) {
+                var total = c.reduce(function(a,b){ return a+b }, 0)
+                var idle = c[3] + (c[4] || 0)
+                if (prevCpuTotal > 0 && total > prevCpuTotal) {
+                    var dT = total - prevCpuTotal, dI = idle - prevCpuIdle
+                    curCpu = Math.max(0, Math.min(100, 100 * (dT - dI) / dT))
+                    histCpu = pushHist(histCpu, curCpu)
+                }
+                prevCpuTotal = total; prevCpuIdle = idle
             }
-            prevCpuTotal = total; prevCpuIdle = idle
         }
-        var m = L[1].trim().split(/\s+/).map(Number)
+
+        // Per-core lines (cpu0, cpu1, …) → coreUtils as [{pct}]
+        var newCores = [], newPrev = []
+        for (var ci = 1; ci < cpuLines.length; ci++) {
+            var cl = cpuLines[ci].trim()
+            if (cl.indexOf("cpu") !== 0) continue
+            var cv = cl.split(/\s+/).slice(1).map(Number)
+            if (cv.length < 5) continue
+            var ct = cv.reduce(function(a,b){ return a+b }, 0)
+            var ci2 = cv[3] + (cv[4] || 0)
+            var pct = 0
+            if (prevCores.length > newCores.length) {
+                var p = prevCores[newCores.length]
+                if (p && ct > p.total) {
+                    var cdt = ct - p.total, cdi = ci2 - p.idle
+                    pct = Math.max(0, Math.min(100, 100 * (cdt - cdi) / cdt))
+                }
+            }
+            newCores.push({ pct: pct })
+            newPrev.push({ total: ct, idle: ci2 })
+        }
+        coreUtils = newCores
+        prevCores = newPrev
+
+        var m = L[0].trim().split(/\s+/).map(Number)
         if (m.length >= 2 && m[0] > 0) {
             ramTotal = m[0] / 1048576
             curRam = (m[0] - m[1]) / 1048576
             histRam = pushHist(histRam, curRam)
         }
-        var n = L[2].trim().split(/\s+/).map(Number)
+        var n = L[1].trim().split(/\s+/).map(Number)
         if (n.length >= 2) {
             var now = Date.now()
             if (prevRxB >= 0 && now > prevNetMs) {
@@ -159,7 +196,7 @@ PlasmoidItem {
             }
             prevRxB = n[0]; prevTxB = n[1]; prevNetMs = now
         }
-        var g = L[3].trim()
+        var g = L[2].trim()
         if (g !== "na" && g.indexOf(",") > 0) {
             var f = g.split(",").map(function(s){ return parseFloat(s.trim()) })
             if (f.length >= 5 && !isNaN(f[0])) {
@@ -171,17 +208,16 @@ PlasmoidItem {
                 histPower = pushHist(histPower, f[4])
             }
         }
-        var t = parseFloat(L[4]); if (!isNaN(t) && t > 0) { curCpuTemp = t; histCpuTempS = pushHist(histCpuTempS, t) }
-        var fq = parseFloat(L[5]); if (!isNaN(fq)) curFreq = fq
-        var ld = parseFloat(L[6]); if (!isNaN(ld)) load1 = ld
-        // 8) DISK: cumulative sectors read/written across whole disks
-        if (L.length >= 8) {
-            var dk = L[7].trim().split(/\s+/).map(Number)
+        var t = parseFloat(L[3]); if (!isNaN(t) && t > 0) { curCpuTemp = t; histCpuTempS = pushHist(histCpuTempS, t) }
+        var fq = parseFloat(L[4]); if (!isNaN(fq)) curFreq = fq
+        var ld = parseFloat(L[5]); if (!isNaN(ld)) load1 = ld
+        if (L.length >= 7) {
+            var dk = L[6].trim().split(/\s+/).map(Number)
             if (dk.length >= 2) {
                 var dnow = Date.now()
                 if (prevDrS >= 0 && dnow > prevDiskMs) {
                     var ddt = (dnow - prevDiskMs) / 1000
-                    curDr = Math.max(0, (dk[0] - prevDrS) * 512 / ddt / 1048576)   // MB/s
+                    curDr = Math.max(0, (dk[0] - prevDrS) * 512 / ddt / 1048576)
                     curDw = Math.max(0, (dk[1] - prevDwS) * 512 / ddt / 1048576)
                     histDr = pushHist(histDr, curDr)
                     histDw = pushHist(histDw, curDw)
@@ -295,7 +331,72 @@ PlasmoidItem {
                 label: "CPU " + root.curCpu.toFixed(0) + "%" + (root.curFreq > 0 ? " · " + root.curFreq.toFixed(2) + " GHz" : "")
                 value: "load " + root.load1.toFixed(2) + (root.curCpuTemp > 0 ? " · " + root.curCpuTemp.toFixed(0) + "°C" : "")
             }
-            Spark { series: root.histCpu; maxValue: 100; lineColor: Kirigami.Theme.textColor }
+            // Per-core utilization bars as a background behind the CPU sparkline
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 3.8
+                // Core bars — one vertical bar per core, filled by utilization %
+                Row {
+                    anchors.fill: parent
+                    spacing: 1
+                    Repeater {
+                        model: root.coreUtils.length
+                        delegate: Item {
+                            width: (parent.width - Math.max(0, root.coreUtils.length - 1)) / Math.max(1, root.coreUtils.length)
+                            height: parent.height
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: parent.height * Math.min(1, (root.coreUtils[index] ? root.coreUtils[index].pct : 0) / 100)
+                                color: {
+                                    var pct = root.coreUtils[index] ? root.coreUtils[index].pct : 0
+                                    return pct > 80 ? Qt.rgba(Kirigami.Theme.negativeTextColor.r,
+                                                              Kirigami.Theme.negativeTextColor.g,
+                                                              Kirigami.Theme.negativeTextColor.b, 0.35)
+                                         : pct > 40 ? Qt.rgba(Kirigami.Theme.neutralTextColor.r,
+                                                              Kirigami.Theme.neutralTextColor.g,
+                                                              Kirigami.Theme.neutralTextColor.b, 0.25)
+                                         : Qt.rgba(Kirigami.Theme.textColor.r,
+                                                   Kirigami.Theme.textColor.g,
+                                                   Kirigami.Theme.textColor.b, 0.12)
+                                }
+                                Behavior on height { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
+                                Behavior on color { ColorAnimation { duration: 500 } }
+                            }
+                        }
+                    }
+                }
+                // Sparkline on top
+                Spark { anchors.fill: parent; series: root.histCpu; maxValue: 100; lineColor: Kirigami.Theme.textColor }
+            }
+            // Per-core % labels (compact: only show if ≤32 cores to avoid clutter)
+            Flow {
+                visible: root.coreUtils.length > 0 && root.coreUtils.length <= 32
+                Layout.fillWidth: true
+                spacing: 2
+                Repeater {
+                    model: root.coreUtils.length
+                    delegate: PC3.Label {
+                        text: (root.coreUtils[index] ? root.coreUtils[index].pct.toFixed(0) : "0")
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+                        font.family: "monospace"
+                        width: Math.max(Kirigami.Units.gridUnit * 1.2,
+                               (parent.parent.width - (root.coreUtils.length - 1) * 2) / root.coreUtils.length)
+                        horizontalAlignment: Text.AlignHCenter
+                        opacity: {
+                            var pct = root.coreUtils[index] ? root.coreUtils[index].pct : 0
+                            return pct > 50 ? 0.9 : 0.45
+                        }
+                        color: {
+                            var pct = root.coreUtils[index] ? root.coreUtils[index].pct : 0
+                            return pct > 80 ? Kirigami.Theme.negativeTextColor
+                                 : pct > 40 ? Kirigami.Theme.neutralTextColor
+                                 : Kirigami.Theme.textColor
+                        }
+                    }
+                }
+            }
             Offenders { list: root.topCpu }
             GraphHeader {
                 label: "RAM " + root.curRam.toFixed(1) + " GiB"
