@@ -60,9 +60,17 @@ PlasmoidItem {
         rebuild()
     }
 
-    // pull the last log lines for one container; keyed back by the exact command
+    // pull the last log lines for one container; keyed back by the exact command.
+    // Falls back to direct `podman logs` when powos doesn't have the logs
+    // subcommand (older installed image) or when the powos wrapper isn't present.
     function fetchLogs(name) {
-        var cmd = "/usr/bin/powos containers logs " + root.shellQuote(name) + " --lines 300"
+        var qn = root.shellQuote(name)
+        // Try podman directly — the powos wrapper just calls `podman logs --tail`
+        // anyway, and this avoids version-mismatch issues where the installed
+        // powos predates the `containers logs` subcommand.
+        var cmd = "podman logs --tail 300 " + qn + " 2>&1 || " +
+                  "sudo -n podman logs --tail 300 " + qn + " 2>&1 || " +
+                  "echo '(no logs — container may be a system container)'"
         root.pendingLog[cmd] = name
         logger.connectSource(cmd)
     }
