@@ -3171,6 +3171,7 @@ case "${1:-}" in
         source "$POWOS_LIB/mods/verify.sh" 2>/dev/null || true
         source "$POWOS_LIB/mods/snapshot.sh" 2>/dev/null || true
         source "$POWOS_LIB/mods/adopt.sh" 2>/dev/null || true
+        source "$POWOS_LIB/mods/portable.sh" 2>/dev/null || true
         case "${1:-}" in
             # ── Native mod manager verbs (v2) ────────────────────────────
             status)                             shift; mods_status_cmd "$@" ;;
@@ -3243,6 +3244,8 @@ case "${1:-}" in
             doctor)                             shift; mods_doctor_cmd "$@" ;;
             rollback)                           shift; mods_rollback_cmd "$@" ;;
             adopt)                              shift; mods_adopt_cmd "$@" ;;
+            export)                             shift; mods_export_cmd "$@" ;;
+            import)                             shift; mods_import_cmd "$@" ;;
 
             # ── Legacy / escape hatch verbs ──────────────────────────────
             install-manager|install-mgr)        shift; mods_install_cmd "$@" ;;

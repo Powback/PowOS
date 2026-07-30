@@ -788,7 +788,11 @@ Priority order based on user's broken install + popularity:
 
 - `powos mods search <game> <query>` — search Nexus from CLI
 - `powos mods update <game> [mod]` — check for mod updates via Nexus API
-- `powos mods export/import` — share mod lists
+- ✅ `powos mods export/import` — share mod lists (implemented: `lib/mods/portable.sh`).
+  Export projects the manifest to a machine-independent list (Nexus ids +
+  priority + enabled, local paths/hashes stripped); import re-installs via the
+  normal install path and replays the enabled/disabled state. `--dry-run` prints
+  the plan and touches nothing.
 - FOMOD support (if needed — complex, may stay out of scope)
 
 ### What NOT to build

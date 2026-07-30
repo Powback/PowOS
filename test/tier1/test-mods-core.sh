@@ -539,6 +539,91 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════
+# 12. EXPORT / IMPORT (portable mod lists)
+# ═══════════════════════════════════════════════════════════════════════
+echo "== Export / import =="
+
+PORTABLE_LIB="$REPO_ROOT/lib/mods/portable.sh"
+[[ -f "$PORTABLE_LIB" ]] || PORTABLE_LIB="/usr/lib/powos/mods/portable.sh"
+
+if [[ -f "$PORTABLE_LIB" ]] && source "$PORTABLE_LIB" 2>/dev/null; then
+    # Fresh, deterministic manifest: a framework + two nexus mods (one disabled)
+    rm -f "$MODS_MANIFEST_DIR/cyberpunk2077.json"
+    mods_manifest_init cyberpunk2077 >/dev/null 2>&1
+    mods_manifest_add_mod cyberpunk2077 "id=fw-red4ext" "nexus_mod_id=2060" \
+        "name=RED4ext" "is_framework=true" "priority=0" \
+        "staging_dir=$MODS_STAGING_DIR/cyberpunk2077/fw-red4ext" "files_json=[]" >/dev/null 2>&1
+    mods_manifest_add_mod cyberpunk2077 "id=mod-12345" "nexus_mod_id=12345" "nexus_file_id=67890" \
+        "name=Cool Mod" "version=1.0" "priority=10" \
+        "staging_dir=$MODS_STAGING_DIR/cyberpunk2077/mod-12345" \
+        "files_json=[{\"path\":\"a/b.archive\",\"sha256\":\"deadbeef\",\"size\":10}]" >/dev/null 2>&1
+    mods_manifest_add_mod cyberpunk2077 "id=mod-99999" "nexus_mod_id=99999" \
+        "name=Off Mod" "version=2.0" "priority=20" \
+        "staging_dir=$MODS_STAGING_DIR/cyberpunk2077/mod-99999" "files_json=[]" >/dev/null 2>&1
+    mods_manifest_set_enabled cyberpunk2077 mod-99999 false >/dev/null 2>&1
+
+    EXPORT_FILE="$TMP/cp-export.json"
+
+    check "export writes file" 'mods_export_cmd cyberpunk2077 --out "$EXPORT_FILE" >/dev/null 2>&1'
+    check "export file valid + marker + count" 'python3 -c "
+import json
+d=json.load(open(\"$EXPORT_FILE\"))
+assert d[\"powos_mods_export\"]==1
+assert d[\"game\"]==\"cyberpunk2077\"
+assert d[\"appid\"]==1091500
+assert d[\"mod_count\"]==3
+"'
+    check "export keeps portable fields" 'python3 -c "
+import json
+d=json.load(open(\"$EXPORT_FILE\"))
+m=[x for x in d[\"mods\"] if x[\"nexus_mod_id\"]==12345][0]
+assert m[\"nexus_file_id\"]==67890
+assert m[\"version\"]==\"1.0\"
+"'
+    check "export strips machine-local fields" 'python3 -c "
+import json
+d=json.load(open(\"$EXPORT_FILE\"))
+for m in d[\"mods\"]:
+    assert \"staging_dir\" not in m, \"staging_dir leaked\"
+    assert \"files\" not in m, \"files leaked\"
+    assert \"installed_at\" not in m, \"installed_at leaked\"
+"'
+    check "export preserves enabled=false" 'python3 -c "
+import json
+d=json.load(open(\"$EXPORT_FILE\"))
+off=[x for x in d[\"mods\"] if x[\"nexus_mod_id\"]==99999][0]
+assert off[\"enabled\"]==False
+"'
+    check "export preserves is_framework" 'python3 -c "
+import json
+d=json.load(open(\"$EXPORT_FILE\"))
+fw=[x for x in d[\"mods\"] if x[\"nexus_mod_id\"]==2060][0]
+assert fw[\"is_framework\"]==True
+"'
+    check "export to stdout is valid JSON" 'mods_export_cmd cyberpunk2077 2>/dev/null | python3 -c "import json,sys; json.load(sys.stdin)"'
+    check "export nonexistent game fails" '! mods_export_cmd no_such_game >/dev/null 2>&1'
+
+    # ── import (dry-run: no network, touches nothing) ──
+    check "import dry-run runs" 'mods_import_cmd "$EXPORT_FILE" --dry-run >/dev/null 2>&1'
+    check "import dry-run changes nothing" '[[ "$(mods_manifest_count cyberpunk2077)" == "3" ]]'
+    # capture-then-match (here-string): a piped `grep -q` would SIGPIPE the
+    # still-writing importer and `set -o pipefail` would mask the real match.
+    check "import plan shows disabled state" 'out="$(mods_import_cmd "$EXPORT_FILE" --dry-run 2>&1)"; grep -qE "\[off\]" <<< "$out"'
+    check "import plan tags framework" 'out="$(mods_import_cmd "$EXPORT_FILE" --dry-run 2>&1)"; grep -q "framework" <<< "$out"'
+    check "import --game override honoured" 'out="$(mods_import_cmd "$EXPORT_FILE" --game skyrimse --dry-run 2>&1)"; grep -q "skyrimse" <<< "$out"'
+    check "import rejects non-export JSON" 'echo "{\"x\":1}" > "$TMP/bad.json"; ! mods_import_cmd "$TMP/bad.json" --dry-run >/dev/null 2>&1'
+    check "import rejects invalid JSON" 'echo "not json" > "$TMP/bad2.json"; ! mods_import_cmd "$TMP/bad2.json" --dry-run >/dev/null 2>&1'
+    check "import rejects missing file" '! mods_import_cmd "$TMP/nope.json" --dry-run >/dev/null 2>&1'
+
+    # ── round-trip ──
+    check "round-trip export→import dry-run count matches" '
+        mods_export_cmd cyberpunk2077 --out "$TMP/rt.json" >/dev/null 2>&1
+        [[ "$(python3 -c "import json;print(json.load(open(\"$TMP/rt.json\"))[\"mod_count\"])")" == "3" ]]'
+else
+    skip "export/import (portable.sh not found)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
 # RESULTS
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
