@@ -35,9 +35,11 @@ PlasmoidItem {
     property var rawList: []             // last parsed structural list
     property var statsByName: ({})       // name -> stats object
     property var expanded: ({})          // container name -> true when its detail is open
-    property var detailTab: ({})         // name -> "logs" | "details" (default "logs")
+    property var detailTab: ({})         // name -> "logs" | "details" | "processes" (default "logs")
     property var logsByName: ({})        // name -> last fetched log text
     property var pendingLog: ({})        // in-flight log command -> container name
+    property var processesByName: ({})   // name -> array of {pid, cpu, mem, cmd} (cpu/mem are %)
+    property var pendingProc: ({})       // in-flight process command -> container name
 
     ListModel { id: rowModel }           // flat display rows (stack headers + containers + details)
 
@@ -49,14 +51,16 @@ PlasmoidItem {
             // default to the Logs tab and fetch it as soon as the row opens
             if (!root.detailTab[name]) root.detailTab[name] = "logs"
             if (root.detailTab[name] === "logs") root.fetchLogs(name)
+            if (root.detailTab[name] === "processes") root.fetchProcesses(name)
         }
         rebuild()
     }
 
-    // switch a container's detail tab; fetch logs on first view of that tab
+    // switch a container's detail tab; fetch logs/processes on first view of that tab
     function setDetailTab(name, tab) {
         root.detailTab[name] = tab
         if (tab === "logs" && root.logsByName[name] === undefined) root.fetchLogs(name)
+        if (tab === "processes" && root.processesByName[name] === undefined) root.fetchProcesses(name)
         rebuild()
     }
 
@@ -73,6 +77,22 @@ PlasmoidItem {
                   "echo '(no logs — container may be a system container)'"
         root.pendingLog[cmd] = name
         logger.connectSource(cmd)
+    }
+
+    // fetch the processes running inside one container via `podman top`.
+    // Columns: PID, %CPU, %MEM, COMMAND (comm = exe name only, no args).
+    // Output is captured into a var first so the sudo fallback (system
+    // containers) fires on failure instead of feeding an error into the pipe;
+    // an empty capture (stopped container) yields no rows → "no processes".
+    // The podman-injected `ps` helper is filtered out. Sorted by %CPU desc.
+    function fetchProcesses(name) {
+        var qn = root.shellQuote(name)
+        var top = "podman top " + qn + " -eo pid,pcpu,pmem,comm 2>/dev/null"
+        var cmd = "out=$(" + top + " || sudo -n " + top + "); " +
+                  "printf '%s\\n' \"$out\" | tail -n +2 | awk '$4!=\"ps\"' | " +
+                  "sort -k2 -rn | head -n 10"
+        root.pendingProc[cmd] = name
+        procreader.connectSource(cmd)
     }
 
     function shellQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
@@ -155,7 +175,7 @@ PlasmoidItem {
                  scope: "user", run: 0, total: 0, cpu: 0, mem: 0,
                  net_rx: 0, net_tx: 0, blk_r: 0, blk_w: 0, hasStats: false,
                  isOpen: false, ports: "", labelsJson: "{}", traefikUrl: "",
-                 activeTab: "logs", logText: "" }
+                 activeTab: "logs", logText: "", procJson: "" }
     }
 
     // Extract the first Host(`...`) value from traefik router labels → "http://host"
@@ -255,17 +275,20 @@ PlasmoidItem {
                 r.traefikUrl = root.traefikHost(ci.labels)
                 r.isOpen = !!root.expanded[ci.name]
                 rows.push(r)
-                // when expanded, a detail row shows a tabbed panel (Logs / Details)
+                // when expanded, a detail row shows a tabbed panel (Logs / Processes / Details)
                 if (r.isOpen) {
                     var dr = blankRow()
                     dr.rowType = "detail"; dr.grouped = (key !== ""); dr.ports = ci.ports || ""
                     dr.name = ci.name
                     dr.labelsJson = JSON.stringify(ci.labels || {})
                     dr.activeTab = root.detailTab[ci.name] || "logs"
-                    // logsByName is refreshed asynchronously; read the cache here so
-                    // the periodic rebuild keeps whatever log text has arrived
+                    // logsByName / processesByName are refreshed asynchronously; read
+                    // the cache here so the periodic rebuild keeps whatever has arrived.
+                    // procJson stays "" until the first fetch resolves (→ "loading…").
                     dr.logText = (root.logsByName[ci.name] !== undefined)
                         ? root.logsByName[ci.name] : ""
+                    dr.procJson = (root.processesByName[ci.name] !== undefined)
+                        ? JSON.stringify(root.processesByName[ci.name]) : ""
                     rows.push(dr)
                 }
             }
@@ -329,6 +352,33 @@ PlasmoidItem {
             if (!name) return
             var out = ((d.stdout || "") + (d.stderr || "")).replace(/\s+$/, "")
             root.logsByName[name] = out === "" ? "(no output)" : out
+            root.rebuild()
+        }
+    }
+    P5Support.DataSource {
+        id: procreader; engine: "executable"; connectedSources: []
+        onNewData: function (s, d) {
+            disconnectSource(s)
+            var name = root.pendingProc[s]
+            delete root.pendingProc[s]
+            if (!name) return
+            var out = (d.stdout || "").replace(/\s+$/, "")
+
+            // each line is "PID %CPU %MEM COMM" (comm is a single token)
+            var procs = []
+            var lines = out.split('\n')
+            for (var i = 0; i < lines.length; i++) {
+                var parts = lines[i].trim().split(/\s+/)
+                if (parts.length >= 4) {
+                    procs.push({
+                        pid: parts[0],
+                        cpu: parseFloat(parts[1]) || 0,
+                        mem: parseFloat(parts[2]) || 0,
+                        cmd: parts.slice(3).join(' ')
+                    })
+                }
+            }
+            root.processesByName[name] = procs
             root.rebuild()
         }
     }
@@ -534,8 +584,9 @@ PlasmoidItem {
                             }
                         }
 
-                        // ── detail: tabbed panel (Logs / Details) shown when expanded ──
-                        // Logs is the default tab (last ~300 log lines); Details keeps
+                        // ── detail: tabbed panel (Logs / Processes / Details) when expanded ──
+                        // Logs is the default tab (last ~300 log lines); Processes lists
+                        // the top processes inside the container (podman top); Details keeps
                         // the ports + labels view. labelPairs turns the labels JSON into
                         // [{k, v, url}] so each label renders on its own row.
                         ColumnLayout {
@@ -547,7 +598,15 @@ PlasmoidItem {
                             anchors.rightMargin: Kirigami.Units.smallSpacing
                             spacing: Kirigami.Units.smallSpacing
 
-                            property bool onLogs: model.activeTab !== "details"
+                            property bool onLogs: model.activeTab === "logs"
+                            property bool onProcs: model.activeTab === "processes"
+                            property bool onDetails: model.activeTab === "details"
+
+                            // parse the cached process JSON for the Processes tab
+                            property var procList: {
+                                try { return JSON.parse(model.procJson || "[]") }
+                                catch (e) { return [] }
+                            }
 
                             property var labelPairs: {
                                 var o = {}
@@ -572,22 +631,32 @@ PlasmoidItem {
                                     TapHandler { onTapped: root.setDetailTab(model.name, "logs") }
                                 }
                                 PC3.Label {
-                                    text: "Details"
-                                    font.bold: !detailCol.onLogs
+                                    text: "Processes"
+                                    font.bold: detailCol.onProcs
                                     font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                    color: !detailCol.onLogs ? Kirigami.Theme.highlightColor
+                                    color: detailCol.onProcs ? Kirigami.Theme.highlightColor
                                                              : Kirigami.Theme.textColor
-                                    opacity: !detailCol.onLogs ? 1.0 : 0.7
+                                    opacity: detailCol.onProcs ? 1.0 : 0.7
+                                    TapHandler { onTapped: root.setDetailTab(model.name, "processes") }
+                                }
+                                PC3.Label {
+                                    text: "Details"
+                                    font.bold: detailCol.onDetails
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    color: detailCol.onDetails ? Kirigami.Theme.highlightColor
+                                                               : Kirigami.Theme.textColor
+                                    opacity: detailCol.onDetails ? 1.0 : 0.7
                                     TapHandler { onTapped: root.setDetailTab(model.name, "details") }
                                 }
                                 Item { Layout.fillWidth: true }
                                 PC3.ToolButton {
-                                    visible: detailCol.onLogs
+                                    visible: detailCol.onLogs || detailCol.onProcs
                                     icon.name: "view-refresh"
                                     display: PC3.AbstractButton.IconOnly
                                     implicitHeight: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
-                                    onClicked: root.fetchLogs(model.name)
-                                    PC3.ToolTip.text: "Refresh logs"
+                                    onClicked: detailCol.onLogs ? root.fetchLogs(model.name)
+                                                                : root.fetchProcesses(model.name)
+                                    PC3.ToolTip.text: detailCol.onLogs ? "Refresh logs" : "Refresh processes"
                                     PC3.ToolTip.visible: hovered
                                     PC3.ToolTip.delay: 600
                                 }
@@ -631,9 +700,96 @@ PlasmoidItem {
                                 }
                             }
 
+                            // ── Processes tab: top processes inside the container ──
+                            Rectangle {
+                                visible: detailCol.onProcs
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 9
+                                radius: Kirigami.Units.smallSpacing
+                                color: Kirigami.Theme.alternateBackgroundColor
+                                border.width: 1
+                                border.color: Qt.rgba(Kirigami.Theme.textColor.r,
+                                                      Kirigami.Theme.textColor.g,
+                                                      Kirigami.Theme.textColor.b, 0.15)
+
+                                // loading (fetch not resolved) vs empty (resolved, no rows)
+                                PC3.Label {
+                                    anchors.centerIn: parent
+                                    visible: model.procJson === "" || detailCol.procList.length === 0
+                                    text: model.procJson === "" ? "loading…" : "no processes"
+                                    opacity: 0.5
+                                    font: Kirigami.Theme.smallFont
+                                }
+
+                                PC3.ScrollView {
+                                    anchors.fill: parent
+                                    anchors.margins: Kirigami.Units.smallSpacing
+                                    clip: true
+                                    contentWidth: availableWidth
+                                    visible: detailCol.procList.length > 0
+
+                                    ColumnLayout {
+                                        width: parent.width
+                                        spacing: 1
+                                        // column header
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: Kirigami.Units.smallSpacing
+                                            PC3.Label {
+                                                text: "PROCESS"; opacity: 0.5
+                                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                                font.bold: true; Layout.fillWidth: true
+                                            }
+                                            PC3.Label {
+                                                text: "CPU"; opacity: 0.5
+                                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                                font.bold: true
+                                                Layout.preferredWidth: Kirigami.Units.gridUnit * 2.5
+                                                horizontalAlignment: Text.AlignRight
+                                            }
+                                            PC3.Label {
+                                                text: "MEM"; opacity: 0.5
+                                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                                font.bold: true
+                                                Layout.preferredWidth: Kirigami.Units.gridUnit * 2.5
+                                                horizontalAlignment: Text.AlignRight
+                                            }
+                                        }
+                                        Repeater {
+                                            model: detailCol.procList
+                                            delegate: RowLayout {
+                                                required property var modelData
+                                                Layout.fillWidth: true
+                                                spacing: Kirigami.Units.smallSpacing
+                                                PC3.Label {
+                                                    text: modelData.cmd
+                                                    font.family: "monospace"
+                                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                                    elide: Text.ElideRight; Layout.fillWidth: true
+                                                }
+                                                PC3.Label {
+                                                    text: (modelData.cpu || 0).toFixed(1) + "%"
+                                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                                    opacity: modelData.cpu > 0 ? 1.0 : 0.5
+                                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2.5
+                                                    horizontalAlignment: Text.AlignRight
+                                                }
+                                                PC3.Label {
+                                                    text: (modelData.mem || 0).toFixed(1) + "%"
+                                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                                    opacity: modelData.mem > 0 ? 1.0 : 0.5
+                                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2.5
+                                                    horizontalAlignment: Text.AlignRight
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             // ── Details tab: ports + labels ──
                             ColumnLayout {
-                                visible: !detailCol.onLogs
+                                visible: detailCol.onDetails
                                 Layout.fillWidth: true
                                 spacing: 1
 

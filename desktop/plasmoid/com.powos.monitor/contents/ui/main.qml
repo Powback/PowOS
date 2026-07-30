@@ -62,25 +62,37 @@ PlasmoidItem {
         "awk '/^cpu MHz/{s+=$4; n++} END{if(n) printf \"%.2f\\n\", s/n/1000; else print 0}' /proc/cpuinfo; " +
         "cut -d' ' -f1 /proc/loadavg; " +
         "awk '$3 ~ /^(nvme[0-9]+n[0-9]+|sd[a-z]+)$/ {r+=$6; w+=$10} END{print r, w}' /proc/diskstats"
-    // Top offenders per resource. Disk sampler uses grep -s (gawk fatals on
-    // unreadable/vanished /proc files); per-process io = own processes only.
+    // Top offenders per resource, each line "comm value container". Disk sampler
+    // uses grep -s (gawk fatals on unreadable/vanished /proc files); per-process
+    // io = own processes only.
+    //
+    // Container attribution: rc() maps a host PID to its owning podman container.
+    // rootless podman puts a container's processes under a libpod-<64hex>.scope
+    // cgroup; `podman ps --no-trunc` lists that same 64-hex id → name. A PID with
+    // no container cgroup (or a container we can't see, e.g. root-owned) → "host".
+    // podman absent → empty map → everything resolves to "host" (graceful).
     readonly property string mediumCmd:
-        "ps -eo comm,%cpu --sort=-%cpu --no-headers | head -3; " +
+        "CM=$(mktemp); podman ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null > $CM || true; " +
+        "rc(){ cid=$(grep -hoE '[0-9a-f]{64}' /proc/\"$1\"/cgroup 2>/dev/null | head -1); n=''; " +
+        "[ -n \"$cid\" ] && n=$(awk -v c=\"$cid\" '$1==c{print $2; exit}' $CM); " +
+        "[ -n \"$n\" ] && printf '%s' \"$n\" || printf host; }; " +
+        "ps -eo pid,%cpu,comm --sort=-%cpu --no-headers | head -3 | while read pid val comm; do echo \"$comm $val $(rc $pid)\"; done; " +
         "echo __M__; " +
-        "ps -eo comm,%mem --sort=-%mem --no-headers | head -3; " +
+        "ps -eo pid,%mem,comm --sort=-%mem --no-headers | head -3 | while read pid val comm; do echo \"$comm $val $(rc $pid)\"; done; " +
         "echo __D__; " +
         "T1=$(mktemp); T2=$(mktemp); " +
         "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T1; " +
         "sleep 1; " +
         "grep -sH -E '^(read_bytes|write_bytes)' /proc/[0-9]*/io | awk -F: '{s[$1]+=$3} END{for(f in s) print f, s[f]}' > $T2; " +
-        "awk 'NR==FNR{a[$1]=$2; next} ($1 in a) && ($2>a[$1]) {d=$2-a[$1]; split($1,p,\"/\"); pid=p[3]; cf=\"/proc/\"pid\"/comm\"; c=\"?\"; if((getline c < cf)>0) close(cf); print d, c}' $T1 $T2 | sort -rn | head -3 | awk '{printf \"%s %.2f\\n\", $2, $1/1048576}'; " +
+        "awk 'NR==FNR{a[$1]=$2; next} ($1 in a) && ($2>a[$1]) {d=$2-a[$1]; split($1,p,\"/\"); pid=p[3]; cf=\"/proc/\"pid\"/comm\"; c=\"?\"; if((getline c < cf)>0) close(cf); print d, pid, c}' $T1 $T2 | sort -k1 -rn | head -3 | while read d pid c; do mb=$(awk -v x=\"$d\" 'BEGIN{printf \"%.2f\", x/1048576}'); echo \"$c $mb $(rc $pid)\"; done; " +
         "rm -f $T1 $T2; " +
         // Per-process net BANDWIDTH needs root (nethogs); unprivileged proxy is
         // socket ownership — who's actively talking, by connection count.
         "echo __N__; " +
-        "ss -tunp 2>/dev/null | grep -oP 'users:\\(\\(\"\\K[^\"]+' | sort | uniq -c | sort -rn | head -3 | awk '{print $2, $1}'; " +
+        "ss -tunp 2>/dev/null | grep -oE 'users:\\(\\(\"[^\"]+\",pid=[0-9]+' | sed -E 's/users:\\(\\(//; s/\"//g; s/,pid=/ /' | awk '{cnt[$1]++; pid[$1]=$2} END{for(c in cnt) print c, cnt[c], pid[c]}' | sort -k2 -rn | head -3 | while read comm cnt pid; do echo \"$comm $cnt $(rc $pid)\"; done; " +
         "echo __HW__; " +
-        "cat /var/lib/powos/state/hwinfo.json 2>/dev/null || echo '{}'"
+        "cat /var/lib/powos/state/hwinfo.json 2>/dev/null || echo '{}'; " +
+        "rm -f $CM"
 
     function pushHist(arr, v) { var a = arr.slice(); a.push(v); if (a.length > maxSamples) a.shift(); return a }
 
@@ -99,12 +111,20 @@ PlasmoidItem {
     Timer { interval: 10000; running: true; repeat: true; triggeredOnStart: true
             onTriggered: exec.connectSource(root.mediumCmd) }
 
+    // each line is "name value container" (container may be absent → "host").
+    // comm is a single token, so name is field 0; value + container trail it.
     function parseOffenders(txt, unit) {
         var out = []
         txt.trim().split("\n").forEach(function(ln) {
             var f = ln.trim().split(/\s+/)
-            if (f.length >= 2) out.push({ name: f.slice(0, f.length - 1).join(" "),
-                                          val: (parseFloat(f[f.length - 1]) || 0).toFixed(1) + unit })
+            if (f.length < 2) return
+            var hasCtr = f.length >= 3
+            var ctr = hasCtr ? f[f.length - 1] : "host"
+            var valF = hasCtr ? f[f.length - 2] : f[f.length - 1]
+            var nameEnd = hasCtr ? f.length - 2 : f.length - 1
+            out.push({ name: f.slice(0, nameEnd).join(" "),
+                       val: (parseFloat(valF) || 0).toFixed(1) + unit,
+                       ctr: ctr })
         })
         return out
     }
@@ -283,11 +303,24 @@ PlasmoidItem {
         Item { Layout.fillWidth: true }
         PC3.Label { id: r; opacity: 0.7; font.pointSize: Kirigami.Theme.smallFont.pointSize }
     }
-    // one-line "worst offenders" strip under a graph: "name val · name val · …"
+    // one-line "worst offenders" strip under a graph, grouped by owning container:
+    //   "db: postgres 8%  ·  host: chrome 12% node 5%"
+    // When every offender is on the host (no containers involved) it collapses to
+    // the plain "› name val · name val" form so the common case stays uncluttered.
     component Offenders: PC3.Label {
         property var list: []
         visible: list.length > 0
-        text: "› " + list.map(function(p){ return p.name + " " + p.val }).join("  ·  ")
+        text: {
+            var groups = [], idx = {}
+            for (var i = 0; i < list.length; i++) {
+                var p = list[i], key = p.ctr || "host"
+                if (!(key in idx)) { idx[key] = groups.length; groups.push({ ctr: key, items: [] }) }
+                groups[idx[key]].items.push(p.name + " " + p.val)
+            }
+            if (groups.length === 1 && groups[0].ctr === "host")
+                return "› " + groups[0].items.join("  ·  ")
+            return "› " + groups.map(function(g){ return g.ctr + ": " + g.items.join(" ") }).join("   ·   ")
+        }
         opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize
         elide: Text.ElideRight
         Layout.fillWidth: true
