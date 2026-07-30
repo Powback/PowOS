@@ -162,6 +162,17 @@ Key facts an agent should CHECK before starting:
 - Sync conflicts `powos sync {status|resolve|--keep-ram|--keep-usb|--merge}` — detection ✅, `--merge` basic ⚠️.
 - CacheFS (lazy user-data FUSE) — ❌ incomplete: write-back to USB NOT implemented (written data is lost); must remain disabled (`POWOS_CACHEFS_ENABLED`).
 - Containers `powos containers …` (Podman/Distrobox), install/export GUI apps. ✅
+- Desktop widgets (KDE plasmoids in `desktop/plasmoid/`, shipped to
+  `/usr/share/plasma/plasmoids/`) — add from "Add Widgets" or the System Tray: ✅
+  - `com.powos.containers` — start/stop/restart podman containers, grouped by
+    compose stack; expand a container for Logs / **Processes** (podman top) / Details.
+  - `com.powos.monitor` — CPU (aggregate + per-core bars), GPU, net, disk;
+    worst-offenders strips **grouped by owning container** (host vs container).
+  - `com.powos.updates` (tray) — version + changelog, bootc update available
+    (skopeo digest compare), one-click upgrade/rollback, and **apply local
+    `/var/lib/powos/src` changes** (`powos update self`).
+  - `com.powos.camera` (tray) — shows when the camera is in use AND **names the
+    app(s)** holding `/dev/video*` (which KDE's stock indicator can't).
 - Dev / modding — TWO paths, pick by whether you want it committed:
   - **Runtime, per-machine** (`powos dev`): `new`/`fork`/`build`/`enable`/`disable`/
     `update`, `--ai` gen, plus native app override — `override <app>` seeds a
@@ -184,6 +195,24 @@ Key facts an agent should CHECK before starting:
   one-shot reboot to Windows) IS built. ✅
 
 ## Game modding (`powos mods`)
+- **Native v2 mod manager (primary path — see docs/MODDING-V2.md).** Per-game
+  install rules live in `config/mods/games.d/<game>.conf` (cyberpunk2077,
+  gtav, gtav-legacy, rdr2, skyrimse). Mods stage to `~/.local/state/powos/mods`
+  and deploy over the game dir via a rootless overlayfs mount; a Steam
+  `powos-game-shim %command%` ensures the overlay before launch. Verbs:
+  - `install <game> <mod-id…>` (numeric Nexus id / `nxm://` / local file) —
+    auto-installs required frameworks, then the mods. RAGE games (GTAV/RDR2)
+    auto-route through the ASI backend (`powos mods asi …`).
+  - `list <game>` · `enable/disable <game> <mod>` · `deploy/undeploy <game>` ·
+    `status [game]` · `verify <game>` · `snapshot`/`rollback <game>` ·
+    `adopt <game>` (absorb a manually-modded game dir) · `doctor`.
+  - **`export <game> [--out FILE]` / `import <file> [--game G] [--dry-run]
+    [--no-deploy]`** — share/back up a mod list. Export projects the manifest to
+    a machine-independent list (Nexus ids + priority + enabled, local paths/
+    hashes stripped); import re-installs via the normal path and replays the
+    enabled state. `--dry-run` prints the plan and installs nothing. ✅
+- Legacy escape hatches (Nexus Mods App GUI / Vortex / Wabbajack) remain for
+  FOMOD wizards and games without a `games.d` config — details below.
 - Install mod managers on-demand: `powos mods install nexus-mods-app`
   (AppImage, native Linux, Nexus's own — replaces old Vortex which was
   Windows-only). Also `install vortex` (documents the Proton wrapper path,

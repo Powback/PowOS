@@ -941,6 +941,21 @@ Mod-manager lifecycle:
                                     packages, sets WINEDLLOVERRIDES).
                                     Requires Steam to be closed.
 
+Native mod manager (v2 — per-game rules in games.d, overlayfs deploy):
+  powos mods install <game> <id…>  Install Nexus mod(s) by id (auto-installs
+                                    frameworks first). game: cyberpunk2077,
+                                    gtav, gtav-legacy, rdr2, skyrimse.
+  powos mods list <game>           List installed mods for a game
+  powos mods enable|disable <game> <mod-id>
+  powos mods deploy|undeploy <game>   Mount/unmount the mod overlay
+  powos mods status [game]         Show manifest + deploy state
+  powos mods adopt <game>          Absorb a manually-modded game dir
+  powos mods verify <game>         Headless launch → crash/freeze/booted verdict
+  powos mods snapshot|rollback <game>   Snapshot / restore a mod loadout
+  powos mods export <game> [--out FILE]   Save a portable mod list (share/backup)
+  powos mods import <file> [--game G] [--dry-run] [--no-deploy]
+                                    Re-install a shared list; --dry-run = plan only
+
 Nexus Mods App CLI (headless mod management — needs nexus-mods-app installed):
   powos mods auth [api-key]       Log in. With key = save it. Without = OAuth.
   powos mods logout               Log out.
