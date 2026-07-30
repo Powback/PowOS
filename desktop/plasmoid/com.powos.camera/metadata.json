@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PowOS"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Shows when the camera is in use — and names the application(s) using it",
+        "Icon": "camera-web",
+        "Id": "com.powos.camera",
+        "License": "MIT",
+        "Name": "PowOS Camera Indicator",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
