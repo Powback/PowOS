@@ -38,6 +38,11 @@ PlasmoidItem {
     property string rollbackVersion: ""
     property var    changelog: []          // [{hash, subject, type}]
 
+    // local source (/var/lib/powos/src) vs the running image — what
+    // `powos update self` would push into the live system
+    property var    srcDirty: []           // uncommitted edits: [{status, path}]
+    property var    srcAhead: []           // commits ahead of image: [{hash, subject, type}]
+
     property bool   checking: false
     property bool   ranOnce: false
     property string lastError: ""
@@ -45,6 +50,8 @@ PlasmoidItem {
     // remote check only meaningful when we got both digests
     readonly property bool checkOk: curDigest !== "" && remoteDigest !== ""
     readonly property bool updateAvailable: checkOk && curDigest !== remoteDigest
+    // local edits/commits not yet applied to the running system
+    readonly property bool localChanges: srcDirty.length > 0 || srcAhead.length > 0
 
     // one exec gathers everything; sentinels split the sections. The remote
     // digest is looked up inside the script (it already has the ref from bootc),
@@ -54,8 +61,14 @@ PlasmoidItem {
         "echo __BOOTC__; BJ=$(bootc status --json 2>/dev/null); printf '%s' \"$BJ\"; echo; " +
         "echo __REMOTE__; REF=$(printf '%s' \"$BJ\" | jq -r '.status.booted.image.image.image // empty' 2>/dev/null); " +
         "[ -n \"$REF\" ] && skopeo inspect --format '{{.Digest}}' \"docker://$REF\" 2>/dev/null; echo; " +
-        "echo __LOG__; git -C " + srcDir + " -c safe.directory=" + srcDir +
-        " log --pretty=format:'%h%x1f%s' -n 30 2>/dev/null"
+        // local source state: uncommitted edits + commits ahead of the commit
+        // the running image was built from (/usr/lib/powos/.powos-src-commit).
+        // GIT_OPTIONAL_LOCKS=0 keeps the read-only status from writing the index.
+        "G=\"env GIT_OPTIONAL_LOCKS=0 git -C " + srcDir + " -c safe.directory=" + srcDir + "\"; " +
+        "MK=$(cat /usr/lib/powos/.powos-src-commit 2>/dev/null || cat /var/lib/powos/.powos-src-commit 2>/dev/null); " +
+        "echo __DIRTY__; $G status --porcelain 2>/dev/null; " +
+        "echo __AHEAD__; [ -n \"$MK\" ] && $G log --pretty=format:'%h%x1f%s' \"${MK}..HEAD\" 2>/dev/null; echo; " +
+        "echo __LOG__; $G log --pretty=format:'%h%x1f%s' -n 30 2>/dev/null"
 
     function shellQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
 
@@ -110,21 +123,39 @@ PlasmoidItem {
         root.hasRollback = hasRb; root.rollbackVersion = rbv
 
         // remote digest
-        root.remoteDigest = section(out, "__REMOTE__", "__LOG__")
+        root.remoteDigest = section(out, "__REMOTE__", "__DIRTY__")
 
-        // changelog (hash <US> subject per line)
-        var log = section(out, "__LOG__", null)
-        var rows = []
-        if (log !== "") {
-            var lines = log.split("\n")
-            for (var i = 0; i < lines.length; i++) {
-                var parts = lines[i].split(String.fromCharCode(31))
-                if (parts.length < 2) continue
-                var subj = cleanSubject(parts[1])
-                rows.push({ hash: parts[0], subject: subj, type: commitType(subj) })
+        // local uncommitted edits (git porcelain: "XY path")
+        var dirty = section(out, "__DIRTY__", "__AHEAD__")
+        var dRows = []
+        if (dirty !== "") {
+            var dl = dirty.split("\n")
+            for (var k = 0; k < dl.length; k++) {
+                var ln = dl[k]
+                if (ln.trim() === "") continue
+                dRows.push({ status: ln.substring(0, 2).trim(), path: ln.substring(3) })
             }
         }
-        root.changelog = rows
+        root.srcDirty = dRows
+
+        // commits in the src tree ahead of the running image
+        root.srcAhead = parseCommitLines(section(out, "__AHEAD__", "__LOG__"))
+        // full changelog of what's shipped
+        root.changelog = parseCommitLines(section(out, "__LOG__", null))
+    }
+
+    // "hash <US> subject" lines → [{hash, subject, type}]
+    function parseCommitLines(blob) {
+        var rows = []
+        if (!blob || blob === "") return rows
+        var lines = blob.split("\n")
+        for (var i = 0; i < lines.length; i++) {
+            var parts = lines[i].split(String.fromCharCode(31))
+            if (parts.length < 2) continue
+            var subj = cleanSubject(parts[1])
+            rows.push({ hash: parts[0], subject: subj, type: commitType(subj) })
+        }
+        return rows
     }
 
     // colour for a conventional-commit type badge
@@ -153,6 +184,8 @@ PlasmoidItem {
     }
     function applyUpdate()  { runInKonsole("sudo powos upgrade") }
     function rollBack()     { runInKonsole("sudo bootc rollback && echo 'Rollback staged — reboot to switch versions.'") }
+    // push the bundled /var/lib/powos/src edits into the running system (transient)
+    function applyLocal()   { runInKonsole("sudo powos update self") }
 
     P5Support.DataSource {
         id: poller; engine: "executable"; connectedSources: []
@@ -205,9 +238,12 @@ PlasmoidItem {
             hoverEnabled: true
             onClicked: root.expanded = !root.expanded
         }
-        PC3.ToolTip.text: root.updateAvailable ? "PowOS update available"
-                        : root.checkOk ? "PowOS is up to date"
-                        : "PowOS Updates"
+        PC3.ToolTip.text: {
+            var base = root.updateAvailable ? "PowOS update available"
+                     : root.checkOk ? "PowOS is up to date"
+                     : "PowOS Updates"
+            return root.localChanges ? base + " · local changes to apply" : base
+        }
         PC3.ToolTip.visible: mouse.containsMouse
         PC3.ToolTip.delay: 600
     }
@@ -336,6 +372,83 @@ PlasmoidItem {
                     PC3.Button {
                         text: "Roll back"; icon.name: "edit-undo"
                         onClicked: root.rollBack()
+                    }
+                }
+            }
+
+            // ── local source changes: what `powos update self` would apply ──
+            Rectangle {
+                visible: root.localChanges
+                Layout.fillWidth: true
+                Layout.preferredHeight: localCol.implicitHeight + Kirigami.Units.smallSpacing * 2
+                radius: Kirigami.Units.smallSpacing
+                color: Qt.rgba(Kirigami.Theme.neutralTextColor.r, Kirigami.Theme.neutralTextColor.g,
+                               Kirigami.Theme.neutralTextColor.b, 0.15)
+
+                ColumnLayout {
+                    id: localCol
+                    anchors.fill: parent
+                    anchors.margins: Kirigami.Units.smallSpacing
+                    spacing: 2
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+                        Kirigami.Icon {
+                            source: "document-edit"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 0
+                            PC3.Label { text: "Local source changes"; font.bold: true; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                            PC3.Label {
+                                text: {
+                                    var p = []
+                                    if (root.srcAhead.length > 0) p.push(root.srcAhead.length + " commit" + (root.srcAhead.length > 1 ? "s" : "") + " to apply")
+                                    if (root.srcDirty.length > 0) p.push(root.srcDirty.length + " uncommitted edit" + (root.srcDirty.length > 1 ? "s" : ""))
+                                    return p.join("  ·  ")
+                                }
+                                opacity: 0.7; font: Kirigami.Theme.smallFont
+                                elide: Text.ElideRight; Layout.fillWidth: true
+                            }
+                        }
+                        PC3.Button {
+                            text: "Apply"
+                            icon.name: "system-run"
+                            onClicked: root.applyLocal()
+                            PC3.ToolTip.text: "sudo powos update self — apply to the running system (reverts on reboot)"
+                            PC3.ToolTip.visible: hovered
+                            PC3.ToolTip.delay: 600
+                        }
+                    }
+
+                    // a short preview: commits ahead, then uncommitted files
+                    Repeater {
+                        model: root.srcAhead.slice(0, 3)
+                        delegate: PC3.Label {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            text: "• " + modelData.subject
+                            opacity: 0.75; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            elide: Text.ElideRight
+                        }
+                    }
+                    Repeater {
+                        model: root.srcDirty.slice(0, 3)
+                        delegate: PC3.Label {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            text: (modelData.status || "M") + "  " + modelData.path
+                            opacity: 0.6; font.family: "monospace"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            elide: Text.ElideMiddle
+                        }
+                    }
+                    PC3.Label {
+                        visible: (root.srcAhead.length + root.srcDirty.length) > 6
+                        text: "…and more"
+                        opacity: 0.5; font: Kirigami.Theme.smallFont
                     }
                 }
             }
