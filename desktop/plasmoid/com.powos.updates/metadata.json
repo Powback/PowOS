@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PowOS"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Update availability, changelog and one-click upgrade / rollback for the PowOS bootc image",
+        "Icon": "system-software-update",
+        "Id": "com.powos.updates",
+        "License": "MIT",
+        "Name": "PowOS Updates",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
