@@ -382,6 +382,25 @@ on exit (keeps CUDA on the host otherwise).
 
 ### Games Storage (powos games) — shared NTFS partition, both OSes
 
+> **Three namespaces, one rule each — singular/plural is meaningful:**
+>
+> | Command | Scope | Owns |
+> |---|---|---|
+> | `powos game <name> <verb>` | ONE game | Facade (`lib/game.sh`) — dispatches to mods subsystems. Owns no state. |
+> | `powos games` | The COLLECTION | Bare = list your games. `games sync` = saves between devices. |
+> | `powos games storage <verb>` | The DISK | POWOS-GAMES partition: create/mount/resize/steam-setup (`lib/games.sh`). |
+> | `powos mods <verb> <game>` | Mod tooling | The actual implementation — Nexus/Vortex/Wabbajack/ASI/prefixes. |
+>
+> `powos game` is a **facade**: `powos game gtav mod install 123` and
+> `powos mods install gtav 123` do the same work. Two spellings, one
+> implementation — the facade must never grow its own state.
+>
+> New feature routing test: *partitions or mounts a disk?* → `games storage`.
+> *Puts files into a game or a prefix?* → `mods` (then expose it on the facade).
+>
+> The storage verbs still work bare (`powos games create --size 512`) for
+> existing scripts, but `storage` is the documented spelling.
+
 POWOS-GAMES is a first-class partition: NTFS, labeled `POWOS-GAMES`,
 deliberately visible to Windows. Every other PowOS partition is hidden from
 Windows via GPT type GUIDs (Linux-filesystem type = no drive letter = no
@@ -552,6 +571,50 @@ powos ai agents
 plus live `powos help` at call time via `AGENT_CONTEXT_CMD`. Edit that ONE doc
 when features change — do not re-describe features in individual agent prompts,
 which drift. Ships to `/etc/powos/ai/context/capabilities.md`.
+
+**`!cmd` — agent instructions are GENERATED from `--help`, not hand-written.**
+In any `AGENT_SYSTEM_PROMPT` (or `FLAVOR_PROMPT`), a line whose first character
+is `!` is replaced at load time by that command's stdout:
+
+```bash
+AGENT_SYSTEM_PROMPT="You are the PowOS modding agent.
+
+!powos mods help
+"
+```
+
+The agent then reads the REAL, CURRENT help text, so prompt and CLI cannot
+drift. **Corollary — this is the rule, not a nicety: if a command's `--help`
+can't explain a feature, that is a HELP BUG to fix at the source. Never restate
+command documentation as prose in an agent.conf.** (The hardcoded CLI listing
+this replaced in `modder/agent.conf` had already gone stale — it was missing
+`verify`, `bisect`, `deploy`, `adopt`, `snapshot` and `export`/`import`.)
+
+Division of labour:
+- `AGENT_SYSTEM_PROMPT` — judgment (routing, policy, failure diagnosis) plus
+  `!cmd` for the CLI contract.
+- `AGENT_CONTEXT_CMD` — live STATE only (what's installed, what's
+  authenticated, what's detected). Never duplicate help here; that pays for the
+  same tokens twice and drifts twice as fast.
+
+**Consequence: an undocumented command no longer exists.** Once instructions
+are generated from `--help`, a working-but-undocumented verb is invisible to
+the agent. `test/tier1/test-mods-core.sh` enforces the contract in BOTH
+directions — every help-documented verb must dispatch, and every verb an agent
+needs must appear in help. Both failure modes were real here: `snapshot` was
+documented but never wired, and `info` / `files` / `changelog` /
+`download-link` / `install-file` / `check` / `doctor` / `loadouts` all worked
+but were missing from help. When you add a verb, add it to help in the same
+commit or the agent will never use it.
+
+Mechanics: `_ai_expand_prompt_cmds` in `lib/ai/agent.sh`, run at the end of
+`_ai_load_agent` so it covers flavor prompts too. Each command is capped at
+`AI_PROMPT_CMD_TIMEOUT` (default 10s) so a wedged command can't hang agent
+startup; failures report inline (`[cmd — unavailable (exit N)]`) rather than
+silently yielding an empty section, which would give the agent amnesia about a
+whole subsystem. ANSI escapes are stripped (PowOS colorizes unconditionally). A
+`!` that isn't the first character of a line is ordinary text. Tested in
+`test/tier1/test-ai-agent.sh`.
 
 **Agent Config Structure:**
 ```
@@ -1241,6 +1304,32 @@ systemd-sysext status
 systemd-sysext refresh
 ```
 
+## Testing — nothing to remember
+
+`just test` (= `bash test/tier1/run-all.sh`) **auto-discovers** every
+`test/tier1/test-*.{sh,py}`. CI runs that same script. Drop a test file in and
+it runs. There is no list to update, anywhere.
+
+**Do not reintroduce a hand-written list of tests.** The old CI enumerated
+them, drifted, and ran 10 of 31 suites — which is how `powos sync` shipped
+silently running the cloud backup instead of the sync.
+
+Known-flaky/known-broken suites are quarantined **inside `run-all.sh`** with a
+written reason. They still run and report, they just don't gate. That list is
+debt, not a parking spot.
+
+Invariants that used to be prose rules here are now assertions — if you break
+one, a test says so, with the reason, at the point of breakage:
+
+| Invariant | Enforced by |
+|---|---|
+| No function defined in two libs sourced into the same shell | `test-lib-collisions.sh` |
+| Shared constants resolve the same in either source order | `test-lib-collisions.sh` |
+| Every verb `powos mods help` documents actually dispatches | `test-mods-core.sh` |
+| Every verb an agent needs is discoverable in help | `test-mods-core.sh` |
+| Every verb `powos game` documents resolves to a real function | `test-game-facade.sh` |
+| One canonical game id across manifest / harness / `powos games` | `test-mods-harness.sh` |
+
 ## CI & GitHub API etiquette (agents: READ THIS)
 
 The GitHub REST API allows **5,000 requests/hour shared across every agent and
@@ -1334,6 +1423,9 @@ firstboot self-completion failure.
 | Sync conflict detection | ✅ Implemented (HW validation pending) | Detection works; `--merge` does 3-way resolve: base manifest tracks last sync, changed-on-one-side taken, both-changed → newer mtime wins + `.powos-conflict-<machine>` copy; `sync resolve` lists conflicts |
 | Games resize | ✅ Implemented (HW validation pending) | Grow/shrink POWOS-GAMES via ntfsresize + parted; plan display + `--dry-run`; safety: refuses if mounted, shrink requires `--yes` + ntfsfix pre-check |
 | Cloud backup | ⚠️ Partial | git-based implementation exists (`lib/backup.sh`); not fully validated |
+| Game-centric CLI (`powos game <name>`) | ✅ Implemented | Facade in `lib/game.sh` over the mods subsystems; `powos games` now lists games, disk work moved to `powos games storage` (bare verbs still dispatch). 83 tests. |
+| Venice Unleashed (`powos mods vu`) | 🚧 Implemented, HW validation pending | BF3 community client + VEXT, under GE-Proton in its own prefix (`lib/mods/vu.sh`). Client install/activate/play, dedicated server, native `d3dcompiler_47` (needed on EVERY branch — Wine's stub renders a blank WebUI). 68 unit tests; end-to-end needs BF3 files + an EA account. |
+| Agent prompts from `--help` (`!cmd`) | ✅ Implemented | `_ai_expand_prompt_cmds` in `lib/ai/agent.sh` — a `!cmd` line in a system prompt is replaced by that command's output, so agent instructions can't drift from the CLI. Timeout-capped, ANSI-stripped, failures inline. |
 | Tier-2 VM testing | ✅ Implemented | QEMU-KVM boot-to-desktop: stages A (boot), B (SDDM), C (desktop), D (Anaconda install), R (ramboot regression). CI blocks publish on A-C. |
 
 ## Credentials

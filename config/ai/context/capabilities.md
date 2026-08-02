@@ -211,6 +211,27 @@ Key facts an agent should CHECK before starting:
     a machine-independent list (Nexus ids + priority + enabled, local paths/
     hashes stripped); import re-installs via the normal path and replays the
     enabled state. `--dry-run` prints the plan and installs nothing. ✅
+- **`powos game <name> <verb>`** — game-centric facade over everything below.
+  `powos game` / `powos games` lists your games; `powos game gtav status`,
+  `powos game cyberpunk mod install 1234`, `powos game bf3 play`. Names accept
+  any spelling the mod manager takes (canonical id, alias, Steam appid);
+  `bf3`/`vu` routes to Venice Unleashed. It dispatches to `powos mods <verb>
+  <game>`, which keeps working identically — prefer whichever reads better.
+  Namespace rule: `game` = one game · `games` = the collection ·
+  `games storage` = the POWOS-GAMES disk partition · `mods` = the tooling. ✅
+- **Venice Unleashed (`powos mods vu`)** — Battlefield 3 community client +
+  VEXT modding framework. A whole third-party CLIENT, not a Nexus mod, so it
+  never routes through NMA/Vortex. Runs under GE-Proton in its own prefix
+  (same mechanism as MO2 — no Bottles). `vu install [--gamepath DIR]` ·
+  `activate [--token T]` · `play` · `branch prod|dev` · `status` ·
+  `server init|start|status` · `uninstall [--purge]`.
+  **The one gotcha:** VU's WebUI needs a NATIVE `d3dcompiler_47` in the prefix
+  on EVERY branch, not just dev. Wine's built-in stub renders a blank/black UI
+  with no error, which reads as "VU is broken on Linux" — it isn't, and hasn't
+  been since 2022. `vu install` installs it; `vu status` reports if a prefix
+  reset lost it. Server ports: 7948/udp harmony, 25200/udp frostbite,
+  47200/tcp rcon. 🚧 Implemented, hardware validation pending (needs BF3 files
+  and an EA account that owns the game).
 - Legacy escape hatches (Nexus Mods App GUI / Vortex / Wabbajack) remain for
   FOMOD wizards and games without a `games.d` config — details below.
 - Install mod managers on-demand: `powos mods install nexus-mods-app`
