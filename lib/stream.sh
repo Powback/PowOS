@@ -2,7 +2,7 @@
 # stream.sh - PowStream status & control wrapper.
 #
 # The PowStream overlay ships user units that autostart at login:
-#   powstream-webrtc-server.service  (WebRTC server, default :8080)
+#   powstream-webrtc-server.service  (WebRTC server, default :8090, HTTPS)
 #   powlens-sidecar.service          (detector sidecar, :8791)
 #
 # `powos stream` is a thin status/control layer over those units —
@@ -21,7 +21,12 @@ POWOS_TAG=stream
 WEBRTC_UNIT="powstream-webrtc-server.service"
 SIDECAR_UNIT="powlens-sidecar.service"
 TOKEN_PATH="${HOME}/.config/powstream/portal-restore-token"
-WEBRTC_PORT=8080
+# The server's own default is 8090 and it serves HTTPS with a self-signed
+# cert unless started with --no-tls. This used to say 8080/http, which printed
+# a connect URL that simply did not answer. Override with --port in a unit
+# drop-in; there is NO POWSTREAM_PORT env var (nothing has ever read one).
+WEBRTC_PORT="${POWSTREAM_WEBRTC_PORT:-8090}"
+WEBRTC_SCHEME="${POWSTREAM_WEBRTC_SCHEME:-https}"
 
 _unit_state() {
     systemctl --user show -p ActiveState --value "$1" 2>/dev/null || echo "unknown"
@@ -63,7 +68,7 @@ stream_status() {
     if [[ "$ws_state" == "active" ]]; then
         local ip; ip=$(_lan_ip)
         echo ""
-        echo -e "  ${CYAN}Connect:${NC} http://${ip}:${WEBRTC_PORT}/"
+        echo -e "  ${CYAN}Connect:${NC} ${WEBRTC_SCHEME}://${ip}:${WEBRTC_PORT}/"
     fi
 
     # Quick hint if units not found (overlay not installed)
@@ -80,7 +85,7 @@ stream_start() {
     systemctl --user start "$SIDECAR_UNIT" 2>/dev/null || pwarn "Failed to start $SIDECAR_UNIT"
     if _unit_running "$WEBRTC_UNIT"; then
         local ip; ip=$(_lan_ip)
-        pok "PowStream running — connect at http://${ip}:${WEBRTC_PORT}/"
+        pok "PowStream running — connect at ${WEBRTC_SCHEME}://${ip}:${WEBRTC_PORT}/"
     else
         perr "WebRTC server failed to start. Check: powos stream logs"
     fi
@@ -99,7 +104,7 @@ stream_restart() {
     systemctl --user restart "$SIDECAR_UNIT" 2>/dev/null || pwarn "Failed to restart $SIDECAR_UNIT"
     if _unit_running "$WEBRTC_UNIT"; then
         local ip; ip=$(_lan_ip)
-        pok "PowStream restarted — connect at http://${ip}:${WEBRTC_PORT}/"
+        pok "PowStream restarted — connect at ${WEBRTC_SCHEME}://${ip}:${WEBRTC_PORT}/"
     else
         perr "WebRTC server failed to start. Check: powos stream logs"
     fi

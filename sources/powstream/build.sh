@@ -85,7 +85,9 @@ sed "s|@LIBRARY_PATH@|/usr/lib/powstream/libvklayer_powstream_capture.so|" \
     > "$MANIFEST_DIR/VkLayer_POWSTREAM_capture.json"
 
 # Global capture flag — layer stays dormant unless the PowStream server
-# sentinel (/tmp/depthcap/streaming.active) exists.
+# sentinel ($POWSTREAM_CAPTURE_DUMP_DIR/streaming.active) exists. The dump dir
+# defaults to /tmp/depthcap — which is what the ExecStartPre below creates —
+# but it IS a variable, so moving it moves the sentinel too.
 cat > "$ENV_DIR/powstream.conf" <<'CONF'
 POWSTREAM_CAPTURE=1
 CONF
@@ -109,10 +111,21 @@ ship_bin() { # <name>  (looks in target/release, then host-bins — the Docker
     return 1
 }
 
-# Browser client (ATW viewer + dashboards) — the server serves this via --web-root.
+# Browser clients. TWO separate trees, served from two separate flags:
+#   web/webrtc      -> --web-root  -> /      (dashboards, plain viewer)
+#   stream/static   -> --atw-root  -> /atw   (depth-aware ATW client, WebGL warp)
+# The ATW root used to be a RELATIVE path compiled into the server, which only
+# resolved in a dev checkout — under our unit the CWD is not the repo, so /atw
+# 404'd on every install. It is an explicit flag now, so we must ship the tree.
 if [[ -d "$SRC/web/webrtc" ]]; then
     mkdir -p "$OUTPUT_DIR/usr/lib/powstream/web"
     cp -r "$SRC/web/webrtc/." "$OUTPUT_DIR/usr/lib/powstream/web/"
+fi
+if [[ -d "$SRC/stream/static" ]]; then
+    mkdir -p "$OUTPUT_DIR/usr/lib/powstream/atw"
+    cp -r "$SRC/stream/static/." "$OUTPUT_DIR/usr/lib/powstream/atw/"
+else
+    echo "WARN: $SRC/stream/static missing — /atw (depth reprojection) will 404" >&2
 fi
 
 if ship_bin powstream-webrtc-server; then
@@ -134,10 +147,13 @@ ExecStartPre=/usr/bin/mkdir -p /tmp/depthcap
 #   and never self-heals. Default OFF for a stable stream; opt back in per-box
 #   with a drop-in (POWSTREAM_FIT_MODESET=1) if your compositor handles it.
 # TOUCH_ROT=none: with no modeset the output stays landscape, so no correction.
-# NO_AUTH=1 skips the login gate for trusted LAN use.
+# NO_AUTH=1 is LOAD-BEARING, not a convenience: /ws sits behind a session
+#   cookie and the ATW client has no login flow, so dropping this makes /atw
+#   fail with "HTTP Authentication failed". Only remove it if you also add a
+#   login path for that client.
 # All overridable via a drop-in.
 Environment=POWSTREAM_FPS=120 POWSTREAM_BITRATE=20000 POWSTREAM_FIT_MODESET=0 POWSTREAM_TOUCH_ROT=none POWSTREAM_NO_AUTH=1
-ExecStart=/usr/lib/powstream/bin/powstream-webrtc-server --web-root /usr/lib/powstream/web --fps ${POWSTREAM_FPS} --bitrate ${POWSTREAM_BITRATE}
+ExecStart=/usr/lib/powstream/bin/powstream-webrtc-server --web-root /usr/lib/powstream/web --atw-root /usr/lib/powstream/atw --fps ${POWSTREAM_FPS} --bitrate ${POWSTREAM_BITRATE}
 Restart=on-failure
 RestartSec=3
 
