@@ -74,9 +74,12 @@ Install to disk (dual-boot Windows) — the primary path:
   install-system --alongside   Dual-boot: install into free space, keep Windows
   install-system --whole-disk  Erase target disk (requires confirmation)
   install-system --dry-run     Show the plan, change nothing
-  games status        Shared NTFS games partition (with Windows) — state
-  games create --size N        Create POWOS-GAMES (plan + confirm + --dry-run)
-  games steam-setup   Put a Steam library on the shared partition
+  games               List your games (mods + deploy state)
+  game <name>         Everything PowOS can do with ONE game
+  game <name> mod install <id…>   Install mods into that game
+  games storage status         Shared NTFS games partition (with Windows)
+  games storage create --size N   Create POWOS-GAMES (plan + confirm + --dry-run)
+  games storage steam-setup    Put a Steam library on the shared partition
   games sync status   Sync saves/mods between devices (PC ↔ Steam Deck)
   games sync push --to DEVICE [--what saves|mods|all]
   games sync pull --from DEVICE
@@ -3088,6 +3091,13 @@ case "${1:-}" in
         source "$POWOS_LIB/games.sh"
         cmd_games "$@"
         ;;
+    # Singular: everything PowOS can do with ONE game. A facade over the mods
+    # subsystems — `powos mods <verb> <game>` remains the equivalent spelling.
+    game)
+        shift
+        source "$POWOS_LIB/game.sh"
+        cmd_game "$@"
+        ;;
     zones)
         shift
         source "$POWOS_LIB/zones.sh"
@@ -3182,7 +3192,9 @@ case "${1:-}" in
                 if [[ $# -ge 1 ]] && mods_normalize_name "${1:-}" >/dev/null 2>&1; then
                     mods_install_cmd "$@"
                 elif [[ $# -ge 2 ]] && type -t mods_install_mod &>/dev/null; then
-                    local _game="$1"; shift
+                    # No `local` — this case runs at top-level script scope,
+                    # where `local` is a fatal error that still exits 0.
+                    _game="$1"; shift
                     mods_load_game_conf "$_game" 2>/dev/null && {
                         # Has a v2 game config → native install path
                         if ! mods_check_frameworks "$_game" 2>/dev/null; then
@@ -3202,8 +3214,15 @@ case "${1:-}" in
                 ;;
             remove|rm|uninstall)
                 shift
-                if [[ $# -ge 2 ]] && type -t mods_remove_mod &>/dev/null; then
-                    local _game="$1"; shift
+                # Mirror the `install` precedence: a known manager/tool name
+                # means "uninstall that tool" (and its own flags, e.g.
+                # `uninstall venice-unleashed --purge`), not "remove mod
+                # '--purge' from game 'venice-unleashed'".
+                if [[ $# -ge 1 ]] && mods_normalize_name "${1:-}" >/dev/null 2>&1; then
+                    mods_uninstall_cmd "$@"
+                elif [[ $# -ge 2 ]] && type -t mods_remove_mod &>/dev/null; then
+                    # No `local` — top-level script scope (see install above).
+                    _game="$1"; shift
                     for _mod in "$@"; do
                         mods_remove_mod "$_game" "$_mod"
                     done
@@ -3222,14 +3241,26 @@ case "${1:-}" in
                 ;;
             enable)
                 shift
-                local _game="${1:?Usage: powos mods enable <game> <mod-id>}"; shift
+                # No `local` — top-level script scope (see install above).
+                _game="${1:?Usage: powos mods enable <game> <mod-id>}"; shift
                 for _mod in "$@"; do mods_enable_mod "$_game" "$_mod"; done
                 ;;
             disable)
                 shift
-                local _game="${1:?Usage: powos mods disable <game> <mod-id>}"; shift
+                _game="${1:?Usage: powos mods disable <game> <mod-id>}"; shift
                 for _mod in "$@"; do mods_disable_mod "$_game" "$_mod"; done
                 ;;
+            # `powos mods help` documents these, so they must dispatch.
+            snapshot)
+                shift
+                if [[ "${1:-}" == "list" ]]; then
+                    shift; mods_snapshot_list "$@"
+                else
+                    mods_snapshot_create "${1:?Usage: powos mods snapshot <game> [label]}" \
+                                         "${2:-manual}"
+                fi
+                ;;
+            snapshots)                          shift; mods_snapshot_list "$@" ;;
             deploy)                             shift; mods_deploy_cmd "$@" ;;
             undeploy)                           shift; mods_undeploy_cmd "$@" ;;
             verify|test-boot)
@@ -3304,6 +3335,13 @@ case "${1:-}" in
                 shift
                 source "$POWOS_LIB/mods/modlist.sh"
                 modlist_dispatch "$@"
+                ;;
+            vu|venice|venice-unleashed|bf3)
+                shift
+                # modlist.sh first: vu reuses its GE-Proton installer.
+                source "$POWOS_LIB/mods/modlist.sh"
+                source "$POWOS_LIB/mods/vu.sh"
+                cmd_mods_vu "$@"
                 ;;
             help|--help|-h|"")                  mods_help ;;
             *)                                  perr "Unknown: powos mods $1"; mods_help; exit 1 ;;
