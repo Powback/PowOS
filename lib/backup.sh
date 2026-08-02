@@ -17,10 +17,13 @@ set -euo pipefail
 
 POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
 POWOS_STATE_DIR="${POWOS_ROOT}/git"
-# Must match lib/setup.sh — it WRITES here (nexus.key etc.) and this file
-# BACKS UP what's here. Ignoring XDG_CONFIG_HOME meant that on any box that
-# sets it, setup wrote one place and backup archived another.
-POWOS_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/powos"
+# Must match lib/setup.sh — setup WRITES here (nexus.key etc.) and this file
+# ARCHIVES it. Ignoring XDG_CONFIG_HOME meant that on any box that sets it,
+# setup wrote one directory and backup archived another.
+# Parameterized on PURPOSE: a bare assignment would clobber a caller's value
+# (test harnesses export it to sandbox themselves) and would override whichever
+# lib loaded first — the exact rule test-lib-collisions.sh enforces.
+POWOS_CONFIG_DIR="${POWOS_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/powos}"
 SYNC_CONFIG="${POWOS_CONFIG_DIR}/sync.conf"
 
 # Colors

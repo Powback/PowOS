@@ -60,7 +60,10 @@ setup() {
     # Fake USB mount for RAM ↔ USB sync tests (sync.sh reads this at source time)
     export POWOS_USB_MOUNT="$TEST_DIR/usb"
     mkdir -p "$POWOS_USB_MOUNT"
-    mkdir -p "$HOME/.config/powos"
+    # Use the dir this sandbox EXPORTED, not a hardcoded $HOME path. backup.sh
+    # now honours POWOS_CONFIG_DIR (it used to bare-assign over it), so a
+    # hardcoded assertion silently tested the wrong directory.
+    mkdir -p "$POWOS_CONFIG_DIR"
 
     # Source backup script (for git operations)
     source "$TEST_DIR/lib/backup.sh" 2>/dev/null || true
@@ -355,7 +358,7 @@ test_sync_setup() {
         ((TESTS_FAILED++)) || true
     fi
 
-    assert_file_exists "$HOME/.config/powos/sync.conf" "Sync config created"
+    assert_file_exists "$POWOS_CONFIG_DIR/sync.conf" "Sync config created"
 }
 
 test_has_remote() {
@@ -959,7 +962,7 @@ test_load_sync_config() {
     echo "Test: Load sync configuration"
 
     # Create test config
-    cat > "$HOME/.config/powos/sync.conf" << 'EOF'
+    cat > "$POWOS_CONFIG_DIR/sync.conf" << 'EOF'
 POWOS_SYNC_REMOTE="git@test:repo.git"
 POWOS_SYNC_STRATEGY="machine"
 POWOS_SYNC_AUTO_PUSH=true

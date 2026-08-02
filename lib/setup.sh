@@ -18,7 +18,9 @@ source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh" 2
 }
 POWOS_TAG=setup
 
-POWOS_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/powos"
+# Must match lib/backup.sh, which archives what this file writes. Parameterized
+# so a caller (or a test sandbox) can point it elsewhere; see backup.sh.
+POWOS_CONFIG_DIR="${POWOS_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/powos}"
 
 # ─── GitHub auth ─────────────────────────────────────────────────────────
 # Wraps gh's device-code flow. gh handles the token storage + configures a

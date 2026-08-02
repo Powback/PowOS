@@ -99,10 +99,15 @@ echo "-- shared constants resolve consistently --"
 # wins — which is what the bugs were about anyway. Order is varied deliberately:
 # a bare assignment only shows up as a bug when it loads second.
 
+# Hermetic: the ambient environment must not decide the answer. This helper
+# used to inherit XDG_CONFIG_HOME, so it passed on a dev box (unset) and failed
+# on a CI runner (set) — the same non-hermeticity this suite exists to catch.
+# `env -u` strips the XDG vars; pass extra assignments via _RESOLVE_ENV.
 _resolves() {  # name expected lib...
     local name="$1" expect="$2"; shift 2
     local got
-    got="$(HOME=/tmp bash -c '
+    got="$(env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u POWOS_CONFIG_DIR \
+               -u POWOS_NEXUS_UA HOME=/tmp ${_RESOLVE_ENV:-} bash -c '
         for f in "$@"; do source "$f" >/dev/null 2>&1; done
         printf "%s" "${'"$name"':-}"' _ "$@" 2>/dev/null)"
     [[ "$got" == "$expect" ]] \
@@ -116,9 +121,24 @@ _resolves POWOS_NEXUS_UA "powos-mods/2.0" lib/mods/install.sh lib/mods/nexus-api
 _resolves POWOS_NEXUS_UA "powos-mods/2.0" lib/mods/nexus-api.sh lib/mods/install.sh
 
 # setup.sh WRITES config here, backup.sh ARCHIVES it — they must agree in
-# either order, including whether XDG_CONFIG_HOME is honoured.
+# either order. Both cases matter: the original bug was backup.sh hardcoding
+# $HOME/.config while setup.sh honoured XDG_CONFIG_HOME, so a box that set XDG
+# had setup writing one directory and backup archiving another.
 _resolves POWOS_CONFIG_DIR "/tmp/.config/powos" lib/setup.sh lib/backup.sh
 _resolves POWOS_CONFIG_DIR "/tmp/.config/powos" lib/backup.sh lib/setup.sh
+
+# ...and with XDG_CONFIG_HOME set, which is where they used to diverge.
+_RESOLVE_ENV="XDG_CONFIG_HOME=/tmp/xdgtest" \
+    _resolves POWOS_CONFIG_DIR "/tmp/xdgtest/powos" lib/setup.sh lib/backup.sh
+_RESOLVE_ENV="XDG_CONFIG_HOME=/tmp/xdgtest" \
+    _resolves POWOS_CONFIG_DIR "/tmp/xdgtest/powos" lib/backup.sh lib/setup.sh
+
+# A caller's explicit value must win over both — test harnesses rely on it to
+# sandbox themselves, and a bare assignment in either lib would clobber it.
+_RESOLVE_ENV="POWOS_CONFIG_DIR=/tmp/caller-wins" \
+    _resolves POWOS_CONFIG_DIR "/tmp/caller-wins" lib/setup.sh lib/backup.sh
+_RESOLVE_ENV="POWOS_CONFIG_DIR=/tmp/caller-wins" \
+    _resolves POWOS_CONFIG_DIR "/tmp/caller-wins" lib/backup.sh lib/setup.sh
 
 echo
 echo "-- named regressions --"
