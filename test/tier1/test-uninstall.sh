@@ -3,7 +3,13 @@
 # arg handling, dry-run, not-found exit). Backend probes that need podman/
 # flatpak/brew are stubbed; real removal is I/O and needs a VM.
 
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 
 LIB="/usr/lib/powos/uninstall.sh"
 [[ -f "$LIB" ]] || LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/uninstall.sh"
@@ -18,11 +24,11 @@ echo "== flatpak app-id matching (stubbed flatpak) =="
 flatpak() {  # stub: two installed apps
     printf 'md.obsidian.Obsidian\ncom.valvesoftware.Steam\n'
 }
-r=$(probe_flatpak obsidian); [[ "$r" == "md.obsidian.Obsidian" ]] && ok "matches by last id component" || bad "obsidian" "$r"
-r=$(probe_flatpak OBSIDIAN); [[ "$r" == "md.obsidian.Obsidian" ]] && ok "case-insensitive" || bad "case" "$r"
-r=$(probe_flatpak steam); [[ "$r" == "com.valvesoftware.Steam" ]] && ok "second app matches" || bad "steam" "$r"
-r=$(probe_flatpak valvesoftware); [[ -z "$r" ]] && ok "middle component does NOT match" || bad "middle" "$r"
-r=$(probe_flatpak gimp); [[ -z "$r" ]] && ok "absent app → empty" || bad "absent" "$r"
+r=$(probe_flatpak_installed obsidian); [[ "$r" == "md.obsidian.Obsidian" ]] && ok "matches by last id component" || bad "obsidian" "$r"
+r=$(probe_flatpak_installed OBSIDIAN); [[ "$r" == "md.obsidian.Obsidian" ]] && ok "case-insensitive" || bad "case" "$r"
+r=$(probe_flatpak_installed steam); [[ "$r" == "com.valvesoftware.Steam" ]] && ok "second app matches" || bad "steam" "$r"
+r=$(probe_flatpak_installed valvesoftware); [[ -z "$r" ]] && ok "middle component does NOT match" || bad "middle" "$r"
+r=$(probe_flatpak_installed gimp); [[ -z "$r" ]] && ok "absent app → empty" || bad "absent" "$r"
 unset -f flatpak
 
 echo "== host-layer probe (stubbed rpm-ostree json) =="

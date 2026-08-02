@@ -29,7 +29,7 @@ SANDBOX_BOX="${POWOS_SANDBOX_BOX:-powos-sandbox}"
 # ── probes: print an identifier when found, nothing otherwise ─────
 
 # Flatpak app whose id's last component matches (md.obsidian.Obsidian ← obsidian)
-probe_flatpak() {
+probe_flatpak_installed() {
     command -v flatpak >/dev/null 2>&1 || return 0
     flatpak list --app --columns=application 2>/dev/null |
         awk -v p="$(echo "$1" | tr '[:upper:]' '[:lower:]')" \
@@ -45,7 +45,7 @@ probe_sandbox() {
     fi
 }
 
-probe_brew() {
+probe_brew_installed() {
     command -v brew >/dev/null 2>&1 || return 0
     brew list --formula 2>/dev/null | grep -Fx "$1"
 }
@@ -129,9 +129,9 @@ cmd_remove() {
         found=false
 
         local fp_id sb_kind brew_hit host_hit
-        fp_id=$(probe_flatpak "$thing")
+        fp_id=$(probe_flatpak_installed "$thing")
         sb_kind=$(probe_sandbox "$thing")
-        brew_hit=$(probe_brew "$thing")
+        brew_hit=$(probe_brew_installed "$thing")
         host_hit=$(probe_host_layer "$thing")
 
         [[ -n "$fp_id"    ]] && { found=true; ulog "found: flatpak ($fp_id)"; }

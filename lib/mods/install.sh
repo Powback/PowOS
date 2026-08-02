@@ -31,13 +31,14 @@ MODS_ICONS_DIR="${MODS_ICONS_DIR:-$HOME/.local/share/icons/hicolor/512x512/apps}
 
 # ─── Tool registry ────────────────────────────────────────────────────────
 
-mods_known_tools() { echo "nexus-mods-app vortex mod-organizer-2"; }
+mods_known_tools() { echo "nexus-mods-app vortex mod-organizer-2 venice-unleashed"; }
 
 mods_binary_of() {
     case "$1" in
         nexus-mods-app|nexus|nma)  echo "$MODS_APPS_DIR/NexusModsApp.AppImage" ;;
         vortex)                    echo "$HOME/.local/bin/vortex" ;;
         mod-organizer-2)           echo "$HOME/.local/bin/mod-organizer-2" ;;
+        venice-unleashed)          echo "$HOME/.local/bin/venice-unleashed" ;;
         *) return 1 ;;
     esac
 }
@@ -47,6 +48,7 @@ mods_normalize_name() {
         nexus|nma|nexus-mods-app|"nexus mods app")  echo "nexus-mods-app" ;;
         vortex|vortex-mod-manager)                  echo "vortex" ;;
         mo2|mod-organizer|mod-organizer-2|"mod organizer 2")  echo "mod-organizer-2" ;;
+        vu|venice|venice-unleashed|"venice unleashed")  echo "venice-unleashed" ;;
         *) return 1 ;;
     esac
 }
@@ -344,8 +346,13 @@ EOF
 # installing — read description + file list + categories + version → pick
 # the right main file → install.
 
+# Owned by mods/nexus-api.sh — duplicated here only so this file still works
+# when sourced alone. Both MUST stay parameterized with the SAME default:
+# bin/powos sources this file first, so a bare assignment here silently
+# overrides nexus-api.sh (which is how every v2 API call ended up sending the
+# stale "powos-mods/0.1" user agent).
 POWOS_NEXUS_KEY_FILE="${POWOS_NEXUS_KEY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/powos/nexus.key}"
-POWOS_NEXUS_UA="powos-mods/0.1"
+POWOS_NEXUS_UA="${POWOS_NEXUS_UA:-powos-mods/2.0}"
 
 mods_nexus_key() {
     [[ -f "$POWOS_NEXUS_KEY_FILE" ]] || {
@@ -513,9 +520,13 @@ mods_nexus_slug_to_game_name() {
 # powos mods deploy <game>
 #   Sync the game's loadout to disk — deploy stage of the pipeline.
 #   Handy on its own after all downloads + loadout-installs are done.
-mods_deploy_cmd() {
+# NMA loadout deploy (legacy backend). Deliberately NOT named mods_deploy_cmd:
+# mods/deploy.sh owns that name for the v2 overlayfs mount, and bin/powos
+# sources deploy.sh after this file — so naming both the same made `powos mods
+# deploy` depend on source order between two totally different implementations.
+mods_nma_deploy_cmd() {
     POWOS_MODS_LAST_VERB="deploy"
-    local game="${1:?Usage: powos mods deploy <game>}"
+    local game="${1:?Usage: powos mods legacy nma deploy <game>}"
     local slug; slug="$(mods_nexus_slug_of "$game")"
     local lid; lid="$(mods_loadout_id_for "$slug")"
     [[ -z "$lid" ]] && { perr "No loadout found for game $game (slug: $slug)."; return 1; }
@@ -843,6 +854,12 @@ mods_install_cmd() {
         mod-organizer-2)
             source "$(dirname "${BASH_SOURCE[0]}")/modlist.sh"
             mo2_install ;;
+        venice-unleashed)
+            # modlist.sh first — vu reuses its GE-Proton installer.
+            source "$(dirname "${BASH_SOURCE[0]}")/modlist.sh"
+            source "$(dirname "${BASH_SOURCE[0]}")/vu.sh"
+            shift
+            vu_install_cmd "$@" ;;
     esac
 }
 
@@ -867,6 +884,16 @@ mods_uninstall_cmd() {
     if [[ "$canonical" == "mod-organizer-2" ]]; then
         source "$(dirname "${BASH_SOURCE[0]}")/modlist.sh"
         mo2_uninstall
+        return $?
+    fi
+
+    # VU likewise owns a client dir, prefix, instance dir and config — and its
+    # uninstall deliberately KEEPS the instance dir (server.key, mods) unless
+    # --purge, which the generic path can't express.
+    if [[ "$canonical" == "venice-unleashed" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/vu.sh"
+        shift
+        vu_uninstall_cmd "$@"
         return $?
     fi
 
@@ -942,7 +969,9 @@ Mod-manager lifecycle:
                                     Requires Steam to be closed.
 
 Native mod manager (v2 — per-game rules in games.d, overlayfs deploy):
-  powos mods install <game> <id…>  Install Nexus mod(s) by id (auto-installs
+  powos mods install <game> <id…>  Install Nexus mod(s) by id, alias: bulk.
+                                    Reads ids from stdin if none given.
+                                    (auto-installs
                                     frameworks first). game: cyberpunk2077,
                                     gtav, gtav-legacy, rdr2, skyrimse.
   powos mods list <game>           List installed mods for a game
@@ -955,6 +984,30 @@ Native mod manager (v2 — per-game rules in games.d, overlayfs deploy):
   powos mods export <game> [--out FILE]   Save a portable mod list (share/backup)
   powos mods import <file> [--game G] [--dry-run] [--no-deploy]
                                     Re-install a shared list; --dry-run = plan only
+  powos mods doctor <game> [--ai]  Diagnose a broken mod setup
+  powos mods snapshots <game>      List snapshots (= snapshot list)
+
+Nexus REST API — inspect before you install (needs a Nexus API key:
+'powos setup nexus'). This is how you pick the RIGHT file variant rather
+than guessing: read the mod, read its file list, then install by file-id.
+  powos mods info <game> <mod-id>  Mod summary JSON: name/description/
+                                     version/author.
+  powos mods files <game> <mod-id> File list JSON with categories:
+                                     1=MAIN 2=UPDATE 3=OPTIONAL 4=OLD 5=MISC.
+                                     Use it to choose HD vs SD, ESL vs ESM,
+                                     archive vs REDmod, etc.
+  powos mods changelog <game> <mod-id>
+                                   Per-version changelog.
+  powos mods download-link <game> <mod-id> <file-id>
+                                   Signed nxm:// URL (Nexus Premium only).
+  powos mods install-file <game> <mod-id> <file-id>
+                                   Install ONE specific file, when the
+                                     auto-picked MAIN isn't the right variant.
+  powos mods check <game> <mod-id…>
+                                   Pre-flight: reads each mod's README to find
+                                     missing DEPENDENCIES and flag CONFLICTS.
+                                     'install' runs this automatically.
+                                     Aliases: analyze, preflight.
 
 Nexus Mods App CLI (headless mod management — needs nexus-mods-app installed):
   powos mods auth [api-key]       Log in. With key = save it. Without = OAuth.
@@ -972,6 +1025,7 @@ Nexus Mods App CLI (headless mod management — needs nexus-mods-app installed):
   powos mods tools <game>         List tools registered for a game.
   powos mods run-tool <game> <tool>
                                   Run a game tool via NMA.
+  powos mods loadouts             List NMA loadouts.
   powos mods raw <args...>        Forward raw args to \`NexusModsApp as-main\`
                                   for any subcommand PowOS hasn't wrapped.
 
@@ -1008,6 +1062,17 @@ ASI-loader stack for RAGE games (GTA V / RDR2 — off-Nexus loaders + .asi plugi
   powos mods asi list <game>              Show the managed ASI stack
   powos mods asi check <game>             Health/staleness check (reads plugin logs)
   powos mods asi help                     Full ASI verb list
+
+Venice Unleashed (Battlefield 3 community client + VEXT modding framework):
+  powos mods vu install [--gamepath DIR]  Client + GE-Proton + native
+                                            d3dcompiler_47 + launcher
+  powos mods vu activate [--token TOKEN]  Activate BF3 (EA app, or headless)
+  powos mods vu play                      Launch the client
+  powos mods vu server init|start|status  Dedicated server
+  powos mods vu status                    Client/gamepath/runtime/d3dcompiler
+  powos mods vu help                      Full VU verb list
+  ${DIM}VU's WebUI needs a NATIVE d3dcompiler_47 on every branch — Wine's stub
+  renders a blank UI with no error. 'vu install' handles it.${NC}
 
 Known tools:
   ${BOLD}nexus-mods-app${NC}   Nexus's native-Linux cross-platform manager

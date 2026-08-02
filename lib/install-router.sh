@@ -33,7 +33,7 @@ SANDBOX_HOME="${POWOS_SANDBOX_HOME:-$HOME/.local/share/powos/sandbox-home}"
 SANDBOX_IMAGE="${POWOS_SANDBOX_IMAGE:-registry.fedoraproject.org/fedora:latest}"
 
 # ── probes (read-only, best-effort) ──────────────────────────────
-probe_flatpak() {
+probe_flatpak_available() {
     command -v flatpak >/dev/null || return 1
     local out
     # Prefer real applications: exact id-segment match first, then exact name
@@ -49,7 +49,7 @@ probe_flatpak() {
     [[ -n "$out" ]] && echo "$out"
 }
 probe_rpm()  { command -v dnf5 >/dev/null && timeout 10 dnf5 -q repoquery --queryformat '%{name}\n' "$1" 2>/dev/null | grep -qx "$1"; }
-probe_brew() { command -v brew >/dev/null && brew info --formula "$1" &>/dev/null; }
+probe_brew_available() { command -v brew >/dev/null && brew info --formula "$1" &>/dev/null; }
 
 # ── sandbox container (separate home = your files are invisible to it) ──
 sandbox_ensure() {
@@ -113,7 +113,7 @@ route_one() {
         plog "$pkg → ${BOLD}$forced${NC} ${DIM}(forced with -m)${NC}"
         [[ "$dry" == "true" ]] && return 0
         case "$forced" in
-            flatpak)   do_flatpak "$(probe_flatpak "$pkg" || echo "$pkg")" ;;
+            flatpak)   do_flatpak "$(probe_flatpak_available "$pkg" || echo "$pkg")" ;;
             sandbox)   do_sandbox "$pkg" ;;
             brew)      do_brew "$pkg" ;;
             pip)       do_pip "$pkg" ;;
@@ -124,9 +124,9 @@ route_one() {
     fi
 
     plog "Searching for '${BOLD}$pkg${NC}' across package sources…"
-    fid="$(probe_flatpak "$pkg")" || true
+    fid="$(probe_flatpak_available "$pkg")" || true
     probe_rpm "$pkg"  && has_rpm=true
-    probe_brew "$pkg" && has_brew=true
+    probe_brew_available "$pkg" && has_brew=true
 
     # Build the found-list in containment order (most contained first).
     local -a names=() details=()

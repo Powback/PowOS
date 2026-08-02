@@ -17,7 +17,10 @@ set -euo pipefail
 
 POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
 POWOS_STATE_DIR="${POWOS_ROOT}/git"
-POWOS_CONFIG_DIR="${HOME}/.config/powos"
+# Must match lib/setup.sh — it WRITES here (nexus.key etc.) and this file
+# BACKS UP what's here. Ignoring XDG_CONFIG_HOME meant that on any box that
+# sets it, setup wrote one place and backup archived another.
+POWOS_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/powos"
 SYNC_CONFIG="${POWOS_CONFIG_DIR}/sync.conf"
 
 # Colors
@@ -1164,12 +1167,16 @@ cmd_backup() {
     esac
 }
 
-# Legacy alias for backward compatibility
-cmd_sync() {
-    cmd_backup "$@"
-}
+# NO `cmd_sync` alias here — it used to exist "for backward compatibility" and
+# was actively breaking the product. bin/powos sources sync.sh and THEN
+# backup.sh, so a cmd_sync defined in this file silently overwrote the real
+# RAM↔USB sync: `powos sync status` ran the cloud git backup (and initialised a
+# git repo) instead of showing sync conflicts. Two subsystems, one function
+# name, last-sourced wins.
+#
+# `powos backup` is this file's entry point. `powos sync` belongs to lib/sync.sh.
 
 # Allow sourcing or direct execution
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    cmd_sync "$@"
+    cmd_backup "$@"
 fi
