@@ -29,8 +29,18 @@ if [[ -d "${LOCAL_CHECKOUT}/layers/vk-capture" ]]; then
 elif [[ -d "$SCRIPT_DIR/upstream/layers/vk-capture" ]]; then
     SRC="$SCRIPT_DIR/upstream"
 else
+    # PowStream is a PRIVATE repo with no published releases, so this clone
+    # only succeeds for someone with access. Fail with that fact instead of a
+    # raw git auth error: `powos overlay list` advertises this overlay to
+    # everyone, so a stranger will land here and deserves to know why.
     echo "Cloning $UPSTREAM_URL..."
-    git clone --depth 1 "$UPSTREAM_URL" "$SCRIPT_DIR/upstream"
+    if ! git clone --depth 1 "$UPSTREAM_URL" "$SCRIPT_DIR/upstream"; then
+        echo "ERROR: could not clone $UPSTREAM_URL" >&2
+        echo "  PowStream is a private repository — building this overlay needs" >&2
+        echo "  access to it. If you already have a checkout, put it at" >&2
+        echo "  ${LOCAL_CHECKOUT} and re-run; that path is preferred over cloning." >&2
+        exit 1
+    fi
     SRC="$SCRIPT_DIR/upstream"
 fi
 echo "PowStream source: $SRC"

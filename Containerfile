@@ -129,8 +129,14 @@ RUN useradd -m -d /home/powos -G wheel -u 1000 powos 2>/dev/null || true && \
 # provider, podman-docker ships /usr/bin/docker→podman plus the `nodocker` file
 # that silences the emulation notice. No Docker daemon, fully rootless.
 #
-# PowStream runtime deps (first-party streaming — must not fail on a fresh
-# install). Bazzite already ships gstreamer1, -plugins-base, -plugins-good,
+# PowStream runtime dep. NOTE: PowStream ITSELF is deliberately NOT in this
+# image — it's a private repo, so it ships as a sysext overlay
+# (sources/powstream/) built on the target with `powos overlay build
+# powstream`. What's baked here is only its one missing GStreamer plugin, so
+# that building the overlay later doesn't ALSO require layering an RPM onto an
+# atomic OS. `powos stream` tells you if the overlay isn't installed yet.
+#
+# Bazzite already ships gstreamer1, -plugins-base, -plugins-good,
 # -plugins-bad-free (webrtcbin/dtls/srtp), -plugin-pipewire (pipewiresrc),
 # and nvcodec (nvh264enc) via the NVIDIA image. The ONE package it omits is
 # libnice-gstreamer1 — the GStreamer plugin for ICE (nicesink/nicesrc), which
