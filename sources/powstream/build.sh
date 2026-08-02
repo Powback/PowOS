@@ -181,6 +181,35 @@ UNIT
     ln -sfn ../powlens-sidecar.service "$WANTS_DIR/powlens-sidecar.service"
 fi
 
+# ── Artifact-skew guard ─────────────────────────────────────────────
+# This script REUSES any pre-existing target/release or host-bins artifact
+# rather than forcing a rebuild — deliberate, because the dev image builds the
+# binaries and they get bind-mounted in. The hazard is shipping a layer .so and
+# a server from DIFFERENT commits: PowStream's T1 depth protocol gained a
+# session id, and the new relay drops v1 datagrams with a single log line, so a
+# stale layer against a fresh server means depth silently absent.
+#
+# Cheap proxy: every shipped artifact should be newer than the newest source
+# file. Warn rather than fail — prebuilt binaries are a supported path.
+_newest_src="$(find "$SRC/layers" "$SRC/bins" "$SRC/crates" "$SRC/tools" \
+                 -name '*.rs' -newer "$SO" -print -quit 2>/dev/null || true)"
+if [[ -n "$_newest_src" ]]; then
+    echo "WARN: source is NEWER than the shipped layer .so — artifacts may be stale." >&2
+    echo "      e.g. $_newest_src" >&2
+    echo "      A layer/server commit mismatch shows up as depth silently missing" >&2
+    echo "      ('dropping T1 v1 datagrams' in the server log). Rebuild with:" >&2
+    echo "      cargo build --release -p powstream-vklayer-capture \\" >&2
+    echo "        -p powstream-webrtc-server -p powlens-detector-sidecar" >&2
+fi
+
+# Stamp what this overlay was built from, so a running system can be traced
+# back to a commit without guessing.
+if _stamp="$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null)"; then
+    printf 'powstream_commit=%s\nbuilt=%s\n' \
+        "$_stamp" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "$OUTPUT_DIR/usr/lib/powstream/BUILD-INFO"
+fi
+
 echo "✅ Built: powstream overlay"
 echo "   /usr/lib/powstream/libvklayer_powstream_capture.so"
 echo "   /usr/share/vulkan/implicit_layer.d/VkLayer_POWSTREAM_capture.json"
