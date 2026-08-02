@@ -12,8 +12,13 @@
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-LIB="/usr/lib/powos/menu.sh"
-[[ -f "$LIB" ]] || LIB="$REPO/lib/menu.sh"
+# Prefer the WORKING TREE over the installed copy. This used to be the other
+# way round, which meant running the suite inside a PowOS image silently
+# tested /usr/lib/powos (the baked, possibly months-old code) instead of the
+# changes under test — failures then looked like real regressions when the
+# working tree was never loaded at all.
+LIB=$REPO/lib/menu.sh
+[[ -f "$LIB" ]] || LIB="/usr/lib/powos/menu.sh"
 # shellcheck disable=SC1090
 source "$LIB"
 

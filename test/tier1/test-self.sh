@@ -21,8 +21,13 @@
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-LIB="/usr/lib/powos/self.sh"
-[[ -f "$LIB" ]] || LIB="$REPO/lib/self.sh"
+# Prefer the WORKING TREE over the installed copy. This used to be the other
+# way round, which meant running the suite inside a PowOS image silently
+# tested /usr/lib/powos (the baked, possibly months-old code) instead of the
+# changes under test — failures then looked like real regressions when the
+# working tree was never loaded at all.
+LIB=$REPO/lib/self.sh
+[[ -f "$LIB" ]] || LIB="/usr/lib/powos/self.sh"
 
 PASS=0; FAIL=0
 ok()  { echo "  ok   - $1"; PASS=$((PASS+1)); }

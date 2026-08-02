@@ -27,9 +27,14 @@
 set -u
 
 # Locate the lib relative to this test, or the installed path.
-LIB="/usr/lib/powos/ramboot.sh"
+# Prefer the WORKING TREE over the installed copy. This used to be the other
+# way round, which meant running the suite inside a PowOS image silently
+# tested /usr/lib/powos (the baked, possibly months-old code) instead of the
+# changes under test — failures then looked like real regressions when the
+# working tree was never loaded at all.
+LIB=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)/ramboot.sh
 if [[ ! -f "$LIB" ]]; then
-    LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)/ramboot.sh"
+    LIB="/usr/lib/powos/ramboot.sh"
 fi
 
 PASS=0; FAIL=0
@@ -149,6 +154,8 @@ rb_require_root() { return 0; }
 rb_ram_total_kib() { echo $((32*GIB)); }
 rb_os_size_kib()   { echo $((8*GIB));  }
 rpm-ostree() { echo "$*" >> "$TMP/ro.log"; }
+# Pin the tool rather than inferring it from PATH — see the bootc block below.
+rb_karg_tool() { echo "rpm-ostree"; }
 : > "$TMP/ro.log"
 out=$(rb_enable 2>&1); rc=$?
 check "enable succeeds on installed system"        '[[ $rc -eq 0 ]]'
@@ -206,6 +213,11 @@ rb_require_root() { return 0; }
 rb_ram_total_kib() { echo $((32*GIB)); }
 rb_os_size_kib()   { echo $((8*GIB));  }
 bootc() { echo "$*" >> "$TMP/bootc.log"; }
+# rb_karg_tool() prefers rpm-ostree when it is on PATH. This block exercises the
+# BOOTC FALLBACK, so it must pin the choice: relying on rpm-ostree being absent
+# passed on a plain dev container and failed on a real PowOS image, where
+# rpm-ostree obviously exists. Environment-dependent, i.e. not a real test.
+rb_karg_tool() { echo "bootc"; }
 : > "$TMP/bootc.log"
 out=$(rb_enable 2>&1); rc=$?
 check "bootc path succeeds"          '[[ $rc -eq 0 ]]'
@@ -214,6 +226,7 @@ check "bootc appended installed karg" 'grep -q -- "kargs --append-if-missing rd.
 # ── disable removes the kargs ─────────────────────────────────────
 echo "== disable removes kargs =="
 reset_globals
+rb_karg_tool() { echo "bootc"; }
 : > "$TMP/bootc.log"
 out=$(rb_disable 2>&1); rc=$?
 check "disable succeeds"             '[[ $rc -eq 0 ]]'
@@ -222,10 +235,11 @@ check "disable deletes ramsize"        'grep -q -- "--delete-if-present rd.powos
 
 # disable dry-run mutates nothing.
 reset_globals; RB_DRY_RUN=1
+rb_karg_tool() { echo "bootc"; }
 : > "$TMP/bootc.log"
 out=$(rb_disable 2>&1); rc=$?
 check "disable dry-run runs no tool"  '[[ ! -s "$TMP/bootc.log" ]]'
-unset -f bootc rb_cmdline rb_have_powos_data rb_is_installed rb_require_root rb_ram_total_kib rb_os_size_kib
+unset -f bootc rb_karg_tool rb_cmdline rb_have_powos_data rb_is_installed rb_require_root rb_ram_total_kib rb_os_size_kib
 
 # ── reset removes the counter file (real temp file) ───────────────
 echo "== reset clears the self-heal counter =="

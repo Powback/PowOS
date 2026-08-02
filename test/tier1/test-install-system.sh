@@ -24,9 +24,14 @@
 set -u
 
 # Locate the lib relative to this test, or the installed path.
-LIB="/usr/lib/powos/install-system.sh"
+# Prefer the WORKING TREE over the installed copy. This used to be the other
+# way round, which meant running the suite inside a PowOS image silently
+# tested /usr/lib/powos (the baked, possibly months-old code) instead of the
+# changes under test — failures then looked like real regressions when the
+# working tree was never loaded at all.
+LIB=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)/install-system.sh
 if [[ ! -f "$LIB" ]]; then
-    LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)/install-system.sh"
+    LIB="/usr/lib/powos/install-system.sh"
 fi
 
 PASS=0; FAIL=0

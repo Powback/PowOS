@@ -30,8 +30,13 @@ set -u
 
 # Locate the lib + firstboot bin relative to this test, or the installed paths.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB="/usr/lib/powos/install-wizard.sh"
-[[ -f "$LIB" ]] || LIB="$(cd "$HERE/../../lib" && pwd)/install-wizard.sh"
+# Prefer the WORKING TREE over the installed copy. This used to be the other
+# way round, which meant running the suite inside a PowOS image silently
+# tested /usr/lib/powos (the baked, possibly months-old code) instead of the
+# changes under test — failures then looked like real regressions when the
+# working tree was never loaded at all.
+LIB=$(cd "$HERE/../../lib" && pwd)/install-wizard.sh
+[[ -f "$LIB" ]] || LIB="/usr/lib/powos/install-wizard.sh"
 FB="/usr/bin/powos-firstboot-apply"
 [[ -f "$FB" ]] || FB="$(cd "$HERE/../../bin" && pwd)/powos-firstboot-apply"
 
