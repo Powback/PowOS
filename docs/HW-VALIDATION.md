@@ -35,13 +35,16 @@ The items below are what `validate.sh --all` **cannot** cover.
 
 ## 1. Layer sync — `--delete` behaviour after a delete-after fix
 
-**Files:** `lib/ramfs/layer-sync.py:14`, `lib/ramfs/overlay-mount.sh:189`
+**Files:** `lib/ramfs/layer-sync.py:14`
 
 **Background:** an earlier version used `rsync --delete-after`, which
 wiped the custom layer on the first sync. The fix removed `--delete` from
 `layer-sync.py` entirely (the RAM upper is a fresh tmpfs each boot, so
-deletions can't accumulate). `overlay-mount.sh` still uses `--delete` in
-its two-stage sync (pending → final), which is correct there.
+deletions can't accumulate). `lib/ramfs/overlay-mount.sh` was listed here
+too; it has since been DELETED as dead code — zero references anywhere, it
+duplicated the dracut module with different paths, and it still carried the
+`rsync --delete` two-stage sync. The live overlay setup is
+`lib/dracut/90powos-ramboot/`.
 
 **Steps:**
 1. Boot the real system with `rd.powos.ramboot=1` (USB overlay model).

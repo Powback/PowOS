@@ -164,10 +164,14 @@ lib/dracut/90powos-ramboot/
 └── powos-overlay-init.sh # Userspace initialization
 
 lib/ramfs/
-├── layer-sync.py         # Syncs RAM → custom layer (every 60s)
-│                         # Whiteout translation, USB disconnect guard,
-│                         # disk flush after sync, consecutive failure notifications
-└── overlay-mount.sh      # Legacy overlay utilities
+└── layer-sync.py         # Syncs RAM → custom layer (every 60s)
+                          # Whiteout translation, USB disconnect guard,
+                          # disk flush after sync, consecutive failure notifications
+
+# overlay-mount.sh was deleted: dead code (zero references) that duplicated
+# the dracut module with DIFFERENT paths and still carried the `rsync --delete`
+# pattern behind the old custom-layer wipe. The live overlay setup is
+# lib/dracut/90powos-ramboot/.
 
 test/tier1/
 ├── test-layer-sync.py    # Layer sync unit tests (whiteouts, USB detection)
