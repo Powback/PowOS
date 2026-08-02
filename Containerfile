@@ -38,6 +38,10 @@
 #   ghcr.io/ublue-os/bazzite-nvidia:stable       NVIDIA closed (Maxwell/Pascal)
 #   ghcr.io/ublue-os/bazzite:stable              AMD / Intel
 ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia-open:stable
+# Source of the compiled KDE artifacts. MUST be global (declared before the
+# first FROM) — an ARG used in a FROM is only visible if it is global scope.
+# Default builds them in-tree; CI overrides with a content-addressed image.
+ARG KDE_BUILDER=kde-builder-local
 
 # Staging stage — assemble every file drop into one scratch tree so the final
 # image gets a single COPY layer instead of one per source directory. Nothing
@@ -88,10 +92,25 @@ COPY systemd/plasmalogin.service.d/       /usr/lib/systemd/system/plasmalogin.se
 # rpm). Only patch dirs + config are copied in (upstream/ is a gitignored
 # multi-GB clone cache — never part of the build context). A patch that no
 # longer applies/builds fails the image build loudly. Discarded after COPY.
-FROM ${BASE_IMAGE} AS kde-builder
+FROM ${BASE_IMAGE} AS kde-builder-local
 COPY sources/kde/dev.conf sources/kde/image-build.sh /tmp/kde/
 COPY sources/kde/patches/ /tmp/kde/patches/
 RUN chmod +x /tmp/kde/image-build.sh && /tmp/kde/image-build.sh /tmp/kde /kde-out
+
+# Where the KDE artifacts come from. Defaults to building them right here, so a
+# plain `podman build .` still works with no arguments.
+#
+# CI overrides it with a prebuilt, content-addressed image:
+#   --build-arg KDE_BUILDER=ghcr.io/<owner>/powos-kde:<hash-of-sources/kde>
+# and buildah then SKIPS the kde-builder-local stage entirely, because nothing
+# references it. Compiling plasma-desktop takes ~30 min and its inputs change
+# maybe monthly, so rebuilding it on every commit was the dominant CI cost.
+#
+# Deliberately NOT solved with --cache-to: that has never once worked here
+# (podman/buildah#5148, the COPY --from=staging race) and, worse, it fails
+# SILENTLY into a cold build. A missing builder image is a hard error you can
+# see; a missing cache entry is a 40-minute mystery.
+FROM ${KDE_BUILDER} AS kde-builder
 
 FROM ${BASE_IMAGE}
 

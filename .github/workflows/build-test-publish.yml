@@ -153,6 +153,37 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
 
+      # Compiling plasma-desktop takes ~30 min; its inputs change maybe monthly.
+      # Rebuilding it every commit was the dominant CI cost, and --cache-to has
+      # NEVER worked here (podman/buildah#5148) so the cache repos do not even
+      # exist — every build has always been fully cold.
+      #
+      # Content-address the KDE stage instead: hash its actual inputs (the base
+      # image ref + sources/kde/**). If that exact image exists, reuse it and
+      # buildah skips the compile stage entirely (verified: 1s with --no-cache).
+      # If not, build and push it. A missing builder image is a hard error you
+      # can see; a missing cache entry was a 40-minute mystery.
+      - name: Resolve or build the KDE builder image
+        if: steps.gate.outputs.run == 'true'
+        id: kde
+        run: |
+          KEY=$( { echo "${{ steps.base.outputs.image }}"; \
+                   find sources/kde -type f ! -path '*/upstream/*' -print0 \
+                     | sort -z | xargs -0 sha256sum; } | sha256sum | cut -c1-16 )
+          REF="${{ env.IMAGE }}-kde:${{ matrix.variant }}-$KEY"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          if sudo podman pull -q "$REF" 2>/dev/null; then
+              echo "::notice::KDE builder cache HIT ($KEY) — skipping the plasma-desktop compile"
+              echo "hit=true" >> "$GITHUB_OUTPUT"
+          else
+              echo "::notice::KDE builder cache MISS ($KEY) — building and pushing it"
+              sudo podman build --target kde-builder-local \
+                  --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
+                  -f Containerfile -t "$REF" .
+              sudo podman push "$REF" || echo "::warning::KDE builder push failed; the build still proceeds, next run just misses again"
+              echo "hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build ${{ matrix.variant }} (local only — not pushed yet)
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -178,6 +209,7 @@ jobs:
               --cache-from "$CACHE" \
               --cache-to   "$CACHE" \
               --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
+              --build-arg KDE_BUILDER=${{ steps.kde.outputs.ref }} \
               --build-arg POWOS_SRC_COMMIT=${{ github.sha }} \
               -f Containerfile \
               -t ${{ env.IMAGE }}:${{ matrix.variant }} \
@@ -188,6 +220,7 @@ jobs:
               sudo podman build --layers \
                 --cache-from "$CACHE" \
                 --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
+                --build-arg KDE_BUILDER=${{ steps.kde.outputs.ref }} \
                 --build-arg POWOS_SRC_COMMIT=${{ github.sha }} \
                 -f Containerfile \
                 -t ${{ env.IMAGE }}:${{ matrix.variant }} \
