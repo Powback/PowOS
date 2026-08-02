@@ -55,7 +55,20 @@ for appdir in "${appdirs[@]}"; do
     echo "── $app $ver — ${#patches[@]} patch(es), $url ──"
     # Source repos are defined-but-disabled on Fedora; builddep usually
     # auto-enables them, fall back to explicit enable if not.
-    dnf5 -y builddep "$app" || dnf5 -y builddep --enablerepo='*source*' "$app"
+    #
+    # `--setopt=*.exclude=` clears Bazzite's repo excludes for THIS transaction.
+    # Bazzite excludes `mesa-*` (it ships Mesa from Terra), which also catches
+    # mesa-libGLU-devel — the sole provider of pkgconfig(glu). KDE's build deps
+    # pull sdl2-compat-devel, which requires it, so builddep failed with "none
+    # of the providers can be installed" and took the whole image build with
+    # it. That is why the published image sat 74 commits behind: not un-run,
+    # BROKEN, since roughly 2026-07-13.
+    #
+    # Safe here: kde-builder is a throwaway stage and only /kde-out is COPY'd
+    # into the final image, so a relaxed exclude cannot leak Fedora's mesa into
+    # the shipped OS.
+    _bd=( dnf5 -y --setopt='*.exclude=' builddep )
+    "${_bd[@]}" "$app" || "${_bd[@]}" --enablerepo='*source*' "$app"
 
     src="/tmp/kde-build/$app"
     rm -rf "$src"
