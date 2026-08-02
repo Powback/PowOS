@@ -38,13 +38,25 @@ LAYER_SYNC="/usr/lib/powos/ramfs/layer-sync.py"
 # purpose - it should expire exactly at reboot.
 KEEP_USB_FLAG="$STATE_DIR/sync-keep-usb"
 
-# Get machine ID
+# Get machine ID. MUST never return empty.
+#
+# A freshly built bootc image ships /etc/machine-id EXISTING BUT EMPTY —
+# systemd populates it on first boot. `-f` is true for an empty file, so the
+# old check took the `cat` branch, produced "", and never reached the hostname
+# fallback it was written to have.
+#
+# An empty MACHINE_ID makes a box conflict with ITSELF: write_sync_marker
+# records SYNC_MACHINE_ID="", read_sync_marker maps the empty read through
+# ${id:-unknown} to the literal "unknown", and check_for_conflicts then
+# compares "unknown" != "" and reports a conflict against our own last sync.
+POWOS_MACHINE_ID_FILE="${POWOS_MACHINE_ID_FILE:-/etc/machine-id}"
+
 get_machine_id() {
-    if [[ -f /etc/machine-id ]]; then
-        cat /etc/machine-id
-    else
-        hostname -s 2>/dev/null || echo "unknown"
-    fi
+    local id=""
+    [[ -s "$POWOS_MACHINE_ID_FILE" ]] && id=$(cat "$POWOS_MACHINE_ID_FILE" 2>/dev/null)
+    [[ -z "$id" ]] && id=$(hostname -s 2>/dev/null || true)
+    [[ -z "$id" ]] && id="unknown"
+    printf '%s' "$id"
 }
 
 MACHINE_ID=$(get_machine_id)

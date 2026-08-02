@@ -226,6 +226,36 @@ EOF
     result=$(check_for_conflicts || echo "conflict")
     assert_equals "none" "$result" "Same-machine marker → no conflict"
 
+    # REGRESSION: a freshly built bootc image ships /etc/machine-id EXISTING
+    # BUT EMPTY (systemd fills it on first boot). `-f` is true for an empty
+    # file, so get_machine_id used to return "" and never reach its hostname
+    # fallback — and an empty id makes the box conflict with ITSELF, because
+    # read_sync_marker maps the empty value through ${id:-unknown} to the
+    # literal "unknown", which then compares unequal to "". Caught by CI in
+    # the freshly built image; invisible against a provisioned one.
+    : > "$TEST_DIR/empty-machine-id"   # the exact shape a fresh image ships
+    local _mid_empty _mid_missing
+    _mid_empty=$(POWOS_MACHINE_ID_FILE="$TEST_DIR/empty-machine-id" \
+                 bash -c 'source "$1"/lib/sync.sh >/dev/null 2>&1; get_machine_id' _ "$TEST_DIR")
+    _mid_missing=$(POWOS_MACHINE_ID_FILE="$TEST_DIR/no-such-machine-id" \
+                 bash -c 'source "$1"/lib/sync.sh >/dev/null 2>&1; get_machine_id' _ "$TEST_DIR")
+    ((TESTS_RUN++)) || true
+    if [[ -n "$_mid_empty" ]]; then
+        echo -e "${GREEN}✓${NC} get_machine_id never empty when /etc/machine-id is EMPTY"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} get_machine_id returned empty for an EMPTY machine-id file"
+        ((TESTS_FAILED++)) || true
+    fi
+    ((TESTS_RUN++)) || true
+    if [[ -n "$_mid_missing" ]]; then
+        echo -e "${GREEN}✓${NC} get_machine_id never empty when the file is ABSENT"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} get_machine_id returned empty for an ABSENT machine-id file"
+        ((TESTS_FAILED++)) || true
+    fi
+
     # Case 3: marker from ANOTHER machine → conflict MUST be detected.
     # The capture pattern below is exactly what ram_sync_now / bin/powos use;
     # it must yield exactly "conflict" (the old echo+return-1 bug produced
