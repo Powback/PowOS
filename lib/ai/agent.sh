@@ -126,6 +126,53 @@ _ai_resolve_agent_alias() {
     echo "$requested"
 }
 
+# Expand `!command` directives inside an agent/flavor system prompt.
+#
+# A line whose first character is `!` is replaced by that command's stdout.
+# This is how agents learn the CLI: the prompt says `!powos mods help` and
+# the agent reads the REAL, CURRENT help text. Help output IS the agent's
+# instruction manual, so the two can never drift. Corollary: if a command's
+# --help can't explain a feature, that's a help bug to fix at the source —
+# never restate it as prose in an agent.conf.
+#
+# agent.conf is already sourced, so these commands are inside the existing
+# trust boundary. Each is still capped by a timeout (a wedged command must
+# not hang the agent) and failures are reported inline, because an empty
+# section would silently give the agent amnesia about a whole subsystem.
+# ANSI escapes are stripped — PowOS colorizes unconditionally, and raw
+# escape codes in a system prompt are pure token waste.
+_ai_expand_prompt_cmds() {
+    local prompt="$1"
+
+    # Fast path: nothing to expand unless some line actually starts with `!`.
+    [[ "$prompt" == '!'* || "$prompt" == *$'\n!'* ]] || { printf '%s' "$prompt"; return 0; }
+
+    local timeout_s="${AI_PROMPT_CMD_TIMEOUT:-10}"
+    local line cmd out rc
+    while IFS= read -r line; do
+        if [[ "$line" != '!'* ]]; then
+            printf '%s\n' "$line"
+            continue
+        fi
+        cmd="${line#!}"
+        if out=$(timeout "$timeout_s" bash -c "$cmd" 2>/dev/null); then
+            out=$(printf '%s' "$out" | sed $'s/\033\[[0-9;]*[a-zA-Z]//g')
+            if [[ -n "$out" ]]; then
+                printf '%s\n' "$out"
+            else
+                printf '[%s — produced no output]\n' "$cmd"
+            fi
+        else
+            rc=$?
+            if (( rc == 124 )); then
+                printf '[%s — timed out after %ss]\n' "$cmd" "$timeout_s"
+            else
+                printf '[%s — unavailable (exit %s)]\n' "$cmd" "$rc"
+            fi
+        fi
+    done <<< "$prompt"
+}
+
 _ai_load_flavor() {
     local agent="$1"
     local flavor="$2"
@@ -221,6 +268,12 @@ _ai_load_agent() {
         AGENT_SYSTEM_PROMPT=""
         AGENT_CLIENT=""
         AGENT_TOOLS=""
+    fi
+
+    # Runs last so it covers the flavor prompt too (flavors append to
+    # AGENT_SYSTEM_PROMPT above and may carry their own `!cmd` lines).
+    if [[ -n "${AGENT_SYSTEM_PROMPT:-}" ]]; then
+        AGENT_SYSTEM_PROMPT="$(_ai_expand_prompt_cmds "$AGENT_SYSTEM_PROMPT")"
     fi
 }
 

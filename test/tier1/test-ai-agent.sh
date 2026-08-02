@@ -178,6 +178,98 @@ test_agent_configs_source_cleanly() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Tests: `!cmd` prompt expansion
+#
+# Agent instructions are generated from the binaries' own --help rather than
+# hand-copied into agent.conf, so a line starting with `!` in a system prompt
+# is replaced by that command's output. These tests pin the contract:
+# expansion happens, failures stay visible, ANSI is stripped, and a wedged
+# command cannot hang agent startup.
+# ─────────────────────────────────────────────────────────────────
+
+test_prompt_cmd_expansion() {
+    echo ""
+    echo "Test: !cmd expansion in system prompts"
+
+    # shellcheck source=/dev/null
+    source "$REPO_ROOT/lib/ai/agent.sh" >/dev/null 2>&1 || true
+    assert_function_exists "_ai_expand_prompt_cmds" "_ai_expand_prompt_cmds defined"
+    declare -f _ai_expand_prompt_cmds >/dev/null 2>&1 || return 0
+
+    local out
+
+    out="$(_ai_expand_prompt_cmds 'plain text')"
+    assert_equals "plain text" "$out" "Prompt without ! passes through untouched"
+
+    out="$(_ai_expand_prompt_cmds 'before
+!echo GENERATED
+after')"
+    assert_contains "$out" "GENERATED" "Command output is inlined"
+    assert_contains "$out" "before"    "Text before the directive survives"
+    assert_contains "$out" "after"     "Text after the directive survives"
+    ((TESTS_RUN++)) || true
+    if [[ "$out" != *'!echo'* ]]; then
+        echo -e "${GREEN}✓${NC} Literal directive is consumed, not leaked"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Literal directive leaked into the prompt"
+        ((TESTS_FAILED++)) || true
+    fi
+
+    out="$(_ai_expand_prompt_cmds 'wow! not a directive')"
+    assert_equals "wow! not a directive" "$out" "A ! mid-line is not a directive"
+
+    # A silently-empty section would give the agent amnesia about a whole
+    # subsystem, so failures must be loud in-band.
+    out="$(_ai_expand_prompt_cmds '!false')"
+    assert_contains "$out" "unavailable" "Failing command reports inline"
+    out="$(_ai_expand_prompt_cmds '!true')"
+    assert_contains "$out" "no output"   "Silent command reports inline"
+
+    out="$(AI_PROMPT_CMD_TIMEOUT=1 _ai_expand_prompt_cmds '!sleep 5')"
+    assert_contains "$out" "timed out"   "Wedged command times out, not hangs"
+
+    out="$(_ai_expand_prompt_cmds '!printf "\033[1mBOLD\033[0m\n"')"
+    assert_contains "$out" "BOLD" "ANSI-colored output still yields its text"
+    ((TESTS_RUN++)) || true
+    if [[ "$out" != *$'\033'* ]]; then
+        echo -e "${GREEN}✓${NC} ANSI escapes stripped from expanded output"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} ANSI escapes leaked into the prompt"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
+test_modder_prompt_is_generated() {
+    echo ""
+    echo "Test: modder agent prompt is generated from --help"
+
+    local conf="$REPO_ROOT/config/ai/agents/modder/agent.conf"
+    if [[ ! -f "$conf" ]]; then
+        ((TESTS_RUN++)) || true
+        echo -e "${YELLOW}⊘${NC} Skipping: modder/agent.conf not available"
+        return 0
+    fi
+
+    assert_contains "$(cat "$conf")" '!powos mods help' \
+        "modder agent.conf sources its CLI surface from the binary"
+
+    # The CLI reference must not ALSO be hand-maintained in the context
+    # command, or it drifts and gets paid for twice on every call.
+    ((TESTS_RUN++)) || true
+    local ctx_line
+    ctx_line="$(grep -m1 '^AGENT_CONTEXT_CMD=' "$conf" || true)"
+    if [[ "$ctx_line" != *'powos mods help'* ]]; then
+        echo -e "${GREEN}✓${NC} Context command carries state, not duplicated help"
+        ((TESTS_PASSED++)) || true
+    else
+        echo -e "${RED}✗${NC} Help output duplicated in AGENT_CONTEXT_CMD"
+        ((TESTS_FAILED++)) || true
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Tests: Helpers Module
 # ─────────────────────────────────────────────────────────────────
 
@@ -677,6 +769,8 @@ main() {
     test_agent_config_load
     test_agent_base_config
     test_agent_configs_source_cleanly
+    test_prompt_cmd_expansion
+    test_modder_prompt_is_generated
 
     # Client tests
     test_client_base_source
