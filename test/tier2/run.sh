@@ -423,34 +423,59 @@ stage_a() {
 
 # ─── STAGE B: SDDM greeter ──────────────────────────────────────────────────
 
+# Which display manager does this image actually use?
+# Returns the implementation's base name (plasmalogin, sddm, gdm...) by
+# resolving the display-manager.service alias. Never hardcode an implementation:
+# PowOS switched from SDDM to plasmalogin and every hardcoded reference in this
+# file silently became a permanent failure.
+dm_impl_name() {
+    vm_ssh "readlink -f /etc/systemd/system/display-manager.service 2>/dev/null \
+            | xargs -r basename | sed 's/\.service$//'" 2>/dev/null || echo ""
+}
+
 stage_b() {
-    section "STAGE B: SDDM display manager"
+    section "STAGE B: display manager"
     local start=$SECONDS checks="" ok=true
 
-    # Is SDDM running?
+    # Ask about display-manager.service, NOT a specific implementation.
+    #
+    # This stage hardcoded sddm.service. PowOS does not ship SDDM — it ships
+    # plasmalogin (Plasma Login Manager), which [Install] Alias=s itself to
+    # display-manager.service. So `is-active sddm.service` returned "inactive"
+    # forever, stage B could never pass, and because the Push step only runs
+    # when every prior step succeeded, NOTHING HAS PUBLISHED SINCE THE SWITCH.
+    # A green display manager was being reported as a hard failure.
+    #
+    # display-manager.service is the DM-agnostic handle systemd provides
+    # exactly so callers do not name an implementation. Swapping DMs again
+    # will not break this.
+    local dm_unit="display-manager.service"
+    local dm_impl; dm_impl="$(dm_impl_name)"
+    echo "  display manager: ${dm_impl:-unknown}"
+
     local status
-    status=$(vm_ssh "systemctl is-active sddm.service" || echo "inactive")
+    status=$(vm_ssh "systemctl is-active $dm_unit" || echo "inactive")
     if [[ "$status" == "active" ]]; then
-        t2_pass "sddm.service active"
-        checks="$(check_json sddm-active pass)"
+        t2_pass "$dm_unit active (${dm_impl:-unknown})"
+        checks="$(check_json dm-active pass)"
     else
-        t2_fail "sddm.service: $status -- SDDM NOT RUNNING"
-        checks="$(check_json sddm-active fail)"
+        t2_fail "$dm_unit: $status -- DISPLAY MANAGER NOT RUNNING"
+        checks="$(check_json dm-active fail)"
         ok=false
     fi
 
     # Crash-loop detection (NRestarts)
     local restarts
-    restarts=$(vm_ssh "systemctl show sddm.service -p NRestarts --value" || echo "?")
+    restarts=$(vm_ssh "systemctl show $dm_unit -p NRestarts --value" || echo "?")
     if [[ "$restarts" == "0" ]]; then
-        t2_pass "SDDM restarts: 0 (stable)"
-        checks+=",$(check_json sddm-no-crashloop pass)"
+        t2_pass "display manager restarts: 0 (stable)"
+        checks+=",$(check_json dm-no-crashloop pass)"
     elif [[ "$restarts" =~ ^[0-9]+$ ]] && (( restarts <= 2 )); then
-        echo -e "  ${YELLOW}WARN${NC}  SDDM restarted ${restarts}x"
-        checks+=",$(check_json sddm-no-crashloop warn)"
+        echo -e "  ${YELLOW}WARN${NC}  display manager restarted ${restarts}x"
+        checks+=",$(check_json dm-no-crashloop warn)"
     else
-        t2_fail "SDDM restarts: $restarts -- CRASH-LOOP DETECTED"
-        checks+=",$(check_json sddm-no-crashloop fail)"
+        t2_fail "display manager restarts: $restarts -- CRASH-LOOP DETECTED"
+        checks+=",$(check_json dm-no-crashloop fail)"
         ok=false
     fi
 
@@ -468,7 +493,7 @@ stage_b() {
     fi
 
     local v="pass"; $ok || v="fail"
-    verdict_emit b sddm-greeter "$v" $(( SECONDS - start )) "$checks"
+    verdict_emit b dm-greeter "$v" $(( SECONDS - start )) "$checks"
     $ok
 }
 
@@ -478,9 +503,15 @@ stage_c() {
     section "STAGE C: Desktop session (autologin)"
     local start=$SECONDS checks="" ok=true
 
-    # Inject autologin config via SSH
-    echo "  Injecting SDDM autologin config..."
-    if vm_sudo "mkdir -p /etc/sddm.conf.d && cat > /etc/sddm.conf.d/zz-test-autologin.conf << 'SDDMEOF'
+    # Autologin config goes to the ACTUAL display manager's drop-in dir.
+    # plasmalogin is an SDDM fork and keeps the [Autologin] schema, but reads
+    # /etc/plasmalogin.conf.d/ — writing /etc/sddm.conf.d/ on this image put the
+    # file somewhere nothing reads.
+    local dm_impl; dm_impl="$(dm_impl_name)"
+    [[ -n "$dm_impl" ]] || dm_impl="sddm"
+    local dm_confd="/etc/${dm_impl}.conf.d"
+    echo "  Injecting autologin config into ${dm_confd}/ ..."
+    if vm_sudo "mkdir -p $dm_confd && cat > $dm_confd/zz-test-autologin.conf << 'SDDMEOF'
 [Autologin]
 User=powos
 Session=plasma.desktop
@@ -494,9 +525,9 @@ SDDMEOF" 2>/dev/null; then
         return 1
     fi
 
-    # Restart SDDM to trigger autologin
-    echo "  Restarting SDDM..."
-    vm_sudo "systemctl restart sddm.service" 2>/dev/null || true
+    # Restart the display manager to trigger autologin.
+    echo "  Restarting display-manager.service (${dm_impl})..."
+    vm_sudo "systemctl restart display-manager.service" 2>/dev/null || true
     sleep 5
 
     # Wait for plasmashell
@@ -565,7 +596,7 @@ SDDMEOF" 2>/dev/null; then
     take_screenshot "stage-c-desktop"
 
     # Cleanup
-    vm_sudo "rm -f /etc/sddm.conf.d/zz-test-autologin.conf" 2>/dev/null || true
+    vm_sudo "rm -f /etc/sddm.conf.d/zz-test-autologin.conf /etc/plasmalogin.conf.d/zz-test-autologin.conf" 2>/dev/null || true
 
     local v="pass"; $ok || v="fail"
     verdict_emit c desktop-session "$v" $(( SECONDS - start )) "$checks"
@@ -851,26 +882,27 @@ stage_e1() {
         fi
     fi
 
-    # SDDM
-    local sddm_st
-    sddm_st=$(vm_ssh "systemctl is-active sddm.service" || echo "inactive")
-    if [[ "$sddm_st" == "active" ]]; then
-        t2_pass "SDDM active (live)"
-        checks+=",$(check_json live-sddm pass)"
+    # Display manager — by alias, not by implementation (see stage_b).
+    local dm_st
+    dm_st=$(vm_ssh "systemctl is-active display-manager.service" || echo "inactive")
+    if [[ "$dm_st" == "active" ]]; then
+        t2_pass "display manager active (live)"
+        checks+=",$(check_json live-dm pass)"
     else
-        t2_fail "SDDM not active: $sddm_st"
-        checks+=",$(check_json live-sddm fail)"
+        t2_fail "display manager not active: $dm_st"
+        checks+=",$(check_json live-dm fail)"
         ok=false
     fi
 
     # Desktop via autologin (same pattern as stage_c)
     if $ok; then
-        vm_sudo "mkdir -p /etc/sddm.conf.d && cat > /etc/sddm.conf.d/zz-test-autologin.conf << 'SDDMEOF'
+        local live_dm; live_dm="$(dm_impl_name)"; [[ -n "$live_dm" ]] || live_dm="sddm"
+        vm_sudo "mkdir -p /etc/${live_dm}.conf.d && cat > /etc/${live_dm}.conf.d/zz-test-autologin.conf << 'SDDMEOF'
 [Autologin]
 User=powos
 Session=plasma.desktop
 SDDMEOF" 2>/dev/null || true
-        vm_sudo "systemctl restart sddm.service" 2>/dev/null || true
+        vm_sudo "systemctl restart display-manager.service" 2>/dev/null || true
         sleep 5
         local elapsed=0 desktop_up=false
         while (( elapsed < DESKTOP_TIMEOUT )); do
