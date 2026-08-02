@@ -214,7 +214,7 @@ jobs:
               -f Containerfile \
               -t ${{ env.IMAGE }}:${{ matrix.variant }} \
               -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
-              -t powos-ci \
+              -t localhost/powos-ci \
               . ; then
               echo "::warning::--cache-to failed (likely podman/buildah#5148 race). Retrying without cache-to; image itself will still build."
               sudo podman build --layers \
@@ -225,7 +225,7 @@ jobs:
                 -f Containerfile \
                 -t ${{ env.IMAGE }}:${{ matrix.variant }} \
                 -t ${{ env.IMAGE }}:${{ matrix.variant }}-${{ github.sha }} \
-                -t powos-ci \
+                -t localhost/powos-ci \
                 .
           fi
 
@@ -275,6 +275,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils ovmf sshpass
 
+      # NOTE: pass the image FULLY QUALIFIED as localhost/powos-ci.
+      # `podman build -t powos-ci` stores it as localhost/powos-ci:latest, but
+      # bootc-image-builder resolves an unqualified name against docker.io and
+      # fails with:
+      #   reference "[overlay@...]docker.io/library/powos-ci:latest" does not
+      #   resolve to an image ID
+      # podman's own CLI searches localhost first, which is why the container
+      # test step above works with the bare name and only bib does not.
       - name: Build test qcow2 (bootc-image-builder)
         if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
         timeout-minutes: 15
@@ -286,7 +294,7 @@ jobs:
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type qcow2 --rootfs btrfs --local \
-            powos-ci
+            localhost/powos-ci
 
       - name: Tier-2 VM boot test (stages A-C)
         id: tier2
@@ -312,7 +320,7 @@ jobs:
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type anaconda-iso --local \
-            powos-ci
+            localhost/powos-ci
           chmod +x test/tier2/run.sh test/tier2/lib/qmp.py
           ARTIFACTS_DIR="$PWD/tier2-artifacts-stage-d" \
             bash test/tier2/run.sh \
@@ -337,7 +345,7 @@ jobs:
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type raw-efi --rootfs btrfs --local \
-            powos-ci
+            localhost/powos-ci
           # bib puts raw at image/disk.raw
           live_raw="tier2-live-output/image/disk.raw"
           if [[ ! -f "$live_raw" ]]; then
