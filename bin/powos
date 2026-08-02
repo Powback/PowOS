@@ -114,20 +114,31 @@ Sync, flush & backup:
   safe                Check if safe to unplug USB
   backup [status|push|pull|setup <url>]  Backup system state to cloud (git)
 
-Update & self (edit → test → push loop):
-  update              Check for available updates
-  update os           Update Bazzite base OS (bootc upgrade; 'upgrade' is smarter)
-  update packages     Update installed packages
-  update apply        Apply all updates (os + packages)
-  upgrade             Pull+stage a base update, apply the lightest restart
-  upgrade --check     Just check if a base update is available
-  reload              Apply your local PowOS changes LIVE (no reboot)
+Updating — one question: whose code?
+
+  THEIRS (the published image):
+  upgrade             Pull+stage a base update, apply the lightest restart.
+                        Works on BOTH models — installed disk AND USB-live.
+                        Kernel unchanged → soft-reboot (~s), otherwise reboot.
+  upgrade --check     Is a base update available?
+  upgrade --now       Stage AND apply the lightest restart, unattended
+
+  YOURS (the checkout at /var/lib/powos/src):
+  reload              Apply your local changes LIVE — no reboot
   reload --pull       git pull the checkout first, then apply
   reload --build      Full local image build + switch (base/package changes)
-  self status         Edit-loop: baked commit, git attach state, local edits
-  self test           Apply local /var/lib/powos/src edits to THIS system (transient)
+  self status         Baked commit, git attach state, local edits
+  self test           Same apply as 'reload', inside the self edit-loop
   self pull           SAFE update from upstream (never discards local edits)
   self push           git add -A + commit + push (-m "message")
+
+  NARROWER (rarely what you want):
+  update packages     Layered packages only — not the base image
+  update projects     Rebuild dev projects from upstream (see: powos dev)
+  overlay build-all   Rebuild sysext overlays (see: powos overlay)
+
+  'update os' / 'update apply' route to 'upgrade' — kept so muscle memory and
+  scripts don't break, but 'upgrade' is the name.
   stream              PowStream WebRTC status / start / stop / logs / setup
   overlay <cmd>       Sysext overlays: build|enable|disable|list|status|clean <name>
   zones               KZones window snapping: status / list layouts / edit
@@ -741,68 +752,15 @@ cmd_update() {
             ;;
 
         os)
-            echo -e "${BOLD}${CYAN}Applying OS Updates${NC}"
-            echo "════════════════════════════════════════"
-            echo ""
-
-            # Ensure USB is connected
-            if [[ "$(get_usb_status)" != "connected" ]]; then
-                echo -e "${RED}Error: USB not connected${NC}"
-                echo "Updates need USB connected to persist to updates layer"
-                exit 1
-            fi
-
-            # Verify the USB layers dir is a real mount before staging.
-            # A bare mkdir here would fabricate a tmpfs directory and stage
-            # "updates" into RAM while claiming success.
-            if ! mountpoint -q /run/powos/usb-layers 2>/dev/null; then
-                echo -e "${RED}Error: /run/powos/usb-layers is not a mountpoint${NC}"
-                echo "The USB data partition is not bind-mounted — staging updates"
-                echo "here would write to RAM and be lost on reboot."
-                echo "Check 'powos status' and reconnect/remount the USB drive."
-                exit 1
-            fi
-
-            # Create updates layer directory
-            mkdir -p "$UPDATES_LAYER"
-
-            if command -v bootc &>/dev/null; then
-                echo "Fetching OS update via bootc..."
-                echo "This updates the base OS image without affecting your customizations."
-                echo ""
-
-                # bootc upgrade will stage the update
-                # On atomic systems, this prepares the update for next boot
-                if bootc upgrade 2>&1; then
-                    echo ""
-                    echo -e "${GREEN}✓ OS update staged${NC}"
-                    echo "  Update will be applied on next boot"
-                    echo "  Your customizations remain in the custom layer"
-                    echo ""
-                    echo "  If the update causes issues, run:"
-                    echo "    powos rollback updates"
-                else
-                    echo -e "${RED}OS update failed${NC}"
-                    exit 1
-                fi
-            else
-                echo -e "${YELLOW}bootc not available${NC}"
-                echo "Falling back to dnf for system updates..."
-                echo "These updates will go to the updates layer."
-                echo ""
-
-                # For non-bootc systems, use dnf but target updates layer
-                # This requires mounting updates layer as writable
-                if [[ -d "$UPDATES_LAYER" ]]; then
-                    # Use dnf with installroot to put updates in the layer
-                    echo "Installing system updates to updates layer..."
-                    dnf upgrade -y --installroot="$UPDATES_LAYER" --releasever=/ 2>/dev/null || \
-                        dnf upgrade -y  # Fallback to normal upgrade
-                fi
-
-                echo ""
-                echo -e "${GREEN}✓ System updates applied${NC}"
-            fi
+            # ONE OS-update path: powos upgrade. It wraps bootc, picks the
+            # lightest restart (soft-reboot when the kernel is unchanged), and
+            # carries the USB-connected guard for the USB-live model.
+            #
+            # This arm used to gate on USB unconditionally, so on an installed
+            # system — the primary install path — it just errored out.
+            source "$POWOS_LIB/upgrade.sh"
+            shift   # drop "os"; pass through --check/--now/etc.
+            cmd_upgrade "$@"
             ;;
 
         packages)
@@ -839,41 +797,11 @@ cmd_update() {
             ;;
 
         apply)
-            echo -e "${BOLD}${CYAN}Applying All Updates${NC}"
-            echo "════════════════════════════════════════"
-            echo ""
-
-            # Ensure USB is connected for persistence
-            if [[ "$(get_usb_status)" != "connected" ]]; then
-                echo -e "${RED}Error: USB not connected${NC}"
-                echo "Updates need USB connected to persist"
-                exit 1
-            fi
-
-            # Apply OS updates first
-            echo "=== OS Updates ==="
-            if command -v bootc &>/dev/null; then
-                bootc upgrade 2>&1 || echo "No OS updates or bootc failed"
-            fi
-            echo ""
-
-            # Then package updates
-            echo "=== Package Updates ==="
-            if command -v dnf &>/dev/null; then
-                dnf upgrade -y
-            fi
-
-            # Sync to custom layer
-            echo ""
-            echo "Syncing to custom layer..."
-            if [[ -x "$LAYER_SYNC" ]]; then
-                python3 "$LAYER_SYNC" --sync-now
-            fi
-
-            echo ""
-            echo -e "${GREEN}✓ All updates applied${NC}"
-            echo "  OS updates staged for next boot (updates layer)"
-            echo "  Package updates synced to custom layer"
+            # `powos upgrade` handles the OS on BOTH models (it carries the
+            # USB-connected guard, applied only when actually on the USB-live
+            # model). This arm is just OS-then-packages.
+            cmd_update os
+            cmd_update packages
             ;;
 
         powos|self)
@@ -1052,8 +980,12 @@ cmd_update() {
             echo "Tip: Edit source at $POWOS_SRC, then run 'powos update self'"
             ;;
 
-        overlays)
-            echo -e "${BOLD}${CYAN}Rebuilding Overlays with Latest Upstream${NC}"
+        projects)
+            # NOT sysext overlays — this iterates PROJECTS_DIR and rebuilds dev
+            # PROJECTS. It was called "overlays", which is the name of a
+            # different subsystem entirely (`powos overlay`, sysext), so anyone
+            # reaching for it to rebuild an overlay silently rebuilt projects.
+            echo -e "${BOLD}${CYAN}Rebuilding Dev Projects with Latest Upstream${NC}"
             echo "════════════════════════════════════════"
             echo ""
 
@@ -1091,7 +1023,7 @@ cmd_update() {
             ;;
 
         *)
-            echo "Usage: powos update {check|os|powos|packages|overlays|apply}"
+            echo "Usage: powos update {check|os|powos|packages|projects|apply}"
             echo ""
             echo "  check     - Check for available updates"
             echo "  os        - Update Bazzite base OS"

@@ -114,8 +114,13 @@ reload_post_apply() {
     if grep -qE '^containers/distrobox\.ini$' <<<"$changed" && confirm "distrobox.ini changed — re-assemble containers now?"; then
         powos containers assemble || pwarn "assemble reported issues."
     fi
+    # sources/ and overlays/ hold SYSEXT overlay definitions, so rebuild those
+    # — via `powos overlay`, the subsystem that owns them. This used to call
+    # `powos update overlays`, which despite the name iterates PROJECTS_DIR and
+    # rebuilds dev projects, so an overlay change silently rebuilt something
+    # else and the overlay was never regenerated.
     if grep -qE '^(overlays|sources)/' <<<"$changed" && confirm "overlays/sources changed — rebuild overlays now?"; then
-        powos update overlays || pwarn "overlay rebuild reported issues."
+        powos overlay build-all || pwarn "overlay rebuild reported issues."
     fi
 }
 

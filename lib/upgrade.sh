@@ -20,6 +20,20 @@ POWOS_TAG=upgrade
 
 
 # Is a non-booted deployment currently staged? (echo "yes"/"")
+# "Is this the USB-live model?" already has ONE answer: rb_is_usb_model() in
+# ramboot.sh (boot state, then cmdline, then POWOS-DATA presence). Reuse it
+# rather than writing a second detector that can drift — that divergence is
+# exactly what produced two canonical game ids and a `powos sync` that ran the
+# backup. ramboot.sh is pure definitions, so sourcing it here is side-effect free.
+up_is_usb_model() {
+    if ! declare -f rb_is_usb_model >/dev/null 2>&1; then
+        # shellcheck source=/dev/null
+        source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/ramboot.sh" 2>/dev/null || return 1
+    fi
+    declare -f rb_is_usb_model >/dev/null 2>&1 || return 1
+    rb_is_usb_model
+}
+
 up_has_staged() {
     rpm-ostree status --json 2>/dev/null | python3 -c '
 import json,sys
@@ -76,6 +90,23 @@ cmd_upgrade() {
     done
 
     command -v bootc >/dev/null 2>&1 || { perr "bootc not found."; return 1; }
+
+    # Model-aware guard, folded in from the old `powos update os`.
+    #
+    # `bootc upgrade` is the SAME operation on both models — it stages a new
+    # deployment either way. The only real difference is that on the USB-live
+    # layered model the OS lives on the stick, so staging an update with the
+    # stick unplugged is pointless. That guard used to sit in `update os`,
+    # which applied it unconditionally — including on installed systems, which
+    # have no USB at all, making the documented OS-update command a dead end on
+    # the primary install path.
+    #
+    # So it belongs here, conditioned on actually BEING the USB model.
+    if up_is_usb_model && [[ "$(get_usb_status 2>/dev/null)" != "connected" ]]; then
+        perr "USB not connected — this box boots the USB-live layered model."
+        plog "Reconnect the PowOS stick: the OS and its update layer live there."
+        return 1
+    fi
 
     if (( check )); then
         plog "Checking for a base update…"
