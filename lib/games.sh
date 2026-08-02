@@ -1049,22 +1049,32 @@ gms_resize() {
 # ── Usage / entry ─────────────────────────────────────────────────
 gms_usage() {
     cat << EOF
-powos games — shared games partition (POWOS-GAMES) for PowOS + Windows
+powos games — your game collection, and the shared POWOS-GAMES partition
 
-One NTFS partition both OSes use: the same installed games serve both.
-Deliberately visible to Windows (drive letter); everything else PowOS
-owns stays hidden. Works on live-USB and installed (internal-SSD) systems.
+  powos games            List your games (mods, deploy state)
+  powos game <name>      Everything PowOS can do with ONE game
+  powos games storage    The shared NTFS partition (below)
+
+The partition: one NTFS volume both OSes use, so the same installed games
+serve PowOS and Windows. Deliberately visible to Windows (drive letter);
+everything else PowOS owns stays hidden. Works on live-USB and installed
+(internal-SSD) systems.
 
 Usage: powos games <command> [options]
 
 Commands:
-  status                 Show partition / mount / Steam-wiring state
-  create --size N        Create the partition (N GB) on the PowOS-owned disk
-  create --whole         Create the partition filling the disk's free space
-  mount                  Install + enable the systemd mount ($GMS_MOUNTPOINT)
-  steam-setup            Shared Steam library + native-FS Proton-state symlinks
-  resize --size N        Grow or shrink POWOS-GAMES to N GB (NTFS in-place)
-  sync                   Sync saves/mods between devices (run 'powos games sync help')
+  list                   List your games (default when no command given)
+  sync                   Sync saves/mods between devices ('powos games sync help')
+
+  storage status         Show partition / mount / Steam-wiring state
+  storage create --size N   Create the partition (N GB) on the PowOS-owned disk
+  storage create --whole    Create the partition filling the disk's free space
+  storage mount          Install + enable the systemd mount ($GMS_MOUNTPOINT)
+  storage steam-setup    Shared Steam library + native-FS Proton-state symlinks
+  storage resize --size N   Grow or shrink POWOS-GAMES to N GB (NTFS in-place)
+
+  The storage verbs also work without the 'storage' prefix
+  ('powos games create --size 512'), kept for existing scripts.
 
 Options:
   --size N               Partition size in GB (create; required unless --whole)
@@ -1086,7 +1096,12 @@ EOF
 }
 
 cmd_games() {
-    local sub="${1:-status}"; shift 2>/dev/null || true
+    # `powos games` is the COLLECTION namespace: bare, it lists your games,
+    # because that is what the word means to anyone who types it. The
+    # POWOS-GAMES *partition* lives under `powos games storage <verb>`.
+    # The bare disk verbs (status/create/mount/steam-setup/resize) still
+    # dispatch, so existing scripts and muscle memory keep working.
+    local sub="${1:-list}"; shift 2>/dev/null || true
 
     # The sync sub-command has its own option parser — delegate immediately
     # so its flags (--to, --from, --what, etc.) aren't consumed here.
@@ -1094,6 +1109,22 @@ cmd_games() {
         source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/games-sync.sh"
         cmd_games_sync "$@"
         return
+    fi
+
+    if [[ "$sub" == "list" || "$sub" == "ls" ]]; then
+        local _l="${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+        source "$_l/game.sh"
+        source "$_l/mods/core.sh"    2>/dev/null || true
+        source "$_l/mods/modlist.sh" 2>/dev/null || true
+        source "$_l/mods/vu.sh"      2>/dev/null || true
+        game_list_cmd
+        return
+    fi
+
+    # `storage` is the explicit spelling for the disk verbs; unwrap it and
+    # fall through to the same dispatch the bare verbs already use.
+    if [[ "$sub" == "storage" || "$sub" == "disk" || "$sub" == "partition" ]]; then
+        sub="${1:-status}"; shift 2>/dev/null || true
     fi
 
     while [[ $# -gt 0 ]]; do
