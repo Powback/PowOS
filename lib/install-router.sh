@@ -71,7 +71,16 @@ sandbox_share() {   # explicit containment grant — the audited escape hatch
 }
 
 # ── executors ─────────────────────────────────────────────────────
-do_flatpak() { flatpak install -y flathub "$1"; }
+# `flatpak install -y flathub X` PROMPTS ("found in multiple installations")
+# and then ABORTS non-interactively when the flathub remote is registered in
+# BOTH the system and the user installation — which is the default on Bazzite.
+# Always name the installation explicitly: system first, user as fallback.
+flatpak_scope() {
+    flatpak --system remotes --columns=name 2>/dev/null | grep -qx flathub && { echo "--system"; return; }
+    flatpak --user   remotes --columns=name 2>/dev/null | grep -qx flathub && { echo "--user";   return; }
+    echo "--system"
+}
+do_flatpak() { flatpak "$(flatpak_scope)" install -y flathub "$1"; }
 do_sandbox() {
     sandbox_ensure || return 1
     distrobox enter "$SANDBOX_BOX" -- sudo dnf install -y "$1" || return 1

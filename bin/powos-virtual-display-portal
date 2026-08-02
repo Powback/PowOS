@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+# powos-virtual-display-portal — create & HOLD a KWin virtual output.
+#
+# This is the low-level primitive behind `powos-virtual-display`. It drives the
+# freedesktop ScreenCast portal (xdg-desktop-portal-kde) with source type
+# VIRTUAL (bit 4) — which KWin implements via the `zkde_screencast_unstable_v1`
+# Wayland protocol (`DrmBackend::createVirtualOutput`). The result is an
+# ADDITIVE, headless KWin output: existing physical outputs are NOT touched,
+# no root, and it is removed the instant this process exits (or is asked to
+# quit) because the portal auto-closes the session on peer disconnect.
+#
+# Why the portal and not the raw Wayland protocol: the portal path needs no
+# Wayland dev tooling and reuses KDE's restore-token consent flow, so after a
+# ONE-TIME approval (done while a physical monitor is still on) every later
+# creation is dialog-free — which is essential because the whole point is to
+# run with the monitor OFF, where a consent dialog could never be seen.
+#
+# Output contract:
+#   - On success, prints one line to stdout:  NODE_ID <pipewire-node-id>
+#     and (if --node-file given) writes the bare node id there.
+#   - Then blocks, holding the virtual output alive, until SIGINT/SIGTERM.
+#   - Exit code 0 on clean shutdown, non-zero on failure to create.
+#
+# Restore token is persisted at $XDG_CONFIG_HOME/powstream/virtual-display-token
+# (default ~/.config/...). Delete that file to force a fresh consent dialog.
+#
+# Usage:
+#   powos-virtual-display-portal [--node-file PATH] [--quiet]
+#
+# NOTE: KDE's ScreenCast portal does not let the client choose the virtual
+# output's resolution (KWin picks a default). For exact sizing you'd bind
+# zkde_screencast_unstable_v1.stream_virtual_output(width,height) directly;
+# see the report. For streaming-to-a-phone the default is fine.
+
+import argparse
+import os
+import signal
+import sys
+
+import gi
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+BUS_NAME = "org.freedesktop.portal.Desktop"
+OBJ_PATH = "/org/freedesktop/portal/desktop"
+SC_IFACE = "org.freedesktop.portal.ScreenCast"
+SESSION_IFACE = "org.freedesktop.portal.Session"
+REQUEST_IFACE = "org.freedesktop.portal.Request"
+
+SOURCE_TYPE_VIRTUAL = 4  # ScreenCast source-type bitmask: 1=MONITOR 2=WINDOW 4=VIRTUAL
+PERSIST_UNTIL_REVOKED = 2
+CURSOR_MODE_EMBEDDED = 2
+
+
+def token_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.environ.get("HOME", ""), ".config"
+    )
+    return os.path.join(base, "powstream", "virtual-display-token")
+
+
+def load_token():
+    try:
+        with open(token_path(), "r") as f:
+            t = f.read().strip()
+            return t or None
+    except OSError:
+        return None
+
+
+def save_token(token):
+    if not token:
+        return
+    p = token_path()
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            f.write(token)
+    except OSError as e:
+        sys.stderr.write(f"[vdisplay] warn: could not save token: {e}\n")
+
+
+class VirtualDisplay:
+    def __init__(self, node_file=None, quiet=False):
+        self.node_file = node_file
+        self.quiet = quiet
+        self.loop = GLib.MainLoop()
+        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self.sender = self.bus.get_unique_name().lstrip(":").replace(".", "_")
+        self.session_handle = None
+        self.node_id = None
+        self.rc = 0
+        self._req_counter = 0
+
+    def log(self, msg):
+        if not self.quiet:
+            sys.stderr.write(f"[vdisplay] {msg}\n")
+            sys.stderr.flush()
+
+    # --- portal Request/Response plumbing -------------------------------
+    def _new_token(self, prefix):
+        self._req_counter += 1
+        return f"{prefix}{os.getpid()}_{self._req_counter}"
+
+    def _call(self, method, params_no_options, options, on_response):
+        """Issue a portal method whose last arg is the a{sv} options dict.
+        Subscribes to the predicted Request object's Response signal first."""
+        handle_token = self._new_token("pvd")
+        req_path = f"{OBJ_PATH}/request/{self.sender}/{handle_token}"
+        options["handle_token"] = GLib.Variant("s", handle_token)
+
+        sub_id = [None]
+
+        def _on_signal(conn, sender, path, iface, sig, params):
+            code, results = params.unpack()
+            self.bus.signal_unsubscribe(sub_id[0])
+            on_response(code, results)
+
+        sub_id[0] = self.bus.signal_subscribe(
+            BUS_NAME, REQUEST_IFACE, "Response", req_path, None,
+            Gio.DBusSignalFlags.NONE, _on_signal,
+        )
+
+        # PyGObject converts a python dict{str: GLib.Variant} into a{sv} when
+        # the tuple signature asks for it, so pass the dict directly (do NOT
+        # pre-wrap it in GLib.Variant("a{sv}", …) — that double-wraps).
+        full = tuple(params_no_options) + (options,)
+        self.bus.call(
+            BUS_NAME, OBJ_PATH, SC_IFACE, method,
+            GLib.Variant(self._sig_for(method), full),
+            GLib.VariantType.new("(o)"),
+            Gio.DBusCallFlags.NONE, -1, None,
+            lambda c, res: self._finish_call(c, res, method),
+        )
+
+    def _sig_for(self, method):
+        return {
+            "CreateSession": "(a{sv})",
+            "SelectSources": "(oa{sv})",
+            "Start": "(osa{sv})",
+        }[method]
+
+    def _finish_call(self, conn, res, method):
+        try:
+            conn.call_finish(res)
+        except GLib.Error as e:
+            self.log(f"{method} call failed: {e.message}")
+            self.rc = 1
+            self.loop.quit()
+
+    # --- handshake steps ------------------------------------------------
+    def start(self):
+        self.log("creating ScreenCast session (source type: VIRTUAL)…")
+        self._call(
+            "CreateSession", [],
+            {"session_handle_token": GLib.Variant("s", self._new_token("pvdses"))},
+            self._on_session_created,
+        )
+        self.loop.run()
+        return self.rc
+
+    def _on_session_created(self, code, results):
+        if code != 0:
+            self.log(f"CreateSession denied/failed (code {code})")
+            self.rc = 1
+            return self.loop.quit()
+        self.session_handle = results["session_handle"]
+        self.log("session created; selecting VIRTUAL source…")
+        opts = {
+            "types": GLib.Variant("u", SOURCE_TYPE_VIRTUAL),
+            "cursor_mode": GLib.Variant("u", CURSOR_MODE_EMBEDDED),
+            "persist_mode": GLib.Variant("u", PERSIST_UNTIL_REVOKED),
+        }
+        tok = load_token()
+        if tok:
+            opts["restore_token"] = GLib.Variant("s", tok)
+            self.log("using saved restore token (dialog-free)")
+        else:
+            self.log("no saved token — a ONE-TIME consent dialog will appear "
+                     "(approve it on the physical monitor)")
+        self._call("SelectSources", [self.session_handle], opts,
+                   self._on_sources_selected)
+
+    def _on_sources_selected(self, code, results):
+        if code != 0:
+            self.log(f"SelectSources failed (code {code})")
+            self.rc = 1
+            return self.loop.quit()
+        self.log("starting cast (creates the virtual output)…")
+        self._call("Start", [self.session_handle, ""], {}, self._on_started)
+
+    def _on_started(self, code, results):
+        if code != 0:
+            self.log(f"Start failed/denied (code {code})")
+            self.rc = 1
+            return self.loop.quit()
+        tok = results.get("restore_token")
+        if tok:
+            save_token(tok)
+            self.log("saved restore token → future runs are dialog-free")
+        streams = results.get("streams") or []
+        if not streams:
+            self.log("Start returned no streams — no virtual output created")
+            self.rc = 1
+            return self.loop.quit()
+        self.node_id = streams[0][0]
+        self.log(f"virtual output live — pipewire node {self.node_id}")
+        print(f"NODE_ID {self.node_id}", flush=True)
+        if self.node_file:
+            try:
+                with open(self.node_file, "w") as f:
+                    f.write(str(self.node_id))
+            except OSError as e:
+                self.log(f"warn: could not write node file: {e}")
+        # Hold. The session (and thus the virtual output) stays alive until we
+        # close it or the process exits (portal drops it on peer disconnect).
+
+    def shutdown(self, *_):
+        self.log("shutting down — removing virtual output")
+        if self.session_handle:
+            try:
+                self.bus.call_sync(
+                    BUS_NAME, self.session_handle, SESSION_IFACE, "Close",
+                    None, None, Gio.DBusCallFlags.NONE, 2000, None,
+                )
+            except GLib.Error:
+                pass
+        if self.node_file:
+            try:
+                os.unlink(self.node_file)
+            except OSError:
+                pass
+        self.loop.quit()
+        return GLib.SOURCE_REMOVE
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Create & hold a KWin virtual output")
+    ap.add_argument("--node-file", help="write the pipewire node id here; unlink on exit")
+    ap.add_argument("--quiet", action="store_true")
+    args = ap.parse_args()
+
+    vd = VirtualDisplay(node_file=args.node_file, quiet=args.quiet)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, vd.shutdown)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, vd.shutdown)
+    sys.exit(vd.start())
+
+
+if __name__ == "__main__":
+    main()

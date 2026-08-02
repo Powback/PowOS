@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+# powos-virtual-display — keep a KWin desktop compositable when no physical
+# monitor is present, so PowStream can keep streaming headlessly.
+#
+# THE PROBLEM
+#   On this box the desktop outputs are DisplayPort (DP-3, DP-4). Powering off
+#   / unplugging a DP monitor drops the HPD line: the sink disappears, the DRM
+#   connector goes `disconnected`, and KWin REMOVES the output (not DPMS-off —
+#   the output truly vanishes). With no output there is nothing to composite or
+#   capture, so PowStream's stream dies. (Contrast: a monitor merely in standby
+#   would stay `connected`/DPMS-off and streaming would keep working — that is
+#   NOT what happens here.)
+#
+# THE FIX
+#   Create an ADDITIVE, headless KWin virtual output via the KDE ScreenCast
+#   portal (source type VIRTUAL → KWin `DrmBackend::createVirtualOutput`). It
+#   does not disturb existing outputs, needs no root, and is removed cleanly
+#   when we stop holding it. KWin migrates windows onto it automatically, so
+#   the desktop keeps compositing with the monitor off.
+#
+# SUBCOMMANDS
+#   status            Show physical outputs, virtual outputs, and holder state.
+#   once              Create a virtual output and hold it until Ctrl-C (or until
+#                     this process is killed). Prints the pipewire node id.
+#   watch             Daemon: ensure a virtual output exists EXACTLY when there
+#                     is no usable PHYSICAL output; remove it when one returns.
+#   ensure            Create one now only if no physical output exists; hold it.
+#   stop              Stop any running holder (removes the virtual output).
+#
+# The pipewire node id of the live virtual output is written to
+#   $XDG_RUNTIME_DIR/powstream/virtual-display.node
+# so PowStream can target it (see the integration notes in the report).
+#
+# Deliberately additive & conservative: this NEVER disables, rotates, rescales
+# or reconfigures any existing output. It only ADDS a virtual one.
+
+set -uo pipefail
+
+TAG="virtual-display"
+PORTAL_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/powos-virtual-display-portal"
+RUNDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/powstream"
+NODE_FILE="$RUNDIR/virtual-display.node"
+PIDFILE="$RUNDIR/virtual-display.pid"
+POLL_SECS="${POWOS_VDISPLAY_POLL:-3}"
+
+mkdir -p "$RUNDIR"
+
+log()  { echo "[$TAG] $*" >&2; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# --- output enumeration (READ-ONLY; never mutates KWin) -----------------
+# A virtual output created by the screencast portal is NOT a DisplayPort/HDMI
+# connector, so we distinguish "physical" (DP-*/HDMI-*/eDP-*/DVI-*) from the
+# virtual placeholder purely by connector name.
+#
+# Count of connected, enabled PHYSICAL outputs KWin currently has.
+PY_PHYS='
+import json, sys, re
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print(-1); raise SystemExit
+outs = data.get("outputs", data) if isinstance(data, dict) else data
+n = 0
+for o in outs:
+    name = str(o.get("name", ""))
+    if not re.match(r"^(DP|HDMI|eDP|DVI|LVDS|DisplayPort)", name, re.I):
+        continue  # skip Virtual-*/placeholder outputs
+    if o.get("connected") and o.get("enabled"):
+        n += 1
+print(n)
+'
+PY_VIRT='
+import json, sys, re
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+outs = data.get("outputs", data) if isinstance(data, dict) else data
+for o in outs:
+    name = str(o.get("name", ""))
+    if not re.match(r"^(DP|HDMI|eDP|DVI|LVDS|DisplayPort)", name, re.I):
+        print(name)
+'
+
+physical_output_count() {
+    if have kscreen-doctor; then
+        # JSON is the stable machine surface. Match outputs whose name looks
+        # like a real connector AND are connected+enabled. NOTE: feed the JSON
+        # through the pipe (a heredoc here would hijack python's stdin).
+        local j; j=$(kscreen-doctor -j 2>/dev/null)
+        if [[ -n "$j" ]]; then
+            printf '%s' "$j" | python3 -c "$PY_PHYS" 2>/dev/null
+            return
+        fi
+    fi
+    # Fallback: DRM sysfs. Count connectors reporting `connected`.
+    local n=0 s
+    for st in /sys/class/drm/card*-DP-*/status /sys/class/drm/card*-HDMI-*/status /sys/class/drm/card*-eDP-*/status; do
+        [[ -r "$st" ]] || continue
+        s=$(cat "$st" 2>/dev/null)
+        [[ "$s" == "connected" ]] && n=$((n+1))
+    done
+    echo "$n"
+}
+
+# Names of any virtual/placeholder outputs KWin currently exposes.
+virtual_output_names() {
+    have kscreen-doctor || return 0
+    local j; j=$(kscreen-doctor -j 2>/dev/null)
+    [[ -n "$j" ]] || return 0
+    printf '%s' "$j" | python3 -c "$PY_VIRT" 2>/dev/null
+}
+
+holder_running() {
+    [[ -f "$PIDFILE" ]] || return 1
+    local p; p=$(cat "$PIDFILE" 2>/dev/null)
+    [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null
+}
+
+start_holder() {
+    if holder_running; then
+        log "holder already running (pid $(cat "$PIDFILE"))"
+        return 0
+    fi
+    [[ -x "$PORTAL_HELPER" ]] || { log "missing helper: $PORTAL_HELPER"; return 1; }
+    log "creating virtual output…"
+    "$PORTAL_HELPER" --node-file "$NODE_FILE" &
+    local pid=$!
+    echo "$pid" > "$PIDFILE"
+    # Wait briefly for the node file to prove the output actually came up.
+    local waited=0
+    while [[ ! -s "$NODE_FILE" ]] && kill -0 "$pid" 2>/dev/null && (( waited < 15 )); do
+        sleep 1; waited=$((waited+1))
+    done
+    if [[ -s "$NODE_FILE" ]]; then
+        log "virtual output up — pipewire node $(cat "$NODE_FILE")"
+        return 0
+    fi
+    log "virtual output did NOT come up (holder may need a one-time consent"
+    log "dialog — run 'powos-virtual-display once' on the local console first)"
+    kill "$pid" 2>/dev/null
+    rm -f "$PIDFILE"
+    return 1
+}
+
+stop_holder() {
+    if holder_running; then
+        local p; p=$(cat "$PIDFILE")
+        log "stopping holder (pid $p) — removing virtual output"
+        kill -TERM "$p" 2>/dev/null
+        local waited=0
+        while kill -0 "$p" 2>/dev/null && (( waited < 5 )); do sleep 1; waited=$((waited+1)); done
+        kill -KILL "$p" 2>/dev/null
+    fi
+    rm -f "$PIDFILE" "$NODE_FILE"
+}
+
+cmd_status() {
+    local pc; pc=$(physical_output_count)
+    echo "physical outputs connected+enabled : $pc"
+    echo "virtual/placeholder outputs        : $(virtual_output_names | paste -sd, - 2>/dev/null || true)"
+    if holder_running; then
+        echo "holder                             : running (pid $(cat "$PIDFILE"))"
+        echo "pipewire node                      : $(cat "$NODE_FILE" 2>/dev/null || echo '?')"
+    else
+        echo "holder                             : stopped"
+    fi
+}
+
+cmd_once() {
+    exec "$PORTAL_HELPER" --node-file "$NODE_FILE"
+}
+
+cmd_ensure() {
+    local pc; pc=$(physical_output_count)
+    if [[ "$pc" -gt 0 ]]; then
+        log "physical output present ($pc) — no virtual output needed"
+        return 0
+    fi
+    start_holder
+}
+
+cmd_watch() {
+    log "watching outputs every ${POLL_SECS}s (Ctrl-C to stop)"
+    trap 'stop_holder; exit 0' INT TERM
+    while true; do
+        local pc; pc=$(physical_output_count)
+        if [[ "$pc" -le 0 ]]; then
+            # No physical output → make sure a virtual one exists.
+            if ! holder_running; then
+                log "no physical output — creating virtual output"
+                start_holder || log "creation failed; will retry"
+            fi
+        else
+            # Physical output(s) back → drop the virtual one (revert).
+            if holder_running; then
+                log "physical output returned ($pc) — reverting"
+                stop_holder
+            fi
+        fi
+        sleep "$POLL_SECS"
+    done
+}
+
+usage() {
+    sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+case "${1:-status}" in
+    status|st|"") cmd_status ;;
+    once)         cmd_once ;;
+    ensure)       cmd_ensure ;;
+    watch)        cmd_watch ;;
+    stop)         stop_holder ;;
+    help|-h|--help) usage ;;
+    *) log "unknown subcommand: $1"; usage; exit 1 ;;
+esac

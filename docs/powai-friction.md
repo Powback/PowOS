@@ -8,6 +8,15 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
 
 ## Open
 
+- [x] **`powos install <flatpak-app>` aborts when flathub is in both installations.**
+  2026-07-24: `powos install prismlauncher` probed correctly, then died with
+  `Remote 'flathub' found in multiple installations: 1) system 2) user … error: No
+  remote chosen`. `do_flatpak()` ran `flatpak install -y flathub "$1"` with no
+  installation named; `-y` does NOT answer that prompt, so the router is broken for
+  every flatpak on a stock Bazzite (which registers flathub in both). Had to work
+  around with a raw `flatpak --system install`. — fixed: `flatpak_scope()` picks
+  `--system`, falling back to `--user`, and `do_flatpak` always names it.
+
 - [ ] **`powos ai --agent X --continue` continues the GLOBAL most-recent conversation,
   not agent X.** `--continue` → `client_continue` → `claude --print --continue`, which
   resumes whatever ran last in the cwd, then grafts X's system prompt on top. With
