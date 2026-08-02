@@ -18,9 +18,17 @@ default:
 #  DEVELOPMENT & TESTING (Tier 1)
 # ═══════════════════════════════════════════════════════════════════
 
-# Run all Tier 1 tests
+# Run all Tier 1 tests (auto-discovered — the exact runner CI uses)
 test:
-    @echo "🧪 Running Tier 1 test suite..."
+    @bash test/tier1/run-all.sh
+
+# Run only Tier 1 tests matching a name, e.g. `just test-only mods`
+test-only filter:
+    @bash test/tier1/run-all.sh {{filter}}
+
+# Run Tier 1 inside the container image (needs docker compose)
+test-container:
+    @echo "🧪 Running Tier 1 test suite in-image..."
     docker compose --profile test run --rm test-runner
 
 # Stop development environment

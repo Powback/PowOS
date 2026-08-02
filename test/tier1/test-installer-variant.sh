@@ -9,7 +9,13 @@
 # Usage:  bash test/tier1/test-installer-variant.sh
 #   Docker: docker exec powos bash /powos/test/tier1/test-installer-variant.sh
 
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 [[ -f "$ROOT/Containerfile" ]] || ROOT="/var/lib/powos/src"
@@ -20,9 +26,10 @@ INSTALLER_TOML="$ROOT/config/bootc/installer/50-powos-installer.toml"
 CONSOLE_TOML="$KARGS_DIR/45-powos-console.toml"
 BUILD="$ROOT/build/build-iso.sh"
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 ok()   { echo "  ok   - $1"; PASS=$((PASS+1)); }
 bad()  { echo "  FAIL - $1"; FAIL=$((FAIL+1)); }
+skip() { echo "  skip - $1"; SKIP=$((SKIP+1)); }
 check(){ if eval "$2"; then ok "$1"; else bad "$1 (expected: $2)"; fi; }
 
 echo "== installer kargs.d (installer variant only) =="
@@ -55,17 +62,20 @@ check "console file sorts before the 50- kargs files" \
     '[[ "$(basename "$CONSOLE_TOML")" < "50-powos-installer.toml" ]]'
 
 echo "== Containerfile installer wiring =="
-check "Containerfile declares POWOS_INSTALLER arg" 'grep -q "ARG POWOS_INSTALLER" "$CF"'
-check "Containerfile installs installer kargs when installer" \
-    'grep -q "50-powos-installer.toml" "$CF"'
-check "Containerfile masks firstboot-disk in installer variant" \
-    'grep -q "systemctl mask powos-firstboot-disk.service" "$CF"'
-check "Containerfile stages installer kargs outside kargs.d" \
-    'grep -q "COPY config/bootc/installer/" "$CF"'
+# The POWOS_INSTALLER build-arg machinery (installer kargs, firstboot-disk
+# masking, the /usr /etc /var restorecon relabel) was deliberately REMOVED from
+# the Containerfile in 75dd0e4 "strip: minimum viable PowOS layer" — the
+# canonical installer is the Anaconda ISO now (see CLAUDE.md's install section).
+#
+# These assertions kept demanding that removed machinery and had been failing
+# ever since. Nobody noticed, because this file was missing from CI's
+# hand-written test list. It is auto-discovered now, so it must match reality.
+# The installer-variant contract that DOES still hold is in build-iso.sh below.
+skip "Containerfile POWOS_INSTALLER wiring — removed in 75dd0e4 (Anaconda ISO is canonical)"
+skip "Containerfile restorecon relabel — removed with the same strip"
 
 echo "== Containerfile SELinux hygiene (both variants) =="
 check "Containerfile masks setroubleshootd" 'grep -q "systemctl mask setroubleshootd.service" "$CF"'
-check "Containerfile relabels files with restorecon" 'grep -q "restorecon -RF /usr /etc /var" "$CF"'
 
 echo "== build-iso.sh CANONICAL Anaconda installer ISO =="
 # The canonical, hardware-validated installer is an Anaconda GUI ISO. The default
@@ -84,5 +94,5 @@ check "build-iso.sh produces powos-installer.raw" 'grep -q "powos-installer.raw"
 check "build-iso.sh keeps the live raw name" 'grep -q "RAW_NAME=\"powos.raw\"" "$BUILD"'
 
 echo ""
-echo "== Results: $PASS passed, $FAIL failed =="
+echo "== Results: $PASS passed, $FAIL failed, $SKIP skipped =="
 [[ $FAIL -eq 0 ]]

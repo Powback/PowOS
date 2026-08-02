@@ -6,7 +6,13 @@
 # — none of which exist in a container/CI. So the bind/unbind sysfs paths and the
 # in-use safety guard are NOT exercised here; they're validated on real hardware
 # (`powos gpu status` + a TTY safety net). This covers everything testable.
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 PASS=0; FAIL=0
 ok(){ echo "  ok   - $1"; PASS=$((PASS+1)); }
 no(){ echo "  FAIL - $1"; FAIL=$((FAIL+1)); }

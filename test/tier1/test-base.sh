@@ -2,7 +2,13 @@
 # test-base.sh - unit tests for `powos base` pure logic (name mapping, listing,
 # validation). No podman/reboot/disk — those are I/O and need a VM.
 
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 
 LIB="/usr/lib/powos/base.sh"
 [[ -f "$LIB" ]] || LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/base.sh"

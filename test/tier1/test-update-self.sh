@@ -13,7 +13,13 @@
 #   Docker:  docker exec powos bash /test/tier1/test-update-self.sh
 #   Booted:  sudo bash test/tier1/test-update-self.sh
 
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 
 PASS=0; FAIL=0; SKIP=0
 pass() { echo "  ok   - $1"; PASS=$((PASS+1)); }

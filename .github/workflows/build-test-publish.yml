@@ -72,24 +72,17 @@ jobs:
           mapfile -t shell_bins < <(grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/*)
           shellcheck -S error "${shell_bins[@]}" lib/*.sh build/*.sh
 
-      - name: Tier1 dev-mode bash tests
-        run: |
-          bash test/tier1/test-hardware-detect.sh
-          bash test/tier1/test-pinstall.sh
-          bash test/tier1/test-install-system.sh
-          bash test/tier1/test-vm.sh
-          bash test/tier1/test-gpu.sh
-          bash test/tier1/test-variant-select.sh
-          bash test/tier1/test-base.sh
-          bash test/tier1/test-boot-manager.sh
-          bash test/tier1/test-config.sh
-          bash test/tier1/test-uninstall.sh
-
-      - name: Data integrity (layer-sync, cachefs unit tests)
+      # Auto-discovers test/tier1/* — do NOT reintroduce a hand-written list
+      # here. The old list silently fell behind until 21 of 31 suites never ran
+      # in CI, which is how a broken `powos sync` (it ran the cloud backup) and
+      # a set of never-dispatched commands shipped unnoticed. A new test file is
+      # now picked up the moment it lands, with nothing to remember.
+      # Known-flaky / known-broken suites are declared with a reason in
+      # run-all.sh; they still run and report, they just don't gate the build.
+      - name: Tier1 suite (auto-discovered)
         run: |
           pip install psutil rich 2>/dev/null || true
-          python3 test/tier1/test-layer-sync.py
-          python3 test/tier1/test-cachefs.py
+          bash test/tier1/run-all.sh
 
   # ─── STAGE 2: build image locally, test against it, push on green ────────
   # Everything happens on one runner in the runner's local podman store.

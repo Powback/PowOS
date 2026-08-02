@@ -20,7 +20,13 @@
 #
 # Usage:  bash test/tier1/test-windows.sh
 
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 
 # Locate the lib relative to this test, or the installed path.
 LIB="/usr/lib/powos/windows.sh"
@@ -590,10 +596,21 @@ check "cold-boot messaging (no resume wording)" \
     'echo "$out" | grep -qi "COLD-BOOT" && ! echo "$out" | grep -qi "resumes its own session"'
 check "layer-sync flushed (--sync-now)" 'rec_has "python3 .*--sync-now"'
 check "layer-sync daemon stopped" 'rec_has "systemctl stop powos-layer-sync.service"'
+# win_unmount_games STOPS the systemd mount unit when one is active (keeps unit
+# state consistent, no auto-remount after resume) and only falls back to a plain
+# `umount` otherwise. This scenario's systemctl mock returns 0 for everything —
+# including `is-active` — so the unit path is the one taken. Demanding `umount`
+# specifically was simply wrong.
+#
+# The ordering check below also passed VACUOUSLY: rec_line returned empty when
+# nothing matched, and bash compares empty as 0, so "0 -lt N" was true no matter
+# what. Both operands must now exist.
+SW_UNMOUNT_RE="^umount $SW_G\|^systemctl stop .*\.mount"
 check "POWOS-GAMES unmounted (hosts the image; frozen rw-mount rule)" \
-    'rec_has "^umount $SW_G"'
+    'rec_has "$SW_UNMOUNT_RE"'
 check "games unmounted BEFORE BootNext" \
-    '[[ "$(rec_line "^umount $SW_G")" -lt "$(rec_line "efibootmgr --bootnext")" ]]'
+    '[[ -n "$(rec_line "$SW_UNMOUNT_RE")" && -n "$(rec_line "efibootmgr --bootnext")" ]] &&
+     [[ "$(rec_line "$SW_UNMOUNT_RE")" -lt "$(rec_line "efibootmgr --bootnext")" ]]'
 check "BootNext set to the Windows entry (0003)" 'rec_has "efibootmgr --bootnext 0003"'
 check "hibernate invoked" 'rec_has "systemctl hibernate"'
 

@@ -7,7 +7,13 @@
 # Usage:  bash test/tier1/test-help.sh
 #   Docker: docker exec powos bash /var/lib/powos/src/test/tier1/test-help.sh
 
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 [[ -f "$ROOT/bin/powos" ]] || ROOT="/var/lib/powos/src"
@@ -50,7 +56,8 @@ before_exp() {
 }
 # A sampling of the CORE surface — including `boot windows` (real dual-boot) which
 # must stay CORE even though the VHDX `windows` command is experimental.
-for cmd in "install-system" "games status" "boot windows" "backup" "rollback" "self status"; do
+for cmd in "install-system" "games storage status" "game <name>" "boot windows" \
+           "backup" "rollback" "self status"; do
     check "'$cmd' listed under CORE" "before_exp \"$cmd\""
 done
 

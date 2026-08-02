@@ -8,7 +8,13 @@
 # Usage:  bash test/tier1/test-mods-core.sh
 #   Docker: docker exec powos bash /var/lib/powos/src/test/tier1/test-mods-core.sh
 
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 
 # ── Locate libs ──────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -621,6 +627,62 @@ assert fw[\"is_framework\"]==True
         [[ "$(python3 -c "import json;print(json.load(open(\"$TMP/rt.json\"))[\"mod_count\"])")" == "3" ]]'
 else
     skip "export/import (portable.sh not found)"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# HELP <-> DISPATCH CONTRACT
+#
+# Agent instructions are GENERATED from `powos mods help` (the `!cmd`
+# mechanism), so help is no longer just documentation — it is the only thing
+# the modding agent knows about this CLI. Two failure modes, both of which
+# were real in this tree:
+#
+#   help promises a verb that doesn't dispatch  -> agent recommends a command
+#                                                  that errors out
+#                                                  (was true of `snapshot`)
+#   a verb dispatches but isn't in help         -> agent cannot know it exists
+#                                                  (was true of `info`, `files`,
+#                                                  `changelog`, `download-link`,
+#                                                  `install-file`, `check`,
+#                                                  `doctor`, `loadouts`)
+#
+# This section pins both directions.
+# ═══════════════════════════════════════════════════════════════════════
+echo ""
+echo "-- help <-> dispatch contract --"
+
+POWOS_BIN="$REPO_ROOT/bin/powos"
+if [[ -x "$POWOS_BIN" ]]; then
+    HTMP="$(mktemp -d)"
+    HELP_TXT="$(HOME="$HTMP" "$POWOS_BIN" mods help 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+
+    check "help is non-trivial" '[[ ${#HELP_TXT} -gt 500 ]]'
+
+    # Direction 1: everything help promises must actually dispatch.
+    # Help writes alternatives as `powos mods deploy|undeploy <game>`, so split
+    # on `|` — otherwise the second verb of every pair goes untested.
+    _undispatched=""
+    while read -r _v; do
+        [[ -n "$_v" ]] || continue
+        _out="$(HOME="$HTMP" "$POWOS_BIN" mods "$_v" 2>&1)"
+        grep -q "Unknown: powos mods $_v" <<< "$_out" && _undispatched="$_undispatched $_v"
+    done < <(grep -oE '^[[:space:]]+powos mods [a-z][a-z0-9|-]*' <<< "$HELP_TXT" \
+             | awk '{print $3}' | tr '|' '\n' | sort -u)
+    check "every help-documented verb dispatches" '[[ -z "$_undispatched" ]]'
+
+    # Direction 2: the commands an agent needs in order to inspect a mod and
+    # pick the right file variant must be discoverable from help alone. A verb
+    # counts as documented whether it's written standalone or as one side of
+    # an `a|b` alternative.
+    for _v in info files changelog download-link install-file check doctor \
+              loadouts snapshot snapshots deploy undeploy adopt verify \
+              export import vu; do
+        check "help documents 'powos mods $_v'" \
+              'grep -qE "(powos mods |\|)$_v( |\||\$)" <<< "$HELP_TXT"'
+    done
+    rm -rf "$HTMP"
+else
+    skip "bin/powos not executable — help/dispatch contract untested"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════
