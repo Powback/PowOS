@@ -737,13 +737,15 @@ NMA and Vortex remain available as escape hatches for:
 - Games not yet defined in `games.d/`
 - Users who prefer the GUI experience
 
-```bash
-# Legacy access (explicit opt-in):
-powos mods legacy nma <game>        # Launch NMA for this game
-powos mods legacy vortex <game>     # Launch Vortex for this game
-powos mods legacy jackify <list>    # Run a Wabbajack modlist
+The `powos mods legacy <backend>` wrapper was removed — it was a second
+spelling for three commands that are all reachable directly:
 
-# After using legacy tools, adopt the results:
+```bash
+powos mods launch nexus-mods-app    # Launch NMA
+powos mods vortex <args>            # Vortex CLI
+powos mods modlist install <list>   # Wabbajack modlist
+
+# After using these, adopt the results:
 powos mods adopt <game>             # Absorb whatever they installed
 ```
 

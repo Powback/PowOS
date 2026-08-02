@@ -2048,8 +2048,6 @@ elif [[ -f "$(dirname "$0")/../lib/backup.sh" ]]; then
     source "$(dirname "$0")/../lib/backup.sh"
 fi
 
-# Legacy source command (kept for backward compatibility)
-
 # ═══════════════════════════════════════════════════════════════════
 # Container Commands (Podman/Distrobox)
 # ═══════════════════════════════════════════════════════════════════
@@ -2789,24 +2787,6 @@ case "${1:-}" in
                 source "$POWOS_LIB/mods/asi.sh"
                 asi_dispatch "$@"
                 ;;
-            # Legacy backends (escape hatches)
-            legacy)
-                shift
-                case "${1:-}" in
-                    nma|nexus) shift; mods_launch_cmd "nexus-mods-app" "$@" ;;
-                    vortex)
-                        shift
-                        source "$POWOS_LIB/mods/vortex.sh"
-                        vortex_dispatch "$@"
-                        ;;
-                    jackify|modlist|wabbajack|wj)
-                        shift
-                        source "$POWOS_LIB/mods/modlist.sh"
-                        modlist_dispatch "$@"
-                        ;;
-                    *) perr "Unknown legacy backend: ${1:-}. Use: nma, vortex, jackify" ;;
-                esac
-                ;;
             vortex)
                 shift
                 source "$POWOS_LIB/mods/vortex.sh"
@@ -2894,24 +2874,6 @@ case "${1:-}" in
                 ai_call "$@"
                 ;;
         esac
-        ;;
-    source|src|s)
-        # Deprecated - redirect to dev
-        echo -e "${YELLOW}Note: 'powos source' is deprecated. Use 'powos dev' instead.${NC}"
-        shift
-        cmd_dev "$@"
-        ;;
-    remote)
-        # Legacy alias for backup
-        echo -e "${YELLOW}Note: 'powos remote' is now 'powos backup'${NC}"
-        shift
-        cmd_backup "$@"
-        ;;
-    state)
-        # Legacy alias for backup
-        echo -e "${YELLOW}Note: 'powos state' is now 'powos backup'${NC}"
-        shift
-        cmd_backup "$@"
         ;;
     version|--version|-v)
         cmd_version

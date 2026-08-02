@@ -517,24 +517,6 @@ mods_nexus_slug_to_game_name() {
     esac
 }
 
-# powos mods deploy <game>
-#   Sync the game's loadout to disk — deploy stage of the pipeline.
-#   Handy on its own after all downloads + loadout-installs are done.
-# NMA loadout deploy (legacy backend). Deliberately NOT named mods_deploy_cmd:
-# mods/deploy.sh owns that name for the v2 overlayfs mount, and bin/powos
-# sources deploy.sh after this file — so naming both the same made `powos mods
-# deploy` depend on source order between two totally different implementations.
-mods_nma_deploy_cmd() {
-    POWOS_MODS_LAST_VERB="deploy"
-    local game="${1:?Usage: powos mods legacy nma deploy <game>}"
-    local slug; slug="$(mods_nexus_slug_of "$game")"
-    local lid; lid="$(mods_loadout_id_for "$slug")"
-    [[ -z "$lid" ]] && { perr "No loadout found for game $game (slug: $slug)."; return 1; }
-    plog "Synchronizing $lid to disk (deploying mods)…"
-    mods_nma_invoke loadout synchronize -l "$lid" \
-        && pok "Loadout $lid deployed." \
-        || { perr "loadout synchronize failed."; return 1; }
-}
 
 # powos mods loadouts
 #   List all NMA loadouts. Thin wrapper.

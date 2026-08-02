@@ -1295,8 +1295,8 @@ which is the only thing that resolves the source tree correctly on an
 installed system (the overlays ship inside the snapshot at
 `/var/lib/powos/src/sources`, NOT `/var/lib/powos/sources`).
 
-`powos source` is a deprecated alias that redirects to `powos dev` — it
-manages dev PROJECTS, not sysext overlays. Do not use it for overlay work.
+(`powos source` used to exist as an alias for `powos dev`; it was removed —
+`dev` manages PROJECTS, which are a different thing from sysext overlays.)
 
 ```bash
 # List overlays (+ which are built/enabled)

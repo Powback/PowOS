@@ -474,7 +474,6 @@ vortex_install_cmd() {
         case "$1" in
             --version)              version="$2"; shift 2 ;;
             --no-default)           take_default=false; shift ;;
-            --set-default)          take_default=true; shift ;;   # legacy no-op
             *)                      perr "Unknown flag: $1"; return 1 ;;
         esac
     done
