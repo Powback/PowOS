@@ -22,19 +22,47 @@ MODS_GAMES_CONF_DIR="${MODS_GAMES_CONF_DIR:-/usr/lib/powos/mods/games.d}"
 # Source a games.d/<game>.conf, populating GAME_* variables.
 # Falls back to project source tree during development.
 
+# The games.d search path — installed location first, then the dev source
+# tree. THE one definition: this list used to be copy-pasted into every
+# function that needed it, which is how two canonical vocabularies for the
+# same game were able to drift apart (harness state said "gta5", the manifest
+# said "gtav"). Everything that looks up a game config goes through here.
+mods_games_conf_dirs() {
+    echo "$MODS_GAMES_CONF_DIR"
+    echo "${POWOS_SRC:-/var/lib/powos/src}/config/mods/games.d"
+    echo "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../config/mods/games.d"
+}
+
+# Canonical game id (= the games.d conf basename) for a Steam appid.
+# games.d is the SINGLE source of truth for canonical ids, so `powos games`,
+# the mod manifest and the verify harness all speak one vocabulary.
+# Returns non-zero when no config claims that appid.
+mods_game_id_for_appid() {
+    local appid="$1" dir f
+    [[ -n "$appid" ]] || return 1
+    while read -r dir; do
+        [[ -d "$dir" ]] || continue
+        for f in "$dir"/*.conf; do
+            [[ -f "$f" ]] || continue
+            local got
+            got="$(grep -m1 '^GAME_APPID=' "$f" 2>/dev/null | cut -d= -f2 | tr -d '"'"'"' ')"
+            [[ "$got" == "$appid" ]] && { basename "$f" .conf; return 0; }
+        done
+        return 1   # first existing dir wins, matching mods_load_game_conf
+    done < <(mods_games_conf_dirs)
+    return 1
+}
+
 mods_load_game_conf() {
     local game="$1"
-    local conf=""
+    local conf="" dir
 
-    # Try installed path first, then dev source tree
-    for dir in "$MODS_GAMES_CONF_DIR" \
-               "${POWOS_SRC:-/var/lib/powos/src}/config/mods/games.d" \
-               "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../config/mods/games.d"; do
+    while read -r dir; do
         if [[ -f "$dir/${game}.conf" ]]; then
             conf="$dir/${game}.conf"
             break
         fi
-    done
+    done < <(mods_games_conf_dirs)
 
     if [[ -z "$conf" ]]; then
         perr "No game config for '$game'. Available:"
@@ -51,10 +79,8 @@ mods_load_game_conf() {
 }
 
 mods_list_games() {
-    local dir
-    for dir in "$MODS_GAMES_CONF_DIR" \
-               "${POWOS_SRC:-/var/lib/powos/src}/config/mods/games.d" \
-               "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../config/mods/games.d"; do
+    local dir f
+    while read -r dir; do
         if [[ -d "$dir" ]]; then
             for f in "$dir"/*.conf; do
                 [[ -f "$f" ]] || continue
@@ -65,7 +91,7 @@ mods_list_games() {
             done
             return 0
         fi
-    done
+    done < <(mods_games_conf_dirs)
     pwarn "No games.d directory found."
 }
 

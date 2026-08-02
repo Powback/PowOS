@@ -8,7 +8,13 @@
 # Usage:  bash test/tier1/test-mods-harness.sh
 #   Docker: docker exec powos bash /var/lib/powos/src/test/tier1/test-mods-harness.sh
 
-set -uo pipefail
+# NOTE: deliberately NO `pipefail`. These harnesses assert with
+# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
+# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
+# on scheduling. That produced random failures (test-windows.sh swung between 4
+# and 11 "failures" on identical runs). Last-command status is the correct
+# semantics for an assertion anyway.
+set -u
 
 # ── Locate libs ──────────────────────────────────────────────────────────
 
@@ -73,6 +79,23 @@ echo "== Game name resolution =="
 check "cyberpunk appid resolves"  '[[ "$(mods_game_name_of 1091500)" == "cyberpunk2077" ]]'
 check "skyrim appid resolves"     '[[ "$(mods_game_name_of 489830)" == "skyrimse" ]]'
 check "unknown appid passes through" '[[ "$(mods_game_name_of 999999)" == "999999" ]]'
+
+# ONE canonical vocabulary. This names verdict files, so it MUST equal the
+# games.d conf basename — the same id `powos games`, the mod manifest and
+# `powos game <name>` use. It used to return "gta5"/"gta5-legacy" from a
+# private table while games.d said "gtav"/"gtav-legacy", giving one game two
+# state keys across adjacent subsystems.
+check "gtav appid matches games.d id"        '[[ "$(mods_game_name_of 3240220)" == "gtav" ]]'
+check "gtav-legacy appid matches games.d id" '[[ "$(mods_game_name_of 271590)"  == "gtav-legacy" ]]'
+check "rdr2 appid matches games.d id"        '[[ "$(mods_game_name_of 1174180)" == "rdr2" ]]'
+# Titles with no games.d config still resolve via the fallback table.
+check "fallout4 (no games.d conf) resolves"  '[[ "$(mods_game_name_of 377160)" == "fallout4" ]]'
+
+# Every name it returns must round-trip back to the same appid.
+for _a in 3240220 271590 1091500 489830 1174180; do
+    check "round-trips appid $_a" \
+          '[[ "$(mods_appid_of "$(mods_game_name_of $_a)")" == "$_a" ]]'
+done
 
 # ── Test: harness_cpu_ticks (on ourselves) ───────────────────────────────
 echo ""

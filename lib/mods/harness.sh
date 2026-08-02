@@ -34,6 +34,12 @@ source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/..}/common.sh
 }
 POWOS_TAG=harness
 
+# core.sh owns the games.d lookup (mods_game_id_for_appid) that names verdict
+# files. Without it this file would need its own copy of the canonical-id
+# table — which is exactly the duplication that let harness state ("gta5") and
+# the mod manifest ("gtav") disagree about the same game.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/core.sh" 2>/dev/null || true
+
 # ─── Paths ────────────────────────────────────────────────────────────────
 
 HARNESS_STATE_DIR="${HARNESS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/powos/mods/verify}"
@@ -312,7 +318,10 @@ harness_discover_game_pid() {
 
         # Method 2: /proc scan for compatdata/<appid>
         local found_pid
-        found_pid="$(python3 - "$appid" <<'PY' 2>/dev/null)" || true
+        # The heredoc terminator MUST be inside the command substitution. It
+        # used to close on the `$(...)` line, which left the body outside —
+        # python got empty stdin, so this /proc fallback silently never fired.
+        found_pid="$(python3 - "$appid" 2>/dev/null <<'PY'
 import sys, os
 appid = sys.argv[1]
 for pid in sorted(os.listdir("/proc"), key=lambda x: int(x) if x.isdigit() else 0, reverse=True):
@@ -329,6 +338,7 @@ for pid in sorted(os.listdir("/proc"), key=lambda x: int(x) if x.isdigit() else 
         pass
 sys.exit(1)
 PY
+)" || true
         if [[ -n "$found_pid" ]]; then
             echo "$found_pid"
             return 0
@@ -1143,18 +1153,25 @@ ${BOLD}Safety:${NC}
 EOF
 }
 
-# Resolve human-readable game name from appid.
+# Canonical game id for an appid. This names harness verdict files, so it MUST
+# agree with the id the rest of PowOS uses (`powos games`, the mod manifest,
+# `powos game <name>`) — otherwise one game gets two state keys and its own
+# history becomes invisible to the adjacent subsystem.
+#
+# games.d is the source of truth and is consulted first. The table below is
+# only a fallback for titles with no games.d config (Vortex-managed games that
+# have no native install rules yet).
 mods_game_name_of() {
+    if declare -f mods_game_id_for_appid >/dev/null 2>&1; then
+        local id
+        id="$(mods_game_id_for_appid "$1" 2>/dev/null)" && [[ -n "$id" ]] \
+            && { echo "$id"; return 0; }
+    fi
     case "$1" in
-        1091500) echo "cyberpunk2077" ;;
-        489830)  echo "skyrimse" ;;
         377160)  echo "fallout4" ;;
         1716740) echo "starfield" ;;
         292030)  echo "witcher3" ;;
         1086940) echo "bg3" ;;
-        3240220) echo "gta5" ;;
-        271590)  echo "gta5-legacy" ;;
-        1174180) echo "rdr2" ;;
         *) echo "$1" ;;
     esac
 }
