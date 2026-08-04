@@ -14,7 +14,12 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
     tty: true
     volumes:
-      - powos-home:/home/powos:rw
+      # Mount at the REAL home path. On the ostree/bazzite base /home is a
+      # symlink to var/home, and mounting a volume onto a path *through* that
+      # symlink (/home/powos) makes conmon fail to start the container
+      # ("readObjectStart: expect { or n" — an empty OCI spec). /var/home/powos
+      # is the symlink target, so /home/powos still resolves to it.
+      - powos-home:/var/home/powos:rw
       # Live-dev bind: edit source on the host, it's live at /powos in the
       # container (the entrypoint symlinks it into /var/lib/powos and rebuilds
       # overlays). Optional — the image also ships its source at

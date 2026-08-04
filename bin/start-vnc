@@ -6,6 +6,11 @@ export HOME=/home/powos
 export USER=powos
 export DISPLAY=:1
 
+# dbus/Plasma need a machine-id; the container image ships an empty one.
+if [[ ! -s /etc/machine-id ]]; then
+    sudo bash -c 'dbus-uuidgen > /etc/machine-id' 2>/dev/null || true
+fi
+
 # Create VNC directory
 mkdir -p $HOME/.vnc
 
@@ -20,7 +25,15 @@ export XDG_SESSION_TYPE=x11
 export XDG_RUNTIME_DIR=/tmp/runtime-powos
 mkdir -p $XDG_RUNTIME_DIR
 chmod 700 $XDG_RUNTIME_DIR
-exec dbus-launch --exit-with-session startxfce4
+# PowOS ships KDE Plasma, not XFCE. Prefer the X11 Plasma session; fall back to
+# whatever desktop session is actually present so the container is never blank.
+if command -v startplasma-x11 >/dev/null 2>&1; then
+    exec dbus-launch --exit-with-session startplasma-x11
+elif command -v startxfce4 >/dev/null 2>&1; then
+    exec dbus-launch --exit-with-session startxfce4
+else
+    exec dbus-launch --exit-with-session xterm
+fi
 EOF
 chmod +x $HOME/.vnc/xstartup
 

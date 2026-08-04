@@ -63,16 +63,20 @@ log_success "Hardware profile applied"
 # ─────────────────────────────────────────────────────────────────
 log_step "Step 3/6: Building Overlays (Frankenstein Mods)"
 OVERLAY_MGR="/usr/lib/powos/overlay-manager.sh"
-if [[ -d "${POWOS_MOUNT}/sources" ]] && [[ -f "$OVERLAY_MGR" ]]; then
-    for src in "${POWOS_MOUNT}/sources"/*/; do
-        if [[ -f "${src}/build.sh" ]]; then
-            name=$(basename "$src")
-            log "Building: $name"
-            POWOS_ROOT="$POWOS_MOUNT" bash "$OVERLAY_MGR" build "$name" 2>&1 | tail -5 || true
-        fi
-    done
-    POWOS_ROOT="$POWOS_MOUNT" bash "$OVERLAY_MGR" enable-all 2>&1 || true
-    log_success "Overlays built and enabled"
+if [[ -d "${POWOS_MOUNT}/sources" ]] && [[ -f "$OVERLAY_MGR" ]] && [[ "${POWOS_BUILD_OVERLAYS:-0}" == "1" ]]; then
+    # Building every overlay from source (kde, powstream, …) is minutes of
+    # compile — it must NOT block the desktop/CLI from coming up. Background it
+    # and log to a file. Off by default; POWOS_BUILD_OVERLAYS=1 to enable.
+    log "Building overlays in the background (log: /var/log/powos-overlays.log)…"
+    (
+        for src in "${POWOS_MOUNT}/sources"/*/; do
+            [[ -f "${src}/build.sh" ]] || continue
+            POWOS_ROOT="$POWOS_MOUNT" bash "$OVERLAY_MGR" build "$(basename "$src")" || true
+        done
+        POWOS_ROOT="$POWOS_MOUNT" bash "$OVERLAY_MGR" enable-all || true
+    ) >/var/log/powos-overlays.log 2>&1 &
+elif [[ -d "${POWOS_MOUNT}/sources" ]]; then
+    log "overlay sources present — skipping auto-build (set POWOS_BUILD_OVERLAYS=1 to enable)"
 else
     log "No overlay sources found"
 fi
