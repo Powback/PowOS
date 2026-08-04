@@ -2525,7 +2525,7 @@ case "${1:-}" in
         source "$POWOS_LIB/doctor.sh"
         cmd_doctor "$@"
         ;;
-    install-wizard|install)
+    install-wizard)
         shift
         source "$POWOS_LIB/install-wizard.sh"
         cmd_install_wizard "$@"
@@ -2675,13 +2675,21 @@ case "${1:-}" in
             deploy)                             shift; mods_deploy_cmd "$@" ;;
             undeploy)                           shift; mods_undeploy_cmd "$@" ;;
             verify|test-boot)
+                # verify is the headless-launch harness (what the help promises).
+                # Its sub-verbs (history/setup) must route to the harness too —
+                # the old `any-arg → mods_verify_cmd` hijack sent `verify <game>`
+                # to the integrity checker (wrong engine) and `verify history`
+                # into a bogus "load game 'history'". Integrity lives on in
+                # mods_verify_cmd for doctor's internal use (lib/mods/verify.sh),
+                # it was never the documented `verify`.
                 shift
-                if [[ -n "${1:-}" ]] && type -t mods_verify_cmd &>/dev/null; then
-                    mods_verify_cmd "$@"
-                else
-                    source "$POWOS_LIB/mods/harness.sh"
-                    harness_verify_cmd "$@"
-                fi
+                source "$POWOS_LIB/mods/harness.sh"
+                case "${1:-}" in
+                    history|results|log) shift; harness_history_cmd "$@" ;;
+                    setup)               shift; harness_setup_cmd "$@" ;;
+                    ""|help|--help|-h)   harness_help ;;
+                    *)                   harness_verify_cmd "$@" ;;
+                esac
                 ;;
             doctor)                             shift; mods_doctor_cmd "$@" ;;
             rollback)                           shift; mods_rollback_cmd "$@" ;;

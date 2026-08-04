@@ -670,6 +670,17 @@ if [[ -x "$POWOS_BIN" ]]; then
              | awk '{print $3}' | tr '|' '\n' | sort -u)
     check "every help-documented verb dispatches" '[[ -z "$_undispatched" ]]'
 
+    # Regression: `verify` is the headless-launch harness (what help promises),
+    # and its sub-verbs must reach the harness — NOT the integrity checker.
+    # The old dispatch sent `verify <arg>` to mods_verify_cmd, so `verify
+    # history` tried to load a game called "history" and the documented
+    # harness history was unreachable.
+    _vh="$(HOME="$HTMP" "$POWOS_BIN" mods verify history 2>&1)"
+    check "'verify history' reaches the harness"  'grep -qiE "harness|no results|verdict|history" <<< "$_vh"'
+    check "'verify history' is not a game-load"    '! grep -qiE "load.*game .history|no manifest|unknown game" <<< "$_vh"'
+    _vb="$(HOME="$HTMP" "$POWOS_BIN" mods verify 2>&1)"
+    check "bare 'verify' shows harness help"       'grep -qi "headless" <<< "$_vb"'
+
     # Direction 2: the commands an agent needs in order to inspect a mod and
     # pick the right file variant must be discoverable from help alone. A verb
     # counts as documented whether it's written standalone or as one side of
