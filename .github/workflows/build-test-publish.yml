@@ -274,6 +274,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils ovmf sshpass
+          # The runner ships /dev/kvm but the runner user often can't open it
+          # ("failed to initialize kvm: Permission denied"), which forces the
+          # boot test onto TCG (5-10x slower, risks the stage timeouts). Grant
+          # access so KVM is actually usable; harmless if KVM isn't real (the
+          # harness falls back to TCG via -accel kvm:tcg either way).
+          sudo chmod a+rw /dev/kvm 2>/dev/null || true
+          ls -l /dev/kvm 2>/dev/null || echo "no /dev/kvm on this runner"
 
       # NOTE: pass the image FULLY QUALIFIED as localhost/powos-ci.
       # `podman build -t powos-ci` stores it as localhost/powos-ci:latest, but
