@@ -436,10 +436,8 @@ ${BOLD}powos mods vu server${NC} — VU dedicated server
   powos mods vu server init           Create the instance dir + show key steps
   powos mods vu server start [args]   Run the dedicated server (foreground)
   powos mods vu server status         Instance dir, key, port reachability
-  powos mods vu server mod <verb>     Manage server mods (install/list/enable/
-                                        disable/remove/update). 'mod help' for
-                                        sources (gh:owner/repo, local zip, vumm)
-                                        and how multi-mod repos let you choose.
+
+Mods for the server: ${BOLD}powos mods vu mod${NC} (install/list/enable/…).
 
 The instance directory (${VU_INSTANCE_DIR}) holds server.key, config and mods.
 Get server.key from your VU account, drop it in that directory.
@@ -514,7 +512,6 @@ vu_server_cmd() {
         init)    vu_server_init ;;
         start)   vu_server_start "$@" ;;
         status)  vu_server_status ;;
-        mod|mods) vu_server_mod_cmd "$@" ;;
         help|-h|--help) vu_server_help ;;
         *) perr "Unknown server verb: $sub"; vu_server_help; return 1 ;;
     esac
@@ -522,7 +519,7 @@ vu_server_cmd() {
 
 # ── Server mods (Admin/Mods + ModList.txt) ────────────────────────────────────
 #
-# A VU server mod is just a folder under <instance>/Admin/Mods/ that contains a
+# A VU mod is just a folder under <instance>/Admin/Mods/ that contains a
 # mod.json. VU won't LOAD it until the folder name is listed in
 # <instance>/Admin/ModList.txt. So "installing" a mod is two deterministic
 # steps: place the folder, then (optionally) add its name to the list.
@@ -671,16 +668,20 @@ vu_mod_resolve_source() {
 
 vu_mod_help() {
     cat <<EOF
-${BOLD}powos mods vu server mod${NC} — manage dedicated-server mods
+${BOLD}powos mods vu mod${NC} — manage VU mods
 
-  install <source> [name...] [--all] [--no-enable] [--ref REF]
-                          Place mod(s) into ${VU_MODS_DIR}
-                          and enable them in ModList.txt.
+VU mods are always server-side: a server loads them, and clients auto-download
+them on join. So there is no client/server split here — just 'vu mod'.
+
+  install <source> [--only A,B | --all] [--disabled]
+                          Install mod(s) into the server and enable them.
+                          --only picks specific mods from a multi-mod repo;
+                          --all takes every one; --disabled skips ModList.
   list                    Show installed mods and their enabled state.
   enable  <name>          Add a mod to ModList.txt (VU loads it).
   disable <name>          Remove from ModList.txt (files kept).
   remove  <name>          Delete the mod folder and delist it.
-  update  [name|--all]    Re-fetch mods that came from GitHub.
+  update  [name]          Re-fetch GitHub mods (no name = all of them).
 
 ${BOLD}Sources${NC}
   gh:owner/repo[@ref]     A GitHub repo (default branch unless @ref).
@@ -696,30 +697,31 @@ ${BOLD}Sources${NC}
 
 ${BOLD}Choosing when a repo ships several mods${NC}
   A repo with multiple mod.json folders is NOT installed wholesale. With no
-  names given (and no TTY to prompt) install LISTS the mods and stops. Pass
-  the name(s) you want, or ${BOLD}--all${NC} to take everything on purpose.
+  ${BOLD}--only${NC}/${BOLD}--all${NC} (and no TTY to prompt) install LISTS the mods and stops.
+  Use ${BOLD}--only ModA,ModB${NC} to pick, or ${BOLD}--all${NC} to take everything on purpose.
 
 A mod is identified by a mod.json containing a Name — nothing is guessed.
 EOF
 }
 
-# install <source> [name...] [--all] [--no-enable] [--ref REF]
+# install <source> [--only A,B | --all] [--disabled]
 vu_mod_install_cmd() {
-    local source="" want=() take_all=false do_enable=true ref=""
+    local source="" want=() take_all=false do_enable=true _o=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --all)       take_all=true ;;
-            --no-enable) do_enable=false ;;
-            --ref)       ref="$2"; shift ;;
-            -h|--help)   vu_mod_help; return 0 ;;
-            -*)          perr "unknown flag: $1"; return 1 ;;
-            *) if [[ -z "$source" ]]; then source="$1"; else want+=("$1"); fi ;;
+            --all)      take_all=true ;;
+            --only)     IFS=', ' read -r -a _o <<< "${2:-}"; want+=("${_o[@]}"); shift ;;
+            --only=*)   IFS=', ' read -r -a _o <<< "${1#*=}"; want+=("${_o[@]}") ;;
+            --disabled) do_enable=false ;;
+            -h|--help)  vu_mod_help; return 0 ;;
+            -*)         perr "unknown flag: $1"; return 1 ;;
+            *) if [[ -z "$source" ]]; then source="$1"
+               else perr "unexpected argument '$1' — pick mods with ${BOLD}--only NAME[,NAME]${NC}, not positionally."; return 1; fi ;;
         esac
         shift
     done
-    [[ -z "$source" ]] && { perr "usage: powos mods vu server mod install <source> [name...]"; vu_mod_help; return 1; }
-    # A --ref applies to gh:/URL sources by appending @ref when absent.
-    if [[ -n "$ref" && "$source" == gh:* && "$source" != *@* ]]; then source="$source@$ref"; fi
+    [[ -z "$source" ]] && { perr "usage: powos mods vu mod install <source> [--only A,B | --all] [--disabled]"; vu_mod_help; return 1; }
+    # Pin a ref with the source itself: gh:owner/repo@ref (no separate flag).
 
     local resolved dir spec
     resolved="$(vu_mod_resolve_source "$source")" || return $?
@@ -766,7 +768,7 @@ vu_mod_install_cmd() {
         # Non-interactive, multiple mods, no selection → refuse; never auto-all.
         perr "$source ships ${count} mods — choose which, don't install all blindly:"
         vu_mod_install_list_available names[@]
-        plog "  re-run with the name(s), or ${BOLD}--all${NC} to take every one."
+        plog "  pick with ${BOLD}--only ModA,ModB${NC}, or ${BOLD}--all${NC} to take every one."
         [[ -n "$cleanup" ]] && rm -rf "$cleanup"
         return 2
     fi
@@ -781,7 +783,7 @@ vu_mod_install_cmd() {
     for i in "${pick[@]}"; do
         if installed="$(vu_place_mod "${paths[$i]}" "${names[$i]}" "$spec")"; then
             if $do_enable; then vu_modlist_add "$installed"; pok "installed + enabled: $installed"
-            else pok "installed (disabled): $installed  ${DIM}enable with: powos mods vu server mod enable $installed${NC}"; fi
+            else pok "installed (disabled): $installed  ${DIM}enable with: powos mods vu mod enable $installed${NC}"; fi
         else
             rc=1
         fi
@@ -798,7 +800,7 @@ vu_mod_install_list_available() {
 }
 
 vu_mod_list_cmd() {
-    echo -e "${BOLD}VU server mods${NC}  ${DIM}$VU_MODS_DIR${NC}"
+    echo -e "${BOLD}VU mods${NC}  ${DIM}$VU_MODS_DIR${NC}"
     echo    "════════════════════════════════════════"
     if [[ ! -d "$VU_MODS_DIR" ]] || [[ -z "$(ls -A "$VU_MODS_DIR" 2>/dev/null)" ]]; then
         echo "  (none installed)"; return 0
@@ -817,24 +819,24 @@ vu_mod_list_cmd() {
 }
 
 vu_mod_enable_cmd() {
-    [[ -n "${1:-}" ]] || { perr "usage: … server mod enable <name>"; return 1; }
+    [[ -n "${1:-}" ]] || { perr "usage: powos mods vu mod enable <name>"; return 1; }
     [[ -d "$VU_MODS_DIR/$1" ]] || { perr "no such mod folder: $1  (install it first)"; return 1; }
     vu_modlist_add "$1"; pok "enabled: $1"
 }
 
 vu_mod_disable_cmd() {
-    [[ -n "${1:-}" ]] || { perr "usage: … server mod disable <name>"; return 1; }
+    [[ -n "${1:-}" ]] || { perr "usage: powos mods vu mod disable <name>"; return 1; }
     vu_modlist_remove "$1"; pok "disabled: $1  ${DIM}(files kept)${NC}"
 }
 
 vu_mod_remove_cmd() {
-    [[ -n "${1:-}" ]] || { perr "usage: … server mod remove <name>"; return 1; }
+    [[ -n "${1:-}" ]] || { perr "usage: powos mods vu mod remove <name>"; return 1; }
     vu_modlist_remove "$1"
     rm -rf "${VU_MODS_DIR:?}/$1"
     pok "removed: $1"
 }
 
-# update [name|--all] — re-fetch gh-sourced mods from their recorded provenance.
+# update [name] — re-fetch gh-sourced mods from their recorded provenance.
 vu_mod_update_cmd() {
     local target="${1:-}"
     [[ -d "$VU_MODS_DIR" ]] || { perr "no mods installed."; return 1; }
@@ -864,7 +866,7 @@ vu_mod_update_cmd() {
     plog "update done: $updated updated, $skipped skipped."
 }
 
-vu_server_mod_cmd() {
+vu_mod_cmd() {
     local sub="${1:-list}"; shift || true
     case "$sub" in
         install|add|i) vu_mod_install_cmd "$@" ;;
@@ -929,10 +931,18 @@ Server:
   powos mods vu server init       Create the instance dir, explain server.key
   powos mods vu server start      Run the dedicated server (foreground)
   powos mods vu server status     Instance, key and port summary
-  powos mods vu server mod ...    Install/list/enable/disable/update server
-                                    mods from GitHub, a local zip, or vumm.
-                                    Multi-mod repos let you pick, never all.
   powos mods vu server help       Server-specific detail
+
+Mods (always server-side — clients auto-download on join):
+  powos mods vu mod install <source> [--only A,B|--all] [--disabled]
+                                  Install mod(s) from GitHub (gh:owner/repo),
+                                    a local zip/folder, or vumm. A repo with
+                                    several mods lets you pick — never all.
+  powos mods vu mod list          Installed mods + enabled state
+  powos mods vu mod enable|disable|remove <name>
+  powos mods vu mod update [name]
+                                  Re-fetch GitHub-sourced mods
+  powos mods vu mod help          Sources + selection detail
 
 Other:
   powos mods vu status            Client, gamepath, runtime, d3dcompiler
@@ -962,6 +972,7 @@ cmd_mods_vu() {
         branch)       vu_branch_cmd "$@" ;;
         play|launch)  vu_play_cmd "$@" ;;
         server)       vu_server_cmd "$@" ;;
+        mod|mods)     vu_mod_cmd "$@" ;;
         status)       vu_status_cmd ;;
         uninstall)    vu_uninstall_cmd "$@" ;;
         help|-h|--help) vu_help ;;

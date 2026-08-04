@@ -225,6 +225,16 @@ Key facts an agent should CHECK before starting:
   (same mechanism as MO2 — no Bottles). `vu install [--gamepath DIR]` ·
   `activate [--token T]` · `play` · `branch prod|dev` · `status` ·
   `server init|start|status` · `uninstall [--purge]`.
+  **Mods (`vu mod`)** — VU mods are always server-side (a server loads them,
+  clients auto-download on join), so the verb is just `vu mod`, no client/server
+  split. `vu mod install <source> [name...]` where source is `gh:owner/repo`,
+  a github URL, a local dir/zip (the Discord/forum escape hatch), or `vumm:<name>`
+  (bf3reality-account-gated — even realitymod 403s anonymously, and vumm has no
+  search/list). A mod is identified by a `mod.json` Name, not guessed; a repo
+  shipping several mods is never installed wholesale — with no name and no TTY it
+  lists them and refuses (pass the name(s) or `--all`). `vu mod list` ·
+  `enable|disable|remove <name>` (ModList.txt wiring) · `update [name|--all]`
+  (re-fetch GitHub mods).
   **The one gotcha:** VU's WebUI needs a NATIVE `d3dcompiler_47` in the prefix
   on EVERY branch, not just dev. Wine's built-in stub renders a blank/black UI
   with no error, which reads as "VU is broken on Linux" — it isn't, and hasn't

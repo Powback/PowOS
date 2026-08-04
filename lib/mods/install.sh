@@ -1051,6 +1051,8 @@ Venice Unleashed (Battlefield 3 community client + VEXT modding framework):
   powos mods vu activate [--token TOKEN]  Activate BF3 (EA app, or headless)
   powos mods vu play                      Launch the client
   powos mods vu server init|start|status  Dedicated server
+  powos mods vu mod install|list|…        Server mods (GitHub/zip/vumm; a
+                                            multi-mod repo lets you pick)
   powos mods vu status                    Client/gamepath/runtime/d3dcompiler
   powos mods vu help                      Full VU verb list
   ${DIM}VU's WebUI needs a NATIVE d3dcompiler_47 on every branch — Wine's stub

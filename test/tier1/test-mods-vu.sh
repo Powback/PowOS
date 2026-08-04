@@ -259,27 +259,28 @@ _mreset
 check "multi w/o selection: refuses"   '! vu_mod_install_cmd "$MULTI" </dev/null 2>/dev/null'
 check "multi w/o selection: installs nothing" '[[ -z "$(ls -A "$VU_MODS_DIR")" ]]'
 
-# named selection installs ONLY that mod
+# --only selection installs ONLY that mod
 _mreset
-vu_mod_install_cmd "$MULTI" ModB </dev/null >/dev/null 2>&1
-check "named select: ModB placed"      '[[ -d "$VU_MODS_DIR/ModB" ]]'
-check "named select: ModA NOT placed"  '[[ ! -d "$VU_MODS_DIR/ModA" ]]'
-check "named select: only ModB enabled" 'vu_modlist_has ModB && ! vu_modlist_has ModA'
+vu_mod_install_cmd "$MULTI" --only ModB </dev/null >/dev/null 2>&1
+check "--only ModB: placed"            '[[ -d "$VU_MODS_DIR/ModB" ]]'
+check "--only ModB: ModA NOT placed"  '[[ ! -d "$VU_MODS_DIR/ModA" ]]'
+check "--only ModB: only ModB enabled" 'vu_modlist_has ModB && ! vu_modlist_has ModA'
 
 # unknown name is an error, not a silent no-op
 _mreset
-check "unknown name errors"            '! vu_mod_install_cmd "$MULTI" Nope </dev/null 2>/dev/null'
+check "unknown --only name errors"     '! vu_mod_install_cmd "$MULTI" --only Nope </dev/null 2>/dev/null'
+check "stray positional is rejected"   '! vu_mod_install_cmd "$MULTI" ModA ModB </dev/null 2>/dev/null'
 
 # --all is the explicit opt-in to take everything
 _mreset
 vu_mod_install_cmd "$MULTI" --all </dev/null >/dev/null 2>&1
 check "--all: both placed"             '[[ -d "$VU_MODS_DIR/ModA" && -d "$VU_MODS_DIR/ModB" ]]'
 
-# --no-enable places files but leaves ModList untouched
+# --disabled places files but leaves ModList untouched
 _mreset
-vu_mod_install_cmd "$SINGLE" --no-enable </dev/null >/dev/null 2>&1
-check "--no-enable: placed"            '[[ -d "$VU_MODS_DIR/SoloMod" ]]'
-check "--no-enable: NOT in ModList"    '! vu_modlist_has SoloMod'
+vu_mod_install_cmd "$SINGLE" --disabled </dev/null >/dev/null 2>&1
+check "--disabled: placed"             '[[ -d "$VU_MODS_DIR/SoloMod" ]]'
+check "--disabled: NOT in ModList"     '! vu_modlist_has SoloMod'
 
 # enable / disable / remove lifecycle
 check "enable adds to ModList"         'vu_mod_enable_cmd SoloMod >/dev/null && vu_modlist_has SoloMod'
@@ -301,8 +302,10 @@ for v in install list enable disable remove update; do
 done
 check "mod help explains gh: source"   'grep -q "gh:owner/repo" <<< "$MHELP"'
 check "mod help explains choose-not-all" 'grep -qi "never" <<< "$MHELP" || grep -qi "not installed wholesale" <<< "$MHELP"'
-check "server help mentions 'server mod'" 'grep -q "server mod" <<< "$(vu_server_help)"'
-check "main help mentions 'server mod'" 'grep -q "server mod" <<< "$(vu_help)"'
+check "mod help header is 'vu mod' not 'server mod'" 'grep -q "powos mods vu mod" <<< "$MHELP" && ! grep -q "server mod" <<< "$MHELP"'
+check "main help documents 'vu mod'"   'grep -q "powos mods vu mod" <<< "$(vu_help)"'
+check "server help points at 'vu mod'"  'grep -q "vu mod" <<< "$(vu_server_help)"'
+check "vu mod dispatches (real path)"   'vu_mod_cmd help >/dev/null 2>&1'
 
 echo
 echo "-- tool-registry wiring in install.sh --"
