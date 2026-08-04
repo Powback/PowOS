@@ -2,6 +2,18 @@
 # Installed to /etc/xdg/kwinrc — KDE reads this as the system-level baseline
 # for every user. User overrides in ~/.config/kwinrc take precedence.
 
+# On-screen (touch) keyboard provider.
+# KWin launches this desktop file as the Wayland input method when the virtual
+# keyboard is shown. We use Maliit (maliit-keyboard, installed by the
+# Containerfile) instead of Plasma's Qt-VirtualKeyboard default: QtVK sizes its
+# keys to screen WIDTH, so on a portrait/vertical touchscreen the panel overruns
+# the bottom of the screen, and it exposes no height/scale knob. Maliit is the
+# touch-first keyboard Plasma Mobile ships — portrait-aware, with real sizing —
+# and it's a package + this one setting, not a forked source patch. Users can
+# still switch providers in System Settings → Virtual Keyboard.
+[Wayland]
+InputMethod=/usr/share/applications/com.github.maliit.keyboard.desktop
+
 # Enable KZones window-snapping script for all users.
 # The script is installed at /usr/share/kwin/scripts/kzones/ (baked into the
 # image by the Containerfile; also rebuildable via `powos overlay build powzones`).

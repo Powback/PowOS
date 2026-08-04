@@ -66,6 +66,15 @@ COPY config/kde/konsole/                  /usr/share/konsole/
 # this exact path (with %IMAGE_NAME%/%GREENBOOT% substitutions through glow), so
 # overwriting it swaps the banner while keeping the renderer + themes intact.
 COPY config/ublue-os/motd/powos.md        /usr/share/ublue-os/motd/bazzite.md
+# AI agent/client/context configs. `lib/ai/agent.sh` resolves agents from
+# AI_CONFIG_DIR=/etc/powos/ai on an installed system, so an agent that isn't
+# copied here does not exist at runtime — `powos ai manager` fell back to
+# "Warning: Agent 'manager' not found, using defaults". The pre-strip
+# Containerfile shipped this as part of a blanket `COPY config/ /etc/powos/`;
+# the curated list that replaced it dropped config/ai entirely, and the older
+# agents only kept working because they survived in the ostree /etc merge from
+# a pre-strip deployment.
+COPY config/ai/                           /etc/powos/ai/
 COPY config/zones/                        /etc/powos/zones/
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
@@ -167,7 +176,7 @@ RUN useradd -m -d /home/powos -G wheel -u 1000 powos 2>/dev/null || true && \
 # stream hangs at "Negotiating" with "missing a plug-in" in the server log.
 RUN dnf5 -y install --setopt=install_weak_deps=False \
         openrgb piper logiops uv unzip podman-compose podman-docker \
-        libnice-gstreamer1 && \
+        libnice-gstreamer1 maliit-keyboard && \
     curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip" \
         -o /tmp/bun.zip && \
     unzip -q -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/bin/ && \
