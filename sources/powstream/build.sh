@@ -84,12 +84,23 @@ sed "s|@LIBRARY_PATH@|/usr/lib/powstream/libvklayer_powstream_capture.so|" \
     "$SRC/layers/vk-capture/VkLayer_POWSTREAM_capture.json.in" \
     > "$MANIFEST_DIR/VkLayer_POWSTREAM_capture.json"
 
-# Global capture flag — layer stays dormant unless the PowStream server
-# sentinel ($POWSTREAM_CAPTURE_DUMP_DIR/streaming.active) exists. The dump dir
-# defaults to /tmp/depthcap — which is what the ExecStartPre below creates —
-# but it IS a variable, so moving it moves the sentinel too.
+# Capture is PER-GAME opt-in, NOT session-global. VK_LAYER_POWSTREAM_capture is
+# an IMPLICIT Vulkan layer: setting POWSTREAM_CAPTURE=1 for the whole session
+# loads it into EVERY Vulkan app — including anti-cheat titles (BattlEye/EAC),
+# where its present hook + game-memory read/write (camera matrix out, freecam
+# pose in) is a textbook ban trigger. Even dormant (no streaming.active
+# sentinel) the layer is still resident in the game process, i.e. detectable.
+# So we ship the manifest but do NOT enable it globally. Turn it on for a
+# specific, non-anti-cheat game with `powos stream launch -- <cmd>` or the Steam
+# launch option (`powos stream steam-option`). This file is documentation only.
 cat > "$ENV_DIR/powstream.conf" <<'CONF'
-POWSTREAM_CAPTURE=1
+# PowStream capture is PER-GAME opt-in — intentionally NOT enabled globally.
+# The implicit Vulkan layer VK_LAYER_POWSTREAM_capture loads only when
+# POWSTREAM_CAPTURE=1 is set for a specific process. Enable it per game:
+#   powos stream launch -- <game command>     # any launcher
+#   powos stream steam-option                  # paste into a game's Steam launch opts
+# NEVER enable it for anti-cheat games (BattlEye/EAC) — the present hook and
+# game-memory access is a ban risk. See `powos stream games`.
 CONF
 
 # ── Runtime services: WebRTC server + detector sidecar ──────────────

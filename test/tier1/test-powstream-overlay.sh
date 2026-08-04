@@ -107,10 +107,15 @@ if [[ -f "$MANIFEST" ]]; then
 fi
 
 echo
-echo "-- capture enable flag --"
+echo "-- capture is PER-GAME opt-in, NOT session-global --"
 ENVCONF="$OUT/usr/lib/environment.d/powstream.conf"
-check "environment.d conf installed"  '[[ -f "$ENVCONF" ]]'
-check "exports POWSTREAM_CAPTURE=1"   'grep -qx "POWSTREAM_CAPTURE=1" "$ENVCONF"'
+check "environment.d conf installed"       '[[ -f "$ENVCONF" ]]'
+# The implicit Vulkan layer must NOT be enabled globally — a global
+# POWSTREAM_CAPTURE=1 loads the game-memory-hooking layer into every Vulkan app,
+# including anti-cheat titles (ban risk). It must be an ACTIVE (non-comment)
+# line that is absent; only a commented example is allowed.
+check "does NOT globally enable capture"   '! grep -qE "^[[:space:]]*POWSTREAM_CAPTURE=1" "$ENVCONF"'
+check "documents per-game opt-in"          'grep -qi "per-game" "$ENVCONF"'
 
 echo
 echo "-- runtime binaries --"

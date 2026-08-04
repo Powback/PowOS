@@ -64,6 +64,22 @@ stream_status() {
         echo -e "  Portal token:    ${YELLOW}missing${NC} — run 'powos stream setup' on the local console"
     fi
 
+    # Capture-layer mode — MUST be per-game, never session-global (a global
+    # enable loads the game-memory-hooking layer into every Vulkan title,
+    # including anti-cheat ones → ban risk).
+    local glob=""
+    for f in /usr/lib/environment.d/powstream.conf \
+             "${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/powstream.conf"; do
+        grep -qs '^[[:space:]]*POWSTREAM_CAPTURE=1' "$f" 2>/dev/null && glob="$f"
+    done
+    if [[ -n "$glob" ]]; then
+        echo -e "  Capture layer:   ${RED}GLOBAL — UNSAFE${NC} (loads into every Vulkan game)"
+        echo -e "    ${YELLOW}Fix:${NC} remove the POWSTREAM_CAPTURE=1 line from ${DIM}$glob${NC}, re-login."
+        echo -e "         then enable per game: ${BOLD}powos stream launch -- <cmd>${NC}"
+    else
+        echo -e "  Capture layer:   ${GREEN}per-game opt-in${NC} (safe — 'powos stream launch')"
+    fi
+
     # Connect URL
     if [[ "$ws_state" == "active" ]]; then
         local ip; ip=$(_lan_ip)
@@ -176,21 +192,90 @@ stream_setup() {
     fi
 }
 
+# ── Per-game capture opt-in ───────────────────────────────────────────────────
+# The depth/camera capture layer (VK_LAYER_POWSTREAM_capture) is an IMPLICIT
+# Vulkan layer — it must be enabled PER GAME, never globally, so it never loads
+# into a game you're not streaming (and NEVER into an anti-cheat title, where its
+# present hook + game-memory read/write is a ban risk). Not every game supports
+# the ATW/reprojection either, so opt-in is the right model.
+POWSTREAM_LAYER="VK_LAYER_POWSTREAM_capture"
+STREAM_GAMES_LIST="${XDG_CONFIG_HOME:-$HOME/.config}/powstream/games.list"
+
+# Run a command with capture ON for THAT process only (env is inherited by the
+# game; exec replaces this shell). This is the per-game enable for any launcher.
+stream_launch() {
+    [[ "${1:-}" == "--" ]] && shift
+    [[ $# -gt 0 ]] || { perr "usage: powos stream launch -- <command> [args…]"; return 1; }
+    plog "Launching with PowStream capture ${GREEN}ON${NC} (this process only): ${DIM}$*${NC}"
+    exec env POWSTREAM_CAPTURE=1 POWSTREAM_CAPTURE_DISABLE= "$@"
+}
+
+# The env that GUARANTEES the layer never loads — for wrappers around
+# anti-cheat games (e.g. the FiveM launcher) to apply. Prints "VAR=val VAR=val".
+stream_safe_env() {
+    printf 'POWSTREAM_CAPTURE_DISABLE=1 VK_LOADER_LAYERS_DISABLE=%s' "$POWSTREAM_LAYER"
+}
+
+# Steam per-game enable: the launch-option string to paste into a game's
+# Properties → Launch Options (Steam stores it per game — the natural opt-in).
+stream_steam_option() {
+    echo "Paste into the game's Steam → Properties → Launch Options:"
+    echo -e "  ${BOLD}POWSTREAM_CAPTURE=1 %command%${NC}"
+    echo -e "  ${DIM}Only for a game you actually stream with ATW — NEVER an anti-cheat title.${NC}"
+}
+
+# Informational allowlist of games you've opted in (the real enable is the env
+# var per launch / Steam option above).
+stream_games() {
+    if [[ -s "$STREAM_GAMES_LIST" ]]; then
+        echo -e "${BOLD}Games opted into PowStream capture:${NC}"
+        sed 's/^/  • /' "$STREAM_GAMES_LIST"
+    else
+        echo "No games opted into PowStream capture — the layer loads into nothing."
+    fi
+    echo -e "  ${DIM}enable: powos stream enable <game> · launch: powos stream launch -- <cmd>${NC}"
+}
+stream_enable() {
+    [[ -n "${1:-}" ]] || { perr "usage: powos stream enable <game>"; return 1; }
+    mkdir -p "$(dirname "$STREAM_GAMES_LIST")"; touch "$STREAM_GAMES_LIST"
+    grep -qxF "$1" "$STREAM_GAMES_LIST" 2>/dev/null || echo "$1" >> "$STREAM_GAMES_LIST"
+    pok "'$1' noted as capture-enabled."
+    plog "Launch it with:  powos stream launch -- <its command>"
+    plog "Steam game?      powos stream steam-option   (paste the launch option instead)"
+}
+stream_disable() {
+    [[ -n "${1:-}" ]] || { perr "usage: powos stream disable <game>"; return 1; }
+    if [[ -f "$STREAM_GAMES_LIST" ]]; then
+        grep -vxF "$1" "$STREAM_GAMES_LIST" > "$STREAM_GAMES_LIST.tmp" 2>/dev/null \
+            && mv "$STREAM_GAMES_LIST.tmp" "$STREAM_GAMES_LIST"
+    fi
+    pok "'$1' removed from the capture allowlist."
+}
+
 stream_usage() {
     cat <<EOF
 PowStream — WebRTC streaming status & control
 
 Usage: powos stream [command]
 
-Commands:
-  (none)    Show status (services, token, connect URL)
+Services:
+  status    Show status (services, token, connect URL, capture mode)
   start     Start the WebRTC server + detector sidecar
   stop      Stop all PowStream services
   restart   Restart all PowStream services
-  logs      Tail PowStream logs (default: last 100 lines)
-  logs N    Tail last N lines
+  logs [N]  Tail PowStream logs (default: last 100 lines)
   setup     Pre-seed the screencast portal restore token
             (run once on the local console to enable dialog-free capture)
+
+Per-game depth/camera capture (ATW) — opt-in, never global:
+  launch -- <cmd>   Run a game with the capture layer ON for that process only
+  steam-option      Print the Steam launch option to enable capture for a game
+  enable <game>     Note a game as capture-enabled (allowlist record)
+  disable <game>    Remove a game from the allowlist
+  games             List games opted into capture
+
+  ${DIM}The capture layer hooks the game (reads camera matrix, writes freecam pose).
+  NEVER enable it for anti-cheat games (BattlEye/EAC) — it is a ban risk.${NC}
 
 The PowStream overlay must be built + enabled first:
   powos overlay build powstream && powos overlay enable powstream
@@ -198,14 +283,20 @@ EOF
 }
 
 cmd_stream() {
-    local sub="${1:-status}"; shift 2>/dev/null || true
+    local sub="${1:-help}"; shift 2>/dev/null || true
     case "$sub" in
-        status|st|"")  stream_status ;;
+        status|st)     stream_status ;;
         start)         stream_start ;;
         stop)          stream_stop ;;
         restart)       stream_restart ;;
         logs|log)      stream_logs "${1:-100}" ;;
         setup)         stream_setup ;;
+        launch|run)    stream_launch "$@" ;;
+        steam-option|steam) stream_steam_option ;;
+        games)         stream_games ;;
+        enable|on)     stream_enable "${1:-}" ;;
+        disable|off)   stream_disable "${1:-}" ;;
+        safe-env)      stream_safe_env; echo ;;
         help|-h|--help) stream_usage ;;
         *) perr "Unknown: powos stream $sub"; stream_usage; return 1 ;;
     esac
