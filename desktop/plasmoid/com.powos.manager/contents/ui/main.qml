@@ -4,15 +4,19 @@
 //   LEFT sidebar  — your projects (~/Projects/*, ● = has a live manager thread)
 //                   and the agent roster (with unread-inbox badges). Picking a
 //                   project switches the manager to THAT project's thread
-//                   (per-directory memory: see lib/ai/manager/manager.py).
+//                   (per-directory memory: see lib/ai/manager/manager.py) AND
+//                   reloads that project's saved chat transcript.
 //   RIGHT chat    — the live conversation. Each turn runs
-//                   `powos ai manager --json-events --once …`, whose normalized
-//                   event stream is rendered as chat bubbles + tool panels
-//                   (⚙ tool_use, ↳ tool_result, ✉ inbox).
+//                   `powos ai manager --json-events --once … | tee <tmp>`, and
+//                   we POLL <tmp> so tool_use/tool_result/assistant events show
+//                   up as they happen — Plasma's executable DataSource only
+//                   delivers stdout once at process exit, so the file poll is
+//                   what makes the output live. A final consume at completion is
+//                   the safety net (worst case = everything at the end).
 //
-// Sidebar data comes from `powos ai manager --list-json` (one clean JSON blob,
-// no ANSI to parse), refreshed on a timer. All shell-outs go through the
-// standard Plasma executable DataSource, like the other PowOS plasmoids.
+// Sidebar data comes from `powos ai manager --list-json` (one clean JSON blob),
+// refreshed on a timer. All shell-outs go through the Plasma executable
+// DataSource, like the other PowOS plasmoids.
 import QtQuick
 import QtQuick.Layouts
 import org.kde.plasma.plasmoid
@@ -35,10 +39,33 @@ PlasmoidItem {
     property var projects: []                // [{name, path, hasSession}]
     property var agents: []                  // [{name, pending}]
 
+    // Streaming-turn state
+    property string tmpBase: "/tmp/powos-mgr"
+    property int seq: 0
+    property string turnFile: ""             // current turn's tee'd output file
+    property int turnLine: 0                 // complete JSONL lines already consumed
+    property bool turnDone: false            // process exited (final consume pending)
+    property int turnEvents: 0               // renderable events seen this turn
+    // Transcript load state
+    property string pendingLoadName: "default"
+
     ListModel { id: chatModel }              // {role, text, name, ok}
 
     // Single-quote a string for safe use in a shell command.
     function shellQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
+    // base64 of a UTF-8 string (Qt.btoa alone mangles non-Latin1); pairs with `base64 -d`.
+    function b64(s) { return Qt.btoa(unescape(encodeURIComponent(String(s)))) }
+    // Filesystem-safe key for a project path (mirrors manager.py encode_cwd).
+    function encodeKey(path) {
+        if (!path) return "default"
+        var k = String(path).replace(/\//g, "-").replace(/^-+/, "").replace(/[^A-Za-z0-9._-]/g, "_")
+        return k || "default"
+    }
+    // Shell expressions (double-quoted so $HOME expands; key is sanitized safe).
+    function transcriptDirExpr() { return "\"${XDG_STATE_HOME:-$HOME/.local/state}/powos/ai/manager/transcripts\"" }
+    function transcriptFileExpr(path) {
+        return "\"${XDG_STATE_HOME:-$HOME/.local/state}/powos/ai/manager/transcripts/" + encodeKey(path) + ".jsonl\""
+    }
 
     // ── sidebar ────────────────────────────────────────────────────────────
     function refreshSidebar() { sidebarSource.connectSource(root.powos + " ai manager --list-json") }
@@ -51,67 +78,157 @@ PlasmoidItem {
         } catch (e) { /* transient — keep last good data */ }
     }
 
-    function selectProject(path, name) {
-        if (root.currentProject === path) return
-        root.currentProject = path
-        root.currentProjectName = name
-        chatModel.clear()
-        chatModel.append({ role: "system", text: "Switched to " + name +
-            " — the manager resumed this project's thread. Say hello.",
-            name: "", ok: true })
+    // ── transcript persistence (per project) ─────────────────────────────────
+    function saveTranscript() {
+        var rows = []
+        for (var i = 0; i < chatModel.count; i++) {
+            var it = chatModel.get(i)
+            if (it.role === "system") continue          // hints are not real history
+            rows.push(JSON.stringify({ role: it.role, text: it.text, name: it.name, ok: it.ok }))
+        }
+        var content = rows.join("\n")
+        var cmd = "mkdir -p " + transcriptDirExpr() + " && printf %s " + shellQuote(b64(content)) +
+                  " | base64 -d > " + transcriptFileExpr(root.currentProject)
+        ioSource.connectSource(cmd)
     }
 
-    // ── chat ───────────────────────────────────────────────────────────────
+    function loadTranscript(path, name) {
+        root.pendingLoadName = name
+        loadSource.connectSource("cat " + transcriptFileExpr(path) + " 2>/dev/null")
+    }
+
+    function applyTranscript(text) {
+        chatModel.clear()
+        var lines = String(text).split("\n")
+        var any = false
+        for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i].trim()
+            if (!ln) continue
+            try {
+                var it = JSON.parse(ln)
+                chatModel.append({ role: it.role, text: it.text || "",
+                                   name: it.name || "", ok: it.ok === undefined ? true : it.ok })
+                any = true
+            } catch (e) { /* skip a corrupt line */ }
+        }
+        if (!any) {
+            chatModel.append({ role: "system", name: "", ok: true,
+                text: "Talking to the manager in " + root.pendingLoadName +
+                      " — its thread here resumes. Say hello." })
+        }
+        chatView.positionViewAtEnd()
+    }
+
+    function selectProject(path, name) {
+        if (root.currentProject === path) return
+        if (root.busy) return                            // don't switch mid-turn
+        saveTranscript()                                 // persist the project we're leaving
+        root.currentProject = path
+        root.currentProjectName = name
+        loadTranscript(path, name)                       // repopulate from the target's transcript
+    }
+
+    // ── chat (streaming turn) ────────────────────────────────────────────────
     function send(text) {
         if (!text || !text.trim() || root.busy) return
         chatModel.append({ role: "user", text: text, name: "", ok: true })
+        saveTranscript()
         root.busy = true
+        root.lastError = ""
+        root.seq += 1
+        root.turnFile = root.tmpBase + "-" + root.seq + ".jsonl"
+        root.turnLine = 0
+        root.turnDone = false
+        root.turnEvents = 0
         var cwd = root.currentProject ? (" --cwd " + shellQuote(root.currentProject)) : ""
-        // Pipe the message in as stdin (base64) so nothing about the text needs
-        // shell-escaping beyond the base64 alphabet.
-        var b64 = Qt.btoa(text)
-        var cmd = "printf %s " + shellQuote(b64) + " | base64 -d | " +
-                  root.powos + " ai manager --json-events --once-stdin" + cwd
+        // Pipe the message in as base64 (no shell-escaping of the text needed),
+        // and tee the event stream to a temp file we poll for live rendering.
+        var cmd = "printf %s " + shellQuote(b64(text)) + " | base64 -d | " +
+                  root.powos + " ai manager --json-events --once-stdin" + cwd +
+                  " | tee " + shellQuote(root.turnFile)
         chatSource.connectSource(cmd)
+        pollTimer.start()
     }
 
-    function pushEvents(out) {
-        var lines = String(out).split("\n")
-        for (var i = 0; i < lines.length; i++) {
-            var line = lines[i].trim()
-            if (!line) continue
+    // Consume any NEW complete JSONL lines from `text` (the growing file or the
+    // final stdout). turnLine tracks how many complete lines we've rendered, so
+    // the live poll and the completion consume never double-render.
+    function consume(text) {
+        var lines = String(text).split("\n")
+        var complete = lines.length - 1              // last element is partial (or "")
+        for (var i = root.turnLine; i < complete; i++) {
+            var ln = lines[i].trim()
+            if (!ln) continue
             var ev
-            try { ev = JSON.parse(line) } catch (e) { continue }
-            switch (ev.kind) {
-            case "assistant":
-                chatModel.append({ role: "manager", text: ev.text, name: "", ok: true }); break
-            case "tool_use":
-                chatModel.append({ role: "tool_use", text: ev.hint || "", name: ev.name, ok: true }); break
-            case "tool_result":
-                chatModel.append({ role: "tool_result", text: ev.text || "", name: "", ok: !!ev.ok }); break
-            case "inbox":
-                chatModel.append({ role: "inbox", text: ev.text, name: "", ok: true }); break
-            // 'user' already shown; 'session'/'turn_done' are meta — ignore.
-            }
+            try { ev = JSON.parse(ln) } catch (e) { continue }
+            appendEvent(ev)
         }
+        if (complete > root.turnLine) root.turnLine = complete
         chatView.positionViewAtEnd()
+    }
+
+    function appendEvent(ev) {
+        switch (ev.kind) {
+        case "assistant":
+            chatModel.append({ role: "manager", text: ev.text, name: "", ok: true }); root.turnEvents++; break
+        case "tool_use":
+            chatModel.append({ role: "tool_use", text: ev.hint || "", name: ev.name, ok: true }); root.turnEvents++; break
+        case "tool_result":
+            chatModel.append({ role: "tool_result", text: ev.text || "", name: "", ok: !!ev.ok }); root.turnEvents++; break
+        case "inbox":
+            chatModel.append({ role: "inbox", text: ev.text, name: "", ok: true }); root.turnEvents++; break
+        // 'user' already shown; 'session'/'turn_done' are meta — ignore.
+        }
+    }
+
+    function finalizeTurn(stderrText) {
+        pollTimer.stop()
+        root.busy = false
+        // Only surface stderr as an error if the turn produced nothing at all —
+        // otherwise it's just noise (e.g. a harmless agent-config warning).
+        var err = String(stderrText || "").trim()
+        root.lastError = (root.turnEvents === 0 && err) ? err : ""
+        saveTranscript()
+        if (root.turnFile) { ioSource.connectSource("rm -f " + shellQuote(root.turnFile)); root.turnFile = "" }
     }
 
     P5Support.DataSource {
         id: sidebarSource; engine: "executable"; connectedSources: []
         onNewData: function (s, d) { disconnectSource(s); root.applySidebar((d.stdout || "").trim()) }
     }
+    // Runs the turn; its stdout (the tee) arrives once at process exit = the
+    // completion signal + final consume + stderr.
     P5Support.DataSource {
         id: chatSource; engine: "executable"; connectedSources: []
         onNewData: function (s, d) {
-            disconnectSource(s); root.busy = false
-            if ((d.stderr || "").trim()) root.lastError = (d.stderr || "").trim()
-            root.pushEvents(d.stdout || "")
+            disconnectSource(s)
+            root.turnDone = true
+            root.consume(d.stdout || "")
+            root.finalizeTurn(d.stderr || "")
         }
     }
+    // Live poll of the growing tee file.
+    P5Support.DataSource {
+        id: pollSource; engine: "executable"; connectedSources: []
+        onNewData: function (s, d) { disconnectSource(s); root.consume(d.stdout || "") }
+    }
+    // Transcript loads (per project).
+    P5Support.DataSource {
+        id: loadSource; engine: "executable"; connectedSources: []
+        onNewData: function (s, d) { disconnectSource(s); root.applyTranscript(d.stdout || "") }
+    }
+    // Fire-and-forget writes/cleanup (saveTranscript, rm temp).
+    P5Support.DataSource {
+        id: ioSource; engine: "executable"; connectedSources: []
+        onNewData: function (s, d) { disconnectSource(s) }
+    }
 
+    Timer {
+        id: pollTimer; interval: 250; repeat: true; running: false
+        onTriggered: if (root.turnFile) pollSource.connectSource("cat " + root.shellQuote(root.turnFile) + " 2>/dev/null")
+    }
     Timer { interval: 5000; running: true; repeat: true; onTriggered: root.refreshSidebar() }
-    Component.onCompleted: refreshSidebar()
+    Component.onCompleted: { refreshSidebar(); loadTranscript(root.currentProject, root.currentProjectName) }
 
     fullRepresentation: RowLayout {
         anchors.fill: parent
