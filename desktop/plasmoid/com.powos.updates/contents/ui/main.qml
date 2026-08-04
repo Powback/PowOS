@@ -1,12 +1,16 @@
 // PowOS Updates plasmoid — a system-tray notifier for the bootc image.
 //
 // Everything it reads is UNPRIVILEGED:
-//   • `powos version`        → running version + source commit
-//   • `bootc status --json`  → booted image ref/digest + a rollback deployment
-//   • `skopeo inspect`       → the remote digest for that same ref; a mismatch
-//                              means an update is waiting (the sanctioned
-//                              registry-digest check, no root, no `bootc
-//                              upgrade --check` which needs a booted host + root)
+//   • `powos version`          → running version + source commit
+//   • `rpm-ostree status --json` → booted image ref/digest + rollback deployment.
+//                                Read as the plain user; `bootc status --json`
+//                                now REQUIRES root, so it was silently failing
+//                                here and the check reported "couldn't reach the
+//                                registry" when it had never obtained a ref.
+//   • `skopeo inspect`         → the remote digest for that same ref; a mismatch
+//                                means an update is waiting (the sanctioned
+//                                registry-digest check, no root — the published
+//                                image is public, so no --creds needed)
 //   • `git log` in /var/lib/powos/src → the changelog of what's shipped
 //
 // The two actions that DO need root (apply / roll back) are launched in a
@@ -71,8 +75,17 @@ PlasmoidItem {
     // so the whole check is a single round-trip.
     readonly property string statusCmd:
         "echo __VER__; powos version 2>/dev/null; " +
-        "echo __BOOTC__; BJ=$(bootc status --json 2>/dev/null); printf '%s' \"$BJ\"; echo; " +
-        "echo __REMOTE__; REF=$(printf '%s' \"$BJ\" | jq -r '.status.booted.image.image.image // empty' 2>/dev/null); " +
+        // Booted image ref + digest via rpm-ostree — it reads as an unprivileged
+        // user, whereas `bootc status --json` now REQUIRES root ("must be
+        // executed as the root user"), which the widget deliberately never has,
+        // so bootc left the ref empty and the check reported "couldn't reach the
+        // registry" when it had simply never asked.
+        "echo __BOOTC__; BJ=$(rpm-ostree status --json 2>/dev/null); printf '%s' \"$BJ\"; echo; " +
+        // Strip the ostree transport prefix from the booted deployment's
+        // container-image-reference to get a plain registry ref for skopeo.
+        // The published image is public, so no --creds are needed.
+        "echo __REMOTE__; REF=$(printf '%s' \"$BJ\" | jq -r '(.deployments[]|select(.booted==true)|.\"container-image-reference\") // empty' 2>/dev/null " +
+        "| sed -E 's/^ostree-unverified-registry://; s/^ostree-remote-registry:[^:]+://; s/^ostree-unverified-image://; s#^docker://##; s#^containers-storage:##'); " +
         "[ -n \"$REF\" ] && skopeo inspect --format '{{.Digest}}' \"docker://$REF\" 2>/dev/null; echo; " +
         // local source state: uncommitted edits + commits ahead of the commit
         // the running image was built from (/usr/lib/powos/.powos-src-commit).
@@ -116,20 +129,30 @@ PlasmoidItem {
         var mv = ver.match(/version\s+(\S+)/i);      root.curVersion = mv ? mv[1] : "?"
         var mc = ver.match(/commit:\s*(\S+)/i);      root.curCommit  = mc ? mc[1] : ""
 
-        // bootc deployment json
+        // rpm-ostree deployment json (userspace; no root needed)
         var bj = section(out, "__BOOTC__", "__REMOTE__")
         var ref = "", dig = "", dv = "", ds = "", hasRb = false, rbv = ""
         try {
             var j = JSON.parse(bj)
-            var b = j && j.status && j.status.booted
-            if (b && b.image) {
-                if (b.image.image && b.image.image.image) ref = b.image.image.image
-                dig = b.image.imageDigest || ""
-                dv  = b.image.version || ""
-                ds  = b.image.timestamp || ""
+            var deps = (j && j.deployments) || []
+            for (var i = 0; i < deps.length; i++) {
+                var dep = deps[i]
+                if (dep.booted) {
+                    ref = String(dep["container-image-reference"] || "")
+                        .replace(/^ostree-unverified-registry:/, "")
+                        .replace(/^ostree-remote-registry:[^:]+:/, "")
+                        .replace(/^ostree-unverified-image:/, "")
+                        .replace(/^docker:\/\//, "")
+                        .replace(/^containers-storage:/, "")
+                    dig = dep["container-image-reference-digest"] || ""
+                    dv  = dep.version || ""
+                    // rpm-ostree timestamp is unix epoch seconds
+                    if (dep.timestamp) ds = new Date(dep.timestamp * 1000).toLocaleString(Qt.locale())
+                } else if (!dep.staged && !hasRb) {
+                    // the (non-staged) previous deployment = the rollback target
+                    hasRb = true; rbv = dep.version || ""
+                }
             }
-            var rb = j && j.status && j.status.rollback
-            if (rb && rb.image) { hasRb = true; rbv = rb.image.version || "" }
         } catch (e) { /* no host / not bootc → leave blank, UI copes */ }
         root.curRef = ref; root.curDigest = dig
         root.deployVersion = dv; root.deployStamp = ds
