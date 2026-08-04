@@ -221,6 +221,90 @@ check "help lists the rcon port"       'grep -q "47200" <<< "$HELP"'
 check "help links the docs"            'grep -q "docs.veniceunleashed.net" <<< "$HELP"'
 
 echo
+echo "-- server mods: identification + ModList wiring (no network) --"
+
+# Isolated mod sandbox; reassign the globals the mod functions read.
+MODTEST="$TMP/modtest"
+VU_MODS_DIR="$MODTEST/Admin/Mods"
+VU_MODLIST="$MODTEST/Admin/ModList.txt"
+_mreset() { rm -rf "$MODTEST"; mkdir -p "$VU_MODS_DIR"; }
+
+# A repo that ships ONE mod, and one that ships TWO.
+SINGLE="$TMP/src-single"; mkdir -p "$SINGLE/ext"
+echo '{"Name":"SoloMod","Version":"1.0.0"}' > "$SINGLE/mod.json"
+MULTI="$TMP/src-multi"; mkdir -p "$MULTI/ModA/ext" "$MULTI/ModB/ext"
+echo '{"Name":"ModA","Version":"1.0.0"}' > "$MULTI/ModA/mod.json"
+echo '{"name":"ModB","Version":"2.0.0"}' > "$MULTI/ModB/mod.json"   # lowercase key
+
+# mod.json name extraction (VU uses "Name"; tolerate "name")
+check "modjson_name reads Name"        '[[ "$(vu_modjson_name "$SINGLE/mod.json")" == "SoloMod" ]]'
+check "modjson_name reads lowercase"   '[[ "$(vu_modjson_name "$MULTI/ModB/mod.json")" == "ModB" ]]'
+check "modjson_name empty on missing"  '[[ -z "$(vu_modjson_name "$TMP/nope.json" 2>/dev/null)" ]]'
+
+# discovery
+check "find_mods: one in single repo"  '[[ "$(vu_find_mods "$SINGLE" | wc -l)" -eq 1 ]]'
+check "find_mods: two in multi repo"   '[[ "$(vu_find_mods "$MULTI" | wc -l)" -eq 2 ]]'
+check "find_mods: none in empty tree"  '[[ -z "$(vu_find_mods "$TMP/home")" ]]'
+
+# single-mod install auto-selects, places files, and enables in ModList
+_mreset
+check "install single: rc 0"           'vu_mod_install_cmd "$SINGLE" </dev/null'
+check "install single: folder placed"  '[[ -f "$VU_MODS_DIR/SoloMod/mod.json" ]]'
+check "install single: provenance kept" '[[ -f "$VU_MODS_DIR/SoloMod/.powos-source" ]]'
+check "install single: enabled in list" 'vu_modlist_has SoloMod'
+
+# THE CONSTRAINT: a multi-mod repo, non-interactive, no selection → refuse,
+# install NOTHING (never auto-all).
+_mreset
+check "multi w/o selection: refuses"   '! vu_mod_install_cmd "$MULTI" </dev/null 2>/dev/null'
+check "multi w/o selection: installs nothing" '[[ -z "$(ls -A "$VU_MODS_DIR")" ]]'
+
+# named selection installs ONLY that mod
+_mreset
+vu_mod_install_cmd "$MULTI" ModB </dev/null >/dev/null 2>&1
+check "named select: ModB placed"      '[[ -d "$VU_MODS_DIR/ModB" ]]'
+check "named select: ModA NOT placed"  '[[ ! -d "$VU_MODS_DIR/ModA" ]]'
+check "named select: only ModB enabled" 'vu_modlist_has ModB && ! vu_modlist_has ModA'
+
+# unknown name is an error, not a silent no-op
+_mreset
+check "unknown name errors"            '! vu_mod_install_cmd "$MULTI" Nope </dev/null 2>/dev/null'
+
+# --all is the explicit opt-in to take everything
+_mreset
+vu_mod_install_cmd "$MULTI" --all </dev/null >/dev/null 2>&1
+check "--all: both placed"             '[[ -d "$VU_MODS_DIR/ModA" && -d "$VU_MODS_DIR/ModB" ]]'
+
+# --no-enable places files but leaves ModList untouched
+_mreset
+vu_mod_install_cmd "$SINGLE" --no-enable </dev/null >/dev/null 2>&1
+check "--no-enable: placed"            '[[ -d "$VU_MODS_DIR/SoloMod" ]]'
+check "--no-enable: NOT in ModList"    '! vu_modlist_has SoloMod'
+
+# enable / disable / remove lifecycle
+check "enable adds to ModList"         'vu_mod_enable_cmd SoloMod >/dev/null && vu_modlist_has SoloMod'
+check "disable keeps folder"           'vu_mod_disable_cmd SoloMod >/dev/null && ! vu_modlist_has SoloMod && [[ -d "$VU_MODS_DIR/SoloMod" ]]'
+check "remove deletes folder"          'vu_mod_remove_cmd SoloMod >/dev/null && [[ ! -d "$VU_MODS_DIR/SoloMod" ]]'
+
+# ModList is idempotent (no duplicate lines)
+_mreset; vu_modlist_add Dup; vu_modlist_add Dup
+check "modlist add is idempotent"      '[[ "$(grep -c "^Dup$" "$VU_MODLIST")" -eq 1 ]]'
+
+# not-a-mod source is rejected
+_mreset; mkdir -p "$TMP/notamod"; echo hi > "$TMP/notamod/readme.txt"
+check "rejects source with no mod.json" '! vu_mod_install_cmd "$TMP/notamod" </dev/null 2>/dev/null'
+
+# mod help + parent help document the surface (help<->dispatch contract)
+MHELP="$(vu_mod_help 2>/dev/null)"
+for v in install list enable disable remove update; do
+    check "mod help documents '$v'"    'grep -q "$v" <<< "$MHELP"'
+done
+check "mod help explains gh: source"   'grep -q "gh:owner/repo" <<< "$MHELP"'
+check "mod help explains choose-not-all" 'grep -qi "never" <<< "$MHELP" || grep -qi "not installed wholesale" <<< "$MHELP"'
+check "server help mentions 'server mod'" 'grep -q "server mod" <<< "$(vu_server_help)"'
+check "main help mentions 'server mod'" 'grep -q "server mod" <<< "$(vu_help)"'
+
+echo
 echo "-- tool-registry wiring in install.sh --"
 
 if [[ -f "$INSTALL_LIB" ]]; then

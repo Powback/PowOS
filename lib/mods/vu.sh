@@ -52,6 +52,16 @@ VU_CONF="${VU_CONF:-${XDG_CONFIG_HOME:-$HOME/.config}/powos/vu.conf}"
 
 VU_ZIP_URL="${VU_ZIP_URL:-https://veniceunleashed.net/files/vu.zip}"
 
+# Server mods live in <instance>/Admin/Mods/<name>/ (each a folder with a
+# mod.json) and are only LOADED when their folder name is listed in
+# <instance>/Admin/ModList.txt — placing files is not enough. See
+# https://docs.veniceunleashed.net/hosting/mods/
+VU_MODS_DIR="${VU_MODS_DIR:-$VU_INSTANCE_DIR/Admin/Mods}"
+VU_MODLIST="${VU_MODLIST:-$VU_INSTANCE_DIR/Admin/ModList.txt}"
+# Cached vumm-cli binary (optional path — only used for vumm:<name> sources).
+VU_VUMM_BIN="${VU_VUMM_BIN:-${XDG_CACHE_HOME:-$HOME/.cache}/powos/vumm}"
+VU_VUMM_VERSION="${VU_VUMM_VERSION:-v0.2.1}"
+
 # ── Config (key=value, parsed without eval) ───────────────────────────────────
 
 vu_conf_get() {
@@ -426,6 +436,10 @@ ${BOLD}powos mods vu server${NC} — VU dedicated server
   powos mods vu server init           Create the instance dir + show key steps
   powos mods vu server start [args]   Run the dedicated server (foreground)
   powos mods vu server status         Instance dir, key, port reachability
+  powos mods vu server mod <verb>     Manage server mods (install/list/enable/
+                                        disable/remove/update). 'mod help' for
+                                        sources (gh:owner/repo, local zip, vumm)
+                                        and how multi-mod repos let you choose.
 
 The instance directory (${VU_INSTANCE_DIR}) holds server.key, config and mods.
 Get server.key from your VU account, drop it in that directory.
@@ -500,8 +514,367 @@ vu_server_cmd() {
         init)    vu_server_init ;;
         start)   vu_server_start "$@" ;;
         status)  vu_server_status ;;
+        mod|mods) vu_server_mod_cmd "$@" ;;
         help|-h|--help) vu_server_help ;;
         *) perr "Unknown server verb: $sub"; vu_server_help; return 1 ;;
+    esac
+}
+
+# ── Server mods (Admin/Mods + ModList.txt) ────────────────────────────────────
+#
+# A VU server mod is just a folder under <instance>/Admin/Mods/ that contains a
+# mod.json. VU won't LOAD it until the folder name is listed in
+# <instance>/Admin/ModList.txt. So "installing" a mod is two deterministic
+# steps: place the folder, then (optionally) add its name to the list.
+#
+# The identification rule is exact, not heuristic: a directory is a VU mod iff
+# it holds a mod.json with a Name. A repo "ships multiple mods" when several
+# mod.json files sit in different subfolders — we surface ALL of them and make
+# YOU choose. We never silently install every mod in a repo.
+
+# Read the mod Name out of a mod.json (VU uses "Name"; tolerate lowercase).
+vu_modjson_name() {
+    python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print((d.get("Name") or d.get("name") or "").strip())
+except Exception:
+    pass' "$1" 2>/dev/null
+}
+
+# Emit "<name>\t<abs mod-folder path>" for every VU mod under a directory tree.
+# maxdepth keeps us out of deep vendored trees; node_modules/.git are skipped.
+vu_find_mods() {
+    local root="$1" mj dir name
+    [[ -d "$root" ]] || return 0
+    while IFS= read -r mj; do
+        dir="$(cd "$(dirname "$mj")" && pwd)"
+        name="$(vu_modjson_name "$mj")"
+        [[ -n "$name" ]] && printf '%s\t%s\n' "$name" "$dir"
+    done < <(find "$root" -maxdepth 4 -name mod.json -type f \
+                  -not -path '*/.git/*' -not -path '*/node_modules/*' 2>/dev/null | sort)
+}
+
+# ModList.txt helpers — the file is folder-names, one per line.
+vu_modlist_has() {
+    [[ -f "$VU_MODLIST" ]] && grep -qxF "$1" "$VU_MODLIST"
+}
+vu_modlist_add() {
+    mkdir -p "$(dirname "$VU_MODLIST")"; touch "$VU_MODLIST"
+    vu_modlist_has "$1" || printf '%s\n' "$1" >> "$VU_MODLIST"
+}
+vu_modlist_remove() {
+    [[ -f "$VU_MODLIST" ]] || return 0
+    local tmp; tmp="$(mktemp)"
+    grep -vxF "$1" "$VU_MODLIST" > "$tmp" || true
+    mv "$tmp" "$VU_MODLIST"
+}
+
+# Copy one mod folder into Admin/Mods/<name>, recording where it came from so
+# `update` can re-fetch it. Destination name is sanitised of path separators.
+vu_place_mod() {
+    local src="$1" name="$2" source_spec="${3:-}"
+    name="${name//\//_}"; name="${name//[[:space:]]/_}"
+    local dest="$VU_MODS_DIR/$name"
+    mkdir -p "$VU_MODS_DIR"
+    rm -rf "$dest"
+    cp -a "$src" "$dest" || { perr "copy failed: $src -> $dest"; return 1; }
+    rm -rf "$dest/.git"
+    [[ -n "$source_spec" ]] && printf '%s\n' "$source_spec" > "$dest/.powos-source"
+    printf '%s' "$name"
+}
+
+# Fetch a GitHub repo tarball (no git needed) into a fresh dir; echo that dir.
+# Accepts owner/repo[@ref]; resolves the default branch when no ref is given.
+vu_gh_fetch() {
+    local spec="$1" ref="" repo
+    repo="${spec%@*}"; [[ "$spec" == *@* ]] && ref="${spec##*@}"
+    if [[ -z "$ref" ]]; then
+        ref="$(curl -fsSL "https://api.github.com/repos/$repo" 2>/dev/null \
+               | python3 -c 'import json,sys; print(json.load(sys.stdin).get("default_branch","main"))' 2>/dev/null)"
+        [[ -z "$ref" ]] && ref=main
+    fi
+    local tmp; tmp="$(mktemp -d)"
+    if ! curl -fsSL "https://codeload.github.com/$repo/tar.gz/$ref" 2>/dev/null \
+            | tar xz -C "$tmp" 2>/dev/null; then
+        perr "could not download github.com/$repo@$ref"
+        rm -rf "$tmp"; return 1
+    fi
+    printf '%s' "$tmp"
+}
+
+# Ensure the vumm binary is present (download once), echo its path.
+vu_vumm_bin() {
+    if [[ -x "$VU_VUMM_BIN" ]]; then printf '%s' "$VU_VUMM_BIN"; return 0; fi
+    local arch; arch="$(uname -m)"
+    local a; case "$arch" in x86_64|amd64) a=amd64 ;; i?86) a=386 ;;
+        *) perr "no vumm build for $arch"; return 1 ;; esac
+    plog "Fetching vumm-cli $VU_VUMM_VERSION ($a)…" >&2
+    local tmp; tmp="$(mktemp -d)"
+    local url="https://github.com/BF3RM/vumm-cli/releases/download/$VU_VUMM_VERSION/vumm_linux_${a}.tar.gz"
+    if ! curl -fsSL "$url" 2>/dev/null | tar xz -C "$tmp" 2>/dev/null; then
+        perr "vumm download failed: $url"; rm -rf "$tmp"; return 1
+    fi
+    mkdir -p "$(dirname "$VU_VUMM_BIN")"
+    mv "$tmp/vumm" "$VU_VUMM_BIN" && chmod +x "$VU_VUMM_BIN"
+    rm -rf "$tmp"
+    printf '%s' "$VU_VUMM_BIN"
+}
+
+# Resolve a source token to a local directory of candidate mods + a provenance
+# string. Prints "<dir>\t<source_spec>". Caller cleans up temp dirs itself.
+vu_mod_resolve_source() {
+    local src="$1"
+    case "$src" in
+        gh:*)
+            local spec="${src#gh:}" dir
+            dir="$(vu_gh_fetch "$spec")" || return 1
+            printf '%s\t%s\n' "$dir" "gh:$spec"
+            ;;
+        http*://*github.com/*)
+            # https://github.com/owner/repo(.git)(/tree/ref) → gh:owner/repo[@ref]
+            local rest="${src#*github.com/}" owner repo ref="" spec
+            owner="${rest%%/*}"; rest="${rest#*/}"; repo="${rest%%/*}"; repo="${repo%.git}"
+            [[ "$rest" == */tree/* ]] && ref="${rest##*/tree/}"
+            spec="$owner/$repo"; [[ -n "$ref" ]] && spec="$spec@$ref"
+            local dir; dir="$(vu_gh_fetch "$spec")" || return 1
+            printf '%s\t%s\n' "$dir" "gh:$spec"
+            ;;
+        vumm:*)
+            perr "vumm mods install into the instance dir, not a folder tree."
+            plog "  Run:  ${BOLD}cd '$VU_INSTANCE_DIR' && '$(vu_vumm_bin 2>/dev/null || echo vumm)' install ${src#vumm:}${NC}"
+            plog "  vumm needs a bf3reality login first (even realitymod 403s anonymously):"
+            plog "    ${DIM}vumm register / vumm login${NC}"
+            return 3
+            ;;
+        *)
+            # Local path: a directory, or a .zip / .tar(.gz) archive.
+            if [[ -d "$src" ]]; then
+                printf '%s\t%s\n' "$(cd "$src" && pwd)" "path:$(cd "$src" && pwd)"
+            elif [[ -f "$src" ]]; then
+                local tmp; tmp="$(mktemp -d)"
+                case "$src" in
+                    *.zip)        unzip -q "$src" -d "$tmp" 2>/dev/null ;;
+                    *.tar.gz|*.tgz) tar xzf "$src" -C "$tmp" 2>/dev/null ;;
+                    *.tar)        tar xf "$src" -C "$tmp" 2>/dev/null ;;
+                    *) perr "unknown archive: $src"; rm -rf "$tmp"; return 1 ;;
+                esac || { perr "extract failed: $src"; rm -rf "$tmp"; return 1; }
+                printf '%s\t%s\n' "$tmp" "path:$src"
+                else
+                perr "not a github source, directory, or archive: $src"
+                return 1
+            fi
+            ;;
+    esac
+}
+
+vu_mod_help() {
+    cat <<EOF
+${BOLD}powos mods vu server mod${NC} — manage dedicated-server mods
+
+  install <source> [name...] [--all] [--no-enable] [--ref REF]
+                          Place mod(s) into ${VU_MODS_DIR}
+                          and enable them in ModList.txt.
+  list                    Show installed mods and their enabled state.
+  enable  <name>          Add a mod to ModList.txt (VU loads it).
+  disable <name>          Remove from ModList.txt (files kept).
+  remove  <name>          Delete the mod folder and delist it.
+  update  [name|--all]    Re-fetch mods that came from GitHub.
+
+${BOLD}Sources${NC}
+  gh:owner/repo[@ref]     A GitHub repo (default branch unless @ref).
+  https://github.com/…    Same, as a full URL (…/tree/<ref> honoured).
+  ./path  |  file.zip|.tar.gz
+                          A local folder or archive — the escape hatch for
+                          mods handed out on Discord/forums: download it,
+                          point PowOS at it, it finds the mod.json and places
+                          it correctly.
+  vumm:<name>             The BF3-Reality registry (prints the exact vumm
+                          command; needs a bf3reality login — even realitymod
+                          403s anonymously, so vumm is an account-gated path).
+
+${BOLD}Choosing when a repo ships several mods${NC}
+  A repo with multiple mod.json folders is NOT installed wholesale. With no
+  names given (and no TTY to prompt) install LISTS the mods and stops. Pass
+  the name(s) you want, or ${BOLD}--all${NC} to take everything on purpose.
+
+A mod is identified by a mod.json containing a Name — nothing is guessed.
+EOF
+}
+
+# install <source> [name...] [--all] [--no-enable] [--ref REF]
+vu_mod_install_cmd() {
+    local source="" want=() take_all=false do_enable=true ref=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --all)       take_all=true ;;
+            --no-enable) do_enable=false ;;
+            --ref)       ref="$2"; shift ;;
+            -h|--help)   vu_mod_help; return 0 ;;
+            -*)          perr "unknown flag: $1"; return 1 ;;
+            *) if [[ -z "$source" ]]; then source="$1"; else want+=("$1"); fi ;;
+        esac
+        shift
+    done
+    [[ -z "$source" ]] && { perr "usage: powos mods vu server mod install <source> [name...]"; vu_mod_help; return 1; }
+    # A --ref applies to gh:/URL sources by appending @ref when absent.
+    if [[ -n "$ref" && "$source" == gh:* && "$source" != *@* ]]; then source="$source@$ref"; fi
+
+    local resolved dir spec
+    resolved="$(vu_mod_resolve_source "$source")" || return $?
+    dir="${resolved%%$'\t'*}"; spec="${resolved#*$'\t'}"
+    local cleanup=""; [[ "$spec" == gh:* || "$spec" == path:*.zip || "$spec" == path:*.tar* ]] && cleanup="$dir"
+
+    local -a names=() paths=()
+    local line
+    while IFS=$'\t' read -r n p; do names+=("$n"); paths+=("$p"); done < <(vu_find_mods "$dir")
+
+    local count=${#names[@]}
+    if [[ $count -eq 0 ]]; then
+        perr "no mod.json found under $source — not a VU mod."
+        [[ -n "$cleanup" ]] && rm -rf "$cleanup"
+        return 1
+    fi
+
+    # Decide which indices to install.
+    local -a pick=()
+    if [[ ${#want[@]} -gt 0 ]]; then
+        local w i found
+        for w in "${want[@]}"; do
+            found=false
+            for i in "${!names[@]}"; do
+                if [[ "${names[$i],,}" == "${w,,}" ]]; then pick+=("$i"); found=true; fi
+            done
+            $found || { perr "no mod named '$w' in $source"; vu_mod_install_list_available names[@]; [[ -n "$cleanup" ]] && rm -rf "$cleanup"; return 1; }
+        done
+    elif $take_all || [[ $count -eq 1 ]]; then
+        for i in "${!names[@]}"; do pick+=("$i"); done
+    elif [[ -t 0 ]]; then
+        echo "This source ships ${count} mods:"; vu_mod_install_list_available names[@]
+        printf 'Install which? (numbers, space-separated, or "a" for all): '
+        local ans; read -r ans
+        if [[ "$ans" == a || "$ans" == all ]]; then
+            for i in "${!names[@]}"; do pick+=("$i"); done
+        else
+            local tok
+            for tok in $ans; do
+                [[ "$tok" =~ ^[0-9]+$ ]] && (( tok>=1 && tok<=count )) && pick+=("$((tok-1))")
+            done
+        fi
+    else
+        # Non-interactive, multiple mods, no selection → refuse; never auto-all.
+        perr "$source ships ${count} mods — choose which, don't install all blindly:"
+        vu_mod_install_list_available names[@]
+        plog "  re-run with the name(s), or ${BOLD}--all${NC} to take every one."
+        [[ -n "$cleanup" ]] && rm -rf "$cleanup"
+        return 2
+    fi
+
+    if [[ ${#pick[@]} -eq 0 ]]; then
+        pwarn "Nothing selected."
+        [[ -n "$cleanup" ]] && rm -rf "$cleanup"
+        return 1
+    fi
+
+    local i installed rc=0
+    for i in "${pick[@]}"; do
+        if installed="$(vu_place_mod "${paths[$i]}" "${names[$i]}" "$spec")"; then
+            if $do_enable; then vu_modlist_add "$installed"; pok "installed + enabled: $installed"
+            else pok "installed (disabled): $installed  ${DIM}enable with: powos mods vu server mod enable $installed${NC}"; fi
+        else
+            rc=1
+        fi
+    done
+    [[ -n "$cleanup" ]] && rm -rf "$cleanup"
+    return $rc
+}
+
+# helper: print a numbered "  N) name" list from a names-array passed by name.
+vu_mod_install_list_available() {
+    local -n _arr="$1"
+    local i
+    for i in "${!_arr[@]}"; do printf '  %d) %s\n' "$((i+1))" "${_arr[$i]}"; done
+}
+
+vu_mod_list_cmd() {
+    echo -e "${BOLD}VU server mods${NC}  ${DIM}$VU_MODS_DIR${NC}"
+    echo    "════════════════════════════════════════"
+    if [[ ! -d "$VU_MODS_DIR" ]] || [[ -z "$(ls -A "$VU_MODS_DIR" 2>/dev/null)" ]]; then
+        echo "  (none installed)"; return 0
+    fi
+    local d name src
+    for d in "$VU_MODS_DIR"/*/; do
+        [[ -d "$d" ]] || continue
+        name="$(basename "$d")"
+        src=""; [[ -f "$d/.powos-source" ]] && src="$(cat "$d/.powos-source")"
+        if vu_modlist_has "$name"; then
+            echo -e "  ${GREEN}●${NC} $name  ${DIM}enabled${NC}${src:+   ${DIM}($src)${NC}}"
+        else
+            echo -e "  ${YELLOW}○${NC} $name  ${DIM}disabled${NC}${src:+   ${DIM}($src)${NC}}"
+        fi
+    done
+}
+
+vu_mod_enable_cmd() {
+    [[ -n "${1:-}" ]] || { perr "usage: … server mod enable <name>"; return 1; }
+    [[ -d "$VU_MODS_DIR/$1" ]] || { perr "no such mod folder: $1  (install it first)"; return 1; }
+    vu_modlist_add "$1"; pok "enabled: $1"
+}
+
+vu_mod_disable_cmd() {
+    [[ -n "${1:-}" ]] || { perr "usage: … server mod disable <name>"; return 1; }
+    vu_modlist_remove "$1"; pok "disabled: $1  ${DIM}(files kept)${NC}"
+}
+
+vu_mod_remove_cmd() {
+    [[ -n "${1:-}" ]] || { perr "usage: … server mod remove <name>"; return 1; }
+    vu_modlist_remove "$1"
+    rm -rf "${VU_MODS_DIR:?}/$1"
+    pok "removed: $1"
+}
+
+# update [name|--all] — re-fetch gh-sourced mods from their recorded provenance.
+vu_mod_update_cmd() {
+    local target="${1:-}"
+    [[ -d "$VU_MODS_DIR" ]] || { perr "no mods installed."; return 1; }
+    local d name src updated=0 skipped=0
+    for d in "$VU_MODS_DIR"/*/; do
+        [[ -d "$d" ]] || continue
+        name="$(basename "$d")"
+        [[ -n "$target" && "$target" != "--all" && "$target" != "$name" ]] && continue
+        src=""; [[ -f "$d/.powos-source" ]] && src="$(cat "$d/.powos-source")"
+        if [[ "$src" != gh:* ]]; then
+            pwarn "skip $name — not a GitHub mod (source: ${src:-unknown})"; skipped=$((skipped+1)); continue
+        fi
+        plog "updating $name from ${src}…"
+        local tmp; tmp="$(vu_gh_fetch "${src#gh:}")" || { skipped=$((skipped+1)); continue; }
+        # Find the mod folder in the fresh tree whose Name matches this one.
+        local newpath="" n p
+        while IFS=$'\t' read -r n p; do
+            [[ "${n//\//_}" == "$name" || "$n" == "$name" ]] && newpath="$p"
+        done < <(vu_find_mods "$tmp")
+        if [[ -n "$newpath" ]]; then
+            vu_place_mod "$newpath" "$name" "$src" >/dev/null && { pok "updated $name"; updated=$((updated+1)); }
+        else
+            pwarn "could not find '$name' in the refreshed repo — left as-is"; skipped=$((skipped+1))
+        fi
+        rm -rf "$tmp"
+    done
+    plog "update done: $updated updated, $skipped skipped."
+}
+
+vu_server_mod_cmd() {
+    local sub="${1:-list}"; shift || true
+    case "$sub" in
+        install|add|i) vu_mod_install_cmd "$@" ;;
+        list|ls)       vu_mod_list_cmd ;;
+        enable)        vu_mod_enable_cmd "$@" ;;
+        disable)       vu_mod_disable_cmd "$@" ;;
+        remove|rm)     vu_mod_remove_cmd "$@" ;;
+        update)        vu_mod_update_cmd "$@" ;;
+        help|-h|--help) vu_mod_help ;;
+        *) perr "Unknown mod verb: $sub"; vu_mod_help; return 1 ;;
     esac
 }
 
@@ -556,6 +929,9 @@ Server:
   powos mods vu server init       Create the instance dir, explain server.key
   powos mods vu server start      Run the dedicated server (foreground)
   powos mods vu server status     Instance, key and port summary
+  powos mods vu server mod ...    Install/list/enable/disable/update server
+                                    mods from GitHub, a local zip, or vumm.
+                                    Multi-mod repos let you pick, never all.
   powos mods vu server help       Server-specific detail
 
 Other:
