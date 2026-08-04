@@ -526,10 +526,17 @@ stage_c() {
     # ${dm_confd}. The old `vm_sudo "mkdir && cat > /etc/…"` failed because
     # vm_sudo's `sudo -S` only covered the mkdir — the `> /etc/…` redirect ran
     # as the non-root SSH user (permission denied → "Could not inject").
+    # Relogin=true is load-bearing: plasmalogin/SDDM autologins only ONCE per
+    # boot by default. Stage B already brought up the greeter, so on the DM
+    # RESTART below autologin would NOT re-fire — the greeter reshows, keeps DRM
+    # master, and the would-be user session's kwin then fails with
+    # "drmModeListLessees()/atomic commit: Permission denied". Relogin makes
+    # autologin fire on every DM start so the user session actually takes over.
     if vm_ssh "cat > /tmp/zz-test-autologin.conf << 'SDDMEOF'
 [Autologin]
 User=powos
 Session=plasma.desktop
+Relogin=true
 SDDMEOF
 echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p $dm_confd && install -m 0644 /tmp/zz-test-autologin.conf $dm_confd/zz-test-autologin.conf'" 2>/dev/null; then
         t2_pass "Autologin config injected"
