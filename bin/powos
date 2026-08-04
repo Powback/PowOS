@@ -1952,33 +1952,15 @@ cmd_build_iso() {
 
 PROJECTS_DIR="${POWOS_ROOT:-/var/lib/powos}/projects"
 
-# Source the unified dev system
-if [[ -f /usr/lib/powos/dev-commands.sh ]]; then
-    source /usr/lib/powos/dev-commands.sh
-elif [[ -f "$(dirname "$0")/../lib/dev-commands.sh" ]]; then
-    source "$(dirname "$0")/../lib/dev-commands.sh"
-fi
-
-# Source the AI agent system
-if [[ -f /usr/lib/powos/ai/agent.sh ]]; then
-    source /usr/lib/powos/ai/agent.sh
-elif [[ -f "$(dirname "$0")/../lib/ai/agent.sh" ]]; then
-    source "$(dirname "$0")/../lib/ai/agent.sh"
-fi
-
-# Source the RAM ↔ USB sync system
-if [[ -f /usr/lib/powos/sync.sh ]]; then
-    source /usr/lib/powos/sync.sh
-elif [[ -f "$(dirname "$0")/../lib/sync.sh" ]]; then
-    source "$(dirname "$0")/../lib/sync.sh"
-fi
-
-# Source the backup system (USB ↔ cloud)
-if [[ -f /usr/lib/powos/backup.sh ]]; then
-    source /usr/lib/powos/backup.sh
-elif [[ -f "$(dirname "$0")/../lib/backup.sh" ]]; then
-    source "$(dirname "$0")/../lib/backup.sh"
-fi
+# These four historically hardcoded /usr/lib/powos first, which made the
+# installed copy shadow a dev checkout — dev edits to sync/backup/dev-commands/
+# agent were silently ignored (breaks the "edit source, apply live" workflow).
+# Use $POWOS_LIB like the other ~54 sourced libs: it already resolves to the
+# repo when run from a checkout and to /usr/lib/powos when installed.
+[[ -f "$POWOS_LIB/dev-commands.sh" ]] && source "$POWOS_LIB/dev-commands.sh"
+[[ -f "$POWOS_LIB/ai/agent.sh" ]]     && source "$POWOS_LIB/ai/agent.sh"
+[[ -f "$POWOS_LIB/sync.sh" ]]         && source "$POWOS_LIB/sync.sh"
+[[ -f "$POWOS_LIB/backup.sh" ]]       && source "$POWOS_LIB/backup.sh"
 
 # ═══════════════════════════════════════════════════════════════════
 # Container Commands (Podman/Distrobox)
