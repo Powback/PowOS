@@ -70,6 +70,67 @@ self_usr_ro() {
 }
 
 # ══════════════════════════════════════════════════════════════════
+# Image file map — the SINGLE SOURCE OF TRUTH for `update self`.
+#
+# The Containerfile's `staging` stage is a list of `COPY <src...> <dst>` lines
+# that place every shipped file. Rather than hand-maintain a parallel copy list
+# in `update self` (which drifted — profile.d / konsole / MOTD were shipped by
+# the image but not live-appliable), we derive the map straight from those COPY
+# lines. Add a COPY to the Containerfile and `update self` picks it up for free;
+# test/tier1/test-self-manifest.sh enforces that they stay in lockstep.
+# ══════════════════════════════════════════════════════════════════
+
+# Emit `src<TAB>dst` for every applicable staging COPY. Multi-src lines expand
+# to one row per src. Build-only entries are skipped: `.snapshot` (the source
+# snapshot itself, not a runtime file) and anything under /tmp (KDE build stage).
+self_copy_manifest() {
+    local containerfile="${1:-$SELF_SRC/Containerfile}"
+    [[ -r "$containerfile" ]] || return 0
+    awk '
+        /^FROM[[:space:]]+scratch[[:space:]]+AS[[:space:]]+staging/ { instage=1; next }
+        /^FROM[[:space:]]/ { instage=0 }
+        instage && /^COPY[[:space:]]/ {
+            n=0; delete a
+            for (i=2; i<=NF; i++) { if ($i ~ /^--/) continue; a[++n]=$i }  # drop --flags
+            if (n < 2) next
+            dst=a[n]
+            if (dst ~ /^\/tmp\//) next
+            for (i=1; i<n; i++) {
+                if (a[i] ~ /^\.snapshot/) continue
+                print a[i] "\t" dst
+            }
+        }
+    ' "$containerfile"
+}
+
+# Apply the image file map onto the running system from $src_root. rsync's
+# default (temp file + atomic rename) is safe even for the running /usr/bin/powos
+# and for a lib/*.sh being sourced right now; --no-owner/--no-group keep the
+# installed files root-owned (we copy under sudo). Caller must have engaged the
+# usr-overlay for /usr first. Echoes each applied target.
+self_apply_manifest() {
+    local src_root="$1" containerfile="${2:-$src_root/Containerfile}"
+    local src dst abs
+    while IFS=$'\t' read -r src dst; do
+        [[ -n "$src" && -n "$dst" ]] || continue
+        abs="$src_root/${src%/}"
+        if [[ ! -e "$abs" ]]; then
+            echo "  (skip: $src not in tree)"
+            continue
+        fi
+        if [[ -d "$abs" ]]; then
+            dst="${dst%/}"
+            sudo mkdir -p "$dst"
+            sudo rsync -a --no-owner --no-group "$abs/" "$dst/" && echo "  $dst/  ← $src"
+        else
+            if [[ "$dst" == */ ]]; then sudo mkdir -p "$dst"
+            else sudo mkdir -p "$(dirname "$dst")"; fi
+            sudo rsync -a --no-owner --no-group "$abs" "$dst" && echo "  $dst  ← $src"
+        fi
+    done < <(self_copy_manifest "$containerfile")
+}
+
+# ══════════════════════════════════════════════════════════════════
 # SAFE pull — replaces the old `git checkout -f` footgun.
 #
 # Contract: this function NEVER discards uncommitted local edits and NEVER runs
@@ -410,7 +471,7 @@ EOF
 }
 
 cmd_self() {
-    local sub="${1:-status}"; shift || true
+    local sub="${1:-help}"; shift || true
     case "$sub" in
         status|st)  self_status "$SELF_SRC" ;;
         test|t)     self_test "$SELF_SRC" ;;

@@ -899,101 +899,17 @@ cmd_update() {
                 fi
             fi
 
-            # Install scripts
-            echo "Installing scripts..."
-
-            # bin/ -> /usr/bin/  (atomic: copy to a temp then mv, so we never
-            # truncate the currently-running script in place — an in-place cp
-            # over /usr/bin/powos corrupts this very bash process mid-run,
-            # which surfaced as a bogus "unexpected EOF" and a failed deploy.)
-            if [[ -d "$POWOS_SRC/bin" ]]; then
-                for script in "$POWOS_SRC/bin"/*; do
-                    [[ -f "$script" ]] || continue
-                    local name; name=$(basename "$script")
-                    local tmp="/usr/bin/.${name}.new.$$"
-                    sudo cp "$script" "$tmp"
-                    sudo chmod +x "$tmp"
-                    sudo mv -f "$tmp" "/usr/bin/$name"
-                    echo "  /usr/bin/$name"
-                done
-            fi
-
-            # lib/ -> /usr/lib/powos/
-            if [[ -d "$POWOS_SRC/lib" ]]; then
-                sudo mkdir -p /usr/lib/powos
-                sudo cp -r "$POWOS_SRC/lib/"* /usr/lib/powos/
-                sudo chmod +x /usr/lib/powos/*.sh 2>/dev/null || true
-                sudo chmod +x /usr/lib/powos/**/*.sh 2>/dev/null || true
-                sudo chmod +x /usr/lib/powos/**/*.py 2>/dev/null || true
-                echo "  /usr/lib/powos/ (lib/*)"
-            fi
-
-            # config/ -> system paths. These MIRROR the Containerfile staging
-            # COPY lines exactly; when you add a COPY there, add it here too or
-            # `update self` cannot live-apply that file. (The old blanket
-            # `config/* -> /etc/powos/` mis-placed profile.d/kde/motd, so those
-            # could only be applied by hand — the reason for this explicit map.)
-            local c="$POWOS_SRC/config"
-            # PowOS's own config tree
-            [[ -d "$c/ai" ]]    && { sudo mkdir -p /etc/powos/ai;    sudo cp -r "$c/ai/"*    /etc/powos/ai/; }
-            [[ -d "$c/zones" ]] && { sudo mkdir -p /etc/powos/zones; sudo cp -r "$c/zones/"* /etc/powos/zones/; }
-            # config/etc/ is a 1:1 mirror of /etc/ (profile.d, containers, ssh,
-            # systemd/logind…) — one copy covers every config/etc/* COPY.
-            [[ -d "$c/etc" ]] && { sudo cp -r "$c/etc/"* /etc/; echo "  /etc/ (config/etc/*)"; }
-            # KDE: rc files -> /etc/xdg, konsole profiles -> /usr/share/konsole
-            if [[ -d "$c/kde" ]]; then
-                for f in powermanagementprofilesrc kglobalshortcutsrc kwinrc konsolerc; do
-                    [[ -f "$c/kde/$f" ]] && sudo cp "$c/kde/$f" /etc/xdg/
-                done
-                [[ -d "$c/kde/konsole" ]] && { sudo mkdir -p /usr/share/konsole; sudo cp -r "$c/kde/konsole/"* /usr/share/konsole/; }
-                echo "  /etc/xdg + /usr/share/konsole (config/kde/*)"
-            fi
-            # MOTD rebrand: overwrite the path /usr/libexec/ublue-motd renders.
-            [[ -f "$c/ublue-os/motd/powos.md" ]] && { sudo mkdir -p /usr/share/ublue-os/motd; sudo cp "$c/ublue-os/motd/powos.md" /usr/share/ublue-os/motd/bazzite.md; echo "  /usr/share/ublue-os/motd (MOTD)"; }
-            # Assorted single-dest configs
-            [[ -d "$c/tmpfiles.d" ]] && sudo cp -r "$c/tmpfiles.d/"* /etc/tmpfiles.d/ 2>/dev/null || true
-            [[ -d "$c/sysctl.d" ]]   && sudo cp -r "$c/sysctl.d/"*   /etc/sysctl.d/   2>/dev/null || true
-            [[ -d "$c/NetworkManager/conf.d" ]] && { sudo mkdir -p /etc/NetworkManager/conf.d; sudo cp -r "$c/NetworkManager/conf.d/"* /etc/NetworkManager/conf.d/ 2>/dev/null || true; }
-            [[ -f "$c/logid/logid.cfg" ]] && sudo cp "$c/logid/logid.cfg" /etc/logid.cfg 2>/dev/null || true
-            echo "  /etc/powos/ + system config paths (config/*)"
-
-            # systemd/ -> /usr/lib/systemd/system/ and /usr/lib/powos/
-            if [[ -d "$POWOS_SRC/systemd" ]]; then
-                for file in "$POWOS_SRC/systemd"/*.service; do
-                    [[ -f "$file" ]] || continue
-                    sudo cp "$file" /usr/lib/systemd/system/
-                done
-                for file in "$POWOS_SRC/systemd"/powos-*; do
-                    [[ -f "$file" ]] && [[ ! "$file" == *.service ]] || continue
-                    sudo cp "$file" /usr/lib/powos/
-                    sudo chmod +x "/usr/lib/powos/$(basename "$file")"
-                done
-                echo "  /usr/lib/systemd/system/ (services)"
-                sudo systemctl daemon-reload 2>/dev/null || true
-            fi
-
-            # sources/ -> /var/lib/powos/sources/
-            if [[ -d "$POWOS_SRC/sources" ]]; then
-                sudo mkdir -p /var/lib/powos/sources
-                sudo cp -r "$POWOS_SRC/sources/"* /var/lib/powos/sources/
-                echo "  /var/lib/powos/sources/"
-            fi
-
-            # desktop/plasmoid/ -> /usr/share/plasma/plasmoids/  (KDE widgets)
-            # The image build COPYs these; without it here, 'self test' could
-            # never apply widget changes live (they only showed up on a rebuild).
-            if [[ -d "$POWOS_SRC/desktop/plasmoid" ]]; then
-                sudo mkdir -p /usr/share/plasma/plasmoids
-                sudo cp -r "$POWOS_SRC/desktop/plasmoid/"* /usr/share/plasma/plasmoids/
-                echo "  /usr/share/plasma/plasmoids/ (widgets)"
-            fi
-
-            # desktop/autostart/ -> /etc/xdg/autostart/  (login-session entries)
-            if [[ -d "$POWOS_SRC/desktop/autostart" ]]; then
-                sudo mkdir -p /etc/xdg/autostart
-                sudo cp "$POWOS_SRC/desktop/autostart/"* /etc/xdg/autostart/ 2>/dev/null || true
-                echo "  /etc/xdg/autostart/"
-            fi
+            # Install every file the image ships, straight from the Containerfile
+            # staging COPY map (self_apply_manifest / self_copy_manifest in
+            # self.sh). This is the SINGLE SOURCE OF TRUTH: whatever the image
+            # COPYs, `update self` applies — no hand-kept list to drift out of
+            # sync (which is exactly how profile.d / konsole / MOTD became
+            # un-live-appliable). rsync's atomic rename makes replacing the
+            # running /usr/bin/powos and in-use lib/*.sh safe.
+            echo "Installing from Containerfile map..."
+            self_apply_manifest "$POWOS_SRC" "$POWOS_SRC/Containerfile"
+            # Units may have changed (systemd/*, config/etc/systemd, ...).
+            sudo systemctl daemon-reload 2>/dev/null || true
 
             sysext_remerge_if_needed
 
