@@ -7,6 +7,7 @@ serialization, and LIVE comms-inbox injection — is exercised with no real
 `claude`, no network, no desktop.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -145,6 +146,116 @@ class ManagerTests(unittest.TestCase):
         ])
         self.assertIn("disk critical", out)
         self.assertIn("/, 96% used", out)
+
+
+class OnceModeTests(unittest.TestCase):
+    """The widget path: one turn, normalized JSONL events, per-dir cwd."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.store = os.path.join(self.tmp, "store")
+        self.stub = os.path.join(self.tmp, "stub.py")
+        with open(self.stub, "w") as f:
+            f.write(STUB)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _once(self, text, cwd=None, extra=None):
+        env = dict(os.environ,
+                   MANAGER_CLAUDE_CMD=f"{sys.executable} {self.stub}",
+                   POWOS_MANAGER_SAFE="1", NO_COLOR="1")
+        args = [sys.executable, BROKER, "--agent-id", "manager",
+                "--session-store", self.store, "--json-events",
+                "--once", text]
+        if cwd:
+            args += ["--cwd", cwd]
+        if extra:
+            args += extra
+        p = subprocess.run(args, capture_output=True, text=True, env=env,
+                           cwd=self.tmp, timeout=60)
+        events = [json.loads(l) for l in p.stdout.splitlines() if l.strip()]
+        return events
+
+    def test_json_events_shape(self):
+        evs = self._once("hello widget")
+        kinds = [e["kind"] for e in evs]
+        self.assertIn("session", kinds)
+        self.assertIn("user", kinds)         # the user's own turn echoed
+        self.assertIn("assistant", kinds)
+        self.assertIn("turn_done", kinds)
+        user = next(e for e in evs if e["kind"] == "user")
+        self.assertEqual(user["text"], "hello widget")
+        asst = next(e for e in evs if e["kind"] == "assistant")
+        self.assertIn("echo: hello widget", asst["text"])
+
+    def test_once_exits_after_one_turn(self):
+        # exactly one turn_done — once() must not hang waiting for more.
+        evs = self._once("just one")
+        self.assertEqual(sum(1 for e in evs if e["kind"] == "turn_done"), 1)
+
+    def test_cwd_gives_separate_thread(self):
+        d1 = os.path.join(self.tmp, "projA"); os.makedirs(d1)
+        d2 = os.path.join(self.tmp, "projB"); os.makedirs(d2)
+        self._once("hi", cwd=d1)
+        self._once("hi", cwd=d2)
+        sess = os.path.join(self.store, "sessions")
+        files = os.listdir(sess)
+        # one session file per distinct working directory
+        self.assertEqual(len(files), 2)
+        self.assertTrue(any("projA" in f for f in files))
+        self.assertTrue(any("projB" in f for f in files))
+
+
+class ListJsonTests(unittest.TestCase):
+    """Sidebar data feed for the widget."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.store = os.path.join(self.tmp, "store")
+        self.projects = os.path.join(self.tmp, "Projects")
+        self.comms = os.path.join(self.tmp, "comms")
+        for p in ("Alpha", "Beta"):
+            os.makedirs(os.path.join(self.projects, p))
+        os.makedirs(os.path.join(self.comms, "agents", "coder", "inbox"))
+        with open(os.path.join(self.comms, "agents", "coder", "inbox", "m.json"), "w") as f:
+            f.write("{}")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _list(self):
+        env = dict(os.environ, POWOS_PROJECTS_DIR=self.projects,
+                   COMMS_ROOT=self.comms)
+        p = subprocess.run(
+            [sys.executable, BROKER, "--session-store", self.store, "--list-json"],
+            capture_output=True, text=True, env=env, timeout=30)
+        return json.loads(p.stdout)
+
+    def test_lists_projects_and_agents(self):
+        data = self._list()
+        names = [p["name"] for p in data["projects"]]
+        self.assertEqual(names, ["Alpha", "Beta"])
+        agents = {a["name"]: a["pending"] for a in data["agents"]}
+        # known roster present even with no inbox…
+        self.assertIn("manager", agents)
+        self.assertIn("devops", agents)
+        # …and real inbox depth is reflected
+        self.assertEqual(agents["coder"], 1)
+
+    def test_hassession_reflects_store(self):
+        # give Alpha a session, Beta none
+        SESS = os.path.join(self.store, "sessions")
+        os.makedirs(SESS, exist_ok=True)
+        alpha = os.path.join(self.projects, "Alpha").replace("/", "-").strip("-")
+        with open(os.path.join(SESS, alpha + ".session"), "w") as f:
+            f.write("sess-xyz")
+        data = self._list()
+        byname = {p["name"]: p["hasSession"] for p in data["projects"]}
+        self.assertTrue(byname["Alpha"])
+        self.assertFalse(byname["Beta"])
 
 
 if __name__ == "__main__":

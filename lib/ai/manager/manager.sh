@@ -11,6 +11,17 @@ manager_run() {
     command -v python3 &>/dev/null || { echo "manager needs python3" >&2; return 1; }
     [[ -f "$MANAGER_SERVER" ]] || { echo "manager.py not found" >&2; return 1; }
 
+    local store="${AI_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/powos/ai}/manager"
+    mkdir -p "$store"
+
+    # Lightweight data query for the widget sidebar — skip the (expensive)
+    # persona load / mcp wiring / context gathering the chat path needs.
+    if [[ " $* " == *" --list-json "* ]]; then
+        export COMMS_ROOT
+        python3 "$MANAGER_SERVER" --agent-id manager --session-store "$store" --list-json
+        return
+    fi
+
     # Load the manager persona. _ai_load_agent expands the !cmd lines, so the
     # system prompt carries the CURRENT `powos help` / `powos comms help`.
     if ! declare -f _ai_load_agent &>/dev/null; then
@@ -38,18 +49,24 @@ $ctx"
     spf="$(mktemp "${TMPDIR:-/tmp}/powos-manager-sys.XXXXXX")"
     printf '%s' "$sysprompt" > "$spf"
 
-    local store="${AI_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/powos/ai}/manager"
-    mkdir -p "$store"
-
-    # --safe: keep permission prompts (no --dangerously-skip-permissions).
-    [[ "${1:-}" == "--safe" ]] && export POWOS_MANAGER_SAFE=1
+    # Split our own flags (--safe) from broker pass-throughs
+    # (--once, --json-events, --cwd, ...).
+    local passthru=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --safe) export POWOS_MANAGER_SAFE=1 ;;
+            *) passthru+=("$1") ;;
+        esac
+        shift
+    done
 
     local rc=0
     python3 "$MANAGER_SERVER" \
         --agent-id manager \
         --system-prompt-file "$spf" \
         ${mcp_file:+--mcp-config-file "$mcp_file"} \
-        --session-store "$store" || rc=$?
+        --session-store "$store" \
+        "${passthru[@]}" || rc=$?
 
     rm -f "$spf" "$mcp_file" 2>/dev/null
     return $rc

@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """PowOS Manager — a persistent streaming agent session you can leave running.
 
-This is the backend the desktop widget will front (Phase 2); today it drives a
-clean terminal REPL. It owns ONE long-lived `claude` process in bidirectional
-stream-json mode, so the conversation persists across turns and:
+Backend for the desktop widget (Phase 2) and a clean terminal REPL today. It
+owns ONE `claude` process in bidirectional stream-json mode, so a conversation
+persists across turns and:
 
   * per-directory memory  — the session id is stored keyed by cwd and resumed,
-    so `manager` in ~/Projects/Foo continues Foo's thread, Bar's in Bar.
+    so `manager` in ~/Projects/Foo continues Foo's thread, Bar's in Bar. The
+    widget maps its project sidebar onto this: picking a project = its thread.
   * live inbox delivery    — mail arriving in the manager's comms inbox is
-    injected into the session as a user turn automatically; the manager never
-    has to poll or call wait_for_message.
+    injected as a user turn automatically; the manager never polls.
 
-Two writers feed the session (you at the keyboard, and the inbox watcher); a
-single sender serializes them and only sends between turns, so nothing
-interleaves mid-response. Output events are parsed and rendered as panels — the
-same shape the widget will consume as JSON later.
+Everything the session produces is turned into ONE normalized event stream
+(assistant / tool_use / tool_result / turn_done / inbox / user / session). A
+pluggable sink consumes it:
 
-The `claude` command is overridable via MANAGER_CLAUDE_CMD (used by the tests to
-substitute a hermetic stub that speaks the same stream-json protocol).
+  * terminal sink  — pretty panels for the REPL (default, interactive).
+  * jsonl sink     — one JSON object per line on stdout (--json-events), which
+    the widget parses into chat bubbles and tool panels.
+
+Frontends: `repl()` (interactive, two writers = you + the inbox watcher,
+serialized) and `once(text)` (one turn against the per-dir session, for the
+widget). The `claude` command is overridable via MANAGER_CLAUDE_CMD (the tests
+substitute a hermetic stub speaking the same protocol).
 """
 
 import argparse
@@ -39,6 +44,7 @@ CYAN = lambda s: _c("36", s)
 GREEN = lambda s: _c("32", s)
 YELLOW = lambda s: _c("33", s)
 MAGENTA = lambda s: _c("35", s)
+RED = lambda s: _c("31", s)
 
 
 def encode_cwd(path):
@@ -73,17 +79,21 @@ class SessionStore:
 
 
 class Manager:
-    def __init__(self, args):
+    def __init__(self, args, sink=None, enable_inbox=True):
         self.args = args
-        self.cwd = os.getcwd()
+        self.cwd = os.path.abspath(args.cwd) if getattr(args, "cwd", None) else os.getcwd()
         self.store = SessionStore(args.session_store)
         self.session_id = self.store.load(self.cwd)
         self.pending = queue.Queue()      # (source, text) awaiting send
         self.busy = threading.Event()     # set while a turn is in flight
         self.stop = threading.Event()
         self.proc = None
+        self.turns_done = 0
+        self.enable_inbox = enable_inbox
+        self.sink = sink or self._term_sink
         self._comms_root = os.environ.get("COMMS_ROOT", "")
         self._agent_id = args.agent_id
+        self._log = None
 
     # -- process launch ------------------------------------------------------
 
@@ -113,19 +123,47 @@ class Manager:
         self._log = open(log_path, "a")
         self.proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=self._log, text=True, bufsize=1, env=env)
-        where = os.path.basename(self.cwd) or "/"
-        resumed = f"resumed {self.session_id[:8]}" if self.session_id else "new session"
-        print(DIM(f"● PowOS Manager — {where} ({resumed}). "
-                  f"Type to talk; Ctrl-D or /exit to quit.\n"))
+            stderr=self._log, text=True, bufsize=1, env=env,
+            cwd=self.cwd)
 
-    # -- the three loops -----------------------------------------------------
+    # -- normalized event stream + sinks -------------------------------------
+
+    def _emit(self, ev):
+        """Send one normalized event to the active sink."""
+        try:
+            self.sink(ev)
+        except Exception:
+            pass
+
+    def _term_sink(self, ev):
+        k = ev.get("kind")
+        if k == "assistant":
+            print(BOLD(CYAN("\nmanager")) + DIM(" ▸ ") + ev["text"].strip())
+        elif k == "tool_use":
+            hint = ev.get("hint", "")
+            print(YELLOW(f"\n  ⚙ {ev['name']}") + (DIM(f"  {hint}") if hint else ""))
+        elif k == "tool_result":
+            tag = DIM("  ↳ ") + (GREEN("ok") if ev.get("ok") else RED("err"))
+            print(tag + DIM(f"  {ev.get('text','')}"))
+        elif k == "inbox":
+            print(MAGENTA(f"\n✉  {ev['text']}"))
+        elif k == "turn_done":
+            cost = ev.get("cost")
+            if cost and _TTY:
+                print(DIM(f"  · turn done (${cost:.4f})"))
+        # 'user' and 'session' are silent in the terminal (you typed it / meta)
+
+    def _json_sink(self, ev):
+        sys.stdout.write(json.dumps(ev) + "\n")
+        sys.stdout.flush()
+
+    # -- the loops -----------------------------------------------------------
 
     def _send_event(self, text):
-        ev = {"type": "user", "message": {"role": "user",
-              "content": [{"type": "text", "text": text}]}}
+        msg = {"type": "user", "message": {"role": "user",
+               "content": [{"type": "text", "text": text}]}}
         try:
-            self.proc.stdin.write(json.dumps(ev) + "\n")
+            self.proc.stdin.write(json.dumps(msg) + "\n")
             self.proc.stdin.flush()
             self.busy.set()
         except (BrokenPipeError, ValueError):
@@ -142,7 +180,9 @@ class Manager:
             except queue.Empty:
                 continue
             if source == "inbox":
-                print(MAGENTA(f"\n✉  {text}"))
+                self._emit({"kind": "inbox", "text": text})
+            else:
+                self._emit({"kind": "user", "text": text})
             self._send_event(text)
 
     def inbox_loop(self):
@@ -175,7 +215,7 @@ class Manager:
             time.sleep(1.0)
 
     def reader_loop(self):
-        """Parse the event stream and render it; clear busy on each result."""
+        """Parse the raw event stream into normalized events; clear busy on result."""
         for line in self.proc.stdout:
             if self.stop.is_set():
                 break
@@ -183,69 +223,84 @@ class Manager:
             if not line:
                 continue
             try:
-                ev = json.loads(line)
+                raw = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            self._render(ev)
+            self._parse_raw(raw)
         self.stop.set()
 
-    # -- rendering (the shape the widget will consume too) -------------------
-
-    def _render(self, ev):
+    def _parse_raw(self, ev):
         t = ev.get("type")
         if t == "system" and ev.get("subtype") == "init":
             sid = ev.get("session_id")
             if sid:
                 self.session_id = sid
                 self.store.save(self.cwd, sid)
+                self._emit({"kind": "session", "id": sid})
         elif t == "assistant":
             for b in ev["message"].get("content", []):
                 if b.get("type") == "text" and b.get("text", "").strip():
-                    print(BOLD(CYAN("\nmanager")) + DIM(" ▸ ") + b["text"].strip())
+                    self._emit({"kind": "assistant", "text": b["text"].strip()})
                 elif b.get("type") == "tool_use":
-                    self._render_tool_use(b)
+                    self._emit({"kind": "tool_use", "name": b.get("name", "?"),
+                                "hint": self._tool_hint(b.get("input", {}) or {})})
         elif t == "user":
             for b in ev["message"].get("content", []):
                 if b.get("type") == "tool_result":
-                    self._render_tool_result(b)
+                    self._emit({"kind": "tool_result",
+                                "ok": not b.get("is_error"),
+                                "text": self._result_text(b.get("content", ""))})
         elif t == "result":
             self.busy.clear()
+            self.turns_done += 1
             if ev.get("session_id"):
                 self.session_id = ev["session_id"]
                 self.store.save(self.cwd, ev["session_id"])
-            cost = ev.get("total_cost_usd")
-            if cost and _TTY:
-                print(DIM(f"  · turn done (${cost:.4f})"))
+            self._emit({"kind": "turn_done", "cost": ev.get("total_cost_usd")})
 
-    def _render_tool_use(self, b):
-        name = b.get("name", "?")
-        inp = b.get("input", {}) or {}
+    @staticmethod
+    def _tool_hint(inp):
         hint = (inp.get("command") or inp.get("file_path") or inp.get("path")
                 or inp.get("pattern") or inp.get("to") or inp.get("message") or "")
         hint = str(hint).replace("\n", " ")
-        if len(hint) > 100:
-            hint = hint[:100] + "…"
-        print(YELLOW(f"\n  ⚙ {name}") + (DIM(f"  {hint}") if hint else ""))
+        return hint[:120] + "…" if len(hint) > 120 else hint
 
-    def _render_tool_result(self, b):
-        content = b.get("content", "")
+    @staticmethod
+    def _result_text(content):
         if isinstance(content, list):
             content = " ".join(c.get("text", "") for c in content
                                if isinstance(c, dict))
         content = str(content).strip().replace("\n", " ")
-        if not content:
-            return
-        if len(content) > 160:
-            content = content[:160] + "…"
-        tag = DIM("  ↳ ") + (GREEN("ok") if not b.get("is_error") else _c("31", "err"))
-        print(tag + DIM(f"  {content}"))
+        return content[:160] + "…" if len(content) > 160 else content
 
-    # -- terminal frontend ---------------------------------------------------
+    # -- frontends -----------------------------------------------------------
 
-    def repl(self):
+    def _spawn_workers(self):
         threading.Thread(target=self.reader_loop, daemon=True).start()
         threading.Thread(target=self.sender_loop, daemon=True).start()
-        threading.Thread(target=self.inbox_loop, daemon=True).start()
+        if self.enable_inbox:
+            threading.Thread(target=self.inbox_loop, daemon=True).start()
+
+    def once(self, text, timeout=300):
+        """Run a single turn against the per-dir session, then exit. Widget path."""
+        self.enable_inbox = False
+        self.start()
+        self._spawn_workers()
+        self.pending.put(("user", text))
+        t0 = time.time()
+        while self.turns_done < 1 and not self.stop.is_set():
+            if time.time() - t0 > timeout:
+                break
+            time.sleep(0.05)
+        self.shutdown()
+
+    def repl(self):
+        self.start()
+        where = os.path.basename(self.cwd) or "/"
+        resumed = f"resumed {self.session_id[:8]}" if self.session_id else "new session"
+        print(DIM(f"● PowOS Manager — {where} ({resumed}). "
+                  f"Type to talk; Ctrl-D or /exit to quit.\n"))
+        self._spawn_workers()
         try:
             while not self.stop.is_set():
                 try:
@@ -262,6 +317,7 @@ class Manager:
         finally:
             self.drain()
             self.shutdown()
+            print(DIM("\n● Manager stopped. Session saved — `powos ai manager` resumes it."))
 
     def drain(self, timeout=120):
         """Let queued/in-flight turns finish before tearing the session down."""
@@ -285,7 +341,44 @@ class Manager:
                 self.proc.wait(timeout=10)
             except Exception:
                 self.proc.kill()
-        print(DIM("\n● Manager stopped. Session saved — `powos ai manager` resumes it."))
+        if self._log:
+            try:
+                self._log.close()
+            except Exception:
+                pass
+
+
+# Known agent roster — shown in the widget sidebar even before an inbox exists.
+KNOWN_AGENTS = ["manager", "assistant", "health", "coder", "devops",
+                "containerizer", "creator", "modder"]
+
+
+def list_json(args):
+    """Sidebar data for the widget: projects (with per-dir session state) and
+    agents (with inbox depth). One clean JSON object — no ANSI to parse."""
+    store = SessionStore(args.session_store)
+    base = os.environ.get("POWOS_PROJECTS_DIR") or os.path.expanduser("~/Projects")
+    projects = []
+    if os.path.isdir(base):
+        for name in sorted(os.listdir(base)):
+            p = os.path.join(base, name)
+            if os.path.isdir(p) and not name.startswith("."):
+                projects.append({"name": name, "path": p,
+                                 "hasSession": bool(store.load(p))})
+    # Merge the known roster with whatever inboxes actually exist.
+    root = os.environ.get("COMMS_ROOT", "")
+    adir = os.path.join(root, "agents") if root else ""
+    depth = {}
+    if adir and os.path.isdir(adir):
+        for name in os.listdir(adir):
+            inbox = os.path.join(adir, name, "inbox")
+            if os.path.isdir(inbox):
+                depth[name] = len([f for f in os.listdir(inbox)
+                                   if f.endswith(".json")])
+    names = list(dict.fromkeys(KNOWN_AGENTS + sorted(depth)))
+    agents = [{"name": n, "pending": depth.get(n, 0)} for n in names]
+    print(json.dumps({"projects": projects, "agents": agents,
+                      "projectsBase": base}))
 
 
 def main():
@@ -294,15 +387,36 @@ def main():
     ap.add_argument("--system-prompt-file")
     ap.add_argument("--mcp-config-file")
     ap.add_argument("--session-store", required=True)
+    ap.add_argument("--cwd", help="Directory whose session to resume (per-dir memory).")
+    ap.add_argument("--once", metavar="TEXT",
+                    help="Send one turn against the per-dir session, then exit.")
+    ap.add_argument("--once-stdin", action="store_true",
+                    help="Like --once, but read the turn text from stdin "
+                         "(lets the widget avoid shell-quoting the message).")
+    ap.add_argument("--json-events", action="store_true",
+                    help="Emit one normalized JSON event per line (for the widget).")
+    ap.add_argument("--list-json", action="store_true",
+                    help="Emit sidebar data (projects + agents) as JSON and exit.")
+    args = ap.parse_args()
+
+    if args.list_json:
+        list_json(args)
+        return
     # Live output: line-buffer so a pipe/widget consumer sees each event as it
     # renders (a block-buffered pipe would swallow everything until exit).
     try:
         sys.stdout.reconfigure(line_buffering=True)
     except Exception:
         pass
-    m = Manager(ap.parse_args())
-    m.start()
-    m.repl()
+    m = Manager(args)
+    if args.json_events:
+        m.sink = m._json_sink
+    if args.once_stdin:
+        m.once(sys.stdin.read().strip())
+    elif args.once is not None:
+        m.once(args.once)
+    else:
+        m.repl()
 
 
 if __name__ == "__main__":

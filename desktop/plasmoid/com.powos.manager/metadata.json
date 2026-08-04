@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PowOS"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Chat with the PowOS manager — sidebar of your projects and agents, live chat on the right",
+        "Icon": "system-run",
+        "Id": "com.powos.manager",
+        "License": "MIT",
+        "Name": "PowOS Manager",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

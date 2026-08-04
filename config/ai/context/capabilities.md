@@ -180,6 +180,11 @@ Key facts an agent should CHECK before starting:
 - Containers `powos containers …` (Podman/Distrobox), install/export GUI apps. ✅
 - Desktop widgets (KDE plasmoids in `desktop/plasmoid/`, shipped to
   `/usr/share/plasma/plasmoids/`) — add from "Add Widgets" or the System Tray: ✅
+  - `com.powos.manager` — **two-pane chat with the PowOS manager**: left sidebar of
+    your projects (`~/Projects/*`, ● = live thread) + agent roster (unread badges),
+    right pane a live chat. Picking a project switches to that project's manager
+    thread (per-dir memory). Each turn runs `powos ai manager --json-events --once`,
+    rendered as bubbles + tool panels (⚙ tool_use, ↳ tool_result, ✉ inbox).
   - `com.powos.containers` — start/stop/restart podman containers, grouped by
     compose stack; expand a container for Logs / **Processes** (podman top) / Details.
   - `com.powos.monitor` — CPU (aggregate + per-core bars), GPU, net, disk;
