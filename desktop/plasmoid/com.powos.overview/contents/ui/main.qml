@@ -123,7 +123,7 @@ PlasmoidItem {
     function field(o, k, dflt) { return (o && o[k] !== undefined && o[k] !== null && o[k] !== "") ? o[k] : (dflt || "—") }
 
     fullRepresentation: Item {
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 18
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 20
         Layout.minimumHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
         Layout.preferredHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
 
@@ -188,8 +188,8 @@ PlasmoidItem {
             // "what's stealing my machine" view: cpu, memory, or disk I/O.
             RowLayout {
                 Layout.fillWidth: true
-                spacing: Kirigami.Units.largeSpacing
-                readonly property int metricW: Kirigami.Units.gridUnit * 4
+                spacing: Kirigami.Units.smallSpacing
+                readonly property int metricW: Kirigami.Units.gridUnit * 3
 
                 PC3.Label {
                     text: "process"; opacity: 0.5
@@ -197,9 +197,9 @@ PlasmoidItem {
                     elide: Text.ElideRight; Layout.fillWidth: true
                 }
                 Repeater {
-                    model: [ { key: "cpu", label: "cpu %" },
-                             { key: "mem", label: "mem %" },
-                             { key: "io",  label: "disk MB/s" } ]
+                    model: [ { key: "cpu", label: "cpu%" },
+                             { key: "mem", label: "mem%" },
+                             { key: "io",  label: "disk" } ]
                     delegate: PC3.Label {
                         readonly property bool active: root.sortKey === modelData.key
                         text: (active ? "▼ " : "") + modelData.label
@@ -227,13 +227,13 @@ PlasmoidItem {
                 ListView {
                     id: procList
                     readonly property int rowH: Math.round(Kirigami.Theme.smallFont.pixelSize * 1.35)
-                    readonly property int metricW: Kirigami.Units.gridUnit * 4
+                    readonly property int metricW: Kirigami.Units.gridUnit * 3
                     model: root.sortedProcs
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     delegate: RowLayout {
                         width: procList.width
-                        spacing: Kirigami.Units.largeSpacing
+                        spacing: Kirigami.Units.smallSpacing
                         PC3.Label {
                             text: (modelData.name || "")
                                   + (modelData.count > 1 ? " ×" + modelData.count : "")

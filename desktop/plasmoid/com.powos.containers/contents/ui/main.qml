@@ -681,15 +681,32 @@ PlasmoidItem {
                                     clip: true
                                     contentWidth: availableWidth
 
-                                    // Logs open scrolled to the NEWEST lines (tail behaviour):
-                                    // pin the flickable to the bottom whenever the text loads or
-                                    // its rendered height settles.
-                                    function scrollToBottom() {
-                                        var f = logScroll.contentItem
-                                        if (f) f.contentY = Math.max(0, f.contentHeight - f.height)
+                                    // Tail behaviour: open on the NEWEST lines and follow new
+                                    // output — but only while the user is already at the bottom,
+                                    // so the 5s in-place refresh doesn't yank them back up after
+                                    // they've scrolled to read. Driven off the *Flickable's* own
+                                    // contentHeight (logScroll.contentItem), NOT the TextEdit's:
+                                    // ScrollView updates the flickable geometry a frame after the
+                                    // text relayouts, so setting contentY on the TextEdit's signal
+                                    // ran against a stale (small) flickable contentHeight and got
+                                    // clamped back to the top — that's why it showed from the top.
+                                    property bool atBottom: true
+                                    Connections {
+                                        target: logScroll.contentItem
+                                        function onContentHeightChanged() {
+                                            if (!logScroll.atBottom) return
+                                            var f = logScroll.contentItem
+                                            f.contentY = Math.max(0, f.contentHeight - f.height)
+                                        }
+                                        function onContentYChanged() {
+                                            var f = logScroll.contentItem
+                                            logScroll.atBottom =
+                                                (f.contentHeight - f.height - f.contentY) < 4
+                                        }
                                     }
 
                                     TextEdit {
+                                        id: logEdit
                                         readOnly: true
                                         selectByMouse: true
                                         wrapMode: TextEdit.Wrap
@@ -705,10 +722,6 @@ PlasmoidItem {
                                                                               Kirigami.Theme.textColor.b, 0.5)
                                         font.family: "monospace"
                                         font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                        // contentHeight grows as the log text renders — follow it
-                                        // to the bottom so the freshest output is what you see.
-                                        onContentHeightChanged: logScroll.scrollToBottom()
-                                        Component.onCompleted: logScroll.scrollToBottom()
                                     }
                                 }
                             }

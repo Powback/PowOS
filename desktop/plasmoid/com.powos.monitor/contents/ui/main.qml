@@ -258,7 +258,7 @@ PlasmoidItem {
         property color lineColor: Kirigami.Theme.highlightColor
         property color lineColor2: Kirigami.Theme.neutralTextColor
         Layout.fillWidth: true
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 3.8
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 2.1
         onSeriesChanged: requestPaint()
         onSeries2Changed: requestPaint()
         onMaxValueChanged: requestPaint()
@@ -367,7 +367,7 @@ PlasmoidItem {
             // Per-core utilization bars as a background behind the CPU sparkline
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Kirigami.Units.gridUnit * 3.8
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 2.6
                 // Core bars — one vertical bar per core, filled by utilization %
                 Row {
                     anchors.fill: parent
