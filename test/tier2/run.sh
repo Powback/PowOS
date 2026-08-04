@@ -272,9 +272,11 @@ start_vm() {
     SERIAL_LOG="$ARTIFACTS_DIR/serial.log"
     rm -f "$QMP_SOCK" "$SERIAL_LOG"
 
-    # kvm:tcg = try KVM, auto-fall-back to TCG if KVM init fails at runtime
-    # (belt-and-suspenders on top of the preflight accessibility check).
-    local accel=(-accel kvm:tcg)
+    # KVM when the preflight found /dev/kvm usable (the workflow chmods it so a
+    # runner that has it can open it), else TCG. NOTE: `-accel kvm:tcg` is NOT
+    # valid QEMU (`kvm:tcg` fallback is only accepted by `-machine accel=`), and
+    # passing it makes QEMU die instantly — that was a self-inflicted red.
+    local accel=(-enable-kvm)
     (( USE_KVM )) || accel=(-accel tcg)
 
     echo "  Memory: $QEMU_MEM  CPUs: $QEMU_CPUS  Accel: $( (( USE_KVM )) && echo KVM || echo TCG)"
@@ -638,9 +640,11 @@ stage_d() {
     SERIAL_LOG="$ARTIFACTS_DIR/serial-install.log"
     rm -f "$QMP_SOCK" "$SERIAL_LOG"
 
-    # kvm:tcg = try KVM, auto-fall-back to TCG if KVM init fails at runtime
-    # (belt-and-suspenders on top of the preflight accessibility check).
-    local accel=(-accel kvm:tcg)
+    # KVM when the preflight found /dev/kvm usable (the workflow chmods it so a
+    # runner that has it can open it), else TCG. NOTE: `-accel kvm:tcg` is NOT
+    # valid QEMU (`kvm:tcg` fallback is only accepted by `-machine accel=`), and
+    # passing it makes QEMU die instantly — that was a self-inflicted red.
+    local accel=(-enable-kvm)
     (( USE_KVM )) || accel=(-accel tcg)
 
     # Anaconda kickstart: pass via kernel cmdline if available
@@ -819,9 +823,11 @@ start_live_vm() {
     SERIAL_LOG="$ARTIFACTS_DIR/serial-live.log"
     rm -f "$QMP_SOCK" "$SERIAL_LOG"
 
-    # kvm:tcg = try KVM, auto-fall-back to TCG if KVM init fails at runtime
-    # (belt-and-suspenders on top of the preflight accessibility check).
-    local accel=(-accel kvm:tcg)
+    # KVM when the preflight found /dev/kvm usable (the workflow chmods it so a
+    # runner that has it can open it), else TCG. NOTE: `-accel kvm:tcg` is NOT
+    # valid QEMU (`kvm:tcg` fallback is only accepted by `-machine accel=`), and
+    # passing it makes QEMU die instantly — that was a self-inflicted red.
+    local accel=(-enable-kvm)
     (( USE_KVM )) || accel=(-accel tcg)
 
     # Live images need more RAM for the OS to fit (especially E2 ramboot)
