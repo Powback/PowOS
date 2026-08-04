@@ -199,8 +199,15 @@ preflight() {
         ok=false
     fi
 
-    if [[ -e /dev/kvm ]]; then
+    # Existence is not enough: on some CI runners /dev/kvm exists but the
+    # runner user can't open it, and QEMU then hard-fails with
+    # "failed to initialize kvm: Permission denied". Require it to be actually
+    # readable AND writable before claiming KVM; otherwise fall back to TCG.
+    if [[ -r /dev/kvm && -w /dev/kvm ]]; then
         t2_pass "/dev/kvm available (KVM)"
+    elif [[ -e /dev/kvm ]]; then
+        echo -e "  ${YELLOW}WARN${NC}  /dev/kvm exists but is not accessible -- using TCG (5-10x slower)"
+        USE_KVM=0
     else
         echo -e "  ${YELLOW}WARN${NC}  /dev/kvm not available -- using TCG (expect 5-10x slower boot)"
         USE_KVM=0
@@ -265,7 +272,9 @@ start_vm() {
     SERIAL_LOG="$ARTIFACTS_DIR/serial.log"
     rm -f "$QMP_SOCK" "$SERIAL_LOG"
 
-    local accel=(-enable-kvm)
+    # kvm:tcg = try KVM, auto-fall-back to TCG if KVM init fails at runtime
+    # (belt-and-suspenders on top of the preflight accessibility check).
+    local accel=(-accel kvm:tcg)
     (( USE_KVM )) || accel=(-accel tcg)
 
     echo "  Memory: $QEMU_MEM  CPUs: $QEMU_CPUS  Accel: $( (( USE_KVM )) && echo KVM || echo TCG)"
@@ -629,7 +638,9 @@ stage_d() {
     SERIAL_LOG="$ARTIFACTS_DIR/serial-install.log"
     rm -f "$QMP_SOCK" "$SERIAL_LOG"
 
-    local accel=(-enable-kvm)
+    # kvm:tcg = try KVM, auto-fall-back to TCG if KVM init fails at runtime
+    # (belt-and-suspenders on top of the preflight accessibility check).
+    local accel=(-accel kvm:tcg)
     (( USE_KVM )) || accel=(-accel tcg)
 
     # Anaconda kickstart: pass via kernel cmdline if available
@@ -808,7 +819,9 @@ start_live_vm() {
     SERIAL_LOG="$ARTIFACTS_DIR/serial-live.log"
     rm -f "$QMP_SOCK" "$SERIAL_LOG"
 
-    local accel=(-enable-kvm)
+    # kvm:tcg = try KVM, auto-fall-back to TCG if KVM init fails at runtime
+    # (belt-and-suspenders on top of the preflight accessibility check).
+    local accel=(-accel kvm:tcg)
     (( USE_KVM )) || accel=(-accel tcg)
 
     # Live images need more RAM for the OS to fit (especially E2 ramboot)
