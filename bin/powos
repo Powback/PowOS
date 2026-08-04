@@ -928,12 +928,34 @@ cmd_update() {
                 echo "  /usr/lib/powos/ (lib/*)"
             fi
 
-            # config/ -> /etc/powos/
-            if [[ -d "$POWOS_SRC/config" ]]; then
-                sudo mkdir -p /etc/powos
-                sudo cp -r "$POWOS_SRC/config/"* /etc/powos/
-                echo "  /etc/powos/ (config/*)"
+            # config/ -> system paths. These MIRROR the Containerfile staging
+            # COPY lines exactly; when you add a COPY there, add it here too or
+            # `update self` cannot live-apply that file. (The old blanket
+            # `config/* -> /etc/powos/` mis-placed profile.d/kde/motd, so those
+            # could only be applied by hand — the reason for this explicit map.)
+            local c="$POWOS_SRC/config"
+            # PowOS's own config tree
+            [[ -d "$c/ai" ]]    && { sudo mkdir -p /etc/powos/ai;    sudo cp -r "$c/ai/"*    /etc/powos/ai/; }
+            [[ -d "$c/zones" ]] && { sudo mkdir -p /etc/powos/zones; sudo cp -r "$c/zones/"* /etc/powos/zones/; }
+            # config/etc/ is a 1:1 mirror of /etc/ (profile.d, containers, ssh,
+            # systemd/logind…) — one copy covers every config/etc/* COPY.
+            [[ -d "$c/etc" ]] && { sudo cp -r "$c/etc/"* /etc/; echo "  /etc/ (config/etc/*)"; }
+            # KDE: rc files -> /etc/xdg, konsole profiles -> /usr/share/konsole
+            if [[ -d "$c/kde" ]]; then
+                for f in powermanagementprofilesrc kglobalshortcutsrc kwinrc konsolerc; do
+                    [[ -f "$c/kde/$f" ]] && sudo cp "$c/kde/$f" /etc/xdg/
+                done
+                [[ -d "$c/kde/konsole" ]] && { sudo mkdir -p /usr/share/konsole; sudo cp -r "$c/kde/konsole/"* /usr/share/konsole/; }
+                echo "  /etc/xdg + /usr/share/konsole (config/kde/*)"
             fi
+            # MOTD rebrand: overwrite the path /usr/libexec/ublue-motd renders.
+            [[ -f "$c/ublue-os/motd/powos.md" ]] && { sudo mkdir -p /usr/share/ublue-os/motd; sudo cp "$c/ublue-os/motd/powos.md" /usr/share/ublue-os/motd/bazzite.md; echo "  /usr/share/ublue-os/motd (MOTD)"; }
+            # Assorted single-dest configs
+            [[ -d "$c/tmpfiles.d" ]] && sudo cp -r "$c/tmpfiles.d/"* /etc/tmpfiles.d/ 2>/dev/null || true
+            [[ -d "$c/sysctl.d" ]]   && sudo cp -r "$c/sysctl.d/"*   /etc/sysctl.d/   2>/dev/null || true
+            [[ -d "$c/NetworkManager/conf.d" ]] && { sudo mkdir -p /etc/NetworkManager/conf.d; sudo cp -r "$c/NetworkManager/conf.d/"* /etc/NetworkManager/conf.d/ 2>/dev/null || true; }
+            [[ -f "$c/logid/logid.cfg" ]] && sudo cp "$c/logid/logid.cfg" /etc/logid.cfg 2>/dev/null || true
+            echo "  /etc/powos/ + system config paths (config/*)"
 
             # systemd/ -> /usr/lib/systemd/system/ and /usr/lib/powos/
             if [[ -d "$POWOS_SRC/systemd" ]]; then
