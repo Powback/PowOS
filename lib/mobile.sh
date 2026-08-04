@@ -5,7 +5,7 @@
 # Everything enabled by default, user can disable what they don't need.
 #
 # Commands:
-#   powos mobile              - Enable mobile mode (copy to RAM)
+#   powos mobile              - Show mobile-mode status (bare = status)
 #   powos mobile -c           - Customize what to include
 #   powos mobile status       - Show current mode
 #   powos mobile disable      - Return to USB-backed mode
@@ -905,7 +905,13 @@ cmd_mobile() {
     shift || true
 
     case "$action" in
-        ""|enable)
+        "")
+            # Bare `powos mobile` shows status — it no longer silently enables
+            # mobile mode (a state change). Enabling is the explicit verb.
+            mobile_status
+            echo "  (status only — run 'sudo powos mobile enable' to enable mobile mode)"
+            ;;
+        enable)
             mobile_enable "$@"
             ;;
         -c|--customize)
@@ -951,8 +957,9 @@ cmd_mobile() {
             echo "Usage: powos mobile [command] [args]"
             echo ""
             echo "Commands:"
-            echo "  (none)              Enable mobile mode (copy to RAM)"
-            echo "  -c, --customize     Interactive menu to customize"
+            echo "  (none)              Show mobile-mode status"
+            echo "  enable              Enable mobile mode (copy to RAM)"
+            echo "  -c, --customize     Enable via interactive category menu"
             echo "  status              Show current mobile mode status"
             echo "  disable             Return to USB-backed mode"
             echo ""
@@ -964,7 +971,8 @@ cmd_mobile() {
             echo "  exclude-all         Exclude all categories"
             echo ""
             echo "Examples:"
-            echo "  powos mobile                    # Enable with current settings"
+            echo "  powos mobile                    # Show status"
+            echo "  sudo powos mobile enable        # Enable with current settings"
             echo "  powos mobile -c                 # Interactive customization"
             echo "  powos mobile categories         # List categories"
             echo "  powos mobile exclude Games      # Exclude Games category"

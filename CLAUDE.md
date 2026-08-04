@@ -94,7 +94,8 @@ powos version         # Show version and active layers
 **Real-world scenario:** Your USB runs on Machine A, you unplug and use on Machine B, then return to Machine A. Both machines have changes in RAM - conflict!
 
 ```bash
-powos sync                    # Sync RAM ↔ USB (detects conflicts)
+powos sync                    # Show sync status (bare = status)
+powos sync now                # Sync RAM ↔ USB now (detects conflicts)
 powos sync status             # Show sync status & conflicts
 powos sync resolve            # Interactive conflict resolution
 powos sync resolve --ai       # AI analyzes conflicts & recommends action
@@ -138,7 +139,8 @@ immediately after `sudo powos mobile enable` completes.
 > not persisted to the overlayfs upper layer or USB.
 
 ```bash
-sudo powos mobile                # Enable mobile mode (live bind mounts, no reboot)
+sudo powos mobile enable         # Enable mobile mode (live bind mounts, no reboot)
+powos mobile                     # Show mobile-mode status (bare = status)
 sudo powos mobile -c             # Interactive menu to customize categories first
 powos mobile status              # Show active binds / stale-state detection
 sudo powos mobile disable        # Unmount binds + free tmpfs, return to USB-backed

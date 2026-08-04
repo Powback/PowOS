@@ -5,7 +5,7 @@
 # Detects conflicts when USB was used on another machine.
 #
 # Commands:
-#   powos sync          - Sync RAM ↔ USB (detect conflicts)
+#   powos sync          - Show sync status (bare = status; `sync now` writes)
 #   powos sync status   - Show sync status
 #   powos sync resolve  - Resolve conflicts interactively
 #   powos sync force    - Force overwrite (RAM wins or USB wins)
@@ -969,11 +969,14 @@ cmd_sync() {
     done
 
     case "$action" in
-        ""|now)
-            ram_sync_now
-            ;;
-        status|st)
+        ""|status|st)
+            # Bare `powos sync` shows status — it no longer silently writes
+            # RAM→USB. The mutation is the explicit `powos sync now`.
             ram_sync_status
+            [[ -z "$action" ]] && echo "  (status only — run 'powos sync now' to actually sync)"
+            ;;
+        now)
+            ram_sync_now
             ;;
         resolve)
             if [[ "$use_ai" == "true" ]]; then
@@ -1019,7 +1022,8 @@ cmd_sync() {
             echo "  --ai, -a      Use AI to analyze conflicts and recommend action"
             echo ""
             echo "Examples:"
-            echo "  powos sync              # Normal sync"
+            echo "  powos sync              # Show status (does NOT sync)"
+            echo "  powos sync now          # Actually sync RAM to USB"
             echo "  powos sync status       # Check if there are conflicts"
             echo "  powos sync resolve --ai # AI helps you decide what to do"
             echo "  powos sync --keep-ram   # Force your changes to USB"
