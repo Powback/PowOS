@@ -109,6 +109,54 @@ vu_wine() {
 
 vu_wineprefix() { printf '%s' "$VU_PREFIX/pfx"; }
 
+# ── Prefix choice: VU's own prefix vs BF3's Steam prefix (vu-proton style) ─────
+# Default: VU runs in its OWN GE-Proton prefix ($VU_ROOT/prefix). But BF3 owned
+# on Steam activates THROUGH Steam — no separate EA sign-in — and that
+# activation plus the game's DXVK state live in Steam's own Proton prefix.
+# Opting to reuse it (`vu install --steam-prefix`, persisted in vu.conf; or
+# VU_STEAM_PREFIX=1) repoints VU at that already-activated prefix, and
+# d3dcompiler_47 then lands there — the reliable path the vu-proton project
+# documents (github.com/VileEnd/vu-proton).
+
+# BF3's Steam appid, read from the appmanifest beside the gamepath (1238820 fb).
+vu_bf3_appid() {
+    local bf3 steamapps mf appid
+    bf3="$(vu_detect_bf3 2>/dev/null)"      || { printf '1238820'; return 0; }
+    steamapps="$(cd "$bf3/../.." 2>/dev/null && pwd)" || { printf '1238820'; return 0; }
+    for mf in "$steamapps"/appmanifest_*.acf; do
+        [[ -f "$mf" ]] || continue
+        grep -qi '"installdir"[[:space:]]*"Battlefield 3"' "$mf" || continue
+        appid="$(grep -oE '"appid"[[:space:]]*"[0-9]+"' "$mf" | grep -oE '[0-9]+' | head -1)"
+        [[ -n "$appid" ]] && { printf '%s' "$appid"; return 0; }
+    done
+    printf '1238820'
+}
+
+# Path to BF3's Steam Proton prefix (steamapps/compatdata/<appid>), or empty.
+vu_steam_prefix() {
+    local bf3 steamapps
+    bf3="$(vu_detect_bf3 2>/dev/null)"      || return 1
+    steamapps="$(cd "$bf3/../.." 2>/dev/null && pwd)" || return 1
+    printf '%s/compatdata/%s' "$steamapps" "$(vu_bf3_appid)"
+}
+
+# Repoint VU_PREFIX at BF3's Steam prefix when opted in. Idempotent — call at the
+# top of install/play/server before VU_PREFIX is used.
+vu_apply_prefix_choice() {
+    local mode="${VU_STEAM_PREFIX:-$(vu_conf_get prefix 2>/dev/null || true)}"
+    case "$mode" in
+        steam|1)
+            local sp; sp="$(vu_steam_prefix 2>/dev/null || true)"
+            if [[ -n "$sp" ]]; then
+                VU_PREFIX="$sp"
+                plog "Using BF3's Steam prefix: ${DIM}$VU_PREFIX${NC}"
+            else
+                pwarn "--steam-prefix set but BF3's Steam prefix not found; using VU's own prefix."
+            fi
+            ;;
+    esac
+}
+
 vu_installed() { [[ -f "$VU_CLIENT_DIR/vu.com" || -f "$VU_CLIENT_DIR/vu.exe" ]]; }
 
 # Is the NATIVE d3dcompiler_47 in the prefix? Wine's builtin stub lives in the
@@ -246,12 +294,14 @@ vu_d3dcompiler_cmd() {
 }
 
 vu_install_cmd() {
-    local gamepath="" branch=""
+    local gamepath="" branch="" prefix_choice=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --gamepath) gamepath="${2:-}"; shift 2 ;;
-            --branch)   branch="${2:-}";   shift 2 ;;
-            -h|--help)  vu_help; return 0 ;;
+            --gamepath)     gamepath="${2:-}"; shift 2 ;;
+            --branch)       branch="${2:-}";   shift 2 ;;
+            --steam-prefix) prefix_choice="steam"; shift ;;
+            --own-prefix)   prefix_choice="own";   shift ;;
+            -h|--help)      vu_help; return 0 ;;
             *) perr "Unknown option: $1"; return 1 ;;
         esac
     done
@@ -268,6 +318,11 @@ vu_install_cmd() {
             *) perr "--branch must be 'prod' or 'dev'."; return 1 ;;
         esac
     fi
+    [[ -n "$prefix_choice" ]] && vu_conf_set prefix "$prefix_choice"
+
+    # Honour the prefix choice BEFORE touching the prefix (d3dcompiler must land
+    # in whichever prefix VU will actually launch in).
+    vu_apply_prefix_choice
 
     vu_fetch_client || return 1
 
@@ -404,7 +459,8 @@ vu_activate_cmd() {
 
 vu_play_cmd() {
     vu_installed || { perr "VU not installed. Run: powos mods vu install"; return 1; }
-    [[ -x "$VU_WRAPPER" ]] || vu_write_wrapper
+    vu_apply_prefix_choice
+    vu_write_wrapper   # rewrite so the launcher reflects the current prefix choice
     if ! vu_has_d3dcompiler; then
         pwarn "Native d3dcompiler_47 is missing — expect a blank WebUI."
         pwarn "Fix: ${BOLD}powos mods vu d3dcompiler${NC}"
@@ -482,6 +538,7 @@ vu_server_init() {
 
 vu_server_start() {
     vu_installed || { perr "VU not installed. Run: powos mods vu install"; return 1; }
+    vu_apply_prefix_choice
     local proton; proton="$(vu_proton || true)"
     [[ -z "$proton" ]] && { perr "No GE-Proton. Run: powos mods modlist proton"; return 1; }
     local bf3; bf3="$(vu_detect_bf3 || true)"
@@ -911,10 +968,15 @@ BF3 game files and an EA account that owns Battlefield 3.
 
 Setup:
   powos mods vu install [--gamepath DIR] [--branch prod|dev]
+                        [--steam-prefix | --own-prefix]
                                   Download the client, install GE-Proton and
                                     the native d3dcompiler_47, write launcher
                                     + KDE menu entry. Re-run with --gamepath
                                     to repoint at your BF3 files.
+                                    --steam-prefix runs VU inside BF3's Steam
+                                    Proton prefix (already Steam-activated — no
+                                    EA sign-in); --own-prefix (default) uses a
+                                    dedicated VU prefix.
   powos mods vu activate [--token EA_TOKEN]
                                   Activate BF3. Without --token this uses the
                                     running EA app (-lsx); with it, the

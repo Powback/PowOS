@@ -93,6 +93,44 @@ vu_conf_set gamepath "$TMP/does-not-exist"
 check "stale configured path ignored"  '! vu_detect_bf3 2>/dev/null'
 
 echo
+echo "-- prefix choice: own vs BF3's Steam prefix (vu-proton style) --"
+
+# Fake a Steam library: gamepath under steamapps/common + appmanifest + compatdata
+_SL="$TMP/SteamLib/steamapps"
+mkdir -p "$_SL/common/Battlefield 3" "$_SL/compatdata/1238820/pfx"
+touch "$_SL/common/Battlefield 3/bf3.exe"
+printf '"AppState"{"appid"\t"1238820"\n"installdir"\t"Battlefield 3"}\n' > "$_SL/appmanifest_1238820.acf"
+vu_conf_set gamepath "$_SL/common/Battlefield 3"
+
+check "bf3_appid read from manifest"   '[[ "$(vu_bf3_appid)" == "1238820" ]]'
+check "steam_prefix resolves compatdata" '[[ "$(vu_steam_prefix)" == "$_SL/compatdata/1238820" ]]'
+
+# default = own prefix (unchanged by apply)
+rm -f "$VU_CONF"; vu_conf_set gamepath "$_SL/common/Battlefield 3"
+VU_PREFIX="$VU_ROOT/prefix"
+vu_apply_prefix_choice
+check "default keeps VU's own prefix"  '[[ "$VU_PREFIX" == "$VU_ROOT/prefix" ]]'
+
+# --steam-prefix (persisted) repoints VU_PREFIX at BF3's Steam prefix
+vu_conf_set prefix steam
+VU_PREFIX="$VU_ROOT/prefix"
+vu_apply_prefix_choice
+check "--steam-prefix uses Steam prefix" '[[ "$VU_PREFIX" == "$_SL/compatdata/1238820" ]]'
+check "wineprefix follows into Steam pfx" '[[ "$(vu_wineprefix)" == "$_SL/compatdata/1238820/pfx" ]]'
+
+# env override works too
+vu_conf_set prefix own; VU_PREFIX="$VU_ROOT/prefix"
+VU_STEAM_PREFIX=1 vu_apply_prefix_choice
+check "VU_STEAM_PREFIX=1 env override"  '[[ "$VU_PREFIX" == "$_SL/compatdata/1238820" ]]'
+
+# appid fallback when no manifest matches
+rm -f "$_SL"/appmanifest_*.acf
+check "appid falls back to 1238820"    '[[ "$(vu_bf3_appid)" == "1238820" ]]'
+
+# reset for later tests
+rm -f "$VU_CONF"; VU_PREFIX="$VU_ROOT/prefix"
+
+echo
 echo "-- client presence --"
 
 check "not installed initially"        '! vu_installed'
