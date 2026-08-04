@@ -31,6 +31,20 @@ _claude_is_uuid() {
     [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
 }
 
+# Append the session-selection flag to the caller's args array (by nameref):
+#   - a real client UUID  → --resume <uuid>
+#   - no UUID, but PowOS asked to continue (POWOS_AI_CONTINUE_NATIVE=1) →
+#     --continue (the CLI's own "most recent conversation in this directory",
+#     which includes sessions started with the raw `claude` CLI).
+_claude_add_session() {
+    local -n _sa="$1"; local sid="$2"
+    if [[ -n "$sid" ]] && _claude_is_uuid "$sid"; then
+        _sa+=("--resume" "$sid")
+    elif [[ -z "$sid" && "${POWOS_AI_CONTINUE_NATIVE:-}" == "1" ]]; then
+        _sa+=("--continue")
+    fi
+}
+
 # Append invocation-wide extra flags to the caller's args array (by nameref).
 # Currently: --dangerously-skip-permissions when the user passed --yolo. The
 # claude CLI won't run --dangerously-skip-permissions as root unless the guest
@@ -38,6 +52,12 @@ _claude_is_uuid() {
 _claude_add_common() {
     local -n _a="$1"
     [[ "${POWOS_AI_SKIP_PERMS:-}" == "1" ]] && _a+=("--dangerously-skip-permissions")
+    # Wire the inter-agent comms mailbox as an MCP server, so every agent can
+    # message_agent / escalate / notify_user / wait_for_message. Merges with any
+    # other MCP config (no --strict-mcp-config), so the user's servers stay.
+    if declare -f comms_enabled &>/dev/null && comms_enabled; then
+        _a+=("--mcp-config" "$(comms_mcp_config_json)")
+    fi
 }
 
 # Send a prompt and get a response
@@ -72,6 +92,11 @@ client_call() {
         else
             _debug "Ignoring non-UUID session id '$session_id' (starting fresh)"
         fi
+    elif [[ "${POWOS_AI_CONTINUE_NATIVE:-}" == "1" ]]; then
+        # PowOS had no tracked UUID for this agent, but the user asked to
+        # continue — defer to the claude CLI's own "most recent conversation in
+        # this directory", which includes sessions started with the raw CLI.
+        args+=("--continue")
     fi
 
     _debug "Running: $cmd ${args[*]} \"${prompt:0:50}...\""
@@ -126,9 +151,7 @@ client_call_json() {
         args+=("--system-prompt" "$system_prompt")
     fi
 
-    if [[ -n "$session_id" ]] && _claude_is_uuid "$session_id"; then
-        args+=("--resume" "$session_id")
-    fi
+    _claude_add_session args "$session_id"
 
     "$cmd" "${args[@]}" "$prompt"
 }
@@ -147,9 +170,7 @@ client_call_verbose() {
         args+=("--system-prompt" "$system_prompt")
     fi
 
-    if [[ -n "$session_id" ]] && _claude_is_uuid "$session_id"; then
-        args+=("--resume" "$session_id")
-    fi
+    _claude_add_session args "$session_id"
 
     "$cmd" "${args[@]}" "$prompt"
 }
@@ -215,9 +236,7 @@ client_call_stream() {
     local args=("--print" "--output-format" "stream-json" "--verbose")
     _claude_add_common args
     [[ -n "$system_prompt" ]] && args+=("--system-prompt" "$system_prompt")
-    if [[ -n "$session_id" ]] && _claude_is_uuid "$session_id"; then
-        args+=("--resume" "$session_id")
-    fi
+    _claude_add_session args "$session_id"
 
     # Without jq we can't parse events — stream the raw JSONL (still live).
     if ! command -v jq &>/dev/null; then
@@ -305,9 +324,7 @@ client_interactive() {
 
     # Add session — only resume a real client UUID; anything else (e.g. a
     # fabricated first-use name) starts a new interactive conversation.
-    if [[ -n "$session_id" ]] && _claude_is_uuid "$session_id"; then
-        args+=("--resume" "$session_id")
-    fi
+    _claude_add_session args "$session_id"
 
     _debug "Running interactive: $cmd ${args[*]}"
 

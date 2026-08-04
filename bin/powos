@@ -173,7 +173,12 @@ Dev & AI:
   ai "prompt"         Ask AI for help (uses default agent)
   ai --agent coder|devops|health   Pick an agent
   ai -i               Interactive chat mode
+  ai --continue       Resume the last chat here (incl. plain claude-CLI sessions)
   ai --session <id>   Resume a conversation
+  ai manager          Persistent PowOS manager (streaming, per-dir memory, live inbox)
+  comms send <to> <msg>   Message another agent's inbox (health/coder/devops...)
+  comms watch --agent R   Park until that role gets mail (yield, no polling)
+  comms inbox|agents      Show an inbox / list all inboxes
 
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
@@ -2790,10 +2795,26 @@ case "${1:-}" in
             "")
                 ai_help
                 ;;
+            manager)
+                shift
+                source "$POWOS_LIB/ai/manager/manager.sh"
+                manager_run "$@"
+                ;;
             *)
                 ai_call "$@"
                 ;;
         esac
+        ;;
+    manager)
+        # top-level alias for `powos ai manager`
+        shift
+        source "$POWOS_LIB/ai/manager/manager.sh"
+        manager_run "$@"
+        ;;
+    comms)
+        shift
+        source "$POWOS_LIB/ai/comms/comms.sh"
+        cmd_comms "$@"
         ;;
     version|--version|-v)
         cmd_version

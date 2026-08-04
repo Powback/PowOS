@@ -43,6 +43,12 @@ if [[ -f "$AI_LIB_DIR/session.sh" ]]; then
     source "$AI_LIB_DIR/session.sh"
 fi
 
+# Source inter-agent comms (mailbox MCP wiring). Optional — absent on older
+# trees; comms_enabled guards every use.
+if [[ -f "$AI_LIB_DIR/comms/comms.sh" ]]; then
+    source "$AI_LIB_DIR/comms/comms.sh"
+fi
+
 # Colors
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -651,6 +657,14 @@ ai_call() {
     local agent="${opt_agent:-$AI_DEFAULT_AGENT}"
     _ai_load_agent "$agent" || return 1
 
+    # Wire this agent's comms identity so the mailbox MCP (launched by the
+    # client via --mcp-config) knows whose inbox it is and where to escalate.
+    # No explicit parent: routing defaults apply (workers escalate to manager,
+    # manager escalates to user).
+    if declare -f comms_export_identity &>/dev/null && comms_enabled; then
+        comms_export_identity "$agent"
+    fi
+
     # Resolve client (CLI override > agent preference > default)
     local client="${opt_client:-${AGENT_CLIENT:-$AI_DEFAULT_CLIENT}}"
 
@@ -703,9 +717,13 @@ ai_call() {
             resolved_session=$(ai_session_get_client_id "$opt_session" 2>/dev/null || true)
         fi
         if [[ -z "$resolved_session" ]]; then
-            local _cont_label="agent '${agent}'"
-            [[ -z "$using_implicit_session" ]] && _cont_label="session '${opt_session}'"
-            echo -e "${YELLOW}No previous conversation for ${_cont_label} — starting a new one.${NC}" >&2
+            # No PowOS-tracked conversation for this agent. Rather than start
+            # fresh, fall back to the CLIENT's native "continue most recent in
+            # this directory" — which picks up conversations you ran with the
+            # raw `claude` CLI too, not just ones PowOS created. The client
+            # honors POWOS_AI_CONTINUE_NATIVE when it has no explicit session.
+            export POWOS_AI_CONTINUE_NATIVE=1
+            echo -e "${CYAN}No PowOS-tracked chat for agent '${agent}' — resuming the most recent conversation in this directory (including ones from the claude CLI).${NC}" >&2
         fi
     elif [[ -n "$opt_new_session" ]]; then
         # --new-session: discard any stored client session, start fresh
@@ -748,6 +766,15 @@ $context
 \`\`\`
 
 User request: $prompt"
+    fi
+
+    # If mail is waiting for this agent's role, nudge it to read the inbox.
+    # Non-consuming: the agent decides whether to drain it.
+    if declare -f comms_pending_note &>/dev/null && comms_enabled; then
+        local _comms_note; _comms_note="$(comms_pending_note "$agent")"
+        [[ -n "$_comms_note" ]] && full_prompt="[comms] $_comms_note
+
+$full_prompt"
     fi
 
     # --continue is now handled uniformly through $resolved_session above

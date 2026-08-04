@@ -157,6 +157,22 @@ Key facts an agent should CHECK before starting:
   probes flatpak / powos-sandbox (rpm+pip) / brew / host rpm-ostree layer and
   removes from every backend the thing is found in. Honest about host-layer
   config residue in /etc,/var. ✅
+- Persistent **manager** (`powos ai manager`, aliases jarvis/boss): the standing PowOS
+  orchestrator — a long-lived streaming `claude` session (backend for the coming desktop
+  widget). Keeps context across turns, has **per-directory memory** (resumes the session
+  keyed by cwd), and receives comms mail **live** (injected as a turn — no polling). It is
+  the default escalation target: specialist agents report UP to it. `--safe` keeps
+  permission prompts. `powos ai --continue` now also resumes raw `claude` CLI sessions in
+  the current dir. ✅ (Phase 1; widget is Phase 2)
+- Inter-agent comms (`powos comms` + a `comms` MCP auto-wired into every `powos ai`
+  agent): a daemonless **mailbox** so agents talk to each other. Each agent runs as a
+  role (health/coder/devops/...); mail addressed to a role lands in that role's durable
+  inbox (spool under XDG state) and is read by whoever next runs as that role — or by a
+  live agent of that role parked on it. As an agent you have MCP tools: `send_message`
+  (to a role), `escalate` (to your parent, default `user`), `notify_user`, `read_inbox`
+  (drains), and **`wait_for_message`** (BLOCKS until mail arrives — yield while idle
+  instead of polling; you can also Monitor the inbox path). Humans/scripts use
+  `powos comms send|watch|inbox|agents|notify`. ✅ (opt out: `POWOS_COMMS_ENABLED=0`)
 - Mobile mode `powos mobile` — copy OS to RAM so USB can unplug. 🚧 live remount not done; reboot needed.
 - Cloud backup `powos backup {status|push|pull|setup}` — git-based USB state backup. ✅ CLI exists.
 - Sync conflicts `powos sync {status|resolve|--keep-ram|--keep-usb|--merge}` — detection ✅, `--merge` basic ⚠️.
