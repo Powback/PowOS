@@ -224,22 +224,49 @@ stream_steam_option() {
     echo -e "  ${DIM}Only for a game you actually stream with ATW — NEVER an anti-cheat title.${NC}"
 }
 
-# Informational allowlist of games you've opted in (the real enable is the env
-# var per launch / Steam option above).
+# Curated registry of games where the depth/camera capture (ATW/reprojection) is
+# actually developed. The layer reads engine-specific camera/projection state, so
+# it only works on games it's been built + verified against — this is opt-in per
+# game, never global. status: tested (validated) | dev (in development, unverified).
+# id|display|status  — ids match `powos game` where applicable.
+stream_supported() {
+    cat <<'LIST'
+gtav|Grand Theft Auto V|tested
+rdr2|Red Dead Redemption 2|dev
+cyberpunk2077|Cyberpunk 2077|dev
+LIST
+}
+_stream_support_status() {  # echo tested|dev|"" for an id/alias
+    local q="${1,,}"
+    case "$q" in gta|gta5|gtav) q=gtav ;; cp2077|cyberpunk) q=cyberpunk2077 ;; rdr|rdr2) q=rdr2 ;; esac
+    stream_supported | awk -F'|' -v q="$q" 'tolower($1)==q{print $3}'
+}
+
 stream_games() {
-    if [[ -s "$STREAM_GAMES_LIST" ]]; then
-        echo -e "${BOLD}Games opted into PowStream capture:${NC}"
-        sed 's/^/  • /' "$STREAM_GAMES_LIST"
-    else
-        echo "No games opted into PowStream capture — the layer loads into nothing."
-    fi
-    echo -e "  ${DIM}enable: powos stream enable <game> · launch: powos stream launch -- <cmd>${NC}"
+    echo -e "${BOLD}PowStream capture — supported games${NC}  ${DIM}(ATW/reprojection; opt-in per game)${NC}"
+    local id disp st mark on
+    while IFS='|' read -r id disp st; do
+        [[ -n "$id" ]] || continue
+        if [[ "$st" == tested ]]; then mark="${GREEN}● tested${NC}"; else mark="${YELLOW}◐ in dev${NC}"; fi
+        on=""; grep -qxF "$id" "$STREAM_GAMES_LIST" 2>/dev/null && on="  ${CYAN}[enabled]${NC}"
+        printf '  %-16s %-26s %b%b\n' "$id" "$disp" "$mark" "$on"
+    done < <(stream_supported)
+    echo
+    echo -e "  ${DIM}enable: powos stream enable <id> · then launch: powos stream launch -- <cmd>${NC}"
+    echo -e "  ${DIM}Steam: powos stream steam-option (paste into the game's launch options)${NC}"
 }
 stream_enable() {
     [[ -n "${1:-}" ]] || { perr "usage: powos stream enable <game>"; return 1; }
+    local st; st="$(_stream_support_status "$1")"
+    if [[ -z "$st" ]]; then
+        pwarn "'$1' isn't a known ATW-supported game — capture likely won't reproject correctly."
+        pwarn "Supported: $(stream_supported | cut -d'|' -f1 | tr '\n' ' ')"
+    elif [[ "$st" == dev ]]; then
+        pwarn "'$1' capture is IN DEVELOPMENT (unverified) — expect rough edges."
+    fi
     mkdir -p "$(dirname "$STREAM_GAMES_LIST")"; touch "$STREAM_GAMES_LIST"
     grep -qxF "$1" "$STREAM_GAMES_LIST" 2>/dev/null || echo "$1" >> "$STREAM_GAMES_LIST"
-    pok "'$1' noted as capture-enabled."
+    pok "'$1' opted into capture${st:+ ($st)}."
     plog "Launch it with:  powos stream launch -- <its command>"
     plog "Steam game?      powos stream steam-option   (paste the launch option instead)"
 }
@@ -270,9 +297,9 @@ Services:
 Per-game depth/camera capture (ATW) — opt-in, never global:
   launch -- <cmd>   Run a game with the capture layer ON for that process only
   steam-option      Print the Steam launch option to enable capture for a game
-  enable <game>     Note a game as capture-enabled (allowlist record)
+  enable <game>     Opt a supported game into capture (allowlist record)
   disable <game>    Remove a game from the allowlist
-  games             List games opted into capture
+  games             Supported games + status (GTA tested; RDR2/Cyberpunk in dev)
 
   ${DIM}The capture layer hooks the game (reads camera matrix, writes freecam pose).
   NEVER enable it for anti-cheat games (BattlEye/EAC) — it is a ban risk.${NC}
