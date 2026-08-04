@@ -122,27 +122,33 @@ fivem_artifact_url() {
     printf '%s/%s/fx.tar.xz' "${base%/}" "$build"
 }
 
-# Best-effort: scrape the artifacts listing for the LATEST RECOMMENDED build
-# number. Returns empty on failure (caller then requires --build).
+# Best-effort: scrape the artifacts listing for the newest build id. The id is
+# the FULL "<build>-<hash>" slug — the download path is
+# .../master/<build>-<hash>/fx.tar.xz, NOT .../master/<build>/ (that 404s).
+# Returns the highest-numbered slug, or empty on failure (caller then needs one).
 fivem_latest_build() {
-    local edition base html
+    local edition base html slug try
     edition="$(fivem_edition_norm "$1")" || return 1
     base="$(fivem_artifact_base "$edition")"
     command -v curl >/dev/null 2>&1 || return 1
-    html="$(curl -fsSL --max-time 15 "$base/" 2>/dev/null)" || return 1
-    # Links look like ./<build>-<hash>/fx.tar.xz ; the recommended one is tagged.
-    # Grab the highest build number present as a safe fallback.
-    printf '%s' "$html" | grep -oE '[0-9]{3,6}-[0-9a-f]{6,}/fx\.tar\.xz' \
-        | grep -oE '^[0-9]+' | sort -n | tail -1
+    # The artifacts page is heavy/occasionally rate-limits — retry a couple times.
+    for try in 1 2 3; do
+        html="$(curl -fsSL --max-time 25 "$base/" 2>/dev/null)" || html=""
+        slug="$(printf '%s' "$html" | grep -oE '[0-9]{3,6}-[0-9a-f]{6,40}/fx\.tar\.xz' \
+                  | sed 's|/fx\.tar\.xz$||' | sort -t- -k1,1n | tail -1)"
+        [[ -n "$slug" ]] && { printf '%s' "$slug"; return 0; }
+    done
+    return 1
 }
 
 # ── Config (key=value, parsed without eval) ───────────────────────────────────
 
+# Always exits 0 (empty output on a miss) — bin/powos runs `set -e`, so a
+# non-zero return here would abort every `x="$(fivem_conf_get …)"` assignment.
 fivem_conf_get() {
-    local key="$1"
-    [[ -f "$FIVEM_CONF" ]] || return 1
-    local line
-    line="$(grep -m1 "^${key}=" "$FIVEM_CONF" 2>/dev/null)" || return 1
+    local key="$1" line
+    [[ -f "$FIVEM_CONF" ]] || return 0
+    line="$(grep -m1 "^${key}=" "$FIVEM_CONF" 2>/dev/null)" || return 0
     printf '%s' "${line#*=}"
 }
 
@@ -177,7 +183,7 @@ fivem_server_install() {
     build="$2"
     if [[ -z "$build" ]]; then
         plog "Resolving latest ${edition} build…"
-        build="$(fivem_latest_build "$edition")"
+        build="$(fivem_latest_build "$edition" || true)"   # || true: set -e safe
     fi
     if [[ -z "$build" ]]; then
         perr "Could not resolve a build number for ${edition}."
@@ -391,7 +397,7 @@ cmd_mods_fivem() {
             local ssub="${1:-status}"; shift 2>/dev/null || true
             _fivem_take_edition "$@" || return 1
             case "$ssub" in
-                install) fivem_server_install "$_FE" "$( [[ "${_FARGS[0]}" == --build ]] && echo "${_FARGS[1]}" )" ;;
+                install) fivem_server_install "$_FE" "$( [[ "${_FARGS[0]:-}" == --build ]] && echo "${_FARGS[1]:-}" )" ;;
                 up|start)   fivem_server_up "$_FE" ;;
                 down|stop)  fivem_server_down "$_FE" ;;
                 console|attach) fivem_server_console "$_FE" ;;
