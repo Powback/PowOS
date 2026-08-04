@@ -2187,15 +2187,28 @@ cmd_containers() {
             distrobox enter "$name"
             ;;
 
-        remove|rm)
+        remove|rm|delete|destroy)
+            # One removal verb (was split: remove=distrobox, delete=podman).
+            # distrobox containers get distrobox's own teardown (home
+            # integration + the podman container); plain podman/app containers
+            # use the podman path. Auto-detected — you no longer have to know
+            # which backend a container came from. All four spellings kept.
             local name="${2:-}"
             if [[ -z "$name" ]]; then
                 echo "Usage: powos containers remove <name>"
                 return 1
             fi
-            echo "Removing container: $name"
-            distrobox rm "$name" --yes
-            echo -e "${GREEN}✓ Container '$name' removed${NC}"
+            if distrobox list --no-color 2>/dev/null \
+                 | awk -F'|' 'NR>1{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}' \
+                 | grep -qx "$name"; then
+                echo "Removing distrobox container: $name"
+                distrobox rm "$name" --yes \
+                    && echo -e "${GREEN}✓ Container '$name' removed${NC}"
+            elif _container_delete "$name"; then
+                echo -e "${GREEN}✓ removed: ${name}${NC}"
+            else
+                return 1
+            fi
             ;;
 
         stats)
@@ -2237,21 +2250,6 @@ cmd_containers() {
             fi
             ;;
 
-        delete|destroy)
-            # Force-remove a podman container (stops it first). Keeps volumes and
-            # images. Distinct from 'remove'/'rm' below, which is distrobox-only.
-            # The widget confirms with the user before invoking this.
-            local name="${2:-}"
-            if [[ -z "$name" ]]; then
-                echo "Usage: powos containers delete <name>"
-                return 1
-            fi
-            if _container_delete "$name"; then
-                echo -e "${GREEN}✓ deleted: ${name}${NC}"
-            else
-                return 1
-            fi
-            ;;
 
         assemble)
             echo -e "${BOLD}${CYAN}Creating Predefined Containers${NC}"
