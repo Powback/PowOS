@@ -541,14 +541,15 @@ echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p $dm_confd && install -m 0644 /tmp/zz-
         return 1
     fi
 
-    # The CI VM has no GPU (bochs-drm/llvmpipe). kwin_wayland falls back to
-    # software fine, but plasmashell's QtQuick scene-graph dies on the software
-    # GL and the shell never appears (login + compositor come up, screen stays
-    # black). Force the software rasterizer for the session. This MUST go where
-    # startplasma actually sources session env — /etc/xdg/plasma-workspace/env/
-    # (an /etc/environment.d drop-in is NOT read by the plasma session).
-    echo "  Forcing software QtQuick for the GPU-less VM..."
-    vm_ssh "printf 'export QT_QUICK_BACKEND=software\n' > /tmp/swrender.sh
+    # The CI VM has no GPU (bochs-drm, no Vulkan). Bazzite defaults Mesa to ZINK
+    # (Vulkan-on-GL), which fails there — the journal shows
+    # "MESA: error: ZINK: failed to choose pdev" + "egl: failed to create dri2
+    # screen", so kwin_wayland gets no working GL and the whole session (incl.
+    # plasmashell) never renders. Force the llvmpipe SOFTWARE driver (overriding
+    # Zink) plus the software QtQuick backend. Must go where startplasma sources
+    # session env — /etc/xdg/plasma-workspace/env/ (not /etc/environment.d).
+    echo "  Forcing software Mesa/llvmpipe for the GPU-less VM..."
+    vm_ssh "printf 'export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe\nexport LIBGL_ALWAYS_SOFTWARE=1\nexport GALLIUM_DRIVER=llvmpipe\nexport QT_QUICK_BACKEND=software\n' > /tmp/swrender.sh
 echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p /etc/xdg/plasma-workspace/env && install -m 0755 /tmp/swrender.sh /etc/xdg/plasma-workspace/env/99-swrender.sh'" 2>/dev/null || true
 
     # Restart the display manager to trigger autologin.
