@@ -41,6 +41,14 @@ echo "== test-mods-vu.sh =="
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Point HOME at the sandbox BEFORE sourcing. vu_detect_bf3() scans real Steam
+# library paths under $HOME ($HOME/Games, $HOME/.local/share/Steam/...); left
+# unsandboxed, a genuine BF3 install on the dev box is discovered and flips the
+# "no install" assertions (green in CI's empty container, red on a gamer's box).
+# Overriding HOME makes discovery hermetic regardless of what's installed.
+export HOME="$TMP/home"
+mkdir -p "$HOME"
+
 export VU_ROOT="$TMP/vu"
 export VU_CLIENT_DIR="$VU_ROOT/client"
 export VU_INSTANCE_DIR="$VU_ROOT/instance"
