@@ -2667,6 +2667,11 @@ case "${1:-}" in
                 source "$POWOS_LIB/mods/vu.sh"
                 cmd_mods_vu "$@"
                 ;;
+            fivem|fxserver|cfx)
+                shift
+                source "$POWOS_LIB/mods/fivem.sh"
+                cmd_mods_fivem "$@"
+                ;;
             help|--help|-h|"")                  mods_help ;;
             *)                                  perr "Unknown: powos mods $1"; mods_help; exit 1 ;;
         esac

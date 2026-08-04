@@ -1058,6 +1058,14 @@ Venice Unleashed (Battlefield 3 community client + VEXT modding framework):
   ${DIM}VU's WebUI needs a NATIVE d3dcompiler_47 on every branch — Wine's stub
   renders a blank UI with no error. 'vu install' handles it.${NC}
 
+FiveM (GTA V multiplayer — server + client, Legacy & Enhanced editions):
+  powos mods fivem server install [--edition legacy|enhanced] [--build N]
+  powos mods fivem server up|down|console  Run under txAdmin (tmux)
+  powos mods fivem license <key>          Store the Cfx server license
+  powos mods fivem status                 Both editions' server state
+  powos mods fivem help                   Full FiveM verb list
+  ${DIM}Legacy = mature (default); Enhanced = Early Access. Also: powos game fivem …${NC}
+
 Known tools:
   ${BOLD}nexus-mods-app${NC}   Nexus's native-Linux cross-platform manager
                    (recommended for Cyberpunk 2077 on Linux). Aliases:

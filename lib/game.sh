@@ -170,6 +170,18 @@ game_list_cmd() {
         printf "  %-16s %-38s %b\n" "bf3" "Battlefield 3 (Venice Unleashed)" "$vu_state"
     fi
 
+    # FiveM (GTA V multiplayer) — server+client stack, shown if an engine exists.
+    if declare -f fivem_server_installed >/dev/null 2>&1 || [[ -f "${POWOS_LIB:-$GAME_LIB_DIR}/mods/fivem.sh" ]]; then
+        _game_need_fivem 2>/dev/null || true
+        if declare -f fivem_server_installed >/dev/null 2>&1; then
+            local fm_state="${DIM}not installed${NC}"
+            if fivem_server_installed legacy 2>/dev/null || fivem_server_installed enhanced 2>/dev/null; then
+                any=true; fm_state="server ready"
+            fi
+            printf "  %-16s %-38s %b\n" "fivem" "GTA V multiplayer (Legacy + Enhanced)" "$fm_state"
+        fi
+    fi
+
     $any || echo -e "  ${DIM}No games configured.${NC}"
 
     echo
@@ -193,6 +205,25 @@ _game_need_vu() {
     # shellcheck source=/dev/null
     [[ -f "$m/modlist.sh" ]] && source "$m/modlist.sh"
     [[ -f "$m/vu.sh" ]] && source "$m/vu.sh"
+}
+
+# FiveM (GTA V multiplayer) is a server+client stack of its own, not a games.d
+# game and not the SP ASI flow that `powos game gtav` drives.
+game_is_fivem() {
+    case "${1,,}" in
+        fivem|fxserver|cfx|"fivem legacy"|fivem-legacy|"fivem enhanced"|fivem-enhanced) return 0 ;;
+    esac
+    return 1
+}
+_game_need_fivem() {
+    local m="${POWOS_LIB:-$GAME_LIB_DIR}/mods"
+    # shellcheck source=/dev/null
+    [[ -f "$m/fivem.sh" ]] && source "$m/fivem.sh"
+}
+_game_fivem_dispatch() {
+    _game_need_fivem
+    declare -f cmd_mods_fivem >/dev/null 2>&1 || { perr "FiveM module unavailable."; return 1; }
+    cmd_mods_fivem "$@"
 }
 
 # `powos game bf3 <verb>` — Venice Unleashed owns its own verb set, so hand
@@ -256,6 +287,10 @@ Names: any spelling the mod manager accepts — canonical id (gtav), alias
 (gta, gta5), or Steam appid (3240220). 'bf3' / 'vu' routes to Venice
 Unleashed, which has its own verbs (see 'powos mods vu help').
 
+'fivem' routes to the GTA V multiplayer stack (server + client, Legacy &
+Enhanced) — a separate thing from 'gtav' (single-player ASI mods). See
+'powos game fivem help'.
+
 ${BOLD}This is a facade.${NC} 'powos mods <verb> <game>' does the same work and
 keeps working — use whichever reads better. Storage lives elsewhere:
 'powos games storage' for the shared POWOS-GAMES partition.
@@ -274,6 +309,12 @@ cmd_game() {
     # Venice Unleashed is a client, not a games.d game.
     if game_is_vu "$name"; then
         _game_vu_dispatch "$@"
+        return $?
+    fi
+
+    # FiveM (GTA V multiplayer): server + client, its own verb set.
+    if game_is_fivem "$name"; then
+        _game_fivem_dispatch "$@"
         return $?
     fi
 
