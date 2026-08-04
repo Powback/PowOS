@@ -38,8 +38,11 @@ PlasmoidItem {
     property string rollbackVersion: ""
     property var    changelog: []          // [{hash, subject, type}]
 
-    // local source (/var/lib/powos/src) vs the running image — what
-    // `powos update self` would push into the live system
+    // local source (/var/lib/powos/src) state, split two ways — these are
+    // DIFFERENT things and the widget must never add them together:
+    //   srcDirty — uncommitted edits, the only `powos update self` territory
+    //   srcAhead — commits ahead of the running image, an OS-update signal
+    //              (`powos update os` / upgrade), NOT `update self`
     property var    srcDirty: []           // uncommitted edits: [{status, path}]
     property var    srcAhead: []           // commits ahead of image: [{hash, subject, type}]
 
@@ -50,8 +53,18 @@ PlasmoidItem {
     // remote check only meaningful when we got both digests
     readonly property bool checkOk: curDigest !== "" && remoteDigest !== ""
     readonly property bool updateAvailable: checkOk && curDigest !== remoteDigest
-    // local edits/commits not yet applied to the running system
-    readonly property bool localChanges: srcDirty.length > 0 || srcAhead.length > 0
+    // Two DISTINCT source signals — never conflate them (this split is the whole
+    // point of the fix; adding them together is what produced the alarming
+    // "109 changes to apply"):
+    //  • localEdits — genuine uncommitted edits in /var/lib/powos/src. THIS is
+    //    the only thing `powos update self` is for: a dev pushing their own live
+    //    edits into the running system (reverts on reboot).
+    //  • srcAheadOfImage — src has advanced past the commit the running image
+    //    was built from (typically many upstream commits after a `git pull`).
+    //    That means a newer IMAGE is due; the fix is `powos update os` / upgrade,
+    //    NOT `update self`. Applying 100+ upstream commits transiently is wrong.
+    readonly property bool localEdits: srcDirty.length > 0
+    readonly property bool srcAheadOfImage: srcAhead.length > 0
 
     // one exec gathers everything; sentinels split the sections. The remote
     // digest is looked up inside the script (it already has the ref from bootc),
@@ -242,7 +255,9 @@ PlasmoidItem {
             var base = root.updateAvailable ? "PowOS update available"
                      : root.checkOk ? "PowOS is up to date"
                      : "PowOS Updates"
-            return root.localChanges ? base + " · local changes to apply" : base
+            if (root.localEdits) return base + " · uncommitted local edits"
+            if (root.srcAheadOfImage) return base + " · source ahead of running image"
+            return base
         }
         PC3.ToolTip.visible: mouse.containsMouse
         PC3.ToolTip.delay: 600
@@ -376,9 +391,80 @@ PlasmoidItem {
                 }
             }
 
-            // ── local source changes: what `powos update self` would apply ──
+            // ── running image is behind the source tree ─────────────────────
+            // src carries commits the running image was NOT built with (usually
+            // many, after a `git pull`) → a newer image is due. Informational
+            // ONLY: the sanctioned fix is an OS update — `powos update os` /
+            // upgrade, or the "Install" action in the banner above once a build
+            // is published. This is NOT `update self`, so there is no apply
+            // button here: transiently pushing 100+ upstream commits into the
+            // running system is exactly the action we're steering the user away
+            // from.
             Rectangle {
-                visible: root.localChanges
+                visible: root.srcAheadOfImage
+                Layout.fillWidth: true
+                Layout.preferredHeight: aheadCol.implicitHeight + Kirigami.Units.smallSpacing * 2
+                radius: Kirigami.Units.smallSpacing
+                color: Kirigami.Theme.alternateBackgroundColor
+
+                ColumnLayout {
+                    id: aheadCol
+                    anchors.fill: parent
+                    anchors.margins: Kirigami.Units.smallSpacing
+                    spacing: 2
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+                        Kirigami.Icon {
+                            source: "vcs-update-required"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 0
+                            PC3.Label { text: "Running image is behind the source"; font.bold: true; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                            PC3.Label {
+                                text: {
+                                    var n = root.srcAhead.length
+                                    return "source tree is " + n + " commit" + (n > 1 ? "s" : "")
+                                         + " ahead of the running image — " + (root.updateAvailable
+                                              ? "install the update above to catch up"
+                                              : "run powos update os to catch up")
+                                }
+                                opacity: 0.7; font: Kirigami.Theme.smallFont
+                                wrapMode: Text.Wrap; Layout.fillWidth: true
+                            }
+                        }
+                    }
+
+                    // a short preview of the newest commits the image is missing
+                    Repeater {
+                        model: root.srcAhead.slice(0, 3)
+                        delegate: PC3.Label {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            text: "• " + modelData.subject
+                            opacity: 0.75; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            elide: Text.ElideRight
+                        }
+                    }
+                    PC3.Label {
+                        visible: root.srcAhead.length > 3
+                        text: "…and " + (root.srcAhead.length - 3) + " more"
+                        opacity: 0.5; font: Kirigami.Theme.smallFont
+                    }
+                }
+            }
+
+            // ── uncommitted local edits: what `powos update self` applies ──
+            // Scoped to genuine porcelain changes ONLY — a dev's own live edits
+            // to the bundled source, pushed transiently into the running system
+            // (reverts on reboot). Commits already merged upstream are NOT here;
+            // those belong to the "Running image is behind" note above.
+            Rectangle {
+                visible: root.localEdits
                 Layout.fillWidth: true
                 Layout.preferredHeight: localCol.implicitHeight + Kirigami.Units.smallSpacing * 2
                 radius: Kirigami.Units.smallSpacing
@@ -402,14 +488,9 @@ PlasmoidItem {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 0
-                            PC3.Label { text: "Local source changes"; font.bold: true; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                            PC3.Label { text: "Uncommitted local edits"; font.bold: true; font.pointSize: Kirigami.Theme.smallFont.pointSize }
                             PC3.Label {
-                                text: {
-                                    var p = []
-                                    if (root.srcAhead.length > 0) p.push(root.srcAhead.length + " commit" + (root.srcAhead.length > 1 ? "s" : "") + " to apply")
-                                    if (root.srcDirty.length > 0) p.push(root.srcDirty.length + " uncommitted edit" + (root.srcDirty.length > 1 ? "s" : ""))
-                                    return p.join("  ·  ")
-                                }
+                                text: root.srcDirty.length + " uncommitted edit" + (root.srcDirty.length > 1 ? "s" : "") + " in the source tree"
                                 opacity: 0.7; font: Kirigami.Theme.smallFont
                                 elide: Text.ElideRight; Layout.fillWidth: true
                             }
@@ -418,23 +499,13 @@ PlasmoidItem {
                             text: "Apply"
                             icon.name: "system-run"
                             onClicked: root.applyLocal()
-                            PC3.ToolTip.text: "sudo powos update self — apply to the running system (reverts on reboot)"
+                            PC3.ToolTip.text: "sudo powos update self — apply your uncommitted edits to the running system (reverts on reboot)"
                             PC3.ToolTip.visible: hovered
                             PC3.ToolTip.delay: 600
                         }
                     }
 
-                    // a short preview: commits ahead, then uncommitted files
-                    Repeater {
-                        model: root.srcAhead.slice(0, 3)
-                        delegate: PC3.Label {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            text: "• " + modelData.subject
-                            opacity: 0.75; font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            elide: Text.ElideRight
-                        }
-                    }
+                    // a short preview of the changed files
                     Repeater {
                         model: root.srcDirty.slice(0, 3)
                         delegate: PC3.Label {
@@ -446,8 +517,8 @@ PlasmoidItem {
                         }
                     }
                     PC3.Label {
-                        visible: (root.srcAhead.length + root.srcDirty.length) > 6
-                        text: "…and more"
+                        visible: root.srcDirty.length > 3
+                        text: "…and " + (root.srcDirty.length - 3) + " more"
                         opacity: 0.5; font: Kirigami.Theme.smallFont
                     }
                 }
