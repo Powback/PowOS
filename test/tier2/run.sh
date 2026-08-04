@@ -541,6 +541,17 @@ echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p $dm_confd && install -m 0644 /tmp/zz-
         return 1
     fi
 
+    # The CI VM has no GPU (bochs-drm/llvmpipe). kwin_wayland falls back to
+    # software fine, but plasmashell's QtQuick scene-graph dies on the software
+    # GL and the shell never appears (login + compositor come up, screen stays
+    # black). Force the software rasterizer for the session so the shell renders.
+    # Written to /etc/environment.d so the plasma systemd --user session picks
+    # it up on the autologin restart below. (Same idea belongs in PowOS's
+    # 'virtual' hardware profile for real VM installs — noted as a follow-up.)
+    echo "  Forcing software QtQuick for the GPU-less VM..."
+    vm_ssh "echo 'QT_QUICK_BACKEND=software' > /tmp/swrender.conf
+echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p /etc/environment.d && install -m 0644 /tmp/swrender.conf /etc/environment.d/99-tier2-swrender.conf'" 2>/dev/null || true
+
     # Restart the display manager to trigger autologin.
     echo "  Restarting display-manager.service (${dm_impl})..."
     vm_sudo "systemctl restart display-manager.service" 2>/dev/null || true
