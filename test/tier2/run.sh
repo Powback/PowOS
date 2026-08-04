@@ -544,13 +544,12 @@ echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p $dm_confd && install -m 0644 /tmp/zz-
     # The CI VM has no GPU (bochs-drm/llvmpipe). kwin_wayland falls back to
     # software fine, but plasmashell's QtQuick scene-graph dies on the software
     # GL and the shell never appears (login + compositor come up, screen stays
-    # black). Force the software rasterizer for the session so the shell renders.
-    # Written to /etc/environment.d so the plasma systemd --user session picks
-    # it up on the autologin restart below. (Same idea belongs in PowOS's
-    # 'virtual' hardware profile for real VM installs — noted as a follow-up.)
+    # black). Force the software rasterizer for the session. This MUST go where
+    # startplasma actually sources session env — /etc/xdg/plasma-workspace/env/
+    # (an /etc/environment.d drop-in is NOT read by the plasma session).
     echo "  Forcing software QtQuick for the GPU-less VM..."
-    vm_ssh "echo 'QT_QUICK_BACKEND=software' > /tmp/swrender.conf
-echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p /etc/environment.d && install -m 0644 /tmp/swrender.conf /etc/environment.d/99-tier2-swrender.conf'" 2>/dev/null || true
+    vm_ssh "printf 'export QT_QUICK_BACKEND=software\n' > /tmp/swrender.sh
+echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p /etc/xdg/plasma-workspace/env && install -m 0755 /tmp/swrender.sh /etc/xdg/plasma-workspace/env/99-swrender.sh'" 2>/dev/null || true
 
     # Restart the display manager to trigger autologin.
     echo "  Restarting display-manager.service (${dm_impl})..."
@@ -578,6 +577,11 @@ echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p /etc/environment.d && install -m 0644
         t2_fail "plasmashell not found after ${DESKTOP_TIMEOUT}s -- SESSION DIED AFTER LOGIN"
         checks+=",$(check_json plasmashell-running fail)"
         ok=false
+        # Capture WHY: the plasma session logs to the user journal. Dump the
+        # plasmashell / startplasma lines so we diagnose from evidence, not guesses.
+        echo "  ── plasmashell/plasma journal (why the shell didn't start) ──"
+        vm_sudo "journalctl -b --no-pager 2>/dev/null | grep -iE 'plasmashell|startplasma|plasma-plasmashell|kwin_wayland' | tail -40" 2>/dev/null | sed 's/^/    /' || echo "    (journal unavailable)"
+        echo "  ─────────────────────────────────────────────────────────────"
     fi
 
     # Compositor
