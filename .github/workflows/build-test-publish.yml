@@ -285,7 +285,11 @@ jobs:
       # test step above works with the bare name and only bib does not.
       - name: Build test qcow2 (bootc-image-builder)
         if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
-        timeout-minutes: 15
+        # bib converting the large nvidia-open image to a btrfs qcow2 runs
+        # ~10-15 min on a good day; a 15-min cap left ZERO headroom and timed
+        # out the nightly (run 30803671221). Give it real margin — this is a
+        # build-time budget, not a hang guard, so a generous cap is correct.
+        timeout-minutes: 25
         run: |
           mkdir -p tier2-bib-output
           sudo podman run --rm --privileged \
