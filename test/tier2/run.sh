@@ -522,11 +522,16 @@ stage_c() {
     [[ -n "$dm_impl" ]] || dm_impl="sddm"
     local dm_confd="/etc/${dm_impl}.conf.d"
     echo "  Injecting autologin config into ${dm_confd}/ ..."
-    if vm_sudo "mkdir -p $dm_confd && cat > $dm_confd/zz-test-autologin.conf << 'SDDMEOF'
+    # Write to /tmp first (works unprivileged), then `sudo install` it into
+    # ${dm_confd}. The old `vm_sudo "mkdir && cat > /etc/…"` failed because
+    # vm_sudo's `sudo -S` only covered the mkdir — the `> /etc/…` redirect ran
+    # as the non-root SSH user (permission denied → "Could not inject").
+    if vm_ssh "cat > /tmp/zz-test-autologin.conf << 'SDDMEOF'
 [Autologin]
 User=powos
 Session=plasma.desktop
-SDDMEOF" 2>/dev/null; then
+SDDMEOF
+echo '$SSH_PASS' | sudo -S sh -c 'mkdir -p $dm_confd && install -m 0644 /tmp/zz-test-autologin.conf $dm_confd/zz-test-autologin.conf'" 2>/dev/null; then
         t2_pass "Autologin config injected"
         checks="$(check_json autologin-injected pass)"
     else
