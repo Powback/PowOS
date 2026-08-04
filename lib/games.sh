@@ -1123,8 +1123,26 @@ cmd_games() {
 
     # `storage` is the explicit spelling for the disk verbs; unwrap it and
     # fall through to the same dispatch the bare verbs already use.
+    local _storage=0
     if [[ "$sub" == "storage" || "$sub" == "disk" || "$sub" == "partition" ]]; then
+        _storage=1
         sub="${1:-status}"; shift 2>/dev/null || true
+    fi
+
+    # Singular/plural bridge: `powos games <name> ...` is almost always a user
+    # reaching for the per-game view (`powos game <name>`), not a disk verb.
+    # Unless it's an explicit `storage` form or a real disk verb, hand it to
+    # the game facade instead of erroring "Unknown games command".
+    if [[ $_storage -eq 0 ]]; then
+        case "$sub" in
+            status|create|mount|steam-setup|steam|resize|help|-h|--help) ;;
+            *)
+                local _gl="${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+                source "$_gl/game.sh"
+                cmd_game "$sub" "$@"
+                return
+                ;;
+        esac
     fi
 
     while [[ $# -gt 0 ]]; do
