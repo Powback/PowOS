@@ -9,13 +9,18 @@
 # sets "show only tasks from the current screen" on ALL icon task managers,
 # so each taskbar shows the windows on its own monitor.
 #
-# STRICTLY CONSERVATIVE, same philosophy as powos-panel-center:
+# STRICTLY CONSERVATIVE about PANELS, same philosophy as powos-panel-center:
 # - A screen is processed ONCE (per-user, per-screen marker). If the user
 #   deletes the panel we created, we never re-add it.
 # - A screen that already has a panel is marked processed and never touched.
-# - showOnlyCurrentScreen is only applied at the moment a new panel is
-#   created (i.e. a new monitor appeared) — a user who unchecks it later is
-#   not re-forced unless yet another new monitor shows up.
+#
+# But showOnlyCurrentScreen IS re-asserted on every icon task manager at EVERY
+# login (not only when a new panel is created). Plasma config rewrites and shell
+# restarts can silently flip it back to false on a secondary screen, and then
+# that monitor's taskbar shows the primary screen's windows. Re-asserting each
+# login makes the per-screen filter self-healing instead of a one-shot that
+# quietly regresses. (Panels themselves are still never re-created — only this
+# one boolean is kept true, which is always what a per-monitor taskbar wants.)
 #
 # Unlike the reordering dance in powos-panel-center, this needs no
 # plasmashell restart: addWidget() appends in call order, so building the
@@ -76,16 +81,17 @@ for (var s = 0; s < screenCount; s++) {
     p.addWidget("org.kde.plasma.showdesktop");
     created.push(s);
 }
-if (created.length > 0) {
-    for (var i in panels()) {
-        panels()[i].widgets().forEach(function(w) {
-            if (w.type == "org.kde.plasma.icontasks") {
-                w.currentConfigGroup = ["General"];
-                w.writeConfig("showOnlyCurrentScreen", true);
-                w.reloadConfig();
-            }
-        });
-    }
+// Every login: re-assert per-screen task filtering on every icon task manager,
+// whether or not a panel was just created. Heals a secondary taskbar whose
+// showOnlyCurrentScreen got flipped back to false by a config rewrite.
+for (var i in panels()) {
+    panels()[i].widgets().forEach(function(w) {
+        if (w.type == "org.kde.plasma.icontasks") {
+            w.currentConfigGroup = ["General"];
+            w.writeConfig("showOnlyCurrentScreen", true);
+            w.reloadConfig();
+        }
+    });
 }
 print("SEEN:" + seen.join(";"));
 '
