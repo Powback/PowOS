@@ -62,6 +62,10 @@ COPY config/kde/kglobalshortcutsrc        /etc/xdg/kglobalshortcutsrc
 COPY config/kde/kwinrc                    /etc/xdg/kwinrc
 COPY config/kde/konsolerc                 /etc/xdg/konsolerc
 COPY config/kde/konsole/                  /usr/share/konsole/
+# Rebrand the login MOTD from Bazzite → PowOS. /usr/libexec/ublue-motd renders
+# this exact path (with %IMAGE_NAME%/%GREENBOOT% substitutions through glow), so
+# overwriting it swaps the banner while keeping the renderer + themes intact.
+COPY config/ublue-os/motd/powos.md        /usr/share/ublue-os/motd/bazzite.md
 COPY config/zones/                        /etc/powos/zones/
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
