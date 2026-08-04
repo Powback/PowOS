@@ -675,10 +675,19 @@ PlasmoidItem {
                                                       Kirigami.Theme.textColor.b, 0.15)
 
                                 PC3.ScrollView {
+                                    id: logScroll
                                     anchors.fill: parent
                                     anchors.margins: Kirigami.Units.smallSpacing
                                     clip: true
                                     contentWidth: availableWidth
+
+                                    // Logs open scrolled to the NEWEST lines (tail behaviour):
+                                    // pin the flickable to the bottom whenever the text loads or
+                                    // its rendered height settles.
+                                    function scrollToBottom() {
+                                        var f = logScroll.contentItem
+                                        if (f) f.contentY = Math.max(0, f.contentHeight - f.height)
+                                    }
 
                                     TextEdit {
                                         readOnly: true
@@ -696,6 +705,10 @@ PlasmoidItem {
                                                                               Kirigami.Theme.textColor.b, 0.5)
                                         font.family: "monospace"
                                         font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                        // contentHeight grows as the log text renders — follow it
+                                        // to the bottom so the freshest output is what you see.
+                                        onContentHeightChanged: logScroll.scrollToBottom()
+                                        Component.onCompleted: logScroll.scrollToBottom()
                                     }
                                 }
                             }
