@@ -119,10 +119,18 @@ jobs:
       - name: Free disk space (bazzite base + built image ≈ 15GB, runner has ~14GB free)
         if: steps.gate.outputs.run == 'true'
         run: |
+          # The qcow2 build copies ~13.5GB of image layers into the disk; a cold
+          # osbuild store (0 layers cached) needs that much free at once, which
+          # ~14GB wasn't reliably enough for → flaky "Build test qcow2" deaths.
+          # Strip everything this job never touches.
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
                       /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
-                      /usr/share/swift /usr/local/.ghcup || true
+                      /usr/share/swift /usr/local/.ghcup \
+                      /usr/share/miniconda /opt/az /usr/lib/google-cloud-sdk \
+                      /usr/local/share/powershell /usr/local/share/chromium \
+                      /opt/microsoft /usr/lib/jvm /usr/local/lib/node_modules || true
           sudo docker image prune --all --force || true
+          sudo apt-get clean || true
           df -h /
 
       - name: Resolve base image
@@ -290,13 +298,11 @@ jobs:
       #   resolve to an image ID
       # podman's own CLI searches localhost first, which is why the container
       # test step above works with the bare name and only bib does not.
+      # 35 not 25: a COLD osbuild store copies the full 13.5GB of layers, which
+      # can run past 25 min on a slow runner (that's a flaky death, not a hang).
       - name: Build test qcow2 (bootc-image-builder)
         if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
-        # bib converting the large nvidia-open image to a btrfs qcow2 runs
-        # ~10-15 min on a good day; a 15-min cap left ZERO headroom and timed
-        # out the nightly (run 30803671221). Give it real margin — this is a
-        # build-time budget, not a hang guard, so a generous cap is correct.
-        timeout-minutes: 25
+        timeout-minutes: 35
         run: |
           mkdir -p tier2-bib-output
           sudo podman run --rm --privileged \
