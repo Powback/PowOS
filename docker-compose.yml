@@ -15,6 +15,11 @@ services:
     tty: true
     volumes:
       - powos-home:/home/powos:rw
+      # Live-dev bind: edit source on the host, it's live at /powos in the
+      # container (the entrypoint symlinks it into /var/lib/powos and rebuilds
+      # overlays). Optional — the image also ships its source at
+      # /var/lib/powos/src, so the container runs fine without this.
+      - .:/powos:rw
     privileged: true
     ports:
       - "6091:8443"

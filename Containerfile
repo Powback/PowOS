@@ -222,3 +222,8 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     systemctl mask plasma-setup.service 2>/dev/null || true && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true
+
+# Container dev/test entrypoint: `docker compose up` / `docker run` launches the
+# desktop boot sequence + VNC/noVNC. IGNORED by the installed OS (it boots via
+# systemd), this only affects running the image as a container.
+CMD ["/usr/bin/powos-desktop-entrypoint"]

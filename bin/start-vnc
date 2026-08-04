@@ -30,11 +30,13 @@ vncserver -kill :1 2>/dev/null || true
 # Start VNC server
 vncserver :1 -geometry 1920x1080 -depth 24 -localhost no
 
-# Start noVNC (websocket proxy for browser access)
-/usr/bin/novnc_proxy --vnc localhost:5901 --listen 6080 &
+# Start noVNC (websocket proxy for browser access). Listen on 8443 to match the
+# compose port map (6091:8443) and powos-boot — 6080 left the browser unable to
+# reach it through the published port.
+/usr/bin/novnc_proxy --vnc localhost:5901 --listen 8443 &
 
 echo "VNC started on :1 (port 5901)"
-echo "noVNC available at http://localhost:6080"
+echo "noVNC available at http://localhost:6091/vnc.html  (via compose 6091:8443)"
 
 # Keep running
 wait
