@@ -232,13 +232,19 @@ stream_steam_option() {
 stream_supported() {
     cat <<'LIST'
 gtav|Grand Theft Auto V|tested
+minecraft|Minecraft (native Vulkan)|dev
 rdr2|Red Dead Redemption 2|dev
 cyberpunk2077|Cyberpunk 2077|dev
 LIST
 }
 _stream_support_status() {  # echo tested|dev|"" for an id/alias
     local q="${1,,}"
-    case "$q" in gta|gta5|gtav) q=gtav ;; cp2077|cyberpunk) q=cyberpunk2077 ;; rdr|rdr2) q=rdr2 ;; esac
+    case "$q" in
+        gta|gta5|gtav) q=gtav ;;
+        cp2077|cyberpunk) q=cyberpunk2077 ;;
+        rdr|rdr2) q=rdr2 ;;
+        mc|minecraft) q=minecraft ;;
+    esac
     stream_supported | awk -F'|' -v q="$q" 'tolower($1)==q{print $3}'
 }
 
