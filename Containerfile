@@ -87,6 +87,7 @@ COPY config/etc/systemd/logind.conf.d/     /etc/systemd/logind.conf.d/
 COPY config/etc/containers/oci/hooks.d/     /etc/containers/oci/hooks.d/
 COPY config/etc/containers/containers.conf.d/ /etc/containers/containers.conf.d/
 COPY config/etc/profile.d/                  /etc/profile.d/
+COPY config/tmux/tmux.conf                  /etc/tmux.conf
 # Login-availability fix (exception to zero-boot-services, deliberately):
 # Plasma Login Manager's greeter can wedge into a broken-QML state after a
 # session exit ("...not a function" TypeErrors, black frozen login screen —
@@ -189,6 +190,24 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
     rm -f /tmp/kzones.kwinscript && \
     dnf5 -y clean all && \
     systemctl enable ratbagd.service logid.service
+
+# tmux session persistence ACROSS REBOOT. The resume picker only ever survived a
+# closed tab, a logout or an SSH drop — the tmux server dies with the kernel, so
+# a restart still lost everything. resurrect snapshots sessions/windows/panes and
+# their working directories; continuum autosaves on a timer and restores on
+# server start. Vendored and PINNED at build time rather than through tpm, which
+# clones from GitHub on first run — unacceptable in an image and broken offline.
+ARG TMUX_RESURRECT_VER=v4.0.0
+ARG TMUX_CONTINUUM_VER=v3.1.0
+RUN mkdir -p /usr/share/tmux-plugins && \
+    curl -fsSL "https://github.com/tmux-plugins/tmux-resurrect/archive/refs/tags/${TMUX_RESURRECT_VER}.tar.gz" \
+        | tar xz -C /usr/share/tmux-plugins && \
+    mv /usr/share/tmux-plugins/tmux-resurrect-* /usr/share/tmux-plugins/tmux-resurrect && \
+    curl -fsSL "https://github.com/tmux-plugins/tmux-continuum/archive/refs/tags/${TMUX_CONTINUUM_VER}.tar.gz" \
+        | tar xz -C /usr/share/tmux-plugins && \
+    mv /usr/share/tmux-plugins/tmux-continuum-* /usr/share/tmux-plugins/tmux-continuum && \
+    test -x /usr/share/tmux-plugins/tmux-resurrect/resurrect.tmux && \
+    test -x /usr/share/tmux-plugins/tmux-continuum/continuum.tmux
 
 # One layer for every file we ship (CLI + libs + plasmoids + KDE default).
 COPY --from=staging / /

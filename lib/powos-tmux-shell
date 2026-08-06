@@ -81,7 +81,26 @@ _powos_tmux_rows() {
 }
 export -f _powos_tmux_rows
 
-# Nothing to resume → just make this terminal persistent with a fresh session.
+# No sessions yet — but on the first terminal after a REBOOT the sessions worth
+# having are the ones tmux-continuum is about to restore. Creating a blank one
+# immediately would win the race and leave you in an empty shell while your
+# restored work sat detached behind it.
+#
+# Only wait when there is actually something to restore (resurrect writes a
+# `last` symlink after its first save). Otherwise a genuinely fresh machine
+# would eat this delay on every terminal for nothing.
+_resurrect_last="${XDG_STATE_HOME:-$HOME/.local/state}/tmux/resurrect/last"
+if [ -z "$(tmux list-sessions -F x 2>/dev/null | head -n1)" ] && [ -e "$_resurrect_last" ]; then
+    tmux start-server 2>/dev/null      # triggers continuum's restore hook
+    _n=0
+    while [ "$_n" -lt 20 ]; do         # up to ~5s, exits as soon as one appears
+        [ -n "$(tmux list-sessions -F x 2>/dev/null | head -n1)" ] && break
+        sleep 0.25
+        _n=$((_n + 1))
+    done
+fi
+
+# Still nothing (fresh machine, or restore found nothing) → plain new session.
 # No menu when there is no prior work to choose from.
 if [ -z "$(tmux list-sessions -F x 2>/dev/null | head -n1)" ]; then
     exec tmux new-session

@@ -22,8 +22,11 @@ _powos_tmux_ssh_hook() {
                                                   # sets this before exec'ing a
                                                   # fallback shell, which would
                                                   # otherwise re-enter here.
-    [ -x /usr/lib/powos/powos-tmux-shell ] || return
-    exec /usr/lib/powos/powos-tmux-shell
+    # Overridable so the test suite can point at a stub; hardcoding the absolute
+    # path made this hook untestable.
+    _pts="${POWOS_TMUX_SHELL_BIN:-/usr/lib/powos/powos-tmux-shell}"
+    [ -x "$_pts" ] || return
+    exec "$_pts"
 }
 _powos_tmux_ssh_hook
 unset -f _powos_tmux_ssh_hook 2>/dev/null
