@@ -955,8 +955,8 @@ them on join. So there is no client/server split here — just 'vu mod'.
   disable <name>          Remove from ModList.txt (files kept).
   remove  <name>          Delete the mod folder and delist it.
   update  [name]          Re-fetch GitHub mods (no name = all of them).
-  build   <name>          Build a WebUI mod (pnpm) and pack ui.vuic via vuicc
-                          under wine — for HasWebUI mods like MapEditor.
+  build <name> [--dev]    Build a WebUI mod → ui.vuic via vuicc under wine.
+                          --dev = proxy stub + pnpm serve HMR (live WebUI reload).
   dev [name] [--watch|--reload|--restart]
                           Dev loop: watch the mods dir, tail the server log, and
                           surface errors on save. Auto-reload is opt-in:
@@ -1293,44 +1293,68 @@ vu_vuicc_bin() {
 # Build a WebUI mod: pnpm install + production build, then pack dist/ → ui.vuic
 # with vuicc under wine (the .exe is Windows-only; vextpack silently skips the
 # pack on Linux, so PowOS does it). Idempotent-ish; safe to re-run after edits.
-vu_mod_build_cmd() {
-    case "${1:-}" in
-        ""|-h|--help|help)
-            cat <<EOF
-${BOLD}powos mods vu mod build${NC} <name>  — build a WebUI mod's ui.vuic
+# Pack a source dir into <out> (ui.vuic) with vuicc under wine. Forward-slash
+# Z:/ paths; no display. Caller has already resolved wine/prefix.
+vu_vuicc_pack() {
+    local src="$1" out="$2" wine pdir vuicc
+    wine="$(vu_wine)"; pdir="$(vu_proton_dir)"; vuicc="$(vu_vuicc_bin)" || return 1
+    env -u DISPLAY -u WAYLAND_DISPLAY \
+        WINEPREFIX="$(vu_wineprefix)" WINELOADER="$wine" WINESERVER="$pdir/files/bin/wineserver" \
+        LD_LIBRARY_PATH="$pdir/files/lib64:$pdir/files/lib" WINEDEBUG=-all \
+        "$wine" "$vuicc" "Z:$src" "Z:$out" >/dev/null 2>&1
+}
 
-Runs ${BOLD}pnpm i && pnpm build${NC} in the mod's WebUI/, then packs the built
-dist/ into ui.vuic using vuicc under GE-Proton wine (VU only ships vuicc as a
-Windows .exe). Needed for mods with a WebUI (HasWebUI in mod.json), e.g. MapEditor.
-Re-run after WebUI source changes.
+vu_mod_build_cmd() {
+    local dev=0 name=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dev)  dev=1; shift ;;
+            -h|--help|help)
+                cat <<EOF
+${BOLD}powos mods vu mod build${NC} <name> [--dev]  — build a WebUI mod
+
+Production (default): ${BOLD}pnpm i && pnpm build${NC}, then pack the built dist/ into
+ui.vuic with vuicc under GE-Proton wine (VU ships vuicc only as a Windows .exe).
+
+${BOLD}--dev${NC}: WebUI hot-reload. Packs vextpack's proxy stub into ui.vuic (the in-game
+WebUI then loads http://localhost:8080) and runs ${BOLD}pnpm serve${NC} — edit WebUI
+source and it hot-reloads live in-game. Foreground; Ctrl-C to stop the dev server.
 EOF
-            return 0 ;;
-    esac
-    local name="$1" moddir webui
-    moddir="$VU_MODS_DIR/$name"
+                return 0 ;;
+            -*) perr "Unknown option: $1"; return 1 ;;
+            *)  name="$1"; shift ;;
+        esac
+    done
+    [[ -n "$name" ]] || { perr "usage: powos mods vu mod build <name> [--dev]"; return 1; }
+    local moddir webui; moddir="$VU_MODS_DIR/$name"; webui="$moddir/WebUI"
     [[ -d "$moddir" ]] || { perr "No such mod: $name  (looked under $VU_MODS_DIR)"; return 1; }
-    webui="$moddir/WebUI"
     [[ -f "$webui/package.json" ]] || { perr "$name has no WebUI/package.json — nothing to build."; return 1; }
     command -v pnpm >/dev/null || { perr "pnpm is required. Install it: ${BOLD}npm i -g pnpm${NC}"; return 1; }
     vu_apply_prefix_choice
-    local wine pdir; wine="$(vu_wine)"; pdir="$(vu_proton_dir)"
-    [[ -n "$wine" ]] || { perr "No GE-Proton wine (needed to run vuicc). Run: powos mods modlist proton"; return 1; }
-    local vuicc; vuicc="$(vu_vuicc_bin)" || return 1
-
-    plog "Building $name WebUI ${DIM}($webui)${NC}…"
-    if ! ( cd "$webui" && pnpm i && NODE_ENV=production pnpm build ); then
-        perr "WebUI build (pnpm) failed."; return 1
-    fi
-    [[ -d "$webui/dist" ]] || { perr "build produced no dist/ — nothing to pack."; return 1; }
-
+    [[ -n "$(vu_wine)" ]] || { perr "No GE-Proton wine (needed to run vuicc). Run: powos mods modlist proton"; return 1; }
+    vu_vuicc_bin >/dev/null || return 1
     local out="$moddir/ui.vuic"
-    plog "Packing dist/ → ui.vuic ${DIM}(vuicc under wine)${NC}…"
-    if ! env -u DISPLAY -u WAYLAND_DISPLAY \
-            WINEPREFIX="$(vu_wineprefix)" WINELOADER="$wine" WINESERVER="$pdir/files/bin/wineserver" \
-            LD_LIBRARY_PATH="$pdir/files/lib64:$pdir/files/lib" WINEDEBUG=-all \
-            "$wine" "$vuicc" "Z:$webui/dist" "Z:$out" >/dev/null 2>&1; then
-        perr "vuicc pack failed."; return 1
+
+    plog "Installing WebUI deps ${DIM}($webui)${NC}…"
+    ( cd "$webui" && pnpm i ) || { perr "pnpm install failed."; return 1; }
+
+    if [[ $dev -eq 1 ]]; then
+        # Dev: the ui.vuic is just vextpack's redirect stub → localhost:8080.
+        local proxy="$webui/node_modules/vextpack/proxy"
+        [[ -d "$proxy" ]] || { perr "vextpack proxy not found — is this a vextpack WebUI mod?"; return 1; }
+        plog "Packing dev proxy → ui.vuic ${DIM}(redirects in-game WebUI to :8080)${NC}…"
+        vu_vuicc_pack "$proxy" "$out" || { perr "vuicc pack (proxy) failed."; return 1; }
+        [[ -s "$out" ]] || { perr "vuicc produced no ui.vuic."; return 1; }
+        pok "Dev proxy ui.vuic ready. (Re)connect the client to load the live WebUI."
+        plog "Starting HMR dev server ${BOLD}pnpm serve${NC} on :8080 — keep it running, Ctrl-C to stop."
+        exec bash -lc "cd '$webui' && pnpm serve"
     fi
+
+    plog "Building $name WebUI (production)…"
+    ( cd "$webui" && NODE_ENV=production pnpm build ) || { perr "WebUI build failed."; return 1; }
+    [[ -d "$webui/dist" ]] || { perr "build produced no dist/ — nothing to pack."; return 1; }
+    plog "Packing dist/ → ui.vuic ${DIM}(vuicc under wine)${NC}…"
+    vu_vuicc_pack "$webui/dist" "$out" || { perr "vuicc pack failed."; return 1; }
     [[ -s "$out" ]] || { perr "vuicc produced no ui.vuic."; return 1; }
     pok "Built $name WebUI → ui.vuic ${DIM}($(du -h "$out" | cut -f1))${NC}. Restart the server to serve it."
 }
