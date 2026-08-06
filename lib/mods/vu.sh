@@ -475,6 +475,35 @@ vu_install_icon() {
     return 0
 }
 
+# On KDE/KWin, a Proton app's window carries the GENERIC WM_CLASS "steam_proton",
+# so the Task Manager can't map the running window back to this .desktop and
+# draws a blank taskbar icon. A KWin rule matched on VU's window TITLE (so it
+# only ever touches VU, never other Proton apps that share the class) forces the
+# window to associate with the venice-unleashed desktop file — giving the running
+# window the VU logo. Idempotent; KDE-only (no-op without kwriteconfig6).
+vu_install_kwin_rule() {
+    command -v kwriteconfig6 >/dev/null || return 1
+    local rc="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrulesrc"
+    grep -q "^desktopfile=$VU_ICON_NAME\$" "$rc" 2>/dev/null && return 0   # already present
+    local uuid
+    uuid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null)" || uuid="$(uuidgen 2>/dev/null)" || return 1
+    local cur newlist
+    cur="$(kreadconfig6 --file kwinrulesrc --group General --key rules 2>/dev/null)"
+    [[ -n "$cur" ]] && newlist="$cur,$uuid" || newlist="$uuid"
+    kwriteconfig6 --file kwinrulesrc --group General --key rules "$newlist"
+    kwriteconfig6 --file kwinrulesrc --group "$uuid" --key Description "Venice Unleashed taskbar icon (PowOS)"
+    kwriteconfig6 --file kwinrulesrc --group "$uuid" --key wmclass "steam_proton"
+    kwriteconfig6 --file kwinrulesrc --group "$uuid" --key wmclassmatch 1
+    kwriteconfig6 --file kwinrulesrc --group "$uuid" --key title 'Venice Unleashed|vu\.com'
+    kwriteconfig6 --file kwinrulesrc --group "$uuid" --key titlematch 3
+    kwriteconfig6 --file kwinrulesrc --group "$uuid" --key desktopfile "$VU_ICON_NAME"
+    kwriteconfig6 --file kwinrulesrc --group "$uuid" --key desktopfilerule 2
+    qdbus org.kde.KWin /KWin reconfigure 2>/dev/null \
+        || dbus-send --type=method_call --dest=org.kde.KWin /KWin org.kde.KWin.reconfigure 2>/dev/null \
+        || true
+    return 0
+}
+
 vu_write_desktop() {
     mkdir -p "$(dirname "$VU_DESKTOP")"
     local icon="applications-games"
@@ -491,6 +520,9 @@ Categories=Game;ActionGame;
 Keywords=battlefield;bf3;vu;venice;
 EOF
     update-desktop-database "$(dirname "$VU_DESKTOP")" 2>/dev/null || true
+    # KDE: the running window shares the generic steam_proton class — give it the
+    # VU icon via a title-matched KWin rule (only when we actually installed one).
+    if [[ "$icon" == "$VU_ICON_NAME" ]]; then vu_install_kwin_rule || true; fi
 }
 
 # ── Activate / play ───────────────────────────────────────────────────────────
