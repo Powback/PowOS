@@ -213,6 +213,9 @@ def do_watch(host, port, password, watchdir, logfile, reload_words):
                 tail.emit()
                 time.sleep(3)
 
+    # First token selects the on-change action: "-watch-" (none), "-restart-"
+    # (run $VU_DEV_RESTART_CMD), else treat reload_words as an RCON command.
+    action = reload_words[0] if reload_words else "-watch-"
     r = connect()
     last = _snapshot(watchdir)
     try:
@@ -227,15 +230,25 @@ def do_watch(host, port, password, watchdir, logfile, reload_words):
             last = now
             stamp = time.strftime("%H:%M:%S")
             extra = "" if len(changed) <= 1 else " (+%d more)" % (len(changed) - 1)
-            print("[vu-dev] %s  change: %s%s → reloading…" % (stamp, rel, extra))
-            try:
-                print("[vu-dev]   %s" % _fmt(r.command(*reload_words)))
-            except (OSError, IOError) as e:
-                print("[vu-dev]   reload send failed (%s) — reconnecting…" % e)
+            if action == "-watch-":
+                print("[vu-dev] %s  change: %s%s  (watch-only — reload manually)" % (stamp, rel, extra))
+            elif action == "-restart-":
+                print("[vu-dev] %s  change: %s%s → restarting server…" % (stamp, rel, extra))
+                os.system(os.environ.get("VU_DEV_RESTART_CMD", ""))
                 r.close()
+                time.sleep(8)
                 r = connect()
                 last = _snapshot(watchdir)
-            time.sleep(0.4)  # let the reload produce log output, then surface it
+            else:
+                print("[vu-dev] %s  change: %s%s → reloading…" % (stamp, rel, extra))
+                try:
+                    print("[vu-dev]   %s" % _fmt(r.command(*reload_words)))
+                except (OSError, IOError) as e:
+                    print("[vu-dev]   reload send failed (%s) — reconnecting…" % e)
+                    r.close()
+                    r = connect()
+                    last = _snapshot(watchdir)
+            time.sleep(0.4)  # let the action produce log output, then surface it
             tail.emit()
     except KeyboardInterrupt:
         print("\n[vu-dev] stopped.")

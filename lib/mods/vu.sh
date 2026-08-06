@@ -957,10 +957,11 @@ them on join. So there is no client/server split here — just 'vu mod'.
   update  [name]          Re-fetch GitHub mods (no name = all of them).
   build   <name>          Build a WebUI mod (pnpm) and pack ui.vuic via vuicc
                           under wine — for HasWebUI mods like MapEditor.
-  dev     [name]          Hot-reload dev loop: watch the mods dir and send
-                          ${VU_RELOAD_CMD} on every save. Edit the Lua in
-                          ${VU_MODS_DIR}/<mod>/ and it reloads live — no restart.
-                          (Pairs with ${BOLD}powos mods vu rcon${NC} for one-off commands.)
+  dev [name] [--watch|--reload|--restart]
+                          Dev loop: watch the mods dir, tail the server log, and
+                          surface errors on save. Auto-reload is opt-in:
+                          --watch (default, no reload) · --reload (fast, only for
+                          reload-safe mods) · --restart (full restart, any mod).
 
 ${BOLD}Sources${NC}
   gh:owner/repo[@ref]     A GitHub repo (default branch unless @ref).
@@ -1211,31 +1212,44 @@ EOF
 }
 
 vu_mod_dev_cmd() {
-    case "${1:-}" in
-        -h|--help|help)
-            cat <<EOF
-${BOLD}powos mods vu mod dev${NC} [mod-name]  — hot-reload dev loop
+    local mode="watch" name=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --reload)  mode="reload";  shift ;;
+            --restart) mode="restart"; shift ;;
+            --watch)   mode="watch";   shift ;;
+            -h|--help|help)
+                cat <<EOF
+${BOLD}powos mods vu mod dev${NC} [mod-name] [--watch|--reload|--restart]
 
-Watches the mods dir (or one mod under it) and sends ${BOLD}${VU_RELOAD_CMD}${NC}
-to the running server on every .lua/.json save — edit in place, see it live.
-Mods live where they always do: ${VU_MODS_DIR}/<mod>/. Ctrl-C to stop.
+Watches ${VU_MODS_DIR}/ (or one mod), tails the server log, and surfaces errors
+as you save. Auto-reload is OPT-IN — many mods (incl. MapEditor) keep hooks and
+state that ${BOLD}modList.ReloadExtensions${NC} doesn't cleanly re-init, so a full restart is
+often the honest choice. Ctrl-C to stop.
 
-  powos mods vu mod dev            # watch all of Admin/Mods
-  powos mods vu mod dev MyMod      # watch just Admin/Mods/MyMod
+  ${BOLD}--watch${NC}    (default) watch + tail + surface errors; you reload manually.
+  ${BOLD}--reload${NC}   send ${VU_RELOAD_CMD} on each save (fast; only for reload-safe mods).
+  ${BOLD}--restart${NC}  full clean server restart on each save (safe for any mod).
+
+  powos mods vu mod dev MapEditor --restart
 EOF
-            return 0 ;;
-    esac
+                return 0 ;;
+            -*) perr "Unknown option: $1"; return 1 ;;
+            *)  name="$1"; shift ;;
+        esac
+    done
+
     local pw; pw="$(vu_rcon_preflight)" || return 1
     local watch="$VU_MODS_DIR"
-    if [[ -n "${1:-}" ]]; then
-        watch="$VU_MODS_DIR/$1"
-        [[ -d "$watch" ]] || { perr "No such mod: $1  (looked under $VU_MODS_DIR)"; return 1; }
+    if [[ -n "$name" ]]; then
+        watch="$VU_MODS_DIR/$name"
+        [[ -d "$watch" ]] || { perr "No such mod: $name  (looked under $VU_MODS_DIR)"; return 1; }
     fi
     mkdir -p "$watch"
 
     # Ensure the server is running — this is a dev loop, it owns its server.
     if ! vu_rcon_up; then
-        plog "Server not up — starting it headless (log: $VU_SERVER_LOG)…"
+        plog "Server not up — starting it (log: $VU_SERVER_LOG)…"
         vu_server_start_detached || { perr "Could not start the server."; return 1; }
         local i=0
         until vu_rcon_up; do
@@ -1245,8 +1259,23 @@ EOF
         pok "Server up (RCON ${VU_RCON_HOST}:${VU_RCON_PORT})."
     fi
 
-    plog "Hot-reload dev loop — edit Lua under ${BOLD}$watch${NC}; ${DIM}[srv] lines = server output, '!' = looks like an error${NC}"
-    exec python3 "$VU_RCON_PY" watch "$VU_RCON_HOST" "$VU_RCON_PORT" "$pw" "$watch" "$VU_SERVER_LOG" $VU_RELOAD_CMD
+    # Translate the mode into the watcher's on-change action token.
+    local action
+    case "$mode" in
+        reload)
+            action="$VU_RELOAD_CMD"
+            plog "Dev loop ${BOLD}--reload${NC}: ${VU_RELOAD_CMD} on save ${DIM}(only for reload-safe mods)${NC}" ;;
+        restart)
+            action="-restart-"
+            # SIGTERM (never SIGKILL — Proton/nvidia RAM leak), then relaunch detached.
+            export VU_DEV_RESTART_CMD="pkill -TERM -f 'vu[.]com' 2>/dev/null; sleep 3; setsid '${POWOS_BIN:-$0}' mods vu server start >/dev/null 2>&1 </dev/null & disown 2>/dev/null || true"
+            plog "Dev loop ${BOLD}--restart${NC}: full clean server restart on save" ;;
+        *)
+            action="-watch-"
+            plog "Dev loop ${BOLD}--watch${NC}: tailing logs, no auto-reload ${DIM}(reload: powos mods vu rcon ${VU_RELOAD_CMD})${NC}" ;;
+    esac
+    plog "Editing under ${BOLD}$watch${NC}; ${DIM}[srv] = server output, '!' = looks like an error. Ctrl-C to stop.${NC}"
+    exec python3 "$VU_RCON_PY" watch "$VU_RCON_HOST" "$VU_RCON_PORT" "$pw" "$watch" "$VU_SERVER_LOG" $action
 }
 
 # Ensure vuicc.exe is cached; echo its path. Downloaded once from VU's file host.
@@ -1390,8 +1419,9 @@ Mods (always server-side — clients auto-download on join):
   powos mods vu mod enable|disable|remove <name>
   powos mods vu mod update [name]
                                   Re-fetch GitHub-sourced mods
-  powos mods vu mod dev [name]    Hot-reload dev loop — watch the mods dir,
-                                    send modList.ReloadExtensions on each save
+  powos mods vu mod dev [name] [--watch|--reload|--restart]
+                                  Dev loop — watch + tail + surface errors;
+                                    auto-reload/-restart on save is opt-in
   powos mods vu mod help          Sources + selection detail
 
 Live server control (Frostbite RCON on 47200):
