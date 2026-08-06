@@ -66,3 +66,71 @@ sysext_remerge_if_needed() {
     fi
     _POWOS_SYSEXT_WAS_MERGED=""
 }
+
+# ── Canonical source-checkout resolution ─────────────────────────────────────
+# ONE resolver, shared by `powos reload` and `powos self`, so the two halves of
+# the dev loop can never disagree about which tree they are editing.
+#
+# They used to disagree: reload auto-discovered your real checkout while self
+# hardcoded /var/lib/powos/src. So `powos self test` and `powos reload` edited
+# DIFFERENT trees, and the bundled one silently rotted — it is only refreshed by
+# an image rebuild, so a machine that had not rebuilt in days was editing
+# days-old code with nothing saying so. `powos self reseed` exists purely to
+# paper over that. Resolving through one function removes the class of bug.
+#
+# Order: explicit arg > remembered (~/.config/powos/dev-src) > $POWOS_DEV_SRC >
+# common checkout locations > the bundled /var/lib/powos/src as LAST resort.
+# Bundled-last is the important part: it stays available for "no external
+# checkout, edit PowOS from inside the image", but stops being the default the
+# moment a real checkout exists.
+
+# Invoking user's home even under sudo, so detection + memory find ~/PowOS.
+powos_src_home() {
+    if [[ -n "${SUDO_USER:-}" ]]; then getent passwd "$SUDO_USER" | cut -d: -f6
+    else echo "$HOME"; fi
+}
+
+POWOS_SRC_MEMORY="${POWOS_DEV_SRC_FILE:-$(powos_src_home)/.config/powos/dev-src}"
+
+powos_src_valid() { [[ -n "${1:-}" && -f "$1/bin/powos" && -f "$1/Containerfile" ]]; }
+
+powos_src_find() {
+    local explicit="${1:-}" H c s
+    H="$(powos_src_home)"
+    if [[ -n "$explicit" ]]; then
+        powos_src_valid "$explicit" && { ( cd "$explicit" && pwd ); return 0; }
+        perr "Not a PowOS checkout: $explicit"; return 1
+    fi
+    if [[ -f "$POWOS_SRC_MEMORY" ]]; then
+        s="$(cat "$POWOS_SRC_MEMORY" 2>/dev/null)"
+        powos_src_valid "$s" && { echo "$s"; return 0; }
+    fi
+    powos_src_valid "${POWOS_DEV_SRC:-}" && { ( cd "$POWOS_DEV_SRC" && pwd ); return 0; }
+    for c in "$H/PowOS" "$H/powos" "$H/src/PowOS" "$H/Projects/PowOS" "$PWD"; do
+        [[ -d "$c/.git" ]] && powos_src_valid "$c" && { ( cd "$c" && pwd ); return 0; }
+    done
+    [[ -d /var/lib/powos/src/.git ]] && powos_src_valid /var/lib/powos/src && { echo /var/lib/powos/src; return 0; }
+    return 1
+}
+
+powos_src_remember() {
+    mkdir -p "$(dirname "$POWOS_SRC_MEMORY")" 2>/dev/null && \
+        echo "$1" > "$POWOS_SRC_MEMORY" 2>/dev/null || true
+}
+
+# Loud, non-fatal warning when the resolved tree is behind its upstream. Silent
+# staleness is the failure this resolver exists to prevent: a tree can sit N
+# commits behind for days and nothing says so until a build ships old code.
+# Never fails the caller — a missing remote or no network must not block a build.
+powos_src_staleness() {
+    local src="${1:-}" ref behind
+    [[ -d "$src/.git" ]] || return 0
+    ref=$(git -C "$src" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || return 0
+    [[ -n "$ref" ]] || return 0
+    behind=$(git -C "$src" rev-list --count "HEAD..$ref" 2>/dev/null) || return 0
+    if [[ "${behind:-0}" -gt 0 ]]; then
+        pwarn "$src is $behind commit(s) behind $ref."
+        pwarn "  Fetch first, or you will build/ship stale code: git -C $src pull --ff-only"
+    fi
+    return 0
+}

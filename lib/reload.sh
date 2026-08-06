@@ -23,36 +23,15 @@ set -uo pipefail
 source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
 POWOS_TAG=reload
 
-# Invoking user's home even under sudo, so detection + memory find ~/PowOS.
-reload_home() {
-    if [[ -n "${SUDO_USER:-}" ]]; then getent passwd "$SUDO_USER" | cut -d: -f6
-    else echo "$HOME"; fi
-}
-RELOAD_MEMORY="${POWOS_DEV_SRC_FILE:-$(reload_home)/.config/powos/dev-src}"
-
-reload_valid() { [[ -n "$1" && -f "$1/bin/powos" && -f "$1/Containerfile" ]]; }
-
-reload_find() {
-    local explicit="${1:-}" H c s
-    H="$(reload_home)"
-    if [[ -n "$explicit" ]]; then
-        reload_valid "$explicit" && { ( cd "$explicit" && pwd ); return 0; }
-        perr "Not a PowOS checkout: $explicit"; return 1
-    fi
-    # remembered
-    if [[ -f "$RELOAD_MEMORY" ]]; then s="$(cat "$RELOAD_MEMORY" 2>/dev/null)"; reload_valid "$s" && { echo "$s"; return 0; }; fi
-    # env override
-    reload_valid "${POWOS_DEV_SRC:-}" && { ( cd "$POWOS_DEV_SRC" && pwd ); return 0; }
-    # common checkouts (prefer a git checkout over the bundled src)
-    for c in "$H/PowOS" "$H/powos" "$H/src/PowOS" "$H/Projects/PowOS" "$PWD"; do
-        [[ -d "$c/.git" ]] && reload_valid "$c" && { ( cd "$c" && pwd ); return 0; }
-    done
-    # last resort: bundled source if it's a real git repo
-    [[ -d /var/lib/powos/src/.git ]] && reload_valid /var/lib/powos/src && { echo /var/lib/powos/src; return 0; }
-    return 1
-}
-
-reload_remember() { mkdir -p "$(dirname "$RELOAD_MEMORY")" 2>/dev/null && echo "$1" > "$RELOAD_MEMORY" 2>/dev/null || true; }
+# Source resolution now lives in common.sh as powos_src_* so that `powos self`
+# resolves IDENTICALLY. These wrappers stay for the existing call sites (and for
+# anyone with muscle memory); they are thin delegates, not a second copy — a
+# second copy is exactly how reload and self drifted apart in the first place.
+reload_home()     { powos_src_home; }
+RELOAD_MEMORY="$POWOS_SRC_MEMORY"
+reload_valid()    { powos_src_valid "$@"; }
+reload_find()     { powos_src_find "$@"; }
+reload_remember() { powos_src_remember "$@"; }
 
 # Changes to these paths are BAKED AT IMAGE BUILD TIME — `update self` can't
 # hot-apply them, so they need a full build + switch (+reboot) to take effect.

@@ -20,7 +20,12 @@ set -uo pipefail
 source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
 POWOS_TAG=self
 
-SELF_SRC="${POWOS_SRC:-/var/lib/powos/src}"
+# Resolve through the SHARED resolver (common.sh) rather than hardcoding the
+# bundled tree. `powos reload` always resolved this way; `self` did not, so the
+# two edited different trees and the bundled one rotted unnoticed. Same resolver
+# = they cannot disagree. Bundled /var/lib/powos/src is still the last resort
+# inside powos_src_find, so the "no external checkout" case is unaffected.
+SELF_SRC="${POWOS_SRC:-$(powos_src_find 2>/dev/null || echo /var/lib/powos/src)}"
 # Prefer /usr (current-image truth); fall back to /var for images built
 # before the move — will disappear once every machine has upgraded past it.
 if [[ -n "${POWOS_SRC_COMMIT_FILE:-}" ]]; then
@@ -472,6 +477,18 @@ EOF
 
 cmd_self() {
     local sub="${1:-help}"; shift || true
+
+    # Say WHICH tree we resolved, and shout if it is behind upstream. Both of
+    # these were invisible before: `self` silently used the bundled snapshot and
+    # never checked freshness, so it could apply, commit and push days-old code
+    # while the real checkout sat elsewhere, fully up to date.
+    case "$sub" in
+        status|st|test|t|pull|push|reseed)
+            plog "source: $SELF_SRC"
+            powos_src_staleness "$SELF_SRC"
+            ;;
+    esac
+
     case "$sub" in
         status|st)  self_status "$SELF_SRC" ;;
         test|t)     self_test "$SELF_SRC" ;;
