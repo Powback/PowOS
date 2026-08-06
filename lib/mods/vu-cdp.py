@@ -40,14 +40,19 @@ def http_targets(hostport):
         return json.load(r)
 
 
-def pick_page(hostport):
-    """Return the webSocketDebuggerUrl of the first inspectable page."""
-    targets = http_targets(hostport)
-    pages = [t for t in targets if t.get("type") == "page" and t.get("webSocketDebuggerUrl")]
-    chosen = (pages or [t for t in targets if t.get("webSocketDebuggerUrl")])
-    if not chosen:
-        raise IOError("no inspectable CDP target at %s (is the client up with -dwebui?)" % hostport)
-    return chosen[0]["webSocketDebuggerUrl"]
+def pick_page(hostport, match=None):
+    """webSocketDebuggerUrl of the first inspectable page; if `match` is given,
+    prefer a page whose url/title contains it (e.g. 'mapeditor')."""
+    targets = [t for t in http_targets(hostport) if t.get("webSocketDebuggerUrl")]
+    if match:
+        m = match.lower()
+        hits = [t for t in targets if m in (t.get("url", "") + " " + t.get("title", "")).lower()]
+        if hits:
+            targets = hits
+    pages = [t for t in targets if t.get("type") == "page"] or targets
+    if not pages:
+        raise IOError("no inspectable CDP target at %s (client up with -dwebui?)" % hostport)
+    return pages[0]["webSocketDebuggerUrl"]
 
 
 class WS:
@@ -120,9 +125,12 @@ class WS:
             pass
 
 
+MATCH = None  # page url/title filter, set from --target
+
+
 class CDP:
-    def __init__(self, hostport):
-        self.ws = WS(pick_page(hostport))
+    def __init__(self, hostport, match=None):
+        self.ws = WS(pick_page(hostport, match if match is not None else MATCH))
         self.id = 0
 
     def call(self, method, params=None, timeout=15):
@@ -184,6 +192,22 @@ def cmd_click(hostport, selector):
     return 0
 
 
+def cmd_soldier(hostport):
+    # Auto-select the first non-empty soldier on the players screen. Gameface has
+    # no element.click(), so dispatch a real MouseEvent (Vue @click catches it).
+    c = CDP(hostport, "players")
+    try:
+        js = ("(()=>{const es=[...document.querySelectorAll('.soldier-entry')]"
+              ".filter(e=>!(e.className||'').includes('empty'));"
+              "if(!es.length)return 'NO-SOLDIER';"
+              "es[0].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));"
+              "return 'SELECTED '+(es[0].textContent||'').trim().slice(0,30);})()")
+        print(c.evaluate(js))
+    finally:
+        c.close()
+    return 0
+
+
 def cmd_console(hostport, seconds):
     c = CDP(hostport)
     try:
@@ -230,18 +254,56 @@ def cmd_screenshot(hostport, outpath):
     return 0
 
 
+def cmd_errors(hostport, seconds):
+    # NB: never Page.reload a VU WebUI — it severs the Lua bridge and wedges CEF.
+    # We enable Runtime.enable which replays already-collected console/exceptions.
+    c = CDP(hostport)
+    try:
+        c.call("Runtime.enable"); c.call("Log.enable")
+        print("[cdp] capturing errors/warnings for %ss…" % seconds)
+        c.ws.sock.settimeout(1.0)
+        elapsed = n = 0
+        while elapsed < seconds:
+            try:
+                msg = json.loads(c.ws.recv())
+            except socket.timeout:
+                elapsed += 1
+                continue
+            m = msg.get("method"); p = msg.get("params", {})
+            if m == "Runtime.exceptionThrown":
+                d = p.get("exceptionDetails", {})
+                print("[EXCEPTION] %s" % (d.get("exception", {}).get("description") or d.get("text"))); n += 1
+            elif m == "Runtime.consoleAPICalled" and p.get("type") in ("error", "warning", "assert"):
+                args = " ".join(str(a.get("value", a.get("description", ""))) for a in p.get("args", []))
+                print("[console.%s] %s" % (p.get("type"), args)); n += 1
+            elif m == "Log.entryAdded":
+                e = p.get("entry", {})
+                if e.get("level") in ("error", "warning"):
+                    print("[log.%s] %s  %s" % (e.get("level"), e.get("text"), e.get("url", ""))); n += 1
+        print("[cdp] %d error/warning event(s)." % n)
+    finally:
+        c.close()
+    return 0
+
+
 USAGE = (
-    "usage: vu-cdp.py [--addr host:port] <mode> [args]\n"
-    "  modes: targets | title | eval <js> | click <css> | console [secs] | screenshot <out.png>\n"
+    "usage: vu-cdp.py [--addr host:port] [--target url-substr] <mode> [args]\n"
+    "  modes: targets | title | eval <js> | click <css> | console [secs] |\n"
+    "         errors [secs] | screenshot <out.png>\n"
     "  --addr defaults to $VU_CDP_ADDR or localhost:8884\n"
 )
 
 
 def main(argv):
+    global MATCH
     argv = argv[1:]
     hp = os.environ.get("VU_CDP_ADDR", DEFAULT)
-    if argv and argv[0] == "--addr":
-        hp = argv[1]; argv = argv[2:]
+    while argv and argv[0] in ("--addr", "--target"):
+        if argv[0] == "--addr":
+            hp = argv[1]
+        else:
+            MATCH = argv[1]
+        argv = argv[2:]
     if not argv:
         print(USAGE)
         return 2
@@ -256,8 +318,12 @@ def main(argv):
             return cmd_eval(hp, rest[0])
         if mode == "click":
             return cmd_click(hp, rest[0])
+        if mode == "soldier":
+            return cmd_soldier(hp)
         if mode == "console":
             return cmd_console(hp, int(rest[0]) if rest else 30)
+        if mode == "errors":
+            return cmd_errors(hp, int(rest[0]) if rest else 12)
         if mode == "screenshot":
             return cmd_screenshot(hp, rest[0] if rest else "webui.png")
     except (OSError, IOError) as e:

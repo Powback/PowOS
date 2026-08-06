@@ -452,6 +452,11 @@ args=( -gamepath "$GAMEPATH" )
 if [[ "$BRANCH" == "dev" ]]; then
     args+=( -env dev -updateBranch dev )
 fi
+# Always capture the client console to a file. `proton run` sends the game's stdio to
+# /dev/null (uncapturable), but VU's own -debuglog writes a timestamped log to
+# %LOCALAPPDATA%/VeniceUnleashed/ — the only way to read client [VeniceEXT]/[WebUI]/
+# Lua logs. Read the latest with `powos mods vu logs`.
+args+=( -debuglog )
 
 mkdir -p "$VU_PREFIX"
 export STEAM_COMPAT_DATA_PATH="$VU_PREFIX"
@@ -1568,6 +1573,33 @@ Docs: https://docs.veniceunleashed.net/
 EOF
 }
 
+# ── Client logs ───────────────────────────────────────────────────────────────
+# `proton run` throws the game's stdio at /dev/null, so the ONLY way to read the VU
+# client console ([VeniceEXT]/[WebUI]/Lua) is VU's own -debuglog, which writes a
+# timestamped vu_<ts>.log into %LOCALAPPDATA%/VeniceUnleashed. `vu play` always passes
+# -debuglog now; this reads the newest one.
+vu_client_logdir() {
+    printf '%s/drive_c/users/steamuser/AppData/Local/VeniceUnleashed' "$(vu_wineprefix)"
+}
+
+vu_logs_cmd() {
+    vu_apply_prefix_choice
+    local dir log; dir="$(vu_client_logdir)"
+    log="$(ls -t "$dir"/vu_*.log 2>/dev/null | head -1)"
+    [[ -n "$log" ]] || {
+        perr "No client log yet."
+        plog "Launch the client (${BOLD}powos mods vu play${NC}) — it captures via -debuglog."
+        return 1
+    }
+    case "${1:-}" in
+        -f|--follow) plog "Following ${DIM}$log${NC} (Ctrl-C to stop)…"; exec tail -f "$log" ;;
+        -p|--path)   printf '%s\n' "$log" ;;
+        -h|--help)   echo "usage: powos mods vu logs [N | -f/--follow | -p/--path]  (N = last N lines, default 200)" ;;
+        ''|[0-9]*)   tail -n "${1:-200}" "$log" ;;
+        *)           perr "Unknown logs arg: $1"; return 1 ;;
+    esac
+}
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 cmd_mods_vu() {
@@ -1582,6 +1614,7 @@ cmd_mods_vu() {
         mod|mods)     vu_mod_cmd "$@" ;;
         rcon)         vu_rcon_cmd "$@" ;;
         webui)        vu_webui_cmd "$@" ;;
+        logs)         vu_logs_cmd "$@" ;;
         status)       vu_status_cmd ;;
         uninstall)    vu_uninstall_cmd "$@" ;;
         help|-h|--help) vu_help ;;
