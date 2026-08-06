@@ -438,15 +438,54 @@ EOF
     esac
 }
 
+# VU ships no icon file, but vu.exe carries the VU logo as an embedded PE icon
+# resource. Extract it (needs icoutils: wrestool + icotool) and install it into
+# the hicolor theme as 'venice-unleashed' so the menu entry shows the logo
+# instead of a generic controller. Idempotent; silently returns non-zero if the
+# tools or the exe are absent, in which case the caller keeps the generic icon.
+VU_ICON_NAME="${VU_ICON_NAME:-venice-unleashed}"
+vu_icon_theme_dir() { printf '%s/icons/hicolor' "${XDG_DATA_HOME:-$HOME/.local/share}"; }
+
+vu_install_icon() {
+    local base; base="$(vu_icon_theme_dir)"
+    [[ -f "$base/128x128/apps/$VU_ICON_NAME.png" ]] && return 0   # already done
+    local exe="$VU_CLIENT_DIR/vu.exe"
+    [[ -f "$exe" ]] || return 1
+    command -v wrestool >/dev/null && command -v icotool >/dev/null || return 1
+
+    local tmp; tmp="$(mktemp -d)" || return 1
+    if ! wrestool -x -t 14 -o "$tmp/vu.ico" "$exe" 2>/dev/null || [[ ! -s "$tmp/vu.ico" ]]; then
+        rm -rf "$tmp"; return 1
+    fi
+    ( cd "$tmp" && icotool -x vu.ico ) 2>/dev/null || { rm -rf "$tmp"; return 1; }
+
+    local installed=0 png w
+    for png in "$tmp"/*.png; do
+        [[ -f "$png" ]] || continue
+        # icotool names files <base>_<idx>_<w>x<h>x<depth>.png — derive the size.
+        w="$(printf '%s' "$png" | sed -n 's/.*_\([0-9]\+\)x[0-9]\+x[0-9]\+\.png$/\1/p')"
+        [[ -n "$w" ]] || continue
+        mkdir -p "$base/${w}x${w}/apps"
+        cp "$png" "$base/${w}x${w}/apps/$VU_ICON_NAME.png" && installed=1
+    done
+    rm -rf "$tmp"
+    [[ $installed -eq 1 ]] || return 1
+
+    gtk-update-icon-cache -f -t "$base" 2>/dev/null || touch "$base" 2>/dev/null
+    return 0
+}
+
 vu_write_desktop() {
     mkdir -p "$(dirname "$VU_DESKTOP")"
+    local icon="applications-games"
+    vu_install_icon && icon="$VU_ICON_NAME"
     cat > "$VU_DESKTOP" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Venice Unleashed
 Comment=Battlefield 3 community client and modding framework
 Exec=$VU_WRAPPER
-Icon=applications-games
+Icon=$icon
 Terminal=false
 Categories=Game;ActionGame;
 Keywords=battlefield;bf3;vu;venice;
