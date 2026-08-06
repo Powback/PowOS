@@ -101,8 +101,20 @@ cmd_build_image() {
         fi
         pok "Staged $img. Review: sudo bootc status"
         pok "Old deployment stays as rollback."
-        read -rp "Reboot now to apply? [y/N] " a
-        [[ "$a" =~ ^[Yy]$ ]] && sudo systemctl reboot
+        # Only prompt on a TTY: run from a script/CI/background job this would
+        # read EOF instantly and silently swallow whatever is on stdin.
+        if [[ -t 0 ]]; then
+            read -rp "Reboot now to apply? [y/N] " a || true
+            [[ "$a" =~ ^[Yy]$ ]] && sudo systemctl reboot
+        else
+            plog "Not a TTY — skipping the reboot prompt."
+            plog "Apply when ready:  sudo systemctl reboot"
+        fi
+        # Explicit success. Without this the function returns the result of the
+        # y/N test, so declining the reboot (or any non-interactive run) made a
+        # completely successful build exit 1 — indistinguishable from a failure
+        # to any script or CI job wrapping this command.
+        return 0
     else
         echo
         pok "Done. Next:"
