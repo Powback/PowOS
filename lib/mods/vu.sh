@@ -84,6 +84,12 @@ VU_RCON_PORT="${VU_RCON_PORT:-47200}"
 # The VEXT server-wide hot-reload command (reloads every extension in ModList).
 VU_RELOAD_CMD="${VU_RELOAD_CMD:-modList.ReloadExtensions}"
 
+# vuicc — VU's WebUI compiler that packs a built WebUI (dist/) into ui.vuic, the
+# container VU serves. It ships only as a Windows .exe, so PowOS runs it under
+# GE-Proton wine. Cached once from VU's file host.
+VU_VUICC_URL="${VU_VUICC_URL:-https://veniceunleashed.net/files/vuicc.exe}"
+VU_VUICC_BIN="${VU_VUICC_BIN:-${XDG_CACHE_HOME:-$HOME/.cache}/powos/vuicc.exe}"
+
 # ── Config (key=value, parsed without eval) ───────────────────────────────────
 
 vu_conf_get() {
@@ -945,6 +951,8 @@ them on join. So there is no client/server split here — just 'vu mod'.
   disable <name>          Remove from ModList.txt (files kept).
   remove  <name>          Delete the mod folder and delist it.
   update  [name]          Re-fetch GitHub mods (no name = all of them).
+  build   <name>          Build a WebUI mod (pnpm) and pack ui.vuic via vuicc
+                          under wine — for HasWebUI mods like MapEditor.
   dev     [name]          Hot-reload dev loop: watch the mods dir and send
                           ${VU_RELOAD_CMD} on every save. Edit the Lua in
                           ${VU_MODS_DIR}/<mod>/ and it reloads live — no restart.
@@ -1237,6 +1245,63 @@ EOF
     exec python3 "$VU_RCON_PY" watch "$VU_RCON_HOST" "$VU_RCON_PORT" "$pw" "$watch" "$VU_SERVER_LOG" $VU_RELOAD_CMD
 }
 
+# Ensure vuicc.exe is cached; echo its path. Downloaded once from VU's file host.
+vu_vuicc_bin() {
+    [[ -s "$VU_VUICC_BIN" ]] && { printf '%s' "$VU_VUICC_BIN"; return 0; }
+    mkdir -p "$(dirname "$VU_VUICC_BIN")"
+    plog "Fetching vuicc.exe (VU WebUI compiler)…" >&2
+    if ! curl -fSL "$VU_VUICC_URL" -o "$VU_VUICC_BIN" 2>/dev/null; then
+        perr "Could not download vuicc.exe from $VU_VUICC_URL"
+        rm -f "$VU_VUICC_BIN"; return 1
+    fi
+    printf '%s' "$VU_VUICC_BIN"
+}
+
+# Build a WebUI mod: pnpm install + production build, then pack dist/ → ui.vuic
+# with vuicc under wine (the .exe is Windows-only; vextpack silently skips the
+# pack on Linux, so PowOS does it). Idempotent-ish; safe to re-run after edits.
+vu_mod_build_cmd() {
+    case "${1:-}" in
+        ""|-h|--help|help)
+            cat <<EOF
+${BOLD}powos mods vu mod build${NC} <name>  — build a WebUI mod's ui.vuic
+
+Runs ${BOLD}pnpm i && pnpm build${NC} in the mod's WebUI/, then packs the built
+dist/ into ui.vuic using vuicc under GE-Proton wine (VU only ships vuicc as a
+Windows .exe). Needed for mods with a WebUI (HasWebUI in mod.json), e.g. MapEditor.
+Re-run after WebUI source changes.
+EOF
+            return 0 ;;
+    esac
+    local name="$1" moddir webui
+    moddir="$VU_MODS_DIR/$name"
+    [[ -d "$moddir" ]] || { perr "No such mod: $name  (looked under $VU_MODS_DIR)"; return 1; }
+    webui="$moddir/WebUI"
+    [[ -f "$webui/package.json" ]] || { perr "$name has no WebUI/package.json — nothing to build."; return 1; }
+    command -v pnpm >/dev/null || { perr "pnpm is required. Install it: ${BOLD}npm i -g pnpm${NC}"; return 1; }
+    vu_apply_prefix_choice
+    local wine pdir; wine="$(vu_wine)"; pdir="$(vu_proton_dir)"
+    [[ -n "$wine" ]] || { perr "No GE-Proton wine (needed to run vuicc). Run: powos mods modlist proton"; return 1; }
+    local vuicc; vuicc="$(vu_vuicc_bin)" || return 1
+
+    plog "Building $name WebUI ${DIM}($webui)${NC}…"
+    if ! ( cd "$webui" && pnpm i && NODE_ENV=production pnpm build ); then
+        perr "WebUI build (pnpm) failed."; return 1
+    fi
+    [[ -d "$webui/dist" ]] || { perr "build produced no dist/ — nothing to pack."; return 1; }
+
+    local out="$moddir/ui.vuic"
+    plog "Packing dist/ → ui.vuic ${DIM}(vuicc under wine)${NC}…"
+    if ! env -u DISPLAY -u WAYLAND_DISPLAY \
+            WINEPREFIX="$(vu_wineprefix)" WINELOADER="$wine" WINESERVER="$pdir/files/bin/wineserver" \
+            LD_LIBRARY_PATH="$pdir/files/lib64:$pdir/files/lib" WINEDEBUG=-all \
+            "$wine" "$vuicc" "Z:$webui/dist" "Z:$out" >/dev/null 2>&1; then
+        perr "vuicc pack failed."; return 1
+    fi
+    [[ -s "$out" ]] || { perr "vuicc produced no ui.vuic."; return 1; }
+    pok "Built $name WebUI → ui.vuic ${DIM}($(du -h "$out" | cut -f1))${NC}. Restart the server to serve it."
+}
+
 vu_mod_cmd() {
     local sub="${1:-list}"; shift || true
     case "$sub" in
@@ -1246,6 +1311,7 @@ vu_mod_cmd() {
         disable)       vu_mod_disable_cmd "$@" ;;
         remove|rm)     vu_mod_remove_cmd "$@" ;;
         update)        vu_mod_update_cmd "$@" ;;
+        build)         vu_mod_build_cmd "$@" ;;
         dev|watch)     vu_mod_dev_cmd "$@" ;;
         help|-h|--help) vu_mod_help ;;
         *) perr "Unknown mod verb: $sub"; vu_mod_help; return 1 ;;
