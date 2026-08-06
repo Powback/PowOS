@@ -141,6 +141,8 @@ Updating — one question: whose code?
   scripts don't break, but 'upgrade' is the name.
   stream              PowStream WebRTC status / start / stop / logs / setup
   overlay <cmd>       Sysext overlays: build|enable|disable|list|status|clean <name>
+  console             Every tmux session at once, in one grid (Alt+Enter = take over)
+  console --live      Live read-only mirrors instead of snapshots
   zones               KZones window snapping: status / list layouts / edit
 
 Layers & rollback:
@@ -2431,6 +2433,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/game.sh"
         cmd_game "$@"
+        ;;
+    console)
+        shift
+        source "$POWOS_LIB/console.sh"
+        cmd_console "$@"
         ;;
     zones)
         shift

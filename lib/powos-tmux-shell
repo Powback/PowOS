@@ -39,6 +39,7 @@ command -v tmux >/dev/null 2>&1 || exec_shell
 export POWOS_TMUX_RESUME_DONE=1
 export POWOS_TMUX_NEW='  +  new session'
 export POWOS_TMUX_SHELL='  ·  plain shell (no tmux)'
+export POWOS_TMUX_CONSOLE='  ▦  console — every session in one grid'
 
 # Row generator for the picker. Exported so fzf's reload() can re-run it after a
 # kill. Reads tmux fresh each call, so the list always reflects reality. Detached
@@ -67,14 +68,23 @@ _powos_tmux_rows() {
                "$1" "$pre" "$2" "$1" "$winlbl" "$ttl" "$cwd" "$tag" "$post"
     }
     # tmux -F does not expand \t, so put the attach flag first and split on space.
+    # The console session is a VIEW of the others, not work to resume — the
+    # action row below opens it. Listing it here too would be duplicate noise.
     tmux list-sessions -F '#{session_attached} #{session_name}' 2>/dev/null \
-      | awk '$1==0{$1="";sub(/^ /,"");print}' | while IFS= read -r s; do
+      | awk -v me="${POWOS_CONSOLE_SESSION:-console}" \
+            '$1==0{$1="";sub(/^ /,""); if ($0 != me) print}' | while IFS= read -r s; do
           [ -n "$s" ] && _row "$s" '○' ''
       done
     printf '%s\t%s\n' "$POWOS_TMUX_NEW" "$POWOS_TMUX_NEW"
+    # Only worth offering with 2+ sessions — a "grid" of one is just an attach
+    # with extra steps.
+    if [ "$(tmux list-sessions -F x 2>/dev/null | wc -l)" -ge 2 ]; then
+        printf '%s\t%s\n' "$POWOS_TMUX_CONSOLE" "$POWOS_TMUX_CONSOLE"
+    fi
     printf '%s\t%s\n' "$POWOS_TMUX_SHELL" "$POWOS_TMUX_SHELL"
     tmux list-sessions -F '#{session_attached} #{session_name}' 2>/dev/null \
-      | awk '$1!=0{$1="";sub(/^ /,"");print}' | while IFS= read -r s; do
+      | awk -v me="${POWOS_CONSOLE_SESSION:-console}" \
+            '$1!=0{$1="";sub(/^ /,""); if ($0 != me) print}' | while IFS= read -r s; do
           [ -n "$s" ] && _row "$s" '●' 'dim' 'attached'
       done
     unset -f _row
@@ -108,8 +118,17 @@ fi
 
 preview='
     s={1}
-    case "$s" in *"new session"*|*"plain shell"*)
-        echo "  (starts a fresh session/shell)"; exit 0;; esac
+    case "$s" in
+        *"console"*)
+            echo "  Every session at once, in one tiled grid."
+            echo
+            echo "  Read-only snapshots, so opening it can NOT resize the"
+            echo "  sessions it is showing. Alt+Enter takes over the focused"
+            echo "  one; prefix+z zooms it fullscreen. Mouse works."
+            exit 0;;
+        *"new session"*|*"plain shell"*)
+            echo "  (starts a fresh session/shell)"; exit 0;;
+    esac
     tmux list-windows -t "$s" -F \
       "  #{window_index}: #{window_name}  [#{window_panes}p]#{?window_active,   ← active,}" 2>/dev/null
     echo
@@ -141,6 +160,10 @@ fi
 case "$name" in
     "" | "$POWOS_TMUX_SHELL")
         exec_shell ;;
+    "$POWOS_TMUX_CONSOLE")
+        # console attaches its own session; if it bails (e.g. nothing to show)
+        # fall back rather than leaving the terminal with no shell.
+        exec "${POWOS_BIN:-powos}" console || exec_shell ;;
     "$POWOS_TMUX_NEW")
         printf 'name for new session (blank = auto): ' >&2
         read -r sname
