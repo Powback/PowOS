@@ -203,11 +203,27 @@ STREAM_GAMES_LIST="${XDG_CONFIG_HOME:-$HOME/.config}/powstream/games.list"
 
 # Run a command with capture ON for THAT process only (env is inherited by the
 # game; exec replaces this shell). This is the per-game enable for any launcher.
+#
+#   powos stream launch [--game NAME] -- <command> [args…]
+#
+# --game NAME sets POWSTREAM_GAME so the detector tags its profile
+# (cam_profile.NAME.json) instead of guessing from a mapped .exe. Proton titles
+# self-name from the .exe, but a NATIVE game (Minecraft's `java`) has none, so
+# without this its profile lands under "unknown" (or collides with other `java`
+# titles). Optional — omit it for Steam/Proton games.
 stream_launch() {
-    [[ "${1:-}" == "--" ]] && shift
-    [[ $# -gt 0 ]] || { perr "usage: powos stream launch -- <command> [args…]"; return 1; }
-    plog "Launching with PowStream capture ${GREEN}ON${NC} (this process only): ${DIM}$*${NC}"
-    exec env POWSTREAM_CAPTURE=1 POWSTREAM_CAPTURE_DISABLE= "$@"
+    local game=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --game)   game="${2:-}"; shift 2 || { perr "--game needs a name"; return 1; } ;;
+            --game=*) game="${1#--game=}"; shift ;;
+            --)       shift; break ;;
+            *)        break ;;   # first non-flag = start of the command
+        esac
+    done
+    [[ $# -gt 0 ]] || { perr "usage: powos stream launch [--game NAME] -- <command> [args…]"; return 1; }
+    plog "Launching with PowStream capture ${GREEN}ON${NC} (this process only)${game:+ as ${BOLD}$game${NC}}: ${DIM}$*${NC}"
+    exec env POWSTREAM_CAPTURE=1 POWSTREAM_CAPTURE_DISABLE= ${game:+POWSTREAM_GAME="$game"} "$@"
 }
 
 # The env that GUARANTEES the layer never loads — for wrappers around
@@ -301,7 +317,11 @@ Services:
             (run once on the local console to enable dialog-free capture)
 
 Per-game depth/camera capture (ATW) — opt-in, never global:
-  launch -- <cmd>   Run a game with the capture layer ON for that process only
+  launch [--game NAME] -- <cmd>
+                    Run a game with the capture layer ON for that process only.
+                    --game NAME tags the detector profile (cam_profile.NAME.json);
+                    needed for native games (e.g. Minecraft) that have no .exe to
+                    self-name from. Omit for Steam/Proton titles.
   steam-option      Print the Steam launch option to enable capture for a game
   enable <game>     Opt a supported game into capture (allowlist record)
   disable <game>    Remove a game from the allowlist

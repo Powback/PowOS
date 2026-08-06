@@ -48,6 +48,28 @@ printf '%s' "$so" | grep -q 'POWSTREAM_CAPTURE=1 %command%' && ok "steam-option 
 # 5. launch requires a command (no accidental no-op).
 stream_launch >/dev/null 2>&1 && bad "launch ran with no command" || ok "launch guards empty command"
 
+# 5b. launch builds the right env. stream_launch exec's `env`; shadow it with a
+#     stub that prints the argv so we can inspect what would run. plog → no-op so
+#     it doesn't pollute the captured output.
+plog(){ :; }
+STUBDIR="$(mktemp -d)"
+cat > "$STUBDIR/env" <<'E'
+#!/usr/bin/env bash
+printf '%s\n' "$@"
+E
+chmod +x "$STUBDIR/env"
+
+# --game NAME sets POWSTREAM_GAME (native games have no .exe to self-name from).
+out="$(PATH="$STUBDIR:$PATH" stream_launch --game minecraft -- thegame --arg 2>/dev/null)"
+printf '%s\n' "$out" | grep -qx 'POWSTREAM_GAME=minecraft' && ok "--game sets POWSTREAM_GAME" || bad "--game did not set POWSTREAM_GAME"
+printf '%s\n' "$out" | grep -qx 'POWSTREAM_CAPTURE=1'      && ok "launch still enables capture" || bad "launch lost POWSTREAM_CAPTURE"
+printf '%s\n' "$out" | grep -qx 'thegame'                 && ok "launch passes the command through" || bad "command not passed through"
+
+# Without --game, POWSTREAM_GAME must NOT leak (Proton titles self-name from .exe).
+out2="$(PATH="$STUBDIR:$PATH" stream_launch -- thegame 2>/dev/null)"
+printf '%s\n' "$out2" | grep -q 'POWSTREAM_GAME' && bad "POWSTREAM_GAME set without --game" || ok "no POWSTREAM_GAME without --game"
+rm -rf "$STUBDIR"
+
 # 6. The overlay must NOT ship a global enable (mirrors test-powstream-overlay).
 if grep -qE "^[[:space:]]*POWSTREAM_CAPTURE=1" "$ROOT/sources/powstream/build.sh"; then
     # allowed only inside the heredoc as a COMMENTED example
