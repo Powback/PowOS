@@ -88,6 +88,48 @@ else
   bad "source session resized by capture: $BEFORE -> $AFTER"
 fi
 
+# --- layout adapts to screen size (the mobile case) ------------------------
+L=$(POWOS_CONSOLE_LAYOUT=tabs bash -c "source '$LIB' 2>/dev/null; console_layout")
+[ "$L" = tabs ] && ok "POWOS_CONSOLE_LAYOUT overrides detection" \
+  || bad "layout override ignored (got '$L')"
+
+# A phone-sized terminal must NOT get a tiled grid: halving the WIDTH is the
+# problem on a phone, so the answer is full-width rows stacked vertically.
+L=$(POWOS_CONSOLE_MIN_COLS=9999 bash -c "source '$LIB' 2>/dev/null; console_layout")
+[ "$L" = stack ] && ok "narrow terminal selects stack (full-width rows), not grid" \
+  || bad "narrow terminal chose '$L', expected stack"
+L=$(POWOS_CONSOLE_MIN_COLS=1 POWOS_CONSOLE_MIN_LINES=1 \
+      bash -c "source '$LIB' 2>/dev/null; console_layout")
+[ "$L" = grid ] && ok "roomy terminal selects grid" || bad "roomy terminal chose '$L'"
+
+# --- key bindings must never be unguarded -----------------------------------
+# `bind-key -n` writes to tmux's SERVER-GLOBAL root table. An unguarded binding
+# would steal Enter inside the user's real sessions, which is unacceptable.
+# Anchor on "tmux bind-key" so that "tmux UNbind-key -n" (cleanup, legitimate)
+# does not match, and skip comments — the file explains this hazard in prose,
+# and the prose necessarily contains the string being searched for.
+if grep -nE 'tmux bind-key -n' "$LIB" | grep -vE '^[0-9]+: *#' | grep -v 'if-shell -F' | grep -q .; then
+  bad "found an UNGUARDED bind-key -n (would steal keys in real sessions)"
+else
+  ok "every global binding is guarded by a session check"
+fi
+grep -q 'send-keys \$1' "$LIB" \
+  && ok "guarded bindings pass the key through outside the console" \
+  || bad "no pass-through: keys would be swallowed elsewhere"
+grep -q 'unbind-key -n' "$LIB" \
+  && ok "--kill removes the global bindings" \
+  || bad "bindings would outlive the console session"
+
+# Every key bound with _ckey must appear in CONSOLE_KEYS, or --kill leaves it
+# behind. This already happened once: DoubleClick1Pane was bound and not cleaned.
+KEYS=$(grep -E '^CONSOLE_KEYS=' "$LIB" | cut -d'"' -f2)
+MISSING=""
+for k in $(grep -oE '^\s*_ckey [A-Za-z0-9-]+' "$LIB" | awk '{print $2}' | sort -u); do
+  printf '%s\n' $KEYS | grep -qx "$k" || MISSING="$MISSING $k"
+done
+[ -z "$MISSING" ] && ok "every bound key is in CONSOLE_KEYS (cleanup can't drift)" \
+  || bad "bound but never unbound:$MISSING"
+
 echo
 echo "console: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
