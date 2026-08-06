@@ -90,6 +90,12 @@ VU_RELOAD_CMD="${VU_RELOAD_CMD:-modList.ReloadExtensions}"
 VU_VUICC_URL="${VU_VUICC_URL:-https://veniceunleashed.net/files/vuicc.exe}"
 VU_VUICC_BIN="${VU_VUICC_BIN:-${XDG_CACHE_HOME:-$HOME/.cache}/powos/vuicc.exe}"
 
+# WebUI remote debugging (CDP). The client with -dwebui exposes a Chrome
+# DevTools endpoint; vu-cdp.py reads the console, evaluates JS, clicks, and
+# screenshots the WebUI — the AI's eyes+hands on the client UI.
+VU_CDP_PY="${VU_CDP_PY:-$VU_LIB_DIR/vu-cdp.py}"
+VU_CDP_ADDR="${VU_CDP_ADDR:-localhost:8884}"
+
 # ── Config (key=value, parsed without eval) ───────────────────────────────────
 
 vu_conf_get() {
@@ -1211,6 +1217,30 @@ EOF
     python3 "$VU_RCON_PY" send "$VU_RCON_HOST" "$VU_RCON_PORT" "$pw" "${words[@]}"
 }
 
+# Drive/read the client WebUI over CDP (needs the client launched with -dwebui).
+vu_webui_cmd() {
+    case "${1:-}" in
+        ""|-h|--help|help)
+            cat <<EOF
+${BOLD}powos mods vu webui${NC} <verb>  — inspect/drive the client WebUI (CDP on ${VU_CDP_ADDR})
+
+  targets              List inspectable WebUI pages
+  title                Current page title + URL
+  eval "<js>"          Evaluate JavaScript, print the result
+  click "<css>"        Click the first element matching a CSS selector
+  console [seconds]    Stream console logs + exceptions (client-side errors)
+  screenshot <out.png> Screenshot the WebUI overlay
+
+Needs the client running with ${BOLD}-dwebui${NC} (powos mods vu play … -dwebui).
+Override the endpoint with VU_CDP_ADDR (default ${VU_CDP_ADDR}).
+EOF
+            return 0 ;;
+    esac
+    command -v python3 >/dev/null || { perr "python3 required for CDP."; return 1; }
+    [[ -f "$VU_CDP_PY" ]] || { perr "vu-cdp.py missing at $VU_CDP_PY"; return 1; }
+    VU_CDP_ADDR="$VU_CDP_ADDR" python3 "$VU_CDP_PY" --addr "$VU_CDP_ADDR" "$@"
+}
+
 vu_mod_dev_cmd() {
     local mode="watch" name=""
     while [[ $# -gt 0 ]]; do
@@ -1452,6 +1482,11 @@ Live server control (Frostbite RCON on 47200):
   powos mods vu rcon "<command>"  Send an RCON command (serverInfo, version,
                                     admin.say …, modList.ReloadExtensions)
 
+Client WebUI control (CDP on :8884, client launched with -dwebui):
+  powos mods vu webui <verb>      targets|title|eval|click|console|screenshot —
+                                    read/drive the client WebUI (MapEditor UI,
+                                    soldier-select, client console errors)
+
 Other:
   powos mods vu status            Client, gamepath, runtime, d3dcompiler
   powos mods vu uninstall [--purge]
@@ -1485,6 +1520,7 @@ cmd_mods_vu() {
         server)       vu_server_cmd "$@" ;;
         mod|mods)     vu_mod_cmd "$@" ;;
         rcon)         vu_rcon_cmd "$@" ;;
+        webui)        vu_webui_cmd "$@" ;;
         status)       vu_status_cmd ;;
         uninstall)    vu_uninstall_cmd "$@" ;;
         help|-h|--help) vu_help ;;
