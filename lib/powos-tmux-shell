@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# powos-tmux-shell — the login command for a PowOS terminal.
+#
+# WHY THIS IS A COMMAND AND NOT A SHELL RC HOOK
+# ---------------------------------------------
+# The previous implementation lived in /etc/profile.d and had to *guess* whether
+# it was inside a terminal we own, by sniffing $KONSOLE_VERSION / $SSH_CONNECTION.
+# That fails two ways:
+#   1. profile.d is a LOGIN-shell mechanism. Konsole happens to spawn `-bash`
+#      (login), but Dolphin's embedded terminal spawns plain `/bin/bash`
+#      (non-login), so the hook's delivery depended on a distro-specific
+#      /etc/bashrc re-sourcing loop.
+#   2. Allow-listing terminals never converges — Dolphin's KPart, Yakuake,
+#      VS Code, Zed and every future surface each need a new special case.
+#
+# Being the terminal's Command inverts both problems. Konsole runs us directly,
+# and because /etc/xdg/konsolerc sets DefaultProfile=PowOS.profile, EVERY
+# Konsole-KPart surface (Dolphin's F4 panel, Yakuake, ...) inherits us for free.
+# There is nothing to detect: if we are running, we are in a terminal.
+#
+# SSH has no Konsole profile to configure, so 50-powos-tmux-resume.sh execs this
+# same script — one implementation, two entry points.
+#
+# CONTRACT: this script must ALWAYS end in an exec. A terminal whose command
+# exits is a terminal that vanishes, so every failure path falls back to a shell.
+
+# --- fallback: hand the user a normal login shell ---------------------------
+# Marked DONE so the SSH hook in profile.d cannot re-enter and loop.
+exec_shell() {
+    export POWOS_TMUX_RESUME_DONE=1
+    exec "${SHELL:-/bin/bash}" -l
+}
+
+[ -z "$TMUX" ]           || exec_shell   # never nest inside tmux
+[ -z "$POWOS_NO_TMUX" ]  || exec_shell   # escape hatch
+[ -t 0 ]                 || exec_shell   # no tty (scripted/embedded) -> plain
+command -v tmux >/dev/null 2>&1 || exec_shell
+
+export POWOS_TMUX_RESUME_DONE=1
+export POWOS_TMUX_NEW='  +  new session'
+export POWOS_TMUX_SHELL='  ·  plain shell (no tmux)'
+
+# Row generator for the picker. Exported so fzf's reload() can re-run it after a
+# kill. Reads tmux fresh each call, so the list always reflects reality. Detached
+# sessions come first (they are the real resume targets — the tabs you lost);
+# already-attached ones are listed dimmed underneath, still selectable so you can
+# jump to one.
+_powos_tmux_rows() {
+    local s wins cwd cmd ttl winlbl
+    _row() {  # _row <name> <glyph> <dim?> <tag?>
+        local pre="" post="" tag=""
+        [ -n "$3" ] && { pre=$'\033[2m'; post=$'\033[0m'; }
+        [ -n "$4" ] && tag="  ($4)"
+        wins=$(tmux display-message -p -t "$1" '#{session_windows}' 2>/dev/null)
+        # Only surface the window count above 1 — every fresh session has 1, so
+        # printing "1w" on every row is pure noise.
+        winlbl=""; [ "${wins:-1}" -gt 1 ] 2>/dev/null && winlbl="${wins}w"
+        cwd=$(tmux display-message -p -t "$1" '#{pane_current_path}' 2>/dev/null)
+        cmd=$(tmux display-message -p -t "$1" '#{pane_current_command}' 2>/dev/null)
+        # The title a program set (OSC 0/2) identifies a session far better than
+        # the bare command; fall back to the command when nothing set one.
+        ttl=$(tmux display-message -p -t "$1" '#{pane_title}' 2>/dev/null)
+        cwd=${cwd/#\/var\/home\//\/home\/}   # ostree physical -> logical
+        cwd=${cwd/#$HOME/\~}
+        case "$ttl" in ""|"$cmd"|"$(hostname -s 2>/dev/null)") ttl="$cmd" ;; esac
+        printf '%s\t%s%s  %-14s %-4s %-26.26s  %s%s%s\n' \
+               "$1" "$pre" "$2" "$1" "$winlbl" "$ttl" "$cwd" "$tag" "$post"
+    }
+    # tmux -F does not expand \t, so put the attach flag first and split on space.
+    tmux list-sessions -F '#{session_attached} #{session_name}' 2>/dev/null \
+      | awk '$1==0{$1="";sub(/^ /,"");print}' | while IFS= read -r s; do
+          [ -n "$s" ] && _row "$s" '○' ''
+      done
+    printf '%s\t%s\n' "$POWOS_TMUX_NEW" "$POWOS_TMUX_NEW"
+    printf '%s\t%s\n' "$POWOS_TMUX_SHELL" "$POWOS_TMUX_SHELL"
+    tmux list-sessions -F '#{session_attached} #{session_name}' 2>/dev/null \
+      | awk '$1!=0{$1="";sub(/^ /,"");print}' | while IFS= read -r s; do
+          [ -n "$s" ] && _row "$s" '●' 'dim' 'attached'
+      done
+    unset -f _row
+}
+export -f _powos_tmux_rows
+
+# Nothing to resume → just make this terminal persistent with a fresh session.
+# No menu when there is no prior work to choose from.
+if [ -z "$(tmux list-sessions -F x 2>/dev/null | head -n1)" ]; then
+    exec tmux new-session
+fi
+
+preview='
+    s={1}
+    case "$s" in *"new session"*|*"plain shell"*)
+        echo "  (starts a fresh session/shell)"; exit 0;; esac
+    tmux list-windows -t "$s" -F \
+      "  #{window_index}: #{window_name}  [#{window_panes}p]#{?window_active,   ← active,}" 2>/dev/null
+    echo
+    tmux display-message -p -t "$s" "  title: #{pane_title}"
+    tmux display-message -p -t "$s" "  dir  : #{pane_current_path}"
+    tmux display-message -p -t "$s" "  cmd  : #{pane_current_command}"
+    tmux display-message -p -t "$s" "  seen : #{t:session_activity}"
+    echo "  ────────────────────────────────────────────"
+    tmux capture-pane -ep -t "$s" 2>/dev/null | tail -n 40
+'
+
+if command -v fzf >/dev/null 2>&1; then
+    choice=$(
+        _powos_tmux_rows | fzf --ansi --reverse --height='80%' \
+                --delimiter=$'\t' --with-nth=2 \
+                --prompt='resume ▶ ' \
+                --header="tmux on $(hostname -s)   ·   Enter = attach   ·   Del = kill   ·   Esc = shell" \
+                --bind='del:execute-silent(tmux kill-session -t {1} 2>/dev/null)+reload(bash -c _powos_tmux_rows)' \
+                --preview="$preview" \
+                --preview-window='right,58%,border-left,wrap'
+    )
+    name=${choice%%$'\t'*}
+else
+    # No fzf (shouldn't happen on PowOS) → newest DETACHED session, else shell.
+    name=$(tmux list-sessions -F '#{session_attached} #{session_name}' 2>/dev/null \
+             | awk '$1==0{$1="";sub(/^ /,"");print}' | head -n1)
+fi
+
+case "$name" in
+    "" | "$POWOS_TMUX_SHELL")
+        exec_shell ;;
+    "$POWOS_TMUX_NEW")
+        printf 'name for new session (blank = auto): ' >&2
+        read -r sname
+        [ -n "$sname" ] && exec tmux new-session -s "$sname"
+        exec tmux new-session ;;
+    *)
+        # The pick may have just been killed with Del; attach only if it still
+        # exists, otherwise fall back rather than dying on a stale name.
+        tmux has-session -t "$name" 2>/dev/null && exec tmux attach-session -t "$name"
+        exec_shell ;;
+esac
