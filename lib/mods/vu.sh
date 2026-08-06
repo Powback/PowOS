@@ -12,12 +12,18 @@
 # (modlist_install_ge_proton + $MODLIST_COMPAT_DIR). No Bottles, no Steam
 # shortcut required.
 #
-# THE d3dcompiler_47 GOTCHA — this is the whole reason this module exists:
-# VU's current WebUI needs a NATIVE d3dcompiler_47. Wine's built-in stub does
-# not implement enough of it, and the failure mode is a black / blank UI or a
-# silent exit rather than an error, so it reads as "VU is broken on Linux".
-# It is not — it has been fixable since 2022. `vu install` puts the native DLL
-# in the prefix via winetricks; `vu d3dcompiler` re-does it on its own.
+# THE WEBUI RUNTIME GOTCHA — this is the whole reason this module exists:
+# VU's current WebUI (Coherent Gameface: cohtml + v8 + vu-core) needs TWO
+# native pieces in the prefix, and Wine's built-ins are not enough:
+#   1. d3dcompiler_47   — for shader compilation. Missing → black/blank UI.
+#   2. vcrun2022 (the VC++ 2015-2022 runtime: msvcp140/vcruntime140/…) — vu.com
+#      and vu-core are built against MSVC; without a complete matching runtime
+#      the launcher NULL-derefs inside msvcp140 the instant it starts and dies
+#      with NO window at all (page fault c0000005 at msvcp140+0x15413). Wine
+#      ships a partial set, which is worse than nothing: it loads, then crashes.
+# Both failure modes are silent (no error dialog), so they read as "VU is broken
+# on Linux". It is not — it has been fixable since 2022. `vu install` installs
+# both via winetricks; `vu d3dcompiler` re-does them on its own.
 #
 # Ports a dedicated server needs open (from the VU hosting docs):
 #   7948/udp   Monitored Harmony networking
@@ -167,6 +173,15 @@ vu_has_d3dcompiler() {
     [[ -f "$log" ]] && grep -qx 'd3dcompiler_47' "$log"
 }
 
+# The VC++ 2015-2022 runtime (vcrun2022). vu.com / vu-core NULL-deref inside
+# msvcp140 on startup without a complete matching runtime — a hard crash with
+# no window, distinct from the blank-UI d3dcompiler failure. winetricks records
+# it; that log is authoritative.
+vu_has_vcrun() {
+    local log; log="$(vu_wineprefix)/winetricks.log"
+    [[ -f "$log" ]] && grep -qx 'vcrun2022' "$log"
+}
+
 # ── BF3 discovery ─────────────────────────────────────────────────────────────
 
 # VU needs the BF3 game files (the user owns them via Origin/EA). Look in the
@@ -219,14 +234,23 @@ vu_status_cmd() {
         echo -e "  Runtime:       $mark_no no GE-Proton  ${DIM}(powos mods modlist proton)${NC}"
     fi
 
-    # The gotcha
+    # The gotcha — both WebUI runtime pieces
     if [[ ! -d "$(vu_wineprefix)" ]]; then
         echo -e "  d3dcompiler:   $mark_no prefix not created yet"
-    elif vu_has_d3dcompiler; then
-        echo -e "  d3dcompiler:   $mark_ok native d3dcompiler_47 present"
+        echo -e "  vcrun2022:     $mark_no prefix not created yet"
     else
-        echo -e "  d3dcompiler:   $mark_warn MISSING — WebUI will render blank"
-        echo -e "                 ${DIM}powos mods vu d3dcompiler${NC}"
+        if vu_has_d3dcompiler; then
+            echo -e "  d3dcompiler:   $mark_ok native d3dcompiler_47 present"
+        else
+            echo -e "  d3dcompiler:   $mark_warn MISSING — WebUI will render blank"
+            echo -e "                 ${DIM}powos mods vu d3dcompiler${NC}"
+        fi
+        if vu_has_vcrun; then
+            echo -e "  vcrun2022:     $mark_ok VC++ 2015-2022 runtime present"
+        else
+            echo -e "  vcrun2022:     $mark_warn MISSING — launcher crashes on startup (msvcp140)"
+            echo -e "                 ${DIM}powos mods vu d3dcompiler${NC}"
+        fi
     fi
 
     # Branch
@@ -283,14 +307,25 @@ vu_d3dcompiler_cmd() {
     }
 
     mkdir -p "$(vu_wineprefix)"
-    plog "Installing native d3dcompiler_47 into VU's prefix (may take a minute)…"
+
+    # The WebUI needs BOTH: d3dcompiler_47 (shaders) and the full VC++ 2015-2022
+    # runtime (vcrun2022). Skip whichever is already recorded so re-runs are cheap.
+    local -a want=()
+    vu_has_d3dcompiler || want+=( d3dcompiler_47 )
+    vu_has_vcrun       || want+=( vcrun2022 )
+    if [[ ${#want[@]} -eq 0 ]]; then
+        pok "WebUI runtime already present (d3dcompiler_47 + vcrun2022)."
+        return 0
+    fi
+
+    plog "Installing VU WebUI runtime into the prefix: ${want[*]} (may take a minute)…"
     if ! WINEPREFIX="$(vu_wineprefix)" WINE="$wine" WINESERVER="$(dirname "$wine")/wineserver" \
-            winetricks -q d3dcompiler_47; then
-        perr "winetricks d3dcompiler_47 failed."
-        plog "Without it VU's WebUI renders blank — this is not optional."
+            winetricks -q "${want[@]}"; then
+        perr "winetricks failed installing: ${want[*]}"
+        plog "Without these VU's WebUI renders blank or crashes on startup — not optional."
         return 1
     fi
-    pok "Native d3dcompiler_47 installed."
+    pok "VU WebUI runtime installed (d3dcompiler_47 + vcrun2022)."
 }
 
 vu_install_cmd() {
@@ -335,8 +370,10 @@ vu_install_cmd() {
             pwarn "No GE-Proton. Run: powos mods modlist proton"
         fi
     fi
-    vu_has_d3dcompiler || vu_d3dcompiler_cmd || \
-        pwarn "Continuing, but VU's WebUI will be blank until d3dcompiler_47 lands."
+    if ! vu_has_d3dcompiler || ! vu_has_vcrun; then
+        vu_d3dcompiler_cmd || \
+            pwarn "Continuing, but VU's WebUI will be blank or crash until the runtime lands."
+    fi
 
     mkdir -p "$VU_INSTANCE_DIR"
     vu_write_wrapper
@@ -461,8 +498,9 @@ vu_play_cmd() {
     vu_installed || { perr "VU not installed. Run: powos mods vu install"; return 1; }
     vu_apply_prefix_choice
     vu_write_wrapper   # rewrite so the launcher reflects the current prefix choice
-    if ! vu_has_d3dcompiler; then
-        pwarn "Native d3dcompiler_47 is missing — expect a blank WebUI."
+    if ! vu_has_d3dcompiler || ! vu_has_vcrun; then
+        vu_has_d3dcompiler || pwarn "Native d3dcompiler_47 is missing — expect a blank WebUI."
+        vu_has_vcrun       || pwarn "VC++ 2015-2022 runtime (vcrun2022) is missing — launcher will crash on startup."
         pwarn "Fix: ${BOLD}powos mods vu d3dcompiler${NC}"
     fi
     exec "$VU_WRAPPER" "$@"
@@ -981,7 +1019,8 @@ Setup:
                                   Activate BF3. Without --token this uses the
                                     running EA app (-lsx); with it, the
                                     headless path for servers.
-  powos mods vu d3dcompiler       (Re)install the native d3dcompiler_47.
+  powos mods vu d3dcompiler       (Re)install the WebUI runtime into the prefix
+                                    (native d3dcompiler_47 + VC++ 2015-2022).
   powos mods vu branch [prod|dev] Show or set the update branch.
 
 Play:
@@ -1012,11 +1051,14 @@ Other:
                                   Remove client + prefix (--purge also drops
                                     the instance dir and config)
 
-${BOLD}The d3dcompiler_47 gotcha${NC} — VU's WebUI needs a NATIVE
-d3dcompiler_47 on EVERY branch, not just dev; Wine's built-in stub is not
-enough. The symptom is a blank or black UI, not an error message, so it reads
-like "VU is broken on Linux". It is not, and has been fixable since 2022.
-'vu install' handles it; 'vu status' tells you if it went missing.
+${BOLD}The WebUI runtime gotcha${NC} — VU's WebUI (Coherent Gameface) needs TWO
+native pieces in the prefix on EVERY branch, not just dev:
+  • d3dcompiler_47  — missing → blank/black UI (Wine's stub isn't enough).
+  • vcrun2022 (VC++ 2015-2022) — missing → the launcher NULL-derefs inside
+    msvcp140 and dies on startup with NO window at all.
+Both symptoms are silent (no error), so they read like "VU is broken on Linux".
+It is not, and has been fixable since 2022. 'vu install' installs both;
+'vu status' tells you if either went missing.
 
 Server ports: 7948/udp harmony · 25200/udp frostbite · 47200/tcp rcon
 Docs: https://docs.veniceunleashed.net/
