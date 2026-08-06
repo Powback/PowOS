@@ -598,21 +598,27 @@ vu_server_help() {
     cat <<EOF
 ${BOLD}powos mods vu server${NC} — VU dedicated server
 
-  powos mods vu server init           Create the instance dir + show key steps
-  powos mods vu server start [args]   Run the dedicated server (foreground)
-  powos mods vu server status         Instance dir, key, port reachability
+  powos mods vu server init           Create the instance dir + scaffold config
+  powos mods vu server start [args]   Run the dedicated server (headless)
+  powos mods vu server status         Instance dir, key, config, port reachability
 
 Mods for the server: ${BOLD}powos mods vu mod${NC} (install/list/enable/…).
 
 The instance directory (${VU_INSTANCE_DIR}) holds server.key, config and mods.
-Get server.key from your VU account, drop it in that directory.
+Get server.key from your VU account, drop it in that directory. 'init' also
+writes ${BOLD}Admin/Startup.txt${NC} (server name + RCON password) and
+${BOLD}Admin/MapList.txt${NC} (map rotation) — edit those to taste; they are
+never overwritten once they exist.
+
+'start' runs with ${BOLD}-server -dedicated -headless${NC} so no window is
+created (the docs' default '-dedicated' alone still opens a server GUI window).
 
 Ports to forward:
   7948/udp   Monitored Harmony networking
   25200/udp  Frostbite networking
   47200/tcp  RCON
 
-Useful passthrough args: -high60 | -high120 (tick rate), -headless,
+Useful passthrough args: -high60 | -high120 (tick rate),
 -maxPlayers N, -unlisted, -listen host:port, -highResTerrain.
 EOF
 }
@@ -629,19 +635,63 @@ vu_server_status() {
     fi
     local bf3; bf3="$(vu_detect_bf3 || true)"
     echo -e "  gamepath:  ${bf3:-${RED}not configured${NC}}"
+    if [[ -f "$VU_INSTANCE_DIR/Admin/Startup.txt" && -f "$VU_INSTANCE_DIR/Admin/MapList.txt" ]]; then
+        local maps; maps="$(grep -cvE '^\s*$' "$VU_INSTANCE_DIR/Admin/MapList.txt" 2>/dev/null)"
+        echo -e "  config:    ${GREEN}●${NC} Startup.txt + MapList.txt (${maps:-0} maps)"
+    else
+        echo -e "  config:    ${YELLOW}○${NC} missing — run ${BOLD}powos mods vu server init${NC}"
+    fi
     echo
     echo -e "  ${DIM}Ports: 7948/udp harmony · 25200/udp frostbite · 47200/tcp rcon${NC}"
     echo
 }
 
 vu_server_init() {
-    mkdir -p "$VU_INSTANCE_DIR" || return 1
+    local admin="$VU_INSTANCE_DIR/Admin"
+    mkdir -p "$admin/Mods" "$VU_INSTANCE_DIR/logs" || return 1
     pok "Instance directory ready: $VU_INSTANCE_DIR"
+
+    # The server won't host a real match without its Admin config: MapList.txt
+    # (map rotation), Startup.txt (server name + RCON password + vars), and an
+    # (optionally empty) ModList.txt. Scaffold sane defaults, but NEVER clobber
+    # files the user has already edited.
+    if [[ ! -f "$admin/Startup.txt" ]]; then
+        local rcon
+        rcon="$(openssl rand -hex 8 2>/dev/null || tr -dc 'a-f0-9' </dev/urandom 2>/dev/null | head -c 16)"
+        [[ -n "$rcon" ]] || rcon="changeme-$$"
+        cat > "$admin/Startup.txt" <<EOF
+vars.serverName "PowOS Venice Unleashed"
+vars.maxPlayers 64
+vars.friendlyFire false
+vars.autoBalance true
+vars.roundStartPlayerCount 1
+vars.roundRestartPlayerCount 1
+admin.password "$rcon"
+EOF
+        pok "Wrote Admin/Startup.txt  ${DIM}(RCON/admin password: $rcon)${NC}"
+    fi
+    if [[ ! -f "$admin/MapList.txt" ]]; then
+        cat > "$admin/MapList.txt" <<'EOF'
+MP_001 ConquestLarge0 2
+MP_003 ConquestLarge0 2
+MP_007 ConquestLarge0 2
+MP_011 ConquestLarge0 2
+MP_012 ConquestLarge0 2
+MP_013 ConquestLarge0 2
+MP_017 ConquestLarge0 2
+MP_018 ConquestLarge0 2
+MP_Subway ConquestLarge0 2
+EOF
+        pok "Wrote Admin/MapList.txt  ${DIM}(base-game Conquest Large rotation)${NC}"
+    fi
+    [[ -f "$admin/ModList.txt" ]] || : > "$admin/ModList.txt"
+
     if [[ ! -f "$VU_INSTANCE_DIR/server.key" ]]; then
-        plog "Now drop your ${BOLD}server.key${NC} into that directory."
+        plog "Now drop your ${BOLD}server.key${NC} into $VU_INSTANCE_DIR."
         plog "  ${DIM}It comes from your Venice Unleashed account page.${NC}"
     fi
-    plog "Then: ${BOLD}powos mods vu server start${NC}"
+    plog "Tune ${BOLD}Admin/Startup.txt${NC} / ${BOLD}Admin/MapList.txt${NC}, then:"
+    plog "  ${BOLD}powos mods vu server start${NC}   ${DIM}(runs headless — no window)${NC}"
     plog "Forward 7948/udp, 25200/udp, 47200/tcp."
 }
 
@@ -669,7 +719,7 @@ vu_server_start() {
         "$proton" run "$VU_CLIENT_DIR/vu.com" \
             -gamepath "$bf3" \
             -serverInstancePath "$winpath" \
-            -server -dedicated "$@"
+            -server -dedicated -headless "$@"
 }
 
 vu_server_cmd() {
