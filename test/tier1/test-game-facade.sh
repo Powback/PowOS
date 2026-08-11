@@ -142,8 +142,17 @@ if [[ -x "$POWOS" ]]; then
 
     OUT="$(run game)"
     check "powos game (bare) lists games"   'grep -q cyberpunk2077 <<< "$OUT"'
+    # Bare `powos games` shows usage (it is the COLLECTION+storage namespace and
+    # a bare invocation is ambiguous); `powos games list` is the listing verb,
+    # routed through the singular/plural bridge added in 6a00abd.
     OUT="$(run games)"
-    check "powos games (bare) lists games"  'grep -q cyberpunk2077 <<< "$OUT"'
+    check "powos games (bare) shows usage"  'grep -qi "powos games" <<< "$OUT"'
+    OUT="$(run games list)"
+    check "powos games list lists games"    'grep -q cyberpunk2077 <<< "$OUT"'
+    # The bridge: `powos games <name>` must reach the per-game view rather than
+    # erroring "Unknown games command" — the singular/plural trap.
+    OUT="$(run games gtav)"
+    check "powos games <name> bridges to the per-game view" 'grep -q "id:        gtav" <<< "$OUT"'
     OUT="$(run game gta)"
     check "powos game gta resolves to gtav" 'grep -q "id:        gtav" <<< "$OUT"'
     OUT="$(run game notagame)"
