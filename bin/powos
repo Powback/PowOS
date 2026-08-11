@@ -140,6 +140,7 @@ Updating — one question: whose code?
   'update os' / 'update apply' route to 'upgrade' — kept so muscle memory and
   scripts don't break, but 'upgrade' is the name.
   stream              PowStream WebRTC status / start / stop / logs / setup
+  wallet              What is asking for your KDE wallet password (who/watch/why)
   overlay <cmd>       Sysext overlays: build|enable|disable|list|status|clean <name>
   console             Every tmux session at once, in one grid (Alt+Enter = take over)
   console --live      Live read-only mirrors instead of snapshots
@@ -2338,6 +2339,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/stream.sh"
         cmd_stream "$@"
+        ;;
+    wallet)
+        shift
+        source "$POWOS_LIB/wallet.sh"
+        cmd_wallet "$@"
         ;;
     overlay)
         shift
