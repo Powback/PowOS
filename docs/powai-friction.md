@@ -272,3 +272,18 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
   EDID-forced always-connected connector on an unused output, (c) wait for KDE
   portal fix. Meanwhile monitors-ON streaming works via POWSTREAM_FIT_MODESET=0
   (stops the client re-moding the real monitors, which trashed the layout).
+
+- [ ] **`powos mods vu server start` can exit 0 without starting the server**
+  — 2026-08-12: repeatedly produced a dead server while reporting success.
+  `logs/server.log` held only `Script started … ntsync: up and running …
+  Script done [COMMAND_EXIT_CODE="0"]` — no VU banner, no error, no `vu.com`
+  process. Reproduced across several attempts, including after waiting for
+  wineserver to fully drain. Running the SAME generated script by hand worked
+  every time: `setsid script -qfec './.powos-server-launch.sh' logs/server.log`.
+  Note the `script` PTY wrap is REQUIRED, not incidental — VU renders its
+  console through wine's terminal backend, so launching without a PTY leaves a
+  running server but a completely empty log, which reads as a different bug.
+  Two fixes: (1) don't exit 0 when the server dies in ~0s — detect "no VU
+  banner within N seconds" and surface the captured output as a failure;
+  (2) find why the wrapper's own `script` invocation dies where an identical
+  hand-run one does not (env / stdin / setsid session differences).
