@@ -61,11 +61,48 @@ NC=$'\033[0m'
 # Load Configuration
 # ═══════════════════════════════════════════════════════════════════
 
+# ── Anthropic endpoint: ONE machine-wide source of truth ─────────────
+#
+# Written by `powos config claude-endpoint` / `claude-token`. Read here so every
+# consumer — powos ai, the manager, the desktop widget — resolves the same
+# endpoint no matter what environment it was launched from.
+#
+# This exists because the endpoint used to live ONLY in the environment, in five
+# uncoordinated copies (~/.bashrc, environment.d, the systemd user env, the dbus
+# activation env, and each container's compose file). When the authority moved
+# off-box, only the shell copy was updated — so `powos ai` worked in a terminal
+# while the widget, which inherits plasmashell's much older environment, kept
+# calling a proxy that no longer existed and failed with connection refused.
+#
+# Environment WINS: an explicitly-exported value is a deliberate override (and
+# containers legitimately point somewhere else), so this only fills in blanks.
+# That also means adding this file cannot break a setup that works today.
+#
+# Path is a variable so the tests can point it at a fixture. Keep in sync with
+# CFG_ENDPOINT_FILE in lib/config.sh — test-ai-endpoint.sh asserts they match.
+POWOS_AI_ENDPOINT_FILE="${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf}"
+
+_ai_load_endpoint() {
+    [[ -r "$POWOS_AI_ENDPOINT_FILE" ]] || return 0
+    local url token
+    # Parse rather than source: this file is written by a root-only command, but
+    # sourcing turns a stray line into arbitrary code in every agent process.
+    url=$(awk -F= '$1=="ANTHROPIC_BASE_URL"{sub(/^[^=]*=/,""); print; exit}' \
+          "$POWOS_AI_ENDPOINT_FILE" 2>/dev/null)
+    token=$(awk -F= '$1=="ANTHROPIC_AUTH_TOKEN"{sub(/^[^=]*=/,""); print; exit}' \
+            "$POWOS_AI_ENDPOINT_FILE" 2>/dev/null)
+    [[ -z "${ANTHROPIC_BASE_URL:-}"   && -n "$url"   ]] && export ANTHROPIC_BASE_URL="$url"
+    [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" && -n "$token" ]] && export ANTHROPIC_AUTH_TOKEN="$token"
+    return 0
+}
+
 _ai_load_config() {
     # Load global config
     if [[ -f "$AI_CONFIG_DIR/agent.conf" ]]; then
         source "$AI_CONFIG_DIR/agent.conf"
     fi
+
+    _ai_load_endpoint
 
     # Set defaults if not configured
     AI_DEFAULT_CLIENT="${AI_DEFAULT_CLIENT:-claude}"

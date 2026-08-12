@@ -37,6 +37,8 @@ ramsize|custom|reboot|RAM overlay size, e.g. 8G or 24G (kernel arg rd.powos.rams
 sync-interval|custom|now|RAM→disk layer sync interval in seconds (default 60)
 nvidia-persistence|on,off|now|Keep the NVIDIA GPU initialized between uses (consistent idle state)
 cachefs|on,off|reboot|CacheFS lazy /home (experimental)
+claude-endpoint|custom|now|Claude authority URL every PowOS agent calls (e.g. http://claude-auth.pow)
+claude-token|custom|now|Token sent to that authority — any non-empty value; it stops the CLI forking the OAuth grant
 EOF
 }
 
@@ -195,6 +197,100 @@ set_cachefs() {
     local v=false; [[ "$1" == "on" ]] && v=true
     cfg_file_set POWOS_CACHEFS_ENABLED "$v" && \
         cok "cachefs: $1 — takes effect after reboot (experimental; see docs)"
+}
+
+# ── claude endpoint / token ───────────────────────────────────────
+#
+# ONE machine-wide source of truth for where PowOS agents send Anthropic calls.
+# lib/ai/agent.sh reads this file at call time, so `powos ai`, the manager and
+# the desktop widget all agree regardless of the environment they inherited.
+#
+# It exists because this used to live only in the environment, in five
+# uncoordinated copies. When the authority moved off-box only ~/.bashrc was
+# updated, so the widget — which inherits plasmashell's environment from session
+# start — kept calling a dead local proxy and failed with connection refused.
+#
+# Keep CFG_ENDPOINT_FILE in sync with POWOS_AI_ENDPOINT_FILE in lib/ai/agent.sh;
+# test-ai-endpoint.sh fails if the two ever disagree.
+CFG_ENDPOINT_FILE="${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf}"
+# Mirrored for things PowOS does not run itself — the raw `claude` CLI, editors,
+# anything reading plain env. Written under the invoking user's HOME (not root's,
+# which is where it would land when set_ is called through sudo).
+cfg_endpoint_user_env() {
+    local h="$HOME"
+    [[ -n "${SUDO_USER:-}" ]] && h="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+    echo "$h/.config/environment.d/50-powos-claude.conf"
+}
+
+cfg_endpoint_read() {  # cfg_endpoint_read <KEY>
+    [[ -r "$CFG_ENDPOINT_FILE" ]] || return 0
+    awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}' "$CFG_ENDPOINT_FILE" 2>/dev/null
+}
+
+# Rewrite both keys together. Writing one at a time would drop the other, since
+# the file is regenerated rather than patched.
+cfg_endpoint_write() {  # cfg_endpoint_write <url> <token>
+    local url="$1" token="$2" tmp
+    tmp=$(mktemp) || return 1
+    {
+        echo "# Written by 'powos config claude-endpoint' / 'claude-token'."
+        echo "# Read by lib/ai/agent.sh at call time. Environment overrides this."
+        echo "ANTHROPIC_BASE_URL=$url"
+        echo "ANTHROPIC_AUTH_TOKEN=$token"
+    } > "$tmp"
+    sudo mkdir -p "$(dirname "$CFG_ENDPOINT_FILE")" || { rm -f "$tmp"; return 1; }
+    sudo cp "$tmp" "$CFG_ENDPOINT_FILE" || { rm -f "$tmp"; return 1; }
+    sudo chmod 0644 "$CFG_ENDPOINT_FILE"
+    rm -f "$tmp"
+
+    local uenv; uenv="$(cfg_endpoint_user_env)"
+    mkdir -p "$(dirname "$uenv")" 2>/dev/null && {
+        {
+            echo "# Mirror of $CFG_ENDPOINT_FILE for tools PowOS does not launch"
+            echo "# itself (raw \`claude\`, editors). Change it with:"
+            echo "#   powos config claude-endpoint <url>"
+            echo "ANTHROPIC_BASE_URL=$url"
+            echo "ANTHROPIC_AUTH_TOKEN=$token"
+        } > "$uenv" 2>/dev/null
+    }
+    # Update the live session too, so newly-launched apps pick it up without a
+    # logout. Already-running processes keep their old copy — nothing can change
+    # another process's environment, which is why the file above is the fix.
+    systemctl --user set-environment \
+        "ANTHROPIC_BASE_URL=$url" "ANTHROPIC_AUTH_TOKEN=$token" 2>/dev/null || true
+}
+
+get_claude_endpoint() {
+    local v; v=$(cfg_endpoint_read ANTHROPIC_BASE_URL)
+    echo "${v:-(unset)}"
+}
+validate_claude_endpoint() { [[ "$1" =~ ^https?://[^[:space:]]+$ ]]; }
+set_claude_endpoint() {
+    local token; token=$(cfg_endpoint_read ANTHROPIC_AUTH_TOKEN)
+    # A blank token is not a neutral default: without it the CLI runs its own
+    # OAuth refresh and forks the rotating grant, which revokes the whole token
+    # family. The value itself is irrelevant — the authority replaces the header.
+    [[ -n "$token" ]] || token="proxy-managed"
+    cfg_endpoint_write "$1" "$token" || { cerr "claude-endpoint: write failed"; return 1; }
+    cok "claude-endpoint: $1"
+    cfg_endpoint_note
+}
+get_claude_token() {
+    local v; v=$(cfg_endpoint_read ANTHROPIC_AUTH_TOKEN)
+    echo "${v:-(unset)}"
+}
+validate_claude_token() { [[ -n "$1" && "$1" != *[[:space:]]* ]]; }
+set_claude_token() {
+    local url; url=$(cfg_endpoint_read ANTHROPIC_BASE_URL)
+    [[ -n "$url" ]] || { cerr "set claude-endpoint first: powos config claude-endpoint <url>"; return 1; }
+    cfg_endpoint_write "$url" "$1" || { cerr "claude-token: write failed"; return 1; }
+    cok "claude-token: set"
+    cfg_endpoint_note
+}
+cfg_endpoint_note() {
+    echo "  New agents and terminals use this immediately."
+    echo "  Already-running GUI apps (the desktop widget) keep the old value until"
+    echo "  Plasma restarts: systemctl --user restart plasma-plasmashell.service"
 }
 
 # ── command ───────────────────────────────────────────────────────

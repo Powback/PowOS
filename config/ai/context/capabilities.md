@@ -150,9 +150,18 @@ Key facts an agent should CHECK before starting:
   toggles AND value settings — ssh, driver (stable/testing channel), auto-update
   (background staging via rpm-ostreed, never auto-reboots), ramsize (kernel arg,
   reboot), sync-interval (layer-sync daemon, applied live), nvidia-persistence,
-  cachefs. Each shows WHEN it applies (now/reboot). Registry-based: adding a
-  setting is one line + get/set(/validate) pair in lib/config.sh. Intended
-  substrate for a future installer/GUI. ✅
+  cachefs, **claude-endpoint / claude-token**. Each shows WHEN it applies
+  (now/reboot). Registry-based: adding a setting is one line + get/set(/validate)
+  pair in lib/config.sh. Intended substrate for a future installer/GUI. ✅
+  - `claude-endpoint` is the ONE place the Anthropic authority URL lives
+    (`/etc/powos/ai/endpoint.conf`). lib/ai/agent.sh reads it at call time, so
+    `powos ai`, the manager and the desktop widget agree no matter what
+    environment they were launched from — the widget inherits plasmashell's env
+    from session start, which is why an env-only setup broke it whenever the
+    endpoint moved. An explicitly-exported env var still wins, so per-shell
+    overrides and containers (which point at the authority on their own network)
+    are unaffected. Changing it takes effect for new agents immediately;
+    already-running GUI apps need Plasma restarted.
 - Uninstall (`powos remove [--dry] <thing...>`): mirror of the install router —
   probes flatpak / powos-sandbox (rpm+pip) / brew / host rpm-ostree layer and
   removes from every backend the thing is found in. Honest about host-layer
