@@ -166,6 +166,33 @@ if [[ -f /etc/containers/oci/hooks.d/pow-collision-check.json ]]; then
     fi
 fi
 
+# ── reload: desktop widgets, and the overlay-permission trap ─────────
+# `powos reload` must ship plasmoids, or a one-line QML fix needs a full image
+# build and looks like it "didn't work" when it simply was not deployed.
+RELOAD_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/reload.sh"
+if [[ -f "$RELOAD_SH" ]]; then
+    if grep -q 'desktop/plasmoid' "$RELOAD_SH"; then
+        ok "reload deploys desktop/plasmoid (QML changes are hot-applicable)"
+    else
+        bad "reload does not deploy plasmoids — widget edits need a full image build"
+    fi
+
+    # For a directory present in BOTH layers, overlayfs takes the UPPER layer's
+    # mode. A bare `mkdir -p` in the sysext builder runs under the root shell's
+    # umask, so /usr/share and /usr/share/plasma came out 0700 and masked every
+    # Plasma file from the session — the desktop lost all its widgets.
+    if grep -qE 'mkdir -p "\$ext/usr/share' "$RELOAD_SH"; then
+        bad "sysext builder uses bare 'mkdir -p' under /usr/share — will mask it at 0700"
+    else
+        ok "sysext builder does not create /usr/share dirs with an inherited umask"
+    fi
+    if grep -q 'install -d -m755 "\$ext/usr/share"' "$RELOAD_SH"; then
+        ok "shared dirs are created with an explicit 0755 mode"
+    else
+        bad "no explicit mode on the extension's /usr/share dirs"
+    fi
+fi
+
 echo
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]

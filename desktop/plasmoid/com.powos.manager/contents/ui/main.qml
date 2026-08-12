@@ -116,7 +116,11 @@ PlasmoidItem {
                 text: "Talking to the manager in " + root.pendingLoadName +
                       " — its thread here resumes. Say hello." })
         }
-        chatView.positionViewAtEnd()
+        // Scrolling is the ListView's own job — see `onCountChanged` on chatView.
+        // Reaching for `chatView` from here throws ReferenceError: this function
+        // lives on PlasmoidItem, while chatView is inside fullRepresentation,
+        // which is a Component and therefore a separate QML context (and is not
+        // instantiated at all until the popup first opens).
     }
 
     function selectProject(path, name) {
@@ -164,7 +168,7 @@ PlasmoidItem {
             appendEvent(ev)
         }
         if (complete > root.turnLine) root.turnLine = complete
-        chatView.positionViewAtEnd()
+        // Auto-scroll handled by chatView.onCountChanged (see above).
     }
 
     function appendEvent(ev) {
@@ -335,6 +339,15 @@ PlasmoidItem {
                     model: chatModel
                     clip: true
                     spacing: Kirigami.Units.smallSpacing
+                    // Own the auto-scroll here rather than having callers poke
+                    // chatView.positionViewAtEnd(): those callers live on
+                    // PlasmoidItem, outside this Component's scope, so the id
+                    // was never resolvable and every append threw a silent
+                    // ReferenceError — leaving the newest message off-screen.
+                    // Reacting to the model instead works for every producer,
+                    // and cannot run before the view exists.
+                    onCountChanged: Qt.callLater(positionViewAtEnd)
+                    Component.onCompleted: Qt.callLater(positionViewAtEnd)
                     delegate: Item {
                         width: ListView.view.width
                         implicitHeight: bubble.implicitHeight + Kirigami.Units.smallSpacing

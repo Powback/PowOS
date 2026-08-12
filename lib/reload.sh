@@ -174,6 +174,21 @@ done
 rsync -a --exclude 'dracut/' "$src/lib/" "$ext/usr/lib/powos/"
 [[ -d "$src/overlays" ]] && rsync -a "$src/overlays/" "$ext/usr/lib/powos/overlays/"
 cp -a "$src"/systemd/powos-* "$ext/usr/lib/powos/" 2>/dev/null || true
+# Desktop widgets. Without this, editing a plasmoid's QML could only be applied
+# by a full image build — so a one-line widget fix cost ~20 minutes, and it was
+# easy to conclude a fix "didn't work" when it simply had not been deployed.
+# Reload the shell afterwards to see it:
+#   systemctl --user restart plasma-plasmashell.service
+if [[ -d "$src/desktop/plasmoid" ]]; then
+    # install -d -m755, NOT mkdir -p: this runs in a root shell whose umask made
+    # the intermediate dirs 0700, and for a directory present in both layers
+    # overlayfs takes the UPPER layer's mode — so /usr/share and /usr/share/plasma
+    # became root-only and every Plasma file under them turned unreadable for the
+    # session. Explicit modes on each level, and on the copied tree.
+    install -d -m755 "$ext/usr/share" "$ext/usr/share/plasma" \
+                     "$ext/usr/share/plasma/plasmoids"
+    rsync -a --chmod=D755,F644 "$src/desktop/plasmoid/" "$ext/usr/share/plasma/plasmoids/"
+fi
 # ID=_any → matches any base version (survives bootc upgrades)
 printf 'ID=_any\n' > "$ext/usr/lib/extension-release.d/extension-release.powos-dev"
 # config lives on writable /etc — apply directly, not via sysext
