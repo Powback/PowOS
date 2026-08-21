@@ -1,70 +1,189 @@
 #!/bin/bash
-# test-variant-select.sh - unit tests for boot-time GPU variant selection.
-# Pure logic, no hardware. Verifies auto-detect, manual override, and fallbacks.
+# test-variant-select.sh - initramfs multi-variant base selection.
+#
+# powos_select_base_variant() in lib/dracut/90powos-ramboot/ramboot-setup.sh
+# decides WHICH OS BOOTS off a multi-variant live USB. It shipped carrying
+# "TODO(hw): validate on real hardware / a VM — this is boot-critical" and had
+# no tests at all. A wrong answer here boots the wrong base, or none.
+#
+# The function is extracted and sourced in isolation rather than sourcing
+# ramboot-setup.sh, which would execute real boot logic (tmpfs mounts,
+# pivot_root) on the test machine.
+#
+# Covers the precedence chain it documents:
+#   explicit override / persistent default > GPU auto-detect > main > first
+# plus the guarantee that a single-variant USB behaves exactly as before.
+#
+# Usage:  bash test/tier1/test-variant-select.sh
 
-# NOTE: deliberately NO `pipefail`. These harnesses assert with
-# `echo "$out" | grep -q ...`, and `grep -q` exits on its first match — which
-# SIGPIPEs the writer, making the pipeline return 141 under pipefail depending
-# on scheduling. That produced random failures (test-windows.sh swung between 4
-# and 11 "failures" on identical runs). Last-command status is the correct
-# semantics for an assertion anyway.
 set -u
 
-# Prefer the WORKING TREE over the installed copy. This used to be the other
-# way round, which meant running the suite inside a PowOS image silently
-# tested /usr/lib/powos (the baked, possibly months-old code) instead of the
-# changes under test — failures then looked like real regressions when the
-# working tree was never loaded at all.
-LIB=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/boot/variant-select.sh
-[[ -f "$LIB" ]] || LIB="/usr/lib/powos/boot/variant-select.sh"
-# shellcheck disable=SC1090
-source "$LIB"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+SRC="$ROOT/lib/dracut/90powos-ramboot/ramboot-setup.sh"
 
 PASS=0; FAIL=0
 ok()  { echo "  ok   - $1"; PASS=$((PASS+1)); }
-bad() { echo "  FAIL - $1 (got: ${2:-})"; FAIL=$((FAIL+1)); }
+bad() { echo "  FAIL - $1"; FAIL=$((FAIL+1)); [[ -n "${2:-}" ]] && echo "         $2"; }
 
-# sel <override> <gpu> <available> -> chosen variant (drops the reason)
-sel() { variant_select "$1" "$2" "$3" | cut -f1; }
+[[ -f "$SRC" ]] || { echo "missing $SRC"; exit 1; }
 
-ALL="nvidia-open,nvidia,main"   # a USB carrying all three variants
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
 
-echo "== GPU → variant mapping (open is default for NVIDIA) =="
-[[ "$(variant_from_gpu nvidia-desktop)" == "nvidia-open" ]] && ok "nvidia-desktop → nvidia-open" || bad "nvidia map"
-[[ "$(variant_from_gpu nvidia-mobile)"  == "nvidia-open" ]] && ok "nvidia-mobile → nvidia-open"  || bad "nvidia-mobile map"
-[[ "$(variant_from_gpu amd-desktop)"    == "main"        ]] && ok "amd → main"                   || bad "amd map"
-[[ "$(variant_from_gpu intel)"          == "main"        ]] && ok "intel → main"                 || bad "intel map"
-[[ "$(variant_from_gpu unknown)"        == "main"        ]] && ok "unknown → main"               || bad "unknown map"
+# Extract just the two functions under test.
+EXTRACT="$TMP/select.sh"
+# _powos_variant_in is a ONE-LINER ending in '}', so a sed range starting at it
+# runs on to the next line beginning with '}' — the end of the other function —
+# swallowing both into one mangled definition. Grab them separately.
+grep '^_powos_variant_in()' "$SRC" > "$EXTRACT"
+sed -n '/^powos_select_base_variant()/,/^}/p' "$SRC" >> "$EXTRACT"
+if ! grep -q 'powos_select_base_variant' "$EXTRACT"; then
+    echo "  FAIL - could not extract powos_select_base_variant from ramboot-setup.sh"
+    echo "== Results: 0 passed, 1 failed =="
+    exit 1
+fi
 
-echo "== Auto-detect defaults NVIDIA to OPEN =="
-r=$(sel "" nvidia-desktop "$ALL"); [[ "$r" == "nvidia-open" ]] && ok "nvidia GPU auto-picks OPEN" || bad "auto open" "$r"
-r=$(sel "auto" amd "$ALL");        [[ "$r" == "main" ]]        && ok "amd GPU picks main"         || bad "auto amd" "$r"
-r=$(sel "auto" intel "main");      [[ "$r" == "main" ]]        && ok "intel picks main"           || bad "auto intel" "$r"
+# ── Harness ────────────────────────────────────────────────────────────────
+USB_LAYERS="$TMP/usb"
+NEWROOT="$TMP/newroot"
+BASE_LAYER="$NEWROOT"
+CMDLINE_VARIANT=""
+HAS_NVIDIA=0
 
-echo "== User can SELECT closed proprietary (the whole point) =="
-r=$(sel "nvidia" nvidia-desktop "$ALL"); [[ "$r" == "nvidia" ]] && ok "override 'nvidia' picks CLOSED over open default" || bad "select closed" "$r"
-r=$(sel "nvidia-open" nvidia-desktop "$ALL"); [[ "$r" == "nvidia-open" ]] && ok "override 'nvidia-open' picks open" || bad "select open" "$r"
-r=$(sel "main" nvidia-desktop "$ALL"); [[ "$r" == "main" ]] && ok "override 'main' picks amd/intel build" || bad "select main" "$r"
+info() { :; }
+getarg() {
+    # dracut's getarg prints the value and returns 0 when present.
+    case "$1" in
+        rd.powos.variant=) [[ -n "$CMDLINE_VARIANT" ]] && { printf '%s\n' "$CMDLINE_VARIANT"; return 0; }; return 1 ;;
+    esac
+    return 1
+}
+lspci() { [[ "$HAS_NVIDIA" == "1" ]] && echo "01:00.0 VGA compatible controller: NVIDIA Corporation GA104"; return 0; }
+command() {
+    # Make `command -v lspci` reflect the fixture rather than the host.
+    if [[ "${1:-}" == "-v" && "${2:-}" == "lspci" ]]; then
+        [[ "$HAS_NVIDIA" == "skip" ]] && return 1
+        echo lspci; return 0
+    fi
+    builtin command "$@"
+}
 
-echo "== Override for a variant not on the USB → falls back to auto =="
-r=$(sel "nvidia" amd "main"); [[ "$r" == "main" ]] && ok "missing closed variant → auto main" || bad "override-missing" "$r"
+# shellcheck source=/dev/null
+source "$EXTRACT"
 
-echo "== Fallbacks when detected variant absent =="
-r=$(sel "auto" nvidia-desktop "main"); [[ "$r" == "main" ]] && ok "nvidia GPU but only main on USB → main" || bad "fallback main" "$r"
-r=$(sel "auto" nvidia-desktop "nvidia"); [[ "$r" == "nvidia" ]] && ok "only closed nvidia on USB → nvidia" || bad "single variant" "$r"
+setup() {
+    rm -rf "$USB_LAYERS" "$NEWROOT"
+    mkdir -p "$USB_LAYERS/layers" "$NEWROOT"
+    local v
+    for v in "$@"; do mkdir -p "$USB_LAYERS/layers/base-$v"; done
+    BASE_LAYER="$NEWROOT"
+    CMDLINE_VARIANT=""
+    HAS_NVIDIA=0
+    rm -f "$USB_LAYERS/.powos-default-variant"
+}
 
-echo "== variant_available helper =="
-variant_available nvidia "nvidia,main" && ok "finds present variant" || bad "available present"
-variant_available foo "nvidia,main"    || ok "rejects absent variant"
+chose() { echo "${BASE_LAYER##*/base-}"; }
 
-echo "== USB manifest discovery (base-*/ dirs) =="
-tmp="$(mktemp -d)"; mkdir -p "$tmp/base-nvidia" "$tmp/base-main"
-avail="$(variant_list_available "$tmp")"
-# order isn't guaranteed; check membership
-( variant_available nvidia "$avail" && variant_available main "$avail" ) \
-    && ok "lists both base-* variants ($avail)" || bad "manifest discovery" "$avail"
-rm -rf "$tmp"
+# ── Tests ──────────────────────────────────────────────────────────────────
+echo "== single-variant USB (must behave exactly as before) =="
 
-echo
+setup    # no base-* dirs at all
+powos_select_base_variant
+[[ "$BASE_LAYER" == "$NEWROOT" ]] \
+    && ok "no base-*/ dirs → BASE_LAYER untouched (unchanged single-variant boot)" \
+    || bad "no base-*/ dirs → BASE_LAYER untouched" "got '$BASE_LAYER'"
+
+echo ""
+echo "== GPU auto-detect =="
+
+setup main nvidia-open
+HAS_NVIDIA=1
+powos_select_base_variant
+[[ "$(chose)" == "nvidia-open" ]] \
+    && ok "NVIDIA present → nvidia-open" \
+    || bad "NVIDIA present → nvidia-open" "got '$(chose)'"
+
+setup main nvidia-open
+HAS_NVIDIA=0
+powos_select_base_variant
+[[ "$(chose)" == "main" ]] \
+    && ok "no NVIDIA → main" \
+    || bad "no NVIDIA → main" "got '$(chose)'"
+
+setup main nvidia-open
+HAS_NVIDIA=skip     # lspci absent entirely
+powos_select_base_variant
+[[ "$(chose)" == "main" ]] \
+    && ok "lspci missing → main (no crash, no wrong guess)" \
+    || bad "lspci missing → main" "got '$(chose)'"
+
+echo ""
+echo "== explicit override beats auto-detect =="
+
+setup main nvidia-open deck
+HAS_NVIDIA=1
+CMDLINE_VARIANT="deck"
+powos_select_base_variant
+[[ "$(chose)" == "deck" ]] \
+    && ok "rd.powos.variant=deck wins over NVIDIA autodetect" \
+    || bad "override wins over autodetect" "got '$(chose)'"
+
+setup main nvidia-open
+HAS_NVIDIA=1
+CMDLINE_VARIANT="auto"
+powos_select_base_variant
+[[ "$(chose)" == "nvidia-open" ]] \
+    && ok "rd.powos.variant=auto falls through to autodetect" \
+    || bad "auto falls through to autodetect" "got '$(chose)'"
+
+# An override naming a variant that is NOT on the stick must not brick the
+# boot — fall back to the detected one rather than a nonexistent directory.
+setup main nvidia-open
+HAS_NVIDIA=0
+CMDLINE_VARIANT="deck"
+powos_select_base_variant
+[[ "$(chose)" == "main" && -d "$BASE_LAYER" ]] \
+    && ok "override for an ABSENT variant falls back to a real base" \
+    || bad "override for an absent variant falls back" "got '$(chose)'"
+
+echo ""
+echo "== persistent default =="
+
+setup main nvidia-open deck
+HAS_NVIDIA=1
+echo "deck" > "$USB_LAYERS/.powos-default-variant"
+powos_select_base_variant
+[[ "$(chose)" == "deck" ]] \
+    && ok ".powos-default-variant beats autodetect" \
+    || bad ".powos-default-variant beats autodetect" "got '$(chose)'"
+
+setup main nvidia-open deck
+HAS_NVIDIA=1
+echo "deck" > "$USB_LAYERS/.powos-default-variant"
+CMDLINE_VARIANT="main"
+powos_select_base_variant
+[[ "$(chose)" == "main" ]] \
+    && ok "cmdline beats the persistent default" \
+    || bad "cmdline beats the persistent default" "got '$(chose)'"
+
+echo ""
+echo "== fallbacks =="
+
+setup nvidia-open        # no 'main' on the stick, no NVIDIA in the box
+HAS_NVIDIA=0
+powos_select_base_variant
+[[ "$(chose)" == "nvidia-open" && -d "$BASE_LAYER" ]] \
+    && ok "no 'main' available → first available, never a missing dir" \
+    || bad "no 'main' available → first available" "got '$(chose)'"
+
+setup deck
+HAS_NVIDIA=1
+powos_select_base_variant
+[[ -d "$BASE_LAYER" ]] \
+    && ok "single base-* present → that one, and it exists on disk" \
+    || bad "single base-* present" "got '$BASE_LAYER'"
+
+echo ""
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]
