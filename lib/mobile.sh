@@ -900,17 +900,51 @@ mobile_disable() {
 # CLI Entry Point
 # ═══════════════════════════════════════════════════════════════════
 
+mobile_usage() {
+    cat <<'EOF'
+PowOS Mobile Mode
+
+Copy OS layers to RAM so USB can be unplugged.
+By default, everything is included.
+
+Usage: powos mobile [command] [args]
+
+Commands:
+  status              Show current mobile mode status
+  enable              Enable mobile mode (copy to RAM)
+  -c, --customize     Enable via interactive category menu
+  disable             Return to USB-backed mode
+
+Category Management (non-interactive):
+  categories          List all categories with sizes
+  exclude <cat>...    Exclude categories from mobile
+  include <cat>...    Include categories in mobile
+  include-all         Include all categories (default)
+  exclude-all         Exclude all categories
+
+Examples:
+  powos mobile                    # Show this help
+  powos mobile status             # Show status
+  sudo powos mobile enable        # Enable with current settings
+  powos mobile -c                 # Interactive customization
+  powos mobile categories         # List categories
+  powos mobile exclude Games      # Exclude Games category
+  powos mobile include-all        # Reset to include everything
+  powos mobile enable             # Then enable mobile mode
+
+LLM/Script Usage:
+  powos mobile exclude-all
+  powos mobile include 'System Environment/Base'
+  powos mobile include 'User Interface/Desktops'
+  powos mobile enable
+EOF
+}
+
 cmd_mobile() {
-    local action="${1:-}"
+    local action="${1:-help}"
     shift || true
 
     case "$action" in
-        "")
-            # Bare `powos mobile` shows status — it no longer silently enables
-            # mobile mode (a state change). Enabling is the explicit verb.
-            mobile_status
-            echo "  (status only — run 'sudo powos mobile enable' to enable mobile mode)"
-            ;;
         enable)
             mobile_enable "$@"
             ;;

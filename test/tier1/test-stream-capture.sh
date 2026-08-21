@@ -65,6 +65,21 @@ printf '%s\n' "$out" | grep -qx 'POWSTREAM_GAME=minecraft' && ok "--game sets PO
 printf '%s\n' "$out" | grep -qx 'POWSTREAM_CAPTURE=1'      && ok "launch still enables capture" || bad "launch lost POWSTREAM_CAPTURE"
 printf '%s\n' "$out" | grep -qx 'thegame'                 && ok "launch passes the command through" || bad "command not passed through"
 
+# REGRESSION: the enable path must NEVER *define* POWSTREAM_CAPTURE_DISABLE (even
+# empty). The Vulkan loader disables an implicit layer whenever its
+# disable_environment var exists, so `POWSTREAM_CAPTURE_DISABLE=` silently
+# disabled the capture layer — capture never engaged via `powos stream launch`.
+# It must instead REMOVE it from the child env (`env -u POWSTREAM_CAPTURE_DISABLE`).
+printf '%s\n' "$out" | grep -q 'POWSTREAM_CAPTURE_DISABLE=' && bad "enable path defines POWSTREAM_CAPTURE_DISABLE (disables the layer!)" || ok "enable path never defines POWSTREAM_CAPTURE_DISABLE"
+printf '%s\n' "$out" | grep -qx -- '-u' && printf '%s\n' "$out" | grep -qx 'POWSTREAM_CAPTURE_DISABLE' \
+  && ok "enable path unsets an inherited POWSTREAM_CAPTURE_DISABLE (env -u)" || bad "enable path does not clear inherited kill-switch"
+
+# REGRESSION (second gate): the layer's streaming_active() keeps it dormant
+# (inserted, hooking nothing, no frames) until a sentinel file OR a force flag is
+# present. Nothing in the PowOS integration creates the sentinel, so the enable
+# path must set POWSTREAM_FORCE_ACTIVE=1 or `powos stream launch` captures nothing.
+printf '%s\n' "$out" | grep -qx 'POWSTREAM_FORCE_ACTIVE=1' && ok "enable path wakes the layer (POWSTREAM_FORCE_ACTIVE=1)" || bad "enable path leaves the layer dormant (no FORCE_ACTIVE)"
+
 # Without --game, POWSTREAM_GAME must NOT leak (Proton titles self-name from .exe).
 out2="$(PATH="$STUBDIR:$PATH" stream_launch -- thegame 2>/dev/null)"
 printf '%s\n' "$out2" | grep -q 'POWSTREAM_GAME' && bad "POWSTREAM_GAME set without --game" || ok "no POWSTREAM_GAME without --game"

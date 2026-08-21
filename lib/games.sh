@@ -1101,7 +1101,7 @@ cmd_games() {
     # POWOS-GAMES *partition* lives under `powos games storage <verb>`.
     # The bare disk verbs (status/create/mount/steam-setup/resize) still
     # dispatch, so existing scripts and muscle memory keep working.
-    local sub="${1:-list}"; shift 2>/dev/null || true
+    local sub="${1:-help}"; shift 2>/dev/null || true
 
     # The sync sub-command has its own option parser — delegate immediately
     # so its flags (--to, --from, --what, etc.) aren't consumed here.

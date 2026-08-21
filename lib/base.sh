@@ -181,7 +181,7 @@ EOF
 }
 
 cmd_base() {
-    local sub="${1:-list}"; shift 2>/dev/null || true
+    local sub="${1:-help}"; shift 2>/dev/null || true
     case "$sub" in
         list|ls)        base_list ;;
         current|active) base_current ;;

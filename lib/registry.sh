@@ -88,12 +88,28 @@ except Exception: d={}
 [print("  •", h) for h in (d.get("auths") or {})]' 2>/dev/null || echo "  (unreadable)"
 }
 
+registry_usage() {
+    cat <<EOF
+powos registry — root's container-registry pull credentials (for private images)
+
+Usage: powos registry [command] [host]
+
+Commands:
+  status         Show which registries have stored credentials
+  login  [host]  Store pull credentials (default host: ghcr.io; reuses gh token)
+  logout [host]  Remove stored credentials for host
+
+Writes /etc/ostree/auth.json (root, 0600) — the file bootc/ostree read for auth.
+EOF
+}
+
 cmd_registry() {
-    local sub="${1:-status}"; shift || true
+    local sub="${1:-help}"; shift || true
     case "$sub" in
         login)          registry_login "$@" ;;
         logout)         registry_logout "$@" ;;
-        status|"")      registry_status ;;
-        *) perr "Usage: powos registry {login|logout|status} [host]"; return 1 ;;
+        status)         registry_status ;;
+        help|-h|--help) registry_usage ;;
+        *) perr "Unknown: powos registry $sub"; registry_usage; return 1 ;;
     esac
 }

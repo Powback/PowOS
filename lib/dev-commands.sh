@@ -26,7 +26,7 @@ source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/common.sh"
 POWOS_TAG=dev
 
 cmd_dev() {
-    local action="${1:-list}"
+    local action="${1:-help}"
     shift || true
 
     case "$action" in
@@ -60,8 +60,13 @@ cmd_dev() {
         update)
             dev_update "$@"
             ;;
-        *)
+        help|-h|--help)
             dev_help
+            ;;
+        *)
+            perr "Unknown: powos dev $action"
+            dev_help
+            return 1
             ;;
     esac
 }

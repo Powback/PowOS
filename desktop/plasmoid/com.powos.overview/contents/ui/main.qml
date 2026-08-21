@@ -16,8 +16,32 @@ import org.kde.plasma.plasma5support as P5Support
 PlasmoidItem {
     id: root
     preferredRepresentation: fullRepresentation
-    Layout.minimumWidth: Kirigami.Units.gridUnit * 16
+    // Wide enough that the process table's name column survives: the three
+    // metric columns are fixed-width, so every pixel the widget lacks comes
+    // out of the name. nameMin + 3×metricW + spacing + margins is the floor.
+    Layout.minimumWidth: tableMinW
     Layout.minimumHeight: Kirigami.Units.gridUnit * 8
+    readonly property int tableMinW: procNameMinW + metricW * 3
+                                     + Kirigami.Units.smallSpacing * 3
+                                     + Kirigami.Units.largeSpacing * 2
+
+    // ── process-table column widths ──────────────────────────────
+    // Derived from the actual glyph width of the widest value each metric can
+    // print, NOT a gridUnit guess: gridUnit tracks font HEIGHT, so on a HiDPI
+    // or large-font setup a `gridUnit * 3` column grew far past the ~5 digits
+    // it holds while the name column (the only flexible one) absorbed the loss
+    // and elided to nothing. Defined once here because the header row and the
+    // list delegate MUST agree or the columns visibly misalign.
+    readonly property int metricW: Math.ceil(metricMetrics.width) + Kirigami.Units.smallSpacing
+    readonly property int procNameMinW: Kirigami.Units.gridUnit * 7
+    TextMetrics {
+        id: metricMetrics
+        font: Kirigami.Theme.smallFont
+        // Widest thing a metric cell ever prints: disk I/O at 2 decimals
+        // ("1234.56"). Also covers a summed cpu% over 100 on a grouped row,
+        // and the "▼ disk" header, both of which are shorter.
+        text: "9999.99"
+    }
 
     // ── state ────────────────────────────────────────────────────
     property var ov: ({})
@@ -123,7 +147,10 @@ PlasmoidItem {
     function field(o, k, dflt) { return (o && o[k] !== undefined && o[k] !== null && o[k] !== "") ? o[k] : (dflt || "—") }
 
     fullRepresentation: Item {
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 20
+        // Default popup width: the table floor plus real slack for the name
+        // column, so a typical `systemd-journald`-length comm fits unelided.
+        Layout.preferredWidth: Math.max(Kirigami.Units.gridUnit * 20,
+                                        root.tableMinW + Kirigami.Units.gridUnit * 6)
         Layout.minimumHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
         Layout.preferredHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
 
@@ -189,12 +216,13 @@ PlasmoidItem {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
-                readonly property int metricW: Kirigami.Units.gridUnit * 3
 
                 PC3.Label {
                     text: "process"; opacity: 0.5
                     font.pointSize: Kirigami.Theme.smallFont.pointSize
-                    elide: Text.ElideRight; Layout.fillWidth: true
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: root.procNameMinW
                 }
                 Repeater {
                     model: [ { key: "cpu", label: "cpu%" },
@@ -208,7 +236,8 @@ PlasmoidItem {
                         opacity: active ? 0.9 : 0.5
                         color: active ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
                         horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: parent.metricW
+                        Layout.preferredWidth: root.metricW
+                        Layout.minimumWidth: root.metricW
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
@@ -227,7 +256,6 @@ PlasmoidItem {
                 ListView {
                     id: procList
                     readonly property int rowH: Math.round(Kirigami.Theme.smallFont.pixelSize * 1.35)
-                    readonly property int metricW: Kirigami.Units.gridUnit * 3
                     model: root.sortedProcs
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
@@ -239,7 +267,9 @@ PlasmoidItem {
                                   + (modelData.count > 1 ? " ×" + modelData.count : "")
                             font.pointSize: Kirigami.Theme.smallFont.pointSize
                             font.bold: true; opacity: 0.9
-                            elide: Text.ElideRight; Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: root.procNameMinW
                         }
                         PC3.Label {
                             text: (modelData.cpu || 0).toFixed(1)
@@ -247,7 +277,8 @@ PlasmoidItem {
                             opacity: root.sortKey === "cpu" ? 0.95 : 0.6
                             font.bold: root.sortKey === "cpu"
                             horizontalAlignment: Text.AlignRight
-                            Layout.preferredWidth: procList.metricW
+                            Layout.preferredWidth: root.metricW
+                            Layout.minimumWidth: root.metricW
                         }
                         PC3.Label {
                             text: (modelData.mem || 0).toFixed(1)
@@ -255,7 +286,8 @@ PlasmoidItem {
                             opacity: root.sortKey === "mem" ? 0.95 : 0.6
                             font.bold: root.sortKey === "mem"
                             horizontalAlignment: Text.AlignRight
-                            Layout.preferredWidth: procList.metricW
+                            Layout.preferredWidth: root.metricW
+                            Layout.minimumWidth: root.metricW
                         }
                         PC3.Label {
                             text: (modelData.io || 0) > 0 ? (modelData.io).toFixed(2) : "—"
@@ -263,7 +295,8 @@ PlasmoidItem {
                             opacity: root.sortKey === "io" ? 0.95 : 0.6
                             font.bold: root.sortKey === "io"
                             horizontalAlignment: Text.AlignRight
-                            Layout.preferredWidth: procList.metricW
+                            Layout.preferredWidth: root.metricW
+                            Layout.minimumWidth: root.metricW
                         }
                     }
                 }

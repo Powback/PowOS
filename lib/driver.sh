@@ -101,11 +101,27 @@ cmd_driver_switch() {
     [[ "$ans" =~ ^[Yy]$ ]] && sudo systemctl reboot
 }
 
+driver_usage() {
+    cat <<EOF
+powos driver — switch the NVIDIA driver channel (rebase to a different image tag)
+
+Usage: powos driver [command]
+
+Commands:
+  status    Show the current channel / booted image
+  stable    Rebase to :nvidia-open          (tested drivers) — next reboot
+  testing   Rebase to :nvidia-open-testing  (newest drivers) — next reboot
+
+Switching applies on the NEXT reboot; the old deployment stays as rollback.
+EOF
+}
+
 cmd_driver() {
-    local sub="${1:-status}"; shift || true
+    local sub="${1:-help}"; shift || true
     case "$sub" in
-        status|"")        cmd_driver_status ;;
+        status)           cmd_driver_status ;;
         stable|testing)   cmd_driver_switch "$sub" ;;
-        *) perr "Usage: powos driver {status|stable|testing}"; return 1 ;;
+        help|-h|--help)   driver_usage ;;
+        *) perr "Unknown: powos driver $sub"; driver_usage; return 1 ;;
     esac
 }

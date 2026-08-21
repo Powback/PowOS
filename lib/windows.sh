@@ -2400,7 +2400,7 @@ Metal boots always COLD-BOOT (hibernation is a VM-mode-only feature).
 Usage: powos windows [<command>] [options]
 
 Commands:
-  (none)              THE SWITCH: guards → layer-sync flush → unmount games
+  switch              THE SWITCH: guards → layer-sync flush → unmount games
                       → BootNext → hibernate PowOS; Windows cold-boots
   status              Image, hibernation state, boot entry, snapshots
   fetch-iso           Download + verify the OFFICIAL Microsoft Win11 ISO
@@ -3500,7 +3500,8 @@ cmd_windows() {
     # (dedicated WIN-ESP + POWOS-WIN instead of a file on POWOS-GAMES).
     if [[ "$WIN_BACKEND" == "partition" ]]; then
         case "$sub" in
-            "")             win_part_switch ;;
+            "")             win_usage ;;
+            switch)         win_part_switch ;;
             status)         win_part_status ;;
             create)         win_part_create ;;
             install)        win_part_install ;;
@@ -3516,7 +3517,8 @@ cmd_windows() {
     fi
 
     case "$sub" in
-        "")             win_switch ;;
+        "")             win_usage ;;
+        switch)         win_switch ;;
         status)         win_status ;;
         create)         win_create ;;
         install)        win_install ;;

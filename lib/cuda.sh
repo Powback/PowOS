@@ -119,7 +119,7 @@ EOF
 }
 
 cmd_cuda() {
-    local sub="${1:-status}"; shift || true
+    local sub="${1:-help}"; shift || true
     case "$sub" in
         enable|on|create|install) cmd_cuda_enable "$@" ;;
         enter|shell)              cmd_cuda_enter "$@" ;;

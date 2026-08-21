@@ -511,7 +511,7 @@ cmd_games_sync() {
     GSY_VERBOSE=0
     GSY_WHAT=saves
 
-    local sub="${1:-status}"; shift 2>/dev/null || true
+    local sub="${1:-help}"; shift 2>/dev/null || true
 
     case "$sub" in
         # ── add-device NAME [HOST] [USER] [STEAM_PATH] ──────────────────

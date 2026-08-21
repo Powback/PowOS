@@ -2,14 +2,20 @@
 // AND names the application(s) using it.
 //
 // KDE's stock privacy indicator only says "the camera is in use" — it can't
-// tell you *what* has it open. This does, by scanning /proc/<pid>/fd for open
-// handles to /dev/video* and reading /proc/<pid>/comm for the process name.
+// tell you *what* has it open. This does — but naming the app is subtler than
+// it looks. On a PipeWire desktop, apps don't open /dev/video* themselves:
+// PipeWire opens the device on their behalf, so a raw /proc fd scan only ever
+// finds "pipewire" (the broker), never the real app — and shows nothing at all
+// while the camera is merely suspended.
 //
-// It's unprivileged on purpose: a normal user can only readlink the fds of
-// their OWN processes, which is exactly where camera use lives (browser, Zoom,
-// OBS, …). Root-owned openers stay invisible — an acceptable trade for needing
-// no privileges. Each poll emits "pid|comm|device" lines; the UI groups them by
-// process so one app holding capture + metadata nodes shows once.
+// So detection lives in contents/scripts/camscan.py, which asks PipeWire
+// directly: a physical camera is in use when a v4l2/libcamera source node is
+// streaming, and the consumer linked to that source names the real app (keying
+// off the camera source means a screen-cast is never mistaken for camera use).
+// A /proc fd scan is kept as a fallback for apps that open /dev/video*
+// directly. The script emits "pid|name|device" lines; the UI groups them so one
+// app shows once. Still unprivileged: it only sees the user's own PipeWire and
+// readable fds — exactly where desktop camera use lives.
 import QtQuick
 import QtQuick.Layouts
 import org.kde.plasma.plasmoid
@@ -26,33 +32,42 @@ PlasmoidItem {
     property bool ranOnce: false
     readonly property bool inUse: apps.length > 0
 
-    // one line per open handle: "pid|comm|/dev/videoN". readlink on another
-    // user's fd fails → continue, so we naturally see only our own processes.
-    readonly property string scanCmd:
-        "for l in /proc/[0-9]*/fd/*; do " +
-        "t=$(readlink \"$l\" 2>/dev/null) || continue; " +
-        "case \"$t\" in /dev/video*) " +
-        "p=${l#/proc/}; p=${p%%/*}; " +
-        "c=$(cat /proc/$p/comm 2>/dev/null) || c='?'; " +
-        "echo \"$p|$c|$t\";; esac; done | sort -u"
+    // Absolute path to the bundled scanner, resolved wherever the plasmoid is
+    // installed (/usr/share/… in the OS image, ~/.local/share/… for local tests).
+    readonly property string scriptPath: {
+        var u = Qt.resolvedUrl("../scripts/camscan.py").toString()
+        return u.indexOf("file://") === 0 ? decodeURIComponent(u.substring(7)) : u
+    }
+    // The scanner emits one "pid|name|device" line per app using the camera.
+    readonly property string scanCmd: "python3 \"" + scriptPath + "\""
 
     function scan() { scanner.connectSource(root.scanCmd) }
 
-    // nicer label for a raw comm ("chrome" → "Chrome", known apps spelled out)
-    function pretty(comm) {
+    // nicer label for a raw name ("chrome" → "Chrome", known apps spelled out,
+    // "powstream-webrtc-server" → "Powstream Webrtc Server")
+    function pretty(name) {
         var known = {
             "chrome": "Google Chrome", "chromium": "Chromium", "firefox": "Firefox",
             "firefox-bin": "Firefox", "zoom": "Zoom", "obs": "OBS Studio",
             "Discord": "Discord", "teams": "Teams", "slack": "Slack",
-            "cheese": "Cheese", "guvcview": "guvcview", "webcamoid": "Webcamoid"
+            "cheese": "Cheese", "guvcview": "guvcview", "webcamoid": "Webcamoid",
+            "powstream-webrtc-server": "PowStream (WebRTC)",
+            "gst-launch-1.0": "GStreamer", "ffmpeg": "FFmpeg"
         }
-        if (known[comm]) return known[comm]
-        return comm.charAt(0).toUpperCase() + comm.slice(1)
+        if (known[name]) return known[name]
+        // PipeWire client / binary names are often dash/underscore separated —
+        // title-case each segment so they read like a name, not a slug.
+        if (name.indexOf("-") >= 0 || name.indexOf("_") >= 0) {
+            return name.split(/[-_]/).map(function (w) {
+                return w ? w.charAt(0).toUpperCase() + w.slice(1) : w
+            }).join(" ")
+        }
+        return name.charAt(0).toUpperCase() + name.slice(1)
     }
 
     function parse(out) {
         root.ranOnce = true
-        var byPid = {}, order = []
+        var byKey = {}, order = []
         var lines = String(out || "").split("\n")
         for (var i = 0; i < lines.length; i++) {
             var ln = lines[i].trim()
@@ -60,11 +75,14 @@ PlasmoidItem {
             var f = ln.split("|")
             if (f.length < 3) continue
             var pid = f[0], comm = f[1], dev = f[2]
-            if (!(pid in byPid)) { byPid[pid] = { pid: pid, comm: comm, devs: [] }; order.push(pid) }
-            if (byPid[pid].devs.indexOf(dev) < 0) byPid[pid].devs.push(dev)
+            // PipeWire consumers may have no PID — group those by name instead
+            // so two nameless apps don't collapse into one row.
+            var key = (pid && pid !== "-") ? pid : ("name:" + comm)
+            if (!(key in byKey)) { byKey[key] = { pid: pid, comm: comm, devs: [] }; order.push(key) }
+            if (byKey[key].devs.indexOf(dev) < 0) byKey[key].devs.push(dev)
         }
         var list = []
-        for (var j = 0; j < order.length; j++) list.push(byPid[order[j]])
+        for (var j = 0; j < order.length; j++) list.push(byKey[order[j]])
         root.apps = list
     }
 
@@ -186,7 +204,9 @@ PlasmoidItem {
                                 elide: Text.ElideRight; Layout.fillWidth: true
                             }
                             PC3.Label {
-                                text: "pid " + modelData.pid + "  ·  " + modelData.devs.join(", ")
+                                text: (modelData.pid && modelData.pid !== "-"
+                                       ? "pid " + modelData.pid + "  ·  " : "")
+                                      + modelData.devs.join(", ")
                                 opacity: 0.6; font: Kirigami.Theme.smallFont
                                 elide: Text.ElideRight; Layout.fillWidth: true
                             }

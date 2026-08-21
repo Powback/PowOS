@@ -116,13 +116,29 @@ cmd_gpu_to_host() {
     pok "dGPU back on the host driver ($(gpu_driver_of "$bdf")). CUDA/native gaming ready."
 }
 
+gpu_usage() {
+    cat <<EOF
+powos gpu — hotswap a discrete GPU between the PowOS host and a VM guest
+
+Usage: powos gpu [command] [--dry-run]
+
+Commands:
+  status            Where the dGPU is (host vs vfio) + passthrough readiness
+  to-vm | release   Release from the host driver → bind vfio-pci (VM-ready)
+  to-host | reclaim Reclaim from vfio → native driver (Linux/CUDA-ready)
+
+⚠️ EXPERIMENTAL, hardware-specific, boot/display-critical. Needs IOMMU on and
+the desktop running on the OTHER GPU; to-vm refuses while the dGPU is in use.
+EOF
+}
+
 cmd_gpu() {
-    local sub="${1:-status}"; shift || true
+    local sub="${1:-help}"; shift || true
     case "$sub" in
-        status|"")        cmd_gpu_status ;;
+        status)           cmd_gpu_status ;;
         to-vm|release)    cmd_gpu_to_vm "$@" ;;
         to-host|reclaim)  cmd_gpu_to_host ;;
-        -h|--help)        sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
-        *) perr "Usage: powos gpu {status|to-vm|to-host} [--dry-run]"; return 1 ;;
+        help|-h|--help)   gpu_usage ;;
+        *) perr "Unknown: powos gpu $sub"; gpu_usage; return 1 ;;
     esac
 }

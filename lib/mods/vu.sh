@@ -786,7 +786,7 @@ vu_server_start() {
 }
 
 vu_server_cmd() {
-    local sub="${1:-status}"; shift || true
+    local sub="${1:-help}"; shift || true
     case "$sub" in
         init)    vu_server_init ;;
         start)   vu_server_start "$@" ;;
@@ -1390,7 +1390,7 @@ EOF
 }
 
 vu_mod_cmd() {
-    local sub="${1:-list}"; shift || true
+    local sub="${1:-help}"; shift || true
     case "$sub" in
         install|add|i) vu_mod_install_cmd "$@" ;;
         list|ls)       vu_mod_list_cmd ;;
@@ -1510,7 +1510,7 @@ EOF
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 cmd_mods_vu() {
-    local sub="${1:-status}"; shift || true
+    local sub="${1:-help}"; shift || true
     case "$sub" in
         install)      vu_install_cmd "$@" ;;
         activate)     vu_activate_cmd "$@" ;;

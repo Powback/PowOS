@@ -597,7 +597,7 @@ EOF
 }
 
 cmd_ramboot() {
-    local sub="${1:-status}"; shift 2>/dev/null || true
+    local sub="${1:-help}"; shift 2>/dev/null || true
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --dry-run) RB_DRY_RUN=1; shift ;;

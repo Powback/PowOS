@@ -561,7 +561,7 @@ EOF
 }
 
 cmd_vm() {
-    local sub="${1:-status}"; shift 2>/dev/null || true
+    local sub="${1:-help}"; shift 2>/dev/null || true
     # Parse options (order-independent).
     local args=()
     while [[ $# -gt 0 ]]; do

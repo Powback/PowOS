@@ -28,7 +28,14 @@ PlasmoidItem {
 
     property string listCmd: "/usr/bin/powos containers list --json"
     property string statsCmd: "/usr/bin/powos containers stats --json"
-    property bool busy: false
+    // in-flight actions, keyed by container name (name -> "start"|"stop"|...).
+    // Deliberately NOT a single global `busy` flag: stopping one container has
+    // nothing to do with starting another, and a global gate meant a slow
+    // `podman stop` (10s SIGTERM grace) froze every control in the widget.
+    // Reassigned wholesale on every change so QML bindings re-evaluate.
+    property var acting: ({})
+    readonly property int actingCount: Object.keys(root.acting).length
+    property var pendingAct: ({})        // in-flight action command -> container name
     property string lastError: ""
     property string confirmName: ""      // pending delete target (empty = dialog hidden)
 
@@ -301,10 +308,15 @@ PlasmoidItem {
         while (rowModel.count > rows.length) rowModel.remove(rowModel.count - 1)
     }
 
+    function isActing(name) { return !!root.acting[name] }
     function runAction(name, action) {
-        if (root.busy) return
-        root.busy = true
-        actor.connectSource("/usr/bin/powos containers " + action + " " + root.shellQuote(name) + " >/dev/null 2>&1; echo done")
+        if (root.acting[name]) return          // only this container is gated
+        var next = Object.assign({}, root.acting)
+        next[name] = action
+        root.acting = next                     // reassign → bindings re-evaluate
+        var cmd = "/usr/bin/powos containers " + action + " " + root.shellQuote(name) + " >/dev/null 2>&1; echo done"
+        root.pendingAct[cmd] = name
+        actor.connectSource(cmd)
     }
     function openDir(dir) {
         if (!dir) return
@@ -337,7 +349,17 @@ PlasmoidItem {
     }
     P5Support.DataSource {
         id: actor; engine: "executable"; connectedSources: []
-        onNewData: function (s, d) { disconnectSource(s); root.busy = false; root.refresh(); root.refreshStats() }
+        onNewData: function (s, d) {
+            disconnectSource(s)
+            var name = root.pendingAct[s]
+            delete root.pendingAct[s]
+            if (name !== undefined) {
+                var next = Object.assign({}, root.acting)
+                delete next[name]
+                root.acting = next
+            }
+            root.refresh(); root.refreshStats()
+        }
     }
     P5Support.DataSource {
         id: opener; engine: "executable"; connectedSources: []
@@ -406,7 +428,7 @@ PlasmoidItem {
                 }
                 PC3.Label { text: "Containers"; font.bold: true; Layout.fillWidth: true }
                 PC3.BusyIndicator {
-                    running: root.busy; visible: root.busy
+                    running: root.actingCount > 0; visible: root.actingCount > 0
                     Layout.preferredWidth: Kirigami.Units.iconSizes.small
                     Layout.preferredHeight: Kirigami.Units.iconSizes.small
                 }
@@ -562,24 +584,32 @@ PlasmoidItem {
                                 }
                                 TapHandler { onTapped: root.toggleExpand(model.name) }
                             }
+                            // spins while THIS container's action is in flight; the
+                            // rest of the widget stays fully interactive
+                            PC3.BusyIndicator {
+                                visible: root.isActing(model.name)
+                                running: visible
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                            }
                             PC3.ToolButton {
                                 icon.name: "media-playback-start"
-                                enabled: !model.running && !root.busy
+                                enabled: !model.running && !root.isActing(model.name)
                                 onClicked: root.runAction(model.name, "start")
                             }
                             PC3.ToolButton {
                                 icon.name: "media-playback-stop"
-                                enabled: model.running && !root.busy
+                                enabled: model.running && !root.isActing(model.name)
                                 onClicked: root.runAction(model.name, "stop")
                             }
                             PC3.ToolButton {
                                 icon.name: "view-refresh"
-                                enabled: model.running && !root.busy
+                                enabled: model.running && !root.isActing(model.name)
                                 onClicked: root.runAction(model.name, "restart")
                             }
                             PC3.ToolButton {
                                 icon.name: "edit-delete"
-                                enabled: !root.busy
+                                enabled: !root.isActing(model.name)
                                 onClicked: root.confirmName = model.name
                             }
                         }

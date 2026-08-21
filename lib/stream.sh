@@ -223,7 +223,24 @@ stream_launch() {
     done
     [[ $# -gt 0 ]] || { perr "usage: powos stream launch [--game NAME] -- <command> [args…]"; return 1; }
     plog "Launching with PowStream capture ${GREEN}ON${NC} (this process only)${game:+ as ${BOLD}$game${NC}}: ${DIM}$*${NC}"
-    exec env POWSTREAM_CAPTURE=1 POWSTREAM_CAPTURE_DISABLE= ${game:+POWSTREAM_GAME="$game"} "$@"
+    # Two independent gates both have to be right or capture silently no-ops:
+    #
+    #  1. -u POWSTREAM_CAPTURE_DISABLE, NOT DISABLE= : the Vulkan loader disables
+    #     an implicit layer whenever its disable_environment var is *defined at
+    #     all* — an empty value still counts as "disable". Setting it to "" would
+    #     silently disable the very layer we're enabling. Removing it from the
+    #     child env is the only way to clear an inherited kill-switch here.
+    #
+    #  2. POWSTREAM_FORCE_ACTIVE=1 : the layer's streaming_active() gate (checked
+    #     once at vkCreateDevice) keeps it DORMANT — inserted but hooking nothing,
+    #     streaming no frames — until either the <dump>/streaming.active sentinel
+    #     exists or a force flag is set. Nothing in the PowOS integration creates
+    #     that sentinel (the server/sidecar don't; only the e2e harness does), so
+    #     without this an explicit `powos stream launch` would capture nothing.
+    #     The env flag is per-process: it dies with the game, leaves no global
+    #     marker to clean up, and honours the same per-game opt-in as CAPTURE.
+    exec env -u POWSTREAM_CAPTURE_DISABLE POWSTREAM_CAPTURE=1 POWSTREAM_FORCE_ACTIVE=1 \
+        ${game:+POWSTREAM_GAME="$game"} "$@"
 }
 
 # The env that GUARANTEES the layer never loads — for wrappers around

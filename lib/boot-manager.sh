@@ -115,7 +115,7 @@ EOF
 }
 
 cmd_boot() {
-    local sub="${1:-list}"; shift 2>/dev/null || true
+    local sub="${1:-help}"; shift 2>/dev/null || true
     case "$sub" in
         list|ls)       bm_list ;;
         windows|win)   bm_boot_to "windows|microsoft" "Windows" ;;

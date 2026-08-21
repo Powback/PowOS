@@ -2529,7 +2529,11 @@ case "${1:-}" in
         source "$POWOS_LIB/mods/snapshot.sh" 2>/dev/null || true
         source "$POWOS_LIB/mods/adopt.sh" 2>/dev/null || true
         source "$POWOS_LIB/mods/portable.sh" 2>/dev/null || true
+        source "$POWOS_LIB/mods/e2e.sh" 2>/dev/null || true
         case "${1:-}" in
+            # End-to-end: launch the game, drive it, assert on live state.
+            # `verify` asks whether it booted; `e2e` asks whether it works.
+            e2e)                                shift; e2e_dispatch "$@" ;;
             # ── Native mod manager verbs (v2) ────────────────────────────
             status)                             shift; mods_status_cmd "$@" ;;
             install)
