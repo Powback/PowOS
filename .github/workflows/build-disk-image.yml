@@ -25,8 +25,11 @@ on:
       variant:
         description: Which published variant to build the disk image from
         type: choice
-        default: nvidia-open
-        options: [ nvidia-open, nvidia, main ]
+        default: all
+        # Must match tags the publish workflow actually pushes. 'nvidia' was
+        # never built and 'main'/'deck' only exist as of the multi-variant
+        # change — picking an unpublished tag fails at the pull step.
+        options: [ all, nvidia-open, main, deck ]
 
 env:
   IMAGE: ghcr.io/powback/powos
@@ -37,11 +40,27 @@ jobs:
     permissions:
       contents: read
       packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ nvidia-open, main, deck ]
     steps:
+      - name: Gate (honor the dispatch variant input)
+        id: gate
+        run: |
+          sel='${{ inputs.variant }}'
+          if [[ -n "$sel" && "$sel" != "all" && "$sel" != "${{ matrix.variant }}" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout (for build/install-to-usb.sh)
+        if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
 
       - name: Free disk space (bazzite images are large)
+        if: steps.gate.outputs.run == 'true'
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
                       /opt/hostedtoolcache /usr/local/share/boost \
@@ -53,6 +72,7 @@ jobs:
           df -h /
 
       - name: Create reflink-capable scratch volume (XFS loopback)
+        if: steps.gate.outputs.run == 'true'
         # Sparse backing file: grows on demand, so containers-storage on the
         # root fs and the scratch volume share the same free-space pool
         # instead of each reserving worst-case upfront.
@@ -66,12 +86,15 @@ jobs:
           df -h /build
 
       - name: Log in to GHCR (rootful podman)
+        if: steps.gate.outputs.run == 'true'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Pull OS image
-        run: sudo podman pull ${{ env.IMAGE }}:${{ inputs.variant }}
+        if: steps.gate.outputs.run == 'true'
+        run: sudo podman pull ${{ env.IMAGE }}:${{ matrix.variant }}
 
       - name: Build raw disk image
+        if: steps.gate.outputs.run == 'true'
         run: |
           sudo podman run --rm --privileged \
             --security-opt label=type:unconfined_t \
@@ -80,10 +103,11 @@ jobs:
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type raw --rootfs btrfs \
-            ${{ env.IMAGE }}:${{ inputs.variant }}
+            ${{ env.IMAGE }}:${{ matrix.variant }}
           sudo ls -lh /build/output/image/
 
       - name: Bake POWOS-DATA + install/recovery boot entries into the image
+        if: steps.gate.outputs.run == 'true'
         # The flashed USB must be complete out of the box — no post-boot
         # commands. Extend the raw by 6G of free tail, attach it as a loop
         # device, and run the SAME setup that install-to-usb.sh does on real
@@ -99,6 +123,7 @@ jobs:
           sudo losetup -d "$loop"
 
       - name: E2E boot the raw image in QEMU and assert login screen appears
+        if: steps.gate.outputs.run == 'true'
         # The whole point of this workflow is to produce a disk image that
         # ACTUALLY BOOTS. Everything below (compression, artifact upload)
         # runs only if the image passes a real UEFI boot in a KVM VM and
@@ -172,30 +197,32 @@ jobs:
           esac
 
       - name: Upload boot console log (always)
-        if: always()
+        if: always() && steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-console-${{ inputs.variant }}
+          name: e2e-console-${{ matrix.variant }}
           path: /build/vm/console.log
           retention-days: 7
           if-no-files-found: ignore
 
       - name: Compress
+        if: steps.gate.outputs.run == 'true'
         run: |
-          sudo mv /build/output/image/disk.raw /build/output/powos-${{ inputs.variant }}.raw
+          sudo mv /build/output/image/disk.raw /build/output/powos-${{ matrix.variant }}.raw
           # Free the store's reflink twin first — zstd output needs real bytes.
           sudo rm -rf /build/store
-          sudo zstd -T0 --sparse --rm /build/output/powos-${{ inputs.variant }}.raw
+          sudo zstd -T0 --sparse --rm /build/output/powos-${{ matrix.variant }}.raw
           ls -lh /build/output/
 
       - name: Disk telemetry (postmortem aid)
-        if: always()
+        if: always() && steps.gate.outputs.run == 'true'
         run: df -h / /build 2>/dev/null || df -h /
 
       - name: Upload artifact
+        if: steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: powos-${{ inputs.variant }}-raw
-          path: /build/output/powos-${{ inputs.variant }}.raw.zst
+          name: powos-${{ matrix.variant }}-raw
+          path: /build/output/powos-${{ matrix.variant }}.raw.zst
           retention-days: 7
           compression-level: 0  # already zstd-compressed

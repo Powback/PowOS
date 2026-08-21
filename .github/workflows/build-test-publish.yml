@@ -18,6 +18,16 @@ name: Build, Test & Publish PowOS
 #   nvidia-open          NVIDIA open kernel modules (DEFAULT; RTX 50-series REQUIRES this).
 #                         Built + tested + published on every push to master.
 #                         Also gets :latest.
+#   main                 AMD / Intel (ghcr.io/ublue-os/bazzite:stable). Built +
+#                         published on every push. NO NVIDIA drivers — this is
+#                         the variant for AMD desktops.
+#   deck                 Steam Deck (ghcr.io/ublue-os/bazzite-deck:stable).
+#                         Built + published on every push. Carries upstream's
+#                         Deck hardware enablement (jupiter kernel, Deck audio
+#                         and controller firmware, gamescope session defaults)
+#                         which the nvidia-open image does NOT have — flashing
+#                         nvidia-open onto a Deck gives you NVIDIA kmods on AMD
+#                         hardware and no Deck enablement.
 #   nvidia-open-testing  Tracks ghcr.io/ublue-os/bazzite-nvidia-open:testing.
 #                         Built weekly via cron (or workflow_dispatch). NOT
 #                         E2E-tested (by intent — the :testing base is by
@@ -42,7 +52,7 @@ on:
         description: Which variant to build (dispatch only)
         type: choice
         default: all
-        options: [ all, nvidia-open, nvidia-open-testing ]
+        options: [ all, nvidia-open, main, deck, nvidia-open-testing ]
   schedule:
     - cron: '0 6 * * 1'   # weekly rebuild to pick up new bazzite :stable/:testing
 
@@ -97,7 +107,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [ nvidia-open, nvidia-open-testing ]
+        variant: [ nvidia-open, main, deck, nvidia-open-testing ]
     steps:
       - name: Gate (skip -testing on push events; honor dispatch variant input)
         id: gate
@@ -139,6 +149,8 @@ jobs:
         run: |
           case "${{ matrix.variant }}" in
             nvidia-open)         img=ghcr.io/ublue-os/bazzite-nvidia-open:stable ;;
+            main)                img=ghcr.io/ublue-os/bazzite:stable ;;
+            deck)                img=ghcr.io/ublue-os/bazzite-deck:stable ;;
             nvidia-open-testing) img=ghcr.io/ublue-os/bazzite-nvidia-open:testing ;;
           esac
           echo "image=$img" >> "$GITHUB_OUTPUT"
@@ -237,8 +249,12 @@ jobs:
                 .
           fi
 
-      - name: Container tests (tier1 inside the actual image) — nvidia-open only
-        if: steps.gate.outputs.run == 'true' && matrix.variant == 'nvidia-open'
+      # Runs for every published variant: these execute in a container on a
+      # GPU-less runner, so they are GPU-agnostic, and gating publish on them
+      # keeps the "red builds never reach a user's machine" promise for the
+      # AMD and Deck images too. The heavy VM E2E below stays nvidia-open-only.
+      - name: Container tests (tier1 inside the actual image)
+        if: steps.gate.outputs.run == 'true' && matrix.variant != 'nvidia-open-testing'
         run: |
           sudo podman run --rm -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
             --entrypoint /bin/bash powos-ci -c '
