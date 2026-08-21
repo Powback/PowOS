@@ -548,32 +548,70 @@ isv_install_whole_disk() {
     # a DISK install must not run from a tmpfs upper (every write would vanish
     # at reboot, and a plugged-in USB's layers would stack into the root).
     # TODO(hw): validate exact bootc flags against the shipped bootc version.
-    # Offline variant install: when the media carries the requested variant,
-    # read its bytes from the stick (--source-imgref) while still recording the
-    # registry ref the installed system should track (--target-imgref). No
-    # network is involved. Without a local copy we simply install the running
-    # image, exactly as before — never a silent registry pull mid-install.
-    local -a variant_args=()
+    # bootc install runs INSIDE a podman container of the image being
+    # installed. Calling it directly on the live host does NOT work — see the
+    # "Installing" section of lib/variants.sh for the three forms that were
+    # tried on hardware and what each one said. This is why the guided
+    # installer never completed before.
+    #
+    # The image comes off the media, so the install is fully offline; the
+    # INSTALLED system is pointed at the registry for later upgrades.
+    local install_img="" tgt=""
     if [[ -n "$ISV_VARIANT" ]]; then
-        local src tgt
-        if src=$(pv_source_imgref "$ISV_VARIANT" 2>/dev/null) && [[ -n "$src" ]]; then
-            tgt=$(pv_target_imgref "$ISV_VARIANT")
-            variant_args=(--source-imgref "$src"
-                          --target-imgref "$tgt"
-                          --target-transport registry)
+        if pv_have_variant "$ISV_VARIANT" 2>/dev/null; then
             isv_ok "Installing variant '$ISV_VARIANT' from the media (offline)."
-            isv_log "  source: $src"
-            isv_log "  target: $tgt"
+            if [[ $ISV_DRY_RUN -eq 1 ]]; then
+                install_img="${POWOS_VARIANT_LOCAL_TAG:-localhost/powos-variant}:$ISV_VARIANT"
+            elif ! install_img=$(pv_prepare_image "$ISV_VARIANT"); then
+                isv_err "Could not import variant '$ISV_VARIANT' off the media."
+                isv_err "If this ran out of space, container storage needs to live on the"
+                isv_err "media: $(pv_storage_hint 2>/dev/null || echo '<POWOS-DATA>/@powos/containers')"
+                return 1
+            fi
+            tgt=$(pv_target_imgref "$ISV_VARIANT")
         else
-            isv_warn "Variant '$ISV_VARIANT' is not on this media — installing the running image instead."
-            isv_warn "  $(pv_describe)"
+            isv_err "Variant '$ISV_VARIANT' is not on this media."
+            isv_err "  $(pv_describe)"
+            return 1
+        fi
+    else
+        # No variant named. If the media carries exactly one, that is
+        # unambiguous — use it. Otherwise this can only be planned, not run:
+        # bootc cannot install the running live system directly.
+        local only
+        only=$(pv_list 2>/dev/null | head -2 | tr '\n' ' ')
+        only="${only% }"
+        if [[ -n "$only" && "$only" != *" "* ]]; then
+            ISV_VARIANT="$only"
+            isv_ok "Only one variant on the media — installing '$ISV_VARIANT'."
+            if [[ $ISV_DRY_RUN -eq 1 ]]; then
+                install_img="${POWOS_VARIANT_LOCAL_TAG:-localhost/powos-variant}:$ISV_VARIANT"
+            elif ! install_img=$(pv_prepare_image "$ISV_VARIANT"); then
+                isv_err "Could not import variant '$ISV_VARIANT' off the media."
+                return 1
+            fi
+            tgt=$(pv_target_imgref "$ISV_VARIANT")
+        elif [[ $ISV_DRY_RUN -eq 1 ]]; then
+            # Planning only: show the partition plan, and be explicit that a
+            # real run needs a variant.
+            isv_warn "No variant selected — planning only; a real install needs --variant."
+            install_img="<variant-image>"
+        else
+            isv_err "No variant selected, and bootc cannot install the running live system directly."
+            isv_err "Pass --variant <name>; the media must carry that variant."
+            isv_err "  $(pv_describe)"
+            return 1
         fi
     fi
 
+    local -a target_args=()
+    [[ -n "$tgt" ]] && target_args=(--target-imgref "$tgt" --target-transport registry)
+
     run_step "wipe + install PowOS" \
-        bootc install to-disk --wipe --karg rd.powos.ramboot=0 \
-            --filesystem "$ISV_FS" ${variant_args[@]+"${variant_args[@]}"} \
-            ${size_args[@]+"${size_args[@]}"} "$ISV_TARGET" || {
+        pv_bootc_install "$install_img" "$ISV_TARGET" \
+            --wipe --karg rd.powos.ramboot=0 \
+            --filesystem "$ISV_FS" ${target_args[@]+"${target_args[@]}"} \
+            ${size_args[@]+"${size_args[@]}"} || {
         isv_err "bootc install failed."
         return 1
     }

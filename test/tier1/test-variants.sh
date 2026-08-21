@@ -101,62 +101,60 @@ fi
 export POWOS_VARIANTS_DIR="$LAYOUT"
 
 echo ""
-echo "== install-system emits the offline flags =="
+echo "== install-system uses the CONTAINERISED bootc flow =="
 
-# Minimal shadows so isv_install_whole_disk can run its dry-run plan.
+# bootc install cannot run directly on the live host — verified on hardware,
+# see the "Installing" comment in lib/variants.sh. install-system must go
+# through pv_bootc_install (podman run <image> bootc install ...), and must NOT
+# fall back to a bare `bootc install` or to --source-imgref, both of which fail.
 export POWOS_LIB="$ROOT/lib"
 # shellcheck source=/dev/null
 source "$ROOT/lib/install-system.sh" 2>/dev/null || { echo "cannot source install-system.sh"; exit 1; }
 
-bootc() {
-    if [[ "$*" == *"--help"* ]]; then echo "      --root-size <ROOT_SIZE>"; return 0; fi
-    echo "BOOTC-RAN $*"; return 0
-}
+CALLED_IMG=""; CALLED_TARGET=""; CALLED_ARGS=""
+pv_bootc_install() { CALLED_IMG="$1"; CALLED_TARGET="$2"; shift 2; CALLED_ARGS="$*"; echo "PV-INSTALL $CALLED_IMG $CALLED_TARGET $CALLED_ARGS"; }
 lsblk()  { echo "512000"; }
 parted() { return 0; }
 blkid()  { echo ""; }
 findmnt() { echo ""; }
+bootc() { echo "BARE-BOOTC-CALLED $*"; return 0; }
 
 run_variant_plan() {
-    ISV_DRY_RUN=1
-    ISV_TARGET=/dev/sdz
-    ISV_FS=btrfs
-    ISV_SHARED_GB=0
-    ISV_WINDOWS_GB=0
-    ISV_VARIANT="$1"
+    CALLED_IMG=""; CALLED_TARGET=""; CALLED_ARGS=""
+    ISV_DRY_RUN=1; ISV_TARGET=/dev/sdz; ISV_FS=btrfs
+    ISV_SHARED_GB=0; ISV_WINDOWS_GB=0; ISV_VARIANT="$1"
     isv_install_whole_disk 2>&1
 }
 
 out=$(run_variant_plan deck)
-echo "$out" | grep -q -- "--source-imgref oci:$LAYOUT:deck" \
-    && ok "variant on media → --source-imgref reads from the stick" \
-    || bad "--source-imgref emitted" "$(echo "$out" | grep -i imgref | head -2)"
+echo "$out" | grep -q "pv_bootc_install\|PV-INSTALL" \
+    && ok "install goes through the containerised helper" \
+    || bad "install goes through pv_bootc_install" "$(echo "$out" | tail -3)"
+
+echo "$out" | grep -q -- "--source-imgref" \
+    && bad "must NOT use --source-imgref (it fails on hardware)" \
+    || ok "does not use --source-imgref (which fails on hardware)"
 
 echo "$out" | grep -q -- "--target-imgref ghcr.io/powback/powos:deck" \
-    && ok "variant on media → --target-imgref records the registry ref" \
-    || bad "--target-imgref emitted" "$(echo "$out" | grep -i imgref | head -2)"
+    && ok "installed system is pointed at the registry for later upgrades" \
+    || bad "--target-imgref recorded" "$(echo "$out" | grep -i imgref | head -2)"
 
-echo "$out" | grep -q -- "--target-transport registry" \
-    && ok "target transport is registry (so bootc upgrade works later)" \
-    || bad "target transport emitted"
-
-# Absent variant: install the running image, never reach for the network.
-out=$(run_variant_plan nvidia-closed-nonexistent)
-if echo "$out" | grep -q -- "--source-imgref"; then
-    bad "absent variant must not emit a source-imgref" "$(echo "$out" | grep -i imgref | head -2)"
+# A variant that is not on the media must FAIL LOUDLY. Silently installing
+# something else is how you end up with the wrong OS on a Steam Deck.
+out=$(run_variant_plan nvidia-closed-nonexistent); rc=$?
+if echo "$out" | grep -qi "not on this media"; then
+    ok "a variant absent from the media fails loudly, does not substitute"
 else
-    ok "variant absent from media → no imgref flags, installs the running image"
+    bad "absent variant fails loudly" "$(echo "$out" | tail -3)"
 fi
-echo "$out" | grep -qi "not on this media" \
-    && ok "absent variant is reported honestly, not silently ignored" \
-    || bad "absent variant reported"
 
-# No variant requested at all → byte-identical to the classic arg line.
+# No variant at all cannot silently proceed either: bootc has no way to install
+# the running live system directly.
 out=$(run_variant_plan "")
-if echo "$out" | grep -q -- "--source-imgref\|--target-imgref"; then
-    bad "no variant requested must not change the bootc args"
+if echo "$out" | grep -qi "No variant selected"; then
+    ok "no variant selected is refused with an explanation"
 else
-    ok "no variant requested → classic bootc args unchanged"
+    bad "no variant selected is refused" "$(echo "$out" | tail -3)"
 fi
 
 echo ""
