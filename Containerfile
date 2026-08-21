@@ -185,7 +185,17 @@ RUN useradd -m -d /home/powos -G wheel -u 1000 powos 2>/dev/null || true && \
 # libnice-gstreamer1 — the GStreamer plugin for ICE (nicesink/nicesrc), which
 # webrtcbin needs at runtime to negotiate WebRTC connections. Without it the
 # stream hangs at "Negotiating" with "missing a plug-in" in the server log.
-RUN dnf5 -y install --setopt=install_weak_deps=False \
+# akmod-openrgb's %post builds a kernel module and refuses to run as root
+# ("Not to be used as root; start as user or 'akmodsbuild' instead"), which
+# fails the whole rpm transaction on the bazzite-deck base. It succeeds on the
+# desktop bases, so the akmod is excluded ONLY on Deck images rather than
+# stripping RGB kernel support from desktops. No loss there: that module drives
+# motherboard/RAM lighting over SMBus, which a Steam Deck does not have. The
+# openrgb userspace tool still installs.
+RUN . /etc/os-release; \
+    EXCL=""; \
+    case "${VARIANT_ID:-}${IMAGE_ID:-}" in *deck*) EXCL="--exclude=akmod-openrgb" ;; esac; \
+    dnf5 -y install --setopt=install_weak_deps=False $EXCL \
         openrgb piper logiops uv unzip podman-compose podman-docker \
         libnice-gstreamer1 maliit-keyboard && \
     curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip" \

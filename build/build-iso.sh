@@ -173,9 +173,22 @@ build_installer_iso() {
     log "Using bootc-image-builder to create the Anaconda GUI installer ISO..."
     log "Output: ${OUTPUT_DIR}/bootiso/install.iso"
 
-    # Matches the hardware-validated invocation exactly: a plain --type
-    # anaconda-iso build. Anaconda supplies its own disk selection + install
-    # confirmations, so no kickstart/auto-wipe config is layered on.
+    # A PLAIN `--type anaconda-iso` build is NOT interactive. bootc-image-builder
+    # generates its own kickstart containing
+    #     clearpart --all
+    #     autopart --nohome --type=btrfs
+    #     reboot --eject
+    # and boots it with inst.ks=hd. `clearpart --all` carries no --drives
+    # restriction, so it erases EVERY ATTACHED DISK with no prompt — verified by
+    # booting the ISO: it began installing unattended, and the kickstart is
+    # readable at /osbuild.ks on the media. On a Steam Deck booted with its
+    # microSD inserted, that takes the card and everything on it.
+    #
+    # Supplying our own [customizations.installer.kickstart] contents REPLACES
+    # those directives (verified by diffing the generated manifest: clearpart
+    # present without the config, absent with it). With no partitioning
+    # directives Anaconda stops at the storage spoke and asks, which is the
+    # behaviour this script always claimed to have.
     if podman run \
         --rm \
         -it \
@@ -184,6 +197,7 @@ build_installer_iso() {
         --security-opt label=type:unconfined_t \
         -v "${OUTPUT_DIR}:/output" \
         -v /var/lib/containers/storage:/var/lib/containers/storage \
+        -v "${POWOS_ROOT}/build/iso-config/config.toml:/config.toml:ro" \
         quay.io/centos-bootc/bootc-image-builder:latest \
         --type anaconda-iso \
         --rootfs btrfs \

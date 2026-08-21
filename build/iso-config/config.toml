@@ -1,0 +1,10 @@
+[customizations.installer.kickstart]
+contents = """
+# PowOS: interactive install.
+# The default kickstart bootc-image-builder generates contains
+#   clearpart --all
+#   autopart --nohome --type=btrfs
+# which erases EVERY attached disk with no prompt. On a Steam Deck booted with
+# its microSD inserted that takes the card too.
+%include /run/install/repo/osbuild-base.ks
+"""
