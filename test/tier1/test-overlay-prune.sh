@@ -18,8 +18,9 @@
 # 4. Nested paths keep their directory structure
 # 5. Symlinks are pruned/kept like regular files
 # 6. A DANGLING symlink on the host still counts as present
-# 7. An overlay that adds nothing fails instead of shipping empty
-# 8. The real reference /usr is never written to
+# 7. A symlinked ANCESTOR on the host is never turned into a directory
+# 8. An overlay that adds nothing fails instead of shipping empty
+# 9. The real reference /usr is never written to
 
 set -euo pipefail
 
@@ -204,6 +205,37 @@ test_dangling_host_symlink_still_counts() {
     assert_present "$OUT_DIR/usr/bin/keeper" "unrelated new file still kept"
 }
 
+test_never_replaces_a_host_symlink_dir() {
+    echo ""
+    echo "TEST: a symlinked ANCESTOR on the host is never turned into a directory"
+    make_fixture ancestor
+
+    # Exactly the ostree layout: /usr/local -> ../var/usrlocal
+    mkdir -p "$REF_USR" "$TEST_DIR/ancestor/ref/var/usrlocal"
+    ln -s ../var/usrlocal "$REF_USR/local"
+
+    # A package that ships /usr/local/sbin/... (real: filesystem//usr/local/sbin)
+    mkdir -p "$TEMP_ROOT/usr/local/sbin" "$TEMP_ROOT/usr/bin"
+    echo "tool"    > "$TEMP_ROOT/usr/local/sbin/some-tool"
+    echo "payload" > "$TEMP_ROOT/usr/bin/keeper"
+
+    powos_prune_overlay_usr "$TEMP_ROOT" "$OUT_DIR" "$REF_USR" > /dev/null
+
+    assert_absent "$OUT_DIR/usr/local/sbin/some-tool" \
+        "file under a symlinked host dir is pruned"
+    assert_present "$OUT_DIR/usr/bin/keeper" "unrelated new file still kept"
+
+    ((TESTS_RUN++)) || true
+    if [[ -d "$OUT_DIR/usr/local" && ! -L "$OUT_DIR/usr/local" ]]; then
+        ((TESTS_FAILED++)) || true
+        echo -e "${RED}✗${NC} /usr/local is not materialised as a real directory"
+        echo "    would mask the host symlink and hide /var/usrlocal"
+    else
+        ((TESTS_PASSED++)) || true
+        echo -e "${GREEN}✓${NC} /usr/local is not materialised as a real directory"
+    fi
+}
+
 test_empty_overlay_fails() {
     echo ""
     echo "TEST: an overlay that adds nothing fails loudly"
@@ -264,6 +296,7 @@ main() {
     test_keeps_nested_structure
     test_handles_symlinks
     test_dangling_host_symlink_still_counts
+    test_never_replaces_a_host_symlink_dir
     test_empty_overlay_fails
     test_reference_usr_untouched
 

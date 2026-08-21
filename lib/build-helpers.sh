@@ -26,6 +26,23 @@ powos_prune_overlay_usr() {
             pruned=$((pruned+1))
             continue
         fi
+        # Never materialise a DIRECTORY where the reference has a SYMLINK.
+        # /usr/local is a symlink to ../var/usrlocal on an ostree host; a
+        # package shipping /usr/local/sbin makes us mkdir -p a real
+        # /usr/local, and overlayfs gives the upper directory precedence —
+        # masking the host's symlink so everything in /var/usrlocal vanishes
+        # for as long as the overlay is merged. Checking $rel alone misses
+        # this: it is an ANCESTOR that is the symlink, not the file.
+        local anc="$rel" ancestor_link=""
+        while :; do
+            anc="$(dirname "$anc")"
+            [[ "$anc" == "." || "$anc" == "/" ]] && break
+            if [[ -L "$ref_usr/$anc" ]]; then ancestor_link="$anc"; break; fi
+        done
+        if [[ -n "$ancestor_link" ]]; then
+            pruned=$((pruned+1))
+            continue
+        fi
         mkdir -p "$output_dir/usr/$(dirname "$rel")"
         cp -a "$src" "$output_dir/usr/$rel"
         kept=$((kept+1))
