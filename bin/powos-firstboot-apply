@@ -26,6 +26,9 @@ set -uo pipefail
 # Overridable so tests can point at a temp file instead of /etc.
 POWOS_INSTALL_CONF="${POWOS_INSTALL_CONF:-/etc/powos/install.conf}"
 POWOS_AI_CONF_DIR="${POWOS_AI_CONF_DIR:-/etc/powos/ai}"
+# Survives install.conf being deleted, so a variant switch that failed for
+# want of network can be retried on a later boot.
+POWOS_PENDING_VARIANT="${POWOS_PENDING_VARIANT:-/etc/powos/pending-variant}"
 
 GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'; RED=$'\033[0;31m'; CYAN=$'\033[0;36m'; NC=$'\033[0m'
 
@@ -189,14 +192,47 @@ fb_apply_gpu_flavor() {
     fb_log "GPU flavor '$flavor' → image variant '$want'"
     fb_log "  from: $ref"
     fb_log "    to: $target"
+    fb_switch_variant "$target" "$ref"
+}
+
+# Stage $1, recording it for a later retry if it fails. install.conf is deleted
+# at the end of firstboot (it holds a password hash), so without this marker a
+# switch that fails — most likely because the machine was offline, since the
+# other variant's bytes have to come from the registry — would lose the
+# recorded flavor permanently and leave the machine silently generic.
+fb_switch_variant() {
+    local target="$1" ref="${2:-}"
     if bootc switch "$target" >/dev/null 2>&1; then
+        rm -f "$POWOS_PENDING_VARIANT" 2>/dev/null || true
         fb_ok "staged $target — applies on the next reboot (old deployment stays as rollback)"
-    else
-        # Never fatal: a machine that boots on the wrong variant is a working
-        # machine with the wrong drivers, which the user can fix later with
-        # `powos driver`. A machine that fails firstboot is not.
-        fb_warn "bootc switch to $target failed — staying on $ref"
+        return 0
     fi
+    # Never fatal: a machine on the wrong variant is a working machine with
+    # generic drivers. A machine that fails firstboot is not.
+    fb_warn "bootc switch to $target failed${ref:+ — staying on $ref}"
+    if mkdir -p "$(dirname "$POWOS_PENDING_VARIANT")" 2>/dev/null &&
+       printf '%s\n' "$target" > "$POWOS_PENDING_VARIANT" 2>/dev/null; then
+        fb_warn "recorded $target for retry — powos-variant-retry.service will try again"
+        fb_warn "(usually this just means no network yet; it needs the registry)"
+    else
+        fb_warn "could not record the pending variant — fix manually with 'powos driver'"
+    fi
+    return 0
+}
+
+# --retry-variant: re-attempt a switch recorded by a previous boot. Driven by
+# powos-variant-retry.service, which is gated on the marker existing.
+fb_retry_variant() {
+    local target
+    [[ -r "$POWOS_PENDING_VARIANT" ]] || { fb_log "no pending variant — nothing to retry"; return 0; }
+    target=$(head -1 "$POWOS_PENDING_VARIANT" 2>/dev/null)
+    if [[ -z "$target" || "$target" != *"/"*":"* ]]; then
+        fb_warn "pending variant file is malformed — removing it"
+        rm -f "$POWOS_PENDING_VARIANT" 2>/dev/null || true
+        return 0
+    fi
+    fb_log "retrying variant switch → $target"
+    fb_switch_variant "$target"
 }
 
 fb_apply_ai() {
@@ -285,5 +321,9 @@ fb_main() {
 
 # Run only when executed directly, not when sourced by the test harness.
 if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
-    fb_main "$@"
+    if [[ "${1:-}" == "--retry-variant" ]]; then
+        fb_retry_variant
+    else
+        fb_main "$@"
+    fi
 fi

@@ -1,0 +1,29 @@
+# powos-variant-retry.service - finish a GPU-variant switch that could not
+# complete on first boot.
+#
+# firstboot records the machine's GPU flavor and `bootc switch`es to the
+# matching published image. That switch PULLS a different image, so it needs
+# the registry — on a machine that was offline at first boot it fails, and
+# install.conf (which held the answer) is deleted immediately afterwards
+# because it carries a password hash.
+#
+# So the failed target is written to /etc/powos/pending-variant instead, and
+# this unit retries it on later boots until it lands. Self-disabling: the
+# applier removes the marker on success, and ConditionPathExists then skips
+# this unit forever.
+
+[Unit]
+Description=PowOS retry GPU variant switch
+ConditionPathExists=/etc/powos/pending-variant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/powos-firstboot-apply --retry-variant
+RemainAfterExit=no
+# Never fail a boot over this.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

@@ -162,5 +162,80 @@ else
 fi
 
 echo ""
+echo "== offline behaviour (no network at first boot) =="
+
+TMPD=$(mktemp -d)
+POWOS_PENDING_VARIANT="$TMPD/pending-variant"
+
+# Matching variant + no network = no switch attempted at all. This is the
+# guarantee that flashing the right image installs FULLY OFFLINE.
+reset_state
+POWOS_GPU_FLAVOR="deck"; IS_DECK=0
+CURRENT_REF="ghcr.io/powback/powos:deck"
+SWITCH_RC=1     # pretend the registry is unreachable
+fb_apply_gpu_flavor >/dev/null 2>&1
+if [[ -z "$SWITCH_CALLED" && ! -f "$POWOS_PENDING_VARIANT" ]]; then
+    ok "right image flashed → no switch, no network, no pending marker"
+else
+    bad "right image flashed → no switch at all" "switch='$SWITCH_CALLED' marker=$([[ -f $POWOS_PENDING_VARIANT ]] && echo yes || echo no)"
+fi
+
+# Wrong variant + offline: must record the intent, because install.conf is
+# deleted straight after and the answer would otherwise be lost forever.
+reset_state
+rm -f "$POWOS_PENDING_VARIANT"
+POWOS_GPU_FLAVOR="nvidia-open"
+CURRENT_REF="ghcr.io/powback/powos:main"
+SWITCH_RC=1
+fb_apply_gpu_flavor >/dev/null 2>&1
+if [[ "$(cat "$POWOS_PENDING_VARIANT" 2>/dev/null)" == "ghcr.io/powback/powos:nvidia-open" ]]; then
+    ok "offline switch failure records the target for retry"
+else
+    bad "offline switch failure records the target" "marker='$(cat "$POWOS_PENDING_VARIANT" 2>/dev/null)'"
+fi
+
+# The retry succeeds later and clears the marker (self-disabling unit).
+reset_state
+printf 'ghcr.io/powback/powos:nvidia-open\n' > "$POWOS_PENDING_VARIANT"
+SWITCH_RC=0
+fb_retry_variant >/dev/null 2>&1
+if [[ "$SWITCH_CALLED" == "ghcr.io/powback/powos:nvidia-open" && ! -f "$POWOS_PENDING_VARIANT" ]]; then
+    ok "retry switches and removes the marker on success"
+else
+    bad "retry switches and clears the marker" "switch='$SWITCH_CALLED' marker still $([[ -f $POWOS_PENDING_VARIANT ]] && echo present || echo gone)"
+fi
+
+# Still offline on the retry → marker must survive for the boot after that.
+reset_state
+printf 'ghcr.io/powback/powos:nvidia-open\n' > "$POWOS_PENDING_VARIANT"
+SWITCH_RC=1
+fb_retry_variant >/dev/null 2>&1
+if [[ -f "$POWOS_PENDING_VARIANT" ]]; then
+    ok "retry that fails again keeps the marker for a later boot"
+else
+    bad "retry that fails again keeps the marker" "marker was removed"
+fi
+
+reset_state
+rm -f "$POWOS_PENDING_VARIANT"
+fb_retry_variant >/dev/null 2>&1
+if [[ -z "$SWITCH_CALLED" ]]; then
+    ok "retry with no marker is a clean no-op"
+else
+    bad "retry with no marker is a no-op" "switch called with '$SWITCH_CALLED'"
+fi
+
+reset_state
+printf 'not-a-ref\n' > "$POWOS_PENDING_VARIANT"
+fb_retry_variant >/dev/null 2>&1
+if [[ -z "$SWITCH_CALLED" && ! -f "$POWOS_PENDING_VARIANT" ]]; then
+    ok "malformed marker is discarded, not retried forever"
+else
+    bad "malformed marker is discarded" "switch='$SWITCH_CALLED'"
+fi
+
+rm -rf "$TMPD"
+
+echo ""
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]

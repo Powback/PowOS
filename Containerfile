@@ -100,6 +100,16 @@ COPY systemd/greeter-watchdog.service     /usr/lib/systemd/system/greeter-watchd
 COPY systemd/greeter-watchdog.timer       /usr/lib/systemd/system/greeter-watchdog.timer
 COPY systemd/plasmalogin.service.d/       /usr/lib/systemd/system/plasmalogin.service.d/
 
+# First-boot appliers. bin/powos-firstboot-apply already shipped (COPY bin/
+# above), but its UNIT never did — so on every installed system the applier sat
+# in /usr/bin and nothing ever invoked it, and the guided installer's hostname,
+# user, password, SSH key, RAM-boot, AI and restore choices were silently
+# dropped. Both units are self-disabling via ConditionPathExists, so this does
+# not violate the zero-boot-services rule: with no install.conf and no pending
+# variant they are skipped outright.
+COPY systemd/powos-firstboot.service      /usr/lib/systemd/system/powos-firstboot.service
+COPY systemd/powos-variant-retry.service  /usr/lib/systemd/system/powos-variant-retry.service
+
 # KDE-builder stage — bakes sources/kde/patches/<app>/ into the image.
 # Built FROM THE SAME base image so the rebuilt bits match the shipped app's
 # exact version and ABI (the script clones the tag matching the installed
@@ -250,6 +260,8 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
       exit 1; \
     fi && \
     systemctl enable greeter-watchdog.timer && \
+    systemctl enable powos-firstboot.service && \
+    systemctl enable powos-variant-retry.service && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
     systemctl mask plasma-setup.service 2>/dev/null || true && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
