@@ -235,12 +235,49 @@ iwz_list_disks() {
     if [[ -n "$data" ]]; then
         live=$(lsblk -no PKNAME "$data" 2>/dev/null | head -1)
     fi
-    lsblk -dn -o NAME,SIZE,MODEL,TYPE 2>/dev/null | while read -r name size model type; do
+    # Emits: /dev/NAME <TAB> SIZE <TAB> MODEL <TAB> removable(yes|no) <TAB> TRAN
+    #
+    # INTERNAL DISKS ARE EMITTED FIRST, REMOVABLE ONES LAST, and this ordering
+    # is load-bearing: whiptail/kdialog pre-highlight the FIRST menu entry, so
+    # whatever leads this list is what a bare Enter selects. lsblk's own order
+    # puts mmcblk0 (the SD card) ahead of nvme0n1, which is how an install
+    # landed on a Steam Deck's SD card and erased the games on it.
+    #
+    # MODEL is requested LAST so a model string containing spaces is absorbed
+    # by the final read variable instead of splitting the fields.
+    local name size type rm hotplug tran model removable
+    local -a fixed=() removables=()
+    while read -r name size type rm hotplug tran model; do
         [[ "$type" == "disk" ]] || continue
         case "$name" in loop*|sr*|zram*) continue ;; esac
         [[ -n "$live" && "$name" == "$live" ]] && continue
-        printf '/dev/%s\t%s\t%s\n' "$name" "$size" "${model:-disk}"
-    done
+        removable=no
+        [[ "$rm" == "1" || "$hotplug" == "1" || "$tran" == "usb" ]] && removable=yes
+        # SD/eMMC readers report rm=0 on some controllers — treat mmcblk as
+        # removable regardless, since on a Deck that is always the card slot.
+        case "$name" in mmcblk*) removable=yes ;; esac
+        if [[ "$removable" == "yes" ]]; then
+            removables+=("$(printf '/dev/%s\t%s\t%s\t%s\t%s' "$name" "$size" "${model:-disk}" "$removable" "${tran:-?}")")
+        else
+            fixed+=("$(printf '/dev/%s\t%s\t%s\t%s\t%s' "$name" "$size" "${model:-disk}" "$removable" "${tran:-?}")")
+        fi
+    done < <(lsblk -dn -o NAME,SIZE,TYPE,RM,HOTPLUG,TRAN,MODEL 2>/dev/null)
+    local e
+    for e in ${fixed[@]+"${fixed[@]}"};      do printf '%s\n' "$e"; done
+    for e in ${removables[@]+"${removables[@]}"}; do printf '%s\n' "$e"; done
+}
+
+# Is $1 one of the disks iwz_list_disks flagged removable? Used to gate the
+# destructive picks behind a typed confirmation.
+iwz__is_removable() {
+    local want="$1" dev size model removable tran
+    while IFS=$'\t' read -r dev size model removable tran; do
+        if [[ "$dev" == "$want" ]]; then
+            [[ "$removable" == "yes" ]]
+            return
+        fi
+    done < <(iwz_list_disks)
+    return 1
 }
 
 # PURE: write the shared install.conf from the IWZ_* globals. $1 = path
@@ -345,10 +382,14 @@ iwz_build_installer_args() {
 
 iwz_step_disk() {
     iwz_step "Target disk"
-    local -a menu=() line dev size model
-    while IFS=$'\t' read -r dev size model; do
+    local -a menu=() dev size model removable tran
+    while IFS=$'\t' read -r dev size model removable tran; do
         [[ -n "$dev" ]] || continue
-        menu+=("$dev" "$size  ${model}")
+        if [[ "$removable" == "yes" ]]; then
+            menu+=("$dev" "[REMOVABLE ${tran}] $size  ${model}  — SD card / USB, NOT the internal drive")
+        else
+            menu+=("$dev" "$size  ${model}  (${tran}, internal)")
+        fi
     done < <(iwz_list_disks)
 
     if [[ ${#menu[@]} -eq 0 ]]; then
@@ -357,8 +398,22 @@ iwz_step_disk() {
         local d; d=$(iwz_input "Target disk device (e.g. /dev/nvme0n1)" "${IWZ_DISK:-/dev/nvme0n1}") || return 1
         IWZ_DISK="$d"
     else
-        local pick; pick=$(iwz_menu "Choose the disk to install PowOS onto:" "${menu[@]}") || return 1
+        local pick
+        pick=$(iwz_menu "Choose the disk to install PowOS onto — THIS DISK IS ERASED COMPLETELY:" "${menu[@]}") || return 1
         [[ -n "$pick" ]] || return 1
+        # Picking removable media is nearly always a slip (the SD card sits
+        # right next to the internal drive in this list). Never accept it from
+        # a keypress alone — make it be typed out in full.
+        if iwz__is_removable "$pick"; then
+            iwz_warn "$pick is REMOVABLE media (SD card / USB stick), not the internal drive."
+            iwz_warn "Installing here ERASES it completely, including any games stored on it."
+            local typed
+            typed=$(iwz_input "Type $pick exactly to confirm, or leave blank to choose again" "") || return 1
+            if [[ "$typed" != "$pick" ]]; then
+                iwz_warn "Not confirmed — nothing selected."
+                return 1
+            fi
+        fi
         IWZ_DISK="$pick"
     fi
     iwz_ok "Disk: $IWZ_DISK"
@@ -370,22 +425,30 @@ iwz_step_disk() {
 iwz_step_games_disk() {
     IWZ_GAMES_DISK=""
     # Collect disks as dev/size/model triples so we can count + list the others.
-    local -a disks=() dev size model
-    while IFS=$'\t' read -r dev size model; do
+    local -a disks=() dev size model removable tran
+    while IFS=$'\t' read -r dev size model removable tran; do
         [[ -n "$dev" ]] || continue
-        disks+=("$dev" "$size" "$model")
+        disks+=("$dev" "$size" "$model" "$removable" "$tran")
     done < <(iwz_list_disks)
 
-    local n=$(( ${#disks[@]} / 3 ))
+    local n=$(( ${#disks[@]} / 5 ))
     (( n > 1 )) || return 0   # only one disk to choose from — stay same-disk
 
     iwz_step "Shared games partition location"
-    local -a menu=(same "Same disk as PowOS (carve a partition)")
+    # "same" stays FIRST so the pre-highlighted entry is the non-destructive
+    # one — this menu offers to consume whole disks, and on a Deck one of them
+    # is the SD card full of the user's games.
+    local -a menu=(same "Same disk as PowOS (carve a partition) — leaves other disks untouched")
     local i
-    for (( i=0; i<${#disks[@]}; i+=3 )); do
+    for (( i=0; i<${#disks[@]}; i+=5 )); do
         dev="${disks[i]}"; size="${disks[i+1]}"; model="${disks[i+2]}"
+        removable="${disks[i+3]}"; tran="${disks[i+4]}"
         [[ "$dev" == "$IWZ_DISK" ]] && continue   # never the PowOS disk itself
-        menu+=("$dev" "Use $dev whole ($size  $model) for games")
+        if [[ "$removable" == "yes" ]]; then
+            menu+=("$dev" "ERASE removable $dev ($size  $model, $tran) and use it all for games")
+        else
+            menu+=("$dev" "ERASE $dev whole ($size  $model) and use it all for games")
+        fi
     done
 
     local pick
@@ -393,6 +456,18 @@ iwz_step_games_disk() {
     if [[ -z "$pick" || "$pick" == "same" ]]; then
         IWZ_GAMES_DISK=""
     else
+        if iwz__is_removable "$pick"; then
+            iwz_warn "$pick is REMOVABLE media (SD card / USB stick)."
+            iwz_warn "Choosing it ERASES the whole card, including games already on it."
+            local typed
+            typed=$(iwz_input "Type $pick exactly to confirm, or leave blank to keep games on the PowOS disk" "") || return 1
+            if [[ "$typed" != "$pick" ]]; then
+                iwz_warn "Not confirmed — keeping games on the PowOS disk."
+                IWZ_GAMES_DISK=""
+                iwz_ok "Games disk: same disk as PowOS"
+                return 0
+            fi
+        fi
         IWZ_GAMES_DISK="$pick"
     fi
     iwz_ok "Games disk: $([[ -n "$IWZ_GAMES_DISK" ]] && echo "$IWZ_GAMES_DISK (separate whole disk)" || echo "same disk as PowOS")"
