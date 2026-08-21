@@ -1,6 +1,39 @@
 #!/usr/bin/env bash
 # build-helpers.sh - Shared functions for overlay build scripts
 
+# Copy <temp_root>/usr into <output_dir>/usr, skipping every path the
+# reference /usr already provides.
+#
+# This is the guard that keeps a sysext additive. dnf --installroot resolves a
+# full dependency closure, so an un-pruned overlay ships glibc, OpenSSL,
+# systemd libs and bash built for the overlay's target release; merging that
+# over a host on a newer release replaces its core libraries with older ones
+# and kills the running system.
+#
+# Extracted so it is unit-testable without a package install —
+# test/tier1/test-overlay-prune.sh exercises it directly.
+# Returns non-zero when nothing new remains: an overlay that only shadows the
+# host is never valid.
+# Usage: powos_prune_overlay_usr <temp_root> <output_dir> [ref_usr]
+powos_prune_overlay_usr() {
+    local temp_root="$1" output_dir="$2" ref_usr="${3:-/usr}"
+    local kept=0 pruned=0 rel src
+    while IFS= read -r -d '' src; do
+        rel="${src#"$temp_root"/usr/}"
+        # -e follows symlinks, so a DANGLING symlink on the host would look
+        # absent and we would happily shadow it. -L catches that case.
+        if [[ -e "$ref_usr/$rel" || -L "$ref_usr/$rel" ]]; then
+            pruned=$((pruned+1))
+            continue
+        fi
+        mkdir -p "$output_dir/usr/$(dirname "$rel")"
+        cp -a "$src" "$output_dir/usr/$rel"
+        kept=$((kept+1))
+    done < <(find "$temp_root/usr" \( -type f -o -type l \) -print0)
+    echo "Overlay contents: kept $kept new file(s), pruned $pruned already on the host."
+    [[ $kept -gt 0 ]]
+}
+
 # Install packages from packages.txt to the output directory
 # Usage: install_packages <output_dir> <packages_file>
 install_packages() {
@@ -172,39 +205,28 @@ install_packages() {
     local ref_usr="${POWOS_PRUNE_USR:-/usr}"
     if [[ -d "$temp_root/usr" && -d "$ref_usr" ]]; then
         echo "Pruning files already provided by $ref_usr ..."
-        local kept=0 pruned=0 rel
-        while IFS= read -r -d '' src; do
-            rel="${src#$temp_root/usr/}"
-            if [[ -e "$ref_usr/$rel" ]]; then
-                pruned=$((pruned+1))
-                continue
-            fi
-            mkdir -p "$output_dir/usr/$(dirname "$rel")"
-            cp -a "$src" "$output_dir/usr/$rel"
-            kept=$((kept+1))
-        done < <(find "$temp_root/usr" \( -type f -o -type l \) -print0)
-        echo "Overlay contents: kept $kept new file(s), pruned $pruned already on the host."
-        if [[ $kept -eq 0 ]]; then
+        if ! powos_prune_overlay_usr "$temp_root" "$output_dir" "$ref_usr"; then
             echo "ERROR: overlay would be empty — every file already exists on the host." >&2
             rm -rf "$temp_root"
             return 1
         fi
     fi
-    if false; then
-        cp -r "$temp_root/usr/"* "$output_dir/usr/"
-        # A sysext MUST NOT ship its own /usr/lib/os-release — systemd-sysext
-        # refuses ("Extension contains '/usr/lib/os-release', which is not
-        # allowed") and, worse, aborts the ENTIRE sysext merge on the FIRST
-        # such extension, silently blocking every other overlay too. dnf's
-        # --installroot pulls in the base OS release file, so strip it here
-        # (plus any machine-id, which sysext also forbids).
-        rm -f "$output_dir/usr/lib/os-release" \
-              "$output_dir/usr/lib64/os-release" \
-              "$output_dir/etc/os-release" \
-              "$output_dir/usr/lib/machine-id" \
-              "$output_dir/etc/machine-id" 2>/dev/null || true
-    fi
-    
+
+    # A sysext MUST NOT ship its own /usr/lib/os-release — systemd-sysext
+    # refuses ("Extension contains '/usr/lib/os-release', which is not
+    # allowed") and, worse, aborts the ENTIRE sysext merge on the FIRST such
+    # extension, silently blocking every other overlay too. dnf's
+    # --installroot pulls in the base OS release file. Pruning already drops
+    # it whenever the reference /usr has one, but strip it unconditionally so
+    # a cross-build against a tree that lacks it cannot reintroduce the
+    # problem. (Same for machine-id, which sysext also forbids.)
+    rm -f "$output_dir/usr/lib/os-release" \
+          "$output_dir/usr/lib64/os-release" \
+          "$output_dir/etc/os-release" \
+          "$output_dir/usr/lib/machine-id" \
+          "$output_dir/etc/machine-id" 2>/dev/null || true
+
+
     # Also check for /etc configs and move them to /usr/share/<name>/etc for sysext compatibility
     # (Systemd sysexts only overlay /usr)
     # However, for simplicity in this specific "install_packages", we might just copy /usr.
