@@ -47,7 +47,10 @@ wal_qdbus() {
     else return 127; fi
 }
 
-wal_call() { wal_qdbus "$WAL_SVC" "$WAL_OBJ" "${WAL_IFACE}.$@" 2>/dev/null; }
+wal_call() {
+    local method="$1"; shift
+    wal_qdbus "$WAL_SVC" "$WAL_OBJ" "${WAL_IFACE}.${method}" "$@" 2>/dev/null
+}
 
 wal_wallets()      { wal_call wallets; }
 wal_is_open()      { wal_call isOpen "$1" 2>/dev/null | grep -qi true; }
