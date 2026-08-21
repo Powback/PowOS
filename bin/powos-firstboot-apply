@@ -119,6 +119,86 @@ fb_apply_ramboot() {
     fi
 }
 
+# ── GPU variant ───────────────────────────────────────────────────
+# The install media is ONE image that boots anywhere (the generic build), so
+# an installed machine can easily be running the wrong variant for its GPU.
+# The wizard already detects and records POWOS_GPU_FLAVOR — until 2026-08-21
+# nothing ever read it, so every install simply kept whatever variant the USB
+# happened to carry. This re-points the install at the matching published tag.
+
+# Steam Deck DMI product names: Jupiter = LCD, Galileo = OLED.
+fb_is_steam_deck() {
+    local p=""
+    [[ -r /sys/class/dmi/id/product_name ]] && p=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
+    case "$p" in Jupiter|Galileo) return 0 ;; *) return 1 ;; esac
+}
+
+# Published image tag for a wizard GPU flavor. Deck hardware OVERRIDES the GPU
+# answer: a Deck is AMD, but it needs upstream's Deck enablement (jupiter
+# kernel, Deck audio/controller firmware, gamescope session defaults) that the
+# generic AMD image does not carry.
+fb_variant_for_flavor() {
+    local flavor="${1:-}"
+    if fb_is_steam_deck; then echo "deck"; return 0; fi
+    case "$flavor" in
+        nvidia-open|nvidia) echo "nvidia-open" ;;
+        deck)               echo "deck" ;;
+        amd|intel|main)     echo "main" ;;
+        # Unknown or undetectable → the generic build. AMD and Intel drivers
+        # are in-kernel so it comes up everywhere; guessing NVIDIA instead
+        # would put proprietary kmods on a machine that has no NVIDIA GPU.
+        *)                  echo "main" ;;
+    esac
+}
+
+# The registry ref of the currently booted deployment, prefixes stripped.
+fb_current_image_ref() {
+    rpm-ostree status --json 2>/dev/null | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+ref = ""
+for dep in d.get("deployments", []):
+    if dep.get("booted"):
+        ref = dep.get("container-image-reference") or ""
+        break
+for pre in ("ostree-unverified-registry:", "ostree-image-signed:",
+            "ostree-unverified-image:", "ostree-remote-image:"):
+    if ref.startswith(pre):
+        ref = ref[len(pre):]; break
+if "://" in ref:
+    ref = ref.split("://", 1)[1]
+print(ref)' 2>/dev/null
+}
+
+fb_apply_gpu_flavor() {
+    local flavor="${POWOS_GPU_FLAVOR:-}" want ref repo target
+    [[ -n "$flavor" ]] || { fb_log "no GPU flavor recorded — leaving the image alone"; return 0; }
+    want="$(fb_variant_for_flavor "$flavor")"
+    ref="$(fb_current_image_ref)"
+    if [[ -z "$ref" || "$ref" != *"/"*":"* ]]; then
+        fb_warn "cannot read the booted image reference — not switching GPU variant"
+        return 0
+    fi
+    repo="${ref%:*}"; repo="${repo%@*}"
+    target="$repo:$want"
+    if [[ "$ref" == "$target" ]]; then
+        fb_ok "already on the '$want' image variant"
+        return 0
+    fi
+    fb_log "GPU flavor '$flavor' → image variant '$want'"
+    fb_log "  from: $ref"
+    fb_log "    to: $target"
+    if bootc switch "$target" >/dev/null 2>&1; then
+        fb_ok "staged $target — applies on the next reboot (old deployment stays as rollback)"
+    else
+        # Never fatal: a machine that boots on the wrong variant is a working
+        # machine with the wrong drivers, which the user can fix later with
+        # `powos driver`. A machine that fails firstboot is not.
+        fb_warn "bootc switch to $target failed — staying on $ref"
+    fi
+}
+
 fb_apply_ai() {
     local provider="${POWOS_AI_PROVIDER:-none}" key="${POWOS_AI_KEY:-}"
     [[ -n "$provider" && "$provider" != "none" ]] || { fb_log "no AI provider — skipping"; return 0; }
@@ -184,6 +264,7 @@ fb_main() {
     fb_apply_user     || true
     fb_apply_ssh      || true
     fb_apply_ramboot  || true
+    fb_apply_gpu_flavor || true
     fb_apply_ai       || true
     fb_apply_restore  || true
 

@@ -222,7 +222,21 @@ iwz_detect_gpu_flavor() {
     if echo "$out" | grep -qiE "VGA.*Intel|Display.*Intel"; then
         echo "intel"; return 0
     fi
-    echo "nvidia-open"   # default when nothing is detectable
+    # Undetectable → the GENERIC build, not NVIDIA. AMD and Intel drivers are
+    # in-kernel so the generic image comes up on anything; guessing NVIDIA
+    # instead installs proprietary kmods on a machine that may have no NVIDIA
+    # GPU at all, which is the worse failure and the harder one to undo.
+    echo "amd"
+}
+
+# Steam Deck DMI product names: Jupiter = LCD, Galileo = OLED. A Deck is AMD,
+# but it needs upstream's Deck enablement (jupiter kernel, Deck audio and
+# controller firmware, gamescope session defaults) that the generic AMD image
+# does not carry — so it is its own flavor, checked before the GPU.
+iwz_is_steam_deck() {
+    local p=""
+    [[ -r /sys/class/dmi/id/product_name ]] && p=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
+    case "$p" in Jupiter|Galileo) return 0 ;; *) return 1 ;; esac
 }
 
 # Enumerate installable disks: "/dev/NAME<TAB>SIZE<TAB>MODEL", excluding
@@ -499,12 +513,19 @@ iwz_step_sizes() {
 
 iwz_step_gpu() {
     iwz_step "GPU driver flavor"
-    local detected; detected=$(iwz_detect_gpu_flavor)
+    # Deck hardware wins over the GPU answer — see iwz_is_steam_deck.
+    local detected
+    if iwz_is_steam_deck; then
+        detected="deck"
+    else
+        detected=$(iwz_detect_gpu_flavor)
+    fi
     iwz_log "Auto-detected: $detected"
     local g
     g=$(iwz_menu "GPU driver flavor (detected default: $detected):" \
         "$detected"  "Use the auto-detected default ($detected)" \
-        nvidia-open  "NVIDIA open kernel modules (project default)" \
+        deck         "Steam Deck (Deck kernel, firmware, gamescope session)" \
+        nvidia-open  "NVIDIA open kernel modules (RTX 40/50-series need this)" \
         nvidia       "NVIDIA closed/proprietary modules" \
         amd          "AMD (Mesa)" \
         intel        "Intel (Mesa)") || return 1

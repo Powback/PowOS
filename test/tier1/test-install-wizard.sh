@@ -214,7 +214,12 @@ check "AMD/Radeon → amd"              '[[ "$(iwz_detect_gpu_flavor)" == "amd" 
 lspci() { echo "00:02.0 VGA compatible controller: Intel Corporation UHD Graphics"; }
 check "Intel → intel"                 '[[ "$(iwz_detect_gpu_flavor)" == "intel" ]]'
 lspci() { echo "00:1f.0 ISA bridge: nothing graphical here"; }
-check "unknown → nvidia-open default" '[[ "$(iwz_detect_gpu_flavor)" == "nvidia-open" ]]'
+# Undetectable must fall back to the GENERIC build, not NVIDIA. The media is
+# one image that installs anywhere, so this default decides what an unknown
+# machine ends up running: AMD/Intel drivers are in-kernel and come up on
+# everything, whereas guessing NVIDIA puts proprietary kmods on a machine that
+# may have no NVIDIA GPU — the worse failure, and the harder one to undo.
+check "unknown → generic (amd), NOT nvidia" '[[ "$(iwz_detect_gpu_flavor)" == "amd" ]]'
 unset -f lspci
 
 # ── UI backend selection ──────────────────────────────────────────
