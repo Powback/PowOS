@@ -1,0 +1,31 @@
+#!/usr/bin/bash
+# Switch this session to Game Mode (gamescope) — the console-like UI.
+#
+# Deliberately NOT "Steam Big Picture Mode": that shortcut runs Big Picture
+# INSIDE the desktop session, where Steam Input falls back to the desktop
+# layout and the overlay cannot composite. This starts the real gamescope
+# session instead, which is what makes controllers and the overlay behave.
+set -euo pipefail
+
+die() {
+    if [[ -t 2 ]]; then echo >&2 "$*"; else
+        command -v zenity >/dev/null 2>&1 && zenity --error --text="$*" || echo >&2 "$*"
+    fi
+    exit 1
+}
+
+command -v gamescope-session-plus >/dev/null 2>&1 \
+    || die "Game Mode is not installed.\n\nEnable the capability first:\n  powos overlay enable capability-gaming-mode"
+
+# steamos-session-select is the supported switch; it writes the session choice
+# and restarts the display manager into it.
+if command -v steamos-session-select >/dev/null 2>&1; then
+    exec steamos-session-select gamescope
+fi
+
+# Fallback: ask the display manager for the session directly.
+if [[ -f /usr/share/wayland-sessions/gamescope-session.desktop ]]; then
+    exec systemctl --user start gamescope-session.target
+fi
+
+die "gamescope is installed but no way to switch sessions was found\n(steamos-session-select and gamescope-session.desktop are both missing)."

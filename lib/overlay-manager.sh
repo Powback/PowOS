@@ -17,7 +17,11 @@ _omgr_self_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ ! -d "$_omgr_self_root/sources" && -d /var/lib/powos/src/sources ]]; then
     _omgr_self_root="/var/lib/powos/src"
 fi
-POWOS_ROOT="${POWOS_ROOT:-$_omgr_self_root}"
+# Exported, not just assigned: every sources/<name>/build.sh sources
+# "${POWOS_ROOT}/lib/build-helpers.sh", and build.sh runs as a CHILD process.
+# Without the export it dies instantly on "POWOS_ROOT: unbound variable",
+# which broke `powos overlay build` for every overlay.
+export POWOS_ROOT="${POWOS_ROOT:-$_omgr_self_root}"
 EXTENSIONS_DIR="${POWOS_EXTENSIONS_DIR:-${POWOS_ROOT}/extensions}"
 # /var/lib/powos/src is RESET to the baked snapshot on every boot, so built
 # extensions there (and the /var/lib/extensions symlinks pointing at them)

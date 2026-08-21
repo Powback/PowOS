@@ -8,9 +8,12 @@ gamescope-session-steam
 # SteamOS-like system manager
 steamos-manager
 
-# Handheld Daemon for controller support (universal)
-hhd
-hhd-ui
+# Handheld Daemon for controller support.
+# OPTIONAL ('?'): matters on ROG Ally / Legion Go class handhelds; a Steam Deck
+# uses native kernel support instead. Not carried by the ublue COPRs, so a hard
+# requirement here would block Gaming Mode on every machine.
+?hhd
+?hhd-ui
 
 # Zenity for dialogs
 zenity

@@ -15,8 +15,19 @@ install_packages() {
     echo "Installing packages from $pkg_file..."
 
     # Read packages, ignoring comments and empty lines
-    local packages
-    packages=$(grep -v '^#' "$pkg_file" 2>/dev/null | grep -v '^$' | tr '\n' ' ' || true)
+    # A leading '?' marks a package OPTIONAL: install it when the repos have
+    # it, never fail the build when they do not. Everything else is REQUIRED
+    # and its absence fails the build (see the verification pass below).
+    # Optional exists for packages that only apply to some hardware — e.g. hhd
+    # (Handheld Daemon) matters on ROG Ally / Legion Go class devices, while a
+    # Steam Deck uses native kernel support, and it is not carried by the
+    # ublue COPRs at all.
+    local all_lines required_pkgs optional_pkgs packages
+    all_lines=$(grep -v '^#' "$pkg_file" 2>/dev/null | grep -v '^$' || true)
+    required_pkgs=$(echo "$all_lines" | grep -v '^?' | tr '\n' ' ' || true)
+    optional_pkgs=$(echo "$all_lines" | grep '^?' | sed 's/^?//' | tr '\n' ' ' || true)
+    packages="$required_pkgs $optional_pkgs"
+    packages=$(echo "$packages" | tr -s ' ')
 
     if [[ -z "$packages" ]]; then
         echo "No packages to install."
@@ -33,14 +44,44 @@ install_packages() {
     mkdir -p "$temp_root/etc/yum.repos.d/"
     cp /etc/yum.repos.d/* "$temp_root/etc/yum.repos.d/" || true # Copy all available repos
 
-    # Auto-detect release version from the container
-    local release_ver
-    if [[ -f /etc/os-release ]]; then
-        release_ver=$(grep -oP 'VERSION_ID=\K\d+' /etc/os-release)
-    else
-        release_ver="39" # Fallback
+    # Release version: the OVERLAY's declared target wins over the host's.
+    #
+    # An overlay pins OS_VERSION in metadata.env because its packages exist for
+    # that Fedora release. Auto-detecting the host instead breaks every build
+    # the moment the host moves ahead of upstream: capability-gaming-mode
+    # declares 43, the box moved to 44, and gamescope-session-plus /
+    # steamos-manager have no fc44 build in the ublue-os COPRs yet — so every
+    # headline package vanished with "No match for argument".
+    local release_ver=""
+    local meta_file="${OVERLAY_SOURCE_DIR:-$(dirname "$pkg_file")}/metadata.env"
+    if [[ -f "$meta_file" ]]; then
+        release_ver=$(grep -oP '^OS_VERSION="?\K\d+' "$meta_file" 2>/dev/null || true)
+        [[ -n "$release_ver" ]] && echo "Using overlay's declared OS_VERSION: $release_ver"
     fi
-    echo "Detected release version: $release_ver"
+    if [[ -z "$release_ver" ]]; then
+        if [[ -f /etc/os-release ]]; then
+            release_ver=$(grep -oP 'VERSION_ID=\K\d+' /etc/os-release)
+        else
+            release_ver="39" # Fallback
+        fi
+        echo "Detected release version from host: $release_ver"
+    fi
+
+    # Pick a package manager that will actually run here.
+    #
+    # On Bazzite/PowOS hosts /usr/bin/dnf is a WRAPPER that hard-refuses
+    # ("Fedora Atomic images utilize rpm-ostree instead") unless it detects a
+    # container or an unlocked deployment — and it refuses even for a
+    # --installroot build into a temp dir, which touches nothing on the host.
+    # The wrapper's own first branch execs /usr/bin/dnf5, so call that
+    # directly and overlay builds work on the OS PowOS is built from.
+    local dnf_bin
+    if command -v dnf5 >/dev/null 2>&1; then
+        dnf_bin=dnf5
+    else
+        dnf_bin=dnf
+    fi
+    echo "Using package manager: $dnf_bin"
 
     # Use dnf to install into temp root
     # --nogpgcheck is added as a workaround for build failures with unsigned packages.
@@ -48,9 +89,28 @@ install_packages() {
     # briefly losing network (e.g. session lock + WiFi power-save) cause a whole
     # overlay to fail otherwise. Three attempts with backoff covers realistic
     # flakes without hiding a genuinely misconfigured repo.
+    # Repositories an overlay needs, declared in its metadata.env as e.g.
+    #   REPOS="copr:copr.fedorainfracloud.org:ublue-os:bazzite ..."
+    #
+    # ublue/Bazzite ship their COPRs with enabled=0. Copying the .repo files
+    # into the build root is therefore not enough — dnf ignores them and every
+    # package from those repos reports "No match for argument", which
+    # --skip-unavailable then swallows. Enable exactly what the overlay asks
+    # for: no more (no surprise packages from testing repos), no less.
+    local -a repo_args=()
+    if [[ -f "$meta_file" ]]; then
+        local declared_repos
+        declared_repos=$(grep -oP '^REPOS="?\K[^"]*' "$meta_file" 2>/dev/null || true)
+        local r
+        for r in $declared_repos; do
+            repo_args+=(--enablerepo="$r")
+            echo "Enabling repo: $r"
+        done
+    fi
+
     local attempt rc
     for attempt in 1 2 3; do
-        if dnf install -y --installroot="$temp_root" --releasever="$release_ver" --setopt=install_weak_deps=False --setopt=keepcache=False --setopt=retries=5 --setopt=timeout=60 --nogpgcheck --skip-unavailable $packages; then
+        if "$dnf_bin" install -y --installroot="$temp_root" "${repo_args[@]+"${repo_args[@]}"}" --releasever="$release_ver" --setopt=install_weak_deps=False --setopt=keepcache=False --setopt=retries=5 --setopt=timeout=60 --nogpgcheck --skip-unavailable $packages; then
             echo "Packages installed successfully to temp root (attempt $attempt)."
             break
         fi
@@ -65,9 +125,72 @@ install_packages() {
         fi
     done
 
-    # Move files from temp root to output dir
-    # We primarily want /usr
-    if [[ -d "$temp_root/usr" ]]; then
+    # Verify every REQUESTED package actually landed.
+    #
+    # --skip-unavailable keeps a build alive when an optional package is
+    # missing from a variant's repos, but on its own it also lets the packages
+    # that DEFINE a capability vanish silently: capability-gaming-mode once
+    # "built" green while gamescope-session-plus, steamos-manager and hhd were
+    # all skipped, producing a 900MB overlay that could not possibly work.
+    # A build that cannot deliver its headline packages must fail loudly.
+    local missing=()
+    local pkg
+    for pkg in $required_pkgs; do
+        # --whatprovides, not a literal name query: dnf resolves aliases and
+        # virtual provides (python-vdf installs as python3-vdf), so querying
+        # the requested string alone reports false missing packages.
+        if ! rpm --root "$temp_root" -q --whatprovides "$pkg" >/dev/null 2>&1; then
+            missing+=("$pkg")
+        fi
+    done
+    local opt
+    for opt in $optional_pkgs; do
+        rpm --root "$temp_root" -q --whatprovides "$opt" >/dev/null 2>&1 \
+            || echo "note: optional package not available here, continuing without it: $opt"
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "ERROR: these REQUIRED packages are NOT in the built root:" >&2
+        printf '  - %s\n' "${missing[@]}" >&2
+        echo "The repositories reachable from this build environment do not carry them." >&2
+        echo "Build in an environment with the right repos (e.g. the PowOS/Bazzite image)." >&2
+        rm -rf "$temp_root"
+        return 1
+    fi
+
+    # Move files from temp root to output dir, PRUNING anything the host
+    # already provides.
+    #
+    # A sysext may only ADD to /usr — it must never shadow what is already
+    # there. dnf --installroot resolves a full dependency closure, so a naive
+    # copy ships glibc, OpenSSL, systemd libs and bash built for the overlay's
+    # target release. Merging that over a host on a NEWER release replaces its
+    # core libraries with older ones: sshd died instantly the first time this
+    # shipped, taking remote access with it while the machine stayed up.
+    #
+    # Compare against a reference /usr (the build host's by default, or
+    # POWOS_PRUNE_USR when cross-building) and keep only genuinely new files.
+    local ref_usr="${POWOS_PRUNE_USR:-/usr}"
+    if [[ -d "$temp_root/usr" && -d "$ref_usr" ]]; then
+        echo "Pruning files already provided by $ref_usr ..."
+        local kept=0 pruned=0 rel
+        while IFS= read -r -d '' src; do
+            rel="${src#$temp_root/usr/}"
+            if [[ -e "$ref_usr/$rel" ]]; then
+                pruned=$((pruned+1))
+                continue
+            fi
+            mkdir -p "$output_dir/usr/$(dirname "$rel")"
+            cp -a "$src" "$output_dir/usr/$rel"
+            kept=$((kept+1))
+        done < <(find "$temp_root/usr" \( -type f -o -type l \) -print0)
+        echo "Overlay contents: kept $kept new file(s), pruned $pruned already on the host."
+        if [[ $kept -eq 0 ]]; then
+            echo "ERROR: overlay would be empty — every file already exists on the host." >&2
+            rm -rf "$temp_root"
+            return 1
+        fi
+    fi
+    if false; then
         cp -r "$temp_root/usr/"* "$output_dir/usr/"
         # A sysext MUST NOT ship its own /usr/lib/os-release — systemd-sysext
         # refuses ("Extension contains '/usr/lib/os-release', which is not
@@ -114,8 +237,22 @@ copy_overlay_files() {
     # Binaries (handle empty directories gracefully)
     if [[ -d "$source_dir/bin" ]] && ls "$source_dir/bin/"* &>/dev/null; then
         mkdir -p "$output_dir/usr/bin"
-        cp -r "$source_dir/bin/"* "$output_dir/usr/bin/"
-        chmod +x "$output_dir/usr/bin/"*
+        # chmod ONLY what we just copied. Blanket-chmodding /usr/bin also hits
+        # package-provided entries and symlinks whose targets were pruned as
+        # host-provided — those are dangling inside the overlay but resolve
+        # fine once merged, and chmod failing on them killed the whole build.
+        local _b
+        for _b in "$source_dir/bin/"*; do
+            [[ -f "$_b" ]] || continue
+            cp -a "$_b" "$output_dir/usr/bin/"
+            chmod +x "$output_dir/usr/bin/$(basename "$_b")"
+        done
+    fi
+
+    # Desktop entries — how a capability appears in the application menu.
+    if [[ -d "$source_dir/applications" ]] && ls "$source_dir/applications/"* &>/dev/null; then
+        mkdir -p "$output_dir/usr/share/applications"
+        cp -r "$source_dir/applications/"* "$output_dir/usr/share/applications/"
     fi
 
     # Configs (generic)

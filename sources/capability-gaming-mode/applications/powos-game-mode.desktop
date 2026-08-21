@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Switch to Game Mode
+GenericName=Console-like gaming session
+Comment=Leave the desktop and start the gamescope session (Steam Deck UI)
+Exec=/usr/bin/powos-game-mode
+Icon=steamdeck-gaming-return
+Terminal=false
+Categories=Game;
+Keywords=game;gamescope;deck;bigpicture;console;
+StartupNotify=true
