@@ -32,6 +32,20 @@ isv_log()     { echo -e "${CYAN}[install]${NC} $*"; }
 isv_ok()      { echo -e "${GREEN}[install]${NC} $*"; }
 isv_warn()    { echo -e "${YELLOW}[install]${NC} $*"; }
 isv_err()     { echo -e "${RED}[install]${NC} $*" >&2; }
+
+# Offline GPU-variant store (pv_* helpers). Sourced next to this file so the
+# installer can read a variant's bytes straight off the install media instead
+# of pulling from a registry. Guarded, with no-op fallbacks: a missing
+# variants.sh must degrade to "install the running image", never to an error
+# in the middle of a disk install.
+if ! declare -F pv_source_imgref >/dev/null 2>&1; then
+    _isv_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    # shellcheck source=/dev/null
+    [[ -n "$_isv_lib_dir" && -r "$_isv_lib_dir/variants.sh" ]] && source "$_isv_lib_dir/variants.sh"
+fi
+declare -F pv_source_imgref >/dev/null 2>&1 || pv_source_imgref() { return 1; }
+declare -F pv_target_imgref >/dev/null 2>&1 || pv_target_imgref() { return 1; }
+declare -F pv_describe      >/dev/null 2>&1 || pv_describe() { echo "no offline variant store available"; }
 isv_step()    { echo; echo -e "${BOLD}── $* ──${NC}"; }
 
 # ── Global state (set by option parsing) ──────────────────────────
@@ -55,6 +69,9 @@ ISV_WINDOWS_GB="auto"  # unallocated tail (GB) reserved for the 'partition'
 ISV_SHARED_AUTO=0      # 1 = value came from "auto" (may shrink to fit)
 ISV_WINDOWS_AUTO=0     # 1 = value came from "auto" (may shrink to fit)
 ISV_FS="btrfs"         # root filesystem
+ISV_VARIANT=""         # GPU variant to install (deck|main|nvidia-open).
+                       # When the media carries an offline variant store,
+                       # its bytes are used and NO network is touched.
 
 # run_step "description" cmd args...
 # Executes a (destructive) command unless dry-run. Always echoes it first.
@@ -531,9 +548,32 @@ isv_install_whole_disk() {
     # a DISK install must not run from a tmpfs upper (every write would vanish
     # at reboot, and a plugged-in USB's layers would stack into the root).
     # TODO(hw): validate exact bootc flags against the shipped bootc version.
+    # Offline variant install: when the media carries the requested variant,
+    # read its bytes from the stick (--source-imgref) while still recording the
+    # registry ref the installed system should track (--target-imgref). No
+    # network is involved. Without a local copy we simply install the running
+    # image, exactly as before — never a silent registry pull mid-install.
+    local -a variant_args=()
+    if [[ -n "$ISV_VARIANT" ]]; then
+        local src tgt
+        if src=$(pv_source_imgref "$ISV_VARIANT" 2>/dev/null) && [[ -n "$src" ]]; then
+            tgt=$(pv_target_imgref "$ISV_VARIANT")
+            variant_args=(--source-imgref "$src"
+                          --target-imgref "$tgt"
+                          --target-transport registry)
+            isv_ok "Installing variant '$ISV_VARIANT' from the media (offline)."
+            isv_log "  source: $src"
+            isv_log "  target: $tgt"
+        else
+            isv_warn "Variant '$ISV_VARIANT' is not on this media — installing the running image instead."
+            isv_warn "  $(pv_describe)"
+        fi
+    fi
+
     run_step "wipe + install PowOS" \
         bootc install to-disk --wipe --karg rd.powos.ramboot=0 \
-            --filesystem "$ISV_FS" ${size_args[@]+"${size_args[@]}"} "$ISV_TARGET" || {
+            --filesystem "$ISV_FS" ${variant_args[@]+"${variant_args[@]}"} \
+            ${size_args[@]+"${size_args[@]}"} "$ISV_TARGET" || {
         isv_err "bootc install failed."
         return 1
     }
@@ -1044,6 +1084,7 @@ isv_parse_args() {
                     return 1
                 fi
                 shift 2 ;;
+            --variant)     ISV_VARIANT="${2:-}"; shift 2 ;;
             --fs)
                 ISV_FS="${2:-btrfs}"
                 case "$ISV_FS" in

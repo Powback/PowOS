@@ -770,6 +770,30 @@ setup_persistence() {
     log "    layers/updates/  - OS updates"
     log "    home/            - User data (CacheFS source)"
 
+    # Offline GPU-variant store. Copying the OCI layout here is what lets the
+    # installer lay down the NVIDIA image on an NVIDIA box and the Deck image
+    # on a Deck FROM THIS STICK, with no network — see lib/variants.sh.
+    if [[ -n "${WITH_VARIANTS:-}" ]]; then
+        if [[ -f "${WITH_VARIANTS}/index.json" ]]; then
+            log "  Copying offline variant store ($(du -sh "$WITH_VARIANTS" 2>/dev/null | cut -f1))..."
+            mkdir -p "${mount_point}/@powos/variants"
+            # -a preserves the layout verbatim; the blob digests ARE the
+            # content addresses, so any rewriting would invalidate it.
+            if cp -a "${WITH_VARIANTS}/." "${mount_point}/@powos/variants/"; then
+                log_success "  Offline variants: $(python3 -c '
+import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: sys.exit(0)
+print(" ".join(filter(None,[(m.get("annotations") or {}).get("org.opencontainers.image.ref.name") for m in d.get("manifests",[])])))
+' "${mount_point}/@powos/variants/index.json" 2>/dev/null)"
+            else
+                log_error "  Failed to copy the variant store — the USB will install the running image only."
+            fi
+        else
+            log_error "  --with-variants '${WITH_VARIANTS}' has no index.json; skipping."
+        fi
+    fi
+
     # Copy overlay sources if they exist
     if [[ -d "${POWOS_ROOT}/sources" ]]; then
         log "  Copying overlay sources..."
@@ -1017,6 +1041,8 @@ main() {
                 variants_only=1
                 shift
                 ;;
+            --with-variants)
+                WITH_VARIANTS="${2:-}"; shift 2 ;;
             --image)
                 image="$2"
                 shift 2

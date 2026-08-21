@@ -372,6 +372,20 @@ iwz_load_config() {
 #                --yes alone must NOT satisfy install-system's typed erase
 #                confirmation — see confirm() in install-system.sh)
 #   alongside  → --alongside                              (no erase flag)
+# Published image tag for a GPU flavor. Mirrors fb_variant_for_flavor() in
+# bin/powos-firstboot-apply — keep the two in step; test-firstboot-gpu-variant.sh
+# and test-install-wizard-disks.sh both pin this mapping.
+iwz_variant_for_flavor() {
+    local flavor="${1:-}"
+    if iwz_is_steam_deck; then echo "deck"; return 0; fi
+    case "$flavor" in
+        nvidia-open|nvidia) echo "nvidia-open" ;;
+        deck)               echo "deck" ;;
+        amd|intel|main)     echo "main" ;;
+        *)                  echo "main" ;;
+    esac
+}
+
 iwz_build_installer_args() {
     local -a a=()
     [[ -n "$IWZ_DISK" ]] && a+=(--disk "$IWZ_DISK")
@@ -380,6 +394,10 @@ iwz_build_installer_args() {
         alongside)  a+=(--alongside) ;;
     esac
     [[ -n "$IWZ_FS" ]] && a+=(--fs "$IWZ_FS")
+    # GPU variant. install-system only acts on this when the media carries the
+    # variant's bytes, in which case the install is fully offline; otherwise it
+    # installs the running image and says so. Never causes a network fetch.
+    [[ -n "$IWZ_GPU_FLAVOR" ]] && a+=(--variant "$(iwz_variant_for_flavor "$IWZ_GPU_FLAVOR")")
     [[ -n "$IWZ_GAMES_GB" ]]   && a+=(--shared-gb "$IWZ_GAMES_GB")
     [[ -n "$IWZ_WINDOWS_GB" ]] && a+=(--windows-gb "$IWZ_WINDOWS_GB")
     # A separate games disk (different from the PowOS target) → --games-disk.
