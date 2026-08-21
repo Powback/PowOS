@@ -33,7 +33,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POWOS_ROOT="$(dirname "$SCRIPT_DIR")"
 OUTPUT_DIR="${POWOS_ROOT}/build/output"
-IMAGE_NAME="localhost/powos:latest"
+# Overridable so an ISO can be built from an image CI already published,
+# instead of recompiling the whole thing locally:
+#   POWOS_IMAGE_REF=ghcr.io/powback/powos:deck ./build/build-iso.sh installer
+IMAGE_NAME="${POWOS_IMAGE_REF:-localhost/powos:latest}"
 ISO_NAME="powos-installer.iso"
 RAW_NAME="powos.raw"
 # LEGACY lean installer VARIANT (POWOS_INSTALLER=1): a separate image + raw that
@@ -108,6 +111,21 @@ check_requirements() {
 # Step 1: Build the PowOS container image
 # ─────────────────────────────────────────────────────────────────
 build_container_image() {
+    # An explicitly supplied image is used as-is. Pull it if it is not already
+    # in local storage; bootc-image-builder needs it there because it no longer
+    # pulls images itself.
+    if [[ -n "${POWOS_IMAGE_REF:-}" ]]; then
+        log_step "Step 1/3: Using published image ${POWOS_IMAGE_REF}"
+        if podman image exists "$POWOS_IMAGE_REF" 2>/dev/null; then
+            log_success "Already in local storage: $POWOS_IMAGE_REF"
+        elif podman pull "$POWOS_IMAGE_REF"; then
+            log_success "Pulled: $POWOS_IMAGE_REF"
+        else
+            log_error "Could not obtain $POWOS_IMAGE_REF"
+            exit 1
+        fi
+        return 0
+    fi
     log_step "Step 1/3: Building PowOS container image"
 
     cd "$POWOS_ROOT"

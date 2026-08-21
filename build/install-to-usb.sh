@@ -456,6 +456,30 @@ add_games_partition() {
 #   powos-safe.conf     (Recovery — Safe mode;  +powos.mode=safe  rd.powos.ramboot=0)
 #   powos-aidebug.conf  (Recovery — AI Debug;   +powos.mode=aidebug rd.powos.ramboot=0)
 # All best-effort: warns and returns 0 on any problem so it NEVER bricks boot.
+# Give a BLS entry an explicit sort-key.
+#
+# Every entry we generate is a COPY of the live entry, so they all inherit the
+# same `version` field. grub2's blscfg sorts by version, they tie, and the order
+# then falls back to directory read order — arbitrary. The sort-key at least
+# makes OUR three entries order deterministically relative to each other
+# (install before recovery).
+#
+# KNOWN LIMITATION, measured on a real boot: this does NOT move them behind the
+# plain live entry. The menu still comes up as
+#   *Recovery — Safe mode / Install PowOS to disk / Recovery — AI Debug / Bazzite
+# with safe mode highlighted, so plugging the stick in and waiting boots into
+# safe mode (RAM boot off) rather than the live desktop. Adding sort-key was
+# tried and verified NOT to fix that; grub2 does not order sort-key entries
+# after unkeyed ones. Making the live entry the default needs a different
+# mechanism (grubenv saved_entry, or giving the recovery entries a lower
+# version) and is deliberately not attempted here — it is boot-critical, and
+# the current behaviour is safe, just unhelpful.
+_bls_sort_key() {
+    local file="$1" key="$2"
+    grep -q '^sort-key ' "$file" 2>/dev/null && return 0
+    printf 'sort-key %s\n' "$key" >> "$file"
+}
+
 write_bls_entries() {
     local entries_dir="$1"
 
@@ -501,6 +525,7 @@ write_bls_entries() {
         log_warn "Failed to inject powos.install=1 into $install_entry — removing it."
         rm -f "$install_entry"
     else
+        _bls_sort_key "$install_entry" "powos-2-install"
         log_success "Added boot entry: 'Install PowOS to disk'"
     fi
 
@@ -520,6 +545,7 @@ write_bls_entries() {
         ' "$template" > "$out"
         grep -q '^title ' "$out" || echo "title $title" >> "$out"
         if grep -q "powos.mode=$mode" "$out"; then
+            _bls_sort_key "$out" "powos-9-$name"
             log_success "Added boot entry: '$title'"
         else
             log_warn "Failed to build recovery entry '$title' — removing."
