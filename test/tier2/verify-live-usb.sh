@@ -44,7 +44,7 @@ SSH_PORT="${SSH_PORT:-2223}"
 echo "== preparing VM disks =="
 # Never write to the caller's image: work on a copy-on-write overlay so a
 # failed boot or a stray install cannot corrupt the artifact we are testing.
-qemu_img() { podman run --rm -v "$WORK":/w -v "$(dirname "$RAW")":/src:ro -w /w "$RUNNER" qemu-img "$@"; }
+qemu_img() { podman run --rm --security-opt label=disable -v "$WORK":/w -v "$(dirname "$RAW")":/src:ro -w /w "$RUNNER" qemu-img "$@"; }
 qemu_img create -f qcow2 -F raw -b "/src/$(basename "$RAW")" /w/live.qcow2 >/dev/null 2>&1 \
     || { echo "  could not create the overlay"; exit 1; }
 qemu_img create -f qcow2 /w/internal.qcow2 40G >/dev/null 2>&1
@@ -56,8 +56,10 @@ echo "== booting =="
 CONSOLE="$WORK/console.log"
 : > "$CONSOLE"
 
-podman run -d --name powos-verify --device /dev/kvm \
-    -v "$WORK":/w -p "$SSH_PORT:2222" "$RUNNER" \
+# /src must be mounted here too: live.qcow2 is a copy-on-write overlay whose
+# BACKING file is the raw, and QEMU resolves that path inside this container.
+podman run -d --name powos-verify --device /dev/kvm --security-opt label=disable \
+    -v "$WORK":/w -v "$(dirname "$RAW")":/src:ro -p "$SSH_PORT:2222" "$RUNNER" \
     bash -c '
       cp /usr/share/edk2/ovmf/OVMF_CODE.fd /w/CODE.fd
       cp /usr/share/edk2/ovmf/OVMF_VARS.fd /w/VARS.fd
@@ -71,16 +73,19 @@ podman run -d --name powos-verify --device /dev/kvm \
         -drive if=none,id=sdcard,format=qcow2,file=/w/sdcard.qcow2 \
         -device usb-storage,bus=xhci.0,drive=sdcard,removable=on \
         -netdev user,id=n0,hostfwd=tcp::2222-:22 -device virtio-net-pci,netdev=n0 \
-        -serial file:/w/console.log -display none -no-reboot' >/dev/null 2>&1 \
+        -serial file:/w/console.log -display none' >/dev/null 2>&1 \
     || { echo "  could not start the VM"; exit 1; }
 
 # Cover BOTH outcomes: a login prompt, and every failure signature we know how
 # to recognise. Silence must not read as success.
-success='Reached target Login Prompts|Started .*Login Manager|Started SDDM|Started Plasma Login|plasmalogin\.service.*Started'
+# A serial getty prompt ('<host> login:') is just as valid a 'it booted'
+# signal as the graphical login manager, and on a headless VM it is often
+# the ONLY one. Missing it made a perfectly good boot report as failure.
+success='Reached target Login Prompts|Started .*Login Manager|Started SDDM|Started Plasma Login|plasmalogin\.service.*Started|login:[[:space:]]*$'
 failure='Kernel panic|Emergency mode|Reached target Emergency|Reached target Rescue|Failed to start plasmalogin|systemd-sysext\.service.*Failed|powos-overlay\.service.*failed|Failed to merge|Extension contains'
 
 verdict=""
-for _ in $(seq 1 120); do   # up to ~10 minutes
+for _ in $(seq 1 180); do   # up to ~15 minutes, across a possible first-boot reboot
     if grep -qE "$failure" "$CONSOLE" 2>/dev/null; then verdict=fail; break; fi
     if grep -qE "$success" "$CONSOLE" 2>/dev/null; then verdict=up;   break; fi
     podman inspect powos-verify --format '{{.State.Running}}' 2>/dev/null | grep -q true || { verdict=died; break; }
@@ -99,7 +104,7 @@ if [[ "$verdict" == "up" ]]; then
     echo "== installer disk enumeration, on real block devices =="
     # sshd is enabled in the image; the powos user's password is 'powos'.
     ssh_run() {
-        podman run --rm --network host "$RUNNER" \
+        podman run --rm --network host --security-opt label=disable "$RUNNER" \
             sshpass -p powos ssh -p "$SSH_PORT" \
               -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -o ConnectTimeout=10 powos@127.0.0.1 "$1" 2>/dev/null
