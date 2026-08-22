@@ -113,4 +113,31 @@ write_entry powos-aidebug.conf "Recovery — AI Debug (diagnose boot)" \
 
 # The ostree entries are regenerated too, so re-apply the console fix to them.
 for f in "$ENTRIES"/*.conf; do [[ -f "$f" ]] && console_to_display "$f"; done
+
+# Keep the menu default pointing at the NEWEST deployment.
+#
+# install-to-usb.sh writes an explicit `set default=` when the stick is made,
+# but a deployment created later (bazzite-hardware-setup applying Deck kargs,
+# an update, a rollback) adds a higher-numbered ostree entry and leaves that
+# default naming the OLD one — which is what a Steam Deck did: it auto-selected
+# ostree:1, the deployment from before its own hardware kargs were applied.
+GRUB_CFG="${POWOS_GRUB_CFG:-/boot/grub2/grub.cfg}"
+if [[ -f "$GRUB_CFG" ]]; then
+    newest=$(find "$ENTRIES" -maxdepth 1 -name '*.conf' ! -name 'powos-*' \
+               -printf '%f\n' 2>/dev/null | sort -V | tail -1)
+    newest="${newest%.conf}"
+    if [[ -n "$newest" ]] && ! grep -q "set default=\"$newest\"" "$GRUB_CFG"; then
+        if grep -q 'BEGIN powos-default' "$GRUB_CFG"; then
+            sed -i "/BEGIN powos-default/,/END powos-default/s|^set default=.*|set default=\"$newest\"|" "$GRUB_CFG"
+        else
+            awk -v id="$newest" '
+                /### END 10_blscfg.cfg ###/ {
+                    print; print "### BEGIN powos-default ###"
+                    print "set default=\"" id "\""
+                    print "### END powos-default ###"; next
+                } { print }' "$GRUB_CFG" > "$GRUB_CFG.tmp" && mv "$GRUB_CFG.tmp" "$GRUB_CFG"
+        fi
+        echo "powos-boot-entries: menu default -> $newest"
+    fi
+fi
 exit 0

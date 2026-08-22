@@ -570,8 +570,13 @@ _grub_menu_defaults() {
 
     # Default to the image's own live entry (the one we did not author).
     local live
+    # NEWEST deployment, not the first alphabetically. ostree names entries
+    # ostree-1.conf, ostree-2.conf, ... with the HIGHEST number being the most
+    # recent deployment — so `sort | head -1` picked the OLD one. On a Steam
+    # Deck that meant the menu defaulted to the deployment from before
+    # bazzite-hardware-setup applied its Deck kargs.
     live=$(find "$boot_mp/loader/entries" -maxdepth 1 -name '*.conf' \
-             ! -name 'powos-*' -printf '%f\n' 2>/dev/null | sort | head -1)
+             ! -name 'powos-*' -printf '%f\n' 2>/dev/null | sort -V | tail -1)
     if [[ -z "$live" ]]; then
         log_warn "Could not identify the live BLS entry — default entry left as-is."
         return 0
