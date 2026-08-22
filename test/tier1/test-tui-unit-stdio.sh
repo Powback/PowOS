@@ -32,6 +32,16 @@ for u in powos-installer powos-safemode; do
     [[ "$out" == "tty" ]] && ok "$u: StandardOutput=tty" || bad "$u: StandardOutput=$out (expected tty)"
 done
 
+# systemd starts services with no HOME. Libraries the wizard sources expand
+# $HOME under `set -u`, so without this the installer aborts with
+# "HOME: unbound variable" partway through a real install.
+f="$ROOT/systemd/powos-installer.service"
+if grep -qE '^Environment=HOME=' "$f"; then
+    ok "powos-installer sets HOME (sourced libs expand it under set -u)"
+else
+    bad "powos-installer does not set HOME" "libs expanding a bare \$HOME will abort the install"
+fi
+
 echo ""
 echo "== Results: $P passed, $F failed =="
 [[ $F -eq 0 ]]
