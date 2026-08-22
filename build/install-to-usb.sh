@@ -13,6 +13,23 @@
 
 set -euo pipefail
 
+# Every temp mount this script makes is registered here and unmounted on exit,
+# including on error. Without this a mid-script failure leaves the target's
+# partitions mounted, which then blocks the next run ("Partition is mounted")
+# and leaves stray mounts behind on the host.
+POWOS_TMP_MOUNTS=()
+_powos_cleanup_mounts() {
+    local m
+    for (( idx=${#POWOS_TMP_MOUNTS[@]}-1 ; idx>=0 ; idx-- )); do
+        m="${POWOS_TMP_MOUNTS[idx]}"
+        [[ -n "$m" ]] || continue
+        mountpoint -q "$m" 2>/dev/null && umount "$m" 2>/dev/null
+        [[ -d "$m" ]] && rmdir "$m" 2>/dev/null
+    done
+    return 0
+}
+trap _powos_cleanup_mounts EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POWOS_ROOT="$(dirname "$SCRIPT_DIR")"
 RAW_PATH="${POWOS_ROOT}/build/output/powos.raw"
@@ -214,7 +231,16 @@ rescan_parts() {
     # Loop devices: force a capacity + partition-table re-read.
     [[ "$device" == /dev/loop* ]] && losetup -c "$device" 2>/dev/null || true
     if command -v udevadm &>/dev/null; then
-        udevadm trigger --subsystem-match=block 2>/dev/null || true
+        # Trigger ONLY this device and its partitions. A bare
+        # "--subsystem-match=block" re-triggers every block device on the
+        # machine, which makes the desktop's automounter mount unrelated disks
+        # — including the running system's own root partition. Six of those
+        # accumulated during one session here and broke systemd's mount
+        # namespacing (systemd-timedated and systemd-hostnamed died with
+        # "/etc: No such file or directory", taking NTP with them).
+        udevadm trigger --subsystem-match=block \
+            --sysname-match="$(basename "$device")" \
+            --sysname-match="$(basename "$device")[0-9]*" 2>/dev/null || true
         udevadm settle --timeout=10 2>/dev/null || true
     fi
 }
@@ -653,7 +679,7 @@ add_install_boot_entry() {
     log "Adding 'Install PowOS' boot menu entry..."
 
     local mp entries_dir="" part
-    mp=$(mktemp -d)
+    mp=$(mktemp -d); POWOS_TMP_MOUNTS+=("$mp")
 
     # Find the partition that holds loader/entries (boot or ESP, depending on layout)
     while read -r part; do
@@ -744,7 +770,7 @@ add_base_variants() {
         return 1
     fi
 
-    mp=$(mktemp -d)
+    mp=$(mktemp -d); POWOS_TMP_MOUNTS+=("$mp")
     mount "$data_part" "$mp" || { log_error "mount $data_part failed"; rmdir "$mp"; return 1; }
     mkdir -p "$mp/layers"
 
@@ -776,7 +802,7 @@ add_variant_boot_entries() {
     partprobe "$device" 2>/dev/null || true; sleep 1
 
     local mp entries_dir="" part
-    mp=$(mktemp -d)
+    mp=$(mktemp -d); POWOS_TMP_MOUNTS+=("$mp")
     while read -r part; do
         [[ -b "$part" ]] || continue
         if mount "$part" "$mp" 2>/dev/null; then
@@ -853,7 +879,7 @@ setup_persistence() {
     fi
 
     local mount_point
-    mount_point=$(mktemp -d)
+    mount_point=$(mktemp -d); POWOS_TMP_MOUNTS+=("$mount_point")
 
     log "Setting up persistent layer structure on $data_part..."
     mount "$data_part" "$mount_point"
