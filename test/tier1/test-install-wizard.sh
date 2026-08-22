@@ -326,6 +326,19 @@ unset -f hostnamectl useradd chpasswd id getent systemctl powos chown
 
 # ── Summary ───────────────────────────────────────────────────────
 echo
+# The wizard must be answerable with nothing but Enter — a Steam Deck's
+# controller emulates arrows, Enter and Escape and no letters at all. whiptail
+# highlights Yes, so a Yes-default question is one the user says yes to by
+# accident; "restore from a backup?" then leads straight into a free-text git
+# URL prompt they have no way to type into.
+echo "== Enter-only navigation =="
+if grep -q 'iwz_yesno .*backup.*defaultno' "$LIB"; then
+    check "the restore question defaults to No" true
+else
+    check "the restore question defaults to No" false
+fi
+check "the tui backend honours a No default" 'grep -q -- "--defaultno" "$LIB"'
+
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]
 

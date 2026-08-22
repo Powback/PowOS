@@ -111,16 +111,29 @@ iwz_msg() {
 }
 
 # iwz_yesno "text"  → returns 0 (yes) / 1 (no)
+# iwz_yesno <text> [defaultno]
+#
+# Pass "defaultno" for questions where No is the safe answer. It matters more
+# than it looks: whiptail highlights Yes, and the whole wizard is designed to
+# be answerable with nothing but Enter, so every Yes-default question is a
+# question the user accidentally says yes to. "Restore from a cloud backup?"
+# then leads straight into a free-text git URL prompt — on a device whose
+# controller offers arrows, Enter and Escape and no letters at all.
 iwz_yesno() {
-    local text="$1"
+    local text="$1" defaultno="${2:-}"
     case "${IWZ_UI:-read}" in
-        gui) kdialog --title "$IWZ_TITLE" --yesno "$text" ;;
+        gui) if [[ "$defaultno" == defaultno ]]; then
+                 kdialog --title "$IWZ_TITLE" --warningyesno "$text"
+             else
+                 kdialog --title "$IWZ_TITLE" --yesno "$text"
+             fi ;;
         tui) local b h; b=$(iwz__tui_bin)
              # Height from the content: the confirmation embeds the full review
              # text, and a fixed 15 rows silently truncated it.
              h=$(( $(printf '%s\n' "$text" | wc -l) + 8 ))
              (( h < 12 )) && h=12; (( h > 24 )) && h=24
-             "$b" --title "$IWZ_TITLE" --yesno "$text" "$h" 76 ;;
+             local -a dn=(); [[ "$defaultno" == defaultno ]] && dn=(--defaultno)
+             "$b" --title "$IWZ_TITLE" ${dn[@]+"${dn[@]}"} --yesno "$text" "$h" 76 ;;
         *)   echo; echo -e "$text"; local a; read -r -p "  [y/N] " a || return 1
              [[ "$a" =~ ^[Yy] ]] ;;
     esac
@@ -711,7 +724,7 @@ iwz_step_ai() {
 
 iwz_step_restore() {
     iwz_step "Restore from backup"
-    if iwz_yesno "Restore projects/config from a PowOS cloud backup after install?"; then
+    if iwz_yesno "Restore projects/config from a PowOS cloud backup after install?" defaultno; then
         local u
         u=$(iwz_input "Git repository URL of your backup" "${IWZ_RESTORE_URL:-}") || u=""
         IWZ_RESTORE_URL="$u"
