@@ -522,11 +522,20 @@ _bls_sort_key() {
 _bls_console_to_display() {
     local f="$1"
     grep -q '^options .*console=' "$f" 2>/dev/null || return 0
-    grep -q '^options .*console=tty0' "$f" 2>/dev/null || return 0
     awk '
         /^options / {
             n = 0
-            for (i = 2; i <= NF; i++) if ($i != "console=tty0") out[n++] = $i
+            for (i = 2; i <= NF; i++) {
+                # Drop EVERY serial console. Keeping one and merely putting
+                # console=tty0 last is theoretically equivalent — the last
+                # console= becomes /dev/console — but on a Steam Deck that
+                # still produced a blank screen, while deleting console=ttyS0
+                # outright produced a working one. Ship the configuration that
+                # was observed to work, not the one that should have.
+                if ($i ~ /^console=ttyS/ || $i ~ /^console=ttyUSB/ || $i ~ /^console=ttyAMA/) continue
+                if ($i == "console=tty0") continue
+                out[n++] = $i
+            }
             line = "options"
             for (i = 0; i < n; i++) line = line " " out[i]
             print line " console=tty0"
