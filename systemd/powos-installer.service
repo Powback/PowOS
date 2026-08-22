@@ -6,13 +6,41 @@ Documentation=man:powos(8)
 # boot has no such arg, so this service stays inactive.
 ConditionKernelCommandLine=powos.install
 # On a KDE image graphical.target starts SDDM, which seizes tty1 and hides the
-# installer. Conflict with + order after the display manager so it is stopped
-# before we take the console. (Belt and braces: the BLS install entry also
-# forces systemd.unit=multi-user.target so the DM never starts.)
+# installer. Order after the display manager, and stop it from ExecStartPre
+# rather than declaring a conflict — see the note below. (Belt and braces: the
+# BLS install entry also forces systemd.unit=multi-user.target so the DM never
+# starts on an install boot.)
 After=multi-user.target display-manager.service
-Conflicts=getty@tty1.service display-manager.service
+
+# NO Conflicts= HERE. This is the bug that cost the most to find.
+#
+# Conflicts is resolved when the JOB IS ENQUEUED, not when the unit runs.
+# ConditionKernelCommandLine is checked much later, when the job executes. So
+# on an ordinary boot — no installer karg anywhere — this unit still got a
+# start job from multi-user.target, that job still pulled in a STOP job for
+# display-manager.service, and systemd resolved the clash the only way it can:
+#
+#   sddm.service: Looking at job sddm.service/start conflicted_by=no
+#   sddm.service: Looking at job sddm.service/stop  conflicted_by=yes
+#   sddm.service: Fixing conflicting jobs sddm.service/start,sddm.service/stop
+#                 by deleting job sddm.service/start
+#
+# (captured with systemd.log_level=debug in a VM). The display manager was
+# deleted from the transaction before this unit was even skipped, and nothing
+# is logged about it at normal log level: graphical.target goes ACTIVE, the
+# journal never mentions sddm, and the machine sits on a console. That is
+# exactly what the Steam Deck did, boot after boot.
+#
+# Stopping the tty holders from ExecStartPre instead means it happens if and
+# only if this unit actually runs.
 
 [Service]
+# Take tty1 for real, now that we know we are running.
+# Bounded: a blocking systemctl call from inside a starting unit is the kind
+# of thing that deadlocks a boot, and this is only belt-and-braces anyway —
+# the boot entry already forces multi-user.target, so no display manager is
+# running to stop.
+ExecStartPre=-/usr/bin/timeout 20 /usr/bin/systemctl stop getty@tty1.service display-manager.service
 Type=idle
 # Take over tty1 for the guided installer (TUI, or the GUI when a desktop is
 # up). The wizard collects disk/sizes/GPU/hostname/user/ssh/ramboot/AI/restore,

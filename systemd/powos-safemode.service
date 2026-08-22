@@ -6,11 +6,37 @@ Documentation=man:powos(8)
 ConditionKernelCommandLine=powos.mode
 After=multi-user.target network-online.target
 Wants=network-online.target
-Conflicts=getty@tty1.service
-Conflicts=display-manager.service
 After=display-manager.service
 
+# NO Conflicts= HERE. This is the bug that cost the most to find.
+#
+# Conflicts is resolved when the JOB IS ENQUEUED, not when the unit runs.
+# ConditionKernelCommandLine is checked much later, when the job executes. So
+# on an ordinary boot — no installer karg anywhere — this unit still got a
+# start job from multi-user.target, that job still pulled in a STOP job for
+# display-manager.service, and systemd resolved the clash the only way it can:
+#
+#   sddm.service: Looking at job sddm.service/start conflicted_by=no
+#   sddm.service: Looking at job sddm.service/stop  conflicted_by=yes
+#   sddm.service: Fixing conflicting jobs sddm.service/start,sddm.service/stop
+#                 by deleting job sddm.service/start
+#
+# (captured with systemd.log_level=debug in a VM). The display manager was
+# deleted from the transaction before this unit was even skipped, and nothing
+# is logged about it at normal log level: graphical.target goes ACTIVE, the
+# journal never mentions sddm, and the machine sits on a console. That is
+# exactly what the Steam Deck did, boot after boot.
+#
+# Stopping the tty holders from ExecStartPre instead means it happens if and
+# only if this unit actually runs.
+
 [Service]
+# Take tty1 for real, now that we know we are running.
+# Bounded: a blocking systemctl call from inside a starting unit is the kind
+# of thing that deadlocks a boot, and this is only belt-and-braces anyway —
+# the boot entry already forces multi-user.target, so no display manager is
+# running to stop.
+ExecStartPre=-/usr/bin/timeout 20 /usr/bin/systemctl stop getty@tty1.service display-manager.service
 Type=idle
 ExecStart=/usr/bin/powos-safemode
 StandardInput=tty

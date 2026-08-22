@@ -72,6 +72,38 @@ for pu in plymouth-quit plymouth-quit-wait; do
     fi
 done
 
+# No unit that is enabled unconditionally may declare Conflicts= against the
+# display manager or the console getty.
+#
+# Conflicts is resolved when the JOB IS ENQUEUED; ConditionKernelCommandLine is
+# checked later, when the job runs. So powos-installer.service — enabled into
+# multi-user.target and gated on a karg that is absent on an ordinary boot —
+# still enqueued a STOP job for display-manager.service every single boot, and
+# systemd resolved the clash by deleting the display manager's start job:
+#
+#   sddm.service: Fixing conflicting jobs sddm.service/start,sddm.service/stop
+#                 by deleting job sddm.service/start
+#
+# Nothing is logged at normal level. graphical.target goes ACTIVE, the journal
+# never mentions sddm, and the machine sits on a console — which is precisely
+# what a Steam Deck did, boot after boot, while every symlink on disk looked
+# correct. Take the tty from ExecStartPre instead, where it happens only when
+# the unit actually runs.
+for cu in powos-installer powos-safemode; do
+    cunit="$ROOT/systemd/$cu.service"
+    if grep -qE '^Conflicts=.*(display-manager|getty@)' "$cunit"; then
+        bad "$cu declares Conflicts= against the display manager/getty" \
+            "an unconditionally-enabled unit does this on EVERY boot, killing the desktop"
+    else
+        ok "$cu takes the tty without a boot-wide Conflicts="
+    fi
+    if grep -qE '^ExecStartPre=.*systemctl stop' "$cunit"; then
+        ok "$cu stops the tty holders when it actually runs"
+    else
+        bad "$cu never stops the tty holders" "the installer would draw underneath a getty"
+    fi
+done
+
 # powos-firstboot CREATES THE USER ACCOUNT. Two properties decide whether a
 # freshly installed machine is usable on its first boot:
 #
