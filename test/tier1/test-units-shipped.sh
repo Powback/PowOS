@@ -1,0 +1,67 @@
+#!/bin/bash
+# test-units-shipped.sh - units the boot menu depends on must reach the image.
+#
+# systemd/ holds 17 unit files; the Containerfile COPYs a handful. A unit that
+# is not COPYed exists only in /usr/lib/powos/src/systemd (the source snapshot)
+# and is never installed, so systemd never sees it.
+#
+# This shipped as a silent, total failure: install-to-usb.sh writes an "Install
+# PowOS to disk" boot entry that appends powos.install=1 and boots
+# multi-user.target, and powos-installer.service — the unit whose entire job is
+# to run the wizard on that karg — was missing. Choosing the entry booted to a
+# blank console. The Safe mode / AI Debug entries were dead the same way.
+#
+# Only units something else actively depends on are REQUIRED here. The rest are
+# reported so the gap stays visible rather than being silently forgotten.
+#
+# Usage:  bash test/tier1/test-units-shipped.sh
+set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CF="$ROOT/Containerfile"
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'; NC=$'\033[0m'
+PASS=0; FAIL=0
+ok()  { echo -e "${GREEN}✓${NC} $1"; PASS=$((PASS+1)); }
+bad() { echo -e "${RED}✗${NC} $1"; [[ -n "${2:-}" ]] && echo "    $2"; FAIL=$((FAIL+1)); }
+
+# Units that MUST be installed, and why. Each is depended on by something that
+# ships to users: a boot-menu entry, or the guided installer's handoff.
+declare -A REQUIRED=(
+  [powos-installer.service]="the boot menu's 'Install PowOS to disk' entry (powos.install=1) starts nothing without it"
+  [powos-safemode.service]="the 'Recovery — Safe mode' and 'AI Debug' entries (powos.mode=) do nothing without it"
+  [powos-firstboot.service]="applies the wizard's hostname/user/password/SSH/ramboot/AI/restore choices"
+  [powos-variant-retry.service]="retries a GPU-variant switch that had no network at first boot"
+)
+
+echo "== units the shipped boot menu depends on =="
+for u in "${!REQUIRED[@]}"; do
+  if grep -qF "COPY systemd/$u " "$CF"; then
+    if grep -qE "systemctl enable +$u" "$CF"; then
+      ok "$u is COPYed and enabled"
+    else
+      bad "$u is COPYed but never enabled" "${REQUIRED[$u]}"
+    fi
+  else
+    bad "$u is NOT copied into the image" "${REQUIRED[$u]}"
+  fi
+done
+
+echo ""
+echo "== units present in systemd/ but not installed (visibility, not a failure) =="
+shopt -s nullglob
+unshipped=0
+for f in "$ROOT"/systemd/*.service "$ROOT"/systemd/*.timer; do
+  u=$(basename "$f")
+  [[ -n "${REQUIRED[$u]:-}" ]] && continue
+  grep -qF "COPY systemd/$u " "$CF" && continue
+  echo -e "  ${YELLOW}not installed${NC}: $u"
+  unshipped=$((unshipped+1))
+done
+[[ $unshipped -eq 0 ]] && echo "  (none)"
+echo "  $unshipped unit(s) exist in systemd/ but never reach /usr/lib/systemd/system."
+echo "  These are NOT asserted: the ramboot/overlay stack may be driven by the"
+echo "  dracut module instead. Review before adding — enabling a unit the image"
+echo "  is not set up for is how a boot gets broken."
+
+echo ""
+echo "== Results: $PASS passed, $FAIL failed =="
+[[ $FAIL -eq 0 ]]

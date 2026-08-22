@@ -109,6 +109,14 @@ COPY systemd/plasmalogin.service.d/       /usr/lib/systemd/system/plasmalogin.se
 # variant they are skipped outright.
 COPY systemd/powos-firstboot.service      /usr/lib/systemd/system/powos-firstboot.service
 COPY systemd/powos-variant-retry.service  /usr/lib/systemd/system/powos-variant-retry.service
+# The boot-menu entries install-to-usb.sh writes are useless without these two.
+# "Install PowOS to disk" appends powos.install=1 and boots multi-user.target;
+# with powos-installer.service absent NOTHING starts the wizard, so choosing it
+# gave a black screen. Likewise the Safe mode / AI Debug entries append
+# powos.mode= and did nothing. Both are ConditionKernelCommandLine-gated, so
+# they stay inert on a normal boot.
+COPY systemd/powos-installer.service      /usr/lib/systemd/system/powos-installer.service
+COPY systemd/powos-safemode.service       /usr/lib/systemd/system/powos-safemode.service
 
 # KDE-builder stage — bakes sources/kde/patches/<app>/ into the image.
 # Built FROM THE SAME base image so the rebuilt bits match the shipped app's
@@ -272,6 +280,8 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     systemctl enable greeter-watchdog.timer && \
     systemctl enable powos-firstboot.service && \
     systemctl enable powos-variant-retry.service && \
+    systemctl enable powos-installer.service && \
+    systemctl enable powos-safemode.service && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
     systemctl mask plasma-setup.service 2>/dev/null || true && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
