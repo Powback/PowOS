@@ -798,9 +798,13 @@ cmd_install_wizard() {
     iwz_step_sizes    || { iwz_warn "Cancelled."; return 1; }
     iwz_step_gpu      || { iwz_warn "Cancelled."; return 1; }
     iwz_step_identity || { iwz_warn "Cancelled."; return 1; }
-    iwz_step_ssh      || { iwz_warn "Cancelled."; return 1; }
+    # SSH key and AI provider are not asked. Both are optional extras that can
+    # be set up trivially after first boot, and every extra prompt is a real
+    # cost on a device with no keyboard — the controller's keyboard emulation
+    # offers arrows, Enter and Escape and no letters, so a free-text field is
+    # something the user can only skip anyway. Defaults stand: SSH off, no AI
+    # provider. The steps remain callable for other front-ends and tests.
     iwz_step_ramboot  || { iwz_warn "Cancelled."; return 1; }
-    iwz_step_ai       || { iwz_warn "Cancelled."; return 1; }
     iwz_step_restore  || { iwz_warn "Cancelled."; return 1; }
 
     # The summary goes INSIDE the confirmation. It used to be a separate msgbox
