@@ -63,11 +63,11 @@ write_entry() {
 }
 
 write_entry powos-install.conf "Install PowOS to disk" \
-    "powos.install=1 systemd.unit=multi-user.target"
+    "powos.install=1 systemd.unit=multi-user.target plymouth.enable=0"
 write_entry powos-safe.conf    "Recovery — Safe mode (RAM boot off)" \
-    "rd.powos.ramboot=0 powos.mode=safe systemd.unit=multi-user.target"
+    "rd.powos.ramboot=0 powos.mode=safe systemd.unit=multi-user.target plymouth.enable=0"
 write_entry powos-aidebug.conf "Recovery — AI Debug (diagnose boot)" \
-    "rd.powos.ramboot=0 powos.mode=aidebug systemd.unit=multi-user.target"
+    "rd.powos.ramboot=0 powos.mode=aidebug systemd.unit=multi-user.target plymouth.enable=0"
 
 # The ostree entries are regenerated too, so re-apply the console fix to them.
 for f in "$ENTRIES"/*.conf; do [[ -f "$f" ]] && console_to_display "$f"; done

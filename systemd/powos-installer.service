@@ -18,6 +18,12 @@ Type=idle
 # up). The wizard collects disk/sizes/GPU/hostname/user/ssh/ramboot/AI/restore,
 # then drives `powos install-system` + firstboot config. (The raw
 # `powos install-system` is still available by hand.)
+# whiptail CLEARS the screen before drawing. Without a usable TERM it clears
+# and renders nothing, which looks exactly like a hung black screen with a
+# cursor — observed on a Steam Deck. systemd usually sets TERM=linux for a VC,
+# but not dependably enough to rely on when the failure mode is "user sees
+# nothing at all".
+Environment=TERM=linux
 ExecStart=/usr/bin/powos-install-wizard
 StandardInput=tty
 StandardOutput=tty
