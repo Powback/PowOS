@@ -69,12 +69,12 @@ console_to_display() {
                 # outright produced a working one. Ship the configuration that
                 # was observed to work, not the one that should have.
                 if ($i ~ /^console=ttyS/ || $i ~ /^console=ttyUSB/ || $i ~ /^console=ttyAMA/) continue
-                if ($i == "console=tty0") continue
+                if ($i == "console=tty0" || $i ~ /^plymouth.enable=/) continue
                 out[n++] = $i
             }
             line = "options"
             for (i = 0; i < n; i++) line = line " " out[i]
-            print line " console=tty0"
+            print line " console=tty0 plymouth.enable=0"
             next
         }
         { print }
