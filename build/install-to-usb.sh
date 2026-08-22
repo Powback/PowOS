@@ -162,8 +162,12 @@ confirm_usb_erase() {
 
     read -p "Type 'YES' to write PowOS to $device: " confirm
     if [[ "$confirm" != "YES" ]]; then
-        log "Aborted"
-        exit 0
+        # Non-zero: nothing was written, so callers must be able to tell this
+        # apart from success. This used to `exit 0`, which meant an automated
+        # bake whose confirmation never reached the prompt reported success and
+        # then "verified" a completely blank device.
+        log "Aborted — nothing was written"
+        exit 1
     fi
 }
 
