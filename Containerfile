@@ -78,6 +78,27 @@ COPY config/ai/                           /etc/powos/ai/
 COPY config/zones/                        /etc/powos/zones/
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
+# powos-display-manager.conf hardcodes plasmalogin as the display-manager alias
+# and re-creates it with 'L+' on EVERY boot. That is right on a base that ships
+# plasma-login-manager and no sddm — and catastrophic on one where it is the
+# other way round: bazzite-deck has sddm and no plasmalogin, so every boot
+# forcibly pointed display-manager.service at a unit that does not exist,
+# overwriting the correct symlink baked into the image. graphical.target went
+# active and started nothing; the user was left on a console with the journal
+# showing zero mentions of any display manager.
+#
+# Retarget the rule at whichever DM this base actually ships, or drop it.
+RUN set -eux; \
+    conf=/etc/tmpfiles.d/powos-display-manager.conf; \
+    if [ -f /usr/lib/systemd/system/plasmalogin.service ]; then \
+        echo "display-manager alias: plasmalogin (unchanged)"; \
+    elif [ -f /usr/lib/systemd/system/sddm.service ]; then \
+        sed -i 's|/usr/lib/systemd/system/plasmalogin.service|/usr/lib/systemd/system/sddm.service|' "$conf"; \
+        echo "display-manager alias: retargeted to sddm"; \
+    else \
+        rm -f "$conf"; \
+        echo "display-manager alias: no known DM, rule removed"; \
+    fi
 COPY config/sysctl.d/                     /etc/sysctl.d/
 COPY config/NetworkManager/conf.d/        /etc/NetworkManager/conf.d/
 COPY config/etc/containers/systemd/users/  /etc/containers/systemd/users/
