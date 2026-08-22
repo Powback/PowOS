@@ -702,6 +702,27 @@ write_bls_entries() {
         log_success "Added boot entry: 'Install PowOS to disk'"
     fi
 
+    # ── Live boot with systemd debug logging ──────────────────────
+    # The live entry reaches graphical.target and never starts a display
+    # manager, with ZERO mentions of sddm in the journal despite the unit file,
+    # the graphical.target.wants symlink and the display-manager alias all
+    # being correct on disk. "Never considered" is not a failure mode that
+    # ordinary logging explains, so this entry makes systemd record its
+    # dependency resolution and unit loading, which will say whether sddm is
+    # loaded, skipped, or dropped from the target.
+    local dbg="$entries_dir/powos-debug.conf"
+    awk '
+        /^title /   { print "title Live boot (systemd debug logging)"; next }
+        /^options / { print $0 " systemd.log_level=debug systemd.log_target=journal"; next }
+        { print }
+    ' "$template" > "$dbg"
+    grep -q '^title ' "$dbg" || echo "title Live boot (systemd debug logging)" >> "$dbg"
+    if grep -q '^options .*root=' "$dbg"; then
+        log_success "Added boot entry: 'Live boot (systemd debug logging)'"
+    else
+        rm -f "$dbg"
+    fi
+
     # ── Recovery entries (Safe mode + AI Debug) ───────────────────
     # Both force RAM boot OFF (so they come up even when a ramboot/normal boot
     # doesn't) and carry powos.mode=, which powos-safemode.service acts on:
