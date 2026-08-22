@@ -163,6 +163,22 @@ pv_prepare_image() {
     fi
 
     src=$(pv_source_imgref "$want") || return 1
+
+    # Fail FAST if the unpack cannot fit. Unpacked a variant is ~13.5GB against
+    # ~5.7GB compressed, and container storage is wherever
+    # /var/lib/containers lives. Without this the install copies blobs for
+    # several minutes and only then dies with "no space left on device", having
+    # burned the time and left a half-written store behind — which is exactly
+    # what happened on a Steam Deck whose medium root is 25.9GB.
+    local need_mib=15000 have_mib store_dir=/var/lib/containers
+    [[ -d "$store_dir" ]] || store_dir=/var
+    have_mib=$(df -BM --output=avail "$store_dir" 2>/dev/null | tail -1 | tr -dc '0-9')
+    if [[ -n "$have_mib" ]] && (( have_mib < need_mib )); then
+        pv__warn "not enough room to unpack '$want': $store_dir has ${have_mib}MiB free, need ~${need_mib}MiB."
+        pv__warn "container storage lives on $(findmnt -no SOURCE --target "$store_dir" 2>/dev/null || echo "$store_dir")."
+        pv__warn "on install media this should be POWOS-DATA — check the medium's /etc/fstab entry for /var/lib/containers."
+        return 1
+    fi
     pv__log "importing $want off the media into local storage (no network)..." >&2
     # Unpacked, this is ~13.5GB per variant against ~5.7GB compressed on the
     # media. A live system whose /var is small will fail here — callers should
