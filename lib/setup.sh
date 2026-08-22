@@ -20,7 +20,11 @@ POWOS_TAG=setup
 
 # Must match lib/backup.sh, which archives what this file writes. Parameterized
 # so a caller (or a test sandbox) can point it elsewhere; see backup.sh.
-POWOS_CONFIG_DIR="${POWOS_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/powos}"
+# HOME needs a fallback: systemd services run without it, and these libs are
+# sourced by the installer wizard, which runs as a unit under `set -u` — a bare
+# $HOME aborted a real install with "HOME: unbound variable". Must stay
+# byte-identical to lib/backup.sh; test-lib-collisions.sh pins that.
+POWOS_CONFIG_DIR="${POWOS_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/powos}"
 
 # ─── GitHub auth ─────────────────────────────────────────────────────────
 # Wraps gh's device-code flow. gh handles the token storage + configures a

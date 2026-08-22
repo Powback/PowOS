@@ -841,7 +841,6 @@ add_install_boot_entry() {
     # entries_dir is <boot>/loader/entries; grub.cfg lives at <boot>/grub2/.
     _grub_menu_defaults "$(dirname "$(dirname "$entries_dir")")"
     _mask_live_hardware_setup "$device"
-    _fstab_containers_on_data "$device"
 
     # Make the menu actually visible (bootc images often hide it / 0s timeout).
     # Fedora-family hosts ship grub2-editenv; Debian/Ubuntu ship grub-editenv.
@@ -1403,6 +1402,7 @@ main() {
         add_data_partition "$device"
         add_install_boot_entry "$device"
         setup_persistence "$device"
+        _fstab_containers_on_data "$device"
         show_complete "$device"
         return 0
     fi
@@ -1413,6 +1413,10 @@ main() {
     add_data_partition "$device"
     add_install_boot_entry "$device"
     setup_persistence "$device"
+    # AFTER setup_persistence: it creates the @powos/containers subvolume, and
+    # this refuses to write the fstab entry until that subvolume exists (an
+    # entry pointing at a non-subvolume fails silently under nofail).
+    _fstab_containers_on_data "$device"
 
     show_complete "$device"
 }
