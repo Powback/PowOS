@@ -57,6 +57,10 @@ IWZ_GPU_FLAVOR="nvidia-open"       # nvidia-open | nvidia | amd | intel
 IWZ_HOSTNAME="powos"
 IWZ_USERNAME="powos"
 IWZ_PASSWORD_HASH=""               # openssl passwd -6 output; NEVER plaintext
+IWZ_PASSWORD_NONE=0                # 1 = deliberately NO password (blank entry).
+                                   # Distinct from an empty hash, which just
+                                   # means "not collected" and leaves the
+                                   # account LOCKED.
 IWZ_SSH_ENABLE=0                   # 0 | 1
 IWZ_SSH_KEY=""                     # optional authorized_keys line
 IWZ_RAMBOOT="off"                  # off | installed
@@ -321,6 +325,7 @@ iwz_write_config() {
         echo "POWOS_HOSTNAME=$(iwz__q "$IWZ_HOSTNAME")"
         echo "POWOS_USERNAME=$(iwz__q "$IWZ_USERNAME")"
         echo "POWOS_PASSWORD_HASH=$(iwz__q "$IWZ_PASSWORD_HASH")"
+        echo "POWOS_PASSWORD_NONE=$(iwz__q "$IWZ_PASSWORD_NONE")"
         echo ""
         echo "# ── Remote access ──"
         echo "POWOS_SSH_ENABLE=$(iwz__q "$IWZ_SSH_ENABLE")"
@@ -355,6 +360,7 @@ iwz_load_config() {
     IWZ_HOSTNAME="${POWOS_HOSTNAME:-$IWZ_HOSTNAME}"
     IWZ_USERNAME="${POWOS_USERNAME:-$IWZ_USERNAME}"
     IWZ_PASSWORD_HASH="${POWOS_PASSWORD_HASH:-$IWZ_PASSWORD_HASH}"
+    IWZ_PASSWORD_NONE="${POWOS_PASSWORD_NONE:-$IWZ_PASSWORD_NONE}"
     IWZ_SSH_ENABLE="${POWOS_SSH_ENABLE:-$IWZ_SSH_ENABLE}"
     IWZ_SSH_KEY="${POWOS_SSH_KEY:-$IWZ_SSH_KEY}"
     IWZ_RAMBOOT="${POWOS_RAMBOOT:-$IWZ_RAMBOOT}"
@@ -558,12 +564,21 @@ iwz_step_identity() {
 
     # Collect + confirm the password, hash it immediately, and never keep the
     # plaintext. A single loop lets the user retry on mismatch.
+    # An EMPTY entry means "use the default", it does not re-prompt.
+    #
+    # This loop used to reject blank and loop forever. On a Steam Deck that is
+    # an unescapable trap: with no Steam client running the controller falls
+    # back to keyboard emulation that provides arrows, Enter and Escape — and
+    # no letters. The installer drew the password box and there was physically
+    # no way to answer it or get past it.
     local p1 p2
     while true; do
-        p1=$(iwz_password "Password for '$IWZ_USERNAME'") || return 1
+        p1=$(iwz_password "Password for '$IWZ_USERNAME' (leave blank for NO password)") || return 1
         if [[ -z "$p1" ]]; then
-            iwz_warn "Empty password — please enter one."
-            continue
+            IWZ_PASSWORD_HASH=""
+            IWZ_PASSWORD_NONE=1
+            iwz_warn "No password — '$IWZ_USERNAME' will log in without one. Set one later: passwd"
+            break
         fi
         p2=$(iwz_password "Confirm password") || return 1
         if [[ "$p1" != "$p2" ]]; then
@@ -572,6 +587,7 @@ iwz_step_identity() {
             continue
         fi
         IWZ_PASSWORD_HASH=$(iwz_hash_password "$p1")
+        IWZ_PASSWORD_NONE=0
         p1=""; p2=""
         if [[ -z "$IWZ_PASSWORD_HASH" ]]; then
             iwz_err "Could not hash the password (is openssl installed?)."

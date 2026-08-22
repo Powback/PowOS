@@ -66,8 +66,22 @@ fb_apply_user() {
         fi
     fi
 
+    # Deliberately no password: clear the field so the account can log in
+    # without one. This is NOT the same as an empty hash — useradd leaves a '!'
+    # in /etc/shadow, which LOCKS the account. `passwd -d` empties it.
+    #
+    # Chosen in the installer by leaving the password box blank, which is the
+    # only workable answer on a device with no keyboard: a Steam Deck's
+    # controller falls back to arrows/Enter/Escape with no letters, so a
+    # mandatory password is an unescapable prompt.
+    if [[ "${POWOS_PASSWORD_NONE:-0}" == "1" ]]; then
+        if passwd -d "$user" >/dev/null 2>&1; then
+            fb_ok "no password set for '$user' (login without one; set later with passwd)"
+        else
+            fb_warn "could not clear the password for '$user'"
+        fi
     # Set the password from the pre-computed hash (-e = value is encrypted).
-    if [[ -n "$hash" ]]; then
+    elif [[ -n "$hash" ]]; then
         if printf '%s:%s\n' "$user" "$hash" | chpasswd -e 2>/dev/null; then
             fb_ok "password set for '$user'"
         else
