@@ -621,6 +621,11 @@ _fstab_containers_on_data() {
     for deploy in "$mp"/root/ostree/deploy/*/deploy/*.[0-9]; do
         [[ -d "$deploy/etc" ]] || continue
         mkdir -p "$deploy/var/lib/containers" 2>/dev/null || true
+        # Marks this deployment as a live installer medium. powos-boot-entries
+        # is gated on it, so an installed system never gains installer entries
+        # or loses its splash.
+        mkdir -p "$deploy/etc/powos" 2>/dev/null || true
+        : > "$deploy/etc/powos/.live-medium" 2>/dev/null || true
         if ! grep -q '/var/lib/containers' "$deploy/etc/fstab" 2>/dev/null; then
             # Only write the entry if the subvolume really exists, otherwise
             # nofail turns a broken mount into a silent one.

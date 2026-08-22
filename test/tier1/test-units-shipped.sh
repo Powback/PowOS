@@ -45,6 +45,15 @@ for u in "${!REQUIRED[@]}"; do
   fi
 done
 
+# powos-boot-entries must be gated on the live-medium marker, or it also runs on
+# an INSTALLED system and adds installer entries to that machine's boot menu.
+if grep -q 'ConditionPathExists=/etc/powos/.live-medium' "$ROOT/systemd/powos-boot-entries.service"; then
+    ok "powos-boot-entries only runs on a live medium"
+else
+    bad "powos-boot-entries is not gated on the live-medium marker" \
+        "it would add Install/Recovery entries to an installed system's own menu"
+fi
+
 echo ""
 echo "== units present in systemd/ but not installed (visibility, not a failure) =="
 shopt -s nullglob

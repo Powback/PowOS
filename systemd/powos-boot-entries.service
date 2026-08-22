@@ -6,6 +6,11 @@ Documentation=man:powos(8)
 # Re-apply them every boot; the script is idempotent and writes nothing when
 # they are already correct.
 ConditionPathIsDirectory=/boot/loader/entries
+# Only on a live installer medium. install-to-usb.sh drops this marker into the
+# medium's deployment. Without it this unit would also run on an INSTALLED
+# system, where it would add an "Install PowOS to disk" entry to that machine's
+# own boot menu and strip its boot splash — neither of which belongs there.
+ConditionPathExists=/etc/powos/.live-medium
 After=local-fs.target
 [Service]
 Type=oneshot
