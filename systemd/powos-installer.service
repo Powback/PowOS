@@ -24,6 +24,10 @@ Type=idle
 # but not dependably enough to rely on when the failure mode is "user sees
 # nothing at all".
 Environment=TERM=linux
+# systemd starts services with no HOME. Several libs the wizard sources expand
+# $HOME while running under `set -u`, which aborts the installer outright
+# (lib/backup.sh did exactly that). Give them one.
+Environment=HOME=/root
 ExecStart=/usr/bin/powos-install-wizard
 StandardInput=tty
 StandardOutput=tty

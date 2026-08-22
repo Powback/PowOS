@@ -23,7 +23,10 @@ POWOS_STATE_DIR="${POWOS_ROOT}/git"
 # Parameterized on PURPOSE: a bare assignment would clobber a caller's value
 # (test harnesses export it to sandbox themselves) and would override whichever
 # lib loaded first — the exact rule test-lib-collisions.sh enforces.
-POWOS_CONFIG_DIR="${POWOS_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/powos}"
+# HOME must have a fallback: systemd services run without it, and this file is
+# sourced by the installer wizard, which runs as a unit. Under `set -u` a bare
+# $HOME aborts with "HOME: unbound variable" — which killed the install mid-run.
+POWOS_CONFIG_DIR="${POWOS_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/powos}"
 SYNC_CONFIG="${POWOS_CONFIG_DIR}/sync.conf"
 
 # Colors
