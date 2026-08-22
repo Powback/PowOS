@@ -523,7 +523,12 @@ _bls_console_to_display() {
 # Default is the plain live entry, not the installer: auto-starting a disk
 # installer unattended is not something a boot timeout should ever do.
 _grub_menu_defaults() {
-    local boot_mp="$1" cfg="$boot_mp/grub2/grub.cfg" timeout="${POWOS_MENU_TIMEOUT:-10}"
+    # Separate declarations: bash creates every name in a single `local` before
+    # assigning any of them, so "cfg=$boot_mp/..." on the same line reads an
+    # unset $boot_mp and dies under set -u.
+    local boot_mp="$1"
+    local cfg="$boot_mp/grub2/grub.cfg"
+    local timeout="${POWOS_MENU_TIMEOUT:-10}"
     [[ -f "$cfg" ]] || { log_warn "No grub.cfg at $cfg — menu timeout/default left as-is."; return 0; }
 
     sed -i "s/^set timeout=[0-9]\+$/set timeout=$timeout/" "$cfg"

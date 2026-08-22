@@ -114,7 +114,10 @@ self_copy_manifest() {
 # installed files root-owned (we copy under sudo). Caller must have engaged the
 # usr-overlay for /usr first. Echoes each applied target.
 self_apply_manifest() {
-    local src_root="$1" containerfile="${2:-$src_root/Containerfile}"
+    # Separate declarations — bash creates every name in one `local` before
+    # assigning, so the default here would expand an unset $src_root.
+    local src_root="$1"
+    local containerfile="${2:-$src_root/Containerfile}"
     local src dst abs
     while IFS=$'\t' read -r src dst; do
         [[ -n "$src" && -n "$dst" ]] || continue
