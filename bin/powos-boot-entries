@@ -23,6 +23,32 @@ set -uo pipefail
 ENTRIES="${POWOS_ENTRIES_DIR:-/boot/loader/entries}"
 [[ -d "$ENTRIES" ]] || { echo "powos-boot-entries: no $ENTRIES — nothing to do"; exit 0; }
 
+# /boot is mounted READ-ONLY on an ostree system. Without this every write
+# below fails with "Read-only file system" and the entries stay missing — which
+# is exactly what happened on a Steam Deck: bazzite-hardware-setup applied its
+# kargs, rpm-ostree created a new deployment, ostree regenerated the loader
+# slot, and this service then could not put the entries back.
+POWOS_REMOUNTED_BOOT=0
+_powos_boot_rw() {
+    [[ "${POWOS_ENTRIES_DIR:-}" ]] && return 0   # tests point at a normal dir
+    mountpoint -q /boot || return 0
+    findmnt -no OPTIONS /boot 2>/dev/null | grep -qw ro || return 0
+    if mount -o remount,rw /boot 2>/dev/null; then
+        POWOS_REMOUNTED_BOOT=1
+    else
+        echo "powos-boot-entries: /boot is read-only and could not be remounted rw"
+        return 1
+    fi
+}
+_powos_boot_ro() {
+    (( POWOS_REMOUNTED_BOOT )) || return 0
+    mount -o remount,ro /boot 2>/dev/null || true
+    POWOS_REMOUNTED_BOOT=0
+}
+# Always hand /boot back the way we found it, even on error.
+trap _powos_boot_ro EXIT
+_powos_boot_rw || exit 0
+
 # The template is the image's own entry: never one of ours.
 template=$(find "$ENTRIES" -maxdepth 1 -name '*.conf' ! -name 'powos-*' | sort | head -1)
 [[ -n "$template" ]] || { echo "powos-boot-entries: no ostree entry to template from"; exit 0; }
