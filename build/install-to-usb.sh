@@ -616,10 +616,18 @@ _fstab_containers_on_data() {
 
     mp=$(mktemp -d); POWOS_TMP_MOUNTS+=("$mp")
     mount "$root_part" "$mp" 2>/dev/null || { log_warn "Could not mount $root_part — container storage left on the medium root."; return 0; }
+    local dm; dm=$(mktemp -d); POWOS_TMP_MOUNTS+=("$dm")
+    mount "$data_part" "$dm" 2>/dev/null || { log_warn "Could not mount POWOS-DATA to verify the subvolume."; return 0; }
     for deploy in "$mp"/root/ostree/deploy/*/deploy/*.[0-9]; do
         [[ -d "$deploy/etc" ]] || continue
         mkdir -p "$deploy/var/lib/containers" 2>/dev/null || true
         if ! grep -q '/var/lib/containers' "$deploy/etc/fstab" 2>/dev/null; then
+            # Only write the entry if the subvolume really exists, otherwise
+            # nofail turns a broken mount into a silent one.
+            if ! btrfs subvolume show "$dm/@powos/containers" >/dev/null 2>&1; then
+                log_warn "@powos/containers is not a subvolume — not adding the fstab entry."
+                continue
+            fi
             printf 'UUID=%s /var/lib/containers btrfs subvol=@powos/containers,rw,noatime,nofail 0 0\n' \
                 "$data_uuid" >> "$deploy/etc/fstab"
             log_success "Live medium: /var/lib/containers mounted from POWOS-DATA (room for the install)"
@@ -1016,7 +1024,16 @@ setup_persistence() {
     # PowOS directories
     mkdir -p "${mount_point}/@powos/extensions"
     mkdir -p "${mount_point}/@powos/sources"
-    mkdir -p "${mount_point}/@powos/containers"
+    # A SUBVOLUME, not a directory: the medium's fstab mounts this at
+    # /var/lib/containers with subvol=@powos/containers so the ~13.5GB install
+    # unpack lands here instead of filling the medium's root. btrfs subvol=
+    # only accepts a subvolume — pointed at a plain directory the mount fails,
+    # and with nofail it fails SILENTLY, which is exactly the "no space left on
+    # device" the entry exists to prevent.
+    if [[ ! -d "${mount_point}/@powos/containers" ]]; then
+        btrfs subvolume create "${mount_point}/@powos/containers" >/dev/null 2>&1 \
+            || mkdir -p "${mount_point}/@powos/containers"
+    fi
     mkdir -p "${mount_point}/@powos/git"
     mkdir -p "${mount_point}/@powos/state"
 
