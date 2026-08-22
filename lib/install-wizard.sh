@@ -112,7 +112,12 @@ iwz_yesno() {
     local text="$1"
     case "${IWZ_UI:-read}" in
         gui) kdialog --title "$IWZ_TITLE" --yesno "$text" ;;
-        tui) local b; b=$(iwz__tui_bin); "$b" --title "$IWZ_TITLE" --yesno "$text" 15 72 ;;
+        tui) local b h; b=$(iwz__tui_bin)
+             # Height from the content: the confirmation embeds the full review
+             # text, and a fixed 15 rows silently truncated it.
+             h=$(( $(printf '%s\n' "$text" | wc -l) + 8 ))
+             (( h < 12 )) && h=12; (( h > 24 )) && h=24
+             "$b" --title "$IWZ_TITLE" --yesno "$text" "$h" 76 ;;
         *)   echo; echo -e "$text"; local a; read -r -p "  [y/N] " a || return 1
              [[ "$a" =~ ^[Yy] ]] ;;
     esac
@@ -798,8 +803,13 @@ cmd_install_wizard() {
     iwz_step_ai       || { iwz_warn "Cancelled."; return 1; }
     iwz_step_restore  || { iwz_warn "Cancelled."; return 1; }
 
-    iwz_msg "$(iwz_review_text)"
-    if ! iwz_yesno "Proceed with the install shown above?"; then
+    # The summary goes INSIDE the confirmation. It used to be a separate msgbox
+    # followed by "Proceed with the install shown above?" — but whiptail clears
+    # the screen when it draws the next dialog, so by the time the question
+    # appeared there was nothing "above" to read.
+    if ! iwz_yesno "$(iwz_review_text)
+
+Proceed with this install?"; then
         iwz_warn "Aborted. Nothing was changed."
         return 1
     fi
