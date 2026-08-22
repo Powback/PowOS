@@ -280,9 +280,23 @@ iwz_list_disks() {
         [[ -n "$live" && "$name" == "$live" ]] && continue
         removable=no
         [[ "$rm" == "1" || "$hotplug" == "1" || "$tran" == "usb" ]] && removable=yes
-        # SD/eMMC readers report rm=0 on some controllers — treat mmcblk as
-        # removable regardless, since on a Deck that is always the card slot.
-        case "$name" in mmcblk*) removable=yes ;; esac
+        # SD/eMMC readers report rm=0 on some controllers, so mmcblk needs
+        # deciding from the card type rather than from RM/HOTPLUG. The kernel
+        # publishes it: "SD" for a card in a slot, "MMC" for a soldered-down
+        # eMMC. That distinction is the whole ballgame on a 64GB Steam Deck,
+        # where the eMMC IS the internal drive — calling it removable there
+        # would demand the device path be TYPED OUT, which is impossible on a
+        # Deck with no keyboard, and would leave the only install target
+        # unreachable. Anything we cannot read falls back to removable, since
+        # erasing a card by mistake is the cheaper error.
+        case "$name" in
+            mmcblk*)
+                case "$(cat "${IWZ_SYSBLOCK:-/sys/block}/$name/device/type" 2>/dev/null)" in
+                    MMC) removable=no ;;
+                    *)   removable=yes ;;
+                esac
+                ;;
+        esac
         if [[ "$removable" == "yes" ]]; then
             removables+=("$(printf '/dev/%s\t%s\t%s\t%s\t%s' "$name" "$size" "${model:-disk}" "$removable" "${tran:-?}")")
         else

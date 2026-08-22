@@ -48,6 +48,20 @@ nvme0n1 931G disk 0 0 nvme WD PC SN740 1TB'
     PKNAME_OUT=""
 }
 
+# A 64GB Steam Deck: the internal drive IS an eMMC (mmcblk0), and the SD card
+# is mmcblk1. Only /sys/block/*/device/type tells them apart — "MMC" is the
+# soldered-down internal, "SD" is the card slot.
+emmc_deck_layout() {
+    LSBLK_OUT='mmcblk0  58G disk 0 0 mmc  BJTD4R
+mmcblk1 477G disk 0 1 mmc  SD Card Reader'
+    BLKID_OUT=""
+    PKNAME_OUT=""
+    IWZ_SYSBLOCK=$(mktemp -d)
+    mkdir -p "$IWZ_SYSBLOCK/mmcblk0/device" "$IWZ_SYSBLOCK/mmcblk1/device"
+    echo MMC > "$IWZ_SYSBLOCK/mmcblk0/device/type"
+    echo SD  > "$IWZ_SYSBLOCK/mmcblk1/device/type"
+}
+
 # ── Tests ──────────────────────────────────────────────────────────────────
 
 t_internal_first() {
@@ -173,6 +187,44 @@ nvme0n1 931G disk 0 0 nvme WD PC SN740 1TB'
 }
 
 echo "== installer disk enumeration =="
+
+t_emmc_is_internal() {
+    emmc_deck_layout
+    local first flag
+    first=$(iwz_list_disks | head -1 | cut -f1)
+    flag=$(iwz_list_disks | head -1 | cut -f4)
+    if [[ "$first" == "/dev/mmcblk0" && "$flag" == "no" ]]; then
+        ok "a soldered eMMC counts as INTERNAL (the only install target on a 64GB Deck)"
+    else
+        bad "a soldered eMMC counts as INTERNAL" "got '$first' removable=$flag"
+    fi
+    rm -rf "$IWZ_SYSBLOCK"; unset IWZ_SYSBLOCK
+}
+
+t_sd_card_beside_emmc_still_removable() {
+    emmc_deck_layout
+    local line
+    line=$(iwz_list_disks | grep '/dev/mmcblk1')
+    if [[ "$(cut -f4 <<<"$line")" == "yes" ]]; then
+        ok "the SD card is still flagged removable when an eMMC is present"
+    else
+        bad "the SD card is still flagged removable" "got '$line'"
+    fi
+    rm -rf "$IWZ_SYSBLOCK"; unset IWZ_SYSBLOCK
+}
+
+t_unreadable_mmc_type_is_removable() {
+    IWZ_SYSBLOCK=$(mktemp -d)          # empty: no type attribute at all
+    LSBLK_OUT='mmcblk0 477G disk 0 0 mmc  SD Card Reader'
+    BLKID_OUT=""; PKNAME_OUT=""
+    if [[ "$(iwz_list_disks | cut -f4)" == "yes" ]]; then
+        ok "an unreadable card type falls back to REMOVABLE (erasing a card is the cheaper mistake)"
+    else
+        bad "an unreadable card type falls back to REMOVABLE"
+    fi
+    rmdir "$IWZ_SYSBLOCK"; unset IWZ_SYSBLOCK
+}
+
 t_internal_first
 t_removable_last
 t_mmcblk_flagged_removable
@@ -183,6 +235,9 @@ t_model_with_spaces
 t_is_removable_helper
 t_no_disks_is_empty
 t_partitions_and_loops_ignored
+t_emmc_is_internal
+t_sd_card_beside_emmc_still_removable
+t_unreadable_mmc_type_is_removable
 
 echo ""
 echo "== Results: $PASS passed, $FAIL failed =="
