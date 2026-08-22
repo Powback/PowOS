@@ -158,16 +158,30 @@ pv_prepare_image() {
     ref="${POWOS_VARIANT_LOCAL_TAG}:${want}"
 
     # Already imported (e.g. a retry, or a previous install in this session).
-    if podman image exists "$ref" 2>/dev/null; then
+    local _ms _g _r
+    if _ms=$(pv_media_storage 2>/dev/null); then
+        _g="${_ms%%|*}"; _r="${_ms##*|}"
+        if podman --root "$_g" --runroot "$_r" image exists "$ref" 2>/dev/null; then
+            printf '%s\n' "$ref"; return 0
+        fi
+    elif podman image exists "$ref" 2>/dev/null; then
         printf '%s\n' "$ref"; return 0
     fi
 
     src=$(pv_source_imgref "$want") || return 1
-    pv__log "importing $want off the media into local storage (no network)..." >&2
+    local ms graph runroot dest
+    if ms=$(pv_media_storage); then
+        graph="${ms%%|*}"; runroot="${ms##*|}"
+        dest="containers-storage:[overlay@${graph}+${runroot}]${ref}"
+        pv__log "importing $want off the media into storage ON THE MEDIA ($graph)..." >&2
+    else
+        dest="containers-storage:$ref"
+        pv__log "importing $want off the media into local storage (no network)..." >&2
+    fi
     # Unpacked, this is ~13.5GB per variant against ~5.7GB compressed on the
     # media. A live system whose /var is small will fail here — callers should
     # relocate container storage onto the media first (see pv_storage_hint).
-    skopeo copy "$src" "containers-storage:$ref" >&2 || return 1
+    skopeo copy "$src" "$dest" >&2 || return 1
     printf '%s\n' "$ref"
 }
 
@@ -179,14 +193,49 @@ pv_storage_hint() {
     printf '%s\n' "$mp/@powos/containers"
 }
 
+# Container storage ON THE MEDIA, created if needed.
+#
+# Unpacking a variant costs ~13.5GB. A live medium's root holds the OS and has
+# nowhere near that free — on a Steam Deck stick it is 25.9GB with the system
+# already in it, so the import died with "no space left on device" after
+# copying blobs for several minutes. POWOS-DATA is the rest of the device
+# (terabytes on a large drive), and install-to-usb already creates
+# @powos/containers for exactly this.
+#
+# Prints "<graphroot>|<runroot>" so callers can point both skopeo and podman at
+# it. Fails (silently) when there is no writable media, leaving the classic
+# behaviour untouched for a normal installed system.
+POWOS_MEDIA_RUNROOT="${POWOS_MEDIA_RUNROOT:-/run/powos-containers}"
+pv_media_storage() {
+    local store
+    store=$(pv_storage_hint 2>/dev/null) || return 1
+    mkdir -p "$store" 2>/dev/null || return 1
+    [[ -w "$store" ]] || return 1
+    mkdir -p "$POWOS_MEDIA_RUNROOT" 2>/dev/null || return 1
+    printf '%s|%s\n' "$store" "$POWOS_MEDIA_RUNROOT"
+}
+
 # Run `bootc install to-disk` for image $1 onto device $2; remaining args are
 # passed through to bootc.
 pv_bootc_install() {
     local image="$1" target="$2"; shift 2
-    podman run --rm --privileged --pid=host \
-        --security-opt label=type:unconfined_t \
-        -v /dev:/dev \
-        -v /var/lib/containers:/var/lib/containers \
-        "$image" \
-        bootc install to-disk "$@" "$target"
+    # Must read the image from wherever pv_prepare_image put it. On live media
+    # that is POWOS-DATA, not /var/lib/containers, which has no room for it.
+    local ms graph runroot
+    if ms=$(pv_media_storage 2>/dev/null); then
+        graph="${ms%%|*}"; runroot="${ms##*|}"
+        podman --root "$graph" --runroot "$runroot" run --rm --privileged --pid=host \
+            --security-opt label=type:unconfined_t \
+            -v /dev:/dev \
+            -v "$graph:$graph" \
+            "$image" \
+            bootc install to-disk "$@" "$target"
+    else
+        podman run --rm --privileged --pid=host \
+            --security-opt label=type:unconfined_t \
+            -v /dev:/dev \
+            -v /var/lib/containers:/var/lib/containers \
+            "$image" \
+            bootc install to-disk "$@" "$target"
+    fi
 }
