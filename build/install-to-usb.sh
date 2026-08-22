@@ -484,6 +484,32 @@ _bls_sort_key() {
     printf 'sort-key %s\n' "$key" >> "$file"
 }
 
+# Make the DISPLAY the primary console on every entry on this medium.
+#
+# The last console= on the kernel command line becomes /dev/console. Images
+# built by bootc-image-builder carry "console=tty0 console=ttyS0", which is
+# right for a VM and wrong for physical hardware: on a machine with no serial
+# port (a Steam Deck, most laptops) systemd's output and anything else writing
+# to /dev/console goes to a port that does not exist, and the screen shows
+# nothing but a cursor. Serial is kept — just no longer last — so VM debugging
+# still works.
+_bls_console_to_display() {
+    local f="$1"
+    grep -q '^options .*console=' "$f" 2>/dev/null || return 0
+    grep -q '^options .*console=tty0' "$f" 2>/dev/null || return 0
+    awk '
+        /^options / {
+            n = 0
+            for (i = 2; i <= NF; i++) if ($i != "console=tty0") out[n++] = $i
+            line = "options"
+            for (i = 0; i < n; i++) line = line " " out[i]
+            print line " console=tty0"
+            next
+        }
+        { print }
+    ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
 write_bls_entries() {
     local entries_dir="$1"
 
@@ -558,6 +584,14 @@ write_bls_entries() {
     }
     _write_recovery_entry "powos-safe"    "Recovery — Safe mode (RAM boot off)" "safe"
     _write_recovery_entry "powos-aidebug" "Recovery — AI Debug (diagnose boot)" "aidebug"
+    # Point every entry on this medium at the display (see
+    # _bls_console_to_display). Includes the image's own ostree entries, which
+    # we did not write but which boot on the same hardware.
+    local _e
+    for _e in "$entries_dir"/*.conf; do
+        [[ -f "$_e" ]] && _bls_console_to_display "$_e"
+    done
+
 }
 
 add_install_boot_entry() {
