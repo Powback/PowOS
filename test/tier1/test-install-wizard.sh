@@ -342,3 +342,14 @@ iwz_yesno() { return 0; }
 iwz_input() { echo "https://example/repo.git"; }
 iwz_step_restore >/dev/null 2>&1
 check "accepting a restore URL returns 0" '[[ $? -eq 0 ]]'
+
+# ── read-backend defaults ─────────────────────────────────────────
+# Enter must accept the highlighted/first entry, as whiptail and kdialog do.
+# Returning 1 on empty made a bare Enter read as a CANCEL and abort the
+# installer at the first prompt.
+echo "== read backend: Enter takes the first entry =="
+IWZ_UI=read
+out=$(printf '\n' | iwz_menu "pick" one "First" two "Second" 2>/dev/null)
+check "empty input selects the first tag" '[[ "$out" == "one" ]]'
+out=$(printf '2\n' | iwz_menu "pick" one "First" two "Second" 2>/dev/null)
+check "an explicit number still selects that tag" '[[ "$out" == "two" ]]'

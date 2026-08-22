@@ -165,7 +165,11 @@ iwz_menu() {
                  printf '  %2d) %s\n' "$((i+1))" "${labels[$i]}" >&2
              done
              local sel
-             read -r -p "  Choose [1-${#tags[@]}]: " sel || return 1
+             read -r -p "  Choose [1-${#tags[@]}] (Enter = 1): " sel || return 1
+             # Empty means "take the first entry", matching whiptail/kdialog where
+             # Enter accepts the highlighted item. Returning 1 made a bare Enter
+             # read as a CANCEL and abort the installer.
+             [[ -z "$sel" ]] && sel=1
              [[ "$sel" =~ ^[0-9]+$ ]] || return 1
              (( sel >= 1 && sel <= ${#tags[@]} )) || return 1
              printf '%s\n' "${tags[$((sel-1))]}" ;;
