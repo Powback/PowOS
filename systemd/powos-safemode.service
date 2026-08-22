@@ -4,7 +4,12 @@ Documentation=man:powos(8)
 # Only when the boot carries a `powos.mode=` karg (the Recovery boot-menu
 # entries set powos.mode=safe or =aidebug). Takes over tty1 like the installer.
 ConditionKernelCommandLine=powos.mode
-After=multi-user.target network-online.target
+After=multi-user.target
+# Wanted, but NOT waited for. This is the console you reach when the machine
+# will not boot properly, and half the time that includes the network: ordering
+# after network-online.target meant staring at a blank screen for
+# NetworkManager-wait-online's full timeout before recovery would even draw.
+# The AI-debug path does its own waiting when it needs a network.
 Wants=network-online.target
 After=display-manager.service
 
