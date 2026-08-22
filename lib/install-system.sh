@@ -188,20 +188,25 @@ isv_live_device() {
 # ── Disk discovery ────────────────────────────────────────────────
 # The boot splash is OFF on installed systems, and this is deliberate.
 #
-# plymouth-quit-wait.service runs `plymouth --wait` with an infinite timeout.
-# On this image plymouthd stops answering, so that unit and plymouth-quit
-# hang and the boot never reaches graphical.target — no display manager, no
-# console, nothing. It reproduces in a clean QEMU VM off our own raw image and
-# it is what a Steam Deck showed: "stuck at plymouth-quit-wait.service".
+# Not because plymouth hangs — measured in QEMU off our own image, it does
+# not: the boot reaches a getty either way. What it does is take the console
+# the moment plymouth-quit runs, so systemd's status lines stop appearing,
+# and paint a black screen while it does. On a machine whose display manager
+# never starts — see systemd/powos-installer.service for the reason that
+# happened for weeks — the result is indistinguishable from a hang, and was
+# read as one by everyone who looked at it, including on a Steam Deck where
+# the last line on screen was "Starting plymouth-quit-wait.service" and the
+# machine was in fact running fine.
 #
-# The live medium already boots with plymouth.enable=0, which is why the stick
-# gets past it. An installed system had no such karg and would have hung on
-# every boot — installing from a medium that works onto a machine that then
-# does not is the worst possible outcome, so it inherits the same karg. The
-# drop-ins in systemd/plymouth-quit*.service.d bound the hang as well; this
-# karg avoids it. Losing the splash also means boot messages stay on screen,
-# which on hardware that has spent this long showing black screens is not a
-# loss. Override with POWOS_SPLASH=1 to install with the splash enabled.
+# So the splash is off for the same reason the live medium turns it off: when
+# something goes wrong on this hardware, the difference between a black screen
+# and a scrolling boot log is the difference between a bug you can see and one
+# you cannot. Installing from a medium that shows its work onto a machine that
+# hides it is the wrong trade. The drop-ins in
+# systemd/plymouth-quit*.service.d bound the units' timeouts as well, so a
+# plymouth that genuinely stops answering cannot hold the boot open forever.
+#
+# Override with POWOS_SPLASH=1 to install with the splash enabled.
 ISV_SPLASH_KARG="${ISV_SPLASH_KARG:-plymouth.enable=$([[ "${POWOS_SPLASH:-0}" == "1" ]] && echo 1 || echo 0)}"
 
 # Emit candidate target disks: NAME SIZE MODEL TRAN REMOVABLE
