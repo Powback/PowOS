@@ -557,7 +557,8 @@ _bls_console_to_display() {
 #
 # Default is the plain live entry, not the installer: auto-starting a disk
 # installer unattended is not something a boot timeout should ever do.
-# Stop the LIVE medium from re-deploying itself.
+# Stop the LIVE medium from re-deploying itself, and from mounting the target
+# machine's disks.
 #
 # bazzite-hardware-setup runs `rpm-ostree kargs` on first boot to add
 # hardware-specific kargs, then reboots. On an installed system that is
@@ -570,16 +571,40 @@ _bls_console_to_display() {
 # Masking it here affects ONLY the medium. A system installed FROM this stick
 # is laid down from the offline variant store, so it gets the unmasked unit and
 # configures its hardware normally on first boot.
+# Units masked on the medium only. Each is correct on an installed system and
+# wrong on an installer:
+#
+#   bazzite-hardware-setup     runs `rpm-ostree kargs` and reboots, creating a
+#                              SECOND deployment — which makes ostree regenerate
+#                              the loader slot and delete the Install/Recovery
+#                              entries, and produced a deployment that hung at
+#                              initrd-switch-root.
+#   ublue-os-media-automount   "Mount partitons automaticaly" — it mounts the
+#                              disks of the machine being installed. On a Steam
+#                              Deck whose internal drive holds half of a
+#                              degraded two-device btrfs, the mount never
+#                              completes: dev-nvme0n1p1.device times out after
+#                              90s, systemd-fsck@ and the .mount unit fail, and
+#                              the boot stalls. An installer must not mount the
+#                              disk it is about to write.
+POWOS_LIVE_MASK_UNITS=(
+    bazzite-hardware-setup.service
+    ublue-os-media-automount.service
+)
+
 _mask_live_hardware_setup() {
     local device="$1" root_part mp deploy
     root_part=$(lsblk -nro NAME,LABEL "$device" 2>/dev/null | awk '$2=="root"{print "/dev/"$1; exit}')
     [[ -n "$root_part" ]] || { log_warn "No 'root' partition found — hardware-setup left unmasked."; return 0; }
     mp=$(mktemp -d); POWOS_TMP_MOUNTS+=("$mp")
     mount "$root_part" "$mp" 2>/dev/null || { log_warn "Could not mount $root_part — hardware-setup left unmasked."; return 0; }
+    local unit
     for deploy in "$mp"/root/ostree/deploy/*/deploy/*.[0-9]; do
         [[ -d "$deploy/etc/systemd/system" ]] || continue
-        ln -sfn /dev/null "$deploy/etc/systemd/system/bazzite-hardware-setup.service"
-        log_success "Live medium: bazzite-hardware-setup masked (no self-redeploy)"
+        for unit in "${POWOS_LIVE_MASK_UNITS[@]}"; do
+            ln -sfn /dev/null "$deploy/etc/systemd/system/$unit"
+        done
+        log_success "Live medium: masked ${POWOS_LIVE_MASK_UNITS[*]}"
     done
     sync; umount "$mp" 2>/dev/null || true
 }
