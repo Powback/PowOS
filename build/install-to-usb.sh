@@ -557,6 +557,33 @@ _bls_console_to_display() {
 #
 # Default is the plain live entry, not the installer: auto-starting a disk
 # installer unattended is not something a boot timeout should ever do.
+# Stop the LIVE medium from re-deploying itself.
+#
+# bazzite-hardware-setup runs `rpm-ostree kargs` on first boot to add
+# hardware-specific kargs, then reboots. On an installed system that is
+# correct. On a live USB it is actively harmful: it creates a SECOND
+# deployment, which makes ostree regenerate the loader slot (deleting the
+# Install and Recovery entries), forces an extra reboot, and — observed on a
+# Steam Deck — produced a deployment that hangs at initrd-switch-root, leaving
+# the older one as the only bootable option.
+#
+# Masking it here affects ONLY the medium. A system installed FROM this stick
+# is laid down from the offline variant store, so it gets the unmasked unit and
+# configures its hardware normally on first boot.
+_mask_live_hardware_setup() {
+    local device="$1" root_part mp deploy
+    root_part=$(lsblk -nro NAME,LABEL "$device" 2>/dev/null | awk '$2=="root"{print "/dev/"$1; exit}')
+    [[ -n "$root_part" ]] || { log_warn "No 'root' partition found — hardware-setup left unmasked."; return 0; }
+    mp=$(mktemp -d); POWOS_TMP_MOUNTS+=("$mp")
+    mount "$root_part" "$mp" 2>/dev/null || { log_warn "Could not mount $root_part — hardware-setup left unmasked."; return 0; }
+    for deploy in "$mp"/root/ostree/deploy/*/deploy/*.[0-9]; do
+        [[ -d "$deploy/etc/systemd/system" ]] || continue
+        ln -sfn /dev/null "$deploy/etc/systemd/system/bazzite-hardware-setup.service"
+        log_success "Live medium: bazzite-hardware-setup masked (no self-redeploy)"
+    done
+    sync; umount "$mp" 2>/dev/null || true
+}
+
 _grub_menu_defaults() {
     # Separate declarations: bash creates every name in a single `local` before
     # assigning any of them, so "cfg=$boot_mp/..." on the same line reads an
@@ -723,6 +750,7 @@ add_install_boot_entry() {
     write_bls_entries "$entries_dir"
     # entries_dir is <boot>/loader/entries; grub.cfg lives at <boot>/grub2/.
     _grub_menu_defaults "$(dirname "$(dirname "$entries_dir")")"
+    _mask_live_hardware_setup "$device"
 
     # Make the menu actually visible (bootc images often hide it / 0s timeout).
     # Fedora-family hosts ship grub2-editenv; Debian/Ubuntu ship grub-editenv.
