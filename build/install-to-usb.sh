@@ -510,6 +510,52 @@ _bls_console_to_display() {
     ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 }
 
+# Give the boot menu a usable timeout and a sane default entry.
+#
+# The image ships "set timeout=1" and no explicit default, so GRUB takes entry
+# 0 — and grub's blscfg lists BLS entries by FILENAME DESCENDING, which makes
+# powos-safe.conf first. The result on real hardware: "Recovery — Safe mode"
+# auto-boots one second after the menu appears, and a user who is not already
+# holding an arrow key never gets to choose. (sort-key does NOT fix this: this
+# grub ignores it when the entries do not all carry one, which was measured on
+# a real boot.)
+#
+# Default is the plain live entry, not the installer: auto-starting a disk
+# installer unattended is not something a boot timeout should ever do.
+_grub_menu_defaults() {
+    local boot_mp="$1" cfg="$boot_mp/grub2/grub.cfg" timeout="${POWOS_MENU_TIMEOUT:-10}"
+    [[ -f "$cfg" ]] || { log_warn "No grub.cfg at $cfg — menu timeout/default left as-is."; return 0; }
+
+    sed -i "s/^set timeout=[0-9]\+$/set timeout=$timeout/" "$cfg"
+
+    # Default to the image's own live entry (the one we did not author).
+    local live
+    live=$(find "$boot_mp/loader/entries" -maxdepth 1 -name '*.conf' \
+             ! -name 'powos-*' -printf '%f\n' 2>/dev/null | sort | head -1)
+    if [[ -z "$live" ]]; then
+        log_warn "Could not identify the live BLS entry — default entry left as-is."
+        return 0
+    fi
+    live="${live%.conf}"
+
+    if grep -q '^set default=' "$cfg" && ! grep -q 'BEGIN powos-default' "$cfg"; then
+        : # greenboot's conditional default; ours is appended after blscfg below
+    fi
+    if ! grep -q 'BEGIN powos-default' "$cfg"; then
+        awk -v id="$live" '
+            /### END 10_blscfg.cfg ###/ {
+                print
+                print "### BEGIN powos-default ###"
+                print "set default=\"" id "\""
+                print "### END powos-default ###"
+                next
+            }
+            { print }
+        ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+    fi
+    log_success "Boot menu: ${timeout}s timeout, default entry '$live'"
+}
+
 write_bls_entries() {
     local entries_dir="$1"
 
@@ -630,6 +676,8 @@ add_install_boot_entry() {
 
     # Write the Install + Recovery BLS entries into the mounted entries dir.
     write_bls_entries "$entries_dir"
+    # entries_dir is <boot>/loader/entries; grub.cfg lives at <boot>/grub2/.
+    _grub_menu_defaults "$(dirname "$(dirname "$entries_dir")")"
 
     # Make the menu actually visible (bootc images often hide it / 0s timeout).
     # Fedora-family hosts ship grub2-editenv; Debian/Ubuntu ship grub-editenv.
