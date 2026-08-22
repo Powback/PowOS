@@ -27,7 +27,14 @@ Environment=TERM=linux
 ExecStart=/usr/bin/powos-install-wizard
 StandardInput=tty
 StandardOutput=tty
-StandardError=journal
+# MUST be the tty, not the journal. whiptail uses the standard
+# "3>&1 1>&2 2>&3" swap so the SELECTION returns on stdout for $(...) capture
+# and the DIALOG goes to stderr. That works in a terminal because stderr is the
+# terminal. With StandardError=journal the entire menu was drawn into the
+# journal and the screen showed only the plain echo header — observed on a
+# Steam Deck as "PowOS Guided Installer / backend: tui / -- Target disk --"
+# followed by nothing at all.
+StandardError=tty
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
