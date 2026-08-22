@@ -421,7 +421,10 @@ ram_sync_resolve() {
 
     # Show any .powos-conflict-* files left from a previous merge so the user
     # knows they need review (independent of whether a machine conflict exists).
-    local ram_upper="/run/powos-overlay/upper"
+    # Overridable ONLY so the test suite can point it at a fixture tree and
+    # exercise this function for real. Nothing in production sets it, so the
+    # default is the live overlay upper dir exactly as before.
+    local ram_upper="${POWOS_RAM_UPPER:-/run/powos-overlay/upper}"
     if [[ -d "$ram_upper" ]]; then
         local pending_conflicts
         pending_conflicts=$(find "$ram_upper" -name "*.powos-conflict-*" 2>/dev/null | sort)
@@ -597,7 +600,7 @@ ram_sync_merge() {
     echo -e "${CYAN}3-way merge: RAM ↔ USB...${NC}"
     echo ""
 
-    local ram_upper="/run/powos-overlay/upper"
+    local ram_upper="${POWOS_RAM_UPPER:-/run/powos-overlay/upper}"
     local usb_custom="$USB_MOUNT/layers/custom"
 
     if [[ ! -d "$ram_upper" ]] || [[ ! -d "$usb_custom" ]]; then
@@ -771,7 +774,7 @@ ram_sync_show_diff() {
     echo -e "${CYAN}Differences between RAM and USB:${NC}"
     echo ""
 
-    local ram_upper="/run/powos-overlay/upper"
+    local ram_upper="${POWOS_RAM_UPPER:-/run/powos-overlay/upper}"
     local usb_custom="$USB_MOUNT/layers/custom"
 
     if [[ -d "$ram_upper" ]] && [[ -d "$usb_custom" ]]; then
@@ -793,7 +796,7 @@ ram_sync_show_diff() {
 # Get detailed diff for AI analysis
 get_diff_for_ai() {
     local diff_output=""
-    local ram_upper="/run/powos-overlay/upper"
+    local ram_upper="${POWOS_RAM_UPPER:-/run/powos-overlay/upper}"
     local usb_custom="$USB_MOUNT/layers/custom"
 
     if [[ ! -d "$ram_upper" ]] || [[ ! -d "$usb_custom" ]]; then

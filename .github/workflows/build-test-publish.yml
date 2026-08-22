@@ -256,7 +256,16 @@ jobs:
       - name: Container tests (tier1 inside the actual image)
         if: steps.gate.outputs.run == 'true' && matrix.variant != 'nvidia-open-testing'
         run: |
-          sudo podman run --rm -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
+          # --tmpfs /tmp is load-bearing, not tidiness. The runner's container
+          # rootfs is fuse-overlayfs, whose readdir cache goes stale: a
+          # directory read while empty keeps returning the empty listing after
+          # files are created in it, even though `[[ -f ]]` on those same files
+          # succeeds. test-sync.sh reads layers/custom while empty during the
+          # manifest tests, so the four files the merge test then writes were
+          # invisible to find/ls and "Class 5: USB-only new file" failed here
+          # and nowhere else. A real tmpfs at /tmp sidesteps fuse-overlayfs for
+          # every test's scratch space.
+          sudo podman run --rm --tmpfs /tmp -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
             --entrypoint /bin/bash powos-ci -c '
               set -e
               bash /powos/test/tier1/test-hardware-detect.sh

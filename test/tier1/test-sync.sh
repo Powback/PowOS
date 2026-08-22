@@ -826,104 +826,14 @@ test_three_way_merge() {
     mknod "$USB_MOUNT/layers/custom/class6.txt" c 0 0 2>/dev/null || \
         true   # non-root: omit whiteout (class6 test will be skipped)
 
-    # ── 3. Run the merge via an inline override ────────────────────
-    # ram_sync_merge() hard-codes /run/powos-overlay/upper; we shadow it
-    # here with a version that uses our test paths.
-    local saved_ram_upper="$ram_upper"
-
+    # ── 3. Run the REAL merge ─────────────────────────────────────
+    # This used to be an inline reimplementation of ram_sync_merge(), which
+    # meant the suite asserted against a COPY: lib/sync.sh's merge could break
+    # without a single test noticing. lib/sync.sh now honours POWOS_RAM_UPPER
+    # (default unchanged) purely so the shipped function can be pointed at a
+    # fixture tree and exercised for real.
     local merge_out
-    merge_out=$(
-        ram_sync_merge() {
-            local ram_upper="$saved_ram_upper"
-            local usb_custom="$USB_MOUNT/layers/custom"
-
-            [[ -d "$ram_upper" && -d "$usb_custom" ]] || { echo "paths missing"; return 1; }
-
-            declare -A BASE_HASH=()
-            local has_manifest=0
-            load_sync_manifest BASE_HASH 2>/dev/null && has_manifest=1
-
-            _is_whiteout() {
-                [[ -c "$1" ]] && [[ "$(LC_ALL=C stat -c '%t%T' "$1" 2>/dev/null)" == "00" ]]
-            }
-            _file_hash() {
-                local f="$1"
-                if _is_whiteout "$f"; then echo "DELETED"
-                elif [[ -f "$f" ]]; then md5sum "$f" 2>/dev/null | cut -d' ' -f1
-                else echo ""
-                fi
-            }
-
-            declare -A all_files=()
-            while IFS= read -r -d '' f; do
-                all_files["${f#${ram_upper}/}"]=1
-            done < <(find "$ram_upper" \( -type f -o -type c \) -print0 2>/dev/null)
-            while IFS= read -r -d '' f; do
-                all_files["${f#${usb_custom}/}"]=1
-            done < <(find "$usb_custom" \( -type f -o -type c \) -print0 2>/dev/null)
-
-            local n_ram_kept=0 n_usb_taken=0 n_conflict=0
-            for rel in "${!all_files[@]}"; do
-                [[ "$rel" == *.powos-conflict-* ]] && continue
-                local ram_f="$ram_upper/$rel"
-                local usb_f="$usb_custom/$rel"
-                local ram_hash="" usb_hash="" base_hash="ABSENT"
-                [[ -f "$ram_f" || -c "$ram_f" ]] && ram_hash=$(_file_hash "$ram_f")
-                [[ -f "$usb_f" || -c "$usb_f" ]] && usb_hash=$(_file_hash "$usb_f")
-                [[ -n "${BASE_HASH[$rel]+x}" ]] && base_hash="${BASE_HASH[$rel]}"
-
-                if [[ -z "$usb_hash" ]]; then
-                    if [[ "$base_hash" != "ABSENT" && "$ram_hash" == "$base_hash" ]]; then
-                        rm -f "$ram_f" 2>/dev/null || true
-                    else
-                        (( n_ram_kept++ )) || true
-                    fi
-                    continue
-                fi
-                if [[ -z "$ram_hash" ]]; then
-                    if [[ "$base_hash" != "ABSENT" && "$usb_hash" == "$base_hash" ]]; then
-                        :
-                    else
-                        mkdir -p "$(dirname "$ram_f")"
-                        cp -a "$usb_f" "$ram_f"
-                        (( n_usb_taken++ )) || true
-                    fi
-                    continue
-                fi
-                [[ "$ram_hash" == "$usb_hash" ]] && continue
-
-                if [[ "$has_manifest" -eq 1 && "$base_hash" != "ABSENT" ]]; then
-                    if [[ "$ram_hash" == "$base_hash" ]]; then
-                        mkdir -p "$(dirname "$ram_f")"
-                        cp -a "$usb_f" "$ram_f"
-                        (( n_usb_taken++ )) || true
-                        continue
-                    fi
-                    if [[ "$usb_hash" == "$base_hash" ]]; then
-                        (( n_ram_kept++ )) || true
-                        continue
-                    fi
-                fi
-
-                (( n_conflict++ )) || true
-                local ram_mtime usb_mtime
-                ram_mtime=$(stat -c '%Y' "$ram_f" 2>/dev/null || echo 0)
-                usb_mtime=$(stat -c '%Y' "$usb_f" 2>/dev/null || echo 0)
-                if (( usb_mtime > ram_mtime )); then
-                    cp -a "$ram_f" "${ram_f}.powos-conflict-${MACHINE_ID}" 2>/dev/null || true
-                    cp -a "$usb_f" "$ram_f"
-                    (( n_usb_taken++ )) || true
-                else
-                    mkdir -p "$(dirname "$ram_f")"
-                    cp -a "$usb_f" "${ram_f}.powos-conflict-${MACHINE_ID}" 2>/dev/null || true
-                    (( n_ram_kept++ )) || true
-                fi
-            done
-            printf 'ram_kept=%d usb_taken=%d conflicts=%d\n' \
-                "$n_ram_kept" "$n_usb_taken" "$n_conflict"
-        }
-        ram_sync_merge
-    )
+    merge_out=$(POWOS_RAM_UPPER="$ram_upper" ram_sync_merge 2>&1)
 
     # ── 4. Assert each class outcome ──────────────────────────────
     # Class 1: RAM changed, USB at base → RAM version kept.
@@ -977,7 +887,7 @@ test_three_way_merge() {
     fi
 
     # Confirm merge reported exactly 1 conflict (class 3).
-    assert_contains "$merge_out" "conflicts=1" "Merge reported exactly 1 conflict (class 3)"
+    assert_contains "$merge_out" "1 file(s) had conflicts" "Merge reported exactly 1 conflict (class 3)"
 
     # ── Cleanup ───────────────────────────────────────────────────
     USB_MOUNT="$old_usb"
