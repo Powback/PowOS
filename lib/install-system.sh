@@ -190,7 +190,13 @@ isv_live_device() {
 # (excludes the live device; REMOVABLE is the sysfs flag: 1/0/?)
 isv_candidate_disks() {
     local live; live=" $(isv_live_device) "
-    lsblk -dn -o NAME,SIZE,MODEL,TRAN,TYPE 2>/dev/null | while read -r name size model tran type; do
+    # MODEL is requested LAST, and read LAST, because it is the only field that
+    # can contain spaces. Asked for in the middle, "WD PC SN740 1TB" shifts
+    # every following field along — TYPE ends up holding a fragment of the
+    # model, the `type == disk` test fails, and the disk vanishes from the
+    # candidate list entirely. The user then sees their drive missing, and
+    # passing --disk for it is rejected as "not an installable target".
+    lsblk -dn -o NAME,SIZE,TRAN,TYPE,MODEL 2>/dev/null | while read -r name size tran type model; do
         [[ "$type" == "disk" ]] || continue
         [[ "$name" == loop* || "$name" == sr* || "$name" == zram* ]] && continue
         [[ "$live" == *" /dev/$name "* ]] && continue   # skip the drive we booted from

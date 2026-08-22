@@ -44,6 +44,9 @@ iwz_step() { echo; echo -e "${BOLD}── $* ──${NC}"; }
 IWZ_DRY_RUN=0
 IWZ_UI=""                          # gui | tui | read  (resolved by iwz_detect_ui)
 IWZ_CONFIG_PATH="${IWZ_CONFIG_PATH:-/etc/powos/install.conf}"
+# Full transcript of the install-system run, so a failure can be quoted back
+# inside a dialog after whiptail has wiped the screen.
+IWZ_INSTALL_LOG="${IWZ_INSTALL_LOG:-/tmp/powos-install.log}"
 IWZ_TITLE="PowOS Install"
 
 IWZ_DISK=""
@@ -839,8 +842,13 @@ iwz_commit() {
         powos install-system $args --dry-run || iwz_warn "installer preview returned non-zero"
     else
         echo -e "  ${DIM}\$ powos install-system $args${NC}"
+        # Tee the run: whiptail CLEARS the screen before drawing its next
+        # dialog, so by the time a failure can be reported in one, everything
+        # the installer printed is gone. Keep a copy to quote back.
         # shellcheck disable=SC2086
-        powos install-system $args || { iwz_err "Installer failed — aborting."; return 1; }
+        powos install-system $args 2>&1 | tee "$IWZ_INSTALL_LOG"
+        local rc=${PIPESTATUS[0]}
+        [[ $rc -eq 0 ]] || { iwz_err "Installer failed — aborting."; return 1; }
         # 3) Place the config on the installed system for firstboot. A failure
         #    here must NOT abort: the disk is already written, and aborting
         #    would skip the completion screen and the reboot prompt — leaving
@@ -919,7 +927,33 @@ Proceed with this install?"; then
         return 1
     fi
 
-    iwz_commit || return 1
+    local commit_rc=0
+    iwz_commit || commit_rc=$?
+
+    if [[ $commit_rc -ne 0 ]]; then
+        # Do NOT just return. This service holds tty1 with getty@tty1
+        # conflicted out, so returning strands a keyboard-less machine on a
+        # frozen error screen with no way out but the power button. Offer one.
+        iwz_step "Failed"
+        iwz_err "The install did not complete. Nothing further was changed."
+        if [[ $IWZ_DRY_RUN -eq 0 && ${EUID:-$(id -u)} -eq 0 ]]; then
+            local tail_txt=""
+            [[ -s "$IWZ_INSTALL_LOG" ]] && tail_txt=$(sed 's/\x1b\[[0-9;]*m//g' "$IWZ_INSTALL_LOG" |
+                                                      grep -v '^[[:space:]]*$' | tail -n 8 | cut -c1-70)
+            if iwz_yesno "The install did not complete.
+${tail_txt:+
+$tail_txt
+}
+Choose Yes to reboot (the USB boots again, so you can retry),
+or No to leave this screen up.
+
+Reboot now?"; then
+                sync
+                systemctl reboot || reboot
+            fi
+        fi
+        return 1
+    fi
 
     iwz_step "Done"
     iwz_ok "Install complete."

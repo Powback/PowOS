@@ -347,11 +347,17 @@ echo "== Candidate disk exclusion =="
 isv_live_device() { echo "/dev/sdb"; }
 lsblk() {
     # Only emulate the exact call isv_candidate_disks makes.
-    if [[ "$*" == *"-dn -o NAME,SIZE,MODEL,TRAN,TYPE"* ]]; then
+    # MODEL comes LAST here, and one model has SPACES in it on purpose: real
+    # drives are named "WD PC SN740 1TB", and asked for in the middle that
+    # model shifted TYPE along by three fields, so the disk failed the
+    # `type == disk` test and vanished from the candidate list entirely.
+    if [[ "$*" == *"-dn -o NAME,SIZE,TRAN,TYPE,MODEL"* ]]; then
         cat <<'LSBLK'
-sda   500G Samsung_SSD   sata  disk
-sdb    32G Kingston_USB  usb   disk
-loop0  25G               ""    loop
+sda   500G sata  disk Samsung_SSD
+sdb    32G usb   disk Kingston_USB
+nvme0n1 1T nvme  disk WD PC SN740 1TB
+mmcblk0 58G mmc  disk BJTD4R
+loop0  25G ""    loop
 LSBLK
     fi
 }
@@ -362,6 +368,9 @@ out=$(isv_candidate_disks)
 check "internal /dev/sda is a candidate"     'echo "$out" | grep -q "/dev/sda"'
 check "live USB /dev/sdb is excluded"        '! echo "$out" | grep -q "/dev/sdb"'
 check "loop device excluded"                 '! echo "$out" | grep -q "loop"'
+check "a model with SPACES still lists its disk" 'echo "$out" | grep -q "/dev/nvme0n1"'
+check "the spaced model survives intact"        'echo "$out" | grep -q "WD PC SN740 1TB"'
+check "a Deck eMMC is a candidate"              'echo "$out" | grep -q "/dev/mmcblk0"'
 unset -f isv_live_device lsblk isv_detect_windows
 
 # ── --windows-gb parsing ──────────────────────────────────────────
