@@ -328,3 +328,17 @@ unset -f hostnamectl useradd chpasswd id getent systemctl powos chown
 echo
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]
+
+# ── Step exit status ──────────────────────────────────────────────
+# A wizard step must return 0 when the user DECLINES an optional step. A bare
+# trailing "[[ ... ]] && cmd" makes the function's status that of the test, so
+# answering "No" to the restore prompt returned 1 and the caller aborted the
+# whole installer.
+echo "== optional steps return success when declined =="
+iwz_yesno() { return 1; }
+iwz_step_restore >/dev/null 2>&1
+check "declining restore returns 0" '[[ $? -eq 0 ]]'
+iwz_yesno() { return 0; }
+iwz_input() { echo "https://example/repo.git"; }
+iwz_step_restore >/dev/null 2>&1
+check "accepting a restore URL returns 0" '[[ $? -eq 0 ]]'

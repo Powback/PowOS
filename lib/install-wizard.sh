@@ -655,7 +655,12 @@ iwz_step_restore() {
     else
         IWZ_RESTORE_URL=""
     fi
+    # `return 0` is load-bearing. A bare trailing "[[ ... ]] && cmd" makes the
+    # FUNCTION's exit status that of the test, so declining the restore (empty
+    # URL) returned 1 and the caller treated it as a cancel — answering "No"
+    # aborted the whole installer.
     [[ -n "$IWZ_RESTORE_URL" ]] && iwz_ok "Restore from: $IWZ_RESTORE_URL"
+    return 0
 }
 
 # PURE-ish: build the human review summary as a string (no side effects).
