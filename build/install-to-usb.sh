@@ -592,6 +592,42 @@ POWOS_LIVE_MASK_UNITS=(
     ublue-os-media-automount.service
 )
 
+# Put /var/lib/containers on POWOS-DATA, from boot, via the medium's fstab.
+#
+# Installing a variant unpacks ~13.5GB into container storage. The medium's root
+# holds the OS and has nowhere near that free — on a Steam Deck stick it is
+# 25.9GB with the system already in it, so the install spent minutes copying
+# blobs and then died with "no space left on device".
+#
+# Doing this at WRITE time rather than at install time is deliberate. Two
+# attempts to relocate the storage at runtime both broke bootc, which resolves
+# its own image through the canonical /var/lib/containers/storage and then
+# re-execs in the host mount namespace: --root gave "no such object", and
+# mounting the graph elsewhere gave "Re-exec in host mountns: exec: No such file
+# or directory". An fstab entry keeps the canonical path AND puts the bytes on
+# the big partition, with nothing to arrange mid-install.
+_fstab_containers_on_data() {
+    local device="$1" root_part data_part data_uuid mp deploy
+    root_part=$(lsblk -nro NAME,LABEL "$device" 2>/dev/null | awk '$2=="root"{print "/dev/"$1; exit}')
+    data_part=$(lsblk -nro NAME,LABEL "$device" 2>/dev/null | awk '$2=="POWOS-DATA"{print "/dev/"$1; exit}')
+    [[ -n "$root_part" && -n "$data_part" ]] || { log_warn "No root/POWOS-DATA pair — container storage left on the medium root."; return 0; }
+    data_uuid=$(blkid -s UUID -o value "$data_part" 2>/dev/null)
+    [[ -n "$data_uuid" ]] || { log_warn "POWOS-DATA has no UUID yet — skipping the container-storage mount."; return 0; }
+
+    mp=$(mktemp -d); POWOS_TMP_MOUNTS+=("$mp")
+    mount "$root_part" "$mp" 2>/dev/null || { log_warn "Could not mount $root_part — container storage left on the medium root."; return 0; }
+    for deploy in "$mp"/root/ostree/deploy/*/deploy/*.[0-9]; do
+        [[ -d "$deploy/etc" ]] || continue
+        mkdir -p "$deploy/var/lib/containers" 2>/dev/null || true
+        if ! grep -q '/var/lib/containers' "$deploy/etc/fstab" 2>/dev/null; then
+            printf 'UUID=%s /var/lib/containers btrfs subvol=@powos/containers,rw,noatime,nofail 0 0\n' \
+                "$data_uuid" >> "$deploy/etc/fstab"
+            log_success "Live medium: /var/lib/containers mounted from POWOS-DATA (room for the install)"
+        fi
+    done
+    sync; umount "$mp" 2>/dev/null || true
+}
+
 _mask_live_hardware_setup() {
     local device="$1" root_part mp deploy
     root_part=$(lsblk -nro NAME,LABEL "$device" 2>/dev/null | awk '$2=="root"{print "/dev/"$1; exit}')
@@ -797,6 +833,7 @@ add_install_boot_entry() {
     # entries_dir is <boot>/loader/entries; grub.cfg lives at <boot>/grub2/.
     _grub_menu_defaults "$(dirname "$(dirname "$entries_dir")")"
     _mask_live_hardware_setup "$device"
+    _fstab_containers_on_data "$device"
 
     # Make the menu actually visible (bootc images often hide it / 0s timeout).
     # Fedora-family hosts ship grub2-editenv; Debian/Ubuntu ship grub-editenv.

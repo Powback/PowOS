@@ -163,8 +163,10 @@ pv_prepare_image() {
     fi
 
     src=$(pv_source_imgref "$want") || return 1
-    pv_media_storage_mount || true
-    pv__log "importing $want off the media (no network)..." >&2
+    pv__log "importing $want off the media into local storage (no network)..." >&2
+    # Unpacked, this is ~13.5GB per variant against ~5.7GB compressed on the
+    # media. A live system whose /var is small will fail here — callers should
+    # relocate container storage onto the media first (see pv_storage_hint).
     skopeo copy "$src" "containers-storage:$ref" >&2 || return 1
     printf '%s\n' "$ref"
 }
@@ -177,120 +179,10 @@ pv_storage_hint() {
     printf '%s\n' "$mp/@powos/containers"
 }
 
-# Container storage ON THE MEDIA, created if needed.
-#
-# Unpacking a variant costs ~13.5GB. A live medium's root holds the OS and has
-# nowhere near that free — on a Steam Deck stick it is 25.9GB with the system
-# already in it, so the import died with "no space left on device" after
-# copying blobs for several minutes. POWOS-DATA is the rest of the device
-# (terabytes on a large drive), and install-to-usb already creates
-# @powos/containers for exactly this.
-#
-# Prints "<graphroot>|<runroot>" so callers can point both skopeo and podman at
-# it. Fails (silently) when there is no writable media, leaving the classic
-# behaviour untouched for a normal installed system.
-POWOS_MEDIA_RUNROOT="${POWOS_MEDIA_RUNROOT:-/run/powos-containers}"
-POWOS_CONTAINERS_STORAGE="${POWOS_CONTAINERS_STORAGE:-/var/lib/containers/storage}"
-
-# Put container storage ON THE MEDIA by bind-mounting it over the canonical
-# path, rather than pointing tools at a different one.
-#
-# Why a bind and not --root/--runroot: bootc resolves its own image and then
-# re-execs itself in the HOST mount namespace, and both steps assume the
-# canonical /var/lib/containers/storage. Overriding the graph root produced
-# "no such object <digest>"; mounting the graph elsewhere produced "Re-exec in
-# host mountns: exec: No such file or directory". A bind keeps every path where
-# the tools expect it and moves only the BYTES.
-#
-# Needed because unpacking a variant costs ~13.5GB while a live medium's root
-# holds the OS — on a Steam Deck stick that is 25.9GB with the system already in
-# it, so the import died with "no space left on device" after minutes of
-# copying. POWOS-DATA is the rest of the device.
-#
-# Best-effort: on an installed system there is no media and the classic path is
-# left completely untouched.
-pv_media_storage_mount() {
-    local store
-    store=$(pv_storage_hint 2>/dev/null) || return 1
-    mkdir -p "$store" 2>/dev/null || return 1
-    [[ -w "$store" ]] || return 1
-    mkdir -p "$POWOS_CONTAINERS_STORAGE" 2>/dev/null || true
-    # Already bound (retry, or a second variant in the same session).
-    findmnt -no TARGET "$POWOS_CONTAINERS_STORAGE" >/dev/null 2>&1 && return 0
-    mount --bind "$store" "$POWOS_CONTAINERS_STORAGE" 2>/dev/null || return 1
-    pv__log "container storage relocated onto the media ($store)" >&2
-}
-
-pv_prepare_image() {
-    local want="$1" src ref
-    ref="${POWOS_VARIANT_LOCAL_TAG}:${want}"
-
-    # Already imported (e.g. a retry, or a previous install in this session).
-    local _ms _g _r
-    if _ms=$(pv_media_storage 2>/dev/null); then
-        _g="${_ms%%|*}"; _r="${_ms##*|}"
-        if podman --root "$_g" --runroot "$_r" image exists "$ref" 2>/dev/null; then
-            printf '%s\n' "$ref"; return 0
-        fi
-    elif podman image exists "$ref" 2>/dev/null; then
-        printf '%s\n' "$ref"; return 0
-    fi
-
-    src=$(pv_source_imgref "$want") || return 1
-    local ms graph runroot dest
-    if ms=$(pv_media_storage); then
-        graph="${ms%%|*}"; runroot="${ms##*|}"
-        dest="containers-storage:[overlay@${graph}+${runroot}]${ref}"
-        pv__log "importing $want off the media into storage ON THE MEDIA ($graph)..." >&2
-    else
-        dest="containers-storage:$ref"
-        pv__log "importing $want off the media into local storage (no network)..." >&2
-    fi
-    # Unpacked, this is ~13.5GB per variant against ~5.7GB compressed on the
-    # media. A live system whose /var is small will fail here — callers should
-    # relocate container storage onto the media first (see pv_storage_hint).
-    skopeo copy "$src" "$dest" >&2 || return 1
-    printf '%s\n' "$ref"
-}
-
-# Where container storage should live so an import has room. The media's
-# @powos/containers is created by install-to-usb.sh for exactly this.
-pv_storage_hint() {
-    local mp
-    mp=$(pv_data_mount) || return 1
-    printf '%s\n' "$mp/@powos/containers"
-}
-
-# Container storage ON THE MEDIA, created if needed.
-#
-# Unpacking a variant costs ~13.5GB. A live medium's root holds the OS and has
-# nowhere near that free — on a Steam Deck stick it is 25.9GB with the system
-# already in it, so the import died with "no space left on device" after
-# copying blobs for several minutes. POWOS-DATA is the rest of the device
-# (terabytes on a large drive), and install-to-usb already creates
-# @powos/containers for exactly this.
-#
-# Prints "<graphroot>|<runroot>" so callers can point both skopeo and podman at
-# it. Fails (silently) when there is no writable media, leaving the classic
-# behaviour untouched for a normal installed system.
-POWOS_MEDIA_RUNROOT="${POWOS_MEDIA_RUNROOT:-/run/powos-containers}"
-pv_media_storage() {
-    local store
-    store=$(pv_storage_hint 2>/dev/null) || return 1
-    mkdir -p "$store" 2>/dev/null || return 1
-    [[ -w "$store" ]] || return 1
-    mkdir -p "$POWOS_MEDIA_RUNROOT" 2>/dev/null || return 1
-    printf '%s|%s\n' "$store" "$POWOS_MEDIA_RUNROOT"
-}
-
 # Run `bootc install to-disk` for image $1 onto device $2; remaining args are
 # passed through to bootc.
 pv_bootc_install() {
     local image="$1" target="$2"; shift 2
-    # Deliberately plain: bootc re-execs in the host mount namespace and
-    # resolves its own image through the canonical storage path, so nothing
-    # here may move those paths. pv_media_storage_mount has already put the
-    # storage bytes on the media underneath /var/lib/containers/storage.
     podman run --rm --privileged --pid=host \
         --security-opt label=type:unconfined_t \
         -v /dev:/dev \
