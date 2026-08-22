@@ -186,6 +186,24 @@ isv_live_device() {
 }
 
 # ── Disk discovery ────────────────────────────────────────────────
+# The boot splash is OFF on installed systems, and this is deliberate.
+#
+# plymouth-quit-wait.service runs `plymouth --wait` with an infinite timeout.
+# On this image plymouthd stops answering, so that unit and plymouth-quit
+# hang and the boot never reaches graphical.target — no display manager, no
+# console, nothing. It reproduces in a clean QEMU VM off our own raw image and
+# it is what a Steam Deck showed: "stuck at plymouth-quit-wait.service".
+#
+# The live medium already boots with plymouth.enable=0, which is why the stick
+# gets past it. An installed system had no such karg and would have hung on
+# every boot — installing from a medium that works onto a machine that then
+# does not is the worst possible outcome, so it inherits the same karg. The
+# drop-ins in systemd/plymouth-quit*.service.d bound the hang as well; this
+# karg avoids it. Losing the splash also means boot messages stay on screen,
+# which on hardware that has spent this long showing black screens is not a
+# loss. Override with POWOS_SPLASH=1 to install with the splash enabled.
+ISV_SPLASH_KARG="${ISV_SPLASH_KARG:-plymouth.enable=$([[ "${POWOS_SPLASH:-0}" == "1" ]] && echo 1 || echo 0)}"
+
 # Emit candidate target disks: NAME SIZE MODEL TRAN REMOVABLE
 # (excludes the live device; REMOVABLE is the sysfs flag: 1/0/?)
 isv_candidate_disks() {
@@ -615,7 +633,7 @@ isv_install_whole_disk() {
 
     run_step "wipe + install PowOS" \
         pv_bootc_install "$install_img" "$ISV_TARGET" \
-            --wipe --karg rd.powos.ramboot=0 \
+            --wipe --karg rd.powos.ramboot=0 --karg "$ISV_SPLASH_KARG" \
             --filesystem "$ISV_FS" ${target_args[@]+"${target_args[@]}"} \
             ${size_args[@]+"${size_args[@]}"} || {
         isv_err "bootc install failed."
@@ -800,7 +818,7 @@ isv_install_alongside() {
     # --acknowledge-destructive refers to the target rootfs (empty here), not the disk.
     run_step "install PowOS to filesystem" \
         bootc install to-filesystem --acknowledge-destructive \
-            --karg rd.powos.ramboot=0 "$mnt" || {
+            --karg rd.powos.ramboot=0 --karg "$ISV_SPLASH_KARG" "$mnt" || {
         isv_err "bootc install to-filesystem failed."
         run_step "cleanup unmount" umount -R "$mnt" 2>/dev/null || true
         return 1

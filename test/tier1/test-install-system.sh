@@ -585,6 +585,22 @@ check "auto oversize: windows shrunk first (250 → 190)" \
     'echo "$out" | grep -q "windows reservation shrunk 250GB → 190GB"'
 unset -f bootc lsblk parted mkfs.ntfs blkid
 
+# ── Boot splash on installed systems ──────────────────────────────
+# plymouth-quit-wait.service waits forever, and on this image plymouthd stops
+# answering: the boot then never reaches graphical.target. The live medium
+# boots with plymouth.enable=0 and gets past it; an installed system with no
+# such karg hangs on every boot. Installing from a working medium onto a
+# machine that then does not boot is the worst outcome available, so both
+# install paths must carry the karg.
+echo "== installed systems boot with the splash off =="
+LIBSRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)/install-system.sh"
+[[ -f "$LIBSRC" ]] || LIBSRC=/usr/lib/powos/install-system.sh
+check "default splash karg disables plymouth" '[[ "$ISV_SPLASH_KARG" == "plymouth.enable=0" ]]'
+n_splash=$(grep -c -- '--karg "\$ISV_SPLASH_KARG"' "$LIBSRC")
+check "BOTH install paths pass it (to-disk and to-filesystem)" '[[ "$n_splash" -eq 2 ]]'
+check "POWOS_SPLASH=1 can put the splash back" \
+      '[[ "$(POWOS_SPLASH=1 ISV_SPLASH_KARG="" bash -c "source \"$LIBSRC\" >/dev/null 2>&1; echo \$ISV_SPLASH_KARG")" == "plymouth.enable=1" ]]'
+
 # ── Summary ───────────────────────────────────────────────────────
 echo
 echo "== Results: $PASS passed, $FAIL failed =="

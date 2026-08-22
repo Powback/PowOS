@@ -54,6 +54,24 @@ else
         "it would add Install/Recovery entries to an installed system's own menu"
 fi
 
+# The plymouth handoff must be time-bounded. plymouth-quit-wait.service ships
+# TimeoutSec=0 — infinite — and on this image plymouthd stops answering, so the
+# boot stops dead before graphical.target with no display manager and no
+# console. Reproduced in QEMU off our own raw image and reported from a Deck.
+for pu in plymouth-quit plymouth-quit-wait; do
+    dropin="$ROOT/systemd/$pu.service.d/10-powos-timeout.conf"
+    if [[ -f "$dropin" ]] && grep -qE '^TimeoutSec=[1-9]' "$dropin"; then
+        ok "$pu is time-bounded"
+    else
+        bad "$pu has no bounded timeout drop-in" "a stuck plymouth hangs the whole boot"
+    fi
+    if grep -qF "COPY systemd/$pu.service.d/" "$CF"; then
+        ok "$pu drop-in reaches the image"
+    else
+        bad "$pu drop-in is never copied into the image" "the file exists but does nothing"
+    fi
+done
+
 # powos-firstboot CREATES THE USER ACCOUNT. Two properties decide whether a
 # freshly installed machine is usable on its first boot:
 #

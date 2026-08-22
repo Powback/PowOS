@@ -102,6 +102,11 @@ COPY systemd/plasmalogin.service.d/       /usr/lib/systemd/system/plasmalogin.se
 # Same treatment for sddm, the display manager the deck variant uses (it has no
 # plasma-login-manager). See the drop-in for why the alias alone is not enough.
 COPY systemd/sddm.service.d/              /usr/lib/systemd/system/sddm.service.d/
+# Bound the plymouth handoff. Without these the boot can stop dead at
+# "Starting plymouth-quit-wait.service" and never reach a display manager —
+# reproduced in QEMU off our own image and on a Steam Deck. See the drop-ins.
+COPY systemd/plymouth-quit.service.d/     /usr/lib/systemd/system/plymouth-quit.service.d/
+COPY systemd/plymouth-quit-wait.service.d/ /usr/lib/systemd/system/plymouth-quit-wait.service.d/
 
 # First-boot appliers. bin/powos-firstboot-apply already shipped (COPY bin/
 # above), but its UNIT never did — so on every installed system the applier sat

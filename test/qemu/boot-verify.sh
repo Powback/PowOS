@@ -46,6 +46,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ -f "$RAW" ] || { echo "boot-verify: --raw IMG required and must exist" >&2; exit 2; }
+# Absolute, because the overlay qcow2 is created in a temp dir and qemu-img
+# resolves a relative backing path against the QCOW2's own directory, not the
+# cwd. A relative --raw therefore produced an unopenable overlay and qemu died
+# on startup with "Could not open ... ov.qcow2".
+RAW="$(cd "$(dirname "$RAW")" && pwd)/$(basename "$RAW")"
 for t in qemu-system-x86_64 qemu-img socat convert; do
     command -v "$t" >/dev/null 2>&1 || { echo "boot-verify: missing tool: $t" >&2; exit 2; }
 done
@@ -57,7 +62,10 @@ for v in /usr/share/edk2/ovmf/OVMF_VARS.fd /usr/share/OVMF/OVMF_VARS.fd; do [ -f
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 cp "$VARS_TMPL" "$WORK/vars.fd"
-qemu-img create -f qcow2 -b "$RAW" -F raw "$WORK/ov.qcow2" >/dev/null   # COW: never mutate the raw
+# COW: never mutate the raw. Checked, because a silent failure here surfaces
+# only as qemu exiting instantly, which reads as a boot failure.
+qemu-img create -f qcow2 -b "$RAW" -F raw "$WORK/ov.qcow2" >/dev/null || {
+    echo "boot-verify: could not create the overlay image over $RAW" >&2; exit 2; }
 mkdir -p "$SHOTS"; : > "$SERIAL"
 ACCEL="-enable-kvm"; [ -e /dev/kvm ] || { ACCEL="-accel tcg"; echo "boot-verify: no /dev/kvm — TCG (slow)"; }
 
