@@ -99,6 +99,9 @@ COPY config/tmux/tmux.conf                  /etc/tmux.conf
 COPY systemd/greeter-watchdog.service     /usr/lib/systemd/system/greeter-watchdog.service
 COPY systemd/greeter-watchdog.timer       /usr/lib/systemd/system/greeter-watchdog.timer
 COPY systemd/plasmalogin.service.d/       /usr/lib/systemd/system/plasmalogin.service.d/
+# Same treatment for sddm, the display manager the deck variant uses (it has no
+# plasma-login-manager). See the drop-in for why the alias alone is not enough.
+COPY systemd/sddm.service.d/              /usr/lib/systemd/system/sddm.service.d/
 
 # First-boot appliers. bin/powos-firstboot-apply already shipped (COPY bin/
 # above), but its UNIT never did — so on every installed system the applier sat
@@ -284,6 +287,10 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     systemctl enable powos-installer.service && \
     systemctl enable powos-safemode.service && \
     systemctl enable powos-boot-entries.service && \
+    # Enable whichever display manager this base actually ships. Enabling both
+    # would put two DMs in graphical.target's Wants.
+    { [ -f /usr/lib/systemd/system/plasmalogin.service ] \
+        || systemctl enable sddm.service; } && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
     systemctl mask plasma-setup.service 2>/dev/null || true && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
