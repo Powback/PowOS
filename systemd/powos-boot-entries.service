@@ -1,0 +1,16 @@
+[Unit]
+Description=PowOS — re-apply boot menu entries into the current ostree slot
+Documentation=man:powos(8)
+# /boot/loader is a symlink ostree flips to a freshly generated loader.N on any
+# deployment change, which silently deletes the Install and Recovery entries.
+# Re-apply them every boot; the script is idempotent and writes nothing when
+# they are already correct.
+ConditionPathIsDirectory=/boot/loader/entries
+After=local-fs.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/powos-boot-entries
+RemainAfterExit=yes
+StandardOutput=journal
+[Install]
+WantedBy=multi-user.target
