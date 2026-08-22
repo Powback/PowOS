@@ -7,15 +7,30 @@
 # config. ConditionPathExists makes it self-disabling: with the file gone the
 # unit is skipped on every subsequent boot.
 #
-# After=network-online.target so the optional restore-from-backup 'git pull'
-# has network. All steps are best-effort — a failure here never blocks boot.
+# ORDERING, and why it is not the obvious one:
+#
+#   Before=display-manager.service — this unit CREATES THE USER ACCOUNT. Left
+#   unordered it races the greeter, and losing that race means a login screen
+#   with nobody to log in as on a machine that has just been installed. The
+#   dependency is ordering only, never Requires: if this unit fails or times
+#   out, the desktop still comes up.
+#
+#   No network-online. It used to pull that in for the optional
+#   restore-from-backup 'git pull', which meant a freshly installed machine
+#   with no wifi configured yet — every Steam Deck, on its first boot — sat
+#   through NetworkManager-wait-online's full timeout BEFORE the user existed,
+#   with the greeter already on screen. Identity must not wait on a network it
+#   usually does not have. The restore step does its own short wait, and only
+#   when a restore URL was actually configured.
+#
+# All steps are best-effort — a failure here never blocks boot.
 
 [Unit]
 Description=PowOS first-boot setup (apply install.conf)
 Documentation=man:powos-firstboot-apply
 ConditionPathExists=/etc/powos/install.conf
-After=network-online.target systemd-user-sessions.service
-Wants=network-online.target
+After=systemd-user-sessions.service
+Before=display-manager.service graphical.target
 
 [Service]
 Type=oneshot
@@ -23,6 +38,9 @@ ExecStart=/usr/bin/powos-firstboot-apply
 RemainAfterExit=no
 # Keep going even if the applier returns nonzero — never fail the boot on it.
 SuccessExitStatus=0 1
+# Bounded, because the greeter is now ordered after this. Anything that hangs
+# gets killed and the desktop comes up regardless.
+TimeoutStartSec=120
 
 [Install]
 WantedBy=multi-user.target

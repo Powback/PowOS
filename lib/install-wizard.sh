@@ -558,6 +558,30 @@ iwz_step_sizes() {
     iwz_ok "Root=$IWZ_ROOT_GB games=$IWZ_GAMES_GB windows=$IWZ_WINDOWS_GB fs=$IWZ_FS"
 }
 
+# Which variants does this medium actually carry?
+#
+# The GPU menu used to offer all six flavors unconditionally, but a flavor is
+# only installable if the variant it maps to is present on the stick:
+# install-system refuses outright ("Variant 'nvidia-open' is not on this
+# media") rather than falling back. That refusal landed AFTER every remaining
+# question had been answered, which is the worst possible moment for it. Offer
+# what can actually be installed instead.
+#
+# variants.sh is sourced lazily: this lib is sourced into the whole CLI and
+# into tests, and neither should grow a hard dependency on it. An unreadable
+# or absent medium simply leaves the full list, which is the right answer on a
+# dev box.
+iwz__media_variants() {
+    if ! declare -F pv_list >/dev/null 2>&1; then
+        local lib="${POWOS_LIB:-/usr/lib/powos}"
+        [[ -f "$lib/variants.sh" ]] || lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+        # shellcheck disable=SC1090
+        [[ -f "$lib/variants.sh" ]] && source "$lib/variants.sh" 2>/dev/null
+    fi
+    declare -F pv_list >/dev/null 2>&1 || return 1
+    pv_list 2>/dev/null
+}
+
 iwz_step_gpu() {
     iwz_step "GPU driver flavor"
     # Deck hardware wins over the GPU answer — see iwz_is_steam_deck.
@@ -568,14 +592,27 @@ iwz_step_gpu() {
         detected=$(iwz_detect_gpu_flavor)
     fi
     iwz_log "Auto-detected: $detected"
+
+    local avail; avail=$(iwz__media_variants | tr '\n' ' ')
+    local -a all=(deck        "Steam Deck (Deck kernel, firmware, gamescope session)"
+                  nvidia-open "NVIDIA open kernel modules (RTX 40/50-series need this)"
+                  nvidia      "NVIDIA closed/proprietary modules"
+                  amd         "AMD (Mesa)"
+                  intel       "Intel (Mesa)")
+    local -a menu=("$detected" "Use the auto-detected default ($detected)")
+    local i f
+    for ((i=0; i<${#all[@]}; i+=2)); do
+        f="${all[i]}"
+        [[ "$f" == "$detected" ]] && continue
+        if [[ -n "$avail" ]]; then
+            # Keep only flavors whose variant is on the stick.
+            [[ " $avail " == *" $(iwz_variant_for_flavor "$f") "* ]] || continue
+        fi
+        menu+=("$f" "${all[i+1]}")
+    done
+
     local g
-    g=$(iwz_menu "GPU driver flavor (detected default: $detected):" \
-        "$detected"  "Use the auto-detected default ($detected)" \
-        deck         "Steam Deck (Deck kernel, firmware, gamescope session)" \
-        nvidia-open  "NVIDIA open kernel modules (RTX 40/50-series need this)" \
-        nvidia       "NVIDIA closed/proprietary modules" \
-        amd          "AMD (Mesa)" \
-        intel        "Intel (Mesa)") || return 1
+    g=$(iwz_menu "GPU driver flavor (detected default: $detected):" "${menu[@]}") || return 1
     IWZ_GPU_FLAVOR="${g:-$detected}"
     iwz_ok "GPU flavor: $IWZ_GPU_FLAVOR"
 }
@@ -722,28 +759,68 @@ EOF
 # powos-firstboot-apply finds it on first boot. The target root is identified
 # by GPT label "PowOS". Non-fatal — every failure is logged, never fatal.
 # TODO(hw): validate mount/copy against real bootc-laid layouts.
-iwz_copy_config_to_target() {
-    local part mnt
-    part=$(blkid -L PowOS 2>/dev/null || true)
-    if [[ -z "$part" ]]; then
-        iwz_warn "Could not find the installed PowOS partition by label — firstboot"
-        iwz_warn "config not copied. Re-run identity setup on the installed system."
-        return 0
+# Where does the installed system's /etc actually live?
+#
+# Two wrong assumptions used to stack here, and together they meant the
+# first-boot config was NEVER placed — so an install that otherwise succeeded
+# came up with no user account, no password and no hostname, which on a Deck
+# with no keyboard is an unusable machine:
+#
+#   1. The root partition was looked up with `blkid -L PowOS`, a FILESYSTEM
+#      label. Nothing sets one. `bootc install to-disk` labels the root fs
+#      "root", and the alongside path sets only a GPT PARTLABEL of PowOS.
+#      The lookup returned empty every time and the function warned and gave
+#      up — quietly, at the very end of a long install.
+#   2. The config was written to <partition>/etc. On an ostree/bootc system
+#      the booted /etc is the DEPLOYMENT's etc, several levels down; a file at
+#      the top of the partition is invisible to the running system forever.
+#
+# So: find the partition by looking for a deployment on it, and write into
+# that deployment.
+iwz__target_partitions() {
+    if [[ -n "${IWZ_DISK:-}" ]]; then
+        lsblk -ln -o PATH "$IWZ_DISK" 2>/dev/null | tail -n +2
     fi
-    mnt=$(mktemp -d) || return 0
-    if mount "$part" "$mnt" 2>/dev/null; then
-        mkdir -p "$mnt/etc/powos" 2>/dev/null || true
-        if cp "$IWZ_CONFIG_PATH" "$mnt/etc/powos/install.conf" 2>/dev/null; then
-            chmod 600 "$mnt/etc/powos/install.conf" 2>/dev/null || true
-            iwz_ok "First-boot config placed on the installed system."
-        else
-            iwz_warn "Could not copy install.conf onto the target."
+    # Last resort when the target disk is unknown or lsblk is unavailable.
+    blkid -L PowOS 2>/dev/null || true
+}
+
+iwz__deployment_etc() {
+    local mnt="$1" d
+    local -a cands=()
+    # Bare layout, plus the nested one a btrfs subvolume install produces.
+    for d in "$mnt"/ostree/deploy/*/deploy/*.[0-9] \
+             "$mnt"/*/ostree/deploy/*/deploy/*.[0-9]; do
+        [[ -d "$d/etc" ]] && cands+=("$d/etc")
+    done
+    [[ ${#cands[@]} -gt 0 ]] || return 1
+    # Newest wins, on the off chance a target carries more than one.
+    ls -1dt "${cands[@]}" 2>/dev/null | head -1
+}
+
+iwz_copy_config_to_target() {
+    local part mnt etc placed=0
+    mnt=$(mktemp -d) || return 1
+    while read -r part; do
+        # No -b test: every candidate already comes from lsblk on the target
+        # disk (or a blkid label lookup), and mount is the real gate — it
+        # refuses anything that is not a filesystem. Requiring a block device
+        # here only made the loop untestable.
+        [[ -n "$part" ]] || continue
+        mount "$part" "$mnt" 2>/dev/null || continue
+        if etc=$(iwz__deployment_etc "$mnt"); then
+            mkdir -p "$etc/powos" 2>/dev/null || true
+            if cp "$IWZ_CONFIG_PATH" "$etc/powos/install.conf" 2>/dev/null; then
+                chmod 600 "$etc/powos/install.conf" 2>/dev/null || true
+                iwz_ok "First-boot config placed on the installed system ($part)."
+                placed=1
+            fi
         fi
         umount "$mnt" 2>/dev/null || true
-    else
-        iwz_warn "Could not mount $part to place the first-boot config."
-    fi
+        [[ $placed -eq 1 ]] && break
+    done < <(iwz__target_partitions)
     rmdir "$mnt" 2>/dev/null || true
+    [[ $placed -eq 1 ]] || return 1
 }
 
 iwz_commit() {
@@ -764,8 +841,14 @@ iwz_commit() {
         echo -e "  ${DIM}\$ powos install-system $args${NC}"
         # shellcheck disable=SC2086
         powos install-system $args || { iwz_err "Installer failed — aborting."; return 1; }
-        # 3) Place the config on the installed system for firstboot.
-        iwz_run_step "copy first-boot config to installed system" iwz_copy_config_to_target
+        # 3) Place the config on the installed system for firstboot. A failure
+        #    here must NOT abort: the disk is already written, and aborting
+        #    would skip the completion screen and the reboot prompt — leaving
+        #    a keyboard-less machine stranded on a dead tty. Record it and say
+        #    so plainly at the end instead.
+        IWZ_FIRSTBOOT_PLACED=1
+        iwz_run_step "copy first-boot config to installed system" \
+            iwz_copy_config_to_target || IWZ_FIRSTBOOT_PLACED=0
     fi
 }
 
@@ -840,7 +923,34 @@ Proceed with this install?"; then
 
     iwz_step "Done"
     iwz_ok "Install complete."
-    echo "  Remove the USB and reboot. On first boot PowOS applies your"
-    echo "  hostname, user, SSH, AI and restore settings automatically."
+    if [[ "${IWZ_FIRSTBOOT_PLACED:-1}" -eq 1 ]]; then
+        echo "  On first boot PowOS applies your hostname, user and restore"
+        echo "  settings automatically."
+    else
+        iwz_err "The first-boot config could NOT be placed on the installed system."
+        iwz_err "PowOS is installed, but your user account and hostname will not be"
+        iwz_err "applied — you will need a console to create a user by hand."
+    fi
     echo
+
+    # Offer the reboot from inside the wizard, while a dialog can still be
+    # answered. This service holds tty1 and conflicts getty@tty1 out of the
+    # way, and systemd does not bring the getty back when we exit — so once
+    # this function returns there is no shell to type `reboot` into, and no
+    # second VT to switch to. On a Steam Deck, whose controller emulates
+    # arrows/Enter/Escape and nothing else, that leaves holding the power
+    # button as the only way off a machine that has just finished writing a
+    # disk. Ask first; No simply leaves the screen up.
+    if [[ $IWZ_DRY_RUN -eq 0 && ${EUID:-$(id -u)} -eq 0 ]]; then
+        if iwz_yesno "Install complete.
+
+Take the USB stick out NOW, then choose Yes to boot into PowOS.
+Leaving it in just boots the installer medium again.
+
+Reboot now?"; then
+            iwz_ok "Rebooting."
+            sync
+            systemctl reboot || reboot
+        fi
+    fi
 }

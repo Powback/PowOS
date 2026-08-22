@@ -54,6 +54,34 @@ else
         "it would add Install/Recovery entries to an installed system's own menu"
 fi
 
+# powos-firstboot CREATES THE USER ACCOUNT. Two properties decide whether a
+# freshly installed machine is usable on its first boot:
+#
+#   * ordered before the greeter — otherwise the login screen can appear with
+#     no account on it, which is what a user sees as "the install failed"; and
+#   * not waiting on network-online — a fresh Deck has no wifi configured, so
+#     pulling that in spent NetworkManager-wait-online's entire timeout before
+#     the account was created, with the greeter already on screen.
+FB_UNIT="$ROOT/systemd/powos-firstboot.service"
+if grep -qE '^Before=.*display-manager\.service' "$FB_UNIT"; then
+    ok "powos-firstboot is ordered before the display manager"
+else
+    bad "powos-firstboot is not ordered before the display manager" \
+        "the greeter can come up before the user account exists"
+fi
+if grep -qE '^(After|Wants|Requires)=.*network-online\.target' "$FB_UNIT"; then
+    bad "powos-firstboot waits on network-online.target" \
+        "a first boot with no wifi stalls the whole unit before the user is created"
+else
+    ok "powos-firstboot does not wait on the network to create the user"
+fi
+if grep -qE '^TimeoutStartSec=' "$FB_UNIT"; then
+    ok "powos-firstboot is time-bounded (the greeter is ordered after it)"
+else
+    bad "powos-firstboot has no TimeoutStartSec" \
+        "anything that hangs in it now delays the desktop indefinitely"
+fi
+
 echo ""
 echo "== units present in systemd/ but not installed (visibility, not a failure) =="
 shopt -s nullglob

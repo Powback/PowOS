@@ -36,6 +36,11 @@ SWITCH_RC=0
 
 fb_is_steam_deck()     { return $IS_DECK; }
 fb_current_image_ref() { printf '%s\n' "$CURRENT_REF"; }
+# The applier bounds its registry pull with `timeout 60 bootc …`. `timeout`
+# execs a real binary and cannot see a shell function, so the stub below would
+# be bypassed; FB_TIMEOUT is the seam that removes the wrapper for tests.
+FB_TIMEOUT=""
+
 bootc() {
     if [[ "${1:-}" == "switch" ]]; then SWITCH_CALLED="${2:-}"; return $SWITCH_RC; fi
     return 0

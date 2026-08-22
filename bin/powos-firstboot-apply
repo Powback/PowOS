@@ -216,7 +216,11 @@ fb_apply_gpu_flavor() {
 # recorded flavor permanently and leave the machine silently generic.
 fb_switch_variant() {
     local target="$1" ref="${2:-}"
-    if bootc switch "$target" >/dev/null 2>&1; then
+    # Bounded: this pulls from a registry, and the unit it runs in is now
+    # ordered before the greeter. With no network yet — the normal state on a
+    # first boot — an unbounded pull would spend the whole unit timeout here
+    # and the retry path below would never be reached.
+    if ${FB_TIMEOUT-timeout 60} bootc switch "$target" >/dev/null 2>&1; then
         rm -f "$POWOS_PENDING_VARIANT" 2>/dev/null || true
         fb_ok "staged $target — applies on the next reboot (old deployment stays as rollback)"
         return 0
@@ -279,9 +283,39 @@ fb_apply_ai() {
     fi
 }
 
+# Wait for the network, briefly, and ONLY here.
+#
+# The unit no longer pulls in network-online.target: doing so made every
+# first boot without wifi (i.e. every fresh Steam Deck) sit through
+# NetworkManager-wait-online before the user account was created, with the
+# greeter already up. The restore pull is the one step that genuinely needs a
+# network, so it does its own bounded wait instead of taxing the whole boot.
+FB_NET_WAIT_SECS="${FB_NET_WAIT_SECS:-45}"
+fb_wait_for_network() {
+    local i
+    for ((i = 0; i < FB_NET_WAIT_SECS; i++)); do
+        if [[ "$(systemctl is-active NetworkManager.service 2>/dev/null)" == active ]] &&
+           nm-online -q -t 1 2>/dev/null; then
+            return 0
+        fi
+        # No NetworkManager (or no nm-online): fall back to asking the kernel
+        # whether any route to the outside world exists at all.
+        if ip route get 1.1.1.1 >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 fb_apply_restore() {
     local url="${POWOS_RESTORE_URL:-}"
     [[ -n "$url" ]] || { fb_log "no restore URL — skipping"; return 0; }
+    if ! fb_wait_for_network; then
+        fb_warn "no network after ${FB_NET_WAIT_SECS}s — skipping restore"
+        fb_warn "run 'powos backup pull' once you are online"
+        return 0
+    fi
     if ! command -v powos >/dev/null 2>&1; then
         fb_warn "powos CLI not found — cannot restore from backup"
         return 0
