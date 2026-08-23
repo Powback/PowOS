@@ -146,7 +146,7 @@ pv_describe() {
         echo "no offline variant store on this media"
         return 0
     fi
-    tags=$(pv_list | tr '\n' ' ')
+    tags=$(pv_list | tr '\n' ' ') || true
     echo "offline variants on media: ${tags:-none} (${dir})"
 }
 
@@ -196,7 +196,7 @@ pv_prepare_image() {
     # what happened on a Steam Deck whose medium root is 25.9GB.
     local need_mib=15000 have_mib store_dir=/var/lib/containers
     [[ -d "$store_dir" ]] || store_dir=/var
-    have_mib=$(df -BM --output=avail "$store_dir" 2>/dev/null | tail -1 | tr -dc '0-9')
+    have_mib=$(df -BM --output=avail "$store_dir" 2>/dev/null | tail -1 | tr -dc '0-9') || true
     if [[ -n "$have_mib" ]] && (( have_mib < need_mib )); then
         pv__warn "not enough room to unpack '$want': $store_dir has ${have_mib}MiB free, need ~${need_mib}MiB."
         pv__warn "container storage lives on $(findmnt -no SOURCE --target "$store_dir" 2>/dev/null || echo "$store_dir")."

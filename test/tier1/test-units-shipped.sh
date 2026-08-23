@@ -104,6 +104,28 @@ for cu in powos-installer powos-safemode; do
     fi
 done
 
+# The built-in account must get a home directory on a fresh install.
+#
+# The image bakes in a 'powos' user, but /var is empty on a fresh bootc
+# install, so /var/home/powos does not exist. sddm autologins that user into
+# gamescope, a session with no home dies with exit code 3, and sddm restarts it
+# forever — a black screen with a cursor on a machine that installed perfectly.
+# Two independent guards, because firstboot only runs when install.conf made it
+# onto the target and a hand-rolled `bootc install` has no such file.
+HOMERULE="$ROOT/config/tmpfiles.d/powos-home.conf"
+if [[ -f "$HOMERULE" ]] && grep -qE '^d[[:space:]]+/var/home/powos' "$HOMERULE"; then
+    ok "a tmpfiles rule creates /var/home/powos on every boot"
+else
+    bad "nothing guarantees /var/home/powos exists" \
+        "the autologin session dies with exit 3 and the screen stays black"
+fi
+if grep -q 'created missing home directory' "$ROOT/bin/powos-firstboot-apply"; then
+    ok "firstboot also creates a missing home for a PRE-EXISTING user"
+else
+    bad "firstboot only creates a home via useradd -m" \
+        "useradd never runs for the baked-in account, so the home is never made"
+fi
+
 # powos-firstboot CREATES THE USER ACCOUNT. Two properties decide whether a
 # freshly installed machine is usable on its first boot:
 #

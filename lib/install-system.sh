@@ -175,7 +175,7 @@ isv_live_device() {
     local out="" c base
     for c in ${candidates[@]+"${candidates[@]}"}; do
         # Strip to parent disk (e.g. /dev/sdb2 -> /dev/sdb, nvme0n1p2 -> nvme0n1)
-        base=$(lsblk -no PKNAME "$c" 2>/dev/null | head -1)
+        base=$(lsblk -no PKNAME "$c" 2>/dev/null | head -1) || true
         if [[ -n "$base" ]]; then
             out+=" /dev/$base"
         else
@@ -379,7 +379,7 @@ isv_free_block_start() {
 # Whole-disk size of a device in MiB (0 if unreadable).
 isv_disk_size_mib() {
     local b
-    b=$(lsblk -bdn -o SIZE "$1" 2>/dev/null | head -1 | tr -d '[:space:]')
+    b=$(lsblk -bdn -o SIZE "$1" 2>/dev/null | head -1 | tr -d '[:space:]') || true
     [[ "$b" =~ ^[0-9]+$ ]] || { echo 0; return; }
     echo $(( b / 1048576 ))
 }
@@ -608,7 +608,7 @@ isv_install_whole_disk() {
         # unambiguous — use it. Otherwise this can only be planned, not run:
         # bootc cannot install the running live system directly.
         local only
-        only=$(pv_list 2>/dev/null | head -2 | tr '\n' ' ')
+        only=$(pv_list 2>/dev/null | head -2 | tr '\n' ' ') || true
         only="${only% }"
         if [[ -n "$only" && "$only" != *" "* ]]; then
             ISV_VARIANT="$only"
@@ -990,7 +990,7 @@ isv_verify_new_partition() {
     fi
     if [[ -n "$expect_mib" ]]; then
         local size_b size_mib diff
-        size_b=$(lsblk -bnd -o SIZE "$part" 2>/dev/null | head -1 | tr -d '[:space:]')
+        size_b=$(lsblk -bnd -o SIZE "$part" 2>/dev/null | head -1 | tr -d '[:space:]') || true
         if [[ "$size_b" =~ ^[0-9]+$ ]]; then
             size_mib=$(( size_b / 1048576 ))
             diff=$(( size_mib - expect_mib )); (( diff < 0 )) && diff=$(( -diff ))
@@ -1059,7 +1059,15 @@ isv_post_install() {
     # 0) GPU driver variant: the install carries whatever variant you booted.
     local booted_variant="nvidia-open (default)"
     local vk
-    vk=$(grep -o 'rd.powos.variant=[^ ]*' /proc/cmdline 2>/dev/null | head -1)
+    # `|| true` is load-bearing. This lib does `set -uo pipefail` at the top,
+    # which it applies to bin/powos's shell too — and bin/powos runs under
+    # `set -e`. So when rd.powos.variant is absent from the cmdline (it is, on
+    # every medium we build), grep exits 1, pipefail hands that up as the
+    # pipeline's status, the assignment inherits it, and errexit kills the
+    # whole installer — one line after "Installation complete!". That is
+    # exactly what happened on the Deck: a finished install reported as
+    # failed, and the first-boot config never copied onto it.
+    vk=$(grep -o 'rd.powos.variant=[^ ]*' /proc/cmdline 2>/dev/null | head -1) || true
     [[ -n "$vk" ]] && booted_variant="${vk#rd.powos.variant=}"
     isv_log "GPU driver variant installed: ${booted_variant}"
     isv_log "  (installs the variant you booted; to switch open<->closed, reboot"

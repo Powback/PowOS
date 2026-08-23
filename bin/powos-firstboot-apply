@@ -66,6 +66,35 @@ fb_apply_user() {
         fi
     fi
 
+    # ...and give it a HOME, which `useradd -m` above does NOT cover.
+    #
+    # The image bakes in a 'powos' account, and 'powos' is also the installer's
+    # default username — so on a normal install `id powos` already succeeds,
+    # useradd never runs, and nothing ever creates /var/home/powos. /var is
+    # empty on a fresh install, so the account exists with a home directory
+    # that does not.
+    #
+    # That is not a cosmetic gap. sddm autologins this user straight into
+    # gamescope, the session cannot start without a home, and it crashes with
+    # exit code 3 and is restarted forever. What the user sees is a black
+    # screen with a cursor on a machine that installed perfectly — which is
+    # exactly how a fresh Steam Deck install came up.
+    local home
+    home=$(getent passwd "$user" | cut -d: -f6) || home=""
+    if [[ -n "$home" && ! -d "$home" ]]; then
+        if mkdir -p "$home" 2>/dev/null; then
+            # Populate from skel the way useradd -m would, without clobbering.
+            cp -a /etc/skel/. "$home/" 2>/dev/null || true
+            chown -R "$user":"$(id -gn "$user" 2>/dev/null || echo "$user")" "$home" 2>/dev/null || true
+            chmod 700 "$home" 2>/dev/null || true
+            restorecon -R "$home" 2>/dev/null || true
+            fb_ok "created missing home directory $home for '$user'"
+        else
+            fb_warn "could not create home directory $home for '$user'"
+            fb_warn "the graphical session will not start without it"
+        fi
+    fi
+
     # Deliberately no password: clear the field so the account can log in
     # without one. This is NOT the same as an empty hash — useradd leaves a '!'
     # in /etc/shadow, which LOCKS the account. `passwd -d` empties it.
