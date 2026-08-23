@@ -38,21 +38,45 @@ pv__warn() { echo "[variants] $*" >&2; }
 
 # Mount point of the POWOS-DATA partition, mounting it read-only if needed.
 # Prints the path, or nothing when there is no such partition.
+# Where can the offline variant store be read from?
+#
+# The naive answer — "wherever POWOS-DATA is already mounted" — is wrong on our
+# own live medium, and wrong in a way that reports the store as missing while
+# it is sitting right there. The medium's fstab mounts POWOS-DATA's
+# @powos/containers subvolume at /var/lib/containers, to give the install room
+# to unpack. That makes /var/lib/containers the FIRST (and usually only) hit
+# for this device, and it exposes exactly one subvolume: @powos/variants is not
+# under it. Taking that answer produced
+#
+#     No offline variant store on this media.
+#     Variant 'deck' is not on this media.
+#
+# on a stick whose store had just been verified byte for byte.
+#
+# So: accept an existing mount only if the store is actually visible through
+# it, and otherwise mount the filesystem ROOT ourselves. subvolid=5 is what
+# makes that the root rather than whatever btrfs has set as the default
+# subvolume.
 pv_data_mount() {
-    local dev mp
+    local dev mp sub
     dev=$(blkid -L POWOS-DATA 2>/dev/null || true)
     [[ -n "$dev" ]] || return 1
 
-    mp=$(findmnt -n -o TARGET "$dev" 2>/dev/null | head -1)
-    if [[ -n "$mp" ]]; then printf '%s\n' "$mp"; return 0; fi
+    while read -r mp; do
+        [[ -n "$mp" ]] || continue
+        for sub in "${POWOS_VARIANTS_SUBDIRS[@]}"; do
+            if [[ -f "$mp/$sub/index.json" ]]; then printf '%s\n' "$mp"; return 0; fi
+        done
+    done < <(findmnt -n -o TARGET --source "$dev" 2>/dev/null)
 
-    # Not mounted yet — mount read-only. Read-only on purpose: the installer
-    # only ever reads from here, and the stick may be shared/removable.
+    # Nothing usable mounted. Mount the root read-only — read-only on purpose:
+    # the installer only ever reads from here, and the stick may be shared.
     mkdir -p "$POWOS_VARIANTS_MNT" 2>/dev/null || return 1
-    if mount -o ro "$dev" "$POWOS_VARIANTS_MNT" 2>/dev/null; then
-        printf '%s\n' "$POWOS_VARIANTS_MNT"; return 0
+    if ! findmnt -n "$POWOS_VARIANTS_MNT" >/dev/null 2>&1; then
+        mount -o ro,subvolid=5 "$dev" "$POWOS_VARIANTS_MNT" 2>/dev/null ||
+            mount -o ro "$dev" "$POWOS_VARIANTS_MNT" 2>/dev/null || return 1
     fi
-    return 1
+    printf '%s\n' "$POWOS_VARIANTS_MNT"
 }
 
 # Directory of the OCI layout on the media, or nothing.
