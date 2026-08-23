@@ -74,8 +74,8 @@ for nu in "$ROOT"/systemd/*.service; do
 done
 ok "no shipped unit orders itself after network-online.target"
 
-GB="$ROOT/systemd/greenboot-healthcheck.service.d/20-powos-no-network-wait.conf"
-if [[ -f "$GB" ]] && grep -qE '^After=$' "$GB" && grep -qE '^Wants=$' "$GB"; then
+GB="$ROOT/systemd/greenboot-healthcheck.service.d/10-network-online.conf"
+if [[ -f "$GB" ]] && ! grep -qE "^(After|Wants)=.*network-online" "$GB"; then
     ok "greenboot's network-online drop-in is overridden"
 else
     bad "greenboot still waits for network-online" \
