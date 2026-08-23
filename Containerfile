@@ -107,6 +107,11 @@ COPY systemd/sddm.service.d/              /usr/lib/systemd/system/sddm.service.d
 # reproduced in QEMU off our own image and on a Steam Deck. See the drop-ins.
 COPY systemd/plymouth-quit.service.d/     /usr/lib/systemd/system/plymouth-quit.service.d/
 COPY systemd/plymouth-quit-wait.service.d/ /usr/lib/systemd/system/plymouth-quit-wait.service.d/
+# Drop cardwired's Wants= on the deprecated udev-settle, which was stalling
+# sysinit.target — and therefore the desktop — for ~4.6s. See the drop-in.
+COPY systemd/cardwired.service.d/         /usr/lib/systemd/system/cardwired.service.d/
+# Stop greenboot holding the desktop open waiting for DHCP. See the drop-in.
+COPY systemd/greenboot-healthcheck.service.d/ /usr/lib/systemd/system/greenboot-healthcheck.service.d/
 
 # First-boot appliers. bin/powos-firstboot-apply already shipped (COPY bin/
 # above), but its UNIT never did — so on every installed system the applier sat

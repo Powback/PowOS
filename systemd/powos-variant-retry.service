@@ -15,7 +15,11 @@
 [Unit]
 Description=PowOS retry GPU variant switch
 ConditionPathExists=/etc/powos/pending-variant
-After=network-online.target
+# Wanted, NOT waited for. This unit only retries a variant switch that
+# already failed once — it is the least urgent thing on the system, and
+# ordering it after network-online.target puts NetworkManager-wait-online on
+# the boot's critical path for a machine that may have no network at all. The
+# retry does its own waiting when it actually runs.
 Wants=network-online.target
 
 [Service]

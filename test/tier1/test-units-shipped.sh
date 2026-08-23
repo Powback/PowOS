@@ -54,6 +54,39 @@ else
         "it would add Install/Recovery entries to an installed system's own menu"
 fi
 
+# NOTHING may hold the boot open waiting for a network.
+#
+# This is a handheld. It boots with no network configured, in aeroplane mode,
+# or nowhere near the wifi it knows — and the desktop must not care. Measured
+# on a Steam Deck before this was fixed:
+#
+#     NetworkManager-wait-online.service +4.530s  on the critical chain
+#     to graphical.target, out of 14.2s of userspace
+#
+# pulled in because greenboot-healthcheck ordered itself after
+# network-online.target while sitting ahead of multi-user.target. Wants= is
+# fine (the network still gets brought up); After= on the boot path is not.
+for nu in "$ROOT"/systemd/*.service; do
+    n=$(basename "$nu")
+    grep -qE '^After=.*network-online\.target' "$nu" || continue
+    bad "$n orders itself AFTER network-online.target" \
+        "a unit on the boot path must never wait for DHCP"
+done
+ok "no shipped unit orders itself after network-online.target"
+
+GB="$ROOT/systemd/greenboot-healthcheck.service.d/20-powos-no-network-wait.conf"
+if [[ -f "$GB" ]] && grep -qE '^After=$' "$GB" && grep -qE '^Wants=$' "$GB"; then
+    ok "greenboot's network-online drop-in is overridden"
+else
+    bad "greenboot still waits for network-online" \
+        "the desktop is gated on DHCP via boot-complete.target"
+fi
+if grep -qF "COPY systemd/greenboot-healthcheck.service.d/" "$CF"; then
+    ok "the greenboot override reaches the image"
+else
+    bad "the greenboot override is never copied into the image"
+fi
+
 # The plymouth handoff must be time-bounded. plymouth-quit-wait.service ships
 # TimeoutSec=0 — infinite — and on this image plymouthd stops answering, so the
 # boot stops dead before graphical.target with no display manager and no

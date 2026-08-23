@@ -1,9 +1,11 @@
 [Unit]
 Description=PowOS System Hydration
 Documentation=https://github.com/user/powos
-After=network-online.target powos-overlay.service
+# Not ordered after network-online.target: that drags
+# NetworkManager-wait-online onto the critical path to multi-user.target, and
+# with Before=multi-user.target below it would gate the desktop on DHCP.
+# Hydration is a background top-up; it waits for the network itself. powos-overlay.service
 Wants=network-online.target
-Before=multi-user.target
 ConditionPathExists=/usr/lib/powos/powos-hydrate
 # Only run if hydration is needed
 ConditionPathExists=!/var/lib/powos/state/hydrated
