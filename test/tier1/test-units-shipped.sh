@@ -54,6 +54,33 @@ else
         "it would add Install/Recovery entries to an installed system's own menu"
 fi
 
+# sshd must survive an ostree upgrade.
+#
+# Bazzite's 81-desktop.preset disables sshd.service, Fedora's 90-default
+# enables it, and presets are first-match-wins — so 81 beats 90 and sshd is
+# off unless we intervene. Intervening with `systemctl enable` alone is not
+# enough: that writes into /etc, which ostree three-way merges on upgrade with
+# presets re-applied over it, so remote access can vanish across an update
+# silently. A Steam Deck came back from a SteamOS update with no sshd exactly
+# this way. Two belts: a preset that sorts ahead of 81, and a wants symlink in
+# /usr that no /etc merge can touch.
+PRESET="$ROOT/config/systemd-preset/80-powos.preset"
+if [[ -f "$PRESET" ]] && grep -qE '^enable sshd\.service' "$PRESET"; then
+    ok "a preset sorting ahead of Bazzite's re-enables sshd"
+else
+    bad "no preset re-enables sshd" "81-desktop.preset disables it and wins"
+fi
+if grep -qF "COPY config/systemd-preset/" "$CF"; then
+    ok "the preset reaches the image"
+else
+    bad "the preset is never copied into the image"
+fi
+if grep -qF 'multi-user.target.wants/sshd.service' "$CF"; then
+    ok "sshd is also wanted from /usr, out of reach of the /etc merge"
+else
+    bad "sshd is only enabled via /etc" "an ostree upgrade can merge it away"
+fi
+
 # systemd-udev-settle must not run: it is deprecated upstream, ordered before
 # sysinit.target, and one unit wanting it makes the entire boot wait for the
 # udev queue (+4.6s measured). A Wants= reset drop-in was tried first and did

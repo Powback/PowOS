@@ -1,0 +1,17 @@
+# PowOS: keep sshd enabled.
+#
+# Bazzite ships 81-desktop.preset with:
+#     disable sshd.socket
+#     disable sshd.service
+# and Fedora's 90-default.preset enables it. Presets are applied in lexical
+# order and the FIRST match wins, so 81 beats 90 and sshd ends up disabled.
+#
+# We compensated with `systemctl enable sshd.service` at build time, which
+# writes a symlink into /etc — and /etc is precisely what ostree three-way
+# merges on an upgrade, with presets re-applied over the top. So SSH could
+# disappear across an update with nothing logged about it, which is how a Deck
+# came back from a SteamOS update with no way in.
+#
+# 80 sorts ahead of 81, so this wins. Paired with a wants-symlink in /usr (see
+# the Containerfile), which no /etc merge can touch.
+enable sshd.service

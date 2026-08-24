@@ -78,6 +78,8 @@ COPY config/ai/                           /etc/powos/ai/
 COPY config/zones/                        /etc/powos/zones/
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
+# Keep sshd enabled against Bazzite's preset, which disables it. See the file.
+COPY config/systemd-preset/              /usr/lib/systemd/system-preset/
 COPY config/sysctl.d/                     /etc/sysctl.d/
 COPY config/NetworkManager/conf.d/        /etc/NetworkManager/conf.d/
 COPY config/etc/containers/systemd/users/  /etc/containers/systemd/users/
@@ -168,6 +170,8 @@ LABEL org.opencontainers.image.description="Minimal PowOS layer on Bazzite (CLI 
 RUN useradd -m -d /home/powos -G wheel -u 1000 powos 2>/dev/null || true && \
     echo "powos:powos" | chpasswd && \
     systemctl enable sshd.service && \
+    mkdir -p /usr/lib/systemd/system/multi-user.target.wants && \
+    ln -sf ../sshd.service /usr/lib/systemd/system/multi-user.target.wants/sshd.service && \
     mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/powos
 
 # Desktop peripheral + dev-runtime stack.
