@@ -79,9 +79,23 @@ for f in "$MEDIUM" "$TARGET"; do
 done
 
 # GRUB menu: the default is the LIVE entry, and "Install PowOS to disk" sits
-# MENU_UP entries above it. Any keypress cancels GRUB's countdown, so the first
-# `up` also buys us unlimited time for the rest.
-sleep 8
+# MENU_UP entries above it.
+#
+# WAIT for the menu to actually be on screen before sending anything. A fixed
+# sleep races GRUB: keys sent before it draws are swallowed, the countdown runs
+# out, and the VM boots the LIVE entry instead — which looks like the installer
+# silently refusing to start, when in fact it was never selected. A drawn menu
+# is a screenful of text, so its screendump is far larger than the near-empty
+# frames before it.
+menu_seen=0
+for _ in $(seq 1 40); do
+    sleep 1; snap "probe"
+    if [ -f "$SHOTS/probe.png" ] && [ "$(stat -c %s "$SHOTS/probe.png")" -gt 5000 ]; then
+        menu_seen=1; break
+    fi
+done
+[ "$menu_seen" = 1 ] || echo "install-e2e: WARNING — never saw a menu; keys may miss" >&2
+# Any keypress cancels the countdown, so once it is drawn there is no more rush.
 for _ in $(seq 1 "$MENU_UP"); do mon "sendkey up"; sleep 1; done
 snap "menu"
 mon "sendkey ret"
