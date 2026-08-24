@@ -91,37 +91,35 @@ else
     bad "systemd-udev-settle is not masked" "one Wants= on it stalls sysinit for seconds"
 fi
 
-# NOTHING may hold the boot open waiting for a network.
+# The network wait must be BOUNDED, never removed.
 #
-# This is a handheld. It boots with no network configured, in aeroplane mode,
-# or nowhere near the wifi it knows — and the desktop must not care. Measured
-# on a Steam Deck before this was fixed:
+# greenboot's health check is ordered after network-online.target and gates
+# boot-complete.target, so the desktop waits for it. Removing greenboot's
+# network dependency looks like the fix and is a trap: greenboot then runs
+# before any network exists, does not pass, and its redboot-auto-reboot
+# reboots the machine. Reproduced in a VM with -nic none:
 #
-#     NetworkManager-wait-online.service +4.530s  on the critical chain
-#     to graphical.target, out of 14.2s of userspace
+#     [  OK  ] Stopped greenboot-healthcheck.service
+#     [ 34.75] reboot: Restarting system
 #
-# pulled in because greenboot-healthcheck ordered itself after
-# network-online.target while sitting ahead of multi-user.target. Wants= is
-# fine (the network still gets brought up); After= on the boot path is not.
-for nu in "$ROOT"/systemd/*.service; do
-    n=$(basename "$nu")
-    grep -qE '^After=.*network-online\.target' "$nu" || continue
-    bad "$n orders itself AFTER network-online.target" \
-        "a unit on the boot path must never wait for DHCP"
-done
-ok "no shipped unit orders itself after network-online.target"
-
-GB="$ROOT/systemd/greenboot-healthcheck.service.d/10-network-online.conf"
-if [[ -f "$GB" ]] && ! grep -qE "^(After|Wants)=.*network-online" "$GB"; then
-    ok "greenboot's network-online drop-in is overridden"
+# and on a Steam Deck away from its wifi it was an endless loop. "Slow when
+# offline" must not become "will not boot when offline".
+if [[ -d "$ROOT/systemd/greenboot-healthcheck.service.d" ]]; then
+    bad "greenboot's network dependency is being overridden" \
+        "that causes a reboot loop when the machine has no network"
 else
-    bad "greenboot still waits for network-online" \
-        "the desktop is gated on DHCP via boot-complete.target"
+    ok "greenboot keeps its network-online dependency"
 fi
-if grep -qF "COPY systemd/greenboot-healthcheck.service.d/" "$CF"; then
-    ok "the greenboot override reaches the image"
+NMW="$ROOT/systemd/NetworkManager-wait-online.service.d/10-powos-bound.conf"
+if [[ -f "$NMW" ]] && grep -qE 'timeout=[1-9]' "$NMW"; then
+    ok "the network wait is bounded by a short nm-online timeout"
 else
-    bad "the greenboot override is never copied into the image"
+    bad "the network wait is unbounded" "an offline boot stalls on the default timeout"
+fi
+if grep -qF "COPY systemd/NetworkManager-wait-online.service.d/" "$CF"; then
+    ok "the bounded wait reaches the image"
+else
+    bad "the bounded wait is never copied into the image"
 fi
 
 # The plymouth handoff must be time-bounded. plymouth-quit-wait.service ships

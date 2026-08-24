@@ -112,8 +112,9 @@ COPY systemd/plymouth-quit-wait.service.d/ /usr/lib/systemd/system/plymouth-quit
 # Drop cardwired's Wants= on the deprecated udev-settle, which was stalling
 # sysinit.target — and therefore the desktop — for ~4.6s. See the drop-in.
 COPY systemd/cardwired.service.d/         /usr/lib/systemd/system/cardwired.service.d/
-# Stop greenboot holding the desktop open waiting for DHCP. See the drop-in.
-COPY systemd/greenboot-healthcheck.service.d/ /usr/lib/systemd/system/greenboot-healthcheck.service.d/
+# Bound the network wait rather than removing greenboot's dependency on it —
+# removing it turns "slow when offline" into a reboot loop. See the drop-in.
+COPY systemd/NetworkManager-wait-online.service.d/ /usr/lib/systemd/system/NetworkManager-wait-online.service.d/
 
 # First-boot appliers. bin/powos-firstboot-apply already shipped (COPY bin/
 # above), but its UNIT never did — so on every installed system the applier sat
