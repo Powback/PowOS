@@ -20,7 +20,7 @@
 set -uo pipefail
 
 MEDIUM="" ; TARGET="" ; TIMEOUT=2400 ; SHOTS="${TMPDIR:-/tmp}/powos-e2e-shots"
-SERIAL="${TMPDIR:-/tmp}/powos-e2e-serial.log" ; MEM="6G" ; KEYS=22 ; KEY_GAP=5
+SERIAL="${TMPDIR:-/tmp}/powos-e2e-serial.log" ; MEM="6G" ; KEYS=22 ; KEY_GAP=5 ; MENU_UP=3
 while [ $# -gt 0 ]; do
     case "$1" in
         --medium)  MEDIUM="$2"; shift 2 ;;
@@ -29,6 +29,7 @@ while [ $# -gt 0 ]; do
         --shots)   SHOTS="$2"; shift 2 ;;
         --serial)  SERIAL="$2"; shift 2 ;;
         --keys)    KEYS="$2"; shift 2 ;;
+        --menu-up) MENU_UP="$2"; shift 2 ;;
         -h|--help) grep '^#' "$0" | cut -c3-; exit 0 ;;
         *) echo "install-e2e: unknown option: $1" >&2; exit 2 ;;
     esac
@@ -66,9 +67,25 @@ mon() { printf '%s\n' "$1" | socat - unix-connect:"$WORK/qmon" >/dev/null 2>&1; 
 snap() { mon "screendump $WORK/s.ppm"; sleep 1
          [ -f "$WORK/s.ppm" ] && { convert "$WORK/s.ppm" "$SHOTS/$1.png" 2>/dev/null; rm -f "$WORK/s.ppm"; }; }
 
-# Let firmware + GRUB + boot settle, then capture the menu as evidence.
-sleep 12; snap "menu"
-sleep 60; snap "booted"
+# Nothing else may hold the images: QEMU takes a write lock, and a leaked
+# qemu or a still-attached loop device makes it exit instantly with
+# "Failed to get shared write lock" — which looks exactly like a medium that
+# will not boot. That cost a full debugging cycle; check for it up front.
+for f in "$MEDIUM" "$TARGET"; do
+    if command -v losetup >/dev/null 2>&1 && losetup -j "$f" 2>/dev/null | grep -q .; then
+        echo "install-e2e: $f is still attached to a loop device — detach it first" >&2
+        kill -9 "$QPID" 2>/dev/null; exit 2
+    fi
+done
+
+# GRUB menu: the default is the LIVE entry, and "Install PowOS to disk" sits
+# MENU_UP entries above it. Any keypress cancels GRUB's countdown, so the first
+# `up` also buys us unlimited time for the rest.
+sleep 8
+for _ in $(seq 1 "$MENU_UP"); do mon "sendkey up"; sleep 1; done
+snap "menu"
+mon "sendkey ret"
+sleep 75; snap "booted"
 
 # Drive the wizard. Every question is designed to be answerable with a bare
 # Enter — that is the whole point of the keyboard-less design — so this is a
