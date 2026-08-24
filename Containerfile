@@ -317,6 +317,20 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     { [ -f /usr/lib/systemd/system/plasmalogin.service ] \
         || systemctl enable sddm.service; } && \
     systemctl mask setroubleshootd.service 2>/dev/null || true && \
+    # systemd-udev-settle is deprecated upstream ("should not be used") and is
+    # ordered Before=sysinit.target, so ONE unit wanting it makes the whole
+    # boot wait for the udev queue to drain: +4.637s on the critical chain to
+    # graphical.target, measured on a Steam Deck, and the reason
+    # `systemd-analyze blame` is topped by dev-ttyS0.device and dev-tpm0.device
+    # at ~10s each — symptoms, not costs.
+    #
+    # Only Bazzite's cardwired.service wants it. A drop-in resetting that
+    # unit's Wants= is the polite fix and it did NOT work: verified on a live
+    # medium built with the drop-in in place, udev-settle still ran after
+    # switch-root and cardwired started only once it finished. Masking is
+    # decisive — a Wants= on a masked unit is simply ignored — and cardwired
+    # keeps its own Restart=on-failure if it genuinely needs devices later.
+    systemctl mask systemd-udev-settle.service 2>/dev/null || true && \
     systemctl mask plasma-setup.service 2>/dev/null || true && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true

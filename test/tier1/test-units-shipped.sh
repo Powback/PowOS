@@ -54,6 +54,16 @@ else
         "it would add Install/Recovery entries to an installed system's own menu"
 fi
 
+# systemd-udev-settle must not run: it is deprecated upstream, ordered before
+# sysinit.target, and one unit wanting it makes the entire boot wait for the
+# udev queue (+4.6s measured). A Wants= reset drop-in was tried first and did
+# not take — verified on a booted medium — so the unit is masked instead.
+if grep -q 'systemctl mask systemd-udev-settle.service' "$CF"; then
+    ok "systemd-udev-settle is masked in the image"
+else
+    bad "systemd-udev-settle is not masked" "one Wants= on it stalls sysinit for seconds"
+fi
+
 # NOTHING may hold the boot open waiting for a network.
 #
 # This is a handheld. It boots with no network configured, in aeroplane mode,

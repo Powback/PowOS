@@ -11,6 +11,21 @@ ConditionPathIsDirectory=/boot/loader/entries
 # system, where it would add an "Install PowOS to disk" entry to that machine's
 # own boot menu and strip its boot splash — neither of which belongs there.
 ConditionPathExists=/etc/powos/.live-medium
+# Finish before greenboot runs its health check.
+#
+# This unit remounts /boot rw to write the entries and restores it to ro on
+# exit. greenboot needs /boot, and with nothing ordering the two, the flip
+# lands underneath it:
+#
+#     EXT4-fs (vda3): re-mounted … ro
+#     [FAILED] Failed to start greenboot-healthcheck.service
+#     [DEPEND] Dependency failed for boot-complete.target
+#
+# observed on a live medium in a VM. It is medium-only — an installed system
+# has no .live-medium marker, so this unit never runs there and greenboot is
+# untouched — but a FAILED health check on the stick is both alarming and
+# needless.
+Before=greenboot-healthcheck.service
 After=local-fs.target
 [Service]
 Type=oneshot
