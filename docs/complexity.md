@@ -59,3 +59,32 @@ the way `parse_sudo_argv` is explained above.
 
 Verified in both directions before being enabled: a new function at CC 16 fails,
 a budgeted function grown past its entry fails, and a clean tree passes.
+
+## Repo-wide picture
+
+1526 functions in production shell. **113 over 15, 42 over 25.** The gate freezes
+all of it; none of it is today's work.
+
+The gate originally globbed `lib/*.sh`, which does **not** descend into
+`lib/mods/` (16 files) or `lib/ai/` (8) — 24 files of real production code were
+silently uncovered. It now enumerates by shebang via `git ls-files`.
+
+### Raw CC misranks dispatchers
+
+Separating `case` arms from genuine branching changes the priority order:
+
+| function | CC | case arms | real | note |
+|---|---|---|---|---|
+| `powos:cmd_health` | 100 | 6 | **92** | 423 lines, 53 `if`, 39 `&&`/`\|\|` |
+| `harness.sh:harness_run` | 77 | 0 | 77 | |
+| `windows.sh:win_install` | 69 | 0 | 69 | |
+| `agent.sh:ai_call` | 82 | 15 | 67 | |
+| `mods/adopt.sh:mods_adopt_cmd` | 52 | 0 | 52 | 21 loops — nesting, not width |
+| `game.sh:cmd_game` | 44 | **25** | 19 | a dispatcher; leave it alone |
+
+`cmd_game` looks bad and is not: a flat 25-arm `case` is what a dispatcher
+should be, and splitting it by CC would make it worse. `cmd_health` is the
+opposite — nearly all of its 100 is real branching in one function.
+
+**If anything gets refactored, `cmd_health` first.** Nothing here is urgent: it
+is long-standing code that works, and the ratchet stops it growing.

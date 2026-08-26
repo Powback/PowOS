@@ -3,15 +3,25 @@
 # Lowering a number when code improves is welcome. Raising one needs a reason.
 # Regenerate the raw list with: python3 build/complexity.py --budget <files>
 
+adopt.sh:mods_adopt_cmd 53
+agent.sh:_ai_interactive_loop 19
+agent.sh:_ai_resume_picker 24
+agent.sh:ai_call 85
+agent.sh:ai_interactive 30
 ai-healer.sh:auto_heal 16
+asi.sh:asi_add 37
 backup.sh:cmd_backup 16
 backup.sh:sync_from_working_dirs 18
 backup.sh:sync_pull 22
 backup.sh:sync_to_working_dirs 17
 build-helpers.sh:install_packages 28
 build-image.sh:cmd_build_image 29
+check.sh:mods_analyze 18
 console.sh:cmd_console 18
 console.sh:console_build 50
+core.sh:mods_install_mod 16
+core.sh:mods_status_cmd 28
+deploy.sh:mods_deploy_mount 17
 dev-commands.sh:dev_dockerize 24
 dev-commands.sh:dev_fork 26
 dev-commands.sh:dev_new 16
@@ -19,6 +29,7 @@ dev-commands.sh:dev_new_ai 19
 dev-commands.sh:dev_override 18
 dev-commands.sh:dev_patch 16
 doctor.sh:cmd_doctor 17
+fivem.sh:cmd_mods_fivem 24
 game.sh:cmd_game 45
 games-sync.sh:cmd_games_sync 28
 games-sync.sh:gsy_push 16
@@ -26,6 +37,11 @@ games.sh:cmd_games 33
 games.sh:gms_create 36
 games.sh:gms_resize 41
 games.sh:gms_steam_setup 16
+harness.sh:harness_bisect 17
+harness.sh:harness_run 78
+harness.sh:harness_verify_cmd 18
+helpers.sh:ai_parse_files_to_dir 16
+helpers.sh:ai_parse_markdown_to_dir 24
 install-router.sh:route_one 33
 install-system.sh:cmd_install_system 22
 install-system.sh:isv_install_alongside 37
@@ -48,8 +64,12 @@ mobile.sh:cmd_mobile 16
 mobile.sh:mobile_enable 16
 mobile.sh:mobile_status 19
 mobile.sh:show_simple_menu 18
+modlist.sh:modlist_configure_cmd 22
+modlist.sh:modlist_install_cmd 28
 overlay-manager.sh:main 18
 pinstall:update_ini_packages 22
+portable.sh:mods_export_cmd 17
+portable.sh:mods_import_cmd 38
 powos:cmd_containers 41
 powos:cmd_health 101
 powos:cmd_install 34
@@ -60,6 +80,7 @@ powos:cmd_update 49
 powos-askpass:parse_sudo_argv 32
 powos-firstboot-apply:fb_apply_user 24
 powos-welcome:menu_loop 29
+ramboot-setup.sh:powos_select_base_variant 16
 ramboot.sh:rb_enable 17
 registry.sh:registry_login 19
 reload.sh:cmd_reload 41
@@ -72,10 +93,20 @@ sync.sh:get_diff_for_ai 17
 sync.sh:ram_sync_merge 43
 uninstall.sh:cmd_remove 17
 upgrade.sh:cmd_upgrade 27
+verify.sh:mods_doctor_cmd 25
+verify.sh:mods_verify_cmd 33
 vm.sh:cmd_vm 16
 vm.sh:vm_build_windows_setup_ps1 17
 vm.sh:vm_windows 21
 vm.sh:vm_windows_setup 19
+vortex.sh:vortex_bulk_cmd 16
+vortex.sh:vortex_install_cmd 17
+vu.sh:vu_install_cmd 27
+vu.sh:vu_install_icon 16
+vu.sh:vu_mod_build_cmd 25
+vu.sh:vu_mod_dev_cmd 22
+vu.sh:vu_mod_install_cmd 43
+vu.sh:vu_mod_resolve_source 20
 windows.sh:cmd_windows 63
 windows.sh:win_fetch_iso 22
 windows.sh:win_finalize 40

@@ -88,7 +88,10 @@ jobs:
       - name: Cyclomatic complexity (ratchet)
         run: |
           mapfile -t shell_bins < <(grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/*)
-          python3 build/complexity.py --check "${shell_bins[@]}" lib/*.sh build/*.sh
+          # lib/*.sh does NOT glob into lib/mods, lib/ai etc — 24 files of real
+          # production code were uncovered. Enumerate by shebang instead.
+          mapfile -t shell_all < <(git ls-files 'lib/**/*.sh' 'lib/*.sh' 'build/*.sh' 'sources/**/*.sh' | sort -u)
+          python3 build/complexity.py --check "${shell_bins[@]}" "${shell_all[@]}"
 
       # Auto-discovers test/tier1/* — do NOT reintroduce a hand-written list
       # here. The old list silently fell behind until 21 of 31 suites never ran
