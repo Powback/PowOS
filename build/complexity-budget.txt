@@ -76,7 +76,7 @@ powos:cmd_install 34
 powos:cmd_layers 21
 powos:cmd_rollback 17
 powos:cmd_status 30
-powos:cmd_update 49
+powos:cmd_update 8
 powos-askpass:parse_sudo_argv 32
 powos-firstboot-apply:fb_apply_user 24
 powos-welcome:menu_loop 29

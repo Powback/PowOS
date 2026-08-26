@@ -710,53 +710,288 @@ cmd_rollback() {
 # Update Command
 # ═══════════════════════════════════════════════════════════════════
 
+# ─── `powos update` sub-commands ──────────────────────────────────
+#
+# cmd_update stays a flat case: six arms dispatching on a verb is what a
+# dispatcher is supposed to look like, and splitting it by CC would make
+# it worse. What put it at CC 49 was not the case (10 of those points)
+# but the arms — `check`, `packages`, `self` and `projects` carried
+# 30-110 lines of real work each, inline. Those are functions now; the
+# case is a case again.
+
+# `powos update` / `powos update check` — read-only: report what is
+# available and how to apply it. Applies nothing.
+_update_check() {
+    echo -e "${BOLD}${CYAN}Checking for Updates${NC}"
+    echo "════════════════════════════════════════"
+    echo ""
+
+    # Check bootc for base OS updates
+    echo "Base OS (via bootc):"
+    if command -v bootc &>/dev/null; then
+        if bootc upgrade --check 2>/dev/null; then
+            echo "  Run 'powos update os' to apply"
+        else
+            echo "  System is up to date (or offline)"
+        fi
+    else
+        echo "  bootc not available"
+    fi
+    echo ""
+
+    # Check for package updates
+    echo "Packages:"
+    if [[ -f /run/ostree-booted ]]; then
+        # Atomic host: packages ride the base image (dnf is a guard
+        # stub here — piping it into wc used to produce a multi-line
+        # value and an arithmetic-syntax error on this exact screen).
+        echo "  Managed by the base image — 'powos upgrade' covers OS + packages"
+    elif command -v dnf5 &>/dev/null; then
+        local updates
+        updates=$(dnf5 check-update --quiet 2>/dev/null | grep -Ec '^[[:alnum:]]') || true
+        if [[ "${updates:-0}" -gt 0 ]]; then
+            echo "  $updates package updates available"
+            echo "  Run 'powos update packages' to install"
+        else
+            echo "  System is up to date"
+        fi
+    else
+        echo "  No supported package manager found"
+    fi
+    echo ""
+    echo "Commands:"
+    echo "  powos update os        - Apply OS updates (goes to updates layer)"
+    echo "  powos update packages  - Apply package updates (goes to custom layer)"
+    echo "  powos update apply     - Apply all updates"
+}
+
+# `powos update packages` — dnf upgrade, then push the result into the
+# custom layer. USB-live model only; without the stick there is nowhere
+# for the result to persist to.
+_update_packages() {
+    echo -e "${BOLD}${CYAN}Applying Package Updates${NC}"
+    echo "════════════════════════════════════════"
+    echo ""
+
+    # Ensure USB is connected for persistence
+    if [[ "$(get_usb_status)" != "connected" ]]; then
+        echo -e "${RED}Error: USB not connected${NC}"
+        echo "Updates need USB connected to persist"
+        exit 1
+    fi
+
+    # Apply package updates (goes to RAM, syncs to custom layer)
+    if command -v dnf &>/dev/null; then
+        echo "Installing package updates..."
+        echo "These go to your custom layer (separate from OS updates)."
+        echo ""
+        dnf upgrade -y
+
+        # Sync to custom layer
+        echo ""
+        echo "Syncing to custom layer..."
+        if [[ -x "$LAYER_SYNC" ]]; then
+            python3 "$LAYER_SYNC" --sync-now
+        fi
+    fi
+
+    echo ""
+    echo -e "${GREEN}✓ Package updates applied${NC}"
+    echo "  Changes synced to custom layer"
+    echo "  Will persist across reboots"
+}
+
+# Make /usr writable enough to install into, and say so when it cannot be.
+# Both traps below present as a pile of EROFS from the copies in
+# _update_self rather than as anything that mentions /usr.
+_update_self_prepare_usr() {
+    # Writability pre-flight (installed composefs boxes). Two traps:
+    #  - merged systemd-sysext extensions sit as a READ-ONLY overlay on
+    #    /usr, so every cp below fails with EROFS → unmerge first,
+    #    re-merge after the install;
+    #  - the base /usr itself is read-only → engage the transient
+    #    bootc usr-overlay (same mechanism as 'powos self test';
+    #    reverts on reboot). bootc usr-overlay also silently drops
+    #    merged sysexts, which the re-merge below repairs.
+    source "$POWOS_LIB/self.sh"
+    source "$POWOS_LIB/common.sh"
+    sysext_unmerge_if_needed
+    if self_usr_ro; then
+        echo "/usr is read-only — engaging transient bootc usr-overlay (reverts on reboot)..."
+        if ! sudo bootc usr-overlay >/dev/null 2>&1 || self_usr_ro; then
+            echo -e "${RED}/usr still read-only — cannot install scripts.${NC}"
+            return 1
+        fi
+    fi
+}
+
+# Say which tree is about to be installed, and how far it has drifted, so
+# the line above "Installing from Containerfile map..." names the source of
+# whatever lands in /usr.
+_update_self_describe_src() {
+    local POWOS_SRC="$1"
+    echo "Source: $POWOS_SRC"
+
+    # Show what's changed (if git available)
+    if [[ -d "$POWOS_SRC/.git" ]]; then
+        local changes
+        # GIT_OPTIONAL_LOCKS=0: read-only status must not refresh the
+        # index — when run under sudo that writes a root-owned .git/index.
+        changes=$(cd "$POWOS_SRC" && GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | wc -l)
+        local commit
+        commit=$(cd "$POWOS_SRC" && GIT_OPTIONAL_LOCKS=0 git log -1 --format="%h %s" 2>/dev/null || echo "unknown")
+        echo "Commit: $commit"
+        [[ "$changes" -gt 0 ]] && echo "Uncommitted changes: $changes files"
+    fi
+    echo ""
+}
+
+# `powos update self` / `powos update powos` — reinstall the CLI and its
+# libraries from a source tree. Args arrive already shifted past the verb.
+_update_self() {
+    echo -e "${BOLD}${CYAN}Updating PowOS${NC}"
+    echo "════════════════════════════════════════"
+    echo ""
+
+    # Default source location (bundled with PowOS)
+    local POWOS_SRC="${POWOS_SRC:-/var/lib/powos/src}"
+    local custom_src=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --from)
+                custom_src="$2"
+                shift 2
+                ;;
+            --pull)
+                # SAFE pull: attach-in-place (bundled snapshot) or plain
+                # rebase (existing checkout) WITHOUT ever discarding local
+                # edits. Replaces the old `git checkout -f` that blindly
+                # reset to master and nuked uncommitted work. See lib/self.sh.
+                local _src_owner
+                _src_owner=$(stat -c %U "$POWOS_SRC" 2>/dev/null || echo root)
+                if [[ $EUID -eq 0 && "$_src_owner" != "root" ]]; then
+                    # git-as-root leaves root-owned .git files that break
+                    # the owner's pushes until the next boot re-chown.
+                    echo -e "${RED}Refusing --pull as root over the ${_src_owner}-owned tree.${NC}"
+                    echo "Run 'powos update self --pull' as $_src_owner, then 'sudo powos update self'."
+                    return 1
+                fi
+                source "$POWOS_LIB/self.sh"
+                self_safe_pull "$POWOS_SRC" || return 1
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    # Use custom source if specified
+    [[ -n "$custom_src" ]] && POWOS_SRC="$custom_src"
+
+    if [[ ! -d "$POWOS_SRC" ]]; then
+        echo -e "${RED}PowOS source not found at: $POWOS_SRC${NC}"
+        echo ""
+        echo "Options:"
+        echo "  1. Specify source location:"
+        echo "     powos update self --from /mnt/disk/Projects/PowOS"
+        echo ""
+        echo "  2. The source should be bundled at /var/lib/powos/src"
+        echo "     (included in PowOS ISO builds)"
+        return 1
+    fi
+
+    _update_self_describe_src "$POWOS_SRC"
+
+    _update_self_prepare_usr
+
+    # Install every file the image ships, straight from the Containerfile
+    # staging COPY map (self_apply_manifest / self_copy_manifest in
+    # self.sh). This is the SINGLE SOURCE OF TRUTH: whatever the image
+    # COPYs, `update self` applies — no hand-kept list to drift out of
+    # sync (which is exactly how profile.d / konsole / MOTD became
+    # un-live-appliable). rsync's atomic rename makes replacing the
+    # running /usr/bin/powos and in-use lib/*.sh safe.
+    echo "Installing from Containerfile map..."
+    self_apply_manifest "$POWOS_SRC" "$POWOS_SRC/Containerfile"
+    # Units may have changed (systemd/*, config/etc/systemd, ...).
+    sudo systemctl daemon-reload 2>/dev/null || true
+
+    sysext_remerge_if_needed
+
+    echo ""
+    echo -e "${GREEN}✓ PowOS updated from source${NC}"
+    echo ""
+    echo "Changes applied immediately. You may want to:"
+    echo "  - Restart your shell for PATH changes"
+    echo "  - Run 'powos dev build-all' to rebuild overlays"
+    echo ""
+    echo "Tip: Edit source at $POWOS_SRC, then run 'powos update self'"
+}
+
+# `powos update projects` — NOT sysext overlays. This iterates
+# PROJECTS_DIR and rebuilds dev PROJECTS. The arm was once called
+# "overlays", which is the name of a different subsystem entirely
+# (`powos overlay`, sysext), so anyone reaching for it to rebuild an
+# overlay silently rebuilt projects instead.
+_update_projects() {
+    echo -e "${BOLD}${CYAN}Rebuilding Dev Projects with Latest Upstream${NC}"
+    echo "════════════════════════════════════════"
+    echo ""
+
+    if [[ ! -d "$PROJECTS_DIR" ]]; then
+        echo "No projects directory found"
+        return 0
+    fi
+
+    local updated=0
+    for proj_dir in "$PROJECTS_DIR"/*/; do
+        local name=$(basename "$proj_dir")
+        local conf="$proj_dir/project.conf"
+
+        [[ "$name" == "*" ]] && continue
+        [[ ! -f "$conf" ]] && continue
+
+        source "$conf"
+
+        # Only update if it's a fork with upstream
+        if [[ "${PROJECT_TYPE:-}" == "fork" ]] && [[ -n "${UPSTREAM_URL:-}" ]]; then
+            echo "Updating $name..."
+            if declare -f cmd_dev &>/dev/null; then
+                cmd_dev update "$name" 2>/dev/null || echo "  Failed to update $name"
+            fi
+            ((updated++)) || true
+        fi
+    done
+
+    if [[ "$updated" -eq 0 ]]; then
+        echo "No forked projects to update"
+    else
+        echo ""
+        echo -e "${GREEN}✓ Updated $updated overlay(s)${NC}"
+    fi
+}
+
+# Verb list for an unrecognised sub-command.
+_update_usage() {
+    echo "Usage: powos update {check|os|powos|packages|projects|apply}"
+    echo ""
+    echo "  check     - Check for available updates"
+    echo "  os        - Update Bazzite base OS"
+    echo "  powos     - Update PowOS scripts"
+    echo "  packages  - Update installed packages"
+    echo "  overlays  - Rebuild overlays with latest upstream"
+    echo "  apply     - Apply all updates (os + packages)"
+}
+
 cmd_update() {
     local action="${1:-check}"
     local UPDATES_LAYER="/run/powos/usb-layers/layers/updates"
 
     case "$action" in
         check)
-            echo -e "${BOLD}${CYAN}Checking for Updates${NC}"
-            echo "════════════════════════════════════════"
-            echo ""
-
-            # Check bootc for base OS updates
-            echo "Base OS (via bootc):"
-            if command -v bootc &>/dev/null; then
-                if bootc upgrade --check 2>/dev/null; then
-                    echo "  Run 'powos update os' to apply"
-                else
-                    echo "  System is up to date (or offline)"
-                fi
-            else
-                echo "  bootc not available"
-            fi
-            echo ""
-
-            # Check for package updates
-            echo "Packages:"
-            if [[ -f /run/ostree-booted ]]; then
-                # Atomic host: packages ride the base image (dnf is a guard
-                # stub here — piping it into wc used to produce a multi-line
-                # value and an arithmetic-syntax error on this exact screen).
-                echo "  Managed by the base image — 'powos upgrade' covers OS + packages"
-            elif command -v dnf5 &>/dev/null; then
-                local updates
-                updates=$(dnf5 check-update --quiet 2>/dev/null | grep -Ec '^[[:alnum:]]') || true
-                if [[ "${updates:-0}" -gt 0 ]]; then
-                    echo "  $updates package updates available"
-                    echo "  Run 'powos update packages' to install"
-                else
-                    echo "  System is up to date"
-                fi
-            else
-                echo "  No supported package manager found"
-            fi
-            echo ""
-            echo "Commands:"
-            echo "  powos update os        - Apply OS updates (goes to updates layer)"
-            echo "  powos update packages  - Apply package updates (goes to custom layer)"
-            echo "  powos update apply     - Apply all updates"
+            _update_check
             ;;
 
         os)
@@ -772,36 +1007,7 @@ cmd_update() {
             ;;
 
         packages)
-            echo -e "${BOLD}${CYAN}Applying Package Updates${NC}"
-            echo "════════════════════════════════════════"
-            echo ""
-
-            # Ensure USB is connected for persistence
-            if [[ "$(get_usb_status)" != "connected" ]]; then
-                echo -e "${RED}Error: USB not connected${NC}"
-                echo "Updates need USB connected to persist"
-                exit 1
-            fi
-
-            # Apply package updates (goes to RAM, syncs to custom layer)
-            if command -v dnf &>/dev/null; then
-                echo "Installing package updates..."
-                echo "These go to your custom layer (separate from OS updates)."
-                echo ""
-                dnf upgrade -y
-
-                # Sync to custom layer
-                echo ""
-                echo "Syncing to custom layer..."
-                if [[ -x "$LAYER_SYNC" ]]; then
-                    python3 "$LAYER_SYNC" --sync-now
-                fi
-            fi
-
-            echo ""
-            echo -e "${GREEN}✓ Package updates applied${NC}"
-            echo "  Changes synced to custom layer"
-            echo "  Will persist across reboots"
+            _update_packages
             ;;
 
         apply)
@@ -813,170 +1019,16 @@ cmd_update() {
             ;;
 
         powos|self)
-            echo -e "${BOLD}${CYAN}Updating PowOS${NC}"
-            echo "════════════════════════════════════════"
-            echo ""
-
-            # Default source location (bundled with PowOS)
-            local POWOS_SRC="${POWOS_SRC:-/var/lib/powos/src}"
-            local custom_src=""
-
-            # Parse --from argument
-            shift
-            while [[ $# -gt 0 ]]; do
-                case "$1" in
-                    --from)
-                        custom_src="$2"
-                        shift 2
-                        ;;
-                    --pull)
-                        # SAFE pull: attach-in-place (bundled snapshot) or plain
-                        # rebase (existing checkout) WITHOUT ever discarding local
-                        # edits. Replaces the old `git checkout -f` that blindly
-                        # reset to master and nuked uncommitted work. See lib/self.sh.
-                        local _src_owner
-                        _src_owner=$(stat -c %U "$POWOS_SRC" 2>/dev/null || echo root)
-                        if [[ $EUID -eq 0 && "$_src_owner" != "root" ]]; then
-                            # git-as-root leaves root-owned .git files that break
-                            # the owner's pushes until the next boot re-chown.
-                            echo -e "${RED}Refusing --pull as root over the ${_src_owner}-owned tree.${NC}"
-                            echo "Run 'powos update self --pull' as $_src_owner, then 'sudo powos update self'."
-                            return 1
-                        fi
-                        source "$POWOS_LIB/self.sh"
-                        self_safe_pull "$POWOS_SRC" || return 1
-                        shift
-                        ;;
-                    *)
-                        shift
-                        ;;
-                esac
-            done
-
-            # Use custom source if specified
-            [[ -n "$custom_src" ]] && POWOS_SRC="$custom_src"
-
-            if [[ ! -d "$POWOS_SRC" ]]; then
-                echo -e "${RED}PowOS source not found at: $POWOS_SRC${NC}"
-                echo ""
-                echo "Options:"
-                echo "  1. Specify source location:"
-                echo "     powos update self --from /mnt/disk/Projects/PowOS"
-                echo ""
-                echo "  2. The source should be bundled at /var/lib/powos/src"
-                echo "     (included in PowOS ISO builds)"
-                return 1
-            fi
-
-            echo "Source: $POWOS_SRC"
-
-            # Show what's changed (if git available)
-            if [[ -d "$POWOS_SRC/.git" ]]; then
-                local changes
-                # GIT_OPTIONAL_LOCKS=0: read-only status must not refresh the
-                # index — when run under sudo that writes a root-owned .git/index.
-                changes=$(cd "$POWOS_SRC" && GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | wc -l)
-                local commit
-                commit=$(cd "$POWOS_SRC" && GIT_OPTIONAL_LOCKS=0 git log -1 --format="%h %s" 2>/dev/null || echo "unknown")
-                echo "Commit: $commit"
-                [[ "$changes" -gt 0 ]] && echo "Uncommitted changes: $changes files"
-            fi
-            echo ""
-
-            # Writability pre-flight (installed composefs boxes). Two traps:
-            #  - merged systemd-sysext extensions sit as a READ-ONLY overlay on
-            #    /usr, so every cp below fails with EROFS → unmerge first,
-            #    re-merge after the install;
-            #  - the base /usr itself is read-only → engage the transient
-            #    bootc usr-overlay (same mechanism as 'powos self test';
-            #    reverts on reboot). bootc usr-overlay also silently drops
-            #    merged sysexts, which the re-merge below repairs.
-            source "$POWOS_LIB/self.sh"
-            source "$POWOS_LIB/common.sh"
-            sysext_unmerge_if_needed
-            if self_usr_ro; then
-                echo "/usr is read-only — engaging transient bootc usr-overlay (reverts on reboot)..."
-                if ! sudo bootc usr-overlay >/dev/null 2>&1 || self_usr_ro; then
-                    echo -e "${RED}/usr still read-only — cannot install scripts.${NC}"
-                    return 1
-                fi
-            fi
-
-            # Install every file the image ships, straight from the Containerfile
-            # staging COPY map (self_apply_manifest / self_copy_manifest in
-            # self.sh). This is the SINGLE SOURCE OF TRUTH: whatever the image
-            # COPYs, `update self` applies — no hand-kept list to drift out of
-            # sync (which is exactly how profile.d / konsole / MOTD became
-            # un-live-appliable). rsync's atomic rename makes replacing the
-            # running /usr/bin/powos and in-use lib/*.sh safe.
-            echo "Installing from Containerfile map..."
-            self_apply_manifest "$POWOS_SRC" "$POWOS_SRC/Containerfile"
-            # Units may have changed (systemd/*, config/etc/systemd, ...).
-            sudo systemctl daemon-reload 2>/dev/null || true
-
-            sysext_remerge_if_needed
-
-            echo ""
-            echo -e "${GREEN}✓ PowOS updated from source${NC}"
-            echo ""
-            echo "Changes applied immediately. You may want to:"
-            echo "  - Restart your shell for PATH changes"
-            echo "  - Run 'powos dev build-all' to rebuild overlays"
-            echo ""
-            echo "Tip: Edit source at $POWOS_SRC, then run 'powos update self'"
+            shift   # drop the verb; _update_self parses --from/--pull
+            _update_self "$@"
             ;;
 
         projects)
-            # NOT sysext overlays — this iterates PROJECTS_DIR and rebuilds dev
-            # PROJECTS. It was called "overlays", which is the name of a
-            # different subsystem entirely (`powos overlay`, sysext), so anyone
-            # reaching for it to rebuild an overlay silently rebuilt projects.
-            echo -e "${BOLD}${CYAN}Rebuilding Dev Projects with Latest Upstream${NC}"
-            echo "════════════════════════════════════════"
-            echo ""
-
-            if [[ ! -d "$PROJECTS_DIR" ]]; then
-                echo "No projects directory found"
-                return 0
-            fi
-
-            local updated=0
-            for proj_dir in "$PROJECTS_DIR"/*/; do
-                local name=$(basename "$proj_dir")
-                local conf="$proj_dir/project.conf"
-
-                [[ "$name" == "*" ]] && continue
-                [[ ! -f "$conf" ]] && continue
-
-                source "$conf"
-
-                # Only update if it's a fork with upstream
-                if [[ "${PROJECT_TYPE:-}" == "fork" ]] && [[ -n "${UPSTREAM_URL:-}" ]]; then
-                    echo "Updating $name..."
-                    if declare -f cmd_dev &>/dev/null; then
-                        cmd_dev update "$name" 2>/dev/null || echo "  Failed to update $name"
-                    fi
-                    ((updated++)) || true
-                fi
-            done
-
-            if [[ "$updated" -eq 0 ]]; then
-                echo "No forked projects to update"
-            else
-                echo ""
-                echo -e "${GREEN}✓ Updated $updated overlay(s)${NC}"
-            fi
+            _update_projects
             ;;
 
         *)
-            echo "Usage: powos update {check|os|powos|packages|projects|apply}"
-            echo ""
-            echo "  check     - Check for available updates"
-            echo "  os        - Update Bazzite base OS"
-            echo "  powos     - Update PowOS scripts"
-            echo "  packages  - Update installed packages"
-            echo "  overlays  - Rebuild overlays with latest upstream"
-            echo "  apply     - Apply all updates (os + packages)"
+            _update_usage
             ;;
     esac
 }
