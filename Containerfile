@@ -441,6 +441,57 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true
 
+# ── Languages: keep only what this build needs ─────────────────────
+#
+#   podman build --build-arg POWOS_LOCALES="en_US nb_NO de_DE" ...
+#
+# Empty ("") keeps everything. 700 languages ship by default, which is ~886M
+# across TWO trees that need completely different handling:
+#
+#   /usr/share/locale  663M  gettext .mo app translations, one dir per language.
+#                            A plain prune. Note both "nb" and "nb_NO" forms
+#                            exist, so the language prefix must be kept too or
+#                            translations vanish while the locale still works.
+#   /usr/lib/locale    223M  NOT per-language files — a single binary
+#                            locale-archive. `rm` does nothing useful here;
+#                            entries come out with localedef --delete-from-archive.
+#
+# C and POSIX are never removed: they are the fallback every program lands on,
+# and losing them breaks things in ways that look unrelated to locale.
+ARG POWOS_LOCALES="en_US nb_NO"
+RUN set -eu; \
+    if [ -z "${POWOS_LOCALES}" ]; then \
+      echo "locales: keeping all (POWOS_LOCALES empty)"; \
+    else \
+      before=$(( $(du -sm /usr/share/locale 2>/dev/null | cut -f1) \
+               + $(du -sm /usr/lib/locale   2>/dev/null | cut -f1) )); \
+      keep="C POSIX"; \
+      for l in ${POWOS_LOCALES}; do keep="$keep $l ${l%%_*}"; done; \
+      for d in /usr/share/locale/*/; do \
+        [ -d "$d" ] || continue; n=$(basename "$d"); \
+        case " $keep " in *" $n "*) ;; *) rm -rf "$d" ;; esac; \
+      done; \
+      if command -v localedef >/dev/null 2>&1; then \
+        for e in $(localedef --list-archive 2>/dev/null); do \
+          b=${e%%.*}; \
+          case " $keep " in \
+            *" $b "*) ;; \
+            *) localedef --delete-from-archive "$e" 2>/dev/null || true ;; \
+          esac; \
+        done; \
+      fi; \
+      for m in C POSIX; do \
+        [ -d "/usr/share/locale/$m" ] || true; \
+      done; \
+      after=$(( $(du -sm /usr/share/locale 2>/dev/null | cut -f1) \
+              + $(du -sm /usr/lib/locale   2>/dev/null | cut -f1) )); \
+      echo "locales: ${before}M -> ${after}M (kept: ${POWOS_LOCALES})"; \
+      for l in ${POWOS_LOCALES}; do \
+        [ -d "/usr/share/locale/${l}" ] || [ -d "/usr/share/locale/${l%%_*}" ] \
+          || echo "locales: note — no translation dir for '$l' (locale itself may still work)"; \
+      done; \
+    fi
+
 # ── DECK ONLY: firmware for hardware a Deck does not have ──────────
 #
 # linux-firmware ships blobs for every vendor and lands in every variant. The
