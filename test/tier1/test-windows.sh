@@ -1520,6 +1520,435 @@ out=$(cmd_windows --backend bogus status 2>&1); rc=$?
 check "invalid backend rejected"                   '[[ $rc -ne 0 ]] && echo "$out" | grep -q "Unknown WINDOWS_BACKEND"'
 rm -f "$CONF2"
 
+# ══════════════════════════════════════════════════════════════════
+echo "== Partition backend — status building blocks =="
+# ══════════════════════════════════════════════════════════════════
+# win_status and win_part_status had byte-identical firmware-entry and
+# snapshot-count blocks; they are one implementation now, shared by both
+# backends. These assert the CONTRACT (published global, count, return code),
+# not the wording — rewording a status line must not fail a test that is
+# really about which "next step" the operator is told to run.
+
+# Tool-presence shim. Tier-1 runs "on any machine with bash", so a `command -v`
+# check must NOT fall through to the host — this box has no qemu/sgdisk, and a
+# passthrough made guard tests pass for the wrong reason. WIN_TEST_MISSING lists
+# the tools a scenario wants absent; everything else is present.
+WIN_TEST_MISSING=""
+fake_command() {
+    if [[ "${1:-}" == -v ]]; then
+        case " $WIN_TEST_MISSING " in *" ${2:-} "*) return 1 ;; esac
+        return 0
+    fi
+    builtin command "$@"
+}
+
+PS_TMP=$(mktemp -d)
+setup_status_mocks() {
+    source "$LIB"
+    win_snapshot_dir() { echo "$PS_TMP/snaps"; }
+    win_find_boot_entry()  { echo "0003"; }
+    win_boot_entry_label() { echo "Windows Boot Manager"; }
+    efibootmgr() { echo "Boot0003* Windows Boot Manager"; }
+    # The block gates on `command -v efibootmgr` + /sys/firmware/efi; shadow
+    # `command` so the test does not depend on the host being UEFI.
+    WIN_TEST_MISSING=""
+    command() { fake_command "$@"; }
+}
+
+# ── win_status_boot_entry: publishes the id, never echoes it ──
+setup_status_mocks
+# NOTE: assert the published global from the CURRENT shell — a $(...) capture
+# would set it only in a subshell. (Same trap as the WIN_BACKEND tests below.)
+if [[ -d /sys/firmware/efi ]]; then
+    win_status_boot_entry >/dev/null; rc=$?
+    check "boot_entry publishes the id"        '[[ "$WIN_STATUS_ENTRY_ID" == "0003" ]]'
+    check "boot_entry returns 0"               '[[ $rc -eq 0 ]]'
+    setup_status_mocks; win_find_boot_entry() { return 1; }
+    win_status_boot_entry >/dev/null
+    check "boot_entry publishes empty on none" '[[ -z "$WIN_STATUS_ENTRY_ID" ]]'
+fi
+# No efibootmgr at all: the id must still be published (empty), because
+# win_status_next reads it and an UNSET value would be a bug under `set -u`.
+setup_status_mocks
+WIN_TEST_MISSING="efibootmgr"
+WIN_STATUS_ENTRY_ID="stale"
+win_status_boot_entry >/dev/null; rc=$?
+check "boot_entry clears a stale id"       '[[ -z "$WIN_STATUS_ENTRY_ID" && $rc -eq 0 ]]'
+
+# ── win_status_snapshots: the glob is the backend's, and it discriminates ──
+mkdir -p "$PS_TMP/snaps"
+: > "$PS_TMP/snaps/one.zst"; : > "$PS_TMP/snaps/two.zst"
+: > "$PS_TMP/snaps/a.ntfsclone.zst"
+setup_status_mocks
+out=$(win_status_snapshots '*.ntfsclone.zst')
+check "snapshots counts only the given glob" 'echo "$out" | grep -qE "Snapshots +: 1"'
+out=$(win_status_snapshots '*.zst')
+check "vhd glob counts every .zst"           'echo "$out" | grep -qE "Snapshots +: 3"'
+# No snapshot dir at all → 0, not an error.
+setup_status_mocks; win_snapshot_dir() { return 1; }
+out=$(win_status_snapshots '*.zst'); rc=$?
+check "snapshots: absent dir → 0, rc 0"      '[[ $rc -eq 0 ]] && echo "$out" | grep -qE "Snapshots +: 0"'
+
+# ── win_status_image: publishes which images exist ──
+IMG_D="$PS_TMP/img"; mkdir -p "$IMG_D"
+setup_status_mocks
+win_image_hibernated() { echo absent; }; win_image_in_use() { return 1; }
+win_status_image "$IMG_D" >/dev/null
+check "image: none → both flags 0" '[[ $WIN_STATUS_HAVE_CANON -eq 0 && $WIN_STATUS_HAVE_RAW -eq 0 ]]'
+: > "$IMG_D/windows.raw"
+win_status_image "$IMG_D" >/dev/null
+check "image: raw only → HAVE_RAW"  '[[ $WIN_STATUS_HAVE_CANON -eq 0 && $WIN_STATUS_HAVE_RAW -eq 1 ]]'
+: > "$IMG_D/windows.vhdx"
+win_status_image "$IMG_D" >/dev/null
+check "image: canonical → HAVE_CANON" '[[ $WIN_STATUS_HAVE_CANON -eq 1 ]]'
+# --fixed-vhd changes which file IS canonical.
+WIN_FIXED_VHD=1
+win_status_image "$IMG_D" >/dev/null
+check "image: --fixed-vhd looks for .vhd" '[[ $WIN_STATUS_HAVE_CANON -eq 0 ]]'
+WIN_FIXED_VHD=0
+
+# ── the "next step" advice is a pure function of the published facts ──
+setup_status_mocks
+WIN_STATUS_HAVE_CANON=0; WIN_STATUS_HAVE_RAW=0; WIN_STATUS_ENTRY_ID=""
+out=$(win_status_next)
+check "next: nothing installed → create"     'echo "$out" | grep -q "windows create"'
+WIN_STATUS_HAVE_RAW=1
+out=$(win_status_next)
+check "next: raw present → install"          'echo "$out" | grep -q "windows install"'
+WIN_STATUS_HAVE_CANON=1
+out=$(win_status_next)
+check "next: image but no entry → finalize"  'echo "$out" | grep -q "windows finalize"'
+WIN_STATUS_ENTRY_ID="0003"
+out=$(win_status_next)
+check "next: image + entry → ready"          'echo "$out" | grep -q "Ready"'
+
+# Partition backend's variant keys off the DEVICES, not the image flags.
+out=$(win_part_status_next "" "")
+check "part next: no partitions → create"    'echo "$out" | grep -q "windows create"'
+out=$(win_part_status_next /dev/sdz3 "")
+check "part next: ESP only → install"        'echo "$out" | grep -q "windows install"'
+WIN_STATUS_ENTRY_ID=""
+out=$(win_part_status_next /dev/sdz3 /dev/sdz4)
+check "part next: both, no entry → finalize" 'echo "$out" | grep -q "windows finalize"'
+WIN_STATUS_ENTRY_ID="0003"
+out=$(win_part_status_next /dev/sdz3 /dev/sdz4)
+check "part next: both + entry → ready"      'echo "$out" | grep -q "Ready"'
+
+# ══════════════════════════════════════════════════════════════════
+echo "== Partition backend — create guards =="
+# ══════════════════════════════════════════════════════════════════
+# Every refusal below stops a command that PARTITIONS A REAL DISK. They are
+# asserted on return code, because that is what makes win_part_create stop.
+
+setup_create_mocks() {
+    source "$LIB"
+    rec_reset
+    WIN_DRY_RUN=0
+    win_win_part()  { echo ""; }
+    win_esp_part()  { echo ""; }
+    win_part_disk() { echo /dev/sdz; }
+    win_is_block()  { return 0; }
+    lsblk() { case "$*" in *"-o TYPE"*) echo disk ;; *) echo "sdz 64G" ;; esac; }
+    win_part_free_block() { echo "10240 40960 30720"; }
+    win_part_settle() { rec "settle"; }
+    win_part_by_partlabel() { case "$2" in "$WIN_ESP_LABEL") echo /dev/sdz3 ;; *) echo /dev/sdz4 ;; esac; }
+    win_last_partition() { echo /dev/sdz9; }
+    win_verify_new_partition() { rec "verify $1"; return 0; }
+    win_set_part_type() { rec "settype $2 $3"; }
+    parted() { rec "parted $*"; return 0; }
+    mkfs.vfat() { rec "mkfs.vfat $*"; return 0; }
+    mkfs.ntfs() { rec "mkfs.ntfs $*"; return 0; }
+    WIN_TEST_MISSING=""
+    command() { fake_command "$@"; }
+}
+
+# An existing POWOS-WIN means a working Windows — creating again would orphan it.
+setup_create_mocks; win_win_part() { echo /dev/sdz4; }
+out=$(win_part_create_guard_existing 2>&1); rc=$?
+check "create refuses when POWOS-WIN exists" '[[ $rc -ne 0 ]]'
+setup_create_mocks; win_esp_part() { echo /dev/sdz3; }
+out=$(win_part_create_guard_existing 2>&1); rc=$?
+check "create refuses when only WIN-ESP exists" '[[ $rc -ne 0 ]]'
+setup_create_mocks
+win_part_create_guard_existing >/dev/null 2>&1
+check "create guard passes on a clean disk" '[[ $? -eq 0 ]]'
+
+# The disk must be a WHOLE disk — handing parted a partition writes a GPT inside it.
+setup_create_mocks; lsblk() { case "$*" in *"-o TYPE"*) echo part ;; *) echo x ;; esac; }
+win_part_create_preflight >/dev/null 2>&1
+check "preflight refuses a non-whole-disk" '[[ $? -ne 0 ]]'
+setup_create_mocks; win_part_disk() { return 1; }
+win_part_create_preflight >/dev/null 2>&1
+check "preflight refuses when no disk resolves" '[[ $? -ne 0 ]]'
+setup_create_mocks
+win_part_create_preflight >/dev/null 2>&1; rc=$?
+check "preflight publishes the disk" '[[ $rc -eq 0 && "$WIN_PC_DISK" == "/dev/sdz" ]]'
+# Missing tools refuse for a real run, but a --dry-run must still print a plan.
+setup_create_mocks; WIN_TEST_MISSING="mkfs.ntfs"
+win_part_create_preflight >/dev/null 2>&1
+check "preflight refuses a missing mkfs.ntfs" '[[ $? -ne 0 ]]'
+WIN_DRY_RUN=1
+win_part_create_preflight >/dev/null 2>&1
+check "dry-run tolerates missing tools"       '[[ $? -eq 0 ]]'
+WIN_DRY_RUN=0
+
+# Geometry: no tail, and a tail too small to hold ESP + a usable Windows.
+setup_create_mocks; win_part_free_block() { echo ""; }
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+check "geometry refuses with no free tail" '[[ $? -ne 0 ]]'
+setup_create_mocks; win_part_free_block() { echo "10240 11000 760"; }
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+check "geometry refuses a too-small tail"  '[[ $? -ne 0 ]]'
+# The boundary is ESP + the minimum Windows, exactly.
+setup_create_mocks; win_part_free_block() { echo "10240 18944 $(( WIN_ESP_SIZE_MIB + WIN_MIN_WIN_MIB ))"; }
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+check "geometry accepts exactly the minimum" '[[ $? -eq 0 ]]'
+setup_create_mocks; win_part_free_block() { echo "10240 18943 $(( WIN_ESP_SIZE_MIB + WIN_MIN_WIN_MIB - 1 ))"; }
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+check "geometry refuses one MiB under"       '[[ $? -ne 0 ]]'
+# ESP is carved from the START of the tail, Windows takes the rest.
+setup_create_mocks
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+check "geometry: ESP starts at the tail"    '[[ "$WIN_PC_ESP_START" == "10240" ]]'
+check "geometry: ESP is WIN_ESP_SIZE_MIB"   '[[ "$WIN_PC_ESP_END" == "10752.00" ]]'
+check "geometry: Windows follows the ESP"   '[[ "$WIN_PC_WIN_START" == "$WIN_PC_ESP_END" ]]'
+check "geometry: Windows runs to the end"   '[[ "$WIN_PC_WIN_END" == "40960" ]]'
+
+# ── win_part_create_resolve: the fallback safety gate ──
+# blkid is authoritative. "Last partition" is a fallback, and GPT numbering
+# gaps mean it can be a PRE-EXISTING partition — so the fallback, and ONLY the
+# fallback, must go through win_verify_new_partition before anyone formats it.
+setup_create_mocks
+dev=$(win_part_create_resolve /dev/sdz "$WIN_ESP_LABEL" 512 2>&1); rc=$?
+check "resolve: blkid hit returns the device" '[[ $rc -eq 0 && "$dev" == "/dev/sdz3" ]]'
+check "resolve: blkid hit SKIPS the verify"   '! rec_has "verify"'
+setup_create_mocks; win_part_by_partlabel() { echo ""; }
+dev=$(win_part_create_resolve /dev/sdz "$WIN_ESP_LABEL" 512 2>&1); rc=$?
+check "resolve: fallback returns last part"   '[[ $rc -eq 0 && "$dev" == "/dev/sdz9" ]]'
+check "resolve: fallback RUNS the verify"     'rec_has "verify /dev/sdz9"'
+# A failed verify must refuse — this is the guard that stops us formatting
+# somebody else's partition.
+setup_create_mocks; win_part_by_partlabel() { echo ""; }
+win_verify_new_partition() { rec "verify $1"; return 1; }
+win_part_create_resolve /dev/sdz "$WIN_ESP_LABEL" 512 >/dev/null 2>&1
+check "resolve: failed verify refuses"        '[[ $? -ne 0 ]]'
+# No device node at all, from either route.
+setup_create_mocks; win_part_by_partlabel() { echo ""; }; win_last_partition() { echo ""; }
+win_part_create_resolve /dev/sdz "$WIN_ESP_LABEL" 512 >/dev/null 2>&1
+check "resolve: no device node refuses"       '[[ $? -ne 0 ]]'
+# Resolved but not a block device.
+setup_create_mocks; win_is_block() { return 1; }
+win_part_create_resolve /dev/sdz "$WIN_ESP_LABEL" 512 >/dev/null 2>&1
+check "resolve: non-block device refuses"     '[[ $? -ne 0 ]]'
+
+# ── the two carve phases ──
+setup_create_mocks
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+rec_reset
+win_part_create_esp /dev/sdz >/dev/null 2>&1; rc=$?
+check "esp phase succeeds"            '[[ $rc -eq 0 ]]'
+check "esp phase publishes its device" '[[ "$WIN_PC_ESP_DEV" == "/dev/sdz3" ]]'
+check "esp phase formats FAT32"        'rec_has "mkfs.vfat.*WIN-ESP"'
+check "esp phase sets GPT type EF00"   'rec_has "settype /dev/sdz3 EF00"'
+check "esp phase creates before formatting" \
+    '[[ $(rec_line "parted") -lt $(rec_line "mkfs.vfat") ]]'
+# win_set_part_type is best-effort: it WARNS rather than failing, and must not
+# become the phase's return value (the caller does `|| return 1`).
+setup_create_mocks
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+win_set_part_type() { rec "settype"; return 7; }
+win_part_create_esp /dev/sdz >/dev/null 2>&1
+check "esp phase survives a warning set_part_type" '[[ $? -eq 0 ]]'
+setup_create_mocks
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+win_set_part_type() { rec "settype"; return 7; }
+win_part_create_win /dev/sdz >/dev/null 2>&1
+check "win phase survives a warning set_part_type" '[[ $? -eq 0 ]]'
+# A failed mkfs must refuse rather than leave an unformatted partition claimed.
+setup_create_mocks
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+mkfs.ntfs() { rec "mkfs.ntfs"; return 1; }
+win_part_create_win /dev/sdz >/dev/null 2>&1
+check "win phase refuses on mkfs failure" '[[ $? -ne 0 ]]'
+setup_create_mocks
+win_part_create_geometry /dev/sdz >/dev/null 2>&1
+parted() { rec "parted"; return 1; }
+win_part_create_esp /dev/sdz >/dev/null 2>&1
+check "esp phase refuses on parted failure" '[[ $? -ne 0 ]]'
+
+# Dry-run end to end: a full plan, and NOT ONE mutating call.
+setup_create_mocks
+reset_globals; WIN_DRY_RUN=1; WIN_ASSUME_YES=1
+win_require_root() { return 0; }
+rec_reset
+out=$(win_part_create 2>&1); rc=$?
+check "create --dry-run succeeds"        '[[ $rc -eq 0 ]]'
+check "create --dry-run changes NOTHING" 'rec_empty'
+check "create --dry-run shows both mkparts" \
+    'echo "$out" | grep -q "mkpart WIN-ESP" && echo "$out" | grep -q "mkpart POWOS-WIN"'
+# Declining the confirmation is a refusal, and must also change nothing.
+setup_create_mocks
+reset_globals; WIN_ASSUME_YES=0
+win_require_root() { return 0; }; win_confirm() { return 1; }
+rec_reset
+win_part_create >/dev/null 2>&1; rc=$?
+check "create refuses when unconfirmed"  '[[ $rc -ne 0 ]]'
+check "unconfirmed create changes NOTHING" 'rec_empty'
+
+# ══════════════════════════════════════════════════════════════════
+echo "== Partition backend — install guards =="
+# ══════════════════════════════════════════════════════════════════
+PI_TMP=$(mktemp -d)
+setup_pinstall_mocks() {
+    source "$LIB"
+    rec_reset
+    reset_globals
+    WIN_RUNDIR="$PI_TMP/run"; mkdir -p "$WIN_RUNDIR"
+    WIN_ISO="$PI_TMP/win11.iso"; : > "$WIN_ISO"
+    WIN_TD_UNATTEND_MNT=""
+    win_esp_part() { echo /dev/sdz3; }
+    win_win_part() { echo /dev/sdz4; }
+    win_win_mounted() { return 1; }
+    win_guard_image_free() { return 0; }
+    win_find_first_existing() { echo "$PI_TMP/OVMF.fd"; }
+    win_require_root() { return 0; }
+    win_is_block() { return 0; }
+    truncate()  { rec "truncate $*"; return 0; }
+    mkfs.vfat() { rec "mkfs.vfat $*"; return 0; }
+    mount()     { rec "mount $*"; return 0; }
+    umount()    { rec "umount $*"; return 0; }
+    WIN_TEST_MISSING=""
+    command() { fake_command "$@"; }
+}
+
+# The ISO is the user's; PowOS ships no Microsoft bits, so there is nothing
+# to fall back to and the refusal is the feature.
+setup_pinstall_mocks; WIN_ISO=""
+win_part_install_require_iso >/dev/null 2>&1
+check "install refuses without an ISO"   '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; WIN_ISO="$PI_TMP/absent.iso"
+win_part_install_require_iso >/dev/null 2>&1
+check "install refuses a missing ISO"    '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; WIN_ISO="$PI_TMP/absent.iso"; WIN_DRY_RUN=1
+win_part_install_require_iso >/dev/null 2>&1
+check "dry-run tolerates a missing ISO"  '[[ $? -eq 0 ]]'
+
+# Both partitions must exist, and NEITHER may be mounted or open — a host
+# rw-mount racing guest writes is the classic mounted-disk corruption.
+setup_pinstall_mocks; win_win_part() { echo ""; }
+win_part_install_resolve_parts >/dev/null 2>&1
+check "install refuses without POWOS-WIN" '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; win_esp_part() { echo ""; }
+win_part_install_resolve_parts >/dev/null 2>&1
+check "install refuses without WIN-ESP"   '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; win_win_mounted() { [[ "$1" == /dev/sdz4 ]]; }
+win_part_install_resolve_parts >/dev/null 2>&1
+check "install refuses a mounted POWOS-WIN" '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; win_win_mounted() { [[ "$1" == /dev/sdz3 ]]; }
+win_part_install_resolve_parts >/dev/null 2>&1
+check "install refuses a mounted WIN-ESP"   '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; win_guard_image_free() { [[ "$1" != /dev/sdz4 ]]; }
+win_part_install_resolve_parts >/dev/null 2>&1
+check "install refuses a busy POWOS-WIN"    '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; win_guard_image_free() { [[ "$1" != /dev/sdz3 ]]; }
+win_part_install_resolve_parts >/dev/null 2>&1
+check "install refuses a busy WIN-ESP"      '[[ $? -ne 0 ]]'
+setup_pinstall_mocks
+win_part_install_resolve_parts >/dev/null 2>&1; rc=$?
+check "resolve_parts publishes both devices" \
+    '[[ $rc -eq 0 && "$WIN_PI_WIN_DEV" == "/dev/sdz4" && "$WIN_PI_ESP_DEV" == "/dev/sdz3" ]]'
+
+# Firmware: a real run refuses without OVMF; a dry-run substitutes a
+# placeholder so the plan prints on a machine that will never run it.
+setup_pinstall_mocks; win_find_first_existing() { return 1; }
+win_part_install_firmware >/dev/null 2>&1
+check "install refuses without OVMF"       '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; win_find_first_existing() { return 1; }; WIN_DRY_RUN=1
+win_part_install_firmware >/dev/null 2>&1; rc=$?
+check "dry-run substitutes OVMF placeholder" \
+    '[[ $rc -eq 0 && "$WIN_PI_OVMF_CODE" == "<OVMF_CODE.fd>" ]]'
+setup_pinstall_mocks
+win_part_install_firmware >/dev/null 2>&1
+check "firmware publishes a per-run NVRAM copy" \
+    '[[ "$WIN_PI_OVMF_VARS" == "$WIN_RUNDIR/part_install_VARS.fd" ]]'
+
+# Preflight: the tool list depends on the mode. --interactive builds no
+# unattend volume, so it must not demand mkfs.vfat/truncate.
+setup_pinstall_mocks; WIN_PI_WIN_DEV=/dev/sdz4; WIN_PI_ESP_DEV=/dev/sdz3
+WIN_TEST_MISSING="mkfs.vfat"
+win_part_install_preflight >/dev/null 2>&1
+check "preflight refuses missing mkfs.vfat" '[[ $? -ne 0 ]]'
+WIN_INTERACTIVE=1
+win_part_install_preflight >/dev/null 2>&1
+check "--interactive does not need mkfs.vfat" '[[ $? -eq 0 ]]'
+WIN_INTERACTIVE=0
+setup_pinstall_mocks; WIN_PI_WIN_DEV=/dev/sdz4; WIN_PI_ESP_DEV=/dev/sdz3
+WIN_TEST_MISSING="qemu-system-x86_64"
+win_part_install_preflight >/dev/null 2>&1
+check "preflight refuses missing qemu"      '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; WIN_PI_WIN_DEV=/dev/sdz4; WIN_PI_ESP_DEV=/dev/sdz3
+win_is_block() { return 1; }
+win_part_install_preflight >/dev/null 2>&1
+check "preflight refuses non-block devices" '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; win_require_root() { return 1; }
+win_part_install_preflight >/dev/null 2>&1
+check "preflight refuses without root"      '[[ $? -ne 0 ]]'
+
+# ── the unattend volume, and the teardown HAND-OFF ──
+# win_part_install owns the EXIT trap, so the phase must NOT clear the trap or
+# run the teardown itself: on failure it returns 1 and leaves
+# WIN_TD_UNATTEND_MNT pointing at the half-built loop mount for the caller to
+# unwind. A phase that "helpfully" cleaned up would leave the caller's
+# teardown with nothing to do and the mount leaked on the INT/TERM path.
+setup_pinstall_mocks
+win_part_install_make_unattend >/dev/null 2>&1; rc=$?
+check "make_unattend succeeds"              '[[ $rc -eq 0 ]]'
+check "make_unattend publishes the image"   '[[ "$WIN_PI_UNATTEND_IMG" == "$WIN_RUNDIR/unattend.img" ]]'
+check "make_unattend clears mnt on success" '[[ -z "$WIN_TD_UNATTEND_MNT" ]]'
+check "make_unattend builds then unmounts" \
+    '[[ $(rec_line "truncate") -lt $(rec_line "mount -o loop") ]] && [[ $(rec_line "mount -o loop") -lt $(rec_line "umount") ]]'
+setup_pinstall_mocks; WIN_INTERACTIVE=1
+win_part_install_make_unattend >/dev/null 2>&1; rc=$?
+check "--interactive builds no unattend"    '[[ $rc -eq 0 && -z "$WIN_PI_UNATTEND_IMG" ]] && rec_empty'
+setup_pinstall_mocks; mount() { rec "mount $*"; return 1; }
+win_part_install_make_unattend >/dev/null 2>&1; rc=$?
+check "make_unattend refuses on mount failure" '[[ $rc -ne 0 ]]'
+check "make_unattend HANDS OFF the mount state" '[[ -n "$WIN_TD_UNATTEND_MNT" ]]'
+setup_pinstall_mocks; truncate() { rec "truncate $*"; return 1; }
+win_part_install_make_unattend >/dev/null 2>&1
+check "make_unattend refuses on truncate failure" '[[ $? -ne 0 ]]'
+setup_pinstall_mocks; mkfs.vfat() { rec "mkfs.vfat $*"; return 1; }
+win_part_install_make_unattend >/dev/null 2>&1
+check "make_unattend refuses on mkfs failure"     '[[ $? -ne 0 ]]'
+
+# End to end: the caller unwinds what the phase handed it.
+setup_pinstall_mocks; WIN_ASSUME_YES=1
+mount() { rec "mount $*"; return 1; }
+qemu-system-x86_64() { rec "qemu"; return 0; }
+win_part_install >/dev/null 2>&1; rc=$?
+check "install fails when the unattend volume fails" '[[ $rc -ne 0 ]]'
+check "a failed unattend NEVER launches qemu"        '! rec_has "qemu"'
+check "the caller ran the teardown"                  '[[ -z "$WIN_TD_UNATTEND_MNT" ]]'
+
+# Dry-run end to end: full plan, zero mutating calls, no root demanded.
+setup_pinstall_mocks; WIN_DRY_RUN=1; WIN_ASSUME_YES=1
+win_require_root() { rec "ROOT-DEMANDED"; return 1; }
+qemu-system-x86_64() { rec "qemu"; return 0; }
+out=$(win_part_install 2>&1); rc=$?
+check "install --dry-run succeeds"          '[[ $rc -eq 0 ]]'
+check "install --dry-run changes NOTHING"   'rec_empty'
+check "install --dry-run never demands root" '! rec_has "ROOT-DEMANDED"'
+check "install --dry-run shows the qemu shape" 'echo "$out" | grep -q "qemu-system-x86_64"'
+# Declining the confirmation must not launch anything.
+setup_pinstall_mocks; WIN_ASSUME_YES=0
+win_confirm() { return 1; }
+qemu-system-x86_64() { rec "qemu"; return 0; }
+win_part_install >/dev/null 2>&1; rc=$?
+check "install refuses when unconfirmed"    '[[ $rc -ne 0 ]]'
+check "unconfirmed install never runs qemu" '! rec_has "qemu"'
+
+rm -rf "$PS_TMP" "$PI_TMP"
+
 # ── Summary ───────────────────────────────────────────────────────
 rm -f "$REC"
 echo

@@ -2415,27 +2415,58 @@ win_slim_cmd() {
 # ══════════════════════════════════════════════════════════════════
 #  status
 # ══════════════════════════════════════════════════════════════════
-win_status() {
-    win_step "Windows on PowOS — status (virtual-disk file design)"
+# ── Status building blocks (shared by BOTH backends) ──────────────
+# The firmware-entry and snapshot-count blocks were byte-identical in
+# win_status and win_part_status; they are one implementation now. Both
+# PRINT, so neither can be a command substitution — the entry id is
+# published in WIN_STATUS_ENTRY_ID instead (the "next step" logic reads it).
 
-    local games dir raw canon
-    games=$(win_games_mount 2>/dev/null || true)
-    echo
-    if [[ -z "$games" ]]; then
-        echo -e "  POWOS-GAMES : ${WIN_YELLOW}not mounted${WIN_NC} — the image lives on it"
-        echo "                (mount it:  powos games mount)"
-        echo
-        echo -e "  Next step   : mount POWOS-GAMES, then ${WIN_BOLD}powos windows status${WIN_NC}"
-        return 0
+# Firmware entry (efibootmgr scan; absent on non-UEFI / test machines).
+# Publishes the entry id (empty = none found) in WIN_STATUS_ENTRY_ID.
+win_status_boot_entry() {
+    WIN_STATUS_ENTRY_ID=""
+    local efi_out=""
+    if command -v efibootmgr &>/dev/null && [[ -d /sys/firmware/efi ]]; then
+        efi_out=$(efibootmgr 2>/dev/null || true)
+        WIN_STATUS_ENTRY_ID=$(win_find_boot_entry "windows|microsoft" "$efi_out" || true)
+        if [[ -n "$WIN_STATUS_ENTRY_ID" ]]; then
+            echo -e "  Boot entry  : ${WIN_GREEN}Boot${WIN_STATUS_ENTRY_ID}${WIN_NC} ($(win_boot_entry_label "$WIN_STATUS_ENTRY_ID" "$efi_out" || echo Windows))"
+        else
+            echo -e "  Boot entry  : ${WIN_YELLOW}none${WIN_NC} (efibootmgr found no Windows entry)"
+        fi
+    else
+        echo -e "  Boot entry  : unknown ${WIN_DIM}(no UEFI/efibootmgr here)${WIN_NC}"
     fi
-    echo "  POWOS-GAMES : mounted at $games"
-    dir="$games/$WIN_IMAGE_SUBDIR"
-    raw="$dir/windows.raw"; canon="$dir/windows.$(win_image_ext)"
+    return 0
+}
 
-    local have_canon=0 have_raw=0
-    [[ -e "$canon" ]] && have_canon=1
-    [[ -e "$raw" ]] && have_raw=1
-    if [[ $have_canon -eq 1 ]]; then
+# Snapshot count on POWOS-DATA. $1 = the glob the backend stores under
+# ('*.zst' for vhd, '*.ntfsclone.zst' for the partition backend) — deliberately
+# UNQUOTED at the loop so it expands.
+win_status_snapshots() {
+    local pat="${1:?}" sdir count=0 f
+    sdir=$(win_snapshot_dir 2>/dev/null || true)
+    if [[ -n "$sdir" && -d "$sdir" ]]; then
+        # shellcheck disable=SC2231
+        for f in "$sdir"/$pat; do [[ -e "$f" ]] && count=$((count+1)); done
+        echo "  Snapshots   : $count ($sdir)"
+    else
+        echo "  Snapshots   : 0 (POWOS-DATA unmounted or none taken)"
+    fi
+    return 0
+}
+
+# The image line for the vhd backend: canonical VHD(X), a pending raw, or
+# nothing — plus the in-use and hibernation detail the canonical case carries.
+# $1 = the image directory. Publishes WIN_STATUS_HAVE_CANON / WIN_STATUS_HAVE_RAW
+# (the "next step" logic reads both).
+win_status_image() {
+    local dir="${1:?}" raw canon
+    raw="$dir/windows.raw"; canon="$dir/windows.$(win_image_ext)"
+    WIN_STATUS_HAVE_CANON=0; WIN_STATUS_HAVE_RAW=0
+    [[ -e "$canon" ]] && WIN_STATUS_HAVE_CANON=1
+    [[ -e "$raw" ]] && WIN_STATUS_HAVE_RAW=1
+    if [[ $WIN_STATUS_HAVE_CANON -eq 1 ]]; then
         echo -e "  Image       : ${WIN_GREEN}present${WIN_NC}  $canon"
         local used=""
         used=$(du -h "$canon" 2>/dev/null | while read -r a _; do echo "$a"; break; done)
@@ -2451,52 +2482,52 @@ win_status() {
             *)       echo -e "  Hibernated  : unknown ${WIN_DIM}(root + qemu-nbd needed to probe;${WIN_NC}"
                      echo -e "                ${WIN_DIM}metal boots always cold-boot regardless)${WIN_NC}" ;;
         esac
-    elif [[ $have_raw -eq 1 ]]; then
+    elif [[ $WIN_STATUS_HAVE_RAW -eq 1 ]]; then
         echo -e "  Image       : ${WIN_YELLOW}raw install image${WIN_NC}  $raw"
         echo "                (conversion pending: powos windows finalize)"
     else
         echo -e "  Image       : ${WIN_YELLOW}none${WIN_NC}"
     fi
+    return 0
+}
 
-    # Firmware entry (efibootmgr scan; absent on non-UEFI / test machines).
-    local entry_id="" efi_out=""
-    if command -v efibootmgr &>/dev/null && [[ -d /sys/firmware/efi ]]; then
-        efi_out=$(efibootmgr 2>/dev/null || true)
-        entry_id=$(win_find_boot_entry "windows|microsoft" "$efi_out" || true)
-        if [[ -n "$entry_id" ]]; then
-            echo -e "  Boot entry  : ${WIN_GREEN}Boot${entry_id}${WIN_NC} ($(win_boot_entry_label "$entry_id" "$efi_out" || echo Windows))"
-        else
-            echo -e "  Boot entry  : ${WIN_YELLOW}none${WIN_NC} (efibootmgr found no Windows entry)"
-        fi
-    else
-        echo -e "  Boot entry  : unknown ${WIN_DIM}(no UEFI/efibootmgr here)${WIN_NC}"
-    fi
-
-    # Snapshots
-    local sdir count=0 f
-    sdir=$(win_snapshot_dir 2>/dev/null || true)
-    if [[ -n "$sdir" && -d "$sdir" ]]; then
-        for f in "$sdir"/*.zst; do [[ -e "$f" ]] && count=$((count+1)); done
-        echo "  Snapshots   : $count ($sdir)"
-    else
-        echo "  Snapshots   : 0 (POWOS-DATA unmounted or none taken)"
-    fi
-
-    # What comes next?
+# What comes next, for the vhd backend. Reads the three published facts.
+win_status_next() {
     echo
-    if [[ $have_canon -eq 0 && $have_raw -eq 0 ]]; then
+    if [[ ${WIN_STATUS_HAVE_CANON:-0} -eq 0 && ${WIN_STATUS_HAVE_RAW:-0} -eq 0 ]]; then
         echo -e "  Next step   : ${WIN_BOLD}sudo powos windows create${WIN_NC}"
         echo -e "                need an ISO?  ${WIN_BOLD}sudo powos windows fetch-iso [--slim]${WIN_NC}"
-    elif [[ $have_canon -eq 0 ]]; then
+    elif [[ ${WIN_STATUS_HAVE_CANON:-0} -eq 0 ]]; then
         echo -e "  Next step   : ${WIN_BOLD}sudo powos windows install --iso <path>${WIN_NC}"
         echo -e "                (or ${WIN_BOLD}--fetch${WIN_NC} to download the official ISO first)"
         echo -e "                then  ${WIN_BOLD}sudo powos windows finalize${WIN_NC}"
-    elif [[ -z "$entry_id" ]]; then
+    elif [[ -z "${WIN_STATUS_ENTRY_ID:-}" ]]; then
         echo -e "  Next step   : ${WIN_BOLD}sudo powos windows finalize${WIN_NC}  (firmware entry missing)"
     else
         echo -e "  Ready       : metal (cold boot):  ${WIN_BOLD}sudo powos windows${WIN_NC}"
         echo -e "                same instance, VM:  ${WIN_BOLD}sudo powos windows vm${WIN_NC}"
     fi
+    return 0
+}
+
+win_status() {
+    win_step "Windows on PowOS — status (virtual-disk file design)"
+
+    local games
+    games=$(win_games_mount 2>/dev/null || true)
+    echo
+    if [[ -z "$games" ]]; then
+        echo -e "  POWOS-GAMES : ${WIN_YELLOW}not mounted${WIN_NC} — the image lives on it"
+        echo "                (mount it:  powos games mount)"
+        echo
+        echo -e "  Next step   : mount POWOS-GAMES, then ${WIN_BOLD}powos windows status${WIN_NC}"
+        return 0
+    fi
+    echo "  POWOS-GAMES : mounted at $games"
+    win_status_image "$games/$WIN_IMAGE_SUBDIR"
+    win_status_boot_entry
+    win_status_snapshots '*.zst'
+    win_status_next
     return 0
 }
 
@@ -2795,14 +2826,13 @@ win_ntfsclone_restore() {
 # ══════════════════════════════════════════════════════════════════
 #  partition: create — carve WIN-ESP + POWOS-WIN from the unallocated tail
 # ══════════════════════════════════════════════════════════════════
-win_part_create() {
-    win_step "Create the Windows partitions — WIN-ESP + POWOS-WIN (EXPERIMENTAL — TODO(hw))"
-
-    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
-        win_require_root "create" || return 1
-    fi
-
-    # Exactly one of each in the world (resolved by label everywhere).
+# ── create phases ─────────────────────────────────────────────────
+# Exactly one WIN-ESP and one POWOS-WIN exist in the world (everything else
+# resolves them BY LABEL, so a second pair would be ambiguous rather than
+# merely untidy). Both refusals are load-bearing: the first stops a reinstall
+# silently orphaning a working Windows, the second catches a half-finished
+# create.
+win_part_create_guard_existing() {
     local existing
     existing=$(win_win_part || true)
     if [[ -n "$existing" ]]; then
@@ -2817,15 +2847,21 @@ win_part_create() {
         win_err "Finish the install:  powos windows install --iso <path>"
         return 1
     fi
+    return 0
+}
 
-    local disk
-    disk=$(win_part_disk) || {
+# The PowOS-owned disk and the tools needed to carve it. The disk must be a
+# WHOLE disk — handing parted a partition would write a GPT inside it. The
+# tool check is skipped under --dry-run so a plan can be printed anywhere.
+# Publishes the disk in WIN_PC_DISK.
+win_part_create_preflight() {
+    WIN_PC_DISK=$(win_part_disk) || {
         win_err "Could not determine the PowOS-owned disk (no POWOS-DATA, root is an overlay)."
         return 1
     }
-    if ! win_is_block "$disk" \
-       || [[ "$(lsblk -dn -o TYPE "$disk" 2>/dev/null | head -1 | tr -d '[:space:]')" != "disk" ]]; then
-        win_err "$disk is not a whole-disk block device."
+    if ! win_is_block "$WIN_PC_DISK" \
+       || [[ "$(lsblk -dn -o TYPE "$WIN_PC_DISK" 2>/dev/null | head -1 | tr -d '[:space:]')" != "disk" ]]; then
+        win_err "$WIN_PC_DISK is not a whole-disk block device."
         return 1
     fi
 
@@ -2837,11 +2873,17 @@ win_part_create() {
         win_err "Missing required tools: ${missing[*]}  (mkfs.ntfs ships in ntfsprogs/ntfs-3g)."
         return 1
     fi
+    return 0
+}
 
-    # The unallocated TAIL reserved at burn time (install-to-usb.sh --windows-gb).
-    local fb_start fb_end fb_size
-    read -r fb_start fb_end fb_size <<< "$(win_part_free_block "$disk")"
-    if [[ -z "$fb_start" || -z "$fb_end" ]]; then
+# Where the two partitions go: the unallocated TAIL reserved at burn time
+# (install-to-usb.sh --windows-gb). Refuses if there is none, or if it cannot
+# hold WIN-ESP plus a usable POWOS-WIN. $1 = disk. Publishes the geometry in
+# WIN_PC_* (fractional MiB offsets are handed to parted VERBATIM).
+win_part_create_geometry() {
+    local disk="${1:?}"
+    read -r WIN_PC_FB_START WIN_PC_FB_END WIN_PC_FB_SIZE <<< "$(win_part_free_block "$disk")"
+    if [[ -z "$WIN_PC_FB_START" || -z "$WIN_PC_FB_END" ]]; then
         win_err "No unallocated free space on $disk for the Windows partitions."
         win_err "The 'partition' backend carves WIN-ESP + POWOS-WIN from a reserved tail."
         win_err "Re-burn the USB reserving one:"
@@ -2850,24 +2892,29 @@ win_part_create() {
         return 1
     fi
     local need_mib=$(( WIN_ESP_SIZE_MIB + WIN_MIN_WIN_MIB ))
-    if (( fb_size < need_mib )); then
-        win_err "Free block is only ${fb_size}MiB — need >= ${need_mib}MiB for WIN-ESP"
+    if (( WIN_PC_FB_SIZE < need_mib )); then
+        win_err "Free block is only ${WIN_PC_FB_SIZE}MiB — need >= ${need_mib}MiB for WIN-ESP"
         win_err "(512MiB) plus a usable POWOS-WIN. Re-burn with a bigger --windows-gb."
         return 1
     fi
 
     # WIN-ESP first (512MiB from the block start), POWOS-WIN the rest to the end.
     # LC_ALL=C: parted needs a period decimal separator, never a comma.
-    local esp_start="$fb_start" esp_end win_start win_end win_size_mib
-    esp_end=$(LC_ALL=C awk -v s="$fb_start" -v z="$WIN_ESP_SIZE_MIB" 'BEGIN{printf "%.2f", s + z}')
-    win_start="$esp_end"; win_end="$fb_end"
-    win_size_mib=$(LC_ALL=C awk -v s="$win_start" -v e="$win_end" 'BEGIN{printf "%d", e - s}')
+    WIN_PC_ESP_START="$WIN_PC_FB_START"
+    WIN_PC_ESP_END=$(LC_ALL=C awk -v s="$WIN_PC_FB_START" -v z="$WIN_ESP_SIZE_MIB" 'BEGIN{printf "%.2f", s + z}')
+    WIN_PC_WIN_START="$WIN_PC_ESP_END"; WIN_PC_WIN_END="$WIN_PC_FB_END"
+    WIN_PC_WIN_SIZE_MIB=$(LC_ALL=C awk -v s="$WIN_PC_WIN_START" -v e="$WIN_PC_WIN_END" 'BEGIN{printf "%d", e - s}')
+    return 0
+}
 
+# Pure output: the plan, and the exposure contract it is about to honour.
+win_part_create_print_plan() {
+    local disk="${1:?}"
     win_step "Plan"
     echo "  Disk:       $disk"
-    echo "  Free tail:  ${fb_start} -> ${fb_end} MiB (${fb_size} MiB)"
-    echo "  WIN-ESP:    ${esp_start} -> ${esp_end} MiB (512MiB, FAT32, GPT type EF00, label $WIN_ESP_LABEL)"
-    echo "  POWOS-WIN:  ${win_start} -> ${win_end} MiB (${win_size_mib} MiB, NTFS, GPT type 0700, label $WIN_WIN_LABEL)"
+    echo "  Free tail:  ${WIN_PC_FB_START} -> ${WIN_PC_FB_END} MiB (${WIN_PC_FB_SIZE} MiB)"
+    echo "  WIN-ESP:    ${WIN_PC_ESP_START} -> ${WIN_PC_ESP_END} MiB (512MiB, FAT32, GPT type EF00, label $WIN_ESP_LABEL)"
+    echo "  POWOS-WIN:  ${WIN_PC_WIN_START} -> ${WIN_PC_WIN_END} MiB (${WIN_PC_WIN_SIZE_MIB} MiB, NTFS, GPT type 0700, label $WIN_WIN_LABEL)"
     echo "  Exposure:   EF00 + 0700 are Windows-visible BY DESIGN. Every PowOS/Linux"
     echo "              partition keeps its type (8300 = letterless, invisible) — this"
     echo "              command only creates in free space and NEVER touches them."
@@ -2875,72 +2922,110 @@ win_part_create() {
     echo -e "  ${WIN_DIM}Current layout:${WIN_NC}"
     lsblk -o NAME,SIZE,FSTYPE,LABEL "$disk" 2>/dev/null | awk '{print "    " $0}'
     echo
+    return 0
+}
 
-    win_confirm "Carve WIN-ESP + POWOS-WIN on $disk?" || {
-        win_log "Aborted. Nothing was changed."
-        return 1
-    }
+# Dry-run: print the exact command sequence, change NOTHING (resolving live
+# devices here would point at existing partitions — mirror games/create).
+win_part_create_dry_run() {
+    local disk="${1:?}"
+    win_run_step "create WIN-ESP (${WIN_PC_ESP_START}MiB -> ${WIN_PC_ESP_END}MiB)" \
+        parted -s "$disk" mkpart "$WIN_ESP_LABEL" fat32 "${WIN_PC_ESP_START}MiB" "${WIN_PC_ESP_END}MiB"
+    win_run_step "format FAT32 (label $WIN_ESP_LABEL)" \
+        mkfs.vfat -F 32 -n "$WIN_ESP_LABEL" "<new WIN-ESP>"
+    win_run_step "set GPT type EF00 (EFI System — visible to Windows)" \
+        sgdisk -t "N:EF00" "$disk"
+    win_run_step "create POWOS-WIN (${WIN_PC_WIN_START}MiB -> ${WIN_PC_WIN_END}MiB)" \
+        parted -s "$disk" mkpart "$WIN_WIN_LABEL" ntfs "${WIN_PC_WIN_START}MiB" "${WIN_PC_WIN_END}MiB"
+    win_run_step "format NTFS (label $WIN_WIN_LABEL)" \
+        mkfs.ntfs -f -L "$WIN_WIN_LABEL" "<new POWOS-WIN>"
+    win_run_step "set GPT type 0700 (Microsoft basic data — visible to Windows)" \
+        sgdisk -t "N:0700" "$disk"
+    win_warn "dry-run complete — nothing was changed."
+    return 0
+}
 
-    # Dry-run: print the exact command sequence, change NOTHING (resolving live
-    # devices here would point at existing partitions — mirror games/create).
-    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
-        win_run_step "create WIN-ESP (${esp_start}MiB -> ${esp_end}MiB)" \
-            parted -s "$disk" mkpart "$WIN_ESP_LABEL" fat32 "${esp_start}MiB" "${esp_end}MiB"
-        win_run_step "format FAT32 (label $WIN_ESP_LABEL)" \
-            mkfs.vfat -F 32 -n "$WIN_ESP_LABEL" "<new WIN-ESP>"
-        win_run_step "set GPT type EF00 (EFI System — visible to Windows)" \
-            sgdisk -t "N:EF00" "$disk"
-        win_run_step "create POWOS-WIN (${win_start}MiB -> ${win_end}MiB)" \
-            parted -s "$disk" mkpart "$WIN_WIN_LABEL" ntfs "${win_start}MiB" "${win_end}MiB"
-        win_run_step "format NTFS (label $WIN_WIN_LABEL)" \
-            mkfs.ntfs -f -L "$WIN_WIN_LABEL" "<new POWOS-WIN>"
-        win_run_step "set GPT type 0700 (Microsoft basic data — visible to Windows)" \
-            sgdisk -t "N:0700" "$disk"
-        win_warn "dry-run complete — nothing was changed."
-        return 0
+# Find the partition parted just created on $1 with GPT partlabel $2, and hand
+# back its device node. blkid is authoritative; "last partition" is a fallback
+# for when it has not caught up, and is the DANGEROUS one — GPT numbering gaps
+# mean the last row can be a PRE-EXISTING partition, so the fallback (and ONLY
+# the fallback) goes through win_verify_new_partition against the expected size
+# $3. Echoes the device; every refusal writes to stderr, so the caller's
+# command substitution never swallows one.
+win_part_create_resolve() {
+    local disk="${1:?}" label="${2:?}" expect_mib="${3:?}" dev used_fb=0
+    dev=$(win_part_by_partlabel "$disk" "$label")
+    if [[ -z "$dev" ]]; then dev=$(win_last_partition "$disk"); used_fb=1; fi
+    if [[ -z "$dev" ]] || ! win_is_block "$dev"; then
+        win_err "$label created but its device node was not found."; return 1
     fi
+    (( used_fb == 1 )) && { win_verify_new_partition "$dev" "$expect_mib" || return 1; }
+    echo "$dev"
+}
 
-    # ── WIN-ESP ──
-    win_run_step "create WIN-ESP (${esp_start}MiB -> ${esp_end}MiB)" \
-        parted -s "$disk" mkpart "$WIN_ESP_LABEL" fat32 "${esp_start}MiB" "${esp_end}MiB" || {
+# ── WIN-ESP ──  Publishes the device in WIN_PC_ESP_DEV.
+win_part_create_esp() {
+    local disk="${1:?}"
+    win_run_step "create WIN-ESP (${WIN_PC_ESP_START}MiB -> ${WIN_PC_ESP_END}MiB)" \
+        parted -s "$disk" mkpart "$WIN_ESP_LABEL" fat32 "${WIN_PC_ESP_START}MiB" "${WIN_PC_ESP_END}MiB" || {
         win_err "parted mkpart WIN-ESP failed — nothing was formatted."; return 1
     }
     win_part_settle "$disk"
-    local esp_dev used_fb=0
-    esp_dev=$(win_part_by_partlabel "$disk" "$WIN_ESP_LABEL")
-    if [[ -z "$esp_dev" ]]; then esp_dev=$(win_last_partition "$disk"); used_fb=1; fi
-    if [[ -z "$esp_dev" ]] || ! win_is_block "$esp_dev"; then
-        win_err "WIN-ESP created but its device node was not found."; return 1
-    fi
-    (( used_fb == 1 )) && { win_verify_new_partition "$esp_dev" "$WIN_ESP_SIZE_MIB" || return 1; }
+    WIN_PC_ESP_DEV=$(win_part_create_resolve "$disk" "$WIN_ESP_LABEL" "$WIN_ESP_SIZE_MIB") || return 1
     win_run_step "format FAT32 (label $WIN_ESP_LABEL)" \
-        mkfs.vfat -F 32 -n "$WIN_ESP_LABEL" "$esp_dev" || {
-        win_err "mkfs.vfat failed — format $esp_dev manually."; return 1
+        mkfs.vfat -F 32 -n "$WIN_ESP_LABEL" "$WIN_PC_ESP_DEV" || {
+        win_err "mkfs.vfat failed — format $WIN_PC_ESP_DEV manually."; return 1
     }
-    win_set_part_type "$disk" "$esp_dev" EF00 "EFI System — visible to Windows"
+    win_set_part_type "$disk" "$WIN_PC_ESP_DEV" EF00 "EFI System — visible to Windows"
+    # Explicit: win_set_part_type is best-effort (it WARNS rather than fails),
+    # and must not become this phase's return value.
+    return 0
+}
 
-    # ── POWOS-WIN ──
-    win_run_step "create POWOS-WIN (${win_start}MiB -> ${win_end}MiB)" \
-        parted -s "$disk" mkpart "$WIN_WIN_LABEL" ntfs "${win_start}MiB" "${win_end}MiB" || {
+# ── POWOS-WIN ──  Publishes the device in WIN_PC_WIN_DEV.
+win_part_create_win() {
+    local disk="${1:?}"
+    win_run_step "create POWOS-WIN (${WIN_PC_WIN_START}MiB -> ${WIN_PC_WIN_END}MiB)" \
+        parted -s "$disk" mkpart "$WIN_WIN_LABEL" ntfs "${WIN_PC_WIN_START}MiB" "${WIN_PC_WIN_END}MiB" || {
         win_err "parted mkpart POWOS-WIN failed. WIN-ESP was created; re-run once you"
         win_err "have made room, or delete WIN-ESP and start over."; return 1
     }
     win_part_settle "$disk"
-    local win_dev used_fb2=0
-    win_dev=$(win_part_by_partlabel "$disk" "$WIN_WIN_LABEL")
-    if [[ -z "$win_dev" ]]; then win_dev=$(win_last_partition "$disk"); used_fb2=1; fi
-    if [[ -z "$win_dev" ]] || ! win_is_block "$win_dev"; then
-        win_err "POWOS-WIN created but its device node was not found."; return 1
-    fi
-    (( used_fb2 == 1 )) && { win_verify_new_partition "$win_dev" "$win_size_mib" || return 1; }
+    WIN_PC_WIN_DEV=$(win_part_create_resolve "$disk" "$WIN_WIN_LABEL" "$WIN_PC_WIN_SIZE_MIB") || return 1
     win_run_step "format NTFS (label $WIN_WIN_LABEL)" \
-        mkfs.ntfs -f -L "$WIN_WIN_LABEL" "$win_dev" || {
-        win_err "mkfs.ntfs failed — format $win_dev manually."; return 1
+        mkfs.ntfs -f -L "$WIN_WIN_LABEL" "$WIN_PC_WIN_DEV" || {
+        win_err "mkfs.ntfs failed — format $WIN_PC_WIN_DEV manually."; return 1
     }
-    win_set_part_type "$disk" "$win_dev" 0700 "Microsoft basic data — visible to Windows"
+    win_set_part_type "$disk" "$WIN_PC_WIN_DEV" 0700 "Microsoft basic data — visible to Windows"
+    return 0
+}
+
+win_part_create() {
+    win_step "Create the Windows partitions — WIN-ESP + POWOS-WIN (EXPERIMENTAL — TODO(hw))"
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
+        win_require_root "create" || return 1
+    fi
+    win_part_create_guard_existing || return 1
+    win_part_create_preflight || return 1
+    win_part_create_geometry "$WIN_PC_DISK" || return 1
+    win_part_create_print_plan "$WIN_PC_DISK"
+
+    win_confirm "Carve WIN-ESP + POWOS-WIN on $WIN_PC_DISK?" || {
+        win_log "Aborted. Nothing was changed."
+        return 1
+    }
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_part_create_dry_run "$WIN_PC_DISK"
+        return 0
+    fi
+
+    win_part_create_esp "$WIN_PC_DISK" || return 1
+    win_part_create_win "$WIN_PC_DISK" || return 1
 
     win_step "Done"
-    win_ok "WIN-ESP ($esp_dev) + POWOS-WIN ($win_dev) ready."
+    win_ok "WIN-ESP ($WIN_PC_ESP_DEV) + POWOS-WIN ($WIN_PC_WIN_DEV) ready."
     echo "  Next — run Windows Setup (your own ISO) onto them:"
     echo
     echo -e "    ${WIN_BOLD}powos windows install --iso /path/to/Win11.iso${WIN_NC}"
@@ -2956,9 +3041,10 @@ win_part_create() {
 # whole disk [fake GPT][WIN-ESP][POWOS-WIN] so Setup lays its own ESP/MSR/C:
 # onto the real partitions through the mapping; the direct-attach path here is
 # EXPERIMENTAL and unvalidated (the whole partition backend is TODO(hw)).
-win_part_install() {
-    win_step "Install Windows onto WIN-ESP + POWOS-WIN (EXPERIMENTAL — TODO(hw))"
-
+# ── install phases ────────────────────────────────────────────────
+# The ISO is the user's. PowOS ships no Microsoft bits, so there is no
+# fallback to improvise here — the refusal IS the feature.
+win_part_install_require_iso() {
     if [[ -z "$WIN_ISO" ]]; then
         win_err "A user-supplied Windows ISO is required:"
         win_err "  powos windows install --iso /path/to/Win11.iso"
@@ -2968,40 +3054,54 @@ win_part_install() {
     if [[ ${WIN_DRY_RUN:-0} -eq 0 && ! -f "$WIN_ISO" ]]; then
         win_err "ISO not found: $WIN_ISO"; return 1
     fi
+    return 0
+}
 
-    local esp_dev win_dev
-    esp_dev=$(win_esp_part || true)
-    win_dev=$(win_win_part || true)
-    if [[ -z "$esp_dev" || -z "$win_dev" ]]; then
+# Resolve WIN-ESP + POWOS-WIN and prove BOTH are safe to hand to a VM.
+# Neither may be mounted or otherwise open: a host rw-mount racing guest
+# writes is the classic mounted-disk corruption, and it eats the volume.
+# Publishes the devices in WIN_PI_ESP_DEV / WIN_PI_WIN_DEV.
+win_part_install_resolve_parts() {
+    WIN_PI_ESP_DEV=$(win_esp_part || true)
+    WIN_PI_WIN_DEV=$(win_win_part || true)
+    if [[ -z "$WIN_PI_ESP_DEV" || -z "$WIN_PI_WIN_DEV" ]]; then
         win_err "WIN-ESP and/or POWOS-WIN not found — create them first:"
         win_err "  powos windows create"
         return 1
     fi
-    # Neither may be mounted or otherwise open (a host rw-mount racing guest
-    # writes is the classic mounted-disk corruption).
-    if win_win_mounted "$win_dev" || win_win_mounted "$esp_dev"; then
+    if win_win_mounted "$WIN_PI_WIN_DEV" || win_win_mounted "$WIN_PI_ESP_DEV"; then
         win_err "WIN-ESP/POWOS-WIN is mounted — unmount before handing it to the VM."
         return 1
     fi
-    win_guard_image_free "$win_dev" || return 1
-    win_guard_image_free "$esp_dev" || return 1
+    win_guard_image_free "$WIN_PI_WIN_DEV" || return 1
+    win_guard_image_free "$WIN_PI_ESP_DEV" || return 1
+    return 0
+}
 
-    # OVMF firmware + a per-run writable NVRAM copy (same as the vhd backend).
-    local ovmf_code src_vars ovmf_vars
-    ovmf_code=$(win_find_first_existing "${WIN_OVMF_CODE_CANDIDATES[@]}") || {
-        if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then ovmf_code="<OVMF_CODE.fd>"; else
+# OVMF firmware + a per-run writable NVRAM copy (same as the vhd backend).
+# Under --dry-run a missing firmware is a PLACEHOLDER, not a refusal, so the
+# plan can be printed on a machine that will never run it. Publishes
+# WIN_PI_OVMF_CODE / WIN_PI_VARS_SRC / WIN_PI_OVMF_VARS.
+win_part_install_firmware() {
+    WIN_PI_OVMF_CODE=$(win_find_first_existing "${WIN_OVMF_CODE_CANDIDATES[@]}") || {
+        if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then WIN_PI_OVMF_CODE="<OVMF_CODE.fd>"; else
             win_err "OVMF UEFI firmware not found. Install edk2-ovmf."; return 1; fi
     }
-    src_vars=$(win_find_first_existing "${WIN_OVMF_VARS_CANDIDATES[@]}") || {
-        if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then src_vars="<OVMF_VARS.fd>"; else
+    WIN_PI_VARS_SRC=$(win_find_first_existing "${WIN_OVMF_VARS_CANDIDATES[@]}") || {
+        if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then WIN_PI_VARS_SRC="<OVMF_VARS.fd>"; else
             win_err "OVMF_VARS template not found (edk2-ovmf)."; return 1; fi
     }
-    ovmf_vars="${WIN_RUNDIR}/part_install_VARS.fd"
+    WIN_PI_OVMF_VARS="${WIN_RUNDIR}/part_install_VARS.fd"
+    return 0
+}
 
+# Pure output: what is about to be attached, and the two things the operator
+# must know (default password, and that this path is EXPERIMENTAL).
+win_part_install_print_plan() {
     win_step "Plan"
     echo "  ISO (user-supplied): $WIN_ISO"
-    echo "  Disk 0 (POWOS-WIN):  $win_dev  (real NTFS partition — Windows C:)"
-    echo "  Disk 1 (WIN-ESP):    $esp_dev  (real FAT32 partition — Windows boot files)"
+    echo "  Disk 0 (POWOS-WIN):  $WIN_PI_WIN_DEV  (real NTFS partition — Windows C:)"
+    echo "  Disk 1 (WIN-ESP):    $WIN_PI_ESP_DEV  (real FAT32 partition — Windows boot files)"
     echo "  No shared-ESP backup needed: WIN-ESP is dedicated to Windows."
     echo "  VM:                  ${WIN_RAM} RAM, ${WIN_CPUS} vCPUs, OVMF, AHCI (same stack as metal)"
     if [[ ${WIN_INTERACTIVE:-0} -eq 1 ]]; then
@@ -3016,60 +3116,93 @@ win_part_install() {
     win_warn "TODO(hw): direct partition attach is EXPERIMENTAL; native-boot"
     win_warn "self-registration onto WIN-ESP is finished by 'powos windows finalize'."
     echo
+    return 0
+}
 
-    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
-        # Show the exact QEMU shape, launch nothing.
-        local qdry
-        qdry=$(win_build_qemu_cmd "$win_dev" raw "$esp_dev" "$WIN_ISO" \
-                                  "$WIN_RAM" "$WIN_CPUS" "$ovmf_code" "$ovmf_vars" \
-                                  "<unattend.img>")
-        echo -e "  ${WIN_DIM}${qdry}${WIN_NC}"
-        win_warn "dry-run: not launching. Nothing was changed."
-        return 0
-    fi
-
+# Everything that can still refuse for free: root, the tools the chosen mode
+# needs, and both partitions really being block devices. Runs AFTER the
+# dry-run exit and BEFORE the confirmation, so a --dry-run never demands root
+# and a confirmed install never dies on a missing tool.
+win_part_install_preflight() {
     win_require_root "install" || return 1
     local t req_tools=(qemu-system-x86_64)
     [[ ${WIN_INTERACTIVE:-0} -eq 0 ]] && req_tools+=(mkfs.vfat truncate)
     for t in "${req_tools[@]}"; do
         command -v "$t" &>/dev/null || { win_err "Required tool missing: $t"; return 1; }
     done
-    if ! win_is_block "$win_dev" || ! win_is_block "$esp_dev"; then
+    if ! win_is_block "$WIN_PI_WIN_DEV" || ! win_is_block "$WIN_PI_ESP_DEV"; then
         win_err "WIN-ESP/POWOS-WIN are not both block devices."; return 1
     fi
+    return 0
+}
+
+# The unattend volume: a tiny FAT disk carrying autounattend.xml (reuses the
+# shared generator). --interactive builds nothing and publishes an empty path.
+# On failure it returns 1 with WIN_TD_UNATTEND_MNT still pointing at any
+# mounted staging dir — the CALLER owns the EXIT trap and the teardown, so
+# this phase must NOT unwind a half-built loop mount itself.
+# Publishes the image path in WIN_PI_UNATTEND_IMG.
+win_part_install_make_unattend() {
+    WIN_PI_UNATTEND_IMG=""
+    [[ ${WIN_INTERACTIVE:-0} -eq 1 ]] && return 0
+    local xml vhdpath="\\${WIN_IMAGE_SUBDIR}\\windows.$(win_image_ext)"
+    xml=$(win_build_autounattend "$WIN_USERNAME" "$WIN_PASSWORD" \
+            "$WIN_LOCALE" "$WIN_KEYBOARD" "$WIN_PRODUCT_KEY" \
+            "$WIN_EDITION" "$WIN_WITH_STEAM" "$vhdpath")
+    local unattend_img="${WIN_RUNDIR}/unattend.img"
+    WIN_PI_UNATTEND_IMG="$unattend_img"
+    win_run_step "create unattend volume (64MiB, sparse)" \
+        truncate -s 64M "$unattend_img" || return 1
+    win_run_step "format unattend volume (FAT)" \
+        mkfs.vfat "$unattend_img" >/dev/null || return 1
+    local ump_dir
+    ump_dir=$(mktemp -d) || return 1
+    WIN_TD_UNATTEND_MNT="$ump_dir"
+    win_run_step "mount unattend volume" \
+        mount -o loop "$unattend_img" "$ump_dir" || return 1
+    printf '%s\n' "$xml" > "$ump_dir/autounattend.xml" || {
+        win_err "Could not write autounattend.xml."; return 1; }
+    win_run_step "unmount unattend volume" umount "$ump_dir" || return 1
+    WIN_TD_UNATTEND_MNT=""; rmdir "$ump_dir" 2>/dev/null || true
+    return 0
+}
+
+win_part_install() {
+    win_step "Install Windows onto WIN-ESP + POWOS-WIN (EXPERIMENTAL — TODO(hw))"
+
+    win_part_install_require_iso || return 1
+    win_part_install_resolve_parts || return 1
+    win_part_install_firmware || return 1
+    win_part_install_print_plan
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        # Show the exact QEMU shape, launch nothing.
+        local qdry
+        qdry=$(win_build_qemu_cmd "$WIN_PI_WIN_DEV" raw "$WIN_PI_ESP_DEV" "$WIN_ISO" \
+                                  "$WIN_RAM" "$WIN_CPUS" "$WIN_PI_OVMF_CODE" "$WIN_PI_OVMF_VARS" \
+                                  "<unattend.img>")
+        echo -e "  ${WIN_DIM}${qdry}${WIN_NC}"
+        win_warn "dry-run: not launching. Nothing was changed."
+        return 0
+    fi
+
+    win_part_install_preflight || return 1
 
     win_confirm "Boot Windows Setup against the real partitions?" || {
         win_log "Aborted. Nothing was changed."; return 1
     }
     mkdir -p "$WIN_RUNDIR" || return 1
-    [[ -f "$ovmf_vars" ]] || cp "$src_vars" "$ovmf_vars" || return 1
+    [[ -f "$WIN_PI_OVMF_VARS" ]] || cp "$WIN_PI_VARS_SRC" "$WIN_PI_OVMF_VARS" || return 1
 
-    # Unattend volume (reuses the shared autounattend generator).
-    local unattend_img="" ump_dir=""
+    # This function owns the EXIT trap, so it also owns the teardown — the
+    # unattend phase just returns 1 and leaves the state for us to unwind.
     trap 'win_install_teardown' EXIT INT TERM
-    if [[ ${WIN_INTERACTIVE:-0} -eq 0 ]]; then
-        local xml vhdpath="\\${WIN_IMAGE_SUBDIR}\\windows.$(win_image_ext)"
-        xml=$(win_build_autounattend "$WIN_USERNAME" "$WIN_PASSWORD" \
-                "$WIN_LOCALE" "$WIN_KEYBOARD" "$WIN_PRODUCT_KEY" \
-                "$WIN_EDITION" "$WIN_WITH_STEAM" "$vhdpath")
-        unattend_img="${WIN_RUNDIR}/unattend.img"
-        win_run_step "create unattend volume (64MiB, sparse)" \
-            truncate -s 64M "$unattend_img" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        win_run_step "format unattend volume (FAT)" \
-            mkfs.vfat "$unattend_img" >/dev/null || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        ump_dir=$(mktemp -d) || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        WIN_TD_UNATTEND_MNT="$ump_dir"
-        win_run_step "mount unattend volume" \
-            mount -o loop "$unattend_img" "$ump_dir" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        printf '%s\n' "$xml" > "$ump_dir/autounattend.xml" || {
-            win_err "Could not write autounattend.xml."; trap - EXIT INT TERM; win_install_teardown; return 1; }
-        win_run_step "unmount unattend volume" umount "$ump_dir" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        WIN_TD_UNATTEND_MNT=""; rmdir "$ump_dir" 2>/dev/null || true
-    fi
+    win_part_install_make_unattend || { trap - EXIT INT TERM; win_install_teardown; return 1; }
 
     local qemu_cmd
-    qemu_cmd=$(win_build_qemu_cmd "$win_dev" raw "$esp_dev" "$WIN_ISO" \
-                                  "$WIN_RAM" "$WIN_CPUS" "$ovmf_code" "$ovmf_vars" "$unattend_img")
+    qemu_cmd=$(win_build_qemu_cmd "$WIN_PI_WIN_DEV" raw "$WIN_PI_ESP_DEV" "$WIN_ISO" \
+                                  "$WIN_RAM" "$WIN_CPUS" "$WIN_PI_OVMF_CODE" "$WIN_PI_OVMF_VARS" \
+                                  "$WIN_PI_UNATTEND_IMG")
     win_ok "Launching Windows Setup onto the real partitions…"
     echo -e "  ${WIN_DIM}${qemu_cmd}${WIN_NC}"
     eval "$qemu_cmd"; local vmrc=$?
@@ -3460,10 +3593,8 @@ win_part_switch() {
 # ══════════════════════════════════════════════════════════════════
 #  partition: status
 # ══════════════════════════════════════════════════════════════════
-win_part_status() {
-    win_step "Windows on PowOS — status (dedicated-partition backend)"
-    echo
-
+# The PowOS-owned disk line (or an honest "not identified").
+win_part_status_disk() {
     local disk
     disk=$(win_part_disk 2>/dev/null || true)
     if [[ -z "$disk" ]]; then
@@ -3471,11 +3602,13 @@ win_part_status() {
     else
         echo "  PowOS disk  : $disk"
     fi
+    return 0
+}
 
-    local esp_dev win_dev
-    esp_dev=$(win_esp_part 2>/dev/null || true)
-    win_dev=$(win_win_part 2>/dev/null || true)
-
+# The WIN-ESP / POWOS-WIN lines, plus the mount and hibernation detail
+# POWOS-WIN carries. $1 = WIN-ESP device (may be empty), $2 = POWOS-WIN device.
+win_part_status_devices() {
+    local esp_dev="${1-}" win_dev="${2-}"
     if [[ -n "$esp_dev" ]]; then
         echo -e "  WIN-ESP     : ${WIN_GREEN}present${WIN_NC}  $esp_dev ($(win_dev_size "$esp_dev"))"
     else
@@ -3497,43 +3630,43 @@ win_part_status() {
     else
         echo -e "  POWOS-WIN   : ${WIN_YELLOW}none${WIN_NC}"
     fi
+    return 0
+}
 
-    # Firmware entry.
-    local entry_id="" efi_out=""
-    if command -v efibootmgr &>/dev/null && [[ -d /sys/firmware/efi ]]; then
-        efi_out=$(efibootmgr 2>/dev/null || true)
-        entry_id=$(win_find_boot_entry "windows|microsoft" "$efi_out" || true)
-        if [[ -n "$entry_id" ]]; then
-            echo -e "  Boot entry  : ${WIN_GREEN}Boot${entry_id}${WIN_NC} ($(win_boot_entry_label "$entry_id" "$efi_out" || echo Windows))"
-        else
-            echo -e "  Boot entry  : ${WIN_YELLOW}none${WIN_NC} (efibootmgr found no Windows entry)"
-        fi
-    else
-        echo -e "  Boot entry  : unknown ${WIN_DIM}(no UEFI/efibootmgr here)${WIN_NC}"
-    fi
-
-    # Snapshots (ntfsclone images share the vhd snapshot dir on POWOS-DATA).
-    local sdir count=0 f
-    sdir=$(win_snapshot_dir 2>/dev/null || true)
-    if [[ -n "$sdir" && -d "$sdir" ]]; then
-        for f in "$sdir"/*.ntfsclone.zst; do [[ -e "$f" ]] && count=$((count+1)); done
-        echo "  Snapshots   : $count ($sdir)"
-    else
-        echo "  Snapshots   : 0 (POWOS-DATA unmounted or none taken)"
-    fi
-
+# What comes next, for the partition backend. $1 = WIN-ESP, $2 = POWOS-WIN;
+# the firmware entry comes from WIN_STATUS_ENTRY_ID.
+win_part_status_next() {
+    local esp_dev="${1-}" win_dev="${2-}"
     echo
     if [[ -z "$win_dev" && -z "$esp_dev" ]]; then
         echo -e "  Next step   : ${WIN_BOLD}sudo powos windows create${WIN_NC}"
         echo -e "                (needs a burn-time unallocated tail: install-to-usb.sh --windows-gb N)"
     elif [[ -z "$win_dev" ]]; then
         echo -e "  Next step   : ${WIN_BOLD}sudo powos windows install --iso <path>${WIN_NC}"
-    elif [[ -z "$entry_id" ]]; then
+    elif [[ -z "${WIN_STATUS_ENTRY_ID:-}" ]]; then
         echo -e "  Next step   : ${WIN_BOLD}sudo powos windows finalize${WIN_NC}  (firmware entry missing)"
     else
         echo -e "  Ready       : metal (seamless resume):  ${WIN_BOLD}sudo powos windows${WIN_NC}"
         echo -e "                same instance, VM:        ${WIN_BOLD}sudo powos windows vm${WIN_NC}"
     fi
+    return 0
+}
+
+win_part_status() {
+    win_step "Windows on PowOS — status (dedicated-partition backend)"
+    echo
+
+    win_part_status_disk
+
+    local esp_dev win_dev
+    esp_dev=$(win_esp_part 2>/dev/null || true)
+    win_dev=$(win_win_part 2>/dev/null || true)
+
+    win_part_status_devices "$esp_dev" "$win_dev"
+    win_status_boot_entry
+    # ntfsclone images share the vhd snapshot dir on POWOS-DATA.
+    win_status_snapshots '*.ntfsclone.zst'
+    win_part_status_next "$esp_dev" "$win_dev"
 }
 
 # ══════════════════════════════════════════════════════════════════

@@ -126,13 +126,13 @@ windows.sh:win_finalize 12
 windows.sh:win_image_hibernated 16
 windows.sh:win_install 24
 windows.sh:win_load_config 16
-windows.sh:win_part_create 35
+windows.sh:win_part_create 10
 windows.sh:win_part_finalize 24
-windows.sh:win_part_install 38
-windows.sh:win_part_status 27
+windows.sh:win_part_install 12
+windows.sh:win_part_status 3
 windows.sh:win_part_switch 24
 windows.sh:win_part_vm 23
 windows.sh:win_slim_iso 18
-windows.sh:win_status 28
+windows.sh:win_status 3
 windows.sh:win_switch 23
 windows.sh:win_vm 18

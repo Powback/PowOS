@@ -77,13 +77,16 @@ Separating `case` arms from genuine branching changes the priority order:
 |---|---|---|---|---|
 | `powos:cmd_health` | 100 | 6 | **92** | 423 lines, 53 `if`, 39 `&&`/`\|\|` |
 | `harness.sh:harness_run` | 77 | 0 | 77 | |
-| `windows.sh:win_install` | 69 | 0 | 69 | |
+| ~~`windows.sh:win_install`~~ | ~~69~~ | 0 | **24** | split into phases (2eb16cd) |
 | `agent.sh:ai_call` | 82 | 15 | 67 | |
 | ~~`mods/adopt.sh:mods_adopt_cmd`~~ | ~~52~~ | | **8** | measured wrong — see below |
 | `game.sh:cmd_game` | 44 | **25** | 19 | a dispatcher; leave it alone |
+| `windows.sh:cmd_windows` | 63 | **57** | 5 | same shape as `cmd_game`; leave it alone |
 
 `cmd_game` looks bad and is not: a flat 25-arm `case` is what a dispatcher
-should be, and splitting it by CC would make it worse. `cmd_health` is the
+should be, and splitting it by CC would make it worse. `cmd_windows` is the
+same shape — one arm per flag and per subcommand, twice over for its two
+backends — and carries a comment saying so. `cmd_health` is the
 opposite — nearly all of its 100 is real branching in one function.
 
 **If anything gets refactored, `cmd_health` first.** Nothing here is urgent: it
