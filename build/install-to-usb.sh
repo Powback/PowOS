@@ -652,6 +652,40 @@ _fstab_containers_on_data() {
             printf '  To look around here: log in as  powos  /  powos\n'
             printf '\n'
         } > "$deploy/etc/issue" 2>/dev/null || true
+
+        # NEVER ask for a password on the medium. A Steam Deck has ONE USB port.
+        # The install stick is in it, so there is no keyboard, so a login prompt
+        # is not "inconvenient" — it is an unrecoverable dead end. And the
+        # install entry boots systemd.unit=multi-user.target (no display
+        # manager), so tty1 is a getty whenever powos-installer.service is not
+        # holding it.
+        #
+        # So autologin root on tty1, medium only. This does not weaken anything:
+        # physical possession of the stick already grants root via the installer
+        # itself, which partitions disks unauthenticated by design.
+        mkdir -p "$deploy/etc/systemd/system/getty@tty1.service.d" 2>/dev/null || true
+        cat > "$deploy/etc/systemd/system/getty@tty1.service.d/10-powos-live-autologin.conf" <<'AUTOLOGIN' 2>/dev/null || true
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
+AUTOLOGIN
+
+        # And if the installer was asked for but its service did not take the
+        # console, start the wizard from that shell rather than leaving a bare
+        # prompt. Guarded on the karg so a plain live boot still gets a shell.
+        cat > "$deploy/root/.bash_profile" <<'PROFILE' 2>/dev/null || true
+# PowOS live medium. Auto-start the installer when it was asked for and the
+# service did not already run it — see 10-powos-live-autologin.conf.
+if grep -q 'powos.install' /proc/cmdline 2>/dev/null \
+   && [ -z "${POWOS_WIZARD_STARTED:-}" ] \
+   && ! systemctl is-active --quiet powos-installer.service 2>/dev/null; then
+    export POWOS_WIZARD_STARTED=1
+    echo
+    echo "  Starting the PowOS installer..."
+    echo
+    exec /usr/bin/powos-install-wizard
+fi
+PROFILE
         if ! grep -q '/var/lib/containers' "$deploy/etc/fstab" 2>/dev/null; then
             # Only write the entry if the subvolume really exists, otherwise
             # nofail turns a broken mount into a silent one.

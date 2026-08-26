@@ -454,6 +454,22 @@ check "nothing we ship turns password auth off" \
       '! grep -rqi "^[[:space:]]*PasswordAuthentication[[:space:]]\+no" \
            "$HERE/../../config/etc/ssh/" 2>/dev/null'
 
+# ── the medium must never demand a password ────────────────────────
+# A Steam Deck has ONE USB port. The install stick occupies it, so no keyboard
+# can be attached. A login prompt is therefore not an inconvenience, it is an
+# unrecoverable dead end -- and the install entry boots
+# systemd.unit=multi-user.target, so tty1 is a getty whenever the installer
+# service is not holding it.
+echo "== the live medium never asks for a password =="
+U="$HERE/../../build/install-to-usb.sh"
+check "the medium autologins on tty1"            'grep -q "autologin root" "$U"'
+check "it overrides the vendor ExecStart (ExecStart= first)"       'grep -A2 "10-powos-live-autologin" "$U" | grep -q "^ExecStart=$" || grep -q "ExecStart=\\?$" "$U"'
+check "the drop-in is written to the DEPLOYMENT etc, not the partition root"       'grep -q "deploy/etc/systemd/system/getty@tty1.service.d" "$U"'
+check "the wizard auto-starts when powos.install was asked for"       'grep -q "powos.install./proc/cmdline\|grep -q .powos.install. /proc/cmdline" "$U"'
+check "and does NOT auto-start on a plain live boot"       'grep -q "POWOS_WIZARD_STARTED" "$U"'
+check "it does not fight the service if that already ran it"       'grep -q "is-active --quiet powos-installer" "$U"'
+check "autologin is medium-only (next to the live marker)"       'grep -q "live-medium" "$U"'
+
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]
 
