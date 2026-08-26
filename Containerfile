@@ -228,6 +228,7 @@ RUN useradd -m -d /home/powos -G wheel -u 1000 powos 2>/dev/null || true && \
 # openrgb userspace tool still installs.
 RUN . /etc/os-release; \
     EXCL=""; \
+    . /etc/os-release 2>/dev/null || true; \
     case "${VARIANT_ID:-}${IMAGE_ID:-}" in *deck*) EXCL="--exclude=akmod-openrgb" ;; esac; \
     dnf5 -y install --setopt=install_weak_deps=False $EXCL \
         openrgb piper logiops uv unzip podman-compose podman-docker \
@@ -354,6 +355,29 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     # fstab is mounted by systemd's own fstab generator regardless.
     systemctl mask ublue-os-media-automount.service 2>/dev/null || true && \
     systemctl mask plasma-setup.service 2>/dev/null || true && \
+    # DECK ONLY: install the dracut trim and REGENERATE the initramfs.
+    #
+    # The config alone changes nothing — the initramfs is already built in the
+    # base image, so it has to be rebuilt for the omissions to take effect.
+    # Guarded on the variant because main and nvidia-open need exactly the
+    # drivers this omits. Failure is fatal on purpose: silently shipping the
+    # old 241MB initramfs while claiming it was trimmed is worse than a failed
+    # build.
+    { . /etc/os-release 2>/dev/null || true; \
+      case "${VARIANT_ID:-}${IMAGE_ID:-}${POWOS_VARIANT:-}" in \
+        *deck*) \
+          install -Dm644 /usr/share/powos/dracut-deck-slim.conf \
+                  /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf; \
+          KVER=$(ls /usr/lib/modules | head -1); \
+          BEFORE=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
+          dracut --force --no-hostonly --kver "$KVER" \
+                 "/usr/lib/modules/$KVER/initramfs.img"; \
+          AFTER=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
+          echo "initramfs: $((BEFORE/1048576))MB -> $((AFTER/1048576))MB (deck trim)"; \
+          [ "$AFTER" -lt "$BEFORE" ] || { echo "BUILD ERROR: initramfs did not shrink"; exit 1; }; \
+          ;; \
+        *) echo "initramfs: left generic (not the deck variant)" ;; \
+      esac; } && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true
 
