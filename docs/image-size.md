@@ -1,0 +1,61 @@
+# Image size: what is stripped, what is optional, what must never go
+
+## Build args
+
+| arg | default | effect |
+|---|---|---|
+| `POWOS_LOCALES` | `en_US nb_NO` | keep only these languages. `""` keeps all 700. **886M → 454M** |
+| `POWOS_ICON_THEMES` | `""` | extra themes to keep. Referenced themes are kept regardless. **205M → 165M** |
+| `POWOS_EXTRAS` | `""` | packages to `rpm -e`. Removes nothing unless set |
+| `POWOS_BREW` | `fetch` | `bundled` keeps the 126M Homebrew payload |
+
+Applied unconditionally: `/usr/share/doc`, `man`, `help`, unreferenced wallpapers
+(**−532M**). Deck-only: `nvidia`/`intel`/`i915` firmware (**437M → 203M**).
+
+Total ≈ **1.36 GB**.
+
+## DO NOT STRIP
+
+Everything here looked removable and was not. Each cost real debugging, and the
+evidence was always one command away.
+
+| | why |
+|---|---|
+| `ath10k` firmware | **the wifi.** LCD Deck (Jupiter) = Qualcomm Atheros QCA6174 |
+| `qcom` firmware | OLED Deck (Galileo) = WCN6855 |
+| `rtl_nic` firmware | **USB-C dock ethernet** (Realtek RTL8153). A docked Deck needs it |
+| `mediatek` firmware | MediaTek USB adapters. "The Deck has no MediaTek silicon" is true of built-in hardware and irrelevant to what gets plugged in |
+| `llvm15` (198M) | **OpenCL's pinned toolchain.** `libRusticlOpenCL`, `libopencl-clang`, `libLLVMSPIRVLib`, `libigc` all load it by path. Unowned by rpm and `--whatrequires` shows nothing, because they `dlopen` it |
+| `libwebkit2gtk-4.1` (90M) | **required by Lutris** |
+| `hicolor` icons | `breeze` declares `Inherits=hicolor`. Removing it breaks icon lookup everywhere, not just one theme |
+| `breeze_cursors`, `Adwaita` | cursor theme; GTK fallback. A KDE-only keep-list misses both |
+| CJK fonts (409M) | renders Japanese/Chinese **Steam titles** |
+| `locale` C / POSIX | the fallback every program lands on |
+| `godot-runner` | has a reverse dependency. `rpm -e` refuses it; a `rm` would not have |
+
+## The rule
+
+**`rpm -e`, never `rm`.** rpm refuses when something depends on the package, and
+takes its systemd units with it. Deleting a binary leaves its units pointing at
+nothing — a failed unit every boot. `tailscale` ships three.
+
+**"Nothing references it" has been wrong six times here.** grep and
+`rpm -q --whatrequires` both miss `dlopen`, unpackaged trees, and runtime paths.
+Verify by removing it and booting, not by reading metadata.
+
+## Not removable
+
+`lto-dump` (39M) belongs to `gcc`. `bun` (77M) is unowned by any package.
+
+## Verify
+
+```bash
+# what a build actually did — each trim prints one line
+grep -E '^(sleep|firmware|locales|icons|brew|extras):' /var/tmp/fb-image.log
+
+# what a built image contains
+podman run --rm --entrypoint /bin/bash <image> -c 'du -sh /usr/share/* | sort -rh | head'
+```
+
+The build fails loudly if `amdgpu`, `ath10k`, `qcom` or `hicolor` went missing,
+or if a tailscale unit survived without its binary.
