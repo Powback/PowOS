@@ -1420,18 +1420,15 @@ cmd_install_system() {
     # bottom of the screen, and torn down on ANY exit so a cancelled install
     # does not leave the terminal with a two-line scroll region.
     #
-    # The step total is an ESTIMATE and is treated as one: whole-disk and
-    # alongside take different paths, so the footer always prints a literal
-    # "step N/M" beside the bar and refuses to show full until pg_finish.
+    # Total 0 on purpose — there is no honest denominator. The whole-disk path
+    # runs exactly ONE run_step (`bootc install`, which IS the install), so a
+    # "step 1/9" bar would sit still for the whole run and lie. An earlier
+    # version hardcoded 9/12 and would have done exactly that. The footer shows
+    # an activity marker and a plain step counter instead; bootc draws its own
+    # byte-level bar in the scrolling area above, with real numbers.
     if pg_have; then
-        local _pg_total=9
-        [[ "$ISV_MODE" == "alongside" ]] && _pg_total=12
-        # ISV_SHARED_GB may still be the literal "auto" here, which would make
-        # a bare (( )) comparison error out under errexit.
-        [[ "${ISV_SHARED_GB:-0}" =~ ^[0-9]+$ ]] && (( ISV_SHARED_GB > 0 )) \
-            && _pg_total=$(( _pg_total + 2 ))
         trap 'pg_finish' EXIT INT TERM
-        pg_begin "$_pg_total"
+        pg_begin 0
     fi
 
     # Separate games disk: PowOS takes the WHOLE target (no games/Windows tail

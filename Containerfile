@@ -465,14 +465,28 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
 #                    cursor, or none.
 #   Adwaita          what GTK apps fall back to; KDE-only keep-lists miss it.
 #
-# The keep-list is always UNIONED with those three plus whatever the
-# look-and-feel defaults name, so a narrow POWOS_ICON_THEMES cannot break the
-# desktop. Build fails if the union comes back empty.
+# Two modes, because the first version was decorative — it unioned the arg with
+# every referenced theme, so oxygen (54M) could never be dropped no matter what
+# you passed, and the arg only ever ADDED.
+#
+#   POWOS_ICON_THEMES=""            derive the keep-list from look-and-feel
+#                                   defaults (safe; keeps oxygen)
+#   POWOS_ICON_THEMES="breeze ..."  YOUR list is authoritative; the reference
+#                                   union is skipped, so unused themes go
+#
+# The floor is not negotiable in either mode: hicolor (breeze Inherits it, so
+# losing it breaks icon lookup everywhere), breeze_cursors, and Adwaita for GTK.
+# Build fails if the list comes back empty or hicolor went missing.
 ARG POWOS_ICON_THEMES=""
 RUN set -eu; \
-    keep="hicolor breeze_cursors Adwaita ${POWOS_ICON_THEMES}"; \
-    keep="$keep $(grep -rhs '^Theme=' /usr/share/plasma/look-and-feel/*/contents/defaults \
-                    2>/dev/null | sed 's/^Theme=//; s/^org\.kde\.//; s/\.desktop$//' | sort -u)"; \
+    keep="hicolor breeze_cursors Adwaita"; \
+    if [ -n "${POWOS_ICON_THEMES}" ]; then \
+      keep="$keep ${POWOS_ICON_THEMES}"; \
+      echo "icons: explicit keep-list, reference union NOT applied"; \
+    else \
+      keep="$keep $(grep -rhs '^Theme=' /usr/share/plasma/look-and-feel/*/contents/defaults \
+                      2>/dev/null | sed 's/^Theme=//; s/^org\.kde\.//; s/\.desktop$//' | sort -u)"; \
+    fi; \
     keep=$(printf '%s\n' $keep | sort -u); \
     [ -n "$keep" ] || { echo "BUILD ERROR: icon keep-list is EMPTY"; exit 1; }; \
     if [ -d /usr/share/icons ]; then \

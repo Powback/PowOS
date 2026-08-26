@@ -5,7 +5,7 @@
 | arg | default | effect |
 |---|---|---|
 | `POWOS_LOCALES` | `en_US nb_NO` | keep only these languages. `""` keeps all 700. **886M → 454M** |
-| `POWOS_ICON_THEMES` | `""` | extra themes to keep. Referenced themes are kept regardless. **205M → 165M** |
+| `POWOS_ICON_THEMES` | `""` | empty = derive from look-and-feel defaults (**205M → 165M**). Set = YOUR list is authoritative, reference union skipped (**→ 111M**). `hicolor`/`breeze_cursors`/`Adwaita` are a floor in both modes |
 | `POWOS_EXTRAS` | `""` | packages to `rpm -e`. Removes nothing unless set |
 | `POWOS_BREW` | `bundled` | `fetch` drops the 126M payload — **but there is no runtime re-add yet**, see below |
 
@@ -56,6 +56,17 @@ packages: `powos install cosign` genuinely restores them.
 ## Not removable
 
 `lto-dump` (39M) belongs to `gcc`. `bun` (77M) is unowned by any package.
+
+## Testing
+
+`test-image-invariants.sh` runs **inside a built image** and asserts on the
+filesystem: firmware that must survive, `hicolor`, locale fallback, sleep-policy
+coherence, and that no enabled unit points at a missing binary.
+
+Prefer it over the Containerfile-grep tests (`test-firmware-trim`,
+`test-sleep-policy`, `test-image-trim`). Those assert the right text was typed,
+which is not the same as the build having done it — a `RUN` that silently no-ops
+leaves them green. It caught a real orphan the moment it was written.
 
 ## Verify
 

@@ -276,6 +276,8 @@ jobs:
               # Needs the real /usr/libexec/bazzite-hardware-setup, which only
               # exists inside the image; it skips its replay on the host runner.
               bash /powos/test/tier1/test-firstboot-offline.sh
+              # Behavioural: asserts on the BUILT filesystem, not Containerfile text.
+              bash /powos/test/tier1/test-image-invariants.sh
             '
 
       - name: E2E tests (loop-back USB, overlayfs, layer-sync, cachefs) — nvidia-open only

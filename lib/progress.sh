@@ -18,13 +18,17 @@
 # with a static screen, and there was no way to tell. A number that ticks says
 # the machine is alive even when nothing else changes.
 #
-# HONESTY ABOUT "OVERALL"
-# M is a declared estimate, not a measurement: the step count differs between
-# whole-disk and alongside installs, and steps are wildly uneven in duration
-# (bootc install is minutes, a mkfs is a second). So the bar is NEVER allowed
-# to claim completion it has not reached — it clamps at M-1 until pg_finish is
-# actually called, and the "step N/M" text is always shown so the raw numbers
-# are visible even when the bar's proportion is a poor guide.
+# WHY THERE IS NO PERCENTAGE
+# There is no honest denominator. The whole-disk path — the common one — runs
+# exactly ONE run_step: `bootc install`, which IS the install. A "step 1/9" bar
+# would sit still for the entire run and lie about progress. The alongside path
+# has more steps but they are wildly uneven (a mkfs is a second, bootc is
+# minutes), so proportion-of-steps still does not mean proportion-of-time.
+#
+# So pass a total only if one genuinely exists. With total 0 the second line
+# becomes an INDETERMINATE activity marker plus a plain step counter — it shows
+# the machine is working without inventing a fraction. bootc draws its own
+# byte-level bar in the scrolling area above, and that one has real numbers.
 #
 # The footer is written to /dev/tty, NOT stdout: the installer tees stdout to
 # /tmp/powos-install.log, and escape sequences in a log file make it unreadable
@@ -89,6 +93,19 @@ pg__state_load() {
     PG_LABEL="$lb"
 }
 
+# An indeterminate marker: one cell sweeping back and forth. Conveys "alive",
+# claims no proportion.
+pg__marker() {
+    local width=$1 t=$2 span pos i out=""
+    (( width < 4 )) && width=4
+    span=$(( width - 1 )); (( span < 1 )) && span=1
+    pos=$(( t % (span * 2) )); (( pos >= span )) && pos=$(( span * 2 - pos ))
+    for (( i = 0; i < width; i++ )); do
+        if (( i == pos )); then out="$out#"; else out="$out."; fi
+    done
+    printf '[%s]' "$out"
+}
+
 pg__draw() {
     (( PG_ACTIVE )) || return 0
     pg__state_load
@@ -100,11 +117,19 @@ pg__draw() {
     # "is this alive", which a percentage cannot answer for a single step.
     line1=$(printf '  %-*s %4ds' $(( cols - 12 )) "${PG_LABEL:0:$(( cols - 14 ))}" "$elapsed")
 
-    # Overall: clamp below full until pg_finish, and always print N/M.
-    local shown=$PG_CURRENT
-    (( shown >= PG_TOTAL && PG_ACTIVE == 1 )) && shown=$(( PG_TOTAL > 0 ? PG_TOTAL - 1 : 0 ))
-    bar2=$(pg__bar "$shown" "$PG_TOTAL" $(( cols > 40 ? cols - 24 : 16 )))
-    line2=$(printf '  %s step %d/%d' "$bar2" "$PG_CURRENT" "$PG_TOTAL")
+    local width=$(( cols > 40 ? cols - 24 : 16 ))
+    if (( PG_TOTAL > 0 )); then
+        # A real denominator exists: clamp below full until pg_finish.
+        local shown=$PG_CURRENT
+        (( shown >= PG_TOTAL && PG_ACTIVE == 1 )) && shown=$(( PG_TOTAL - 1 ))
+        bar2=$(pg__bar "$shown" "$PG_TOTAL" "$width")
+        line2=$(printf '  %s step %d/%d' "$bar2" "$PG_CURRENT" "$PG_TOTAL")
+    else
+        # No denominator: an activity marker that moves with elapsed time, so it
+        # is visibly alive without claiming a fraction it cannot know.
+        bar2=$(pg__marker "$width" "$elapsed")
+        line2=$(printf '  %s step %d  %s' "$bar2" "$PG_CURRENT" "working")
+    fi
 
     {   printf '\0337'                                  # save cursor (DECSC)
         printf '\033[%d;1H\033[2K%s' $(( rows - 1 )) "$line1"
