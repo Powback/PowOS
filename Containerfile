@@ -60,6 +60,8 @@ COPY desktop/autostart/                   /etc/xdg/autostart/
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
 COPY config/kde/kglobalshortcutsrc        /etc/xdg/kglobalshortcutsrc
 COPY config/kde/kwinrc                    /etc/xdg/kwinrc
+# Dark by default. See the file — this is a default, not an override.
+COPY config/kde/kdeglobals                /etc/xdg/kdeglobals
 COPY config/kde/konsolerc                 /etc/xdg/konsolerc
 COPY config/kde/konsole/                  /usr/share/konsole/
 # Rebrand the login MOTD from Bazzite → PowOS. /usr/libexec/ublue-motd renders

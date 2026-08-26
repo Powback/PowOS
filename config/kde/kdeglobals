@@ -1,0 +1,18 @@
+# PowOS: dark by default.
+#
+# /etc/xdg/kdeglobals is the SYSTEM default, not a forced setting — anything a
+# user changes in System Settings is written to ~/.config/kdeglobals and wins.
+# Putting it in /etc/skel instead would only affect accounts created after this
+# image lands, which is the wrong scope for a look-and-feel default.
+#
+# All three keys are needed. Setting only ColorScheme leaves the light icon set
+# in place (dark panels, light icons); setting only LookAndFeelPackage does not
+# reliably apply on a session that already has a colour scheme recorded.
+[General]
+ColorScheme=BreezeDark
+
+[Icons]
+Theme=breeze-dark
+
+[KDE]
+LookAndFeelPackage=org.kde.breezedark.desktop
