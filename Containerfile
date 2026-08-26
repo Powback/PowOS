@@ -354,6 +354,15 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     # precondition never holds on our images, and anything a user does put in
     # fstab is mounted by systemd's own fstab generator regardless.
     systemctl mask ublue-os-media-automount.service 2>/dev/null || true && \
+    # Two units that cost seconds of CPU on a 4-core APU during boot and do
+    # nothing a handheld needs. Neither is on the critical path, so this does
+    # not move the headline number — it stops them competing with the units
+    # that ARE on it.
+    #   mandb-update  rebuilds the man-page database. On a games console.
+    #   avahi-daemon  mDNS/zeroconf discovery; nothing here consumes it, and
+    #                 it can be started later if something ever does.
+    systemctl disable fedora-atomic-desktop-mandb-update.service 2>/dev/null || true && \
+    systemctl disable avahi-daemon.service avahi-daemon.socket 2>/dev/null || true && \
     systemctl mask plasma-setup.service 2>/dev/null || true && \
     # DECK ONLY: install the dracut trim and REGENERATE the initramfs.
     #
@@ -366,15 +375,19 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     { . /etc/os-release 2>/dev/null || true; \
       case "${VARIANT_ID:-}${IMAGE_ID:-}${POWOS_VARIANT:-}" in \
         *deck*) \
-          install -Dm644 /usr/share/powos/dracut-deck-slim.conf \
-                  /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf; \
-          KVER=$(ls /usr/lib/modules | head -1); \
-          BEFORE=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
-          dracut --force --no-hostonly --kver "$KVER" \
-                 "/usr/lib/modules/$KVER/initramfs.img"; \
-          AFTER=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
-          echo "initramfs: $((BEFORE/1048576))MB -> $((AFTER/1048576))MB (deck trim)"; \
-          [ "$AFTER" -lt "$BEFORE" ] || { echo "BUILD ERROR: initramfs did not shrink"; exit 1; }; \
+          if [ -f /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf ]; then \
+            echo "initramfs: already trimmed in an earlier stage, leaving it"; \
+          else \
+            install -Dm644 /usr/share/powos/dracut-deck-slim.conf \
+                    /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf; \
+            KVER=$(ls /usr/lib/modules | head -1); \
+            BEFORE=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
+            dracut --force --no-hostonly --kver "$KVER" \
+                   "/usr/lib/modules/$KVER/initramfs.img"; \
+            AFTER=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
+            echo "initramfs: $((BEFORE/1048576))MB -> $((AFTER/1048576))MB (deck trim)"; \
+            [ "$AFTER" -lt "$BEFORE" ] || { echo "BUILD ERROR: initramfs did not shrink"; exit 1; }; \
+          fi; \
           ;; \
         *) echo "initramfs: left generic (not the deck variant)" ;; \
       esac; } && \
