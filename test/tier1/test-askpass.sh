@@ -191,8 +191,16 @@ fi
 
 echo ""
 echo "== fail-safe: a broken helper must not lock anyone out of root =="
+# These assert that a broken SUDO_ASKPASS does not cost you root. That is only
+# observable where sudo ACTUALLY authenticates: on a passwordless (NOPASSWD)
+# sudoers -- CI runners, most containers -- `sudo -A` never consults the helper
+# at all and simply succeeds, so the assertion tests nothing and fails for a
+# reason unrelated to the code.
 if ! command -v sudo >/dev/null 2>&1; then
     skip "sudo not installed"
+elif sudo -n true 2>/dev/null; then
+    skip "sudo is passwordless here; -A never consults the helper"
+    skip "sudo is passwordless here; -A never consults the helper"
 else
     sudo -k 2>/dev/null
     timeout 15 env SUDO_ASKPASS=/nonexistent/askpass sudo -A /bin/true >/dev/null 2>&1
