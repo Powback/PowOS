@@ -91,6 +91,26 @@ else
     bad "systemd-udev-settle is not masked" "one Wants= on it stalls sysinit for seconds"
 fi
 
+# ublue-os-media-automount must be masked. It runs `findmnt -s --json ...`,
+# which exits non-zero when /etc/fstab has nothing to list — and a bootc
+# install leaves fstab EMPTY. Its Python does not handle that, so the unit
+# fails on every single boot of every PowOS install and sits red in
+# `systemctl --failed` forever.
+if grep -q 'systemctl mask ublue-os-media-automount.service' "$CF"; then
+    ok "ublue-os-media-automount is masked (it crashes on an empty fstab)"
+else
+    bad "ublue-os-media-automount is not masked" "it fails on every boot"
+fi
+
+# A minute of blank, repeatedly-cleared screen on a first boot is
+# indistinguishable from a brick — it was reported as a boot loop. Narrate it.
+if [[ -f "$ROOT/bin/powos-firstboot-notice" ]] && grep -qF "COPY systemd/powos-firstboot-notice.service" "$CF"; then
+    ok "the first boot explains the hardware-setup pause on the console"
+else
+    bad "nothing narrates the first-boot hardware setup" \
+        "a minute of cleared screen then a reboot reads as a boot loop"
+fi
+
 # The network wait must be BOUNDED, never removed.
 #
 # greenboot's health check is ordered after network-online.target and gates

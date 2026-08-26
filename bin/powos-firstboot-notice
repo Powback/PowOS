@@ -1,0 +1,45 @@
+#!/bin/bash
+# powos-firstboot-notice - say what the first boot is doing, on the console.
+#
+# On a fresh Deck install, bazzite-hardware-setup applies Deck-specific kernel
+# args, stages a new ostree deployment and reboots. That takes about a minute,
+# and because PowOS boots without plymouth the console is left showing whatever
+# printed last — while amdgpu re-initialises the framebuffer over and over,
+# clearing it each time. What the user sees is a black screen, cleared
+# repeatedly, with no progress and no explanation, followed by a reboot.
+#
+# It is indistinguishable from a boot loop. It was in fact reported as one.
+#
+# So: while that unit runs, print a heartbeat to the console saying what is
+# happening, how long it takes, and that the reboot is expected. Cheap, and it
+# turns "my new install is bricked" into "it is doing something".
+set -uo pipefail
+UNIT="${POWOS_NOTICE_UNIT:-bazzite-hardware-setup.service}"
+TTY="${POWOS_NOTICE_TTY:-/dev/tty1}"
+
+state() { systemctl is-active "$UNIT" 2>/dev/null; }
+say()   { printf '%b' "$1" > "$TTY" 2>/dev/null || true; }
+
+# Nothing to narrate if the unit is not part of this boot at all.
+systemctl cat "$UNIT" >/dev/null 2>&1 || exit 0
+
+# Wait briefly for it to start; if it never does, this boot is not the one.
+for _ in $(seq 1 90); do
+    case "$(state)" in activating|active) break ;; esac
+    sleep 1
+done
+case "$(state)" in activating|active) : ;; *) exit 0 ;; esac
+
+say "\n\n  ── PowOS: first-boot hardware setup ──\n"
+say "  Applying Steam Deck kernel settings and preparing a new system image.\n"
+say "  This takes about a minute, the screen may clear repeatedly, and the\n"
+say "  machine will REBOOT ONCE when it finishes. This is normal.\n"
+say "  Do not power off.\n\n"
+
+secs=0
+while :; do
+    case "$(state)" in activating|active) : ;; *) break ;; esac
+    sleep 5; secs=$((secs + 5))
+    say "  ...still working (${secs}s). Do not power off.\n"
+done
+say "\n  Hardware setup finished — rebooting once to apply it.\n\n"

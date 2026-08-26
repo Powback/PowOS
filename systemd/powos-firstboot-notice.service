@@ -1,0 +1,22 @@
+# Narrate bazzite-hardware-setup on the console. See bin/powos-firstboot-notice
+# for why: without it, a fresh Deck install shows a minute of blank, repeatedly
+# cleared screen and then reboots, which reads exactly like a boot loop.
+[Unit]
+Description=PowOS: explain the first-boot hardware setup on the console
+After=basic.target
+# Ordering only — never Requires. A missing or already-finished hardware-setup
+# must not make this unit fail, and this unit must never delay anything.
+After=bazzite-hardware-setup.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/powos-firstboot-notice
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+# Never hold the boot open: this is commentary, not work.
+TimeoutStartSec=150
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

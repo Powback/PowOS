@@ -134,6 +134,7 @@ COPY systemd/powos-variant-retry.service  /usr/lib/systemd/system/powos-variant-
 COPY systemd/powos-installer.service      /usr/lib/systemd/system/powos-installer.service
 COPY systemd/powos-safemode.service       /usr/lib/systemd/system/powos-safemode.service
 COPY systemd/powos-boot-entries.service   /usr/lib/systemd/system/powos-boot-entries.service
+COPY systemd/powos-firstboot-notice.service /usr/lib/systemd/system/powos-firstboot-notice.service
 
 # KDE-builder stage — bakes sources/kde/patches/<app>/ into the image.
 # Built FROM THE SAME base image so the rebuilt bits match the shipped app's
@@ -302,6 +303,7 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     systemctl enable powos-installer.service && \
     systemctl enable powos-safemode.service && \
     systemctl enable powos-boot-entries.service && \
+    systemctl enable powos-firstboot-notice.service && \
     # powos-display-manager.conf pins display-manager.service to plasmalogin and
     # re-creates it with 'L+' on EVERY boot. Right on a base shipping
     # plasma-login-manager; catastrophic on one where sddm is the DM and
@@ -336,6 +338,15 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     # decisive — a Wants= on a masked unit is simply ignored — and cardwired
     # keeps its own Restart=on-failure if it genuinely needs devices later.
     systemctl mask systemd-udev-settle.service 2>/dev/null || true && \
+    # ublue-os-media-automount crashes on every PowOS boot. It runs
+    # `findmnt -s --json ...`, which reads /etc/fstab and exits non-zero when
+    # there is nothing to list — and a bootc install leaves /etc/fstab EMPTY,
+    # because mounts come from kernel args and ostree rather than fstab. Its
+    # Python does not handle that exit status, so the unit dies with a
+    # CalledProcessError and sits red in `systemctl --failed` forever. The
+    # precondition never holds on our images, and anything a user does put in
+    # fstab is mounted by systemd's own fstab generator regardless.
+    systemctl mask ublue-os-media-automount.service 2>/dev/null || true && \
     systemctl mask plasma-setup.service 2>/dev/null || true && \
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true
