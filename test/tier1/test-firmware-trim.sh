@@ -17,11 +17,14 @@ CF="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/Containerfile"
 
 echo "== deck firmware trim =="
 check "the trim exists and is deck-gated" \
-      'grep -q "dropped nvidia/intel/i915/mediatek" "$CF"'
-for v in nvidia intel i915 mediatek; do
+      'grep -q "dropped nvidia/intel/i915" "$CF"'
+for v in nvidia intel i915; do
   check "drops $v (no such hardware on a Deck)" 'grep -q "/usr/lib/firmware/'"$v"'" "$CF"'
 done
-for k in amdgpu ath10k qcom; do
+# mediatek was in the drop list and was taken back OUT: MediaTek USB wifi and
+# ethernet adapters exist, and a Deck gets docked. "The Deck has no MediaTek
+# silicon" is true of the built-in hardware and irrelevant to what is plugged in.
+for k in amdgpu ath10k qcom mediatek rtl_nic; do
   check "NEVER drops $k" '! grep -qE "rm -rf[^;]*firmware/'"$k"'" "$CF"'
 done
 check "the build FAILS if wifi/gpu firmware went missing" \
