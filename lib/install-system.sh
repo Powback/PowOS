@@ -240,17 +240,56 @@ ISV_SPLASH_KARG="${ISV_SPLASH_KARG:-plymouth.enable=$([[ "${POWOS_SPLASH:-0}" ==
 #
 # See isv_hardware_fixups for (2).
 
+# Is this machine one bazzite-hardware-setup treats as a handheld?
+#
+# Call ITS OWN detectors when they exist rather than copying their model lists.
+# We run from the live medium, which ships /usr/libexec/hwsupport, so the answer
+# comes from the same code that will run on first boot and cannot drift out of
+# sync with it. The DMI fallback is only for hosts without those helpers (CI,
+# a dev box), and covers the Decks by name.
+isv__hwsupport() { echo "${ISV_HWSUPPORT:-/usr/libexec/hwsupport}"; }
+
+isv__is_valve() {
+    local h; h=$(isv__hwsupport)
+    [[ -x "$h/valve-hardware" ]] && { "$h/valve-hardware" && return 0 || return 1; }
+    local id; id=$(cat "${ISV_DMI:-/sys/devices/virtual/dmi/id}/product_name" 2>/dev/null || echo "")
+    [[ -n "$id" && ":Jupiter:Galileo:" == *":$id:"* ]]
+}
+
+isv__is_handheld() {
+    local h; h=$(isv__hwsupport)
+    [[ -x "$h/non-valve-handheld-hardware" ]] && { "$h/non-valve-handheld-hardware" && return 0 || return 1; }
+    return 1
+}
+
 # Emit the kargs bazzite-hardware-setup would append, one per line.
 # We run ON the target hardware from the live USB, so this reads the same DMI
-# the script will read on first boot and reaches the same conclusion.
+# and the same kernel parameters it will read on first boot.
+#
+# NOTE the script is versioned and the branches MOVE between versions. v71 (on
+# a desktop nvidia-open image) has no ppfeaturemask branch but does have the
+# gttsize fixups; v72 (the deck image) is the reverse. Reading whichever copy
+# happens to be on the build host and generalising from it is how this was got
+# wrong once already — hence test-firstboot-offline.sh replays the script that
+# is actually installed rather than trusting a remembered reading.
 isv_hardware_kargs() {
-    local sysid
-    sysid=$(cat "${ISV_DMI:-/sys/devices/virtual/dmi/id}/product_name" 2>/dev/null || echo "")
+    local id; id=$(cat "${ISV_DMI:-/sys/devices/virtual/dmi/id}/product_name" 2>/dev/null || echo "")
 
-    # amd_iommu=off — Valve handhelds (Jupiter/Galileo) plus the Lenovo/ASUS
-    # list, mirroring bazzite-hardware-setup's own condition.
-    if [[ -n "$sysid" ]] && \
-       [[ ":Jupiter:Galileo:83N0:83N1:83E1:ROG Ally RC71L:ROG Ally X RC72LA:" == *":$sysid:"* ]]; then
+    # amdgpu.ppfeaturemask — handhelds (Valve or otherwise). The value is the
+    # running kernel's own setting OR 0x4000, exactly as upstream computes it;
+    # its guard is a substring test for "ppfeaturemask", so any value suppresses
+    # the re-deploy, but we match the real one so the GPU behaves as intended.
+    if isv__is_valve || isv__is_handheld; then
+        local ppf ppf_file="${ISV_PPFEATUREMASK_FILE:-/sys/module/amdgpu/parameters/ppfeaturemask}"
+        ppf=$(cat "$ppf_file" 2>/dev/null) || ppf=""
+        if [[ "$ppf" =~ ^-?[0-9]+$ ]]; then
+            printf 'amdgpu.ppfeaturemask=0x%x\n' "$(( ppf | 0x4000 ))"
+        fi
+    fi
+
+    # amd_iommu=off — Valve handhelds plus the Lenovo/ASUS list.
+    if isv__is_valve || [[ -n "$id" && \
+       ":83N0:83N1:83E1:ROG Ally RC71L:ROG Ally X RC72LA:" == *":$id:"* ]]; then
         echo "amd_iommu=off"
     fi
 
