@@ -116,6 +116,15 @@ if [[ -f "$NMW" ]] && grep -qE 'timeout=[1-9]' "$NMW"; then
 else
     bad "the network wait is unbounded" "an offline boot stalls on the default timeout"
 fi
+# ...and giving up must not be an error. nm-online exits non-zero on timeout,
+# so without the "-" prefix the unit goes FAILED on every boot of a device
+# with no network — the normal case for a handheld.
+if [[ -f "$NMW" ]] && grep -qE '^ExecStart=-' "$NMW"; then
+    ok "an offline boot does not leave a FAILED unit behind"
+else
+    bad "nm-online timing out marks the unit FAILED" \
+        "every offline boot reports a failure that is not one"
+fi
 if grep -qF "COPY systemd/NetworkManager-wait-online.service.d/" "$CF"; then
     ok "the bounded wait reaches the image"
 else
