@@ -592,15 +592,15 @@ unset -f bootc lsblk parted mkfs.ntfs blkid
 # such karg hangs on every boot. Installing from a working medium onto a
 # machine that then does not boot is the worst outcome available, so both
 # install paths must carry the karg.
-echo "== installed systems boot WITH the splash; the medium stays text =="
+echo "== boots are TEXT by default: a machine you cannot read cannot be diagnosed =="
 LIBSRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)/install-system.sh"
 [[ -f "$LIBSRC" ]] || LIBSRC=/usr/lib/powos/install-system.sh
-check "default splash karg ENABLES plymouth (installed systems get the splash)" \
-      '[[ "$ISV_SPLASH_KARG" == "plymouth.enable=1" ]]'
+check "default splash karg DISABLES plymouth (first, be diagnosable)" \
+      '[[ "$ISV_SPLASH_KARG" == "plymouth.enable=0" ]]'
 n_splash=$(grep -c -- '--karg "\$ISV_SPLASH_KARG"' "$LIBSRC")
 check "BOTH install paths pass it (to-disk and to-filesystem)" '[[ "$n_splash" -eq 2 ]]'
-check "POWOS_SPLASH=0 can turn the splash off" \
-      '[[ "$(POWOS_SPLASH=0 ISV_SPLASH_KARG="" bash -c "source \"$LIBSRC\" >/dev/null 2>&1; echo \$ISV_SPLASH_KARG")" == "plymouth.enable=0" ]]'
+check "POWOS_SPLASH=1 can turn the splash on" \
+      '[[ "$(POWOS_SPLASH=1 ISV_SPLASH_KARG="" bash -c "source \"$LIBSRC\" >/dev/null 2>&1; echo \$ISV_SPLASH_KARG")" == "plymouth.enable=1" ]]'
 
 # ── Summary ───────────────────────────────────────────────────────
 echo

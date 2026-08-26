@@ -186,26 +186,27 @@ isv_live_device() {
 }
 
 # ── Disk discovery ────────────────────────────────────────────────
-# The boot splash is ON for installed systems, OFF for the install medium.
+# The boot splash is OFF. First, be diagnosable.
 #
-# It was off everywhere for a while, and for a good reason at the time: a
-# plymouth-covered screen hid a boot that never started a display manager, and
-# every diagnosis attempt was reduced to guessing at a black rectangle. That
-# cause is fixed (see systemd/powos-installer.service), so the splash can come
-# back where it belongs.
+# It was turned on for installed systems once the display-manager bug was
+# fixed, and that was premature for two reasons.
 #
-# The medium keeps text. When you are installing an OS, or booting a stick
-# because something is already wrong, the boot log is the thing you want on
-# screen — not an animation over the top of it.
+# The practical one: a machine you cannot read is a machine you cannot
+# diagnose. A first boot that shows a splash over a blank screen, clearing
+# repeatedly, gives the user nothing to report and me nothing to work from —
+# which is exactly how several hours went.
 #
-# Plymouth still needs a KMS driver for the GPU that is actually present;
-# amdgpu stays in the deck initramfs for exactly that reason, and only the
-# drivers for absent vendors are trimmed. ESC toggles the full log at any
-# point during boot, and powos-firstboot-notice draws its progress onto the
-# splash via `plymouth display-message` rather than being hidden by it.
+# The specific one: bazzite-hardware-setup branches on plymouth. It appends
+# kernel args with `rpm-ostree kargs --append-if-missing=plymouth.use-simpledrm=0`,
+# and appending kargs stages a deployment and reboots. If the args it wants do
+# not end up present, it does the same thing on the next boot — a reboot loop
+# by construction. Enabling plymouth put that script down a branch it was not
+# taking before, and the install that followed did not converge the way the
+# previous one did.
 #
-# POWOS_SPLASH=0 installs with the splash off.
-ISV_SPLASH_KARG="${ISV_SPLASH_KARG:-plymouth.enable=$([[ "${POWOS_SPLASH:-1}" == "1" ]] && echo 1 || echo 0)}"
+# Text boot is what the install medium already does, and it is why the
+# installer's own output is readable. POWOS_SPLASH=1 opts back in.
+ISV_SPLASH_KARG="${ISV_SPLASH_KARG:-plymouth.enable=$([[ "${POWOS_SPLASH:-0}" == "1" ]] && echo 1 || echo 0)}"
 
 # Emit candidate target disks: NAME SIZE MODEL TRAN REMOVABLE
 # (excludes the live device; REMOVABLE is the sysfs flag: 1/0/?)

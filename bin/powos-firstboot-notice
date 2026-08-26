@@ -53,10 +53,24 @@ say "  This takes about a minute, the screen may clear repeatedly, and the\n"
 say "  machine will REBOOT ONCE when it finishes. This is normal.\n"
 say "  Do not power off.\n\n"
 
+# Show WHAT it is doing, not just that it is doing something.
+#
+# The unit's own output goes to the journal, never the console, so a bare
+# heartbeat leaves the user staring at a counter with no idea what is
+# happening or whether it is stuck — which is exactly the complaint this was
+# written to answer, and it only half-answered it. Echo the unit's latest log
+# line alongside the timer.
 secs=0
+lastmsg=""
 while :; do
     case "$(state)" in activating|active) : ;; *) break ;; esac
     sleep 5; secs=$((secs + 5))
-    say "  ...still working (${secs}s). Do not power off.\n"
+    msg=$(journalctl -u "$UNIT" -n 1 --no-pager -o cat 2>/dev/null | tr -d '\r' | cut -c1-70)
+    if [ -n "$msg" ] && [ "$msg" != "$lastmsg" ]; then
+        say "  [${secs}s] $msg\n"
+        lastmsg="$msg"
+    else
+        say "  ...still working (${secs}s). Do not power off.\n"
+    fi
 done
 say "\n  Hardware setup finished — rebooting once to apply it.\n\n"
