@@ -626,6 +626,32 @@ _fstab_containers_on_data() {
         # or loses its splash.
         mkdir -p "$deploy/etc/powos" 2>/dev/null || true
         : > "$deploy/etc/powos/.live-medium" 2>/dev/null || true
+
+        # Say what this is, above the login prompt.
+        #
+        # The menu default is the LIVE entry, deliberately — a boot timeout must
+        # never auto-start something that wipes a disk. But booting live then
+        # lands on a bare "bazzite login" that explains nothing: not that you are
+        # in a live environment rather than an installer, not that the installer
+        # is a different menu entry, not what credentials to use. Twice in one
+        # day that read as "the installer is broken" when the stick was fine.
+        #
+        # /etc/issue is exactly the mechanism for this — agetty prints it above
+        # the prompt — and it is LIVE-MEDIUM ONLY, written next to the
+        # .live-medium marker, so an installed system is untouched.
+        {
+            printf '\n'
+            _c=$(cat "$deploy/usr/lib/powos/.powos-src-commit" 2>/dev/null | cut -c1-8)
+            printf '  PowOS Live  %s\n' "${_c:+($_c)}"
+            printf '  ----------------------------------------------------------\n'
+            printf '  This is the LIVE environment. It does NOT install anything.\n'
+            printf '\n'
+            printf '  To install: reboot, then pick "Install PowOS to disk"\n'
+            printf '              from the boot menu (it is a few entries up).\n'
+            printf '\n'
+            printf '  To look around here: log in as  powos  /  powos\n'
+            printf '\n'
+        } > "$deploy/etc/issue" 2>/dev/null || true
         if ! grep -q '/var/lib/containers' "$deploy/etc/fstab" 2>/dev/null; then
             # Only write the entry if the subvolume really exists, otherwise
             # nofail turns a broken mount into a silent one.
