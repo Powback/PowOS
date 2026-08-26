@@ -176,6 +176,58 @@ iwz_input() {
     printf '%s\n' "$val"
 }
 
+# Kernel messages print onto the very console the installer draws on.
+#
+# The installer mounts overlayfs repeatedly — the offline variant store, the
+# ostree deployment — and each mount makes EVM emit
+#
+#     EVM: overlay not supported
+#
+# straight across whatever is on screen. On a Deck that lands on the disk-
+# selection list: the one screen where picking the wrong entry wipes the wrong
+# drive, now overwritten by kernel text with no way to redraw it.
+#
+# So quiet the CONSOLE, and only for as long as the UI is up.
+#
+# NOTHING IS LOST. This lowers console_loglevel, which controls what printk
+# writes to the screen; every message still goes to the kernel ring buffer and
+# the journal, so `dmesg` and `journalctl -k` after the install show all of
+# them. It is a display fix, not a logging change — which matters, because the
+# whole reason this boot is text-mode rather than plymouth is so a failure
+# stays readable.
+# Readable text from the install log.
+#
+# The log is a `script` transcript now, so it carries ANSI colour AND the
+# carriage returns indicatif uses to redraw its progress bar in place. Without
+# stripping the CRs, a single progress line reads as one enormous line and the
+# failure you are trying to quote back is buried in it.
+iwz_install_log_text() {
+    [[ -s "$IWZ_INSTALL_LOG" ]] || return 0
+    sed -e 's/\r/\n/g' -e 's/\x1b\[[0-9;]*[A-Za-z]//g' "$IWZ_INSTALL_LOG"
+}
+
+IWZ_PRINTK_SAVED=""
+IWZ_PRINTK_PATH="${IWZ_PRINTK_PATH:-/proc/sys/kernel/printk}"
+
+iwz_console_quiet() {
+    IWZ_PRINTK_SAVED=""
+    [[ -w "$IWZ_PRINTK_PATH" ]] || return 0
+    local cur
+    cur=$(cut -f1 "$IWZ_PRINTK_PATH" 2>/dev/null) || return 0
+    [[ "$cur" =~ ^[0-9]+$ ]] || return 0
+    printf '1\n' > "$IWZ_PRINTK_PATH" 2>/dev/null || return 0
+    # Only remember it once we know the write took, so restore cannot put back
+    # a value we never actually replaced.
+    IWZ_PRINTK_SAVED="$cur"
+}
+
+iwz_console_restore() {
+    [[ -n "$IWZ_PRINTK_SAVED" ]] || return 0
+    [[ -w "$IWZ_PRINTK_PATH" ]] || return 0
+    printf '%s\n' "$IWZ_PRINTK_SAVED" > "$IWZ_PRINTK_PATH" 2>/dev/null || true
+    IWZ_PRINTK_SAVED=""
+}
+
 # iwz_password "prompt" ["default"]  → prints the entered secret
 #                                       (no echo in the read backend)
 #
@@ -918,12 +970,39 @@ iwz_commit() {
         powos install-system $args --dry-run || iwz_warn "installer preview returned non-zero"
     else
         echo -e "  ${DIM}\$ powos install-system $args${NC}"
-        # Tee the run: whiptail CLEARS the screen before drawing its next
-        # dialog, so by the time a failure can be reported in one, everything
-        # the installer printed is gone. Keep a copy to quote back.
+        # Run it under a PTY, and keep a copy of everything it printed.
+        #
+        # The copy has to exist because whiptail CLEARS the screen before its
+        # next dialog, so by the time a failure can be shown in one, the
+        # installer's output is gone.
+        #
+        # But it must NOT be a pipe. bootc draws its image-copy progress with
+        # indicatif, which redraws in place only when stdout `is_terminal()`.
+        # Piping into `tee` made stdout a pipe, so indicatif fell back to
+        # emitting a NEW LINE per update — the wall of "Copying ..." that
+        # scrolls for minutes and conveys nothing. bootc 1.16.9 has no
+        # --progress-fd or progress-mode flag on `install to-disk` to ask for
+        # anything better (only `upgrade` has --quiet), so the fix is to stop
+        # taking the terminal away from it.
+        #
+        # powos-pty-run gives it a real pty, writes the transcript to the log,
+        # and still shows output live. `script(1)` would do the same but
+        # util-linux-script is NOT in the image, so preferring it would have
+        # silently fallen through to the pipe and changed nothing. Readers of
+        # the log must strip CR and ANSI — iwz_install_log_text does.
+        local rc pty_run
+        pty_run=$(command -v powos-pty-run 2>/dev/null) \
+            || pty_run="$(dirname "${BASH_SOURCE[0]}")/../bin/powos-pty-run"
+        : > "$IWZ_INSTALL_LOG" 2>/dev/null || true
         # shellcheck disable=SC2086
-        powos install-system $args 2>&1 | tee "$IWZ_INSTALL_LOG"
-        local rc=${PIPESTATUS[0]}
+        if [[ -x "$pty_run" ]]; then
+            "$pty_run" "$IWZ_INSTALL_LOG" "powos install-system $args"
+            rc=$?
+        else
+            iwz_warn "powos-pty-run missing — install output will be verbose."
+            powos install-system $args 2>&1 | tee "$IWZ_INSTALL_LOG"
+            rc=${PIPESTATUS[0]}
+        fi
         [[ $rc -eq 0 ]] || { iwz_err "Installer failed — aborting."; return 1; }
         # 3) Place the config on the installed system for firstboot. A failure
         #    here must NOT abort: the disk is already written, and aborting
@@ -966,6 +1045,12 @@ cmd_install_wizard() {
     done
 
     IWZ_UI=$(iwz_detect_ui)
+
+    # Stop kernel printk painting over the UI (see iwz_console_quiet). Restore
+    # on ANY exit, including a cancel or a crash, so a machine that drops back
+    # to a shell is not left with a silenced console.
+    trap iwz_console_restore EXIT INT TERM
+    iwz_console_quiet
 
     echo
     echo -e "${CYAN}${BOLD}  PowOS Guided Installer${NC}"
@@ -1017,7 +1102,7 @@ Proceed with this install?"; then
         iwz_err "The install did not complete. Nothing further was changed."
         if [[ $IWZ_DRY_RUN -eq 0 && ${EUID:-$(id -u)} -eq 0 ]]; then
             local tail_txt=""
-            [[ -s "$IWZ_INSTALL_LOG" ]] && tail_txt=$(sed 's/\x1b\[[0-9;]*m//g' "$IWZ_INSTALL_LOG" |
+            [[ -s "$IWZ_INSTALL_LOG" ]] && tail_txt=$(iwz_install_log_text |
                                                       grep -v '^[[:space:]]*$' | tail -n 8 | cut -c1-70)
             if iwz_yesno "The install did not complete.
 ${tail_txt:+

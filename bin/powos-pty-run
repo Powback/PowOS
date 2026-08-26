@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""powos-pty-run <logfile> <shell-command>
+
+Run a command on a PTY, showing its output live AND appending a transcript to
+<logfile>. Exit status is the command's.
+
+WHY THIS EXISTS
+bootc draws its image-copy progress with indicatif, which redraws in place only
+when stdout is_terminal(). The installer used to pipe into `tee` to keep a copy
+of the output, which made stdout a pipe -- so indicatif fell back to printing a
+NEW LINE per update and the screen filled with "Copying ..." for minutes while
+saying nothing useful. bootc 1.16.9 exposes no --progress-fd or progress-mode
+flag on `install to-disk` (only `upgrade` has --quiet), so the only lever is to
+stop taking the terminal away from it.
+
+`script(1)` does exactly this job, but util-linux-script is NOT in the image and
+adding a package to fix output formatting is a poor trade. python3 is already
+present and its pty module does the same thing in a dozen lines.
+"""
+import os
+import pty
+import sys
+
+
+def main() -> int:
+    if len(sys.argv) < 3:
+        print("usage: powos-pty-run <logfile> <command>", file=sys.stderr)
+        return 2
+    logfile, command = sys.argv[1], sys.argv[2]
+
+    try:
+        log = open(logfile, "ab", buffering=0)
+    except OSError as exc:                       # a log we cannot write must not
+        print(f"powos-pty-run: {exc}", file=sys.stderr)   # cost you the install
+        log = None
+
+    def read(fd: int) -> bytes:
+        data = os.read(fd, 65536)
+        if log is not None and data:
+            try:
+                log.write(data)
+            except OSError:
+                pass
+        return data
+
+    status = pty.spawn(["/bin/bash", "-c", command], read)
+    if log is not None:
+        log.close()
+    # pty.spawn returns a wait status, not an exit code.
+    if hasattr(os, "waitstatus_to_exitcode"):
+        try:
+            return os.waitstatus_to_exitcode(status)
+        except ValueError:
+            return 1
+    return os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -298,7 +298,7 @@ RUN ln -sf /dev/null /etc/systemd/system/sleep.target && \
 # `bootc switch` or `bootc upgrade` from a machine with an existing /var
 # would silently keep the old (or missing) marker.
 ARG POWOS_SRC_COMMIT=""
-RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog /usr/bin/pow-collision-check 2>/dev/null || true && \
+RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-pty-run /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog /usr/bin/pow-collision-check 2>/dev/null || true && \
     find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
     # Guard: OCI hook JSON must never ship without its binary. crun fails
     # opaquely ("error executing hook … (exit code: 1)") on EVERY container

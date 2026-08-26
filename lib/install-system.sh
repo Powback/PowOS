@@ -75,8 +75,21 @@ ISV_VARIANT=""         # GPU variant to install (deck|main|nvidia-open).
 
 # run_step "description" cmd args...
 # Executes a (destructive) command unless dry-run. Always echoes it first.
+# Progress footer. Sourced defensively: install-system must keep working if
+# progress.sh is missing, so every pg_* call is guarded by pg_have.
+if [[ -z "${PG_ACTIVE:-}" ]]; then
+    _isv_pg="$(dirname "${BASH_SOURCE[0]}")/progress.sh"
+    # shellcheck source=/dev/null
+    [[ -r "$_isv_pg" ]] && source "$_isv_pg"
+    unset _isv_pg
+fi
+pg_have() { declare -F pg_step >/dev/null 2>&1; }
+
 run_step() {
     local desc="$1"; shift
+    # Advance the footer BEFORE running, so the line names what is happening
+    # now rather than what just finished.
+    pg_have && pg_step "$desc"
     echo -e "  ${DIM}\$ $*${NC}"
     if [[ $ISV_DRY_RUN -eq 1 ]]; then
         isv_warn "dry-run: skipped ($desc)"
@@ -1392,6 +1405,25 @@ cmd_install_system() {
 
     isv_choose_disk   || return 1
     isv_choose_mode   || return 1
+
+    # Pin the progress footer for the rest of the run. Started AFTER the
+    # interactive disk/mode questions so it never fights a prompt for the
+    # bottom of the screen, and torn down on ANY exit so a cancelled install
+    # does not leave the terminal with a two-line scroll region.
+    #
+    # The step total is an ESTIMATE and is treated as one: whole-disk and
+    # alongside take different paths, so the footer always prints a literal
+    # "step N/M" beside the bar and refuses to show full until pg_finish.
+    if pg_have; then
+        local _pg_total=9
+        [[ "$ISV_MODE" == "alongside" ]] && _pg_total=12
+        # ISV_SHARED_GB may still be the literal "auto" here, which would make
+        # a bare (( )) comparison error out under errexit.
+        [[ "${ISV_SHARED_GB:-0}" =~ ^[0-9]+$ ]] && (( ISV_SHARED_GB > 0 )) \
+            && _pg_total=$(( _pg_total + 2 ))
+        trap 'pg_finish' EXIT INT TERM
+        pg_begin "$_pg_total"
+    fi
 
     # Separate games disk: PowOS takes the WHOLE target (no games/Windows tail
     # carved there); POWOS-GAMES is created on ISV_GAMES_DISK AFTER the install
