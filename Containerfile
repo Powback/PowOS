@@ -411,6 +411,51 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true
 
+# ── Trim base-image bulk the system never uses ─────────────────────
+#
+# All of this comes from the Bazzite base; PowOS adds none of it. Removing it
+# takes ~555 MB off the DEPLOYED system.
+#
+# It does NOT shrink the download, and it is worth being explicit about that so
+# nobody re-measures it expecting one. The build runs with --layers and no
+# squash, so a delete here is a whiteout in a NEW layer while the bytes stay in
+# the base layer and are still fetched — the 135-layer, ~7 GB first pull is
+# unchanged, possibly a few KB larger. Shrinking THAT means squashing or moving
+# off the base image, which is a different job.
+#
+# Three deliberate exclusions:
+#   /usr/share/licenses  a SEPARATE tree from /usr/share/doc (14 MB), so the
+#                        license texts survive. Do not fold it in.
+#   /usr/share/locale    663 MB, but pruning to English drops nb_NO with it.
+#   /usr/share/fonts     409 MB, mostly Noto CJK — that is what renders
+#                        Japanese and Chinese game titles in Steam.
+#
+# Wallpapers are TRIMMED TO THE REFERENCED SET, not emptied. Plasma's
+# look-and-feel defaults name specific wallpapers, and deleting one leaves the
+# default desktop pointing at a missing image. The keep-list is derived from
+# those files at build time rather than hardcoded, so it cannot drift when the
+# base changes its defaults, and the build fails loudly if that derivation
+# comes back empty — which would otherwise delete every wallpaper silently.
+
+RUN set -eu; \
+    keep=$(grep -rhs '^Image=' /usr/share/plasma/look-and-feel/*/contents/defaults 2>/dev/null \
+             | sed 's/^Image=//' | sort -u); \
+    keep="$keep $(grep -rhso '/usr/share/wallpapers/[A-Za-z0-9_-]*' \
+             /usr/share/plasma /usr/share/sddm /etc 2>/dev/null | sed 's|.*/||' | sort -u)"; \
+    keep=$(printf '%s\n' $keep | sort -u); \
+    if [ -d /usr/share/wallpapers ]; then \
+      [ -n "$keep" ] || { echo "BUILD ERROR: wallpaper keep-list is EMPTY; refusing to delete them all"; exit 1; }; \
+      for d in /usr/share/wallpapers/*/; do \
+        [ -d "$d" ] || continue; \
+        n=$(basename "$d"); \
+        printf '%s\n' $keep | grep -qxF "$n" || rm -rf "$d"; \
+      done; \
+    fi; \
+    rm -rf /usr/share/doc /usr/share/man /usr/share/help; \
+    [ -d /usr/share/licenses ] \
+      || { echo "BUILD ERROR: /usr/share/licenses was removed - license texts must survive"; exit 1; }; \
+    echo "trim: /usr/share is now $(du -sh /usr/share 2>/dev/null | cut -f1)"
+
 # Container dev/test entrypoint: `docker compose up` / `docker run` launches the
 # desktop boot sequence + VNC/noVNC. IGNORED by the installed OS (it boots via
 # systemd), this only affects running the image as a container.
