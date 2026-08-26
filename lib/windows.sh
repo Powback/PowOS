@@ -119,6 +119,13 @@ WIN_CONFIG_LOADED=""        # set to the path once a config is applied (plan dis
 # Unattend-volume teardown state (set by win_install, read by the trap).
 WIN_TD_UNATTEND_MNT=""
 
+# Outputs of the win_install phases (see "install phases" below). Globals
+# because the phases also PRINT — a command substitution would swallow the
+# progress lines the install is supposed to show.
+WIN_INSTALL_OVMF_CODE=""
+WIN_INSTALL_OVMF_VARS_SRC=""
+WIN_INSTALL_UNATTEND_IMG=""
+
 # OVMF (UEFI firmware) search paths — same candidates as lib/vm.sh.
 WIN_OVMF_CODE_CANDIDATES=(
     /usr/share/edk2/ovmf/OVMF_CODE.fd
@@ -1219,9 +1226,17 @@ win_backup_esp() {
     return 0
 }
 
-win_install() {
-    win_step "Install Windows into the image (EXPERIMENTAL — TODO(hw))"
+# ── install phases ────────────────────────────────────────────────
+# win_install is the orchestrator; the five functions below are its phases,
+# in the order it runs them. They are NOT general-purpose helpers: each one
+# reads the WIN_* globals the option parser filled in, prints the exact
+# wording users (and the tier-1 tests) depend on, and returns non-zero to
+# abort the install. Splitting them out is a readability change only — the
+# order, the guards and the messages are unchanged.
 
+# Phase 1 — decide WHICH ISO gets installed, and prove it exists.
+# Rewrites the WIN_ISO global in place; that rewrite IS the phase output.
+win_install_resolve_iso() {
     # --fetch convenience: acquire the OFFICIAL ISO first (optionally --slim it),
     # then install the result. win_fetch_iso reports the produced ISO path in
     # WIN_FETCHED_ISO (the slim output when slimmed).
@@ -1259,48 +1274,14 @@ win_install() {
         win_slim_iso "$WIN_ISO" "$_slimout" || { win_err "slim failed — not installing."; return 1; }
         WIN_ISO="$_slimout"
     fi
+    return 0
+}
 
-    local games
-    games=$(win_games_mount) || {
-        win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
-        return 1
-    }
-    local dir="$games/$WIN_IMAGE_SUBDIR"
-    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
-    if [[ -e "$canon" ]]; then
-        win_err "Windows is already installed ($canon)."
-        win_err "Boot it:  powos windows  /  powos windows vm"
-        win_err "To reinstall: snapshot/remove the image, then powos windows create."
-        return 1
-    fi
-    if [[ ! -e "$raw" ]]; then
-        win_err "No installation image found. Create it first:"
-        win_err "  powos windows create [--size N]"
-        return 1
-    fi
-    win_guard_image_free "$raw" || return 1
-
-    # The REAL PowOS ESP: the ONLY real block device the VM gets — Setup's
-    # first-logon bcdboot lays the native-boot files onto it.
-    local esp esp_mnt
-    esp=$(win_powos_esp) || {
-        win_err "Could not identify the PowOS ESP (nothing mounted at /boot/efi)."
-        win_err "The install VM needs it (as a 2nd disk) for the native-boot files."
-        return 1
-    }
-    esp_mnt=$(win_esp_mountpoint "$esp") || {
-        win_err "Could not resolve the ESP mountpoint for backup."
-        return 1
-    }
-
-    # Backup destination on POWOS-DATA.
-    local bdir bfile
-    bdir=$(win_backup_dir) || {
-        win_err "POWOS-DATA is not mounted — the mandatory ESP backup lives on it."
-        return 1
-    }
-    bfile="$bdir/esp-backup-$(date +%Y%m%d-%H%M%S).tar.zst"
-
+# Phase 2 — the plan display. Pure output: it must not mutate anything, so
+# --dry-run can stop straight after it. $1 raw image, $2 ESP device,
+# $3 ESP-backup destination; everything else comes from the WIN_* globals.
+win_install_print_plan() {
+    local raw="${1:?}" esp="${2:?}" bfile="${3:?}"
     win_step "Plan"
     echo "  ISO (user-supplied): $WIN_ISO"
     echo "  Disk 0 (target):     $raw  (raw sparse file — Setup creates its own"
@@ -1347,7 +1328,14 @@ win_install() {
         fi
     fi
     echo
+    return 0
+}
 
+# Phase 3 — the --fixed-vhd nudge for a SMALL install. Advisory only: it
+# prints a hint and never changes the outcome, so it always returns 0 (a
+# trailing `[[ ]] && cmd` that tests false would otherwise hand the caller
+# a 1 and, under set -e, abort the install for a piece of advice).
+win_install_size_hint() {
     # Native VHD boot prefers a FIXED VHD; a small (slim/tiny11) install makes
     # that practical up front — a dynamic VHDX balloons toward its full --size
     # on the first metal boot (docs/PROBLEM.md cost note 1).
@@ -1358,12 +1346,17 @@ win_install() {
         [[ -n "$_isz" && "$_isz" -gt 0 && "$_isz" -lt 4294967296 ]] && _small=1
     fi
     [[ $_small -eq 1 ]] && win_fixed_vhd_hint
+    return 0
+}
 
-    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
-        win_warn "dry-run: stopping before the ESP backup and VM launch. Nothing was changed."
-        return 0
-    fi
-
+# Phase 4 — everything that can still refuse for free: root, the tools the
+# chosen mode needs, the ESP really being a block device, and the OVMF
+# firmware. Runs AFTER the dry-run exit and BEFORE the confirmation, so a
+# --dry-run never demands root and a confirmed install never fails on a
+# missing tool. $1 = the ESP device. Publishes the firmware paths in
+# WIN_INSTALL_OVMF_CODE / WIN_INSTALL_OVMF_VARS_SRC.
+win_install_preflight() {
+    local esp="${1:?}"
     win_require_root "install" || return 1
     local t req_tools=(qemu-system-x86_64 tar zstd)
     [[ ${WIN_INTERACTIVE:-0} -eq 0 ]] && req_tools+=(mkfs.vfat truncate)
@@ -1375,15 +1368,136 @@ win_install() {
         return 1
     fi
 
-    # OVMF firmware (vm.sh candidates) + per-run writable NVRAM copy.
-    local ovmf_code src_vars ovmf_vars
-    ovmf_code=$(win_find_first_existing "${WIN_OVMF_CODE_CANDIDATES[@]}") || {
+    # OVMF firmware (vm.sh candidates); the caller derives the per-run
+    # writable NVRAM copy from WIN_RUNDIR.
+    WIN_INSTALL_OVMF_CODE=$(win_find_first_existing "${WIN_OVMF_CODE_CANDIDATES[@]}") || {
         win_err "OVMF UEFI firmware not found. Install edk2-ovmf."; return 1
     }
-    src_vars=$(win_find_first_existing "${WIN_OVMF_VARS_CANDIDATES[@]}") || {
+    WIN_INSTALL_OVMF_VARS_SRC=$(win_find_first_existing "${WIN_OVMF_VARS_CANDIDATES[@]}") || {
         win_err "OVMF_VARS template not found (edk2-ovmf)."; return 1
     }
-    ovmf_vars="${WIN_RUNDIR}/install_VARS.fd"
+    return 0
+}
+
+# Phase 5 — the unattend volume: a tiny FAT disk carrying autounattend.xml
+# and (unless --no-games) the Steam first-logon script + preloaded
+# SteamSetup.exe. The FAT volume carries an NTFS-style LABEL so the
+# first-logon PowerShell can find both it and POWOS-GAMES by label.
+# --interactive builds nothing and publishes an empty path.
+# On failure it returns 1 with WIN_TD_UNATTEND_MNT still pointing at any
+# mounted staging dir — the CALLER owns the teardown, exactly as before.
+# Publishes the image path in WIN_INSTALL_UNATTEND_IMG.
+win_install_make_unattend() {
+    WIN_INSTALL_UNATTEND_IMG=""
+    local games_setup=0 steam_arg="$WIN_WITH_STEAM"
+    if [[ ${WIN_NO_GAMES:-0} -eq 0 ]]; then
+        games_setup=1        # the ps1 owns Steam (offline preinstall + CDN fallback)
+        steam_arg=0          # …so do NOT also inject the CDN inline Steam block
+    fi
+    if [[ ${WIN_INTERACTIVE:-0} -eq 0 ]]; then
+        local xml ump vhdpath
+        vhdpath="\\${WIN_IMAGE_SUBDIR}\\windows.$(win_image_ext)"
+        xml=$(win_build_autounattend "$WIN_USERNAME" "$WIN_PASSWORD" \
+                "$WIN_LOCALE" "$WIN_KEYBOARD" "$WIN_PRODUCT_KEY" \
+                "$WIN_EDITION" "$steam_arg" "$vhdpath" \
+                "$games_setup" "$WIN_UNATTEND_LABEL")
+        local unattend_img="${WIN_RUNDIR}/unattend.img"
+        WIN_INSTALL_UNATTEND_IMG="$unattend_img"
+        win_run_step "create unattend volume (64MiB, sparse)" \
+            truncate -s 64M "$unattend_img" || return 1
+        win_run_step "format + label unattend volume (FAT '$WIN_UNATTEND_LABEL')" \
+            mkfs.vfat -n "$WIN_UNATTEND_LABEL" "$unattend_img" >/dev/null || return 1
+        local ump_dir
+        ump_dir=$(mktemp -d) || return 1
+        WIN_TD_UNATTEND_MNT="$ump_dir"
+        win_run_step "mount unattend volume" \
+            mount -o loop "$unattend_img" "$ump_dir" || return 1
+        echo -e "  ${WIN_DIM}\$ (write) ${ump_dir}/autounattend.xml${WIN_NC}"
+        if ! printf '%s\n' "$xml" > "$ump_dir/autounattend.xml"; then
+            win_err "Could not write autounattend.xml."
+            return 1
+        fi
+        # Steam + shared-library first-logon payload (default; --no-games skips).
+        if [[ $games_setup -eq 1 ]]; then
+            local ps1
+            ps1=$(win_build_steam_firstlogon_ps1 "$WIN_GAMES_LABEL" \
+                    "$WIN_GAMES_LETTER" "$WIN_UNATTEND_LABEL" \
+                    "$WIN_STEAM_AUTOSTART" "$WIN_STEAM_SETUP_NAME" \
+                    "$WIN_STEAM_LIB_SUBDIR")
+            echo -e "  ${WIN_DIM}\$ (write) ${ump_dir}/powos-first-logon.ps1${WIN_NC}"
+            printf '%s\n' "$ps1" > "$ump_dir/powos-first-logon.ps1" || \
+                win_warn "Could not write the Steam first-logon script — continuing."
+            # Preload the OFFICIAL Steam bootstrapper onto the volume (best
+            # effort — first logon falls back to the CDN if this is absent).
+            win_fetch_steam_setup "$ump_dir/$WIN_STEAM_SETUP_NAME" || \
+                win_warn "Steam preload failed — first logon will use the CDN fallback."
+        fi
+        win_run_step "unmount unattend volume" umount "$ump_dir" || return 1
+        WIN_TD_UNATTEND_MNT=""
+        rmdir "$ump_dir" 2>/dev/null || true
+    fi
+    return 0
+}
+
+win_install() {
+    win_step "Install Windows into the image (EXPERIMENTAL — TODO(hw))"
+
+    win_install_resolve_iso || return 1
+
+    local games
+    games=$(win_games_mount) || {
+        win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
+        return 1
+    }
+    local dir="$games/$WIN_IMAGE_SUBDIR"
+    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
+    if [[ -e "$canon" ]]; then
+        win_err "Windows is already installed ($canon)."
+        win_err "Boot it:  powos windows  /  powos windows vm"
+        win_err "To reinstall: snapshot/remove the image, then powos windows create."
+        return 1
+    fi
+    if [[ ! -e "$raw" ]]; then
+        win_err "No installation image found. Create it first:"
+        win_err "  powos windows create [--size N]"
+        return 1
+    fi
+    win_guard_image_free "$raw" || return 1
+
+    # The REAL PowOS ESP: the ONLY real block device the VM gets — Setup's
+    # first-logon bcdboot lays the native-boot files onto it.
+    local esp esp_mnt
+    esp=$(win_powos_esp) || {
+        win_err "Could not identify the PowOS ESP (nothing mounted at /boot/efi)."
+        win_err "The install VM needs it (as a 2nd disk) for the native-boot files."
+        return 1
+    }
+    esp_mnt=$(win_esp_mountpoint "$esp") || {
+        win_err "Could not resolve the ESP mountpoint for backup."
+        return 1
+    }
+
+    # Backup destination on POWOS-DATA.
+    local bdir bfile
+    bdir=$(win_backup_dir) || {
+        win_err "POWOS-DATA is not mounted — the mandatory ESP backup lives on it."
+        return 1
+    }
+    bfile="$bdir/esp-backup-$(date +%Y%m%d-%H%M%S).tar.zst"
+
+    win_install_print_plan "$raw" "$esp" "$bfile"
+
+    win_install_size_hint
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_warn "dry-run: stopping before the ESP backup and VM launch. Nothing was changed."
+        return 0
+    fi
+
+    win_install_preflight "$esp" || return 1
+    local ovmf_code="$WIN_INSTALL_OVMF_CODE"
+    local src_vars="$WIN_INSTALL_OVMF_VARS_SRC"
+    local ovmf_vars="${WIN_RUNDIR}/install_VARS.fd"
 
     win_confirm "Back up the ESP and boot Windows Setup?" || {
         win_log "Aborted. Nothing was changed."
@@ -1409,57 +1523,11 @@ win_install() {
 
     trap 'win_install_teardown' EXIT INT TERM
 
-    # ── 3. Unattend volume: a tiny FAT disk carrying autounattend.xml, and
-    #      (unless --no-games) the Steam first-logon script + preloaded
-    #      SteamSetup.exe. The FAT volume carries an NTFS-style LABEL so the
-    #      first-logon PowerShell can find both it and POWOS-GAMES by label. ──
-    local unattend_img=""
-    local games_setup=0 steam_arg="$WIN_WITH_STEAM"
-    if [[ ${WIN_NO_GAMES:-0} -eq 0 ]]; then
-        games_setup=1        # the ps1 owns Steam (offline preinstall + CDN fallback)
-        steam_arg=0          # …so do NOT also inject the CDN inline Steam block
-    fi
-    if [[ ${WIN_INTERACTIVE:-0} -eq 0 ]]; then
-        local xml ump vhdpath
-        vhdpath="\\${WIN_IMAGE_SUBDIR}\\windows.$(win_image_ext)"
-        xml=$(win_build_autounattend "$WIN_USERNAME" "$WIN_PASSWORD" \
-                "$WIN_LOCALE" "$WIN_KEYBOARD" "$WIN_PRODUCT_KEY" \
-                "$WIN_EDITION" "$steam_arg" "$vhdpath" \
-                "$games_setup" "$WIN_UNATTEND_LABEL")
-        unattend_img="${WIN_RUNDIR}/unattend.img"
-        win_run_step "create unattend volume (64MiB, sparse)" \
-            truncate -s 64M "$unattend_img" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        win_run_step "format + label unattend volume (FAT '$WIN_UNATTEND_LABEL')" \
-            mkfs.vfat -n "$WIN_UNATTEND_LABEL" "$unattend_img" >/dev/null || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        local ump_dir
-        ump_dir=$(mktemp -d) || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        WIN_TD_UNATTEND_MNT="$ump_dir"
-        win_run_step "mount unattend volume" \
-            mount -o loop "$unattend_img" "$ump_dir" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        echo -e "  ${WIN_DIM}\$ (write) ${ump_dir}/autounattend.xml${WIN_NC}"
-        if ! printf '%s\n' "$xml" > "$ump_dir/autounattend.xml"; then
-            win_err "Could not write autounattend.xml."
-            trap - EXIT INT TERM; win_install_teardown; return 1
-        fi
-        # Steam + shared-library first-logon payload (default; --no-games skips).
-        if [[ $games_setup -eq 1 ]]; then
-            local ps1
-            ps1=$(win_build_steam_firstlogon_ps1 "$WIN_GAMES_LABEL" \
-                    "$WIN_GAMES_LETTER" "$WIN_UNATTEND_LABEL" \
-                    "$WIN_STEAM_AUTOSTART" "$WIN_STEAM_SETUP_NAME" \
-                    "$WIN_STEAM_LIB_SUBDIR")
-            echo -e "  ${WIN_DIM}\$ (write) ${ump_dir}/powos-first-logon.ps1${WIN_NC}"
-            printf '%s\n' "$ps1" > "$ump_dir/powos-first-logon.ps1" || \
-                win_warn "Could not write the Steam first-logon script — continuing."
-            # Preload the OFFICIAL Steam bootstrapper onto the volume (best
-            # effort — first logon falls back to the CDN if this is absent).
-            win_fetch_steam_setup "$ump_dir/$WIN_STEAM_SETUP_NAME" || \
-                win_warn "Steam preload failed — first logon will use the CDN fallback."
-        fi
-        win_run_step "unmount unattend volume" umount "$ump_dir" || { trap - EXIT INT TERM; win_install_teardown; return 1; }
-        WIN_TD_UNATTEND_MNT=""
-        rmdir "$ump_dir" 2>/dev/null || true
-    fi
+    # ── 3. Unattend volume (phase 5). It leaves WIN_TD_UNATTEND_MNT set on
+    #      failure so the teardown below unwinds a half-built volume. ──
+    local unattend_img
+    win_install_make_unattend || { trap - EXIT INT TERM; win_install_teardown; return 1; }
+    unattend_img="$WIN_INSTALL_UNATTEND_IMG"
 
     # ── 4. Launch Setup ──
     local qemu_cmd
@@ -1496,26 +1564,17 @@ win_install() {
     echo "    $(win_build_esp_restore_cmd "$bfile" "$esp_mnt")"
     return 0
 }
+# ── finalize phases ───────────────────────────────────────────────
+# Same shape as the install phases above: win_finalize is the orchestrator,
+# these are the numbered steps it runs, in order. Each returns non-zero to
+# abort finalize; the guards and messages are unchanged.
 
-# ══════════════════════════════════════════════════════════════════
-#  finalize — raw→VHDX conversion, ESP verification, firmware entry
-# ══════════════════════════════════════════════════════════════════
-win_finalize() {
-    win_step "Finalize the Windows install (EXPERIMENTAL — TODO(hw))"
-
-    local games
-    games=$(win_games_mount) || {
-        win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
-        return 1
-    }
-    local dir="$games/$WIN_IMAGE_SUBDIR"
-    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
-
-    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
-        win_require_root "finalize" || return 1
-        win_require_efi || return 1
-    fi
-
+# Phase 1 — settle the image format. Either the container is already there
+# (nothing to do; a leftover raw is only a warning), or a pending raw gets
+# converted, or there is no image at all and finalize refuses.
+# $1 raw path, $2 container path, $3 image directory (for the refusal text).
+win_finalize_convert() {
+    local raw="${1:?}" canon="${2:?}" dir="${3:?}"
     # ── 1. Pending raw → container conversion ──────────────────────
     if [[ -e "$canon" ]]; then
         win_ok "Container image present: $canon (conversion already done)."
@@ -1547,20 +1606,12 @@ win_finalize() {
         win_err "Run:  powos windows create   then   powos windows install --iso <path>"
         return 1
     fi
+    return 0
+}
 
-    # ── 2. Verify the ESP gained the native-boot files ─────────────
-    # BCD is binary; presence of EFI/Microsoft/Boot/BCD + bootmgfw.efi is
-    # the testable proxy for "bcdboot ran and the BCD points at
-    # vhd=[locate]" (Setup's first-logon self-registration).
-    local esp esp_mnt
-    esp=$(win_powos_esp) || {
-        win_err "Could not identify the PowOS ESP (nothing mounted at /boot/efi)."
-        return 1
-    }
-    esp_mnt=$(win_esp_mountpoint "$esp") || {
-        win_err "ESP is not mounted — mount it (e.g. at /boot/efi) and re-run."
-        return 1
-    }
+# Phase 2 — proof that Setup's first-logon bcdboot ran. $1 = ESP mountpoint.
+win_finalize_verify_esp() {
+    local esp_mnt="${1:?}"
     if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
         win_warn "dry-run: skipping ESP boot-file verification."
     elif [[ -e "$esp_mnt/EFI/Microsoft/Boot/BCD" && -e "$esp_mnt/EFI/Microsoft/Boot/bootmgfw.efi" ]]; then
@@ -1572,7 +1623,15 @@ win_finalize() {
         win_err "finish, or run bcdboot manually inside Windows."
         return 1
     fi
+    return 0
+}
 
+# Phase 3 — the HOST-side firmware entry. bcdboot inside the VM wrote the
+# ESP files, but it cannot create the host's NVRAM entry (the VM has its
+# own NVRAM), so it is created here and then re-resolved to prove
+# `powos boot windows` can find it. $1 = the ESP partition device.
+win_finalize_boot_entry() {
+    local esp="${1:?}"
     # ── 3. Host-side firmware entry ────────────────────────────────
     # bcdboot inside the VM wrote the ESP FILES, but it can NOT create the
     # host's NVRAM entry — the VM has its own NVRAM. Create it here.
@@ -1605,18 +1664,14 @@ win_finalize() {
             win_ok "Verified: 'powos boot windows' resolves Boot${entry_id}."
         fi
     fi
+    return 0
+}
 
-    # ── 4. Fallback .cmd for interactive installs ──────────────────
-    local script target="$dir/powos-windows-postinstall.cmd"
-    script=$(win_build_postinstall_cmd)
-    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
-        win_warn "dry-run: would write the fallback post-install script to $target"
-    elif printf '%s' "$script" > "$target"; then
-        win_log "Fallback post-install script (interactive installs): $target"
-    else
-        win_warn "Could not write $target — not fatal (unattended installs don't need it)."
-    fi
-
+# Phase 5 — the closing "Done" block: the newest ESP backup turned into a
+# one-line restore command, or a warning that there is none.
+# $1 = ESP mountpoint (the restore target).
+win_finalize_print_restore() {
+    local esp_mnt="${1:?}"
     # ── 5. ESP restore one-liner ───────────────────────────────────
     local bdir latest=""
     bdir=$(win_backup_dir 2>/dev/null || true)
@@ -1635,6 +1690,63 @@ win_finalize() {
         win_warn "automatically by 'powos windows install'."
     fi
     echo -e "  Switch with:  ${WIN_BOLD}powos windows${WIN_NC}"
+    return 0
+}
+
+
+
+# ══════════════════════════════════════════════════════════════════
+#  finalize — raw→VHDX conversion, ESP verification, firmware entry
+# ══════════════════════════════════════════════════════════════════
+win_finalize() {
+    win_step "Finalize the Windows install (EXPERIMENTAL — TODO(hw))"
+
+    local games
+    games=$(win_games_mount) || {
+        win_err "POWOS-GAMES is not mounted — mount it first:  powos games mount"
+        return 1
+    }
+    local dir="$games/$WIN_IMAGE_SUBDIR"
+    local raw="$dir/windows.raw" canon="$dir/windows.$(win_image_ext)"
+
+    if [[ ${WIN_DRY_RUN:-0} -eq 0 ]]; then
+        win_require_root "finalize" || return 1
+        win_require_efi || return 1
+    fi
+
+    # ── 1. Pending raw → container conversion ──────────────────────
+    win_finalize_convert "$raw" "$canon" "$dir" || return 1
+
+    # ── 2. Verify the ESP gained the native-boot files ─────────────
+    # BCD is binary; presence of EFI/Microsoft/Boot/BCD + bootmgfw.efi is
+    # the testable proxy for "bcdboot ran and the BCD points at
+    # vhd=[locate]" (Setup's first-logon self-registration).
+    local esp esp_mnt
+    esp=$(win_powos_esp) || {
+        win_err "Could not identify the PowOS ESP (nothing mounted at /boot/efi)."
+        return 1
+    }
+    esp_mnt=$(win_esp_mountpoint "$esp") || {
+        win_err "ESP is not mounted — mount it (e.g. at /boot/efi) and re-run."
+        return 1
+    }
+    win_finalize_verify_esp "$esp_mnt" || return 1
+
+    # ── 3. Host-side firmware entry ────────────────────────────────
+    win_finalize_boot_entry "$esp" || return 1
+
+    # ── 4. Fallback .cmd for interactive installs ──────────────────
+    local script target="$dir/powos-windows-postinstall.cmd"
+    script=$(win_build_postinstall_cmd)
+    if [[ ${WIN_DRY_RUN:-0} -eq 1 ]]; then
+        win_warn "dry-run: would write the fallback post-install script to $target"
+    elif printf '%s' "$script" > "$target"; then
+        win_log "Fallback post-install script (interactive installs): $target"
+    else
+        win_warn "Could not write $target — not fatal (unattended installs don't need it)."
+    fi
+
+    win_finalize_print_restore "$esp_mnt"
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -3424,6 +3536,16 @@ win_part_status() {
     fi
 }
 
+# ══════════════════════════════════════════════════════════════════
+#  cmd_windows — the CLI entry point: flag parsing + subcommand dispatch
+# ══════════════════════════════════════════════════════════════════
+# This measures CC 63 and is DELIBERATELY left whole. 57 of its 62 decision
+# points are `case` arms (one per flag, one per subcommand, twice over for
+# the two backends); the genuine branching is five — the pre-scan loop, the
+# parse loop, the backend validation and one `&&`. Splitting a flat case by
+# complexity score buys nothing and costs the property that makes a
+# dispatcher readable: every option and every subcommand visible in one
+# place, in one order. If this function grows, it should grow ARMS.
 cmd_windows() {
     # Reset per-invocation state (the lib is sourced into a fresh CLI process,
     # but be defensive — tests call cmd_windows repeatedly).

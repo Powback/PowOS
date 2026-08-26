@@ -109,9 +109,9 @@ vu.sh:vu_mod_install_cmd 43
 vu.sh:vu_mod_resolve_source 20
 windows.sh:cmd_windows 63
 windows.sh:win_fetch_iso 22
-windows.sh:win_finalize 40
+windows.sh:win_finalize 12
 windows.sh:win_image_hibernated 16
-windows.sh:win_install 70
+windows.sh:win_install 24
 windows.sh:win_load_config 16
 windows.sh:win_part_create 35
 windows.sh:win_part_finalize 24

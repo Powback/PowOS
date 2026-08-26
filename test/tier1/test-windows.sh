@@ -569,6 +569,264 @@ unset -f qemu-img efibootmgr
 source "$LIB"
 
 # ══════════════════════════════════════════════════════════════════
+echo "== install / finalize phases (the extracted seams, contract level) =="
+# ══════════════════════════════════════════════════════════════════
+# win_install and win_finalize are orchestrators over named phases. The
+# end-to-end sections above already pin the ORDER and the refusals; these
+# pin each phase's own contract — what it refuses, what it publishes, and
+# what it hands back to the caller — so a phase cannot quietly stop
+# refusing while the orchestrator still looks right.
+#
+# Deliberately asserted on the CONTRACT (return code, published global,
+# recorded tool call), not on the prose: rewording a message must not fail
+# a test that is really about a guard.
+
+# ── phase 1: which ISO gets installed (win_install_resolve_iso) ────
+setup_install_mocks
+reset_globals; WIN_ISO=""
+out=$(win_install_resolve_iso 2>&1); rc=$?
+check "resolve_iso: no --iso and no --fetch → refuses" \
+    '[[ $rc -ne 0 ]] && echo "$out" | grep -q -- "--iso"'
+
+setup_install_mocks
+reset_globals; WIN_ISO=/isos/definitely-absent.iso
+out=$(win_install_resolve_iso 2>&1); rc=$?
+check "resolve_iso: a real run refuses an ISO path that does not exist" \
+    '[[ $rc -ne 0 ]]'
+
+setup_install_mocks
+reset_globals; WIN_DRY_RUN=1; WIN_ISO=/isos/definitely-absent.iso
+out=$(win_install_resolve_iso 2>&1); rc=$?
+check "resolve_iso: --dry-run does NOT demand the ISO exist" '[[ $rc -eq 0 ]]'
+
+setup_install_mocks
+win_fetch_iso() { WIN_FETCHED_ISO="$IN_ISO"; return 0; }
+reset_globals; WIN_DRY_RUN=1; WIN_FETCH=1
+win_install_resolve_iso >/dev/null 2>&1; rc=$?
+check "resolve_iso: --fetch publishes the fetched ISO into WIN_ISO" \
+    '[[ $rc -eq 0 && "$WIN_ISO" == "$IN_ISO" ]]'
+
+setup_install_mocks
+win_fetch_iso() { return 1; }
+reset_globals; WIN_DRY_RUN=1; WIN_FETCH=1
+out=$(win_install_resolve_iso 2>&1); rc=$?
+check "resolve_iso: a failed --fetch aborts (never installs from nothing)" \
+    '[[ $rc -ne 0 ]]'
+
+setup_install_mocks
+win_fetch_iso() { WIN_FETCHED_ISO=""; return 0; }
+reset_globals; WIN_DRY_RUN=1; WIN_FETCH=1
+out=$(win_install_resolve_iso 2>&1); rc=$?
+check "resolve_iso: --fetch that yields no path aborts" '[[ $rc -ne 0 ]]'
+
+setup_install_mocks
+win_slim_iso() { rec "slim_iso $*"; printf 'x' > "$2"; }
+reset_globals; WIN_DRY_RUN=1; WIN_SLIM=1; WIN_ISO="$IN_ISO"
+rec_reset
+win_install_resolve_iso >/dev/null 2>&1; rc=$?
+check "resolve_iso: --slim on a supplied ISO installs the SLIM output" \
+    '[[ $rc -eq 0 && "$WIN_ISO" != "$IN_ISO" ]] && rec_has "^slim_iso "'
+
+setup_install_mocks
+win_slim_iso() { rec "slim_iso $*"; return 1; }
+reset_globals; WIN_DRY_RUN=1; WIN_SLIM=1; WIN_ISO="$IN_ISO"
+out=$(win_install_resolve_iso 2>&1); rc=$?
+check "resolve_iso: a failed --slim aborts rather than installing the fat ISO" \
+    '[[ $rc -ne 0 ]]'
+
+# ── phase 3: the --fixed-vhd nudge (win_install_size_hint) ─────────
+# Advisory only. Its last statement is a `[[ ]] && cmd` that is FALSE in the
+# common case; if that status escaped, a sourced caller under `set -e` would
+# abort a perfectly good install over a piece of advice.
+setup_install_mocks
+reset_globals; WIN_DRY_RUN=1; WIN_ISO=/isos/win11.iso
+out=$(win_install_size_hint 2>&1); rc=$?
+check "size_hint: the silent case still returns 0" \
+    '[[ $rc -eq 0 ]] && ! echo "$out" | grep -q -- "--fixed-vhd"'
+setup_install_mocks
+reset_globals; WIN_SLIM=1; WIN_ISO=/isos/win11.iso
+out=$(win_install_size_hint 2>&1); rc=$?
+check "size_hint: a --slim install gets the --fixed-vhd nudge" \
+    '[[ $rc -eq 0 ]] && echo "$out" | grep -q -- "--fixed-vhd"'
+
+# ── phase 4: preflight (win_install_preflight) ────────────────────
+setup_install_mocks
+reset_globals
+WIN_INSTALL_OVMF_CODE=""; WIN_INSTALL_OVMF_VARS_SRC=""
+win_install_preflight /dev/sdz1 >/dev/null 2>&1; rc=$?
+check "preflight: passes with root, tools, a block ESP and OVMF present" \
+    '[[ $rc -eq 0 ]]'
+check "preflight: publishes both OVMF paths for the caller" \
+    '[[ -n "$WIN_INSTALL_OVMF_CODE" && -n "$WIN_INSTALL_OVMF_VARS_SRC" ]]'
+
+setup_install_mocks
+win_require_root() { return 1; }
+reset_globals
+out=$(win_install_preflight /dev/sdz1 2>&1); rc=$?
+check "preflight: refuses without root" '[[ $rc -ne 0 ]]'
+
+setup_install_mocks
+win_is_block() { return 1; }
+reset_globals
+out=$(win_install_preflight /dev/sdz1 2>&1); rc=$?
+check "preflight: refuses when the ESP is not a block device" \
+    '[[ $rc -ne 0 ]] && echo "$out" | grep -q "block device"'
+
+setup_install_mocks
+win_find_first_existing() { return 1; }
+reset_globals
+out=$(win_install_preflight /dev/sdz1 2>&1); rc=$?
+check "preflight: refuses when OVMF firmware is absent" \
+    '[[ $rc -ne 0 ]] && echo "$out" | grep -q "OVMF"'
+
+setup_install_mocks
+# Shadow the `command` builtin so one required tool reads as missing without
+# depending on what this machine happens to have installed.
+command() { if [[ "${1:-}" == "-v" && "${2:-}" == "zstd" ]]; then return 1; fi; builtin command "$@"; }
+reset_globals
+out=$(win_install_preflight /dev/sdz1 2>&1); rc=$?
+unset -f command
+check "preflight: refuses when a required tool is missing" \
+    '[[ $rc -ne 0 ]] && echo "$out" | grep -q "zstd"'
+
+# ── phase 5: the unattend volume (win_install_make_unattend) ──────
+setup_install_mocks
+win_fetch_steam_setup() { rec "steam-preload $*"; printf 'x' > "$1"; }
+reset_globals; WIN_INTERACTIVE=1
+WIN_INSTALL_UNATTEND_IMG="stale-value"
+rec_reset
+win_install_make_unattend >/dev/null 2>&1; rc=$?
+check "make_unattend: --interactive builds nothing and publishes an empty path" \
+    '[[ $rc -eq 0 && -z "$WIN_INSTALL_UNATTEND_IMG" ]] && rec_empty'
+
+setup_install_mocks
+win_fetch_steam_setup() { rec "steam-preload $*"; printf 'x' > "$1"; }
+reset_globals
+rec_reset
+win_install_make_unattend >/dev/null 2>&1; rc=$?
+check "make_unattend: unattended builds, fills and releases the FAT volume" \
+    '[[ $rc -eq 0 && "$WIN_INSTALL_UNATTEND_IMG" == "$IN_RUN/unattend.img" ]] &&
+     rec_has "^truncate " && rec_has "^mkfs.vfat " && rec_has "^umount "'
+check "make_unattend: no teardown state left behind on success" \
+    '[[ -z "$WIN_TD_UNATTEND_MNT" ]]'
+
+# The failure hand-off: the phase returns non-zero with the staging
+# mountpoint STILL recorded, because win_install — which owns the EXIT trap —
+# is the one that unwinds it. Losing that global would leak a loop mount.
+setup_install_mocks
+win_fetch_steam_setup() { rec "steam-preload $*"; printf 'x' > "$1"; }
+mount() { rec "mount $*"; return 1; }
+reset_globals
+rec_reset
+win_install_make_unattend >/dev/null 2>&1; rc=$?
+check "make_unattend: a mount failure aborts and leaves teardown state set" \
+    '[[ $rc -ne 0 && -n "$WIN_TD_UNATTEND_MNT" ]]'
+win_install_teardown
+check "make_unattend: the caller's teardown then clears that state" \
+    '[[ -z "$WIN_TD_UNATTEND_MNT" ]]'
+
+unset -f tar zstd mount umount mkfs.vfat truncate qemu-system-x86_64
+source "$LIB"
+
+# ── finalize phase 1: conversion (win_finalize_convert) ───────────
+PH_D=$(mktemp -d)
+setup_finalize_mocks
+reset_globals
+rec_reset
+out=$(win_finalize_convert "$PH_D/windows.raw" "$PH_D/windows.vhdx" "$PH_D" 2>&1); rc=$?
+check "finalize_convert: no image at all → refuses, points at create" \
+    '[[ $rc -ne 0 ]] && echo "$out" | grep -q "powos windows create"'
+
+setup_finalize_mocks
+win_image_in_use() { return 0; }
+: > "$PH_D/windows.raw"
+reset_globals
+rec_reset
+out=$(win_finalize_convert "$PH_D/windows.raw" "$PH_D/windows.vhdx" "$PH_D" 2>&1); rc=$?
+check "finalize_convert: refuses to convert an image another process holds" \
+    '[[ $rc -ne 0 ]] && ! rec_has "qemu-img"'
+check "finalize_convert: the refused raw is still there" '[[ -e "$PH_D/windows.raw" ]]'
+
+setup_finalize_mocks
+reset_globals; WIN_FIXED_VHD=1
+rec_reset
+out=$(win_finalize_convert "$PH_D/windows.raw" "$PH_D/windows.vhd" "$PH_D" 2>&1); rc=$?
+check "finalize_convert: --fixed-vhd converts with the vpc/fixed subformat" \
+    '[[ $rc -eq 0 ]] && rec_has "qemu-img convert -O vpc -o subformat=fixed"'
+check "finalize_convert: the raw is deleted once converted" \
+    '[[ ! -e "$PH_D/windows.raw" ]]'
+
+setup_finalize_mocks
+qemu-img() { rec "qemu-img $*"; : > "${!#}"; }     # produces an EMPTY container
+: > "$PH_D/windows.raw"; rm -f "$PH_D/windows.vhdx"
+reset_globals
+rec_reset
+out=$(win_finalize_convert "$PH_D/windows.raw" "$PH_D/windows.vhdx" "$PH_D" 2>&1); rc=$?
+check "finalize_convert: an empty conversion output aborts and KEEPS the raw" \
+    '[[ $rc -ne 0 && -e "$PH_D/windows.raw" ]]'
+
+setup_finalize_mocks
+reset_globals
+rec_reset
+out=$(win_finalize_convert "$PH_D/windows.raw" "$PH_D/windows.vhd" "$PH_D" 2>&1); rc=$?
+check "finalize_convert: an existing container is left alone (no reconvert)" \
+    '[[ $rc -eq 0 ]] && ! rec_has "qemu-img"'
+check "finalize_convert: a leftover raw next to it only warns" \
+    'echo "$out" | grep -qi "stale"'
+
+# ── finalize phase 3: the HOST firmware entry ─────────────────────
+setup_finalize_mocks
+rm -f "$FN_FLAG"
+reset_globals
+rec_reset
+out=$(win_finalize_boot_entry /dev/sdz1 2>&1); rc=$?
+check "finalize_boot_entry: creates the host NVRAM entry when absent" \
+    '[[ $rc -eq 0 ]] && rec_has "efibootmgr -c -d /dev/sdz -p 1"'
+check "finalize_boot_entry: proves the new entry resolves afterwards" \
+    'echo "$out" | grep -q "Boot0004"'
+
+setup_finalize_mocks
+reset_globals
+rec_reset
+out=$(win_finalize_boot_entry /dev/sdz1 2>&1); rc=$?
+check "finalize_boot_entry: an existing entry is reused, never duplicated" \
+    '[[ $rc -eq 0 ]] && ! rec_has "efibootmgr -c"'
+
+setup_finalize_mocks
+win_parent_disk() { return 1; }
+reset_globals
+out=$(win_finalize_boot_entry /dev/sdz1 2>&1); rc=$?
+check "finalize_boot_entry: refuses when the ESP disk cannot be derived" \
+    '[[ $rc -ne 0 ]]'
+
+setup_finalize_mocks
+rm -f "$FN_FLAG"
+efibootmgr() { if [[ "$*" == *"-c"* ]]; then rec "efibootmgr $*"; return 0; fi
+               printf 'Boot0001* PowOS\tHD(1,GPT,aaaa)\n'; }
+reset_globals
+rec_reset
+out=$(win_finalize_boot_entry /dev/sdz1 2>&1); rc=$?
+check "finalize_boot_entry: an entry that does not resolve is a FAILURE" \
+    '[[ $rc -ne 0 ]] && rec_has "efibootmgr -c"'
+
+# ── finalize phase 5: the ESP restore one-liner ───────────────────
+setup_finalize_mocks
+reset_globals
+out=$(win_finalize_print_restore "$FN_E" 2>&1); rc=$?
+check "finalize_print_restore: newest backup becomes the restore one-liner" \
+    '[[ $rc -eq 0 ]] && echo "$out" | grep "zstd -dc" | grep -q "esp-backup-20260701-000000"'
+
+setup_finalize_mocks
+win_backup_dir() { return 1; }
+reset_globals
+out=$(win_finalize_print_restore "$FN_E" 2>&1); rc=$?
+check "finalize_print_restore: no backup found → warns, still returns 0" \
+    '[[ $rc -eq 0 ]] && echo "$out" | grep -qi "no esp backup"'
+
+unset -f qemu-img efibootmgr
+source "$LIB"
+
+# ══════════════════════════════════════════════════════════════════
 echo "== the switch (metal COLD boot) =="
 # ══════════════════════════════════════════════════════════════════
 SW_G=$(mktemp -d); mkdir -p "$SW_G/PowOS-Windows"; : > "$SW_G/PowOS-Windows/windows.vhdx"
