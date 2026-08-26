@@ -832,5 +832,19 @@ unset -f _mock_disk _unmock_disk _calls
 
 # ── Summary ───────────────────────────────────────────────────────
 echo
+# `shift 2` with one argument left shifts nothing and returns non-zero, so the
+# option loop spins forever. `powos games create --size` (value omitted) hung
+# the process instead of reporting the mistake. Timeboxed: a regression here
+# would hang the suite, which is how it survived unnoticed.
+echo "== an option missing its value must refuse, not hang =="
+for opt in --size --disk; do
+    timeout 5 bash -c "source '$LIB' >/dev/null 2>&1; cmd_games create $opt" >/dev/null 2>&1
+    rc=$?
+    check "create $opt with no value exits non-zero (not 124/hang)" \
+          "[ $rc -ne 0 ] && [ $rc -ne 124 ]"
+done
+timeout 5 bash -c "source '$LIB' >/dev/null 2>&1; cmd_games create --size 64 --dry-run" >/dev/null 2>&1
+check "a valid --size still works"  "[ $? -ne 124 ]"
+
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]

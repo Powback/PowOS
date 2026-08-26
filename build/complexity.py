@@ -11,6 +11,19 @@ DEC = [re.compile(p) for p in [
 # other heredocs across 29 files were affected.
 HEREDOC = re.compile(r'<<-?\s*[\'"]?([A-Za-z_][A-Za-z0-9_]*)[\'"]?')
 
+def relkey(path):
+    """Key a function by REPO-RELATIVE path, not basename.
+
+    Basenames collide: lib/install.sh and lib/mods/install.sh both produced
+    'install.sh:...', so one budget entry silently governed two different
+    functions in two different files — and whichever was measured last won.
+    """
+    p = os.path.abspath(path)
+    for root in (os.getcwd(), os.path.dirname(os.path.dirname(os.path.abspath(__file__)))):
+        if p.startswith(root + os.sep):
+            return os.path.relpath(p, root)
+    return os.path.basename(path)
+
 def strip(l):
     out, q = [], None
     for ch in l:
@@ -44,12 +57,12 @@ for path in sys.argv[1:]:
                 depth = l.count('{') - l.count('}')
                 for d in DEC: cc += len(d.findall(l[l.index('{')+1:]))
                 if depth <= 0:
-                    rows.append((os.path.basename(path), fn, cc, i-start+1)); fn=None
+                    rows.append((relkey(path), fn, cc, i-start+1)); fn=None
             continue
         for d in DEC: cc += len(d.findall(l))
         depth += l.count('{') - l.count('}')
         if depth <= 0:
-            rows.append((os.path.basename(path), fn, cc, i-start+1)); fn=None
+            rows.append((relkey(path), fn, cc, i-start+1)); fn=None
 rows.sort(key=lambda r: -r[2])
 
 # ── report / check ────────────────────────────────────────────────

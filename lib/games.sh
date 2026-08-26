@@ -1276,9 +1276,15 @@ cmd_games() {
         case "$1" in
             --dry-run) GMS_DRY_RUN=1; shift ;;
             --yes|-y)  GMS_ASSUME_YES=1; shift ;;
-            --size)    GMS_SIZE_GB="${2:-}"; shift 2 ;;
+            # `shift 2` with only one argument left shifts NOTHING and returns
+            # non-zero — $# never decreases and the loop spins forever. Reached
+            # by `powos games create --size` with the value omitted, which hung
+            # the process rather than reporting the mistake.
+            --size)    [[ $# -ge 2 ]] || { gms_err "--size needs a value (GB)"; return 1; }
+                       GMS_SIZE_GB="$2"; shift 2 ;;
             --whole)   GMS_WHOLE=1; shift ;;
-            --disk)    GMS_DISK="${2:-}"; shift 2 ;;
+            --disk)    [[ $# -ge 2 ]] || { gms_err "--disk needs a value (device)"; return 1; }
+                       GMS_DISK="$2"; shift 2 ;;
             -h|--help) gms_usage; return 0 ;;
             *)         gms_err "Unknown option: $1"; gms_usage; return 1 ;;
         esac
