@@ -208,6 +208,101 @@ isv_live_device() {
 # installer's own output is readable. POWOS_SPLASH=1 opts back in.
 ISV_SPLASH_KARG="${ISV_SPLASH_KARG:-plymouth.enable=$([[ "${POWOS_SPLASH:-0}" == "1" ]] && echo 1 || echo 0)}"
 
+# Kernel args + fixup markers this hardware needs, applied AT INSTALL so that
+# first boot has nothing left to do and therefore needs no network.
+#
+# bazzite-hardware-setup runs on first boot and ends with:
+#
+#     rpm-ostree kargs ${NEEDED_KARGS[*]} || exit 1
+#     ...
+#     echo $HWS_VER > $HWS_VER_FILE          # <- skipped by that exit 1
+#
+# On a registry-origin system, changing kargs writes a new deployment, which
+# wants the REGISTRY. With no network that call fails, the `exit 1` skips the
+# "already ran" markers, and the next boot runs the whole thing again. That is
+# an unbootable loop on any handheld first booted away from wifi — a fresh Deck
+# cycled until ethernet was plugged in, then converged in a single reboot.
+#
+# It is the ONLY networked line in that script (line 41's `rpm-ostree kargs` is
+# a read), so leaving it with nothing to do removes the dependency outright and
+# the rest of hardware setup still runs normally.
+#
+# Two things have to be true for NEEDED_KARGS to come out empty:
+#
+#   1. The kargs it wants are already present. Its guards are substring tests
+#      (`[[ ! $KARGS =~ "amd_iommu" ]]`), so presence is all that is checked.
+#   2. The fixup markers exist. This is the one that actually bites: the gttsize
+#      branch is gated on `[ ! -f /etc/bazzite/fixups/gttsize ]` ALONE, with no
+#      test that the karg is there to delete. On a Valve handheld it appends two
+#      --delete-if-present entries unconditionally, so NEEDED_KARGS is non-empty
+#      on a fresh install however many kargs we pre-apply, and rpm-ostree runs
+#      to perform two deletions that are already no-ops.
+#
+# See isv_hardware_fixups for (2).
+
+# Emit the kargs bazzite-hardware-setup would append, one per line.
+# We run ON the target hardware from the live USB, so this reads the same DMI
+# the script will read on first boot and reaches the same conclusion.
+isv_hardware_kargs() {
+    local sysid
+    sysid=$(cat "${ISV_DMI:-/sys/devices/virtual/dmi/id}/product_name" 2>/dev/null || echo "")
+
+    # amd_iommu=off — Valve handhelds (Jupiter/Galileo) plus the Lenovo/ASUS
+    # list, mirroring bazzite-hardware-setup's own condition.
+    if [[ -n "$sysid" ]] && \
+       [[ ":Jupiter:Galileo:83N0:83N1:83E1:ROG Ally RC71L:ROG Ally X RC72LA:" == *":$sysid:"* ]]; then
+        echo "amd_iommu=off"
+    fi
+
+    # bluetooth.disable_ertm=1 is added on EVERY machine, not just handhelds.
+    echo "bluetooth.disable_ertm=1"
+}
+
+# Fixup markers to pre-create in the installed system's /etc.
+#
+# These are exactly the files bazzite-hardware-setup touches after a successful
+# run. Pre-creating them suppresses its --delete-if-present cleanup branches,
+# which exist to strip kargs that older Bazzite installs set. We have never set
+# amdgpu.gttsize, amdgpu.sg_display, panel_orientation or preempt=full, so on a
+# PowOS install every one of those deletions is a no-op — the only thing they
+# accomplish is forcing the networked rpm-ostree call above.
+isv_hardware_fixups() {
+    echo "gttsize"
+    echo "sg_display2"
+    echo "orientation_old2"
+    echo "preempt_cleanup2"
+}
+
+# Locate a deployment's /etc under a freshly mounted target partition.
+# Twin of iwz__deployment_etc in install-wizard.sh; kept local because the
+# wizard runs `powos install-system` as a subprocess, so the two libraries are
+# never sourced together. Writing to "$mnt/etc" instead is the mistake that
+# once made install.conf invisible to the installed system forever: the booted
+# /etc is the DEPLOYMENT's etc, several directories down.
+isv__deployment_etc() {
+    local mnt="$1" d
+    local -a cands=()
+    for d in "$mnt"/ostree/deploy/*/deploy/*.[0-9] \
+             "$mnt"/*/ostree/deploy/*/deploy/*.[0-9]; do
+        [[ -d "$d/etc" ]] && cands+=("$d/etc")
+    done
+    [[ ${#cands[@]} -gt 0 ]] || return 1
+    ls -1dt "${cands[@]}" 2>/dev/null | head -1
+}
+
+# Seed the fixup markers into a mounted target. Returns 0 only if it wrote
+# them, so the caller can stop looking once a deployment has been found.
+isv_seed_hardware_fixups() {
+    local mnt="$1" etc d f
+    etc=$(isv__deployment_etc "$mnt") || return 1
+    d="$etc/bazzite/fixups"
+    mkdir -p "$d" 2>/dev/null || return 1
+    while read -r f; do
+        [[ -n "$f" ]] && : > "$d/$f" 2>/dev/null
+    done < <(isv_hardware_fixups)
+    return 0
+}
+
 # Emit candidate target disks: NAME SIZE MODEL TRAN REMOVABLE
 # (excludes the live device; REMOVABLE is the sysfs flag: 1/0/?)
 isv_candidate_disks() {
@@ -635,9 +730,19 @@ isv_install_whole_disk() {
     local -a target_args=()
     [[ -n "$tgt" ]] && target_args=(--target-imgref "$tgt" --target-transport registry)
 
+    # Kernel args this hardware needs, computed from the machine we are running
+    # on, so first boot has nothing left to append. See isv_hardware_kargs.
+    local -a _hwk=() ; local _k
+    while read -r _k; do [[ -n "$_k" ]] && _hwk+=(--karg "$_k"); done < <(isv_hardware_kargs)
+    # `|| true`: this library is sourced into a `set -e` caller, and a bare
+    # `[[ ]] && cmd` that tests false returns 1. That exact shape aborted the
+    # installer one line after "Installation complete!" once already.
+    [[ ${#_hwk[@]} -gt 0 ]] && isv_ok "Pre-applying hardware kargs: ${_hwk[*]//--karg /}" || true
+
     run_step "wipe + install PowOS" \
         pv_bootc_install "$install_img" "$ISV_TARGET" \
             --wipe --karg rd.powos.ramboot=0 --karg "$ISV_SPLASH_KARG" \
+            ${_hwk[@]+"${_hwk[@]}"} \
             --filesystem "$ISV_FS" ${target_args[@]+"${target_args[@]}"} \
             ${size_args[@]+"${size_args[@]}"} || {
         isv_err "bootc install failed."
@@ -647,20 +752,30 @@ isv_install_whole_disk() {
 
     # Reach into the freshly written target and make its boot menu usable.
     # Done here, while we still know exactly which disk was installed to.
-    local _bm _bp
+    # Two jobs, on possibly different partitions, so track them separately and
+    # keep going until both are done rather than breaking on the first hit.
+    local _bm _bp _did_menu=0 _did_fix=0
     for _bp in $(lsblk -ln -o PATH "$ISV_TARGET" 2>/dev/null | tail -n +2); do
+        [[ $_did_menu -eq 1 && $_did_fix -eq 1 ]] && break
         [[ -b "$_bp" ]] || continue
         _bm=$(mktemp -d) || break
         if mount "$_bp" "$_bm" 2>/dev/null; then
-            if [[ -f "$_bm/boot/grub2/grub.cfg" || -f "$_bm/grub2/grub.cfg" ]]; then
+            if [[ $_did_menu -eq 0 ]] && \
+               [[ -f "$_bm/boot/grub2/grub.cfg" || -f "$_bm/grub2/grub.cfg" ]]; then
                 isv_boot_menu_reachable "$_bm"
-                umount "$_bm" 2>/dev/null; rmdir "$_bm" 2>/dev/null
-                break
+                _did_menu=1
+            fi
+            # Suppress bazzite-hardware-setup's no-op karg cleanup, which would
+            # otherwise force a networked rpm-ostree call on first boot.
+            if [[ $_did_fix -eq 0 ]] && isv_seed_hardware_fixups "$_bm"; then
+                isv_ok "First boot will not need the network (hardware setup pre-satisfied)."
+                _did_fix=1
             fi
             umount "$_bm" 2>/dev/null
         fi
         rmdir "$_bm" 2>/dev/null
     done
+    [[ $_did_fix -eq 1 ]] || isv_warn "Could not pre-seed hardware-setup markers; first boot may need a network connection."
 
     if (( shared_gb > 0 )); then
         # Non-fatal: the OS install already succeeded; a missing games

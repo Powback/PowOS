@@ -273,6 +273,9 @@ jobs:
               bash /powos/test/tier1/test-overlay.sh
               bash /powos/test/tier1/test-sync.sh
               bash /powos/test/tier1/test-ai-agent.sh
+              # Needs the real /usr/libexec/bazzite-hardware-setup, which only
+              # exists inside the image; it skips its replay on the host runner.
+              bash /powos/test/tier1/test-firstboot-offline.sh
             '
 
       - name: E2E tests (loop-back USB, overlayfs, layer-sync, cachefs) — nvidia-open only

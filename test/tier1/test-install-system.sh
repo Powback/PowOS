@@ -602,6 +602,18 @@ check "BOTH install paths pass it (to-disk and to-filesystem)" '[[ "$n_splash" -
 check "POWOS_SPLASH=1 can turn the splash on" \
       '[[ "$(POWOS_SPLASH=1 ISV_SPLASH_KARG="" bash -c "source \"$LIBSRC\" >/dev/null 2>&1; echo \$ISV_SPLASH_KARG")" == "plymouth.enable=1" ]]'
 
+# ── Hardware kargs pre-applied at install ─────────────────────────
+# Behaviour is covered in depth by test-firstboot-offline.sh, which replays
+# bazzite-hardware-setup's own branch text. Here we only assert the wiring:
+# that what the installer computes actually reaches `bootc install`.
+echo "== hardware kargs are wired into the install =="
+check "the computed kargs are passed to bootc install" \
+      'grep -q -- "_hwk\[@\]" "$LIBSRC"'
+check "the fixup markers are seeded after install" \
+      'grep -q "isv_seed_hardware_fixups \"\$_bm\"" "$LIBSRC"'
+check "a failure to seed them is reported, not silent" \
+      'grep -q "may need a network connection" "$LIBSRC"'
+
 # ── Summary ───────────────────────────────────────────────────────
 echo
 echo "== Results: $PASS passed, $FAIL failed =="
