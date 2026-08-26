@@ -1004,9 +1004,18 @@ isv_install_alongside() {
     # inherit the live image's ramboot karg.
     # TODO(hw): confirm to-filesystem flags against the shipped bootc version;
     # --acknowledge-destructive refers to the target rootfs (empty here), not the disk.
+    # Same hardware kargs as the whole-disk path. Missing them here meant an
+    # ALONGSIDE install still had bazzite-hardware-setup calling `rpm-ostree
+    # kargs` on first boot, which needs the registry — i.e. the offline boot
+    # loop was only fixed for one of the two install modes.
+    local -a _hwk2=() ; local _k2
+    while read -r _k2; do [[ -n "$_k2" ]] && _hwk2+=(--karg "$_k2"); done < <(isv_hardware_kargs)
+    [[ ${#_hwk2[@]} -gt 0 ]] && isv_ok "Pre-applying hardware kargs: ${_hwk2[*]//--karg /}" || true
+
     run_step "install PowOS to filesystem" \
         bootc install to-filesystem --acknowledge-destructive \
-            --karg rd.powos.ramboot=0 --karg "$ISV_SPLASH_KARG" "$mnt" || {
+            --karg rd.powos.ramboot=0 --karg "$ISV_SPLASH_KARG" \
+            ${_hwk2[@]+"${_hwk2[@]}"} "$mnt" || {
         isv_err "bootc install to-filesystem failed."
         run_step "cleanup unmount" umount -R "$mnt" 2>/dev/null || true
         return 1

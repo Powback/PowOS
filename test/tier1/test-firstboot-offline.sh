@@ -35,6 +35,10 @@ echo "== first boot needs no network =="
 # shellcheck disable=SC1090
 source "$LIB" >/dev/null 2>&1
 check "installer computes hardware kargs" 'declare -F isv_hardware_kargs'
+check "BOTH install paths get the kargs, not just whole-disk" \
+      'n=$(grep -c "isv_hardware_kargs)" "$LIB"); [ "$n" -ge 2 ]'
+check "the alongside path passes them to bootc install to-filesystem" \
+      'grep -q "_hwk2\[@\]" "$LIB"'
 check "installer seeds hardware fixups"   'declare -F isv_seed_hardware_fixups'
 # NOTE: capture into a variable rather than piping into `grep -q`. Under
 # `set -o pipefail`, grep -q exits at the first match, the producer is killed

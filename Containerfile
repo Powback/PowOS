@@ -281,10 +281,40 @@ COPY --from=kde-builder /kde-out/ /
 # shell). Complements config/etc/systemd/logind.conf.d/50-powos-no-suspend.conf
 # which blocks the trigger side (lid/keys/idle); this blocks the target side so
 # a rogue systemctl suspend or systemd-inhibit --shell suspend has no effect.
-RUN ln -sf /dev/null /etc/systemd/system/sleep.target && \
-    ln -sf /dev/null /etc/systemd/system/suspend.target && \
-    ln -sf /dev/null /etc/systemd/system/hibernate.target && \
-    ln -sf /dev/null /etc/systemd/system/hybrid-sleep.target
+# A HANDHELD IS THE EXCEPTION, and getting this wrong produces a boot that
+# looks broken. PowOS ships PowerButtonAction=1 (suspend-to-RAM) so the Deck's
+# power button behaves like stock SteamOS. If the sleep targets are ALSO masked,
+# the two fight: PowerDevil asks logind to suspend, logind starts a masked
+# target, the request fails, and each attempt tears down and re-initialises the
+# display — which is when amdgpu logs "DTM TA is not initialized". The screen
+# blanks and returns over and over and the machine looks wedged.
+#
+# So: masked everywhere EXCEPT the deck variant, which is allowed to sleep and
+# whose power button is expected to.
+RUN . /etc/os-release 2>/dev/null || true; \
+    case "${VARIANT_ID:-}${IMAGE_ID:-}${POWOS_VARIANT:-}" in \
+      *deck*) \
+        echo "sleep: ALLOWED (handheld — power button suspends)"; \
+        rm -f /etc/systemd/system/sleep.target \
+              /etc/systemd/system/suspend.target \
+              /etc/systemd/system/hibernate.target \
+              /etc/systemd/system/hybrid-sleep.target; \
+        rm -f /etc/systemd/logind.conf.d/50-powos-no-suspend.conf; \
+        ;; \
+      *) \
+        echo "sleep: BLOCKED (infra box — suspend kills Traefik/containers)"; \
+        ln -sf /dev/null /etc/systemd/system/sleep.target; \
+        ln -sf /dev/null /etc/systemd/system/suspend.target; \
+        ln -sf /dev/null /etc/systemd/system/hibernate.target; \
+        ln -sf /dev/null /etc/systemd/system/hybrid-sleep.target; \
+        # Nothing may ASK for a suspend that cannot happen: leaving
+        # PowerButtonAction=1 here recreates the same fight on a desktop.
+        if [ -f /etc/skel/.config/powerdevilrc ]; then \
+          sed -i 's/^PowerButtonAction=1/PowerButtonAction=0/' \
+              /etc/skel/.config/powerdevilrc; \
+        fi; \
+        ;; \
+    esac
 
 # Exec bits + SELinux relabel + silence setroubleshootd (crash-loops processing
 # initial denials from our /usr additions on first boot) + src-commit marker,
