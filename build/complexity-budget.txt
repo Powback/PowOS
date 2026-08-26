@@ -83,12 +83,12 @@ overlay-manager.sh:main 18
 pinstall:update_ini_packages 22
 portable.sh:mods_export_cmd 16
 portable.sh:mods_import_cmd 11
-powos:cmd_containers 41
+powos:cmd_containers 14
 powos:cmd_health 7
-powos:cmd_install 34
-powos:cmd_layers 21
-powos:cmd_rollback 17
-powos:cmd_status 30
+powos:cmd_install 10
+powos:cmd_layers 6
+powos:cmd_rollback 11
+powos:cmd_status 1
 powos:cmd_update 8
 powos-askpass:parse_sudo_argv 32
 powos-firstboot-apply:fb_apply_user 24
