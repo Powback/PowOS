@@ -18,7 +18,24 @@ UNIT="${POWOS_NOTICE_UNIT:-bazzite-hardware-setup.service}"
 TTY="${POWOS_NOTICE_TTY:-/dev/tty1}"
 
 state() { systemctl is-active "$UNIT" 2>/dev/null; }
-say()   { printf '%b' "$1" > "$TTY" 2>/dev/null || true; }
+
+# Speak through plymouth when it owns the screen, and to the console when it
+# does not. Installed systems boot with the splash on, so a message written
+# only to tty1 would be drawn underneath it and never seen — which is the
+# whole failure this script exists to prevent. `plymouth display-message`
+# draws on top of the animation; the console path still covers the install
+# medium and anything booted with plymouth.enable=0.
+have_plymouth() { command -v plymouth >/dev/null 2>&1 && plymouth --ping >/dev/null 2>&1; }
+say() {
+    printf '%b' "$1" > "$TTY" 2>/dev/null || true
+    if have_plymouth; then
+        # One line at a time: plymouth messages are not a scrolling console.
+        printf '%b' "$1" | tr -d '\n' | sed 's/  */ /g' | {
+            read -r line || true
+            [ -n "${line:-}" ] && plymouth display-message --text="$line" >/dev/null 2>&1 || true
+        }
+    fi
+}
 
 # Nothing to narrate if the unit is not part of this boot at all.
 systemctl cat "$UNIT" >/dev/null 2>&1 || exit 0

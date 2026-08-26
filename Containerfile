@@ -78,6 +78,8 @@ COPY config/ai/                           /etc/powos/ai/
 COPY config/zones/                        /etc/powos/zones/
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
+# Staged, not installed: this must only take effect for the deck variant.
+COPY config/dracut.conf.d/95-powos-deck-slim.conf /usr/share/powos/dracut-deck-slim.conf
 # Keep sshd enabled against Bazzite's preset, which disables it. See the file.
 COPY config/systemd-preset/              /usr/lib/systemd/system-preset/
 COPY config/sysctl.d/                     /etc/sysctl.d/

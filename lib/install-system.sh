@@ -186,28 +186,26 @@ isv_live_device() {
 }
 
 # ── Disk discovery ────────────────────────────────────────────────
-# The boot splash is OFF on installed systems, and this is deliberate.
+# The boot splash is ON for installed systems, OFF for the install medium.
 #
-# Not because plymouth hangs — measured in QEMU off our own image, it does
-# not: the boot reaches a getty either way. What it does is take the console
-# the moment plymouth-quit runs, so systemd's status lines stop appearing,
-# and paint a black screen while it does. On a machine whose display manager
-# never starts — see systemd/powos-installer.service for the reason that
-# happened for weeks — the result is indistinguishable from a hang, and was
-# read as one by everyone who looked at it, including on a Steam Deck where
-# the last line on screen was "Starting plymouth-quit-wait.service" and the
-# machine was in fact running fine.
+# It was off everywhere for a while, and for a good reason at the time: a
+# plymouth-covered screen hid a boot that never started a display manager, and
+# every diagnosis attempt was reduced to guessing at a black rectangle. That
+# cause is fixed (see systemd/powos-installer.service), so the splash can come
+# back where it belongs.
 #
-# So the splash is off for the same reason the live medium turns it off: when
-# something goes wrong on this hardware, the difference between a black screen
-# and a scrolling boot log is the difference between a bug you can see and one
-# you cannot. Installing from a medium that shows its work onto a machine that
-# hides it is the wrong trade. The drop-ins in
-# systemd/plymouth-quit*.service.d bound the units' timeouts as well, so a
-# plymouth that genuinely stops answering cannot hold the boot open forever.
+# The medium keeps text. When you are installing an OS, or booting a stick
+# because something is already wrong, the boot log is the thing you want on
+# screen — not an animation over the top of it.
 #
-# Override with POWOS_SPLASH=1 to install with the splash enabled.
-ISV_SPLASH_KARG="${ISV_SPLASH_KARG:-plymouth.enable=$([[ "${POWOS_SPLASH:-0}" == "1" ]] && echo 1 || echo 0)}"
+# Plymouth still needs a KMS driver for the GPU that is actually present;
+# amdgpu stays in the deck initramfs for exactly that reason, and only the
+# drivers for absent vendors are trimmed. ESC toggles the full log at any
+# point during boot, and powos-firstboot-notice draws its progress onto the
+# splash via `plymouth display-message` rather than being hidden by it.
+#
+# POWOS_SPLASH=0 installs with the splash off.
+ISV_SPLASH_KARG="${ISV_SPLASH_KARG:-plymouth.enable=$([[ "${POWOS_SPLASH:-1}" == "1" ]] && echo 1 || echo 0)}"
 
 # Emit candidate target disks: NAME SIZE MODEL TRAN REMOVABLE
 # (excludes the live device; REMOVABLE is the sysfs flag: 1/0/?)
