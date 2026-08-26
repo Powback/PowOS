@@ -14,8 +14,25 @@ check(){ if ( eval "$2" ) >/dev/null 2>&1; then echo "  ok   - $1"; PASS=$((PASS
          else echo "  FAIL - $1"; FAIL=$((FAIL+1)); fi }
 skip(){ echo "  skip - $1"; SKIP=$((SKIP+1)); }
 
+# Only assert against an image built from THIS source.
+#
+# The guard used to be "am I on PowOS", which is true on a dev box running an
+# older build — so the suite asserted today's invariants against yesterday's
+# image and failed for the right reason about the wrong artifact. The askpass
+# check had already grown its own version of this exemption; this generalises it
+# to the whole file.
+#
+# CI runs this inside the freshly built image, where the commit matches. A
+# developer running run-all.sh on their PowOS desktop gets a skip.
 [[ -f /usr/lib/powos/.powos-src-commit ]] || {
     echo "  skip - not inside a PowOS image"; echo; echo "== Results: 0 passed, 0 failed =="; exit 0; }
+_img_commit=$(cat /usr/lib/powos/.powos-src-commit 2>/dev/null)
+_src_commit=$(git -C "$(dirname "${BASH_SOURCE[0]}")/../.." rev-parse HEAD 2>/dev/null || echo "")
+if [[ -n "$_src_commit" && "$_img_commit" != "$_src_commit" ]]; then
+    echo "  skip - image is ${_img_commit:0:8}, source is ${_src_commit:0:8};"
+    echo "         these invariants describe an image built from THIS source."
+    echo; echo "== Results: 0 passed, 0 failed =="; exit 0
+fi
 . /etc/os-release 2>/dev/null || true
 IS_DECK=0; case "${VARIANT_ID:-}${IMAGE_ID:-}" in *deck*) IS_DECK=1 ;; esac
 echo "== image invariants (variant: ${VARIANT_ID:-?}, deck=$IS_DECK) =="
