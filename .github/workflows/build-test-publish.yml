@@ -82,6 +82,14 @@ jobs:
           mapfile -t shell_bins < <(grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/*)
           shellcheck -S error "${shell_bins[@]}" lib/*.sh build/*.sh
 
+      # A RATCHET, not a ceiling: existing debt is frozen in
+      # build/complexity-budget.txt, new functions are capped at 15. Raising a
+      # budget entry is allowed but must be deliberate. See docs/complexity.md.
+      - name: Cyclomatic complexity (ratchet)
+        run: |
+          mapfile -t shell_bins < <(grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/*)
+          python3 build/complexity.py --check "${shell_bins[@]}" lib/*.sh build/*.sh
+
       # Auto-discovers test/tier1/* — do NOT reintroduce a hand-written list
       # here. The old list silently fell behind until 21 of 31 suites never ran
       # in CI, which is how a broken `powos sync` (it ran the cloud backup) and
