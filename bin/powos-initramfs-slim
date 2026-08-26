@@ -1,0 +1,59 @@
+#!/bin/bash
+# powos-initramfs-slim - rebuild this machine's initramfs for THIS machine.
+#
+# The shipped initramfs is generic: it must boot anything, so it carries every
+# storage, filesystem and GPU driver in the kernel. On a Steam Deck that is
+# 127MB even after the deck variant's omissions, and it is read off btrfs by
+# GRUB before the kernel starts and then unpacked by the initrd — so it is
+# paid twice, on every boot, forever.
+#
+# A host-only initramfs contains the drivers THIS machine actually loads,
+# typically 20-40MB. That cannot be done at image build time: dracut would
+# capture the builder's hardware, not yours. So it happens here, once, on the
+# installed system.
+#
+# Safety, in order:
+#   * runs only AFTER graphical.target, so the generic initramfs has already
+#     proved it boots this machine;
+#   * rpm-ostree stages a NEW deployment and leaves the current one intact as
+#     the rollback;
+#   * greenboot marks a failed boot and rolls back automatically;
+#   * and the installer sets a 5s boot menu, so the rollback can be selected
+#     by hand on a device with no keyboard.
+#
+# Undo with:  sudo rpm-ostree initramfs --disable
+set -uo pipefail
+MARKER="${POWOS_SLIM_MARKER:-/etc/powos/.initramfs-slim-done}"
+log() { echo "powos-initramfs-slim: $*"; }
+
+[[ -e "$MARKER" ]] && { log "already done"; exit 0; }
+
+# Deck only. Other variants run on arbitrary hardware where a generic
+# initramfs is the whole point — a host-only one there would be a machine that
+# stops booting the first time a disk controller changes.
+. /etc/os-release 2>/dev/null || true
+case "${VARIANT_ID:-}${IMAGE_ID:-}" in
+    *deck*) : ;;
+    *) log "not the deck variant — leaving the generic initramfs alone"; exit 0 ;;
+esac
+
+command -v rpm-ostree >/dev/null 2>&1 || { log "no rpm-ostree — skipping"; exit 0; }
+
+# Already enabled by someone else? Then there is nothing to do and nothing to
+# claim credit for.
+if rpm-ostree initramfs 2>/dev/null | grep -qi 'enabled: *yes'; then
+    log "client-side initramfs already enabled"
+    mkdir -p "$(dirname "$MARKER")" 2>/dev/null || true
+    : > "$MARKER" 2>/dev/null || true
+    exit 0
+fi
+
+log "regenerating a host-only initramfs (this takes a few minutes)"
+if rpm-ostree initramfs --enable --arg=--hostonly >/dev/null 2>&1; then
+    mkdir -p "$(dirname "$MARKER")" 2>/dev/null || true
+    : > "$MARKER" 2>/dev/null || true
+    log "staged — the next boot uses it; the current deployment stays as rollback"
+else
+    log "could not regenerate; the generic initramfs is untouched and still boots"
+    exit 0
+fi

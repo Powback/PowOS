@@ -1,0 +1,22 @@
+# Rebuild the initramfs for THIS machine, once, after the desktop is up.
+# See bin/powos-initramfs-slim for the reasoning and the safety net.
+[Unit]
+Description=PowOS: slim this machine's initramfs (once, after first successful boot)
+ConditionPathExists=!/etc/powos/.initramfs-slim-done
+# AFTER the desktop: the generic initramfs must prove it boots this machine
+# before we replace it, and this work must never be something a user waits for.
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/powos-initramfs-slim
+RemainAfterExit=no
+# Never fail a boot over an optimisation.
+SuccessExitStatus=0 1
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=900
+
+[Install]
+WantedBy=graphical.target

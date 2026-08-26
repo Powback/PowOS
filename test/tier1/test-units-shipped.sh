@@ -91,6 +91,29 @@ else
     bad "systemd-udev-settle is not masked" "one Wants= on it stalls sysinit for seconds"
 fi
 
+# The host-only initramfs step must be deck-only, must run AFTER the desktop,
+# and must never fail a boot. A generic initramfs boots any machine; a
+# host-only one boots the machine it was built on. Getting that wrong on
+# main/nvidia-open — which run on arbitrary desktops and servers — would mean
+# a system that stops booting the first time a disk controller changes.
+SL="$ROOT/bin/powos-initramfs-slim"
+if [[ -x "$SL" ]] && grep -q '\*deck\*' "$SL"; then
+    ok "the host-only initramfs step is deck-only"
+else
+    bad "the host-only initramfs step is not restricted to deck" \
+        "a host-only initramfs on arbitrary hardware is a future non-booting machine"
+fi
+if grep -qE '^After=graphical\.target' "$ROOT/systemd/powos-initramfs-slim.service"; then
+    ok "it runs after the desktop, so the generic initramfs proved itself first"
+else
+    bad "it runs before the desktop" "an unproven initramfs would replace a working one"
+fi
+if grep -qE '^SuccessExitStatus=' "$ROOT/systemd/powos-initramfs-slim.service"; then
+    ok "it cannot fail a boot"
+else
+    bad "a failed optimisation could fail the boot"
+fi
+
 # The initramfs trim must NEVER reach main or nvidia-open. Those variants run
 # on arbitrary desktops and servers: md RAID, SAS/SATA HBAs and the full
 # filesystem set are exactly what they need to find a root at all. Only the

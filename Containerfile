@@ -143,6 +143,7 @@ COPY systemd/powos-installer.service      /usr/lib/systemd/system/powos-installe
 COPY systemd/powos-safemode.service       /usr/lib/systemd/system/powos-safemode.service
 COPY systemd/powos-boot-entries.service   /usr/lib/systemd/system/powos-boot-entries.service
 COPY systemd/powos-firstboot-notice.service /usr/lib/systemd/system/powos-firstboot-notice.service
+COPY systemd/powos-initramfs-slim.service /usr/lib/systemd/system/powos-initramfs-slim.service
 
 # KDE-builder stage — bakes sources/kde/patches/<app>/ into the image.
 # Built FROM THE SAME base image so the rebuilt bits match the shipped app's
@@ -313,6 +314,7 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     systemctl enable powos-safemode.service && \
     systemctl enable powos-boot-entries.service && \
     systemctl enable powos-firstboot-notice.service && \
+    systemctl enable powos-initramfs-slim.service && \
     # powos-display-manager.conf pins display-manager.service to plasmalogin and
     # re-creates it with 'L+' on EVERY boot. Right on a base shipping
     # plasma-login-manager; catastrophic on one where sddm is the DM and
