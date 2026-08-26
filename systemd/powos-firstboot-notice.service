@@ -4,9 +4,17 @@
 [Unit]
 Description=PowOS: explain the first-boot hardware setup on the console
 After=basic.target
-# Ordering only — never Requires. A missing or already-finished hardware-setup
-# must not make this unit fail, and this unit must never delay anything.
-After=bazzite-hardware-setup.service
+# BEFORE, not after. This unit narrates bazzite-hardware-setup while it runs,
+# so it has to be started first — ordering it After meant systemd only started
+# it once hardware-setup had finished, at which point its polling loop found
+# the unit inactive and exited without printing a thing. It could never have
+# worked, and the blank minute it exists to explain stayed blank.
+#
+# Ordering only, never Requires: a missing or already-finished hardware-setup
+# must not make this unit fail, and this unit must never delay anything —
+# Type=simple means systemd treats it as started immediately, so Before= here
+# costs nothing.
+Before=bazzite-hardware-setup.service
 
 [Service]
 Type=simple

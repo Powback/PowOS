@@ -197,7 +197,9 @@ fi
 # A minute of blank, repeatedly-cleared screen on a first boot is
 # indistinguishable from a brick — it was reported as a boot loop. Narrate it.
 if [[ -f "$ROOT/bin/powos-firstboot-notice" ]] && grep -qF "COPY systemd/powos-firstboot-notice.service" "$CF" \
-   && grep -q 'plymouth display-message' "$ROOT/bin/powos-firstboot-notice"; then
+   && grep -q 'plymouth display-message' "$ROOT/bin/powos-firstboot-notice" \
+   && grep -qE '^Before=bazzite-hardware-setup' "$ROOT/systemd/powos-firstboot-notice.service" \
+   && ! grep -qE '^After=bazzite-hardware-setup' "$ROOT/systemd/powos-firstboot-notice.service"; then
     ok "the first boot explains the hardware-setup pause, on the splash AND the console"
 else
     bad "nothing narrates the first-boot hardware setup" \
