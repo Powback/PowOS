@@ -989,10 +989,20 @@ Reboot now?"; then
     # button as the only way off a machine that has just finished writing a
     # disk. Ask first; No simply leaves the screen up.
     if [[ $IWZ_DRY_RUN -eq 0 && ${EUID:-$(id -u)} -eq 0 ]]; then
+        # Do NOT tell anyone to remove the stick before rebooting. This
+        # system is RUNNING FROM IT: the live root filesystem lives on that
+        # USB, so pulling it out mid-session yanks the root out from under a
+        # running kernel. The machine panics and cannot even shut down
+        # cleanly, which is exactly what happened to the first person who
+        # followed this dialog's earlier wording.
         if iwz_yesno "Install complete.
 
-Take the USB stick out NOW, then choose Yes to boot into PowOS.
-Leaving it in just boots the installer medium again.
+LEAVE THE USB IN and choose Yes — this live system is running from it,
+and pulling it out now will crash the machine.
+
+Take it out while the machine restarts, once the screen goes black.
+If it comes back to this installer, the stick was still in: remove it
+then, or pick the internal drive from the firmware boot menu.
 
 Reboot now?"; then
             iwz_ok "Rebooting."

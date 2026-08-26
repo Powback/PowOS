@@ -339,6 +339,20 @@ else
 fi
 check "the tui backend honours a No default" 'grep -q -- "--defaultno" "$LIB"'
 
+# Never tell anyone to remove the stick BEFORE rebooting. The live system's
+# root filesystem is on that USB, so pulling it out mid-session yanks the root
+# from under a running kernel: the machine panics and cannot shut down. The
+# completion dialog said "Take the USB stick out NOW, then choose Yes" and a
+# user did exactly that.
+echo "== the completion dialog must not strand a running system =="
+if grep -q 'LEAVE THE USB IN' "$LIB"; then
+    check "the dialog says to leave the USB in until after the reboot" true
+else
+    check "the dialog says to leave the USB in until after the reboot" false
+fi
+check "no 'remove it then reboot' ordering survives" \
+      '! grep -qE "(Take|Remove) the USB( stick)? out NOW|Remove the USB and reboot" "$LIB" "$ROOT/lib/install-system.sh"'
+
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]
 

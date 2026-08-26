@@ -1255,6 +1255,9 @@ cmd_install_system() {
 
     isv_step "Done"
     isv_ok "PowOS installed to $ISV_TARGET."
-    echo "  Remove the USB and reboot, then pick PowOS from the UEFI boot menu."
+    # Same trap as the wizard's dialog: this system is running FROM the USB,
+    # so "remove it and reboot" in that order crashes the machine.
+    echo "  Reboot first — the USB is this system's root, so pulling it now"
+    echo "  will panic the machine. Take it out while it restarts."
     echo
 }
