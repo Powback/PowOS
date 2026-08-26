@@ -394,6 +394,10 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
             AFTER=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
             echo "initramfs: $((BEFORE/1048576))MB -> $((AFTER/1048576))MB (deck trim)"; \
             [ "$AFTER" -lt "$BEFORE" ] || { echo "BUILD ERROR: initramfs did not shrink"; exit 1; }; \
+            lsinitrd "/usr/lib/modules/$KVER/initramfs.img" 2>/dev/null \
+              | grep -q ostree-prepare-root \
+              || { echo "BUILD ERROR: regenerated initramfs has no ostree-prepare-root — it cannot switch root"; exit 1; }; \
+            echo "initramfs: ostree support verified present"; \
           fi; \
           ;; \
         *) echo "initramfs: left generic (not the deck variant)" ;; \

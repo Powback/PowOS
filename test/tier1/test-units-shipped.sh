@@ -113,6 +113,30 @@ else
     bad "a tmpfiles-created home misses the power button default"
 fi
 
+# Regenerating the initramfs MUST keep ostree support, and the build must
+# verify it rather than trust it. dracut decides on its ostree module by
+# looking for a booted ostree system; inside a container build there is none,
+# so it omits the module, and the result is an initramfs with no
+# ostree-prepare-root that cannot assemble the deployment:
+#
+#     Failed to start initrd-switch-root.service
+#
+# Nothing warns. The image just comes out smaller and unbootable, which is
+# indistinguishable from a successful trim — and it shipped on a stick.
+DSLIM="$ROOT/config/dracut.conf.d/95-powos-deck-slim.conf"
+if grep -qE '^add_dracutmodules\+=.*ostree' "$DSLIM"; then
+    ok "the trim force-includes the ostree dracut module"
+else
+    bad "the initramfs trim does not force ostree in" \
+        "dracut omits it in a container build and switch-root then fails"
+fi
+if grep -q 'has no ostree-prepare-root' "$CF"; then
+    ok "the build FAILS if ostree-prepare-root is missing from the initramfs"
+else
+    bad "the build does not verify ostree survived regeneration" \
+        "an unbootable initramfs looks exactly like a successful trim"
+fi
+
 # The host-only initramfs step must be deck-only, must run AFTER the desktop,
 # and must never fail a boot. A generic initramfs boots any machine; a
 # host-only one boots the machine it was built on. Getting that wrong on
