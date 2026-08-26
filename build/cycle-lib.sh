@@ -61,7 +61,11 @@ timings() {
 say()  { printf '    %s\n' "$*"; }
 ok()   { printf '    \033[32mok\033[0m   %s\n' "$*"; }
 warn() { printf '    \033[33mwarn\033[0m %s\n' "$*"; }
-die()  { printf '\n\033[1;31mFATAL: %s\033[0m\n' "$*" >&2; exit 1; }
+die()  {
+    printf '\n\033[1;31mFATAL: %s\033[0m\n' "$*" >&2
+    timings "${POWOS_TIER:-tier} (FAILED)" >&2
+    exit 1
+}
 
 # A decision the pipeline made on your behalf must never scroll past as one
 # grey line. Anything that SKIPS work prints through this.

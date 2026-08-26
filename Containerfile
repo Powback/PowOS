@@ -43,6 +43,31 @@ ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia-open:stable
 # Default builds them in-tree; CI overrides with a content-addressed image.
 ARG KDE_BUILDER=kde-builder-local
 
+# Where the BASE-ONLY PREFIX comes from. Same trick as KDE_BUILDER, for the same
+# reason and with much bigger stakes.
+#
+# MEASURED, because the shape of this cost is not what it looks like: on this
+# box `podman commit` takes ~27 SECONDS for a layer on this image whether that
+# layer contains four files or none at all. Mounting the 141-layer image and
+# running a command takes 0.43s, so the layer COUNT is not the problem. The
+# problem is that podman reports `Native Overlay Diff: false` — because
+# `overlay.mountopt` sets `metacopy=on`, which makes containers/storage fall
+# back to the NAIVE diff, and the naive diff walks the entire ~11 GB tree on
+# every single commit.
+#
+#   4 no-op RUNs with    --layers : 111.6s   (4 commits)
+#   4 no-op RUNs with --layers=false: 28.5s  (1 commit)
+#
+# So the build is priced per COMMIT, not per instruction and not per byte. The
+# split below exists to make the number of commits per edit-verify cycle ONE:
+# everything that depends only on the base image lives in the `powos-base`
+# stage, is built once with --layers and tagged content-addressed; the payload
+# stage is then built with --layers=false and commits exactly once.
+#
+# Default `powos-base` resolves to the in-file stage, so a bare `podman build .`
+# still works end to end — it is simply slower. build/iterate.sh overrides it.
+ARG POWOS_BASE=powos-base
+
 # Staging stage — assemble every file drop into one scratch tree so the final
 # image gets a single COPY layer instead of one per source directory. Nothing
 # from this stage ships; it exists purely to consolidate layers.
@@ -54,7 +79,6 @@ ARG KDE_BUILDER=kde-builder-local
 FROM scratch AS staging
 COPY bin/                                 /usr/bin/
 COPY lib/                                 /usr/lib/powos/
-COPY .snapshot/                           /usr/lib/powos/src/
 COPY desktop/plasmoid/                    /usr/share/plasma/plasmoids/
 COPY desktop/autostart/                   /etc/xdg/autostart/
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
@@ -158,6 +182,14 @@ COPY systemd/powos-boot-entries.service   /usr/lib/systemd/system/powos-boot-ent
 COPY systemd/powos-firstboot-notice.service /usr/lib/systemd/system/powos-firstboot-notice.service
 COPY systemd/powos-initramfs-slim.service /usr/lib/systemd/system/powos-initramfs-slim.service
 
+# LAST in this stage on purpose. .snapshot/ is a `git archive HEAD` extraction,
+# so it differs on every single commit. Anywhere earlier in the list and the
+# COPYs after it are invalidated too — it used to be third of fifty-one, which
+# re-committed forty-eight layers per build for no change in their content.
+# Nothing else in this stage writes under /usr/lib/powos/src, so the resulting
+# tree is byte-identical wherever this line sits.
+COPY .snapshot/                           /usr/lib/powos/src/
+
 # KDE-builder stage — bakes sources/kde/patches/<app>/ into the image.
 # Built FROM THE SAME base image so the rebuilt bits match the shipped app's
 # exact version and ABI (the script clones the tag matching the installed
@@ -184,7 +216,7 @@ RUN chmod +x /tmp/kde/image-build.sh && /tmp/kde/image-build.sh /tmp/kde /kde-ou
 # see; a missing cache entry is a 40-minute mystery.
 FROM ${KDE_BUILDER} AS kde-builder
 
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS powos-base
 
 LABEL org.opencontainers.image.title="PowOS"
 LABEL org.opencontainers.image.description="Minimal PowOS layer on Bazzite (CLI + KDE widgets, zero boot-time services)"
@@ -280,205 +312,74 @@ RUN mkdir -p /usr/share/tmux-plugins && \
     test -x /usr/share/tmux-plugins/tmux-resurrect/resurrect.tmux && \
     test -x /usr/share/tmux-plugins/tmux-continuum/continuum.tmux
 
-# One layer for every file we ship (CLI + libs + plasmoids + KDE default).
-COPY --from=staging / /
 
-# Version-matched rebuilds of patched KDE apps (sources/kde/patches/).
-COPY --from=kde-builder /kde-out/ /
-
-# Mask all sleep-related systemd targets — no code path can suspend the box.
-# Must run in the real base stage (not the scratch staging stage, which has no
-# shell). Complements config/etc/systemd/logind.conf.d/50-powos-no-suspend.conf
-# which blocks the trigger side (lid/keys/idle); this blocks the target side so
-# a rogue systemctl suspend or systemd-inhibit --shell suspend has no effect.
-# A HANDHELD IS THE EXCEPTION, and getting this wrong produces a boot that
-# looks broken. PowOS ships PowerButtonAction=1 (suspend-to-RAM) so the Deck's
-# power button behaves like stock SteamOS. If the sleep targets are ALSO masked,
-# the two fight: PowerDevil asks logind to suspend, logind starts a masked
-# target, the request fails, and each attempt tears down and re-initialises the
-# display — which is when amdgpu logs "DTM TA is not initialized". The screen
-# blanks and returns over and over and the machine looks wedged.
+# ── DECK ONLY: initramfs trim, hoisted ahead of the PowOS payload ──
 #
-# The deck also gets 60-powos-deck-power.conf: the power button has three
-# possible owners (Steam in game mode, PowerDevil in Plasma, nobody at the
-# greeter) and the old blanket ignore left the third case dead. See that file.
+# This logic used to live only in the big post-COPY fixup layer below. It is the
+# most expensive single step in the build — a full dracut regeneration plus, in
+# the old form, FIVE separate lsinitrd runs, each of which decompresses a ~100 MB
+# image just to grep it. Its inputs are the BASE IMAGE and the one dracut config
+# file copied immediately above: nothing from bin/, lib/, config/, systemd/ or
+# the source snapshot. Sitting after `COPY --from=staging / /` meant that every
+# commit, however trivial, threw the layer away and regenerated the initramfs.
+# Hoisted here it stays cached until the base image or that dracut config
+# actually changes, which is the truth about what it depends on.
 #
-# So: masked everywhere EXCEPT the deck variant, which is allowed to sleep and
-# whose power button is expected to.
+# ORDERING THAT MUST NOT DRIFT: this runs BEFORE the firmware trim further down,
+# exactly as it did when it lived downstream. dracut may pull firmware into the
+# initramfs, so regenerating after the trim is not guaranteed to produce the
+# same image and is not what has been booted and shipped.
+#
+# The downstream copy is deliberately kept. It tests for this exact file and
+# reports "already trimmed in an earlier stage, leaving it" — a branch that was
+# written in anticipation of this move — so it becomes a no-op here and remains
+# the fallback for any variant or build order where the hoist does not apply.
+#
+# The three greps are the same assertions as before, against one decompression
+# instead of five. ostree-prepare-root is the one that matters: an initramfs
+# regenerated without it boots nothing while looking like a perfect trim, and
+# that is exactly what once shipped on a stick.
+COPY config/dracut.conf.d/95-powos-deck-slim.conf /usr/share/powos/dracut-deck-slim.conf
 RUN . /etc/os-release 2>/dev/null || true; \
     case "${VARIANT_ID:-}${IMAGE_ID:-}${POWOS_VARIANT:-}" in \
       *deck*) \
-        echo "sleep: ALLOWED (handheld — power button suspends)"; \
-        rm -f /etc/systemd/system/sleep.target \
-              /etc/systemd/system/suspend.target \
-              /etc/systemd/system/hibernate.target \
-              /etc/systemd/system/hybrid-sleep.target; \
-        rm -f /etc/systemd/logind.conf.d/50-powos-no-suspend.conf; \
-        install -Dm644 /usr/share/powos/logind-deck-power.conf \
-                /etc/systemd/logind.conf.d/60-powos-deck-power.conf; \
+        install -Dm644 /usr/share/powos/dracut-deck-slim.conf \
+                /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf; \
+        KVER=$(ls /usr/lib/modules | head -1); \
+        BEFORE=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
+        dracut --force --no-hostonly --kver "$KVER" \
+               "/usr/lib/modules/$KVER/initramfs.img"; \
+        AFTER=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
+        echo "initramfs: $((BEFORE/1048576))MB -> $((AFTER/1048576))MB (deck trim)"; \
+        [ "$AFTER" -lt "$BEFORE" ] || { echo "BUILD ERROR: initramfs did not shrink"; exit 1; }; \
+        lsinitrd "/usr/lib/modules/$KVER/initramfs.img" 2>/dev/null > /tmp/lsinitrd.list; \
+        for _need in ostree-prepare-root plymouthd amdgpu; do \
+          grep -q "$_need" /tmp/lsinitrd.list \
+            || { echo "BUILD ERROR: regenerated initramfs is missing $_need — it cannot switch root / show boot"; \
+                 rm -f /tmp/lsinitrd.list; exit 1; }; \
+        done; \
+        rm -f /tmp/lsinitrd.list; \
+        echo "initramfs: ostree-prepare-root, plymouth and amdgpu verified present"; \
         ;; \
-      *) \
-        echo "sleep: BLOCKED (infra box — suspend kills Traefik/containers)"; \
-        ln -sf /dev/null /etc/systemd/system/sleep.target; \
-        ln -sf /dev/null /etc/systemd/system/suspend.target; \
-        ln -sf /dev/null /etc/systemd/system/hibernate.target; \
-        ln -sf /dev/null /etc/systemd/system/hybrid-sleep.target; \
-        # Nothing may ASK for a suspend that cannot happen: leaving
-        # PowerButtonAction=1 here recreates the same fight on a desktop.
-        if [ -f /etc/skel/.config/powerdevilrc ]; then \
-          sed -i 's/^PowerButtonAction=1/PowerButtonAction=0/' \
-              /etc/skel/.config/powerdevilrc; \
-        fi; \
-        ;; \
+      *) echo "initramfs: left generic (not the deck variant)" ;; \
     esac
 
-# Exec bits + SELinux relabel + silence setroubleshootd (crash-loops processing
-# initial denials from our /usr additions on first boot) + src-commit marker,
-# all in a single layer so post-copy fixups don't multiply layers either.
-# POWOS_SRC_COMMIT is used by `powos self pull` to know the true base when
-# comparing local edits against upstream. Injected by CI:
-#   podman build --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD)" ...
-# Marker lives under /usr/lib/powos/ (part of the read-only OS image) so it
-# ALWAYS reflects the currently-booted image. Writing it to /var was a bug:
-# bootc only seeds /var on the FIRST deployment of a stateroot, so a
-# `bootc switch` or `bootc upgrade` from a machine with an existing /var
-# would silently keep the old (or missing) marker.
-ARG POWOS_SRC_COMMIT=""
-RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-pty-run /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog /usr/bin/pow-collision-check /usr/bin/powos-askpass 2>/dev/null || true && \
-    find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
-    # Guard: OCI hook JSON must never ship without its binary. crun fails
-    # opaquely ("error executing hook … (exit code: 1)") on EVERY container
-    # start when the binary is missing — this broke docker compose for an
-    # agent on 2026-07-14. Fail the build here so the misalignment is caught
-    # before the image is published.
-    if [ -f /etc/containers/oci/hooks.d/pow-collision-check.json ] && \
-       [ ! -x /usr/bin/pow-collision-check ]; then \
-      echo "BUILD ERROR: OCI hook JSON shipped without /usr/bin/pow-collision-check" >&2; \
-      exit 1; \
-    fi && \
-    # Same shape of guard for askpass. environment.d is KEY=VALUE only, so the
-    # `test -x` guard the two shell drop-ins carry cannot be expressed there —
-    # an image that shipped the env files without an executable helper would
-    # break every `sudo -A` in the session with no warning at build time.
-    if [ -f /usr/lib/environment.d/zz-powos-askpass.conf ] && \
-       [ ! -x /usr/bin/powos-askpass ]; then \
-      echo "BUILD ERROR: askpass env drop-ins shipped without an executable /usr/bin/powos-askpass" >&2; \
-      exit 1; \
-    fi && \
-    # The whole fix hinges on glob order: /etc/profile and startplasma source
-    # these directories with *.sh, digits sort before letters, and the files we
-    # must beat are lettered (askpass.sh, kde-openssh-askpass.sh,
-    # ksshaskpass.sh). If a base update renames one to sort after "zz-", ours is
-    # silently overwritten and the ONLY symptom is the original bad dialog
-    # coming back. Assert the order rather than trust it.
-    for d in /etc/profile.d /etc/xdg/plasma-workspace/env; do \
-      [ -d "$d" ] || continue; \
-      last_ap=$(ls "$d" | grep -i askpass | sort | tail -1); \
-      case "$last_ap" in \
-        zz-powos-askpass.sh|"") ;; \
-        *) echo "BUILD ERROR: $d/$last_ap sorts after our askpass drop-in" >&2; exit 1 ;; \
-      esac; \
-    done && \
-    systemctl enable greeter-watchdog.timer && \
-    systemctl enable powos-firstboot.service && \
-    systemctl enable powos-variant-retry.service && \
-    systemctl enable powos-installer.service && \
-    systemctl enable powos-safemode.service && \
-    systemctl enable powos-boot-entries.service && \
-    systemctl enable powos-firstboot-notice.service && \
-    systemctl enable powos-initramfs-slim.service && \
-    # powos-display-manager.conf pins display-manager.service to plasmalogin and
-    # re-creates it with 'L+' on EVERY boot. Right on a base shipping
-    # plasma-login-manager; catastrophic on one where sddm is the DM and
-    # plasmalogin does not exist (bazzite-deck): every boot repointed
-    # display-manager.service at a missing unit and clobbered the correct
-    # symlink baked into the image, so graphical.target started nothing.
-    { if [ -f /usr/lib/systemd/system/plasmalogin.service ]; then \
-          echo "display-manager alias: plasmalogin (unchanged)"; \
-      elif [ -f /usr/lib/systemd/system/sddm.service ]; then \
-          sed -i "s|plasmalogin.service|sddm.service|" /etc/tmpfiles.d/powos-display-manager.conf; \
-          echo "display-manager alias: retargeted to sddm"; \
-      else \
-          rm -f /etc/tmpfiles.d/powos-display-manager.conf; \
-          echo "display-manager alias: no known DM, rule removed"; \
-      fi; } && \
-    # Enable whichever display manager this base actually ships. Enabling both
-    # would put two DMs in graphical.target's Wants.
-    { [ -f /usr/lib/systemd/system/plasmalogin.service ] \
-        || systemctl enable sddm.service; } && \
-    systemctl mask setroubleshootd.service 2>/dev/null || true && \
-    # systemd-udev-settle is deprecated upstream ("should not be used") and is
-    # ordered Before=sysinit.target, so ONE unit wanting it makes the whole
-    # boot wait for the udev queue to drain: +4.637s on the critical chain to
-    # graphical.target, measured on a Steam Deck, and the reason
-    # `systemd-analyze blame` is topped by dev-ttyS0.device and dev-tpm0.device
-    # at ~10s each — symptoms, not costs.
-    #
-    # Only Bazzite's cardwired.service wants it. A drop-in resetting that
-    # unit's Wants= is the polite fix and it did NOT work: verified on a live
-    # medium built with the drop-in in place, udev-settle still ran after
-    # switch-root and cardwired started only once it finished. Masking is
-    # decisive — a Wants= on a masked unit is simply ignored — and cardwired
-    # keeps its own Restart=on-failure if it genuinely needs devices later.
-    systemctl mask systemd-udev-settle.service 2>/dev/null || true && \
-    # ublue-os-media-automount crashes on every PowOS boot. It runs
-    # `findmnt -s --json ...`, which reads /etc/fstab and exits non-zero when
-    # there is nothing to list — and a bootc install leaves /etc/fstab EMPTY,
-    # because mounts come from kernel args and ostree rather than fstab. Its
-    # Python does not handle that exit status, so the unit dies with a
-    # CalledProcessError and sits red in `systemctl --failed` forever. The
-    # precondition never holds on our images, and anything a user does put in
-    # fstab is mounted by systemd's own fstab generator regardless.
-    systemctl mask ublue-os-media-automount.service 2>/dev/null || true && \
-    # Two units that cost seconds of CPU on a 4-core APU during boot and do
-    # nothing a handheld needs. Neither is on the critical path, so this does
-    # not move the headline number — it stops them competing with the units
-    # that ARE on it.
-    #   mandb-update  rebuilds the man-page database. On a games console.
-    #   avahi-daemon  mDNS/zeroconf discovery; nothing here consumes it, and
-    #                 it can be started later if something ever does.
-    systemctl disable fedora-atomic-desktop-mandb-update.service 2>/dev/null || true && \
-    systemctl disable avahi-daemon.service avahi-daemon.socket 2>/dev/null || true && \
-    systemctl mask plasma-setup.service 2>/dev/null || true && \
-    # DECK ONLY: install the dracut trim and REGENERATE the initramfs.
-    #
-    # The config alone changes nothing — the initramfs is already built in the
-    # base image, so it has to be rebuilt for the omissions to take effect.
-    # Guarded on the variant because main and nvidia-open need exactly the
-    # drivers this omits. Failure is fatal on purpose: silently shipping the
-    # old 241MB initramfs while claiming it was trimmed is worse than a failed
-    # build.
-    { . /etc/os-release 2>/dev/null || true; \
-      case "${VARIANT_ID:-}${IMAGE_ID:-}${POWOS_VARIANT:-}" in \
-        *deck*) \
-          if [ -f /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf ]; then \
-            echo "initramfs: already trimmed in an earlier stage, leaving it"; \
-          else \
-            install -Dm644 /usr/share/powos/dracut-deck-slim.conf \
-                    /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf; \
-            KVER=$(ls /usr/lib/modules | head -1); \
-            BEFORE=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
-            dracut --force --no-hostonly --kver "$KVER" \
-                   "/usr/lib/modules/$KVER/initramfs.img"; \
-            AFTER=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
-            echo "initramfs: $((BEFORE/1048576))MB -> $((AFTER/1048576))MB (deck trim)"; \
-            [ "$AFTER" -lt "$BEFORE" ] || { echo "BUILD ERROR: initramfs did not shrink"; exit 1; }; \
-            lsinitrd "/usr/lib/modules/$KVER/initramfs.img" 2>/dev/null \
-              | grep -q ostree-prepare-root \
-              || { echo "BUILD ERROR: regenerated initramfs has no ostree-prepare-root — it cannot switch root"; exit 1; }; \
-            echo "initramfs: ostree support verified present"; \
-            for _need in plymouthd amdgpu; do \
-              lsinitrd "/usr/lib/modules/$KVER/initramfs.img" 2>/dev/null \
-                | grep -q "$_need" \
-                || { echo "BUILD ERROR: regenerated initramfs is missing $_need"; exit 1; }; \
-            done; \
-            echo "initramfs: plymouth and amdgpu verified present"; \
-          fi; \
-          ;; \
-        *) echo "initramfs: left generic (not the deck variant)" ;; \
-      esac; } && \
-    printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
-    restorecon -RF /usr /etc 2>/dev/null || true
+
+# ══════════════════════════════════════════════════════════════════
+#  BASE-ONLY LAYERS — everything from here to `COPY --from=staging`
+#  depends ONLY on the base image and the build ARGs above it.
+#
+#  Nothing below this line until the payload COPY may read a file that
+#  PowOS ships. That is the whole point: these layers are the slow ones
+#  (dracut, ~700 localedef deletions, several full-tree du/rm passes) and
+#  they are cached across every commit that does not change the base or an
+#  ARG. They used to sit AFTER the payload COPY, where a one-character edit
+#  to a shell script invalidated all of them.
+#
+#  If you add a step here that greps /etc, /usr/share/plasma or /usr/bin for
+#  something PowOS put there, it will silently see the base image's version
+#  instead. Put that step after the payload COPY.
+# ══════════════════════════════════════════════════════════════════
 
 # ── Icon themes: keep the referenced set ───────────────────────────
 #
@@ -739,6 +640,220 @@ RUN set -eu; \
     [ -d /usr/share/licenses ] \
       || { echo "BUILD ERROR: /usr/share/licenses was removed - license texts must survive"; exit 1; }; \
     echo "trim: /usr/share is now $(du -sh /usr/share 2>/dev/null | cut -f1)"
+
+
+# ══════════════════════════════════════════════════════════════════
+#  POWOS PAYLOAD — from here down, layers see the files PowOS ships and
+#  are therefore invalidated by every commit. Keep this section cheap.
+# ══════════════════════════════════════════════════════════════════
+
+# One layer for every file we ship (CLI + libs + plasmoids + KDE default).
+FROM ${POWOS_BASE}
+
+COPY --from=staging / /
+
+# Version-matched rebuilds of patched KDE apps (sources/kde/patches/).
+COPY --from=kde-builder /kde-out/ /
+
+# Mask all sleep-related systemd targets — no code path can suspend the box.
+# Must run in the real base stage (not the scratch staging stage, which has no
+# shell). Complements config/etc/systemd/logind.conf.d/50-powos-no-suspend.conf
+# which blocks the trigger side (lid/keys/idle); this blocks the target side so
+# a rogue systemctl suspend or systemd-inhibit --shell suspend has no effect.
+# A HANDHELD IS THE EXCEPTION, and getting this wrong produces a boot that
+# looks broken. PowOS ships PowerButtonAction=1 (suspend-to-RAM) so the Deck's
+# power button behaves like stock SteamOS. If the sleep targets are ALSO masked,
+# the two fight: PowerDevil asks logind to suspend, logind starts a masked
+# target, the request fails, and each attempt tears down and re-initialises the
+# display — which is when amdgpu logs "DTM TA is not initialized". The screen
+# blanks and returns over and over and the machine looks wedged.
+#
+# The deck also gets 60-powos-deck-power.conf: the power button has three
+# possible owners (Steam in game mode, PowerDevil in Plasma, nobody at the
+# greeter) and the old blanket ignore left the third case dead. See that file.
+#
+# So: masked everywhere EXCEPT the deck variant, which is allowed to sleep and
+# whose power button is expected to.
+RUN . /etc/os-release 2>/dev/null || true; \
+    case "${VARIANT_ID:-}${IMAGE_ID:-}${POWOS_VARIANT:-}" in \
+      *deck*) \
+        echo "sleep: ALLOWED (handheld — power button suspends)"; \
+        rm -f /etc/systemd/system/sleep.target \
+              /etc/systemd/system/suspend.target \
+              /etc/systemd/system/hibernate.target \
+              /etc/systemd/system/hybrid-sleep.target; \
+        rm -f /etc/systemd/logind.conf.d/50-powos-no-suspend.conf; \
+        install -Dm644 /usr/share/powos/logind-deck-power.conf \
+                /etc/systemd/logind.conf.d/60-powos-deck-power.conf; \
+        ;; \
+      *) \
+        echo "sleep: BLOCKED (infra box — suspend kills Traefik/containers)"; \
+        ln -sf /dev/null /etc/systemd/system/sleep.target; \
+        ln -sf /dev/null /etc/systemd/system/suspend.target; \
+        ln -sf /dev/null /etc/systemd/system/hibernate.target; \
+        ln -sf /dev/null /etc/systemd/system/hybrid-sleep.target; \
+        # Nothing may ASK for a suspend that cannot happen: leaving
+        # PowerButtonAction=1 here recreates the same fight on a desktop.
+        if [ -f /etc/skel/.config/powerdevilrc ]; then \
+          sed -i 's/^PowerButtonAction=1/PowerButtonAction=0/' \
+              /etc/skel/.config/powerdevilrc; \
+        fi; \
+        ;; \
+    esac
+
+# Exec bits + SELinux relabel + silence setroubleshootd (crash-loops processing
+# initial denials from our /usr additions on first boot) + src-commit marker,
+# all in a single layer so post-copy fixups don't multiply layers either.
+# POWOS_SRC_COMMIT is used by `powos self pull` to know the true base when
+# comparing local edits against upstream. Injected by CI:
+#   podman build --build-arg POWOS_SRC_COMMIT="$(git rev-parse HEAD)" ...
+# Marker lives under /usr/lib/powos/ (part of the read-only OS image) so it
+# ALWAYS reflects the currently-booted image. Writing it to /var was a bug:
+# bootc only seeds /var on the FIRST deployment of a stateroot, so a
+# `bootc switch` or `bootc upgrade` from a machine with an existing /var
+# would silently keep the old (or missing) marker.
+ARG POWOS_SRC_COMMIT=""
+RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-pty-run /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog /usr/bin/pow-collision-check /usr/bin/powos-askpass 2>/dev/null || true && \
+    find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
+    # Guard: OCI hook JSON must never ship without its binary. crun fails
+    # opaquely ("error executing hook … (exit code: 1)") on EVERY container
+    # start when the binary is missing — this broke docker compose for an
+    # agent on 2026-07-14. Fail the build here so the misalignment is caught
+    # before the image is published.
+    if [ -f /etc/containers/oci/hooks.d/pow-collision-check.json ] && \
+       [ ! -x /usr/bin/pow-collision-check ]; then \
+      echo "BUILD ERROR: OCI hook JSON shipped without /usr/bin/pow-collision-check" >&2; \
+      exit 1; \
+    fi && \
+    # Same shape of guard for askpass. environment.d is KEY=VALUE only, so the
+    # `test -x` guard the two shell drop-ins carry cannot be expressed there —
+    # an image that shipped the env files without an executable helper would
+    # break every `sudo -A` in the session with no warning at build time.
+    if [ -f /usr/lib/environment.d/zz-powos-askpass.conf ] && \
+       [ ! -x /usr/bin/powos-askpass ]; then \
+      echo "BUILD ERROR: askpass env drop-ins shipped without an executable /usr/bin/powos-askpass" >&2; \
+      exit 1; \
+    fi && \
+    # The whole fix hinges on glob order: these drop-ins must sort AFTER the
+    # base image's ksshaskpass ones or they are silently overwritten and the
+    # only symptom is the original bad dialog. Assert it rather than trust it.
+    for d in /etc/profile.d /etc/xdg/plasma-workspace/env; do \
+      [ -d "$d" ] || continue; \
+      last_ap=$(ls "$d" | grep -i askpass | sort | tail -1); \
+      case "$last_ap" in \
+        zz-powos-askpass.sh) ;; \
+        "") ;; \
+        *) echo "BUILD ERROR: $d/$last_ap sorts after our askpass drop-in" >&2; exit 1 ;; \
+      esac; \
+    done && \
+    systemctl enable greeter-watchdog.timer && \
+    systemctl enable powos-firstboot.service && \
+    systemctl enable powos-variant-retry.service && \
+    systemctl enable powos-installer.service && \
+    systemctl enable powos-safemode.service && \
+    systemctl enable powos-boot-entries.service && \
+    systemctl enable powos-firstboot-notice.service && \
+    systemctl enable powos-initramfs-slim.service && \
+    # powos-display-manager.conf pins display-manager.service to plasmalogin and
+    # re-creates it with 'L+' on EVERY boot. Right on a base shipping
+    # plasma-login-manager; catastrophic on one where sddm is the DM and
+    # plasmalogin does not exist (bazzite-deck): every boot repointed
+    # display-manager.service at a missing unit and clobbered the correct
+    # symlink baked into the image, so graphical.target started nothing.
+    { if [ -f /usr/lib/systemd/system/plasmalogin.service ]; then \
+          echo "display-manager alias: plasmalogin (unchanged)"; \
+      elif [ -f /usr/lib/systemd/system/sddm.service ]; then \
+          sed -i "s|plasmalogin.service|sddm.service|" /etc/tmpfiles.d/powos-display-manager.conf; \
+          echo "display-manager alias: retargeted to sddm"; \
+      else \
+          rm -f /etc/tmpfiles.d/powos-display-manager.conf; \
+          echo "display-manager alias: no known DM, rule removed"; \
+      fi; } && \
+    # Enable whichever display manager this base actually ships. Enabling both
+    # would put two DMs in graphical.target's Wants.
+    { [ -f /usr/lib/systemd/system/plasmalogin.service ] \
+        || systemctl enable sddm.service; } && \
+    systemctl mask setroubleshootd.service 2>/dev/null || true && \
+    # systemd-udev-settle is deprecated upstream ("should not be used") and is
+    # ordered Before=sysinit.target, so ONE unit wanting it makes the whole
+    # boot wait for the udev queue to drain: +4.637s on the critical chain to
+    # graphical.target, measured on a Steam Deck, and the reason
+    # `systemd-analyze blame` is topped by dev-ttyS0.device and dev-tpm0.device
+    # at ~10s each — symptoms, not costs.
+    #
+    # Only Bazzite's cardwired.service wants it. A drop-in resetting that
+    # unit's Wants= is the polite fix and it did NOT work: verified on a live
+    # medium built with the drop-in in place, udev-settle still ran after
+    # switch-root and cardwired started only once it finished. Masking is
+    # decisive — a Wants= on a masked unit is simply ignored — and cardwired
+    # keeps its own Restart=on-failure if it genuinely needs devices later.
+    systemctl mask systemd-udev-settle.service 2>/dev/null || true && \
+    # ublue-os-media-automount crashes on every PowOS boot. It runs
+    # `findmnt -s --json ...`, which reads /etc/fstab and exits non-zero when
+    # there is nothing to list — and a bootc install leaves /etc/fstab EMPTY,
+    # because mounts come from kernel args and ostree rather than fstab. Its
+    # Python does not handle that exit status, so the unit dies with a
+    # CalledProcessError and sits red in `systemctl --failed` forever. The
+    # precondition never holds on our images, and anything a user does put in
+    # fstab is mounted by systemd's own fstab generator regardless.
+    systemctl mask ublue-os-media-automount.service 2>/dev/null || true && \
+    # Two units that cost seconds of CPU on a 4-core APU during boot and do
+    # nothing a handheld needs. Neither is on the critical path, so this does
+    # not move the headline number — it stops them competing with the units
+    # that ARE on it.
+    #   mandb-update  rebuilds the man-page database. On a games console.
+    #   avahi-daemon  mDNS/zeroconf discovery; nothing here consumes it, and
+    #                 it can be started later if something ever does.
+    systemctl disable fedora-atomic-desktop-mandb-update.service 2>/dev/null || true && \
+    systemctl disable avahi-daemon.service avahi-daemon.socket 2>/dev/null || true && \
+    systemctl mask plasma-setup.service 2>/dev/null || true && \
+    # DECK ONLY: install the dracut trim and REGENERATE the initramfs.
+    #
+    # The config alone changes nothing — the initramfs is already built in the
+    # base image, so it has to be rebuilt for the omissions to take effect.
+    # Guarded on the variant because main and nvidia-open need exactly the
+    # drivers this omits. Failure is fatal on purpose: silently shipping the
+    # old 241MB initramfs while claiming it was trimmed is worse than a failed
+    # build.
+    { . /etc/os-release 2>/dev/null || true; \
+      case "${VARIANT_ID:-}${IMAGE_ID:-}${POWOS_VARIANT:-}" in \
+        *deck*) \
+          if [ -f /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf ]; then \
+            echo "initramfs: already trimmed in an earlier stage, leaving it"; \
+          else \
+            install -Dm644 /usr/share/powos/dracut-deck-slim.conf \
+                    /usr/lib/dracut/dracut.conf.d/95-powos-deck-slim.conf; \
+            KVER=$(ls /usr/lib/modules | head -1); \
+            BEFORE=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
+            dracut --force --no-hostonly --kver "$KVER" \
+                   "/usr/lib/modules/$KVER/initramfs.img"; \
+            AFTER=$(stat -c %s "/usr/lib/modules/$KVER/initramfs.img"); \
+            echo "initramfs: $((BEFORE/1048576))MB -> $((AFTER/1048576))MB (deck trim)"; \
+            [ "$AFTER" -lt "$BEFORE" ] || { echo "BUILD ERROR: initramfs did not shrink"; exit 1; }; \
+            lsinitrd "/usr/lib/modules/$KVER/initramfs.img" 2>/dev/null \
+              | grep -q ostree-prepare-root \
+              || { echo "BUILD ERROR: regenerated initramfs has no ostree-prepare-root — it cannot switch root"; exit 1; }; \
+            echo "initramfs: ostree support verified present"; \
+            for _need in plymouthd amdgpu; do \
+              lsinitrd "/usr/lib/modules/$KVER/initramfs.img" 2>/dev/null \
+                | grep -q "$_need" \
+                || { echo "BUILD ERROR: regenerated initramfs is missing $_need"; exit 1; }; \
+            done; \
+            echo "initramfs: plymouth and amdgpu verified present"; \
+          fi; \
+          ;; \
+        *) echo "initramfs: left generic (not the deck variant)" ;; \
+      esac; } && \
+    printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
+    # Threaded relabel where policycoreutils supports it. A full -R over /usr is
+    # the single most expensive thing left in the per-commit layers; -T 0 means
+    # one thread per core. The fallback is NOT decorative — the trailing `|| true`
+    # that has always been here makes a rejected flag look exactly like a box with
+    # no SELinux, so without the second attempt an unsupported -T would silently
+    # skip the relabel entirely and ship an image whose /usr is unlabelled.
+    { restorecon -RF -T 0 /usr /etc 2>/dev/null \
+      || restorecon -RF /usr /etc 2>/dev/null \
+      || true; }
 
 # Container dev/test entrypoint: `docker compose up` / `docker run` launches the
 # desktop boot sequence + VNC/noVNC. IGNORED by the installed OS (it boots via

@@ -49,6 +49,7 @@ esac
 TAG="ghcr.io/powback/powos:$VARIANT"
 SHA=$(head_commit)
 
+POWOS_TIER="iterate/$VARIANT"
 refuse_if_cycle_running
 echo "=== iterate: $VARIANT at ${SHA:0:8} ==="
 
@@ -108,11 +109,53 @@ else
         -f Containerfile -t "$KDEREF" . || die "kde builder build"
 fi
 
-# ── the image ─────────────────────────────────────────────────────
-stage "podman build"
-S podman build --layers \
+# ── the base prefix (cached across commits) ───────────────────────
+# Everything in the Containerfile that depends only on the base image lives in
+# the `powos-base` stage. It is built ONCE per (base image, base-stage text,
+# dracut config) and tagged by a hash of exactly those three things, so an edit
+# to a shell script cannot invalidate it and an edit to the base stage cannot
+# fail to.
+#
+# The key is derived from the STAGE TEXT, not the whole Containerfile: hashing
+# the file would rebuild six minutes of dnf5/dracut/localedef every time someone
+# fixed a comment in the payload half.
+stage "resolve base prefix"
+S podman image exists "$BASE" 2>/dev/null || S podman pull -q "$BASE" >/dev/null 2>&1 \
+    || die "cannot obtain base image $BASE"
+BASE_ID=$(image_digest "$BASE")
+BASE_SECTION=$(awk '/^FROM \$\{BASE_IMAGE\} AS powos-base$/,/^FROM \$\{POWOS_BASE\}$/' Containerfile)
+[[ -n "$BASE_SECTION" ]] || die "cannot locate the powos-base stage in Containerfile"
+BASEKEY=$( { printf '%s\n%s\n' "$BASE_ID" "$BASE_SECTION"
+             cat config/dracut.conf.d/95-powos-deck-slim.conf 2>/dev/null; } \
+           | sha256sum | cut -c1-16 )
+BASEREF="localhost/powos-base:$VARIANT-$BASEKEY"
+if S podman image exists "$BASEREF" 2>/dev/null; then
+    ok "base prefix cache HIT ($BASEKEY)"
+else
+    loud "BASE PREFIX CACHE MISS — rebuilding the base-only layers" \
+         "Base image, base-stage instructions or the dracut config changed." \
+         "This is the slow path (dnf5, dracut, ~700 localedef deletions) and" \
+         "costs several minutes. Every commit after this one reuses it." \
+         "ref: $BASEREF"
+    S podman build --layers --target powos-base \
+        --build-arg BASE_IMAGE="$BASE" \
+        -f Containerfile -t "$BASEREF" . || die "base prefix build"
+fi
+
+# ── the payload (one commit) ──────────────────────────────────────
+# --layers=false ON PURPOSE, and it is the single largest speedup here.
+#
+# `podman commit` costs ~27s on this image no matter what the layer contains,
+# because overlay.mountopt sets metacopy=on, which turns off native overlay diff
+# and falls back to walking the whole ~11 GB tree. With --layers the payload
+# half committed sixteen times per edit; without it, once. Nothing is lost:
+# every instruction in the payload stage is invalidated by every commit anyway,
+# so there was never a cache hit to give up.
+stage "podman build (payload)"
+S podman build --layers=false \
     --build-arg BASE_IMAGE="$BASE" \
     --build-arg KDE_BUILDER="$KDEREF" \
+    --build-arg POWOS_BASE="$BASEREF" \
     --build-arg POWOS_SRC_COMMIT="$SHA" \
     -f Containerfile -t "$TAG" -t "localhost/powos-ci-$VARIANT" . \
     || die "image build"

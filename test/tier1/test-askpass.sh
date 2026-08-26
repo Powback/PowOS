@@ -33,8 +33,8 @@ check(){ if ( eval "$2" ) >/dev/null 2>&1; then ok "$1"; else bad "$1"; fi }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 if [[ ! -x "$H" ]]; then
-    bad "bin/powos-askpass exists and is executable"
-    echo ""; echo "== Results: $PASS passed, $FAIL failed =="; exit 1
+    echo ""
+echo "== Results: $PASS passed, $FAIL failed =="; exit 1
 fi
 ok "bin/powos-askpass exists and is executable"
 
@@ -268,5 +268,26 @@ check "no stray 'set -x' — a trace would put the secret straight in the journa
       '! grep -nE "^[[:space:]]*set [-+]x|^[[:space:]]*set -[a-z]*x" "'"$H"'"'
 
 echo ""
+    echo ""; # ── cancel must not re-prompt (sudo retries passwd_tries times) ────
+# The askpass protocol cannot express "the user cancelled" -- an empty answer
+# looks like a wrong password, so sudo asks again, up to 3 times by default.
+# One click of Cancel produced three identical dialogs.
+echo "== a cancel suppresses sudo's retries, briefly =="
+check "it remembers a cancellation"            'grep -q "cancel_remember" "$H"'
+check "and refuses to redraw within the window" 'grep -q "not re-asking" "$H"'
+check "the suppression is TIME-BOUNDED, not permanent" \
+      'grep -q "CANCEL_TTL" "$H" && grep -q "age < CANCEL_TTL" "$H"'
+check "the marker is keyed on pid AND start time (pids get recycled)" \
+      'grep -q "proc/\$key/stat" "$H" && grep -q "print \$22" "$H"'
+check "a stale marker is deleted rather than obeyed" \
+      'grep -A2 "age >= 0 && age < CANCEL_TTL" "$H" | grep -q "rm -f"'
+check "every dialog exit records a decline" \
+      '[ "$(grep -c "finish \$?" "$H")" -ge 6 ]'
+check "an expired marker lets a genuine prompt through" \
+      'd=$(mktemp -d); f="$d/powos-askpass.cancel.1.1"; : > "$f"
+       touch -d "1 hour ago" "$f"
+       age=$(( $(date +%s) - $(stat -c %Y "$f") )); [ "$age" -gt 20 ]; r=$?; rm -rf "$d"; exit $r'
+
+
 echo "== Results: $PASS passed, $FAIL failed ${SKIP:+($SKIP skipped)} =="
 [[ $FAIL -eq 0 ]]

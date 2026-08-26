@@ -37,3 +37,27 @@ __pycache__/
 # Temp
 *.tmp
 *.log
+
+# ── Context bulk that no COPY ever reads ──────────────────────────
+#
+# `podman build` tars and hashes the whole context before it runs the first
+# instruction, so anything here is paid for on EVERY build including a fully
+# cached one. Measured on this tree: extensions/ 355M + bazzite/ 128M = 483M of
+# the 490M context, and grep says no COPY in the Containerfile names either.
+#
+# bazzite/ is vendored by build/vendor-bazzite.sh for a `COPY bazzite/system_files/`
+# that the Containerfile no longer has. The vendor step still exists for other
+# consumers; excluding the directory here does not remove it, it stops the image
+# build from carrying it. If a COPY of it ever comes back, delete this line —
+# build/iterate.sh greps for exactly that and fails loudly if the two disagree.
+extensions/
+bazzite/
+
+# Multi-GB KDE source clone cache. The Containerfile comment already says it is
+# "never part of the build context"; that was true only because it happened to
+# be absent, not because anything enforced it.
+sources/*/upstream/
+
+# Cached raw/media artifacts and their bookkeeping.
+build/output/
+build/.cache/

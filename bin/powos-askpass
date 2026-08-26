@@ -367,6 +367,51 @@ if [[ -n "${POWOS_ASKPASS_DRY_RUN:-}" ]]; then
     exit 0
 fi
 
+# ── Cancel is not expressible in the askpass protocol ──────────────
+#
+# sudo hands askpass a prompt and reads a password from stdout. There is no way
+# to say "the user cancelled" — an empty answer is indistinguishable from a
+# wrong one, so sudo retries passwd_tries times (default 3). Click Cancel once
+# and the same dialog comes back twice more.
+#
+# So remember a cancellation briefly and, within that window, exit immediately
+# without drawing anything. sudo burns its remaining tries against a helper that
+# returns nothing and gives up. TIME-BOUNDED on purpose: a genuine prompt a
+# minute later must still be shown, so this must not become a permanent mute.
+#
+# Keyed on the sudo pid AND its start time, because pids are recycled and a
+# stale marker must never suppress a different invocation.
+CANCEL_TTL="${POWOS_ASKPASS_CANCEL_TTL:-20}"
+
+cancel_marker_path() {
+    local key="${sudo_pid:-${ssh_pid:-none}}" st=""
+    [[ -r "/proc/$key/stat" ]] && st=$(awk '{print $22}' "/proc/$key/stat" 2>/dev/null)
+    printf '%s/powos-askpass.cancel.%s.%s' "${XDG_RUNTIME_DIR:-/tmp}" "$key" "${st:-0}"
+}
+
+cancel_recent() {
+    local f; f=$(cancel_marker_path)
+    [[ -f "$f" ]] || return 1
+    local age=$(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) ))
+    if (( age >= 0 && age < CANCEL_TTL )); then return 0; fi
+    rm -f "$f" 2>/dev/null
+    return 1
+}
+
+cancel_remember() { : > "$(cancel_marker_path)" 2>/dev/null || true; }
+
+# A dialog returning non-zero is the user declining. Record it, then exit.
+finish() {
+    local rc="$1"
+    (( rc != 0 )) && cancel_remember
+    exit "$rc"
+}
+
+if cancel_recent; then
+    printf 'powos-askpass: cancelled moments ago; not re-asking\n' >&2
+    exit 1
+fi
+
 want_mode="${POWOS_ASKPASS_MODE:-}"
 if [[ -z "$want_mode" ]]; then
     if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] \
@@ -381,18 +426,18 @@ if [[ "$want_mode" == "gui" ]]; then
     body=$(rich_body)
     if command -v kdialog >/dev/null 2>&1; then
         case "$MODE" in
-            confirm)  kdialog --title "$TITLE" --yesno    "$body"; exit $? ;;
-            input)    kdialog --title "$TITLE" --inputbox "$body"; exit $? ;;
-            *)        kdialog --title "$TITLE" --password "$body"; exit $? ;;
+            confirm)  kdialog --title "$TITLE" --yesno    "$body"; finish $? ;;
+            input)    kdialog --title "$TITLE" --inputbox "$body"; finish $? ;;
+            *)        kdialog --title "$TITLE" --password "$body"; finish $? ;;
         esac
     elif command -v zenity >/dev/null 2>&1; then
         # zenity has no rich text and no body text on --password, so it gets
         # the plain rendering through --entry.
         pbody=$(plain_body)
         case "$MODE" in
-            confirm) zenity --question --title="$TITLE" --text="$pbody"; exit $? ;;
-            input)   zenity --entry --title="$TITLE" --text="$pbody"; exit $? ;;
-            *)       zenity --entry --hide-text --title="$TITLE" --text="$pbody"; exit $? ;;
+            confirm) zenity --question --title="$TITLE" --text="$pbody"; finish $? ;;
+            input)   zenity --entry --title="$TITLE" --text="$pbody"; finish $? ;;
+            *)       zenity --entry --hide-text --title="$TITLE" --text="$pbody"; finish $? ;;
         esac
     fi
     # No dialog tool after all — fall through to the terminal path rather than
