@@ -470,6 +470,13 @@ check "and does NOT auto-start on a plain live boot"       'grep -q "POWOS_WIZAR
 check "it does not fight the service if that already ran it"       'grep -q "is-active --quiet powos-installer" "$U"'
 check "autologin is medium-only (next to the live marker)"       'grep -q "live-medium" "$U"'
 
+# /root is a SYMLINK to /var/roothome on ostree and does not exist in the
+# deployment at burn time, so a write there silently goes nowhere -- which is
+# exactly what happened to the first version of this hook.
+check "the wizard hook is NOT written to /root (symlink to /var/roothome)" \
+      '! grep -q "deploy/root/.bash_profile" "$U"'
+check "it uses /etc/profile.d, a real directory in the deployment" \
+      'grep -q "deploy/etc/profile.d" "$U"'
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]
 

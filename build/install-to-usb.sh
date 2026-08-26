@@ -673,7 +673,27 @@ AUTOLOGIN
         # And if the installer was asked for but its service did not take the
         # console, start the wizard from that shell rather than leaving a bare
         # prompt. Guarded on the karg so a plain live boot still gets a shell.
-        cat > "$deploy/root/.bash_profile" <<'PROFILE' 2>/dev/null || true
+        #
+        # /etc/profile.d, NOT /root/.bash_profile: on ostree /root is a SYMLINK
+        # to /var/roothome, which does not exist in the deployment at burn time,
+        # so that write silently went nowhere. /etc/profile.d is a real
+        # directory in the deployment and agetty --autologin runs a login shell,
+        # which sources it.
+        mkdir -p "$deploy/etc/profile.d" 2>/dev/null || true
+        cat > "$deploy/etc/profile.d/zzz-powos-live-installer.sh" <<'PROFILE' 2>/dev/null || true
+# PowOS live medium: start the installer if it was asked for and the service
+# did not already run it. See 10-powos-live-autologin.conf.
+if [ -n "${BASH_VERSION:-}" ] && [ "$(id -u)" = 0 ] \
+   && [ -z "${POWOS_WIZARD_STARTED:-}" ] \
+   && grep -q 'powos.install' /proc/cmdline 2>/dev/null \
+   && ! systemctl is-active --quiet powos-installer.service 2>/dev/null; then
+    export POWOS_WIZARD_STARTED=1
+    echo
+    echo "  Starting the PowOS installer..."
+    echo
+    exec /usr/bin/powos-install-wizard
+fi
+PROFILE' 2>/dev/null || true
 # PowOS live medium. Auto-start the installer when it was asked for and the
 # service did not already run it — see 10-powos-live-autologin.conf.
 if grep -q 'powos.install' /proc/cmdline 2>/dev/null \
