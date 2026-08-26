@@ -432,6 +432,45 @@ RUN set -eu; \
       echo "icons: ${before}M -> ${after}M (kept: $(printf '%s ' $keep))"; \
     fi
 
+# ── overlay: stop asking the kernel for metacopy it does not have ──
+#
+# Fedora/Bazzite ship /usr/share/containers/storage.conf with
+#
+#     mountopt = "nodev,metacopy=on"
+#
+# metacopy requires CONFIG_OVERLAY_FS_REDIRECT_DIR. This kernel does not have it
+# (/sys/module/overlay/parameters/redirect_dir reads N), so containers/storage
+# asks, is refused, and falls back to naive copying — logging
+#
+#     "Not using native diff for overlay, this may cause degraded performance
+#      for building images: kernel has no CONFIG_OVERLAY_FS_REDIRECT_DIR enabled"
+#
+# The cost is not theoretical. It is why importing the offline variant off the
+# install medium sits on "Getting image source signatures" for minutes: every
+# layer is copied in full rather than diffed. The same fallback makes
+# `podman commit` take ~27s regardless of what changed, which was 71% of the
+# image build time before the build was restructured.
+#
+# So drop metacopy and keep the rest of the vendor config. This LOSES NOTHING:
+# the option was never functional on this kernel. /etc wins over /usr/share, and
+# the file must be complete rather than a fragment — containers/storage reads
+# one or the other, it does not merge them.
+#
+# If a future kernel gains CONFIG_OVERLAY_FS_REDIRECT_DIR, revisit: metacopy is
+# genuinely faster where it works. The guard below fails the build if the vendor
+# file ever stops containing the option, so this cannot rot into a no-op.
+RUN set -eu; \
+    src=/usr/share/containers/storage.conf; \
+    [ -f "$src" ] || { echo "BUILD ERROR: $src missing; cannot derive /etc override"; exit 1; }; \
+    grep -q 'metacopy=on' "$src" \
+      || { echo "BUILD ERROR: vendor storage.conf no longer sets metacopy=on - re-check whether this override is still needed"; exit 1; }; \
+    mkdir -p /etc/containers; \
+    sed 's/^\(mountopt[[:space:]]*=.*\)metacopy=on,\?/\1/; s/,\"$/\"/; s/^\(mountopt[[:space:]]*=[[:space:]]*\"\),/\1/' \
+        "$src" > /etc/containers/storage.conf; \
+    grep -q 'metacopy' /etc/containers/storage.conf \
+      && { echo "BUILD ERROR: metacopy survived the rewrite"; exit 1; }; \
+    echo "overlay: $(grep -m1 '^mountopt' /etc/containers/storage.conf) (metacopy dropped - kernel lacks REDIRECT_DIR)"
+
 # ── Optional extras a handheld never runs ──────────────────────────
 #
 #   podman build --build-arg POWOS_EXTRAS="cosign godot-runner tailscale" ...

@@ -142,6 +142,18 @@ check "plain sudo still has its own terminal prompt (askpass is -A only)" \
       '[ -x /usr/bin/sudo ]'
 fi
 
+# The image must not ask the kernel for overlay features it lacks. metacopy=on
+# needs CONFIG_OVERLAY_FS_REDIRECT_DIR; without it containers/storage falls back
+# to naive full-tree copying — which is why importing the offline variant off
+# the install medium crawls, and why podman commit cost ~27s regardless of what
+# changed. Proven on this kernel: Native Overlay Diff false with it, true without.
+check "storage.conf does not request metacopy (kernel lacks REDIRECT_DIR)" \
+      '[ ! -f /etc/containers/storage.conf ] || ! grep -q "metacopy" /etc/containers/storage.conf'
+check "and /etc actually overrides the vendor file" \
+      '[ ! -f /usr/share/containers/storage.conf ] \
+       || ! grep -q "metacopy=on" /usr/share/containers/storage.conf \
+       || [ -f /etc/containers/storage.conf ]'
+
 echo
 echo "== Results: $PASS passed, $FAIL failed${SKIP:+, $SKIP skipped} =="
 [[ $FAIL -eq 0 ]]
