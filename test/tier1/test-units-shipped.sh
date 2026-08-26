@@ -91,6 +91,28 @@ else
     bad "systemd-udev-settle is not masked" "one Wants= on it stalls sysinit for seconds"
 fi
 
+# The power button must sleep the device in the Plasma session. Bazzite seeds
+# PowerButtonAction=0 because the gamescope session owns that key — correct
+# there, and wrong the moment you land in Plasma instead: logind defers to the
+# session, PowerDevil inhibits the key claiming it handles it, and then does
+# nothing. Pressing power appears to be broken hardware.
+PD="$ROOT/config/skel/.config/powerdevilrc"
+if [[ -f "$PD" ]] && grep -qE '^PowerButtonAction=1' "$PD"; then
+    ok "the power button is configured to sleep (ToRam)"
+else
+    bad "the power button has no action configured" "a press does nothing at all"
+fi
+if grep -qF "COPY config/skel/" "$CF"; then
+    ok "the skel default reaches the image"
+else
+    bad "the skel default never reaches the image"
+fi
+if grep -qE '^C +/var/home/powos/\.config/powerdevilrc' "$ROOT/config/tmpfiles.d/powos-home.conf"; then
+    ok "a home made by tmpfiles gets it too, without clobbering user edits"
+else
+    bad "a tmpfiles-created home misses the power button default"
+fi
+
 # The host-only initramfs step must be deck-only, must run AFTER the desktop,
 # and must never fail a boot. A generic initramfs boots any machine; a
 # host-only one boots the machine it was built on. Getting that wrong on

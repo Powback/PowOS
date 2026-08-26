@@ -1,0 +1,24 @@
+# PowOS: the power button sleeps the device.
+#
+# Bazzite seeds PowerButtonAction=0 ("do nothing") into the user's profile,
+# which is correct for a Deck running the gamescope/Steam session — that
+# session owns the power button and handles a short press itself.
+#
+# It is wrong the moment you land in the Plasma desktop instead, which happens
+# whenever the Steam session is not the one running. Then logind has
+# HandlePowerKey=ignore (deferring to the session), PowerDevil holds a
+# handle-power-key inhibitor (claiming the session handles it), and PowerDevil's
+# configured action is "nothing" — so the press is captured by something that
+# then deliberately ignores it. Pressing power does nothing at all, which reads
+# as broken hardware.
+#
+# 1 = ToRam in PowerDevil's enum (NoAction=0, ToRam=1, ToDisk=2, Shutdown=4,
+# LockScreen=8). Sleep is what a handheld's power button should do.
+[AC][SuspendAndShutdown]
+PowerButtonAction=1
+
+[Battery][SuspendAndShutdown]
+PowerButtonAction=1
+
+[LowBattery][SuspendAndShutdown]
+PowerButtonAction=1

@@ -78,6 +78,9 @@ COPY config/ai/                           /etc/powos/ai/
 COPY config/zones/                        /etc/powos/zones/
 COPY config/logid/logid.cfg               /etc/logid.cfg
 COPY config/tmpfiles.d/                   /etc/tmpfiles.d/
+# Seeded into new users' homes: the power button must sleep the device when
+# the Plasma session is the one running. See the file.
+COPY config/skel/                         /etc/skel/
 # Staged, not installed: this must only take effect for the deck variant.
 COPY config/dracut.conf.d/95-powos-deck-slim.conf /usr/share/powos/dracut-deck-slim.conf
 # Keep sshd enabled against Bazzite's preset, which disables it. See the file.
