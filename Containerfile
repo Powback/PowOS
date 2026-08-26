@@ -97,6 +97,13 @@ COPY config/etc/systemd/logind.conf.d/     /etc/systemd/logind.conf.d/
 COPY config/etc/containers/oci/hooks.d/     /etc/containers/oci/hooks.d/
 COPY config/etc/containers/containers.conf.d/ /etc/containers/containers.conf.d/
 COPY config/etc/profile.d/                  /etc/profile.d/
+# Askpass. Three environments can raise a password prompt with no terminal to
+# explain itself, and each needs its own drop-in — profile.d (above) covers
+# shells, plasma-workspace/env covers anything launched from the desktop, and
+# environment.d covers `systemd --user` units. All three point SUDO_ASKPASS and
+# SSH_ASKPASS at /usr/bin/powos-askpass. See the files and docs/auth-prompts.md.
+COPY config/kde/plasma-env/                 /etc/xdg/plasma-workspace/env/
+COPY config/etc/environment.d/              /usr/lib/environment.d/
 COPY config/tmux/tmux.conf                  /etc/tmux.conf
 # Login-availability fix (exception to zero-boot-services, deliberately):
 # Plasma Login Manager's greeter can wedge into a broken-QML state after a
@@ -337,7 +344,7 @@ RUN . /etc/os-release 2>/dev/null || true; \
 # `bootc switch` or `bootc upgrade` from a machine with an existing /var
 # would silently keep the old (or missing) marker.
 ARG POWOS_SRC_COMMIT=""
-RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-pty-run /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog /usr/bin/pow-collision-check 2>/dev/null || true && \
+RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-boot /usr/bin/powos-pty-run /usr/bin/powos-widget-autoadd /usr/bin/greeter-watchdog /usr/bin/pow-collision-check /usr/bin/powos-askpass 2>/dev/null || true && \
     find /usr/lib/powos -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} + 2>/dev/null || true && \
     # Guard: OCI hook JSON must never ship without its binary. crun fails
     # opaquely ("error executing hook … (exit code: 1)") on EVERY container
@@ -349,6 +356,29 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
       echo "BUILD ERROR: OCI hook JSON shipped without /usr/bin/pow-collision-check" >&2; \
       exit 1; \
     fi && \
+    # Same shape of guard for askpass. environment.d is KEY=VALUE only, so the
+    # `test -x` guard the two shell drop-ins carry cannot be expressed there —
+    # an image that shipped the env files without an executable helper would
+    # break every `sudo -A` in the session with no warning at build time.
+    if [ -f /usr/lib/environment.d/zz-powos-askpass.conf ] && \
+       [ ! -x /usr/bin/powos-askpass ]; then \
+      echo "BUILD ERROR: askpass env drop-ins shipped without an executable /usr/bin/powos-askpass" >&2; \
+      exit 1; \
+    fi && \
+    # The whole fix hinges on glob order: /etc/profile and startplasma source
+    # these directories with *.sh, digits sort before letters, and the files we
+    # must beat are lettered (askpass.sh, kde-openssh-askpass.sh,
+    # ksshaskpass.sh). If a base update renames one to sort after "zz-", ours is
+    # silently overwritten and the ONLY symptom is the original bad dialog
+    # coming back. Assert the order rather than trust it.
+    for d in /etc/profile.d /etc/xdg/plasma-workspace/env; do \
+      [ -d "$d" ] || continue; \
+      last_ap=$(ls "$d" | grep -i askpass | sort | tail -1); \
+      case "$last_ap" in \
+        zz-powos-askpass.sh|"") ;; \
+        *) echo "BUILD ERROR: $d/$last_ap sorts after our askpass drop-in" >&2; exit 1 ;; \
+      esac; \
+    done && \
     systemctl enable greeter-watchdog.timer && \
     systemctl enable powos-firstboot.service && \
     systemctl enable powos-variant-retry.service && \
