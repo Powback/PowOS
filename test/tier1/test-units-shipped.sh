@@ -124,11 +124,12 @@ fi
 #
 # and on a Steam Deck away from its wifi it was an endless loop. "Slow when
 # offline" must not become "will not boot when offline".
-if [[ -d "$ROOT/systemd/greenboot-healthcheck.service.d" ]]; then
-    bad "greenboot's network dependency is being overridden" \
-        "that causes a reboot loop when the machine has no network"
+GB="$ROOT/systemd/greenboot-healthcheck.service.d/10-network-online.conf"
+if [[ -f "$GB" ]] && ! grep -qE '^(After|Wants)=.*network-online' "$GB"; then
+    ok "greenboot does not wait for DHCP before releasing the desktop"
 else
-    ok "greenboot keeps its network-online dependency"
+    bad "greenboot still waits for network-online" \
+        "5s on the critical path, on a device that boots away from wifi"
 fi
 NMW="$ROOT/systemd/NetworkManager-wait-online.service.d/10-powos-bound.conf"
 if [[ -f "$NMW" ]] && grep -qE 'timeout=[1-9]' "$NMW"; then

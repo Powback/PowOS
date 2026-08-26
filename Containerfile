@@ -115,6 +115,10 @@ COPY systemd/cardwired.service.d/         /usr/lib/systemd/system/cardwired.serv
 # Bound the network wait rather than removing greenboot's dependency on it —
 # removing it turns "slow when offline" into a reboot loop. See the drop-in.
 COPY systemd/NetworkManager-wait-online.service.d/ /usr/lib/systemd/system/NetworkManager-wait-online.service.d/
+# Replace greenboot's network-online drop-in so the desktop is not gated on
+# DHCP — 5.0s on the critical path, measured. See the drop-in for why this is
+# safe and why the earlier revert was based on a misdiagnosis.
+COPY systemd/greenboot-healthcheck.service.d/ /usr/lib/systemd/system/greenboot-healthcheck.service.d/
 
 # First-boot appliers. bin/powos-firstboot-apply already shipped (COPY bin/
 # above), but its UNIT never did — so on every installed system the applier sat
