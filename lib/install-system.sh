@@ -75,21 +75,8 @@ ISV_VARIANT=""         # GPU variant to install (deck|main|nvidia-open).
 
 # run_step "description" cmd args...
 # Executes a (destructive) command unless dry-run. Always echoes it first.
-# Progress footer. Sourced defensively: install-system must keep working if
-# progress.sh is missing, so every pg_* call is guarded by pg_have.
-if [[ -z "${PG_ACTIVE:-}" ]]; then
-    _isv_pg="$(dirname "${BASH_SOURCE[0]}")/progress.sh"
-    # shellcheck source=/dev/null
-    [[ -r "$_isv_pg" ]] && source "$_isv_pg"
-    unset _isv_pg
-fi
-pg_have() { declare -F pg_step >/dev/null 2>&1; }
-
 run_step() {
     local desc="$1"; shift
-    # Advance the footer BEFORE running, so the line names what is happening
-    # now rather than what just finished.
-    pg_have && pg_step "$desc"
     echo -e "  ${DIM}\$ $*${NC}"
     if [[ $ISV_DRY_RUN -eq 1 ]]; then
         isv_warn "dry-run: skipped ($desc)"
@@ -1414,23 +1401,6 @@ cmd_install_system() {
 
     isv_choose_disk   || return 1
     isv_choose_mode   || return 1
-
-    # Pin the progress footer for the rest of the run. Started AFTER the
-    # interactive disk/mode questions so it never fights a prompt for the
-    # bottom of the screen, and torn down on ANY exit so a cancelled install
-    # does not leave the terminal with a two-line scroll region.
-    #
-    # Total 0 on purpose — there is no honest denominator. The whole-disk path
-    # runs exactly ONE run_step (`bootc install`, which IS the install), so a
-    # "step 1/9" bar would sit still for the whole run and lie. An earlier
-    # version hardcoded 9/12 and would have done exactly that. The footer shows
-    # an activity marker and a plain step counter instead; bootc draws its own
-    # byte-level bar in the scrolling area above, with real numbers.
-    if pg_have; then
-        trap 'pg_finish' EXIT INT TERM
-        pg_begin 0
-    fi
-
     # Separate games disk: PowOS takes the WHOLE target (no games/Windows tail
     # carved there); POWOS-GAMES is created on ISV_GAMES_DISK AFTER the install
     # succeeds. An empty value — or one equal to the target — keeps the classic

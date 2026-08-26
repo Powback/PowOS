@@ -12,6 +12,7 @@ set -uo pipefail
 PASS=0; FAIL=0; SKIP=0
 check(){ if ( eval "$2" ) >/dev/null 2>&1; then echo "  ok   - $1"; PASS=$((PASS+1));
          else echo "  FAIL - $1"; FAIL=$((FAIL+1)); fi }
+skip(){ echo "  skip - $1"; SKIP=$((SKIP+1)); }
 
 [[ -f /usr/lib/powos/.powos-src-commit ]] || {
     echo "  skip - not inside a PowOS image"; echo; echo "== Results: 0 passed, 0 failed =="; exit 0; }
@@ -88,6 +89,59 @@ check "brew is either present or POWOS_BREW dropped it deliberately" \
       '[ -f /usr/share/homebrew.tar.zst ] || [ ! -f /usr/lib/systemd/system/brew-setup.service ] \
        || grep -q "ConditionPathExists=/usr/share/homebrew.tar.zst" /usr/lib/systemd/system/brew-setup.service'
 
+# ── askpass: the dialog must be able to say what it is authenticating ──
+#
+# The whole fix is a glob-order bet against files the BASE image owns:
+#   /etc/profile.d/askpass.sh              -> SUDO_ASKPASS=ksshaskpass
+#   /etc/profile.d/kde-openssh-askpass.sh  -> SSH_ASKPASS=ksshaskpass
+#   /etc/xdg/plasma-workspace/env/ksshaskpass.sh
+# If a base update renames one of those to something sorting after "zz-", or a
+# COPY silently lands nothing, the ONLY symptom is the original bad dialog
+# coming back — "Unable to parse phrase" and a box that names nothing. So this
+# does not grep the Containerfile; it sources the files the way the shell does
+# and reads the variable back.
+#
+# Gated on the image's OWN bundled source snapshot (/usr/lib/powos/src, a
+# `git archive HEAD` of the commit that built it), not on the helper's
+# presence — gating on the helper would make the whole block vacuous in
+# exactly the case it exists to catch. The three states are distinct:
+#   src has it, /usr/bin has it   -> assert everything below
+#   src has it, /usr/bin does not -> THE BUILD DROPPED IT. Fail loudly.
+#   src does not have it          -> booted image predates the feature. Skip.
+if [ ! -e /usr/lib/powos/src/bin/powos-askpass ] && [ ! -x /usr/bin/powos-askpass ]; then
+  skip "askpass: this image predates powos-askpass (not in its source snapshot)"
+else
+check "powos-askpass is installed and executable" '[ -x /usr/bin/powos-askpass ]'
+check "powos-askpass runs and can describe a sudo prompt" \
+      'POWOS_ASKPASS_DRY_RUN=1 /usr/bin/powos-askpass "[sudo] password for x: " \
+         | grep -q "wants to run a command as root"'
+check "after sourcing ALL of /etc/profile.d, SUDO_ASKPASS is powos-askpass" \
+      'v=$(env -i bash -c "for i in /etc/profile.d/*.sh; do . \$i >/dev/null 2>&1; done;
+                           echo \$SUDO_ASKPASS")
+       [ "$v" = "/usr/bin/powos-askpass" ]'
+check "after sourcing ALL of /etc/profile.d, SSH_ASKPASS is powos-askpass" \
+      'v=$(env -i bash -c "for i in /etc/profile.d/*.sh; do . \$i >/dev/null 2>&1; done;
+                           echo \$SSH_ASKPASS")
+       [ "$v" = "/usr/bin/powos-askpass" ]'
+check "after sourcing the Plasma session env, SSH_ASKPASS is powos-askpass" \
+      '[ ! -d /etc/xdg/plasma-workspace/env ] ||
+       { v=$(env -i bash -c "for i in /etc/xdg/plasma-workspace/env/*.sh; do . \$i >/dev/null 2>&1; done;
+                             echo \$SSH_ASKPASS")
+         [ "$v" = "/usr/bin/powos-askpass" ]; }'
+check "systemd user units get it too (environment.d drop-in shipped)" \
+      'grep -qs "^SUDO_ASKPASS=/usr/bin/powos-askpass$" /usr/lib/environment.d/zz-powos-askpass.conf'
+check "no askpass drop-in in either dir sorts after ours" \
+      'for d in /etc/profile.d /etc/xdg/plasma-workspace/env; do
+         [ -d "$d" ] || continue
+         l=$(ls "$d" | grep -i askpass | sort | tail -1)
+         [ -z "$l" ] || [ "$l" = "zz-powos-askpass.sh" ] || { echo "loses to $d/$l"; exit 1; }
+       done'
+# Failing safe is not a nicety here: SUDO_ASKPASS is consulted only by `sudo -A`,
+# which is why a broken helper can never cost anyone root.
+check "plain sudo still has its own terminal prompt (askpass is -A only)" \
+      '[ -x /usr/bin/sudo ]'
+fi
+
 echo
-echo "== Results: $PASS passed, $FAIL failed =="
+echo "== Results: $PASS passed, $FAIL failed${SKIP:+, $SKIP skipped} =="
 [[ $FAIL -eq 0 ]]

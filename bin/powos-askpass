@@ -1,0 +1,449 @@
+#!/bin/bash
+# powos-askpass - the one askpass helper for PowOS, for every prompt that is
+# raised without a terminal to explain itself.
+#
+# THE BUG THIS EXISTS FOR
+#
+#   ksshaskpass[1259757]: Unable to parse phrase "[sudo] password for powos: "
+#
+# ksshaskpass is an *SSH* passphrase dialog. Bazzite ships
+# /etc/profile.d/askpass.sh, which points SUDO_ASKPASS at it, so every
+# `sudo -A` in a GUI session hands a sudo prompt to a program that only knows
+# how to parse ssh prompts. It fails its regexes, logs the line above, and
+# draws a box titled "Enter SSH Credentials" with the text "Please enter
+# passphrase" — no host, no command, no requesting process, no reason. A burst
+# of those is indistinguishable from malware asking for your root password.
+#
+# sudo hands an askpass helper exactly ONE argument: the prompt string. Nothing
+# else. No SUDO_COMMAND, no SUDO_USER, no cwd. So the helper has to go and find
+# the context itself, and this one does: it walks /proc from $PPID up to the
+# `sudo` process, reads sudo's argv (readable — only /proc/<sudo>/cwd is
+# blocked, because sudo is setuid), and reads the cmdline/cwd of sudo's own
+# parent, which is the shell or app that actually asked.
+#
+# WHAT IT WILL NOT DO
+#
+#   - It will not suppress a prompt. SUDO_ASKPASS=/bin/false was tried and
+#     rejected: silencing the prompt turns an expired credential into a silent
+#     failure, which is strictly worse than an ugly dialog.
+#   - It never handles, stores, logs or echoes a password. The secret goes from
+#     the dialog to stdout and nowhere else. Nothing here writes it to a file,
+#     the journal, or a variable that outlives the call.
+#   - It never decides anything about authorisation. It is a label printer.
+#
+# FAILING SAFE
+#
+#   SUDO_ASKPASS only affects `sudo -A`. If this script is missing, broken, or
+#   non-executable, plain `sudo` still prompts on the terminal exactly as it
+#   always did — there is no path by which a bad askpass helper locks anyone
+#   out of root. The profile.d snippet that installs it additionally refuses to
+#   export SUDO_ASKPASS unless the file is executable, so a half-applied image
+#   degrades to the old (bad, but working) ksshaskpass rather than to nothing.
+#
+# CONTRACT (imposed by sudo(8) and ssh(1), not by us)
+#
+#   argv[1]   the prompt string
+#   stdout    the secret, and NOTHING else
+#   exit 0    user answered;  exit != 0  user cancelled / cannot be asked
+#
+# Everything this script wants to tell the user therefore goes to the dialog,
+# to /dev/tty, or to stderr. Never to stdout.
+#
+# TESTING
+#   POWOS_ASKPASS_DRY_RUN=1  compose the text, print it, exit — never prompts.
+#   POWOS_ASKPASS_MODE=tty|gui  force a renderer instead of auto-detecting.
+
+set -uo pipefail
+
+PROMPT="${1-}"
+
+# Longest value we will ever render. An unbounded /proc/<pid>/cmdline in a
+# dialog is a defacing primitive: the claude-code wrapper on this box has a
+# 4 KB cmdline containing newlines and quotes.
+MAXV=140
+MAXCHAIN=6
+
+# ── /proc readers ────────────────────────────────────────────────────────────
+# Every one of these is allowed to fail. A pid can exit between two reads, and
+# /proc/<pid>/cwd of a setuid binary is unreadable by design.
+
+proc_comm() { cat "/proc/$1/comm" 2>/dev/null; }
+
+proc_cmdline() { tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null; }
+
+proc_cwd() { readlink "/proc/$1/cwd" 2>/dev/null; }
+
+# Field 4 of /proc/<pid>/stat is the ppid — but field 2 is comm, unquoted and
+# free to contain spaces and parentheses ("(Web Content)"). Split after the
+# LAST ')' or this mis-parses for half the processes on a desktop.
+proc_ppid() {
+    local st rest parts
+    st=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+    rest=${st##*") "}
+    read -r -a parts <<< "$rest" || return 1
+    printf '%s' "${parts[1]:-}"
+}
+
+# ── text hygiene ─────────────────────────────────────────────────────────────
+
+# clip <string> [max] - one line, printable only, bounded length.
+clip() {
+    local s="${1-}" max="${2:-$MAXV}"
+    s=${s//$'\n'/ }
+    s=${s//$'\t'/ }
+    s=$(printf '%s' "$s" | tr -c '[:print:]' ' ' 2>/dev/null) || s="${1-}"
+    s=$(printf '%s' "$s" | tr -s ' ') || true
+    s="${s#" "}"; s="${s%" "}"
+    if (( ${#s} > max )); then s="${s:0:max}..."; fi
+    printf '%s' "$s"
+}
+
+# Qt decides a QLabel is rich text by sniffing for tags/entities, and in rich
+# text mode '\n' collapses to a space — so a plain-text body with newlines
+# renders as one run-on line the moment a command happens to contain '<'.
+# Escaping first and then declaring <qt> explicitly makes the mode a decision
+# rather than a coin flip.
+#
+# NOT written with ${s//</&lt;}. Bash 5.2 turned on `patsub_replacement`, under
+# which an unquoted '&' in the REPLACEMENT half of ${var//pat/rep} expands to
+# the text that matched — so '&lt;' silently becomes '<lt;', and the escaping
+# that was supposed to prevent markup injection instead produces broken markup.
+# Observed live on bash 5.3.9. sed's '\&' is unambiguous in every version.
+xml_escape() {
+    printf '%s' "${1-}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+# ── ancestry ─────────────────────────────────────────────────────────────────
+# ANC_PIDS: this helper's ancestors, nearest first. Bounded — a /proc loop
+# (which should not happen, but a pid-namespace boundary can look like one)
+# must not spin forever inside an authentication prompt.
+
+ANC_PIDS=()
+collect_ancestors() {
+    local p="${PPID:-1}" n=0
+    while (( n < 16 )); do
+        [[ -d "/proc/$p" ]] || break
+        ANC_PIDS+=("$p")
+        local up; up=$(proc_ppid "$p") || break
+        [[ -n "$up" && "$up" != "0" && "$up" != "$p" ]] || break
+        p="$up"; n=$((n+1))
+    done
+}
+
+# find_ancestor <comm> [comm...] -> echoes pid, or nothing
+find_ancestor() {
+    local pid want c
+    for pid in "${ANC_PIDS[@]:-}"; do
+        [[ -n "$pid" ]] || continue
+        c=$(proc_comm "$pid")
+        for want in "$@"; do
+            [[ "$c" == "$want" ]] && { printf '%s' "$pid"; return 0; }
+        done
+    done
+    return 1
+}
+
+# The readable ancestry, as comm names, oldest -> newest. This is the field
+# that actually answers "what is asking me this?" when the immediate parent is
+# a generic `bash`.
+ancestry_chain() {
+    local sep=" < " pid c out="" i=0
+    for pid in "${ANC_PIDS[@]:-}"; do
+        [[ -n "$pid" ]] || continue
+        (( i >= MAXCHAIN )) && break
+        c=$(proc_comm "$pid"); [[ -n "$c" ]] || continue
+        [[ -n "$out" ]] && out="$out$sep"
+        out="$out$c"
+        i=$((i+1))
+    done
+    printf '%s' "$out"
+}
+
+# ── sudo argv ────────────────────────────────────────────────────────────────
+# sudo's own /proc/<pid>/cmdline IS readable (only cwd is not), so the command
+# can be recovered exactly. There is no shortcut for this: sudo deliberately
+# does not put SUDO_COMMAND into the askpass helper's environment.
+#
+# Options that consume a value, so the parser does not mistake the value for
+# the command. Taken from sudo(8) 1.9.x.
+SUDO_OPTS_WITH_ARG="CDghpRrTtUuc"
+
+SUDO_CMD=""; SUDO_USER_TARGET="root"; SUDO_KIND="command"
+parse_sudo_argv() {
+    local pid="$1" argv=() i n a rest ch j
+    [[ -n "$pid" && -r "/proc/$pid/cmdline" ]] || { SUDO_KIND="unknown"; return 1; }
+    # 2>/dev/null FIRST: redirections apply left to right, so putting it after
+    # the input redirect still lets bash print "No such file or directory" for
+    # a pid that exited between the ancestry walk and this read.
+    mapfile -d '' -t argv 2>/dev/null < "/proc/$pid/cmdline" || { SUDO_KIND="unknown"; return 1; }
+    n=${#argv[@]}; (( n > 1 )) || { SUDO_KIND="none"; return 0; }
+
+    i=1
+    while (( i < n )); do
+        a="${argv[$i]}"
+        case "$a" in
+            --) i=$((i+1)); break ;;
+            --user=*)  SUDO_USER_TARGET="${a#--user=}"; i=$((i+1)) ;;
+            --user|--group|--host|--prompt|--chroot|--chdir|--role|--type|\
+            --other-user|--close-from|--command-timeout|--login-class)
+                [[ "$a" == "--user" ]] && SUDO_USER_TARGET="${argv[$((i+1))]:-root}"
+                i=$((i+2)) ;;
+            --*=*) i=$((i+1)) ;;
+            --login)  SUDO_KIND="login-shell"; i=$((i+1)) ;;
+            --shell)  SUDO_KIND="shell";       i=$((i+1)) ;;
+            --edit)   SUDO_KIND="edit";        i=$((i+1)) ;;
+            --validate) SUDO_KIND="validate";  i=$((i+1)) ;;
+            --*) i=$((i+1)) ;;
+            -*)
+                # Short cluster: -Anu root, -u root, -i, ...
+                rest="${a#-}"
+                j=0
+                while (( j < ${#rest} )); do
+                    ch="${rest:$j:1}"
+                    case "$ch" in
+                        i) SUDO_KIND="login-shell" ;;
+                        s) SUDO_KIND="shell" ;;
+                        e) SUDO_KIND="edit" ;;
+                        v) SUDO_KIND="validate" ;;
+                        l) SUDO_KIND="list" ;;
+                    esac
+                    if [[ "$SUDO_OPTS_WITH_ARG" == *"$ch"* ]]; then
+                        # Value is either glued to the cluster or the next argv.
+                        local val="${rest:$((j+1))}"
+                        if [[ -z "$val" ]]; then
+                            val="${argv[$((i+1))]:-}"; i=$((i+1))
+                        fi
+                        [[ "$ch" == "u" && -n "$val" ]] && SUDO_USER_TARGET="$val"
+                        break
+                    fi
+                    j=$((j+1))
+                done
+                i=$((i+1)) ;;
+            *) break ;;
+        esac
+    done
+
+    # Whatever is left starts with any VAR=value assignments, then the command.
+    while (( i < n )) && [[ "${argv[$i]}" == [A-Za-z_]*=* ]]; do i=$((i+1)); done
+
+    if (( i < n )); then
+        SUDO_CMD="${argv[*]:$i}"
+        [[ "$SUDO_KIND" == "command" ]] || SUDO_KIND="command"
+    fi
+    return 0
+}
+
+describe_sudo_kind() {
+    case "$SUDO_KIND" in
+        login-shell) printf 'a login shell (sudo -i)' ;;
+        shell)       printf 'a shell (sudo -s)' ;;
+        edit)        printf 'sudoedit' ;;
+        validate)    printf 'refresh the sudo timestamp (sudo -v)' ;;
+        list)        printf 'list sudo privileges (sudo -l)' ;;
+        none)        printf 'sudo (no command given)' ;;
+        unknown)     printf 'could not be identified - no sudo process in this prompt%ss ancestry' "'" ;;
+        *)           printf 'could not be identified' ;;
+    esac
+}
+
+# ── the composed message ─────────────────────────────────────────────────────
+
+TITLE="Authentication required"
+HEADLINE="A program is asking for a password."
+MODE="password"          # password | confirm | input
+LABELS=(); VALUES=()
+
+addf() { LABELS+=("$1"); VALUES+=("$(clip "${2-}")"); }
+
+collect_ancestors
+
+sudo_pid=""; ssh_pid=""
+sudo_pid=$(find_ancestor sudo sudoedit) || sudo_pid=""
+ssh_pid=$(find_ancestor ssh ssh-add sshfs scp sftp git rsync) || ssh_pid=""
+
+# The classification order is deliberate: prompt SHAPE wins over ancestry,
+# because `sudo ssh somehost` has a sudo ancestor and an ssh prompt, and the
+# honest answer there is "ssh wants a remote password", not "sudo wants root".
+case "$PROMPT" in
+    *"(yes/no"*|*fingerprint*)
+        MODE="input"
+        TITLE="Unknown SSH host key"
+        HEADLINE="SSH cannot verify the identity of the host it is connecting to."
+        addf "Question" "$PROMPT"
+        [[ -n "$ssh_pid" ]] && addf "Requested by" "$(proc_cmdline "$ssh_pid")"
+        addf "Answer with" "yes, no, or the fingerprint"
+        ;;
+    *)
+    if [[ "${SSH_ASKPASS_PROMPT:-}" == "confirm" ]]; then
+        MODE="confirm"
+        TITLE="Confirm use of SSH key"
+        HEADLINE="The SSH agent is being asked to use one of your keys."
+        addf "Request" "$PROMPT"
+        [[ -n "$ssh_pid" ]] && addf "Requested by" "$(proc_cmdline "$ssh_pid")"
+        addf "Session" "$(ancestry_chain)"
+    elif [[ "$PROMPT" == *passphrase* || "$PROMPT" == *"Enter PIN"* ]]; then
+        TITLE="SSH key passphrase"
+        HEADLINE="A private key is being unlocked."
+        # "Enter passphrase for key '/home/u/.ssh/id_ed25519':" and the
+        # unquoted "Enter passphrase for /home/u/.ssh/id_ed25519:" are both
+        # emitted by OpenSSH depending on the caller. Pull the path out of
+        # either, rather than showing the whole sentence.
+        key="$PROMPT"
+        key="${key#*passphrase for }"; key="${key#key }"
+        key="${key#\'}"; key="${key%%\':*}"; key="${key%%:*}"
+        [[ -n "$key" && "$key" != "$PROMPT" ]] && addf "Key" "$key"
+        addf "Prompt" "$PROMPT"
+        [[ -n "$ssh_pid" ]] && addf "Requested by" "$(proc_cmdline "$ssh_pid")"
+        addf "Session" "$(ancestry_chain)"
+    elif [[ "$PROMPT" == "[sudo]"* || ( -n "$sudo_pid" && "$PROMPT" == *[Pp]assword* ) ]]; then
+        parse_sudo_argv "$sudo_pid" || true
+        TITLE="Run as ${SUDO_USER_TARGET}"
+        HEADLINE="A program on this machine wants to run a command as ${SUDO_USER_TARGET}."
+        if [[ -n "$SUDO_CMD" ]]; then
+            addf "Command" "$SUDO_CMD"
+        else
+            addf "Command" "$(describe_sudo_kind)"
+        fi
+        addf "Run as" "$SUDO_USER_TARGET"
+
+        req=""; cwd=""
+        if [[ -n "$sudo_pid" ]]; then
+            req=$(proc_ppid "$sudo_pid") || req=""
+        fi
+        if [[ -n "$req" ]]; then
+            addf "Requested by" "$(proc_comm "$req") - $(proc_cmdline "$req")  [pid $req]"
+        fi
+        # /proc/<sudo>/cwd is unreadable (setuid), but the helper is started in
+        # the SAME directory sudo was invoked from, so our own cwd is the
+        # honest answer and needs no permissions at all.
+        cwd="$PWD"
+        [[ -n "$cwd" ]] || cwd=$(proc_cwd "${req:-$$}")
+        [[ -n "$cwd" ]] && addf "Directory" "$cwd"
+        addf "Session" "$(ancestry_chain)"
+        addf "Asking as" "$(id -un 2>/dev/null)@$(hostname 2>/dev/null)"
+    elif [[ "$PROMPT" == *"'s password:"* ]]; then
+        TITLE="Remote password"
+        HEADLINE="A remote account password is being requested."
+        who="${PROMPT%%\'s password:*}"
+        addf "Account" "$who"
+        [[ -n "$ssh_pid" ]] && addf "Requested by" "$(proc_cmdline "$ssh_pid")"
+        addf "Session" "$(ancestry_chain)"
+    else
+        TITLE="Authentication required"
+        HEADLINE="A program is asking for a password. PowOS could not identify what for - treat it with suspicion."
+        addf "Prompt" "${PROMPT:-(the program gave no prompt text)}"
+        parent="${ANC_PIDS[0]:-}"
+        [[ -n "$parent" ]] && addf "Requested by" "$(proc_comm "$parent") - $(proc_cmdline "$parent")  [pid $parent]"
+        addf "Directory" "$PWD"
+        addf "Session" "$(ancestry_chain)"
+    fi
+    ;;
+esac
+
+# ── renderers ────────────────────────────────────────────────────────────────
+
+plain_body() {
+    local i
+    printf '%s\n' "$HEADLINE"
+    for i in "${!LABELS[@]}"; do
+        printf '  %-13s %s\n' "${LABELS[$i]}:" "${VALUES[$i]}"
+    done
+}
+
+rich_body() {
+    local i out
+    out="<qt>$(xml_escape "$HEADLINE")<br/><br/><table>"
+    for i in "${!LABELS[@]}"; do
+        out="$out<tr><td><b>$(xml_escape "${LABELS[$i]}")</b>&nbsp;&nbsp;</td>"
+        out="$out<td><tt>$(xml_escape "${VALUES[$i]}")</tt></td></tr>"
+    done
+    printf '%s' "$out</table></qt>"
+}
+
+if [[ -n "${POWOS_ASKPASS_DRY_RUN:-}" ]]; then
+    printf '== %s ==\n' "$TITLE"
+    plain_body
+    printf 'mode: %s\n' "$MODE"
+    exit 0
+fi
+
+want_mode="${POWOS_ASKPASS_MODE:-}"
+if [[ -z "$want_mode" ]]; then
+    if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] \
+       && { command -v kdialog >/dev/null 2>&1 || command -v zenity >/dev/null 2>&1; }; then
+        want_mode="gui"
+    else
+        want_mode="tty"
+    fi
+fi
+
+if [[ "$want_mode" == "gui" ]]; then
+    body=$(rich_body)
+    if command -v kdialog >/dev/null 2>&1; then
+        case "$MODE" in
+            confirm)  kdialog --title "$TITLE" --yesno    "$body"; exit $? ;;
+            input)    kdialog --title "$TITLE" --inputbox "$body"; exit $? ;;
+            *)        kdialog --title "$TITLE" --password "$body"; exit $? ;;
+        esac
+    elif command -v zenity >/dev/null 2>&1; then
+        # zenity has no rich text and no body text on --password, so it gets
+        # the plain rendering through --entry.
+        pbody=$(plain_body)
+        case "$MODE" in
+            confirm) zenity --question --title="$TITLE" --text="$pbody"; exit $? ;;
+            input)   zenity --entry --title="$TITLE" --text="$pbody"; exit $? ;;
+            *)       zenity --entry --hide-text --title="$TITLE" --text="$pbody"; exit $? ;;
+        esac
+    fi
+    # No dialog tool after all — fall through to the terminal path rather than
+    # failing. This is the branch that keeps `sudo -A` working over SSH with
+    # DISPLAY forwarded but no kdialog on the far side.
+fi
+
+# ── terminal fallback ────────────────────────────────────────────────────────
+# The prompt must go to the CONTROLLING TERMINAL, not stdout (stdout is the
+# secret channel) and not stdin (which sudo may have redirected). If there is
+# no controlling terminal there is nobody to ask: say so on stderr, where it
+# reaches the journal or sudo's own error stream, and exit non-zero at once.
+# This is the branch that must never hang a boot.
+# Braces, not a bare `exec ... 2>/dev/null`: bash applies redirections left to
+# right, so the 2>/dev/null would arrive too late to swallow the open failure
+# and the user would see a raw "/dev/tty: No such device or address" first.
+if ! { exec 3<>/dev/tty; } 2>/dev/null; then
+    {
+        printf 'powos-askpass: %s\n' "$TITLE"
+        plain_body
+        printf 'powos-askpass: no terminal and no graphical session - cannot ask.\n'
+    } >&2
+    exit 1
+fi
+
+{
+    printf '\n== %s ==\n' "$TITLE"
+    plain_body
+} >&3
+
+case "$MODE" in
+    confirm)
+        printf 'Allow? [y/N] ' >&3
+        IFS= read -r answer <&3 || { exec 3>&-; exit 1; }
+        exec 3>&-
+        [[ "$answer" =~ ^[Yy] ]] && exit 0
+        exit 1
+        ;;
+    input)
+        printf 'Answer: ' >&3
+        IFS= read -r answer <&3 || { exec 3>&-; exit 1; }
+        exec 3>&-
+        printf '%s\n' "$answer"
+        exit 0
+        ;;
+    *)
+        printf 'Password: ' >&3
+        IFS= read -r -s secret <&3 || { printf '\n' >&3; exec 3>&-; exit 1; }
+        printf '\n' >&3
+        exec 3>&-
+        printf '%s\n' "$secret"
+        exit 0
+        ;;
+esac

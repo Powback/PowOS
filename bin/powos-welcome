@@ -101,11 +101,16 @@ run_in_terminal() {
 
 # Explicit sudo for the one non-terminal privileged path (chpasswd): use a
 # graphical askpass when available so the prompt is visible in GUI sessions.
+#
+# powos-askpass FIRST, and ksshaskpass only as a last resort: ksshaskpass is an
+# ssh-passphrase dialog, so handing it a sudo prompt gets "Unable to parse
+# phrase" and a box that says nothing about what is being authorised. It stays
+# in the list because a dialog with no information still beats no dialog.
 w_sudo() {
     if [[ $HAS_GUI -eq 1 && -z "${SUDO_ASKPASS:-}" ]]; then
         local askpass
-        for askpass in /usr/bin/ksshaskpass /usr/libexec/kf6/ksshaskpass \
-                       /usr/libexec/ssh/ksshaskpass; do
+        for askpass in /usr/bin/powos-askpass /usr/bin/ksshaskpass \
+                       /usr/libexec/kf6/ksshaskpass /usr/libexec/ssh/ksshaskpass; do
             if [[ -x "$askpass" ]]; then
                 SUDO_ASKPASS="$askpass" sudo -A "$@"
                 return
