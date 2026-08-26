@@ -644,6 +644,23 @@ isv_install_whole_disk() {
     }
     isv_ok "Base system installed."
 
+    # Reach into the freshly written target and make its boot menu usable.
+    # Done here, while we still know exactly which disk was installed to.
+    local _bm _bp
+    for _bp in $(lsblk -ln -o PATH "$ISV_TARGET" 2>/dev/null | tail -n +2); do
+        [[ -b "$_bp" ]] || continue
+        _bm=$(mktemp -d) || break
+        if mount "$_bp" "$_bm" 2>/dev/null; then
+            if [[ -f "$_bm/boot/grub2/grub.cfg" || -f "$_bm/grub2/grub.cfg" ]]; then
+                isv_boot_menu_reachable "$_bm"
+                umount "$_bm" 2>/dev/null; rmdir "$_bm" 2>/dev/null
+                break
+            fi
+            umount "$_bm" 2>/dev/null
+        fi
+        rmdir "$_bm" 2>/dev/null
+    done
+
     if (( shared_gb > 0 )); then
         # Non-fatal: the OS install already succeeded; a missing games
         # partition can always be added later with `powos games create`.
@@ -1051,6 +1068,30 @@ isv_create_games_on_separate_disk() {
 }
 
 # ── Post-install: automate the dual-boot footguns ─────────────────
+# Make the boot menu reachable on the installed system.
+#
+# bootc writes `set timeout=1`. One second is not a menu; it is a formality.
+# On a Steam Deck — no keyboard, d-pad only — it is impossible to hit
+# deliberately, which means the rollback deployment that ostree carefully
+# keeps for you cannot actually be selected when you need it. Every "just
+# boot the previous deployment" recovery instruction assumes a menu you can
+# reach.
+#
+# Five seconds is long enough to catch with a d-pad and short enough not to
+# be a tax on every boot.
+isv_boot_menu_reachable() {
+    local mnt="$1" cfg
+    for cfg in "$mnt/boot/grub2/grub.cfg" "$mnt/grub2/grub.cfg"; do
+        [[ -f "$cfg" ]] || continue
+        if sed -i 's/^set timeout=[0-9]\+$/set timeout=5/' "$cfg" 2>/dev/null; then
+            isv_ok "Boot menu timeout set to 5s (rollback is selectable)"
+            return 0
+        fi
+    done
+    isv_warn "Could not set the boot menu timeout — rollback may be hard to select."
+    return 0
+}
+
 isv_post_install() {
     isv_step "Post-install tuning (dual-boot friendliness)"
 

@@ -91,6 +91,29 @@ else
     bad "systemd-udev-settle is not masked" "one Wants= on it stalls sysinit for seconds"
 fi
 
+# The initramfs trim must NEVER reach main or nvidia-open. Those variants run
+# on arbitrary desktops and servers: md RAID, SAS/SATA HBAs and the full
+# filesystem set are exactly what they need to find a root at all. Only the
+# deck variant — one fixed AMD handheld with one NVMe — can safely drop them.
+DS="$ROOT/config/dracut.conf.d/95-powos-deck-slim.conf"
+if [[ -f "$DS" ]] && grep -qE '^omit_drivers' "$DS"; then
+    ok "the deck initramfs trim exists"
+else
+    bad "the deck initramfs trim is missing"
+fi
+if grep -qF 'COPY config/dracut.conf.d/95-powos-deck-slim.conf /usr/share/powos/' "$CF" \
+   && ! grep -qE '^COPY config/dracut.conf.d/.*dracut\.conf\.d/' "$CF"; then
+    ok "the trim is STAGED, never installed unconditionally"
+else
+    bad "the trim is installed for every variant" \
+        "main and nvidia-open would lose RAID/HBA/filesystem drivers they need"
+fi
+if grep -q 'deck\*)' "$CF" && grep -q 'initramfs: left generic (not the deck variant)' "$CF"; then
+    ok "only *deck* builds install it and regenerate"
+else
+    bad "the deck-only guard is missing"
+fi
+
 # ublue-os-media-automount must be masked. It runs `findmnt -s --json ...`,
 # which exits non-zero when /etc/fstab has nothing to list — and a bootc
 # install leaves fstab EMPTY. Its Python does not handle that, so the unit
