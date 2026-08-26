@@ -18,8 +18,13 @@
 #   live_marker=yes|no
 #   containers_fstab=yes|no
 set -uo pipefail
-S() { if sudo -n true 2>/dev/null; then sudo "$@" 2>/dev/null
-      else echo "${POWOS_SUDO_PASS:-powos}" | sudo -S "$@" 2>/dev/null; fi }
+S() {
+    # Prime the credential cache with its own stdin, then run with -n so the
+    # caller's stdin reaches the command. See build/cycle-lib.sh for the bug
+    # the obvious `echo pass | sudo -S "$@"` form causes.
+    sudo -n true 2>/dev/null || echo "${POWOS_SUDO_PASS:-powos}" | sudo -S -v 2>/dev/null
+    sudo -n "$@" 2>/dev/null
+}
 src="${1:?usage: raw-stamp.sh <image|device>}"; loop=""; part=""
 if [[ -b "$src" ]]; then
     part=$(S lsblk -nro NAME,LABEL "$src" | awk '$2=="root"{print "/dev/"$1; exit}')

@@ -20,9 +20,18 @@ mkdir -p "$CACHE"
 # same way, but try a cached/passwordless sudo first: -S with a password on
 # stdin costs a PAM round trip per call, and the burn verification alone makes
 # forty of them.
+# Prime the credential cache with its OWN stdin, then run the real command with
+# -n so the caller's stdin reaches it untouched.
+#
+# The obvious form — `echo pass | sudo -S "$@"` — is wrong here in a way that is
+# invisible until it corrupts something. It hands the password pipe to the
+# command as ITS stdin, so `S bash -s <<EOF` runs bash with the password as its
+# script instead of the heredoc, and
+# `printf 'YES\n' | S ./install-to-usb.sh` writes a disk without ever
+# delivering the confirmation the script is blocking on.
 S() {
-    if sudo -n true 2>/dev/null; then sudo "$@"
-    else echo "${POWOS_SUDO_PASS:-powos}" | sudo -S "$@"; fi
+    sudo -n true 2>/dev/null || echo "${POWOS_SUDO_PASS:-powos}" | sudo -S -v 2>/dev/null
+    sudo -n "$@"
 }
 export -f S 2>/dev/null || true
 
@@ -105,10 +114,38 @@ tree_is_dirty() {
     return 1
 }
 
+# ── mutual exclusion ──────────────────────────────────────────────
+# Two mechanisms, because they answer different questions.
+#
+# The lock is authoritative for THESE tiers. The first version of this used
+# `pgrep -f 'prepare\.sh|burn-prepared\.sh|boot-gate\.sh'`, which matches any
+# process whose command line merely CONTAINS those strings — including the
+# shell that was about to launch the tier, if that shell's command line quoted
+# the name. It refused to run and blamed a cycle that did not exist. A pattern
+# over other processes' argv is a guess; a lock is a fact.
+#
+# The pgrep survives only for the legacy /var/tmp/*.sh cycle, which knows
+# nothing about this lock. It is anchored to the start of the command line so
+# it matches a shell EXECUTING those scripts, not one talking about them.
+# Re-entrant DOWN A PROCESS TREE, which is the whole point: media.sh holds the
+# lock and then runs build/iterate.sh as a child, and a child blocking on its
+# parent's lock is a deadlock dressed as a safety feature. It did exactly that
+# once — "another build tier already holds the lock" was media.sh describing
+# itself. The exported marker is inherited by children and by nothing else.
+acquire_lock() {
+    [[ -n "${POWOS_TIER_LOCK:-}" ]] && return 0
+    exec 9>"$CACHE/.lock" || die "cannot open the tier lock"
+    if ! flock -n 9; then
+        die "another build tier already holds $CACHE/.lock — refusing to compete for podman"
+    fi
+    export POWOS_TIER_LOCK=$$
+}
+
 refuse_if_cycle_running() {
+    acquire_lock
     local p
-    p=$(pgrep -af '[p]repare\.sh|[b]urn-prepared\.sh|[b]oot-gate\.sh' 2>/dev/null | head -3)
+    p=$(pgrep -af '^(/usr/bin/|/bin/)?bash /var/tmp/(prepare|burn-prepared|boot-gate)\.sh' 2>/dev/null | head -3)
     [[ -z "$p" ]] && return 0
-    die "a build cycle is already running — refusing to compete for podman/the device:
+    die "the legacy /var/tmp build cycle is running — refusing to compete for podman/the device:
 $p"
 }

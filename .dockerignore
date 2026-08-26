@@ -58,6 +58,6 @@ bazzite/
 # be absent, not because anything enforced it.
 sources/*/upstream/
 
-# Cached raw/media artifacts and their bookkeeping.
-build/output/
+# Tier bookkeeping (raw cache key, gate record, timings). build/output/ is
+# already excluded above under "Build artifacts".
 build/.cache/

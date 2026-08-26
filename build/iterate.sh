@@ -58,7 +58,9 @@ echo "=== iterate: $VARIANT at ${SHA:0:8} ==="
 # edits DO land in the image — while /usr/lib/powos/.powos-src-commit still says
 # HEAD, because that comes from `git archive HEAD`. The image is then stamped
 # with a commit that cannot reproduce it. Fine to iterate on; burn.sh refuses.
-if [[ $ALLOW_DIRTY -eq 0 ]] && dirt=$(tree_is_dirty); then
+DIRTY=clean
+if dirt=$(tree_is_dirty); then DIRTY=dirty; fi
+if [[ $ALLOW_DIRTY -eq 0 && "$DIRTY" == dirty ]]; then
     loud "UNCOMMITTED CHANGES IN THE BUILD CONTEXT" \
          "" \
          "These files are copied into the image, but .powos-src-commit will" \
@@ -187,8 +189,21 @@ fi
 # ── record, for media.sh's raw cache ──────────────────────────────
 # A HINT, not a permission slip. media.sh compares it, and then still re-reads
 # the commit baked inside the raw before trusting it.
+# A HINT, and a precise one. media.sh uses it to decide whether rebuilding is
+# redundant, so it has to record everything that makes an image trustworthy:
+# which digest, which commit, whether the tree was clean when it was built (a
+# dirty build is stamped with a commit it does not match), and whether the
+# in-image tests actually ran and passed for THIS digest.
+#
+# This matters more than it looks: a podman image ID changes on every rebuild
+# even when nothing changed, because the fixup layer writes files with
+# build-time timestamps. Without this record, media.sh would rebuild, get a new
+# digest, and miss the raw cache every single time — which is exactly what it
+# did on its first run.
 DIGEST=$(image_digest "$TAG")
-printf '%s\t%s\t%s\n' "$DIGEST" "$SHA" "$(date -u +%FT%TZ)" > "$CACHE/image-$VARIANT"
+[[ $RUN_TESTS -eq 1 ]] && TESTED=tested || TESTED=untested
+printf '%s\t%s\t%s\t%s\t%s\n' "$DIGEST" "$SHA" "$(date -u +%FT%TZ)" "$DIRTY" "$TESTED" \
+    > "$CACHE/image-$VARIANT"
 say "image id ${DIGEST#sha256:}" | cut -c1-60
 
 timings "iterate/$VARIANT"

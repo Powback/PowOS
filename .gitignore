@@ -63,3 +63,6 @@ sources/*/upstream/
 
 # Local agent/session config, not part of the OS.
 .claude/
+
+# Build-tier bookkeeping (raw cache key, gate record, timings)
+build/.cache/

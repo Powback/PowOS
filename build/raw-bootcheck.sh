@@ -19,8 +19,13 @@
 # substitute for the gate. It runs on EVERY freshly built raw, gate or no gate,
 # so a skipped gate is never a completely unexamined artifact.
 set -uo pipefail
-S() { if sudo -n true 2>/dev/null; then sudo "$@" 2>/dev/null
-      else echo "${POWOS_SUDO_PASS:-powos}" | sudo -S "$@" 2>/dev/null; fi }
+S() {
+    # Prime the credential cache with its own stdin, then run with -n so the
+    # caller's stdin reaches the command. See build/cycle-lib.sh for the bug
+    # the obvious `echo pass | sudo -S "$@"` form causes.
+    sudo -n true 2>/dev/null || echo "${POWOS_SUDO_PASS:-powos}" | sudo -S -v 2>/dev/null
+    sudo -n "$@" 2>/dev/null
+}
 src="${1:?usage: raw-bootcheck.sh <image|device>}"
 P=0; F=0
 pass(){ echo "    ok   - $1"; P=$((P+1)); }

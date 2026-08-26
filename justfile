@@ -15,6 +15,34 @@ default:
     @just --list --unsorted
 
 # ═══════════════════════════════════════════════════════════════════
+#  BUILD TIERS  —  docs/build-speed.md
+#
+#  Three tiers, cheapest first. Most changes only need `just iterate`.
+#  Each tier verifies its own artifacts; none of them trusts a note about
+#  one. See docs/build-speed.md for what each costs and why.
+# ═══════════════════════════════════════════════════════════════════
+
+# The edit->verify loop: build the image and run the in-image tier-1 tests (~38s)
+iterate *ARGS:
+    @bash build/iterate.sh {{ARGS}}
+
+# Add the offline variant store, the raw disk image and the boot gate
+media *ARGS:
+    @bash build/media.sh {{ARGS}}
+
+# Boot the raw in a VM no matter what the change looks like
+media-gated:
+    @bash build/media.sh --gate always
+
+# Write the verified raw to the stick and check sixteen things about it
+burn *ARGS:
+    @bash build/burn.sh {{ARGS}}
+
+# Re-run the post-write checks against the stick without writing anything
+burn-verify:
+    @bash build/burn.sh --verify-only
+
+# ═══════════════════════════════════════════════════════════════════
 #  DEVELOPMENT & TESTING (Tier 1)
 # ═══════════════════════════════════════════════════════════════════
 
