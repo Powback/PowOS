@@ -64,7 +64,15 @@ IWZ_PASSWORD_NONE=0                # 1 = deliberately NO password (blank entry).
                                    # Distinct from an empty hash, which just
                                    # means "not collected" and leaves the
                                    # account LOCKED.
-IWZ_SSH_ENABLE=0                   # 0 | 1
+# Default ON. The wizard no longer ASKS about SSH (every prompt costs real
+# effort on a device whose controller offers arrows, Enter and Escape), and a
+# question that is not asked must not answer itself with the more restrictive
+# option. The image deliberately enables sshd; defaulting to 0 here meant
+# firstboot ran `systemctl disable --now sshd` on every install and quietly
+# removed remote access — which is how a freshly installed Steam Deck ended up
+# unreachable, and would have left a headless server with no way in at all.
+# Blank passwords are still refused by sshd, so this is not an open door.
+IWZ_SSH_ENABLE=1                   # 0 | 1
 IWZ_SSH_KEY=""                     # optional authorized_keys line
 IWZ_RAMBOOT="off"                  # off | installed
 IWZ_AI_PROVIDER="none"             # claude | gemini | ollama | none
@@ -676,13 +684,13 @@ iwz_step_identity() {
 
 iwz_step_ssh() {
     iwz_step "Remote access (SSH)"
+    # The KEY field is gone, the CHOICE stays. A public key is a long line of
+    # free text, which is unusable on a controller offering arrows, Enter and
+    # Escape; "do you want remote access" is one keypress and is nobody's
+    # business to answer on the user's behalf. Add a key after first boot with
+    # ssh-copy-id.
     if iwz_yesno "Enable the SSH server on the installed system?"; then
         IWZ_SSH_ENABLE=1
-        local k
-        k=$(iwz_input "Optional SSH public key (authorized_keys line, blank to skip)" "${IWZ_SSH_KEY:-}") || k=""
-        # An empty input returns the (empty) default — keep whatever we had.
-        [[ "$k" == "" ]] && k="$IWZ_SSH_KEY"
-        IWZ_SSH_KEY="$k"
     else
         IWZ_SSH_ENABLE=0
     fi
@@ -711,14 +719,10 @@ iwz_step_ai() {
         gemini "Gemini (Google)" \
         ollama "Ollama (local, no key)") || return 1
     IWZ_AI_PROVIDER="${p:-none}"
+    # Same rule as SSH: the KEY prompt is gone, the CHOICE stays. An API key is
+    # a long opaque string — impossible to enter without a keyboard and easy to
+    # add later with `powos ai setup`. Picking a provider is a menu keypress.
     IWZ_AI_KEY=""
-    case "$IWZ_AI_PROVIDER" in
-        claude|gemini)
-            local k
-            k=$(iwz_input "API key for $IWZ_AI_PROVIDER (blank to add later)" "") || k=""
-            IWZ_AI_KEY="$k"
-            ;;
-    esac
     iwz_ok "AI provider: $IWZ_AI_PROVIDER"
 }
 
@@ -920,12 +924,15 @@ cmd_install_wizard() {
     iwz_step_sizes    || { iwz_warn "Cancelled."; return 1; }
     iwz_step_gpu      || { iwz_warn "Cancelled."; return 1; }
     iwz_step_identity || { iwz_warn "Cancelled."; return 1; }
-    # SSH key and AI provider are not asked. Both are optional extras that can
-    # be set up trivially after first boot, and every extra prompt is a real
-    # cost on a device with no keyboard — the controller's keyboard emulation
-    # offers arrows, Enter and Escape and no letters, so a free-text field is
-    # something the user can only skip anyway. Defaults stand: SSH off, no AI
-    # provider. The steps remain callable for other front-ends and tests.
+    # Both of these ASK, and neither demands typing. What was removed is the
+    # free-text KEY fields — an SSH public key and an API key are long opaque
+    # strings, unusable on a controller with no letters, and both are trivial
+    # to add after first boot. Removing the surrounding questions as well was a
+    # mistake: it turned "do not ask me for a key" into "decide for me", and
+    # the SSH default of off then disabled sshd on every install, leaving a
+    # freshly installed machine with no way in.
+    iwz_step_ssh      || { iwz_warn "Cancelled."; return 1; }
+    iwz_step_ai       || { iwz_warn "Cancelled."; return 1; }
     iwz_step_ramboot  || { iwz_warn "Cancelled."; return 1; }
     iwz_step_restore  || { iwz_warn "Cancelled."; return 1; }
 

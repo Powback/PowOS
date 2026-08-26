@@ -122,7 +122,10 @@ fb_apply_user() {
 }
 
 fb_apply_ssh() {
-    local user="${POWOS_USERNAME:-}" enable="${POWOS_SSH_ENABLE:-0}" key="${POWOS_SSH_KEY:-}"
+    # Unset means LEAVE IT ALONE, not "disable". A config that never mentions
+    # SSH — a hand-written install.conf, an older one, a front-end that does
+    # not ask — must not have remote access silently taken away from it.
+    local user="${POWOS_USERNAME:-}" enable="${POWOS_SSH_ENABLE-}" key="${POWOS_SSH_KEY:-}"
 
     # Install an authorized key regardless of the daemon state (harmless).
     if [[ -n "$key" && -n "$user" ]]; then
@@ -144,9 +147,11 @@ fb_apply_ssh() {
     if [[ "$enable" == "1" ]]; then
         systemctl enable --now sshd 2>/dev/null && fb_ok "sshd enabled" \
             || fb_warn "could not enable sshd"
-    else
+    elif [[ "$enable" == "0" ]]; then
         systemctl disable --now sshd 2>/dev/null || true
-        fb_log "sshd left disabled"
+        fb_log "sshd disabled (explicitly requested)"
+    else
+        fb_log "no SSH preference recorded — leaving sshd as the image ships it"
     fi
 }
 

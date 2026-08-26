@@ -351,7 +351,31 @@ else
     check "the dialog says to leave the USB in until after the reboot" false
 fi
 check "no 'remove it then reboot' ordering survives" \
-      '! grep -qE "(Take|Remove) the USB( stick)? out NOW|Remove the USB and reboot" "$LIB" "$ROOT/lib/install-system.sh"'
+      '! grep -qE "(Take|Remove) the USB( stick)? out NOW|Remove the USB and reboot" "$LIB" "$(dirname "$LIB")/install-system.sh"'
+
+# A question the wizard does not ASK must not answer itself restrictively.
+# The SSH prompt was removed to spare a keyboard-less device, leaving the
+# default at 0 — and once install.conf actually reached the target, firstboot
+# ran `systemctl disable --now sshd` on every install. A freshly installed
+# Steam Deck came up unreachable, and a headless server would have had no way
+# in at all.
+echo "== SSH is not silently switched off =="
+FBSRC="$(cd "$HERE/../../bin" && pwd)/powos-firstboot-apply"
+[[ -f "$FBSRC" ]] || FBSRC="$FB"
+check "the wizard ASKS about SSH rather than deciding" \
+      'grep -q "iwz_step_ssh  *||" "$LIB"'
+check "the wizard ASKS about the AI provider rather than deciding" \
+      'grep -q "iwz_step_ai  *||" "$LIB"'
+check "no SSH public-key PROMPT survives (unusable without a keyboard)" \
+      '! grep -q "iwz_input \"Optional SSH public key" "$LIB"'
+check "no API-key prompt survives" \
+      '! grep -q "API key for" "$LIB"'
+check "the wizard defaults SSH to enabled" \
+      'grep -qE "^IWZ_SSH_ENABLE=1" "$LIB"'
+check "firstboot treats UNSET as leave-alone, not disable" \
+      'grep -q "no SSH preference recorded" "$FBSRC"'
+check "firstboot only disables when explicitly told to" \
+      'grep -q "explicitly requested" "$FBSRC"'
 
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]
