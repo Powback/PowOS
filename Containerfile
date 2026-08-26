@@ -62,6 +62,7 @@ COPY config/kde/kglobalshortcutsrc        /etc/xdg/kglobalshortcutsrc
 COPY config/kde/kwinrc                    /etc/xdg/kwinrc
 # Dark by default. See the file — this is a default, not an override.
 COPY config/kde/kdeglobals                /etc/xdg/kdeglobals
+COPY config/etc/systemd/logind.conf.d/60-powos-deck-power.conf /usr/share/powos/logind-deck-power.conf
 COPY config/kde/konsolerc                 /etc/xdg/konsolerc
 COPY config/kde/konsole/                  /usr/share/konsole/
 # Rebrand the login MOTD from Bazzite → PowOS. /usr/libexec/ublue-motd renders
@@ -291,6 +292,10 @@ COPY --from=kde-builder /kde-out/ /
 # display — which is when amdgpu logs "DTM TA is not initialized". The screen
 # blanks and returns over and over and the machine looks wedged.
 #
+# The deck also gets 60-powos-deck-power.conf: the power button has three
+# possible owners (Steam in game mode, PowerDevil in Plasma, nobody at the
+# greeter) and the old blanket ignore left the third case dead. See that file.
+#
 # So: masked everywhere EXCEPT the deck variant, which is allowed to sleep and
 # whose power button is expected to.
 RUN . /etc/os-release 2>/dev/null || true; \
@@ -302,6 +307,8 @@ RUN . /etc/os-release 2>/dev/null || true; \
               /etc/systemd/system/hibernate.target \
               /etc/systemd/system/hybrid-sleep.target; \
         rm -f /etc/systemd/logind.conf.d/50-powos-no-suspend.conf; \
+        install -Dm644 /usr/share/powos/logind-deck-power.conf \
+                /etc/systemd/logind.conf.d/60-powos-deck-power.conf; \
         ;; \
       *) \
         echo "sleep: BLOCKED (infra box — suspend kills Traefik/containers)"; \
@@ -576,6 +583,12 @@ RUN set -eu; \
 #            is not — it very nearly went into a removal list on that basis.
 #   qcom     Qualcomm; the OLED Deck (Galileo) uses a WCN6855.
 #
+# NOT mediatek: MediaTek USB wifi/ethernet adapters exist and a Deck is
+# routinely docked. It was in the removal list on the reasoning that the Deck
+# has no MediaTek silicon — true of the built-in hardware, and irrelevant to
+# what gets plugged into it. rtl_nic (41 files, Realtek RTL8153) is likewise
+# what most USB-C dock ethernet needs and is deliberately untouched.
+#
 # Only vendors with NO presence on either Deck are removed, and the build fails
 # loudly if a required tree went with them.
 RUN . /etc/os-release 2>/dev/null || true; \
@@ -585,13 +598,13 @@ RUN . /etc/os-release 2>/dev/null || true; \
         rm -rf /usr/lib/firmware/nvidia \
                /usr/lib/firmware/intel \
                /usr/lib/firmware/i915 \
-               /usr/lib/firmware/mediatek; \
+               ; \
         for _keep in amdgpu ath10k qcom; do \
           ls -d /usr/lib/firmware/${_keep}* >/dev/null 2>&1 \
             || { echo "BUILD ERROR: firmware trim removed $_keep — the Deck needs it (gpu/wifi)"; exit 1; }; \
         done; \
         after=$(du -sm /usr/lib/firmware 2>/dev/null | cut -f1); \
-        echo "firmware: ${before}M -> ${after}M (deck: dropped nvidia/intel/i915/mediatek)"; \
+        echo "firmware: ${before}M -> ${after}M (deck: dropped nvidia/intel/i915)"; \
         ;; \
       *) echo "firmware: left complete (not the deck variant)" ;; \
     esac
