@@ -441,6 +441,36 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true
 
+# ── Homebrew: fetch on demand, do not ship the payload ─────────────
+#
+# homebrew.tar.zst is 125M of payload unpacked into /home/linuxbrew on first
+# boot. It is worth dropping not because of the size but because of what it is:
+# lib/install-router.sh rates brew UNSANDBOXED, "opt-in only (-m brew); never
+# chosen automatically — this is the supply-chain surface". The sandbox backend
+# does the same job for CLI tools with a separate $HOME, so on a machine that
+# never types `-m brew` this is dormant attack surface being carried forever.
+#
+# SAFE BECAUSE brew-setup.service is ALREADY gated on the tarball:
+#     ConditionPathExists=/usr/share/homebrew.tar.zst
+# so removing it makes the unit no-op rather than fail. No drop-in, no masking,
+# nothing left in `systemctl --failed`.
+#
+# POWOS_BREW=bundled keeps it for an install that must have brew offline.
+ARG POWOS_BREW="fetch"
+RUN set -eu; \
+    if [ "${POWOS_BREW}" = "bundled" ]; then \
+      echo "brew: bundled (payload kept)"; \
+    elif [ -f /usr/share/homebrew.tar.zst ]; then \
+      sz=$(du -sm /usr/share/homebrew.tar.zst | cut -f1); \
+      rm -f /usr/share/homebrew.tar.zst; \
+      grep -q 'ConditionPathExists=/usr/share/homebrew.tar.zst' \
+           /usr/lib/systemd/system/brew-setup.service 2>/dev/null \
+        || echo "brew: WARNING — brew-setup.service is not gated on the payload; it may now fail at boot"; \
+      echo "brew: fetch-on-demand (dropped ${sz}M payload)"; \
+    else \
+      echo "brew: no payload present"; \
+    fi
+
 # ── Languages: keep only what this build needs ─────────────────────
 #
 #   podman build --build-arg POWOS_LOCALES="en_US nb_NO de_DE" ...
