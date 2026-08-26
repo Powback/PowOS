@@ -42,3 +42,20 @@ that is not enforced is the wrong trade.
 Set it above the current maximum and ratchet down, so it fails on *new* debt
 rather than demanding a rewrite of the installer on day one. Exempt parsers
 explicitly rather than letting someone "fix" them.
+
+## The gate (added)
+
+CI runs `build/complexity.py --check` as a **ratchet**:
+
+* a function listed in `build/complexity-budget.txt` may not exceed its entry
+* anything else may not exceed **15**
+
+So existing debt is frozen rather than demanded away on day one, and new debt
+fails the build. When a function improves, the check prints the lower number and
+asks you to update the budget — the ratchet only turns one way.
+
+Raising an entry is allowed. It must be deliberate and explained in the commit,
+the way `parse_sudo_argv` is explained above.
+
+Verified in both directions before being enabled: a new function at CC 16 fails,
+a budgeted function grown past its entry fails, and a clean tree passes.

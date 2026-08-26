@@ -35,6 +35,53 @@ for path in sys.argv[1:]:
         if depth <= 0:
             rows.append((os.path.basename(path), fn, cc, i-start+1)); fn=None
 rows.sort(key=lambda r: -r[2])
+
+# ── report / check ────────────────────────────────────────────────
+# --check enforces a RATCHET, not a fixed ceiling:
+#   * a function in the budget may not exceed its recorded value
+#   * anything else may not exceed NEW_CAP
+# So existing debt is frozen rather than demanded away, and new debt fails.
+BUDGET = os.path.join(os.path.dirname(os.path.abspath(__file__)), "complexity-budget.txt")
+NEW_CAP = 15
+
+def load_budget():
+    b = {}
+    try:
+        for line in open(BUDGET, encoding="utf-8"):
+            line = line.split("#")[0].strip()
+            if not line: continue
+            fn, cc = line.rsplit(None, 1)
+            b[fn.strip()] = int(cc)
+    except OSError:
+        pass
+    return b
+
+if "--check" in sys.argv:
+    budget, fails, drifted = load_budget(), [], []
+    for f, n, c, ln in rows:
+        key = "%s:%s" % (f, n)
+        if key in budget:
+            if c > budget[key]:
+                fails.append("  %-46s CC %d > budgeted %d" % (key, c, budget[key]))
+            elif c < budget[key]:
+                drifted.append("  %-46s CC %d (budget %d - lower it)" % (key, c, budget[key]))
+        elif c > NEW_CAP:
+            fails.append("  %-46s CC %d > %d (new code)" % (key, c, NEW_CAP))
+    for d in drifted: print(d)
+    if fails:
+        print("\ncomplexity: FAIL")
+        print("\n".join(fails))
+        print("\nRaise a budget entry only with a reason. See docs/complexity.md.")
+        sys.exit(1)
+    print("complexity: ok (%d functions, cap %d for new code)" % (len(rows), NEW_CAP))
+    sys.exit(0)
+
+if "--budget" in sys.argv:
+    for f, n, c, ln in sorted(rows, key=lambda r: (r[0], r[1])):
+        if c > NEW_CAP:
+            print("%s:%s %d" % (f, n, c))
+    sys.exit(0)
+
 print("  %-34s %-32s %4s %5s" % ("FILE","FUNCTION","CC","LINES"))
 for f,n,c,ln in rows[:16]:
     print("  %-34s %-32s %4d %5d" % (f,n,c,ln))
