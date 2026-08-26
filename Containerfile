@@ -441,6 +441,43 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true
 
+# ── Icon themes: keep the referenced set ───────────────────────────
+#
+#   podman build --build-arg POWOS_ICON_THEMES="breeze breeze-dark" ...
+#
+# 205M of themes, most never selected. Trimmed the same way as wallpapers --
+# by REFERENCE, not by size -- because two of these are load-bearing in ways
+# their size does not hint at:
+#
+#   hicolor          the freedesktop fallback theme. breeze declares
+#                    Inherits=hicolor, so dropping it does not remove one theme,
+#                    it breaks icon lookup for everything.
+#   breeze_cursors   the cursor theme. Losing it gives you an X11 default
+#                    cursor, or none.
+#   Adwaita          what GTK apps fall back to; KDE-only keep-lists miss it.
+#
+# The keep-list is always UNIONED with those three plus whatever the
+# look-and-feel defaults name, so a narrow POWOS_ICON_THEMES cannot break the
+# desktop. Build fails if the union comes back empty.
+ARG POWOS_ICON_THEMES=""
+RUN set -eu; \
+    keep="hicolor breeze_cursors Adwaita ${POWOS_ICON_THEMES}"; \
+    keep="$keep $(grep -rhs '^Theme=' /usr/share/plasma/look-and-feel/*/contents/defaults \
+                    2>/dev/null | sed 's/^Theme=//; s/^org\.kde\.//; s/\.desktop$//' | sort -u)"; \
+    keep=$(printf '%s\n' $keep | sort -u); \
+    [ -n "$keep" ] || { echo "BUILD ERROR: icon keep-list is EMPTY"; exit 1; }; \
+    if [ -d /usr/share/icons ]; then \
+      before=$(du -sm /usr/share/icons | cut -f1); \
+      for d in /usr/share/icons/*/; do \
+        [ -d "$d" ] || continue; n=$(basename "$d"); \
+        printf '%s\n' $keep | grep -qxF "$n" || rm -rf "$d"; \
+      done; \
+      [ -d /usr/share/icons/hicolor ] \
+        || { echo "BUILD ERROR: hicolor removed — breeze Inherits it, icon lookup breaks"; exit 1; }; \
+      after=$(du -sm /usr/share/icons | cut -f1); \
+      echo "icons: ${before}M -> ${after}M (kept: $(printf '%s ' $keep))"; \
+    fi
+
 # ── Homebrew: fetch on demand, do not ship the payload ─────────────
 #
 # homebrew.tar.zst is 125M of payload unpacked into /home/linuxbrew on first
