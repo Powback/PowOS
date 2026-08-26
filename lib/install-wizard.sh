@@ -71,8 +71,23 @@ IWZ_PASSWORD_NONE=0                # 1 = deliberately NO password (blank entry).
 # firstboot ran `systemctl disable --now sshd` on every install and quietly
 # removed remote access — which is how a freshly installed Steam Deck ended up
 # unreachable, and would have left a headless server with no way in at all.
-# Blank passwords are still refused by sshd, so this is not an open door.
 IWZ_SSH_ENABLE=1                   # 0 | 1
+
+# The value the password box OPENS WITH. Enter accepts it; emptying the box is
+# still a deliberate "no password" and is honoured as one.
+#
+# The box used to open empty, and empty ran `passwd -d`. sshd ships
+# `PermitEmptyPasswords no`, so that account could never log in over SSH — and
+# empty is the answer a Deck all but forces, because without the Steam client
+# its controller emulates arrows/Enter/Escape and no letters, making Enter the
+# only reachable answer. So the machine most in need of remote access was the
+# one guaranteed not to have it. An older comment here cited sshd refusing
+# empty passwords as evidence this was "not an open door" — the same fact, read
+# as a feature.
+#
+# Matches the password the image itself ships (Containerfile: `powos:powos`),
+# so a wizard install and a straight `bootc install` behave the same way.
+IWZ_DEFAULT_PASSWORD="powos"
 IWZ_SSH_KEY=""                     # optional authorized_keys line
 IWZ_RAMBOOT="off"                  # off | installed
 IWZ_AI_PROVIDER="none"             # claude | gemini | ollama | none
@@ -161,15 +176,38 @@ iwz_input() {
     printf '%s\n' "$val"
 }
 
-# iwz_password "prompt"  → prints the entered secret (no echo in read backend)
+# iwz_password "prompt" ["default"]  → prints the entered secret
+#                                       (no echo in the read backend)
+#
+# With a default, whiptail's box opens PRE-FILLED with it, so a bare Enter
+# submits the default and an emptied box is a deliberate "no password". That
+# distinction matters on a Steam Deck: without the Steam client its controller
+# emulates arrows, Enter and Escape and NO letters, so Enter is the only answer
+# available and it must produce something usable.
+#
+# kdialog and the read backend cannot pre-fill, so there empty input means
+# "accepted the default" — the same thing Enter does on a prefilled box. That
+# leaves those two backends no way to express "no password at all", so a lone
+# "-" does it. (A user whose chosen password is literally "-" must set it after
+# install with passwd; that is the whole cost of the sentinel.)
+#
+# Which backend runs is not academic: the base image ships neither whiptail nor
+# dialog — newt is in the capability-gaming-mode sysext, not the base — so the
+# boot-menu installer is the READ backend, and "-" is the gesture that actually
+# reaches most users.
+IWZ_NO_PASSWORD_SENTINEL="-"
 iwz_password() {
-    local prompt="$1" val
+    local prompt="$1" def="${2:-}" val
     case "${IWZ_UI:-read}" in
-        gui) val=$(kdialog --title "$IWZ_TITLE" --password "$prompt") || return 1 ;;
+        gui) val=$(kdialog --title "$IWZ_TITLE" --password "$prompt") || return 1
+             [[ -z "$val" ]] && val="$def" ;;
         tui) local b; b=$(iwz__tui_bin)
-             val=$("$b" --title "$IWZ_TITLE" --passwordbox "$prompt" 12 72 3>&1 1>&2 2>&3) || return 1 ;;
-        *)   read -r -s -p "$prompt: " val || return 1; echo >&2 ;;
+             val=$("$b" --title "$IWZ_TITLE" --passwordbox "$prompt" 12 72 "$def" 3>&1 1>&2 2>&3) || return 1 ;;
+        *)   read -r -s -p "$prompt${def:+ [$def]}: " val || return 1; echo >&2
+             [[ -z "$val" ]] && val="$def" ;;
     esac
+    # An explicit "no password" from a backend that cannot be emptied.
+    [[ -n "$def" && "$val" == "$IWZ_NO_PASSWORD_SENTINEL" ]] && val=""
     printf '%s\n' "$val"
 }
 
@@ -648,7 +686,8 @@ iwz_step_identity() {
 
     # Collect + confirm the password, hash it immediately, and never keep the
     # plaintext. A single loop lets the user retry on mismatch.
-    # An EMPTY entry means "use the default", it does not re-prompt.
+    # An EMPTY entry means "use the default" ($IWZ_DEFAULT_PASSWORD), it does
+    # not re-prompt and it does NOT leave the account passwordless.
     #
     # This loop used to reject blank and loop forever. On a Steam Deck that is
     # an unescapable trap: with no Steam client running the controller falls
@@ -657,11 +696,31 @@ iwz_step_identity() {
     # no way to answer it or get past it.
     local p1 p2
     while true; do
-        p1=$(iwz_password "Password for '$IWZ_USERNAME' (leave blank for NO password)") || return 1
+        p1=$(iwz_password \
+                "Password for '$IWZ_USERNAME' ('$IWZ_NO_PASSWORD_SENTINEL' = no password)" \
+                "$IWZ_DEFAULT_PASSWORD") || return 1
+
+        # Emptied on purpose: a genuinely passwordless account.
         if [[ -z "$p1" ]]; then
             IWZ_PASSWORD_HASH=""
             IWZ_PASSWORD_NONE=1
             iwz_warn "No password — '$IWZ_USERNAME' will log in without one. Set one later: passwd"
+            iwz_warn "sshd refuses empty passwords, so remote login will need an SSH key."
+            break
+        fi
+
+        # Left at the default: nothing was typed, so there is nothing to
+        # confirm — and demanding confirmation here is exactly the trap that
+        # used to strand a Deck, whose controller cannot type the letters back.
+        if [[ "$p1" == "$IWZ_DEFAULT_PASSWORD" ]]; then
+            IWZ_PASSWORD_HASH=$(iwz_hash_password "$p1")
+            IWZ_PASSWORD_NONE=0
+            p1=""
+            if [[ -z "$IWZ_PASSWORD_HASH" ]]; then
+                iwz_err "Could not hash the password (is openssl installed?)."
+                return 1
+            fi
+            iwz_warn "Using the default password '$IWZ_DEFAULT_PASSWORD' — change it later with: passwd"
             break
         fi
         p2=$(iwz_password "Confirm password") || return 1
@@ -758,7 +817,7 @@ Review your install choices:
   GPU flavor  : ${IWZ_GPU_FLAVOR}
   Hostname    : ${IWZ_HOSTNAME}
   Username    : ${IWZ_USERNAME}
-  Password    : $([[ -n "$IWZ_PASSWORD_HASH" ]] && echo "set (hashed)" || echo "NOT SET")
+  Password    : $([[ "$IWZ_PASSWORD_NONE" == "1" ]] && echo "NONE — login without one; SSH will need a key" || echo "set (hashed)")
   SSH         : $([[ $IWZ_SSH_ENABLE -eq 1 ]] && echo "enabled$([[ -n "$IWZ_SSH_KEY" ]] && echo " + key")" || echo "disabled")
   RAM boot    : ${IWZ_RAMBOOT}
   AI provider : ${IWZ_AI_PROVIDER}$([[ -n "$IWZ_AI_KEY" ]] && echo " (key set)")

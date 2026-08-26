@@ -377,6 +377,83 @@ check "firstboot treats UNSET as leave-alone, not disable" \
 check "firstboot only disables when explicitly told to" \
       'grep -q "explicitly requested" "$FBSRC"'
 
+# ── the box opens on the default; "no password" stays reachable ───
+# The box used to open empty, and empty ran `passwd -d`. sshd ships
+# PermitEmptyPasswords no, so that account could never log in remotely — and
+# empty is what a Steam Deck all but forces, since without the Steam client its
+# controller emulates arrows/Enter/Escape and no letters. Enter must therefore
+# produce something usable, while an emptied box must still mean "no password".
+echo "== password: opens on the default, no-password still reachable =="
+IWZ_UI=read
+IWZ_USERNAME=powos; IWZ_HOSTNAME=powos
+
+check "the TUI box is pre-filled with the default" \
+      'grep -q -- "--passwordbox \"\$prompt\" 12 72 \"\$def\"" "$LIB"'
+check "the read backend shows the default as a [powos] placeholder" \
+      'grep -q "read -r -s -p \"\$prompt\${def:+ \[\$def\]}: \"" "$LIB"'
+check "the prompt states how to ask for no password" \
+      'grep -q "no password" "$LIB"'
+check "the default matches the one the image ships" \
+      'grep -q "powos:powos" "$HERE/../../Containerfile" && [[ "$IWZ_DEFAULT_PASSWORD" == "powos" ]]'
+
+# Accepting the default (bare Enter) must not then demand confirmation, which
+# a Deck cannot type back.
+IWZ_PASSWORD_HASH=""; IWZ_PASSWORD_NONE=0
+iwz_step_identity >/dev/null 2>&1 <<< $'\n\n\n'
+check "accepting the default yields a hash" \
+      '[[ -n "$IWZ_PASSWORD_HASH" ]]'
+check "accepting the default is NOT a passwordless account" \
+      '[[ "$IWZ_PASSWORD_NONE" == "0" ]]'
+check "that hash authenticates the default password" \
+      's=$(echo "$IWZ_PASSWORD_HASH" | cut -d\$ -f3)
+       [[ "$(openssl passwd -6 -salt "$s" "$IWZ_DEFAULT_PASSWORD")" == "$IWZ_PASSWORD_HASH" ]]'
+check "and rejects a different password" \
+      's=$(echo "$IWZ_PASSWORD_HASH" | cut -d\$ -f3)
+       [[ "$(openssl passwd -6 -salt "$s" "definitely-not-it")" != "$IWZ_PASSWORD_HASH" ]]'
+check "no confirmation was demanded for the untouched default" \
+      '[[ "$IWZ_PASSWORD_HASH" == \$6\$* ]]'
+
+# "No password" must still be reachable. In the TUI that is an emptied box; in
+# the read backend, which is what the boot-menu installer actually runs (the
+# base image ships no whiptail), it is the "-" sentinel.
+IWZ_PASSWORD_HASH="x"; IWZ_PASSWORD_NONE=0
+iwz_step_identity >/dev/null 2>&1 <<< $'\n\n-\n'
+check "the '-' sentinel means NO password (read backend)" \
+      '[[ "$IWZ_PASSWORD_NONE" == "1" && -z "$IWZ_PASSWORD_HASH" ]]'
+
+IWZ_PASSWORD_HASH="x"; IWZ_PASSWORD_NONE=0
+iwz_password() { printf '\n'; }          # an emptied TUI box
+iwz_step_identity >/dev/null 2>&1 <<< $'\n\n'
+check "an emptied TUI box also means NO password" \
+      '[[ "$IWZ_PASSWORD_NONE" == "1" && -z "$IWZ_PASSWORD_HASH" ]]'
+unset -f iwz_password
+source "$LIB" >/dev/null 2>&1            # restore the real helper
+
+# A typed password must beat the default.
+IWZ_PASSWORD_HASH=""; IWZ_PASSWORD_NONE=0
+iwz_step_identity >/dev/null 2>&1 <<< $'\n\nhunter2\nhunter2\n'
+check "a typed password is used instead of the default" \
+      's=$(echo "$IWZ_PASSWORD_HASH" | cut -d\$ -f3)
+       [[ "$(openssl passwd -6 -salt "$s" "hunter2")" == "$IWZ_PASSWORD_HASH" ]]'
+check "the plaintext is never written to install.conf" \
+      '( f=$(mktemp); IWZ_CONFIG_PATH=$f iwz_write_config "$f" >/dev/null 2>&1
+         ! grep -qE "^POWOS_PASSWORD=|=hunter2$" "$f"; r=$?; rm -f "$f"; exit $r )'
+
+# The image's own half of "SSH works out of the box": the wizard default is
+# useless if the shipped image has no password or no daemon.
+CF="$HERE/../../Containerfile"
+check "the image sets a password for the powos user" \
+      'grep -q "chpasswd" "$CF"'
+check "the image enables sshd" \
+      'grep -q "systemctl enable sshd.service" "$CF"'
+check "sshd is wanted by multi-user even if the preset re-disables it" \
+      'grep -q "multi-user.target.wants/sshd.service" "$CF"'
+check "the preset keeps sshd enabled" \
+      'grep -qx "enable sshd.service" "$HERE/../../config/systemd-preset/80-powos.preset"'
+check "nothing we ship turns password auth off" \
+      '! grep -rqi "^[[:space:]]*PasswordAuthentication[[:space:]]\+no" \
+           "$HERE/../../config/etc/ssh/" 2>/dev/null'
+
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]
 
