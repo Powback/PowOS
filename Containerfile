@@ -544,7 +544,7 @@ RUN set -eu; \
 # nothing left in `systemctl --failed`.
 #
 # POWOS_BREW=bundled keeps it for an install that must have brew offline.
-ARG POWOS_BREW="fetch"
+ARG POWOS_BREW="bundled"
 RUN set -eu; \
     if [ "${POWOS_BREW}" = "bundled" ]; then \
       echo "brew: bundled (payload kept)"; \

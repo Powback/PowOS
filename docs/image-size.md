@@ -7,7 +7,7 @@
 | `POWOS_LOCALES` | `en_US nb_NO` | keep only these languages. `""` keeps all 700. **886M → 454M** |
 | `POWOS_ICON_THEMES` | `""` | extra themes to keep. Referenced themes are kept regardless. **205M → 165M** |
 | `POWOS_EXTRAS` | `""` | packages to `rpm -e`. Removes nothing unless set |
-| `POWOS_BREW` | `fetch` | `bundled` keeps the 126M Homebrew payload |
+| `POWOS_BREW` | `bundled` | `fetch` drops the 126M payload — **but there is no runtime re-add yet**, see below |
 
 Applied unconditionally: `/usr/share/doc`, `man`, `help`, unreferenced wallpapers
 (**−532M**). Deck-only: `nvidia`/`intel`/`i915` firmware (**437M → 203M**).
@@ -42,6 +42,16 @@ nothing — a failed unit every boot. `tailscale` ships three.
 **"Nothing references it" has been wrong six times here.** grep and
 `rpm -q --whatrequires` both miss `dlopen`, unpackaged trees, and runtime paths.
 Verify by removing it and booting, not by reading metadata.
+
+## Homebrew has no re-add path yet
+
+`POWOS_BREW=fetch` drops the payload, but `lib/install-router.sh` only probes
+`command -v brew` — nothing installs it. So `powos install -m brew <pkg>` simply
+reports brew unavailable, permanently. Default is therefore `bundled` until
+`ensure_brew()` exists.
+
+Contrast `POWOS_EXTRAS`, which is safe precisely because its targets are rpm
+packages: `powos install cosign` genuinely restores them.
 
 ## Not removable
 
