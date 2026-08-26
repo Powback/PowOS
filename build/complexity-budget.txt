@@ -62,6 +62,14 @@ install-to-usb.sh:setup_persistence 17
 install-wizard.sh:cmd_install_wizard 32
 install-wizard.sh:iwz_list_disks 16
 install-wizard.sh:iwz_step_games_disk 17
+# These two were INVISIBLE to the analyzer until the heredoc fix: bad brace
+# counting inside `python3 - <<'PY'` swallowed their definitions, so the tool
+# reported neither. They are unchanged across every commit that has touched
+# install.sh, so this freezes pre-existing debt the way the rest of this file
+# does — it is not new code, it just became measurable. Both are candidates
+# for the same stage-split that took harness_run from 78 to 9.
+install.sh:_mods_install_one 17
+install.sh:mods_install_smart_cmd 24
 menu.sh:cmd_menu 23
 menu.sh:menu_action 18
 mobile.sh:_copy_categories_to_dir 17
