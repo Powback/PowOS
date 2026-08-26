@@ -4,6 +4,13 @@ DEC = [re.compile(p) for p in [
     r'(?:^|[\s;(])if\s', r'(?:^|[\s;(])elif\s', r'(?:^|[\s;(])while\s',
     r'(?:^|[\s;(])until\s', r'(?:^|[\s;(])for\s', r'&&', r'\|\|', r';;\s*$',
 ]]
+# Heredoc bodies are DATA, not shell. Without this, `for`/`if` inside a
+# `python3 - <<'PY'` payload counted as shell branching: mods_adopt_cmd measured
+# 53 when its real shell complexity is 8, and that inflated number was written
+# into docs as the third-worst function in the repo. 47 Python payloads and 19
+# other heredocs across 29 files were affected.
+HEREDOC = re.compile(r'<<-?\s*[\'"]?([A-Za-z_][A-Za-z0-9_]*)[\'"]?')
+
 def strip(l):
     out, q = [], None
     for ch in l:
@@ -19,8 +26,17 @@ for path in sys.argv[1:]:
     try: lines = open(path, encoding='utf-8', errors='replace').read().split('\n')
     except OSError: continue
     fn, depth, cc, start = None, 0, 0, 0
+    heredoc = None
     for i, raw in enumerate(lines, 1):
+        # Inside a heredoc body nothing is shell; only the terminator matters.
+        if heredoc is not None:
+            if raw.strip() == heredoc:
+                heredoc = None
+            continue
         l = strip(raw)
+        m_h = HEREDOC.search(l)
+        if m_h:
+            heredoc = m_h.group(1)
         if fn is None:
             m = FN.match(l)
             if m:

@@ -79,7 +79,7 @@ Separating `case` arms from genuine branching changes the priority order:
 | `harness.sh:harness_run` | 77 | 0 | 77 | |
 | `windows.sh:win_install` | 69 | 0 | 69 | |
 | `agent.sh:ai_call` | 82 | 15 | 67 | |
-| `mods/adopt.sh:mods_adopt_cmd` | 52 | 0 | 52 | 21 loops — nesting, not width |
+| ~~`mods/adopt.sh:mods_adopt_cmd`~~ | ~~52~~ | | **8** | measured wrong — see below |
 | `game.sh:cmd_game` | 44 | **25** | 19 | a dispatcher; leave it alone |
 
 `cmd_game` looks bad and is not: a flat 25-arm `case` is what a dispatcher
@@ -143,3 +143,27 @@ local that `_harness_confidence` reads afterwards, so hoisting it was
 required. It surfaced only because `test-mods-harness.sh` was fixed to source
 the checkout instead of `/usr/lib/powos` — until then the suite had been
 reporting green against an installed copy three weeks stale.
+
+
+## The analyzer counted Python as shell
+
+`build/complexity.py` did not track heredoc boundaries, so `for`/`if` inside a
+`python3 - <<'PY'` payload counted as shell branching. **`mods_adopt_cmd` measured
+53 when its real shell complexity is 8** — the other 45 were 297 lines of Python.
+That inflated number was published in the table above as the third-worst function
+in the repo, and acting on it would have meant restructuring a function that was
+already fine.
+
+47 Python payloads and 19 other heredocs across 29 files were affected.
+
+Fixing it also revealed a second fault: a `}` inside a heredoc body corrupted
+brace-depth tracking and silently merged adjacent functions, so some branches
+were attributed to the wrong one. Function count went 1632 → 1663 once heredoc
+bodies were skipped.
+
+Repo-wide after the fix: **103 over 15, 24 over 25.**
+
+The lesson is the one this file already carries about the first version
+reporting a two-line helper at CC 67: **sanity-check a measuring tool against a
+known case before believing its output, and again before writing its output into
+documentation.** I did the first and not the second.
