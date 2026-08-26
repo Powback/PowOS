@@ -71,7 +71,7 @@ pinstall:update_ini_packages 22
 portable.sh:mods_export_cmd 17
 portable.sh:mods_import_cmd 38
 powos:cmd_containers 41
-powos:cmd_health 101
+powos:cmd_health 7
 powos:cmd_install 34
 powos:cmd_layers 21
 powos:cmd_rollback 17

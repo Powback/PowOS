@@ -1024,67 +1024,42 @@ cmd_safe() {
 # Health Command - System health summary
 # ═══════════════════════════════════════════════════════════════════
 
-cmd_health() {
-    local use_ai=false
-    local ai_prompt=""
 
-    # Parse arguments
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --ai|-a)
-                use_ai=true
-                shift
-                ;;
-            --help|-h)
-                echo "Usage: powos health [options] [prompt]"
-                echo ""
-                echo "Show system health summary or talk to health AI agent."
-                echo ""
-                echo "Options:"
-                echo "  --ai, -a     Talk to health AI agent"
-                echo ""
-                echo "Examples:"
-                echo "  powos health                    # Show health summary"
-                echo "  powos health --ai               # Interactive health agent"
-                echo "  powos health --ai 'why is sync slow?'"
-                return 0
-                ;;
-            *)
-                ai_prompt="$*"
-                break
-                ;;
-        esac
-    done
+# ═══════════════════════════════════════════════════════════════════
+# Health probes
+#
+# `powos health` was one 423-line function: CC 101, the worst in the
+# repo, and NOT the dispatcher-shaped kind that a high CC forgives —
+# only 6 case arms against 53 if/elif and 39 &&/||. It was a dozen
+# independent probes sharing two counters and one long body.
+#
+# Each probe is now its own function. It prints its own section and
+# reports findings by bumping the two counters below rather than by
+# exit status: a single probe can raise several findings (the layer
+# check alone raises two) and an exit status carries only one. The
+# counters are file-scope rather than cmd_health locals so that the
+# dependency is written down instead of resting on bash's dynamic
+# scoping, which is invisible at the call site and easy to break.
+#
+# Output text, order, and side effects are byte-for-byte what the
+# inline version produced — including the `|| echo "0"` quirks that
+# double up a count under `pipefail`. Those are separate bugs; fixing
+# them here would have made this diff unreviewable.
+# ═══════════════════════════════════════════════════════════════════
 
-    if [[ "$use_ai" == "true" ]]; then
-        # Gather system context and pass to health agent
-        local context
-        context=$(get_health_context)
+_HEALTH_ISSUES=0
+_HEALTH_WARNINGS=0
+_HEALTH_USB_STATUS=""
 
-        if [[ -n "$ai_prompt" ]]; then
-            # One-shot with context - prepend context to prompt
-            ai_call --agent health "SYSTEM CONTEXT:
-$context
+# `((n++))` evaluates to the PRE-increment value, so it returns 1 when n
+# is 0 — which is why every call site inline carried a `|| true`. Plain
+# arithmetic assignment always returns 0, so the guard is gone with it.
+_health_issue()   { _HEALTH_ISSUES=$((_HEALTH_ISSUES + 1)); }
+_health_warning() { _HEALTH_WARNINGS=$((_HEALTH_WARNINGS + 1)); }
 
-USER QUESTION: $ai_prompt"
-        else
-            # Interactive mode with health agent - pass context via --context
-            echo -e "${CYAN}Starting health agent...${NC}"
-            ai_interactive --agent health --context "$context"
-        fi
-        return
-    fi
-
-    # Non-AI: Show health summary
-    echo -e "${BOLD}${CYAN}PowOS Health Check${NC}"
-    echo "════════════════════════════════════════"
-    echo ""
-
-    local issues=0
-    local warnings=0
-    local POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
-
-    # --- Layers ---
+# Layer stack, plus the rollback skip-flags that make a
+# boot quietly different from the one the user configured.
+_health_layers() {
     echo -e "${CYAN}Layers${NC}"
     local layers
     layers=$(get_active_layers)
@@ -1092,7 +1067,7 @@ USER QUESTION: $ai_prompt"
         echo -e "  ${GREEN}✓${NC} Layer stack active: $layers"
     else
         echo -e "  ${YELLOW}○${NC} Standard boot (no layers)"
-        ((warnings++)) || true
+        _health_warning
     fi
 
     # Check for rollback flags
@@ -1100,16 +1075,18 @@ USER QUESTION: $ai_prompt"
         source "$STATE_DIR/ramboot-state"
         if [[ "${POWOS_SKIP_CUSTOM:-}" == "1" ]]; then
             echo -e "  ${YELLOW}⚠${NC} Custom layer SKIPPED (rollback active)"
-            ((warnings++)) || true
+            _health_warning
         fi
         if [[ "${POWOS_SKIP_UPDATES:-}" == "1" ]]; then
             echo -e "  ${YELLOW}⚠${NC} Updates layer SKIPPED (rollback active)"
-            ((warnings++)) || true
+            _health_warning
         fi
     fi
     echo ""
+}
 
-    # --- RAM Overlay ---
+# Are we running from the RAM overlay, and how much of it is dirty.
+_health_ram_overlay() {
     echo -e "${CYAN}RAM Overlay${NC}"
     if is_ramboot; then
         local ram_size
@@ -1124,48 +1101,53 @@ USER QUESTION: $ai_prompt"
         fi
     else
         echo -e "  ${YELLOW}○${NC} Not running from RAM overlay"
-        ((warnings++)) || true
+        _health_warning
     fi
     echo ""
+}
 
-    # --- USB ---
+# USB presence. Publishes _HEALTH_USB_STATUS for _health_sync.
+_health_usb() {
     echo -e "${CYAN}USB Drive${NC}"
-    local usb_status
-    usb_status=$(get_usb_status)
-    case "$usb_status" in
+    # Resolved once and published, not re-read: _health_sync branches on the
+    # same value and must not be able to disagree with the line printed here.
+    _HEALTH_USB_STATUS=$(get_usb_status)
+    case "$_HEALTH_USB_STATUS" in
         connected)
             echo -e "  ${GREEN}✓${NC} Connected"
             ;;
         disconnected)
             echo -e "  ${YELLOW}○${NC} Disconnected (working from RAM)"
-            ((warnings++)) || true
+            _health_warning
             ;;
         *)
             echo -e "  ${RED}?${NC} Unknown status"
-            ((issues++)) || true
+            _health_issue
             ;;
     esac
     echo ""
+}
 
-    # --- RAM ↔ USB Sync ---
+# RAM ↔ USB sync: locks, conflicts, daemon, last-sync age.
+_health_sync() {
     echo -e "${CYAN}Sync (RAM ↔ USB)${NC}"
     # Check for lock file (interrupted sync)
     if [[ -f "/run/powos/sync.lock" ]]; then
         echo -e "  ${RED}✗${NC} Sync lock exists (interrupted?)"
-        ((issues++)) || true
+        _health_issue
     else
         echo -e "  ${GREEN}✓${NC} No sync locks"
     fi
 
     # Check for conflicts (if USB connected)
-    if [[ "$usb_status" == "connected" ]]; then
+    if [[ "${_HEALTH_USB_STATUS:-}" == "connected" ]]; then
         if declare -f check_for_conflicts &>/dev/null; then
             local conflict_status
             conflict_status=$(check_for_conflicts 2>/dev/null || echo "conflict")
             if [[ "$conflict_status" == "conflict" ]]; then
                 echo -e "  ${RED}✗${NC} CONFLICT - USB modified by another machine"
                 echo "      Run: powos sync resolve"
-                ((issues++)) || true
+                _health_issue
             else
                 echo -e "  ${GREEN}✓${NC} No conflicts"
             fi
@@ -1198,8 +1180,11 @@ except: print('Unknown')
         echo "    Last sync: $last_sync"
     fi
     echo ""
+}
 
-    # --- Cloud Backup ---
+# The git mirror of the USB and its remote, if configured.
+_health_backup() {
+    local POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
     echo -e "${CYAN}Backup (USB → Cloud)${NC}"
     local git_dir="$POWOS_ROOT/git"
     if [[ -d "$git_dir/.git" ]]; then
@@ -1219,7 +1204,7 @@ except: print('Unknown')
             if [[ "$ahead" != "?" ]] && [[ "$behind" != "?" ]]; then
                 if [[ "$ahead" -gt 0 ]] && [[ "$behind" -gt 0 ]]; then
                     echo -e "    ${YELLOW}⚠${NC} Diverged: $ahead ahead, $behind behind"
-                    ((warnings++)) || true
+                    _health_warning
                 elif [[ "$ahead" -gt 0 ]]; then
                     echo -e "    ${YELLOW}○${NC} $ahead commits to push"
                 elif [[ "$behind" -gt 0 ]]; then
@@ -1244,8 +1229,10 @@ except: print('Unknown')
         echo "      Run: powos backup setup <url>"
     fi
     echo ""
+}
 
-    # --- User Data (CacheFS) ---
+# CacheFS write-back cache: active, running, and how dirty.
+_health_cachefs() {
     echo -e "${CYAN}User Data (CacheFS)${NC}"
     if is_cachefs_active; then
         echo -e "  ${GREEN}✓${NC} CacheFS active (write-back enabled)"
@@ -1275,8 +1262,11 @@ except: pass
         echo -e "  ${YELLOW}○${NC} CacheFS not active (opt-in: POWOS_CACHEFS_ENABLED=true)"
     fi
     echo ""
+}
 
-    # --- Projects ---
+# Project directories and how many are enabled as extensions.
+_health_projects() {
+    local POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
     echo -e "${CYAN}Projects${NC}"
     local projects_dir="$POWOS_ROOT/projects"
     if [[ -d "$projects_dir" ]]; then
@@ -1306,8 +1296,11 @@ except: pass
         echo -e "  ${YELLOW}○${NC} Projects dir not found"
     fi
     echo ""
+}
 
-    # --- Overlays/Extensions ---
+# Built overlays, enabled sysexts, systemd-sysext's own view.
+_health_overlays() {
+    local POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
     echo -e "${CYAN}Overlays${NC}"
     local extensions_dir="$POWOS_ROOT/extensions"
     local system_ext_dir="/var/lib/extensions"
@@ -1345,8 +1338,10 @@ except: pass
         fi
     fi
     echo ""
+}
 
-    # --- OCI hook integrity ---
+# Silent-by-default: prints nothing unless the hook is broken.
+_health_oci_hooks() {
     # Incident 2026-07-14: hook JSON present without binary → every container
     # start fails with an opaque crun error. Flag it loudly.
     if [[ -f /etc/containers/oci/hooks.d/pow-collision-check.json ]] && \
@@ -1359,10 +1354,12 @@ except: pass
         echo "        crun: error executing hook '/usr/bin/pow-collision-check'"
         echo "      Fix: sudo cp /var/lib/powos/src/bin/pow-collision-check /usr/bin/ && sudo chmod +x /usr/bin/pow-collision-check"
         echo ""
-        ((issues++)) || true
+        _health_issue
     fi
+}
 
-    # --- Containers ---
+# Distrobox and podman inventory.
+_health_containers() {
     echo -e "${CYAN}Containers${NC}"
     if command -v distrobox &>/dev/null; then
         local distrobox_count
@@ -1380,8 +1377,11 @@ except: pass
         echo -e "  ${YELLOW}○${NC} Podman not available"
     fi
     echo ""
+}
 
-    # --- AI System ---
+# Which AI clients are installed and how many agents exist.
+_health_ai_system() {
+    local POWOS_ROOT="${POWOS_ROOT:-/var/lib/powos}"
     echo -e "${CYAN}AI System${NC}"
     local ai_available=false
 
@@ -1422,8 +1422,10 @@ except: pass
         fi
     fi
     echo ""
+}
 
-    # --- Hardware Profile ---
+# The detected hardware profile, if firstboot got that far.
+_health_hardware() {
     echo -e "${CYAN}Hardware${NC}"
     if [[ -f "$STATE_DIR/hardware" ]]; then
         source "$STATE_DIR/hardware" 2>/dev/null || true
@@ -1434,18 +1436,106 @@ except: pass
         echo -e "  ${YELLOW}○${NC} Hardware not detected"
     fi
     echo ""
+}
 
-    # --- Summary ---
+# Verdict line. Reads the counters the probes bumped.
+_health_summary() {
     echo "════════════════════════════════════════"
-    if [[ $issues -gt 0 ]]; then
-        echo -e "${RED}Issues: $issues${NC}  ${YELLOW}Warnings: $warnings${NC}"
+    if [[ $_HEALTH_ISSUES -gt 0 ]]; then
+        echo -e "${RED}Issues: $_HEALTH_ISSUES${NC}  ${YELLOW}Warnings: $_HEALTH_WARNINGS${NC}"
         echo ""
         echo "Run 'powos health --ai' to troubleshoot."
-    elif [[ $warnings -gt 0 ]]; then
-        echo -e "${GREEN}No issues${NC}  ${YELLOW}Warnings: $warnings${NC}"
+    elif [[ $_HEALTH_WARNINGS -gt 0 ]]; then
+        echo -e "${GREEN}No issues${NC}  ${YELLOW}Warnings: $_HEALTH_WARNINGS${NC}"
     else
         echo -e "${GREEN}✓ All systems healthy${NC}"
     fi
+}
+
+# The probes cmd_health runs, in the order it runs them. The order is
+# part of the contract twice over: this text is what users paste into
+# bug reports, and _health_sync reads the USB status _health_usb
+# resolved.
+_HEALTH_PROBES=(layers ram_overlay usb sync backup cachefs
+                projects overlays oci_hooks containers ai_system hardware)
+
+# Long-form help for `powos health --help`.
+_health_usage() {
+    echo "Usage: powos health [options] [prompt]"
+    echo ""
+    echo "Show system health summary or talk to health AI agent."
+    echo ""
+    echo "Options:"
+    echo "  --ai, -a     Talk to health AI agent"
+    echo ""
+    echo "Examples:"
+    echo "  powos health                    # Show health summary"
+    echo "  powos health --ai               # Interactive health agent"
+    echo "  powos health --ai 'why is sync slow?'"
+}
+
+# `powos health --ai [prompt]`: hand the gathered context to the agent.
+_health_ai_agent() {
+    local ai_prompt="$1"
+    # Gather system context and pass to health agent
+    local context
+    context=$(get_health_context)
+
+    if [[ -n "$ai_prompt" ]]; then
+        # One-shot with context - prepend context to prompt
+        ai_call --agent health "SYSTEM CONTEXT:
+$context
+
+USER QUESTION: $ai_prompt"
+    else
+        # Interactive mode with health agent - pass context via --context
+        echo -e "${CYAN}Starting health agent...${NC}"
+        ai_interactive --agent health --context "$context"
+    fi
+}
+
+cmd_health() {
+    local use_ai=false
+    local ai_prompt=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ai|-a)
+                use_ai=true
+                shift
+                ;;
+            --help|-h)
+                _health_usage
+                return 0
+                ;;
+            *)
+                ai_prompt="$*"
+                break
+                ;;
+        esac
+    done
+
+    if [[ "$use_ai" == "true" ]]; then
+        _health_ai_agent "$ai_prompt"
+        return
+    fi
+
+    # Non-AI: Show health summary
+    echo -e "${BOLD}${CYAN}PowOS Health Check${NC}"
+    echo "════════════════════════════════════════"
+    echo ""
+
+    _HEALTH_ISSUES=0
+    _HEALTH_WARNINGS=0
+    _HEALTH_USB_STATUS=""
+
+    local probe
+    for probe in "${_HEALTH_PROBES[@]}"; do
+        "_health_$probe"
+    done
+
+    _health_summary
 }
 
 # Get system context for AI health agent

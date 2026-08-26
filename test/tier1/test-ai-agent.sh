@@ -564,11 +564,18 @@ test_increment_crash_class() {
         ((TESTS_FAILED++)) || true
     fi
 
-    # No bare ((var++)) may remain in the CLI / healer
+    # No bare ((var++)) may remain in the CLI / healer.
+    #
+    # The contract is "no unguarded increment ever RUNS", not "these
+    # characters never appear". A comment that merely explains the idiom
+    # cannot abort a shell, so matches with a `#` earlier on the line are
+    # dropped — otherwise documenting the trap trips the test for it, which
+    # is how bin/powos ended up with a comment that failed CI.
     local offenders
     offenders=$(grep -nE '\(\([A-Za-z_]+\+\+\)\)' \
         "$REPO_ROOT/bin/powos" "$REPO_ROOT/lib/ai-healer.sh" 2>/dev/null \
-        | grep -v '|| true' || true)
+        | grep -v '|| true' \
+        | grep -vE ':[0-9]+:[^#]*#[^#]*\(\([A-Za-z_]+\+\+\)\)' || true)
     assert_equals "" "$offenders" "No bare ((var++)) left in bin/powos / lib/ai-healer.sh"
 }
 
