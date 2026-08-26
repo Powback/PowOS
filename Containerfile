@@ -487,6 +487,48 @@ RUN set -eu; \
       echo "icons: ${before}M -> ${after}M (kept: $(printf '%s ' $keep))"; \
     fi
 
+# ── Optional extras a handheld never runs ──────────────────────────
+#
+#   podman build --build-arg POWOS_EXTRAS="cosign godot-runner tailscale" ...
+#   POWOS_EXTRAS="" keeps everything (default).
+#
+# rpm -e, NOT rm. Three reasons, each learned the hard way today:
+#   * tailscale ships tailscaled.service, tailscale-wait-online.service and
+#     tailscale-online.target. Deleting just the binary leaves units pointing at
+#     nothing — a failed unit every boot, which is the exact class of bug that
+#     made a Deck look broken.
+#   * rpm REFUSES if anything depends on the package, so the dependency check is
+#     free and always current. `rm` gives you no such thing, and "nothing
+#     references it" has been wrong five times in this codebase (ath10k was the
+#     wifi, webkit2gtk4.1 is Lutris, llvm15 is OpenCL).
+#   * rpm keeps its database honest; rm desyncs it.
+#
+# NOT offered here: lto-dump (39M) belongs to gcc and cannot be removed without
+# taking the compiler, and bun (77M) is unowned by any package — something put
+# it there deliberately and rpm cannot reason about it.
+ARG POWOS_EXTRAS=""
+RUN set -eu; \
+    if [ -z "${POWOS_EXTRAS}" ]; then \
+      echo "extras: keeping all (POWOS_EXTRAS empty)"; \
+    else \
+      before=$(rpm -qa | wc -l); \
+      for pkg in ${POWOS_EXTRAS}; do \
+        if ! rpm -q "$pkg" >/dev/null 2>&1; then \
+          echo "extras: $pkg not installed, skipping"; \
+        elif rpm -e "$pkg" 2>/dev/null; then \
+          echo "extras: removed $pkg"; \
+        else \
+          echo "extras: REFUSED to remove $pkg — something depends on it"; \
+        fi; \
+      done; \
+      echo "extras: $before -> $(rpm -qa | wc -l) packages"; \
+      for u in tailscaled tailscale-wait-online; do \
+        [ -f "/usr/lib/systemd/system/$u.service" ] \
+          && [ ! -x /usr/bin/tailscaled ] \
+          && { echo "BUILD ERROR: $u.service survived without its binary — it will fail every boot"; exit 1; }; \
+      done; true; \
+    fi
+
 # ── Homebrew: fetch on demand, do not ship the payload ─────────────
 #
 # homebrew.tar.zst is 125M of payload unpacked into /home/linuxbrew on first
