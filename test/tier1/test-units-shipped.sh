@@ -130,8 +130,8 @@ else
     bad "the initramfs trim does not force ostree in" \
         "dracut omits it in a container build and switch-root then fails"
 fi
-if grep -q 'has no ostree-prepare-root' "$CF"; then
-    ok "the build FAILS if ostree-prepare-root is missing from the initramfs"
+if grep -q 'has no ostree-prepare-root' "$CF" && grep -q 'is missing \$_need' "$CF"; then
+    ok "the build FAILS if ostree, plymouth or amdgpu are missing from the initramfs"
 else
     bad "the build does not verify ostree survived regeneration" \
         "an unbootable initramfs looks exactly like a successful trim"

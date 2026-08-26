@@ -398,6 +398,12 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
               | grep -q ostree-prepare-root \
               || { echo "BUILD ERROR: regenerated initramfs has no ostree-prepare-root — it cannot switch root"; exit 1; }; \
             echo "initramfs: ostree support verified present"; \
+            for _need in plymouthd amdgpu; do \
+              lsinitrd "/usr/lib/modules/$KVER/initramfs.img" 2>/dev/null \
+                | grep -q "$_need" \
+                || { echo "BUILD ERROR: regenerated initramfs is missing $_need"; exit 1; }; \
+            done; \
+            echo "initramfs: plymouth and amdgpu verified present"; \
           fi; \
           ;; \
         *) echo "initramfs: left generic (not the deck variant)" ;; \
