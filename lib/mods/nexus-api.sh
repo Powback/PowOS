@@ -154,9 +154,16 @@ nexus_resolve_file_id() {
     local slug="$1" mod_id="$2"
     local files_json
     files_json="$(nexus_mod_files "$slug" "$mod_id")" || return 1
-    python3 - <<'PY' <<< "$files_json"
-import json, sys
-data = json.loads(sys.stdin.read())
+    # NOT `python3 - <<'PY' <<< "$files_json"`: two redirections compete for
+    # stdin, the herestring wins, and python receives the JSON *as its script*
+    # instead of the heredoc. The JSON happens to be a valid Python expression,
+    # so it evaluated silently, printed nothing and exited 0 -- every caller got
+    # an empty file_id believing it had succeeded. shellcheck flags this as
+    # SC2261 (error); CI never saw it because its shellcheck globs lib/*.sh,
+    # which does not descend into lib/mods/.
+    NEXUS_FILES_JSON="$files_json" python3 - <<'PY'
+import json, os, sys
+data = json.loads(os.environ["NEXUS_FILES_JSON"])
 files = data.get("files", [])
 if not files:
     sys.exit(1)

@@ -80,7 +80,12 @@ jobs:
           # pow-collision-check hook) — shellcheck hard-fails non-shell
           # scripts with SC1071, so lint only files with a sh/bash shebang.
           mapfile -t shell_bins < <(grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/*)
-          shellcheck -S error "${shell_bins[@]}" lib/*.sh build/*.sh
+          # lib/*.sh does NOT descend into lib/mods/ or lib/ai/ — 31 files were
+          # never linted. That is why SC2261 in lib/mods/nexus-api.sh (two
+          # redirections competing for stdin, silently returning an empty
+          # file_id) never failed a build. Enumerate, do not glob.
+          mapfile -t shell_all < <(git ls-files 'lib/**/*.sh' 'lib/*.sh' 'build/*.sh' 'sources/**/*.sh' | sort -u)
+          shellcheck -S error "${shell_bins[@]}" "${shell_all[@]}"
 
       # A RATCHET, not a ceiling: existing debt is frozen in
       # build/complexity-budget.txt, new functions are capped at 15. Raising a
