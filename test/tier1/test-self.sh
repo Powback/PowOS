@@ -52,7 +52,16 @@ case "$sub" in
     log)      echo "abc1234 fake head"; exit 0 ;;
     rev-list) printf '0\t0\n'; exit 0 ;;
     cat-file) exit "${FAKE_GIT_CATFILE_RC:-0}" ;;
-    *)        exit 0 ;;   # init/remote/fetch/reset/stash/pull/add/commit/checkout
+    # These default to 0, i.e. to what the catch-all below already did — they
+    # exist so the attach phases' failure paths are reachable.
+    fetch)    exit "${FAKE_GIT_FETCH_RC:-0}" ;;
+    checkout) exit "${FAKE_GIT_CHECKOUT_RC:-0}" ;;
+    init)     exit "${FAKE_GIT_INIT_RC:-0}" ;;
+    stash)    case "${a[3]:-${a[1]:-}}" in
+                  push) exit "${FAKE_GIT_STASH_PUSH_RC:-0}" ;;
+                  pop)  exit "${FAKE_GIT_STASH_POP_RC:-0}" ;;
+              esac; exit 0 ;;
+    *)        exit 0 ;;   # remote/reset/pull/add/commit
 esac
 FAKE
 chmod +x "$FAKEBIN/git"
@@ -192,6 +201,150 @@ if [[ -f "$RELOAD_SH" ]]; then
         bad "no explicit mode on the extension's /usr/share dirs"
     fi
 fi
+
+# ═══════════════════════════════════════════════════════════════════
+echo "== self_safe_pull phases (the extracted seams, contract level) =="
+# ═══════════════════════════════════════════════════════════════════
+# self_safe_pull is an orchestrator over named phases. The end-to-end checks
+# above pin the promise the command makes ("NEVER discards local edits");
+# these pin each phase's own contract — what it publishes and what it refuses
+# — so a phase cannot stop refusing while the orchestrator still looks right.
+# Asserted on return codes, published globals and the recorded git calls, not
+# on wording.
+
+PH="$WORK/phase"; mkdir -p "$PH"
+PHRO="$WORK/phase-ro"; mkdir -p "$PHRO"; chmod 500 "$PHRO"
+BAKED=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+printf '%s\n' "$BAKED" > "$WORK/phase-marker"
+
+# ── self_pull_existing: Case A, the plain safe pull ───────────────
+: > "$GIT_LOG"
+FAKE_GIT_DIRTY=1 FAKE_GIT_STASH_PUSH_RC=1 self_pull_existing "$PH" >/dev/null 2>&1; rc=$?
+[[ $rc -ne 0 ]] && ok "existing: a failed stash means NO pull (edits untouched)" \
+  || bad "existing: pulled anyway after the stash failed (rc=$rc)"
+! grep -qE '(^| )pull( |$)' "$GIT_LOG" && ok "existing: no pull ran once the stash failed" \
+  || bad "existing: a pull ran over unstashed edits"
+
+: > "$GIT_LOG"
+FAKE_GIT_DIRTY=1 FAKE_GIT_STASH_POP_RC=1 self_pull_existing "$PH" >/dev/null 2>&1; rc=$?
+[[ $rc -eq 2 ]] && ok "existing: a conflicting stash pop reports rc=2, not success" \
+  || bad "existing: conflicted pop returned $rc (the edits are in the stash!)"
+
+# ── self_pull_attach: turn a bundle into a checkout ───────────────
+SELF_MARKER="$WORK/phase-marker"
+: > "$GIT_LOG"
+self_pull_attach "$PHRO" https://example.invalid/x.git >/dev/null 2>&1; rc=$?
+if [[ $EUID -eq 0 ]]; then
+    ok "attach: (skipped writability refusal — running as root)"
+else
+    [[ $rc -ne 0 ]] && ok "attach: refuses a read-only bundled source" \
+      || bad "attach: tried to init a git repo it cannot write to"
+fi
+
+: > "$GIT_LOG"
+FAKE_GIT_INIT_RC=1 self_pull_attach "$PH" https://example.invalid/x.git >/dev/null 2>&1; rc=$?
+[[ $rc -ne 0 ]] && ok "attach: a failed git init aborts" || bad "attach: continued after init failed"
+
+: > "$GIT_LOG"
+self_pull_attach "$PH" https://example.invalid/x.git >/dev/null 2>&1; rc=$?
+[[ $rc -eq 0 && "$SELF_PULL_BAKED" == "$BAKED" ]] \
+  && ok "attach: publishes the baked base SHA" \
+  || bad "attach: SELF_PULL_BAKED is '$SELF_PULL_BAKED' (rc=$rc)"
+[[ "$SELF_PULL_HAVE_MASTER" == 1 ]] && ok "attach: records that origin/master arrived" \
+  || bad "attach: did not record the master fetch"
+
+# A failed fetch is normal (offline) — the FALLBACK reports it with the right
+# message. If the trailing `&&` escaped as the return value, attach would abort
+# every offline run before the fallback ever got a chance.
+: > "$GIT_LOG"
+FAKE_GIT_FETCH_RC=1 self_pull_attach "$PH" https://example.invalid/x.git >/dev/null 2>&1; rc=$?
+[[ $rc -eq 0 ]] && ok "attach: an offline fetch is not an attach failure" \
+  || bad "attach: returned $rc because the fetch failed (the && leaked)"
+[[ "$SELF_PULL_HAVE_MASTER" == 0 ]] && ok "attach: records that master did NOT arrive" \
+  || bad "attach: claimed master arrived after a failed fetch"
+
+# ── self_pull_have_base: is the TRUE base usable? ─────────────────
+SELF_PULL_HAVE_MASTER=1
+self_pull_have_base "$PH" unknown 2>/dev/null \
+  && bad "have_base: accepted the literal 'unknown' as a commit" \
+  || ok "have_base: an unknown baked SHA is not a base"
+self_pull_have_base "$PH" "" 2>/dev/null \
+  && bad "have_base: accepted an empty baked SHA" \
+  || ok "have_base: an empty baked SHA is not a base"
+FAKE_GIT_CATFILE_RC=1 self_pull_have_base "$PH" "$BAKED" 2>/dev/null \
+  && bad "have_base: accepted a commit git cannot resolve" \
+  || ok "have_base: an unresolvable baked commit is not a base"
+SELF_PULL_HAVE_MASTER=0
+self_pull_have_base "$PH" "$BAKED" 2>/dev/null \
+  && bad "have_base: accepted a base with no origin/master to align onto" \
+  || ok "have_base: needs origin/master as well as the base"
+SELF_PULL_HAVE_MASTER=1
+self_pull_have_base "$PH" "$BAKED" 2>/dev/null \
+  && ok "have_base: base present + master fetched → usable" \
+  || bad "have_base: rejected a perfectly good base"
+
+# ── self_pull_align_baked ─────────────────────────────────────────
+SELF_PULL_HAVE_MASTER=1
+self_pull_align_baked "$PH" unknown >/dev/null 2>&1; rc=$?
+[[ $rc -eq $SELF_PULL_SKIP ]] \
+  && ok "align_baked: hands back SKIP so the caller falls through" \
+  || bad "align_baked: returned $rc instead of the SKIP sentinel"
+
+: > "$GIT_LOG"
+FAKE_GIT_DIRTY=1 self_pull_align_baked "$PH" "$BAKED" >/dev/null 2>&1; rc=$?
+grep -q "stash push" "$GIT_LOG" && ok "align_baked: a dirty bundle is stashed before checkout" \
+  || bad "align_baked: checked out over local edits without stashing"
+grep -q "stash pop" "$GIT_LOG" && ok "align_baked: the edits are popped back afterwards" \
+  || bad "align_baked: edits left in the stash"
+[[ $rc -eq 0 ]] && ok "align_baked: succeeds with edits preserved" || bad "align_baked rc=$rc"
+
+: > "$GIT_LOG"
+FAKE_GIT_DIRTY=1 FAKE_GIT_CHECKOUT_RC=1 self_pull_align_baked "$PH" "$BAKED" >/dev/null 2>&1; rc=$?
+[[ $rc -ne 0 ]] && ok "align_baked: a failed checkout is a failure" || bad "align_baked hid a failed checkout"
+grep -q "stash pop" "$GIT_LOG" \
+  && ok "align_baked: the stash is restored even when the checkout fails" \
+  || bad "align_baked: left the user's edits stashed after a failed checkout"
+
+: > "$GIT_LOG"
+FAKE_GIT_DIRTY=1 FAKE_GIT_STASH_POP_RC=1 self_pull_align_baked "$PH" "$BAKED" >/dev/null 2>&1; rc=$?
+[[ $rc -eq 2 ]] && ok "align_baked: a conflicting pop reports rc=2 (edits are in the stash)" \
+  || bad "align_baked: conflicted pop returned $rc"
+
+# ── self_pull_align_master: the no-true-base fallback ─────────────
+# This is the load-bearing refusal: without the baked base we cannot tell a
+# pristine bundle from an edited one, so a dirty tree must NEVER be reset.
+SELF_PULL_HAVE_MASTER=0
+: > "$GIT_LOG"
+self_pull_align_master "$PH" >/dev/null 2>&1; rc=$?
+[[ $rc -ne 0 ]] && ok "align_master: refuses when upstream never arrived" || bad "align_master rc=$rc offline"
+! grep -qE '(^| )checkout' "$GIT_LOG" && ok "align_master: no checkout when upstream is missing" \
+  || bad "align_master: checked out with no upstream"
+
+SELF_PULL_HAVE_MASTER=1
+: > "$GIT_LOG"
+FAKE_GIT_DIRTY=1 self_pull_align_master "$PH" >/dev/null 2>&1; rc=$?
+[[ $rc -ne 0 ]] && ok "align_master: REFUSES a dirty tree with no known base" \
+  || bad "align_master: would have reset over local edits"
+! grep -qE '(^| )checkout' "$GIT_LOG" \
+  && ok "align_master: nothing is checked out when it refuses" \
+  || bad "align_master: ran a checkout in the refuse path"
+
+: > "$GIT_LOG"
+self_pull_align_master "$PH" >/dev/null 2>&1; rc=$?
+[[ $rc -eq 0 ]] && ok "align_master: a clean tree is safe to align" || bad "align_master rc=$rc on a clean tree"
+grep -q "checkout -B master origin/master" "$GIT_LOG" \
+  && ok "align_master: aligns onto origin/master (never checkout -f)" \
+  || bad "align_master: did not align a clean tree"
+! grep -q "checkout -f" "$GIT_LOG" && ok "align_master: never uses checkout -f" || bad "checkout -f used!"
+
+: > "$GIT_LOG"
+FAKE_GIT_CHECKOUT_RC=1 self_pull_align_master "$PH" >/dev/null 2>&1; rc=$?
+[[ $rc -ne 0 ]] && ok "align_master: a failed checkout is reported" || bad "align_master hid a failed checkout"
+
+unset FAKE_GIT_DIRTY FAKE_GIT_FETCH_RC FAKE_GIT_CHECKOUT_RC FAKE_GIT_INIT_RC \
+      FAKE_GIT_STASH_PUSH_RC FAKE_GIT_STASH_POP_RC FAKE_GIT_CATFILE_RC
+SELF_MARKER="$WORK/missing"
+
 
 echo
 echo "== Results: $PASS passed, $FAIL failed =="

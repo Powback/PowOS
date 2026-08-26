@@ -574,6 +574,262 @@ check "shrink: ntfsfix failure → refused (rc != 0)" '[[ $rc -ne 0 ]]'
 check "shrink: ntfsresize never called after ntfsfix failure" '[[ ${#MUT_CALLS[@]} -eq 0 ]]'
 unset -f blkid lsblk findmnt gms_is_block ntfsfix ntfsresize parted
 
+# ══════════════════════════════════════════════════════════════════
+echo "== create / resize phases (the extracted seams, contract level) =="
+# ══════════════════════════════════════════════════════════════════
+# gms_create and gms_resize are orchestrators over named phases. The sections
+# above drive them end to end; these drive each phase on its own, so a guard
+# cannot quietly stop refusing while the orchestrator still looks right.
+#
+# Calling the phases directly also reaches code the end-to-end tests cannot:
+# everything past the root check, which on an unprivileged test box always
+# refuses. Asserted on the CONTRACT — return code, published GMS_CR_*/GMS_RS_*
+# global, recorded tool call and its ORDER — never on the wording.
+
+MUT_CALLS=()
+_mock_disk() {
+    parted() {
+        case "$*" in
+            *"print free"*) cat <<'PARTED'
+Disk /dev/sdz: 500000MiB
+Number  Start      End        Size       Type     File system  Flags
+ 1      1.00MiB    100000MiB  99999MiB   primary  btrfs
+ 2      100000MiB  200000MiB  100000MiB  primary  ntfs
+        200000MiB  500000MiB  300000MiB           Free Space
+PARTED
+                ;;
+            *) MUT_CALLS+=("parted $*"); return "${PARTED_RC:-0}" ;;
+        esac
+    }
+    mkfs.ntfs()    { MUT_CALLS+=("mkfs.ntfs $*"); return "${MKFS_RC:-0}"; }
+    sgdisk()       { MUT_CALLS+=("sgdisk $*"); return "${SGDISK_RC:-0}"; }
+    ntfsfix()      { MUT_CALLS+=("ntfsfix $*"); return "${NTFSFIX_RC:-0}"; }
+    ntfsresize()   { MUT_CALLS+=("ntfsresize $*")
+                     case "$*" in
+                        *--check*)     return "${NTFSCHECK_RC:-0}" ;;
+                        *--no-action*) return "${NTFSNOACT_RC:-0}" ;;
+                     esac
+                     return "${NTFSRESIZE_RC:-0}"; }
+    gms_settle()   { MUT_CALLS+=("settle $*"); }
+    gms_is_block() { [[ " ${NONBLOCK:-} " == *" $1 "* ]] && return 1; return 0; }
+    lsblk() { case "$*" in
+                *"-no PKNAME"*)   printf '%s\n' "${PKNAME-sdz}" ;;
+                *"-bnd -o SIZE"*) printf '%s\n' "${SIZE_B-$(( 512 * 1024 * 1048576 ))}" ;;
+                *"-dn -o TYPE"*)  printf '%s\n' "${DISK_TYPE-disk}" ;;
+                *"-ln -o PATH"*)  printf '%s\n' ${PARTS-/dev/sdz /dev/sdz1 /dev/sdz2} ;;
+                *) echo "" ;;
+              esac; }
+    blkid() { case "$*" in
+                *"-L POWOS-GAMES"*) [[ -n "${GAMES_PART:-}" ]] && { echo "$GAMES_PART"; return 0; }; return 2 ;;
+                *"-s PARTLABEL"*)   [[ -n "${PARTLABEL:-}" ]] && echo "$PARTLABEL"; return 0 ;;
+                *"-s TYPE"*)        [[ -n "${SIG:-}" ]] && echo "$SIG"; return 0 ;;
+              esac; return 2; }
+    findmnt() { case "$*" in
+                  *"-S "*) [[ -n "${MOUNTED:-}" ]] && { echo "$MOUNTED"; return 0; }; return 1 ;;
+                  *) printf '%s\n' "${ROOTSRC-/dev/sdz1}" ;;
+                esac; }
+}
+_unmock_disk() {
+    unset -f parted mkfs.ntfs sgdisk ntfsfix ntfsresize gms_settle gms_is_block \
+             lsblk blkid findmnt
+}
+_calls() { printf '%s\n' "${MUT_CALLS[@]:-}"; }
+_mock_disk
+
+# ── gms_create_check_options ──────────────────────────────────────
+reset_gms; GMS_WHOLE=1; GMS_SIZE_GB=100
+out=$(gms_create_check_options 2>&1); rc=$?
+check "check_options: --size and --whole together are refused" '[[ $rc -ne 0 ]]'
+reset_gms
+out=$(gms_create_check_options 2>&1); rc=$?
+check "check_options: neither --size nor --whole is refused"   '[[ $rc -ne 0 ]]'
+for bad_size in 0 abc -5 " "; do
+    reset_gms; GMS_SIZE_GB="$bad_size"
+    gms_create_check_options >/dev/null 2>&1
+    check "check_options: --size '$bad_size' is refused"       '[[ $? -ne 0 ]]'
+done
+reset_gms; GMS_SIZE_GB=100
+gms_create_check_options >/dev/null 2>&1; rc=$?
+check "check_options: --size 100 → 102400 MiB" \
+    '[[ $rc -eq 0 && "$GMS_CR_WANT_MIB" -eq 102400 ]]'
+# The last statement is `[[ $GMS_WHOLE -eq 0 ]] && GMS_CR_WANT_MIB=...`, which
+# is FALSE under --whole. Without the explicit `return 0` that status becomes
+# the return value and every --whole run is refused before anything is checked.
+reset_gms; GMS_WHOLE=1
+gms_create_check_options >/dev/null 2>&1; rc=$?
+check "check_options: --whole alone is ACCEPTED (the trailing && cannot leak)" \
+    '[[ $rc -eq 0 ]]'
+
+# ── gms_create_check_unique ───────────────────────────────────────
+reset_gms
+GAMES_PART=/dev/sdz9 gms_create_check_unique >/dev/null 2>&1
+check "check_unique: refuses to create a SECOND POWOS-GAMES" '[[ $? -ne 0 ]]'
+gms_create_check_unique >/dev/null 2>&1
+check "check_unique: allows the first one"                   '[[ $? -eq 0 ]]'
+
+# ── gms_create_target_disk ────────────────────────────────────────
+reset_gms; GMS_DISK=/dev/sdz
+gms_create_target_disk >/dev/null 2>&1; rc=$?
+check "target_disk: --disk override wins" \
+    '[[ $rc -eq 0 && "$GMS_CR_DISK" == /dev/sdz ]]'
+reset_gms; GMS_DISK=/dev/sdz
+DISK_TYPE=part gms_create_target_disk >/dev/null 2>&1
+check "target_disk: refuses a PARTITION as the target"       '[[ $? -ne 0 ]]'
+reset_gms; GMS_DISK=/dev/sdz
+NONBLOCK=/dev/sdz gms_create_target_disk >/dev/null 2>&1
+check "target_disk: refuses a non-block-device target"       '[[ $? -ne 0 ]]'
+reset_gms
+ROOTSRC=overlay gms_create_target_disk >/dev/null 2>&1
+check "target_disk: refuses when no PowOS-owned disk can be found" '[[ $? -ne 0 ]]'
+
+# ── gms_create_bounds ─────────────────────────────────────────────
+reset_gms; GMS_SIZE_GB=100
+gms_create_bounds /dev/sdz 102400 >/dev/null 2>&1; rc=$?
+check "bounds: the partition starts at the free block's start" \
+    '[[ $rc -eq 0 && "$GMS_CR_P_START" == "200000.00" ]]'
+check "bounds: and ends at start+size, INSIDE the block (never 100%)" \
+    '[[ "$GMS_CR_P_END" == "302400.00" ]]'
+reset_gms; GMS_SIZE_GB=9000
+gms_create_bounds /dev/sdz $(( 9000 * 1024 )) >/dev/null 2>&1
+check "bounds: refuses a size larger than the free block"    '[[ $? -ne 0 ]]'
+reset_gms; GMS_WHOLE=1
+gms_create_bounds /dev/sdz 0 >/dev/null 2>&1; rc=$?
+check "bounds: --whole fills the free block exactly" \
+    '[[ $rc -eq 0 && "$GMS_CR_P_END" == "500000.00" && "$GMS_SIZE_GB" -eq 292 ]]'
+
+# ── gms_create_locate_part ────────────────────────────────────────
+reset_gms
+PARTLABEL=POWOS-GAMES gms_create_locate_part /dev/sdz 102400 >/dev/null 2>&1; rc=$?
+check "locate_part: resolves by GPT partlabel, not enumeration order" \
+    '[[ $rc -eq 0 && "$GMS_CR_PART" == /dev/sdz1 ]]'
+reset_gms
+PARTLABEL=other SIG=ntfs gms_create_locate_part /dev/sdz 102400 >/dev/null 2>&1
+check "locate_part: the fallback ABORTS on an existing filesystem signature" \
+    '[[ $? -ne 0 ]]'
+reset_gms
+PARTLABEL=other SIZE_B=$(( 5 * 1024 * 1048576 )) \
+    gms_create_locate_part /dev/sdz 102400 >/dev/null 2>&1
+check "locate_part: the fallback ABORTS when the size is wrong" '[[ $? -ne 0 ]]'
+reset_gms
+PARTLABEL=other PARTS= gms_create_locate_part /dev/sdz 102400 >/dev/null 2>&1
+check "locate_part: refuses when no device node turned up"     '[[ $? -ne 0 ]]'
+
+# ── gms_create_set_gpt_type ───────────────────────────────────────
+reset_gms; MUT_CALLS=()
+gms_create_set_gpt_type /dev/sdz /dev/sdz2 >/dev/null 2>&1
+check "set_gpt_type: sets 0700 so Windows letters the partition" \
+    '_calls | grep -q "sgdisk -t 2:0700 /dev/sdz"'
+reset_gms; MUT_CALLS=()
+out=$(SGDISK_RC=1 gms_create_set_gpt_type /dev/sdz /dev/sdz2 2>&1)
+check "set_gpt_type: a failed sgdisk warns, it does not abort the create" \
+    'echo "$out" | grep -qi "sgdisk"'
+
+# ── gms_resize_locate ─────────────────────────────────────────────
+reset_gms
+gms_resize_locate >/dev/null 2>&1
+check "resize_locate: refuses without --size"                  '[[ $? -ne 0 ]]'
+reset_gms; GMS_SIZE_GB=512
+gms_resize_locate >/dev/null 2>&1
+check "resize_locate: refuses when there is no POWOS-GAMES"    '[[ $? -ne 0 ]]'
+reset_gms; GMS_SIZE_GB=512
+GAMES_PART=/dev/sdz2 PKNAME= gms_resize_locate >/dev/null 2>&1
+check "resize_locate: refuses when the disk cannot be determined" '[[ $? -ne 0 ]]'
+reset_gms; GMS_SIZE_GB=512
+GAMES_PART=/dev/mapper/games gms_resize_locate >/dev/null 2>&1
+check "resize_locate: refuses when the partition number cannot be read" '[[ $? -ne 0 ]]'
+reset_gms; GMS_SIZE_GB=512
+GAMES_PART=/dev/sdz2 SIZE_B=bogus gms_resize_locate >/dev/null 2>&1
+check "resize_locate: refuses when the current size is unreadable" '[[ $? -ne 0 ]]'
+reset_gms; GMS_SIZE_GB=512
+GAMES_PART=/dev/sdz2 gms_resize_locate >/dev/null 2>&1; rc=$?
+check "resize_locate: publishes part, disk, number and current size" \
+    '[[ $rc -eq 0 && "$GMS_RS_PART" == /dev/sdz2 && "$GMS_RS_DISK" == /dev/sdz \
+       && "$GMS_RS_PNUM" == 2 && "$GMS_RS_CUR_MIB" -eq 524288 ]]'
+
+# ── gms_resize_preflight: every refusal that runs before root ─────
+reset_gms; GMS_SIZE_GB=600
+MOUNTED=/var/mnt/games gms_resize_preflight /dev/sdz2 /dev/sdz 2 524288 614400 0 >/dev/null 2>&1
+check "preflight: refuses to resize a MOUNTED partition"       '[[ $? -ne 0 ]]'
+reset_gms; GMS_SIZE_GB=200
+gms_resize_preflight /dev/sdz2 /dev/sdz 2 524288 204800 1 >/dev/null 2>&1
+check "preflight: a shrink without --yes is refused"           '[[ $? -ne 0 ]]'
+reset_gms; GMS_SIZE_GB=200; GMS_ASSUME_YES=1
+gms_resize_preflight /dev/sdz2 /dev/sdz 2 524288 204800 1 >/dev/null 2>&1
+check "preflight: --yes unlocks the shrink"                    '[[ $? -eq 0 ]]'
+reset_gms; GMS_SIZE_GB=200; GMS_DRY_RUN=1
+gms_resize_preflight /dev/sdz2 /dev/sdz 2 524288 204800 1 >/dev/null 2>&1
+check "preflight: --dry-run does not need --yes (nothing is changed)" '[[ $? -eq 0 ]]'
+reset_gms; GMS_SIZE_GB=600
+gms_resize_preflight /dev/sdz2 /dev/sdz 2 524288 614400 0 >/dev/null 2>&1
+check "preflight: a grow with adjacent room is allowed"        '[[ $? -eq 0 ]]'
+
+# ── gms_resize_grow_headroom ──────────────────────────────────────
+reset_gms
+gms_resize_grow_headroom /dev/sdz 2 /dev/sdz2 102400 204800 >/dev/null 2>&1
+check "grow_headroom: 100GiB of adjacent free space is enough for +100GiB" '[[ $? -eq 0 ]]'
+reset_gms
+gms_resize_grow_headroom /dev/sdz 2 /dev/sdz2 102400 $(( 102400 + 400000 )) >/dev/null 2>&1
+check "grow_headroom: refuses when the adjacent block is too small" '[[ $? -ne 0 ]]'
+reset_gms
+parted() { cat <<'FULL'
+Disk /dev/sdz: 500000MiB
+Number  Start      End        Size       Type     File system  Flags
+ 2      100000MiB  200000MiB  100000MiB  primary  ntfs
+FULL
+}
+gms_resize_grow_headroom /dev/sdz 2 /dev/sdz2 102400 204800 >/dev/null 2>&1
+check "grow_headroom: refuses when the disk has no free space at all" \
+    '[[ $? -ne 0 ]]'
+unset -f parted; _mock_disk
+
+# ── gms_resize_shrink: filesystem first, and abort on any doubt ───
+reset_gms; MUT_CALLS=()
+NTFSFIX_RC=1 gms_resize_shrink /dev/sdz2 /dev/sdz 2 204800 >/dev/null 2>&1
+check "shrink: a failed ntfsfix aborts"                        '[[ $? -ne 0 ]]'
+check "shrink: nothing was resized after ntfsfix failed" \
+    '! _calls | grep -q "^ntfsresize"'
+reset_gms; MUT_CALLS=()
+NTFSCHECK_RC=1 gms_resize_shrink /dev/sdz2 /dev/sdz 2 204800 >/dev/null 2>&1
+check "shrink: a filesystem with errors is REFUSED"            '[[ $? -ne 0 ]]'
+check "shrink: no resize ran after a failed integrity check" \
+    '! _calls | grep -qE "^ntfsresize --size"'
+reset_gms; MUT_CALLS=()
+NTFSNOACT_RC=1 gms_resize_shrink /dev/sdz2 /dev/sdz 2 204800 >/dev/null 2>&1
+check "shrink: a failed --no-action feasibility check aborts"  '[[ $? -ne 0 ]]'
+check "shrink: no real resize after the feasibility check failed" \
+    '! _calls | grep -qE "^ntfsresize --size"'
+reset_gms; MUT_CALLS=()
+PARTED_RC=1 gms_resize_shrink /dev/sdz2 /dev/sdz 2 204800 >/dev/null 2>&1
+check "shrink: a failed resizepart is reported"                '[[ $? -ne 0 ]]'
+reset_gms; MUT_CALLS=()
+gms_resize_shrink /dev/sdz2 /dev/sdz 2 204800 >/dev/null 2>&1; rc=$?
+check "shrink: succeeds when every step does"                  '[[ $rc -eq 0 ]]'
+check "shrink: the FILESYSTEM shrinks before the partition does" \
+    '[[ "$(_calls | grep -nE "^(ntfsresize --size|parted -s)" | head -1 | cut -d: -f2- | cut -d" " -f1)" == "ntfsresize" ]]'
+check "shrink: the new end is start+size (100000 + 204800)" \
+    '_calls | grep -q "parted -s /dev/sdz resizepart 2 304800.00MiB"'
+
+# ── gms_resize_grow: partition first, THEN the filesystem ─────────
+reset_gms; MUT_CALLS=()
+gms_resize_grow /dev/sdz2 /dev/sdz 2 614400 >/dev/null 2>&1; rc=$?
+check "grow: succeeds when every step does"                    '[[ $rc -eq 0 ]]'
+check "grow: the PARTITION grows before the filesystem does" \
+    '[[ "$(_calls | grep -nE "^(ntfsresize|parted -s)" | head -1 | cut -d: -f2- | cut -d" " -f1)" == "parted" ]]'
+check "grow: the partition table is re-read before the FS grows" \
+    '_calls | grep -q "^settle"'
+reset_gms; MUT_CALLS=()
+PARTED_RC=1 gms_resize_grow /dev/sdz2 /dev/sdz 2 614400 >/dev/null 2>&1
+check "grow: a failed resizepart aborts before touching the filesystem" '[[ $? -ne 0 ]]'
+check "grow: the filesystem is untouched when resizepart failed" \
+    '! _calls | grep -q "^ntfsresize"'
+reset_gms; MUT_CALLS=()
+NTFSRESIZE_RC=1 gms_resize_grow /dev/sdz2 /dev/sdz 2 614400 >/dev/null 2>&1
+check "grow: a failed filesystem grow is reported"             '[[ $? -ne 0 ]]'
+
+_unmock_disk
+unset -f _mock_disk _unmock_disk _calls
+
+
 # ── Summary ───────────────────────────────────────────────────────
 echo
 echo "== Results: $PASS passed, $FAIL failed =="

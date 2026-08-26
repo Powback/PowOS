@@ -154,105 +154,128 @@ self_apply_manifest() {
 #      - baked SHA unknown/unfetchable → align with origin/master ONLY if the
 #        tree is clean; otherwise REFUSE (tell the user to commit/copy first).
 # ══════════════════════════════════════════════════════════════════
-self_safe_pull() {
-    local src="${1:-$SELF_SRC}"
-    local upstream="${POWOS_UPSTREAM:-$SELF_UPSTREAM}"
+# self_safe_pull's phases. Each is a named step of the flow above, in the
+# order the orchestrator runs them. Values a phase produces are published in
+# a SELF_PULL_* global rather than echoed: every one of them also PRINTS
+# progress, and a command substitution would swallow exactly that.
+SELF_PULL_BAKED=""         # baked base SHA, or "unknown" (self_pull_attach)
+SELF_PULL_HAVE_MASTER=0    # did the origin/master fetch succeed?
 
-    if [[ ! -d "$src" ]]; then
-        perr "PowOS source not found at: $src"
-        return 1
-    fi
-
-    # ── Case A: already a git checkout → plain safe pull ──
-    if [[ -d "$src/.git" ]]; then
-        local stashed=0
-        if self_git_dirty "$src"; then
-            plog "Local edits present — stashing before pull…"
-            if git -C "$src" stash push -u -m "powos-self-pull" >/dev/null 2>&1; then
-                stashed=1
-            else
-                pwarn "git stash failed — not pulling (your edits are untouched)."
-                return 1
-            fi
+# ── Case A: already a git checkout → plain safe pull ──
+# Local edits are stashed first and popped after, so a pull can never eat them.
+self_pull_existing() {
+    local src="$1" stashed=0
+    if self_git_dirty "$src"; then
+        plog "Local edits present — stashing before pull…"
+        if git -C "$src" stash push -u -m "powos-self-pull" >/dev/null 2>&1; then
+            stashed=1
+        else
+            pwarn "git stash failed — not pulling (your edits are untouched)."
+            return 1
         fi
-        plog "Pulling latest (rebase) in $src…"
-        git -C "$src" pull --rebase 2>&1 | self_indent \
-            || git -C "$src" pull 2>&1 | self_indent \
-            || pwarn "git pull reported issues."
-        if (( stashed )); then
-            plog "Restoring your local edits…"
-            if ! git -C "$src" stash pop 2>&1 | self_indent; then
-                pwarn "Your edits are SAFE in 'git stash' but conflicted with upstream."
-                pwarn "Resolve in $src (git status), then 'git stash drop' when done."
-                return 2
-            fi
-        fi
-        pok "Up to date; local edits preserved."
-        return 0
     fi
+    plog "Pulling latest (rebase) in $src…"
+    git -C "$src" pull --rebase 2>&1 | self_indent \
+        || git -C "$src" pull 2>&1 | self_indent \
+        || pwarn "git pull reported issues."
+    if (( stashed )); then
+        plog "Restoring your local edits…"
+        if ! git -C "$src" stash pop 2>&1 | self_indent; then
+            pwarn "Your edits are SAFE in 'git stash' but conflicted with upstream."
+            pwarn "Resolve in $src (git status), then 'git stash drop' when done."
+            return 2
+        fi
+    fi
+    pok "Up to date; local edits preserved."
+    return 0
+}
 
-    # ── Case B: bundled snapshot (no .git) ──
+# ── Case B, step 1: turn the bundled snapshot into a git checkout ──
+# Publishes SELF_PULL_BAKED and SELF_PULL_HAVE_MASTER. Non-zero means nothing
+# was attached and the caller must stop.
+self_pull_attach() {
+    local src="$1" upstream="$2"
     if [[ ! -w "$src" ]]; then
         perr "Bundled source at $src is not writable — can't attach git."
         perr "Re-run with sudo, or copy the source somewhere writable and use --from."
         return 1
     fi
 
-    local baked; baked="$(self_baked_sha)"
+    SELF_PULL_BAKED="$(self_baked_sha)"
     plog "No .git in $src — attaching to upstream:"
-    plog "  $upstream   (baked base: $baked)"
+    plog "  $upstream   (baked base: $SELF_PULL_BAKED)"
 
     git -C "$src" init -q 2>/dev/null || { perr "git init failed."; return 1; }
     git -C "$src" remote add origin "$upstream" 2>/dev/null \
         || git -C "$src" remote set-url origin "$upstream" 2>/dev/null || true
 
     # Always need origin/master to align onto.
-    local have_master=0
-    git -C "$src" fetch --depth 200 origin master 2>/dev/null && have_master=1
+    SELF_PULL_HAVE_MASTER=0
+    git -C "$src" fetch --depth 200 origin master 2>/dev/null && SELF_PULL_HAVE_MASTER=1
+    # A failed fetch is NOT an error here — the fallback below reports it with
+    # the right message. Without this `return 0` the `&&` above would become
+    # the return value and abort the attach on a perfectly normal offline run.
+    return 0
+}
 
-    if [[ "$baked" != "unknown" && -n "$baked" ]]; then
-        # Ensure the baked base commit is present (depth fallback → master).
-        git -C "$src" cat-file -e "${baked}^{commit}" 2>/dev/null \
-            || git -C "$src" fetch --depth 200 origin "$baked" 2>/dev/null || true
+# Can we align onto the TRUE baked base? Ensures the baked commit is present
+# (depth fallback → an explicit fetch of it) and that origin/master arrived.
+# Non-zero means "not usable" — the caller falls back to the master-only path.
+self_pull_have_base() {
+    local src="$1" baked="$2"
+    [[ "$baked" != "unknown" && -n "$baked" ]] || return 1
+    git -C "$src" cat-file -e "${baked}^{commit}" 2>/dev/null \
+        || git -C "$src" fetch --depth 200 origin "$baked" 2>/dev/null || true
+    git -C "$src" cat-file -e "${baked}^{commit}" 2>/dev/null || return 1
+    (( SELF_PULL_HAVE_MASTER ))
+}
 
-        if git -C "$src" cat-file -e "${baked}^{commit}" 2>/dev/null && (( have_master )); then
-            # Seed HEAD+index from the TRUE base: only genuine edits show as
-            # pending. (Spec said `reset --soft`; on a freshly-init'd repo the
-            # index is empty, so --soft would flag every bundle file as a change.
-            # `reset --mixed` seeds the index from the baked tree, correctly
-            # realizing the stated goal.)
-            git -C "$src" reset --mixed "$baked" >/dev/null 2>&1 || true
-            local stashed=0
-            if self_git_dirty "$src"; then
-                plog "Bundle carries local edits — stashing before checkout…"
-                git -C "$src" stash push -u -m "powos-bundle-edits" >/dev/null 2>&1 && stashed=1
-            fi
-            if ! git -C "$src" checkout -B master origin/master >/dev/null 2>&1; then
-                perr "checkout of origin/master failed."
-                (( stashed )) && git -C "$src" stash pop >/dev/null 2>&1 || true
-                return 1
-            fi
-            if (( stashed )); then
-                plog "Restoring your local edits…"
-                if ! git -C "$src" stash pop 2>&1 | self_indent; then
-                    pwarn "Edits are SAFE in 'git stash' but conflicted with upstream."
-                    pwarn "Resolve in $src, then 'git stash drop'."
-                    return 2
-                fi
-            fi
-            pok "Attached to upstream at baked base; local edits preserved."
-            return 0
+# ── Case B, step 2: align onto origin/master FROM the baked base ──
+# Returns SELF_PULL_SKIP (90) when the baked base is unusable, so the caller
+# can fall through — any other code is this phase's final answer.
+SELF_PULL_SKIP=90
+self_pull_align_baked() {
+    local src="$1" baked="$2"
+    self_pull_have_base "$src" "$baked" || return "$SELF_PULL_SKIP"
+
+    # Seed HEAD+index from the TRUE base: only genuine edits show as
+    # pending. (Spec said `reset --soft`; on a freshly-init'd repo the
+    # index is empty, so --soft would flag every bundle file as a change.
+    # `reset --mixed` seeds the index from the baked tree, correctly
+    # realizing the stated goal.)
+    git -C "$src" reset --mixed "$baked" >/dev/null 2>&1 || true
+    local stashed=0
+    if self_git_dirty "$src"; then
+        plog "Bundle carries local edits — stashing before checkout…"
+        git -C "$src" stash push -u -m "powos-bundle-edits" >/dev/null 2>&1 && stashed=1
+    fi
+    if ! git -C "$src" checkout -B master origin/master >/dev/null 2>&1; then
+        perr "checkout of origin/master failed."
+        (( stashed )) && git -C "$src" stash pop >/dev/null 2>&1 || true
+        return 1
+    fi
+    if (( stashed )); then
+        plog "Restoring your local edits…"
+        if ! git -C "$src" stash pop 2>&1 | self_indent; then
+            pwarn "Edits are SAFE in 'git stash' but conflicted with upstream."
+            pwarn "Resolve in $src, then 'git stash drop'."
+            return 2
         fi
     fi
+    pok "Attached to upstream at baked base; local edits preserved."
+    return 0
+}
 
-    # ── Fallback: baked SHA unknown/unfetchable. NEVER force over edits. ──
-    if (( ! have_master )); then
+# ── Case B, fallback: baked SHA unknown/unfetchable. NEVER force over edits. ──
+# Without the true base we can't perfectly separate edits from a pristine
+# bundle. Seed the index from origin/master and REFUSE if anything differs.
+self_pull_align_master() {
+    local src="$1"
+    if (( ! SELF_PULL_HAVE_MASTER )); then
         perr "Couldn't fetch upstream (network/auth?)."
         perr "Set up auth (gh auth login) or deploy locally: powos update self --from /path"
         return 1
     fi
-    # Without the true base we can't perfectly separate edits from a pristine
-    # bundle. Seed the index from origin/master and REFUSE if anything differs.
     git -C "$src" reset --mixed origin/master >/dev/null 2>&1 || true
     if self_git_dirty "$src"; then
         perr "Baked base commit is unknown and the tree differs from origin/master."
@@ -268,6 +291,26 @@ self_safe_pull() {
     fi
     pok "Attached to upstream (no local edits detected)."
     return 0
+}
+
+self_safe_pull() {
+    local src="${1:-$SELF_SRC}"
+    local upstream="${POWOS_UPSTREAM:-$SELF_UPSTREAM}"
+
+    if [[ ! -d "$src" ]]; then
+        perr "PowOS source not found at: $src"
+        return 1
+    fi
+
+    [[ -d "$src/.git" ]] && { self_pull_existing "$src"; return $?; }
+
+    self_pull_attach "$src" "$upstream" || return 1
+
+    local rc
+    self_pull_align_baked "$src" "$SELF_PULL_BAKED"; rc=$?
+    (( rc == SELF_PULL_SKIP )) || return "$rc"
+
+    self_pull_align_master "$src"
 }
 
 # ══════════════════════════════════════════════════════════════════

@@ -208,6 +208,89 @@ reload_drop_sysext() {
     pok "Dropped the powos-dev sysext overlay — back to the image's CLI."
 }
 
+# ── cmd_reload's phases ───────────────────────────────────────────
+# cmd_reload parses the flags and then runs these in order. Each one is a job
+# it used to do inline; the orchestrator now reads as the sequence it is.
+
+# Never silently apply stale code. Without --pull that means warning (and
+# offering to pull) when the checkout is behind; with --pull it means pulling.
+reload_refresh_source() {
+    local src="$1" do_pull="$2"
+    (( do_pull )) || { reload_check_behind "$src"; return 0; }
+    [[ -d "$src/.git" ]] || return 0
+    plog "Pulling latest in $src…"
+    git -C "$src" pull --rebase 2>&1 | tail -2 || pwarn "git pull had issues (continuing with what's there)."
+    return 0
+}
+
+# Some changes are baked at image build time, so a live apply would silently
+# not pick them up. List them and offer the build. Returns 0 = build it.
+reload_confirm_build() {
+    local src="$1"
+    pwarn "These changes are baked at build time — a live apply WON'T pick them up:"
+    reload_changed_files "$src" | grep -E "$RELOAD_NEEDS_BUILD_RE" | sed 's/^/    • /'
+    echo "    (Containerfile / dracut / kernel-args need a full image build + reboot.)"
+    confirm "Build the image locally + switch now?" && return 0
+    pwarn "Applying only the hot-reloadable parts; the above wait for 'powos reload --build'."
+    return 1
+}
+
+# --build: bake the checkout into a local image and bootc switch onto it.
+reload_do_build() {
+    local src="$1"
+    plog "Baking $src into a local image + switch…"
+    # Source from the CHECKOUT (not the overlay) so this survives the drop.
+    local bimg="$src/lib/build-image.sh"
+    [[ -f "$bimg" ]] || bimg="${POWOS_LIB:-/usr/lib/powos}/build-image.sh"
+    [[ -f "$bimg" ]] || { perr "build-image.sh not found (looked in $src/lib and \$POWOS_LIB)."; return 1; }
+    # shellcheck disable=SC1090
+    POWOS_BUILD_CONTEXT="$src" source "$bimg"
+    # Now that the build functions are in memory, drop the overlay so it can't
+    # shadow the freshly-built base after reboot.
+    reload_usr_ro && reload_drop_sysext
+    POWOS_BUILD_CONTEXT="$src" cmd_build_image --switch
+    local rc=$?
+    (( rc == 0 )) && reload_mark_applied "$src"
+    return $rc
+}
+
+# Apply the CLI live — sysext on a read-only /usr, direct copy on a writable
+# one — and turn the apply's exit code into the user-facing message. 0 = live.
+# Publishes RELOAD_APPLIED_RO so the caller can say how to roll it back.
+RELOAD_APPLIED_RO=0
+reload_apply() {
+    local src="$1" extbase="$2" rc
+    RELOAD_APPLIED_RO=0
+    if reload_usr_ro; then
+        RELOAD_APPLIED_RO=1
+        plog "Read-only /usr → systemd-sysext overlay ($([[ $extbase == /var/* ]] && echo 'persistent' || echo 'ephemeral'))…"
+        reload_apply_sysext "$src" "$extbase"; rc=$?
+    else
+        plog "Writable /usr → applying directly (no reboot)…"
+        reload_apply_live "$src"; rc=$?
+    fi
+    case "$rc" in
+        0)  return 0 ;;
+        42) perr "The applied CLI failed to run — reverted. Fix $src, then 'powos reload' again."; return 1 ;;
+        3)  perr "systemd-sysext refresh failed — see 'systemctl status systemd-sysext'."; return 1 ;;
+        4)  perr "sysext didn't merge (extension-release mismatch?). Inspect: systemd-sysext status"; return 1 ;;
+        *)  perr "apply failed (rc=$rc)."; return "$rc" ;;
+    esac
+}
+
+# Say what just happened — and, on a read-only /usr, how to undo it.
+reload_report() {
+    local ro="$1" once="$2"
+    if (( ! ro )); then
+        pok "Live & persisted. For base/package changes: powos reload --build"
+    elif (( once )); then
+        pok "Live via sysext overlay (ephemeral — cleared on reboot). composefs untouched."
+    else
+        pok "Live & PERSISTENT — auto-merged on every boot. composefs untouched."
+        pok "Roll back: powos reload --drop   ·   Bake into image: powos reload --build"
+    fi
+}
+
 cmd_reload() {
     local do_pull=0 do_build=0 where=0 force_live=0 do_drop=0 do_once=0 explicit=""
     while [[ $# -gt 0 ]]; do
@@ -237,12 +320,7 @@ cmd_reload() {
     reload_remember "$src"
     (( where )) && { pok "Local source: $src"; return 0; }
 
-    (( do_pull )) || reload_check_behind "$src"   # never silently apply stale code
-
-    if (( do_pull )) && [[ -d "$src/.git" ]]; then
-        plog "Pulling latest in $src…"
-        git -C "$src" pull --rebase 2>&1 | tail -2 || pwarn "git pull had issues (continuing with what's there)."
-    fi
+    reload_refresh_source "$src" "$do_pull"
 
     # SAFETY: refuse to apply anything with a syntax error (would brick the CLI).
     if ! reload_syntax_check "$src"; then
@@ -252,59 +330,14 @@ cmd_reload() {
 
     # Auto-detect whether the local changes actually need a full build.
     if (( ! do_build && ! force_live )) && reload_needs_build "$src"; then
-        pwarn "These changes are baked at build time — a live apply WON'T pick them up:"
-        reload_changed_files "$src" | grep -E "$RELOAD_NEEDS_BUILD_RE" | sed 's/^/    • /'
-        echo "    (Containerfile / dracut / kernel-args need a full image build + reboot.)"
-        if confirm "Build the image locally + switch now?"; then
-            do_build=1
-        else
-            pwarn "Applying only the hot-reloadable parts; the above wait for 'powos reload --build'."
-        fi
+        reload_confirm_build "$src" && do_build=1
     fi
+    (( do_build )) && { reload_do_build "$src"; return $?; }
 
-    if (( do_build )); then
-        plog "Baking $src into a local image + switch…"
-        # Source from the CHECKOUT (not the overlay) so this survives the drop.
-        local bimg="$src/lib/build-image.sh"
-        [[ -f "$bimg" ]] || bimg="${POWOS_LIB:-/usr/lib/powos}/build-image.sh"
-        [[ -f "$bimg" ]] || { perr "build-image.sh not found (looked in $src/lib and \$POWOS_LIB)."; return 1; }
-        POWOS_BUILD_CONTEXT="$src" source "$bimg"
-        # Now that the build functions are in memory, drop the overlay so it can't
-        # shadow the freshly-built base after reboot.
-        reload_usr_ro && reload_drop_sysext
-        POWOS_BUILD_CONTEXT="$src" cmd_build_image --switch
-        local rc=$?
-        (( rc == 0 )) && reload_mark_applied "$src"
-        return $rc
-    fi
-
-    local rc ro=0 extbase=/var/lib/extensions
+    local extbase=/var/lib/extensions
     (( do_once )) && extbase=/run/extensions
-    if reload_usr_ro; then
-        ro=1
-        plog "Read-only /usr → systemd-sysext overlay ($([[ $extbase == /var/* ]] && echo 'persistent' || echo 'ephemeral'))…"
-        reload_apply_sysext "$src" "$extbase"; rc=$?
-    else
-        plog "Writable /usr → applying directly (no reboot)…"
-        reload_apply_live "$src"; rc=$?
-    fi
-    case "$rc" in
-        0)  : ;;
-        42) perr "The applied CLI failed to run — reverted. Fix $src, then 'powos reload' again."; return 1 ;;
-        3)  perr "systemd-sysext refresh failed — see 'systemctl status systemd-sysext'."; return 1 ;;
-        4)  perr "sysext didn't merge (extension-release mismatch?). Inspect: systemd-sysext status"; return 1 ;;
-        *)  perr "apply failed (rc=$rc)."; return "$rc" ;;
-    esac
+    reload_apply "$src" "$extbase" || return $?
     reload_post_apply "$src"      # systemd reload / distrobox reassemble / overlay rebuild
     reload_mark_applied "$src"
-    if (( ro )); then
-        if (( do_once )); then
-            pok "Live via sysext overlay (ephemeral — cleared on reboot). composefs untouched."
-        else
-            pok "Live & PERSISTENT — auto-merged on every boot. composefs untouched."
-            pok "Roll back: powos reload --drop   ·   Bake into image: powos reload --build"
-        fi
-    else
-        pok "Live & persisted. For base/package changes: powos reload --build"
-    fi
+    reload_report "$RELOAD_APPLIED_RO" "$do_once"
 }

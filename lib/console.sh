@@ -111,87 +111,103 @@ console_layout() {
     fi
 }
 
-console_build() {
-    local live="${1:-0}" layout="${2:-grid}" first=1 s pane cmd
-    local -a targets
-    # Panes re-invoke us, so resolve OUR binary and lib rather than trusting
-    # whatever `powos` happens to be on PATH inside the pane — running from a
-    # checkout, that would otherwise dispatch into the installed copy.
-    local self_bin="${POWOS_BIN:-}" env_pfx=""
-    [ -n "$self_bin" ] || self_bin="$(command -v powos 2>/dev/null)"
-    [ -n "$self_bin" ] || self_bin="/usr/bin/powos"
-    [ -n "${POWOS_LIB:-}" ] && env_pfx="POWOS_LIB=$(printf '%q' "$POWOS_LIB") "
-    mapfile -t targets < <(console_targets)
-    if [ "${#targets[@]}" -eq 0 ]; then
-        perr "No other tmux sessions to show."
-        plog "Open a terminal or two first — every PowOS terminal is a session."
-        return 1
+# ── console_build's phases ────────────────────────────────────────
+# console_build is an orchestrator over these, in the order it calls them.
+# Phases that produce a value publish it in a CONSOLE_* global rather than
+# echoing it: several of them call tmux, and a command substitution would
+# capture that output instead of letting it through.
+CONSOLE_SELF_BIN=""   # binary a snapshot pane re-invokes (console_self_cmd)
+CONSOLE_ENV_PFX=""    # env prefix that pins POWOS_LIB for that re-invocation
+CONSOLE_PANE_CMD=""   # the command one grid cell runs (console_pane_cmd)
+
+# Panes re-invoke us, so resolve OUR binary and lib rather than trusting
+# whatever `powos` happens to be on PATH inside the pane — running from a
+# checkout, that would otherwise dispatch into the installed copy.
+console_self_cmd() {
+    CONSOLE_SELF_BIN="${POWOS_BIN:-}"
+    [ -n "$CONSOLE_SELF_BIN" ] || CONSOLE_SELF_BIN="$(command -v powos 2>/dev/null)"
+    [ -n "$CONSOLE_SELF_BIN" ] || CONSOLE_SELF_BIN="/usr/bin/powos"
+    CONSOLE_ENV_PFX=""
+    [ -n "${POWOS_LIB:-}" ] && CONSOLE_ENV_PFX="POWOS_LIB=$(printf '%q' "$POWOS_LIB") "
+    # The line above is FALSE whenever POWOS_LIB is unset, and as the last
+    # statement of a function that status becomes the return value — which
+    # would abort a sourced caller running under `set -e`.
+    return 0
+}
+
+# How many stacked rows fit before each becomes unreadable? Each pane costs
+# its content plus a border line; below ~4 content rows a snapshot shows
+# nothing useful, so that is the floor.
+console_page_size() {
+    local avail per_page
+    avail=$(( $(tput lines 2>/dev/null || echo 24) - 1 ))
+    per_page=$(( avail / ${POWOS_CONSOLE_MIN_ROWS:-5} ))
+    [ "$per_page" -lt 1 ] && per_page=1
+    echo "$per_page"
+}
+
+# What one grid cell runs: a read-only snapshot re-invocation of ourselves, or
+# — under --live — a real read-only attach.
+console_pane_cmd() {
+    local live="$1" s="$2"
+    if [ "$live" = 1 ]; then
+        # Mirrors must not dictate geometry. 'largest' means the real client
+        # still sets the size; the small mirror just sees part of it.
+        tmux set-option -t "=$s" window-size largest 2>/dev/null || true
+        tmux set-option -t "=$s" aggressive-resize on 2>/dev/null || true
+        CONSOLE_PANE_CMD="TMUX= tmux attach-session -r -t $(printf '%q' "=$s")"
+    else
+        CONSOLE_PANE_CMD="${CONSOLE_ENV_PFX}$(printf '%q' "$CONSOLE_SELF_BIN") console --pane $(printf '%q' "$s")"
     fi
+}
 
-    tmux kill-session -t "$CONSOLE_SESSION" 2>/dev/null || true
-
-    # How many stacked rows fit before each becomes unreadable? Each pane costs
-    # its content plus a border line; below ~4 content rows a snapshot shows
-    # nothing useful, so that is the floor.
-    local placed=0 per_page=0 avail
-    if [ "$layout" = stack ]; then
-        avail=$(( $(tput lines 2>/dev/null || echo 24) - 1 ))
-        per_page=$(( avail / ${POWOS_CONSOLE_MIN_ROWS:-5} ))
-        [ "$per_page" -lt 1 ] && per_page=1
+# Put one session on screen: first pane creates the session, the rest either
+# open a window (tabs, and each new stack page) or split the current one.
+console_place_pane() {
+    local layout="$1" first="$2" placed="$3" per_page="$4" s="$5" cmd="$6"
+    if [ "$first" = 1 ]; then
+        # Pin the size to THIS terminal. Built detached, tmux would pick an
+        # arbitrary default and later pages came out a different width from
+        # the first — so the pagination maths and the geometry disagreed
+        # until a client attached.
+        tmux new-session -d -s "$CONSOLE_SESSION" -n "$s" \
+             -x "$(tput cols 2>/dev/null || echo 80)" \
+             -y "$(tput lines 2>/dev/null || echo 24)" "$cmd"
+    elif [ "$layout" = tabs ]; then
+        # One window per session: full screen each, switch via the status bar.
+        tmux new-window -t "$CONSOLE_SESSION" -n "$s" "$cmd"
+    elif [ "$layout" = stack ] && [ "$per_page" -gt 0 ] \
+         && [ "$((placed % per_page))" -eq 0 ]; then
+        # PAGINATE. tmux panes are not a scrollable viewport — you cannot drag
+        # the stack past the window edge. Cramming 12 sessions into 24 rows
+        # gives 1 line each, which is useless. So fill a page with readable
+        # rows and put the rest on the next window, which the status bar (and
+        # n/p) pages through — swipe-equivalent rather than scroll.
+        tmux new-window -t "$CONSOLE_SESSION" -n "$s" "$cmd"
+    else
+        tmux split-window -t "$CONSOLE_SESSION" "$cmd"
     fi
+}
 
-    for s in "${targets[@]}"; do
-        if [ "$live" = 1 ]; then
-            # Mirrors must not dictate geometry. 'largest' means the real client
-            # still sets the size; the small mirror just sees part of it.
-            tmux set-option -t "=$s" window-size largest 2>/dev/null || true
-            tmux set-option -t "=$s" aggressive-resize on 2>/dev/null || true
-            cmd="TMUX= tmux attach-session -r -t $(printf '%q' "=$s")"
-        else
-            cmd="${env_pfx}$(printf '%q' "$self_bin") console --pane $(printf '%q' "$s")"
-        fi
+# The layout pass, run after every placement and once at the end. It MUST
+# honour the chosen layout — an unconditional `tiled` here silently undid the
+# even-vertical stack, so a phone got a 2-column grid: exactly the
+# narrow-column problem the stack layout exists to avoid.
+console_relayout() {
+    case "${1:-grid}" in
+        tabs)  : ;;   # each session is its own window; nothing to lay out
+        stack) tmux select-layout -t "$CONSOLE_SESSION" even-vertical >/dev/null 2>&1 || true ;;
+        *)     tmux select-layout -t "$CONSOLE_SESSION" tiled >/dev/null 2>&1 || true ;;
+    esac
+}
 
-        if [ "$first" = 1 ]; then
-            # Pin the size to THIS terminal. Built detached, tmux would pick an
-            # arbitrary default and later pages came out a different width from
-            # the first — so the pagination maths and the geometry disagreed
-            # until a client attached.
-            tmux new-session -d -s "$CONSOLE_SESSION" -n "$s" \
-                 -x "$(tput cols 2>/dev/null || echo 80)" \
-                 -y "$(tput lines 2>/dev/null || echo 24)" "$cmd"
-            first=0
-        elif [ "$layout" = tabs ]; then
-            # One window per session: full screen each, switch via the status bar.
-            tmux new-window -t "$CONSOLE_SESSION" -n "$s" "$cmd"
-        elif [ "$layout" = stack ] && [ "$per_page" -gt 0 ] \
-             && [ "$((placed % per_page))" -eq 0 ]; then
-            # PAGINATE. tmux panes are not a scrollable viewport — you cannot drag
-            # the stack past the window edge. Cramming 12 sessions into 24 rows
-            # gives 1 line each, which is useless. So fill a page with readable
-            # rows and put the rest on the next window, which the status bar (and
-            # n/p) pages through — swipe-equivalent rather than scroll.
-            tmux new-window -t "$CONSOLE_SESSION" -n "$s" "$cmd"
-        else
-            tmux split-window -t "$CONSOLE_SESSION" "$cmd"
-        fi
-        placed=$((placed + 1))
-        # Remember which session this pane shows, so Enter can promote it.
-        pane=$(tmux display-message -p -t "$CONSOLE_SESSION" '#{pane_id}')
-        tmux set-option -p -t "$pane" @console-session "$s" 2>/dev/null || true
-        case "$layout" in
-            tabs)  : ;;   # each session is its own window; nothing to lay out
-            stack) tmux select-layout -t "$CONSOLE_SESSION" even-vertical >/dev/null 2>&1 || true ;;
-            *)     tmux select-layout -t "$CONSOLE_SESSION" tiled >/dev/null 2>&1 || true ;;
-        esac
-    done
-
-    tmux set-option -t "$CONSOLE_SESSION" mouse on 2>/dev/null || true
-
+# Bar at the TOP on touch layouts: thumbs sit at the bottom of a phone, so a
+# bottom bar is exactly where they occlude the screen, and it reads as chrome
+# rather than navigation. tmux makes window names clickable when mouse is on,
+# so this doubles as the switcher. The pane borders are labelled either way.
+console_status_bar() {
+    local layout="$1"
     if [ "$layout" = tabs ] || [ "$layout" = stack ]; then
-        # Bar at the TOP on touch layouts: thumbs sit at the bottom of a phone,
-        # so a bottom bar is exactly where they occlude the screen, and it reads
-        # as chrome rather than navigation. tmux makes window names clickable
-        # when mouse is on, so this doubles as the switcher.
         tmux set-option -t "$CONSOLE_SESSION" status on 2>/dev/null || true
         tmux set-option -t "$CONSOLE_SESSION" status-position top 2>/dev/null || true
         tmux set-option -t "$CONSOLE_SESSION" status-left '#[bold] ‹ console #[default]' 2>/dev/null || true
@@ -204,20 +220,19 @@ console_build() {
         fi
         tmux set-option -t "$CONSOLE_SESSION" window-status-format ' #W ' 2>/dev/null || true
         tmux set-option -t "$CONSOLE_SESSION" window-status-current-format '#[reverse] #W #[noreverse]' 2>/dev/null || true
-        tmux set-option -t "$CONSOLE_SESSION" pane-border-status top 2>/dev/null || true
-        tmux set-option -t "$CONSOLE_SESSION" pane-border-format \
-            ' #{?#{@console-session},#{@console-session},#{pane_index}} ' 2>/dev/null || true
-    else
-        tmux set-option -t "$CONSOLE_SESSION" pane-border-status top 2>/dev/null || true
-        tmux set-option -t "$CONSOLE_SESSION" pane-border-format \
-            ' #{?#{@console-session},#{@console-session},#{pane_index}} ' 2>/dev/null || true
     fi
+    tmux set-option -t "$CONSOLE_SESSION" pane-border-status top 2>/dev/null || true
+    tmux set-option -t "$CONSOLE_SESSION" pane-border-format \
+        ' #{?#{@console-session},#{@console-session},#{pane_index}} ' 2>/dev/null || true
+}
 
-    # Bind single keys WITHOUT stealing them everywhere else. `bind-key -n` adds
-    # to the root table, which is server-global — an unguarded binding here would
-    # fire inside the user's real sessions too (Enter would stop working). The
-    # `-F` guard is evaluated as a format, so it costs no shell per keystroke,
-    # and anything outside the console session is passed straight through.
+# Bind single keys WITHOUT stealing them everywhere else. `bind-key -n` adds
+# to the root table, which is server-global — an unguarded binding here would
+# fire inside the user's real sessions too (Enter would stop working). The
+# `-F` guard is evaluated as a format, so it costs no shell per keystroke,
+# and anything outside the console session is passed straight through.
+console_bind_keys() {
+    local layout="$1"
     _ckey() {
         tmux bind-key -n "$1" if-shell -F "#{==:#{session_name},$CONSOLE_SESSION}" \
              "$2" "send-keys $1" 2>/dev/null || true
@@ -235,16 +250,39 @@ console_build() {
         _ckey p 'previous-window'
     fi
     unset -f _ckey
+}
 
-    # Final layout pass. This MUST honour the chosen layout — an unconditional
-    # `tiled` here silently undid the even-vertical stack set in the loop above,
-    # so a phone got a 2-column grid: exactly the narrow-column problem the stack
-    # layout exists to avoid.
-    case "$layout" in
-        tabs)  : ;;
-        stack) tmux select-layout -t "$CONSOLE_SESSION" even-vertical >/dev/null 2>&1 || true ;;
-        *)     tmux select-layout -t "$CONSOLE_SESSION" tiled >/dev/null 2>&1 || true ;;
-    esac
+console_build() {
+    local live="${1:-0}" layout="${2:-grid}" first=1 s pane
+    local -a targets
+    console_self_cmd
+    mapfile -t targets < <(console_targets)
+    if [ "${#targets[@]}" -eq 0 ]; then
+        perr "No other tmux sessions to show."
+        plog "Open a terminal or two first — every PowOS terminal is a session."
+        return 1
+    fi
+
+    tmux kill-session -t "$CONSOLE_SESSION" 2>/dev/null || true
+
+    local placed=0 per_page=0
+    [ "$layout" = stack ] && per_page="$(console_page_size)"
+
+    for s in "${targets[@]}"; do
+        console_pane_cmd "$live" "$s"
+        console_place_pane "$layout" "$first" "$placed" "$per_page" "$s" "$CONSOLE_PANE_CMD"
+        first=0
+        placed=$((placed + 1))
+        # Remember which session this pane shows, so Enter can promote it.
+        pane=$(tmux display-message -p -t "$CONSOLE_SESSION" '#{pane_id}')
+        tmux set-option -p -t "$pane" @console-session "$s" 2>/dev/null || true
+        console_relayout "$layout"
+    done
+
+    tmux set-option -t "$CONSOLE_SESSION" mouse on 2>/dev/null || true
+    console_status_bar "$layout"
+    console_bind_keys "$layout"
+    console_relayout "$layout"
     tmux select-window -t "$CONSOLE_SESSION:^" 2>/dev/null || true
     return 0
 }

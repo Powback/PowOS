@@ -23,7 +23,6 @@ build-helpers.sh:install_packages 28
 build-image.sh:cmd_build_image 29
 check.sh:mods_analyze 1
 console.sh:cmd_console 18
-console.sh:console_build 50
 core.sh:mods_install_mod 16
 core.sh:mods_status_cmd 8
 deploy.sh:mods_deploy_mount 17
@@ -38,9 +37,11 @@ fivem.sh:cmd_mods_fivem 24
 game.sh:cmd_game 45
 games-sync.sh:cmd_games_sync 28
 games-sync.sh:gsy_push 16
-games.sh:cmd_games 33
-games.sh:gms_create 36
-games.sh:gms_resize 41
+# `powos games`' dispatcher. 16 of its 29 decision points are case arms —
+# seven for the option grammar, seven for the verb dispatch, two for the
+# storage bridge — and the rest is one guard per delegation target. Same
+# call as cmd_game and cmd_windows: a flat dispatcher stays flat.
+games.sh:cmd_games 30
 games.sh:gms_steam_setup 16
 harness.sh:harness_bisect 15
 harness.sh:harness_run 9
@@ -96,14 +97,15 @@ powos-welcome:menu_loop 29
 ramboot-setup.sh:powos_select_base_variant 16
 ramboot.sh:rb_enable 17
 registry.sh:registry_login 19
-reload.sh:cmd_reload 41
+# The five phases it used to run inline are their own functions now; what
+# is left is the flag grammar (9 of its 22 decision points) plus the
+# sequence that calls them.
+reload.sh:cmd_reload 23
 self.sh:cmd_self 16
-self.sh:self_safe_pull 34
 setup.sh:setup_nexus_cmd 17
 stream.sh:cmd_stream 16
 sync.sh:cmd_sync 17
 sync.sh:get_diff_for_ai 17
-sync.sh:ram_sync_merge 43
 uninstall.sh:cmd_remove 17
 upgrade.sh:cmd_upgrade 27
 verify.sh:mods_doctor_cmd 10

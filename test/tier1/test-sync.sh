@@ -897,6 +897,148 @@ test_three_way_merge() {
     rm -rf "$merge_dir"
 }
 
+# ─────────────────────────────────────────────────────────────────
+# Tests: the merge's extracted phases (contract level)
+# ─────────────────────────────────────────────────────────────────
+# ram_sync_merge is an orchestrator over named phases. test_three_way_merge
+# above drives the whole thing end to end; this drives each phase on its own,
+# so a resolution rule cannot quietly change while the totals still add up.
+# Asserted on the VERDICT and on what is on disk afterwards, never on wording.
+test_merge_phases() {
+    echo ""
+    echo "Test: merge phases — whiteouts, per-file verdicts, conflict backups"
+
+    local d="$TEST_DIR/phases-$$"
+    mkdir -p "$d/ram" "$d/usb"
+    local old_machine="$MACHINE_ID"
+    MACHINE_ID="test-machine-P"
+
+    # ── ram_sync_is_whiteout / ram_sync_file_hash ────────────────
+    echo "content" > "$d/ram/regular"
+    assert_equals "$(md5sum "$d/ram/regular" | cut -d' ' -f1)" \
+        "$(ram_sync_file_hash "$d/ram/regular")" \
+        "file_hash: a regular file hashes to its md5"
+    assert_equals "" "$(ram_sync_file_hash "$d/ram/absent")" \
+        "file_hash: an absent path hashes to the empty string"
+    if ram_sync_is_whiteout "$d/ram/regular"; then
+        echo -e "${RED}✗${NC} is_whiteout: a regular file was called a deletion marker"
+        ((TESTS_RUN++)) || true; ((TESTS_FAILED++)) || true
+    else
+        echo -e "${GREEN}✓${NC} is_whiteout: a regular file is not a deletion marker"
+        ((TESTS_RUN++)) || true; ((TESTS_PASSED++)) || true
+    fi
+    if mknod "$d/ram/wh" c 0 0 2>/dev/null; then
+        assert_equals "DELETED" "$(ram_sync_file_hash "$d/ram/wh")" \
+            "file_hash: an overlayfs whiteout hashes to DELETED"
+        if ram_sync_is_whiteout "$d/ram/wh"; then
+            echo -e "${GREEN}✓${NC} is_whiteout: a 0:0 char device IS a deletion marker"
+            ((TESTS_RUN++)) || true; ((TESTS_PASSED++)) || true
+        else
+            echo -e "${RED}✗${NC} is_whiteout: missed a real whiteout (deletions would not sync)"
+            ((TESTS_RUN++)) || true; ((TESTS_FAILED++)) || true
+        fi
+        rm -f "$d/ram/wh"
+    else
+        echo "  (whiteout hash tests skipped — mknod c 0 0 unavailable here)"
+    fi
+
+    # ── ram_sync_collect: every path in EITHER tree ──────────────
+    mkdir -p "$d/c/ram/sub" "$d/c/usb"
+    echo x > "$d/c/ram/sub/only-ram"
+    echo y > "$d/c/usb/only-usb"
+    declare -A collected=()
+    ram_sync_collect collected "$d/c/ram" "$d/c/usb"
+    assert_equals "1" "${collected[sub/only-ram]:-0}" "collect: picks up a RAM-only nested path"
+    assert_equals "1" "${collected[only-usb]:-0}"     "collect: picks up a USB-only path"
+
+    # ── ram_sync_resolve_file: one verdict per conflict class ────
+    declare -A base=()
+    local R="$d/r" U="$d/u"
+
+    _verdict() {   # $1 = has_manifest, rest set up by the caller
+        RAM_SYNC_VERDICT=unset
+        ram_sync_resolve_file "$2" "$R" "$U" "$1" base
+        printf '%s' "$RAM_SYNC_VERDICT"
+    }
+    _fresh() { rm -rf "$R" "$U"; mkdir -p "$R" "$U"; base=(); }
+
+    _fresh; echo new > "$R/f"
+    assert_equals "kept" "$(_verdict 0 f)" "class 1: RAM-only addition is kept"
+
+    _fresh; echo base > "$R/f"; base[f]=$(printf 'base\n' | md5sum | cut -d' ' -f1)
+    _verdict 1 f >/dev/null
+    if [[ -e "$R/f" ]]; then
+        echo -e "${RED}✗${NC} class 1: USB's deletion did not win over an unchanged RAM file"
+        ((TESTS_RUN++)) || true; ((TESTS_FAILED++)) || true
+    else
+        echo -e "${GREEN}✓${NC} class 1: USB deletion wins when RAM is unchanged from base"
+        ((TESTS_RUN++)) || true; ((TESTS_PASSED++)) || true
+    fi
+
+    _fresh; echo edited > "$R/f"; base[f]=$(printf 'base\n' | md5sum | cut -d' ' -f1)
+    assert_equals "kept" "$(_verdict 1 f)" "class 1: an EDITED RAM file survives a USB deletion"
+
+    _fresh; echo usb > "$U/f"
+    assert_equals "taken" "$(_verdict 0 f)" "class 2: a USB-only addition is copied in"
+
+    _fresh; echo base > "$U/f"; base[f]=$(printf 'base\n' | md5sum | cut -d' ' -f1)
+    assert_equals "noop" "$(_verdict 1 f)" "class 2: RAM's deletion wins when USB is unchanged"
+
+    _fresh; echo same > "$R/f"; echo same > "$U/f"
+    assert_equals "noop" "$(_verdict 0 f)" "class 3: identical content needs no work"
+
+    _fresh; echo base > "$R/f"; echo newer > "$U/f"
+    base[f]=$(printf 'base\n' | md5sum | cut -d' ' -f1)
+    assert_equals "taken" "$(_verdict 1 f)" "class 4: USB changed, RAM did not → take USB"
+
+    _fresh; echo mine > "$R/f"; echo base > "$U/f"
+    base[f]=$(printf 'base\n' | md5sum | cut -d' ' -f1)
+    assert_equals "kept" "$(_verdict 1 f)" "class 5: RAM changed, USB did not → keep RAM"
+
+    _fresh; echo mine > "$R/f"; echo theirs > "$U/f"
+    base[f]=$(printf 'base\n' | md5sum | cut -d' ' -f1)
+    touch -d @2000 "$R/f"; touch -d @1000 "$U/f"
+    assert_equals "conflict-ram" "$(_verdict 1 f)" "class 6: both changed, RAM newer → RAM wins"
+    assert_file_exists "$R/f.powos-conflict-test-machine-P" \
+        "class 6: the losing USB copy is saved, never dropped"
+
+    _fresh; echo mine > "$R/f"; echo theirs > "$U/f"
+    base[f]=$(printf 'base\n' | md5sum | cut -d' ' -f1)
+    touch -d @1000 "$R/f"; touch -d @2000 "$U/f"
+    assert_equals "conflict-usb" "$(_verdict 1 f)" "class 6: both changed, USB newer → USB wins"
+    assert_file_exists "$R/f.powos-conflict-test-machine-P" \
+        "class 6: the losing RAM copy is saved, never dropped"
+
+    # Without a manifest there is no base, so every difference is a conflict
+    # and mtime alone decides — never a silent overwrite.
+    _fresh; echo mine > "$R/f"; echo theirs > "$U/f"
+    touch -d @2000 "$R/f"; touch -d @1000 "$U/f"
+    assert_equals "conflict-ram" "$(_verdict 0 f)" \
+        "no manifest: a difference is a CONFLICT, not a silent overwrite"
+
+    # A path present in the tree but absent from the manifest has no base
+    # either, so it must take the same conflict route.
+    _fresh; echo mine > "$R/f"; echo theirs > "$U/f"
+    base[other]=deadbeef
+    touch -d @2000 "$R/f"; touch -d @1000 "$U/f"
+    assert_equals "conflict-ram" "$(_verdict 1 f)" \
+        "manifest without an entry for this path → conflict route"
+
+    # ── ram_sync_resolve_one_sided hands two-sided paths back ────
+    _fresh; echo a > "$R/f"; echo b > "$U/f"
+    if ram_sync_resolve_one_sided "$R/f" "$U/f" ha hb ABSENT; then
+        echo -e "${RED}✗${NC} one_sided: claimed a path present on BOTH sides"
+        ((TESTS_RUN++)) || true; ((TESTS_FAILED++)) || true
+    else
+        echo -e "${GREEN}✓${NC} one_sided: defers when both sides have the path"
+        ((TESTS_RUN++)) || true; ((TESTS_PASSED++)) || true
+    fi
+
+    unset -f _verdict _fresh
+    MACHINE_ID="$old_machine"
+    rm -rf "$d"
+}
+
 test_load_sync_config() {
     echo ""
     echo "Test: Load sync configuration"
@@ -975,6 +1117,7 @@ main() {
 
     # 3-way merge tests
     test_three_way_merge
+    test_merge_phases
 
     # Teardown
     teardown

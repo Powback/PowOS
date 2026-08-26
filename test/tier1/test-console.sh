@@ -21,8 +21,9 @@ ok()  { pass=$((pass+1)); echo "  ok: $1"; }
 bad() { fail=$((fail+1)); echo "  FAIL: $1"; }
 
 SOCK=powos-console-test
+TMPD="$(mktemp -d)"
 TM() { tmux -L "$SOCK" "$@"; }
-cleanup() { TM kill-server 2>/dev/null; }
+cleanup() { TM kill-server 2>/dev/null; rm -rf "$TMPD"; }
 trap cleanup EXIT
 cleanup
 
@@ -129,6 +130,163 @@ for k in $(grep -oE '^\s*_ckey [A-Za-z0-9-]+' "$LIB" | awk '{print $2}' | sort -
 done
 [ -z "$MISSING" ] && ok "every bound key is in CONSOLE_KEYS (cleanup can't drift)" \
   || bad "bound but never unbound:$MISSING"
+
+# ══════════════════════════════════════════════════════════════════
+echo "== console_build phases (the extracted seams, contract level) =="
+# ══════════════════════════════════════════════════════════════════
+# console_build is an orchestrator over named phases. The checks above pin the
+# whole-file invariants; these pin each phase's own contract — what it
+# publishes, which tmux verb it reaches for, and what it refuses to do — so a
+# phase cannot quietly change while console_build still looks right.
+#
+# Asserted on the CONTRACT (published global, recorded tmux call, exit code),
+# never on the prose: rewording a message must not fail a test about a guard.
+# tmux is a RECORDER here, not the real server: these phases are about which
+# command is issued, and the real-server checks above already cover the rest.
+
+# `cleanup` already ran once above (it clears any leftovers from a previous
+# run), and it removes TMPD — so recreate it here rather than at declaration.
+mkdir -p "$TMPD"
+PRE="$TMPD/phase-preamble.sh"
+cat > "$PRE" <<PREEOF
+source "$LIB" 2>/dev/null
+REC="$TMPD/tmux-calls"; : > "\$REC"
+tmux() {
+    printf 'tmux %s\n' "\$*" >> "\$REC"
+    case "\$1" in
+        display-message) echo '%1' ;;
+        list-sessions)   [ -n "\${SESSIONS:-}" ] && printf '%s\n' \${SESSIONS} ;;
+    esac
+    return 0
+}
+tput() { case "\$1" in lines) echo "\${TLINES:-24}" ;; cols) echo "\${TCOLS:-80}" ;; esac; return 0; }
+calls() { cat "\$REC"; }
+PREEOF
+
+# Run a snippet with the lib sourced and tmux/tput recording.
+phase() { POWOS_LIB="$REPO/lib" bash -c "source '$PRE'; $1" 2>&1; }
+
+# ── console_self_cmd: which binary a snapshot pane re-invokes ─────
+# Its last statement is `[ -n "$POWOS_LIB" ] && CONSOLE_ENV_PFX=...`, FALSE
+# whenever POWOS_LIB is unset. Without the explicit `return 0` that status
+# becomes the return value and a sourced caller under `set -e` dies here.
+OUT=$(env -u POWOS_LIB bash -c "source '$LIB' 2>/dev/null; console_self_cmd; echo rc=\$?")
+printf '%s' "$OUT" | grep -q 'rc=0' \
+  && ok "console_self_cmd returns 0 when POWOS_LIB is unset" \
+  || bad "console_self_cmd leaks a false test as its return value (set -e would abort)"
+
+OUT=$(phase 'POWOS_BIN=/opt/powos console_self_cmd; echo "$CONSOLE_SELF_BIN"')
+[ "$OUT" = /opt/powos ] && ok "console_self_cmd honours POWOS_BIN" \
+  || bad "console_self_cmd ignored POWOS_BIN (got '$OUT')"
+
+OUT=$(phase 'POWOS_LIB=/tmp/l console_self_cmd; printf "%s" "$CONSOLE_ENV_PFX"')
+case "$OUT" in
+  POWOS_LIB=*) ok "console_self_cmd pins POWOS_LIB for the re-invoked pane" ;;
+  *) bad "pane re-invocation would not pin POWOS_LIB (got '$OUT')" ;;
+esac
+
+# ── console_page_size: how many stacked rows stay readable ────────
+OUT=$(phase 'TLINES=4 console_page_size')
+[ "$OUT" = 1 ] && ok "console_page_size floors at 1 (never 0 panes per page)" \
+  || bad "console_page_size returned '$OUT' on a 4-row terminal"
+OUT=$(phase 'TLINES=61 POWOS_CONSOLE_MIN_ROWS=5 console_page_size')
+[ "$OUT" = 12 ] && ok "console_page_size divides the rows by MIN_ROWS" \
+  || bad "console_page_size returned '$OUT', expected 12"
+
+# ── console_pane_cmd: what one grid cell runs ─────────────────────
+OUT=$(phase 'console_self_cmd; console_pane_cmd 0 sess; echo "$CONSOLE_PANE_CMD"')
+printf '%s' "$OUT" | grep -q -- '--pane' \
+  && ok "snapshot mode re-invokes powos with --pane" \
+  || bad "snapshot pane does not re-invoke --pane (got '$OUT')"
+OUT=$(phase 'console_self_cmd; console_pane_cmd 1 sess; echo "$CONSOLE_PANE_CMD"; calls')
+printf '%s' "$OUT" | grep -q 'attach-session -r -t =sess' \
+  && ok "--live attaches READ-ONLY, to the exact session name" \
+  || bad "--live pane is not a read-only exact-match attach"
+printf '%s' "$OUT" | grep -q 'window-size largest' \
+  && ok "--live sets window-size=largest first (mirrors must not shrink originals)" \
+  || bad "--live mirror could resize the user's real session"
+OUT=$(phase 'console_self_cmd; console_pane_cmd 0 sess; calls')
+[ -z "$OUT" ] && ok "snapshot mode touches NO tmux options (the whole point)" \
+  || bad "snapshot mode issued tmux commands: $OUT"
+
+# ── console_place_pane: session/window/split ──────────────────────
+OUT=$(phase 'console_place_pane grid 1 0 0 s "cmd"; calls')
+printf '%s' "$OUT" | grep -q 'new-session .* -x 80 -y 24' \
+  && ok "first pane pins the size to THIS terminal (-x/-y explicit)" \
+  || bad "first pane built without explicit geometry: $OUT"
+OUT=$(phase 'console_place_pane tabs 0 1 0 s "cmd"; calls')
+printf '%s' "$OUT" | grep -q 'new-window' \
+  && ok "tabs layout opens a window per session" || bad "tabs did not open a window"
+OUT=$(phase 'console_place_pane stack 0 4 2 s "cmd"; calls')
+printf '%s' "$OUT" | grep -q 'new-window' \
+  && ok "stack paginates onto a new window at the page boundary" \
+  || bad "stack did not paginate at placed%%per_page==0"
+OUT=$(phase 'console_place_pane stack 0 3 2 s "cmd"; calls')
+printf '%s' "$OUT" | grep -q 'split-window' \
+  && ok "stack splits within a page" || bad "stack did not split mid-page"
+OUT=$(phase 'console_place_pane stack 0 4 0 s "cmd"; calls')
+printf '%s' "$OUT" | grep -q 'split-window' \
+  && ok "per_page=0 cannot divide by zero — it splits instead" \
+  || bad "per_page=0 did not fall through to split-window"
+
+# ── console_relayout: the layout pass must honour the layout ──────
+# An unconditional `tiled` here silently undid the even-vertical stack, so a
+# phone got the 2-column grid the stack layout exists to avoid.
+OUT=$(phase 'console_relayout stack; calls')
+printf '%s' "$OUT" | grep -q 'even-vertical' \
+  && ok "stack lays out even-vertical" || bad "stack was not laid out vertically"
+OUT=$(phase 'console_relayout grid; calls')
+printf '%s' "$OUT" | grep -q 'tiled' && ok "grid lays out tiled" || bad "grid was not tiled"
+OUT=$(phase 'console_relayout tabs; calls')
+[ -z "$OUT" ] && ok "tabs lays out nothing (each session owns its window)" \
+  || bad "tabs issued a layout command: $OUT"
+
+# ── console_status_bar: borders are labelled in EVERY layout ──────
+for L in grid stack tabs; do
+  OUT=$(phase "console_status_bar $L; calls")
+  printf '%s' "$OUT" | grep -q 'pane-border-format' \
+    && ok "$L: panes are labelled with the session they show" \
+    || bad "$L: pane borders unlabelled — you cannot tell the panes apart"
+done
+OUT=$(phase 'console_status_bar grid; calls')
+printf '%s' "$OUT" | grep -q 'status-position top' \
+  && bad "grid got the touch status bar (that bar is for phones)" \
+  || ok "grid gets no touch status bar"
+OUT=$(phase 'console_status_bar stack; calls')
+printf '%s' "$OUT" | grep -q 'status-position top' \
+  && ok "stack puts the bar at the TOP (thumbs occlude the bottom)" \
+  || bad "stack bar is not at the top"
+
+# ── console_bind_keys: paging keys only where paging exists ───────
+OUT=$(phase 'console_bind_keys grid; calls')
+printf '%s' "$OUT" | grep -qE 'bind-key -n [np] ' \
+  && bad "grid bound n/p — it has no pages to move between" \
+  || ok "grid does not bind the paging keys"
+for L in stack tabs; do
+  OUT=$(phase "console_bind_keys $L; calls")
+  printf '%s' "$OUT" | grep -q 'bind-key -n n ' \
+    && ok "$L binds n/p (it paginates across windows)" \
+    || bad "$L cannot be paged with n/p"
+done
+OUT=$(phase 'console_bind_keys stack; calls')
+if printf '%s\n' "$OUT" | grep 'bind-key -n' | grep -qv 'if-shell -F'; then
+  bad "a binding escaped the session guard (would steal keys everywhere)"
+else
+  ok "every key console_bind_keys binds is session-guarded"
+fi
+OUT=$(phase 'console_bind_keys grid; declare -F _ckey || echo gone')
+[ "$OUT" = gone ] && ok "the _ckey helper is unset again afterwards" \
+  || bad "_ckey leaked into the caller's namespace"
+
+# ── console_build: nothing to mirror is a refusal, not an empty grid ──
+OUT=$(phase 'SESSIONS= console_build 0 grid; echo "rc=$?"; calls')
+printf '%s' "$OUT" | grep -q 'rc=1' \
+  && ok "console_build refuses when there are no other sessions" \
+  || bad "console_build built an empty console"
+printf '%s' "$OUT" | grep -q 'kill-session' \
+  && bad "console_build killed the console session before knowing it had work" \
+  || ok "the refusal happens before anything is destroyed"
+
 
 echo
 echo "console: $pass passed, $fail failed"
