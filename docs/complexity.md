@@ -88,3 +88,58 @@ opposite — nearly all of its 100 is real branching in one function.
 
 **If anything gets refactored, `cmd_health` first.** Nothing here is urgent: it
 is long-standing code that works, and the ratchet stops it growing.
+
+### It also miscounts heredocs
+
+`build/complexity.py` is line-based and does not track heredoc boundaries, so
+every `for`/`if`/`elif` inside an embedded `python3 - <<'PY'` payload is scored
+as *shell* branching. That is not a rounding error:
+
+| function | measured | shell | the rest |
+|---|---|---|---|
+| `mods/adopt.sh:mods_adopt_cmd` | 52 | **8** | 297 lines of embedded Python |
+| `mods/portable.sh:mods_import_cmd` | 38 | 25 | three small Python payloads |
+
+The table above ranked `mods_adopt_cmd` third-worst in the repo and described
+it as "21 loops — nesting, not width". Those loops are in Python, and the
+shell around them is eight branches of argument handling. Anyone who acted on
+that ranking would have spent the effort restructuring a function that was
+already fine.
+
+Two ways out, and the choice is not about the metric:
+
+* If the payload is big enough to be a program, **make it a file**.
+  `adopt.py` now sits beside `adopt.sh` the way `vu-rcon.py` sits beside
+  `vu.sh`; it is lintable, runnable and diffable on its own, and the shell
+  function drops to what it actually does. `COPY lib/` ships it either way.
+* If it is a ten-line filter feeding a `while read`, leave it inline. Moving
+  it would scatter one thought across two files to satisfy a tool's blind
+  spot. `mods_import_cmd` keeps its three.
+
+Teaching the analyzer about heredocs is the real fix and would lower numbers
+across the tree — treat it as a separate change, because it moves many budget
+entries at once.
+
+### Results of the lib/ai + lib/mods pass
+
+| function | before | after | how |
+|---|---|---|---|
+| `agent.sh:ai_call` | 85 | 14 | split by call STAGE: parse, resolve backends, resolve session, compose prompt, dispatch, record |
+| `harness.sh:harness_run` | 78 | 9 | split by PHASE, plus one helper per monitor-loop signal |
+| `adopt.sh:mods_adopt_cmd` | 53 | 9 | payload moved to `adopt.py` |
+| `vu.sh:vu_mod_install_cmd` | 43 | 15 | option grammar, then one helper per "which mods do you mean" branch |
+| `portable.sh:mods_import_cmd` | 38 | 11 | parse / plan / apply |
+
+`agent.sh:_ai_parse_args` (21) is budgeted, not fixed: 15 of its 21 are case
+arms, one per option — the `parse_sudo_argv` exemption above.
+
+The helpers write into the caller's locals rather than echoing, because bash
+is dynamically scoped and these stages resolve several interdependent values
+at once; `x=$(helper)` would fork a subshell and lose `export` side effects
+(`--yolo`) or buffer output that exists precisely to stream. Every name so
+written is declared `local` in the top-level function — and one that was NOT
+is the single bug this pass introduced: `mhud_ever_seen` was a monitor-loop
+local that `_harness_confidence` reads afterwards, so hoisting it was
+required. It surfaced only because `test-mods-harness.sh` was fixed to source
+the checkout instead of `/usr/lib/powos` — until then the suite had been
+reporting green against an installed copy three weeks stale.

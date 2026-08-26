@@ -990,16 +990,27 @@ A mod is identified by a mod.json containing a Name — nothing is guessed.
 EOF
 }
 
-# install <source> [--only A,B | --all] [--disabled]
-vu_mod_install_cmd() {
-    local source="" want=() take_all=false do_enable=true _o=()
+# ── `vu mod install`, in four steps ──────────────────────────────────────────
+#
+# This was one 86-line function at CC 43 — real branching, not case width: an
+# option grammar, then a four-way "which of these mods do you mean?" decision
+# (--only / --all / prompt / refuse), then the install loop. Each step below
+# writes into vu_mod_install_cmd's LOCALS (bash is dynamically scoped); the
+# arrays `names`, `paths` and `pick` are shared state by design, and echoing
+# them back would mean re-splitting mod names that legitimately contain spaces.
+
+# Parse argv into source/want/take_all/do_enable. Deliberately one flat case —
+# an option grammar's arm count is its specification, not accidental width.
+# Returns 1 on a usage error (message already printed) and 3 for --help, which
+# vu_mod_install_cmd turns back into exit 0.
+_vu_mod_install_parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --all)      take_all=true ;;
             --only)     IFS=', ' read -r -a _o <<< "${2:-}"; want+=("${_o[@]}"); shift ;;
             --only=*)   IFS=', ' read -r -a _o <<< "${1#*=}"; want+=("${_o[@]}") ;;
             --disabled) do_enable=false ;;
-            -h|--help)  vu_mod_help; return 0 ;;
+            -h|--help)  vu_mod_help; return 3 ;;
             -*)         perr "unknown flag: $1"; return 1 ;;
             *) if [[ -z "$source" ]]; then source="$1"
                else perr "unexpected argument '$1' — pick mods with ${BOLD}--only NAME[,NAME]${NC}, not positionally."; return 1; fi ;;
@@ -1007,6 +1018,99 @@ vu_mod_install_cmd() {
         shift
     done
     [[ -z "$source" ]] && { perr "usage: powos mods vu mod install <source> [--only A,B | --all] [--disabled]"; vu_mod_help; return 1; }
+    # Explicit: the [[ ]] && above is the last command and its 1 (source IS set)
+    # would otherwise read as a parse failure.
+    return 0
+}
+
+# --only NAME[,NAME]: every name must match, case-insensitively, or nothing
+# is installed. Returns 1 on the first name that matches no mod.
+_vu_pick_by_name() {
+    local w i found
+    for w in "${want[@]}"; do
+        found=false
+        for i in "${!names[@]}"; do
+            if [[ "${names[$i],,}" == "${w,,}" ]]; then pick+=("$i"); found=true; fi
+        done
+        $found || { perr "no mod named '$w' in $source"; vu_mod_install_list_available names[@]; [[ -n "$cleanup" ]] && rm -rf "$cleanup"; return 1; }
+    done
+    return 0
+}
+
+_vu_pick_all() {
+    local i
+    for i in "${!names[@]}"; do pick+=("$i"); done
+}
+
+# TTY and no selection flag: ask. "a"/"all" takes everything, otherwise the
+# 1-based numbers printed by vu_mod_install_list_available.
+_vu_pick_interactive() {
+    local i
+    echo "This source ships ${count} mods:"; vu_mod_install_list_available names[@]
+    printf 'Install which? (numbers, space-separated, or "a" for all): '
+    local ans; read -r ans
+    if [[ "$ans" == a || "$ans" == all ]]; then
+        _vu_pick_all
+    else
+        local tok
+        for tok in $ans; do
+            [[ "$tok" =~ ^[0-9]+$ ]] && (( tok>=1 && tok<=count )) && pick+=("$((tok-1))")
+        done
+    fi
+    return 0
+}
+
+# Decide which indices to install, filling `pick`. Returns 1 for "nothing to
+# do" and 2 for the non-interactive refusal — both propagated unchanged.
+_vu_select_mods() {
+    if [[ ${#want[@]} -gt 0 ]]; then
+        _vu_pick_by_name || return 1
+    elif $take_all || [[ $count -eq 1 ]]; then
+        _vu_pick_all
+    elif [[ -t 0 ]]; then
+        _vu_pick_interactive
+    else
+        # Non-interactive, multiple mods, no selection → refuse; never auto-all.
+        perr "$source ships ${count} mods — choose which, don't install all blindly:"
+        vu_mod_install_list_available names[@]
+        plog "  pick with ${BOLD}--only ModA,ModB${NC}, or ${BOLD}--all${NC} to take every one."
+        [[ -n "$cleanup" ]] && rm -rf "$cleanup"
+        return 2
+    fi
+
+    if [[ ${#pick[@]} -eq 0 ]]; then
+        pwarn "Nothing selected."
+        [[ -n "$cleanup" ]] && rm -rf "$cleanup"
+        return 1
+    fi
+    return 0
+}
+
+# Place every picked mod. Returns 1 if ANY placement failed — the rest still
+# get installed, which is the pre-existing behaviour.
+_vu_install_picked() {
+    local i installed rc=0
+    for i in "${pick[@]}"; do
+        if installed="$(vu_place_mod "${paths[$i]}" "${names[$i]}" "$spec")"; then
+            if $do_enable; then vu_modlist_add "$installed"; pok "installed + enabled: $installed"
+            else pok "installed (disabled): $installed  ${DIM}enable with: powos mods vu mod enable $installed${NC}"; fi
+        else
+            rc=1
+        fi
+    done
+    return $rc
+}
+
+# install <source> [--only A,B | --all] [--disabled]
+vu_mod_install_cmd() {
+    local source="" want=() take_all=false do_enable=true _o=()
+    local _rc=0
+    _vu_mod_install_parse_args "$@" || _rc=$?
+    case "$_rc" in
+        0) ;;
+        3) return 0 ;;      # --help
+        *) return "$_rc" ;;
+    esac
     # Pin a ref with the source itself: gh:owner/repo@ref (no separate flag).
 
     local resolved dir spec
@@ -1027,53 +1131,10 @@ vu_mod_install_cmd() {
 
     # Decide which indices to install.
     local -a pick=()
-    if [[ ${#want[@]} -gt 0 ]]; then
-        local w i found
-        for w in "${want[@]}"; do
-            found=false
-            for i in "${!names[@]}"; do
-                if [[ "${names[$i],,}" == "${w,,}" ]]; then pick+=("$i"); found=true; fi
-            done
-            $found || { perr "no mod named '$w' in $source"; vu_mod_install_list_available names[@]; [[ -n "$cleanup" ]] && rm -rf "$cleanup"; return 1; }
-        done
-    elif $take_all || [[ $count -eq 1 ]]; then
-        for i in "${!names[@]}"; do pick+=("$i"); done
-    elif [[ -t 0 ]]; then
-        echo "This source ships ${count} mods:"; vu_mod_install_list_available names[@]
-        printf 'Install which? (numbers, space-separated, or "a" for all): '
-        local ans; read -r ans
-        if [[ "$ans" == a || "$ans" == all ]]; then
-            for i in "${!names[@]}"; do pick+=("$i"); done
-        else
-            local tok
-            for tok in $ans; do
-                [[ "$tok" =~ ^[0-9]+$ ]] && (( tok>=1 && tok<=count )) && pick+=("$((tok-1))")
-            done
-        fi
-    else
-        # Non-interactive, multiple mods, no selection → refuse; never auto-all.
-        perr "$source ships ${count} mods — choose which, don't install all blindly:"
-        vu_mod_install_list_available names[@]
-        plog "  pick with ${BOLD}--only ModA,ModB${NC}, or ${BOLD}--all${NC} to take every one."
-        [[ -n "$cleanup" ]] && rm -rf "$cleanup"
-        return 2
-    fi
+    _vu_select_mods || return $?
 
-    if [[ ${#pick[@]} -eq 0 ]]; then
-        pwarn "Nothing selected."
-        [[ -n "$cleanup" ]] && rm -rf "$cleanup"
-        return 1
-    fi
-
-    local i installed rc=0
-    for i in "${pick[@]}"; do
-        if installed="$(vu_place_mod "${paths[$i]}" "${names[$i]}" "$spec")"; then
-            if $do_enable; then vu_modlist_add "$installed"; pok "installed + enabled: $installed"
-            else pok "installed (disabled): $installed  ${DIM}enable with: powos mods vu mod enable $installed${NC}"; fi
-        else
-            rc=1
-        fi
-    done
+    local rc=0
+    _vu_install_picked || rc=$?
     [[ -n "$cleanup" ]] && rm -rf "$cleanup"
     return $rc
 }

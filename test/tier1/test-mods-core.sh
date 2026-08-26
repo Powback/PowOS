@@ -469,6 +469,18 @@ import json
 d=json.load(open(\"$MODS_MANIFEST_DIR/cyberpunk2077.json\"))
 assert any(\"adopted\" in m.get(\"source\",\"\") for m in d[\"mods\"])
 "'
+
+    # ── adopt.py ships beside adopt.sh ──
+    #
+    # The scanner used to be a 297-line heredoc inside mods_adopt_cmd. It is
+    # now a file, which means it can go missing in a way a heredoc could not:
+    # a partial deploy, or an installer that copies *.sh only. Assert that it
+    # is there, that it is the file adopt.sh actually resolves, and that its
+    # absence FAILS instead of silently adopting nothing.
+    check "adopt.py exists beside adopt.sh"  '[[ -f "$REPO_ROOT/lib/mods/adopt.py" ]]'
+    check "adopt.py is valid python"         'python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$REPO_ROOT/lib/mods/adopt.py"'
+    check "MODS_ADOPT_PY resolves to it"     '[[ "$MODS_ADOPT_PY" -ef "$REPO_ROOT/lib/mods/adopt.py" ]]'
+    check "missing adopt.py fails loudly"    '( MODS_ADOPT_PY="$TMP/nope.py"; ! mods_adopt_cmd cyberpunk2077 --dry-run >/dev/null 2>&1 )'
 else
     skip "adopt (adopt.sh not loaded)"
 fi

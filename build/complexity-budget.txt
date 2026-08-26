@@ -3,10 +3,15 @@
 # Lowering a number when code improves is welcome. Raising one needs a reason.
 # Regenerate the raw list with: python3 build/complexity.py --budget <files>
 
-adopt.sh:mods_adopt_cmd 53
+adopt.sh:mods_adopt_cmd 9
 agent.sh:_ai_interactive_loop 19
+# `powos ai`'s option grammar, lifted out of ai_call (85 -> 14). 15 of its
+# 21 are case arms: one per option, which IS the specification. Splitting
+# it would scatter one grammar across several functions — the same reason
+# parse_sudo_argv is exempt in docs/complexity.md.
+agent.sh:_ai_parse_args 21
 agent.sh:_ai_resume_picker 24
-agent.sh:ai_call 85
+agent.sh:ai_call 14
 agent.sh:ai_interactive 30
 ai-healer.sh:auto_heal 16
 asi.sh:asi_add 37
@@ -38,7 +43,7 @@ games.sh:gms_create 36
 games.sh:gms_resize 41
 games.sh:gms_steam_setup 16
 harness.sh:harness_bisect 17
-harness.sh:harness_run 78
+harness.sh:harness_run 9
 harness.sh:harness_verify_cmd 18
 helpers.sh:ai_parse_files_to_dir 16
 helpers.sh:ai_parse_markdown_to_dir 24
@@ -69,7 +74,7 @@ modlist.sh:modlist_install_cmd 28
 overlay-manager.sh:main 18
 pinstall:update_ini_packages 22
 portable.sh:mods_export_cmd 17
-portable.sh:mods_import_cmd 38
+portable.sh:mods_import_cmd 11
 powos:cmd_containers 41
 powos:cmd_health 7
 powos:cmd_install 34
@@ -105,7 +110,7 @@ vu.sh:vu_install_cmd 27
 vu.sh:vu_install_icon 16
 vu.sh:vu_mod_build_cmd 25
 vu.sh:vu_mod_dev_cmd 22
-vu.sh:vu_mod_install_cmd 43
+vu.sh:vu_mod_install_cmd 15
 vu.sh:vu_mod_resolve_source 20
 windows.sh:cmd_windows 63
 windows.sh:win_fetch_iso 22

@@ -659,6 +659,118 @@ test_session_name_validation() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Tests: ai_call's option grammar (_ai_parse_args)
+#
+# ai_call was split by stage; the parser is the only piece with a grammar to
+# get wrong. These assert the CONTRACT — which option sets which opt_*, the
+# two special exit codes, and the two orderings that are easy to break in a
+# refactor — not the shape of the case statement.
+# ─────────────────────────────────────────────────────────────────
+
+# Run _ai_parse_args in the same shell shape ai_call uses (opt_* declared
+# local by the caller) and print "rc|agent|client|session|cont|resume|new|
+# interactive|json|verbose|stream|prompt".
+_parse_probe() {
+    bash -c '
+        source "'"$TEST_DIR"'/lib/ai/agent.sh" 2>/dev/null
+        ai_help() { echo "HELP-CALLED"; }
+        probe() {
+            local opt_agent="" opt_client="" opt_session="" opt_continue=""
+            local opt_resume="" opt_new_session="" opt_interactive="" opt_json=""
+            local opt_verbose="" opt_stream="" prompt=""
+            local rc=0
+            _ai_parse_args "$@" || rc=$?
+            printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n" \
+                "$rc" "$opt_agent" "$opt_client" "$opt_session" "$opt_continue" \
+                "$opt_resume" "$opt_new_session" "$opt_interactive" "$opt_json" \
+                "$opt_verbose" "$opt_stream" "$prompt"
+        }
+        probe "$@"
+    ' _ "$@" 2>/dev/null
+}
+
+test_ai_arg_parsing() {
+    echo ""
+    echo "Test: ai_call option grammar"
+
+    assert_function_exists _ai_parse_args "_ai_parse_args exists"
+
+    assert_equals "0|coder|ollama|proj||||||true|false|how do I sync" \
+        "$(_parse_probe -a coder -c ollama -s proj --verbose --no-stream how do I sync)" \
+        "Short and long options set their opt_*; positionals join into one prompt"
+
+    assert_equals "0||||||||true||true|hi" \
+        "$(_parse_probe --json --stream hi)" \
+        "--json and --stream are independent flags"
+
+    assert_equals "0||||true||true||||true|hi" \
+        "$(_parse_probe --continue --new-session --stream hi)" \
+        "--continue and --new-session both record; ai_call decides precedence"
+
+    # --resume takes an OPTIONAL session name, but must not swallow a flag
+    assert_equals "0|||mysess||true||true||||" \
+        "$(_parse_probe --resume mysess --interactive)" \
+        "--resume consumes a following non-flag as the session name"
+    assert_equals "0|||||true|||||true|" \
+        "$(_parse_probe --resume --stream)" \
+        "--resume does NOT consume a following flag"
+
+    # Exit codes are the whole interface between the parser and ai_call
+    assert_equals "1" "$(_parse_probe --bogus | cut -d'|' -f1)" \
+        "Unknown option returns 1"
+    assert_equals "3" "$(_parse_probe --help | tail -1 | cut -d'|' -f1)" \
+        "--help returns 3 (ai_call turns that into exit 0)"
+    assert_contains "$(_parse_probe --help)" "HELP-CALLED" "--help prints the help"
+
+    # --help short-circuits: options AFTER it are never applied. --yolo's
+    # export is the observable one.
+    local after_help
+    after_help=$(bash -c '
+        source "'"$TEST_DIR"'/lib/ai/agent.sh" 2>/dev/null
+        ai_help() { :; }
+        probe() {
+            local opt_agent="" opt_client="" opt_session="" opt_continue=""
+            local opt_resume="" opt_new_session="" opt_interactive="" opt_json=""
+            local opt_verbose="" opt_stream="" prompt=""
+            _ai_parse_args "$@" || true
+            echo "${POWOS_AI_SKIP_PERMS:-unset}"
+        }
+        probe --help --yolo
+    ' 2>/dev/null)
+    assert_equals "unset" "$after_help" \
+        "--help stops parsing before a later --yolo can export POWOS_AI_SKIP_PERMS"
+
+    local with_yolo
+    with_yolo=$(bash -c '
+        source "'"$TEST_DIR"'/lib/ai/agent.sh" 2>/dev/null
+        probe() {
+            local opt_agent="" opt_client="" opt_session="" opt_continue=""
+            local opt_resume="" opt_new_session="" opt_interactive="" opt_json=""
+            local opt_verbose="" opt_stream="" prompt=""
+            _ai_parse_args "$@" || true
+            echo "${POWOS_AI_SKIP_PERMS:-unset}"
+        }
+        probe --yolo hello
+    ' 2>/dev/null)
+    assert_equals "1" "$with_yolo" "--yolo exports POWOS_AI_SKIP_PERMS=1"
+}
+
+# ai_call's stages are separate functions now; a missing one is a silent
+# behaviour change (an unset local flowing into the client call), so assert
+# the decomposition exists.
+test_ai_call_stages() {
+    echo ""
+    echo "Test: ai_call stage helpers"
+    local f
+    for f in _ai_parse_args _ai_prepare_request _ai_parse_invocation \
+             _ai_resolve_backends _ai_stored_client_id _ai_resolve_session \
+             _ai_compose_prompt _ai_resolve_stream_default _ai_dispatch_client \
+             _ai_record_exchange; do
+        assert_function_exists "$f" "Stage helper $f exists"
+    done
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Tests: ai_call round-trip with a stubbed claude binary
 # ─────────────────────────────────────────────────────────────────
 
@@ -790,6 +902,10 @@ main() {
     # Name validation (path traversal)
     test_agent_name_validation
     test_session_name_validation
+
+    # ai_call decomposition: option grammar + stage helpers
+    test_ai_arg_parsing
+    test_ai_call_stages
 
     # Client round-trip with stubbed claude binary
     test_claude_stub_roundtrip

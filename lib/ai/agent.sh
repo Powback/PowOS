@@ -580,23 +580,29 @@ PREVIEW_SCRIPT
     echo "$_picked"
 }
 
-# Main call function
-ai_call() {
-    _ai_ensure_config
+# ── ai_call's steps ──────────────────────────────────────────────────
+#
+# ai_call was one 298-line function at CC 85. It is split below by the STAGES
+# of a call — parse argv, resolve backends, resolve session, compose the
+# prompt, dispatch, record — not by line count.
+#
+# Each helper writes into ai_call's LOCALS rather than echoing a value (bash
+# is dynamically scoped, so an undeclared assignment here lands on the
+# caller's `local`). That is deliberate: several stages resolve more than one
+# value at once, and `x=$(helper)` would run them in a subshell — which loses
+# `export POWOS_AI_SKIP_PERMS` from --yolo and would buffer the streaming
+# path that exists precisely so output is NOT captured. Every name written
+# here is declared `local` in ai_call, so nothing leaks to the calling shell.
 
-    local opt_agent=""
-    local opt_client=""
-    local opt_session=""
-    local opt_continue=""
-    local opt_resume=""
-    local opt_new_session=""
-    local opt_interactive=""
-    local opt_json=""
-    local opt_verbose=""
-    local opt_stream=""   # "", "true", or "false"; default resolved after parsing
-    local prompt=""
-
-    # Parse arguments
+# Parse argv into the opt_* locals.
+#
+# Deliberately left as one flat case: an option grammar's arm count IS its
+# specification, and splitting it across functions scatters the grammar (see
+# docs/complexity.md on parse_sudo_argv). Budgeted, not "fixed".
+#
+# Returns 1 on an unknown option (message already printed) and 3 for
+# "handled, nothing further to do" — which ai_call turns back into exit 0.
+_ai_parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --agent|-a)
@@ -655,7 +661,7 @@ ai_call() {
                 ;;
             --help|-h)
                 ai_help
-                return 0
+                return 3
                 ;;
             -*)
                 echo -e "${RED}Unknown option: $1${NC}" >&2
@@ -673,13 +679,19 @@ ai_call() {
                 ;;
         esac
     done
+    return 0
+}
 
+# Turn the parsed options into a concrete request: run the --resume picker and
+# read a piped prompt. Returns 3 (→ ai_call exits 0) when there is nothing to
+# resume or the picker was cancelled.
+_ai_prepare_request() {
     # --resume: show fzf picker if no explicit session was given
     if [[ -n "$opt_resume" ]]; then
         if [[ -z "$opt_session" ]]; then
             local _picked
-            _picked=$(_ai_resume_picker) || return 0   # no sessions → exit clean
-            [[ -n "$_picked" ]] || return 0            # cancelled (Esc) → exit clean
+            _picked=$(_ai_resume_picker) || return 3   # no sessions → exit clean
+            [[ -n "$_picked" ]] || return 3            # cancelled (Esc) → exit clean
             opt_session="$_picked"
         fi
         opt_continue="true"
@@ -689,9 +701,19 @@ ai_call() {
     if [[ -z "$prompt" && -z "$opt_interactive" && ! -t 0 ]]; then
         prompt=$(cat)
     fi
+    return 0
+}
 
-    # Resolve agent
-    local agent="${opt_agent:-$AI_DEFAULT_AGENT}"
+_ai_parse_invocation() {
+    _ai_parse_args "$@" || return $?
+    _ai_prepare_request
+}
+
+# Resolve and load the agent, then the client (CLI override > agent
+# preference > default, with one fallback). Returns 1 — after printing the
+# same message as before — if either cannot be satisfied.
+_ai_resolve_backends() {
+    agent="${opt_agent:-$AI_DEFAULT_AGENT}"
     _ai_load_agent "$agent" || return 1
 
     # Wire this agent's comms identity so the mailbox MCP (launched by the
@@ -702,8 +724,7 @@ ai_call() {
         comms_export_identity "$agent"
     fi
 
-    # Resolve client (CLI override > agent preference > default)
-    local client="${opt_client:-${AGENT_CLIENT:-$AI_DEFAULT_CLIENT}}"
+    client="${opt_client:-${AGENT_CLIENT:-$AI_DEFAULT_CLIENT}}"
 
     # Try fallback if primary not available
     if ! _ai_client_available "$client"; then
@@ -718,27 +739,36 @@ ai_call() {
 
     # Load client
     _ai_load_client "$client" || return 1
+}
 
-    # Every agent gets an implicit, per-agent session so that --continue and
-    # interactive resume THAT agent's own last conversation — via the client's
-    # stored session UUID (directory-independent) — instead of the client's
-    # global most-recent chat in the current directory (the old footgun).
+# The stored client UUID for a PowOS session, or empty. Tolerates session.sh
+# not being sourced (older trees) exactly as the inline lookups it replaces.
+_ai_stored_client_id() {
+    declare -f ai_session_get_client_id &>/dev/null || return 0
+    ai_session_get_client_id "$1" 2>/dev/null || true
+}
+
+# Decide which conversation this call joins, writing $resolved_session.
+#
+# Every agent gets an implicit, per-agent session so that --continue and
+# interactive resume THAT agent's own last conversation — via the client's
+# stored session UUID (directory-independent) — instead of the client's
+# global most-recent chat in the current directory (the old footgun).
+#
+# Only a STORED client session ID (a real UUID from a previous call) is ever
+# passed to the client. On first use of a named session we start fresh and
+# store the client's returned session ID afterwards — passing the PowOS
+# session NAME as --resume breaks the claude CLI.
+_ai_resolve_session() {
     local agent_session="_agent_${agent//[^A-Za-z0-9_-]/_}"
 
     # When the user didn't name a session, fall back to the agent's implicit
     # one. A bare one-shot call still starts fresh, but its resulting UUID is
     # recorded into the implicit session so a later --continue can resume it.
-    local using_implicit_session=""
     if [[ -z "$opt_session" ]]; then
         opt_session="$agent_session"
         using_implicit_session="true"
     fi
-
-    # Resolve session. Only pass the client a STORED client session ID (a
-    # real UUID from a previous call). On first use of a named session we
-    # start fresh and store the client's returned session ID afterwards —
-    # passing the PowOS session NAME as --resume breaks the claude CLI.
-    local resolved_session=""
 
     # Auto-create the PowOS session file on first use
     if declare -f ai_session_start &>/dev/null && \
@@ -750,9 +780,7 @@ ai_call() {
         # --continue: resume this agent's (or the named session's) own last
         # conversation by its stored client UUID — NOT the client's global
         # most-recent chat. Works regardless of current directory.
-        if declare -f ai_session_get_client_id &>/dev/null; then
-            resolved_session=$(ai_session_get_client_id "$opt_session" 2>/dev/null || true)
-        fi
+        resolved_session=$(_ai_stored_client_id "$opt_session")
         if [[ -z "$resolved_session" ]]; then
             # No PowOS-tracked conversation for this agent. Rather than start
             # fresh, fall back to the CLIENT's native "continue most recent in
@@ -770,24 +798,13 @@ ai_call() {
     elif [[ -z "$using_implicit_session" ]]; then
         # A named --session (without --continue) resumes its stored UUID. A
         # bare call (implicit session) starts fresh but records afterwards.
-        if declare -f ai_session_get_client_id &>/dev/null; then
-            resolved_session=$(ai_session_get_client_id "$opt_session" 2>/dev/null || true)
-        fi
+        resolved_session=$(_ai_stored_client_id "$opt_session")
     fi
+    return 0
+}
 
-    # Interactive mode
-    if [[ -n "$opt_interactive" ]]; then
-        ai_interactive "$agent" "$client" "$opt_session"
-        return $?
-    fi
-
-    # Need a prompt for non-interactive
-    if [[ -z "$prompt" ]]; then
-        echo -e "${RED}Error: No prompt provided${NC}" >&2
-        echo "Usage: powos ai [options] \"prompt\"" >&2
-        return 1
-    fi
-
+# Build $full_prompt: the user's prompt plus agent context and any waiting mail.
+_ai_compose_prompt() {
     # Gather context if agent has context command
     local context=""
     if [[ -n "${AGENT_CONTEXT_CMD:-}" ]]; then
@@ -795,7 +812,7 @@ ai_call() {
     fi
 
     # Build full prompt with context
-    local full_prompt="$prompt"
+    full_prompt="$prompt"
     if [[ -n "$context" ]]; then
         full_prompt="Current system state:
 \`\`\`
@@ -813,6 +830,110 @@ User request: $prompt"
 
 $full_prompt"
     fi
+    # Explicit: the [[ ]] && above is the last command, and returning its 1
+    # would abort an errexit caller when there is simply no mail.
+    return 0
+}
+
+# Stream live by DEFAULT for a normal interactive prompt (so you see tool-use
+# and progress, not just the final answer). Off for --json (machine output),
+# --verbose, or when stdout isn't a TTY (piped/scripted). Force with --stream,
+# disable with --no-stream.
+_ai_resolve_stream_default() {
+    if [[ -z "$opt_stream" ]]; then
+        if [[ -t 1 && -z "$opt_json" && -z "$opt_verbose" ]]; then
+            opt_stream="true"
+        else
+            opt_stream="false"
+        fi
+    fi
+}
+
+# Call the client with the appropriate function, writing $result. Returns the
+# client's exit code. Capture is explicit — an `x=$(...)` assignment would
+# trip errexit in strict shells before any error handling could run.
+_ai_dispatch_client() {
+    local _rc=0
+    if [[ "$opt_stream" == "true" ]] && declare -f client_call_stream &>/dev/null; then
+        # Stream live — NOT captured (command substitution would buffer it all
+        # and defeat the whole point). Output goes straight to the terminal.
+        client_call_stream "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session" || _rc=$?
+    elif [[ -n "$opt_verbose" ]] && declare -f client_call_verbose &>/dev/null; then
+        result=$(client_call_verbose "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || _rc=$?
+    elif [[ -n "$opt_json" ]] && declare -f client_call_json &>/dev/null; then
+        result=$(client_call_json "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || _rc=$?
+    else
+        result=$(client_call "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || _rc=$?
+    fi
+    return $_rc
+}
+
+# Record the exchange in the PowOS session file (used by session export) and
+# save the client's session ID so a later --continue can resume it.
+_ai_record_exchange() {
+    if [[ -n "$opt_session" ]] && declare -f ai_session_add_message &>/dev/null; then
+        ai_session_add_message "$opt_session" "user" "$prompt" 2>/dev/null || true
+        ai_session_add_message "$opt_session" "assistant" "$result" 2>/dev/null || true
+    fi
+
+    if [[ -n "$opt_session" ]] && declare -f client_get_session_id &>/dev/null; then
+        local new_client_id
+        new_client_id=$(client_get_session_id 2>/dev/null || true)
+        if [[ -n "$new_client_id" ]] && declare -f ai_session_set_client_id &>/dev/null; then
+            ai_session_set_client_id "$opt_session" "$new_client_id" 2>/dev/null || true
+        fi
+    fi
+    return 0
+}
+
+# Main call function
+ai_call() {
+    _ai_ensure_config
+
+    local opt_agent=""
+    local opt_client=""
+    local opt_session=""
+    local opt_continue=""
+    local opt_resume=""
+    local opt_new_session=""
+    local opt_interactive=""
+    local opt_json=""
+    local opt_verbose=""
+    local opt_stream=""   # "", "true", or "false"; default resolved after parsing
+    local prompt=""
+
+    # Everything below writes into these; see the note above the helpers.
+    local agent="" client=""
+    local using_implicit_session=""
+    local resolved_session=""
+    local full_prompt=""
+    local result=""
+
+    local _rc=0
+    _ai_parse_invocation "$@" || _rc=$?
+    case "$_rc" in
+        0) ;;
+        3) return 0 ;;          # --help, or the resume picker was cancelled
+        *) return "$_rc" ;;
+    esac
+
+    _ai_resolve_backends || return 1
+    _ai_resolve_session  || return 1
+
+    # Interactive mode
+    if [[ -n "$opt_interactive" ]]; then
+        ai_interactive "$agent" "$client" "$opt_session"
+        return $?
+    fi
+
+    # Need a prompt for non-interactive
+    if [[ -z "$prompt" ]]; then
+        echo -e "${RED}Error: No prompt provided${NC}" >&2
+        echo "Usage: powos ai [options] \"prompt\"" >&2
+        return 1
+    fi
+
+    _ai_compose_prompt
 
     # --continue is now handled uniformly through $resolved_session above
     # (it resolves the agent's / named session's stored client UUID, so the
@@ -824,34 +945,10 @@ $full_prompt"
         export CLAUDE_JSON_OUTPUT="true"
     fi
 
-    # Stream live by DEFAULT for a normal interactive prompt (so you see tool-use
-    # and progress, not just the final answer). Off for --json (machine output),
-    # --verbose, or when stdout isn't a TTY (piped/scripted). Force with --stream,
-    # disable with --no-stream.
-    if [[ -z "$opt_stream" ]]; then
-        if [[ -t 1 && -z "$opt_json" && -z "$opt_verbose" ]]; then
-            opt_stream="true"
-        else
-            opt_stream="false"
-        fi
-    fi
+    _ai_resolve_stream_default
 
-    # Call client with appropriate function. Capture the exit code
-    # explicitly — an `x=$(...)` assignment would trip errexit in strict
-    # shells before any error handling could run.
-    local result=""
     local exit_code=0
-    if [[ "$opt_stream" == "true" ]] && declare -f client_call_stream &>/dev/null; then
-        # Stream live — NOT captured (command substitution would buffer it all
-        # and defeat the whole point). Output goes straight to the terminal.
-        client_call_stream "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session" || exit_code=$?
-    elif [[ -n "$opt_verbose" ]] && declare -f client_call_verbose &>/dev/null; then
-        result=$(client_call_verbose "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || exit_code=$?
-    elif [[ -n "$opt_json" ]] && declare -f client_call_json &>/dev/null; then
-        result=$(client_call_json "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || exit_code=$?
-    else
-        result=$(client_call "$full_prompt" "${AGENT_SYSTEM_PROMPT:-}" "$resolved_session") || exit_code=$?
-    fi
+    _ai_dispatch_client || exit_code=$?
 
     if [[ $exit_code -ne 0 ]]; then
         echo -e "${RED}Error: AI client '$client' failed (exit code $exit_code)${NC}" >&2
@@ -862,20 +959,7 @@ $full_prompt"
     # Output result (streaming mode already printed it live).
     [[ "$opt_stream" == "true" ]] || echo "$result"
 
-    # Record the exchange in the PowOS session file (used by session export)
-    if [[ -n "$opt_session" ]] && declare -f ai_session_add_message &>/dev/null; then
-        ai_session_add_message "$opt_session" "user" "$prompt" 2>/dev/null || true
-        ai_session_add_message "$opt_session" "assistant" "$result" 2>/dev/null || true
-    fi
-
-    # Save session ID mapping if we got a new one from the client
-    if [[ -n "$opt_session" ]] && declare -f client_get_session_id &>/dev/null; then
-        local new_client_id
-        new_client_id=$(client_get_session_id 2>/dev/null || true)
-        if [[ -n "$new_client_id" ]] && declare -f ai_session_set_client_id &>/dev/null; then
-            ai_session_set_client_id "$opt_session" "$new_client_id" 2>/dev/null || true
-        fi
-    fi
+    _ai_record_exchange
 
     return 0
 }

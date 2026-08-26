@@ -18,20 +18,31 @@ set -u
 
 # ── Locate libs ──────────────────────────────────────────────────────────
 
-HARNESS_LIB="/usr/lib/powos/mods/harness.sh"
-INSTALL_LIB="/usr/lib/powos/mods/install.sh"
-MOCK_GAME="/usr/lib/powos/../test/mock-game"   # installed path
-
-# Dev-tree fallback
+# The tree this test file lives in comes FIRST.
+#
+# This used to prefer /usr/lib/powos/mods/harness.sh and fall back to the
+# checkout. On any machine with PowOS installed that silently exercised the
+# SHIPPED copy — here, one three weeks stale — so the suite reported 58/58
+# green against code the author had never touched, and a refactor of
+# harness_run showed up only as "the new helpers don't exist". The sibling
+# suites (test-mods-core.sh, test-mods-vu.sh) already resolve this way, and in
+# the container the documented invocation is under /var/lib/powos/src, which
+# has its own lib/ — so the installed path stays a fallback, not the default.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$SCRIPT_DIR/../.."
+
+HARNESS_LIB="$REPO_ROOT/lib/mods/harness.sh"
+INSTALL_LIB="$REPO_ROOT/lib/mods/install.sh"
+MOCK_GAME="$SCRIPT_DIR/../mock-game"
+
 if [[ ! -f "$HARNESS_LIB" ]]; then
-    HARNESS_LIB="$SCRIPT_DIR/../../lib/mods/harness.sh"
+    HARNESS_LIB="/usr/lib/powos/mods/harness.sh"
 fi
 if [[ ! -f "$INSTALL_LIB" ]]; then
-    INSTALL_LIB="$SCRIPT_DIR/../../lib/mods/install.sh"
+    INSTALL_LIB="/usr/lib/powos/mods/install.sh"
 fi
 if [[ ! -f "$MOCK_GAME" ]]; then
-    MOCK_GAME="$SCRIPT_DIR/../mock-game"
+    MOCK_GAME="/usr/lib/powos/../test/mock-game"
 fi
 
 PASS=0; FAIL=0
@@ -416,6 +427,83 @@ SENT
         ' 2>&1)"
     check "no sentinel = no injection"      '[[ "$clean_val" == *"unset"* ]]'
 fi
+
+# ── Test: the monitor-loop check contract ────────────────────────────────
+#
+# harness_run's poll loop used to be inline, and each freeze/timeout check
+# ended in a bare `break`. It is now a chain of helpers where the ONLY signal
+# is the exit status: 0 = keep polling, 1 = a verdict has been reached. Get
+# that inverted and the harness either never stops or stops on the first poll,
+# and the end-to-end mock tests above would still pass in mock mode by luck of
+# timing. Assert the contract directly.
+echo ""
+echo "== Monitor-loop check contract =="
+
+# NOTE: subshell — check() eval's this in the current shell, so a bare `exit`
+# would end the whole suite silently.
+check "phase helpers exist" '(
+    for f in _harness_resolve_env _harness_launch _harness_launch_mock \
+             _harness_launch_umu _harness_launch_steam _harness_monitor \
+             _harness_poll_once _harness_verdict_on_exit _harness_sample_signals \
+             _harness_check_frames _harness_check_cpu _harness_check_timeout \
+             _harness_confidence _harness_collect_artifacts _harness_cleanup \
+             _harness_emit_verdict; do
+        declare -f "$f" >/dev/null || exit 1
+    done
+)'
+
+# _harness_check_timeout: 0 while under the timeout, 1 at/over it.
+_tmo_probe() {
+    local elapsed="$1" mhud_ever_seen="$2" frame_stalled="$3"
+    local HARNESS_TIMEOUT=10
+    local verdict="unknown" mangohud_frozen=false
+    _harness_check_timeout >/dev/null 2>&1 && echo "keep:$verdict" || echo "stop:$verdict"
+}
+check "timeout: under the limit keeps polling"  '[[ "$(_tmo_probe 5 false false)"  == "keep:unknown" ]]'
+check "timeout: reached => booted, stop"        '[[ "$(_tmo_probe 10 false false)" == "stop:booted" ]]'
+check "timeout: reached but frames stalled => freeze" \
+                                                '[[ "$(_tmo_probe 12 true true)"   == "stop:freeze" ]]'
+
+# _harness_check_frames: only stops once the freeze window has fully elapsed,
+# and a resumed frame counter must clear the stall timer.
+_frames_probe() {
+    local mhud_ever_seen="$1" cur_mhud="$2" prev_mhud_lines="$3"
+    local frames_frozen_since="$4" now="$5"
+    local HARNESS_FREEZE_WINDOW=5
+    local verdict="unknown" mangohud_frozen=false
+    _harness_check_frames >/dev/null 2>&1 \
+        && echo "keep:$verdict:$frames_frozen_since" \
+        || echo "stop:$verdict:$frames_frozen_since"
+}
+check "frames: no MangoHud data ever => never freezes" \
+        '[[ "$(_frames_probe false 0 0 0 100)" == keep:unknown:* ]]'
+check "frames: first stalled poll starts the timer, keeps polling" \
+        '[[ "$(_frames_probe true 7 7 0 100)" == "keep:unknown:100" ]]'
+check "frames: still inside the window keeps polling" \
+        '[[ "$(_frames_probe true 7 7 98 100)" == "keep:unknown:98" ]]'
+check "frames: window elapsed => freeze, stop" \
+        '[[ "$(_frames_probe true 7 7 90 100)" == "stop:freeze:90" ]]'
+check "frames: advancing counter clears the stall timer" \
+        '[[ "$(_frames_probe true 9 7 90 100)" == "keep:unknown:0" ]]'
+
+# _harness_check_cpu: same shape, gated on prev_cpu > 0 (first poll has none).
+_cpu_probe() {
+    local prev_cpu="$1" cur_cpu="$2" prev_ctx="$3" cur_ctx="$4"
+    local cpu_frozen_since="$5" now="$6"
+    local HARNESS_FREEZE_WINDOW=5
+    local verdict="unknown" cpu_frozen=false cpu_stalled=false mhud_ever_seen=false
+    _harness_check_cpu >/dev/null 2>&1 \
+        && echo "keep:$verdict:$cpu_frozen_since" \
+        || echo "stop:$verdict:$cpu_frozen_since"
+}
+check "cpu: first poll (prev_cpu 0) never freezes" \
+        '[[ "$(_cpu_probe 0 0 0 0 0 100)" == "keep:unknown:0" ]]'
+check "cpu: stasis inside the window keeps polling" \
+        '[[ "$(_cpu_probe 5 5 3 3 98 100)" == "keep:unknown:98" ]]'
+check "cpu: stasis past the window => freeze, stop" \
+        '[[ "$(_cpu_probe 5 5 3 3 90 100)" == "stop:freeze:90" ]]'
+check "cpu: ctx switches still moving clears the timer" \
+        '[[ "$(_cpu_probe 5 5 3 4 90 100)" == "keep:unknown:0" ]]'
 
 # ── Results ──────────────────────────────────────────────────────────────
 echo ""

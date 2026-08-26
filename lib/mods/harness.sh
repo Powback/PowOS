@@ -515,45 +515,24 @@ harness_restore_saves() {
 
 # ─── Core: launch + monitor + verdict ────────────────────────────────────
 
-# Launch a game and monitor it. Emit a verdict.
-# Args: appid [game_exe_override]
-# Env: HARNESS_TIMEOUT, HARNESS_FREEZE_WINDOW, HARNESS_POLL_INTERVAL,
-#      HARNESS_MOCK, HARNESS_BASELINE, HARNESS_NO_STEAM
-# Stdout: verdict JSON only
-harness_run() {
-    # All log output to stderr; only the verdict JSON goes to stdout.
-    plog()  { echo -e "${CYAN:-}[harness]${NC:-} $*" >&2; }
-    pok()   { echo -e "${GREEN:-}[harness]${NC:-} $*" >&2; }
-    pwarn() { echo -e "${YELLOW:-}[harness]${NC:-} $*" >&2; }
+# harness_run was one 349-line function at CC 78 — and unlike a dispatcher,
+# none of that was `case` width: it is six sequential PHASES (resolve env,
+# launch, monitor, score confidence, collect artifacts, emit) with a
+# three-way launch strategy and a four-signal poll nested inside.
+#
+# It is split below by those phases. The helpers write into harness_run's
+# LOCALS (bash is dynamically scoped) rather than echoing: harness_run's
+# stdout is the verdict JSON and nothing else, so a helper that printed its
+# result would corrupt the contract — and phases like the launch set three
+# values at once (game_pid, launch_mode, game_exe).
+#
+# Nothing here is exported: every name written is `local` in harness_run or
+# in _harness_monitor.
 
-    local appid="$1"
-    local game_exe="${2:-}"
-    local ts
-    ts="$(date -u +%Y%m%dT%H%M%SZ)"
-
-    local game_dir="" prefix_path="" proton_path="" launch_opts=""
-    local game_pid="" exit_code=0
-    local verdict="unknown" elapsed=0
-    local crash_dumps="" proton_log_errors="" cpu_frozen=false mangohud_frozen=false
-    local game_log_json="{}"
-    local has_mangohud=false
-    local confidence="high"  # downgraded when signals are missing/disagree
-    local launch_mode="mock"
-
-    # Prepare directories
-    mkdir -p "$HARNESS_STATE_DIR" "$HARNESS_CRASH_DIR" "$HARNESS_MANGOHUD_DIR" \
-             "$HARNESS_RUN_DIR" 2>/dev/null || true
-    rm -f "$HARNESS_CRASH_DIR"/*.dmp 2>/dev/null || true
-
-    # ── Safety: refuse if game already running ──
-    if [[ -z "$HARNESS_MOCK" ]] && harness_game_running "$appid"; then
-        perr "Game (appid $appid) is already running!"
-        perr "Close the game first, then re-run verify."
-        perr "Note: verify wants the desktop idle-ish (gamescope nested window"
-        perr "on a hidden workspace still composites — avoid heavy desktop work)."
-        return 1
-    fi
-
+# ── Phase 1: resolve the Steam environment (or fake one for mock mode) ──
+# Writes: game_dir prefix_path proton_path launch_opts has_mangohud
+#         confidence launch_mode.  Returns 1 if the game dir can't be found.
+_harness_resolve_env() {
     if [[ -n "$HARNESS_MOCK" ]]; then
         # ── Mock mode ──
         plog "Mock mode: using $HARNESS_MOCK"
@@ -586,208 +565,253 @@ harness_run() {
             pwarn "Install MangoHud for frame-based freeze detection (catches busy-spin hangs)"
         fi
     fi
+    # Explicit: the [[ ]] && plog lines above would otherwise decide this
+    # function's exit status, and the caller treats non-zero as "no game dir".
+    return 0
+}
 
-    # ── Backup saves if --baseline ──
-    local saves_backup=""
-    if [[ "$HARNESS_BASELINE" == "1" ]]; then
-        saves_backup="/tmp/powos-harness-saves-$appid-$ts"
-        harness_backup_saves "$prefix_path" "$saves_backup"
+# ── Phase 2: launch. Three strategies, one per env; each writes game_pid ──
+
+_harness_launch_mock() {
+    # ── Mock: direct launch ──
+    # shellcheck disable=SC2206
+    local launch_cmd=($HARNESS_MOCK)
+    plog "Launching mock game (timeout: ${HARNESS_TIMEOUT}s)..."
+    setsid "${launch_cmd[@]}" &>/dev/null &
+    game_pid=$!
+    launch_mode="mock"
+}
+
+_harness_launch_umu() {
+    # ── Secondary path: umu-run (DRM-free only) ──
+    if ! command -v umu-run >/dev/null 2>&1; then
+        perr "umu-run not found. Install umu-launcher: pip install umu-launcher"
+        return 1
     fi
-
-    # ── Build the launch command / strategy ──
-
-    if [[ -n "$HARNESS_MOCK" ]]; then
-        # ── Mock: direct launch ──
-        # shellcheck disable=SC2206
-        local launch_cmd=($HARNESS_MOCK)
-        plog "Launching mock game (timeout: ${HARNESS_TIMEOUT}s)..."
-        setsid "${launch_cmd[@]}" &>/dev/null &
-        game_pid=$!
-        launch_mode="mock"
-
-    elif [[ "$HARNESS_NO_STEAM" == "1" ]]; then
-        # ── Secondary path: umu-run (DRM-free only) ──
-        if ! command -v umu-run >/dev/null 2>&1; then
-            perr "umu-run not found. Install umu-launcher: pip install umu-launcher"
-            return 1
-        fi
-        local umu_env=(
-            "WINEPREFIX=$prefix_path/pfx"
-            "GAMEID=$appid"
-            "UMU_RUNTIME_UPDATE=0"
-            "PROTON_LOG=1"
-            "PROTON_LOG_DIR=/tmp"
-            "PROTON_CRASH_REPORT_DIR=$HARNESS_CRASH_DIR"
+    local umu_env=(
+        "WINEPREFIX=$prefix_path/pfx"
+        "GAMEID=$appid"
+        "UMU_RUNTIME_UPDATE=0"
+        "PROTON_LOG=1"
+        "PROTON_LOG_DIR=/tmp"
+        "PROTON_CRASH_REPORT_DIR=$HARNESS_CRASH_DIR"
+    )
+    if [[ "$has_mangohud" == "true" ]]; then
+        umu_env+=(
+            "MANGOHUD=1"
+            "MANGOHUD_CONFIG=no_display,output_folder=$HARNESS_MANGOHUD_DIR,autostart_log=3,log_duration=0,log_interval=500"
         )
-        if [[ "$has_mangohud" == "true" ]]; then
-            umu_env+=(
-                "MANGOHUD=1"
-                "MANGOHUD_CONFIG=no_display,output_folder=$HARNESS_MANGOHUD_DIR,autostart_log=3,log_duration=0,log_interval=500"
-            )
-        fi
-        [[ -n "$proton_path" ]] && umu_env+=("PROTONPATH=$proton_path")
+    fi
+    [[ -n "$proton_path" ]] && umu_env+=("PROTONPATH=$proton_path")
 
-        if [[ -z "$game_exe" ]]; then
-            game_exe="$(find "$game_dir" -maxdepth 2 -name '*.exe' -type f 2>/dev/null | head -1)" || true
-        fi
-        [[ -z "$game_exe" ]] && { perr "No game exe found"; return 1; }
+    if [[ -z "$game_exe" ]]; then
+        game_exe="$(find "$game_dir" -maxdepth 2 -name '*.exe' -type f 2>/dev/null | head -1)" || true
+    fi
+    [[ -z "$game_exe" ]] && { perr "No game exe found"; return 1; }
 
-        plog "Launching via umu-run (timeout: ${HARNESS_TIMEOUT}s)..."
-        setsid env "${umu_env[@]}" umu-run "$game_exe" &>/dev/null &
-        game_pid=$!
-        launch_mode="umu-run"
+    plog "Launching via umu-run (timeout: ${HARNESS_TIMEOUT}s)..."
+    setsid env "${umu_env[@]}" umu-run "$game_exe" &>/dev/null &
+    game_pid=$!
+    launch_mode="umu-run"
+}
 
-    else
-        # ── Primary path: steam -applaunch with shim ──
-        harness_ensure_steam || return 1
+_harness_launch_steam() {
+    # ── Primary path: steam -applaunch with shim ──
+    harness_ensure_steam || return 1
 
-        # Check shim is installed
-        local current_opts
-        current_opts="$(harness_launch_options "$appid" 2>/dev/null)" || current_opts=""
-        if [[ "$current_opts" != *"powos-game-shim"* ]]; then
-            perr "powos-game-shim not found in launch options for appid $appid"
-            perr "Run first: powos mods verify setup $(mods_game_name_of "$appid" 2>/dev/null || echo "$appid")"
-            perr "Or use --no-steam for DRM-free games"
-            return 1
-        fi
-
-        # Write the env sentinel for the shim to source
-        local sentinel="$HARNESS_RUN_DIR/${appid}.env"
-        {
-            echo "export PROTON_LOG=1"
-            echo "export PROTON_LOG_DIR=/tmp"
-            echo "export PROTON_CRASH_REPORT_DIR=$HARNESS_CRASH_DIR"
-            if [[ "$has_mangohud" == "true" ]]; then
-                echo "export MANGOHUD=1"
-                echo "export MANGOHUD_CONFIG=no_display,output_folder=$HARNESS_MANGOHUD_DIR,autostart_log=3,log_duration=0,log_interval=500"
-            fi
-        } > "$sentinel"
-
-        # Clean old PID file
-        rm -f "$HARNESS_RUN_DIR/${appid}.pid" 2>/dev/null || true
-
-        plog "Launching via steam -applaunch $appid (timeout: ${HARNESS_TIMEOUT}s)..."
-        steam -applaunch "$appid" &>/dev/null &
-
-        # Discover the game PID (shim writes it, or /proc scan)
-        plog "Waiting for game process..."
-        game_pid="$(harness_discover_game_pid "$appid" 30)" || {
-            perr "Could not find game process within 30s"
-            rm -f "$sentinel" 2>/dev/null || true
-            return 1
-        }
-        launch_mode="steam"
-        plog "Found game PID: $game_pid"
+    # Check shim is installed
+    local current_opts
+    current_opts="$(harness_launch_options "$appid" 2>/dev/null)" || current_opts=""
+    if [[ "$current_opts" != *"powos-game-shim"* ]]; then
+        perr "powos-game-shim not found in launch options for appid $appid"
+        perr "Run first: powos mods verify setup $(mods_game_name_of "$appid" 2>/dev/null || echo "$appid")"
+        perr "Or use --no-steam for DRM-free games"
+        return 1
     fi
 
-    plog "Game PID: $game_pid (pgid: $(ps -o pgid= -p $game_pid 2>/dev/null | tr -d ' ' || echo '?'))"
+    # Write the env sentinel for the shim to source
+    local sentinel="$HARNESS_RUN_DIR/${appid}.env"
+    {
+        echo "export PROTON_LOG=1"
+        echo "export PROTON_LOG_DIR=/tmp"
+        echo "export PROTON_CRASH_REPORT_DIR=$HARNESS_CRASH_DIR"
+        if [[ "$has_mangohud" == "true" ]]; then
+            echo "export MANGOHUD=1"
+            echo "export MANGOHUD_CONFIG=no_display,output_folder=$HARNESS_MANGOHUD_DIR,autostart_log=3,log_duration=0,log_interval=500"
+        fi
+    } > "$sentinel"
 
-    # ── Monitor loop ──
-    # Freeze heuristic (PM correction):
-    #   PRIMARY: MangoHud frame progress (catches busy-spin freezes where CPU advances)
-    #   SECONDARY: CPU ticks + context switches stasis (catches wait-hangs)
-    #   BOOTED = frames advancing AND survived full timeout
+    # Clean old PID file
+    rm -f "$HARNESS_RUN_DIR/${appid}.pid" 2>/dev/null || true
+
+    plog "Launching via steam -applaunch $appid (timeout: ${HARNESS_TIMEOUT}s)..."
+    steam -applaunch "$appid" &>/dev/null &
+
+    # Discover the game PID (shim writes it, or /proc scan)
+    plog "Waiting for game process..."
+    game_pid="$(harness_discover_game_pid "$appid" 30)" || {
+        perr "Could not find game process within 30s"
+        rm -f "$sentinel" 2>/dev/null || true
+        return 1
+    }
+    launch_mode="steam"
+    plog "Found game PID: $game_pid"
+}
+
+# Build the launch command / strategy.
+_harness_launch() {
+    if [[ -n "$HARNESS_MOCK" ]]; then
+        _harness_launch_mock
+    elif [[ "$HARNESS_NO_STEAM" == "1" ]]; then
+        _harness_launch_umu
+    else
+        _harness_launch_steam
+    fi
+}
+
+# ── Phase 3: the monitor loop, one decision per helper ──
+
+# The process died between polls: its exit status IS the verdict.
+_harness_verdict_on_exit() {
+    wait "$game_pid" 2>/dev/null
+    exit_code=$?
+    if [[ $exit_code -ne 0 ]]; then
+        verdict="crash"
+        plog "Process exited with code $exit_code after ${elapsed}s → CRASH"
+    else
+        verdict="booted"
+        plog "Process exited cleanly after ${elapsed}s"
+    fi
+}
+
+# Sample this poll's raw signals into cur_cpu / cur_ctx / cur_mhud.
+_harness_sample_signals() {
+    # ── CPU ticks delta ──
+    cur_cpu="$(harness_cpu_ticks "$game_pid" 2>/dev/null)" || cur_cpu=0
+    cur_ctx="$(harness_ctx_switches "$game_pid" 2>/dev/null)" || cur_ctx=0
+
+    # ── MangoHud CSV check (PRIMARY freeze signal) ──
+    cur_mhud="$(harness_mangohud_advancing "$HARNESS_MANGOHUD_DIR" "$prev_mhud_lines" 2>/dev/null)" || cur_mhud="$prev_mhud_lines"
+
+    if [[ "$cur_mhud" -gt 0 ]]; then
+        mhud_ever_seen=true
+    fi
+}
+
+# PRIMARY: frames not advancing (MangoHud). Catches BOTH wait-hangs AND
+# busy-spins. Returns 1 once the freeze window has elapsed (stop polling).
+_harness_check_frames() {
+    if [[ "$mhud_ever_seen" == "true" ]] && [[ "$cur_mhud" -eq "$prev_mhud_lines" ]]; then
+        frame_stalled=true
+        if [[ "$frames_frozen_since" -eq 0 ]]; then
+            frames_frozen_since="$now"
+        elif [[ $((now - frames_frozen_since)) -ge $HARNESS_FREEZE_WINDOW ]]; then
+            verdict="freeze"
+            mangohud_frozen=true
+            plog "No frame progress for ${HARNESS_FREEZE_WINDOW}s (MangoHud) → FREEZE"
+            return 1
+        fi
+    else
+        frames_frozen_since=0
+    fi
+    return 0
+}
+
+# SECONDARY: CPU ticks + context switches stasis (fallback when MangoHud
+# unavailable). Returns 1 once the freeze window has elapsed.
+_harness_check_cpu() {
+    if [[ "$prev_cpu" -gt 0 ]] && [[ "$cur_cpu" -eq "$prev_cpu" ]] \
+        && [[ "$cur_ctx" -eq "$prev_ctx" ]]; then
+        cpu_stalled=true
+        if [[ "$cpu_frozen_since" -eq 0 ]]; then
+            cpu_frozen_since="$now"
+        elif [[ $((now - cpu_frozen_since)) -ge $HARNESS_FREEZE_WINDOW ]]; then
+            verdict="freeze"
+            cpu_frozen=true
+            # If MangoHud isn't available, this is the only signal — lower confidence
+            if [[ "$mhud_ever_seen" != "true" ]]; then
+                plog "No CPU/ctxsw activity for ${HARNESS_FREEZE_WINDOW}s (no MangoHud) → FREEZE"
+            else
+                plog "No CPU/ctxsw activity for ${HARNESS_FREEZE_WINDOW}s → FREEZE"
+            fi
+            return 1
+        fi
+    else
+        cpu_frozen_since=0
+    fi
+    return 0
+}
+
+# ── Timeout = BOOTED ──
+# BOOTED requires frames advancing (if MangoHud available) AND surviving
+# timeout. Returns 1 when the timeout is reached (verdict decided).
+_harness_check_timeout() {
+    if [[ $elapsed -ge $HARNESS_TIMEOUT ]]; then
+        if [[ "$mhud_ever_seen" == "true" ]] && [[ "$frame_stalled" == "true" ]]; then
+            # Reached timeout but frames aren't advancing — not a clean boot
+            verdict="freeze"
+            mangohud_frozen=true
+            plog "Timeout reached but frames stalled → FREEZE"
+        else
+            verdict="booted"
+            plog "Survived ${HARNESS_TIMEOUT}s → BOOTED"
+        fi
+        return 1
+    fi
+    return 0
+}
+
+# One poll: returns 0 to keep going, 1 once a verdict has been reached.
+# The order matters and is the original order — liveness, then frames, then
+# CPU, then timeout — and the prev_* carry-over happens only if no check
+# fired, exactly as when this was inline and each check used `break`.
+_harness_poll_once() {
+    if ! kill -0 "$game_pid" 2>/dev/null; then
+        _harness_verdict_on_exit
+        return 1
+    fi
+
+    local cur_cpu cur_ctx cur_mhud
+    _harness_sample_signals
+
+    # ── Freeze detection (revised heuristic) ──
+    local frame_stalled=false cpu_stalled=false
+
+    _harness_check_frames || return 1
+    _harness_check_cpu    || return 1
+
+    prev_cpu="$cur_cpu"
+    prev_ctx="$cur_ctx"
+    prev_mhud_lines="$cur_mhud"
+
+    _harness_check_timeout || return 1
+    return 0
+}
+
+# ── Monitor loop ──
+# Freeze heuristic (PM correction):
+#   PRIMARY: MangoHud frame progress (catches busy-spin freezes where CPU advances)
+#   SECONDARY: CPU ticks + context switches stasis (catches wait-hangs)
+#   BOOTED = frames advancing AND survived full timeout
+_harness_monitor() {
     local prev_cpu=0 prev_ctx=0
     local prev_mhud_lines=0
     local frames_frozen_since=0 cpu_frozen_since=0
-    local mhud_ever_seen=false
-    local wall_start
+    # NOT local: mhud_ever_seen outlives the loop — _harness_confidence reads
+    # it to spot signals that disagree. harness_run declares it.
+    local wall_start now
     wall_start="$(date +%s)"
 
     while true; do
         sleep "$HARNESS_POLL_INTERVAL"
-        local now
         now="$(date +%s)"
         elapsed=$((now - wall_start))
-
-        # Check if process is still alive
-        if ! kill -0 "$game_pid" 2>/dev/null; then
-            wait "$game_pid" 2>/dev/null
-            exit_code=$?
-            if [[ $exit_code -ne 0 ]]; then
-                verdict="crash"
-                plog "Process exited with code $exit_code after ${elapsed}s → CRASH"
-            else
-                verdict="booted"
-                plog "Process exited cleanly after ${elapsed}s"
-            fi
-            break
-        fi
-
-        # ── CPU ticks delta ──
-        local cur_cpu
-        cur_cpu="$(harness_cpu_ticks "$game_pid" 2>/dev/null)" || cur_cpu=0
-        local cur_ctx
-        cur_ctx="$(harness_ctx_switches "$game_pid" 2>/dev/null)" || cur_ctx=0
-
-        # ── MangoHud CSV check (PRIMARY freeze signal) ──
-        local cur_mhud
-        cur_mhud="$(harness_mangohud_advancing "$HARNESS_MANGOHUD_DIR" "$prev_mhud_lines" 2>/dev/null)" || cur_mhud="$prev_mhud_lines"
-
-        if [[ "$cur_mhud" -gt 0 ]]; then
-            mhud_ever_seen=true
-        fi
-
-        # ── Freeze detection (revised heuristic) ──
-        local frame_stalled=false cpu_stalled=false
-
-        # PRIMARY: frames not advancing (MangoHud). Catches BOTH wait-hangs AND busy-spins.
-        if [[ "$mhud_ever_seen" == "true" ]] && [[ "$cur_mhud" -eq "$prev_mhud_lines" ]]; then
-            frame_stalled=true
-            if [[ "$frames_frozen_since" -eq 0 ]]; then
-                frames_frozen_since="$now"
-            elif [[ $((now - frames_frozen_since)) -ge $HARNESS_FREEZE_WINDOW ]]; then
-                verdict="freeze"
-                mangohud_frozen=true
-                plog "No frame progress for ${HARNESS_FREEZE_WINDOW}s (MangoHud) → FREEZE"
-                break
-            fi
-        else
-            frames_frozen_since=0
-        fi
-
-        # SECONDARY: CPU ticks + context switches stasis (fallback when MangoHud unavailable)
-        if [[ "$prev_cpu" -gt 0 ]] && [[ "$cur_cpu" -eq "$prev_cpu" ]] \
-            && [[ "$cur_ctx" -eq "$prev_ctx" ]]; then
-            cpu_stalled=true
-            if [[ "$cpu_frozen_since" -eq 0 ]]; then
-                cpu_frozen_since="$now"
-            elif [[ $((now - cpu_frozen_since)) -ge $HARNESS_FREEZE_WINDOW ]]; then
-                verdict="freeze"
-                cpu_frozen=true
-                # If MangoHud isn't available, this is the only signal — lower confidence
-                if [[ "$mhud_ever_seen" != "true" ]]; then
-                    plog "No CPU/ctxsw activity for ${HARNESS_FREEZE_WINDOW}s (no MangoHud) → FREEZE"
-                else
-                    plog "No CPU/ctxsw activity for ${HARNESS_FREEZE_WINDOW}s → FREEZE"
-                fi
-                break
-            fi
-        else
-            cpu_frozen_since=0
-        fi
-
-        prev_cpu="$cur_cpu"
-        prev_ctx="$cur_ctx"
-        prev_mhud_lines="$cur_mhud"
-
-        # ── Timeout = BOOTED ──
-        # BOOTED requires frames advancing (if MangoHud available) AND surviving timeout
-        if [[ $elapsed -ge $HARNESS_TIMEOUT ]]; then
-            if [[ "$mhud_ever_seen" == "true" ]] && [[ "$frame_stalled" == "true" ]]; then
-                # Reached timeout but frames aren't advancing — not a clean boot
-                verdict="freeze"
-                mangohud_frozen=true
-                plog "Timeout reached but frames stalled → FREEZE"
-            else
-                verdict="booted"
-                plog "Survived ${HARNESS_TIMEOUT}s → BOOTED"
-            fi
-            break
-        fi
+        _harness_poll_once || break
     done
+}
 
-    # ── Determine confidence ──
+# ── Phase 4: determine confidence ──
+_harness_confidence() {
     if [[ "$has_mangohud" != "true" ]] && [[ -z "$HARNESS_MOCK" ]]; then
         confidence="medium"
     fi
@@ -800,9 +824,10 @@ harness_run() {
         # This is actually the expected case for busy-spin hangs — still high confidence
         confidence="high"
     fi
+}
 
-    # ── Collect crash artifacts ──
-    local dump_list
+# ── Phase 5: collect crash artifacts ──
+_harness_collect_artifacts() {
     dump_list="$(find "$HARNESS_CRASH_DIR" -name '*.dmp' 2>/dev/null | tr '\n' ',')"
     dump_list="${dump_list%,}"
 
@@ -813,23 +838,25 @@ harness_run() {
     fi
 
     game_log_json="$(harness_game_logs "$appid" "$game_dir" "$prefix_path" 2>/dev/null)" || game_log_json="{}"
+}
 
-    # ── Kill game if still running ──
+# ── Phase 6a: kill the game, drop the sentinel, put the saves back ──
+_harness_cleanup() {
     if kill -0 "$game_pid" 2>/dev/null; then
         plog "Killing game process tree..."
         harness_kill_tree "$game_pid" "$prefix_path"
     fi
 
-    # ── Clean up sentinel ──
     rm -f "$HARNESS_RUN_DIR/${appid}.env" "$HARNESS_RUN_DIR/${appid}.pid" 2>/dev/null || true
 
-    # ── Restore saves if we backed them up ──
     if [[ -n "$saves_backup" ]] && [[ -d "$saves_backup" ]]; then
         harness_restore_saves "$prefix_path" "$saves_backup"
         rm -rf "$saves_backup"
     fi
+}
 
-    # ── Emit verdict JSON ──
+# ── Phase 6b: emit verdict JSON (the ONLY thing on stdout) ──
+_harness_emit_verdict() {
     local game_name
     game_name="$(mods_game_name_of "$appid" 2>/dev/null)" || game_name="$appid"
 
@@ -868,6 +895,69 @@ PY
     local rc=$?
     plog "Verdict saved to $verdict_file"
     return $rc
+}
+
+# Launch a game and monitor it. Emit a verdict.
+# Args: appid [game_exe_override]
+# Env: HARNESS_TIMEOUT, HARNESS_FREEZE_WINDOW, HARNESS_POLL_INTERVAL,
+#      HARNESS_MOCK, HARNESS_BASELINE, HARNESS_NO_STEAM
+# Stdout: verdict JSON only
+harness_run() {
+    # All log output to stderr; only the verdict JSON goes to stdout.
+    plog()  { echo -e "${CYAN:-}[harness]${NC:-} $*" >&2; }
+    pok()   { echo -e "${GREEN:-}[harness]${NC:-} $*" >&2; }
+    pwarn() { echo -e "${YELLOW:-}[harness]${NC:-} $*" >&2; }
+
+    local appid="$1"
+    local game_exe="${2:-}"
+    local ts
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+
+    local game_dir="" prefix_path="" proton_path="" launch_opts=""
+    local game_pid="" exit_code=0
+    local verdict="unknown" elapsed=0
+    local crash_dumps="" proton_log_errors="" cpu_frozen=false mangohud_frozen=false
+    local game_log_json="{}"
+    local has_mangohud=false
+    # Set by the monitor loop, read afterwards by _harness_confidence — so it
+    # is declared here, at the scope that spans both phases, not in the loop.
+    local mhud_ever_seen=false
+    local confidence="high"  # downgraded when signals are missing/disagree
+    local launch_mode="mock"
+    local dump_list=""
+    local saves_backup=""
+
+    # Prepare directories
+    mkdir -p "$HARNESS_STATE_DIR" "$HARNESS_CRASH_DIR" "$HARNESS_MANGOHUD_DIR" \
+             "$HARNESS_RUN_DIR" 2>/dev/null || true
+    rm -f "$HARNESS_CRASH_DIR"/*.dmp 2>/dev/null || true
+
+    # ── Safety: refuse if game already running ──
+    if [[ -z "$HARNESS_MOCK" ]] && harness_game_running "$appid"; then
+        perr "Game (appid $appid) is already running!"
+        perr "Close the game first, then re-run verify."
+        perr "Note: verify wants the desktop idle-ish (gamescope nested window"
+        perr "on a hidden workspace still composites — avoid heavy desktop work)."
+        return 1
+    fi
+
+    _harness_resolve_env || return 1
+
+    # ── Backup saves if --baseline ──
+    if [[ "$HARNESS_BASELINE" == "1" ]]; then
+        saves_backup="/tmp/powos-harness-saves-$appid-$ts"
+        harness_backup_saves "$prefix_path" "$saves_backup"
+    fi
+
+    _harness_launch || return 1
+
+    plog "Game PID: $game_pid (pgid: $(ps -o pgid= -p $game_pid 2>/dev/null | tr -d ' ' || echo '?'))"
+
+    _harness_monitor
+    _harness_confidence
+    _harness_collect_artifacts
+    _harness_cleanup
+    _harness_emit_verdict
 }
 
 # ─── Bisect: binary-search for the breaking mod ──────────────────────────
