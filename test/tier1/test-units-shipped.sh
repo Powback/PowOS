@@ -155,6 +155,12 @@ else
     bad "greenboot still waits for network-online" \
         "5s on the critical path, on a device that boots away from wifi"
 fi
+if [[ -f "$GB" ]] && grep -qE '^After=graphical\.target' "$GB"; then
+    ok "greenboot judges the boot AFTER the desktop is up, not before"
+else
+    bad "the desktop waits on greenboot" \
+        "a verdict about an already-successful boot should not gate the screen"
+fi
 NMW="$ROOT/systemd/NetworkManager-wait-online.service.d/10-powos-bound.conf"
 if [[ -f "$NMW" ]] && grep -qE 'timeout=[1-9]' "$NMW"; then
     ok "the network wait is bounded by a short nm-online timeout"

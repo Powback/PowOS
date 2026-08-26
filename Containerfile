@@ -121,6 +121,8 @@ COPY systemd/NetworkManager-wait-online.service.d/ /usr/lib/systemd/system/Netwo
 # DHCP — 5.0s on the critical path, measured. See the drop-in for why this is
 # safe and why the earlier revert was based on a misdiagnosis.
 COPY systemd/greenboot-healthcheck.service.d/ /usr/lib/systemd/system/greenboot-healthcheck.service.d/
+# Bootloader updates are not something to wait at a blank screen for.
+COPY systemd/bootloader-update.service.d/ /usr/lib/systemd/system/bootloader-update.service.d/
 
 # First-boot appliers. bin/powos-firstboot-apply already shipped (COPY bin/
 # above), but its UNIT never did — so on every installed system the applier sat
