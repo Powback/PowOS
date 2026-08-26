@@ -441,6 +441,41 @@ RUN chmod +x /usr/bin/powos /usr/bin/pinstall /usr/bin/premove /usr/bin/powos-bo
     printf '%s\n' "${POWOS_SRC_COMMIT:-unknown}" > /usr/lib/powos/.powos-src-commit && \
     restorecon -RF /usr /etc 2>/dev/null || true
 
+# ── DECK ONLY: firmware for hardware a Deck does not have ──────────
+#
+# linux-firmware ships blobs for every vendor and lands in every variant. The
+# gpu-amd / gpu-nvidia / gpu-intel capabilities in sources/ scope the DRIVERS
+# per variant, but not these blobs — so a Deck image carries 285M of firmware
+# it can never load.
+#
+# WHAT MUST SURVIVE, because getting this wrong bricks connectivity rather than
+# just wasting space:
+#   amdgpu   the GPU. Obviously.
+#   ath*     THE WIFI. The LCD Deck (Jupiter) uses a Qualcomm Atheros QCA6174,
+#            so ath10k is required. `ath` looks like a removable vendor blob and
+#            is not — it very nearly went into a removal list on that basis.
+#   qcom     Qualcomm; the OLED Deck (Galileo) uses a WCN6855.
+#
+# Only vendors with NO presence on either Deck are removed, and the build fails
+# loudly if a required tree went with them.
+RUN . /etc/os-release 2>/dev/null || true; \
+    case "${VARIANT_ID:-}${IMAGE_ID:-}${POWOS_VARIANT:-}" in \
+      *deck*) \
+        before=$(du -sm /usr/lib/firmware 2>/dev/null | cut -f1); \
+        rm -rf /usr/lib/firmware/nvidia \
+               /usr/lib/firmware/intel \
+               /usr/lib/firmware/i915 \
+               /usr/lib/firmware/mediatek; \
+        for _keep in amdgpu ath10k qcom; do \
+          ls -d /usr/lib/firmware/${_keep}* >/dev/null 2>&1 \
+            || { echo "BUILD ERROR: firmware trim removed $_keep — the Deck needs it (gpu/wifi)"; exit 1; }; \
+        done; \
+        after=$(du -sm /usr/lib/firmware 2>/dev/null | cut -f1); \
+        echo "firmware: ${before}M -> ${after}M (deck: dropped nvidia/intel/i915/mediatek)"; \
+        ;; \
+      *) echo "firmware: left complete (not the deck variant)" ;; \
+    esac
+
 # ── Trim base-image bulk the system never uses ─────────────────────
 #
 # All of this comes from the Bazzite base; PowOS adds none of it. Removing it
