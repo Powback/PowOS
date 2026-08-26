@@ -36,7 +36,7 @@ echo "== first boot needs no network =="
 source "$LIB" >/dev/null 2>&1
 check "installer computes hardware kargs" 'declare -F isv_hardware_kargs'
 check "BOTH install paths get the kargs, not just whole-disk" \
-      'n=$(grep -c "isv_hardware_kargs)" "$LIB"); [ "$n" -ge 2 ]'
+      '[ "$(grep -c "isv_karg_args" "$LIB")" -ge 3 ]'   # definition + 2 callers
 check "the alongside path passes them to bootc install to-filesystem" \
       'grep -q "_hwk2\[@\]" "$LIB"'
 check "installer seeds hardware fixups"   'declare -F isv_seed_hardware_fixups'

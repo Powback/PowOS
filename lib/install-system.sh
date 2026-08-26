@@ -262,6 +262,17 @@ isv__is_handheld() {
     return 1
 }
 
+# Build the --karg argument list for bootc from isv_hardware_kargs.
+# Extracted because both install paths need it and inlining it twice added
+# branch count to two already-large functions for no benefit.
+isv_karg_args() {
+    local k
+    while read -r k; do
+        [[ -n "$k" ]] || continue
+        printf '%s\n' --karg "$k"
+    done < <(isv_hardware_kargs)
+}
+
 # Emit the kargs bazzite-hardware-setup would append, one per line.
 # We run ON the target hardware from the live USB, so this reads the same DMI
 # and the same kernel parameters it will read on first boot.
@@ -327,6 +338,45 @@ isv__deployment_etc() {
     done
     [[ ${#cands[@]} -gt 0 ]] || return 1
     ls -1dt "${cands[@]}" 2>/dev/null | head -1
+}
+
+# Post-install work on the freshly written disk: make its boot menu reachable,
+# and seed the hardware-setup fixup markers.
+#
+# Two jobs on possibly different partitions, so they are tracked separately and
+# the walk continues until both are done rather than stopping at the first hit.
+# Extracted from isv_install_whole_disk, which this pushed from CC 33 to 49.
+isv_finalize_target() {
+    local target="$1" mnt part did_menu=0 did_fix=0
+    for part in $(lsblk -ln -o PATH "$target" 2>/dev/null | tail -n +2); do
+        [[ $did_menu -eq 1 && $did_fix -eq 1 ]] && break
+        [[ -b "$part" ]] || continue
+        mnt=$(mktemp -d) || break
+        if mount "$part" "$mnt" 2>/dev/null; then
+            isv__finalize_one "$mnt" did_menu did_fix
+            umount "$mnt" 2>/dev/null
+        fi
+        rmdir "$mnt" 2>/dev/null
+    done
+    [[ $did_fix -eq 1 ]] \
+        || isv_warn "Could not pre-seed hardware-setup markers; first boot may need a network connection."
+}
+
+# One mounted partition. Flags are passed by NAME so the caller can stop early.
+isv__finalize_one() {
+    local mnt="$1" menc="$2" fixc="$3"
+    if [[ "${!menc}" -eq 0 ]] \
+       && [[ -f "$mnt/boot/grub2/grub.cfg" || -f "$mnt/grub2/grub.cfg" ]]; then
+        isv_boot_menu_reachable "$mnt"
+        printf -v "$menc" 1
+    fi
+    # Suppress bazzite-hardware-setup's no-op karg cleanup, which would
+    # otherwise force a networked rpm-ostree call on first boot.
+    if [[ "${!fixc}" -eq 0 ]] && isv_seed_hardware_fixups "$mnt"; then
+        isv_ok "First boot will not need the network (hardware setup pre-satisfied)."
+        printf -v "$fixc" 1
+    fi
+    return 0
 }
 
 # Seed the fixup markers into a mounted target. Returns 0 only if it wrote
@@ -771,8 +821,7 @@ isv_install_whole_disk() {
 
     # Kernel args this hardware needs, computed from the machine we are running
     # on, so first boot has nothing left to append. See isv_hardware_kargs.
-    local -a _hwk=() ; local _k
-    while read -r _k; do [[ -n "$_k" ]] && _hwk+=(--karg "$_k"); done < <(isv_hardware_kargs)
+    local -a _hwk=(); mapfile -t _hwk < <(isv_karg_args)
     # `|| true`: this library is sourced into a `set -e` caller, and a bare
     # `[[ ]] && cmd` that tests false returns 1. That exact shape aborted the
     # installer one line after "Installation complete!" once already.
@@ -791,30 +840,7 @@ isv_install_whole_disk() {
 
     # Reach into the freshly written target and make its boot menu usable.
     # Done here, while we still know exactly which disk was installed to.
-    # Two jobs, on possibly different partitions, so track them separately and
-    # keep going until both are done rather than breaking on the first hit.
-    local _bm _bp _did_menu=0 _did_fix=0
-    for _bp in $(lsblk -ln -o PATH "$ISV_TARGET" 2>/dev/null | tail -n +2); do
-        [[ $_did_menu -eq 1 && $_did_fix -eq 1 ]] && break
-        [[ -b "$_bp" ]] || continue
-        _bm=$(mktemp -d) || break
-        if mount "$_bp" "$_bm" 2>/dev/null; then
-            if [[ $_did_menu -eq 0 ]] && \
-               [[ -f "$_bm/boot/grub2/grub.cfg" || -f "$_bm/grub2/grub.cfg" ]]; then
-                isv_boot_menu_reachable "$_bm"
-                _did_menu=1
-            fi
-            # Suppress bazzite-hardware-setup's no-op karg cleanup, which would
-            # otherwise force a networked rpm-ostree call on first boot.
-            if [[ $_did_fix -eq 0 ]] && isv_seed_hardware_fixups "$_bm"; then
-                isv_ok "First boot will not need the network (hardware setup pre-satisfied)."
-                _did_fix=1
-            fi
-            umount "$_bm" 2>/dev/null
-        fi
-        rmdir "$_bm" 2>/dev/null
-    done
-    [[ $_did_fix -eq 1 ]] || isv_warn "Could not pre-seed hardware-setup markers; first boot may need a network connection."
+    isv_finalize_target "$ISV_TARGET"
 
     if (( shared_gb > 0 )); then
         # Non-fatal: the OS install already succeeded; a missing games
@@ -995,8 +1021,7 @@ isv_install_alongside() {
     # ALONGSIDE install still had bazzite-hardware-setup calling `rpm-ostree
     # kargs` on first boot, which needs the registry — i.e. the offline boot
     # loop was only fixed for one of the two install modes.
-    local -a _hwk2=() ; local _k2
-    while read -r _k2; do [[ -n "$_k2" ]] && _hwk2+=(--karg "$_k2"); done < <(isv_hardware_kargs)
+    local -a _hwk2=(); mapfile -t _hwk2 < <(isv_karg_args)
     [[ ${#_hwk2[@]} -gt 0 ]] && isv_ok "Pre-applying hardware kargs: ${_hwk2[*]//--karg /}" || true
 
     run_step "install PowOS to filesystem" \

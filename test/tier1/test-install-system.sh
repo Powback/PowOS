@@ -610,7 +610,7 @@ echo "== hardware kargs are wired into the install =="
 check "the computed kargs are passed to bootc install" \
       'grep -q -- "_hwk\[@\]" "$LIBSRC"'
 check "the fixup markers are seeded after install" \
-      'grep -q "isv_seed_hardware_fixups \"\$_bm\"" "$LIBSRC"'
+      'grep -q "isv_seed_hardware_fixups" "$LIBSRC" && grep -q "isv_finalize_target" "$LIBSRC"'
 check "a failure to seed them is reported, not silent" \
       'grep -q "may need a network connection" "$LIBSRC"'
 
