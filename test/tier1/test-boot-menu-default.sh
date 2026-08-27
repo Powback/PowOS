@@ -70,6 +70,22 @@ check "the mask is on the INSTALL entry, beside powos.install=1" \
 check "it is NOT applied to the live or recovery entries" \
       '[ "$(grep -c "systemd.mask=getty@tty1" "$U")" -eq 1 ]'
 
+# The default must be written as the entry's TITLE.
+#
+# Measured under OVMF on the real medium:
+#     set default="powos-install.conf"      -> did NOT match; booted entry 0
+#     set default="Install PowOS to disk"   -> booted that entry
+# grub's blscfg id resolution is not dependable for these entries. Both forms
+# look correct in grub.cfg, which is exactly why the broken one survived.
+check "the default is resolved to the entry TITLE" \
+      'grep -q "live_title=" "$U" && grep -q "s/\^title" "$U"'
+check "a titleless entry warns instead of silently writing a bad id" \
+      'grep -q "has no title line" "$U"'
+check "title extraction works on a real BLS entry" \
+      'd=$(mktemp -d); printf "title Bazzite (ostree:0)\nversion 1\n" > "$d/e.conf"
+       t=$(sed -n "s/^title[[:space:]]\\+//p" "$d/e.conf" | head -1)
+       [ "$t" = "Bazzite (ostree:0)" ]; r=$?; rm -rf "$d"; exit $r'
+
 echo
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]

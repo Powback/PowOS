@@ -796,9 +796,25 @@ _grub_menu_defaults() {
             { print }
         ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
     fi
+    # Use the entry's TITLE, not its filename-id.
+    #
+    # Measured under OVMF on the real medium: set default="powos-install.conf"
+    # did NOT select that entry (GRUB fell back to entry 0, Safe mode), while
+    # set default="Install PowOS to disk" booted it correctly. grub's blscfg id
+    # resolution is not dependable for these entries; the title is what it
+    # actually matches on. Both forms LOOK right in grub.cfg, which is why the
+    # broken one survived so long.
+    local live_title
+    live_title=$(sed -n 's/^title[[:space:]]\+//p' "$boot_mp/loader/entries/$live" 2>/dev/null | head -1)
+    if [[ -n "$live_title" ]]; then
+        live="$live_title"
+    else
+        log_warn "Live entry $live has no title line — falling back to its filename id."
+    fi
+
     # A default that names no entry is indistinguishable from no default at all:
     # GRUB just takes entry 0. Refuse to ship that silently.
-    if [[ ! -f "$boot_mp/loader/entries/$live" ]]; then
+    if [[ "$live" == *.conf && ! -f "$boot_mp/loader/entries/$live" ]]; then
         log_warn "Boot menu default '$live' does not name an entry file — GRUB will fall back to entry 0."
     fi
     log_success "Boot menu: ${timeout}s timeout, default entry '$live'"
