@@ -38,7 +38,10 @@ lib/dracut/90powos-ramboot/ramboot-setup.sh:powos_select_base_variant 16
 lib/game.sh:cmd_game 45
 lib/games-sync.sh:cmd_games_sync 28
 lib/games-sync.sh:gsy_push 16
-lib/games.sh:cmd_games 30
+# +2 over the post-refactor 30: the --size/--disk "needs a value" guards
+# added in b770604. Without them `shift 2` with one arg left spins forever.
+# Two branches that prevent a hang are worth two points.
+lib/games.sh:cmd_games 32
 lib/games.sh:gms_steam_setup 16
 lib/install-router.sh:route_one 33
 lib/install-system.sh:cmd_install_system 22
