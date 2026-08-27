@@ -494,16 +494,16 @@ add_games_partition() {
 # makes OUR three entries order deterministically relative to each other
 # (install before recovery).
 #
-# KNOWN LIMITATION, measured on a real boot: this does NOT move them behind the
-# plain live entry. The menu still comes up as
-#   *Recovery — Safe mode / Install PowOS to disk / Recovery — AI Debug / Bazzite
-# with safe mode highlighted, so plugging the stick in and waiting boots into
-# safe mode (RAM boot off) rather than the live desktop. Adding sort-key was
-# tried and verified NOT to fix that; grub2 does not order sort-key entries
-# after unkeyed ones. Making the live entry the default needs a different
-# mechanism (grubenv saved_entry, or giving the recovery entries a lower
-# version) and is deliberately not attempted here — it is boot-critical, and
-# the current behaviour is safe, just unhelpful.
+# ORDERING is not fixable here: grub2 does not order sort-key entries after
+# unkeyed ones, so the menu is
+#   Recovery — Safe mode / Install PowOS to disk / Live debug / AI Debug / Bazzite
+#
+# The DEFAULT is what matters, and it is fixed — see set_menu_defaults(). This
+# comment used to call safe-mode-as-default harmless. It is not: safe mode
+# carries no powos.install, so choosing it (or letting the 10s
+# timeout expire onto it) means the installer service correctly never runs and
+# the boot lands on a bare login prompt. That cost two installs before anyone
+# read the serial console.
 _bls_sort_key() {
     local file="$1" key="$2"
     grep -q '^sort-key ' "$file" 2>/dev/null && return 0
@@ -762,7 +762,20 @@ _grub_menu_defaults() {
         log_warn "Could not identify the live BLS entry — default entry left as-is."
         return 0
     fi
-    live="${live%.conf}"
+    # KEEP the .conf. grub's blscfg ids each entry by its FILENAME INCLUDING the
+    # extension, so `set default="ostree-1"` matched nothing, GRUB silently fell
+    # back to entry 0, and BLS entries sort filename-DESCENDING — which puts
+    # powos-safe.conf first. Every medium ever written defaulted to
+    # "Recovery — Safe mode", which carries no powos.install, so the installer
+    # service correctly never ran and the boot landed on a login prompt.
+    #
+    # Verified by booting the real medium twice under OVMF and reading the serial:
+    #   set default="ostree-1"       -> *Recovery — Safe mode (RAM boot off)
+    #   set default="ostree-1.conf"  -> *Bazzite (ostree:0)
+    #
+    # The comment above this block used to say a different mechanism was needed
+    # (grubenv saved_entry, or versioning the recovery entries). It was not. It
+    # needed the five characters this line was stripping.
 
     if grep -q '^set default=' "$cfg" && ! grep -q 'BEGIN powos-default' "$cfg"; then
         : # greenboot's conditional default; ours is appended after blscfg below
@@ -778,6 +791,11 @@ _grub_menu_defaults() {
             }
             { print }
         ' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+    fi
+    # A default that names no entry is indistinguishable from no default at all:
+    # GRUB just takes entry 0. Refuse to ship that silently.
+    if [[ ! -f "$boot_mp/loader/entries/$live" ]]; then
+        log_warn "Boot menu default '$live' does not name an entry file — GRUB will fall back to entry 0."
     fi
     log_success "Boot menu: ${timeout}s timeout, default entry '$live'"
 }
