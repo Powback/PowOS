@@ -86,6 +86,7 @@ COPY config/kde/kglobalshortcutsrc        /etc/xdg/kglobalshortcutsrc
 COPY config/kde/kwinrc                    /etc/xdg/kwinrc
 # Dark by default. See the file — this is a default, not an override.
 COPY config/kde/kdeglobals                /etc/xdg/kdeglobals
+COPY config/sddm.conf.d/                  /etc/sddm.conf.d/
 COPY config/etc/systemd/logind.conf.d/60-powos-deck-power.conf /usr/share/powos/logind-deck-power.conf
 COPY config/kde/konsolerc                 /etc/xdg/konsolerc
 COPY config/kde/konsole/                  /usr/share/konsole/
