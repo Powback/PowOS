@@ -136,7 +136,10 @@ check_device() {
     fi
 
     # Don't allow installing to mounted filesystems
-    if mount | grep -q "^$device "; then
+    # Capture first — a SIGPIPE from grep -q exiting early would report a
+    # MOUNTED device as free, and this guard exists to stop writing to one.
+    _mounts=$(mount)
+    if grep -q "^$device " <<< "$_mounts"; then
         log_error "Device is mounted: $device"
         log_error "Unmount all partitions first"
         exit 1
@@ -144,7 +147,8 @@ check_device() {
 
     # Also check partitions
     for part in "${device}"*[0-9]; do
-        if [[ -b "$part" ]] && mount | grep -q "^$part "; then
+        _pmounts=$(mount)
+        if [[ -b "$part" ]] && grep -q "^$part " <<< "$_pmounts"; then
             log_error "Partition is mounted: $part"
             log_error "Unmount it first: sudo umount $part"
             exit 1

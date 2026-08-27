@@ -146,7 +146,11 @@ if [ -n "$B" ] && mount -o ro "$B" "$M" 2>/dev/null; then
   for e in powos-install powos-safe powos-aidebug; do
     [ -f "$E/$e.conf" ] && ok "entry: $e" || bad "entry missing: $e"
   done
-  if grep -h '^options' $E/*.conf 2>/dev/null | tr ' ' '\n' | grep -q '^console=ttyS'; then
+  # Capture first: under pipefail, grep -q exiting early kills the producers and
+  # returns 141, which this negative check would read as 'no serial console' —
+  # a silent PASS for the exact thing it exists to catch.
+  _opts=$(grep -h '^options' $E/*.conf 2>/dev/null | tr ' ' '\n')
+  if grep -q '^console=ttyS' <<< "$_opts"; then
     bad "serial console still present"
   else ok "no serial console on any entry"; fi
   n=$(grep -lc 'plymouth.enable=0' $E/*.conf 2>/dev/null | wc -l)
