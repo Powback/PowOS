@@ -134,10 +134,16 @@ COPY config/tmux/tmux.conf                  /etc/tmux.conf
 # Plasma Login Manager's greeter can wedge into a broken-QML state after a
 # session exit ("...not a function" TypeErrors, black frozen login screen —
 # hit on real hardware 2026-07-09). greeter-watchdog detects that signature
-# and bounces plasmalogin; it NEVER touches an active user session. The
-# plasmalogin.service.d drop-ins also gain Restart=on-failure for the
-# plain-crash case. A broken login screen is exactly the "bricked feeling"
-# the zero-boot-services rule exists to prevent — hence the exception.
+# and bounces plasmalogin; it NEVER touches an active user session. A broken
+# login screen is exactly the "bricked feeling" the zero-boot-services rule
+# exists to prevent — hence the exception.
+#
+# The restart policy is upstream's and stays upstream's: both plasmalogin and
+# sddm already ship Restart=always with StartLimitIntervalSec=30/Burst=2. We
+# used to override that here and every version of the override was worse — the
+# last one weakened Restart to on-failure and *loosened* the limit to 60/3
+# while its own comment claimed to be tightening it. The drop-ins now carry
+# nothing but [Install].
 COPY systemd/greeter-watchdog.service     /usr/lib/systemd/system/greeter-watchdog.service
 COPY systemd/greeter-watchdog.timer       /usr/lib/systemd/system/greeter-watchdog.timer
 COPY systemd/plasmalogin.service.d/       /usr/lib/systemd/system/plasmalogin.service.d/
