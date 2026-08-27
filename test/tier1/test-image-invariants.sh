@@ -129,9 +129,13 @@ if [ ! -e /usr/lib/powos/src/bin/powos-askpass ] && [ ! -x /usr/bin/powos-askpas
   skip "askpass: this image predates powos-askpass (not in its source snapshot)"
 else
 check "powos-askpass is installed and executable" '[ -x /usr/bin/powos-askpass ]'
+# Capture, do NOT pipe into `grep -q`. Under `set -o pipefail` grep exits at the
+# first match, the producer is killed mid-write, and the pipeline returns 141
+# (SIGPIPE) — so this passed on a fast host and failed inside the image. Same
+# trap already fixed once today in test-firstboot-offline.sh.
 check "powos-askpass runs and can describe a sudo prompt" \
-      'POWOS_ASKPASS_DRY_RUN=1 /usr/bin/powos-askpass "[sudo] password for x: " \
-         | grep -q "wants to run a command as root"'
+      'o=$(POWOS_ASKPASS_DRY_RUN=1 /usr/bin/powos-askpass "[sudo] password for x: " 2>&1)
+       grep -q "wants to run a command as root" <<< "$o"'
 check "after sourcing ALL of /etc/profile.d, SUDO_ASKPASS is powos-askpass" \
       'v=$(env -i bash -c "for i in /etc/profile.d/*.sh; do . \$i >/dev/null 2>&1; done;
                            echo \$SUDO_ASKPASS")
