@@ -43,7 +43,14 @@ S podman run --rm --privileged --device /dev/kvm -v /dev:/dev \
 # so "Started sddm" is never a contiguous string in the raw log. Grepping the
 # raw bytes returns 0 matches and calls a perfectly good boot a failure — which
 # it did, twice, on an image that boots fine.
-if S cat /var/tmp/vm-gate.log | sed 's/\x1b\[[0-9;]*m//g' | grep -aqE 'Started sddm|Reached target graphical'; then
+# Capture, then match. NOT `cat | sed | grep -q`: this file runs under
+# `set -o pipefail`, grep -q exits the instant it matches, cat and sed are killed
+# mid-write, and the pipeline returns 141 — so a SUCCESSFUL match reported
+# "did not reach a desktop". The earlier the match appeared, the more reliably
+# the gate rejected a good image. It refused two builds of a raw whose log
+# contains "Started sddm.service".
+_gate_log=$(S cat /var/tmp/vm-gate.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+if grep -aqE 'Started sddm|Reached target graphical' <<< "$_gate_log"; then
     echo "@@ gate passed: this image boots to a desktop"
     exit 0
 fi
