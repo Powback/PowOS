@@ -46,6 +46,30 @@ check "and it is NEVER a recovery entry" \
        live=$(find "$d/loader/entries" -maxdepth 1 -name "*.conf" ! -name "powos-*" -printf "%f\n" | sort -V | tail -1)
        case "$live" in powos-*) r=1 ;; *) r=0 ;; esac; rm -rf "$d"; exit $r'
 
+# The install entry must MASK getty@tty1 on the kernel command line.
+#
+# powos-installer.service stops getty@tty1 in ExecStartPre, but the install
+# entry boots systemd.unit=multi-user.target, and getty.target pulls the getty
+# straight back up afterwards. Captured on a real OVMF boot:
+#
+#     [  OK  ] Started powos-installer.service - ... ("Install PowOS" entry).
+#     [  OK  ] Started getty@tty1.service - Getty on tty1.
+#     bazzite login:
+#
+# The installer WAS running — behind a getty that owned the console. The unit
+# cannot use Conflicts= (that is what once deleted sddm from every boot), so the
+# only place that cannot lose the race is the kernel command line: the mask is
+# in effect before any unit starts.
+#
+# Re-booted with the mask: "Started getty@tty1" appears 0 times.
+echo "== the install entry masks the getty that was stealing tty1 =="
+check "the install entry masks getty@tty1" \
+      'grep -q "systemd.mask=getty@tty1.service" "$U"'
+check "the mask is on the INSTALL entry, beside powos.install=1" \
+      'grep -q "powos.install=1.*systemd.mask=getty@tty1" "$U"'
+check "it is NOT applied to the live or recovery entries" \
+      '[ "$(grep -c "systemd.mask=getty@tty1" "$U")" -eq 1 ]'
+
 echo
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]

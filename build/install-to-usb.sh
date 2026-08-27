@@ -835,7 +835,7 @@ write_bls_entries() {
     # from seizing tty1 and hiding the installer.
     awk '
         /^title / { print "title Install PowOS to disk"; next }
-        /^options / { print $0 " powos.install=1 systemd.unit=multi-user.target plymouth.enable=0"; next }
+        /^options / { print $0 " powos.install=1 systemd.unit=multi-user.target plymouth.enable=0 systemd.mask=getty@tty1.service"; next }
         { print }
     ' "$template" > "$install_entry"
     # Ensure a title line existed; if not, add one (cosmetic only).
