@@ -73,5 +73,21 @@ TTYVHangup=yes
 # If the user quits the installer, drop back to a login rather than looping.
 Restart=no
 
+# Hand tty1 back when we are done.
+#
+# The install entry carries systemd.mask=getty@tty1.service, because otherwise
+# getty.target restarts the getty after our ExecStartPre stops it and the getty
+# wins the console — the installer then runs with nowhere to draw and the user
+# sees "bazzite login". Masking on the kernel command line is the only place
+# that cannot lose that race.
+#
+# But the mask also disables the medium's autologin drop-in, which is the
+# no-keyboard fallback: a Steam Deck's only USB port holds the install stick, so
+# a password prompt is unanswerable. Unmask and start the getty once the
+# installer exits, so a cancelled or failed install lands on an autologin root
+# shell instead of a dead console.
+ExecStopPost=-/usr/bin/systemctl unmask getty@tty1.service
+ExecStopPost=-/usr/bin/systemctl start getty@tty1.service
+
 [Install]
 WantedBy=multi-user.target

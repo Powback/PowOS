@@ -209,6 +209,26 @@ iwz_install_log_text() {
 IWZ_PRINTK_SAVED=""
 IWZ_PRINTK_PATH="${IWZ_PRINTK_PATH:-/proc/sys/kernel/printk}"
 
+# Stop the VT blanking mid-install.
+#
+# The Linux console blanks after ~10 minutes idle. An install is long and mostly
+# silent, so it blanks, the next line of output unblanks it, and the display is
+# re-initialised — which is when amdgpu logs
+#
+#     [drm] Failed to add display topology, DTM TA is not initialized.
+#
+# The message is harmless; the re-initialisation is not. Repeated over a long
+# install it added roughly half an hour on a Deck. consoleblank=0 on the install
+# entry covers the kernel side; this covers a console already running with a
+# blank timer set, and costs nothing when there is no VT to set.
+iwz_console_noblank() {
+    local tty="${IWZ_TTY:-/dev/tty1}"
+    [[ -w "$tty" ]] || return 0
+    command -v setterm >/dev/null 2>&1 || return 0
+    setterm --blank 0 --powersave off >"$tty" 2>/dev/null || true
+    return 0
+}
+
 iwz_console_quiet() {
     IWZ_PRINTK_SAVED=""
     [[ -w "$IWZ_PRINTK_PATH" ]] || return 0
@@ -1051,6 +1071,7 @@ cmd_install_wizard() {
     # to a shell is not left with a silenced console.
     trap iwz_console_restore EXIT INT TERM
     iwz_console_quiet
+    iwz_console_noblank
 
     echo
     echo -e "${CYAN}${BOLD}  PowOS Guided Installer${NC}"
