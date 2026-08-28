@@ -295,12 +295,17 @@ client_resume() {
     local session_id="$1"
     local prompt="${2:-}"
     local cmd="${CLIENT_CMD:-claude}"
+    # Resume is a full invocation like any other, so it needs the same
+    # invocation-wide flags: --yolo (--dangerously-skip-permissions) and the
+    # comms MCP mailbox. Omitting them here silently dropped both on resume.
+    local args=()
+    _claude_add_common args
 
     if [[ -n "$prompt" ]]; then
-        "$cmd" --print --resume "$session_id" "$prompt"
+        "$cmd" --print "${args[@]}" --resume "$session_id" "$prompt"
     else
         # Interactive resume
-        "$cmd" --resume "$session_id"
+        "$cmd" "${args[@]}" --resume "$session_id"
     fi
 }
 
@@ -311,6 +316,11 @@ client_interactive() {
 
     local cmd="${CLIENT_CMD:-claude}"
     local args=()
+    # Interactive is still a full invocation: it needs --yolo
+    # (--dangerously-skip-permissions) and the comms MCP mailbox just as much as
+    # --print does. Without this, `powos ai --yolo -i` still prompted and
+    # interactive agents had no send_message/escalate/wait_for_message.
+    _claude_add_common args
 
     # Add system prompt. Use --append-system-prompt (works in interactive
     # AND print mode) rather than --system-prompt (which Claude Code 2.x
