@@ -8,6 +8,38 @@ Format: `- [ ] <friction>` → `- [x] <friction> — fixed in <commit>`
 
 ## Open
 
+- [ ] **`powos upgrade` calls an installed bootc system "USB-live" and refuses to
+  run.** 2026-08-28: on a box installed to disk, `powos upgrade --check` printed
+  `USB not connected — this box boots the USB-live layered model. Reconnect the
+  PowOS stick`. It is not USB-live: `/` is a composefs overlay from ostree and
+  `/boot` + `/boot/efi` are mounted from `nvme1n1`. The likely confusion is a
+  `POWOS-DATA` btrfs label on an unrelated loop device (`/var/tmp/medium.img`,
+  a 40G disk image left over from USB-layout work), which the detection appears
+  to treat as "the stick is missing" rather than "this machine is installed".
+  Cost: the upgrade path is unusable on installed systems, and the message
+  actively misdirects — it sent this session off telling the user to go find a
+  USB stick they did not need. Detection should key off the *boot* model
+  (ostree deployment vs USB overlay-stack), not off a label that any attached
+  image file can carry.
+
+- [x] **`powos ai --yolo` was silently ignored in interactive and resumed
+  sessions.** `_claude_add_common` appends `--dangerously-skip-permissions` and
+  wires the comms MCP mailbox, but `client_resume` and `client_interactive`
+  built their args without calling it. So `powos ai --yolo "prompt"` skipped
+  permissions while `powos ai --yolo -i` kept prompting, with no error and no
+  warning — the flag was accepted and dropped. The same omission stripped the
+  comms mailbox from every interactive/resumed agent, leaving them with no
+  `send_message` / `escalate` / `wait_for_message`. — fixed in dc125e1.
+
+- [ ] **`powos self push` does `git add -A`, which is unsafe on a shared
+  checkout.** `/var/lib/powos/src` is worked on by several concurrent agent
+  sessions. `add -A` sweeps whatever another session has dirty into your commit;
+  on 2026-08-28 an unrelated `lib/mods/vu.sh` in progress would have shipped
+  with a tmux fix. Worked around by committing from a separate `git worktree` at
+  `origin/master` with explicit pathspecs. `self push` should stage only paths
+  it was given, or refuse when the tree is dirty outside them.
+
+
 - [x] **`powos install <flatpak-app>` aborts when flathub is in both installations.**
   2026-07-24: `powos install prismlauncher` probed correctly, then died with
   `Remote 'flathub' found in multiple installations: 1) system 2) user … error: No
