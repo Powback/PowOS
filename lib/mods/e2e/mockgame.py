@@ -54,7 +54,7 @@ class MockGame(state.Channel):
         self.p1_never_moves = faults.get("p1_never_moves", False)
 
         self.pad_count = 3
-        # Player one is on pad 0 (PlayerOnePadIndex=0), bound from the start.
+        # Player one is on pad 0, bound from the start.
         self.players = [self._mk(1, 10.0, "guid-pad0")]
         self.commands = []
         self.paused = False

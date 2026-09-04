@@ -7,8 +7,8 @@ already using, which always pauses and never joins. Pad 2 joins as player two.
 Pad 3 joins as player three.
 
 That configuration matters more than it looks. Putting player one on the
-keyboard instead (`PlayerOnePadIndex=-1`) is easier to arrange, because then
-every pad is a joiner and the harness needs no reserved pad — but it never
+keyboard instead is easier to arrange, because then every pad is a joiner and
+the harness needs no reserved pad — but it never
 checks the half that actually breaks: whether player one's own controller still
 drives player one once a clone exists. Both directions are asserted here:
 
@@ -213,8 +213,11 @@ def setup(sess):
     sess.log(f"controllers already attached: "
              f"{[d.get('name') for d in sess.baseline_devices] or 'none'}")
 
-    # Pads before the save loads: the first attached pad becomes player one's
-    # (PlayerOnePadIndex=0), so it has to exist before there is a player one.
+    # Pads before the save loads. The mod has no pad-index setting: it treats
+    # whichever device has actually been driving player one as player one's,
+    # observed from their own action set. So pad 1 has to exist before there is
+    # a player one, and case 5 (player one moves on pad 1, before any join) is
+    # what makes the observation happen rather than merely asserting on it.
     sess.add_pads(sess.pad_count or 3)
     sess.log(f"pad roles — 1: player one (reserved), 2: joins as player two, "
              f"3: joins as player three")
