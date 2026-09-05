@@ -164,6 +164,11 @@ class MockGame(state.Channel):
                 self._split = False
         if not self._split or len(xs) < 2:
             return {"active": False, "paneCount": 0, "panes": []}
+        n = min(max(len(xs), 2), 4)
+        if n >= 3:
+            return {"active": True, "paneCount": n, "panes": [
+                {"x": i / n, "y": 0.0, "w": 1.0 / n, "h": 1.0,
+                 "knights": [{"name": f"Knight {i}"}]} for i in range(n)]}
         return {"active": True, "paneCount": 2, "panes": [
             {"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0, "knights": []},
             {"x": 0.5, "y": 0.0, "w": 0.5, "h": 1.0, "knights": []},
@@ -273,7 +278,13 @@ class MockGame(state.Channel):
         """Pad N drives whichever player is bound to device N."""
         if self.no_input:
             return
-        step = -2.0 if self.moves_left else 2.0
+        # 6 units a step, not 2. Nothing asserts the exact distance (the
+        # thresholds are "moved more than 1" and "drifted less than 0.5"), but
+        # every walk-to-a-position helper iterates until it arrives — and
+        # prove-mode replays the whole scenario once per injected fault, so a
+        # small step multiplied out into a ten-minute run for a suite whose
+        # entire value is being fast enough to run before every real one.
+        step = -6.0 if self.moves_left else 6.0
         guid = f"guid-pad{pad_index}"
         for p in self.players:
             if p["pos"] is None:
@@ -368,6 +379,7 @@ FAULTS = [
     ("never_zooms", "the camera widens when the group spreads"),
     ("never_splits",
      "the screen splits when the Knights spread, and merges when they regroup"),
+    ("never_splits", "three Knights divide the screen three ways"),
     ("never_merges",
      "the screen splits when the Knights spread, and merges when they regroup"),
     ("same_device", "a third pad joins as player three"),

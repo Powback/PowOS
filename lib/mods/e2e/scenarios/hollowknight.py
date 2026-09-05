@@ -899,6 +899,89 @@ def t_join_p3(sess):
             f"on index {p2.get('deviceIndex')}")
 
 
+@test("three Knights divide the screen three ways")
+def t_split_three(sess):
+    """The pane count follows the roster, not just the two-player case.
+
+    Two panes are halves; three are equal strips. Nothing about the two-Knight
+    case exercises that, and "up to four panes" was a deliberate design choice
+    rather than a side effect, so it gets its own coverage.
+    """
+    st = sess.channel.state()
+    if st.get("playerCount", 1) < 3:
+        raise Skip("needs three Knights")
+    if st.get("split") is None:
+        raise Skip("this build does not report a split layout")
+
+    _ensure_unpaused(sess)
+    r = sess.channel.command("setcfg", key="MaxZoomFactor", value="1.0")
+    assert r.get("ok"), f"could not lower the zoom ceiling for this case: {r}"
+    restore = r.get("was", 1.6)
+    try:
+        # Player one one way, player three the other, player two left where it
+        # stands — three distinct positions along the axis, which is what a
+        # three-way split needs to be meaningful.
+        _wait_playing(sess)
+        # Centre ALL three first. The previous case regroups everyone onto
+        # player one with a leash, which leaves the whole party wherever that
+        # put them — last run, jammed against the left wall, where walking
+        # further left does nothing and the span never reaches the threshold.
+        for pad, n in ((P1_PAD, 1), (P2_PAD, 2), (P3_PAD, 3)):
+            _walk_to_room_middle(sess, pad, n)
+        _wait_still(sess)
+
+        p1, p3 = sess.pad(P1_PAD), sess.pad(P3_PAD)
+        t0 = time.time()
+        while time.time() - t0 < 2.5:
+            p1.stick(-1.0, 0.0)
+            p3.stick(1.0, 0.0)
+            time.sleep(0.2)
+        p1.neutral()
+        p3.neutral()
+        time.sleep(0.5)
+
+        st3 = sess.channel.state()
+        split, cam3 = _cam_split(st3), _cam(st3)
+        sess.dump_state("08-split-three")
+        sess.shot("08-split-three")
+
+        # Could this run create the condition at all? Three Knights have to be
+        # driven to three separate places, and Hollow Knight's terrain does not
+        # cooperate with choreography — walls, ledges and drops stop a Knight
+        # wherever they please, and a run reached here with all three inside
+        # ten world units. A group that still fits in one view is a group the
+        # mod is RIGHT not to split for, so that is reported as a setup that
+        # did not happen rather than as a mod failure.
+        if not _asked_for_zoom(cam3):
+            raise Skip(
+                f"the three Knights could not be driven far enough apart in this "
+                f"room to outgrow one view (needed {cam3.get('neededHalfHeight')} "
+                f"against an un-zoomed {cam3.get('baseHalfHeight')}), so the "
+                f"three-way split was never asked for")
+
+        assert split.get("active"), (
+            f"three Knights spread past what one view can hold and the screen "
+            f"stayed whole (paneCount {split.get('paneCount')}): needed "
+            f"{cam3.get('neededHalfHeight')} of view against an allowed "
+            f"{cam3.get('allowedHalfHeight')}")
+        panes = split.get("panes") or []
+        assert len(panes) == 3, (
+            f"three Knights should divide the screen three ways, got {len(panes)}")
+
+        widths = sorted(round(p["w"], 3) for p in panes)
+        heights = sorted(round(p["h"], 3) for p in panes)
+        assert widths[0] == widths[-1] and heights[0] == heights[-1], (
+            f"panes must be identical in size; got widths {widths}, heights {heights}")
+
+        held = sorted(len(p.get("knights") or []) for p in panes)
+        assert held == [1, 1, 1], (
+            f"each pane should hold exactly one Knight, got {held} — a pane with "
+            f"none renders empty and a pane with two defeats the split")
+        return f"three equal panes, one Knight each ({widths[0]:.2f} x {heights[0]:.2f})"
+    finally:
+        sess.channel.command("setcfg", key="MaxZoomFactor", value=str(restore))
+
+
 @test("each Knight has its own health pool")
 def t_separate_health(sess):
     st = sess.channel.state()
