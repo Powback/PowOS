@@ -122,6 +122,7 @@ def _hold_right(sess, pad_index, seconds=1.5):
     st = sess.channel.state()
     numbers = [p["n"] for p in st.get("players", [])]
     tracks = {n: [_x(_player(st, n))] for n in numbers}
+    scenes = {st.get("scene")}
 
     pad = sess.pad(pad_index)
     pad.stick(1.0, 0.0)
@@ -129,12 +130,14 @@ def _hold_right(sess, pad_index, seconds=1.5):
     while time.time() - t0 < seconds:
         time.sleep(0.25)
         now = sess.channel.state()
+        scenes.add(now.get("scene"))
         for n in numbers:
             tracks[n].append(_x(_player(now, n)))
     pad.neutral()
     time.sleep(0.6)
 
     final = sess.channel.state()
+    scenes.add(final.get("scene"))
     out = {}
     for n in numbers:
         tracks[n].append(_x(_player(final, n)))
@@ -147,7 +150,55 @@ def _hold_right(sess, pad_index, seconds=1.5):
              + "; ".join(f"P{n}: " + (", ".join(f"{v:.1f}" for v in tracks[n]
                                                 if v is not None))
                          for n in numbers))
+    out["_scenes"] = scenes
     return out
+
+
+def _hold_right_same_room(sess, pad_index, seconds=1.5, attempts=3):
+    """Hold right, and insist the whole hold happened in ONE room.
+
+    Rooms are authored at the world origin, so an x in Crossroads_47 and an x
+    in Crossroads_19 are not in the same coordinate space. A hold that walks
+    into a transition therefore produces a delta that measures nothing — and
+    it reads as the most alarming failure this rig has, "the Knight moved and
+    was then yanked backwards", which is what a broken leash looks like. One
+    run was spent on that.
+
+    Retrying is safe rather than lucky: a transition drops you just inside the
+    next room, so the retry starts far from the edge it just crossed. If the
+    room still changes every time, the run cannot measure this and says so
+    instead of guessing.
+    """
+    for attempt in range(attempts):
+        _wait_playing(sess)
+        tracks = _hold_right(sess, pad_index, seconds)
+        scenes = tracks.pop("_scenes", set())
+        if len(scenes) <= 1:
+            return tracks
+        sess.warn(f"the room changed during the hold ({' -> '.join(sorted(s or '?' for s in scenes))}); "
+                  f"x is per-room so that measurement is meaningless — retaking "
+                  f"(attempt {attempt + 2}/{attempts})")
+    raise AssertionError(
+        "every attempt to measure this walked through a room transition, so "
+        "the Knight's movement could not be measured in one coordinate space. "
+        "This is the harness failing to find still ground, not the mod.")
+
+
+def _wait_playing(sess, timeout=20):
+    """Block until the game is actually in gameplay.
+
+    Inputs do nothing during a level transition: the mod's join gate wants
+    GameState.PLAYING, and vanilla's own pause path wants PLAYING or PAUSED.
+    So a Start press sent during EXITING_LEVEL is swallowed by the engine and
+    the case that sent it reports the mod ignoring a controller. Nothing is
+    weakened by waiting — a press that lands mid-transition tests nothing.
+    """
+    ok, last = sess.channel.wait_for(
+        lambda s: s.get("gameState") == "PLAYING", timeout=timeout)
+    if not ok:
+        sess.warn(f"still not in gameplay after {timeout}s "
+                  f"(gameState {(last or {}).get('gameState')})")
+    return ok
 
 
 def _assert_drives_only(sess, pad_index, driven, others, tracks):
@@ -182,6 +233,7 @@ def _assert_drives_only(sess, pad_index, driven, others, tracks):
 
 def _join_with_start(sess, pad_index, expect_count, timeout=25):
     """Press Start on a pad and wait for the roster to grow."""
+    _wait_playing(sess)
     before = sess.channel.state().get("playerCount")
     sess.log(f"pad {pad_index + 1}: pressing START (players now {before})")
     sess.pad(pad_index).press("START", 0.12)
@@ -388,7 +440,7 @@ def t_p1_baseline(sess):
     have completely different causes.
     """
     _ensure_unpaused(sess)
-    tracks = _hold_right(sess, P1_PAD)
+    tracks = _hold_right_same_room(sess, P1_PAD)
     delta = _assert_drives_only(sess, P1_PAD, driven=1, others=[], tracks=tracks)
     sess.dump_state("01-p1-baseline")
     return f"player one travelled {delta:+.2f} units on pad 1, before any join"
@@ -433,7 +485,7 @@ def t_p2_moves(sess):
     if st.get("playerCount", 1) < 2:
         raise Skip("player two is not in the session")
     _ensure_unpaused(sess)
-    tracks = _hold_right(sess, P2_PAD)
+    tracks = _hold_right_same_room(sess, P2_PAD)
     delta = _assert_drives_only(sess, P2_PAD, driven=2, others=[1], tracks=tracks)
     sess.shot("03-player-two-moved")
     sess.dump_state("03-player-two-moved")
@@ -455,7 +507,7 @@ def t_p1_after_join(sess):
     if st.get("playerCount", 1) < 2:
         raise Skip("player two never joined, so nothing was rebound")
     _ensure_unpaused(sess)
-    tracks = _hold_right(sess, P1_PAD)
+    tracks = _hold_right_same_room(sess, P1_PAD)
     try:
         delta = _assert_drives_only(sess, P1_PAD, driven=1, others=[2], tracks=tracks)
     except AssertionError as ex:
