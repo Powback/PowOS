@@ -186,3 +186,50 @@ def steam_launch(appid, log=print):
     subprocess.Popen(["steam", "-applaunch", str(appid)],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
+
+
+def direct_launch(conf, log=print):
+    """Run the game through Proton without Steam. A FALLBACK, never the default.
+
+    The Steam path above is the one that matters: it satisfies Steamworks DRM
+    and uses the player's own Proton build and launch options, so a run
+    reproduces what they actually play. This does not replace it.
+
+    But a Steam client that is running and signed OUT accepts -applaunch and
+    then does nothing, which is indistinguishable from a broken mod for 180
+    seconds. So when the Steam path produces no process, and the game's config
+    supplies a direct command, this runs it and says loudly that it did.
+
+    It will not rescue every game, and it does not rescue Hollow Knight. That
+    one checks how it was started and shuts itself down — "Application was not
+    launched through Steam! Shutting down..." in its own Player.log — after
+    getting far enough for BepInEx to load and a mod's debug server to answer,
+    which makes the failure look like a mod crash rather than a licence check.
+    For titles like that, a signed-in Steam is not a convenience, and this
+    fallback only buys a clearer error.
+    """
+    cmd = conf.get("E2E_DIRECT_LAUNCH")
+    if not cmd:
+        return False
+    expand = conf.get("_expand")
+    if expand:
+        cmd = expand(cmd)
+    env = dict(os.environ)
+    raw_env = conf.get("E2E_DIRECT_ENV") or ""
+    if expand:
+        raw_env = expand(raw_env)
+    for pair in raw_env.split(";"):
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            env[k.strip()] = v.strip()
+    log("[e2e] FALLBACK: launching through Proton directly — Steam did not "
+        "start the game. This bypasses the client, so anything that depends "
+        "on it (cloud saves, overlay, DRM) is not being exercised.")
+    try:
+        subprocess.Popen(["/bin/bash", "-lc", cmd], env=env,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return True
+    except Exception as ex:
+        log(f"[e2e] direct launch failed: {ex}")
+        return False

@@ -533,9 +533,14 @@ def launch(session, conf, timeout):
         if pattern:
             log(f"waiting for a process matching '{pattern}'…")
             pid = proc_mod.wait_for_process(pattern, timeout=min(timeout, 180))
+            conf["_expand"] = lambda v: expand(v, conf)
+            if not pid and proc_mod.direct_launch(conf, log=log):
+                pid = proc_mod.wait_for_process(pattern, timeout=120)
             if not pid:
                 err(f"no process matching '{pattern}' after "
-                    f"{min(timeout, 180)}s — did the game start?")
+                    f"{min(timeout, 180)}s — did the game start? A signed-out "
+                    f"Steam client accepts -applaunch and does nothing, which "
+                    f"looks exactly like this; check its connection log.")
                 return False
             log(f"game pid {pid}")
 
