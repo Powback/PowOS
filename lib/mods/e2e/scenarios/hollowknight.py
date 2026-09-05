@@ -112,6 +112,61 @@ def _ensure_unpaused(sess):
     return False
 
 
+def _walk_to_room_middle(sess, pad_index, player_n, timeout=6.0):
+    """Put a Knight in the middle third of the room before measuring it.
+
+    Blind repositioning does not work here. Walking a fixed time away from the
+    edge you just crossed can walk you straight over the OPPOSITE edge, and
+    then the measuring hold crosses back — which is exactly how this case
+    burned all four attempts. Rooms are authored from the world origin, so the
+    channel's sceneWidth makes the middle a known destination rather than a
+    guess. Aborts the moment the room changes; nothing here is asserted on.
+    """
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        st = sess.channel.state()
+        width = st.get("sceneWidth") or 0
+        x = _x(_player(st, player_n))
+        if not width or width <= 0 or x is None:
+            return False
+        scene0 = st.get("scene")
+        lo, hi = width / 3.0, width * 2.0 / 3.0
+        if lo <= x <= hi:
+            sess.pad(pad_index).neutral()
+            return True
+        sess.pad(pad_index).stick(1.0 if x < lo else -1.0, 0.0)
+        time.sleep(0.3)
+        if sess.channel.state().get("scene") != scene0:
+            sess.pad(pad_index).neutral()
+            return False
+    sess.pad(pad_index).neutral()
+    return False
+
+
+def _wait_still(sess, timeout=4.0, tol=0.15):
+    """Wait until every Knight has stopped moving on its own.
+
+    A measurement is only meaningful from rest. A room transition walks the
+    hero into the new room under the game's control, a fresh clone settles
+    under gravity, and the leash can snap someone across the screen — all of
+    which look exactly like "that Knight is reading someone else's input" if
+    the hold starts while they are still in motion. Costs a fraction of a
+    second and removes a whole class of false accusation.
+    """
+    prev, t0 = None, time.time()
+    while time.time() - t0 < timeout:
+        st = sess.channel.state()
+        xs = {p["n"]: _x(_player(st, p["n"])) for p in st.get("players", [])}
+        if prev is not None and all(
+                a is not None and (b := prev.get(n)) is not None
+                and abs(a - b) < tol for n, a in xs.items()):
+            return True
+        prev = xs
+        time.sleep(0.25)
+    sess.warn(f"the Knights were still drifting after {timeout}s; measuring anyway")
+    return False
+
+
 def _hold_right(sess, pad_index, seconds=1.5):
     """Hold right on one pad; return {player number: (start_x, end_x, peak_x)}.
 
@@ -154,7 +209,7 @@ def _hold_right(sess, pad_index, seconds=1.5):
     return out
 
 
-def _hold_right_same_room(sess, pad_index, seconds=1.5, attempts=3):
+def _hold_right_same_room(sess, pad_index, driven_n, seconds=1.5, attempts=4):
     """Hold right, and insist the whole hold happened in ONE room.
 
     Rooms are authored at the world origin, so an x in Crossroads_47 and an x
@@ -171,13 +226,21 @@ def _hold_right_same_room(sess, pad_index, seconds=1.5, attempts=3):
     """
     for attempt in range(attempts):
         _wait_playing(sess)
+        if attempt:
+            # A transition drops you just inside the next room, so walking the
+            # SAME way again heads for its far side. Walk to the middle of
+            # whichever room we are in now instead, which is a known place
+            # rather than a guessed distance.
+            _walk_to_room_middle(sess, pad_index, driven_n)
+            time.sleep(0.4)
+        _wait_still(sess)
         tracks = _hold_right(sess, pad_index, seconds)
         scenes = tracks.pop("_scenes", set())
         if len(scenes) <= 1:
             return tracks
         sess.warn(f"the room changed during the hold ({' -> '.join(sorted(s or '?' for s in scenes))}); "
-                  f"x is per-room so that measurement is meaningless — retaking "
-                  f"(attempt {attempt + 2}/{attempts})")
+                  f"x is per-room so that measurement is meaningless — backing "
+                  f"off the edge and retaking (attempt {min(attempt + 2, attempts)}/{attempts})")
     raise AssertionError(
         "every attempt to measure this walked through a room transition, so "
         "the Knight's movement could not be measured in one coordinate space. "
@@ -229,6 +292,71 @@ def _assert_drives_only(sess, pad_index, driven, others, tracks):
             f"handler that is not its own, which is the exact bug this "
             f"architecture exists to avoid")
     return delta
+
+
+def _cam(state):
+    return (state or {}).get("camera") or {}
+
+
+def _asked_for_zoom(cam):
+    """Did the group need more view than the game's own un-zoomed one?"""
+    need, base = cam.get("neededHalfHeight"), cam.get("baseHalfHeight")
+    return bool(need and base and need > base * 1.05)
+
+
+def _got_zoom(cam):
+    """Did the camera actually give it?"""
+    cur, base = cam.get("currentHalfHeight"), cam.get("baseHalfHeight")
+    return bool(cur and base and cur > base * 1.02)
+
+
+def _spread_apart(sess, seconds=2.0, attempts=3):
+    """Drive player one left and player two right at once, in ONE room.
+
+    Returns (widest_fov_seen, starting_fov). Retries on a room change for the
+    same reason the movement holds do: a transition repositions everyone, so
+    the spread it produced is not the spread the camera was asked to frame.
+    """
+    for attempt in range(attempts):
+        _wait_playing(sess)
+        _wait_still(sess)
+        st = sess.channel.state()
+        scene0 = st.get("scene")
+        started = _cam(st).get("fieldOfView")
+        widest = started or 0.0
+        asked = got = False
+        peak = {}
+
+        p1, p2 = sess.pad(P1_PAD), sess.pad(P2_PAD)
+        p1.stick(-1.0, 0.0)
+        p2.stick(1.0, 0.0)
+        t0 = time.time()
+        changed = False
+        while time.time() - t0 < seconds:
+            time.sleep(0.2)
+            now = sess.channel.state()
+            if now.get("scene") != scene0:
+                changed = True
+                break
+            cam = _cam(now)
+            fov = cam.get("fieldOfView")
+            if fov is not None:
+                widest = max(widest, fov)
+            if _asked_for_zoom(cam):
+                asked = True
+                if _got_zoom(cam):
+                    got = True
+                    peak = cam           # the sample the pass actually rests on
+        p1.neutral()
+        p2.neutral()
+        time.sleep(0.4)
+
+        if not changed:
+            return widest, started, asked, got, peak
+        sess.warn(f"the room changed while spreading the group; retaking "
+                  f"(attempt {min(attempt + 2, attempts)}/{attempts})")
+    raise AssertionError(
+        "could not spread the group without crossing a room transition")
 
 
 def _join_with_start(sess, pad_index, expect_count, timeout=25):
@@ -440,7 +568,7 @@ def t_p1_baseline(sess):
     have completely different causes.
     """
     _ensure_unpaused(sess)
-    tracks = _hold_right_same_room(sess, P1_PAD)
+    tracks = _hold_right_same_room(sess, P1_PAD, 1)
     delta = _assert_drives_only(sess, P1_PAD, driven=1, others=[], tracks=tracks)
     sess.dump_state("01-p1-baseline")
     return f"player one travelled {delta:+.2f} units on pad 1, before any join"
@@ -485,7 +613,7 @@ def t_p2_moves(sess):
     if st.get("playerCount", 1) < 2:
         raise Skip("player two is not in the session")
     _ensure_unpaused(sess)
-    tracks = _hold_right_same_room(sess, P2_PAD)
+    tracks = _hold_right_same_room(sess, P2_PAD, 2)
     delta = _assert_drives_only(sess, P2_PAD, driven=2, others=[1], tracks=tracks)
     sess.shot("03-player-two-moved")
     sess.dump_state("03-player-two-moved")
@@ -507,7 +635,7 @@ def t_p1_after_join(sess):
     if st.get("playerCount", 1) < 2:
         raise Skip("player two never joined, so nothing was rebound")
     _ensure_unpaused(sess)
-    tracks = _hold_right_same_room(sess, P1_PAD)
+    tracks = _hold_right_same_room(sess, P1_PAD, 1)
     try:
         delta = _assert_drives_only(sess, P1_PAD, driven=1, others=[2], tracks=tracks)
     except AssertionError as ex:
@@ -518,6 +646,59 @@ def t_p1_after_join(sess):
     sess.dump_state("04-p1-after-join")
     return (f"player one still travelled {delta:+.2f} units on pad 1 with a "
             f"clone on the field; player two held still")
+
+
+@test("the camera widens when the group spreads")
+def t_camera_widens(sess):
+    """The camera must actually zoom out — on the real render parameter.
+
+    Hollow Knight's world camera is PERSPECTIVE: tk2dCamera drives it as
+    fieldOfView / ZoomFactor and calls ResetProjectionMatrix, so
+    cam.orthographicSize is an inert leftover. The mod wrote its zoom there
+    until v0.7.12, which meant AutoZoom did nothing in every released build —
+    and, because that inert 480 dwarfed every real distance, the screen
+    leash's "the camera cannot frame this" test was never true either. Both
+    features were dead and nothing said so.
+
+    So this asserts on fieldOfView, the number the renderer actually uses.
+    """
+    st = sess.channel.state()
+    if st.get("playerCount", 1) < 2:
+        raise Skip("needs two Knights to have a group to frame")
+    cam = st.get("camera") or {}
+    if not cam.get("present"):
+        raise Skip("the state channel is not reporting a camera")
+
+    assert cam.get("orthographic") is False, (
+        "this test assumes the perspective camera Hollow Knight actually uses; "
+        f"the channel reports orthographic={cam.get('orthographic')}")
+
+    _ensure_unpaused(sess)
+    widest, started, asked, got, peak = _spread_apart(sess)
+    assert started is not None and widest is not None, (
+        "the state channel reported no fieldOfView, so zoom cannot be measured")
+
+    # Self-calibrating: the camera is only obliged to widen once the group
+    # actually needs more view than the game's own. Without this, a hold that
+    # simply did not separate the Knights far enough reads exactly like a
+    # camera refusing to zoom, and those have opposite meanings.
+    assert asked, (
+        f"the Knights never spread far enough to need more than the base view "
+        f"(fieldOfView {started:.2f} -> peak {widest:.2f} deg), so this run "
+        f"could not test zoom at all. Harness problem, not a mod verdict")
+    assert got, (
+        f"the group needed more view than the base and the camera refused to "
+        f"widen: fieldOfView peaked at {widest:.2f} deg against an un-zoomed "
+        f"{cam.get('tk2dSettingsFov')} deg. On this camera zoom is "
+        f"fieldOfView / ZoomFactor — a zoom written to orthographicSize is "
+        f"silently discarded")
+
+    sess.dump_state("05-camera-widened")
+    return (f"at widest spread the group needed {peak.get('neededHalfHeight', 0):.1f} "
+            f"world units of view against an un-zoomed "
+            f"{peak.get('baseHalfHeight', 0):.1f}, and the camera gave "
+            f"{peak.get('currentHalfHeight', 0):.1f} "
+            f"(fieldOfView {started:.1f} -> {widest:.1f} deg)")
 
 
 @test("a third pad joins as player three")

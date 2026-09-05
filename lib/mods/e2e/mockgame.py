@@ -52,6 +52,11 @@ class MockGame(state.Channel):
         # exists, then stops.
         self.p1_dead_after_join = faults.get("p1_dead_after_join", False)
         self.p1_never_moves = faults.get("p1_never_moves", False)
+        # The camera never widens however far the group spreads. This is what
+        # HKCouchCoop actually did until v0.7.12: it wrote zoom into
+        # cam.orthographicSize, which is inert on Hollow Knight's perspective
+        # camera, so AutoZoom was silently a no-op in every released build.
+        self.never_zooms = faults.get("never_zooms", False)
 
         self.pad_count = 3
         # Player one is on pad 0, bound from the start.
@@ -113,6 +118,7 @@ class MockGame(state.Channel):
             "version": "0.6.8", "gameVersion": "1.5.12620",
             "time": time.time() % 1000, "frame": 1,
             "scene": None if self.no_save else "Crossroads_47",
+            "sceneWidth": 60.0, "sceneHeight": 20.0,
             "gameState": "MAIN_MENU" if self.no_save else "PLAYING",
             "paused": self.paused,
             "inGameplay": not self.no_save,
@@ -121,7 +127,37 @@ class MockGame(state.Channel):
             "extraCount": len(self.players) - 1,
             "lastJoinRejection": None,
             "players": copy.deepcopy(self.players),
+            "camera": self._camera(),
             "devices": self._devices(),
+        }
+
+    BASE_FOV = 25.431
+
+    def _camera(self):
+        """A perspective camera that widens as the group spreads, like the
+        real one: fieldOfView = settings fov / ZoomFactor, so widening means a
+        ZoomFactor below one."""
+        xs = [p["pos"]["x"] for p in self.players
+              if p.get("pos") and p["pos"].get("x") is not None]
+        spread = (max(xs) - min(xs)) if len(xs) >= 2 else 0.0
+        # Modelled the way the real one works, at this fake world's scale (a
+        # held stick moves a Knight 2 units): widen once the group needs more
+        # than the un-zoomed view holds, capped at MaxZoomFactor.
+        base_half, margin = 2.0, 0.5
+        needed = spread / 2.0 + margin
+        zoom = 1.0
+        if not self.never_zooms and needed > base_half:
+            zoom = max(1.0 / 1.6, base_half / needed)
+        base_h = base_half
+        return {
+            "present": True, "orthographic": False, "orthographicSize": 480,
+            "neededHalfHeight": needed, "allowedHalfHeight": base_h * 1.6,
+            "baseHalfHeight": base_h, "currentHalfHeight": base_h / zoom,
+            "fieldOfView": self.BASE_FOV / zoom, "aspect": 1.678,
+            "pixelWidth": 1515, "pixelHeight": 903,
+            "rect": {"x": 0, "y": 0, "w": 1, "h": 1},
+            "tk2dZoomFactor": zoom, "tk2dSettingsFov": self.BASE_FOV,
+            "tk2dProjection": "Perspective",
         }
 
     def command(self, name, **args):
@@ -275,6 +311,7 @@ FAULTS = [
     ("moves_left", "player two moves on pad 2, and player one does not"),
     ("p1_dead_after_join",
      "player one STILL moves on his own pad after player two joined"),
+    ("never_zooms", "the camera widens when the group spreads"),
     ("same_device", "a third pad joins as player three"),
     ("never_leaves", "holding Start removes a player"),
     ("leave_keeps_device", "holding Start removes a player"),
