@@ -1326,18 +1326,33 @@ def t_transition_together(sess):
     direction = 1.0 if (width and x < width / 2.0) else -1.0
     pad = sess.pad(P1_PAD)
     changed = None
-    t0 = time.time()
-    while time.time() - t0 < 25 * _pace(sess):
-        pad.stick(direction, 0.0)
-        _nap(sess, 0.25)
-        now = sess.channel.state()
-        if now.get("scene") and now.get("scene") != before_scene:
-            changed = now.get("scene")
+    # Try the nearer edge first, then the other one. Heading for the closer
+    # side is a good guess and not a reliable one: a room's nearer edge may
+    # have no door at all, or terrain in the way, and this case then skipped
+    # depending only on where the previous case happened to leave the party.
+    # Walking the other way costs nothing when the first attempt works.
+    for way in (direction, -direction):
+        t0 = time.time()
+        # Each direction gets its own full budget rather than half of the old
+        # one. Splitting 25s into two 14s halves made the near edge cheaper to
+        # give up on than it used to be, so a door that was previously reached
+        # in ~20s now times out and the case skips "in either direction" —
+        # trading one skip for another.
+        while time.time() - t0 < 24 * _pace(sess):
+            pad.stick(way, 0.0)
+            _nap(sess, 0.25)
+            now = sess.channel.state()
+            if now.get("scene") and now.get("scene") != before_scene:
+                changed = now.get("scene")
+                break
+        pad.neutral()
+        if changed:
             break
-    pad.neutral()
+        sess.log(f"no transition {'right' if way > 0 else 'left'} of "
+                 f"{before_scene}; trying the other way")
     if not changed:
         raise Skip(f"could not reach a room transition from {before_scene} "
-                   f"within the time allowed, so nothing was tested")
+                   f"in either direction, so nothing was tested")
 
     # Let the arrival settle: vanilla walks player one in for a few frames
     # after it reports him in position, and the mod collects the party across
