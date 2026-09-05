@@ -808,6 +808,12 @@ def t_split_screen(sess):
         assert len(panes) == 2, (
             f"two Knights should divide the screen two ways, got {len(panes)}")
 
+        # In rotating mode the screen is cut into regions, not rectangles, so
+        # the pane rects describe nothing drawn. The mod says which it is.
+        if split.get("paneRectsApply") is False:
+            sess.log("rotating split active — pane rectangles do not apply, "
+                     "skipping the geometry assertions")
+            return (f"screen split {len(panes)} ways with a rotating divider")
         widths = sorted(round(p["w"], 3) for p in panes)
         heights = sorted(round(p["h"], 3) for p in panes)
         assert widths[0] == widths[-1] and heights[0] == heights[-1], (
@@ -987,6 +993,12 @@ def t_split_three(sess):
         assert len(panes) == 3, (
             f"three Knights should divide the screen three ways, got {len(panes)}")
 
+        # In rotating mode the screen is cut into regions, not rectangles, so
+        # the pane rects describe nothing drawn. The mod says which it is.
+        if split.get("paneRectsApply") is False:
+            sess.log("rotating split active — pane rectangles do not apply, "
+                     "skipping the geometry assertions")
+            return (f"screen split {len(panes)} ways with a rotating divider")
         widths = sorted(round(p["w"], 3) for p in panes)
         heights = sorted(round(p["h"], 3) for p in panes)
         assert widths[0] == widths[-1] and heights[0] == heights[-1], (
