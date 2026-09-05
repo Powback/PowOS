@@ -59,6 +59,10 @@ class MockGame(state.Channel):
         self.never_zooms = faults.get("never_zooms", False)
         self.never_splits = faults.get("never_splits", False)
         self.never_merges = faults.get("never_merges", False)
+        # Friendly fire that never lands — what the game does on its own,
+        # because a nail drops the hero layer and heroes have no IHitResponder.
+        self.no_friendly_fire = faults.get("no_friendly_fire", False)
+        self.friendly_fire = False
         self.max_zoom = 1.6
         self.leash = -1.0
         self._split = False
@@ -208,6 +212,11 @@ class MockGame(state.Channel):
             if key == "MaxZoomFactor":
                 was, self.max_zoom = self.max_zoom, float(args.get("value", 1.6))
                 return {"ok": True, "did": "setcfg", "was": was, "now": self.max_zoom}
+            if key == "FriendlyFire":
+                was = self.friendly_fire
+                self.friendly_fire = str(args.get("value", "false")).lower() == "true"
+                return {"ok": True, "did": "setcfg", "was": was,
+                        "now": self.friendly_fire}
             if key == "LeashDistance":
                 was, self.leash = self.leash, float(args.get("value", -1))
                 # A positive leash pulls the extras to player one. Modelled as
@@ -274,6 +283,20 @@ class MockGame(state.Channel):
             return
         self._join(pad_index)
 
+    def pad_attack(self, pad_index):
+        """A swing. Hits any OTHER player standing on the attacker."""
+        if not self.friendly_fire or self.no_friendly_fire:
+            return
+        guid = f"guid-pad{pad_index}"
+        attacker = next((p for p in self.players if p.get("deviceGuid") == guid), None)
+        if attacker is None or not attacker.get("pos"):
+            return
+        for p in self.players:
+            if p is attacker or not p.get("pos"):
+                continue
+            if abs(p["pos"]["x"] - attacker["pos"]["x"]) <= 5.0:
+                p["health"] = max(0, p.get("health", 6) - 1)
+
     def pad_stick(self, pad_index, x):
         """Pad N drives whichever player is bound to device N."""
         if self.no_input:
@@ -310,6 +333,9 @@ class FakePad:
         self.devnode = f"/dev/input/fake{index}"
 
     def press(self, control, seconds=0.09):
+        if control.upper() == "X":
+            self.game.pad_attack(self.index)
+            return
         self.game._held = seconds
         self.game.pad_press(self.index, control)
 
@@ -381,6 +407,7 @@ FAULTS = [
     ("p1_dead_after_join",
      "player one STILL moves on his own pad after player two joined"),
     ("never_zooms", "the camera widens when the group spreads"),
+    ("no_friendly_fire", "friendly fire lets one Knight hurt another"),
     ("never_splits",
      "the screen splits when the Knights spread, and merges when they regroup"),
     ("never_splits", "three Knights divide the screen three ways"),

@@ -39,8 +39,15 @@ except Exception as _ex:                                    # pragma: no cover
 # Names are the harness's vocabulary, deliberately pad-neutral: a scenario says
 # "press A", never "press BTN_SOUTH".
 
+# X and Y are NOT the compass points they look like. The Linux gamepad spec
+# names the face buttons by position, and on an Xbox-style pad that makes
+# BTN_WEST the X button and BTN_NORTH the Y button — the opposite of the
+# obvious reading. Getting this backwards sends Y when a scenario asks for X,
+# which in Hollow Knight is the difference between swinging the nail (Action3,
+# physical X) and pressing something unbound: the input vanishes silently and
+# the feature under test looks broken.
 BUTTONS = {
-    "A": "BTN_SOUTH", "B": "BTN_EAST", "X": "BTN_NORTH", "Y": "BTN_WEST",
+    "A": "BTN_SOUTH", "B": "BTN_EAST", "X": "BTN_WEST", "Y": "BTN_NORTH",
     "START": "BTN_START", "SELECT": "BTN_SELECT", "BACK": "BTN_SELECT",
     "TL": "BTN_TL", "TR": "BTN_TR", "LB": "BTN_TL", "RB": "BTN_TR",
     "THUMBL": "BTN_THUMBL", "THUMBR": "BTN_THUMBR",

@@ -1001,6 +1001,62 @@ def t_split_three(sess):
         sess.channel.command("setcfg", key="MaxZoomFactor", value=str(restore))
 
 
+@test("friendly fire lets one Knight hurt another")
+def t_friendly_fire(sess):
+    """Off by default, and structurally impossible without the mod's help.
+
+    A nail's DamageEnemies drops layer 9 — the hero layer — when collecting
+    targets, and the damage it would deal goes through HitTaker to an
+    IHitResponder, which heroes do not have. Two independent reasons a swing
+    passes through a teammate, so this asserts a hit actually lands rather than
+    that a toggle exists.
+    """
+    st = sess.channel.state()
+    if st.get("playerCount", 1) < 2:
+        raise Skip("needs a teammate to hit")
+    _ensure_unpaused(sess)
+
+    r = sess.channel.command("setcfg", key="FriendlyFire", value="true")
+    assert r.get("ok"), f"could not enable friendly fire: {r}"
+    was_ff = r.get("was", False)
+    # Stand them together, deterministically. Walking two Knights into nail
+    # range is choreography this terrain does not cooperate with; a short fixed
+    # leash puts the extras on player one wherever they are.
+    r2 = sess.channel.command("setcfg", key="LeashDistance", value="4")
+    leash_was = r2.get("was", -1)
+    try:
+        _wait_playing(sess)
+        _wait_still(sess)
+        before = {p["n"]: p.get("health") for p in sess.channel.state().get("players", [])}
+
+        # Swing player two's nail a few times; they are standing on player one.
+        for _ in range(6):
+            sess.pad(P2_PAD).press("X", 0.08)
+            _nap(sess, 0.35)
+        _nap(sess, 0.5)
+
+        after_state = sess.channel.state()
+        after = {p["n"]: p.get("health") for p in after_state.get("players", [])}
+        sess.dump_state("09-friendly-fire")
+
+        hurt = [n for n in before
+                if before.get(n) is not None and after.get(n) is not None
+                and after[n] < before[n]]
+        assert hurt, (
+            f"nobody lost a mask while player two swung at point-blank range "
+            f"with friendly fire on (health before {before}, after {after}). "
+            f"A nail drops the hero layer when collecting targets, so this only "
+            f"works if the mod deals the hit itself")
+        assert 2 not in hurt, (
+            f"player two hurt ITSELF swinging ({before.get(2)} -> {after.get(2)}) "
+            f"— the attacker must be excluded from its own swing")
+        return (f"player two's nail took {before.get(1)} -> {after.get(1)} masks "
+                f"off player one")
+    finally:
+        sess.channel.command("setcfg", key="FriendlyFire", value=str(was_ff).lower())
+        sess.channel.command("setcfg", key="LeashDistance", value=str(leash_was))
+
+
 @test("each Knight has its own health pool")
 def t_separate_health(sess):
     st = sess.channel.state()
