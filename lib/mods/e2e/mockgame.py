@@ -57,6 +57,10 @@ class MockGame(state.Channel):
         # cam.orthographicSize, which is inert on Hollow Knight's perspective
         # camera, so AutoZoom was silently a no-op in every released build.
         self.never_zooms = faults.get("never_zooms", False)
+        self.never_splits = faults.get("never_splits", False)
+        self.never_merges = faults.get("never_merges", False)
+        self.max_zoom = 1.6
+        self._split = False
 
         self.pad_count = 3
         # Player one is on pad 0, bound from the start.
@@ -128,10 +132,41 @@ class MockGame(state.Channel):
             "lastJoinRejection": None,
             "players": copy.deepcopy(self.players),
             "camera": self._camera(),
+            "split": self._split_layout(),
             "devices": self._devices(),
         }
 
     BASE_FOV = 25.431
+    BASE_HALF = 12.0
+    MARGIN = 0.5
+
+    def _split_layout(self):
+        """Two equal side-by-side panes once the group outgrows the view.
+
+        Hysteresis on both edges, like the mod: a single threshold sits exactly
+        where a marginal group would tear the screen apart and back together
+        every few frames.
+        """
+        xs = [p["pos"]["x"] for p in self.players
+              if p.get("pos") and p["pos"].get("x") is not None]
+        spread = (max(xs) - min(xs)) if len(xs) >= 2 else 0.0
+        needed = spread / 2.0 + self.MARGIN
+        allowed = self.BASE_HALF * self.max_zoom
+        m = 0.15
+        if self._split:
+            self._split = needed > allowed * (1 - m)
+            if self.never_merges:
+                self._split = True
+        else:
+            self._split = needed > allowed * (1 + m)
+            if self.never_splits:
+                self._split = False
+        if not self._split or len(xs) < 2:
+            return {"active": False, "paneCount": 0, "panes": []}
+        return {"active": True, "paneCount": 2, "panes": [
+            {"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0, "knights": []},
+            {"x": 0.5, "y": 0.0, "w": 0.5, "h": 1.0, "knights": []},
+        ]}
 
     def _camera(self):
         """A perspective camera that widens as the group spreads, like the
@@ -143,11 +178,11 @@ class MockGame(state.Channel):
         # Modelled the way the real one works, at this fake world's scale (a
         # held stick moves a Knight 2 units): widen once the group needs more
         # than the un-zoomed view holds, capped at MaxZoomFactor.
-        base_half, margin = 2.0, 0.5
+        base_half, margin = self.BASE_HALF, self.MARGIN
         needed = spread / 2.0 + margin
         zoom = 1.0
         if not self.never_zooms and needed > base_half:
-            zoom = max(1.0 / 1.6, base_half / needed)
+            zoom = max(1.0 / self.max_zoom, base_half / needed)
         base_h = base_half
         return {
             "present": True, "orthographic": False, "orthographicSize": 480,
@@ -162,6 +197,11 @@ class MockGame(state.Channel):
 
     def command(self, name, **args):
         self.commands.append((name, args))
+        if name == "setcfg":
+            if args.get("key") == "MaxZoomFactor":
+                was, self.max_zoom = self.max_zoom, float(args.get("value", 1.6))
+                return {"ok": True, "did": "setcfg", "was": was, "now": self.max_zoom}
+            return {"ok": True, "did": "setcfg", "was": None}
         before = len(self.players)
         if name == "join":
             self._join(len(self.players) - 1)
@@ -312,6 +352,10 @@ FAULTS = [
     ("p1_dead_after_join",
      "player one STILL moves on his own pad after player two joined"),
     ("never_zooms", "the camera widens when the group spreads"),
+    ("never_splits",
+     "the screen splits when the Knights spread, and merges when they regroup"),
+    ("never_merges",
+     "the screen splits when the Knights spread, and merges when they regroup"),
     ("same_device", "a third pad joins as player three"),
     ("never_leaves", "holding Start removes a player"),
     ("leave_keeps_device", "holding Start removes a player"),

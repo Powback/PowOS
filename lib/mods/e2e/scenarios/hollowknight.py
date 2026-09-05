@@ -112,7 +112,7 @@ def _ensure_unpaused(sess):
     return False
 
 
-def _walk_to_room_middle(sess, pad_index, player_n, timeout=6.0):
+def _walk_to_room_middle(sess, pad_index, player_n, timeout=14.0, band=None):
     """Put a Knight in the middle third of the room before measuring it.
 
     Blind repositioning does not work here. Walking a fixed time away from the
@@ -130,16 +130,19 @@ def _walk_to_room_middle(sess, pad_index, player_n, timeout=6.0):
         if not width or width <= 0 or x is None:
             return False
         scene0 = st.get("scene")
-        lo, hi = width / 3.0, width * 2.0 / 3.0
+        b = band if band is not None else max(width * 0.1, 2.0)
+        lo, hi = width / 2.0 - b, width / 2.0 + b
         if lo <= x <= hi:
             sess.pad(pad_index).neutral()
             return True
         sess.pad(pad_index).stick(1.0 if x < lo else -1.0, 0.0)
-        time.sleep(0.3)
+        time.sleep(0.2)
         if sess.channel.state().get("scene") != scene0:
             sess.pad(pad_index).neutral()
             return False
     sess.pad(pad_index).neutral()
+    sess.warn(f"player {player_n} did not reach the middle of the room within "
+              f"{timeout}s — it may be walled in or the room may be very wide")
     return False
 
 
@@ -298,6 +301,10 @@ def _cam(state):
     return (state or {}).get("camera") or {}
 
 
+def _cam_split(state):
+    return (state or {}).get("split") or {}
+
+
 def _asked_for_zoom(cam):
     """Did the group need more view than the game's own un-zoomed one?"""
     need, base = cam.get("neededHalfHeight"), cam.get("baseHalfHeight")
@@ -319,6 +326,12 @@ def _spread_apart(sess, seconds=2.0, attempts=3):
     """
     for attempt in range(attempts):
         _wait_playing(sess)
+        # Start from the middle of the room. Spreading needs runway on BOTH
+        # sides, and by this point in a run the Knights have usually been left
+        # wherever the previous case stopped them — often against an edge,
+        # where walking apart just crosses a transition and measures nothing.
+        _walk_to_room_middle(sess, P1_PAD, 1)
+        _walk_to_room_middle(sess, P2_PAD, 2)
         _wait_still(sess)
         st = sess.channel.state()
         scene0 = st.get("scene")
@@ -334,6 +347,8 @@ def _spread_apart(sess, seconds=2.0, attempts=3):
         changed = False
         while time.time() - t0 < seconds:
             time.sleep(0.2)
+            p1.stick(-1.0, 0.0)
+            p2.stick(1.0, 0.0)
             now = sess.channel.state()
             if now.get("scene") != scene0:
                 changed = True
@@ -699,6 +714,103 @@ def t_camera_widens(sess):
             f"{peak.get('baseHalfHeight', 0):.1f}, and the camera gave "
             f"{peak.get('currentHalfHeight', 0):.1f} "
             f"(fieldOfView {started:.1f} -> {widest:.1f} deg)")
+
+
+@test("the screen splits when the Knights spread, and merges when they regroup")
+def t_split_screen(sess):
+    """Dynamic split-screen: one pane per Knight, along the axis they parted on.
+
+    The threshold is deliberately moved for this case. Split engages only once
+    the group needs more view than the camera may give, which at the shipped
+    MaxZoomFactor is roughly forty world units of separation — further than two
+    Knights can walk apart without leaving the room, so the case would test
+    room transitions instead of split-screen. Dropping the zoom ceiling to 1.0
+    makes the same code path reachable indoors. The threshold moves; the logic
+    under test does not.
+    """
+    st = sess.channel.state()
+    if st.get("playerCount", 1) < 2:
+        raise Skip("needs two Knights to have anything to split between")
+    if st.get("split") is None:
+        raise Skip("this build does not report a split layout")
+
+    _ensure_unpaused(sess)
+    r = sess.channel.command("setcfg", key="MaxZoomFactor", value="1.0")
+    assert r.get("ok"), f"could not lower the zoom ceiling for this case: {r}"
+    restore = r.get("was", 1.6)
+    try:
+        _spread_apart(sess)
+        st = sess.channel.state()
+        sess.dump_state("07-split-attempt")
+        split, cam = _cam_split(st), _cam(st)
+        xs = [p["pos"]["x"] for p in st.get("players", [])
+              if p.get("pos") and p["pos"].get("x") is not None]
+        spread = (max(xs) - min(xs)) if len(xs) > 1 else 0.0
+        assert split.get("active"), (
+            f"the screen stayed whole (paneCount {split.get('paneCount')}) with "
+            f"the Knights {spread:.1f} world units apart: the group needed "
+            f"{cam.get('neededHalfHeight')} of view against an allowed "
+            f"{cam.get('allowedHalfHeight')} (un-zoomed {cam.get('baseHalfHeight')}). "
+            f"Split engages above allowed * (1 + SplitMergeMargin)")
+
+        panes = split.get("panes") or []
+        assert len(panes) == 2, (
+            f"two Knights should divide the screen two ways, got {len(panes)}")
+
+        widths = sorted(round(p["w"], 3) for p in panes)
+        heights = sorted(round(p["h"], 3) for p in panes)
+        assert widths[0] == widths[-1] and heights[0] == heights[-1], (
+            f"panes must be identical in size — DarknessCameraEffect resizes "
+            f"its RenderTexture whenever the camera's pixel dimensions change, "
+            f"so uneven panes thrash a RenderTexture every frame. Got widths "
+            f"{widths}, heights {heights}")
+
+        # The cut must follow the axis they ACTUALLY parted on, which is not
+        # necessarily the one they were driven along: Hollow Knight's terrain
+        # routinely leaves one Knight far above the other, and a run that
+        # assumed "they walked left and right, so the split is vertical" called
+        # a correct horizontal split a bug.
+        ys = [p["pos"]["y"] for p in st.get("players", [])
+              if p.get("pos") and p["pos"].get("y") is not None]
+        spread_y = (max(ys) - min(ys)) if len(ys) > 1 else 0.0
+        side_by_side = spread >= spread_y
+        axis = "x" if side_by_side else "y"
+        if side_by_side:
+            assert widths[0] < heights[0], (
+                f"the Knights are further apart along x ({spread:.1f}) than y "
+                f"({spread_y:.1f}), so the screen should be cut into side-by-side "
+                f"panes (narrow and tall); got {widths[0]:.2f} wide by "
+                f"{heights[0]:.2f} high")
+        else:
+            assert widths[0] > heights[0], (
+                f"the Knights are further apart along y ({spread_y:.1f}) than x "
+                f"({spread:.1f}), so the screen should be cut into stacked panes "
+                f"(wide and short); got {widths[0]:.2f} wide by "
+                f"{heights[0]:.2f} high")
+
+        # And it must come back together. Stand them close, not merely both
+        # near the middle: needed half-height has a floor of ZoomMargin, so
+        # with the ceiling held at 1.0 for this case the gap between "needs
+        # more view" and "does not" is only a few world units wide. Players who
+        # have actually regrouped are next to each other.
+        _walk_to_room_middle(sess, P2_PAD, 2, band=2.0)
+        _walk_to_room_middle(sess, P1_PAD, 1, band=2.0)
+        _wait_still(sess)
+        ok, last = sess.channel.wait_for(
+            lambda s: not (_cam_split(s).get("active")), timeout=8)
+        lc = _cam(last)
+        assert ok, (
+            f"the Knights regrouped and the screen stayed split "
+            f"(paneCount {_cam_split(last).get('paneCount')}) — a split that "
+            f"cannot merge is worse than no split at all. The group needed "
+            f"{lc.get('neededHalfHeight')} of view against an allowed "
+            f"{lc.get('allowedHalfHeight')}; merge happens below "
+            f"allowed * (1 - SplitMergeMargin)")
+        sess.dump_state("07-split-merged")
+        return (f"screen split two ways across {axis} (apart {spread:.1f} by "
+                f"{spread_y:.1f}), then merged when they regrouped")
+    finally:
+        sess.channel.command("setcfg", key="MaxZoomFactor", value=str(restore))
 
 
 @test("a third pad joins as player three")
