@@ -334,6 +334,10 @@ class FakeSession:
         self.evidence_dir = tmpdir
         self.save_slot = None
         self.conf = {}
+        # A second against this fake game is worth a fiftieth of one: it has no
+        # physics to settle and no frames to wait for, and prove-mode replays
+        # the whole scenario once per injected fault.
+        self.time_scale = 0.02
         self.messages = []
 
     def log(self, m):

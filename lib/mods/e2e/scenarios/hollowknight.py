@@ -107,7 +107,7 @@ def _ensure_unpaused(sess):
         sess.pad(P1_PAD).press("START", 0.12)
         ok, _ = sess.channel.wait_for(lambda s: not s.get("paused"), timeout=6)
         if ok:
-            time.sleep(0.5)
+            _nap(sess, 0.5)
             return True
     return False
 
@@ -122,8 +122,8 @@ def _walk_to_room_middle(sess, pad_index, player_n, timeout=14.0, band=None):
     channel's sceneWidth makes the middle a known destination rather than a
     guess. Aborts the moment the room changes; nothing here is asserted on.
     """
-    t0 = time.time()
-    while time.time() - t0 < timeout:
+    t0, budget = time.time(), timeout * _pace(sess)
+    while time.time() - t0 < budget:
         st = sess.channel.state()
         width = st.get("sceneWidth") or 0
         x = _x(_player(st, player_n))
@@ -136,7 +136,7 @@ def _walk_to_room_middle(sess, pad_index, player_n, timeout=14.0, band=None):
             sess.pad(pad_index).neutral()
             return True
         sess.pad(pad_index).stick(1.0 if x < lo else -1.0, 0.0)
-        time.sleep(0.2)
+        _nap(sess, 0.2)
         if sess.channel.state().get("scene") != scene0:
             sess.pad(pad_index).neutral()
             return False
@@ -157,7 +157,8 @@ def _wait_still(sess, timeout=4.0, tol=0.15):
     second and removes a whole class of false accusation.
     """
     prev, t0 = None, time.time()
-    while time.time() - t0 < timeout:
+    budget = timeout * _pace(sess)
+    while time.time() - t0 < budget:
         st = sess.channel.state()
         xs = {p["n"]: _x(_player(st, p["n"])) for p in st.get("players", [])}
         if prev is not None and all(
@@ -165,7 +166,7 @@ def _wait_still(sess, timeout=4.0, tol=0.15):
                 and abs(a - b) < tol for n, a in xs.items()):
             return True
         prev = xs
-        time.sleep(0.25)
+        _nap(sess, 0.25)
     sess.warn(f"the Knights were still drifting after {timeout}s; measuring anyway")
     return False
 
@@ -184,15 +185,15 @@ def _hold_right(sess, pad_index, seconds=1.5):
 
     pad = sess.pad(pad_index)
     pad.stick(1.0, 0.0)
-    t0 = time.time()
-    while time.time() - t0 < seconds:
-        time.sleep(0.25)
+    t0, budget = time.time(), seconds * _pace(sess)
+    while time.time() - t0 < budget:
+        _nap(sess, 0.25)
         now = sess.channel.state()
         scenes.add(now.get("scene"))
         for n in numbers:
             tracks[n].append(_x(_player(now, n)))
     pad.neutral()
-    time.sleep(0.6)
+    _nap(sess, 0.6)
 
     final = sess.channel.state()
     scenes.add(final.get("scene"))
@@ -235,7 +236,7 @@ def _hold_right_same_room(sess, pad_index, driven_n, seconds=1.5, attempts=4):
             # whichever room we are in now instead, which is a known place
             # rather than a guessed distance.
             _walk_to_room_middle(sess, pad_index, driven_n)
-            time.sleep(0.4)
+            _nap(sess, 0.4)
         _wait_still(sess)
         tracks = _hold_right(sess, pad_index, seconds)
         scenes = tracks.pop("_scenes", set())
@@ -295,6 +296,24 @@ def _assert_drives_only(sess, pad_index, driven, others, tracks):
             f"handler that is not its own, which is the exact bug this "
             f"architecture exists to avoid")
     return delta
+
+
+def _pace(sess):
+    """How long a second is worth against whatever is on the other end.
+
+    The waits here are sized for a real game: physics settles, animations play,
+    a held stick moves a Knight over time. The fake game prove-mode runs
+    against has none of that — it steps when a pad is pushed and answers
+    instantly — so every one of those seconds is spent asleep for nothing, once
+    per injected fault. That turned a check whose whole value is being cheap
+    enough to run before every real launch into a twelve-minute wait, and a
+    guard people skip is not a guard.
+    """
+    return getattr(sess, "time_scale", 1.0)
+
+
+def _nap(sess, seconds):
+    time.sleep(seconds * _pace(sess))
 
 
 def _cam(state):
@@ -362,10 +381,10 @@ def _spread_apart(sess, seconds=2.0, attempts=3):
         p1, p2 = sess.pad(P1_PAD), sess.pad(P2_PAD)
         p1.stick(-1.0, 0.0)
         p2.stick(1.0, 0.0)
-        t0 = time.time()
+        t0, budget = time.time(), seconds * _pace(sess)
         changed = False
-        while time.time() - t0 < seconds:
-            time.sleep(0.2)
+        while time.time() - t0 < budget:
+            _nap(sess, 0.2)
             p1.stick(-1.0, 0.0)
             p2.stick(1.0, 0.0)
             now = sess.channel.state()
@@ -383,7 +402,7 @@ def _spread_apart(sess, seconds=2.0, attempts=3):
                     peak = cam           # the sample the pass actually rests on
         p1.neutral()
         p2.neutral()
-        time.sleep(0.4)
+        _nap(sess, 0.4)
 
         if not changed:
             return widest, started, asked, got, peak
@@ -931,14 +950,14 @@ def t_split_three(sess):
         _wait_still(sess)
 
         p1, p3 = sess.pad(P1_PAD), sess.pad(P3_PAD)
-        t0 = time.time()
-        while time.time() - t0 < 2.5:
+        t0, budget = time.time(), 2.5 * _pace(sess)
+        while time.time() - t0 < budget:
             p1.stick(-1.0, 0.0)
             p3.stick(1.0, 0.0)
-            time.sleep(0.2)
+            _nap(sess, 0.2)
         p1.neutral()
         p3.neutral()
-        time.sleep(0.5)
+        _nap(sess, 0.5)
 
         st3 = sess.channel.state()
         split, cam3 = _cam_split(st3), _cam(st3)
