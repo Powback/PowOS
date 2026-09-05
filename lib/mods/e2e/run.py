@@ -389,6 +389,30 @@ def load_scenario(name):
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+def _other_run_pid(game):
+    """PID of another live run for this game, or None.
+
+    Cheap and deliberately conservative: reads /proc rather than keeping a lock
+    file, so a run killed with SIGKILL leaves nothing stale behind to clear.
+    """
+    me = os.getpid()
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except OSError:
+        return None
+    for p in pids:
+        if int(p) == me:
+            continue
+        try:
+            with open(f"/proc/{p}/cmdline", "rb") as fh:
+                parts = fh.read().decode("utf-8", "replace").split("\0")
+        except (OSError, IOError):
+            continue
+        if any(part.endswith("e2e/run.py") for part in parts) and game in parts:
+            return int(p)
+    return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="powos mods e2e",
                                  description="End-to-end test a modded game")
@@ -404,6 +428,16 @@ def main(argv=None):
                     help="report readiness of every prerequisite and exit")
     ap.add_argument("--out", help="verdict JSON path")
     a = ap.parse_args(argv)
+
+    other = _other_run_pid(a.game)
+    if other:
+        err(f"another e2e run for '{a.game}' is already live (pid {other}).")
+        err("Two runs drive the SAME game through the SAME window: they create")
+        err("separate virtual pads, so the game sees twice as many controllers,")
+        err("player one's pad becomes ambiguous, and each run reads the other's")
+        err("input as the mod misrouting controllers. The failures look exactly")
+        err("like real bugs and are not. Stop that run first, or wait for it.")
+        return 2
 
     conf_path = find_conf(a.game)
     if not conf_path:

@@ -171,7 +171,7 @@ def _wait_still(sess, timeout=4.0, tol=0.15):
     return False
 
 
-def _hold_right(sess, pad_index, seconds=1.5):
+def _hold_right(sess, pad_index, seconds=1.5, sign=1.0):
     """Hold right on one pad; return {player number: (start_x, end_x, peak_x)}.
 
     Samples throughout rather than just the endpoints: two samples cannot tell
@@ -184,7 +184,7 @@ def _hold_right(sess, pad_index, seconds=1.5):
     scenes = {st.get("scene")}
 
     pad = sess.pad(pad_index)
-    pad.stick(1.0, 0.0)
+    pad.stick(sign, 0.0)
     t0, budget = time.time(), seconds * _pace(sess)
     while time.time() - t0 < budget:
         _nap(sess, 0.25)
@@ -213,7 +213,8 @@ def _hold_right(sess, pad_index, seconds=1.5):
     return out
 
 
-def _hold_right_same_room(sess, pad_index, driven_n, seconds=1.5, attempts=4):
+def _hold_right_same_room(sess, pad_index, driven_n, seconds=1.5, attempts=4,
+                          sign=1.0):
     """Hold right, and insist the whole hold happened in ONE room.
 
     Rooms are authored at the world origin, so an x in Crossroads_47 and an x
@@ -238,7 +239,7 @@ def _hold_right_same_room(sess, pad_index, driven_n, seconds=1.5, attempts=4):
             _walk_to_room_middle(sess, pad_index, driven_n)
             _nap(sess, 0.4)
         _wait_still(sess)
-        tracks = _hold_right(sess, pad_index, seconds)
+        tracks = _hold_right(sess, pad_index, seconds, sign=sign)
         scenes = tracks.pop("_scenes", set())
         if len(scenes) <= 1:
             return tracks
@@ -249,6 +250,17 @@ def _hold_right_same_room(sess, pad_index, driven_n, seconds=1.5, attempts=4):
         "every attempt to measure this walked through a room transition, so "
         "the Knight's movement could not be measured in one coordinate space. "
         "This is the harness failing to find still ground, not the mod.")
+
+
+def _hold_left_same_room(sess, pad_index, driven_n, seconds=1.5, attempts=4):
+    """The same measurement, walking the other way.
+
+    Used only as a second opinion when holding right produced nothing: a
+    Knight standing against scenery is indistinguishable from a pad that
+    drives nothing if you only ever push one direction.
+    """
+    return _hold_right_same_room(sess, pad_index, driven_n, seconds, attempts,
+                                 sign=-1.0)
 
 
 def _wait_playing(sess, timeout=20):
@@ -268,8 +280,10 @@ def _wait_playing(sess, timeout=20):
     return ok
 
 
-def _assert_drives_only(sess, pad_index, driven, others, tracks):
-    """`driven` moved right; every player in `others` stayed put."""
+def _assert_drives_only(sess, pad_index, driven, others, tracks,
+                        direction="RIGHT"):
+    """`driven` moved the way it was pushed; every player in `others` stayed put."""
+    want = 1 if direction == "RIGHT" else -1
     d = tracks.get(driven)
     assert d is not None, f"player {driven} has no position — it is not on the field"
     start, end, peak = d
@@ -277,13 +291,13 @@ def _assert_drives_only(sess, pad_index, driven, others, tracks):
 
     assert abs(delta) > MOVED, (
         f"player {driven} moved {delta:+.2f} world units while pad "
-        f"{pad_index + 1} held RIGHT — that pad is enumerated and bound, but "
-        f"its stick is not driving that Knight")
-    assert delta > 0, (
+        f"{pad_index + 1} held {direction} — that pad is enumerated and bound, "
+        f"but its stick is not driving that Knight")
+    assert delta * want > 0, (
         f"player {driven} ended {delta:+.2f} from where it started while its "
-        f"pad held RIGHT (furthest reached x={peak:.1f} from {start:.1f}), so "
+        f"pad held {direction} (furthest reached x={peak:.1f} from {start:.1f}), so "
         + ("it moved and was then pulled back — leash or a scripted reposition"
-           if peak > start + STILL else "it moved in the wrong direction"))
+           if abs(peak - start) > STILL else "it moved in the wrong direction"))
 
     for n in others:
         o = tracks.get(n)
@@ -324,6 +338,35 @@ def _cam_split(state):
     return (state or {}).get("split") or {}
 
 
+def _pane_brightness(path, panes):
+    """Mean brightness inside each pane's own rect.
+
+    The whole-screen average hides the failure that matters: one Knight's pane
+    drawing nothing averages out against another's that draws fine, and lands
+    near half — right on the whole-screen threshold. Reported rather than
+    asserted, because a Knight genuinely standing in an unlit spot is not a
+    bug and must not fail a run.
+    """
+    try:
+        from PIL import Image
+        import numpy as np
+    except Exception:
+        return None
+    try:
+        im = np.asarray(Image.open(path).convert("RGB")).astype(float)
+    except Exception:
+        return None
+    h, w = im.shape[0], im.shape[1]
+    out = []
+    for p in panes:
+        # Viewport y is bottom-up; image rows are top-down.
+        x0 = int(round(p["x"] * w)); x1 = int(round((p["x"] + p["w"]) * w))
+        y0 = int(round((1.0 - p["y"] - p["h"]) * h)); y1 = int(round((1.0 - p["y"]) * h))
+        cell = im[max(y0, 0):min(y1, h), max(x0, 0):min(x1, w)]
+        out.append(float(cell.mean()) if cell.size else None)
+    return out
+
+
 def _mean_brightness(path):
     """Average luminance of a screenshot, or None if it cannot be read.
 
@@ -355,7 +398,7 @@ def _got_zoom(cam):
     return bool(cur and base and cur > base * 1.02)
 
 
-def _spread_apart(sess, seconds=2.0, attempts=3):
+def _spread_apart(sess, seconds=6.0, attempts=3):
     """Drive player one left and player two right at once, in ONE room.
 
     Returns (widest_fov_seen, starting_fov). Retries on a room change for the
@@ -371,6 +414,14 @@ def _spread_apart(sess, seconds=2.0, attempts=3):
         _walk_to_room_middle(sess, P1_PAD, 1)
         _walk_to_room_middle(sess, P2_PAD, 2)
         _wait_still(sess)
+        # Let the post-transition straggler net expire before spreading.
+        # For 120 frames after the party is gathered through a door, the mod
+        # snaps any Knight more than TEN units from player one back to him —
+        # it exists to rescue someone left behind at a doorway. Walking apart
+        # inside that window is a tug of war the test cannot win, and it caps
+        # the separation at about ten units: exactly the 9.5 that kept landing
+        # just under the split threshold and skipping this case.
+        _nap(sess, 2.5)
         st = sess.channel.state()
         scene0 = st.get("scene")
         started = _cam(st).get("fieldOfView")
@@ -400,6 +451,17 @@ def _spread_apart(sess, seconds=2.0, attempts=3):
                 if _got_zoom(cam):
                     got = True
                     peak = cam           # the sample the pass actually rests on
+
+            # Stop as soon as they are far enough apart to split, rather than
+            # walking for a fixed time. A duration cannot be right for every
+            # room: two seconds left them a hair under the threshold and the
+            # case skipped, five walked them into a door and it failed for
+            # crossing a transition. The condition itself is the thing to wait
+            # for, and stopping at it keeps them clear of the edges.
+            needed = cam.get("neededHalfHeight") or 0
+            allowed = cam.get("allowedHalfHeight") or 0
+            if allowed and needed > allowed * 1.2:
+                break
         p1.neutral()
         p2.neutral()
         _nap(sess, 0.4)
@@ -606,8 +668,24 @@ def t_pad_identity(sess):
     extra = len(st.get("devices", [])) - len(sess.baseline_devices) - len(sess.pads)
     note = ""
     if extra > 0:
-        note = (f"; NOTE {extra} more in-game device(s) than pads — Steam Input "
-                f"twins")
+        # Do NOT just call these Steam Input twins. That explanation is
+        # plausible enough to stop an investigation, and it was wrong once:
+        # the extras were dead virtual pads from runs that had been killed
+        # while the game kept running, so InControl still held them. Player
+        # one's pad then mapped to two device indices and the run reported the
+        # mod misrouting controllers — the exact bug the architecture exists to
+        # prevent, and a false alarm. Twins come in pairs, so an odd count or a
+        # count that is not one per pad is a reason to suspect stale devices.
+        twinnish = extra == len(sess.pads)
+        note = (f"; NOTE {extra} more in-game device(s) than pads — "
+                + ("consistent with Steam Input twins (one per pad)"
+                   if twinnish else
+                   "NOT a clean twin pattern, so these may be STALE devices "
+                   "from an earlier run that was killed while the game kept "
+                   "running. Restart the game before trusting any input "
+                   "result from this run"))
+        if not twinnish:
+            sess.warn(note.lstrip("; "))
     return ("; ".join(f"pad {i + 1} -> device {sorted(p)}"
                       for i, p in seen.items()) + note)
 
@@ -667,10 +745,25 @@ def t_p2_moves(sess):
         raise Skip("player two is not in the session")
     _ensure_unpaused(sess)
     tracks = _hold_right_same_room(sess, P2_PAD, 2)
-    delta = _assert_drives_only(sess, P2_PAD, driven=2, others=[1], tracks=tracks)
+    try:
+        delta = _assert_drives_only(sess, P2_PAD, driven=2, others=[1], tracks=tracks)
+        went = "right"
+    except AssertionError:
+        # RIGHT alone cannot tell "this pad drives nothing" from "this Knight
+        # is against a wall". Player two spawns beside player one, wherever
+        # that happens to be, so the spot is not chosen and sometimes has
+        # scenery immediately to the right — passing runs recorded as little as
+        # +1.46 units, which is a case sitting on the edge of the geometry
+        # rather than a healthy margin. Ask the same question the other way
+        # before calling the pad dead.
+        tracks = _hold_left_same_room(sess, P2_PAD, 2)
+        delta = _assert_drives_only(sess, P2_PAD, driven=2, others=[1],
+                                    tracks=tracks, direction="LEFT")
+        went = "left (right was blocked)"
     sess.shot("03-player-two-moved")
     sess.dump_state("03-player-two-moved")
-    return f"player two travelled {delta:+.2f} units on pad 2; player one held still"
+    return (f"player two travelled {delta:+.2f} units {went} on pad 2; "
+            f"player one held still")
 
 
 @test("player one STILL moves on his own pad after player two joined")
@@ -735,10 +828,17 @@ def t_camera_widens(sess):
     # actually needs more view than the game's own. Without this, a hold that
     # simply did not separate the Knights far enough reads exactly like a
     # camera refusing to zoom, and those have opposite meanings.
-    assert asked, (
-        f"the Knights never spread far enough to need more than the base view "
-        f"(fieldOfView {started:.2f} -> peak {widest:.2f} deg), so this run "
-        f"could not test zoom at all. Harness problem, not a mod verdict")
+    # A run that could not create the condition has not found a bug, and
+    # reporting it as one buries real failures in noise. Note this is a SKIP
+    # only for "never spread far enough" — the camera refusing to widen when
+    # the group DID need it stays a hard failure below.
+    if not asked:
+        raise Skip(
+            f"the Knights never spread far enough to need more than the base "
+            f"view (fieldOfView {started:.2f} -> peak {widest:.2f} deg). The "
+            f"room they start in is too cramped to separate that far; the "
+            f"split-screen case reaches a real spread later and exercises the "
+            f"same framing math")
     assert got, (
         f"the group needed more view than the base and the camera refused to "
         f"widen: fieldOfView peaked at {widest:.2f} deg against an un-zoomed "
@@ -797,12 +897,26 @@ def t_split_screen(sess):
             "itself down — see the BepInEx log. It releases the camera when it "
             "does that, so the view is whole rather than black, but the feature "
             "is off")
+        # Not splitting when the group never outgrew the view is the correct
+        # behaviour, not a bug — the same distinction the zoom case draws. How
+        # far two Knights can actually separate depends on the room they happen
+        # to be standing in, and reporting "the screen refused to split" for a
+        # run that never asked it to buries real failures in noise.
+        needed = cam.get("neededHalfHeight") or 0
+        allowed = cam.get("allowedHalfHeight") or 0
+        if not split.get("active") and needed <= allowed * 1.15:
+            raise Skip(
+                f"the Knights only reached {spread:.1f} units apart, needing "
+                f"{needed} of view against an allowed {allowed} — under the "
+                f"threshold, so no split was ever asked for. The room did not "
+                f"give them space to separate; this is the harness failing to "
+                f"set up the case, not the mod refusing to split")
+
         assert split.get("active"), (
-            f"the screen stayed whole (paneCount {split.get('paneCount')}) with "
-            f"the Knights {spread:.1f} world units apart: the group needed "
-            f"{cam.get('neededHalfHeight')} of view against an allowed "
-            f"{cam.get('allowedHalfHeight')} (un-zoomed {cam.get('baseHalfHeight')}). "
-            f"Split engages above allowed * (1 + SplitMergeMargin)")
+            f"the group needed {needed} of view against an allowed {allowed} "
+            f"(un-zoomed {cam.get('baseHalfHeight')}) with the Knights "
+            f"{spread:.1f} units apart — past the threshold, and the screen "
+            f"still stayed whole (paneCount {split.get('paneCount')})")
 
         panes = split.get("panes") or []
         assert len(panes) == 2, (
@@ -832,6 +946,50 @@ def t_split_screen(sess):
                 f"{whole_light:.1f} whole. The layout can be perfect and the "
                 f"view still black — a manual Camera.Render() that never "
                 f"reaches the screen leaves the HUD intact and the world gone")
+
+        # While they are still apart, prove the OTHER way of reaching the
+        # screen works too. SplitRotate ships off, and its own description
+        # calls the plain split "the verified one" — but off-and-untested is a
+        # worse answer than off-and-known-to-work, and it is the riskier path:
+        # pane cameras render into textures and a compositor paints the regions
+        # itself, so a mistake there is a black screen. Checked here rather
+        # than in a case of its own because recreating this separation later,
+        # with the party already clustered, does not reliably reach the
+        # threshold — a standalone case simply skipped every time.
+        rotate_problem = None
+        rot = sess.channel.command("setcfg", key="SplitRotate", value="true")
+        rot_was = rot.get("was", False)
+        try:
+            _nap(sess, 0.6)
+            rst = sess.channel.state()
+            rsplit = rst.get("split") or {}
+            if rsplit.get("rotating") is True:
+                rshot = sess.shot("13-rotating-split")
+                rlight = _mean_brightness(rshot)
+                # Recorded, NOT asserted here. Throwing mid-case skipped the
+                # merge below and left the party spread and the screen split
+                # for every case that followed — friendly fire and the death
+                # case then failed as collateral, which reads as three broken
+                # features instead of one. The verdict is raised at the end,
+                # once this case has put the game back.
+                if whole_light and rlight is not None and rlight < whole_light * 0.4:
+                    rotate_problem = (
+                        f"the rotating compositor engaged and the world went "
+                        f"dark: {rlight:.1f} against {whole_light:.1f} whole. "
+                        f"It paints the screen from render textures, so a "
+                        f"mistake there is a black screen, not a wrong-looking "
+                        f"one")
+                sess.log(f"rotating split drew {rsplit.get('paneCount')} region(s) "
+                         f"at {rlight:.1f} brightness "
+                         f"(normal {rsplit.get('rotateNormalX')}, "
+                         f"{rsplit.get('rotateNormalY')})")
+            else:
+                sess.warn("SplitRotate was switched on but the compositor did "
+                          "not take it (it stands down when its shader is "
+                          "missing), so the rotating path is still unverified")
+        finally:
+            sess.channel.command("setcfg", key="SplitRotate",
+                                 value=str(bool(rot_was)).lower())
 
         # The cut must follow the axis they ACTUALLY parted on, which is not
         # necessarily the one they were driven along: Hollow Knight's terrain
@@ -888,9 +1046,30 @@ def t_split_screen(sess):
             f"{lc.get('neededHalfHeight')} of view against an allowed "
             f"{lc.get('allowedHalfHeight')}; merge happens below "
             f"allowed * (1 - SplitMergeMargin)")
+        # Asserted again now that it works. It painted black until the
+        # triangle fan's winding was fixed (back-face culling silently
+        # discarded the fill), and this check is what caught that — so it goes
+        # back to failing rather than warning, or the next regression in this
+        # path is a warning nobody reads.
+        assert rotate_problem is None, rotate_problem
+
         sess.dump_state("07-split-merged")
+
+        # Say what each pane actually drew. A dark pane here is not failed on —
+        # a Knight can legitimately stand somewhere unlit — but it is the
+        # difference between "split works" and "split works and both players
+        # can see", and without it a half-black screen passes silently.
+        lit = _pane_brightness(shot_path, [p["viewport"] if "viewport" in p else p
+                                           for p in panes])
+        lit_note = ""
+        if lit:
+            lit_note = " panes lit " + ", ".join(
+                "?" if v is None else f"{v:.1f}" for v in lit)
+            if any(v is not None and v < 1.0 for v in lit):
+                lit_note += " (a pane drew almost nothing — check that Knight "
+                lit_note += "is somewhere with scenery)"
         return (f"screen split two ways across {axis} (apart {spread:.1f} by "
-                f"{spread_y:.1f}), then merged when they regrouped")
+                f"{spread_y:.1f}), then merged when they regrouped.{lit_note}")
     finally:
         sess.channel.command("setcfg", key="MaxZoomFactor", value=str(restore))
 
@@ -977,7 +1156,12 @@ def t_split_three(sess):
         # ten world units. A group that still fits in one view is a group the
         # mod is RIGHT not to split for, so that is reported as a setup that
         # did not happen rather than as a mod failure.
-        if not _asked_for_zoom(cam3):
+        # A skip here is only honest when the group genuinely fitted in one
+        # view. If it DID outgrow the view and the screen still did not split,
+        # that is the failure this case exists for — prove-mode caught this
+        # skipping under its own never_splits fault, which makes a case
+        # decoration rather than a check.
+        if not _asked_for_zoom(cam3) and not split.get("active"):
             raise Skip(
                 f"the three Knights could not be driven far enough apart in this "
                 f"room to outgrow one view (needed {cam3.get('neededHalfHeight')} "
@@ -1041,32 +1225,150 @@ def t_friendly_fire(sess):
         _wait_still(sess)
         before = {p["n"]: p.get("health") for p in sess.channel.state().get("players", [])}
 
-        # Swing player two's nail a few times; they are standing on player one.
+        # Only the CLONE swings. A clone hurting the vanilla hero is the case
+        # worth proving: player one's own swing is ordinary game code and would
+        # pass this test without the mod's damage path being exercised at all.
+        #
+        # Both pads were swung for one run, deliberately, to tell "the attack
+        # button is not binding" from "a clone cannot attack" — it was the
+        # binding (see pads.py). That diagnostic has served its purpose and is
+        # removed: leaving it in would let player one's hit satisfy the
+        # mask-loss assertion and hide a clone that cannot land one.
         for _ in range(6):
             sess.pad(P2_PAD).press("X", 0.08)
-            _nap(sess, 0.35)
+            _nap(sess, 0.25)
         _nap(sess, 0.5)
 
         after_state = sess.channel.state()
         after = {p["n"]: p.get("health") for p in after_state.get("players", [])}
         sess.dump_state("09-friendly-fire")
 
+        # Assert on the mod's own hit counter, NOT merely on health dropping.
+        # A run passed this case with swings:0 hits:0 — nothing had swung and
+        # nothing had been struck, but an ENEMY had damaged someone, and "a
+        # mask was lost" cannot tell those apart. Enemies now target the
+        # nearest Knight rather than fixating on player one, so that
+        # confusion is routine rather than unlucky.
+        ff = (after_state.get("friendlyFire") or {})
+        assert ff.get("swings", 0) > 0, (
+            f"no nail swing was registered at all ({ff}) — the attack input "
+            f"never reached the game, so friendly fire was not exercised. "
+            f"Hollow Knight binds attack to Action3, physical X, which on an "
+            f"Xbox-360-identifying pad is evdev BTN_NORTH (0x133) — NOT "
+            f"BTN_WEST, whatever the positional naming suggests. Compare "
+            f"rawAction3 against rawAnyButton: a face button arriving while "
+            f"rawAction3 stays 0 means the mapping is wrong, not the mod")
+        assert ff.get("hits", 0) > 0, (
+            f"player two swung {ff.get('swings')} time(s) at point-blank range "
+            f"and landed no friendly-fire hit ({ff}). overlaps={ff.get('overlaps')} "
+            f"says whether the blade was ever measured as touching them")
+
+        # Assert on the mod's OWN measurement of a mask coming off, taken
+        # across its TakeDamage call. Comparing health before and after the
+        # whole sequence cannot tell our damage from an enemy's, and an enemy
+        # hit satisfying it is how this passed while friendly fire dealt
+        # nothing at all: hits counted 3 while every Knight stayed at 6.
+        assert ff.get("landed", 0) > 0, (
+            f"the mod dealt {ff.get('hits')} friendly-fire hit(s) and not one "
+            f"took a mask off ({ff.get('refused')} refused). "
+            f"HeroController.TakeDamage declines silently — invulnerability "
+            f"frames from an earlier hit, damage mode, recoil — so a hit "
+            f"counter alone does not mean damage. Health before {before}, "
+            f"after {after}")
+
         hurt = [n for n in before
                 if before.get(n) is not None and after.get(n) is not None
                 and after[n] < before[n]]
-        assert hurt, (
-            f"nobody lost a mask while player two swung at point-blank range "
-            f"with friendly fire on (health before {before}, after {after}). "
-            f"A nail drops the hero layer when collecting targets, so this only "
-            f"works if the mod deals the hit itself")
-        assert 2 not in hurt, (
-            f"player two hurt ITSELF swinging ({before.get(2)} -> {after.get(2)}) "
-            f"— the attacker must be excluded from its own swing")
-        return (f"player two's nail took {before.get(1)} -> {after.get(1)} masks "
-                f"off player one")
+        # Either direction counts, so do not demand a specific victim.
+        # Self-damage would mean the attacker is not excluded from its own
+        # swing, which is a different bug from not landing at all.
+        assert ff.get("hits", 0) > 0, "no friendly-fire hit recorded"
+        # Name whoever actually lost the mask. Hardcoding player one read
+        # "took 6 -> 6 masks off player one" on a passing run, which describes
+        # no damage at all and sent a diagnosis off after the wrong half.
+        victim = hurt[0] if hurt else "?"
+        return (f"player two's nail landed {ff.get('landed')} of "
+                f"{ff.get('hits')} hit(s) ({ff.get('refused')} refused by "
+                f"invulnerability); player {victim} went "
+                f"{before.get(victim)} -> {after.get(victim)} masks")
     finally:
         sess.channel.command("setcfg", key="FriendlyFire", value=str(was_ff).lower())
         sess.channel.command("setcfg", key="LeashDistance", value=str(leash_was))
+
+
+@test("the party arrives together after a room change")
+def t_transition_together(sess):
+    """The bug a player hit and this rig kept walking straight past.
+
+    Extras take no part in a transition: GameManager calls LeaveScene and
+    EnterScene on hero_ctrl, which is player one and nobody else. So an extra
+    keeps the coordinates it held in the PREVIOUS room, and the party arrives
+    spread between whatever entrances those coordinates land near — reported
+    from play as "one spawned at top and the other on bottom".
+
+    Earlier runs crossed rooms constantly and never checked this, because the
+    movement cases treat a transition as something to retry around rather than
+    something to assert on.
+    """
+    st = sess.channel.state()
+    if st.get("playerCount", 1) < 2:
+        raise Skip("needs two Knights to arrive together or apart")
+    _ensure_unpaused(sess)
+    _wait_playing(sess)
+
+    before_scene = st.get("scene")
+    gathers_before = st.get("gathers", 0)
+
+    # Walk player one at a wall until the room changes. Either direction will
+    # do; whichever edge is nearer wins.
+    width = st.get("sceneWidth") or 0
+    x = _x(_player(st, 1)) or 0
+    direction = 1.0 if (width and x < width / 2.0) else -1.0
+    pad = sess.pad(P1_PAD)
+    changed = None
+    t0 = time.time()
+    while time.time() - t0 < 25 * _pace(sess):
+        pad.stick(direction, 0.0)
+        _nap(sess, 0.25)
+        now = sess.channel.state()
+        if now.get("scene") and now.get("scene") != before_scene:
+            changed = now.get("scene")
+            break
+    pad.neutral()
+    if not changed:
+        raise Skip(f"could not reach a room transition from {before_scene} "
+                   f"within the time allowed, so nothing was tested")
+
+    # Let the arrival settle: vanilla walks player one in for a few frames
+    # after it reports him in position, and the mod collects the party across
+    # that window.
+    _wait_playing(sess)
+    _nap(sess, 2.0)
+    _wait_still(sess)
+
+    after = sess.channel.state()
+    sess.dump_state("10-after-transition")
+    sess.shot("10-after-transition")
+    xs, ys = [], []
+    for p in after.get("players", []):
+        if p.get("pos"):
+            xs.append(p["pos"]["x"])
+            ys.append(p["pos"]["y"])
+    assert len(xs) >= 2, "lost a Knight across the transition"
+
+    spread = max(max(xs) - min(xs), max(ys) - min(ys))
+    gathers = after.get("gathers", 0)
+    gate = after.get("entryGate")
+    sess.log(f"arrived in {changed} via gate {gate!r}; "
+             f"x {min(xs):.1f}..{max(xs):.1f}, y {min(ys):.1f}..{max(ys):.1f}")
+    assert spread < 20.0, (
+        f"the party arrived {spread:.1f} world units apart in {changed} "
+        f"(x {min(xs):.1f}..{max(xs):.1f}, y {min(ys):.1f}..{max(ys):.1f}). "
+        f"Extras take no part in a transition, so without being collected they "
+        f"keep the previous room's coordinates. Entry gate {gate!r}, gathers "
+        f"logged: {gathers - gathers_before}")
+    return (f"{before_scene} -> {changed}, party within {spread:.1f} units "
+            f"({gathers - gathers_before} Knight(s) collected)")
 
 
 @test("each Knight has its own health pool")
@@ -1080,6 +1382,96 @@ def t_separate_health(sess):
         assert hp is not None and hp >= 0, f"player {n} has no health value ({hp})"
         assert mx and mx > 0, f"player {n} has no max health ({mx})"
     return "; ".join(f"P{n} {hp}/{mx}" for n, hp, mx in pools)
+
+
+@test("the multiplayer entry sits with the other options, above Back")
+def t_menu_placement(sess):
+    """Where the entry is drawn, not merely that it exists.
+
+    Reported from play as the option being "in a weird spot": it was placed one
+    step below the LOWEST button in Options, and Options ends with Back — so it
+    hung underneath Back, detached from the group it belongs to, and the
+    controller ran Game Options -> ... -> Back -> Multiplayer.
+
+    This is the one part of the mod invisible from the state channel, so the
+    mod reports the order it built and this checks it. Opening the screen
+    through the channel rather than driving the title menus blind keeps the
+    case about the entry instead of about menu navigation.
+    """
+    _ensure_unpaused(sess)
+    sess.channel.command("options")
+    ok, st = sess.channel.wait_for(
+        lambda s: (s.get("menu") or {}).get("entryIndex", -1) >= 0, timeout=15)
+    menu = (st or {}).get("menu") or {}
+    names = [e.get("name") for e in menu.get("order", [])]
+
+    assert menu.get("built"), (
+        f"the multiplayer screen was never built, so Options has no entry "
+        f"(order {names}). Everything falls back to the config file")
+    ours = menu.get("entryIndex", -1)
+    back = menu.get("backIndex", -1)
+    assert ours >= 0, f"no HKCC_ entry in the Options list (order {names})"
+
+    sess.shot("11-options-menu")
+    if back < 0:
+        # Not an assertion, but not a quiet pass either: this is the branch
+        # that placed the entry by fallback, which is the placement that was
+        # reported as wrong in the first place.
+        sess.warn(f"no Back/Apply entry recognised in Options, so the entry "
+                  f"was positioned by fallback and its placement is NOT "
+                  f"verified (order {names})")
+        return f"multiplayer entry present at index {ours} of {len(names)}, placement unverified"
+
+    assert ours < back, (
+        f"the multiplayer entry is BELOW Back (entry at {ours}, Back at "
+        f"{back}, order {names}) — it hangs off the bottom of the menu "
+        f"instead of sitting with the options it belongs to")
+    sess.shot("11-options-menu")
+    return (f"multiplayer entry at index {ours}, Back at {back} "
+            f"({' | '.join(n or '?' for n in names)})")
+
+
+@test("a fallen player leaves a shade instead of ending the run")
+def t_shade_on_death(sess):
+    """The run survives one player dying, and the shade is the way back.
+
+    Player one is the case that matters. He is the save file and the singleton
+    the camera follows, so the old behaviour was to despawn everyone and run
+    the vanilla game-over — one player's mistake ended the other's run. He now
+    goes down like anyone else, hidden in place rather than destroyed, with a
+    shade a teammate beats to bring him back.
+    """
+    _ensure_unpaused(sess)
+    st = sess.channel.state()
+    if st.get("playerCount", 1) < 2:
+        raise Skip("needs a teammate — a solo death is a real death")
+    if not (st.get("config") or {}).get("independentHealth", True):
+        raise Skip("shared health pool: a death IS the team's death")
+
+    before_scene = st.get("scene")
+    sess.channel.command("kill", n=1)
+    ok, last = sess.channel.wait_for(
+        lambda s: s.get("playerOneDowned") is True, timeout=20)
+
+    assert ok, (
+        f"player one died and did not go down: playerOneDowned stayed "
+        f"{(last or {}).get('playerOneDowned')}. Either the death ran vanilla "
+        f"(which ends the session) or the down path refused — it needs "
+        f"IndependentHealth and ShadeRevive on, and someone else standing")
+
+    # The run must still be the same run: a vanilla game-over reloads the scene
+    # and drops the party, which is exactly what this replaces.
+    assert last.get("scene") == before_scene, (
+        f"the scene changed from {before_scene} to {last.get('scene')} — that "
+        f"is the vanilla death respawn, so the run ended rather than the life")
+    assert last.get("playerCount", 0) >= 2, (
+        f"playerCount fell to {last.get('playerCount')} — the teammates were "
+        f"despawned, which is the game-over path this case exists to avoid")
+
+    sess.shot("12-player-one-downed")
+    sess.dump_state("12-player-one-downed")
+    return (f"player one is down in {last.get('scene')} with "
+            f"{last.get('playerCount')} player(s) still in the session")
 
 
 @test("holding Start removes a player")

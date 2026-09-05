@@ -39,15 +39,22 @@ except Exception as _ex:                                    # pragma: no cover
 # Names are the harness's vocabulary, deliberately pad-neutral: a scenario says
 # "press A", never "press BTN_SOUTH".
 
-# X and Y are NOT the compass points they look like. The Linux gamepad spec
-# names the face buttons by position, and on an Xbox-style pad that makes
-# BTN_WEST the X button and BTN_NORTH the Y button — the opposite of the
-# obvious reading. Getting this backwards sends Y when a scenario asks for X,
-# which in Hollow Knight is the difference between swinging the nail (Action3,
-# physical X) and pressing something unbound: the input vanishes silently and
-# the feature under test looks broken.
+# X and Y look like they should be the positional names, and they are not.
+# The Linux gamepad spec names face buttons by position, but the constants
+# alias onto the older ones: BTN_X == BTN_NORTH == 0x133 and
+# BTN_Y == BTN_WEST == 0x134. xpad — the actual Xbox 360 driver — emits BTN_X
+# for the X button, so a device declaring 360 vid/pid (which this one does,
+# below) is read by SDL through that mapping: X is BTN_NORTH, Y is BTN_WEST.
+#
+# Reading the positional spec instead and "correcting" X to BTN_WEST is a
+# mistake this file has already made once. It costs more than it looks like it
+# should, because it fails silently and only on the cases that press X: the
+# button binds to nothing, Hollow Knight's attack (Action3) never fires, and
+# the feature under test looks broken rather than the harness. Measured, not
+# reasoned: with X sent as BTN_WEST the mod's own probe saw 125 face-button
+# frames and rawAction3 == 0.
 BUTTONS = {
-    "A": "BTN_SOUTH", "B": "BTN_EAST", "X": "BTN_WEST", "Y": "BTN_NORTH",
+    "A": "BTN_SOUTH", "B": "BTN_EAST", "X": "BTN_NORTH", "Y": "BTN_WEST",
     "START": "BTN_START", "SELECT": "BTN_SELECT", "BACK": "BTN_SELECT",
     "TL": "BTN_TL", "TR": "BTN_TR", "LB": "BTN_TL", "RB": "BTN_TR",
     "THUMBL": "BTN_THUMBL", "THUMBR": "BTN_THUMBR",

@@ -62,7 +62,13 @@ class MockGame(state.Channel):
         # Friendly fire that never lands — what the game does on its own,
         # because a nail drops the hero layer and heroes have no IHitResponder.
         self.no_friendly_fire = faults.get("no_friendly_fire", False)
+        # Extras keep the old room's coordinates — what the game does unaided.
+        self.no_gather_on_transition = faults.get("no_gather_on_transition", False)
+        self.gathers = 0
+        self.scene_name = "Crossroads_47"
         self.friendly_fire = False
+        self.ff_swings = 0
+        self.ff_hits = 0
         self.max_zoom = 1.6
         self.leash = -1.0
         self._split = False
@@ -126,7 +132,8 @@ class MockGame(state.Channel):
             "mod": "NotTheMod" if self.wrong_mod else "HKCouchCoop",
             "version": "0.6.8", "gameVersion": "1.5.12620",
             "time": time.time() % 1000, "frame": 1,
-            "scene": None if self.no_save else "Crossroads_47",
+            "scene": None if self.no_save else self.scene_name,
+            "gathers": self.gathers,
             "sceneWidth": 60.0, "sceneHeight": 20.0,
             "gameState": "MAIN_MENU" if self.no_save else "PLAYING",
             "paused": self.paused,
@@ -137,6 +144,12 @@ class MockGame(state.Channel):
             "lastJoinRejection": None,
             "players": copy.deepcopy(self.players),
             "camera": self._camera(),
+            "friendlyFire": {
+                "enabled": self.friendly_fire,
+                "swings": self.ff_swings,
+                "overlaps": self.ff_hits,
+                "hits": self.ff_hits,
+            },
             "split": self._split_layout(),
             "devices": self._devices(),
         }
@@ -285,7 +298,10 @@ class MockGame(state.Channel):
 
     def pad_attack(self, pad_index):
         """A swing. Hits any OTHER player standing on the attacker."""
-        if not self.friendly_fire or self.no_friendly_fire:
+        if not self.friendly_fire:
+            return
+        self.ff_swings += 1
+        if self.no_friendly_fire:
             return
         guid = f"guid-pad{pad_index}"
         attacker = next((p for p in self.players if p.get("deviceGuid") == guid), None)
@@ -296,6 +312,36 @@ class MockGame(state.Channel):
                 continue
             if abs(p["pos"]["x"] - attacker["pos"]["x"]) <= 5.0:
                 p["health"] = max(0, p.get("health", 6) - 1)
+                self.ff_hits += 1
+
+    def _maybe_transition(self, pad_index):
+        """Walking past an edge changes the room, as it does in the game."""
+        p1 = self.players[0] if self.players else None
+        if p1 is None or not p1.get("pos"):
+            return
+        # Far outside the room, not just past its edge. The spread cases walk
+        # Knights well past sceneWidth on purpose to force a split, and a
+        # transition triggering there teleported player one back to the middle
+        # mid-measurement — which read as "the group never spread far enough"
+        # and made the three-way case unable to pass against a healthy game.
+        # Only a sustained walk, like the transition case does, gets here.
+        if -400.0 <= p1["pos"]["x"] <= 460.0:
+            return
+        self.scene_name = "Crossroads_19" if self.scene_name != "Crossroads_19" \
+            else "Crossroads_47"
+        p1["pos"]["x"] = 30.0
+        p1["pos"]["y"] = 5.0
+        if self.no_gather_on_transition:
+            for p in self.players[1:]:
+                if p.get("pos"):
+                    p["pos"]["x"] = 30.0 + 45.0     # left behind, rooms apart
+                    p["pos"]["y"] = 48.0
+            return
+        for p in self.players[1:]:
+            if p.get("pos"):
+                p["pos"]["x"] = 31.0
+                p["pos"]["y"] = 5.0
+                self.gathers += 1
 
     def pad_stick(self, pad_index, x):
         """Pad N drives whichever player is bound to device N."""
@@ -324,6 +370,7 @@ class MockGame(state.Channel):
                     drives = False
             if drives:
                 p["pos"]["x"] += step * x
+        self._maybe_transition(pad_index)
 
 
 class FakePad:
@@ -408,6 +455,7 @@ FAULTS = [
      "player one STILL moves on his own pad after player two joined"),
     ("never_zooms", "the camera widens when the group spreads"),
     ("no_friendly_fire", "friendly fire lets one Knight hurt another"),
+    ("no_gather_on_transition", "the party arrives together after a room change"),
     ("never_splits",
      "the screen splits when the Knights spread, and merges when they regroup"),
     ("never_splits", "three Knights divide the screen three ways"),
