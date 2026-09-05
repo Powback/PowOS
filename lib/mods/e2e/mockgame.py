@@ -60,6 +60,7 @@ class MockGame(state.Channel):
         self.never_splits = faults.get("never_splits", False)
         self.never_merges = faults.get("never_merges", False)
         self.max_zoom = 1.6
+        self.leash = -1.0
         self._split = False
 
         self.pad_count = 3
@@ -198,9 +199,22 @@ class MockGame(state.Channel):
     def command(self, name, **args):
         self.commands.append((name, args))
         if name == "setcfg":
-            if args.get("key") == "MaxZoomFactor":
+            key = args.get("key")
+            if key == "MaxZoomFactor":
                 was, self.max_zoom = self.max_zoom, float(args.get("value", 1.6))
                 return {"ok": True, "did": "setcfg", "was": was, "now": self.max_zoom}
+            if key == "LeashDistance":
+                was, self.leash = self.leash, float(args.get("value", -1))
+                # A positive leash pulls the extras to player one. Modelled as
+                # the snap it is: the real one teleports them, it does not walk
+                # them, which is exactly why a test uses it to regroup rather
+                # than trying to walk a Knight down off a ledge.
+                if self.leash > 0 and self.players and self.players[0].get("pos"):
+                    anchor = self.players[0]["pos"]["x"]
+                    for p in self.players[1:]:
+                        if p.get("pos"):
+                            p["pos"]["x"] = anchor + 1.0
+                return {"ok": True, "did": "setcfg", "was": was, "now": self.leash}
             return {"ok": True, "did": "setcfg", "was": None}
         before = len(self.players)
         if name == "join":

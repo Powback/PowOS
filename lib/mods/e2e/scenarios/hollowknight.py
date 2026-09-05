@@ -305,6 +305,25 @@ def _cam_split(state):
     return (state or {}).get("split") or {}
 
 
+def _mean_brightness(path):
+    """Average luminance of a screenshot, or None if it cannot be read.
+
+    Exists because every other assertion in this case reads the layout the mod
+    decided, and none of them can see a pixel. A run once reported 13/13 with
+    the panes drawing nothing at all: the geometry was right, the driver threw
+    nothing, and the world was black behind an intact HUD.
+    """
+    if not path:
+        return None
+    try:
+        from PIL import Image
+        import numpy as np
+        with Image.open(path) as im:
+            return float(np.asarray(im.convert("L"), dtype="float32").mean())
+    except Exception:
+        return None
+
+
 def _asked_for_zoom(cam):
     """Did the group need more view than the game's own un-zoomed one?"""
     need, base = cam.get("neededHalfHeight"), cam.get("baseHalfHeight")
@@ -735,6 +754,11 @@ def t_split_screen(sess):
         raise Skip("this build does not report a split layout")
 
     _ensure_unpaused(sess)
+    # How bright the world is with ONE whole view, to measure the split
+    # against. An absolute floor would misjudge a genuinely dark room.
+    whole_shot = sess.shot("07-before-split")
+    whole_light = _mean_brightness(whole_shot)
+
     r = sess.channel.command("setcfg", key="MaxZoomFactor", value="1.0")
     assert r.get("ok"), f"could not lower the zoom ceiling for this case: {r}"
     restore = r.get("was", 1.6)
@@ -742,10 +766,18 @@ def t_split_screen(sess):
         _spread_apart(sess)
         st = sess.channel.state()
         sess.dump_state("07-split-attempt")
+        # Pixels, not just geometry. Everything else here reads the layout the
+        # mod decided; only a screenshot shows whether the panes actually drew.
+        shot_path = sess.shot("07-split-attempt")
         split, cam = _cam_split(st), _cam(st)
         xs = [p["pos"]["x"] for p in st.get("players", [])
               if p.get("pos") and p["pos"].get("x") is not None]
         spread = (max(xs) - min(xs)) if len(xs) > 1 else 0.0
+        assert not split.get("abandoned"), (
+            "the split-screen driver threw on three consecutive frames and stood "
+            "itself down — see the BepInEx log. It releases the camera when it "
+            "does that, so the view is whole rather than black, but the feature "
+            "is off")
         assert split.get("active"), (
             f"the screen stayed whole (paneCount {split.get('paneCount')}) with "
             f"the Knights {spread:.1f} world units apart: the group needed "
@@ -764,6 +796,17 @@ def t_split_screen(sess):
             f"its RenderTexture whenever the camera's pixel dimensions change, "
             f"so uneven panes thrash a RenderTexture every frame. Got widths "
             f"{widths}, heights {heights}")
+
+        # The panes must actually draw. This is the only assertion here that
+        # looks at the screen rather than at what the mod says it decided.
+        split_light = _mean_brightness(shot_path)
+        if whole_light is not None and split_light is not None:
+            assert split_light >= whole_light * 0.5, (
+                f"the screen is split but the panes are not drawing: the world "
+                f"averages {split_light:.1f} brightness while split against "
+                f"{whole_light:.1f} whole. The layout can be perfect and the "
+                f"view still black — a manual Camera.Render() that never "
+                f"reaches the screen leaves the HUD intact and the world gone")
 
         # The cut must follow the axis they ACTUALLY parted on, which is not
         # necessarily the one they were driven along: Hollow Knight's terrain
@@ -788,16 +831,30 @@ def t_split_screen(sess):
                 f"(wide and short); got {widths[0]:.2f} wide by "
                 f"{heights[0]:.2f} high")
 
-        # And it must come back together. Stand them close, not merely both
-        # near the middle: needed half-height has a floor of ZoomMargin, so
-        # with the ceiling held at 1.0 for this case the gap between "needs
-        # more view" and "does not" is only a few world units wide. Players who
-        # have actually regrouped are next to each other.
-        _walk_to_room_middle(sess, P2_PAD, 2, band=2.0)
-        _walk_to_room_middle(sess, P1_PAD, 1, band=2.0)
-        _wait_still(sess)
-        ok, last = sess.channel.wait_for(
-            lambda s: not (_cam_split(s).get("active")), timeout=8)
+        # And it must come back together. Regroup with a short fixed leash
+        # rather than by walking: walking cannot close a VERTICAL gap, and
+        # Hollow Knight's platforms routinely leave one Knight tens of units
+        # above another — a run reached this point with the Knights 43 units
+        # apart in y, which no amount of walking left and right would fix. The
+        # fixed-distance leash is shipped behaviour, it pulls the extras to
+        # player one wherever they are, and it is independent of terrain.
+        # Put the zoom ceiling back to what a player actually runs before
+        # testing the merge. It was only lowered to make the split reachable
+        # indoors; leaving it down makes "regrouped" mean almost touching,
+        # because needed half-height has a floor of ZoomMargin and the whole
+        # window between "needs more view" and "does not" collapses to about a
+        # world unit. Splitting is tested under a reachable threshold, merging
+        # under the shipped one.
+        sess.channel.command("setcfg", key="MaxZoomFactor", value=str(restore))
+        r2 = sess.channel.command("setcfg", key="LeashDistance", value="5")
+        assert r2.get("ok"), f"could not set a regrouping leash: {r2}"
+        leash_was = r2.get("was", -1)
+        try:
+            _wait_still(sess)
+            ok, last = sess.channel.wait_for(
+                lambda s: not (_cam_split(s).get("active")), timeout=10)
+        finally:
+            sess.channel.command("setcfg", key="LeashDistance", value=str(leash_was))
         lc = _cam(last)
         assert ok, (
             f"the Knights regrouped and the screen stayed split "
