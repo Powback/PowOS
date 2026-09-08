@@ -939,7 +939,23 @@ def t_split_screen(sess):
         # The panes must actually draw. This is the only assertion here that
         # looks at the screen rather than at what the mod says it decided.
         split_light = _mean_brightness(shot_path)
-        if whole_light is not None and split_light is not None:
+        if whole_light is None or split_light is None:
+            # Do not let this pass quietly. Every other assertion in this case
+            # reads what the mod SAYS it decided; this is the only one that
+            # looks at the screen, and a run once reported all green with the
+            # panes drawing nothing at all. Unmeasurable pixels means this case
+            # verified the layout and nothing else, and the report has to say
+            # so rather than show a green tick for it.
+            sess.warn(
+                "the split layout is correct, but no screenshot could be "
+                "measured (whole="
+                f"{'unmeasured' if whole_light is None else round(whole_light, 1)}, "
+                f"split={'unmeasured' if split_light is None else round(split_light, 1)}"
+                ") — the check that the panes actually DRAW did not run. "
+                "Screenshots need a session: DISPLAY, XAUTHORITY, "
+                "WAYLAND_DISPLAY, XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS "
+                "from the logged-in desktop")
+        else:
             assert split_light >= whole_light * 0.5, (
                 f"the screen is split but the panes are not drawing: the world "
                 f"averages {split_light:.1f} brightness while split against "
@@ -979,10 +995,21 @@ def t_split_screen(sess):
                         f"It paints the screen from render textures, so a "
                         f"mistake there is a black screen, not a wrong-looking "
                         f"one")
-                sess.log(f"rotating split drew {rsplit.get('paneCount')} region(s) "
-                         f"at {rlight:.1f} brightness "
-                         f"(normal {rsplit.get('rotateNormalX')}, "
-                         f"{rsplit.get('rotateNormalY')})")
+                # rlight is None when the screenshot could not be read at
+                # all, and that is not a detail to format past: the black
+                # screen check above is the only thing watching the riskier
+                # of the two split paths, and with no pixels it did not run.
+                if rlight is None:
+                    sess.warn(
+                        f"rotating split drew {rsplit.get('paneCount')} "
+                        f"region(s), but its screenshot could not be measured, "
+                        f"so the check that it is not painting a black screen "
+                        f"did not run — the rotating path is unverified")
+                else:
+                    sess.log(f"rotating split drew {rsplit.get('paneCount')} "
+                             f"region(s) at {rlight:.1f} brightness "
+                             f"(normal {rsplit.get('rotateNormalX')}, "
+                             f"{rsplit.get('rotateNormalY')})")
             else:
                 sess.warn("SplitRotate was switched on but the compositor did "
                           "not take it (it stands down when its shader is "
@@ -990,6 +1017,38 @@ def t_split_screen(sess):
         finally:
             sess.channel.command("setcfg", key="SplitRotate",
                                  value=str(bool(rot_was)).lower())
+
+        # Split-screen is a preference, not a mechanism: some people want the
+        # camera to keep everyone in one frame and the leash to drag the
+        # stragglers in instead. Prove the OFF direction while the Knights are
+        # still apart — this is the only moment in the run where a split is
+        # actually up, so it is the only moment where switching it off can be
+        # observed doing anything. It must TEAR DOWN the split already on
+        # screen, not merely decline the next one: panes are live cameras, and
+        # leaving them parented to a disabled feature is how a half-frozen
+        # screen happens. The row sits in the pause menu, so this is a setting
+        # a player can reach mid-fight.
+        off_problem = None
+        panes_before = (sess.channel.state().get("split") or {}).get("paneCount")
+        off = sess.channel.command("setcfg", key="SplitScreen", value="false")
+        off_was = off.get("was", True)
+        try:
+            _nap(sess, 0.6)
+            osplit = sess.channel.state().get("split") or {}
+            if osplit.get("active") or (osplit.get("paneCount") or 0) > 1:
+                off_problem = (
+                    f"SplitScreen was switched off while the Knights were "
+                    f"apart and the split stayed up: active="
+                    f"{osplit.get('active')}, paneCount="
+                    f"{osplit.get('paneCount')}")
+            else:
+                sess.log(f"SplitScreen off tore the split down while the "
+                         f"Knights were still apart (panes {panes_before} -> "
+                         f"{osplit.get('paneCount')})")
+        finally:
+            sess.channel.command("setcfg", key="SplitScreen",
+                                 value=str(bool(off_was)).lower())
+            _nap(sess, 0.6)
 
         # The cut must follow the axis they ACTUALLY parted on, which is not
         # necessarily the one they were driven along: Hollow Knight's terrain
@@ -1052,6 +1111,7 @@ def t_split_screen(sess):
         # back to failing rather than warning, or the next regression in this
         # path is a warning nobody reads.
         assert rotate_problem is None, rotate_problem
+        assert off_problem is None, off_problem
 
         sess.dump_state("07-split-merged")
 
