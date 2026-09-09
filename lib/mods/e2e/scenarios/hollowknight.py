@@ -1506,6 +1506,99 @@ def t_menu_placement(sess):
             f"({' | '.join(n or '?' for n in names)})")
 
 
+@test("an extra dies, leaves a shade, and beating it brings them back")
+def t_extra_death_revive(sess):
+    """The whole loop for a NON player-one death, which nothing covered.
+
+    The existing fallen-player case kills player one. That is the harder case
+    and the one that used to end everyone's run, but it means the ordinary
+    one — a teammate dies, you fight their shade, they get up — went to
+    players untested, and it is the one they hit first.
+
+    Reported from play: killing player two reset PLAYER ONE to spawn, and
+    beating the shade revived nobody, leaving a one-player session that could
+    not get back to two. Both symptoms fall out of one branch —
+    EndRunIfEveryoneIsDown calling DespawnAll and re-dispatching the death to
+    player one — so this asserts on both halves separately rather than just
+    on the end state.
+    """
+    _ensure_unpaused(sess)
+    st = sess.channel.state()
+    if st.get("playerCount", 1) < 2:
+        raise Skip("needs a teammate to kill")
+    cfg = st.get("config") or {}
+    if not cfg.get("independentHealth", True) or not cfg.get("shadeRevive", True):
+        raise Skip("needs IndependentHealth and ShadeRevive for the shade loop")
+
+    def player(state, n):
+        for p in state.get("players", []):
+            if p.get("n") == n:
+                return p
+        return {}
+
+    before_scene = st.get("scene")
+    before_count = st.get("playerCount")
+    p1_before = player(st, 1).get("pos") or {}
+
+    sess.channel.command("kill", n=2)
+    ok, last = sess.channel.wait_for(
+        lambda s: player(s, 2).get("downed") is True, timeout=20)
+    assert ok, (
+        f"player two was killed and never went down: downed stayed "
+        f"{player(last or {}, 2).get('downed')}. The death did not route to "
+        f"the extra-player path at all")
+
+    # Player one must be untouched. A vanilla game-over reloads the scene and
+    # puts him at the last bench, so check the scene AND the position: a
+    # same-scene respawn still teleports him.
+    assert last.get("playerOneDowned") is not True, (
+        "player two died and took PLAYER ONE down with him — the death was "
+        "re-dispatched to player one, which is the game-over path")
+    assert last.get("scene") == before_scene, (
+        f"the scene changed from {before_scene} to {last.get('scene')} when "
+        f"player two died — that is player one's death respawn, not player "
+        f"two's")
+    p1_after = player(last, 1).get("pos") or {}
+    if p1_before and p1_after:
+        moved = abs(p1_after.get("x", 0) - p1_before.get("x", 0))
+        assert moved < 8.0, (
+            f"player one jumped {moved:.1f} units when player two died — he "
+            f"was respawned. He should not have moved at all")
+    assert last.get("playerCount") == before_count, (
+        f"playerCount went {before_count} -> {last.get('playerCount')} on a "
+        f"teammate's death: the roster was despawned, which also throws away "
+        f"the record the shade needs to revive anyone")
+
+    shade = player(last, 2).get("shade")
+    assert shade, (
+        "player two went down but left no shade, so there is nothing to beat "
+        "and no way back — the session is stuck at one player")
+    sess.dump_state("14-extra-downed")
+
+    # Now the way back. Dealt as a real hit so HealthManager.OnDeath fires;
+    # destroying the shade would skip the revive and still look green.
+    res = sess.channel.command("killshade", n=2)
+    assert res.get("ok"), f"could not beat player two's shade: {res.get('why')}"
+
+    ok, last = sess.channel.wait_for(
+        lambda s: player(s, 2).get("downed") is False
+        and player(s, 2).get("alive") is True, timeout=25)
+    assert ok, (
+        f"player two's shade was beaten and player two did not come back: "
+        f"downed={player(last or {}, 2).get('downed')}, "
+        f"alive={player(last or {}, 2).get('alive')}, "
+        f"playerCount={(last or {}).get('playerCount')}. This is the softlock: "
+        f"the session is down a player with no shade left to beat")
+
+    assert last.get("playerOneDowned") is not True, (
+        "player one went down while player two was being revived")
+    sess.dump_state("14-extra-revived")
+    sess.shot("14-extra-revived")
+    return (f"player two died in {before_scene}, left a shade, and beating it "
+            f"restored them with player one untouched "
+            f"({last.get('playerCount')} players)")
+
+
 @test("a fallen player leaves a shade instead of ending the run")
 def t_shade_on_death(sess):
     """The run survives one player dying, and the shade is the way back.
