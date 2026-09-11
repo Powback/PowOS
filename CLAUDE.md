@@ -1444,6 +1444,62 @@ firstboot self-completion failure.
 | Manager desktop widget (`com.powos.manager`) | ✅ Implemented | Two-pane KDE plasmoid: sidebar (projects `~/Projects/*` with live-thread markers + agent roster with unread badges) and a live chat that renders the manager's `--json-events` stream as bubbles + tool panels. Picking a project switches to its per-dir thread. Thin front-end over the manager backend (transport validated end-to-end vs real `claude`); QML not statically lintable on this box (no qmllint) — verify visually on desktop. |
 | Inter-agent comms (`powos comms`) | ✅ Implemented | Daemonless mailbox MCP auto-wired into every `powos ai` agent (`lib/ai/comms/`). Role inboxes (spool under XDG state, no backend); tools `send_message`/`escalate`/`notify_user`/`read_inbox`/`wait_for_message` (blocking yield — no polling). Human/script CLI `powos comms send|watch|inbox|agents|notify`. 19 tier-1 tests; validated end-to-end against a real headless `claude -p`. Opt out: `POWOS_COMMS_ENABLED=0`. |
 
+## Debugging Venice Unleashed / BF3 level work (agents: READ THIS FIRST)
+
+Rebuilding a BF3 level and getting it to render took days, almost all of it spent guessing. Nothing
+below is subtle; it is all just evidence that was there and went unread. **Do these two things
+before forming any theory.**
+
+**1. Read the minidump. VU writes them for the SERVER as well as the client.**
+`~/.local/share/.../VeniceUnleashed/dumps/*.dmp`. One command does the whole triage:
+
+```bash
+tools/vu_diag.py --since 30     # in the MapEditor mod's tools/
+```
+
+It reports how far each side got, wine's fault line, and the newest dump with **every frame
+resolved to a function and the strings that function references**. Those strings name the
+subsystem: `vegetationMeshInstance` / `vegetation/skinTransforms` is the vegetation system with no
+instance to write to — which is a missing `WindComponentData`, which is a visual environment the
+level never carried. Four full build-and-join cycles of guessing did not find that; one dump did.
+
+**2. Diff the emit against the game's own level.** Every defect had the same shape — the source
+level has something the emit does not, and neither the build nor the dedicated server says so:
+
+```bash
+tools/usd/level_parity.py <emit-dir> --level mp_001
+```
+
+Lists entity types the source level has and the emit lacks, and partitions the emit references but
+does not carry.
+
+### Things that are true and cost a day each
+
+- **A dedicated server never creates a shader.** Every headless check can pass on a level no client
+  can draw. "Server loads it" means nothing about rendering.
+- **`LoadingInfo: Blocking on shader creation` is not a failure.** It is the second-to-last stage;
+  a healthy client sits there too. The signal is `Level:Loaded` and whether frames keep ticking.
+- **A renderer null only fires when the offending thing is DRAWN.** A 40-second test window says
+  "alive" about a build that dies at 19 minutes. Any bisect on a drawing fault needs minutes, or it
+  measures time-to-crash and the thresholds are meaningless.
+- **`vu.com` is a 26 KB loader** that decrypts BF3's image at runtime. `bf3.exe` on disk does *not*
+  disassemble at the addresses a crash reports, and there is no RTTI. Dump the image out of a live
+  client (`tools/vu_image.py dump`), then `dis` / `fn` / `xref` / `trace` against that.
+- **Launch with `WINEDEBUG=+seh`** for client faults: wine prints the exception, registers and a
+  real backtrace even when VU writes no dump. `tools/vu_catch.py` SIGSTOPs the process at the fault
+  and reads the structures it died on — which is how the last missing texture named itself.
+- **Never SIGKILL a Proton client.** It leaks ~120 GiB of host RAM through the nvidia driver until
+  a reboot. SIGTERM, or SIGSTOP then SIGCONT.
+- **Add each target to a bundle exactly once.** A later line wins, so a shared texture emitted once
+  per mesh that uses it silently replaces itself (3,421 duplicates on MP_001).
+- **Carry references transitively.** Shader graphs, the variation database's textures, lod groups,
+  material variations, decal shaders — each was a separate crash, and all of them are one rule:
+  walk every reference in every emitted partition and carry what is missing, then repeat.
+- **Some things cannot be reached by walking references.** A compiled shader names textures that
+  appear in no EBX, and the shader database's own list of them is incomplete (349 of 605 shaders on
+  MP_001). Carry the source level's whole resource list instead:
+  `list_bundle_resources win32/levels/<level>/<level>`.
+
 ## Credentials
 
 ```
