@@ -29,6 +29,14 @@
 #     Windows 616.64 a consumer scored 0/300 evaluates; the same build scored
 #     300/300 on 616.56, crashing inside NVIDIA's own nvngx_dlssnr.dll. Linux is a
 #     different driver branch, so `doctor` MEASURES instead of assuming.
+#   - MULTI-SWAPCHAIN GAMES ARE NOT SERVED YET. The helper builds one neural
+#     context for whichever swapchain asks first. GTA V Enhanced presents six
+#     (Rockstar launcher, Steam overlay, then the game), the launcher wins, and
+#     every frame from the game's real swapchain is then rejected — observed
+#     live: ~3300 frames submitted, 0 composed. There is no knob to pin it, and
+#     restarting the helper to rebind does NOT help: it re-binds the launcher
+#     and yanks the transport out from under the running game. Prefer a
+#     single-swapchain title until upstream can select a swapchain.
 #   - PowOS ships NO NVIDIA binaries and NO layer binaries. nvngx_dlssnr.dll is
 #     NVIDIA's and is not in any public driver package (verified against the
 #     official 616.92 Windows package by filename and exact size). The layer is
@@ -364,10 +372,35 @@ cmd_dlss_runtime_list() {
 
 # ── NR layer install ─────────────────────────────────────────────────────
 
-DLSS_BUILD_DEPS_64="clang llvm meson ninja-build mingw64-gcc-c++ qt6-qtbase-devel"
-# The 32-bit layer is MANDATORY, not optional — 32-bit games load the 32-bit
+# Build deps, installed INSIDE a throwaway container — never layered onto the
+# host. On a bootc image layering ~15 build-time packages costs a reboot and then
+# has to be carried forever, for tools nothing needs at runtime.
+#
+# This list is NOT the upstream README's; each addition below it was found by a
+# failing build, so do not "tidy" them away:
+#   gcc-c++ libstdc++-devel   64-bit bits/c++config.h — the .i686 set alone
+#                             fails the native target
+#   libstdc++-static glibc-static  the CLI tools link with -static
+#   libXi-devel libX11-devel  layer_linux/src/hotkey.cpp needs
+#                             X11/extensions/XInput2.h
+# The 32-bit layer is MANDATORY, not optional: 32-bit games load the 32-bit
 # layer, and the build drives native/linux32/windows targets together.
-DLSS_BUILD_DEPS_32="glibc-devel.i686 libstdc++-devel.i686 libgcc.i686 libatomic.i686"
+DLSS_BUILD_DEPS="clang llvm meson ninja-build git pkgconf-pkg-config
+gcc-c++ libstdc++-devel libstdc++-static glibc-static
+mingw64-gcc-c++ qt6-qtbase-devel
+libXi-devel libX11-devel libXext-devel libXrandr-devel libXfixes-devel
+glibc-devel.i686 libstdc++-devel.i686 libgcc.i686 libatomic.i686
+glslang vulkan-headers"
+
+# Pin the build container to the HOST's Fedora release. A newer glibc in the
+# container produces binaries the host loader refuses; older is safe but the
+# layer links against the host Vulkan loader and Qt, so matching is correct.
+dlss_build_image() {
+    [[ -n "${POWOS_DLSS_BUILD_IMAGE:-}" ]] && { echo "$POWOS_DLSS_BUILD_IMAGE"; return; }
+    local ver
+    ver="$(. /etc/os-release 2>/dev/null && echo "${VERSION_ID:-}")"
+    echo "registry.fedoraproject.org/fedora:${ver:-latest}"
+}
 
 cmd_dlss_nr_install() {
     dlss_driver_ok || { perr "No working NVIDIA driver — fix that first."; return 1; }
@@ -382,16 +415,8 @@ cmd_dlss_nr_install() {
         fi
     fi
 
-    local missing=""
-    local p
-    for p in git meson ninja clang; do
-        command -v "$p" >/dev/null 2>&1 || missing="$missing $p"
-    done
-    if [[ -n "$missing" ]]; then
-        pwarn "Missing build tools:$missing"
-        plog  "Install with:"
-        echo  "    rpm-ostree install $DLSS_BUILD_DEPS_64 $DLSS_BUILD_DEPS_32"
-        plog  "…then reboot and re-run. (Layering build deps on a bootc image needs a reboot.)"
+    if ! command -v podman >/dev/null 2>&1; then
+        perr "podman not found (should ship with PowOS) — needed for the container build."
         return 1
     fi
 
@@ -404,16 +429,45 @@ cmd_dlss_nr_install() {
         git clone --depth 1 "$DLSS_LAYER_REPO" "$DLSS_LAYER_SRC" || { perr "Clone failed."; return 1; }
     fi
 
-    plog "Building (native 64-bit + 32-bit Linux layers + the Windows NGX helper)…"
-    ( cd "$DLSS_LAYER_SRC" && tools/meson-build.sh ) || {
-        perr "Build failed. Full deps:"
-        echo "    $DLSS_BUILD_DEPS_64 $DLSS_BUILD_DEPS_32"
+    # Build INSIDE a container so the host never gains build-time packages. The
+    # first cut of this told the user to rpm-ostree install ~20 packages and
+    # reboot; on a bootc image that is a bad trade for tools nothing needs at
+    # runtime. Verified: the container-built .so resolves entirely against host
+    # libraries and needs at most GLIBC_2.38 against a host 2.43.
+    local img; img="$(dlss_build_image)"
+    local script="$DLSS_LAYER_SRC/.powos-dlss-build.sh"
+    {
+        echo "set -e"
+        echo "dnf -y install $(echo "$DLSS_BUILD_DEPS" | tr '\n' ' ') >/dev/null"
+        echo "cd /src && tools/meson-build.sh"
+    } > "$script"
+
+    plog "Building in $img (native + 32-bit layers + the Windows NGX helper)…"
+    if ! podman run --rm -v "$DLSS_LAYER_SRC":/src:Z -w /src "$img" bash /src/.powos-dlss-build.sh; then
+        perr "Build failed. Deps used:"
+        echo "$DLSS_BUILD_DEPS" | sed 's/^/    /'
         return 1
-    }
+    fi
+
+    # install.sh wants a STAGED package tree (it checks for root/usr), not the
+    # raw build dir — so stage a tarball first. Building in-container too, since
+    # make-dist needs the same toolchain.
+    plog "Staging a distributable package…"
+    {
+        echo "set -e"
+        echo "dnf -y install tar gzip >/dev/null"
+        echo "cd /src && ./packaging/make-dist.sh tar"
+    } > "$script"
+    podman run --rm -v "$DLSS_LAYER_SRC":/src:Z -w /src "$img" bash /src/.powos-dlss-build.sh >/dev/null \
+        || { perr "make-dist failed."; return 1; }
+
+    local staged
+    staged="$(find "$DLSS_LAYER_SRC/dist" -maxdepth 1 -type d -name 'dlssnr-[0-9]*-linux-*' 2>/dev/null | sort -V | tail -1)"
+    [[ -n "$staged" ]] || { perr "No staged package under $DLSS_LAYER_SRC/dist."; return 1; }
 
     # Per-user install: no root, no /usr write, so no sysext unmerge dance.
-    plog "Installing per-user (no root; keeps /usr untouched)…"
-    ( cd "$DLSS_LAYER_SRC" && ./install.sh --user ) || { perr "install.sh --user failed."; return 1; }
+    plog "Installing per-user from $(basename "$staged") (no root; /usr untouched)…"
+    ( cd "$staged" && ./install.sh --user ) || { perr "install.sh --user failed."; return 1; }
 
     local conflict; conflict="$(dlss_layer_conflicts)"
     [[ -n "$conflict" ]] && {
