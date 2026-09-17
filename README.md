@@ -269,6 +269,8 @@ powos games steam-setup            # Steam library on the shared partition
 powos boot windows                 # one-shot reboot into bare-metal Windows, back after
 powos vm windows                   # run installed Windows as a KVM guest (no reboot, non-AC only)
 powos gpu status | to-vm | to-host # hotswap the dGPU between Linux (CUDA) and a VM
+powos dlss4 preset k              # force a DLSS 4 transformer preset (official)
+powos dlss status                 # DLSS 5 Neural Rendering readiness (experimental)
 ```
 
 > **Status:**
