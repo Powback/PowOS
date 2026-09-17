@@ -382,6 +382,46 @@ on exit (keeps CUDA on the host otherwise).
 > (else releasing the dGPU freezes the session — `powos gpu to-vm` refuses while
 > the GPU is in use). Keep a TTY/SSH the first time.
 
+### DLSS (powos dlss / powos dlss4)
+
+```bash
+powos dlss4 preset k               # DLSS 4 transformer preset launch options (OFFICIAL)
+powos dlss status                  # what works, what is blocked, and why
+powos dlss runtime import <path>   # verify + install NVIDIA's nvngx_dlssnr.dll by hash
+powos dlss nr install              # build + install the NR Vulkan layer (per-user)
+powos dlss nr smoke                # run the layer's smoke test, report evaluates
+powos dlss nr enable [<appid>]     # arm NR session-wide, or for one Steam appid
+```
+
+**Why one layer covers every game:** on Linux DXVK translates D3D9/10/11 and
+VKD3D-Proton translates D3D12, so *every* DirectX game is already Vulkan by the
+time it presents. A single implicit Vulkan layer therefore reaches DX9→DX12 plus
+native Vulkan with no per-game setup. The Windows tooling (DLSS5-Swapper,
+DLSS5-Feeder) cannot be ported: Feeder depends on the Windows Vulkan loader
+reading ReShade's layer from the registry, which Proton's winevulkan does not do.
+
+**Two things that are NOT the same:** Neural Rendering is a synthesised DLSS
+evaluate (optical-flow motion vectors, null depth, `UseAutoMask`), so it can be
+applied layer-wide. Super Resolution and Frame Generation need per-frame motion
+vectors *and* depth from the engine, so they can never be universal — they stay
+per-game. Do not let help text blur these.
+
+PowOS ships **no** NVIDIA binaries and **no** layer binaries. `nvngx_dlssnr.dll`
+is NVIDIA's and is not in any public driver package (verified against the official
+616.92 Windows package by filename and exact size); the layer is AGPL-3.0. Both
+are supplied or built per-machine, which is also why there is nothing to
+redistribute. `powos dlss runtime import` gates on sha256 + Authenticode, because
+a patched runtime fails NGX's own signature check with `0xBAD00002` on RTX 50.
+
+> ⚠️ **Status / testability:** `test/tier1/test-dlss.sh` covers the probes, PE
+> validation, hash gating, preset mapping and verb dispatch (48 assertions).
+> Whether NR actually *evaluates* cannot be unit-tested — it needs an RTX 50, the
+> proprietary runtime and a DXVK-NVAPI Proton — so `powos dlss doctor` and
+> `powos dlss nr smoke` measure it on real hardware. Expect ~50-60% fps cost;
+> Xid 31 MMU faults and Xid 69 black screens are reported on Blackwell/Linux.
+> Driver pairing is decisive and unpredictable: on Windows the same consumer
+> scored 0/300 evaluates on one driver and 300/300 on the adjacent one.
+
 ### Games Storage (powos games) — shared NTFS partition, both OSes
 
 > **Three namespaces, one rule each — singular/plural is meaningful:**
@@ -1443,6 +1483,8 @@ firstboot self-completion failure.
 | Persistent manager (`powos ai manager`) | ✅ Implemented | Standing orchestrator: long-lived streaming `claude` session (`lib/ai/manager/`), per-directory memory (resumes by cwd), **live comms-inbox injection** (mail becomes a turn, no polling), default escalation hub. Terminal REPL + widget backend: `--once`/`--once-stdin` run one turn, `--json-events` emit a normalized event stream (assistant/tool_use/tool_result/turn_done/inbox), `--list-json` feeds the sidebar. `--safe` keeps permission prompts. 11 hermetic tests + validated against real `claude`. Also: `powos ai --continue` now resumes raw `claude` CLI sessions in the dir. |
 | Manager desktop widget (`com.powos.manager`) | ✅ Implemented | Two-pane KDE plasmoid: sidebar (projects `~/Projects/*` with live-thread markers + agent roster with unread badges) and a live chat that renders the manager's `--json-events` stream as bubbles + tool panels. Picking a project switches to its per-dir thread. Thin front-end over the manager backend (transport validated end-to-end vs real `claude`); QML not statically lintable on this box (no qmllint) — verify visually on desktop. |
 | Inter-agent comms (`powos comms`) | ✅ Implemented | Daemonless mailbox MCP auto-wired into every `powos ai` agent (`lib/ai/comms/`). Role inboxes (spool under XDG state, no backend); tools `send_message`/`escalate`/`notify_user`/`read_inbox`/`wait_for_message` (blocking yield — no polling). Human/script CLI `powos comms send|watch|inbox|agents|notify`. 19 tier-1 tests; validated end-to-end against a real headless `claude -p`. Opt out: `POWOS_COMMS_ENABLED=0`. |
+| DLSS 4 presets (`powos dlss4`) | ✅ Implemented | Official route: `DXVK_NVAPI_DRS_*` preset override + `DLSSIndicator` overlay to verify what actually loaded. Needs a DXVK-NVAPI-bearing Proton (GE/cachyos); stock Proton lacks it. Upscaler model only — does not add frame generation. |
+| DLSS 5 Neural Rendering (`powos dlss nr`) | 🧪 Opt-in, HW validation pending | Layer-wide NR via a Vulkan implicit layer, so DX9-DX12 + native Vulkan with no per-game setup (`lib/dlss.sh`). PowOS ships no NVIDIA or layer binaries — `runtime import` gates on sha256 + Authenticode. ~50-60% fps cost; Xid faults reported on Blackwell/Linux; driver pairing is decisive, so `dlss doctor`/`nr smoke` measure rather than assume. SR/FG deliberately excluded (they need engine motion vectors + depth). 48 unit tests. |
 
 ## Credentials
 

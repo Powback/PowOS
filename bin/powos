@@ -97,6 +97,8 @@ Boot / dual-boot:
   cuda enable         Set up the CUDA toolkit in a GPU-passthrough container
   cuda status         Container / toolkit / GPU visibility
 
+  dlss4 preset <j-m>  Force a DLSS 4 transformer preset (official; j,k=DLSS 4, l,m=4.5)
+
 Controllers (analog stick-drift fixer — any joystick/gamepad):
   controller list                  Detected controllers + deadzone + idle drift
   controller deadzone <dev> <pct>  Set & persist a driver-level deadzone (now)
@@ -198,6 +200,9 @@ Feature Status table in CLAUDE.md before relying on them.
   vm windows         Boot installed Windows as a KVM guest (no reboot; non-AC only)
   gpu status         Where the dGPU is (host vs VM) + passthrough readiness
   gpu to-vm|to-host  Hotswap the dGPU between Linux (CUDA) and a VM
+  dlss status        DLSS 5 Neural Rendering readiness (~50-60% fps cost)
+  dlss doctor        Measure whether NR actually evaluates on this driver
+  dlss nr install    Build the NR Vulkan layer — covers DX9-DX12 + Vulkan, no per-game setup
   (CacheFS — lazy-load /home with write-back — opt-in via POWOS_CACHEFS_ENABLED=true)
 
 Examples:
@@ -2767,6 +2772,19 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/driver.sh"
         cmd_driver "$@"
+        ;;
+    dlss)
+        shift
+        experimental_warn dlss
+        source "$POWOS_LIB/dlss.sh"
+        cmd_dlss "$@"
+        ;;
+    dlss4)
+        shift
+        # DLSS 4 transformer presets are OFFICIAL and have no blockers, so this
+        # one is deliberately not behind experimental_warn — unlike `dlss nr`.
+        source "$POWOS_LIB/dlss.sh"
+        cmd_dlss4 "$@"
         ;;
     controller|controllers|pad|gamepad|joystick)
         shift
