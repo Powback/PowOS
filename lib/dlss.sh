@@ -929,15 +929,34 @@ dlss_flatpak_manifest_build() {
 }
 
 dlss_flatpak_arm() {
-    local app="$1"
+    local app="$1" dir
     command -v flatpak >/dev/null 2>&1 || { perr "flatpak not installed"; return 1; }
     dlss_flatpak_manifest_build || { perr "No layer manifest to rewrite (powos dlss nr install)"; return 1; }
+    # The manifest dir is passed as the TEXTUAL $HOME path, deliberately NOT
+    # realpath'd and NOT prefixed with /run/host. Two different mappings are in
+    # play and they pull opposite ways:
+    #
+    #   $HOME      flatpak re-maps the user's home into the sandbox at the same
+    #              textual path, so /home/powos/... resolves inside. Resolving
+    #              the /home -> /var/home symlink first BREAKS it, because
+    #              /run/host is a minimal mount whose var/ holds only usrlocal.
+    #   /run/host  is the real host tree, so the manifest's library_path DOES
+    #              need the resolved path (handled in manifest_build).
+    #
+    # Verified inside org.DolphinEmu.dolphin-emu: the layer .so is present at
+    # /run/host/usr/lib64/dlssnr/layer/, and $HOME/... lists correctly.
+    dir="${DLSS_FLATPAK_DIR%/}"
     flatpak override --user "$app" \
         --env=VKLayer_DLSS5=1 \
-        --env=VK_ADD_LAYER_PATH="/run/host/$DLSS_FLATPAK_DIR" \
+        --env=VK_ADD_LAYER_PATH="$dir" \
         --filesystem=host:ro 2>/dev/null || { perr "flatpak override failed for $app"; return 1; }
     pok "  on (flatpak): $app"
-    plog "  UNVERIFIED on this box — confirm with 'powos dlss games' after launching."
+    # What is actually verified: inside the sandbox the manifests list and the
+    # layer .so resolves. What is NOT: that the loader then activates it in a
+    # real flatpak game — that needs a Vulkan app to run, and the runtime here
+    # ships no vulkaninfo. Say so rather than implying end-to-end coverage.
+    plog "  paths verified inside the sandbox; layer ACTIVATION is unconfirmed —"
+    plog "  launch it and check 'dlssnr-helper status' composes frames."
 }
 
 dlss_flatpak_disarm() {
