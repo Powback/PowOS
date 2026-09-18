@@ -479,6 +479,236 @@ cmd_dlss_nr_install() {
     plog "Next: powos dlss doctor   (measures whether THIS driver actually evaluates)"
 }
 
+# ── per-game NR, without touching game files ─────────────────────────────
+#
+# The rule that shapes all of this: NOTHING is written into steamapps/common.
+# OptiScaler is a DLL proxy, so it has to be somewhere the game's loader looks —
+# but the prefix's system32 is such a place, and a prefix is Steam-generated
+# compatdata, not game data. Steam's "verify integrity" only checks
+# steamapps/common, and a game update never rewrites a prefix.
+#
+# It masquerades as winmm.dll rather than dxgi.dll because DXVK already owns
+# dxgi in the prefix; displacing that would take DXVK out of the pipeline.
+# winmm is a wine stub OptiScaler chain-loads.
+#
+# The override is set once per Proton via user_settings.py, which Proton imports
+# and applies to EVERY game it runs — so there are no per-game launch options.
+# "n,b" is native-then-builtin, so it is inert in any prefix where no native
+# winmm.dll was placed: other games on the same Proton are unaffected.
+
+DLSS_OPTI_DIR="${DLSS_OPTI_DIR:-$DLSS_CACHE_DIR/optiscaler}"
+
+dlss_steam_root() {
+    local s
+    for s in "${XDG_DATA_HOME:-$HOME/.local/share}/Steam" "$HOME/.steam/steam" "$HOME/.steam/root"; do
+        [[ -d "$s/steamapps" ]] && { echo "$s"; return 0; }
+    done
+    return 1
+}
+
+# Qualifying games, as "<appid>|<name>". A game qualifies when it ships an
+# upscaler runtime: OptiScaler hooks that call, so without one there is nothing
+# to hook. Read from appmanifests so the appid comes with it.
+dlss_games_scan() {
+    local root lib manifest appid installdir gdir
+    root="$(dlss_steam_root)" || return 0
+    lib="$root/steamapps"
+    {
+        for manifest in "$lib"/appmanifest_*.acf; do
+            [[ -f "$manifest" ]] || continue
+            appid="$(basename "$manifest" | tr -dc '0-9')"
+            installdir="$(grep -m1 '"installdir"' "$manifest" 2>/dev/null | cut -d'"' -f4)"
+            [[ -n "$installdir" ]] || continue
+            gdir="$lib/common/$installdir"
+            [[ -d "$gdir" ]] || continue
+            # Proton/runtime entries are not games.
+            [[ "$installdir" == Proton* || "$installdir" == SteamLinuxRuntime* ]] && continue
+            if find "$gdir" -maxdepth 4 \( -iname 'nvngx_dlss.dll' -o -iname 'libxess.dll' \
+                 -o -iname 'amd_fidelityfx*dx12.dll' -o -iname 'ffx_fsr2*dx12*.dll' \) \
+                 2>/dev/null | grep -q .; then
+                echo "$appid|$installdir"
+            fi
+        done
+    }
+}
+
+dlss_prefix_sys32() {
+    local root; root="$(dlss_steam_root)" || return 1
+    echo "$root/steamapps/compatdata/${1:?}/pfx/drive_c/windows/system32"
+}
+
+# Which Proton a prefix was built with. Read from a builtin DLL's symlink target
+# rather than parsing config.vdf: the link is what the prefix actually uses, and
+# it is right even when CompatToolMapping is empty (Steam's default picks one).
+dlss_proton_of_prefix() {
+    local sys32="$1" tgt
+    for f in version.dll winhttp.dll wininet.dll; do
+        tgt="$(readlink "$sys32/$f" 2>/dev/null)" && [[ -n "$tgt" ]] && {
+            echo "${tgt%%/files/*}"; return 0
+        }
+    done
+    return 1
+}
+
+# Proton applies this to every game it runs: no per-game launch options.
+dlss_write_user_settings() {
+    local proton="$1" f="$1/user_settings.py"
+    [[ -d "$proton" ]] || return 1
+    if [[ -f "$f" ]] && ! grep -q 'powos dlss' "$f" 2>/dev/null; then
+        pwarn "  $proton/user_settings.py exists and is not ours — leaving it alone"
+        pwarn "  add manually:  \"WINEDLLOVERRIDES\": \"winmm=n,b\""
+        return 0
+    fi
+    cat > "$f" <<'PYEOF_INNER'
+# Written by powos dlss. Proton imports this and applies it to EVERY game it
+# runs, which is why no per-game launch options are needed.
+#
+# winmm rather than dxgi: DXVK owns dxgi.dll in the prefix and overriding it
+# would displace DXVK itself. "n,b" is native-then-builtin, so this is inert in
+# any prefix where no native winmm.dll was placed.
+user_settings = {
+    "WINEDLLOVERRIDES": "winmm=n,b",
+}
+PYEOF_INNER
+    plog "  override set on $(basename "$proton")"
+}
+
+dlss_on_one() {
+    local appid="$1" name="$2" sys32 runtime proton
+    sys32="$(dlss_prefix_sys32 "$appid")" || return 1
+    runtime="$(dlss_nr_runtime_path)"
+    [[ -f "$runtime" ]] || { perr "No NR runtime — powos dlss runtime import <path>"; return 1; }
+    [[ -d "$DLSS_OPTI_DIR" ]] || { perr "No OptiScaler payload at $DLSS_OPTI_DIR"; return 1; }
+
+    if [[ ! -d "$sys32" ]]; then
+        pwarn "$name: no prefix yet — run the game once, then re-run this"
+        return 1
+    fi
+    plog "$name"
+
+    # winmm.dll in a prefix is a SYMLINK into Proton's read-only install, so it
+    # must be replaced, not written through. Keep the target to restore on `off`.
+    if [[ -L "$sys32/winmm.dll" ]]; then
+        readlink "$sys32/winmm.dll" > "$sys32/.powos-winmm-orig"
+    elif [[ ! -f "$sys32/.powos-winmm-orig" ]]; then
+        # Not a symlink (a previous run replaced it, or Proton copied it), so
+        # derive the builtin's path from a sibling that IS still a link.
+        local sib l
+        for sib in version.dll winhttp.dll wininet.dll dbghelp.dll; do
+            l="$(readlink "$sys32/$sib" 2>/dev/null)" || continue
+            [[ -n "$l" ]] && { echo "${l%/*}/winmm.dll" > "$sys32/.powos-winmm-orig"; break; }
+        done
+    fi
+    rm -f "$sys32/winmm.dll"
+    cp -a "$DLSS_OPTI_DIR/OptiScaler.dll"       "$sys32/winmm.dll"
+    cp -a "$DLSS_OPTI_DIR/nvngx.dll_dlssnr.dll" "$sys32/"
+    cp -a "$DLSS_OPTI_DIR/OptiScaler.ini"       "$sys32/"
+    cp -a "$DLSS_OPTI_DIR/OptiScaler"           "$sys32/" 2>/dev/null
+
+    # Hard-link the 166 MB model: one inode however many games use it.
+    rm -f "$sys32/nvngx_dlssnr.dll"
+    ln "$runtime" "$sys32/nvngx_dlssnr.dll" 2>/dev/null \
+        || cp -a "$runtime" "$sys32/nvngx_dlssnr.dll"
+
+    sed -i '/^\[DlssNr\]/,/^\[/{s/^Enabled=auto/Enabled=true/}' "$sys32/OptiScaler.ini"
+
+    proton="$(dlss_proton_of_prefix "$sys32")" && dlss_write_user_settings "$proton"
+    pok "  on"
+}
+
+dlss_off_one() {
+    local appid="$1" name="$2" sys32 orig
+    sys32="$(dlss_prefix_sys32 "$appid")" || return 1
+    [[ -f "$sys32/nvngx_dlssnr.dll" || -f "$sys32/.powos-winmm-orig" ]] || return 1
+    rm -f "$sys32/nvngx_dlssnr.dll" "$sys32/nvngx.dll_dlssnr.dll" "$sys32/OptiScaler.ini"
+    rm -rf "$sys32/OptiScaler"
+    rm -f "$sys32/winmm.dll"
+    # Put wine's builtin back. Leaving winmm.dll ABSENT is worse than leaving
+    # ours in place: any game that actually calls into winmm then fails to start.
+    # Three sources, in order of trust, because `on` cannot always capture the
+    # symlink (if winmm.dll was already a regular file, there was none to read).
+    orig="$(cat "$sys32/.powos-winmm-orig" 2>/dev/null)"
+    if [[ -z "$orig" ]]; then
+        # A sibling builtin's target names the exact Proton this prefix uses.
+        local sib l
+        for sib in version.dll winhttp.dll wininet.dll dbghelp.dll; do
+            l="$(readlink "$sys32/$sib" 2>/dev/null)" || continue
+            [[ -n "$l" ]] && { orig="${l%/*}/winmm.dll"; break; }
+        done
+    fi
+    if [[ -n "$orig" && -e "$orig" ]]; then
+        ln -s "$orig" "$sys32/winmm.dll"
+    else
+        pwarn "  could not restore winmm.dll — Proton recreates it on next launch"
+    fi
+    rm -f "$sys32/.powos-winmm-orig"
+    pok "off: $name"
+}
+
+cmd_dlss_on() {
+    local target="${1:---all}" appid name n=0
+    if [[ "$target" == "--all" ]]; then
+        while IFS='|' read -r appid name; do
+            [[ -n "$appid" ]] || continue
+            dlss_on_one "$appid" "$name" && n=$((n+1))
+        done < <(dlss_games_scan)
+        pok "Neural Rendering on for $n game(s)."
+    else
+        while IFS='|' read -r appid name; do
+            [[ "${name,,}" == *"${target,,}"* ]] && { dlss_on_one "$appid" "$name"; return $?; }
+        done < <(dlss_games_scan)
+        perr "No upscaler game matches '$target' (powos dlss games)"; return 1
+    fi
+    echo
+    plog "No launch options needed — the override is set on the Proton itself."
+    plog "Games never launched have no prefix yet; run them once, then 'powos dlss on'."
+}
+
+cmd_dlss_off() {
+    local target="${1:---all}" appid name proton root
+    if [[ "$target" == "--all" ]]; then
+        while IFS='|' read -r appid name; do
+            [[ -n "$appid" ]] || continue
+            dlss_off_one "$appid" "$name" || true
+        done < <(dlss_games_scan)
+        # Drop our overrides too, but never someone else's file.
+        root="$(dlss_steam_root)" || return 0
+        for proton in "$root/steamapps/common"/Proton*/ "$HOME/.steam/root/compatibilitytools.d"/*/; do
+            [[ -f "$proton/user_settings.py" ]] || continue
+            grep -q 'powos dlss' "$proton/user_settings.py" 2>/dev/null && {
+                rm -f "$proton/user_settings.py"; plog "override removed from $(basename "${proton%/}")"; }
+        done
+        pok "Neural Rendering off."
+    else
+        while IFS='|' read -r appid name; do
+            [[ "${name,,}" == *"${target,,}"* ]] && { dlss_off_one "$appid" "$name"; return 0; }
+        done < <(dlss_games_scan)
+        perr "No match for '$target'"; return 1
+    fi
+}
+
+cmd_dlss_games() {
+    echo -e "${BOLD}Games that can take Neural Rendering${NC}"
+    echo    "════════════════════════════════════════"
+    local appid name sys32 n=0 on=0
+    while IFS='|' read -r appid name; do
+        [[ -n "$appid" ]] || continue
+        n=$((n+1)); sys32="$(dlss_prefix_sys32 "$appid")"
+        if [[ -f "$sys32/nvngx_dlssnr.dll" ]]; then
+            printf "  ${GREEN}●${NC} %-38s ${DIM}on${NC}\n" "$name"; on=$((on+1))
+        elif [[ -d "$sys32" ]]; then
+            printf "  ${DIM}○${NC} %-38s ${DIM}off${NC}\n" "$name"
+        else
+            printf "  ${DIM}○${NC} %-38s ${DIM}never launched (no prefix)${NC}\n" "$name"
+        fi
+    done < <(dlss_games_scan)
+    echo
+    echo -e "  ${DIM}$n game(s) qualify, $on on. Nothing is written to steamapps/common.${NC}"
+    echo -e "  ${BOLD}powos dlss on${NC} [game|--all]   ${BOLD}powos dlss off${NC} [game|--all]"
+    echo
+}
+
+
 # ── doctor: measure, never assume ────────────────────────────────────────
 
 cmd_dlss_doctor() {
@@ -700,6 +930,9 @@ cmd_dlss() {
     local sub="${1:-status}"; shift || true
     case "$sub" in
         status|info)      cmd_dlss_status "$@" ;;
+        on|enable)        cmd_dlss_on "$@" ;;
+        off|disable)      cmd_dlss_off "$@" ;;
+        games|list)       cmd_dlss_games "$@" ;;
         doctor|check)     cmd_dlss_doctor "$@" ;;
         runtime|runtimes) cmd_dlss_runtime "$@" ;;
         nr|neural)        cmd_dlss_nr "$@" ;;
