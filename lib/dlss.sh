@@ -532,6 +532,27 @@ dlss_games_scan() {
     }
 }
 
+# Every Proton on the box, not just the ones a prefix already points at.
+#
+# Arming only the Protons in use was a real bug: `on --all` walks prefixes, so a
+# Proton that no armed game happens to use never got user_settings.py. Games on
+# it then silently did nothing -- observed with GTA V on GE-Proton11-1 while
+# Fallout 4 worked on Proton Experimental. Steam also reassigns a game's Proton
+# at any time, so "in use" is not a stable set to key on.
+dlss_all_protons() {
+    local root d
+    root="$(dlss_steam_root)" || return 0
+    for d in "$root/steamapps/common"/Proton*/ \
+             "$HOME/.steam/root/compatibilitytools.d"/*/ \
+             "${XDG_DATA_HOME:-$HOME/.local/share}/Steam/compatibilitytools.d"/*/ \
+             /usr/share/steam/compatibilitytools.d/*/; do
+        # realpath before dedupe: /home is a symlink to /var/home on this base,
+        # so the same Proton appears under two spellings and `sort -u` on the raw
+        # strings keeps both — the same trap as the Steam library scan.
+        [[ -f "$d/proton" ]] && { realpath -m "${d%/}" 2>/dev/null || echo "${d%/}"; }
+    done | sort -u
+}
+
 dlss_prefix_sys32() {
     local root; root="$(dlss_steam_root)" || return 1
     echo "$root/steamapps/compatdata/${1:?}/pfx/drive_c/windows/system32"
@@ -686,6 +707,16 @@ cmd_dlss_on() {
         done < <(dlss_games_scan)
         perr "No upscaler game matches '$target' (powos dlss games)"; return 1
     fi
+    # Arm every installed Proton, not only those a prefix already referenced:
+    # the layer covers games with no OptiScaler prefix at all, and Steam can
+    # reassign a game's Proton whenever it likes.
+    local proton armed=0
+    while read -r proton; do
+        [[ -n "$proton" ]] || continue
+        dlss_write_user_settings "$proton" >/dev/null 2>&1 && armed=$((armed+1))
+    done < <(dlss_all_protons)
+    pok "Vulkan layer armed on $armed Proton install(s) — covers every game, any API."
+
     echo
     plog "No launch options needed — the override is set on the Proton itself."
     plog "Games never launched have no prefix yet; run them once, then 'powos dlss on'."
@@ -699,8 +730,7 @@ cmd_dlss_off() {
             dlss_off_one "$appid" "$name" || true
         done < <(dlss_games_scan)
         # Drop our overrides too, but never someone else's file.
-        root="$(dlss_steam_root)" || return 0
-        for proton in "$root/steamapps/common"/Proton*/ "$HOME/.steam/root/compatibilitytools.d"/*/; do
+        for proton in $(dlss_all_protons); do
             [[ -f "$proton/user_settings.py" ]] || continue
             grep -q 'powos dlss' "$proton/user_settings.py" 2>/dev/null && {
                 rm -f "$proton/user_settings.py"; plog "override removed from $(basename "${proton%/}")"; }
