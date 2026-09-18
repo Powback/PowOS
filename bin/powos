@@ -203,6 +203,9 @@ Feature Status table in CLAUDE.md before relying on them.
   dlss status        DLSS 5 Neural Rendering readiness (~50-60% fps cost)
   dlss doctor        Measure whether NR actually evaluates on this driver
   dlss nr install    Build the NR Vulkan layer — covers DX9-DX12 + Vulkan, no per-game setup
+  dlss games         List games, whether each is proton or native, and what is armed
+  dlss on|off        Arm/disarm a game (--all, or --flatpak <app-id>)
+  dlss wrap <name>   Wrap a native launcher (Prism, Lutris) so it runs armed
   (CacheFS — lazy-load /home with write-back — opt-in via POWOS_CACHEFS_ENABLED=true)
 
 Examples:

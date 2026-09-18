@@ -135,18 +135,35 @@ dlss_nr_runtime_verified() {
     [[ "$(dlss_sha256 "$(dlss_nr_runtime_path)")" == "$DLSS_NR_SHA256_RTX50" ]]
 }
 
-dlss_layer_installed() {
-    compgen -G "$DLSS_LAYER_MANIFEST_DIR/VK_LAYER_NV_dlssnr*.json" >/dev/null 2>&1
-}
+# Every directory the Vulkan loader reads implicit layers from, in its own
+# order. The system dirs are NOT merely a conflict source: the layer's installer
+# can install there (--system), and for gamescope it is the only thing that
+# works — gamescope carries cap_sys_nice, so the process is AT_SECURE and the
+# loader ignores $HOME layer paths entirely.
+DLSS_LAYER_SYS_DIRS="${DLSS_LAYER_SYS_DIRS:-/usr/share/vulkan/implicit_layer.d /etc/vulkan/implicit_layer.d}"
 
-# A competing manifest elsewhere is a real hazard: the layer's own installer warns
-# that the user tree, system tree, tarball and RPM all claim the same manifest and
-# "the loader reads whichever it finds first".
-dlss_layer_conflicts() {
+dlss_layer_dirs_with_manifest() {
     local d
-    for d in /usr/share/vulkan/implicit_layer.d /etc/vulkan/implicit_layer.d; do
+    for d in "$DLSS_LAYER_MANIFEST_DIR" $DLSS_LAYER_SYS_DIRS; do
         compgen -G "$d/VK_LAYER_NV_dlssnr*.json" >/dev/null 2>&1 && echo "$d"
     done
+}
+
+dlss_layer_installed() {
+    [[ -n "$(dlss_layer_dirs_with_manifest)" ]]
+}
+
+# A competing manifest is a real hazard: the layer's own installer warns that the
+# user tree, system tree, tarball and RPM all claim the same manifest and "the
+# loader reads whichever it finds first".
+#
+# A conflict is MORE THAN ONE location carrying it — not "the system tree carries
+# it", which is a perfectly good install and the only one gamescope can read.
+# Reporting a lone system install as a conflict sent us chasing a non-problem.
+dlss_layer_conflicts() {
+    local dirs
+    dirs="$(dlss_layer_dirs_with_manifest)"
+    [[ "$(echo "$dirs" | grep -c .)" -gt 1 ]] && echo "$dirs"
     return 0
 }
 
@@ -553,30 +570,61 @@ dlss_steam_root() {
     return 1
 }
 
-# Qualifying games, as "<appid>|<name>". A game qualifies when it ships an
-# upscaler runtime: OptiScaler hooks that call, so without one there is nothing
-# to hook. Read from appmanifests so the appid comes with it.
+# Does this directory ship a Linux ELF executable?
+#
+# The magic is read directly rather than shelled out to file(1), which is not
+# guaranteed present. Deliberately NOT `grep -q` on a pipeline: under `pipefail`
+# grep exits at the first match, SIGPIPEs the writer, and the pipeline returns
+# 141 depending on scheduling (see the note at the top of this file).
+dlss_dir_has_elf() {
+    local d="$1" f magic
+    while IFS= read -r f; do
+        # Hex, not the raw bytes: a command substitution drops NULs and warns,
+        # and plenty of non-ELF files start with one.
+        magic="$(od -An -tx1 -N4 "$f" 2>/dev/null | tr -d ' \n')"
+        [[ "$magic" == "7f454c46" ]] && return 0
+    done < <(find "$d" -maxdepth 3 -type f -executable \
+                  ! -name '*.dll' ! -name '*.exe' ! -name '*.so' 2>/dev/null | head -40)
+    return 1
+}
+
+# Steam games, as "<kind>|<appid>|<name>" where kind is proton|native.
+#
+#   proton  ships an upscaler runtime, so OptiScaler has a call to hook.
+#   native  a Linux build — no Proton, so no user_settings.py reaches it.
+#
+# Native is detected as "has an ELF executable AND no .exe near the top". ELF
+# alone is not enough: plenty of Windows games ship a Linux helper binary, and
+# a Proton game mislabelled native would be armed through the wrong mechanism.
+# Absence of compatdata is not a test either — a never-launched Proton game has
+# no prefix yet.
+#
+# Native rows are deliberately NOT gated on "is it Vulkan". Arming an OpenGL
+# game is inert: the layer only attaches to a VkSwapchainKHR, so a false
+# positive costs nothing, whereas guessing wrong the other way hides a game.
 dlss_games_scan() {
     local root lib manifest appid installdir gdir
     root="$(dlss_steam_root)" || return 0
     lib="$root/steamapps"
-    {
-        for manifest in "$lib"/appmanifest_*.acf; do
-            [[ -f "$manifest" ]] || continue
-            appid="$(basename "$manifest" | tr -dc '0-9')"
-            installdir="$(grep -m1 '"installdir"' "$manifest" 2>/dev/null | cut -d'"' -f4)"
-            [[ -n "$installdir" ]] || continue
-            gdir="$lib/common/$installdir"
-            [[ -d "$gdir" ]] || continue
-            # Proton/runtime entries are not games.
-            [[ "$installdir" == Proton* || "$installdir" == SteamLinuxRuntime* ]] && continue
-            if find "$gdir" -maxdepth 4 \( -iname 'nvngx_dlss.dll' -o -iname 'libxess.dll' \
+    for manifest in "$lib"/appmanifest_*.acf; do
+        [[ -f "$manifest" ]] || continue
+        appid="$(basename "$manifest" | tr -dc '0-9')"
+        installdir="$(grep -m1 '"installdir"' "$manifest" 2>/dev/null | cut -d'"' -f4)"
+        [[ -n "$installdir" ]] || continue
+        gdir="$lib/common/$installdir"
+        [[ -d "$gdir" ]] || continue
+        # Proton/runtime entries are not games.
+        [[ "$installdir" == Proton* || "$installdir" == SteamLinuxRuntime* ]] && continue
+
+        if [[ -n "$(find "$gdir" -maxdepth 4 \( -iname 'nvngx_dlss.dll' -o -iname 'libxess.dll' \
                  -o -iname 'amd_fidelityfx*dx12.dll' -o -iname 'ffx_fsr2*dx12*.dll' \) \
-                 2>/dev/null | grep -q .; then
-                echo "$appid|$installdir"
-            fi
-        done
-    }
+                 -print -quit 2>/dev/null)" ]]; then
+            echo "proton|$appid|$installdir"
+        elif [[ -z "$(find "$gdir" -maxdepth 2 -iname '*.exe' -print -quit 2>/dev/null)" ]] \
+             && dlss_dir_has_elf "$gdir"; then
+            echo "native|$appid|$installdir"
+        fi
+    done
 }
 
 # Every Proton on the box, not just the ones a prefix already points at.
@@ -740,19 +788,210 @@ dlss_off_one() {
     pok "off: $name"
 }
 
+# ── native (non-Proton) games ────────────────────────────────────────────
+#
+# A native Linux game never runs through Proton, so user_settings.py — the file
+# that arms every Proton game at once — cannot reach it. Nothing about the layer
+# needs changing: it is a system-wide implicit layer gated on VKLayer_DLSS5=1 and
+# it hooks any VkSwapchainKHR, Proton or not (verified with vkcube). All that is
+# missing is a way to set that variable for one native game.
+#
+# Three surfaces, three mechanisms:
+#   Steam native  the game shim's env sentinel — NO LaunchOptions writer of our
+#                 own (mods_set_launch_options CLOBBERS, harness_setup_shim
+#                 PREPENDS; they already fight, a third would be worse)
+#   non-Steam     a generated wrapper on PATH
+#   flatpak       flatpak override --env
+
+DLSS_WRAPPER_DIR="${DLSS_WRAPPER_DIR:-$HOME/.local/bin}"
+
+# Where WE write sentinels. Deliberately the user-owned location, not
+# /run/powos/verify: that needs root to create, so arming would prompt for sudo
+# per game — intolerable across `--all`. Making the system dir world-writable
+# instead is not an option, because powos-game-shim SOURCES these files, so a
+# dir anyone can write is arbitrary code execution in someone's game session.
+# $XDG_RUNTIME_DIR is already 0700 and ours. The shim reads both.
+DLSS_USER_SHIM_DIR="${DLSS_USER_SHIM_DIR:-${XDG_RUNTIME_DIR:-/tmp/powos-$(id -u)}/powos/verify}"
+
+dlss_shim_dir_ensure() {
+    mkdir -p "$DLSS_USER_SHIM_DIR" 2>/dev/null || return 1
+    chmod 700 "$DLSS_USER_SHIM_DIR" 2>/dev/null || true
+}
+
+# Reads check BOTH locations, because `powos dlss nr enable <appid>` and the
+# verify harness may have written the system one.
+dlss_shim_env_file() { echo "$DLSS_USER_SHIM_DIR/${1:?}.env"; }
+dlss_native_is_armed() {
+    [[ -f "$DLSS_USER_SHIM_DIR/${1:?}.env" || -f "$DLSS_SHIM_ENV_DIR/${1:?}.env" ]]
+}
+
+# Wire bin/powos-game-shim into a game's launch options, so the sentinel is
+# actually read. Writing the sentinel without this is a silent no-op — the bug
+# this function exists to close. harness.sh owns that edit; source it lazily
+# rather than duplicating a fourth LaunchOptions writer.
+dlss_shim_wire() {
+    local appid="$1" rc
+    if ! declare -F harness_setup_shim >/dev/null 2>&1; then
+        # harness.sh sets its own POWOS_TAG at file scope, which would relabel
+        # every later message in this run as [harness]. Restore ours.
+        local _tag="${POWOS_TAG:-dlss}"
+        source "${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/mods/harness.sh" 2>/dev/null
+        POWOS_TAG="$_tag"
+    fi
+    declare -F harness_setup_shim >/dev/null 2>&1 || return 1
+    harness_setup_shim "$appid" >/dev/null 2>&1; rc=$?
+    POWOS_TAG="${POWOS_TAG:-dlss}"
+    return $rc
+}
+
+dlss_arm_native() {
+    local appid="$1" name="$2" f
+    plog "$name"
+    dlss_shim_dir_ensure || { perr "  cannot create $DLSS_SHIM_ENV_DIR"; return 1; }
+    f="$(dlss_shim_env_file "$appid")"
+    {
+        echo "# Written by powos dlss. Native Linux game — no Proton, so the"
+        echo "# per-Proton user_settings.py override cannot reach it."
+        echo "export VKLayer_DLSS5=1"
+        echo "export VK_INSTANCE_LAYERS=VK_LAYER_NV_dlssnr:VK_LAYER_NV_present"
+    } > "$f" || { perr "  cannot write $f"; return 1; }
+
+    if dlss_shim_wire "$appid"; then
+        pok "  on (native)"
+    else
+        # Steam rewrites localconfig.vdf from memory on exit, so this edit needs
+        # Steam closed. Say so instead of reporting a success that does nothing.
+        pwarn "  armed, but the launch shim is not wired (Steam must be CLOSED)"
+        pwarn "  close Steam, then:  powos mods verify setup $appid"
+    fi
+}
+
+dlss_disarm_native() {
+    local appid="$1" name="$2" removed=0
+    [[ -f "$DLSS_USER_SHIM_DIR/$appid.env" ]] && { rm -f "$DLSS_USER_SHIM_DIR/$appid.env"; removed=1; }
+    # Ours may also have been written to the system dir by `nr enable <appid>`.
+    [[ -f "$DLSS_SHIM_ENV_DIR/$appid.env" ]] && { rm -f "$DLSS_SHIM_ENV_DIR/$appid.env" 2>/dev/null && removed=1; }
+    [[ $removed -eq 1 ]] || return 1
+    pok "off: $name"
+}
+
+# A wrapper for anything not launched by Steam — Prism Launcher, Lutris, or a
+# bare ELF. Same two-heredoc shape as mo2_write_wrapper (lib/mods/modlist.sh):
+# unquoted first so the command interpolates, quoted second for the literal body.
+dlss_wrapper_path() { echo "$DLSS_WRAPPER_DIR/${1:?}-dlss"; }
+
+dlss_write_native_wrapper() {
+    local slug="$1"; shift
+    local w; w="$(dlss_wrapper_path "$slug")"
+    mkdir -p "$DLSS_WRAPPER_DIR" || { perr "Cannot create $DLSS_WRAPPER_DIR"; return 1; }
+    cat > "$w" <<EOF
+#!/bin/bash
+# Written by powos dlss wrap $slug. Runs the command with the DLSS 5 Neural
+# Rendering Vulkan layer armed. The layer is inert without VKLayer_DLSS5=1, so
+# this wrapper is the whole difference between armed and not.
+POWOS_DLSS_TARGET=($(printf '%q ' "$@"))
+EOF
+    cat >> "$w" <<'EOF'
+export VKLayer_DLSS5=1
+export VK_INSTANCE_LAYERS=VK_LAYER_NV_dlssnr:VK_LAYER_NV_present
+exec "${POWOS_DLSS_TARGET[@]}" "$@"
+EOF
+    chmod +x "$w" || return 1
+    pok "Wrapper: $w"
+    case ":$PATH:" in
+        *:"$DLSS_WRAPPER_DIR":*) : ;;
+        *) pwarn "Add $DLSS_WRAPPER_DIR to PATH to run '$slug-dlss' directly." ;;
+    esac
+}
+
+# ── flatpak ──────────────────────────────────────────────────────────────
+#
+# A flatpak app cannot see the host's layer: the runtime ships its OWN
+# share/vulkan/implicit_layer.d which shadows ours, and our manifest's
+# library_path is absolute, so inside the sandbox it resolves to the runtime's
+# /usr/lib64 — the wrong file. So point VK_ADD_LAYER_PATH at a generated
+# manifest whose paths are rewritten under /run/host, and grant host:ro.
+DLSS_FLATPAK_DIR="${DLSS_FLATPAK_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/powos/dlss/flatpak}"
+
+dlss_flatpak_manifest_build() {
+    local src dst found=0
+    mkdir -p "$DLSS_FLATPAK_DIR" || return 1
+    for src in /usr/share/vulkan/implicit_layer.d/VK_LAYER_NV_dlssnr.*.json \
+               "$DLSS_LAYER_MANIFEST_DIR"/VK_LAYER_NV_dlssnr.*.json; do
+        [[ -f "$src" ]] || continue
+        dst="$DLSS_FLATPAK_DIR/$(basename "$src")"
+        # library_path may be absolute or relative to the manifest; rewrite only
+        # absolute host paths, which is what our installer writes.
+        sed 's#"library_path"[[:space:]]*:[[:space:]]*"/#"library_path": "/run/host/#' \
+            "$src" > "$dst" && found=$((found+1))
+    done
+    [[ $found -gt 0 ]]
+}
+
+dlss_flatpak_arm() {
+    local app="$1"
+    command -v flatpak >/dev/null 2>&1 || { perr "flatpak not installed"; return 1; }
+    dlss_flatpak_manifest_build || { perr "No layer manifest to rewrite (powos dlss nr install)"; return 1; }
+    flatpak override --user "$app" \
+        --env=VKLayer_DLSS5=1 \
+        --env=VK_ADD_LAYER_PATH="/run/host/$DLSS_FLATPAK_DIR" \
+        --filesystem=host:ro 2>/dev/null || { perr "flatpak override failed for $app"; return 1; }
+    pok "  on (flatpak): $app"
+    plog "  UNVERIFIED on this box — confirm with 'powos dlss games' after launching."
+}
+
+dlss_flatpak_disarm() {
+    local app="$1"
+    command -v flatpak >/dev/null 2>&1 || return 1
+    flatpak override --user "$app" \
+        --unset-env=VKLayer_DLSS5 --unset-env=VK_ADD_LAYER_PATH 2>/dev/null \
+        || return 1
+    pok "off (flatpak): $app"
+}
+
+dlss_flatpak_armed() {
+    command -v flatpak >/dev/null 2>&1 || return 0
+    local app
+    while IFS= read -r app; do
+        [[ -n "$app" ]] || continue
+        if flatpak override --user --show "$app" 2>/dev/null | grep -- 'VKLayer_DLSS5=1' >/dev/null 2>&1; then
+            echo "$app"
+        fi
+    done < <(flatpak list --app --columns=application 2>/dev/null)
+}
+
+# Arm one row, dispatching on its kind. Proton games get OptiScaler in the
+# prefix; native games get the shim sentinel.
+dlss_on_row() {
+    case "$1" in
+        native) dlss_arm_native "$2" "$3" ;;
+        *)      dlss_on_one     "$2" "$3" ;;
+    esac
+}
+dlss_off_row() {
+    case "$1" in
+        native) dlss_disarm_native "$2" "$3" ;;
+        *)      dlss_off_one       "$2" "$3" ;;
+    esac
+}
+
 cmd_dlss_on() {
-    local target="${1:---all}" appid name n=0
+    local target="${1:---all}" kind appid name n=0
+    if [[ "$target" == "--flatpak" ]]; then
+        [[ -n "${2:-}" ]] || { perr "Usage: powos dlss on --flatpak <app-id>"; return 1; }
+        dlss_flatpak_arm "$2"; return $?
+    fi
     if [[ "$target" == "--all" ]]; then
-        while IFS='|' read -r appid name; do
+        while IFS='|' read -r kind appid name; do
             [[ -n "$appid" ]] || continue
-            dlss_on_one "$appid" "$name" && n=$((n+1))
+            dlss_on_row "$kind" "$appid" "$name" && n=$((n+1))
         done < <(dlss_games_scan)
         pok "Neural Rendering on for $n game(s)."
     else
-        while IFS='|' read -r appid name; do
-            [[ "${name,,}" == *"${target,,}"* ]] && { dlss_on_one "$appid" "$name"; return $?; }
+        while IFS='|' read -r kind appid name; do
+            [[ "${name,,}" == *"${target,,}"* ]] && { dlss_on_row "$kind" "$appid" "$name"; return $?; }
         done < <(dlss_games_scan)
-        perr "No upscaler game matches '$target' (powos dlss games)"; return 1
+        perr "No game matches '$target' (powos dlss games)"; return 1
     fi
     # Arm every installed Proton, not only those a prefix already referenced:
     # the layer covers games with no OptiScaler prefix at all, and Steam can
@@ -770,12 +1009,21 @@ cmd_dlss_on() {
 }
 
 cmd_dlss_off() {
-    local target="${1:---all}" appid name proton root
+    local target="${1:---all}" kind appid name proton app
+    if [[ "$target" == "--flatpak" ]]; then
+        [[ -n "${2:-}" ]] || { perr "Usage: powos dlss off --flatpak <app-id>"; return 1; }
+        dlss_flatpak_disarm "$2"; return $?
+    fi
     if [[ "$target" == "--all" ]]; then
-        while IFS='|' read -r appid name; do
+        while IFS='|' read -r kind appid name; do
             [[ -n "$appid" ]] || continue
-            dlss_off_one "$appid" "$name" || true
+            dlss_off_row "$kind" "$appid" "$name" || true
         done < <(dlss_games_scan)
+        # Any flatpak app we armed, too — otherwise "off" leaves it on.
+        while IFS= read -r app; do
+            [[ -n "$app" ]] || continue
+            dlss_flatpak_disarm "$app" || true
+        done < <(dlss_flatpak_armed)
         # Drop our overrides too, but never someone else's file.
         for proton in $(dlss_all_protons); do
             [[ -f "$proton/user_settings.py" ]] || continue
@@ -784,8 +1032,8 @@ cmd_dlss_off() {
         done
         pok "Neural Rendering off."
     else
-        while IFS='|' read -r appid name; do
-            [[ "${name,,}" == *"${target,,}"* ]] && { dlss_off_one "$appid" "$name"; return 0; }
+        while IFS='|' read -r kind appid name; do
+            [[ "${name,,}" == *"${target,,}"* ]] && { dlss_off_row "$kind" "$appid" "$name"; return 0; }
         done < <(dlss_games_scan)
         perr "No match for '$target'"; return 1
     fi
@@ -794,22 +1042,70 @@ cmd_dlss_off() {
 cmd_dlss_games() {
     echo -e "${BOLD}Games that can take Neural Rendering${NC}"
     echo    "════════════════════════════════════════"
-    local appid name sys32 n=0 on=0
-    while IFS='|' read -r appid name; do
+    local kind appid name sys32 app w n=0 on=0
+    while IFS='|' read -r kind appid name; do
         [[ -n "$appid" ]] || continue
-        n=$((n+1)); sys32="$(dlss_prefix_sys32 "$appid")"
+        n=$((n+1))
+        if [[ "$kind" == "native" ]]; then
+            # Native games have no prefix, so the sentinel is the only state.
+            if dlss_native_is_armed "$appid"; then
+                printf "  ${GREEN}●${NC} %-34s ${DIM}%-7s on${NC}\n" "$name" "$kind"; on=$((on+1))
+            else
+                printf "  ${DIM}○${NC} %-34s ${DIM}%-7s off${NC}\n" "$name" "$kind"
+            fi
+            continue
+        fi
+        sys32="$(dlss_prefix_sys32 "$appid")"
         if [[ -f "$sys32/nvngx_dlssnr.dll" ]]; then
-            printf "  ${GREEN}●${NC} %-38s ${DIM}on${NC}\n" "$name"; on=$((on+1))
+            printf "  ${GREEN}●${NC} %-34s ${DIM}%-7s on${NC}\n" "$name" "$kind"; on=$((on+1))
         elif [[ -d "$sys32" ]]; then
-            printf "  ${DIM}○${NC} %-38s ${DIM}off${NC}\n" "$name"
+            printf "  ${DIM}○${NC} %-34s ${DIM}%-7s off${NC}\n" "$name" "$kind"
         else
-            printf "  ${DIM}○${NC} %-38s ${DIM}never launched (no prefix)${NC}\n" "$name"
+            printf "  ${DIM}○${NC} %-34s ${DIM}%-7s never launched (no prefix)${NC}\n" "$name" "$kind"
         fi
     done < <(dlss_games_scan)
+
+    while IFS= read -r app; do
+        [[ -n "$app" ]] || continue
+        n=$((n+1)); on=$((on+1))
+        printf "  ${GREEN}●${NC} %-34s ${DIM}%-7s on${NC}\n" "$app" "flatpak"
+    done < <(dlss_flatpak_armed)
+
+    for w in "$DLSS_WRAPPER_DIR"/*-dlss; do
+        [[ -f "$w" ]] || continue
+        n=$((n+1)); on=$((on+1))
+        printf "  ${GREEN}●${NC} %-34s ${DIM}%-7s wrapper${NC}\n" "$(basename "$w")" "native"
+    done
+
     echo
-    echo -e "  ${DIM}$n game(s) qualify, $on on. Nothing is written to steamapps/common.${NC}"
-    echo -e "  ${BOLD}powos dlss on${NC} [game|--all]   ${BOLD}powos dlss off${NC} [game|--all]"
+    echo -e "  ${DIM}$n entr(ies), $on on. Nothing is written to steamapps/common.${NC}"
+    echo -e "  ${BOLD}powos dlss on${NC} [game|--all|--flatpak <id>]   ${BOLD}powos dlss off${NC} [same]"
+    echo -e "  ${BOLD}powos dlss wrap${NC} <name> -- <command>   ${DIM}(Prism, Lutris, any native binary)${NC}"
     echo
+}
+
+# Arm an arbitrary native command — the escape hatch for anything Steam does not
+# launch. `powos dlss wrap minecraft -- prismlauncher` → ~/.local/bin/minecraft-dlss
+cmd_dlss_wrap() {
+    local slug="${1:-}"; shift || true
+    [[ -n "$slug" ]] || { perr "Usage: powos dlss wrap <name> -- <command> [args]"; return 1; }
+    [[ "${1:-}" == "--" ]] && shift
+    if [[ $# -eq 0 ]]; then
+        # No command given: treat the name as the binary, if it resolves.
+        command -v "$slug" >/dev/null 2>&1 \
+            || { perr "Usage: powos dlss wrap <name> -- <command> [args]"; return 1; }
+        set -- "$(command -v "$slug")"
+    fi
+    dlss_layer_installed || pwarn "Layer not installed yet — the wrapper will be inert (powos dlss nr install)."
+    dlss_write_native_wrapper "$slug" "$@"
+}
+
+cmd_dlss_unwrap() {
+    local slug="${1:-}" w
+    [[ -n "$slug" ]] || { perr "Usage: powos dlss unwrap <name>"; return 1; }
+    w="$(dlss_wrapper_path "$slug")"
+    [[ -f "$w" ]] || { perr "No wrapper at $w"; return 1; }
+    rm -f "$w" && pok "Removed $w"
 }
 
 
@@ -1011,6 +1307,13 @@ ${BOLD}powos dlss${NC} — NVIDIA DLSS on Linux
 
   powos dlss status                Capability report: what works, what is blocked
   powos dlss doctor                Check the pipeline and say where it breaks
+  powos dlss games                 List games, their kind, and which are armed
+  powos dlss on  [game|--all]      Arm a game (or all of them)
+  powos dlss off [game|--all]      Disarm
+  powos dlss on  --flatpak <id>    Arm a flatpak app
+  powos dlss off --flatpak <id>    Disarm it
+  powos dlss wrap <name> -- <cmd>  Wrapper for a native launcher (Prism, Lutris)
+  powos dlss unwrap <name>         Remove that wrapper
   powos dlss runtime import <path> Verify + install NVIDIA's nvngx_dlssnr.dll
   powos dlss runtime list          Installed runtimes with hashes
   powos dlss nr install            Build + install the NR Vulkan layer (per-user)
@@ -1021,6 +1324,12 @@ ${BOLD}powos dlss${NC} — NVIDIA DLSS on Linux
 
 One Vulkan layer covers DX9-DX12 and native Vulkan, because DXVK and
 VKD3D-Proton already make every DirectX game Vulkan before it presents.
+
+${BOLD}Proton vs native:${NC} a Proton game is armed once per Proton via
+user_settings.py, so it needs no launch options. A NATIVE Linux game never runs
+through Proton, so it is armed through the game shim's env sentinel instead —
+which requires Steam to be CLOSED once, to wire the shim in. Anything Steam does
+not launch at all uses ${BOLD}wrap${NC}.
 
 ${BOLD}Honesty:${NC} Neural Rendering costs ~50-60% fps and is experimental — Xid
 faults and black screens are reported on Blackwell/Linux. Super Resolution and
@@ -1037,6 +1346,8 @@ cmd_dlss() {
         on|enable)        cmd_dlss_on "$@" ;;
         off|disable)      cmd_dlss_off "$@" ;;
         games|list)       cmd_dlss_games "$@" ;;
+        wrap)             cmd_dlss_wrap "$@" ;;
+        unwrap)           cmd_dlss_unwrap "$@" ;;
         doctor|check)     cmd_dlss_doctor "$@" ;;
         runtime|runtimes) cmd_dlss_runtime "$@" ;;
         nr|neural)        cmd_dlss_nr "$@" ;;

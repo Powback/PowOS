@@ -23,6 +23,20 @@ APPID="${SteamAppId:-${STEAM_APPID:-unknown}}"
 SENTINEL="/run/powos/verify/${APPID}.env"
 PID_FILE="/run/powos/verify/${APPID}.pid"
 
+# A second, USER-OWNED sentinel location, sourced after the system one.
+#
+# /run/powos/verify needs root to create, which means arming a game needs a sudo
+# prompt — unacceptable per-game, and worse across `--all`. The obvious fix,
+# making the system dir world-writable via tmpfiles.d, is NOT safe: this script
+# SOURCES the sentinel, so a writable-by-anyone directory is arbitrary code
+# execution in another user's game session. $XDG_RUNTIME_DIR is already 0700 and
+# owned by the user, so a sentinel there needs no root and grants no one new
+# anything.
+USER_SENTINEL=""
+if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+    USER_SENTINEL="$XDG_RUNTIME_DIR/powos/verify/${APPID}.env"
+fi
+
 # ── Phase 1: Overlay mount-ensure ──────────────────────────────────────
 # If a mod manifest exists for this game, ensure the overlay is mounted.
 # The manifest → game mapping is resolved by scanning manifests for appid.
@@ -82,10 +96,15 @@ if [[ -d "$MODS_MANIFEST_DIR" ]] && [[ "$APPID" != "unknown" ]]; then
     unset _game _merged _powos _mf_appid _base
 fi
 
-# ── Phase 2: Source verify env sentinel ────────────────────────────────
+# ── Phase 2: Source verify env sentinels ───────────────────────────────
+# System first, then the user's, so a per-user setting wins a tie.
 if [[ -f "$SENTINEL" ]]; then
     # shellcheck disable=SC1090
     source "$SENTINEL"
+fi
+if [[ -n "$USER_SENTINEL" && -f "$USER_SENTINEL" ]]; then
+    # shellcheck disable=SC1090
+    source "$USER_SENTINEL"
 fi
 
 # Write our PID and the child PID for the harness

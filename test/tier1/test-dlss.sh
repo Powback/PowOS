@@ -27,8 +27,13 @@ trap 'rm -rf "$TMP"' EXIT
 export DLSS_CACHE_DIR="$TMP/cache"
 export DLSS_RUNTIME_DIR="$TMP/runtimes"
 export DLSS_LAYER_MANIFEST_DIR="$TMP/implicit_layer.d"
+# The SYSTEM layer dirs are a seam too, or these assertions read whatever the
+# developer's own box has installed in /usr/share/vulkan/implicit_layer.d.
+export DLSS_LAYER_SYS_DIRS="$TMP/sys-layer.d"
 export DLSS_SHIM_ENV_DIR="$TMP/verify"
-mkdir -p "$DLSS_RUNTIME_DIR" "$DLSS_LAYER_MANIFEST_DIR" "$DLSS_SHIM_ENV_DIR"
+export DLSS_WRAPPER_DIR="$TMP/bin"
+mkdir -p "$DLSS_RUNTIME_DIR" "$DLSS_LAYER_MANIFEST_DIR" "$DLSS_LAYER_SYS_DIRS" \
+         "$DLSS_SHIM_ENV_DIR" "$DLSS_WRAPPER_DIR"
 
 source "$DIR/lib/dlss.sh" 2>/dev/null
 
@@ -102,6 +107,18 @@ dlss_layer_installed && no "layer reported installed with no manifest!" || ok "n
 : > "$DLSS_LAYER_MANIFEST_DIR/VK_LAYER_NV_dlssnr.x86_64.json"
 dlss_layer_installed && ok "manifest -> installed" || no "manifest not detected"
 
+# A SYSTEM-only install is a real install, not a conflict. gamescope carries
+# cap_sys_nice, so it runs AT_SECURE and the loader ignores $HOME layer dirs --
+# system-wide is the only thing it can read. Treating it as "not installed"
+# made status/doctor lie on a correctly-installed box.
+rm -f "$DLSS_LAYER_MANIFEST_DIR/VK_LAYER_NV_dlssnr.x86_64.json"
+: > "$DLSS_LAYER_SYS_DIRS/VK_LAYER_NV_dlssnr.x86_64.json"
+dlss_layer_installed && ok "system-only manifest -> installed" || no "system manifest not detected"
+[[ -z "$(dlss_layer_conflicts)" ]] && ok "one location -> no conflict" || no "lone system install reported as a conflict"
+: > "$DLSS_LAYER_MANIFEST_DIR/VK_LAYER_NV_dlssnr.x86_64.json"
+[[ -n "$(dlss_layer_conflicts)" ]] && ok "two locations -> conflict reported" || no "duplicate manifests not reported"
+rm -f "$DLSS_LAYER_SYS_DIRS/VK_LAYER_NV_dlssnr.x86_64.json"
+
 echo "== enable/disable via the game shim (no LaunchOptions writer) =="
 out="$(cmd_dlss_nr_enable 4242 2>&1)"
 [[ -f "$DLSS_SHIM_ENV_DIR/4242.env" ]] && ok "per-game arm writes the shim env sentinel" || no "shim sentinel not written"
@@ -123,13 +140,57 @@ grep -qi 'frame generation\|Super Resolution\|SR/FG' <<<"$(cmd_dlss_usage 2>&1)"
 grep -qi '50-60% fps\|50-60%' <<<"$(cmd_dlss_usage 2>&1)" \
     && ok "usage states the fps cost" || no "usage omits the fps cost"
 
+echo "== native (non-Proton) games =="
+# A native Linux game never runs through Proton, so user_settings.py cannot
+# reach it. These assertions pin the separate mechanism.
+NG="$TMP/native-game"; mkdir -p "$NG"
+printf '\177ELF\002\001\001\0' > "$NG/thegame"; chmod +x "$NG/thegame"
+dlss_dir_has_elf "$NG" && ok "ELF detected by magic, not by file(1)" || no "ELF not detected"
+WG="$TMP/win-game"; mkdir -p "$WG"
+printf 'MZ\220\0' > "$WG/game.exe"; chmod +x "$WG/game.exe"
+dlss_dir_has_elf "$WG" && no "a PE .exe was mistaken for an ELF!" || ok "PE .exe is not an ELF"
+# A Windows game shipping a Linux helper must NOT be classed native -- it would
+# then be armed through the wrong mechanism entirely.
+printf '\177ELF\002\001\001\0' > "$WG/helper"; chmod +x "$WG/helper"
+dlss_dir_has_elf "$WG" && ok "ELF helper alongside a .exe still reads as ELF" || no "helper ELF missed"
+
+dlss_native_is_armed 9911 && no "unarmed native game reported armed!" || ok "native: unarmed by default"
+: > "$DLSS_SHIM_ENV_DIR/9911.env"
+dlss_native_is_armed 9911 && ok "native: sentinel means armed" || no "native arm not detected"
+rm -f "$DLSS_SHIM_ENV_DIR/9911.env"
+
+echo "== wrap: a native launcher PowOS does not start itself =="
+cat > "$TMP/target.sh" <<'TGT'
+#!/bin/bash
+echo "layer=$VKLayer_DLSS5 args=[$*]"
+TGT
+chmod +x "$TMP/target.sh"
+cmd_dlss_wrap demo -- "$TMP/target.sh" --base >/dev/null 2>&1
+W="$DLSS_WRAPPER_DIR/demo-dlss"
+[[ -x "$W" ]] && ok "wrap generates an executable wrapper" || no "wrapper not generated"
+out="$("$W" --extra "a b" 2>&1)"
+grep -q 'layer=1' <<<"$out" && ok "wrapper arms the layer" || no "wrapper did not set VKLayer_DLSS5"
+grep -q 'args=\[--base --extra a b\]' <<<"$out" \
+    && ok "wrapper preserves baked args and quoting" || no "wrapper mangled arguments: $out"
+cmd_dlss_unwrap demo >/dev/null 2>&1
+[[ ! -e "$W" ]] && ok "unwrap removes it" || no "wrapper survived unwrap"
+
 echo "== every documented verb dispatches (the powos mods snapshot lesson) =="
 # Guards against help promising a verb that was never wired.
 for fn in cmd_dlss cmd_dlss_status cmd_dlss_doctor cmd_dlss_runtime \
           cmd_dlss_runtime_import cmd_dlss_runtime_list cmd_dlss_nr \
           cmd_dlss_nr_install cmd_dlss_nr_smoke cmd_dlss_nr_enable \
-          cmd_dlss_nr_disable cmd_dlss4 cmd_dlss4_preset; do
+          cmd_dlss_nr_disable cmd_dlss4 cmd_dlss4_preset \
+          cmd_dlss_on cmd_dlss_off cmd_dlss_games cmd_dlss_wrap cmd_dlss_unwrap \
+          dlss_games_scan dlss_arm_native dlss_disarm_native dlss_flatpak_arm; do
     [[ "$(type -t "$fn")" == "function" ]] && ok "$fn defined" || no "$fn MISSING"
+done
+
+# Help must document every verb, or an agent generating its instructions from
+# --help can never use it (CLAUDE.md: an undocumented command does not exist).
+usage_out="$(cmd_dlss_usage 2>&1)"
+for verb in "dlss games" "dlss on" "dlss off" "dlss wrap" "dlss unwrap"; do
+    grep -q -- "$verb" <<<"$usage_out" && ok "usage documents '$verb'" || no "usage omits '$verb'"
 done
 out="$(cmd_dlss nonsense 2>&1)"; rc=$?
 [[ $rc -ne 0 ]] && ok "unknown verb returns non-zero" || no "unknown verb returned 0"
