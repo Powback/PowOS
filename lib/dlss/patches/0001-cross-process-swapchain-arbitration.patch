@@ -1,0 +1,104 @@
+--- a/layer_linux/src/layer.cpp
++++ b/layer_linux/src/layer.cpp
+@@ -31,6 +31,9 @@
+ #include "vk_table.h"
+ 
+ #include <dlfcn.h>
++#include <signal.h>
++#include <cerrno>
++#include <unistd.h>
+ #include <fcntl.h>
+ #include <sys/mman.h>
+ #include <sys/stat.h>
+@@ -587,6 +590,64 @@
+     return true;
+ }
+ 
++// Cross-process arbitration for the shared helper.
++//
++// ClaimPrimary above is per-PROCESS: g_primary is static, so each process picks
++// its own largest swapchain. The helper is ONE service with ONE neural context,
++// so a game spanning several processes has them all submit, and the helper binds
++// its context to whichever arrived first. Seen in GTA V Enhanced: the Rockstar
++// launcher (1024x600) and the game (2977x1440) both claim, the launcher wins the
++// context, and every frame from the game is refused for size mismatch -- 0
++// composed, 22 rejected, while both logs read clean.
++//
++// layerPid in the header is last-writer-wins, which cannot arbitrate. So the
++// claim carries the AREA: a process takes the channel only if its swapchain is
++// larger than the incumbent's, or the incumbent is gone. Kept in a small file
++// rather than a new header field so the protocol version stays put and an older
++// helper keeps working.
++static std::string PrimaryClaimPath() {
++    const char* dir = getenv("DLSSNR_RUNTIME_DIR");
++    if (dir && *dir) return std::string(dir) + "/primary.claim";
++    return "/tmp/dlssnr-" + std::to_string(getuid()) + "/primary.claim";
++}
++
++static bool PidAlive(uint32_t pid) {
++    if (!pid) return false;
++    return ::kill(pid_t(pid), 0) == 0 || errno == EPERM;
++}
++
++// May this process drive the helper with a swapchain of this area?
++static bool ClaimChannel(uint64_t area) {
++    const std::string path = PrimaryClaimPath();
++    const uint32_t self = uint32_t(getpid());
++    uint32_t owner = 0; unsigned long long ownerArea = 0;
++    if (FILE* f = fopen(path.c_str(), "re")) {
++        if (fscanf(f, "%u %llu", &owner, &ownerArea) != 2) { owner = 0; ownerArea = 0; }
++        fclose(f);
++    }
++    const bool take = (owner == self) || !PidAlive(owner) || area > ownerArea;
++    if (!take) return false;
++    if (owner == self && ownerArea == area) return true;
++    // temp + rename, so a reader never sees a half-written claim.
++    const std::string tmp = path + ".tmp";
++    if (FILE* f = fopen(tmp.c_str(), "we")) {
++        fprintf(f, "%u %llu\n", self, (unsigned long long)area);
++        fclose(f);
++        if (rename(tmp.c_str(), path.c_str()) != 0) unlink(tmp.c_str());
++    }
++    return true;
++}
++
++static void ReleaseChannel() {
++    const std::string path = PrimaryClaimPath();
++    uint32_t owner = 0; unsigned long long ownerArea = 0;
++    if (FILE* f = fopen(path.c_str(), "re")) {
++        if (fscanf(f, "%u %llu", &owner, &ownerArea) != 2) owner = 0;
++        fclose(f);
++    }
++    if (owner == uint32_t(getpid())) unlink(path.c_str());
++}
++
+ // Whether this swapchain is the one driving the channel, asked without claiming it.
+ static bool IsPrimary(VkDevice device, VkSwapchainKHR swapchain) {
+     std::lock_guard<std::mutex> lk(g_primaryMutex);
+@@ -1151,6 +1212,7 @@
+         dc->shm.hdr->layerPid.store(0);
+         dc->shm.hdr->layerCompositionUp.store(0);
+     }
++    ReleaseChannel();
+     if (dc->vkDeviceWaitIdle) dc->vkDeviceWaitIdle(device);
+     {
+         std::lock_guard<std::mutex> lk(dc->lock);
+@@ -1679,6 +1741,18 @@
+                 if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
+                 continue;
+             }
++            // Primary within THIS process is not enough: the helper is shared, so
++            // a launcher process would otherwise bind the neural context with its
++            // small window and starve the game. Largest swapchain across all
++            // processes wins the channel; the rest pass through untouched.
++            if (!ClaimChannel(uint64_t(sc.width) * sc.height)) {
++                static std::atomic<uint32_t> nc{0};
++                const uint32_t kc = nc.fetch_add(1);
++                if (kc < 3)
++                    Log("[layer] present: another process holds the channel with a larger "
++                        "swapchain (ours %ux%u); passing through", sc.width, sc.height);
++                continue;
++            }
+             sc.queue = queue;
+             if (!sc.ready && !dc->shm.dead) {
+                 if (!CreateResources(dc, sc, family)) {

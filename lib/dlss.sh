@@ -364,10 +364,56 @@ cmd_dlss_runtime_list() {
 
 # ── NR layer install ─────────────────────────────────────────────────────
 
-DLSS_BUILD_DEPS_64="clang llvm meson ninja-build mingw64-gcc-c++ qt6-qtbase-devel"
+# Each group below was found by a failing build, so don't "tidy" any away:
+#   gcc-c++ libstdc++-devel   64-bit bits/c++config.h. The .i686 set alone
+#                             fails the NATIVE target.
+#   *-static (both arches)    the CLI tools and both layers link -static.
+#   libXi/libX11-devel        layer_linux/src/hotkey.cpp includes XInput2.h
+#
+# ARCH-QUALIFY the static libs. Listing `libstdc++-static` unqualified next to
+# `libstdc++-static.i686` lets dnf collapse the two onto the i686 spec, so only
+# the 32-bit libstdc++.a lands and the native layer fails to link with the very
+# misleading `cannot find -lstdc++` — while `libstdc++-static` reads as present.
+DLSS_BUILD_DEPS_64="clang llvm meson ninja-build mingw64-gcc-c++ qt6-qtbase-devel gcc-c++ libstdc++-devel libstdc++-static.x86_64 glibc-static.x86_64 libXi-devel libX11-devel libXext-devel libXrandr-devel libXfixes-devel"
 # The 32-bit layer is MANDATORY, not optional — 32-bit games load the 32-bit
-# layer, and the build drives native/linux32/windows targets together.
-DLSS_BUILD_DEPS_32="glibc-devel.i686 libstdc++-devel.i686 libgcc.i686 libatomic.i686"
+# layer, and tools/meson-build.sh drives native -> linux32 -> windows under
+# `set -e`, so a 32-bit link failure silently stops the WINDOWS NGX helper —
+# the piece that actually hosts the model — from ever being built.
+DLSS_BUILD_DEPS_32="glibc-devel.i686 libstdc++-devel.i686 libgcc.i686 libatomic.i686 libstdc++-static.i686 glibc-static.i686"
+
+DLSS_PATCH_DIR="${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/dlss/patches"
+
+# Apply our carried patches to the upstream layer checkout.
+#
+# Never hard-fails: a build without them is still a working layer for
+# single-process games, and refusing to install would be worse than degrading.
+# But it says plainly what is lost, because an unpatched build fails LATER, in a
+# game, with clean-looking logs on both sides — the expensive kind of silence.
+dlss_apply_layer_patches() {
+    local p applied=0 failed=0
+    [[ -d "$DLSS_PATCH_DIR" ]] || return 0
+    for p in "$DLSS_PATCH_DIR"/*.patch; do
+        [[ -e "$p" ]] || continue
+        if git -C "$DLSS_LAYER_SRC" apply --check "$p" 2>/dev/null; then
+            git -C "$DLSS_LAYER_SRC" apply "$p" && applied=$((applied + 1))
+        elif git -C "$DLSS_LAYER_SRC" apply --reverse --check "$p" 2>/dev/null; then
+            applied=$((applied + 1))   # already applied
+        else
+            failed=$((failed + 1))
+            pwarn "Patch did not apply: $(basename "$p")"
+        fi
+    done
+    if [[ $failed -gt 0 ]]; then
+        pwarn "Upstream has moved under our patches. The layer will still build,"
+        pwarn "but games that present from several processes (a storefront"
+        pwarn "launcher plus the game) will silently get NO neural rendering:"
+        pwarn "the launcher's small swapchain takes the helper's one context and"
+        pwarn "every frame from the game is refused for size mismatch."
+    elif [[ $applied -gt 0 ]]; then
+        plog "Applied $applied PowOS patch(es) to the layer."
+    fi
+    return 0
+}
 
 cmd_dlss_nr_install() {
     dlss_driver_ok || { perr "No working NVIDIA driver — fix that first."; return 1; }
@@ -398,11 +444,16 @@ cmd_dlss_nr_install() {
     mkdir -p "$DLSS_CACHE_DIR"
     if [[ -d "$DLSS_LAYER_SRC/.git" ]]; then
         plog "Updating $DLSS_LAYER_SRC…"
+        # Drop our patches first: they are local modifications, and --ff-only
+        # refuses to pull over them. They are re-applied below.
+        git -C "$DLSS_LAYER_SRC" checkout -- . 2>/dev/null
         git -C "$DLSS_LAYER_SRC" pull --ff-only || pwarn "Pull failed; building the existing checkout."
     else
         plog "Cloning $DLSS_LAYER_REPO (AGPL-3.0)…"
         git clone --depth 1 "$DLSS_LAYER_REPO" "$DLSS_LAYER_SRC" || { perr "Clone failed."; return 1; }
     fi
+
+    dlss_apply_layer_patches
 
     plog "Building (native 64-bit + 32-bit Linux layers + the Windows NGX helper)…"
     ( cd "$DLSS_LAYER_SRC" && tools/meson-build.sh ) || {
