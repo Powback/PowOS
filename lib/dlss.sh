@@ -479,6 +479,167 @@ cmd_dlss_nr_install() {
     plog "Next: powos dlss doctor   (measures whether THIS driver actually evaluates)"
 }
 
+# ── per-game install (OptiScaler: the full-quality route) ────────────────
+#
+# Why per-game at all: NVIDIA ships no shared location for the NR runtime, so
+# every game needs its own copy beside its renderer. At 166 MB that is ~2 GB
+# across a library, so the runtime is HARD-LINKED rather than copied: one inode,
+# many games, and `nr remove` unlinks instead of deleting.
+#
+# Why OptiScaler here rather than the Vulkan layer: it hooks the game's existing
+# DLSS/FSR/XeSS call, so the model gets the engine's real depth, motion vectors
+# and jitter, and runs BEFORE the UI is composited. The layer only ever sees the
+# finished frame — good optical-flow motion, but no depth, no jitter, and it
+# processes the HUD along with the scene.
+
+DLSS_OPTI_DIR="${DLSS_OPTI_DIR:-$DLSS_CACHE_DIR/optiscaler}"
+
+# Steam libraries, one per line; libraryfolders.vdf lists any extras.
+dlss_steam_libs() {
+    local steam lf extra
+    for steam in "${XDG_DATA_HOME:-$HOME/.local/share}/Steam" "$HOME/.steam/steam" "$HOME/.steam/root"; do
+        [[ -d "$steam/steamapps" ]] || continue
+        echo "$steam/steamapps/common"
+        lf="$steam/steamapps/libraryfolders.vdf"
+        if [[ -f "$lf" ]]; then
+            grep -oE '"path"[[:space:]]*"[^"]+"' "$lf" 2>/dev/null |
+                sed -E 's/.*"path"[[:space:]]*"([^"]+)".*/\1/' |
+                while read -r extra; do echo "${extra}/steamapps/common"; done
+        fi
+        return 0
+    done
+}
+
+# A game qualifies when it ships an upscaler runtime: OptiScaler hooks that call,
+# so without one there is nothing to hook. Echoes "<dir>|<upscaler>|<name>".
+# Installing beside the upscaler DLL is deliberate — that is where the renderer
+# lives (bin/x64 for Cyberpunk, the root for most others), which beats keeping a
+# per-game table of executable paths.
+dlss_game_scan() {
+    local lib g hit
+    # realpath before dedupe: /home is a symlink to /var/home on this base, so
+    # the same library shows up under two spellings and every game is listed
+    # (and installed) twice. `sort -u` on the raw strings does not catch it.
+    dlss_steam_libs | while read -r lib; do realpath -m "$lib" 2>/dev/null || echo "$lib"; done |
+      sort -u | while read -r lib; do
+        [[ -d "$lib" ]] || continue
+        for g in "$lib"/*/; do
+            [[ -d "$g" ]] || continue
+            hit="$(find "$g" -maxdepth 4 \( -iname 'nvngx_dlss.dll' -o -iname 'libxess.dll' \
+                     -o -iname 'amd_fidelityfx*dx12.dll' -o -iname 'ffx_fsr2*dx12*.dll' \) \
+                     2>/dev/null | head -1)"
+            [[ -n "$hit" ]] && echo "$(dirname "$hit")|$(basename "$hit")|$(basename "${g%/}")"
+        done
+    done
+}
+
+cmd_dlss_games() {
+    echo -e "${BOLD}Games that can take DLSS 5 Neural Rendering${NC}"
+    echo    "════════════════════════════════════════"
+    local mark_ok="${GREEN}●${NC}" mark_no="${DIM}○${NC}"
+    local n=0 found=0 dir up name
+    while IFS='|' read -r dir up name; do
+        [[ -n "$name" ]] || continue
+        n=$((n+1))
+        if [[ -f "$dir/nvngx_dlssnr.dll" ]]; then
+            printf "  %b %-40s ${DIM}installed${NC}\n" "$mark_ok" "$name"; found=$((found+1))
+        else
+            printf "  %b %-40s ${DIM}%s${NC}\n" "$mark_no" "$name" "$up"
+        fi
+    done < <(dlss_game_scan)
+    echo
+    echo -e "  ${DIM}$n game(s) ship an upscaler; $found have NR installed.${NC}"
+    echo -e "  ${BOLD}Install:${NC} powos dlss nr install <name>   |   --all"
+    echo
+}
+
+# Resolve a typed name to one scanned game (substring, case-insensitive).
+dlss_find_game() {
+    local want="${1,,}" dir up name
+    while IFS='|' read -r dir up name; do
+        [[ -n "$name" ]] || continue
+        [[ "${name,,}" == *"$want"* ]] && { echo "$dir|$up|$name"; return 0; }
+    done < <(dlss_game_scan)
+    return 1
+}
+
+dlss_install_one() {
+    local dir="$1" name="$2" runtime f
+    runtime="$(dlss_nr_runtime_path)"
+    [[ -f "$runtime" ]] || { perr "No NR runtime — powos dlss runtime import <path>"; return 1; }
+    [[ -d "$DLSS_OPTI_DIR" ]] || { perr "No OptiScaler payload at $DLSS_OPTI_DIR"; return 1; }
+
+    plog "$name"
+    for f in dxgi.dll OptiScaler.ini; do
+        if [[ -e "$dir/$f" && ! -e "$dir/$f.powos-dlss-backup" ]]; then
+            cp -a "$dir/$f" "$dir/$f.powos-dlss-backup"
+            pwarn "  existing $f backed up"
+        fi
+    done
+
+    cp -a "$DLSS_OPTI_DIR/OptiScaler.dll"       "$dir/dxgi.dll"
+    cp -a "$DLSS_OPTI_DIR/OptiScaler.ini"       "$dir/OptiScaler.ini"
+    cp -a "$DLSS_OPTI_DIR/nvngx.dll_dlssnr.dll" "$dir/"
+    cp -a "$DLSS_OPTI_DIR/OptiScaler"           "$dir/" 2>/dev/null
+
+    rm -f "$dir/nvngx_dlssnr.dll"
+    if ln "$runtime" "$dir/nvngx_dlssnr.dll" 2>/dev/null; then
+        plog "  runtime hard-linked (costs no extra disk)"
+    else
+        cp -a "$runtime" "$dir/nvngx_dlssnr.dll"
+        pwarn "  runtime COPIED (different filesystem) — 166 MB"
+    fi
+
+    # NR ships off; installing it deliberately means wanting it on.
+    sed -i '/^\[DlssNr\]/,/^\[/{s/^Enabled=auto/Enabled=true/}' "$dir/OptiScaler.ini"
+    pok "  installed"
+}
+
+cmd_dlss_nr_install_game() {
+    local target="${1:-}" hit dir up name n=0
+    [[ -n "$target" ]] || { perr "Usage: powos dlss nr install <game|--all>"; return 1; }
+    if [[ "$target" == "--all" ]]; then
+        while IFS='|' read -r dir up name; do
+            [[ -n "$name" ]] || continue
+            dlss_install_one "$dir" "$name" && n=$((n+1))
+        done < <(dlss_game_scan)
+        pok "Installed into $n game(s)."
+    else
+        hit="$(dlss_find_game "$target")" || { perr "No installed game matches '$target'"; return 1; }
+        dlss_install_one "${hit%%|*}" "${hit##*|}" || return 1
+    fi
+    echo
+    plog "Each game also needs this in its Steam launch options:"
+    echo  "    WINEDLLOVERRIDES=dxgi.dll=n,b %command%"
+    plog "Games behind a storefront launcher need their skip flag too, e.g."
+    echo  "    ... %command% --launcher-skip      (Cyberpunk 2077)"
+    pwarn "Steam rewrites localconfig.vdf from memory on exit — set launch options"
+    pwarn "with Steam CLOSED or the edit is silently lost."
+}
+
+cmd_dlss_nr_remove_game() {
+    local target="${1:-}" hit dir name entry f
+    local dirs=()
+    [[ -n "$target" ]] || { perr "Usage: powos dlss nr remove <game|--all>"; return 1; }
+    if [[ "$target" == "--all" ]]; then
+        while IFS='|' read -r dir _ name; do [[ -n "$dir" ]] && dirs+=("$dir|$name"); done < <(dlss_game_scan)
+    else
+        hit="$(dlss_find_game "$target")" || { perr "No match for '$target'"; return 1; }
+        dirs=("${hit%%|*}|${hit##*|}")
+    fi
+    for entry in "${dirs[@]}"; do
+        dir="${entry%%|*}"; name="${entry##*|}"
+        [[ -f "$dir/nvngx_dlssnr.dll" ]] || continue
+        rm -f "$dir/dxgi.dll" "$dir/nvngx_dlssnr.dll" "$dir/nvngx.dll_dlssnr.dll" "$dir/OptiScaler.ini"
+        rm -rf "$dir/OptiScaler"
+        for f in dxgi.dll OptiScaler.ini; do
+            [[ -e "$dir/$f.powos-dlss-backup" ]] && mv "$dir/$f.powos-dlss-backup" "$dir/$f"
+        done
+        pok "removed from $name"
+    done
+}
+
+
 # ── doctor: measure, never assume ────────────────────────────────────────
 
 cmd_dlss_doctor() {
@@ -646,7 +807,8 @@ cmd_dlss4_preset() {
 cmd_dlss_nr() {
     local sub="${1:-}"; shift || true
     case "$sub" in
-        install)          cmd_dlss_nr_install "$@" ;;
+        install)          if [[ -n "${1:-}" ]]; then cmd_dlss_nr_install_game "$@"; else cmd_dlss_nr_install; fi ;;
+        remove|uninstall) cmd_dlss_nr_remove_game "$@" ;;
         enable|on)        cmd_dlss_nr_enable "$@" ;;
         disable|off)      cmd_dlss_nr_disable "$@" ;;
         smoke|test)       cmd_dlss_nr_smoke "$@" ;;
@@ -700,6 +862,7 @@ cmd_dlss() {
     local sub="${1:-status}"; shift || true
     case "$sub" in
         status|info)      cmd_dlss_status "$@" ;;
+        games|list)       cmd_dlss_games "$@" ;;
         doctor|check)     cmd_dlss_doctor "$@" ;;
         runtime|runtimes) cmd_dlss_runtime "$@" ;;
         nr|neural)        cmd_dlss_nr "$@" ;;
