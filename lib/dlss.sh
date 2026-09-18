@@ -567,7 +567,16 @@ dlss_write_user_settings() {
 # would displace DXVK itself. "n,b" is native-then-builtin, so this is inert in
 # any prefix where no native winmm.dll was placed.
 user_settings = {
+    # OptiScaler, where a prefix has it (games with an upscaler to intercept).
     "WINEDLLOVERRIDES": "winmm=n,b",
+    # The Vulkan layer, for EVERY other game. On Linux DXVK translates
+    # D3D8/9/10/11 and VKD3D-Proton translates D3D12, so every game is Vulkan by
+    # the time it presents -- one layer therefore reaches DX8 through DX12 and
+    # native Vulkan, with nothing installed per game and no game files touched.
+    # Lower quality than OptiScaler (colour + optical-flow motion, no depth or
+    # jitter, and the HUD is processed too), but it is the only thing that
+    # covers a game with no upscaler to hook.
+    "VKLayer_DLSS5": "1",
 }
 PYEOF_INNER
     plog "  override set on $(basename "$proton")"
@@ -613,6 +622,21 @@ dlss_on_one() {
     sed -i '/^\[DlssNr\]/,/^\[/{s/^Enabled=auto/Enabled=true/}' "$sys32/OptiScaler.ini"
 
     proton="$(dlss_proton_of_prefix "$sys32")" && dlss_write_user_settings "$proton"
+
+    # Two neural consumers in one process cancel each other out: OptiScaler
+    # hijacks the NGX calls and the layer's pass never runs, while both logs read
+    # clean. This prefix has OptiScaler, so turn the layer OFF for it via the
+    # layer manifest's own disable_environment. A prefix-scoped registry value is
+    # the only per-game switch available — user_settings.py is per-Proton, and
+    # anything in launch options is what we are deliberately avoiding.
+    if command -v wine >/dev/null 2>&1 || [[ -n "$proton" ]]; then
+        local pfx_root="${sys32%/drive_c/windows/system32}"
+        local reg="$pfx_root/user.reg"
+        if [[ -f "$reg" ]] && ! grep -q 'DLSSNR_DISABLE' "$reg" 2>/dev/null; then
+            printf '\n[Environment]\n"DLSSNR_DISABLE"="1"\n' >> "$reg"
+            plog "  vulkan layer disabled here (OptiScaler takes precedence)"
+        fi
+    fi
     pok "  on"
 }
 
@@ -627,6 +651,9 @@ dlss_off_one() {
     # ours in place: any game that actually calls into winmm then fails to start.
     # Three sources, in order of trust, because `on` cannot always capture the
     # symlink (if winmm.dll was already a regular file, there was none to read).
+    # Re-allow the layer here; OptiScaler is no longer taking precedence.
+    local pfx_root="${sys32%/drive_c/windows/system32}"
+    [[ -f "$pfx_root/user.reg" ]] && sed -i '/"DLSSNR_DISABLE"="1"/d' "$pfx_root/user.reg" 2>/dev/null
     orig="$(cat "$sys32/.powos-winmm-orig" 2>/dev/null)"
     if [[ -z "$orig" ]]; then
         # A sibling builtin's target names the exact Proton this prefix uses.
