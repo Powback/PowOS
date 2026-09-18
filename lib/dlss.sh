@@ -380,16 +380,24 @@ cmd_dlss_runtime_list() {
 # failing build, so do not "tidy" them away:
 #   gcc-c++ libstdc++-devel   64-bit bits/c++config.h — the .i686 set alone
 #                             fails the native target
-#   libstdc++-static glibc-static  the CLI tools link with -static
+#   *-static (BOTH arches)    the CLI tools and both layers link with -static
 #   libXi-devel libX11-devel  layer_linux/src/hotkey.cpp needs
 #                             X11/extensions/XInput2.h
 # The 32-bit layer is MANDATORY, not optional: 32-bit games load the 32-bit
-# layer, and the build drives native/linux32/windows targets together.
+# layer, and the build drives native/linux32/windows targets together under
+# `set -e`, so a 32-bit link failure silently stops the WINDOWS NGX helper --
+# the piece that actually hosts the model -- from ever being built.
+#
+# ARCH-QUALIFY the static libs. Listing `libstdc++-static` unqualified next to
+# `libstdc++-static.i686` lets dnf collapse the two onto the i686 spec, so only
+# the 32-bit libstdc++.a lands and the NATIVE layer fails to link with the very
+# misleading `cannot find -lstdc++` -- while the package reads as installed.
 DLSS_BUILD_DEPS="clang llvm meson ninja-build git pkgconf-pkg-config
-gcc-c++ libstdc++-devel libstdc++-static glibc-static
+gcc-c++ libstdc++-devel libstdc++-static.x86_64 glibc-static.x86_64
 mingw64-gcc-c++ qt6-qtbase-devel
 libXi-devel libX11-devel libXext-devel libXrandr-devel libXfixes-devel
 glibc-devel.i686 libstdc++-devel.i686 libgcc.i686 libatomic.i686
+libstdc++-static.i686 glibc-static.i686
 glslang vulkan-headers"
 
 # Pin the build container to the HOST's Fedora release. A newer glibc in the
@@ -400,6 +408,40 @@ dlss_build_image() {
     local ver
     ver="$(. /etc/os-release 2>/dev/null && echo "${VERSION_ID:-}")"
     echo "registry.fedoraproject.org/fedora:${ver:-latest}"
+}
+
+DLSS_PATCH_DIR="${DLSS_PATCH_DIR:-${POWOS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/dlss/patches}"
+
+# Apply the patches PowOS carries against the upstream layer checkout.
+#
+# Never hard-fails: an unpatched build is still a working layer for
+# single-process games, and refusing to install would be worse than degrading.
+# But it says plainly what is lost, because an unpatched build fails LATER, in a
+# game, with clean-looking logs on both sides — the expensive kind of silence.
+dlss_apply_layer_patches() {
+    local p applied=0 failed=0
+    [[ -d "$DLSS_PATCH_DIR" ]] || return 0
+    for p in "$DLSS_PATCH_DIR"/*.patch; do
+        [[ -e "$p" ]] || continue
+        if git -C "$DLSS_LAYER_SRC" apply --check "$p" 2>/dev/null; then
+            git -C "$DLSS_LAYER_SRC" apply "$p" && applied=$((applied + 1))
+        elif git -C "$DLSS_LAYER_SRC" apply --reverse --check "$p" 2>/dev/null; then
+            applied=$((applied + 1))   # already applied
+        else
+            failed=$((failed + 1))
+            pwarn "Patch did not apply: $(basename "$p")"
+        fi
+    done
+    if [[ $failed -gt 0 ]]; then
+        pwarn "Upstream has moved under our patches. The layer will still build,"
+        pwarn "but games that present from several processes (a storefront"
+        pwarn "launcher plus the game) will silently get NO neural rendering:"
+        pwarn "the launcher's small swapchain takes the helper's one context and"
+        pwarn "every frame from the game is refused for size mismatch."
+    elif [[ $applied -gt 0 ]]; then
+        plog "Applied $applied PowOS patch(es) to the layer."
+    fi
+    return 0
 }
 
 cmd_dlss_nr_install() {
@@ -423,11 +465,16 @@ cmd_dlss_nr_install() {
     mkdir -p "$DLSS_CACHE_DIR"
     if [[ -d "$DLSS_LAYER_SRC/.git" ]]; then
         plog "Updating $DLSS_LAYER_SRC…"
+        # Drop our patches first: they are local modifications and --ff-only
+        # refuses to pull over them. They are re-applied immediately below.
+        git -C "$DLSS_LAYER_SRC" checkout -- . 2>/dev/null
         git -C "$DLSS_LAYER_SRC" pull --ff-only || pwarn "Pull failed; building the existing checkout."
     else
         plog "Cloning $DLSS_LAYER_REPO (AGPL-3.0)…"
         git clone --depth 1 "$DLSS_LAYER_REPO" "$DLSS_LAYER_SRC" || { perr "Clone failed."; return 1; }
     fi
+
+    dlss_apply_layer_patches
 
     # Build INSIDE a container so the host never gains build-time packages. The
     # first cut of this told the user to rpm-ostree install ~20 packages and
