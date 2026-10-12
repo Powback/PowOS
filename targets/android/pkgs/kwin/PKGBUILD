@@ -6,6 +6,8 @@
 #   0001, 0002  rebased by us onto 6.7.5 (two hunks did not apply: inputmethod commitText, and the
 #               no-DRM dmabuf tranches, which 6.7 restructured around a Q_ASSERT on a scanout device)
 #   0003-0007   verbatim
+#   0008        ours: the Anland backend ported to KWin 6.7's RenderDevice API, plus a null-DRM
+#               guard in core/renderdevice.cpp (see the patch header)
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -38,11 +40,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0004-backends-anland-Harden-and-trace-consumer-reconnects.patch
           0005-backends-anland-Detach-audio-before-closing-transport-fds.patch
           0006-plugins-qpa-avoid-null-paint-devices-after-buffer-failures.patch
-          0007-plugins-qpa-fall-back-to-software-without-a-DRM-device.patch)
+          0007-plugins-qpa-fall-back-to-software-without-a-DRM-device.patch
+          0008-backends-anland-Port-to-KWin-6.7-RenderDevice-API.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

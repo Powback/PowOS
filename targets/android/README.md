@@ -17,7 +17,7 @@ It reuses [Andromarchy](https://github.com/lotfibennour/andromarchy) (GPL-3.0), 
 | Android app (display, touch, keyboard, audio, rootfs install) | Andromarchy's APK, unmodified | none yet (see Hacks) |
 | No-root runtime (patched glibc loader, fakechroot, fakeroot over TCP, seccomp trap, shims) | Andromarchy's engine | none |
 | GPU: Mesa on KGSL (Adreno without `/dev/dri`) | lfdevs/mesa-for-android-container, via Andromarchy | none |
-| Compositor | Hyprland on Andromarchy's aquamarine backend | **KWin with lfdevs's Anland backend** ([pkgs/kwin](pkgs/kwin)), ported from KWin 6.6.6 to Arch's 6.7.5 |
+| Compositor | Hyprland on Andromarchy's aquamarine backend | **KWin with lfdevs's Anland backend** ([pkgs/kwin](pkgs/kwin)), ported from KWin 6.6.6 to Arch's 6.7.5: two lfdevs patches rebased, plus our patch 0008 for 6.7's new RenderDevice API. KWin renders EGL-only on the phone (no Vulkan: there's no DRM node to match a Vulkan device to) |
 | Desktop | Omarchy | **KDE Plasma + the PowOS layer** ([install-powos-android.sh](install-powos-android.sh)) |
 
 The PowOS layer is the same files the desktop image ships: [layer.list](layer.list) says, for every

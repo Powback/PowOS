@@ -1,0 +1,350 @@
+backends/anland: port to the KWin 6.7 RenderDevice API (PowOS)
+
+KWin 6.7 moved EGL display ownership from the backend to a RenderDevice that the
+backend owns and hands to its EglBackend (setRenderDevice). Ported the same way KDE
+ported VirtualBackend from 6.6 to 6.7:
+
+- AnlandBackend builds its RenderDevice in initialize() from a surfaceless EGL
+  display (EGL_MESA_platform_surfaceless) and the DRM render node, or no DRM device
+  in ANLAND_NO_DRM_DEVICE mode; replaces the separate m_drmDevice/m_eglDisplay.
+- AnlandEglBackend: init() returns bool (setFailed() is gone), createContext() takes
+  no config, supportedDrmFormats() returns FormatModifierMap, makeCurrent() results
+  checked where a failure means rendering into nothing.
+- AnlandOutput: OutputMode is built from an OutputModeline in 6.7 (OutputMode::Flag
+  became OutputModeline::Flag).
+- core/renderdevice.cpp: a RenderDevice without a DrmDevice skips Vulkan instead of
+  dereferencing the null device (needed on Android, where there is no /dev/dri).
+
+Not upstream; lfdevs's patches target KWin 6.6.6.
+
+diff -ruN s3/src/backends/anland/anland_backend.cpp s4/src/backends/anland/anland_backend.cpp
+--- a/src/backends/anland/anland_backend.cpp	2026-10-13 01:01:38
++++ b/src/backends/anland/anland_backend.cpp	2026-10-13 01:03:19
+@@ -13,6 +13,7 @@
+ #include "anland_output.h"
+ 
+ #include "core/drmdevice.h"
++#include "core/renderdevice.h"
+ #include "core/renderloop.h"
+ #include "inputmethod.h"
+ #include "main.h"
+@@ -40,6 +41,10 @@
+ namespace KWin
+ {
+ 
++#ifndef EGL_PLATFORM_SURFACELESS_MESA
++#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
++#endif
++
+ static const QString s_defaultSocketPath = QStringLiteral("/tmp/display_daemon.sock");
+ static const int s_reconnectIntervalMs = 200;
+ 
+@@ -110,7 +115,7 @@
+         ::disconnect(m_display); // C producer API, not QObject::disconnect
+         m_display = nullptr;
+     }
+-    // m_eglDisplay (EglDisplay) tears down the EGLDisplay in its destructor; the
++    // m_renderDevice tears down its EglDisplay (and DrmDevice) in its destructor; the
+     // 5.27-era manual eglTerminate(sceneEglDisplay()) is no longer needed.
+ }
+ 
+@@ -133,18 +138,29 @@
+         return false;
+     }
+ 
++    // KWin 6.7 port: the backend owns a RenderDevice (as VirtualBackend does), built
++    // from a surfaceless EGL display plus, when there is one, a DRM render node. On
++    // Android (ANLAND_NO_DRM_DEVICE) there is no /dev/dri: the DrmDevice is null and
++    // RenderDevice skips Vulkan (see renderdevice.cpp), leaving EGL on KGSL.
++    std::unique_ptr<DrmDevice> drmDevice;
+     m_noDrmDeviceMode = noDrmDeviceRequested();
+     if (m_noDrmDeviceMode) {
+         qCWarning(KWIN_ANLAND) << "ANLAND_NO_DRM_DEVICE is enabled; using surfaceless EGL without a KWin DrmDevice";
+     } else {
+         // KWin dereferences renderBackend->drmDevice() during OpenGL compositor
+         // setup; without a real device it segfaults. Open one up front.
+-        m_drmDevice = openRenderDevice();
+-        if (!m_drmDevice) {
++        drmDevice = openRenderDevice();
++        if (!drmDevice) {
+             qCWarning(KWIN_ANLAND) << "no usable DRM render device; cannot bring up OpenGL compositing";
+             return false;
+         }
+     }
++    auto eglDisplay = EglDisplay::create(eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr), drmDevice.get());
++    if (!eglDisplay) {
++        qCWarning(KWIN_ANLAND) << "could not create a surfaceless EGL display (EGL_MESA_platform_surfaceless)";
++        return false;
++    }
++    m_renderDevice = std::make_unique<RenderDevice>(std::move(drmDevice), std::move(eglDisplay));
+ 
+     m_inputDevice = std::make_unique<AnlandInputDevice>();
+ 
+@@ -217,12 +233,12 @@
+ 
+ EglDisplay *AnlandBackend::sceneEglDisplayObject() const
+ {
+-    return m_eglDisplay.get();
++    return m_renderDevice ? m_renderDevice->eglDisplay() : nullptr;
+ }
+ 
+-void AnlandBackend::setEglDisplay(std::unique_ptr<EglDisplay> &&display)
++DrmDevice *AnlandBackend::drmDevice() const
+ {
+-    m_eglDisplay = std::move(display);
++    return m_renderDevice ? m_renderDevice->drmDevice() : nullptr;
+ }
+ 
+ bool AnlandBackend::notifyFramePresented()
+diff -ruN s3/src/backends/anland/anland_backend.h s4/src/backends/anland/anland_backend.h
+--- a/src/backends/anland/anland_backend.h	2026-10-13 01:01:37
++++ b/src/backends/anland/anland_backend.h	2026-10-13 01:03:01
+@@ -36,6 +36,7 @@
+ class EglBackend;
+ class EglDisplay;
+ class InputBackend;
++class RenderDevice;
+ 
+ class KWIN_EXPORT AnlandBackend : public OutputBackend
+ {
+@@ -53,16 +54,18 @@
+     QList<BackendOutput *> outputs() const override;
+ 
+     EglDisplay *sceneEglDisplayObject() const override;
+-    void setEglDisplay(std::unique_ptr<EglDisplay> &&display);
++    /** KWin 6.7: the backend owns its render device (EGL display + optional DRM node). */
++    RenderDevice *renderDevice() const
++    {
++        return m_renderDevice.get();
++    }
+ 
+     display_ctx *display() const
+     {
+         return m_display;
+     }
+-    DrmDevice *drmDevice() const
+-    {
+-        return m_drmDevice.get();
+-    }
++    /** nullptr in ANLAND_NO_DRM_DEVICE mode (Android: no /dev/dri). */
++    DrmDevice *drmDevice() const;
+     bool noDrmDeviceMode() const
+     {
+         return m_noDrmDeviceMode;
+@@ -109,8 +112,7 @@
+     QString m_socketPath;
+     display_ctx *m_display = nullptr;
+ 
+-    std::unique_ptr<DrmDevice> m_drmDevice;
+-    std::unique_ptr<EglDisplay> m_eglDisplay;
++    std::unique_ptr<RenderDevice> m_renderDevice;
+     QVector<AnlandOutput *> m_outputs;
+     std::unique_ptr<AnlandInputDevice> m_inputDevice;
+ 
+diff -ruN s3/src/backends/anland/anland_egl_backend.cpp s4/src/backends/anland/anland_egl_backend.cpp
+--- a/src/backends/anland/anland_egl_backend.cpp	2026-10-13 01:01:38
++++ b/src/backends/anland/anland_egl_backend.cpp	2026-10-13 01:03:50
+@@ -71,7 +71,8 @@
+ {
+     // Destroying the GL textures/framebuffers needs the context current. Callers
+     // (backend state machine on fallback, ~AnlandEglLayer) may run outside a frame.
+-    m_backend->openglContext()->makeCurrent();
++    // Best effort, as in VirtualEglLayer's destructor: nothing to do if it fails.
++    (void)m_backend->openglContext()->makeCurrent();
+ 
+     for (int i = 0; i < MAX_BUFS; i++) {
+         m_fbos[i].reset();
+@@ -93,7 +94,10 @@
+         return false;
+     }
+ 
+-    m_backend->openglContext()->makeCurrent();
++    if (!m_backend->openglContext()->makeCurrent()) {
++        qCWarning(KWIN_ANLAND) << "could not make the EGL context current to import buffers";
++        return false;
++    }
+ 
+     releaseBuffers();
+ 
+@@ -196,7 +200,9 @@
+ 
+ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
+ {
+-    m_backend->openglContext()->makeCurrent();
++    if (!m_backend->openglContext()->makeCurrent()) {
++        return std::nullopt;
++    }
+ 
+     m_currentIndex = get_selected_idx(m_display);
+ 
+@@ -254,7 +260,7 @@
+     return m_backend->drmDevice();
+ }
+ 
+-QHash<uint32_t, QList<uint64_t>> AnlandEglLayer::supportedDrmFormats() const
++FormatModifierMap AnlandEglLayer::supportedDrmFormats() const
+ {
+     return {};
+ }
+@@ -280,42 +286,34 @@
+     return m_backend->drmDevice();
+ }
+ 
++// KWin 6.7 port (after VirtualEglBackend's own 6.6 -> 6.7 change): the surfaceless
++// EGL display is created by AnlandBackend::initialize() as part of its RenderDevice;
++// this backend only adopts it. init() reports failure by returning false instead of
++// the removed setFailed().
+ bool AnlandEglBackend::initializeEgl()
+ {
+-    initClientExtensions();
+-
+-    if (!m_backend->sceneEglDisplayObject()) {
+-        if (!hasClientExtension(QByteArrayLiteral("EGL_MESA_platform_surfaceless"))) {
+-            qCWarning(KWIN_ANLAND) << "Extension EGL_MESA_platform_surfaceless not available";
+-            return false;
+-        }
+-        m_backend->setEglDisplay(EglDisplay::create(eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr)));
++    if (!initClientExtensions()) {
++        return false;
+     }
+-
+-    auto display = m_backend->sceneEglDisplayObject();
+-    if (!display) {
++    if (!m_backend->renderDevice()) {
++        qCWarning(KWIN_ANLAND) << "no render device (surfaceless EGL display missing)";
+         return false;
+     }
+-    setEglDisplay(display);
++    setRenderDevice(m_backend->renderDevice());
+     return true;
+ }
+ 
+-void AnlandEglBackend::init()
++bool AnlandEglBackend::init()
+ {
+     if (!initializeEgl()) {
+-        setFailed("Could not initialize egl");
+-        return;
++        qCWarning(KWIN_ANLAND, "Could not initialize egl");
++        return false;
+     }
+-    if (!initRenderingContext()) {
+-        setFailed("Could not initialize rendering context");
+-        return;
++    if (!createContext()) {
++        qCWarning(KWIN_ANLAND, "Could not initialize rendering context");
++        return false;
+     }
+ 
+-    if (checkGLError("Init")) {
+-        setFailed("Error during init of AnlandEglBackend");
+-        return;
+-    }
+-
+     initWayland();
+ 
+     const auto outputs = m_backend->outputs();
+@@ -325,16 +323,11 @@
+ 
+     connect(m_backend, &AnlandBackend::outputAdded, this, &AnlandEglBackend::addOutput);
+     connect(m_backend, &AnlandBackend::outputRemoved, this, &AnlandEglBackend::removeOutput);
++    return true;
+ }
+ 
+-bool AnlandEglBackend::initRenderingContext()
+-{
+-    return createContext(EGL_NO_CONFIG_KHR) && openglContext()->makeCurrent();
+-}
+-
+ void AnlandEglBackend::addOutput(BackendOutput *output)
+ {
+-    openglContext()->makeCurrent();
+     auto *anlandOutput = static_cast<AnlandOutput *>(output);
+     auto layer = std::make_unique<AnlandEglLayer>(anlandOutput, this);
+     // Let AnlandBackend reach this layer through its output (output->eglLayer()).
+@@ -344,7 +337,8 @@
+ 
+ void AnlandEglBackend::removeOutput(BackendOutput *output)
+ {
+-    openglContext()->makeCurrent();
++    // The layer's GL objects are destroyed below; best effort as in releaseBuffers().
++    (void)openglContext()->makeCurrent();
+     static_cast<AnlandOutput *>(output)->setEglLayer(nullptr);
+     m_outputs.erase(output);
+ }
+diff -ruN s3/src/backends/anland/anland_egl_backend.h s4/src/backends/anland/anland_egl_backend.h
+--- a/src/backends/anland/anland_egl_backend.h	2026-10-13 01:01:38
++++ b/src/backends/anland/anland_egl_backend.h	2026-10-13 01:03:26
+@@ -48,7 +48,7 @@
+     std::optional<OutputLayerBeginFrameInfo> doBeginFrame() override;
+     bool doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame) override;
+     DrmDevice *scanoutDevice() const override;
+-    QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
++    FormatModifierMap supportedDrmFormats() const override;
+     bool importBuffers(int count);
+     void releaseBuffers() override;
+ 
+@@ -78,7 +78,7 @@
+     AnlandEglBackend(AnlandBackend *b);
+     ~AnlandEglBackend() override;
+ 
+-    void init() override;
++    bool init() override;
+     QList<OutputLayer *> compatibleOutputLayers(BackendOutput *output) override;
+     DrmDevice *drmDevice() const override;
+ 
+@@ -90,7 +90,6 @@
+ 
+ private:
+     bool initializeEgl();
+-    bool initRenderingContext();
+ 
+     void addOutput(BackendOutput *output);
+     void removeOutput(BackendOutput *output);
+diff -ruN s3/src/backends/anland/anland_output.cpp s4/src/backends/anland/anland_output.cpp
+--- a/src/backends/anland/anland_output.cpp	2026-10-13 01:01:37
++++ b/src/backends/anland/anland_output.cpp	2026-10-13 01:13:37
+@@ -69,7 +69,7 @@
+     }
+     m_renderLoop->setRefreshRate(refresh);
+ 
+-    auto mode = std::make_shared<OutputMode>(pixelSize, refresh, OutputMode::Flag::Preferred);
++    auto mode = std::make_shared<OutputMode>(OutputModeline(pixelSize, refresh, OutputModeline::Flag::Preferred));
+ 
+     setState(State{
+         .position = QPoint(0, 0),
+@@ -97,7 +97,7 @@
+ 
+     // Keep the OutputMode in lockstep with the RenderLoop, mirroring init(), so
+     // currentMode()->refreshRate() and any mode-based logic see the new rate.
+-    auto mode = std::make_shared<OutputMode>(modeSize(), refresh, OutputMode::Flag::Preferred);
++    auto mode = std::make_shared<OutputMode>(OutputModeline(modeSize(), refresh, OutputModeline::Flag::Preferred));
+     State next = m_state;
+     next.modes = {mode};
+     next.currentMode = mode;
+@@ -135,7 +135,7 @@
+     // Keep the same refresh rate; update both the OutputMode and the RenderLoop
+     // pacing. Mirroring setRefreshRate() / init().
+     const int refresh = m_renderLoop->refreshRate();
+-    auto mode = std::make_shared<OutputMode>(newSize, refresh, OutputMode::Flag::Preferred);
++    auto mode = std::make_shared<OutputMode>(OutputModeline(newSize, refresh, OutputModeline::Flag::Preferred));
+     State next = m_state;
+     next.modes = {mode};
+     next.currentMode = mode;
+diff -ruN s3/src/core/renderdevice.cpp s4/src/core/renderdevice.cpp
+--- a/src/core/renderdevice.cpp	2026-10-13 01:01:37
++++ b/src/core/renderdevice.cpp	2026-10-13 01:04:02
+@@ -135,6 +135,13 @@
+ 
+ static std::unique_ptr<VulkanDevice> openVulkanDevice(const vk::raii::Instance &instance, DrmDevice *drm)
+ {
++    // A render device without a DRM node (the anland backend on Android: EGL is
++    // surfaceless on KGSL, no /dev/dri) can't be matched to a Vulkan physical device
++    // by its render node: run EGL-only rather than dereference the missing device.
++    if (!drm) {
++        qCDebug(KWIN_VULKAN, "No DRM device for this render device; Vulkan disabled");
++        return nullptr;
++    }
+     const auto [enumerateResult, physicalDevices] = instance.enumeratePhysicalDevices();
+     if (enumerateResult != vk::Result::eSuccess) {
+         qCWarning(KWIN_VULKAN) << "querying vulkan devices failed:" << vk::to_string(enumerateResult);
