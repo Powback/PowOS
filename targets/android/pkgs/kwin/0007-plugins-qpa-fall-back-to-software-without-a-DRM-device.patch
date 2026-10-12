@@ -1,0 +1,74 @@
+From: lfdevs <lfdevs@lfdevs.com>
+Date: Fri, 14 Aug 2026 21:08:05 +0800
+Subject: [PATCH] plugins/qpa: fall back to software without a DRM device
+
+The Anland backend can run with a surfaceless EGL display and no KWin DrmDevice. Qt Quick still selected its OpenGL renderer, then the QPA window code dereferenced the missing device while allocating its swapchain.
+
+Select Qt Quick software rendering in this configuration and allocate the associated buffers through the SHM allocator. Reject non-dma-buf buffers in the OpenGL QPA path as an additional safeguard, so an unexpected direct OpenGL window fails cleanly instead of dereferencing null dma-buf attributes.
+---
+ src/compositor.cpp                     | 7 ++++++-
+ src/plugins/qpa/eglplatformcontext.cpp | 8 +++++++-
+ src/plugins/qpa/window.cpp             | 6 ++++--
+ 3 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/src/compositor.cpp b/src/compositor.cpp
+index 8c566dc..a061ff1 100644
+--- a/src/compositor.cpp
++++ b/src/compositor.cpp
+@@ -283,7 +283,12 @@ void Compositor::start()
+         case NoCompositing:
+             break;
+         case OpenGLCompositing:
+-            QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
++            if (m_backend->drmDevice()) {
++                QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
++            } else {
++                qCWarning(KWIN_CORE) << "No DRM device available; forcing Qt Quick to use the software renderer";
++                QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
++            }
+             break;
+         case QPainterCompositing:
+             QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+diff --git a/src/plugins/qpa/eglplatformcontext.cpp b/src/plugins/qpa/eglplatformcontext.cpp
+index dd593bb..acfa6bc 100644
+--- a/src/plugins/qpa/eglplatformcontext.cpp
++++ b/src/plugins/qpa/eglplatformcontext.cpp
+@@ -93,7 +93,13 @@ bool EGLPlatformContext::makeCurrent(QPlatformSurface *surface)
+         if (it != m_renderTargets.end()) {
+             m_current = it->second;
+         } else {
+-            std::shared_ptr<GLTexture> texture = m_eglContext->importDmaBufAsTexture(*buffer->dmabufAttributes());
++            const DmaBufAttributes *attributes = buffer->dmabufAttributes();
++            if (!attributes) {
++                qCWarning(KWIN_QPA) << "Cannot import a non-dma-buf graphics buffer into an OpenGL context";
++                return false;
++            }
++
++            std::shared_ptr<GLTexture> texture = m_eglContext->importDmaBufAsTexture(*attributes);
+             if (!texture) {
+                 return false;
+             }
+diff --git a/src/plugins/qpa/window.cpp b/src/plugins/qpa/window.cpp
+index bde5d96..2cc64bd 100644
+--- a/src/plugins/qpa/window.cpp
++++ b/src/plugins/qpa/window.cpp
+@@ -46,7 +46,9 @@ Window::~Window()
+ Swapchain *Window::swapchain(const std::shared_ptr<EglContext> &context, const QHash<uint32_t, QList<uint64_t>> &formats)
+ {
+     const QSize nativeSize = geometry().size() * devicePixelRatio();
+-    const bool software = window()->surfaceType() == QSurface::RasterSurface; // RasterGLSurface is unsupported by us
++    const bool isRaster = window()->surfaceType() == QSurface::RasterSurface; // RasterGLSurface is unsupported by us
++    DrmDevice *device = isRaster ? nullptr : Compositor::self()->backend()->drmDevice();
++    const bool software = isRaster || !device;
+     if (!m_swapchain || m_swapchain->size() != nativeSize
+         || !formats.contains(m_swapchain->format())
+         || m_swapchain->modifiers() != formats[m_swapchain->format()]
+@@ -57,7 +59,7 @@ Swapchain *Window::swapchain(const std::shared_ptr<EglContext> &context, const Q
+             static ShmGraphicsBufferAllocator shmAllocator;
+             allocator = &shmAllocator;
+         } else {
+-            allocator = Compositor::self()->backend()->drmDevice()->allocator();
++            allocator = device->allocator();
+         }
+ 
+         for (auto it = formats.begin(); it != formats.end(); it++) {

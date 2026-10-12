@@ -1,0 +1,18 @@
+#!/bin/bash
+# /usr/local/bin/omarchy-toggle-idle on PowOS Android.
+#
+# HACK: Omarchy's command name, kept because Andromarchy's engine (android-system-services.py,
+# android-session-services.py) calls it when an app inhibits sleep (video players, the D-Bus
+# ScreenSaver.Inhibit stand-in). Real fix: the engine calls a neutral name we both provide.
+#
+# On Android the screen timeout is Android's: the app holds the screen on itself when asked
+# (session services read this state file, same path Omarchy uses). So this only records the state.
+# Usage: omarchy-toggle-idle [stay-awake|allow-idle]   (no argument: toggle)
+f=~/.local/state/omarchy/indicators/stay-awake
+mkdir -p "${f%/*}"
+case ${1:-} in
+  stay-awake) touch "$f" ;;
+  allow-idle) rm -f "$f" ;;
+  "") if [ -e "$f" ]; then rm -f "$f"; else touch "$f"; fi ;;
+  *) echo "usage: omarchy-toggle-idle [stay-awake|allow-idle]" >&2; exit 1 ;;
+esac

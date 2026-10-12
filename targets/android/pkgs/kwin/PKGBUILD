@@ -1,0 +1,68 @@
+# PowOS Android: Arch's kwin 6.7.5-3 PKGBUILD + lfdevs's Anland display backend, so KDE Plasma
+# can draw on Android through the same display daemon Andromarchy's app hosts.
+#
+# Upstream recipe: gitlab.archlinux.org/archlinux/packaging/packages/kwin @ 09bed0b (6.7.5-3).
+# Patches: github.com/lfdevs/kwin, branch ubuntu/resolute (KWin 6.6.6), debian/patches/:
+#   0001, 0002  rebased by us onto 6.7.5 (two hunks did not apply: inputmethod commitText, and the
+#               no-DRM dmabuf tranches, which 6.7 restructured around a Q_ASSERT on a scanout device)
+#   0003-0007   verbatim
+#
+# HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
+# "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
+# getting the Anland backend upstream into KWin; until then each Plasma update means rebasing
+# these patches and bumping pkgver here (the rootfs build pins kwin so -Syu can't replace it).
+
+pkgname=kwin
+pkgver=6.7.5
+_dirver=$(echo $pkgver | cut -d. -f1-3)
+pkgrel=3.1
+pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
+arch=(aarch64)
+url='https://kde.org/plasma-desktop/'
+license=(LGPL-2.0-or-later)
+depends=(aurorae breeze glibc iio-sensor-proxy plasma-activities kauth kcmutils kcolorscheme kconfig
+         kcoreaddons kcrash kdbusaddons kdeclarative kdecoration kglobalaccel kglobalacceld kguiaddons
+         ki18n kidletime kirigami kitemmodels knewstuff knighttime knotifications kpackage kquickcharts
+         kscreenlocker kservice ksvg kwayland kwidgetsaddons kwindowsystem kxmlgui lcms2 libcanberra
+         libdisplay-info libdrm libei libepoxy libevdev libgcc libinput libpipewire
+         libqaccessibilityclient-qt6 libstdc++ libxcb libxcvt libxkbcommon mesa milou
+         pipewire-session-manager libplasma qt6-5compat qt6-base qt6-declarative qt6-svg qt6-tools
+         systemd-libs vulkan-icd-loader wayland xcb-util-keysyms xcb-util-wm)
+makedepends=(extra-cmake-modules kdoctools krunner plasma-wayland-protocols python vulkan-headers
+             wayland-protocols xorg-xwayland)
+optdepends=('plasma-keyboard: virtual keyboard')
+groups=(plasma)
+_patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
+          0002-Add-support-for-running-without-a-DRM-device-kwin-6.7.patch
+          0003-Fall-back-to-memfd-without-a-DRM-device.patch
+          0004-backends-anland-Harden-and-trace-consumer-reconnects.patch
+          0005-backends-anland-Detach-audio-before-closing-transport-fds.patch
+          0006-plugins-qpa-avoid-null-paint-devices-after-buffer-failures.patch
+          0007-plugins-qpa-fall-back-to-software-without-a-DRM-device.patch)
+source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
+        "${_patches[@]}")
+sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+
+prepare() {
+  cd $pkgname-$pkgver
+  for p in "${_patches[@]}"; do
+    echo "Applying $p"
+    patch -p1 -N < "$srcdir/$p"
+  done
+}
+
+build() {
+  cmake -B build  -S $pkgname-$pkgver \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  # HACK: '|| true' because setcap needs xattr support the build container's filesystem may lack.
+  # It only matters on desktops (CAP_SYS_NICE for realtime scheduling); on Android the app's
+  # processes can't hold capabilities anyway.
+  setcap CAP_SYS_NICE=+ep "$pkgdir"/usr/bin/kwin_wayland || true
+}

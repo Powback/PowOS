@@ -1,0 +1,9 @@
+#!/bin/bash
+# /usr/local/bin/omarchy-lock-screen on PowOS Android: deliberately does nothing.
+#
+# HACK: Omarchy's command name, kept because Andromarchy's logind stand-in
+# (android-system-services.py: Lock / LockSessions) runs it. KDE's own screen locker would ask for
+# a PAM password, and the app user has none: locking would lock you out of the desktop. Android's
+# lock screen already protects the phone. Real fix: a lock that hands off to Android's keyguard
+# through the planned two-way Android bridge.
+exit 0

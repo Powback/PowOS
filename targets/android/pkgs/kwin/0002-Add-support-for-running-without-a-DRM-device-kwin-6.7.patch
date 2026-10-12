@@ -1,0 +1,161 @@
+diff -ruN s1/src/backends/anland/anland_backend.cpp s2/src/backends/anland/anland_backend.cpp
+--- a/src/backends/anland/anland_backend.cpp	2026-10-13 00:52:59
++++ b/src/backends/anland/anland_backend.cpp	2026-10-13 00:53:20
+@@ -81,6 +81,12 @@
+     return DrmDevice::open(QStringLiteral("/dev/dri/renderD128"));
+ }
+ 
++static bool noDrmDeviceRequested()
++{
++    const QByteArray value = qgetenv("ANLAND_NO_DRM_DEVICE").trimmed().toLower();
++    return value == "1" || value == "true" || value == "yes" || value == "on";
++}
++
+ AnlandBackend::AnlandBackend(const QString &socketPath, QObject *parent)
+     : OutputBackend(parent)
+     , m_socketPath(socketPath.isEmpty() ? s_defaultSocketPath : socketPath)
+@@ -127,12 +133,17 @@
+         return false;
+     }
+ 
+-    // KWin dereferences renderBackend->drmDevice() during OpenGL compositor
+-    // setup; without a real device it segfaults. Open one up front.
+-    m_drmDevice = openRenderDevice();
+-    if (!m_drmDevice) {
+-        qCWarning(KWIN_ANLAND) << "no usable DRM render device; cannot bring up OpenGL compositing";
+-        return false;
++    m_noDrmDeviceMode = noDrmDeviceRequested();
++    if (m_noDrmDeviceMode) {
++        qCWarning(KWIN_ANLAND) << "ANLAND_NO_DRM_DEVICE is enabled; using surfaceless EGL without a KWin DrmDevice";
++    } else {
++        // KWin dereferences renderBackend->drmDevice() during OpenGL compositor
++        // setup; without a real device it segfaults. Open one up front.
++        m_drmDevice = openRenderDevice();
++        if (!m_drmDevice) {
++            qCWarning(KWIN_ANLAND) << "no usable DRM render device; cannot bring up OpenGL compositing";
++            return false;
++        }
+     }
+ 
+     m_inputDevice = std::make_unique<AnlandInputDevice>();
+diff -ruN s1/src/backends/anland/anland_backend.h s2/src/backends/anland/anland_backend.h
+--- a/src/backends/anland/anland_backend.h	2026-10-13 00:52:59
++++ b/src/backends/anland/anland_backend.h	2026-10-13 00:53:20
+@@ -63,6 +63,10 @@
+     {
+         return m_drmDevice.get();
+     }
++    bool noDrmDeviceMode() const
++    {
++        return m_noDrmDeviceMode;
++    }
+     AnlandInputDevice *inputDevice() const
+     {
+         return m_inputDevice.get();
+@@ -116,6 +120,7 @@
+ 
+     bool m_consumerReady = false;
+     bool m_inFallback = false;
++    bool m_noDrmDeviceMode = false;
+ 
+     // Last known clipboard text — used to de-duplicate (KWin changed -> we sent ->
+     // consumer sets the same text on Android -> consumer sends back to KWin).
+diff -ruN s1/src/compositor.cpp s2/src/compositor.cpp
+--- a/src/compositor.cpp	2026-10-13 00:52:59
++++ b/src/compositor.cpp	2026-10-13 00:53:20
+@@ -131,9 +131,11 @@
+     QVariantHash gpuInformation;
+     gpuInformation[QStringLiteral("api_type")] = QStringLiteral("OpenGL");
+     gpuInformation[QStringLiteral("name")] = QString::fromUtf8(glPlatform->glRendererString());
+-    if (const auto pciInfo = backend->drmDevice()->pciDeviceInfo()) {
+-        gpuInformation[QStringLiteral("id")] = QString::number(pciInfo->device_id, 16);
+-        gpuInformation[QStringLiteral("vendor_id")] = QString::number(pciInfo->vendor_id, 16);
++    if (DrmDevice *drmDevice = backend->drmDevice()) {
++        if (const auto pciInfo = drmDevice->pciDeviceInfo()) {
++            gpuInformation[QStringLiteral("id")] = QString::number(pciInfo->device_id, 16);
++            gpuInformation[QStringLiteral("vendor_id")] = QString::number(pciInfo->vendor_id, 16);
++        }
+     }
+     if (glPlatform->driverVersion().isValid()) {
+         gpuInformation[QStringLiteral("version")] = glPlatform->driverVersion().toString();
+diff -ruN s1/src/opengl/eglbackend.cpp s2/src/opengl/eglbackend.cpp
+--- a/src/opengl/eglbackend.cpp	2026-10-13 00:52:59
++++ b/src/opengl/eglbackend.cpp	2026-10-13 00:53:38
+@@ -122,7 +122,11 @@
+         return;
+     }
+     DrmDevice *scanoutDevice = drmDevice();
+-    Q_ASSERT(scanoutDevice);
++    // Anland on Android runs without any DRM device (ANLAND_NO_DRM_DEVICE): the
++    // display daemon allocates the buffers and EGL is surfaceless on KGSL. Keep
++    // advertising dmabuf formats then, with dev_t 0 when EGL has no render node.
++    // (KWin 6.7 port of lfdevs's 6.6 "else" branch: 6.7 asserted a scanout device.)
++    const dev_t fallbackDevice = scanoutDevice ? scanoutDevice->deviceId() : dev_t(0);
+ 
+     auto filterFormats = [this](std::optional<uint32_t> bpc, bool withExternalOnlyYUV) {
+         FormatModifierMap set;
+@@ -175,17 +179,17 @@
+     };
+ 
+     m_tranches.append({
+-        .device = m_renderDevice->eglDisplay()->renderDevNode().value_or(scanoutDevice->deviceId()),
++        .device = m_renderDevice->eglDisplay()->renderDevNode().value_or(fallbackDevice),
+         .flags = LinuxDmaBufV1Feedback::TrancheFlag::Sampling,
+         .formatTable = filterFormats(10, false),
+     });
+     m_tranches.append({
+-        .device = m_renderDevice->eglDisplay()->renderDevNode().value_or(scanoutDevice->deviceId()),
++        .device = m_renderDevice->eglDisplay()->renderDevNode().value_or(fallbackDevice),
+         .flags = LinuxDmaBufV1Feedback::TrancheFlag::Sampling,
+         .formatTable = filterFormats(8, false),
+     });
+     m_tranches.append({
+-        .device = m_renderDevice->eglDisplay()->renderDevNode().value_or(scanoutDevice->deviceId()),
++        .device = m_renderDevice->eglDisplay()->renderDevNode().value_or(fallbackDevice),
+         .flags = LinuxDmaBufV1Feedback::TrancheFlag::Sampling,
+         .formatTable = includeShaderConversions(filterFormats(std::nullopt, true)),
+     });
+diff -ruN s1/src/opengl/egldisplay.cpp s2/src/opengl/egldisplay.cpp
+--- a/src/opengl/egldisplay.cpp	2026-10-13 00:52:59
++++ b/src/opengl/egldisplay.cpp	2026-10-13 00:53:20
+@@ -95,6 +95,10 @@
+ 
+ static std::optional<dev_t> devIdForFileName(const QString &path)
+ {
++    if (path.isEmpty()) {
++        return std::nullopt;
++    }
++
+     auto device = DrmDevice::open(path);
+     if (device) {
+         return device->deviceId();
+diff -ruN s1/src/wayland_server.cpp s2/src/wayland_server.cpp
+--- a/src/wayland_server.cpp	2026-10-13 00:52:59
++++ b/src/wayland_server.cpp	2026-10-13 00:53:20
+@@ -863,7 +863,16 @@
+ 
+ void WaylandServer::setRenderBackend(RenderBackend *backend)
+ {
+-    if (backend->drmDevice()->supportsSyncObjTimelines()) {
++    DrmDevice *drmDevice = backend->drmDevice();
++    if (!drmDevice) {
++        if (m_linuxDrmSyncObj) {
++            m_linuxDrmSyncObj->remove();
++            m_linuxDrmSyncObj = nullptr;
++        }
++        return;
++    }
++
++    if (drmDevice->supportsSyncObjTimelines()) {
+         // ensure the DRM_IOCTL_SYNCOBJ_EVENTFD ioctl is supported
+         const auto linuxVersion = linuxKernelVersion();
+         if (linuxVersion < Version(6, 6)) {
+@@ -874,7 +883,7 @@
+             return;
+         }
+         if (!m_linuxDrmSyncObj) {
+-            m_linuxDrmSyncObj = new LinuxDrmSyncObjV1Interface(m_display, m_display, backend->drmDevice());
++            m_linuxDrmSyncObj = new LinuxDrmSyncObjV1Interface(m_display, m_display, drmDevice);
+         }
+     } else if (m_linuxDrmSyncObj) {
+         m_linuxDrmSyncObj->remove();

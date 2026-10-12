@@ -1,0 +1,39 @@
+#!/bin/bash
+# /usr/bin/Hyprland in the PowOS Android rootfs: starts KDE Plasma (KWin on the Anland backend).
+#
+# HACK: this file is named Hyprland only because Andromarchy's app hardcodes the session command
+# (SessionService.java: `exec /usr/bin/Hyprland`). There is no Hyprland in this rootfs. Real fix:
+# the app reads the session command from the rootfs (planned upstream PR to Andromarchy, or our own
+# PowOS-branded app), then this becomes /usr/bin/powos-android-session.
+#
+# Environment from the app (SessionService.archEnv): XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS,
+# DBUS_SYSTEM_BUS_ADDRESS, ANDROMARCHY_SOCKET (display daemon), ANDROMARCHY_PHYSICAL_MM, LANG, TZ.
+# The GPU variables (KGSL Mesa) are set for every process by the engine's arch-native.sh.
+set -u
+
+# KWin picks its Anland backend whenever ANLAND_SOCKET is set (patched main_wayland.cpp). Same daemon,
+# same wire protocol as Andromarchy's (protocol.h structs identical; checked 2026-10-13).
+export ANLAND_SOCKET="$ANDROMARCHY_SOCKET"
+# No /dev/dri on Android: KWin must not try to open a DRM render node (patch 0002).
+export ANLAND_NO_DRM_DEVICE=1
+export EGL_PLATFORM=surfaceless
+export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE
+export KDE_FULL_SESSION=true
+# PowOS knows it is the phone build (the powos CLI gates boot/bootc/systemd commands on this).
+export POWOS_PLATFORM=phone
+
+# HACK: the app ends its splash screen only when it sees Omarchy's shell process (`quickshell`/`qs`);
+# otherwise it waits out a 2-minute timeout. Tell it directly once plasmashell is up. Real fix: the
+# app waits for $XDG_RUNTIME_DIR/desktop-ready alone (same planned app change as above).
+(
+  for _ in $(seq 600); do pgrep -x plasmashell >/dev/null && break; sleep 0.2; done
+  sleep 1
+  touch "$XDG_RUNTIME_DIR/desktop-ready"
+) &
+
+# First session of this rootfs (Flatpak remote, theme defaults); idempotent, marks itself done.
+/opt/powos/first-session.sh >"$XDG_RUNTIME_DIR/powos-first-session.log" 2>&1 &
+
+# startplasma-wayland runs kwin_wayland_wrapper (which inherits ANLAND_SOCKET -> Anland backend)
+# and then plasmashell. systemd boot is off in /etc/xdg/startkderc: there is no systemd on Android.
+exec startplasma-wayland
