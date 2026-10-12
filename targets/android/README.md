@@ -19,6 +19,7 @@ It reuses [Andromarchy](https://github.com/lotfibennour/andromarchy) (GPL-3.0), 
 | GPU: Mesa on KGSL (Adreno without `/dev/dri`) | lfdevs/mesa-for-android-container, via Andromarchy | none |
 | Compositor | Hyprland on Andromarchy's aquamarine backend | **KWin with lfdevs's Anland backend** ([pkgs/kwin](pkgs/kwin)), ported from KWin 6.6.6 to Arch's 6.7.5: two lfdevs patches rebased, plus our patch 0008 for 6.7's new RenderDevice API. KWin renders EGL-only on the phone (no Vulkan: there's no DRM node to match a Vulkan device to) |
 | Desktop | Omarchy | **KDE Plasma + the PowOS layer** ([install-powos-android.sh](install-powos-android.sh)) |
+| On-screen keyboard | Squeekboard (Omarchy plugin) | **Android's own keyboard** (the app's IME path into KWin's Anland backend); Squeekboard isn't built |
 
 The PowOS layer is the same files the desktop image ships: [layer.list](layer.list) says, for every
 `COPY` in the Containerfile's `staging` stage, whether it goes onto the phone and why not if it doesn't.

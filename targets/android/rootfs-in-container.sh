@@ -18,6 +18,19 @@ curl -fL -o /work/alarm.tar.gz -z /work/alarm.tar.gz "$ALARM_URL"
 rm -rf "$R" && mkdir -p "$R"
 bsdtar -xpf /work/alarm.tar.gz -C "$R"
 
+# European mirrors first, the geo-IP balancer last. The balancer alone sent this build (Switzerland) to
+# a US mirror that stalled mid-transaction ("Operation too slow") and failed the whole build; pacman
+# falls through the Server list per file, so several entries make one slow mirror survivable.
+cat > "$R/etc/pacman.d/mirrorlist" <<'EOF'
+Server = http://de3.mirror.archlinuxarm.org/$arch/$repo
+Server = http://de.mirror.archlinuxarm.org/$arch/$repo
+Server = http://de4.mirror.archlinuxarm.org/$arch/$repo
+Server = http://fr.mirror.archlinuxarm.org/$arch/$repo
+Server = http://dk.mirror.archlinuxarm.org/$arch/$repo
+Server = http://hu.mirror.archlinuxarm.org/$arch/$repo
+Server = http://mirror.archlinuxarm.org/$arch/$repo
+EOF
+
 # Inputs the chroot needs (layout build-inside.sh expects in /tmp/lotfix).
 mkdir -p "$R/tmp/lotfix"
 cp -r "$A/patches" "$A/native" "$R/tmp/lotfix/"

@@ -2,10 +2,11 @@ PowOS: build KDE Plasma + the PowOS layer instead of Hyprland + Omarchy.
 
 Against lotfibennour/andromarchy @ 220754d390f743aa5a8227e689402de1a6eb0281, build/build-inside.sh.
 Engine steps (pacman setup, KGSL Mesa, fakeroot/fakechroot, patched glibc, shims, Xwayland,
-protection hooks, squeekboard, browser) are untouched; only the desktop-specific steps change.
+protection hooks, browser) are untouched. Desktop-specific steps change: no Hyprland/aquamarine/
+hyprgrass, no Omarchy, no Squeekboard (Android's keyboard types into KWin via the app's IME path).
 
 --- a/build/build-inside.sh	2026-10-13 00:57:58
-+++ b/build/build-inside.sh	2026-10-13 00:58:17
++++ b/build/build-inside.sh	2026-10-13 01:30:33
 @@ -36,8 +36,8 @@
  # --overwrite: the native build copied fakechroot's library in beforehand, to start this rootfs.
  pacman -S --noconfirm --needed --overwrite '/usr/lib/libfakeroot/fakechroot/*' \
@@ -13,11 +14,11 @@ protection hooks, squeekboard, browser) are untouched; only the desktop-specific
 -  hyprland hyprwayland-scanner wayland-protocols glaze cli11 hwdata libdisplay-info libinput seatd pixman \
 -  fakechroot fakeroot kitty foot alacritty python-gobject jq brightnessctl gnome-keyring libsecret flatpak gnome-software nautilus squeekboard \
 +  wayland-protocols hwdata libdisplay-info libinput seatd pixman \
-+  fakechroot fakeroot python-gobject jq brightnessctl gnome-keyring libsecret flatpak squeekboard \
++  fakechroot fakeroot python-gobject jq brightnessctl gnome-keyring libsecret flatpak \
    mesa-utils libva-utils vulkan-tools vulkan-headers wayland-utils ttf-dejavu htop ncdu tree bc glm meson
  
  
-@@ -47,16 +47,8 @@
+@@ -47,32 +47,15 @@
  for p in $L/patches/fakeroot/*.patch; do patch -d /tmp/fr -p1 < "$p"; done
  (cd /tmp/fr && ./configure --prefix=/usr/local --with-ipc=tcp && make -j"$(nproc)" && make install)
  
@@ -31,14 +32,21 @@ protection hooks, squeekboard, browser) are untouched; only the desktop-specific
 -rm -rf /tmp/hyprgrass && git clone -q https://github.com/horriblename/hyprgrass /tmp/hyprgrass && git -C /tmp/hyprgrass checkout -q 8e605468cbf429791d61ddbfaeb14ff5e08fec3e
 -(cd /tmp/hyprgrass && meson setup build -Dbuildtype=release && ninja -C build)
 -install -Dm755 /tmp/hyprgrass/build/src/libhyprgrass.so /usr/lib/hyprland-plugins/libhyprgrass.so
++# PowOS: no Squeekboard build. Only Omarchy's plugin starts it; under KDE, typing comes from Android's own
++# keyboard (the app's SystemIME -> TEXT_INPUT -> KWin's Anland backend). Its build deps (libbsd...) also
++# arrived only through the Omarchy/GNOME packages dropped above.
+ 
+-# Squeekboard on the overlay layer (above fullscreen windows) + current Rust's close() signature: our build in
+-# /opt/lotfix (pacman never touches it), started by /usr/local/bin/squeekboard. Rust only for this build.
+-pacman -S --noconfirm --needed rust glib2-devel
+-rm -rf /root/.cargo/registry/src # sources left half-unpacked by an interrupted run
+-rm -rf /tmp/squeekboard && git clone -q --depth 1 -b v1.43.1 https://gitlab.gnome.org/World/Phosh/squeekboard.git /tmp/squeekboard
+-git -C /tmp/squeekboard apply $L/patches/squeekboard/*.patch
+-(cd /tmp/squeekboard && meson setup build --buildtype=release -Dtests=false && ninja -C build)
+-install -Dm755 /tmp/squeekboard/build/src/squeekboard /opt/lotfix/squeekboard
+-pacman -Rns --noconfirm rust
+ 
 -
- # Squeekboard on the overlay layer (above fullscreen windows) + current Rust's close() signature: our build in
- # /opt/lotfix (pacman never touches it), started by /usr/local/bin/squeekboard. Rust only for this build.
- pacman -S --noconfirm --needed rust glib2-devel
-@@ -68,11 +60,8 @@
- pacman -Rns --noconfirm rust
- 
- 
 -# Omarchy.
 -rm -rf /tmp/omarchy
 -rm -rf /tmp/omarchy && git clone -q --depth 1 ${OMARCHY_REF:+-b "$OMARCHY_REF"} https://github.com/basecamp/omarchy /tmp/omarchy
@@ -49,7 +57,7 @@ protection hooks, squeekboard, browser) are untouched; only the desktop-specific
  # systemctl without systemd (user services, Restart=), ahead of systemd's own in /usr/local/bin.
  bash $L/native/install-systemctl.sh
  
-@@ -149,8 +138,9 @@
+@@ -149,8 +132,9 @@
  # Linux -> Android requests (Wi-Fi panel, launching Android apps): the app watches run/android-request.
  install -m 755 $L/native/android-request.sh /usr/local/bin/android-request
  # First boot on the device (SessionService runs it: uid, machine-id, locale, setup form answers) and first session.
