@@ -65,7 +65,9 @@ docker volume create powos-android-rootfs >/dev/null
 # The working tree is deleted afterwards (success or not): it is only scratch space, and leaving
 # ~15-20 GB behind on the shared disk is how it filled up.
 trap 'docker volume rm -f powos-android-rootfs >/dev/null 2>&1 || true' EXIT
+# powos-android-cache is the opposite of scratch: kept between builds (Arch base tarball, pacman
+# packages, Mesa/fakeroot sources) so dev rebuilds don't re-download ~3 GB. A few GB; never pruned here.
 docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
-  -v powos-android-rootfs:/work -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
+  -v powos-android-rootfs:/work -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
   "$IMAGE" bash /rootfs-in-container.sh
 echo "built: $OUT/powos-rootfs.tar.gz"

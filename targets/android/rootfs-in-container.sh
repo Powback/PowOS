@@ -14,9 +14,11 @@ grep -q '^DisableSandbox' /etc/pacman.conf || sed -i '/^\[options\]/a DisableSan
 pacman -Sy --noconfirm --needed libarchive curl >/dev/null
 
 # Fresh Arch Linux ARM base every build: a half-built rootfs from an interrupted run is not reusable.
-curl -fL -o /work/alarm.tar.gz -z /work/alarm.tar.gz "$ALARM_URL"
+# The tarball itself (~790 MB) is kept on the persistent cache volume, re-fetched only when newer.
+mkdir -p /cache/dl
+curl -fL -o /cache/dl/alarm.tar.gz -z /cache/dl/alarm.tar.gz "$ALARM_URL"
 rm -rf "$R" && mkdir -p "$R"
-bsdtar -xpf /work/alarm.tar.gz -C "$R"
+bsdtar -xpf /cache/dl/alarm.tar.gz -C "$R"
 
 # European mirrors first, the geo-IP balancer last. The balancer alone sent this build (Switzerland) to
 # a US mirror that stalled mid-transaction ("Operation too slow") and failed the whole build; pacman
@@ -35,12 +37,17 @@ EOF
 mkdir -p "$R/tmp/lotfix"
 cp -r "$A/patches" "$A/native" "$R/tmp/lotfix/"
 cp -r /in/powos "$R/tmp/lotfix/powos"
-curl -fsSL -o "$R/tmp/lotfix/mesa.tar" "$MESA_URL"
-curl -fsSL -o "$R/tmp/lotfix/fakeroot.tar.gz" "$FAKEROOT_URL"
+mkdir -p /cache/dl /cache/pkg
+curl -fsSL -o /cache/dl/mesa.tar -z /cache/dl/mesa.tar "$MESA_URL" && cp /cache/dl/mesa.tar "$R/tmp/lotfix/mesa.tar"
+curl -fsSL -o /cache/dl/fakeroot.tar.gz -z /cache/dl/fakeroot.tar.gz "$FAKEROOT_URL" && cp /cache/dl/fakeroot.tar.gz "$R/tmp/lotfix/fakeroot.tar.gz"
 cp "$A/build/build-inside.sh" "$R/tmp/lotfix/build-inside.sh"
 
-cleanup() { for m in dev/pts dev proc sys; do umount -l "$R/$m" 2>/dev/null || true; done; }
+# pacman's package cache lives on the persistent cache volume (/cache/pkg), so rebuilds reuse the
+# ~2-3 GB of packages instead of re-downloading them from flaky mirrors. Unmounted (first) before
+# the image's own cache is emptied below, so packing never wipes it.
+cleanup() { for m in var/cache/pacman/pkg dev/pts dev proc sys; do umount -l "$R/$m" 2>/dev/null || true; done; }
 trap 'rc=$?; cleanup; exit $rc' EXIT
+mkdir -p "$R/var/cache/pacman/pkg" && mount --bind /cache/pkg "$R/var/cache/pacman/pkg"
 mount -t proc proc "$R/proc"
 mount --rbind /sys "$R/sys" && mount --make-rslave "$R/sys"
 mount --rbind /dev "$R/dev" && mount --make-rslave "$R/dev"
