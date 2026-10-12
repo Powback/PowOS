@@ -25,5 +25,7 @@ for p in "${pkgs[@]}"; do
       cp -r /pkg/. /build/ && chown -R builder /build && cd /build
       sudo -u builder MAKEFLAGS="-j8" makepkg -sf --noconfirm --skippgpcheck
       cp /build/*.pkg.tar.* /out/'
+  # Scratch only (KWin's build tree is several GB) on the Docker disk shared with live services.
+  docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
 done
 ls -la "$OUT"

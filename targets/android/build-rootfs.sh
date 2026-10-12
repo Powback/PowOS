@@ -53,7 +53,18 @@ install -m 755 "$HERE/install-powos-android.sh" "$S/"
 # 3. Build inside a privileged aarch64 container (chroot + mounts need it), on a Docker volume:
 #    a bind-mounted macOS directory can't hold Linux ownership, device nodes or hard links.
 # Resource caps keep the build from starving the services running on the same Colima VM.
+# The Docker disk is shared with the live PowStation services: a full disk breaks them (this build
+# once filled it to 100%). Refuse to start without room for the ~15-20 GB working tree plus margin.
+NEED_GB=25
+free_gb=$(docker run --rm "$IMAGE" df -BG --output=avail /etc/hostname | tail -1 | tr -dc '0-9')
+if [ "${free_gb:-0}" -lt "$NEED_GB" ]; then
+  echo "only ${free_gb} GB free on the Docker disk; need ${NEED_GB} GB (shared with live services)" >&2
+  exit 1
+fi
 docker volume create powos-android-rootfs >/dev/null
+# The working tree is deleted afterwards (success or not): it is only scratch space, and leaving
+# ~15-20 GB behind on the shared disk is how it filled up.
+trap 'docker volume rm -f powos-android-rootfs >/dev/null 2>&1 || true' EXIT
 docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
   -v powos-android-rootfs:/work -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
   "$IMAGE" bash /rootfs-in-container.sh
