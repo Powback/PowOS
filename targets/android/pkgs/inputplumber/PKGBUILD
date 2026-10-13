@@ -1,0 +1,45 @@
+# Packaged from https://github.com/terrapkg/packages/blob/frawhide/anda/games/inputplumber/inputplumber.spec, unchanged code.
+# (Identical on Terra's f44 branch, which Bazzite installs from: `dnf5 install --enable-repo=terra ... inputplumber`.)
+# Patches are Terra's, copied verbatim next to this file:
+#   make-install-dont-build.patch  `make install` installs target/$(BUILD_TYPE)/inputplumber instead of rebuilding
+#   gpd_fixup.patch                7 upstream GPD hardware-support commits (git am series: renames + new device files)
+pkgname=inputplumber
+pkgver=0.82.0
+pkgrel=1
+pkgdesc='Open source input router and remapper daemon for Linux'
+arch=(aarch64)
+url=https://github.com/ShadowBlip/InputPlumber
+license=(GPL-3.0-or-later)
+# spec BuildRequires: libevdev-devel libiio-devel git make cargo libudev-devel llvm-devel clang-devel mold
+makedepends=(rust git make llvm clang)
+# spec Requires: libevdev libiio; Recommends: steam gamescope-session linuxconsoletools
+depends=(libevdev libiio systemd-libs gcc-libs)
+optdepends=('steam' 'gamescope-session' 'linuxconsoletools')
+conflicts=(hhd)
+source=("InputPlumber-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+        make-install-dont-build.patch
+        gpd_fixup.patch)
+sha256sums=('aaee9b65b47a21756169eb1c49eb258ecdd1896fb8dd4996c2b50d11af049d21'
+            '0db08367820c6aaa50613c0bba530b0f5db6b12ac88da6e5f79d5e362ded5d9a'
+            '6d81d11a3280c1b41d40b172a0b731d4c78e5ab838dd51a5017aab6c1116f26d')
+
+prepare() {
+  cd "InputPlumber-$pkgver"
+  # spec: %autosetup -S git_am -p1 (git-format patches with renames; git apply handles them like git am)
+  git apply -p1 "$srcdir/make-install-dont-build.patch"
+  git apply -p1 "$srcdir/gpd_fixup.patch"
+}
+
+build() {
+  cd "InputPlumber-$pkgver"
+  # spec: %cargo_build (default features)
+  cargo build --release
+}
+
+package() {
+  cd "InputPlumber-$pkgver"
+  # spec: %make_install BUILD_TYPE=rpm PREFIX=%buildroot%_prefix (rpm = Fedora's cargo profile; ours is release)
+  make install BUILD_TYPE=release PREFIX="$pkgdir/usr"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

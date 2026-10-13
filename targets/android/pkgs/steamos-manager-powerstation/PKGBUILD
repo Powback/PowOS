@@ -1,0 +1,53 @@
+# Packaged from https://github.com/terrapkg/packages/blob/frawhide/anda/games/steamos-manager-powerstation/steamos-manager-powerstation.spec, unchanged code.
+# (Identical on Terra's f44 branch, which Bazzite installs from: Bazzite's Containerfile runs
+#  `dnf5 install --enable-repo=terra ... steamos-manager-powerstation`.)
+# Upstream: OpenGamingCollective's steamos-manager (Valve's gitlab.steamos.cloud/holo/steamos-manager plus
+# PowerStation / OGC gamescope-session support), at the exact commit the spec pins.
+# Not mirrored: the spec's SELinux module (steamos_manager.te/.if/.fc -> .pp + semodule/restorecon in %post);
+# Arch has no SELinux policy. Everything else is the same files from the same `make install`.
+pkgname=steamos-manager-powerstation
+_commit=9b62985123eab1ca47bc7042e350475329e327b2
+_commitdate=20261008
+pkgver=0.${_commitdate}.git${_commit::7}   # spec: 0~%{commitdate}.git%{shortcommit} ('~' is not valid in an Arch pkgver)
+pkgrel=1
+pkgdesc="SteamOS Manager, a system daemon abstracting Steam's interactions with the OS (PowerStation/OGC build)"
+arch=(aarch64)
+url=https://github.com/OpenGamingCollective/steamos-manager
+license=(MIT)
+# spec BuildRequires: cargo-rpm-macros clang-devel rust mold glib2-devel speech-dispatcher-devel pkgconfig(libudev)
+makedepends=(rust clang)
+# spec Requires: powerstation gamescope-session-ogui-steam (+ auto-detected shared libs below)
+# HACK: gamescope-session-ogui-steam is not a pacman package on the phone: its files come from the PowOS image
+# itself (phone-rules.conf "bundle", content.tar.zst), so pacman can't see it. Real fix: the content step
+# registers bundled RPMs as (file-less) pacman packages so dependencies like this one resolve.
+depends=(glib2 speech-dispatcher systemd-libs dbus powerstation)
+provides=(steamos-manager)
+conflicts=(steamos-manager)
+source=("steamos-manager-$_commit.tar.gz::$url/archive/$_commit.tar.gz")
+sha256sums=('f42c098ea9423d3f0323819e5aabb2cf3fdd260bbcaeb8f5e9099e13e4f4351b')
+
+build() {
+  cd "steamos-manager-$_commit"
+  # spec: %cargo_build (default features), then %make_install, whose `install` target depends on the
+  # Makefile's `build` (cargo build -r): the shipped binaries come from that release build.
+  make build
+}
+
+package() {
+  cd "steamos-manager-$_commit"
+  make DESTDIR="$pkgdir" install
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+
+  # spec: not used by anyone apparently, steamOS specific(?)
+  rm "$pkgdir/usr/lib/systemd/user/orca.service"
+  # Empty dirs `make install` creates that the spec's %files does not ship.
+  rmdir "$pkgdir/usr/share/steamos-manager/remotes.d" "$pkgdir/etc/steamos-manager/remotes.d" "$pkgdir/etc/steamos-manager" "$pkgdir/etc"
+
+  local u="$pkgdir/usr/lib/systemd/user"
+  install -d -m0755 "$u/graphical-session-pre.target.wants"
+  ln -s ../steamos-manager-session-cleanup.service "$u/graphical-session-pre.target.wants/steamos-manager-session-cleanup.service"
+  install -d -m0755 "$u/cecd.service.wants"
+  ln -s ../steamos-manager-configure-cecd.service "$u/cecd.service.wants/steamos-manager-configure-cecd.service"
+  install -d -m0755 "$u/gamescope-session-plus@ogui-steam.service.wants"
+  ln -s ../steamos-manager.service "$u/gamescope-session-plus@ogui-steam.service.wants/steamos-manager.service"
+}

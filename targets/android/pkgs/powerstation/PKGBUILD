@@ -1,0 +1,46 @@
+# Packaged from https://github.com/terrapkg/packages/blob/frawhide/anda/games/powerstation/powerstation.spec, unchanged code.
+# (Identical on Terra's f44 branch; pulled into Bazzite as a Requires of steamos-manager-powerstation.)
+# On aarch64 the AMD libryzenadj backend is compiled out by upstream itself
+# (Cargo.toml: [target.'cfg(target_arch = "x86_64")'.dependencies] libryzenadj; #[cfg(target_arch = "x86_64")] in src/).
+pkgname=powerstation
+pkgver=0.8.4
+pkgrel=1
+pkgdesc='Daemon for controlling TDP and performance over DBus'
+arch=(aarch64)
+url=https://github.com/ShadowBlip/PowerStation
+license=(GPL-3.0-or-later)
+# spec BuildRequires: rust-packaging pciutils-devel systemd-devel clang cmake
+makedepends=(rust pciutils systemd clang cmake)
+# spec Requires: dbus zlib-ng-compat (Fedora's libz provider; Arch's is zlib)
+depends=(dbus zlib systemd-libs gcc-libs)
+source=("PowerStation-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('56c37b64ffb8b83ed0094dd09b2dc4ec757093e9f1a5908806e29b1f53d2d4b4')
+
+build() {
+  cd "PowerStation-$pkgver"
+  # spec: %{cargo_build} --locked (default features)
+  cargo build --release --locked
+}
+
+package() {
+  cd "PowerStation-$pkgver"
+  # spec: %crate_install_bin
+  install -Dm755 target/release/powerstation "$pkgdir/usr/bin/powerstation"
+
+  # DBus system policy
+  install -Dm644 rootfs/usr/share/dbus-1/system.d/org.shadowblip.PowerStation.conf \
+    -t "$pkgdir/usr/share/dbus-1/system.d"
+
+  install -Dm644 rootfs/usr/lib/systemd/system/powerstation.service -t "$pkgdir/usr/lib/systemd/system"
+
+  # APU platform databases
+  install -Dm644 rootfs/usr/share/powerstation/platform/*.toml \
+    -t "$pkgdir/usr/share/powerstation/platform"
+
+  sed -i 's/After=graphical-session.target//g' "$pkgdir/usr/lib/systemd/system/powerstation.service"
+
+  echo 'enable powerstation.service' | install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/system-preset/95-enable-powerstation.preset"
+
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
