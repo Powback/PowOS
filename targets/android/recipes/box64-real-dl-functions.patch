@@ -1,0 +1,55 @@
+--- a/src/libtools/libdl.c	2026-10-13 13:52:00.496533014 +0000
++++ b/src/libtools/libdl.c	2026-10-13 13:52:00.507533049 +0000
+@@ -58,13 +58,33 @@
+     return 0;
+ }
+ 
++// PowOS (Android, no root): how the real dlopen/dlclose/dlsym are found. These hooks are exported from the box64
++// executable, so they interpose every library's calls, fakechroot's included (the LD_PRELOAD that makes an
++// app-private rootfs look like /). Upstream resolves them with GetNativeSymbolUnversioned, which walks the loaded
++// objects with dl_iterate_phdr; fakechroot wraps dl_iterate_phdr and resolves its own next functions through
++// dlsym - which lands back here: unbounded recursion, a segfault before main (even "box64 --version").
++// libc's dlsym comes from dlvsym (neither exported by box64 nor wrapped by fakechroot); every other function is
++// looked up with it, called from here, so RTLD_NEXT means "after the box64 executable": fakechroot's dlopen when
++// it is preloaded (its path rewriting is what lets native libraries, e.g. the Vulkan loader, dlopen inside the
++// rootfs), libc's otherwise.
++static void* real_dl(const char* name)
++{
++    static void* (*libc_dlsym)(void*, const char*) = NULL;
++    if(!libc_dlsym) libc_dlsym = dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.34");
++    if(!libc_dlsym) libc_dlsym = dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.17");
++    if(!strcmp(name, "dlsym") && libc_dlsym) return (void*)libc_dlsym;
++    void* p = libc_dlsym ? libc_dlsym(RTLD_NEXT, name) : NULL;  // not a tail call: RTLD_NEXT is relative to here
++    if(!p) p = GetNativeSymbolUnversioned(RTLD_NEXT, name);
++    return p;
++}
++
+ static void*(*real_dlopen)(const char*, int) = NULL;
+ static int (*real_dlclose)(void*) = NULL;
+ static void* (*real_dlsym)(void*, const char*) = NULL;
+ 
+ EXPORT void* dlopen(const char* path, int flags)
+ {
+-    if (!real_dlopen) real_dlopen = GetNativeSymbolUnversioned(RTLD_NEXT, "dlopen");
++    if (!real_dlopen) real_dlopen = real_dl("dlopen");
+ 
+     // will look only for libs loaded with full path (and only on 64bits for now)
+     if(path && strchr(path, '/') && (/*(box64_is32bits && FileIsX86ELF(path)) ||*/ (!box64_is32bits && FileIsX64ELF(path)))) {
+@@ -91,7 +111,7 @@
+ 
+ EXPORT int dlclose(void* handle)
+ {
+-    if (!real_dlclose) real_dlclose = GetNativeSymbolUnversioned(RTLD_NEXT, "dlclose");
++    if (!real_dlclose) real_dlclose = real_dl("dlclose");
+ 
+     if((uintptr_t)handle>=HOOKLIB && (uintptr_t)handle<HOOKLIB+hooked_size) {
+         uint32_t i = (uintptr_t)handle-HOOKLIB;
+@@ -106,7 +126,7 @@
+ 
+ EXPORT void* dlsym(void* handle, const char* symbol)
+ {
+-    if (!real_dlsym) real_dlsym = GetNativeSymbolUnversioned(RTLD_NEXT, "dlsym");
++    if (!real_dlsym) real_dlsym = real_dl("dlsym");
+ 
+     if((uintptr_t)handle>=HOOKLIB && (uintptr_t)handle<HOOKLIB+hooked_size) {
+         uint32_t i = (uintptr_t)handle-HOOKLIB;

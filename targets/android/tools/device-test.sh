@@ -41,7 +41,7 @@ EOF
   if [ "${1:-}" = test ]; then
     # Payloads: the probe, built for the rootfs's glibc in an Arch Linux ARM container; the Windows test programs.
     [ -x "$A/out/probe/powos-probe" ] || docker run --rm --platform linux/arm64 -v "$A:/a" menci/archlinuxarm:latest bash -c \
-      'pacman -Sy --noconfirm --needed gcc >/dev/null 2>&1; mkdir -p /a/out/probe && gcc -O2 -o /a/out/probe/powos-probe /a/tools/probe/powos-probe.c'
+      'sed -i "/^\\[options\\]/a DisableSandbox" /etc/pacman.conf; pacman-key --init >/dev/null 2>&1; pacman-key --populate archlinuxarm >/dev/null 2>&1; pacman -Sy --noconfirm --needed gcc >/dev/null; mkdir -p /a/out/probe && gcc -O2 -o /a/out/probe/powos-probe /a/tools/probe/powos-probe.c'
     [ -f "$A/out/wintest/x86_64/d3d11tri.exe" ] || "$HERE/wintest/build.sh"
   fi
   exec docker exec -i "$C" bash /android/tools/device-test.sh "$@"
