@@ -45,6 +45,7 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.util.DisplayMetrics;   // ADDED
 
@@ -117,6 +118,8 @@ public class MainActivity extends Activity
     private int mImeBottom = 0;   // last IME bottom inset
     private int mBarHeight = 0;   // extra-keys bar height in px
     private ExtraKeysBar extraKeysBar;
+    private TextView mKeyboardButton; // PowOS: floating ⌨ (bottom right) toggling the system keyboard
+    private float mKeyboardButtonDy;  // how far the user dragged it up/down (the keyboard lift is added on top)
     private FrameLayout mRoot;    // content root, host of the extra-keys bar
     private float mDensity = 1f;
     private boolean mPointerCaptureEnabled = false;
@@ -418,6 +421,8 @@ public class MainActivity extends Activity
                 }
             }
         });
+        addKeyboardButton(root);
+
         // Positioning happens lazily the first time the keyboard is shown
         // (see toggleVirtualKeyboard). Positioning it here would spin forever:
         // the view starts GONE and a GONE view is never measured.
@@ -1140,6 +1145,75 @@ public class MainActivity extends Activity
         }
         if (extraKeysBar != null)
             extraKeysBar.setTranslationY(-mImeBottom);
+        // The ⌨ button rides above the keyboard and the bar, so it can close the keyboard again.
+        if (mKeyboardButton != null)
+            mKeyboardButton.setTranslationY(mKeyboardButtonDy - mImeBottom - barH);
+    }
+
+    /**
+     * PowOS: a floating ⌨ button in the bottom-right corner. A tap shows/hides Android's keyboard (the same
+     * toggle as the extra-keys bar's ⌨ key and the notification action), for when no text field asked for it.
+     * A drag moves it (anywhere on screen) out of the way of what's underneath.
+     */
+    private void addKeyboardButton(FrameLayout root) {
+        int size = Math.round(52 * mDensity);
+        int margin = Math.round(20 * mDensity);
+        TextView b = new TextView(this);
+        b.setText("⌨");
+        b.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 26);
+        b.setTextColor(Color.WHITE);
+        b.setGravity(Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        bg.setColor(0x99202020);
+        bg.setStroke(Math.round(1 * mDensity), 0x55FFFFFF);
+        b.setBackground(bg);
+        b.setElevation(6 * mDensity);
+        b.setContentDescription("Keyboard");
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size, Gravity.BOTTOM | Gravity.END);
+        lp.setMargins(0, 0, margin, margin);
+        int slop = android.view.ViewConfiguration.get(this).getScaledTouchSlop();
+        b.setOnTouchListener(new View.OnTouchListener() {
+            float downX, downY, startTx, startDy;
+            boolean dragging;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = e.getRawX();
+                        downY = e.getRawY();
+                        startTx = v.getTranslationX();
+                        startDy = mKeyboardButtonDy;
+                        dragging = false;
+                        v.setAlpha(1f);
+                        return true;
+                    case MotionEvent.ACTION_MOVE: {
+                        float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
+                        if (!dragging && Math.hypot(dx, dy) > slop) dragging = true;
+                        if (dragging) {
+                            View p = (View) v.getParent();
+                            // Kept on screen: the button starts at the bottom-right corner, so it moves left/up.
+                            v.setTranslationX(Math.max(-(p.getWidth() - v.getWidth() - margin), Math.min(0, startTx + dx)));
+                            mKeyboardButtonDy = Math.max(-(p.getHeight() - v.getHeight() - margin), Math.min(0, startDy + dy));
+                            relayout();
+                        }
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                        v.setAlpha(0.85f);
+                        if (!dragging) systemIme.toggleSystemKeyboard();
+                        return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        v.setAlpha(0.85f);
+                        return true;
+                }
+                return false;
+            }
+        });
+        b.setAlpha(0.85f);
+        root.addView(b, lp);
+        mKeyboardButton = b;
     }
 
     // Show/hide the extra-keys bar and re-apply the layout so the display area
