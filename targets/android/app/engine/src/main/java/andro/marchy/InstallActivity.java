@@ -31,11 +31,12 @@ import java.util.Locale;
  * first-boot.sh, which applies the answers (setup.conf).
  */
 public class InstallActivity extends Activity {
-    /** The rootfs built by build/build-rootfs.sh, published as a GitHub release asset. */
-    static final String ROOTFS_URL = "https://github.com/lotfibennour/andromarchy/releases/latest/download/lotfix-rootfs.tar.gz";
+    /** PowOS: the PowOS rootfs (targets/android/build-rootfs.sh), served by android-app-dev's web server on the LAN/VPN
+     *  (android.pow/apk = ~/Projects/android-app-dev/output). Was Andromarchy's Omarchy rootfs on GitHub. */
+    static final String ROOTFS_URL = "http://android.pow/apk/powos-rootfs.tar.gz";
     /** A local copy in the app's external files dir (Android/data/andro.marchy/files/, no permission needed) is used
      *  instead when present: offline installs and tests. */
-    static final String LOCAL_NAME = "lotfix-rootfs.tar.gz";
+    static final String LOCAL_NAME = "powos-rootfs.tar.gz";
     private static final long NEEDED_BYTES = 12L << 30; // archive + extracted rootfs, with room for apps
 
     // {xkb layout, label}: the common ones; the first selected is the physical keyboard's.

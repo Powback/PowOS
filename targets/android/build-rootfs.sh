@@ -60,3 +60,10 @@ docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
   -v powos-android-rootfs:/work -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
   "$IMAGE" bash /rootfs-in-container.sh
 echo "built: $OUT/powos-rootfs.tar.gz"
+
+# Serve it to the PowOS app (engine InstallActivity.ROOTFS_URL = http://android.pow/apk/powos-rootfs.tar.gz):
+# android-app-dev's web server serves its output/ there. A hard link, not a copy (same disk, ~2 GB).
+PUBLISH=${POWOS_PUBLISH_DIR:-$HOME/Projects/android-app-dev/output}
+if [ -d "$PUBLISH" ]; then
+  ln -f "$OUT/powos-rootfs.tar.gz" "$PUBLISH/powos-rootfs.tar.gz" && echo "published: http://android.pow/apk/powos-rootfs.tar.gz"
+fi

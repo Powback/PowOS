@@ -1,6 +1,7 @@
 package dev.omalauncher.linux
 
 import android.content.Context
+import android.content.Intent
 import android.system.Os
 import android.util.Log
 import dev.omalauncher.LauncherData
@@ -22,6 +23,8 @@ import java.net.URL
 import java.util.zip.GZIPInputStream
 
 private const val TAG = "bootstrap"
+// PowOS: Linux is PowOS (the engine installs and runs it); Omalauncher's own Arch/proot setup below is off.
+private const val POWOS = true
 private const val ROOTFS_URL = "http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 private const val TARBALL = "ArchLinuxARM-aarch64-latest.tar.gz"
 
@@ -213,6 +216,12 @@ class Bootstrap(
      */
     suspend fun run() =
         withContext(Dispatchers.IO) {
+            // PowOS: "Linux" is PowOS, installed and run by the engine (andro.marchy): the PowOS rootfs from
+            // our server, no proot, no Arch download. Its state is the engine's rootfs; Omalauncher's own
+            // proot setup/update steps below don't run (they come back on the engine runtime later,
+            // docs/powos-app-plan.md phase 2).
+            _state.value = if (andro.marchy.SessionService.rootfsReady(context)) LinuxState.Installed else LinuxState.NotInstalled
+            if (POWOS) return@withContext
             try {
                 adoptLegacySetup()
                 when {
@@ -234,6 +243,14 @@ class Bootstrap(
 
     /** Starts installing Linux with [picked] coding agents; see [run]. */
     suspend fun install(picked: List<Agent>) {
+        if (POWOS) {
+            // PowOS: the engine's desktop activity installs PowOS on first launch (setup form, then the
+            // download), and starts the PowOS session afterwards.
+            context.startActivity(
+                Intent(context, andro.marchy.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return
+        }
         choose(picked)
         run()
     }
