@@ -19,6 +19,7 @@ ntfs-3g-system-compression aur          ntfs-3g-system-compression
 pinfo                 aur               pinfo
 vulkan-low-latency-layer aur            vulkan-low-latency-layer
 box64                 aur               (x86 translator: PowOS's Steam + x86 games, see patches/andromarchy/0002)
+gtk2                  aur               (none: the native ARM64 Steam client's steamui.so/vgui2_s.so link libgtk-x11-2.0, which Arch dropped; see play/powos-steam)
 # Bazzite's own (bazzite-portal, cicpoffs, gamemode-news-hook, gmodpatchtool, krunner-yafti,
 # steam-notif-daemon) have no Arch recipe: pkgs/<name>/PKGBUILD, packaged from their Bazzite/terra spec.
 gtk2                  aur               (Valve native ARM64 Steam client: steamui.so needs libgtk-x11-2.0; Arch moved gtk2 to the AUR)

@@ -128,6 +128,17 @@ case $proton in
 esac
 [ -x "$dir/proton" ] || die "no Proton at $dir"
 
+# HACK: Wine's wine-preloader is a static binary that opens the Wine loader with raw syscalls, which bypass
+# fakechroot (the rootfs is not the real /): it fails with "<path>/wine: could not open", for the first process
+# and for every process Wine starts later (ntdll execs the preloader itself, so WINELOADERNOEXEC alone is not
+# enough). Without the file, Wine falls back to starting its loader directly, through glibc. Found in
+# tools/lab/phone-sim.sh (2026-10-13). Cost: no early address-space reservation (a few old 32-bit games want
+# it). Real fix: a preloader that resolves paths like fakechroot does (or a real chroot).
+for pre in "$dir"/files/lib/wine/aarch64-unix/wine-preloader; do
+  [ -e "$pre" ] || continue
+  mv "$pre" "$pre.powos-disabled" 2>/dev/null || die "cannot disable $pre (read-only Proton?): it cannot run under fakechroot"
+done
+
 # ── environment ──────────────────────────────────────────────────────────────────────────────────────────
 mkdir -p "$STATE" "$PREFIXES" "$STEAM_DIR"
 if [ "$steam_verb" = 0 ]; then

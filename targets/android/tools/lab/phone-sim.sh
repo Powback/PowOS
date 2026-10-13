@@ -12,12 +12,17 @@
 # (checked: a Rosetta mapping in any process is reported).
 #
 #   phone-sim.sh setup [rootfs.tar.gz]   extract (default out/powos-rootfs.tar.gz), first-boot, lavapipe
-#   phone-sim.sh run '<bash cmd>'        as the app's session runs programs   (ARCH_ROOT=1 phone-sim.sh run ... : fake root)
-#   phone-sim.sh rm                      drop the simulation volume
+#   phone-sim.sh run '<bash cmd>'        as the app's session runs programs   (ARCH_ROOT=1 phone-sim.sh run ... : fake root;
+#                                        SIM_PRE='<host-side cmds>': e.g. copy files from /android into $ARCH_ROOTFS)
+#   phone-sim.sh rm                      drop the simulation's storage
+# Storage: a sparse ext4 image on the Mac's disk (out/phone-sim.img), loop-mounted in the Colima VM at
+# /mnt/powos-phone-sim and bind-mounted into the container: the extracted rootfs (~15 GB) stays off the Docker
+# disk shared with live services. The app directory inside is owned by the app uid, as on the phone.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 A=$(cd "$HERE/../.." && pwd)
-VOL=powos-phone-sim
+IMG=$A/out/phone-sim.img
+MNT=/mnt/powos-phone-sim
 APP=/data/data/andro.marchy
 R=$APP/files/rootfs
 RUN=$APP/files/run
@@ -29,19 +34,24 @@ FROM alpine:3.22
 RUN apk add --no-cache bash coreutils tar gzip xvfb xdpyinfo gcc musl-dev zstd curl
 EOF
 
+mounted() { colima ssh -- mountpoint -q $MNT; }
+mount_store() {
+  mounted && return
+  [ -f "$IMG" ] || { truncate -s 60G "$IMG"; colima ssh -- sudo mkfs.ext4 -q "$IMG"; }
+  colima ssh -- sudo sh -c "mkdir -p $MNT && mount -o loop '$IMG' $MNT && mkdir -p $MNT/app && chown $UID_APP:$UID_APP $MNT/app"
+}
+
 sim() { # run a host-side bash script in the simulation container, as the app's uid
   docker run --rm -i --platform linux/arm64 --user $UID_APP:$UID_APP --cap-drop ALL --security-opt no-new-privileges \
     --cpus "${SIM_CPUS:-6}" --memory "${SIM_MEM:-12g}" --shm-size 1g \
-    -v $VOL:$APP -v "$A:/android:ro" ${SIM_MOUNTS:-} -e ARCH_ROOT="${ARCH_ROOT:-0}" $IMAGE bash -s
+    -v $MNT/app:$APP -v "$A:/android:ro" ${SIM_MOUNTS:-} -e ARCH_ROOT="${ARCH_ROOT:-0}" $IMAGE bash -s
 }
 
 case ${1:-help} in
   setup)
     tarball=${2:-$A/out/powos-rootfs.tar.gz}
     [ -f "$tarball" ] || { echo "no $tarball" >&2; exit 1; }
-    docker volume create $VOL >/dev/null
-    # The volume's root belongs to root: hand the app directory to the app uid first.
-    docker run --rm -v $VOL:$APP alpine:3.22 chown $UID_APP:$UID_APP $APP
+    mount_store
     rel=${tarball#$A/}
     sim <<EOF
 set -e
@@ -54,18 +64,20 @@ EOF
     # The app runs first-boot.sh once, through the launcher (SessionService), before the first session.
     ARCH_ROOT=1 "$0" run '/opt/lotfix/first-boot.sh' 2>&1 | tail -5 || true
     # Lab only: lavapipe, since there is no KGSL here. Outside the rootfs's own Mesa (its ICD list is untouched).
-    docker run --rm -v $VOL:$APP menci/archlinuxarm:latest bash -c "
+    docker run --rm -v $MNT/app:$APP menci/archlinuxarm:latest bash -c "
       set -e
       grep -q '^DisableSandbox' /etc/pacman.conf || sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
-      pacman -Syw --noconfirm --cachedir /tmp/c vulkan-swrast >/dev/null 2>&1
-      mkdir -p /tmp/x $R/opt/powos-lab && bsdtar -xf /tmp/c/vulkan-swrast-*.pkg.tar.* -C /tmp/x
+      pacman-key --init >/dev/null 2>&1; pacman-key --populate archlinuxarm >/dev/null 2>&1
+      mkdir -p /tmp/c && pacman -Syw --noconfirm --cachedir /tmp/c vulkan-swrast >/dev/null
+      mkdir -p /tmp/x $R/opt/powos-lab && bsdtar -xf \$(ls /tmp/c/vulkan-swrast-*.pkg.tar.* | grep -v sig\$) -C /tmp/x
       cp /tmp/x/usr/lib/libvulkan_lvp.so $R/opt/powos-lab/
-      sed 's|\"library_path\": *\"[^\"]*\"|\"library_path\": \"/opt/powos-lab/libvulkan_lvp.so\"|' /tmp/x/usr/share/vulkan/icd.d/lvp_icd.*.json > $R/opt/powos-lab/lvp_icd.json
+      sed 's|\"library_path\": *\"[^\"]*\"|\"library_path\": \"/opt/powos-lab/libvulkan_lvp.so\"|' /tmp/x/usr/share/vulkan/icd.d/lvp_icd*.json > $R/opt/powos-lab/lvp_icd.json
       chown -R $UID_APP:$UID_APP $R/opt/powos-lab"
     echo "phone-sim ready"
     ;;
   run)
     shift
+    mount_store
     cmd=$*
     # The app's environment (SessionService.archEnv) + an X server on the host side + lavapipe.
     sim <<EOF
@@ -74,6 +86,8 @@ export DBUS_SESSION_BUS_ADDRESS=unix:path=$RUN/bus HOME=/root
 Xvfb :1 -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 &
 for i in \$(seq 50); do [ -S /tmp/.X11-unix/X1 ] && break; sleep 0.1; done
 export DISPLAY=:1 VK_ICD_FILENAMES=/opt/powos-lab/lvp_icd.json POWOS_SIM=1
+# SIM_PRE: host-side commands first (e.g. copying test files from /android into \$ARCH_ROOTFS).
+${SIM_PRE:-}
 # Rosetta watch: Colima registers it for x86 binaries; on the phone nothing would. Any hit means an x86 exec
 # bypassed android-compat's hook (and would fail on the phone).
 ( while sleep 1; do grep -l -i rosetta /proc/[0-9]*/maps 2>/dev/null; done | sort -u > /tmp/rosetta.txt ) &
@@ -83,6 +97,7 @@ rc=\$?
 exit \$rc
 EOF
     ;;
-  rm) docker volume rm -f $VOL ;;
+  umount) colima ssh -- sudo umount $MNT ;;
+  rm) mounted && colima ssh -- sudo umount $MNT; rm -f "$IMG" ;;
   *) sed -n '2,20p' "$0" ;;
 esac

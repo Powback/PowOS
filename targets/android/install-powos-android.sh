@@ -80,6 +80,11 @@ printf '{"Config":{"RootFS":"%s"}}\n' "${fexroot%/}" > /usr/share/fex-emu/Config
 pacman -S --noconfirm --needed vulkan-icd-loader vulkan-tools libxinerama libxcomposite libxrandr libxcursor \
   libxi libxkbcommon sdl2-compat gnutls freetype2 fontconfig gst-plugins-base-libs
 install -m 755 "$P/play/powos-play" /usr/bin/powos-play
+# Steam: Valve's native ARM64 client (play/powos-steam bootstraps it on first use, ~110 MB + its own update).
+# What it links that Valve's Steam Runtime would otherwise provide (gtk2 is ours, recipes.list).
+pacman -S --noconfirm --needed alsa-lib libasyncns at-spi2-core at-spi2-atk libcups gdk-pixbuf2 libibus libnm nspr \
+  nss openal libpipewire libpulse libsndfile libvdpau libxdamage libxtst libxss
+install -m 755 "$P/play/powos-steam" /usr/bin/powos-steam
 
 # ── PowOS's files: everything in the image no package owns (PowOS layer, Bazzite's system_files, Deck
 # presets...), architecture-independent only. Unpacked after the packages, as the image's layers sit on top

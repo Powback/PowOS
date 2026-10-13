@@ -1,0 +1,66 @@
+#!/bin/bash
+# powos-steam: Steam on PowOS's phone build - Valve's native ARM64 Linux client (the Steam Frame's), no x86
+# emulation for Steam itself and no Steam Runtime container.
+#
+#   powos-steam [steam args...]     first run downloads the client bootstrap (~110 MB), Steam updates itself (~650 MB)
+#
+# Why not /usr/bin/steam (Valve's launcher from the PowOS image): its steam.sh only knows the x86 platforms
+# (ubuntu12_32): under box64 the 32-bit client self-updates, then spins at 100% CPU before starting its web helper
+# (lab, 2026-10-13), and its web helper would need the Steam Runtime container (pressure-vessel -> bwrap -> user
+# namespaces, which Android denies apps). Valve publishes a linuxarm64 client on the stable channel
+# (client-update.steamstatic.com/steam_client_linuxarm64): steamrtarm64/steam, whose steamwebhelper.sh starts the
+# web helper directly, without a container. Games then run through Proton's aarch64 build (powos-play
+# --register-steam adds it as a compatibility tool without the runtime requirement).
+set -euo pipefail
+S=${STEAM_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/Steam}
+CDN=https://client-update.steamstatic.com
+
+bootstrap() {
+  echo "powos-steam: fetching the ARM64 Steam client bootstrap" >&2
+  mkdir -p "$S"
+  local manifest f
+  manifest=$(curl -fsSL "$CDN/steam_client_linuxarm64")
+  # The package with steamrtarm64/steam and its updater; the client downloads the rest itself.
+  f=$(printf '%s\n' "$manifest" | awk '/"bins_linuxarm64_linuxarm64"/ {p=1} p && /"file"/ {gsub(/"/, "", $2); print $2; exit}')
+  [ -n "$f" ] || { echo "powos-steam: no bins_linuxarm64_linuxarm64 in Valve's manifest" >&2; exit 1; }
+  curl -fL --progress-bar -o "$S/.bootstrap.zip" "$CDN/$f"
+  # Valve's zips use '\' separators in places and carry no permission bits (Steam's own unpacker handles both).
+  python3 - "$S" <<'PY'
+import os, sys, zipfile
+root = sys.argv[1]
+with zipfile.ZipFile(os.path.join(root, ".bootstrap.zip")) as z:
+    for i in z.infolist():
+        name = i.filename.replace("\\", "/")
+        dst = os.path.join(root, name)
+        if name.endswith("/"):
+            os.makedirs(dst, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        data = z.read(i)
+        with open(dst, "wb") as out:
+            out.write(data)
+        if data[:4] == b"\x7fELF" or name.endswith((".so", ".sh")) or ".so." in name:
+            os.chmod(dst, 0o755)
+PY
+  rm -f "$S/.bootstrap.zip"
+}
+
+[ -x "$S/steamrtarm64/steam" ] || bootstrap
+# What steam.sh would set up: the ~/.steam links games and Proton look for.
+mkdir -p "$HOME/.steam" "$S/logs"
+ln -sfn "$S" "$HOME/.steam/steam"
+ln -sfn "$S" "$HOME/.steam/root"
+ln -sfn "$S/steamrtarm64" "$HOME/.steam/bin64"
+
+cd "$S/steamrtarm64"
+export LD_LIBRARY_PATH=$S/steamrtarm64:$S/steamrtarm64/libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+# STEAMOS/STEAM_RUNTIME as the Steam Frame setup uses them. -no-cef-sandbox: Chromium's sandbox needs user
+# namespaces or a setuid helper, neither exists for an Android app.
+export STEAMOS=1 STEAM_RUNTIME=1
+# The updater exits 42 after installing an update ("restart me"), as steam.sh loops on it.
+while :; do
+  rc=0
+  ./steam -no-cef-sandbox "$@" || rc=$?
+  [ "$rc" = 42 ] || exit "$rc"
+  echo "powos-steam: updated, restarting" >&2
+done
