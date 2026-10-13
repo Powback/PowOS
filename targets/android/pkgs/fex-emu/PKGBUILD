@@ -1,0 +1,42 @@
+# FEX-Emu for PowOS on Android: runs x86/x86-64 Linux binaries on the phone (the Steam client's x86 parts,
+# native x86 Linux games, Proton's ARM64EC x86 code path). Valve's own choice for Steam on ARM.
+# Arch Linux ARM has no package and the AUR one is stale (2406), hence ours, at a release tag.
+pkgname=fex-emu
+pkgver=2610
+pkgrel=1
+pkgdesc='Fast usermode x86 and x86-64 emulator for Arm64 (PowOS phone build)'
+url=https://fex-emu.com
+arch=(aarch64)
+license=(MIT)
+makedepends=(git cmake ninja clang llvm lld python python-setuptools)
+depends=(squashfs-tools squashfuse erofs-utils)
+source=("git+https://github.com/FEX-Emu/FEX.git#tag=FEX-$pkgver")
+sha256sums=('SKIP')
+
+prepare() {
+  cd FEX
+  git submodule update --init --recursive --depth 1
+}
+
+build() {
+  # TUNE_CPU defaults to "native", which would tune for the build host (an Apple M-series in Colima);
+  # generic armv8.2-a runs on every phone SoC FEX supports.
+  # No FEXConfig (Qt GUI) and no thunks yet (thunks need an x86 cross toolchain; a later step for GL/Vulkan speed).
+  cmake -S FEX -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DUSE_LINKER=lld \
+    -DENABLE_LTO=TRUE \
+    -DBUILD_TESTS=FALSE \
+    -DBUILD_FEXCONFIG=FALSE \
+    -DENABLE_CCACHE=FALSE \
+    -DTUNE_CPU=generic -DTUNE_ARCH=armv8.2-a \
+    -DOVERRIDE_VERSION=FEX-$pkgver
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 FEX/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

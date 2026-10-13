@@ -23,7 +23,14 @@ mkdir -p /usr/share/powos
 pacman -Slq | sort -u > /tmp/arch-available.txt
 python3 $P/resolve-packages.py $P/manifest/leaves.tsv $P/phone-rules.conf /tmp/arch-available.txt \
   /tmp/powos-install.txt /usr/share/powos/phone-report.txt
-pacman -S --noconfirm --needed $(cat /tmp/powos-install.txt)
+# One transaction first; if any single package breaks it (a conflict, a repo hiccup), the rest still go
+# in one by one and the ones that failed are listed at the top of the report.
+if ! pacman -S --noconfirm --needed $(cat /tmp/powos-install.txt); then
+  for p in $(cat /tmp/powos-install.txt); do
+    pacman -S --noconfirm --needed "$p" >/dev/null 2>&1 || echo "FAILED   $p  pacman could not install it" >> /tmp/powos-failed.txt
+  done
+  [ -s /tmp/powos-failed.txt ] && { cat /tmp/powos-failed.txt /usr/share/powos/phone-report.txt > /tmp/r && mv /tmp/r /usr/share/powos/phone-report.txt; }
+fi
 
 # Our KWin (Anland backend) over Arch's, then pinned: pacman must never swap it for Arch's, which has no
 # way to draw on Android. HACK: IgnorePkg means Plasma updates need a matching rebuild of our kwin

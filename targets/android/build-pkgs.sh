@@ -11,6 +11,10 @@ pkgs=("$@"); [ ${#pkgs[@]} -gt 0 ] || pkgs=($(cd "$HERE/pkgs" && ls))
 
 for p in "${pkgs[@]}"; do
   echo "== $p"
+  # A failed run leaves its scratch volume (set -e exits before the rm below); a stale src/ then
+  # re-applies the patches onto an already patched tree. Always start clean, and clean up on exit.
+  docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
+  trap 'docker volume rm -f "powos-android-pkg-'"$p"'" >/dev/null 2>&1 || true' EXIT
   # Resource caps: shares the Colima VM with live services. A volume keeps makepkg's src/ off the
   # macOS bind mount (faster, and keeps Linux ownership).
   docker run --rm --platform linux/arm64 --cpus 8 --memory 16g \
