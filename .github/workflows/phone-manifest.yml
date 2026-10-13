@@ -1,0 +1,82 @@
+# PowOS on Android (targets/android) derives its content from the published PowOS Deck image instead of
+# keeping its own lists. This workflow reads that image and publishes a few MB describing it (top-level
+# packages, the Flatpak list, PowOS-owned architecture-independent files) as an OCI artifact:
+#   ghcr.io/powback/powos-phone:deck   (+ :deck-<image commit>)
+# It never builds or pushes PowOS images: it runs after build-test-publish has published them, or by hand.
+name: phone-manifest
+
+on:
+  workflow_run:
+    workflows: [ build-test-publish ]
+    types: [ completed ]
+    branches: [ master ]
+  # While the Android target is developed on its branch (workflow_dispatch only works once this file is on
+  # master): rerun when the manifest's own inputs change. Still only reads the published image.
+  push:
+    branches: [ worktree-powos-multiplatform ]
+    paths:
+      - .github/workflows/phone-manifest.yml
+      - targets/android/phone-rules.conf
+      - targets/android/tools/emit-manifest.sh
+  workflow_dispatch:
+    inputs:
+      image:
+        description: PowOS image to read
+        default: ghcr.io/powback/powos:deck
+
+concurrency:
+  group: phone-manifest
+  cancel-in-progress: false
+
+jobs:
+  manifest:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ${{ github.event.inputs.image || 'ghcr.io/powback/powos:deck' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space (the Deck image is ~20 GB unpacked; the runner has ~14 GB free)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+                      /usr/share/swift /usr/local/.ghcup \
+                      /usr/share/miniconda /opt/az /usr/lib/google-cloud-sdk \
+                      /usr/local/share/powershell /usr/local/share/chromium \
+                      /opt/microsoft /usr/lib/jvm /usr/local/lib/node_modules || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Read the image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          sudo podman pull "$IMAGE"
+          digest=$(sudo podman image inspect "$IMAGE" --format '{{.Digest}}')
+          echo "IMAGE_DIGEST=$digest" >> "$GITHUB_ENV"
+          mkdir -p phone-manifest
+          sudo podman run --rm -v "$PWD:/repo:ro" -v "$PWD/phone-manifest:/out" --entrypoint bash \
+            "$IMAGE" /repo/targets/android/tools/emit-manifest.sh /out /repo/targets/android/phone-rules.conf
+          sudo chown -R "$(id -u)" phone-manifest
+          printf '%s@%s\n' "${IMAGE%%:*}" "$digest" > phone-manifest/image.txt
+          ls -la phone-manifest
+
+      - name: Set up oras
+        uses: oras-project/setup-oras@v1
+
+      - name: Publish ghcr.io/powback/powos-phone
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+          cd phone-manifest
+          tag=deck-${IMAGE_DIGEST#sha256:}
+          tag=${tag:0:20}
+          oras push "ghcr.io/powback/powos-phone:$tag" \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --annotation "powos.image=$(cat image.txt)" \
+            image.txt leaves.tsv packages.tsv flatpaks.txt content.list content.tar.zst
+          oras tag "ghcr.io/powback/powos-phone:$tag" deck
+          echo "published ghcr.io/powback/powos-phone:$tag (= :deck) from $(cat image.txt)" >> "$GITHUB_STEP_SUMMARY"
