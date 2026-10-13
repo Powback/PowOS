@@ -1,5 +1,5 @@
 diff --git a/native/android-compat.c b/native/android-compat.c
-index b034b72..acd7e8a 100644
+index b034b72..6b7b1d6 100644
 --- a/native/android-compat.c
 +++ b/native/android-compat.c
 @@ -1318,6 +1318,22 @@ __attribute__((constructor)) static void snapshot_runtime_env(void)
@@ -25,7 +25,7 @@ index b034b72..acd7e8a 100644
  static int has_var(char *const envp[], const char *name)
  {
      size_t n = strlen(name);
-@@ -1353,7 +1369,24 @@ int execve(const char *path, char *const argv[], char *const envp[])
+@@ -1353,7 +1369,26 @@ int execve(const char *path, char *const argv[], char *const envp[])
      if (base && strstr(base, "/bwrap-flatpak/") && strcmp(slash ? slash + 1 : path, "flatpak-spawn") == 0 &&
          access("/run/host/andromarchy-bin/flatpak-spawn", X_OK) == 0)
          path = "/run/host/andromarchy-bin/flatpak-spawn";
@@ -33,19 +33,21 @@ index b034b72..acd7e8a 100644
 +    path = self_exe_target(path);
 +    // x86 programs (Steam's bootstrapper, x86 Linux games): what binfmt_misc does for FEX on a Linux PC, which
 +    // Android does not let an app register. Exec FEXInterpreter with the program as its first argument.
-+    if (path && x86_program(path) && access("/usr/bin/FEXInterpreter", X_OK) == 0) {
++    // FEX's interpreter is /usr/bin/FEX since FEX-2604 (FEXInterpreter before).
++    const char *fex = access("/usr/bin/FEX", X_OK) == 0 ? "/usr/bin/FEX" : "/usr/bin/FEXInterpreter";
++    if (path && x86_program(path) && access(fex, X_OK) == 0) {
 +        size_t argc = 0;
 +        while (argv && argv[argc])
 +            argc++;
 +        // FEXInterpreter <program> <argv[1..]>: the program's own argv[0] is replaced by its path, as binfmt does.
 +        char *fex_argv[argc + 3];
 +        size_t k = 0;
-+        fex_argv[k++] = "FEXInterpreter";
++        fex_argv[k++] = (char *)fex;
 +        fex_argv[k++] = (char *)path;
 +        for (size_t i = 1; i < argc; i++)
 +            fex_argv[k++] = argv[i];
 +        fex_argv[k] = NULL;
-+        return next("/usr/bin/FEXInterpreter", fex_argv, env);
++        return next(fex, fex_argv, env);
 +    }
 +    return next(path, argv, env);
  }

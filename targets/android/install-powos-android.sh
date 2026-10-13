@@ -49,6 +49,13 @@ grep -q '^IgnorePkg.*\bkwin\b' $C || sed -i "/^IgnorePkg/ s/$/ kwin/" $C
 # the binfmt_misc registration an Android app cannot make. FEX's x86 rootfs comes from FEX's own fetcher,
 # extracted: no FUSE mounts on Android.
 FEXRootFSFetcher -y -x --distro-list-first --force-ui tty
+# System-wide, so every user and service finds it: FEX's global config + rootfs location. (The fetcher's own
+# "set as default" writes no config in this rootfs; verified on the S25: FEX then saw an empty RootFS path.)
+mkdir -p /usr/share/fex-emu/RootFS
+for d in ~/.local/share/fex-emu/RootFS/*/; do mv "$d" /usr/share/fex-emu/RootFS/; done
+rm -rf ~/.local/share/fex-emu/RootFS
+fexroot=$(ls -d /usr/share/fex-emu/RootFS/*/ | head -1)
+printf '{"Config":{"RootFS":"%s"}}\n' "${fexroot%/}" > /usr/share/fex-emu/Config.json
 
 # ── PowOS's files: everything in the image no package owns (PowOS layer, Bazzite's system_files, Deck
 # presets...), architecture-independent only. Unpacked after the packages, as the image's layers sit on top
