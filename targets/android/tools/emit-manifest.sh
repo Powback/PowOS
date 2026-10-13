@@ -57,10 +57,12 @@ tar -C / --no-recursion --hard-dereference -cf - -T "$out/content.list" | zstd -
 # What the image offers a user, for the phone's parity check (tools/phone-parity.py): KIND<TAB>NAME<TAB>OWNER.
 # OWNER is the RPM, or "image" for files no package owns (PowOS's layer). Units are the ENABLED ones: what
 # actually runs on a booted PowOS, system-wide and per user.
-rpm -qa --qf '[%{FILENAMES}\t%{NAME}\n]' > /tmp/owners
+rpm -qa --qf '[%{FILENAMES}\t%{=NAME}\n]' > /tmp/owners
 unit_file() { ls "$@" 2>/dev/null | head -1; }
 { # KIND<TAB>NAME<TAB>PATH
-  for f in /usr/bin/* /usr/sbin/*; do { [ -e "$f" ] || [ -L "$f" ]; } && printf 'bin\t%s\t%s\n' "${f##*/}" "$f"; done
+  # /usr/sbin is a symlink to bin on current Fedora: only list it when it is a real directory.
+  sbin=; [ -L /usr/sbin ] || sbin=/usr/sbin
+  for f in /usr/bin/* ${sbin:+$sbin/*}; do { [ -e "$f" ] || [ -L "$f" ]; } && printf 'bin\t%s\t%s\n' "${f##*/}" "$f"; done
   for f in /usr/share/applications/*.desktop; do
     grep -q '^NoDisplay=true' "$f" 2>/dev/null || printf 'app\t%s\t%s\n' "${f##*/}" "$f"
   done

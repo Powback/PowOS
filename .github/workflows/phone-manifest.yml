@@ -73,7 +73,7 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
           cd phone-manifest
           tag=deck-${IMAGE_DIGEST#sha256:}
-          tag=${tag:0:20}
+          tag=${tag:0:20}-${{ github.run_id }}   # per run: two runs of one image must not race over the tag
           oras push "ghcr.io/powback/powos-phone:$tag" \
             --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --annotation "powos.image=$(cat image.txt)" \
