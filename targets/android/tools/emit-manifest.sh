@@ -46,5 +46,5 @@ sort -u /tmp/unowned | while read -r f; do
   if [ -f "$f" ] && [ ! -L "$f" ] && [ "$(head -c 4 "$f" 2>/dev/null | od -An -c | tr -d ' ')" = '177ELF' ]; then continue; fi
   echo "${f#/}" >> "$out/content.list"
 done
-tar -C / --no-recursion -cf - -T "$out/content.list" | zstd -q -19 -o "$out/content.tar.zst"
+tar -C / --no-recursion --hard-dereference -cf - -T "$out/content.list" | zstd -q -19 -o "$out/content.tar.zst"
 echo "emit-manifest: $(wc -l < "$out/packages.tsv") packages, $(grep -vc '^#' "$out/flatpaks.txt") flatpak lines, $(wc -l < "$out/content.list") content files ($(du -h "$out/content.tar.zst" | cut -f1))"
