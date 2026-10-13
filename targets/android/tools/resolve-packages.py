@@ -43,6 +43,29 @@ for raw in open(rules_f):
     elif kind == "bundle":
         bundles.add(rest.split()[0])
 
+# Naming conventions that differ between Fedora and Arch for the same software, used only when no rule matched
+# and the RPM's own name isn't an Arch package: Arch names are lowercase, and Arch ships one package where Fedora
+# splits libraries, data, headers and docs into subpackages (bzip2-libs, avahi-libs, ImageMagick-libs...).
+SPLITS = ("-libs", "-lib", "-common", "-data", "-devel", "-doc", "-docs", "-filesystem", "-core", "-utils",
+          "-tools", "-plugins", "-modules", "-runtime", "-shared")
+
+
+def fedora_to_arch(rpm):
+    seen = []
+    cand = rpm
+    while True:
+        for c in (cand, cand.lower()):
+            if c in available:
+                return c
+            seen.append(c)
+        if cand.startswith("boost-") and "boost-libs" in available:
+            return "boost-libs"
+        cut = next((s for s in SPLITS if cand.endswith(s) and len(cand) > len(s)), None)
+        if not cut:
+            return None
+        cand = cand[: -len(cut)]
+
+
 install, report = [], []
 for line in open(leaves_f):
     if not line.strip():
@@ -67,12 +90,17 @@ for line in open(leaves_f):
             if alt != name and alt in available and name not in available:
                 targets = [alt]
                 break
+    fallback = ""
+    if targets == [name] and name not in available:
+        alt = fedora_to_arch(name)
+        if alt:
+            targets, fallback = [alt], f" (by name: {name} -> {alt})"
     missing = [t for t in targets if t not in available]
     if missing:
         report.append(("MISSING", name, "no Arch Linux ARM package: " + " ".join(missing)))
     install += [t for t in targets if t in available]
     if not missing:
-        report.append(("install", name, " ".join(targets)))
+        report.append(("install", name, " ".join(targets) + fallback))
 
 with open(install_f, "w") as f:
     f.write("\n".join(sorted(set(install))) + "\n")

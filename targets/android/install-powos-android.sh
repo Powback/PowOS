@@ -21,11 +21,13 @@ pacman -S --noconfirm --needed plasma-workspace xdg-desktop-portal-kde kscreen p
 # build (recipes.list: upstream recipes built for aarch64). First, so the mapping below finds them.
 pacman -U --noconfirm "$P"/pkgs/*.pkg.tar.*
 
-# ── PowOS's packages: the image's top-level RPMs, mapped to Arch by phone-rules.conf ───────────────────
-# The report (what each top-level RPM became, MISSING ones first) stays in the image for review.
+# ── PowOS's packages: EVERY RPM in the image, mapped to Arch by phone-rules.conf ───────────────────────
+# Not only the top-level ones: Fedora and Arch split dependencies differently, so Arch's dependency closure of
+# the top level missed real PowOS software (embree, mtools, alsa-utils, bluez's tools... found by
+# phone-parity.py). The report (what each RPM became, MISSING ones first) stays in the image for review.
 mkdir -p /usr/share/powos
 { pacman -Slq; pacman -Qq; } | sort -u > /tmp/arch-available.txt
-python3 $P/resolve-packages.py $P/manifest/leaves.tsv $P/phone-rules.conf /tmp/arch-available.txt \
+python3 $P/resolve-packages.py $P/manifest/packages.tsv $P/phone-rules.conf /tmp/arch-available.txt \
   /tmp/powos-install.txt /usr/share/powos/phone-report.txt
 # Ours are installed already (and in no repo, so pacman -S would not find them).
 pacman -Qq | sort -u > /tmp/installed.txt
