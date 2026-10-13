@@ -30,20 +30,41 @@ if os.path.exists(report_path):
 # host) only presence is checked.
 import subprocess
 
-def active_units(user):
+def unit_states(user):
+    """name -> active | inactive | failed ... (None when not checking a live system)."""
     if root != "/":
         return None
     names = [l.split("\t")[1] for l in open(index_path) if l.startswith("user-unit\t" if user else "unit\t")]
     if not names:
-        return set()
+        return {}
     cmd = ["systemctl"] + (["--user"] if user else []) + ["is-active"] + names
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=120).stdout.split()
     except (OSError, subprocess.TimeoutExpired):
-        return set()
-    return {n for n, state in zip(names, out) if state == "active"}
+        return {}
+    return dict(zip(names, out))
 
-active = {"unit": active_units(False), "user-unit": active_units(True)}
+states = {"unit": unit_states(False), "user-unit": unit_states(True)}
+
+
+def unit_ok(kind, name):
+    """Running, or a one-shot that ran without failing (docker-systemctl-replacement keeps a per-unit log)."""
+    st = states[kind]
+    if st is None or name.endswith((".target", ".path", ".socket")):
+        return True, ""
+    state = st.get(name, "unknown")
+    if state == "active":
+        return True, ""
+    if state == "failed":
+        return False, "failed"
+    unit = next((p for p in (f"etc/systemd/{'user' if kind == 'user-unit' else 'system'}/{name}",
+                             f"usr/lib/systemd/{'user' if kind == 'user-unit' else 'system'}/{name}")
+                 if os.path.exists(os.path.join(root, p))), None)
+    oneshot = unit and any(l.strip().replace(" ", "") == "Type=oneshot" for l in open(os.path.join(root, unit)))
+    logs = (os.path.expanduser("~/.config/log/journal") if kind == "user-unit" else "/var/log/journal")
+    if oneshot and os.path.exists(os.path.join(logs, name + ".log")):
+        return True, ""
+    return False, "one-shot, never ran" if oneshot else "not running"
 
 
 def present(kind, name):
@@ -70,9 +91,8 @@ for line in open(index_path):
     t[1] += 1
     ok = present(kind, name)
     why = "missing"
-    if ok and kind in ("unit", "user-unit") and active[kind] is not None and name not in active[kind] \
-            and not name.endswith((".target", ".path", ".socket")):
-        ok, why = False, "unit file present, not active"
+    if ok and kind in ("unit", "user-unit"):
+        ok, why = unit_ok(kind, name)
     if ok:
         t[0] += 1
     else:

@@ -80,9 +80,10 @@ fi
 # user units from Omarchy's Hyprland autostart, which PowOS doesn't have; here it is the session's job.
 # System units (multi-user.target) and user units (default.target); units whose Condition*= fail on a phone
 # skip themselves, as on any machine. Guarded: one manager per scope.
-# System units run as root, as on PowOS: Andromarchy's (fake) root, what sudo gives here.
-pgrep -f 'pytho[n].*systemctl init' >/dev/null ||
-  sudo env SYSTEMD_DEFAULT_TARGET=multi-user.target systemctl init >"$XDG_RUNTIME_DIR/powos-system-units.log" 2>&1 &
+# System units run as root, as on PowOS: Andromarchy's (fake) root, what sudo gives here. "default" starts the
+# enabled ones once and returns; "init" (a PID 1 stand-in) loops reaping over /proc, which an Android app can
+# only partly read (it spun on "Permission denied" on the S25). Daemons it starts keep running.
+sudo env SYSTEMD_DEFAULT_TARGET=multi-user.target systemctl default >"$XDG_RUNTIME_DIR/powos-system-units.log" 2>&1 &
 pgrep -f 'pytho[n].*systemctl --user init' >/dev/null ||
   systemctl --user init >"$XDG_RUNTIME_DIR/powos-user-units.log" 2>&1 &
 

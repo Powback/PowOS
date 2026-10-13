@@ -18,6 +18,8 @@ sha256sums=('SKIP')
 prepare() {
   cd "$_gitname"
   git lfs install --local
+  # makepkg clones from its local bare mirror, which holds no LFS objects: fetch them from GitHub.
+  git config lfs.url "https://github.com/solsticegamestudios/$_gitname.git/info/lfs"
   git lfs pull
   git lfs checkout
   cargo fetch --locked
