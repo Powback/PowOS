@@ -25,7 +25,7 @@ for p in "${pkgs[@]}"; do
   local_mount=(); [ "$src" = local ] && local_mount=(-v "$HERE/pkgs/$p:/pkg:ro")
   # Resource caps: shares the Colima VM with live services. A volume keeps makepkg's src/ off the
   # macOS bind mount (faster, and keeps Linux ownership).
-  docker run --rm --platform linux/arm64 --cpus 8 --memory 16g "${local_mount[@]}" \
+  docker run --rm --platform linux/arm64 --cpus 8 --memory 16g ${local_mount[@]+"${local_mount[@]}"} \
     -e PKG="$p" -e SRC="$src" -v "$OUT:/out" -v "powos-android-pkg-$p:/build" "$IMAGE" bash -c '
       set -euo pipefail
       # HACK: pacman 7 download sandbox (Landlock) is not permitted in Docker.
