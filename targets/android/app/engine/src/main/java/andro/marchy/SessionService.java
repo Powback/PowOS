@@ -97,7 +97,7 @@ public class SessionService extends Service {
         // Requests from Linux for Android-only actions (Wi-Fi panel, launching Android apps).
         requests = new AndroidRequests(this, runDir(this));
         requests.startWatching();
-        // Android apps in Omarchy's menu (.desktop entries in the rootfs, launched through the requests above).
+        // Android apps in PowOS's application menu (.desktop entries in the rootfs, launched through the requests above).
         apps = new AndroidApps(this);
         apps.register(this);
 

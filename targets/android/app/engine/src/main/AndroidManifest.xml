@@ -22,11 +22,11 @@
     <!-- PowOS: a library inside the PowOS app. The <application> attributes (icon, label, theme, backup)
          are the app's; the activities that relied on the old app-wide fullscreen theme now set it. -->
     <application>
-        <!-- PowOS: the full KDE desktop. HACK (phase 0): its own launcher entry, "PowOS Desktop", until
-             the home screen starts it (docs/powos-app-plan.md phase 1). -->
+        <!-- PowOS: the PowOS (KDE Plasma) desktop IS the home screen: HOME + DEFAULT, so the Home button lands
+             on it. First launch without PowOS installed shows the PowOS setup (InstallActivity). -->
         <activity
             android:name=".MainActivity"
-            android:label="PowOS Desktop"
+            android:label="PowOS"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:enableOnBackInvokedCallback="false"
@@ -39,6 +39,8 @@
                 android:value="true" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <meta-data

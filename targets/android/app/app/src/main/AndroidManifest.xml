@@ -36,6 +36,7 @@
 
         <activity
             android:name=".MainActivity"
+            android:label="PowOS Launcher"
             android:clearTaskOnLaunch="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
             android:excludeFromRecents="true"
@@ -44,10 +45,10 @@
             android:resizeableActivity="true"
             android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustResize">
+            <!-- PowOS: not the home screen any more; the PowOS desktop is (engine MainActivity). Kept as an
+                 app entry ("PowOS Launcher") for Omalauncher's settings, themes and widgets until those move. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.HOME" />
-                <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <!-- A widget shared as a link or QR code: https://simonschubert.github.io/omarchy-widgets/w#owl1.<data> (widgets/market/Share.kt). -->
