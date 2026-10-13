@@ -18,5 +18,6 @@ makemkv               aur               makemkv
 ntfs-3g-system-compression aur          ntfs-3g-system-compression
 pinfo                 aur               pinfo
 vulkan-low-latency-layer aur            vulkan-low-latency-layer
+box64                 aur               (x86 translator: PowOS's Steam + x86 games, see patches/andromarchy/0002)
 # Bazzite's own (bazzite-portal, cicpoffs, gamemode-news-hook, gmodpatchtool, krunner-yafti,
 # steam-notif-daemon) have no Arch recipe: pkgs/<name>/PKGBUILD, packaged from their Bazzite/terra spec.

@@ -1,8 +1,7 @@
 diff --git a/native/android-compat.c b/native/android-compat.c
-index b034b72..6b7b1d6 100644
---- a/native/android-compat.c
-+++ b/native/android-compat.c
-@@ -1318,6 +1318,22 @@ __attribute__((constructor)) static void snapshot_runtime_env(void)
+--- a/native/android-compat.c	2026-10-13 08:07:03
++++ b/native/android-compat.c	2026-10-13 08:07:03
+@@ -1318,6 +1318,22 @@
      }
  }
  
@@ -25,7 +24,7 @@ index b034b72..6b7b1d6 100644
  static int has_var(char *const envp[], const char *name)
  {
      size_t n = strlen(name);
-@@ -1353,7 +1369,26 @@ int execve(const char *path, char *const argv[], char *const envp[])
+@@ -1353,7 +1369,31 @@
      if (base && strstr(base, "/bwrap-flatpak/") && strcmp(slash ? slash + 1 : path, "flatpak-spawn") == 0 &&
          access("/run/host/andromarchy-bin/flatpak-spawn", X_OK) == 0)
          path = "/run/host/andromarchy-bin/flatpak-spawn";
@@ -33,8 +32,13 @@ index b034b72..6b7b1d6 100644
 +    path = self_exe_target(path);
 +    // x86 programs (Steam's bootstrapper, x86 Linux games): what binfmt_misc does for FEX on a Linux PC, which
 +    // Android does not let an app register. Exec FEXInterpreter with the program as its first argument.
-+    // FEX's interpreter is /usr/bin/FEX since FEX-2604 (FEXInterpreter before).
-+    const char *fex = access("/usr/bin/FEX", X_OK) == 0 ? "/usr/bin/FEX" : "/usr/bin/FEXInterpreter";
++    // box64 first: it runs x86 code against the NATIVE glibc for library calls, so file access goes through
++    // fakechroot like any program here. FEX performs the guest's syscalls raw: they reach Android's real
++    // filesystem, not the rootfs (PowOS's steam failed "cd /usr/bin" under FEX on the S25). FEX stays the
++    // fallback (its interpreter is /usr/bin/FEX since FEX-2604, FEXInterpreter before).
++    const char *fex = access("/usr/bin/box64", X_OK) == 0  ? "/usr/bin/box64"
++                      : access("/usr/bin/FEX", X_OK) == 0 ? "/usr/bin/FEX"
++                                                          : "/usr/bin/FEXInterpreter";
 +    if (path && x86_program(path) && access(fex, X_OK) == 0) {
 +        size_t argc = 0;
 +        while (argv && argv[argc])

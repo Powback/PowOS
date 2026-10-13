@@ -1,7 +1,7 @@
 diff --git a/native/android-compat.c b/native/android-compat.c
---- a/native/android-compat.c	2026-10-13 07:43:32
-+++ b/native/android-compat.c	2026-10-13 07:43:32
-@@ -1817,7 +1817,10 @@
+--- a/native/android-compat.c	2026-10-13 08:07:03
++++ b/native/android-compat.c	2026-10-13 08:07:03
+@@ -1822,7 +1822,10 @@
                  return -1;
              base[n] = 0;
          }
