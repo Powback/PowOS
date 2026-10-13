@@ -3,19 +3,22 @@
 # Arch Linux ARM has no package and the AUR one is stale (2406), hence ours, at a release tag.
 pkgname=fex-emu
 pkgver=2610
-pkgrel=1
+pkgrel=2
 pkgdesc='Fast usermode x86 and x86-64 emulator for Arm64 (PowOS phone build)'
 url=https://fex-emu.com
 arch=(aarch64)
 license=(MIT)
 makedepends=(git cmake ninja clang llvm lld python python-setuptools)
 depends=(squashfs-tools squashfuse erofs-utils)
-source=("git+https://github.com/FEX-Emu/FEX.git#tag=FEX-$pkgver")
-sha256sums=('SKIP')
+source=("git+https://github.com/FEX-Emu/FEX.git#tag=FEX-$pkgver"
+        0001-exec-by-path-through-libc.patch)
+sha256sums=('SKIP' 'SKIP')
 
 prepare() {
   cd FEX
   git submodule update --init --recursive --depth 1
+  # Android: exec by path through libc (the userspace launcher; see the patch)
+  patch -p1 < "$srcdir/0001-exec-by-path-through-libc.patch"
 }
 
 build() {

@@ -1,0 +1,39 @@
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.cpp	2026-10-13 07:54:12
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls.cpp	2026-10-13 07:54:12
+@@ -194,6 +194,18 @@
+   auto Interp = GetShebangInterpFD(FD);
+   close(FD);
+   return Interp;
++}
++
++// Android (PowOS on Andromarchy): programs in the Linux rootfs can only be started through the userspace
++// launcher that LD_PRELOADs into every process (fakechroot's execve: the rootfs loader + #! handling, and
++// android-compat's /proc/self/exe redirection): the kernel cannot start them itself, their PT_INTERP does not
++// exist on Android's filesystem. A raw execveat syscall bypasses that launcher, so exec by path goes through
++// libc's execve. FD-based execs (AT_EMPTY_PATH) keep the raw syscall: no path for the launcher to translate.
++static long HostExecveat(int dirfd, const char* pathname, char* const* argv, char* const* envp, int flags) {
++  if (dirfd == AT_FDCWD && flags == 0 && pathname && pathname[0]) {
++    return ::execve(pathname, argv, envp);
++  }
++  return ::syscall(SYS_execveat, dirfd, pathname, argv, envp, flags);
+ }
+ 
+ uint64_t ExecveHandler(FEXCore::Core::CpuStateFrame* Frame, const char* pathname, char* const* argv, char* const* envp, ExecveAtArgs Args) {
+@@ -408,7 +420,7 @@
+   }
+ 
+   if (IsBinfmtCompatible || IsOtherELF || IsForeignShebang) {
+-    Result = ::syscall(SYS_execveat, Args.dirfd, Filename.c_str(), argv, EnvpPtr, Args.flags);
++    Result = HostExecveat(Args.dirfd, Filename.c_str(), argv, EnvpPtr, Args.flags);
+     CloseSeccompFD();
+     CloseFDExecFD();
+     SYSCALL_ERRNO();
+@@ -458,7 +470,7 @@
+     ExecveArgs.emplace_back(nullptr);
+   }
+ 
+-  Result = ::syscall(SYS_execveat, Args.dirfd, "/proc/self/exe", const_cast<char* const*>(ExecveArgs.data()), EnvpPtr, Args.flags);
++  Result = HostExecveat(Args.dirfd, "/proc/self/exe", const_cast<char* const*>(ExecveArgs.data()), EnvpPtr, Args.flags);
+   CloseSeccompFD();
+   CloseFDExecFD();
+ 
