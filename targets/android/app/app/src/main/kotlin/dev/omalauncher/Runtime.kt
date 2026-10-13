@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import dev.omalauncher.linux.AGENTS
 import dev.omalauncher.linux.Agent
 import dev.omalauncher.linux.AgentStore
+import dev.omalauncher.linux.POWOS
 import dev.omalauncher.linux.AudioBridge
 import dev.omalauncher.linux.Bootstrap
 import dev.omalauncher.linux.FILES_COMMAND
@@ -220,6 +221,17 @@ class Runtime(
     /** Continues a failed install, or a failed update of an installed system. */
     fun retryLinux() = runLinux { bootstrap.run() }
 
+    /**
+     * PowOS: re-reads whether PowOS is installed. The engine installs it in its own activity, so the home
+     * screen checks again whenever it comes back (MainActivity.onResume); otherwise it keeps offering the
+     * install. Only the state: Omalauncher's own Linux services (onLinuxReady: its compositor, proot
+     * helpers, Linux app scan) target its proot system and stay off until they run on PowOS (phase 2).
+     */
+    fun refreshLinuxState() {
+        if (linuxJob?.isActive == true) return
+        scope.launch { bootstrap.run() }
+    }
+
     /** Runs [work] with the foreground service up, so it goes on outside the app; then starts Linux if it's installed. */
     private fun runLinux(work: suspend () -> Unit) {
         if (linuxJob?.isActive == true) return
@@ -233,7 +245,8 @@ class Runtime(
                     }
                 }
                 work()
-                if (bootstrap.isInstalled) onLinuxReady() else setService(false)
+                // PowOS: Omalauncher's own Linux services target its proot system; off until phase 2 (see refreshLinuxState).
+                if (bootstrap.isInstalled && !POWOS) onLinuxReady() else setService(false)
             }
     }
 

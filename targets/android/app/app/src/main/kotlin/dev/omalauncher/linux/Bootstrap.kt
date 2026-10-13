@@ -24,7 +24,7 @@ import java.util.zip.GZIPInputStream
 
 private const val TAG = "bootstrap"
 // PowOS: Linux is PowOS (the engine installs and runs it); Omalauncher's own Arch/proot setup below is off.
-private const val POWOS = true
+internal const val POWOS = true
 private const val ROOTFS_URL = "http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 private const val TARBALL = "ArchLinuxARM-aarch64-latest.tar.gz"
 

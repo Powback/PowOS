@@ -90,6 +90,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         runtime.wm.focus(null)
         removeStaleWindowTasks()
+        // PowOS: back from the engine's installer (or anything else), so check whether PowOS is installed now.
+        runtime.refreshLinuxState()
         // The user may have set or replaced the wallpaper while we were in the background.
         lifecycleScope.launch { runtime.themes.refreshLiveWallpaper() }
     }
