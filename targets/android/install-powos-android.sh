@@ -73,6 +73,14 @@ rm -rf ~/.local/share/fex-emu/RootFS
 fexroot=$(ls -d /usr/share/fex-emu/RootFS/*/ | head -1)
 printf '{"Config":{"RootFS":"%s"}}\n' "${fexroot%/}" > /usr/share/fex-emu/Config.json
 
+# Windows games: powos-play runs a .exe through Proton without Steam's container runtime (pressure-vessel needs
+# user namespaces; see play/powos-play). Proton itself (GE-Proton's aarch64 build, ~2 GB) is downloaded on first
+# use, not shipped. What ARM64 Wine loads at run time (dlopen, so no package depends on it), and vulkaninfo for
+# checking the GPU from a terminal.
+pacman -S --noconfirm --needed vulkan-icd-loader vulkan-tools libxinerama libxcomposite libxrandr libxcursor \
+  libxi libxkbcommon sdl2-compat gnutls freetype2 fontconfig gst-plugins-base-libs
+install -m 755 "$P/play/powos-play" /usr/bin/powos-play
+
 # ── PowOS's files: everything in the image no package owns (PowOS layer, Bazzite's system_files, Deck
 # presets...), architecture-independent only. Unpacked after the packages, as the image's layers sit on top
 # of its packages.
