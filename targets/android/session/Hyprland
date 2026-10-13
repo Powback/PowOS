@@ -11,6 +11,11 @@
 # The GPU variables (KGSL Mesa) are set for every process by the engine's arch-native.sh.
 set -u
 
+# Semaphores emulated by the runtime (Andromarchy patch 0004: SysV sets in /tmp/.sysv, named ones in /tmp/.shm) live
+# in files that outlive the processes; the kernel would drop them on reboot. Each session starts clean, so a set left
+# by a killed Steam cannot make the next one wait forever.
+rm -rf /tmp/.sysv /tmp/.shm/sem.* 2>/dev/null
+
 # KWin picks its Anland backend whenever ANLAND_SOCKET is set (patched main_wayland.cpp). Same daemon,
 # same wire protocol as Andromarchy's (protocol.h structs identical; checked 2026-10-13).
 export ANLAND_SOCKET="$ANDROMARCHY_SOCKET"
