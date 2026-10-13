@@ -6,7 +6,7 @@ protection hooks, browser) are untouched. Desktop-specific steps change: no Hypr
 hyprgrass, no Omarchy, no Squeekboard (Android's keyboard types into KWin via the app's IME path).
 
 --- a/build/build-inside.sh	2026-10-13 00:57:58
-+++ b/build/build-inside.sh	2026-10-13 01:35:14
++++ b/build/build-inside.sh	2026-10-13 02:03:37
 @@ -36,8 +36,8 @@
  # --overwrite: the native build copied fakechroot's library in beforehand, to start this rootfs.
  pacman -S --noconfirm --needed --overwrite '/usr/lib/libfakeroot/fakechroot/*' \
@@ -57,7 +57,7 @@ hyprgrass, no Omarchy, no Squeekboard (Android's keyboard types into KWin via th
  # systemctl without systemd (user services, Restart=), ahead of systemd's own in /usr/local/bin.
  bash $L/native/install-systemctl.sh
  
-@@ -121,6 +104,9 @@
+@@ -121,9 +104,15 @@
      tr ':' '\n' | grep -v libfakeroot.so | paste -sd:)" makepkg --noconfirm 2>&1 | tail -3)
    rm -rf /tmp/nofakeroot
  else
@@ -66,8 +66,15 @@ hyprgrass, no Omarchy, no Squeekboard (Android's keyboard types into KWin via th
 +  pacman -S --noconfirm --needed $(cd /tmp/brave && source ./PKGBUILD && echo "${depends[@]}")
    useradd -m aurbuild 2>/dev/null || true
    chown -R aurbuild /tmp/brave
-   (cd /tmp/brave && runuser -u aurbuild -- makepkg --noconfirm -s 2>&1 | tail -3)
-@@ -149,8 +135,9 @@
+-  (cd /tmp/brave && runuser -u aurbuild -- makepkg --noconfirm -s 2>&1 | tail -3)
++  # PowOS: Arch's own fakeroot (SysV IPC) for this build-host packaging step. The TCP fakeroot built
++  # above into /usr/local/bin is for Android (no SysV IPC) and fails here ("libfakeroot: connect:
++  # Permission denied"). Full output kept: `tail -3` used to hide the real error.
++  (cd /tmp/brave && runuser -u aurbuild -- env PATH=/usr/bin:/bin makepkg --noconfirm -s 2>&1 | tail -15)
+   userdel -r aurbuild 2>/dev/null || true
+ fi
+ pacman -U --noconfirm /tmp/brave/brave-origin-bin-*.pkg.tar.*
+@@ -149,8 +138,9 @@
  # Linux -> Android requests (Wi-Fi panel, launching Android apps): the app watches run/android-request.
  install -m 755 $L/native/android-request.sh /usr/local/bin/android-request
  # First boot on the device (SessionService runs it: uid, machine-id, locale, setup form answers) and first session.
