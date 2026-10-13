@@ -1,0 +1,4 @@
+# Built by the buildExecutables task (NDK), not sources
+src/main/jniLibs/
+.cxx/
+build/

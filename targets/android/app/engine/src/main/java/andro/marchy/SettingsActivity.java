@@ -54,7 +54,8 @@ public class SettingsActivity extends Activity {
     private static final String KEY_NOTIFICATION_ENABLED = "settings_notification";
     private static final String KEY_SCREEN_ORIENTATION = "screen_orientation";
     private static final String KEY_PIP_MODE = "pip_mode";
-    private static final String DEFAULT_SOCKET_PATH = "/data/data/andro.marchy/files/run/andromarchy/display_daemon.sock";
+    // PowOS: from the app's real files dir (was a /data/data/andro.marchy literal; the app id is now com.powos.app).
+    private String defaultSocketPath() { return SessionService.daemonSocket(this).getPath(); }
     private static final int UNBOUND = -1;
 
     // Stored values match Termux:X11's forceOrientation preference.
@@ -871,8 +872,8 @@ public class SettingsActivity extends Activity {
 
         EditText socketInput = new EditText(this);
         socketInput.setSingleLine(true);
-        socketInput.setText(prefs.getString(KEY_SOCKET_PATH, DEFAULT_SOCKET_PATH));
-        socketInput.setHint(DEFAULT_SOCKET_PATH);
+        socketInput.setText(prefs.getString(KEY_SOCKET_PATH, defaultSocketPath()));
+        socketInput.setHint(defaultSocketPath());
         socketInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}

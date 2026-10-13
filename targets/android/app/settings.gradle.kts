@@ -1,4 +1,4 @@
-rootProject.name = "Omalauncher"
+rootProject.name = "PowOS"
 
 pluginManagement {
     repositories {
@@ -29,3 +29,4 @@ dependencyResolutionManagement {
 
 include(":app")
 include(":owl")
+include(":engine")

@@ -14,11 +14,16 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.omalauncher"
-        minSdk = 29
-        targetSdk = 37
-        versionCode = 11
-        versionName = "0.6.0"
+        // PowOS: our own app id, so it installs next to Omalauncher from the Play Store.
+        applicationId = "com.powos.app"
+        // minSdk 30: the engine's native code needs API 30 (memfd_create).
+        minSdk = 30
+        // targetSdk 28: Android lets only apps targeting <= 28 execute files from their own data dir (W^X),
+        // which running the PowOS rootfs without proot needs (the engine's lotfix-run). Consequence:
+        // side-loaded, not on the Play Store. (Omalauncher targets 37 and runs proot from its APK instead.)
+        targetSdk = 28
+        versionCode = 1
+        versionName = "0.1.0"
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -73,6 +78,8 @@ dependencies {
     implementation(libs.androidsvg)
     implementation(libs.zxing.core)
     implementation(project(":owl"))
+    // PowOS: Andromarchy's engine (display, session, rootfs install), GPL-3.0; the app is GPL-3.0 as a whole.
+    implementation(project(":engine"))
     testImplementation(libs.junit)
     // android.jar only has stubs of org.json.
     testImplementation(libs.org.json)

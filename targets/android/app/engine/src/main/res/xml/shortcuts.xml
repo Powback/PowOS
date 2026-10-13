@@ -9,6 +9,6 @@
             android:action="android.intent.action.MAIN"
             android:category="android.intent.category.LAUNCHER"
             android:targetClass="andro.marchy.SettingsActivity"
-            android:targetPackage="andro.marchy"/>
+            android:targetPackage="com.powos.app"/>
     </shortcut>
 </shortcuts>

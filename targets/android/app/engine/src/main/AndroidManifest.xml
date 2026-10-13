@@ -19,13 +19,15 @@
         xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
-    <application
-        android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
-        android:label="Andromarchy"
-        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+    <!-- PowOS: a library inside the PowOS app. The <application> attributes (icon, label, theme, backup)
+         are the app's; the activities that relied on the old app-wide fullscreen theme now set it. -->
+    <application>
+        <!-- PowOS: the full KDE desktop. HACK (phase 0): its own launcher entry, "PowOS Desktop", until
+             the home screen starts it (docs/powos-app-plan.md phase 1). -->
         <activity
             android:name=".MainActivity"
+            android:label="PowOS Desktop"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:enableOnBackInvokedCallback="false"
             android:exported="true"
@@ -58,6 +60,7 @@
         </activity>
         <activity
             android:name=".InstallActivity"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity

@@ -82,7 +82,8 @@ static struct consumer_state g_state = {
 /* Connection config, set from Java via nativeConfigure() and read on each
  * (re)connect in do_connect(). Guarded by cfg_lock. */
 static pthread_mutex_t cfg_lock = PTHREAD_MUTEX_INITIALIZER;
-static char cfg_socket_path[256] = "/data/data/andro.marchy/files/run/andromarchy/display_daemon.sock";
+/* PowOS: fallback only; nativeConfigure() sets the real path from the app (SessionService.daemonSocket). */
+static char cfg_socket_path[256] = "/data/data/com.powos.app/files/run/andromarchy/display_daemon.sock";
 static bool cfg_use_root = false;
 static bool cfg_use_compatible_bridge = false;
 static int cfg_compatible_fd = -1;

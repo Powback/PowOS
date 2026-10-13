@@ -84,7 +84,8 @@ public class MainActivity extends Activity
     // the AAudio playback stream while this window is in the foreground.
     private AudioManager mAudioManager;
     private AudioFocusRequest mAudioFocusRequest;
-    private static final String DEFAULT_SOCKET_PATH = "/data/data/andro.marchy/files/run/andromarchy/display_daemon.sock";
+    // PowOS: from the app's real files dir (was a /data/data/andro.marchy literal; the app id is now com.powos.app).
+    private String defaultSocketPath() { return SessionService.daemonSocket(this).getPath(); }
     private static final String KEY_ACCESSIBILITY_ENABLED = "accessibility_key_intercept";
     private static final String KEY_EXTRA_KEYS_ENABLED = "extra_keys_bar";
     private static final String KEY_AUTO_SHOW_EXTRA_KEYS = "auto_show_extra_keys";
@@ -232,9 +233,9 @@ public class MainActivity extends Activity
     // Termux-side Binder bridge instead of calling connect() from this UID.
     private void applyConnectionConfig() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String sock = prefs.getString(KEY_SOCKET_PATH, DEFAULT_SOCKET_PATH);
+        String sock = prefs.getString(KEY_SOCKET_PATH, defaultSocketPath());
         if (sock == null || sock.trim().isEmpty())
-            sock = DEFAULT_SOCKET_PATH;
+            sock = defaultSocketPath();
         boolean useRoot = prefs.getBoolean(KEY_USE_ROOT, false);
         String helperPath = getApplicationInfo().nativeLibraryDir + "/libfdhelper.so";
         String bridgePath = getCacheDir().getAbsolutePath() + "/andromarchy_fdbridge.sock";
