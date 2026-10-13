@@ -38,6 +38,13 @@ fi
 pacman -U --noconfirm "$P"/pkgs/kwin-*.pkg.tar.*
 grep -q '^IgnorePkg.*\bkwin\b' $C || sed -i "/^IgnorePkg/ s/$/ kwin/" $C
 
+# FEX: PowOS's Steam (Valve's bootstrapper is 32-bit x86) and x86 games run through it, as on Valve's own ARM
+# hardware. The engine's execve hands x86 programs to FEXInterpreter (patches/andromarchy/0002), standing in for
+# the binfmt_misc registration an Android app cannot make. FEX's x86 rootfs comes from FEX's own fetcher,
+# extracted: no FUSE mounts on Android.
+pacman -U --noconfirm "$P"/pkgs/fex-emu-*.pkg.tar.*
+FEXRootFSFetcher -y -x --distro-list-first --force-ui tty
+
 # ── PowOS's files: everything in the image no package owns (PowOS layer, Bazzite's system_files, Deck
 # presets...), architecture-independent only. Unpacked after the packages, as the image's layers sit on top
 # of its packages.

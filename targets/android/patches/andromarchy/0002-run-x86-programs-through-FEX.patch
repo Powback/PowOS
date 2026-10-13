@@ -1,0 +1,53 @@
+diff --git a/native/android-compat.c b/native/android-compat.c
+index b034b72..acd7e8a 100644
+--- a/native/android-compat.c
++++ b/native/android-compat.c
+@@ -1318,6 +1318,22 @@ __attribute__((constructor)) static void snapshot_runtime_env(void)
+     }
+ }
+ 
++// ELF e_machine of an x86 (EM_386, 3) or x86-64 (EM_X86_64, 62) program. open() goes through fakechroot, so the
++// guest path works as given.
++static int x86_program(const char *path)
++{
++    unsigned char h[20];
++    int fd = open(path, O_RDONLY | O_CLOEXEC);
++    if (fd < 0)
++        return 0;
++    ssize_t r = read(fd, h, sizeof h);
++    close(fd);
++    if (r < (ssize_t)sizeof h || h[0] != 0x7f || h[1] != 'E' || h[2] != 'L' || h[3] != 'F' || h[5] != 1)
++        return 0;
++    unsigned machine = h[18] | (h[19] << 8);
++    return machine == 3 || machine == 62;
++}
++
+ static int has_var(char *const envp[], const char *name)
+ {
+     size_t n = strlen(name);
+@@ -1353,7 +1369,24 @@ int execve(const char *path, char *const argv[], char *const envp[])
+     if (base && strstr(base, "/bwrap-flatpak/") && strcmp(slash ? slash + 1 : path, "flatpak-spawn") == 0 &&
+         access("/run/host/andromarchy-bin/flatpak-spawn", X_OK) == 0)
+         path = "/run/host/andromarchy-bin/flatpak-spawn";
+-    return next(self_exe_target(path), argv, env);
++    path = self_exe_target(path);
++    // x86 programs (Steam's bootstrapper, x86 Linux games): what binfmt_misc does for FEX on a Linux PC, which
++    // Android does not let an app register. Exec FEXInterpreter with the program as its first argument.
++    if (path && x86_program(path) && access("/usr/bin/FEXInterpreter", X_OK) == 0) {
++        size_t argc = 0;
++        while (argv && argv[argc])
++            argc++;
++        // FEXInterpreter <program> <argv[1..]>: the program's own argv[0] is replaced by its path, as binfmt does.
++        char *fex_argv[argc + 3];
++        size_t k = 0;
++        fex_argv[k++] = "FEXInterpreter";
++        fex_argv[k++] = (char *)path;
++        for (size_t i = 1; i < argc; i++)
++            fex_argv[k++] = argv[i];
++        fex_argv[k] = NULL;
++        return next("/usr/bin/FEXInterpreter", fex_argv, env);
++    }
++    return next(path, argv, env);
+ }
+ 
+ int execv(const char *path, char *const argv[])
