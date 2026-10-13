@@ -135,6 +135,25 @@ public class SessionService extends Service {
             Thread.currentThread().interrupt();
         }
 
+        // 0b. PowOS: our packages (KWin with the Anland backend, box64, FEX, PowOS packages Arch Linux ARM doesn't
+        //     build) from the [powos] repo in the PowApps store (targets/android/publish-repo.sh), installed and
+        //     updated on each start - phones get them without adb or a new rootfs. Its own pacman config with only
+        //     that repo: Arch's repos are never refreshed here, so this can't make a partial upgrade. Off the
+        //     store's network (android.pow unresolvable) it just fails; in the background, so the session starts
+        //     at once, and an updated KWin takes over on the next session.
+        File repoConf = new File(rootfs(this), "etc/pacman.d/powos-repo.conf");
+        repoConf.getParentFile().mkdirs();
+        // HACK: SigLevel TrustAll - the repo is unsigned (served over plain HTTP on the LAN/VPN only). Real fix:
+        // sign the packages in build-pkgs.sh with a PowOS key and ship its public key in the rootfs keyring.
+        try (java.io.FileWriter w = new java.io.FileWriter(repoConf)) {
+            w.write("[options]\nArchitecture = auto\nDisableSandbox\nSigLevel = Optional TrustAll\n\n"
+                    + "[powos]\nServer = http://android.pow/apk/repo\n");
+        }
+        spawn("powos-packages", List.of(launcher, "-c", "C=/etc/pacman.d/powos-repo.conf; exec >\"$XDG_RUNTIME_DIR/"
+                + "powos-packages.log\" 2>&1; sudo pacman --config $C -Sy --noconfirm || exit 0;"
+                + " P=$(pacman --config $C -Slq powos); sudo pacman --config $C -S --noconfirm --needed $P"
+                + " || for p in $P; do sudo pacman --config $C -S --noconfirm --needed $p; done"), archEnv(run, sock));
+
         // 1. Display daemon: relays buffers and input between this app's display and Hyprland.
         spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock.getPath()), null);
 

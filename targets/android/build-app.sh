@@ -35,3 +35,12 @@ docker run --rm --cpus 8 --memory 12g --entrypoint /bin/bash \
     ./gradlew --no-daemon -q ":app:$TASK" 2>&1 | tail -40
     apk=$(ls app/build/outputs/apk/$VARIANT/*.apk | head -1)
     cp "$apk" /out/powos-$VARIANT.apk && ls -la /out/powos-$VARIANT.apk'
+
+# Publish to the PowApps store (android-app-dev's output/, served at http://android.pow/apk/): phones install and
+# update it from there, on the LAN or over the WireGuard VPN. POWOS_STORE= (empty) skips it.
+STORE=${POWOS_STORE-$HOME/Projects/android-app-dev/output}
+if [ -n "$STORE" ] && [ -d "$STORE" ]; then
+  cp "$OUT/powos-$VARIANT.apk" "$STORE/powos-$VARIANT.apk.tmp"
+  mv "$STORE/powos-$VARIANT.apk.tmp" "$STORE/powos-$VARIANT.apk"
+  echo "published: http://android.pow/apk/powos-$VARIANT.apk"
+fi
