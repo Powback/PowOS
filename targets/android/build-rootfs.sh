@@ -36,7 +36,7 @@ S=$W/powos
 rm -rf "$S" && mkdir -p "$S/pkgs"
 "$HERE/tools/fetch-manifest.sh" "$S/manifest" "${POWOS_MANIFEST:-ghcr.io/powback/powos-phone:deck}"
 cp "$OUT"/pkgs/*.pkg.tar.* "$S/pkgs/"   # ours: kwin, fex-emu, recipes.list builds
-cp -a "$HERE/session" "$HERE/shims" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
+cp -a "$HERE/session" "$HERE/shims" "$HERE/play" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
 
 # 3. Build inside a privileged aarch64 container (chroot + mounts need it), on a Docker volume:
@@ -44,21 +44,39 @@ install -m 755 "$HERE/install-powos-android.sh" "$S/"
 # Resource caps keep the build from starving the services running on the same Colima VM.
 # The Docker disk is shared with the live PowStation services: a full disk breaks them (this build
 # once filled it to 100%). Refuse to start without room for the ~15-20 GB working tree plus margin.
+# POWOS_SCRATCH=image (or automatically when the Docker disk is short): the working tree goes in a sparse ext4
+# image on the output directory's disk (the Mac's, via VirtioFS), loop-mounted in the container, so the build
+# never touches the shared Docker disk beyond the package cache. ext4, not the macOS folder itself: the tree
+# needs Linux ownership, device nodes and case-sensitive names.
 NEED_GB=25
 free_gb=$(docker run --rm "$IMAGE" df -BG --output=avail /etc/hostname | tail -1 | tr -dc '0-9')
-if [ "${free_gb:-0}" -lt "$NEED_GB" ]; then
-  echo "only ${free_gb} GB free on the Docker disk; need ${NEED_GB} GB (shared with live services)" >&2
-  exit 1
+SCRATCH=${POWOS_SCRATCH:-volume}
+if [ "$SCRATCH" = volume ] && [ "${free_gb:-0}" -lt "$NEED_GB" ]; then
+  echo "only ${free_gb} GB free on the Docker disk (shared with live services): working tree goes in a disk image" >&2
+  SCRATCH=image
 fi
-docker volume create powos-android-rootfs >/dev/null
-# The working tree is deleted afterwards (success or not): it is only scratch space, and leaving
-# ~15-20 GB behind on the shared disk is how it filled up.
-trap 'docker volume rm -f powos-android-rootfs >/dev/null 2>&1 || true' EXIT
+# The volume/image name carries the worktree, so two checkouts building at once never share a working tree.
+TAG=$(printf %s "$HERE" | cksum | cut -d' ' -f1)
+if [ "$SCRATCH" = image ]; then
+  IMG=$W/rootfs-scratch.img
+  rm -f "$IMG" && truncate -s 40G "$IMG"
+  trap 'rm -f "$IMG"' EXIT
+  work=(-v "$W:/scratch")
+  inner='mkfs.ext4 -q /scratch/rootfs-scratch.img && mkdir -p /work && mount -o loop /scratch/rootfs-scratch.img /work && bash /rootfs-in-container.sh; rc=$?; umount -l /work; exit $rc'
+else
+  VOL=powos-android-rootfs-$TAG
+  docker volume create "$VOL" >/dev/null
+  # The working tree is deleted afterwards (success or not): it is only scratch space, and leaving
+  # ~15-20 GB behind on the shared disk is how it filled up.
+  trap 'docker volume rm -f "$VOL" >/dev/null 2>&1 || true' EXIT
+  work=(-v "$VOL:/work")
+  inner='bash /rootfs-in-container.sh'
+fi
 # powos-android-cache is the opposite of scratch: kept between builds (Arch base tarball, pacman
 # packages, Mesa/fakeroot sources) so dev rebuilds don't re-download ~3 GB. A few GB; never pruned here.
 docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
-  -v powos-android-rootfs:/work -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
-  "$IMAGE" bash /rootfs-in-container.sh
+  "${work[@]}" -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" \
+  "$IMAGE" bash -c "$inner"
 echo "built: $OUT/powos-rootfs.tar.gz"
 
 # Serve it to the PowOS app (engine InstallActivity.ROOTFS_URL = http://android.pow/apk/powos-rootfs.tar.gz):
