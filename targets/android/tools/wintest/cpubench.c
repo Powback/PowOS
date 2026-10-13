@@ -55,7 +55,7 @@ static uint64_t w_matmul(void)
                     s += a[i][k] * b[k][j];
                 c[i][j] = s + r;
             }
-    return (uint64_t)(c[N / 2][N / 3] * 1000);
+    return (uint64_t)(int64_t)(c[N / 2][N / 3] * 1000); // via int64: negative double -> uint64 differs by arch
 }
 
 // Memory: 64 MB memcpy, 20 times.
@@ -92,11 +92,11 @@ static uint64_t w_api(void)
     return sum;
 }
 
-// Kernel round trips (wineserver / syscalls): 20k event create/set/wait/close.
+// Kernel round trips (wineserver / syscalls): 2k event create/set/wait/close.
 static uint64_t w_sys(void)
 {
     uint64_t ok = 0;
-    for (int i = 0; i < 20000; i++) {
+    for (int i = 0; i < 2000; i++) {
         HANDLE e = CreateEventW(NULL, TRUE, FALSE, NULL);
         SetEvent(e);
         ok += WaitForSingleObject(e, 0) == WAIT_OBJECT_0;
@@ -105,12 +105,15 @@ static uint64_t w_sys(void)
     return ok;
 }
 
-// Threads: 4 threads x 50M LCG steps.
+// Threads: 4 threads x 50M xorshift steps (a serial chain no compiler can shortcut, unlike an LCG).
 static DWORD WINAPI lcg_thread(void *arg)
 {
     uint64_t x = (uintptr_t)arg;
-    for (int i = 0; i < 50000000; i++)
-        x = x * 6364136223846793005ULL + 1442695040888963407ULL;
+    for (int i = 0; i < 50000000; i++) {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+    }
     *(volatile uint64_t *)&x;
     return (DWORD)x;
 }
