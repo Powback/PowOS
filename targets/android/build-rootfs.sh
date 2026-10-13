@@ -12,7 +12,6 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=$(cd "$HERE/../.." && pwd)
 OUT=$HERE/out
 W=$OUT/work
 mkdir -p "$OUT" "$W"
@@ -25,29 +24,19 @@ IMAGE=menci/archlinuxarm:latest   # build host userland only; the rootfs itself 
 KWIN_PKG=${1:-$(ls "$OUT"/pkgs/kwin-*.pkg.tar.* 2>/dev/null | head -1)}
 [ -f "${KWIN_PKG:-}" ] || { echo "no kwin package: run targets/android/build-pkgs.sh first" >&2; exit 1; }
 
-"$HERE/check-layer-drift.sh"
-
 # 1. Andromarchy at the pinned commit, with our build patch.
 rm -rf "$W/andromarchy"
 git clone -q "$ANDROMARCHY_URL" "$W/andromarchy"
 git -C "$W/andromarchy" checkout -q "$ANDROMARCHY_REF"
 for p in "$HERE"/patches/andromarchy/*.patch; do patch -d "$W/andromarchy" -p1 < "$p"; done
 
-# 2. The PowOS layer, laid out at its destinations (layer.list '+' lines).
+# 2. What PowOS is: the published PowOS Deck image's manifest (a few MB; see
+#    .github/workflows/phone-manifest.yml). POWOS_MANIFEST picks another one (e.g. a commit's deck-<digest>).
 S=$W/powos
-rm -rf "$S" && mkdir -p "$S/layer" "$S/pkgs"
-rm -rf "$W/snapshot" && mkdir -p "$W/snapshot"
-git -C "$REPO" archive HEAD | tar -x -C "$W/snapshot"   # same as CI's .snapshot/: the committed tree
-while read -r mark src dst _; do
-  [ "$mark" = + ] || continue
-  from=$REPO/$src
-  [ "$src" = .snapshot/ ] && from=$W/snapshot/
-  mkdir -p "$S/layer/$(dirname "$dst")"
-  if [ -d "$from" ]; then mkdir -p "$S/layer/$dst" && cp -a "$from". "$S/layer/$dst"
-  else cp -a "$from" "$S/layer/$dst"; fi
-done < <(grep -E '^[+-] ' "$HERE/layer.list")
+rm -rf "$S" && mkdir -p "$S/pkgs"
+"$HERE/tools/fetch-manifest.sh" "$S/manifest" "${POWOS_MANIFEST:-ghcr.io/powback/powos-phone:deck}"
 cp "$KWIN_PKG" "$S/pkgs/"
-cp -a "$HERE/session" "$HERE/shims" "$HERE/packages.list" "$S/"
+cp -a "$HERE/session" "$HERE/shims" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
 
 # 3. Build inside a privileged aarch64 container (chroot + mounts need it), on a Docker volume:

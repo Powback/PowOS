@@ -23,9 +23,16 @@ It reuses [Andromarchy](https://github.com/lotfibennour/andromarchy) (GPL-3.0), 
 | Desktop | Omarchy | **KDE Plasma + the PowOS layer** ([install-powos-android.sh](install-powos-android.sh)) |
 | On-screen keyboard | Squeekboard (Omarchy plugin) | **Android's own keyboard** (the app's IME path into KWin's Anland backend); Squeekboard isn't built |
 
-The PowOS layer is the same files the desktop image ships: [layer.list](layer.list) says, for every
-`COPY` in the Containerfile's `staging` stage, whether it goes onto the phone and why not if it doesn't.
-[check-layer-drift.sh](check-layer-drift.sh) fails when the two disagree.
+**What PowOS is comes from PowOS itself.** The phone is the PowOS Steam Deck flavour minus its hardware:
+after `build-test-publish` publishes `ghcr.io/powback/powos:deck`,
+[phone-manifest.yml](../../.github/workflows/phone-manifest.yml) reads that image on the CI runner and
+publishes a few MB as `ghcr.io/powback/powos-phone:deck` ([tools/emit-manifest.sh](tools/emit-manifest.sh)):
+the image's top-level packages, its Flatpak list, and the architecture-independent files no package owns
+(PowOS's layer, Bazzite's own files, Deck presets). The phone build fetches that
+([tools/fetch-manifest.sh](tools/fetch-manifest.sh)), installs the packages' Arch Linux ARM equivalents and
+unpacks the files. The only hand-written part is [phone-rules.conf](phone-rules.conf): Fedora→Arch name
+differences and what can't exist on a phone (kernels, firmware, drivers, Deck hardware, systemd units). Each
+build writes `/usr/share/powos/phone-report.txt`: what every PowOS package became, MISSING ones first.
 
 On the phone, `/etc/powos/platform` reads `phone` (and the session exports `POWOS_PLATFORM=phone`), so
 PowOS can tell where it runs. Commands that need a booted machine (bootc, rollback, ramboot, drivers,
@@ -70,7 +77,6 @@ Every workaround is marked `HACK:` at the spot in the code. Summary:
 | `omarchy-dns`, `omarchy-toggle-idle`, `omarchy-lock-screen` ([shims](shims)) | Andromarchy's engine calls these Omarchy names | Neutral command names in the engine |
 | `omarchy-lock-screen` does nothing | KDE's locker needs a PAM password the app user doesn't have (would lock you out); Android's lock screen protects the phone | Hand-off to Android's keyguard via the two-way bridge |
 | Our KWin is `pkgname=kwin`, `pkgrel=3.1`, held with `IgnorePkg` | Satisfies every Plasma package's `depends=(kwin)` and keeps Arch's (which can't draw on Android) out | Anland backend upstream in KWin |
-| [layer.list](layer.list) duplicates the Containerfile's staging list | Adding the phone changes nothing in the desktop/Deck build | One manifest both builds read, once the phone build is proven |
 | `DisableSandbox` in pacman.conf of build containers | pacman 7's Landlock sandbox isn't permitted in Docker (Andromarchy's rootfs does the same on-device) | A container runtime that allows Landlock |
 | `setcap ... \|\| true` in the kwin PKGBUILD | The build container's filesystem may lack xattrs; the capability is irrelevant on Android | Build where xattrs work |
 
@@ -81,12 +87,12 @@ Every workaround is marked `HACK:` at the spot in the code. Summary:
   fixed in patch 0008. Found with an LD_PRELOAD crash reporter.
 - Plasma session comes up from the app's own session start; output scale set from the physical size
   (2.75x on the S25).
-- The desktop's apps per [packages.list](packages.list), installed with pacman inside the running rootfs.
+- The desktop's apps installed with pacman inside the running rootfs (now derived from the PowOS Deck image).
 
 ## Not done yet
 
 - **Audio** through KWin's Anland audio path: not checked yet.
-- **Steam/Proton/FEX** and AUR-only gaming tools (`~`/`-` in packages.list): later, by the user.
+- **Steam/Proton/FEX** and ARM gaps (`provide`/MISSING in the phone report): later, by the user.
 - **powos CLI gating** on `/etc/powos/platform` (commands that can't work on a phone should say so).
 - **PowOS-branded app** (`com.powos.app`) with its own download URL, removing the path hacks above.
 - **Two-way Android bridge**: calendar, contacts, notifications to `powos android ...` and a local
