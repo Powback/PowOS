@@ -201,7 +201,9 @@ public class SessionService extends Service {
     private Map<String, String> archEnv(File run, File sock) {
         Map<String, String> env = new java.util.HashMap<>(System.getenv());
         env.put("ARCH_ROOTFS", rootfs(this).getPath());
-        env.put("ARCH_EXCLUDE_EXTRA", run.getPath()); // sockets: real paths, not rewritten into the rootfs
+        // sockets: real paths, not rewritten into the rootfs. PowOS: also the phone's shared storage (/storage,
+        // /sdcard), so PowOS's file manager and apps see the phone's files (storage permission: MainActivity).
+        env.put("ARCH_EXCLUDE_EXTRA", run.getPath() + ":/storage:/sdcard");
         env.put("XDG_RUNTIME_DIR", run.getPath());
         env.put("TZ", java.util.TimeZone.getDefault().getID()); // glibc only knows /etc/localtime otherwise: UTC
         env.put("LANG", androidLocale(this)); // Android's language (first-boot.sh compiles its locale)

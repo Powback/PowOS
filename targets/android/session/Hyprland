@@ -64,6 +64,17 @@ fi
   fi
 ) &
 
+# The phone's files in PowOS: the app passes /storage through (SessionService ARCH_EXCLUDE_EXTRA) once the
+# storage permission is granted. ~/Phone is the whole shared storage; the standard folders (Dolphin's Places,
+# file pickers, browsers' downloads) are the phone's own. Every start: the permission may come later.
+phone=/storage/emulated/0
+if [ -r "$phone" ]; then
+  ln -sfn "$phone" "$HOME/Phone"
+  for d in DOWNLOAD:Download PICTURES:DCIM DOCUMENTS:Documents MUSIC:Music VIDEOS:Movies; do
+    xdg-user-dirs-update --set "${d%%:*}" "$phone/${d#*:}" 2>/dev/null
+  done
+fi
+
 # First session of this rootfs (Flatpak remote, theme defaults); idempotent, marks itself done.
 /opt/powos/first-session.sh >"$XDG_RUNTIME_DIR/powos-first-session.log" 2>&1 &
 

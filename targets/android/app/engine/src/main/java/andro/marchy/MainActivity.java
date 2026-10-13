@@ -296,6 +296,11 @@ public class MainActivity extends Activity
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Prefs.init(this); // settings defaults + move from the former file name
+        // PowOS: the phone's files in PowOS (Dolphin, file pickers): shared storage. targetSdk 28 = full access
+        // with the classic storage permission; /storage is passed through to Linux (SessionService.archEnv).
+        if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[] {android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
 
         // Andromarchy: this app is also the Linux side. Start the session (daemon, audio, Hyprland) if the Arch
         // rootfs is installed; this activity then connects to the daemon like the Termux version did.

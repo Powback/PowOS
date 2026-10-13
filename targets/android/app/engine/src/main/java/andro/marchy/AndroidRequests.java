@@ -46,6 +46,47 @@ final class AndroidRequests extends FileObserver {
         return o;
     }
 
+    /**
+     * PowOS (temporary, for docs/android-windows.md): which direction a local socket between this app
+     * (untrusted_app) and the shell helper passes SELinux. app -> shell: connect to @powos-shellhelper;
+     * shell -> app: listen on @powos-app for 20 s. Results in run/socket-test.log.
+     */
+    private void socketTest() {
+        File log = new File(file.getParentFile(), "socket-test.log");
+        new Thread(() -> {
+            StringBuilder out = new StringBuilder();
+            try (android.net.LocalSocket s = new android.net.LocalSocket()) {
+                s.connect(new android.net.LocalSocketAddress("powos-shellhelper"));
+                out.append("app->shell: connected\n");
+            } catch (Exception e) {
+                out.append("app->shell: FAILED ").append(e).append('\n');
+            }
+            try (android.net.LocalServerSocket server = new android.net.LocalServerSocket("powos-app")) {
+                out.append("shell->app: listening on @powos-app\n");
+                write(log, out.toString());
+                Thread closer = new Thread(() -> {
+                    try { Thread.sleep(20_000); server.close(); } catch (Exception ignored) {}
+                });
+                closer.start();
+                try (android.net.LocalSocket c = server.accept()) {
+                    out.append("shell->app: accepted from uid ").append(c.getPeerCredentials().getUid()).append('\n');
+                } catch (Exception e) {
+                    out.append("shell->app: no connection (").append(e.getMessage()).append(")\n");
+                }
+            } catch (Exception e) {
+                out.append("shell->app: listen FAILED ").append(e).append('\n');
+            }
+            write(log, out.toString());
+        }).start();
+    }
+
+    private static void write(File f, String s) {
+        try (java.io.FileWriter w = new java.io.FileWriter(f)) {
+            w.write(s);
+        } catch (java.io.IOException ignored) {
+        }
+    }
+
     @Override
     public void onEvent(int event, String path) {
         if (!"android-request".equals(path))
@@ -65,6 +106,10 @@ final class AndroidRequests extends FileObserver {
             // split: beside Andromarchy (Android's split screen; a tablet enters it from full screen)
             if (intent != null && req[0].equals("split"))
                 intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+        }
+        if (req[0].equals("socket-test")) { // PowOS (temporary): can the app and the shell helper (ShellHelper) talk?
+            socketTest();
+            return;
         }
         if (req[0].equals("power") && req.length == 2) { // Omarchy's shutdown / reboot / log out / suspend
             Restarter.power(ctx, req[1].trim());
