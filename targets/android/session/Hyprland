@@ -87,6 +87,11 @@ sudo env SYSTEMD_DEFAULT_TARGET=multi-user.target systemctl default >"$XDG_RUNTI
 pgrep -f 'pytho[n].*systemctl --user init' >/dev/null ||
   systemctl --user init >"$XDG_RUNTIME_DIR/powos-user-units.log" 2>&1 &
 
+# adb's way into the session for tools/device-test.sh (only adb's uid is accepted; see the file). HACK: until the
+# PowOS app has its own command service.
+pgrep -f 'powos-devtest-agen[t]' >/dev/null ||
+  /usr/lib/powos/phone/powos-devtest-agent >"$XDG_RUNTIME_DIR/powos-devtest-agent.log" 2>&1 &
+
 # First session of this rootfs (Flatpak remote, theme defaults); idempotent, marks itself done.
 /opt/powos/first-session.sh >"$XDG_RUNTIME_DIR/powos-first-session.log" 2>&1 &
 

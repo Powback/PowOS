@@ -75,16 +75,23 @@ install -m 755 "$P/play/powos-play" /usr/bin/powos-play
 # of its packages.
 # Never over an Arch package's own file (outside /etc, where PowOS's configs are meant to win): the image's
 # unowned files can carry Fedora-specific copies of things Arch packages provide (a libgcc_s.so.1 symlink did).
-python3 - "$P/manifest/content.list" > /tmp/powos-content-skip <<'PY'
-import glob, sys
+# Same for directories: a non-directory entry (a symlink, typically) where an Arch package has a real directory is
+# left out (tar cannot replace a directory; the image's usr/share/fonts/noto-cjk -> google-noto-sans-cjk-fonts
+# symlink vs Arch's noto-fonts-cjk directory stopped the build). Types come from the tar itself, so a directory
+# entry is never excluded (that would drop its whole subtree).
+zstd -dc $P/manifest/content.tar.zst | python3 -c '
+import glob, os, sys, tarfile
 owned = set()
-for f in glob.glob('/var/lib/pacman/local/*/files'):
-    owned.update(l.strip() for l in open(f) if l.strip() and not l.startswith('%') and not l.endswith('/\n'))
-for l in open(sys.argv[1]):
-    l = l.strip()
-    if l in owned and not l.startswith('etc/'):
-        print(l)
-PY
+for f in glob.glob("/var/lib/pacman/local/*/files"):
+    owned.update(l.strip() for l in open(f) if l.strip() and not l.startswith("%") and not l.endswith("/\n"))
+for m in tarfile.open(fileobj=sys.stdin.buffer, mode="r|"):
+    n = m.name[2:] if m.name.startswith("./") else m.name
+    if m.isdir():
+        continue
+    real_dir = os.path.isdir("/" + n) and not os.path.islink("/" + n)
+    if real_dir or (n in owned and not n.startswith("etc/")):
+        print(n)
+' > /tmp/powos-content-skip
 echo "powos: $(wc -l < /tmp/powos-content-skip) content files left to the Arch packages that own them"
 zstd -dc $P/manifest/content.tar.zst | tar -x -C / --no-same-owner --exclude-from=/tmp/powos-content-skip
 cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
@@ -104,6 +111,7 @@ bsdtar -xf /tmp/bun.zip -C /tmp && install -m 755 /tmp/bun-linux-aarch64/bun /us
 # Session + Omarchy-name stand-ins
 install -m 755 "$P/session/Hyprland" /usr/bin/Hyprland            # HACK: see the file
 install -Dm 755 "$P/session/first-session.sh" /opt/powos/first-session.sh
+install -Dm 755 "$P/session/powos-devtest-agent" /usr/lib/powos/phone/powos-devtest-agent
 # first-boot.sh goes to /opt/lotfix/ in build-inside.sh's own install step (patched to take ours).
 # HACK: Omarchy command names the engine calls; see each file. omarchy-dns is Andromarchy's own
 # Android version (resolv.conf from Android's network), unchanged.

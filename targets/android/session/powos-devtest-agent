@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+# powos-devtest-agent: lets tools/device-test.sh run scripts inside the PowOS session over adb, without root.
+#
+# adb's shell user cannot enter the app's private rootfs (the stock app is not debuggable, so no run-as). This agent,
+# started by the session launcher, listens on the abstract unix socket "powos-devtest"; the host reaches it with
+#   adb forward tcp:<port> localabstract:powos-devtest
+# Only adb may talk to it: the kernel's SO_PEERCRED must say uid 2000 (shell, i.e. adbd) or 0. Any other app on the
+# phone that connects is refused. A client sends a bash script and closes its write side; the agent runs it with
+# the session's environment (display, Wayland, D-Bus) and streams stdout+stderr back, then "\n__EXIT <code>\n".
+# HACK: a debugging channel into the app, needed because the Andromarchy app has no command entry point. Real fix:
+# the PowOS app's own adb-reachable command service (com.powos.app), with the same peer check.
+import os
+import socket
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
+
+NAME = b"\0powos-devtest"
+ALLOWED_UIDS = {0, 2000}
+
+
+def session_env():
+    """The running Plasma session's environment (WAYLAND_DISPLAY, DISPLAY, D-Bus...): the agent itself starts
+    before startplasma, so its own environment lacks them. Our own processes' /proc entries are readable."""
+    env = dict(os.environ)
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            if open(f"/proc/{pid}/comm").read().strip() != "plasmashell":
+                continue
+            for kv in open(f"/proc/{pid}/environ", "rb").read().split(b"\0"):
+                k, sep, v = kv.decode(errors="replace").partition("=")
+                if sep and k in ("WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS",
+                                 "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "QT_QPA_PLATFORM"):
+                    env[k] = v
+            break
+        except OSError:
+            continue
+    return env
+
+
+def serve(conn):
+    try:
+        pid, uid, gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if uid not in ALLOWED_UIDS:
+            conn.sendall(b"refused: peer uid %d is not adb\n" % uid)
+            return
+        script = b""
+        while True:
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            script += chunk
+        # From a file, not a pipe: scripts carry payloads (MBs of base64) and bash writes output while reading.
+        with tempfile.NamedTemporaryFile(prefix="powos-devtest-", suffix=".sh", delete=False) as f:
+            f.write(script)
+        try:
+            p = subprocess.Popen(["bash", f.name], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, cwd=os.environ.get("HOME", "/root"), env=session_env())
+            for line in iter(p.stdout.readline, b""):
+                conn.sendall(line)
+            conn.sendall(b"\n__EXIT %d\n" % p.wait())
+        finally:
+            os.unlink(f.name)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    finally:
+        conn.close()
+
+
+def main():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.bind(NAME)
+    except OSError as e:
+        print(f"powos-devtest-agent: {e} (already running?)", file=sys.stderr)
+        return 1
+    s.listen(4)
+    while True:
+        conn, _ = s.accept()
+        threading.Thread(target=serve, args=(conn,), daemon=True).start()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
