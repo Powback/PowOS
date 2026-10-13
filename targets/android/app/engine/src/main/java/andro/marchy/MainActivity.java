@@ -301,6 +301,18 @@ public class MainActivity extends Activity
         if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[] {android.Manifest.permission.READ_EXTERNAL_STORAGE,
                     android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+        // PowOS: keep running with the screen off. Doze and Samsung's battery management firewall an optimized app
+        // completely, loopback included, and the Linux side lives on loopback (fake root over TCP: sudo, pacman,
+        // PowOS's services). Measured on the S25: screen off -> every loopback connect timed out. Ask once to be
+        // exempt (the system dialog; One UI also needs the app's battery setting on "Unrestricted").
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+        if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:" + getPackageName())));
+            } catch (android.content.ActivityNotFoundException ignored) {
+            }
+        }
 
         // Andromarchy: this app is also the Linux side. Start the session (daemon, audio, Hyprland) if the Arch
         // rootfs is installed; this activity then connects to the daemon like the Termux version did.
