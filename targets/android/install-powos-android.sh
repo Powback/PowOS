@@ -78,4 +78,11 @@ install -m 755 "$L/native/omarchy-dns-android.sh" /usr/local/bin/omarchy-dns
 install -m 755 "$P/shims/omarchy-toggle-idle" /usr/local/bin/omarchy-toggle-idle
 install -m 755 "$P/shims/omarchy-lock-screen" /usr/local/bin/omarchy-lock-screen
 
+# Parity with the PowOS image: every command, app, autostart entry and enabled unit it offers, checked here.
+# Gaps are listed by the PowOS package they come from; the report stays in the image.
+install -Dm 644 $P/manifest/index.tsv /usr/share/powos/phone-index.tsv
+install -Dm 755 $P/phone-parity.py /usr/lib/powos/phone/phone-parity.py
+python3 /usr/lib/powos/phone/phone-parity.py /usr/share/powos/phone-index.tsv > /usr/share/powos/phone-parity.txt || true
+
 echo "powos installed: $(head -1 /usr/share/powos/phone-report.txt)"
+sed -n '2,7p' /usr/share/powos/phone-parity.txt

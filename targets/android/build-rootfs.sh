@@ -35,8 +35,8 @@ for p in "$HERE"/patches/andromarchy/*.patch; do patch -d "$W/andromarchy" -p1 <
 S=$W/powos
 rm -rf "$S" && mkdir -p "$S/pkgs"
 "$HERE/tools/fetch-manifest.sh" "$S/manifest" "${POWOS_MANIFEST:-ghcr.io/powback/powos-phone:deck}"
-cp "$KWIN_PKG" "$S/pkgs/"
-cp -a "$HERE/session" "$HERE/shims" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$S/"
+cp "$OUT"/pkgs/*.pkg.tar.* "$S/pkgs/"   # ours: kwin, fex-emu, recipes.list builds
+cp -a "$HERE/session" "$HERE/shims" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
 
 # 3. Build inside a privileged aarch64 container (chroot + mounts need it), on a Docker volume:

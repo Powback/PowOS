@@ -77,6 +77,6 @@ jobs:
           oras push "ghcr.io/powback/powos-phone:$tag" \
             --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --annotation "powos.image=$(cat image.txt)" \
-            image.txt leaves.tsv packages.tsv flatpaks.txt content.list content.tar.zst
+            image.txt leaves.tsv packages.tsv flatpaks.txt content.list index.tsv content.tar.zst
           oras tag "ghcr.io/powback/powos-phone:$tag" deck
           echo "published ghcr.io/powback/powos-phone:$tag (= :deck) from $(cat image.txt)" >> "$GITHUB_STEP_SUMMARY"

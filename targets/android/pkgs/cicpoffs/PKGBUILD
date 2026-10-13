@@ -1,0 +1,26 @@
+# Packaged from https://github.com/ublue-os/cicpoffs/blob/master/packaging/fedora/cicpoffs.spec, unchanged code.
+# Bazzite installs the cicpoffs-fc<ver>.rpm release asset that ublue-os/cicpoffs CI builds
+# from master with that spec (the FUSE3 port). The AUR cicpoffs-git is the original FUSE2
+# adlerosn/cicpoffs, i.e. different code, so it is not used.
+pkgname=cicpoffs
+pkgver=0.3
+pkgrel=1
+pkgdesc='Case-Insensitive Case-Preserving Overlay FUSE File System'
+arch=(aarch64)
+url='https://github.com/ublue-os/cicpoffs'
+license=('GPL-2.0-only')
+depends=(fuse3 attr)
+makedepends=(git gcc make pkgconf)
+source=("cicpoffs::git+https://github.com/ublue-os/cicpoffs.git#branch=master")
+sha256sums=('SKIP')
+
+build() {
+  cd cicpoffs
+  make cicpoffs
+}
+
+package() {
+  cd cicpoffs
+  install -Dm755 cicpoffs "$pkgdir/usr/bin/cicpoffs"
+  ln -s cicpoffs "$pkgdir/usr/bin/mount.cicpoffs"
+}

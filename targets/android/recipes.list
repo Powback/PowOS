@@ -10,3 +10,13 @@ nvtop                 official          nvtop
 rom-properties        aur               rom-properties-kf6 rom-properties-utils
 obs-vkcapture         aur               obs-studio-plugin-vkcapture-hook-libs
 xwaylandvideobridge   official          xwaylandvideobridge
+cardwire              aur               cardwire-gui
+hfsprogs              aur               hfsplus-tools
+hfsutils              aur               hfsutils
+krunner-bazaar        aur               krunner-bazaar
+makemkv               aur               makemkv
+ntfs-3g-system-compression aur          ntfs-3g-system-compression
+pinfo                 aur               pinfo
+vulkan-low-latency-layer aur            vulkan-low-latency-layer
+# Bazzite's own (bazzite-portal, cicpoffs, gamemode-news-hook, gmodpatchtool, krunner-yafti,
+# steam-notif-daemon) have no Arch recipe: pkgs/<name>/PKGBUILD, packaged from their Bazzite/terra spec.

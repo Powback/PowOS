@@ -1,0 +1,26 @@
+# Packaged from https://github.com/terrapkg/packages/blob/main/anda/games/gamemode-news-hook/gamemode-news-hook.spec, unchanged code.
+pkgname=gamemode-news-hook
+pkgver=1.4.0
+pkgrel=1
+pkgdesc='Replace Steam Game Mode update cards with custom announcements'
+arch=(aarch64)
+url='https://github.com/honjow/gamemode-news-hook'
+license=('MIT')
+depends=(python)
+optdepends=('python-systemd: journal logging')
+backup=(etc/gamemode-news-hook.conf)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('c063c09849aa1a5b7a04c22fde423030be133d31786cd12a34b9ae29be9b5a6b')
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 src/$pkgname "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 src/$pkgname.conf "$pkgdir/etc/$pkgname.conf"
+  install -dm755 "$pkgdir/usr/lib/$pkgname"
+  install -m644 -t "$pkgdir/usr/lib/$pkgname" src/lib/*.py
+  install -dm755 "$pkgdir/usr/lib/$pkgname/js"
+  install -m644 -t "$pkgdir/usr/lib/$pkgname/js" src/lib/js/*.js
+  install -Dm644 src/systemd/$pkgname.service "$pkgdir/usr/lib/systemd/user/$pkgname.service"
+  install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" docs/README.md docs/steam-event-api.md
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -1,0 +1,30 @@
+# Packaged from https://github.com/ublue-os/bazzite/blob/main/spec_files/krunner-yafti/krunner-yafti.spec, unchanged code.
+pkgname=krunner-yafti
+pkgver=1.0.3
+pkgrel=1
+pkgdesc='KDE KRunner plugin for Bazzite Portal Actions via Yafti'
+arch=(aarch64)
+url='https://github.com/ykshek/krunner-yafti'
+license=('Apache-2.0')
+depends=(krunner qt6-base yaml-cpp ki18n kconfig kcoreaddons)
+makedepends=(cmake extra-cmake-modules gettext)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('0562e99c87f0b0d94a1918062472351e5b6b1d50d5b46f8da4e43710dbcf6591')
+
+build() {
+  cmake -B build -S "$pkgname-$pkgver" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr
+  cmake --build build
+}
+
+check() {
+  # Same smoke test as the spec's %check: the plugin was produced.
+  find build -name krunner-yafti.so | grep -q .
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 "$pkgname-$pkgver/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "$pkgname-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

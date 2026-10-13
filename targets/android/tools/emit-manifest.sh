@@ -9,6 +9,7 @@
 #   content.tar.zst  architecture-independent files no RPM owns (PowOS's layer, Bazzite's system_files,
 #                  Containerfile drops) + files of the content-only packages the rules say to bundle
 #   content.list   the paths in content.tar.zst
+#   index.tsv      what the image offers a user (commands, apps, autostart, enabled units) and who provides it
 set -euo pipefail
 out=$1 rules=$2
 mkdir -p "$out"
@@ -47,4 +48,23 @@ sort -u /tmp/unowned | while read -r f; do
   echo "${f#/}" >> "$out/content.list"
 done
 tar -C / --no-recursion --hard-dereference -cf - -T "$out/content.list" | zstd -q -19 -o "$out/content.tar.zst"
+
+# What the image offers a user, for the phone's parity check (tools/phone-parity.py): KIND<TAB>NAME<TAB>OWNER.
+# OWNER is the RPM, or "image" for files no package owns (PowOS's layer). Units are the ENABLED ones: what
+# actually runs on a booted PowOS, system-wide and per user.
+rpm -qa --qf '[%{FILENAMES}\t%{NAME}\n]' > /tmp/owners
+unit_file() { ls "$@" 2>/dev/null | head -1; }
+{ # KIND<TAB>NAME<TAB>PATH
+  for f in /usr/bin/* /usr/sbin/*; do { [ -e "$f" ] || [ -L "$f" ]; } && printf 'bin\t%s\t%s\n' "${f##*/}" "$f"; done
+  for f in /usr/share/applications/*.desktop; do
+    grep -q '^NoDisplay=true' "$f" 2>/dev/null || printf 'app\t%s\t%s\n' "${f##*/}" "$f"
+  done
+  for f in /etc/xdg/autostart/*.desktop; do printf 'autostart\t%s\t%s\n' "${f##*/}" "$f"; done
+  systemctl list-unit-files --state=enabled --no-legend 2>/dev/null | awk '{print $1}' | while read -r u; do
+    printf 'unit\t%s\t%s\n' "$u" "$(unit_file /etc/systemd/system/"$u" /usr/lib/systemd/system/"$u")"; done
+  systemctl --global list-unit-files --state=enabled --no-legend 2>/dev/null | awk '{print $1}' | while read -r u; do
+    printf 'user-unit\t%s\t%s\n' "$u" "$(unit_file /etc/systemd/user/"$u" /usr/lib/systemd/user/"$u")"; done
+} > /tmp/surface
+awk -F'\t' 'NR == FNR {owner[$1] = $2; next} {print $1 "\t" $2 "\t" ($3 in owner ? owner[$3] : "image")}' \
+  /tmp/owners /tmp/surface | sort -u > "$out/index.tsv"
 echo "emit-manifest: $(wc -l < "$out/packages.tsv") packages, $(grep -vc '^#' "$out/flatpaks.txt") flatpak lines, $(wc -l < "$out/content.list") content files ($(du -h "$out/content.tar.zst" | cut -f1))"

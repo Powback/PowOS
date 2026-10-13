@@ -1,0 +1,24 @@
+# Packaged from https://github.com/terrapkg/packages/blob/main/anda/games/steam-notif-daemon/steam-notif-daemon.spec, unchanged code.
+pkgname=steam-notif-daemon
+pkgver=1.0.1
+pkgrel=1
+pkgdesc='Steam notification daemon'
+arch=(aarch64)
+url='https://github.com/Jovian-Experiments/steam_notif_daemon'
+license=('MIT')
+depends=(systemd-libs curl)
+makedepends=(meson gcc)
+provides=(steam_notif_daemon)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('72d2df04ec46875b84e6a766478ab77498ab6b9792f3936fa73e2a0fbc53c8f1')
+
+build() {
+  arch-meson "steam_notif_daemon-$pkgver" build -Dsd-bus-provider=libsystemd
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+  install -Dm644 "steam_notif_daemon-$pkgver/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "steam_notif_daemon-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -1,0 +1,38 @@
+# Packaged from https://github.com/terrapkg/packages/blob/main/anda/games/gmodpatchtool/gmodpatchtool.spec, unchanged code.
+# The spec git-clones the tag and runs `git-lfs checkout` before the cargo build, so this
+# uses the same git source. (AUR only has gmodpatchtool-bin, an x86_64 prebuilt.)
+pkgname=gmodpatchtool
+_gitname=GModPatchTool
+pkgver=20260722
+pkgrel=1
+pkgdesc='Automatic Patching/Updating of GMod CEF. Fixes macOS/Linux launch issues.'
+arch=(aarch64)
+url='https://solsticegamestudios.com/fixmedia'
+license=('GPL-3.0-only')
+depends=(gcc-libs glibc)
+makedepends=(git git-lfs cargo mold)
+provides=($_gitname)
+source=("$_gitname::git+https://github.com/solsticegamestudios/$_gitname.git#tag=$pkgver")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$_gitname"
+  git lfs install --local
+  git lfs pull
+  git lfs checkout
+  cargo fetch --locked
+}
+
+build() {
+  cd "$_gitname"
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+package() {
+  cd "$_gitname"
+  find target/release -maxdepth 1 -type f -executable ! -name '*.so' \
+    -exec install -Dm755 -t "$pkgdir/usr/bin" {} +
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE.txt"
+}

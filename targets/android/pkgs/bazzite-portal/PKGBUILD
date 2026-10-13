@@ -1,0 +1,22 @@
+# Packaged from https://github.com/terrapkg/packages/blob/main/anda/apps/bazzite-portal/bazzite-portal.spec, unchanged code.
+pkgname=bazzite-portal
+pkgver=0.2.5
+pkgrel=1
+pkgdesc='Bazzite Portal is a tabbed frontend for curated script execution, with a focus on distro specific QOL shortcuts'
+arch=(aarch64)
+url='https://github.com/ublue-os/yafti-gtk'
+license=('GPL-3.0-only')
+depends=(python-gobject python-yaml gtk4)
+provides=(Bazzite-Portal)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/ublue-os/yafti-gtk/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('720ea306e0adc702fdd7193942166158473a057b72d01876e405e1aad12a431d')
+
+package() {
+  cd "yafti-gtk-$pkgver"
+  install -Dm755 yafti_gtk.py "$pkgdir/usr/bin/yafti_gtk.py"
+  install -Dm644 io.github.ublue_os.yafti_gtk.desktop "$pkgdir/usr/share/applications/io.github.ublue_os.yafti_gtk.desktop"
+  install -Dm644 portal.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.ublue_os.yafti_gtk.svg"
+  install -Dm644 io.github.ublue_os.yafti_gtk.metainfo.xml "$pkgdir/usr/share/metainfo/io.github.ublue_os.yafti_gtk.metainfo.xml"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
