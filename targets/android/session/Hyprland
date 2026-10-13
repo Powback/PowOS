@@ -40,23 +40,28 @@ fi
   touch "$XDG_RUNTIME_DIR/desktop-ready"
 ) &
 
-# Output scale from the display's density: Anland reports pixels only, so KWin starts at 1x and a
-# 500+ dpi phone gets a tiny desktop and a huge cursor. The app passes the physical size
-# (ANDROMARCHY_PHYSICAL_MM, "<long>x<short>" mm); scale = dpi / 180 in quarter steps, clamped 1..4
-# (a phone is held closer than a monitor: ~3x on a 6.9" 1440p phone, 1x on an 8-10" 1280p tablet).
-# POWOS_SCALE overrides it (e.g. set in the app's environment, or exported before this script).
+# Initial output scale from the display's density, FIRST START ONLY: Anland reports pixels only, so
+# KWin starts at 1x and a 500+ dpi phone gets a tiny desktop and a huge cursor. The app passes the
+# physical size (ANDROMARCHY_PHYSICAL_MM, "<long>x<short>" mm); scale = dpi / 270 in quarter steps,
+# clamped 1..4 (2x on a 6.9" 1440p phone, 1x on an 8-10" 1280p tablet; dpi/180 = 2.75x was too big).
+# After that the user's choice in System Settings > Display & Monitor (kscreen; KWin saves it in
+# kwinoutputconfig.json) is never overridden. POWOS_SCALE forces a scale on every start instead.
 (
   for _ in $(seq 600); do pgrep -x plasmashell >/dev/null && break; sleep 0.2; done
+  done_mark=$HOME/.local/state/powos/output-scale.done
+  [ -z "${POWOS_SCALE:-}" ] && [ -e "$done_mark" ] && exit 0
   scale=${POWOS_SCALE:-}
   if [ -z "$scale" ] && [ -n "${ANDROMARCHY_PHYSICAL_MM:-}" ]; then
     mm=${ANDROMARCHY_PHYSICAL_MM%%x*}
     px=$(kscreen-doctor -j 2>/dev/null | jq -r '.outputs[0] as $o | ($o.modes[] | select(.id == $o.currentModeId) | [.size.width, .size.height] | max)' 2>/dev/null)
     if [ -n "$px" ] && [ "$px" != null ] && [ "${mm:-0}" -gt 0 ]; then
-      scale=$(awk -v px="$px" -v mm="$mm" 'BEGIN { s = int(px / (mm / 25.4) / 180 * 4 + 0.5) / 4; if (s < 1) s = 1; if (s > 4) s = 4; print s }')
+      scale=$(awk -v px="$px" -v mm="$mm" 'BEGIN { s = int(px / (mm / 25.4) / 270 * 4 + 0.5) / 4; if (s < 1) s = 1; if (s > 4) s = 4; print s }')
     fi
   fi
-  [ -n "$scale" ] && kscreen-doctor "output.1.scale.$scale" >/dev/null 2>&1 \
-    && echo "powos-session: output scale $scale (${ANDROMARCHY_PHYSICAL_MM:-?} mm)" >&2
+  if [ -n "$scale" ] && kscreen-doctor "output.1.scale.$scale" >/dev/null 2>&1; then
+    echo "powos-session: output scale $scale (${ANDROMARCHY_PHYSICAL_MM:-?} mm)" >&2
+    mkdir -p "${done_mark%/*}" && touch "$done_mark"
+  fi
 ) &
 
 # First session of this rootfs (Flatpak remote, theme defaults); idempotent, marks itself done.

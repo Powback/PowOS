@@ -13,10 +13,11 @@ C=/etc/pacman.conf
 
 # ── KDE Plasma ────────────────────────────────────────────────────────────────────────────────────────
 # A deliberately small Plasma: the shell, KDE's core apps and the portals. No plasma-nm/powerdevil/
-# bluedevil/kscreen: Android owns network, power, Bluetooth and displays (the engine's android-nm and
-# android-upower stand-ins answer the D-Bus calls Plasma makes).
+# bluedevil: Android owns network, power and Bluetooth (the engine's android-nm and android-upower
+# stand-ins answer the D-Bus calls Plasma makes). kscreen IS included: Android owns the display mode,
+# but the scale is the user's, set in System Settings > Display & Monitor.
 pacman -S --noconfirm --needed \
-  plasma-desktop plasma-workspace kdeplasma-addons breeze breeze-gtk kde-gtk-config systemsettings \
+  plasma-desktop plasma-workspace kdeplasma-addons breeze breeze-gtk kde-gtk-config systemsettings kscreen \
   xdg-desktop-portal-kde konsole dolphin kate ark spectacle gwenview okular \
   noto-fonts noto-fonts-emoji ttf-hack \
   tmux jq curl unzip uv python
