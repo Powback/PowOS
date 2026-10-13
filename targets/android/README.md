@@ -38,6 +38,29 @@ On the phone, `/etc/powos/platform` reads `phone` (and the session exports `POWO
 PowOS can tell where it runs. Commands that need a booted machine (bootc, rollback, ramboot, drivers,
 distrobox/podman) can't work inside an app on any distro.
 
+## Windows games (Proton)
+
+**Status: lab-verified, not yet run on the phone** (2026-10-13; details, numbers and the open walls in
+[docs/windows-games.md](docs/windows-games.md)). `powos-play` runs a Windows program through Proton **without
+Steam's container runtime** (pressure-vessel needs user namespaces, which Android denies to apps):
+
+```bash
+powos-play --install-proton          # GE-Proton's aarch64 build (~600 MB download, ~2.1 GB), once
+powos-play ~/Games/Foo/Foo.exe       # x86_64/i686 .exe: ARM64 Wine + FEX ARM64EC/WoW64, DXVK -> Turnip
+powos-play --hud --log Foo.exe       # DXVK HUD + MangoHud CSV + Proton log in ~/.local/state/powos/play
+powos-play --wayland Foo.exe         # Wine's Wayland driver (the zero-copy route) instead of Xwayland
+powos-play --proton x86_64 Foo.exe   # fallback: x86_64 Proton with all of Wine under box64 (no 32-bit DXVK)
+powos-play --register-steam          # Steam compatibility tool "PowOS-GE-Proton...": Proton without the runtime
+```
+
+Default is GE-Proton's **aarch64** build: Wine, DXVK and the Windows DLLs are native ARM64; only the game's own
+x86 code is emulated, by FEX inside Wine. In the lab it passes D3D9/D3D11 tests for x86_64, i686 and arm64
+programs and is ~15% faster than all-box64 Proton, starting in half the time; under box64, 32-bit programs get
+no Vulkan (BOX32 cannot load libvulkan), so no DXVK. Phone test: [tools/device-test.sh](tools/device-test.sh)
+(adb; probe, GPU/zero-copy checks, the tests above, benchmarks, Steam, any .exe). Lab:
+[tools/lab/phone-sim.sh](tools/lab/phone-sim.sh) runs the rootfs exactly as the app does (lotfix-run, fakechroot,
+no namespaces, app uid) in a container, lavapipe instead of the GPU.
+
 ## Requirements
 
 - Android 11+ with a Qualcomm **Adreno** GPU (Snapdragon). Target device: OnePlus Open (Adreno 740).
@@ -52,7 +75,9 @@ targets/android/build-rootfs.sh       # rootfs -> out/powos-rootfs.tar.gz       
 ```
 
 Both run in containers capped at 8 CPUs / 16 GB, because the Colima VM also serves the live PowStation
-services. The rootfs is assembled on a Docker volume, not a macOS folder (Linux ownership, devices, links).
+services. The rootfs is assembled on a Docker volume, not a macOS folder (Linux ownership, devices, links); when
+the shared Docker disk has under 25 GB free (or with `POWOS_SCRATCH=image`), in a sparse ext4 image under
+`out/work/` on the Mac's disk instead, loop-mounted in the build container.
 
 ## Install on a phone (test path)
 
@@ -78,6 +103,9 @@ Every workaround is marked `HACK:` at the spot in the code. Summary:
 | `omarchy-lock-screen` does nothing | KDE's locker needs a PAM password the app user doesn't have (would lock you out); Android's lock screen protects the phone | Hand-off to Android's keyguard via the two-way bridge |
 | Our KWin is `pkgname=kwin`, `pkgrel=3.1`, held with `IgnorePkg` | Satisfies every Plasma package's `depends=(kwin)` and keeps Arch's (which can't draw on Android) out | Anland backend upstream in KWin |
 | `DisableSandbox` in pacman.conf of build containers | pacman 7's Landlock sandbox isn't permitted in Docker (Andromarchy's rootfs does the same on-device) | A container runtime that allows Landlock |
+| `powos-play` runs Proton without the Steam Linux Runtime; `--register-steam` writes a compat tool whose manifest drops `require_tool_appid` ([play/powos-play](play/powos-play)) | pressure-vessel needs bubblewrap and user namespaces; Android gives an app neither | none on Android: the rootfs itself is the runtime |
+| `powos-play` sets `PROTON_NO_FSYNC=1` unless `POWOS_PLAY_FSYNC=1` | fsync's `futex_waitv` may be killed by Android's app seccomp filter; esync (eventfd) is safe | drop it once `powos-probe` shows `futex_waitv` allowed on the device |
+| `powos-devtest-agent` in the session ([session/powos-devtest-agent](session/powos-devtest-agent)): runs scripts sent over `adb forward localabstract:powos-devtest`, only for peers with uid 2000/0 | the stock app has no command entry point and isn't debuggable (no `run-as`), so adb can't reach into the rootfs | the PowOS app's own adb-reachable command service |
 | `setcap ... \|\| true` in the kwin PKGBUILD | The build container's filesystem may lack xattrs; the capability is irrelevant on Android | Build where xattrs work |
 
 ## Verified on device (S25 Ultra)
@@ -92,7 +120,9 @@ Every workaround is marked `HACK:` at the spot in the code. Summary:
 ## Not done yet
 
 - **Audio** through KWin's Anland audio path: not checked yet.
-- **Steam/Proton/FEX** and ARM gaps (`provide`/MISSING in the phone report): later, by the user.
+- **Proton on the device** (powos-play, lab-verified) and **Steam** (box64; its web helper without the runtime
+  container): `tools/device-test.sh test --steam` once the phone is reachable over adb.
+- ARM gaps (`provide`/MISSING in the phone report): later, by the user.
 - **powos CLI gating** on `/etc/powos/platform` (commands that can't work on a phone should say so).
 - **PowOS-branded app** (`com.powos.app`) with its own download URL, removing the path hacks above.
 - **Two-way Android bridge**: calendar, contacts, notifications to `powos android ...` and a local
