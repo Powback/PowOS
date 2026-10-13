@@ -38,11 +38,12 @@ On the phone, `/etc/powos/platform` reads `phone` (and the session exports `POWO
 PowOS can tell where it runs. Commands that need a booted machine (bootc, rollback, ramboot, drivers,
 distrobox/podman) can't work inside an app on any distro.
 
-## Windows games (Proton)
+## Windows games (Proton) and Steam
 
-**Status: lab-verified, not yet run on the phone** (2026-10-13; details, numbers and the open walls in
-[docs/windows-games.md](docs/windows-games.md)). `powos-play` runs a Windows program through Proton **without
-Steam's container runtime** (pressure-vessel needs user namespaces, which Android denies to apps):
+**Status: verified in the lab and in phone-sim (the rootfs run exactly as the app runs it), not yet on the phone**
+(2026-10-13; numbers, the walls found and the zero-copy analysis in [docs/windows-games.md](docs/windows-games.md)).
+`powos-play` runs a Windows program through Proton **without Steam's container runtime** (pressure-vessel needs
+user namespaces, which Android denies to apps); `powos-steam` runs **Valve's native ARM64 Steam client**:
 
 ```bash
 powos-play --install-proton          # GE-Proton's aarch64 build (~600 MB download, ~2.1 GB), once
@@ -50,16 +51,26 @@ powos-play ~/Games/Foo/Foo.exe       # x86_64/i686 .exe: ARM64 Wine + FEX ARM64E
 powos-play --hud --log Foo.exe       # DXVK HUD + MangoHud CSV + Proton log in ~/.local/state/powos/play
 powos-play --wayland Foo.exe         # Wine's Wayland driver (the zero-copy route) instead of Xwayland
 powos-play --proton x86_64 Foo.exe   # fallback: x86_64 Proton with all of Wine under box64 (no 32-bit DXVK)
-powos-play --register-steam          # Steam compatibility tool "PowOS-GE-Proton...": Proton without the runtime
+powos-steam                          # Steam (ARM64 client; first run ~110 MB + its own ~650 MB update)
+powos-play --register-steam          # Proton for Steam games: compat tool "PowOS-GE-Proton..." without the runtime
 ```
 
 Default is GE-Proton's **aarch64** build: Wine, DXVK and the Windows DLLs are native ARM64; only the game's own
-x86 code is emulated, by FEX inside Wine. In the lab it passes D3D9/D3D11 tests for x86_64, i686 and arm64
-programs and is ~15% faster than all-box64 Proton, starting in half the time; under box64, 32-bit programs get
-no Vulkan (BOX32 cannot load libvulkan), so no DXVK. Phone test: [tools/device-test.sh](tools/device-test.sh)
-(adb; probe, GPU/zero-copy checks, the tests above, benchmarks, Steam, any .exe). Lab:
-[tools/lab/phone-sim.sh](tools/lab/phone-sim.sh) runs the rootfs exactly as the app does (lotfix-run, fakechroot,
-no namespaces, app uid) in a container, lavapipe instead of the GPU.
+x86 code is emulated, by FEX inside Wine. D3D9/D3D11 tests pass for x86_64, i686 and arm64 programs in both places;
+~15% faster than all-box64 Proton in the lab, half the start time; under box64, 32-bit programs get no Vulkan
+(BOX32 cannot load libvulkan), so no DXVK. Steam's client starts and connects in phone-sim; its web helper (the UI)
+is still open there. Phone test: [tools/device-test.sh](tools/device-test.sh) (adb: probe, GPU/zero-copy checks,
+the render tests, benchmarks, `--steam`, any `--exe`). Lab: [tools/lab/phone-sim.sh](tools/lab/phone-sim.sh).
+
+### On the phone (once adb is reachable)
+
+```bash
+targets/android/tools/device-test.sh pair <host:port> <code>   # Wireless debugging > Pair with pairing code
+targets/android/tools/device-test.sh connect <host:port>
+targets/android/tools/device-test.sh push-rootfs               # then the app's first-launch form on the phone
+targets/android/tools/device-test.sh wait-session
+targets/android/tools/device-test.sh test --steam [--box64] [--exe <url>]
+```
 
 ## Requirements
 
@@ -104,6 +115,12 @@ Every workaround is marked `HACK:` at the spot in the code. Summary:
 | Our KWin is `pkgname=kwin`, `pkgrel=3.1`, held with `IgnorePkg` | Satisfies every Plasma package's `depends=(kwin)` and keeps Arch's (which can't draw on Android) out | Anland backend upstream in KWin |
 | `DisableSandbox` in pacman.conf of build containers | pacman 7's Landlock sandbox isn't permitted in Docker (Andromarchy's rootfs does the same on-device) | A container runtime that allows Landlock |
 | `powos-play` runs Proton without the Steam Linux Runtime; `--register-steam` writes a compat tool whose manifest drops `require_tool_appid` ([play/powos-play](play/powos-play)) | pressure-vessel needs bubblewrap and user namespaces; Android gives an app neither | none on Android: the rootfs itself is the runtime |
+| `powos-play` renames Proton's `wine-preloader` to `*.powos-disabled` | the static preloader opens Wine's loader with raw syscalls, outside fakechroot ("could not open"), for every Wine process | a preloader that resolves paths like fakechroot (or a real chroot) |
+| box64 built with `box64-real-dl-functions.patch` ([recipes/box64.sh](recipes/box64.sh)) | box64's exported dlopen/dlsym hooks recursed through fakechroot (segfault before main) and bypassed fakechroot's dlopen (Vulkan ICD not found) | upstream box64 |
+| `powos-steam`/`powos-play` add `$FAKECHROOT_BASE`-prefixed `LD_LIBRARY_PATH` entries | the dynamic loader is not fakechroot-aware: rootfs paths in LD_LIBRARY_PATH are ignored | fakechroot translating LD_LIBRARY_PATH on exec |
+| Andromarchy patch 0004: SysV + named semaphores emulated in files, `get_robust_list(0)` answered in userspace, `nsroot.so` first in every `dlmopen` namespace | Android kills SysV IPC; glibc's sem_open needs /dev/shm; `set_robust_list` is neutralized; preloads don't reach dlmopen namespaces - all hit by Steam | upstream Andromarchy (or kernel-level fixes that aren't available to an app) |
+| Session start removes `/tmp/.sysv` and `/tmp/.shm/sem.*` ([session/Hyprland](session/Hyprland)) | emulated semaphores outlive their processes (the kernel would drop them on reboot) | same as above |
+| `gtk2` built from AUR (recipes.list) | Valve's ARM64 `steamui.so` links GTK 2, which Arch dropped | Steam without GTK 2 |
 | `powos-play` sets `PROTON_NO_FSYNC=1` unless `POWOS_PLAY_FSYNC=1` | fsync's `futex_waitv` may be killed by Android's app seccomp filter; esync (eventfd) is safe | drop it once `powos-probe` shows `futex_waitv` allowed on the device |
 | `powos-devtest-agent` in the session ([session/powos-devtest-agent](session/powos-devtest-agent)): runs scripts sent over `adb forward localabstract:powos-devtest`, only for peers with uid 2000/0 | the stock app has no command entry point and isn't debuggable (no `run-as`), so adb can't reach into the rootfs | the PowOS app's own adb-reachable command service |
 | `setcap ... \|\| true` in the kwin PKGBUILD | The build container's filesystem may lack xattrs; the capability is irrelevant on Android | Build where xattrs work |
@@ -120,8 +137,8 @@ Every workaround is marked `HACK:` at the spot in the code. Summary:
 ## Not done yet
 
 - **Audio** through KWin's Anland audio path: not checked yet.
-- **Proton on the device** (powos-play, lab-verified) and **Steam** (box64; its web helper without the runtime
-  container): `tools/device-test.sh test --steam` once the phone is reachable over adb.
+- **Proton and Steam on the device** (verified in phone-sim; Steam's web helper still open):
+  `tools/device-test.sh test --steam` once the phone is reachable over adb.
 - ARM gaps (`provide`/MISSING in the phone report): later, by the user.
 - **powos CLI gating** on `/etc/powos/platform` (commands that can't work on a phone should say so).
 - **PowOS-branded app** (`com.powos.app`) with its own download URL, removing the path hacks above.

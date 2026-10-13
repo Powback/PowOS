@@ -15,7 +15,7 @@
 # (2) GPU/WSI: vulkaninfo, linux-dmabuf in KWin, DRI3 in Xwayland, vkcube's buffer path (dmabuf vs wl_shm) and fps
 # on Wayland / X11 / forced CPU copy; (3) powos-play + GE-Proton aarch64: d3d9/d3d11 test programs (x86_64, i686,
 # arm64) with DXVK HUD + MangoHud logs, X11 and Wayland; (4) cpubench across the x86 paths (bench.sh);
-# (5) --steam: Steam's bootstrap under box64 with the no-runtime workarounds, logs + screenshot;
+# (5) --steam: Valve's native ARM64 Steam client (powos-steam) with the runtime fixes, logs + screenshot;
 # (6) --exe: a Windows program of your choice through powos-play (zip/exe URL or a path on the phone).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -192,18 +192,22 @@ EOF
     } | agent | tee "$R/bench.txt" || true
 
     if [ $steam = 1 ]; then
-      echo "== 5. Steam under box64 (no Steam Linux Runtime)"
+      echo "== 5. Steam: Valve's native ARM64 client (powos-steam), no Steam Runtime container"
       agent > "$R/steam.txt" 2>&1 <<'EOF' || true
 set -x
 powos-play --register-steam
-# Steam's bootstrapper is 32-bit x86: the engine's exec hook hands it to box64 (BOX32). The client's web helper
-# normally runs inside the Steam Runtime container (pressure-vessel -> bwrap): no namespaces here, so no CEF sandbox
-# and no container. Bootstrap download is ~300 MB.
-export STEAM_RUNTIME=1 STEAMOS=1 BOX64_LOG=1 STEAM_DISABLE_ZINK=1
-(timeout 900 steam -no-cef-sandbox -noverifyfiles > /tmp/steam-console.log 2>&1 &)
-for i in $(seq 90); do sleep 10; pgrep -fa 'steamwebhelper|ubuntu12_32/steam' | head -3; tail -1 /tmp/steam-console.log; done
-tail -100 /tmp/steam-console.log
-ls ~/.local/share/Steam/logs/ 2>&1; tail -30 ~/.local/share/Steam/logs/bootstrap_log.txt ~/.local/share/Steam/logs/webhelper.txt 2>&1
+# First run: ~110 MB bootstrap, then Steam's own ~650 MB update (exit 42 = restart, handled by powos-steam).
+(timeout 1200 powos-steam > /tmp/steam-console.log 2>&1 &)
+for i in $(seq 100); do
+  sleep 10
+  pgrep -fa 'steamrtarm64/steamwebhelper' >/dev/null && echo "t=${i}0s webhelper running"
+  grep -q 'Connectivity test: result=Connected' ~/.local/share/Steam/logs/connection_log.txt 2>/dev/null && echo "t=${i}0s client connected"
+  [ $i -ge 30 ] && pgrep -fa 'steamrtarm64/steamwebhelper' >/dev/null && break
+done
+grep -a -E 'Assertion|Fatal|corrupt|semaphore|Segmentation|undefined symbol' /tmp/steam-console.log | sort | uniq -c | head -20
+L=~/.local/share/Steam/logs
+tail -30 $L/webhelper.txt $L/cef_log.txt $L/connection_log.txt 2>&1 | cut -c1-240
+ls /tmp/.sysv /tmp/.shm 2>&1 | head
 EOF
       adb exec-out screencap -p > "$R/steam-screen.png" || true
       tail -40 "$R/steam.txt"

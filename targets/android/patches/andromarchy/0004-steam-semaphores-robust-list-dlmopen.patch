@@ -71,7 +71,7 @@ diff -ruN a/native/android-compat.c b/native/android-compat.c
          sigaction(sigs[i], &sa, NULL);
 +}
 +
-+// 12. For Valve's Steam client (PowOS, patch 0004; found with PowOS's tools/lab/phone-sim.sh):
++// 12. HACK: for Valve's Steam client (PowOS, patch 0004; found with PowOS's tools/lab/phone-sim.sh):
 +//  a) SysV semaphores (semget/semop/semctl), emulated in shared files: Android's seccomp kills the real ones
 +//     (answered ENOSYS above until now), and Steam's tier0 asserted "Function not implemented" and stalled.
 +//  b) POSIX named semaphores (sem_open): glibc keeps them in /dev/shm and opens it internally (no /dev/shm on
