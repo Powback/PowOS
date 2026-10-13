@@ -50,6 +50,9 @@ done >> /tmp/unowned
 sort -u /tmp/unowned | while read -r f; do
   [ -L "$f" ] || [ -f "$f" ] || continue
   if [ -f "$f" ] && [ ! -L "$f" ] && [ "$(head -c 4 "$f" 2>/dev/null | od -An -c | tr -d ' ')" = '177ELF' ]; then continue; fi
+  # Shared-library names (files or symlinks) are architecture-specific too: Fedora's unowned libgcc_s.so.1
+  # symlink replaced Arch's real library on the S25 and broke every program needing it.
+  case ${f##*/} in lib*.so | lib*.so.*) continue ;; esac
   echo "${f#/}" >> "$out/content.list"
 done
 tar -C / --no-recursion --hard-dereference -cf - -T "$out/content.list" | zstd -q -19 -o "$out/content.tar.zst"

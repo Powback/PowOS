@@ -60,7 +60,20 @@ printf '{"Config":{"RootFS":"%s"}}\n' "${fexroot%/}" > /usr/share/fex-emu/Config
 # ── PowOS's files: everything in the image no package owns (PowOS layer, Bazzite's system_files, Deck
 # presets...), architecture-independent only. Unpacked after the packages, as the image's layers sit on top
 # of its packages.
-zstd -dc $P/manifest/content.tar.zst | tar -x -C / --no-same-owner
+# Never over an Arch package's own file (outside /etc, where PowOS's configs are meant to win): the image's
+# unowned files can carry Fedora-specific copies of things Arch packages provide (a libgcc_s.so.1 symlink did).
+python3 - "$P/manifest/content.list" > /tmp/powos-content-skip <<'PY'
+import glob, sys
+owned = set()
+for f in glob.glob('/var/lib/pacman/local/*/files'):
+    owned.update(l.strip() for l in open(f) if l.strip() and not l.startswith('%') and not l.endswith('/\n'))
+for l in open(sys.argv[1]):
+    l = l.strip()
+    if l in owned and not l.startswith('etc/'):
+        print(l)
+PY
+echo "powos: $(wc -l < /tmp/powos-content-skip) content files left to the Arch packages that own them"
+zstd -dc $P/manifest/content.tar.zst | tar -x -C / --no-same-owner --exclude-from=/tmp/powos-content-skip
 cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
 
 # ── Phone-specific ──────────────────────────────────────────────────────────────────────────────────────
