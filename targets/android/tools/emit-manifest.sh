@@ -16,7 +16,7 @@ mkdir -p "$out"
 rpm -qa --qf '%{NAME}\t%{ARCH}\n' | sort -u > "$out/packages.tsv"
 # Top level: packages nothing else installed requires. These are what the phone maps (Arch pulls in
 # their dependencies itself); packages.tsv stays for reference and for "bundle" lookups.
-dnf5 repoquery --installed --leaves --qf '%{name}\t%{arch}\n' 2>/dev/null | sort -u > "$out/leaves.tsv" \
+dnf5 repoquery --installed --leaves --qf '%{name}|%{arch}\n' 2>/dev/null | tr '|' '\t' | sort -u > "$out/leaves.tsv" \
   || cp "$out/packages.tsv" "$out/leaves.tsv"
 
 : > "$out/flatpaks.txt"
