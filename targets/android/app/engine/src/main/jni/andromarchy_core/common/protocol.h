@@ -74,6 +74,7 @@ struct buf_info {
 
 #define OUTPUT_TYPE_CLIPBOARD 1
 #define OUTPUT_TYPE_RESOURCES_REQUEST 2
+#define OUTPUT_TYPE_KEYBOARD 3 /* PowOS: show/hide the Android keyboard (keyboard.visible) */
 
 
 
@@ -138,6 +139,10 @@ struct OutputEvent{
             uint32_t type;
             uint32_t args[3]; //support 3 args
         } resources_request;
+        /* PowOS: OUTPUT_TYPE_KEYBOARD - a text field gained (1) or lost (0) focus in the compositor */
+        struct {
+            uint32_t visible;
+        } keyboard;
         struct
         {
             uint32_t padding[4];

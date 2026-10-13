@@ -1239,6 +1239,12 @@ public class MainActivity extends Activity
         return true;
     }
 
+    // PowOS: a text field gained/lost focus in the compositor (Clipboard.nativeSetKeyboardVisible, UI thread).
+    void setSystemKeyboardVisible(boolean visible) {
+        if (systemIme != null)
+            systemIme.setSystemKeyboardVisible(visible);
+    }
+
     // ---- SystemIME.Host ----
 
     @Override

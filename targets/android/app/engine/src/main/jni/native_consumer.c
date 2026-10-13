@@ -217,6 +217,10 @@ static void *event_thread_func(void *arg)
         (*g_jvm)->DetachCurrentThread(g_jvm);
         return NULL;
     }
+    /* PowOS: the Android keyboard follows text-field focus in the compositor (OUTPUT_TYPE_KEYBOARD). */
+    jmethodID setKeyboardMethod = (*env)->GetMethodID(env, ctxClass, "nativeSetKeyboardVisible", "(Z)V");
+    if (!setKeyboardMethod)
+        (*env)->ExceptionClear(env);
 
     while (s->event_running) {
         if (!s->ctx) {
@@ -248,6 +252,9 @@ static void *event_thread_func(void *arg)
                 }
             }
             free(buf);
+        } else if (ev.type == OUTPUT_TYPE_KEYBOARD) {
+            if (setKeyboardMethod)
+                (*env)->CallVoidMethod(env, g_activity_obj, setKeyboardMethod, (jboolean)(ev.keyboard.visible != 0));
         } else {
             /* Unknown or zero-length event: drain any trailing data if size > 0 */
             LOGI("event thread: unknown output event type=%u size=%u", ev.type, ev.clipboard.size);

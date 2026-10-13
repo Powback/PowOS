@@ -420,6 +420,14 @@ public final class SystemIME {
             retryShow(requestId, attempt);
     }
 
+    // PowOS: the compositor asks for the keyboard when a text field gains focus (Wayland text-input) and to
+    // hide it when focus leaves one: Android's own keyboard stands in for an on-screen keyboard. A user who
+    // dismissed or summoned it by hand keeps that until the next focus change.
+    void setSystemKeyboardVisible(boolean visible) {
+        if (visible != isImeVisible())
+            toggleSystemKeyboard();
+    }
+
     // Toggle the system IME (soft keyboard). Driven by the ⌨ bar key tap and the
     // user-bound hardware keycode.
     void toggleSystemKeyboard() {

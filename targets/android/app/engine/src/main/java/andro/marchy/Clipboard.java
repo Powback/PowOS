@@ -37,6 +37,16 @@ public final class Clipboard {
         }
     }
 
+    // PowOS: called from the native event thread when a text field gains or loses focus in the compositor
+    // (OUTPUT_TYPE_KEYBOARD): Android's keyboard follows. (Hosted here because this object is the callback target
+    // the native side resolves methods on.)
+    public void nativeSetKeyboardVisible(boolean visible) {
+        if (context instanceof MainActivity) {
+            MainActivity a = (MainActivity) context;
+            a.runOnUiThread(() -> a.setSystemKeyboardVisible(visible));
+        }
+    }
+
     // Called from native C on exit_fallback to send initial clipboard sync.
     public void nativeClipboardSync() {
         ClipboardManager cm = context.getSystemService(ClipboardManager.class);

@@ -1,0 +1,102 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: the Android keyboard follows text-field focus
+
+Text-input v2/v3 enabled on the focused surface -> OUTPUT_TYPE_KEYBOARD to the consumer, which shows or
+hides the Android soft keyboard (typed text already comes back as INPUT_TYPE_TEXT_INPUT).
+---
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+--- a/src/backends/anland/anland_backend.cpp	2026-10-13 07:55:56
++++ b/src/backends/anland/anland_backend.cpp	2026-10-13 07:55:56
+@@ -23,6 +23,9 @@
+ #include "wayland/abstract_data_source.h"
+ #include "wayland/display.h"
+ #include "wayland/seat.h"
++#include "wayland/surface.h"
++#include "wayland/textinput_v2.h"
++#include "wayland/textinput_v3.h"
+ #include "wayland_server.h"
+ 
+ #include <QFutureWatcher>
+@@ -201,6 +204,11 @@
+         connect(seat, &SeatInterface::selectionChanged, this, [this](AbstractDataSource *) {
+             onClipboardChanged();
+         });
++        // PowOS: a text field gaining or losing focus shows or hides the Android keyboard. The same test
++        // KWin's InputMethod::refreshActive() makes, without needing an input-method client bound.
++        connect(seat, &SeatInterface::focusedTextInputSurfaceChanged, this, &AnlandBackend::updateConsumerKeyboard);
++        connect(seat->textInputV2(), &TextInputV2Interface::enabledChanged, this, &AnlandBackend::updateConsumerKeyboard);
++        connect(seat->textInputV3(), &TextInputV3Interface::enabledChanged, this, &AnlandBackend::updateConsumerKeyboard);
+     }
+ 
+     return true;
+@@ -611,6 +619,28 @@
+     source->requestData(mimeType, std::move(pipe->writeEndpoint));
+     waylandServer()->display()->flush();
+     return std::move(pipe->readEndpoint);
++}
++
++void AnlandBackend::updateConsumerKeyboard()
++{
++    SeatInterface *seat = waylandServer()->seat();
++    bool want = false;
++    if (SurfaceInterface *surface = seat->focusedTextInputSurface()) {
++        ClientConnection *client = surface->client();
++        auto t2 = seat->textInputV2();
++        auto t3 = seat->textInputV3();
++        want = (t2->clientSupportsTextInput(client) && t2->isEnabled())
++            || (t3->clientSupportsTextInput(client) && t3->isEnabled());
++    }
++    if (want == m_keyboardRequested)
++        return;
++    m_keyboardRequested = want;
++    if (m_inFallback)
++        return;
++    OutputEvent ev = {};
++    ev.type = OUTPUT_TYPE_KEYBOARD;
++    ev.keyboard.visible = want ? 1 : 0;
++    push_output_event(m_display, &ev);
+ }
+ 
+ /*
+diff --git a/src/backends/anland/anland_backend.h b/src/backends/anland/anland_backend.h
+--- a/src/backends/anland/anland_backend.h	2026-10-13 07:55:56
++++ b/src/backends/anland/anland_backend.h	2026-10-13 07:55:56
+@@ -101,6 +101,8 @@
+ 
+     // Clipboard sync — bidirectional bridge between KWin selection / consumer
+     void onClipboardChanged();
++    // PowOS: Android's keyboard follows text-field focus (text-input v2/v3 enabled on the focused surface)
++    void updateConsumerKeyboard();
+     void sendClipboardToConsumer(const QByteArray &text);
+     void sendClipboardToKWin(const QByteArray &text);
+ 
+@@ -128,6 +130,7 @@
+     // consumer sets the same text on Android -> consumer sends back to KWin).
+     // QByteArray is trivially sent over the data channel as UTF-8.
+     QByteArray m_clipboardText;
++    bool m_keyboardRequested = false;
+ };
+ 
+ } // namespace KWin
+diff --git a/src/backends/anland/protocol.h b/src/backends/anland/protocol.h
+--- a/src/backends/anland/protocol.h	2026-10-13 07:55:56
++++ b/src/backends/anland/protocol.h	2026-10-13 07:55:56
+@@ -135,6 +135,10 @@
+             uint32_t type;
+             uint32_t args[3]; //support 3 args
+         } resources_request;
++        /* PowOS: OUTPUT_TYPE_KEYBOARD - a text field gained (1) or lost (0) focus */
++        struct {
++            uint32_t visible;
++        } keyboard;
+         struct
+         {
+             uint32_t padding[4];
+@@ -145,6 +149,7 @@
+ 
+ #define OUTPUT_TYPE_CLIPBOARD 1
+ #define OUTPUT_TYPE_RESOURCES_REQUEST 2
++#define OUTPUT_TYPE_KEYBOARD 3 /* PowOS: show/hide the Android keyboard (keyboard.visible) */
+ 
+ /*
+  * Audio runs on its own dedicated bidirectional socketpair (hello fd slot 4),
