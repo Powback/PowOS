@@ -75,6 +75,16 @@ if [ -r "$phone" ]; then
   done
 fi
 
+# PowOS's services: the image's enabled units, from their own unit files, under Andromarchy's systemctl
+# (docker-systemctl-replacement: reads the real .service files, Restart=, enabled targets). Andromarchy started
+# user units from Omarchy's Hyprland autostart, which PowOS doesn't have; here it is the session's job.
+# System units (multi-user.target) and user units (default.target); units whose Condition*= fail on a phone
+# skip themselves, as on any machine. Guarded: one manager per scope.
+pgrep -f 'pytho[n].*systemctl init' >/dev/null ||
+  SYSTEMD_DEFAULT_TARGET=multi-user.target systemctl init >"$XDG_RUNTIME_DIR/powos-system-units.log" 2>&1 &
+pgrep -f 'pytho[n].*systemctl --user init' >/dev/null ||
+  systemctl --user init >"$XDG_RUNTIME_DIR/powos-user-units.log" 2>&1 &
+
 # First session of this rootfs (Flatpak remote, theme defaults); idempotent, marks itself done.
 /opt/powos/first-session.sh >"$XDG_RUNTIME_DIR/powos-first-session.log" 2>&1 &
 

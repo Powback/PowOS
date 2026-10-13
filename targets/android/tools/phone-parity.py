@@ -25,9 +25,25 @@ if os.path.exists(report_path):
         if len(parts) >= 2 and not line.startswith("#"):
             mapping[parts[1].split("\\t")[0].split("\t")[0]] = (parts[0], parts[2].strip() if len(parts) > 2 else "")
 
-# Enabled units only do anything under a service manager. The Android rootfs has no systemd (no PID 1, no
-# cgroups): a present unit file is reported as not running until the phone runs units.
-service_manager = os.path.exists(os.path.join(root, "run/systemd/system"))
+# Enabled units only do anything when something runs them. On the phone that is Andromarchy's systemctl
+# (docker-systemctl-replacement), started by the session; ask it which units are active. Elsewhere (--root on a
+# host) only presence is checked.
+import subprocess
+
+def active_units(user):
+    if root != "/":
+        return None
+    names = [l.split("\t")[1] for l in open(index_path) if l.startswith("user-unit\t" if user else "unit\t")]
+    if not names:
+        return set()
+    cmd = ["systemctl"] + (["--user"] if user else []) + ["is-active"] + names
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=120).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    return {n for n, state in zip(names, out) if state == "active"}
+
+active = {"unit": active_units(False), "user-unit": active_units(True)}
 
 
 def present(kind, name):
@@ -54,8 +70,9 @@ for line in open(index_path):
     t[1] += 1
     ok = present(kind, name)
     why = "missing"
-    if ok and kind in ("unit", "user-unit") and not service_manager:
-        ok, why = False, "file present, not running: no service manager on the phone"
+    if ok and kind in ("unit", "user-unit") and active[kind] is not None and name not in active[kind] \
+            and not name.endswith((".target", ".path", ".socket")):
+        ok, why = False, "unit file present, not active"
     if ok:
         t[0] += 1
     else:
