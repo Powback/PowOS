@@ -8,6 +8,8 @@
 #   where AGP adds what it needs itself (platform 37, NDK 28.2, CMake). The NDK/CMake host tools are x86_64
 #   Linux only; on this arm64 Colima VM they run through Rosetta's binfmt.
 # - Gradle's caches live in the persistent volume powos-android-gradle (separate from android-app-dev's own).
+# - The debug signing key lives in powos-android-keys (/root/.android): one key across builds, so an update
+#   installs over the previous APK instead of failing with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
 # - The sources are copied into the container first: building on the macOS bind mount hits VirtioFS
 #   ENOMEM (see android-app-dev's notes), and keeps build dirs out of the repo.
 set -euo pipefail
@@ -23,7 +25,7 @@ free_gb=$(docker run --rm --entrypoint df "$IMAGE" -BG --output=avail /etc/hostn
 
 task=assemble$(tr '[:lower:]' '[:upper:]' <<< "${VARIANT:0:1}")${VARIANT:1}
 docker run --rm --cpus 8 --memory 12g --entrypoint /bin/bash \
-  -v powos-android-sdk:/sdk -v powos-android-gradle:/root/.gradle \
+  -v powos-android-sdk:/sdk -v powos-android-gradle:/root/.gradle -v powos-android-keys:/root/.android \
   -v "$HERE/app:/src:ro" -v "$OUT:/out" -e TASK="$task" -e VARIANT="$VARIANT" "$IMAGE" -c '
     set -euo pipefail
     [ -d /sdk/platforms ] || cp -a /opt/android-sdk/. /sdk/
