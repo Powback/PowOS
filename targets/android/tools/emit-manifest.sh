@@ -27,7 +27,12 @@ done
 
 # Files no package owns, in the places PowOS/Bazzite put content; generated caches and machine state left out.
 rpm -qa --qf '[%{FILENAMES}\n]' | sort -u > /tmp/owned
-find /etc /usr/share /usr/lib/powos /usr/bin /usr/libexec \( -type f -o -type l \) 2>/dev/null | sort -u > /tmp/all
+# Everywhere the image keeps files: PowOS's and Bazzite's own live all over /usr/lib too (systemd units, udev
+# rules, tmpfiles/sysusers, environment.d...), not only in /usr/lib/powos. /usr/lib64 is x86 libraries.
+find /etc /usr/share /usr/lib /usr/bin /usr/sbin /usr/libexec /usr/local /opt \( -type f -o -type l \) 2>/dev/null \
+  | grep -vE '^/usr/lib/(modules|firmware|sysimage|ostree-boot|debug|locale/locale-archive|fontconfig/cache)(/|$)' \
+  | sort -u > /tmp/all
+# ^ generated or machine state: kernel modules + initramfs, firmware, the RPM database, boot files, caches.
 comm -23 /tmp/all /tmp/owned \
   | grep -vE '^/etc/(machine-id|hostname|shadow|gshadow|passwd|group|subuid|subgid|ld\.so\.cache|pki|selinux|ssh/ssh_host_|fstab|resolv\.conf|yum\.repos\.d|dnf|rpm|ostree|containers/storage)' \
   | grep -vE '^/usr/share/(mime/[^/]+$|icons/[^/]+/icon-theme\.cache|fonts/.*\.uuid|applications/mimeinfo\.cache|glib-2\.0/schemas/gschemas\.compiled)' \
