@@ -34,7 +34,7 @@ RUN apk add --no-cache android-tools python3 bash coreutils
 EOF
     # Host network: the Colima VM is bridged on the LAN (192.168.50.100), so wireless adb reaches the phone.
     docker run -d --name "$C" --network host --cpus 1 --memory 1g -e POWOS_IN_ADB_CONTAINER=1 \
-      -e ADB_SERVER_SOCKET=tcp:127.0.0.1:$ADB_PORT -v powos-phone-adb-keys:/root/.android \
+      -e ANDROID_ADB_SERVER_PORT=$ADB_PORT -v powos-phone-adb-keys:/root/.android \
       -v "$A:/android" powos-phone-adb sleep infinity >/dev/null
   fi
   [ "${1:-}" = stop ] && { docker rm -f "$C" >/dev/null; echo stopped; exit 0; }
