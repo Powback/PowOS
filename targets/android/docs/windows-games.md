@@ -37,6 +37,9 @@ right colour), DXVK 3.1 on lavapipe:
 | x86_64 under box64 0.4.4, lab | PASS | PASS | FAIL: no Vulkan | FAIL (crash) | - |
 | x86_64 under box64, **phone-sim** (with the box64 patch below) | PASS | PASS | FAIL | FAIL | - |
 
+Final tarball (sha256 `bc56f70a...`, 6.86 GB), fresh phone-sim: aarch64 x86_64-d3d11 and i686-d3d9 PASS; box64
+x86_64-d3d11 PASS but the process exits 247 at teardown (not chased).
+
 32-bit under box64: Wine's 32-bit Unix side runs under BOX32, which cannot load `libvulkan.so.1`
 (`DxvkInstance: Failed to create Vulkan instance`), so 32-bit games get no DXVK there. The aarch64 build has no
 32-bit Unix side and passes.
