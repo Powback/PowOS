@@ -31,7 +31,7 @@ IMAGE=powos-phone-sim-host
 
 docker image inspect $IMAGE >/dev/null 2>&1 || docker build -q -t $IMAGE - >/dev/null <<'EOF'
 FROM alpine:3.22
-RUN apk add --no-cache bash coreutils tar gzip xvfb xdpyinfo gcc musl-dev zstd curl
+RUN apk add --no-cache bash coreutils tar gzip xvfb xdpyinfo gcc musl-dev zstd curl mesa-dri-gallium mesa-gl xwd imagemagick
 EOF
 
 mounted() { colima ssh -- mountpoint -q $MNT; }
@@ -42,9 +42,10 @@ mount_store() {
 }
 
 sim() { # run a host-side bash script in the simulation container, as the app's uid
+  mkdir -p "$A/out/sim-shots" && chmod 777 "$A/out/sim-shots"
   docker run --rm -i --platform linux/arm64 --user $UID_APP:$UID_APP --cap-drop ALL --security-opt no-new-privileges \
     --cpus "${SIM_CPUS:-6}" --memory "${SIM_MEM:-12g}" --shm-size 1g \
-    -v $MNT/app:$APP -v "$A:/android:ro" ${SIM_MOUNTS:-} -e ARCH_ROOT="${ARCH_ROOT:-0}" $IMAGE bash -s
+    -v $MNT/app:$APP -v "$A:/android:ro" -v "$A/out/sim-shots:/shots" ${SIM_MOUNTS:-} -e ARCH_ROOT="${ARCH_ROOT:-0}" $IMAGE bash -s
 }
 
 case ${1:-help} in
@@ -83,7 +84,7 @@ EOF
     sim <<EOF
 export ARCH_ROOTFS=$R XDG_RUNTIME_DIR=$RUN ARCH_EXCLUDE_EXTRA=$RUN:/tmp/.X11-unix TZ=UTC LANG=C.UTF-8
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$RUN/bus HOME=/root
-Xvfb :1 -screen 0 1280x720x24 -nolisten tcp >/dev/null 2>&1 &
+Xvfb :1 -screen 0 1280x720x24 -nolisten tcp +extension GLX >/dev/null 2>&1 &
 for i in \$(seq 50); do [ -S /tmp/.X11-unix/X1 ] && break; sleep 0.1; done
 export DISPLAY=:1 VK_ICD_FILENAMES=/opt/powos-lab/lvp_icd.json POWOS_SIM=1
 # SIM_PRE: host-side commands first (e.g. copying test files from /android into \$ARCH_ROOTFS).
@@ -91,8 +92,11 @@ ${SIM_PRE:-}
 # Rosetta watch: Colima registers it for x86 binaries; on the phone nothing would. Any hit means an x86 exec
 # bypassed android-compat's hook (and would fail on the phone).
 ( while sleep 1; do grep -l -i rosetta /proc/[0-9]*/maps 2>/dev/null; done | sort -u > /tmp/rosetta.txt ) &
-$APP/files/lotfix-run -c $(printf %q "$cmd")
+# No KGSL here: the session launcher's own fallback (session/Hyprland) for every program, llvmpipe.
+$APP/files/lotfix-run -c $(printf %q "unset MESA_LOADER_DRIVER_OVERRIDE TURNIP_KMD FD_FORCE_KGSL XWAYLAND_FORCE_KGSL_SURFACELESS; export GALLIUM_DRIVER=llvmpipe LIBGL_ALWAYS_SOFTWARE=1; $cmd")
 rc=\$?
+# SIM_SHOT=<name>.png: a screenshot of the simulated display afterwards, to out/sim-shots/.
+[ -n "${SIM_SHOT:-}" ] && xwd -root -display :1 -silent | magick xwd:- "/shots/${SIM_SHOT:-}"
 [ -s /tmp/rosetta.txt ] && echo "phone-sim: WARNING rosetta ran x86 code: \$(cat /tmp/rosetta.txt | tr '\n' ' ')" >&2
 exit \$rc
 EOF

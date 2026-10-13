@@ -171,6 +171,15 @@ fi
 if [ "$log" = 1 ]; then
   export PROTON_LOG=${PROTON_LOG:-1} PROTON_LOG_DIR=$STATE
 fi
+# HACK: Proton puts its own library directories on LD_LIBRARY_PATH as rootfs paths, which the (not fakechroot-aware)
+# dynamic loader cannot use under the runtime; the same directories as host paths, after Proton's, make its
+# bundled libraries win over the rootfs's as on a PC. No-op outside the runtime (FAKECHROOT_BASE unset).
+if [ -n "${FAKECHROOT_BASE:-}" ]; then
+  for d in "$dir"/files/lib/aarch64-linux-gnu "$dir"/files/lib/x86_64-linux-gnu "$dir"/files/lib/i386-linux-gnu; do
+    [ -d "$d" ] && LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$FAKECHROOT_BASE$d
+  done
+  export LD_LIBRARY_PATH
+fi
 # Vulkan driver: the engine's arch-native.sh sets the KGSL variables for Turnip; without /dev/kgsl-3d0
 # (emulator, lab container) Mesa's lavapipe is the only Vulkan device - fine for smoke tests.
 
