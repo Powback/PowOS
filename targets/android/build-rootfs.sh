@@ -47,7 +47,7 @@ while read -r mark src dst _; do
   else cp -a "$from" "$S/layer/$dst"; fi
 done < <(grep -E '^[+-] ' "$HERE/layer.list")
 cp "$KWIN_PKG" "$S/pkgs/"
-cp -a "$HERE/session" "$HERE/shims" "$S/"
+cp -a "$HERE/session" "$HERE/shims" "$HERE/packages.list" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
 
 # 3. Build inside a privileged aarch64 container (chroot + mounts need it), on a Docker volume:

@@ -1,0 +1,136 @@
+# PowOS's desktop packages on Android: every package the desktop image installs (dnf in
+# containers/Containerfile.base-common + Containerfile), mapped to Arch Linux ARM or left out on purpose.
+# check-layer-drift.sh fails when the Containerfiles install a package this file doesn't account for.
+#
+# Format:  + <fedora-name> <arch-package...>   installed in the phone rootfs
+#          - <fedora-name> <reason>             not on Android, on purpose
+#          ~ <fedora-name> <how>                provided another way (see install-powos-android.sh)
+
+# Gaming
+~ steam                        Valve's ARM64 client (steam_client_linuxarm64), Proton ARM64 + FEX via Steam
++ lutris                       lutris
+- umu-launcher                 not in Arch Linux ARM (AUR); Steam runs Proton itself
+- mangohud.x86_64              not in Arch Linux ARM for aarch64 (AUR only)
+- mangohud.i686                32-bit x86: games' own bits come through FEX/Proton
+- vkBasalt.x86_64              post-processing layer for x86 games; not packaged for aarch64
+- vkBasalt.i686                same
+- gamescope.x86_64             KWin is the compositor; gamescope needs DRM/KMS, which apps don't get
+- gamescope-libs.x86_64        same
+- gamescope-libs.i686          same
+- gamescope-shaders            same
+- libFAudio.x86_64             x86 game runtime: comes with Proton/FEX
+- libFAudio.i686               same
+- libobs_vkcapture.x86_64      OBS game capture (x86)
+- libobs_vkcapture.i686        same
+- libobs_glcapture.x86_64      same
+- libobs_glcapture.i686        same
+- VK_hdr_layer                 HDR output needs DRM/KMS
+- cage                         kiosk compositor for gamescope sessions
+- ds-inhibit                   Steam Deck controller inhibit
+- jupiter-sd-mounting-btrfs    Steam Deck SD-card mounting
+- steamdeck-kde-presets-desktop Steam Deck desktop presets
+- scx-scheds                   sched_ext needs our own kernel
+- scx-tools                    same
+
+# Desktop apps and tools
++ btop                         btop
++ duf                          duf
++ fastfetch                    fastfetch
++ fish                         fish
++ glow                         glow
++ gum                          gum
++ jq                           jq
++ kdeconnectd                  kdeconnect
++ kdeplasma-addons             kdeplasma-addons
++ kio-extras                   kio-extras
++ krdp                         krdp
++ lsb_release                  lsb-release
++ lzip                         lzip
++ p7zip                        7zip
++ p7zip-plugins                7zip
++ rar                          unrar
++ sqlite                       sqlite
+- topgrade                     not in Arch Linux ARM (AUR); `pacman -Syu` covers the phone
++ unzip                        unzip
++ uv                           uv
++ vim                          vim
++ vulkan-tools                 vulkan-tools
++ wmctrl                       wmctrl
++ xdg-user-dirs                xdg-user-dirs
++ xdotool                      xdotool
++ xrandr                       xorg-xrandr
++ xwininfo                     xorg-xwininfo
++ yad                          yad
++ python3-pip                  python-pip
++ libadwaita                   libadwaita
++ gobject-introspection        gobject-introspection
++ dbus-x11                     dbus
++ libxcrypt-compat             libxcrypt-compat
++ pulseaudio-utils             libpulse
++ libnice-gstreamer1           libnice
++ ladspa-noise-suppression-for-voice noise-suppression-for-voice
+- ladspa-caps-plugins          LADSPA effects bundle, not packaged for aarch64
+- pipewire-module-filter-chain-sofa spatial-audio filter; Android routes audio
+- ptyxis                       Konsole is PowOS's terminal
+- bazaar                       Flathub front-end (GTK); Discover + Flathub on the phone instead
+- krunner-bazaar               same
+- webapp-manager               Linux Mint tool, not in Arch ARM
+- rom-properties-kf6           not in Arch ARM
+- python3-icoextract           Windows icon extraction for game launchers; not packaged
+- Sunshine                     game-stream host; the phone is the client side (AUR only)
+- maliit-keyboard              Android's own keyboard types into KWin
+- fcitx5-chinese-addons        input methods: Android's keyboard handles languages
+- fcitx5-hangul                same
+- fcitx5-mozc                  same
+- kcm-fcitx5                   same
+
+# Fonts
++ google-noto-sans-cjk-fonts   noto-fonts-cjk
++ fira-code-fonts              ttf-fira-code
++ lato-fonts                   ttf-lato
++ nerd-fonts                   ttf-nerd-fonts-symbols
+- twitter-twemoji-fonts        noto-fonts-emoji already covers emoji
+
+# PC hardware and system administration: not reachable from an Android app
+- openrgb                      RGB over SMBus/USB HID
+- piper                        gaming mouse config over USB HID
+- logiops                      Logitech HID++ daemon
+- i2c-tools                    I2C buses
+- lm_sensors                   hardware sensors
+- ddcutil                      monitor DDC/CI
+- libcec                       HDMI-CEC
+- xwiimote-ng                  Wii remote kernel driver
+- libinput-utils               libinput debugging (input comes from Android)
+- iwd                          Android owns Wi-Fi
+- tailscale                    one VPN per phone: use the Android Tailscale app
+- libfreeaptx                  Bluetooth codecs: Android owns Bluetooth
+- ydotool                      needs /dev/uinput
+- wlr-randr                    wlroots-only tool
+- lshw                         hardware listing needs /sys and root
+- f3                           flash-drive testing
+- stress-ng                    stress testing
+- gnome-disk-utility           no block devices for apps
+- btrfs-assistant              no btrfs
+- compsize                     same
+- duperemove                   same
+- snapper                      same
+- edk2-ovmf                    VMs need KVM
+- qemu                         same
+- libvirt                      same
+- waydroid                     Android inside Android
+- podman-compose               containers need namespaces, denied to apps
+- podman-docker                same
+- cockpit-files                web admin over systemd
+- cockpit-networkmanager       same
+- cockpit-podman               same
+- cockpit-selinux              same
+- cockpit-storaged             same
+- cockpit-system               same
+- udica                        SELinux policy generator
+- uupd                         bootc/rpm update service
+- dnf5-plugins                 Fedora package manager
+- cpulimit                     not in Arch ARM; Android schedules the app
+- libaacs                      Blu-ray decryption
+- libbdplus                    same
+- libbluray                    Blu-ray
+- libbluray-utils              same

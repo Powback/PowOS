@@ -20,6 +20,9 @@ pacman -S --noconfirm --needed \
   xdg-desktop-portal-kde konsole dolphin kate ark spectacle gwenview okular \
   noto-fonts noto-fonts-emoji ttf-hack \
   tmux jq curl unzip uv python
+# The desktop image's apps and tools, as mapped in packages.list ('+' lines; '~' ones are handled
+# below or later, '-' ones are deliberately not on Android).
+pacman -S --noconfirm --needed $(awk '/^\+ /{for (i = 3; i <= NF; i++) print $i}' "$P/packages.list" | sort -u)
 # Our KWin (Anland backend) over Arch's, then pinned: pacman must never swap it for Arch's, which has no
 # way to draw on Android. HACK: IgnorePkg means Plasma updates need a matching rebuild of our kwin
 # (pacman warns about the held package); the real fix is the Anland backend upstream in KWin.

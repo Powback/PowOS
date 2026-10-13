@@ -23,4 +23,23 @@ if [ -n "$stale" ]; then
   rc=1
 fi
 [ $rc = 0 ] && echo "layer.list in step with Containerfile staging ($(echo "$staging" | wc -l | tr -d ' ') sources)"
+
+# Packages: every package the desktop image installs (dnf in the Containerfiles) must be mapped in
+# packages.list (+ installed / ~ provided another way / - left out with a reason).
+# The extractor's tokens "qt", "|" and "terra-release{...}" are shell/brace artefacts, not packages.
+desktop=$(python3 targets/android/tools/desktop-packages.py . | cut -f1 | grep -vE '^(qt|\||terra-release.*)$' | sort -u)
+mapped=$(awk '/^[+~-] /{print $2}' targets/android/packages.list | sort -u)
+pmissing=$(comm -23 <(echo "$desktop") <(echo "$mapped"))
+pstale=$(comm -13 <(echo "$desktop") <(echo "$mapped"))
+if [ -n "$pmissing" ]; then
+  echo "packages.list does not account for these desktop packages (add as +, ~ or - with a reason):"
+  echo "$pmissing" | sed 's/^/  /'
+  rc=1
+fi
+if [ -n "$pstale" ]; then
+  echo "packages.list maps packages the desktop image no longer installs:"
+  echo "$pstale" | sed 's/^/  /'
+  rc=1
+fi
+[ -z "$pmissing$pstale" ] && echo "packages.list in step with the desktop image ($(echo "$desktop" | wc -l | tr -d ' ') packages)"
 exit $rc
