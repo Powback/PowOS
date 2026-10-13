@@ -1,0 +1,12 @@
+# PowOS packages Arch Linux ARM doesn't build: the upstream recipe, built unchanged for aarch64 by
+# build-pkgs.sh (makepkg --ignorearch). phone-rules.conf maps the PowOS RPM names to these.
+#   <arch package>     <official|aur>    <PowOS RPM(s) it stands for>
+mangohud              official          terra-mangohud
+vkbasalt              aur               vkBasalt
+umu-launcher          official          umu-launcher umu-wrapper
+input-remapper        aur               input-remapper
+scopebuddy            aur               ScopeBuddy
+nvtop                 official          nvtop
+rom-properties        aur               rom-properties-kf6 rom-properties-utils
+obs-vkcapture         aur               obs-studio-plugin-vkcapture-hook-libs
+xwaylandvideobridge   official          xwaylandvideobridge

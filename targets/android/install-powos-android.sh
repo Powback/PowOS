@@ -17,12 +17,19 @@ echo "powos: from $(cat $P/manifest/image.txt)"
 # ── What the phone session itself needs (not PowOS content: the Plasma session on Android) ─────────────
 pacman -S --noconfirm --needed plasma-workspace xdg-desktop-portal-kde kscreen python zstd
 
+# ── Our packages (build-pkgs.sh): KWin with the Anland backend, FEX, and PowOS packages Arch Linux ARM doesn't
+# build (recipes.list: upstream recipes built for aarch64). First, so the mapping below finds them.
+pacman -U --noconfirm "$P"/pkgs/*.pkg.tar.*
+
 # ── PowOS's packages: the image's top-level RPMs, mapped to Arch by phone-rules.conf ───────────────────
 # The report (what each top-level RPM became, MISSING ones first) stays in the image for review.
 mkdir -p /usr/share/powos
-pacman -Slq | sort -u > /tmp/arch-available.txt
+{ pacman -Slq; pacman -Qq; } | sort -u > /tmp/arch-available.txt
 python3 $P/resolve-packages.py $P/manifest/leaves.tsv $P/phone-rules.conf /tmp/arch-available.txt \
   /tmp/powos-install.txt /usr/share/powos/phone-report.txt
+# Ours are installed already (and in no repo, so pacman -S would not find them).
+pacman -Qq | sort -u > /tmp/installed.txt
+sort -u /tmp/powos-install.txt | comm -23 - /tmp/installed.txt > /tmp/r && mv /tmp/r /tmp/powos-install.txt
 # One transaction first; if any single package breaks it (a conflict, a repo hiccup), the rest still go
 # in one by one and the ones that failed are listed at the top of the report.
 if ! pacman -S --noconfirm --needed $(cat /tmp/powos-install.txt); then
@@ -35,14 +42,12 @@ fi
 # Our KWin (Anland backend) over Arch's, then pinned: pacman must never swap it for Arch's, which has no
 # way to draw on Android. HACK: IgnorePkg means Plasma updates need a matching rebuild of our kwin
 # (pacman warns about the held package); the real fix is the Anland backend upstream in KWin.
-pacman -U --noconfirm "$P"/pkgs/kwin-*.pkg.tar.*
 grep -q '^IgnorePkg.*\bkwin\b' $C || sed -i "/^IgnorePkg/ s/$/ kwin/" $C
 
 # FEX: PowOS's Steam (Valve's bootstrapper is 32-bit x86) and x86 games run through it, as on Valve's own ARM
 # hardware. The engine's execve hands x86 programs to FEXInterpreter (patches/andromarchy/0002), standing in for
 # the binfmt_misc registration an Android app cannot make. FEX's x86 rootfs comes from FEX's own fetcher,
 # extracted: no FUSE mounts on Android.
-pacman -U --noconfirm "$P"/pkgs/fex-emu-*.pkg.tar.*
 FEXRootFSFetcher -y -x --distro-list-first --force-ui tty
 
 # ── PowOS's files: everything in the image no package owns (PowOS layer, Bazzite's system_files, Deck
