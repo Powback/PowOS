@@ -4,9 +4,9 @@ Subject: [PATCH] input: PowOS phone: swipe up on the desktop or a panel opens th
 The taskbar is the app drawer's handle; the desktop background too. See PhoneLauncherSwipeFilter.
 ---
 diff --git a/src/input.cpp b/src/input.cpp
---- a/src/input.cpp	2026-10-13 03:54:24
-+++ b/src/input.cpp	2026-10-13 03:54:24
-@@ -65,7 +65,10 @@
+--- a/src/input.cpp	2026-10-13 04:02:18
++++ b/src/input.cpp	2026-10-13 04:02:18
+@@ -65,7 +65,11 @@
  #include <KScreenLocker/KsldApp>
  #endif
  // Qt
@@ -14,10 +14,11 @@ diff --git a/src/input.cpp b/src/input.cpp
  #include <QAction>
 +#include <QDBusConnection>
 +#include <QDBusMessage>
++#include <QDBusPendingCall>
  #include <QKeyEvent>
  #include <QThread>
  #include <qpa/qwindowsysteminterface.h>
-@@ -1920,6 +1923,104 @@
+@@ -1920,6 +1924,104 @@
  };
  
  /**
@@ -122,7 +123,7 @@ diff --git a/src/input.cpp b/src/input.cpp
   * This filter implements window actions. If the event should not be passed to the
   * current window it will filter out the event
   */
-@@ -3170,6 +3271,11 @@
+@@ -3170,6 +3272,11 @@
      if (kwinApp()->supportsGlobalShortcuts()) {
          m_screenEdgeFilter = std::make_unique<ScreenEdgeInputFilter>();
          installInputEventFilter(m_screenEdgeFilter.get());
@@ -135,8 +136,8 @@ diff --git a/src/input.cpp b/src/input.cpp
  
      m_dragAndDropFilter = std::make_unique<DragAndDropInputFilter>();
 diff --git a/src/input.h b/src/input.h
---- a/src/input.h	2026-10-13 03:54:24
-+++ b/src/input.h	2026-10-13 03:54:24
+--- a/src/input.h	2026-10-13 04:02:18
++++ b/src/input.h	2026-10-13 04:02:18
 @@ -321,6 +321,7 @@
      std::unique_ptr<InputEventFilter> m_lockscreenFilter;
  #endif
