@@ -32,6 +32,9 @@ python3 $P/resolve-packages.py $P/manifest/packages.tsv $P/phone-rules.conf /tmp
 # Ours are installed already (and in no repo, so pacman -S would not find them).
 pacman -Qq | sort -u > /tmp/installed.txt
 sort -u /tmp/powos-install.txt | comm -23 - /tmp/installed.txt > /tmp/r && mv /tmp/r /tmp/powos-install.txt
+# PowOS's choice among alternative providers first (PipeWire for JACK and PulseAudio, as Fedora/PowOS does):
+# otherwise a dependency pulls in pacman's default provider (jack2) and pipewire-jack then conflicts with it.
+pacman -S --noconfirm --needed --ask 4 pipewire-jack pipewire-pulse
 # One transaction first; if any single package breaks it (a conflict, a repo hiccup), the rest still go
 # in one by one and the ones that failed are listed at the top of the report.
 if ! pacman -S --noconfirm --needed $(cat /tmp/powos-install.txt); then
