@@ -12,6 +12,10 @@ ported VirtualBackend from 6.6 to 6.7:
   checked where a failure means rendering into nothing.
 - AnlandOutput: OutputMode is built from an OutputModeline in 6.7 (OutputMode::Flag
   became OutputModeline::Flag).
+- core/gpumanager.cpp: GpuManager (new in 6.7) assumed a udev monitor; an Android app
+  can't open udev's netlink socket, so createMonitor() returns null and KWin segfaulted
+  at startup (UdevMonitor::fd() on null, found on a Samsung S25). Without a monitor it
+  now skips GPU hot-plug and only does the initial scan.
 - core/renderdevice.cpp: a RenderDevice without a DrmDevice skips Vulkan instead of
   dereferencing the null device (needed on Android, where there is no /dev/dri).
 
@@ -331,6 +335,30 @@ diff -ruN s3/src/backends/anland/anland_output.cpp s4/src/backends/anland/anland
      State next = m_state;
      next.modes = {mode};
      next.currentMode = mode;
+diff -ruN s3/src/core/gpumanager.cpp s4/src/core/gpumanager.cpp
+--- a/src/core/gpumanager.cpp	2026-10-13 01:01:37
++++ b/src/core/gpumanager.cpp	2026-10-13 02:31:12
+@@ -76,12 +76,16 @@
+     , m_udmabufDevId(getDevId(m_udmabuf))
+     , m_udev(std::make_unique<Udev>())
+     , m_udevMonitor(m_udev->createMonitor())
+-    , m_udevNotifier(std::make_unique<QSocketNotifier>(m_udevMonitor->fd(), QSocketNotifier::Read))
++    // No udev monitor where the kernel's udev netlink socket is unavailable (an Android app running
++    // KWin on the anland backend): then there is no GPU hot-plug to follow, only the initial scan.
++    , m_udevNotifier(m_udevMonitor ? std::make_unique<QSocketNotifier>(m_udevMonitor->fd(), QSocketNotifier::Read) : nullptr)
+     , m_explicitRenderNodes(qEnvironmentVariableIsSet("KWIN_RENDER_NODES") ? splitPathList(qEnvironmentVariable("KWIN_RENDER_NODES")) : std::optional<QStringList>())
+ {
+-    m_udevMonitor->filterSubsystemDevType("drm");
+-    connect(m_udevNotifier.get(), &QSocketNotifier::activated, this, &GpuManager::handleUdevEvent);
+-    m_udevMonitor->enable();
++    if (m_udevMonitor) {
++        m_udevMonitor->filterSubsystemDevType("drm");
++        connect(m_udevNotifier.get(), &QSocketNotifier::activated, this, &GpuManager::handleUdevEvent);
++        m_udevMonitor->enable();
++    }
+     scanForRenderDevices();
+ }
+ 
 diff -ruN s3/src/core/renderdevice.cpp s4/src/core/renderdevice.cpp
 --- a/src/core/renderdevice.cpp	2026-10-13 01:01:37
 +++ b/src/core/renderdevice.cpp	2026-10-13 01:04:02
