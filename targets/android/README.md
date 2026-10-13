@@ -4,8 +4,10 @@ PowOS's KDE Plasma desktop and the PowOS layer (CLI, widgets, configs, AI agents
 app**: no root, no bootloader unlock, no proot. Android keeps the kernel and the hardware; a real Arch
 Linux ARM system runs on top with the phone's GPU.
 
-**Status: experimental, not yet run on a device.** The build is new; the first device test (OnePlus Open)
-is pending. Nothing here touches the desktop or Steam Deck image: this directory is purely additive.
+**Status: experimental, runs on a Samsung Galaxy S25 Ultra** (Android 16 / One UI 8.0, Snapdragon 8 Elite,
+Adreno 830; locked bootloader, no root) since 2026-10-13: KDE Plasma with the PowOS layer, on the GPU, through
+the stock Andromarchy app. Nothing here touches the desktop or Steam Deck image: this directory is purely
+additive.
 
 ## How it works
 
@@ -72,11 +74,19 @@ Every workaround is marked `HACK:` at the spot in the code. Summary:
 | `DisableSandbox` in pacman.conf of build containers | pacman 7's Landlock sandbox isn't permitted in Docker (Andromarchy's rootfs does the same on-device) | A container runtime that allows Landlock |
 | `setcap ... \|\| true` in the kwin PKGBUILD | The build container's filesystem may lack xattrs; the capability is irrelevant on Android | Build where xattrs work |
 
+## Verified on device (S25 Ultra)
+
+- KWin 6.7.5 + ported Anland patches draws through Andromarchy's display daemon and takes touch input.
+- KWin 6.7's new GpuManager crashed without a udev monitor (apps can't open udev's netlink socket);
+  fixed in patch 0008. Found with an LD_PRELOAD crash reporter.
+- Plasma session comes up from the app's own session start; output scale set from the physical size
+  (2.75x on the S25).
+- The desktop's apps per [packages.list](packages.list), installed with pacman inside the running rootfs.
+
 ## Not done yet
 
-- **First device test.** Unverified: KWin 6.7.5 + the ported Anland patches actually drawing via
-  Andromarchy's display daemon (wire protocol checked identical on paper), and audio through KWin's
-  Anland audio path.
+- **Audio** through KWin's Anland audio path: not checked yet.
+- **Steam/Proton/FEX** and AUR-only gaming tools (`~`/`-` in packages.list): later, by the user.
 - **powos CLI gating** on `/etc/powos/platform` (commands that can't work on a phone should say so).
 - **PowOS-branded app** (`com.powos.app`) with its own download URL, removing the path hacks above.
 - **Two-way Android bridge**: calendar, contacts, notifications to `powos android ...` and a local
