@@ -43,7 +43,7 @@ final class SplashScreen {
                 a.getSystemService(ActivityManager.class).getMemoryInfo(m);
                 String soc = Build.VERSION.SDK_INT >= 31 && !Build.SOC_MODEL.equals(Build.UNKNOWN)
                         ? Build.SOC_MODEL : Build.HARDWARE;
-                return "{\"version\":\"" + BuildConfig.VERSION_NAME + "\",\"kernel\":\"" + System.getProperty("os.version")
+                return "{\"version\":\"" + AppVersion.name(a) + "\",\"kernel\":\"" + System.getProperty("os.version")
                         + "\",\"mem\":\"" + String.format(java.util.Locale.ROOT, "%.1f / %.1f GB",
                         (m.totalMem - m.availMem) / 1e9, m.totalMem / 1e9) + "\",\"soc\":\"" + soc + "\"}";
             }

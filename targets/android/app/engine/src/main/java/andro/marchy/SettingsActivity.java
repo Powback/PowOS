@@ -176,8 +176,8 @@ public class SettingsActivity extends Activity {
 
         // Build version, injected from git at build time (see app/build.gradle).
         TextView version = new TextView(this);
-        version.setText(BuildConfig.VERSION_NAME
-            + " (" + BuildConfig.VERSION_CODE + ")");
+        version.setText(AppVersion.name(this)
+            + " (" + AppVersion.code(this) + ")");
         version.setTextSize(12);
         version.setGravity(Gravity.START);
         version.setPadding(0, dp(24), 0, 0);

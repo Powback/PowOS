@@ -134,3 +134,24 @@
 - libbdplus                    same
 - libbluray                    Blu-ray
 - libbluray-utils              same
+
+# Bazzite's default Flatpaks (upstream/bazzite-kde-flatpaks.txt), installed on the desktop's first boot.
+# '+' = installed natively instead (Arch ARM package; uses the rootfs's Adreno Mesa directly),
+# 'F' = the same Flatpak, installed from Flathub (aarch64) by the first session.
++ flatpak:org.mozilla.firefox  firefox
++ flatpak:org.kde.gwenview     gwenview
++ flatpak:org.kde.okular       okular
++ flatpak:org.kde.kcalc        kcalc
++ flatpak:org.kde.haruna       haruna
++ flatpak:org.kde.filelight    filelight
+F flatpak:it.mijorus.gearlever
+F flatpak:com.github.tchx84.Flatseal
+F flatpak:io.github.flattool.Warehouse
+- flatpak:com.ranfdev.DistroShelf containers need namespaces, denied to apps
+~ flatpak:net.davidotek.pupgui2 Proton version manager: with Steam/Proton (later, by the user)
+- flatpak:org.freedesktop.Platform.VulkanLayer.MangoHud x86 game overlay layer (with Steam/Proton later)
+- flatpak:org.freedesktop.Platform.VulkanLayer.vkBasalt same
+- flatpak:org.freedesktop.Platform.VulkanLayer.OBSVkCapture OBS game capture; OBS isn't a default app
+- flatpak:com.obsproject.Studio.Plugin.OBSVkCapture same
+- flatpak:com.obsproject.Studio.Plugin.Gstreamer same
+- flatpak:com.obsproject.Studio.Plugin.GStreamerVaapi same

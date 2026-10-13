@@ -24,7 +24,7 @@ public final class CompatibleBridge {
     public static final String ACTION_START = "andro.marchy.COMPATIBLE_BRIDGE_START";
 
     private static final String TAG = "AndromarchyCompatibleBridge";
-    private static final String APPLICATION_ID = BuildConfig.APPLICATION_ID;
+    // PowOS: no BuildConfig.APPLICATION_ID in a library; the broadcast goes to our own package (context below).
 
     private final Context context;
     private final BridgeBinder binder;
@@ -77,7 +77,7 @@ public final class CompatibleBridge {
 
         Intent intent = new Intent(ACTION_START);
         intent.putExtra(null, bundle);
-        intent.setPackage(APPLICATION_ID);
+        intent.setPackage(context.getPackageName());
         try {
             context.sendBroadcast(intent);
         } catch (RuntimeException e) {

@@ -58,6 +58,11 @@ def executables = [
     "libtermuxva.so"   : ["native-src/third_party/termux-va/daemon/termux-va.c", "-std=c11",
                           "-Inative-src/third_party/termux-va/common", "-lmediandk", "-llog", "-landroid"],
 ]
+// Paths resolved here, at configuration time: the PowOS build runs with Gradle's configuration cache
+// (Omalauncher's gradle.properties), which forbids calling the script's file() while the task executes.
+def resolvedExecutables = executables.collectEntries { name, srcs ->
+    [name, srcs.collect { it.startsWith("-I") ? "-I" + file(it.substring(2)).path : it.startsWith("-") ? it : file(it).path }]
+}
 tasks.register("buildExecutables") {
     inputs.files(executables.values().flatten().findAll { !it.startsWith("-") })
     outputs.dir(jniOut)
@@ -70,10 +75,7 @@ tasks.register("buildExecutables") {
         def clang = "${ndkDir.get().asFile}/toolchains/llvm/prebuilt/${host}/bin/aarch64-linux-android30-clang" +
                     (host == "windows-x86_64" ? ".cmd" : "")
         jniOut.mkdirs()
-        executables.each { name, srcs ->
-            def args = srcs.collect {
-                it.startsWith("-I") ? "-I" + file(it.substring(2)).path : it.startsWith("-") ? it : file(it).path
-            }
+        resolvedExecutables.each { name, args ->
             def proc = ([clang, "-O2", "-Wall", "-pie", "-Wl,-z,max-page-size=16384",
                          "-o", new File(jniOut, name).path] + args).execute()
             proc.waitForProcessOutput(System.out, System.err)

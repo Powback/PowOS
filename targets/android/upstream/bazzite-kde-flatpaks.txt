@@ -1,0 +1,20 @@
+# Bazzite (KDE) default Flatpaks, installed on first boot of the PowOS desktop (Bazzite base).
+# Snapshot of https://raw.githubusercontent.com/ublue-os/bazzite/main/system_files/desktop/kinoite/usr/share/ublue-os/bazzite/flatpak/install
+# taken 2026-10-13. Refresh by re-downloading it; check-layer-drift.sh then shows what packages.list must map.
+org.mozilla.firefox
+org.kde.gwenview
+org.kde.okular
+org.kde.kcalc
+org.kde.haruna
+org.kde.filelight
+com.ranfdev.DistroShelf
+it.mijorus.gearlever
+com.github.tchx84.Flatseal
+io.github.flattool.Warehouse
+net.davidotek.pupgui2
+org.freedesktop.Platform.VulkanLayer.MangoHud//23.08
+org.freedesktop.Platform.VulkanLayer.vkBasalt//23.08
+org.freedesktop.Platform.VulkanLayer.OBSVkCapture//23.08
+com.obsproject.Studio.Plugin.OBSVkCapture
+com.obsproject.Studio.Plugin.Gstreamer
+com.obsproject.Studio.Plugin.GStreamerVaapi

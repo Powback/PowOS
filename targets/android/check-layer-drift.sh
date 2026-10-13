@@ -28,7 +28,7 @@ fi
 # packages.list (+ installed / ~ provided another way / - left out with a reason).
 # The extractor's tokens "qt", "|" and "terra-release{...}" are shell/brace artefacts, not packages.
 desktop=$(python3 targets/android/tools/desktop-packages.py . | cut -f1 | grep -vE '^(qt|\||terra-release.*)$' | sort -u)
-mapped=$(awk '/^[+~-] /{print $2}' targets/android/packages.list | sort -u)
+mapped=$(awk '/^[+~-] / && $2 !~ /^flatpak:/ {print $2}' targets/android/packages.list | sort -u)
 pmissing=$(comm -23 <(echo "$desktop") <(echo "$mapped"))
 pstale=$(comm -13 <(echo "$desktop") <(echo "$mapped"))
 if [ -n "$pmissing" ]; then
@@ -42,4 +42,21 @@ if [ -n "$pstale" ]; then
   rc=1
 fi
 [ -z "$pmissing$pstale" ] && echo "packages.list in step with the desktop image ($(echo "$desktop" | wc -l | tr -d ' ') packages)"
+
+# Bazzite's default Flatpaks (vendored snapshot, upstream/bazzite-kde-flatpaks.txt; "//branch" dropped).
+fp_upstream=$(grep -v '^#' targets/android/upstream/bazzite-kde-flatpaks.txt | sed 's|//.*||' | grep . | sort -u)
+fp_mapped=$(awk '/^[+~F-] / && $2 ~ /^flatpak:/ {sub(/^flatpak:/, "", $2); print $2}' targets/android/packages.list | sort -u)
+fmissing=$(comm -23 <(echo "$fp_upstream") <(echo "$fp_mapped"))
+fstale=$(comm -13 <(echo "$fp_upstream") <(echo "$fp_mapped"))
+if [ -n "$fmissing" ]; then
+  echo "packages.list does not account for these Bazzite default Flatpaks:"
+  echo "$fmissing" | sed 's/^/  /'
+  rc=1
+fi
+if [ -n "$fstale" ]; then
+  echo "packages.list maps Flatpaks that are no longer Bazzite defaults:"
+  echo "$fstale" | sed 's/^/  /'
+  rc=1
+fi
+[ -z "$fmissing$fstale" ] && echo "packages.list in step with Bazzite's default Flatpaks ($(echo "$fp_upstream" | wc -l | tr -d ' ') apps)"
 exit $rc
