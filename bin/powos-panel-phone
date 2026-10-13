@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# powos-panel-phone — on a PowOS phone, the panel's launcher is the full-screen
+# app grid (Application Dashboard) instead of Kickoff's menu: a phone's app
+# drawer. KWin opens the same launcher when you swipe up on the desktop or on
+# the taskbar (PowOS phone KWin, PhoneLauncherSwipeFilter), so the gesture and
+# the start button show the same grid.
+#
+# Phones only (/etc/powos/platform = phone); desktops and the Deck keep Kickoff.
+# Once per user, like powos-panel-center: after that the user owns the panel
+# (right click the launcher > Show Alternatives switches it back).
+#
+# HOW: Kickoff and the Dashboard are alternatives of one another (both provide
+# org.kde.plasma.launchermenu), so the swap is the applet's plugin= line: same
+# applet id, same place on the panel, same Alt+F1 / Meta shortcut. plasmashell
+# must not be running while the file changes (it writes its in-memory layout
+# on exit), hence stop -> edit -> start, the same dance as powos-panel-center.
+
+set -uo pipefail
+
+[[ "$(cat /etc/powos/platform 2>/dev/null)" == phone ]] || exit 0
+
+state="${XDG_STATE_HOME:-$HOME/.local/state}/powos"
+marker="$state/panel-phone-v1"
+[[ -f "$marker" ]] && exit 0
+done_marker() { mkdir -p "$state"; touch "$marker"; }
+
+rc="${XDG_CONFIG_HOME:-$HOME/.config}/plasma-org.kde.plasma.desktop-appletsrc"
+
+# The first session writes the default layout a moment after plasmashell starts;
+# powos-panel-center (autostart too) restarts plasmashell once — let it finish.
+for _ in $(seq 1 60); do
+    grep -qx 'plugin=org.kde.plasma.kickoff' "$rc" 2>/dev/null \
+        && [[ -f "$state/panel-centered-v1" ]] && break
+    sleep 1
+done
+# No Kickoff: the user picked another launcher already. Leave it.
+grep -qx 'plugin=org.kde.plasma.kickoff' "$rc" 2>/dev/null || { done_marker; exit 0; }
+
+# No systemd on the Android phone build: plasmashell is plasma_session's child there.
+if systemctl --user is-active --quiet plasma-plasmashell.service 2>/dev/null; then
+    systemctl --user stop plasma-plasmashell.service
+    sed -i 's/^plugin=org\.kde\.plasma\.kickoff$/plugin=org.kde.plasma.kickerdash/' "$rc"
+    systemctl --user start plasma-plasmashell.service
+else
+    kquitapp6 plasmashell >/dev/null 2>&1
+    for _ in $(seq 1 50); do pgrep -x plasmashell >/dev/null || break; sleep 0.2; done
+    sed -i 's/^plugin=org\.kde\.plasma\.kickoff$/plugin=org.kde.plasma.kickerdash/' "$rc"
+    setsid -f plasmashell >/dev/null 2>&1
+fi
+
+done_marker

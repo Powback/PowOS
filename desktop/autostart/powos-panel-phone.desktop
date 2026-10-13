@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Panel Phone
+Comment=On a PowOS phone, makes the panel launcher the full-screen app grid (once)
+Exec=/usr/bin/powos-panel-phone
+Icon=start-here-kde
+Terminal=false
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;
+NoDisplay=true

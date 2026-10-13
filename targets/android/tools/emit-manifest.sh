@@ -30,7 +30,10 @@ find /etc /usr/share /usr/lib/powos /usr/bin /usr/libexec \( -type f -o -type l 
 comm -23 /tmp/all /tmp/owned \
   | grep -vE '^/etc/(machine-id|hostname|shadow|gshadow|passwd|group|subuid|subgid|ld\.so\.cache|pki|selinux|ssh/ssh_host_|fstab|resolv\.conf|yum\.repos\.d|dnf|rpm|ostree|containers/storage)' \
   | grep -vE '^/usr/share/(mime/[^/]+$|icons/[^/]+/icon-theme\.cache|fonts/.*\.uuid|applications/mimeinfo\.cache|glib-2\.0/schemas/gschemas\.compiled)' \
+  | grep -vE '^/usr/share/(rpm/|gamescope-session-plus/bootstrap_steam\.tar\.gz$|homebrew\.tar\.zst$)' \
   > /tmp/unowned
+# ^ rpm/: Fedora's package database (140 MB; the phone has pacman). bootstrap_steam.tar.gz: Steam's x86 client
+#   bootstrap (1.5 GB; Steam fetches its own on first start). homebrew.tar.zst: x86 Linuxbrew (150 MB).
 
 # Content-only packages the phone takes as files (rules: "bundle <rpm-name>").
 for p in $(awk '$1 == "bundle" {print $2}' "$rules"); do
@@ -38,10 +41,14 @@ for p in $(awk '$1 == "bundle" {print $2}' "$rules"); do
 done >> /tmp/unowned
 
 # Architecture-independent only: ELF files can't run on the phone (they come from Arch packages instead).
-: > "$out/content.list"
+# Big blobs (>50 MB) are never config or scripts: left out and listed in content-skipped.txt so they're seen.
+: > "$out/content.list"; : > "$out/content-skipped.txt"
 sort -u /tmp/unowned | while read -r f; do
   [ -L "$f" ] || [ -f "$f" ] || continue
   if [ -f "$f" ] && [ ! -L "$f" ] && [ "$(head -c 4 "$f" 2>/dev/null | od -An -c | tr -d ' ')" = '177ELF' ]; then continue; fi
+  if [ -f "$f" ] && [ ! -L "$f" ] && [ "$(stat -c %s "$f")" -gt 52428800 ]; then
+    echo "$(stat -c %s "$f") ${f#/}" >> "$out/content-skipped.txt"; continue
+  fi
   echo "${f#/}" >> "$out/content.list"
 done
 tar -C / --no-recursion -cf - -T "$out/content.list" | zstd -q -19 -o "$out/content.tar.zst"
