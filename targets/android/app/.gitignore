@@ -17,3 +17,5 @@ fastlane/README.md
 keystore.properties
 # captured by scripts/collage-captures.sh
 store/collage/raw/
+# stamped by android-app-dev scripts/build-gradle.sh
+app/version.properties

@@ -9,6 +9,13 @@ plugins {
 val uploadKey = rootProject.file("keystore.properties").takeIf { it.exists() }
     ?.let { f -> Properties().apply { f.inputStream().use(::load) } }
 
+// Version stamped by android-app-dev's build (scripts/build-gradle.sh writes app/version.properties, gitignored):
+// PowApps compares versionCode with the store's <project>.ver sidecar to offer updates.
+val versionProps = Properties().also { props ->
+    val f = rootProject.file("app/version.properties")
+    if (f.exists()) f.inputStream().use { props.load(it) }
+}
+
 android {
     namespace = "dev.omalauncher"
     compileSdk = 37
@@ -22,8 +29,8 @@ android {
         // which running the PowOS rootfs without proot needs (the engine's lotfix-run). Consequence:
         // side-loaded, not on the Play Store. (Omalauncher targets 37 and runs proot from its APK instead.)
         targetSdk = 28
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = versionProps.getProperty("versionCode")?.toInt() ?: 1
+        versionName = versionProps.getProperty("versionName") ?: "0.1.0-dev"
         ndk { abiFilters += "arm64-v8a" }
     }
 
