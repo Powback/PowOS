@@ -15,11 +15,14 @@ IMAGE=powos-web-qemu-build
 sed -e 's|https://zlib.net/zlib-$ZLIB_VERSION.tar.xz \| tar xJC|https://zlib.net/fossils/zlib-$ZLIB_VERSION.tar.gz \| tar xzC|' \
   "$SRC/Dockerfile" | docker build -t "$IMAGE" -
 
-# The flags are qemu-wasm's README build for aarch64-softmmu (xterm-pty serves the serial console for now).
-EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT \
--D_GNU_SOURCE -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB \
--sWASM_BIGINT -sMALLOC=mimalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js -sEXPORT_ES6=1 \
--sASYNCIFY_IMPORTS=ffi_call_js"
+# The flags are container2wasm's aarch64 build of qemu-wasm (reference/container2wasm/Dockerfile:899), which
+# ships arm64 guests: qemu-wasm's README flags plus -fno-inline-functions (aarch64 only there) and emmalloc
+# instead of mimalloc. With the README's flags systemd crashed (SEGV) in the initrd although every instruction
+# group of test/tcg-check matched the real CPU. xterm-pty serves the serial console for now.
+EXTRA_CFLAGS="-O3 -fno-inline-functions -g -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG \
+-DG_DISABLE_ASSERT -D_GNU_SOURCE -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sALLOW_TABLE_GROWTH \
+-sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=emmalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js \
+-sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js"
 # Our additions (targets/web/qemu/: the on-demand chunked disk, block/chunked.c) are laid over a copy of the
 # pinned source in a volume, which QEMU builds out of tree (keeps build/ off the macOS bind mount, and
 # incremental across runs: cp -a keeps mtimes, so unchanged files aren't rebuilt).
@@ -39,6 +42,9 @@ docker run --rm --cpus 8 --memory 12g -v "$SRC:/qemu-pinned:ro" -v "$HERE/qemu:/
     cfg="#define INSTANTIATE_NUM $INSTANTIATE_NUM"
     [ "$(cat /vol/src/tcg/wasm32-config.h 2>/dev/null)" = "$cfg" ] || echo "$cfg" > /vol/src/tcg/wasm32-config.h
     cd /vol/build
+    # Changed flags need a fresh configure (configure bakes them into build.ninja): start the build dir over.
+    if [ "$(cat .powos-flags 2>/dev/null)" != "$EXTRA_CFLAGS" ]; then rm -rf /vol/build/* /vol/build/.[!.]*; fi
+    printf %s "$EXTRA_CFLAGS" > .powos-flags
     [ -f build.ninja ] || emconfigure /vol/src/configure --static --target-list=aarch64-softmmu --cpu=wasm32 \
       --cross-prefix= --without-default-features --enable-system --with-coroutine=fiber --enable-virtfs \
       --extra-cflags="$EXTRA_CFLAGS" --extra-cxxflags="$EXTRA_CFLAGS" \

@@ -19,6 +19,13 @@ docker run --rm -v "$HERE/out:/out" powos-web-qemu-build bash -c '
   rm -rf /tmp/pack && mkdir -p /tmp/pack/pack-kernel /tmp/pack/pack-initramfs
   cp /out/disk/Image /tmp/pack/pack-kernel/
   cp /out/disk/initramfs.img /tmp/pack/pack-initramfs/
+  # Test initramfses, when built (?boot=<name>, args.js): test/tcg-check, test/probe.
+  for t in tcg-check probe; do
+    [ -f /out/$t/initramfs.img ] || continue
+    mkdir -p /tmp/pack/pack-$t && cp /out/$t/initramfs.img /tmp/pack/pack-$t/
+    python3 /emsdk/upstream/emscripten/tools/file_packager.py /out/site/load-$t.data \
+      --preload /tmp/pack/pack-$t@/pack-$t > /out/site/load-$t.js
+  done
   for f in kernel initramfs; do
     python3 /emsdk/upstream/emscripten/tools/file_packager.py /out/site/load-$f.data \
       --preload /tmp/pack/pack-$f@/pack-$f > /out/site/load-$f.js

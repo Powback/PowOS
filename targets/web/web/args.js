@@ -22,3 +22,21 @@ Module.powosArgs = (diskUrl) => [
   '-drive', `if=none,id=disk0,format=raw,file.driver=chunked,file.url=${diskUrl}`,
   '-device', 'virtio-blk-pci,drive=disk0',
 ];
+
+// ?boot=<name>: the same kernel and machine, a test initramfs instead of PowOS's (packed by assemble.sh from
+// out/<name>/initramfs.img), no disk.
+//   tcg-check  checksums groups of AArch64 instructions (test/tcg-check), compared with the real CPU's values
+//   probe      PowOS's initramfs + test/probe/probe-init: systemd's unit loading as an ordinary process, so a
+//              crash is reported by the kernel (PC, registers, library + offset) instead of systemd's handler
+Module.testBoots = {
+  'tcg-check': 'console=ttyAMA0 rdinit=/init quiet',
+  // root= only so the kernel unpacks into ramfs, not a tmpfs capped at RAM/2 (too small for PowOS's initramfs)
+  probe: 'console=ttyAMA0 root=/dev/vda rdinit=/probe-init print-fatal-signals=1 norandmaps',
+};
+Module.testArgs = (name) => {
+  const a = Module.powosArgs('');
+  a.splice(a.indexOf('-initrd'), 2, '-initrd', `/pack-${name}/initramfs.img`);
+  a.splice(a.indexOf('-append'), 2, '-append', Module.testBoots[name]);
+  a.splice(a.indexOf('-drive'), 4); // no disk
+  return a;
+};

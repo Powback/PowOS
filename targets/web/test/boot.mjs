@@ -1,7 +1,8 @@
 // Boots PowOS Web in headless Chromium and waits for the login prompt on the serial console.
 // Reports the boot time and what the streamed disk fetched (QEMU's chunked driver logs it to the console).
 //   URL      page to open (default https://powos-web.pow/)
-//   TIMEOUT  seconds to wait for "login:" (default 1800: emulated in wasm, a first boot is slow)
+//   TIMEOUT  seconds to wait (default 1800: emulated in wasm, a first boot is slow)
+//   WAIT_FOR regex that means done (default: a login prompt; tcg-check: 'tcg-check done')
 //   OUT      directory for console.log, serial.txt, screen.png
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -9,6 +10,7 @@ import fs from 'node:fs';
 const url = process.env.URL || 'https://powos-web.pow/';
 const timeout = Number(process.env.TIMEOUT || 1800) * 1000;
 const out = process.env.OUT || '/out';
+const waitFor = new RegExp(process.env.WAIT_FOR || 'login:\\s*$', 'm');
 fs.mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch({
@@ -46,7 +48,7 @@ let ok = false;
 while (Date.now() - start < timeout) {
   text = await serial();
   fs.writeFileSync(`${out}/serial.txt`, text); // as it goes: a hung boot still leaves its log
-  if (/login:\s*$/m.test(text)) { ok = true; break; }
+  if (waitFor.test(text)) { ok = true; break; }
   if (/Freezing execution|Kernel panic|Aborted\(/.test(text)) {
     console.log('BOOT FAILED:\n' + text.trim().split('\n').slice(-25).join('\n'));
     break;
@@ -58,7 +60,7 @@ while (Date.now() - start < timeout) {
 const secs = Math.round((Date.now() - start) / 1000);
 fs.writeFileSync(`${out}/serial.txt`, text);
 await page.screenshot({ path: `${out}/screen.png` });
-console.log(ok ? `LOGIN PROMPT after ${secs}s` : `NO LOGIN PROMPT after ${secs}s`);
+console.log(ok ? `DONE (${waitFor}) after ${secs}s` : `NOT DONE (${waitFor}) after ${secs}s`);
 console.log(`disk: ${lastFetch || '(nothing reported)'}`);
 await browser.close();
 process.exit(ok ? 0 : 1);

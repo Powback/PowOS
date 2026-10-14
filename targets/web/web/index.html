@@ -17,9 +17,9 @@
 <body>
   <header><b>PowOS Web</b><span id="status">loading QEMU…</span></header>
   <div id="terminal"></div>
-  <!-- Kernel and initramfs, preloaded (Emscripten file_packager). The disk is NOT: it streams. -->
+  <!-- Kernel and initramfs, preloaded (Emscripten file_packager). The disk is NOT: it streams. The initramfs is
+       loaded below by boot mode (?boot=tcg-check|probe boots a test initramfs instead: args.js). -->
   <script src="./load-kernel.js"></script>
-  <script src="./load-initramfs.js"></script>
   <script src="./args.js"></script>
   <script type="module">
     import 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
@@ -36,7 +36,14 @@
     xterm.loadAddon(master);
     Module.pty = slave;
     Module.mainScriptUrlOrBlob = new URL('./qemu-system-aarch64.js', location.href).href;
-    Module.arguments = Module.powosArgs(new URL('./disk', location.href).href);
+    const testBoot = new URLSearchParams(location.search).get('boot');
+    const test = testBoot in Module.testBoots ? testBoot : null;
+    await new Promise((ok, fail) => {
+      const s = Object.assign(document.createElement('script'),
+        { src: test ? `./load-${test}.js` : './load-initramfs.js', onload: ok, onerror: fail });
+      document.head.append(s);
+    });
+    Module.arguments = test ? Module.testArgs(test) : Module.powosArgs(new URL('./disk', location.href).href);
     // QEMU's own stderr (the chunked disk reports what it fetched there) goes to the console and the header.
     Module.printErr = (line) => {
       console.log(line);

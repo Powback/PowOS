@@ -1,0 +1,19 @@
+PowOS web: ctpop's output is args[0] and its input args[1] (one output, one input); the Wasm backend passed
+args[1], args[2], so it wrote the count into the source register and read a nonexistent operand.
+Upstream: https://github.com/ktock/qemu-wasm/issues/52 (open as of 2026-10-14).
+
+--- a/tcg/wasm32/tcg-target.c.inc
++++ b/tcg/wasm32/tcg-target.c.inc
+@@ -3688,10 +3688,10 @@
+         tcg_out_not(s, opc, args[0], args[1]);
+         break;
+     case INDEX_op_ctpop_i32:
+-        tcg_out_ctpop_i32(s, opc, args[1], args[2]);
++        tcg_out_ctpop_i32(s, opc, args[0], args[1]);
+         break;
+     case INDEX_op_ctpop_i64:
+-        tcg_out_ctpop_i64(s, opc, args[1], args[2]);
++        tcg_out_ctpop_i64(s, opc, args[0], args[1]);
+         break;
+     case INDEX_op_add2_i32:
+     case INDEX_op_add2_i64:
