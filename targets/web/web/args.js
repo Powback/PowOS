@@ -16,7 +16,7 @@
 globalThis.Module = globalThis.Module || {};
 Module.preRun = Module.preRun || [];
 
-Module.powosArgs = (m, diskUrl, { resume = false } = {}) => [
+Module.powosArgs = (m, diskUrl, { resume = false, snapshot = '' } = {}) => [
   // The screen is QEMU's graphical console on the page's canvas (-display web: qemu/ui/web.c, web/display.js); the
   // serial console stays on the terminal below it.
   '-display', 'web', '-serial', 'stdio', '-monitor', 'none',
@@ -28,9 +28,10 @@ Module.powosArgs = (m, diskUrl, { resume = false } = {}) => [
   '-append', m.append,
   // -drive, not -blockdev: -blockdev checks driver names against QEMU's QAPI schema, which only knows upstream
   // drivers; -drive finds "chunked" in the block layer's registry. A resumed snapshot also sees the blocks its
-  // machine had written (the overlay build-snapshot.sh saved).
+  // machine had written: the overlay build-snapshot.sh saved next to that snapshot's state (snapshots/<id>/, the id
+  // from snapshot.json), so a newer build never mixes its disk with an older published state.
   '-drive', `if=none,id=disk0,format=raw,file.driver=chunked,file.url=${diskUrl}` +
-    (resume ? ',file.overlay=snapshot/overlay.bin' : ''),
+    (resume ? `,file.overlay=snapshots/${snapshot}/overlay.bin` : ''),
   '-device', 'virtio-blk-pci,drive=disk0',
   // Resume: the machine state native QEMU saved at the login prompt, instead of booting.
   ...(resume ? ['-incoming', 'file:/pack-state/vm.state'] : []),

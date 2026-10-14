@@ -14,8 +14,18 @@ mkdir -p "$SITE"
 cp "$HERE"/out/qemu/qemu-system-aarch64.js "$HERE"/out/qemu/qemu-system-aarch64.wasm \
   "$HERE"/out/qemu/qemu-system-aarch64.worker.js "$SITE/"
 cp "$HERE"/web/* "$SITE/"
-rm -f "$SITE/load-state.data" "$SITE/load-state.js"   # only a current snapshot is offered
-docker run --rm -v "$HERE/out:/out" powos-web-qemu-build bash -c '
+rm -f "$SITE/load-state.data" "$SITE/load-state.data.gz" "$SITE/load-state.js" "$SITE/snapshot.json"   # only a current snapshot is offered
+# The snapshot to publish: the newest COMPLETE one (build-snapshot.sh makes a new out/disk/snapshots/<id>/ per run,
+# so a build in progress or a failed one is never picked, and never disturbs the one being served).
+D=$HERE/out/disk
+mkdir -p "$D/snapshots"
+if [ -f "$D/snapshot/vm.state" ]; then   # the old single-directory layout: adopt it as a dated snapshot
+  mv "$D/snapshot" "$D/snapshots/$(date -r "$D/snapshot/vm.state" +%Y%m%d-%H%M%S)"
+fi
+SNAP=$(ls -d "$D"/snapshots/*/ 2>/dev/null | sort | while read -r d; do [ -f "$d/vm.state" ] && [ -f "$d/overlay.bin" ] && basename "$d"; done | tail -1 || true)
+# Older complete snapshots beyond the newest three go (their overlay chunks stay: chunks are shared, by content).
+ls -d "$D"/snapshots/*/ 2>/dev/null | sort | while read -r d; do [ -f "$d/vm.state" ] && echo "$d"; done | awk '{a[NR] = $0} END {for (i = 1; i <= NR - 3; i++) print a[i]}' | xargs rm -rf || true
+docker run --rm -v "$HERE/out:/out" -e SNAP="$SNAP" powos-web-qemu-build bash -c '
   set -euo pipefail
   rm -rf /tmp/pack && mkdir -p /tmp/pack/pack-kernel /tmp/pack/pack-initramfs
   cp /out/disk/Image.gz /tmp/pack/pack-kernel/
@@ -28,8 +38,8 @@ docker run --rm -v "$HERE/out:/out" powos-web-qemu-build bash -c '
       --preload /tmp/pack/pack-$t@/pack-$t > /out/site/load-$t.js
   done
   # The snapshot to resume (build-snapshot.sh), when made.
-  if [ -f /out/disk/snapshot/vm.state ]; then
-    mkdir -p /tmp/pack/pack-state && cp /out/disk/snapshot/vm.state /tmp/pack/pack-state/
+  if [ -n "$SNAP" ]; then
+    mkdir -p /tmp/pack/pack-state && cp /out/disk/snapshots/$SNAP/vm.state /tmp/pack/pack-state/
     python3 /emsdk/upstream/emscripten/tools/file_packager.py /out/site/load-state.data \
       --preload /tmp/pack/pack-state@/pack-state > /out/site/load-state.js
   fi
@@ -42,6 +52,8 @@ docker run --rm -v "$HERE/out:/out" powos-web-qemu-build bash -c '
 for f in "$SITE"/*.wasm "$SITE"/*.data; do
   [ -f "$f.gz" ] && [ "$f.gz" -nt "$f" ] || gzip -9 -k -f "$f"
 done
+# Which snapshot the packed state belongs to: the page reads its disk overlay from snapshots/<id>/ (args.js).
+[ -n "$SNAP" ] && printf '{"id": "%s"}\n' "$SNAP" > "$SITE/snapshot.json" && echo "snapshot: $SNAP"
 # What the page downloads before QEMU starts, with real sizes: its progress bar (index.html).
 python3 - "$SITE" <<'PY'
 import json, os, sys
