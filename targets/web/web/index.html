@@ -31,6 +31,7 @@
 
     const xterm = new Terminal({ convertEol: false, fontSize: 13 });
     xterm.open(document.getElementById('terminal'));
+    window.powosTerm = xterm; // the serial console, for tests (test/boot.mjs) and the devtools
     const { master, slave } = openpty();
     xterm.loadAddon(master);
     Module.pty = slave;

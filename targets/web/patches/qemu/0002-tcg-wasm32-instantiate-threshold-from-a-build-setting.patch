@@ -1,0 +1,16 @@
+PowOS web: the number of times a TB runs in the interpreter (TCI) before it is compiled to Wasm comes from
+tcg/wasm32-config.h, written by targets/web/build-qemu.sh (QEMU_WASM_INSTANTIATE_NUM, default 1500 as upstream).
+A huge value keeps everything in TCI: tells Wasm-backend bugs from others.
+
+--- a/tcg/wasm32.h
++++ b/tcg/wasm32.h
+@@ -37,6 +37,9 @@
+
+ void init_wasm32();
+
++#include "wasm32-config.h"
++#ifndef INSTANTIATE_NUM
+ #define INSTANTIATE_NUM 1500
++#endif
+
+ #endif

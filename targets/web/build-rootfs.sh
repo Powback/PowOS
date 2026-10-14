@@ -33,7 +33,10 @@ if [ "${free_gb:-0}" -lt "$NEED_GB" ]; then
   exit 1
 fi
 docker volume create powos-web-rootfs >/dev/null
-trap 'docker volume rm -f powos-web-rootfs >/dev/null 2>&1 || true' EXIT
+cleanup_volume() { docker volume rm -f powos-web-rootfs >/dev/null 2>&1 || true; }
+# Also on INT/TERM: bash skips EXIT traps when killed, and a stopped build once left 7 GB behind.
+trap cleanup_volume EXIT
+trap 'cleanup_volume; exit 130' INT TERM
 # powos-android-cache: the phone build's persistent cache (ALARM tarball, pacman packages) - shared, so the
 # two builds download Arch once.
 docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \

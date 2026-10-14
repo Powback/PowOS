@@ -2,15 +2,18 @@
 """PowOS manifest (top-level RPMs) + phone-rules.conf + Arch's package list -> what the phone installs.
 
 Usage: resolve-packages.py <leaves.tsv> <phone-rules.conf> <available.txt> <install.txt> <report.txt>
-  available.txt: Arch package names one per line (pacman -Slq).
+  available.txt: Arch package names one per line (pacman -Slq), plus the names packages provide.
+  POWOS_TARGET (phone|vm, default phone): rules written kind@target only apply to that target.
 Writes the Arch packages to install, and a report of every RPM's fate (installed as / skipped / provided /
 bundled / MISSING: no Arch package), MISSING first.
 """
 import fnmatch
+import os
 import re
 import sys
 
 leaves_f, rules_f, avail_f, install_f, report_f = sys.argv[1:6]
+target = os.environ.get("POWOS_TARGET", "phone")
 available = {l.strip() for l in open(avail_f) if l.strip()}
 
 skips, skiparch, renames, rewrites, provides, bundles = [], {}, {}, [], [], set()
@@ -19,6 +22,9 @@ for raw in open(rules_f):
     if not line:
         continue
     kind, rest = line.split(None, 1)
+    kind, _, only = kind.partition("@")
+    if only and only != target:
+        continue
     if kind == "skip":
         # globs until the first token that is not a name/glob followed by the reason: globs are the tokens
         # before the reason; we treat every token containing no space as a glob and keep the line as reason.

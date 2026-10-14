@@ -26,8 +26,14 @@ EOF
 grep -q '^DisableSandbox' "$R/etc/pacman.conf" || sed -i '/^\[options\]/a DisableSandbox' "$R/etc/pacman.conf"
 cp -r /in/powos "$R/tmp/powos"
 
-cleanup() { for m in var/cache/pacman/pkg dev/pts dev proc sys; do umount -l "$R/$m" 2>/dev/null || true; done; }
+cleanup() {
+  for m in var/cache/pacman/pkg dev/pts dev proc sys; do umount -l "$R/$m" 2>/dev/null || true; done
+  umount -l "$R" 2>/dev/null || true
+}
 trap 'rc=$?; cleanup; exit $rc' EXIT
+# The rootfs bound onto itself, as arch-chroot does: / inside the chroot is then a mount point, so pacman can
+# measure it (otherwise "could not determine root mount point" and its free-space check refuses everything).
+mount --bind "$R" "$R"
 mkdir -p "$R/var/cache/pacman/pkg" && mount --bind /cache/pkg "$R/var/cache/pacman/pkg"
 mount -t proc proc "$R/proc"
 mount --rbind /sys "$R/sys" && mount --make-rslave "$R/sys"
@@ -43,7 +49,7 @@ chroot "$R" /bin/bash -c '
 cleanup; trap - EXIT
 mkdir -p /out/disk
 cp "$R/boot/Image" /out/disk/Image
-cp "$R/boot/initramfs-linux-fallback.img" /out/disk/initramfs.img
+cp "$R/boot/initramfs-powos-vm.img" /out/disk/initramfs.img
 rm -rf "$R/tmp/powos" "$R/var/cache/pacman/pkg/"* "$R/etc/resolv.conf"
 ln -sf ../run/systemd/resolve/stub-resolv.conf "$R/etc/resolv.conf"
 du -sh "$R" | sed 's/^/rootfs: /'

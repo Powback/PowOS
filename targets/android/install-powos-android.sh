@@ -30,8 +30,13 @@ pacman -U --noconfirm "$P"/pkgs/*.pkg.tar.*
 # the top level missed real PowOS software (embree, mtools, alsa-utils, bluez's tools... found by
 # phone-parity.py). The report (what each RPM became, MISSING ones first) stays in the image for review.
 mkdir -p /usr/share/powos
-{ pacman -Slq; pacman -Qq; } | sort -u > /tmp/arch-available.txt
-python3 $P/resolve-packages.py $P/manifest/packages.tsv $P/phone-rules.conf /tmp/arch-available.txt \
+# Available = package names plus the names they provide: Arch's perl ships the core modules Fedora splits into
+# ~130 perl-* RPMs, tinyxxd provides xxd... (pacman -S installs a provider by such a name).
+{ pacman -Slq; pacman -Qq
+  LC_ALL=C pacman -Si | awk '/^[A-Za-z][A-Za-z ]* *: / {p = ($1 == "Provides")} p {sub(/^Provides *: */, ""); print}' \
+    | tr -s ' ' '\n' | sed 's/[<>=].*//' | grep -v -x -e None -e ''
+} | sort -u > /tmp/arch-available.txt
+POWOS_TARGET=$POWOS_TARGET python3 $P/resolve-packages.py $P/manifest/packages.tsv $P/phone-rules.conf /tmp/arch-available.txt \
   /tmp/powos-install.txt /usr/share/powos/phone-report.txt
 # Ours are installed already (and in no repo, so pacman -S would not find them).
 pacman -Qq | sort -u > /tmp/installed.txt
@@ -71,11 +76,18 @@ printf '{"Config":{"RootFS":"%s"}}\n' "${fexroot%/}" > /usr/share/fex-emu/Config
 # of its packages.
 # Never over an Arch package's own file (outside /etc, where PowOS's configs are meant to win): the image's
 # unowned files can carry Fedora-specific copies of things Arch packages provide (a libgcc_s.so.1 symlink did).
+# Nor over a directory an Arch package owns: Fedora's compatibility symlinks can sit where Arch has a real
+# directory (usr/share/fonts/noto-cjk -> google-noto-sans-cjk-fonts, vs noto-fonts-cjk's noto-cjk/), and tar
+# can't replace one. The content holds only files and symlinks (no directories), so skipping such a path drops
+# exactly that one entry.
 python3 - "$P/manifest/content.list" > /tmp/powos-content-skip <<'PY'
 import glob, sys
 owned = set()
 for f in glob.glob('/var/lib/pacman/local/*/files'):
-    owned.update(l.strip() for l in open(f) if l.strip() and not l.startswith('%') and not l.endswith('/\n'))
+    for l in open(f):
+        l = l.strip()
+        if l and not l.startswith('%'):
+            owned.add(l.rstrip('/'))
 for l in open(sys.argv[1]):
     l = l.strip()
     if l in owned and not l.startswith('etc/'):
@@ -110,9 +122,12 @@ install -m 755 "$P/shims/omarchy-toggle-idle" /usr/local/bin/omarchy-toggle-idle
 install -m 755 "$P/shims/omarchy-lock-screen" /usr/local/bin/omarchy-lock-screen
 else
 # ── Virtual machine (targets/web) ───────────────────────────────────────────────────────────────────────
-# A normal boot: Arch Linux ARM's kernel (its fallback initramfs has every driver, virtio included), systemd as
-# init, the root filesystem on the VM's first virtio disk. PowOS's login (powos/powos, as in PowOS's docs).
+# A normal boot: Arch Linux ARM's kernel, systemd as init, the root filesystem on the VM's first virtio disk.
+# PowOS's login (powos/powos, as in PowOS's docs).
 pacman -S --noconfirm --needed linux-aarch64 mkinitcpio
+# A generic initramfs (every driver, as mkinitcpio's old "fallback"): the default one is autodetected for the
+# build container's hardware, and mkinitcpio no longer makes the fallback by default. The VM boots this one.
+mkinitcpio -k "$(ls /usr/lib/modules | head -1)" -S autodetect -g /boot/initramfs-powos-vm.img
 echo '/dev/vda / ext4 rw,relatime 0 1' > /etc/fstab
 echo powos > /etc/hostname
 id powos >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash powos

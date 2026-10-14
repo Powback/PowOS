@@ -1,6 +1,6 @@
 # PowOS Web: PowOS running in the browser (QEMU compiled to WebAssembly), its disk streamed on demand.
-#   http://powos-web.pow (LAN)   https://powos-web.powback.com (behind Authelia)
-# Build first: build-qemu.sh, build-disk.sh, assemble.sh.
+#   https://powos-web.pow - LAN (and WireGuard) only, not exposed on powback.com
+# Build first: build-qemu.sh, build-rootfs.sh, assemble.sh.
 services:
   powos-web:
     image: nginx:alpine
@@ -12,11 +12,18 @@ services:
       - ./out/disk:/srv/disk:ro
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.powos-web.rule=Host(`powos-web.powback.com`)"
-      - "traefik.http.routers.powos-web.entrypoints=websecure"
-      - "traefik.http.routers.powos-web.tls.certresolver=letsencrypt"
       - "traefik.http.routers.powos-web-local.rule=Host(`powos-web.pow`)"
       - "traefik.http.routers.powos-web-local.entrypoints=web"
+      # HTTPS on the LAN name too, with Traefik's own self-signed certificate (no Let's Encrypt, no public name):
+      # QEMU's threads need SharedArrayBuffer, which browsers only give a secure context (HTTPS or localhost).
+      # Accept the certificate warning once.
+      - "traefik.http.routers.powos-web-local-tls.rule=Host(`powos-web.pow`)"
+      - "traefik.http.routers.powos-web-local-tls.entrypoints=websecure"
+      - "traefik.http.routers.powos-web-local-tls.tls=true"
+      # LAN + WireGuard only (PowStation's local-only allowlist): ports 80/443 face the internet, and a Host
+      # header naming powos-web.pow would otherwise reach this from outside.
+      - "traefik.http.routers.powos-web-local.middlewares=local-only@docker"
+      - "traefik.http.routers.powos-web-local-tls.middlewares=local-only@docker"
       - "traefik.http.services.powos-web.loadbalancer.server.port=80"
     networks:
       - traefik

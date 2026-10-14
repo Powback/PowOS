@@ -13,7 +13,7 @@
  * Fetches are synchronous XHRs: this runs on QEMU's worker thread (-sPROXY_TO_PTHREAD), where they're allowed
  * and only block the guest's I/O, never the page.
  *
- * Usage: -blockdev driver=chunked,node-name=disk0,url=https://host/powos/disk
+ * Usage: -drive if=none,id=disk0,format=raw,file.driver=chunked,file.url=https://host/powos/disk
  *        -device virtio-blk-pci,drive=disk0
  *
  * TODO: keep written blocks (and fetched ones) in OPFS, so writes survive a reload and the second visit needs
@@ -54,9 +54,26 @@ EM_JS(int, chunked_http_get, (const char *url, void *dst, int cap), {
     }
 });
 #else
+/*
+ * Native QEMU (the same source, built to make snapshots on the server): url= is a local directory holding the
+ * published disk, read as files - the same bytes the browser streams.
+ */
 static int chunked_http_get(const char *url, void *dst, int cap)
 {
-    return -1;
+    int fd = open(url, O_RDONLY);
+    ssize_t n, total = 0;
+
+    if (fd < 0) {
+        return -errno;
+    }
+    while (total < cap && (n = read(fd, (uint8_t *)dst + total, cap - total)) > 0) {
+        total += n;
+    }
+    if (total == cap && read(fd, &(uint8_t){0}, 1) > 0) {
+        total = -2; /* bigger than the buffer */
+    }
+    close(fd);
+    return total;
 }
 #endif
 

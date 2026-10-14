@@ -25,7 +25,7 @@ EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -matomics -mbulk-me
 # incremental across runs: cp -a keeps mtimes, so unchanged files aren't rebuilt).
 docker run --rm --cpus 8 --memory 12g -v "$SRC:/qemu-pinned:ro" -v "$HERE/qemu:/powos:ro" \
   -v "$HERE/patches/qemu:/patches:ro" -v powos-web-qemu-build:/vol -v "$OUT:/out" \
-  -e EXTRA_CFLAGS="$EXTRA_CFLAGS" "$IMAGE" bash -c '
+  -e EXTRA_CFLAGS="$EXTRA_CFLAGS" -e INSTANTIATE_NUM="${QEMU_WASM_INSTANTIATE_NUM:-1500}" "$IMAGE" bash -c '
     set -euo pipefail
     mkdir -p /vol/src /vol/build
     cp -a -u /qemu-pinned/. /vol/src/
@@ -35,11 +35,16 @@ docker run --rm --cpus 8 --memory 12g -v "$SRC:/qemu-pinned:ro" -v "$HERE/qemu:/
       patch -d /vol/src -p1 -R -f -s --dry-run < "$p" >/dev/null 2>&1 && continue
       patch -d /vol/src -p1 -f -s < "$p"
     done
+    # TCI-to-Wasm threshold (patch 0002). Rewritten only when it changes: switching rebuilds a few files.
+    cfg="#define INSTANTIATE_NUM $INSTANTIATE_NUM"
+    [ "$(cat /vol/src/tcg/wasm32-config.h 2>/dev/null)" = "$cfg" ] || echo "$cfg" > /vol/src/tcg/wasm32-config.h
     cd /vol/build
     [ -f build.ninja ] || emconfigure /vol/src/configure --static --target-list=aarch64-softmmu --cpu=wasm32 \
       --cross-prefix= --without-default-features --enable-system --with-coroutine=fiber --enable-virtfs \
       --extra-cflags="$EXTRA_CFLAGS" --extra-cxxflags="$EXTRA_CFLAGS" \
       --extra-ldflags="-sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
     emmake make -j"$(nproc)" qemu-system-aarch64
-    cp qemu-system-aarch64* /out/ 2>/dev/null || cp qemu-system-aarch64.* /out/
+    # The JS loader is linked as plain "qemu-system-aarch64" (no extension); the page imports it as .js.
+    cp qemu-system-aarch64 /out/qemu-system-aarch64.js
+    cp qemu-system-aarch64.wasm qemu-system-aarch64.worker.js /out/
     ls -la /out'
