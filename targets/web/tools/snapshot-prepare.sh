@@ -14,6 +14,10 @@ fi
 grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
 systemctl is-enabled -q sddm.service || systemctl enable sddm.service
 
+# Units the browser machine masks (machine.json's systemd.mask= list, put here by build-snapshot.sh as MASK so the
+# kernel command line stays under its 2048 bytes): masked before graphical.target starts them.
+[ -n "${MASK:-}" ] && systemctl mask --runtime $MASK
+
 # The desktop: SDDM logs powos into Plasma; wait for its shell, then for the first-login work to settle.
 timeout 1800 systemctl start graphical.target
 systemctl is-active -q sddm.service || timeout 600 systemctl start sddm.service

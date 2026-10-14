@@ -23,12 +23,20 @@ echo "snapshot: out/disk/snapshots/$ID"
 # no qemu_fw_cfg, and another disk would change the machine. systemd.unit=kernel-command-line.target: the generator
 # hooks its command into default.target, which our explicit systemd.unit= bypasses; the script starts the targets.
 # Only this run has these arguments; the browser's command line is machine.json's.
-SCRIPT=$(python3 -c "import base64,gzip,sys; print(base64.b64encode(gzip.compress(open(sys.argv[1],'rb').read(), 9)).decode())" "$HERE/tools/snapshot-prepare.sh")
+# The kernel command line holds 2048 bytes (arm64 COMMAND_LINE_SIZE) and a longer one is cut off silently - systemd
+# then sees half a quoted command and freezes the boot. So: comments are stripped from the script, machine.json's
+# systemd.mask= list rides inside the script (applied with systemctl mask --runtime before any target starts), and
+# the total is checked here.
+MASKS=$(python3 -c "import json; print(' '.join(a.split('=',1)[1] for a in json.load(open('$M'))['append'].split() if a.startswith('systemd.mask=')))")
+APPEND=$(python3 -c "import json; print(' '.join(a for a in json.load(open('$M'))['append'].split() if not a.startswith('systemd.mask=')))")
+SCRIPT=$(python3 "$HERE/tools/pack-prepare.py" "$HERE/tools/snapshot-prepare.sh" "$MASKS")
 PREPARE="systemd.unit=kernel-command-line.target systemd.run_success_action=none systemd.run_failure_action=none systemd.run=\"/bin/sh -c 'echo $SCRIPT | base64 -d | gzip -dc | /bin/sh'\""
-echo "snapshot: prepare script on the command line: ${#PREPARE} bytes"
+CMDLINE="$APPEND $PREPARE"
+echo "snapshot: kernel command line ${#CMDLINE} of 2047 bytes (prepare script ${#PREPARE})"
+[ ${#CMDLINE} -lt 2040 ] || { echo "snapshot: kernel command line too long - it would be cut off and freeze the boot" >&2; exit 1; }
 docker run --rm -v "$HERE/out/disk:/disk" -v "$HERE/out/qemu-native:/q:ro" -v "$HERE/tools:/tools:ro" \
   -e MACHINE="$(j machine)" -e CPU="$(j cpu)" -e MEM="$(j memory)" -e KERNEL="$(j kernel)" -e INITRD="$(j initrd)" \
-  -e APPEND="$(j append)" -e PREPARE="$PREPARE" -e DEVICES="$DEVICES" -e S="/disk/snapshots/$ID" powos-web-qemu-native bash -c '
+  -e APPEND="$APPEND" -e PREPARE="$PREPARE" -e DEVICES="$DEVICES" -e S="/disk/snapshots/$ID" powos-web-qemu-native bash -c '
   set -euo pipefail
   # The browser machine (args.js), natively; plus a QMP socket for the snapshot controller.
   /q/qemu-system-aarch64 -display none -M "$MACHINE" -cpu "$CPU" -m "$MEM" -accel tcg -nic none $DEVICES \

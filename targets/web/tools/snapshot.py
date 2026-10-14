@@ -70,8 +70,12 @@ class QMP:
 
 con = Serial(serial_path)
 # The guest prints POWOS-SNAPSHOT-FAILED instead when its desktop never came up: no state is saved then.
-if con.expect(re.escape(MARKER) + "|POWOS-SNAPSHOT-FAILED", 3600).group(0) != MARKER:
-    sys.exit("snapshot: the guest's desktop never came up (POWOS-SNAPSHOT-FAILED; see serial.log) - nothing saved")
+# A dead boot ends the run at once instead of after the hour-long wait (a cut-off command line once froze systemd at
+# 6 s and this waited 28 minutes for a marker that could never come).
+DEAD = "Freezing execution|Kernel panic|has a bad unit file setting|Failed to start default target"
+got = con.expect(re.escape(MARKER) + "|POWOS-SNAPSHOT-FAILED|" + DEAD, 3600).group(0)
+if got != MARKER:
+    sys.exit(f"snapshot: {got!r} on the guest console (see serial.log) - nothing saved")
 time.sleep(3)
 
 q = QMP(qmp_path)
