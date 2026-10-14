@@ -30,6 +30,7 @@
     import initEmscriptenModule from './qemu-system-aarch64.js';
 
     const status = document.getElementById('status');
+    const timing = {}; // ms since navigation start, per stage (logged once PowOS answers)
     // Failures must show on the page, not only in the devtools console.
     const fail = (msg) => {
       status.textContent = `error: ${msg}`;
@@ -85,6 +86,7 @@
         }
       }));
       bar.parentElement.classList.add('done');
+      timing.downloaded = performance.now();
     }
     const script = (src) => new Promise((ok, fail) =>
       document.head.append(Object.assign(document.createElement('script'), { src, onload: ok, onerror: fail })));
@@ -119,21 +121,32 @@
       if (ownLines === null) ownLines = lines;
       const sawOutput = lines > ownLines;
       if (status.style.color) return clearInterval(beat); // failed
-      if (!/^running/.test(status.textContent))
+      if (!/^(running|resumed)/.test(status.textContent))
         status.textContent = `booting PowOS… ${Math.round((Date.now() - t0) / 1000)} s` +
           (sawOutput ? '' : ' (waiting for the first kernel output)');
     }, 1000);
     Module.onAbort = (what) => fail(`QEMU aborted: ${what}`);
+    timing.qemu = performance.now();
     await initEmscriptenModule(Module);
+    timing.started = performance.now();
     // A resumed snapshot sits at its login prompt silently: press Enter for it until the guest answers.
     if (resume) {
       const before = xterm.buffer.active.baseY + xterm.buffer.active.cursorY;
       let tries = 0;
       const nudge = setInterval(() => {
         const now = xterm.buffer.active.baseY + xterm.buffer.active.cursorY;
-        if (now > before || ++tries > 30) return clearInterval(nudge);
+        if (now > before) {
+          // Time to the first answer of the resumed machine, and where it went (console: the breakdown).
+          const s = (t) => (t / 1000).toFixed(1);
+          timing.answered = performance.now();
+          console.log(`timing: downloaded ${s(timing.downloaded)} s, QEMU loaded ${s(timing.started)} s, ` +
+                      `PowOS answered ${s(timing.answered)} s`);
+          status.textContent = `resumed in ${s(timing.answered)} s`;
+          return clearInterval(nudge);
+        }
+        if (++tries > 100) return clearInterval(nudge);
         xterm.paste('\r');
-      }, 1000);
+      }, 300); // promptly: this is on the critical path of time-to-PowOS
     }
     // xterm-pty: report the TTY as not readable while the terminal has no input, so QEMU's poll doesn't spin.
     const oldPoll = Module.TTY.stream_ops.poll;

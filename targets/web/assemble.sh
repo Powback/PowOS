@@ -37,6 +37,11 @@ docker run --rm -v "$HERE/out:/out" powos-web-qemu-build bash -c '
     python3 /emsdk/upstream/emscripten/tools/file_packager.py /out/site/load-$f.data \
       --preload /tmp/pack/pack-$f@/pack-$f > /out/site/load-$f.js
   done'
+# Precompressed once (nginx gzip_static serves file.gz): gzip -9 here instead of nginx compressing hundreds of MB
+# per visitor at its fast level. The page's progress counts decompressed bytes, as the browser hands them over.
+for f in "$SITE"/*.wasm "$SITE"/*.data; do
+  [ -f "$f.gz" ] && [ "$f.gz" -nt "$f" ] || gzip -9 -k -f "$f"
+done
 # What the page downloads before QEMU starts, with real sizes: its progress bar (index.html).
 python3 - "$SITE" <<'PY'
 import json, os, sys
