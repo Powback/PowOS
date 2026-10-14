@@ -22,7 +22,11 @@ services:
       - "traefik.http.routers.powos-web-local-tls.tls=true"
       # LAN + WireGuard only (PowStation's local-only allowlist): ports 80/443 face the internet, and a Host
       # header naming powos-web.pow would otherwise reach this from outside.
-      - "traefik.http.routers.powos-web-local.middlewares=local-only@docker"
+      # Plain http:// only redirects: over http the browser ignores COOP/COEP, so the page can never be
+      # cross-origin isolated there ("not cross-origin isolated").
+      - "traefik.http.middlewares.powos-web-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.powos-web-https.redirectscheme.permanent=true"
+      - "traefik.http.routers.powos-web-local.middlewares=local-only@docker,powos-web-https"
       - "traefik.http.routers.powos-web-local-tls.middlewares=local-only@docker"
       - "traefik.http.services.powos-web.loadbalancer.server.port=80"
     networks:

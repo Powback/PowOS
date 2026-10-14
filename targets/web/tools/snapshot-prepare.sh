@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs as root inside the snapshot machine (build-snapshot.sh: handed in through QEMU's fw_cfg, started by systemd's
+# Runs as root inside the snapshot machine (build-snapshot.sh: gzip+base64 on its kernel command line, started by systemd's
 # run generator): brings PowOS to its desktop, lets it settle, frees what a resumed machine doesn't need, and
 # signals tools/snapshot.py, which then saves the running machine.
 echo POWOS-SNAPSHOT-START > /dev/console
@@ -12,11 +12,24 @@ if [ ! -f /etc/sddm.conf.d/10-powos-vm-autologin.conf ]; then
   printf '[Autologin]\nUser=powos\nSession=%s\n' "${session%.desktop}" > /etc/sddm.conf.d/10-powos-vm-autologin.conf
 fi
 grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
+systemctl is-enabled -q sddm.service || systemctl enable sddm.service
 
 # The desktop: SDDM logs powos into Plasma; wait for its shell, then for the first-login work to settle.
 timeout 1800 systemctl start graphical.target
-for i in $(seq 1800); do pgrep -x plasmashell > /dev/null && break; sleep 1; done
-pgrep -x plasmashell > /dev/null && echo "POWOS-SNAPSHOT plasmashell up after ${i}s" > /dev/console
+systemctl is-active -q sddm.service || timeout 600 systemctl start sddm.service
+# Give up as soon as SDDM is gone rather than waiting out the clock (a missing display manager once cost 30 min here).
+for i in $(seq 1800); do
+  pgrep -x plasmashell > /dev/null && break
+  systemctl is-active -q sddm.service || break
+  sleep 1
+done
+if ! pgrep -x plasmashell > /dev/null; then
+  # No desktop, no snapshot: saving this machine would ship a text console as "PowOS".
+  { echo "POWOS-SNAPSHOT-FAILED: no plasmashell after ${i}s"; systemctl status sddm.service --no-pager -n 30
+    journalctl -b -u sddm.service --no-pager -n 40; } > /dev/console 2>&1
+  exit 1
+fi
+echo "POWOS-SNAPSHOT plasmashell up after ${i}s" > /dev/console
 sleep 90
 systemctl list-jobs > /dev/console
 

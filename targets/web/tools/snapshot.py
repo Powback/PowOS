@@ -63,18 +63,23 @@ class QMP:
         while True:
             r = json.loads(self.f.readline())
             if "error" in r:
-                sys.exit(f"snapshot: {name}: {r['error']}")
+                raise RuntimeError(f"snapshot: {name}: {r['error']}")
             if "return" in r:
                 return r["return"]
 
 
 con = Serial(serial_path)
-con.expect(re.escape(MARKER), 3600)
+# The guest prints POWOS-SNAPSHOT-FAILED instead when its desktop never came up: no state is saved then.
+if con.expect(re.escape(MARKER) + "|POWOS-SNAPSHOT-FAILED", 3600).group(0) != MARKER:
+    sys.exit("snapshot: the guest's desktop never came up (POWOS-SNAPSHOT-FAILED; see serial.log) - nothing saved")
 time.sleep(3)
 
 q = QMP(qmp_path)
 os.makedirs(os.path.dirname(state), exist_ok=True)
-q.cmd("screendump", filename=os.path.join(os.path.dirname(state), "screen.ppm"))  # what is being saved
+try:
+    q.cmd("screendump", filename=os.path.join(os.path.dirname(state), "screen.ppm"))  # what is being saved
+except RuntimeError as e:
+    print(e, "(continuing: the picture is only for checking)", file=sys.stderr)
 q.cmd("migrate", uri=f"file:{state}")
 while True:
     st = q.cmd("query-migrate").get("status")

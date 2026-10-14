@@ -14,16 +14,20 @@ j() { python3 -c "import json,sys; print(json.load(open('$M'))['$1'])"; }
 DEVICES=$(python3 -c "import json; print(' '.join('-device ' + d for d in json.load(open('$M')).get('devices', [])))")
 rm -rf "$HERE/out/disk/snapshot" && mkdir -p "$HERE/out/disk/snapshot"
 # The guest prepares itself for the snapshot: tools/snapshot-prepare.sh (desktop up, settled, page cache dropped,
-# memory reported, ready marker), handed in through QEMU's fw_cfg and run as root by systemd's run generator - no
-# login. systemd.unit=kernel-command-line.target: the generator hooks its command into default.target, which our
-# explicit systemd.unit= bypasses; the script starts the targets itself. Only this run has these arguments.
-PREPARE="systemd.unit=kernel-command-line.target systemd.run_success_action=none systemd.run_failure_action=none systemd.run=\"/bin/sh -c 'modprobe qemu_fw_cfg; exec /bin/sh /sys/firmware/qemu_fw_cfg/by_name/opt/powos/prepare/raw'\""
+# memory reported, ready marker), run as root by systemd's run generator - no login. The script rides on the kernel
+# command line itself, gzip+base64 (that alphabet is command-line safe; ~1 KB of the 2 KB limit): the ALARM kernel has
+# no qemu_fw_cfg, and another disk would change the machine. systemd.unit=kernel-command-line.target: the generator
+# hooks its command into default.target, which our explicit systemd.unit= bypasses; the script starts the targets.
+# Only this run has these arguments; the browser's command line is machine.json's.
+SCRIPT=$(python3 -c "import base64,gzip,sys; print(base64.b64encode(gzip.compress(open(sys.argv[1],'rb').read(), 9)).decode())" "$HERE/tools/snapshot-prepare.sh")
+PREPARE="systemd.unit=kernel-command-line.target systemd.run_success_action=none systemd.run_failure_action=none systemd.run=\"/bin/sh -c 'echo $SCRIPT | base64 -d | gzip -dc | /bin/sh'\""
+echo "snapshot: prepare script on the command line: ${#PREPARE} bytes"
 docker run --rm -v "$HERE/out/disk:/disk" -v "$HERE/out/qemu-native:/q:ro" -v "$HERE/tools:/tools:ro" \
   -e MACHINE="$(j machine)" -e CPU="$(j cpu)" -e MEM="$(j memory)" -e KERNEL="$(j kernel)" -e INITRD="$(j initrd)" \
   -e APPEND="$(j append)" -e PREPARE="$PREPARE" -e DEVICES="$DEVICES" powos-web-qemu-native bash -c '
   set -euo pipefail
   # The browser machine (args.js), natively; plus a QMP socket for the snapshot controller.
-  /q/qemu-system-aarch64 -display none -M "$MACHINE" -cpu "$CPU" -m "$MEM" -accel tcg -nic none $DEVICES -fw_cfg name=opt/powos/prepare,file=/tools/snapshot-prepare.sh \
+  /q/qemu-system-aarch64 -display none -M "$MACHINE" -cpu "$CPU" -m "$MEM" -accel tcg -nic none $DEVICES \
     -kernel "/disk/$KERNEL" -initrd "/disk/$INITRD" -append "$APPEND $PREPARE" \
     -drive if=none,id=disk0,format=raw,file.driver=chunked,file.url=/disk,file.save-overlay=/disk/snapshot/overlay.bin \
     -device virtio-blk-pci,drive=disk0 -qmp unix:/tmp/qmp.sock,server=on,wait=off \

@@ -5,6 +5,8 @@
 //   WAIT_FOR regex that means done (default: a login prompt; tcg-check: 'tcg-check done')
 //   PRESS_ENTER  1: press Enter in the terminal every 2 s (a resumed snapshot sits at its prompt silently)
 //   OUT      directory for console.log, serial.txt, screen.png
+//   DESKTOP  1: done means the DESKTOP is on the canvas (a fifth of it lit and many colours), not a serial prompt.
+//            A black canvas or a text console never passes - "a frame arrived" is not "PowOS is showing".
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 
@@ -44,12 +46,35 @@ const serial = () => page.evaluate(() => {
   return lines.join('\n');
 });
 
+// What the canvas shows: share of lit pixels and how many distinct (quantised) colours.
+const canvasLook = () => page.evaluate(() => {
+  const src = document.getElementById('screen');
+  if (!src || !src.width) return { lit: 0, colours: 0 };
+  const c = document.createElement('canvas');
+  c.width = 320; c.height = 200;
+  const g = c.getContext('2d');
+  g.drawImage(src, 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let lit = 0;
+  const colours = new Set();
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] + d[i + 1] + d[i + 2] > 48) lit++;
+    colours.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4);
+  }
+  return { lit: lit / (d.length / 4), colours: colours.size };
+});
+const desktop = process.env.DESKTOP === '1';
+
 let text = '';
 let ok = false;
+let look = { lit: 0, colours: 0 };
 while (Date.now() - start < timeout) {
   text = await serial();
   fs.writeFileSync(`${out}/serial.txt`, text); // as it goes: a hung boot still leaves its log
-  if (waitFor.test(text)) { ok = true; break; }
+  if (desktop) {
+    look = await canvasLook();
+    if (look.lit > 0.2 && look.colours > 40) { ok = true; break; }
+  } else if (waitFor.test(text)) { ok = true; break; }
   if (/Freezing execution|Kernel panic|Aborted\(/.test(text)) {
     console.log('BOOT FAILED:\n' + text.trim().split('\n').slice(-25).join('\n'));
     break;
@@ -67,7 +92,9 @@ while (Date.now() - start < timeout) {
 const secs = Math.round((Date.now() - start) / 1000);
 fs.writeFileSync(`${out}/serial.txt`, text);
 await page.screenshot({ path: `${out}/screen.png` });
-console.log(ok ? `DONE (${waitFor}) after ${secs}s` : `NOT DONE (${waitFor}) after ${secs}s`);
+const goal = desktop ? 'desktop on the canvas' : waitFor;
+console.log(ok ? `DONE (${goal}) after ${secs}s` : `NOT DONE (${goal}) after ${secs}s`);
+if (desktop) console.log(`canvas: ${Math.round(look.lit * 100)}% lit, ${look.colours} colours`);
 console.log(`disk: ${lastFetch || '(nothing reported)'}`);
 await browser.close();
 process.exit(ok ? 0 : 1);

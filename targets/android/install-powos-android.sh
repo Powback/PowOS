@@ -148,6 +148,10 @@ echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel && chmod 440 /etc/sudo
 mkdir -p /etc/sddm.conf.d
 printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/10-powos-vm-autologin.conf
 grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
+# Arch enables nothing on install (Fedora's presets do it for Bazzite): without these graphical.target is reached
+# with no display manager at all, and the machine sits at a text login.
+systemctl enable sddm.service
+systemctl set-default graphical.target
 fi
 
 # Parity with the PowOS image: every command, app, autostart entry and enabled unit it offers, checked here.
