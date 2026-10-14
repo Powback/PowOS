@@ -1,0 +1,70 @@
+#!/bin/sh
+# PowOS bring-up init: turns the phone into a USB network adapter + serial port and serves a root shell.
+#   Mac side:  phone.sh shell   (telnet 172.16.42.1)   or   screen /dev/tty.usbmodem*   (serial gadget)
+# Nothing here touches storage. To leave: hold power + volume down until the phone restarts into Android.
+export PATH=/bin:/sbin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts /run /tmp
+mount -t devpts devpts /dev/pts
+mount -t configfs configfs /sys/kernel/config
+mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+
+say() { echo "powos-bringup: $*" > /dev/kmsg; echo "powos-bringup: $*" > /dev/tty0 2>/dev/null; }
+say "init started, kernel $(uname -r)"
+
+# A console wherever one exists (QEMU's serial when testing this initramfs; phones have none reachable).
+for t in ttyAMA0 ttyMSM0; do
+  [ -e /dev/$t ] && setsid sh -c "exec sh </dev/$t >/dev/$t 2>&1" &
+done
+
+# Shells first, so a slow or failed USB bring-up still leaves a way in: telnet on every interface, and the
+# USB serial gadget port, respawned (the Mac side opening/closing it ends a session).
+telnetd -l /bin/sh -p 23
+( while true; do [ -e /dev/ttyGS0 ] && setsid sh -c 'exec sh </dev/ttyGS0 >/dev/ttyGS0 2>&1'; sleep 1; done ) &
+
+# USB gadget: CDC-NCM network (macOS/Linux drivers built in; Windows 11 too) + CDC-ACM serial.
+G=/sys/kernel/config/usb_gadget/powos
+mkdir -p $G/strings/0x409 $G/configs/c.1/strings/0x409
+echo 0x18d1 > $G/idVendor     # Google VID + a debug PID, the same pair postmarketOS uses for its debug shell
+echo 0xd001 > $G/idProduct
+echo "PowOS" > $G/strings/0x409/manufacturer
+echo "PowOS bring-up" > $G/strings/0x409/product
+echo "powos-$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | cut -c1-8)" > $G/strings/0x409/serialnumber
+echo "bring-up" > $G/configs/c.1/strings/0x409/configuration
+mkdir -p $G/functions/ncm.usb0 $G/functions/acm.GS0
+ln -s $G/functions/ncm.usb0 $G/configs/c.1/
+ln -s $G/functions/acm.GS0 $G/configs/c.1/
+
+# The USB controller appears once its PHY, regulators and clocks have probed: wait for it.
+udc=
+for i in $(seq 60); do
+  udc=$(ls /sys/class/udc 2>/dev/null | head -1)
+  [ -n "$udc" ] && break
+  sleep 1
+done
+if [ -z "$udc" ]; then
+  say "NO USB device controller after 60 s - dmesg kept in /run/dmesg.txt"
+else
+  echo "$udc" > $G/UDC
+  say "USB gadget up on $udc"
+fi
+
+# Network: 172.16.42.1 here, DHCP hands the Mac 172.16.42.2.
+[ -n "$udc" ] && for i in $(seq 20); do ifconfig usb0 > /dev/null 2>&1 && break; sleep 1; done
+ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up
+mkdir -p /var/lib/misc && touch /var/lib/misc/udhcpd.leases
+cat > /etc/udhcpd.conf <<EOF
+start 172.16.42.2
+end 172.16.42.2
+interface usb0
+option subnet 255.255.255.0
+option lease 3600
+EOF
+udhcpd /etc/udhcpd.conf
+
+dmesg > /run/dmesg.txt
+say "shell: telnet 172.16.42.1 (or the USB serial port)"
+while true; do sleep 60; dmesg > /run/dmesg.txt; done

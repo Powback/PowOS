@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * OnePlus Open per-unit values, written by `phone.sh dump` from the phone's stock device tree.
+ * POWOS-PLACEHOLDER: not read from the phone yet - make-bootimg.sh refuses to pack a boot image while this line exists.
+ */
+/ {
+	qcom,msm-id = <519 0x20000>;	/* SM8550 v2 - to be confirmed from the stock DT */
+	qcom,board-id = <0 0>;		/* unknown until read from the phone */
+};

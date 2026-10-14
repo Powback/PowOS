@@ -1,0 +1,1204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PowOS Phone Home</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<!--
+  PowOS phone home: interactive design proposal (2026-10-15).
+  Single file, no build, no network needed (Google Fonts optional; falls back to system-ui).
+  Companion docs: powos-shell-design.md, powos-app-plan.md, android-windows.md (same folder).
+-->
+<style>
+:root{
+  --bg:#eef0f6; --panel:#ffffff; --panel-2:#f6f7fb; --ink:#141824; --muted:#5b6274; --line:#dfe3ec;
+  --accent:#6a48ff; --accent-2:#0eae9f; --accent-ink:#fff; --warn:#e8930c; --bad:#e5484d; --ok:#22a663;
+  --android:#2fbf71; --linux:#6a48ff;
+  --wall:radial-gradient(120% 70% at 10% 0%,#cdbfff 0,transparent 55%),radial-gradient(90% 60% at 100% 35%,#a6efe4 0,transparent 55%),radial-gradient(110% 60% at 40% 105%,#ffd3ea 0,transparent 60%),#eef0fb;
+  --glass:rgba(255,255,255,.62); --glass-2:rgba(255,255,255,.82); --glass-line:rgba(255,255,255,.75);
+  --w-ink:#121521; --w-muted:#535b6e; --w-soft:rgba(20,24,40,.07);
+  --shadow:0 10px 30px -12px rgba(30,30,70,.25);
+  --frame:#1b1d23; --frame-edge:#3a3e48;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0b0d12; --panel:#141821; --panel-2:#1a1f2b; --ink:#e8ebf2; --muted:#98a1b3; --line:#252b39;
+    --accent:#8b6bff; --accent-2:#2dd4bf;
+    --wall:radial-gradient(120% 70% at 10% 0%,#3b2295 0,transparent 55%),radial-gradient(90% 60% at 100% 35%,#0b5d63 0,transparent 55%),radial-gradient(110% 60% at 40% 105%,#5a1746 0,transparent 60%),#0a0b12;
+    --glass:rgba(20,23,33,.55); --glass-2:rgba(28,32,45,.86); --glass-line:rgba(255,255,255,.09);
+    --w-ink:#eef1f7; --w-muted:#a2aabc; --w-soft:rgba(255,255,255,.07);
+    --shadow:0 12px 30px -12px rgba(0,0,0,.6);
+    --frame:#050608; --frame-edge:#2a2e36;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b0d12; --panel:#141821; --panel-2:#1a1f2b; --ink:#e8ebf2; --muted:#98a1b3; --line:#252b39;
+  --accent:#8b6bff; --accent-2:#2dd4bf;
+  --wall:radial-gradient(120% 70% at 10% 0%,#3b2295 0,transparent 55%),radial-gradient(90% 60% at 100% 35%,#0b5d63 0,transparent 55%),radial-gradient(110% 60% at 40% 105%,#5a1746 0,transparent 60%),#0a0b12;
+  --glass:rgba(20,23,33,.55); --glass-2:rgba(28,32,45,.86); --glass-line:rgba(255,255,255,.09);
+  --w-ink:#eef1f7; --w-muted:#a2aabc; --w-soft:rgba(255,255,255,.07);
+  --shadow:0 12px 30px -12px rgba(0,0,0,.6);
+  --frame:#050608; --frame-edge:#2a2e36;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+input{font:inherit;color:inherit}
+svg{display:block}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+
+/* ---------- page chrome ---------- */
+.app{display:grid;grid-template-columns:minmax(0,1fr) 400px;height:100vh}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+header.top{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em;margin-right:auto}
+.brand .logo{width:28px;height:28px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px}
+.brand small{display:block;font-weight:500;color:var(--muted);font-size:12px}
+.seg{display:inline-flex;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{padding:6px 10px;border-radius:7px;font-size:12.5px;font-weight:500;color:var(--muted);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.ctl{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+.ctl label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);padding:6px 10px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2)}
+.chk[aria-pressed="true"]{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.stage{flex:1;min-height:0;display:grid;place-items:center;position:relative;overflow:hidden;padding:36px 16px 40px}
+.hint{position:absolute;left:0;right:0;bottom:10px;text-align:center;font-size:12.5px;color:var(--muted);pointer-events:none;padding:0 16px}
+.hint kbd{font:600 11px "JetBrains Mono",monospace;border:1px solid var(--line);background:var(--panel);padding:1px 5px;border-radius:5px}
+.devlabel{position:absolute;top:10px;left:0;right:0;text-align:center;font-size:12px;color:var(--muted)}
+.devlabel b{color:var(--ink);font-weight:600}
+.sizer{position:relative}
+.device{position:absolute;left:0;top:0;transform-origin:0 0;padding:9px;border-radius:calc(var(--r) + 9px);background:var(--frame);box-shadow:0 0 0 1.5px var(--frame-edge),0 30px 80px -30px rgba(0,0,0,.55)}
+.device.hand{padding:9px;border-radius:30px}
+.screen{position:relative;overflow:hidden;border-radius:var(--r);background:#000;user-select:none;-webkit-user-select:none;touch-action:pan-x pan-y}
+.home,.pill{touch-action:none}
+.nbody kbd{font:600 11px "JetBrains Mono",monospace;border:1px solid var(--line);background:var(--panel-2);padding:1px 5px;border-radius:5px}
+.hinge{position:absolute;top:0;bottom:0;left:50%;width:1px;background:linear-gradient(transparent,rgba(255,255,255,.18) 20%,rgba(255,255,255,.18) 80%,transparent);z-index:60;pointer-events:none;mix-blend-mode:overlay}
+/* handheld shell */
+.grip{position:absolute;top:-30px;bottom:-30px;width:150px;background:linear-gradient(180deg,#2a2d35,#17191e);border-radius:60px;box-shadow:inset 0 2px 0 rgba(255,255,255,.06),0 20px 50px -20px rgba(0,0,0,.6);z-index:-1}
+.grip.l{left:-128px}.grip.r{right:-128px}
+.stick{position:absolute;width:46px;height:46px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#4a4f5a,#1c1e23);box-shadow:0 3px 0 #0c0d10}
+.dpad{position:absolute;width:66px;height:66px}
+.dpad button{position:absolute;width:22px;height:22px;background:#3a3e48;border-radius:4px;color:#aab;font-size:10px}
+.dpad button:active,.abxy button:active{filter:brightness(1.6)}
+.abxy{position:absolute;width:70px;height:70px}
+.abxy button{position:absolute;width:24px;height:24px;border-radius:50%;background:#3a3e48;color:#fff;font-weight:700;font-size:11px}
+.gbtn{position:absolute;font-size:9px;color:#8a8f9b;padding:3px 8px;border-radius:9px;background:#24272e}
+
+/* notes panel */
+aside.notes{border-left:1px solid var(--line);background:var(--panel);overflow:auto;display:flex;flex-direction:column}
+.ntabs{position:sticky;top:0;background:var(--panel);z-index:2;padding:14px 18px 0;border-bottom:1px solid var(--line)}
+.ntabs h2{margin:0 0 10px;font-size:15px;letter-spacing:-.01em}
+.ntabs .seg{margin-bottom:10px}
+.nbody{padding:16px 18px 40px;font-size:13.5px}
+.nbody h3{font-size:13px;margin:18px 0 6px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.nbody h3:first-child{margin-top:0}
+.nbody p{margin:6px 0}
+.nbody ul{margin:6px 0;padding-left:18px}
+.nbody li{margin:4px 0}
+.nbody code{font:12px "JetBrains Mono",monospace;background:var(--panel-2);padding:1px 4px;border-radius:4px;border:1px solid var(--line)}
+.nbody table{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0}
+.nbody th,.nbody td{text-align:left;vertical-align:top;padding:7px 6px;border-bottom:1px solid var(--line)}
+.nbody th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}
+.tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px;letter-spacing:.02em}
+.tag.c{background:color-mix(in srgb,var(--android) 18%,transparent);color:var(--android)}
+.tag.k{background:color-mix(in srgb,var(--linux) 18%,transparent);color:var(--linux)}
+.tag.n{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.q{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;background:var(--panel-2)}
+.q b{display:block;margin-bottom:3px}
+.q .rec{color:var(--muted);font-size:12.5px}
+pre.owl{font:11.5px/1.5 "JetBrains Mono",monospace;background:#11131a;color:#d6d9e6;padding:10px 12px;border-radius:10px;overflow:auto;margin:8px 0}
+pre.owl i{color:#8b6bff;font-style:normal}pre.owl u{color:#2dd4bf;text-decoration:none}pre.owl s{color:#e8a65b;text-decoration:none}
+
+@media (max-width:1100px){
+  .app{grid-template-columns:1fr;height:auto}
+  .stage{height:86vh;min-height:520px}
+  aside.notes{border-left:0;border-top:1px solid var(--line)}
+}
+@media (max-width:600px){
+  header.top,.ctl{padding:10px 16px}
+  .stage{padding:16px 16px 34px}
+}
+
+/* ---------- inside the device ---------- */
+.screen{color:var(--w-ink);font-size:13px}
+.wall{position:absolute;inset:0;background:var(--wall)}
+.wall::after{content:"";position:absolute;inset:0;background:radial-gradient(60% 40% at 70% 70%,rgba(255,255,255,.08),transparent)}
+.layer{position:absolute;inset:0}
+.sb{position:absolute;top:0;left:0;right:0;height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:600;font-size:12.5px;z-index:40;pointer-events:none}
+.sb .icons{display:flex;gap:5px;align-items:center}
+.cam{position:absolute;top:10px;width:11px;height:11px;border-radius:50%;background:#000;box-shadow:0 0 0 2px rgba(0,0,0,.4);z-index:41;left:50%;margin-left:-5.5px}
+.pill{position:absolute;bottom:6px;left:50%;width:120px;height:5px;margin-left:-60px;border-radius:5px;background:var(--w-ink);opacity:.55;z-index:45;cursor:pointer}
+.pill::before{content:"";position:absolute;inset:-12px -20px}
+.glass{background:var(--glass);backdrop-filter:blur(18px) saturate(1.5);-webkit-backdrop-filter:blur(18px) saturate(1.5);border:1px solid var(--glass-line);box-shadow:var(--shadow)}
+.toast{position:absolute;left:50%;bottom:70px;transform:translate(-50%,20px);opacity:0;transition:.25s;z-index:80;padding:9px 14px;border-radius:14px;font-size:12px;font-weight:500;white-space:nowrap;max-width:90%;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* home */
+.home{position:absolute;inset:30px 0 0;display:flex;flex-direction:column}
+.pages{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;min-height:0}
+.pages::-webkit-scrollbar{display:none}
+.page{flex:0 0 100%;scroll-snap-align:start;padding:10px 14px 0;overflow:hidden}
+.wgrid{display:grid;grid-template-columns:repeat(var(--cols),1fr);grid-auto-rows:var(--row);gap:10px;grid-auto-flow:row dense}
+.dots{display:flex;justify-content:center;gap:6px;padding:8px 0 6px}
+.dots i{cursor:pointer;width:6px;height:6px;border-radius:3px;background:var(--w-ink);opacity:.25;transition:.2s}
+.dots i.on{width:16px;opacity:.7}
+.dock{margin:0 14px;padding:9px 12px;border-radius:24px;display:flex;justify-content:space-around}
+.bar{margin:8px 14px 20px;height:44px;border-radius:22px;display:flex;align-items:center;gap:8px;padding:0 6px 0 14px;color:var(--w-muted);cursor:text}
+.bar .ph{flex:1;font-size:13px}
+.bar .mic{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:#fff}
+
+/* widgets */
+.w{position:relative;border-radius:20px;padding:12px 13px;overflow:hidden;container-type:size;min-width:0}
+.w .lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--w-muted);display:flex;align-items:center;gap:5px}
+.w .lbl i{width:6px;height:6px;border-radius:50%;background:var(--accent-2);display:inline-block}
+.w-clock .t{font-size:clamp(30px,26cqh,58px);font-weight:300;letter-spacing:-.04em;line-height:1}
+.w-clock .d{font-weight:600;margin-top:4px;font-size:13px}
+.w-clock .m{color:var(--w-muted);font-size:11.5px;margin-top:2px}
+.w-clock.big{background:none;border-color:transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;padding-left:6px}
+.w-clock.big .t{font-size:clamp(40px,50cqh,76px);font-weight:200}
+.w-weather .tmp{font-size:30px;font-weight:300;letter-spacing:-.03em;line-height:1.1;margin-top:3px}
+.w-weather .s{font-size:11.5px;color:var(--w-muted)}
+.spark{position:absolute;left:0;right:0;bottom:0;height:34%;opacity:.9}
+.ring{position:relative;width:min(58cqh,40cqw);aspect-ratio:1;flex:none}
+.ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:15px;font-weight:700}
+.kv{font-size:11.5px;color:var(--w-muted);line-height:1.6}
+.kv b{color:var(--w-ink);font-weight:600}
+.agenda{margin-top:6px;display:flex;flex-direction:column;gap:6px}
+.ev{display:flex;gap:8px;align-items:stretch;font-size:12px;line-height:1.25}
+.ev i{width:3px;border-radius:2px;flex:none}
+.ev small{display:block;color:var(--w-muted);font-size:10.5px}
+.layers{display:flex;flex-direction:column;gap:4px;margin:7px 0}
+.lay{display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 7px;border-radius:7px;background:var(--w-soft)}
+.lay i{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.lay span{margin-left:auto;color:var(--w-muted);font-size:10.5px}
+.mini-btn{font-size:11px;font-weight:600;padding:5px 10px;border-radius:9px;background:var(--accent);color:#fff}
+.mini-btn.ghost{background:var(--w-soft);color:var(--w-ink)}
+.w-media{display:flex;gap:12px;align-items:center}
+.art{width:min(76cqh,40cqw);aspect-ratio:1;border-radius:14px;flex:none;background:linear-gradient(135deg,#ff5f8f,#7b3cff 60%,#1e3a8a);box-shadow:0 8px 20px -8px rgba(123,60,255,.6);position:relative;overflow:hidden}
+.art::after{content:"";position:absolute;inset:30% -10% -40% 30%;border-radius:50%;background:rgba(255,255,255,.18)}
+.prog{height:4px;border-radius:2px;background:var(--w-soft);margin:7px 0;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--w-ink);border-radius:2px}
+.mctl{display:flex;gap:14px;align-items:center}
+.mctl .pp{width:30px;height:30px;border-radius:50%;background:var(--w-ink);color:var(--panel);display:grid;place-items:center}
+.tgl{display:flex;justify-content:space-between;align-items:center;height:100%;gap:6px}
+.tgl button{flex:1;height:100%;max-height:44px;border-radius:14px;display:grid;place-items:center;background:var(--w-soft);transition:.15s}
+.tgl button.on{background:var(--accent);color:#fff}
+.games{display:flex;gap:8px;margin-top:8px;height:calc(100% - 22px)}
+.cover{flex:1;border-radius:12px;position:relative;overflow:hidden;min-width:0;display:flex;align-items:flex-end;padding:7px;font-size:10.5px;font-weight:700;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.6);line-height:1.15}
+.cover::before{content:"";position:absolute;inset:0;background:linear-gradient(transparent 45%,rgba(0,0,0,.55))}
+.cover span{position:relative}
+.agentmsg{font-size:12px;margin-top:6px;padding:8px 10px;border-radius:12px 12px 12px 4px;background:var(--w-soft)}
+.agentin{margin-top:7px;font-size:11.5px;color:var(--w-muted);padding:7px 10px;border-radius:10px;border:1px dashed var(--glass-line)}
+@container (max-height:90px){ .w-weather .spark{display:none} }
+@container (max-width:150px){ .w-media .art{display:none} .agenda .ev:nth-child(n+3){display:none} }
+
+/* edit mode */
+.home.edit .w{animation:wig .5s ease-in-out infinite alternate;outline:1.5px dashed color-mix(in srgb,var(--accent) 70%,transparent);outline-offset:-1px;cursor:grab}
+.home.edit .w:nth-child(2n){animation-delay:-.25s}
+@keyframes wig{from{transform:rotate(-.5deg)}to{transform:rotate(.5deg)}}
+.wx,.wr{display:none;position:absolute;width:24px;height:24px;border-radius:50%;z-index:5;place-items:center;font-size:13px;font-weight:700}
+.home.edit .wx,.home.edit .wr{display:grid}
+.wx{top:6px;right:6px;background:var(--bad);color:#fff}
+.wr{bottom:6px;right:6px;background:var(--accent);color:#fff}
+.wsz{display:none;position:absolute;bottom:9px;left:10px;font:600 10px "JetBrains Mono",monospace;color:var(--accent);z-index:5}
+.home.edit .wsz{display:block}
+.home.edit .page{padding-top:54px}
+.w.h1 .wx{top:50%;margin-top:-12px;right:36px}.w.h1 .wr{bottom:auto;top:50%;margin-top:-12px}.home.edit .w.h1 .wsz{display:none}
+.w.drag-over{outline:2px solid var(--accent)!important}
+.editbar{position:absolute;top:34px;left:12px;right:12px;z-index:30;display:flex;align-items:center;gap:8px;padding:6px 6px 6px 12px;border-radius:16px;font-size:12px}
+.editbar span{flex:1;color:var(--w-muted)}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:50;border-radius:26px 26px 0 0;padding:10px 16px 24px;max-height:72%;overflow:auto;background:var(--glass-2);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border-top:1px solid var(--glass-line);animation:up .28s cubic-bezier(.2,.8,.2,1)}
+@keyframes up{from{transform:translateY(40%);opacity:0}}
+@keyframes fade{from{opacity:0}}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--w-ink);opacity:.25;margin:2px auto 10px}
+.wlib{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wlib button{text-align:left;padding:10px;border-radius:14px;background:var(--w-soft);font-size:12px}
+.wlib button b{display:block;font-size:12.5px}
+.wlib button small{color:var(--w-muted)}
+
+/* tablet home */
+.home.tab{flex-direction:row;inset:30px 0 0}
+.rail{width:64px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 0;margin:8px 0 8px 10px;border-radius:22px}
+.rail .sep{width:26px;height:1px;background:var(--glass-line);margin:2px 0}
+.tabmain{flex:1;display:flex;flex-direction:column;min-width:0}
+.tabmain .page{padding:8px 14px 0}
+
+/* app icon */
+.ico{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10.5px;font-weight:500;min-width:0}
+.ico .sq{width:var(--isz,46px);height:var(--isz,46px);border-radius:31%;display:grid;place-items:center;color:#fff;font-weight:800;font-size:calc(var(--isz,46px)*.36);letter-spacing:-.03em;box-shadow:0 4px 12px -4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.25);position:relative}
+.ico .nm{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--w-ink)}
+.badge{position:absolute;right:-3px;bottom:-3px;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--panel);font-size:8px;font-weight:800;color:#fff}
+.badge.a{background:var(--android)}
+.badge.l{background:var(--linux)}
+.ico.hl .sq{outline:2.5px solid var(--accent);outline-offset:3px}
+
+/* drawer */
+.ovl{position:absolute;inset:0;z-index:50}
+.scrim{position:absolute;inset:0;background:rgba(10,10,20,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:fade .2s}
+.drawer{position:absolute;left:0;right:0;bottom:0;top:38px;border-radius:28px 28px 0 0;display:flex;flex-direction:column;padding:8px 14px 0;background:var(--glass-2);backdrop-filter:blur(30px) saturate(1.4);-webkit-backdrop-filter:blur(30px) saturate(1.4);border-top:1px solid var(--glass-line);animation:up .3s cubic-bezier(.2,.8,.2,1)}
+.drawer.tab{left:50%;right:auto;width:560px;margin-left:-280px;top:60px;bottom:58px;border-radius:24px;border:1px solid var(--glass-line)}
+.dsearch{display:flex;align-items:center;gap:8px;height:42px;border-radius:21px;background:var(--w-soft);padding:0 6px 0 13px;color:var(--w-muted)}
+.dsearch input{flex:1;border:0;background:none;outline:none;color:var(--w-ink);font-size:13.5px;min-width:0}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:10px 0 4px;flex:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:5px 11px;border-radius:14px;font-size:11.5px;font-weight:600;background:var(--w-soft);color:var(--w-muted)}
+.chip.on{background:var(--w-ink);color:var(--panel)}
+.srcrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;font-size:11px;color:var(--w-muted);flex:none}
+.srcseg{display:inline-flex;background:var(--w-soft);border-radius:9px;padding:2px}
+.srcseg button{padding:3px 9px;border-radius:7px;font-size:11px;font-weight:600;color:var(--w-muted)}
+.srcseg button.on{background:var(--glass-2);color:var(--w-ink);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.dscroll{flex:1;overflow:auto;scrollbar-width:none;padding-bottom:24px}
+.dscroll::-webkit-scrollbar{display:none}
+.sect{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--w-muted);margin:10px 0 8px}
+.dgrid{display:grid;grid-template-columns:repeat(var(--dcols,4),1fr);gap:14px 6px}
+.ask{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:var(--w-soft);margin-top:8px;width:100%;text-align:left;font-size:12.5px}
+.ask .av{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-2));flex:none}
+.ask small{display:block;color:var(--w-muted);font-size:11px}
+
+/* overview */
+.ov{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;padding-top:44px;animation:fade .2s}
+.ov .scrim{background:rgba(5,5,12,.45);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.ovtrack{position:relative;flex:1;display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;padding:10px 20%;align-items:center;scrollbar-width:none}
+.ovtrack::-webkit-scrollbar{display:none}
+.card{flex:0 0 60%;scroll-snap-align:center;display:flex;flex-direction:column;gap:8px;animation:up .3s}
+.card .hd{display:flex;align-items:center;gap:7px;color:#fff;font-size:12px;font-weight:600}
+.card .hd .ico{--isz:22px}
+.card .hd .x{margin-left:auto;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center;font-size:12px}
+.card .shot{aspect-ratio:var(--ar,.48);border-radius:18px;overflow:hidden;box-shadow:0 20px 40px -12px rgba(0,0,0,.6);cursor:pointer;position:relative;background:var(--panel)}
+.card .acts{display:flex;gap:6px;justify-content:center}
+.card .acts button{font-size:11px;font-weight:600;color:#fff;padding:5px 10px;border-radius:10px;background:rgba(255,255,255,.14)}
+.ovfoot{position:relative;display:flex;justify-content:center;gap:10px;padding:10px 0 26px}
+.ovfoot button{color:#fff;font-size:12px;font-weight:600;padding:8px 16px;border-radius:16px;background:rgba(255,255,255,.14)}
+.ov.tab .ovtrack{display:grid;grid-template-columns:repeat(3,1fr);padding:10px 26px;gap:18px;align-content:center;overflow:auto}
+.ov.tab .card{flex:none}
+.dz{position:absolute;top:44px;bottom:70px;width:28%;border:2px dashed rgba(255,255,255,.35);border-radius:22px;display:grid;place-items:center;color:rgba(255,255,255,.8);font-size:12px;font-weight:600;opacity:0;transition:.2s;pointer-events:none;z-index:3;text-align:center;padding:10px}
+.dz.l{left:12px}.dz.r{right:12px}
+.ov.dragging .dz{opacity:1;pointer-events:auto}
+.dz.over{background:rgba(139,107,255,.3);border-color:#fff}
+
+/* windows */
+.desk{position:absolute;inset:30px 0 0;display:flex;flex-direction:column}
+.panes{flex:1;display:flex;gap:0;padding:6px;min-height:0;position:relative}
+.pane{position:relative;border-radius:16px;overflow:hidden;background:var(--panel);display:flex;flex-direction:column;min-width:0;box-shadow:var(--shadow);transition:box-shadow .2s}
+.pane.focus{box-shadow:0 0 0 2px var(--accent),var(--shadow)}
+.divider{width:14px;flex:none;display:grid;place-items:center;cursor:col-resize;touch-action:none}
+.divider i{width:4px;height:44px;border-radius:2px;background:var(--w-ink);opacity:.45}
+.wtitle{height:30px;flex:none;display:flex;align-items:center;gap:7px;padding:0 6px 0 10px;font-size:11.5px;font-weight:600;background:var(--panel-2);border-bottom:1px solid var(--line);color:var(--ink);cursor:grab;touch-action:none}
+.wtitle .ico{--isz:16px}
+.wtitle .wb{margin-left:auto;display:flex;gap:4px}
+.wtitle .wb button{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10px;color:var(--muted)}
+.wtitle .wb button:hover{background:var(--line)}
+.wtitle .src{font-weight:500;color:var(--muted);font-size:10.5px}
+.float{position:absolute;z-index:20;border-radius:14px;overflow:hidden;display:flex;flex-direction:column;background:var(--panel);box-shadow:0 0 0 1px var(--glass-line),0 24px 50px -14px rgba(0,0,0,.55)}
+.float .rs{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;touch-action:none;background:linear-gradient(135deg,transparent 50%,var(--line) 50%)}
+.taskbar{height:46px;flex:none;margin:0 6px 6px;border-radius:16px;display:flex;align-items:center;gap:4px;padding:0 8px}
+.taskbar .start{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-weight:800;font-size:12px}
+.taskbar .tsearch{height:32px;border-radius:10px;padding:0 10px;display:flex;align-items:center;gap:6px;color:var(--w-muted);font-size:11.5px;background:var(--w-soft);width:150px}
+.taskbar .apps{flex:1;display:flex;justify-content:center;gap:6px}
+.tb{position:relative;width:36px;height:36px;display:grid;place-items:center;border-radius:10px}
+.tb .ico{--isz:26px}
+.tb.run::after{content:"";position:absolute;bottom:1px;left:50%;width:6px;height:3px;margin-left:-3px;border-radius:2px;background:var(--w-muted)}
+.tb.act{background:var(--w-soft)}
+.tb.act::after{width:14px;margin-left:-7px;background:var(--accent)}
+.tray{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;padding:0 4px}
+.tray small{display:block;font-weight:500;color:var(--w-muted);font-size:9.5px;text-align:right}
+
+/* app mock content */
+.abody{flex:1;position:relative;overflow:hidden;font-size:11px;color:var(--ink);background:var(--panel);min-height:0}
+.ahead{height:42px;display:flex;align-items:center;gap:8px;padding:0 12px;color:#fff;font-weight:600;font-size:12.5px}
+.bub{max-width:72%;padding:6px 9px;border-radius:12px;margin:6px 10px;font-size:11px;line-height:1.35}
+.bub.in{background:var(--panel-2);border:1px solid var(--line)}
+.bub.out{margin-left:auto;background:#d9fdd3;color:#111}
+:root[data-theme="dark"] .bub.out{background:#144d37;color:#e9fff3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .bub.out{background:#144d37;color:#e9fff3}}
+.term{position:absolute;inset:0;background:#0e1016;color:#c9d1e0;font:10.5px/1.55 "JetBrains Mono",monospace;padding:10px 12px;white-space:pre;overflow:hidden}
+.term .g{color:#2dd4bf}.term .p{color:#8b6bff}.term .y{color:#e8c46b}
+.skl{height:8px;border-radius:4px;background:var(--line);margin:7px 12px}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(54px,1fr));gap:10px;padding:12px}
+.fgrid div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:9.5px;color:var(--muted)}
+.fgrid div i{width:36px;height:28px;border-radius:5px;background:linear-gradient(#5aa9f6,#2b7de0);display:block}
+.urlbar{margin:8px 10px;height:26px;border-radius:13px;background:var(--panel-2);border:1px solid var(--line);font-size:10.5px;display:flex;align-items:center;padding:0 10px;color:var(--muted)}
+.hero{margin:8px 10px;height:38%;border-radius:12px;background:linear-gradient(135deg,#ff9a5a,#ff4f86,#6a48ff)}
+.lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:8px;padding:10px}
+.lib i{aspect-ratio:2/3;border-radius:8px;display:block}
+.srow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.srow i{width:24px;height:24px;border-radius:8px;display:block}
+
+/* shade */
+.shade{position:absolute;left:0;right:0;top:0;z-index:55;padding:36px 14px 14px;border-radius:0 0 28px 28px;background:var(--glass-2);backdrop-filter:blur(30px) saturate(1.4);-webkit-backdrop-filter:blur(30px) saturate(1.4);border-bottom:1px solid var(--glass-line);animation:down .3s cubic-bezier(.2,.8,.2,1);max-height:100%;overflow:auto;scrollbar-width:none}
+.shade::-webkit-scrollbar{display:none}
+@keyframes down{from{transform:translateY(-30%);opacity:0}}
+.shade.tab{left:auto;width:100%;display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:40px 18px 18px;border-radius:0 0 24px 24px}
+.shd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.shd .t{font-size:26px;font-weight:300;letter-spacing:-.03em}
+.shd small{color:var(--w-muted);font-size:11.5px}
+.qs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.qt{height:54px;border-radius:16px;background:var(--w-soft);display:flex;flex-direction:column;align-items:flex-start;justify-content:center;padding:0 10px;gap:2px;font-size:10.5px;font-weight:600;text-align:left}
+.qt span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.qt small{font-weight:500;color:var(--w-muted);font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.qt.on{background:var(--accent);color:#fff}
+.qt.on small{color:rgba(255,255,255,.75)}
+.slider{height:34px;border-radius:17px;background:var(--w-soft);margin:10px 0;position:relative;overflow:hidden;display:flex;align-items:center;padding-left:12px;font-size:11px;font-weight:600}
+.slider i{position:absolute;left:0;top:0;bottom:0;width:62%;background:color-mix(in srgb,var(--accent) 30%,transparent)}
+.slider span{position:relative}
+.ngroup{margin-top:10px}
+.nf{display:flex;gap:10px;padding:10px;border-radius:16px;background:var(--glass);border:1px solid var(--glass-line);margin-bottom:6px;align-items:flex-start;animation:up .25s}
+.nf .ico{--isz:30px}
+.nf .tx{flex:1;min-width:0;font-size:11.5px;line-height:1.35}
+.nf .tx b{font-size:12px}
+.nf .tx small{color:var(--w-muted);font-size:10.5px;margin-left:4px}
+.nf .tx .acts{display:flex;gap:6px;margin-top:6px}
+.nf .x{color:var(--w-muted);font-size:12px;width:20px}
+
+/* game mode */
+.game{position:absolute;inset:0;background:radial-gradient(80% 60% at 80% 0%,#2a1a6b 0,transparent 60%),radial-gradient(60% 50% at 0% 100%,#06393d 0,transparent 60%),#07080d;color:#eef0f7;display:flex;flex-direction:column;z-index:10}
+.gtop{display:flex;align-items:center;gap:12px;padding:16px 20px 6px;font-size:12px;font-weight:600}
+.gtop .lg{display:flex;align-items:center;gap:8px;font-weight:800;letter-spacing:.04em;font-size:12px}
+.gtop .lg i{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,#8b6bff,#2dd4bf);display:grid;place-items:center;font-style:normal;font-size:10px}
+.gtop .sp{flex:1}
+.gtop .pad{display:flex;align-items:center;gap:5px;color:#9aa3b5;font-weight:500}
+.gtop .av{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#ff8a5b,#ff4f86)}
+.gscroll{flex:1;overflow:auto;position:relative;padding:4px 0 10px;scrollbar-width:none}
+.gscroll::-webkit-scrollbar{display:none}
+.grow{padding:0 20px;margin-top:12px}
+.grow h4{margin:0 0 8px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#9aa3b5;display:flex;gap:8px;align-items:center}
+.grow h4 em{font-style:normal;color:#2dd4bf;text-transform:none;letter-spacing:0;font-weight:600}
+.gtrack{display:flex;gap:12px;overflow-x:auto;scrollbar-width:none;padding:6px 4px 10px;margin:-6px -4px 0}
+.gtrack::-webkit-scrollbar{display:none}
+.gf{flex:none;border-radius:16px;position:relative;overflow:hidden;transition:transform .16s,box-shadow .16s;cursor:pointer;outline:none}
+.ghero.gf.focus{transform:none}
+.gf.focus{transform:scale(1.06);box-shadow:0 0 0 3px #fff,0 0 0 6px #8b6bff,0 18px 40px -10px rgba(139,107,255,.7);z-index:2}
+.ghero{height:150px;width:100%;display:flex;flex-direction:column;justify-content:flex-end;padding:16px;background:linear-gradient(110deg,rgba(0,0,0,.65),transparent 70%),linear-gradient(135deg,#ff7a45,#c21f6b 50%,#3a0f6b)}
+.ghero h3{margin:0;font-size:22px;letter-spacing:-.02em}
+.ghero p{margin:2px 0 10px;font-size:11.5px;color:#d9dcea}
+.ghero .bar2{height:4px;width:160px;border-radius:2px;background:rgba(255,255,255,.25)}
+.ghero .bar2 i{display:block;height:100%;width:42%;background:#fff;border-radius:2px}
+.gplay{position:absolute;right:16px;bottom:16px;padding:8px 16px;border-radius:12px;background:#fff;color:#111;font-weight:700;font-size:12px;display:flex;gap:6px;align-items:center}
+.gtile{width:104px;height:140px;display:flex;align-items:flex-end;padding:8px;font-size:11px;font-weight:700;line-height:1.15}
+.gtile::before{content:"";position:absolute;inset:0;background:linear-gradient(transparent 40%,rgba(0,0,0,.7))}
+.gtile span{position:relative}
+.gtile .src{position:absolute;top:6px;left:6px;font-size:8.5px;font-weight:800;padding:2px 5px;border-radius:5px;background:rgba(0,0,0,.55);letter-spacing:.04em}
+.gstream{width:178px;height:100px;padding:12px;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(135deg,#1b2340,#10131c);border:1px solid rgba(255,255,255,.08)}
+.gstream b{font-size:13px}
+.gstream small{color:#9aa3b5;font-size:10.5px}
+.gstream .st{display:flex;gap:6px;align-items:center;font-size:10.5px;color:#2dd4bf}
+.gstream .st i{width:7px;height:7px;border-radius:50%;background:#2dd4bf;box-shadow:0 0 8px #2dd4bf}
+.gsm{width:92px;height:70px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:10.5px;font-weight:600;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.07)}
+.gfoot{display:flex;gap:14px;justify-content:flex-end;padding:8px 20px 14px;font-size:11px;color:#9aa3b5;flex-wrap:wrap}
+.gfoot span{display:flex;align-items:center;gap:5px}
+.gk{width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;font-size:9.5px;font-weight:800;color:#fff}
+.game.narrow .ghero{height:130px}
+.game.narrow .ghero h3{font-size:18px}
+.game.short .gtop{padding-top:10px}
+.game.short .ghero{height:96px;padding:10px 14px}
+.game.short .ghero h3{font-size:17px}
+.game.short .gtile{width:84px;height:112px}
+.game.short .grow{margin-top:8px}
+.gmenu{position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.6);display:grid;place-items:center;animation:fade .15s}
+.gmenu div{background:#141824;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:16px 18px;min-width:240px;font-size:12px}
+.gmenu b{display:block;font-size:14px;margin-bottom:8px}
+.gmenu p{margin:4px 0;color:#c4c9d6}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <header class="top">
+      <div class="brand"><div class="logo">P</div><div>PowOS Phone Home<small>Interactive design proposal · home, launcher, multitasking, game mode</small></div></div>
+      <div class="seg" id="themeSeg" role="group" aria-label="Theme">
+        <button data-theme-set="auto" aria-pressed="true">Auto</button>
+        <button data-theme-set="light" aria-pressed="false">Light</button>
+        <button data-theme-set="dark" aria-pressed="false">Dark</button>
+      </div>
+    </header>
+    <div class="ctl">
+      <label>Device</label>
+      <div class="seg" id="devSeg" role="group" aria-label="Device"></div>
+      <label>Screen</label>
+      <div class="seg" id="viewSeg" role="group" aria-label="Screen"></div>
+      <button class="chk" id="editBtn" aria-pressed="false">Edit widgets</button>
+      <button class="chk" id="tbBtn" aria-pressed="true" title="Unfolded / large screen only">Taskbar (unfolded)</button>
+    </div>
+    <div class="stage" id="stage">
+      <div class="devlabel" id="devlabel"></div>
+      <div class="sizer" id="sizer"><div class="device" id="device"></div></div>
+      <div class="hint" id="hint"></div>
+    </div>
+  </div>
+
+  <aside class="notes">
+    <div class="ntabs">
+      <h2>Design notes</h2>
+      <div class="seg" id="noteSeg" role="group" aria-label="Notes">
+        <button data-n="p" aria-pressed="true">Principles</button>
+        <button data-n="g" aria-pressed="false">Gestures</button>
+        <button data-n="o" aria-pressed="false">From Omalauncher</button>
+        <button data-n="i" aria-pressed="false">Build map</button>
+        <button data-n="q" aria-pressed="false">Open questions</button>
+      </div>
+    </div>
+    <div class="nbody" id="nbody"></div>
+  </aside>
+</div>
+
+<template id="n-p">
+  <h3>Principles</h3>
+  <ul>
+    <li><b>Home is instant.</b> The home screen, widgets and drawer are native (Compose, from the Omalauncher fork) and draw before the PowOS session is up. Widgets that need PowOS show a placeholder until the session answers.</li>
+    <li><b>One drawer, two worlds.</b> Android apps and PowOS apps (KDE, Flatpak, pacman) sit in one list, one search, one ranking. A small corner badge (<span class="tag c">A</span> Android, <span class="tag k">L</span> PowOS/Linux) tells them apart. The badge only affects how the app runs.</li>
+    <li><b>Every window is a task.</b> A PowOS window and an Android app are the same thing to the user: a Recents card, splittable, floatable, closable.</li>
+    <li><b>The form factor picks the layout.</b> The S25 and the folded Open use a 6-column grid, pages, a dock and the bar. The unfolded Open uses a 12-column grid, a side rail, a taskbar, split panes and floating windows. Plugging in a controller switches home to Game Mode.</li>
+    <li><b>The bar does two jobs.</b> Typing searches apps. If no app matches, Enter sends the text to the PowOS agent (<code>powos ai manager</code>).</li>
+    <li><b>Same look on every device.</b> Glass widgets over one wallpaper, one accent, light and dark. Game Mode is always dark, the same convention as Steam Big Picture and TV launchers.</li>
+  </ul>
+  <h3>Grid</h3>
+  <p>Phone: 6 columns, about 10 rows per page, 2 pages. Unfolded: 12 columns on one page, packed with <code>grid-auto-flow: dense</code>, so phone layouts move over without a separate layout per device. Widget sizes use OWL's <code>W×H</code> format. In edit mode, the ⤡ button cycles through each widget's allowed sizes.</p>
+</template>
+
+<template id="n-g">
+  <h3>Touch</h3>
+  <table>
+    <tr><th>Gesture</th><th>Result</th></tr>
+    <tr><td>Swipe up from bottom edge</td><td>Home</td></tr>
+    <tr><td>Swipe up from edge + hold</td><td>Overview (Recents)</td></tr>
+    <tr><td>Swipe left/right on the pill</td><td>Previous/next app <span class="tag n">not mocked</span></td></tr>
+    <tr><td>Swipe up on home, or tap the bar</td><td>App drawer (search focused when you tap the bar)</td></tr>
+    <tr><td>Swipe down from top / on home</td><td>Notifications and quick settings</td></tr>
+    <tr><td>Long-press a widget</td><td>Edit mode (move, resize, remove, add)</td></tr>
+    <tr><td>Drag an overview card to a half (unfolded)</td><td>Split screen</td></tr>
+    <tr><td>Drag the split divider</td><td>Resize panes</td></tr>
+    <tr><td>Drag a window title bar</td><td>Move a floating window</td></tr>
+  </table>
+  <p>In the prototype, drag with the mouse inside the device. Click the pill to go home. Press and hold the pill to open the overview.</p>
+  <h3>Controller (Game Mode)</h3>
+  <table>
+    <tr><th>Button</th><th>Keyboard here</th><th>Result</th></tr>
+    <tr><td>D-pad / left stick</td><td><kbd>←↑→↓</kbd></td><td>Move focus</td></tr>
+    <tr><td>A</td><td><kbd>Enter</kbd></td><td>Launch / select</td></tr>
+    <tr><td>B</td><td><kbd>Esc</kbd></td><td>Back</td></tr>
+    <tr><td>☰ / Guide</td><td><kbd>M</kbd></td><td>Quick menu (performance, overview, touch home)</td></tr>
+  </table>
+  <p>A real gamepad also works if the browser reports one (Gamepad API).</p>
+</template>
+
+<template id="n-o">
+  <h3>Taken from Omalauncher (MIT)</h3>
+  <ul>
+    <li><b>The bar.</b> One input at the bottom of home that searches apps and also takes prompts. Enter opens the top match or sends the text to the agent. Hold the mic for voice.</li>
+    <li><b>OWL widgets</b> on a 6-column grid with free sizes (<code>3x2</code>, <code>6x3</code>…). Widgets use live <code>cmd</code>/<code>stream</code>/<code>file</code>/<code>android.*</code> sources, can be edited on the phone, and come from a store. Here, the PowOS status, agent inbox and system widgets are OWL widgets with PowOS sources.</li>
+    <li><b>Linux windows as Android tasks</b>, each with its own Recents card. This is the model for multitasking.</li>
+    <li><b>Side rail</b> for pinned apps. Used here on the unfolded Open.</li>
+    <li><b>Themes applied to launcher and guest together</b>, so KDE windows and the launcher share an accent and wallpaper.</li>
+    <li>Usage-ranked suggestions in the drawer (<code>AppUsage</code>), and a dot on settings when an update is pending.</li>
+  </ul>
+  <pre class="owl"><i>widget</i> <s>"powos-status"</s> {
+  <i>meta</i> { owl: 1; size: <s>"3x3"</s>; minSize: <s>"3x2"</s> }
+  <i>source</i> st = <u>stream</u>(<s>"powos status --json --watch"</s>)
+  <i>let</i> s = json(st)
+  Column { gap: 4
+    Text { text: <s>"PowOS · ${s.session}"</s> }
+    Text { text: <s>"Sync ${ago(s.last_sync)}"</s>; color: s.sync_ok ? muted : red }
+    Button { text: <s>"Sync now"</s>; on click: run(<s>"powos sync now"</s>) }
+  }
+}</pre>
+  <h3>Not taken</h3>
+  <p>Omalauncher's compositor (wlbridge, proot, its CPU <code>wl_shm</code> path) and its Omarchy-only themes. PowOS keeps KWin on Anland with the GPU path. See <code>powos-app-plan.md</code>.</p>
+</template>
+
+<template id="n-i">
+  <h3>How each piece gets built</h3>
+  <table>
+    <tr><th>Piece</th><th>Built with</th><th>Notes</th></tr>
+    <tr><td>Home grid, pages, dock, bar</td><td><span class="tag c">Compose</span></td><td>Omalauncher's <code>ui/Home*</code>, <code>SideRail</code> and <code>Gestures</code>, kept as they are. This is phase 1 of the app plan.</td></tr>
+    <tr><td>Widgets</td><td><span class="tag c">Compose / OWL</span></td><td><code>cmd</code>/<code>stream</code> run through the <code>Guest</code> seam (lotfix) in the PowOS session (phase 2). In desktop mode, the same data can also feed Plasma plasmoids.</td></tr>
+    <tr><td>Drawer + search</td><td><span class="tag c">Compose</span></td><td>Android <code>PackageManager</code> list plus <code>.desktop</code> files from the rootfs (phase 3). The badge comes from the app's source.</td></tr>
+    <tr><td>Recents / split / float (phone)</td><td><span class="tag c">Android tasks</span> + <span class="tag k">KWin</span></td><td>Each PowOS toplevel gets its own Anland output and its own Android task (shell design §combination). Android split and freeform then work for free.</td></tr>
+    <tr><td>Unfolded taskbar mode</td><td><span class="tag k">KWin + Plasma</span></td><td>One large Anland output runs the real Plasma session: a Plasma panel for the taskbar and KWin tiling for split. Android apps appear as KWin windows through a VirtualDisplay and Shizuku (<code>android-windows.md</code>). Without Shizuku, they fall back to floating Android windows.</td></tr>
+    <tr><td>Game Mode</td><td><span class="tag c">Compose</span> (proposal)</td><td>A focus-driven Compose screen. It reads the Steam library from the rootfs and lists PowStream hosts. A game launches in KWin fullscreen, or as Gamescope nested in KWin.</td></tr>
+    <tr><td>Shade + quick settings</td><td><span class="tag c">Compose</span> overlay</td><td>On the S25 (locked bootloader), Android's own shade stays. Our shade opens from home and from PowOS windows, and mirrors notifications through a NotificationListener. On the OnePlus Open running native PowOS, it becomes the Plasma shell's shade.</td></tr>
+    <tr><td>Lock screen</td><td><span class="tag c">Compose</span></td><td>Phase 4, using <code>requestDismissKeyguard</code>.</td></tr>
+  </table>
+  <p><b>Native OnePlus Open (later):</b> the same design runs as a Plasma Mobile style containment plus plasmoids, with no Android underneath. Keeping widgets in OWL means they would need to be ported to QML then. Open question 1 covers this.</p>
+</template>
+
+<template id="n-q">
+  <h3>For Mats</h3>
+  <div class="q"><b>1. What are widgets built in: OWL (Compose) or Plasma plasmoids?</b><span class="rec">Recommendation: OWL on the phone now, because it is instant and already exists. Add an OWL→QML renderer later so the native Open and the desktop can use the same <code>.owl</code> files.</span></div>
+  <div class="q"><b>2. Unfolded default: launcher home with a taskbar, or the full Plasma desktop?</b><span class="rec">Prototype shows the launcher home with a taskbar. Opening any window switches the Plasma session to large-output desktop mode.</span></div>
+  <div class="q"><b>3. Game Mode: build our own (shown here), or run Steam Big Picture / Gamescope as the home?</b><span class="rec">Our own home that launches into Big Picture. Should connecting a controller switch to Game Mode automatically, or ask first?</span></div>
+  <div class="q"><b>4. What is PowStream exactly?</b><span class="rec">Assumed: Moonlight/Sunshine-style streaming from PowStation or a gaming PC, with Wake-on-LAN. Should streams also appear as library tiles?</span></div>
+  <div class="q"><b>5. Should the bar's Enter-to-agent go to <code>powos ai manager</code> (persistent, per-directory) or a one-shot <code>powos ai</code>?</b></div>
+  <div class="q"><b>6. Theme source:</b> keep Omalauncher's Omarchy theme catalog, or one PowOS theme tied to KDE colour schemes?</div>
+  <div class="q"><b>7. Shade on the S25:</b> is an in-launcher shade alongside Android's real one acceptable, or should we only add tiles to Android's shade (TileService)?</div>
+  <div class="q"><b>8. Folded cover screen:</b> same widgets as the S25, or a shorter, glanceable set?</div>
+</template>
+
+<script>
+(function(){
+"use strict";
+/* ================= data ================= */
+const APPS = [
+  // PowOS / Linux
+  ['dolphin','Dolphin','l','KDE','System',['#3daee9','#1a6fc0'],'D','files'],
+  ['konsole','Konsole','l','KDE','Dev',['#3a3f4c','#14161c'],'>_','term'],
+  ['kate','Kate','l','KDE','Dev',['#5b7cfa','#2a3fbf'],'K','editor'],
+  ['firefox','Firefox','l','Flatpak','Internet',['#ff9a3c','#9059ff'],'Fx','browser'],
+  ['steam','Steam','l','Flatpak','Games',['#2a475e','#121a24'],'S','steam'],
+  ['heroic','Heroic','l','Flatpak','Games',['#b026ff','#4f0b9e'],'H','steam'],
+  ['bottles','Bottles','l','Flatpak','Games',['#f06a2c','#a0360c'],'B',''],
+  ['powstream','PowStream','l','PowOS','Games',['#8b6bff','#0eae9f'],'PS','steam'],
+  ['krita','Krita','l','Flatpak','Media',['#f2643a','#b8261a'],'Kr',''],
+  ['vlc','VLC','l','Flatpak','Media',['#ff9500','#d35400'],'V','music'],
+  ['okular','Okular','l','KDE','Office',['#e9573f','#a8302a'],'O',''],
+  ['manager','PowOS Agent','l','PowOS','Dev',['#6a48ff','#2dd4bf'],'AI','agent'],
+  ['nvim','Neovim','l','pacman','Dev',['#57a143','#1f5a2a'],'nv','term'],
+  ['obs','OBS Studio','l','Flatpak','Media',['#4a4f5a','#202228'],'●',''],
+  ['discover','Discover','l','KDE','System',['#3daee9','#2c5fa8'],'Di','settings'],
+  ['ksettings','KDE Settings','l','KDE','System',['#7f8c9d','#475363'],'⚙','settings'],
+  ['kdeconnect','KDE Connect','l','KDE','Tools',['#2ecc71','#138a67'],'Kc',''],
+  // Android
+  ['phone','Phone','a','Android','Social',['#34c759','#1e8f3d'],'☏',''],
+  ['whatsapp','WhatsApp','a','Android','Social',['#25d366','#128c7e'],'W','chat'],
+  ['signal','Signal','a','Android','Social',['#3a76f0','#1d4fc4'],'Si','chat'],
+  ['messages','Messages','a','Android','Social',['#4f8bff','#2459d6'],'M','chat'],
+  ['chrome','Chrome','a','Android','Internet',['#4285f4','#db4437'],'C','browser'],
+  ['spotify','Spotify','a','Android','Media',['#1ed760','#0f7a37'],'Sp','music'],
+  ['youtube','YouTube','a','Android','Media',['#ff2a4a','#b3001b'],'▶','music'],
+  ['maps','Maps','a','Android','Tools',['#34a853','#1a73e8'],'Ma',''],
+  ['camera','Camera','a','Android','Tools',['#5a5f6b','#22252c'],'◉',''],
+  ['photos','Photos','a','Android','Media',['#fbbc04','#ea4335'],'Ph',''],
+  ['gmail','Gmail','a','Android','Office',['#ea4335','#b31412'],'G',''],
+  ['gcal','Calendar','a','Android','Office',['#4285f4','#1a56c4'],'31',''],
+  ['bank','Bank','a','Android','Tools',['#191c24','#3a3f4c'],'R',''],
+  ['moonlight','Moonlight','a','Android','Games',['#5a6b8c','#1f2a3f'],'Ml','steam'],
+  ['clock','Clock','a','Android','Tools',['#2a2f3a','#0f1116'],'◷',''],
+  ['play','Play Store','a','Android','System',['#01875f','#0b5d43'],'▷',''],
+  ['asettings','Settings','a','Android','System',['#6b7280','#374151'],'⚙','settings'],
+].map(a=>({id:a[0],name:a[1],src:a[2],kind:a[3],cat:a[4],c:a[5],g:a[6],ui:a[7]}));
+const A = Object.fromEntries(APPS.map(a=>[a.id,a]));
+const CATS = ['All','Games','Social','Media','Internet','Dev','Office','Tools','System'];
+const DOCK = ['phone','whatsapp','firefox','konsole','steam'];
+const RAIL = ['whatsapp','firefox','dolphin','konsole','spotify','steam'];
+
+const GAMES = [
+  {n:'Hades II',c:['#ff7a45','#7a1450'],s:'STEAM',p:'42%'},
+  {n:'Arc Raiders',c:['#e8c46b','#3a2a10'],s:'STREAM'},
+  {n:'Balatro',c:['#e5484d','#3b1b6b'],s:'STEAM'},
+  {n:'Stardew Valley',c:['#6fd36f','#1f6e8c'],s:'STEAM'},
+  {n:'Battlefield 3 · VU',c:['#5fa8d3','#1b2a3a'],s:'VU'},
+  {n:'Celeste',c:['#ff6fb5','#30206b'],s:'STEAM'},
+  {n:'Dead Cells',c:['#ff4f5e','#0f2a4a'],s:'ANDROID'},
+  {n:'Cyberpunk 2077',c:['#f5e663','#c2186b'],s:'STREAM'},
+  {n:'Elden Ring',c:['#d6b56b','#2c2416'],s:'STREAM'},
+  {n:'Vampire Survivors',c:['#b23a3a','#2a0e2e'],s:'STEAM'},
+];
+
+const DEV = {
+  s25:{name:'Galaxy S25 Ultra',short:'S25 Ultra',w:372,h:806,r:36,form:'phone',note:'6.9″ · 1440×3120 · 19.5:9'},
+  fold:{name:'OnePlus Open, folded',short:'Open folded',w:344,h:766,r:32,form:'phone',note:'6.31″ cover · 1116×2484 · 20:9'},
+  open:{name:'OnePlus Open, unfolded',short:'Open unfolded',w:720,h:670,r:24,form:'tab',note:'7.82″ · 2440×2268 · nearly square'},
+  hand:{name:'Handheld + controller',short:'Handheld',w:806,h:372,r:22,form:'land',note:'S25 in a controller shell · Game Mode is home'},
+};
+const VIEWS = [['home','Home'],['drawer','App drawer'],['overview','Overview'],['windows','Windows'],['game','Game Mode'],['shade','Shade']];
+
+const WDEF = {
+  clock:{name:'Clock',d:'Time, date, next alarm',sizes:[[6,2],[4,2],[3,2]]},
+  weather:{name:'Weather',d:'Placeholder: http source',sizes:[[3,2],[2,2],[6,2]]},
+  system:{name:'Battery & system',d:'android.battery + PowOS RAM',sizes:[[3,2],[6,2],[2,2]]},
+  calendar:{name:'Agenda',d:'android.calendar',sizes:[[3,3],[3,4],[6,3],[3,2]]},
+  powos:{name:'PowOS status',d:'stream: powos status --json',sizes:[[3,3],[3,2],[6,2]]},
+  media:{name:'Now playing',d:'android.media session',sizes:[[6,2],[3,2],[6,3]]},
+  toggles:{name:'Quick toggles',d:'Wi-Fi, BT, DND, Game, VPN',sizes:[[6,1],[3,1]]},
+  games:{name:'Recent games',d:'Steam + PowStream recents',sizes:[[6,3],[6,2],[3,3]]},
+  agent:{name:'Agent inbox',d:'powos comms inbox',sizes:[[6,2],[3,3],[6,3]]},
+  station:{name:'PowStation',d:'http: claude-auth.pow, containers',sizes:[[3,2],[6,2]]},
+};
+
+/* ================= state ================= */
+const S = {
+  dev:'s25', view:'home', theme:'auto', edit:false, taskbar:true, note:'p',
+  q:'', cat:'All', srcf:'all', addSheet:false, playing:true, gmenu:false,
+  widgets:[
+    {id:'clock',w:6,h:2,p:0},{id:'weather',w:3,h:2,p:0},{id:'system',w:3,h:2,p:0},
+    {id:'calendar',w:3,h:3,p:0},{id:'powos',w:3,h:3,p:0},{id:'media',w:6,h:2,p:0},{id:'toggles',w:6,h:1,p:0},
+    {id:'games',w:6,h:3,p:1},{id:'agent',w:6,h:2,p:1},
+  ],
+  t:{wifi:1,bt:1,dnd:0,game:0,vpn:1,flash:0,rot:1,sync:1,hot:0,save:0,loc:1,cast:0},
+  recents:['whatsapp','konsole','firefox','spotify','dolphin','steam'],
+  win:{a:'dolphin',b:'whatsapp',split:true,ratio:.52,focus:'a',floats:[{app:'konsole',x:380,y:60,w:290,h:190}]},
+  phoneApp:'whatsapp', phoneFloats:[],
+  gf:{r:0,c:[0,0,0,0,0]},
+  notifs:[
+    {app:'manager',t:'PowOS Agent',m:'CI is green on powos-multiplatform. Merge?',a:['Reply','Open'],ago:'2m'},
+    {app:'whatsapp',t:'Kari',m:'Raid tonight at 8? 🎮',a:['Reply','Mark read'],ago:'5m'},
+    {app:'steam',t:'Steam',m:'Hades II update downloaded (1.2 GB)',a:['Play'],ago:'21m'},
+    {app:'ksettings',t:'PowOS',m:'Layer sync complete: custom layer +14 MB',a:[],ago:'34m'},
+    {app:'gcal',t:'Calendar',m:'Dentist at 13:30',a:['Snooze'],ago:'1h'},
+  ],
+};
+
+/* ================= helpers ================= */
+const $ = (s,r=document)=>r.querySelector(s);
+const esc = s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const form = ()=> S.dev==='hand' ? 'land' : DEV[S.dev].form;
+const P = {
+  wifi:'<path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/>',
+  bat:'<rect x="2" y="7" width="18" height="10" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="9" width="11" height="6" rx="1.5" fill="currentColor"/><path d="M21.5 10.5v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  sig:'<path d="M4 18v-2M9 18v-5M14 18V9M19 18V5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
+  search:'<circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  mic:'<rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  bt:'<path d="m7 7 10 10-5 4V3l5 4L7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>',
+  moon:'<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z" fill="currentColor"/>',
+  pad:'<path d="M7 8h10a5 5 0 0 1 4.8 6.4l-1 3.4a2.5 2.5 0 0 1-4.3.9L14.6 16H9.4l-1.9 2.7a2.5 2.5 0 0 1-4.3-.9l-1-3.4A5 5 0 0 1 7 8Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 11v3M5.5 12.5h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="11.5" r="1" fill="currentColor"/><circle cx="18" cy="13.5" r="1" fill="currentColor"/>',
+  shield:'<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8 7.5 9.5 4.3-1.5 7.5-5 7.5-9.5V6L12 3Z" fill="none" stroke="currentColor" stroke-width="2"/>',
+  play:'<path d="M8 5.5v13l10.5-6.5L8 5.5Z" fill="currentColor"/>',
+  pause:'<rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/>',
+  prev:'<path d="M17 6v12L8.5 12 17 6ZM6.5 6v12" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  next:'<path d="M7 6v12l8.5-6L7 6Zm10.5 0v12" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  sync:'<path d="M20 11a8 8 0 0 0-14.3-4.5M4 13a8 8 0 0 0 14.3 4.5M5 3v4h4M19 21v-4h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  grid:'<path d="M5 5h4v4H5zM15 5h4v4h-4zM5 15h4v4H5zM15 15h4v4h-4z" fill="currentColor"/>',
+  gear:'<circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  torch:'<path d="M8 3h8v4l-2 3v10h-4V10L8 7V3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+  rot:'<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  cast:'<path d="M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6M3 12a8 8 0 0 1 8 8M3 16a4 4 0 0 1 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  stream:'<rect x="3" y="4" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  bolt:'<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" fill="currentColor"/>',
+};
+const ic = (n,s=16)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" aria-hidden="true">${P[n]||''}</svg>`;
+function icon(id,{size=46,label=true,badge=true,hl=false}={}){
+  const a=A[id]; if(!a) return '';
+  return `<div class="ico${hl?' hl':''}" style="--isz:${size}px" title="${esc(a.name)} · ${a.src==='a'?'Android app':a.kind+' · runs in PowOS'}"><div class="sq" style="background:linear-gradient(145deg,${a.c[0]},${a.c[1]})">${esc(a.g)}${badge?`<span class="badge ${a.src==='a'?'a':'l'}">${a.src==='a'?'A':'L'}</span>`:''}</div>${label?`<div class="nm">${esc(a.name)}</div>`:''}</div>`;
+}
+function now(){const d=new Date();return {t:d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false}),d:d.toLocaleDateString([], {weekday:'long',day:'numeric',month:'long'}),ds:d.toLocaleDateString([], {weekday:'short',day:'numeric',month:'short'})};}
+function toast(msg){const t=$('#toast');if(!t)return;t.textContent=msg;t.classList.add('on');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('on'),1900);}
+
+/* ================= widget content ================= */
+function wBody(w){
+  const n=now(), small=w.w<=2, half=w.w<=3;
+  switch(w.id){
+    case 'clock': return `<div class="w-clock"><div class="t t-time">${n.t}</div><div class="d t-date">${half?n.ds:n.d}</div>${w.h>1?`<div class="m">Alarm 07:00 · ${S.t.dnd?'Do not disturb on':'3 notifications'}</div>`:''}</div>`;
+    case 'weather': return `<div class="w-weather"><div class="lbl"><i></i>Oslo</div><div class="tmp">9°</div>${small?'':'<div class="s">Cloudy · H 11° L 4°</div>'}<svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><path d="M0 22 C15 18 20 10 35 12 S60 22 72 14 90 6 100 9 V30 H0Z" fill="color-mix(in srgb,var(--accent-2) 22%,transparent)"/><path d="M0 22 C15 18 20 10 35 12 S60 22 72 14 90 6 100 9" fill="none" stroke="var(--accent-2)" stroke-width="1.5"/></svg></div>`;
+    case 'system': {
+      const ring=`<div class="ring"><svg viewBox="0 0 40 40" width="100%" height="100%"><circle cx="20" cy="20" r="16" fill="none" stroke="var(--w-soft)" stroke-width="4.5"/><circle cx="20" cy="20" r="16" fill="none" stroke="var(--ok)" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="${.78*100.5} 100.5" transform="rotate(-90 20 20)"/></svg><b>78</b></div>`;
+      return `<div style="display:flex;gap:12px;align-items:center;height:100%">${ring}${small?'':`<div class="kv" style="white-space:nowrap"><b>78%</b> · 9 h<br>RAM <b>7.1</b> GB<br>PowOS <b style="color:var(--ok)">●</b></div>`}</div>`;
+    }
+    case 'calendar': return `<div class="lbl"><i style="background:#4285f4"></i>Today</div><div class="agenda">
+      <div class="ev"><i style="background:#4285f4"></i><div>Standup<small>10:00 – 10:15 · Meet</small></div></div>
+      <div class="ev"><i style="background:#e8930c"></i><div>Dentist<small>13:30 · Majorstuen</small></div></div>
+      <div class="ev"><i style="background:#8b6bff"></i><div>Raid night<small>20:00 · Discord</small></div></div>
+      ${w.h>3?'<div class="ev"><i style="background:#22a663"></i><div>Gym<small>Tomorrow 07:30</small></div></div>':''}</div>`;
+    case 'powos': return `<div class="lbl"><i></i>PowOS</div>
+      ${w.h>2?`<div class="layers"><div class="lay"><i></i>custom<span>2.1G</span></div><div class="lay"><i></i>updates<span>156M</span></div><div class="lay"><i></i>base<span>bazzite</span></div></div>`:'<div class="kv" style="margin:6px 0"><b>custom · updates · base</b></div>'}
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px"><span class="kv">Synced <b>30s</b> ago</span><button class="mini-btn" data-act="sync">Sync</button></div>`;
+    case 'media': return `<div class="w-media" style="height:100%"><div class="art"></div><div style="flex:1;min-width:0"><div class="lbl">${icon('spotify',{size:14,label:false,badge:false})}<span>Spotify · S25</span></div><div style="font-weight:700;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Midnight City</div><div class="kv">M83</div><div class="prog"><i style="width:38%"></i></div><div class="mctl"><button data-act="prev">${ic('prev',16)}</button><button class="pp" data-act="play">${ic(S.playing?'pause':'play',14)}</button><button data-act="next">${ic('next',16)}</button></div></div></div>`;
+    case 'toggles': {
+      const ks = half?['wifi','bt','game']:['wifi','bt','dnd','game','vpn'];
+      const map={wifi:'wifi',bt:'bt',dnd:'moon',game:'pad',vpn:'shield'};
+      return `<div class="tgl">${ks.map(k=>`<button class="${S.t[k]?'on':''}" data-tog="${k}" title="${k}">${ic(map[k],18)}</button>`).join('')}</div>`;
+    }
+    case 'games': return `<div class="lbl"><i style="background:#8b6bff"></i>Continue playing<span style="margin-left:auto;text-transform:none;letter-spacing:0;color:var(--accent);font-weight:600" data-act="gamemode">Game Mode ›</span></div><div class="games">${GAMES.slice(0,half?2:4).map(g=>`<div class="cover" data-act="gamemode" style="background:linear-gradient(150deg,${g.c[0]},${g.c[1]})"><span>${esc(g.n)}</span></div>`).join('')}</div>`;
+    case 'agent': return `<div class="lbl"><i style="background:linear-gradient(135deg,var(--accent),var(--accent-2))"></i>Agent inbox · 2 new</div><div class="agentmsg"><b>manager</b>: CI is green on <i>powos-multiplatform</i>. Merge to main?</div>${w.h>2?'<div class="agentmsg"><b>health</b>: layer sync OK, 14 MB pushed.</div>':''}<div class="agentin" data-act="ask">Reply or ask PowOS…</div>`;
+    case 'station': return `<div class="lbl"><i></i>PowStation</div><div class="kv" style="margin-top:6px">Containers <b>23</b> up<br>claude-auth <b style="color:var(--ok)">●</b> · DNS <b style="color:var(--ok)">●</b><br>CPU <b>14%</b> · 192.168.50.100</div>`;
+  }
+  return '';
+}
+function widgetHTML(w,i){
+  const big = w.id==='clock' && w.w>=4 && !S.edit;
+  return `<div class="w w-${w.id} ${w.h===1?'h1 ':''}${big?'w-clock big':'glass'}" data-wi="${i}" style="grid-column:span ${Math.min(w.w,cols())};grid-row:span ${w.h}" ${S.edit?'draggable="true"':''}>
+    ${wBody(w)}
+    <button class="wx" data-wdel="${i}" title="Remove">×</button>
+    <button class="wr" data-wsize="${i}" title="Resize">⤡</button>
+    <span class="wsz">${w.w}×${w.h}</span></div>`;
+}
+const cols = ()=> form()==='tab'?12:6;
+
+/* ================= screens ================= */
+function statusBar(dark){
+  const n=now();
+  return `<div class="sb" style="${dark?'color:#eef0f7':''}"><span class="t-time">${n.t}</span><span class="icons">${S.t.vpn?ic('shield',13):''}${ic('sig',14)}${ic('wifi',14)}<span style="font-size:11px">78%</span>${ic('bat',18)}</span></div>`;
+}
+function homePhone(){
+  const pages=[0,1].map(p=>`<div class="page" data-page="${p}"><div class="wgrid" style="--cols:6;--row:${S.dev==='fold'?50:52}px">${S.widgets.map((w,i)=>w.p===p?widgetHTML(w,i):'').join('')}</div></div>`).join('');
+  return `<div class="home ${S.edit?'edit':''}" id="home">
+    <div class="pages" id="pages">${pages}</div>
+    <div class="dots"><i class="on" data-pg="0"></i><i data-pg="1"></i></div>
+    <div class="dock glass">${DOCK.map(id=>`<button data-open="${id}">${icon(id,{size:46,label:false})}</button>`).join('')}</div>
+    <div class="bar glass" data-act="bar">${ic('search',16)}<span class="ph">Search apps, or ask PowOS…</span><span class="mic">${ic('mic',15)}</span></div>
+  </div>`;
+}
+function homeTab(){
+  const grid = `<div class="page" style="overflow:auto;scrollbar-width:none"><div class="wgrid" style="--cols:12;--row:52px">${S.widgets.map((w,i)=>widgetHTML(w,i)).join('')}</div></div>`;
+  const bottom = S.taskbar ? taskbar() : `<div class="bar glass" data-act="bar" style="margin:8px 14px 18px">${ic('search',16)}<span class="ph">Search apps, or ask PowOS…</span><span class="mic">${ic('mic',15)}</span></div>`;
+  return `<div class="home tab ${S.edit?'edit':''}" id="home" style="flex-direction:column">
+    <div style="flex:1;display:flex;min-height:0">
+      <div class="rail glass">${RAIL.map(id=>`<button data-open="${id}">${icon(id,{size:38,label:false})}</button>`).join('')}<div class="sep"></div><button data-act="drawer" title="All apps" style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:var(--w-soft)">${ic('grid',18)}</button></div>
+      <div class="tabmain">${grid}</div>
+    </div>${bottom}</div>`;
+}
+function taskbar(){
+  const running = new Set(S.recents.slice(0,4).concat([S.win.a,S.win.b].filter(Boolean)).concat(S.win.floats.map(f=>f.app)));
+  const pinned = ['dolphin','firefox','konsole','whatsapp','spotify','steam'];
+  const list = [...new Set(pinned.concat([...running]))];
+  const fo=S.win.focus, active = S.view==='windows' ? (fo==='a'?S.win.a:fo==='b'?S.win.b:(S.win.floats[+fo.slice(1)]||{}).app) : null;
+  const n=now();
+  return `<div class="taskbar glass">
+    <button class="start" data-act="drawer" title="Launcher">P</button>
+    <div class="tsearch" data-act="bar">${ic('search',13)}Search · ask</div>
+    <div class="apps">${list.map(id=>`<button class="tb ${running.has(id)?'run':''} ${active===id?'act':''}" data-open="${id}">${icon(id,{size:26,label:false})}</button>`).join('')}</div>
+    <div class="tray"><button data-act="shade" style="display:flex;gap:6px;align-items:center">${ic('sync',13)}${ic('wifi',14)}${ic('bat',17)}</button><div><span class="t-time">${n.t}</span><small>${n.ds}</small></div></div>
+  </div>`;
+}
+
+function appBody(id){
+  const a=A[id]||{}; const hd=(t)=>`<div class="ahead" style="background:linear-gradient(90deg,${a.c[0]},${a.c[1]})">${t||esc(a.name)}</div>`;
+  switch(a.ui){
+    case 'chat': return `<div class="abody">${hd(id==='whatsapp'?'Kari':esc(a.name))}<div class="bub in">Raid tonight at 8? 🎮</div><div class="bub out">Yes! Streaming from PowStation</div><div class="bub in">Bring the Open, we need the big screen</div><div class="bub out">It's folded in my pocket right now 😄</div><div class="bub in">lol</div></div>`;
+    case 'agent': return `<div class="abody">${hd('PowOS Agent · manager')}<div class="bub in">CI is green on powos-multiplatform. Merge to main?</div><div class="bub out">Wait. Run tier2 on the Open first.</div><div class="bub in">Queued. I'll ping you on the home widget.</div></div>`;
+    case 'term': return `<div class="abody"><div class="term"><span class="g">powos@s25</span>:<span class="p">~</span>$ powos status
+PowOS Status
+════════════════════════
+Active Layers
+  Stack:   <span class="y">custom,updates,base</span>
+  ├─ ● custom   2.1G
+  ├─ ● updates  156M
+  └─ ● base     bazzite
+Session   ● kwin (anland) · 1 output
+Sync      ● 30s ago
+<span class="g">powos@s25</span>:<span class="p">~</span>$ █</div></div>`;
+    case 'files': return `<div class="abody"><div class="urlbar">/home/powos/Projects</div><div class="fgrid">${['PowOS','PowStation','Powpanion','spec-llm','Downloads','Music','Pictures','Games','Notes','Videos'].map(n=>`<div><i></i>${n}</div>`).join('')}</div></div>`;
+    case 'browser': return `<div class="abody"><div class="urlbar">${ic('search',11)}&nbsp; dash.powback.com</div><div class="hero"></div><div class="skl" style="width:70%"></div><div class="skl"></div><div class="skl" style="width:50%"></div><div class="skl" style="width:80%"></div></div>`;
+    case 'music': return `<div class="abody" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:linear-gradient(#2a1460,#0b0b12);color:#fff"><div class="art" style="width:46%;max-width:180px"></div><b>Midnight City</b><span style="opacity:.7">M83</span></div>`;
+    case 'steam': return `<div class="abody" style="background:#10151d;color:#c7d5e0">${hd()}<div class="lib">${GAMES.slice(0,9).map(g=>`<i style="background:linear-gradient(150deg,${g.c[0]},${g.c[1]})"></i>`).join('')}</div></div>`;
+    case 'settings': return `<div class="abody">${hd()}${['Network','Bluetooth','Display','Sound','PowOS layers','Updates'].map((t,i)=>`<div class="srow"><i style="background:hsl(${i*50+200} 60% 55%)"></i>${t}</div>`).join('')}</div>`;
+    case 'editor': return `<div class="abody"><div class="term" style="background:#14161d"><span class="p">widget</span> <span class="y">"memory"</span> {
+  <span class="p">source</span> mem = <span class="g">cmd</span>(<span class="y">"free -b"</span>) every 5s
+  Text { text: <span class="y">"\${pct}%"</span> }
+}</div></div>`;
+  }
+  return `<div class="abody" style="display:grid;place-items:center"><div style="text-align:center">${icon(id,{size:64,label:false})}<div style="margin-top:10px;font-weight:600">${esc(a.name)}</div><div style="color:var(--muted);font-size:10.5px">${a.src==='a'?'Android app':a.kind+' app · PowOS session'}</div></div></div>`;
+}
+function winTitle(id,where){
+  const a=A[id];
+  return `<div class="wtitle" data-drag="${where}">${icon(id,{size:16,label:false,badge:false})}${esc(a.name)} <span class="src">${a.src==='a'?'Android':'PowOS'}</span><span class="wb"><button data-wmin="${where}" title="Minimize">–</button><button data-wfloat="${where}" title="${where.startsWith('f')?'Maximize':'Float'}">❐</button><button data-wclose="${where}" title="Close">✕</button></span></div>`;
+}
+function windowsView(){
+  if(form()!=='tab'){
+    // phone: one fullscreen task + floating windows
+    const fl = S.phoneFloats.map((f,i)=>`<div class="float" data-fi="${i}" style="left:${f.x}px;top:${f.y}px;width:${f.w}px;height:${f.h}px">${winTitle(f.app,'f'+i)}${appBody(f.app)}<span class="rs" data-rs="${i}"></span></div>`).join('');
+    return `<div class="desk" style="inset:30px 0 0"><div class="pane" style="flex:1;border-radius:0;box-shadow:none">${appBody(S.phoneApp)}</div>${fl}</div>`;
+  }
+  const w=S.win;
+  const pane=(k)=>`<div class="pane ${w.focus===k?'focus':''}" data-pane="${k}" style="${w.split?`flex:0 0 calc(${(k==='a'?w.ratio:1-w.ratio)*100}% - 7px)`:'flex:1'}">${winTitle(w[k],k)}${appBody(w[k])}</div>`;
+  const fl = w.floats.map((f,i)=>`<div class="float" data-fi="${i}" style="left:${f.x}px;top:${f.y}px;width:${f.w}px;height:${f.h}px;${w.focus==='f'+i?'box-shadow:0 0 0 2px var(--accent),0 24px 50px -14px rgba(0,0,0,.55)':''}">${winTitle(f.app,'f'+i)}${appBody(f.app)}<span class="rs" data-rs="${i}"></span></div>`).join('');
+  return `<div class="desk"><div class="panes" id="panes">${pane('a')}${w.split?`<div class="divider" id="divider"><i></i></div>${pane('b')}`:''}${fl}</div>${S.taskbar?taskbar():''}</div>`;
+}
+
+function drawer(){
+  const tab = form()!=='phone';
+  return `<div class="ovl"><div class="scrim" data-act="home"></div><div class="drawer ${tab?'tab':''}" id="drawer" style="--dcols:${tab?6:4}">
+    <div class="grab"></div>
+    <div class="dsearch">${ic('search',16)}<input id="q" placeholder="Search apps, or ask PowOS…" value="${esc(S.q)}" autocomplete="off" spellcheck="false"><span class="mic" style="width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:#fff">${ic('mic',14)}</span></div>
+    <div class="chips">${CATS.map(c=>`<button class="chip ${S.cat===c?'on':''}" data-cat="${c}">${c}</button>`).join('')}</div>
+    <div class="srcrow"><span><span class="badge a" style="position:static;display:inline-grid;width:14px;height:14px;font-size:7px;border:0;vertical-align:-2px">A</span> Android &nbsp; <span class="badge l" style="position:static;display:inline-grid;width:14px;height:14px;font-size:7px;border:0;vertical-align:-2px">L</span> PowOS</span>
+      <span class="srcseg">${[['all','All'],['l','PowOS'],['a','Android']].map(([k,t])=>`<button class="${S.srcf===k?'on':''}" data-srcf="${k}">${t}</button>`).join('')}</span></div>
+    <div class="dscroll" id="dlist">${drawerList()}</div>
+  </div></div>`;
+}
+function drawerList(){
+  const q=S.q.trim().toLowerCase();
+  let list=APPS.filter(a=>(S.cat==='All'||a.cat===S.cat)&&(S.srcf==='all'||a.src===S.srcf)&&(!q||a.name.toLowerCase().includes(q)||a.kind.toLowerCase().includes(q)||a.cat.toLowerCase().includes(q)));
+  list.sort((x,y)=>x.name.localeCompare(y.name));
+  if(q){ list.sort((x,y)=>(y.name.toLowerCase().startsWith(q))-(x.name.toLowerCase().startsWith(q))); }
+  let h='';
+  if(!q && S.cat==='All'){
+    h+=`<div class="sect">Suggested · by usage</div><div class="dgrid">${S.recents.slice(0,form()==='phone'?4:6).map(id=>`<button data-open="${id}">${icon(id)}</button>`).join('')}</div>`;
+  }
+  if(list.length){
+    h+=`<div class="sect">${q?'Apps':S.cat==='All'?'All apps':S.cat} · ${list.length}</div><div class="dgrid">${list.map((a,i)=>`<button data-open="${a.id}">${icon(a.id,{hl:q&&i===0})}</button>`).join('')}</div>`;
+  }
+  if(q){
+    h+=`<button class="ask" data-act="askq"><span class="av">${ic('bolt',15)}</span><span><b>Ask PowOS: “${esc(S.q)}”</b><small>${list.length?'':'No app matches. Enter sends this to '}powos ai manager</small></span></button>
+        <button class="ask" data-act="install"><span class="av" style="background:#3daee9">${ic('search',15)}</span><span><b>Find “${esc(S.q)}” to install</b><small>Flathub · pacman · Play Store</small></span></button>`;
+  }
+  return h;
+}
+
+function overview(){
+  const tab=form()!=='phone';
+  const ar = tab ? 1.25 : (S.dev==='hand'?2.1:.47);
+  const cards=S.recents.map(id=>`<div class="card" data-card="${id}" ${tab?'draggable="true"':''}>
+      <div class="hd">${icon(id,{size:22,label:false})}<span>${esc(A[id].name)}</span><button class="x" data-rclose="${id}" title="Close">✕</button></div>
+      <div class="shot" style="--ar:${ar}" data-open="${id}"><div style="position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none">${appBody(id)}</div></div>
+      <div class="acts">${tab?`<button data-split="${id}">⫿ Split</button>`:''}<button data-float="${id}">❐ Float</button></div>
+    </div>`).join('');
+  return `<div class="ov ${tab?'tab':''}" id="ov"><div class="scrim" data-act="home"></div>
+    ${tab?'<div class="dz l" data-dz="a">Drop for left half</div><div class="dz r" data-dz="b">Drop for right half</div>':''}
+    <div class="ovtrack">${cards||'<div style="color:#fff;margin:auto;position:relative">No recent apps</div>'}</div>
+    <div class="ovfoot"><button data-act="clear">Clear all</button>${tab?'<button data-act="windows">Back to windows</button>':''}</div></div>`;
+}
+
+function shade(){
+  const n=now(), tab=form()!=='phone';
+  const tiles=[['wifi','Wi-Fi','wifi','PowNet 5G'],['bt','Bluetooth','bt','Xbox pad'],['dnd','Focus','moon','Off'],['game','Game','pad','Controller'],['vpn','WireGuard','shield','powback'],['sync','Sync','sync','30s ago'],['flash','Torch','torch',''],['rot','Rotate','rot','']];
+  const qs=`<div><div class="shd"><span class="t t-time">${n.t}</span><small>${n.d}</small></div>
+    <div class="qs">${tiles.map(([k,t,i,s])=>`<button class="qt ${S.t[k]?'on':''}" data-tog="${k}">${ic(i,15)}<span>${t}</span>${s?`<small>${S.t[k]?s:'Off'}</small>`:''}</button>`).join('')}</div>
+    <div class="slider"><i></i><span>☀ Brightness</span></div>
+    <div class="nf" style="align-items:center"><div class="art" style="width:40px;border-radius:10px"></div><div class="tx"><b>Midnight City</b><br><span style="color:var(--w-muted)">M83 · Spotify</span></div><button data-act="play">${ic(S.playing?'pause':'play',18)}</button></div></div>`;
+  const nfs=`<div class="ngroup"><div class="sect" style="display:flex;justify-content:space-between">Notifications<button data-act="nclear" style="color:var(--accent);font-weight:700;letter-spacing:.05em">CLEAR</button></div>
+    ${S.notifs.map((f,i)=>`<div class="nf">${icon(f.app,{size:30,label:false})}<div class="tx"><b>${esc(f.t)}</b><small>${f.ago}</small><br>${esc(f.m)}${f.a.length?`<div class="acts">${f.a.map(x=>`<button class="mini-btn ghost" data-open="${f.app}">${x}</button>`).join('')}</div>`:''}</div><button class="x" data-ndel="${i}">✕</button></div>`).join('')||'<div class="kv" style="text-align:center;padding:16px">All caught up</div>'}</div>`;
+  return `<div class="ovl"><div class="scrim" data-act="back"></div><div class="shade ${tab?'tab':''}">${tab?qs+nfs:qs+nfs}<div class="grab" style="margin-top:12px;grid-column:1/-1" data-act="back"></div></div></div>`;
+}
+
+function game(){
+  const d=DEV[S.dev], narrow=d.w<420, short=d.h<420;
+  const hero=`<div class="grow" data-row="0"><div class="gtrack"><div class="gf ghero" data-g="play:Hades II"><h3>Hades II</h3><p>Continue · 42% · last played 2 h ago · local</p><div class="bar2"><i></i></div><span class="gplay">${ic('play',12)} Play</span></div></div></div>`;
+  const recent=`<div class="grow" data-row="1"><h4>Recent</h4><div class="gtrack">${GAMES.slice(0,8).map(g=>`<div class="gf gtile" data-g="play:${esc(g.n)}" style="background:linear-gradient(155deg,${g.c[0]},${g.c[1]})"><span class="src">${g.s}</span><span>${esc(g.n)}</span></div>`).join('')}</div></div>`;
+  const stream=`<div class="grow" data-row="2"><h4>PowStream <em>● PowStation online · 4K60 · 6 ms</em></h4><div class="gtrack">
+    <div class="gf gstream" data-g="stream:Big Picture"><div style="display:flex;justify-content:space-between">${ic('stream',18)}<span class="st"><i></i>ready</span></div><div><b>Steam on Gaming PC</b><br><small>Big Picture · 2560×1440 · HDR</small></div></div>
+    <div class="gf gstream" data-g="stream:Desktop"><div>${ic('stream',18)}</div><div><b>Full desktop</b><br><small>Gaming PC · mouse + touch</small></div></div>
+    <div class="gf gstream" data-g="wake:Gaming PC" style="background:linear-gradient(135deg,#2a1d12,#14100c)"><div>${ic('bolt',18)}</div><div><b>Wake Laptop</b><br><small>Asleep · Wake-on-LAN</small></div></div>
+    <div class="gf gstream" data-g="stream:PowOS desktop"><div>${ic('grid',18)}</div><div><b>This phone → TV</b><br><small>Cast PowOS desktop</small></div></div></div></div>`;
+  const lib=`<div class="grow" data-row="3"><h4>Library <em>Steam 214 · Installed 18 · Android 9 · Streaming 61</em></h4><div class="gtrack">${GAMES.slice().reverse().map(g=>`<div class="gf gtile" data-g="play:${esc(g.n)}" style="background:linear-gradient(200deg,${g.c[0]},${g.c[1]})"><span class="src">${g.s}</span><span>${esc(g.n)}</span></div>`).join('')}</div></div>`;
+  const sys=`<div class="grow" data-row="4"><h4>System</h4><div class="gtrack">${[['gear','Settings'],['bolt','Performance'],['sync','Downloads'],['pad','Controllers'],['grid','Touch home']].map(([i,t])=>`<div class="gf gsm" data-g="sys:${t}">${ic(i,20)}${t}</div>`).join('')}</div></div>`;
+  const n=now();
+  return `<div class="game ${narrow?'narrow':''} ${short?'short':''}" id="game">
+    <div class="gtop" style="${S.dev==='hand'?'':'padding-top:38px'}"><span class="lg"><i>P</i>POWOS · GAME MODE</span><span class="sp"></span><span class="pad">${ic('pad',16)} ${S.dev==='hand'?'Handheld shell':'Xbox controller'}</span><span>${ic('bat',18)}</span><span class="t-time">${n.t}</span><span class="av"></span></div>
+    <div class="gscroll" id="gscroll">${hero}${recent}${stream}${lib}${sys}</div>
+    <div class="gfoot"><span><i class="gk" style="background:#2fbf71">A</i>Select</span><span><i class="gk" style="background:#e5484d">B</i>Back</span><span><i class="gk" style="background:#e8c46b;color:#111">Y</i>Search</span><span><i class="gk" style="background:#4a4f5a">☰</i>Menu (M)</span></div>
+    ${S.gmenu?`<div class="gmenu" data-act="gmenu"><div><b>Quick menu</b><p>⚡ Performance: Balanced · 60 fps cap</p><p>🔊 Volume 60% · 🔆 70%</p><p>⧉ Overview / switch app</p><p>▦ Touch home (leave Game Mode)</p><p style="color:#9aa3b5;margin-top:10px">B / Esc to close</p></div></div>`:''}
+  </div>`;
+}
+
+function addSheet(){
+  const have=new Set(S.widgets.map(w=>w.id));
+  return `<div class="ovl"><div class="scrim" data-act="closesheet"></div><div class="sheet"><div class="grab"></div>
+    <div style="font-weight:700;margin-bottom:4px">Add widget</div><div class="kv" style="margin-bottom:10px">OWL widgets: built-in, store, or <span class="mono">~/.config/powos/widgets/*.owl</span></div>
+    <div class="wlib">${Object.entries(WDEF).map(([k,d])=>`<button data-wadd="${k}" ${have.has(k)?'style="opacity:.45"':''}><b>${d.name}</b><small>${d.d}${have.has(k)?' · on home':''}</small></button>`).join('')}</div>
+    <div class="kv" style="margin-top:12px">Sizes snap to the 6-column grid (12 when unfolded).</div></div></div>`;
+}
+
+/* ================= render ================= */
+function render(){
+  const d=DEV[S.dev]; const dev=$('#device');
+  dev.className='device'+(S.dev==='hand'?' hand':'');
+  dev.style.setProperty('--r',d.r+'px');
+  let v=S.view; if(S.dev==='hand' && v==='home') v='game';
+  let base='', over='', dark=false;
+  if(v==='game'){ base=game(); dark=true; }
+  else if(v==='windows'){ base=windowsView(); }
+  else { base = form()==='phone'?homePhone():homeTab(); }
+  if(v==='drawer') over=drawer();
+  if(v==='overview') over=overview();
+  if(v==='shade') over=shade();
+  if(S.addSheet) over=addSheet();
+  if(v==='windows' && form()==='phone') dark=false;
+  const editbar = S.edit && (v==='home') ? `<div class="editbar glass"><span>Drag to move · ⤡ resize · × remove</span><button class="mini-btn ghost" data-act="addw">+ Widget</button><button class="mini-btn" data-act="done">Done</button></div>`:'';
+  const grips = S.dev==='hand' ? `<div class="grip l"><div class="stick" style="left:52px;top:46px"></div><div class="dpad" style="left:42px;top:150px"><button style="left:22px;top:0" data-pad="up">▲</button><button style="left:0;top:22px" data-pad="left">◀</button><button style="left:44px;top:22px" data-pad="right">▶</button><button style="left:22px;top:44px" data-pad="down">▼</button></div><span class="gbtn" style="left:60px;top:250px" data-pad="menu">☰</span></div>
+    <div class="grip r"><div class="abxy" style="left:40px;top:40px"><button style="left:23px;top:0;color:#e8c46b" data-pad="y">Y</button><button style="left:0;top:23px;color:#5fa8ff" data-pad="x">X</button><button style="left:46px;top:23px;color:#e5484d" data-pad="b">B</button><button style="left:23px;top:46px;color:#2fbf71" data-pad="a">A</button></div><div class="stick" style="left:50px;top:160px"></div><span class="gbtn" style="left:52px;top:250px" data-pad="guide">⊞ PowOS</span></div>`:'';
+  const showPill = !(form()==='tab' && S.taskbar && (v==='home'||v==='windows')) && v!=='game';
+  dev.innerHTML = `${grips}<div class="screen" id="screen" style="width:${d.w}px;height:${d.h}px">
+    <div class="wall"></div>
+    <div class="layer" id="base">${base}</div>
+    ${editbar}
+    <div class="layer" id="over" style="pointer-events:${over?'auto':'none'}">${over}</div>
+    ${v!=='game'||S.dev!=='hand'?statusBar(dark):''}
+    ${S.dev!=='hand'&&S.dev!=='open'?'<div class="cam"></div>':''}
+    ${S.dev==='open'?'<div class="hinge"></div><div class="cam" style="left:75%"></div>':''}
+    ${showPill?'<div class="pill" id="pill" title="Tap: home · hold: overview"></div>':''}
+    <div class="toast glass" id="toast"></div>
+  </div>`;
+  fit(); chrome(); bind();
+  if(v==='game') applyGameFocus(false);
+  if(v==='drawer'){ const q=$('#q'); if(q && S.focusQ){ q.focus(); q.setSelectionRange(q.value.length,q.value.length); S.focusQ=false; } }
+}
+function fit(){
+  const d=DEV[S.dev], st=$('#stage');
+  const extraW = S.dev==='hand'?260:0, extraH=S.dev==='hand'?60:0;
+  const W=d.w+18+extraW, H=d.h+18+extraH;
+  const aw=st.clientWidth-32, ah=st.clientHeight-84;
+  const s=Math.min(1.15,aw/W,ah/H);
+  const sz=$('#sizer'); sz.style.width=(d.w+18)*s+'px'; sz.style.height=(d.h+18)*s+'px';
+  $('#device').style.transform=`scale(${s})`;
+}
+function chrome(){
+  $('#devSeg').innerHTML=Object.entries(DEV).map(([k,d])=>`<button data-dev="${k}" aria-pressed="${S.dev===k}">${d.short}</button>`).join('')+(S.dev==='fold'||S.dev==='open'?`<button data-dev="${S.dev==='fold'?'open':'fold'}" aria-pressed="false" style="color:var(--accent)">${S.dev==='fold'?'⇿ Unfold':'⇼ Fold'}</button>`:'');
+  const v = S.dev==='hand'&&S.view==='home'?'game':S.view;
+  $('#viewSeg').innerHTML=VIEWS.map(([k,t])=>`<button data-view="${k}" aria-pressed="${v===k}">${t}</button>`).join('');
+  $('#editBtn').setAttribute('aria-pressed',S.edit);
+  $('#tbBtn').setAttribute('aria-pressed',S.taskbar);
+  $('#tbBtn').style.display = S.dev==='open'?'':'none';
+  const d=DEV[S.dev];
+  $('#devlabel').innerHTML=`<b>${d.name}</b> · ${d.note}`;
+  const H={
+    home: form()==='tab'?'Unfolded: side rail, 12-col widget grid, taskbar. Long-press a widget to edit. Drag down for the shade.':'Swipe up on home for the drawer, down for the shade. Long-press a widget to edit. Scroll sideways for page 2. Tap the bar to search or ask.',
+    drawer:'Type to filter. <kbd>Enter</kbd> opens the highlighted app, or asks the agent if nothing matches. Badges: A = Android, L = PowOS.',
+    overview: form()==='tab'?'Drag a card onto a half to split it, or use ⫿ Split / ❐ Float. Click a card to open it.':'Scroll the cards. Click to open, ✕ to close, ❐ to float over the current app.',
+    windows: form()==='tab'?'Drag the divider. Drag floating windows by the title bar and resize from the corner. The taskbar switches apps.':'One app per task. Floating windows sit on top. Swipe up from the bottom edge (or tap the pill) to go home.',
+    game:'Gamepad: <kbd>←↑→↓</kbd> move · <kbd>Enter</kbd> A · <kbd>Esc</kbd> B · <kbd>M</kbd> menu' + (S.dev==='hand'?' · the drawn buttons work too':''),
+    shade:'Quick settings + notifications. Tiles toggle; ✕ dismisses. Tap outside to close.',
+  };
+  $('#hint').innerHTML = H[v]||'';
+}
+
+/* ================= interactions ================= */
+function go(view){ S.view=view; S.gmenu=false; S.addSheet=false; if(view!=='home') S.edit=false; render(); }
+function openApp(id){
+  if(!A[id]) return;
+  S.recents=[id,...S.recents.filter(x=>x!==id)];
+  if(form()==='tab'){
+    const w=S.win;
+    if(w.focus==='b' && w.split) w.b=id; else if(w.split && w.b===id){} else w.a=id;
+    if(w.split && w.a===w.b){ w.b = S.recents.find(x=>x!==w.a); }
+  } else S.phoneApp=id;
+  if(id==='steam' || id==='powstream' || id==='moonlight'){ }
+  S.view='windows'; S.edit=false; S.addSheet=false; render();
+  toast(A[id].src==='a' ? `${A[id].name}: Android task${form()==='tab'?' → KWin window via VirtualDisplay':''}` : `${A[id].name}: launched in the PowOS session (${A[id].kind})`);
+}
+function bind(){
+  const scr=$('#screen');
+  scr.onclick=onClick;
+  // drawer search
+  const q=$('#q');
+  if(q){
+    q.oninput=()=>{S.q=q.value;$('#dlist').innerHTML=drawerList();};
+    q.onkeydown=e=>{ if(e.key==='Enter'){ const first=$('#dlist .ico.hl')?.closest('[data-open]'); if(first) openApp(first.dataset.open); else if(S.q.trim()){ toast(`→ powos ai manager: “${S.q.trim()}”`); } } };
+  }
+  // widget drag & drop
+  if(S.edit){
+    scr.querySelectorAll('.w[draggable]').forEach(el=>{
+      el.ondragstart=e=>{e.dataTransfer.setData('text/plain',el.dataset.wi);el.style.opacity=.4;};
+      el.ondragend=()=>{el.style.opacity='';};
+      el.ondragover=e=>{e.preventDefault();el.classList.add('drag-over');};
+      el.ondragleave=()=>el.classList.remove('drag-over');
+      el.ondrop=e=>{e.preventDefault();const from=+e.dataTransfer.getData('text/plain'),to=+el.dataset.wi;if(from===to)return;const W=S.widgets;const fp=W[from].p;W[from].p=W[to].p;W[to].p=fp;[W[from],W[to]]=[W[to],W[from]];render();};
+    });
+  }
+  // overview drag to split
+  const ov=$('#ov');
+  if(ov && form()==='tab'){
+    ov.querySelectorAll('.card[draggable]').forEach(c=>{
+      c.ondragstart=e=>{e.dataTransfer.setData('text/plain',c.dataset.card);ov.classList.add('dragging');};
+      c.ondragend=()=>ov.classList.remove('dragging');
+    });
+    ov.querySelectorAll('.dz').forEach(z=>{
+      z.ondragover=e=>{e.preventDefault();z.classList.add('over');};
+      z.ondragleave=()=>z.classList.remove('over');
+      z.ondrop=e=>{e.preventDefault();const id=e.dataTransfer.getData('text/plain');splitWith(id,z.dataset.dz);};
+    });
+  }
+  // pages dots
+  const pg=$('#pages');
+  if(pg){ let wl=0; pg.onwheel=e=>{ if(Math.abs(e.deltaY)<=Math.abs(e.deltaX)) return; e.preventDefault(); if(Date.now()-wl<450||Math.abs(e.deltaY)<15) return; wl=Date.now(); const i=Math.round(pg.scrollLeft/pg.clientWidth)+(e.deltaY>0?1:-1); pg.scrollTo({left:pg.clientWidth*Math.max(0,Math.min(1,i)),behavior:'smooth'}); };
+    pg.onscroll=()=>{const i=Math.round(pg.scrollLeft/pg.clientWidth);scr.querySelectorAll('.dots i').forEach((d,k)=>d.classList.toggle('on',k===i));}; if(S.page){pg.scrollLeft=pg.clientWidth*S.page;} }
+  scr.querySelectorAll('.ovtrack').forEach(el=>{ el.onwheel=e=>{ if(getComputedStyle(el).display==='grid') return; if(Math.abs(e.deltaY)>Math.abs(e.deltaX)){ el.scrollLeft+=e.deltaY; e.preventDefault(); } }; });
+  // divider drag
+  const dv=$('#divider');
+  if(dv){ dv.onpointerdown=e=>{e.stopPropagation();dv.setPointerCapture(e.pointerId);const panes=$('#panes').getBoundingClientRect();const sc=panes.width/$('#panes').offsetWidth;
+    dv.onpointermove=m=>{S.win.ratio=Math.max(.25,Math.min(.75,(m.clientX-panes.left)/panes.width));const ps=scr.querySelectorAll('.pane');ps[0].style.flex=`0 0 calc(${S.win.ratio*100}% - 7px)`;ps[1].style.flex=`0 0 calc(${(1-S.win.ratio)*100}% - 7px)`;};
+    dv.onpointerup=()=>{dv.onpointermove=null;}; }; }
+  // floating window move/resize
+  scr.querySelectorAll('.float').forEach(f=>{
+    const i=+f.dataset.fi, arr= form()==='tab'?S.win.floats:S.phoneFloats, st=arr[i];
+    const scale=()=>f.getBoundingClientRect().width/f.offsetWidth;
+    const tb=f.querySelector('.wtitle');
+    tb.onpointerdown=e=>{ if(e.target.closest('button'))return; e.stopPropagation(); tb.setPointerCapture(e.pointerId); const s=scale(),sx=e.clientX,sy=e.clientY,ox=st.x,oy=st.y; if(form()==='tab'){S.win.focus='f'+i;}
+      tb.onpointermove=m=>{st.x=ox+(m.clientX-sx)/s;st.y=Math.max(0,oy+(m.clientY-sy)/s);f.style.left=st.x+'px';f.style.top=st.y+'px';};
+      tb.onpointerup=()=>{tb.onpointermove=null;}; };
+    const rs=f.querySelector('.rs');
+    rs.onpointerdown=e=>{e.stopPropagation();rs.setPointerCapture(e.pointerId);const s=scale(),sx=e.clientX,sy=e.clientY,ow=st.w,oh=st.h;
+      rs.onpointermove=m=>{st.w=Math.max(180,ow+(m.clientX-sx)/s);st.h=Math.max(130,oh+(m.clientY-sy)/s);f.style.width=st.w+'px';f.style.height=st.h+'px';};
+      rs.onpointerup=()=>{rs.onpointermove=null;};};
+  });
+  bindGestures(scr);
+}
+function splitWith(id,side){
+  const w=S.win; w.split=true;
+  if(side==='a'){ if(w.b===id) w.b=w.a; w.a=id; } else { if(w.a===id) w.a=w.b; w.b=id; }
+  if(w.a===w.b) w.b=S.recents.find(x=>x!==w.a);
+  w.floats=w.floats.filter(f=>f.app!==id); w.focus=side;
+  S.recents=[id,...S.recents.filter(x=>x!==id)];
+  go('windows'); toast(`${A[id].name} → ${side==='a'?'left':'right'} half`);
+}
+function floatApp(id){
+  if(form()==='tab'){
+    const w=S.win; if(w.a===id && w.split){ w.a=w.b; w.split=false; } else if(w.b===id){ w.split=false; }
+    else if(w.a===id){ w.a=S.recents.find(x=>x!==id && !w.floats.some(f=>f.app===x)); }
+    if(!w.floats.some(f=>f.app===id)) w.floats.push({app:id,x:200+w.floats.length*30,y:60+w.floats.length*30,w:300,h:220});
+    w.focus='f'+(w.floats.length-1);
+  } else {
+    if(S.phoneApp===id) S.phoneApp=S.recents.find(x=>x!==id);
+    if(!S.phoneFloats.some(f=>f.app===id)) S.phoneFloats.push({app:id,x:40,y:120+S.phoneFloats.length*40,w:250,h:300});
+  }
+  go('windows');
+}
+function onClick(e){
+  const t=e.target.closest('[data-open],[data-act],[data-tog],[data-cat],[data-srcf],[data-wdel],[data-wsize],[data-wadd],[data-rclose],[data-split],[data-float],[data-ndel],[data-wclose],[data-wfloat],[data-wmin],[data-pane],[data-g],[data-pad]');
+  if(S.longFired){ S.longFired=false; return; }
+  const pgd=e.target.closest('[data-pg]'); if(pgd){ const pg=$('#pages'); pg.scrollTo({left:pg.clientWidth*+pgd.dataset.pg,behavior:'smooth'}); return; }
+  if(!t) return;
+  const ds=t.dataset;
+  if(S.edit && t.closest('.w') && !ds.wdel && !ds.wsize) return;
+  if(ds.pad){ pad(ds.pad); return; }
+  if(ds.g){ gameActivate(t); return; }
+  if(ds.open){ e.stopPropagation(); if(t.closest('.card')){ openApp(ds.open); return;} openApp(ds.open); return; }
+  if(ds.tog){ S.t[ds.tog]^=1; if(ds.tog==='game'&&S.t.game){ go('game'); return;} render(); return; }
+  if(ds.cat){ S.cat=ds.cat; render(); return; }
+  if(ds.srcf){ S.srcf=ds.srcf; render(); return; }
+  if(ds.wdel){ S.widgets.splice(+ds.wdel,1); render(); return; }
+  if(ds.wsize){ const w=S.widgets[+ds.wsize], sz=WDEF[w.id].sizes; const k=sz.findIndex(s=>s[0]===w.w&&s[1]===w.h); const n=sz[(k+1)%sz.length]; w.w=n[0]; w.h=n[1]; render(); return; }
+  if(ds.wadd){ if(!S.widgets.some(w=>w.id===ds.wadd)){ const s=WDEF[ds.wadd].sizes[0]; S.widgets.push({id:ds.wadd,w:s[0],h:s[1],p:1}); } S.addSheet=false; S.page=form()==='phone'?1:0; render(); S.page=0; toast(`${WDEF[ds.wadd].name} added`); return; }
+  if(ds.rclose){ e.stopPropagation(); S.recents=S.recents.filter(x=>x!==ds.rclose); render(); return; }
+  if(ds.split){ splitWith(ds.split,'b'); return; }
+  if(ds.float){ floatApp(ds.float); return; }
+  if(ds.ndel){ S.notifs.splice(+ds.ndel,1); render(); return; }
+  if(ds.wclose){ closeWin(ds.wclose); return; }
+  if(ds.wfloat){ const k=ds.wfloat; if(k.startsWith('f')){ const i=+k.slice(1); const arr=form()==='tab'?S.win.floats:S.phoneFloats; const f=arr.splice(i,1)[0]; if(form()==='tab'){ if(S.win.split) S.win.b=f.app; else { S.win.split=true; S.win.b=f.app; } S.win.focus='b'; } else S.phoneApp=f.app; render(); } else floatApp(S.win[k]); return; }
+  if(ds.wmin){ closeWin(ds.wmin,true); return; }
+  if(ds.pane){ if(S.win.focus!==ds.pane){S.win.focus=ds.pane; render();} return; }
+  switch(ds.act){
+    case 'bar': S.focusQ=true; S.q=''; go('drawer'); break;
+    case 'drawer': S.q=''; go('drawer'); break;
+    case 'home': go('home'); break;
+    case 'back': go(S.prevView&&S.prevView!=='shade'?S.prevView:'home'); break;
+    case 'windows': go('windows'); break;
+    case 'shade': S.prevView=S.view; go('shade'); break;
+    case 'clear': S.recents=[]; render(); break;
+    case 'nclear': S.notifs=[]; render(); break;
+    case 'done': S.edit=false; render(); break;
+    case 'addw': S.addSheet=true; render(); break;
+    case 'closesheet': S.addSheet=false; render(); break;
+    case 'play': S.playing=!S.playing; render(); break;
+    case 'prev': case 'next': toast(ds.act==='next'?'Next track':'Previous track'); break;
+    case 'sync': toast('powos sync now · custom layer synced'); break;
+    case 'gamemode': go('game'); break;
+    case 'ask': S.focusQ=true; go('drawer'); break;
+    case 'askq': toast(`→ powos ai manager: “${S.q.trim()}”`); break;
+    case 'install': toast(`Searching Flathub, pacman and Play for “${S.q.trim()}”…`); break;
+    case 'gmenu': S.gmenu=false; render(); break;
+  }
+}
+function closeWin(k,min){
+  if(k.startsWith('f')){ const arr=form()==='tab'?S.win.floats:S.phoneFloats; arr.splice(+k.slice(1),1); S.win.focus='a'; render(); return; }
+  if(form()!=='tab'){ go('home'); return; }
+  const w=S.win; const id=w[k];
+  if(!min) S.recents=S.recents.filter(x=>x!==id);
+  if(w.split){ if(k==='a') w.a=w.b; w.split=false; w.b=null; w.focus='a'; render(); }
+  else go('home');
+}
+
+/* gestures: edge swipes, pill tap/hold, long-press widgets */
+function bindGestures(scr){
+  let st=null, holdT=null, longT=null;
+  scr.onpointerdown=e=>{
+    if(S.view==='game') return;
+    const r=scr.getBoundingClientRect(), s=r.height/scr.offsetHeight;
+    const y=(e.clientY-r.top)/s, h=scr.offsetHeight;
+    const zone = y<34?'top': (y>h-26||e.target.id==='pill')?'bottom':'mid';
+    if(e.target.closest('input,.wtitle,.divider,.rs,.dsearch,.chips,.taskbar,.dock')) { if(zone!=='bottom') return; }
+    S.longFired=false;
+    st={x:e.clientX,y:e.clientY,zone,s,t:Date.now(),moved:false,over:false};
+    if(zone==='bottom'){
+      holdT=setTimeout(()=>{ if(st){ st.over=true; S.prevView=S.view; go('overview'); } },420);
+    }
+    const w=e.target.closest('.w');
+    if(w && !S.edit && S.view==='home'){ longT=setTimeout(()=>{ if(st&&!st.moved){ S.edit=true; S.longFired=true; render(); toast('Edit mode: drag, resize or remove widgets'); } },520); }
+  };
+  scr.onpointermove=e=>{ if(!st) return; const dy=(e.clientY-st.y)/st.s, dx=(e.clientX-st.x)/st.s; if(Math.abs(dy)>8||Math.abs(dx)>8){ st.moved=true; clearTimeout(longT); } if(st.zone==='bottom' && Math.abs(dx)>30 && Math.abs(dy)<20) clearTimeout(holdT); };
+  scr.onpointerup=e=>{
+    clearTimeout(holdT); clearTimeout(longT); if(!st) return;
+    const dy=(e.clientY-st.y)/st.s, dx=(e.clientX-st.x)/st.s, z=st.zone, over=st.over; st=null;
+    if(over) return;
+    if(z==='bottom'){ if(dy<-20 || Math.abs(dy)<6&&Math.abs(dx)<6){ if(S.view!=='home'||S.edit){ S.edit=false; go('home'); } } return; }
+    if(z==='top' && dy>40){ S.prevView=S.view; go('shade'); return; }
+    if(Math.abs(dx)>Math.abs(dy)) return;
+    if(S.view==='home' && !S.edit){ if(dy<-70){ S.q=''; go('drawer'); } else if(dy>70){ S.prevView='home'; go('shade'); } }
+    else if(S.view==='drawer' && dy>120 && !document.activeElement?.matches('#q')){ go('home'); }
+    else if(S.view==='shade' && dy<-70){ go(S.prevView||'home'); }
+  };
+  scr.onpointercancel=()=>{clearTimeout(holdT);clearTimeout(longT);st=null;};
+}
+
+/* ================= game focus ================= */
+function rows(){ return [...document.querySelectorAll('#game .grow')].map(r=>[...r.querySelectorAll('.gf')]); }
+function applyGameFocus(scroll=true){
+  const R=rows(); if(!R.length) return;
+  S.gf.r=Math.max(0,Math.min(R.length-1,S.gf.r));
+  const row=R[S.gf.r]; const c=Math.max(0,Math.min(row.length-1,S.gf.c[S.gf.r]||0)); S.gf.c[S.gf.r]=c;
+  document.querySelectorAll('#game .gf.focus').forEach(x=>x.classList.remove('focus'));
+  const el=row[c]; el.classList.add('focus');
+  const tr=el.parentElement, gs=$('#gscroll'), rowEl=el.closest('.grow'), b=scroll?'smooth':'auto';
+  tr.scrollTo({left:Math.max(0, el.offsetLeft - tr.clientWidth/2 + el.offsetWidth/2),behavior:b});
+  gs.scrollTo({top:Math.max(0, rowEl.offsetTop - gs.clientHeight/2 + rowEl.offsetHeight/2),behavior:b});
+}
+function gameActivate(el){
+  const R=rows(); R.forEach((row,ri)=>{const ci=row.indexOf(el); if(ci>=0){S.gf.r=ri;S.gf.c[ri]=ci;}}); applyGameFocus();
+  const [k,v]=el.dataset.g.split(':');
+  if(v==='Touch home'){ S.t.game=0; if(S.dev==='hand') S.dev='s25'; go('home'); return; }
+  const msg={play:`Launching ${v} · KWin fullscreen, controller captured`,stream:`PowStream → ${v} · connecting to PowStation…`,wake:`Wake-on-LAN sent to ${v}`,sys:`${v}`}[k];
+  toast(msg);
+}
+function pad(b){
+  const vv = S.dev==='hand'&&S.view==='home'?'game':S.view;
+  if(b==='guide'){ go(vv==='game'?'overview':'game'); return; }
+  if(vv!=='game'){ if(b==='b') go(S.dev==='hand'?'game':'home'); return; }
+  if(S.gmenu){ if(b==='b'||b==='menu'){S.gmenu=false;render();} return; }
+  const R=rows();
+  if(b==='up'){ S.gf.r--; applyGameFocus(); }
+  else if(b==='down'){ S.gf.r++; applyGameFocus(); }
+  else if(b==='left'){ S.gf.c[S.gf.r]=(S.gf.c[S.gf.r]||0)-1; applyGameFocus(); }
+  else if(b==='right'){ S.gf.c[S.gf.r]=(S.gf.c[S.gf.r]||0)+1; applyGameFocus(); }
+  else if(b==='a'){ const el=document.querySelector('#game .gf.focus'); if(el) gameActivate(el); }
+  else if(b==='b'){ if(S.dev!=='hand') go('home'); else toast('Already at Game Mode home'); }
+  else if(b==='menu'){ S.gmenu=true; render(); }
+  else if(b==='y'){ toast('Search library…'); }
+  else if(b==='x'){ toast('Options: ' + (document.querySelector('#game .gf.focus')?.dataset.g.split(':')[1]||'')); }
+}
+document.addEventListener('keydown',e=>{
+  if(e.target.matches('input')) { if(e.key==='Escape'){ go('home'); } return; }
+  const vv = S.dev==='hand'&&S.view==='home'?'game':S.view;
+  const map={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',Enter:'a',Escape:'b',m:'menu',M:'menu',y:'y',x:'x'};
+  if(vv==='game' && map[e.key]){ e.preventDefault(); pad(map[e.key]); return; }
+  if(e.key==='Escape' && vv!=='home'){ S.edit=false; go('home'); }
+});
+/* real gamepad (if present) */
+let gpPrev={};
+function pollPad(){
+  const gps=navigator.getGamepads?navigator.getGamepads():[]; const g=[...gps].find(Boolean);
+  if(g){ const m={12:'up',13:'down',14:'left',15:'right',0:'a',1:'b',3:'y',2:'x',9:'menu',16:'guide'};
+    for(const k in m){ const p=g.buttons[k]&&g.buttons[k].pressed; if(p&&!gpPrev[k]) pad(m[k]); gpPrev[k]=p; }
+    requestAnimationFrame(pollPad); }
+}
+window.addEventListener('gamepadconnected',()=>{ toast('Controller connected → Game Mode'); go('game'); pollPad(); });
+
+/* ================= page chrome wiring ================= */
+document.getElementById('devSeg').onclick=e=>{const b=e.target.closest('[data-dev]');if(!b)return;const was=S.dev;S.dev=b.dataset.dev;
+  if(S.dev==='hand'&&S.view==='home') S.view='game';
+  if(was==='hand'&&S.view==='game'&&S.dev!=='hand') S.view='home';
+  render(); if((was==='fold'&&S.dev==='open')||(was==='open'&&S.dev==='fold')) toast(S.dev==='open'?'Unfolded: 12-col grid, rail, taskbar, split':'Folded: cover layout, 6-col grid');};
+document.getElementById('viewSeg').onclick=e=>{const b=e.target.closest('[data-view]');if(!b)return;const v=b.dataset.view; if(v==='shade') S.prevView=S.view; if(v==='drawer') S.q=''; go(v==='home'&&S.dev==='hand'?'game':v); if(v==='home'&&S.dev==='hand') toast('Controller attached: Game Mode is home. ⊞ → Touch home leaves it.');};
+document.getElementById('editBtn').onclick=()=>{S.edit=!S.edit; S.view='home'; if(S.dev==='hand') S.dev='s25'; render();};
+document.getElementById('tbBtn').onclick=()=>{S.taskbar=!S.taskbar; render();};
+document.getElementById('themeSeg').onclick=e=>{const b=e.target.closest('[data-theme-set]');if(!b)return;S.theme=b.dataset.themeSet;
+  if(S.theme==='auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme',S.theme);
+  document.querySelectorAll('#themeSeg button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  try{localStorage.setItem('powos-launcher-theme',S.theme);}catch(_){}};
+function showNote(k){S.note=k;$('#nbody').innerHTML=document.getElementById('n-'+k).innerHTML;document.querySelectorAll('#noteSeg button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.n===k));}
+document.getElementById('noteSeg').onclick=e=>{const b=e.target.closest('[data-n]');if(b)showNote(b.dataset.n);};
+document.getElementById('device').addEventListener('click',e=>{const p=e.target.closest('[data-pad]');if(p&&!e.target.closest('#screen')){pad(p.dataset.pad);}});
+try{const th=localStorage.getItem('powos-launcher-theme');if(th&&th!=='auto'){const b=document.querySelector(`[data-theme-set="${th}"]`);b&&b.click();}}catch(_){}
+window.addEventListener('resize',fit); try{ new ResizeObserver(()=>fit()).observe(document.getElementById('stage')); document.fonts&&document.fonts.ready.then(fit); }catch(_){}
+setInterval(()=>{const n=now();document.querySelectorAll('.t-time').forEach(x=>x.textContent=n.t);},20000);
+showNote('p');
+/* deep link: #dev=open&view=windows&edit=1 */
+try{const h=new URLSearchParams(location.hash.slice(1)); if(DEV[h.get('dev')]) S.dev=h.get('dev'); if(VIEWS.some(v=>v[0]===h.get('view'))) S.view=h.get('view'); if(h.get('edit')==='1') S.edit=true; if(h.get('theme')){ const b=document.querySelector(`[data-theme-set="${h.get('theme')}"]`); b&&b.click(); }}catch(_){}
+render();
+})();
+</script>
+</body>
+</html>
