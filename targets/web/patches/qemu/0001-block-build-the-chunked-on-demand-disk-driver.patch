@@ -1,0 +1,12 @@
+PowOS web: build block/chunked.c (targets/web/qemu/block/chunked.c), the disk streamed on demand.
+
+--- a/block/meson.build
++++ b/block/meson.build
+@@ -21,6 +21,7 @@
+   'mirror.c',
+   'nbd.c',
+   'null.c',
++  'chunked.c',
+   'preallocate.c',
+   'progress_meter.c',
+   'qapi.c',

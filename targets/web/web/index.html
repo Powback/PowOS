@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PowOS Web</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+  <style>
+    :root { --bg: #0d1117; --fg: #c9d1d9; --muted: #8b949e; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
+    header { padding: 8px 16px; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+    header b { font-size: 15px; }
+    #status { color: var(--muted); }
+    #terminal { height: calc(100% - 40px); padding: 0 8px; }
+  </style>
+</head>
+<body>
+  <header><b>PowOS Web</b><span id="status">loading QEMU…</span></header>
+  <div id="terminal"></div>
+  <!-- Kernel and initramfs, preloaded (Emscripten file_packager). The disk is NOT: it streams. -->
+  <script src="./load-kernel.js"></script>
+  <script src="./load-initramfs.js"></script>
+  <script src="./args.js"></script>
+  <script type="module">
+    import 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
+    import 'https://cdn.jsdelivr.net/npm/xterm-pty@0.9.4/index.js';
+    import initEmscriptenModule from './qemu-system-aarch64.js';
+
+    const status = document.getElementById('status');
+    if (!crossOriginIsolated) status.textContent = 'needs cross-origin isolation (COOP/COEP headers) for threads';
+
+    const xterm = new Terminal({ convertEol: false, fontSize: 13 });
+    xterm.open(document.getElementById('terminal'));
+    const { master, slave } = openpty();
+    xterm.loadAddon(master);
+    Module.pty = slave;
+    Module.mainScriptUrlOrBlob = new URL('./qemu-system-aarch64.js', location.href).href;
+    Module.arguments = Module.powosArgs(new URL('./disk', location.href).href);
+    // QEMU's own stderr (the chunked disk reports what it fetched there) goes to the console and the header.
+    Module.printErr = (line) => {
+      console.log(line);
+      if (line.startsWith('chunked:')) status.textContent = line.slice(9);
+    };
+
+    status.textContent = 'booting PowOS…';
+    await initEmscriptenModule(Module);
+    // xterm-pty: report the TTY as not readable while the terminal has no input, so QEMU's poll doesn't spin.
+    const oldPoll = Module.TTY.stream_ops.poll;
+    Module.TTY.stream_ops.poll = function (stream, timeout) {
+      if (!slave.readable) return (slave.readable ? 1 : 0) | (slave.writable ? 4 : 0);
+      return oldPoll.call(stream, timeout);
+    };
+  </script>
+</body>
+</html>

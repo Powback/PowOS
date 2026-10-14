@@ -8,8 +8,12 @@
 #   pkgs/      our built packages (kwin with the Anland backend)
 #   session/   the session launcher + first-boot/first-session
 #   shims/     stand-ins for Omarchy commands Andromarchy's engine calls
+#
+# POWOS_TARGET=vm installs the same PowOS for a virtual machine instead (targets/web: PowOS in the browser):
+# everything but the phone-specific section, plus a kernel and a normal systemd boot. P= points at the inputs.
 set -euo pipefail
-P=/tmp/lotfix/powos
+POWOS_TARGET=${POWOS_TARGET:-phone}
+P=${P:-/tmp/lotfix/powos}
 L=/tmp/lotfix
 C=/etc/pacman.conf
 echo "powos: from $(cat $P/manifest/image.txt)"
@@ -81,17 +85,19 @@ echo "powos: $(wc -l < /tmp/powos-content-skip) content files left to the Arch p
 zstd -dc $P/manifest/content.tar.zst | tar -x -C / --no-same-owner --exclude-from=/tmp/powos-content-skip
 cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
 
+# HACK: bun is an x86 binary the PowOS image puts outside any package (Containerfile curl), so the manifest
+# can't carry it; the aarch64 build of the same release. Real fix: the manifest lists such binaries too.
+curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/latest/download/bun-linux-aarch64.zip
+bsdtar -xf /tmp/bun.zip -C /tmp && install -m 755 /tmp/bun-linux-aarch64/bun /usr/bin/bun && rm -rf /tmp/bun*
+mkdir -p /etc/powos && echo "$POWOS_TARGET" > /etc/powos/platform
+
+if [ "$POWOS_TARGET" = phone ]; then
 # ── Phone-specific ──────────────────────────────────────────────────────────────────────────────────────
 # No systemd on Android: startplasma must start the session's services itself, not ask systemd to.
 mkdir -p /etc/xdg
 printf '[General]\nsystemdBoot=false\n' > /etc/xdg/startkderc
 # The app's user is root with home /root: seed it from /etc/skel as useradd would for a new user.
 cp -a /etc/skel/. /root/ 2>/dev/null || true
-mkdir -p /etc/powos && echo phone > /etc/powos/platform
-# HACK: bun is an x86 binary the PowOS image puts outside any package (Containerfile curl), so the manifest
-# can't carry it; the aarch64 build of the same release. Real fix: the manifest lists such binaries too.
-curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/latest/download/bun-linux-aarch64.zip
-bsdtar -xf /tmp/bun.zip -C /tmp && install -m 755 /tmp/bun-linux-aarch64/bun /usr/bin/bun && rm -rf /tmp/bun*
 
 # Session + Omarchy-name stand-ins
 install -m 755 "$P/session/Hyprland" /usr/bin/Hyprland            # HACK: see the file
@@ -102,6 +108,17 @@ install -Dm 755 "$P/session/first-session.sh" /opt/powos/first-session.sh
 install -m 755 "$L/native/omarchy-dns-android.sh" /usr/local/bin/omarchy-dns
 install -m 755 "$P/shims/omarchy-toggle-idle" /usr/local/bin/omarchy-toggle-idle
 install -m 755 "$P/shims/omarchy-lock-screen" /usr/local/bin/omarchy-lock-screen
+else
+# ── Virtual machine (targets/web) ───────────────────────────────────────────────────────────────────────
+# A normal boot: Arch Linux ARM's kernel (its fallback initramfs has every driver, virtio included), systemd as
+# init, the root filesystem on the VM's first virtio disk. PowOS's login (powos/powos, as in PowOS's docs).
+pacman -S --noconfirm --needed linux-aarch64 mkinitcpio
+echo '/dev/vda / ext4 rw,relatime 0 1' > /etc/fstab
+echo powos > /etc/hostname
+id powos >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash powos
+echo powos:powos | chpasswd
+echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel && chmod 440 /etc/sudoers.d/10-wheel
+fi
 
 # Parity with the PowOS image: every command, app, autostart entry and enabled unit it offers, checked here.
 # Gaps are listed by the PowOS package they come from; the report stays in the image.

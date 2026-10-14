@@ -1,0 +1,3 @@
+[submodule "targets/web/third_party/qemu-wasm"]
+	path = targets/web/third_party/qemu-wasm
+	url = https://github.com/ktock/qemu-wasm
