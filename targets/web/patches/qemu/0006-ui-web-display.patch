@@ -1,0 +1,25 @@
+PowOS web: -display web (targets/web/qemu/ui/web.c): the graphical console in the browser page - frames read in
+place from the shared Wasm heap, input through a ring the page writes. A no-op on native builds.
+
+--- a/qapi/ui.json	2026-10-14 23:31:18
++++ b/qapi/ui.json	2026-10-14 23:31:18
+@@ -1494,7 +1494,8 @@
+     { 'name': 'curses', 'if': 'CONFIG_CURSES' },
+     { 'name': 'cocoa', 'if': 'CONFIG_COCOA' },
+     { 'name': 'spice-app', 'if': 'CONFIG_SPICE' },
+-    { 'name': 'dbus', 'if': 'CONFIG_DBUS_DISPLAY' }
++    { 'name': 'dbus', 'if': 'CONFIG_DBUS_DISPLAY' },
++    { 'name': 'web' }
+   ]
+ }
+ 
+--- a/ui/meson.build	2026-10-14 23:31:18
++++ b/ui/meson.build	2026-10-14 23:31:18
+@@ -17,6 +17,7 @@
+   'ui-hmp-cmds.c',
+   'ui-qmp-cmds.c',
+   'util.c',
++  'web.c',
+ ))
+ system_ss.add(when: pixman, if_true: files('console-vc.c'), if_false: files('console-vc-stubs.c'))
+ if dbus_display

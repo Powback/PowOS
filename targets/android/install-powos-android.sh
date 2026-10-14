@@ -143,6 +143,11 @@ echo powos > /etc/hostname
 id powos >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash powos
 echo powos:powos | chpasswd
 echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel && chmod 440 /etc/sudoers.d/10-wheel
+# The browser shows PowOS's desktop: SDDM logs powos straight into Plasma (Wayland), and KWin composites in software
+# with QPainter - no GPU in the VM, and OpenGL on llvmpipe is far slower under emulation.
+mkdir -p /etc/sddm.conf.d
+printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/10-powos-vm-autologin.conf
+grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
 fi
 
 # Parity with the PowOS image: every command, app, autostart entry and enabled unit it offers, checked here.

@@ -69,11 +69,12 @@ class QMP:
 
 
 con = Serial(serial_path)
-con.expect(re.escape(MARKER), 1200)
+con.expect(re.escape(MARKER), 3600)
 time.sleep(3)
 
 q = QMP(qmp_path)
 os.makedirs(os.path.dirname(state), exist_ok=True)
+q.cmd("screendump", filename=os.path.join(os.path.dirname(state), "screen.ppm"))  # what is being saved
 q.cmd("migrate", uri=f"file:{state}")
 while True:
     st = q.cmd("query-migrate").get("status")

@@ -14,11 +14,19 @@
     #bar { flex: 1; min-width: 120px; max-width: 360px; height: 6px; background: #30363d; border-radius: 3px; overflow: hidden; }
     #bar > div { height: 100%; width: 0; background: #58a6ff; transition: width .2s; }
     #bar.done { display: none; }
-    #terminal { height: calc(100% - 40px); padding: 0 8px; }
+    body { display: flex; flex-direction: column; }
+    main { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; }
+    #screen { max-width: 100%; max-height: 100%; outline: none; touch-action: none; image-rendering: auto; }
+    #terminal { height: 200px; padding: 0 8px; border-top: 1px solid #30363d; }
+    #terminal.hidden { display: none; }
+    header button { margin-left: auto; background: #21262d; color: var(--fg); border: 1px solid #30363d;
+                    border-radius: 6px; padding: 2px 10px; font: inherit; cursor: pointer; }
   </style>
 </head>
 <body>
-  <header><b>PowOS Web</b><div id="bar"><div></div></div><span id="status">loading…</span></header>
+  <header><b>PowOS Web</b><div id="bar"><div></div></div><span id="status">loading…</span>
+    <button id="console-toggle" title="The serial console">console</button></header>
+  <main><canvas id="screen" width="1280" height="800"></canvas></main>
   <div id="terminal"></div>
   <!-- Kernel and initramfs, preloaded (Emscripten file_packager). The disk is NOT: it streams. The initramfs is
        loaded below by boot mode (?boot=tcg-check|probe boots a test initramfs instead: args.js). -->
@@ -28,6 +36,7 @@
     import 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
     import 'https://cdn.jsdelivr.net/npm/xterm-pty@0.9.4/index.js';
     import initEmscriptenModule from './qemu-system-aarch64.js';
+    import { attachDisplay } from './display.js';
 
     const status = document.getElementById('status');
     const timing = {}; // ms since navigation start, per stage (logged once PowOS answers)
@@ -52,6 +61,15 @@
     xterm.loadAddon(master);
     Module.pty = slave;
     Module.mainScriptUrlOrBlob = new URL('./qemu-system-aarch64.js', location.href).href;
+    document.getElementById('console-toggle').onclick =
+      () => document.getElementById('terminal').classList.toggle('hidden');
+    // The screen: QEMU's graphical console (-display web) on the canvas, input back (display.js).
+    attachDisplay(Module, document.getElementById('screen'), {
+      onFirstFrame: () => {
+        timing.frame = performance.now();
+        console.log(`timing: first frame ${(timing.frame / 1000).toFixed(1)} s`);
+      },
+    });
     // Modes: resume (default when a snapshot is published: the machine state native QEMU saved at the login
     // prompt - seconds, not a boot), ?boot=cold (boot from scratch), ?boot=tcg-check|probe (tests, args.js).
     const boot = new URLSearchParams(location.search).get('boot');

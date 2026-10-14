@@ -10,19 +10,20 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 M=$HERE/web/machine.json
 j() { python3 -c "import json,sys; print(json.load(open('$M'))['$1'])"; }
+# The machine's devices (display + input): part of the machine, so the snapshot has them too.
+DEVICES=$(python3 -c "import json; print(' '.join('-device ' + d for d in json.load(open('$M')).get('devices', [])))")
 rm -rf "$HERE/out/disk/snapshot" && mkdir -p "$HERE/out/disk/snapshot"
-# The guest prepares itself for the snapshot (systemd's run generator: a root command from the kernel command line,
-# no login): once booted, drop the page cache and compact (freed pages are zeros: init_on_free=1), report memory use,
-# then the marker tools/snapshot.py waits for. Only this run has it; the browser's command line is machine.json's.
-# systemd.unit=kernel-command-line.target: the run generator hooks its command into default.target, which our explicit
-# systemd.unit=multi-user.target bypasses; the command starts multi-user.target itself (blocks until the boot is done).
-PREPARE="systemd.unit=kernel-command-line.target systemd.run_success_action=none systemd.run_failure_action=none systemd.run=\"/bin/sh -c 'echo POWOS-SNAPSHOT-START > /dev/console; timeout 600 systemctl start multi-user.target; systemctl list-jobs > /dev/console; sync; echo 3 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory; free -m > /dev/console; ps -eo rss,comm --sort=-rss | head -20 > /dev/console; echo POWOS-SNAPSHOT-\$((6*7)) > /dev/console'\""
+# The guest prepares itself for the snapshot: tools/snapshot-prepare.sh (desktop up, settled, page cache dropped,
+# memory reported, ready marker), handed in through QEMU's fw_cfg and run as root by systemd's run generator - no
+# login. systemd.unit=kernel-command-line.target: the generator hooks its command into default.target, which our
+# explicit systemd.unit= bypasses; the script starts the targets itself. Only this run has these arguments.
+PREPARE="systemd.unit=kernel-command-line.target systemd.run_success_action=none systemd.run_failure_action=none systemd.run=\"/bin/sh -c 'modprobe qemu_fw_cfg; exec /bin/sh /sys/firmware/qemu_fw_cfg/by_name/opt/powos/prepare/raw'\""
 docker run --rm -v "$HERE/out/disk:/disk" -v "$HERE/out/qemu-native:/q:ro" -v "$HERE/tools:/tools:ro" \
   -e MACHINE="$(j machine)" -e CPU="$(j cpu)" -e MEM="$(j memory)" -e KERNEL="$(j kernel)" -e INITRD="$(j initrd)" \
-  -e APPEND="$(j append)" -e PREPARE="$PREPARE" powos-web-qemu-native bash -c '
+  -e APPEND="$(j append)" -e PREPARE="$PREPARE" -e DEVICES="$DEVICES" powos-web-qemu-native bash -c '
   set -euo pipefail
   # The browser machine (args.js), natively; plus a QMP socket for the snapshot controller.
-  /q/qemu-system-aarch64 -display none -M "$MACHINE" -cpu "$CPU" -m "$MEM" -accel tcg -nic none \
+  /q/qemu-system-aarch64 -display none -M "$MACHINE" -cpu "$CPU" -m "$MEM" -accel tcg -nic none $DEVICES -fw_cfg name=opt/powos/prepare,file=/tools/snapshot-prepare.sh \
     -kernel "/disk/$KERNEL" -initrd "/disk/$INITRD" -append "$APPEND $PREPARE" \
     -drive if=none,id=disk0,format=raw,file.driver=chunked,file.url=/disk,file.save-overlay=/disk/snapshot/overlay.bin \
     -device virtio-blk-pci,drive=disk0 -qmp unix:/tmp/qmp.sock,server=on,wait=off \
@@ -37,3 +38,5 @@ docker run --rm -v "$HERE/out/disk:/disk" -v "$HERE/out/qemu-native:/q:ro" -v "$
   grep -a "chunked: saved overlay" /tmp/qemu.log
   grep -a -A3 "Mem:" /tmp/serial.log | head -4
   ls -la /disk/snapshot'
+# The desktop as it was saved (QEMU's screendump, taken right before the migration).
+[ -f "$HERE/out/disk/snapshot/screen.ppm" ] && echo "screen: $HERE/out/disk/snapshot/screen.ppm"

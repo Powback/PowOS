@@ -17,7 +17,11 @@ globalThis.Module = globalThis.Module || {};
 Module.preRun = Module.preRun || [];
 
 Module.powosArgs = (m, diskUrl, { resume = false } = {}) => [
-  '-nographic', '-M', m.machine, '-cpu', m.cpu, '-m', m.memory, '-accel', 'tcg,tb-size=256',
+  // The screen is QEMU's graphical console on the page's canvas (-display web: qemu/ui/web.c, web/display.js); the
+  // serial console stays on the terminal below it.
+  '-display', 'web', '-serial', 'stdio', '-monitor', 'none',
+  '-M', m.machine, '-cpu', m.cpu, '-m', m.memory, '-accel', 'tcg,tb-size=256',
+  ...(m.devices || []).flatMap((d) => ['-device', d]),
   '-nic', 'none',
   '-kernel', `/pack-kernel/${m.kernel}`,
   '-initrd', `/pack-initramfs/${m.initrd}`,

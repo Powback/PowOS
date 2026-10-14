@@ -4,5 +4,10 @@
   "memory": "1024M",
   "kernel": "Image.gz",
   "initrd": "initramfs.img",
-  "append": "console=ttyAMA0 root=/dev/vda rw rootfstype=ext4 systemd.unit=multi-user.target systemd.default_device_timeout_sec=600 init_on_free=1"
+  "append": "console=ttyAMA0 root=/dev/vda rw rootfstype=ext4 systemd.unit=multi-user.target systemd.default_device_timeout_sec=600 init_on_free=1",
+  "devices": [
+    "virtio-gpu-pci,xres=1280,yres=800",
+    "virtio-keyboard-pci",
+    "virtio-tablet-pci"
+  ]
 }
