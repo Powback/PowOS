@@ -48,7 +48,8 @@ chroot "$R" /bin/bash -c '
 
 cleanup; trap - EXIT
 mkdir -p /out/disk
-cp "$R/boot/Image" /out/disk/Image
+# The compressed kernel (QEMU unpacks Image.gz): the browser downloads it before booting.
+cp "$R/boot/Image.gz" /out/disk/Image.gz
 cp "$R/boot/initramfs-powos-vm.img" /out/disk/initramfs.img
 rm -rf "$R/tmp/powos" "$R/var/cache/pacman/pkg/"* "$R/etc/resolv.conf"
 ln -sf ../run/systemd/resolve/stub-resolv.conf "$R/etc/resolv.conf"

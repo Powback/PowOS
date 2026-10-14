@@ -157,6 +157,14 @@ int main(void) {
     ASM1("umaddl",     "umaddl %0, %w1, %w2, %2")
     ASM1("smull",      "smull %0, %w1, %w2")
     ASM1("sdiv.w",     "orr w9, %w2, #1\n\tsdiv %w0, %w1, w9")
+    /* Flags of 32-bit arithmetic (QEMU: add2_i32/sub2_i32 for C). The systemd crash: C of CMN w, #imm was wrong. */
+    ASM1("adds.w.c",   "adds wzr, %w1, %w2\n\tcset %w0, cs")
+    ASM1("cmn.w.ls",   "and w9, %w1, #7\n\tsub w9, w9, #8\n\tcmn w9, #0x5\n\tcset %w0, ls")
+    ASM1("cmn.w.hi",   "and w9, %w1, #7\n\tsub w9, w9, #8\n\tcmn w9, #0x3\n\tcset %w0, hi")
+    ASM1("subs.w.c",   "subs wzr, %w1, %w2\n\tcset %w0, cs")
+    ASM1("adcs.w",     "adds w9, %w1, %w2\n\tadcs %w0, %w1, %w2\n\tcset w9, cs\n\tadd %0, %0, x9, lsl #33")
+    ASM1("sbcs.w",     "subs w9, %w1, %w2\n\tsbcs %w0, %w2, %w1\n\tcset w9, cc\n\tadd %0, %0, x9, lsl #33")
+    ASM1("clz.w",      "and w9, %w1, %w2\n\tclz %w0, w9")
     { static int32_t i32s[256]; static int16_t i16s[256]; static int8_t i8s[256];
       for (int i = 0; i < 256; i++) { i32s[i] = (int32_t)rnd(); i16s[i] = (int16_t)rnd(); i8s[i] = (int8_t)rnd(); }
       GROUP("ldrsw", uint64_t r; __asm__ volatile("ldrsw %0, [%1]" : "=r"(r) : "r"(&i32s[a & 255])); h = mix(h, r););
@@ -213,6 +221,7 @@ int main(void) {
     printf("tcg-check done\n");
     fflush(stdout);
     if (getpid() == 1) {
+        sleep(1); /* let the UART drain: powering off at once lost the last lines */
         sync();
         reboot(RB_POWER_OFF);
     }

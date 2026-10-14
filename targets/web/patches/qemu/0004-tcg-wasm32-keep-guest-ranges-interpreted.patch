@@ -1,0 +1,26 @@
+PowOS web: TBs whose guest PC lies in [WASM_NOCOMPILE_LO, WASM_NOCOMPILE_HI) (tcg/wasm32-config.h, written by
+targets/web/build-qemu.sh from QEMU_WASM_NOCOMPILE=lo-hi) are never compiled to Wasm: their run counters start at
+INT32_MIN, which the run loop keeps in the interpreter (TCI). For bisecting Wasm-backend miscompiles by guest
+address; no range (the default) changes nothing.
+
+--- a/tcg/tcg.c	2026-10-14 19:39:02
++++ b/tcg/tcg.c	2026-10-14 19:39:02
+@@ -6415,7 +6415,17 @@
+     size_base = (uint32_t*)s->code_ptr;
+     s->code_ptr += 4;
+     int counter_size = get_core_nums() * 4;
+-    memset(s->code_ptr, 0, counter_size);
++    {
++#include "wasm32-config.h"
++#if defined(WASM_NOCOMPILE_LO) && defined(WASM_NOCOMPILE_HI)
++        int32_t start = (pc_start >= WASM_NOCOMPILE_LO && pc_start < WASM_NOCOMPILE_HI) ? INT32_MIN : 0;
++#else
++        int32_t start = 0;
++#endif
++        for (int i = 0; i < counter_size / 4; i++) {
++            ((int32_t *)s->code_ptr)[i] = start;
++        }
++    }
+     s->code_ptr += counter_size;
+     *size_base = counter_size;
+     

@@ -125,9 +125,19 @@ else
 # A normal boot: Arch Linux ARM's kernel, systemd as init, the root filesystem on the VM's first virtio disk.
 # PowOS's login (powos/powos, as in PowOS's docs).
 pacman -S --noconfirm --needed linux-aarch64 mkinitcpio
-# A generic initramfs (every driver, as mkinitcpio's old "fallback"): the default one is autodetected for the
-# build container's hardware, and mkinitcpio no longer makes the fallback by default. The VM boots this one.
-mkinitcpio -k "$(ls /usr/lib/modules | head -1)" -S autodetect -g /boot/initramfs-powos-vm.img
+# The VM's initramfs: only what mounting the root needs (virtio disk + ext4), busybox init (base hook, no
+# systemd/udev in the initramfs). The browser downloads it before booting, so size is time: ~3 MB instead of
+# the ~185 MB generic one, and emulated systemd-in-initrd was the slow stage that also timed out waiting for
+# /dev/vda (devtmpfs makes the node as soon as virtio_blk loads).
+cat > /etc/mkinitcpio-powos-vm.conf <<'EOF'
+MODULES=(virtio_pci virtio_blk ext4)
+BINARIES=()
+FILES=()
+HOOKS=(base)
+COMPRESSION=zstd
+COMPRESSION_OPTIONS=(-19)
+EOF
+mkinitcpio -k "$(ls /usr/lib/modules | head -1)" -c /etc/mkinitcpio-powos-vm.conf -g /boot/initramfs-powos-vm.img
 echo '/dev/vda / ext4 rw,relatime 0 1' > /etc/fstab
 echo powos > /etc/hostname
 id powos >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash powos

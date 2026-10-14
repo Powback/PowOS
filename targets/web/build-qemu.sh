@@ -28,18 +28,28 @@ EXTRA_CFLAGS="-O3 -fno-inline-functions -g -Wno-error=unused-command-line-argume
 # incremental across runs: cp -a keeps mtimes, so unchanged files aren't rebuilt).
 docker run --rm --cpus 8 --memory 12g -v "$SRC:/qemu-pinned:ro" -v "$HERE/qemu:/powos:ro" \
   -v "$HERE/patches/qemu:/patches:ro" -v powos-web-qemu-build:/vol -v "$OUT:/out" \
-  -e EXTRA_CFLAGS="$EXTRA_CFLAGS" -e INSTANTIATE_NUM="${QEMU_WASM_INSTANTIATE_NUM:-1500}" "$IMAGE" bash -c '
+  -e EXTRA_CFLAGS="$EXTRA_CFLAGS" -e INSTANTIATE_NUM="${QEMU_WASM_INSTANTIATE_NUM:-1500}" -e NOCOMPILE="${QEMU_WASM_NOCOMPILE:-}" -e SKIP_PATCHES="${QEMU_WASM_SKIP_PATCHES:-}" "$IMAGE" bash -c '
     set -euo pipefail
     mkdir -p /vol/src /vol/build
-    cp -a -u /qemu-pinned/. /vol/src/
+    # The source is rebuilt from the pinned tree every time, then our files and ALL patches go on fresh: what is
+    # compiled is exactly what git has (a changed patch can never meet an older version of itself). cp -a keeps
+    # the pinned mtimes, so only the files patches touch are recompiled.
+    cp -a /qemu-pinned/. /vol/src/
     cp -a /powos/. /vol/src/
-    # Patches go on once: the copy persists in the volume (one that reverses cleanly is already applied).
+    # QEMU_WASM_SKIP_PATCHES (e.g. "0005"): leave patches out, to prove a test catches what they fix.
     for p in /patches/*.patch; do
-      patch -d /vol/src -p1 -R -f -s --dry-run < "$p" >/dev/null 2>&1 && continue
-      patch -d /vol/src -p1 -f -s < "$p"
+      n=$(basename "$p" | cut -c1-4)
+      case " $SKIP_PATCHES " in *" $n "*) echo "skipping patch $n"; continue ;; esac
+      patch -d /vol/src -p1 -s --no-backup-if-mismatch < "$p" || { echo "patch failed: $p" >&2; exit 1; }
     done
-    # TCI-to-Wasm threshold (patch 0002). Rewritten only when it changes: switching rebuilds a few files.
+    # TCI-to-Wasm threshold (patch 0002) and a guest-PC range never compiled to Wasm (patch 0004, bisecting).
+    # Rewritten only when it changes: switching rebuilds a few files.
     cfg="#define INSTANTIATE_NUM $INSTANTIATE_NUM"
+    if [ -n "$NOCOMPILE" ]; then
+      cfg="$cfg
+#define WASM_NOCOMPILE_LO ${NOCOMPILE%-*}ull
+#define WASM_NOCOMPILE_HI ${NOCOMPILE#*-}ull"
+    fi
     [ "$(cat /vol/src/tcg/wasm32-config.h 2>/dev/null)" = "$cfg" ] || echo "$cfg" > /vol/src/tcg/wasm32-config.h
     cd /vol/build
     # Changed flags need a fresh configure (configure bakes them into build.ninja): start the build dir over.

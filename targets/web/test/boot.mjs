@@ -3,6 +3,7 @@
 //   URL      page to open (default https://powos-web.pow/)
 //   TIMEOUT  seconds to wait (default 1800: emulated in wasm, a first boot is slow)
 //   WAIT_FOR regex that means done (default: a login prompt; tcg-check: 'tcg-check done')
+//   PRESS_ENTER  1: press Enter in the terminal every 2 s (a resumed snapshot sits at its prompt silently)
 //   OUT      directory for console.log, serial.txt, screen.png
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -53,7 +54,13 @@ while (Date.now() - start < timeout) {
     console.log('BOOT FAILED:\n' + text.trim().split('\n').slice(-25).join('\n'));
     break;
   }
-  await page.waitForTimeout(5000);
+  if (process.env.PRESS_ENTER === '1') {
+    await page.evaluate(() => window.powosTerm?.focus());
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(2000);
+  } else {
+    await page.waitForTimeout(5000);
+  }
   const s = Math.round((Date.now() - start) / 1000);
   if (s % 60 < 5) console.log(`${s}s: ${text.trim().split('\n').pop()?.slice(0, 120) || '(no serial output yet)'} | ${lastFetch}`);
 }

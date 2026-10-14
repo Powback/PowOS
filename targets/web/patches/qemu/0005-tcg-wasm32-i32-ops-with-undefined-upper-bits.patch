@@ -1,0 +1,224 @@
+PowOS web: i32 ops whose results depended on the undefined upper 32 bits of i32 values in the Wasm backend
+(which computes i32 ops with 64-bit arithmetic):
+- add2_i32/sub2_i32: carry/borrow from a 64-bit add/sub never saw bit 32, so AArch64 ADDS/CMN on W registers set
+  C wrongly and conditional branches went the wrong way. This crashed systemd under qemu-wasm (found with
+  targets/web/test/probe: interpreting only libsystemd-shared's hashmap code fixed it).
+- mulu2/muls2/muluh/mulsh_i32: operands not zero/sign-extended before the 64-bit multiply; mulsh shifted unsigned.
+- clz32/ctz32: zero test on the whole 64-bit register.
+- extract_i32/sextract_i32: 32-bit shift amounts used with 64-bit shifts (wrong bits extracted).
+- bswap16/bswap32: TCG_BSWAP_OS (sign-extended output) ignored.
+
+--- a/tcg/wasm32/tcg-target.c.inc	2026-10-14 21:08:27
++++ b/tcg/wasm32/tcg-target.c.inc	2026-10-14 21:08:27
+@@ -885,7 +885,8 @@
+ 
+ static void tcg_wasm_out_clz32(TCGContext *s, TCGReg ret, TCGReg arg1, TCGReg arg2){
+     tcg_wasm_out_op_global_get_r(s, arg1);
+-    tcg_wasm_out_op_i64_eqz(s);
++    tcg_wasm_out_op_i32_wrap_i64(s); /* PowOS web: zero test on the i32 value, not the 64-bit register */
++    tcg_wasm_out_op_i32_eqz(s);
+     tcg_wasm_out_op_if_ret_i32(s);
+     tcg_wasm_out_op_global_get_r(s, arg2);
+     tcg_wasm_out_op_i32_wrap_i64(s);
+@@ -912,7 +913,8 @@
+ 
+ static void tcg_wasm_out_ctz32(TCGContext *s, TCGReg ret, TCGReg arg1, TCGReg arg2){
+     tcg_wasm_out_op_global_get_r(s, arg1);
+-    tcg_wasm_out_op_i64_eqz(s);
++    tcg_wasm_out_op_i32_wrap_i64(s); /* PowOS web: zero test on the i32 value, not the 64-bit register */
++    tcg_wasm_out_op_i32_eqz(s);
+     tcg_wasm_out_op_if_ret_i32(s);
+     tcg_wasm_out_op_global_get_r(s, arg2);
+     tcg_wasm_out_op_i32_wrap_i64(s);
+@@ -1458,26 +1460,112 @@
+     tcg_wasm_out_op_global_set_r(s, reth);
+ }
+ 
++/*
++ * PowOS web: the i32 forms of add2/sub2. TCG leaves the upper 32 bits of an i32 value undefined (this backend
++ * computes i32 ops with 64-bit arithmetic), so the carry/borrow must come from bit 32 of the zero-extended low
++ * halves. The 64-bit forms above never see a 32-bit carry (0xfffffffc + 5 is no 64-bit overflow): every AArch64
++ * ADDS/CMN on W registers (gen_add32_CC: add2_i32) set C wrongly, and branches on it went the wrong way (systemd's
++ * hashmap code then handed memcpy a garbage pointer).
++ */
++static void tcg_wasm_out_add2_i32(TCGContext *s, TCGReg retl, TCGReg reth,
++                                  TCGReg al, TCGReg ah, TCGReg bl, TCGReg bh)
++{
++    /* sum = zext32(al) + zext32(bl): the carry is bit 32 */
++    tcg_wasm_out_op_global_get_r(s, al);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_u(s);
++    tcg_wasm_out_op_global_get_r(s, bl);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_u(s);
++    tcg_wasm_out_op_i64_add(s);
++    tcg_wasm_out_op_local_set(s, TMP64_0_IDX);
++
++    /* high = (ah + bh + carry) mod 2^32, computed before any output is written (outputs may alias inputs) */
++    tcg_wasm_out_op_global_get_r(s, ah);
++    tcg_wasm_out_op_global_get_r(s, bh);
++    tcg_wasm_out_op_i64_add(s);
++    tcg_wasm_out_op_local_get(s, TMP64_0_IDX);
++    tcg_wasm_out_op_i64_const(s, 32);
++    tcg_wasm_out_op_i64_shr_u(s);
++    tcg_wasm_out_op_i64_add(s);
++    tcg_wasm_out_op_i64_const(s, 0xffffffff);
++    tcg_wasm_out_op_i64_and(s);
++
++    /* low = sum mod 2^32 */
++    tcg_wasm_out_op_local_get(s, TMP64_0_IDX);
++    tcg_wasm_out_op_i64_const(s, 0xffffffff);
++    tcg_wasm_out_op_i64_and(s);
++    tcg_wasm_out_op_global_set_r(s, retl);
++    tcg_wasm_out_op_global_set_r(s, reth);
++}
++
++static void tcg_wasm_out_sub2_i32(TCGContext *s, TCGReg retl, TCGReg reth,
++                                  TCGReg al, TCGReg ah, TCGReg bl, TCGReg bh)
++{
++    /* diff = zext32(al) - zext32(bl): negative (bit 63 set) exactly when there is a borrow */
++    tcg_wasm_out_op_global_get_r(s, al);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_u(s);
++    tcg_wasm_out_op_global_get_r(s, bl);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_u(s);
++    tcg_wasm_out_op_i64_sub(s);
++    tcg_wasm_out_op_local_set(s, TMP64_0_IDX);
++
++    /* high = (ah - bh - borrow) mod 2^32 */
++    tcg_wasm_out_op_global_get_r(s, ah);
++    tcg_wasm_out_op_global_get_r(s, bh);
++    tcg_wasm_out_op_i64_sub(s);
++    tcg_wasm_out_op_local_get(s, TMP64_0_IDX);
++    tcg_wasm_out_op_i64_const(s, 63);
++    tcg_wasm_out_op_i64_shr_u(s);
++    tcg_wasm_out_op_i64_sub(s);
++    tcg_wasm_out_op_i64_const(s, 0xffffffff);
++    tcg_wasm_out_op_i64_and(s);
++
++    /* low = diff mod 2^32 */
++    tcg_wasm_out_op_local_get(s, TMP64_0_IDX);
++    tcg_wasm_out_op_i64_const(s, 0xffffffff);
++    tcg_wasm_out_op_i64_and(s);
++    tcg_wasm_out_op_global_set_r(s, retl);
++    tcg_wasm_out_op_global_set_r(s, reth);
++}
++
+ static void tcg_wasm_out_mulu2_i32(TCGContext *s, TCGReg retl, TCGReg reth, TCGReg arg1, TCGReg arg2)
+ {
++    /* PowOS web: i32 operands carry undefined upper bits; extend them before the 64-bit multiply. */
+     tcg_wasm_out_op_global_get_r(s, arg1);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_u(s);
+     tcg_wasm_out_op_global_get_r(s, arg2);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_u(s);
+     tcg_wasm_out_op_i64_mul(s);
+     tcg_wasm_out_op_set_r_as_i64(s, retl, reth);
+ }
+ 
+ static void tcg_wasm_out_muls2_i32(TCGContext *s, TCGReg retl, TCGReg reth, TCGReg arg1, TCGReg arg2)
+ {
++    /* PowOS web: i32 operands carry undefined upper bits; extend them before the 64-bit multiply. */
+     tcg_wasm_out_op_global_get_r(s, arg1);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_s(s);
+     tcg_wasm_out_op_global_get_r(s, arg2);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_s(s);
+     tcg_wasm_out_op_i64_mul(s);
+     tcg_wasm_out_op_set_r_as_i64(s, retl, reth);
+ }
+ 
+ static void tcg_wasm_out_muluh_i32(TCGContext *s, TCGReg ret, TCGReg arg1, TCGReg arg2)
+ {
++    /* PowOS web: i32 operands carry undefined upper bits; extend them before the 64-bit multiply. */
+     tcg_wasm_out_op_global_get_r(s, arg1);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_u(s);
+     tcg_wasm_out_op_global_get_r(s, arg2);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_u(s);
+     tcg_wasm_out_op_i64_mul(s);
+     tcg_wasm_out_op_i64_const(s, 32);
+     tcg_wasm_out_op_i64_shr_u(s);
+@@ -1487,11 +1575,16 @@
+ 
+ static void tcg_wasm_out_mulsh_i32(TCGContext *s, TCGReg ret, TCGReg arg1, TCGReg arg2)
+ {
++    /* PowOS web: i32 operands carry undefined upper bits; extend them before the 64-bit multiply. */
+     tcg_wasm_out_op_global_get_r(s, arg1);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_s(s);
+     tcg_wasm_out_op_global_get_r(s, arg2);
++    tcg_wasm_out_op_i32_wrap_i64(s);
++    tcg_wasm_out_op_i64_extend_i32_s(s);
+     tcg_wasm_out_op_i64_mul(s);
+     tcg_wasm_out_op_i64_const(s, 32);
+-    tcg_wasm_out_op_i64_shr_u(s);
++    tcg_wasm_out_op_i64_shr_s(s); /* signed high half */
+     tcg_wasm_out_op_i32_wrap_i64(s);
+     tcg_wasm_out_op_global_set_r(s, ret);
+ }
+@@ -1555,7 +1648,9 @@
+     int rs;
+     switch (type) {
+     case TCG_TYPE_I32:
+-        rs = 32 - len;
++        /* PowOS web: the shifts below are 64-bit; 32 - len extracted the wrong bits (e.g. sextract_i32(x, 0, 8)
++         * returned x's low 32 bits). pos + len <= 32, so the 64-bit amounts are exact for i32 too. */
++        rs = 64 - len;
+         break;
+     case TCG_TYPE_I64:
+         rs = 64 - len;
+@@ -1674,7 +1769,11 @@
+     tcg_wasm_out_op_i32_shl(s); // D_B_
+ 
+     tcg_wasm_out_op_i32_or(s); // DCBA
+-    tcg_wasm_out_op_i64_extend_i32_u(s);
++    if (flags & TCG_BSWAP_OS) { /* PowOS web: sign-extended output was requested */
++        tcg_wasm_out_op_i64_extend_i32_s(s);
++    } else {
++        tcg_wasm_out_op_i64_extend_i32_u(s);
++    }
+     tcg_wasm_out_op_global_set_r(s, dest);
+ }
+ 
+@@ -1704,7 +1803,11 @@
+     }
+ 
+     tcg_wasm_out_op_i32_or(s); // **BA
+-    tcg_wasm_out_op_i64_extend_i32_u(s);
++    if (flags & TCG_BSWAP_OS) { /* PowOS web: sign-extended output was requested (SSBA above, all 64 bits) */
++        tcg_wasm_out_op_i64_extend_i32_s(s);
++    } else {
++        tcg_wasm_out_op_i64_extend_i32_u(s);
++    }
+     tcg_wasm_out_op_global_set_r(s, dest);
+ }
+ 
+@@ -3279,13 +3382,21 @@
+                          TCGReg al, TCGReg ah, TCGReg bl, TCGReg bh)
+ {
+     tcg_tci_out_op_rrrrrr(s, opc, retl, reth, al, ah, bl, bh);
+-    tcg_wasm_out_add2(s, retl, reth, al, ah, bl, bh);
++    if (opc == INDEX_op_add2_i32) {
++        tcg_wasm_out_add2_i32(s, retl, reth, al, ah, bl, bh);
++    } else {
++        tcg_wasm_out_add2(s, retl, reth, al, ah, bl, bh);
++    }
+ }
+ static void tcg_out_sub2(TCGContext *s, TCGOpcode opc, TCGReg retl, TCGReg reth,
+                          TCGReg al, TCGReg ah, TCGReg bl, TCGReg bh)
+ {
+     tcg_tci_out_op_rrrrrr(s, opc, retl, reth, al, ah, bl, bh);
+-    tcg_wasm_out_sub2(s, retl, reth, al, ah, bl, bh);
++    if (opc == INDEX_op_sub2_i32) {
++        tcg_wasm_out_sub2_i32(s, retl, reth, al, ah, bl, bh);
++    } else {
++        tcg_wasm_out_sub2(s, retl, reth, al, ah, bl, bh);
++    }
+ }
+ static void tcg_out_mulu2_i32(TCGContext *s, TCGOpcode opc, TCGReg retl, TCGReg reth, TCGReg arg1, TCGReg arg2)
+ {

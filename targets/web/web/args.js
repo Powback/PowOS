@@ -1,26 +1,35 @@
-// QEMU's command line: PowOS's Arch Linux ARM build (targets/web/build-rootfs.sh, the phone's installer in VM
-// mode) on QEMU's "virt" board. Its kernel + initramfs are preloaded (boot needs them whole); its root
-// filesystem is the chunked disk, streamed block by block as the guest reads it (qemu/block/chunked.c). The
-// page passes the disk's absolute URL (QEMU's worker fetches it).
+// QEMU's command line for PowOS's Arch Linux ARM build (targets/web/build-rootfs.sh, the phone's installer in VM
+// mode) on QEMU's "virt" board. The machine itself is machine.json - the one definition the browser and the
+// snapshot builder (build-snapshot.sh, native QEMU) share: a snapshot only restores on the identical machine.
 //
-// Memory: wasm32 caps QEMU's whole heap at 2300M (TOTAL_MEMORY): guest RAM + the TCG translation cache +
-// the preloaded kernel/initramfs (held as files, and the initramfs copied again into guest RAM) must fit.
-// 1536M RAM + 500M cache ran out (Aborted(OOM)). TODO: a slim initramfs (virtio + ext4 only) frees ~350M.
+// Its kernel + initramfs are preloaded (small: Image.gz + a virtio/ext4-only initramfs); its root filesystem is the
+// chunked disk, streamed block by block as the guest reads it (qemu/block/chunked.c). The page passes the disk's
+// absolute URL (QEMU's worker fetches it).
 //
-// CPU: neoverse-n1 (ARMv8.2, no SVE), not "max": with max, glibc picks SVE/MOPS routines, and systemd crashed
-// (SEGV in PID 1) under qemu-wasm's young wasm code generator. v8.2 because our FEX build targets it.
+// machine.json notes:
+//   memory  wasm32 caps QEMU's whole heap at 2300M (TOTAL_MEMORY): guest RAM + the TCG translation cache + the
+//           preloaded files must fit (1536M RAM + a 500M cache ran out: Aborted(OOM)).
+//   cpu     neoverse-n1 (ARMv8.2, no SVE): cheaper to emulate than "max" (the kernel boots ~2x faster); v8.2
+//           because our FEX build targets it. (systemd's crash under qemu-wasm was not the CPU model: it was the
+//           Wasm backend's 32-bit carry, patches/qemu/0005.)
+//   append  systemd.default_device_timeout_sec: emulated udev is slow; the 90 s default could time out a boot.
 globalThis.Module = globalThis.Module || {};
 Module.preRun = Module.preRun || [];
-Module.powosArgs = (diskUrl) => [
-  '-nographic', '-M', 'virt', '-cpu', 'neoverse-n1', '-m', '1024M', '-accel', 'tcg,tb-size=256',
+
+Module.powosArgs = (m, diskUrl, { resume = false } = {}) => [
+  '-nographic', '-M', m.machine, '-cpu', m.cpu, '-m', m.memory, '-accel', 'tcg,tb-size=256',
   '-nic', 'none',
-  '-kernel', '/pack-kernel/Image',
-  '-initrd', '/pack-initramfs/initramfs.img',
-  '-append', 'console=ttyAMA0 root=/dev/vda rw rootfstype=ext4 systemd.unit=multi-user.target',
+  '-kernel', `/pack-kernel/${m.kernel}`,
+  '-initrd', `/pack-initramfs/${m.initrd}`,
+  '-append', m.append,
   // -drive, not -blockdev: -blockdev checks driver names against QEMU's QAPI schema, which only knows upstream
-  // drivers; -drive finds "chunked" in the block layer's registry.
-  '-drive', `if=none,id=disk0,format=raw,file.driver=chunked,file.url=${diskUrl}`,
+  // drivers; -drive finds "chunked" in the block layer's registry. A resumed snapshot also sees the blocks its
+  // machine had written (the overlay build-snapshot.sh saved).
+  '-drive', `if=none,id=disk0,format=raw,file.driver=chunked,file.url=${diskUrl}` +
+    (resume ? ',file.overlay=snapshot/overlay.bin' : ''),
   '-device', 'virtio-blk-pci,drive=disk0',
+  // Resume: the machine state native QEMU saved at the login prompt, instead of booting.
+  ...(resume ? ['-incoming', 'file:/pack-state/vm.state'] : []),
 ];
 
 // ?boot=<name>: the same kernel and machine, a test initramfs instead of PowOS's (packed by assemble.sh from
@@ -30,13 +39,12 @@ Module.powosArgs = (diskUrl) => [
 //              crash is reported by the kernel (PC, registers, library + offset) instead of systemd's handler
 Module.testBoots = {
   'tcg-check': 'console=ttyAMA0 rdinit=/init quiet',
-  // root= only so the kernel unpacks into ramfs, not a tmpfs capped at RAM/2 (too small for PowOS's initramfs)
+  // root= only so the kernel unpacks into ramfs, not a tmpfs capped at RAM/2 (too small for big initramfses)
   probe: 'console=ttyAMA0 root=/dev/vda rdinit=/probe-init print-fatal-signals=1 norandmaps',
 };
-Module.testArgs = (name) => {
-  const a = Module.powosArgs('');
+Module.testArgs = (m, name) => {
+  const a = Module.powosArgs({ ...m, append: Module.testBoots[name] }, '');
   a.splice(a.indexOf('-initrd'), 2, '-initrd', `/pack-${name}/initramfs.img`);
-  a.splice(a.indexOf('-append'), 2, '-append', Module.testBoots[name]);
   a.splice(a.indexOf('-drive'), 4); // no disk
   return a;
 };

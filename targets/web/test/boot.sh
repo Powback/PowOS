@@ -7,7 +7,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=${1:-$(mktemp -d)}
 mkdir -p "$OUT"
-docker run --rm --network traefik --ipc=host -v "$HERE:/test:ro" -v "$OUT:/out" -e TIMEOUT="${TIMEOUT:-1800}" -e WAIT_FOR="${WAIT_FOR:-}" -e URL="${URL:-}" \
+docker run --rm --network traefik --ipc=host -v "$HERE:/test:ro" -v "$OUT:/out" -e TIMEOUT="${TIMEOUT:-1800}" -e WAIT_FOR="${WAIT_FOR:-}" -e URL="${URL:-}" -e PRESS_ENTER="${PRESS_ENTER:-}" \
   -w /tmp mcr.microsoft.com/playwright:v1.56.0-noble bash -c '
     npm init -y >/dev/null && npm i -s playwright@1.56.0 >/dev/null && cp /test/boot.mjs . && node boot.mjs'
 echo "artifacts: $OUT"

@@ -31,6 +31,8 @@
 #include "qemu/option.h"
 #include "block/block-io.h"
 #include "block/block_int.h"
+#include "qemu/bswap.h"
+#include "qemu/cutils.h"
 #include <zlib.h>
 
 #ifdef __EMSCRIPTEN__
@@ -53,7 +55,23 @@ EM_JS(int, chunked_http_get, (const char *url, void *dst, int cap), {
         return -1;
     }
 });
+/*
+ * Read-ahead: start an asynchronous fetch of a chunk the guest will probably read next. Chunks are immutable
+ * (Cache-Control: immutable), so it lands in the browser's HTTP cache and the later synchronous read is served
+ * from there - many round trips become parallel downloads. Fire and forget; each URL once.
+ */
+EM_JS(void, chunked_prefetch, (const char *url), {
+    var u = UTF8ToString(url);
+    var seen = globalThis.__chunkedPrefetched || (globalThis.__chunkedPrefetched = new Set());
+    if (seen.has(u)) return;
+    seen.add(u);
+    fetch(u).then(function (r) { return r.arrayBuffer(); }).catch(function () { seen.delete(u); });
+});
 #else
+static void chunked_prefetch(const char *url)
+{
+}
+
 /*
  * Native QEMU (the same source, built to make snapshots on the server): url= is a local directory holding the
  * published disk, read as files - the same bytes the browser streams.
@@ -87,6 +105,7 @@ typedef struct {
 
 typedef struct {
     char *url;
+    char *save_overlay;   /* native: where close() writes the overlay of this session's writes */
     int64_t size;
     int64_t block_size;
     int hash_bytes;
@@ -105,6 +124,10 @@ static QemuOptsList runtime_opts = {
     .head = QTAILQ_HEAD_INITIALIZER(runtime_opts.head),
     .desc = {
         { .name = "url", .type = QEMU_OPT_STRING, .help = "base URL of the chunked disk" },
+        { .name = "overlay", .type = QEMU_OPT_STRING,
+          .help = "overlay (under url) of blocks a snapshot's machine had written: block index -> chunk hash" },
+        { .name = "save-overlay", .type = QEMU_OPT_STRING,
+          .help = "native: on close, write this session's writes as chunks (under url) + an overlay file here" },
         { /* end of list */ }
     },
 };
@@ -120,12 +143,14 @@ static int chunked_file_open(BlockDriverState *bs, QDict *options, int flags, Er
 {
     BDRVChunkedState *s = bs->opaque;
     QemuOpts *opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
-    g_autofree char *murl = NULL, *iurl = NULL, *mtext = NULL;
+    g_autofree char *murl = NULL, *iurl = NULL, *mtext = NULL, *overlay = NULL;
     QDict *m;
     int n;
 
     qemu_opts_absorb_qdict(opts, options, &error_abort);
     s->url = g_strdup(qemu_opt_get(opts, "url"));
+    overlay = g_strdup(qemu_opt_get(opts, "overlay"));
+    s->save_overlay = g_strdup(qemu_opt_get(opts, "save-overlay"));
     qemu_opts_del(opts);
     if (!s->url) {
         error_setg(errp, "chunked: url= is required");
@@ -162,6 +187,31 @@ static int chunked_file_open(BlockDriverState *bs, QDict *options, int flags, Er
         return -EIO;
     }
 
+    /*
+     * A snapshot's overlay: the blocks its machine had written (they're in its RAM's page cache and file system
+     * state), as (u64 little-endian block index, hash) records; their chunks live in the same store, so they
+     * stream like the rest of the disk.
+     */
+    if (overlay) {
+        int rec = 8 + s->hash_bytes, cap = 16 << 20;
+        g_autofree char *ourl = g_strdup_printf("%s/%s", s->url, overlay);
+        g_autofree uint8_t *o = g_malloc(cap);
+        n = chunked_http_get(ourl, o, cap);
+        if (n < 0 || n % rec) {
+            error_setg(errp, "chunked: overlay %s: bad size %d", ourl, n);
+            return -EIO;
+        }
+        for (int i = 0; i < n; i += rec) {
+            uint64_t index = ldq_le_p(o + i);
+            if (index >= s->blocks) {
+                error_setg(errp, "chunked: overlay %s: block %" PRIu64 " out of range", ourl, index);
+                return -EINVAL;
+            }
+            memcpy(s->hashes + index * s->hash_bytes, o + i + 8, s->hash_bytes);
+        }
+        fprintf(stderr, "chunked: overlay %s: %d blocks\n", overlay, n / rec);
+    }
+
     s->dirty = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, g_free);
     for (int i = 0; i < CACHE_BLOCKS; i++) {
         s->cache[i].index = -1;
@@ -175,9 +225,65 @@ static int chunked_file_open(BlockDriverState *bs, QDict *options, int flags, Er
     return 0;
 }
 
+/*
+ * Native, when making a snapshot (targets/web/build-snapshot.sh): the blocks this session wrote, as chunks in the
+ * disk's store (named by SHA-256 truncated to hashBytes - names only have to be unique) + the overlay file that
+ * maps block index -> chunk. All-zero blocks get the zero hash (read back as zeros, never stored).
+ */
+static void chunked_save_overlay(BDRVChunkedState *s)
+{
+    g_autoptr(GByteArray) recs = g_byte_array_new();
+    g_autofree uint8_t *cbuf = g_malloc(compressBound(s->block_size));
+    GHashTableIter it;
+    gpointer k, v;
+    int n = 0, stored = 0;
+
+    g_hash_table_iter_init(&it, s->dirty);
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        int64_t index = *(int64_t *)k;
+        const uint8_t *data = v;
+        uint8_t hash[64] = { 0 }, idx[8];
+
+        if (!buffer_is_zero(data, s->block_size)) {
+            g_autofree char *hex = g_compute_checksum_for_data(G_CHECKSUM_SHA256, data, s->block_size);
+            g_autofree char *dir = g_strdup_printf("%s/chunks/%.2s", s->url, hex);
+            g_autofree char *path = g_strdup_printf("%s/%.*s", dir, s->hash_bytes * 2, hex);
+            for (int i = 0; i < s->hash_bytes; i++) {
+                sscanf(hex + 2 * i, "%2hhx", &hash[i]);
+            }
+            if (access(path, F_OK) != 0) {
+                uLongf clen = compressBound(s->block_size);
+                if (compress2(cbuf, &clen, data, s->block_size, 6) != Z_OK) {
+                    fprintf(stderr, "chunked: compressing block %" PRId64 " failed\n", index);
+                    continue;
+                }
+                g_mkdir_with_parents(dir, 0755);
+                if (!g_file_set_contents(path, (const char *)cbuf, clen, NULL)) {
+                    fprintf(stderr, "chunked: writing %s failed\n", path);
+                    continue;
+                }
+                stored++;
+            }
+        }
+        stq_le_p(idx, index);
+        g_byte_array_append(recs, idx, 8);
+        g_byte_array_append(recs, hash, s->hash_bytes);
+        n++;
+    }
+    if (!g_file_set_contents(s->save_overlay, (const char *)recs->data, recs->len, NULL)) {
+        fprintf(stderr, "chunked: writing overlay %s failed\n", s->save_overlay);
+        return;
+    }
+    fprintf(stderr, "chunked: saved overlay %s: %d blocks (%d new chunks)\n", s->save_overlay, n, stored);
+}
+
 static void chunked_close(BlockDriverState *bs)
 {
     BDRVChunkedState *s = bs->opaque;
+    if (s->save_overlay) {
+        chunked_save_overlay(s);
+    }
+    g_free(s->save_overlay);
     for (int i = 0; i < CACHE_BLOCKS; i++) {
         g_free(s->cache[i].data);
     }
@@ -204,12 +310,23 @@ static bool is_zero_hash(const uint8_t *h, int n)
 }
 
 /* The block's current bytes: written copy, cached, zeros (NULL), or fetched now. Sets *err on failure. */
+#define READAHEAD_BLOCKS 8 /* chunks prefetched after each fetch (ext4 lays files out mostly sequentially) */
+
+/* The chunk URL of a block (g_free it). */
+static char *chunk_url(BDRVChunkedState *s, const uint8_t *h)
+{
+    char hex[129];
+    for (int i = 0; i < s->hash_bytes; i++) {
+        sprintf(hex + 2 * i, "%02x", h[i]);
+    }
+    return g_strdup_printf("%s/chunks/%.2s/%s", s->url, hex, hex);
+}
+
 static const uint8_t *block_data(BDRVChunkedState *s, int64_t index, int *err)
 {
     const uint8_t *h = s->hashes + index * s->hash_bytes;
     uint8_t *w = g_hash_table_lookup(s->dirty, &index);
     CacheEntry *victim = &s->cache[0];
-    char hex[129];
     g_autofree char *url = NULL;
     uLongf len;
     int n;
@@ -231,10 +348,7 @@ static const uint8_t *block_data(BDRVChunkedState *s, int64_t index, int *err)
         }
     }
 
-    for (int i = 0; i < s->hash_bytes; i++) {
-        sprintf(hex + 2 * i, "%02x", h[i]);
-    }
-    url = g_strdup_printf("%s/chunks/%.2s/%s", s->url, hex, hex);
+    url = chunk_url(s, h);
     n = chunked_http_get(url, s->compressed, s->compressed_cap);
     if (n <= 0) {
         fprintf(stderr, "chunked: fetching block %" PRId64 " (%s) failed: %d\n", index, url, n);
@@ -249,6 +363,14 @@ static const uint8_t *block_data(BDRVChunkedState *s, int64_t index, int *err)
     }
     victim->index = index;
     victim->used = ++s->tick;
+    /* Read-ahead: the next stored blocks (not zero, not overwritten here) start downloading in parallel. */
+    for (int64_t next = index + 1; next <= index + READAHEAD_BLOCKS && next < s->blocks; next++) {
+        const uint8_t *nh = s->hashes + next * s->hash_bytes;
+        if (!is_zero_hash(nh, s->hash_bytes) && !g_hash_table_contains(s->dirty, &next)) {
+            g_autofree char *nurl = chunk_url(s, nh);
+            chunked_prefetch(nurl);
+        }
+    }
     s->fetched_blocks++;
     s->fetched_bytes += n;
     if (s->fetched_blocks % 64 == 0) {
@@ -346,6 +468,7 @@ static int chunked_reopen_prepare(BDRVReopenState *reopen_state, BlockReopenQueu
 
 static const char *const chunked_strong_runtime_opts[] = {
     "url",
+    "overlay",
     NULL
 };
 

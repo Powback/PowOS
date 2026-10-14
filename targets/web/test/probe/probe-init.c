@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
+static int n_ok, n_killed, n_other;
+
 static void run(char *const argv[]) {
     printf("probe: run %s %s\n", argv[0], argv[1] ? argv[1] : "");
     fflush(stdout);
@@ -20,6 +22,8 @@ static void run(char *const argv[]) {
     if (p == 0) {
         /* systemd refuses --test as root ("Don't run test mode as root"): run it as nobody. */
         if (setgid(65534) || setuid(65534)) perror("drop privileges");
+        /* The unit dump (tens of thousands of lines) would push everything else out of the console. */
+        freopen("/dev/null", "w", stdout);
         execv(argv[0], argv);
         perror("execv");
         _exit(127);
@@ -46,8 +50,8 @@ static void run(char *const argv[]) {
         for (char *l = strtok(maps, "\n"); l; l = strtok(NULL, "\n"))
             if (strstr(l, " r-xp ")) printf("probe:   %s\n", l);
     }
-    if (WIFSIGNALED(st)) printf("probe: %s KILLED by signal %d\n", argv[0], WTERMSIG(st));
-    else printf("probe: %s exited %d\n", argv[0], WEXITSTATUS(st));
+    if (WIFSIGNALED(st)) { n_killed++; printf("probe: %s KILLED by signal %d\n", argv[0], WTERMSIG(st)); }
+    else { if (WEXITSTATUS(st) == 0) n_ok++; else n_other++; printf("probe: %s exited %d\n", argv[0], WEXITSTATUS(st)); }
     fflush(stdout);
 }
 
@@ -60,12 +64,14 @@ int main(void) {
     mkdir("/tmp", 01777);
     mount("tmpfs", "/tmp", "tmpfs", 0, "mode=1777");        /* --test makes its unit dirs there, as nobody */
     mkdir("/run/systemd", 0755);
-    setenv("SYSTEMD_LOG_LEVEL", "debug", 1);
+    setenv("SYSTEMD_LOG_LEVEL", "notice", 1);
     setenv("SYSTEMD_LOG_TARGET", "console", 1);
     char *test[] = { "/usr/lib/systemd/systemd", "--test", "--system", "--no-pager", NULL };
     for (int i = 0; i < 3; i++) run(test);
+    printf("probe summary: ok=%d killed=%d other=%d\n", n_ok, n_killed, n_other);
     printf("probe done\n");
     fflush(stdout);
+    sleep(1); /* let the UART drain: powering off at once lost the last lines */
     sync();
     reboot(RB_POWER_OFF);
     return 0;

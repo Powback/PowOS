@@ -10,12 +10,15 @@
     html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
     header { padding: 8px 16px; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
     header b { font-size: 15px; }
-    #status { color: var(--muted); }
+    #status { color: var(--muted); font-variant-numeric: tabular-nums; }
+    #bar { flex: 1; min-width: 120px; max-width: 360px; height: 6px; background: #30363d; border-radius: 3px; overflow: hidden; }
+    #bar > div { height: 100%; width: 0; background: #58a6ff; transition: width .2s; }
+    #bar.done { display: none; }
     #terminal { height: calc(100% - 40px); padding: 0 8px; }
   </style>
 </head>
 <body>
-  <header><b>PowOS Web</b><span id="status">loading QEMU…</span></header>
+  <header><b>PowOS Web</b><div id="bar"><div></div></div><span id="status">loading…</span></header>
   <div id="terminal"></div>
   <!-- Kernel and initramfs, preloaded (Emscripten file_packager). The disk is NOT: it streams. The initramfs is
        loaded below by boot mode (?boot=tcg-check|probe boots a test initramfs instead: args.js). -->
@@ -27,7 +30,19 @@
     import initEmscriptenModule from './qemu-system-aarch64.js';
 
     const status = document.getElementById('status');
-    if (!crossOriginIsolated) status.textContent = 'needs cross-origin isolation (COOP/COEP headers) for threads';
+    // Failures must show on the page, not only in the devtools console.
+    const fail = (msg) => {
+      status.textContent = `error: ${msg}`;
+      status.style.color = '#f85149';
+      window.powosTerm?.writeln(`\r\n\x1b[31mPowOS Web stopped: ${msg}\x1b[0m`);
+    };
+    window.addEventListener('error', (e) => fail(e.message || String(e.error)));
+    window.addEventListener('unhandledrejection', (e) => fail(e.reason?.message || String(e.reason)));
+    if (!crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') {
+      fail('this browser did not give the page cross-origin isolation (needed for QEMU\'s threads): ' +
+           'open it over https://powos-web.pow (accept the certificate) in Chrome, Edge or Firefox');
+      throw new Error('not cross-origin isolated');
+    }
 
     const xterm = new Terminal({ convertEol: false, fontSize: 13 });
     xterm.open(document.getElementById('terminal'));
@@ -36,22 +51,90 @@
     xterm.loadAddon(master);
     Module.pty = slave;
     Module.mainScriptUrlOrBlob = new URL('./qemu-system-aarch64.js', location.href).href;
-    const testBoot = new URLSearchParams(location.search).get('boot');
-    const test = testBoot in Module.testBoots ? testBoot : null;
-    await new Promise((ok, fail) => {
-      const s = Object.assign(document.createElement('script'),
-        { src: test ? `./load-${test}.js` : './load-initramfs.js', onload: ok, onerror: fail });
-      document.head.append(s);
-    });
-    Module.arguments = test ? Module.testArgs(test) : Module.powosArgs(new URL('./disk', location.href).href);
+    // Modes: resume (default when a snapshot is published: the machine state native QEMU saved at the login
+    // prompt - seconds, not a boot), ?boot=cold (boot from scratch), ?boot=tcg-check|probe (tests, args.js).
+    const boot = new URLSearchParams(location.search).get('boot');
+    const test = boot in Module.testBoots ? boot : null;
+    const machine = await (await fetch('./machine.json', { cache: 'no-cache' })).json();
+
+    // Everything QEMU needs before it starts (files.json: names + sizes, by assemble.sh), downloaded here with one
+    // progress bar. Emscripten then loads the same URLs from the browser cache (revalidation only).
+    const size = (b) => b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`;
+    const bar = document.querySelector('#bar > div');
+    {
+      const all = await (await fetch('./files.json', { cache: 'no-cache' })).json();
+      var resume = !test && boot !== 'cold' && 'load-state.data' in all;
+      const need = new Set(['load-kernel.data', test ? `load-${test}.data` : 'load-initramfs.data']);
+      if (resume) need.add('load-state.data');
+      const want = Object.entries(all).filter(([n]) => !n.startsWith('load-') || need.has(n));
+      const total = want.reduce((t, [, s]) => t + s, 0);
+      let got = 0;
+      const show = () => {
+        const pct = Math.min(100, Math.floor(100 * got / total));
+        bar.style.width = `${pct}%`;
+        status.textContent = `downloading ${size(got)} / ${size(total)} (${pct}%)`;
+      };
+      await Promise.all(want.map(async ([name]) => {
+        const r = await fetch(`./${name}`);
+        const reader = r.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          got += value.length;
+          show();
+        }
+      }));
+      bar.parentElement.classList.add('done');
+    }
+    const script = (src) => new Promise((ok, fail) =>
+      document.head.append(Object.assign(document.createElement('script'), { src, onload: ok, onerror: fail })));
+    await script(test ? `./load-${test}.js` : './load-initramfs.js');
+    if (resume) await script('./load-state.js');
+    Module.arguments = test ? Module.testArgs(machine, test)
+      : Module.powosArgs(machine, new URL('./disk', location.href).href, { resume });
     // QEMU's own stderr (the chunked disk reports what it fetched there) goes to the console and the header.
+    // The streamed disk reports what it fetched ("chunked: fetched N blocks, X MB over the network").
     Module.printErr = (line) => {
       console.log(line);
-      if (line.startsWith('chunked:')) status.textContent = line.slice(9);
+      const m = line.match(/fetched (\d+) blocks, ([\d.]+) MB/);
+      if (m) status.textContent = `running · disk: ${size(parseFloat(m[2]) * 1e6)} streamed (${m[1]} blocks)`;
     };
+    Module.setStatus = () => {}; // Emscripten's own "Downloading data..." would overwrite ours; done above
+    if (resume) {
+      xterm.writeln('PowOS Web: resuming PowOS from its snapshot (?boot=cold boots from scratch instead).');
+      xterm.writeln('Press Enter for the login prompt. PowOS streams from its disk as it is read (MB in the header).\r\n');
+    } else {
+      xterm.writeln('PowOS Web: QEMU and the boot files are loaded; booting. Everything runs emulated in this');
+      xterm.writeln('tab: kernel output starts within a minute, the login prompt takes several more. PowOS itself');
+      xterm.writeln('streams from the disk as it is read (MB in the header).\r\n');
+    }
 
-    status.textContent = 'booting PowOS…';
+    status.textContent = resume ? 'resuming PowOS…' : 'booting PowOS…';
+    // Heartbeat: elapsed time until the first output, so "slow" is distinguishable from "stuck".
+    const t0 = Date.now();
+    // Output beyond our own welcome lines (counted once they are written) means the guest is talking.
+    let ownLines = null;
+    const beat = setInterval(() => {
+      const lines = xterm.buffer.active.baseY + xterm.buffer.active.cursorY;
+      if (ownLines === null) ownLines = lines;
+      const sawOutput = lines > ownLines;
+      if (status.style.color) return clearInterval(beat); // failed
+      if (!/^running/.test(status.textContent))
+        status.textContent = `booting PowOS… ${Math.round((Date.now() - t0) / 1000)} s` +
+          (sawOutput ? '' : ' (waiting for the first kernel output)');
+    }, 1000);
+    Module.onAbort = (what) => fail(`QEMU aborted: ${what}`);
     await initEmscriptenModule(Module);
+    // A resumed snapshot sits at its login prompt silently: press Enter for it until the guest answers.
+    if (resume) {
+      const before = xterm.buffer.active.baseY + xterm.buffer.active.cursorY;
+      let tries = 0;
+      const nudge = setInterval(() => {
+        const now = xterm.buffer.active.baseY + xterm.buffer.active.cursorY;
+        if (now > before || ++tries > 30) return clearInterval(nudge);
+        xterm.paste('\r');
+      }, 1000);
+    }
     // xterm-pty: report the TTY as not readable while the terminal has no input, so QEMU's poll doesn't spin.
     const oldPoll = Module.TTY.stream_ops.poll;
     Module.TTY.stream_ops.poll = function (stream, timeout) {
