@@ -29,17 +29,18 @@ if [ ! -f "$SRC/CMakeLists.txt" ]; then
   tar -xJf "$TARBALL" -C "$SRC" --strip-components=1
 fi
 # PowOS patches over Qt modules (idempotent).
-[ "$module" != qtdeclarative ] || python3 /powos-lw/patch-qtdeclarative.py "$SRC"
+[ ! -f "/powos-lw/patch-$module.py" ] || python3 "/powos-lw/patch-$module.py" "$SRC"
 
 case $stage in
   host)
     B=/ws/build/qt-host
-    rm -rf "$B" && mkdir -p "$B"
+    [ "${QT_INCREMENTAL:-}" = 1 ] || rm -rf "$B"
+    mkdir -p "$B"
     cmake -G Ninja -S "$SRC" -B "$B" \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/ws/install/qt-host \
       -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF \
       -DFEATURE_gui=ON -DFEATURE_widgets=ON -DINPUT_opengl=no -DFEATURE_opengl=OFF -DFEATURE_xcb=OFF -DFEATURE_wayland=OFF \
-      -DFEATURE_dbus=OFF -DFEATURE_icu=OFF -DFEATURE_glib=OFF -DFEATURE_sql=OFF -DFEATURE_network=ON \
+      -DFEATURE_dbus=ON -DFEATURE_icu=OFF -DFEATURE_glib=OFF -DFEATURE_sql=OFF -DFEATURE_network=ON \
       -DFEATURE_printsupport=OFF -DFEATURE_testlib=OFF -DINPUT_openssl=no
     cmake --build "$B" -j "$JOBS"
     cmake --install "$B"
@@ -49,9 +50,12 @@ case $stage in
     [ "${QT_INCREMENTAL:-}" = 1 ] || rm -rf "$B"   # QT_INCREMENTAL=1: reconfigure + rebuild only what changed
     mkdir -p "$B"
     bash /powos-lw/qt-toolchain.sh > "$B/toolchain.cmake"
-    # Off: everything that needs fork (process), dlopen (library: plugins are linked in statically), GL/Vulkan
-    # (no GPU), D-Bus, ICU, fontconfig. Qt Concurrent + Network on: Kirigami needs them; libinput/xkbcommon/udev/mtdev (the evdev plugins read wasminput directly).
+    # QProcess on: vfork semantics on Wasm (patch-qtbase.py). QLibrary on (KDE's plugin code needs the API; loading a
+    # shared plugin just fails - plugins are linked in statically). Off: GL/Vulkan
+    # (no GPU), ICU, fontconfig. Qt Concurrent + Network on: Kirigami needs them; Qt DBus linked to our libdbus (build-dep:dbus); libinput/xkbcommon/udev/mtdev (the evdev plugins read wasminput directly).
     # Bundled freetype/harfbuzz/png/zlib/pcre2. Exceptions off like the libc++ we link (build-libcxx.sh).
+    # DBus1_*: dbus's DBus1Config finds its files with absolute hints, which the sysroot-only search mode re-roots
+    # under the musl sysroot (DBus1_FOUND=0) - so they are given directly.
     cmake -G Ninja -S "$SRC" -B "$B" \
       -DCMAKE_TOOLCHAIN_FILE="$B/toolchain.cmake" -DQT_HOST_PATH=/ws/install/qt-host \
       -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/ws/install/qt-wasm32_nommu \
@@ -60,10 +64,13 @@ case $stage in
       -DFEATURE_libinput=OFF -DFEATURE_tslib=OFF -DFEATURE_xkbcommon=OFF -DFEATURE_libudev=OFF -DFEATURE_mtdev=OFF \
       -DINPUT_opengl=no -DFEATURE_opengl=OFF -DFEATURE_vulkan=OFF -DFEATURE_egl=OFF -DFEATURE_eglfs=OFF -DFEATURE_kms=OFF \
       -DFEATURE_xcb=OFF -DFEATURE_wayland=OFF -DFEATURE_vnc=OFF \
-      -DFEATURE_dbus=OFF -DFEATURE_glib=OFF -DFEATURE_icu=OFF -DFEATURE_fontconfig=OFF -DFEATURE_journald=OFF \
+      -DFEATURE_dbus=ON -DINPUT_dbus=linked -DDBus1_DIR=/ws/install/qt-wasm32_nommu/lib/cmake/DBus1 \
+      -DDBus1_INCLUDE_DIR=/ws/install/qt-wasm32_nommu/include/dbus-1.0 \
+      -DDBus1_ARCH_INCLUDE_DIR=/ws/install/qt-wasm32_nommu/lib/dbus-1.0/include \
+      -DDBus1_LIBRARY=/ws/install/qt-wasm32_nommu/lib/libdbus-1.a -DFEATURE_glib=OFF -DFEATURE_icu=OFF -DFEATURE_fontconfig=OFF -DFEATURE_journald=OFF \
       -DFEATURE_freetype=ON -DFEATURE_system_freetype=OFF -DFEATURE_harfbuzz=ON -DFEATURE_system_harfbuzz=OFF \
       -DFEATURE_png=ON -DFEATURE_system_png=OFF -DFEATURE_jpeg=OFF -DFEATURE_system_zlib=OFF -DFEATURE_system_pcre2=OFF \
-      -DFEATURE_process=OFF -DFEATURE_library=OFF -DFEATURE_sharedmemory=OFF -DFEATURE_systemsemaphore=OFF \
+      -DFEATURE_process=ON -DFEATURE_library=ON -DFEATURE_sharedmemory=OFF -DFEATURE_systemsemaphore=OFF \
       -DFEATURE_backtrace=OFF -DFEATURE_exceptions=OFF \
       -DFEATURE_network=ON -DFEATURE_sql=OFF -DFEATURE_printsupport=OFF -DFEATURE_testlib=OFF -DFEATURE_concurrent=ON \
       -DINPUT_openssl=no
