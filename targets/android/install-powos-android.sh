@@ -168,6 +168,8 @@ for a in steam bazzite-desktop-bootstrap bazzite-announcement bazzite-portal bal
   printf '[Desktop Entry]\nHidden=true\n' > /home/powos/.config/autostart/$a.desktop
 done
 chown -R powos:powos /home/powos/.config
+# Bazzite's "Return to Gaming Mode" desktop shortcut: game mode is gamescope on Vulkan, which the VM can't run.
+rm -f /home/powos/Desktop/*[Gg]am*[Mm]ode*.desktop /etc/skel/Desktop/*[Gg]am*[Mm]ode*.desktop
 fi
 
 # Parity with the PowOS image: every command, app, autostart entry and enabled unit it offers, checked here.

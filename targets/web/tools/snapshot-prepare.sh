@@ -19,6 +19,7 @@ for a in steam bazzite-desktop-bootstrap bazzite-announcement bazzite-portal bal
   printf '[Desktop Entry]\nHidden=true\n' > /home/powos/.config/autostart/$a.desktop
 done
 chown -R powos:powos /home/powos/.config
+rm -f /home/powos/Desktop/*[Gg]am*[Mm]ode*.desktop
 
 # Units the browser machine masks (machine.json's systemd.mask= list, put here by build-snapshot.sh as MASK so the
 # kernel command line stays under its 2048 bytes): masked before graphical.target starts them.
@@ -51,12 +52,12 @@ echo "POWOS-SNAPSHOT plasmashell up after ${i}s" > /dev/console
 # Settled = Plasma's splash (ksplashqml) has exited: it closes exactly when the session's startup phases are done and
 # the desktop has been drawn. Then 30 s more for late widgets. Emulated, a fixed wait saved an undrawn desktop (black
 # canvas), and "wait for idle CPU" never ends: the PowOS widgets keep an emulated CPU busy.
-for n in $(seq 180); do
-  pgrep -x ksplashqml > /dev/null || break
-  sleep 10
-done
-sleep 30
-echo "POWOS-SNAPSHOT settled after $((n * 10 + 30))s" > /dev/console
+# It has to be seen first: right after plasmashell starts the splash may not be up yet (that once ended this wait at
+# once and saved a desktop with wallpaper but no panel).
+for n in $(seq 60); do pgrep -x ksplashqml > /dev/null && break; sleep 5; done
+for m in $(seq 180); do pgrep -x ksplashqml > /dev/null || break; sleep 10; done
+sleep 60
+echo "POWOS-SNAPSHOT settled after $((n * 5 + m * 10 + 60))s" > /dev/console
 systemctl list-jobs > /dev/console
 
 # Free what the resumed machine doesn't need: with init_on_free=1 (web/machine.json) freed pages are zeros, which

@@ -150,24 +150,36 @@
     timing.qemu = performance.now();
     await initEmscriptenModule(Module);
     timing.started = performance.now();
-    // A resumed snapshot sits at its login prompt silently: press Enter for it until the guest answers.
+    // A resumed snapshot sits at its login prompt silently: press Enter for it until the guest answers. "Answered" means
+    // the guest's own prompt on the terminal - QEMU's stderr (chunked: ... lines) shares the terminal and once
+    // counted as an answer.
     if (resume) {
-      const before = xterm.buffer.active.baseY + xterm.buffer.active.cursorY;
+      const guestPrompt = /login:\s*$|[$#]\s*$/;
+      const lastLine = () => {
+        const b = xterm.buffer.active;
+        for (let i = b.baseY + b.cursorY; i >= 0; i--) {
+          const t = (b.getLine(i)?.translateToString(true) || '').trimEnd();
+          if (t) return t;
+        }
+        return '';
+      };
       let tries = 0;
-      const nudge = setInterval(() => {
-        const now = xterm.buffer.active.baseY + xterm.buffer.active.cursorY;
-        if (now > before) {
+      const nudge = () => {
+        if (guestPrompt.test(lastLine())) {
           // Time to the first answer of the resumed machine, and where it went (console: the breakdown).
           const s = (t) => (t / 1000).toFixed(1);
           timing.answered = performance.now();
           console.log(`timing: downloaded ${s(timing.downloaded)} s, QEMU loaded ${s(timing.started)} s, ` +
                       `PowOS answered ${s(timing.answered)} s`);
           status.textContent = `resumed in ${s(timing.answered)} s`;
-          return clearInterval(nudge);
+          return;
         }
-        if (++tries > 100) return clearInterval(nudge);
+        if (++tries > 400) return;
         xterm.paste('\r');
-      }, 300); // promptly: this is on the critical path of time-to-PowOS
+        // Promptly at first (this is on the critical path of time-to-PowOS), then every 3 s.
+        setTimeout(nudge, tries < 100 ? 300 : 3000);
+      };
+      nudge();
     }
     // xterm-pty: report the TTY as not readable while the terminal has no input, so QEMU's poll doesn't spin.
     const oldPoll = Module.TTY.stream_ops.poll;

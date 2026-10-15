@@ -36,7 +36,11 @@ export function attachDisplay(Module, canvas, { onFirstFrame } = {}) {
   let draw = null;               // (surface, dirty) => void, set once a renderer is ready
   let first = true;
 
+  // Counters for tests and the console: frames QEMU sent, input events the page pushed, and the input ring's
+  // head (page) / tail (QEMU) - tail lagging behind head means QEMU is not draining input.
+  const stats = Module.powosStats = { frames: 0, events: 0, ring: () => ring ? [Atomics.load(ring.h32, ring.base), Atomics.load(ring.h32, ring.base + 1)] : null };
   Module.powosFrame = (heap, ptr, w, h, stride, x, y, rw, rh) => {
+    stats.frames++;
     if (!surface || surface.ptr !== ptr || surface.w !== w || surface.h !== h) {
       surface = { heap, ptr, w, h, stride };
       canvas.width = w;
@@ -124,6 +128,7 @@ export function attachDisplay(Module, canvas, { onFirstFrame } = {}) {
   let ring = null; // { h32, base, slots }
   const pending = [];
   const push = (type, a, b) => {
+    stats.events++;
     if (!ring) { if (pending.length < 256) pending.push([type, a, b]); return; }
     const { h32, base, slots } = ring;
     const head = Atomics.load(h32, base);
