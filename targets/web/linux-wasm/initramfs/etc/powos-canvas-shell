@@ -3,4 +3,4 @@
 # reaches it through the input device's kbd handler) from the inittab /init writes, respawned when it exits.
 clear
 echo "PowOS on Linux/Wasm - canvas console"
-exec sh
+exec sh -l

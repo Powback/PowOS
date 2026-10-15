@@ -23,6 +23,22 @@
   let user_executable = null;
   let user_executable_params = null;
 
+  // PowOS: the function table size a PIC Wasm program needs - WASM_DYLINK_MEM_INFO (subsection 1) of its dylink.0
+  // section: mem_size, mem_align, table_size, table_align (LEB128). 0 when absent.
+  const powos_dylink_table_size = (module) => {
+    const sections = WebAssembly.Module.customSections(module, "dylink.0");
+    if (!sections.length) return 0;
+    const b = new Uint8Array(sections[0]);
+    let i = 0;
+    const leb = () => { let r = 0, s = 0, x; do { x = b[i++]; r += (x & 0x7f) * 2 ** s; s += 7; } while (x & 0x80); return r; };
+    while (i < b.length) {
+      const type = b[i++], size = leb(), end = i + size;
+      if (type === 1) { leb(); leb(); return leb(); }
+      i = end;
+    }
+    return 0;
+  };
+
   /// The user executabe instance, or null. Try using the instance variable in the promise over this one if possible.
   let user_executable_instance = null;
   let user_executable_imports = null;
@@ -497,7 +513,7 @@
             memory: memory,
             __memory_base: new WebAssembly.Global({ value: 'i' + arch_bits, mutable: false }, Ulong(user_executable_params.data_start)),
             __stack_pointer: new WebAssembly.Global({ value: 'i' + arch_bits, mutable: true }, stack_pointer),
-            __indirect_function_table: new WebAssembly.Table({ initial: 4096, element: "anyfunc" }), // TODO: fix this!
+            __indirect_function_table: null, // PowOS: sized from the module below (powos_dylink_table_size)
             __table_base: new WebAssembly.Global({ value: 'i' + arch_bits, mutable: false }, Ulong(user_executable_params.table_start)),
             __table_base32: new WebAssembly.Global({ value: 'i32', mutable: false }, Number(user_executable_params.table_start)),
 
@@ -548,7 +564,14 @@
         // * clone: clone explicitly passes its tls pointer to the kernel as part of the syscall. Unless the tls pointer
         //   has been overridden with CLONE_SETTLS, it will be copied from the old task to the new one. This is mostly
         //   useful when CLONE_VFORK is used, in which case the new task can borrow the TLS until it calls exec or exit.
-        let woken = user_executable.then((user_module) => WebAssembly.instantiate(user_module, user_executable_imports));
+        // PowOS: size the program's function table from its dylink.0 section (upstream used a fixed 4096 entries, which
+        // a Qt program - 16728 - overflows: "table import 1 is smaller than initial 16728, got 4096").
+        let woken = user_executable.then((user_module) => {
+          const needed = Number(user_executable_params.table_start) + powos_dylink_table_size(user_module);
+          user_executable_imports.env.__indirect_function_table =
+            new WebAssembly.Table({ initial: Math.max(4096, needed), element: "anyfunc" });
+          return WebAssembly.instantiate(user_module, user_executable_imports);
+        });
 
         woken = woken.then((instance) => {
           instance.exports.__wasm_apply_data_relocs();
@@ -582,7 +605,9 @@
             // Ideally libc would do this instead of the usual __init_array stuff (e.g. override __libc_start_init in
             // musl). However, a reference to __wasm_call_ctors becomes a GOT import in -fPIC code, perhaps rightfully
             // so with the current implementation and use case on LLVM. Anyway, we do it here, slightly early on...
-            if (instance.exports.__wasm_call_ctors) {
+            // PowOS: programs built against our musl run them themselves, after libc init (patch-musl-threads.py) -
+            // here they ran before malloc worked. Only older programs (no marker) still get the early call.
+            if (instance.exports.__wasm_call_ctors && !instance.exports.__powos_libc_runs_ctors) {
               instance.exports.__wasm_call_ctors();
             }
 

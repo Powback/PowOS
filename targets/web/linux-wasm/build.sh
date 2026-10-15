@@ -41,6 +41,11 @@ docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linu
       patch-musl) python3 /powos-lw/patch-musl-threads.py /ws/src/musl ;;
       # C++ runtime for PowOS programs (Qt, KDE, ...): libc++ + libc++abi, static (build-libcxx.sh).
       build-libcxx) bash /powos-lw/build-libcxx.sh ;;
+      # libpowos-wasm-support.a: what C++ programs need that musl and libc++abi lack (build-support.sh).
+      build-support) bash /powos-lw/build-support.sh ;;
+      # Qt (qtbase): host tools, then static wasm32 linuxfb + evdev (build-qt.sh).
+      build-qt-host) bash /powos-lw/build-qt.sh host ;;
+      build-qt) bash /powos-lw/build-qt.sh target ;;
       # PowOS kernel additions: the streamed disk driver + EROFS (patch-kernel.py). Also run right after fetch-kernel.
       patch-kernel) python3 /powos-lw/patch-kernel.py /ws/src/kernel ;;
       # PowOS layer over upstream initramfs: our files (linux-wasm/initramfs/) appended to the archive; the kernel

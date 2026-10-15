@@ -36,6 +36,30 @@ if 'PowOS: positional' not in s:
     open(p, 'w').write(s.replace(old, new, 1))
     print('musl: __clone passes tls and ctid')
 
+# Static constructors: Wasm has no .init_array - wasm-ld puts them in __wasm_call_ctors, which upstream's runtime
+# called before _start, i.e. before musl initialized itself (page size from auxv, malloc). A C++ program whose static
+# constructors allocate (every Qt program: plugin registration) got NULL from malloc and died in qBadAlloc. Run them
+# where .init_array would run, and export a marker telling the runtime (linux-worker.js) not to call them early.
+p = os.path.join(sys.argv[1], 'src/env/__libc_start_main.c')
+s = open(p).read()
+old = 'static void libc_start_init(void)\n{\n\t_init();\n'
+if 'PowOS: Wasm ctors' not in s:
+    assert old in s, '__libc_start_main.c changed upstream: re-check the Wasm constructors patch'
+    s = s.replace(old, '''#ifdef __wasm__
+/* PowOS: Wasm ctors - run by libc (below), not by the runtime before libc is up (see patch-musl-threads.py). */
+void __wasm_call_ctors(void);
+int __powos_libc_runs_ctors = 1;
+#endif
+static void libc_start_init(void)
+{
+\t_init();
+#ifdef __wasm__
+\t__wasm_call_ctors();
+#endif
+''', 1)
+    open(p, 'w').write(s)
+    print('musl: static constructors run after libc init')
+
 p = os.path.join(sys.argv[1], 'src/thread/pthread_create.c')
 s = open(p).read()
 if 'PowOS: Wasm TLS' in s:

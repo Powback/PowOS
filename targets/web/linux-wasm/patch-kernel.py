@@ -125,4 +125,29 @@ if 'PowOS: claim it' not in s:
     s = s.replace(old_pick, new_pick, 1).replace(old_up, new_up, 1)
     open(p, 'w').write(s)
 
+# NOMMU loads a program by reading the whole .wasm into ONE physically contiguous allocation (fs/binfmt_wasm.c
+# vm_mmap), and the arch never set ARCH_FORCE_MAX_ORDER, so the generic MAX_PAGE_ORDER 10 (4 MiB) capped program
+# size: a 27 MiB Qt program failed with "nommu: Allocation of length 27672576 ... failed". 15 = 128 MiB blocks.
+p = os.path.join(k, 'arch/wasm/Kconfig')
+s = open(p).read()
+if 'ARCH_FORCE_MAX_ORDER' not in s:
+    s += '''
+# PowOS: programs (and their data) are single contiguous allocations on NOMMU - allow up to 128 MiB.
+config ARCH_FORCE_MAX_ORDER
+	int
+	default 15
+'''
+    open(p, 'w').write(s)
+
+# A program's main stack is a fixed allocation on NOMMU, and upstream made it 2 pages (8 KiB): enough for BusyBox,
+# not for Qt - PCRE2's compiler ran off its end into the heap ("memory access out of bounds" in malloc).
+p = os.path.join(k, 'fs/binfmt_wasm.c')
+s = open(p).read()
+old = '#define WASM_STACK_SIZE\t\t(2UL * PAGE_SIZE)'
+if old in s:
+    s = s.replace(old, '#define WASM_STACK_SIZE\t\t(1UL << 20) /* PowOS: 1 MiB (was 2 pages) - Qt needs real stacks */')
+    open(p, 'w').write(s)
+else:
+    assert 'PowOS: 1 MiB' in s, 'binfmt_wasm.c changed upstream: re-check WASM_STACK_SIZE'
+
 print('kernel: wasm_blk + EROFS, wasmfb + fbcon, wasminput + evdev')

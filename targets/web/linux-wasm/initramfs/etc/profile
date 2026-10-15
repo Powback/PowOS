@@ -1,0 +1,10 @@
+# PowOS on Linux/Wasm: login-shell environment (both shells: the page's terminal and the canvas, initramfs/init).
+export PATH=/powos/apps:/bin:/sbin:/usr/bin:/usr/sbin
+# Qt programs (build-qt-apps.sh): draw on /dev/fb0 - the canvas - with the fonts on the streamed disk; keyboard and
+# pointer come from /dev/input (wasminput) through Qt's evdev plugins.
+export QT_QPA_PLATFORM=linuxfb:fb=/dev/fb0
+export QT_QPA_FONTDIR=/powos/fonts
+# The canvas pointer is absolute (wasminput: ABS_X/ABS_Y, no REL_X/REL_Y), and Qt's evdev discovery only takes
+# devices with relative axes for a mouse - so name it, in absolute mode. event0 is the only input device.
+export QT_QPA_EVDEV_MOUSE_PARAMETERS=/dev/input/event0:abs
+export XDG_RUNTIME_DIR=/run

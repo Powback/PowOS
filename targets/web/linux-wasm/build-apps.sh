@@ -26,7 +26,7 @@ mkdir -p "$HERE/out/linux-wasm/apps"
     case $src in
       *.c)   $CC $COMMON -o /tmp/$n "$src" -lc --rtlib=compiler-rt -v > /tmp/$n.log 2>&1 ;;
       *.cpp) $CC $COMMON -x c++ -std=c++20 -fno-exceptions -nostdinc++ -isystem $CXX/include/c++/v1 \
-               -o /tmp/$n "$src" -L$CXX/lib -lc++ -lc++abi -lc --rtlib=compiler-rt -v > /tmp/$n.log 2>&1 ;;
+               -o /tmp/$n "$src" -L$CXX/lib -lc++ -lc++abi -lpowos-wasm-support -lc --rtlib=compiler-rt -v > /tmp/$n.log 2>&1 ;;
     esac || { grep -E "error|undefined" /tmp/$n.log | head -20; exit 1; }
     { grep -E "wasm-ld" /tmp/$n.log | tail -1; $REAL_LLVM/llvm-objdump -h /tmp/$n; } > /out/apps/$n.link.txt 2>&1
     cp /tmp/$n /out/apps/$n

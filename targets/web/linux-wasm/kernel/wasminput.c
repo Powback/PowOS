@@ -34,7 +34,6 @@ static void wasminput_drain(struct work_struct *work)
 {
 	s32 head = smp_load_acquire(&ring[0]);
 	s32 tail = ring[1];
-	bool any = false;
 
 	while (tail != head) {
 		s32 *ev = &ring[2 + (tail % RING_SLOTS) * 4];
@@ -55,12 +54,14 @@ static void wasminput_drain(struct work_struct *work)
 				input_report_rel(wasminput_dev, REL_WHEEL, ev[1] == 3 ? 1 : -1);
 			break;
 		}
-		any = true;
+		/*
+		 * One SYN frame per page event: a click's press and release often land in the same 10 ms drain, and in
+		 * one frame they cancel out - readers (Qt's evdev mouse) see only the final state, no button change.
+		 */
+		input_sync(wasminput_dev);
 		tail = (tail + 1) % (RING_SLOTS * 1024);
 	}
 	smp_store_release(&ring[1], tail);
-	if (any)
-		input_sync(wasminput_dev);
 	schedule_delayed_work(&wasminput_work, msecs_to_jiffies(10));
 }
 
