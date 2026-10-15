@@ -111,6 +111,9 @@ if [ "$POWOS_TARGET" = phone ]; then
 # No systemd on Android: startplasma must start the session's services itself, not ask systemd to.
 mkdir -p /etc/xdg
 printf '[General]\nsystemdBoot=false\n' > /etc/xdg/startkderc
+# Android's own lock screen guards the phone; KDE's idle lock on top asked for a password nobody set (the session
+# runs as root).
+printf '[Daemon]\nAutolock=false\nLockOnResume=false\n' > /etc/xdg/kscreenlockerrc
 # The app's user is root with home /root: seed it from /etc/skel as useradd would for a new user.
 cp -a /etc/skel/. /root/ 2>/dev/null || true
 

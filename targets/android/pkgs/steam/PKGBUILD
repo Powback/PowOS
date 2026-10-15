@@ -1,0 +1,23 @@
+# Valve's Steam launcher, for PowOS on ARM phones. Arch's own steam package is x86_64 (multilib) only; the launcher
+# itself is a shell script plus Valve's 32-bit x86 bootstrap, which run here through FEX (fex-emu's binfmt rules
+# in rooted mode, the engine's execve in the no-root app) - as on Valve's own ARM hardware. Packaged like Arch's
+# steam PKGBUILD (Valve's Makefile), unchanged code.
+pkgname=steam
+pkgver=1.0.0.87
+pkgrel=1
+pkgdesc="Valve's Steam launcher (x86, runs through FEX) - PowOS phone build"
+arch=(any)
+url=https://steampowered.com/
+license=(custom)
+depends=(bash python fex-emu curl desktop-file-utils hicolor-icon-theme lsof xdg-utils xz zenity)
+source=("https://repo.steampowered.com/steam/archive/stable/steam_$pkgver.tar.gz")
+sha256sums=('649375d2f9377f8009aaf3e2ff09978041eb9114897d9c5a3886f1d82e27ba1f')
+
+package() {
+  cd steam-launcher
+  make DESTDIR="$pkgdir" PREFIX=/usr install
+  # steamdeps installs Ubuntu packages through apt; nothing to do on PowOS (as Arch's package).
+  ln -sf /usr/bin/true "$pkgdir/usr/bin/steamdeps"
+  rm -rf "$pkgdir/etc/apt"
+  install -Dm644 steam_subscriber_agreement.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
