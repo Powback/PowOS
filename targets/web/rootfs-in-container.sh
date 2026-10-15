@@ -1,7 +1,7 @@
 #!/bin/bash
 # Container half of build-rootfs.sh. The base is targets/android/rootfs-in-container.sh's (fresh Arch Linux ARM,
 # European mirrors, the shared package cache), without Andromarchy's engine. /in = staged inputs (ro),
-# /work = scratch volume, /out = targets/web/out.
+# /work = scratch filesystem (a loop-mounted ext4 image on the Mac side, build-rootfs.sh), /out = targets/web/out.
 set -euo pipefail
 ALARM_URL=http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
 R=/work/rootfs

@@ -140,13 +140,19 @@ EOF
 mkinitcpio -k "$(ls /usr/lib/modules | head -1)" -c /etc/mkinitcpio-powos-vm.conf -g /boot/initramfs-powos-vm.img
 echo '/dev/vda / ext4 rw,relatime 0 1' > /etc/fstab
 echo powos > /etc/hostname
+# Arch Linux ARM ships a default user alarm/alarm (uid 1000): a known password, and Bazzite's autologin picks the
+# first uid >= 1000 - it logged the VM in as alarm. PowOS has one user, powos.
+id alarm >/dev/null 2>&1 && userdel -r alarm 2>/dev/null
 id powos >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash powos
 echo powos:powos | chpasswd
 echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel && chmod 440 /etc/sudoers.d/10-wheel
 # The browser shows PowOS's desktop: SDDM logs powos straight into Plasma (Wayland), and KWin composites in software
 # with QPainter - no GPU in the VM, and OpenGL on llvmpipe is far slower under emulation.
 mkdir -p /etc/sddm.conf.d
-printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/10-powos-vm-autologin.conf
+# zzz-: SDDM applies /etc/sddm.conf.d in name order, last wins, and Bazzite ships zz-bazzite-autologin (User) and
+# zz-holo-autologin (Session=Steam game mode). Game mode is gamescope on Vulkan - the VM has no GPU, so it exits.
+rm -f /etc/sddm.conf.d/10-powos-vm-autologin.conf
+printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/zzz-powos-vm-autologin.conf
 grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
 # Arch enables nothing on install (Fedora's presets do it for Bazzite): without these graphical.target is reached
 # with no display manager at all, and the machine sits at a text login.

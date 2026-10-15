@@ -4,13 +4,11 @@
 # signals tools/snapshot.py, which then saves the running machine.
 echo POWOS-SNAPSHOT-START > /dev/console
 
-# HACK: bridge until the rootfs is rebuilt - install-powos-android.sh (POWOS_TARGET=vm) now writes both of these
-# at install time. Written here they land in the snapshot's disk overlay, so the resumed machine has them too.
-if [ ! -f /etc/sddm.conf.d/10-powos-vm-autologin.conf ]; then
-  mkdir -p /etc/sddm.conf.d
-  session=$(ls /usr/share/wayland-sessions/ | grep '^plasma' | head -1)
-  printf '[Autologin]\nUser=powos\nSession=%s\n' "${session%.desktop}" > /etc/sddm.conf.d/10-powos-vm-autologin.conf
-fi
+# HACK: bridge until the rootfs is rebuilt - install-powos-android.sh (POWOS_TARGET=vm) now writes these at install
+# time. Written here they land in the snapshot's disk overlay, so the resumed machine has them too. zzz- sorts after
+# Bazzite's zz-bazzite-autologin (User=alarm) and zz-holo-autologin (Steam game mode, which needs a GPU).
+rm -f /etc/sddm.conf.d/10-powos-vm-autologin.conf
+printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/zzz-powos-vm-autologin.conf
 grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
 systemctl is-enabled -q sddm.service || systemctl enable sddm.service
 
@@ -25,6 +23,8 @@ systemctl is-active -q sddm.service || timeout 600 systemctl start sddm.service
 for i in $(seq 1800); do
   pgrep -x plasmashell > /dev/null && break
   systemctl is-active -q sddm.service || break
+  # SDDM showing its greeter means the autologin session already failed.
+  pgrep -f sddm-greeter > /dev/null && break
   sleep 1
 done
 if ! pgrep -x plasmashell > /dev/null; then
@@ -32,7 +32,9 @@ if ! pgrep -x plasmashell > /dev/null; then
   # Diagnostics BEFORE the marker: snapshot.py stops the machine the moment it sees the marker.
   { pacman -Q sddm plasma-workspace kwin; ls /usr/lib/systemd/system/sddm* /usr/share/wayland-sessions/
     systemctl get-default; systemctl is-enabled sddm.service; systemctl status sddm.service --no-pager -n 30
-    journalctl -b -u sddm.service --no-pager -n 40; } > /dev/console 2>&1
+    journalctl -b -u sddm.service --no-pager -n 40
+    grep -r . /etc/sddm.conf /etc/sddm.conf.d 2>/dev/null
+    journalctl -b _UID=$(id -u powos) --no-pager | grep -v -E 'pam_|dbus-daemon' | tail -60; } > /dev/console 2>&1
   sleep 2
   echo "POWOS-SNAPSHOT-FAILED: no plasmashell after ${i}s" > /dev/console
   exit 1

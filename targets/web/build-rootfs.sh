@@ -24,25 +24,32 @@ cp -a "$ANDROID/session" "$ANDROID/shims" "$ANDROID/phone-rules.conf" "$ANDROID/
   "$ANDROID/tools/phone-parity.py" "$W/powos/"
 install -m 755 "$ANDROID/install-powos-android.sh" "$W/powos/"
 
-# 2. Build in a privileged aarch64 container (chroot + mounts), the rootfs on a scratch volume (Linux ownership,
-#    device nodes). The Docker disk is shared with live services: refuse without room.
-NEED_GB=16
-free_gb=$(docker run --rm "$IMAGE" df -BG --output=avail /etc/hostname | tail -1 | tr -dc '0-9')
+# 2. Build in a privileged aarch64 container (chroot + mounts). The rootfs needs a Linux filesystem (ownership,
+#    device nodes) but must NOT go on the Docker disk: that disk is shared with live services (Pi-hole, databases)
+#    and a ~17 GB rootfs can fill it. So the scratch filesystem is a sparse ext4 image on the Mac's disk
+#    (out/work/rootfs-scratch.ext4), loop-mounted at /work inside the container, deleted afterwards.
+NEED_GB=45   # scratch rootfs (~17 GB) + the raw disk image (~17 GB, sparse) + chunks (~8 GB), all on the Mac side
+free_gb=$(df -g "$OUT" | awk 'NR == 2 {print $4}')
 if [ "${free_gb:-0}" -lt "$NEED_GB" ]; then
-  echo "only ${free_gb} GB free on the Docker disk; need ${NEED_GB} GB (shared with live services)" >&2
+  echo "only ${free_gb} GB free on the Mac disk under $OUT; need ${NEED_GB} GB" >&2
   exit 1
 fi
-docker volume create powos-web-rootfs >/dev/null
-cleanup_volume() { docker volume rm -f powos-web-rootfs >/dev/null 2>&1 || true; }
+mkdir -p "$OUT/work"
+cleanup_scratch() { rm -f "$OUT/work/rootfs-scratch.ext4"; }
 # Also on INT/TERM: bash skips EXIT traps when killed, and a stopped build once left 7 GB behind.
-trap cleanup_volume EXIT
-trap 'cleanup_volume; exit 130' INT TERM
+trap cleanup_scratch EXIT
+trap 'cleanup_scratch; exit 130' INT TERM
 # powos-android-cache: the phone build's persistent cache (ALARM tarball, pacman packages) - shared, so the
 # two builds download Arch once.
 docker run --rm --privileged --platform linux/arm64 --cpus 8 --memory 16g \
-  -v powos-web-rootfs:/work -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" \
+  -v powos-android-cache:/cache -v "$W:/in:ro" -v "$OUT:/out" \
   -v "$HERE/rootfs-in-container.sh:/rootfs-in-container.sh:ro" -v "$HERE/tools:/tools:ro" \
-  "$IMAGE" bash /rootfs-in-container.sh
+  "$IMAGE" bash -c 'set -e
+    truncate -s 48G /out/work/rootfs-scratch.ext4
+    mke2fs -q -F -t ext4 /out/work/rootfs-scratch.ext4
+    mkdir -p /work && mount -o loop /out/work/rootfs-scratch.ext4 /work
+    trap "umount -l /work 2>/dev/null || true" EXIT
+    bash /rootfs-in-container.sh'
 cp "$W/powos/manifest/image.txt" "$OUT/disk/image.txt"
 rm -rf "$W"
 echo "disk: $OUT/disk ($(du -sh "$OUT/disk/chunks" | cut -f1) of chunks)"
