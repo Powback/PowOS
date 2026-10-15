@@ -17,9 +17,10 @@ const waitFor = new RegExp(process.env.WAIT_FOR || 'login:\\s*$', 'm');
 fs.mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch({
+  channel: process.env.CHANNEL || undefined, // CHANNEL=chrome: the installed Google Chrome (test/boot-mac.sh)
   args: [
-    // Inside Docker the LAN name doesn't resolve: send it to Traefik on the shared network.
-    '--host-resolver-rules=MAP powos-web.pow traefik',
+    // Inside Docker the LAN name doesn't resolve: send it to Traefik on the shared network (RESOLVE overrides).
+    `--host-resolver-rules=MAP powos-web.pow ${process.env.RESOLVE || 'traefik'}`,
     '--enable-features=SharedArrayBuffer',
   ],
 });

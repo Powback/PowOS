@@ -8,7 +8,7 @@ const url = process.env.URL || 'https://powos-web.pow/';
 const out = process.env.OUT || '/out';
 const wait = Number(process.env.WAIT || 40);
 fs.mkdirSync(out, { recursive: true });
-const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP powos-web.pow traefik', '--remote-debugging-port=9333'] });
+const browser = await chromium.launch({ channel: process.env.CHANNEL || undefined, args: [`--host-resolver-rules=MAP powos-web.pow ${process.env.RESOLVE || 'traefik'}`, '--remote-debugging-port=9333'] });
 const page = await browser.newPage({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
 await page.goto(url, { waitUntil: 'load' });
 const term = () => page.evaluate(() => {

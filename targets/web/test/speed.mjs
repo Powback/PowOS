@@ -7,7 +7,7 @@ import fs from 'node:fs';
 const url = process.env.URL || 'https://powos-web.pow/';
 const out = process.env.OUT || '/out';
 fs.mkdirSync(out, { recursive: true });
-const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP powos-web.pow traefik'] });
+const browser = await chromium.launch({ channel: process.env.CHANNEL || undefined, args: [`--host-resolver-rules=MAP powos-web.pow ${process.env.RESOLVE || 'traefik'}`] });
 const page = await browser.newPage({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
 const log = fs.createWriteStream(`${out}/speed-console.log`);
 page.on('console', (m) => log.write(m.text() + '\n'));

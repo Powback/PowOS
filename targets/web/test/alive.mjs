@@ -8,7 +8,7 @@ const url = process.env.URL || 'https://powos-web.pow/';
 const out = process.env.OUT || '/out';
 const secs = Number(process.env.SECS || 240);
 fs.mkdirSync(out, { recursive: true });
-const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP powos-web.pow traefik'] });
+const browser = await chromium.launch({ channel: process.env.CHANNEL || undefined, args: [`--host-resolver-rules=MAP powos-web.pow ${process.env.RESOLVE || 'traefik'}`] });
 const page = await browser.newPage({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } });
 let fetched = '(none)';
 const hb = []; // [wall ms, guest uptime s] from the snapshot's heartbeat on the serial console
@@ -35,7 +35,7 @@ while (Date.now() - t0 < secs * 1000) {
   });
   if (s.hb !== null) hb.push([Date.now(), s.hb]);
   // LOGIN=1: type the user name once the guest answers - a login has to read /bin/login & co. from the disk.
-  if (process.env.LOGIN === '1' && !typed && s.hb !== null) {
+  if (process.env.LOGIN === '1' && !typed && s.hb !== null && Date.now() - t0 > Number(process.env.LOGIN_AT || 0) * 1000) {
     typed = true;
     await page.evaluate(() => window.powosTerm?.focus());
     await page.keyboard.type('powos');

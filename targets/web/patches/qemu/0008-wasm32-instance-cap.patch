@@ -1,0 +1,41 @@
+PowOS web: more compiled wasm instances alive (30000), and evicted ones count as freed at eviction instead of
+when the browser GC finalizes them - otherwise a large working set (a KDE desktop) runs mostly in TCI.
+
+--- a/tcg/wasm32.c	2026-10-15 13:11:44
++++ b/tcg/wasm32.c	2026-10-15 13:11:44
+@@ -104,7 +104,11 @@
+     int fidx;
+ };
+ 
+-#define MAX_INSTANCE_ALIVE 15000
++/*
++ * PowOS web: 30000 (was 15000). A desktop's hot code is far larger than 15000 blocks; past the cap new hot blocks
++ * stay in the TCI interpreter (profiled: ~47% of a resumed KDE desktop's vCPU time).
++ */
++#define MAX_INSTANCE_ALIVE 30000
+ #define INSTANCE_RUNNING_LEN MAX_INSTANCE_ALIVE
+ __thread struct instance_info instance_running[INSTANCE_RUNNING_LEN];
+ __thread int instance_running_begin = 0;
+@@ -132,6 +136,8 @@
+ 
+ static void check_instance_garbage_collected()
+ {
++    /* PowOS web: freed instances are counted at eviction (remove_instance_running_local), not when GC'd. */
++    instance_garbage_collected_local = 0;
+     if (instance_garbage_collected_local > 0) {
+         if (instance_garbage_collected_local > instance_pending_gc_local()) {
+             printf("unexpected number of removed instances %d > %d",
+@@ -159,6 +165,13 @@
+     if (to_remove_instance_idx > 0) {
+         remove_module_js();
+     }
++    /*
++     * PowOS web: evicted instances count as freed now. They are unreachable once removed from the function table;
++     * waiting for the FinalizationRegistry kept the count at the cap for long stretches (a worker running wasm
++     * rarely allocates JS objects, so its GC runs rarely) and every new hot block ran interpreted meanwhile.
++     */
++    qatomic_sub(&instance_alive_global, to_remove);
++    instance_alive_local -= to_remove;
+ }
+ 
+ static void add_instance_running_local(int fidx, void *tb_ptr)
