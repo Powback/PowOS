@@ -1,0 +1,9 @@
+#!/bin/sh
+# PowOS on Linux/Wasm: init (replaces upstream's, appended over its initramfs by build.sh powos-initramfs).
+mount -t proc none /proc
+mount -t sysfs none /sys
+mkdir -p /tmp /run /var/tmp
+mount -t tmpfs none /tmp
+mount -t tmpfs none /run
+echo "PowOS on Linux/Wasm - the kernel and every program here are WebAssembly, no CPU emulation."
+exec /sbin/init -s

@@ -6,7 +6,7 @@
 # Source: targets/web/reference/linux-wasm (git clone, gitignored). Workspace: a sparse ext4 image on the Mac disk
 # (out/linux-wasm/workspace.ext4), loop-mounted in a privileged container - LLVM's build is tens of GB of small files,
 # too much for the Docker disk (shared with live services) and slow on a bind mount. Kept between runs (incremental).
-# Artifacts: out/linux-wasm/install/ (vmlinux.wasm, initramfs, runtime).
+# Artifacts: out/linux-wasm/install/ (vmlinux.wasm, initramfs, runtime). After build-initramfs, run powos-initramfs.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SRC=$HERE/reference/linux-wasm
@@ -14,7 +14,7 @@ OUT=$HERE/out/linux-wasm
 [ -x "$SRC/linux-wasm.sh" ] || { echo "clone it first: git clone https://github.com/joelseverin/linux-wasm $SRC" >&2; exit 1; }
 mkdir -p "$OUT"
 docker build -q -t linux-wasm-base:dev "$SRC/docker/linux-wasm-base" > /dev/null
-docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -e JOBS="${JOBS:-12}" linux-wasm-base:dev bash -c '
+docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linux-wasm:/powos-lw:ro" -e JOBS="${JOBS:-12}" linux-wasm-base:dev bash -c '
   set -e
   [ -f /out/workspace.ext4 ] || { truncate -s 80G /out/workspace.ext4; mkfs.ext4 -q -F /out/workspace.ext4; }
   mkdir -p /ws && mount -o loop /out/workspace.ext4 /ws
@@ -34,10 +34,19 @@ docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -e JOBS="${JOB
           git clone -q --depth 1 -b wasm-7.0 --single-branch --no-tags https://github.com/joelseverin/linux.git /ws/src/kernel && break
           [ $try = 3 ] && exit 1; echo "kernel clone failed, retrying in 60 s"; sleep 60
         done ;;
+      # PowOS patches over upstream (also applied right after fetch-busybox): hush command substitution via clone().
+      patch-busybox) python3 /powos-lw/patch-hush-cmdsubst.py /ws/src/busybox/shell/hush.c ;;
+      # PowOS layer over upstream initramfs: our files (linux-wasm/initramfs/) appended to the archive; the kernel
+      # unpacks entries in order, so ours replace upstream ones (e.g. /init).
+      powos-initramfs)
+        I=/ws/install/initramfs-wasm32_nommu
+        gunzip -f $I/initramfs.cpio.gz
+        (cd /powos-lw/initramfs && find . -mindepth 1 | cpio -o --format=newc -A -O $I/initramfs.cpio)
+        gzip -f $I/initramfs.cpio ;;
       fetch-*) n=${cmd#fetch-}
                for try in 1 2 3; do
                  rm -rf "/ws/src/$n"
-                 /linux-wasm/linux-wasm.sh "$cmd" && break
+                 /linux-wasm/linux-wasm.sh "$cmd" && { [ "$n" != busybox ] || python3 /powos-lw/patch-hush-cmdsubst.py /ws/src/busybox/shell/hush.c; } && break
                  [ $try = 3 ] && exit 1; echo "fetch $n failed, retrying"; sleep 10
                done ;;
       *) /linux-wasm/linux-wasm.sh "$cmd" ;;
