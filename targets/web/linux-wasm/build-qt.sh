@@ -14,6 +14,7 @@ declare -A SHA256=(
   [qtbase]=a951bd163c7b80fc6b8c88d7668fb56abf91c152373e13c10666763238131307
   [qtshadertools]=c7d84f436e1aaef39fdcadebf2bd71bdf24dc69497e13f2e0198873cbbfea2ab
   [qtdeclarative]=311f3a2603e1973bb59baef9dfa740a376de713157d4782ee043681e889c9260
+  [qtsvg]=e4ab39534ec97987b1b9b60ef7f4d3253d5912a69f8c713a01753174a4029331
 )
 TARBALL=/out/dl/$module-everywhere-src-$QT_VERSION.tar.xz
 SRC=/ws/src/$module-$QT_VERSION
@@ -45,10 +46,11 @@ case $stage in
     ls /ws/install/qt-host/libexec ;;
   target)
     B=/ws/build/qt-wasm32_nommu
-    rm -rf "$B" && mkdir -p "$B"
+    [ "${QT_INCREMENTAL:-}" = 1 ] || rm -rf "$B"   # QT_INCREMENTAL=1: reconfigure + rebuild only what changed
+    mkdir -p "$B"
     bash /powos-lw/qt-toolchain.sh > "$B/toolchain.cmake"
     # Off: everything that needs fork (process), dlopen (library: plugins are linked in statically), GL/Vulkan
-    # (no GPU), D-Bus, ICU, fontconfig; libinput/xkbcommon/udev/mtdev (the evdev plugins read wasminput directly).
+    # (no GPU), D-Bus, ICU, fontconfig. Qt Concurrent + Network on: Kirigami needs them; libinput/xkbcommon/udev/mtdev (the evdev plugins read wasminput directly).
     # Bundled freetype/harfbuzz/png/zlib/pcre2. Exceptions off like the libc++ we link (build-libcxx.sh).
     cmake -G Ninja -S "$SRC" -B "$B" \
       -DCMAKE_TOOLCHAIN_FILE="$B/toolchain.cmake" -DQT_HOST_PATH=/ws/install/qt-host \
@@ -63,7 +65,7 @@ case $stage in
       -DFEATURE_png=ON -DFEATURE_system_png=OFF -DFEATURE_jpeg=OFF -DFEATURE_system_zlib=OFF -DFEATURE_system_pcre2=OFF \
       -DFEATURE_process=OFF -DFEATURE_library=OFF -DFEATURE_sharedmemory=OFF -DFEATURE_systemsemaphore=OFF \
       -DFEATURE_backtrace=OFF -DFEATURE_exceptions=OFF \
-      -DFEATURE_network=OFF -DFEATURE_sql=OFF -DFEATURE_printsupport=OFF -DFEATURE_testlib=OFF -DFEATURE_concurrent=OFF \
+      -DFEATURE_network=ON -DFEATURE_sql=OFF -DFEATURE_printsupport=OFF -DFEATURE_testlib=OFF -DFEATURE_concurrent=ON \
       -DINPUT_openssl=no
     cmake --build "$B" -j "$JOBS"
     cmake --install "$B"

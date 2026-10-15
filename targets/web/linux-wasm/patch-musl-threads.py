@@ -72,6 +72,28 @@ if 'PowOS: thread stacks' not in s:
     open(p, 'w').write(s)
     print('musl: 2 MiB default thread stacks')
 
+# Detached threads free their own stack on exit (__unmapself). The generic version first jumps to a small shared
+# stack (CRTJMP) so the munmap can't pull the stack out from under itself; Wasm can't switch stacks that way, so the
+# port aborted - any detached thread that finished killed its program (seen in Qt). A Wasm function's locals live
+# in the engine, not in linear memory, and nothing below writes to the thread's (shadow) stack after the munmap, so
+# it can unmap and exit directly.
+p = os.path.join(sys.argv[1], 'src/thread/__unmapself.c')
+s = open(p).read()
+if 'PowOS: Wasm unmapself' not in s:
+    s = '''#ifdef __wasm__
+/* PowOS: Wasm unmapself (see patch-musl-threads.py) - no stack switch needed or possible. */
+#include "pthread_impl.h"
+#include "syscall.h"
+void __unmapself(void *base, size_t size)
+{
+\t__syscall(SYS_munmap, base, size);
+\tfor (;;) __syscall(SYS_exit, 0);
+}
+#else
+''' + s + '#endif\n'
+    open(p, 'w').write(s)
+    print('musl: __unmapself for Wasm')
+
 p = os.path.join(sys.argv[1], 'src/thread/pthread_create.c')
 s = open(p).read()
 # Each part checks its own marker, so a tree patched by an older version of this script gets the newer parts.

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 const url = process.env.URL || 'https://powos-web.pow/linux-wasm/';
 const app = process.env.APP || 'qthello', MARK = app.toUpperCase();
 // Where each app's text field and button are, in canvas (kernel) pixels.
-const layout = { qthello: [640, 98, 640, 130], qmlhello: [320, 219, 320, 301] }[app] || [640, 98, 640, 130];
+const layout = { qthello: [640, 98, 640, 130], qmlhello: [320, 219, 320, 301], kirigamihello: [668, 137, 648, 168] }[app] || [640, 98, 640, 130];
 const out = process.env.OUT || '/out';
 fs.mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ channel: process.env.CHANNEL || undefined, args: [`--host-resolver-rules=MAP powos-web.pow ${process.env.RESOLVE || 'traefik'}`] });

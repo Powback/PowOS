@@ -49,6 +49,8 @@ docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linu
       # Another Qt module: build-qtmod-host:<module> / build-qtmod:<module> (e.g. qtdeclarative).
       build-qtmod-host:*) bash /powos-lw/build-qt.sh host-module "${cmd#*:}" ;;
       build-qtmod:*) bash /powos-lw/build-qt.sh target-module "${cmd#*:}" ;;
+      # A KDE Frameworks module (build-kde.sh): build-kde:<name>, e.g. build-kde:kirigami.
+      build-kde:*) bash /powos-lw/build-kde.sh "${cmd#*:}" ;;
       # PowOS kernel additions: the streamed disk driver + EROFS (patch-kernel.py). Also run right after fetch-kernel.
       patch-kernel) python3 /powos-lw/patch-kernel.py /ws/src/kernel ;;
       # PowOS layer over upstream initramfs: our files (linux-wasm/initramfs/) appended to the archive; the kernel
