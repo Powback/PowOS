@@ -303,6 +303,11 @@
       port.postMessage({ method: "fb_init", base: base, width: width, height: height, stride: stride });
     },
 
+    // PowOS: keyboard + pointer (kernel/wasminput.c): the page writes events into this ring in the shared memory.
+    wasm_driver_input_init: (ring, slots) => {
+      port.postMessage({ method: "input_init", ring: ring, slots: slots });
+    },
+
     // PowOS: the streamed disk (see powos_disk above).
     wasm_driver_blk_sectors: () => powos_disk().sectors,
     wasm_driver_blk_read: (sector, buffer, len) => {

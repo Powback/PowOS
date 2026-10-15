@@ -110,6 +110,13 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
       console_write(message.message);
     },
 
+    // PowOS: the kernel's input ring (kernel/wasminput.c); index.html feeds it from the canvas.
+    input_init: (message) => {
+      if (globalThis.powosInput) {
+        globalThis.powosInput(memory, message.ring, message.slots);
+      }
+    },
+
     // PowOS: the kernel's framebuffer (kernel/wasmfb.c); index.html draws it.
     fb_init: (message) => {
       if (globalThis.powosFramebuffer) {
