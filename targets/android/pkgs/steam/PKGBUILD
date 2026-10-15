@@ -4,7 +4,7 @@
 # steam PKGBUILD (Valve's Makefile), unchanged code.
 pkgname=steam
 pkgver=1.0.0.87
-pkgrel=1
+pkgrel=2
 pkgdesc="Valve's Steam launcher (x86, runs through FEX) - PowOS phone build"
 arch=(any)
 url=https://steampowered.com/
@@ -18,6 +18,12 @@ package() {
   make DESTDIR="$pkgdir" PREFIX=/usr install
   # steamdeps installs Ubuntu packages through apt; nothing to do on PowOS (as Arch's package).
   ln -sf /usr/bin/true "$pkgdir/usr/bin/steamdeps"
+  # The launcher scripts run in FEX's x86 world (FEXBash: x86 bash over FEX's x86 rootfs), not the native ARM one:
+  # steam.sh looks for 32-bit x86 libraries (libc.so.6) on the system it runs on and stops without them.
+  rm "$pkgdir/usr/bin/steam"
+  printf '#!/bin/sh\n# PowOS (ARM): Valve'"'"'s launcher inside FEX'"'"'s x86 environment.\nexec FEXBash -c '"'"'exec /usr/lib/steam/bin_steam.sh "$@"'"'"' steam "$@"\n' \
+    > "$pkgdir/usr/bin/steam"
+  chmod 755 "$pkgdir/usr/bin/steam"
   rm -rf "$pkgdir/etc/apt"
   install -Dm644 steam_subscriber_agreement.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
