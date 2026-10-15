@@ -46,4 +46,9 @@ while (Date.now() - t0 < secs * 1000) {
   console.log(`${Math.round((Date.now() - t0) / 1000)}s frames=${s.frames} guest=${s.hb ?? '-'}s speed=${rate} disk=[${s.disk ?? 'none'}] serial="${s.last}"`);
 }
 await page.screenshot({ path: `${out}/alive.png` });
+fs.writeFileSync(`${out}/terminal.txt`, await page.evaluate(() => {
+  const b = window.powosTerm?.buffer.active, l = [];
+  if (b) for (let i = 0; i < b.length; i++) l.push((b.getLine(i)?.translateToString(true) || '').trimEnd());
+  return l.join('\n');
+}));
 await browser.close();
