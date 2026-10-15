@@ -298,6 +298,11 @@
       return count;
     },
 
+    // PowOS: the framebuffer (kernel/wasmfb.c): the page draws it straight from the shared memory.
+    wasm_driver_fb_init: (base, width, height, stride) => {
+      port.postMessage({ method: "fb_init", base: base, width: width, height: height, stride: stride });
+    },
+
     // PowOS: the streamed disk (see powos_disk above).
     wasm_driver_blk_sectors: () => powos_disk().sectors,
     wasm_driver_blk_read: (sector, buffer, len) => {

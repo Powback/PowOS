@@ -55,6 +55,35 @@
 
 <body>
   <h1>Linux/Wasm</h1>
+  <canvas id="screen" style="display: none; width: 100%; max-width: 1280px; image-rendering: pixelated;"></canvas>
+  <script>
+    // PowOS: /dev/fb0 (kernel/wasmfb.c) lives in the kernel's shared memory; copy it to the canvas every frame.
+    // XRGB little-endian (B, G, R, X bytes) -> canvas RGBA.
+    globalThis.powosFramebuffer = (memory, base, width, height, stride) => {
+      const canvas = document.getElementById("screen");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.style.display = "block";
+      const ctx = canvas.getContext("2d");
+      const image = ctx.createImageData(width, height);
+      const out = new Uint32Array(image.data.buffer);
+      globalThis.powosFrames = 0;
+      const draw = () => {
+        const src = new Uint32Array(memory.buffer, base, (stride / 4) * height);
+        for (let y = 0; y < height; y++) {
+          const row = y * (stride / 4), o = y * width;
+          for (let x = 0; x < width; x++) {
+            const p = src[row + x];
+            out[o + x] = 0xff000000 | ((p & 0xff) << 16) | (p & 0xff00) | ((p >> 16) & 0xff);
+          }
+        }
+        ctx.putImageData(image, 0, 0);
+        globalThis.powosFrames++;
+        requestAnimationFrame(draw);
+      };
+      requestAnimationFrame(draw);
+    };
+  </script>
   <div id="terminal" tabindex="0"></div>
   <pre>
 Examples: ls          watch uptime              head /proc/cpuinfo

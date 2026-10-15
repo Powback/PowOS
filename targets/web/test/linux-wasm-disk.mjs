@@ -42,4 +42,6 @@ const all = await text();
 console.log(all.split('\n').slice(-24).join('\n'));
 console.log(`disk: ${ranges} range requests, ${(rangeBytes / 1024).toFixed(0)} KiB of ${(fs.existsSync('/dev/null') ? '' : '')}the image`);
 fs.writeFileSync(`${out}/terminal.txt`, all);
+console.log(`framebuffer: ${await page.evaluate(() => globalThis.powosFrames ?? 'no canvas')} frames drawn`);
+await page.screenshot({ path: `${out}/page.png`, fullPage: true });
 await browser.close();

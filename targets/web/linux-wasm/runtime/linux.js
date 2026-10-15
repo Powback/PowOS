@@ -110,6 +110,13 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
       console_write(message.message);
     },
 
+    // PowOS: the kernel's framebuffer (kernel/wasmfb.c); index.html draws it.
+    fb_init: (message) => {
+      if (globalThis.powosFramebuffer) {
+        globalThis.powosFramebuffer(memory, message.base, message.width, message.height, message.stride);
+      }
+    },
+
     log: (message) => {
       log(message.message);
     },
