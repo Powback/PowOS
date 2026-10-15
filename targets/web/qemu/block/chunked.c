@@ -145,14 +145,14 @@ static int chunked_file_open(BlockDriverState *bs, QDict *options, int flags, Er
 {
     BDRVChunkedState *s = bs->opaque;
     QemuOpts *opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
-    g_autofree char *murl = NULL, *iurl = NULL, *mtext = NULL, *overlay = NULL, *index = NULL;
+    g_autofree char *murl = NULL, *iurl = NULL, *mtext = NULL, *overlay = NULL, *index_name = NULL;
     QDict *m;
     int n;
 
     qemu_opts_absorb_qdict(opts, options, &error_abort);
     s->url = g_strdup(qemu_opt_get(opts, "url"));
     overlay = g_strdup(qemu_opt_get(opts, "overlay"));
-    index = g_strdup(qemu_opt_get(opts, "index"));
+    index_name = g_strdup(qemu_opt_get(opts, "index"));
     s->save_overlay = g_strdup(qemu_opt_get(opts, "save-overlay"));
     qemu_opts_del(opts);
     if (!s->url) {
@@ -184,7 +184,7 @@ static int chunked_file_open(BlockDriverState *bs, QDict *options, int flags, Er
 
     /* A snapshot carries its own copy of the index it was made on (build-snapshot.sh), so publishing a rebuilt disk
      * (a new index.bin) never changes the disk under an already published snapshot. */
-    iurl = g_strdup_printf("%s/%s", s->url, index ? index : "index.bin");
+    iurl = g_strdup_printf("%s/%s", s->url, index_name ? index_name : "index.bin");
     s->hashes = g_malloc(s->blocks * s->hash_bytes);
     n = chunked_http_get(iurl, s->hashes, s->blocks * s->hash_bytes);
     if (n != s->blocks * s->hash_bytes) {

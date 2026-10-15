@@ -7,6 +7,10 @@ echo POWOS-SNAPSHOT-START > /dev/console
 # Units the browser machine masks (machine.json's systemd.mask= list, put here by build-snapshot.sh as MASK so the
 # kernel command line stays under its 2048 bytes): masked before graphical.target starts them.
 [ -n "${MASK:-}" ] && systemctl mask --runtime $MASK
+# No swap in the browser machine (the zram units are in that list): swapped-out pages cost a decompression and the
+# kernel's reclaim on every touch, which under browser emulation stalls the whole desktop for minutes. 1.5 GB holds
+# the desktop (~0.6 GB used) without it.
+swapoff -a
 
 # The desktop: SDDM logs powos into Plasma; wait for its shell, then for the first-login work to settle.
 timeout 1800 systemctl start graphical.target
@@ -45,6 +49,7 @@ systemctl list-jobs > /dev/console
 
 # Free what the resumed machine doesn't need: with init_on_free=1 (web/machine.json) freed pages are zeros, which
 # the migration stream stores as a few bytes each.
+swapoff -a
 sync
 echo 3 > /proc/sys/vm/drop_caches
 echo 1 > /proc/sys/vm/compact_memory
