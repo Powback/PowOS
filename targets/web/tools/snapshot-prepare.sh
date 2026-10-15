@@ -29,8 +29,12 @@ for i in $(seq 1800); do
 done
 if ! pgrep -x plasmashell > /dev/null; then
   # No desktop, no snapshot: saving this machine would ship a text console as "PowOS".
-  { echo "POWOS-SNAPSHOT-FAILED: no plasmashell after ${i}s"; systemctl status sddm.service --no-pager -n 30
+  # Diagnostics BEFORE the marker: snapshot.py stops the machine the moment it sees the marker.
+  { pacman -Q sddm plasma-workspace kwin; ls /usr/lib/systemd/system/sddm* /usr/share/wayland-sessions/
+    systemctl get-default; systemctl is-enabled sddm.service; systemctl status sddm.service --no-pager -n 30
     journalctl -b -u sddm.service --no-pager -n 40; } > /dev/console 2>&1
+  sleep 2
+  echo "POWOS-SNAPSHOT-FAILED: no plasmashell after ${i}s" > /dev/console
   exit 1
 fi
 echo "POWOS-SNAPSHOT plasmashell up after ${i}s" > /dev/console
