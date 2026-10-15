@@ -1,0 +1,50 @@
+PowOS web: -incoming file:chunked:<index> streams the snapshot state on demand
+(targets/web/qemu/migration/chunked-state.c) instead of reading a file preloaded into MEMFS.
+
+--- a/migration/file.c	2026-10-15 04:26:53
++++ b/migration/file.c	2026-10-15 04:26:53
+@@ -14,6 +14,9 @@
+ #include "io/channel-file.h"
+ #include "io/channel-util.h"
+ #include "trace.h"
++#include "chunked-state.h"
++#include "block/aio.h"
++#include "qemu/main-loop.h"
+ 
+ #define OFFSET_OPTION ",offset="
+ 
+@@ -69,8 +72,24 @@
+     return G_SOURCE_REMOVE;
+ }
+ 
++/* PowOS web: file:chunked:<index> - the snapshot state streamed on demand (chunked-state.c). */
++static void chunked_state_incoming(void *opaque)
++{
++    migration_channel_process_incoming(QIO_CHANNEL(opaque));
++    object_unref(OBJECT(opaque));
++}
++
+ void file_start_incoming_migration(FileMigrationArgs *file_args, Error **errp)
+ {
++    if (g_str_has_prefix(file_args->filename, "chunked:")) {
++        QIOChannel *cioc = chunked_state_open(file_args->filename + strlen("chunked:"), errp);
++        if (cioc) {
++            /* Started from the main loop, as the file: case does through its watch. */
++            aio_bh_schedule_oneshot(qemu_get_aio_context(), chunked_state_incoming, cioc);
++        }
++        return;
++    }
++
+     g_autofree char *filename = g_strdup(file_args->filename);
+     QIOChannelFile *fioc = NULL;
+     uint64_t offset = file_args->offset;
+--- a/migration/meson.build	2026-10-15 04:26:53
++++ b/migration/meson.build	2026-10-15 04:26:53
+@@ -17,6 +17,7 @@
+   'exec.c',
+   'fd.c',
+   'file.c',
++  'chunked-state.c',
+   'global_state.c',
+   'migration-hmp-cmds.c',
+   'migration.c',

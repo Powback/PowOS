@@ -33,8 +33,9 @@ Module.powosArgs = (m, diskUrl, { resume = false, snapshot = '' } = {}) => [
   '-drive', `if=none,id=disk0,format=raw,file.driver=chunked,file.url=${diskUrl}` +
     (resume ? `,file.overlay=snapshots/${snapshot}/overlay.bin` : ''),
   '-device', 'virtio-blk-pci,drive=disk0',
-  // Resume: the machine state native QEMU saved at the login prompt, instead of booting.
-  ...(resume ? ['-incoming', 'file:/pack-state/vm.state'] : []),
+  // Resume: the machine state native QEMU saved with the desktop up, instead of booting - streamed on demand from the
+  // snapshot's chunks (qemu/migration/chunked-state.c), never downloaded whole into the wasm heap.
+  ...(resume ? ['-incoming', `file:chunked:${diskUrl}/snapshots/${snapshot}/state.index`] : []),
 ];
 
 // ?boot=<name>: the same kernel and machine, a test initramfs instead of PowOS's (packed by assemble.sh from

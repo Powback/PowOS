@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Splits a disk image into what the browser streams on demand.
 
-    chunk-disk.py DISK OUTDIR
+    chunk-disk.py DISK OUTDIR [INDEX MANIFEST]
 
 OUTDIR/chunks/<hh>/<hash>   one 256 KiB block of the disk, zlib-compressed, named by the BLAKE2b-128 of its
                             uncompressed bytes: identical blocks are stored (and fetched, and cached) once, and a
@@ -9,6 +9,8 @@ OUTDIR/chunks/<hh>/<hash>   one 256 KiB block of the disk, zlib-compressed, name
 OUTDIR/index.bin            16 bytes per block, in disk order: the block's hash, or all zeros for a block of zeros
                             (never stored or fetched - most of a sparse disk).
 OUTDIR/manifest.json        disk size, block size, and the stats.
+INDEX MANIFEST              other paths for those two, e.g. a snapshot's state (OUTDIR/snapshots/<id>/state.index +
+                            state.json, read by qemu/migration/chunked-state.c): its chunks join the same OUTDIR/chunks.
 
 QEMU's chunked block driver (targets/web/qemu/block/chunked.c) reads index.bin once, then fetches a block the first time the guest reads it.
 """
@@ -54,6 +56,8 @@ def work(args):
 
 def main():
     disk, outdir = sys.argv[1], sys.argv[2]
+    index_path = sys.argv[3] if len(sys.argv) > 3 else os.path.join(outdir, "index.bin")
+    manifest_path = sys.argv[4] if len(sys.argv) > 4 else os.path.join(outdir, "manifest.json")
     size = os.path.getsize(disk)
     blocks = (size + BLOCK - 1) // BLOCK
     for i in range(256):
@@ -69,7 +73,7 @@ def main():
             if n % 20 == 0:
                 print(f"chunk-disk: {start * BLOCK / 1e9:.1f} / {size / 1e9:.1f} GB", flush=True)
     idx = b"".join(index)
-    with open(os.path.join(outdir, "index.bin"), "wb") as f:
+    with open(index_path, "wb") as f:
         f.write(idx)
     zero = sum(1 for i in range(blocks) if idx[i * HASH_BYTES:(i + 1) * HASH_BYTES] == bytes(HASH_BYTES))
     chunk_bytes = sum(e.stat().st_size for d in os.scandir(os.path.join(outdir, "chunks")) for e in os.scandir(d))
@@ -82,7 +86,7 @@ def main():
         "uniqueChunks": sum(1 for d in os.scandir(os.path.join(outdir, "chunks")) for _ in os.scandir(d)),
         "chunkBytes": chunk_bytes,
     }
-    with open(os.path.join(outdir, "manifest.json"), "w") as f:
+    with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=1)
     print(f"chunk-disk: {blocks} blocks, {zero} zero, {manifest['uniqueChunks']} chunks, "
           f"{chunk_bytes / 1e9:.2f} GB compressed (newly stored this run: {stored})")

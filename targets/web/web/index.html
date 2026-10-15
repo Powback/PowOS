@@ -82,13 +82,13 @@
     const bar = document.querySelector('#bar > div');
     {
       const all = await (await fetch('./files.json', { cache: 'no-cache' })).json();
-      // The published snapshot's id (assemble.sh): the state in load-state.data and its disk overlay belong together.
-      var snapshot = !test && boot !== 'cold' && 'load-state.data' in all
+      // The published snapshot's id (assemble.sh): its machine state and its disk overlay live under snapshots/<id>/.
+      // Its state is streamed by QEMU itself (chunked, like the disk), so nothing of it is downloaded here.
+      var snapshot = !test && boot !== 'cold'
         ? (await (await fetch('./snapshot.json', { cache: 'no-cache' }).catch(() => ({ json: () => ({}) }))).json().catch(() => ({}))).id
         : undefined;
       var resume = !!snapshot;
       const need = new Set(['load-kernel.data', test ? `load-${test}.data` : 'load-initramfs.data']);
-      if (resume) need.add('load-state.data');
       const want = Object.entries(all).filter(([n]) => !n.startsWith('load-') || need.has(n));
       const total = want.reduce((t, [, s]) => t + s, 0);
       let got = 0;
@@ -113,7 +113,6 @@
     const script = (src) => new Promise((ok, fail) =>
       document.head.append(Object.assign(document.createElement('script'), { src, onload: ok, onerror: fail })));
     await script(test ? `./load-${test}.js` : './load-initramfs.js');
-    if (resume) await script('./load-state.js');
     Module.arguments = test ? Module.testArgs(machine, test)
       : Module.powosArgs(machine, new URL('./disk', location.href).href, { resume, snapshot });
     // QEMU's own stderr (the chunked disk reports what it fetched there) goes to the console and the header.

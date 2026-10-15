@@ -38,11 +38,6 @@ docker run --rm -v "$HERE/out:/out" -e SNAP="$SNAP" powos-web-qemu-build bash -c
       --preload /tmp/pack/pack-$t@/pack-$t > /out/site/load-$t.js
   done
   # The snapshot to resume (build-snapshot.sh), when made.
-  if [ -n "$SNAP" ]; then
-    mkdir -p /tmp/pack/pack-state && cp /out/disk/snapshots/$SNAP/vm.state /tmp/pack/pack-state/
-    python3 /emsdk/upstream/emscripten/tools/file_packager.py /out/site/load-state.data \
-      --preload /tmp/pack/pack-state@/pack-state > /out/site/load-state.js
-  fi
   for f in kernel initramfs; do
     python3 /emsdk/upstream/emscripten/tools/file_packager.py /out/site/load-$f.data \
       --preload /tmp/pack/pack-$f@/pack-$f > /out/site/load-$f.js
@@ -53,7 +48,15 @@ for f in "$SITE"/*.wasm "$SITE"/*.data; do
   [ -f "$f.gz" ] && [ "$f.gz" -nt "$f" ] || gzip -9 -k -f "$f"
 done
 # Which snapshot the packed state belongs to: the page reads its disk overlay from snapshots/<id>/ (args.js).
-[ -n "$SNAP" ] && printf '{"id": "%s"}\n' "$SNAP" > "$SITE/snapshot.json" && echo "snapshot: $SNAP"
+# The snapshot's machine state is streamed, not packed: chunked like the disk, into the same chunks/ (zero blocks never
+# stored or fetched, unchanged chunks shared between snapshots), indexed per snapshot. QEMU reads it on demand
+# (-incoming file:chunked:..., qemu/migration/chunked-state.c), so no copy of it sits in the wasm heap.
+if [ -n "$SNAP" ]; then
+  S=$D/snapshots/$SNAP
+  [ -f "$S/state.index" ] || python3 "$HERE/tools/chunk-disk.py" "$S/vm.state" "$D" "$S/state.index" "$S/state.json" | tail -1
+  printf '{"id": "%s"}\n' "$SNAP" > "$SITE/snapshot.json"
+  echo "snapshot: $SNAP"
+fi
 # What the page downloads before QEMU starts, with real sizes: its progress bar (index.html).
 python3 - "$SITE" <<'PY'
 import json, os, sys

@@ -7,7 +7,7 @@
 # Usage: targets/web/build-qemu-native.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-OUT=$HERE/out/qemu-native
+OUT=${OUT:-$HERE/out/qemu-native}
 mkdir -p "$OUT"
 IMAGE=powos-web-qemu-native
 docker build -q -t "$IMAGE" - >/dev/null <<'EOF'
