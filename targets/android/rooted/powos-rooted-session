@@ -22,8 +22,13 @@ if [ -s "$PGFILE" ]; then
 fi
 echo $$ > "$PGFILE"
 # Sessions started before the process group existed: by full command line.
-pkill -KILL -f '^(/usr/bin/)?(startplasma-wayland|plasma_session|kwin_wayland_wrapper|kwin_wayland|plasmashell)( |$)' 2>/dev/null
+pkill -KILL -f '^(/usr/bin/)?(startplasma-wayland|plasma_session|kwin_wayland_wrapper|kwin_wayland|plasmashell|pipewire|wireplumber|pipewire-pulse)( |$)' 2>/dev/null
+pkill -KILL -f "dbus-daemon.*$R/" 2>/dev/null
 sleep 0.3
+# What a previous session left in the app's run dir: its sockets and locks (root-owned ones from sessions that ran
+# as root would lock the user out: pipewire "failed to create context: Permission denied").
+rm -f "$R"/bus "$R"/system_bus "$R"/pipewire-0* "$R"/wayland-* "$R"/kwin-xwayland-*
+chown -R powos:powos "$R"   # the app's own dir: powos is the app's uid
 
 # GPU: Mesa on KGSL (Adreno; Android has no /dev/dri). In the no-root engine lotfix-run sets these.
 export TURNIP_KMD=kgsl FD_FORCE_KGSL=1
@@ -46,29 +51,33 @@ export POWOS_SESSION_MODE=rooted
 export QT_FORCE_STDERR_LOGGING=1
 
 bg() { local name=$1; shift; ( "$@" ) > "$R/$name.log" 2>&1 & }
+# The desktop is the user's, as on every PowOS: powos (uid = the PowOS app's Android uid, so it owns the app's run
+# dir and display socket; rooted/powos-deploy.sh). Root keeps only the system bus and the phone's stand-in services.
+AS_USER=(setpriv --reuid=powos --regid=powos --init-groups -- env HOME=/home/powos USER=powos LOGNAME=powos)
+as_user() { "${AS_USER[@]}" "$@"; }
 wait_sock() { for _ in $(seq 100); do [ -S "$1" ] && return 0; sleep 0.1; done; return 1; }
 
 # D-Bus: the session bus, and a system bus of PowOS's own for the stand-in hardware services (same config and
 # services as the app's: android-nm/upower read the phone's state files the app writes into $R).
 rm -f "$R/bus" "$R/system_bus"
-bg dbus dbus-daemon --session --nofork --nopidfile --address="unix:path=$R/bus"
+bg dbus as_user dbus-daemon --session --nofork --nopidfile --address="unix:path=$R/bus"
 bg system-dbus dbus-daemon --config-file=/opt/lotfix/system-bus.conf --nofork --nopidfile --address="unix:path=$R/system_bus"
 wait_sock "$R/system_bus"
 for s in android-nm android-upower android-system-services; do bg "$s" "$s"; done
 wait_sock "$R/bus"
-bg android-session-services android-session-services
-K=$HOME/.local/share/keyrings
-mkdir -p "$K" && chmod 700 "$K"
-[ -f "$K/login.keyring" ] || printf '[keyring]\ndisplay-name=Login\nctime=0\nmtime=0\nlock-on-idle=false\nlock-after=false\n' > "$K/login.keyring"
-[ -f "$K/default" ] || printf login > "$K/default"
-bg gnome-keyring gnome-keyring-daemon --foreground --components=secrets
+bg android-session-services as_user android-session-services
+as_user sh -c 'K=$HOME/.local/share/keyrings; mkdir -p "$K" && chmod 700 "$K"
+  [ -f "$K/login.keyring" ] || printf "[keyring]\ndisplay-name=Login\nctime=0\nmtime=0\nlock-on-idle=false\nlock-after=false\n" > "$K/login.keyring"
+  [ -f "$K/default" ] || printf login > "$K/default"'
+bg gnome-keyring as_user gnome-keyring-daemon --foreground --components=secrets
 
 # Sound: KWin's Anland backend makes PipeWire nodes for the phone's speaker and microphone.
-bg pipewire pipewire
+bg pipewire as_user pipewire
 wait_sock "$R/pipewire-0"
-bg wireplumber wireplumber
-bg pipewire-pulse pipewire-pulse
+bg wireplumber as_user wireplumber
+bg pipewire-pulse as_user pipewire-pulse
 
 # The desktop: the same PowOS session as the app's (ANLAND_SOCKET, scale, services, startplasma-wayland).
 export EGL_PLATFORM=surfaceless
-exec /usr/bin/Hyprland >> "$R/hyprland.log" 2>&1
+cd /home/powos
+exec "${AS_USER[@]}" /usr/bin/Hyprland >> "$R/hyprland.log" 2>&1

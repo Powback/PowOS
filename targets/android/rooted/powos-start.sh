@@ -19,6 +19,9 @@ m() { nsenter -t 1 -m -- "$@"; }
 mounted() { m grep -q " $1 " /proc/mounts; }
 bind() { mounted "$2" || { mkdir -p "$2" && m mount --rbind "$1" "$2" && echo "bind $1 -> $2"; }; }
 
+# PowOS's root as a mount of its own that allows setuid: Android mounts /data nosuid, which stops sudo for the user
+# powos. --rbind keeps what is already mounted inside (a rerun while PowOS runs).
+mounted "$R" || { m mount --rbind "$R" "$R" && m mount -o remount,bind,suid "$R" && echo "setuid allowed in $R"; }
 bind /dev "$R/dev"
 bind /proc "$R/proc"
 bind /sys "$R/sys"
