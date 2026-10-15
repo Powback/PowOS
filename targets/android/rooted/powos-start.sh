@@ -30,6 +30,17 @@ mounted "$R/dev/shm" || { mkdir -p "$R/dev/shm"; m mount -t tmpfs -o mode=1777 t
 for d in .X11-unix .ICE-unix .XIM-unix .font-unix; do m mkdir -p "$R/tmp/$d" && m chmod 1777 "$R/tmp/$d"; done
 bind /storage/emulated/0 "$R/mnt/sdcard"
 
+# x86 programs (Steam, Proton games) run through FEX: register PowOS's binfmt rules with the kernel (Android's
+# kernel has BINFMT_MISC built in, unmounted). Flag F: the kernel opens /usr/bin/FEX at registration, from inside
+# PowOS's root, so the rule works from any mount namespace; Android itself never executes x86 ELFs.
+BM="$R/proc/sys/fs/binfmt_misc"
+[ -e "$BM/register" ] || m mount -t binfmt_misc binfmt_misc "$BM"
+for f in "$R"/usr/lib/binfmt.d/FEX-*.conf; do
+  [ -e "$f" ] || continue
+  n=$(cut -d: -f2 "$f")
+  [ -e "$BM/$n" ] || m chroot "$R" /usr/bin/env PATH=/usr/bin /bin/sh -c "cat /usr/lib/binfmt.d/${f##*/} > /proc/sys/fs/binfmt_misc/register" && echo "binfmt $n"
+done
+
 # DNS: Android keeps no resolv.conf; PowOS asks Android's resolver (netd) via the first DNS server it knows,
 # else the LAN's Pi-hole.
 dns=$(getprop net.dns1); [ -n "$dns" ] || dns=192.168.50.100

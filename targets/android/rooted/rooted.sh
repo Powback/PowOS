@@ -9,6 +9,7 @@
 #   check     what works: PowOS CLI, systemd-free services, GPU (vulkaninfo through Turnip)
 #   log       /data/powos/start.log
 #   run CMD   one command inside PowOS (no pipes: they would run in Android's shell)
+#   wifi      adb over Wi-Fi (port 5555, kept across reboots): unplug the cable
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -51,6 +52,13 @@ log)
   asu "cat /data/powos/start.log" ;;
 run)
   shift; in_powos "$*" ;;
+wifi)
+  # adbd keeps listening on 5555 after reboots (persist.adb.tcp.port); adb still asks the phone to authorize a new
+  # computer, as over USB.
+  ip=$(adb shell ip -4 addr show wlan0 | awk '/inet /{sub("/.*", "", $2); print $2}')
+  asu "setprop persist.adb.tcp.port 5555"
+  adb tcpip 5555 && sleep 2 && adb connect "$ip:5555"
+  echo "unplug USB, or: export ANDROID_SERIAL=$ip:5555" ;;
 *)
-  sed -n '2,10p' "$0"; exit 1 ;;
+  sed -n '2,13p' "$0"; exit 1 ;;
 esac

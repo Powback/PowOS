@@ -16,10 +16,9 @@ its own in the other slot) is parked, not deleted — see the end.
 | Root | Magisk **v30.7** (official, sha256-checked); stock init_boot patched on the phone by Magisk's own script (`tools/magisk-patch.sh`) → flashed to `init_boot_b` |
 | Backup | `ALL=1 ./phone.sh backup` → `backup/8e5d600d/`: every partition except `userdata` and the raw LUN nodes, each sha256-checked against the phone. Includes the irreplaceable `persist`, `modemst1`, `modemst2`, `fsg`. |
 
-## Still to do
-1. Finish the backup (super last), then verify `vbmeta`/`vendor_boot` against the downloaded stock images.
-2. Copy `backup/8e5d600d/` off this Mac (NAS or external drive) — the Mac is nearly full, and a backup on one
-   machine is not a backup.
+## Backup
+Done and verified (sha256 per partition), copied to the NAS:
+`~/nas/PowCache/backups/oneplus-open-8e5d600d/`.
 
 ## Rules for the phone from now on
 - **Never install or flash anything older than 16.0.5.1301.** (Anti-rollback index on the Open's EU builds is 0 so far
@@ -43,12 +42,19 @@ The no-root PowOS app (targets/android, e.g. the S25 Ultra) stays a first-class 
 - ONE app, two modes (step 2): the PowOS app detects root → real chroot + direct GPU; no root → today's engine.
   Same APK, same PowApps updates.
 
-## Next: PowOS on top (pick one at a time)
-Easiest first:
-1. PowOS CLI + configs and native Linux tools (root shell).
-2. Full Arch Linux ARM environment with GPU (Mesa Turnip on KGSL) — real Linux desktop apps; FEX for x86 Steam/Proton.
-3. The PowOS/KDE desktop as a full-screen session.
-4. Android customization: launcher, theming, Magisk modules.
+## PowOS on top — progress
+| step | status |
+|---|---|
+| 1. PowOS CLI + configs, root shell | done: `rooted/rooted.sh install` → `/data/powos/root`, sshd :2222, `powos version` 0.3.0 |
+| 2. Arch Linux ARM with GPU | done: Turnip Adreno 740 on KGSL, Vulkan 1.4 (Mesa 26.3) |
+| 3. PowOS/KDE desktop full-screen | done 2026-10-16: the PowOS app in rooted mode runs KDE Plasma as real root on the inner screen (`rooted/powos-session.sh`) |
+| 4. Steam/Proton via FEX | in progress: FEX 2610 + box64 installed, x86 binfmt registered at start, x86-64 RootFS |
+| 5. Fold/cover screen layouts | todo: inner = desktop, cover = Plasma phone layout |
+| 6. Android apps as KWin windows | todo |
+| 7. PowOS as Android home screen | todo |
+| 8. Phone-aware CLI, layers/rollback on /data/powos | todo |
+
+Wireless adb: `adb connect 192.168.50.239:5555` (persist.adb.tcp.port=5555).
 
 ### Performance expectations (honest)
 - PowOS and Linux apps: native (ARM64 binaries on the real CPU/GPU).
