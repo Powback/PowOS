@@ -5,5 +5,11 @@ mount -t sysfs none /sys
 mkdir -p /tmp /run /var/tmp
 mount -t tmpfs none /tmp
 mount -t tmpfs none /run
+# The disk the page streams on demand (kernel wasm_blk, read-only EROFS), at /powos. No devtmpfs: make the node.
+major=$(awk '$2 == "wasmblk" {print $1}' /proc/devices)
+if [ -n "$major" ]; then
+  mknod /dev/wasmblk0 b "$major" 0
+  mkdir -p /powos && mount -t erofs -o ro /dev/wasmblk0 /powos && echo "PowOS: /powos streamed on demand"
+fi
 echo "PowOS on Linux/Wasm - the kernel and every program here are WebAssembly, no CPU emulation."
 exec /sbin/init -s

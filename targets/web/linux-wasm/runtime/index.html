@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+
+<head>
+  <meta charset="utf-8">
+  <!-- SPDX-License-Identifier: GPL-2.0-only -->
+
+  <script>
+    // Append ?v=-1 to the URL to cache-bust smug browsers that ignore your Cache-Control headers.
+    let wasm_linux_version = parseInt(new URLSearchParams(document.location.search).get("v") || 1);
+    wasm_linux_version = (wasm_linux_version < 0) ? (+new Date()) : wasm_linux_version;
+    document.write("<l" + "ink rel=\"stylesheet\" href=\"bright.css?v=" + wasm_linux_version + "\">");
+    document.write("<l" + "ink rel=\"stylesheet\" href=\"xterm.css?v=" + wasm_linux_version + "\">");
+    document.write("<scr" + "ipt src=\"linux.js?v=" + wasm_linux_version + "\"></scr" + "ipt>");
+    document.write("<scr" + "ipt src=\"xterm.js?v=" + wasm_linux_version + "\"></scr" + "ipt>");
+
+    const variant = (new URLSearchParams(document.location.search).get("variant") != "wasm64_nommu") ? "wasm32_nommu" : "wasm64_nommu";
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      const term = new Terminal({ theme: { background: "#013425", foreground: "#FFC012" } });
+      term.open(document.getElementById("terminal"));
+
+      const log = (text) => term.write(("\x1B[2m" + text + "\x1B[0m\n").replaceAll("\n", "\r\n"));
+      const console_write = (data) => term.write(data);  // Pre-decoded UTF-8 data.
+
+      // This is needed for SharedArrayBuffer on modern browsers.
+      if (!window.crossOriginIsolated) {
+        log("Error: Server did not set correct cross-origin-isolated headers.");
+        // Keep going though, it might work in some environments...
+      }
+
+      try {
+        const worker_url = "linux-worker.js?v=" + wasm_linux_version;
+
+        const vmlinux = await WebAssembly.compileStreaming(fetch("vmlinux-" + variant + ".wasm?v=" + wasm_linux_version));
+
+        // Boot on 3 CPUs, we will bring up more later on as needed.
+        const boot_cmdline =
+          "maxcpus=3 nohz_full=0,2-63 rcu_nocbs=0,2-63 root=/dev/ram0 rootfstype=ramfs init=/init console=hvc console=ttyS0";
+
+        const initrd_request = await fetch("initramfs-" + variant + ".cpio.gz?v=" + wasm_linux_version);
+        if (!initrd_request.ok) {
+          throw new Error("Failed to fetch initrd from server, status: " + initrd_request.status);
+        }
+        const initrd = await initrd_request.arrayBuffer();
+
+        const os = await linux(worker_url, variant, vmlinux, boot_cmdline, initrd, log, console_write);
+        term.onData(data => os.key_input(data));
+      } catch (error) {
+        log("Linux/Wasm failed with (" + error.name + "): " + error.message + "\n" + error.stack);
+        throw error;
+      }
+    }, false);
+  </script>
+</head>
+
+<body>
+  <h1>Linux/Wasm</h1>
+  <div id="terminal" tabindex="0"></div>
+  <pre>
+Examples: ls          watch uptime              head /proc/cpuinfo
+          pwd         usleep 1234567            ps | grep kthreadd
+          top         vi file.txt               find /proc -name cmdline -maxdepth 2
+          mount       exec sh                   echo Hello &gt;&gt; world && cat world
+          iostat      strings /bin/busybox      grep "Cpus_allowed_list" &lt; /proc/self/status</pre>
+  <article>
+    <p>
+      The console takes over <kbd>Ctrl</kbd> + <kbd>C</kbd> etc. Depending on your platform and browser, adding
+      <kbd>Shift</kbd> to the combo may work. Using <kbd>Ctrl</kbd> + <kbd>Insert</kbd> for copy and <kbd>Shift</kbd> +
+      <kbd>Insert</kbd> for paste may also work. Right-clicking and using the context menu should also work.
+    </p>
+    <p>
+      This is a proof-of-concept of the Linux kernel booting in your web browser, powered by <a
+        href="https://webassembly.org/" target="_blank">WebAssembly (Wasm)</a>. The included programs (shell and
+      standard commands) are provided by BusyBox, backed by a musl libc implementation.
+      The terminal emulator is provided by Xterm.js.As always, if you are unsure about how some piece of software works,
+      <strong>take a look at the <a href="https://github.com/joelseverin/linux-wasm" target="_blank">source
+          code</a></strong>!
+    </p>
+
+    <h2>Release for Linux 7.x-era</h2>
+    <p>
+      The original release by Joel Severin was based on 6.x-era kernels. Some of the changes since that are listed
+      below.
+    <ul>
+      <li>As it turns out, there exists <a href="https://github.com/tombl/linux" target="_blank">another Wasm port from
+          the same era written by Tom (@tombl)</a>. Whatever is currently running is the start of an effort to combine
+        the best of both ports, but it's still work in progress and pending further review. Tom's port also has virtio
+        and device tree support, both good features that will eventually be added here too.</li>
+      <li>64-bit kernel support (optional).</li>
+      <li>Many small improvements and bug fixes.</li>
+    </ul>
+    </p>
+  </article>
+</body>

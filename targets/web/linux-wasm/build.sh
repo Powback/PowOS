@@ -31,11 +31,14 @@ docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linu
       fetch-kernel)
         for try in 1 2 3; do
           rm -rf /ws/src/kernel
-          git clone -q --depth 1 -b wasm-7.0 --single-branch --no-tags https://github.com/joelseverin/linux.git /ws/src/kernel && break
+          git clone -q --depth 1 -b wasm-7.0 --single-branch --no-tags https://github.com/joelseverin/linux.git /ws/src/kernel \
+            && python3 /powos-lw/patch-kernel.py /ws/src/kernel && break
           [ $try = 3 ] && exit 1; echo "kernel clone failed, retrying in 60 s"; sleep 60
         done ;;
       # PowOS patches over upstream (also applied right after fetch-busybox): hush command substitution via clone().
       patch-busybox) python3 /powos-lw/patch-hush-cmdsubst.py /ws/src/busybox/shell/hush.c ;;
+      # PowOS kernel additions: the streamed disk driver + EROFS (patch-kernel.py). Also run right after fetch-kernel.
+      patch-kernel) python3 /powos-lw/patch-kernel.py /ws/src/kernel ;;
       # PowOS layer over upstream initramfs: our files (linux-wasm/initramfs/) appended to the archive; the kernel
       # unpacks entries in order, so ours replace upstream ones (e.g. /init).
       powos-initramfs)
