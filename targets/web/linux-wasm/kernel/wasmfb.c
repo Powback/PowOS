@@ -31,11 +31,21 @@ static int wasmfb_setcolreg(unsigned int regno, unsigned int red, unsigned int g
 	return 0;
 }
 
+/*
+ * NOMMU: get_fb_unmapped_area() already handed out the buffer itself as the mapping's address; there is nothing to
+ * map. (Without an fb_mmap the fbdev core refuses mmap: WARN + -ENODEV.)
+ */
+static int wasmfb_mmap(struct fb_info *info, struct vm_area_struct *vma)
+{
+	return 0;
+}
+
 static const struct fb_ops wasmfb_ops = {
 	.owner		= THIS_MODULE,
 	__FB_DEFAULT_SYSMEM_OPS_RDWR,
 	.fb_setcolreg	= wasmfb_setcolreg,
 	__FB_DEFAULT_SYSMEM_OPS_DRAW,
+	.fb_mmap	= wasmfb_mmap,
 };
 
 static int __init wasmfb_init(void)

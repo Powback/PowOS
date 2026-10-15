@@ -27,13 +27,20 @@ await run('ls -la /dev/input/; cat /proc/bus/input/devices | grep -E "^N:|^H:"')
 await run('cat /dev/input/event0 > /tmp/ev &');
 // Input on the canvas.
 const canvas = page.locator('#screen');
+const box = await canvas.boundingBox();
+console.log(`canvas box: x ${box.x.toFixed(0)} y ${box.y.toFixed(0)} w ${box.width.toFixed(0)} h ${box.height.toFixed(0)}`);
 await canvas.click({ position: { x: 200, y: 150 } });
 await page.keyboard.type('powos');
-for (let i = 0; i < 10; i++) await page.mouse.move(300 + i * 20, 200 + i * 10);
+// Two known points: a quarter and three quarters across/down the canvas (expect ABS ~8192 and ~24575).
+await page.mouse.move(box.x + box.width / 4, box.y + box.height / 4);
+await page.waitForTimeout(300);
+await page.mouse.move(box.x + box.width * 3 / 4, box.y + box.height * 3 / 4);
 await page.waitForTimeout(1500);
 const events = await page.evaluate(() => globalThis.powosInputEvents);
 await term.click();
 await run('kill %1; wc -c /tmp/ev');
+// input_event on wasm32: 4+4 time, u16 type, u16 code, s32 value. Print type code value of each EV_ABS (type 3).
+await run("od -An -tu2 -w16 /tmp/ev | awk '$5 == 3 {print \"ABS code\", $6, \"value\", $7 + $8 * 65536}' | tail -6");
 const t = await text();
 const m = /^\s*(\d+) \/tmp\/ev/m.exec(t);
 console.log(t.split('\n').slice(-12).join('\n'));

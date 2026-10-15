@@ -12,6 +12,9 @@ docker run --rm -v "$REPO:/repo:ro" -v "$OUT:/out" debian:trixie bash -euc '
   rm -rf /tmp/root && mkdir -p /tmp/root
   for d in bin lib config desktop docs; do [ -d /repo/$d ] && cp -a /repo/$d /tmp/root/; done
   cp /repo/README.md /repo/CLAUDE.md /tmp/root/ 2>/dev/null || true
+  # PowOS programs built for Linux/Wasm (build-apps.sh), at /powos/apps.
+  mkdir -p /tmp/root/apps
+  for f in /out/apps/*; do case $f in *.txt|*"*") ;; *) cp "$f" /tmp/root/apps/ ;; esac; done
   # Uncompressed: EROFS decompression uses vmap(), which a NOMMU kernel does not have (BUG at mm/nommu.c, panic).
   # The page streams only the blocks that are read anyway.
   mkfs.erofs /out/powos.erofs /tmp/root > /dev/null
