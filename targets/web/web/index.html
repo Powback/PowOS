@@ -176,8 +176,9 @@
         }
         if (++tries > 400) return;
         xterm.paste('\r');
-        // Promptly at first (this is on the critical path of time-to-PowOS), then every 3 s.
-        setTimeout(nudge, tries < 100 ? 300 : 3000);
+        // Promptly at first (on the critical path of time-to-PowOS), then every 2 s: a slow guest answers every
+        // queued Enter with another login prompt.
+        setTimeout(nudge, tries < 10 ? 300 : 2000);
       };
       nudge();
     }

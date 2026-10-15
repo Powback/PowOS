@@ -31,7 +31,7 @@ Module.powosArgs = (m, diskUrl, { resume = false, snapshot = '' } = {}) => [
   // machine had written: the overlay build-snapshot.sh saved next to that snapshot's state (snapshots/<id>/, the id
   // from snapshot.json), so a newer build never mixes its disk with an older published state.
   '-drive', `if=none,id=disk0,format=raw,file.driver=chunked,file.url=${diskUrl}` +
-    (resume ? `,file.overlay=snapshots/${snapshot}/overlay.bin` : ''),
+    (resume ? `,file.index=snapshots/${snapshot}/disk.index,file.overlay=snapshots/${snapshot}/overlay.bin` : ''),
   '-device', 'virtio-blk-pci,drive=disk0',
   // Resume: the machine state native QEMU saved with the desktop up, instead of booting - streamed on demand from the
   // snapshot's chunks (qemu/migration/chunked-state.c), never downloaded whole into the wasm heap.

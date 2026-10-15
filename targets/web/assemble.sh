@@ -22,7 +22,7 @@ mkdir -p "$D/snapshots"
 if [ -f "$D/snapshot/vm.state" ]; then   # the old single-directory layout: adopt it as a dated snapshot
   mv "$D/snapshot" "$D/snapshots/$(date -r "$D/snapshot/vm.state" +%Y%m%d-%H%M%S)"
 fi
-SNAP=$(ls -d "$D"/snapshots/*/ 2>/dev/null | sort | while read -r d; do [ -f "$d/vm.state" ] && [ -f "$d/overlay.bin" ] && basename "$d"; done | tail -1 || true)
+SNAP=$(ls -d "$D"/snapshots/*/ 2>/dev/null | sort | while read -r d; do [ -f "$d/vm.state" ] && [ -f "$d/overlay.bin" ] && [ -f "$d/disk.index" ] && basename "$d"; done | tail -1 || true)
 # Older complete snapshots beyond the newest three go (their overlay chunks stay: chunks are shared, by content).
 ls -d "$D"/snapshots/*/ 2>/dev/null | sort | while read -r d; do [ -f "$d/vm.state" ] && echo "$d"; done | awk '{a[NR] = $0} END {for (i = 1; i <= NR - 3; i++) print a[i]}' | xargs rm -rf || true
 docker run --rm -v "$HERE/out:/out" -e SNAP="$SNAP" powos-web-qemu-build bash -c '

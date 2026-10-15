@@ -124,6 +124,8 @@ static QemuOptsList runtime_opts = {
     .head = QTAILQ_HEAD_INITIALIZER(runtime_opts.head),
     .desc = {
         { .name = "url", .type = QEMU_OPT_STRING, .help = "base URL of the chunked disk" },
+        { .name = "index", .type = QEMU_OPT_STRING,
+          .help = "index (under url) to use instead of index.bin: a snapshot pins the disk it was made on" },
         { .name = "overlay", .type = QEMU_OPT_STRING,
           .help = "overlay (under url) of blocks a snapshot's machine had written: block index -> chunk hash" },
         { .name = "save-overlay", .type = QEMU_OPT_STRING,
@@ -143,13 +145,14 @@ static int chunked_file_open(BlockDriverState *bs, QDict *options, int flags, Er
 {
     BDRVChunkedState *s = bs->opaque;
     QemuOpts *opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
-    g_autofree char *murl = NULL, *iurl = NULL, *mtext = NULL, *overlay = NULL;
+    g_autofree char *murl = NULL, *iurl = NULL, *mtext = NULL, *overlay = NULL, *index = NULL;
     QDict *m;
     int n;
 
     qemu_opts_absorb_qdict(opts, options, &error_abort);
     s->url = g_strdup(qemu_opt_get(opts, "url"));
     overlay = g_strdup(qemu_opt_get(opts, "overlay"));
+    index = g_strdup(qemu_opt_get(opts, "index"));
     s->save_overlay = g_strdup(qemu_opt_get(opts, "save-overlay"));
     qemu_opts_del(opts);
     if (!s->url) {
@@ -179,7 +182,9 @@ static int chunked_file_open(BlockDriverState *bs, QDict *options, int flags, Er
     }
     s->blocks = DIV_ROUND_UP(s->size, s->block_size);
 
-    iurl = g_strdup_printf("%s/index.bin", s->url);
+    /* A snapshot carries its own copy of the index it was made on (build-snapshot.sh), so publishing a rebuilt disk
+     * (a new index.bin) never changes the disk under an already published snapshot. */
+    iurl = g_strdup_printf("%s/%s", s->url, index ? index : "index.bin");
     s->hashes = g_malloc(s->blocks * s->hash_bytes);
     n = chunked_http_get(iurl, s->hashes, s->blocks * s->hash_bytes);
     if (n != s->blocks * s->hash_bytes) {
@@ -468,6 +473,7 @@ static int chunked_reopen_prepare(BDRVReopenState *reopen_state, BlockReopenQueu
 
 static const char *const chunked_strong_runtime_opts[] = {
     "url",
+    "index",
     "overlay",
     NULL
 };

@@ -50,4 +50,8 @@ echo 3 > /proc/sys/vm/drop_caches
 echo 1 > /proc/sys/vm/compact_memory
 free -m > /dev/console
 ps -eo rss,comm --sort=-rss | head -25 > /dev/console
+# Heartbeat on the serial console, carried into the resumed machine: guest uptime every 5 s ("HB <seconds>"). Against
+# wall time it is the browser emulator's speed (test/alive.mjs). Its own unit, so it outlives this script; no forks
+# but sleep.
+systemd-run --unit=powos-heartbeat sh -c 'while sleep 5; do read u _ < /proc/uptime; echo "HB $u"; done > /dev/ttyAMA0'
 echo "POWOS-SNAPSHOT-$((6*7))" > /dev/console
