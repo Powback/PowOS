@@ -55,4 +55,4 @@ docker run --rm -v "$HERE/out/disk:/disk" -v "$HERE/out/qemu-native:/q:ro" -v "$
   grep -a -A3 "Mem:" /tmp/serial.log | head -4
   ls -la $S'
 # The desktop as it was saved (QEMU's screendump, taken right before the migration).
-[ -f "$HERE/out/disk/snapshots/$ID/screen.ppm" ] && echo "screen: $HERE/out/disk/snapshots/$ID/screen.ppm"
+if [ -f "$HERE/out/disk/snapshots/$ID/screen.ppm" ]; then echo "screen: $HERE/out/disk/snapshots/$ID/screen.ppm"; fi

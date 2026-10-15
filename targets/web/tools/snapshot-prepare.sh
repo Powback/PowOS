@@ -11,6 +11,13 @@ rm -f /etc/sddm.conf.d/10-powos-vm-autologin.conf
 printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/zzz-powos-vm-autologin.conf
 grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
 systemctl is-enabled -q sddm.service || systemctl enable sddm.service
+mkdir -p /home/powos/.config/autostart
+for a in steam bazzite-desktop-bootstrap bazzite-announcement baloo_file org.kde.kdeconnect.daemon ibus \
+         geoclue-demo-agent input-remapper-autoload print-applet spice-vdagent \
+         org.gnome.SettingsDaemon.DiskUtilityNotify org.kde.kunifiedpush-distributor; do
+  printf '[Desktop Entry]\nHidden=true\n' > /home/powos/.config/autostart/$a.desktop
+done
+chown -R powos:powos /home/powos/.config
 
 # Units the browser machine masks (machine.json's systemd.mask= list, put here by build-snapshot.sh as MASK so the
 # kernel command line stays under its 2048 bytes): masked before graphical.target starts them.
@@ -40,7 +47,18 @@ if ! pgrep -x plasmashell > /dev/null; then
   exit 1
 fi
 echo "POWOS-SNAPSHOT plasmashell up after ${i}s" > /dev/console
-sleep 90
+# Settled = the CPU idle >= 85 % for three 10 s windows in a row. Emulated, Plasma paints everything in software and a
+# fixed wait saved a machine whose desktop had not drawn yet (the browser resumed onto a black screen).
+cpu() { awk '/^cpu / {print $5 + $6, $2 + $3 + $4 + $5 + $6 + $7 + $8}' /proc/stat; }
+set -- $(cpu); quiet=0
+for n in $(seq 240); do
+  sleep 10
+  i0=$1; t0=$2; set -- $(cpu)
+  pct=$(( ($1 - i0) * 100 / ($2 - t0 + 1) ))
+  if [ $pct -ge 85 ]; then quiet=$((quiet + 1)); else quiet=0; fi
+  [ $quiet -ge 3 ] && break
+done
+echo "POWOS-SNAPSHOT settled after $((n * 10))s (idle ${pct}%)" > /dev/console
 systemctl list-jobs > /dev/console
 
 # Free what the resumed machine doesn't need: with init_on_free=1 (web/machine.json) freed pages are zeros, which

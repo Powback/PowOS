@@ -158,6 +158,15 @@ grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/envir
 # with no display manager at all, and the machine sits at a text login.
 systemctl enable sddm.service
 systemctl set-default graphical.target
+# Login autostarts the VM can't use (x86 Steam client, first-run wizards, printers, SPICE) or can't afford in 1 GB
+# of emulated RAM (file indexer, KDE Connect, a second input method): hidden for powos only - real hardware keeps them.
+mkdir -p /home/powos/.config/autostart
+for a in steam bazzite-desktop-bootstrap bazzite-announcement baloo_file org.kde.kdeconnect.daemon ibus \
+         geoclue-demo-agent input-remapper-autoload print-applet spice-vdagent \
+         org.gnome.SettingsDaemon.DiskUtilityNotify org.kde.kunifiedpush-distributor; do
+  printf '[Desktop Entry]\nHidden=true\n' > /home/powos/.config/autostart/$a.desktop
+done
+chown -R powos:powos /home/powos/.config
 fi
 
 # Parity with the PowOS image: every command, app, autostart entry and enabled unit it offers, checked here.
