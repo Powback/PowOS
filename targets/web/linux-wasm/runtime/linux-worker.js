@@ -574,7 +574,13 @@
         });
 
         woken = woken.then((instance) => {
-          instance.exports.__wasm_apply_data_relocs();
+          // PowOS: relocate static data once per address space - i.e. on exec. A clone shares the memory (CLONE_VM:
+          // threads, vfork), which is already relocated; re-applying rewrote every relocated pointer back to its
+          // link-time value under the running program (state it had changed since - Qt's QML loader thread crashed
+          // on such a pointer). NOMMU has no fork, so a clone never needs its own relocation.
+          if (!should_call_clone_callback) {
+            instance.exports.__wasm_apply_data_relocs();
+          }
           if (should_call_clone_callback) {
             // Note: __wasm_init_tls cannot be used as it would also re-initilize the _Thread_local variables' data. But
             // on a clone(), it is none of our business to do that. It's up to the libc to do that as part of pthreads.

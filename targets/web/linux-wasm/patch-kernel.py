@@ -86,10 +86,16 @@ s = s.replace('# CONFIG_MISC_FILESYSTEMS is not set\n', 'CONFIG_MISC_FILESYSTEMS
 s = s.replace('# CONFIG_FB is not set\n', 'CONFIG_FB=y\n')
 s = s.replace('# CONFIG_INPUT_MISC is not set\n', 'CONFIG_INPUT_MISC=y\n')
 s = s.replace('# CONFIG_INPUT_EVDEV is not set\n', 'CONFIG_INPUT_EVDEV=y\n')
+for opt in ('NET', 'SYSVIPC', 'INOTIFY_USER', 'MEMFD_CREATE'):
+    s = s.replace('# CONFIG_%s is not set\n' % opt, '')
 # devtmpfs: the kernel makes /dev/fb0, /dev/wasmblk0, ttys and /dev/urandom itself (the initramfs ships few nodes).
 for opt in ('CONFIG_BLK_DEV_WASM=y', 'CONFIG_EROFS_FS=y', 'CONFIG_FB=y', 'CONFIG_FB_WASM=y',
             'CONFIG_FRAMEBUFFER_CONSOLE=y', 'CONFIG_DEVTMPFS=y',
-            'CONFIG_INPUT_MISC=y', 'CONFIG_INPUT_WASM=y', 'CONFIG_INPUT_EVDEV=y'):
+            'CONFIG_INPUT_MISC=y', 'CONFIG_INPUT_WASM=y', 'CONFIG_INPUT_EVDEV=y',
+            # What a desktop needs from the kernel: Unix sockets (D-Bus, Wayland, Qt's socketpair), inotify (file
+            # watching in Qt/KDE), memfd (Wayland shared-memory buffers), SysV IPC.
+            'CONFIG_NET=y', 'CONFIG_UNIX=y', 'CONFIG_INOTIFY_USER=y', 'CONFIG_TMPFS=y', 'CONFIG_MEMFD_CREATE=y',
+            'CONFIG_SYSVIPC=y'):
     if opt not in s:
         s += opt + '\n'
 open(p, 'w').write(s)

@@ -7,4 +7,6 @@ export QT_QPA_FONTDIR=/powos/fonts
 # The canvas pointer is absolute (wasminput: ABS_X/ABS_Y, no REL_X/REL_Y), and Qt's evdev discovery only takes
 # devices with relative axes for a mouse - so name it, in absolute mode. event0 is the only input device.
 export QT_QPA_EVDEV_MOUSE_PARAMETERS=/dev/input/event0:abs
+# Qt Quick: the software scene graph (no GPU / OpenGL in the browser build).
+export QT_QUICK_BACKEND=software
 export XDG_RUNTIME_DIR=/run

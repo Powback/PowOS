@@ -3,22 +3,32 @@
 #   host:   Qt's build tools (moc, rcc, uic, ...) for the build machine -> /ws/install/qt-host
 #   target: qtbase for wasm32 NOMMU musl, static, drawing with linuxfb on /dev/fb0 (wasmfb: the page's canvas) and
 #           reading /dev/input (wasminput) through the evdev plugins -> /ws/install/qt-wasm32_nommu
-# Source: out/linux-wasm/dl/qtbase-everywhere-src-$QT_VERSION.tar.xz (sha256-checked download, see QT_SHA256).
+#   host-module M / target-module M: another Qt module (qtshadertools, qtdeclarative, ...) for host / target, built
+#           against the Qt above (target: through its qt-cmake, which chain-loads our toolchain).
+# Sources: out/linux-wasm/dl/<module>-everywhere-src-$QT_VERSION.tar.xz, sha256-checked against SHA256 below.
 set -euo pipefail
 stage=$1
+module=${2:-qtbase}
 QT_VERSION=6.12.0
-QT_SHA256=a951bd163c7b80fc6b8c88d7668fb56abf91c152373e13c10666763238131307
-TARBALL=/out/dl/qtbase-everywhere-src-$QT_VERSION.tar.xz
-SRC=/ws/src/qtbase-$QT_VERSION
+declare -A SHA256=(
+  [qtbase]=a951bd163c7b80fc6b8c88d7668fb56abf91c152373e13c10666763238131307
+  [qtshadertools]=c7d84f436e1aaef39fdcadebf2bd71bdf24dc69497e13f2e0198873cbbfea2ab
+  [qtdeclarative]=311f3a2603e1973bb59baef9dfa740a376de713157d4782ee043681e889c9260
+)
+TARBALL=/out/dl/$module-everywhere-src-$QT_VERSION.tar.xz
+SRC=/ws/src/$module-$QT_VERSION
 JOBS=${JOBS:-12}
 # The fake-llvm clang wrapper runs the real tools from here (also needed at build time, not just configure).
 export REAL_LLVM=/ws/install/llvm/bin
 
 if [ ! -f "$SRC/CMakeLists.txt" ]; then
-  echo "$QT_SHA256  $TARBALL" | sha256sum -c -
+  [ -n "${SHA256[$module]:-}" ] || { echo "no sha256 for $module" >&2; exit 1; }
+  echo "${SHA256[$module]}  $TARBALL" | sha256sum -c -
   rm -rf "$SRC" && mkdir -p "$SRC"
   tar -xJf "$TARBALL" -C "$SRC" --strip-components=1
 fi
+# PowOS patches over Qt modules (idempotent).
+[ "$module" != qtdeclarative ] || python3 /powos-lw/patch-qtdeclarative.py "$SRC"
 
 case $stage in
   host)
@@ -58,5 +68,23 @@ case $stage in
     cmake --build "$B" -j "$JOBS"
     cmake --install "$B"
     ls /ws/install/qt-wasm32_nommu/lib ;;
-  *) echo "usage: build-qt.sh host|target" >&2; exit 1 ;;
+  host-module)
+    B=/ws/build/qt-host-$module
+    rm -rf "$B" && mkdir -p "$B"
+    cmake -G Ninja -S "$SRC" -B "$B" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/ws/install/qt-host \
+      -DCMAKE_INSTALL_PREFIX=/ws/install/qt-host -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF
+    cmake --build "$B" -j "$JOBS"
+    cmake --install "$B" ;;
+  target-module)
+    # No RPATHs: static Wasm programs have none, and CMake refuses to rewrite them in non-ELF binaries at install.
+    B=/ws/build/qt-wasm32_nommu-$module
+    # QT_INCREMENTAL=1: keep the build tree (a patched file rebuilds in minutes, not a full module build).
+    [ "${QT_INCREMENTAL:-}" = 1 ] || rm -rf "$B"
+    mkdir -p "$B"
+    /ws/install/qt-wasm32_nommu/bin/qt-cmake -G Ninja -S "$SRC" -B "$B" -DCMAKE_BUILD_TYPE=Release \
+      -DQT_HOST_PATH=/ws/install/qt-host -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF \
+      -DCMAKE_SKIP_RPATH=ON -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON ${QT_MODULE_ARGS:-}
+    cmake --build "$B" -j "$JOBS"
+    cmake --install "$B" ;;
+  *) echo "usage: build-qt.sh host|target|host-module M|target-module M" >&2; exit 1 ;;
 esac

@@ -60,17 +60,26 @@ static void libc_start_init(void)
     open(p, 'w').write(s)
     print('musl: static constructors run after libc init')
 
+# Thread stacks: musl's default is 128 KiB (glibc: 8 MiB). Qt runs real work on threads (the QML type loader), and
+# Wasm has no guard pages - an overflow silently corrupts whatever lies below the stack (seen as "unaligned access"
+# traps on garbage pointers in the loader thread). 2 MiB default; programs can still ask for more or less.
+p = os.path.join(sys.argv[1], 'src/internal/pthread_impl.h')
+s = open(p).read()
+old = '#define DEFAULT_STACK_SIZE 131072\n'
+if 'PowOS: thread stacks' not in s:
+    assert old in s, 'pthread_impl.h changed upstream: re-check DEFAULT_STACK_SIZE'
+    s = s.replace(old, '#define DEFAULT_STACK_SIZE (2 << 20) /* PowOS: thread stacks (patch-musl-threads.py), was 128 KiB */\n', 1)
+    open(p, 'w').write(s)
+    print('musl: 2 MiB default thread stacks')
+
 p = os.path.join(sys.argv[1], 'src/thread/pthread_create.c')
 s = open(p).read()
-if 'PowOS: Wasm TLS' in s:
-    print('musl: threads already patched')
-    sys.exit(0)
-
-anchor = '\tnew->sysinfo = self->sysinfo;\n'
-clone = 'ret = __clone((c11 ? start_c11 : start), stack, flags, args, &new->tid, TP_ADJ(new), &__thread_list_lock);'
-assert anchor in s and clone in s, 'pthread_create.c changed upstream: re-check the Wasm TLS patch'
-
-s = s.replace(anchor, anchor + '''
+# Each part checks its own marker, so a tree patched by an older version of this script gets the newer parts.
+if 'PowOS: Wasm TLS' not in s:
+    anchor = '\tnew->sysinfo = self->sysinfo;\n'
+    clone = 'ret = __clone((c11 ? start_c11 : start), stack, flags, args, &new->tid, TP_ADJ(new), &__thread_list_lock);'
+    assert anchor in s and clone in s, 'pthread_create.c changed upstream: re-check the Wasm TLS patch'
+    s = s.replace(anchor, anchor + '''
 #ifdef __wasm__
 	/* PowOS: Wasm TLS block for the new thread (see patch-musl-threads.py), off the top of its stack. */
 	void *wasm_tls;
@@ -88,15 +97,29 @@ s = s.replace(anchor, anchor + '''
 	void *wasm_tls = TP_ADJ(new);
 #endif
 ''', 1)
-s = s.replace(clone, clone.replace('TP_ADJ(new)', 'wasm_tls'), 1)
-
-decl = '#include "pthread_impl.h"\n'
-assert decl in s
-s = s.replace(decl, decl + '''#ifdef __wasm__
+    s = s.replace(clone, clone.replace('TP_ADJ(new)', 'wasm_tls'), 1)
+    decl = '#include "pthread_impl.h"\n'
+    assert decl in s
+    s = s.replace(decl, decl + '''#ifdef __wasm__
 /* PowOS: linker-synthesized (__wasm_init_tls) and arch/wasm clone.S (__set_tls_base). */
 void __wasm_init_tls(void *);
 void __set_tls_base(void *);
 #endif
 ''', 1)
+    print('musl: threads get a real Wasm TLS block')
+
+# Stack alignment: the Wasm C ABI keeps __stack_pointer 16-byte aligned and clang relies on it (it forms addresses
+# like (sp + 320) | 12). musl only aligns a new thread's stack to the pointer size - every other arch's __clone
+# assembly aligns to 16, the Wasm _Clone does not - so on a misaligned thread stack those ORs produced addresses 4
+# bytes off: Qt's QML loader thread read a QString from the wrong place ("unaligned access" on its refcount).
+if 'PowOS: 16-byte aligned' not in s:
+    old_args = '\tstack -= sizeof(struct start_args);\n'
+    assert old_args in s, 'pthread_create.c changed upstream: re-check the stack alignment patch'
+    s = s.replace(old_args, old_args + '''#ifdef __wasm__
+\t/* PowOS: 16-byte aligned stack top for the new thread (the Wasm ABI's; see patch-musl-threads.py). */
+\tstack = (void *)((uintptr_t)stack & -(uintptr_t)16);
+#endif
+''', 1)
+    print('musl: thread stacks 16-byte aligned')
+
 open(p, 'w').write(s)
-print('musl: threads get a real Wasm TLS block')
