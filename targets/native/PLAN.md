@@ -30,6 +30,14 @@ its own in the other slot) is parked, not deleted — see the end.
   User data goes through Android backups (Google/OnePlus, or Swift Backup with root).
 - Undo root: `fastboot flash init_boot_b backup/8e5d600d/stock-16.0.5.1301-EX01/init_boot.img`.
 
+## Rooted mode and the no-root app: both supported
+The no-root PowOS app (targets/android, e.g. the S25 Ultra) stays a first-class target. Rooted mode is an extra:
+- ONE rootfs (`targets/android/out/powos-rootfs.tar.gz`) for both — the app runs it through the no-root engine,
+  the rooted phone as a real chroot (`targets/android/rooted/`). Rooted-only bits never go into the rootfs;
+  rootfs changes must keep the app working.
+- ONE app, two modes (step 2): the PowOS app detects root → real chroot + direct GPU; no root → today's engine.
+  Same APK, same PowApps updates.
+
 ## Next: PowOS on top (pick one at a time)
 Easiest first:
 1. PowOS CLI + configs and native Linux tools (root shell).
