@@ -20,7 +20,7 @@ const t0 = Date.now();
 await page.waitForTimeout(8000);
 await page.evaluate(() => window.powosTerm?.focus());
 await page.keyboard.press('Enter');
-let typed = false;
+let typed = false, pw = false, probed = false, probeDone = false, typedAt = 0, pwAt = 0, probeAt = 0;
 while (Date.now() - t0 < secs * 1000) {
   await page.waitForTimeout(15000);
   const s = await page.evaluate(() => {
@@ -31,7 +31,8 @@ while (Date.now() - t0 < secs * 1000) {
     if (b) for (let i = b.length - 1; i >= 0 && !disk; i--) { const m = /chunked: fetched (\d+) blocks, ([\d.]+) MB/.exec(b.getLine(i)?.translateToString(true) || ''); if (m) disk = `${m[1]} blocks ${m[2]} MB`; }
     let h = null;
     if (b) for (let i = b.length - 1; i >= 0 && !h; i--) { const m = /^HB ([0-9.]+)/.exec((b.getLine(i)?.translateToString(true) || '').trim()); if (m) h = parseFloat(m[1]); }
-    return { frames: st?.frames, events: st?.events, last: last.slice(0, 60), hb: h, disk };
+    const all = []; if (b) for (let i = Math.max(0, b.length - 60); i < b.length; i++) all.push((b.getLine(i)?.translateToString(true) || '').trimEnd());
+    return { frames: st?.frames, events: st?.events, last: last.slice(0, 60), hb: h, disk, text: all.join('\n') };
   });
   if (s.hb !== null) hb.push([Date.now(), s.hb]);
   // LOGIN=1: type the user name once the guest answers - a login has to read /bin/login & co. from the disk.
@@ -41,6 +42,28 @@ while (Date.now() - t0 < secs * 1000) {
     await page.keyboard.type('powos');
     await page.keyboard.press('Enter');
     console.log('typed: powos');
+    typedAt = Date.now();
+  }
+  // ... then the password once asked, then one command; each step timed.
+  if (typed && !pw && /Password:/.test(s.text)) {
+    pw = true;
+    await page.evaluate(() => window.powosTerm?.focus());
+    await page.keyboard.type('powos');
+    await page.keyboard.press('Enter');
+    console.log(`password asked ${((Date.now() - typedAt) / 1000).toFixed(0)} s after the user name; typed`);
+    pwAt = Date.now();
+  }
+  if (pw && !probed && /\]\$\s*$/m.test(s.text)) {
+    probed = true;
+    console.log(`shell ${((Date.now() - pwAt) / 1000).toFixed(0)} s after the password`);
+    await page.evaluate(() => window.powosTerm?.focus());
+    await page.keyboard.type('echo PROBE-$((6*7)) $(cat /proc/loadavg)');
+    await page.keyboard.press('Enter');
+    probeAt = Date.now();
+  }
+  if (probed && !probeDone) {
+    const m = /PROBE-42 (.*)/.exec(s.text);
+    if (m) { probeDone = true; console.log(`command answered in ${((Date.now() - probeAt) / 1000).toFixed(1)} s; loadavg ${m[1]}`); }
   }
   const rate = hb.length > 1 ? ((hb.at(-1)[1] - hb[0][1]) / ((hb.at(-1)[0] - hb[0][0]) / 1000)).toFixed(3) : '?';
   console.log(`${Math.round((Date.now() - t0) / 1000)}s frames=${s.frames} guest=${s.hb ?? '-'}s speed=${rate} disk=[${s.disk ?? 'none'}] serial="${s.last}"`);

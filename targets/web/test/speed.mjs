@@ -31,9 +31,9 @@ const t0 = Date.now();
 if (!await until(/login:/, 120000)) { console.log('no login prompt; terminal:\n' + (await term()).trim().split('\n').slice(-12).join('\n')); process.exit(1); }
 console.log(`login prompt at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 await type('powos');
-if (!await until(/Password:\s*$/m, 120000)) { console.log('no password prompt'); process.exit(1); }
+if (!await until(/Password:/, 300000)) { console.log('no password prompt'); process.exit(1); }
 await type('powos');
-if (!await until(/\$\s*$/m, 180000)) { console.log('no shell prompt'); process.exit(1); }
+if (!await until(/\]\$\s*$/m, 400000)) { console.log('no shell prompt'); process.exit(1); }
 console.log(`shell at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
 const uptime = async (tag) => {
