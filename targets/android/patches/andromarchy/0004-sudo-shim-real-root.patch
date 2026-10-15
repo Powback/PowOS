@@ -1,0 +1,12 @@
+--- a/native/sudo-shim.sh	2026-10-16 00:54:30
++++ b/native/sudo-shim.sh	2026-10-16 00:54:30
+@@ -16,6 +16,9 @@
+ [ "${USER:-}" != root ] && export SUDO_USER=${USER:-android}
+ export USER=root LOGNAME=root
+ [ -n "${FAKEROOTKEY:-}" ] && exec "$@" # already fake root
++# PowOS rooted mode (targets/android/rooted): the desktop runs as real root in a real chroot, outside the
++# no-root engine (no FAKECHROOT_BASE) - nothing to fake, run the command itself.
++[ "$(id -u)" = 0 ] && [ -z "${FAKECHROOT_BASE:-}" ] && exec "$@"
+ 
+ B=$FAKECHROOT_BASE
+ compat=${LD_PRELOAD%%:*} # lotfix-run puts android-compat.so first

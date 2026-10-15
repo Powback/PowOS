@@ -25,6 +25,9 @@ bind /sys "$R/sys"
 mounted "$R/tmp" || m mount -t tmpfs -o mode=1777 tmpfs "$R/tmp"
 mounted "$R/run" || m mount -t tmpfs -o mode=755 tmpfs "$R/run"
 mounted "$R/dev/shm" || { mkdir -p "$R/dev/shm"; m mount -t tmpfs -o mode=1777 tmpfs "$R/dev/shm"; }
+# What systemd-tmpfiles makes on a booted PowOS: without /tmp/.X11-unix KWin can't open the X11 socket, so no
+# Xwayland, ksmserver (X11) aborts and Plasma never starts plasmashell.
+for d in .X11-unix .ICE-unix .XIM-unix .font-unix; do m mkdir -p "$R/tmp/$d" && m chmod 1777 "$R/tmp/$d"; done
 bind /storage/emulated/0 "$R/mnt/sdcard"
 
 # DNS: Android keeps no resolv.conf; PowOS asks Android's resolver (netd) via the first DNS server it knows,

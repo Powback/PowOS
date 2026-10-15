@@ -319,7 +319,8 @@ public class MainActivity extends Activity
 
         // Andromarchy: this app is also the Linux side. Start the session (daemon, audio, Hyprland) if the Arch
         // rootfs is installed; this activity then connects to the daemon like the Termux version did.
-        if (!SessionService.rootfsReady(this)) { // first launch: setup form, then the rootfs download
+        // PowOS rooted mode (RootMode): PowOS is installed as root at /data/powos/root - no rootfs of the app's own.
+        if (!SessionService.rootfsReady(this) && !RootMode.enabled()) { // first launch: setup form, then download
             redirected = true;
             startActivity(new Intent(this, InstallActivity.class));
             finish();
@@ -731,7 +732,13 @@ public class MainActivity extends Activity
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                     && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                             != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1003);
+                // PowOS: ask once per process. The permission dialog pauses this activity (stopping the display
+                // consumer) and its answer resumes it; asking on every resume looped forever (desktop flashing
+                // every ~0.7s on the OnePlus Open, where targetSdk 28 gets the request answered instantly).
+                if (!notificationPermissionAsked) {
+                    notificationPermissionAsked = true;
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1003);
+                }
             } else {
                 showSettingsNotification();
             }
@@ -984,7 +991,8 @@ public class MainActivity extends Activity
     }
 
     /** Microphone, camera and location in ONE prompt: a second request while the first dialog shows is cancelled. */
-    private boolean devicePermissionsAsked;
+    private static boolean devicePermissionsAsked; // per process: the activity is recreated on config changes
+    private static boolean notificationPermissionAsked;
 
     private void requestDevicePermissions() {
         if (devicePermissionsAsked)

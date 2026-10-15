@@ -2,6 +2,8 @@
 # PowOS alongside Android on a ROOTED phone (Magisk), driven from the Mac over adb. Not the no-root app: PowOS's
 # own Linux system runs with root on the phone's kernel, with the real GPU (Turnip on KGSL).
 #   install   push targets/android/out/powos-rootfs.tar.gz, unpack to /data/powos/root, install the boot service
+#   deploy    (re)install the rooted-mode scripts + the app's rooted-mode flag (part of install; rerun after
+#             changing rooted/*): boot service, desktop session (powos-session.sh, powos-rooted-session)
 #   start     mount + start PowOS now (rooted/powos-start.sh; also runs at every boot via Magisk)
 #   shell     root shell inside PowOS
 #   check     what works: PowOS CLI, systemd-free services, GPU (vulkaninfo through Turnip)
@@ -26,9 +28,16 @@ install)
   got=$(asu "sha256sum /data/local/tmp/powos-rootfs.tar.gz" | awk '{print $1}')
   [ "$want" = "$got" ] || { echo "CHECKSUM MISMATCH after push"; exit 1; }
   asu "mkdir -p /data/powos/root && tar -xzpf /data/local/tmp/powos-rootfs.tar.gz -C /data/powos/root --numeric-owner && rm /data/local/tmp/powos-rootfs.tar.gz"
-  adb push "$HERE/powos-start.sh" /data/local/tmp/powos-start.sh
-  asu "install -m 755 /data/local/tmp/powos-start.sh /data/powos/powos-start.sh && mkdir -p /data/adb/service.d && install -m 755 /data/local/tmp/powos-start.sh /data/adb/service.d/powos.sh && rm /data/local/tmp/powos-start.sh"
+  "$0" deploy
   echo "installed: /data/powos/root ($(asu 'du -sh /data/powos/root' | awk '{print $1}')), boot service in /data/adb/service.d" ;;
+deploy)
+  # The rooted-mode scripts (also part of install): the boot/mount script, the desktop session the PowOS app starts
+  # (powos-session.sh -> /usr/bin/powos-rooted-session inside PowOS), and the flag the app checks
+  # (persist.powos.root=1, set with Magisk's resetprop - readable without a root prompt).
+  for f in powos-start.sh powos-session.sh powos-rooted-session powos-deploy.sh; do
+    adb push -q "$HERE/$f" "/data/local/tmp/$f"
+  done
+  asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh" ;;
 start)
   asu "sh /data/powos/powos-start.sh"; asu "tail -5 /data/powos/start.log" ;;
 shell)

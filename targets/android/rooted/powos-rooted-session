@@ -1,0 +1,62 @@
+#!/bin/bash
+# /usr/bin/powos-rooted-session in /data/powos/root: the session's services, then the PowOS desktop (KDE Plasma on
+# KWin's Anland backend) - what the no-root app engine starts one by one through lotfix-run (SessionService), here as
+# plain root processes in PowOS's own system. Started by /data/powos/powos-session.sh with the environment set.
+set -u
+R=$XDG_RUNTIME_DIR
+cd /root
+
+# The whole session runs in a process group of its own, so a restarted app (new display daemon) can end the
+# previous session completely. Killing by name missed processes: comm is cut at 15 characters
+# (kwin_wayland_wrapper, startplasma-wayland never matched), and the surviving wrapper respawned its KWin, two KWins
+# then fought over the screen (flickering).
+[ -z "${POWOS_SESSION_GROUP:-}" ] && POWOS_SESSION_GROUP=1 exec setsid -w "$0" "$@"
+PGFILE=/run/powos-rooted-session.pgid
+if [ -s "$PGFILE" ]; then
+  old=$(cat "$PGFILE")
+  if [ "$old" != "$$" ]; then
+    kill -TERM -- "-$old" 2>/dev/null
+    for _ in $(seq 30); do kill -0 -- "-$old" 2>/dev/null || break; sleep 0.1; done
+    kill -KILL -- "-$old" 2>/dev/null
+  fi
+fi
+echo $$ > "$PGFILE"
+# Sessions started before the process group existed: by full command line.
+pkill -KILL -f '^(/usr/bin/)?(startplasma-wayland|plasma_session|kwin_wayland_wrapper|kwin_wayland|plasmashell)( |$)' 2>/dev/null
+sleep 0.3
+
+# GPU: Mesa on KGSL (Adreno; Android has no /dev/dri). In the no-root engine lotfix-run sets these.
+export TURNIP_KMD=kgsl FD_FORCE_KGSL=1 MESA_LOADER_DRIVER_OVERRIDE=kgsl GALLIUM_DRIVER=freedreno
+export XWAYLAND_FORCE_KGSL_SURFACELESS=1 ANDROMARCHY_NO_DRM_DEVICE=1
+export POWOS_SESSION_MODE=rooted
+# No journald on a phone: Qt sends its messages (KWin, Plasma) there whenever stderr is not a terminal, so they
+# vanished. Into the session's logs instead.
+export QT_FORCE_STDERR_LOGGING=1
+
+bg() { local name=$1; shift; ( "$@" ) > "$R/$name.log" 2>&1 & }
+wait_sock() { for _ in $(seq 100); do [ -S "$1" ] && return 0; sleep 0.1; done; return 1; }
+
+# D-Bus: the session bus, and a system bus of PowOS's own for the stand-in hardware services (same config and
+# services as the app's: android-nm/upower read the phone's state files the app writes into $R).
+rm -f "$R/bus" "$R/system_bus"
+bg dbus dbus-daemon --session --nofork --nopidfile --address="unix:path=$R/bus"
+bg system-dbus dbus-daemon --config-file=/opt/lotfix/system-bus.conf --nofork --nopidfile --address="unix:path=$R/system_bus"
+wait_sock "$R/system_bus"
+for s in android-nm android-upower android-system-services; do bg "$s" "$s"; done
+wait_sock "$R/bus"
+bg android-session-services android-session-services
+K=$HOME/.local/share/keyrings
+mkdir -p "$K" && chmod 700 "$K"
+[ -f "$K/login.keyring" ] || printf '[keyring]\ndisplay-name=Login\nctime=0\nmtime=0\nlock-on-idle=false\nlock-after=false\n' > "$K/login.keyring"
+[ -f "$K/default" ] || printf login > "$K/default"
+bg gnome-keyring gnome-keyring-daemon --foreground --components=secrets
+
+# Sound: KWin's Anland backend makes PipeWire nodes for the phone's speaker and microphone.
+bg pipewire pipewire
+wait_sock "$R/pipewire-0"
+bg wireplumber wireplumber
+bg pipewire-pulse pipewire-pulse
+
+# The desktop: the same PowOS session as the app's (ANLAND_SOCKET, scale, services, startplasma-wayland).
+export EGL_PLATFORM=surfaceless
+exec /usr/bin/Hyprland >> "$R/hyprland.log" 2>&1

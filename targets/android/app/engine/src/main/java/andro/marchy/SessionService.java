@@ -122,6 +122,19 @@ public class SessionService extends Service {
         String libDir = getApplicationInfo().nativeLibraryDir;
         String launcher = libDir + "/liblotfixrun.so";
 
+        // PowOS rooted mode (RootMode): the display daemon here as always, then the whole session as root inside
+        // PowOS's own system - D-Bus, PipeWire, the stand-in services and the desktop (rooted/powos-rooted-session).
+        // Nothing of the no-root engine below runs. The session sees this run dir at /run/powos-app (bind mount), so
+        // the daemon socket, the phone-state files and desktop-ready (SplashScreen) are shared as they are.
+        if (RootMode.enabled()) {
+            spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock.getPath()), null);
+            Map<String, String> env = archEnv(run, sock);
+            spawn("powos-root-session", List.of("su", "-c", "sh " + RootMode.SESSION + " " + run.getPath() + " "
+                    + sock.getPath() + " " + env.get("ANDROMARCHY_PHYSICAL_MM") + " " + env.get("LANG") + " "
+                    + env.get("TZ")), null);
+            return;
+        }
+
         // 0. First boot of this rootfs on this device (once; the locale part on each start): see first-boot.sh.
         try {
             ProcessBuilder pb = new ProcessBuilder(launcher, "/opt/lotfix/first-boot.sh");
