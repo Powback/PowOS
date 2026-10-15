@@ -55,8 +55,9 @@ echo 3 > /proc/sys/vm/drop_caches
 echo 1 > /proc/sys/vm/compact_memory
 free -m > /dev/console
 ps -eo rss,comm --sort=-rss | head -25 > /dev/console
-# Heartbeat on the serial console, carried into the resumed machine: guest uptime every 5 s ("HB <seconds>"). Against
+# Heartbeat on the serial console, carried into the resumed machine: guest uptime every 5 s ("HB <seconds>") and, every
+# 30 s, the top processes ("TOP ...": what an emulated CPU is spent on). Against
 # wall time it is the browser emulator's speed (test/alive.mjs). Its own unit, so it outlives this script; no forks
 # but sleep.
-systemd-run --unit=powos-heartbeat sh -c 'while sleep 5; do read u _ < /proc/uptime; echo "HB $u"; done > /dev/ttyAMA0'
+systemd-run --unit=powos-heartbeat sh -c 'n=0; while sleep 5; do read u _ < /proc/uptime; echo "HB $u"; n=$((n+1)); [ $((n % 6)) = 0 ] && top -b -n1 -w 100 | sed -n "1,3p;7,13p" | sed "s/^/TOP /"; done > /dev/ttyAMA0'
 echo "POWOS-SNAPSHOT-$((6*7))" > /dev/console
