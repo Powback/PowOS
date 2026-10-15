@@ -1,0 +1,8 @@
+#!/bin/sh
+# A shell on the canvas: tty1 is the framebuffer console (wasmfb + fbcon), and the canvas keyboard reaches it through
+# the input device's kbd handler. Restarted when it exits. Started by /init as its own program, not a ( ... ) &
+# subshell: NOMMU starts children with CLONE_VFORK, so a subshell that never execs or exits blocks init forever.
+while true; do
+  setsid -c sh -c 'clear; echo "PowOS on Linux/Wasm - canvas console"; exec sh' </dev/tty1 >/dev/tty1 2>&1
+  sleep 1
+done

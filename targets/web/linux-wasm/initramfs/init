@@ -11,4 +11,10 @@ if [ -b /dev/wasmblk0 ]; then
   mkdir -p /powos && mount -t erofs -o ro /dev/wasmblk0 /powos && echo "PowOS: /powos streamed on demand"
 fi
 echo "PowOS on Linux/Wasm - the kernel and every program here are WebAssembly, no CPU emulation."
+# A shell on the canvas too (etc/powos-canvas-shell). Without it the canvas only shows a cursor.
+# Only a plain command may go to the background here: "a && b &" is a subshell, which on NOMMU (CLONE_VFORK) blocks
+# init until it exits - and this one never does.
+if [ -c /dev/tty1 ]; then
+  /etc/powos-canvas-shell &
+fi
 exec /sbin/init -s
