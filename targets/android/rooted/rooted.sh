@@ -35,7 +35,8 @@ shell)
 check)
   in_powos "cat /etc/powos/platform; uname -a; powos version 2>&1 | head -3"
   in_powos "ls -la /dev/kgsl-3d0 /dev/dma_heap 2>&1 | head -5"
-  in_powos "vulkaninfo --summary 2>&1 | grep -E 'deviceName|driverName|driverInfo|apiVersion' | head -6" ;;
+  # Filtered here: a pipe inside the command would be run by Android's shell, not inside PowOS.
+  in_powos "vulkaninfo --summary" 2>&1 | grep -E "deviceName|driverName|driverInfo|apiVersion|ERROR" | head -8 ;;
 log)
   asu "cat /data/powos/start.log" ;;
 *)
