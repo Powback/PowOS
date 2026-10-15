@@ -13,7 +13,7 @@ j() { python3 -c "import json; print(json.load(open('$M'))['$1'])"; }
 DEVICES=$(python3 -c "import json; print(' '.join('-device ' + d for d in json.load(open('$M')).get('devices', [])))")
 case "$(uname)" in Darwin) ACCEL="-accel hvf -cpu host";; *) ACCEL="-accel kvm -cpu host";; esac
 rm -f "$W"/debug-*.png "$W/debug-qmp.sock"
-qemu-system-aarch64 -M "$(j machine)" $ACCEL -m "$(j memory)" -display none $DEVICES \
+qemu-system-aarch64 -M "$(j machine)" $ACCEL -m "${MEM:-$(j memory)}" -display none $DEVICES \
   -kernel "$HERE/out/disk/$(j kernel)" -initrd "$HERE/out/disk/$(j initrd)" -append "$(j append)" \
   -drive if=none,id=disk0,format=raw,file="$W/debug-disk.raw" -device virtio-blk-pci,drive=disk0 \
   -nic user,hostfwd=tcp::2222-:22 -serial file:"$W/debug-serial.log" -monitor none \

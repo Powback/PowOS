@@ -154,6 +154,7 @@ mkdir -p /etc/sddm.conf.d
 rm -f /etc/sddm.conf.d/10-powos-vm-autologin.conf
 printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/zzz-powos-vm-autologin.conf
 grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
+grep -q '^QT_QUICK_BACKEND=' /etc/environment || echo 'QT_QUICK_BACKEND=software' >> /etc/environment
 # Arch enables nothing on install (Fedora's presets do it for Bazzite): without these graphical.target is reached
 # with no display manager at all, and the machine sits at a text login.
 systemctl enable sddm.service
@@ -161,7 +162,7 @@ systemctl set-default graphical.target
 # Login autostarts the VM can't use (x86 Steam client, first-run wizards, printers, SPICE) or can't afford in 1 GB
 # of emulated RAM (file indexer, KDE Connect, a second input method): hidden for powos only - real hardware keeps them.
 mkdir -p /home/powos/.config/autostart
-for a in steam bazzite-desktop-bootstrap bazzite-announcement baloo_file org.kde.kdeconnect.daemon ibus \
+for a in steam bazzite-desktop-bootstrap bazzite-announcement bazzite-portal baloo_file org.kde.kdeconnect.daemon ibus \
          geoclue-demo-agent input-remapper-autoload print-applet spice-vdagent \
          org.gnome.SettingsDaemon.DiskUtilityNotify org.kde.kunifiedpush-distributor; do
   printf '[Desktop Entry]\nHidden=true\n' > /home/powos/.config/autostart/$a.desktop
