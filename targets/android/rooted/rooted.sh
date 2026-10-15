@@ -6,6 +6,7 @@
 #   shell     root shell inside PowOS
 #   check     what works: PowOS CLI, systemd-free services, GPU (vulkaninfo through Turnip)
 #   log       /data/powos/start.log
+#   run CMD   one command inside PowOS (no pipes: they would run in Android's shell)
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -39,6 +40,8 @@ check)
   in_powos "vulkaninfo --summary" 2>&1 | grep -E "deviceName|driverName|driverInfo|apiVersion|ERROR" | head -8 ;;
 log)
   asu "cat /data/powos/start.log" ;;
+run)
+  shift; in_powos "$*" ;;
 *)
   sed -n '2,10p' "$0"; exit 1 ;;
 esac
