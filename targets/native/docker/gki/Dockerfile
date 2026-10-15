@@ -4,5 +4,5 @@
 FROM --platform=linux/amd64 debian:bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
       make bc bison flex libssl-dev libelf-dev cpio xz-utils lz4 python3 kmod git curl ca-certificates rsync file \
-      perl gzip libc6-dev gcc \
+      perl gzip libc6-dev gcc dwarves \
     && rm -rf /var/lib/apt/lists/*
