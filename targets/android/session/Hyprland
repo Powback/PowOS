@@ -30,6 +30,9 @@ if [ ! -e /dev/kgsl-3d0 ]; then
   export GALLIUM_DRIVER=llvmpipe LIBGL_ALWAYS_SOFTWARE=1 POWOS_GPU=software
   echo "powos-session: no /dev/kgsl-3d0, using llvmpipe (software rendering)" >&2
 fi
+# HACK: freedreno's UBWC (compressed textures) on KGSL left Plasma's SVG textures (panel, widgets, theme previews)
+# as noise blocks (OnePlus Open, Adreno 740, Mesa 26.3). Real fix: find and report the UBWC bug in Mesa's KGSL path.
+export FD_MESA_DEBUG=${FD_MESA_DEBUG:-noubwc}
 
 # HACK: the app ends its splash screen only when it sees Omarchy's shell process (`quickshell`/`qs`);
 # otherwise it waits out a 2-minute timeout. Tell it directly once plasmashell is up. Real fix: the

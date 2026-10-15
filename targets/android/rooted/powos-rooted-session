@@ -26,7 +26,19 @@ pkill -KILL -f '^(/usr/bin/)?(startplasma-wayland|plasma_session|kwin_wayland_wr
 sleep 0.3
 
 # GPU: Mesa on KGSL (Adreno; Android has no /dev/dri). In the no-root engine lotfix-run sets these.
-export TURNIP_KMD=kgsl FD_FORCE_KGSL=1 MESA_LOADER_DRIVER_OVERRIDE=kgsl GALLIUM_DRIVER=freedreno
+export TURNIP_KMD=kgsl FD_FORCE_KGSL=1
+# HACK: freedreno's UBWC (compressed textures) on KGSL left Plasma's SVG textures (panel, widgets, theme previews)
+# as noise blocks on the OnePlus Open (Adreno 740, Mesa 26.3). Real fix: find and report the UBWC bug in Mesa's
+# KGSL path. Same switch in session/Hyprland for the no-root app.
+export FD_MESA_DEBUG=noubwc
+# OpenGL driver: freedreno's own GL, or zink (GL on Turnip's Vulkan) - Andromarchy's ARCH_GPU switch.
+# /etc/powos/gl picks one; default freedreno.
+case $(cat /etc/powos/gl 2>/dev/null) in
+  zink) export MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink ;;
+  *)    export MESA_LOADER_DRIVER_OVERRIDE=kgsl GALLIUM_DRIVER=freedreno ;;
+esac
+# Per-phone overrides for the whole session (KEY=value lines, e.g. Mesa debug switches).
+[ -f /etc/powos/session.env ] && { set -a; . /etc/powos/session.env; set +a; }
 export XWAYLAND_FORCE_KGSL_SURFACELESS=1 ANDROMARCHY_NO_DRM_DEVICE=1
 export POWOS_SESSION_MODE=rooted
 # No journald on a phone: Qt sends its messages (KWin, Plasma) there whenever stderr is not a terminal, so they
