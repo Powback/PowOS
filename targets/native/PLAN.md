@@ -8,7 +8,7 @@ Active slot: **b**.
 Root first, keep stock OxygenOS as the daily OS, add PowOS pieces on top later. The native-boot kit (PowOS booting on
 its own in the other slot) is parked, not deleted — see the end.
 
-## Done
+## Done (how, step by step and every snag: [ROOTING.md](ROOTING.md))
 | step | result |
 |---|---|
 | Bootloader unlock | unlocked (verified boot `orange`). Note: the confirmation prompt shows on the **inner** screen. |
