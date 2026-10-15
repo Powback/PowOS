@@ -12,6 +12,20 @@ import org.kde.plasma.plasma5support as P5Support
 
 PlasmoidItem {
     id: root
+
+    // Polling slow-down, read once: interval_scale=N in /etc/powos/widgets.conf (default 1 - real hardware unchanged).
+    // Every poll spawns processes; an emulated CPU (PowOS in a browser) can't afford that every few seconds, so
+    // emulated targets set it high.
+    property real intervalScale: 1
+    P5Support.DataSource {
+        engine: "executable"
+        connectedSources: ["sed -n 's/^interval_scale=//p' /etc/powos/widgets.conf 2>/dev/null"]
+        onNewData: (source, data) => {
+            var v = parseFloat(data.stdout)
+            if (v >= 1) root.intervalScale = v
+            disconnectSource(source)
+        }
+    }
     preferredRepresentation: fullRepresentation
     Layout.minimumWidth: Kirigami.Units.gridUnit * 16
     Layout.minimumHeight: Kirigami.Units.gridUnit * 10
@@ -106,9 +120,9 @@ PlasmoidItem {
             else root.parseFast(data.stdout || "")
         }
     }
-    Timer { interval: 3000; running: true; repeat: true; triggeredOnStart: true
+    Timer { interval: 3000 * root.intervalScale; running: true; repeat: true; triggeredOnStart: true
             onTriggered: exec.connectSource(root.fastCmd) }
-    Timer { interval: 10000; running: true; repeat: true; triggeredOnStart: true
+    Timer { interval: 10000 * root.intervalScale; running: true; repeat: true; triggeredOnStart: true
             onTriggered: exec.connectSource(root.mediumCmd) }
 
     // each line is "name value container" (container may be absent → "host").

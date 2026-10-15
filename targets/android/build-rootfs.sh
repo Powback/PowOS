@@ -38,6 +38,8 @@ rm -rf "$S" && mkdir -p "$S/pkgs"
 cp "$OUT"/pkgs/*.pkg.tar.* "$S/pkgs/"   # ours: kwin, fex-emu, recipes.list builds
 cp -a "$HERE/session" "$HERE/shims" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
+# The PowOS desktop widgets from this checkout (install-powos-android.sh puts them over the image content's).
+cp -a "$HERE/../../desktop/plasmoid" "$S/plasmoids"
 
 # 3. Build inside a privileged aarch64 container (chroot + mounts need it), on a Docker volume:
 #    a bind-mounted macOS directory can't hold Linux ownership, device nodes or hard links.

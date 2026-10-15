@@ -15,6 +15,20 @@ import org.kde.plasma.plasma5support as P5Support
 
 PlasmoidItem {
     id: root
+
+    // Polling slow-down, read once: interval_scale=N in /etc/powos/widgets.conf (default 1 - real hardware unchanged).
+    // Every poll spawns processes; an emulated CPU (PowOS in a browser) can't afford that every few seconds, so
+    // emulated targets set it high.
+    property real intervalScale: 1
+    P5Support.DataSource {
+        engine: "executable"
+        connectedSources: ["sed -n 's/^interval_scale=//p' /etc/powos/widgets.conf 2>/dev/null"]
+        onNewData: (source, data) => {
+            var v = parseFloat(data.stdout)
+            if (v >= 1) root.intervalScale = v
+            disconnectSource(source)
+        }
+    }
     preferredRepresentation: fullRepresentation
     // Wide enough that the process table's name column survives: the three
     // metric columns are fixed-width, so every pixel the widget lacks comes
@@ -101,9 +115,9 @@ PlasmoidItem {
             } catch (e) { root.err = "no data (is ~/PowOS or powos overview available?)" }
         }
     }
-    Timer { interval: 30000; running: true; repeat: true; triggeredOnStart: true
+    Timer { interval: 30000 * root.intervalScale; running: true; repeat: true; triggeredOnStart: true
             onTriggered: exec.connectSource(root.dataCmd) }
-    Timer { interval: 10000; running: true; repeat: true; triggeredOnStart: true
+    Timer { interval: 10000 * root.intervalScale; running: true; repeat: true; triggeredOnStart: true
             onTriggered: exec.connectSource(root.mediumCmd) }
 
     function parseMedium(out) {

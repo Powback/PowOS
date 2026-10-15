@@ -4,23 +4,6 @@
 # signals tools/snapshot.py, which then saves the running machine.
 echo POWOS-SNAPSHOT-START > /dev/console
 
-# HACK: bridge until the rootfs is rebuilt - install-powos-android.sh (POWOS_TARGET=vm) now writes these at install
-# time. Written here they land in the snapshot's disk overlay, so the resumed machine has them too. zzz- sorts after
-# Bazzite's zz-bazzite-autologin (User=alarm) and zz-holo-autologin (Steam game mode, which needs a GPU).
-rm -f /etc/sddm.conf.d/10-powos-vm-autologin.conf
-printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/zzz-powos-vm-autologin.conf
-grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
-grep -q '^QT_QUICK_BACKEND=' /etc/environment || echo 'QT_QUICK_BACKEND=software' >> /etc/environment
-systemctl is-enabled -q sddm.service || systemctl enable sddm.service
-mkdir -p /home/powos/.config/autostart
-for a in steam bazzite-desktop-bootstrap bazzite-announcement bazzite-portal baloo_file org.kde.kdeconnect.daemon ibus \
-         geoclue-demo-agent input-remapper-autoload print-applet spice-vdagent \
-         org.gnome.SettingsDaemon.DiskUtilityNotify org.kde.kunifiedpush-distributor; do
-  printf '[Desktop Entry]\nHidden=true\n' > /home/powos/.config/autostart/$a.desktop
-done
-chown -R powos:powos /home/powos/.config
-rm -f /home/powos/Desktop/*[Gg]am*[Mm]ode*.desktop
-
 # Units the browser machine masks (machine.json's systemd.mask= list, put here by build-snapshot.sh as MASK so the
 # kernel command line stays under its 2048 bytes): masked before graphical.target starts them.
 [ -n "${MASK:-}" ] && systemctl mask --runtime $MASK

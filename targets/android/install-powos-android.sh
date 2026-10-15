@@ -95,6 +95,9 @@ for l in open(sys.argv[1]):
 PY
 echo "powos: $(wc -l < /tmp/powos-content-skip) content files left to the Arch packages that own them"
 zstd -dc $P/manifest/content.tar.zst | tar -x -C / --no-same-owner --exclude-from=/tmp/powos-content-skip
+# The PowOS widgets from the checkout being built, over the published image's copies: a widget fix reaches these
+# targets with the build instead of waiting for the next image (the content is the image's; widgets are QML only).
+[ -d $P/plasmoids ] && cp -a $P/plasmoids/. /usr/share/plasma/plasmoids/
 cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
 
 # HACK: bun is an x86 binary the PowOS image puts outside any package (Containerfile curl), so the manifest
@@ -155,6 +158,9 @@ rm -f /etc/sddm.conf.d/10-powos-vm-autologin.conf
 printf '[Autologin]\nUser=powos\nSession=plasma\n' > /etc/sddm.conf.d/zzz-powos-vm-autologin.conf
 grep -q '^KWIN_COMPOSE=' /etc/environment || echo 'KWIN_COMPOSE=Q' >> /etc/environment
 grep -q '^QT_QUICK_BACKEND=' /etc/environment || echo 'QT_QUICK_BACKEND=software' >> /etc/environment
+# The PowOS widgets poll by spawning processes (ps, nvidia-smi, podman, ...) every 3-30 s - ~10% of a real CPU, which
+# saturates an emulated one. 20x less often in the VM; real hardware keeps interval_scale 1 (no file).
+mkdir -p /etc/powos && echo 'interval_scale=20' > /etc/powos/widgets.conf
 # Arch enables nothing on install (Fedora's presets do it for Bazzite): without these graphical.target is reached
 # with no display manager at all, and the machine sits at a text login.
 systemctl enable sddm.service

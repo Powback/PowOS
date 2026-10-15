@@ -23,6 +23,8 @@ cp "$REPO"/*.pkg.tar.* "$W/powos/pkgs/"
 cp -a "$ANDROID/session" "$ANDROID/shims" "$ANDROID/phone-rules.conf" "$ANDROID/tools/resolve-packages.py" \
   "$ANDROID/tools/phone-parity.py" "$W/powos/"
 install -m 755 "$ANDROID/install-powos-android.sh" "$W/powos/"
+# The PowOS desktop widgets from this checkout (install-powos-android.sh puts them over the image content's).
+cp -a "$ANDROID/../../desktop/plasmoid" "$W/powos/plasmoids"
 
 # 2. Build in a privileged aarch64 container (chroot + mounts). The rootfs needs a Linux filesystem (ownership,
 #    device nodes) but must NOT go on the Docker disk: that disk is shared with live services (Pi-hole, databases)
