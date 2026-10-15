@@ -1,0 +1,46 @@
+#!/bin/sh
+# Native PowOS on the OnePlus Open, first stage (init_boot_b ramdisk). The bootloader hands the kernel this ramdisk
+# appended to vendor_boot's, so the phone's first-stage modules (UFS, clocks, regulators, ...) are already here in
+# /lib/modules. Job: load them, find the PowOS partition (GPT name "powos"), switch_root into PowOS's systemd.
+# The rest of the vendor drivers (display, GPU, touch, Wi-Fi) load from PowOS itself (powos-vendor-modules.service).
+# Any failure - no partition, no init - drops to the USB rescue shell (/rescue: telnet 172.16.42.1 over USB), so a
+# bad boot is never a black box. Leaving: hold power + volume down; Android stays in slot A.
+export PATH=/bin:/sbin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /run /newroot
+
+say() { echo "powos-init: $*" > /dev/kmsg; }
+rescue() { say "RESCUE: $*"; exec /rescue; }
+say "kernel $(uname -r), slot $(sed -n 's/.*androidboot.slot_suffix=\([^ ]*\).*/\1/p' /proc/cmdline)"
+
+# First-stage vendor modules, in the order modules.load lists them (dependency order, as Android's init does).
+n=0
+if [ -f /lib/modules/modules.load ]; then
+  while read -r m; do
+    insmod "/lib/modules/$m" 2>/dev/null && n=$((n + 1))
+  done < /lib/modules/modules.load
+fi
+say "first-stage modules loaded: $n"
+
+# The PowOS partition, by GPT name (the UFS LUNs appear once ufs-qcom has probed).
+part=
+for i in $(seq 100); do
+  for u in /sys/class/block/*/uevent; do
+    grep -qx 'PARTNAME=powos' "$u" 2>/dev/null && part=/dev/$(sed -n 's/^DEVNAME=//p' "$u") && break 2
+  done
+  sleep 0.2
+done
+[ -n "$part" ] || rescue "no 'powos' partition found"
+say "root: $part"
+
+# powos.rescue on the kernel command line (or a missing init) stops here with the USB shell.
+grep -q 'powos.rescue' /proc/cmdline && rescue "powos.rescue requested"
+mount -t ext4 -o rw,noatime "$part" /newroot || rescue "cannot mount $part"
+[ -x /newroot/usr/lib/systemd/systemd ] || rescue "no systemd on $part"
+
+mkdir -p /newroot/dev /newroot/proc /newroot/sys
+mount --move /dev /newroot/dev
+umount /proc /sys 2>/dev/null
+exec switch_root /newroot /usr/lib/systemd/systemd
