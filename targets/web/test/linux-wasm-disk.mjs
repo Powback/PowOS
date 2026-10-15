@@ -31,7 +31,8 @@ const t = await until(/^~ # *$/m, 120000);
 if (!t) { console.log('no shell:\n' + (await text()).split('\n').slice(-15).join('\n')); process.exit(1); }
 console.log((t.match(/^(PowOS.*|wasmblk0.*)$/mg) || []).join('\n'));
 await page.locator('#terminal').click();
-for (const cmd of ['ls /powos', 'ls /powos/bin | head -5', 'head -3 /powos/bin/powos', 'du -sh /powos']) {
+const cmds = process.env.CMDS ? process.env.CMDS.split(';;') : ['ls /powos', 'ls /powos/bin | head -5', 'head -3 /powos/bin/powos', 'du -sh /powos'];
+for (const cmd of cmds) {
   await page.keyboard.type(`${cmd}; echo DONE-$((6*7))`);
   await page.keyboard.press('Enter');
   await until(new RegExp(`DONE-42\\n(.*\\n)*~ #`, 'm'), 30000);
