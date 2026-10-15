@@ -30,6 +30,11 @@ its own in the other slot) is parked, not deleted — see the end.
   User data goes through Android backups (Google/OnePlus, or Swift Backup with root).
 - Undo root: `fastboot flash init_boot_b backup/8e5d600d/stock-16.0.5.1301-EX01/init_boot.img`.
 
+## Base distros (decided 2026-10-16, revisit later)
+Arch Linux ARM on phones (rooted + app), Bazzite (Fedora) on x86 PCs / laptop / Steam Deck. Discussed and deferred:
+moving phones to Fedora aarch64 (one ecosystem) or everything to a lean Universal Blue Fedora Atomic base (Bazzite is
+bloated). The PowOS layer (CLI, configs, desktop, agents) stays one source, platform-aware via /etc/powos/platform.
+
 ## Rooted mode and the no-root app: both supported
 The no-root PowOS app (targets/android, e.g. the S25 Ultra) stays a first-class target. Rooted mode is an extra:
 - ONE rootfs (`targets/android/out/powos-rootfs.tar.gz`) for both — the app runs it through the no-root engine,
