@@ -15,7 +15,7 @@ const text = () => page.evaluate(() => {
 });
 const t0 = Date.now();
 await page.goto(url, { waitUntil: 'load' });
-while (Date.now() - t0 < 120000 && !/^~ # /m.test(await text())) await page.waitForTimeout(300); // kernel lines may follow the prompt
+while (Date.now() - t0 < 120000 && !/^~ #( |$)/m.test(await text())) await page.waitForTimeout(300); // kernel lines may follow the prompt
 await page.waitForTimeout(1500);
 const canvas = page.locator('#screen');
 await canvas.scrollIntoViewIfNeeded();

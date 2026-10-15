@@ -11,10 +11,17 @@ if [ -b /dev/wasmblk0 ]; then
   mkdir -p /powos && mount -t erofs -o ro /dev/wasmblk0 /powos && echo "PowOS: /powos streamed on demand"
 fi
 echo "PowOS on Linux/Wasm - the kernel and every program here are WebAssembly, no CPU emulation."
-# A shell on the canvas too (etc/powos-canvas-shell). Without it the canvas only shows a cursor.
-# Only a plain command may go to the background here: "a && b &" is a subshell, which on NOMMU (CLONE_VFORK) blocks
-# init until it exits - and this one never does.
-if [ -c /dev/tty1 ]; then
-  /etc/powos-canvas-shell &
-fi
-exec /sbin/init -s
+# BusyBox init runs the shells, from an inittab written here: one on the console (the page's terminal) and, unless
+# powos.canvas=0 is on the kernel command line (the page's ?cmdline=), one on tty1 - the canvas (wasmfb + fbcon).
+# Upstream runs "init -s" (single user: a console shell, inittab ignored). Starting the canvas shell ourselves, as a
+# background loop next to that, hung ~1 boot in 5 and often left the canvas black; init owns respawning instead.
+# read: a shell builtin, no extra process.
+read -r cmdline < /proc/cmdline
+{
+  echo "::respawn:-/bin/sh"
+  case " $cmdline " in
+    *" powos.canvas=0 "*) ;;
+    *) [ -c /dev/tty1 ] && echo "tty1::respawn:/etc/powos-canvas-shell" ;;
+  esac
+} > /etc/inittab
+exec /sbin/init

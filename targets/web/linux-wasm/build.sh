@@ -37,6 +37,10 @@ docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linu
         done ;;
       # PowOS patches over upstream (also applied right after fetch-busybox): hush command substitution via clone().
       patch-busybox) python3 /powos-lw/patch-hush-cmdsubst.py /ws/src/busybox/shell/hush.c ;;
+      # musl: threads get a real Wasm TLS block (patch-musl-threads.py). Also applied right after fetch-musl.
+      patch-musl) python3 /powos-lw/patch-musl-threads.py /ws/src/musl ;;
+      # C++ runtime for PowOS programs (Qt, KDE, ...): libc++ + libc++abi, static (build-libcxx.sh).
+      build-libcxx) bash /powos-lw/build-libcxx.sh ;;
       # PowOS kernel additions: the streamed disk driver + EROFS (patch-kernel.py). Also run right after fetch-kernel.
       patch-kernel) python3 /powos-lw/patch-kernel.py /ws/src/kernel ;;
       # PowOS layer over upstream initramfs: our files (linux-wasm/initramfs/) appended to the archive; the kernel
@@ -49,7 +53,8 @@ docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linu
       fetch-*) n=${cmd#fetch-}
                for try in 1 2 3; do
                  rm -rf "/ws/src/$n"
-                 /linux-wasm/linux-wasm.sh "$cmd" && { [ "$n" != busybox ] || python3 /powos-lw/patch-hush-cmdsubst.py /ws/src/busybox/shell/hush.c; } && break
+                 /linux-wasm/linux-wasm.sh "$cmd" && { [ "$n" != busybox ] || python3 /powos-lw/patch-hush-cmdsubst.py /ws/src/busybox/shell/hush.c; } \
+                   && { [ "$n" != musl ] || python3 /powos-lw/patch-musl-threads.py /ws/src/musl; } && break
                  [ $try = 3 ] && exit 1; echo "fetch $n failed, retrying"; sleep 10
                done ;;
       *) /linux-wasm/linux-wasm.sh "$cmd" ;;

@@ -19,7 +19,7 @@ async function until(re, ms) {
   return null;
 }
 await page.goto(url, { waitUntil: 'load' });
-if (!await until(/^~ # *$/m, 120000)) { console.log('no shell'); process.exit(1); }
+if (!await until(/^~ #( |$)/m, 120000)) { console.log('no shell'); process.exit(1); }
 await page.locator('#terminal').click();
 await page.keyboard.type('/powos/apps/fbdemo &');
 await page.keyboard.press('Enter');

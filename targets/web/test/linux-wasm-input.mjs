@@ -19,7 +19,7 @@ async function until(re, ms) {
   return null;
 }
 await page.goto(url, { waitUntil: 'load' });
-if (!await until(/^~ # *$/m, 120000)) { console.log('no shell'); process.exit(1); }
+if (!await until(/^~ #( |$)/m, 120000)) { console.log('no shell'); process.exit(1); }
 const term = page.locator('#terminal');
 await term.click();
 const run = async (cmd) => { await page.keyboard.type(cmd); await page.keyboard.press('Enter'); await page.waitForTimeout(800); };

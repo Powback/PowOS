@@ -4,7 +4,8 @@
 - drivers/video/fbdev/wasmfb.c (kernel/wasmfb.c): /dev/fb0, drawn on a canvas by the page;
 - drivers/input/misc/wasminput.c (kernel/wasminput.c): keyboard + pointer from the page's canvas;
 - their Kconfig entries and Makefile lines;
-- the wasm32_nommu defconfig enables them, EROFS (the filesystem on that disk) and the framebuffer console.
+- the wasm32_nommu defconfig enables them, EROFS (the filesystem on that disk) and the framebuffer console;
+- arch/wasm/kernel/process.c: two processes starting at once could get the same CPU (see below).
 
     patch-kernel.py <kernel source dir>"""
 import os, shutil, sys
@@ -92,4 +93,36 @@ for opt in ('CONFIG_BLK_DEV_WASM=y', 'CONFIG_EROFS_FS=y', 'CONFIG_FB=y', 'CONFIG
     if opt not in s:
         s += opt + '\n'
 open(p, 'w').write(s)
+# Every user task gets a CPU (a Web Worker) of its own. user_task_set_affinity() picked the first free one but marked
+# it taken only after cpu_device_up() - which waits for the page to start a new Worker - so two processes starting
+# together could both pick it (two tasks on one Worker). Found while chasing a boot hang - that one turned out to be
+# the canvas shell's startup (now run by init, see initramfs/init) - but the race is real: claim the CPU atomically
+# before bringing it up; release it if that fails.
+p = os.path.join(k, 'arch/wasm/kernel/process.c')
+s = open(p).read()
+old_pick = '''	if (!cpu_online(cpu)) {
+		BUG_ON(!cpu_possible(cpu));
+'''
+new_pick = '''	/* PowOS: claim it before the (sleeping) bring-up, or a concurrent caller picks the same CPU. */
+	if (cpumask_test_and_set_cpu(cpu, &user_cpus))
+		goto hack;
+
+	if (!cpu_online(cpu)) {
+		BUG_ON(!cpu_possible(cpu));
+'''
+old_up = '''		retval = cpu_device_up(get_cpu_device(cpu));
+		if (retval)
+			return retval;
+'''
+new_up = '''		retval = cpu_device_up(get_cpu_device(cpu));
+		if (retval) {
+			cpumask_clear_cpu(cpu, &user_cpus);
+			return retval;
+		}
+'''
+if 'PowOS: claim it' not in s:
+    assert old_pick in s and old_up in s, 'process.c changed upstream: re-check user_task_set_affinity'
+    s = s.replace(old_pick, new_pick, 1).replace(old_up, new_up, 1)
+    open(p, 'w').write(s)
+
 print('kernel: wasm_blk + EROFS, wasmfb + fbcon, wasminput + evdev')

@@ -27,7 +27,7 @@ async function until(re, ms) {
   return null;
 }
 await page.goto(url, { waitUntil: 'load' });
-const t = await until(/^~ # *$/m, 120000);
+const t = await until(/^~ #( |$)/m, 120000);
 if (!t) { console.log('no shell:\n' + (await text()).split('\n').slice(-15).join('\n')); process.exit(1); }
 console.log((t.match(/^(PowOS.*|wasmblk0.*)$/mg) || []).join('\n'));
 await page.locator('#terminal').click();

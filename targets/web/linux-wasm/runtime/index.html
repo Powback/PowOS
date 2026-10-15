@@ -34,8 +34,11 @@
         const vmlinux = await WebAssembly.compileStreaming(fetch("vmlinux-" + variant + ".wasm?v=" + wasm_linux_version));
 
         // Boot on 3 CPUs, we will bring up more later on as needed.
-        const boot_cmdline =
+        let boot_cmdline =
           "maxcpus=3 nohz_full=0,2-63 rcu_nocbs=0,2-63 root=/dev/ram0 rootfstype=ramfs init=/init console=hvc console=ttyS0";
+        // PowOS: extra kernel arguments from the URL, e.g. ?cmdline=powos.canvas=0 (debugging).
+        const extra_cmdline = new URLSearchParams(location.search).get("cmdline");
+        if (extra_cmdline) boot_cmdline += " " + extra_cmdline;
 
         const initrd_request = await fetch("initramfs-" + variant + ".cpio.gz?v=" + wasm_linux_version);
         if (!initrd_request.ok) {

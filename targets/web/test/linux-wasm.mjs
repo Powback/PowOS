@@ -24,7 +24,7 @@ async function until(re, ms) {
 }
 const t0 = Date.now();
 await page.goto(url, { waitUntil: 'load' });
-const prompt = await until(/^~ # *$/m, 120000); // BusyBox ash's prompt, once /init has started the shell
+const prompt = await until(/^~ #( |$)/m, 120000); // BusyBox ash's prompt, once /init has started the shell
 const tBoot = (Date.now() - t0) / 1000;
 if (!prompt) {
   console.log('no shell prompt within 120 s; terminal:\n' + (await text()).split('\n').slice(-15).join('\n'));
