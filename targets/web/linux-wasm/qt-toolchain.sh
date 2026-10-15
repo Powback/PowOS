@@ -9,6 +9,11 @@ cat <<'EOF'
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR wasm32)
 set(CMAKE_SYSROOT /ws/install/musl-wasm32_nommu)
+# CMake's compiler-ABI probe can't read a Wasm object, so it never learns the pointer size - projects that use it
+# (dbus: DBUS_SIZEOF_VOID_P) then generate broken headers. wasm32: 4.
+set(CMAKE_SIZEOF_VOID_P 4)
+set(CMAKE_C_SIZEOF_DATA_PTR 4)
+set(CMAKE_CXX_SIZEOF_DATA_PTR 4)
 set(CMAKE_C_COMPILER /linux-wasm/tools/fake-llvm/clang)
 set(CMAKE_CXX_COMPILER /linux-wasm/tools/fake-llvm/clang)
 set(CMAKE_AR /ws/install/llvm/bin/llvm-ar)
@@ -28,4 +33,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+# pkg-config: only the Wasm prefix's .pc files - never the build machine's.
+set(ENV{PKG_CONFIG_LIBDIR} /ws/install/qt-wasm32_nommu/lib/pkgconfig:/ws/install/qt-wasm32_nommu/share/pkgconfig)
+set(ENV{PKG_CONFIG_PATH} "")
 EOF

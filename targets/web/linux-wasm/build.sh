@@ -14,7 +14,9 @@ OUT=$HERE/out/linux-wasm
 [ -x "$SRC/linux-wasm.sh" ] || { echo "clone it first: git clone https://github.com/joelseverin/linux-wasm $SRC" >&2; exit 1; }
 mkdir -p "$OUT"
 docker build -q -t linux-wasm-base:dev "$SRC/docker/linux-wasm-base" > /dev/null
-docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linux-wasm:/powos-lw:ro" -e JOBS="${JOBS:-12}" -e QT_INCREMENTAL="${QT_INCREMENTAL:-}" linux-wasm-base:dev bash -c '
+# PowOS layer on top (linux-wasm/docker/Dockerfile: pkg-config for the userland builds).
+docker build -q -t linux-wasm-powos:dev "$HERE/linux-wasm/docker" > /dev/null
+docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linux-wasm:/powos-lw:ro" -e JOBS="${JOBS:-12}" -e QT_INCREMENTAL="${QT_INCREMENTAL:-}" linux-wasm-powos:dev bash -c '
   set -e
   [ -f /out/workspace.ext4 ] || { truncate -s 80G /out/workspace.ext4; mkfs.ext4 -q -F /out/workspace.ext4; }
   mkdir -p /ws && mount -o loop /out/workspace.ext4 /ws
@@ -51,6 +53,8 @@ docker run --rm --privileged -v "$SRC:/linux-wasm" -v "$OUT:/out" -v "$HERE/linu
       build-qtmod:*) bash /powos-lw/build-qt.sh target-module "${cmd#*:}" ;;
       # A KDE Frameworks module (build-kde.sh): build-kde:<name>, e.g. build-kde:kirigami.
       build-kde:*) bash /powos-lw/build-kde.sh "${cmd#*:}" ;;
+      # A C library dependency (build-deps.sh): build-dep:<name>, e.g. build-dep:dbus.
+      build-dep:*) bash /powos-lw/build-deps.sh "${cmd#*:}" ;;
       # PowOS kernel additions: the streamed disk driver + EROFS (patch-kernel.py). Also run right after fetch-kernel.
       patch-kernel) python3 /powos-lw/patch-kernel.py /ws/src/kernel ;;
       # PowOS layer over upstream initramfs: our files (linux-wasm/initramfs/) appended to the archive; the kernel

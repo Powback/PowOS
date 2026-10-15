@@ -1,5 +1,5 @@
 # PowOS on Linux/Wasm: login-shell environment (both shells: the page's terminal and the canvas, initramfs/init).
-export PATH=/powos/apps:/bin:/sbin:/usr/bin:/usr/sbin
+export PATH=/powos/apps:/powos/usr/bin:/bin:/sbin:/usr/bin:/usr/sbin
 # Qt programs (build-qt-apps.sh): draw on /dev/fb0 - the canvas - with the fonts on the streamed disk; keyboard and
 # pointer come from /dev/input (wasminput) through Qt's evdev plugins.
 export QT_QPA_PLATFORM=linuxfb:fb=/dev/fb0
@@ -10,3 +10,5 @@ export QT_QPA_EVDEV_MOUSE_PARAMETERS=/dev/input/event0:abs
 # Qt Quick: the software scene graph (no GPU / OpenGL in the browser build).
 export QT_QUICK_BACKEND=software
 export XDG_RUNTIME_DIR=/run
+export HOME=/root
+cd "$HOME"

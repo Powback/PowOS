@@ -15,6 +15,13 @@ docker run --rm -v "$REPO:/repo:ro" -v "$OUT:/out" debian:trixie bash -euc '
   # PowOS programs built for Linux/Wasm (build-apps.sh), at /powos/apps.
   mkdir -p /tmp/root/apps
   for f in /out/apps/*; do case $f in *.txt|*"*") ;; *) cp "$f" /tmp/root/apps/ ;; esac; done
+  # D-Bus (build.sh build-dep:dbus): the daemon + tools and its session config, at /powos/usr.
+  D=/out/install/qt-wasm32_nommu
+  if [ -x $D/bin/dbus-daemon ]; then
+    mkdir -p /tmp/root/usr/bin /tmp/root/usr/share
+    cp $D/bin/dbus-daemon $D/bin/dbus-send $D/bin/dbus-monitor $D/bin/dbus-uuidgen /tmp/root/usr/bin/
+    cp -a $D/share/dbus-1 /tmp/root/usr/share/
+  fi
   # Fonts for Qt (bundled FreeType, no fontconfig: QT_QPA_FONTDIR=/powos/fonts). DejaVu, sha256-checked download.
   if [ -f /out/dl/dejavu-fonts-ttf-2.37.tar.bz2 ]; then
     echo "fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7  /out/dl/dejavu-fonts-ttf-2.37.tar.bz2" | sha256sum -c - > /dev/null
