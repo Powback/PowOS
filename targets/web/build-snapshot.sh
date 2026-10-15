@@ -16,6 +16,9 @@ j() { python3 -c "import json,sys; print(json.load(open('$M'))['$1'])"; }
 DEVICES=$(python3 -c "import json; print(' '.join('-device ' + d for d in json.load(open('$M')).get('devices', [])))")
 ID=$(date +%Y%m%d-%H%M%S)
 mkdir -p "$HERE/out/disk/snapshots/$ID"
+# The disk index this snapshot is made on, pinned next to it: the page streams the disk through this copy, so a rebuilt
+# disk (a new index.bin) published later never changes the disk under this snapshot.
+cp "$HERE/out/disk/index.bin" "$HERE/out/disk/snapshots/$ID/disk.index"
 echo "snapshot: out/disk/snapshots/$ID"
 # The guest prepares itself for the snapshot: tools/snapshot-prepare.sh (desktop up, settled, page cache dropped,
 # memory reported, ready marker), run as root by systemd's run generator - no login. The script rides on the kernel
@@ -35,11 +38,11 @@ CMDLINE="$APPEND $PREPARE"
 echo "snapshot: kernel command line ${#CMDLINE} of 2047 bytes (prepare script ${#PREPARE})"
 [ ${#CMDLINE} -lt 2040 ] || { echo "snapshot: kernel command line too long - it would be cut off and freeze the boot" >&2; exit 1; }
 docker run --rm -v "$HERE/out/disk:/disk" -v "$HERE/out/qemu-native:/q:ro" -v "$HERE/tools:/tools:ro" \
-  -e MACHINE="$(j machine)" -e CPU="$(j cpu)" -e MEM="$(j memory)" -e KERNEL="$(j kernel)" -e INITRD="$(j initrd)" \
+  -e MACHINE="$(j machine)" -e CPU="$(j cpu)" -e MEM="$(j memory)" -e SMP="$(j smp)" -e KERNEL="$(j kernel)" -e INITRD="$(j initrd)" \
   -e APPEND="$APPEND" -e PREPARE="$PREPARE" -e DEVICES="$DEVICES" -e S="/disk/snapshots/$ID" powos-web-qemu-native bash -c '
   set -euo pipefail
   # The browser machine (args.js), natively; plus a QMP socket for the snapshot controller.
-  /q/qemu-system-aarch64 -display none -M "$MACHINE" -cpu "$CPU" -m "$MEM" -accel tcg -nic none $DEVICES \
+  /q/qemu-system-aarch64 -display none -M "$MACHINE" -cpu "$CPU" -m "$MEM" -smp "$SMP" -accel tcg,thread=multi -nic none $DEVICES \
     -kernel "/disk/$KERNEL" -initrd "/disk/$INITRD" -append "$APPEND $PREPARE" \
     -drive if=none,id=disk0,format=raw,file.driver=chunked,file.url=/disk,file.save-overlay=$S/overlay.bin \
     -device virtio-blk-pci,drive=disk0 -qmp unix:/tmp/qmp.sock,server=on,wait=off \
