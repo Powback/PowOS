@@ -10,6 +10,7 @@
 #   log       /data/powos/start.log
 #   run CMD   one command inside PowOS (no pipes: they would run in Android's shell)
 #   wifi      adb over Wi-Fi (port 5555, kept across reboots): unplug the cable
+#   widevine-l3 [remove]   Netflix etc. in SD on the unlocked phone (targets/native/widevine-l3.sh)
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -59,6 +60,16 @@ wifi)
   asu "setprop persist.adb.tcp.port 5555"
   adb tcpip 5555 && sleep 2 && adb connect "$ip:5555"
   echo "unplug USB, or: export ANDROID_SERIAL=$ip:5555" ;;
+widevine-l3)
+  # Netflix etc. in SD on the unlocked phone (Widevine L1 can't be provisioned): see targets/native/widevine-l3.sh.
+  if [ "${2:-}" = remove ]; then
+    asu "rm -f /data/adb/post-fs-data.d/widevine-l3.sh; umount /odm/lib64/liboemcrypto.so; pkill -f android.hardware.drm-service.widevine"
+    echo "removed (Widevine back to L1 attempts)"
+  else
+    adb push -q "$HERE/../../native/widevine-l3.sh" /data/local/tmp/widevine-l3.sh
+    asu "mkdir -p /data/adb/post-fs-data.d && install -m 755 /data/local/tmp/widevine-l3.sh /data/adb/post-fs-data.d/widevine-l3.sh && sh /data/adb/post-fs-data.d/widevine-l3.sh now"
+    echo "Widevine L3 forced (now and at every boot)"
+  fi ;;
 *)
-  sed -n '2,13p' "$0"; exit 1 ;;
+  sed -n '2,14p' "$0"; exit 1 ;;
 esac

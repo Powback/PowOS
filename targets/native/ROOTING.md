@@ -78,9 +78,31 @@ ALL=1 ./phone.sh backup      # → backup/8e5d600d/<partition>.img + .sha256 (ch
 - The Mac was nearly full (backup ≈ 23 GiB): copy to the NAS — `~/nas/PowCache/backups/oneplus-open-8e5d600d/`
   (autofs, NOT under /Volumes) — and re-verify the checksums there.
 
+## 7. Netflix (and other DRM apps) after unlocking
+Symptom: Netflix says **"Sorry, we could not reach the Netflix service … (15001) (-93)"** — it looks like a network
+error but isn't (DNS through Pi-hole resolved every Netflix name; allowing `ichnaea-web.netflix.com` and
+`logs.netflix.com` there changed nothing). logcat shows the real cause:
+```
+QCOM-OEMCrypto: generate_derived_keys_from_wrapped_rot ... Error
+WVCdm: OEMCrypto_GenerateDerivedKeys failed: status = 25
+WVCdm: GetProvisioningRequestInternal] Failed to prepare provisioning request: status = 342
+MediaDrm-JNI: Failed to get provision request: ERROR_DRM_GENERIC_PLUGIN
+```
+- **Why:** Widevine **L1** (hardware DRM in the Qualcomm TEE, `/odm/lib64/liboemcrypto.so`) is only provisioned when
+  the phone proves a **locked** bootloader. The bootloader tells the TEE before Android starts; root can't change
+  that. Netflix doesn't fall back to L3 by itself.
+- **Fix (SD, ~480p):** hide the L1 library so Widevine uses its software **L3**: `rooted/rooted.sh widevine-l3`
+  (`targets/native/widevine-l3.sh`): a bind mount of an empty file (with the library's SELinux label,
+  `vendor_file`, or the HAL can't open it) over the library, installed as a Magisk post-fs-data script so it applies
+  at every boot before the Widevine HAL starts. Nothing on any partition changes. Verified 2026-10-16: Netflix plays.
+- **HD** needs Widevine L1 = a locked bootloader (loses root/PowOS rooted mode), or spoofing the locked state with a
+  leaked OEM keybox (revoked regularly — not used).
+- Undo: `rooted/rooted.sh widevine-l3 remove`.
+
 ## Undo / recover
 | want | do |
 |---|---|
+| Netflix back to L1 attempts | `rooted/rooted.sh widevine-l3 remove` |
 | remove root | `fastboot flash init_boot_b backup/8e5d600d/stock-16.0.5.1301-EX01/init_boot.img` |
 | take an OTA, keep root | install the OTA, then Magisk → Install → "Install to inactive slot (after OTA)", reboot |
 | restore a partition | `fastboot flash <name> backup/8e5d600d/<name>.img` (from the matching build only) |
