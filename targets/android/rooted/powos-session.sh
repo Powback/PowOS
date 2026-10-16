@@ -25,6 +25,8 @@ sock=/run/powos-app/${SOCK#$RUN/}
 # need them. Made private first (pivot_root fails on shared mounts); PowOS's own mount/pivot_root, through its
 # loader: Android's toybox has no pivot_root and no --make-rprivate. powos-rooted-session detaches /.oldroot.
 export L="$R/usr/lib/ld-linux-aarch64.so.1 --library-path $R/usr/lib" R
+# The session keeps this pid through the execs below: powos-run.sh joins its mount namespace.
+echo $$ > /data/powos/session.pid
 exec nsenter -t 1 -m -- unshare -m sh -c '
   $L $R/usr/bin/mount --make-rprivate / && $L $R/usr/bin/mount --rbind $R $R && cd $R && mkdir -p .oldroot &&
     $L $R/usr/bin/pivot_root . .oldroot || exit 1

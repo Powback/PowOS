@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.omalauncher.Runtime
 import dev.omalauncher.linux.TerminalFont
+import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.shellQuote
 import dev.omalauncher.wayland.WindowRenderer
 import dev.omalauncher.wayland.XdgToplevel
@@ -155,7 +156,8 @@ class TerminalTiles(
         onExit: () -> Unit,
     ) {
         val font = term.fontSize?.let { " -o " + shellQuote("main.font=${runtime.terminalFont.family}:size=${TerminalFont.format(it)}") }.orEmpty()
-        val command = term.command?.let { " -e bash -c " + shellQuote(it) }.orEmpty()
+        // PowOS rooted mode: a plain tile is a PowOS terminal - its tmux picker/resume, as Konsole on the desktop.
+        val command = term.command?.let { " -e bash -c " + shellQuote(it) } ?: if (RootedGuest.enabled) " -e ${RootedGuest.TERMINAL_SHELL}" else ""
         runtime.launch("foot --app-id=${term.appId}$font$command", onExit)
     }
 

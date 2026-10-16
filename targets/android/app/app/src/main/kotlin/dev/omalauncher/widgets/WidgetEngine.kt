@@ -159,8 +159,23 @@ class WidgetEngine(
         changes.trySend(Unit)
     }
 
+    /**
+     * PowOS rooted mode: terminals run in the PowOS session (RootedGuest) while Omalauncher's own Linux isn't
+     * there, so terminal widgets with nothing else from Linux run; the rest still wait.
+     */
+    var terminalsOnly by mutableStateOf(false)
+        private set
+
+    fun terminalsChanged(on: Boolean) {
+        if (terminalsOnly == on) return
+        terminalsOnly = on
+        changes.trySend(Unit)
+    }
+
+    private fun runs(program: Program) = !program.needsLinux || linux || (terminalsOnly && program.terminal && program.requires.isEmpty())
+
     /** [spec] needs Linux, which isn't installed: it shows as a placeholder. */
-    fun waitsForLinux(spec: WidgetSpec) = !linux && spec.program?.needsLinux == true
+    fun waitsForLinux(spec: WidgetSpec) = spec.program?.let { !runs(it) } == true
 
     /** File name of the widget whose screen { } is open, full screen over home; see [screenInstance]. */
     var openScreen by mutableStateOf<String?>(null)
@@ -396,7 +411,7 @@ class WidgetEngine(
         for (spec in parsed) {
             val program = spec.program ?: continue
             // Stopped below with the other leftovers.
-            if (program.needsLinux && !linux) continue
+            if (!runs(program)) continue
             val prev = previous.remove(spec.file.name)
             if (prev?.program === program) {
                 instances[spec.file.name] = prev

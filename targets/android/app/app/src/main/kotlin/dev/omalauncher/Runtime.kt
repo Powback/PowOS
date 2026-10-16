@@ -28,6 +28,7 @@ import dev.omalauncher.linux.LinuxApp
 import dev.omalauncher.linux.OpenBridge
 import dev.omalauncher.linux.Pacman
 import dev.omalauncher.linux.Proot
+import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.LinuxState
 import dev.omalauncher.linux.SystemUpdates
 import dev.omalauncher.linux.TerminalFont
@@ -48,6 +49,7 @@ import dev.omalauncher.ui.WindowManager
 import dev.omalauncher.ui.bitmapMask
 import dev.omalauncher.ui.decodeIcon
 import dev.omalauncher.upgrade.Provisioner
+import dev.omalauncher.upgrade.writeAtomically
 import dev.omalauncher.wayland.AndroidClipboard
 import dev.omalauncher.wayland.OutputInfo
 import dev.omalauncher.wayland.WaylandServer
@@ -204,7 +206,8 @@ class Runtime(
             widgets.start()
             // On the first-run screen the download is the screen's job, with progress.
             if (launcherReady) scope.launch { themes.ensureRelease() }
-            if (bootstrap.wanted) runLinux { bootstrap.run() } else bootstrap.run()
+            // Rooted PowOS: the terminal tiles' services start too (onRootedReady).
+            if (bootstrap.wanted || RootedGuest.enabled) runLinux { bootstrap.run() } else bootstrap.run()
         }
     }
 
@@ -246,7 +249,12 @@ class Runtime(
                 }
                 work()
                 // PowOS: Omalauncher's own Linux services target its proot system; off until phase 2 (see refreshLinuxState).
-                if (bootstrap.isInstalled && !POWOS) onLinuxReady() else setService(false)
+                when {
+                    bootstrap.isInstalled && !POWOS -> onLinuxReady()
+                    // The engine's SessionService keeps the process alive then; no second notification.
+                    RootedGuest.enabled -> onRootedReady().also { setService(false) }
+                    else -> setService(false)
+                }
             }
     }
 
@@ -293,19 +301,8 @@ class Runtime(
     private suspend fun onLinuxReady() {
         if (linux) return
         if (!servicesStarted) {
-            servicesStarted = true
-            updateOutput()
-            synchronized(server) { server.selection.system = AndroidClipboard(context, server::clipboardChanged) }
-            context.registerComponentCallbacks(
-                object : ComponentCallbacks {
-                    override fun onConfigurationChanged(newConfig: Configuration) = updateOutput()
-
-                    @Deprecated("Deprecated in Java")
-                    override fun onLowMemory() = Unit
-                },
-            )
+            startServices()
             withContext(Dispatchers.IO) {
-                server.start()
                 proot.procShim.start()
                 openBridge.start()
             }
@@ -334,6 +331,48 @@ class Runtime(
         }
         // Apps render in software until the GPU passed its check on this system build.
         scope.launch { gpu.recheck() }
+    }
+
+    /** The Wayland server, its output and the clipboard; once per process (they run until it ends). */
+    private suspend fun startServices() {
+        if (servicesStarted) return
+        servicesStarted = true
+        updateOutput()
+        synchronized(server) { server.selection.system = AndroidClipboard(context, server::clipboardChanged) }
+        context.registerComponentCallbacks(
+            object : ComponentCallbacks {
+                override fun onConfigurationChanged(newConfig: Configuration) = updateOutput()
+
+                @Deprecated("Deprecated in Java")
+                override fun onLowMemory() = Unit
+            },
+        )
+        withContext(Dispatchers.IO) { server.start() }
+    }
+
+    /** Terminals run in the PowOS session (rooted mode); see [RootedGuest]. */
+    private var rootedTerminals = false
+
+    /**
+     * PowOS on a rooted phone: of Omalauncher's own Linux services only the Wayland server, for the terminal tiles,
+     * whose foot runs in the PowOS desktop session (RootedGuest) - Omalauncher's proot system isn't installed, and
+     * PowOS's packages and updates are PowOS's (never pacman from here).
+     */
+    private suspend fun onRootedReady() {
+        if (rootedTerminals) return
+        startServices()
+        withContext(Dispatchers.IO) {
+            // The keymap Wayland clients get; PowOS's xkbcommon compiles it, once.
+            if (!proot.keymap.exists()) {
+                val out = StringBuilder()
+                if (RootedGuest.run("xkbcli compile-keymap --layout us 2>/dev/null || /usr/lib/xkbcommon/xkbcli-compile-keymap --layout us") { out.appendLine(it) } == 0) {
+                    writeAtomically(proot.keymap, out.toString().toByteArray() + 0)
+                }
+            }
+            synchronized(server) { server.input.setKeymap(proot.keymap.path) }
+        }
+        rootedTerminals = true
+        widgets.terminalsChanged(true)
     }
 
     /** Turns GPU acceleration on (installing and checking the driver) or off, for Linux apps started from then on. */
@@ -537,14 +576,16 @@ class Runtime(
         command: String,
         onExit: () -> Unit = {},
     ) {
-        if (!linux) {
+        val rooted = !linux && rootedTerminals
+        if (!linux && !rooted) {
             linuxWanted = true
             onExit()
             return
         }
         Log.i(TAG, "launch: $command")
         thread(name = "guest-launch", isDaemon = true) {
-            val code = runCatching { proot.run("exec $command") { Log.i(TAG, "[${command.take(24)}] $it") } }.getOrElse { -1 }
+            val log: (String) -> Unit = { Log.i(TAG, "[${command.take(24)}] $it") }
+            val code = runCatching { if (rooted) RootedGuest.run("exec $command", log) else proot.run("exec $command", log) }.getOrElse { -1 }
             Log.i(TAG, "exited $code: $command")
             onExit()
         }

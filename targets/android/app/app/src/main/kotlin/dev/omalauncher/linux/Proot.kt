@@ -15,7 +15,7 @@ class Proot(
     val tmpDir = File(filesDir, "tmp")
 
     /** Bound to XDG_RUNTIME_DIR inside the guest; holds the Wayland socket and the bridges' FIFOs. */
-    val runtimeDir = File(filesDir, "xdg")
+    val runtimeDir = if (RootedGuest.enabled) RootedGuest.runtimeDir(filesDir) else File(filesDir, "xdg")
     val waylandSocket = File(runtimeDir, "wayland-0")
     val keymap = File(filesDir, "keymap.xkb")
 

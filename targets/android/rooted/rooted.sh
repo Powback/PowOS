@@ -36,7 +36,7 @@ deploy)
   # The rooted-mode scripts (also part of install): the boot/mount script, the desktop session the PowOS app starts
   # (powos-session.sh -> /usr/bin/powos-rooted-session inside PowOS), and the flag the app checks
   # (persist.powos.root=1, set with Magisk's resetprop - readable without a root prompt).
-  for f in powos-start.sh powos-session.sh powos-rooted-session powos-deploy.sh; do
+  for f in powos-start.sh powos-session.sh powos-run.sh powos-rooted-session powos-deploy.sh; do
     adb push -q "$HERE/$f" "/data/local/tmp/$f"
   done
   for f in powos-android-app powos-android-tasks powos-android-tasks.desktop; do
@@ -56,6 +56,11 @@ log)
   asu "cat /data/powos/start.log" ;;
 run)
   shift; in_powos "$*" ;;
+android)
+  # A script as root on the Android side (outside PowOS): pushed, then run with Magisk's su.
+  [ -f "${2:-}" ] || { echo "usage: rooted.sh android <script>"; exit 1; }
+  adb push "$2" /data/local/tmp/rooted-android.sh >/dev/null
+  asu "sh /data/local/tmp/rooted-android.sh" ;;
 wifi)
   # adbd keeps listening on 5555 after reboots (persist.adb.tcp.port); adb still asks the phone to authorize a new
   # computer, as over USB.
