@@ -50,6 +50,19 @@ final class CoverFade {
         });
     }
 
+    /** The cover came up as display [id] (FoldWatcher.onDisplayAdded): show on it now, not on the next hinge event. */
+    void shownOn(int id) {
+        main.post(() -> {
+            coverId = id;
+            if (root == null)
+                add();
+            if (image != null)
+                image.setAlpha(level = 1f);
+        });
+    }
+
+    private int coverId = -1;
+
     /** The cover display is gone (the fold ended) or the hold ended. */
     void hide() {
         main.post(this::remove);
@@ -57,12 +70,15 @@ final class CoverFade {
 
     private boolean add() {
         DisplayManager dm = ctx.getSystemService(DisplayManager.class);
-        Display cover = null;
-        for (Display d : dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION))
-            if (d.getDisplayId() != Display.DEFAULT_DISPLAY)
-                cover = d;
-        if (cover == null || !android.provider.Settings.canDrawOverlays(ctx))
-            return false; // not up yet: the next hinge event tries again
+        Display cover = coverId > 0 ? dm.getDisplay(coverId) : null;
+        if (cover == null)
+            for (Display d : dm.getDisplays())
+                if (d.getDisplayId() != Display.DEFAULT_DISPLAY && (d.getFlags() & Display.FLAG_PRESENTATION) != 0)
+                    cover = d;
+        if (cover == null || !android.provider.Settings.canDrawOverlays(ctx)) {
+            Log.d(TAG, "no cover display yet (" + coverId + "), overlay allowed: " + android.provider.Settings.canDrawOverlays(ctx));
+            return false; // not up yet: onDisplayAdded or the next hinge event tries again
+        }
         Context dc = ctx.createDisplayContext(cover).createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null);
         wm = dc.getSystemService(WindowManager.class);
         root = new FrameLayout(dc);
@@ -86,6 +102,7 @@ final class CoverFade {
         lp.setFitInsetsTypes(0);
         try {
             wm.addView(root, lp);
+            Log.i(TAG, "showing on display " + cover.getDisplayId());
             return true;
         } catch (RuntimeException e) {
             Log.w(TAG, "add: " + e);

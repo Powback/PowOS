@@ -443,6 +443,10 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
 
     @Override
     public void onDisplayAdded(int displayId) {
+        // Both screens on (our hold): the cover just came up as a second display - put its picture on it at once.
+        Log.i(TAG, "display " + displayId + " added (holding: " + (override != -1) + ")");
+        if (override != -1)
+            coverFade.shownOn(displayId);
     }
 
     @Override
