@@ -59,7 +59,7 @@ EOF
 # for a connection from itself, so PowOS's adb key is authorized here directly (the same as "Always allow";
 # revoke: remove its line from /data/misc/adb/adb_keys).
 chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/bash -c '
-  pacman -Q scrcpy android-tools pyside6 foot fzf >/dev/null 2>&1 || pacman -S --noconfirm --needed scrcpy android-tools pyside6 foot fzf >/dev/null
+  pacman -Q scrcpy android-tools pyside6 foot fzf ibus libnm openal >/dev/null 2>&1 || pacman -S --noconfirm --needed scrcpy android-tools pyside6 foot fzf ibus libnm openal >/dev/null
   [ -f /home/powos/.android/adbkey.pub ] || setpriv --reuid=powos --regid=powos --init-groups -- \
     env HOME=/home/powos adb keygen /home/powos/.android/adbkey >/dev/null 2>&1'
 K=$R/home/powos/.android/adbkey.pub
