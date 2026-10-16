@@ -91,6 +91,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     private static final int ALL = 99;
 
     private float speed, prevAngle = -1;
+    /** Consecutive rising hinge readings. */
+    private int rising;
     private long prevTime;
     /** The device state we're holding (ALL), -1 none. Hinge thread. */
     private int override = -1;
@@ -104,6 +106,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         if (prevAngle >= 0 && nowMs > prevTime) {
             float v = (a - prevAngle) * 1000f / (nowMs - prevTime);
             speed = speed * 0.5f + v * 0.5f;
+            rising = a > prevAngle ? rising + 1 : 0;
         }
         prevAngle = a;
         prevTime = nowMs;
@@ -135,7 +138,9 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             // cover, and a hold restarted there turned the cover off and on again.
             if (android.os.SystemClock.uptimeMillis() - holdEndedAt < 1000)
                 return;
-            if ((onCover && a >= 3 && speed > 0) || (!onCover && a < CLOSE_START && a > SHUT_END + 2 && speed < 0)
+            // Opening: a steady climb past 4 degrees - shut, the hinge jitters between 0 and 3, and starting on that
+            // turned the cover off and on at random.
+            if ((onCover && a >= 4 && rising >= 2) || (!onCover && a < CLOSE_START && a > SHUT_END + 2 && speed < 0)
                     || (a > SHUT_END + 3 && a < OPEN - 5))
                 hold(ALL, nowMs);
             return;
