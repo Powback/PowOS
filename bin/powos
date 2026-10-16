@@ -454,6 +454,11 @@ cmd_status() {
     echo -e "${BOLD}${CYAN}PowOS Status${NC}"
     echo "════════════════════════════════════════"
     echo ""
+    # A phone has no USB drive, layers or RAM overlay to report (lib/phone.sh).
+    if declare -f powos_is_phone >/dev/null && powos_is_phone; then
+        _status_phone
+        return
+    fi
     _status_layers
     _status_ram_overlay
     _status_user_data
@@ -1643,8 +1648,9 @@ cmd_health() {
     _HEALTH_WARNINGS=0
     _HEALTH_USB_STATUS=""
 
-    local probe
-    for probe in "${_HEALTH_PROBES[@]}"; do
+    local probe probes=("${_HEALTH_PROBES[@]}")
+    declare -f powos_is_phone >/dev/null && powos_is_phone && probes=("${_HEALTH_PROBES_PHONE[@]}")
+    for probe in "${probes[@]}"; do
         "_health_$probe"
     done
 
@@ -2154,6 +2160,7 @@ PROJECTS_DIR="${POWOS_ROOT:-/var/lib/powos}/projects"
 [[ -f "$POWOS_LIB/ai/agent.sh" ]]     && source "$POWOS_LIB/ai/agent.sh"
 [[ -f "$POWOS_LIB/sync.sh" ]]         && source "$POWOS_LIB/sync.sh"
 [[ -f "$POWOS_LIB/backup.sh" ]]       && source "$POWOS_LIB/backup.sh"
+[[ -f "$POWOS_LIB/phone.sh" ]]        && source "$POWOS_LIB/phone.sh"
 
 # ═══════════════════════════════════════════════════════════════════
 # Container Commands (Podman/Distrobox)
