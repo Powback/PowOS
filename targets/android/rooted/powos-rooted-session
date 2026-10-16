@@ -45,6 +45,12 @@ esac
 # Per-phone overrides for the whole session (KEY=value lines, e.g. Mesa debug switches).
 [ -f /etc/powos/session.env ] && { set -a; . /etc/powos/session.env; set +a; }
 export XWAYLAND_FORCE_KGSL_SURFACELESS=1 ANDROMARCHY_NO_DRM_DEVICE=1
+# Hardware video decode/encode (VA-API): Mesa's termuxva driver talks to the PowOS app's termux-va daemon, which
+# uses Android's MediaCodec - the same as the no-root engine (SessionService.archEnv). Android apps in PowOS windows
+# (scrcpy) decode their stream with it instead of the CPU.
+if [ -e /usr/lib/dri/termuxva_drv_video.so ]; then
+  export LIBVA_DRIVER_NAME=termuxva TERMUX_VA_BRIDGE=1 TERMUX_VA_GPU_BACKEND=kgsl TERMUX_VA_SOCKET="$R/termux-va.sock"
+fi
 export POWOS_SESSION_MODE=rooted
 # No journald on a phone: Qt sends its messages (KWin, Plasma) there whenever stderr is not a terminal, so they
 # vanished. Into the session's logs instead.

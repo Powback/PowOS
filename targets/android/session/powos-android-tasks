@@ -37,7 +37,7 @@ def tasks():
     for line in adb("shell", "am", "stack", "list").splitlines():
         m = re.match(r"RootTask id=(\d+) .*displayId=(\d+)", line)
         if m:
-            cur = {"id": int(m[1]), "display": int(m[2]), "type": None, "pkgs": []}
+            cur = {"id": int(m[1]), "display": int(m[2]), "type": None, "mode": None, "pkgs": []}
             found[cur["id"]] = cur
             continue
         if cur is None:
@@ -45,13 +45,19 @@ def tasks():
         t = re.search(r"mActivityType=(\w+)", line)
         if t and cur["type"] is None:
             cur["type"] = t[1]
+        w = re.search(r"mWindowingMode=(\w+)", line)
+        if w and cur["mode"] is None:
+            cur["mode"] = w[1]
         p = re.match(r"\s+taskId=\d+: ([\w.]+)/", line)
         if p and p[1] not in cur["pkgs"]:
             cur["pkgs"].append(p[1])
     return {
         tid: t["pkgs"]
         for tid, t in found.items()
-        if t["display"] == 0 and t["type"] == "standard" and t["pkgs"] and not set(t["pkgs"]) & IGNORE
+        # Picture-in-picture ("pinned") stays Android's floating overlay: moved, it kept its small PiP bounds in a
+        # mostly black window.
+        if t["display"] == 0 and t["type"] == "standard" and t["mode"] != "pinned" and t["pkgs"]
+        and not set(t["pkgs"]) & IGNORE
     }
 
 
@@ -72,6 +78,7 @@ def watch():
         if not adb("get-state").strip() == "device":
             sys.exit("no adb to the phone (rooted mode only)")
     stubs = {}  # task id -> Popen
+    moving = {}  # task id -> time its stand-in was clicked: no new stand-in while Android moves it to its window
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         while True:
@@ -82,12 +89,16 @@ def watch():
                 time.sleep(2)
                 continue
             for tid in list(stubs):
-                if tid not in now or stubs[tid].poll() is not None:
-                    if stubs[tid].poll() is None:
-                        stubs[tid].terminate()
+                if stubs[tid].poll() is not None:  # exits only when clicked
+                    moving[tid] = time.monotonic()
                     del stubs[tid]
+                elif tid not in now:
+                    stubs[tid].terminate()
+                    del stubs[tid]
+            for tid in [t for t, at in moving.items() if time.monotonic() - at > 15]:
+                del moving[tid]
             for tid, pkgs in now.items():
-                if tid not in stubs:
+                if tid not in stubs and tid not in moving:
                     title = " | ".join(label(p) for p in pkgs)
                     stubs[tid] = subprocess.Popen([sys.argv[0], "--stub", str(tid), pkgs[0], title])
             time.sleep(2)

@@ -17,25 +17,50 @@ title=${2:-$1}
 [ -n "$pkg" ] || { echo "usage: powos-android-app [--task <id>] <package> [title]" >&2; exit 2; }
 dev=127.0.0.1:5555
 
+# One window per app: if it has one, bring that to the front instead of opening a second display (by the window's
+# process: the taskbar stand-in of powos-android-tasks has the same app_id).
+W=${XDG_RUNTIME_DIR:-/tmp}/android-windows
+mkdir -p "$W"
+if pid=$(cat "$W/$pkg.pid" 2>/dev/null) && kill -0 "$pid" 2>/dev/null; then
+  js=$W/activate-$$.js
+  printf 'for (const w of workspace.windowList()) if (w.pid == %s) { w.minimized = false; workspace.activeWindow = w; }\n' \
+    "$pid" > "$js"
+  qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript "$js" "powos-activate-$$" >/dev/null &&
+    qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.start >/dev/null
+  qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript "powos-activate-$$" >/dev/null
+  rm -f "$js"
+  exit 0
+fi
+
 if command -v scrcpy >/dev/null && command -v adb >/dev/null; then
   [ "$(adb -s $dev get-state 2>/dev/null)" = device ] || adb connect $dev >/dev/null 2>&1
   if [ "$(adb -s $dev get-state 2>/dev/null)" = device ]; then
     export SDL_VIDEODRIVER=wayland SDL_VIDEO_WAYLAND_WMCLASS="android-$pkg" SDL_APP_ID="android-$pkg"
     # Density = the desktop's scale x 160 (Android's 1 dp = density/160 px), so an Android app is the same size as
     # PowOS's own apps.
-    # HACK: a fixed 1080x1440 display; resizing the window scales the picture instead of the app. scrcpy's
+    # HACK: a fixed-size display; resizing the window scales the picture instead of the app. scrcpy's
     # --flex-display (the display follows the window) showed an over-zoomed, half-black Chrome on the OnePlus Open
     # (scrcpy 5.0.1, 2026-10-16). Real fix: find why (scrcpy issue or our Wayland scaling), then use it.
-    scale=$(kscreen-doctor -j 2>/dev/null | jq -r '.outputs[0].scale // empty' 2>/dev/null)
-    dpi=$(awk -v s="${scale:-1.5}" 'BEGIN { printf "%d", s * 160 }')
-    set -- -s $dev --new-display=1080x1440/"$dpi" --no-vd-system-decorations --no-vd-destroy-content \
-      --no-audio --window-title="$title"
-    [ -n "$task" ] || exec scrcpy "$@" --start-app="$pkg"
+    # Window: 3:4, 80% of the screen's height (desktop units), and the app's display exactly that many pixels at the
+    # desktop's scale - sharp, and never taller than the screen (a 1440 px display opened a 1440-unit window, cut off).
+    set -- $(kscreen-doctor -j 2>/dev/null | jq -r '.outputs[0] as $o | ($o.modes[] | select(.id == $o.currentModeId)
+      | .size.height) as $h | "\($o.scale) \($h)"' 2>/dev/null)
+    geo=$(awk -v s="${1:-1.5}" -v h="${2:-2440}" 'BEGIN {
+      wh = int(h / s * 0.8); ww = int(wh * 3 / 4)
+      printf "%d %d %dx%d %d", ww, wh, int(ww * s / 2) * 2, int(wh * s / 2) * 2, s * 160 }')
+    set -- $geo
+    set -- -s $dev --new-display="$3/$4" --window-width="$1" --window-height="$2" --no-vd-system-decorations \
+      --no-vd-destroy-content --no-audio --window-title="$title"
+    if [ -z "$task" ]; then
+      echo $$ > "$W/$pkg.pid"   # exec keeps the pid: this is the window's process
+      exec scrcpy "$@" --start-app="$pkg"
+    fi
     # A running task: an empty display first, then Android moves the task (with everything in it - a split pair
     # too) onto it once scrcpy reports the display's id.
     log=${XDG_RUNTIME_DIR:-/tmp}/powos-android-app.$$.log
     scrcpy "$@" > "$log" 2>&1 &
     pid=$!
+    echo $pid > "$W/$pkg.pid"
     for _ in $(seq 100); do
       id=$(sed -n 's/.*New display: .* (id=\([0-9]*\)).*/\1/p' "$log")
       [ -n "$id" ] && break

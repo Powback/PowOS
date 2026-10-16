@@ -128,6 +128,10 @@ public class SessionService extends Service {
         // the daemon socket, the phone-state files and desktop-ready (SplashScreen) are shared as they are.
         if (RootMode.enabled()) {
             spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock.getPath()), null);
+            // Hardware video for PowOS (VA-API through Mesa's termuxva bridge -> MediaCodec), as below; the rooted
+            // session points LIBVA at its socket (/run/powos-app/termux-va.sock).
+            spawn("termux-va", List.of(libDir + "/libtermuxva.so", "--sock", new File(run, "termux-va.sock").getPath()),
+                    null);
             Map<String, String> env = archEnv(run, sock);
             spawn("powos-root-session", List.of("su", "-c", "sh " + RootMode.SESSION + " " + run.getPath() + " "
                     + sock.getPath() + " " + env.get("ANDROMARCHY_PHYSICAL_MM") + " " + env.get("LANG") + " "
