@@ -96,7 +96,7 @@ fun StyleScreen(
                 },
                 onRemove = { removing = it },
             )
-            store.current?.let { BackgroundSection(store, it) }
+            store.current?.let { BackgroundSection(store, it, runtime.style) }
             // Style choices don't depend on a theme, so they're offered before themes are downloaded too.
             Heading("home screen")
             val style = runtime.style
@@ -206,6 +206,7 @@ private fun ThemeSection(
 private fun BackgroundSection(
     store: ThemeStore,
     theme: OmarchyTheme,
+    style: StyleStore,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -215,6 +216,7 @@ private fun BackgroundSection(
         if (uri != null) scope.launch { store.addBackground(uri) }
     }
     Heading("background")
+    Flag("home", "transparent", "theme background", style, Style.TRANSPARENT)
     LazyRow(Modifier.bleed(PanelPadding), contentPadding = PaddingValues(horizontal = PanelPadding), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(backgrounds, key = { it.path }) { file ->
             Thumbnail(

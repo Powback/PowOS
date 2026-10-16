@@ -63,9 +63,10 @@ fun LauncherRoot(
 ) {
     state.bindScope()
     val ready = runtime.launcherReady
-    // PowOS: home is always transparent over the system wallpaper (whatever it is), so the system's swipe-home /
-    // recents animations, which show that wallpaper, match it. Only first-run setup gets the theme's solid fill.
-    val showOwnBackground = !ready
+    // Transparent home (Style.TRANSPARENT, or our live wallpaper) shows Android's wallpaper behind the window.
+    val showOwnBackground = !ready || runtime.themes.ownBackground
+    val transparent = runtime.style.style[Style.TRANSPARENT]
+    LaunchedEffect(transparent) { runtime.themes.refreshLiveWallpaper() }
     Box(
         Modifier
             .fillMaxSize()
@@ -108,7 +109,7 @@ private fun DesktopScreen(
         }
     }
 
-    if (!runtime.themes.liveWallpaperActive) {
+    if (runtime.themes.ownBackground) {
         runtime.themes.wallpaper?.let { bmp ->
             // Read while drawing, so swiping pages only redraws this.
             Canvas(Modifier.fillMaxSize()) {

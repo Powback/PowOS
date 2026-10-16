@@ -13,9 +13,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import dev.omalauncher.LauncherData
 import dev.omalauncher.linux.Proot
 import dev.omalauncher.ui.Palette
+import dev.omalauncher.ui.decodeForScreen
 import dev.omalauncher.upgrade.appStamp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -167,10 +169,16 @@ class ThemeStore(
     var liveWallpaperActive by mutableStateOf(false)
         private set
 
+    /** Whether home draws the theme's background itself: not over our live wallpaper, nor when set transparent. */
+    val ownBackground get() = !liveWallpaperActive && !style.style[Style.TRANSPARENT]
+
+    /** Also after [Style.TRANSPARENT] changed: decodes or drops the launcher's own copy of the background. */
     suspend fun refreshLiveWallpaper() {
         liveWallpaperActive = WallpaperManager.getInstance(context).wallpaperInfo?.packageName == context.packageName
-        // PowOS: no own copy of the wallpaper (showBackground).
+        if (!ownBackground) wallpaper = null else if (wallpaper == null) wallpaper = decodeWallpaper(background)
     }
+
+    private suspend fun decodeWallpaper(file: File?) = file?.let { withContext(Dispatchers.IO) { decodeForScreen(it, context)?.asImageBitmap() } }
 
     /** Opens Android's live wallpaper preview with our wallpaper preselected; apps can't set one silently. */
     fun liveWallpaperIntent(): Intent =
@@ -204,6 +212,8 @@ class ThemeStore(
             prefs.edit().putString(RENDERED_BY, appStamp(context)).apply()
         }
         val bg = theme.backgrounds().let { list -> list.firstOrNull { it.name == style.style[Style.BACKGROUND] } ?: list.firstOrNull() }
+        // On reload a different background may replace one already showing.
+        if (bg != background) wallpaper = null
         background = bg
         refreshLiveWallpaper()
     }
@@ -429,11 +439,9 @@ class ThemeStore(
 
     private suspend fun showBackground(file: File?) {
         background = file
-        // PowOS: the launcher never paints a copy of its own - it is transparent over the system wallpaper, so the
-        // system's animations (swipe home, recents, app open/close), which show the system wallpaper, match it.
-        // (Its own copy over a different system wallpaper crossfaded on every swipe.) The theme's background stays
-        // the PowOS desktop's (guest.linkBackground below) and the live wallpaper's, when the user picks that.
-        wallpaper = null
+        // Transparent (the default), home shows the system wallpaper, which the system's animations (swipe home,
+        // recents) show too; its own copy over a different system wallpaper crossfaded on every swipe.
+        wallpaper = if (ownBackground) decodeWallpaper(file) else null
         if (file != null && isLinux()) withContext(Dispatchers.IO) { guest.linkBackground(file) }
         changeListeners.forEach { it() }
     }
