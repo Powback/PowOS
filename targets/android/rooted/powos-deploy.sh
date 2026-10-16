@@ -54,6 +54,28 @@ if [ -f $K ] && ! grep -qF "$(cat $K)" /data/misc/adb/adb_keys 2>/dev/null; then
 fi
 [ "$(getprop persist.adb.tcp.port)" = 5555 ] || setprop persist.adb.tcp.port 5555
 
+# Rootless containers (podman/distrobox) as powos: newuidmap/newgidmap need their file capabilities (Arch ships them
+# with setcap; the rootfs tarball lost them), and podman must leave cgroups alone (Android owns /sys/fs/cgroup) and
+# log to a file (no journald).
+chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c '
+  pacman -Q podman distrobox fuse-overlayfs >/dev/null 2>&1 ||
+    pacman -S --noconfirm --needed podman distrobox fuse-overlayfs >/dev/null
+  setcap cap_setuid+ep /usr/bin/newuidmap && setcap cap_setgid+ep /usr/bin/newgidmap'
+# distrobox shares the host's PID namespace by default, which podman refuses without cgroups: its own instead.
+mkdir -p $R/etc/distrobox
+grep -qs '^unshare_process=1' $R/etc/distrobox/distrobox.conf ||
+  printf '%s\n' '# PowOS rooted mode (rooted/powos-deploy.sh): no cgroups for containers -> a private PID namespace.' \
+    'unshare_process=1' >> $R/etc/distrobox/distrobox.conf
+# The kernel refuses rootless overlayfs on Android's f2fs data partition; fuse-overlayfs does the same in userspace.
+C=$R/home/powos/.config/containers
+mkdir -p $C && printf '%s\n' '# PowOS rooted mode (rooted/powos-deploy.sh): no rootless kernel overlayfs on f2fs.' \
+  '[storage]' 'driver = "overlay"' '[storage.options.overlay]' 'mount_program = "/usr/bin/fuse-overlayfs"' \
+  > $C/storage.conf && chown -R $U:$U $R/home/powos/.config
+mkdir -p $R/etc/containers/containers.conf.d
+printf '%s\n' '# PowOS rooted mode on Android (rooted/powos-deploy.sh): Android owns the cgroups; no journald.' \
+  '[containers]' 'cgroups = "disabled"' '# /dev/net/tun is Android'"'"'s VPN device (not for apps): containers use the phone'"'"'s network.' 'netns = "host"' '# No IPC namespace without System V IPC (Android'"'"'s kernel has neither).' 'ipcns = "host"' 'log_driver = "k8s-file"' '[engine]' 'cgroup_manager = "cgroupfs"' 'events_logger = "file"' \
+  > $R/etc/containers/containers.conf.d/50-powos-phone.conf
+
 # The no-root engine's sudo shim (fakeroot) first on PATH would shadow the real sudo: rooted mode has real root.
 # Moved aside, not deleted; the no-root app's own rootfs keeps it.
 S=$R/usr/local/bin/sudo
