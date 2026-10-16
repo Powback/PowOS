@@ -32,6 +32,11 @@ Done and verified (sha256 per partition), copied to the NAS:
   swapped: user + PID namespaces for Steam/Flatpak/podman). Written from Android with root (`dd`, checksum-verified;
   the live boot_b was byte-identical to `backup/8e5d600d/boot_b.img` first). Undo:
   `fastboot flash boot_b backup/8e5d600d/boot_b.img`. An OTA brings the stock kernel back (redo after Magisk).
+- **2026-10-17: + futex_waitv** (`patches/gki/0001-futex-futex_waitv-backport.patch`, for Proton's fsync):
+  `fastboot boot`-tested (Android, root, PowOS session fine; native futex_waitv = EINVAL, i.e. present), then
+  `fastboot flash boot_b out/boot-powos-gki.img`. Kernel `5.15.180-o-g298ff0fe2773-dirty`. Undo to the namespaces
+  kernel: `fastboot flash boot_b out/boot-powos-gki-ns.img`. (Use the Android SDK's fastboot - the Homebrew one
+  hung on this Mac.)
 
 ## Base distros (decided 2026-10-16, revisit later)
 Arch Linux ARM on phones (rooted + app), Bazzite (Fedora) on x86 PCs / laptop / Steam Deck. Discussed and deferred:
