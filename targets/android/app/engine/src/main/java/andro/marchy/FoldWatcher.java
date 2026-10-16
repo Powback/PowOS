@@ -139,7 +139,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
      * Folded: the Android app focused in PowOS (a PowOS window = a virtual display; powos-android-tasks writes which,
      * run dir file android-active) comes onto the cover screen, so the cover shows what was being used - not the
      * empty phone screen under the desktop (which steps aside, MainActivity.onConfigurationChanged). A PowOS (Linux)
-     * app focused: nothing to carry; the cover shows the launcher.
+     * app in use: the desktop comes onto the cover with it (desktopAppActive). Neither: the cover shows the launcher.
      */
     private void folded() {
         if (!enabled())
@@ -155,6 +155,21 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             }
         } catch (java.io.IOException e) {
             Log.d(TAG, "nothing to carry: " + e);
+        }
+        if (carried == null && !desktopAppActive(ctx)) {
+            // The launcher (HomeScreen.apply made it home for the cover screen), not whatever was below the desktop.
+            su("am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME");
+            Log.i(TAG, "nothing in use: the launcher on the cover screen");
+        }
+    }
+
+    /** A PowOS (Linux) app is what's in use (powos-android-tasks, run dir file desktop-active). */
+    static boolean desktopAppActive(Context ctx) {
+        try {
+            return "1".equals(new String(java.nio.file.Files.readAllBytes(
+                    new java.io.File(SessionService.runDir(ctx), "desktop-active").toPath())).trim());
+        } catch (java.io.IOException e) {
+            return false;
         }
     }
 

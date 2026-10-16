@@ -79,9 +79,14 @@ RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
 # the cover screen (and unfolding back into its window). "<root task id> <display id>", empty when the focused window
 # isn't an Android app (the cover then shows the launcher).
 ACTIVE = os.path.join(RUN, "android-active")
+# "1" while a PowOS (Linux) app is what's in use, else "0": folding the phone then takes the desktop onto the cover
+# screen; otherwise the cover shows the launcher and the desktop keeps its size (MainActivity.onCoverScreen).
+DESKTOP_ACTIVE = os.path.join(RUN, "desktop-active")
+# The desktop itself and panels count as nothing in use ("").
 KWIN_SCRIPT = """
 function report(w) {
-    callDBus("org.powos.AndroidTasks", "/", "org.powos.AndroidTasks", "Activated", w ? String(w.resourceClass) : "");
+    var app = w && !w.desktopWindow && !w.dock && !w.specialWindow;
+    callDBus("org.powos.AndroidTasks", "/", "org.powos.AndroidTasks", "Activated", app ? String(w.resourceClass) : "");
 }
 workspace.windowActivated.connect(report);
 report(workspace.activeWindow);
@@ -113,6 +118,9 @@ def watch():
         with open(ACTIVE + ".tmp", "w") as f:
             f.write(entry)
         os.replace(ACTIVE + ".tmp", ACTIVE)
+        with open(DESKTOP_ACTIVE + ".tmp", "w") as f:
+            f.write("1" if cls and not cls.startswith("android-") else "0")
+        os.replace(DESKTOP_ACTIVE + ".tmp", DESKTOP_ACTIVE)
 
     # A non-Android window (the desktop, a Linux app) only replaces the Android app as "what's in use" once it kept
     # the focus for a while: a touch on the desktop while folding the phone shut must not swap what the cover shows.
