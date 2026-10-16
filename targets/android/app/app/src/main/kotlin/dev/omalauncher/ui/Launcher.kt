@@ -63,8 +63,9 @@ fun LauncherRoot(
 ) {
     state.bindScope()
     val ready = runtime.launcherReady
-    // With our live wallpaper active the window is transparent and Android draws the wallpaper behind it.
-    val showOwnBackground = !ready || !runtime.themes.liveWallpaperActive
+    // PowOS: home is always transparent over the system wallpaper (whatever it is), so the system's swipe-home /
+    // recents animations, which show that wallpaper, match it. Only first-run setup gets the theme's solid fill.
+    val showOwnBackground = !ready
     Box(
         Modifier
             .fillMaxSize()
