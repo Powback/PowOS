@@ -26,6 +26,14 @@ L=$(tr '\0' '\n' < /proc/$PID/environ 2>/dev/null | sed -n 's/^LANG=//p')
 # session start makes a new auth file, and X11 programs (Steam) then failed with "Authorization required".
 P=$(pidof plasmashell | cut -d' ' -f1)
 X=$( [ -n "$P" ] && tr '\0' '\n' < /proc/$P/environ 2>/dev/null | grep -E '^(DISPLAY|XAUTHORITY)=' | tr '\n' ' ')
+# The session's GPU setup (powos-rooted-session: Mesa on KGSL, Andromarchy's display, VA-API, the phone's own
+# /etc/powos/session.env), as KWin got it. Without it Mesa finds no driver ("No driver found"): Steam, games and
+# a restarted plasmashell rendered without the Adreno. Values have no spaces (word-split below, like $X).
+K=$(pidof kwin_wayland | cut -d' ' -f1)
+E=$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' /data/powos/root/etc/powos/session.env 2>/dev/null | tr '\n' '|')
+G=$( [ -n "$K" ] && tr '\0' '\n' < /proc/$K/environ 2>/dev/null |
+  grep -E "^(${E}TURNIP_|FD_|MESA_|GALLIUM_|XWAYLAND_|ANDROMARCHY_|LIBVA_|TERMUX_VA_|POWOS_SESSION_MODE|QT_FORCE_STDERR_LOGGING)[A-Za-z0-9_]*=" |
+  tr '\n' ' ')
 exec nsenter -t "$PID" -m -- /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- /usr/bin/env -i \
   HOME=/home/powos USER=powos LOGNAME=powos SHELL=/bin/bash TERM=xterm-256color \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
@@ -33,5 +41,5 @@ exec nsenter -t "$PID" -m -- /usr/bin/setpriv --reuid=powos --regid=powos --init
   XDG_RUNTIME_DIR=/run/powos-app \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus \
   DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus \
-  ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY="$WAYLAND_DISPLAY"} $X \
+  ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY="$WAYLAND_DISPLAY"} $X $G \
   /bin/bash -lc "cd ~ && $1"
