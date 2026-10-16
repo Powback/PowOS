@@ -290,8 +290,27 @@ public class MainActivity extends Activity
         }
     }
 
+    /**
+     * Connected to the desktop (Native.nativeStart on the current surface). PowOS: the connection lasts while the
+     * activity is in the background (the surface does too, see onCreate), so coming back - swiping home to the
+     * desktop - shows its last frame at once instead of reconnecting and waiting ~0.5 s for a first frame.
+     */
+    private boolean nativeRunning;
+
+    private void startNative(Surface surface) {
+        stopNative();
+        applyConnectionConfig();
+        Native.nativeStart(surface, clipboard);
+        nativeRunning = true;
+        pushRefreshRate();
+        applyMicState();
+        applyAudioLatency();
+        applyAudioKeepalive();
+    }
+
     private void stopNative() {
         Native.nativeStop();
+        nativeRunning = false;
         compatibleFdReady = false;
     }
 
@@ -354,6 +373,10 @@ public class MainActivity extends Activity
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         surfaceView = new SurfaceView(this);
         surfaceView.getHolder().setFormat(android.graphics.PixelFormat.TRANSLUCENT);
+        // The surface (and the desktop's last frame in it) lives as long as the view, not only while the activity is
+        // visible: swiping home or back to the desktop shows it at once (see nativeRunning).
+        if (android.os.Build.VERSION.SDK_INT >= 34)
+            surfaceView.setSurfaceLifecycle(SurfaceView.SURFACE_LIFECYCLE_FOLLOWS_ATTACHMENT);
         surfaceView.setFocusable(true);
         surfaceView.setFocusableInTouchMode(true);
         surfaceView.setOnDragListener(new DropTarget(this)); // Android drag and drop -> ~/Downloads / clipboard
@@ -779,14 +802,8 @@ public class MainActivity extends Activity
         // and registers SERVICE_TYPE_CAMERA on the very first connect rather than a
         // later reconnect. Idempotent, so safe to call on every resume.
         applyCameraState();
-        if (surfaceReady) {
-            stopNative();
-            applyConnectionConfig();
-            Native.nativeStart(surfaceView.getHolder().getSurface(), clipboard);
-            pushRefreshRate();
-            applyMicState();
-            applyAudioLatency();
-            applyAudioKeepalive();
+        if (surfaceReady && !nativeRunning) {
+            startNative(surfaceView.getHolder().getSurface());
         }
 
         // ===== 重新读取触摸板设置 =====
@@ -898,8 +915,7 @@ public class MainActivity extends Activity
         DisplayManager dm = getSystemService(DisplayManager.class);
         if (dm != null)
             dm.unregisterDisplayListener(displayListener);
-        if (!mPipTransitionPending && !isInPictureInPictureMode())
-            stopNative();
+        // PowOS: stays connected in the background (nativeRunning); the surface going away disconnects it.
         abandonMediaAudioFocus();
     }
 
@@ -1102,13 +1118,7 @@ public class MainActivity extends Activity
         surfaceReady = true;
         // Same ordering guarantee as onResume: camera service settled before connect.
         applyCameraState();
-        stopNative();
-        applyConnectionConfig();
-        Native.nativeStart(holder.getSurface(), clipboard);
-        pushRefreshRate();
-        applyMicState();
-        applyAudioLatency();
-        applyAudioKeepalive();
+        startNative(holder.getSurface());
 
         // ===== 更新屏幕尺寸并重置平滑状态 =====
         virtualTouchpad.onSurfaceChanged();
