@@ -1,0 +1,1 @@
+{"Config":{"RootFS":"/usr/share/fex-emu/RootFS/Fedora_44","ThunkHostLibs":"/usr/lib/fex-emu/HostThunks","ThunkGuestLibs":"/usr/share/fex-emu/GuestThunks","ThunkConfig":"/usr/share/fex-emu/thunks.json"}}

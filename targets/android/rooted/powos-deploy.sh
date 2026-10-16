@@ -27,6 +27,10 @@ K=$R/usr/share/kwin/scripts/powos-translucent-desktop
 install -Dm 644 $T/powos-plasma/powos-translucent-desktop/metadata.json $K/metadata.json
 install -Dm 644 $T/powos-plasma/powos-translucent-desktop/contents/code/main.js $K/contents/code/main.js
 rm -rf $T/powos-plasma
+# FEX's config (as the fex-emu package installs it): RootFS + thunks, GPU on, ALSA off (see pkgs/fex-emu/PKGBUILD).
+install -Dm644 $T/fex-Config.json $R/usr/share/fex-emu/Config.json
+install -Dm644 $T/fex-thunks.json $R/usr/share/fex-emu/thunks.json
+rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
   $T/powos-android-tasks.desktop
 

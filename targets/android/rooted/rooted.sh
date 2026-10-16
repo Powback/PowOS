@@ -42,6 +42,8 @@ deploy)
   for f in powos-android-app powos-android-tasks powos-android-tasks.desktop; do
     adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
   done
+  adb push -q "$HERE/../pkgs/fex-emu/Config.json" /data/local/tmp/fex-Config.json
+  adb push -q "$HERE/../pkgs/fex-emu/thunks.json" /data/local/tmp/fex-thunks.json
   adb shell rm -rf /data/local/tmp/powos-plasma
   adb push -q "$HERE/../session/plasma" /data/local/tmp/powos-plasma
   asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh" ;;

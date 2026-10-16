@@ -26,8 +26,10 @@ optdepends=('vulkan-icd-loader: Vulkan thunk (native Turnip)'
             'alsa-lib: asound thunk')
 source=("git+https://github.com/FEX-Emu/FEX.git#tag=FEX-$pkgver"
         0001-exec-by-path-through-libc.patch
-        0002-thunkgen-llvm23.patch)
-sha256sums=('SKIP' 'SKIP' 'SKIP')
+        0002-thunkgen-llvm23.patch
+        Config.json
+        thunks.json)
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 # x86 sysroot for cross-compiling the guest thunks (x86-64 and i686) with clang. Headers + glibc/libstdc++
 # from Arch Linux x86_64 (core/extra/multilib). Fetched with the package list exact (-dd): the sysroot only
@@ -117,4 +119,8 @@ build() {
 package() {
   DESTDIR="$pkgdir" cmake --install build
   install -Dm644 FEX/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  # System-wide config: the RootFS and which thunks x86 programs get. GPU (GL/Vulkan/drm/Wayland) on; ALSA off:
+  # its guest library lacks symbol versions and snd_mixer_elem_set_callback, and Steam's web UI (libcef) died on it.
+  install -Dm644 Config.json "$pkgdir/usr/share/fex-emu/Config.json"
+  install -Dm644 thunks.json "$pkgdir/usr/share/fex-emu/thunks.json"
 }
