@@ -1,0 +1,45 @@
+PowOS: Xwayland hang fix - a Present fence callback fires once.
+
+Against lotfibennour/andromarchy @ 220754d390f743aa5a8227e689402de1a6eb0281: a fifth patch for the Xwayland that
+build-inside.sh compiles (24.1.13 + lfdevs's KGSL patches). The hang is described in the patch header.
+
+--- a/patches/xwayland/0005-present-fence-callback-fires-once.patch	1970-01-01 01:00:00
++++ b/patches/xwayland/0005-present-fence-callback-fires-once.patch	2026-10-16 17:45:24
+@@ -0,0 +1,37 @@
++From: PowOS
++Subject: present: a fence callback fires once (Xwayland hang in miSyncTriggerFence)
++
++24.1's miSyncTriggerFence re-walks a fence's triggers until none fires (a
++trigger may delete others). Present's trigger counted as firing for as long as
++its callback was set, and nothing cleared it: when xwl_present_re_execute
++requeued the request for a later MSC (KGSL surfaceless: no flips, frame
++callbacks held back) the walk fired it again, forever, inside ProcSyncDispatch.
++Xwayland spun a core and stopped serving clients (Steam's web UI, Proton games).
++
++Clear the callback before calling it: it is armed only while the fence is
++untriggered (present_execute_wait), so it is meant to run once. The fence may
++be freed by the callback, so nothing touches it afterwards.
++---
++ present/present_fence.c | 9 +++++++--
++ 1 file changed, 7 insertions(+), 2 deletions(-)
++
++diff --git a/present/present_fence.c b/present/present_fence.c
++--- a/present/present_fence.c
+++++ b/present/present_fence.c
++@@ -52,9 +52,14 @@
++ present_fence_sync_trigger_fired(SyncTrigger *trigger)
++ {
++     struct present_fence        *present_fence = container_of(trigger, struct present_fence, trigger);
+++    void                        (*callback)(void *param) = present_fence->callback;
+++    void                        *param = present_fence->param;
++ 
++-    if (present_fence->callback)
++-        (*present_fence->callback)(present_fence->param);
+++    if (callback) {
+++        present_fence->callback = NULL;
+++        present_fence->param = NULL;
+++        (*callback)(param);
+++    }
++ }
++ 
++ static void
