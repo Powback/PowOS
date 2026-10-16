@@ -42,12 +42,10 @@ ln -sfn "$S" "$HOME/.steam/steam"
 ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # No -cef-disable-gpu here: the ARM64 client's web UI then loses its GPU process ("GPU process isn't usable. Goodbye",
 # exit_code=4, in a restart loop) and never shows a window.
-# HACK: Steam's web UI on Mesa's software GL. On freedreno (KGSL) its GPU process died every few seconds ("GPU state
-# invalid", exit_code 512, then 4) and pages stayed black; 0 crashes in 90 s on llvmpipe. Unsetting the session's
-# MESA_LOADER_DRIVER_OVERRIDE is not enough - the client sets it again for steamwebhelper - but LIBGL_ALWAYS_SOFTWARE
-# wins over it. Vulkan is untouched: Proton games (DXVK/vkd3d) keep Turnip on the Adreno. Real fix: CEF's GPU
-# process on freedreno/KGSL; OpenGL-only games also get llvmpipe until then.
-export LIBGL_ALWAYS_SOFTWARE=1
+# No LIBGL_ALWAYS_SOFTWARE: Mesa's software GLX (drisw) shares images with the X server through SysV shm, which on
+# Android is the shim's emulation the X server can't attach - Steam segfaulted at start ("glx: failed to create
+# drisw screen"). The client sets MESA_LOADER_DRIVER_OVERRIDE=kgsl for steamwebhelper itself, so its web UI runs on
+# freedreno; its GPU process still restarts now and then ("GPU state invalid", exit_code 512).
 # HACK: -no-cef-sandbox - inside Chromium's sandbox the web UI's GPU process died at start (exit_code=4,
 # GPU_DEAD_ON_ARRIVAL: 57 times, then "GPU process isn't usable. Goodbye" and no UI); without it 2 restarts in 90 s.
 # Real fix: find what the sandbox denies Mesa here (Android's kernel/seccomp).
