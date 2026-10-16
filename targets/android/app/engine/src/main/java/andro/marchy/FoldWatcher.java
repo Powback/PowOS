@@ -127,10 +127,22 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         overrideAt = nowMs;
         Log.i(TAG, "holding the " + (state == 0 ? "cover" : "inner screen") + " from hinge " + prevAngle + " (" + Math.round(speed) + "°/s)");
         overrideShell("cmd device_state state " + state);
+        // By the clock, not the next hinge event: a phone put down mid-fold sends none, and the hold would stay.
+        hingeHandler.removeCallbacks(expire);
+        hingeHandler.postDelayed(expire, HOLD_MAX_MS);
     }
+
+    private final Runnable expire = () -> {
+        if (override != -1) {
+            Log.i(TAG, "hold expired");
+            letGo();
+        }
+    };
+    private Handler hingeHandler;
 
     private void letGo() {
         Log.i(TAG, "letting go at hinge " + prevAngle);
+        hingeHandler.removeCallbacks(expire);
         override = -1;
         overrideShell("cmd device_state state reset");
     }
@@ -213,7 +225,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         // Its own thread: the panel check on a display change (a root dumpsys, ~0.2 s) mustn't hold up the veil.
         hingeThread = new android.os.HandlerThread("FoldHinge");
         hingeThread.start();
-        sensors.registerListener(hingeListener, hinge, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, new Handler(hingeThread.getLooper()));
+        hingeHandler = new Handler(hingeThread.getLooper());
+        sensors.registerListener(hingeListener, hinge, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, hingeHandler);
     }
 
     void stop() {
