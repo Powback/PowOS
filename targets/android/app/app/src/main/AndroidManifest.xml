@@ -37,6 +37,7 @@
         <activity
             android:name=".MainActivity"
             android:label="PowOS Launcher"
+            android:taskAffinity="com.powos.app.launcher"
             android:clearTaskOnLaunch="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
             android:excludeFromRecents="true"
@@ -45,8 +46,9 @@
             android:resizeableActivity="true"
             android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustResize">
-            <!-- PowOS: the PowOS launcher. Android's home entry is the engine's HomeActivity ("PowOS"), which opens
-                 this or the PowOS desktop per screen (Settings > Home screen); also its own app entry. -->
+            <!-- PowOS: the PowOS launcher (Home opens it through .HomeLauncher on the cover screen; also its own app
+                 entry). Its own task (taskAffinity): sharing the desktop's task, each singleTask switch to the
+                 desktop finished it, and every Home rebuilt it from scratch (~0.7 s). -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
