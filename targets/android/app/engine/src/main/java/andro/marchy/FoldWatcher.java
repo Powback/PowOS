@@ -60,25 +60,48 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             dm.unregisterDisplayListener(this);
         if (thread != null)
             thread.quitSafely();
+        if (shell != null)
+            shell.destroy();
     }
 
     private Boolean isBig() {
         // The hinge state as Android commits it, through root (rooted mode only, as the reaction below). The app's
         // own view of display 0 (metrics, configuration, even its mode) didn't change through a fold: this app
         // targets SDK 28, and Android hands it compatibility-adjusted display info.
-        try {
-            Process p = new ProcessBuilder("su", "-c", "cmd device_state state").redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes());
-            p.waitFor();
-            if (out.contains("name='OPENED'"))
-                return true;
-            if (out.contains("name='CLOSED'"))
-                return false;
-        } catch (Exception e) {
-            Log.w(TAG, "device state: " + e);
-        }
+        String out = root("cmd device_state state");
+        if (out.contains("name='OPENED'"))
+            return true;
+        if (out.contains("name='CLOSED'"))
+            return false;
         return null; // in between (tent, half open) or unknown: no change
+    }
 
+    // One root shell for the whole session: a new `su` per command took long enough that, on unfold, the cover
+    // screen's app showed on the inner screen before the desktop came up.
+    private Process shell;
+    private java.io.BufferedWriter shellIn;
+    private java.io.BufferedReader shellOut;
+    private static final String END = "__powos_fold_end__";
+
+    /** Runs a command as root and returns its output (on this watcher's thread only). */
+    private String root(String cmd) {
+        try {
+            if (shell == null || !shell.isAlive()) {
+                shell = new ProcessBuilder("su").redirectErrorStream(true).start();
+                shellIn = new java.io.BufferedWriter(new java.io.OutputStreamWriter(shell.getOutputStream()));
+                shellOut = new java.io.BufferedReader(new java.io.InputStreamReader(shell.getInputStream()));
+            }
+            shellIn.write(cmd + "; echo " + END + "\n");
+            shellIn.flush();
+            StringBuilder out = new StringBuilder();
+            for (String line; (line = shellOut.readLine()) != null && !line.equals(END); )
+                out.append(line).append('\n');
+            return out.toString();
+        } catch (java.io.IOException e) {
+            Log.w(TAG, "root shell: " + e);
+            shell = null;
+            return "";
+        }
     }
 
     @Override
@@ -140,12 +163,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         return prefs.getBoolean(KEY_UNFOLD_DESKTOP, true) && RootMode.enabled();
     }
 
-    private static void su(String cmd) {
-        try {
-            new ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start().waitFor();
-        } catch (Exception e) {
-            Log.w(TAG, "su " + cmd + ": " + e);
-        }
+    private void su(String cmd) {
+        root(cmd);
     }
 
     @Override
@@ -156,14 +175,17 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     public void onDisplayRemoved(int displayId) {
     }
 
-    /** Unfolded: the app carried onto the cover goes back into its PowOS window, then the desktop comes up. */
+    /**
+     * Unfolded: the desktop first (Android shows the cover screen's app on the inner screen until then), then the
+     * app carried onto the cover goes back into its PowOS window behind it.
+     */
     private void unfolded() {
         if (!enabled())
             return;
+        su("am start --display 0 -n " + ctx.getPackageName() + "/" + MainActivity.class.getName());
         if (carried != null) {
             su("am display move-stack " + carried[0] + " " + carried[1]); // fails harmlessly if the window closed
             carried = null;
         }
-        su("am start --display 0 -n " + ctx.getPackageName() + "/" + MainActivity.class.getName());
     }
 }

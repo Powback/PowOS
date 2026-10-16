@@ -114,12 +114,29 @@ def watch():
             f.write(entry)
         os.replace(ACTIVE + ".tmp", ACTIVE)
 
+    # A non-Android window (the desktop, a Linux app) only replaces the Android app as "what's in use" once it kept
+    # the focus for a while: a touch on the desktop while folding the phone shut must not swap what the cover shows.
+    settle = QTimer()
+    settle.setSingleShot(True)
+    pending = [""]
+
+    def settled():
+        active[0] = pending[0]
+        write_active()
+
+    settle.timeout.connect(settled)
+
     @ClassInfo({"D-Bus Interface": "org.powos.AndroidTasks"})
     class Service(QObject):
         @Slot(str)
         def Activated(self, cls):  # noqa: N802 - D-Bus method name
-            active[0] = cls
-            write_active()
+            if cls.startswith("android-"):
+                settle.stop()
+                active[0] = cls
+                write_active()
+            else:
+                pending[0] = cls
+                settle.start(10_000)
 
     def refresh():
         nonlocal found
