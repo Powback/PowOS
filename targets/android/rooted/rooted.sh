@@ -39,7 +39,9 @@ deploy)
   for f in powos-start.sh powos-session.sh powos-rooted-session powos-deploy.sh; do
     adb push -q "$HERE/$f" "/data/local/tmp/$f"
   done
-  adb push -q "$HERE/../session/powos-android-app" /data/local/tmp/powos-android-app
+  for f in powos-android-app powos-android-tasks powos-android-tasks.desktop; do
+    adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
+  done
   asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh" ;;
 start)
   asu "sh /data/powos/powos-start.sh"; asu "tail -5 /data/powos/start.log" ;;

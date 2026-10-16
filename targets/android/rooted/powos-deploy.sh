@@ -14,7 +14,10 @@ install -m 755 $T/powos-start.sh /data/adb/service.d/powos.sh
 install -m 755 $T/powos-session.sh /data/powos/powos-session.sh
 install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
 install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
-rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-rooted-session $T/powos-android-app
+install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
+install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android-tasks.desktop
+rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
+  $T/powos-android-tasks.desktop
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run
@@ -41,7 +44,7 @@ EOF
 # for a connection from itself, so PowOS's adb key is authorized here directly (the same as "Always allow";
 # revoke: remove its line from /data/misc/adb/adb_keys).
 chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/bash -c '
-  pacman -Q scrcpy android-tools >/dev/null 2>&1 || pacman -S --noconfirm --needed scrcpy android-tools >/dev/null
+  pacman -Q scrcpy android-tools pyside6 >/dev/null 2>&1 || pacman -S --noconfirm --needed scrcpy android-tools pyside6 >/dev/null
   [ -f /home/powos/.android/adbkey.pub ] || setpriv --reuid=powos --regid=powos --init-groups -- \
     env HOME=/home/powos adb keygen /home/powos/.android/adbkey >/dev/null 2>&1'
 K=$R/home/powos/.android/adbkey.pub

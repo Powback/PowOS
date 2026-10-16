@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Android apps in the taskbar
+Comment=The phone's running Android apps as PowOS taskbar entries (powos-android-tasks)
+Exec=powos-android-tasks
+NoDisplay=true
+X-KDE-autostart-phase=2

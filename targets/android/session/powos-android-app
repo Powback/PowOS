@@ -1,15 +1,20 @@
 #!/bin/sh
-# powos-android-app <package> [title]: an Android app as a PowOS window.
+# powos-android-app <package> [title]            an Android app as a PowOS window (started on its own display)
+# powos-android-app --task <task id> <package> [title]   an app that is already running on the phone's screen,
+#                                                 moved into a PowOS window (powos-android-tasks, on a taskbar click)
 #
 # With adb to the phone itself (rooted mode: rooted/powos-deploy.sh authorizes PowOS's adb key and adbd listens on
 # 127.0.0.1:5555): scrcpy gives the app its own Android virtual display and shows it in a normal Wayland window -
 # KWin decorations, the taskbar (app_id android-<package> = its .desktop entry, so the right icon and grouping),
 # alt-tab, resize. Touch, keyboard and mouse go back to the app. Sound stays on Android (--no-audio: the app plays
-# through the phone's own audio, no second copy). Closing the window closes the app's display.
+# through the phone's own audio, no second copy). Closing the window moves the app back to the phone's screen
+# (--no-vd-destroy-content): it keeps running, as with any window closed on Android's desktop mode.
 # Without adb (the no-root app): the app opens as a floating Android window over the desktop (android-request).
+task=
+[ "$1" = --task ] && { task=$2; shift 2; }
 pkg=$1
 title=${2:-$1}
-[ -n "$pkg" ] || { echo "usage: powos-android-app <package> [title]" >&2; exit 2; }
+[ -n "$pkg" ] || { echo "usage: powos-android-app [--task <id>] <package> [title]" >&2; exit 2; }
 dev=127.0.0.1:5555
 
 if command -v scrcpy >/dev/null && command -v adb >/dev/null; then
@@ -23,8 +28,25 @@ if command -v scrcpy >/dev/null && command -v adb >/dev/null; then
     # (scrcpy 5.0.1, 2026-10-16). Real fix: find why (scrcpy issue or our Wayland scaling), then use it.
     scale=$(kscreen-doctor -j 2>/dev/null | jq -r '.outputs[0].scale // empty' 2>/dev/null)
     dpi=$(awk -v s="${scale:-1.5}" 'BEGIN { printf "%d", s * 160 }')
-    exec scrcpy -s $dev --new-display=1080x1440/"$dpi" --no-vd-system-decorations \
-      --start-app="$pkg" --no-audio --window-title="$title"
+    set -- -s $dev --new-display=1080x1440/"$dpi" --no-vd-system-decorations --no-vd-destroy-content \
+      --no-audio --window-title="$title"
+    [ -n "$task" ] || exec scrcpy "$@" --start-app="$pkg"
+    # A running task: an empty display first, then Android moves the task (with everything in it - a split pair
+    # too) onto it once scrcpy reports the display's id.
+    log=${XDG_RUNTIME_DIR:-/tmp}/powos-android-app.$$.log
+    scrcpy "$@" > "$log" 2>&1 &
+    pid=$!
+    for _ in $(seq 100); do
+      id=$(sed -n 's/.*New display: .* (id=\([0-9]*\)).*/\1/p' "$log")
+      [ -n "$id" ] && break
+      kill -0 $pid 2>/dev/null || break
+      sleep 0.1
+    done
+    [ -n "$id" ] && adb -s $dev shell am display move-stack "$task" "$id"
+    wait $pid
+    rm -f "$log"
+    exit
   fi
 fi
+[ -z "$task" ] || exit 1   # a running app can't be moved without adb
 exec android-request float "$pkg"

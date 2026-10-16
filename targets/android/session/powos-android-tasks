@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""powos-android-tasks: the phone's running Android apps in PowOS's taskbar.
+
+Started with the desktop (/etc/xdg/autostart/powos-android-tasks.desktop). Every 2 s it reads Android's task list
+(adb to the phone itself, 127.0.0.1:5555 - rooted mode; without adb it exits). Each app running on the phone's own
+screen gets a taskbar entry: a small minimized stand-in window whose app_id is the app's .desktop entry
+(android-<package>, written by the PowOS app), so it shows the app's icon and name. Clicking it moves the running
+app - the same instance, a split-screen pair as one - into a real PowOS window (powos-android-app --task). Closing
+that window puts the app back on the phone's screen, and the stand-in returns.
+
+HACK: one small process per stand-in: Qt sets the Wayland app_id (= taskbar icon and grouping) per process, not
+per window. Real fix: a native helper setting app_id per toplevel.
+
+    powos-android-tasks                         the watcher
+    powos-android-tasks --stub <task> <pkg> <title>   one stand-in (started by the watcher)
+"""
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+
+DEV = "127.0.0.1:5555"
+SHARE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app"), "share")
+# Not apps the user ran: PowOS itself, OnePlus's split-screen/canvas container.
+IGNORE = {"com.powos.app", "com.oplus.pscanvas"}
+
+
+def adb(*args, timeout=10):
+    return subprocess.run(["adb", "-s", DEV, *args], capture_output=True, text=True, timeout=timeout).stdout
+
+
+def tasks():
+    """{root task id: [packages]} of the apps on the phone's own screen (display 0)."""
+    found, cur = {}, None
+    for line in adb("shell", "am", "stack", "list").splitlines():
+        m = re.match(r"RootTask id=(\d+) .*displayId=(\d+)", line)
+        if m:
+            cur = {"id": int(m[1]), "display": int(m[2]), "type": None, "pkgs": []}
+            found[cur["id"]] = cur
+            continue
+        if cur is None:
+            continue
+        t = re.search(r"mActivityType=(\w+)", line)
+        if t and cur["type"] is None:
+            cur["type"] = t[1]
+        p = re.match(r"\s+taskId=\d+: ([\w.]+)/", line)
+        if p and p[1] not in cur["pkgs"]:
+            cur["pkgs"].append(p[1])
+    return {
+        tid: t["pkgs"]
+        for tid, t in found.items()
+        if t["display"] == 0 and t["type"] == "standard" and t["pkgs"] and not set(t["pkgs"]) & IGNORE
+    }
+
+
+def label(pkg):
+    try:
+        with open(os.path.join(SHARE, "applications", f"android-{pkg}.desktop")) as f:
+            for line in f:
+                if line.startswith("Name="):
+                    return line[5:].strip()
+    except OSError:
+        pass
+    return pkg
+
+
+def watch():
+    if not adb("get-state").strip() == "device":
+        subprocess.run(["adb", "connect", DEV], capture_output=True)
+        if not adb("get-state").strip() == "device":
+            sys.exit("no adb to the phone (rooted mode only)")
+    stubs = {}  # task id -> Popen
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    try:
+        while True:
+            try:
+                now = tasks()
+            except Exception as e:  # adb hiccup: keep the stand-ins, try again
+                print("tasks:", e, file=sys.stderr)
+                time.sleep(2)
+                continue
+            for tid in list(stubs):
+                if tid not in now or stubs[tid].poll() is not None:
+                    if stubs[tid].poll() is None:
+                        stubs[tid].terminate()
+                    del stubs[tid]
+            for tid, pkgs in now.items():
+                if tid not in stubs:
+                    title = " | ".join(label(p) for p in pkgs)
+                    stubs[tid] = subprocess.Popen([sys.argv[0], "--stub", str(tid), pkgs[0], title])
+            time.sleep(2)
+    finally:
+        for p in stubs.values():
+            p.terminate()
+
+
+def stub(task, pkg, title):
+    from PySide6.QtCore import QRect, Qt
+    from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QRasterWindow
+
+    class Stub(QRasterWindow):
+        def paintEvent(self, _):
+            QPainter(self).fillRect(QRect(0, 0, self.width(), self.height()), QColor(0x20, 0x20, 0x20))
+
+    app = QGuiApplication(sys.argv[:1])
+    app.setDesktopFileName(f"android-{pkg}")  # the Wayland app_id: the taskbar's icon and grouping
+    icon = os.path.join(SHARE, "icons/hicolor/192x192/apps", f"android-{pkg}.png")
+    if os.path.exists(icon):
+        app.setWindowIcon(QIcon(icon))
+    w = Stub()
+    w.setTitle(title)
+    w.resize(320, 200)
+    done = []
+
+    def clicked(*why):
+        # Clicked in the taskbar (KWin restores and activates the minimized stand-in): the running app into a
+        # PowOS window; this stand-in's job is done.
+        print(f"stub {pkg}: {why} active={w.isActive()} state={w.windowStates()}", file=sys.stderr, flush=True)
+        if done or Qt.WindowMinimized in w.windowStates() or not (w.isActive() or w.isExposed()):
+            return
+        done.append(1)
+        subprocess.Popen(["powos-android-app", "--task", task, pkg, title], start_new_session=True)
+        w.hide()
+        app.quit()
+
+    w.activeChanged.connect(lambda: clicked("active"))
+    w.windowStateChanged.connect(lambda s: clicked("state", s))
+    w.showMinimized()
+    app.exec()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 5 and sys.argv[1] == "--stub":
+        stub(*sys.argv[2:5])
+    else:
+        watch()
