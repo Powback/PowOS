@@ -119,7 +119,9 @@ build() {
 package() {
   DESTDIR="$pkgdir" cmake --install build
   install -Dm644 FEX/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  # System-wide config: the RootFS and which thunks x86 programs get. GPU (GL/Vulkan/drm/Wayland) on; ALSA off:
+  # System-wide config: the RootFS, the JIT disk cache (translated code kept in ~/.cache/fex-emu, so the next start
+  # of Steam or a game skips most translation; FEX doesn't prune it yet - watch its size) and which thunks x86
+  # programs get. GPU (GL/Vulkan/drm/Wayland) on; ALSA off:
   # its guest library lacks symbol versions and snd_mixer_elem_set_callback, and Steam's web UI (libcef) died on it.
   install -Dm644 Config.json "$pkgdir/usr/share/fex-emu/Config.json"
   install -Dm644 thunks.json "$pkgdir/usr/share/fex-emu/thunks.json"
