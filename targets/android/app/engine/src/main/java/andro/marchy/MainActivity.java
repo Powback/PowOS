@@ -1251,8 +1251,10 @@ public class MainActivity extends Activity
         b.setAlpha(0.85f);
         root.addView(b, lp);
         mKeyboardButton = b;
-        // Where the user last put it (clamped: the screen may be another size now, e.g. folded).
-        b.post(() -> {
+        // Where the user last put it, re-fitted whenever the window changes size (split screen, folded/unfolded):
+        // a saved spot outside the new window would leave the button unreachable.
+        root.addOnLayoutChangeListener((v, l, t, r, bot, ol, ot, or, ob) -> {
+            if (r - l == or - ol && bot - t == ob - ot) return;
             b.setTranslationX(clampButtonX(b, prefs.getFloat(KEY_KEYBOARD_BUTTON_X, 0), margin));
             mKeyboardButtonDy = clampButtonDy(b, prefs.getFloat(KEY_KEYBOARD_BUTTON_DY, 0), margin);
             relayout();
@@ -1262,15 +1264,16 @@ public class MainActivity extends Activity
     private static final String KEY_KEYBOARD_BUTTON_X = "keyboard_button_x";
     private static final String KEY_KEYBOARD_BUTTON_DY = "keyboard_button_dy";
 
-    // The ⌨ button stays on screen: it starts in the bottom-right corner, so it only moves left and up from there.
+    // The ⌨ button stays inside the window: it starts in the bottom-right corner, so it only moves left and up from
+    // there (offsets <= 0, whatever the window size - also before the first layout, when the size is still 0).
     private static float clampButtonX(View v, float x, int margin) {
         View p = (View) v.getParent();
-        return Math.max(-(p.getWidth() - v.getWidth() - 2 * margin), Math.min(0, x));
+        return Math.min(0, Math.max(-(p.getWidth() - v.getWidth() - 2 * margin), x));
     }
 
     private static float clampButtonDy(View v, float dy, int margin) {
         View p = (View) v.getParent();
-        return Math.max(-(p.getHeight() - v.getHeight() - 2 * margin), Math.min(0, dy));
+        return Math.min(0, Math.max(-(p.getHeight() - v.getHeight() - 2 * margin), dy));
     }
 
     // Show/hide the extra-keys bar and re-apply the layout so the display area
