@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PowOS: an LSPosed module for OnePlus's launcher (com.android.launcher, OxygenOS 16) so a third-party home -
+     PowOS's launcher or desktop - gets what OnePlus's own home has. See README.md. No UI. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="PowOS for OnePlus launcher">
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription"
+            android:value="PowOS as home on OnePlus: instant swipe-to-home, split and floating-window gestures" />
+        <meta-data android:name="xposedminversion" android:value="93" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+    </application>
+</manifest>

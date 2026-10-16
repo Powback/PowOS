@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed scope: OnePlus's launcher (also the recents/gesture provider). -->
+    <string-array name="xposed_scope">
+        <item>com.android.launcher</item>
+    </string-array>
+</resources>
