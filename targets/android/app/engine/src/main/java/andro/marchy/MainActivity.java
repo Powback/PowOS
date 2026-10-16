@@ -1059,9 +1059,35 @@ public class MainActivity extends Activity
     public void surfaceCreated(SurfaceHolder holder) {
     }
 
+    /**
+     * PowOS on a foldable, folded (rooted mode, setting "unfold_opens_desktop"): the desktop doesn't follow onto the
+     * cover screen. Android moves it there and resizes it, which re-laid out the whole desktop (and again on
+     * unfold); instead it steps aside - the cover shows what was below it, the last app or the launcher - and keeps
+     * its size for when the phone opens again.
+     */
+    private boolean onCoverScreen(android.content.res.Configuration c) {
+        return c.smallestScreenWidthDp < 600 && RootMode.enabled()
+            && getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(FoldWatcher.KEY_UNFOLD_DESKTOP, true);
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration c) {
+        super.onConfigurationChanged(c);
+        if (onCoverScreen(c)) {
+            Log.i(TAG, "folded: the desktop steps aside on the cover screen");
+            moveTaskToBack(true);
+        }
+    }
+
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
         Log.i(TAG, "surfaceChanged: " + width + "x" + height);
+        if (onCoverScreen(getResources().getConfiguration())) {
+            // Folded: the desktop keeps its inner-screen size (no re-layout to the cover's shape and back); it is
+            // stepping aside (onConfigurationChanged), and comes back unchanged on unfold (FoldWatcher).
+            Log.i(TAG, "on the cover screen: desktop keeps its size");
+            return;
+        }
         viewWidth = width;
         viewHeight = height;
         surfaceReady = true;
