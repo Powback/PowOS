@@ -295,13 +295,22 @@ public class MainActivity extends Activity
      * activity is in the background (the surface does too, see onCreate), so coming back - swiping home to the
      * desktop - shows its last frame at once instead of reconnecting and waiting ~0.5 s for a first frame.
      */
-    private boolean nativeRunning;
+    private boolean nativeRunning() {
+        return nativeOwner == this;
+    }
+
+    /**
+     * Which of this activity's instances holds the (process-wide) connection. Two can exist - the desktop opened as
+     * MainActivity and as its home alias HomeDesktop - and the hidden one's surface going away disconnected the
+     * visible one's connection, while that one still believed it was connected: the desktop stayed dark.
+     */
+    private static MainActivity nativeOwner;
 
     private void startNative(Surface surface) {
         stopNative();
         applyConnectionConfig();
         Native.nativeStart(surface, clipboard);
-        nativeRunning = true;
+        nativeOwner = this;
         pushRefreshRate();
         applyMicState();
         applyAudioLatency();
@@ -310,8 +319,14 @@ public class MainActivity extends Activity
 
     private void stopNative() {
         Native.nativeStop();
-        nativeRunning = false;
+        nativeOwner = null;
         compatibleFdReady = false;
+    }
+
+    /** Disconnects only if this instance holds the connection (see nativeOwner). */
+    private void stopOwnNative() {
+        if (nativeOwner == this)
+            stopNative();
     }
 
     @Override
@@ -802,7 +817,7 @@ public class MainActivity extends Activity
         // and registers SERVICE_TYPE_CAMERA on the very first connect rather than a
         // later reconnect. Idempotent, so safe to call on every resume.
         applyCameraState();
-        if (surfaceReady && !nativeRunning) {
+        if (surfaceReady && !nativeRunning()) {
             startNative(surfaceView.getHolder().getSurface());
         }
 
@@ -968,7 +983,7 @@ public class MainActivity extends Activity
             return;
         }
         abandonMediaAudioFocus();
-        stopNative();
+        stopOwnNative();
         if (compatibleReceiverRegistered) {
             unregisterReceiver(compatibleBridgeReceiver);
             compatibleReceiverRegistered = false;
@@ -1133,7 +1148,7 @@ public class MainActivity extends Activity
         surfaceReady = false;
         releaseAllMouseButtons();
         resetCapturedTouchpadGesture();
-        stopNative();
+        stopOwnNative();
     }
 
 
