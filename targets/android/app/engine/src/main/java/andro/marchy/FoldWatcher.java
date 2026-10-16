@@ -45,11 +45,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         thread = new android.os.HandlerThread("FoldWatcher");
         thread.start();
         handler = new Handler(thread.getLooper());
-        veil = new FoldVeil(ctx);
-        coverFade = new CoverFade(ctx, coverSnapshot());
         handler.post(() -> {
-            grantOverlay();
-            onCover = coverScreen();
             wasBig = isBig();
             if (wasBig != null)
                 folded = !wasBig;
@@ -57,244 +53,11 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             Log.i(TAG, "watching the hinge (open=" + wasBig + ")");
         });
         dm.registerDisplayListener(this, handler);
-        watchHinge();
-    }
-
-    private android.hardware.SensorManager sensors;
-    private android.hardware.SensorEventListener hingeListener;
-    private float lastAngle = -1;
-    private FoldVeil veil;
-    private android.os.HandlerThread hingeThread;
-
-    /** The hinge angle (0 = shut, 180 = flat; -1 unknown), for MainActivity: the sensor is ahead of the configuration. */
-    static volatile float hingeAngle = -1;
-
-    /** Display 0 is on the cover screen (its physical panel, read through root - this app sees adjusted display info). */
-    static volatile boolean onCover;
-
-    /**
-     * The fold as one crossfade (the iPhone Duo's way): from the start of a deliberate fold to its end both screens
-     * are on (device state ALL - Android's own switch cut from one to the other midway, at ~0-25 degrees closing and
-     * within a few degrees of opening). The inner screen (display 0 throughout) fades out as the phone closes, in as
-     * it opens (FoldVeil); the cover fades the other way (CoverFade). Only shut does the inner screen go off, only
-     * fully open the cover.
-     */
-    private static final float SHUT = 2f, OPEN = 160f;
-    /** An opening starts past this (a few degrees of wiggle at rest don't count); a fold (closing) below the next. */
-    private static final float OPENING_FROM = 5f;
-    private static final float CLOSING_FROM = 150f;
-    /** Only a deliberate fold (degrees per second) holds the screens: a phone held half open isn't kept. */
-    private static final float MIN_SPEED = 40f;
-    /** A hold never outlives this: a stuck one would keep both screens on. */
-    private static final long HOLD_MAX_MS = 4000;
-    /** Both screens on: the inner one as display 0, the cover as a second display. */
-    private static final int ALL = 99;
-
-    private float speed, prevAngle = -1;
-    /** Consecutive rising hinge readings. */
-    private int rising;
-    private long prevTime;
-    /** The device state we're holding (ALL), -1 none. Hinge thread. */
-    private int override = -1;
-    private long overrideAt;
-    /** When the last hold ended: the switch that follows is the crossfade's end, no veil of its own. */
-    private volatile long holdEndedAt;
-    private CoverFade coverFade;
-
-    /** The hinge at [a] (hinge thread): the crossfade, and holding both screens from the fold's start to its end. */
-    private void follow(float a, long nowMs) {
-        if (prevAngle >= 0 && nowMs > prevTime) {
-            float v = (a - prevAngle) * 1000f / (nowMs - prevTime);
-            speed = speed * 0.5f + v * 0.5f;
-            rising = a > prevAngle ? rising + 1 : 0;
-        }
-        prevAngle = a;
-        prevTime = nowMs;
-        steer(a, nowMs);
-        // How closed the phone is, over the whole way.
-        float p = Math.max(0f, Math.min(1f, (OPEN - a) / (OPEN - SHUT)));
-        if (override == ALL) {
-            // Both screens simply on, at full brightness, for the whole fold: no fading either of them down (a
-            // faded screen looked switched off).
-            veil.set(0f, false);
-            coverFade.set(1f);
-        } else if (!onCover && a > SHUT && android.os.SystemClock.uptimeMillis() - holdEndedAt > 1000) {
-            // Not right after a hold: shut, display 0 is the cover already, and the veil (on display 0) would stay
-            // over it - blurred and dark when it should be at its best.
-            veil.set((float) Math.pow(p, 1.3), false);
-        }
-    }
-
-    /** Holds both screens on (device-state override) from a fold's start to its end, then lets Android settle. */
-    private void steer(float a, long nowMs) {
-        // Anywhere between shut and open, both screens; at either end, that end's screen alone. A few degrees of
-        // hysteresis, so resting right at an end doesn't flicker between the two.
-        // Opening starts the crossfade at once: Android switches to the inner screen by itself at ~6 degrees, and
-        // starting later let the cover cut out first.
-        if (override == -1) {
-            // Closing likewise: the front screen comes on as soon as the phone starts to close (it rests open at
-            // ~175-180, so waiting for "below fully open" came late).
-            // Never at shut, nor right after a hold ended: the panel check lags ~0.3 s behind the switch back to the
-            // cover, and a hold restarted there turned the cover off and on again.
-            if (android.os.SystemClock.uptimeMillis() - holdEndedAt < 1000)
-                return;
-            // Opening: a steady climb past 4 degrees - shut, the hinge jitters between 0 and 3, and starting on that
-            // turned the cover off and on at random.
-            if ((onCover && a >= 5 && rising >= 2 && speed > 25) || (!onCover && a < CLOSE_START && a > SHUT_END + 2 && speed < 0)
-                    || (a > SHUT_END + 3 && a < OPEN - 5))
-                hold(ALL, nowMs);
-            return;
-        }
-        hingeHandler.removeCallbacks(settleShut);
-        if ((a >= OPEN && speed > 0) || a >= CLOSE_START + 4) // opened all the way (not a close that started high)
-            letGo();
-        else if (a <= SHUT_END)
-            hingeHandler.postDelayed(settleShut, SHUT_SETTLE_MS); // shut only if it stays shut: a wiggle doesn't flip
-    }
-
-    /** Below this, a closing movement starts the crossfade. */
-    private static final float CLOSE_START = 172f;
-    /** How long the hinge must stay shut before the inner screen goes off. */
-    private static final long SHUT_SETTLE_MS = 250;
-    private final Runnable settleShut = () -> {
-        if (override != -1 && prevAngle <= SHUT_END)
-            letGo();
-    };
-
-    /** A closed phone rests at a few degrees, not 0. */
-    private static final float SHUT_END = 5f;
-    /** No hinge movement this long during a hold: let go. */
-    private static final long IDLE_MS = 800;
-    private final Runnable idle = () -> {
-        if (override != -1) {
-            Log.i(TAG, "fold paused");
-            letGo();
-        }
-    };
-
-    private void hold(int state, long nowMs) {
-        override = state;
-        overrideAt = nowMs;
-        Log.i(TAG, "both screens on from hinge " + prevAngle + " (" + Math.round(speed) + "°/s)");
-        overrideShell("cmd device_state state " + state);
-    }
-
-    private final Runnable expire = () -> {
-        if (override != -1) {
-            Log.i(TAG, "hold expired");
-            letGo();
-        }
-    };
-    private Handler hingeHandler;
-
-    private void letGo() {
-        Log.i(TAG, "letting go at hinge " + prevAngle);
-        hingeHandler.removeCallbacks(expire);
-        hingeHandler.removeCallbacks(idle);
-        hingeHandler.removeCallbacks(settleShut);
-        override = -1;
-        holdEndedAt = android.os.SystemClock.uptimeMillis();
-        overrideShell("cmd device_state state reset");
-        veil.clear();
-        // Once Android settled on one screen (the cover's real content is up by then).
-        hingeHandler.postDelayed(coverFade::hide, 300);
-    }
-
-    // The override's own root shell: the watcher thread's one can be busy with a dumpsys for ~0.2 s.
-    private Process overrideSu;
-    private java.io.Writer overrideIn;
-
-    private void overrideShell(String cmd) {
-        try {
-            if (overrideSu == null || !overrideSu.isAlive()) {
-                overrideSu = new ProcessBuilder("su").redirectErrorStream(true)
-                    .redirectOutput(new java.io.File("/dev/null")).start();
-                overrideIn = new java.io.OutputStreamWriter(overrideSu.getOutputStream());
-            }
-            overrideIn.write(cmd + "\n");
-            overrideIn.flush();
-        } catch (java.io.IOException e) {
-            Log.w(TAG, "override: " + e);
-            overrideSu = null;
-        }
-    }
-
-    /**
-     * The enabled home alias as Android's default home: switching aliases drops the remembered choice, and Home
-     * (or a fold) then asked "open with" PowOS or OnePlus's launcher every time, "always" or not.
-     */
-    private void preferHome(String component) {
-        if (component.equals(preferredHome))
-            return;
-        root("cmd package set-home-activity --user 0 " + component);
-        preferredHome = component;
-        Log.i(TAG, "default home: " + component);
-    }
-
-    private String preferredHome;
-
-    private void grantOverlay() {
-        if (!android.provider.Settings.canDrawOverlays(ctx))
-            root("appops set " + ctx.getPackageName() + " SYSTEM_ALERT_WINDOW allow");
-    }
-
-    /** Whether display 0 is the cover panel: the physical panel Android has it on, by its unique id. */
-    private boolean coverScreen() {
-        String out = root("dumpsys display | grep -m1 -o 'Display 0 \\[id=local:[0-9]*'");
-        return out.contains(COVER_PANEL);
-    }
-
-    /** The OnePlus Open's cover panel (dumpsys display: local:<id>); the inner one is local:4630946704981769859. */
-    private static final String COVER_PANEL = "local:4630946316123810436";
-
-    /**
-     * The hinge angle (0 = shut, 180 = flat), logged as it moves: the timings to make folding smooth - switch what
-     * the cover shows before Android swaps the screens, fade instead of a cut - come from real folds.
-     */
-    private void watchHinge() {
-        sensors = ctx.getSystemService(android.hardware.SensorManager.class);
-        android.hardware.Sensor hinge = sensors == null ? null : sensors.getDefaultSensor(android.hardware.Sensor.TYPE_HINGE_ANGLE);
-        if (hinge == null) {
-            Log.i(TAG, "no hinge angle sensor");
-            return;
-        }
-        hingeListener = new android.hardware.SensorEventListener() {
-            @Override
-            public void onSensorChanged(android.hardware.SensorEvent e) {
-                float a = e.values[0];
-                hingeAngle = a;
-                if (Math.abs(a - lastAngle) < 1f)
-                    return;
-                lastAngle = a;
-                Log.v(TAG, "hinge " + a);
-                if (enabled())
-                    follow(a, e.timestamp / 1_000_000);
-            }
-
-            @Override
-            public void onAccuracyChanged(android.hardware.Sensor s, int accuracy) {
-            }
-        };
-        // Its own thread: the panel check on a display change (a root dumpsys, ~0.2 s) mustn't hold up the veil.
-        hingeThread = new android.os.HandlerThread("FoldHinge");
-        hingeThread.start();
-        hingeHandler = new Handler(hingeThread.getLooper());
-        sensors.registerListener(hingeListener, hinge, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, hingeHandler);
     }
 
     void stop() {
         if (dm != null)
             dm.unregisterDisplayListener(this);
-        if (sensors != null && hingeListener != null)
-            sensors.unregisterListener(hingeListener);
-        if (hingeThread != null) {
-            // Never leave the screens pinned.
-            new Handler(hingeThread.getLooper()).post(() -> {
-                if (override != -1)
-                    letGo();
-            });
-            hingeThread.quitSafely();
-        }
         if (thread != null)
             thread.quitSafely();
         if (shell != null)
@@ -321,6 +84,20 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     private static final String END = "__powos_fold_end__";
 
     /** Runs a command as root and returns its output (on this watcher's thread only). */
+    /**
+     * The enabled home alias as Android's default home: switching aliases drops the remembered choice, and Home
+     * (or a fold) then asked "open with" PowOS or OnePlus's launcher every time, "always" or not.
+     */
+    private void preferHome(String component) {
+        if (component.equals(preferredHome))
+            return;
+        root("cmd package set-home-activity --user 0 " + component);
+        preferredHome = component;
+        Log.i(TAG, "default home: " + component);
+    }
+
+    private String preferredHome;
+
     private String root(String cmd) {
         try {
             if (shell == null || !shell.isAlive()) {
@@ -345,11 +122,6 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     public void onDisplayChanged(int displayId) {
         if (displayId != Display.DEFAULT_DISPLAY)
             return;
-        boolean cover = coverScreen();
-        if (cover != onCover) {
-            onCover = cover;
-            switched(cover);
-        }
         check();
         handler.postDelayed(this::check, 500); // the hinge state can commit just after the display changes
     }
@@ -365,26 +137,13 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         Log.d(TAG, "display 0 changed: big=" + big + " was=" + wasBig);
         if (big == null || big.equals(wasBig))
             return;
-        Log.i(TAG, (big ? "unfolded" : "folded") + " at hinge " + lastAngle + " t=" + android.os.SystemClock.elapsedRealtimeNanos() / 1_000_000);
+        Log.i(TAG, big ? "unfolded" : "folded");
         preferHome(HomeScreen.apply(ctx, big)); // auto: desktop on the inner screen, launcher on the cover
         if (big && Boolean.FALSE.equals(wasBig))
             unfolded();
         else if (!big && Boolean.TRUE.equals(wasBig))
             folded();
         wasBig = big;
-    }
-
-    /**
-     * Android moved display 0 to the other screen: it starts under the full veil, which clears once what it shows
-     * is in place (check(): the launcher, the carried app, the desktop).
-     */
-    private void switched(boolean toCover) {
-        Log.i(TAG, "screen switch to " + (toCover ? "cover" : "inner") + " at hinge " + lastAngle);
-        // The end of our crossfade needs no veil of its own; Android's own switches (a slow fold) get one.
-        if (enabled() && android.os.SystemClock.uptimeMillis() - holdEndedAt > 1000 && override == -1)
-            veil.cover(toCover, 150);
-        else
-            veil.clear(); // the crossfade's end: the screen taking over is at its best at once
     }
 
     /** The Android app taken onto the cover screen at the last fold: its task and the PowOS window's display. */
@@ -411,13 +170,6 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         } catch (java.io.IOException e) {
             Log.d(TAG, "nothing to carry: " + e);
         }
-        // What the cover shows, for the next fold's crossfade (CoverFade), once it's settled.
-        handler.postDelayed(() -> {
-            if (onCover) {
-                String f = coverSnapshot().getPath();
-                root("screencap -p " + f + ".tmp && chmod 644 " + f + ".tmp && mv " + f + ".tmp " + f);
-            }
-        }, 1500);
         if (carried == null && !desktopAppActive(ctx)) {
             // The launcher (HomeScreen.apply made it home for the cover screen), not whatever was below the desktop.
             // By component: a HOME intent made Android ask which home app (ours or OnePlus's) every time - the
@@ -425,10 +177,6 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             su("am start --display 0 -n " + ctx.getPackageName() + "/dev.omalauncher.MainActivity");
             Log.i(TAG, "nothing in use: the launcher on the cover screen");
         }
-    }
-
-    private java.io.File coverSnapshot() {
-        return new java.io.File(ctx.getFilesDir(), "cover-snapshot.png");
     }
 
     /** A PowOS (Linux) app is what's in use (powos-android-tasks, run dir file desktop-active). */
@@ -452,10 +200,6 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
 
     @Override
     public void onDisplayAdded(int displayId) {
-        // Both screens on (our hold): the cover just came up as a second display - put its picture on it at once.
-        Log.i(TAG, "display " + displayId + " added (holding: " + (override != -1) + ")");
-        if (override != -1)
-            coverFade.shownOn(displayId);
     }
 
     @Override
