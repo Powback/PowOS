@@ -1181,16 +1181,21 @@ public class MainActivity extends Activity
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size, Gravity.BOTTOM | Gravity.END);
         lp.setMargins(0, 0, margin, margin);
         int slop = android.view.ViewConfiguration.get(this).getScaledTouchSlop();
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         b.setOnTouchListener(new View.OnTouchListener() {
             float downX, downY, startTx, startDy;
             boolean dragging;
+            android.view.VelocityTracker vt;
 
             @Override
             public boolean onTouch(View v, MotionEvent e) {
+                if (vt == null) vt = android.view.VelocityTracker.obtain();
+                vt.addMovement(e);
                 switch (e.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
                         downX = e.getRawX();
                         downY = e.getRawY();
+                        v.animate().cancel();
                         startTx = v.getTranslationX();
                         startDy = mKeyboardButtonDy;
                         dragging = false;
@@ -1200,20 +1205,44 @@ public class MainActivity extends Activity
                         float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
                         if (!dragging && Math.hypot(dx, dy) > slop) dragging = true;
                         if (dragging) {
-                            View p = (View) v.getParent();
-                            // Kept on screen: the button starts at the bottom-right corner, so it moves left/up.
-                            v.setTranslationX(Math.max(-(p.getWidth() - v.getWidth() - margin), Math.min(0, startTx + dx)));
-                            mKeyboardButtonDy = Math.max(-(p.getHeight() - v.getHeight() - margin), Math.min(0, startDy + dy));
+                            v.setTranslationX(clampButtonX(v, startTx + dx, margin));
+                            mKeyboardButtonDy = clampButtonDy(v, startDy + dy, margin);
                             relayout();
                         }
                         return true;
                     }
                     case MotionEvent.ACTION_UP:
                         v.setAlpha(0.85f);
-                        if (!dragging) systemIme.toggleSystemKeyboard();
+                        if (!dragging) {
+                            systemIme.toggleSystemKeyboard();
+                        } else {
+                            // A flick keeps going (≈0.15 s of its speed), then the button settles on the nearer side
+                            // edge: out of the way, never left in the middle of what's underneath.
+                            vt.computeCurrentVelocity(1000);
+                            View p = (View) v.getParent();
+                            float flungX = v.getTranslationX() + vt.getXVelocity() * 0.15f;
+                            float leftEdge = -(p.getWidth() - v.getWidth() - 2 * margin);
+                            float endX = flungX < leftEdge / 2 ? leftEdge : 0;
+                            float endDy = clampButtonDy(v, mKeyboardButtonDy + vt.getYVelocity() * 0.15f, margin);
+                            float fromDy = mKeyboardButtonDy;
+                            v.animate().translationX(endX).setDuration(220)
+                                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                                .setUpdateListener(a -> {
+                                    mKeyboardButtonDy = fromDy + (endDy - fromDy) * a.getAnimatedFraction();
+                                    relayout();
+                                })
+                                .withEndAction(() -> prefs.edit()
+                                    .putFloat(KEY_KEYBOARD_BUTTON_X, endX)
+                                    .putFloat(KEY_KEYBOARD_BUTTON_DY, endDy).apply())
+                                .start();
+                        }
+                        vt.recycle();
+                        vt = null;
                         return true;
                     case MotionEvent.ACTION_CANCEL:
                         v.setAlpha(0.85f);
+                        vt.recycle();
+                        vt = null;
                         return true;
                 }
                 return false;
@@ -1222,6 +1251,26 @@ public class MainActivity extends Activity
         b.setAlpha(0.85f);
         root.addView(b, lp);
         mKeyboardButton = b;
+        // Where the user last put it (clamped: the screen may be another size now, e.g. folded).
+        b.post(() -> {
+            b.setTranslationX(clampButtonX(b, prefs.getFloat(KEY_KEYBOARD_BUTTON_X, 0), margin));
+            mKeyboardButtonDy = clampButtonDy(b, prefs.getFloat(KEY_KEYBOARD_BUTTON_DY, 0), margin);
+            relayout();
+        });
+    }
+
+    private static final String KEY_KEYBOARD_BUTTON_X = "keyboard_button_x";
+    private static final String KEY_KEYBOARD_BUTTON_DY = "keyboard_button_dy";
+
+    // The ⌨ button stays on screen: it starts in the bottom-right corner, so it only moves left and up from there.
+    private static float clampButtonX(View v, float x, int margin) {
+        View p = (View) v.getParent();
+        return Math.max(-(p.getWidth() - v.getWidth() - 2 * margin), Math.min(0, x));
+    }
+
+    private static float clampButtonDy(View v, float dy, int margin) {
+        View p = (View) v.getParent();
+        return Math.max(-(p.getHeight() - v.getHeight() - 2 * margin), Math.min(0, dy));
     }
 
     // Show/hide the extra-keys bar and re-apply the layout so the display area
