@@ -1024,7 +1024,7 @@ public class SettingsActivity extends Activity {
     root.addView(hint);
     }
 
-    // PowOS: what Home opens (HomeActivity).
+    // PowOS: what Home opens (HomeScreen).
     private void addHomeScreenSection(LinearLayout root) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
@@ -1039,12 +1039,13 @@ public class SettingsActivity extends Activity {
         spinner.setAdapter(new ArrayAdapter<>(this,
             android.R.layout.simple_spinner_dropdown_item,
             getResources().getStringArray(R.array.home_screen_labels)));
-        String current = prefs.getString(HomeActivity.KEY_HOME_SCREEN, HomeActivity.HOME_SCREENS[0]);
-        spinner.setSelection(Math.max(0, java.util.Arrays.asList(HomeActivity.HOME_SCREENS).indexOf(current)));
+        String current = prefs.getString(HomeScreen.KEY_HOME_SCREEN, HomeScreen.HOME_SCREENS[0]);
+        spinner.setSelection(Math.max(0, java.util.Arrays.asList(HomeScreen.HOME_SCREENS).indexOf(current)));
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                prefs.edit().putString(HomeActivity.KEY_HOME_SCREEN, HomeActivity.HOME_SCREENS[position]).apply();
+                prefs.edit().putString(HomeScreen.KEY_HOME_SCREEN, HomeScreen.HOME_SCREENS[position]).commit();
+                HomeScreen.apply(SettingsActivity.this, null);
             }
 
             @Override

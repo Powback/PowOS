@@ -100,6 +100,8 @@ public class SessionService extends Service {
         // Android apps in PowOS's application menu (.desktop entries in the rootfs, launched through the requests above).
         apps = new AndroidApps(this);
         apps.register(this);
+        // What Home opens (desktop or launcher); FoldWatcher refines it from the hinge on foldables.
+        HomeScreen.apply(this, null);
         // Foldables: opening the phone brings the PowOS desktop up (FoldWatcher).
         fold = new FoldWatcher(this);
         fold.start();

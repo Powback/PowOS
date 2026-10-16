@@ -59,6 +59,20 @@
                 <data android:scheme="https" android:host="simonschubert.github.io" android:pathPrefix="/omarchy-widgets/w" />
             </intent-filter>
         </activity>
+        <!-- Android's home screen when it should be the launcher (andro.marchy.HomeScreen switches this and the
+             engine's .HomeDesktop alias; one is enabled). -->
+        <activity-alias
+            android:name="andro.marchy.HomeLauncher"
+            android:label="PowOS Launcher"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
 
         <activity
             android:name=".LinuxWindowActivity"

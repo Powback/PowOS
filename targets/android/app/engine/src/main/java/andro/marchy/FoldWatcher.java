@@ -47,6 +47,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         handler = new Handler(thread.getLooper());
         handler.post(() -> {
             wasBig = isBig();
+            HomeScreen.apply(ctx, wasBig);
             Log.i(TAG, "watching the hinge (open=" + wasBig + ")");
         });
         dm.registerDisplayListener(this, handler);
@@ -92,6 +93,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         if (big == null || big.equals(wasBig))
             return;
         Log.i(TAG, big ? "unfolded" : "folded");
+        HomeScreen.apply(ctx, big); // auto: desktop on the inner screen, launcher on the cover
         if (big && Boolean.FALSE.equals(wasBig))
             unfolded();
         else if (!big && Boolean.TRUE.equals(wasBig))
