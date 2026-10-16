@@ -26,7 +26,7 @@ import android.view.animation.DecelerateInterpolator;
 final class FoldVeil {
     private static final String TAG = "FoldVeil";
     /** At full strength: the blur radius (px) and the overall dim (the sweep does the rest). */
-    private static final int MAX_BLUR = 90;
+    private static final int MAX_BLUR = 72; // the iPhone Duo recreation's maximum
     private static final float MAX_DIM = 0.2f;
     /** How long the new screen takes to clear. */
     private static final long CLEAR_MS = 260;
@@ -115,7 +115,8 @@ final class FoldVeil {
                 return;
             // How far across the front has come (0..1 of the way from the hinge to the far edge), feather included.
             float reach = level * 1.4f;
-            int dark = (int) (Math.min(1f, level * 1.15f) * 255) << 24;
+            // Darkening at twice the blur's strength, capped at black (as the iPhone Duo recreation does).
+            int dark = (int) (Math.min(1f, level * 2f) * 255) << 24;
             if (hingeAtEdge) {
                 float edge = w * reach;
                 paint.setShader(new LinearGradient(edge - w * 0.45f, 0, edge, 0, dark, 0, Shader.TileMode.CLAMP));
