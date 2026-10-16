@@ -22,6 +22,10 @@ until session; do
 done
 # The session's own language: the one PowOS compiled (Android's, e.g. en_CH, may not be).
 L=$(tr '\0' '\n' < /proc/$PID/environ 2>/dev/null | sed -n 's/^LANG=//p')
+# The desktop's X server (Xwayland): its display and auth file, as the desktop's own apps get them from KWin - each
+# session start makes a new auth file, and X11 programs (Steam) then failed with "Authorization required".
+P=$(pidof plasmashell | cut -d' ' -f1)
+X=$( [ -n "$P" ] && tr '\0' '\n' < /proc/$P/environ 2>/dev/null | grep -E '^(DISPLAY|XAUTHORITY)=' | tr '\n' ' ')
 exec nsenter -t "$PID" -m -- /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- /usr/bin/env -i \
   HOME=/home/powos USER=powos LOGNAME=powos SHELL=/bin/bash TERM=xterm-256color \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
@@ -29,5 +33,5 @@ exec nsenter -t "$PID" -m -- /usr/bin/setpriv --reuid=powos --regid=powos --init
   XDG_RUNTIME_DIR=/run/powos-app \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus \
   DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus \
-  ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY="$WAYLAND_DISPLAY"} \
+  ${WAYLAND_DISPLAY:+WAYLAND_DISPLAY="$WAYLAND_DISPLAY"} $X \
   /bin/bash -lc "cd ~ && $1"
