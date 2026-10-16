@@ -1,0 +1,53 @@
+From: PowOS
+Subject: LinuxSyscalls: pass futex_waitv through when the host has it, not only from 5.16
+
+futex_waitv was gated on the host kernel version (>= 5.16). Kernels that
+backport it - Android GKI 5.15 with the backport, enterprise/vendor kernels -
+report an older version and got UnimplementedSyscallSafe (ENOSYS), so Wine/Proton
+fell back from fsync to wineserver round trips: every lock and event became a
+server call (Besiege on an Adreno phone: ~6 fps, wineserver busy, GPU idle).
+
+Probe the host instead: futex_waitv with no waiters returns EINVAL where it
+exists and ENOSYS where it does not. The version check stays as the fast path.
+(Same change as targets/android/pkgs/fex-emu/0003, rebased on Valve's FEX-2607-76-g37265b1.)
+---
+  1 file changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Passthrough.cpp b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Passthrough.cpp
+index 5375d67..761645a 100644
+--- a/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Passthrough.cpp
++++ b/Source/Tools/LinuxEmulation/LinuxSyscalls/Syscalls/Passthrough.cpp
+@@ -12,8 +12,24 @@ $end_info$
+ 
+ #include <FEXCore/IR/IR.h>
+ 
++#include <errno.h>
+ #include <stdint.h>
+ #include <sys/epoll.h>
++#include <sys/syscall.h>
++#include <unistd.h>
++
++#ifndef __NR_futex_waitv
++#define __NR_futex_waitv 449
++#endif
++
++namespace {
++// futex_waitv(NULL, 0, ...) fails with EINVAL where the syscall exists (no waiters) and ENOSYS where it doesn't:
++// backported kernels (Android GKI 5.15, vendor kernels) have it while reporting a version below 5.16.
++bool HostHasFutexWaitv() {
++  const long Result = ::syscall(__NR_futex_waitv, nullptr, 0, 0, nullptr, 0);
++  return Result != -1 || errno != ENOSYS;
++}
++} // namespace
+ 
+ namespace FEX::HLE {
+ #ifdef ARCHITECTURE_arm64
+@@ -378,7 +394,7 @@ void RegisterCommon(FEX::HLE::SyscallHandler* Handler) {
+   REGISTER_SYSCALL_IMPL(landlock_restrict_self, SyscallPassthrough2<SYSCALL_DEF(landlock_restrict_self)>);
+   REGISTER_SYSCALL_IMPL(memfd_secret, SyscallPassthrough1<SYSCALL_DEF(memfd_secret)>);
+   REGISTER_SYSCALL_IMPL(process_mrelease, SyscallPassthrough2<SYSCALL_DEF(process_mrelease)>);
+-  if (Handler->IsHostKernelVersionAtLeast(5, 16, 0)) {
++  if (Handler->IsHostKernelVersionAtLeast(5, 16, 0) || HostHasFutexWaitv()) {
+     REGISTER_SYSCALL_IMPL(futex_waitv, SyscallPassthrough5<SYSCALL_DEF(futex_waitv)>);
+   } else {
+     REGISTER_SYSCALL_IMPL(futex_waitv, UnimplementedSyscallSafe);
