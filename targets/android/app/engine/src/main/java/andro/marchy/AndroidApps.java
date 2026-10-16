@@ -33,9 +33,12 @@ final class AndroidApps extends BroadcastReceiver {
     private final File icons;
 
     AndroidApps(Context ctx) {
-        File home = new File(SessionService.rootfs(ctx), "root");
-        apps = new File(home, ".local/share/applications");
-        icons = new File(home, ".local/share/icons/hicolor/" + ICON_PX + "x" + ICON_PX + "/apps");
+        // Rooted mode: PowOS is /data/powos/root (out of this app's reach); the app's run dir is PowOS's
+        // /run/powos-app, and its share/ is on PowOS's XDG_DATA_DIRS (rooted/powos-session.sh).
+        File share = RootMode.enabled() ? new File(SessionService.runDir(ctx), "share")
+                : new File(SessionService.rootfs(ctx), "root/.local/share");
+        apps = new File(share, "applications");
+        icons = new File(share, "icons/hicolor/" + ICON_PX + "x" + ICON_PX + "/apps");
     }
 
     void register(Context ctx) {

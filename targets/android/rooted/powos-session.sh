@@ -28,5 +28,5 @@ exec nsenter -t 1 -m -- chroot "$R" /usr/bin/env -i \
   ANDROMARCHY_SOCKET="$sock" ANDROMARCHY_PHYSICAL_MM="$MM" \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus \
   DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus \
-  XDG_DATA_DIRS=/home/powos/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share \
+  XDG_DATA_DIRS=/run/powos-app/share:/home/powos/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share \
   /usr/bin/powos-rooted-session
