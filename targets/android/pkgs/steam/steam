@@ -48,4 +48,7 @@ ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # (TURNIP_KMD=kgsl stays: DXVK/vkd3d for Proton). Real fix: the CEF GPU process on freedreno/KGSL - and OpenGL games
 # need the override back (e.g. via FEX's HostEnv for the thunked libGL) once that is found.
 unset MESA_LOADER_DRIVER_OVERRIDE GALLIUM_DRIVER
-cd "$S/steamrtarm64" && exec ./steam "$@"
+# HACK: -no-cef-sandbox - inside Chromium's sandbox the web UI's GPU process died at start (exit_code=4,
+# GPU_DEAD_ON_ARRIVAL: 57 times, then "GPU process isn't usable. Goodbye" and no UI); without it 2 restarts in 90 s.
+# Real fix: find what the sandbox denies Mesa here (Android's kernel/seccomp).
+cd "$S/steamrtarm64" && exec ./steam -no-cef-sandbox "$@"

@@ -116,6 +116,9 @@ printf '[General]\nsystemdBoot=false\n' > /etc/xdg/startkderc
 printf '[Daemon]\nAutolock=false\nLockOnResume=false\n' > /etc/xdg/kscreenlockerrc
 # The app's user is root with home /root: seed it from /etc/skel as useradd would for a new user.
 cp -a /etc/skel/. /root/ 2>/dev/null || true
+# The PowOS widgets poll by spawning processes; podman (Containers widget, list + stats every 5 s) takes seconds of CPU
+# per call here and kept a core busy. Every 30 s on a battery device.
+mkdir -p /etc/powos && echo 'interval_scale=6' > /etc/powos/widgets.conf
 
 # Session + Omarchy-name stand-ins
 install -m 755 "$P/session/Hyprland" /usr/bin/Hyprland            # HACK: see the file
