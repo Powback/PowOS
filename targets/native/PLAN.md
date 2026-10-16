@@ -28,6 +28,10 @@ Done and verified (sha256 per partition), copied to the NAS:
 - **Never back up / restore `userdata` raw**: it is encrypted with keys in the phone's TEE (lost on wipe/relock).
   User data goes through Android backups (Google/OnePlus, or Swift Backup with root).
 - Undo root: `fastboot flash init_boot_b backup/8e5d600d/stock-16.0.5.1301-EX01/init_boot.img`.
+- **Kernel: ours in `boot_b` since 2026-10-16** (`out/boot-powos-gki.img` = stock boot_b with only the kernel
+  swapped: user + PID namespaces for Steam/Flatpak/podman). Written from Android with root (`dd`, checksum-verified;
+  the live boot_b was byte-identical to `backup/8e5d600d/boot_b.img` first). Undo:
+  `fastboot flash boot_b backup/8e5d600d/boot_b.img`. An OTA brings the stock kernel back (redo after Magisk).
 
 ## Base distros (decided 2026-10-16, revisit later)
 Arch Linux ARM on phones (rooted + app), Bazzite (Fedora) on x86 PCs / laptop / Steam Deck. Discussed and deferred:
@@ -48,7 +52,7 @@ The no-root PowOS app (targets/android, e.g. the S25 Ultra) stays a first-class 
 | 1. PowOS CLI + configs, root shell | done: `rooted/rooted.sh install` → `/data/powos/root`, sshd :2222, `powos version` 0.3.0 |
 | 2. Arch Linux ARM with GPU | done: Turnip Adreno 740 on KGSL, Vulkan 1.4 (Mesa 26.3) |
 | 3. PowOS/KDE desktop full-screen | done 2026-10-16: the PowOS app in rooted mode runs KDE Plasma on the inner screen as the user powos (real sudo) (`rooted/powos-session.sh`) |
-| 4. Steam/Proton via FEX | Steam client runs and logs in (2026-10-16). FEX 2610 + box64, x86 binfmt, Fedora 44 x86-64 RootFS, Steam package (FEXBash launcher); namespaces kernel (`config/gki/namespaces.config`, KMI ok, `fastboot boot`-tested: Android, Wi-Fi, modem, GPU, root fine) + PowOS via pivot_root (no chroot) + real bwrap; SysV IPC from the x86 shim `targets/android/steam/sysvipc`. Next: flash the kernel (stock boot_b in backup = undo; until then a reboot drops the namespaces), FEX GPU thunks (Steam UI + games on the Adreno), a Proton game |
+| 4. Steam/Proton via FEX | Steam client runs and logs in (2026-10-16); namespaces kernel flashed to boot_b (2026-10-16, survives reboots; bwrap ok as powos). FEX 2610 + box64, x86 binfmt, Fedora 44 x86-64 RootFS, Steam package (FEXBash launcher); namespaces kernel (`config/gki/namespaces.config`, KMI ok, `fastboot boot`-tested: Android, Wi-Fi, modem, GPU, root fine) + PowOS via pivot_root (no chroot) + real bwrap; SysV IPC from the x86 shim `targets/android/steam/sysvipc`. Next: FEX GPU thunks (Steam UI + games on the Adreno), a Proton game |
 | 5. Fold/cover screen layouts | todo: inner = desktop, cover = Plasma phone layout |
 | 6. Android apps as KWin windows | todo |
 | 7. Android home screen = PowOS launcher | todo. Decided 2026-10-16: the PowOS desktop stays inside the PowOS app (as now) and does NOT replace Android's home screen; the home screen is an Android launcher the Omalauncher way, with proper PowOS integration, built on the existing PowOS launcher |
