@@ -72,19 +72,87 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     static volatile boolean onCover;
 
     /** Fully open / shut: no veil beyond these. */
-    private static final float OPEN_REST = 165f, SHUT_REST = 8f;
-    /** Where Android switched screens on the last fold and the last opening; learned (KEY_SWITCH_*), these to start. */
-    private static final String KEY_SWITCH_CLOSE = "fold_switch_close", KEY_SWITCH_OPEN = "fold_switch_open";
-    private float switchClose = 60f, switchOpen = 70f;
+    private static final float OPEN_REST = 165f, SHUT_REST = 3f;
 
-    /** The veil for the hinge at [a]: rising toward the angle where the screen in use switches off. */
-    private void follow(float a) {
+    /**
+     * Where the screens switch, ours (the device-state override below): Android alone switches to the cover only
+     * once the phone is shut (measured: the cover lit ~0.2 s after the hinge read 0) - dark for most of a fold.
+     * Closing below CLOSE_SWITCH, the cover takes over; opening past OPEN_SWITCH, the inner screen does.
+     */
+    private static final float CLOSE_SWITCH = 40f, OPEN_SWITCH = 35f;
+    /** Only a deliberate fold (degrees per second) switches early: a phone held half open doesn't flip. */
+    private static final float MIN_SPEED = 60f;
+    /** An override never outlives this: a stuck one would keep the wrong screen on. */
+    private static final long OVERRIDE_MAX_MS = 1500;
+
+    private float speed, prevAngle = -1;
+    private long prevTime;
+    /** The device state we're holding (0 = CLOSED, 3 = OPENED), -1 none; since overrideAt. Hinge thread only. */
+    private int override = -1;
+    private long overrideAt;
+
+    /** The hinge at [a] (hinge thread): the veil, and switching the screens early. */
+    private void follow(float a, long nowMs) {
+        if (prevAngle >= 0 && nowMs > prevTime) {
+            float v = (a - prevAngle) * 1000f / (nowMs - prevTime);
+            speed = speed * 0.5f + v * 0.5f;
+        }
+        prevAngle = a;
+        prevTime = nowMs;
+        steer(a, nowMs);
+        // The veil peaks where the screen in use switches off; eased in, barely there while the hinge just moves.
         float p = onCover
-            ? (a - SHUT_REST) / (switchOpen - SHUT_REST)
-            : (OPEN_REST - a) / (OPEN_REST - switchClose);
-        // Ease in: barely there while the hinge just moves a little, full right at the switch.
+            ? (a - SHUT_REST) / (OPEN_SWITCH - SHUT_REST)
+            : (OPEN_REST - a) / (OPEN_REST - CLOSE_SWITCH);
         p = Math.max(0f, Math.min(1f, p));
         veil.set(p * p);
+    }
+
+    /** Switches the screens at our angles (device-state override), and lets go once the hinge is where it goes. */
+    private void steer(float a, long nowMs) {
+        if (override == -1) {
+            if (!onCover && a < CLOSE_SWITCH && a > SHUT_REST && speed < -MIN_SPEED)
+                hold(0, nowMs);
+            else if (onCover && a > OPEN_SWITCH && a < OPEN_REST && speed > MIN_SPEED)
+                hold(3, nowMs);
+            return;
+        }
+        boolean done = override == 0
+            ? a <= SHUT_REST || (a > CLOSE_SWITCH + 15 && speed > 0) // shut, or opened again
+            : a >= OPEN_REST - 15 || (a < OPEN_SWITCH - 15 && speed < 0); // open, or closed again
+        if (done || nowMs - overrideAt > OVERRIDE_MAX_MS)
+            letGo();
+    }
+
+    private void hold(int state, long nowMs) {
+        override = state;
+        overrideAt = nowMs;
+        Log.i(TAG, "switching early to " + (state == 0 ? "cover" : "inner") + " at hinge " + prevAngle + " (" + Math.round(speed) + "°/s)");
+        overrideShell("cmd device_state state " + state);
+    }
+
+    private void letGo() {
+        override = -1;
+        overrideShell("cmd device_state state reset");
+    }
+
+    // The override's own root shell: the watcher thread's one can be busy with a dumpsys for ~0.2 s.
+    private Process overrideSu;
+    private java.io.Writer overrideIn;
+
+    private void overrideShell(String cmd) {
+        try {
+            if (overrideSu == null || !overrideSu.isAlive()) {
+                overrideSu = new ProcessBuilder("su").redirectErrorStream(true)
+                    .redirectOutput(new java.io.File("/dev/null")).start();
+                overrideIn = new java.io.OutputStreamWriter(overrideSu.getOutputStream());
+            }
+            overrideIn.write(cmd + "\n");
+            overrideIn.flush();
+        } catch (java.io.IOException e) {
+            Log.w(TAG, "override: " + e);
+            overrideSu = null;
+        }
     }
 
     private void grantOverlay() {
@@ -112,9 +180,6 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             Log.i(TAG, "no hinge angle sensor");
             return;
         }
-        android.content.SharedPreferences prefs = ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE);
-        switchClose = prefs.getFloat(KEY_SWITCH_CLOSE, switchClose);
-        switchOpen = prefs.getFloat(KEY_SWITCH_OPEN, switchOpen);
         hingeListener = new android.hardware.SensorEventListener() {
             @Override
             public void onSensorChanged(android.hardware.SensorEvent e) {
@@ -125,7 +190,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
                 lastAngle = a;
                 Log.d(TAG, "hinge " + a + " t=" + e.timestamp / 1_000_000);
                 if (enabled())
-                    follow(a);
+                    follow(a, e.timestamp / 1_000_000);
             }
 
             @Override
@@ -143,8 +208,14 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             dm.unregisterDisplayListener(this);
         if (sensors != null && hingeListener != null)
             sensors.unregisterListener(hingeListener);
-        if (hingeThread != null)
+        if (hingeThread != null) {
+            // Never leave the screens pinned.
+            new Handler(hingeThread.getLooper()).post(() -> {
+                if (override != -1)
+                    letGo();
+            });
             hingeThread.quitSafely();
+        }
         if (thread != null)
             thread.quitSafely();
         if (shell != null)
@@ -226,22 +297,12 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
 
     /**
      * Android moved display 0 to the other screen: it starts under the full veil, which clears once what it shows
-     * is in place (check(): the launcher, the carried app, the desktop). The hinge angle here is where this phone
-     * switches - remembered, so the veil on the next fold peaks right there.
+     * is in place (check(): the launcher, the carried app, the desktop).
      */
     private void switched(boolean toCover) {
         Log.i(TAG, "screen switch to " + (toCover ? "cover" : "inner") + " at hinge " + lastAngle);
         if (enabled())
             veil.cover(350);
-        if (lastAngle > SHUT_REST && lastAngle < OPEN_REST) {
-            // Smoothed: one odd fold (a fling, a pause) doesn't move it much.
-            if (toCover)
-                switchClose = switchClose * 0.7f + lastAngle * 0.3f;
-            else
-                switchOpen = switchOpen * 0.7f + lastAngle * 0.3f;
-            ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE).edit()
-                .putFloat(KEY_SWITCH_CLOSE, switchClose).putFloat(KEY_SWITCH_OPEN, switchOpen).apply();
-        }
     }
 
     /** The Android app taken onto the cover screen at the last fold: its task and the PowOS window's display. */
