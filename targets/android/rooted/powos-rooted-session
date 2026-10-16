@@ -30,6 +30,10 @@ sleep 0.3
 # What a previous session left in the app's run dir: its sockets and locks (root-owned ones from sessions that ran
 # as root would lock the user out: pipewire "failed to create context: Permission denied").
 rm -f "$R"/bus "$R"/system_bus "$R"/pipewire-0* "$R"/wayland-* "$R"/kwin-xwayland-*
+# Podman's per-boot runtime state (XDG_RUNTIME_DIR is this dir, which outlives a reboot, unlike a real /run): left
+# over, every podman call failed ("current system boot ID differs from cached boot ID") and the Containers widget
+# showed nothing. No container survives the previous session anyway.
+rm -rf "$R"/containers "$R"/libpod/tmp "$R"/crun "$R"/netns
 chown -R powos:powos "$R"   # the app's own dir: powos is the app's uid
 
 # GPU: Mesa on KGSL (Adreno; Android has no /dev/dri). In the no-root engine lotfix-run sets these.
