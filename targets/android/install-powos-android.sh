@@ -125,6 +125,11 @@ pacman -S --noconfirm --needed scrcpy android-tools pyside6
 install -m 755 "$P/session/powos-android-app" /usr/local/bin/powos-android-app
 install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tasks
 install -Dm 644 "$P/session/powos-android-tasks.desktop" /etc/xdg/autostart/powos-android-tasks.desktop
+# The desktop over Android's wallpaper (the app's surface is translucent): a transparent wallpaper, made the desktop's
+# once per user by a Plasma update script.
+install -Dm 644 "$P/session/plasma/org.powos.transparent/metadata.json" /usr/share/plasma/wallpapers/org.powos.transparent/metadata.json
+install -Dm 644 "$P/session/plasma/org.powos.transparent/contents/ui/main.qml" /usr/share/plasma/wallpapers/org.powos.transparent/contents/ui/main.qml
+install -Dm 644 "$P/session/plasma/powos-transparent-desktop.js" /usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/powos-transparent-desktop.js
 # first-boot.sh goes to /opt/lotfix/ in build-inside.sh's own install step (patched to take ours).
 # HACK: Omarchy command names the engine calls; see each file. omarchy-dns is Andromarchy's own
 # Android version (resolv.conf from Android's network), unchanged.

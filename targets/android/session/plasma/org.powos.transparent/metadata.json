@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PowOS"
+            }
+        ],
+        "Description": "No wallpaper: the desktop is transparent, showing what is behind it (on a phone, Android's wallpaper)",
+        "Id": "org.powos.transparent",
+        "License": "MIT",
+        "Name": "Transparent"
+    },
+    "KPackageStructure": "Plasma/Wallpaper",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

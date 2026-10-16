@@ -17,6 +17,13 @@ install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
 install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
 install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
 install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android-tasks.desktop
+# The desktop over Android's wallpaper (as install-powos-android.sh): transparent wallpaper + its update script.
+W=$R/usr/share/plasma/wallpapers/org.powos.transparent
+install -Dm 644 $T/powos-plasma/org.powos.transparent/metadata.json $W/metadata.json
+install -Dm 644 $T/powos-plasma/org.powos.transparent/contents/ui/main.qml $W/contents/ui/main.qml
+install -Dm 644 $T/powos-plasma/powos-transparent-desktop.js \
+  $R/usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/powos-transparent-desktop.js
+rm -rf $T/powos-plasma
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
   $T/powos-android-tasks.desktop
 
