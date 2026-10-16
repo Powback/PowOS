@@ -47,6 +47,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         handler = new Handler(thread.getLooper());
         handler.post(() -> {
             wasBig = isBig();
+            if (wasBig != null)
+                folded = !wasBig;
             HomeScreen.apply(ctx, wasBig);
             Log.i(TAG, "watching the hinge (open=" + wasBig + ")");
         });
@@ -87,8 +89,14 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         handler.postDelayed(this::check, 500); // the hinge state can commit just after the display changes
     }
 
+    /** The hinge, as last read: true = folded (closed). For MainActivity: a phone-sized window alone doesn't mean
+     *  folded - half the inner screen in split view is phone-sized too. */
+    static volatile boolean folded;
+
     private void check() {
         Boolean big = isBig();
+        if (big != null)
+            folded = !big;
         Log.d(TAG, "display 0 changed: big=" + big + " was=" + wasBig);
         if (big == null || big.equals(wasBig))
             return;

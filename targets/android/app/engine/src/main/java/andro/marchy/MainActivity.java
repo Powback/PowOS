@@ -1066,7 +1066,9 @@ public class MainActivity extends Activity
      * its size for when the phone opens again.
      */
     private boolean onCoverScreen(android.content.res.Configuration c) {
-        return c.smallestScreenWidthDp < 600 && RootMode.enabled()
+        // The hinge (FoldWatcher), not only the window: half the inner screen in split view is phone-sized too, and
+        // the desktop stepped aside there instead of splitting.
+        return FoldWatcher.folded && c.smallestScreenWidthDp < 600 && RootMode.enabled()
             && getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(FoldWatcher.KEY_UNFOLD_DESKTOP, true);
     }
 
