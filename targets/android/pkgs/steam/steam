@@ -29,4 +29,10 @@ if [ ! -x "$S/steamrtarm64/steam" ]; then
   mkdir -p "$S" && t=$(mktemp) && curl -fL "$U/$f" -o "$t" && unzip -oq "$t" -d "$S" && rm -f "$t" \
     && chmod -R u+rwx "$S/steamrtarm64" || { echo "steam: downloading the ARM64 client failed" >&2; exit 1; }
 fi
+# The ~/.steam links Valve's launcher script makes, for the native client: games start through
+# ~/.steam/sdkarm64/steam-launch-wrapper ("Game process removed" at once without it).
+mkdir -p "$HOME/.steam"
+ln -sfn "$S" "$HOME/.steam/root"
+ln -sfn "$S" "$HOME/.steam/steam"
+ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 cd "$S/steamrtarm64" && exec ./steam "$@"
