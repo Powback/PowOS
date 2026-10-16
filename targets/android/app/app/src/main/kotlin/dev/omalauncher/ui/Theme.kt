@@ -104,6 +104,9 @@ object LauncherStyle {
     /** App icons as silhouettes in the accent color (Omarchy) rather than their own colors. */
     val monochromeIcons get() = style[Style.MONOCHROME_ICONS]
 
+    /** App icons recolored to the theme (IconTheme) rather than in their own colors. */
+    val themedIcons get() = style[Style.THEMED_ICONS]
+
     /** Home screen apps as bare icons on the wallpaper instead of framed tiles. */
     val bareAppIcons get() = !style[Style.APP_TILES]
 

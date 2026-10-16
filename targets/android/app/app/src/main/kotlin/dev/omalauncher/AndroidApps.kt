@@ -38,6 +38,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
+import androidx.compose.runtime.snapshotFlow
+import dev.omalauncher.ui.IconTheme
+import dev.omalauncher.ui.LauncherStyle
+import dev.omalauncher.ui.Palette
 
 data class AndroidApp(
     val label: String,
@@ -92,6 +98,17 @@ class AndroidAppCatalog(
     /** By [AndroidApp.key]. */
     val icons = mutableStateMapOf<String, ImageBitmap>()
 
+    /** The icons as the apps draw them; [icons] has them in the theme's colors (IconTheme) when the style says so. */
+    private val originals = HashMap<String, android.graphics.Bitmap>()
+
+    /** The palette icons are themed for, or null for their own colors; read on the main thread. */
+    private fun iconPalette() = if (LauncherStyle.themedIcons) Palette.current.named else null
+
+    private fun themed(
+        bmp: android.graphics.Bitmap,
+        palette: Map<String, androidx.compose.ui.graphics.Color>?,
+    ) = (if (palette == null) bmp else IconTheme.of(palette).recolor(bmp)).asImageBitmap()
+
     /** Alpha-only silhouettes of the same icons, for the monochrome icon style. */
     val masks = mutableStateMapOf<String, ImageBitmap>()
 
@@ -125,6 +142,16 @@ class AndroidAppCatalog(
     private val iconPx = (52 * context.resources.displayMetrics.density).toInt().coerceAtLeast(48)
 
     fun start() {
+        // A theme or icon style change recolors the icons already loaded, off the main thread.
+        scope.launch {
+            snapshotFlow { iconPalette() }.drop(1).collectLatest { palette ->
+                val all = HashMap(originals)
+                for ((key, bmp) in all) {
+                    val img = withContext(iconDispatcher) { themed(bmp, palette) }
+                    if (key in icons) icons[key] = img
+                }
+            }
+        }
         launcherApps.registerCallback(
             object : LauncherApps.Callback() {
                 override fun onPackageAdded(packageName: String, user: UserHandle) = reload()
@@ -232,6 +259,7 @@ class AndroidAppCatalog(
                 if (evict != null) {
                     // In every profile: an update in one doesn't say which, and reloading an icon is cheap.
                     icons.keys.removeAll { it.startsWith("$evict/") }
+                    originals.keys.removeAll { it.startsWith("$evict/") }
                     masks.keys.removeAll { it.startsWith("$evict/") }
                 }
                 var paused = emptySet<Long>()
@@ -268,9 +296,11 @@ class AndroidAppCatalog(
                 }
                 val present = list.mapTo(HashSet()) { it.key }
                 icons.keys.retainAll(present)
+                originals.keys.retainAll(present)
                 masks.keys.retainAll(present)
                 for ((info, app) in infos) {
                     if (app.key in icons) continue
+                    val palette = iconPalette()
                     launch {
                         // Both styles are rendered up front so switching is instant; masks are 1 byte per pixel.
                         val rendered =
@@ -282,12 +312,14 @@ class AndroidAppCatalog(
                                     d.draw(Canvas(bmp))
                                     var mask = iconMask(d, iconPx)
                                     if (app.profile != null) mask = addBadge(bmp, mask, if (app.clone) cloneMark else briefcase)
-                                    bmp.asImageBitmap() to mask.asImageBitmap()
+                                    Triple(bmp, themed(bmp, palette), mask.asImageBitmap())
                                 }.getOrNull()
                             }
                         if (rendered != null) {
-                            icons[app.key] = rendered.first
-                            masks[app.key] = rendered.second
+                            originals[app.key] = rendered.first
+                            // The theme may have changed while it rendered.
+                            icons[app.key] = if (iconPalette() == palette) rendered.second else withContext(iconDispatcher) { themed(rendered.first, iconPalette()) }
+                            masks[app.key] = rendered.third
                         }
                     }
                 }
