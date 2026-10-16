@@ -87,7 +87,11 @@ public class Hook implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     try {
-                        XposedHelpers.callMethod(param.args[0], "setShow");
+                        // Shown and fully opaque for the whole gesture: the fallback fades the home in (alpha 0->1)
+                        // while recents fades out over the system wallpaper - a crossfade to the wallpaper. Like
+                        // iOS / OnePlus's own home: the home is simply there behind the shrinking app.
+                        Object props = XposedHelpers.callMethod(param.args[0], "setShow");
+                        XposedHelpers.callMethod(props, "setAlpha", 1f);
                     } catch (Throwable t) {
                         log("setShow", t);
                     }
