@@ -47,11 +47,11 @@ The no-root PowOS app (targets/android, e.g. the S25 Ultra) stays a first-class 
 |---|---|
 | 1. PowOS CLI + configs, root shell | done: `rooted/rooted.sh install` → `/data/powos/root`, sshd :2222, `powos version` 0.3.0 |
 | 2. Arch Linux ARM with GPU | done: Turnip Adreno 740 on KGSL, Vulkan 1.4 (Mesa 26.3) |
-| 3. PowOS/KDE desktop full-screen | done 2026-10-16: the PowOS app in rooted mode runs KDE Plasma as real root on the inner screen (`rooted/powos-session.sh`) |
-| 4. Steam/Proton via FEX | in progress: FEX 2610 + box64 installed, x86 binfmt registered at start, x86-64 RootFS |
+| 3. PowOS/KDE desktop full-screen | done 2026-10-16: the PowOS app in rooted mode runs KDE Plasma on the inner screen as the user powos (real sudo) (`rooted/powos-session.sh`) |
+| 4. Steam/Proton via FEX | in progress: FEX 2610 + box64, x86 binfmt at start, Fedora 44 x86-64 RootFS, Steam launcher package (FEXBash). Blocked: Steam needs user + PID namespaces, off in Android's kernel → `config/gki/namespaces.config`, KMI-checked before any flash |
 | 5. Fold/cover screen layouts | todo: inner = desktop, cover = Plasma phone layout |
 | 6. Android apps as KWin windows | todo |
-| 7. PowOS as Android home screen | todo |
+| 7. Android home screen = PowOS launcher | todo. Decided 2026-10-16: the PowOS desktop stays inside the PowOS app (as now) and does NOT replace Android's home screen; the home screen is an Android launcher the Omalauncher way, with proper PowOS integration, built on the existing PowOS launcher |
 | 8. Phone-aware CLI, layers/rollback on /data/powos | todo |
 
 Wireless adb: `adb connect 192.168.50.239:5555` (persist.adb.tcp.port=5555).
