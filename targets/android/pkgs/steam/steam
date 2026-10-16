@@ -42,4 +42,10 @@ ln -sfn "$S" "$HOME/.steam/steam"
 ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # No -cef-disable-gpu here: the ARM64 client's web UI then loses its GPU process ("GPU process isn't usable. Goodbye",
 # exit_code=4, in a restart loop) and never shows a window.
+# HACK: no OpenGL driver override for Steam. With the session's MESA_LOADER_DRIVER_OVERRIDE=kgsl (freedreno on KGSL)
+# the web UI's GPU process crashed every few seconds (exit_code 4/512, "GPU state invalid", 29 in 75 s) and the UI
+# barely responded; without it Mesa's software GL draws the UI (2 crashes, idle). Games keep the Adreno through Vulkan
+# (TURNIP_KMD=kgsl stays: DXVK/vkd3d for Proton). Real fix: the CEF GPU process on freedreno/KGSL - and OpenGL games
+# need the override back (e.g. via FEX's HostEnv for the thunked libGL) once that is found.
+unset MESA_LOADER_DRIVER_OVERRIDE GALLIUM_DRIVER
 cd "$S/steamrtarm64" && exec ./steam "$@"
