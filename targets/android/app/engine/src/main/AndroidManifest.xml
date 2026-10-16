@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- FoldVeil: the fold transition over everything (rooted mode grants it itself). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- RestartReceiver: the rooted session after boot and app updates. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- GeoClue2 (location for Linux apps) and the Wi-Fi name, which Android redacts without it -->
@@ -99,6 +101,14 @@
         <receiver
             android:name=".UserActionReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".RestartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <service
             android:name=".KeyInterceptor"
             android:exported="true"

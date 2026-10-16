@@ -1236,9 +1236,6 @@ public class MainActivity extends Activity
 
             @Override
             public boolean onTouch(View v, MotionEvent e) {
-                if (e.getActionMasked() != MotionEvent.ACTION_MOVE)
-                    Log.i(TAG, "kbd button touch " + e.getActionMasked() + " at " + v.getX() + "," + v.getY()
-                        + " tx=" + v.getTranslationX() + " ty=" + v.getTranslationY());
                 if (vt == null) vt = android.view.VelocityTracker.obtain();
                 vt.addMovement(e);
                 switch (e.getActionMasked()) {
@@ -1305,8 +1302,6 @@ public class MainActivity extends Activity
         // a saved spot outside the new window would leave the button unreachable.
         root.addOnLayoutChangeListener((v, l, t, r, bot, ol, ot, or, ob) -> {
             if (r - l == or - ol && bot - t == ob - ot) return;
-            Log.i(TAG, "kbd button: window " + (r - l) + "x" + (bot - t) + ", saved x="
-                + prefs.getFloat(KEY_KEYBOARD_BUTTON_X, 0) + " dy=" + prefs.getFloat(KEY_KEYBOARD_BUTTON_DY, 0));
             b.setTranslationX(clampButtonX(b, prefs.getFloat(KEY_KEYBOARD_BUTTON_X, 0), margin));
             mKeyboardButtonDy = clampButtonDy(b, prefs.getFloat(KEY_KEYBOARD_BUTTON_DY, 0), margin);
             relayout();

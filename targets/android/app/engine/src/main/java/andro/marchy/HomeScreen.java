@@ -27,9 +27,9 @@ final class HomeScreen {
 
     /**
      * Enable the alias that fits now. {@code unfolded}: the hinge state when known (FoldWatcher), else null -
-     * then the screen size decides.
+     * then the screen size decides. Returns the alias's component (FoldWatcher makes it the default home).
      */
-    static void apply(Context ctx, Boolean unfolded) {
+    static String apply(Context ctx, Boolean unfolded) {
         String mode = ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE)
             .getString(KEY_HOME_SCREEN, HOME_SCREENS[0]);
         boolean desktop;
@@ -43,6 +43,7 @@ final class HomeScreen {
         // The new one first: never a moment without a home screen.
         set(ctx, desktop ? "HomeDesktop" : "HomeLauncher", true);
         set(ctx, desktop ? "HomeLauncher" : "HomeDesktop", false);
+        return ctx.getPackageName() + "/andro.marchy." + (desktop ? "HomeDesktop" : "HomeLauncher");
     }
 
     private static void set(Context ctx, String alias, boolean on) {

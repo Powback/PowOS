@@ -52,7 +52,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             wasBig = isBig();
             if (wasBig != null)
                 folded = !wasBig;
-            HomeScreen.apply(ctx, wasBig);
+            preferHome(HomeScreen.apply(ctx, wasBig));
             Log.i(TAG, "watching the hinge (open=" + wasBig + ")");
         });
         dm.registerDisplayListener(this, handler);
@@ -71,27 +71,27 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     /** Display 0 is on the cover screen (its physical panel, read through root - this app sees adjusted display info). */
     static volatile boolean onCover;
 
-    /** Fully open / shut: no veil beyond these. */
-    private static final float OPEN_REST = 165f, SHUT_REST = 3f;
-
     /**
-     * Where the screens switch, ours (the device-state override below): Android alone switches to the cover only
-     * once the phone is shut (measured: the cover lit ~0.2 s after the hinge read 0) - dark for most of a fold.
-     * Closing below CLOSE_SWITCH, the cover takes over; opening past OPEN_SWITCH, the inner screen does.
+     * The fold's ends: the screens switch only here - shut (SHUT) or open (OPEN) - never midway, so neither is
+     * ever seen turning on or off; through the whole fold the veil fades the one in use (the iPhone Duo's way).
+     * Android alone switched midway: to the cover at ~0-25 degrees closing, to the inner screen within a few
+     * degrees of opening, while it still faced away.
      */
-    private static final float CLOSE_SWITCH = 40f, OPEN_SWITCH = 35f;
-    /** Only a deliberate fold (degrees per second) switches early: a phone held half open doesn't flip. */
-    private static final float MIN_SPEED = 60f;
-    /** An override never outlives this: a stuck one would keep the wrong screen on. */
-    private static final long OVERRIDE_MAX_MS = 1500;
+    private static final float SHUT = 2f, OPEN = 160f;
+    /** A fold starts (closing) below this. */
+    private static final float CLOSING_FROM = 150f;
+    /** Only a deliberate fold (degrees per second) holds the screens: a phone held half open isn't kept. */
+    private static final float MIN_SPEED = 40f;
+    /** A hold never outlives this: a stuck one would keep the wrong screen on. */
+    private static final long HOLD_MAX_MS = 4000;
 
     private float speed, prevAngle = -1;
     private long prevTime;
-    /** The device state we're holding (0 = CLOSED, 3 = OPENED), -1 none; since overrideAt. Hinge thread only. */
+    /** The device state we're holding (0 = CLOSED: the cover, 3 = OPENED: the inner screen), -1 none. Hinge thread. */
     private int override = -1;
     private long overrideAt;
 
-    /** The hinge at [a] (hinge thread): the veil, and switching the screens early. */
+    /** The hinge at [a] (hinge thread): the veil, and holding the screen in use until the fold's end. */
     private void follow(float a, long nowMs) {
         if (prevAngle >= 0 && nowMs > prevTime) {
             float v = (a - prevAngle) * 1000f / (nowMs - prevTime);
@@ -100,38 +100,37 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         prevAngle = a;
         prevTime = nowMs;
         steer(a, nowMs);
-        // The veil peaks where the screen in use switches off; eased in, barely there while the hinge just moves.
-        float p = onCover
-            ? (a - SHUT_REST) / (OPEN_SWITCH - SHUT_REST)
-            : (OPEN_REST - a) / (OPEN_REST - CLOSE_SWITCH);
+        // Over the whole way to the switch, eased in.
+        float p = onCover ? (a - SHUT) / (OPEN - SHUT) : (OPEN - a) / (OPEN - SHUT);
         p = Math.max(0f, Math.min(1f, p));
-        veil.set(p * p);
+        veil.set((float) Math.pow(p, 1.3), onCover);
     }
 
-    /** Switches the screens at our angles (device-state override), and lets go once the hinge is where it goes. */
+    /** Holds the screen in use (device-state override) from the fold's start to its end, then lets Android switch. */
     private void steer(float a, long nowMs) {
         if (override == -1) {
-            if (!onCover && a < CLOSE_SWITCH && a > SHUT_REST && speed < -MIN_SPEED)
-                hold(0, nowMs);
-            else if (onCover && a > OPEN_SWITCH && a < OPEN_REST && speed > MIN_SPEED)
-                hold(3, nowMs);
+            if (!onCover && a < CLOSING_FROM && a > SHUT && speed < -MIN_SPEED)
+                hold(3, nowMs); // closing: the inner screen stays on until shut
+            else if (onCover && a > SHUT && a < OPEN && speed > 0)
+                hold(0, nowMs); // opening: the cover stays on until open
             return;
         }
-        boolean done = override == 0
-            ? a <= SHUT_REST || (a > CLOSE_SWITCH + 15 && speed > 0) // shut, or opened again
-            : a >= OPEN_REST - 15 || (a < OPEN_SWITCH - 15 && speed < 0); // open, or closed again
-        if (done || nowMs - overrideAt > OVERRIDE_MAX_MS)
+        boolean done = override == 3
+            ? a <= SHUT || (a >= CLOSING_FROM && speed > 0) // shut (the cover takes over), or opened again
+            : a >= OPEN || (a <= SHUT && speed < 0); // open (the inner screen takes over), or shut again
+        if (done || nowMs - overrideAt > HOLD_MAX_MS)
             letGo();
     }
 
     private void hold(int state, long nowMs) {
         override = state;
         overrideAt = nowMs;
-        Log.i(TAG, "switching early to " + (state == 0 ? "cover" : "inner") + " at hinge " + prevAngle + " (" + Math.round(speed) + "°/s)");
+        Log.i(TAG, "holding the " + (state == 0 ? "cover" : "inner screen") + " from hinge " + prevAngle + " (" + Math.round(speed) + "°/s)");
         overrideShell("cmd device_state state " + state);
     }
 
     private void letGo() {
+        Log.i(TAG, "letting go at hinge " + prevAngle);
         override = -1;
         overrideShell("cmd device_state state reset");
     }
@@ -154,6 +153,20 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             overrideSu = null;
         }
     }
+
+    /**
+     * The enabled home alias as Android's default home: switching aliases drops the remembered choice, and Home
+     * (or a fold) then asked "open with" PowOS or OnePlus's launcher every time, "always" or not.
+     */
+    private void preferHome(String component) {
+        if (component.equals(preferredHome))
+            return;
+        root("cmd package set-home-activity --user 0 " + component);
+        preferredHome = component;
+        Log.i(TAG, "default home: " + component);
+    }
+
+    private String preferredHome;
 
     private void grantOverlay() {
         if (!android.provider.Settings.canDrawOverlays(ctx))
@@ -188,7 +201,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
                 if (Math.abs(a - lastAngle) < 1f)
                     return;
                 lastAngle = a;
-                Log.d(TAG, "hinge " + a + " t=" + e.timestamp / 1_000_000);
+                Log.v(TAG, "hinge " + a);
                 if (enabled())
                     follow(a, e.timestamp / 1_000_000);
             }
@@ -287,7 +300,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         if (big == null || big.equals(wasBig))
             return;
         Log.i(TAG, (big ? "unfolded" : "folded") + " at hinge " + lastAngle + " t=" + android.os.SystemClock.elapsedRealtimeNanos() / 1_000_000);
-        HomeScreen.apply(ctx, big); // auto: desktop on the inner screen, launcher on the cover
+        preferHome(HomeScreen.apply(ctx, big)); // auto: desktop on the inner screen, launcher on the cover
         if (big && Boolean.FALSE.equals(wasBig))
             unfolded();
         else if (!big && Boolean.TRUE.equals(wasBig))
@@ -302,7 +315,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     private void switched(boolean toCover) {
         Log.i(TAG, "screen switch to " + (toCover ? "cover" : "inner") + " at hinge " + lastAngle);
         if (enabled())
-            veil.cover(350);
+            veil.cover(toCover, 150);
     }
 
     /** The Android app taken onto the cover screen at the last fold: its task and the PowOS window's display. */
@@ -331,7 +344,9 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         }
         if (carried == null && !desktopAppActive(ctx)) {
             // The launcher (HomeScreen.apply made it home for the cover screen), not whatever was below the desktop.
-            su("am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME");
+            // By component: a HOME intent made Android ask which home app (ours or OnePlus's) every time - the
+            // home alias switches with the fold, so "remember" never stuck.
+            su("am start --display 0 -n " + ctx.getPackageName() + "/dev.omalauncher.MainActivity");
             Log.i(TAG, "nothing in use: the launcher on the cover screen");
         }
     }
