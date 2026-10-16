@@ -62,6 +62,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.collectLatest
+import dev.omalauncher.theme.SystemTheme
+import dev.omalauncher.ui.Palette
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -158,6 +161,17 @@ class Runtime(
             snapshotFlow { style.style[Style.TERMINAL_FONT] to style.style[Style.TERMINAL_TEXT] }.drop(1).collect { terminalFont.write() }
         }
         androidApps.start()
+        // PowOS rooted mode: the theme goes to the PowOS desktop and Android too (SystemTheme); once per change.
+        if (RootedGuest.enabled) {
+            scope.launch {
+                snapshotFlow { if (style.style[Style.SYSTEM_THEME]) Palette.current else null }.collectLatest { palette ->
+                    palette ?: return@collectLatest
+                    val key = SystemTheme.key(palette).hashCode().toString()
+                    if (prefs.getString(SYSTEM_THEME_KEY, null) == key) return@collectLatest
+                    if (withContext(Dispatchers.IO) { SystemTheme.apply(palette) }) prefs.edit().putString(SYSTEM_THEME_KEY, key).apply()
+                }
+            }
+        }
         // Omarchy's Super bindings inside Linux windows; the home screen handles its own (see MainActivity).
         keyboard.onShortcut = { code ->
             when (code) {
@@ -594,5 +608,6 @@ class Runtime(
     companion object {
         private const val TAG = "runtime"
         private const val SETUP_DONE = "setup_done"
+        private const val SYSTEM_THEME_KEY = "system_theme_applied"
     }
 }

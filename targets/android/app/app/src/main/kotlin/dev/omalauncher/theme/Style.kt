@@ -151,6 +151,7 @@ class Style(
         val SCREEN_GAPS_OUT = Setting.Number("screens.gaps-out", 6.0, 0.0..48.0, "Space in dp from full-screen panels (settings, style, the stores) to the screen's edges.")
         val SCREEN_BORDER_WIDTH = Setting.Number("screens.border-width", 2.0, 0.0..8.0, "How thick full-screen panels' outlines are, in dp.")
 
+        val SYSTEM_THEME = Setting.Flag("system.theme", true, "PowOS on a rooted phone: the theme is the whole phone's too - the PowOS desktop's colors and Android's (Material You accent, dark or light).")
         val THEMED_ICONS = Setting.Flag("icons.themed", true, "App icons in the theme's colors: a muted theme mutes them, a pastel one makes them pastel; false keeps their own colors.")
         val MONOCHROME_ICONS = Setting.Flag("icons.monochrome", false, "App icons as silhouettes in the accent color, as on Omarchy, rather than in their own colors.")
 
@@ -200,7 +201,7 @@ object StyleFile {
     val ALL: List<Setting<*>> =
         with(Style) {
             listOf(THEME, BACKGROUND, TRANSPARENT, APP_TILES, RECENT_APPS, GAPS_IN, GAPS_OUT, TILE_BORDER_WIDTH, TILE_BORDER, TILE_BORDER_FOCUSED) +
-                listOf(SCREEN_GAPS_OUT, SCREEN_BORDER_WIDTH, THEMED_ICONS, MONOCHROME_ICONS, CORNER_SCALE) +
+                listOf(SCREEN_GAPS_OUT, SCREEN_BORDER_WIDTH, THEMED_ICONS, MONOCHROME_ICONS, CORNER_SCALE, SYSTEM_THEME) +
                 STATUS_BAR.all + NAVIGATION_BAR.all + listOf(TERMINAL_FONT, TERMINAL_TEXT)
         }
 

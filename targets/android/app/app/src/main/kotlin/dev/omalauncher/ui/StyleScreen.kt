@@ -102,6 +102,7 @@ fun StyleScreen(
             val style = runtime.style
             Flag("icons", "monochrome", "colored", style, Style.MONOCHROME_ICONS)
             Flag("icon colors", "theme", "original", style, Style.THEMED_ICONS)
+            if (dev.omalauncher.linux.RootedGuest.enabled) Flag("system colors", "theme", "own", style, Style.SYSTEM_THEME)
             Flag("home apps", "boxed", "icon only", style, Style.APP_TILES)
             Flag("recent apps", "shown", "hidden", style, Style.RECENT_APPS)
             NumberOption("corners", Corners.entries.map { it.label to it.scale.toDouble() }, Style.CORNER_SCALE, style)
