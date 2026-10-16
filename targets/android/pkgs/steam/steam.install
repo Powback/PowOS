@@ -1,0 +1,12 @@
+# The System V IPC shim into every FEX x86 RootFS (x86 programs see that tree, not PowOS's /usr/lib). A RootFS
+# fetched later (install-powos-android.sh) gets it there too.
+_sysvipc_into_rootfs() {
+  for r in /usr/share/fex-emu/RootFS/*/; do
+    [ -d "$r/usr/lib" ] || continue
+    mkdir -p "$r/usr/lib/powos-sysvipc"
+    cp -r /usr/lib/powos-sysvipc/i386 /usr/lib/powos-sysvipc/x86_64 "$r/usr/lib/powos-sysvipc/"
+  done
+}
+
+post_install() { _sysvipc_into_rootfs; }
+post_upgrade() { _sysvipc_into_rootfs; }

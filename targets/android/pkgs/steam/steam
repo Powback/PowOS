@@ -1,0 +1,14 @@
+#!/bin/sh
+# /usr/bin/steam on PowOS (ARM): Valve's launcher inside FEX's x86 environment (FEXBash: x86 bash over FEX's x86
+# RootFS) - steam.sh looks for 32-bit x86 libraries (libc.so.6) on the system it runs on and stops without them.
+#
+# System V IPC: Android's kernel has none (semget -> ENOSYS) and the Steam client needs its semaphores; the
+# sysvipc-emu shim (targets/android/steam/sysvipc, both x86 bitnesses - each process skips the other one) provides
+# them from /dev/shm. It lives in FEX's RootFS (steam.install copies it there), where x86 programs find it.
+#
+# -cef-disable-gpu: Steam's web UI (CEF) software-renders. Its x86 Mesa can't reach the Adreno GPU ("MESA-LOADER:
+# failed to retrieve device information") and parts of the UI didn't draw (a store popup without its close button).
+# HACK: until FEX's host thunks give x86 programs the native GPU drivers; then the UI can use the GPU again.
+L=/usr/lib/powos-sysvipc
+export LD_PRELOAD="$L/i386/libsysvipc-emu.so $L/x86_64/libsysvipc-emu.so${LD_PRELOAD:+ $LD_PRELOAD}"
+exec FEXBash -c 'exec /usr/lib/steam/bin_steam.sh -cef-disable-gpu "$@"' steam "$@"

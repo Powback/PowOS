@@ -695,14 +695,6 @@ public class MainActivity extends Activity
                 .build();
     }
 
-    private void requestMediaAudioFocus() {
-        if (mAudioManager == null || mAudioFocusRequest == null)
-            return;
-        int result = mAudioManager.requestAudioFocus(mAudioFocusRequest);
-        if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
-            Log.w(TAG, "media audio focus not granted: " + result);
-    }
-
     private void abandonMediaAudioFocus() {
         if (mAudioManager != null && mAudioFocusRequest != null)
             mAudioManager.abandonAudioFocusRequest(mAudioFocusRequest);
@@ -713,7 +705,8 @@ public class MainActivity extends Activity
         super.onResume();
         mPipTransitionPending = false;
 
-        requestMediaAudioFocus();
+        // PowOS: no audio focus just for being shown - AUDIOFOCUS_GAIN on every resume paused the user's music and
+        // videos whenever PowOS came to the front. Android mixes PowOS's sound with other apps' without it.
 
         String displayCutoutMode = DisplayCutoutMode.get(
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE));

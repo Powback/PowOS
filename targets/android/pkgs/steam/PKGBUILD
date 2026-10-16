@@ -4,26 +4,28 @@
 # steam PKGBUILD (Valve's Makefile), unchanged code.
 pkgname=steam
 pkgver=1.0.0.87
-pkgrel=2
+pkgrel=3
 pkgdesc="Valve's Steam launcher (x86, runs through FEX) - PowOS phone build"
 arch=(any)
 url=https://steampowered.com/
 license=(custom)
-depends=(bash python fex-emu curl desktop-file-utils hicolor-icon-theme lsof xdg-utils xz zenity)
-source=("https://repo.steampowered.com/steam/archive/stable/steam_$pkgver.tar.gz")
-sha256sums=('649375d2f9377f8009aaf3e2ff09978041eb9114897d9c5a3886f1d82e27ba1f')
+depends=(bash python fex-emu curl desktop-file-utils hicolor-icon-theme lsof xdg-utils xz zenity bubblewrap)
+install=steam.install
+# sysvipc-emu.tar.gz: System V IPC for x86 programs (targets/android/steam/sysvipc/build.sh puts it here).
+source=("https://repo.steampowered.com/steam/archive/stable/steam_$pkgver.tar.gz" steam sysvipc-emu.tar.gz)
+noextract=(sysvipc-emu.tar.gz)
+sha256sums=('649375d2f9377f8009aaf3e2ff09978041eb9114897d9c5a3886f1d82e27ba1f' SKIP
+            '95467f98871e35bbf68fbc0dc8e2f7077ea730d77f7cce84ff13d4f6fde8be74')
 
 package() {
+  mkdir -p "$pkgdir/usr/lib/powos-sysvipc"
+  tar -xzf sysvipc-emu.tar.gz -C "$pkgdir/usr/lib/powos-sysvipc" ./i386/libsysvipc-emu.so ./x86_64/libsysvipc-emu.so
   cd steam-launcher
   make DESTDIR="$pkgdir" PREFIX=/usr install
   # steamdeps installs Ubuntu packages through apt; nothing to do on PowOS (as Arch's package).
   ln -sf /usr/bin/true "$pkgdir/usr/bin/steamdeps"
-  # The launcher scripts run in FEX's x86 world (FEXBash: x86 bash over FEX's x86 rootfs), not the native ARM one:
-  # steam.sh looks for 32-bit x86 libraries (libc.so.6) on the system it runs on and stops without them.
-  rm "$pkgdir/usr/bin/steam"
-  printf '#!/bin/sh\n# PowOS (ARM): Valve'"'"'s launcher inside FEX'"'"'s x86 environment.\nexec FEXBash -c '"'"'exec /usr/lib/steam/bin_steam.sh "$@"'"'"' steam "$@"\n' \
-    > "$pkgdir/usr/bin/steam"
-  chmod 755 "$pkgdir/usr/bin/steam"
+  # The launcher in FEX's x86 world, with System V IPC (see the file).
+  install -m755 "$srcdir/steam" "$pkgdir/usr/bin/steam"
   rm -rf "$pkgdir/etc/apt"
   install -Dm644 steam_subscriber_agreement.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
