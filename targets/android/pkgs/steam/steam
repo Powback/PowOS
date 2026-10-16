@@ -9,6 +9,15 @@
 # -cef-disable-gpu: Steam's web UI (CEF) software-renders. Its x86 Mesa can't reach the Adreno GPU ("MESA-LOADER:
 # failed to retrieve device information") and parts of the UI didn't draw (a store popup without its close button).
 # HACK: until FEX's host thunks give x86 programs the native GPU drivers; then the UI can use the GPU again.
-L=/usr/lib/powos-sysvipc
+#
+# Preloaded from the home directory: it is the same path outside FEX, under FEX and inside the Steam Runtime
+# container (pressure-vessel binds the home in). From /usr/lib the container's 64-bit steamwebhelper couldn't find
+# it ("cannot open shared object file"), had no System V IPC and never answered Steam ("steamwebhelper is not
+# responding").
+L=${XDG_DATA_HOME:-$HOME/.local/share}/powos-sysvipc
+for b in i386 x86_64; do
+  cmp -s /usr/lib/powos-sysvipc/$b/libsysvipc-emu.so "$L/$b/libsysvipc-emu.so" \
+    || install -Dm755 /usr/lib/powos-sysvipc/$b/libsysvipc-emu.so "$L/$b/libsysvipc-emu.so"
+done
 export LD_PRELOAD="$L/i386/libsysvipc-emu.so $L/x86_64/libsysvipc-emu.so${LD_PRELOAD:+ $LD_PRELOAD}"
 exec FEXBash -c 'exec /usr/lib/steam/bin_steam.sh -cef-disable-gpu "$@"' steam "$@"

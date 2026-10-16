@@ -4,7 +4,7 @@
 # steam PKGBUILD (Valve's Makefile), unchanged code.
 pkgname=steam
 pkgver=1.0.0.87
-pkgrel=3
+pkgrel=4
 pkgdesc="Valve's Steam launcher (x86, runs through FEX) - PowOS phone build"
 arch=(any)
 url=https://steampowered.com/
