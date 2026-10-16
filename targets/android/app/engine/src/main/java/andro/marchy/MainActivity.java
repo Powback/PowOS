@@ -346,7 +346,14 @@ public class MainActivity extends Activity
         // the system auto-panning the fullscreen window.
         getWindow().setDecorFitsSystemWindows(false);
 
+        // PowOS: the desktop is translucent over Android's wallpaper, like the launcher. KWin already renders RGBA into
+        // these buffers (native_consumer.c, R8G8B8A8, premultiplied); only the Android layers were opaque - this
+        // surface (default OPAQUE drops alpha), the window's background and no wallpaper behind the window.
+        // Where the desktop draws opaque (windows, panels, a Plasma wallpaper) nothing changes.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         surfaceView = new SurfaceView(this);
+        surfaceView.getHolder().setFormat(android.graphics.PixelFormat.TRANSLUCENT);
         surfaceView.setFocusable(true);
         surfaceView.setFocusableInTouchMode(true);
         surfaceView.setOnDragListener(new DropTarget(this)); // Android drag and drop -> ~/Downloads / clipboard
@@ -369,7 +376,7 @@ public class MainActivity extends Activity
                 }
             }
         };
-        root.setBackgroundColor(Color.BLACK);
+        root.setBackgroundColor(Color.TRANSPARENT);
         root.addView(surfaceView, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT));
