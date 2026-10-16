@@ -34,6 +34,8 @@ E=$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' /data/powos/root/etc/powos/se
 G=$( [ -n "$K" ] && tr '\0' '\n' < /proc/$K/environ 2>/dev/null |
   grep -E "^(${E}TURNIP_|FD_|MESA_|GALLIUM_|XWAYLAND_|ANDROMARCHY_|LIBVA_|TERMUX_VA_|POWOS_SESSION_MODE|QT_FORCE_STDERR_LOGGING)[A-Za-z0-9_]*=" |
   tr '\n' ' ')
+# The session's open-file limit (see powos-rooted-session: Proton's esync needs >= 524288), raised while still root.
+ulimit -n 1048576 2>/dev/null
 exec nsenter -t "$PID" -m -- /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- /usr/bin/env -i \
   HOME=/home/powos USER=powos LOGNAME=powos SHELL=/bin/bash TERM=xterm-256color \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
