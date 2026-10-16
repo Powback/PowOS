@@ -7,6 +7,7 @@
 #                          our kernel: MODULE_SIG_PROTECT)
 #   out/gki/Module.symvers symbol CRCs - tools/kmi-check.py compares them with the phone's vendor modules
 #   out/gki/kernel-version
+# PowOS patches to the kernel source: patches/gki/*.patch (applied to the cached tree once).
 # Compiler: Google's prebuilt Clang r450784e (build.config.constants) - same CFI/LTO/symbol versions as stock.
 # Source and build tree live in the powos-gki-cache volume (incremental rebuilds).
 #   ./build-gki-kernel.sh            BRANCH=oneplus/sm8550_v_15.0.0_oneplus_open ./build-gki-kernel.sh
@@ -40,6 +41,14 @@ docker run --rm --platform linux/amd64 -v powos-gki-cache:/cache -v "$PWD":/nati
   fi
   git -C $ROOT log -1 --format="modules/devicetree: %H %cd"
   git -C $SRC log -1 --format="source: %H %cd"
+  # PowOS patches (patches/gki/, e.g. futex_waitv for Proton'"'"'s fsync) on the cached tree: applied once - a patch whose
+  # reverse applies is already in - and a patch that fits neither way stops the build.
+  for p in /native/patches/gki/*.patch; do
+    [ -e "$p" ] || continue
+    if git -C $SRC apply -R --check "$p" 2>/dev/null; then echo "patch already in: ${p##*/}"
+    elif git -C $SRC apply "$p"; then echo "patch applied: ${p##*/}"
+    else echo "ERROR: ${p##*/} does not apply to $SRC" >&2; exit 1; fi
+  done
   B=/cache/build-${BRANCH//\//_}; mkdir -p $B
   export PATH=$CLANG/bin:$PATH
   # Host tools (fixdep, ...) link with lld too, like the Android kernel build - there is no system ld here.
