@@ -15,5 +15,6 @@ Build (arm64 Ubuntu 24.04 container, cross gcc; glibc 2.39 - the Fedora 44 x86 R
 
     targets/android/steam/sysvipc/build.sh    # -> targets/android/out/sysvipc/sysvipc-emu.tar.gz
 
-Kernel alternative: `targets/native/config/gki/sysvipc.config` (needs Halium's KABI-padding patch to keep the
-vendor modules loading - see that file).
+Kernel alternative, not taken: `CONFIG_SYSVIPC=y` in a config fragment is silently dropped by the GKI build (tried
+2026-10-16: the built kernel still had it off). Enabling it needs Halium's patch that moves the SysV fields of
+task_struct into the ANDROID_KABI_RESERVE padding, so the phone's vendor modules keep loading (Droidian/RainOS).
