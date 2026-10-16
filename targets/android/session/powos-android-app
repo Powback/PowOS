@@ -36,6 +36,14 @@ if command -v scrcpy >/dev/null && command -v adb >/dev/null; then
   [ "$(adb -s $dev get-state 2>/dev/null)" = device ] || adb connect $dev >/dev/null 2>&1
   if [ "$(adb -s $dev get-state 2>/dev/null)" = device ]; then
     export SDL_VIDEODRIVER=wayland SDL_VIDEO_WAYLAND_WMCLASS="android-$pkg" SDL_APP_ID="android-$pkg"
+    # Hardware decoding (VA-API through the PowOS app's termux-va -> MediaCodec), set here so it doesn't depend on
+    # how this was started. Without DISPLAY, FFmpeg takes VA-API's DRM path (served by the bridge) instead of X11
+    # (not served: "Failed to initialise VAAPI connection").
+    if [ -S "${XDG_RUNTIME_DIR:-/run/powos-app}/termux-va.sock" ] && [ -e /usr/lib/dri/termuxva_drv_video.so ]; then
+      export LIBVA_DRIVER_NAME=termuxva TERMUX_VA_BRIDGE=1 TERMUX_VA_GPU_BACKEND=kgsl \
+        TERMUX_VA_SOCKET="${XDG_RUNTIME_DIR:-/run/powos-app}/termux-va.sock"
+      unset DISPLAY
+    fi
     # Density = the desktop's scale x 160 (Android's 1 dp = density/160 px), so an Android app is the same size as
     # PowOS's own apps.
     # HACK: a fixed-size display; resizing the window scales the picture instead of the app. scrcpy's
@@ -51,25 +59,22 @@ if command -v scrcpy >/dev/null && command -v adb >/dev/null; then
     set -- $geo
     set -- -s $dev --new-display="$3/$4" --window-width="$1" --window-height="$2" --no-vd-system-decorations \
       --no-vd-destroy-content --no-audio --window-title="$title"
-    if [ -z "$task" ]; then
-      echo $$ > "$W/$pkg.pid"   # exec keeps the pid: this is the window's process
-      exec scrcpy "$@" --start-app="$pkg"
-    fi
-    # A running task: an empty display first, then Android moves the task (with everything in it - a split pair
-    # too) onto it once scrcpy reports the display's id.
-    log=${XDG_RUNTIME_DIR:-/tmp}/powos-android-app.$$.log
-    scrcpy "$@" > "$log" 2>&1 &
-    pid=$!
-    echo $pid > "$W/$pkg.pid"
+    # A new app: started on its display. A running task: an empty display first, then Android moves the task (with
+    # everything in it - a split pair too) onto it once scrcpy reports the display's id.
+    [ -n "$task" ] || set -- "$@" --start-app="$pkg"
+    # scrcpy's output, minus the VA-API bridge's line per decoded frame (tva-va: ...; it has no quiet switch), in a
+    # small per-app log. Its pid (the window's process) for the one-window check above.
+    log=$W/$pkg.log
+    rm -f "$W/$pkg.pid"
+    (sh -c 'echo $$ > "$0"; exec scrcpy "$@"' "$W/$pkg.pid" "$@" 2>&1 | grep --line-buffered -v '^tva-va:' > "$log") &
     for _ in $(seq 100); do
-      id=$(sed -n 's/.*New display: .* (id=\([0-9]*\)).*/\1/p' "$log")
-      [ -n "$id" ] && break
-      kill -0 $pid 2>/dev/null || break
+      [ -n "$task" ] && id=$(sed -n 's/.*New display: .* (id=\([0-9]*\)).*/\1/p' "$log")
+      [ -n "${id:-}" ] && break
+      [ -z "$task" ] && [ -s "$W/$pkg.pid" ] && break
       sleep 0.1
     done
-    [ -n "$id" ] && adb -s $dev shell am display move-stack "$task" "$id"
-    wait $pid
-    rm -f "$log"
+    [ -n "${id:-}" ] && adb -s $dev shell am display move-stack "$task" "$id"
+    wait
     exit
   fi
 fi

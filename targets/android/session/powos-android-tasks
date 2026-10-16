@@ -54,10 +54,7 @@ def tasks():
     return {
         tid: t["pkgs"]
         for tid, t in found.items()
-        # Picture-in-picture ("pinned") stays Android's floating overlay: moved, it kept its small PiP bounds in a
-        # mostly black window.
-        if t["display"] == 0 and t["type"] == "standard" and t["mode"] != "pinned" and t["pkgs"]
-        and not set(t["pkgs"]) & IGNORE
+        if t["display"] == 0 and t["type"] == "standard" and t["pkgs"] and not set(t["pkgs"]) & IGNORE
     }
 
 
