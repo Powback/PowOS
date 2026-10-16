@@ -31,8 +31,8 @@ def adb(*args, timeout=10):
     return subprocess.run(["adb", "-s", DEV, *args], capture_output=True, text=True, timeout=timeout).stdout
 
 
-def tasks():
-    """{root task id: [packages]} of the apps on the phone's own screen (display 0)."""
+def all_tasks():
+    """Every root task: {id: {display, type, mode, pkgs}}."""
     found, cur = {}, None
     for line in adb("shell", "am", "stack", "list").splitlines():
         m = re.match(r"RootTask id=(\d+) .*displayId=(\d+)", line)
@@ -51,6 +51,11 @@ def tasks():
         p = re.match(r"\s+taskId=\d+: ([\w.]+)/", line)
         if p and p[1] not in cur["pkgs"]:
             cur["pkgs"].append(p[1])
+    return found
+
+
+def phone_screen(found):
+    """{root task id: [packages]} of the apps on the phone's own screen (display 0) - the taskbar entries."""
     return {
         tid: t["pkgs"]
         for tid, t in found.items()
@@ -69,36 +74,98 @@ def label(pkg):
     return pkg
 
 
+RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
+# The Android app in the focused PowOS window, for the PowOS app's FoldWatcher: folding the phone moves that task onto
+# the cover screen (and unfolding back into its window). "<root task id> <display id>", empty when the focused window
+# isn't an Android app (the cover then shows the launcher).
+ACTIVE = os.path.join(RUN, "android-active")
+KWIN_SCRIPT = """
+function report(w) {
+    callDBus("org.powos.AndroidTasks", "/", "org.powos.AndroidTasks", "Activated", w ? String(w.resourceClass) : "");
+}
+workspace.windowActivated.connect(report);
+report(workspace.activeWindow);
+"""
+
+
 def watch():
     if not adb("get-state").strip() == "device":
         subprocess.run(["adb", "connect", DEV], capture_output=True)
         if not adb("get-state").strip() == "device":
             sys.exit("no adb to the phone (rooted mode only)")
+    from PySide6.QtCore import ClassInfo, QCoreApplication, QObject, QTimer, Slot
+    from PySide6.QtDBus import QDBusConnection
+
+    app = QCoreApplication(sys.argv[:1])
     stubs = {}  # task id -> Popen
     moving = {}  # task id -> time its stand-in was clicked: no new stand-in while Android moves it to its window
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    found = {}  # the last task list
+    active = [""]  # resourceClass of the focused window
+
+    def write_active():
+        cls, entry = active[0], ""
+        if cls.startswith("android-"):
+            pkg = cls[len("android-"):]
+            for tid, t in found.items():
+                if t["display"] != 0 and pkg in t["pkgs"]:
+                    entry = f"{tid} {t['display']}"
+                    break
+        with open(ACTIVE + ".tmp", "w") as f:
+            f.write(entry)
+        os.replace(ACTIVE + ".tmp", ACTIVE)
+
+    @ClassInfo({"D-Bus Interface": "org.powos.AndroidTasks"})
+    class Service(QObject):
+        @Slot(str)
+        def Activated(self, cls):  # noqa: N802 - D-Bus method name
+            active[0] = cls
+            write_active()
+
+    def refresh():
+        nonlocal found
+        try:
+            found = all_tasks()
+        except Exception as e:  # adb hiccup: keep the stand-ins, try again
+            print("tasks:", e, file=sys.stderr)
+            return
+        now = phone_screen(found)
+        for tid in list(stubs):
+            if stubs[tid].poll() is not None:  # exits only when clicked
+                moving[tid] = time.monotonic()
+                del stubs[tid]
+            elif tid not in now:
+                stubs[tid].terminate()
+                del stubs[tid]
+        for tid in [t for t, at in moving.items() if time.monotonic() - at > 15]:
+            del moving[tid]
+        for tid, pkgs in now.items():
+            if tid not in stubs and tid not in moving:
+                title = " | ".join(label(p) for p in pkgs)
+                stubs[tid] = subprocess.Popen([sys.argv[0], "--stub", str(tid), pkgs[0], title])
+        write_active()  # the focused app's task may have moved (opened, closed, adopted)
+
+    bus = QDBusConnection.sessionBus()
+    service = Service()
+    if not bus.registerService("org.powos.AndroidTasks"):
+        sys.exit("already running")
+    bus.registerObject("/", service, QDBusConnection.ExportAllSlots)
+    # KWin reports every focus change to us (a KWin script can't write files; it can call D-Bus).
+    script = os.path.join(RUN, "powos-android-active.js")
+    with open(script, "w") as f:
+        f.write(KWIN_SCRIPT)
+    kwin = ["qdbus6", "org.kde.KWin", "/Scripting"]
+    subprocess.run(kwin + ["org.kde.kwin.Scripting.unloadScript", "powos-android-active"], capture_output=True)
+    subprocess.run(kwin + ["org.kde.kwin.Scripting.loadScript", script, "powos-android-active"], capture_output=True)
+    subprocess.run(kwin + ["org.kde.kwin.Scripting.start"], capture_output=True)
+
+    timer = QTimer()
+    timer.timeout.connect(refresh)
+    timer.start(2000)
+    refresh()
+    signal.signal(signal.SIGTERM, lambda *_: app.quit())
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
     try:
-        while True:
-            try:
-                now = tasks()
-            except Exception as e:  # adb hiccup: keep the stand-ins, try again
-                print("tasks:", e, file=sys.stderr)
-                time.sleep(2)
-                continue
-            for tid in list(stubs):
-                if stubs[tid].poll() is not None:  # exits only when clicked
-                    moving[tid] = time.monotonic()
-                    del stubs[tid]
-                elif tid not in now:
-                    stubs[tid].terminate()
-                    del stubs[tid]
-            for tid in [t for t, at in moving.items() if time.monotonic() - at > 15]:
-                del moving[tid]
-            for tid, pkgs in now.items():
-                if tid not in stubs and tid not in moving:
-                    title = " | ".join(label(p) for p in pkgs)
-                    stubs[tid] = subprocess.Popen([sys.argv[0], "--stub", str(tid), pkgs[0], title])
-            time.sleep(2)
+        app.exec()
     finally:
         for p in stubs.values():
             p.terminate()

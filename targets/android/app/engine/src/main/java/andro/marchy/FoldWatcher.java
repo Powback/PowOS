@@ -94,7 +94,48 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         Log.i(TAG, big ? "unfolded" : "folded");
         if (big && Boolean.FALSE.equals(wasBig))
             unfolded();
+        else if (!big && Boolean.TRUE.equals(wasBig))
+            folded();
         wasBig = big;
+    }
+
+    /** The Android app taken onto the cover screen at the last fold: its task and the PowOS window's display. */
+    private String[] carried;
+
+    /**
+     * Folded: the Android app focused in PowOS (a PowOS window = a virtual display; powos-android-tasks writes which,
+     * run dir file android-active) comes onto the cover screen, so the cover shows what was being used - not the
+     * empty phone screen under the desktop (which steps aside, MainActivity.onConfigurationChanged). A PowOS (Linux)
+     * app focused: nothing to carry; the cover shows the launcher.
+     */
+    private void folded() {
+        if (!enabled())
+            return;
+        carried = null;
+        try {
+            String[] a = new String(java.nio.file.Files.readAllBytes(
+                    new java.io.File(SessionService.runDir(ctx), "android-active").toPath())).trim().split(" ");
+            if (a.length == 2 && !a[0].isEmpty()) {
+                su("am display move-stack " + a[0] + " 0");
+                carried = a;
+                Log.i(TAG, "carried task " + a[0] + " from display " + a[1] + " onto the cover screen");
+            }
+        } catch (java.io.IOException e) {
+            Log.d(TAG, "nothing to carry: " + e);
+        }
+    }
+
+    private boolean enabled() {
+        SharedPreferences prefs = ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE);
+        return prefs.getBoolean(KEY_UNFOLD_DESKTOP, true) && RootMode.enabled();
+    }
+
+    private static void su(String cmd) {
+        try {
+            new ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start().waitFor();
+        } catch (Exception e) {
+            Log.w(TAG, "su " + cmd + ": " + e);
+        }
     }
 
     @Override
@@ -105,17 +146,14 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     public void onDisplayRemoved(int displayId) {
     }
 
+    /** Unfolded: the app carried onto the cover goes back into its PowOS window, then the desktop comes up. */
     private void unfolded() {
-        SharedPreferences prefs = ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE);
-        if (!prefs.getBoolean(KEY_UNFOLD_DESKTOP, true) || !RootMode.enabled())
+        if (!enabled())
             return;
-        String component = ctx.getPackageName() + "/" + MainActivity.class.getName();
-        new Thread(() -> {
-            try {
-                new ProcessBuilder("su", "-c", "am start --display 0 -n " + component).start().waitFor();
-            } catch (Exception e) {
-                Log.w(TAG, "could not bring the desktop up: " + e);
-            }
-        }).start();
+        if (carried != null) {
+            su("am display move-stack " + carried[0] + " " + carried[1]); // fails harmlessly if the window closed
+            carried = null;
+        }
+        su("am start --display 0 -n " + ctx.getPackageName() + "/" + MainActivity.class.getName());
     }
 }
