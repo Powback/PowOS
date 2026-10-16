@@ -29,6 +29,11 @@ if [ ! -x "$S/steamrtarm64/steam" ]; then
   mkdir -p "$S" && t=$(mktemp) && curl -fL "$U/$f" -o "$t" && unzip -oq "$t" -d "$S" && rm -f "$t" \
     && chmod -R u+rwx "$S/steamrtarm64" || { echo "steam: downloading the ARM64 client failed" >&2; exit 1; }
 fi
+# Games: Valve's FEX compat tool (steamapps/common/FEX-Emu) with GL + Vulkan thunks - the game's x86 graphics calls go
+# to PowOS's native Mesa (Turnip/freedreno on the Adreno; x86 Mesa can't reach Android's KGSL GPU driver). Its x86
+# system (RootFS) is /usr/share/guestos/fex-mesa, which steam.install points at FEX's RootFS.
+export STEAM_COMPAT_FEX_CONFIG=${STEAM_COMPAT_FEX_CONFIG:-TSOEnabled:1,Multiblock:1,ThunksDB_GL:1,ThunksDB_Vulkan:1}
+
 # The ~/.steam links Valve's launcher script makes, for the native client: games start through
 # ~/.steam/sdkarm64/steam-launch-wrapper ("Game process removed" at once without it).
 mkdir -p "$HOME/.steam"

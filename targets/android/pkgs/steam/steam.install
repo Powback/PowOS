@@ -8,5 +8,15 @@ _sysvipc_into_rootfs() {
   done
 }
 
-post_install() { _sysvipc_into_rootfs; }
-post_upgrade() { _sysvipc_into_rootfs; }
+# Valve's FEX compat tool (what the native ARM64 client runs games with) expects the OS's x86 system at
+# /usr/share/guestos/fex-mesa (SteamOS ARM ships one with x86 Mesa): FEX's RootFS.
+_guestos_rootfs() {
+  for r in /usr/share/fex-emu/RootFS/*/; do
+    mkdir -p /usr/share/guestos
+    ln -sfn "${r%/}" /usr/share/guestos/fex-mesa
+    return
+  done
+}
+
+post_install() { _sysvipc_into_rootfs; _guestos_rootfs; }
+post_upgrade() { _sysvipc_into_rootfs; _guestos_rootfs; }
