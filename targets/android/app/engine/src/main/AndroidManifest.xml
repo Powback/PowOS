@@ -31,7 +31,7 @@
              (Settings > Home screen: auto = launcher on the cover screen, desktop on the inner one). -->
         <activity
             android:name=".HomeActivity"
-            android:label="PowOS"
+            android:label="PowOS Launcher"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:excludeFromRecents="true"
             android:exported="true"
