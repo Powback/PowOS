@@ -140,7 +140,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
                 return;
             // Opening: a steady climb past 4 degrees - shut, the hinge jitters between 0 and 3, and starting on that
             // turned the cover off and on at random.
-            if ((onCover && a >= 4 && rising >= 2) || (!onCover && a < CLOSE_START && a > SHUT_END + 2 && speed < 0)
+            if ((onCover && a >= 5 && rising >= 2 && speed > 25) || (!onCover && a < CLOSE_START && a > SHUT_END + 2 && speed < 0)
                     || (a > SHUT_END + 3 && a < OPEN - 5))
                 hold(ALL, nowMs);
             return;
