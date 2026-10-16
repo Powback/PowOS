@@ -21,8 +21,9 @@ import java.util.Set;
 /**
  * PowOS: the Android apps in PowOS's application menu (Plasma's launcher, KRunner, the task manager): one
  * freedesktop .desktop entry + icon per launchable Android app, in the PowOS user's
- * ~/.local/share/applications and icons dirs, category "Android". Each runs android-request "float <package>":
- * the app opens in a floating Android window over the PowOS desktop (see AndroidRequests). Kept in sync on
+ * ~/.local/share/applications and icons dirs, category "Android". Each runs powos-android-app <package>
+ * (session/powos-android-app): the app in its own PowOS window (scrcpy on a virtual display) when PowOS has adb to
+ * the phone, else a floating Android window over the desktop (android-request, see AndroidRequests). Kept in sync on
  * install/update/removal. (Andromarchy wrote a block into Omarchy's JSONC menu instead.)
  */
 final class AndroidApps extends BroadcastReceiver {
@@ -74,7 +75,8 @@ final class AndroidApps extends BroadcastReceiver {
                         + "Type=Application\n"
                         + "Name=" + label + "\n"
                         + "Comment=Android app (" + pkg + ")\n"
-                        + "Exec=android-request float " + pkg + "\n"
+                        + "Exec=powos-android-app " + pkg + " \"" + label.replace("\"", "") + "\"\n"
+                        + "StartupWMClass=android-" + pkg + "\n"
                         + "Icon=" + id + "\n"
                         + "Categories=Android;\n"
                         + "Keywords=android;" + pkg + ";\n"

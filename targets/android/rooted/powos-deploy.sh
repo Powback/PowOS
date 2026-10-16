@@ -13,7 +13,8 @@ mkdir -p /data/adb/service.d
 install -m 755 $T/powos-start.sh /data/adb/service.d/powos.sh
 install -m 755 $T/powos-session.sh /data/powos/powos-session.sh
 install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
-rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-rooted-session
+install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
+rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-rooted-session $T/powos-android-app
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run
@@ -34,6 +35,21 @@ usermod -aG wheel,video,audio,input powos
 echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel && chmod 440 /etc/sudoers.d/10-wheel
 echo "user powos uid $u"
 EOF
+
+# Android apps as PowOS windows (powos-android-app: scrcpy through adb to the phone itself, 127.0.0.1:5555 - adbd
+# listens there with persist.adb.tcp.port, rooted.sh wifi). The phone never shows its "Allow USB debugging?" prompt
+# for a connection from itself, so PowOS's adb key is authorized here directly (the same as "Always allow";
+# revoke: remove its line from /data/misc/adb/adb_keys).
+chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/bash -c '
+  pacman -Q scrcpy android-tools >/dev/null 2>&1 || pacman -S --noconfirm --needed scrcpy android-tools >/dev/null
+  [ -f /home/powos/.android/adbkey.pub ] || setpriv --reuid=powos --regid=powos --init-groups -- \
+    env HOME=/home/powos adb keygen /home/powos/.android/adbkey >/dev/null 2>&1'
+K=$R/home/powos/.android/adbkey.pub
+if [ -f $K ] && ! grep -qF "$(cat $K)" /data/misc/adb/adb_keys 2>/dev/null; then
+  { cat $K; echo; } >> /data/misc/adb/adb_keys && chown system:shell /data/misc/adb/adb_keys && chmod 640 /data/misc/adb/adb_keys
+  echo "adb: PowOS's key authorized"
+fi
+[ "$(getprop persist.adb.tcp.port)" = 5555 ] || setprop persist.adb.tcp.port 5555
 
 # The no-root engine's sudo shim (fakeroot) first on PATH would shadow the real sudo: rooted mode has real root.
 # Moved aside, not deleted; the no-root app's own rootfs keeps it.

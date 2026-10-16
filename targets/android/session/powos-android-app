@@ -1,0 +1,30 @@
+#!/bin/sh
+# powos-android-app <package> [title]: an Android app as a PowOS window.
+#
+# With adb to the phone itself (rooted mode: rooted/powos-deploy.sh authorizes PowOS's adb key and adbd listens on
+# 127.0.0.1:5555): scrcpy gives the app its own Android virtual display and shows it in a normal Wayland window -
+# KWin decorations, the taskbar (app_id android-<package> = its .desktop entry, so the right icon and grouping),
+# alt-tab, resize. Touch, keyboard and mouse go back to the app. Sound stays on Android (--no-audio: the app plays
+# through the phone's own audio, no second copy). Closing the window closes the app's display.
+# Without adb (the no-root app): the app opens as a floating Android window over the desktop (android-request).
+pkg=$1
+title=${2:-$1}
+[ -n "$pkg" ] || { echo "usage: powos-android-app <package> [title]" >&2; exit 2; }
+dev=127.0.0.1:5555
+
+if command -v scrcpy >/dev/null && command -v adb >/dev/null; then
+  [ "$(adb -s $dev get-state 2>/dev/null)" = device ] || adb connect $dev >/dev/null 2>&1
+  if [ "$(adb -s $dev get-state 2>/dev/null)" = device ]; then
+    export SDL_VIDEODRIVER=wayland SDL_VIDEO_WAYLAND_WMCLASS="android-$pkg" SDL_APP_ID="android-$pkg"
+    # Density = the desktop's scale x 160 (Android's 1 dp = density/160 px), so an Android app is the same size as
+    # PowOS's own apps.
+    # HACK: a fixed 1080x1440 display; resizing the window scales the picture instead of the app. scrcpy's
+    # --flex-display (the display follows the window) showed an over-zoomed, half-black Chrome on the OnePlus Open
+    # (scrcpy 5.0.1, 2026-10-16). Real fix: find why (scrcpy issue or our Wayland scaling), then use it.
+    scale=$(kscreen-doctor -j 2>/dev/null | jq -r '.outputs[0].scale // empty' 2>/dev/null)
+    dpi=$(awk -v s="${scale:-1.5}" 'BEGIN { printf "%d", s * 160 }')
+    exec scrcpy -s $dev --new-display=1080x1440/"$dpi" --no-vd-system-decorations \
+      --start-app="$pkg" --no-audio --window-title="$title"
+  fi
+fi
+exec android-request float "$pkg"
