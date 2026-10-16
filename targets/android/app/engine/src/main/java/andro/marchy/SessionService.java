@@ -100,6 +100,9 @@ public class SessionService extends Service {
         // Android apps in PowOS's application menu (.desktop entries in the rootfs, launched through the requests above).
         apps = new AndroidApps(this);
         apps.register(this);
+        // Foldables: opening the phone brings the PowOS desktop up (FoldWatcher).
+        fold = new FoldWatcher(this);
+        fold.start();
 
         try {
             startSession();
@@ -276,6 +279,7 @@ public class SessionService extends Service {
     /** Android's default network -> run/network ("wifi <strength> <ssid>" | "wired" | "none"), read by android-nm. */
     private AndroidRequests requests;
     private AndroidApps apps;
+    private FoldWatcher fold;
 
     // FLAG_INCLUDE_LOCATION_INFO: the Wi-Fi name (SSID) instead of "<unknown ssid>", once location is granted.
     private final ConnectivityManager.NetworkCallback network = new ConnectivityManager.NetworkCallback(
@@ -385,6 +389,7 @@ public class SessionService extends Service {
         getSystemService(ConnectivityManager.class).unregisterNetworkCallback(network);
         requests.stopWatching();
         unregisterReceiver(apps);
+        fold.stop();
         for (Process p : processes)
             p.destroy();
         if (wakeLock != null && wakeLock.isHeld())
