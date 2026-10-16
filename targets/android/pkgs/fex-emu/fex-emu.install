@@ -1,0 +1,15 @@
+# The binfmt_misc rules for x86 programs are registered with flag F (powos-start.sh): the kernel opens /usr/bin/FEX
+# once, at registration, and keeps running THAT file. After an upgrade x86 programs still ran the old FEX until the
+# next boot (seen: patched futex_waitv still answered ENOSYS). Re-register the rules that are active.
+_fex_binfmt_refresh() {
+  local bm=/proc/sys/fs/binfmt_misc f n
+  [ -e "$bm/register" ] || return 0
+  for f in /usr/lib/binfmt.d/FEX-*.conf; do
+    [ -e "$f" ] || continue
+    n=$(cut -d: -f2 "$f")
+    [ -e "$bm/$n" ] || continue
+    echo -1 > "$bm/$n" && cat "$f" > "$bm/register" && echo "fex-emu: re-registered $n"
+  done
+}
+
+post_upgrade() { _fex_binfmt_refresh; }
