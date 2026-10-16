@@ -111,8 +111,10 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         // How closed the phone is, over the whole way.
         float p = Math.max(0f, Math.min(1f, (OPEN - a) / (OPEN - SHUT)));
         if (override == ALL) {
-            veil.set((float) Math.pow(p, 1.3), false);
-            coverFade.set((float) Math.pow(p, 0.8));
+            // Both screens simply on, at full brightness, for the whole fold: no fading either of them down (a
+            // faded screen looked switched off).
+            veil.set(0f, false);
+            coverFade.set(1f);
         } else if (!onCover && a > SHUT && android.os.SystemClock.uptimeMillis() - holdEndedAt > 1000) {
             // Not right after a hold: shut, display 0 is the cover already, and the veil (on display 0) would stay
             // over it - blurred and dark when it should be at its best.
@@ -124,13 +126,31 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     private void steer(float a, long nowMs) {
         // Anywhere between shut and open, both screens; at either end, that end's screen alone. A few degrees of
         // hysteresis, so resting right at an end doesn't flicker between the two.
+        // Opening starts the crossfade at once: Android switches to the inner screen by itself at ~6 degrees, and
+        // starting later let the cover cut out first.
         if (override == -1) {
-            if (a > SHUT_END + 3 && a < OPEN - 5)
+            // Closing likewise: the front screen comes on as soon as the phone starts to close (it rests open at
+            // ~175-180, so waiting for "below fully open" came late).
+            if ((onCover && a >= 3 && speed > 0) || (!onCover && a < CLOSE_START && speed < 0)
+                    || (a > SHUT_END + 3 && a < OPEN - 5))
                 hold(ALL, nowMs);
-        } else if (a <= SHUT_END || a >= OPEN) {
-            letGo();
+            return;
         }
+        hingeHandler.removeCallbacks(settleShut);
+        if ((a >= OPEN && speed > 0) || a >= CLOSE_START + 4) // opened all the way (not a close that started high)
+            letGo();
+        else if (a <= SHUT_END)
+            hingeHandler.postDelayed(settleShut, SHUT_SETTLE_MS); // shut only if it stays shut: a wiggle doesn't flip
     }
+
+    /** Below this, a closing movement starts the crossfade. */
+    private static final float CLOSE_START = 172f;
+    /** How long the hinge must stay shut before the inner screen goes off. */
+    private static final long SHUT_SETTLE_MS = 250;
+    private final Runnable settleShut = () -> {
+        if (override != -1 && prevAngle <= SHUT_END)
+            letGo();
+    };
 
     /** A closed phone rests at a few degrees, not 0. */
     private static final float SHUT_END = 5f;
@@ -162,6 +182,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         Log.i(TAG, "letting go at hinge " + prevAngle);
         hingeHandler.removeCallbacks(expire);
         hingeHandler.removeCallbacks(idle);
+        hingeHandler.removeCallbacks(settleShut);
         override = -1;
         holdEndedAt = android.os.SystemClock.uptimeMillis();
         overrideShell("cmd device_state state reset");
