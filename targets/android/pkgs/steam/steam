@@ -40,8 +40,6 @@ mkdir -p "$HOME/.steam"
 ln -sfn "$S" "$HOME/.steam/root"
 ln -sfn "$S" "$HOME/.steam/steam"
 ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
-# HACK: -cef-disable-gpu - with the web UI on the GPU, the phone's Xwayland (Andromarchy's KGSL build) spins a core in
-# xwl_present_execute <-> xwl_present_re_execute (from miSyncTriggerFence) and stops accepting clients: Steam froze,
-# downloads stopped, every X11 program (games) hung connecting. Real fix: that Present/sync-fence loop in
-# Andromarchy's Xwayland patches. Games still render on the GPU; only Steam's own UI is software-drawn.
-cd "$S/steamrtarm64" && exec ./steam -cef-disable-gpu "$@"
+# No -cef-disable-gpu here: the ARM64 client's web UI then loses its GPU process ("GPU process isn't usable. Goodbye",
+# exit_code=4, in a restart loop) and never shows a window.
+cd "$S/steamrtarm64" && exec ./steam "$@"
