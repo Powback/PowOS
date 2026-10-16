@@ -130,6 +130,9 @@ install -Dm 644 "$P/session/powos-android-tasks.desktop" /etc/xdg/autostart/powo
 install -Dm 644 "$P/session/plasma/org.powos.transparent/metadata.json" /usr/share/plasma/wallpapers/org.powos.transparent/metadata.json
 install -Dm 644 "$P/session/plasma/org.powos.transparent/contents/ui/main.qml" /usr/share/plasma/wallpapers/org.powos.transparent/contents/ui/main.qml
 install -Dm 644 "$P/session/plasma/powos-transparent-desktop.js" /usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/powos-transparent-desktop.js
+# KWin then paints the transparent desktop as translucent (see its main.js: no trails under it).
+install -Dm 644 "$P/session/plasma/powos-translucent-desktop/metadata.json" /usr/share/kwin/scripts/powos-translucent-desktop/metadata.json
+install -Dm 644 "$P/session/plasma/powos-translucent-desktop/contents/code/main.js" /usr/share/kwin/scripts/powos-translucent-desktop/contents/code/main.js
 # first-boot.sh goes to /opt/lotfix/ in build-inside.sh's own install step (patched to take ours).
 # HACK: Omarchy command names the engine calls; see each file. omarchy-dns is Andromarchy's own
 # Android version (resolv.conf from Android's network), unchanged.

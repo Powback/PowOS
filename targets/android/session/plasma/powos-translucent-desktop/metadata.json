@@ -1,0 +1,17 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PowOS"
+            }
+        ],
+        "Description": "The transparent phone desktop is painted as translucent, so nothing piles up under it",
+        "EnabledByDefault": true,
+        "Id": "powos-translucent-desktop",
+        "License": "MIT",
+        "Name": "PowOS translucent desktop"
+    },
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js",
+    "KPackageStructure": "KWin/Script"
+}

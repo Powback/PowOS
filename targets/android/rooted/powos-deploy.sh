@@ -23,6 +23,9 @@ install -Dm 644 $T/powos-plasma/org.powos.transparent/metadata.json $W/metadata.
 install -Dm 644 $T/powos-plasma/org.powos.transparent/contents/ui/main.qml $W/contents/ui/main.qml
 install -Dm 644 $T/powos-plasma/powos-transparent-desktop.js \
   $R/usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/powos-transparent-desktop.js
+K=$R/usr/share/kwin/scripts/powos-translucent-desktop
+install -Dm 644 $T/powos-plasma/powos-translucent-desktop/metadata.json $K/metadata.json
+install -Dm 644 $T/powos-plasma/powos-translucent-desktop/contents/code/main.js $K/contents/code/main.js
 rm -rf $T/powos-plasma
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
   $T/powos-android-tasks.desktop

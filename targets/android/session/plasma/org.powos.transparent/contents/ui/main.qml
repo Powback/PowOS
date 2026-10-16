@@ -10,10 +10,19 @@ WallpaperItem {
     id: root
 
     function clear() {
-        if (root.Window.window)
-            root.Window.window.color = "transparent";
+        const w = root.Window.window;
+        if (w && w.color.a !== 0)
+            w.color = "transparent";
     }
 
     Component.onCompleted: clear()
     Window.onWindowChanged: clear()
+
+    // plasmashell sets the window's color again after startup (and on screen changes): clear it each time.
+    Connections {
+        target: root.Window.window
+        function onColorChanged() {
+            root.clear();
+        }
+    }
 }
