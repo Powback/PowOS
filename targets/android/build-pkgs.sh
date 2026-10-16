@@ -5,12 +5,17 @@
 #   recipes.list           PowOS packages Arch Linux ARM doesn't build: the upstream Arch/AUR recipe, built
 #                          unchanged for aarch64 (makepkg --ignorearch, as Arch Linux ARM does)
 # Usage: targets/android/build-pkgs.sh [package...]   (default: everything in pkgs/ and recipes.list)
+#   PKG_SCRATCH=<dir in the Colima VM>, e.g. /var/tmp/powos-pkgs: build tree on the VM's root disk instead of
+#   a Docker volume, for when the Docker disk (shared with live services) is too full. Must be VM-local, NOT a
+#   /Users path: virtiofs reports shifting owners and git then refuses the tree ("dubious ownership").
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$HERE/out/pkgs
 mkdir -p "$OUT"
 IMAGE=menci/archlinuxarm:latest
 recipe_source() { awk -v n="$1" '$1 == n {print $2}' "$HERE/recipes.list" 2>/dev/null; }
+# Empties a PKG_SCRATCH dir; it lives in the VM, not on this Mac, hence through a container.
+wipe_scratch() { docker run --rm --platform linux/arm64 -v "$scratch:/build" "$IMAGE" find /build -mindepth 1 -delete; }
 pkgs=("$@")
 [ ${#pkgs[@]} -gt 0 ] || pkgs=($(cd "$HERE/pkgs" && ls) $(awk '!/^#/ && NF {print $1}' "$HERE/recipes.list"))
 
@@ -23,10 +28,14 @@ for p in "${pkgs[@]}"; do
   docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
   trap 'docker volume rm -f "powos-android-pkg-'"$p"'" >/dev/null 2>&1 || true' EXIT
   local_mount=(); [ "$src" = local ] && local_mount=(-v "$HERE/pkgs/$p:/pkg:ro")
+  scratch="powos-android-pkg-$p"
+  if [ -n "${PKG_SCRATCH:-}" ]; then
+    scratch=$PKG_SCRATCH/$p; wipe_scratch
+  fi
   # Resource caps: shares the Colima VM with live services. A volume keeps makepkg's src/ off the
   # macOS bind mount (faster, and keeps Linux ownership).
   docker run --rm --platform linux/arm64 --cpus 8 --memory 16g ${local_mount[@]+"${local_mount[@]}"} \
-    -e PKG="$p" -e SRC="$src" -v "$HERE/recipes:/fixups:ro" -v "$OUT:/out" -v "powos-android-pkg-$p:/build" "$IMAGE" bash -c '
+    -e PKG="$p" -e SRC="$src" -v "$HERE/recipes:/fixups:ro" -v "$OUT:/out" -v "$scratch:/build" "$IMAGE" bash -c '
       set -euo pipefail
       # HACK: pacman 7 download sandbox (Landlock) is not permitted in Docker.
       grep -q "^DisableSandbox" /etc/pacman.conf || sed -i "/^\[options\]/a DisableSandbox" /etc/pacman.conf
@@ -49,5 +58,6 @@ for p in "${pkgs[@]}"; do
       cp /build/*.pkg.tar.* /out/'
   # Scratch only (KWin's build tree is several GB) on the Docker disk shared with live services.
   docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
+  [ -z "${PKG_SCRATCH:-}" ] || wipe_scratch
 done
 ls -la "$OUT"

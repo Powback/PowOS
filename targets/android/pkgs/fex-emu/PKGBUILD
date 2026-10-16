@@ -1,30 +1,101 @@
 # FEX-Emu for PowOS on Android: runs x86/x86-64 Linux binaries on the phone (the Steam client's x86 parts,
 # native x86 Linux games, Proton's ARM64EC x86 code path). Valve's own choice for Steam on ARM.
 # Arch Linux ARM has no package and the AUR one is stale (2406), hence ours, at a release tag.
+#
+# Built WITH thunks: x86 programs calling Vulkan/GL/EGL/wayland/drm/asound get a guest thunk library that
+# forwards to the phone's native aarch64 library (Mesa Turnip/freedreno on Adreno via KGSL) through a host
+# thunk, instead of running x86 Mesa under emulation (which can't reach the GPU at all).
 pkgname=fex-emu
 pkgver=2610
-pkgrel=2
-pkgdesc='Fast usermode x86 and x86-64 emulator for Arm64 (PowOS phone build)'
+pkgrel=3
+pkgdesc='Fast usermode x86 and x86-64 emulator for Arm64 (PowOS phone build, with library thunks)'
 url=https://fex-emu.com
 arch=(aarch64)
 license=(MIT)
-makedepends=(git cmake ninja clang llvm lld python python-setuptools)
+# Host side of the thunks: libclang for the thunk generator, the native headers/libs the host thunks wrap.
+# archlinux-keyring: verifies the x86 sysroot packages below.
+makedepends=(git cmake ninja clang llvm lld python python-setuptools pkgconf openssl archlinux-keyring
+             libglvnd mesa vulkan-headers libx11 libxext libxrender libxfixes libxrandr libxcb libxshmfence
+             wayland libdrm alsa-lib)
 depends=(squashfs-tools squashfuse erofs-utils fmt)  # fmt: FEXRootFSFetcher and friends link libfmt.so
+# The host thunks dlopen the native library they forward to; each thunk only works when its library is there.
+optdepends=('vulkan-icd-loader: Vulkan thunk (native Turnip)'
+            'libglvnd: GL/EGL thunks (native Mesa freedreno)'
+            'wayland: wayland-client thunk'
+            'libdrm: drm thunk'
+            'alsa-lib: asound thunk')
 source=("git+https://github.com/FEX-Emu/FEX.git#tag=FEX-$pkgver"
-        0001-exec-by-path-through-libc.patch)
-sha256sums=('SKIP' 'SKIP')
+        0001-exec-by-path-through-libc.patch
+        0002-thunkgen-llvm23.patch)
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+
+# x86 sysroot for cross-compiling the guest thunks (x86-64 and i686) with clang. Headers + glibc/libstdc++
+# from Arch Linux x86_64 (core/extra/multilib). Fetched with the package list exact (-dd): the sysroot only
+# has to compile and link the thunk libraries, not run anything, and mesa's full dependency tree is ~1 GB.
+_x86_mirror='https://geo.mirror.pkgbuild.com/$repo/os/$arch'
+# gcc-libs is a metapackage now; libgcc/libstdc++/libatomic carry the actual runtime libraries.
+_x86_pkgs=(filesystem glibc lib32-glibc gcc gcc-libs libgcc libstdc++ libatomic lib32-gcc-libs linux-api-headers
+           libglvnd lib32-libglvnd mesa vulkan-headers vulkan-icd-loader lib32-vulkan-icd-loader
+           xorgproto libx11 libxau libxdmcp libxext libxrender libxfixes libxrandr libxcb libxshmfence
+           wayland libdrm alsa-lib sdl2-compat)
+
+_make_x86_sysroot() {
+  local root="$srcdir/x86-sysroot" st="$srcdir/x86-pacman"
+  rm -rf "$root" "$st"
+  mkdir -p "$root" "$st"/{db,cache,gnupg}
+  cat > "$st/pacman.conf" <<EOF
+[options]
+Architecture = x86_64
+SigLevel = Required DatabaseOptional
+DisableSandbox
+[core]
+Server = $_x86_mirror
+[extra]
+Server = $_x86_mirror
+[multilib]
+Server = $_x86_mirror
+EOF
+  # Own keyring and database, nothing touches the build host's pacman. pacman/pacman-key insist on root;
+  # fakeroot satisfies the check, every path written is ours. Signatures ARE verified (archlinux keyring).
+  local pac=(fakeroot pacman --config "$st/pacman.conf" --root "$root" --dbpath "$st/db"
+             --cachedir "$st/cache" --gpgdir "$st/gnupg" --logfile /dev/null)
+  fakeroot pacman-key --config "$st/pacman.conf" --gpgdir "$st/gnupg" --init >/dev/null
+  fakeroot pacman-key --config "$st/pacman.conf" --gpgdir "$st/gnupg" --populate archlinux >/dev/null
+  # -w: download + signature check only. Extracting by hand instead of installing: install would run the
+  # packages' x86 hooks/scriptlets in a chroot, which can't execute here (and aren't needed for a sysroot).
+  "${pac[@]}" -Syw --noconfirm -dd "${_x86_pkgs[@]}"
+  local f
+  for f in "$st"/cache/*.pkg.tar.zst; do
+    bsdtar -xpf "$f" -C "$root" --exclude .PKGINFO --exclude .BUILDINFO --exclude .MTREE --exclude .INSTALL
+  done
+  rm -rf "$st/cache"  # the build shares a nearly full Docker disk with live services
+}
 
 prepare() {
   cd FEX
   git submodule update --init --recursive --depth 1
   # Android: exec by path through libc (the userspace launcher; see the patch)
   patch -p1 < "$srcdir/0001-exec-by-path-through-libc.patch"
+  # Thunk generator vs LLVM 23 (Arch Linux ARM's clang): FileManager's stat cache is gone; nothing to clear.
+  patch -p1 < "$srcdir/0002-thunkgen-llvm23.patch"
+  cd "$srcdir"
+
+  _make_x86_sysroot
+  # FEX's own clang toolchain files (target triple, lld) plus the sysroot, so the guest thunks compile
+  # against x86 glibc/libstdc++ instead of the aarch64 host's.
+  local b
+  for b in 64 32; do
+    cat > "$srcdir/toolchain_x86_$b.cmake" <<EOF
+include("$srcdir/FEX/Data/CMake/toolchain_x86_$b.cmake")
+set(CMAKE_SYSROOT "$srcdir/x86-sysroot")
+EOF
+  done
 }
 
 build() {
   # TUNE_CPU defaults to "native", which would tune for the build host (an Apple M-series in Colima);
   # generic armv8.2-a runs on every phone SoC FEX supports.
-  # No FEXConfig (Qt GUI) and no thunks yet (thunks need an x86 cross toolchain; a later step for GL/Vulkan speed).
+  # No FEXConfig (Qt GUI).
   cmake -S FEX -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
@@ -35,6 +106,10 @@ build() {
     -DBUILD_FEXCONFIG=FALSE \
     -DENABLE_CCACHE=FALSE \
     -DTUNE_CPU=generic -DTUNE_ARCH=armv8.2-a \
+    -DBUILD_THUNKS=TRUE -DENABLE_CLANG_THUNKS=TRUE \
+    -DX86_DEV_ROOTFS="$srcdir/x86-sysroot" \
+    -DX86_64_TOOLCHAIN_FILE="$srcdir/toolchain_x86_64.cmake" \
+    -DX86_32_TOOLCHAIN_FILE="$srcdir/toolchain_x86_32.cmake" \
     -DOVERRIDE_VERSION=FEX-$pkgver
   cmake --build build
 }
