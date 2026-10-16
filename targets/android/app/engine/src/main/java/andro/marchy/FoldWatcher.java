@@ -45,7 +45,10 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         thread = new android.os.HandlerThread("FoldWatcher");
         thread.start();
         handler = new Handler(thread.getLooper());
+        veil = new FoldVeil(ctx);
         handler.post(() -> {
+            grantOverlay();
+            onCover = coverScreen();
             wasBig = isBig();
             if (wasBig != null)
                 folded = !wasBig;
@@ -53,11 +56,95 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             Log.i(TAG, "watching the hinge (open=" + wasBig + ")");
         });
         dm.registerDisplayListener(this, handler);
+        watchHinge();
+    }
+
+    private android.hardware.SensorManager sensors;
+    private android.hardware.SensorEventListener hingeListener;
+    private float lastAngle = -1;
+    private FoldVeil veil;
+    private android.os.HandlerThread hingeThread;
+
+    /** The hinge angle (0 = shut, 180 = flat; -1 unknown), for MainActivity: the sensor is ahead of the configuration. */
+    static volatile float hingeAngle = -1;
+
+    /** Display 0 is on the cover screen (its physical panel, read through root - this app sees adjusted display info). */
+    static volatile boolean onCover;
+
+    /** Fully open / shut: no veil beyond these. */
+    private static final float OPEN_REST = 165f, SHUT_REST = 8f;
+    /** Where Android switched screens on the last fold and the last opening; learned (KEY_SWITCH_*), these to start. */
+    private static final String KEY_SWITCH_CLOSE = "fold_switch_close", KEY_SWITCH_OPEN = "fold_switch_open";
+    private float switchClose = 60f, switchOpen = 70f;
+
+    /** The veil for the hinge at [a]: rising toward the angle where the screen in use switches off. */
+    private void follow(float a) {
+        float p = onCover
+            ? (a - SHUT_REST) / (switchOpen - SHUT_REST)
+            : (OPEN_REST - a) / (OPEN_REST - switchClose);
+        // Ease in: barely there while the hinge just moves a little, full right at the switch.
+        p = Math.max(0f, Math.min(1f, p));
+        veil.set(p * p);
+    }
+
+    private void grantOverlay() {
+        if (!android.provider.Settings.canDrawOverlays(ctx))
+            root("appops set " + ctx.getPackageName() + " SYSTEM_ALERT_WINDOW allow");
+    }
+
+    /** Whether display 0 is the cover panel: the physical panel Android has it on, by its unique id. */
+    private boolean coverScreen() {
+        String out = root("dumpsys display | grep -m1 -o 'Display 0 \\[id=local:[0-9]*'");
+        return out.contains(COVER_PANEL);
+    }
+
+    /** The OnePlus Open's cover panel (dumpsys display: local:<id>); the inner one is local:4630946704981769859. */
+    private static final String COVER_PANEL = "local:4630946316123810436";
+
+    /**
+     * The hinge angle (0 = shut, 180 = flat), logged as it moves: the timings to make folding smooth - switch what
+     * the cover shows before Android swaps the screens, fade instead of a cut - come from real folds.
+     */
+    private void watchHinge() {
+        sensors = ctx.getSystemService(android.hardware.SensorManager.class);
+        android.hardware.Sensor hinge = sensors == null ? null : sensors.getDefaultSensor(android.hardware.Sensor.TYPE_HINGE_ANGLE);
+        if (hinge == null) {
+            Log.i(TAG, "no hinge angle sensor");
+            return;
+        }
+        android.content.SharedPreferences prefs = ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE);
+        switchClose = prefs.getFloat(KEY_SWITCH_CLOSE, switchClose);
+        switchOpen = prefs.getFloat(KEY_SWITCH_OPEN, switchOpen);
+        hingeListener = new android.hardware.SensorEventListener() {
+            @Override
+            public void onSensorChanged(android.hardware.SensorEvent e) {
+                float a = e.values[0];
+                hingeAngle = a;
+                if (Math.abs(a - lastAngle) < 1f)
+                    return;
+                lastAngle = a;
+                Log.d(TAG, "hinge " + a + " t=" + e.timestamp / 1_000_000);
+                if (enabled())
+                    follow(a);
+            }
+
+            @Override
+            public void onAccuracyChanged(android.hardware.Sensor s, int accuracy) {
+            }
+        };
+        // Its own thread: the panel check on a display change (a root dumpsys, ~0.2 s) mustn't hold up the veil.
+        hingeThread = new android.os.HandlerThread("FoldHinge");
+        hingeThread.start();
+        sensors.registerListener(hingeListener, hinge, android.hardware.SensorManager.SENSOR_DELAY_FASTEST, new Handler(hingeThread.getLooper()));
     }
 
     void stop() {
         if (dm != null)
             dm.unregisterDisplayListener(this);
+        if (sensors != null && hingeListener != null)
+            sensors.unregisterListener(hingeListener);
+        if (hingeThread != null)
+            hingeThread.quitSafely();
         if (thread != null)
             thread.quitSafely();
         if (shell != null)
@@ -108,6 +195,11 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     public void onDisplayChanged(int displayId) {
         if (displayId != Display.DEFAULT_DISPLAY)
             return;
+        boolean cover = coverScreen();
+        if (cover != onCover) {
+            onCover = cover;
+            switched(cover);
+        }
         check();
         handler.postDelayed(this::check, 500); // the hinge state can commit just after the display changes
     }
@@ -123,13 +215,33 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         Log.d(TAG, "display 0 changed: big=" + big + " was=" + wasBig);
         if (big == null || big.equals(wasBig))
             return;
-        Log.i(TAG, big ? "unfolded" : "folded");
+        Log.i(TAG, (big ? "unfolded" : "folded") + " at hinge " + lastAngle + " t=" + android.os.SystemClock.elapsedRealtimeNanos() / 1_000_000);
         HomeScreen.apply(ctx, big); // auto: desktop on the inner screen, launcher on the cover
         if (big && Boolean.FALSE.equals(wasBig))
             unfolded();
         else if (!big && Boolean.TRUE.equals(wasBig))
             folded();
         wasBig = big;
+    }
+
+    /**
+     * Android moved display 0 to the other screen: it starts under the full veil, which clears once what it shows
+     * is in place (check(): the launcher, the carried app, the desktop). The hinge angle here is where this phone
+     * switches - remembered, so the veil on the next fold peaks right there.
+     */
+    private void switched(boolean toCover) {
+        Log.i(TAG, "screen switch to " + (toCover ? "cover" : "inner") + " at hinge " + lastAngle);
+        if (enabled())
+            veil.cover(350);
+        if (lastAngle > SHUT_REST && lastAngle < OPEN_REST) {
+            // Smoothed: one odd fold (a fling, a pause) doesn't move it much.
+            if (toCover)
+                switchClose = switchClose * 0.7f + lastAngle * 0.3f;
+            else
+                switchOpen = switchOpen * 0.7f + lastAngle * 0.3f;
+            ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE).edit()
+                .putFloat(KEY_SWITCH_CLOSE, switchClose).putFloat(KEY_SWITCH_OPEN, switchOpen).apply();
+        }
     }
 
     /** The Android app taken onto the cover screen at the last fold: its task and the PowOS window's display. */

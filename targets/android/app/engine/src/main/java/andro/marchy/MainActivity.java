@@ -1090,20 +1090,19 @@ public class MainActivity extends Activity
      */
     private boolean onCoverScreen(android.content.res.Configuration c) {
         // The screen the desktop is on, not only the window: half the inner screen in split view is phone-sized too,
-        // and the desktop stepped aside there instead of splitting. Its physical size, read now: the hinge state
-        // (FoldWatcher.folded) can arrive after this configuration change, and the desktop then resized onto the cover.
-        android.view.Display d = getDisplay();
-        boolean cover = d != null
-            ? Math.min(d.getMode().getPhysicalWidth(), d.getMode().getPhysicalHeight()) < COVER_MAX_PX
-            : FoldWatcher.folded;
+        // and the desktop stepped aside there instead of splitting. The hinge sensor first: the device state
+        // (FoldWatcher.folded) and the panel check can arrive after this configuration change, and the desktop then
+        // resized onto the cover. (This app's own display info is compatibility-adjusted, no help.)
+        float hinge = FoldWatcher.hingeAngle;
+        boolean cover = FoldWatcher.onCover || FoldWatcher.folded || (hinge >= 0 && hinge < COVER_MAX_ANGLE);
         // A PowOS app in use comes onto the cover with the desktop (FoldWatcher.folded()).
         return cover && c.smallestScreenWidthDp < 600 && RootMode.enabled()
             && getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(FoldWatcher.KEY_UNFOLD_DESKTOP, true)
             && !FoldWatcher.desktopAppActive(this);
     }
 
-    /** Narrower than this (physical px, short side) is the cover screen: the OnePlus Open's is 1116, the inner 2268. */
-    private static final int COVER_MAX_PX = 1600;
+    /** Folded further than this (degrees) is the cover screen: Android switches screens well before it. */
+    private static final float COVER_MAX_ANGLE = 100f;
 
     @Override
     public void onConfigurationChanged(android.content.res.Configuration c) {
