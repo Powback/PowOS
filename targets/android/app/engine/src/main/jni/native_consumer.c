@@ -52,6 +52,7 @@ struct consumer_state {
     //Note: it is Deamon's Reconnect, not Fallback Flag
     //Fallback is maintained by display lib, and the consumer should not care about it.
     volatile bool need_reconnect;
+    int select_failures;   /* consecutive select_dmabuf failures (render thread only) */
 
     int buf_count;
     int dmabuf_fds[MAX_COLLECT_BUFS];
@@ -542,6 +543,12 @@ static void on_fallback(void *userdata)
     }
 
     stop_event_thread(s);
+
+    /* PowOS: the link to the desktop is gone (KWin restarted with the session, or dropped us): connect afresh.
+     * Nothing else did - the activity kept believing it was connected (MainActivity.nativeRunning) and the
+     * render loop kept failing select_dmabuf, so the desktop stayed blank until the app was force-stopped.
+     * do_connect() tears the old ctx down and retries every 0.5 s until the daemon answers. */
+    s->need_reconnect = true;
 }
 
 static void on_exit_fallback(void *userdata)
@@ -618,9 +625,16 @@ static void *render_thread_func(void *arg)
 
         if (select_dmabuf(s->ctx, idx) < 0) {
             api.queueBuffer(s->window, anb, -1);
+            /* PowOS: a link that fails every frame for ~2 s is dead even if no fallback was signalled. */
+            if (++s->select_failures >= 120) {
+                LOGE("select_dmabuf failing for ~2 s, reconnecting");
+                s->select_failures = 0;
+                s->need_reconnect = true;
+            }
             usleep(16000);
             continue;
         }
+        s->select_failures = 0;
 
         /* The producer renders into the buffer and hands back a render-done fence
          * over data_fd (reverse). Queue with it so SurfaceFlinger waits GPU-side
