@@ -13,11 +13,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import dev.omalauncher.LauncherData
 import dev.omalauncher.linux.Proot
 import dev.omalauncher.ui.Palette
-import dev.omalauncher.ui.decodeForScreen
 import dev.omalauncher.upgrade.appStamp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -171,10 +169,8 @@ class ThemeStore(
 
     suspend fun refreshLiveWallpaper() {
         liveWallpaperActive = WallpaperManager.getInstance(context).wallpaperInfo?.packageName == context.packageName
-        if (!liveWallpaperActive && wallpaper == null) wallpaper = decodeWallpaper(background)
+        // PowOS: no own copy of the wallpaper (showBackground).
     }
-
-    private suspend fun decodeWallpaper(file: File?) = file?.let { withContext(Dispatchers.IO) { decodeForScreen(it, context)?.asImageBitmap() } }
 
     /** Opens Android's live wallpaper preview with our wallpaper preselected; apps can't set one silently. */
     fun liveWallpaperIntent(): Intent =
@@ -208,12 +204,8 @@ class ThemeStore(
             prefs.edit().putString(RENDERED_BY, appStamp(context)).apply()
         }
         val bg = theme.backgrounds().let { list -> list.firstOrNull { it.name == style.style[Style.BACKGROUND] } ?: list.firstOrNull() }
-        // On reload a different background may replace one already showing; it stays up until the new one is decoded.
-        val stale = wallpaper != null && bg != background
         background = bg
-        // Decodes the wallpaper on first load, unless ours is the live one.
         refreshLiveWallpaper()
-        if (stale && !liveWallpaperActive) wallpaper = decodeWallpaper(bg)
     }
 
     /** After a new release was downloaded: its themes, templates and configs. */
@@ -437,8 +429,11 @@ class ThemeStore(
 
     private suspend fun showBackground(file: File?) {
         background = file
-        // With the live wallpaper active, the launcher is transparent and needs no copy of its own.
-        wallpaper = if (liveWallpaperActive) null else decodeWallpaper(file)
+        // PowOS: the launcher never paints a copy of its own - it is transparent over the system wallpaper, so the
+        // system's animations (swipe home, recents, app open/close), which show the system wallpaper, match it.
+        // (Its own copy over a different system wallpaper crossfaded on every swipe.) The theme's background stays
+        // the PowOS desktop's (guest.linkBackground below) and the live wallpaper's, when the user picks that.
+        wallpaper = null
         if (file != null && isLinux()) withContext(Dispatchers.IO) { guest.linkBackground(file) }
         changeListeners.forEach { it() }
     }
