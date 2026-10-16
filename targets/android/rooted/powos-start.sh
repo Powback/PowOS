@@ -31,7 +31,15 @@ mounted "$R/dev/shm" || { mkdir -p "$R/dev/shm"; m mount -t tmpfs -o mode=1777 t
 # What systemd-tmpfiles makes on a booted PowOS: without /tmp/.X11-unix KWin can't open the X11 socket, so no
 # Xwayland, ksmserver (X11) aborts and Plasma never starts plasmashell.
 for d in .X11-unix .ICE-unix .XIM-unix .font-unix; do m mkdir -p "$R/tmp/$d" && m chmod 1777 "$R/tmp/$d"; done
-bind /storage/emulated/0 "$R/mnt/sdcard"
+# The phone's storage: only once Android has unlocked it. At boot /storage/emulated/0 is still an empty tmpfs
+# placeholder; bound then, PowOS kept seeing that (and every later start stacked another). A stale placeholder bind is
+# replaced; at boot the bind waits in the background.
+sdcard() {
+  [ -d /storage/emulated/0/Android ] || return 1
+  while m grep -q " $R/mnt/sdcard tmpfs " /proc/mounts; do m umount -l "$R/mnt/sdcard" || break; done
+  bind /storage/emulated/0 "$R/mnt/sdcard"
+}
+sdcard || (for _ in $(seq 360); do sleep 5; sdcard && break; done) &
 
 # x86 programs (Steam, Proton games) run through FEX: register PowOS's binfmt rules with the kernel (Android's
 # kernel has BINFMT_MISC built in, unmounted). Flag F: the kernel opens /usr/bin/FEX at registration, from inside

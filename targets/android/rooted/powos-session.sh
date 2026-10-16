@@ -20,7 +20,15 @@ m grep -q " $R/run/powos-app " /proc/mounts || m mount --bind "$RUN" "$R/run/pow
 
 # The display socket as PowOS sees it.
 sock=/run/powos-app/${SOCK#$RUN/}
-exec nsenter -t 1 -m -- chroot "$R" /usr/bin/env -i \
+# PowOS as the real root of its own mount namespace (pivot_root), not a chroot: Linux refuses user namespaces inside
+# a chroot ("unshare: Operation not permitted"), and Steam (pressure-vessel/bubblewrap), Flatpak and rootless podman
+# need them. Made private first (pivot_root fails on shared mounts); PowOS's own mount/pivot_root, through its
+# loader: Android's toybox has no pivot_root and no --make-rprivate. powos-rooted-session detaches /.oldroot.
+export L="$R/usr/lib/ld-linux-aarch64.so.1 --library-path $R/usr/lib" R
+exec nsenter -t 1 -m -- unshare -m sh -c '
+  $L $R/usr/bin/mount --make-rprivate / && $L $R/usr/bin/mount --rbind $R $R && cd $R && mkdir -p .oldroot &&
+    $L $R/usr/bin/pivot_root . .oldroot || exit 1
+  exec "$@"' powos-session /usr/bin/env -i \
   HOME=/home/powos USER=powos LOGNAME=powos SHELL=/bin/bash \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
   LANG="$LANG_" TZ="$TZ_" \

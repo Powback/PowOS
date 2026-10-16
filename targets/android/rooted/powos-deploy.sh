@@ -58,5 +58,18 @@ fi
 # Moved aside, not deleted; the no-root app's own rootfs keeps it.
 S=$R/usr/local/bin/sudo
 [ -f $S ] && mv $S $S.noroot-engine && echo "sudo: real sudo (shim moved to $S.noroot-engine)"
+# Same for bubblewrap (Steam's pressure-vessel, Flatpak): the no-root engine's bwrap stand-in replaced
+# /usr/bin/bwrap with a link to it; rooted mode has user namespaces (powos-session.sh: pivot_root, and a kernel with
+# CONFIG_USER_NS - targets/native/config/gki/namespaces.config), so the real one goes back.
+B=$R/usr/local/bin/bwrap
+if [ -f $B ] || [ ! -e $R/usr/bin/bwrap ]; then
+  [ -f $B ] && mv $B $B.noroot-engine
+  rm -f $R/usr/bin/bwrap
+  sed -i '/^NoExtract = usr\/bin\/bwrap$/d' $R/etc/pacman.conf   # the no-root engine kept pacman from installing it
+  # -Sy only if the installed version has left the mirrors (Arch Linux ARM keeps just the current one).
+  chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c \
+    'pacman -S --noconfirm bubblewrap >/dev/null 2>&1 || pacman -Sy --noconfirm bubblewrap >/dev/null'
+  echo "bwrap: real bubblewrap (shim moved to $B.noroot-engine)"
+fi
 resetprop -p persist.powos.root 1
 echo "deployed (persist.powos.root=$(getprop persist.powos.root))"

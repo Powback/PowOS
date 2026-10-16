@@ -5,6 +5,8 @@
 set -u
 R=$XDG_RUNTIME_DIR
 cd /root
+# Android's root, left at /.oldroot by powos-session.sh's pivot_root: detached, PowOS sees only its own system.
+mountpoint -q /.oldroot && umount -l /.oldroot
 
 # The whole session runs in a process group of its own, so a restarted app (new display daemon) can end the
 # previous session completely. Killing by name missed processes: comm is cut at 15 characters
