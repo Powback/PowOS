@@ -306,6 +306,9 @@ public class MainActivity extends Activity
      */
     private static MainActivity nativeOwner;
 
+    /** Resumed (onResume..onPause). */
+    private boolean inFront;
+
     private void startNative(Surface surface) {
         stopNative();
         applyConnectionConfig();
@@ -748,6 +751,7 @@ public class MainActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
+        inFront = true;
         mPipTransitionPending = false;
 
         // PowOS: no audio focus just for being shown - AUDIOFOCUS_GAIN on every resume paused the user's music and
@@ -921,6 +925,7 @@ public class MainActivity extends Activity
     @Override
     protected void onPause() {
         super.onPause();
+        inFront = false;
         if (surfaceView.hasPointerCapture())
             surfaceView.releasePointerCapture();
         releaseAllMouseButtons();
@@ -1135,6 +1140,13 @@ public class MainActivity extends Activity
         viewWidth = width;
         viewHeight = height;
         surfaceReady = true;
+        if (!inFront && nativeOwner != null && nativeOwner != this) {
+            // A desktop instance in the background (its surface lives on, see onCreate) got the new size too - on
+            // unfold both do. Taking the connection here cut the one in front off (the desktop went dark); it
+            // connects when it comes to the front (onResume).
+            Log.i(TAG, "surfaceChanged in the background: the connection stays with the instance in front");
+            return;
+        }
         // Same ordering guarantee as onResume: camera service settled before connect.
         applyCameraState();
         startNative(holder.getSurface());
