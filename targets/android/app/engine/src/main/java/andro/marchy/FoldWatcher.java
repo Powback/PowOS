@@ -131,7 +131,11 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         if (override == -1) {
             // Closing likewise: the front screen comes on as soon as the phone starts to close (it rests open at
             // ~175-180, so waiting for "below fully open" came late).
-            if ((onCover && a >= 3 && speed > 0) || (!onCover && a < CLOSE_START && speed < 0)
+            // Never at shut, nor right after a hold ended: the panel check lags ~0.3 s behind the switch back to the
+            // cover, and a hold restarted there turned the cover off and on again.
+            if (android.os.SystemClock.uptimeMillis() - holdEndedAt < 1000)
+                return;
+            if ((onCover && a >= 3 && speed > 0) || (!onCover && a < CLOSE_START && a > SHUT_END + 2 && speed < 0)
                     || (a > SHUT_END + 3 && a < OPEN - 5))
                 hold(ALL, nowMs);
             return;
