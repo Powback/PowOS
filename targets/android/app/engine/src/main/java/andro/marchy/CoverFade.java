@@ -45,9 +45,8 @@ final class CoverFade {
             level = Math.max(0f, Math.min(1f, l));
             if (root == null && !add())
                 return;
+            // Opacity only: a new blur effect per hinge event made the cover lag behind the hinge.
             image.setAlpha(level);
-            float blur = (1f - level) * MAX_BLUR;
-            image.setRenderEffect(blur < 0.5f ? null : RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP));
         });
     }
 

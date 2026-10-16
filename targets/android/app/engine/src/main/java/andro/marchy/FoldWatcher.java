@@ -80,7 +80,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
      * fully open the cover.
      */
     private static final float SHUT = 2f, OPEN = 160f;
-    /** A fold starts (closing) below this. */
+    /** An opening starts past this (a few degrees of wiggle at rest don't count); a fold (closing) below the next. */
+    private static final float OPENING_FROM = 5f;
     private static final float CLOSING_FROM = 150f;
     /** Only a deliberate fold (degrees per second) holds the screens: a phone held half open isn't kept. */
     private static final float MIN_SPEED = 40f;
@@ -112,30 +113,41 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         if (override == ALL) {
             veil.set((float) Math.pow(p, 1.3), false);
             coverFade.set((float) Math.pow(p, 0.8));
-        } else if (!onCover) {
+        } else if (!onCover && a > SHUT && android.os.SystemClock.uptimeMillis() - holdEndedAt > 1000) {
+            // Not right after a hold: shut, display 0 is the cover already, and the veil (on display 0) would stay
+            // over it - blurred and dark when it should be at its best.
             veil.set((float) Math.pow(p, 1.3), false);
         }
     }
 
     /** Holds both screens on (device-state override) from a fold's start to its end, then lets Android settle. */
     private void steer(float a, long nowMs) {
+        // Anywhere between shut and open, both screens; at either end, that end's screen alone. A few degrees of
+        // hysteresis, so resting right at an end doesn't flicker between the two.
         if (override == -1) {
-            if ((!onCover && a < CLOSING_FROM && a > SHUT && speed < -MIN_SPEED) || (onCover && a > SHUT && a < OPEN && speed > 0))
+            if (a > SHUT_END + 3 && a < OPEN - 5)
                 hold(ALL, nowMs);
-            return;
-        }
-        if (a <= SHUT || a >= OPEN) // shut: the cover alone; open: the inner screen alone
+        } else if (a <= SHUT_END || a >= OPEN) {
             letGo();
+        }
     }
+
+    /** A closed phone rests at a few degrees, not 0. */
+    private static final float SHUT_END = 5f;
+    /** No hinge movement this long during a hold: let go. */
+    private static final long IDLE_MS = 800;
+    private final Runnable idle = () -> {
+        if (override != -1) {
+            Log.i(TAG, "fold paused");
+            letGo();
+        }
+    };
 
     private void hold(int state, long nowMs) {
         override = state;
         overrideAt = nowMs;
         Log.i(TAG, "both screens on from hinge " + prevAngle + " (" + Math.round(speed) + "°/s)");
         overrideShell("cmd device_state state " + state);
-        // By the clock, not the next hinge event: a phone put down mid-fold sends none, and the hold would stay.
-        hingeHandler.removeCallbacks(expire);
-        hingeHandler.postDelayed(expire, HOLD_MAX_MS);
     }
 
     private final Runnable expire = () -> {
@@ -149,6 +161,7 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
     private void letGo() {
         Log.i(TAG, "letting go at hinge " + prevAngle);
         hingeHandler.removeCallbacks(expire);
+        hingeHandler.removeCallbacks(idle);
         override = -1;
         holdEndedAt = android.os.SystemClock.uptimeMillis();
         overrideShell("cmd device_state state reset");
@@ -340,6 +353,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         // The end of our crossfade needs no veil of its own; Android's own switches (a slow fold) get one.
         if (enabled() && android.os.SystemClock.uptimeMillis() - holdEndedAt > 1000 && override == -1)
             veil.cover(toCover, 150);
+        else
+            veil.clear(); // the crossfade's end: the screen taking over is at its best at once
     }
 
     /** The Android app taken onto the cover screen at the last fold: its task and the PowOS window's display. */
