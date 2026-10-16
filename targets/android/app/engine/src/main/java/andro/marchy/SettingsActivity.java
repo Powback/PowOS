@@ -291,6 +291,7 @@ public class SettingsActivity extends Activity {
         currentPage = Page.DISPLAY;
         LinearLayout root = newPage(R.string.section_display);
         addResolutionSection(root);
+        addHomeScreenSection(root);
         addScreenOrientationSection(root);
         addDisplayCutoutSection(root);
         addPipSection(root);
@@ -1021,6 +1022,42 @@ public class SettingsActivity extends Activity {
     hint.setTextColor(getColor(R.color.settings_text_secondary));
     hint.setPadding(0, dp(4), 0, 0);
     root.addView(hint);
+    }
+
+    // PowOS: what Home opens (HomeActivity).
+    private void addHomeScreenSection(LinearLayout root) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        TextView title = new TextView(this);
+        title.setText(R.string.section_home_screen);
+        title.setTextSize(16);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setPadding(0, dp(24), 0, dp(8));
+        root.addView(title);
+
+        Spinner spinner = newSettingsSpinner();
+        spinner.setAdapter(new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_dropdown_item,
+            getResources().getStringArray(R.array.home_screen_labels)));
+        String current = prefs.getString(HomeActivity.KEY_HOME_SCREEN, HomeActivity.HOME_SCREENS[0]);
+        spinner.setSelection(Math.max(0, java.util.Arrays.asList(HomeActivity.HOME_SCREENS).indexOf(current)));
+        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                prefs.edit().putString(HomeActivity.KEY_HOME_SCREEN, HomeActivity.HOME_SCREENS[position]).apply();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        root.addView(spinner);
+
+        TextView hint = new TextView(this);
+        hint.setText(R.string.home_screen_hint);
+        hint.setTextSize(12);
+        hint.setTextColor(getColor(R.color.settings_text_secondary));
+        hint.setPadding(0, dp(4), 0, 0);
+        root.addView(hint);
     }
 
     private void addScreenOrientationSection(LinearLayout root) {

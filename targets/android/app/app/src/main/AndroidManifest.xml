@@ -45,8 +45,8 @@
             android:resizeableActivity="true"
             android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustResize">
-            <!-- PowOS: not the home screen any more; the PowOS desktop is (engine MainActivity). Kept as an
-                 app entry ("PowOS Launcher") for Omalauncher's settings, themes and widgets until those move. -->
+            <!-- PowOS: the PowOS launcher. Android's home entry is the engine's HomeActivity ("PowOS"), which opens
+                 this or the PowOS desktop per screen (Settings > Home screen); also its own app entry. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

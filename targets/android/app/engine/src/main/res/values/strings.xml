@@ -186,6 +186,15 @@
         <item>Screen × 0.25</item>
     </string-array>
 
+    <!-- PowOS: what the Home button opens (HomeActivity.HOME_SCREENS, same order). -->
+    <string name="section_home_screen">Home Screen</string>
+    <string name="home_screen_hint">What Home opens. Auto: the PowOS launcher on a phone-sized screen (the cover screen), the PowOS desktop on a big one (the inner screen). Pick PowOS as the home app in Android\'s settings.</string>
+    <string-array name="home_screen_labels">
+        <item>Auto (launcher on small screen, desktop on big)</item>
+        <item>PowOS desktop</item>
+        <item>PowOS launcher</item>
+    </string-array>
+
     <string-array name="screen_orientation_labels">
         <item>Auto</item>
         <item>Portrait</item>

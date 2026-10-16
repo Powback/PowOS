@@ -11,7 +11,7 @@ import java.io.InputStreamReader;
  * through the no-root engine (lotfix-run: patched loader + fakechroot + fakeroot), and the app needs no rootfs of its
  * own. Phones without root keep the no-root engine, unchanged.
  */
-final class RootMode {
+public final class RootMode {
     static final String SESSION = "/data/powos/powos-session.sh";
 
     private static Boolean cached;
@@ -23,7 +23,7 @@ final class RootMode {
      * The flag rooted.sh sets (persist.powos.root=1, with Magisk's resetprop). Read through getprop: no root prompt
      * and no blocking on the UI thread; the first `su` (the session start) asks Magisk for this app's grant.
      */
-    static synchronized boolean enabled() {
+    public static synchronized boolean enabled() {
         if (cached == null) {
             cached = false;
             try {

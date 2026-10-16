@@ -220,7 +220,9 @@ class Bootstrap(
             // our server, no proot, no Arch download. Its state is the engine's rootfs; Omalauncher's own
             // proot setup/update steps below don't run (they come back on the engine runtime later,
             // docs/powos-app-plan.md phase 2).
-            _state.value = if (andro.marchy.SessionService.rootfsReady(context)) LinuxState.Installed else LinuxState.NotInstalled
+            // Rooted mode: PowOS lives in /data/powos/root, not in the app's own files.
+            val installed = andro.marchy.SessionService.rootfsReady(context) || andro.marchy.RootMode.enabled()
+            _state.value = if (installed) LinuxState.Installed else LinuxState.NotInstalled
             if (POWOS) return@withContext
             try {
                 adoptLegacySetup()

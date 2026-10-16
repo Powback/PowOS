@@ -27,8 +27,26 @@
     <!-- PowOS: a library inside the PowOS app. The <application> attributes (icon, label, theme, backup)
          are the app's; the activities that relied on the old app-wide fullscreen theme now set it. -->
     <application>
-        <!-- PowOS: the PowOS (KDE Plasma) desktop IS the home screen: HOME + DEFAULT, so the Home button lands
-             on it. First launch without PowOS installed shows the PowOS setup (InstallActivity). -->
+        <!-- PowOS: Android's home screen. HomeActivity opens the PowOS launcher or the PowOS desktop per screen
+             (Settings > Home screen: auto = launcher on the cover screen, desktop on the inner one). -->
+        <activity
+            android:name=".HomeActivity"
+            android:label="PowOS"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:resizeableActivity="true"
+            android:stateNotNeeded="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <!-- The PowOS (KDE Plasma) desktop. First launch without PowOS installed shows the PowOS setup
+             (InstallActivity). -->
         <activity
             android:name=".MainActivity"
             android:label="PowOS"
@@ -44,8 +62,6 @@
                 android:value="true" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.HOME" />
-                <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <meta-data
