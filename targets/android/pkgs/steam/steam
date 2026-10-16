@@ -42,14 +42,7 @@ ln -sfn "$S" "$HOME/.steam/steam"
 ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # No -cef-disable-gpu here: the ARM64 client's web UI then loses its GPU process ("GPU process isn't usable. Goodbye",
 # exit_code=4, in a restart loop) and never shows a window.
-# Steam's web UI on the Adreno (the client sets MESA_LOADER_DRIVER_OVERRIDE=kgsl for steamwebhelper itself: freedreno).
-# HACK: vblank_mode=3 - Chromium swaps with interval 0, and Mesa's DRI3 loader with interval 0 on this KGSL/Xwayland
-# setup blocks in dri3_find_back before its first present (reproduced with `vblank_mode=0 glxgears`: no frame,
-# xcb_wait_for_special_event forever). The GPU process sat there until Chromium's watchdog killed it every 30 s
-# (exit_code 512 = RESULT_CODE_HUNG): UI reloading, store pages black, taps lost. Mesa's vblank_mode=3 forces every
-# swap to wait for the next vblank - that path works (60 fps) - and the UI ran with 0 GPU process restarts, store
-# pages drawn. Real fix: the interval-0 path in Mesa's loader/Andromarchy's Xwayland. Vulkan (DXVK) is unaffected.
-export vblank_mode=3
+# Steam's web UI draws on the Adreno (the client sets MESA_LOADER_DRIVER_OVERRIDE=kgsl for steamwebhelper itself).
 # HACK: -no-cef-sandbox - inside Chromium's sandbox the web UI's GPU process died at start (exit_code=4,
 # GPU_DEAD_ON_ARRIVAL: 57 times, then "GPU process isn't usable. Goodbye" and no UI); without it 2 restarts in 90 s.
 # Real fix: find what the sandbox denies Mesa here (Android's kernel/seccomp).
