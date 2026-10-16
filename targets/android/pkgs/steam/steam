@@ -1,23 +1,32 @@
 #!/bin/sh
-# /usr/bin/steam on PowOS (ARM): Valve's launcher inside FEX's x86 environment (FEXBash: x86 bash over FEX's x86
-# RootFS) - steam.sh looks for 32-bit x86 libraries (libc.so.6) on the system it runs on and stops without them.
+# /usr/bin/steam on PowOS (ARM): Valve's native ARM64 Linux client (the "linuxarm64" build behind the Steam Frame -
+# unlisted, but on Valve's update servers since 2026). Steam itself and its web UI run natively; only games' x86
+# code goes through FEX. On first run the client is fetched from Valve's linuxarm64 manifest (it updates itself
+# from then on). STEAM_X86=1 runs the old way: Valve's x86 client entirely under FEX (minutes to start).
 #
-# System V IPC: Android's kernel has none (semget -> ENOSYS) and the Steam client needs its semaphores; the
-# sysvipc-emu shim (targets/android/steam/sysvipc, both x86 bitnesses - each process skips the other one) provides
-# them from /dev/shm. It lives in FEX's RootFS (steam.install copies it there), where x86 programs find it.
-#
-# -cef-disable-gpu: Steam's web UI (CEF) software-renders. Its x86 Mesa can't reach the Adreno GPU ("MESA-LOADER:
-# failed to retrieve device information") and parts of the UI didn't draw (a store popup without its close button).
-# HACK: until FEX's host thunks give x86 programs the native GPU drivers; then the UI can use the GPU again.
-#
-# Preloaded from the home directory: it is the same path outside FEX, under FEX and inside the Steam Runtime
-# container (pressure-vessel binds the home in). From /usr/lib the container's 64-bit steamwebhelper couldn't find
-# it ("cannot open shared object file"), had no System V IPC and never answered Steam ("steamwebhelper is not
-# responding").
+# System V IPC: Android's kernel has none (semget -> ENOSYS) and the client needs its semaphores ("Thread
+# synchronization object is unuseable"); the sysvipc-emu shim (targets/android/steam/sysvipc: aarch64 for the
+# native client, i386 + x86-64 for x86 programs - each process skips the ones of other architectures) provides them
+# from /dev/shm. Preloaded from the home directory: the same path outside FEX, under FEX and inside the Steam Runtime
+# container (pressure-vessel binds the home in; from /usr/lib the container's programs couldn't find it).
 L=${XDG_DATA_HOME:-$HOME/.local/share}/powos-sysvipc
-for b in i386 x86_64; do
+for b in aarch64 i386 x86_64; do
   cmp -s /usr/lib/powos-sysvipc/$b/libsysvipc-emu.so "$L/$b/libsysvipc-emu.so" \
     || install -Dm755 /usr/lib/powos-sysvipc/$b/libsysvipc-emu.so "$L/$b/libsysvipc-emu.so"
 done
-export LD_PRELOAD="$L/i386/libsysvipc-emu.so $L/x86_64/libsysvipc-emu.so${LD_PRELOAD:+ $LD_PRELOAD}"
-exec FEXBash -c 'exec /usr/lib/steam/bin_steam.sh -cef-disable-gpu "$@"' steam "$@"
+export LD_PRELOAD="$L/aarch64/libsysvipc-emu.so $L/i386/libsysvipc-emu.so $L/x86_64/libsysvipc-emu.so${LD_PRELOAD:+ $LD_PRELOAD}"
+
+if [ -n "${STEAM_X86:-}" ]; then
+  # -cef-disable-gpu: the x86 web UI (CEF) software-renders; its x86 Mesa can't reach the Adreno GPU.
+  exec FEXBash -c 'exec /usr/lib/steam/bin_steam.sh -cef-disable-gpu "$@"' steam "$@"
+fi
+
+S=${XDG_DATA_HOME:-$HOME/.local/share}/Steam
+if [ ! -x "$S/steamrtarm64/steam" ]; then
+  U=https://client-update.steamstatic.com
+  f=$(curl -fsSL "$U/steam_client_linuxarm64" | awk '/"bins_linuxarm64_linuxarm64"/ {n = 1} n && /"file"/ {gsub(/"/, "", $2); print $2; exit}')
+  [ -n "$f" ] || { echo "steam: Valve's linuxarm64 manifest has no client (offline?)" >&2; exit 1; }
+  mkdir -p "$S" && t=$(mktemp) && curl -fL "$U/$f" -o "$t" && unzip -oq "$t" -d "$S" && rm -f "$t" \
+    && chmod -R u+rwx "$S/steamrtarm64" || { echo "steam: downloading the ARM64 client failed" >&2; exit 1; }
+fi
+cd "$S/steamrtarm64" && exec ./steam "$@"
