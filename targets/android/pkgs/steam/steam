@@ -42,20 +42,14 @@ ln -sfn "$S" "$HOME/.steam/steam"
 ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # No -cef-disable-gpu here: the ARM64 client's web UI then loses its GPU process ("GPU process isn't usable. Goodbye",
 # exit_code=4, in a restart loop) and never shows a window.
-# HACK: none of the session's KGSL GPU variables for Steam. With any of them left (Andromarchy's Mesa also keys off
-# XWAYLAND_FORCE_KGSL_SURFACELESS) steamwebhelper ends up with MESA_LOADER_DRIVER_OVERRIDE=kgsl again - set inside the
-# client ("unsafe call to setenv"), so unsetting that one alone did nothing: its web UI on freedreno lost its GPU process every few
-# seconds ("GPU state invalid", exit_code 512/4), pages stayed black and the UI crawled. Without them the UI stays up
-# (game pages, library) and Turnip still finds the Adreno on its own - Proton games keep Vulkan on the GPU.
-# (Not LIBGL_ALWAYS_SOFTWARE: software GLX shares images through SysV shm, here the shim's emulation the X server
-# can't attach - Steam segfaulted at start.) Real fix: CEF's GPU process on freedreno/KGSL; OpenGL-only games get
-# software GL until then.
-unset TURNIP_KMD MESA_LOADER_DRIVER_OVERRIDE GALLIUM_DRIVER FD_FORCE_KGSL FD_MESA_DEBUG \
-  XWAYLAND_FORCE_KGSL_SURFACELESS ANDROMARCHY_NO_DRM_DEVICE
-# ...and the client sets MESA_LOADER_DRIVER_OVERRIDE=kgsl for steamwebhelper by itself anyway (it detects Turnip on
-# KGSL): steam-env-guard drops exactly that setenv, so Chromium falls back to its software renderer (store pages
-# draw, 0 GPU process crashes).
-export LD_PRELOAD="/usr/lib/powos-steam/libsteam-env-guard.so $LD_PRELOAD"
+# Steam's web UI on the Adreno (the client sets MESA_LOADER_DRIVER_OVERRIDE=kgsl for steamwebhelper itself: freedreno).
+# HACK: vblank_mode=3 - Chromium swaps with interval 0, and Mesa's DRI3 loader with interval 0 on this KGSL/Xwayland
+# setup blocks in dri3_find_back before its first present (reproduced with `vblank_mode=0 glxgears`: no frame,
+# xcb_wait_for_special_event forever). The GPU process sat there until Chromium's watchdog killed it every 30 s
+# (exit_code 512 = RESULT_CODE_HUNG): UI reloading, store pages black, taps lost. Mesa's vblank_mode=3 forces every
+# swap to wait for the next vblank - that path works (60 fps) - and the UI ran with 0 GPU process restarts, store
+# pages drawn. Real fix: the interval-0 path in Mesa's loader/Andromarchy's Xwayland. Vulkan (DXVK) is unaffected.
+export vblank_mode=3
 # HACK: -no-cef-sandbox - inside Chromium's sandbox the web UI's GPU process died at start (exit_code=4,
 # GPU_DEAD_ON_ARRIVAL: 57 times, then "GPU process isn't usable. Goodbye" and no UI); without it 2 restarts in 90 s.
 # Real fix: find what the sandbox denies Mesa here (Android's kernel/seccomp).

@@ -3,29 +3,21 @@
 # Arch's steam PKGBUILD) stays as the STEAM_X86=1 fallback, through FEX.
 pkgname=steam
 pkgver=1.0.0.87
-pkgrel=14
+pkgrel=15
 pkgdesc="Steam: Valve's native ARM64 client (games through FEX) - PowOS phone build"
-arch=(aarch64)
+arch=(any)
 url=https://steampowered.com/
 license=(custom)
 depends=(bash python fex-emu curl unzip desktop-file-utils hicolor-icon-theme lsof xdg-utils xz zenity bubblewrap
          gtk2 ibus libnm openal)
 install=steam.install
 # sysvipc-emu.tar.gz: System V IPC for the native client and x86 programs (targets/android/steam/sysvipc/build.sh puts it here).
-makedepends=(gcc)
-source=("https://repo.steampowered.com/steam/archive/stable/steam_$pkgver.tar.gz" steam sysvipc-emu.tar.gz
-        steam-env-guard.c)
+source=("https://repo.steampowered.com/steam/archive/stable/steam_$pkgver.tar.gz" steam sysvipc-emu.tar.gz)
 noextract=(sysvipc-emu.tar.gz)
 sha256sums=('649375d2f9377f8009aaf3e2ff09978041eb9114897d9c5a3886f1d82e27ba1f' SKIP
-            '205ee32a07213a8cad3c9bf67caa70361c5b4f9cdec2e71c216c967e651ae4af' SKIP)
-
-build() {
-  # Preloaded into the ARM64 client by /usr/bin/steam: keeps it from forcing its web UI onto freedreno (see the file).
-  gcc -O2 -shared -fPIC -o libsteam-env-guard.so steam-env-guard.c -ldl
-}
+            '205ee32a07213a8cad3c9bf67caa70361c5b4f9cdec2e71c216c967e651ae4af')
 
 package() {
-  install -Dm755 "$srcdir/libsteam-env-guard.so" "$pkgdir/usr/lib/powos-steam/libsteam-env-guard.so"
   mkdir -p "$pkgdir/usr/lib/powos-sysvipc"
   tar -xzf sysvipc-emu.tar.gz -C "$pkgdir/usr/lib/powos-sysvipc" ./aarch64/libsysvipc-emu.so ./i386/libsysvipc-emu.so \
     ./x86_64/libsysvipc-emu.so
