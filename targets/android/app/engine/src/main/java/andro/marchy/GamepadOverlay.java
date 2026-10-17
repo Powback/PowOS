@@ -823,8 +823,8 @@ public final class GamepadOverlay extends View {
             setEditing(false);
             releaseAll();
             // Game mode off: the back screen goes back to normal too (closes the cover pad, which resets the
-            // forced both-screens state).
-            if (CoverPadActivity.running()) CoverPadActivity.stop();
+            // forced both-screens state). The desktop trackpad mode is not game mode's and stays.
+            if (CoverPadActivity.mode() == CoverPadActivity.MODE_GAME) CoverPadActivity.stop();
         }
     }
 
@@ -943,6 +943,9 @@ public final class GamepadOverlay extends View {
                     requestUnbufferedDispatch(e);
                 owner.put(e.getPointerId(i), m);
                 changed = m.down(e.getPointerId(i), e.getX(i), e.getY(i), state);
+                // Latency measurement (setprop log.tag.GamepadOverlay DEBUG): the touch's own timestamp, uptime ms
+                // = CLOCK_MONOTONIC, comparable with a reader of the controller's reports in PowOS.
+                if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "down " + m.type + " t=" + e.getEventTime());
                 // Mouse regions buzz only when they click (MousepadModule.up), not on every touch.
                 if (!(m instanceof MousepadModule))
                     performHapticFeedback(m instanceof StickModule ? HapticFeedbackConstants.CLOCK_TICK

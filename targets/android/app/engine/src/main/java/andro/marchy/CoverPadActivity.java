@@ -49,28 +49,49 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
     static final long PRESS_MIN = 60, PRESS_MAX = 300;
     static final float PRESS_RADIUS = 0.06f;
 
+    /** Game pad (six finger zones -> Deck buttons) or desktop (right half = trackpad, left fingers = mouse buttons). */
+    static final int MODE_GAME = 0, MODE_DESKTOP = 1;
+    static final String EXTRA_MODE = "mode";
+
     private static CoverPadActivity current;
     private SensorManager sensors;
+    int mode;
+    private FingerView view;
 
     static boolean running() { return current != null; }
 
-    /** Both screens on, then this on the cover display (the built-in display that is not {@code from}'s). */
+    /** The running mode, or -1. */
+    static int mode() { return current == null ? -1 : current.mode; }
+
     static void start(Activity from) {
+        start(from, MODE_GAME);
+    }
+
+    /** Both screens on, then this on the cover display (the built-in display that is not {@code from}'s); if it is
+     *  already up, it just switches mode. */
+    static void start(Activity from, int mode) {
+        if (current != null) {
+            current.mode = mode;
+            current.view.modeChanged();
+            return;
+        }
         Display ownDisplay = from.getDisplay();
         int own = ownDisplay != null ? ownDisplay.getDisplayId() : Display.DEFAULT_DISPLAY;
         // The other panel: same kind of display as ours ("Built-in Screen"), not a virtual one (scrcpy...).
         String panelName = ownDisplay != null ? ownDisplay.getName() : "";
         Handler ui = new Handler(Looper.getMainLooper());
-        new Thread(() -> {
+        Log.i(TAG, "start (" + (mode == MODE_DESKTOP ? "desktop" : "game") + ") from display " + own);
+        SU.execute(() -> {
             su("cmd device_state state 99");
             DisplayManager dm = from.getSystemService(DisplayManager.class);
             for (int i = 0; i < 30; i++) { // the cover display comes up a moment after the state switch
                 for (Display d : dm.getDisplays()) {
                     if (d.getDisplayId() != own && panelName.equals(d.getName()) && d.getState() == Display.STATE_ON) {
                         int id = d.getDisplayId();
+                        Log.i(TAG, "cover display " + id + " is on, opening the pad there");
                         ui.post(() -> {
                             ActivityOptions o = ActivityOptions.makeBasic().setLaunchDisplayId(id);
-                            from.startActivity(new Intent(from, CoverPadActivity.class)
+                            from.startActivity(new Intent(from, CoverPadActivity.class).putExtra(EXTRA_MODE, mode)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK), o.toBundle());
                         });
                         return;
@@ -80,17 +101,29 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
             }
             Log.w(TAG, "no cover display came up");
             su("cmd device_state state reset");
-        }, "CoverPadStart").start();
+        });
+    }
+
+    /** Forget the learned grip (and the trackpad's direction calibration). */
+    static void relearn() {
+        if (current != null) current.view.relearn();
     }
 
     static void stop() {
         if (current != null) current.finish();
-        else new Thread(() -> su("cmd device_state state reset"), "CoverPadStop").start();
+        else SU.execute(() -> su("cmd device_state state reset"));
     }
+
+    /** Every device-state change and the start sequence, one at a time and in order: an "off" (reset) still running
+     *  in the background after a quick "on" would switch the cover display off under the new pad and close it. */
+    private static final java.util.concurrent.ExecutorService SU =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "CoverPadSu"));
 
     static void su(String cmd) {
         try {
-            new ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start().waitFor();
+            Process proc = new ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start();
+            proc.getInputStream().readAllBytes(); // drained, so a chatty command can never block on a full pipe
+            Log.i(TAG, "su " + cmd + " -> " + proc.waitFor());
         } catch (Exception e) {
             Log.w(TAG, "su " + cmd + ": " + e);
         }
@@ -100,8 +133,15 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         current = this;
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        setContentView(new FingerView(this));
+        mode = getIntent().getIntExtra(EXTRA_MODE, MODE_GAME);
+        Log.i(TAG, "opened on display " + (getDisplay() != null ? getDisplay().getDisplayId() : -1)
+            + (mode == MODE_DESKTOP ? " (desktop trackpad)" : " (game pad)"));
+        // Not focusable: touches still arrive, but the desktop on the inner screen keeps the focus (keyboard,
+        // Android's "top" activity) - the back screen is only ever touched, never typed into.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+        view = new FingerView(this);
+        setContentView(view);
         sensors = getSystemService(SensorManager.class);
         Sensor hinge = sensors.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE);
         if (hinge != null) sensors.registerListener(this, hinge, SensorManager.SENSOR_DELAY_NORMAL);
@@ -121,10 +161,12 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
 
     @Override
     protected void onDestroy() {
+        Log.i(TAG, "closed" + (isFinishing() ? "" : " by the system"));
         sensors.unregisterListener(this);
         PadHub.get(this).setButtons(PadHub.COVER, 0);
+        view.releaseMouseButtons();
         if (current == this) current = null;
-        new Thread(() -> su("cmd device_state state reset"), "CoverPadStop").start();
+        SU.execute(() -> su("cmd device_state state reset"));
         super.onDestroy();
     }
 
@@ -145,12 +187,130 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         final float[] upX = new float[6], upY = new float[6];
         final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         final SharedPreferences prefs;
+        final CoverPadActivity act;
         boolean seeded;
+        /** Desktop mode, left hand: index, middle, ring -> left, right, middle mouse button (held while pressed). */
+        static final int[] MOUSE_BUTTONS = {0x110, 0x111, 0x112};
+        static final String[] MOUSE_NAMES = {"left click", "right click", "middle click"};
+        // Desktop mode, the trackpad half: its pointers, re-sent as their own event stream to the touchpad.
+        final java.util.ArrayList<Integer> padIds = new java.util.ArrayList<>();
+        /** Back-screen delta -> screen delta: screen x = cal[0]*x + cal[1]*y, screen y = cal[2]*x + cal[3]*y. */
+        final float[] cal = new float[4];
+        /** 0 = calibrated; 1 = waiting for a swipe to the right; 2 = for a swipe down. */
+        int calStep;
+        float calStartX, calStartY, calAxisX, calAxisY;
 
-        FingerView(Context c) {
+        FingerView(CoverPadActivity c) {
             super(c);
+            act = c;
             prefs = c.getSharedPreferences("powos_coverpad", Context.MODE_PRIVATE);
             setBackgroundColor(Color.BLACK);
+            cal[0] = prefs.getFloat("cal0", 0);
+            cal[1] = prefs.getFloat("cal1", 0);
+            cal[2] = prefs.getFloat("cal2", 0);
+            cal[3] = prefs.getFloat("cal3", 0);
+            calStep = cal[0] == 0 && cal[1] == 0 ? 1 : 0;
+        }
+
+        boolean desktop() { return act.mode == MODE_DESKTOP; }
+
+        void modeChanged() {
+            releaseMouseButtons();
+            for (int s = 0; s < 6; s++) { pressed[s] = false; active[s] = false; }
+            pointerSlot.clear();
+            padIds.clear();
+            sendButtons();
+            invalidate();
+        }
+
+        void releaseMouseButtons() {
+            if (!desktop()) return;
+            for (int s = 0; s < 3; s++) if (pressed[s]) Native.nativeSendMouseButton(MOUSE_BUTTONS[s], false);
+        }
+
+        /** The trackpad half: the right hand's side (where the R slots sit along the screen). */
+        boolean onPadHalf(float fx, float fy) {
+            float split = (slotAlong(0) + slotAlong(1) + slotAlong(2) + 3 * 0.5f) / 6f; // between the L hand and the middle
+            return along(fx, fy) > Math.max(0.4f, Math.min(0.6f, split + 0.1f));
+        }
+
+        /** Snap a swipe to the nearest axis (unit vector). */
+        static float[] axisOf(float vx, float vy) {
+            return Math.abs(vx) >= Math.abs(vy) ? new float[]{Math.signum(vx), 0} : new float[]{0, Math.signum(vy)};
+        }
+
+        /** Re-sends the trackpad pointers of {@code e} as their own event to MainActivity's touchpad. */
+        void forwardPad(MotionEvent e, int masked, int changedId) {
+            MainActivity main = MainActivity.sInstance;
+            if (main == null || padIds.isEmpty()) return;
+            int n = padIds.size();
+            MotionEvent.PointerProperties[] props = new MotionEvent.PointerProperties[n];
+            MotionEvent.PointerCoords[] coords = new MotionEvent.PointerCoords[n];
+            int changedIndex = 0;
+            for (int k = 0; k < n; k++) {
+                int id = padIds.get(k), i = e.findPointerIndex(id);
+                props[k] = new MotionEvent.PointerProperties();
+                props[k].id = id;
+                props[k].toolType = MotionEvent.TOOL_TYPE_FINGER;
+                coords[k] = new MotionEvent.PointerCoords();
+                float x = i >= 0 ? e.getX(i) : 0, y = i >= 0 ? e.getY(i) : 0;
+                coords[k].x = cal[0] * x + cal[1] * y; // into screen directions (the back screen is mirrored/rotated)
+                coords[k].y = cal[2] * x + cal[3] * y;
+                coords[k].pressure = 1f;
+                coords[k].size = 0.1f;
+                if (id == changedId) changedIndex = k;
+            }
+            int action;
+            switch (masked) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    action = n == 1 ? MotionEvent.ACTION_DOWN
+                        : MotionEvent.ACTION_POINTER_DOWN | (changedIndex << MotionEvent.ACTION_POINTER_INDEX_SHIFT);
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_POINTER_UP:
+                    action = n == 1 ? MotionEvent.ACTION_UP
+                        : MotionEvent.ACTION_POINTER_UP | (changedIndex << MotionEvent.ACTION_POINTER_INDEX_SHIFT);
+                    break;
+                case MotionEvent.ACTION_CANCEL:
+                    action = MotionEvent.ACTION_CANCEL;
+                    break;
+                default:
+                    action = MotionEvent.ACTION_MOVE;
+            }
+            MotionEvent sub = MotionEvent.obtain(e.getDownTime(), e.getEventTime(), action, n, props, coords, 0, 0,
+                1f, 1f, e.getDeviceId(), 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0);
+            main.backTrackpad(sub);
+            sub.recycle();
+        }
+
+        /** Calibration: one swipe right, one swipe down, on the back; learns its orientation relative to the screen. */
+        void calibrate(int masked, float x, float y) {
+            if (masked == MotionEvent.ACTION_DOWN || masked == MotionEvent.ACTION_POINTER_DOWN) {
+                calStartX = x;
+                calStartY = y;
+                return;
+            }
+            if (masked != MotionEvent.ACTION_UP && masked != MotionEvent.ACTION_POINTER_UP) return;
+            float vx = x - calStartX, vy = y - calStartY;
+            if (Math.hypot(vx, vy) < Math.min(getWidth(), getHeight()) * 0.12f) return; // too short: not a swipe
+            float[] a = axisOf(vx, vy);
+            if (calStep == 1) {
+                calAxisX = a[0];
+                calAxisY = a[1];
+                calStep = 2;
+            } else if (calStep == 2) {
+                if ((a[0] != 0) == (calAxisX != 0)) return; // same axis as "right": try again
+                // screen x = component along the "right" swipe, screen y = along the "down" swipe
+                cal[0] = calAxisX;
+                cal[1] = calAxisY;
+                cal[2] = a[0];
+                cal[3] = a[1];
+                calStep = 0;
+                prefs.edit().putFloat("cal0", cal[0]).putFloat("cal1", cal[1]).putFloat("cal2", cal[2])
+                    .putFloat("cal3", cal[3]).apply();
+                performHapticFeedback(HapticFeedbackConstants.CONFIRM);
+            }
         }
 
         boolean wide() { return getWidth() >= getHeight(); }
@@ -190,7 +350,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         int nearestFree(float fx, float fy) {
             int best = -1;
             double bd = Double.MAX_VALUE;
-            for (int s = 0; s < 6; s++) {
+            for (int s = 0; s < (desktop() ? 3 : 6); s++) {
                 if (active[s]) continue;
                 double d = Math.hypot(fx - sx[s], fy - sy[s]);
                 if (d < bd) { bd = d; best = s; }
@@ -222,17 +382,75 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
             }
         }
 
-        /** All three fingers of one hand down at once: assign them by order across the screen, learn faster. */
-        void recalibrateHands() {
-            for (int h = 0; h < 2; h++) {
-                int b = h * 3;
-                if (!(active[b] && active[b + 1] && active[b + 2])) continue;
-                float w = getWidth(), ht = getHeight();
-                float[][] f = new float[3][];
-                for (int i = 0; i < 3; i++) f[i] = new float[]{tx[b + i] / w, ty[b + i] / ht};
-                java.util.Arrays.sort(f, (p, q) -> Float.compare(across(p[0], p[1]), across(q[0], q[1])));
-                for (int i = 0; i < 3; i++) learn(b + i, f[i][0], f[i][1], LEARN_FULL_HAND);
+        /**
+         * A grip (four or more fingers down, game mode): assign every finger from scratch instead of trusting the
+         * nearest-slot guesses - split the touches into two hands at the widest gap along the screen (3 + 3 when all
+         * six are down), order each hand's fingers across it, remap, and learn strongly. Self-correcting: a finger
+         * once filed under the wrong hand moves back as soon as the whole grip is seen.
+         */
+        void regrip() {
+            if (desktop()) return;
+            for (boolean p : pressed) if (p) return; // never re-label a held button
+            int n = pointerSlot.size();
+            if (n < 4) return;
+            float w = getWidth(), ht = getHeight();
+            float[][] t = new float[n][]; // {id, fx, fy}
+            for (int k = 0; k < n; k++) {
+                int s = pointerSlot.valueAt(k);
+                t[k] = new float[]{pointerSlot.keyAt(k), tx[s] / w, ty[s] / ht};
             }
+            java.util.Arrays.sort(t, (a, b) -> Float.compare(along(a[1], a[2]), along(b[1], b[2])));
+            int split = 3;
+            if (n != 6) { // the widest gap along the screen separates the hands
+                float best = -1;
+                for (int k = 1; k < n; k++) {
+                    float gap = along(t[k][1], t[k][2]) - along(t[k - 1][1], t[k - 1][2]);
+                    if (gap > best && k <= 3 && n - k <= 3) { best = gap; split = k; }
+                }
+            }
+            pointerSlot.clear();
+            for (int s = 0; s < 6; s++) active[s] = false;
+            for (int hand = 0; hand < 2; hand++) {
+                int from = hand == 0 ? 0 : split, to = hand == 0 ? split : n;
+                float[][] f = java.util.Arrays.copyOfRange(t, from, to);
+                java.util.Arrays.sort(f, (a, b) -> Float.compare(across(a[1], a[2]), across(b[1], b[2])));
+                // With fewer than three fingers of a hand down, keep them on the slots nearest across.
+                int[] slots = new int[f.length];
+                if (f.length == 3) { slots[0] = 0; slots[1] = 1; slots[2] = 2; }
+                else {
+                    boolean[] used = new boolean[3];
+                    for (int i = 0; i < f.length; i++) {
+                        int bestS = 0;
+                        float bd = Float.MAX_VALUE;
+                        for (int j = 0; j < 3; j++) {
+                            if (used[j]) continue;
+                            float d = Math.abs(slotAcross(hand * 3 + j) - across(f[i][1], f[i][2]));
+                            if (d < bd) { bd = d; bestS = j; }
+                        }
+                        used[bestS] = true;
+                        slots[i] = bestS;
+                    }
+                }
+                for (int i = 0; i < f.length; i++) {
+                    int s = hand * 3 + slots[i];
+                    pointerSlot.put((int) f[i][0], s);
+                    active[s] = true;
+                    tx[s] = f[i][1] * w;
+                    ty[s] = f[i][2] * ht;
+                    sx[s] += (f[i][1] - sx[s]) * LEARN_FULL_HAND;
+                    sy[s] += (f[i][2] - sy[s]) * LEARN_FULL_HAND;
+                }
+            }
+            save();
+        }
+
+        /** Forget the learned grip: back to the default zones. */
+        void relearn() {
+            prefs.edit().clear().apply();
+            for (int s = 0; s < 6; s++) setSlot(s, s < 3 ? 0.25f : 0.75f, 0.25f * (1 + s % 3));
+            calStep = 1;
+            cal[0] = cal[1] = cal[2] = cal[3] = 0;
+            invalidate();
         }
 
         @Override
@@ -243,6 +461,13 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                 case MotionEvent.ACTION_POINTER_DOWN: {
+                    if (desktop() && onPadHalf(e.getX(idx) / w, e.getY(idx) / h)) {
+                        int id = e.getPointerId(idx);
+                        padIds.add(id);
+                        if (calStep != 0) calibrate(e.getActionMasked(), e.getX(idx), e.getY(idx));
+                        else forwardPad(e, e.getActionMasked(), id);
+                        break;
+                    }
                     int s = nearestFree(e.getX(idx) / w, e.getY(idx) / h);
                     if (s >= 0) {
                         pointerSlot.put(e.getPointerId(idx), s);
@@ -259,12 +484,14 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                             sendButtons();
                         }
                         // t= is the touch's own timestamp (uptime ms, CLOCK_MONOTONIC: comparable with powos-padd's).
+                        regrip();
                         Log.i(TAG, "down " + HAND[s / 3] + " " + FINGER[s % 3] + (pressed[s] ? " -> " + BUTTON_NAMES[s] : "")
                             + " t=" + e.getEventTime());
                     }
                     break;
                 }
                 case MotionEvent.ACTION_MOVE:
+                    if (!padIds.isEmpty() && calStep == 0) forwardPad(e, MotionEvent.ACTION_MOVE, -1);
                     for (int i = 0; i < e.getPointerCount(); i++) {
                         int s = pointerSlot.get(e.getPointerId(i), -1);
                         if (s >= 0) { tx[s] = e.getX(i); ty[s] = e.getY(i); }
@@ -276,9 +503,15 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                     boolean all = e.getActionMasked() == MotionEvent.ACTION_CANCEL;
                     for (int i = 0; i < e.getPointerCount(); i++) {
                         if (!all && i != idx) continue;
+                        int pid = e.getPointerId(i);
+                        if (padIds.contains(pid)) { // the trackpad half
+                            if (calStep != 0) calibrate(e.getActionMasked(), e.getX(i), e.getY(i));
+                            else forwardPad(e, all ? MotionEvent.ACTION_CANCEL : e.getActionMasked(), pid);
+                            padIds.remove(Integer.valueOf(pid));
+                            continue;
+                        }
                         int s = pointerSlot.get(e.getPointerId(i), -1);
                         if (s < 0) continue;
-                        recalibrateHands(); // before the lift breaks up a full hand
                         learn(s, e.getX(i) / w, e.getY(i) / h, LEARN);
                         active[s] = false;
                         lastUp[s] = e.getEventTime();
@@ -299,7 +532,18 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
             return true;
         }
 
+        final boolean[] sentMouse = new boolean[3];
+
         void sendButtons() {
+            if (desktop()) {
+                for (int s = 0; s < 3; s++) {
+                    if (pressed[s] != sentMouse[s]) {
+                        Native.nativeSendMouseButton(MOUSE_BUTTONS[s], pressed[s]);
+                        sentMouse[s] = pressed[s];
+                    }
+                }
+                return;
+            }
             int bits = 0;
             for (int s = 0; s < 6; s++) if (pressed[s]) bits |= BUTTONS[s];
             PadHub.get(getContext()).setButtons(PadHub.COVER, bits);
@@ -325,13 +569,31 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                 }
             }
             paint.setTextAlign(Paint.Align.CENTER);
-            for (int s = 0; s < 6; s++) {
+            if (desktop()) {
+                // The trackpad half, over the zones.
+                paint.setColor(0xEE101418);
+                for (int y = 0; y < h; y += step)
+                    for (int x = 0; x < w; x += step)
+                        if (onPadHalf(x / w, y / h)) c.drawRect(x, y, x + step, y + step, paint);
+                paint.setColor(0xFFB0BEC5);
+                paint.setTextSize(u * 0.06f);
+                float cx = wide() ? w * 0.75f : w / 2f, cy = wide() ? h / 2f : h * 0.75f;
+                String msg = calStep == 1 ? "swipe right ->" : calStep == 2 ? "swipe down" : "trackpad";
+                c.drawText(msg, cx, cy, paint);
+                if (calStep != 0) {
+                    paint.setTextSize(u * 0.035f);
+                    c.drawText("(on the back, as you see the screen)", cx, cy + u * 0.07f, paint);
+                }
+            }
+            for (int s = 0; s < (desktop() ? 3 : 6); s++) {
                 float cx = sx[s] * w, cy = sy[s] * h;
                 paint.setColor(COLORS[s]);
                 c.drawCircle(cx, cy, u * 0.03f, paint);
                 paint.setColor(Color.WHITE);
                 paint.setTextSize(u * 0.045f);
-                c.drawText(HAND[s / 3] + " " + FINGER[s % 3] + "  " + BUTTON_NAMES[s], cx, cy - u * 0.05f, paint);
+                // Two lines: the finger, then what it does (one line overlapped the next zone's label).
+                c.drawText(HAND[s / 3] + " " + FINGER[s % 3], cx, cy - u * 0.10f, paint);
+                c.drawText(desktop() ? MOUSE_NAMES[s] : BUTTON_NAMES[s], cx, cy - u * 0.05f, paint);
                 if (active[s]) {
                     paint.setColor(pressed[s] ? Color.WHITE : COLORS[s]);
                     c.drawCircle(tx[s], ty[s], u * (pressed[s] ? 0.09f : 0.07f), paint);

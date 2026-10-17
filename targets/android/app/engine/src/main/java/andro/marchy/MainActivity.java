@@ -1286,17 +1286,46 @@ public class MainActivity extends Activity
         b.setAlpha(mGamepadOverlay.getVisibility() == View.VISIBLE ? 1f : 0.6f);
         b.setOnClickListener(v -> {
             boolean show = mGamepadOverlay.getVisibility() != View.VISIBLE;
-            mGamepadOverlay.setShown(show);
+            mGamepadOverlay.setShown(show); // hiding also closes the back screen's game pad (GamepadOverlay)
             v.setAlpha(show ? 1f : 0.6f);
             prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
+            // Game mode on, unfolded: the back screen's finger pad comes with it. Never while folded - forcing both
+            // screens on would light the inner screen inside the fold.
+            if (show && !FoldWatcher.folded) CoverPadActivity.start(this, CoverPadActivity.MODE_GAME);
         });
-        // Long-press: the layout editor (Done saves and leaves the controls shown).
+        // Long-press: a menu - the layout editor, or the back screen as a trackpad for the desktop.
         b.setOnLongClickListener(v -> {
             v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
-            mGamepadOverlay.setEditing(true, () -> {
-                v.setAlpha(1f);
-                prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, true).apply();
+            android.widget.PopupMenu menu = new android.widget.PopupMenu(this, v);
+            menu.getMenu().add(0, 1, 0, "Edit controls");
+            if (!FoldWatcher.folded)
+                menu.getMenu().add(0, 2, 1, CoverPadActivity.mode() == CoverPadActivity.MODE_DESKTOP
+                    ? "Back screen: trackpad ✓" : "Back screen: trackpad (desktop)");
+            if (CoverPadActivity.running()) {
+                menu.getMenu().add(0, 4, 2, "Back screen: re-learn grip");
+                menu.getMenu().add(0, 3, 3, "Back screen: off");
+            }
+            menu.setOnMenuItemClickListener(item -> {
+                switch (item.getItemId()) {
+                    case 1:
+                        mGamepadOverlay.setEditing(true, () -> {
+                            v.setAlpha(1f);
+                            prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, true).apply();
+                        });
+                        return true;
+                    case 2:
+                        CoverPadActivity.start(this, CoverPadActivity.MODE_DESKTOP);
+                        return true;
+                    case 3:
+                        CoverPadActivity.stop();
+                        return true;
+                    case 4:
+                        CoverPadActivity.relearn();
+                        return true;
+                }
+                return false;
             });
+            menu.show();
             return true;
         });
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size, Gravity.TOP | Gravity.END);
@@ -1848,6 +1877,12 @@ public class MainActivity extends Activity
 
         if (!mPointerCaptureEnabled && surfaceView.hasPointerCapture())
             surfaceView.releasePointerCapture();
+    }
+
+    /** The back screen's trackpad half (CoverPadActivity, desktop mode): the same touchpad as touchpad mode, already
+     *  turned into screen directions. */
+    boolean backTrackpad(MotionEvent e) {
+        return virtualTouchpad.onTouch(e);
     }
 
     /** The game controls' mouse modules (mouse region, trackball, gyro): the shared cursor, absolute + relative. */
