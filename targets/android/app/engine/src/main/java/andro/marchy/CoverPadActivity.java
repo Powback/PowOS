@@ -239,49 +239,49 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
             return Math.abs(vx) >= Math.abs(vy) ? new float[]{Math.signum(vx), 0} : new float[]{0, Math.signum(vy)};
         }
 
-        /** Re-sends the trackpad pointers of {@code e} as their own event to MainActivity's touchpad. */
-        void forwardPad(MotionEvent e, int masked, int changedId) {
+        /**
+         * The trackpad half drives the game controls' trackball (GamepadOverlay.TrackballModule): the same feel and code
+         * as the on-screen one - the cursor follows from the first pixel, tap = click, two-finger tap = right click,
+         * hold then drag = drag, two fingers = scroll, a flick keeps rolling - on the same cursor. Its host is the
+         * overlay in MainActivity (mouse output, haptics, frame callbacks); points arrive in screen directions.
+         */
+        GamepadOverlay.TrackballModule ball;
+        final GamepadOverlay.PadState noPad = new GamepadOverlay.PadState(); // the trackball only moves the mouse
+
+        GamepadOverlay.TrackballModule ball() {
             MainActivity main = MainActivity.sInstance;
-            if (main == null || padIds.isEmpty()) return;
-            int n = padIds.size();
-            MotionEvent.PointerProperties[] props = new MotionEvent.PointerProperties[n];
-            MotionEvent.PointerCoords[] coords = new MotionEvent.PointerCoords[n];
-            int changedIndex = 0;
-            for (int k = 0; k < n; k++) {
-                int id = padIds.get(k), i = e.findPointerIndex(id);
-                props[k] = new MotionEvent.PointerProperties();
-                props[k].id = id;
-                props[k].toolType = MotionEvent.TOOL_TYPE_FINGER;
-                coords[k] = new MotionEvent.PointerCoords();
-                float x = i >= 0 ? e.getX(i) : 0, y = i >= 0 ? e.getY(i) : 0;
-                coords[k].x = cal[0] * x + cal[1] * y; // into screen directions (the back screen is mirrored/rotated)
-                coords[k].y = cal[2] * x + cal[3] * y;
-                coords[k].pressure = 1f;
-                coords[k].size = 0.1f;
-                if (id == changedId) changedIndex = k;
+            GamepadOverlay host = main != null ? main.gamepadOverlay() : null;
+            if (host == null) return null;
+            if (ball == null || ball.host != host) {
+                ball = new GamepadOverlay.TrackballModule();
+                ball.host = host;
             }
-            int action;
-            switch (masked) {
-                case MotionEvent.ACTION_DOWN:
-                case MotionEvent.ACTION_POINTER_DOWN:
-                    action = n == 1 ? MotionEvent.ACTION_DOWN
-                        : MotionEvent.ACTION_POINTER_DOWN | (changedIndex << MotionEvent.ACTION_POINTER_INDEX_SHIFT);
-                    break;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_POINTER_UP:
-                    action = n == 1 ? MotionEvent.ACTION_UP
-                        : MotionEvent.ACTION_POINTER_UP | (changedIndex << MotionEvent.ACTION_POINTER_INDEX_SHIFT);
-                    break;
-                case MotionEvent.ACTION_CANCEL:
-                    action = MotionEvent.ACTION_CANCEL;
-                    break;
-                default:
-                    action = MotionEvent.ACTION_MOVE;
+            return ball;
+        }
+
+        float screenX(float x, float y) { return cal[0] * x + cal[1] * y; }
+
+        float screenY(float x, float y) { return cal[2] * x + cal[3] * y; }
+
+        void padDown(int id, float x, float y) {
+            GamepadOverlay.TrackballModule b = ball();
+            if (b != null) b.down(id, screenX(x, y), screenY(x, y), noPad);
+        }
+
+        void padMove(MotionEvent e) {
+            GamepadOverlay.TrackballModule b = ball();
+            if (b == null) return;
+            for (int id : padIds) {
+                int i = e.findPointerIndex(id);
+                if (i >= 0) b.move(id, screenX(e.getX(i), e.getY(i)), screenY(e.getX(i), e.getY(i)), noPad);
             }
-            MotionEvent sub = MotionEvent.obtain(e.getDownTime(), e.getEventTime(), action, n, props, coords, 0, 0,
-                1f, 1f, e.getDeviceId(), 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0);
-            main.backTrackpad(sub);
-            sub.recycle();
+        }
+
+        void padUp(int id, boolean cancel) {
+            GamepadOverlay.TrackballModule b = ball();
+            if (b == null) return;
+            if (cancel) b.reset();
+            else b.up(id, noPad);
         }
 
         /** Calibration: one swipe right, one swipe down, on the back; learns its orientation relative to the screen. */
@@ -465,7 +465,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                         int id = e.getPointerId(idx);
                         padIds.add(id);
                         if (calStep != 0) calibrate(e.getActionMasked(), e.getX(idx), e.getY(idx));
-                        else forwardPad(e, e.getActionMasked(), id);
+                        else padDown(id, e.getX(idx), e.getY(idx));
                         break;
                     }
                     int s = nearestFree(e.getX(idx) / w, e.getY(idx) / h);
@@ -491,7 +491,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                     break;
                 }
                 case MotionEvent.ACTION_MOVE:
-                    if (!padIds.isEmpty() && calStep == 0) forwardPad(e, MotionEvent.ACTION_MOVE, -1);
+                    if (!padIds.isEmpty() && calStep == 0) padMove(e);
                     for (int i = 0; i < e.getPointerCount(); i++) {
                         int s = pointerSlot.get(e.getPointerId(i), -1);
                         if (s >= 0) { tx[s] = e.getX(i); ty[s] = e.getY(i); }
@@ -506,7 +506,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                         int pid = e.getPointerId(i);
                         if (padIds.contains(pid)) { // the trackpad half
                             if (calStep != 0) calibrate(e.getActionMasked(), e.getX(i), e.getY(i));
-                            else forwardPad(e, all ? MotionEvent.ACTION_CANCEL : e.getActionMasked(), pid);
+                            else padUp(pid, all);
                             padIds.remove(Integer.valueOf(pid));
                             continue;
                         }

@@ -807,6 +807,9 @@ public class MainActivity extends Activity
         super.onResume();
         inFront = true;
         mPipTransitionPending = false;
+        // The back screen as its toggles say, whenever the desktop comes to the front (start, return, unfold) - not
+        // only when a toggle is tapped. Only acts when it is not in the right mode already.
+        if (mGamepadOverlay != null) applyBackScreen(mGamepadOverlay.getVisibility() == View.VISIBLE);
 
         // PowOS: no audio focus just for being shown - AUDIOFOCUS_GAIN on every resume paused the user's music and
         // videos whenever PowOS came to the front. Android mixes PowOS's sound with other apps' without it.
@@ -1898,10 +1901,9 @@ public class MainActivity extends Activity
             surfaceView.releasePointerCapture();
     }
 
-    /** The back screen's trackpad half (CoverPadActivity, desktop mode): the same touchpad as touchpad mode, already
-     *  turned into screen directions. */
-    boolean backTrackpad(MotionEvent e) {
-        return virtualTouchpad.onTouch(e);
+    /** The game controls (the back screen's trackpad drives their trackball, on the same cursor). */
+    GamepadOverlay gamepadOverlay() {
+        return mGamepadOverlay;
     }
 
     /** The game controls' mouse modules (mouse region, trackball, gyro): the shared cursor, absolute + relative. */
