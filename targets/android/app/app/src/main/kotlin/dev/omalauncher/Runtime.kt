@@ -401,8 +401,6 @@ class Runtime(
         widgets.linuxChanged(true)
         // PowOS's apps in the drawer, search and Android's shortcuts.
         refreshApps()
-        // PowOS AI's agents, reaching the user on the phone: notifications with inline replies.
-        AgentMail.start(context, File(context.filesDir, "run"))
     }
 
     /** Turns GPU acceleration on (installing and checking the driver) or off, for Linux apps started from then on. */

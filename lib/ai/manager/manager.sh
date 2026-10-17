@@ -27,6 +27,10 @@ manager_run() {
     if ! declare -f _ai_load_agent &>/dev/null; then
         echo "AI framework not loaded (agent.sh)" >&2; return 1
     fi
+    # The AI config, the Anthropic endpoint included (/etc/powos/ai/endpoint.conf: the fleet's auth authority), so the
+    # manager's claude uses it wherever it's started - not only from a session whose environment.d already has it
+    # (a phone's PowOS session doesn't).
+    _ai_ensure_config
     _ai_load_agent manager || return 1
 
     # Prepend live state (AGENT_CONTEXT_CMD) so the manager boots oriented.
