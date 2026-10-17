@@ -81,6 +81,9 @@ class Runtime(
     val wm = WindowManager()
     val server = WaylandServer(proot.waylandSocket.path, wm).also { wm.server = it }
     val keyboard = KeyboardBridge(wm)
+
+    /** For what the launcher draws outside Compose (PtyTerminal: its fonts, the clipboard). */
+    val appContext: Context get() = context.applicationContext
     val terminals = TerminalTiles(this)
     val style = StyleStore(context)
     val terminalFont = TerminalFont(proot, style)

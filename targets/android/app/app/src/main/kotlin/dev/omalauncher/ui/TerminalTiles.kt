@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,6 +19,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,7 +45,8 @@ import dev.omalauncher.wayland.XdgToplevel
  * Terminals that live inside home-screen tiles (the widgets' `Terminal` node)
  * instead of their own Android task. Each runs its own foot with a unique
  * app_id, and the window manager hands that toplevel to the tile rather than
- * opening an activity for it.
+ * opening an activity for it. In PowOS's rooted mode a tile is a [PtyTerminal]
+ * instead, drawn by the launcher itself (why: see there).
  *
  * A tile is inert until tapped, so swipes still turn pages and open the
  * drawer; tapping it gives it the keyboard and its touches, until a tap
@@ -84,9 +87,13 @@ class TerminalTiles(
     /** Whether [appId] is a tile's terminal at a size of the widget's own, which foot.ini's doesn't change. */
     fun hasOwnFont(appId: String) = sessions.any { it.appId == appId && it.fontSize != null }
 
+    /** The [PtyTerminal] tile that has the keyboard; the others have it through their window's focus. */
+    private var ptyActive by mutableStateOf<EmbeddedTerminal?>(null)
+
     /** The tile that has the keyboard, if any. */
     val active: EmbeddedTerminal?
         get() {
+            ptyActive?.let { return it }
             val focused = wm.focused ?: return null
             return sessions.firstOrNull { it.window === focused }
         }
@@ -98,9 +105,18 @@ class TerminalTiles(
 
     internal fun forget(term: EmbeddedTerminal) {
         sessions -= term
+        if (ptyActive === term) deactivate()
     }
 
     fun activate(term: EmbeddedTerminal) {
+        term.pty?.let { pty ->
+            if (wm.focused != null) wm.focus(null)
+            ptyActive = term
+            runtime.keyboard.target = pty
+            tile = null
+            keyboard?.show()
+            return
+        }
         val window = term.window ?: return
         tile = null
         wm.focus(window)
@@ -108,6 +124,10 @@ class TerminalTiles(
     }
 
     fun deactivate() {
+        if (ptyActive != null) {
+            ptyActive = null
+            runtime.keyboard.target = null
+        }
         if (active != null) wm.focus(null)
         tile = null
         keyboard?.hide()
@@ -151,17 +171,31 @@ class TerminalTiles(
         return lift
     }
 
+    /** A rooted-mode tile's terminal: PowOS's tmux picker/resume (as Konsole on the desktop), or its command. */
+    internal fun pty(
+        term: EmbeddedTerminal,
+        onExit: () -> Unit,
+    ) = PtyTerminal(
+        runtime.appContext,
+        term.command ?: RootedGuest.TERMINAL_SHELL,
+        textPixels = { runtime.terminalFont.pixels(term.fontSize ?: runtime.terminalFont.size) },
+        onTap = { if (active === term) keyboard?.show() else activate(term) },
+        onExit = onExit,
+    )
+
     internal fun launch(
         term: EmbeddedTerminal,
         onExit: () -> Unit,
     ) {
         val font = term.fontSize?.let { " -o " + shellQuote("main.font=${runtime.terminalFont.family}:size=${TerminalFont.format(it)}") }.orEmpty()
-        // PowOS rooted mode: a plain tile is a PowOS terminal - its tmux picker/resume, as Konsole on the desktop.
-        val command = term.command?.let { " -e bash -c " + shellQuote(it) } ?: if (RootedGuest.enabled) " -e ${RootedGuest.TERMINAL_SHELL}" else ""
+        val command = term.command?.let { " -e bash -c " + shellQuote(it) }.orEmpty()
         runtime.launch("foot --app-id=${term.appId}$font$command", onExit)
     }
 
     internal fun close(window: XdgToplevel) = wm.close(window)
+
+    /** The terminal text size new terminals open at (settings), which pty tiles follow. */
+    internal val textSize get() = runtime.terminalFont.size
 
     internal val server get() = runtime.server
     internal val windowManager get() = wm
@@ -188,6 +222,10 @@ class EmbeddedTerminal internal constructor(
     var running by mutableStateOf(false)
         private set
 
+    /** Rooted mode: the terminal the launcher draws itself, instead of a foot [window]. */
+    var pty by mutableStateOf<PtyTerminal?>(null)
+        private set
+
     private var closed = false
 
     /** Where the tile is, in window pixels, as if the home screen weren't lifted. */
@@ -196,6 +234,14 @@ class EmbeddedTerminal internal constructor(
     fun start() {
         if (running || closed) return
         running = true
+        if (RootedGuest.enabled) {
+            pty =
+                tiles.pty(this) {
+                    running = false
+                    pty = null
+                }
+            return
+        }
         tiles.launch(this) {
             main.post {
                 running = false
@@ -209,6 +255,7 @@ class EmbeddedTerminal internal constructor(
         closed = true
         tiles.forget(this)
         window?.let(tiles::close)
+        pty?.finish()
     }
 
     internal fun attach(w: XdgToplevel) {
@@ -232,6 +279,28 @@ fun TerminalView(
     val window = term.window
     val active = tiles.active === term
     LaunchedEffect(term) { term.start() }
+    term.pty?.let { pty ->
+        // Follows the theme and the terminal text size, as foot does through foot.ini.
+        val palette = Palette.current
+        LaunchedEffect(pty, palette, tiles.textSize) { pty.restyle() }
+        Box(modifier.onGloballyPositioned { term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
+            key(pty) {
+                AndroidView(
+                    factory = { pty.newView(it) },
+                    onRelease = { pty.release(it) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            // Inert until tapped, like a foot tile: home's swipes pass over it. Once active it takes its own touches
+            // (scrolling, tmux's mouse); a tap shows the keyboard again.
+            if (active) {
+                KeyboardButton(tiles)
+            } else if (interactive) {
+                Box(Modifier.fillMaxSize().pointerInput(term) { detectTapGestures { tiles.activate(term) } })
+            }
+        }
+        return
+    }
     val background = Palette.background.toArgb()
     Box(modifier.onGloballyPositioned { term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
         AndroidView(
@@ -256,20 +325,26 @@ fun TerminalView(
             active -> {
                 // Over the TextureView, which Compose's pointer input doesn't reach.
                 Box(Modifier.fillMaxSize().linuxWindowInput(tiles.windowManager, window))
-                Box(
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .size(32.dp)
-                        .background(Palette.overlay, CircleShape)
-                        .clickable { tiles.keyboard?.toggle() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    BasicText("⌨", style = Mono.copy(color = Palette.foreground))
-                }
+                KeyboardButton(tiles)
             }
             interactive -> Box(Modifier.fillMaxSize().pointerInput(term) { detectTapGestures { tiles.activate(term) } })
         }
+    }
+}
+
+/** The active tile's button that shows or hides the soft keyboard. */
+@Composable
+private fun BoxScope.KeyboardButton(tiles: TerminalTiles) {
+    Box(
+        Modifier
+            .align(Alignment.BottomEnd)
+            .padding(6.dp)
+            .size(32.dp)
+            .background(Palette.overlay, CircleShape)
+            .clickable { tiles.keyboard?.toggle() },
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText("⌨", style = Mono.copy(color = Palette.foreground))
     }
 }
 

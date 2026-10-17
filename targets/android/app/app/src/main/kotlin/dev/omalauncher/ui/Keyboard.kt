@@ -27,10 +27,25 @@ class StickyModifier(
     var latch by mutableStateOf(Latch.Off)
 }
 
+/** Where keys go instead of the focused Wayland window: a terminal the launcher draws itself (PtyTerminal). */
+interface KeyTarget {
+    /** An evdev key [code] pressed or released, modifiers included. */
+    fun key(
+        code: Int,
+        pressed: Boolean,
+    )
+
+    /** A character with no key on the US layout. */
+    fun codePoint(cp: Int)
+}
+
 /** Translates Android key events and IME text into Wayland keyboard input for the focused window. */
 class KeyboardBridge(
     private val wm: WindowManager,
 ) {
+    /** Takes the keys while set, instead of the focused window. */
+    var target: KeyTarget? = null
+
     /** Launcher shortcuts triggered with Meta (Super), like Omarchy's Super bindings. */
     var onShortcut: (Int) -> Boolean = { false }
 
@@ -46,7 +61,7 @@ class KeyboardBridge(
         // Volume buttons stay Android's; their scancodes would otherwise reach the window as KEY_VOLUMEUP/DOWN.
         if (event.keyCode in volumeKeys) return false
         val code = Keys.evdev(event) ?: event.scanCode.takeIf { it > 0 } ?: return false
-        if (wm.focused == null) return false
+        if (wm.focused == null && target == null) return false
         if (event.action == KeyEvent.ACTION_UP && code == swallowUp) {
             swallowUp = null
             return true
@@ -76,7 +91,7 @@ class KeyboardBridge(
             val mapped = if (cp <= 0xffff) Keys.forChar(cp.toChar()) else null
             if (mapped == null) {
                 // Not on a US key, like æ, 你 or an emoji: the keymap grows a key for it.
-                if (!Character.isISOControl(cp)) wm.server.postInput { typeCodePoint(cp) }
+                if (!Character.isISOControl(cp)) target?.codePoint(cp) ?: wm.server.postInput { typeCodePoint(cp) }
                 continue
             }
             val (code, shift) = mapped
@@ -116,7 +131,10 @@ class KeyboardBridge(
     private fun key(
         code: Int,
         pressed: Boolean,
-    ) = wm.server.postInput { key(code, pressed) }
+    ) {
+        target?.let { return it.key(code, pressed) }
+        wm.server.postInput { key(code, pressed) }
+    }
 }
 
 /** An invisible view that owns the soft keyboard and feeds it into [KeyboardBridge]. */

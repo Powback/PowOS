@@ -24,6 +24,8 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
+        // Termux's terminal emulator and view (the launcher's PowOS terminal tiles), published only on JitPack.
+        maven("https://jitpack.io") { mavenContent { includeGroup("com.github.termux.termux-app") } }
     }
 }
 

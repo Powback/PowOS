@@ -131,6 +131,9 @@ class TerminalFont(
     /** The columns a terminal [widthPx] wide gets at [size]. */
     fun columns(widthPx: Int) = columns(widthPx, scale, size)
 
+    /** The pixel height foot gives text of [points] (it multiplies points by its scale), for terminals the launcher draws. */
+    fun pixels(points: Double) = (points * PX_PER_PT * scale).roundToInt().coerceAtLeast(1)
+
     /**
      * Writes foot-font.ini if it changed or is gone: Linux removed and
      * installed again in the same process starts without it.

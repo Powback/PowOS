@@ -84,6 +84,7 @@ dependencies {
     implementation(libs.commons.compress)
     implementation(libs.androidsvg)
     implementation(libs.zxing.core)
+    implementation(libs.termux.terminal.view)
     implementation(project(":owl"))
     // PowOS: Andromarchy's engine (display, session, rootfs install), GPL-3.0; the app is GPL-3.0 as a whole.
     implementation(project(":engine"))

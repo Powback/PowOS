@@ -77,6 +77,11 @@ object Keys {
 
     fun evdev(event: KeyEvent): Int? = byKeyCode[event.keyCode]
 
+    private val byEvdev = byKeyCode.entries.associate { (keyCode, evdev) -> evdev to keyCode }
+
+    /** The Android key code of evdev [code], the reverse of [evdev]. */
+    fun keyCode(code: Int): Int? = byEvdev[code]
+
     /** Shift, Ctrl, Alt, Super and Caps Lock, which a latched modifier shouldn't fold into. */
     fun isModifier(code: Int) = code in setOf(29, 42, 54, 56, 58, 97, 100, 125, 126)
 

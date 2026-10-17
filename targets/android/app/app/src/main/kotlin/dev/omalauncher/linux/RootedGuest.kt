@@ -23,9 +23,12 @@ object RootedGuest {
     const val TERMINAL_SHELL = "/usr/lib/powos/powos-tmux-shell"
 
     /** `bash -lc [command]` in the PowOS session, stderr merged into stdout. */
-    fun process(command: String): ProcessBuilder {
+    fun process(command: String): ProcessBuilder = ProcessBuilder("su", "-c", rootCommand(command)).redirectErrorStream(true)
+
+    /** What root runs (`su -c`) for `bash -lc [command]` in the PowOS session. */
+    fun rootCommand(command: String): String {
         val env = "WAYLAND_DISPLAY=$WAYLAND_DISPLAY LANG=${shellQuote(locale())} TZ=${shellQuote(java.util.TimeZone.getDefault().id)}"
-        return ProcessBuilder("su", "-c", "$env sh /data/powos/powos-run.sh ${shellQuote(command)}").redirectErrorStream(true)
+        return "$env sh /data/powos/powos-run.sh ${shellQuote(command)}"
     }
 
     /** Like Proot.run: blocking, each output line to [onLine]; the exit code. */
