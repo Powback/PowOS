@@ -81,7 +81,10 @@ fun HomeScreen(
     var menuFor by remember { mutableStateOf<HomeItem?>(null) }
 
     val terminals = runtime.terminals
-    BackHandler(enabled = terminals.active != null) { terminals.deactivate() }
+    // A widget's screen (the terminal's) keeps its terminal active with the keyboard down: scrolling and the extra
+    // keys need it; Back closes the screen there instead.
+    val screenOpen = runtime.widgets.openScreen != null
+    BackHandler(enabled = terminals.active != null && !screenOpen) { terminals.deactivate() }
     BackHandler(enabled = state.homeMenuOpen) { state.homeMenuOpen = false }
     BackHandler(enabled = state.editing != null && !state.homeMenuOpen) { state.editing = null }
     BackHandler(enabled = arrange.folder != null && !state.homeMenuOpen) { arrange.folder = null }
@@ -176,7 +179,7 @@ fun HomeScreen(
     // hiding it again mid-way, while a back swipe still drives its animation, left home taking no touches.
     LaunchedEffect(terminals) {
         snapshotFlow { ime.getBottom(density) > 0 }.collect { shown ->
-            if (!shown && terminals.keyboard?.wanted == true) terminals.deactivate()
+            if (!shown && terminals.keyboard?.wanted == true && runtime.widgets.openScreen == null) terminals.deactivate()
         }
     }
     // The bar and recent apps don't wait for that: back as the keyboard starts closing, like the pages.

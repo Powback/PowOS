@@ -184,7 +184,8 @@ class TerminalTiles(
         term.command ?: RootedGuest.TERMINAL_SHELL,
         textPixels = { runtime.terminalFont.pixels(term.fontSize ?: runtime.terminalFont.size) },
         fontFamily = { runtime.terminalFont.family },
-        onTap = { if (active === term) keyboard?.show() else activate(term) },
+        // A tap on the active terminal is the terminal's (tmux's mouse); the soft keyboard has its own button.
+        onTap = { if (active !== term) activate(term) },
         onExit = onExit,
     )
 
@@ -305,7 +306,10 @@ fun TerminalView(
         // Follows the theme and the terminal text size, as foot does through foot.ini.
         val palette = Palette.current
         LaunchedEffect(pty, palette, tiles.textSize, tiles.fontFamily) { pty.restyle() }
-        Box(modifier.onGloballyPositioned { term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
+        // Where the terminal is, for "a press outside it lets go" - from a view that takes input only: a tile
+        // only showing the shell of the screen over it reported the tile's place, so presses in the screen counted
+        // as outside, let go of it, and its tap-to-activate cover then blocked scrolling.
+        Box(modifier.onGloballyPositioned { if (interactive) term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
             // foot's pad around the text, in the terminal's background.
             val pad = with(LocalDensity.current) { tiles.padPixels.toDp() }
             val ownPixels = textSize?.let { with(LocalDensity.current) { it.sp.roundToPx() } }
@@ -317,7 +321,7 @@ fun TerminalView(
                 )
             }
             // Inert until tapped, like a foot tile: home's swipes pass over it. Once active it takes its own touches
-            // (scrolling, tmux's mouse); a tap shows the keyboard again.
+            // (scrolling, tmux's mouse); its button shows the keyboard.
             if (active) {
                 KeyboardButton(tiles)
             } else if (interactive) {
@@ -331,7 +335,7 @@ fun TerminalView(
         return
     }
     val background = Palette.background.toArgb()
-    Box(modifier.onGloballyPositioned { term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
+    Box(modifier.onGloballyPositioned { if (interactive) term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
         AndroidView(
             factory = { EmbeddedWindowView(it, tiles) },
             update = {
