@@ -12,7 +12,11 @@ The display daemon pairs a consumer and a producer per surface id (the HELLO's p
 relays control lines between KWin and the PowOS app: the user's maximize (title bar, menu, shortcut - patch 0014's
 hook) or D-Bus org.powos.WindowTasks.show(windowId) sends "open", the app starts the task; its "closed", or maximize
 again, puts the window back on the desktop. Activating an exported window the desktop way (the taskbar) brings its
-task to the front instead of switching to its desktop.
+task to the front instead of switching to its desktop. An Android app's own window (powos-android-app, app id
+android-<package>) maximizes into the app itself: the window closes, handing the app back to the phone's screen,
+and the PowOS app brings it to the front there ("android <package>"). An application going full screen by itself (a
+game, Steam Big Picture, a video) gets its own task the same way - immersive ("open ... fullscreen") - and goes
+back to the desktop, no longer full screen, when it leaves full screen or its task is closed.
 The producer's handshake and fd pickup get non-blocking variants for that (connect_to_deamon_begin/_finish,
 request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with the desktop's layer.
 ---
@@ -259,7 +263,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
      bool initializeEgl();
 --- a/src/backends/anland/anland_window_task.cpp
 +++ b/src/backends/anland/anland_window_task.cpp
-@@ -0,0 +1,771 @@
+@@ -0,0 +1,840 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -322,11 +326,12 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +// AnlandWindowTask
 +// ---------------------------------------------------------------------------
 +
-+AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uint32_t id)
++AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uint32_t id, bool fullScreen)
 +    : QObject(tasks)
 +    , m_tasks(tasks)
 +    , m_window(window)
 +    , m_id(id)
++    , m_fullScreen(fullScreen)
 +{
 +    m_retry.setSingleShot(true);
 +    m_retry.setInterval(500);
@@ -364,9 +369,16 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    if (m_window && m_exported && !m_window->isDeleted() && workspace()) {
 +        // Back on the desktop as it was, and in front.
 +        m_window->setDesktops(m_desktops);
-+        m_window->moveResize(m_geometry);
-+        if (m_maximizeMode != MaximizeRestore) {
-+            m_window->maximize(m_maximizeMode);
++        if (m_fullScreen) {
++            // Full screen on the desktop would cover it: a normal window again (KWin restores its size from before).
++            if (m_window->isFullScreen()) {
++                m_window->setFullScreen(false);
++            }
++        } else {
++            m_window->moveResize(m_geometry);
++            if (m_maximizeMode != MaximizeRestore) {
++                m_window->maximize(m_maximizeMode);
++            }
 +        }
 +        workspace()->activateWindow(m_window);
 +    }
@@ -440,7 +452,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +        m_desktops = m_window->desktops();
 +        m_geometry = m_window->frameGeometry();
 +        m_maximizeMode = m_window->maximizeMode();
-+        if (m_maximizeMode != MaximizeRestore) {
++        if (m_maximizeMode != MaximizeRestore && !m_window->isFullScreen()) {
 +            m_window->maximize(MaximizeRestore);
 +        }
 +        if (VirtualDesktop *desktop = m_tasks->tasksDesktop()) {
@@ -600,7 +612,8 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +
 +void AnlandWindowTask::fitWindow()
 +{
-+    if (!m_window || m_bufferSize.isEmpty()) {
++    // A full-screen window keeps KWin's full-screen geometry (the screen's - what the immersive task shows).
++    if (!m_window || m_bufferSize.isEmpty() || m_window->isFullScreen()) {
 +        return;
 +    }
 +    // The window takes the task's size (split screen, floating window, fold): its client area fills the buffers.
@@ -892,7 +905,8 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +void AnlandWindowTasks::integrate()
 +{
 +    // The title bar's maximize button (and double tap, the window menu, Meta+PgUp): on a phone, a window fills the
-+    // screen as its own Android task - split screen and floating windows are Android's then. The same in its task
++    // screen as its own Android task - split screen and floating windows are Android's then; an Android app's
++    // window gives the app back to Android. The same in its task
 +    // gives it back to the desktop. A window already maximized on the desktop keeps KWin's restore; an application
 +    // maximizing itself doesn't come this way.
 +    workspace()->setWindowOperationHandler([this](Window *window, Options::WindowOperation op) {
@@ -904,11 +918,21 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +            remove(task);
 +            return true;
 +        }
++        if (handBackAndroidApp(window)) {
++            return true;
++        }
 +        if (window->maximizeMode() == MaximizeFull || !exportable(window)) {
 +            return false;
 +        }
 +        return show(window);
 +    });
++    // An application going full screen (a game, Steam Big Picture, a video) gets its own task the same way, shown
++    // immersive; leaving full screen gives it back.
++    for (Window *window : workspace()->windows()) {
++        watchFullScreen(window);
++    }
++    connect(workspace(), &Workspace::windowAdded, this, &AnlandWindowTasks::watchFullScreen);
++
 +    // Something activated an exported window the desktop way (the PowOS taskbar, a notification): KWin switches to
 +    // its desktop, focuses it, then reports it activated. Bring its task to the front, and stay on the desktop. A
 +    // switch to that desktop on its own (a pager, a shortcut) just goes back.
@@ -933,6 +957,51 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    });
 +}
 +
++bool AnlandWindowTasks::handBackAndroidApp(Window *window)
++{
++    // An Android app shown as a PowOS window (powos-android-app: scrcpy, app id android-<package>): full screen is the
++    // app itself on Android, not a task around its picture. Closing the window hands the app back to the phone's
++    // screen; then the PowOS app brings it to the front there.
++    const QString appId = window->desktopFileName();
++    if (!appId.startsWith(QLatin1String("android-")) || m_controlFd < 0 || window->isDeleted()) {
++        return false;
++    }
++    const QString package = appId.mid(int(strlen("android-")));
++    connect(window, &Window::closed, this, [this, package]() {
++        send({QStringLiteral("android"), package});
++    });
++    window->closeWindow();
++    return true;
++}
++
++void AnlandWindowTasks::watchFullScreen(Window *window)
++{
++    connect(window, &Window::fullScreenChanged, this, [this, window]() {
++        onFullScreenChanged(window);
++    });
++    if (window->isFullScreen()) {
++        // Opened full screen (a game's window): once it's set up.
++        QMetaObject::invokeMethod(this, [this, w = QPointer<Window>(window)]() {
++            if (w) {
++                onFullScreenChanged(w);
++            }
++        }, Qt::QueuedConnection);
++    }
++}
++
++void AnlandWindowTasks::onFullScreenChanged(Window *window)
++{
++    AnlandWindowTask *task = taskFor(window);
++    if (window->isFullScreen()) {
++        if (!task && !handBackAndroidApp(window) && exportable(window)) {
++            show(window, true);
++        }
++    } else if (task && task->fullScreen()) {
++        send({QStringLiteral("close"), QString::number(task->id())});
++        remove(task);
++    }
++}
++
 +bool AnlandWindowTasks::exportable(Window *window) const
 +{
 +    return m_controlFd >= 0 && window && window->isClient() && !window->isDeleted() && window->surface()
@@ -954,7 +1023,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    return show(workspace()->findWindow(QUuid::fromString(windowId)));
 +}
 +
-+bool AnlandWindowTasks::show(Window *window)
++bool AnlandWindowTasks::show(Window *window, bool fullScreen)
 +{
 +    if (m_controlFd < 0) {
 +        qCWarning(KWIN_ANLAND) << "no window tasks: the PowOS app isn't connected";
@@ -969,13 +1038,17 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +        return true;
 +    }
 +    const uint32_t id = m_nextId++;
-+    auto *task = new AnlandWindowTask(this, window, id);
++    auto *task = new AnlandWindowTask(this, window, id, fullScreen);
 +    m_tasks.insert(id, task);
 +    connect(window, &Window::closed, task, [this, task]() {
 +        send({QStringLiteral("close"), QString::number(task->id())});
 +        remove(task);
 +    });
-+    send({QStringLiteral("open"), QString::number(id), window->desktopFileName(), window->caption()});
++    QStringList open{QStringLiteral("open"), QString::number(id), window->desktopFileName(), window->caption()};
++    if (fullScreen) {
++        open.append(QStringLiteral("fullscreen"));
++    }
++    send(open);
 +    return true;
 +}
 +
@@ -1033,7 +1106,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +} // namespace KWin
 --- a/src/backends/anland/anland_window_task.h
 +++ b/src/backends/anland/anland_window_task.h
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,201 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -1086,7 +1159,8 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    Q_OBJECT
 +
 +public:
-+    AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uint32_t id);
++    /** [fullScreen]: opened because the application went full screen (a game, Steam Big Picture, a video). */
++    AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uint32_t id, bool fullScreen);
 +    /** Puts the window back on the desktop, as it was, unless it was closed. */
 +    ~AnlandWindowTask() override;
 +
@@ -1100,6 +1174,10 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    }
 +    /** The task got the focus: so does the window (keys and text follow KWin's focus). */
 +    void focus();
++    bool fullScreen() const
++    {
++        return m_fullScreen;
++    }
 +
 +private:
 +    enum class State {
@@ -1132,6 +1210,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    AnlandWindowTasks *m_tasks;
 +    QPointer<Window> m_window;
 +    const uint32_t m_id;
++    const bool m_fullScreen;
 +    display_ctx *m_display = nullptr;
 +    State m_state = State::Handshake;
 +    QSocketNotifier *m_ctrlNotifier = nullptr;
@@ -1200,13 +1279,17 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    Q_SCRIPTABLE bool show(const QString &windowId);
 +
 +public:
-+    bool show(Window *window);
++    bool show(Window *window, bool fullScreen = false);
 +
 +private:
 +    /** Once the workspace is there: maximize (the user's - title bar, menu, shortcut) = the window's own task. */
 +    void integrate();
 +    bool exportable(Window *window) const;
 +    AnlandWindowTask *taskFor(Window *window) const;
++    /** An Android app's own window (powos-android-app): back to Android, the app itself in front. */
++    bool handBackAndroidApp(Window *window);
++    void watchFullScreen(Window *window);
++    void onFullScreenChanged(Window *window);
 +    void connectControl();
 +    void onControlReadable();
 +    void handleLine(const QString &line);

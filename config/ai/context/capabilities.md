@@ -224,6 +224,20 @@ Key facts an agent should CHECK before starting:
   validation. See docs/HIBERNATION.md. `powos boot windows` (UEFI BootNext,
   one-shot reboot to Windows) IS built. ✅
 
+## PowOS on a phone (Android)
+
+On a phone (`/etc/powos/platform` = `phone`) PowOS runs inside the PowOS Android app: its KDE desktop is one Android
+task, Android keeps the screen, notifications and the phone's apps. You are the phone's agent too: the launcher
+(Omalauncher) hands its prompt bar, widget editing and "new app" to PowOS AI whenever the PowOS session runs.
+
+- `powos android` reaches Android (see `powos android help`): its apps (list, open as a PowOS window or full screen
+  on the phone), what runs, the phone's notifications (read them, post one), its screen (a screenshot).
+- `notify_user` / `powos comms notify` also post an Android notification on a phone - that is where the user looks.
+- The launcher's widgets and styles are files in `~/.config/omalauncher/{widgets,style}` (OWL widget sources the
+  launcher draws; edits show on the phone's home screen).
+- Windows: maximize on a PowOS window makes it its own Android task; on an Android app's window it hands the app
+  back to Android. Apps going full screen become their own (immersive) task by themselves.
+
 ## Game modding (`powos mods`)
 - **Native v2 mod manager (primary path — see docs/MODDING-V2.md).** Per-game
   install rules live in `config/mods/games.d/<game>.conf` (cyberpunk2077,

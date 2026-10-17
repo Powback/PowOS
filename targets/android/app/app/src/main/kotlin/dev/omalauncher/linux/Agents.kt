@@ -40,7 +40,15 @@ val AGENTS =
     )
 
 /**
+ * PowOS AI: PowOS's own agent system (`powos ai`), the launcher's agent whenever the PowOS session runs (rooted
+ * mode). Its persistent manager keeps memory across conversations, has the agents' inbox, and knows the phone through
+ * `powos android`. Nothing to install: it is part of PowOS.
+ */
+val POWOS_AI = Agent("powos-ai", "PowOS AI", "PowOS's own agents: the manager, with the phone and the desktop", "")
+
+/**
  * Starts [agentBin] with a first prompt; OpenCode takes it as --prompt, the others as an argument.
+ * PowOS AI: the manager answers it (one turn), then stays open for the conversation (`powos manager` resumes it).
  * [readOnly], for reading something untrusted: Claude Code starts in plan mode, where it can read but not
  * run commands or change files whatever the user's settings say. The others have no flag for that we can
  * rely on inside proot, and only have the prompt.
@@ -52,6 +60,9 @@ fun agentInvocation(
 ): String {
     val quoted = shellQuote(prompt)
     return when {
+        // --safe: permission prompts on, for reading something untrusted.
+        agentBin == POWOS_AI.bin && readOnly -> "powos manager --safe --once $quoted && exec powos manager --safe"
+        agentBin == POWOS_AI.bin -> "powos manager --once $quoted && exec powos manager"
         agentBin == "opencode" -> "$agentBin --prompt $quoted"
         agentBin == "claude" && readOnly -> "$agentBin --permission-mode plan $quoted"
         else -> "$agentBin $quoted"
@@ -60,6 +71,13 @@ fun agentInvocation(
 
 /** A new-app session in ~/apps: the agent asks what to build, then adds it to the app drawer. */
 fun newAppCommand(agentBin: String): String {
+    if (agentBin == POWOS_AI.bin) {
+        val prompt =
+            "Ask me what app to build, then build it as a PowOS project (powos dev new). It runs on PowOS on my phone " +
+                "(Arch Linux ARM, aarch64, KDE Plasma on a touch screen). When it works, give it a desktop entry in " +
+                "~/.local/share/applications/<name>.desktop so it shows up in my app drawer."
+        return "cd ~ && ${agentInvocation(agentBin, prompt)}"
+    }
     val prompt =
         "Ask me what app to build, then build it in its own directory here. It runs on Arch Linux ARM (aarch64) inside proot " +
             "on an Android phone, under a Wayland compositor: no systemd, no X11, OpenGL usually in software, a small touch screen. " +
@@ -72,6 +90,8 @@ class AgentStore(
     private val proot: Proot,
     /** Called when the set of installed agents changed, so their desktop entries follow. */
     private val onChanged: () -> Unit,
+    /** Whether the PowOS session runs (rooted mode): PowOS AI is the launcher's agent then. */
+    private val powosSession: () -> Boolean = { false },
 ) {
     private val mise get() = File(proot.home, ".local/bin/mise")
     private val shims get() = File(proot.home, ".local/share/mise/shims")
@@ -100,7 +120,8 @@ class AgentStore(
     }
 
     /** The agent the launcher opens for prompts and widget work: the picked one, else the first installed in Omarchy's order. */
-    val default: Agent? get() = installed.firstOrNull { it.bin == preferred } ?: installed.firstOrNull()
+    val default: Agent? get() =
+        if (powosSession()) POWOS_AI else installed.firstOrNull { it.bin == preferred } ?: installed.firstOrNull()
 
     fun choose(agent: Agent) {
         preferred = agent.bin

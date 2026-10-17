@@ -182,6 +182,8 @@ Dev & AI:
   comms send <to> <msg>   Message another agent's inbox (health/coder/devops...)
   comms watch --agent R   Park until that role gets mail (yield, no polling)
   comms inbox|agents      Show an inbox / list all inboxes
+  android apps|open|running   (phone) Android's apps: list, open as a window or full screen, what runs
+  android notifications|notify|screenshot   (phone) The phone's notifications, post one, its screen
 
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
@@ -3068,6 +3070,11 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/ai/comms/comms.sh"
         cmd_comms "$@"
+        ;;
+    android)
+        shift
+        source "$POWOS_LIB/android.sh"
+        cmd_android "$@"
         ;;
     version|--version|-v)
         cmd_version

@@ -103,7 +103,7 @@ class Runtime(
     val themes = ThemeStore(context, proot, style, isLinux = { linux }, onConfigChanged = ::syncGuest)
     private val audio = AudioBridge(proot)
     private val openBridge = OpenBridge(context, proot, onOpenFiles = ::openFiles)
-    val agents = AgentStore(proot, onChanged = ::syncGuest)
+    val agents = AgentStore(proot, onChanged = ::syncGuest, powosSession = { powosSession })
     val pacman = Pacman(context, proot)
     val widgets = WidgetEngine(context, proot, this)
     val updates = SystemUpdates(proot, pacman, agents)

@@ -1,0 +1,146 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] kicker: an A-Z bar on the Application Dashboard
+
+A phone's app drawer has one: at the right edge, the letters # and A-Z. Tap one, or slide along the bar, and All
+Applications (selected first if another category was showing) scrolls smoothly to that letter's section - its own,
+else the next one. The current letter is highlighted while the finger is on the bar.
+---
+--- a/applets/kicker/DashboardRepresentation.qml
++++ b/applets/kicker/DashboardRepresentation.qml
+@@ -74,6 +74,36 @@
+         }
+     }
+ 
++    // PowOS: All Applications at [letter]'s section - its own, else the next one, else the last ("#": the first).
++    // From any category: All Applications is selected first.
++    function scrollToLetter(letter: string) {
++        let allIndex = -1;
++        for (let i = 0; i < rootModel.count; ++i) {
++            const model = rootModel.modelForRow(i);
++            if (model && model.description === "KICKER_ALL_MODEL") {
++                allIndex = i;
++                break;
++            }
++        }
++        if (allIndex < 0) {
++            return;
++        }
++        if (!filterList.allApps) {
++            filterList.currentIndex = allIndex;
++            filterList.applyFilter();
++        }
++        const sections = rootModel.modelForRow(allIndex);
++        let target = sections.count - 1;
++        for (let j = 0; j < sections.count; ++j) {
++            const title = sections.modelForRow(j).description;
++            if (letter === "#" || title.localeCompare(letter, undefined, { sensitivity: "base" }) >= 0) {
++                target = j;
++                break;
++            }
++        }
++        allAppsGrid.scrollToSection(target);
++    }
++
+     function reset() {
+         searchField.clear();
+         searchField.forceActiveFocus(Qt.OtherFocusReason)
+@@ -374,6 +404,64 @@
+                     launchMatchTimer.stop()
+                     Qt.callLater(launchMatchTimer.triggered) // callLater to give bindings time to update
+                 }
++            }
++        }
++
++        // PowOS: an A-Z bar at the right edge, as a phone's app drawer has: tap a letter, or slide along the bar, and
++        // All Applications scrolls to that letter's apps.
++        Item {
++            id: letterBar
++
++            readonly property var letters: ["#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O",
++                                            "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
++            property string current: ""
++
++            anchors {
++                right: parent.right
++                rightMargin: Kirigami.Units.smallSpacing
++                top: middleRow.top
++                bottom: middleRow.bottom
++            }
++            width: Kirigami.Units.gridUnit * 2
++            z: 1
++            visible: !root.searching
++
++            function pick(y: real) {
++                const i = Math.max(0, Math.min(letters.length - 1, Math.floor(y / (height / letters.length))));
++                if (letters[i] !== current) {
++                    current = letters[i];
++                    root.scrollToLetter(current);
++                }
++            }
++
++            Column {
++                anchors.fill: parent
++
++                Repeater {
++                    model: letterBar.letters
++
++                    delegate: PlasmaComponents.Label {
++                        required property string modelData
++
++                        width: letterBar.width
++                        height: letterBar.height / letterBar.letters.length
++                        horizontalAlignment: Text.AlignHCenter
++                        verticalAlignment: Text.AlignVCenter
++                        text: modelData
++                        font.bold: letterBar.current === modelData
++                        color: letterBar.current === modelData ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
++                        opacity: letterBar.current === "" || letterBar.current === modelData ? 1.0 : 0.6
++                    }
++                }
++            }
++
++            MouseArea {
++                anchors.fill: parent
++                preventStealing: true
++                onPressed: mouse => letterBar.pick(mouse.y)
++                onPositionChanged: mouse => letterBar.pick(mouse.y)
++                onReleased: letterBar.current = ""
++                onCanceled: letterBar.current = ""
+             }
+         }
+ 
+--- a/applets/kicker/ItemMultiGridView.qml
++++ b/applets/kicker/ItemMultiGridView.qml
+@@ -37,6 +37,17 @@
+     property alias flickableItem: flickable
+     property ItemGridView firstGrid
+ 
++    // PowOS: scroll smoothly to section [index] (the Application Dashboard's A-Z bar).
++    function scrollToSection(index) {
++        itemColumn.forceLayout() // positions right after a model change (the switch to All Applications)
++        const section = repeater.itemAt(index)
++        if (!section) {
++            return
++        }
++        scrollAnimation.to = Math.max(0, Math.min(section.y, flickable.contentHeight - flickable.height))
++        scrollAnimation.restart()
++    }
++
+     function subGridAt(index) {
+         let subgrid = repeater.itemAt(index)
+         if (subgrid) {
+@@ -98,6 +109,14 @@
+ 
+         flickableDirection: Flickable.VerticalFlick
+         contentHeight: itemColumn.implicitHeight
++
++        NumberAnimation {
++            id: scrollAnimation
++            target: flickable
++            property: "contentY"
++            duration: Kirigami.Units.longDuration
++            easing.type: Easing.OutCubic
++        }
+ 
+         Column {
+             id: itemColumn

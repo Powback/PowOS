@@ -178,10 +178,33 @@ def _idle_hint():
     )
 
 
+def _phone_notify(message):
+    """On a phone running PowOS: the notification on Android too (`powos android notify`), where the user is -
+    the PowOS desktop may not be on screen. Best-effort, never fatal."""
+    platform = os.environ.get("POWOS_PLATFORM", "")
+    if not platform:
+        try:
+            with open("/etc/powos/platform") as f:
+                platform = f.read().strip()
+        except OSError:
+            return
+    if platform != "phone" or not shutil.which("powos"):
+        return
+    try:
+        subprocess.run(
+            ["powos", "android", "notify", f"PowOS AI: {AGENT_ID or 'agent'}", message],
+            check=False, timeout=10,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+
 def _desktop_notify(message, priority):
     """Best-effort desktop toast for notify_user. Never fatal."""
     urgency = {"low": "low", "normal": "normal", "high": "critical",
                "urgent": "critical"}.get(priority, "normal")
+    _phone_notify(message)
     if not shutil.which("notify-send"):
         return
     try:

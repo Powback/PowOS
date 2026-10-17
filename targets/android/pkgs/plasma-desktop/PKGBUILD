@@ -9,7 +9,7 @@
 pkgname=plasma-desktop
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=1.1
+pkgrel=1.2
 pkgdesc='KDE Plasma Desktop'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -100,13 +100,15 @@ makedepends=(extra-cmake-modules
              xorg-server-devel)
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
-        0001-kicker-dashboard-categories-respond-to-a-tap.patch)
+        0001-kicker-dashboard-categories-respond-to-a-tap.patch
+        0002-kicker-an-A-Z-bar-on-the-Application-Dashboard.patch)
 sha256sums=('079fcf6b87d7bf65e3f2a4670d605fac9469344c279a285a98ad549332d7b53e'
-            SKIP)
+            SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver
   patch -p1 -N < "$srcdir/0001-kicker-dashboard-categories-respond-to-a-tap.patch"
+  patch -p1 -N < "$srcdir/0002-kicker-an-A-Z-bar-on-the-Application-Dashboard.patch"
 }
 
 build() {

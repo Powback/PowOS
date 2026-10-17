@@ -30,6 +30,11 @@ PowOS app (app uid)                    display daemon (app uid)            KWin 
     from Recents gives it back to the desktop. A window already maximized keeps KWin's restore, and an app
     maximizing itself doesn't come this way. Minimize and close stay KWin's. Activating an exported window the
     desktop way (the PowOS taskbar) brings its task to the front instead of switching to its desktop.
+    An application going **full screen** by itself (a game, Steam Big Picture, a video) gets its own task the same
+    way, immersive (`open ... fullscreen`: system bars only on a swipe); leaving full screen, Back or closing the
+    task gives it back to the desktop as a normal window. An **Android app's own window** (powos-android-app,
+    app id `android-<package>`) maximized or full screen is handed back to Android instead: the window closes, which
+    returns the app to the phone's screen, and the PowOS app brings it to the front there (`android <package>`).
   - `AnlandWindowTask`: one per exported window. Its own producer connection (the same handshake and reconnect as
     the desktop output), the task's dmabufs imported as framebuffers. On each buffer the consumer offers, it
     renders the window and its popups (`ItemRenderer::renderItem` on their `WindowItem`s, viewport = the client
@@ -49,7 +54,8 @@ PowOS app (app uid)                    display daemon (app uid)            KWin 
   size and activates it. A task only sent to the background keeps its window (not rendering meanwhile).
 
 Control messages are one line of UTF-8 each, fields separated by tabs: `open <id> <app id> <caption>`,
-`title <id> <caption>`, `close <id>` (KWin -> app); `closed <id>`, `focus <id>` (app -> KWin).
+`title <id> <caption>`, `close <id>`, `android <package>` (KWin -> app); `closed <id>`, `focus <id>` (app -> KWin).
+`open` may end in `fullscreen`.
 
 ## Then
 

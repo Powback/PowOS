@@ -25,6 +25,14 @@ APP_DOMAIN=$(ps -AZ | awk '$NF == "com.powos.app" {split($1, c, ":"); print c[3]
   "allow $APP_DOMAIN tmpfs file { read write map getattr }" && echo "sepolicy: $APP_DOMAIN may use PowOS's Wayland buffers"
 m mkdir -p "$R/run/powos-app"
 m grep -q " $R/run/powos-app " /proc/mounts || m mount --bind "$RUN" "$R/run/powos-app"
+# The launcher's widgets and styles, at the place its agents work on them (~/.config/omalauncher, as in the no-root
+# guest): PowOS AI - the launcher's agent in a PowOS session - and the PowOS shell edit the very files the launcher
+# draws. The app's files are the run dir's parent; powos owns them (its uid is the app's).
+for d in widgets style; do
+  m mkdir -p "$R/home/powos/.config/omalauncher/$d" "${RUN%/run}/$d"
+  m grep -q " $R/home/powos/.config/omalauncher/$d " /proc/mounts ||
+    m mount --bind "${RUN%/run}/$d" "$R/home/powos/.config/omalauncher/$d"
+done
 
 # The display socket as PowOS sees it.
 sock=/run/powos-app/${SOCK#$RUN/}

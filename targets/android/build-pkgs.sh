@@ -54,6 +54,11 @@ for p in "${pkgs[@]}"; do
       # HACK: pacman 7 download sandbox (Landlock) is not permitted in Docker.
       grep -q "^DisableSandbox" /etc/pacman.conf || sed -i "/^\[options\]/a DisableSandbox" /etc/pacman.conf
       pacman-key --init >/dev/null 2>&1; pacman-key --populate archlinuxarm >/dev/null 2>&1
+      # A build container is no booted system: the hooks that reload D-Bus and refresh PackageKit after an install
+      # have neither and failed ("error: command failed to execute correctly"). Masked the way pacman documents it - a
+      # same-named hook in /etc/pacman.d/hooks that is /dev/null.
+      mkdir -p /etc/pacman.d/hooks
+      for h in dbus-reload 90-packagekit-refresh; do ln -sf /dev/null "/etc/pacman.d/hooks/$h.hook"; done
       # On the rootfs: no upgrade - its packages are what this one is built against (see BUILD_ON_ROOTFS).
       if [ "$BASE" = rootfs ]; then pacman -Sy --noconfirm --needed base-devel git >/dev/null
       else pacman -Syu --noconfirm --needed base-devel git >/dev/null; fi

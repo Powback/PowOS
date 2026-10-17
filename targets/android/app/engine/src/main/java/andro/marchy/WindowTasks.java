@@ -20,8 +20,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * PowOS: the app's end of the window control channel - PowOS windows KWin shows as their own Android tasks
  * (docs/powos-window-tasks.md). A connection to the display daemon in the control role ("app"); the daemon relays
- * one-line messages to and from KWin: {@code open <id> <app id> <caption>}, {@code title <id> <caption>},
- * {@code close <id>} from KWin; {@code closed <id>}, {@code focus <id>} to it (tab-separated).
+ * one-line messages to and from KWin: {@code open <id> <app id> <caption> [fullscreen]}, {@code title <id> <caption>},
+ * {@code close <id>}, {@code android <package>} from KWin; {@code closed <id>}, {@code focus <id>} to it
+ * (tab-separated).
  *
  * Runs for the session's life (SessionService), reconnecting while the daemon or KWin restart.
  */
@@ -91,6 +92,10 @@ public final class WindowTasks {
 
     private static void handle(Context context, String line) {
         String[] f = line.split("\t", -1);
+        if (f[0].equals("android") && f.length > 1) {
+            showAndroidApp(context, f[1]);
+            return;
+        }
         int id;
         try {
             id = Integer.parseInt(f.length > 1 ? f[1] : "");
@@ -105,6 +110,8 @@ public final class WindowTasks {
                         .setData(Uri.parse("powos-window://" + id))
                         .putExtra(PowosWindowActivity.EXTRA_APP_ID, f.length > 2 ? f[2] : "")
                         .putExtra(PowosWindowActivity.EXTRA_TITLE, f.length > 3 ? f[3] : "")
+                        // The application went full screen (a game, Steam Big Picture): an immersive task.
+                        .putExtra(PowosWindowActivity.EXTRA_FULLSCREEN, f.length > 4 && f[4].equals("fullscreen"))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
                 context.startActivity(i);
                 break;
@@ -123,6 +130,26 @@ public final class WindowTasks {
             }
             default:
                 Log.w(TAG, "unknown control message: " + line);
+        }
+    }
+
+    /**
+     * An Android app the user maximized in its PowOS window (powos-android-app): KWin closed that window, which handed
+     * the app back to the phone's screen; bring it to the front there - the app itself, full screen.
+     */
+    private static void showAndroidApp(Context context, String pkg) {
+        Intent launch = context.getPackageManager().getLaunchIntentForPackage(pkg);
+        if (launch == null) {
+            Log.w(TAG, "no launcher activity for " + pkg);
+            return;
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic()
+                .setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY);
+        try {
+            context.startActivity(launch, options.toBundle());
+        } catch (RuntimeException e) {
+            Log.w(TAG, "could not bring " + pkg + " to the front: " + e.getMessage());
         }
     }
 

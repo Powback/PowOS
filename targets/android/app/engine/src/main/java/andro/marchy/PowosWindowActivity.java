@@ -26,6 +26,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     private static final String TAG = "PowosWindow";
     static final String EXTRA_TITLE = "title";
     static final String EXTRA_APP_ID = "app_id";
+    static final String EXTRA_FULLSCREEN = "fullscreen";
 
     static {
         System.loadLibrary("andromarchy_consumer");
@@ -56,6 +57,8 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         });
         setContentView(view);
         view.requestFocus();
+        if (getIntent().getBooleanExtra(EXTRA_FULLSCREEN, false))
+            immersive();
         setTitleText(getIntent().getStringExtra(EXTRA_TITLE));
     }
 
@@ -64,6 +67,18 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             return getIntent().getData() != null ? Integer.parseInt(getIntent().getData().getHost()) : 0;
         } catch (NumberFormatException e) {
             return 0;
+        }
+    }
+
+    /** A full-screen application (a game, Steam Big Picture): the whole screen, system bars only on a swipe. */
+    private void immersive() {
+        getWindow().getAttributes().layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        getWindow().setDecorFitsSystemWindows(false);
+        android.view.WindowInsetsController c = getWindow().getInsetsController();
+        if (c != null) {
+            c.hide(android.view.WindowInsets.Type.systemBars());
+            c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         }
     }
 
