@@ -225,6 +225,32 @@ def watch():
     subprocess.run(kwin + ["org.kde.kwin.Scripting.loadScript", script, "powos-android-active"], capture_output=True)
     subprocess.run(kwin + ["org.kde.kwin.Scripting.start"], capture_output=True)
 
+    # Split View dropped over PowOS (the PowOS app writes split-pick, see MainActivity.handleSplitPick): the second
+    # app is picked from the app grid, as from OnePlus's own home - open it. Picking an Android app there starts it on
+    # the phone's screen while split-pick is fresh (powos-android-app), filling the split's other half.
+    from PySide6.QtCore import QFileSystemWatcher
+    split_pick = os.path.join(RUN, "split-pick")
+    seen = [""]
+
+    def split_picked(*_):
+        # Once per request: the file holds its time (seconds). A write comes as several directory events (truncate,
+        # write) - opening per event toggled the grid open and shut again (activateLauncherMenu toggles).
+        try:
+            with open(split_pick) as f:
+                stamp = f.read().strip()
+            fresh = time.time() - int(stamp) <= 10
+        except (OSError, ValueError):
+            return  # gone, or caught mid-write
+        if not fresh or stamp == seen[0]:
+            return
+        seen[0] = stamp
+        print("split-pick: opening the app grid", file=sys.stderr, flush=True)
+        subprocess.Popen(["qdbus6", "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.activateLauncherMenu"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    watcher = QFileSystemWatcher([RUN])
+    watcher.directoryChanged.connect(split_picked)
+
     timer = QTimer()
     timer.timeout.connect(refresh)
     timer.start(2000)

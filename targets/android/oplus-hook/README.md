@@ -33,8 +33,11 @@ floating window over PowOS's home (no RecentsActivity left behind), and Split Vi
    splits / floats Chrome. When the window reaches a target OnePlus moves the other recents cards away by winding
    the recents view's enter animation back to 0 - off screen over its home, but full-screen-size (still visible) in
    RecentsActivity's grid: the switcher now fades out while a target is selected, back in if the finger leaves it.
-   Known gap: after Split View, "Open another app to split the screen" shows the home app
-   (PowOS) to pick from, not the switcher - FallbackSwipeHandler starts the home intent on that drop.
+   Picking the second app: OnePlus shows its home for that (tap an icon, it fills the other half);
+   FallbackSwipeHandler starts the third-party home instead. The hook tags that home intent (powos.split_pick); as the
+   PowOS desktop home the app writes run/split-pick, powos-android-tasks opens the app grid, and an Android app picked
+   there starts on the phone's screen (powos-android-app) so it fills the split. As the launcher home (the cover) the
+   launcher itself is the picker. Verified 2026-10-17 on the cover: Chrome on Split View, Gmail tapped, split.
 
 4. **Revealing the taskbar in apps** (short swipe up). It stayed stashed for three reasons, all OnePlus assuming its
    own home: `FallbackActivityInterface` doesn't override `getTaskbarActivityContext()` (base returns null, so the

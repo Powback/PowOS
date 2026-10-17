@@ -167,6 +167,7 @@ public class Hook implements IXposedHookLoadPackage {
     private static final Map<Activity, Object> panels = new WeakHashMap<>();
     private static final Map<Object, Float> downX = new WeakHashMap<>();
     private static final Map<Object, Integer> fingerOffset = new WeakHashMap<>();
+    private static volatile boolean splitPick; // the home intent being started is for picking split's second app
     private static volatile Integer dragOffset; // the finger's sideways travel during a gesture over a third-party home
     private static final int SCROLL_SIGN = 1; // the window's x offset: the same sign (checked on the Open)
     private static final int SIGN = 1; // the panel's offset: finger left = negative
@@ -267,6 +268,35 @@ public class Hook implements IXposedHookLoadPackage {
                     } catch (Throwable t) {
                         log("trigger recents", t);
                     }
+                }
+            });
+            // Split View dropped: OnePlus then shows its home to pick the second app (tap an icon, it fills the other
+            // half). FallbackSwipeHandler starts the third-party home (PowOS) for that; the home intent says why
+            // (powos.split_pick), so PowOS opens its app grid instead of just showing the desktop. 3 = split
+            // (OnePuttUtils options: 1 floating window, 3 split, 4 capsule).
+            XposedBridge.hookAllMethods(XposedHelpers.findClass("com.android.quickstep.FallbackSwipeHandler", cl), "createHomeAnimationFactory", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    try {
+                        splitPick = (Integer) XposedHelpers.callMethod(param.thisObject, "getSelectedOptionsType") == 3;
+                    } catch (Throwable t) {
+                        log("split pick", t);
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    splitPick = false;
+                }
+            });
+            XposedBridge.hookAllMethods(XposedHelpers.findClass("android.app.ContextImpl", cl), "startActivity", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!splitPick || param.args.length == 0 || !(param.args[0] instanceof android.content.Intent))
+                        return;
+                    android.content.Intent i = (android.content.Intent) param.args[0];
+                    if (i.hasCategory(android.content.Intent.CATEGORY_HOME))
+                        i.putExtra("powos.split_pick", true);
                 }
             });
             // ...and on every frame OnePlus sets it again from the recents view's scroll (0 here) - through a setter ART

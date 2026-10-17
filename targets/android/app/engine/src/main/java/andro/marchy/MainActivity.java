@@ -376,9 +376,39 @@ public class MainActivity extends Activity
             stopNative();
     }
 
+    /**
+     * Split View dropped over this home (OnePlus's launcher hook, oplus-hook: the home intent carries
+     * powos.split_pick): the second app is picked from PowOS's app grid. The run dir's split-pick (a timestamp) asks
+     * PowOS to open it (powos-android-tasks), and makes the Android app picked there start on the phone's screen, where
+     * it fills the split's other half, instead of in a PowOS window (powos-android-app).
+     */
+    private void handleSplitPick(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra("powos.split_pick", false))
+            return;
+        intent.removeExtra("powos.split_pick"); // once (the same intent comes back on a recreate)
+        // Only as the desktop home. As the launcher home (the cover screen) the launcher itself is the picker: an app
+        // tapped there starts normally and fills the split.
+        android.content.ComponentName c = intent.getComponent();
+        if (c == null || !c.getClassName().endsWith(".HomeDesktop"))
+            return;
+        try {
+            java.io.File f = new java.io.File(SessionService.runDir(this), "split-pick");
+            java.nio.file.Files.write(f.toPath(), String.valueOf(System.currentTimeMillis() / 1000).getBytes());
+        } catch (Exception e) {
+            android.util.Log.w("PowOS", "split-pick: " + e);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleSplitPick(intent);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        handleSplitPick(getIntent());
         Prefs.init(this); // settings defaults + move from the former file name
         // PowOS: the phone's files in PowOS (Dolphin, file pickers): shared storage. targetSdk 28 = full access
         // with the classic storage permission; /storage is passed through to Linux (SessionService.archEnv).

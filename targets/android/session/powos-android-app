@@ -17,10 +17,22 @@ title=${2:-$1}
 [ -n "$pkg" ] || { echo "usage: powos-android-app [--task <id>] <package> [title]" >&2; exit 2; }
 dev=127.0.0.1:5555
 
-# One window per app: if it has one, bring that to the front instead of opening a second display (by the window's
-# process: the taskbar stand-in of powos-android-tasks has the same app_id).
 W=${XDG_RUNTIME_DIR:-/tmp}/android-windows
 mkdir -p "$W"
+
+# Picking the second app of a split (Split View dropped over PowOS: the PowOS app wrote split-pick, a timestamp):
+# the app starts on the phone's own screen, where Android puts it in the split's other half - not in a window here.
+# An app that has a window leaves it first (closing it moves the app back to the phone's screen).
+pick=${XDG_RUNTIME_DIR:-/run/powos-app}/split-pick
+if [ -z "$task" ] && [ -f "$pick" ] && [ $(( $(date +%s) - $(cat "$pick" 2>/dev/null || echo 0) )) -lt 60 ] &&
+  [ "$(adb -s $dev get-state 2>/dev/null)" = device ]; then
+  rm -f "$pick"
+  pid=$(cat "$W/$pkg.pid" 2>/dev/null) && kill "$pid" 2>/dev/null && sleep 1
+  exec adb -s $dev shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null
+fi
+
+# One window per app: if it has one, bring that to the front instead of opening a second display (by the window's
+# process: the taskbar stand-in of powos-android-tasks has the same app_id).
 if pid=$(cat "$W/$pkg.pid" 2>/dev/null) && kill -0 "$pid" 2>/dev/null; then
   js=$W/activate-$$.js
   printf 'for (const w of workspace.windowList()) if (w.pid == %s) { w.minimized = false; workspace.activeWindow = w; }\n' \
