@@ -80,6 +80,8 @@ bg dbus as_user dbus-daemon --session --nofork --nopidfile --address="unix:path=
 bg system-dbus dbus-daemon --config-file=/opt/lotfix/system-bus.conf --nofork --nopidfile --address="unix:path=$R/system_bus"
 wait_sock "$R/system_bus"
 for s in android-nm android-upower android-system-services; do bg "$s" "$s"; done
+# The app's on-screen controls as a real gamepad (uinput is root-only on Android; see the file).
+bg powos-padd powos-padd
 wait_sock "$R/bus"
 bg android-session-services as_user android-session-services
 as_user sh -c 'K=$HOME/.local/share/keyrings; mkdir -p "$K" && chmod 700 "$K"

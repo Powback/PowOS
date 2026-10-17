@@ -97,6 +97,8 @@ public class MainActivity extends Activity
     // shrinking it: the bar rides up with the keyboard but the surface keeps
     // its full size. See relayout() and buildExtraKeysBar().
     private static final String KEY_KEYBOARD_FLOATING = "keyboard_floating";
+    private static final String KEY_GAMEPAD_SHOWN = "gamepad_shown";
+    private GamepadOverlay mGamepadOverlay;
     private boolean mKeyboardFloating = true;
     // Persistent "tap to open Settings" notification, toggleable in Settings > General.
     private static final String KEY_NOTIFICATION_ENABLED = "settings_notification";
@@ -470,7 +472,15 @@ public class MainActivity extends Activity
                 }
             }
         });
+        // On-screen game controls (GamepadOverlay; virtual gamepad through powos-padd in PowOS). Over the surface,
+        // under the floating buttons; hidden until toggled.
+        mGamepadOverlay = new GamepadOverlay(this,
+            new java.io.File(SessionService.runDir(this), "powos-padd.sock").getPath());
+        root.addView(mGamepadOverlay, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        mGamepadOverlay.setShown(getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_GAMEPAD_SHOWN, false));
         addKeyboardButton(root);
+        addGamepadButton(root);
 
         // Positioning happens lazily the first time the keyboard is shown
         // (see toggleVirtualKeyboard). Positioning it here would spin forever:
@@ -1232,6 +1242,34 @@ public class MainActivity extends Activity
      * toggle as the extra-keys bar's ⌨ key and the notification action), for when no text field asked for it.
      * A drag moves it (anywhere on screen) out of the way of what's underneath.
      */
+    /** Round 🎮 toggle for the game controls, top-right (the keyboard button keeps the bottom). */
+    private void addGamepadButton(FrameLayout root) {
+        int size = Math.round(44 * mDensity);
+        int margin = Math.round(12 * mDensity);
+        TextView b = new TextView(this);
+        b.setText("🎮");
+        b.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 20);
+        b.setGravity(Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        bg.setColor(0x99202020);
+        bg.setStroke(Math.round(1 * mDensity), 0x55FFFFFF);
+        b.setBackground(bg);
+        b.setElevation(6 * mDensity);
+        b.setContentDescription("Game controls");
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        b.setAlpha(mGamepadOverlay.getVisibility() == View.VISIBLE ? 1f : 0.6f);
+        b.setOnClickListener(v -> {
+            boolean show = mGamepadOverlay.getVisibility() != View.VISIBLE;
+            mGamepadOverlay.setShown(show);
+            v.setAlpha(show ? 1f : 0.6f);
+            prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
+        });
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size, Gravity.TOP | Gravity.END);
+        lp.setMargins(0, margin * 4, margin, 0);
+        root.addView(b, lp);
+    }
+
     private void addKeyboardButton(FrameLayout root) {
         int size = Math.round(52 * mDensity);
         int margin = Math.round(20 * mDensity);

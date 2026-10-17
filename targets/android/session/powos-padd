@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""powos-padd: the PowOS app's on-screen controls as a real gamepad.
+
+The app's touch overlay (GamepadOverlay.java) sends the pad's whole state; this daemon owns a virtual Xbox 360 pad
+(uinput) and applies it, so Steam Input, SDL and Wine see an ordinary controller. Runs as root in the rooted session
+(/dev/uinput is root/uhid only) and hands the event node to the desktop user.
+
+Wire format (little endian, 20 bytes, latest state wins; the app sends on change):
+  magic b"PAD1" | u32 buttons | i16 lx, ly, rx, ry | u8 lt, rt | 2 pad bytes
+Buttons, by bit: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 Back, 7 Start, 8 Guide, 9 LS, 10 RS, 11 up, 12 down, 13 left,
+14 right. Sticks: -32768..32767, y down positive (evdev). One client at a time; on disconnect everything is
+released, so a lost connection never leaves a button held.
+"""
+import fcntl, grp, os, pwd, select, socket, struct, sys, time
+
+SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app"), "powos-padd.sock")
+USER = "powos"
+PACKET = struct.Struct("<4sIhhhhBBxx")
+
+EV_SYN, EV_KEY, EV_ABS = 0, 1, 3
+ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_HAT0X, ABS_HAT0Y = 0, 1, 2, 3, 4, 5, 0x10, 0x11
+# Bit -> key code, as the kernel's xpad driver reports an Xbox 360 pad (SDL and Steam know its layout by its id).
+BUTTONS = [0x130, 0x131, 0x133, 0x134, 0x136, 0x137, 0x13a, 0x13b, 0x13c, 0x13d, 0x13e]
+DPAD_BITS = (11, 12, 13, 14)
+
+# ioctls (asm-generic layout: arm64 and x86_64)
+UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT = 0x40045564, 0x40045565, 0x40045567
+UI_DEV_CREATE, UI_DEV_DESTROY = 0x5501, 0x5502
+UI_GET_SYSNAME = lambda n: 0x80000000 | (n << 16) | (ord("U") << 8) | 44
+EVENT = struct.Struct("<qqHHi")  # struct input_event on 64-bit
+
+
+def log(*a):
+    print("powos-padd:", *a, file=sys.stderr, flush=True)
+
+
+class Pad:
+    def __init__(self):
+        self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+        for ev in (EV_KEY, EV_ABS):
+            fcntl.ioctl(self.fd, UI_SET_EVBIT, ev)
+        for k in BUTTONS:
+            fcntl.ioctl(self.fd, UI_SET_KEYBIT, k)
+        ranges = {ABS_X: (-32768, 32767, 16, 128), ABS_Y: (-32768, 32767, 16, 128),
+                  ABS_RX: (-32768, 32767, 16, 128), ABS_RY: (-32768, 32767, 16, 128),
+                  ABS_Z: (0, 255, 0, 0), ABS_RZ: (0, 255, 0, 0),
+                  ABS_HAT0X: (-1, 1, 0, 0), ABS_HAT0Y: (-1, 1, 0, 0)}
+        absmax, absmin, absfuzz, absflat = ([0] * 64 for _ in range(4))
+        for a, (lo, hi, fuzz, flat) in ranges.items():
+            fcntl.ioctl(self.fd, UI_SET_ABSBIT, a)
+            absmin[a], absmax[a], absfuzz[a], absflat[a] = lo, hi, fuzz, flat
+        # struct uinput_user_dev: name[80], input_id (bustype, vendor, product, version), ff_effects_max, abs arrays
+        dev = struct.pack("<80sHHHHI64i64i64i64i", b"Microsoft X-Box 360 pad", 0x03, 0x045E, 0x028E, 0x0110, 0,
+                          *absmax, *absmin, *absfuzz, *absflat)
+        os.write(self.fd, dev)
+        fcntl.ioctl(self.fd, UI_DEV_CREATE)
+        self.state = None
+        self.give_nodes()
+
+    def give_nodes(self):
+        # Android's ueventd makes the nodes root:input(Android); the desktop user (Steam, SDL) must be able to read
+        # them. There is no udev to apply rules.
+        buf = bytearray(64)
+        fcntl.ioctl(self.fd, UI_GET_SYSNAME(len(buf)), buf)
+        name = buf.split(b"\0", 1)[0].decode()
+        sysdir = f"/sys/devices/virtual/input/{name}"
+        uid, gid = pwd.getpwnam(USER).pw_uid, grp.getgrnam("input").gr_gid
+        for _ in range(50):
+            nodes = [n for n in os.listdir(sysdir) if n.startswith(("event", "js"))] if os.path.isdir(sysdir) else []
+            if nodes and all(os.path.exists(f"/dev/input/{n}") for n in nodes):
+                break
+            time.sleep(0.05)
+        for n in nodes:
+            p = f"/dev/input/{n}"
+            os.chown(p, uid, gid)
+            os.chmod(p, 0o660)
+        log("pad", name, "nodes", ", ".join(nodes))
+
+    def emit(self, events):
+        now = time.time()
+        sec, usec = int(now), int((now % 1) * 1e6)
+        data = b"".join(EVENT.pack(sec, usec, t, c, v) for t, c, v in events)
+        os.write(self.fd, data + EVENT.pack(sec, usec, EV_SYN, 0, 0))
+
+    def apply(self, buttons, lx, ly, rx, ry, lt, rt):
+        new = {}
+        for bit, code in enumerate(BUTTONS):
+            new[(EV_KEY, code)] = (buttons >> bit) & 1
+        up, down, left, right = ((buttons >> b) & 1 for b in DPAD_BITS)
+        new[(EV_ABS, ABS_HAT0X)] = right - left
+        new[(EV_ABS, ABS_HAT0Y)] = down - up
+        new.update({(EV_ABS, ABS_X): lx, (EV_ABS, ABS_Y): ly, (EV_ABS, ABS_RX): rx, (EV_ABS, ABS_RY): ry,
+                    (EV_ABS, ABS_Z): lt, (EV_ABS, ABS_RZ): rt})
+        old = self.state or {}
+        changed = [(t, c, v) for (t, c), v in new.items() if old.get((t, c)) != v]
+        if changed:
+            self.emit(changed)
+        self.state = new
+
+    def release(self):
+        self.apply(0, 0, 0, 0, 0, 0, 0)
+
+
+def main():
+    pad = Pad()
+    try:
+        os.unlink(SOCK)
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(SOCK)
+    pw = pwd.getpwnam(USER)
+    os.chown(SOCK, pw.pw_uid, pw.pw_gid)
+    os.chmod(SOCK, 0o600)
+    srv.listen(2)
+    log("listening on", SOCK)
+    client, buf = None, b""
+    while True:
+        r, _, _ = select.select([srv] + ([client] if client else []), [], [])
+        if srv in r:
+            new, _ = srv.accept()
+            if client:  # the newest overlay wins (an app restart reconnects before the old socket times out)
+                client.close()
+                pad.release()
+            client, buf = new, b""
+            log("overlay connected")
+            continue
+        data = client.recv(4096)
+        if not data:
+            client.close()
+            client = None
+            pad.release()
+            log("overlay disconnected, released all")
+            continue
+        buf += data
+        n = len(buf) // PACKET.size
+        if n:
+            # Only the newest complete packet matters (latest state wins).
+            magic, *state = PACKET.unpack_from(buf, (n - 1) * PACKET.size)
+            buf = buf[n * PACKET.size:]
+            if magic != b"PAD1":
+                log("bad packet, dropping client")
+                client.close()
+                client = None
+                pad.release()
+                continue
+            pad.apply(*state)
+
+
+if __name__ == "__main__":
+    main()

@@ -134,6 +134,8 @@ install -Dm 755 "$P/session/first-session.sh" /opt/powos/first-session.sh
 pacman -S --noconfirm --needed scrcpy android-tools pyside6
 install -m 755 "$P/session/powos-android-app" /usr/local/bin/powos-android-app
 install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tasks
+# The app's touch controls as a gamepad (started by powos-rooted-session).
+install -m 755 "$P/session/powos-padd" /usr/bin/powos-padd
 install -Dm 644 "$P/session/powos-android-tasks.desktop" /etc/xdg/autostart/powos-android-tasks.desktop
 # The desktop over Android's wallpaper (the app's surface is translucent): a transparent wallpaper, made the desktop's
 # once per user by a Plasma update script.
