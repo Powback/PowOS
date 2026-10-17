@@ -23,16 +23,22 @@ PowOS app (app uid)                    display daemon (app uid)            KWin 
   carries the id; none = 0, the desktop - old clients unchanged), and relays control messages between the app and
   KWin (`CTRL_MSG_CONTROL_HELLO` / `CTRL_MSG_CONTROL`).
 - **KWin** (`pkgs/kwin` patch 0013, `backends/anland/anland_window_task.*`):
-  - `AnlandWindowTasks`: D-Bus `org.powos.WindowTasks.show(windowId)` on KWin's bus, and the control channel. The
-    window menu's "Open as Android task" (KWin script `powos-window-tasks`) calls it.
+  - `AnlandWindowTasks`: the control channel, D-Bus `org.powos.WindowTasks.show(windowId)` on KWin's bus, and the
+    window buttons: the user's **maximize** (title bar button or double tap, window menu, Meta+PgUp - all through
+    `Workspace::performWindowOperation`, whose platform hook is patch 0014) makes the window its own Android task
+    (full screen; split screen and floating windows are Android's then); maximize in the task, Back, or closing it
+    from Recents gives it back to the desktop. A window already maximized keeps KWin's restore, and an app
+    maximizing itself doesn't come this way. Minimize and close stay KWin's. Activating an exported window the
+    desktop way (the PowOS taskbar) brings its task to the front instead of switching to its desktop.
   - `AnlandWindowTask`: one per exported window. Its own producer connection (the same handshake and reconnect as
     the desktop output), the task's dmabufs imported as framebuffers. On each buffer the consumer offers, it
     renders the window and its popups (`ItemRenderer::renderItem` on their `WindowItem`s, viewport = the client
     area, at the window's scale) when something changed, else holds the buffer until something does (a keepalive
-    frame within the consumer's 5 s), and sends frame callbacks (`framePainted`). While the task shows it the
-    window is hidden on the desktop (`Window::setHidden`) and kept rendering (`refOffscreenRendering`, as
-    screencasts do: not suspended, frame callbacks keep coming); its size follows the task (`moveResize` to the
-    buffer size / scale).
+    frame within the consumer's 5 s), and sends frame callbacks (`framePainted`). While exported the window lives
+    on a virtual desktop of its own, "Android tasks" (made on first use, dropped when empty): the desktop neither
+    paints it nor sends it input, yet it stays shown, so it can have the focus (hidden or minimized windows can't).
+    While the task shows it, it renders offscreen (`refOffscreenRendering`, as screencasts do: not suspended, frame
+    callbacks keep coming); its size follows the task (`moveResize` to the buffer size / scale).
   - Input from the task: touch goes to the window or popup under the point (`SeatInterface::notifyTouchDown` on its
     surface - no hit test against the desktop); keys and text through KWin's normal path to the active window -
     the task's focus activates its window.

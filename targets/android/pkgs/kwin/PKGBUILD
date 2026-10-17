@@ -19,7 +19,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.11
+pkgrel=3.13
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -48,11 +48,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0010-backends-anland-Android-keyboard-follows-text-focus.patch
           0011-backends-anland-Wake-DPMS-when-the-consumer-reconnects.patch
           0012-backends-anland-keyboard-only-when-a-client-asks.patch
-          0013-backends-anland-windows-as-Android-tasks.patch)
+          0013-backends-anland-windows-as-Android-tasks.patch
+          0014-workspace-let-the-platform-take-window-operations-over.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

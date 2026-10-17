@@ -1,0 +1,53 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] workspace: let the platform take a user's window operation over
+
+Workspace::setWindowOperationHandler(): performWindowOperation() - which every user path takes: the title bar's
+buttons and double click, the window menu, the shortcuts - asks the handler first and stops if it handled the
+operation. Applications' own requests don't come this way. On a phone (backends/anland, patch 0013), maximize makes
+the window its own Android task.
+---
+--- a/src/useractions.cpp
++++ b/src/useractions.cpp
+@@ -1064,9 +1064,17 @@
+     }
+ }
+ 
++void Workspace::setWindowOperationHandler(std::function<bool(Window *, Options::WindowOperation)> handler)
++{
++    m_windowOperationHandler = std::move(handler);
++}
++
+ void Workspace::performWindowOperation(Window *window, Options::WindowOperation op)
+ {
+     if (!window) {
++        return;
++    }
++    if (m_windowOperationHandler && m_windowOperationHandler(window, op)) {
+         return;
+     }
+     if (op == Options::MoveOp || op == Options::UnrestrictedMoveOp) {
+--- a/src/workspace.h
++++ b/src/workspace.h
+@@ -447,6 +447,14 @@
+     void requestDpmsState(DpmsState state);
+     DpmsState dpmsState() const;
+ 
++    /**
++     * PowOS: the platform may take a user's window operation over - the title bar's buttons, the window menu, the
++     * shortcuts all come through performWindowOperation(). Returns true when it handled the operation. On a phone,
++     * maximize makes the window its own Android task (backends/anland). An application's own requests (maximize,
++     * minimize from the client) don't come this way.
++     */
++    void setWindowOperationHandler(std::function<bool(KWin::Window *, Options::WindowOperation)> handler);
++
+ public Q_SLOTS:
+     void performWindowOperation(KWin::Window *window, Options::WindowOperation op);
+     // Keybindings
+@@ -654,6 +662,7 @@
+     LogicalOutput *m_activeOutput = nullptr;
+     QList<LogicalOutput *> m_outputOrder;
+ 
++    std::function<bool(Window *, Options::WindowOperation)> m_windowOperationHandler;
+     Window *m_activeWindow;
+     Window *m_moveResizeWindow;
+ 

@@ -9,8 +9,10 @@ callbacks keep coming); its size follows the task. Touch from the task goes stra
 the finger; keys go through KWin's keyboard to the focused window, which the task's focus makes this one.
 
 The display daemon pairs a consumer and a producer per surface id (the HELLO's payload; none = the desktop) and
-relays control lines between KWin and the PowOS app: D-Bus org.powos.WindowTasks.show(windowId) (the window menu's
-"Open as Android task") sends "open", the app starts the task; its "closed" puts the window back on the desktop.
+relays control lines between KWin and the PowOS app: the user's maximize (title bar, menu, shortcut - patch 0014's
+hook) or D-Bus org.powos.WindowTasks.show(windowId) sends "open", the app starts the task; its "closed", or maximize
+again, puts the window back on the desktop. Activating an exported window the desktop way (the taskbar) brings its
+task to the front instead of switching to its desktop.
 The producer's handshake and fd pickup get non-blocking variants for that (connect_to_deamon_begin/_finish,
 request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with the desktop's layer.
 ---
@@ -257,7 +259,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
      bool initializeEgl();
 --- a/src/backends/anland/anland_window_task.cpp
 +++ b/src/backends/anland/anland_window_task.cpp
-@@ -0,0 +1,708 @@
+@@ -0,0 +1,771 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -780,6 +782,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    m_controlRetry.setInterval(1000);
 +    connect(&m_controlRetry, &QTimer::timeout, this, &AnlandWindowTasks::connectControl);
 +    connectControl();
++    connect(kwinApp(), &Application::workspaceCreated, this, &AnlandWindowTasks::integrate);
 +    QDBusConnection::sessionBus().registerObject(QStringLiteral("/org/powos/WindowTasks"), this,
 +                                                 QDBusConnection::ExportScriptableSlots);
 +}
@@ -886,22 +889,84 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    send_all(m_controlFd, msg.constData(), msg.size());
 +}
 +
++void AnlandWindowTasks::integrate()
++{
++    // The title bar's maximize button (and double tap, the window menu, Meta+PgUp): on a phone, a window fills the
++    // screen as its own Android task - split screen and floating windows are Android's then. The same in its task
++    // gives it back to the desktop. A window already maximized on the desktop keeps KWin's restore; an application
++    // maximizing itself doesn't come this way.
++    workspace()->setWindowOperationHandler([this](Window *window, Options::WindowOperation op) {
++        if (op != Options::MaximizeOp) {
++            return false;
++        }
++        if (AnlandWindowTask *task = taskFor(window)) {
++            send({QStringLiteral("close"), QString::number(task->id())});
++            remove(task);
++            return true;
++        }
++        if (window->maximizeMode() == MaximizeFull || !exportable(window)) {
++            return false;
++        }
++        return show(window);
++    });
++    // Something activated an exported window the desktop way (the PowOS taskbar, a notification): KWin switches to
++    // its desktop, focuses it, then reports it activated. Bring its task to the front, and stay on the desktop. A
++    // switch to that desktop on its own (a pager, a shortcut) just goes back.
++    connect(VirtualDesktopManager::self(), &VirtualDesktopManager::currentChanged, this,
++            [this](VirtualDesktop *previous, VirtualDesktop *current, LogicalOutput *output) {
++        if (!m_desktop || current != m_desktop || !previous) {
++            return;
++        }
++        m_returnDesktop = previous;
++        QMetaObject::invokeMethod(this, [this, output]() {
++            if (m_desktop && m_returnDesktop && VirtualDesktopManager::self()->currentDesktop(output) == m_desktop) {
++                VirtualDesktopManager::self()->setCurrent(m_returnDesktop, output);
++            }
++        }, Qt::QueuedConnection);
++    });
++    connect(workspace(), &Workspace::windowActivated, this, [this](Window *window) {
++        AnlandWindowTask *task = taskFor(window);
++        if (!task || !m_desktop || VirtualDesktopManager::self()->currentDesktop(window->output()) != m_desktop) {
++            return; // the task's own focus (requestFocus, no desktop switch), or not exported
++        }
++        send({QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()});
++    });
++}
++
++bool AnlandWindowTasks::exportable(Window *window) const
++{
++    return m_controlFd >= 0 && window && window->isClient() && !window->isDeleted() && window->surface()
++        && window->isNormalWindow() && !window->isPopupWindow();
++}
++
++AnlandWindowTask *AnlandWindowTasks::taskFor(Window *window) const
++{
++    for (AnlandWindowTask *task : m_tasks) {
++        if (window && task->window() == window) {
++            return task;
++        }
++    }
++    return nullptr;
++}
++
 +bool AnlandWindowTasks::show(const QString &windowId)
++{
++    return show(workspace()->findWindow(QUuid::fromString(windowId)));
++}
++
++bool AnlandWindowTasks::show(Window *window)
 +{
 +    if (m_controlFd < 0) {
 +        qCWarning(KWIN_ANLAND) << "no window tasks: the PowOS app isn't connected";
 +        return false;
 +    }
-+    Window *window = workspace()->findWindow(QUuid::fromString(windowId));
-+    if (!window || !window->isClient() || window->isDeleted() || !window->surface()) {
++    if (!exportable(window)) {
 +        return false;
 +    }
-+    for (AnlandWindowTask *task : std::as_const(m_tasks)) {
-+        if (task->window() == window) {
-+            // Already a task: to the front.
-+            send({QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()});
-+            return true;
-+        }
++    if (AnlandWindowTask *task = taskFor(window)) {
++        // Already a task: to the front.
++        send({QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()});
++        return true;
 +    }
 +    const uint32_t id = m_nextId++;
 +    auto *task = new AnlandWindowTask(this, window, id);
@@ -968,7 +1033,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +} // namespace KWin
 --- a/src/backends/anland/anland_window_task.h
 +++ b/src/backends/anland/anland_window_task.h
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,191 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -1134,7 +1199,14 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    /** Shows the window (its KWin internal id) as its own Android task, or brings its task to the front. */
 +    Q_SCRIPTABLE bool show(const QString &windowId);
 +
++public:
++    bool show(Window *window);
++
 +private:
++    /** Once the workspace is there: maximize (the user's - title bar, menu, shortcut) = the window's own task. */
++    void integrate();
++    bool exportable(Window *window) const;
++    AnlandWindowTask *taskFor(Window *window) const;
 +    void connectControl();
 +    void onControlReadable();
 +    void handleLine(const QString &line);
@@ -1149,6 +1221,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    QHash<uint32_t, AnlandWindowTask *> m_tasks;
 +    uint32_t m_nextId = 1;
 +    QPointer<VirtualDesktop> m_desktop;
++    QPointer<VirtualDesktop> m_returnDesktop; // where to go back to when something switched to the tasks desktop
 +};
 +
 +} // namespace KWin
