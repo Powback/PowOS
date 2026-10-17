@@ -60,7 +60,10 @@ ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # No -cef-disable-gpu here: the ARM64 client's web UI then loses its GPU process ("GPU process isn't usable. Goodbye",
 # exit_code=4, in a restart loop) and never shows a window.
 # Steam's web UI draws on the Adreno (the client sets MESA_LOADER_DRIVER_OVERRIDE=kgsl for steamwebhelper itself).
-# HACK: -no-cef-sandbox - inside Chromium's sandbox the web UI's GPU process died at start (exit_code=4,
-# GPU_DEAD_ON_ARRIVAL: 57 times, then "GPU process isn't usable. Goodbye" and no UI); without it 2 restarts in 90 s.
-# Real fix: find what the sandbox denies Mesa here (Android's kernel/seccomp).
-cd "$S/steamrtarm64" && exec ./steam -no-cef-sandbox "$@"
+# HACK: -cef-disable-gpu-sandbox - Chromium's GPU sandbox only lets the GPU process open DRM devices (/dev/dri/*); the
+# Adreno here is KGSL (/dev/kgsl-3d0), so in the sandbox Mesa found no GPU: the GPU process died at start
+# (GPU_DEAD_ON_ARRIVAL, "GPU process isn't usable. Goodbye", no UI) or, on newer clients, the web UI fell back to
+# software rendering. Only the GPU process goes unsandboxed; pages and the rest stay sandboxed (was -no-cef-sandbox:
+# none at all; checked 2026-10-17: GPU process up and steady, renderers sandboxed). Real fix: the KGSL device in
+# Chromium's GPU sandbox broker allowlist (CEF/Valve side).
+cd "$S/steamrtarm64" && exec ./steam -cef-disable-gpu-sandbox "$@"
