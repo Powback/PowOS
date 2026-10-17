@@ -1,0 +1,37 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: wake DPMS when the consumer reconnects
+
+PowerDevil's idle timeout (or any "turn off screen") puts the workspace into DPMS TurningOff and the
+kscreen effect fades the whole scene to transparent. On Android the panel's power belongs to Android,
+so this output never reports DpmsMode::Off and nothing ends the fade except input -- and on touch,
+DpmsInputEventFilter wants a double tap. The user reopens PowOS and sees only the Android wallpaper.
+
+A consumer reconnect is the app coming to the front, i.e. the screen is on and showing us: request
+DPMS On there.
+---
+--- a/src/backends/anland/anland_backend.cpp	2026-10-17 02:34:03
++++ b/src/backends/anland/anland_backend.cpp	2026-10-17 02:34:18
+@@ -27,6 +27,7 @@
+ #include "wayland/textinput_v2.h"
+ #include "wayland/textinput_v3.h"
+ #include "wayland_server.h"
++#include "workspace.h"
+ 
+ #include <QFutureWatcher>
+ #include <QScopeGuard>
+@@ -544,6 +545,15 @@
+     qCDebug(KWIN_ANLAND) << "reconnect: camera request result" << cameraRequestResult;
+     if (m_inFallback) {
+         return;
++    }
++    // PowOS: a consumer reconnect means the user just brought the app to the front -- the Android
++    // screen is on and showing us. A DPMS-off requested while they were away (PowerDevil's idle
++    // timeout, a "turn off screen" action) leaves the scene faded out by the kscreen effect, and
++    // nothing else ends it: this output can't switch Android's panel, so it never reports
++    // DpmsMode::Off, and DpmsInputEventFilter wants a double tap on touch. Turn it back on here.
++    if (workspace() && workspace()->dpmsState() != Workspace::DpmsState::On) {
++        qCInfo(KWIN_ANLAND) << "reconnect: waking from DPMS off";
++        workspace()->requestDpmsState(Workspace::DpmsState::On);
+     }
+     m_outputs[0]->resumeRendering();
+     qCDebug(KWIN_ANLAND) << "reconnect: render loop resumed";

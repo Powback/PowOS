@@ -114,6 +114,11 @@ printf '[General]\nsystemdBoot=false\n' > /etc/xdg/startkderc
 # Android's own lock screen guards the phone; KDE's idle lock on top asked for a password nobody set (the session
 # runs as root).
 printf '[Daemon]\nAutolock=false\nLockOnResume=false\n' > /etc/xdg/kscreenlockerrc
+# Android owns the panel's power and timeout. PowerDevil's idle "turn off screen" can't switch it; it only faded KWin's
+# scene to transparent, leaving the Android wallpaper where the desktop was (the default AC profile, i.e. on the charger).
+for p in AC Battery LowBattery; do
+  printf '[%s][Display]\nDimDisplayWhenIdle=false\nTurnOffDisplayWhenIdle=false\n\n' $p
+done > /etc/xdg/powerdevilrc
 # The app's user is root with home /root: seed it from /etc/skel as useradd would for a new user.
 cp -a /etc/skel/. /root/ 2>/dev/null || true
 # The PowOS widgets poll by spawning processes; podman (Containers widget, list + stats every 5 s) takes seconds of CPU
