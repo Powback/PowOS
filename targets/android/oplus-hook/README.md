@@ -19,16 +19,20 @@ Found by reading the decompiled launcher against AOSP Launcher3 (android16-relea
 doesn't check which app is home. All hooks are guarded: a launcher update that renames something only logs.
 Confidence: 1 high, 2 verified 2026-10-17 on the Open (cover screen): the panel attaches to RecentsActivity's drag
 layer, swipe-up-and-hold shows "Split View" / "Floating window", releasing on Floating window opens the app as a
-floating window over PowOS's home (no RecentsActivity left behind), and Split View enters OnePlus's split; 3 high.
+floating window over PowOS's home (no RecentsActivity left behind), and Split View enters OnePlus's split; 3 high;
+4 verified (below).
 
-**Known gap: revealing the transient taskbar in apps (checked 2026-10-17).** With a third-party home the taskbar is
-enabled and present (3. above) but a short swipe up in an app doesn't reveal it; it stays stashed. Tested on the phone
-with a uinput touchscreen (real finger timing). Findings for the next attempt: AbsSwipeUpHandler only reveals it when
-`activityInterface.getTaskbarActivityContext()` is non-null, and FallbackActivityInterface doesn't override it (base
-returns null); but returning `TaskbarUtils.getTaskbarActivityContext()` there (plus re-setting the handler's
-mTaskbarCanResponseTouch/thresholds) was not enough: OplusBaseTouchInteractionService (~l.1050) gives the gesture a
-TaskbarStashInputConsumer, not the TaskbarUnstashInputConsumer whose detector the handler needs (dumpsys shows
-TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH). Why: the gesture's consumer reaches that check already wrapped (dumpsys: TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH:TYPE_CURSOR_HOVER), so `delegate instanceof OtherActivityInputConsumer` fails and no unstash consumer is made - whichever app is home. The stash consumer's own reveal, a long press on the handle, is taken by Circle to Search (tried: it opens). Fixing it means re-routing every navigation gesture in OnePlus's TouchInteractionService; not done speculatively (a mistake breaks home/back/recents phone-wide).
+4. **Revealing the taskbar in apps** (short swipe up). It stayed stashed for three reasons, all OnePlus assuming its
+   own home: `FallbackActivityInterface` doesn't override `getTaskbarActivityContext()` (base returns null, so the
+   swipe handler never reveals); `OplusTaskbarStashController.TransitionCallback.canResponseTransition()` requires
+   OnePlus's `Launcher` activity with its transitions ended (never created with another home: always false); and
+   `OplusTaskbarModelCallbacks.finishBindingItems()` defers putting icons into the taskbar until that activity exists
+   (so it had 0 icons, which also fails the check). Hooks: the fallback returns the global taskbar context; no Launcher
+   activity counts as "no launcher transition running" (OnePlus's other conditions kept); and the bound items are
+   committed right away (`commitItemsToUI` doesn't use the Launcher). Verified 2026-10-17 on the Open (inner screen,
+   uinput finger): swipe up a little in Settings and release, the taskbar (app drawer, recents, dock apps) slides up
+   and the app stays (endTarget LAST_TASK). Earlier wrong lead, for the record: the consumer
+   `TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH:TYPE_CURSOR_HOVER` is fine, that's the unstash consumer wrapping it.
 
 Build: `targets/android/build-oplus-hook.sh` (android-app-dev). Install: Zygisk on in Magisk, the Vector (LSPosed
 fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scope `com.android.launcher` and restart the

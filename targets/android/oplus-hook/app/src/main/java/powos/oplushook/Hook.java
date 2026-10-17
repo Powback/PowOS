@@ -32,6 +32,7 @@ public class Hook implements IXposedHookLoadPackage {
         swipeToHome(lp.classLoader);
         splitAndFloat(lp.classLoader);
         keepTaskbar(lp.classLoader);
+        revealTaskbar(lp.classLoader);
     }
 
     /**
@@ -66,6 +67,72 @@ public class Hook implements IXposedHookLoadPackage {
                 XposedBridge.hookAllMethods(android.provider.Settings.System.class, m, dropObserversOff);
         } catch (Throwable t) {
             log("keepTaskbar", t);
+        }
+    }
+
+    /**
+     * The (transient) taskbar in apps, revealed by a short swipe up. Under a third-party home (PowOS) it stayed stashed,
+     * for two reasons, both OnePlus assuming its own home is the default:
+     * - AbsSwipeUpHandler only reveals it when activityInterface.getTaskbarActivityContext() gives the taskbar.
+     *   LauncherActivityInterface (OnePlus home) returns the global one, TaskbarUtils.getTaskbarActivityContext();
+     *   FallbackActivityInterface (any other home) doesn't override it, so BaseActivityInterface returns null.
+     * - OplusTaskbarStashController.TransitionCallback.canResponseTransition() requires OnePlus's Launcher activity to
+     *   exist with all its app transitions ended. With another home that activity is never created, so it was always
+     *   false. No Launcher activity means no Launcher transition can be running: that term is true then. The method's
+     *   other conditions (in an app, taskbar has icons) are kept as OnePlus computes them.
+     * - "Taskbar has icons" was never true either: OplusTaskbarModelCallbacks.finishBindingItems() defers putting the
+     *   bound items into the taskbar (commitItemsToUI) until OnePlus's Launcher activity exists. commitItemsToUI doesn't
+     *   use it, so with another home they're committed right away (the deferred refresh still runs if it ever starts).
+     */
+    private static void revealTaskbar(ClassLoader cl) {
+        try {
+            Class<?> fallback = XposedHelpers.findClass("com.android.quickstep.FallbackActivityInterface", cl);
+            Class<?> taskbarUtils = XposedHelpers.findClass("com.android.launcher3.taskbar.TaskbarUtils", cl);
+            Class<?> base = XposedHelpers.findClass("com.android.quickstep.BaseActivityInterface", cl);
+            XposedBridge.hookAllMethods(base, "getTaskbarActivityContext", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.getResult() == null && fallback.isInstance(param.thisObject))
+                        param.setResult(XposedHelpers.callStaticMethod(taskbarUtils, "getTaskbarActivityContext"));
+                }
+            });
+            Class<?> launcher = XposedHelpers.findClass("com.android.launcher3.Launcher", cl);
+            Class<?> callback = XposedHelpers.findClass("com.android.launcher3.taskbar.OplusTaskbarStashController$TransitionCallback", cl);
+            XposedHelpers.findAndHookMethod(callback, "canResponseTransition", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        if ((Boolean) param.getResult())
+                            return;
+                        Object tracker = XposedHelpers.getStaticObjectField(launcher, "ACTIVITY_TRACKER");
+                        if (XposedHelpers.callMethod(tracker, "getCreatedActivity") != null)
+                            return; // OnePlus home is running: its answer stands
+                        Object stash = XposedHelpers.getSurroundingThis(param.thisObject);
+                        if (!(Boolean) XposedHelpers.callMethod(stash, "hasAnyFlag", 1L))
+                            return; // not in an app
+                        Object taskbar = XposedHelpers.getObjectField(stash, "mActivity");
+                        Object view = taskbar == null ? null : XposedHelpers.callMethod(taskbar, "getTaskbarView");
+                        if (view != null && ((android.view.ViewGroup) view).getChildCount() > 0)
+                            param.setResult(true);
+                    } catch (Throwable t) {
+                        log("revealTaskbar canResponseTransition", t);
+                    }
+                }
+            });
+            XposedHelpers.findAndHookMethod("com.android.launcher3.taskbar.OplusTaskbarModelCallbacks", cl, "finishBindingItems",
+                "com.android.launcher3.util.IntSet", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            if (XposedHelpers.getObjectField(param.thisObject, "mDeferTaskOnLauncherReady") != null)
+                                XposedHelpers.callMethod(param.thisObject, "commitItemsToUI");
+                        } catch (Throwable t) {
+                            log("revealTaskbar finishBindingItems", t);
+                        }
+                    }
+                });
+        } catch (Throwable t) {
+            log("revealTaskbar", t);
         }
     }
 
