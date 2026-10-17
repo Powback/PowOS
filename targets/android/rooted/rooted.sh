@@ -42,6 +42,9 @@ deploy)
   for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch; do
     adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
   done
+  # PowOS's own phone launcher swap (bin/, shipped in the PowOS image - a rootfs from an older image lacks it).
+  adb push -q "$HERE/../../../bin/powos-panel-phone" /data/local/tmp/powos-panel-phone
+  adb push -q "$HERE/../../../desktop/autostart/powos-panel-phone.desktop" /data/local/tmp/powos-panel-phone.desktop
   adb push -q "$HERE/../pkgs/fex-emu/Config.json" /data/local/tmp/fex-Config.json
   adb push -q "$HERE/../pkgs/fex-emu/thunks.json" /data/local/tmp/fex-thunks.json
   adb shell rm -rf /data/local/tmp/powos-plasma

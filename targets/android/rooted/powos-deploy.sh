@@ -20,6 +20,12 @@ install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android
 # The phone's controller (Steam Deck over uhid) and the focus watcher, which the session starts (powos-rooted-session).
 install -m 755 $T/powos-padd $R/usr/bin/powos-padd
 install -m 755 $T/powos-focus-watch $R/usr/bin/powos-focus-watch
+# The panel's launcher as the full-screen app grid (Application Dashboard), once per user (bin/powos-panel-phone;
+# KWin's swipe-up on the desktop/taskbar opens the same launcher). Part of the PowOS image; installed here too so a
+# rooted phone whose rootfs came from an older image has it.
+install -m 755 $T/powos-panel-phone $R/usr/bin/powos-panel-phone
+install -m 644 $T/powos-panel-phone.desktop $R/etc/xdg/autostart/powos-panel-phone.desktop
+rm -f $T/powos-panel-phone $T/powos-panel-phone.desktop
 # The desktop over Android's wallpaper (as install-powos-android.sh): transparent wallpaper + its update script.
 W=$R/usr/share/plasma/wallpapers/org.powos.transparent
 install -Dm 644 $T/powos-plasma/org.powos.transparent/metadata.json $W/metadata.json
