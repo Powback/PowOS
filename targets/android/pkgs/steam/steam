@@ -16,6 +16,23 @@ for b in aarch64 i386 x86_64; do
 done
 export LD_PRELOAD="$L/aarch64/libsysvipc-emu.so $L/i386/libsysvipc-emu.so $L/x86_64/libsysvipc-emu.so${LD_PRELOAD:+ $LD_PRELOAD}"
 
+# IPC left behind by a Steam that didn't shut down (killed, crashed, the session restarted): the shim's semaphores are
+# files that a kernel would have released with their processes, so the next Steam waited on ones a dead process held
+# and hung at start. Valve's IPC object and shared memory went with them, and FEX's per-process stats - all in
+# /dev/shm, which is RAM (600 MB of it after a day of games). Only while no Steam of this user runs: its games and
+# helpers are all started by it. Running = the pid Steam keeps in ~/.steam/steam.pid is alive and is Steam's client (by
+# name, pgrep found this script: its process, and the subshells it forks, are called steam too).
+steam_pid=$(cat "$HOME/.steam/steam.pid" 2>/dev/null)
+case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
+  */steamrtarm64/steam | */FEX*) ;;  # the ARM64 client, or the x86 one (STEAM_X86) under FEX
+  *)
+    rm -f /dev/shm/y700-sysv/sem-* "/dev/shm/u$(id -u)-ValveIPCSharedObj-Steam" "/dev/shm/u$(id -u)-Shm_"*
+    for f in /dev/shm/fex-*-stats; do
+      pid=${f#/dev/shm/fex-}; pid=${pid%-stats}
+      [ -e "$f" ] && [ ! -d "/proc/$pid" ] && rm -f "$f"
+    done ;;
+esac
+
 if [ -n "${STEAM_X86:-}" ]; then
   # -cef-disable-gpu: the x86 web UI (CEF) software-renders; its x86 Mesa can't reach the Adreno GPU.
   exec FEXBash -c 'exec /usr/lib/steam/bin_steam.sh -cef-disable-gpu "$@"' steam "$@"
