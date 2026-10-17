@@ -63,6 +63,33 @@ def phone_screen(found):
     }
 
 
+WINDOWS = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "android-windows")  # powos-android-app's
+
+
+def windows():
+    """{display id: scrcpy pid} of the open Android-app windows (powos-android-app: <pkg>.pid, <pkg>.log)."""
+    out = {}
+    try:
+        names = os.listdir(WINDOWS)
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".pid"):
+            continue
+        base = os.path.join(WINDOWS, name[:-4])
+        try:
+            with open(base + ".pid") as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)
+            with open(base + ".log", errors="replace") as f:
+                m = re.search(r"New display: .* \(id=(\d+)\)", f.read())
+        except (OSError, ValueError):
+            continue
+        if m:
+            out[int(m[1])] = pid
+    return out
+
+
 def label(pkg):
     try:
         with open(os.path.join(SHARE, "applications", f"android-{pkg}.desktop")) as f:
@@ -105,6 +132,7 @@ def watch():
     stubs = {}  # task id -> Popen
     moving = {}  # task id -> time its stand-in was clicked: no new stand-in while Android moves it to its window
     found = {}  # the last task list
+    occupied = set()  # window displays that have held an app
     active = [""]  # resourceClass of the focused window
 
     def write_active():
@@ -153,6 +181,20 @@ def watch():
         except Exception as e:  # adb hiccup: keep the stand-ins, try again
             print("tasks:", e, file=sys.stderr)
             return
+        # A window whose app left its display (opened from the phone's side - its taskbar, recents, a link - or closed
+        # there) would stay an empty frame: it closes, and the app's taskbar entry comes back below. Only a display
+        # that has held an app: a new window's display is empty until its app is started or moved onto it.
+        used = {t["display"] for t in found.values() if t["pkgs"]}
+        for disp, pid in windows().items():
+            if disp in used:
+                occupied.add(disp)
+            elif disp in occupied:
+                occupied.discard(disp)
+                print(f"window on display {disp}: its app left, closing", file=sys.stderr, flush=True)
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
         now = phone_screen(found)
         for tid in list(stubs):
             if stubs[tid].poll() is not None:  # exits only when clicked
