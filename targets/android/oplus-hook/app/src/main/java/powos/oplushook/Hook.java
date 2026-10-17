@@ -161,10 +161,16 @@ public class Hook implements IXposedHookLoadPackage {
             single ? "rapid_trigger_panel_stub" : "rapid_multi_trigger_panel_stub", "layout", LAUNCHER);
         if (layout == 0)
             return null;
-        ViewGroup content = a.findViewById(android.R.id.content);
-        View panel = LayoutInflater.from(a).inflate(layout, content, false);
-        content.addView(panel);
+        // Into RecentsActivity's drag layer (RecentsDragLayer, set up in onCreate), behind the recents view - where
+        // Launcher keeps its panel stub. android.R.id.content isn't found from here (findViewById returned null).
+        ViewGroup dragLayer = (ViewGroup) XposedHelpers.callMethod(a, "getDragLayer");
+        if (dragLayer == null)
+            return null;
+        View panel = LayoutInflater.from(a).inflate(layout, dragLayer, false);
+        dragLayer.addView(panel, 0, new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         panels.put(a, panel);
+        XposedBridge.log(TAG + ": trigger panel " + panel.getClass().getSimpleName() + " in " + a.getClass().getSimpleName());
         return panel;
     }
 
