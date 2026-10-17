@@ -99,6 +99,16 @@ public class MainActivity extends Activity
     private static final String KEY_KEYBOARD_FLOATING = "keyboard_floating";
     private static final String KEY_GAMEPAD_SHOWN = "gamepad_shown";
     private GamepadOverlay mGamepadOverlay;
+    private android.os.FileObserver mFocusWatcher;
+
+    private static String readFocusedWindow(java.io.File runDir) {
+        try {
+            return new String(java.nio.file.Files.readAllBytes(new java.io.File(runDir, "focused-window").toPath()),
+                java.nio.charset.StandardCharsets.UTF_8).trim();
+        } catch (java.io.IOException e) {
+            return "";
+        }
+    }
     private boolean mKeyboardFloating = true;
     // Persistent "tap to open Settings" notification, toggleable in Settings > General.
     private static final String KEY_NOTIFICATION_ENABLED = "settings_notification";
@@ -476,6 +486,20 @@ public class MainActivity extends Activity
         // under the floating buttons; hidden until toggled.
         mGamepadOverlay = new GamepadOverlay(this,
             new java.io.File(SessionService.runDir(this), "powos-padd.sock").getPath());
+        mGamepadOverlay.setMouse(new OverlayMouse());
+        // Per-game layouts: powos-focus-watch (PowOS) writes the focused window's class into the run dir.
+        java.io.File runDir = SessionService.runDir(this);
+        mFocusWatcher = new android.os.FileObserver(runDir,
+                android.os.FileObserver.CLOSE_WRITE | android.os.FileObserver.MOVED_TO) {
+            @Override
+            public void onEvent(int event, String path) {
+                if (!"focused-window".equals(path)) return;
+                String key = readFocusedWindow(runDir);
+                runOnUiThread(() -> mGamepadOverlay.setGame(key));
+            }
+        };
+        mFocusWatcher.startWatching();
+        mGamepadOverlay.setGame(readFocusedWindow(runDir));
         root.addView(mGamepadOverlay, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         mGamepadOverlay.setShown(getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_GAMEPAD_SHOWN, false));
@@ -1009,6 +1033,7 @@ public class MainActivity extends Activity
             CameraServices.nativeDestroyCameraService();
             cameraInited = false;
         }
+        if (mFocusWatcher != null) mFocusWatcher.stopWatching();
         if (sInstance == this)
             sInstance = null;
         super.onDestroy();
@@ -1825,6 +1850,30 @@ public class MainActivity extends Activity
             surfaceView.releasePointerCapture();
     }
 
+    /** The game controls' mouse modules (mouse region, trackball, gyro): the shared cursor, absolute + relative. */
+    private final class OverlayMouse implements GamepadOverlay.Mouse {
+        @Override
+        public void move(float dx, float dy) {
+            if (!Float.isFinite(dx) || !Float.isFinite(dy) || (dx == 0f && dy == 0f)) return;
+            ensureCapturedPointerPosition();
+            float rdx = dx * capturedPointerScaleX(), rdy = dy * capturedPointerScaleY();
+            mPointerX += rdx;
+            mPointerY += rdy;
+            ensureCapturedPointerPosition(); // clamps to the output
+            Native.nativeSendMouseMotion(mPointerX, mPointerY, rdx, rdy);
+        }
+
+        @Override
+        public void button(int button, boolean pressed) {
+            Native.nativeSendMouseButton(button, pressed);
+        }
+
+        @Override
+        public void scroll(int axis, float value) {
+            Native.nativeSendMouseScroll(axis, value);
+        }
+    }
+
     private final class CapturedTouchpadOutput implements Touchpad.Output {
         @Override
         public void onMotion(float dx, float dy) {
@@ -2193,12 +2242,16 @@ public class MainActivity extends Activity
         mLastTouchpadButtonPressed = 0;
     }
 
+    // The input coordinate space is the SurfaceView as laid out (touch/mouse events are relative to it).
+    // surfaceChanged's size (viewWidth/viewHeight) is the buffer's, which can be in the panel's natural
+    // orientation: in landscape on the unfolded phone it reported 2268x2440 for a 2440x2268 view, and the
+    // cursor stopped at x = 2268.
     private int capturedPointerViewWidth() {
-        return viewWidth > 0 ? viewWidth : surfaceView.getWidth();
+        return surfaceView.getWidth() > 0 ? surfaceView.getWidth() : viewWidth;
     }
 
     private int capturedPointerViewHeight() {
-        return viewHeight > 0 ? viewHeight : surfaceView.getHeight();
+        return surfaceView.getHeight() > 0 ? surfaceView.getHeight() : viewHeight;
     }
 
     private float capturedPointerScaleX() {

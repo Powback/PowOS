@@ -96,6 +96,13 @@ public final class GamepadOverlay extends View {
 
         abstract void reset();
 
+        /** The overlay this module lives in (mouse output, frame callbacks, pad state). */
+        GamepadOverlay host;
+
+        /** Type-specific settings beyond output/mode (sensitivity, friction...). */
+        void configure(JSONObject o) {
+        }
+
         JSONObject toJson() throws JSONException {
             JSONObject o = new JSONObject().put("type", type);
             JSONArray z = new JSONArray();
@@ -370,6 +377,302 @@ public final class GamepadOverlay extends View {
         }
     }
 
+
+    /** Where mouse modules send motion: the desktop's cursor (MainActivity), absolute + relative. */
+    public interface Mouse {
+        void move(float dx, float dy);
+
+        void button(int button, boolean pressed);
+
+        void scroll(int axis, float value);
+    }
+
+    static final int BTN_LEFT = 0x110, BTN_RIGHT = 0x111;
+    static final float[] SENSITIVITIES = {0.8f, 1.2f, 1.6f, 2.4f, 3.2f};
+
+    static float nextSensitivity(float s) {
+        for (float v : SENSITIVITIES) if (v > s + 0.01f) return v;
+        return SENSITIVITIES[0];
+    }
+
+    /**
+     * Mouse region: drag moves the cursor (relative, so mouse-look games turn), tap = left click, two-finger tap =
+     * right click, hold still then drag = drag with the left button, two fingers moving = scroll.
+     */
+    static class MousepadModule extends Module {
+        float sens = 1.6f;
+        final SparseArray<float[]> fingers = new SparseArray<>(); // id -> {lastX, lastY}
+        long downTime;
+        boolean moved, dragging, twoFinger;
+        final float slop = 12f;
+        final Runnable hold = () -> {
+            if (!moved && fingers.size() == 1 && host != null && host.mouse != null) {
+                dragging = true;
+                host.mouse.button(BTN_LEFT, true);
+                host.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                host.invalidate();
+            }
+        };
+
+        MousepadModule() {
+            type = "mousepad";
+            output = null;
+        }
+
+        @Override void configure(JSONObject o) {
+            sens = (float) o.optDouble("sensitivity", sens);
+        }
+
+        @Override JSONObject toJson() throws JSONException {
+            return super.toJson().put("sensitivity", sens);
+        }
+
+        String title() { return "mouse"; }
+
+        @Override boolean down(int id, float x, float y, PadState s) {
+            if (fingers.size() == 0) {
+                downTime = System.currentTimeMillis();
+                moved = false;
+                twoFinger = false;
+                if (host != null) host.handler.postDelayed(hold, 350);
+            } else {
+                twoFinger = true;
+                if (host != null) host.handler.removeCallbacks(hold);
+            }
+            fingers.put(id, new float[]{x, y});
+            return false;
+        }
+
+        @Override boolean move(int id, float x, float y, PadState s) {
+            float[] f = fingers.get(id);
+            if (f == null || host == null || host.mouse == null) return false;
+            float dx = x - f[0], dy = y - f[1];
+            if (!moved && Math.hypot(dx, dy) < slop) return false; // still a tap
+            if (!moved) {
+                moved = true;
+                host.handler.removeCallbacks(hold);
+            }
+            f[0] = x;
+            f[1] = y;
+            if (fingers.size() >= 2) {
+                // Two fingers: scroll, from the first finger's motion only (both move together).
+                if (fingers.keyAt(0) == id) {
+                    if (Math.abs(dy) >= Math.abs(dx)) host.mouse.scroll(0, -dy * 0.5f);
+                    else host.mouse.scroll(1, dx * 0.5f);
+                }
+            } else {
+                motion(dx * sens, dy * sens);
+            }
+            return false;
+        }
+
+        void motion(float dx, float dy) {
+            host.mouse.move(dx, dy);
+        }
+
+        @Override boolean up(int id, PadState s) {
+            fingers.remove(id);
+            if (fingers.size() > 0 || host == null) return false;
+            host.handler.removeCallbacks(hold);
+            if (dragging) {
+                dragging = false;
+                if (host.mouse != null) host.mouse.button(BTN_LEFT, false);
+            } else if (!moved && System.currentTimeMillis() - downTime < 300 && host.mouse != null) {
+                int b = twoFinger ? BTN_RIGHT : BTN_LEFT;
+                host.mouse.button(b, true);
+                host.mouse.button(b, false);
+            }
+            return false;
+        }
+
+        @Override void reset() {
+            fingers.clear();
+            if (dragging && host != null && host.mouse != null) host.mouse.button(BTN_LEFT, false);
+            dragging = false;
+            if (host != null) host.handler.removeCallbacks(hold);
+        }
+
+        @Override void draw(Canvas c, Paint p, float unit, boolean editing) {
+            float rr = unit * 0.02f;
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(fingers.size() > 0 ? 0x33FFFFFF : 0x14FFFFFF);
+            c.drawRoundRect(zone, rr, rr, p);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(unit * 0.003f);
+            p.setColor(dragging ? 0xAA4FC3F7 : 0x44FFFFFF);
+            c.drawRoundRect(zone, rr, rr, p);
+            drawLabel(c, p, title(), zone.centerX(), zone.centerY(), unit * 0.03f);
+        }
+    }
+
+    /**
+     * Trackball: a mouse region whose motion keeps rolling after a flick and slows with friction; a touch stops it.
+     * For camera control (strategy games, Besiege).
+     */
+    static final class TrackballModule extends MousepadModule {
+        float friction = 0.93f, vx, vy;
+        long lastMove;
+        boolean rolling;
+        final Runnable frame = new Runnable() {
+            @Override public void run() {
+                if (!rolling || host == null || host.mouse == null) return;
+                vx *= friction;
+                vy *= friction;
+                if (Math.hypot(vx, vy) < 0.4) {
+                    rolling = false;
+                    host.invalidate();
+                    return;
+                }
+                host.mouse.move(vx, vy);
+                host.postOnAnimation(this);
+            }
+        };
+
+        TrackballModule() {
+            type = "trackball";
+        }
+
+        @Override void configure(JSONObject o) {
+            super.configure(o);
+            friction = (float) o.optDouble("friction", friction);
+        }
+
+        @Override JSONObject toJson() throws JSONException {
+            return super.toJson().put("friction", friction);
+        }
+
+        @Override String title() { return rolling ? "trackball •" : "trackball"; }
+
+        @Override boolean down(int id, float x, float y, PadState s) {
+            if (rolling) { // a touch stops the ball
+                rolling = false;
+                vx = vy = 0;
+            }
+            return super.down(id, x, y, s);
+        }
+
+        @Override void motion(float dx, float dy) {
+            super.motion(dx, dy);
+            // Per-event velocity (pointer events arrive about once per frame), smoothed.
+            vx = vx * 0.5f + dx * 0.5f;
+            vy = vy * 0.5f + dy * 0.5f;
+            lastMove = System.currentTimeMillis();
+        }
+
+        @Override boolean up(int id, PadState s) {
+            boolean wasDrag = dragging;
+            super.up(id, s);
+            if (fingers.size() == 0 && moved && !wasDrag && !twoFinger
+                    && System.currentTimeMillis() - lastMove < 60 && Math.hypot(vx, vy) > 2 && host != null) {
+                rolling = true;
+                host.postOnAnimation(frame);
+            } else if (fingers.size() == 0) {
+                vx = vy = 0;
+            }
+            return false;
+        }
+
+        @Override void reset() {
+            super.reset();
+            rolling = false;
+            vx = vy = 0;
+        }
+    }
+
+    /**
+     * Gyro: the phone's rotation as mouse look or right stick, while switched on with its own toggle control.
+     * Axes follow the screen's current rotation (landscape or portrait, folded or not).
+     */
+    static final class GyroModule extends Module implements android.hardware.SensorEventListener {
+        boolean on, invertY;
+        float sens = 1.6f;
+        long lastNs;
+
+        GyroModule(String output) {
+            type = "gyro";
+            this.output = "right_stick".equals(output) ? "right_stick" : "mouse";
+        }
+
+        @Override void configure(JSONObject o) {
+            sens = (float) o.optDouble("sensitivity", sens);
+            invertY = o.optBoolean("invert_y", false);
+        }
+
+        @Override JSONObject toJson() throws JSONException {
+            return super.toJson().put("sensitivity", sens).put("invert_y", invertY);
+        }
+
+        void setOn(boolean v) {
+            if (v == on || host == null) return;
+            on = v;
+            android.hardware.SensorManager sm =
+                (android.hardware.SensorManager) host.getContext().getSystemService(Context.SENSOR_SERVICE);
+            if (on) {
+                android.hardware.Sensor g = sm.getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE);
+                if (g == null) {
+                    on = false;
+                    return;
+                }
+                lastNs = 0;
+                sm.registerListener(this, g, android.hardware.SensorManager.SENSOR_DELAY_GAME);
+            } else {
+                sm.unregisterListener(this);
+                if ("right_stick".equals(output)) host.setRightStick(0, 0);
+            }
+            host.invalidate();
+        }
+
+        @Override public void onSensorChanged(android.hardware.SensorEvent e) {
+            if (!on || host == null) return;
+            // Device axes -> screen axes for the current rotation (x right, y up on screen).
+            float x = e.values[0], y = e.values[1];
+            int rot = host.getDisplay() != null ? host.getDisplay().getRotation() : 0;
+            float sx, sy;
+            switch (rot) {
+                case android.view.Surface.ROTATION_90: sx = -y; sy = x; break;
+                case android.view.Surface.ROTATION_180: sx = -x; sy = -y; break;
+                case android.view.Surface.ROTATION_270: sx = y; sy = -x; break;
+                default: sx = x; sy = y;
+            }
+            // Turning about the screen's vertical axis looks left/right; tilting about its horizontal axis up/down.
+            float yaw = -sy, pitch = invertY ? sx : -sx;
+            if ("right_stick".equals(output)) {
+                host.setRightStick(clamp(yaw * sens * 0.35f), clamp(pitch * sens * 0.35f));
+            } else {
+                float dt = lastNs == 0 ? 0f : (e.timestamp - lastNs) / 1e9f;
+                lastNs = e.timestamp;
+                if (dt > 0 && dt < 0.1f && host.mouse != null) {
+                    float px = 900f * sens * dt; // pixels per radian
+                    host.mouse.move(yaw * px, pitch * px);
+                }
+            }
+        }
+
+        private static float clamp(float v) { return Math.max(-1f, Math.min(1f, v)); }
+
+        @Override public void onAccuracyChanged(android.hardware.Sensor s, int a) {
+        }
+
+        @Override boolean down(int id, float x, float y, PadState s) {
+            setOn(!on);
+            return false;
+        }
+
+        @Override boolean move(int id, float x, float y, PadState s) { return false; }
+
+        @Override boolean up(int id, PadState s) { return false; }
+
+        @Override void reset() { setOn(false); }
+
+        @Override void draw(Canvas c, Paint p, float unit, boolean editing) {
+            float r = Math.min(zone.width(), zone.height()) / 2f;
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(on ? 0xAA4FC3F7 : 0x55202020);
+            c.drawCircle(zone.centerX(), zone.centerY(), r, p);
+            drawLabel(c, p, "gyro", zone.centerX(), zone.centerY(), r * 0.8f);
+        }
+    }
+
     static void drawLabel(Canvas c, Paint p, String text, float cx, float cy, float r) {
         if (text == null || text.isEmpty()) return;
         p.setStyle(Paint.Style.FILL);
@@ -385,6 +688,9 @@ public final class GamepadOverlay extends View {
             case "dpad": return new DpadModule();
             case "stick": return new StickModule(output, mode, (float) radius, (float) deadzone);
             case "trigger": return new TriggerModule(output);
+            case "mousepad": return new MousepadModule();
+            case "trackball": return new TrackballModule();
+            case "gyro": return new GyroModule(output);
             default: return null;
         }
     }
@@ -401,6 +707,7 @@ public final class GamepadOverlay extends View {
                 Log.w(TAG, "unknown module type " + o.getString("type") + ", skipped");
                 continue;
             }
+            m.configure(o);
             JSONArray z = o.getJSONArray("zone");
             for (int k = 0; k < 4; k++) m.frac[k] = (float) z.getDouble(k);
             if (o.has("color")) {
@@ -440,6 +747,38 @@ public final class GamepadOverlay extends View {
         }
     };
     private Runnable onEditDone;
+    Mouse mouse;
+    /** Focused game's window class (steam_app_<id>), "" = the default layout. */
+    private String gameKey = "";
+
+    private String layoutPref() {
+        return gameKey.isEmpty() ? KEY_LAYOUT : KEY_LAYOUT + ":" + gameKey;
+    }
+
+    /**
+     * The focused window changed (powos-focus-watch): show that game's layout, or the default one for a game that
+     * has none yet. Ignored while editing, so the editor never switches under the user.
+     */
+    public void setGame(String key) {
+        key = key == null ? "" : key.trim();
+        if (editing || key.equals(gameKey)) return;
+        releaseAll();
+        gameKey = key;
+        load(prefs.getString(layoutPref(), prefs.getString(KEY_LAYOUT, DEFAULT_LAYOUT)));
+        Log.i(TAG, "layout for " + (gameKey.isEmpty() ? "the desktop (default)" : gameKey));
+    }
+
+    public void setMouse(Mouse m) {
+        mouse = m;
+    }
+
+    /** Gyro -> right stick. */
+    void setRightStick(float x, float y) {
+        if (x == state.rx && y == state.ry) return;
+        state.rx = x;
+        state.ry = y;
+        send();
+    }
 
     public GamepadOverlay(Context ctx, String padSocketPath) {
         super(ctx);
@@ -462,13 +801,14 @@ public final class GamepadOverlay extends View {
                 throw new IllegalStateException("built-in layout", e2);
             }
         }
+        for (Module m : modules) m.host = this;
         if (getWidth() > 0) for (Module m : modules) m.layout(getWidth(), getHeight());
         invalidate();
     }
 
     private void save() {
         try {
-            prefs.edit().putString(KEY_LAYOUT, serialize(modules)).apply();
+            prefs.edit().putString(layoutPref(), serialize(modules)).apply();
         } catch (JSONException e) {
             Log.e(TAG, "could not save layout", e);
         }
@@ -546,6 +886,8 @@ public final class GamepadOverlay extends View {
         drawChip(canvas, btnAdd, "+ Add", 0xCC2E7D32, unit);
         drawChip(canvas, btnReset, "Reset", 0xCC6D4C41, unit);
         drawChip(canvas, btnDone, "Done", 0xCC1565C0, unit);
+        drawLabel(canvas, p, "Layout: " + (gameKey.isEmpty() ? "default" : gameKey), getWidth() / 2f,
+            btnAdd.bottom + btnAdd.height() * 0.7f, btnAdd.height() * 0.55f);
     }
 
     private float handleRadius() { return Math.min(getWidth(), getHeight()) * 0.022f; }
@@ -685,15 +1027,20 @@ public final class GamepadOverlay extends View {
     private void showAdd() {
         final String[] items = {"Button A", "Button B", "Button X", "Button Y", "Bumper LB", "Bumper RB", "Back",
             "Start", "Guide", "Stick click L3", "Stick click R3", "D-pad", "Left stick", "Right stick",
-            "Trigger LT", "Trigger RT"};
+            "Trigger LT", "Trigger RT", "Mouse region", "Trackball", "Gyro (toggle)"};
         new AlertDialog.Builder(getContext()).setTitle("Add control").setItems(items, (d, which) -> {
             Module m;
             if (which <= 10) m = new ButtonModule(BUTTON_OUTPUTS[which], "");
             else if (which == 11) m = new DpadModule();
             else if (which <= 13) m = new StickModule(which == 12 ? "left" : "right", "dynamic", 0.08f, 0.1f);
-            else m = new TriggerModule(which == 14 ? "lt" : "rt");
-            float sw = m instanceof StickModule ? 0.3f : m instanceof DpadModule ? 0.18f : m instanceof TriggerModule ? 0.14f : 0.09f;
-            float sh = m instanceof StickModule ? 0.3f : m instanceof DpadModule ? 0.2f : m instanceof TriggerModule ? 0.07f : 0.09f;
+            else if (which <= 15) m = new TriggerModule(which == 14 ? "lt" : "rt");
+            else if (which == 16) m = new MousepadModule();
+            else if (which == 17) m = new TrackballModule();
+            else m = new GyroModule("mouse");
+            m.host = this;
+            boolean area = m instanceof MousepadModule;
+            float sw = area ? 0.35f : m instanceof StickModule ? 0.3f : m instanceof DpadModule ? 0.18f : m instanceof TriggerModule ? 0.14f : 0.09f;
+            float sh = area ? 0.35f : m instanceof StickModule ? 0.3f : m instanceof DpadModule ? 0.2f : m instanceof TriggerModule ? 0.07f : 0.09f;
             m.frac[0] = 0.5f - sw / 2;
             m.frac[1] = 0.45f - sh / 2;
             m.frac[2] = 0.5f + sw / 2;
@@ -731,6 +1078,19 @@ public final class GamepadOverlay extends View {
             TriggerModule t = (TriggerModule) m;
             items.add((t.right ? "RT" : "LT") + "  (swap)");
             actions.add(() -> { t.setOutput(t.right ? "lt" : "rt"); invalidate(); });
+        }
+        if (m instanceof MousepadModule) {
+            MousepadModule mp = (MousepadModule) m;
+            items.add("Sensitivity " + mp.sens + "  (change)");
+            actions.add(() -> { mp.sens = nextSensitivity(mp.sens); invalidate(); });
+        } else if (m instanceof GyroModule) {
+            GyroModule g = (GyroModule) m;
+            items.add("Output: " + ("right_stick".equals(g.output) ? "right stick" : "mouse") + "  (swap)");
+            actions.add(() -> { g.setOn(false); g.output = "right_stick".equals(g.output) ? "mouse" : "right_stick"; invalidate(); });
+            items.add("Sensitivity " + g.sens + "  (change)");
+            actions.add(() -> g.sens = nextSensitivity(g.sens));
+            items.add(g.invertY ? "Up/down inverted  (normal)" : "Up/down normal  (invert)");
+            actions.add(() -> g.invertY = !g.invertY);
         }
         items.add("Delete");
         actions.add(() -> { modules.remove(m); invalidate(); });

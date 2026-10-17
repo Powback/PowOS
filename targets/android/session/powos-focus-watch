@@ -1,0 +1,24 @@
+#!/bin/sh
+# powos-focus-watch: tells the PowOS app which game has focus, so its on-screen controls switch to that game's
+# layout (GamepadOverlay, targets/android/docs/controller-overlay.md). Writes the focused X11 window's class
+# (Steam games: steam_app_<appid>) to $XDG_RUNTIME_DIR/focused-window, the app's run dir; empty when a native
+# (Wayland) window or nothing has focus. Event-driven (xprop -spy on _NET_ACTIVE_WINDOW), no polling.
+OUT=${XDG_RUNTIME_DIR:?}/focused-window
+last=unset
+while :; do
+  # Xwayland's DISPLAY and auth file (its name changes every start): take them from the desktop shell.
+  P=$(pgrep -u "$(id -u)" -x plasmashell | head -1)
+  if [ -n "$P" ]; then
+    eval "$(tr '\0' '\n' < "/proc/$P/environ" | grep -E '^(DISPLAY|XAUTHORITY)=' | sed 's/^/export /')"
+  fi
+  if [ -n "${DISPLAY:-}" ]; then
+    xprop -root -spy _NET_ACTIVE_WINDOW 2>/dev/null | while read -r line; do
+      w=${line##* }
+      cls=$(xprop -id "$w" WM_CLASS 2>/dev/null | sed -n 's/^WM_CLASS([^)]*) = "\([^"]*\)".*/\1/p')
+      [ "$cls" = "$last" ] && continue
+      last=$cls
+      printf '%s' "$cls" > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
+    done
+  fi
+  sleep 3 # desktop or Xwayland not up yet, or restarted
+done
