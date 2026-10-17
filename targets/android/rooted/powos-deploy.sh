@@ -23,6 +23,9 @@ install -Dm 644 $T/powos-plasma/org.powos.transparent/metadata.json $W/metadata.
 install -Dm 644 $T/powos-plasma/org.powos.transparent/contents/ui/main.qml $W/contents/ui/main.qml
 install -Dm 644 $T/powos-plasma/powos-transparent-desktop.js \
   $R/usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/powos-transparent-desktop.js
+# The phone's Android apps as a category of their own in the application menu (as install-powos-android.sh).
+install -Dm 644 $T/powos-plasma/menus/powos-android.menu $R/etc/xdg/menus/applications-merged/powos-android.menu
+install -Dm 644 $T/powos-plasma/menus/powos-android.directory $R/usr/share/desktop-directories/powos-android.directory
 K=$R/usr/share/kwin/scripts/powos-translucent-desktop
 install -Dm 644 $T/powos-plasma/powos-translucent-desktop/metadata.json $K/metadata.json
 install -Dm 644 $T/powos-plasma/powos-translucent-desktop/contents/code/main.js $K/contents/code/main.js

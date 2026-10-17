@@ -1,0 +1,14 @@
+<!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN" "http://www.freedesktop.org/standards/menu-spec/menu-1.0.dtd">
+<!-- PowOS on a phone: the phone's Android apps as a category of their own in the application menu (Kickoff, the
+     launcher, KRunner). Their entries (andro.marchy.AndroidApps) carry the category X-Android, next to the freedesktop
+     main category Android gives the app (a game is under Games too). Merged into plasma-applications.menu. -->
+<Menu>
+  <Name>Applications</Name>
+  <Menu>
+    <Name>Android</Name>
+    <Directory>powos-android.directory</Directory>
+    <Include>
+      <Category>X-Android</Category>
+    </Include>
+  </Menu>
+</Menu>

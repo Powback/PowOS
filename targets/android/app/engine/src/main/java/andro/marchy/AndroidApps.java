@@ -21,7 +21,9 @@ import java.util.Set;
 /**
  * PowOS: the Android apps in PowOS's application menu (Plasma's launcher, KRunner, the task manager): one
  * freedesktop .desktop entry + icon per launchable Android app, in the PowOS user's
- * ~/.local/share/applications and icons dirs, category "Android". Each runs powos-android-app <package>
+ * ~/.local/share/applications and icons dirs. Categories: X-Android (the "Android" category of the menu, from
+ * session/plasma/menus/powos-android.menu) and the freedesktop main category of Android's own app category, so a game
+ * is under Games too and filters/search treat it like any app ({@link #categories}). Each runs powos-android-app <package>
  * (session/powos-android-app): the app in its own PowOS window (scrcpy on a virtual display) when PowOS has adb to
  * the phone, else a floating Android window over the desktop (android-request, see AndroidRequests). Kept in sync on
  * install/update/removal. (Andromarchy wrote a block into Omarchy's JSONC menu instead.)
@@ -74,11 +76,13 @@ final class AndroidApps extends BroadcastReceiver {
                 String entry = "[Desktop Entry]\n"
                         + "Type=Application\n"
                         + "Name=" + label + "\n"
-                        + "Comment=Android app (" + pkg + ")\n"
+                        // The menu shows the comment under the name: what it is, not its package (that stays searchable,
+                        // in Keywords).
+                        + "Comment=Android app\n"
                         + "Exec=powos-android-app " + pkg + " \"" + label.replace("\"", "") + "\"\n"
                         + "StartupWMClass=android-" + pkg + "\n"
                         + "Icon=" + id + "\n"
-                        + "Categories=Android;\n"
+                        + "Categories=" + categories(ri.activityInfo.applicationInfo, pkg) + "\n"
                         + "Keywords=android;" + pkg + ";\n"
                         + "X-PowOS-Android-Package=" + pkg + "\n";
                 File f = new File(apps, id + ".desktop");
@@ -101,6 +105,27 @@ final class AndroidApps extends BroadcastReceiver {
                     new File(icons, PREFIX + pkg + ".png").delete();
                 }
             }
+    }
+
+    /**
+     * The menu categories for an Android app: X-Android, plus the freedesktop main (and additional) category matching
+     * the category the app declares to Android (ApplicationInfo.category). Apps that declare none are only under Android.
+     */
+    static String categories(android.content.pm.ApplicationInfo info, String pkg) {
+        String main;
+        switch (info.category) {
+            case android.content.pm.ApplicationInfo.CATEGORY_GAME: main = "Game;"; break;
+            case android.content.pm.ApplicationInfo.CATEGORY_AUDIO: main = "AudioVideo;Audio;"; break;
+            case android.content.pm.ApplicationInfo.CATEGORY_VIDEO: main = "AudioVideo;Video;"; break;
+            case android.content.pm.ApplicationInfo.CATEGORY_IMAGE: main = "Graphics;Photography;"; break;
+            case android.content.pm.ApplicationInfo.CATEGORY_SOCIAL: main = "Network;InstantMessaging;"; break;
+            case android.content.pm.ApplicationInfo.CATEGORY_NEWS: main = "Network;News;"; break;
+            case android.content.pm.ApplicationInfo.CATEGORY_MAPS: main = "Utility;Maps;"; break;
+            case android.content.pm.ApplicationInfo.CATEGORY_PRODUCTIVITY: main = "Office;"; break;
+            case android.content.pm.ApplicationInfo.CATEGORY_ACCESSIBILITY: main = "Utility;Accessibility;"; break;
+            default: main = pkg.equals("com.android.settings") ? "Settings;" : "";
+        }
+        return "X-Android;" + main;
     }
 
     private static void writeIcon(Drawable d, File out) throws IOException {
