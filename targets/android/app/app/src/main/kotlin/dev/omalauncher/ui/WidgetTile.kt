@@ -3,40 +3,46 @@ package dev.omalauncher.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import dev.omalauncher.widgets.WidgetEngine
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imeAnimationTarget
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.omalauncher.linux.LinuxState
+import dev.omalauncher.widgets.WidgetEngine
 import dev.omalauncher.widgets.WidgetSpec
 import dev.omalauncher.widgets.lang.text
 import dev.omalauncher.widgets.render.WidgetContent
 import dev.omalauncher.widgets.render.WidgetScreen
-import androidx.compose.foundation.layout.fillMaxWidth
 import dev.omalauncher.widgets.runtime.WidgetInstance
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.Alignment
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.imeAnimationTarget
-import androidx.compose.foundation.layout.WindowInsets
 
 @Composable
 internal fun WidgetTile(
@@ -130,7 +136,8 @@ private fun TileButton(
 
 /**
  * A widget's screen { }, full screen over home in an Omarchy window titled by its `title` or the widget's name. A
- * terminal's screen ends above the keyboard and [extraKeys] while it's up, and fills the screen when it's down - sized
+ * terminal's screen is the terminal alone, edge to edge, ending above the keyboard and [extraKeys] while it's up and
+ * filling the screen when it's down - sized
  * once per keyboard change, from where the keyboard is going (its animation target): following its slide frame by
  * frame would resize (re-wrap) the terminal every frame, and waiting for it to settle lagged.
  */
@@ -155,12 +162,20 @@ internal fun WidgetScreenPanel(
     var keysPx by remember { mutableIntStateOf(0) }
     // The extra keys show only over the keyboard (extraKeysWanted).
     val clear = with(density) { (maxOf(target, nav) + if (target > 0) keysPx else 0).toDp() }
-    OverlayPanel(
-        title,
-        onDismiss,
-        keepClearBelow = clear,
-        below = { extraKeys(Modifier.align(Alignment.BottomCenter).imePadding().onSizeChanged { keysPx = it.height }) },
-    ) {
-        WidgetScreen(instance, Modifier.weight(1f).fillMaxWidth())
+    // Edge to edge, no title: it's plainly a terminal, and every column counts. Back closes it (the launcher's
+    // back handler), as any widget screen.
+    Box(Modifier.fillMaxSize().background(Palette.overlay)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .padding(bottom = clear)
+                .background(Palette.background)
+                // Its touches stay its own: none reach home behind it.
+                .pointerInput(Unit) { detectTapGestures { } },
+        ) {
+            WidgetScreen(instance, Modifier.fillMaxSize())
+        }
+        extraKeys(Modifier.align(Alignment.BottomCenter).imePadding().onSizeChanged { keysPx = it.height })
     }
 }
