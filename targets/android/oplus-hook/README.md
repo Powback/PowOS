@@ -15,7 +15,9 @@ OnePlus's launcher (`com.android.launcher`) stays the gesture and recents provid
 
 Found by reading the decompiled launcher against AOSP Launcher3 (android16-release); the system side (oplus-services)
 doesn't check which app is home. All hooks are guarded: a launcher update that renames something only logs.
-Confidence: 1 high, 2 medium (panel placement untested), 3 high.
+Confidence: 1 high, 2 verified 2026-10-17 on the Open (cover screen): the panel attaches to RecentsActivity's drag
+layer, swipe-up-and-hold shows "Split View" / "Floating window", releasing on Floating window opens the app as a
+floating window over PowOS's home (no RecentsActivity left behind), and Split View enters OnePlus's split; 3 high.
 
 Build: `targets/android/build-oplus-hook.sh` (android-app-dev). Install: Zygisk on in Magisk, the Vector (LSPosed
 fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scope `com.android.launcher` and restart the
