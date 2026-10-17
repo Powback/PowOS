@@ -51,7 +51,7 @@ class Compiler private constructor(
                 "Shader" to Kind(setOf("code", "uniforms", "fallback"), Children.NONE),
                 "Spacer" to Kind(emptySet(), Children.NONE),
                 // owl 2: a live terminal (foot) inside the tile.
-                "Terminal" to Kind(setOf("command", "fontSize", "session", "interactive", "textSize"), Children.NONE),
+                "Terminal" to Kind(setOf("command", "fontSize", "session", "interactive", "textSize", "focus"), Children.NONE),
                 // owl 4: input.
                 "Slider" to Kind(setOf("value", "min", "max", "step", "color", "track", "live"), Children.NONE),
                 "Input" to Kind(setOf("text", "placeholder", "color", "fontSize", "clear", "focus"), Children.NONE),
@@ -108,8 +108,8 @@ class Compiler private constructor(
                 // owl 7: more of the phone, without new permissions.
                 listOf("android.alarm", "android.modes", "torch", "share", "haptic").associateWith { 7 } +
                 // owl 8: one shell in a tile and its screen (session), a tile that only shows it (interactive: false),
-                // and its text in sp like other widgets' text (textSize).
-                listOf("Terminal.session", "Terminal.interactive", "Terminal.textSize").associateWith { 8 }
+                // its text in sp like other widgets' text (textSize), and in a screen typing at once (focus).
+                listOf("Terminal.session", "Terminal.interactive", "Terminal.textSize", "Terminal.focus").associateWith { 8 }
 
         // No onLongPress: long-press belongs to the home screen, which lifts the tile to move it.
         /**

@@ -14,6 +14,6 @@ widget "terminal" {
   Terminal { session: "shell"; interactive: false; textSize: 10 }
 
   screen {
-    Terminal { session: "shell" }
+    Terminal { session: "shell"; focus: true }
   }
 }

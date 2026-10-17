@@ -419,10 +419,12 @@ private fun Element(
             val session = p.observe("session")?.toString()
             val interactive = p.observe("interactive")?.truthy != false
             val textSize = p.observe("textSize")?.num()?.toFloat()
+            // In a screen, focus: typing at once (keyboard up), as an Input's focus.
+            val focus = LocalInputFocus.current && p.observe("focus")?.truthy == true
             // A command built from a value still loading waits for it, rather than starting a shell and restarting.
             if (command != Null) {
                 val term = remember(el, command, fontSize, session) { inst.terminal(el, command?.toString(), fontSize, session) }
-                TerminalView(term, mod.then(if (sized) Modifier else Modifier.fillMaxSize()), interactive, textSize)
+                TerminalView(term, mod.then(if (sized) Modifier else Modifier.fillMaxSize()), interactive, textSize, focus)
             }
         }
     }

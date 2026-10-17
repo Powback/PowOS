@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -286,11 +287,18 @@ fun TerminalView(
     modifier: Modifier,
     interactive: Boolean = true,
     textSize: Float? = null,
+    focus: Boolean = false,
 ) {
     val tiles = term.tiles
     val window = term.window
     val active = tiles.active === term
     LaunchedEffect(term) { term.start() }
+    if (focus) {
+        // Typing at once: active once its shell is up; let go when this view goes (a screen closing), or the tile
+        // showing the same shell would stay active and stop opening the screen on a tap.
+        LaunchedEffect(term, term.pty) { if (term.pty != null && tiles.active !== term) tiles.activate(term) }
+        DisposableEffect(term) { onDispose { if (tiles.active === term) tiles.deactivate() } }
+    }
     term.pty?.let { pty ->
         // Follows the theme and the terminal text size, as foot does through foot.ini.
         val palette = Palette.current
