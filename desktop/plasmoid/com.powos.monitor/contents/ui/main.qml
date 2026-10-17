@@ -71,8 +71,14 @@ PlasmoidItem {
         "grep '^cpu' /proc/stat; echo __END_CPU__; " +
         "awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print t, a}' /proc/meminfo; " +
         "awk 'NR>2 {gsub(/:/,\" \"); rx+=$2; tx+=$10} END{print rx, tx}' /proc/net/dev; " +
-        "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.gr,clocks.mem --format=csv,noheader,nounits 2>/dev/null | head -1 || echo na; " +
-        "sensors 2>/dev/null | awk '/^Tctl:/{gsub(/[+°C]/,\"\"); print $2; exit}' || echo 0; " +
+        // Every probe prints exactly one line, whatever the machine has: a pipeline whose first command is missing
+        // still succeeds, printing nothing - the lines shifted and every value read 0 (no nvidia-smi: AMD, Intel,
+        // phones; no lm_sensors).
+        "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.gr,clocks.mem --format=csv,noheader,nounits 2>/dev/null | head -1 | grep . || echo na; " +
+        // CPU temperature: lm_sensors' Tctl (AMD), else the hottest CPU thermal zone (ARM: phones, boards).
+        "{ sensors 2>/dev/null | awk '/^Tctl:/{gsub(/[+°C]/,\"\"); print $2; exit}'; " +
+        "for z in /sys/class/thermal/thermal_zone*; do case $(cat $z/type 2>/dev/null) in *cpu*|*CPU*) cat $z/temp 2>/dev/null;; esac; done | " +
+        "awk '$1>m{m=$1} END{if(m) printf \"%.1f\\n\", m/1000}'; } | head -1 | grep . || echo 0; " +
         "awk '/^cpu MHz/{s+=$4; n++} END{if(n) printf \"%.2f\\n\", s/n/1000; else print 0}' /proc/cpuinfo; " +
         "cut -d' ' -f1 /proc/loadavg; " +
         "awk '$3 ~ /^(nvme[0-9]+n[0-9]+|sd[a-z]+)$/ {r+=$6; w+=$10} END{print r, w}' /proc/diskstats"

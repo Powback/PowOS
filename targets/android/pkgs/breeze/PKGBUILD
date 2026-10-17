@@ -1,0 +1,62 @@
+# PowOS: Arch's breeze recipe (Qt 6 part only) at Plasma 6.7.5 for aarch64, plus our patch: configurable resize zones
+# around windows, which the phone sets wide (a finger can't hit a 1 px window border).
+# HACK: same pkgname as Arch's with pkgrel 1.1 (".1" = ours, as kwin and plasma-desktop) so it replaces the distro
+# package. Real fix: upstream the patch (Breeze's resize-only borders exist only without visible borders), then drop
+# this package.
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+pkgname=breeze
+pkgver=6.7.5
+_dirver=$(echo $pkgver | cut -d. -f1-3)
+pkgrel=1.1
+pkgdesc='Artwork, styles and assets for the Breeze visual style for the Plasma Desktop'
+arch=(aarch64)
+url='https://kde.org/plasma-desktop/'
+license=(LGPL-2.0-or-later)
+depends=(breeze-cursors
+         breeze-icons
+         frameworkintegration
+         glibc
+         kcmutils
+         kcolorscheme
+         kconfig
+         kcoreaddons
+         kdecoration
+         kguiaddons
+         ki18n
+         kiconthemes
+         kirigami
+         kwidgetsaddons
+         kwindowsystem
+         libstdc++
+         qt6-base
+         qt6-declarative
+         qt6-svg)
+makedepends=(extra-cmake-modules)
+optdepends=('breeze-gtk: Breeze widget style for GTK applications'
+            'breeze5: Breeze widget style for Qt5 applications')
+groups=(plasma)
+source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
+        0001-kdecoration-configurable-resize-zones-around-windows.patch)
+sha256sums=('aa05c0c31c852ed5b137327e7798fd763a54c643875d5d8070625475e0af6976'
+            SKIP)
+
+prepare() {
+  cd $pkgname-$pkgver
+  patch -p1 -N < "$srcdir/0001-kdecoration-configurable-resize-zones-around-windows.patch"
+}
+
+build() {
+  cmake -B build -S $pkgname-$pkgver \
+    -DBUILD_TESTING=OFF \
+    -DBUILD_QT5=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  # The cursors are their own package (breeze-cursors), as in Arch's split.
+  rm -r "$pkgdir"/usr/share/icons/{breeze_cursors,Breeze_Light}
+}

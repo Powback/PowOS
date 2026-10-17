@@ -150,6 +150,8 @@ install -Dm 644 "$P/session/plasma/powos-translucent-desktop/contents/code/main.
 # The phone's Android apps as a category of their own in the application menu (entries: andro.marchy.AndroidApps).
 install -Dm 644 "$P/session/plasma/menus/powos-android.menu" /etc/xdg/menus/applications-merged/powos-android.menu
 install -Dm 644 "$P/session/plasma/menus/powos-android.directory" /usr/share/desktop-directories/powos-android.directory
+# Window edges a finger can grab (see the file).
+install -Dm 644 "$P/session/plasma/breezerc" /etc/xdg/breezerc
 # first-boot.sh goes to /opt/lotfix/ in build-inside.sh's own install step (patched to take ours).
 # HACK: Omarchy command names the engine calls; see each file. omarchy-dns is Andromarchy's own
 # Android version (resolv.conf from Android's network), unchanged.

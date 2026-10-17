@@ -51,6 +51,9 @@ deploy)
   adb push -q "$HERE/../pkgs/fex-emu/thunks.json" /data/local/tmp/fex-thunks.json
   adb shell rm -rf /data/local/tmp/powos-plasma
   adb push -q "$HERE/../session/plasma" /data/local/tmp/powos-plasma
+  # PowOS's desktop widgets (desktop/plasmoid; the image ships them - a rootfs from an older image lacks their fixes).
+  adb shell rm -rf /data/local/tmp/powos-plasmoids
+  adb push -q "$HERE/../../../desktop/plasmoid" /data/local/tmp/powos-plasmoids
   asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh" ;;
 start)
   asu "sh /data/powos/powos-start.sh"; asu "tail -5 /data/powos/start.log" ;;

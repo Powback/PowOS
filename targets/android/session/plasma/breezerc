@@ -1,0 +1,5 @@
+# /etc/xdg/breezerc on the phone (rooted/powos-deploy.sh, install-powos-android.sh).
+# Window edges and corners a finger can grab: invisible resize zones this wide (logical pixels) around every window
+# (pkgs/breeze patch 0001). Breeze's own are only for borderless windows, and narrow.
+[Windeco]
+ExtendedResizeBorders=32

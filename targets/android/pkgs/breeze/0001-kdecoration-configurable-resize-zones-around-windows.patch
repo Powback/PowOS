@@ -1,0 +1,49 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] kdecoration: configurable resize zones around windows (touch screens)
+
+Windeco/ExtendedResizeBorders (breezerc, logical pixels, default 0 = as before): invisible resize-only borders that
+wide around every window - sides, bottom and top, so all four corners resize - beyond its visible borders, except
+along an edge a maximized window fills. On a touch screen a finger can't hit a 1 px border; PowOS's phone build sets
+it (/etc/xdg/breezerc).
+---
+--- a/kdecoration/breezedecoration.cpp
++++ b/kdecoration/breezedecoration.cpp
+@@ -433,7 +433,21 @@
+         extSides = extSize;
+     }
+ 
+-    setResizeOnlyBorders(QMarginsF(extSides, 0, extSides, extBottom));
++    // A configured size (touch screens: a finger can't hit a 1 px border): around every window, beyond its borders,
++    // the top too, so all four corners resize.
++    qreal extTop = 0;
++    if (const int configured = m_internalSettings->extendedResizeBorders(); configured > 0) {
++        const qreal size = KDecoration3::snapToPixelGrid(configured, window()->nextScale());
++        if (!isMaximizedHorizontally()) {
++            extSides = std::max(extSides, size);
++        }
++        if (!isMaximizedVertically()) {
++            extBottom = std::max(extBottom, size);
++            extTop = size;
++        }
++    }
++
++    setResizeOnlyBorders(QMarginsF(extSides, extTop, extSides, extBottom));
+ 
+     qreal topLeftRightRadius = 0;
+     qreal bottomLeftRadius = 0;
+--- a/kdecoration/breezesettingsdata.kcfg
++++ b/kdecoration/breezesettingsdata.kcfg
+@@ -104,6 +104,13 @@
+        <default>false</default>
+     </entry>
+ 
++    <!-- invisible resize zones around every window, logical pixels (touch screens); 0: only where there are no borders -->
++    <entry name="ExtendedResizeBorders" type = "Int">
++       <default>0</default>
++       <min>0</min>
++       <max>64</max>
++    </entry>
++
+     <!-- window specific settings -->
+     <entry name="ExceptionType" type="Enum">
+       <choices>

@@ -263,7 +263,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
      bool initializeEgl();
 --- a/src/backends/anland/anland_window_task.cpp
 +++ b/src/backends/anland/anland_window_task.cpp
-@@ -0,0 +1,840 @@
+@@ -0,0 +1,843 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -1004,8 +1004,11 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +
 +bool AnlandWindowTasks::exportable(Window *window) const
 +{
++    // An application's own window: what the taskbar lists. Not the shell's (the app grid is a full-screen
++    // plasmashell window, skip-taskbar - it opened as a task each time).
 +    return m_controlFd >= 0 && window && window->isClient() && !window->isDeleted() && window->surface()
-+        && window->isNormalWindow() && !window->isPopupWindow();
++        && window->isNormalWindow() && !window->isPopupWindow() && !window->skipTaskbar() && !window->isSpecialWindow()
++        && window->desktopFileName() != QLatin1String("org.kde.plasmashell");
 +}
 +
 +AnlandWindowTask *AnlandWindowTasks::taskFor(Window *window) const

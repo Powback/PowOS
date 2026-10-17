@@ -9,7 +9,7 @@
 pkgname=plasma-desktop
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=1.2
+pkgrel=1.3
 pkgdesc='KDE Plasma Desktop'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'

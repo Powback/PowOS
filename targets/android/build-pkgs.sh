@@ -54,14 +54,15 @@ for p in "${pkgs[@]}"; do
       # HACK: pacman 7 download sandbox (Landlock) is not permitted in Docker.
       grep -q "^DisableSandbox" /etc/pacman.conf || sed -i "/^\[options\]/a DisableSandbox" /etc/pacman.conf
       pacman-key --init >/dev/null 2>&1; pacman-key --populate archlinuxarm >/dev/null 2>&1
-      # A build container is no booted system: the hooks that reload D-Bus and refresh PackageKit after an install
-      # have neither and failed ("error: command failed to execute correctly"). Masked the way pacman documents it - a
+      # A build container is no booted system: the hooks that reload D-Bus, refresh PackageKit and load new kernel
+      # modules after an install have none of those and failed ("error: command failed to execute correctly"). Masked the way pacman documents it - a
       # same-named hook in /etc/pacman.d/hooks that is /dev/null.
       mkdir -p /etc/pacman.d/hooks
-      for h in dbus-reload 90-packagekit-refresh; do ln -sf /dev/null "/etc/pacman.d/hooks/$h.hook"; done
+      for h in dbus-reload 90-packagekit-refresh 36-systemd-modules-load; do ln -sf /dev/null "/etc/pacman.d/hooks/$h.hook"; done
+      # (--needed says "is up to date -- skipping" for each package already there: not news, filtered.)
       # On the rootfs: no upgrade - its packages are what this one is built against (see BUILD_ON_ROOTFS).
-      if [ "$BASE" = rootfs ]; then pacman -Sy --noconfirm --needed base-devel git >/dev/null
-      else pacman -Syu --noconfirm --needed base-devel git >/dev/null; fi
+      if [ "$BASE" = rootfs ]; then pacman -Sy --noconfirm --needed base-devel git >/dev/null 2> >(grep -v "is up to date -- skipping" >&2)
+      else pacman -Syu --noconfirm --needed base-devel git >/dev/null 2> >(grep -v "is up to date -- skipping" >&2); fi
       id builder >/dev/null 2>&1 || useradd -m builder
       echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
       case $SRC in
@@ -72,9 +73,20 @@ for p in "${pkgs[@]}"; do
       # recipes/<name>.sh: the smallest change that lets an upstream recipe build on aarch64 (each one says why).
       [ -f "/fixups/$PKG.sh" ] && (cd /build && bash "/fixups/$PKG.sh")
       # Our own packages built earlier satisfy dependencies of later ones (e.g. an AUR recipe needing another, kwin
-      # our kglobalacceld). The newest build of each: out/ keeps old ones, and pacman -U refuses duplicates.
+      # our kglobalacceld): a local repository ahead of the distribution repositories, so makepkg takes ours, and
+      # only what this build needs - installing all of them pulled in unrelated packages whose install scripts fail
+      # in a container (speech-dispatcher: systemctl --global). Ours that are installed already are brought to our
+      # newest build. The newest build of each: out/ keeps old ones.
       ours=$(sh /tools/newest-pkgs.sh /out)
-      [ -z "$ours" ] || pacman -U --noconfirm --needed $ours >/dev/null || echo "build-pkgs: could not install our earlier builds" >&2
+      if [ -n "$ours" ]; then
+        mkdir -p /ours && cp $ours /ours/ && repo-add -q /ours/ours.db.tar.gz /ours/*.pkg.tar.*
+        grep -q "^\[ours\]" /etc/pacman.conf ||
+          sed -i "0,/^\[core\]/s//[ours]\nSigLevel = Optional TrustAll\nServer = file:\/\/\/ours\n\n[core]/" /etc/pacman.conf
+        pacman -Sy >/dev/null
+        installed=$(pacman -Slq ours | while read -r p; do pacman -Q "$p" >/dev/null 2>&1 && echo "$p"; done)
+        [ -z "$installed" ] || pacman -S --noconfirm --needed $installed >/dev/null 2> >(grep -v "is up to date -- skipping" >&2) ||
+          echo "build-pkgs: could not update our earlier builds" >&2
+      fi
       chown -R builder /build && cd /build
       ignorearch=""; [ "$SRC" = local ] || ignorearch=--ignorearch
       # The real sudo, also for makepkg'"'"'s own (sudo pacman, for the dependencies): PowOS'"'"'s rootfs has a sudo

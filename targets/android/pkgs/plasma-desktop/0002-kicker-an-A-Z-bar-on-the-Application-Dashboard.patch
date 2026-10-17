@@ -44,10 +44,11 @@ else the next one. The current letter is highlighted while the finger is on the 
      function reset() {
          searchField.clear();
          searchField.forceActiveFocus(Qt.OtherFocusReason)
-@@ -374,6 +404,64 @@
+@@ -373,6 +403,79 @@
+                 function onQueryFinished() : void {
                      launchMatchTimer.stop()
                      Qt.callLater(launchMatchTimer.triggered) // callLater to give bindings time to update
-                 }
++                }
 +            }
 +        }
 +
@@ -59,15 +60,17 @@ else the next one. The current letter is highlighted while the finger is on the 
 +            readonly property var letters: ["#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O",
 +                                            "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
 +            property string current: ""
++            // Compact: a line per letter, centered beside the grid (not stretched to its height).
++            readonly property real letterHeight: Math.min(Kirigami.Units.gridUnit * 1.2, middleRow.height / letters.length)
 +
 +            anchors {
 +                right: parent.right
 +                rightMargin: Kirigami.Units.smallSpacing
-+                top: middleRow.top
-+                bottom: middleRow.bottom
++                verticalCenter: middleRow.verticalCenter
 +            }
 +            width: Kirigami.Units.gridUnit * 2
-+            z: 1
++            height: letterHeight * letters.length
++            z: 10
 +            visible: !root.searching
 +
 +            function pick(y: real) {
@@ -88,7 +91,7 @@ else the next one. The current letter is highlighted while the finger is on the 
 +                        required property string modelData
 +
 +                        width: letterBar.width
-+                        height: letterBar.height / letterBar.letters.length
++                        height: letterBar.letterHeight
 +                        horizontalAlignment: Text.AlignHCenter
 +                        verticalAlignment: Text.AlignVCenter
 +                        text: modelData
@@ -99,16 +102,28 @@ else the next one. The current letter is highlighted while the finger is on the 
 +                }
 +            }
 +
-+            MouseArea {
-+                anchors.fill: parent
-+                preventStealing: true
-+                onPressed: mouse => letterBar.pick(mouse.y)
-+                onPositionChanged: mouse => letterBar.pick(mouse.y)
-+                onReleased: letterBar.current = ""
-+                onCanceled: letterBar.current = ""
++            // Holds the press for the bar: the Dashboard closes on a tap on its empty background.
++            TapHandler {
++                gesturePolicy: TapHandler.WithinBounds
++            }
++
++            // Follows the finger (or the mouse) itself, so sliding along the bar moves through the letters: a
++            // MouseArea only saw touch converted to a press, not the slide.
++            PointHandler {
++                acceptedDevices: PointerDevice.AllDevices
++                grabPermissions: PointerHandler.CanTakeOverFromAnything
++                onActiveChanged: {
++                    if (!active) {
++                        letterBar.current = "";
++                    }
++                }
++                onPointChanged: {
++                    if (active) {
++                        letterBar.pick(point.position.y);
++                    }
+                 }
              }
          }
- 
 --- a/applets/kicker/ItemMultiGridView.qml
 +++ b/applets/kicker/ItemMultiGridView.qml
 @@ -37,6 +37,17 @@

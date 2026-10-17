@@ -42,7 +42,12 @@ install -Dm 644 $T/powos-plasma/menus/powos-android.directory $R/usr/share/deskt
 K=$R/usr/share/kwin/scripts/powos-translucent-desktop
 install -Dm 644 $T/powos-plasma/powos-translucent-desktop/metadata.json $K/metadata.json
 install -Dm 644 $T/powos-plasma/powos-translucent-desktop/contents/code/main.js $K/contents/code/main.js
+# Window edges a finger can grab (see the file).
+install -Dm 644 $T/powos-plasma/breezerc $R/etc/xdg/breezerc
 rm -rf $T/powos-plasma
+# PowOS's desktop widgets, as the image installs them (Containerfile: desktop/plasmoid -> /usr/share/plasma/plasmoids).
+cp -a $T/powos-plasmoids/. $R/usr/share/plasma/plasmoids/
+rm -rf $T/powos-plasmoids
 # FEX's config (as the fex-emu package installs it): RootFS + thunks, GPU on, ALSA off (see pkgs/fex-emu/PKGBUILD).
 install -Dm644 $T/fex-Config.json $R/usr/share/fex-emu/Config.json
 install -Dm644 $T/fex-thunks.json $R/usr/share/fex-emu/thunks.json
