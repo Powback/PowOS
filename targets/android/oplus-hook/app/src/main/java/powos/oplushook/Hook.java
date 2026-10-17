@@ -165,6 +165,11 @@ public class Hook implements IXposedHookLoadPackage {
     }
 
     private static final Map<Activity, Object> panels = new WeakHashMap<>();
+    private static final Map<Object, Float> downX = new WeakHashMap<>();
+    private static final Map<Object, Integer> fingerOffset = new WeakHashMap<>();
+    private static volatile Integer dragOffset; // the finger's sideways travel during a gesture over a third-party home
+    private static final int SCROLL_SIGN = 1; // the window's x offset: the same sign (checked on the Open)
+    private static final int SIGN = 1; // the panel's offset: finger left = negative
 
     /**
      * Split screen / floating window (drag the app to a side or a corner during the gesture) need the gesture's
@@ -198,6 +203,51 @@ public class Hook implements IXposedHookLoadPackage {
                     } catch (Throwable t) {
                         log("trigger panel", t);
                     }
+                }
+            });
+            // The panel picks a target from the swipe's progress and a sideways offset; OnePlus takes that offset from
+            // the recents view, which a third-party home's switcher (RecentsActivity) never scrolls during the
+            // gesture - the offset stayed 0 and only the middle could be picked. The finger's own sideways travel then.
+            XposedBridge.hookAllMethods(handler, "onMotionEvent", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        android.view.MotionEvent e = (android.view.MotionEvent) param.args[0];
+                        Object self = param.thisObject;
+                        Object panel = XposedHelpers.getObjectField(self, "triggerPanel");
+                        if (e == null || panel == null || !panels.containsValue(panel))
+                            return; // OnePlus's own home: its recents view supplies the offset
+                        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN || !downX.containsKey(self))
+                            downX.put(self, e.getRawX());
+                        int off = (int) (SIGN * (e.getRawX() - downX.get(self)));
+                        fingerOffset.put(panel, off);
+                        int a = e.getActionMasked();
+                        dragOffset = a == android.view.MotionEvent.ACTION_UP || a == android.view.MotionEvent.ACTION_CANCEL ? null : off;
+                        XposedHelpers.callMethod(panel, "updateHorizontalOffset", off);
+                    } catch (Throwable t) {
+                        log("trigger offset", t);
+                    }
+                }
+            });
+            // The window follows the finger sideways, as over OnePlus's home - there its recents view scrolls with the
+            // finger and the window takes that scroll; here the scroll stays 0. Only while the finger is down: the
+            // drop animation after the release is OnePlus's.
+            XposedBridge.hookAllMethods(XposedHelpers.findClass("com.android.quickstep.views.OplusRecentsViewImpl", cl), "getOffsetXForTSV", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Integer off = dragOffset;
+                    if (off != null)
+                        param.setResult((float) (SCROLL_SIGN * off));
+                }
+            });
+            // ...and on every frame OnePlus sets it again from the recents view's scroll (0 here) - through a setter ART
+            // inlines, so hooking the setter misses it. The finger's offset goes in right before the panel picks.
+            XposedBridge.hookAllMethods(multi, "updateProgress", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Integer off = fingerOffset.get(param.thisObject);
+                    if (off != null)
+                        XposedHelpers.setIntField(param.thisObject, "centerPointHorizontalOffset", off);
                 }
             });
         } catch (Throwable t) {

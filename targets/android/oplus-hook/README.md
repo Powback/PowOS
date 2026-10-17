@@ -22,6 +22,17 @@ layer, swipe-up-and-hold shows "Split View" / "Floating window", releasing on Fl
 floating window over PowOS's home (no RecentsActivity left behind), and Split View enters OnePlus's split; 3 high;
 4 verified (below).
 
+5. **Dragging the app to Split View / Floating window on the big screen.** The targets showed, but the window stayed
+   in the middle and nothing could be picked: the panel picks from the swipe's progress and a sideways offset that
+   OnePlus takes from its recents view, which scrolls with the finger over its own home. A third-party home's
+   switcher (RecentsActivity) is never scrolled by the gesture, so the offset stayed 0. Hooks: the finger's sideways
+   travel (from the swipe handler's own motion events) is the panel's offset - set at the start of `updateProgress`,
+   since OnePlus's per-frame reset goes through a setter ART inlines - and, while the finger is down, the window's
+   x offset (`OplusRecentsViewImpl.getOffsetXForTSV`). Verified 2026-10-17 on the Open's inner screen (uinput finger
+   + by hand): the window follows the finger, "Release to enter Split View" / Floating window highlight, and the drop
+   splits / floats Chrome. Known gap: after Split View, "Open another app to split the screen" shows the home app
+   (PowOS) to pick from, not the switcher - FallbackSwipeHandler starts the home intent on that drop.
+
 4. **Revealing the taskbar in apps** (short swipe up). It stayed stashed for three reasons, all OnePlus assuming its
    own home: `FallbackActivityInterface` doesn't override `getTaskbarActivityContext()` (base returns null, so the
    swipe handler never reveals); `OplusTaskbarStashController.TransitionCallback.canResponseTransition()` requires
