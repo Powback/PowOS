@@ -1,8 +1,0 @@
-# /etc/xdg/kded6rc on the phone (rooted/powos-deploy.sh, install-powos-android.sh).
-# No KScreen daemon: its job is monitors being plugged in (and laptop lids). On the phone every output is an Android
-# surface the PowOS app makes - a PowOS window shown as its own Android task is KWin output "anland-2"
-# (docs/powos-window-tasks.md) - and the daemon greeted each new one with its "new screen: how to use it?" chooser,
-# whose "Only use external screen" turned the desktop off. KWin keeps each output's settings itself
-# (kwinoutputconfig.json); kscreen-doctor and System Settings' display page talk to KWin and keep working.
-[Module-kscreen]
-autoload=false

@@ -38,10 +38,10 @@ public final class Native {
     public static native void nativeSetAudioLatency(int speakerMs, int micMs);
     public static native void nativeSetAudioKeepalive(boolean enabled);
 
-    // PowOS: more surfaces - a PowOS window in its own Android task (PowosWindowActivity), on its own display daemon
-    // (SessionService.windowDaemonSocket). Pixels and input only; the calls above stay the desktop's.
-    // A handle is valid from nativeStartWindow (0 = failed) until nativeStopWindow.
-    public static native long nativeStartWindow(Surface surface, String socketPath);
+    // PowOS: more surfaces - a PowOS window KWin exports to its own Android task (PowosWindowActivity), the display
+    // daemon's surface [surfaceId] (docs/powos-window-tasks.md). Pixels and input only; the calls above stay the
+    // desktop's. A handle is valid from nativeStartWindow (0 = failed) until nativeStopWindow.
+    public static native long nativeStartWindow(Surface surface, int surfaceId);
     public static native void nativeStopWindow(long handle);
     public static native void nativeSetWindowRefreshRate(long handle, float hz);
     public static native void nativeSendWindowTouch(long handle, int action, float x, float y, int pointerId);

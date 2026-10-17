@@ -58,14 +58,6 @@ public class SessionService extends Service {
         return new File(runDir(ctx), "andromarchy/display_daemon.sock");
     }
 
-    /**
-     * PowOS: the second display daemon's socket - a PowOS window in its own Android task (PowosWindowActivity), KWin's
-     * output "anland-2" (ANLAND_SOCKET_2, session/Hyprland). See docs/powos-window-tasks.md.
-     */
-    public static File windowDaemonSocket(Context ctx) {
-        return new File(runDir(ctx), "andromarchy/display_daemon-2.sock");
-    }
-
     /** True once the Arch rootfs (built by build/build-rootfs.sh) is in place. */
     public static boolean rootfsReady(Context ctx) {
         return new File(rootfs(ctx), "opt/lotfix/arch-glibc/ld-linux-aarch64.so.1").exists();
@@ -119,6 +111,8 @@ public class SessionService extends Service {
         } catch (IOException e) {
             Log.e(TAG, "session start failed", e);
         }
+        // PowOS: PowOS windows as their own Android tasks - the control channel to KWin (through the daemon).
+        WindowTasks.start(this);
     }
 
     @Override
@@ -131,8 +125,6 @@ public class SessionService extends Service {
         File sock = daemonSocket(this);
         sock.getParentFile().mkdirs();
         sock.delete(); // a stale socket from a killed session would make the daemon's bind fail
-        File windowSock = windowDaemonSocket(this);
-        windowSock.delete();
 
         String libDir = getApplicationInfo().nativeLibraryDir;
         String launcher = libDir + "/liblotfixrun.so";
@@ -143,7 +135,6 @@ public class SessionService extends Service {
         // the daemon socket, the phone-state files and desktop-ready (SplashScreen) are shared as they are.
         if (RootMode.enabled()) {
             spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock.getPath()), null);
-            spawn("andromarchy-2", List.of(libDir + "/libandromarchy.so", windowSock.getPath()), null);
             // Hardware video for PowOS (VA-API through Mesa's termuxva bridge -> MediaCodec), as below; the rooted
             // session points LIBVA at its socket (/run/powos-app/termux-va.sock).
             spawn("termux-va", List.of(libDir + "/libtermuxva.so", "--sock", new File(run, "termux-va.sock").getPath()),
@@ -189,8 +180,6 @@ public class SessionService extends Service {
 
         // 1. Display daemon: relays buffers and input between this app's display and Hyprland.
         spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock.getPath()), null);
-        // PowOS: and one for a PowOS window shown as its own Android task.
-        spawn("andromarchy-2", List.of(libDir + "/libandromarchy.so", windowSock.getPath()), null);
 
         // 2. Session D-Bus (systemd provides it on a normal Linux login). Browsers, file dialogs, portals and tray
         //    apps need it; archEnv() gives every program its address.

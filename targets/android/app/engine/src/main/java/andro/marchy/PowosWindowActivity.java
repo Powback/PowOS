@@ -2,6 +2,8 @@ package andro.marchy;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -9,29 +11,41 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
+import java.io.File;
+
 /**
- * PowOS: a PowOS (KWin) window as its own Android task - its own card in Recents, split screen and floating windows.
- * This activity's surface is KWin's output "anland-2": a consumer on the second display daemon
- * (SessionService.windowDaemonSocket, ANLAND_SOCKET_2 in the session), pixels and input only; audio, clipboard and
- * the keyboard stay with the desktop (MainActivity). KWin places the window on that output (a KWin script for now).
+ * PowOS: a PowOS (KWin) window as its own Android task - its own card in Recents, split screen and floating windows
+ * (docs/powos-window-tasks.md). KWin exports the window to this activity's surface: the display daemon's surface
+ * {@code id} (the intent's data, powos-window://id - a document task per window), pixels and input only; audio,
+ * clipboard and the keyboard stay with the desktop (MainActivity).
  *
- * Slice 1 of docs/powos-window-tasks.md: one such task (one second output), so singleTask in its own affinity.
- * Extra "title": the task's label.
+ * Started and finished by KWin over the control channel (WindowTasks: "open", "close"); tells it when it gets the
+ * focus (KWin activates the window) and when it is closed for good (KWin shows the window on the desktop again).
  */
 public class PowosWindowActivity extends Activity implements SurfaceHolder.Callback {
     private static final String TAG = "PowosWindow";
-    public static final String EXTRA_TITLE = "title";
+    static final String EXTRA_TITLE = "title";
+    static final String EXTRA_APP_ID = "app_id";
 
     static {
         System.loadLibrary("andromarchy_consumer");
     }
 
+    private int id;
     /** The consumer (Native.nativeStartWindow), 0 while none: input is only sent while it's set. */
     private volatile long handle;
+    /** KWin closed the window: nothing to hand back on finishing. */
+    private boolean closedByKWin;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        id = parseId();
+        if (id <= 0) {
+            finish();
+            return;
+        }
+        WindowTasks.tasks.put(id, this);
         SurfaceView view = new SurfaceView(this);
         view.setFocusable(true);
         view.setFocusableInTouchMode(true);
@@ -42,20 +56,40 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         });
         setContentView(view);
         view.requestFocus();
-        applyTitle();
+        setTitleText(getIntent().getStringExtra(EXTRA_TITLE));
+    }
+
+    private int parseId() {
+        try {
+            return getIntent().getData() != null ? Integer.parseInt(getIntent().getData().getHost()) : 0;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /** The task's label (the window's caption) and icon (the app's, as PowOS shows it: powos-apps-export). */
+    void setTitleText(String title) {
+        String appId = getIntent().getStringExtra(EXTRA_APP_ID);
+        Bitmap icon = null;
+        if (appId != null && !appId.isEmpty()) {
+            File png = new File(SessionService.runDir(this), "powos-apps/icons/" + appId + ".png");
+            if (png.isFile())
+                icon = BitmapFactory.decodeFile(png.getPath());
+        }
+        setTaskDescription(new ActivityManager.TaskDescription(title == null || title.isEmpty() ? null : title, icon));
+    }
+
+    /** KWin closed the window ("close"). */
+    void closedByKWin() {
+        closedByKWin = true;
+        finishAndRemoveTask();
     }
 
     @Override
-    protected void onNewIntent(android.content.Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        applyTitle();
-    }
-
-    private void applyTitle() {
-        String title = getIntent().getStringExtra(EXTRA_TITLE);
-        if (title != null)
-            setTaskDescription(new ActivityManager.TaskDescription(title));
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus)
+            WindowTasks.send("focus", id);
     }
 
     @Override
@@ -64,11 +98,11 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-        // A new size (split screen, floating, fold) reconnects with buffers of that size; KWin resizes the output to
-        // them (AnlandEglLayer).
-        Log.i(TAG, "surfaceChanged: " + width + "x" + height);
+        // A new size (split screen, floating, fold) reconnects with buffers of that size; KWin resizes the window to
+        // them.
+        Log.i(TAG, "surface " + id + ": " + width + "x" + height);
         stopConsumer();
-        long h = Native.nativeStartWindow(holder.getSurface(), SessionService.windowDaemonSocket(this).getPath());
+        long h = Native.nativeStartWindow(holder.getSurface(), id);
         if (h == 0) {
             Log.e(TAG, "window consumer did not start");
             return;
@@ -101,21 +135,18 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
             int action;
             if (masked == MotionEvent.ACTION_MOVE) {
                 action = 2;
+            } else if (masked == MotionEvent.ACTION_CANCEL) {
+                action = 1; // every pointer lifts
             } else if (i != index) {
                 continue;
             } else if (masked == MotionEvent.ACTION_DOWN || masked == MotionEvent.ACTION_POINTER_DOWN) {
                 action = 0;
-            } else if (masked == MotionEvent.ACTION_UP || masked == MotionEvent.ACTION_POINTER_UP
-                    || masked == MotionEvent.ACTION_CANCEL) {
+            } else if (masked == MotionEvent.ACTION_UP || masked == MotionEvent.ACTION_POINTER_UP) {
                 action = 1;
             } else {
                 continue;
             }
             Native.nativeSendWindowTouch(h, action, e.getX(i), e.getY(i), e.getPointerId(i));
-            if (masked == MotionEvent.ACTION_CANCEL)
-                for (int j = 0; j < e.getPointerCount(); j++)
-                    if (j != i)
-                        Native.nativeSendWindowTouch(h, 1, e.getX(j), e.getY(j), e.getPointerId(j));
         }
         Native.nativeSendWindowTouchFrame(h);
     }
@@ -139,6 +170,12 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
     @Override
     protected void onDestroy() {
         stopConsumer();
+        if (id > 0) {
+            WindowTasks.tasks.remove(id, this);
+            // Closed for good (swiped from Recents, Back): KWin shows the window on the desktop again.
+            if (isFinishing() && !closedByKWin)
+                WindowTasks.send("closed", id);
+        }
         super.onDestroy();
     }
 }

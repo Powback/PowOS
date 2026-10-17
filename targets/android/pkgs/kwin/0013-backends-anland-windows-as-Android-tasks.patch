@@ -1,0 +1,1326 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: KWin windows as their own Android tasks
+
+A window is exported, not moved: it stays a normal KWin window and is drawn - with its popups - into the buffers of
+an Android task's surface (AnlandWindowTask, anland_window_task.cpp), the way a window screencast draws it, when it
+changes. While the task shows it the window lives on a virtual desktop of its own ("Android tasks": the desktop
+neither paints it nor sends it input, while it can keep the focus) and renders offscreen (not suspended, frame
+callbacks keep coming); its size follows the task. Touch from the task goes straight to the window or popup under
+the finger; keys go through KWin's keyboard to the focused window, which the task's focus makes this one.
+
+The display daemon pairs a consumer and a producer per surface id (the HELLO's payload; none = the desktop) and
+relays control lines between KWin and the PowOS app: D-Bus org.powos.WindowTasks.show(windowId) (the window menu's
+"Open as Android task") sends "open", the app starts the task; its "closed" puts the window back on the desktop.
+The producer's handshake and fd pickup get non-blocking variants for that (connect_to_deamon_begin/_finish,
+request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with the desktop's layer.
+---
+--- a/src/backends/anland/CMakeLists.txt
++++ b/src/backends/anland/CMakeLists.txt
+@@ -4,6 +4,8 @@
+     anland_input.cpp
+     anland_logging.cpp
+     anland_output.cpp
++    # PowOS: KWin windows shown as their own Android tasks
++    anland_window_task.cpp
+     # PipeWire audio engine: sink-monitor capture + virtual mic source
+     anland_audio.c
+     # PipeWire camera engine: virtual Video/Source nodes fed by the Android camera
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -11,6 +11,7 @@
+ #include "anland_input.h"
+ #include "anland_logging.h"
+ #include "anland_output.h"
++#include "anland_window_task.h"
+ 
+ #include "core/drmdevice.h"
+ #include "core/renderdevice.h"
+@@ -200,6 +201,9 @@
+     // reconnect timer starts and discovers the consumer via try_exit_fallback().
+     enterFallback();
+ 
++    // PowOS: windows as their own Android tasks - surfaces of the same daemon, and its control relay to the app.
++    m_windowTasks = new AnlandWindowTasks(this, m_socketPath);
++
+     // Connect to KWin's clipboard change signal once.  The handler is guarded
+     // by m_inFallback so it only fires when a consumer is connected.
+     if (SeatInterface *seat = waylandServer()->seat()) {
+@@ -242,6 +246,14 @@
+     }
+ 
+     return true;
++}
++
++void AnlandBackend::setEglBackend(AnlandEglBackend *backend)
++{
++    if (!backend && m_windowTasks) {
++        m_windowTasks->closeAll();
++    }
++    m_eglBackend = backend;
+ }
+ 
+ std::unique_ptr<EglBackend> AnlandBackend::createOpenGLBackend()
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -31,7 +31,9 @@
+ namespace KWin
+ {
+ 
++class AnlandEglBackend;
+ class AnlandOutput;
++class AnlandWindowTasks;
+ class AnlandInputDevice;
+ class BackendOutput;
+ class DrmDevice;
+@@ -76,6 +78,13 @@
+     {
+         return m_inputDevice.get();
+     }
++    /** The OpenGL backend while there is one (PowOS: window tasks render with it). */
++    AnlandEglBackend *eglBackend() const
++    {
++        return m_eglBackend;
++    }
++    /** null when the OpenGL backend goes: the window tasks close first, their textures need its context. */
++    void setEglBackend(AnlandEglBackend *backend);
+ 
+     bool notifyFramePresented();
+ 
+@@ -121,6 +130,9 @@
+     std::unique_ptr<RenderDevice> m_renderDevice;
+     QVector<AnlandOutput *> m_outputs;
+     std::unique_ptr<AnlandInputDevice> m_inputDevice;
++    AnlandEglBackend *m_eglBackend = nullptr;
++    // PowOS: KWin windows shown as their own Android tasks (anland_window_task.h).
++    AnlandWindowTasks *m_windowTasks = nullptr;
+ 
+     QSocketNotifier *m_inputNotifier = nullptr;
+     QSocketNotifier *m_bufReadyNotifier = nullptr;
+--- a/src/backends/anland/anland_egl_backend.cpp
++++ b/src/backends/anland/anland_egl_backend.cpp
+@@ -115,10 +115,8 @@
+     const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
+ 
+     for (int i = 0; i < count; i++) {
+-        const int fd = get_dmabuf_fd_at(m_display, i);
+-        buf_info info;
+-        if (fd < 0 || get_dmabuf_info_at(m_display, i, &info) < 0) {
+-            qCWarning(KWIN_ANLAND) << "failed to get dmabuf info for buffer" << i;
++        AnlandEglBackend::ImportedBuffer imported = m_backend->importConsumerBuffer(m_display, i, contentTransform);
++        if (!imported.texture) {
+             releaseBuffers();
+             return false;
+         }
+@@ -128,50 +126,13 @@
+          * OutputMode, resize the output to match — the consumer may have rotated or
+          * switched display modes. All buffers in a set share the same size, so we
+          * only need to check the first buffer. */
+-        if (i == 0) {
+-            const QSize bufSize(info.width, info.height);
+-            if (bufSize != m_output->modeSize() && bufSize.isValid()) {
+-                qCInfo(KWIN_ANLAND) << "dmabuf size changed, resizing output to" << bufSize;
+-                m_output->resize(bufSize);
+-            }
++        if (i == 0 && imported.size != m_output->modeSize() && imported.size.isValid()) {
++            qCInfo(KWIN_ANLAND) << "dmabuf size changed, resizing output to" << imported.size;
++            m_output->resize(imported.size);
+         }
+-        const QSize actual(info.width, info.height);
+ 
+-        DmaBufAttributes attrs;
+-        attrs.planeCount = 1;
+-        attrs.width = actual.width();
+-        attrs.height = actual.height();
+-        attrs.format = protocol_format_to_drm(info.format);
+-        attrs.modifier = info.modifier;
+-        // The producer owns the dmabuf fd; DmaBufAttributes (and the EGLImage we
+-        // hand the fd to) must not close it, so dup() into the owning slot.
+-        attrs.fd[0] = FileDescriptor(dup(fd));
+-        attrs.offset[0] = static_cast<int>(info.offset);
+-        attrs.pitch[0] = static_cast<int>(info.stride);
+-
+-        // EglBackend::importDmaBufAsTexture() builds the EGLImage and wraps it in
+-        // a GLTexture in one step (the 5.27-era manual EGLImageKHR +
+-        // EGLImageTexture(...) dance is gone in 6.x).
+-        std::shared_ptr<GLTexture> texture = m_backend->importDmaBufAsTexture(attrs);
+-        if (!texture) {
+-            qCWarning(KWIN_ANLAND) << "failed to import dmabuf" << i << "as texture";
+-            releaseBuffers();
+-            return false;
+-        }
+-
+-        texture->setContentTransform(contentTransform);
+-        auto fbo = std::make_unique<GLFramebuffer>(texture.get());
+-        if (!fbo->valid()) {
+-            qCWarning(KWIN_ANLAND) << "framebuffer for dmabuf" << i << "is not complete";
+-            releaseBuffers();
+-            return false;
+-        }
+-
+-        qCDebug(KWIN_ANLAND) << "imported buffer" << i << "fd" << fd << actual
+-                             << "fmt" << Qt::hex << attrs.format << "mod" << attrs.modifier;
+-
+-        m_textures[i] = std::move(texture);
+-        m_fbos[i] = std::move(fbo);
++        m_textures[i] = std::move(imported.texture);
++        m_fbos[i] = std::move(imported.fbo);
+         m_renderTargets[i].emplace(m_fbos[i].get());
+         // Freshly imported dmabuf has undefined contents: owe it a full repaint.
+         m_accumDamage[i] = Region::infinite();
+@@ -268,10 +229,12 @@
+ AnlandEglBackend::AnlandEglBackend(AnlandBackend *b)
+     : m_backend(b)
+ {
++    m_backend->setEglBackend(this);
+ }
+ 
+ AnlandEglBackend::~AnlandEglBackend()
+ {
++    m_backend->setEglBackend(nullptr);
+     m_outputs.clear();
+     cleanup();
+ }
+@@ -279,6 +242,47 @@
+ display_ctx *AnlandEglBackend::display() const
+ {
+     return m_backend->display();
++}
++
++AnlandEglBackend::ImportedBuffer AnlandEglBackend::importConsumerBuffer(display_ctx *display, int index, OutputTransform contentTransform)
++{
++    const int fd = get_dmabuf_fd_at(display, index);
++    buf_info info;
++    if (fd < 0 || get_dmabuf_info_at(display, index, &info) < 0) {
++        qCWarning(KWIN_ANLAND) << "failed to get dmabuf info for buffer" << index;
++        return {};
++    }
++    const QSize size(info.width, info.height);
++
++    DmaBufAttributes attrs;
++    attrs.planeCount = 1;
++    attrs.width = size.width();
++    attrs.height = size.height();
++    attrs.format = protocol_format_to_drm(info.format);
++    attrs.modifier = info.modifier;
++    // The producer owns the dmabuf fd; DmaBufAttributes (and the EGLImage we
++    // hand the fd to) must not close it, so dup() into the owning slot.
++    attrs.fd[0] = FileDescriptor(dup(fd));
++    attrs.offset[0] = static_cast<int>(info.offset);
++    attrs.pitch[0] = static_cast<int>(info.stride);
++
++    // EglBackend::importDmaBufAsTexture() builds the EGLImage and wraps it in
++    // a GLTexture in one step (the 5.27-era manual EGLImageKHR +
++    // EGLImageTexture(...) dance is gone in 6.x).
++    std::shared_ptr<GLTexture> texture = importDmaBufAsTexture(attrs);
++    if (!texture) {
++        qCWarning(KWIN_ANLAND) << "failed to import dmabuf" << index << "as texture";
++        return {};
++    }
++    texture->setContentTransform(contentTransform);
++    auto fbo = std::make_unique<GLFramebuffer>(texture.get());
++    if (!fbo->valid()) {
++        qCWarning(KWIN_ANLAND) << "framebuffer for dmabuf" << index << "is not complete";
++        return {};
++    }
++    qCDebug(KWIN_ANLAND) << "imported buffer" << index << "fd" << fd << size
++                         << "fmt" << Qt::hex << attrs.format << "mod" << attrs.modifier;
++    return ImportedBuffer{.texture = std::move(texture), .fbo = std::move(fbo), .size = size};
+ }
+ 
+ DrmDevice *AnlandEglBackend::drmDevice() const
+--- a/src/backends/anland/anland_egl_backend.h
++++ b/src/backends/anland/anland_egl_backend.h
+@@ -14,6 +14,7 @@
+ */
+ #pragma once
+ 
++#include "core/output.h"
+ #include "core/outputlayer.h"
+ #include "core/region.h"
+ #include "opengl/eglbackend.h"
+@@ -87,6 +88,16 @@
+         return m_backend;
+     }
+     display_ctx *display() const;
++
++    /** One of a consumer's dmabufs as a texture with a framebuffer on it (PowOS: the desktop's and the window
++     *  tasks' buffers alike). [contentTransform]: how the consumer reads it (always with a vertical flip). */
++    struct ImportedBuffer
++    {
++        std::shared_ptr<GLTexture> texture;
++        std::unique_ptr<GLFramebuffer> fbo;
++        QSize size;
++    };
++    ImportedBuffer importConsumerBuffer(display_ctx *display, int index, OutputTransform contentTransform);
+ 
+ private:
+     bool initializeEgl();
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -0,0 +1,708 @@
++/*
++    KWin - the KDE window manager
++    This file is part of the KDE project.
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++
++    PowOS: KWin windows shown as their own Android tasks. See anland_window_task.h.
++*/
++#include "anland_window_task.h"
++#include "anland_backend.h"
++#include "anland_egl_backend.h"
++#include "anland_input.h"
++#include "anland_logging.h"
++
++#include "core/rendertarget.h"
++#include "core/renderviewport.h"
++#include "effect/effect.h"
++#include "main.h"
++#include "opengl/eglcontext.h"
++#include "opengl/eglnativefence.h"
++#include "opengl/glframebuffer.h"
++#include "opengl/gltexture.h"
++#include "opengl/glutils.h"
++#include "scene/itemrenderer.h"
++#include "scene/windowitem.h"
++#include "scene/workspacescene.h"
++#include "virtualdesktops.h"
++#include "wayland/seat.h"
++#include "wayland_server.h"
++#include "window.h"
++#include "workspace.h"
++
++#include <QDBusConnection>
++#include <QSocketNotifier>
++
++#include <chrono>
++#include <sys/eventfd.h>
++#include <sys/socket.h>
++#include <unistd.h>
++
++extern "C" {
++#include "socket_utils.h"
++}
++
++namespace KWin
++{
++
++// The consumer gives up on a buffer it handed over after 5 s (refresh_done): answer well before.
++static constexpr int s_keepaliveMs = 2000;
++// Touch ids of a task's fingers: never the desktop's own (Android's are small).
++static constexpr qint32 s_touchIdBase = 1 << 16;
++static const QString s_tasksDesktopName = QStringLiteral("Android tasks");
++
++static std::chrono::milliseconds now()
++{
++    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch());
++}
++
++// ---------------------------------------------------------------------------
++// AnlandWindowTask
++// ---------------------------------------------------------------------------
++
++AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uint32_t id)
++    : QObject(tasks)
++    , m_tasks(tasks)
++    , m_window(window)
++    , m_id(id)
++{
++    m_retry.setSingleShot(true);
++    m_retry.setInterval(500);
++    connect(&m_retry, &QTimer::timeout, this, &AnlandWindowTask::requestConsumer);
++    m_keepalive.setSingleShot(true);
++    m_keepalive.setInterval(s_keepaliveMs);
++    connect(&m_keepalive, &QTimer::timeout, this, [this]() {
++        render(true);
++    });
++
++    connect(window, &Window::captionChanged, this, [this]() {
++        m_tasks->send({QStringLiteral("title"), QString::number(m_id), m_window->caption()});
++    });
++
++    // Its surface of the daemon: the task's consumer says hello with the same id once the activity is up.
++    if (connect_to_deamon_begin(&m_display, m_tasks->socketPath().toLocal8Bit().constData(), m_id) < 0) {
++        qCWarning(KWIN_ANLAND) << "window task" << m_id << ": no display daemon";
++        m_display = nullptr;
++        return;
++    }
++    set_fallback_callback(m_display, &AnlandWindowTask::fallbackTrampoline, this);
++    m_ctrlNotifier = new QSocketNotifier(get_ctrl_fd(m_display), QSocketNotifier::Read, this);
++    connect(m_ctrlNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onCtrlReadable);
++}
++
++AnlandWindowTask::~AnlandWindowTask()
++{
++    cancelTouches();
++    releaseBuffers();
++    if (m_display) {
++        ::disconnect(m_display); // C producer API, not QObject::disconnect
++        m_display = nullptr;
++    }
++    unwatchAll();
++    if (m_window && m_exported && !m_window->isDeleted() && workspace()) {
++        // Back on the desktop as it was, and in front.
++        m_window->setDesktops(m_desktops);
++        m_window->moveResize(m_geometry);
++        if (m_maximizeMode != MaximizeRestore) {
++            m_window->maximize(m_maximizeMode);
++        }
++        workspace()->activateWindow(m_window);
++    }
++}
++
++void AnlandWindowTask::focus()
++{
++    if (m_window && m_exported) {
++        // The window is shown (on the tasks desktop, which isn't current), so it can take the focus without a desktop
++        // switch: requestFocus() neither raises nor switches (activateWindow() would switch to its desktop).
++        workspace()->requestFocus(m_window, true);
++    }
++}
++
++void AnlandWindowTask::onCtrlReadable()
++{
++    if (m_state == State::Handshake) {
++        m_ctrlNotifier->setEnabled(false);
++        if (connect_to_deamon_finish(m_display) < 0) {
++            qCWarning(KWIN_ANLAND) << "window task" << m_id << ": daemon handshake failed";
++            m_tasks->remove(this);
++            return;
++        }
++        m_state = State::Fallback;
++        requestConsumer();
++    } else if (m_state == State::Fallback) {
++        m_ctrlNotifier->setEnabled(false);
++        if (finish_exit_fallback(m_display) < 0) {
++            // A stale hand-over (that consumer already left): ask again.
++            m_retry.start();
++            return;
++        }
++        goLive();
++    }
++}
++
++void AnlandWindowTask::requestConsumer()
++{
++    if (!m_display || m_state != State::Fallback) {
++        return;
++    }
++    if (request_consumer_fds(m_display) < 0) {
++        qCWarning(KWIN_ANLAND) << "window task" << m_id << ": lost the display daemon";
++        m_tasks->remove(this);
++        return;
++    }
++    m_ctrlNotifier->setEnabled(true);
++}
++
++void AnlandWindowTask::goLive()
++{
++    if (!importBuffers()) {
++        // try_exit_fallback()'s contract: back to fallback, then ask again.
++        enterFallback();
++        return;
++    }
++    m_state = State::Live;
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "live," << m_bufferSize << "for" << (m_window ? m_window->caption() : QString());
++
++    m_inputNotifier = new QSocketNotifier(get_data_fd(m_display), QSocketNotifier::Read, this);
++    connect(m_inputNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onInputReadable);
++    m_bufReadyNotifier = new QSocketNotifier(get_buffer_ready_fd(m_display), QSocketNotifier::Read, this);
++    connect(m_bufReadyNotifier, &QSocketNotifier::activated, this, &AnlandWindowTask::onBufferReady);
++
++    if (!m_window) {
++        return;
++    }
++    if (!m_exported) {
++        // Off the desktop: its own virtual desktop, which the desktop never shows - the window stays shown (focus,
++        // input) - and kept rendering while the task shows it (the screencast way: not suspended, frame callbacks).
++        m_desktops = m_window->desktops();
++        m_geometry = m_window->frameGeometry();
++        m_maximizeMode = m_window->maximizeMode();
++        if (m_maximizeMode != MaximizeRestore) {
++            m_window->maximize(MaximizeRestore);
++        }
++        if (VirtualDesktop *desktop = m_tasks->tasksDesktop()) {
++            m_window->setDesktops({desktop});
++        }
++        m_exported = true;
++        focus();
++    }
++    watchWindow(m_window);
++    for (Window *child : m_window->transients()) {
++        if (child->isPopupWindow()) {
++            watchWindow(child);
++        }
++    }
++    // Menus and other popups it opens from now on are drawn into the task too.
++    m_popupAdded = connect(workspace(), &Workspace::windowAdded, this, [this](Window *added) {
++        if (added->isPopupWindow() && added->transientFor() == m_window) {
++            watchWindow(added);
++        }
++    });
++    fitWindow();
++}
++
++void AnlandWindowTask::watchWindow(Window *window)
++{
++    for (const Watched &w : std::as_const(m_watched)) {
++        if (w.window == window) {
++            return;
++        }
++    }
++    window->refOffscreenRendering();
++    Watched watched;
++    watched.window = window;
++    watched.damaged = connect(window, &Window::damaged, this, [this]() {
++        std::fill(std::begin(m_stale), std::end(m_stale), true);
++        scheduleRender();
++    });
++    watched.closed = connect(window, &Window::closed, this, [this, window]() {
++        for (qsizetype i = 0; i < m_watched.size(); i++) {
++            if (m_watched[i].window == window) {
++                disconnect(m_watched[i].damaged);
++                disconnect(m_watched[i].closed);
++                window->unrefOffscreenRendering();
++                m_watched.removeAt(i);
++                break;
++            }
++        }
++        std::fill(std::begin(m_stale), std::end(m_stale), true);
++        scheduleRender();
++    });
++    m_watched.append(watched);
++    std::fill(std::begin(m_stale), std::end(m_stale), true);
++    scheduleRender();
++}
++
++void AnlandWindowTask::unwatchAll()
++{
++    disconnect(m_popupAdded);
++    for (const Watched &w : std::as_const(m_watched)) {
++        disconnect(w.damaged);
++        disconnect(w.closed);
++        if (w.window) {
++            w.window->unrefOffscreenRendering();
++        }
++    }
++    m_watched.clear();
++}
++
++void AnlandWindowTask::enterFallback()
++{
++    if (m_state == State::Fallback) {
++        return;
++    }
++    // The task went to the background (its surface is gone) or the consumer dropped: stop drawing, keep the window
++    // where it is (on the tasks desktop) until the task comes back or is closed.
++    qCInfo(KWIN_ANLAND) << "window task" << m_id << "in the background";
++    m_state = State::Fallback;
++    cancelTouches();
++    if (m_inputNotifier) {
++        m_inputNotifier->setEnabled(false);
++        m_inputNotifier->deleteLater();
++        m_inputNotifier = nullptr;
++    }
++    if (m_bufReadyNotifier) {
++        m_bufReadyNotifier->setEnabled(false);
++        m_bufReadyNotifier->deleteLater();
++        m_bufReadyNotifier = nullptr;
++    }
++    m_keepalive.stop();
++    m_offered = false;
++    releaseBuffers();
++    // Not rendering meanwhile: let the window be suspended like any unseen one.
++    unwatchAll();
++    // Called from inside the producer library (it closes the fds right after): ask again from the event loop.
++    QMetaObject::invokeMethod(this, &AnlandWindowTask::requestConsumer, Qt::QueuedConnection);
++}
++
++void AnlandWindowTask::fallbackTrampoline(void *data)
++{
++    static_cast<AnlandWindowTask *>(data)->enterFallback();
++}
++
++bool AnlandWindowTask::importBuffers()
++{
++    AnlandEglBackend *egl = m_tasks->backend()->eglBackend();
++    if (!egl || !egl->openglContext()->makeCurrent()) {
++        return false;
++    }
++    releaseBuffers();
++    const int count = get_buf_count(m_display);
++    if (count <= 0 || count > MAX_BUFS) {
++        return false;
++    }
++    for (int i = 0; i < count; i++) {
++        // Top-down for the consumer, as the desktop's buffers (AnlandEglLayer): a vertical flip, no rotation - the
++        // task's surface is already in its own orientation.
++        auto imported = egl->importConsumerBuffer(m_display, i, OutputTransform::FlipY);
++        if (!imported.texture) {
++            releaseBuffers();
++            return false;
++        }
++        m_bufferSize = imported.size;
++        m_textures[i] = std::move(imported.texture);
++        m_fbos[i] = std::move(imported.fbo);
++        m_stale[i] = true;
++    }
++    m_bufCount = count;
++    return true;
++}
++
++void AnlandWindowTask::releaseBuffers()
++{
++    if (m_bufCount == 0) {
++        return;
++    }
++    if (AnlandEglBackend *egl = m_tasks->backend()->eglBackend()) {
++        (void)egl->openglContext()->makeCurrent();
++    }
++    for (int i = 0; i < MAX_BUFS; i++) {
++        m_fbos[i].reset();
++        m_textures[i].reset();
++    }
++    m_bufCount = 0;
++}
++
++qreal AnlandWindowTask::scale() const
++{
++    return m_window ? m_window->targetScale() : 1.0;
++}
++
++RectF AnlandWindowTask::viewport() const
++{
++    // The client area, at the task's size: no title bar (the task has its own), the window's popups where they open.
++    const QPointF origin = m_window ? m_window->clientGeometry().topLeft() : QPointF();
++    return RectF(origin, QSizeF(m_bufferSize) / scale());
++}
++
++void AnlandWindowTask::fitWindow()
++{
++    if (!m_window || m_bufferSize.isEmpty()) {
++        return;
++    }
++    // The window takes the task's size (split screen, floating window, fold): its client area fills the buffers.
++    const QSizeF client = QSizeF(m_bufferSize) / scale();
++    if (m_window->clientGeometry().size() != client) {
++        m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), m_window->clientSizeToFrameSize(client)));
++    }
++}
++
++QPointF AnlandWindowTask::mapToGlobal(const QPointF &taskPoint) const
++{
++    return viewport().topLeft() + taskPoint / scale();
++}
++
++QList<Window *> AnlandWindowTask::paintedWindows() const
++{
++    QList<Window *> windows;
++    for (const Watched &w : m_watched) {
++        if (w.window && !w.window->isDeleted() && (w.window == m_window || w.window->readyForPainting())) {
++            windows.append(w.window);
++        }
++    }
++    return windows;
++}
++
++void AnlandWindowTask::onBufferReady()
++{
++    eventfd_t val;
++    eventfd_read(get_buffer_ready_fd(m_display), &val);
++    m_offered = true;
++    const int idx = get_selected_idx(m_display);
++    if (idx >= 0 && idx < m_bufCount && m_stale[idx]) {
++        scheduleRender();
++    } else {
++        // Nothing new for it: hold it until the window changes (no frames while idle), answering in time.
++        m_keepalive.start();
++    }
++}
++
++void AnlandWindowTask::scheduleRender()
++{
++    if (!m_offered || m_renderScheduled) {
++        return;
++    }
++    m_renderScheduled = true;
++    QMetaObject::invokeMethod(this, [this]() {
++        m_renderScheduled = false;
++        render(false);
++    }, Qt::QueuedConnection);
++}
++
++void AnlandWindowTask::render(bool keepalive)
++{
++    Q_UNUSED(keepalive)
++    if (m_state != State::Live || !m_offered) {
++        return;
++    }
++    m_keepalive.stop();
++    const int idx = get_selected_idx(m_display);
++    AnlandEglBackend *egl = m_tasks->backend()->eglBackend();
++    if (idx >= 0 && idx < m_bufCount && m_stale[idx] && egl && egl->openglContext()->makeCurrent()) {
++        RenderTarget renderTarget(m_fbos[idx].get());
++        RenderViewport renderViewport(viewport(), scale(), renderTarget, QPoint());
++        WorkspaceScene *scene = kwinApp()->scene();
++        scene->renderer()->beginFrame(renderTarget, renderViewport);
++        glClearColor(0.0, 0.0, 0.0, 1.0);
++        glClear(GL_COLOR_BUFFER_BIT);
++        // The window, then its popups (as a window screencast draws them).
++        for (Window *w : paintedWindows()) {
++            scene->renderer()->renderItem(renderTarget, renderViewport, w->windowItem(), Scene::PAINT_WINDOW_TRANSFORMED,
++                                          Region::infinite(), WindowPaintData{}, {}, {});
++        }
++        scene->renderer()->endFrame();
++        glFlush();
++        // As the desktop: the consumer hands the render-done fence to queueBuffer, SurfaceFlinger waits GPU-side.
++        EGLNativeFence fence{egl->openglContext()->displayObject()};
++        set_render_fence(m_display, fence.takeFileDescriptor().take());
++        m_stale[idx] = false;
++    }
++    trigger_refresh(m_display);
++    m_offered = false;
++    // Frame callbacks: the client draws its next frame at the task's pace.
++    for (Window *w : paintedWindows()) {
++        w->windowItem()->framePainted(nullptr, w->output(), nullptr, now());
++    }
++}
++
++void AnlandWindowTask::onInputReadable()
++{
++    InputEvent ev;
++    while (m_state == State::Live && poll_input_event(m_display, &ev, 0) > 0) {
++        processInputEvent(ev);
++    }
++}
++
++void AnlandWindowTask::processInputEvent(const InputEvent &ev)
++{
++    SeatInterface *seat = waylandServer()->seat();
++    switch (ev.type) {
++    case INPUT_TYPE_KEY:
++        // Through KWin's keyboard (xkb, shortcuts, input method) to the focused window - this one, while its task
++        // has the focus.
++        m_tasks->backend()->inputDevice()->keyboardKey(ev.key.keycode, ev.key.action == INPUT_ACTION_DOWN);
++        break;
++    case INPUT_TYPE_TOUCH: {
++        if (!m_window) {
++            break;
++        }
++        const qint32 id = s_touchIdBase * qint32(m_id) + ev.touch.pointer_id;
++        const QPointF pos = mapToGlobal(QPointF(ev.touch.x, ev.touch.y));
++        seat->setTimestamp(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()));
++        if (ev.touch.action == INPUT_ACTION_DOWN) {
++            if (m_touches.contains(id)) {
++                break;
++            }
++            // Straight to the window or popup under the finger (no hit test against the desktop, where this window
++            // isn't). A touch outside an open popup dismisses it, as KWin's popup filter does.
++            const QList<Window *> windows = paintedWindows();
++            Window *target = m_window;
++            for (auto it = windows.crbegin(); it != windows.crend(); ++it) {
++                if ((*it)->isPopupWindow() && (*it)->frameGeometry().contains(pos)) {
++                    target = *it;
++                    break;
++                }
++            }
++            if (target == m_window) {
++                for (Window *w : windows) {
++                    if (w->isPopupWindow()) {
++                        w->popupDone();
++                    }
++                }
++            }
++            focus();
++            if (seat->notifyTouchDown(target->surface(), target->bufferGeometry().topLeft(), id, pos)) {
++                m_touches.insert(id);
++            }
++        } else if (ev.touch.action == INPUT_ACTION_MOVE) {
++            if (m_touches.contains(id)) {
++                seat->notifyTouchMotion(id, pos);
++            }
++        } else if (ev.touch.action == INPUT_ACTION_UP) {
++            if (m_touches.remove(id)) {
++                seat->notifyTouchUp(id);
++            }
++        }
++        break;
++    }
++    case INPUT_TYPE_TOUCH_FRAME:
++        seat->notifyTouchFrame();
++        break;
++    default:
++        break;
++    }
++}
++
++void AnlandWindowTask::cancelTouches()
++{
++    if (m_touches.isEmpty()) {
++        return;
++    }
++    SeatInterface *seat = waylandServer()->seat();
++    for (qint32 id : std::as_const(m_touches)) {
++        seat->notifyTouchUp(id);
++    }
++    seat->notifyTouchFrame();
++    m_touches.clear();
++}
++
++// ---------------------------------------------------------------------------
++// AnlandWindowTasks
++// ---------------------------------------------------------------------------
++
++AnlandWindowTasks::AnlandWindowTasks(AnlandBackend *backend, const QString &socketPath)
++    : QObject(backend)
++    , m_backend(backend)
++    , m_socketPath(socketPath)
++{
++    m_controlRetry.setSingleShot(true);
++    m_controlRetry.setInterval(1000);
++    connect(&m_controlRetry, &QTimer::timeout, this, &AnlandWindowTasks::connectControl);
++    connectControl();
++    QDBusConnection::sessionBus().registerObject(QStringLiteral("/org/powos/WindowTasks"), this,
++                                                 QDBusConnection::ExportScriptableSlots);
++}
++
++AnlandWindowTasks::~AnlandWindowTasks()
++{
++    closeAll();
++    if (m_controlFd >= 0) {
++        ::close(m_controlFd);
++    }
++}
++
++void AnlandWindowTasks::connectControl()
++{
++    m_controlFd = connect_unix(m_socketPath.toLocal8Bit().constData());
++    if (m_controlFd < 0) {
++        m_controlRetry.start();
++        return;
++    }
++    uint8_t hello[sizeof(ctrl_msg) + sizeof(uint32_t)];
++    const ctrl_msg hdr{.type = CTRL_MSG_CONTROL_HELLO, .size = sizeof(uint32_t)};
++    const uint32_t role = CONTROL_ROLE_COMPOSITOR;
++    memcpy(hello, &hdr, sizeof(hdr));
++    memcpy(hello + sizeof(hdr), &role, sizeof(role));
++    if (send_all(m_controlFd, hello, sizeof(hello)) < 0) {
++        ::close(m_controlFd);
++        m_controlFd = -1;
++        m_controlRetry.start();
++        return;
++    }
++    m_controlBuffer.clear();
++    m_controlNotifier = new QSocketNotifier(m_controlFd, QSocketNotifier::Read, this);
++    connect(m_controlNotifier, &QSocketNotifier::activated, this, &AnlandWindowTasks::onControlReadable);
++}
++
++void AnlandWindowTasks::onControlReadable()
++{
++    char buf[4096];
++    const ssize_t n = ::recv(m_controlFd, buf, sizeof(buf), MSG_DONTWAIT);
++    if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) {
++        // The daemon went away (the app restarted): reconnect.
++        m_controlNotifier->setEnabled(false);
++        m_controlNotifier->deleteLater();
++        m_controlNotifier = nullptr;
++        ::close(m_controlFd);
++        m_controlFd = -1;
++        m_controlRetry.start();
++        return;
++    }
++    if (n < 0) {
++        return;
++    }
++    m_controlBuffer.append(buf, n);
++    while (m_controlBuffer.size() >= int(sizeof(ctrl_msg))) {
++        ctrl_msg hdr;
++        memcpy(&hdr, m_controlBuffer.constData(), sizeof(hdr));
++        if (hdr.size > CONTROL_MAX_PAYLOAD) {
++            m_controlBuffer.clear();
++            return;
++        }
++        if (m_controlBuffer.size() < int(sizeof(hdr) + hdr.size)) {
++            return;
++        }
++        const QByteArray payload = m_controlBuffer.mid(sizeof(hdr), hdr.size);
++        m_controlBuffer.remove(0, sizeof(hdr) + hdr.size);
++        if (hdr.type == CTRL_MSG_CONTROL) {
++            handleLine(QString::fromUtf8(payload));
++        }
++    }
++}
++
++void AnlandWindowTasks::handleLine(const QString &line)
++{
++    const QStringList f = line.split(QLatin1Char('\t'));
++    if (f.size() < 2) {
++        return;
++    }
++    AnlandWindowTask *task = m_tasks.value(f[1].toUInt());
++    if (!task) {
++        return;
++    }
++    if (f[0] == QLatin1String("closed")) {
++        // The task was closed for good: the window goes back on the desktop.
++        remove(task);
++    } else if (f[0] == QLatin1String("focus")) {
++        task->focus();
++    }
++}
++
++void AnlandWindowTasks::send(const QStringList &fields)
++{
++    if (m_controlFd < 0) {
++        return;
++    }
++    QStringList clean;
++    for (QString field : fields) {
++        clean.append(field.replace(QLatin1Char('\t'), QLatin1Char(' ')).replace(QLatin1Char('\n'), QLatin1Char(' ')));
++    }
++    const QByteArray line = clean.join(QLatin1Char('\t')).toUtf8().left(CONTROL_MAX_PAYLOAD);
++    QByteArray msg(sizeof(ctrl_msg), Qt::Uninitialized);
++    const ctrl_msg hdr{.type = CTRL_MSG_CONTROL, .size = uint32_t(line.size())};
++    memcpy(msg.data(), &hdr, sizeof(hdr));
++    msg.append(line);
++    send_all(m_controlFd, msg.constData(), msg.size());
++}
++
++bool AnlandWindowTasks::show(const QString &windowId)
++{
++    if (m_controlFd < 0) {
++        qCWarning(KWIN_ANLAND) << "no window tasks: the PowOS app isn't connected";
++        return false;
++    }
++    Window *window = workspace()->findWindow(QUuid::fromString(windowId));
++    if (!window || !window->isClient() || window->isDeleted() || !window->surface()) {
++        return false;
++    }
++    for (AnlandWindowTask *task : std::as_const(m_tasks)) {
++        if (task->window() == window) {
++            // Already a task: to the front.
++            send({QStringLiteral("open"), QString::number(task->id()), window->desktopFileName(), window->caption()});
++            return true;
++        }
++    }
++    const uint32_t id = m_nextId++;
++    auto *task = new AnlandWindowTask(this, window, id);
++    m_tasks.insert(id, task);
++    connect(window, &Window::closed, task, [this, task]() {
++        send({QStringLiteral("close"), QString::number(task->id())});
++        remove(task);
++    });
++    send({QStringLiteral("open"), QString::number(id), window->desktopFileName(), window->caption()});
++    return true;
++}
++
++void AnlandWindowTasks::closeAll()
++{
++    const auto tasks = m_tasks;
++    m_tasks.clear();
++    for (AnlandWindowTask *task : tasks) {
++        send({QStringLiteral("close"), QString::number(task->id())});
++        delete task;
++    }
++}
++
++void AnlandWindowTasks::remove(AnlandWindowTask *task)
++{
++    if (!m_tasks.remove(task->id())) {
++        return;
++    }
++    task->deleteLater();
++    // After the window went back (the task's destructor).
++    QMetaObject::invokeMethod(this, &AnlandWindowTasks::dropTasksDesktopIfUnused, Qt::QueuedConnection);
++}
++
++VirtualDesktop *AnlandWindowTasks::tasksDesktop()
++{
++    if (m_desktop) {
++        return m_desktop;
++    }
++    VirtualDesktopManager *vdm = VirtualDesktopManager::self();
++    for (VirtualDesktop *desktop : vdm->desktops()) {
++        if (desktop->name() == s_tasksDesktopName) {
++            m_desktop = desktop;
++            return desktop;
++        }
++    }
++    m_desktop = vdm->createVirtualDesktop(vdm->count(), s_tasksDesktopName);
++    return m_desktop;
++}
++
++void AnlandWindowTasks::dropTasksDesktopIfUnused()
++{
++    if (!m_tasks.isEmpty() || !m_desktop) {
++        return;
++    }
++    for (Window *window : workspace()->windows()) {
++        if (!window->isDeleted() && !window->isOnAllDesktops() && window->desktops().contains(m_desktop)) {
++            return;
++        }
++    }
++    // The user's desktops as they were.
++    VirtualDesktopManager::self()->removeVirtualDesktop(m_desktop);
++    m_desktop = nullptr;
++}
++
++} // namespace KWin
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -0,0 +1,183 @@
++/*
++    KWin - the KDE window manager
++    This file is part of the KDE project.
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++
++    PowOS: KWin windows shown as their own Android tasks (targets/android/docs/powos-window-tasks.md in PowOS).
++
++    A window is exported, not moved: it stays a normal KWin window, on a virtual desktop of its own ("Android tasks",
++    so the PowOS desktop neither paints it nor sends it input, while it can still have the focus), kept rendering
++    (offscreen rendering, as for a screencast), and drawn - with its popups - into the buffers of the Android task's
++    surface whenever it changes. Input from the task goes to it directly.
++*/
++#pragma once
++
++#include "core/output.h"
++#include "effect/globals.h"
++#include "core/rect.h"
++#include "window.h"
++
++#include <QByteArray>
++#include <QHash>
++#include <QList>
++#include <QObject>
++#include <QPointer>
++#include <QSet>
++#include <QSize>
++#include <QTimer>
++#include <memory>
++
++extern "C" {
++#include "display_producer.h"
++#include "protocol.h"
++}
++
++class QSocketNotifier;
++
++namespace KWin
++{
++
++class AnlandBackend;
++class AnlandWindowTasks;
++class GLFramebuffer;
++class GLTexture;
++class VirtualDesktop;
++
++/** One exported window: its own surface of the display daemon, the Android task's buffers, input from it. */
++class AnlandWindowTask : public QObject
++{
++    Q_OBJECT
++
++public:
++    AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uint32_t id);
++    /** Puts the window back on the desktop, as it was, unless it was closed. */
++    ~AnlandWindowTask() override;
++
++    uint32_t id() const
++    {
++        return m_id;
++    }
++    Window *window() const
++    {
++        return m_window;
++    }
++    /** The task got the focus: so does the window (keys and text follow KWin's focus). */
++    void focus();
++
++private:
++    enum class State {
++        Handshake, // said hello, waiting for the daemon's screen info (the task's surface)
++        Fallback, // asked for the consumer's fds, waiting for them
++        Live,
++    };
++
++    void onCtrlReadable();
++    void requestConsumer();
++    void goLive();
++    void enterFallback();
++    static void fallbackTrampoline(void *data);
++    bool importBuffers();
++    void releaseBuffers();
++    void onBufferReady();
++    void onInputReadable();
++    void processInputEvent(const InputEvent &ev);
++    void scheduleRender();
++    void render(bool keepalive);
++    void watchWindow(Window *window);
++    void unwatchAll();
++    QList<Window *> paintedWindows() const;
++    QPointF mapToGlobal(const QPointF &taskPoint) const;
++    RectF viewport() const;
++    qreal scale() const;
++    void fitWindow();
++    void cancelTouches();
++
++    AnlandWindowTasks *m_tasks;
++    QPointer<Window> m_window;
++    const uint32_t m_id;
++    display_ctx *m_display = nullptr;
++    State m_state = State::Handshake;
++    QSocketNotifier *m_ctrlNotifier = nullptr;
++    QSocketNotifier *m_inputNotifier = nullptr;
++    QSocketNotifier *m_bufReadyNotifier = nullptr;
++    QTimer m_retry; // asks again after a failed hand-over
++    QTimer m_keepalive; // the consumer gives up on a buffer held for 5 s: answer before, changed or not
++
++    int m_bufCount = 0;
++    std::shared_ptr<GLTexture> m_textures[MAX_BUFS];
++    std::unique_ptr<GLFramebuffer> m_fbos[MAX_BUFS];
++    bool m_stale[MAX_BUFS] = {};
++    QSize m_bufferSize;
++    bool m_offered = false; // the consumer handed us a buffer to fill (buf_ready) and waits for it
++    bool m_renderScheduled = false;
++
++    // What the window was on the desktop, restored when the task closes.
++    QList<VirtualDesktop *> m_desktops;
++    RectF m_geometry;
++    MaximizeMode m_maximizeMode = MaximizeRestore;
++    bool m_exported = false; // on the tasks desktop, rendering offscreen
++    struct Watched
++    {
++        QPointer<Window> window;
++        QMetaObject::Connection damaged;
++        QMetaObject::Connection closed;
++    };
++    QList<Watched> m_watched; // while live: the window and its popups, each holding an offscreen-rendering ref
++    QMetaObject::Connection m_popupAdded;
++    QSet<qint32> m_touches;
++};
++
++/**
++ * The exported windows, the D-Bus interface (org.powos.WindowTasks on KWin's bus, /org/powos/WindowTasks) and the
++ * control channel to the PowOS app (through the display daemon): "open"/"title"/"close" to it, "closed"/"focus"
++ * from it.
++ */
++class AnlandWindowTasks : public QObject
++{
++    Q_OBJECT
++    Q_CLASSINFO("D-Bus Interface", "org.powos.WindowTasks")
++
++public:
++    AnlandWindowTasks(AnlandBackend *backend, const QString &socketPath);
++    ~AnlandWindowTasks() override;
++
++    AnlandBackend *backend() const
++    {
++        return m_backend;
++    }
++    const QString &socketPath() const
++    {
++        return m_socketPath;
++    }
++    /** One control line to the app (fields joined by tabs; tabs and newlines inside them become spaces). */
++    void send(const QStringList &fields);
++    /** The virtual desktop exported windows live on, made on first use. */
++    VirtualDesktop *tasksDesktop();
++    /** A task is done (the app closed it, or its window closed): forget it. */
++    void remove(AnlandWindowTask *task);
++    /** Every task, now (the compositor is going): windows back on the desktop, buffers released. */
++    void closeAll();
++
++public Q_SLOTS:
++    /** Shows the window (its KWin internal id) as its own Android task, or brings its task to the front. */
++    Q_SCRIPTABLE bool show(const QString &windowId);
++
++private:
++    void connectControl();
++    void onControlReadable();
++    void handleLine(const QString &line);
++    void dropTasksDesktopIfUnused();
++
++    AnlandBackend *m_backend;
++    const QString m_socketPath;
++    int m_controlFd = -1;
++    QSocketNotifier *m_controlNotifier = nullptr;
++    QTimer m_controlRetry;
++    QByteArray m_controlBuffer;
++    QHash<uint32_t, AnlandWindowTask *> m_tasks;
++    uint32_t m_nextId = 1;
++    QPointer<VirtualDesktop> m_desktop;
++};
++
++} // namespace KWin
+--- a/src/backends/anland/display_producer.c
++++ b/src/backends/anland/display_producer.c
+@@ -82,10 +82,10 @@
+  * success the four fds and shm_ptr are installed on ctx; the caller releases them
+  * via release_consumer_resources() on any later failure. Returns 0 / -1.
+  */
+-static int pickup_fds(display_ctx *ctx)
++static int pickup_fds(display_ctx *ctx, bool request)
+ {
+     struct ctrl_msg hdr = { .type = CTRL_MSG_PICKUP_FDS, .size = 0 };
+-    if (send_all(ctx->ctrl_fd, &hdr, sizeof(hdr)) < 0)
++    if (request && send_all(ctx->ctrl_fd, &hdr, sizeof(hdr)) < 0)
+         return -1;
+ 
+     struct pollfd pfd = { .fd = ctx->ctrl_fd, .events = POLLIN };
+@@ -171,7 +171,10 @@
+     return 0;
+ }
+ 
+-int connect_to_deamon(display_ctx **out, const char *socket_path)
++/* PowOS: the handshake in two steps, for a surface id (0 = the desktop; others: PowOS windows as Android tasks), so
++ * a caller can wait for the screen info on its event loop - a daemon answers only once that surface's consumer is
++ * there, which for a window task may be a while. */
++int connect_to_deamon_begin(display_ctx **out, const char *socket_path, uint32_t surface_id)
+ {
+     display_ctx *ctx = calloc(1, sizeof(*ctx));
+     if (!ctx)
+@@ -193,18 +196,39 @@
+     if (ctx->ctrl_fd < 0)
+         goto fail;
+ 
+-    struct ctrl_msg hdr = { .type = CTRL_MSG_PRODUCER_HELLO, .size = 0 };
+-    if (send_all(ctx->ctrl_fd, &hdr, sizeof(hdr)) < 0)
++    /* The surface id rides as the HELLO's payload; the desktop's (0) as none, what an old daemon expects. */
++    uint8_t hello[sizeof(struct ctrl_msg) + sizeof(uint32_t)];
++    struct ctrl_msg hdr = { .type = CTRL_MSG_PRODUCER_HELLO, .size = surface_id ? sizeof(uint32_t) : 0 };
++    memcpy(hello, &hdr, sizeof(hdr));
++    memcpy(hello + sizeof(hdr), &surface_id, sizeof(surface_id));
++    if (send_all(ctx->ctrl_fd, hello, sizeof(hdr) + hdr.size) < 0)
+         goto fail;
+ 
++    *out = ctx;
++    return 0;
++
++fail:
++    if (ctx->ctrl_fd >= 0)
++        close(ctx->ctrl_fd);
++    free(ctx);
++    return -1;
++}
++
++int get_ctrl_fd(display_ctx *ctx)
++{
++    return ctx ? ctx->ctrl_fd : -1;
++}
++
++int connect_to_deamon_finish(display_ctx *ctx)
++{
+     uint8_t buf[sizeof(struct ctrl_msg) + sizeof(struct screen_info)];
+     if (recv_all(ctx->ctrl_fd, buf, sizeof(buf)) < 0)
+-        goto fail;
++        return -1;
+ 
+     struct ctrl_msg resp;
+     memcpy(&resp, buf, sizeof(resp));
+     if (resp.type != CTRL_MSG_SCREEN_INFO || resp.size != sizeof(struct screen_info))
+-        goto fail;
++        return -1;
+ 
+     struct screen_info si;
+     memcpy(&si, buf + sizeof(struct ctrl_msg), sizeof(si));
+@@ -216,14 +240,20 @@
+     // Daemon handshake only: screen info is in hand, but the consumer fds and
+     // dmabufs are deliberately left for try_exit_fallback() so the backend brings
+     // the consumer up through the single reconnect path. Stay in fallback.
+-    *out = ctx;
+     return 0;
++}
+ 
+-fail:
+-    if (ctx->ctrl_fd >= 0)
+-        close(ctx->ctrl_fd);
+-    free(ctx);
+-    return -1;
++int connect_to_deamon(display_ctx **out, const char *socket_path)
++{
++    display_ctx *ctx = NULL;
++    if (connect_to_deamon_begin(&ctx, socket_path, 0) < 0)
++        return -1;
++    if (connect_to_deamon_finish(ctx) < 0) {
++        disconnect(ctx);
++        return -1;
++    }
++    *out = ctx;
++    return 0;
+ }
+ 
+ void disconnect(display_ctx *ctx)
+@@ -452,7 +482,7 @@
+         return 0;
+ 
+     // Step 1: ask the daemon to hand over the consumer-side fds.
+-    if (pickup_fds(ctx) < 0) {
++    if (pickup_fds(ctx, true) < 0) {
+         release_consumer_resources(ctx);
+         return -1;
+     }
+@@ -465,6 +495,26 @@
+         return -1;
+     }
+ 
++    ctx->fallback = false;
++    return 0;
++}
++
++int request_consumer_fds(display_ctx *ctx)
++{
++    if (!ctx->fallback)
++        return 0;
++    struct ctrl_msg hdr = { .type = CTRL_MSG_PICKUP_FDS, .size = 0 };
++    return send_all(ctx->ctrl_fd, &hdr, sizeof(hdr));
++}
++
++int finish_exit_fallback(display_ctx *ctx)
++{
++    if (!ctx->fallback)
++        return 0;
++    if (pickup_fds(ctx, false) < 0 || receive_dmabufs(ctx) < 0) {
++        release_consumer_resources(ctx);
++        return -1;
++    }
+     ctx->fallback = false;
+     return 0;
+ }
+--- a/src/backends/anland/display_producer.h
++++ b/src/backends/anland/display_producer.h
+@@ -23,6 +23,18 @@
+  * fallback: it does NOT pick up consumer fds or dmabufs. Returns 0 / -1. */
+ int  connect_to_deamon(display_ctx **ctx, const char *socket_path);
+ 
++/* PowOS: connect_to_deamon() in two steps, for surface [surface_id] (0 = the desktop; others: PowOS windows shown as
++ * their own Android tasks). begin connects and says hello; once get_ctrl_fd() is readable, finish reads the screen
++ * info (0) or fails (-1: disconnect() the ctx). */
++int  connect_to_deamon_begin(display_ctx **ctx, const char *socket_path, uint32_t surface_id);
++int  get_ctrl_fd(display_ctx *ctx);
++int  connect_to_deamon_finish(display_ctx *ctx);
++/* PowOS: try_exit_fallback() without blocking: request asks the daemon for the consumer's fds (it answers when a
++ * consumer is there); once get_ctrl_fd() is readable, finish takes them and the dmabufs (0) or stays in fallback
++ * (-1: request again). */
++int  request_consumer_fds(display_ctx *ctx);
++int  finish_exit_fallback(display_ctx *ctx);
++
+ /* Tear down everything and disconnect from the daemon. */
+ void disconnect(display_ctx *ctx);
+ 
+--- a/src/backends/anland/protocol.h
++++ b/src/backends/anland/protocol.h
+@@ -9,6 +9,14 @@
+ #define CTRL_MSG_REJECT          8
+ #define CTRL_MSG_PICKUP_FDS      9
+ #define CTRL_MSG_FDS_READY      10
++/* PowOS: several surfaces per daemon - the desktop and PowOS windows shown as their own Android tasks
++ * (docs/powos-window-tasks.md). A CONSUMER_HELLO / PRODUCER_HELLO may carry a uint32 surface id as its payload;
++ * none means 0, the desktop. The daemon pairs a consumer and a producer per id. */
++#define CTRL_MSG_CONTROL_HELLO  20  /* payload: uint32 CONTROL_ROLE_*; one connection per role */
++#define CTRL_MSG_CONTROL        21  /* payload: one UTF-8 line (no newline), relayed to the other role */
++#define CONTROL_ROLE_COMPOSITOR 0
++#define CONTROL_ROLE_APP        1
++#define CONTROL_MAX_PAYLOAD     4096
+ 
+ #define DATA_MSG_BUF_READY       100
+ #define DATA_MSG_REFRESH_DONE    101

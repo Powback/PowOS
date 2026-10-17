@@ -135,7 +135,6 @@ pacman -S --noconfirm --needed scrcpy android-tools pyside6
 install -m 755 "$P/session/powos-android-app" /usr/local/bin/powos-android-app
 install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tasks
 install -m 755 "$P/session/powos-apps-export" /usr/local/bin/powos-apps-export
-install -m 755 "$P/session/powos-window-task" /usr/local/bin/powos-window-task
 # The app's touch controls as a gamepad (started by powos-rooted-session).
 install -m 755 "$P/session/powos-padd" /usr/bin/powos-padd
 install -m 755 "$P/session/powos-focus-watch" /usr/bin/powos-focus-watch
@@ -148,11 +147,12 @@ install -Dm 644 "$P/session/plasma/powos-transparent-desktop.js" /usr/share/plas
 # KWin then paints the transparent desktop as translucent (see its main.js: no trails under it).
 install -Dm 644 "$P/session/plasma/powos-translucent-desktop/metadata.json" /usr/share/kwin/scripts/powos-translucent-desktop/metadata.json
 install -Dm 644 "$P/session/plasma/powos-translucent-desktop/contents/code/main.js" /usr/share/kwin/scripts/powos-translucent-desktop/contents/code/main.js
+# "Open as Android task" in the window menu (docs/powos-window-tasks.md).
+install -Dm 644 "$P/session/plasma/powos-window-tasks/metadata.json" /usr/share/kwin/scripts/powos-window-tasks/metadata.json
+install -Dm 644 "$P/session/plasma/powos-window-tasks/contents/code/main.js" /usr/share/kwin/scripts/powos-window-tasks/contents/code/main.js
 # The phone's Android apps as a category of their own in the application menu (entries: andro.marchy.AndroidApps).
 install -Dm 644 "$P/session/plasma/menus/powos-android.menu" /etc/xdg/menus/applications-merged/powos-android.menu
 install -Dm 644 "$P/session/plasma/menus/powos-android.directory" /usr/share/desktop-directories/powos-android.directory
-# No KScreen daemon on the phone: every output is an Android surface (see the file).
-install -Dm 644 "$P/session/plasma/kded6rc" /etc/xdg/kded6rc
 # first-boot.sh goes to /opt/lotfix/ in build-inside.sh's own install step (patched to take ours).
 # HACK: Omarchy command names the engine calls; see each file. omarchy-dns is Andromarchy's own
 # Android version (resolv.conf from Android's network), unchanged.

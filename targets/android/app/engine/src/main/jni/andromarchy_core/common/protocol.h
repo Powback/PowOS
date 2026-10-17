@@ -9,6 +9,14 @@
 #define CTRL_MSG_REJECT          8
 #define CTRL_MSG_PICKUP_FDS      9
 #define CTRL_MSG_FDS_READY      10
+/* PowOS: several surfaces per daemon - the desktop and PowOS windows shown as their own Android tasks
+ * (docs/powos-window-tasks.md). A CONSUMER_HELLO / PRODUCER_HELLO may carry a uint32 surface id as its payload;
+ * none means 0, the desktop. The daemon pairs a consumer and a producer per id. */
+#define CTRL_MSG_CONTROL_HELLO  20  /* payload: uint32 CONTROL_ROLE_*; one connection per role */
+#define CTRL_MSG_CONTROL        21  /* payload: one UTF-8 line (no newline), relayed to the other role */
+#define CONTROL_ROLE_COMPOSITOR 0
+#define CONTROL_ROLE_APP        1
+#define CONTROL_MAX_PAYLOAD     4096
 
 #define DATA_MSG_BUF_READY       100
 #define DATA_MSG_REFRESH_DONE    101

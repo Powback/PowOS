@@ -7,6 +7,8 @@
 typedef struct display_ctx display_ctx;
 int connect_to_deamon_with_fd(display_ctx **out, int ctrl_fd);
 int  connect_to_deamon(display_ctx **ctx, const char *socket_path);
+/* PowOS: a connection for surface [surface_id] (0 = the desktop; others: PowOS windows as Android tasks). */
+int connect_to_deamon_surface(display_ctx **out, int ctrl_fd, uint32_t surface_id);
 void disconnect(display_ctx *ctx);
 int  set_screen_info(display_ctx *ctx, uint32_t width, uint32_t height, uint32_t format, uint32_t refresh);
 int  push_dmabufs(display_ctx *ctx, const int *fds, const struct buf_info *infos, int count);

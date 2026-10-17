@@ -44,12 +44,12 @@ static void on_fallback(void *userdata);
 
 static void on_exit_fallback(void *userdata);
 /* PowOS: one per Android surface. g_state is the desktop (MainActivity: audio, camera, clipboard, keyboard
- * visibility); others are PowOS windows shown as their own Android tasks (PowosWindowActivity), each on its own
- * display daemon socket - pixels and input only. See docs/powos-window-tasks.md. */
+ * visibility); others are PowOS windows shown as their own Android tasks (PowosWindowActivity), surfaces of the same
+ * display daemon with their own id - pixels and input only. See docs/powos-window-tasks.md. */
 struct consumer_state {
     pthread_mutex_t lock;
     bool primary;
-    char socket_path[256];   /* non-primary: its daemon's socket (the primary's is cfg_socket_path) */
+    uint32_t surface_id;     /* 0 for the desktop */
     ANativeWindow *window;
     display_ctx *ctx;
     pthread_t render_thread;
@@ -418,12 +418,13 @@ static int do_connect(struct consumer_state *s)
 
     if (!s->primary) {
         if (use_compatible_bridge) {
-            LOGE("%s: no second surface over the compatible bridge", s->socket_path);
+            LOGE("surface %u: no window surfaces over the compatible bridge", s->surface_id);
             return -1;
         }
-        memcpy(sock_path, s->socket_path, sizeof(sock_path));
         /* The root helper's bridge socket is per connection. */
-        strncat(bridge_path, "-2", sizeof(bridge_path) - strlen(bridge_path) - 1);
+        char suffix[16];
+        snprintf(suffix, sizeof(suffix), "-%u", s->surface_id);
+        strncat(bridge_path, suffix, sizeof(bridge_path) - strlen(bridge_path) - 1);
     }
     const char *sock = sock_path;
 
@@ -499,11 +500,11 @@ static int do_connect(struct consumer_state *s)
             LOGE("root helper connect failed");
             return -1;
         }
-        if (connect_to_deamon_with_fd(&s->ctx, ctrl_fd) < 0) {
-            LOGE("connect_to_deamon_with_fd failed");
+        if (connect_to_deamon_surface(&s->ctx, ctrl_fd, s->surface_id) < 0) {
+            LOGE("connect_to_deamon_surface failed");
             return -1;
         }
-    } else if (connect_to_deamon(&s->ctx, sock) < 0) {
+    } else if (connect_to_deamon_surface(&s->ctx, connect_unix(sock), s->surface_id) < 0) {
         LOGE("connect_to_deamon failed");
         return -1;
     }
@@ -538,7 +539,7 @@ static int do_connect(struct consumer_state *s)
 static void on_fallback(void *userdata)
 {
     struct consumer_state *s = userdata;
-    LOGI("fallback triggered (%s)", s->primary ? "desktop" : s->socket_path);
+    LOGI("fallback triggered (surface %u)", s->surface_id);
 
     if (s->primary)
         audio_set_ctx(NULL);   /* the lib has closed the audio fd; stop touching it */
@@ -573,7 +574,7 @@ static void on_fallback(void *userdata)
 static void on_exit_fallback(void *userdata)
 {
     struct consumer_state *s = userdata;
-    LOGI("exit fallback triggered (%s)", s->primary ? "desktop" : s->socket_path);
+    LOGI("exit fallback triggered (surface %u)", s->surface_id);
 
     send_refresh_rate(s);
     /* Clipboard, keyboard visibility and resource requests are the desktop's: no event thread for the others. */
@@ -1047,12 +1048,12 @@ Java_andro_marchy_Native_nativeSetAudioKeepalive(
 
 /* ---------- PowOS: more surfaces (a PowOS window as its own Android task) ---------- */
 
-/* Starts a consumer for [surface] on the display daemon at [socketPath]: pixels and input only (no audio, camera,
- * clipboard or keyboard - those stay with the desktop, g_state). Returns its handle for the *Window* calls, 0 on
- * failure. The connection retries on its own until the daemon's producer (KWin's output for it) answers. */
+/* Starts a consumer for [surface] as the daemon's surface [surfaceId] (a PowOS window KWin exports to this task):
+ * pixels and input only (no audio, camera, clipboard or keyboard - those stay with the desktop, g_state). Returns its
+ * handle for the *Window* calls, 0 on failure. The connection retries on its own until KWin's producer answers. */
 JNIEXPORT jlong JNICALL
 Java_andro_marchy_Native_nativeStartWindow(
-    JNIEnv *env, jclass clazz, jobject surface, jstring socketPath)
+    JNIEnv *env, jclass clazz, jobject surface, jint surfaceId)
 {
     if (!api_loaded) {
         if (anw_api_load(&api) < 0) {
@@ -1065,12 +1066,12 @@ Java_andro_marchy_Native_nativeStartWindow(
     if (!s)
         return 0;
     pthread_mutex_init(&s->lock, NULL);
-    copy_jstring(env, socketPath, s->socket_path, sizeof(s->socket_path));
+    s->surface_id = (uint32_t)surfaceId;
     for (int i = 0; i < MAX_COLLECT_BUFS; i++)
         s->dmabuf_fds[i] = -1;
     s->window = ANativeWindow_fromSurface(env, surface);
-    if (!s->window || s->socket_path[0] == '\0') {
-        LOGE("window consumer: no surface or socket");
+    if (!s->window || surfaceId <= 0) {
+        LOGE("window consumer: no surface or id");
         if (s->window)
             ANativeWindow_release(s->window);
         pthread_mutex_destroy(&s->lock);
@@ -1088,7 +1089,7 @@ Java_andro_marchy_Native_nativeStartWindow(
         free(s);
         return 0;
     }
-    LOGI("window consumer started on %s", s->socket_path);
+    LOGI("window consumer started for surface %u", s->surface_id);
     return (jlong)(intptr_t)s;
 }
 
@@ -1111,7 +1112,7 @@ Java_andro_marchy_Native_nativeStopWindow(
     cleanup_dmabufs(s);
     if (s->window)
         ANativeWindow_release(s->window);
-    LOGI("window consumer stopped on %s", s->socket_path);
+    LOGI("window consumer stopped for surface %u", s->surface_id);
     pthread_mutex_destroy(&s->lock);
     free(s);
 }

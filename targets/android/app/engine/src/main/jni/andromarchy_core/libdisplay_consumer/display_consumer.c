@@ -23,6 +23,7 @@ struct display_ctx {
     volatile uint32_t *shm_ptr;
     uint32_t screen_w, screen_h;
     uint32_t pixel_format;
+    uint32_t surface_id;      /* PowOS: which surface this is (0 = the desktop; see protocol.h) */
     bool     fallback;
     bool     buffer_pending;
 
@@ -187,9 +188,13 @@ static int send_hello_fds(display_ctx *ctx)
     ctx->fence_fd = fv[0];
     ctx->audio_fd = av[0];
 
-    struct ctrl_msg hdr = { .type = CTRL_MSG_CONSUMER_HELLO, .size = 0 };
+    /* The surface id rides as the HELLO's payload (the desktop's, 0, as none: what an old daemon expects). */
+    uint8_t msg[sizeof(struct ctrl_msg) + sizeof(uint32_t)];
+    struct ctrl_msg hdr = { .type = CTRL_MSG_CONSUMER_HELLO, .size = ctx->surface_id ? sizeof(uint32_t) : 0 };
+    memcpy(msg, &hdr, sizeof(hdr));
+    memcpy(msg + sizeof(hdr), &ctx->surface_id, sizeof(uint32_t));
     int fds[5] = { ctx->buf_ready_efd, fv[1], sv[1], ctx->shm_fd, av[1] };
-    int ret = send_fds(ctx->ctrl_fd, &hdr, sizeof(hdr), fds, 5);
+    int ret = send_fds(ctx->ctrl_fd, msg, sizeof(hdr) + hdr.size, fds, 5);
     close(sv[1]);
     close(fv[1]);
     close(av[1]);
@@ -300,6 +305,10 @@ int connect_to_deamon(display_ctx **out, const char *socket_path){
 }
 int connect_to_deamon_with_fd(display_ctx **out, int ctrl_fd)
 {
+    return connect_to_deamon_surface(out, ctrl_fd, 0);
+}
+int connect_to_deamon_surface(display_ctx **out, int ctrl_fd, uint32_t surface_id)
+{
     display_ctx *ctx = calloc(1, sizeof(*ctx));
     if (!ctx)
         return -1;
@@ -316,6 +325,7 @@ int connect_to_deamon_with_fd(display_ctx **out, int ctrl_fd)
     ctx->shm_ptr = NULL;
     ctx->fallback = true;
 
+    ctx->surface_id = surface_id;
     ctx->ctrl_fd = ctrl_fd;
     if (ctx->ctrl_fd < 0)
         goto fail;

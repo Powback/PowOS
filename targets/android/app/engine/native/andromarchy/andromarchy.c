@@ -21,24 +21,40 @@
  * the fds; it never interprets the slots. */
 #define MAX_FDS    5
 
+/* PowOS: one pair per surface id - 0 is the desktop, others are PowOS windows shown as their own Android tasks
+ * (docs/powos-window-tasks.md). A pair is what the daemon was before: one consumer, one producer, the consumer's
+ * screen info and its deposited fds. */
+#define MAX_PAIRS 16
+
+enum role { ROLE_CONSUMER, ROLE_PRODUCER, ROLE_CONTROL };
+
+struct pair;
+
 struct client {
     int  ctrl_fd;
-    bool is_consumer;
+    enum role role;
+    struct pair *pair;       /* consumer / producer */
+    uint32_t control_role;   /* control: CONTROL_ROLE_* */
 };
 
-static struct client *consumer;
-static struct client *producer;
+struct pair {
+    bool used;
+    uint32_t id;
+    struct client *consumer;
+    struct client *producer;
+    struct screen_info stored_screen;
+    bool has_screen_info;
+    int deposited_fds[MAX_FDS];
+    int deposited_fd_count;
+    bool producer_waiting_screen;
+    bool producer_waiting_fds;
+};
+
+static struct pair pairs[MAX_PAIRS];
+/* The control relay: KWin (CONTROL_ROLE_COMPOSITOR) and the PowOS app (CONTROL_ROLE_APP). */
+static struct client *controls[2];
 static int epoll_fd;
 static volatile bool running = true;
-
-static struct screen_info stored_screen;
-static bool has_screen_info;
-
-static int deposited_fds[MAX_FDS];
-static int deposited_fd_count;
-
-static bool producer_waiting_screen;
-static bool producer_waiting_fds;
 
 static void daemon_log(const char *format, ...)
 {
@@ -140,11 +156,37 @@ static void client_free(struct client *c)
     free(c);
 }
 
-static void clear_deposited_fds(void)
+static struct pair *pair_get(uint32_t id, bool create)
 {
-    for (int i = 0; i < deposited_fd_count; i++)
-        close(deposited_fds[i]);
-    deposited_fd_count = 0;
+    struct pair *free_slot = NULL;
+    for (int i = 0; i < MAX_PAIRS; i++) {
+        if (pairs[i].used && pairs[i].id == id)
+            return &pairs[i];
+        if (!pairs[i].used && !free_slot)
+            free_slot = &pairs[i];
+    }
+    if (!create || !free_slot)
+        return NULL;
+    memset(free_slot, 0, sizeof(*free_slot));
+    free_slot->used = true;
+    free_slot->id = id;
+    return free_slot;
+}
+
+static void clear_deposited_fds(struct pair *p)
+{
+    for (int i = 0; i < p->deposited_fd_count; i++)
+        close(p->deposited_fds[i]);
+    p->deposited_fd_count = 0;
+}
+
+/* A pair with neither side left is forgotten (its id may come back with a new task). */
+static void pair_release_if_empty(struct pair *p)
+{
+    if (p->consumer || p->producer)
+        return;
+    clear_deposited_fds(p);
+    p->used = false;
 }
 
 static int send_ctrl(int fd, uint32_t type)
@@ -153,39 +195,48 @@ static int send_ctrl(int fd, uint32_t type)
     return send_all(fd, &msg, sizeof(msg));
 }
 
-static int send_screen_info_msg(int fd)
+static int send_screen_info_msg(struct pair *p, int fd)
 {
     struct ctrl_msg hdr = { .type = CTRL_MSG_SCREEN_INFO, .size = sizeof(struct screen_info) };
     uint8_t buf[sizeof(struct ctrl_msg) + sizeof(struct screen_info)];
     memcpy(buf, &hdr, sizeof(hdr));
-    memcpy(buf + sizeof(hdr), &stored_screen, sizeof(stored_screen));
+    memcpy(buf + sizeof(hdr), &p->stored_screen, sizeof(p->stored_screen));
     return send_all(fd, buf, sizeof(buf));
 }
 
-static void try_deliver_fds(void)
+static void try_deliver_fds(struct pair *p)
 {
-    if (!producer || deposited_fd_count < MAX_FDS) {
-        producer_waiting_fds = true;
+    if (!p->producer || p->deposited_fd_count < MAX_FDS) {
+        p->producer_waiting_fds = true;
         return;
     }
 
     struct ctrl_msg msg = { .type = CTRL_MSG_FDS_READY, .size = 0 };
-    if (send_fds(producer->ctrl_fd, &msg, sizeof(msg),
-                 deposited_fds, deposited_fd_count) < 0) {
-        daemon_log("daemon: failed to send fds to producer\n");
-        producer_waiting_fds = true;
+    if (send_fds(p->producer->ctrl_fd, &msg, sizeof(msg),
+                 p->deposited_fds, p->deposited_fd_count) < 0) {
+        daemon_log("daemon: surface %u: failed to send fds to producer\n", p->id);
+        p->producer_waiting_fds = true;
         return;
     }
 
-    if (consumer)
-        send_ctrl(consumer->ctrl_fd, CTRL_MSG_FDS_READY);
+    if (p->consumer)
+        send_ctrl(p->consumer->ctrl_fd, CTRL_MSG_FDS_READY);
 
-    for (int i = 0; i < deposited_fd_count; i++)
-        close(deposited_fds[i]);
-    deposited_fd_count = 0;
-    producer_waiting_fds = false;
+    for (int i = 0; i < p->deposited_fd_count; i++)
+        close(p->deposited_fds[i]);
+    p->deposited_fd_count = 0;
+    p->producer_waiting_fds = false;
 
-    daemon_log("daemon: fds delivered to producer\n");
+    daemon_log("daemon: surface %u: fds delivered to producer\n", p->id);
+}
+
+/* Whether c still holds a role (events for a client freed earlier in the same epoll batch are skipped). */
+static bool client_current(struct client *c)
+{
+    if (c->role == ROLE_CONTROL)
+        return c->control_role < 2 && controls[c->control_role] == c;
+    return c->pair && c->pair->used
+        && (c == c->pair->consumer || c == c->pair->producer);
 }
 
 /*
@@ -195,26 +246,60 @@ static void try_deliver_fds(void)
  * alive or already a ghost, finding one is reason enough to drop it.
  *
  * The role pointer is cleared BEFORE client_free() so that any event still queued for
- * this client in the current epoll batch fails the "is it a current role?" guard in
- * the main loop and is skipped instead of dereferencing freed memory.
+ * this client in the current epoll batch fails the client_current() guard in the main
+ * loop and is skipped instead of dereferencing freed memory.
  */
 static void drop_client(struct client *c)
 {
     if (!c)
         return;
-    if (c == consumer) {
-        daemon_log("daemon: consumer disconnected\n");
-        consumer = NULL;
-        /* The deposited fds belong to the consumer that just left; a future producer
-         * must never be handed this stale set. Drop them together with the consumer. */
-        clear_deposited_fds();
-    } else if (c == producer) {
-        daemon_log("daemon: producer disconnected\n");
-        producer = NULL;
-        producer_waiting_screen = false;
-        producer_waiting_fds = false;
+    if (c->role == ROLE_CONTROL) {
+        if (c->control_role < 2 && controls[c->control_role] == c) {
+            daemon_log("daemon: control (%s) disconnected\n", c->control_role == CONTROL_ROLE_APP ? "app" : "compositor");
+            controls[c->control_role] = NULL;
+        }
+    } else if (c->pair) {
+        struct pair *p = c->pair;
+        if (c == p->consumer) {
+            daemon_log("daemon: surface %u: consumer disconnected\n", p->id);
+            p->consumer = NULL;
+            /* The deposited fds belong to the consumer that just left; a future producer
+             * must never be handed this stale set. Drop them together with the consumer. */
+            clear_deposited_fds(p);
+        } else if (c == p->producer) {
+            daemon_log("daemon: surface %u: producer disconnected\n", p->id);
+            p->producer = NULL;
+            p->producer_waiting_screen = false;
+            p->producer_waiting_fds = false;
+        }
+        pair_release_if_empty(p);
     }
     client_free(c);
+}
+
+/* A HELLO's optional surface id (its payload); none = 0, the desktop. */
+static uint32_t hello_id(const struct ctrl_msg *hdr, const uint8_t *payload)
+{
+    uint32_t id = 0;
+    if (hdr->size == sizeof(uint32_t))
+        memcpy(&id, payload, sizeof(id));
+    return id;
+}
+
+static void relay_control(struct client *from, const uint8_t *payload, uint32_t size)
+{
+    struct client *to = controls[from->control_role == CONTROL_ROLE_APP ? CONTROL_ROLE_COMPOSITOR : CONTROL_ROLE_APP];
+    if (!to) {
+        daemon_log("daemon: control message dropped, no %s connected\n",
+                   from->control_role == CONTROL_ROLE_APP ? "compositor" : "app");
+        return;
+    }
+    uint8_t buf[sizeof(struct ctrl_msg) + CONTROL_MAX_PAYLOAD];
+    struct ctrl_msg hdr = { .type = CTRL_MSG_CONTROL, .size = size };
+    memcpy(buf, &hdr, sizeof(hdr));
+    memcpy(buf + sizeof(hdr), payload, size);
+    if (send_all(to->ctrl_fd, buf, sizeof(hdr) + size) < 0)
+        drop_client(to);
 }
 
 static void handle_client_data(struct client *c)
@@ -229,52 +314,66 @@ static void handle_client_data(struct client *c)
         return;
     }
 
-    uint8_t payload[sizeof(struct screen_info)];
+    uint8_t payload[CONTROL_MAX_PAYLOAD];
     if (hdr.size > 0) {
         if (hdr.size > sizeof(payload) || recv_all(c->ctrl_fd, payload, hdr.size) < 0) {
+            for (int i = 0; i < fd_count; i++)
+                close(fds[i]);
             drop_client(c);
             return;
         }
     }
 
+    if (c->role == ROLE_CONTROL) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
+        if (hdr.type == CTRL_MSG_CONTROL)
+            relay_control(c, payload, hdr.size);
+        return;
+    }
+
+    struct pair *p = c->pair;
     switch (hdr.type) {
     case CTRL_MSG_CONSUMER_HELLO:
-        if (c == consumer && fd_count >= MAX_FDS - 1) {
-            clear_deposited_fds();
-            memcpy(deposited_fds, fds, sizeof(int) * fd_count);
-            deposited_fd_count = fd_count;
-            daemon_log("daemon: consumer re-deposited %d fds\n", fd_count);
-            if (producer_waiting_fds)
-                try_deliver_fds();
+        if (c == p->consumer && fd_count >= MAX_FDS - 1) {
+            clear_deposited_fds(p);
+            memcpy(p->deposited_fds, fds, sizeof(int) * fd_count);
+            p->deposited_fd_count = fd_count;
+            fd_count = 0;
+            daemon_log("daemon: surface %u: consumer re-deposited %d fds\n", p->id, p->deposited_fd_count);
+            if (p->producer_waiting_fds)
+                try_deliver_fds(p);
         }
         break;
 
     case CTRL_MSG_SCREEN_INFO:
-        if (c == consumer && hdr.size == sizeof(struct screen_info)) {
+        if (c == p->consumer && hdr.size == sizeof(struct screen_info)) {
             struct screen_info si;
             memcpy(&si, payload, sizeof(si));
             /* Always accept the consumer's screen info, even if it differs from a
              * previous connection — the Android display may have rotated or switched
              * resolution. Overwrite and forward to any waiting producer. */
-            stored_screen = si;
-            has_screen_info = true;
-            daemon_log("daemon: screen info %ux%u fmt=%u\n",
-                       si.width, si.height, si.format);
-            if (producer_waiting_screen && producer) {
-                send_screen_info_msg(producer->ctrl_fd);
-                producer_waiting_screen = false;
+            p->stored_screen = si;
+            p->has_screen_info = true;
+            daemon_log("daemon: surface %u: screen info %ux%u fmt=%u\n",
+                       p->id, si.width, si.height, si.format);
+            if (p->producer_waiting_screen && p->producer) {
+                send_screen_info_msg(p, p->producer->ctrl_fd);
+                p->producer_waiting_screen = false;
             }
         }
         break;
 
     case CTRL_MSG_PICKUP_FDS:
-        if (c == producer)
-            try_deliver_fds();
+        if (c == p->producer)
+            try_deliver_fds(p);
         break;
 
     default:
         break;
     }
+    for (int i = 0; i < fd_count; i++)
+        close(fds[i]);
 }
 
 static void handle_new_connection(int listen_fd)
@@ -289,49 +388,97 @@ static void handle_new_connection(int listen_fd)
 
     int n = recv_fds(client_fd, &hdr, sizeof(hdr), fds, MAX_FDS, &fd_count);
     if (n < (int)sizeof(struct ctrl_msg)) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
+        close(client_fd);
+        return;
+    }
+    uint8_t payload[sizeof(uint32_t)];
+    if (hdr.size > sizeof(payload) || (hdr.size > 0 && recv_all(client_fd, payload, hdr.size) < 0)) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
         close(client_fd);
         return;
     }
 
     struct client *c = calloc(1, sizeof(*c));
     if (!c) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
         close(client_fd);
         return;
     }
     c->ctrl_fd = client_fd;
 
-    if (hdr.type == CTRL_MSG_CONSUMER_HELLO) {
-        /* Evict any prior consumer (alive or ghost) and its stale deposit before this
-         * one takes over the role. */
-        if (consumer)
-            drop_client(consumer);
-        c->is_consumer = true;
-        consumer = c;
+    if (hdr.type == CTRL_MSG_CONSUMER_HELLO || hdr.type == CTRL_MSG_PRODUCER_HELLO) {
+        const uint32_t id = hello_id(&hdr, payload);
+        struct pair *p = pair_get(id, true);
+        if (!p) {
+            daemon_log("daemon: no room for surface %u\n", id);
+            for (int i = 0; i < fd_count; i++)
+                close(fds[i]);
+            close(client_fd);
+            free(c);
+            return;
+        }
+        c->pair = p;
+        if (hdr.type == CTRL_MSG_CONSUMER_HELLO) {
+            /* Evict any prior consumer (alive or ghost) and its stale deposit before this
+             * one takes over the role. */
+            if (p->consumer) {
+                drop_client(p->consumer);
+                p = pair_get(id, true); /* the eviction may have released an otherwise empty pair */
+                c->pair = p;
+            }
+            c->role = ROLE_CONSUMER;
+            p->consumer = c;
 
-        clear_deposited_fds();
-        memcpy(deposited_fds, fds, sizeof(int) * fd_count);
-        deposited_fd_count = fd_count;
-        daemon_log("daemon: consumer connected, %d fds\n", fd_count);
+            clear_deposited_fds(p);
+            memcpy(p->deposited_fds, fds, sizeof(int) * fd_count);
+            p->deposited_fd_count = fd_count;
+            daemon_log("daemon: surface %u: consumer connected, %d fds\n", id, fd_count);
 
-        if (producer_waiting_fds)
-            try_deliver_fds();
+            if (p->producer_waiting_fds)
+                try_deliver_fds(p);
+        } else {
+            for (int i = 0; i < fd_count; i++)
+                close(fds[i]);
+            /* Evict any prior producer (alive or ghost) before this one takes over. */
+            if (p->producer) {
+                drop_client(p->producer);
+                p = pair_get(id, true);
+                c->pair = p;
+            }
+            c->role = ROLE_PRODUCER;
+            p->producer = c;
+            p->producer_waiting_screen = false;
+            p->producer_waiting_fds = false;
+            daemon_log("daemon: surface %u: producer connected\n", id);
 
-    } else if (hdr.type == CTRL_MSG_PRODUCER_HELLO) {
-        /* Evict any prior producer (alive or ghost) before this one takes over. */
-        if (producer)
-            drop_client(producer);
-        c->is_consumer = false;
-        producer = c;
-        producer_waiting_screen = false;
-        producer_waiting_fds = false;
-        daemon_log("daemon: producer connected\n");
-
-        if (has_screen_info)
-            send_screen_info_msg(client_fd);
-        else
-            producer_waiting_screen = true;
-
+            if (p->has_screen_info)
+                send_screen_info_msg(p, client_fd);
+            else
+                p->producer_waiting_screen = true;
+        }
+    } else if (hdr.type == CTRL_MSG_CONTROL_HELLO && hdr.size == sizeof(uint32_t)) {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
+        uint32_t role;
+        memcpy(&role, payload, sizeof(role));
+        if (role > CONTROL_ROLE_APP) {
+            close(client_fd);
+            free(c);
+            return;
+        }
+        if (controls[role])
+            drop_client(controls[role]);
+        c->role = ROLE_CONTROL;
+        c->control_role = role;
+        controls[role] = c;
+        daemon_log("daemon: control (%s) connected\n", role == CONTROL_ROLE_APP ? "app" : "compositor");
     } else {
+        for (int i = 0; i < fd_count; i++)
+            close(fds[i]);
         close(client_fd);
         free(c);
         return;
@@ -372,7 +519,7 @@ int main(int argc, char **argv)
         daemon_perror("bind");
         return 1;
     }
-    if (listen(listen_fd, 4) < 0) {
+    if (listen(listen_fd, 16) < 0) {
         daemon_perror("listen");
         return 1;
     }
@@ -395,7 +542,7 @@ int main(int argc, char **argv)
                  * one evicted by a new connection taking over its role -- leaves a
                  * stale event behind. Skip anything that is no longer a current role
                  * so we never touch freed memory. */
-                if (c != consumer && c != producer)
+                if (!client_current(c))
                     continue;
                 if (events[i].events & (EPOLLHUP | EPOLLERR))
                     drop_client(c);
@@ -405,9 +552,15 @@ int main(int argc, char **argv)
         }
     }
 
-    clear_deposited_fds();
-    client_free(consumer);
-    client_free(producer);
+    for (int i = 0; i < MAX_PAIRS; i++) {
+        if (!pairs[i].used)
+            continue;
+        clear_deposited_fds(&pairs[i]);
+        client_free(pairs[i].consumer);
+        client_free(pairs[i].producer);
+    }
+    client_free(controls[0]);
+    client_free(controls[1]);
     close(listen_fd);
     close(epoll_fd);
     unlink(sock_path);
