@@ -43,9 +43,16 @@ rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-sess
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run
 # after reinstalling the app (new Android uid). Arch Linux ARM's default user alarm goes, as in the VM build.
+# Steam Input gives a game the controller as its own virtual pad, written to /dev/uinput; on Android that is
+# root:uhid 0660 (SteamOS lets the desktop user write it, by udev rule; there's no udev here). So powos joins a group
+# "uhid" with Android's gid - Android's node stays as it is. Without it Steam logs "Couldn't initialize virtual
+# gamepad: Couldn't open /dev/uinput for writing" and games get no controller.
 U=$(stat -c %u /data/data/com.powos.app)
-chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/bash -s "$U" <<'EOF'
-u=$1
+UHID=$(stat -c %g /dev/uinput)
+chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/bash -s "$U" "$UHID" <<'EOF'
+u=$1 uhid=$2
+getent group uhid >/dev/null || groupadd -g "$uhid" uhid
+[ "$(getent group uhid | cut -d: -f3)" = "$uhid" ] || groupmod -g "$uhid" uhid
 id alarm >/dev/null 2>&1 && userdel -r alarm 2>/dev/null
 sed -i "/^android:x:$u:/d" /etc/passwd            # the no-root engine's name for the app uid (session/first-boot.sh)
 getent group powos >/dev/null || groupadd -g "$u" powos
@@ -55,7 +62,7 @@ if ! id powos >/dev/null 2>&1; then
 elif [ "$(id -u powos)" != "$u" ]; then
   usermod -u "$u" powos
 fi
-usermod -aG wheel,video,audio,input powos
+usermod -aG wheel,video,audio,input,uhid powos
 echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel && chmod 440 /etc/sudoers.d/10-wheel
 echo "user powos uid $u"
 EOF

@@ -22,6 +22,10 @@ until session; do
 done
 # The session's own language: the one PowOS compiled (Android's, e.g. en_CH, may not be).
 L=$(tr '\0' '\n' < /proc/$PID/environ 2>/dev/null | sed -n 's/^LANG=//p')
+# Its time zone, likewise (else Android's): su gives none, PowOS has no /etc/localtime, so what this started (Steam
+# from the games widget, its logs) ran on UTC.
+Z=$(tr '\0' '\n' < /proc/$PID/environ 2>/dev/null | sed -n 's/^TZ=//p')
+[ -n "$Z" ] || Z=$(getprop persist.sys.timezone)
 # The desktop's X server (Xwayland): its display and auth file, as the desktop's own apps get them from KWin - each
 # session start makes a new auth file, and X11 programs (Steam) then failed with "Authorization required".
 # From KWin's own arguments (it starts Xwayland: --xwayland-display, --xwayland-xauthority), known from KWin's start:
@@ -51,7 +55,7 @@ CTTY=
 exec nsenter -t "$PID" -m -- $CTTY /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- /usr/bin/env -i \
   HOME=/home/powos USER=powos LOGNAME=powos SHELL=/bin/bash TERM=xterm-256color \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
-  LANG="${L:-${LANG:-C.UTF-8}}" TZ="$TZ" \
+  LANG="${L:-${LANG:-C.UTF-8}}" TZ="${Z:-$TZ}" \
   XDG_RUNTIME_DIR=/run/powos-app \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus \
   DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/powos-app/system_bus \
