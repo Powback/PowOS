@@ -26,7 +26,6 @@ import dev.omalauncher.widgets.render.WidgetScreen
 import androidx.compose.foundation.layout.fillMaxWidth
 import dev.omalauncher.widgets.runtime.WidgetInstance
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.remember
@@ -131,8 +130,8 @@ private fun TileButton(
 
 /**
  * A widget's screen { }, full screen over home in an Omarchy window titled by its `title` or the widget's name. A
- * terminal's screen covers the top of the screen instead, the keyboard and [extraKeys] below it, at one size
- * whether the keyboard is up or not: a resize re-wraps the terminal's text.
+ * terminal's screen ends above the keyboard and [extraKeys] while it's up, and fills the screen when it's down - once
+ * the keyboard has settled: following its slide frame by frame would resize (re-wrap) the terminal every frame.
  */
 @Composable
 internal fun WidgetScreenPanel(
@@ -151,14 +150,14 @@ internal fun WidgetScreenPanel(
     val density = LocalDensity.current
     val ime = WindowInsets.ime.getBottom(density)
     val nav = WindowInsets.navigationBars.getBottom(density)
-    // The keyboard's height once it has settled (not every frame of its animation); a guess until it first shows.
+    var settled by remember { mutableIntStateOf(ime) }
     LaunchedEffect(ime) {
-        kotlinx.coroutines.delay(300)
-        if (ime > nav) KeyboardRoom.px = ime
+        kotlinx.coroutines.delay(150)
+        settled = ime
     }
-    val guess = with(density) { (LocalConfiguration.current.screenHeightDp * 0.4f).dp.roundToPx() }
     var keysPx by remember { mutableIntStateOf(0) }
-    val clear = with(density) { ((KeyboardRoom.px.takeIf { it > 0 } ?: guess) + keysPx).toDp() }
+    // The extra keys show only over the keyboard (extraKeysWanted).
+    val clear = with(density) { (maxOf(settled, nav) + if (settled > 0) keysPx else 0).toDp() }
     OverlayPanel(
         title,
         onDismiss,
@@ -167,9 +166,4 @@ internal fun WidgetScreenPanel(
     ) {
         WidgetScreen(instance, Modifier.weight(1f).fillMaxWidth())
     }
-}
-
-/** The soft keyboard's height in pixels as last seen settled, for panels that keep room for it; 0 until then. */
-internal object KeyboardRoom {
-    var px by mutableIntStateOf(0)
 }
