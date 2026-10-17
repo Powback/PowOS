@@ -22,8 +22,11 @@ object RootedGuest {
     /** The terminal PowOS opens everywhere (Konsole's PowOS.profile): its tmux session picker, falling back to a shell. */
     const val TERMINAL_SHELL = "/usr/lib/powos/powos-tmux-shell"
 
-    /** `bash -lc [command]` in the PowOS session, stderr merged into stdout. */
-    fun process(command: String): ProcessBuilder = ProcessBuilder("su", "-c", rootCommand(command)).redirectErrorStream(true)
+    /** `bash -lc [command]` in the PowOS session, stderr merged into stdout unless not [mergeErrors]. */
+    fun process(
+        command: String,
+        mergeErrors: Boolean = true,
+    ): ProcessBuilder = ProcessBuilder("su", "-c", rootCommand(command)).redirectErrorStream(mergeErrors)
 
     /** What root runs (`su -c`) for `bash -lc [command]` in the PowOS session. */
     fun rootCommand(command: String): String {

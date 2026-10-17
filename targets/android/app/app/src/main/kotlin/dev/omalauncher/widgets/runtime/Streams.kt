@@ -1,6 +1,7 @@
 package dev.omalauncher.widgets.runtime
 
 import dev.omalauncher.linux.Proot
+import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.shellQuote
 import dev.omalauncher.widgets.lang.WidgetError
 import kotlinx.coroutines.CoroutineScope
@@ -73,7 +74,8 @@ class Streams(
 
     private fun open(command: String): SharedFlow<String?> =
         callbackFlow<String?> {
-            val process = proot.process("exec bash -c " + shellQuote(command)).start()
+            val shell = "exec bash -c " + shellQuote(command)
+            val process = (if (RootedGuest.enabled) RootedGuest.process(shell, mergeErrors = false) else proot.process(shell)).start()
             launch(Dispatchers.IO) {
                 try {
                     process.inputStream.bufferedReader().useLines { lines -> lines.forEach { trySend(it) } }

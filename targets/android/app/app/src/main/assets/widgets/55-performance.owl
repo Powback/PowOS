@@ -1,0 +1,79 @@
+widget "performance" {
+  meta { owl: 7; description: "The phone under load: Adreno GPU busy and clock, CPU load, and how hot the CPU, GPU, skin and battery run"; version: "1.0"; license: "MIT"; category: "system" }
+  page: 1
+  order: 7
+  size: 6x3
+  minSize: 3x2
+
+  // One cheap read every 2 s, builtins only (no forks per sensor): GPU busy %, GPU clock (Hz), GPU temp, the
+  // hottest CPU sensor, skin and battery temps (m°C), then /proc/stat's total and idle jiffies for the CPU load.
+  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; read b x < $k/gpu_busy_percentage; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat; echo $b $f $g $c $s $bt $((u+n+y+i+w+q+r)) $((i+w))') every 2s
+
+  let v = words(raw ?? "").map(w => num(w, 0))
+  let gpu = raw == null ? null : v[0]
+  let mhz = raw == null ? null : v[1] / 1000000
+  let tGpu = v[2] / 1000
+  let tCpu = v[3] / 1000
+  let tSkin = v[4] / 1000
+  let tBat = v[5] / 1000
+  let total = v[6]
+  let idle = v[7]
+  let pTotal = prev(total)
+  let pIdle = prev(idle)
+  let cpu = pTotal != null && total > pTotal ? clamp((1 - (idle - pIdle) / (total - pTotal)) * 100, 0, 100) : null
+  let gpuHist = history(gpu, 90)
+  let cpuHist = history(cpu, 90)
+
+  // Parameters aren't named after properties (value, name): inside, the property would win.
+  component Temp(sensor, deg) {
+    Column {
+      gap: 0; align: center; weight: 1
+      Text { text: deg > 0 ? "${round(deg)}°" : "–"; style: body; bold: true; align: center; color: deg >= 80 ? red : deg >= 65 ? orange : deg >= 50 ? yellow : green; animate color: tween(600ms, "ease") }
+      Text { text: sensor; style: label; align: center }
+    }
+  }
+
+  component Trace(what, pct, series, tint) {
+    Column {
+      gap: 2; weight: 1
+      Row {
+        Text { text: what; style: label; weight: 1 }
+        Text { text: pct == null ? "…" : "${round(pct)}%"; style: small; color: tint; width: 44; align: end }
+      }
+      Sparkline { values: series; min: 0; max: 100; area: alpha(tint, 0.18); color: tint; thickness: 1.5; fill: width; weight: 1 }
+    }
+  }
+
+  Row {
+    gap: 14; align: center
+
+    // Adreno as a gauge: the arc fills with load, its color warms with the GPU's temperature.
+    Box {
+      width: rows && rows < 3 ? 92 : 124; height: rows && rows < 3 ? 92 : 124; align: center
+      Ring {
+        value: gpu ?? 0; max: 100; start: 225; sweep: 270; thickness: 9; fill: true
+        color: tGpu >= 80 ? red : tGpu >= 65 ? orange : accent; track: alpha(muted, 0.25)
+        animate value: spring()
+      }
+      Column {
+        gap: 0; align: center
+        Text { text: gpu == null ? "…" : "${round(gpu)}%"; style: title; align: center }
+        Text { text: mhz == null ? "" : "${round(mhz)} MHz"; style: small; color: muted; align: center }
+        Text { text: "adreno"; style: label; align: center }
+      }
+    }
+
+    Column {
+      gap: 8; weight: 1; fill: height
+      Trace { what: "gpu"; pct: gpu; series: gpuHist; tint: accent }
+      Trace { what: "cpu"; pct: cpu; series: cpuHist; tint: magenta }
+      Row {
+        gap: 4
+        Temp { sensor: "cpu"; deg: tCpu }
+        Temp { sensor: "gpu"; deg: tGpu }
+        Temp { sensor: "skin"; deg: tSkin }
+        Temp { sensor: "batt"; deg: tBat }
+      }
+    }
+  }
+}

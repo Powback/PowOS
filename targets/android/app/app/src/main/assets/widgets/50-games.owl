@@ -1,0 +1,92 @@
+widget "games" {
+  meta { owl: 7; description: "Your Steam games in PowOS, last played first: tap one to play it on the PowOS desktop"; version: "1.0"; license: "MIT"; category: "fun" }
+  page: 1
+  order: 6
+  size: 6x3
+  minSize: 3x2
+
+  // Installed games from Steam's app manifests: appid, last played (Unix s), size, name. Proton, the Steam
+  // Linux Runtime and Steamworks redistributables are tools, not games.
+  source acf = cmd('for f in ~/.local/share/Steam/steamapps/appmanifest_*.acf; do awk -F"\"" "/\"appid\"/{a=\$4} /\"name\"/{n=\$4} /\"LastPlayed\"/{l=\$4} /\"SizeOnDisk\"/{s=\$4} END{if (n !~ /^Proton|Steam Linux Runtime|Steamworks|^FEX$/) printf \"%s\\t%s\\t%s\\t%s\\n\", a, l+0, s+0, n}" "$f"; done 2>/dev/null | sort -t "$(printf "\t")" -k2,2nr') every 2m
+  source steam = cmd("pgrep -x steam >/dev/null && echo on || echo off") every 15s
+  source now = clock every 1m
+
+  let games = lines(acf ?? "").filter(l => len(l) > 0).map(l => split(l, "\t"))
+    .map(g => {id: g[0], last: num(g[1], 0), size: num(g[2], 0), name: g[3]})
+  let hero = first(games)
+  let rest = drop(games, 1).take(rows ? max(rows * 2 - 2, 1) : 4)
+  let tints = [accent, magenta, cyan, green, orange, blue, yellow, red]
+
+  // Launching: `steam steam://rungameid/...` hands the game to the running Steam (or starts it), detached so the
+  // action's shell doesn't hold it; then the PowOS desktop comes to the front, where the game opens.
+
+  component Ago(stamp) {
+    let d = now - stamp
+    Text {
+      text: stamp == 0 ? "never played" : d < 3600 ? "${max(floor(d / 60), 1)}m ago" : d < 86400 ? "${floor(d / 3600)}h ago" : d < 86400 * 60 ? "${floor(d / 86400)}d ago" : fmtTime(stamp, "MMM yyyy")
+      style: small; color: muted; maxLines: 1
+    }
+  }
+
+  // A game's tile when there's no art: its initials on a tint picked from the theme by its appid.
+  component Badge(game, side = 34) {
+    let tint = tints[num(game.id, 0) % len(tints)]
+    Box {
+      width: side; height: side; radius: 6 * corners; align: center
+      background: mix(tint, background, 0.55); border: 1; borderColor: alpha(tint, 0.7)
+      Text { text: upper(join(words(replace(replace(game.name, ":", " "), "-", " ")).take(2).map(w => sub(w, 0, 1)), "")); bold: true; color: foreground; fontSize: side * 0.36; align: center }
+    }
+  }
+
+  Column {
+    gap: 8
+    Row {
+      align: center
+      Text { text: "steam"; style: label; weight: 1 }
+      Box { width: 7; height: 7; radius: 4; background: steam == "on" ? green : alpha(muted, 0.6) }
+      Text { text: steam == "on" ? "running" : "${len(games)} installed"; style: small; color: muted; width: 84; align: end }
+    }
+
+    if acf == null {
+      Text { text: "…"; style: muted }
+    } else if hero == null {
+      Text { text: "no games installed in PowOS's Steam yet"; style: small; color: muted }
+    } else {
+      // The last played, big: tap anywhere on it to carry on.
+      Box {
+        fill: width; radius: 8 * corners; clip: true
+        background: linear(0, 0, 400, 0, [mix(tints[num(hero.id, 0) % len(tints)], background, 0.7), alpha(background, 0.4)])
+        border: 1; borderColor: alpha(tints[num(hero.id, 0) % len(tints)], 0.5)
+        onTap: { run("setsid -f steam steam://rungameid/${hero.id} >/dev/null 2>&1"); androidApp("com.powos.app") }
+        Row {
+          padding: 10; gap: 12; align: center
+          Badge { game: hero; side: 46 }
+          Column {
+            gap: 2; weight: 1
+            Text { text: hero.name; style: body; bold: true; maxLines: 1 }
+            Ago { stamp: hero.last }
+          }
+          Box {
+            width: 38; height: 38; radius: 19; align: center; background: accent
+            Text { text: "▶"; color: background; fontSize: 15; align: center }
+          }
+        }
+      }
+      Grid {
+        columns: cols && cols < 5 ? 1 : 2; gap: 6
+        for g in rest key g.id {
+          Row {
+            gap: 8; align: center
+            onTap: { run("setsid -f steam steam://rungameid/${g.id} >/dev/null 2>&1"); androidApp("com.powos.app") }
+            Badge { game: g; side: 26 }
+            Column {
+              gap: 0; weight: 1
+              Text { text: g.name; style: small; maxLines: 1 }
+              Ago { stamp: g.last }
+            }
+          }
+        }
+      }
+    }
+  }
+}

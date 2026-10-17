@@ -506,4 +506,5 @@ and the message goes to `.errors/`.
   `91-focus` (state, buttons and `at`), `92-aurora` (Shader), `93-latency` (stream),
   `88-notes` (Input), `98-notifications` (android.notifications), `99-volume` (Slider),
   and next to it `10-today` (a weather screen behind the tile), `20-fetch` (fastfetch as a dashboard), `45-terminal` (a live terminal) and
-  `60-owl` (sprites).
+  `50-games` (a cmd source parsed into rows, taps that act), `55-performance` (history, prev, a Ring gauge) and
+  `examples/83-owl` (sprites).

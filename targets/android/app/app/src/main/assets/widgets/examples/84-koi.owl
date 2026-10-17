@@ -1,7 +1,5 @@
 widget "koi pond" {
   meta { description: "A pixel-art koi pond in your theme's colors. Tap the water to feed the koi"; version: "1.0"; license: "MIT"; category: "fun" }
-  page: 1
-  order: 6
   size: 6x3
   minSize: 2x2
   padding: 0

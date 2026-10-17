@@ -390,6 +390,8 @@ class Runtime(
         }
         rootedTerminals = true
         widgets.terminalsChanged(true)
+        // Widgets' commands, streams and actions run in the PowOS session too (GuestShell, Streams): PowOS is their Linux.
+        widgets.linuxChanged(true)
     }
 
     /** Turns GPU acceleration on (installing and checking the driver) or off, for Linux apps started from then on. */

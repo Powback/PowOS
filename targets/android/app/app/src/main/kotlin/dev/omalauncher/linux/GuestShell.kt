@@ -89,14 +89,18 @@ class GuestShell(
 
     private fun ensureStarted() {
         if (process?.isAlive == true) return
-        val p = proot.process("exec bash --noprofile --norc").start()
+        // PowOS rooted mode: the shell runs in the PowOS session (as its terminals do), there is no proot system.
+        val shell = "exec bash --noprofile --norc"
+        val p = (if (RootedGuest.enabled) RootedGuest.process(shell, mergeErrors = false) else proot.process(shell)).start()
         process = p
         stdin = p.outputStream.bufferedWriter()
         stdout = p.inputStream.bufferedReader()
+        // Whatever the way in printed (a login profile under su) ends before the marker, not in the first output.
         stdin!!.apply {
-            write("__err=/tmp/.guest-shell-err-\$\$\n")
+            write("__err=/tmp/.guest-shell-err-\$\$; printf '\\n%s\\n' __omarchy_ready__\n")
             flush()
         }
+        while (readLine() != "__omarchy_ready__") Unit
     }
 
     private fun stop() {
