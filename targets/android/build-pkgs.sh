@@ -89,7 +89,7 @@ for p in "${pkgs[@]}"; do
         grep -q "^\[ours\]" /etc/pacman.conf ||
           sed -i "0,/^\[core\]/s//[ours]\nSigLevel = Optional TrustAll\nServer = file:\/\/\/ours\n\n[core]/" /etc/pacman.conf
         pacman -Sy >/dev/null
-        installed=$(pacman -Slq ours | while read -r p; do pacman -Q "$p" >/dev/null 2>&1 && echo "$p"; done)
+        installed=$(pacman -Slq ours | while read -r p; do if pacman -Q "$p" >/dev/null 2>&1; then echo "$p"; fi; done)
         [ -z "$installed" ] || pacman -S --noconfirm --needed $installed >/dev/null 2> >(grep -v "is up to date -- skipping" >&2) ||
           echo "build-pkgs: could not update our earlier builds" >&2
       fi

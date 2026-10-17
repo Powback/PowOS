@@ -1,0 +1,150 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] kicker: the Application Dashboard's favorites as a row above the apps
+
+On a phone the favorites column beside the apps took columns and left a wide gap: the favorites are a row at the
+top of the list instead (above a category's apps or All Applications' sections, hidden while searching), and the apps
+get the width. The session actions the column also held are the categories' Power / Session. The grids' height
+comes from the row itself (root.gridHeight), no longer from the hidden column.
+---
+--- a/applets/kicker/DashboardRepresentation.qml
++++ b/applets/kicker/DashboardRepresentation.qml
+@@ -74,6 +74,9 @@
+         }
+     }
+ 
++    // PowOS: the grids' height, whole cells of the row (it was the favorites column's, which is gone).
++    readonly property int gridHeight: Math.floor(middleRow.height / cellSize) * cellSize
++
+     // PowOS: All Applications at [letter]'s section - its own, else the next one, else the last ("#": the first).
+     // From any category: All Applications is selected first.
+     function scrollToLetter(letter: string) {
+@@ -503,9 +506,13 @@
+                     bottom: parent.bottom
+                 }
+ 
+-                width: (columns * root.cellSize) + Kirigami.Units.gridUnit
++                // PowOS: no favorites column - the favorites are a row above the apps (favoritesRow), the session
++                // actions are the categories' Power / Session. Hidden (a Row leaves invisible items out); it keeps a
++                // width so its grids' geometry stays finite, and takes no columns from the apps.
++                visible: false
++                width: (2 * root.cellSize) + Kirigami.Units.gridUnit
+ 
+-                property int columns: Plasmoid.configuration.favoritesColumns
++                property int columns: 0
+ 
+                 Kirigami.Heading {
+                     id: favoritesColumnLabel
+@@ -656,6 +663,7 @@
+ 
+             Item {
+                 id: splitter
++                visible: false // PowOS: no favorites column to size
+                 width: Math.round(Kirigami.Units.gridUnit / 2)
+                 anchors.top: parent.top
+                 anchors.bottom: parent.bottom
+@@ -703,10 +711,71 @@
+                     }
+                 }
+ 
++                // PowOS: the favorites as a row at the top of the list (not a column of their own beside it).
+                 Item {
++                    id: favoritesRow
++
++                    anchors.top: parent.top
++                    width: parent.width
++                    height: visible ? favoritesRowGrid.y + favoritesRowGrid.height + Kirigami.Units.gridUnit : 0
++                    visible: !root.searching && favoritesRowGrid.count > 0
++
++                    Kirigami.Heading {
++                        id: favoritesRowLabel
++
++                        x: Kirigami.Units.smallSpacing
++                        width: parent.width - x
++                        elide: Text.ElideRight
++                        wrapMode: Text.NoWrap
++                        color: Kirigami.Theme.textColor
++                        level: 1
++                        text: i18nc("@title:group for column with app and system action grids", "Favorites")
++                        textFormat: Text.PlainText
++                    }
++
++                    KSvg.SvgItem {
++                        id: favoritesRowUnderline
++
++                        anchors.top: favoritesRowLabel.bottom
++                        width: parent.width - Kirigami.Units.gridUnit
++                        imagePath: "widgets/line"
++                        elementId: "horizontal-line"
++                    }
++
++                    ItemGridView {
++                        id: favoritesRowGrid
++
++                        anchors {
++                            top: favoritesRowUnderline.bottom
++                            topMargin: Kirigami.Units.gridUnit
++                        }
++
++                        width: parent.width
++                        height: Math.ceil(count / Math.max(1, Math.floor(width / root.cellSize))) * root.cellSize
++
++                        cellWidth: root.cellSize
++                        cellHeight: root.cellSize
++                        iconSize: root.iconSize
++
++                        model: root.globalFavorites
++
++                        hoverEnabled: !hoverBlock.enabled
++                        dropEnabled: true
++
++                        onInteractionConcluded: root.interactionConcluded()
++                        onKeyNavDown: mainColumn.tryActivate(0, currentCol())
++                    }
++                }
++
++                Item {
+                     id: mainGridContainer
+ 
+-                    anchors.fill: parent
++                    anchors {
++                        top: favoritesRow.bottom
++                        left: parent.left
++                        right: parent.right
++                        bottom: parent.bottom
++                    }
+                     z: (opacity === 1.0) ? 1 : 0
+ 
+                     visible: opacity !== 0.0
+@@ -777,7 +846,7 @@
+                         }
+ 
+                         width: parent.width
+-                        height: systemFavoritesGrid.y + systemFavoritesGrid.height - mainGridContainer.headerHeight
++                        height: root.gridHeight - mainGridContainer.headerHeight - favoritesRow.height
+ 
+                         cellWidth: root.cellSize
+                         cellHeight: cellWidth
+@@ -819,12 +888,12 @@
+                     id: allAppsGrid
+ 
+                     anchors {
+-                        top: parent.top
++                        top: favoritesRow.bottom
+                     }
+ 
+                     z: (opacity === 1.0) ? 1 : 0
+                     width: parent.width
+-                    height: systemFavoritesGrid.y + systemFavoritesGrid.height
++                    height: root.gridHeight - favoritesRow.height
+                     cellSize: root.cellSize
+                     iconSize: root.iconSize
+ 
+@@ -875,7 +944,7 @@
+ 
+                     z: (opacity === 1.0) ? 1 : 0
+                     width: parent.width
+-                    height: Math.min(implicitHeight, systemFavoritesGrid.y + systemFavoritesGrid.height)
++                    height: Math.min(implicitHeight, root.gridHeight)
+                     cellSize: root.cellSize
+                     iconSize: root.iconSize
+ 

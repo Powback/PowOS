@@ -1,0 +1,31 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] desktop containment: widgets keep their size while the desktop is narrower
+
+On a phone the desktop narrows often - split screen, a floating window - and AppletsLayout relaid the widgets out
+for each new width: every one shrunk to fit (down to its minimum), and that saved over the real layout (the
+horizontal / vertical fallback too), so they stayed broken afterwards. The relayout is locked while the desktop is
+narrower than the widest it has been this session: widgets keep their size and place, nothing is saved, and back
+at that width AppletsLayout restores the saved layout exactly.
+---
+--- a/containments/desktop/package/contents/ui/main.qml
++++ b/containments/desktop/package/contents/ui/main.qml
+@@ -288,7 +288,19 @@
+         ContainmentLayoutManager.AppletsLayout {
+             id: appletsLayout
+             anchors.fill: parent
++            // PowOS: and while the desktop is narrower than it has been (split screen or a floating window on a
++            // phone): widgets keep their size and place - the relayout shrank every one to fit, and saved that over
++            // the real layout - until it is back to the width they were laid out at, which restores it exactly.
+             relayoutLock: width !== root.availableScreenRect.width || height !== root.availableScreenRect.height
++                || root.availableScreenRect.width < widestWidth
++            property real widestWidth: 0
++            Connections {
++                target: root
++                function onAvailableScreenRectChanged() {
++                    appletsLayout.widestWidth = Math.max(appletsLayout.widestWidth, root.availableScreenRect.width);
++                }
++            }
++            Component.onCompleted: widestWidth = Math.max(widestWidth, root.availableScreenRect.width)
+             // NOTE: use root.availableScreenRect and not own width and height as they are updated not atomically
+             configKey: "ItemGeometries-" + Math.round(root.screenGeometry.width) + "x" + Math.round(root.screenGeometry.height)
+             fallbackConfigKey: root.availableScreenRect.width > root.availableScreenRect.height ? "ItemGeometriesHorizontal" : "ItemGeometriesVertical"
