@@ -1,0 +1,26 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] kicker: Application Dashboard categories respond to a tap
+
+A category was applied on click from currentIndex, which only hover set: a touch tap (no hover) re-applied
+the previous category. The click now selects the clicked category first.
+---
+--- a/applets/kicker/DashboardRepresentation.qml
++++ b/applets/kicker/DashboardRepresentation.qml
+@@ -900,7 +900,16 @@
+                             baseModel: filterList.model
+                             favoritesModel: baseModel.favoritesModel
+ 
+-                            onClicked: ListView.view.applyFilter()
++                            // PowOS: the clicked category, not the hovered one. Hover set currentIndex and the click
++                            // applied it - a tap has no hover, so tapping a category re-applied the previous one
++                            // (mouse and a dragged finger worked, a tap didn't).
++                            onClicked: {
++                                if (isSeparator) {
++                                    return;
++                                }
++                                filterList.currentIndex = index;
++                                filterList.applyFilter();
++                            }
+ 
+                             onHoveredChanged: {
+                                 if (hovered && !isSeparator && !ActionMenu.opened) {

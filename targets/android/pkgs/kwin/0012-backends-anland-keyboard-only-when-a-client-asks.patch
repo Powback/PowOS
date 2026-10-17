@@ -1,0 +1,133 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: show the Android keyboard only when a client asks
+
+As KWin's InputMethod: text-input v3 enable (request / enabled now, without explicit show support) or a
+show-input-panel request shows it - remembered until that field has the focus (Qt enables before the focus moves);
+a focus change alone only keeps it up or hides it. Closing the app grid gave the
+focus to plasmashell's desktop window, whose text input was still enabled, and the keyboard came up over the
+desktop. Each change is logged (kwin_anland: "Android keyboard shown/hidden - <why>").
+---
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -29,6 +29,7 @@
+ #include "wayland_server.h"
+ #include "workspace.h"
+ 
++#include <QElapsedTimer>
+ #include <QFutureWatcher>
+ #include <QScopeGuard>
+ #include <QSocketNotifier>
+@@ -207,9 +208,37 @@
+         });
+         // PowOS: a text field gaining or losing focus shows or hides the Android keyboard. The same test
+         // KWin's InputMethod::refreshActive() makes, without needing an input-method client bound.
+-        connect(seat, &SeatInterface::focusedTextInputSurfaceChanged, this, &AnlandBackend::updateConsumerKeyboard);
+-        connect(seat->textInputV2(), &TextInputV2Interface::enabledChanged, this, &AnlandBackend::updateConsumerKeyboard);
+-        connect(seat->textInputV3(), &TextInputV3Interface::enabledChanged, this, &AnlandBackend::updateConsumerKeyboard);
++        // As KWin's InputMethod decides: the keyboard is SHOWN only when a client asks - text-input v3 enabled
++        // (enable request / enabled now, when the client has no explicit show request), or a show-input-panel
++        // request (v2, newer v3). A focus change alone only keeps it up or hides it: closing the launcher handed
++        // focus to the desktop window of the same client (plasmashell), whose text input was still enabled, and the
++        // keyboard came up over an empty desktop.
++        auto t2 = seat->textInputV2();
++        auto t3 = seat->textInputV3();
++        connect(seat, &SeatInterface::focusedTextInputSurfaceChanged, this, [this]() {
++            updateConsumerKeyboard(false, "focus");
++        });
++        connect(t2, &TextInputV2Interface::enabledChanged, this, [this]() {
++            updateConsumerKeyboard(false, "v2 enabled");
++        });
++        connect(t2, &TextInputV2Interface::requestShowInputPanel, this, [this]() {
++            updateConsumerKeyboard(true, "v2 show");
++        });
++        connect(t2, &TextInputV2Interface::requestHideInputPanel, this, [this]() {
++            hideConsumerKeyboard("v2 hide");
++        });
++        connect(t3, &TextInputV3Interface::enabledChanged, this, [this, t3]() {
++            updateConsumerKeyboard(t3->isEnabled() && t3->implicitShowPanelRequired(), "v3 enabled");
++        });
++        connect(t3, &TextInputV3Interface::enableRequested, this, [this, t3]() {
++            updateConsumerKeyboard(t3->implicitShowPanelRequired(), "v3 enable");
++        });
++        connect(t3, &TextInputV3Interface::requestShowInputPanel, this, [this]() {
++            updateConsumerKeyboard(true, "v3 show");
++        });
++        connect(t3, &TextInputV3Interface::requestHideInputPanel, this, [this]() {
++            hideConsumerKeyboard("v3 hide");
++        });
+     }
+ 
+     return true;
+@@ -631,19 +660,39 @@
+     return std::move(pipe->readEndpoint);
+ }
+ 
+-void AnlandBackend::updateConsumerKeyboard()
++void AnlandBackend::updateConsumerKeyboard(bool showRequested, const char *why)
+ {
+     SeatInterface *seat = waylandServer()->seat();
+-    bool want = false;
++    bool active = false; // a text field has the focus (KWin's InputMethod::refreshActive)
+     if (SurfaceInterface *surface = seat->focusedTextInputSurface()) {
+         ClientConnection *client = surface->client();
+         auto t2 = seat->textInputV2();
+         auto t3 = seat->textInputV3();
+-        want = (t2->clientSupportsTextInput(client) && t2->isEnabled())
++        active = (t2->clientSupportsTextInput(client) && t2->isEnabled())
+             || (t3->clientSupportsTextInput(client) && t3->isEnabled());
+     }
++    // A request counts until the text field it was for has the focus (as KWin's m_shouldShowPanel): Qt enables
++    // text input before the surface gets the keyboard focus, so opening the launcher's search asked first and became
++    // active a moment later. Kept briefly only, so a request whose field never got the focus can't show it later.
++    if (showRequested)
++        m_showRequestedAt.start();
++    const bool pending = m_showRequestedAt.isValid() && m_showRequestedAt.elapsed() < 1000;
++    const bool want = active && (pending || m_keyboardRequested);
++    if (want)
++        m_showRequestedAt.invalidate();
++    setConsumerKeyboard(want, why);
++}
++
++void AnlandBackend::hideConsumerKeyboard(const char *why)
++{
++    setConsumerKeyboard(false, why);
++}
++
++void AnlandBackend::setConsumerKeyboard(bool want, const char *why)
++{
+     if (want == m_keyboardRequested)
+         return;
++    qCInfo(KWIN_ANLAND) << "Android keyboard" << (want ? "shown" : "hidden") << "-" << why;
+     m_keyboardRequested = want;
+     if (m_inFallback)
+         return;
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -11,6 +11,8 @@
+ */
+ #pragma once
+ 
++#include <QElapsedTimer>
++
+ #include "core/outputbackend.h"
+ 
+ #include <QByteArray>
+@@ -102,7 +104,9 @@
+     // Clipboard sync — bidirectional bridge between KWin selection / consumer
+     void onClipboardChanged();
+     // PowOS: Android's keyboard follows text-field focus (text-input v2/v3 enabled on the focused surface)
+-    void updateConsumerKeyboard();
++    void updateConsumerKeyboard(bool showRequested, const char *why);
++    void hideConsumerKeyboard(const char *why);
++    void setConsumerKeyboard(bool want, const char *why);
+     void sendClipboardToConsumer(const QByteArray &text);
+     void sendClipboardToKWin(const QByteArray &text);
+ 
+@@ -131,6 +135,7 @@
+     // QByteArray is trivially sent over the data channel as UTF-8.
+     QByteArray m_clipboardText;
+     bool m_keyboardRequested = false;
++    QElapsedTimer m_showRequestedAt; // a client's last request to show the keyboard (see updateConsumerKeyboard)
+ };
+ 
+ } // namespace KWin

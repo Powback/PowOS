@@ -1,0 +1,121 @@
+# PowOS: Arch's plasma-desktop 6.7.5-1 recipe for aarch64 plus our patch (the Application Dashboard - the phone's
+# start button - answers taps on its categories).
+# HACK: same pkgname as Arch's with pkgrel 1.1 (".1" = ours, as kwin) so it replaces the distro package. Real fix:
+# upstream the patch (KDE bug: kicker's dashboard category click uses the hover-set index), then drop this package.
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+pkgname=plasma-desktop
+pkgver=6.7.5
+_dirver=$(echo $pkgver | cut -d. -f1-3)
+pkgrel=1.1
+pkgdesc='KDE Plasma Desktop'
+arch=(aarch64)
+url='https://kde.org/plasma-desktop/'
+license=(LGPL-2.0-or-later)
+depends=(attica
+         baloo
+         emoji-font # for clock and language KCMs
+         glibc
+         kbookmarks
+         kcmutils
+         kcodecs
+         kcompletion
+         kconfig
+         kconfigwidgets
+         kcoreaddons
+         kcrash
+         kdbusaddons
+         kdeclarative
+         kglobalaccel
+         kguiaddons
+         ki18n
+         kiconthemes
+         kio
+         kirigami
+         kirigami-addons
+         kitemmodels
+         kitemviews
+         kjobwidgets
+         kmenuedit
+         knewstuff
+         knotifications
+         knotifyconfig
+         kpackage
+         kpipewire
+         krunner
+         kservice
+         ksvg
+         kwidgetsaddons
+         kwindowsystem
+         kxmlgui
+         libcanberra
+         libksysguard
+         libstdc++
+         libwacom
+         libx11
+         libxcb
+         libxcursor
+         libxi
+         libxkbcommon
+         libxkbfile
+         libplasma
+         plasma-activities
+         plasma-activities-stats
+         plasma-workspace
+         plasma5support
+         polkit-kde-agent
+         powerdevil
+         qt6-5compat
+         qt6-base
+         qt6-declarative
+         sdl2
+         solid
+         sonnet
+         systemd-libs
+         systemsettings
+         wayland
+         xcb-util-keysyms
+         xdg-user-dirs)
+optdepends=('bluedevil: Bluetooth applet'
+            'glib2: kimpanel IBUS support'
+            'ibus: kimpanel IBUS support'
+            'kaccounts-integration: OpenDesktop integration plugin'
+            'kscreen: screen management'
+            'libaccounts-qt: OpenDesktop integration plugin'
+            'packagekit-qt6: to install new krunner plugins'
+            'plasma-nm: Network manager applet'
+            'plasma-pa: Audio volume applet'
+            'scim: kimpanel SCIM support')
+makedepends=(extra-cmake-modules
+             intltool
+             kaccounts-integration
+             kdoctools
+             libibus
+             packagekit-qt6
+             scim
+             wayland-protocols
+             xf86-input-libinput
+             xorg-server-devel)
+groups=(plasma)
+source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
+        0001-kicker-dashboard-categories-respond-to-a-tap.patch)
+sha256sums=('079fcf6b87d7bf65e3f2a4670d605fac9469344c279a285a98ad549332d7b53e'
+            SKIP)
+
+prepare() {
+  cd $pkgname-$pkgver
+  patch -p1 -N < "$srcdir/0001-kicker-dashboard-categories-respond-to-a-tap.patch"
+}
+
+build() {
+  cmake -B build  -S $pkgname-$pkgver \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}
