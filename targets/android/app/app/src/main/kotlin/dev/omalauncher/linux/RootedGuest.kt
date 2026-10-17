@@ -23,6 +23,15 @@ object RootedGuest {
      */
     private const val WAYLAND_DISPLAY = "wayland-0"
 
+    /** The PowOS app's run dir (the session's XDG_RUNTIME_DIR), once the session is known to run; see [session]. */
+    @Volatile var runDir: File? = null
+
+    /**
+     * Which PowOS session runs: when its start marker was made (each session start makes it anew). Long-lived processes
+     * in the session (GuestShell) start again in a new one rather than staying in the old one's namespace.
+     */
+    fun session(): Long = runDir?.let { File(it, "desktop-ready").lastModified() } ?: 0L
+
     /** The terminal PowOS opens everywhere (Konsole's PowOS.profile): its tmux session picker, falling back to a shell. */
     const val TERMINAL_SHELL = "/usr/lib/powos/powos-tmux-shell"
 

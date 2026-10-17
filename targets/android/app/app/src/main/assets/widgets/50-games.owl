@@ -17,8 +17,8 @@ widget "games" {
   let rest = drop(games, 1).take(rows ? max(rows * 2 - 2, 1) : 4)
   let tints = [accent, magenta, cyan, green, orange, blue, yellow, red]
 
-  // Launching: `steam steam://rungameid/...` hands the game to the running Steam (or starts it), detached so the
-  // action's shell doesn't hold it; then the PowOS desktop comes to the front, where the game opens.
+  // Launching: app() starts `steam steam://rungameid/...` as a graphical app - it hands the game to the running Steam
+  // (or starts Steam) - and brings the PowOS desktop up, where the game opens.
 
   component Ago(stamp) {
     let d = now - stamp
@@ -57,7 +57,7 @@ widget "games" {
         fill: width; radius: 8 * corners; clip: true
         background: linear(0, 0, 400, 0, [mix(tints[num(hero.id, 0) % len(tints)], background, 0.7), alpha(background, 0.4)])
         border: 1; borderColor: alpha(tints[num(hero.id, 0) % len(tints)], 0.5)
-        onTap: { run("setsid -f steam steam://rungameid/${hero.id} >/dev/null 2>&1"); androidApp("com.powos.app") }
+        onTap: app("steam steam://rungameid/${hero.id}")
         Row {
           padding: 10; gap: 12; align: center
           Badge { game: hero; side: 46 }
@@ -77,7 +77,7 @@ widget "games" {
         for g in rest key g.id {
           Row {
             gap: 8; align: center
-            onTap: { run("setsid -f steam steam://rungameid/${g.id} >/dev/null 2>&1"); androidApp("com.powos.app") }
+            onTap: app("steam steam://rungameid/${g.id}")
             Badge { game: g; side: 26 }
             Column {
               gap: 0; weight: 1

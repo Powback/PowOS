@@ -24,8 +24,15 @@ done
 L=$(tr '\0' '\n' < /proc/$PID/environ 2>/dev/null | sed -n 's/^LANG=//p')
 # The desktop's X server (Xwayland): its display and auth file, as the desktop's own apps get them from KWin - each
 # session start makes a new auth file, and X11 programs (Steam) then failed with "Authorization required".
+# From KWin's own arguments (it starts Xwayland: --xwayland-display, --xwayland-xauthority), known from KWin's start:
+# plasmashell, the other source, comes up later - a shell started before it (the launcher's widget shell, at the
+# session's start) got neither, and Steam then said "Unable to open a connection to X".
+KA=$(tr '\0' '\n' < /proc/$(pidof kwin_wayland | cut -d' ' -f1)/cmdline 2>/dev/null)
+XD=$(printf '%s\n' "$KA" | sed -n '/^--xwayland-display$/{n;p;}')
+XA=$(printf '%s\n' "$KA" | sed -n '/^--xwayland-xauthority$/{n;p;}')
+X="${XD:+DISPLAY=$XD} ${XA:+XAUTHORITY=$XA}"
 P=$(pidof plasmashell | cut -d' ' -f1)
-X=$( [ -n "$P" ] && tr '\0' '\n' < /proc/$P/environ 2>/dev/null | grep -E '^(DISPLAY|XAUTHORITY)=' | tr '\n' ' ')
+[ -n "$XD" ] || X=$( [ -n "$P" ] && tr '\0' '\n' < /proc/$P/environ 2>/dev/null | grep -E '^(DISPLAY|XAUTHORITY)=' | tr '\n' ' ')
 # The session's GPU setup (powos-rooted-session: Mesa on KGSL, Andromarchy's display, VA-API, the phone's own
 # /etc/powos/session.env), as KWin got it. Without it Mesa finds no driver ("No driver found"): Steam, games and
 # a restarted plasmashell rendered without the Adreno. Values have no spaces (word-split below, like $X).

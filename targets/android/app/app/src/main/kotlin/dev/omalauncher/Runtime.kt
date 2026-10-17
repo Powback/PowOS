@@ -5,6 +5,7 @@ import android.content.ComponentCallbacks
 import android.content.Context
 import android.content.res.Configuration
 import android.content.Intent
+import java.io.File
 import android.net.Uri
 import android.util.Log
 import android.view.KeyEvent
@@ -389,6 +390,7 @@ class Runtime(
             synchronized(server) { server.input.setKeymap(proot.keymap.path) }
         }
         rootedTerminals = true
+        RootedGuest.runDir = File(context.filesDir, "run")
         widgets.terminalsChanged(true)
         // Widgets' commands, streams and actions run in the PowOS session too (GuestShell, Streams): PowOS is their Linux.
         widgets.linuxChanged(true)

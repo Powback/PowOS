@@ -87,8 +87,14 @@ class GuestShell(
 
     private fun readLine() = stdout!!.readLine() ?: error("guest shell exited")
 
+    /** The PowOS session this shell runs in (rooted mode, RootedGuest.session). */
+    private var session = 0L
+
     private fun ensureStarted() {
+        // The PowOS session restarted (an app update restarts it): this shell is still in the old one.
+        if (RootedGuest.enabled && process != null && session != RootedGuest.session()) stop()
         if (process?.isAlive == true) return
+        if (RootedGuest.enabled) session = RootedGuest.session()
         // PowOS rooted mode: the shell runs in the PowOS session (as its terminals do), there is no proot system.
         val shell = "exec bash --noprofile --norc"
         val p = (if (RootedGuest.enabled) RootedGuest.process(shell, mergeErrors = false) else proot.process(shell)).start()
