@@ -120,6 +120,10 @@ A small daemon in the PowOS session, started with it.
 - Haptic tick on press, on stick deadzone exit and on trackball stop (Android `performHapticFeedback`).
 - Touch → controller latency budget: one display frame. Recognizers run on the UI thread's touch callback;
   sending is a single small write.
+  Measured 2026-10-17 on the OnePlus Open (overlay button A, 10 taps, Android's touch event time → the report's
+  arrival on the Deck controller's hidraw node, both CLOCK_MONOTONIC): mean 11.8 ms, 6.5–17.0 ms, every press and
+  release delivered. The touchscreen's own scan latency comes on top. Method: `setprop log.tag.GamepadOverlay DEBUG`
+  (logs each down's event time) and a hidraw reader in PowOS timestamping button changes.
 - Multi-touch: each pointer is owned by the first module whose zone it lands in (topmost first); it stays
   with that module until it lifts, even when it leaves the zone.
 - Controls are translucent by default (opacity per module) and fade further after a few seconds without
