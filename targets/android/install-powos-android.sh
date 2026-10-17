@@ -132,6 +132,9 @@ install -m 755 "$P/session/Hyprland" /usr/bin/Hyprland            # HACK: see th
 install -Dm 755 "$P/session/first-session.sh" /opt/powos/first-session.sh
 # Android apps as PowOS windows (scrcpy on a virtual display, through adb to the phone itself; see the file).
 pacman -S --noconfirm --needed scrcpy android-tools pyside6
+# The PowOS Terminal widget (desktop/plasmoid/com.powos.terminal): its terminal component, Qt 6 build (Fedora, which
+# the image comes from, only has a Qt 5 one, so the RPM mapping can't bring it).
+pacman -S --noconfirm --needed qmltermwidget
 install -m 755 "$P/session/powos-android-app" /usr/local/bin/powos-android-app
 install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tasks
 install -m 755 "$P/session/powos-apps-export" /usr/local/bin/powos-apps-export

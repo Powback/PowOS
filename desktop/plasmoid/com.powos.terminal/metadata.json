@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PowOS"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Your terminal sessions on the desktop: the same tmux sessions as Konsole, SSH and the phone launcher's terminal",
+        "Icon": "utilities-terminal",
+        "Id": "com.powos.terminal",
+        "License": "MIT",
+        "Name": "PowOS Terminal",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
