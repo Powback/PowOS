@@ -246,13 +246,14 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         }
 
         /**
-         * Back-screen point -> screen directions. The back (cover) panel sits turned 90 degrees to the inner screen:
-         * moving a finger up on the back, as the user sees the front, runs along the back panel's -x. So, with the
-         * inner screen upright: screen x = -back y, screen y = back x. When the inner screen is rotated, the
-         * screen's axes turn with it. (The back screen itself is locked to portrait: its axes never change.)
+         * Back-screen point -> screen directions. The back (cover) panel's top is the inner screen's top, but it faces
+         * away from the user, so left and right are mirrored as seen from the front: with the inner screen in its
+         * normal orientation, screen x = -back x, screen y = back y (a finger moving up on the back moved the cursor
+         * up, measured by the user on the phone). When the inner screen is rotated, the screen's axes turn with it.
+         * (The back screen itself is locked to portrait: its axes never change.)
          */
         float[] toScreen(float x, float y) {
-            float nx = -y, ny = x; // in the inner screen's natural (upright) orientation
+            float nx = -x, ny = y; // in the inner screen's natural orientation
             MainActivity main = MainActivity.sInstance;
             int rot = main != null && main.getDisplay() != null ? main.getDisplay().getRotation() : 0;
             switch (rot) {
