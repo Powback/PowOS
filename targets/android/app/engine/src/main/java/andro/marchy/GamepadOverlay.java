@@ -439,7 +439,7 @@ public final class GamepadOverlay extends View {
                 twoFinger = true;
                 if (host != null) host.handler.removeCallbacks(hold);
             }
-            fingers.put(id, new float[]{x, y});
+            fingers.put(id, new float[]{x, y, x, y}); // last x/y, start x/y
             return false;
         }
 
@@ -447,8 +447,9 @@ public final class GamepadOverlay extends View {
             float[] f = fingers.get(id);
             if (f == null || host == null || host.mouse == null) return false;
             float dx = x - f[0], dy = y - f[1];
-            if (!moved && Math.hypot(dx, dy) < slop) return false; // still a tap
-            if (!moved) {
+            // The cursor follows from the first pixel (no dead zone before it starts); whether the touch is still a
+            // tap is decided by the total travel, so a tap that wobbles a little still clicks.
+            if (!moved && Math.hypot(x - f[2], y - f[3]) >= slop) {
                 moved = true;
                 host.handler.removeCallbacks(hold);
             }
@@ -481,6 +482,7 @@ public final class GamepadOverlay extends View {
                 int b = twoFinger ? BTN_RIGHT : BTN_LEFT;
                 host.mouse.button(b, true);
                 host.mouse.button(b, false);
+                host.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             }
             return false;
         }
@@ -883,11 +885,18 @@ public final class GamepadOverlay extends View {
         p.setStyle(Paint.Style.FILL);
         p.setColor(0xFF4FC3F7);
         for (Module m : modules) canvas.drawCircle(m.zone.right, m.zone.bottom, handleRadius(), p);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(unit * 0.003f);
+        p.setColor(0xFFFF2BD6); // guide magenta
+        if (guideX >= 0) canvas.drawLine(guideX * getWidth(), 0, guideX * getWidth(), getHeight(), p);
+        if (guideY >= 0) canvas.drawLine(0, guideY * getHeight(), getWidth(), guideY * getHeight(), p);
+        if (sizeMatch != null) canvas.drawRect(sizeMatch.zone, p);
         drawChip(canvas, btnAdd, "+ Add", 0xCC2E7D32, unit);
         drawChip(canvas, btnReset, "Reset", 0xCC6D4C41, unit);
         drawChip(canvas, btnDone, "Done", 0xCC1565C0, unit);
-        drawLabel(canvas, p, "Layout: " + (gameKey.isEmpty() ? "default" : gameKey), getWidth() / 2f,
-            btnAdd.bottom + btnAdd.height() * 0.7f, btnAdd.height() * 0.55f);
+        // Which layout is being edited: in the toolbar row, left of the chips (clear of the controls below).
+        drawLabel(canvas, p, "Layout: " + (gameKey.isEmpty() ? "default" : gameKey), btnAdd.left / 2f,
+            btnAdd.centerY(), btnAdd.height() * 0.55f);
     }
 
     private float handleRadius() { return Math.min(getWidth(), getHeight()) * 0.022f; }
@@ -923,10 +932,15 @@ public final class GamepadOverlay extends View {
                     // Not a control: the first finger's gesture goes to the desktop instead.
                     return action != MotionEvent.ACTION_DOWN;
                 }
+                // Every touch event as it arrives, not batched to the display frame: a frame less latency.
+                if (action == MotionEvent.ACTION_DOWN && android.os.Build.VERSION.SDK_INT >= 30)
+                    requestUnbufferedDispatch(e);
                 owner.put(e.getPointerId(i), m);
                 changed = m.down(e.getPointerId(i), e.getX(i), e.getY(i), state);
-                performHapticFeedback(m instanceof StickModule ? HapticFeedbackConstants.CLOCK_TICK
-                    : HapticFeedbackConstants.VIRTUAL_KEY);
+                // Mouse regions buzz only when they click (MousepadModule.up), not on every touch.
+                if (!(m instanceof MousepadModule))
+                    performHapticFeedback(m instanceof StickModule ? HapticFeedbackConstants.CLOCK_TICK
+                        : HapticFeedbackConstants.VIRTUAL_KEY);
                 break;
             }
             case MotionEvent.ACTION_MOVE:
@@ -955,8 +969,47 @@ public final class GamepadOverlay extends View {
         return true;
     }
 
-    private static float snap(float f) {
-        return Math.round(f * 100f) / 100f; // 1% grid
+    /** Smart guides (editor): the module being dragged snaps to these; drawn while they hold. */
+    private final float[] dragStart = new float[4];
+    private float guideX = -1, guideY = -1;
+    private Module sizeMatch;
+
+    private float snapTolX() { return 10f * getResources().getDisplayMetrics().density / Math.max(1, getWidth()); }
+
+    private float snapTolY() { return 10f * getResources().getDisplayMetrics().density / Math.max(1, getHeight()); }
+
+    /** Lines a module can align to on one axis (0 = x, 1 = y): screen edges and centre, every other module's
+     *  edges and centre. */
+    private List<Float> guideLines(Module self, int axis) {
+        List<Float> lines = new ArrayList<>();
+        lines.add(0f);
+        lines.add(0.5f);
+        lines.add(1f);
+        for (Module m : modules) {
+            if (m == self) continue;
+            float a = m.frac[axis], b = m.frac[axis + 2];
+            lines.add(a);
+            lines.add((a + b) / 2f);
+            lines.add(b);
+        }
+        return lines;
+    }
+
+    /** Best shift (within tol) that puts one of {@code edges} on a guide line; {@code out[1]} = the line or -1. */
+    private static void bestSnap(float[] edges, List<Float> lines, float tol, float[] out) {
+        float bestAbs = tol;
+        out[0] = 0;
+        out[1] = -1;
+        for (float e : edges) {
+            for (float l : lines) {
+                float d = l - e;
+                if (Math.abs(d) < bestAbs) {
+                    bestAbs = Math.abs(d);
+                    out[0] = d;
+                    out[1] = l;
+                }
+            }
+        }
     }
 
     private boolean onEditTouch(MotionEvent e) {
@@ -982,6 +1035,7 @@ public final class GamepadOverlay extends View {
                     }
                 }
                 if (editTarget == null) editTarget = moduleAt(x, y);
+                if (editTarget != null) System.arraycopy(editTarget.frac, 0, dragStart, 0, 4);
                 lastX = downX = x;
                 lastY = downY = y;
                 if (editTarget != null && !resizing) handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
@@ -991,18 +1045,51 @@ public final class GamepadOverlay extends View {
                 if (editTarget == null) return true;
                 if (Math.hypot(x - downX, y - downY) > ViewConfiguration.get(getContext()).getScaledTouchSlop())
                     handler.removeCallbacks(longPress);
-                float dx = (x - lastX) / w, dy = (y - lastY) / h;
-                float[] f = editTarget.frac;
+                // From where the drag started (not incrementally), so a snap never sticks: the finger leads.
+                float dx = (x - downX) / w, dy = (y - downY) / h;
+                float[] f = editTarget.frac, s0 = dragStart, out = new float[2];
+                float oldGX = guideX, oldGY = guideY;
+                Module oldMatch = sizeMatch;
+                sizeMatch = null;
                 if (resizing) {
-                    f[2] = Math.max(f[0] + 0.04f, Math.min(1f, f[2] + dx));
-                    f[3] = Math.max(f[1] + 0.04f, Math.min(1f, f[3] + dy));
+                    float r = Math.max(s0[0] + 0.04f, Math.min(1f, s0[2] + dx));
+                    float b = Math.max(s0[1] + 0.04f, Math.min(1f, s0[3] + dy));
+                    // Right/bottom edge onto a guide line, or the same width/height as another control.
+                    bestSnap(new float[]{r}, guideLines(editTarget, 0), snapTolX(), out);
+                    guideX = out[1];
+                    r += out[0];
+                    bestSnap(new float[]{b}, guideLines(editTarget, 1), snapTolY(), out);
+                    guideY = out[1];
+                    b += out[0];
+                    if (guideX < 0 || guideY < 0) {
+                        for (Module m : modules) {
+                            if (m == editTarget) continue;
+                            float mw = m.frac[2] - m.frac[0], mh = m.frac[3] - m.frac[1];
+                            if (guideX < 0 && Math.abs((r - s0[0]) - mw) < snapTolX()) { r = s0[0] + mw; sizeMatch = m; }
+                            if (guideY < 0 && Math.abs((b - s0[1]) - mh) < snapTolY()) { b = s0[1] + mh; sizeMatch = m; }
+                        }
+                    }
+                    f[2] = r;
+                    f[3] = b;
                 } else {
-                    float zw = f[2] - f[0], zh = f[3] - f[1];
-                    f[0] = Math.max(0f, Math.min(1f - zw, f[0] + dx));
-                    f[1] = Math.max(0f, Math.min(1f - zh, f[1] + dy));
-                    f[2] = f[0] + zw;
-                    f[3] = f[1] + zh;
+                    float zw = s0[2] - s0[0], zh = s0[3] - s0[1];
+                    float l = Math.max(0f, Math.min(1f - zw, s0[0] + dx));
+                    float t = Math.max(0f, Math.min(1f - zh, s0[1] + dy));
+                    // Left, centre or right edge onto a guide (screen edge/centre, another control's edge/centre).
+                    bestSnap(new float[]{l, l + zw / 2f, l + zw}, guideLines(editTarget, 0), snapTolX(), out);
+                    guideX = out[1];
+                    l = Math.max(0f, Math.min(1f - zw, l + out[0]));
+                    bestSnap(new float[]{t, t + zh / 2f, t + zh}, guideLines(editTarget, 1), snapTolY(), out);
+                    guideY = out[1];
+                    t = Math.max(0f, Math.min(1f - zh, t + out[0]));
+                    f[0] = l;
+                    f[1] = t;
+                    f[2] = l + zw;
+                    f[3] = t + zh;
                 }
+                // A tick when something new snaps, like Photoshop's guides catching.
+                if ((guideX >= 0 && guideX != oldGX) || (guideY >= 0 && guideY != oldGY) || (sizeMatch != null && sizeMatch != oldMatch))
+                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 lastX = x;
                 lastY = y;
                 editTarget.layout(getWidth(), getHeight());
@@ -1012,13 +1099,13 @@ public final class GamepadOverlay extends View {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 handler.removeCallbacks(longPress);
+                guideX = guideY = -1;
+                sizeMatch = null;
                 if (editTarget != null) {
-                    float[] f = editTarget.frac;
-                    for (int k = 0; k < 4; k++) f[k] = snap(f[k]);
                     editTarget.layout(getWidth(), getHeight());
                     editTarget = null;
-                    invalidate();
                 }
+                invalidate();
                 return true;
         }
         return true;
