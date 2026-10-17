@@ -101,6 +101,10 @@ bg wireplumber as_user wireplumber
 bg pipewire-pulse as_user pipewire-pulse
 
 # The desktop: the same PowOS session as the app's (ANLAND_SOCKET, scale, services, startplasma-wayland).
+# KWin's second Anland output: a PowOS window shown as its own Android task (the app's second display daemon,
+# SessionService.windowDaemonSocket; docs/powos-window-tasks.md). Set here too, not only by Hyprland: a rootfs from an
+# older image has a Hyprland without it.
+export ANLAND_SOCKET_2="${ANDROMARCHY_SOCKET%/*}/display_daemon-2.sock"
 export EGL_PLATFORM=surfaceless
 cd /home/powos
 exec "${AS_USER[@]}" /usr/bin/Hyprland >> "$R/hyprland.log" 2>&1

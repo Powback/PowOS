@@ -1,0 +1,817 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: one daemon connection per output, a second output from ANLAND_SOCKET_2
+
+Each AnlandOutput is one Android surface: its display_ctx, consumer-ready and fallback state, reconnect timer and
+data/buffer-ready notifiers move from the backend into the output (AnlandOutput::Link), and its EGL layer renders
+into that output's buffers. Input maps into the output's place in the layout and touch ids are offset per output,
+so two Android tasks never share a touch point. Audio, camera, clipboard, keyboard visibility and the DPMS wake
+stay with output 1 (the desktop).
+
+With ANLAND_SOCKET_2 set, a second connection says hello at startup and waits on the event loop for the daemon's
+screen info (connect_to_deamon in two steps: a daemon answers only once its consumer is there, maybe never). Output
+"anland-2" then comes up - a PowOS window shown in its own Android task (PowosWindowActivity); KWin's output
+configuration store places it (right of the desktop) and keeps its settings.
+---
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -105,21 +105,25 @@
+ 
+ AnlandBackend::~AnlandBackend()
+ {
+-    teardownNotifiers();
++    for (AnlandOutput *output : std::as_const(m_outputs)) {
++        teardownNotifiers(output);
++        if (output->link().reconnectTimer) {
++            output->link().reconnectTimer->stop();
++        }
++    }
+     // Stop the audio engine before disconnect() closes the audio fd it borrows.
+     anland_audio_stop();
+     // Stop the camera engine (it owns its own resource fds; closes them itself).
+     anland_camera_stop();
+-    if (m_reconnectTimer) {
+-        m_reconnectTimer->stop();
++    for (AnlandOutput *output : std::as_const(m_outputs)) {
++        if (output->display()) {
++            ::disconnect(output->display()); // C producer API, not QObject::disconnect
++        }
+     }
++    m_display = nullptr;
+     // m_outputs are QObject children of this backend; ~QObject deletes them.
+     m_outputs.clear();
+     m_inputDevice.reset();
+-    if (m_display) {
+-        ::disconnect(m_display); // C producer API, not QObject::disconnect
+-        m_display = nullptr;
+-    }
+     // m_renderDevice tears down its EglDisplay (and DrmDevice) in its destructor; the
+     // 5.27-era manual eglTerminate(sceneEglDisplay()) is no longer needed.
+ }
+@@ -131,8 +135,6 @@
+         return false;
+     }
+ 
+-    set_fallback_callback(m_display, &AnlandBackend::fallbackTrampoline, this);
+-
+     uint32_t w = 0, h = 0, fmt = 0, refresh = 0;
+     get_screen_info(m_display, &w, &h, &fmt, &refresh);
+     qCInfo(KWIN_ANLAND) << "connected to daemon at" << m_socketPath
+@@ -169,17 +171,8 @@
+ 
+     m_inputDevice = std::make_unique<AnlandInputDevice>();
+ 
+-    auto *output = new AnlandOutput(this, QStringLiteral("anland-1"));
+-    output->init(QSize(w, h), static_cast<int>(refresh), 1.0);
+-    m_outputs.append(output);
+-    Q_EMIT outputAdded(output);
+-    output->updateEnabled(true);
+-    Q_EMIT outputsQueried();
++    AnlandOutput *output = addOutput(m_display, QStringLiteral("anland-1"), true);
+ 
+-    m_reconnectTimer = new QTimer(this);
+-    m_reconnectTimer->setInterval(s_reconnectIntervalMs);
+-    connect(m_reconnectTimer, &QTimer::timeout, this, &AnlandBackend::onReconnectTimer);
+-
+     // Bring up the audio engine up front: its PipeWire sink-monitor capture and
+     // virtual mic Source live for the whole session, independent of the consumer,
+     // so Linux apps never see the devices appear/disappear as the consumer comes and
+@@ -198,10 +191,16 @@
+     // connect_to_deamon() only fetched screen info; the context is still in
+     // fallback with no consumer fds or dmabufs. Enter fallback explicitly so the
+     // reconnect timer starts and discovers the consumer via try_exit_fallback().
+-    enterFallback();
++    enterFallback(output);
+ 
++    // PowOS: a second Android surface - a PowOS window as its own Android task (docs/powos-window-tasks.md).
++    m_secondSocketPath = qEnvironmentVariable("ANLAND_SOCKET_2");
++    if (!m_secondSocketPath.isEmpty()) {
++        connectSecondOutput();
++    }
++
+     // Connect to KWin's clipboard change signal once.  The handler is guarded
+-    // by m_inFallback so it only fires when a consumer is connected.
++    // by primaryDown() so it only fires when the desktop's consumer is connected.
+     if (SeatInterface *seat = waylandServer()->seat()) {
+         connect(seat, &SeatInterface::selectionChanged, this, [this](AbstractDataSource *) {
+             onClipboardChanged();
+@@ -279,74 +278,131 @@
+     return m_renderDevice ? m_renderDevice->drmDevice() : nullptr;
+ }
+ 
+-bool AnlandBackend::notifyFramePresented()
++AnlandOutput *AnlandBackend::addOutput(display_ctx *display, const QString &name, bool primary)
+ {
+-    if (m_consumerReady) {
+-        trigger_refresh(m_display);
+-        m_consumerReady = false;
++    uint32_t w = 0, h = 0, fmt = 0, refresh = 0;
++    get_screen_info(display, &w, &h, &fmt, &refresh);
++    auto *output = new AnlandOutput(this, name);
++    output->link().display = display; // before outputAdded: the EGL layer takes it
++    output->setPrimary(primary);
++    // Android pointer ids are small: 64 per output keeps two tasks' fingers apart.
++    output->setTouchIdBase(m_outputs.size() * 64);
++    output->init(QSize(w, h), static_cast<int>(refresh), 1.0);
++    // No position here: KWin's output configuration store lays out a new set of outputs itself (anland-2 right of
++    // the desktop) and keeps it (kwinoutputconfig.json).
++    set_fallback_callback(display, &AnlandBackend::fallbackTrampoline, output);
++    output->link().reconnectTimer = new QTimer(this);
++    output->link().reconnectTimer->setInterval(s_reconnectIntervalMs);
++    connect(output->link().reconnectTimer, &QTimer::timeout, this, [this, output]() {
++        onReconnectTimer(output);
++    });
++    m_outputs.append(output);
++    Q_EMIT outputAdded(output);
++    output->updateEnabled(true);
++    Q_EMIT outputsQueried();
++    qCInfo(KWIN_ANLAND) << "output" << name << w << "x" << h << (primary ? "(primary)" : "");
++    return output;
++}
++
++void AnlandBackend::connectSecondOutput()
++{
++    // The daemon sends its screen info only once its consumer (the Android task's surface) is there, maybe much
++    // later or never: wait for it on the event loop, then add the output.
++    display_ctx *display = nullptr;
++    if (connect_to_deamon_begin(&display, m_secondSocketPath.toLocal8Bit().constData()) < 0) {
++        qCWarning(KWIN_ANLAND) << "no second display daemon at" << m_secondSocketPath;
++        return;
++    }
++    auto *notifier = new QSocketNotifier(get_ctrl_fd(display), QSocketNotifier::Read, this);
++    connect(notifier, &QSocketNotifier::activated, this, [this, notifier, display]() {
++        notifier->setEnabled(false);
++        notifier->deleteLater();
++        if (connect_to_deamon_finish(display) < 0) {
++            qCWarning(KWIN_ANLAND) << "second display daemon handshake failed";
++            ::disconnect(display);
++            return;
++        }
++        enterFallback(addOutput(display, QStringLiteral("anland-2"), false));
++    });
++}
++
++bool AnlandBackend::primaryDown() const
++{
++    return m_outputs.isEmpty() || m_outputs.first()->link().inFallback;
++}
++
++bool AnlandBackend::notifyFramePresented(AnlandOutput *output)
++{
++    AnlandOutput::Link &link = output->link();
++    if (link.consumerReady) {
++        trigger_refresh(link.display);
++        link.consumerReady = false;
+         return true;
+     }
+     return false;
+ }
+ 
+-void AnlandBackend::setupNotifiers()
++void AnlandBackend::setupNotifiers(AnlandOutput *output)
+ {
+-    teardownNotifiers();
++    teardownNotifiers(output);
++    AnlandOutput::Link &link = output->link();
+ 
+-    const int dataFd = get_data_fd(m_display);
++    const int dataFd = get_data_fd(link.display);
+     if (dataFd >= 0) {
+-        m_inputNotifier = new QSocketNotifier(dataFd, QSocketNotifier::Read, this);
+-        connect(m_inputNotifier, &QSocketNotifier::activated, this, [this]() {
+-            onInputReadable();
++        link.inputNotifier = new QSocketNotifier(dataFd, QSocketNotifier::Read, this);
++        connect(link.inputNotifier, &QSocketNotifier::activated, this, [this, output]() {
++            onInputReadable(output);
+         });
+     }
+ 
+-    const int bufReadyFd = get_buffer_ready_fd(m_display);
++    const int bufReadyFd = get_buffer_ready_fd(link.display);
+     if (bufReadyFd >= 0) {
+-        m_bufReadyNotifier = new QSocketNotifier(bufReadyFd, QSocketNotifier::Read, this);
+-        connect(m_bufReadyNotifier, &QSocketNotifier::activated, this, [this]() {
+-            onBufferReady();
++        link.bufReadyNotifier = new QSocketNotifier(bufReadyFd, QSocketNotifier::Read, this);
++        connect(link.bufReadyNotifier, &QSocketNotifier::activated, this, [this, output]() {
++            onBufferReady(output);
+         });
+     }
+ }
+ 
+-void AnlandBackend::teardownNotifiers()
++void AnlandBackend::teardownNotifiers(AnlandOutput *output)
+ {
+-    if (m_inputNotifier) {
+-        m_inputNotifier->setEnabled(false);
+-        m_inputNotifier->deleteLater();
+-        m_inputNotifier = nullptr;
++    AnlandOutput::Link &link = output->link();
++    if (link.inputNotifier) {
++        link.inputNotifier->setEnabled(false);
++        link.inputNotifier->deleteLater();
++        link.inputNotifier = nullptr;
+     }
+-    if (m_bufReadyNotifier) {
+-        m_bufReadyNotifier->setEnabled(false);
+-        m_bufReadyNotifier->deleteLater();
+-        m_bufReadyNotifier = nullptr;
++    if (link.bufReadyNotifier) {
++        link.bufReadyNotifier->setEnabled(false);
++        link.bufReadyNotifier->deleteLater();
++        link.bufReadyNotifier = nullptr;
+     }
+ }
+ 
+-void AnlandBackend::onInputReadable()
++void AnlandBackend::onInputReadable(AnlandOutput *output)
+ {
+-    if (m_inFallback) return;
++    AnlandOutput::Link &link = output->link();
++    if (link.inFallback) return;
+ 
+     InputEvent ev;
+-    while (poll_input_event(m_display, &ev, 0) > 0) {
+-        processInputEvent(ev);
+-        if (m_inFallback) break; // poll_input_event may have triggered fallback
++    while (poll_input_event(link.display, &ev, 0) > 0) {
++        processInputEvent(output, ev);
++        if (link.inFallback) break; // poll_input_event may have triggered fallback
+     }
+ }
+ 
+-QPointF AnlandBackend::mapInputToLogical(const QPointF &devicePoint) const
++QPointF AnlandBackend::mapInputToLogical(AnlandOutput *output, const QPointF &devicePoint) const
+ {
+-    AnlandOutput *output = m_outputs[0];
+     // The compositor maps logical -> device with transform().map(p, pixelSize()),
+     // so the inverse maps device -> logical with the inverted transform bounded by
+     // the device-space size (modeSize, the buffer's native landscape extent).
+-    // Then divide out the output scale to land in global logical coordinates.
++    // Then divide out the output scale, and add the output's place in the global
++    // layout (PowOS: outputs sit side by side), to land in global logical coordinates.
+     const QPointF logical = output->transform().inverted().map(devicePoint, QSizeF(output->modeSize()));
+-    return logical / output->scale();
++    return logical / output->scale() + output->position();
+ }
+ 
+-void AnlandBackend::processInputEvent(const InputEvent &ev)
++void AnlandBackend::processInputEvent(AnlandOutput *output, const InputEvent &ev)
+ {
+     if (!m_inputDevice) {
+         return;
+@@ -358,8 +414,8 @@
+         // consumer. Use the same mapInputToLogical for both so that dx/dy delivered
+         // via wl_pointer.relative_motion match the cursor's position space, giving
+         // Wayland clients correct velocity for momentum/kinetic scrolling.
+-        const QPointF pos = mapInputToLogical(QPointF(ev.pointer_motion.x, ev.pointer_motion.y));
+-        const QPointF delta = mapInputToLogical(QPointF(ev.pointer_motion.dx, ev.pointer_motion.dy));
++        const QPointF pos = mapInputToLogical(output, QPointF(ev.pointer_motion.x, ev.pointer_motion.y));
++        const QPointF delta = output->transform().inverted().map(QPointF(ev.pointer_motion.dx, ev.pointer_motion.dy), QSizeF(output->modeSize())) / output->scale();
+         m_inputDevice->pointerMotion(pos, delta, delta);
+         break;
+     }
+@@ -377,16 +433,16 @@
+         m_inputDevice->keyboardKey(ev.key.keycode, ev.key.action == INPUT_ACTION_DOWN);
+         break;
+     case INPUT_TYPE_TOUCH: {
+-        const QPointF pos = mapInputToLogical(QPointF(ev.touch.x, ev.touch.y));
++        const QPointF pos = mapInputToLogical(output, QPointF(ev.touch.x, ev.touch.y));
+         switch (ev.touch.action) {
+         case INPUT_ACTION_DOWN:
+-            m_inputDevice->touchDown(ev.touch.pointer_id, pos);
++            m_inputDevice->touchDown(output->touchIdBase() + ev.touch.pointer_id, pos);
+             break;
+         case INPUT_ACTION_UP:
+-            m_inputDevice->touchUp(ev.touch.pointer_id);
++            m_inputDevice->touchUp(output->touchIdBase() + ev.touch.pointer_id);
+             break;
+         case INPUT_ACTION_MOVE:
+-            m_inputDevice->touchMotion(ev.touch.pointer_id, pos);
++            m_inputDevice->touchMotion(output->touchIdBase() + ev.touch.pointer_id, pos);
+             break;
+         default:
+             break;
+@@ -398,9 +454,8 @@
+         break;
+     case INPUT_TYPE_DISPLAY_REFRESH:
+         // Not an input event: the consumer reports its live display refresh rate
+-        // (mHz) so we can repace the RenderLoop. m_outputs[0] is valid here (used
+-        // for scale above).
+-        m_outputs[0]->setRefreshRate(static_cast<int>(ev.display.refresh_mhz));
++        // (mHz) so we can repace the RenderLoop - this output's.
++        output->setRefreshRate(static_cast<int>(ev.display.refresh_mhz));
+         break;
+     case INPUT_TYPE_CLIPBOARD: {
+         // The clipboard event carries the raw text data as inline payload after the
+@@ -409,7 +464,7 @@
+         if (size == 0)
+             break;
+         QByteArray text(static_cast<int>(size), Qt::Uninitialized);
+-        if (poll_input_event_extend_data(m_display, text.data(), size, 5000) == 1) {
++        if (poll_input_event_extend_data(output->display(), text.data(), size, 5000) == 1) {
+             sendClipboardToKWin(text);
+         }
+         break;
+@@ -421,7 +476,7 @@
+         if (size == 0)
+             break;
+         QByteArray text(static_cast<int>(size), Qt::Uninitialized);
+-        if (poll_input_event_extend_data(m_display, text.data(), size, 5000) == 1) {
++        if (poll_input_event_extend_data(output->display(), text.data(), size, 5000) == 1) {
+             sendTextInputToKWin(text);
+         }
+         break;
+@@ -437,7 +492,7 @@
+             break;
+         int fds[kMaxFds];
+         int got = 0;
+-        if (poll_input_event_extend_fds(m_display, fds, static_cast<int>(fdnum), &got, 5000) != 1
++        if (poll_input_event_extend_fds(output->display(), fds, static_cast<int>(fdnum), &got, 5000) != 1
+             || got < static_cast<int>(fdnum)) {
+             for (int i = 0; i < got; i++)
+                 ::close(fds[i]);
+@@ -457,40 +512,43 @@
+     }
+ }
+ 
+-void AnlandBackend::onBufferReady()
++void AnlandBackend::onBufferReady(AnlandOutput *output)
+ {
+-    if (m_inFallback) {
++    AnlandOutput::Link &link = output->link();
++    if (link.inFallback) {
+         return;
+     }
+ 
+     // The dmabuf set is already in hand (try_exit_fallback() received it when we
+     // left fallback), so buffer-ready is purely a frame-completion signal: drain
+     // the eventfd and pace the render cycle.
+-    const int fd = get_buffer_ready_fd(m_display);
++    const int fd = get_buffer_ready_fd(link.display);
+     if (fd >= 0) {
+         eventfd_t val;
+         eventfd_read(fd, &val);
+     }
+ 
+-    m_consumerReady = true;
++    link.consumerReady = true;
+ 
+     // Buffer-ready is our frame-completion signal: complete the in-flight frame
+     // (if any) and schedule the next one, keeping the render cycle paced by the
+     // consumer rather than a timer.
+-    m_outputs[0]->onConsumerReady();
++    output->onConsumerReady();
+ }
+ 
+ void AnlandBackend::fallbackTrampoline(void *data)
+ {
+-    static_cast<AnlandBackend *>(data)->enterFallback();
++    auto *output = static_cast<AnlandOutput *>(data);
++    output->backend()->enterFallback(output);
+ }
+ 
+-void AnlandBackend::enterFallback()
++void AnlandBackend::enterFallback(AnlandOutput *output)
+ {
+-    if (m_inFallback) {
++    AnlandOutput::Link &link = output->link();
++    if (link.inFallback) {
+         return;
+     }
+-    qCWarning(KWIN_ANLAND) << "consumer disconnected, entering fallback";
++    qCWarning(KWIN_ANLAND) << output->name() << "consumer disconnected, entering fallback";
+ 
+     if (m_inputDevice) {
+         m_inputDevice->touchCancel();
+@@ -498,49 +556,52 @@
+ 
+     // A frame may be in flight awaiting a buffer-ready that will never come now;
+     // fail it so the RenderLoop's frame accounting does not stall.
+-    m_outputs[0]->stopRendering();
++    output->stopRendering();
+ 
+-    teardownNotifiers();
++    teardownNotifiers(output);
+ 
+     // Renderer is stopped: drop the imported dmabuf set before the transport closes
+     // its fds when this callback returns. The layer is null at startup (no GL backend
+     // attached yet).
+-    if (AnlandEglLayer *layer = m_outputs[0]->eglLayer()) {
++    if (AnlandEglLayer *layer = output->eglLayer()) {
+         layer->releaseBuffers();
+     }
+ 
+-    m_consumerReady = false;
+-    m_inFallback = true;
++    link.consumerReady = false;
++    link.inFallback = true;
+ 
+-    // Detach the audio socket before the transport closes the borrowed fd. The streams
+-    // keep running (capture drops its PCM, the mic Source feeds silence), so PipeWire
+-    // never perceives the disconnect.
+-    anland_audio_set_fd(-1);
++    if (output->isPrimary()) {
++        // Detach the audio socket before the transport closes the borrowed fd. The streams
++        // keep running (capture drops its PCM, the mic Source feeds silence), so PipeWire
++        // never perceives the disconnect.
++        anland_audio_set_fd(-1);
+ 
+-    // The consumer's camera fds are now dead: stop recording, destroy the virtual
+-    // camera nodes and close the fds. New ones arrive on the next reconnect.
+-    anland_camera_clear();
++        // The consumer's camera fds are now dead: stop recording, destroy the virtual
++        // camera nodes and close the fds. New ones arrive on the next reconnect.
++        anland_camera_clear();
++    }
+ 
+-    if (m_reconnectTimer) {
+-        m_reconnectTimer->start();
++    if (link.reconnectTimer) {
++        link.reconnectTimer->start();
+     }
+ }
+ 
+-void AnlandBackend::onReconnectTimer()
++void AnlandBackend::onReconnectTimer(AnlandOutput *output)
+ {
+-    if (!m_inFallback) {
+-        m_reconnectTimer->stop();
++    AnlandOutput::Link &link = output->link();
++    if (!link.inFallback) {
++        link.reconnectTimer->stop();
+         return;
+     }
+ 
+-    if (try_exit_fallback(m_display) != 0) {
++    if (try_exit_fallback(link.display) != 0) {
+         return; // still down, keep retrying
+     }
+ 
+-    qCInfo(KWIN_ANLAND) << "consumer reconnected";
+-    m_inFallback = false;
+-    m_consumerReady = false;
+-    m_reconnectTimer->stop();
++    qCInfo(KWIN_ANLAND) << output->name() << "consumer reconnected";
++    link.inFallback = false;
++    link.consumerReady = false;
++    link.reconnectTimer->stop();
+ 
+     // try_exit_fallback() already received a fresh dmabuf set. Import it into the
+     // layer (which arms an infinite/full-output repaint on every rotation buffer),
+@@ -549,9 +610,9 @@
+     // true so the next composite() paints into the new dmabufs even on an idle
+     // desktop. resumeRendering() runs unconditionally to keep inhibit/uninhibit
+     // balanced regardless of whether the GL layer is attached yet.
+-    AnlandEglLayer *layer = m_outputs[0]->eglLayer();
++    AnlandEglLayer *layer = output->eglLayer();
+     if (layer) {
+-        const int bufferCount = get_buf_count(m_display);
++        const int bufferCount = get_buf_count(link.display);
+         qCDebug(KWIN_ANLAND) << "reconnect: importing" << bufferCount << "buffers";
+         if (!layer->importBuffers(bufferCount)) {
+             qCWarning(KWIN_ANLAND) << "reconnect: buffer import failed";
+@@ -559,32 +620,34 @@
+             qCDebug(KWIN_ANLAND) << "reconnect: buffer import complete";
+         }
+     }
+-    setupNotifiers();
++    setupNotifiers(output);
+     qCDebug(KWIN_ANLAND) << "reconnect: notifiers installed";
+-    // Attach the fresh audio socket (a new socketpair was installed by pickup_fds).
+-    qCDebug(KWIN_ANLAND) << "reconnect: attaching audio fd" << get_audio_fd(m_display);
+-    anland_audio_set_fd(get_audio_fd(m_display));
+-    qCDebug(KWIN_ANLAND) << "reconnect: audio fd attached";
+-    // Render loop is resuming and the data channel is live: immediately request the
+-    // camera service. The consumer replies asynchronously with an INPUT_TYPE_RESOURCE
+-    // event whose fds onInputReadable() hands to the camera engine. If the consumer
+-    // has the camera disabled it simply never registers the service and never replies,
+-    // so this is a harmless no-op in that case.
+-    const int cameraRequestResult = push_resources_request(m_display, SERVICE_TYPE_CAMERA, nullptr);
+-    qCDebug(KWIN_ANLAND) << "reconnect: camera request result" << cameraRequestResult;
+-    if (m_inFallback) {
+-        return;
++    if (output->isPrimary()) {
++        // Attach the fresh audio socket (a new socketpair was installed by pickup_fds).
++        qCDebug(KWIN_ANLAND) << "reconnect: attaching audio fd" << get_audio_fd(link.display);
++        anland_audio_set_fd(get_audio_fd(link.display));
++        qCDebug(KWIN_ANLAND) << "reconnect: audio fd attached";
++        // Render loop is resuming and the data channel is live: immediately request the
++        // camera service. The consumer replies asynchronously with an INPUT_TYPE_RESOURCE
++        // event whose fds onInputReadable() hands to the camera engine. If the consumer
++        // has the camera disabled it simply never registers the service and never replies,
++        // so this is a harmless no-op in that case.
++        const int cameraRequestResult = push_resources_request(link.display, SERVICE_TYPE_CAMERA, nullptr);
++        qCDebug(KWIN_ANLAND) << "reconnect: camera request result" << cameraRequestResult;
++        if (link.inFallback) {
++            return;
++        }
++        // PowOS: a consumer reconnect means the user just brought the app to the front -- the Android
++        // screen is on and showing us. A DPMS-off requested while they were away (PowerDevil's idle
++        // timeout, a "turn off screen" action) leaves the scene faded out by the kscreen effect, and
++        // nothing else ends it: this output can't switch Android's panel, so it never reports
++        // DpmsMode::Off, and DpmsInputEventFilter wants a double tap on touch. Turn it back on here.
++        if (workspace() && workspace()->dpmsState() != Workspace::DpmsState::On) {
++            qCInfo(KWIN_ANLAND) << "reconnect: waking from DPMS off";
++            workspace()->requestDpmsState(Workspace::DpmsState::On);
++        }
+     }
+-    // PowOS: a consumer reconnect means the user just brought the app to the front -- the Android
+-    // screen is on and showing us. A DPMS-off requested while they were away (PowerDevil's idle
+-    // timeout, a "turn off screen" action) leaves the scene faded out by the kscreen effect, and
+-    // nothing else ends it: this output can't switch Android's panel, so it never reports
+-    // DpmsMode::Off, and DpmsInputEventFilter wants a double tap on touch. Turn it back on here.
+-    if (workspace() && workspace()->dpmsState() != Workspace::DpmsState::On) {
+-        qCInfo(KWIN_ANLAND) << "reconnect: waking from DPMS off";
+-        workspace()->requestDpmsState(Workspace::DpmsState::On);
+-    }
+-    m_outputs[0]->resumeRendering();
++    output->resumeRendering();
+     qCDebug(KWIN_ANLAND) << "reconnect: render loop resumed";
+     if (layer) {
+         layer->scheduleRepaint(nullptr);
+@@ -694,7 +757,7 @@
+         return;
+     qCInfo(KWIN_ANLAND) << "Android keyboard" << (want ? "shown" : "hidden") << "-" << why;
+     m_keyboardRequested = want;
+-    if (m_inFallback)
++    if (primaryDown())
+         return;
+     OutputEvent ev = {};
+     ev.type = OUTPUT_TYPE_KEYBOARD;
+@@ -710,7 +773,7 @@
+  */
+ void AnlandBackend::onClipboardChanged()
+ {
+-    if (m_inFallback)
++    if (primaryDown())
+         return;
+ 
+     AbstractDataSource *source = waylandServer()->seat()->selection();
+@@ -723,7 +786,7 @@
+     auto *watcher = new QFutureWatcher<QByteArray>(this);
+     connect(watcher, &QFutureWatcher<QByteArray>::finished, this, [this, watcher]() {
+         watcher->deleteLater();
+-        if (m_inFallback)
++        if (primaryDown())
+             return;
+ 
+         const QByteArray text = watcher->result();
+@@ -745,7 +808,7 @@
+  */
+ void AnlandBackend::sendClipboardToConsumer(const QByteArray &text)
+ {
+-    if (m_inFallback)
++    if (primaryDown())
+         return;
+ 
+     const uint32_t len = static_cast<uint32_t>(text.size());
+@@ -846,7 +909,7 @@
+  */
+ void AnlandBackend::sendTextInputToKWin(const QByteArray &text)
+ {
+-    if (m_inFallback)
++    if (primaryDown())
+         return;
+ 
+     const QString str = QString::fromUtf8(text);
+--- a/src/backends/anland/anland_backend.h
++++ b/src/backends/anland/anland_backend.h
+@@ -77,7 +77,7 @@
+         return m_inputDevice.get();
+     }
+ 
+-    bool notifyFramePresented();
++    bool notifyFramePresented(AnlandOutput *output);
+ 
+     /** Re-run the Workspace output layout after an output changed its mode at
+      *  runtime (AnlandOutput::resize). The backend mutates the mode directly via
+@@ -92,14 +92,19 @@
+     }
+ 
+ private:
+-    void setupNotifiers();
+-    void teardownNotifiers();
+-    void onInputReadable();
+-    void onBufferReady();
+-    void processInputEvent(const InputEvent &ev);
+-    QPointF mapInputToLogical(const QPointF &devicePoint) const;
+-    void onReconnectTimer();
+-    void enterFallback();
++    // PowOS: per output - each is one Android surface with its own daemon connection (AnlandOutput::Link).
++    void setupNotifiers(AnlandOutput *output);
++    void teardownNotifiers(AnlandOutput *output);
++    void onInputReadable(AnlandOutput *output);
++    void onBufferReady(AnlandOutput *output);
++    void processInputEvent(AnlandOutput *output, const InputEvent &ev);
++    QPointF mapInputToLogical(AnlandOutput *output, const QPointF &devicePoint) const;
++    void onReconnectTimer(AnlandOutput *output);
++    void enterFallback(AnlandOutput *output);
++    AnlandOutput *addOutput(display_ctx *display, const QString &name, bool primary);
++    void connectSecondOutput();
++    /** The desktop's connection is down: clipboard and keyboard visibility wait. */
++    bool primaryDown() const;
+ 
+     // Clipboard sync — bidirectional bridge between KWin selection / consumer
+     void onClipboardChanged();
+@@ -122,13 +127,9 @@
+     QVector<AnlandOutput *> m_outputs;
+     std::unique_ptr<AnlandInputDevice> m_inputDevice;
+ 
+-    QSocketNotifier *m_inputNotifier = nullptr;
+-    QSocketNotifier *m_bufReadyNotifier = nullptr;
+-    QTimer *m_reconnectTimer = nullptr;
+-
+-    bool m_consumerReady = false;
+-    bool m_inFallback = false;
+     bool m_noDrmDeviceMode = false;
++    // PowOS: a second Android surface (a PowOS window as its own Android task), ANLAND_SOCKET_2.
++    QString m_secondSocketPath;
+ 
+     // Last known clipboard text — used to de-duplicate (KWin changed -> we sent ->
+     // consumer sets the same text on Android -> consumer sends back to KWin).
+--- a/src/backends/anland/anland_egl_backend.cpp
++++ b/src/backends/anland/anland_egl_backend.cpp
+@@ -48,7 +48,7 @@
+     : OutputLayer(output, OutputLayerType::Primary)
+     , m_backend(backend)
+     , m_output(output)
+-    , m_display(backend->display())
++    , m_display(output->display()) // PowOS: its own output's connection
+ {
+     // React to runtime orientation changes (System Settings / kscreen-doctor)
+     // through the output's transformChanged signal instead of polling the transform
+--- a/src/backends/anland/anland_output.cpp
++++ b/src/backends/anland/anland_output.cpp
+@@ -48,7 +48,7 @@
+     // The scene has already been rendered into the daemon's dmabuf by the layer
+     // (AnlandEglLayer::doEndFrame). Hand it to the consumer now.
+     m_frame = frame;
+-    const bool handedToConsumer = m_backend->notifyFramePresented();
++    const bool handedToConsumer = m_backend->notifyFramePresented(this);
+     if (handedToConsumer) {
+         // The consumer will present the buffer and then signal buffer-ready;
+         // defer frame completion until then (see onConsumerReady()).
+--- a/src/backends/anland/anland_output.h
++++ b/src/backends/anland/anland_output.h
+@@ -18,6 +18,13 @@
+ #include <QObject>
+ #include <memory>
+ 
++extern "C" {
++#include "display_producer.h"
++}
++
++class QSocketNotifier;
++class QTimer;
++
+ namespace KWin
+ {
+ 
+@@ -74,6 +81,49 @@
+     void setEglLayer(AnlandEglLayer *layer);
+     AnlandEglLayer *eglLayer() const;
+ 
++    /**
++     * PowOS: an output is one Android surface, reached through its own display daemon connection: the desktop's
++     * (the primary, output 1) or one Android task's (a PowOS window on its own output). AnlandBackend drives it.
++     */
++    struct Link
++    {
++        display_ctx *display = nullptr;
++        QSocketNotifier *inputNotifier = nullptr;
++        QSocketNotifier *bufReadyNotifier = nullptr;
++        QTimer *reconnectTimer = nullptr;
++        bool consumerReady = false;
++        bool inFallback = false;
++    };
++    Link &link()
++    {
++        return m_link;
++    }
++    display_ctx *display() const
++    {
++        return m_link.display;
++    }
++    AnlandBackend *backend() const
++    {
++        return m_backend;
++    }
++    /** The desktop's output: audio, camera, clipboard, keyboard visibility and DPMS ride on its connection. */
++    bool isPrimary() const
++    {
++        return m_primary;
++    }
++    void setPrimary(bool primary)
++    {
++        m_primary = primary;
++    }
++    /** Added to the consumer's touch ids, so two Android tasks' fingers never share one. */
++    int touchIdBase() const
++    {
++        return m_touchIdBase;
++    }
++    void setTouchIdBase(int base)
++    {
++        m_touchIdBase = base;
++    }
+ private:
+     void completeFrame();
+ 
+@@ -83,6 +133,9 @@
+     std::unique_ptr<RenderLoop> m_renderLoop;
+     std::shared_ptr<OutputFrame> m_frame;
+     AnlandEglLayer *m_eglLayer = nullptr;
++    Link m_link;
++    bool m_primary = false;
++    int m_touchIdBase = 0;
+     bool m_awaitingPresent = false;
+     // Tracks our RenderLoop::inhibit() so inhibit/uninhibit stay balanced
+     // (uninhibit() asserts the count is > 0). See onConsumerLost()/resumeRendering().
+--- a/src/backends/anland/display_producer.c
++++ b/src/backends/anland/display_producer.c
+@@ -171,7 +171,9 @@
+     return 0;
+ }
+ 
+-int connect_to_deamon(display_ctx **out, const char *socket_path)
++/* PowOS: the handshake in two steps, so a caller can wait for the screen info on its event loop (a daemon answers
++ * only once its consumer is there - for a PowOS window task, maybe never). */
++int connect_to_deamon_begin(display_ctx **out, const char *socket_path)
+ {
+     display_ctx *ctx = calloc(1, sizeof(*ctx));
+     if (!ctx)
+@@ -197,14 +199,31 @@
+     if (send_all(ctx->ctrl_fd, &hdr, sizeof(hdr)) < 0)
+         goto fail;
+ 
++    *out = ctx;
++    return 0;
++
++fail:
++    if (ctx->ctrl_fd >= 0)
++        close(ctx->ctrl_fd);
++    free(ctx);
++    return -1;
++}
++
++int get_ctrl_fd(display_ctx *ctx)
++{
++    return ctx ? ctx->ctrl_fd : -1;
++}
++
++int connect_to_deamon_finish(display_ctx *ctx)
++{
+     uint8_t buf[sizeof(struct ctrl_msg) + sizeof(struct screen_info)];
+     if (recv_all(ctx->ctrl_fd, buf, sizeof(buf)) < 0)
+-        goto fail;
++        return -1;
+ 
+     struct ctrl_msg resp;
+     memcpy(&resp, buf, sizeof(resp));
+     if (resp.type != CTRL_MSG_SCREEN_INFO || resp.size != sizeof(struct screen_info))
+-        goto fail;
++        return -1;
+ 
+     struct screen_info si;
+     memcpy(&si, buf + sizeof(struct ctrl_msg), sizeof(si));
+@@ -216,14 +235,21 @@
+     // Daemon handshake only: screen info is in hand, but the consumer fds and
+     // dmabufs are deliberately left for try_exit_fallback() so the backend brings
+     // the consumer up through the single reconnect path. Stay in fallback.
+-    *out = ctx;
+     return 0;
++}
+ 
+-fail:
+-    if (ctx->ctrl_fd >= 0)
++int connect_to_deamon(display_ctx **out, const char *socket_path)
++{
++    display_ctx *ctx = NULL;
++    if (connect_to_deamon_begin(&ctx, socket_path) < 0)
++        return -1;
++    if (connect_to_deamon_finish(ctx) < 0) {
+         close(ctx->ctrl_fd);
+-    free(ctx);
+-    return -1;
++        free(ctx);
++        return -1;
++    }
++    *out = ctx;
++    return 0;
+ }
+ 
+ void disconnect(display_ctx *ctx)
+--- a/src/backends/anland/display_producer.h
++++ b/src/backends/anland/display_producer.h
+@@ -22,6 +22,11 @@
+ /* Connect to the daemon and fetch screen info only. Leaves the context in
+  * fallback: it does NOT pick up consumer fds or dmabufs. Returns 0 / -1. */
+ int  connect_to_deamon(display_ctx **ctx, const char *socket_path);
++/* PowOS: connect_to_deamon() in two steps. begin connects and says hello; once get_ctrl_fd() is readable, finish
++ * reads the screen info (0) or fails (-1: then disconnect() the ctx). */
++int  connect_to_deamon_begin(display_ctx **ctx, const char *socket_path);
++int  get_ctrl_fd(display_ctx *ctx);
++int  connect_to_deamon_finish(display_ctx *ctx);
+ 
+ /* Tear down everything and disconnect from the daemon. */
+ void disconnect(display_ctx *ctx);

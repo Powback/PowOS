@@ -7,6 +7,7 @@
 #include <jni.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -42,8 +43,13 @@ static bool api_loaded = false;
 static void on_fallback(void *userdata);
 
 static void on_exit_fallback(void *userdata);
+/* PowOS: one per Android surface. g_state is the desktop (MainActivity: audio, camera, clipboard, keyboard
+ * visibility); others are PowOS windows shown as their own Android tasks (PowosWindowActivity), each on its own
+ * display daemon socket - pixels and input only. See docs/powos-window-tasks.md. */
 struct consumer_state {
     pthread_mutex_t lock;
+    bool primary;
+    char socket_path[256];   /* non-primary: its daemon's socket (the primary's is cfg_socket_path) */
     ANativeWindow *window;
     display_ctx *ctx;
     pthread_t render_thread;
@@ -78,6 +84,7 @@ struct consumer_state {
 
 static struct consumer_state g_state = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
+    .primary = true,
 };
 
 /* Connection config, set from Java via nativeConfigure() and read on each
@@ -409,10 +416,20 @@ static int do_connect(struct consumer_state *s)
         return -1;
     }
 
+    if (!s->primary) {
+        if (use_compatible_bridge) {
+            LOGE("%s: no second surface over the compatible bridge", s->socket_path);
+            return -1;
+        }
+        memcpy(sock_path, s->socket_path, sizeof(sock_path));
+        /* The root helper's bridge socket is per connection. */
+        strncat(bridge_path, "-2", sizeof(bridge_path) - strlen(bridge_path) - 1);
+    }
     const char *sock = sock_path;
 
     if (s->ctx) {
-        audio_set_ctx(NULL);   /* detach audio before the old ctx (and its fd) dies */
+        if (s->primary)
+            audio_set_ctx(NULL);   /* detach audio before the old ctx (and its fd) dies */
         stop_event_thread(s);
         join_event_thread(s);
         disconnect(s->ctx);
@@ -499,7 +516,7 @@ static int do_connect(struct consumer_state *s)
      * enabled it in settings and granted CAMERA). allocate_services() stores this
      * pointer by reference, so it must outlive the ctx -> keep it static. The
      * producer drives it via RESOURCES_REQUEST (handled on the event thread). */
-    if (camera_service_is_ready()) {
+    if (s->primary && camera_service_is_ready()) {
         static struct service_info camera_svc;
         camera_svc.type = SERVICE_TYPE_CAMERA;
         camera_svc.allocate_resource = camera_allocate_resource;
@@ -510,7 +527,8 @@ static int do_connect(struct consumer_state *s)
     set_fallback_callback(s->ctx, on_fallback, s);
     set_exit_fallback_callback(s->ctx, on_exit_fallback, s);
 
-    audio_set_ctx(s->ctx);   /* audio fd is now live; threads pick it up via get_audio_fd */
+    if (s->primary)
+        audio_set_ctx(s->ctx);   /* audio fd is now live; threads pick it up via get_audio_fd */
 
     s->need_reconnect = false;
     LOGI("connected");
@@ -520,12 +538,13 @@ static int do_connect(struct consumer_state *s)
 static void on_fallback(void *userdata)
 {
     struct consumer_state *s = userdata;
-    LOGI("fallback triggered");
+    LOGI("fallback triggered (%s)", s->primary ? "desktop" : s->socket_path);
 
-    audio_set_ctx(NULL);   /* the lib has closed the audio fd; stop touching it */
+    if (s->primary)
+        audio_set_ctx(NULL);   /* the lib has closed the audio fd; stop touching it */
 
     // Disable clip listener on Java side before stopping event thread
-    if (g_jvm && g_activity_obj) {
+    if (s->primary && g_jvm && g_activity_obj) {
         JNIEnv *env = NULL;
         bool attached = false;
         if ((*g_jvm)->GetEnv(g_jvm, (void **)&env, JNI_VERSION_1_6) == JNI_EDETACHED) {
@@ -554,10 +573,13 @@ static void on_fallback(void *userdata)
 static void on_exit_fallback(void *userdata)
 {
     struct consumer_state *s = userdata;
-    LOGI("exit fallback triggered");
+    LOGI("exit fallback triggered (%s)", s->primary ? "desktop" : s->socket_path);
 
-    send_refresh_rate(&g_state);
-    
+    send_refresh_rate(s);
+    /* Clipboard, keyboard visibility and resource requests are the desktop's: no event thread for the others. */
+    if (!s->primary)
+        return;
+
     JNIEnv *env = NULL;
     if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) {
         LOGE("on_exit_fallback: AttachCurrentThread failed");
@@ -1021,4 +1043,123 @@ Java_andro_marchy_Native_nativeSetAudioKeepalive(
     JNIEnv *env, jclass clazz, jboolean enabled)
 {
     audio_set_keepalive(enabled == JNI_TRUE);
+}
+
+/* ---------- PowOS: more surfaces (a PowOS window as its own Android task) ---------- */
+
+/* Starts a consumer for [surface] on the display daemon at [socketPath]: pixels and input only (no audio, camera,
+ * clipboard or keyboard - those stay with the desktop, g_state). Returns its handle for the *Window* calls, 0 on
+ * failure. The connection retries on its own until the daemon's producer (KWin's output for it) answers. */
+JNIEXPORT jlong JNICALL
+Java_andro_marchy_Native_nativeStartWindow(
+    JNIEnv *env, jclass clazz, jobject surface, jstring socketPath)
+{
+    if (!api_loaded) {
+        if (anw_api_load(&api) < 0) {
+            LOGE("failed to load ANativeWindow hidden API");
+            return 0;
+        }
+        api_loaded = true;
+    }
+    struct consumer_state *s = calloc(1, sizeof(*s));
+    if (!s)
+        return 0;
+    pthread_mutex_init(&s->lock, NULL);
+    copy_jstring(env, socketPath, s->socket_path, sizeof(s->socket_path));
+    for (int i = 0; i < MAX_COLLECT_BUFS; i++)
+        s->dmabuf_fds[i] = -1;
+    s->window = ANativeWindow_fromSurface(env, surface);
+    if (!s->window || s->socket_path[0] == '\0') {
+        LOGE("window consumer: no surface or socket");
+        if (s->window)
+            ANativeWindow_release(s->window);
+        pthread_mutex_destroy(&s->lock);
+        free(s);
+        return 0;
+    }
+    if (!g_jvm)
+        (*env)->GetJavaVM(env, &g_jvm);
+    s->refresh_mhz = g_state.refresh_mhz;
+    s->running = true;
+    s->need_reconnect = true;
+    if (pthread_create(&s->render_thread, NULL, render_thread_func, s) != 0) {
+        ANativeWindow_release(s->window);
+        pthread_mutex_destroy(&s->lock);
+        free(s);
+        return 0;
+    }
+    LOGI("window consumer started on %s", s->socket_path);
+    return (jlong)(intptr_t)s;
+}
+
+/* Stops and frees a consumer from nativeStartWindow. The caller must not use [handle] afterwards. */
+JNIEXPORT void JNICALL
+Java_andro_marchy_Native_nativeStopWindow(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    struct consumer_state *s = (struct consumer_state *)(intptr_t)handle;
+    if (!s)
+        return;
+    s->running = false;
+    pthread_join(s->render_thread, NULL);
+    if (s->ctx) {
+        stop_event_thread(s);
+        join_event_thread(s);
+        disconnect(s->ctx);
+        s->ctx = NULL;
+    }
+    cleanup_dmabufs(s);
+    if (s->window)
+        ANativeWindow_release(s->window);
+    LOGI("window consumer stopped on %s", s->socket_path);
+    pthread_mutex_destroy(&s->lock);
+    free(s);
+}
+
+static void push_to(jlong handle, struct InputEvent *ev)
+{
+    struct consumer_state *s = (struct consumer_state *)(intptr_t)handle;
+    if (s && s->ctx)
+        push_input_event(s->ctx, ev);
+}
+
+JNIEXPORT void JNICALL
+Java_andro_marchy_Native_nativeSetWindowRefreshRate(
+    JNIEnv *env, jclass clazz, jlong handle, jfloat hz)
+{
+    struct consumer_state *s = (struct consumer_state *)(intptr_t)handle;
+    if (!s || hz <= 0.0f)
+        return;
+    s->refresh_mhz = (uint32_t)(hz * 1000.0f + 0.5f);
+    send_refresh_rate(s);
+}
+
+JNIEXPORT void JNICALL
+Java_andro_marchy_Native_nativeSendWindowTouch(
+    JNIEnv *env, jclass clazz, jlong handle, jint action, jfloat x, jfloat y, jint pointer_id)
+{
+    struct InputEvent ev = {
+        .type = INPUT_TYPE_TOUCH,
+        .touch = { .action = action, .x = x, .y = y, .pointer_id = pointer_id },
+    };
+    push_to(handle, &ev);
+}
+
+JNIEXPORT void JNICALL
+Java_andro_marchy_Native_nativeSendWindowTouchFrame(
+    JNIEnv *env, jclass clazz, jlong handle)
+{
+    struct InputEvent ev = { .type = INPUT_TYPE_TOUCH_FRAME };
+    push_to(handle, &ev);
+}
+
+JNIEXPORT void JNICALL
+Java_andro_marchy_Native_nativeSendWindowKey(
+    JNIEnv *env, jclass clazz, jlong handle, jint action, jint keycode)
+{
+    struct InputEvent ev = {
+        .type = INPUT_TYPE_KEY,
+        .key = { .action = action, .keycode = keycode },
+    };
+    push_to(handle, &ev);
 }

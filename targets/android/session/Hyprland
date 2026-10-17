@@ -14,6 +14,9 @@ set -u
 # KWin picks its Anland backend whenever ANLAND_SOCKET is set (patched main_wayland.cpp). Same daemon,
 # same wire protocol as Andromarchy's (protocol.h structs identical; checked 2026-10-13).
 export ANLAND_SOCKET="$ANDROMARCHY_SOCKET"
+# The app's second display daemon (SessionService.windowDaemonSocket): KWin's output "anland-2", a PowOS window shown
+# as its own Android task (docs/powos-window-tasks.md). KWin adds it once that task's surface connects.
+export ANLAND_SOCKET_2="${ANDROMARCHY_SOCKET%/*}/display_daemon-2.sock"
 # No /dev/dri on Android: KWin must not try to open a DRM render node (patch 0002).
 export ANLAND_NO_DRM_DEVICE=1
 export EGL_PLATFORM=surfaceless

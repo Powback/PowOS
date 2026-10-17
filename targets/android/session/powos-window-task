@@ -1,0 +1,58 @@
+#!/bin/bash
+# powos-window-task: shows a PowOS window as its own Android task (slice 1 of docs/powos-window-tasks.md).
+#
+#   powos-window-task <window>     <window>: its app id / resource class (as `kdotool` or KWin's support info show it)
+#
+# Opens the PowOS app's PowosWindowActivity (adb to the phone itself, as root: the activity isn't exported), whose
+# surface is KWin's output "anland-2" (ANLAND_SOCKET_2), then moves the window there, maximized, without borders.
+# HACK: placement by a one-shot KWin script, one window at a time. Real fix (the plan's next step): a window control
+# channel - KWin opens a task per window by itself and keeps windows and tasks in step.
+set -eu
+win=${1:?usage: powos-window-task <window app id>}
+DEV=127.0.0.1:5555
+
+adb -s "$DEV" shell su -c "am start -n com.powos.app/andro.marchy.PowosWindowActivity --es title '${win//\'/}'" >/dev/null
+
+script=$(mktemp --suffix=.js)
+trap 'rm -f "$script"' EXIT
+cat > "$script" <<EOF
+const out = workspace.screens.find(o => o.name === "anland-2");
+if (out) {
+    for (const w of workspace.windowList()) {
+        if (w.normalWindow && (w.resourceClass === "$win" || w.desktopFileName === "$win")) {
+            workspace.sendClientToScreen(w, out);
+            w.noBorder = true;
+            w.setMaximize(true, true);
+            workspace.activeWindow = w;
+            print("powos-window-task: " + w.caption + " -> anland-2");
+            break;
+        }
+    }
+} else {
+    print("powos-window-task: no output anland-2 yet");
+}
+EOF
+
+kwin() { gdbus call --session --dest org.kde.KWin "$@" >/dev/null; }
+# The output comes up once the activity's surface has connected (a second or so).
+for _ in $(seq 20); do
+  if gdbus call --session --dest org.kde.KWin --object-path /KWin --method org.kde.KWin.supportInformation 2>/dev/null \
+      | grep -q 'anland-2'; then
+    break
+  fi
+  sleep 0.5
+done
+# Same screen, same size of things: the task's output gets the desktop's scale (KWin keeps it from then on - a new
+# output starts at 1, Anland reports pixels only).
+scales=$(kscreen-doctor -j 2>/dev/null | jq -r '[.outputs[] | {(.name): .scale}] | add | "\(.["anland-1"]) \(.["anland-2"])"')
+read -r desk task <<<"$scales"
+if [ -n "$desk" ] && [ "$desk" != null ] && [ "$task" != null ] && [ "$desk" != "$task" ]; then
+  kscreen-doctor "output.anland-2.scale.$desk" >/dev/null 2>&1 || true
+fi
+
+name=powos-window-task-$$
+id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+  --method org.kde.kwin.Scripting.loadScript "$script" "$name" | tr -dc '0-9')
+kwin --object-path "/Scripting/Script$id" --method org.kde.kwin.Script.run
+sleep 1
+kwin --object-path /Scripting --method org.kde.kwin.Scripting.unloadScript "$name"

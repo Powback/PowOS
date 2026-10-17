@@ -30,16 +30,24 @@ Proves the pipeline end to end with no protocol change: a second daemon on a sec
    `onBufferReady`, `enterFallback`, `onReconnectTimer` become per output; every `m_outputs[0]` goes.
    `mapInputToLogical(output, p)` adds the output's position; touch ids are offset per output so two tasks never
    share one. Audio, camera, clipboard, keyboard visibility and DPMS stay on output 1 (the desktop).
-   `ANLAND_SOCKET_2`: output "anland-2" is created lazily once its consumer has connected (the daemon keeps its
-   screen info), placed right of output 1 so they don't overlap.
-2. **Consumer JNI**: `consumer_state` per surface (heap, handle returned to Java); `nativeStart(surface, socket,
-   primary)` / `nativeStop(handle)` / `nativeSend*(handle, ...)`. Audio, camera and clipboard only for the
-   primary. The existing static calls stay as wrappers for the primary (MainActivity unchanged).
+   `ANLAND_SOCKET_2`: output "anland-2" is created lazily once its consumer has connected - the producer's
+   handshake is split (`connect_to_deamon_begin` / `_finish`) and KWin waits for the daemon's screen info on its
+   event loop, as a daemon answers only once its consumer is there (no thread blocked at exit), at x 16384: outputs never overlap whatever sizes they take (the desktop doubles in width on
+   unfold), and aren't adjacent, so the pointer stays on the desktop.
+2. **Consumer JNI**: `consumer_state` per surface (`primary` flag, own socket path). `g_state` stays the desktop
+   behind the existing static calls (MainActivity unchanged); `nativeStartWindow(surface, socket)` returns a handle
+   for `nativeStopWindow` / `nativeSendWindowTouch|TouchFrame|Key` / `nativeSetWindowRefreshRate`. Audio, camera,
+   clipboard, keyboard visibility and the event thread only for the primary.
 3. **Session**: SessionService starts a second daemon (`display_daemon-2.sock`); the session exports
    `ANLAND_SOCKET_2`.
-4. **Android**: `PowosWindowActivity` (documentLaunchMode="always", resizeable): a SurfaceView consumer on
-   socket 2, touch and keys to its handle.
-5. **Placement (proof only)**: a KWin script sends a chosen window to output 2, maximized, without decorations.
+4. **Android**: `PowosWindowActivity` (singleTask in its own affinity - one second output, so one such task;
+   resizeable): a SurfaceView consumer on socket 2, touch and keys to its handle, a new size reconnects with
+   buffers of that size (KWin resizes the output to them).
+5. **Placement (proof only)**: `powos-window-task <app id>` (session/) opens the activity (adb to the phone, as
+   root) and loads a one-shot KWin script that sends the window to output 2, maximized, without decorations.
+
+Known limits of slice 1: the output stays once created; when its task closes it only stops rendering (fallback)
+and the window stays there, unseen, until moved back. The window control channel below fixes that.
 
 Done when: a PowOS window shows in its own Android task, takes touch and keys there, resizes with the task (split
 screen), and the desktop task keeps working beside it.

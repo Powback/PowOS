@@ -68,6 +68,16 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity-alias>
+        <!-- PowOS: a PowOS window as its own Android task (KWin output "anland-2"; docs/powos-window-tasks.md). -->
+        <activity
+            android:name=".PowosWindowActivity"
+            android:label="PowOS window"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=".PowosWindow"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|density"
+            android:theme="@android:style/Theme.NoTitleBar" />
         <!-- PowOS: the cover screen as a controller surface while unfolded (both screens on). -->
         <activity
             android:name=".CoverPadActivity"
