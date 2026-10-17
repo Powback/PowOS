@@ -14,8 +14,8 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imeAnimationTarget
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -136,8 +136,8 @@ private fun TileButton(
 
 /**
  * A widget's screen { }, full screen over home in an Omarchy window titled by its `title` or the widget's name. A
- * terminal's screen is the terminal alone, edge to edge, ending above the keyboard and [extraKeys] while it's up and
- * filling the screen when it's down - sized
+ * terminal's screen is the terminal alone, edge to edge, its [extraKeys] always below it, above the keyboard while it's
+ * up and above the navigation bar when it's down - sized
  * once per keyboard change, from where the keyboard is going (its animation target): following its slide frame by
  * frame would resize (re-wrap) the terminal every frame, and waiting for it to settle lagged.
  */
@@ -160,8 +160,8 @@ internal fun WidgetScreenPanel(
     val target = WindowInsets.imeAnimationTarget.getBottom(density)
     val nav = WindowInsets.navigationBars.getBottom(density)
     var keysPx by remember { mutableIntStateOf(0) }
-    // The extra keys show only over the keyboard (extraKeysWanted).
-    val clear = with(density) { (maxOf(target, nav) + if (target > 0) keysPx else 0).toDp() }
+    // The extra keys sit above the keyboard, or above the navigation bar when it's down.
+    val clear = with(density) { (maxOf(target, nav) + keysPx).toDp() }
     // Edge to edge, no title: it's plainly a terminal, and every column counts. Back closes it (the launcher's
     // back handler), as any widget screen.
     Box(Modifier.fillMaxSize().background(Palette.overlay)) {
@@ -176,6 +176,11 @@ internal fun WidgetScreenPanel(
         ) {
             WidgetScreen(instance, Modifier.fillMaxSize())
         }
-        extraKeys(Modifier.align(Alignment.BottomCenter).imePadding().onSizeChanged { keysPx = it.height })
+        extraKeys(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
+                .onSizeChanged { keysPx = it.height },
+        )
     }
 }

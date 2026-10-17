@@ -111,19 +111,20 @@ class TerminalTiles(
         if (ptyActive === term) deactivate()
     }
 
-    fun activate(term: EmbeddedTerminal) {
+    /** [term] takes the keys, and the soft keyboard comes up unless not [showKeyboard] (its button raises it). */
+    fun activate(term: EmbeddedTerminal, showKeyboard: Boolean = true) {
         term.pty?.let { pty ->
             if (wm.focused != null) wm.focus(null)
             ptyActive = term
             runtime.keyboard.target = pty
             tile = null
-            keyboard?.show()
+            if (showKeyboard) keyboard?.show()
             return
         }
         val window = term.window ?: return
         tile = null
         wm.focus(window)
-        keyboard?.show()
+        if (showKeyboard) keyboard?.show()
     }
 
     fun deactivate() {
@@ -294,9 +295,10 @@ fun TerminalView(
     val active = tiles.active === term
     LaunchedEffect(term) { term.start() }
     if (focus) {
-        // Typing at once: active once its shell is up; let go when this view goes (a screen closing), or the tile
-        // showing the same shell would stay active and stop opening the screen on a tap.
-        LaunchedEffect(term, term.pty) { if (term.pty != null && tiles.active !== term) tiles.activate(term) }
+        // Active once its shell is up (keys and the extra keys go to it), the soft keyboard left to its button; let
+        // go when this view goes (a screen closing), or the tile showing the same shell would stay active and stop
+        // opening the screen on a tap.
+        LaunchedEffect(term, term.pty) { if (term.pty != null && tiles.active !== term) tiles.activate(term, showKeyboard = false) }
         DisposableEffect(term) { onDispose { if (tiles.active === term) tiles.deactivate() } }
     }
     term.pty?.let { pty ->

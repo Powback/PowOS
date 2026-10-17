@@ -275,12 +275,10 @@ private fun ThemesOverlay(
     runtime.widgets.screenInstance()?.let { (spec, inst) ->
         CompositionLocalProvider(LocalInputFocus provides true) {
             WidgetScreenPanel(spec, inst, onDismiss = { runtime.widgets.openScreen = null }) { m ->
-                if (extraKeysWanted()) {
-                    // Where the keys are, as home's: a press there isn't "outside the terminal" (which lets go of
-                    // it and drops the keyboard - each arrow key did).
-                    DisposableEffect(Unit) { onDispose { runtime.terminals.extraKeys = null } }
-                    ExtraKeys(runtime.keyboard, m.onGloballyPositioned { runtime.terminals.extraKeys = it.boundsInWindow() })
-                }
+                // Always, keyboard up or not: the arrows and the rest are what a phone keyboard lacks anyway. Where
+                // they are, as home's: a press there isn't "outside the terminal" (which lets go of it).
+                DisposableEffect(Unit) { onDispose { runtime.terminals.extraKeys = null } }
+                ExtraKeys(runtime.keyboard, m.onGloballyPositioned { runtime.terminals.extraKeys = it.boundsInWindow() })
             }
         }
     }
