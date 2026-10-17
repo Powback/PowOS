@@ -64,16 +64,24 @@ if command -v scrcpy >/dev/null && command -v adb >/dev/null; then
     [ -n "$task" ] || set -- "$@" --start-app="$pkg"
     # scrcpy's output, minus the VA-API bridge's line per decoded frame (tva-va: ...; it has no quiet switch), in a
     # small per-app log. Its pid (the window's process) for the one-window check above.
+    # The log goes first: the previous window's still said "New display: ... (id=<its display>)", and read before the
+    # new scrcpy truncated it, the task was moved to that gone display - Chrome stayed on the phone, the window empty.
     log=$W/$pkg.log
-    rm -f "$W/$pkg.pid"
+    rm -f "$W/$pkg.pid" "$log"
     (sh -c 'echo $$ > "$0"; exec scrcpy "$@"' "$W/$pkg.pid" "$@" 2>&1 | grep --line-buffered -v '^tva-va:' > "$log") &
-    for _ in $(seq 100); do
-      [ -n "$task" ] && id=$(sed -n 's/.*New display: .* (id=\([0-9]*\)).*/\1/p' "$log")
+    # Up to 30 s: with a game running, pushing and starting scrcpy's server took longer than the 10 s this waited.
+    for _ in $(seq 300); do
+      [ -n "$task" ] && id=$(sed -n 's/.*New display: .* (id=\([0-9]*\)).*/\1/p' "$log" 2>/dev/null)
       [ -n "${id:-}" ] && break
       [ -z "$task" ] && [ -s "$W/$pkg.pid" ] && break
       sleep 0.1
     done
-    [ -n "${id:-}" ] && adb -s $dev shell am display move-stack "$task" "$id"
+    if [ -n "$task" ]; then
+      out=$( [ -n "${id:-}" ] && adb -s $dev shell am display move-stack "$task" "$id" 2>&1 ) && ! echo "$out" | grep -q Exception ||
+        { # Never an empty window: close it (the app stays on the phone's screen, its taskbar entry comes back).
+          echo "powos-android-app: couldn't move task $task to display ${id:-?}: $out" >> "$log"
+          kill "$(cat "$W/$pkg.pid" 2>/dev/null)" 2>/dev/null; }
+    fi
     wait
     exit
   fi
