@@ -35,7 +35,7 @@ for p in "${pkgs[@]}"; do
   # Resource caps: shares the Colima VM with live services. A volume keeps makepkg's src/ off the
   # macOS bind mount (faster, and keeps Linux ownership).
   docker run --rm --platform linux/arm64 --cpus 8 --memory 16g ${local_mount[@]+"${local_mount[@]}"} \
-    -e PKG="$p" -e SRC="$src" -v "$HERE/recipes:/fixups:ro" -v "$OUT:/out" -v "$scratch:/build" "$IMAGE" bash -c '
+    -e PKG="$p" -e SRC="$src" -v "$HERE/recipes:/fixups:ro" -v "$HERE/tools:/tools:ro" -v "$OUT:/out" -v "$scratch:/build" "$IMAGE" bash -c '
       set -euo pipefail
       # HACK: pacman 7 download sandbox (Landlock) is not permitted in Docker.
       grep -q "^DisableSandbox" /etc/pacman.conf || sed -i "/^\[options\]/a DisableSandbox" /etc/pacman.conf
@@ -50,8 +50,10 @@ for p in "${pkgs[@]}"; do
       esac
       # recipes/<name>.sh: the smallest change that lets an upstream recipe build on aarch64 (each one says why).
       [ -f "/fixups/$PKG.sh" ] && (cd /build && bash "/fixups/$PKG.sh")
-      # Our own packages built earlier satisfy dependencies of later ones (e.g. an AUR recipe needing another).
-      ls /out/*.pkg.tar.* >/dev/null 2>&1 && pacman -U --noconfirm --needed /out/*.pkg.tar.* >/dev/null 2>&1 || true
+      # Our own packages built earlier satisfy dependencies of later ones (e.g. an AUR recipe needing another, kwin
+      # our kglobalacceld). The newest build of each: out/ keeps old ones, and pacman -U refuses duplicates.
+      ours=$(sh /tools/newest-pkgs.sh /out)
+      [ -z "$ours" ] || pacman -U --noconfirm --needed $ours >/dev/null || echo "build-pkgs: could not install our earlier builds" >&2
       chown -R builder /build && cd /build
       ignorearch=""; [ "$SRC" = local ] || ignorearch=--ignorearch
       sudo -u builder MAKEFLAGS="-j8" makepkg -sf --noconfirm --skippgpcheck --nocheck $ignorearch

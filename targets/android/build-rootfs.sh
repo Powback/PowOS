@@ -21,7 +21,7 @@ ANDROMARCHY_URL=https://github.com/lotfibennour/andromarchy
 ANDROMARCHY_REF=220754d390f743aa5a8227e689402de1a6eb0281
 IMAGE=menci/archlinuxarm:latest   # build host userland only; the rootfs itself is the ALARM tarball
 
-KWIN_PKG=${1:-$(ls "$OUT"/pkgs/kwin-*.pkg.tar.* 2>/dev/null | head -1)}
+KWIN_PKG=${1:-$("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs" kwin)}
 [ -f "${KWIN_PKG:-}" ] || { echo "no kwin package: run targets/android/build-pkgs.sh first" >&2; exit 1; }
 
 # 1. Andromarchy at the pinned commit, with our build patch.
@@ -35,7 +35,7 @@ for p in "$HERE"/patches/andromarchy/*.patch; do patch -d "$W/andromarchy" -p1 <
 S=$W/powos
 rm -rf "$S" && mkdir -p "$S/pkgs"
 "$HERE/tools/fetch-manifest.sh" "$S/manifest" "${POWOS_MANIFEST:-ghcr.io/powback/powos-phone:deck}"
-cp "$OUT"/pkgs/*.pkg.tar.* "$S/pkgs/"   # ours: kwin, fex-emu, recipes.list builds
+cp $("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs") "$S/pkgs/"   # ours: kwin, fex-emu, recipes.list builds (newest of each)
 cp -a "$HERE/session" "$HERE/shims" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
 # The PowOS desktop widgets from this checkout (install-powos-android.sh puts them over the image content's).

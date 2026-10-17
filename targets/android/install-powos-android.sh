@@ -57,6 +57,8 @@ fi
 # way to draw on Android. HACK: IgnorePkg means Plasma updates need a matching rebuild of our kwin
 # (pacman warns about the held package); the real fix is the Anland backend upstream in KWin.
 grep -q '^IgnorePkg.*\bkwin\b' $C || sed -i "/^IgnorePkg/ s/$/ kwin/" $C
+# Held with it: the kglobalacceld our kwin builds against (see pkgs/kglobalacceld/PKGBUILD).
+grep -q '^IgnorePkg.*\bkglobalacceld\b' $C || sed -i "/^IgnorePkg/ s/$/ kglobalacceld/" $C
 
 # FEX: PowOS's Steam (Valve's bootstrapper is 32-bit x86) and x86 games run through it, as on Valve's own ARM
 # hardware. The engine's execve hands x86 programs to FEXInterpreter (patches/andromarchy/0002), standing in for
