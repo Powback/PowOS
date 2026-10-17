@@ -39,7 +39,7 @@ deploy)
   for f in powos-start.sh powos-session.sh powos-run.sh powos-rooted-session powos-deploy.sh; do
     adb push -q "$HERE/$f" "/data/local/tmp/$f"
   done
-  for f in powos-android-app powos-android-tasks powos-android-tasks.desktop; do
+  for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch; do
     adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
   done
   adb push -q "$HERE/../pkgs/fex-emu/Config.json" /data/local/tmp/fex-Config.json

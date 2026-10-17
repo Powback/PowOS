@@ -215,7 +215,9 @@ class DeckPad:
             data = ATTRIBUTES
         elif self.current_report == GET_STRING_ATTRIBUTE:
             value = BOARD_SERIAL if self.string_attr == 0x00 else SERIAL
-            data = bytes([0x00, GET_STRING_ATTRIBUTE, len(value), self.string_attr]) + value
+            # The Deck's reply: length = the attribute tag + a fixed 20-byte, NUL-padded string. With the string's own
+            # length (12) Steam said "Invalid or missing unit serial number" and made one up.
+            data = bytes([0x00, GET_STRING_ATTRIBUTE, 1 + 20, self.string_attr]) + value.ljust(20, b"\0")
         elif self.current_report == GET_CHIP_ID:
             data = bytes([0x00, GET_CHIP_ID, 0x11, 0x00]) + bytes(range(15))
         else:
