@@ -217,8 +217,14 @@ public class Hook implements IXposedHookLoadPackage {
                         Object panel = XposedHelpers.getObjectField(self, "triggerPanel");
                         if (e == null || panel == null || !panels.containsValue(panel))
                             return; // OnePlus's own home: its recents view supplies the offset
-                        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN || !downX.containsKey(self))
+                        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN || !downX.containsKey(self)) {
                             downX.put(self, e.getRawX());
+                            View rv = (View) XposedHelpers.getObjectField(self, "mRecentsView");
+                            if (rv != null) { // a new gesture: the switcher as it was, should the last one have left it faded
+                                rv.animate().cancel();
+                                rv.setAlpha(1f);
+                            }
+                        }
                         int off = (int) (SIGN * (e.getRawX() - downX.get(self)));
                         fingerOffset.put(panel, off);
                         int a = e.getActionMasked();
@@ -238,6 +244,29 @@ public class Hook implements IXposedHookLoadPackage {
                     Integer off = dragOffset;
                     if (off != null)
                         param.setResult((float) (SCROLL_SIGN * off));
+                }
+            });
+            // When the window reaches a target, OnePlus moves the other recents cards away by winding the recents view's
+            // own enter animation back to 0. Over its home that zooms them off screen; RecentsActivity's grid at 0 draws
+            // them full-screen size, still visible - huge windows behind the one being dropped. The intent (out of the
+            // way) here: the switcher fades out while a target is selected and back in if the finger leaves it. The
+            // dragged window is the app's own surface, not part of this view.
+            XposedBridge.hookAllMethods(handler, "createRecentsAnimationForTriggerPanel", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        Object self = param.thisObject;
+                        if (!panels.containsValue(XposedHelpers.getObjectField(self, "triggerPanel")))
+                            return;
+                        View rv = (View) XposedHelpers.getObjectField(self, "mRecentsView");
+                        if (rv == null)
+                            return;
+                        boolean reverse = (Boolean) param.args[0];
+                        rv.animate().cancel();
+                        rv.animate().alpha(reverse ? 1f : 0f).setDuration((Long) param.args[3]).start();
+                    } catch (Throwable t) {
+                        log("trigger recents", t);
+                    }
                 }
             });
             // ...and on every frame OnePlus sets it again from the recents view's scroll (0 here) - through a setter ART

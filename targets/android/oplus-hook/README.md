@@ -30,7 +30,10 @@ floating window over PowOS's home (no RecentsActivity left behind), and Split Vi
    since OnePlus's per-frame reset goes through a setter ART inlines - and, while the finger is down, the window's
    x offset (`OplusRecentsViewImpl.getOffsetXForTSV`). Verified 2026-10-17 on the Open's inner screen (uinput finger
    + by hand): the window follows the finger, "Release to enter Split View" / Floating window highlight, and the drop
-   splits / floats Chrome. Known gap: after Split View, "Open another app to split the screen" shows the home app
+   splits / floats Chrome. When the window reaches a target OnePlus moves the other recents cards away by winding
+   the recents view's enter animation back to 0 - off screen over its home, but full-screen-size (still visible) in
+   RecentsActivity's grid: the switcher now fades out while a target is selected, back in if the finger leaves it.
+   Known gap: after Split View, "Open another app to split the screen" shows the home app
    (PowOS) to pick from, not the switcher - FallbackSwipeHandler starts the home intent on that drop.
 
 4. **Revealing the taskbar in apps** (short swipe up). It stayed stashed for three reasons, all OnePlus assuming its
