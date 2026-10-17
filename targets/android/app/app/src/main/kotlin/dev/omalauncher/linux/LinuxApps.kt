@@ -38,6 +38,21 @@ fun loadLinuxApps(proot: Proot): List<LinuxApp> {
         .sortedBy { it.name.lowercase() }
 }
 
+/**
+ * PowOS's apps (rooted mode), as session/powos-apps-export wrote them to [dir] (the run dir's powos-apps): apps.tsv
+ * (id, name, exec, terminal, StartupWMClass, categories) and icons/<id>.png; an app's [LinuxApp.icon] is then that
+ * PNG's path on the phone (it's in the PowOS app's own run dir).
+ */
+fun loadPowosApps(dir: File): List<LinuxApp> {
+    val icons = File(dir, "icons")
+    return runCatching { File(dir, "apps.tsv").readLines() }.getOrDefault(emptyList()).mapNotNull { line ->
+        val f = line.split('\t')
+        if (f.size < 4 || f[0].isEmpty() || f[2].isEmpty()) return@mapNotNull null
+        val icon = File(icons, "${f[0]}.png").takeIf { it.isFile }?.path
+        LinuxApp(f[1], f[2], f[3] == "1", f[0], f.getOrNull(4)?.ifEmpty { null }, icon)
+    }
+}
+
 private fun parseDesktopEntry(file: File): LinuxApp? {
     var inEntry = false
     val fields = mutableMapOf<String, String>()

@@ -134,6 +134,7 @@ install -Dm 755 "$P/session/first-session.sh" /opt/powos/first-session.sh
 pacman -S --noconfirm --needed scrcpy android-tools pyside6
 install -m 755 "$P/session/powos-android-app" /usr/local/bin/powos-android-app
 install -m 755 "$P/session/powos-android-tasks" /usr/local/bin/powos-android-tasks
+install -m 755 "$P/session/powos-apps-export" /usr/local/bin/powos-apps-export
 # The app's touch controls as a gamepad (started by powos-rooted-session).
 install -m 755 "$P/session/powos-padd" /usr/bin/powos-padd
 install -m 755 "$P/session/powos-focus-watch" /usr/bin/powos-focus-watch

@@ -205,12 +205,18 @@ internal class AppHandlers(
     val pin: (AppHit) -> Unit,
     val info: (AndroidApp) -> Unit,
     val uninstall: (AndroidApp) -> Unit,
+    /** A PowOS app (rooted mode) onto the phone's own home screen, as an Android shortcut; null where there's none. */
+    val phoneHome: ((LinuxApp) -> Unit)? = null,
 )
 
 /** The long-press menu of an app cell: pin to home, and for Android apps their info and uninstall. */
 private fun AppHit.actions(handlers: AppHandlers): List<Pair<String, () -> Unit>> =
     when (this) {
-        is AppHit.Linux -> listOf("add to home" to { handlers.pin(this) })
+        is AppHit.Linux ->
+            listOfNotNull(
+                "add to home" to { handlers.pin(this) },
+                handlers.phoneHome?.let { add -> "add to phone home" to { add(app) } },
+            )
         is AppHit.Android ->
             listOfNotNull(
                 "add to home" to { handlers.pin(this) },
@@ -500,7 +506,9 @@ internal fun AppPanel(
                                 }
                                 // Clones too, as stock drawers list them: second copies of the owner's apps.
                                 DrawerTab.Personal -> {
-                                    if (linuxState == LinuxState.Installed) {
+                                    if (runtime.powosSession) {
+                                        section("powos", runtime.linuxApps.map { AppHit.Linux(it) })
+                                    } else if (linuxState == LinuxState.Installed) {
                                         section("linux", runtime.linuxApps.map { AppHit.Linux(it) })
                                     } else {
                                         // Linux apps would be listed here; without Linux, one quiet offer instead.

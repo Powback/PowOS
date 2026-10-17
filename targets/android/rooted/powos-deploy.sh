@@ -16,6 +16,8 @@ install -m 755 $T/powos-run.sh /data/powos/powos-run.sh
 install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
 install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
 install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
+# PowOS's apps for Android: the PowOS app's drawer, search and Android shortcuts (it runs this, rooted mode).
+install -m 755 $T/powos-apps-export $R/usr/local/bin/powos-apps-export
 install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android-tasks.desktop
 # The phone's controller (Steam Deck over uhid) and the focus watcher, which the session starts (powos-rooted-session).
 install -m 755 $T/powos-padd $R/usr/bin/powos-padd
@@ -46,7 +48,7 @@ install -Dm644 $T/fex-Config.json $R/usr/share/fex-emu/Config.json
 install -Dm644 $T/fex-thunks.json $R/usr/share/fex-emu/thunks.json
 rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
-  $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch
+  $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
 # the app's run dir (display socket, phone state) is then the user's own, as XDG_RUNTIME_DIR should be. Re-run

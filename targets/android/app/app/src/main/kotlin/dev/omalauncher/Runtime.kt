@@ -36,6 +36,8 @@ import dev.omalauncher.linux.TerminalFont
 import dev.omalauncher.linux.bundledIcons
 import dev.omalauncher.linux.defaultApps
 import dev.omalauncher.linux.loadLinuxApps
+import dev.omalauncher.linux.loadPowosApps
+import dev.omalauncher.linux.PowosShortcuts
 import dev.omalauncher.linux.matches
 import dev.omalauncher.linux.resolveLinuxIcon
 import dev.omalauncher.linux.run
@@ -369,7 +371,10 @@ class Runtime(
     }
 
     /** Terminals run in the PowOS session (rooted mode); see [RootedGuest]. */
-    private var rootedTerminals = false
+    private var rootedTerminals by mutableStateOf(false)
+
+    /** PowOS on a rooted phone is this launcher's Linux: its apps are [linuxApps], its sessions the terminals'. */
+    val powosSession: Boolean get() = !linux && rootedTerminals
 
     /**
      * PowOS on a rooted phone: of Omalauncher's own Linux services only the Wayland server, for the terminal tiles,
@@ -394,6 +399,8 @@ class Runtime(
         widgets.terminalsChanged(true)
         // Widgets' commands, streams and actions run in the PowOS session too (GuestShell, Streams): PowOS is their Linux.
         widgets.linuxChanged(true)
+        // PowOS's apps in the drawer, search and Android's shortcuts.
+        refreshApps()
     }
 
     /** Turns GPU acceleration on (installing and checking the driver) or off, for Linux apps started from then on. */
@@ -461,12 +468,24 @@ class Runtime(
 
     /** Rescans .desktop entries; the list only changes (and recomposes) when entries do. */
     suspend fun refreshApps() {
-        if (!linux) return
-        val apps = withContext(Dispatchers.IO) { loadLinuxApps(proot) }
+        // Rooted mode: PowOS's own apps, as its menu has them (powos-apps-export writes them to the run dir).
+        val powos = !linux && rootedTerminals
+        if (!linux && !powos) return
+        val apps =
+            withContext(Dispatchers.IO) {
+                if (powos) {
+                    RootedGuest.run("powos-apps-export")
+                    loadPowosApps(File(RootedGuest.runDir ?: return@withContext emptyList(), "powos-apps"))
+                } else {
+                    loadLinuxApps(proot)
+                }
+            }
         if (apps != linuxApps.toList()) {
             linuxApps.clear()
             linuxApps += apps
         }
+        // And as Android's own shortcuts: the most used on the PowOS icon, pinned ones kept up to date.
+        if (powos) withContext(Dispatchers.IO) { PowosShortcuts.publish(context, apps) { usage.score("l:" + it.id) } }
         val ids = apps.mapTo(HashSet()) { it.id }
         linuxIcons.keys.retainAll(ids)
         linuxMasks.keys.retainAll(ids)
@@ -476,7 +495,7 @@ class Runtime(
         val loaded =
             withContext(Dispatchers.IO) {
                 missing.mapNotNull { app ->
-                    val file = resolveLinuxIcon(proot.rootfs, app.icon!!) ?: return@mapNotNull null
+                    val file = (if (powos) File(app.icon!!).takeIf { it.isFile } else resolveLinuxIcon(proot.rootfs, app.icon!!)) ?: return@mapNotNull null
                     decodeIcon(file, size)?.let { Triple(app.id, it.asImageBitmap(), bitmapMask(it).asImageBitmap()) }
                 }
             }

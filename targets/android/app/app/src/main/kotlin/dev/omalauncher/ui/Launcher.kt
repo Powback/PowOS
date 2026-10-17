@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import dev.omalauncher.Runtime
+import dev.omalauncher.linux.PowosShortcuts
 import dev.omalauncher.theme.Style
 import dev.omalauncher.theme.StyleStore
 import dev.omalauncher.widgets.checkSecretsCommand
@@ -153,8 +154,9 @@ private fun DesktopScreen(
         }
     }
 
+    val powos = runtime.powosSession
     val handlers =
-        remember(runtime, state, context) {
+        remember(runtime, state, context, powos) {
             AppHandlers(
                 launch = ::launch,
                 // Pins to the page that's showing; the panel closes so the new tile is visible.
@@ -170,6 +172,7 @@ private fun DesktopScreen(
                     runtime.androidApps.openInfo(app)
                 },
                 uninstall = { app -> runtime.androidApps.uninstall(app) },
+                phoneHome = if (powos) { app -> PowosShortcuts.requestPin(context, app) } else null,
             )
         }
 

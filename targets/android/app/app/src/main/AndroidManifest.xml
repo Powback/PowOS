@@ -87,6 +87,16 @@
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize|stateAlwaysHidden" />
 
+        <!-- PowOS (rooted mode): opens a PowOS app from Android - its shortcut on the PowOS icon, in Android's
+             search, or pinned to the phone's home screen (PowosShortcuts). Exported: launchers start shortcuts. -->
+        <activity
+            android:name=".OpenPowosApp"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
+
         <!-- PowOS (rooted mode): a terminal the launcher draws, one task each (PowosTerminalActivity). -->
         <activity
             android:name=".PowosTerminalActivity"

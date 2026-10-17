@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""powos-apps-export: PowOS's apps, for Android (the PowOS app's drawer, search and Android shortcuts).
+
+Writes $XDG_RUNTIME_DIR/powos-apps/ (the PowOS app's run dir, which it reads directly):
+  apps.tsv       one app per line: id, name, exec, terminal (0/1), StartupWMClass, categories (;-separated)
+  icons/<id>.png its icon from PowOS's icon theme (as Plasma shows it), 192 px
+
+The apps are the menu's: .desktop entries of type Application in XDG_DATA_HOME and XDG_DATA_DIRS (Flatpak's exports
+included), the first of each id winning (XDG), without NoDisplay/Hidden ones, ones not for KDE, and the phone's
+Android apps (android-*.desktop, X-Android: the PowOS app made those from Android's own apps). Icons are only drawn
+when missing or their Icon= changed, so a run without new apps doesn't start Qt.
+
+Run by the PowOS app (rooted mode) when its drawer refreshes: `powos-apps-export`.
+"""
+import os
+import re
+import sys
+
+RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
+OUT = os.path.join(RUN, "powos-apps")
+ICONS = os.path.join(OUT, "icons")
+SIZE = 192
+FIELD_CODE = re.compile(r"%[fFuUdDnNickvm]")
+
+
+def data_dirs():
+    home = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    dirs = [home] + (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    dirs += [os.path.expanduser("~/.local/share/flatpak/exports/share"), "/var/lib/flatpak/exports/share"]
+    seen, out = set(), []
+    for d in dirs:
+        if d and d not in seen:
+            seen.add(d)
+            out.append(os.path.join(d, "applications"))
+    return out
+
+
+def parse(path):
+    fields, section = {}, None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for raw in f:
+            line = raw.strip()
+            if line.startswith("["):
+                section = line
+            elif section == "[Desktop Entry]" and "=" in line:
+                key, value = line.split("=", 1)
+                fields.setdefault(key.strip(), value.strip())
+    return fields
+
+
+def shown(fields, desktop_id):
+    if fields.get("Type") != "Application" or "Name" not in fields or "Exec" not in fields:
+        return False
+    if fields.get("NoDisplay") == "true" or fields.get("Hidden") == "true":
+        return False
+    if desktop_id.startswith("android-") or "X-Android" in fields.get("Categories", "").split(";"):
+        return False
+    only = [d for d in fields.get("OnlyShowIn", "").split(";") if d]
+    if only and "KDE" not in only:
+        return False
+    return "KDE" not in fields.get("NotShowIn", "").split(";")
+
+
+def apps():
+    found = {}
+    for d in data_dirs():
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".desktop"):
+                continue
+            desktop_id = name[: -len(".desktop")]
+            if desktop_id in found:  # an earlier dir's entry wins (a user's own one hides the package's)
+                continue
+            try:
+                fields = parse(os.path.join(d, name))
+            except OSError:
+                continue
+            found[desktop_id] = fields if shown(fields, desktop_id) else None
+    return sorted(((i, f) for i, f in found.items() if f), key=lambda e: e[1]["Name"].lower())
+
+
+def clean(value):
+    return value.replace("\t", " ").replace("\n", " ")
+
+
+def icon_theme():
+    """The icon theme Plasma uses (kdeglobals [Icons] Theme), else Breeze."""
+    path = os.path.expanduser("~/.config/kdeglobals")
+    try:
+        section = None
+        with open(path) as f:
+            for raw in f:
+                line = raw.strip()
+                if line.startswith("["):
+                    section = line
+                elif section == "[Icons]" and line.startswith("Theme="):
+                    return line.split("=", 1)[1]
+    except OSError:
+        pass
+    return "breeze"
+
+
+def draw_icons(wanted):
+    """Renders [(id, Icon= value)] with Qt (offscreen), only those missing or whose Icon= changed."""
+    stamps = os.path.join(ICONS, ".icon-names")
+    old = {}
+    try:
+        with open(stamps) as f:
+            old = dict(line.rstrip("\n").split("\t", 1) for line in f if "\t" in line)
+    except OSError:
+        pass
+    todo = [(i, n) for i, n in wanted if old.get(i) != n or not os.path.exists(os.path.join(ICONS, i + ".png"))]
+    if todo:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from PySide6.QtGui import QGuiApplication, QIcon
+
+        app = QGuiApplication(sys.argv[:1])  # noqa: F841 - icons need a QGuiApplication
+        # Offscreen Qt searches only its own resources (:/icons): the system's icon dirs, as a session's Qt has them.
+        roots = [os.path.dirname(d) for d in data_dirs()]
+        QIcon.setThemeSearchPaths([os.path.expanduser("~/.icons")] + [os.path.join(r, "icons") for r in roots])
+        QIcon.setFallbackSearchPaths([os.path.join(r, "pixmaps") for r in roots])
+        QIcon.setThemeName(icon_theme())
+        QIcon.setFallbackThemeName("hicolor")
+        for desktop_id, name in todo:
+            icon = QIcon(name) if name.startswith("/") else QIcon.fromTheme(name)
+            if icon.isNull():
+                continue
+            pixmap = icon.pixmap(SIZE, SIZE)
+            tmp = os.path.join(ICONS, desktop_id + ".png.tmp")
+            if not pixmap.isNull() and pixmap.save(tmp, "PNG"):
+                os.replace(tmp, os.path.join(ICONS, desktop_id + ".png"))
+    with open(stamps + ".tmp", "w") as f:
+        f.writelines(f"{i}\t{n}\n" for i, n in wanted)
+    os.replace(stamps + ".tmp", stamps)
+
+
+def main():
+    os.makedirs(ICONS, exist_ok=True)
+    entries = apps()
+    lines = []
+    for desktop_id, f in entries:
+        exec_line = FIELD_CODE.sub("", f["Exec"]).strip()
+        lines.append("\t".join(clean(v) for v in [
+            desktop_id, f["Name"], exec_line, "1" if f.get("Terminal") == "true" else "0",
+            f.get("StartupWMClass", ""), f.get("Categories", ""),
+        ]) + "\n")
+    tmp = os.path.join(OUT, "apps.tsv.tmp")
+    with open(tmp, "w") as f:
+        f.writelines(lines)
+    os.replace(tmp, os.path.join(OUT, "apps.tsv"))
+    draw_icons([(i, f["Icon"]) for i, f in entries if f.get("Icon")])
+    # Icons of apps gone since.
+    ids = {i for i, _ in entries}
+    for name in os.listdir(ICONS):
+        if name.endswith(".png") and name[: -len(".png")] not in ids:
+            os.remove(os.path.join(ICONS, name))
+    print(f"{len(entries)} apps")
+
+
+if __name__ == "__main__":
+    main()
