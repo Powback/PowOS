@@ -114,7 +114,7 @@ _powos_tmux_rows() {
     if [ -n "${POWOS_TMUX_LIST_W:-}" ]; then
         list_w=$POWOS_TMUX_LIST_W
     else
-        cols=$( { stty size </dev/tty 2>/dev/null || echo "24 80"; } | awk '{ print $2 }')
+        cols=$( { { stty size </dev/tty || stty size; } 2>/dev/null || echo "24 80"; } | awk '{ print $2 }')
         # fzf puts the preview beside the list above 80 columns and above it
         # below, so the list gets about 42% of a wide terminal and all of a
         # narrow one.
@@ -141,7 +141,7 @@ _powos_tmux_rows() {
         # The title a program set (OSC 0/2) identifies a session far better than
         # the bare command; fall back to the command when nothing set one.
         ttl=$(tmux display-message -p -t "$1" '#{pane_title}' 2>/dev/null)
-        case "$ttl" in ""|"$cmd"|"$(hostname -s 2>/dev/null)") ttl="$cmd" ;; esac
+        case "$ttl" in ""|"$cmd"|"${HOSTNAME%%.*}") ttl="$cmd" ;; esac
         if [ "$ww" -gt 0 ]; then
             printf '%s\t%s%s  %-*s %-*s %-*.*s%s%s\n' \
                    "$1" "$pre" "$2" "$nw" "$1" "$ww" "$winlbl" "$tw" "$tw" "$ttl" "$tag" "$post"
@@ -260,7 +260,7 @@ if command -v fzf >/dev/null 2>&1; then
         _powos_tmux_rows | fzf --ansi --reverse --height='80%' \
                 --delimiter=$'\t' --with-nth=2 \
                 --prompt='resume ▶ ' \
-                --header="tmux on $(hostname -s)   ·   Enter = attach   ·   Del = kill   ·   Esc = shell" \
+                --header="tmux on ${HOSTNAME%%.*}   ·   Enter = attach   ·   Del = kill   ·   Esc = shell" \
                 --bind='del:execute-silent(tmux kill-session -t {1} 2>/dev/null)+reload(bash -c _powos_tmux_rows)' \
                 --preview="$preview" \
                 --preview-window='right,58%,border-left,wrap'

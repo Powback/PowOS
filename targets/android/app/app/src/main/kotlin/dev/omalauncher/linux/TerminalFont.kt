@@ -134,6 +134,9 @@ class TerminalFont(
     /** The pixel height foot gives text of [points] (it multiplies points by its scale), for terminals the launcher draws. */
     fun pixels(points: Double) = (points * PX_PER_PT * scale).roundToInt().coerceAtLeast(1)
 
+    /** foot.ini's pad in pixels, for terminals the launcher draws. */
+    val padPixels get() = PAD * scale
+
     /**
      * Writes foot-font.ini if it changed or is gone: Linux removed and
      * installed again in the same process starts without it.

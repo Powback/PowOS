@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.omalauncher.Runtime
@@ -197,6 +198,8 @@ class TerminalTiles(
     /** The terminal text size new terminals open at (settings), which pty tiles follow. */
     internal val textSize get() = runtime.terminalFont.size
 
+    internal val padPixels get() = runtime.terminalFont.padPixels
+
     internal val server get() = runtime.server
     internal val windowManager get() = wm
 
@@ -284,11 +287,13 @@ fun TerminalView(
         val palette = Palette.current
         LaunchedEffect(pty, palette, tiles.textSize) { pty.restyle() }
         Box(modifier.onGloballyPositioned { term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
+            // foot's pad around the text, in the terminal's background.
+            val pad = with(LocalDensity.current) { tiles.padPixels.toDp() }
             key(pty) {
                 AndroidView(
                     factory = { pty.newView(it) },
                     onRelease = { pty.release(it) },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().background(Palette.background).padding(pad),
                 )
             }
             // Inert until tapped, like a foot tile: home's swipes pass over it. Once active it takes its own touches

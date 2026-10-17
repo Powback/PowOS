@@ -229,8 +229,9 @@ class PtyTerminal(
             view.isFocusable = false
             view.isFocusableInTouchMode = false
             view.setTerminalViewClient(viewClient)
-            view.setTypeface(typeface(context))
+            // Size first: it creates the renderer, which setTypeface reads.
             view.setTextSize(textPixels())
+            view.setTypeface(typeface(context))
             view.attachSession(session)
             views += view
             applyColors()
