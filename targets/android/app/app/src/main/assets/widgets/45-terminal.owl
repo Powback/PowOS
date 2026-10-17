@@ -7,13 +7,14 @@ widget "terminal" {
 
   meta { owl: 8 }
 
-  // A real shell. The tile shows it in widget-sized text; tap it to open it full size (its screen), where you
-  // type - the same shell, as the info widget's tile and screen. Back closes the screen; the shell keeps running.
+  // A real shell. The tile shows it in widget-sized text; tap it to open it full size (its screen, the same text
+  // size: more fits), where you type - the same shell, as the info widget's tile and screen. Back closes the
+  // screen; the shell keeps running.
   onTap: screen()
 
   Terminal { session: "shell"; interactive: false; textSize: 10 }
 
   screen {
-    Terminal { session: "shell"; focus: true }
+    Terminal { session: "shell"; focus: true; textSize: 10 }
   }
 }
