@@ -1,0 +1,28 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] folder view: on the desktop, a finger swiped up on the background opens the app launcher
+
+A phone's app drawer: a touch drag mostly upward on the desktop's empty background (where it would start a rubber
+band selection) opens the application launcher. Here, not in the compositor: to KWin the desktop is one surface, so
+its swipe filter also fired when moving or resizing a widget upward (kwin patch 0009 now does panels only). A mouse
+still selects.
+---
+--- a/containments/desktop/package/contents/ui/FolderView.qml
++++ b/containments/desktop/package/contents/ui/FolderView.qml
+@@ -529,6 +529,17 @@
+                     dragY = -1;
+                     clearPressState();
+                 } else {
++                    // PowOS: on the desktop a finger swiped up on the empty background opens the app launcher (a phone's
++                    // app drawer) instead of selecting - here, where it can tell the background from a widget (to the
++                    // compositor the desktop is one surface: moving or resizing a widget upward opened it too). A mouse
++                    // still selects.
++                    if (main.isRootView && !root.isPopup && mouse.source === Qt.MouseEventSynthesizedByQt
++                            && pressY - mouse.y > Math.abs(mouse.x - pressX)) {
++                        clearPressState();
++                        Plasmoid.containment.corona.activateLauncherMenu();
++                        return;
++                    }
++
+                     // Disable rubberband in popup list view mode or while renaming
+                     if (root.useListViewMode || (main.editor && main.editor.targetItem) || (verticalScrollBar.active || horizontalScrollBar.active)) {
+                         return;

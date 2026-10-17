@@ -9,7 +9,7 @@
 pkgname=plasma-desktop
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=1.5
+pkgrel=1.6
 pkgdesc='KDE Plasma Desktop'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -103,9 +103,10 @@ source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         0001-kicker-dashboard-categories-respond-to-a-tap.patch
         0002-kicker-an-A-Z-bar-on-the-Application-Dashboard.patch
         0003-kicker-favorites-as-a-row-above-the-apps.patch
-        0004-desktop-widgets-keep-their-size-while-narrower.patch)
+        0004-desktop-widgets-keep-their-size-while-narrower.patch
+        0005-folder-view-swipe-up-on-the-desktop-opens-the-launcher.patch)
 sha256sums=('079fcf6b87d7bf65e3f2a4670d605fac9469344c279a285a98ad549332d7b53e'
-            SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver
@@ -113,6 +114,7 @@ prepare() {
   patch -p1 -N < "$srcdir/0002-kicker-an-A-Z-bar-on-the-Application-Dashboard.patch"
   patch -p1 -N < "$srcdir/0003-kicker-favorites-as-a-row-above-the-apps.patch"
   patch -p1 -N < "$srcdir/0004-desktop-widgets-keep-their-size-while-narrower.patch"
+  patch -p1 -N < "$srcdir/0005-folder-view-swipe-up-on-the-desktop-opens-the-launcher.patch"
 }
 
 build() {

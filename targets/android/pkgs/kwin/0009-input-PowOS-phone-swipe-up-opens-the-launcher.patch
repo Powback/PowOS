@@ -1,7 +1,8 @@
 From: PowOS <noreply@powback.com>
-Subject: [PATCH] input: PowOS phone: swipe up on the desktop or a panel opens the launcher
+Subject: [PATCH] input: PowOS phone: swipe up on a panel opens the launcher
 
-The taskbar is the app drawer's handle; the desktop background too. See PhoneLauncherSwipeFilter.
+The taskbar is the app drawer's handle. See PhoneLauncherSwipeFilter. (The desktop background opens it too, in
+Plasma, which can tell it from a widget: plasma-desktop patch 0005.)
 ---
 diff --git a/src/input.cpp b/src/input.cpp
 --- a/src/input.cpp	2026-10-13 04:02:18
@@ -22,7 +23,7 @@ diff --git a/src/input.cpp b/src/input.cpp
  };
  
  /**
-+ * PowOS phone: a swipe up on the desktop or on a panel (the taskbar is the drawer handle) opens the
++ * PowOS phone: a swipe up on a panel (the taskbar is the drawer handle) opens the
 + * application launcher, like a phone's app drawer.
 + *
 + * Not a screen edge: on a phone the bottom edge belongs to the host OS's home gesture, and KWin's
@@ -59,7 +60,7 @@ diff --git a/src/input.cpp b/src/input.cpp
 +            return false;
 +        }
 +        const Window *window = input()->findToplevel(event->pos);
-+        if (window && (window->isDesktop() || window->isDock())) {
++        if (window && window->isDock()) { // the desktop background: Plasma's own (plasma-desktop 0005)
 +            m_id = event->id;
 +            m_start = event->pos;
 +        }
