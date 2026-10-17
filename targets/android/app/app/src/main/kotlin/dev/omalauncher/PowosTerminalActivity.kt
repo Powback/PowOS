@@ -67,6 +67,7 @@ class PowosTerminalActivity : ComponentActivity() {
                 applicationContext,
                 command,
                 textPixels = { runtime.terminalFont.pixels(runtime.terminalFont.size) },
+                fontFamily = { runtime.terminalFont.family },
                 onTap = { sink?.show() },
                 onExit = { finishAndRemoveTask() },
             )
@@ -75,7 +76,7 @@ class PowosTerminalActivity : ComponentActivity() {
         setContent {
             LaunchedEffect(Palette.isLight) { applySystemBars(this@PowosTerminalActivity, Palette.isLight) }
             val palette = Palette.current
-            LaunchedEffect(palette, runtime.terminalFont.size) { terminal.restyle() }
+            LaunchedEffect(palette, runtime.terminalFont.size, runtime.terminalFont.family) { terminal.restyle() }
             BackHandler { moveTaskToBack(true) }
             val pad = with(LocalDensity.current) { runtime.terminalFont.padPixels.toDp() }
             Box(

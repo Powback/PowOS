@@ -12,14 +12,15 @@ widget "fetch" {
   // The Arch side, once Linux is installed. Base tools only, so it doesn't make the widget need Linux.
   source lx = cmd("""
     . /etc/os-release
-    printf '{"os":"%s","pkgs":%s,"explicit":%s,"shell":"%s","upgraded":"%s"}' \
-      "$PRETTY_NAME" "$(pacman -Qq | wc -l)" "$(pacman -Qqe | wc -l)" \
+    printf '{"user":"%s","os":"%s","pkgs":%s,"explicit":%s,"shell":"%s","upgraded":"%s"}' \
+      "$(id -un)" "$PRETTY_NAME" "$(pacman -Qq | wc -l)" "$(pacman -Qqe | wc -l)" \
       "$(basename "$SHELL") $(bash --version | head -1 | awk '{print $4}' | cut -d'(' -f1)" \
       "$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -1 | cut -c2-11)"
   """) every 5m json optional
 
   let host = lower(replace(dev.model ?? "phone", " ", "-"))
-  let user = linux ? "root" : "user"
+  // Who Linux runs as: root in the launcher's own Linux, powos in PowOS (rooted phones).
+  let user = lx.user ?? (linux ? "root" : "user")
   let mem = sys.memory
   let disk = sys.storage
   let shown = sys.display

@@ -39,6 +39,8 @@ class PtyTerminal(
     private val context: Context,
     command: String,
     private val textPixels: () -> Int,
+    /** The terminal font family the user picked (Style terminal.font), as foot uses it. */
+    private val fontFamily: () -> String,
     private val onTap: () -> Unit,
     private val onExit: () -> Unit,
 ) : KeyTarget {
@@ -231,7 +233,7 @@ class PtyTerminal(
             view.setTerminalViewClient(viewClient)
             // Size first: it creates the renderer, which setTypeface reads.
             view.setTextSize(textPixels())
-            view.setTypeface(typeface(context))
+            view.setTypeface(typeface(context, fontFamily()) { restyle() })
             view.attachSession(session)
             views += view
             applyColors()
@@ -243,7 +245,11 @@ class PtyTerminal(
 
     /** Follows the launcher's terminal text size and theme. */
     fun restyle() {
-        views.forEach { it.setTextSize(textPixels()) }
+        val face = typeface(context, fontFamily()) { restyle() }
+        views.forEach {
+            it.setTextSize(textPixels())
+            it.setTypeface(face)
+        }
         applyColors()
     }
 
@@ -301,18 +307,63 @@ class PtyTerminal(
         const val KEY_LEFTALT = 56
         const val KEY_RIGHTALT = 100
 
-        /** Monospace with the Nerd Font symbols tmux's and the prompt's icons use, as in foot. */
-        private var typeface: Typeface? = null
+        /** Typefaces by family, with the Nerd Font symbols tmux's and the prompt's icons use as fallback, as in foot. */
+        private val typefaces = HashMap<String, Typeface>()
 
-        fun typeface(context: Context): Typeface =
-            typeface ?: runCatching {
-                // The cells measure the first family, so that is the system's monospace font (Droid Sans Mono).
-                val mono = SystemFonts.getAvailableFonts().first { it.file?.name?.startsWith("DroidSansMono") == true }
+        /** Families whose font file is being fetched from PowOS. */
+        private val fetching = HashSet<String>()
+
+        /**
+         * [family] as an Android typeface. Its font file is PowOS's, out of the app's reach (rooted mode: /data/powos), so
+         * the first time it's looked up with PowOS's fontconfig and copied into the app's files, in the background:
+         * meanwhile, and if that fails, the system's monospace font. [onLoaded] runs (main thread) once it's there.
+         */
+        fun typeface(
+            context: Context,
+            family: String,
+            onLoaded: () -> Unit,
+        ): Typeface {
+            typefaces[family]?.let { return it }
+            val file = java.io.File(context.filesDir, "fonts/" + family.replace(Regex("[^A-Za-z0-9]+"), "-") + ".font")
+            if (file.length() > 0) {
+                withSymbols(context, runCatching { Font.Builder(file).build() }.getOrNull())?.let {
+                    typefaces[family] = it
+                    return it
+                }
+            }
+            if (RootedGuest.enabled && fetching.add(family)) {
+                val main = android.os.Handler(android.os.Looper.getMainLooper())
+                Thread {
+                    val path = StringBuilder()
+                    RootedGuest.run("fc-match -f '%{file}' " + shellQuote("$family:style=Regular")) { path.append(it.trim()) }
+                    if (path.startsWith("/")) {
+                        file.parentFile?.mkdirs()
+                        val copy = "cp ${shellQuote("/data/powos/root$path")} ${shellQuote(file.path)} && chmod 644 ${shellQuote(file.path)}"
+                        runCatching { ProcessBuilder("su", "-c", copy).redirectErrorStream(true).start().waitFor() }
+                    }
+                    main.post {
+                        fetching -= family
+                        if (file.length() > 0) onLoaded() else Log.w(TAG, "no font file for $family (fc-match: $path)")
+                    }
+                }.start()
+            }
+            return withSymbols(context, null) ?: Typeface.MONOSPACE
+        }
+
+        /** [font] (else the system's monospace font, Droid Sans Mono), then the Nerd Font symbols. */
+        private fun withSymbols(
+            context: Context,
+            font: Font?,
+        ): Typeface? =
+            runCatching {
+                val primary = font ?: SystemFonts.getAvailableFonts().first { it.file?.name?.startsWith("DroidSansMono") == true }
+                    .let { Font.Builder(it.file!!).build() }
                 val symbols = Font.Builder(context.resources, R.font.nerd_symbols).build()
-                Typeface.CustomFallbackBuilder(FontFamily.Builder(Font.Builder(mono.file!!).build()).build())
+                // The cells measure the first family, so that is the monospace font.
+                Typeface.CustomFallbackBuilder(FontFamily.Builder(primary).build())
                     .addCustomFallback(FontFamily.Builder(symbols).build())
                     .setSystemFallback("monospace")
                     .build()
-            }.getOrElse { Typeface.MONOSPACE }.also { typeface = it }
+            }.getOrNull()
     }
 }

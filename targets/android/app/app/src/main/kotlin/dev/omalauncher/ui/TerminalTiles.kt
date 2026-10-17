@@ -180,6 +180,7 @@ class TerminalTiles(
         runtime.appContext,
         term.command ?: RootedGuest.TERMINAL_SHELL,
         textPixels = { runtime.terminalFont.pixels(term.fontSize ?: runtime.terminalFont.size) },
+        fontFamily = { runtime.terminalFont.family },
         onTap = { if (active === term) keyboard?.show() else activate(term) },
         onExit = onExit,
     )
@@ -199,6 +200,9 @@ class TerminalTiles(
     internal val textSize get() = runtime.terminalFont.size
 
     internal val padPixels get() = runtime.terminalFont.padPixels
+
+    /** The terminal font family (settings), which pty tiles follow. */
+    internal val fontFamily get() = runtime.terminalFont.family
 
     internal val server get() = runtime.server
     internal val windowManager get() = wm
@@ -285,7 +289,7 @@ fun TerminalView(
     term.pty?.let { pty ->
         // Follows the theme and the terminal text size, as foot does through foot.ini.
         val palette = Palette.current
-        LaunchedEffect(pty, palette, tiles.textSize) { pty.restyle() }
+        LaunchedEffect(pty, palette, tiles.textSize, tiles.fontFamily) { pty.restyle() }
         Box(modifier.onGloballyPositioned { term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
             // foot's pad around the text, in the terminal's background.
             val pad = with(LocalDensity.current) { tiles.padPixels.toDp() }
