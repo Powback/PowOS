@@ -74,7 +74,16 @@ PlasmoidItem {
         // Every probe prints exactly one line, whatever the machine has: a pipeline whose first command is missing
         // still succeeds, printing nothing - the lines shifted and every value read 0 (no nvidia-smi: AMD, Intel,
         // phones; no lm_sensors).
-        "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.gr,clocks.mem --format=csv,noheader,nounits 2>/dev/null | head -1 | grep . || echo na; " +
+        // GPU: util,vram used,vram total (MiB),temp,power (W),clock,memory clock (MHz) - a field the GPU doesn't report
+        // is empty (shown as absent, not 0). NVIDIA (nvidia-smi), else AMD (amdgpu sysfs), else Qualcomm Adreno (kgsl:
+        // phones; its memory is the system's, no power reading).
+        "{ nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,clocks.gr,clocks.mem --format=csv,noheader,nounits 2>/dev/null | head -1; " +
+        "for d in /sys/class/drm/card[0-9]*/device; do [ -r $d/gpu_busy_percent ] || continue; h=$(ls -d $d/hwmon/hwmon* 2>/dev/null | head -1); " +
+        "echo \"$(cat $d/gpu_busy_percent),$(awk '{print int($1/1048576)}' $d/mem_info_vram_used 2>/dev/null),$(awk '{print int($1/1048576)}' $d/mem_info_vram_total 2>/dev/null)," +
+        "$(awk '{print int($1/1000)}' $h/temp1_input 2>/dev/null),$(awk '{printf \"%.1f\", $1/1000000}' $h/power1_average 2>/dev/null)," +
+        "$(awk '/\\*/{print $2+0}' $d/pp_dpm_sclk 2>/dev/null),$(awk '/\\*/{print $2+0}' $d/pp_dpm_mclk 2>/dev/null)\"; break; done; " +
+        "K=/sys/class/kgsl/kgsl-3d0; [ -r $K/gpu_busy_percentage ] && echo \"$(tr -dc 0-9 < $K/gpu_busy_percentage),,,$(awk '{print int($1/1000)}' $K/temp 2>/dev/null),,$(awk '{print int($1/1000000)}' $K/gpuclk 2>/dev/null),\"; " +
+        "} | head -1 | grep . || echo na; " +
         // CPU temperature: lm_sensors' Tctl (AMD), else the hottest CPU thermal zone (ARM: phones, boards).
         "{ sensors 2>/dev/null | awk '/^Tctl:/{gsub(/[+°C]/,\"\"); print $2; exit}'; " +
         "for z in /sys/class/thermal/thermal_zone*; do case $(cat $z/type 2>/dev/null) in *cpu*|*CPU*) cat $z/temp 2>/dev/null;; esac; done | " +
@@ -240,12 +249,13 @@ PlasmoidItem {
         if (g !== "na" && g.indexOf(",") > 0) {
             var f = g.split(",").map(function(s){ return parseFloat(s.trim()) })
             if (f.length >= 5 && !isNaN(f[0])) {
+                // Absent fields stay NaN: the rows for them hide (an Adreno has no VRAM of its own, no power reading).
                 curUtil = f[0]; curVram = f[1]; vramTotal = f[2]; curTemp = f[3]; curPower = f[4]
                 if (f.length >= 7) { gpuClk = f[5]; gpuMemClk = f[6] }
                 histUtil = pushHist(histUtil, f[0])
-                histVram = pushHist(histVram, f[1])
-                histGpuTemp = pushHist(histGpuTemp, f[3])
-                histPower = pushHist(histPower, f[4])
+                if (!isNaN(f[1])) histVram = pushHist(histVram, f[1])
+                if (!isNaN(f[3])) histGpuTemp = pushHist(histGpuTemp, f[3])
+                if (!isNaN(f[4])) histPower = pushHist(histPower, f[4])
             }
         }
         var t = parseFloat(L[3]); if (!isNaN(t) && t > 0) { curCpuTemp = t; histCpuTempS = pushHist(histCpuTempS, t) }
@@ -363,20 +373,22 @@ PlasmoidItem {
 
             GraphHeader {
                 label: "GPU " + root.curUtil.toFixed(0) + "%" + (root.gpuClk > 0 ? " · " + root.gpuClk.toFixed(0) + " MHz" : "")
-                value: root.curTemp.toFixed(0) + "°C · " + root.curPower.toFixed(0) + " W"
+                value: (isNaN(root.curTemp) ? "" : root.curTemp.toFixed(0) + "°C")
+                       + (isNaN(root.curPower) ? "" : " · " + root.curPower.toFixed(0) + " W")
             }
             Spark { series: root.histUtil; maxValue: 100 }
             GraphHeader {
+                visible: !isNaN(root.curVram)
                 label: "VRAM " + fmtGiB(root.curVram) + " GiB"
                 value: (root.vramTotal > 0 ? "of " + fmtGiB(root.vramTotal) + " GiB" : "")
                        + (root.gpuMemClk > 0 ? " · " + root.gpuMemClk.toFixed(0) + " MHz" : "")
             }
-            Spark { series: root.histVram; maxValue: root.vramTotal > 0 ? root.vramTotal : 1; lineColor: Kirigami.Theme.positiveTextColor }
-            GraphHeader { label: "TEMP gpu " + root.curTemp.toFixed(0) + "°C"; value: "cpu " + root.curCpuTemp.toFixed(0) + "°C" }
+            Spark { visible: !isNaN(root.curVram); series: root.histVram; maxValue: root.vramTotal > 0 ? root.vramTotal : 1; lineColor: Kirigami.Theme.positiveTextColor }
+            GraphHeader { label: "TEMP gpu " + (isNaN(root.curTemp) ? "—" : root.curTemp.toFixed(0) + "°C"); value: "cpu " + root.curCpuTemp.toFixed(0) + "°C" }
             Spark { series: root.histGpuTemp; series2: root.histCpuTempS; maxValue: 100
                     lineColor: Kirigami.Theme.negativeTextColor; lineColor2: Kirigami.Theme.neutralTextColor }
-            GraphHeader { label: "POWER " + root.curPower.toFixed(0) + " W"; value: "gpu board draw" }
-            Spark { series: root.histPower; maxValue: 0 }
+            GraphHeader { visible: !isNaN(root.curPower); label: "POWER " + root.curPower.toFixed(0) + " W"; value: "gpu board draw" }
+            Spark { visible: !isNaN(root.curPower); series: root.histPower; maxValue: 0 }
 
             Kirigami.Separator { Layout.fillWidth: true }
 
