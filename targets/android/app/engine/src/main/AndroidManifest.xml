@@ -68,6 +68,14 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity-alias>
+        <!-- PowOS: the cover screen as a controller surface while unfolded (both screens on). -->
+        <activity
+            android:name=".CoverPadActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:resizeableActivity="true"
+            android:taskAffinity=".CoverPad"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
         <activity
             android:name=".SettingsActivity"
             android:enableOnBackInvokedCallback="false"
