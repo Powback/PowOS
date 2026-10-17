@@ -1,0 +1,2 @@
+KWin is built against the Plasma PowOS ships (see build-pkgs.sh): its patches target that KWin version, and
+Arch Linux ARM's newer Plasma libraries (kscreenlocker 6.8) don't build KWin 6.7.5.

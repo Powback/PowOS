@@ -18,7 +18,7 @@ diff --git a/src/input.cpp b/src/input.cpp
  #include <QKeyEvent>
  #include <QThread>
  #include <qpa/qwindowsysteminterface.h>
-@@ -1920,6 +1924,104 @@
+@@ -1920,6 +1924,107 @@
  };
  
  /**
@@ -75,7 +75,10 @@ diff --git a/src/input.cpp b/src/input.cpp
 +        }
 +        const QPointF delta = event->pos - m_start;
 +        if (-delta.y() >= s_distance && std::abs(delta.x()) < -delta.y()) {
-+            waylandServer()->seat()->notifyTouchCancel();
++            // A release, not notifyTouchCancel(): Plasma's desktop kept its press-and-hold timer through a cancel
++            // and went into edit mode (closing the launcher). Past the drag threshold, a release is no click.
++            waylandServer()->seat()->notifyTouchUp(*m_id);
++            waylandServer()->seat()->notifyTouchFrame();
 +            QDBusConnection::sessionBus().asyncCall(
 +                QDBusMessage::createMethodCall(QStringLiteral("org.kde.plasmashell"),
 +                                               QStringLiteral("/PlasmaShell"),
@@ -123,7 +126,7 @@ diff --git a/src/input.cpp b/src/input.cpp
   * This filter implements window actions. If the event should not be passed to the
   * current window it will filter out the event
   */
-@@ -3170,6 +3272,11 @@
+@@ -3170,6 +3275,11 @@
      if (kwinApp()->supportsGlobalShortcuts()) {
          m_screenEdgeFilter = std::make_unique<ScreenEdgeInputFilter>();
          installInputEventFilter(m_screenEdgeFilter.get());
