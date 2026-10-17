@@ -48,7 +48,10 @@ for p in "${pkgs[@]}"; do
   fi
   # Resource caps: shares the Colima VM with live services. A volume keeps makepkg's src/ off the
   # macOS bind mount (faster, and keeps Linux ownership).
+  # Compiler cache across builds (a volume shared by every package): the source tree is fresh each time (a reused
+  # one re-applied the patches), so without it a one-file change to KWin recompiled all of it (~20 min).
   docker run --rm --platform linux/arm64 --cpus 8 --memory 16g ${local_mount[@]+"${local_mount[@]}"} \
+    -v powos-android-ccache:/ccache \
     -e PKG="$p" -e SRC="$src" -e BASE="$base" -v "$HERE/recipes:/fixups:ro" -v "$HERE/tools:/tools:ro" -v "$OUT:/out" -v "$scratch:/build" "$image" bash -c '
       set -euo pipefail
       # HACK: pacman 7 download sandbox (Landlock) is not permitted in Docker.
@@ -63,7 +66,10 @@ for p in "${pkgs[@]}"; do
       # On the rootfs: no upgrade - its packages are what this one is built against (see BUILD_ON_ROOTFS).
       if [ "$BASE" = rootfs ]; then pacman -Sy --noconfirm --needed base-devel git >/dev/null 2> >(grep -v "is up to date -- skipping" >&2)
       else pacman -Syu --noconfirm --needed base-devel git >/dev/null 2> >(grep -v "is up to date -- skipping" >&2); fi
+      pacman -S --noconfirm --needed ccache >/dev/null 2> >(grep -v "is up to date -- skipping" >&2)
+      sed -i "s/^BUILDENV=(\(.*\)!ccache/BUILDENV=(\1ccache/" /etc/makepkg.conf
       id builder >/dev/null 2>&1 || useradd -m builder
+      chown builder /ccache
       echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
       case $SRC in
         local)    cp -r /pkg/. /build/ ;;
@@ -91,7 +97,8 @@ for p in "${pkgs[@]}"; do
       ignorearch=""; [ "$SRC" = local ] || ignorearch=--ignorearch
       # The real sudo, also for makepkg'"'"'s own (sudo pacman, for the dependencies): PowOS'"'"'s rootfs has a sudo
       # stand-in in /usr/local/bin, first on PATH, which knows neither -u nor VAR=value.
-      /usr/bin/sudo -u builder env PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j8" makepkg -sf --noconfirm --skippgpcheck --nocheck $ignorearch
+      /usr/bin/sudo -u builder env PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j8" CCACHE_DIR=/ccache CCACHE_MAXSIZE=30G \
+        CCACHE_BASEDIR=/build makepkg -sf --noconfirm --skippgpcheck --nocheck $ignorearch
       cp /build/*.pkg.tar.* /out/'
   # Scratch only (KWin's build tree is several GB) on the Docker disk shared with live services.
   docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
