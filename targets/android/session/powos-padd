@@ -1,151 +1,312 @@
 #!/usr/bin/env python3
 """powos-padd: the PowOS app's on-screen controls as a real gamepad.
 
-The app's touch overlay (GamepadOverlay.java) sends the pad's whole state; this daemon owns a virtual Xbox 360 pad
-(uinput) and applies it, so Steam Input, SDL and Wine see an ordinary controller. Runs as root in the rooted session
-(/dev/uinput is root/uhid only) and hands the event node to the desktop user.
+The app's touch overlay (GamepadOverlay.java) sends the pad's whole state; this daemon turns it into a controller
+Steam, SDL and Wine see. Runs as root in the rooted session (/dev/uhid and /dev/uinput are root/uhid only on
+Android) and hands the device nodes to the desktop user (no udev to apply rules).
 
-Wire format (little endian, 20 bytes; the app sends on change, every packet is applied in order):
-  magic b"PAD1" | u32 buttons | i16 lx, ly, rx, ry | u8 lt, rt | 2 pad bytes
+Two backends, one at a time (two would show Steam two controllers):
+  deck (default) - a Steam Deck controller over /dev/uhid: Valve 28de:12f0 (the id Steam accepts for a Deck
+                   controller that is not on the Deck's own USB interface), the Deck's vendor HID descriptor, its
+                   64-byte state report and the feature reports Steam asks for. Steam Input then gives every game
+                   the Deck's per-game configs, back paddles, trackpads and gyro. Layout and handshake ported from
+                   InputPlumber's deck-uhid target (src/input/target/steam_deck_uhid.rs, drivers/steam_deck/) and
+                   SDL's steam/controller_structs.h.
+  xbox           - a uinput Xbox 360 pad (POWOS_PADD_MODE=xbox, or when uhid is unavailable): sticks, triggers,
+                   buttons and d-pad only.
+Steam has no udev hotplug here: the device must exist before Steam starts (the session starts this first).
+
+Wire format (little endian; the app sends on change, every packet is applied in order):
+  PAD1 (20 bytes): magic | u32 buttons | i16 lx, ly, rx, ry | u8 lt, rt | 2 pad bytes
+  PAD2 (40 bytes): PAD1's fields, then i16 lpad_x, lpad_y, rpad_x, rpad_y, gyro_pitch, gyro_yaw, gyro_roll,
+                   accel_x, accel_y, accel_z (gyro/accel in Deck raw units: 2000 dps = 32768, 1 g = 16384)
 Buttons, by bit: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 Back, 7 Start, 8 Guide, 9 LS, 10 RS, 11 up, 12 down, 13 left,
-14 right. Sticks: -32768..32767, y down positive (evdev). One client at a time; on disconnect everything is
+14 right, 15 L4, 16 L5, 17 R4, 18 R5, 19 Quick Access, 20 left pad touch, 21 right pad touch, 22 left pad click,
+23 right pad click. Sticks/pads: -32768..32767, y down positive. One client at a time; on disconnect everything is
 released, so a lost connection never leaves a button held.
 """
-import fcntl, grp, os, pwd, select, socket, struct, sys, time
+import fcntl, glob, grp, os, pwd, select, socket, struct, sys, time
 
 SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app"), "powos-padd.sock")
 USER = "powos"
-PACKET = struct.Struct("<4sIhhhhBBxx")
-
-EV_SYN, EV_KEY, EV_ABS = 0, 1, 3
-ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_HAT0X, ABS_HAT0Y = 0, 1, 2, 3, 4, 5, 0x10, 0x11
-# Bit -> key code, as the kernel's xpad driver reports an Xbox 360 pad (SDL and Steam know its layout by its id).
-BUTTONS = [0x130, 0x131, 0x133, 0x134, 0x136, 0x137, 0x13a, 0x13b, 0x13c, 0x13d, 0x13e]
-DPAD_BITS = (11, 12, 13, 14)
-
-# ioctls (asm-generic layout: arm64 and x86_64)
-UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT = 0x40045564, 0x40045565, 0x40045567
-UI_DEV_CREATE, UI_DEV_DESTROY = 0x5501, 0x5502
-UI_GET_SYSNAME = lambda n: 0x80000000 | (n << 16) | (ord("U") << 8) | 44
-EVENT = struct.Struct("<qqHHi")  # struct input_event on 64-bit
+PAD1 = struct.Struct("<4sIhhhhBBxx")
+PAD2 = struct.Struct("<4sIhhhhBBxx10h")
+NEUTRAL = (0, 0, 0, 0, 0, 0, 0) + (0,) * 10
 
 
 def log(*a):
     print("powos-padd:", *a, file=sys.stderr, flush=True)
 
 
-class Pad:
+def give(path):
+    """Device node -> the desktop user (Steam, SDL), group input."""
+    os.chown(path, pwd.getpwnam(USER).pw_uid, grp.getgrnam("input").gr_gid)
+    os.chmod(path, 0o660)
+
+
+# ---------------------------------------------------------------------------------------------------------- xbox
+EV_SYN, EV_KEY, EV_ABS = 0, 1, 3
+ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_HAT0X, ABS_HAT0Y = 0, 1, 2, 3, 4, 5, 0x10, 0x11
+# Bit -> key code, as the kernel's xpad driver reports an Xbox 360 pad (SDL and Steam know its layout by its id).
+XBOX_BUTTONS = [0x130, 0x131, 0x133, 0x134, 0x136, 0x137, 0x13a, 0x13b, 0x13c, 0x13d, 0x13e]
+UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT = 0x40045564, 0x40045565, 0x40045567
+UI_DEV_CREATE = 0x5501
+UI_GET_SYSNAME = lambda n: 0x80000000 | (n << 16) | (ord("U") << 8) | 44
+EVENT = struct.Struct("<qqHHi")  # struct input_event on 64-bit
+
+
+class XboxPad:
+    fd = None  # nothing to read back
+
     def __init__(self):
-        self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+        self.ufd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
         for ev in (EV_KEY, EV_ABS):
-            fcntl.ioctl(self.fd, UI_SET_EVBIT, ev)
-        for k in BUTTONS:
-            fcntl.ioctl(self.fd, UI_SET_KEYBIT, k)
+            fcntl.ioctl(self.ufd, UI_SET_EVBIT, ev)
+        for k in XBOX_BUTTONS:
+            fcntl.ioctl(self.ufd, UI_SET_KEYBIT, k)
         ranges = {ABS_X: (-32768, 32767, 16, 128), ABS_Y: (-32768, 32767, 16, 128),
                   ABS_RX: (-32768, 32767, 16, 128), ABS_RY: (-32768, 32767, 16, 128),
                   ABS_Z: (0, 255, 0, 0), ABS_RZ: (0, 255, 0, 0),
                   ABS_HAT0X: (-1, 1, 0, 0), ABS_HAT0Y: (-1, 1, 0, 0)}
         absmax, absmin, absfuzz, absflat = ([0] * 64 for _ in range(4))
         for a, (lo, hi, fuzz, flat) in ranges.items():
-            fcntl.ioctl(self.fd, UI_SET_ABSBIT, a)
+            fcntl.ioctl(self.ufd, UI_SET_ABSBIT, a)
             absmin[a], absmax[a], absfuzz[a], absflat[a] = lo, hi, fuzz, flat
         # struct uinput_user_dev: name[80], input_id (bustype, vendor, product, version), ff_effects_max, abs arrays
-        dev = struct.pack("<80sHHHHI64i64i64i64i", b"Microsoft X-Box 360 pad", 0x03, 0x045E, 0x028E, 0x0110, 0,
-                          *absmax, *absmin, *absfuzz, *absflat)
-        os.write(self.fd, dev)
-        fcntl.ioctl(self.fd, UI_DEV_CREATE)
+        os.write(self.ufd, struct.pack("<80sHHHHI64i64i64i64i", b"Microsoft X-Box 360 pad", 0x03, 0x045E, 0x028E,
+                                       0x0110, 0, *absmax, *absmin, *absfuzz, *absflat))
+        fcntl.ioctl(self.ufd, UI_DEV_CREATE)
         self.state = None
-        self.give_nodes()
-
-    def give_nodes(self):
-        # Android's ueventd makes the nodes root:input(Android); the desktop user (Steam, SDL) must be able to read
-        # them. There is no udev to apply rules.
         buf = bytearray(64)
-        fcntl.ioctl(self.fd, UI_GET_SYSNAME(len(buf)), buf)
-        name = buf.split(b"\0", 1)[0].decode()
-        sysdir = f"/sys/devices/virtual/input/{name}"
-        uid, gid = pwd.getpwnam(USER).pw_uid, grp.getgrnam("input").gr_gid
+        fcntl.ioctl(self.ufd, UI_GET_SYSNAME(len(buf)), buf)
+        sysdir = "/sys/devices/virtual/input/" + buf.split(b"\0", 1)[0].decode()
         for _ in range(50):
             nodes = [n for n in os.listdir(sysdir) if n.startswith(("event", "js"))] if os.path.isdir(sysdir) else []
             if nodes and all(os.path.exists(f"/dev/input/{n}") for n in nodes):
                 break
             time.sleep(0.05)
         for n in nodes:
-            p = f"/dev/input/{n}"
-            os.chown(p, uid, gid)
-            os.chmod(p, 0o660)
-        log("pad", name, "nodes", ", ".join(nodes))
+            give(f"/dev/input/{n}")
+        log("xbox pad:", ", ".join(nodes))
 
-    def emit(self, events):
-        now = time.time()
-        sec, usec = int(now), int((now % 1) * 1e6)
-        data = b"".join(EVENT.pack(sec, usec, t, c, v) for t, c, v in events)
-        os.write(self.fd, data + EVENT.pack(sec, usec, EV_SYN, 0, 0))
-
-    def apply(self, buttons, lx, ly, rx, ry, lt, rt):
-        new = {}
-        for bit, code in enumerate(BUTTONS):
-            new[(EV_KEY, code)] = (buttons >> bit) & 1
-        up, down, left, right = ((buttons >> b) & 1 for b in DPAD_BITS)
-        new[(EV_ABS, ABS_HAT0X)] = right - left
-        new[(EV_ABS, ABS_HAT0Y)] = down - up
-        new.update({(EV_ABS, ABS_X): lx, (EV_ABS, ABS_Y): ly, (EV_ABS, ABS_RX): rx, (EV_ABS, ABS_RY): ry,
+    def apply(self, s):
+        buttons, lx, ly, rx, ry, lt, rt = s[:7]
+        new = {(EV_KEY, c): (buttons >> bit) & 1 for bit, c in enumerate(XBOX_BUTTONS)}
+        up, down, left, right = ((buttons >> b) & 1 for b in (11, 12, 13, 14))
+        new.update({(EV_ABS, ABS_HAT0X): right - left, (EV_ABS, ABS_HAT0Y): down - up,
+                    (EV_ABS, ABS_X): lx, (EV_ABS, ABS_Y): ly, (EV_ABS, ABS_RX): rx, (EV_ABS, ABS_RY): ry,
                     (EV_ABS, ABS_Z): lt, (EV_ABS, ABS_RZ): rt})
         old = self.state or {}
         changed = [(t, c, v) for (t, c), v in new.items() if old.get((t, c)) != v]
         if changed:
-            self.emit(changed)
+            now = time.time()
+            sec, usec = int(now), int((now % 1) * 1e6)
+            os.write(self.ufd, b"".join(EVENT.pack(sec, usec, t, c, v) for t, c, v in changed)
+                     + EVENT.pack(sec, usec, EV_SYN, 0, 0))
         self.state = new
 
-    def release(self):
-        self.apply(0, 0, 0, 0, 0, 0, 0)
+    def on_readable(self):
+        pass
+
+    def tick(self):
+        pass
+
+    def interval(self):
+        return None
+
+
+# ---------------------------------------------------------------------------------------------------------- deck
+UHID_START, UHID_STOP, UHID_OPEN, UHID_CLOSE, UHID_OUTPUT = 2, 3, 4, 5, 6
+UHID_GET_REPORT, UHID_GET_REPORT_REPLY, UHID_CREATE2, UHID_INPUT2 = 9, 10, 11, 12
+UHID_SET_REPORT, UHID_SET_REPORT_REPLY = 13, 14
+UHID_EVENT_SIZE = 4380
+BUS_USB = 3
+DECK_VID, DECK_PID = 0x28DE, 0x12F0
+# The Deck controller's HID descriptor: one vendor collection, 64-byte input report and 64-byte feature report.
+DECK_DESCRIPTOR = bytes([
+    0x06, 0xff, 0xff, 0x09, 0x01, 0xa1, 0x01, 0x09, 0x02, 0x09, 0x03, 0x15, 0x00, 0x26, 0xff, 0x00, 0x75, 0x08,
+    0x95, 0x40, 0x81, 0x02, 0x09, 0x06, 0x09, 0x07, 0x15, 0x00, 0x26, 0xff, 0x00, 0x75, 0x08, 0x95, 0x40, 0xb1,
+    0x02, 0xc0])
+GET_ATTRIBUTES_VALUES, GET_STRING_ATTRIBUTE, GET_CHIP_ID = 0x83, 0xAE, 0xBA
+# What a real Deck answers to "get attributes" (captured by InputPlumber; meaning undocumented).
+ATTRIBUTES = bytes([0x00, 0x83, 0x2d, 0x01, 0x05, 0x12, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x2b, 0x12,
+                    0xa9, 0x62, 0x04, 0xad, 0xf1, 0xe4, 0x65, 0x09, 0x2e, 0x00, 0x00, 0x00, 0x0b, 0xa0, 0x0f, 0x00,
+                    0x00, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x0e]).ljust(64, b"\0")
+SERIAL, BOARD_SERIAL = b"PWSPHONE0001", b"PWS000000001"
+# Our button bit -> bit in the Deck report (MSB-first numbering from byte 0, as InputPlumber's PackedInputDataReport).
+DECK_BITS = {0: 64, 1: 66, 2: 65, 3: 67, 4: 68, 5: 69, 6: 75, 7: 73, 8: 74, 9: 81, 10: 93, 11: 79, 12: 76, 13: 77,
+             14: 78, 15: 110, 16: 72, 17: 109, 18: 87, 19: 117, 20: 84, 21: 83, 22: 86, 23: 85}
+L2_BIT, R2_BIT = 70, 71
+REPORT_HZ = 250  # a real Deck's rate; gyro needs a steady stream
+
+
+def i16(v):
+    return max(-32768, min(32767, int(v)))
+
+
+class DeckPad:
+    def __init__(self):
+        self.fd = os.open("/dev/uhid", os.O_RDWR | os.O_NONBLOCK)
+        create = struct.pack("<I128s64s64sHHIIII", UHID_CREATE2, b"Steam Deck Controller", b"", SERIAL,
+                             len(DECK_DESCRIPTOR), BUS_USB, DECK_VID, DECK_PID, 0x1000, 0)
+        os.write(self.fd, create + DECK_DESCRIPTOR.ljust(4096, b"\0"))
+        self.state = NEUTRAL
+        self.frame = 0
+        self.opened = False
+        self.current_report = 0
+        self.string_attr = 0
+        self.last_sent = 0.0
+        log("deck controller created (uhid 28de:12f0)")
+
+    def report(self):
+        buttons, lx, ly, rx, ry, lt, rt, lpx, lpy, rpx, rpy, gp, gyw, gr, ax, ay, az = self.state
+        r = bytearray(64)
+        r[0:4] = bytes([0x01, 0x00, 0x09, 0x40])
+        self.frame = (self.frame + 1) & 0xFFFFFFFF
+        struct.pack_into("<I", r, 4, self.frame)
+        bits = [b for ours, b in DECK_BITS.items() if (buttons >> ours) & 1]
+        if lt > 200:
+            bits.append(L2_BIT)
+        if rt > 200:
+            bits.append(R2_BIT)
+        for b in bits:
+            r[b // 8] |= 0x80 >> (b % 8)
+        # Deck axes are y-up; ours (and evdev's) are y-down.
+        struct.pack_into("<4h", r, 16, i16(lpx), i16(-lpy), i16(rpx), i16(-rpy))
+        struct.pack_into("<6h", r, 24, i16(ax), i16(ay), i16(az), i16(gp), i16(gyw), i16(gr))
+        struct.pack_into("<2H", r, 44, lt * 32767 // 255, rt * 32767 // 255)
+        struct.pack_into("<4h", r, 48, i16(lx), i16(-ly), i16(rx), i16(-ry))
+        return bytes(r)
+
+    def send(self):
+        r = self.report()
+        os.write(self.fd, struct.pack("<IH", UHID_INPUT2, len(r)) + r)
+        self.last_sent = time.monotonic()
+
+    def apply(self, s):
+        self.state = tuple(s) + (0,) * (17 - len(s))
+        if self.opened:
+            self.send()  # now, not at the next tick: a press must not wait
+
+    def interval(self):
+        return 1.0 / REPORT_HZ if self.opened else None
+
+    def tick(self):
+        if self.opened and time.monotonic() - self.last_sent >= 1.0 / REPORT_HZ:
+            self.send()
+
+    def give_hidraw(self):
+        for _ in range(50):
+            nodes = glob.glob(f"/sys/devices/virtual/misc/uhid/*:{DECK_VID:04X}:{DECK_PID:04X}.*/hidraw/hidraw*")
+            if nodes and all(os.path.exists("/dev/" + os.path.basename(n)) for n in nodes):
+                break
+            time.sleep(0.05)
+        for n in nodes:
+            give("/dev/" + os.path.basename(n))
+        log("deck controller nodes:", ", ".join(os.path.basename(n) for n in nodes))
+
+    def reply_get(self, req_id):
+        if self.current_report == GET_ATTRIBUTES_VALUES:
+            data = ATTRIBUTES
+        elif self.current_report == GET_STRING_ATTRIBUTE:
+            value = BOARD_SERIAL if self.string_attr == 0x00 else SERIAL
+            data = bytes([0x00, GET_STRING_ATTRIBUTE, len(value), self.string_attr]) + value
+        elif self.current_report == GET_CHIP_ID:
+            data = bytes([0x00, GET_CHIP_ID, 0x11, 0x00]) + bytes(range(15))
+        else:
+            data = b""
+        data = data.ljust(64, b"\0") if data else b""
+        os.write(self.fd, struct.pack("<IIHH", UHID_GET_REPORT_REPLY, req_id, 0, len(data)) + data)
+
+    def on_readable(self):
+        try:
+            ev = os.read(self.fd, UHID_EVENT_SIZE)
+        except BlockingIOError:
+            return
+        kind = struct.unpack_from("<I", ev)[0]
+        if kind == UHID_START:
+            self.give_hidraw()
+        elif kind == UHID_OPEN:
+            self.opened = True
+            log("steam (or another reader) opened the deck controller")
+        elif kind == UHID_CLOSE:
+            self.opened = False
+        elif kind == UHID_GET_REPORT:
+            req_id, _rnum, _rtype = struct.unpack_from("<IBB", ev, 4)
+            self.reply_get(req_id)
+        elif kind == UHID_SET_REPORT:
+            req_id, _rnum, _rtype, size = struct.unpack_from("<IBBH", ev, 4)
+            data = ev[12:12 + size]
+            # data[0] is the report number uhid prepends; data[1] the command; for a string attribute, data[3] which.
+            if len(data) > 1:
+                self.current_report = data[1]
+                if self.current_report == GET_STRING_ATTRIBUTE and len(data) > 3:
+                    self.string_attr = data[3]
+            os.write(self.fd, struct.pack("<IIH", UHID_SET_REPORT_REPLY, req_id, 0))
+        # UHID_OUTPUT (rumble/haptics) and the rest: nothing to do yet.
+
+
+def make_pad():
+    if os.environ.get("POWOS_PADD_MODE", "deck") == "deck":
+        try:
+            return DeckPad()
+        except OSError as e:
+            log("no uhid deck controller (", e, "), using the xbox pad")
+    return XboxPad()
 
 
 def main():
-    pad = Pad()
+    pad = make_pad()
     try:
         os.unlink(SOCK)
     except FileNotFoundError:
         pass
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(SOCK)
-    pw = pwd.getpwnam(USER)
-    os.chown(SOCK, pw.pw_uid, pw.pw_gid)
+    give(SOCK)
     os.chmod(SOCK, 0o600)
     srv.listen(2)
     log("listening on", SOCK)
     client, buf = None, b""
     while True:
-        r, _, _ = select.select([srv] + ([client] if client else []), [], [])
+        fds = [srv] + ([client] if client else []) + ([pad.fd] if pad.fd is not None else [])
+        r, _, _ = select.select(fds, [], [], pad.interval())
+        pad.tick()
+        if pad.fd is not None and pad.fd in r:
+            pad.on_readable()
         if srv in r:
             new, _ = srv.accept()
             if client:  # the newest overlay wins (an app restart reconnects before the old socket times out)
                 client.close()
-                pad.release()
+                pad.apply(NEUTRAL)
             client, buf = new, b""
             log("overlay connected")
+        if client is None or client not in r:
             continue
         data = client.recv(4096)
         if not data:
             client.close()
             client = None
-            pad.release()
+            pad.apply(NEUTRAL)
             log("overlay disconnected, released all")
             continue
         buf += data
-        n = len(buf) // PACKET.size
         # Every packet in order: a quick tap is a press and a release arriving together, and applying only the
-        # newest would lose the press. (Unchanged values emit nothing, so a backlog of stick moves costs little.)
-        for i in range(n):
-            magic, *state = PACKET.unpack_from(buf, i * PACKET.size)
-            if magic != b"PAD1":
+        # newest would lose the press.
+        while len(buf) >= 4:
+            magic = buf[:4]
+            fmt = PAD1 if magic == b"PAD1" else PAD2 if magic == b"PAD2" else None
+            if fmt is None:
                 log("bad packet, dropping client")
                 client.close()
                 client = None
-                pad.release()
+                pad.apply(NEUTRAL)
                 break
-            pad.apply(*state)
-        buf = buf[n * PACKET.size:]
+            if len(buf) < fmt.size:
+                break
+            _, *state = fmt.unpack_from(buf)
+            buf = buf[fmt.size:]
+            pad.apply(state)
 
 
 if __name__ == "__main__":
