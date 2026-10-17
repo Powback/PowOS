@@ -32,10 +32,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.WindowInsets
 
 @Composable
@@ -130,8 +130,9 @@ private fun TileButton(
 
 /**
  * A widget's screen { }, full screen over home in an Omarchy window titled by its `title` or the widget's name. A
- * terminal's screen ends above the keyboard and [extraKeys] while it's up, and fills the screen when it's down - once
- * the keyboard has settled: following its slide frame by frame would resize (re-wrap) the terminal every frame.
+ * terminal's screen ends above the keyboard and [extraKeys] while it's up, and fills the screen when it's down - sized
+ * once per keyboard change, from where the keyboard is going (its animation target): following its slide frame by
+ * frame would resize (re-wrap) the terminal every frame, and waiting for it to settle lagged.
  */
 @Composable
 internal fun WidgetScreenPanel(
@@ -148,16 +149,12 @@ internal fun WidgetScreenPanel(
         return
     }
     val density = LocalDensity.current
-    val ime = WindowInsets.ime.getBottom(density)
+    @OptIn(ExperimentalLayoutApi::class)
+    val target = WindowInsets.imeAnimationTarget.getBottom(density)
     val nav = WindowInsets.navigationBars.getBottom(density)
-    var settled by remember { mutableIntStateOf(ime) }
-    LaunchedEffect(ime) {
-        kotlinx.coroutines.delay(150)
-        settled = ime
-    }
     var keysPx by remember { mutableIntStateOf(0) }
     // The extra keys show only over the keyboard (extraKeysWanted).
-    val clear = with(density) { (maxOf(settled, nav) + if (settled > 0) keysPx else 0).toDp() }
+    val clear = with(density) { (maxOf(target, nav) + if (target > 0) keysPx else 0).toDp() }
     OverlayPanel(
         title,
         onDismiss,

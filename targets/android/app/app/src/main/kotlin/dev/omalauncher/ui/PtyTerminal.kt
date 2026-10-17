@@ -238,6 +238,11 @@ class PtyTerminal(
             // Size first: it creates the renderer, which setTypeface reads.
             view.setTextSize(pixels ?: textPixels())
             view.setTypeface(typeface(context, fontFamily()) { restyle() })
+            // One view drives the shell's size, the newest (a tile's screen over the tile): a view resizes the
+            // session to its own columns whenever it's laid out, and the tile under the screen, smaller and at
+            // smaller text, kept sizing it to the tile - the screen drew the tile's columns. The others let go of
+            // the session (a view without one doesn't resize it) until [release] gives it back.
+            views.forEach { it.attachSession(null) }
             view.attachSession(session)
             views += view
             applyColors()
@@ -246,9 +251,8 @@ class PtyTerminal(
     fun release(view: TerminalView) {
         views -= view
         ownPixels -= view
-        // One shell, shown in two places (a tile and its screen) at different sizes: the one still showing it sizes
-        // it again, or it kept the closed view's size.
-        views.lastOrNull()?.post { views.lastOrNull()?.updateSize() }
+        // The view under it gets the session back, which sizes the shell to it again.
+        views.lastOrNull()?.let { it.post { if (it in views) it.attachSession(session) } }
     }
 
     /** Follows the launcher's terminal text size and theme. */
