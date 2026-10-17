@@ -1242,7 +1242,7 @@ public class MainActivity extends Activity
      * toggle as the extra-keys bar's ⌨ key and the notification action), for when no text field asked for it.
      * A drag moves it (anywhere on screen) out of the way of what's underneath.
      */
-    /** Round 🎮 toggle for the game controls, top-right (the keyboard button keeps the bottom). */
+    /** Round 🎮 toggle for the game controls, top-right (the keyboard button keeps the bottom); long-press edits. */
     private void addGamepadButton(FrameLayout root) {
         int size = Math.round(44 * mDensity);
         int margin = Math.round(12 * mDensity);
@@ -1264,6 +1264,15 @@ public class MainActivity extends Activity
             mGamepadOverlay.setShown(show);
             v.setAlpha(show ? 1f : 0.6f);
             prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
+        });
+        // Long-press: the layout editor (Done saves and leaves the controls shown).
+        b.setOnLongClickListener(v -> {
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            mGamepadOverlay.setEditing(true, () -> {
+                v.setAlpha(1f);
+                prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, true).apply();
+            });
+            return true;
         });
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size, Gravity.TOP | Gravity.END);
         lp.setMargins(0, margin * 4, margin, 0);

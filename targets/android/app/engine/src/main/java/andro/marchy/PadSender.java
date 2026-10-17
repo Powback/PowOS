@@ -8,12 +8,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayDeque;
 
 /**
  * Delivers the on-screen gamepad's state to powos-padd in PowOS (targets/android/session/powos-padd), which
- * turns it into a virtual Xbox 360 pad. Latest state wins: the UI thread only stores the newest state, and
- * this thread writes it whenever it changed, reconnecting when the daemon (re)starts. A dropped write is
- * never a stuck button: the next state, or the daemon's release-on-disconnect, corrects it.
+ * turns it into a virtual Xbox 360 pad. The UI thread queues states; this thread writes them, reconnecting
+ * when the daemon (re)starts. Button changes are never merged away (a quick tap is a press and a release
+ * within one frame); consecutive states that differ only in stick/trigger values are merged, newest wins.
  */
 final class PadSender extends Thread {
 
@@ -23,9 +24,10 @@ final class PadSender extends Thread {
             UP = 1 << 11, DOWN = 1 << 12, LEFT = 1 << 13, RIGHT = 1 << 14;
 
     private static final String TAG = "PadSender";
+    private static final int MAX_QUEUE = 64;
     private final String path;
-    private final byte[] pending = new byte[20];
-    private boolean dirty;
+    private final ArrayDeque<byte[]> queue = new ArrayDeque<>();
+    private int lastQueuedButtons = -1;
     private volatile boolean running = true;
 
     PadSender(String socketPath) {
@@ -36,12 +38,19 @@ final class PadSender extends Thread {
 
     /** Called on every change; cheap, never blocks on the socket. Sticks -1..1 (y down), triggers 0..1. */
     synchronized void post(int buttons, float lx, float ly, float rx, float ry, float lt, float rt) {
-        ByteBuffer b = ByteBuffer.wrap(pending).order(ByteOrder.LITTLE_ENDIAN);
+        byte[] p = new byte[20];
+        ByteBuffer b = ByteBuffer.wrap(p).order(ByteOrder.LITTLE_ENDIAN);
         b.put((byte) 'P').put((byte) 'A').put((byte) 'D').put((byte) '1');
         b.putInt(buttons);
         b.putShort(axis(lx)).putShort(axis(ly)).putShort(axis(rx)).putShort(axis(ry));
         b.put(trigger(lt)).put(trigger(rt)).putShort((short) 0);
-        dirty = true;
+        if (!queue.isEmpty() && buttons == lastQueuedButtons) {
+            queue.pollLast(); // same buttons: only the newest analog values matter
+        } else if (queue.size() >= MAX_QUEUE) {
+            queue.pollFirst(); // daemon away for long: drop the oldest
+        }
+        queue.addLast(p);
+        lastQueuedButtons = buttons;
         notifyAll();
     }
 
@@ -62,19 +71,19 @@ final class PadSender extends Thread {
     public void run() {
         LocalSocket sock = null;
         OutputStream out = null;
-        byte[] packet = new byte[20];
         while (running) {
+            byte[] packet;
             synchronized (this) {
-                while (!dirty && running) {
+                while (queue.isEmpty() && running) {
                     try {
                         wait();
                     } catch (InterruptedException e) {
                         if (!running) return;
                     }
                 }
-                System.arraycopy(pending, 0, packet, 0, packet.length);
-                dirty = false;
+                packet = queue.peekFirst();
             }
+            if (packet == null) continue;
             try {
                 if (sock == null) {
                     sock = new LocalSocket();
@@ -83,6 +92,10 @@ final class PadSender extends Thread {
                     Log.i(TAG, "connected to " + path);
                 }
                 out.write(packet);
+                synchronized (this) {
+                    if (queue.peekFirst() == packet) queue.pollFirst();
+                    if (queue.isEmpty()) lastQueuedButtons = -1;
+                }
             } catch (IOException e) {
                 Log.w(TAG, "powos-padd unreachable: " + e.getMessage());
                 try {
@@ -91,12 +104,8 @@ final class PadSender extends Thread {
                 }
                 sock = null;
                 out = null;
-                // Keep the state and retry shortly (daemon starting with the session).
-                synchronized (this) {
-                    dirty = true;
-                }
                 try {
-                    Thread.sleep(1000);
+                    Thread.sleep(1000); // keep the queue; retry (daemon starting with the session)
                 } catch (InterruptedException ignored) {
                 }
             }

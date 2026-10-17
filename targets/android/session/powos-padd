@@ -5,7 +5,7 @@ The app's touch overlay (GamepadOverlay.java) sends the pad's whole state; this 
 (uinput) and applies it, so Steam Input, SDL and Wine see an ordinary controller. Runs as root in the rooted session
 (/dev/uinput is root/uhid only) and hands the event node to the desktop user.
 
-Wire format (little endian, 20 bytes, latest state wins; the app sends on change):
+Wire format (little endian, 20 bytes; the app sends on change, every packet is applied in order):
   magic b"PAD1" | u32 buttons | i16 lx, ly, rx, ry | u8 lt, rt | 2 pad bytes
 Buttons, by bit: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 Back, 7 Start, 8 Guide, 9 LS, 10 RS, 11 up, 12 down, 13 left,
 14 right. Sticks: -32768..32767, y down positive (evdev). One client at a time; on disconnect everything is
@@ -134,17 +134,18 @@ def main():
             continue
         buf += data
         n = len(buf) // PACKET.size
-        if n:
-            # Only the newest complete packet matters (latest state wins).
-            magic, *state = PACKET.unpack_from(buf, (n - 1) * PACKET.size)
-            buf = buf[n * PACKET.size:]
+        # Every packet in order: a quick tap is a press and a release arriving together, and applying only the
+        # newest would lose the press. (Unchanged values emit nothing, so a backlog of stick moves costs little.)
+        for i in range(n):
+            magic, *state = PACKET.unpack_from(buf, i * PACKET.size)
             if magic != b"PAD1":
                 log("bad packet, dropping client")
                 client.close()
                 client = None
                 pad.release()
-                continue
+                break
             pad.apply(*state)
+        buf = buf[n * PACKET.size:]
 
 
 if __name__ == "__main__":

@@ -159,9 +159,12 @@ package andro.marchy;
                  ((ViewGroup) root).setClipChildren(false);
                  ((ViewGroup) root).setClipToPadding(false);
              }
-             if (getParent() instanceof ViewGroup) {
-                 bringToFront();
-             }
+             // After the attach pass, not during it: bringToFront() reorders the parent's children while the parent
+             // is still dispatching onAttachedToWindow through them, and the sibling that slides into this view's
+             // slot was skipped - never attached, so it could never redraw (the game controls overlay froze).
+             post(() -> {
+                 if (getParent() instanceof ViewGroup) bringToFront();
+             });
          } catch (Exception e) {
              Log.e(TAG, "onAttachedToWindow error", e);
          }
