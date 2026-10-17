@@ -76,12 +76,17 @@ wait_sock() { for _ in $(seq 100); do [ -S "$1" ] && return 0; sleep 0.1; done; 
 # D-Bus: the session bus, and a system bus of PowOS's own for the stand-in hardware services (same config and
 # services as the app's: android-nm/upower read the phone's state files the app writes into $R).
 rm -f "$R/bus" "$R/system_bus"
+# The previous session's PipeWire sockets too: wait_sock below would pass on the stale pipewire-0 and start KWin before
+# the new PipeWire listens; KWin's audio engine then stays on the dead connection (no anland-speaker sink: no sound).
+rm -f "$R/pipewire-0" "$R/pipewire-0.lock" "$R/pipewire-0-manager" "$R/pipewire-0-manager.lock"
 bg dbus as_user dbus-daemon --session --nofork --nopidfile --address="unix:path=$R/bus"
 bg system-dbus dbus-daemon --config-file=/opt/lotfix/system-bus.conf --nofork --nopidfile --address="unix:path=$R/system_bus"
 wait_sock "$R/system_bus"
 for s in android-nm android-upower android-system-services; do bg "$s" "$s"; done
 # The app's on-screen controls as a real gamepad (uinput is root-only on Android; see the file).
 bg powos-padd powos-padd
+# Which game has focus, for the controls' per-game layouts (see the file).
+bg powos-focus-watch as_user powos-focus-watch
 wait_sock "$R/bus"
 bg android-session-services as_user android-session-services
 as_user sh -c 'K=$HOME/.local/share/keyrings; mkdir -p "$K" && chmod 700 "$K"
