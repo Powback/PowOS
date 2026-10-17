@@ -104,19 +104,9 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         });
     }
 
-    /** Forget the learned grip (and the trackpad's direction calibration). */
+    /** Forget the learned grip. */
     static void relearn() {
         if (current != null) current.view.relearn();
-    }
-
-    /** Only the trackpad's directions: the back screen asks for the two swipes again. */
-    static void recalibrateTrackpad() {
-        if (current == null) return;
-        FingerView v = current.view;
-        v.cal[0] = v.cal[1] = v.cal[2] = v.cal[3] = 0;
-        v.calStep = 1;
-        v.prefs.edit().remove("cal0").remove("cal1").remove("cal2").remove("cal3").apply();
-        v.invalidate();
     }
 
     static void stop() {
@@ -204,22 +194,12 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         static final String[] MOUSE_NAMES = {"left click", "right click", "middle click"};
         // Desktop mode, the trackpad half: its pointers, re-sent as their own event stream to the touchpad.
         final java.util.ArrayList<Integer> padIds = new java.util.ArrayList<>();
-        /** Back-screen delta -> screen delta: screen x = cal[0]*x + cal[1]*y, screen y = cal[2]*x + cal[3]*y. */
-        final float[] cal = new float[4];
-        /** 0 = calibrated; 1 = waiting for a swipe to the right; 2 = for a swipe down. */
-        int calStep;
-        float calStartX, calStartY, calAxisX, calAxisY;
 
         FingerView(CoverPadActivity c) {
             super(c);
             act = c;
             prefs = c.getSharedPreferences("powos_coverpad", Context.MODE_PRIVATE);
             setBackgroundColor(Color.BLACK);
-            cal[0] = prefs.getFloat("cal0", 0);
-            cal[1] = prefs.getFloat("cal1", 0);
-            cal[2] = prefs.getFloat("cal2", 0);
-            cal[3] = prefs.getFloat("cal3", 0);
-            calStep = cal[0] == 0 && cal[1] == 0 ? 1 : 0;
         }
 
         boolean desktop() { return act.mode == MODE_DESKTOP; }
@@ -244,10 +224,6 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
             return along(fx, fy) > Math.max(0.4f, Math.min(0.6f, split + 0.1f));
         }
 
-        /** Snap a swipe to the nearest axis (unit vector). */
-        static float[] axisOf(float vx, float vy) {
-            return Math.abs(vx) >= Math.abs(vy) ? new float[]{Math.signum(vx), 0} : new float[]{0, Math.signum(vy)};
-        }
 
         /**
          * The trackpad half drives the game controls' trackball (GamepadOverlay.TrackballModule): the same feel and code
@@ -269,9 +245,27 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
             return ball;
         }
 
-        float screenX(float x, float y) { return cal[0] * x + cal[1] * y; }
+        /**
+         * Back-screen point -> screen directions. The back (cover) panel sits turned 90 degrees to the inner screen:
+         * moving a finger up on the back, as the user sees the front, runs along the back panel's -x. So, with the
+         * inner screen upright: screen x = -back y, screen y = back x. When the inner screen is rotated, the
+         * screen's axes turn with it. (The back screen itself is locked to portrait: its axes never change.)
+         */
+        float[] toScreen(float x, float y) {
+            float nx = -y, ny = x; // in the inner screen's natural (upright) orientation
+            MainActivity main = MainActivity.sInstance;
+            int rot = main != null && main.getDisplay() != null ? main.getDisplay().getRotation() : 0;
+            switch (rot) {
+                case android.view.Surface.ROTATION_90: return new float[]{ny, -nx};
+                case android.view.Surface.ROTATION_180: return new float[]{-nx, -ny};
+                case android.view.Surface.ROTATION_270: return new float[]{-ny, nx};
+                default: return new float[]{nx, ny};
+            }
+        }
 
-        float screenY(float x, float y) { return cal[2] * x + cal[3] * y; }
+        float screenX(float x, float y) { return toScreen(x, y)[0]; }
+
+        float screenY(float x, float y) { return toScreen(x, y)[1]; }
 
         void padDown(int id, float x, float y) {
             GamepadOverlay.TrackballModule b = ball();
@@ -292,35 +286,6 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
             if (b == null) return;
             if (cancel) b.reset();
             else b.up(id, noPad);
-        }
-
-        /** Calibration: one swipe right, one swipe down, on the back; learns its orientation relative to the screen. */
-        void calibrate(int masked, float x, float y) {
-            if (masked == MotionEvent.ACTION_DOWN || masked == MotionEvent.ACTION_POINTER_DOWN) {
-                calStartX = x;
-                calStartY = y;
-                return;
-            }
-            if (masked != MotionEvent.ACTION_UP && masked != MotionEvent.ACTION_POINTER_UP) return;
-            float vx = x - calStartX, vy = y - calStartY;
-            if (Math.hypot(vx, vy) < Math.min(getWidth(), getHeight()) * 0.12f) return; // too short: not a swipe
-            float[] a = axisOf(vx, vy);
-            if (calStep == 1) {
-                calAxisX = a[0];
-                calAxisY = a[1];
-                calStep = 2;
-            } else if (calStep == 2) {
-                if ((a[0] != 0) == (calAxisX != 0)) return; // same axis as "right": try again
-                // screen x = component along the "right" swipe, screen y = along the "down" swipe
-                cal[0] = calAxisX;
-                cal[1] = calAxisY;
-                cal[2] = a[0];
-                cal[3] = a[1];
-                calStep = 0;
-                prefs.edit().putFloat("cal0", cal[0]).putFloat("cal1", cal[1]).putFloat("cal2", cal[2])
-                    .putFloat("cal3", cal[3]).apply();
-                performHapticFeedback(HapticFeedbackConstants.CONFIRM);
-            }
         }
 
         boolean wide() { return getWidth() >= getHeight(); }
@@ -458,8 +423,6 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         void relearn() {
             prefs.edit().clear().apply();
             for (int s = 0; s < 6; s++) setSlot(s, s < 3 ? 0.25f : 0.75f, 0.25f * (1 + s % 3));
-            calStep = 1;
-            cal[0] = cal[1] = cal[2] = cal[3] = 0;
             invalidate();
         }
 
@@ -474,8 +437,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                     if (desktop() && onPadHalf(e.getX(idx) / w, e.getY(idx) / h)) {
                         int id = e.getPointerId(idx);
                         padIds.add(id);
-                        if (calStep != 0) calibrate(e.getActionMasked(), e.getX(idx), e.getY(idx));
-                        else padDown(id, e.getX(idx), e.getY(idx));
+                        padDown(id, e.getX(idx), e.getY(idx));
                         break;
                     }
                     int s = nearestFree(e.getX(idx) / w, e.getY(idx) / h);
@@ -501,7 +463,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                     break;
                 }
                 case MotionEvent.ACTION_MOVE:
-                    if (!padIds.isEmpty() && calStep == 0) padMove(e);
+                    if (!padIds.isEmpty()) padMove(e);
                     for (int i = 0; i < e.getPointerCount(); i++) {
                         int s = pointerSlot.get(e.getPointerId(i), -1);
                         if (s >= 0) { tx[s] = e.getX(i); ty[s] = e.getY(i); }
@@ -515,8 +477,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                         if (!all && i != idx) continue;
                         int pid = e.getPointerId(i);
                         if (padIds.contains(pid)) { // the trackpad half
-                            if (calStep != 0) calibrate(e.getActionMasked(), e.getX(i), e.getY(i));
-                            else padUp(pid, all);
+                            padUp(pid, all);
                             padIds.remove(Integer.valueOf(pid));
                             continue;
                         }
@@ -588,12 +549,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                 paint.setColor(0xFFB0BEC5);
                 paint.setTextSize(u * 0.06f);
                 float cx = wide() ? w * 0.75f : w / 2f, cy = wide() ? h / 2f : h * 0.75f;
-                String msg = calStep == 1 ? "swipe right ->" : calStep == 2 ? "swipe down" : "trackpad";
-                c.drawText(msg, cx, cy, paint);
-                if (calStep != 0) {
-                    paint.setTextSize(u * 0.035f);
-                    c.drawText("(on the back, as you see the screen)", cx, cy + u * 0.07f, paint);
-                }
+                c.drawText("trackpad", cx, cy, paint);
             }
             for (int s = 0; s < (desktop() ? 3 : 6); s++) {
                 float cx = sx[s] * w, cy = sy[s] * h;

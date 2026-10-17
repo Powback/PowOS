@@ -71,6 +71,7 @@
         <!-- PowOS: the cover screen as a controller surface while unfolded (both screens on). -->
         <activity
             android:name=".CoverPadActivity"
+            android:screenOrientation="portrait"
             android:exported="false"
             android:excludeFromRecents="true"
             android:resizeableActivity="true"
