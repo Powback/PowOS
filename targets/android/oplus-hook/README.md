@@ -21,6 +21,15 @@ Confidence: 1 high, 2 verified 2026-10-17 on the Open (cover screen): the panel 
 layer, swipe-up-and-hold shows "Split View" / "Floating window", releasing on Floating window opens the app as a
 floating window over PowOS's home (no RecentsActivity left behind), and Split View enters OnePlus's split; 3 high.
 
+**Known gap: revealing the transient taskbar in apps (checked 2026-10-17).** With a third-party home the taskbar is
+enabled and present (3. above) but a short swipe up in an app doesn't reveal it; it stays stashed. Tested on the phone
+with a uinput touchscreen (real finger timing). Findings for the next attempt: AbsSwipeUpHandler only reveals it when
+`activityInterface.getTaskbarActivityContext()` is non-null, and FallbackActivityInterface doesn't override it (base
+returns null); but returning `TaskbarUtils.getTaskbarActivityContext()` there (plus re-setting the handler's
+mTaskbarCanResponseTouch/thresholds) was not enough: OplusBaseTouchInteractionService (~l.1050) gives the gesture a
+TaskbarStashInputConsumer, not the TaskbarUnstashInputConsumer whose detector the handler needs (dumpsys shows
+TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH). Next: why `delegate instanceof OtherActivityInputConsumer` fails there.
+
 Build: `targets/android/build-oplus-hook.sh` (android-app-dev). Install: Zygisk on in Magisk, the Vector (LSPosed
 fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scope `com.android.launcher` and restart the
 launcher (or reboot). Remove: disable the module in Vector.
