@@ -34,41 +34,36 @@ public class Hook implements IXposedHookLoadPackage {
         keepTaskbar(lp.classLoader);
     }
 
-    private static final ThreadLocal<Boolean> inOverviewTargets = new ThreadLocal<>();
-
     /**
      * The taskbar / "quick peek" dock: OverviewComponentObserver.updateOverviewTargets() switches OnePlus's own
      * taskbar setting off (Settings.System enable_launcher_taskbar = 0, after backing up the user's value) whenever
-     * the default home isn't OnePlus's launcher, and restores it when it is again. Skip exactly those two calls when
-     * they come from there; the user's own taskbar switch in Settings keeps working. (Forcing mIsDefaultHome instead
-     * would also change the recents/home routing.)
+     * the default home isn't OnePlus's launcher. Drop exactly that write: the one that comes from there; the user's own
+     * switch in Settings keeps working, both ways. (Forcing mIsDefaultHome instead would also change the recents/home
+     * routing.)
+     *
+     * At the write itself, not around updateOverviewTargets: that's a private method ART inlines into its callers, so a
+     * hook on it never ran (the setting went back to 0 on every launcher start, 2026-10-17). A stack trace still lists
+     * inlined frames, so the caller check holds either way.
      */
     private static void keepTaskbar(ClassLoader cl) {
-        try {
-            Class<?> observer = XposedHelpers.findClass("com.android.quickstep.OverviewComponentObserver", cl);
-            XposedBridge.hookAllMethods(observer, "updateOverviewTargets", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    inOverviewTargets.set(true);
-                }
-
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    inOverviewTargets.remove();
-                }
-            });
-            Class<?> config = XposedHelpers.findClass("com.android.launcher3.taskbar.TaskbarSettingsConfig", cl);
-            XC_MethodHook skipFromObserver = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    if (!Boolean.TRUE.equals(inOverviewTargets.get()))
+        XC_MethodHook dropObserversOff = new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam param) {
+                if (param.args.length < 3 || !"enable_launcher_taskbar".equals(param.args[1]))
+                    return;
+                if (!"0".equals(String.valueOf(param.args[2])))
+                    return;
+                for (StackTraceElement e : new Throwable().getStackTrace()) {
+                    if (e.getClassName().equals("com.android.quickstep.OverviewComponentObserver")) {
+                        param.setResult(true); // as if written: Settings.System.put* return whether it was
                         return;
-                    if (param.args.length == 0 || Boolean.FALSE.equals(param.args[0]))
-                        param.setResult(null); // backupTaskbarSettingEnable() / setTaskbarSettingEnable(false)
+                    }
                 }
-            };
-            XposedBridge.hookAllMethods(config, "setTaskbarSettingEnable", skipFromObserver);
-            XposedBridge.hookAllMethods(config, "backupTaskbarSettingEnable", skipFromObserver);
+            }
+        };
+        try {
+            for (String m : new String[] {"putInt", "putIntForUser", "putString", "putStringForUser"})
+                XposedBridge.hookAllMethods(android.provider.Settings.System.class, m, dropObserversOff);
         } catch (Throwable t) {
             log("keepTaskbar", t);
         }

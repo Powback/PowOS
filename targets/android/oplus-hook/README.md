@@ -9,9 +9,11 @@ OnePlus's launcher (`com.android.launcher`) stays the gesture and recents provid
 2. **Split screen / floating window gestures.** `OplusBaseSwipeUpHandler.onActivityInit` only takes the gesture's
    trigger panel from OnePlus's `Launcher`; with a third-party home it stays null. Hook inflates the same panel
    (`rapid_(multi_)trigger_panel_stub`) into `RecentsActivity`.
-3. **Taskbar / "quick peek" dock.** `OverviewComponentObserver.updateOverviewTargets` sets
-   `Settings.System enable_launcher_taskbar=0` whenever another app is home. Hook skips that (and its backup) when
-   called from there; the user's own switch keeps working. After installing: turn the taskbar on once in Settings.
+3. **Taskbar.** `OverviewComponentObserver.updateOverviewTargets` sets `Settings.System enable_launcher_taskbar=0`
+   whenever another app is home. Hook drops exactly that write, at `Settings.System.put*` (caller seen in the stack
+   trace): a hook on `updateOverviewTargets` itself never ran, ART inlines that private method. The user's own switch
+   keeps working. After installing: turn the taskbar on once in Settings. Verified 2026-10-17: the setting survives
+   a launcher restart; the launcher's dump shows the (transient) taskbar present.
 
 Found by reading the decompiled launcher against AOSP Launcher3 (android16-release); the system side (oplus-services)
 doesn't check which app is home. All hooks are guarded: a launcher update that renames something only logs.
