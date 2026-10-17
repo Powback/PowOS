@@ -60,8 +60,9 @@ public final class GamepadOverlay extends View {
         + "]}";
 
     static final String[] BUTTON_OUTPUTS = {"a", "b", "x", "y", "lb", "rb", "back", "start", "guide", "ls", "rs",
-        "up", "down", "left", "right"};
-    static final String[] BUTTON_LABELS = {"A", "B", "X", "Y", "LB", "RB", "⧉", "≡", "◉", "L3", "R3", "↑", "↓", "←", "→"};
+        "up", "down", "left", "right", "l4", "l5", "r4", "r5", "qam"};
+    static final String[] BUTTON_LABELS = {"A", "B", "X", "Y", "LB", "RB", "⧉", "≡", "◉", "L3", "R3", "↑", "↓", "←", "→",
+        "L4", "L5", "R4", "R5", "…"};
 
     /** Shared state all modules write; sent as one packet. */
     static final class PadState {
@@ -731,7 +732,7 @@ public final class GamepadOverlay extends View {
     private final SparseArray<Module> owner = new SparseArray<>();
     private final PadState state = new PadState();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final PadSender sender;
+    private final PadHub hub;
     private final SharedPreferences prefs;
 
     // Edit mode
@@ -739,7 +740,7 @@ public final class GamepadOverlay extends View {
     private Module editTarget;
     private boolean resizing;
     private float lastX, lastY, downX, downY;
-    private final RectF btnAdd = new RectF(), btnReset = new RectF(), btnDone = new RectF();
+    private final RectF btnAdd = new RectF(), btnReset = new RectF(), btnDone = new RectF(), btnBack = new RectF();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable longPress = () -> {
         if (editTarget != null && !resizing) {
@@ -785,8 +786,7 @@ public final class GamepadOverlay extends View {
     public GamepadOverlay(Context ctx, String padSocketPath) {
         super(ctx);
         prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        sender = new PadSender(padSocketPath);
-        sender.start();
+        hub = PadHub.get(ctx);
         load(prefs.getString(KEY_LAYOUT, DEFAULT_LAYOUT));
         setWillNotDraw(false);
     }
@@ -822,6 +822,9 @@ public final class GamepadOverlay extends View {
         if (!shown) {
             setEditing(false);
             releaseAll();
+            // Game mode off: the back screen goes back to normal too (closes the cover pad, which resets the
+            // forced both-screens state).
+            if (CoverPadActivity.running()) CoverPadActivity.stop();
         }
     }
 
@@ -856,17 +859,18 @@ public final class GamepadOverlay extends View {
     }
 
     private void send() {
-        sender.post(state.buttons, state.lx, state.ly, state.rx, state.ry, state.lt, state.rt);
+        hub.setOverlay(state.buttons, state.lx, state.ly, state.rx, state.ry, state.lt, state.rt);
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         for (Module m : modules) m.layout(w, h);
         float u = Math.min(w, h), bw = u * 0.16f, bh = u * 0.055f, gap = u * 0.02f, top = u * 0.02f;
-        float left = (w - (3 * bw + 2 * gap)) / 2f;
+        float left = (w - (4 * bw + 3 * gap)) / 2f;
         btnAdd.set(left, top, left + bw, top + bh);
         btnReset.set(left + bw + gap, top, left + 2 * bw + gap, top + bh);
-        btnDone.set(left + 2 * (bw + gap), top, left + 3 * bw + 2 * gap, top + bh);
+        btnBack.set(left + 2 * (bw + gap), top, left + 3 * bw + 2 * gap, top + bh);
+        btnDone.set(left + 3 * (bw + gap), top, left + 4 * bw + 3 * gap, top + bh);
     }
 
     @Override
@@ -893,6 +897,8 @@ public final class GamepadOverlay extends View {
         if (sizeMatch != null) canvas.drawRect(sizeMatch.zone, p);
         drawChip(canvas, btnAdd, "+ Add", 0xCC2E7D32, unit);
         drawChip(canvas, btnReset, "Reset", 0xCC6D4C41, unit);
+        drawChip(canvas, btnBack, CoverPadActivity.running() ? "Back: on" : "Back: off",
+            CoverPadActivity.running() ? 0xCC6A1B9A : 0xCC424242, unit);
         drawChip(canvas, btnDone, "Done", 0xCC1565C0, unit);
         // Which layout is being edited: in the toolbar row, left of the chips (clear of the controls below).
         drawLabel(canvas, p, "Layout: " + (gameKey.isEmpty() ? "default" : gameKey), btnAdd.left / 2f,
@@ -1018,6 +1024,12 @@ public final class GamepadOverlay extends View {
             case MotionEvent.ACTION_DOWN: {
                 if (btnAdd.contains(x, y)) { showAdd(); return true; }
                 if (btnReset.contains(x, y)) { confirmReset(); return true; }
+                if (btnBack.contains(x, y)) { // the cover screen as a controller (both screens on)
+                    if (CoverPadActivity.running()) CoverPadActivity.stop();
+                    else if (getContext() instanceof android.app.Activity) CoverPadActivity.start((android.app.Activity) getContext());
+                    postDelayed(this::invalidate, 1500);
+                    return true;
+                }
                 if (btnDone.contains(x, y)) {
                     setEditing(false);
                     if (onEditDone != null) onEditDone.run();
@@ -1114,7 +1126,8 @@ public final class GamepadOverlay extends View {
     private void showAdd() {
         final String[] items = {"Button A", "Button B", "Button X", "Button Y", "Bumper LB", "Bumper RB", "Back",
             "Start", "Guide", "Stick click L3", "Stick click R3", "D-pad", "Left stick", "Right stick",
-            "Trigger LT", "Trigger RT", "Mouse region", "Trackball", "Gyro (toggle)"};
+            "Trigger LT", "Trigger RT", "Mouse region", "Trackball", "Gyro (toggle)",
+            "Back paddle L4", "Back paddle L5", "Back paddle R4", "Back paddle R5", "Quick Access"};
         new AlertDialog.Builder(getContext()).setTitle("Add control").setItems(items, (d, which) -> {
             Module m;
             if (which <= 10) m = new ButtonModule(BUTTON_OUTPUTS[which], "");
@@ -1123,7 +1136,8 @@ public final class GamepadOverlay extends View {
             else if (which <= 15) m = new TriggerModule(which == 14 ? "lt" : "rt");
             else if (which == 16) m = new MousepadModule();
             else if (which == 17) m = new TrackballModule();
-            else m = new GyroModule("mouse");
+            else if (which == 18) m = new GyroModule("mouse");
+            else m = new ButtonModule(BUTTON_OUTPUTS[15 + which - 19], "");
             m.host = this;
             boolean area = m instanceof MousepadModule;
             float sw = area ? 0.35f : m instanceof StickModule ? 0.3f : m instanceof DpadModule ? 0.18f : m instanceof TriggerModule ? 0.14f : 0.09f;
@@ -1189,7 +1203,6 @@ public final class GamepadOverlay extends View {
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
         handler.removeCallbacks(longPress);
-        releaseAll();
-        sender.shutdown();
+        releaseAll(); // the connection is shared (PadHub) and stays
     }
 }

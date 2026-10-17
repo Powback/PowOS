@@ -15,6 +15,14 @@ echo "--- $(date) powos-session run=$RUN"
 
 sh /data/powos/powos-start.sh                       # mounts (idempotent; also done at boot)
 m() { nsenter -t 1 -m -- "$@"; }
+# SELinux: PowOS's programs run in Magisk's domain and some are Wayland clients of the app's own compositor (the
+# launcher's terminal tiles: foot). A Wayland client hands the compositor its shared-memory fd (a memfd, labelled
+# tmpfs); Android's policy does not let an app use a Magisk-domain fd or tmpfs files, so the kernel dropped it and the
+# compositor failed foot with "wl_shm create_pool without an fd" - the tile showed "exited". Allow exactly that, for
+# the app's own domain (untrusted_app_<targetSdk>, read from the running app). Live policy: applied each session start.
+APP_DOMAIN=$(ps -AZ | awk '$NF == "com.powos.app" {split($1, c, ":"); print c[3]; exit}')
+[ -n "$APP_DOMAIN" ] && magiskpolicy --live "allow $APP_DOMAIN magisk fd use" \
+  "allow $APP_DOMAIN tmpfs file { read write map getattr }" && echo "sepolicy: $APP_DOMAIN may use PowOS's Wayland buffers"
 m mkdir -p "$R/run/powos-app"
 m grep -q " $R/run/powos-app " /proc/mounts || m mount --bind "$RUN" "$R/run/powos-app"
 

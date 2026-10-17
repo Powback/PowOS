@@ -145,7 +145,11 @@ def i16(v):
 
 
 class DeckPad:
+    DEV_GLOB = f"/sys/devices/virtual/misc/uhid/*:{DECK_VID:04X}:{DECK_PID:04X}.*"
+
     def __init__(self):
+        # Our device is the one that appears after the create (another instance's must not be touched).
+        self.before = set(glob.glob(self.DEV_GLOB))
         self.fd = os.open("/dev/uhid", os.O_RDWR | os.O_NONBLOCK)
         create = struct.pack("<I128s64s64sHHIIII", UHID_CREATE2, b"Steam Deck Controller", b"", SERIAL,
                              len(DECK_DESCRIPTOR), BUS_USB, DECK_VID, DECK_PID, 0x1000, 0)
@@ -197,7 +201,8 @@ class DeckPad:
 
     def give_hidraw(self):
         for _ in range(50):
-            nodes = glob.glob(f"/sys/devices/virtual/misc/uhid/*:{DECK_VID:04X}:{DECK_PID:04X}.*/hidraw/hidraw*")
+            ours = set(glob.glob(self.DEV_GLOB)) - self.before
+            nodes = [n for d in ours for n in glob.glob(d + "/hidraw/hidraw*")]
             if nodes and all(os.path.exists("/dev/" + os.path.basename(n)) for n in nodes):
                 break
             time.sleep(0.05)
@@ -255,7 +260,27 @@ def make_pad():
     return XboxPad()
 
 
+def take_over():
+    """One daemon only: a second one would add a second controller to Steam. A new start replaces the old one
+    (a session restart, or a manual restart while the session's copy still runs)."""
+    pidfile = os.path.join(os.path.dirname(SOCK), "powos-padd.pid")
+    try:
+        old = int(open(pidfile).read())
+        if old != os.getpid() and "powos-padd" in open(f"/proc/{old}/cmdline").read():
+            os.kill(old, 15)
+            for _ in range(20):
+                if not os.path.exists(f"/proc/{old}"):
+                    break
+                time.sleep(0.05)
+            log("replaced the previous instance", old)
+    except (OSError, ValueError):
+        pass
+    with open(pidfile, "w") as f:
+        f.write(str(os.getpid()))
+
+
 def main():
+    take_over()
     pad = make_pad()
     try:
         os.unlink(SOCK)

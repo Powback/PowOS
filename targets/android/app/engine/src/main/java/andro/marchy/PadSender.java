@@ -38,9 +38,10 @@ final class PadSender extends Thread {
 
     /** Called on every change; cheap, never blocks on the socket. Sticks -1..1 (y down), triggers 0..1. */
     synchronized void post(int buttons, float lx, float ly, float rx, float ry, float lt, float rt) {
-        byte[] p = new byte[20];
+        // PAD2: PAD1's fields, then trackpads x/y and gyro/accel (zero until a module drives them).
+        byte[] p = new byte[40];
         ByteBuffer b = ByteBuffer.wrap(p).order(ByteOrder.LITTLE_ENDIAN);
-        b.put((byte) 'P').put((byte) 'A').put((byte) 'D').put((byte) '1');
+        b.put((byte) 'P').put((byte) 'A').put((byte) 'D').put((byte) '2');
         b.putInt(buttons);
         b.putShort(axis(lx)).putShort(axis(ly)).putShort(axis(rx)).putShort(axis(ry));
         b.put(trigger(lt)).put(trigger(rt)).putShort((short) 0);
