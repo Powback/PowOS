@@ -15,6 +15,7 @@ import dev.omalauncher.LauncherData
 import dev.omalauncher.Runtime
 import dev.omalauncher.linux.Agent
 import dev.omalauncher.linux.Proot
+import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.pacmanInstall
 import dev.omalauncher.linux.runJob
 import dev.omalauncher.linux.shellQuote
@@ -715,6 +716,26 @@ class WidgetEngine(
         val packages = missing[name].orEmpty()
         if (packages.isEmpty() || installs[name] == Install.Running) return
         installs[name] = Install.Running
+        // PowOS rooted mode: PowOS's own pacman, in a terminal, where the user confirms (and gives sudo its password) -
+        // never a silent install from the launcher; Omalauncher's own Linux isn't there. The tile waits for the
+        // packages to show up (or the terminal to be given up on), then runs.
+        if (RootedGuest.enabled) {
+            val list = packages.joinToString(" ")
+            // The terminal leaves a mark when it ends however it ends (done, cancelled with Ctrl+C, closed), so the tile
+            // stops waiting then rather than at the timeout.
+            val done = "/tmp/.owl-install-${name.hashCode().toUInt()}"
+            val script = "rm -f $done; trap 'touch $done' EXIT; sudo pacman -S --needed $list; echo; read -rp 'Press Enter to close'"
+            runtime.terminal(script, "install $list")
+            scope.launch {
+                withTimeoutOrNull(15 * 60_000L) {
+                    delay(2000)
+                    while (withContext(Dispatchers.IO) { RootedGuest.run("pacman -Q $list >/dev/null 2>&1 || test -e $done") } != 0) delay(2000)
+                }
+                installs.remove(name)
+                checkDependencies(specs.toList())
+            }
+            return
+        }
         scope.launch {
             val (ok, tail) = runtime.pacman.lock.withLock { withContext(Dispatchers.IO) { proot.runJob(pacmanInstall(packages)) } }
             if (ok) installs.remove(name) else installs[name] = Install.Failed(tail.toString())

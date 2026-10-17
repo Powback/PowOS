@@ -87,6 +87,18 @@
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize|stateAlwaysHidden" />
 
+        <!-- PowOS (rooted mode): a terminal the launcher draws, one task each (PowosTerminalActivity). -->
+        <activity
+            android:name=".PowosTerminalActivity"
+            android:label="Terminal"
+            android:theme="@style/Theme.Omalauncher.Window"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:documentLaunchMode="always"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden" />
+
         <!-- Recents names a task after its activity's manifest label, so the common windows get their own. -->
         <activity-alias
             android:name=".TerminalWindow"

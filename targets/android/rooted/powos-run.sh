@@ -36,7 +36,12 @@ G=$( [ -n "$K" ] && tr '\0' '\n' < /proc/$K/environ 2>/dev/null |
   tr '\n' ' ')
 # The session's open-file limit (see powos-rooted-session: Proton's esync needs >= 524288), raised while still root.
 ulimit -n 1048576 2>/dev/null
-exec nsenter -t "$PID" -m -- /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- /usr/bin/env -i \
+# On a terminal (the launcher's terminals: a pty the PowOS app owns, through su), a session of its own with that
+# terminal as its controlling tty, set while still root: su passes the pty on but not as one, and bash then had no job
+# control ("cannot set terminal process group") and /dev/tty didn't open (tmux, fzf).
+CTTY=
+[ -t 0 ] && CTTY="/usr/bin/setsid -c"
+exec nsenter -t "$PID" -m -- $CTTY /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- /usr/bin/env -i \
   HOME=/home/powos USER=powos LOGNAME=powos SHELL=/bin/bash TERM=xterm-256color \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
   LANG="${L:-${LANG:-C.UTF-8}}" TZ="$TZ" \

@@ -16,7 +16,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.zIndex
 import dev.omalauncher.widgets.Cell
 import dev.omalauncher.widgets.Folder
@@ -326,7 +325,7 @@ internal fun HomeGrid(
         val width = constraints.maxWidth / per
         // Landscape turns portrait's grid on its side; the window's size (short side first, so both orientations
         // share it) remembers how many rows portrait had.
-        val window = LocalWindowInfo.current.containerSize
+        val window = windowSize()
         val windowSize = "${minOf(window.width, window.height)}x${maxOf(window.width, window.height)}"
         // Rows the tiles on every page reach down to (apps show as 1x1); the pages share one grid.
         // Derived, so moving or resizing a tile recomposes only its page, unless it changes how far down they reach.

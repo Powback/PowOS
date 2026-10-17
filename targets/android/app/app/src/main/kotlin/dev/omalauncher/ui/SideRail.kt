@@ -4,6 +4,7 @@ import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -44,7 +47,7 @@ enum class HomeSide { Left, Right }
 /** Whether home turns portrait's grid on its side: landscape, unless the window shows two pages. */
 @Composable
 internal fun homeTurned(): Boolean {
-    val window = LocalWindowInfo.current.containerSize
+    val window = windowSize()
     return window.width > window.height && !showsTwoPages(window)
 }
 
@@ -73,7 +76,7 @@ internal fun homeSide(): HomeSide? {
         displays.registerDisplayListener(listener, Handler(Looper.getMainLooper()))
         onDispose { displays.unregisterDisplayListener(listener) }
     }
-    val window = LocalWindowInfo.current.containerSize
+    val window = windowSize()
     val tablet = with(LocalDensity.current) { minOf(window.width, window.height).toDp() } >= 600.dp
     return when {
         !homeTurned() || tablet -> null
@@ -87,6 +90,22 @@ internal fun homeSide(): HomeSide? {
  * foldable's inner screen in either orientation. Phones, tablets and phone landscape show one.
  */
 internal fun showsTwoPages(window: IntSize) = window.width / 2f / window.height in 0.4f..0.65f
+
+/**
+ * The window's size in pixels, read again on every configuration change. LocalWindowInfo.containerSize kept a
+ * split screen's half height after the split ended (seen 2026-10-17 on the OnePlus Open): home stayed laid out as
+ * two half-width pages on the full screen until the activity was recreated. The window's current bounds don't lag.
+ */
+@Composable
+internal fun windowSize(): IntSize {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val container = LocalWindowInfo.current.containerSize
+    return remember(configuration, container) {
+        runCatching { context.getSystemService(WindowManager::class.java).currentWindowMetrics.bounds }
+            .getOrNull()?.let { IntSize(it.width(), it.height()) } ?: container
+    }
+}
 
 /**
  * Room the side takes beside the grid: the strip and the gap between tiles after it, then the rail and the edge's gap

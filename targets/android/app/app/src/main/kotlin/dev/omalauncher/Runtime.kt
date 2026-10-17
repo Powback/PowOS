@@ -519,6 +519,11 @@ class Runtime(
         name: String,
         agent: Agent? = null,
     ) {
+        // PowOS rooted mode: a PowOS terminal the launcher draws, as its own task (folded, the desktop isn't there).
+        if (!linux && rootedTerminals) {
+            PowosTerminalActivity.open(context, command, name)
+            return
+        }
         if (!linux) {
             linuxWanted = true
             return
@@ -581,6 +586,9 @@ class Runtime(
     /** The drawer icon of the app called [name] (an agent's logo, say); null until loaded, or if it has none. */
     fun iconNamed(name: String): ImageBitmap? = linuxApps.firstOrNull { it.name == name }?.let { linuxIcons[it.id] }
 
+    /** Brings the PowOS desktop to the front, also folded (on the cover screen), to show an app just opened there. */
+    fun showDesktop() = andro.marchy.MainActivity.show(context)
+
     /** Opens the Files app, at [path] (a guest path) if given. */
     fun openFiles(path: String? = null) {
         context.startActivity(
@@ -602,6 +610,8 @@ class Runtime(
             return
         }
         Log.i(TAG, "launch: $command")
+        // Rooted mode: it opens on the PowOS desktop (RootedGuest), which comes to the front to show it.
+        if (rooted) showDesktop()
         thread(name = "guest-launch", isDaemon = true) {
             val log: (String) -> Unit = { Log.i(TAG, "[${command.take(24)}] $it") }
             val code = runCatching { if (rooted) RootedGuest.run("exec $command", log) else proot.run("exec $command", log) }.getOrElse { -1 }

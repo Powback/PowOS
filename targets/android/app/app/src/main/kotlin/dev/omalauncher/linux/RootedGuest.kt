@@ -16,8 +16,12 @@ object RootedGuest {
      */
     fun runtimeDir(filesDir: File) = File(filesDir, "run/omalauncher")
 
-    /** The launcher's Wayland socket, as PowOS sees it. */
-    private const val WAYLAND_DISPLAY = "/run/powos-app/omalauncher/wayland-0"
+    /**
+     * Where what the launcher starts shows: the PowOS desktop's own display (KWin's socket in the session's
+     * XDG_RUNTIME_DIR, /run/powos-app). Not the launcher's Wayland server: PowOS processes (SELinux magisk, s0) can't
+     * hand their buffers to the app, so their windows never drew there (see ui/PtyTerminal).
+     */
+    private const val WAYLAND_DISPLAY = "wayland-0"
 
     /** The terminal PowOS opens everywhere (Konsole's PowOS.profile): its tmux session picker, falling back to a shell. */
     const val TERMINAL_SHELL = "/usr/lib/powos/powos-tmux-shell"

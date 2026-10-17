@@ -219,6 +219,18 @@ public class MainActivity extends Activity
 
     public static MainActivity sInstance;
 
+    /**
+     * The desktop was asked for on purpose (the launcher opened a PowOS app, {@link #show}): it stays on the cover
+     * screen too, rather than stepping aside there (onCoverScreen), until it is left.
+     */
+    private static volatile boolean sShownOnPurpose;
+
+    /** Brings the desktop to the front for a PowOS app the user just opened, also on the cover screen (folded). */
+    public static void show(android.content.Context ctx) {
+        sShownOnPurpose = true;
+        ctx.startActivity(new Intent(ctx, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
+
     // ADDED: VirtualKeyboardView instance
     private VirtualKeyboardView virtualKeyboardView;
 
@@ -803,6 +815,13 @@ public class MainActivity extends Activity
     }
 
     @Override
+    protected void onStop() {
+        super.onStop();
+        // Left: folded, the next time it steps aside again (unless asked for again).
+        sShownOnPurpose = false;
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         inFront = true;
@@ -1173,7 +1192,7 @@ public class MainActivity extends Activity
         // A PowOS app in use comes onto the cover with the desktop (FoldWatcher.folded()).
         return cover && c.smallestScreenWidthDp < 600 && RootMode.enabled()
             && getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(FoldWatcher.KEY_UNFOLD_DESKTOP, true)
-            && !FoldWatcher.desktopAppActive(this);
+            && !FoldWatcher.desktopAppActive(this) && !sShownOnPurpose;
     }
 
 
