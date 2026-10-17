@@ -28,7 +28,7 @@ with a uinput touchscreen (real finger timing). Findings for the next attempt: A
 returns null); but returning `TaskbarUtils.getTaskbarActivityContext()` there (plus re-setting the handler's
 mTaskbarCanResponseTouch/thresholds) was not enough: OplusBaseTouchInteractionService (~l.1050) gives the gesture a
 TaskbarStashInputConsumer, not the TaskbarUnstashInputConsumer whose detector the handler needs (dumpsys shows
-TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH). Next: why `delegate instanceof OtherActivityInputConsumer` fails there.
+TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH). Why: the gesture's consumer reaches that check already wrapped (dumpsys: TYPE_OTHER_ACTIVITY:TYPE_TASKBAR_STASH:TYPE_CURSOR_HOVER), so `delegate instanceof OtherActivityInputConsumer` fails and no unstash consumer is made - whichever app is home. The stash consumer's own reveal, a long press on the handle, is taken by Circle to Search (tried: it opens). Fixing it means re-routing every navigation gesture in OnePlus's TouchInteractionService; not done speculatively (a mistake breaks home/back/recents phone-wide).
 
 Build: `targets/android/build-oplus-hook.sh` (android-app-dev). Install: Zygisk on in Magisk, the Vector (LSPosed
 fork, JingMatrix) Magisk module, this APK, then enable it in Vector with scope `com.android.launcher` and restart the
