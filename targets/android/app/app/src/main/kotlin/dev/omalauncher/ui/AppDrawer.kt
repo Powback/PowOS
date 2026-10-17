@@ -528,7 +528,7 @@ internal fun AppPanel(
                         }
                     }
                 }
-                if (query.isNotBlank()) AskRow(runtime, linuxState == LinuxState.Installed, query, highlighted == -1, onAsk)
+                if (query.isNotBlank()) AskRow(runtime, linuxState == LinuxState.Installed || runtime.powosSession, query, highlighted == -1, onAsk)
             }
         }
     }
@@ -548,7 +548,7 @@ private fun AskRow(
         when {
             !linux -> "ask an agent · install linux"
             agent == null -> "ask an agent · install one"
-            else -> "ask ${agent.bin}: " + query.trim().replace('\n', ' ')
+            else -> "ask ${if (agent.bin == dev.omalauncher.linux.POWOS_AI.bin) agent.name else agent.bin}: " + query.trim().replace('\n', ' ')
         }
     Row(
         Modifier

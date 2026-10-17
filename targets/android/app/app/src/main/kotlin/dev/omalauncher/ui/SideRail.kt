@@ -164,7 +164,13 @@ private fun PromptRail(
     val linuxState by runtime.bootstrap.state.collectAsState()
     val agent = runtime.agents.default
     // The longest that fits the rail: a letter takes a whole line.
-    val hints = listOfNotNull(agent?.takeIf { linuxState == LinuxState.Installed }?.let { "open an app or ask ${it.bin}" }, "open an app", "apps")
+    val hints = listOfNotNull(
+        agent?.takeIf { linuxState == LinuxState.Installed || runtime.powosSession }?.let {
+            "open an app or ask ${if (it.bin == dev.omalauncher.linux.POWOS_AI.bin) it.name else it.bin}"
+        },
+        "open an app",
+        "apps",
+    )
     val style = Mono.copy(fontSize = TextSize.Item, color = Palette.muted)
     Column(
         Modifier

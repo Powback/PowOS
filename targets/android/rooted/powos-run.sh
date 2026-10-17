@@ -54,7 +54,7 @@ CTTY=
 [ -t 0 ] && CTTY="/usr/bin/setsid -c"
 exec nsenter -t "$PID" -m -- $CTTY /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- /usr/bin/env -i \
   HOME=/home/powos USER=powos LOGNAME=powos SHELL=/bin/bash TERM=xterm-256color \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
+  PATH=/home/powos/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
   LANG="${L:-${LANG:-C.UTF-8}}" TZ="${Z:-$TZ}" \
   XDG_RUNTIME_DIR=/run/powos-app \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/powos-app/bus \

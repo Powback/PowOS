@@ -48,7 +48,7 @@ exec nsenter -t 1 -m -- unshare -m sh -c '
     $L $R/usr/bin/pivot_root . .oldroot || exit 1
   exec "$@"' powos-session /usr/bin/env -i \
   HOME=/home/powos USER=powos LOGNAME=powos SHELL=/bin/bash \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
+  PATH=/home/powos/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin \
   LANG="$LANG_" TZ="$TZ_" \
   XDG_RUNTIME_DIR=/run/powos-app \
   ANDROMARCHY_SOCKET="$sock" ANDROMARCHY_PHYSICAL_MM="$MM" \

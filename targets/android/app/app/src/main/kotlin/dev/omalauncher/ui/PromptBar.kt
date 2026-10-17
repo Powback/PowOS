@@ -78,6 +78,7 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import dev.omalauncher.Runtime
 import dev.omalauncher.linux.LinuxState
+import dev.omalauncher.linux.POWOS_AI
 import dev.omalauncher.linux.agentInvocation
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -120,8 +121,9 @@ internal fun PromptBar(
     val panelShown by remember(state) { derivedStateOf { state.drawer.value > 0.01f } }
     val agent = runtime.agents.default
     val linuxState by runtime.bootstrap.state.collectAsState()
-    // Agents run in Linux: without it, the bar offers to install it instead.
-    val linux = linuxState == LinuxState.Installed
+    // Agents run in Linux: without it, the bar offers to install it instead. PowOS's session (rooted) is PowOS's own
+    // Linux, where PowOS AI runs.
+    val linux = linuxState == LinuxState.Installed || runtime.powosSession
 
     fun offerLinux() {
         focusManager.clearFocus()
@@ -141,7 +143,12 @@ internal fun PromptBar(
             state.agentsOpen = true
             return
         }
-        runtime.terminal("${agentInvocation(target.bin, p)}; exec bash", target.name, target)
+        // PowOS AI: its own chat, not a terminal (PowosAiActivity).
+        if (target.bin == POWOS_AI.bin) {
+            dev.omalauncher.PowosAiActivity.open(context, p)
+        } else {
+            runtime.terminal("${agentInvocation(target.bin, p)}; exec bash", target.name, target)
+        }
         state.query = ""
         focusManager.clearFocus()
         keyboard?.hide()

@@ -178,9 +178,11 @@ def _idle_hint():
     )
 
 
-def _phone_notify(message):
-    """On a phone running PowOS: the notification on Android too (`powos android notify`), where the user is -
-    the PowOS desktop may not be on screen. Best-effort, never fatal."""
+def _phone_notify(message, priority="normal"):
+    """On a phone running PowOS: the message as an Android notification too, where the user is - the PowOS desktop
+    may not be on screen. Written into the PowOS app's run dir (agent-mail/, the session's XDG_RUNTIME_DIR); the app
+    posts it with an inline reply that comes back to this agent's inbox (targets/android: AgentMail).
+    Best-effort, never fatal."""
     platform = os.environ.get("POWOS_PLATFORM", "")
     if not platform:
         try:
@@ -188,14 +190,17 @@ def _phone_notify(message):
                 platform = f.read().strip()
         except OSError:
             return
-    if platform != "phone" or not shutil.which("powos"):
+    if platform != "phone":
         return
     try:
-        subprocess.run(
-            ["powos", "android", "notify", f"PowOS AI: {AGENT_ID or 'agent'}", message],
-            check=False, timeout=10,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        run = os.environ.get("XDG_RUNTIME_DIR") or "/run/powos-app"
+        box = os.path.join(run, "agent-mail")
+        os.makedirs(box, exist_ok=True)
+        name = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+        tmp = os.path.join(box, f".{name}.tmp")
+        with open(tmp, "w") as f:
+            json.dump({"from": AGENT_ID or "agent", "text": message, "priority": priority}, f)
+        os.rename(tmp, os.path.join(box, f"{name}.json"))
     except Exception:
         pass
 
@@ -204,7 +209,7 @@ def _desktop_notify(message, priority):
     """Best-effort desktop toast for notify_user. Never fatal."""
     urgency = {"low": "low", "normal": "normal", "high": "critical",
                "urgent": "critical"}.get(priority, "normal")
-    _phone_notify(message)
+    _phone_notify(message, priority)
     if not shutil.which("notify-send"):
         return
     try:
