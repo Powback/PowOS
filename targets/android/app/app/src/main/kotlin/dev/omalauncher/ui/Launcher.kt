@@ -271,7 +271,9 @@ private fun ThemesOverlay(
     // A widget's screen first: what it opens (themes, agents) draws on top of it.
     runtime.widgets.screenInstance()?.let { (spec, inst) ->
         CompositionLocalProvider(LocalInputFocus provides true) {
-            WidgetScreenPanel(spec, inst, onDismiss = { runtime.widgets.openScreen = null })
+            WidgetScreenPanel(spec, inst, onDismiss = { runtime.widgets.openScreen = null }) { m ->
+                if (extraKeysWanted()) ExtraKeys(runtime.keyboard, m)
+            }
         }
     }
     // Settings first so the screens it opens draw on top of it.

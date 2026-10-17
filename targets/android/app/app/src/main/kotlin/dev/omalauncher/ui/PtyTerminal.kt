@@ -224,15 +224,19 @@ class PtyTerminal(
             }
         }
 
-    /** A view showing this terminal; [release] it when it goes. */
-    fun newView(context: Context): TerminalView =
+    /** Views with a text size of their own (a widget's textSize), in pixels; the others follow [textPixels]. */
+    private val ownPixels = java.util.WeakHashMap<TerminalView, Int>()
+
+    /** A view showing this terminal, at [pixels] text if given; [release] it when it goes. */
+    fun newView(context: Context, pixels: Int? = null): TerminalView =
         TerminalView(context, null).also { view ->
             // Never focused: the launcher's KeyboardSink owns the soft keyboard and hands the keys on (see [key]).
             view.isFocusable = false
             view.isFocusableInTouchMode = false
             view.setTerminalViewClient(viewClient)
+            if (pixels != null) ownPixels[view] = pixels
             // Size first: it creates the renderer, which setTypeface reads.
-            view.setTextSize(textPixels())
+            view.setTextSize(pixels ?: textPixels())
             view.setTypeface(typeface(context, fontFamily()) { restyle() })
             view.attachSession(session)
             views += view
@@ -241,13 +245,17 @@ class PtyTerminal(
 
     fun release(view: TerminalView) {
         views -= view
+        ownPixels -= view
+        // One shell, shown in two places (a tile and its screen) at different sizes: the one still showing it sizes
+        // it again, or it kept the closed view's size.
+        views.lastOrNull()?.post { views.lastOrNull()?.updateSize() }
     }
 
     /** Follows the launcher's terminal text size and theme. */
     fun restyle() {
         val face = typeface(context, fontFamily()) { restyle() }
         views.forEach {
-            it.setTextSize(textPixels())
+            it.setTextSize(ownPixels[it] ?: textPixels())
             it.setTypeface(face)
         }
         applyColors()

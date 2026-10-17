@@ -678,9 +678,12 @@ class WidgetInstance(
         node: Any,
         command: String?,
         fontSize: Double?,
+        session: String? = null,
     ): EmbeddedTerminal {
-        terminals[node]?.let { if (it.command == command && it.fontSize == fontSize) return it else it.close() }
-        return services.terminal(command, fontSize).also { terminals[node] = it }
+        // Nodes naming the same session share it: the tile's terminal and its screen's are one shell.
+        val key: Any = session?.let { "session:$it" } ?: node
+        terminals[key]?.let { if (it.command == command && it.fontSize == fontSize) return it else it.close() }
+        return services.terminal(command, fontSize).also { terminals[key] = it }
     }
 
     /** [term] is one of this widget's terminals. */

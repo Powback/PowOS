@@ -257,7 +257,9 @@ preview='
 
 if command -v fzf >/dev/null 2>&1; then
     choice=$(
-        _powos_tmux_rows | fzf --ansi --reverse --height='80%' \
+        # Full screen (fzf's alternate screen), not --height: an inline picker isn't redrawn cleanly when the terminal
+        # is resized - the launcher's terminal tile opening full size left the old picker's lines above the new one.
+        _powos_tmux_rows | fzf --ansi --reverse \
                 --delimiter=$'\t' --with-nth=2 \
                 --prompt='resume ▶ ' \
                 --header="tmux on ${HOSTNAME%%.*}   ·   Enter = attach   ·   Del = kill   ·   Esc = shell" \

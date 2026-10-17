@@ -25,7 +25,9 @@ install -m 755 $T/powos-focus-watch $R/usr/bin/powos-focus-watch
 # rooted phone whose rootfs came from an older image has it.
 install -m 755 $T/powos-panel-phone $R/usr/bin/powos-panel-phone
 install -m 644 $T/powos-panel-phone.desktop $R/etc/xdg/autostart/powos-panel-phone.desktop
-rm -f $T/powos-panel-phone $T/powos-panel-phone.desktop
+# The terminals' tmux shell (the launcher's terminal tiles and PowOS's terminals).
+install -m 755 $T/powos-tmux-shell $R/usr/lib/powos/powos-tmux-shell
+rm -f $T/powos-panel-phone $T/powos-panel-phone.desktop $T/powos-tmux-shell
 # The desktop over Android's wallpaper (as install-powos-android.sh): transparent wallpaper + its update script.
 W=$R/usr/share/plasma/wallpapers/org.powos.transparent
 install -Dm 644 $T/powos-plasma/org.powos.transparent/metadata.json $W/metadata.json

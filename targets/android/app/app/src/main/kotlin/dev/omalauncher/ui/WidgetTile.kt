@@ -25,6 +25,19 @@ import dev.omalauncher.widgets.render.WidgetContent
 import dev.omalauncher.widgets.render.WidgetScreen
 import androidx.compose.foundation.layout.fillMaxWidth
 import dev.omalauncher.widgets.runtime.WidgetInstance
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
 
 @Composable
 internal fun WidgetTile(
@@ -116,15 +129,47 @@ private fun TileButton(
     )
 }
 
-/** A widget's screen { }, full screen over home in an Omarchy window titled by its `title` or the widget's name. */
+/**
+ * A widget's screen { }, full screen over home in an Omarchy window titled by its `title` or the widget's name. A
+ * terminal's screen covers the top of the screen instead, the keyboard and [extraKeys] below it, at one size
+ * whether the keyboard is up or not: a resize re-wraps the terminal's text.
+ */
 @Composable
 internal fun WidgetScreenPanel(
     spec: WidgetSpec,
     instance: WidgetInstance,
     onDismiss: () -> Unit,
+    extraKeys: @Composable (Modifier) -> Unit = {},
 ) {
     val title = instance.program.screenTitle?.let { instance.eval(it, instance.root, "title").text() } ?: spec.name
-    OverlayPanel(title, onDismiss) {
+    if (!instance.program.terminal) {
+        OverlayPanel(title, onDismiss) {
+            WidgetScreen(instance, Modifier.weight(1f).fillMaxWidth())
+        }
+        return
+    }
+    val density = LocalDensity.current
+    val ime = WindowInsets.ime.getBottom(density)
+    val nav = WindowInsets.navigationBars.getBottom(density)
+    // The keyboard's height once it has settled (not every frame of its animation); a guess until it first shows.
+    LaunchedEffect(ime) {
+        kotlinx.coroutines.delay(300)
+        if (ime > nav) KeyboardRoom.px = ime
+    }
+    val guess = with(density) { (LocalConfiguration.current.screenHeightDp * 0.4f).dp.roundToPx() }
+    var keysPx by remember { mutableIntStateOf(0) }
+    val clear = with(density) { ((KeyboardRoom.px.takeIf { it > 0 } ?: guess) + keysPx).toDp() }
+    OverlayPanel(
+        title,
+        onDismiss,
+        keepClearBelow = clear,
+        below = { extraKeys(Modifier.align(Alignment.BottomCenter).imePadding().onSizeChanged { keysPx = it.height }) },
+    ) {
         WidgetScreen(instance, Modifier.weight(1f).fillMaxWidth())
     }
+}
+
+/** The soft keyboard's height in pixels as last seen settled, for panels that keep room for it; 0 until then. */
+internal object KeyboardRoom {
+    var px by mutableIntStateOf(0)
 }

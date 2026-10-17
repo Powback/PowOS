@@ -5,8 +5,15 @@ widget "terminal" {
   minSize: 2x2
   padding: 0
 
-  meta { owl: 2 }
+  meta { owl: 8 }
 
-  // A real shell in the tile. Tap it to type; tap outside it or press Back to let go.
-  Terminal { }
+  // A real shell. The tile shows it in widget-sized text; tap it to open it full size (its screen), where you
+  // type - the same shell, as the info widget's tile and screen. Back closes the screen; the shell keeps running.
+  onTap: screen()
+
+  Terminal { session: "shell"; interactive: false; textSize: 10 }
+
+  screen {
+    Terminal { session: "shell" }
+  }
 }

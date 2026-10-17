@@ -34,6 +34,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.omalauncher.Runtime
 import dev.omalauncher.linux.TerminalFont
@@ -275,12 +276,16 @@ class EmbeddedTerminal internal constructor(
     }
 }
 
-/** The tile's content: the terminal's pixels, and its input once it's tapped, if it's [interactive]. */
+/**
+ * The tile's content: the terminal's pixels, and its input once it's tapped, if it's [interactive]. [textSize] (sp)
+ * sizes this view's text, as other widgets' text; null follows the terminal text size.
+ */
 @Composable
 fun TerminalView(
     term: EmbeddedTerminal,
     modifier: Modifier,
     interactive: Boolean = true,
+    textSize: Float? = null,
 ) {
     val tiles = term.tiles
     val window = term.window
@@ -293,9 +298,10 @@ fun TerminalView(
         Box(modifier.onGloballyPositioned { term.bounds = it.boundsInWindow().translate(0f, tiles.lift) }) {
             // foot's pad around the text, in the terminal's background.
             val pad = with(LocalDensity.current) { tiles.padPixels.toDp() }
-            key(pty) {
+            val ownPixels = textSize?.let { with(LocalDensity.current) { it.sp.roundToPx() } }
+            key(pty, ownPixels) {
                 AndroidView(
-                    factory = { pty.newView(it) },
+                    factory = { pty.newView(it, ownPixels) },
                     onRelease = { pty.release(it) },
                     modifier = Modifier.fillMaxSize().background(Palette.background).padding(pad),
                 )
@@ -306,6 +312,10 @@ fun TerminalView(
                 KeyboardButton(tiles)
             } else if (interactive) {
                 Box(Modifier.fillMaxSize().pointerInput(term) { detectTapGestures { tiles.activate(term) } })
+            } else {
+                // Shown only: over the terminal's view (which takes every touch) without consuming, so the tap goes
+                // to the widget (its onTap) and swipes to the home screen.
+                Box(Modifier.fillMaxSize().pointerInput(term) {})
             }
         }
         return
@@ -337,6 +347,7 @@ fun TerminalView(
                 KeyboardButton(tiles)
             }
             interactive -> Box(Modifier.fillMaxSize().pointerInput(term) { detectTapGestures { tiles.activate(term) } })
+            else -> Box(Modifier.fillMaxSize().pointerInput(term) {})
         }
     }
 }

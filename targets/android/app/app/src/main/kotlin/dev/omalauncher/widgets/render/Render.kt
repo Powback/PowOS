@@ -414,10 +414,15 @@ private fun Element(
         "Terminal" -> {
             val command = p.observe("command")
             val fontSize = p.observe("fontSize")?.num()
+            // owl 8: Terminals with the same session are one shell (a tile and its screen); interactive: false only
+            // shows it (taps go to the widget's onTap); textSize is its text in sp, as other widgets' text.
+            val session = p.observe("session")?.toString()
+            val interactive = p.observe("interactive")?.truthy != false
+            val textSize = p.observe("textSize")?.num()?.toFloat()
             // A command built from a value still loading waits for it, rather than starting a shell and restarting.
             if (command != Null) {
-                val term = remember(el, command, fontSize) { inst.terminal(el, command?.toString(), fontSize) }
-                TerminalView(term, mod.then(if (sized) Modifier else Modifier.fillMaxSize()))
+                val term = remember(el, command, fontSize, session) { inst.terminal(el, command?.toString(), fontSize, session) }
+                TerminalView(term, mod.then(if (sized) Modifier else Modifier.fillMaxSize()), interactive, textSize)
             }
         }
     }

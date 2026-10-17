@@ -22,7 +22,7 @@ class Compiler private constructor(
          * instead of failing on what they don't know. Bump it with every
          * addition a widget could depend on: nodes, properties, builtins.
          */
-        const val LEVEL = 7
+        const val LEVEL = 8
         private const val MAX_ASSET_BYTES = 2 shl 20
 
         fun compile(src: String): Program =
@@ -51,7 +51,7 @@ class Compiler private constructor(
                 "Shader" to Kind(setOf("code", "uniforms", "fallback"), Children.NONE),
                 "Spacer" to Kind(emptySet(), Children.NONE),
                 // owl 2: a live terminal (foot) inside the tile.
-                "Terminal" to Kind(setOf("command", "fontSize"), Children.NONE),
+                "Terminal" to Kind(setOf("command", "fontSize", "session", "interactive", "textSize"), Children.NONE),
                 // owl 4: input.
                 "Slider" to Kind(setOf("value", "min", "max", "step", "color", "track", "live"), Children.NONE),
                 "Input" to Kind(setOf("text", "placeholder", "color", "fontSize", "clear", "focus"), Children.NONE),
@@ -106,7 +106,10 @@ class Compiler private constructor(
                 // owl 6: properties, named Node.property; values in commands, quoted; the launcher's corner style.
                 listOf("Input.focus", "sh", "corners").associateWith { 6 } +
                 // owl 7: more of the phone, without new permissions.
-                listOf("android.alarm", "android.modes", "torch", "share", "haptic").associateWith { 7 }
+                listOf("android.alarm", "android.modes", "torch", "share", "haptic").associateWith { 7 } +
+                // owl 8: one shell in a tile and its screen (session), a tile that only shows it (interactive: false),
+                // and its text in sp like other widgets' text (textSize).
+                listOf("Terminal.session", "Terminal.interactive", "Terminal.textSize").associateWith { 8 }
 
         // No onLongPress: long-press belongs to the home screen, which lifts the tile to move it.
         /**

@@ -4,6 +4,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -39,15 +47,32 @@ fun OverlayPanel(
     onDismiss: () -> Unit,
     actions: @Composable RowScope.() -> Unit = {},
     contentWidth: Dp = Dp.Unspecified,
+    /**
+     * Null: the panel fills what the system bars and the keyboard leave. Set: it ends this far above the bottom
+     * whether the keyboard is up or not (a terminal: a resize re-wraps its text), with [below] drawn there.
+     */
+    keepClearBelow: Dp? = null,
+    below: @Composable BoxScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Box(
         Modifier
             .fillMaxSize()
             .background(Palette.overlay)
-            .clickable(onClick = onDismiss)
-            .safeDrawingPadding()
-            .padding(PanelGap),
+            .clickable(onClick = onDismiss),
+    ) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .then(
+                if (keepClearBelow == null) {
+                    Modifier.safeDrawingPadding()
+                } else {
+                    Modifier
+                        .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                        .padding(bottom = keepClearBelow)
+                },
+            ).padding(PanelGap),
     ) {
         Column(
             Modifier
@@ -70,6 +95,8 @@ fun OverlayPanel(
                 Column(Modifier.weight(1f).widthIn(max = contentWidth).fillMaxWidth().align(Alignment.CenterHorizontally), content = content)
             }
         }
+    }
+    below()
     }
 }
 
