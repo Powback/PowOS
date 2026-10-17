@@ -267,6 +267,10 @@ public class MainActivity extends Activity
         if (hasFocus && clipboard != null) {
             clipboard.pushClipboard();
         }
+        // PowOS: the desktop is in front again - a window shown as its own Android task must not keep KWin's focus
+        // (the taskbar would minimize it on a tap instead of bringing its task forward). Surface 0 is the desktop.
+        if (hasFocus)
+            WindowTasks.send("focus", 0);
     }
 
     private void pushRefreshRate() {

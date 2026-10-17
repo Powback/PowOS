@@ -55,7 +55,8 @@ PowOS app (app uid)                    display daemon (app uid)            KWin 
 
 Control messages are one line of UTF-8 each, fields separated by tabs: `open <id> <app id> <caption>`,
 `title <id> <caption>`, `close <id>`, `android <package>` (KWin -> app); `closed <id>`, `focus <id>` (app -> KWin).
-`open` may end in `fullscreen`.
+`open` may end in `fullscreen`; `focus 0` is the desktop's task coming to the front (a window shown as its own task
+then gives up KWin's focus, so the taskbar activates it instead of minimizing it).
 
 ## Then
 

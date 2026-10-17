@@ -263,7 +263,7 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
      bool initializeEgl();
 --- a/src/backends/anland/anland_window_task.cpp
 +++ b/src/backends/anland/anland_window_task.cpp
-@@ -0,0 +1,843 @@
+@@ -0,0 +1,853 @@
 +/*
 +    KWin - the KDE window manager
 +    This file is part of the KDE project.
@@ -873,7 +873,17 @@ request_consumer_fds/finish_exit_fallback), and the dmabuf import is shared with
 +    if (f.size() < 2) {
 +        return;
 +    }
-+    AnlandWindowTask *task = m_tasks.value(f[1].toUInt());
++    const uint32_t id = f[1].toUInt();
++    if (id == 0 && f[0] == QLatin1String("focus")) {
++        // The desktop's task is in front again: a window shown as its own task gives up KWin's focus to the
++        // desktop's next one (else the taskbar, seeing it active, minimizes it on a tap instead of activating it).
++        Window *active = workspace()->activeWindow();
++        if (taskFor(active)) {
++            workspace()->activateNextWindow(active);
++        }
++        return;
++    }
++    AnlandWindowTask *task = m_tasks.value(id);
 +    if (!task) {
 +        return;
 +    }
