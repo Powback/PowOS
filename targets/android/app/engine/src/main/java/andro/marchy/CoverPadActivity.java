@@ -109,6 +109,16 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         if (current != null) current.view.relearn();
     }
 
+    /** Only the trackpad's directions: the back screen asks for the two swipes again. */
+    static void recalibrateTrackpad() {
+        if (current == null) return;
+        FingerView v = current.view;
+        v.cal[0] = v.cal[1] = v.cal[2] = v.cal[3] = 0;
+        v.calStep = 1;
+        v.prefs.edit().remove("cal0").remove("cal1").remove("cal2").remove("cal3").apply();
+        v.invalidate();
+    }
+
     static void stop() {
         if (current != null) current.finish();
         else SU.execute(() -> su("cmd device_state state reset"));

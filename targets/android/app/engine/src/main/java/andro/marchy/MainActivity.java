@@ -1324,6 +1324,8 @@ public class MainActivity extends Activity
             menu.getMenu().add(0, 3, 2, "Back screen as trackpad (desktop)").setCheckable(true)
                 .setChecked(prefs.getBoolean(KEY_BACK_DESKTOP, false));
             if (CoverPadActivity.running()) menu.getMenu().add(0, 4, 3, "Back screen: re-learn grip");
+            if (CoverPadActivity.mode() == CoverPadActivity.MODE_DESKTOP)
+                menu.getMenu().add(0, 5, 4, "Back screen: calibrate trackpad directions");
             menu.setOnMenuItemClickListener(item -> {
                 boolean gameOn = mGamepadOverlay.getVisibility() == View.VISIBLE;
                 switch (item.getItemId()) {
@@ -1343,6 +1345,9 @@ public class MainActivity extends Activity
                         return true;
                     case 4:
                         CoverPadActivity.relearn();
+                        return true;
+                    case 5:
+                        CoverPadActivity.recalibrateTrackpad();
                         return true;
                 }
                 return false;
