@@ -822,9 +822,7 @@ public final class GamepadOverlay extends View {
         if (!shown) {
             setEditing(false);
             releaseAll();
-            // Game mode off: the back screen goes back to normal too (closes the cover pad, which resets the
-            // forced both-screens state). The desktop trackpad mode is not game mode's and stays.
-            if (CoverPadActivity.mode() == CoverPadActivity.MODE_GAME) CoverPadActivity.stop();
+            // (What the back screen does when game mode goes off is MainActivity's: its toggles.)
         }
     }
 

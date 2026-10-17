@@ -98,6 +98,26 @@ public class MainActivity extends Activity
     // its full size. See relayout() and buildExtraKeysBar().
     private static final String KEY_KEYBOARD_FLOATING = "keyboard_floating";
     private static final String KEY_GAMEPAD_SHOWN = "gamepad_shown";
+    /** Toggles: the back screen as a finger pad in game mode (default on), as a trackpad outside it (default off). */
+    private static final String KEY_BACK_GAME = "back_screen_game", KEY_BACK_DESKTOP = "back_screen_desktop";
+
+    /**
+     * What the back (cover) screen should be, from game mode and the two toggles: the finger pad in game mode, the
+     * trackpad outside it, or off (the screens back to normal). Never while folded - forcing both screens on would
+     * light the inner screen inside the fold.
+     */
+    private void applyBackScreen(boolean gameMode) {
+        SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        int want = FoldWatcher.folded ? -1
+            : gameMode && p.getBoolean(KEY_BACK_GAME, true) ? CoverPadActivity.MODE_GAME
+            : !gameMode && p.getBoolean(KEY_BACK_DESKTOP, false) ? CoverPadActivity.MODE_DESKTOP
+            : -1;
+        if (want < 0) {
+            if (CoverPadActivity.running()) CoverPadActivity.stop();
+        } else if (CoverPadActivity.mode() != want) {
+            CoverPadActivity.start(this, want); // starts it, or switches the running one's mode
+        }
+    }
     private GamepadOverlay mGamepadOverlay;
     private android.os.FileObserver mFocusWatcher;
 
@@ -1286,26 +1306,23 @@ public class MainActivity extends Activity
         b.setAlpha(mGamepadOverlay.getVisibility() == View.VISIBLE ? 1f : 0.6f);
         b.setOnClickListener(v -> {
             boolean show = mGamepadOverlay.getVisibility() != View.VISIBLE;
-            mGamepadOverlay.setShown(show); // hiding also closes the back screen's game pad (GamepadOverlay)
+            mGamepadOverlay.setShown(show);
             v.setAlpha(show ? 1f : 0.6f);
             prefs.edit().putBoolean(KEY_GAMEPAD_SHOWN, show).apply();
-            // Game mode on, unfolded: the back screen's finger pad comes with it. Never while folded - forcing both
-            // screens on would light the inner screen inside the fold.
-            if (show && !FoldWatcher.folded) CoverPadActivity.start(this, CoverPadActivity.MODE_GAME);
+            applyBackScreen(show);
         });
-        // Long-press: a menu - the layout editor, or the back screen as a trackpad for the desktop.
+        // Long-press: a menu - the layout editor and the back screen's toggles.
         b.setOnLongClickListener(v -> {
             v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
             android.widget.PopupMenu menu = new android.widget.PopupMenu(this, v);
             menu.getMenu().add(0, 1, 0, "Edit controls");
-            if (!FoldWatcher.folded)
-                menu.getMenu().add(0, 2, 1, CoverPadActivity.mode() == CoverPadActivity.MODE_DESKTOP
-                    ? "Back screen: trackpad ✓" : "Back screen: trackpad (desktop)");
-            if (CoverPadActivity.running()) {
-                menu.getMenu().add(0, 4, 2, "Back screen: re-learn grip");
-                menu.getMenu().add(0, 3, 3, "Back screen: off");
-            }
+            menu.getMenu().add(0, 2, 1, "Back screen in game mode").setCheckable(true)
+                .setChecked(prefs.getBoolean(KEY_BACK_GAME, true));
+            menu.getMenu().add(0, 3, 2, "Back screen as trackpad (desktop)").setCheckable(true)
+                .setChecked(prefs.getBoolean(KEY_BACK_DESKTOP, false));
+            if (CoverPadActivity.running()) menu.getMenu().add(0, 4, 3, "Back screen: re-learn grip");
             menu.setOnMenuItemClickListener(item -> {
+                boolean gameOn = mGamepadOverlay.getVisibility() == View.VISIBLE;
                 switch (item.getItemId()) {
                     case 1:
                         mGamepadOverlay.setEditing(true, () -> {
@@ -1314,10 +1331,12 @@ public class MainActivity extends Activity
                         });
                         return true;
                     case 2:
-                        CoverPadActivity.start(this, CoverPadActivity.MODE_DESKTOP);
+                        prefs.edit().putBoolean(KEY_BACK_GAME, !item.isChecked()).apply();
+                        applyBackScreen(gameOn);
                         return true;
                     case 3:
-                        CoverPadActivity.stop();
+                        prefs.edit().putBoolean(KEY_BACK_DESKTOP, !item.isChecked()).apply();
+                        applyBackScreen(gameOn);
                         return true;
                     case 4:
                         CoverPadActivity.relearn();
