@@ -30,10 +30,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.omalauncher.linux.LinuxState
@@ -137,9 +138,10 @@ private fun TileButton(
 /**
  * A widget's screen { }, full screen over home in an Omarchy window titled by its `title` or the widget's name. A
  * terminal's screen is the terminal alone, edge to edge, its [extraKeys] always below it, above the keyboard while it's
- * up and above the navigation bar when it's down - sized
- * once per keyboard change, from where the keyboard is going (its animation target): following its slide frame by
- * frame would resize (re-wrap) the terminal every frame, and waiting for it to settle lagged.
+ * up and above the navigation bar when it's down. Sized once per keyboard change, from where the keyboard is going
+ * (its animation target): resizing with every frame of its slide would re-wrap the terminal every frame, and waiting
+ * for it to settle lagged. Placed with every frame though, its bottom riding the keyboard's top, so it slides with the
+ * keyboard as the extra keys do rather than jumping ahead of it.
  */
 @Composable
 internal fun WidgetScreenPanel(
@@ -155,13 +157,11 @@ internal fun WidgetScreenPanel(
         }
         return
     }
-    val density = LocalDensity.current
+    val ime = WindowInsets.ime
     @OptIn(ExperimentalLayoutApi::class)
-    val target = WindowInsets.imeAnimationTarget.getBottom(density)
-    val nav = WindowInsets.navigationBars.getBottom(density)
+    val target = WindowInsets.imeAnimationTarget
+    val nav = WindowInsets.navigationBars
     var keysPx by remember { mutableIntStateOf(0) }
-    // The extra keys sit above the keyboard, or above the navigation bar when it's down.
-    val clear = with(density) { (maxOf(target, nav) + keysPx).toDp() }
     // Edge to edge, no title: it's plainly a terminal, and every column counts. Back closes it (the launcher's
     // back handler), as any widget screen.
     Box(Modifier.fillMaxSize().background(Palette.overlay)) {
@@ -169,12 +169,28 @@ internal fun WidgetScreenPanel(
             Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .padding(bottom = clear)
+                // The terminal's own background down to the keys, so what it uncovers as it slides is the terminal
+                // still, not the home screen through the overlay; and what slides past the status bar is cut off.
                 .background(Palette.background)
+                .clipToBounds()
                 // Its touches stay its own: none reach home behind it.
                 .pointerInput(Unit) { detectTapGestures { } },
         ) {
-            WidgetScreen(instance, Modifier.fillMaxSize())
+            WidgetScreen(
+                instance,
+                Modifier.fillMaxWidth().layout { measurable, constraints ->
+                    // Measured against the keyboard's target (read here: once per keyboard change), the extra keys
+                    // sitting above the keyboard, or above the navigation bar when it's down.
+                    val room = constraints.maxHeight
+                    fun clear(keyboard: Int) = maxOf(keyboard, nav.getBottom(this)) + keysPx
+                    val height = (room - clear(target.getBottom(this))).coerceAtLeast(0)
+                    val terminal = measurable.measure(constraints.copy(minHeight = height, maxHeight = height))
+                    layout(constraints.maxWidth, room) {
+                        // Placed where the keyboard is now (read here: placement only, every frame of its slide).
+                        terminal.place(0, room - clear(ime.getBottom(this@layout)) - height)
+                    }
+                },
+            )
         }
         extraKeys(
             Modifier

@@ -187,6 +187,9 @@ fun HomeScreen(
         snapshotFlow { imeTarget.getBottom(density) == 0 && terminals.keyboard?.wanted == true }.collect { terminals.keyboardLeaving = it }
     }
     var origin by remember { mutableStateOf(Offset.Zero) }
+    // With a widget's screen over home (screenOpen; a terminal's shares the tile's shell), the screen sizes itself to
+    // the keyboard and home stays put under it: lifting and cutting the tile behind it, whose shell had the keys,
+    // relaid it out with every frame of the keyboard's slide, under a screen that was resizing too.
     val extraKeys = terminals.active != null && extraKeysWanted()
     val side = homeSide()
     val turned = homeTurned()
@@ -219,8 +222,8 @@ fun HomeScreen(
                 val keys = if (extraKeys) ExtraKeysHeight.toPx() else 0f
                 translationY =
                     -terminals.liftFor(
-                        imeHeight = ime.getBottom(density),
-                        imeTarget = imeTarget.getBottom(density),
+                        imeHeight = if (screenOpen) 0 else ime.getBottom(density),
+                        imeTarget = if (screenOpen) 0 else imeTarget.getBottom(density),
                         windowHeight = view.height,
                         margin = 8.dp.toPx() + keys,
                         top = statusBar.getTop(density) + EdgeGap.toPx(),
@@ -231,7 +234,7 @@ fun HomeScreen(
             // nothing lifted under the status bar.
             .drawWithContent {
                 val keyboard = ime.getBottom(density)
-                if (terminals.active == null || keyboard == 0) {
+                if (screenOpen || terminals.active == null || keyboard == 0) {
                     drawContent()
                 } else {
                     val keys = if (extraKeys) ExtraKeysHeight.toPx() else 0f
@@ -278,7 +281,7 @@ fun HomeScreen(
                 when (item) {
                     is WidgetItem -> {
                         // Whose terminal has the keyboard: the tile gives up what the keyboard covers once the lift is spent.
-                        val typing = engine.instance(item.spec)?.owns(terminals.active) == true
+                        val typing = !screenOpen && engine.instance(item.spec)?.owns(terminals.active) == true
                         WidgetTile(
                             spec = item.spec,
                             instance = engine.instance(item.spec),
