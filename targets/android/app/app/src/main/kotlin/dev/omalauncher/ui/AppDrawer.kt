@@ -244,7 +244,7 @@ private fun HitCell(
 }
 
 /** Height of the recent apps strip; home keeps this much room for it above the bar, even while it's empty. */
-val RecentStripHeight = 56.dp
+val RecentStripHeight = 64.dp
 
 /**
  * The apps opened lately, on home right above the bar, scrolling sideways; [vertical] stands it up
@@ -258,7 +258,7 @@ internal fun RecentStrip(
     modifier: Modifier = Modifier,
     vertical: Boolean = false,
 ) {
-    val apps = recentApps(runtime, 20)
+    val apps = recentApps(runtime, 5)
     // Nothing opened yet: no strip, but its room stays, so home doesn't shift when the first app shows up.
     if (apps.isEmpty()) {
         Spacer(if (vertical) modifier.width(RecentStripHeight) else modifier.height(RecentStripHeight))
@@ -307,10 +307,10 @@ private fun StripCell(
     val haptics = LocalHapticFeedback.current
     val mono = LauncherStyle.monochromeIcons
     val bare = LauncherStyle.bareAppIcons
-    val size = 40.dp
+    val size = 48.dp
     Box(
         Modifier
-            .size(48.dp)
+            .size(56.dp)
             .alpha(if (paused) PausedAlpha else 1f)
             .clip(LauncherStyle.shape(12.dp))
             .combinedClickable(
