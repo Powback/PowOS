@@ -1,0 +1,22 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] kicker: the dashboard doesn't focus its search field while closing
+
+reset() runs when the dashboard closes as well as when it opens, and it focused the search field both times. After a
+category had taken the focus, that was a change of focus on a closing window, to a text field: on the phone, KWin
+raised Android's keyboard as the menu went away. It focuses the field only while shown now.
+---
+--- a/applets/kicker/DashboardRepresentation.qml
++++ b/applets/kicker/DashboardRepresentation.qml
+@@ -109,7 +109,11 @@
+ 
+     function reset() {
+         searchField.clear();
+-        searchField.forceActiveFocus(Qt.OtherFocusReason)
++        // PowOS: only while shown. Closing runs this too, and focusing the field then - after a category had taken
++        // the focus, so it was a change - gave a closing window a text field's focus: the phone's keyboard came up.
++        if (root.visible) {
++            searchField.forceActiveFocus(Qt.OtherFocusReason)
++        }
+         globalFavoritesGrid.currentIndex = -1;
+         systemFavoritesGrid.currentIndex = -1;
+         filterList.currentIndex = 0;
