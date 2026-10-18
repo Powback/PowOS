@@ -28,6 +28,7 @@ function mock() {
   }));
   const recent = ["a:chrome", "l:konsole", "a:spotify", "a:signal", "l:dolphin", "a:youtube"];
   const data = (name) => `powos-shell:${name}`;
+  let samples = null;
   const pin = (name, x, y) => {
     const a = apps.find((app) => app.label === name);
     return { key: "app:" + a.key.slice(2), kind: "app", page: 1, cell: { x, y, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: [1, 1], label: a.label, app: a.key };
@@ -110,6 +111,19 @@ function mock() {
         }
       },
     },
+    // Trees captured from real widgets on the phone (dev/sample-trees.json), keyed by the mock home's widgets.
+    widgets: {
+      watch: async (key, screen) => {
+        samples ??= fetch("./dev/sample-trees.json").then((r) => r.json()).catch(() => ({}));
+        const tree = (await samples)[key] ?? null;
+        listeners.get("widget.tree")?.forEach((h) => h({ key, screen: !!screen, tree }));
+      },
+      unwatch: async () => {},
+      fire: async (key, screen, id, name, args) => console.log("[mock] fire", key, id, name, args),
+      size: async () => {},
+      canvas: async () => {},
+      page: async () => {},
+    },
     keyboard: { show: async () => {}, hide: async () => {} },
     system: { insets: async () => ({ top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 }) },
     on(event, handler) {
@@ -155,6 +169,14 @@ function android(host) {
       add: (app, page, cell) => call("home.add", app, page, cell ?? null),
       remove: (key) => call("home.remove", key),
       group: (key, target) => call("home.group", key, target),
+    },
+    widgets: {
+      watch: (key, screen) => call("widgets.watch", key, !!screen),
+      unwatch: (key, screen) => call("widgets.unwatch", key, !!screen),
+      fire: (key, screen, id, name, args) => call("widgets.fire", key, !!screen, id, name, args ?? []),
+      size: (key, cols, rows, width, height) => call("widgets.size", key, cols, rows, width, height),
+      canvas: (key, id, width, height) => call("widgets.canvas", key, id, width, height),
+      page: (page) => call("widgets.page", page),
     },
     store: { get: (name) => call("store.get", name), set: (name, value) => call("store.set", name, value) },
     keyboard: { show: () => call("keyboard.show"), hide: () => call("keyboard.hide") },

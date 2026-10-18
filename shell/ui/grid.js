@@ -16,6 +16,7 @@ import { signal } from "@preact/signals";
 import { html } from "./html.js";
 import { byKey, carry, folder, home, launch, page, pages, selected } from "../state.js";
 import { powos } from "../bridge.js";
+import { OwlWidget } from "./owl.js";
 
 const LONG_PRESS_MS = 450;
 const SLOP = 10;
@@ -195,8 +196,9 @@ function Tile({ item }) {
     >
       ${item.kind === "widget" &&
       html`<div class="tile widget-face ${isSelected ? "focused" : ""}">
-        <div class="widget-name">${item.name}</div>
-        ${item.error ? html`<div class="widget-error">${item.error}</div>` : html`<div class="muted">widget (phase 4)</div>`}
+        ${item.error
+          ? html`<div class="widget-name">${item.name}</div><div class="widget-error">${item.error}</div>`
+          : html`<${OwlWidget} widget=${item.key} cells=${item.cell} />`}
       </div>`}
       ${item.kind === "app" && html`<${AppFace} appKey=${item.app} label=${item.label} />`}
       ${item.kind === "folder" &&
@@ -311,6 +313,8 @@ export function Pages() {
   useEffect(() => el.current && measure(el.current, home.value.columns), [home.value]);
   const list = pages.value;
   if (page.value >= list.length) page.value = list.length - 1;
+  // Widgets on the page on screen (and beside it) run their sources; the rest pause.
+  useEffect(() => void powos.widgets.page(list[page.value] ?? 1), [page.value, list.join()]);
   return html`
     <div
       class="pages"

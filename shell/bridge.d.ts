@@ -72,6 +72,22 @@ export interface Bridge {
     /** Drops an app item on another app or a folder: into one folder. Returns the folder's key. */
     group(key: string, target: string): Promise<string | null>;
   };
+  /**
+   * OWL widgets: the host runs them; the page draws their trees, sent as "widget.tree" ({ key, screen, tree }) while
+   * watched, and sends back events and sizes. [screen]: the widget's full-screen block instead of its tile.
+   */
+  widgets: {
+    watch(key: string, screen?: boolean): Promise<void>;
+    unwatch(key: string, screen?: boolean): Promise<void>;
+    /** Runs a handler (onTap, onDrag, onChange) of element [id] with its numbers (x, y, dx, dy in dp). */
+    fire(key: string, screen: boolean, id: string, name: string, args: number[]): Promise<void>;
+    /** The tile's size: cells (cols, rows) and dp. */
+    size(key: string, cols: number, rows: number, width: number, height: number): Promise<void>;
+    /** A Canvas's size in dp: its drawing is evaluated at it. */
+    canvas(key: string, id: string, width: number, height: number): Promise<void>;
+    /** The home page on screen (a page number): widgets on it and beside it run their sources. */
+    page(page: number): Promise<void>;
+  };
   keyboard: {
     show(): Promise<void>;
     hide(): Promise<void>;
@@ -80,7 +96,7 @@ export interface Bridge {
     insets(): Promise<Insets>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "keyboard.inset" (px, every frame of its slide), "system.insets",
+   * Events: "apps.changed", "home.changed", "widget.tree", "keyboard.inset" (px, every frame of its slide), "system.insets",
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

@@ -58,7 +58,13 @@ native host (QtWebEngine or WPE in a layer-shell surface, under KWin). The page 
 
 ## OWL widgets: the store keeps working
 
-The widget language stays the one source of truth: the `owl` module (pure Kotlin, ~3.5k lines; only java.time,
+**On the phone (done first):** the widget engine keeps running OWL natively, exactly as for the Compose launcher -
+its sources, services and state. `WidgetTree.kt` walks a widget's nodes as `Render.kt` does and sends the evaluated
+tree (props as JSON, colors as CSS, a Canvas's drawing as an op list) to the page whenever it changes, tracked by
+`snapshotFlow`; `ui/owl.js` draws it with HTML/SVG/canvas and sends taps, drags and sizes back. Every existing and
+store widget works unchanged, with no second interpreter.
+
+**For PowOS (no JVM there):** the language itself moves to the page: (pure Kotlin, ~3.5k lines; only java.time,
 Base64 and Locale from the JDK) becomes Kotlin Multiplatform with a JS target behind small `expect`/`actual` shims.
 Its JS build (`vendor/owl.js`, an ES module) parses and evaluates widgets in the page; a Preact renderer
 (`ui/owl/`) draws their nodes (Text, Row, Column, Canvas, Terminal, Input, Slider, …) as `Render.kt` does in
@@ -117,6 +123,11 @@ the screen is back on.
 - Phase 2 done: `ShellActivity` + `ShellBridge` (apps, icons, usage, store, keyboard, insets, apps.changed,
   files.changed), verified on the phone over CDP: 49 apps, icons served, store round-trips, insets, the override
   folder served and watched. Not yet: Linux/PowOS apps in the list (the rooted session's apps come with phase 5).
+- Phase 4 (widgets) first part done: the phone's widgets drawn from their live trees (layout, text, buttons,
+  progress, rings, sparklines, images, Canvas drawing incl. sprites and gradients), taps and drags back to their
+  handlers, tile sizes and Canvas sizes reported, the visible page driving which widgets run. Verified on the phone
+  (its six widgets) and in a browser on trees captured from it (dev/sample-trees.json). Not yet: Shader (shows its
+  fallback), Input fields, widget screens (the full-screen block), the store/editing screens.
 - Phase 3 (home) mostly done: the same home as the Compose launcher through `home.*` (ShellHome.kt: its WidgetLayout
   cells and Shortcuts), laid out on its grid (as many rows as fit square cells, or as far down as tiles reach);
   pages with an empty one after the last; tap apps and folders; long-press lifts a tile and drags it (page turns at

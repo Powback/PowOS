@@ -167,7 +167,7 @@
 .home-tile.lifted { opacity: 0.25; }
 .widget-face {
   height: 100%;
-  padding: var(--edge);
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -283,5 +283,25 @@
   grid-template-columns: repeat(3, var(--cell));
   gap: var(--gap);
   padding: var(--edge);
+  background: var(--color-background);
+}
+
+/* OWL widgets (owl.js): the tree fills the tile as Render.kt's WidgetContent, a Column. */
+.owl {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  border-radius: inherit;
+  font: 13px var(--font);
+  color: var(--color-foreground);
+}
+.owl-box > * { grid-area: 1 / 1; }
+.owl-terminal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-muted);
   background: var(--color-background);
 }

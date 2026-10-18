@@ -39,6 +39,7 @@ class ShellBridge(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val data get() = File(activity.filesDir, "shell-data").apply { mkdirs() }
     private val home = ShellHome(runtime)
+    private val widgets = ShellWidgets(runtime, scope, ::emit)
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     init {
@@ -88,6 +89,19 @@ class ShellBridge(
             "home.add" -> home.add(a.getString(0), a.getInt(1), a.optJSONObject(2))
             "home.remove" -> home.remove(a.getString(0))
             "home.group" -> home.group(a.getString(0), a.getString(1))
+            "widgets.watch" -> widgets.watch(a.getString(0), a.optBoolean(1))
+            "widgets.unwatch" -> widgets.unwatch(a.getString(0), a.optBoolean(1))
+            "widgets.fire" ->
+                widgets.fire(
+                    a.getString(0),
+                    a.optBoolean(1),
+                    a.getString(2),
+                    a.getString(3),
+                    a.optJSONArray(4)?.let { l -> List(l.length()) { l.optDouble(it) } }.orEmpty(),
+                )
+            "widgets.size" -> widgets.size(a.getString(0), a.getInt(1), a.getInt(2), a.getDouble(3), a.getDouble(4))
+            "widgets.canvas" -> widgets.canvas(a.getString(0), a.getString(1), a.getDouble(2), a.getDouble(3))
+            "widgets.page" -> widgets.page(a.getInt(0))
             else -> throw IllegalArgumentException("no such call: $method")
         }
 

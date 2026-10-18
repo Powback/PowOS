@@ -132,6 +132,10 @@ class ShellActivity : Activity() {
             if ("${url.scheme}://${url.host}" != ORIGIN) return null
             val path = url.path.orEmpty().trimStart('/').ifEmpty { "index.html" }
             if (path.startsWith("_icon/")) return icon(URLDecoder.decode(path.removePrefix("_icon/"), "UTF-8"))
+            if (path.startsWith("_wimg/")) {
+                val rest = path.removePrefix("_wimg/")
+                return widgetImage(URLDecoder.decode(rest.substringBefore('/'), "UTF-8"), URLDecoder.decode(rest.substringAfter('/'), "UTF-8"))
+            }
             if (".." in path.split('/')) return notFound()
             val stream = open(path) ?: return notFound()
             return WebResourceResponse(mime(path), "utf-8", stream).apply {
@@ -163,6 +167,18 @@ class ShellActivity : Activity() {
         return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply {
             responseHeaders = mapOf("Cache-Control" to "max-age=3600")
         }
+    }
+
+    /** A widget's Image src (a file, media: art, an icon), as its instance loads it for the Compose tile. */
+    private fun widgetImage(
+        key: String,
+        src: String,
+    ): WebResourceResponse {
+        val engine = runtime.widgets
+        val inst = engine.specs.firstOrNull { it.file.name == key }?.let(engine::instance) ?: return notFound()
+        val bitmap = inst.image(src) ?: return notFound()
+        val png = ByteArrayOutputStream().also { bitmap.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
     }
 
     private fun notFound() = WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
