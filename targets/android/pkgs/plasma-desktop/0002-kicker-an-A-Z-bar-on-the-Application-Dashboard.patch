@@ -52,7 +52,7 @@ else the next one. The current letter is highlighted while the finger is on the 
 +            }
 +        }
 +
-+        // PowOS: an A-Z bar at the right edge, as a phone's app drawer has: tap a letter, or slide along the bar, and
++        // PowOS: an A-Z bar on the right, as a phone's app drawer has: tap a letter, or slide along the bar, and
 +        // All Applications scrolls to that letter's apps.
 +        Item {
 +            id: letterBar
@@ -63,11 +63,11 @@ else the next one. The current letter is highlighted while the finger is on the 
 +            // Compact: a line per letter, centered beside the grid (not stretched to its height).
 +            readonly property real letterHeight: Math.min(Kirigami.Units.gridUnit * 1.2, middleRow.height / letters.length)
 +
-+            anchors {
-+                right: parent.right
-+                rightMargin: Kirigami.Units.smallSpacing
-+                verticalCenter: middleRow.verticalCenter
-+            }
++            // In from the screen's edge: just right of the categories, in the gap beside them, never nearer the edge
++            // than two grid units (a thumb at the edge kept missing it, and the edge is Android's back gesture).
++            x: Math.min(parent.width - width - Kirigami.Units.gridUnit * 2,
++                        middleRow.x + middleRow.width + Kirigami.Units.smallSpacing)
++            anchors.verticalCenter: middleRow.verticalCenter
 +            width: Kirigami.Units.gridUnit * 2
 +            height: letterHeight * letters.length
 +            z: 10
