@@ -281,7 +281,11 @@ private fun ThemesOverlay(
                 // Always, keyboard up or not: the arrows and the rest are what a phone keyboard lacks anyway. Where
                 // they are, as home's: a press there isn't "outside the terminal" (which lets go of it).
                 DisposableEffect(Unit) { onDispose { runtime.terminals.extraKeys = null } }
-                ExtraKeys(runtime.keyboard, m.onGloballyPositioned { runtime.terminals.extraKeys = it.boundsInWindow() })
+                ExtraKeys(
+                    runtime.keyboard,
+                    m.onGloballyPositioned { runtime.terminals.extraKeys = it.boundsInWindow() },
+                    onHideKeyboard = { runtime.terminals.keyboard?.hide() },
+                )
             }
         }
     }

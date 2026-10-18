@@ -110,7 +110,7 @@ class PowosTerminalActivity : ComponentActivity() {
                         }
                     }
                     // Below the terminal rather than over it, so its rows shrink and nothing hides behind the keys.
-                    if (extraKeysWanted()) ExtraKeys(keys)
+                    if (extraKeysWanted()) ExtraKeys(keys, onHideKeyboard = { sink?.hide() })
                 }
             }
         }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -46,6 +47,7 @@ import kotlinx.coroutines.launch
 private val RowHeight = 40.dp
 private val KeyGap = 3.dp
 private val FrameWidth = 2.dp
+private val HideKeyWidth = 40.dp
 
 /** The gap between the bar and the keyboard, and to the screen's sides: the tiles' gap. */
 private val Gap = 6.dp
@@ -113,28 +115,61 @@ fun extraKeysWanted(): Boolean {
  * The keys a phone keyboard lacks, docked above it for terminals: a framed
  * panel of keycaps, like the tiles above it. Keys never take focus, so the
  * soft keyboard stays up; ctrl and alt latch for the next key on a tap and
- * lock on a long press.
+ * lock on a long press. While the keyboard is up, a key at either end puts it
+ * away ([onHideKeyboard]): within a thumb's reach in either hand, where the
+ * navigation bar's own is on one side only.
  */
 @Composable
 fun ExtraKeys(
     bridge: KeyboardBridge,
     modifier: Modifier = Modifier,
+    onHideKeyboard: () -> Unit,
 ) {
-    Column(
+    val hide = extraKeysWanted()
+    Row(
         modifier
             .fillMaxWidth()
             .padding(start = Gap, end = Gap, bottom = Gap)
             .frame(FrameWidth, Palette.border, Palette.background, radius = 12.dp)
             .padding(KeyGap),
     ) {
-        for (row in Layout) {
-            Row(Modifier.fillMaxWidth().height(RowHeight)) {
-                for (key in row) {
-                    val cap = Modifier.weight(1f).fillMaxHeight().padding(KeyGap)
-                    when (key) {
-                        is Plain -> PlainKey(key, bridge, cap)
-                        is Sticky -> StickyKey(key, key.modifier(bridge), cap)
-                    }
+        if (hide) HideKey(onHideKeyboard)
+        Column(Modifier.weight(1f)) { KeyRows(bridge) }
+        if (hide) HideKey(onHideKeyboard)
+    }
+}
+
+/** Puts the soft keyboard away: as tall as both rows, a chevron pointing down. */
+@Composable
+private fun HideKey(onHide: () -> Unit) {
+    val view = LocalView.current
+    var pressed by remember { mutableStateOf(false) }
+    KeyCap(
+        Modifier.width(HideKeyWidth).height(RowHeight * 2).padding(KeyGap).pointerInput(onHide) {
+            presses {
+                pressed = true
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                val up = waitForUpOrCancellation() != null
+                pressed = false
+                if (up) onHide()
+            }
+        },
+        fill = if (pressed) Palette.accent else Palette.surface,
+    ) {
+        val color = if (pressed) Palette.background else Palette.foreground
+        Image(Icons.Chevron, "hide keyboard", Modifier.size(20.dp).rotate(180f), colorFilter = ColorFilter.tint(color))
+    }
+}
+
+@Composable
+private fun KeyRows(bridge: KeyboardBridge) {
+    for (row in Layout) {
+        Row(Modifier.fillMaxWidth().height(RowHeight)) {
+            for (key in row) {
+                val cap = Modifier.weight(1f).fillMaxHeight().padding(KeyGap)
+                when (key) {
+                    is Plain -> PlainKey(key, bridge, cap)
+                    is Sticky -> StickyKey(key, key.modifier(bridge), cap)
                 }
             }
         }
