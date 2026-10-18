@@ -61,6 +61,22 @@
                 <data android:scheme="https" android:host="simonschubert.github.io" android:pathPrefix="/omarchy-widgets/w" />
             </intent-filter>
         </activity>
+        <!-- The launcher as a web UI (shell/, see shell/DESIGN.md): a preview beside the Compose launcher until it
+             matches it. Its own task and app entry; the page lays itself out around the keyboard (adjustNothing). -->
+        <activity
+            android:name=".shell.ShellActivity"
+            android:label="PowOS Shell (preview)"
+            android:taskAffinity="com.powos.app.shell"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustNothing">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <!-- Android's home screen when it should be the launcher (andro.marchy.HomeScreen switches this and the
              engine's .HomeDesktop alias; one is enabled). -->
         <activity-alias

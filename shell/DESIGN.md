@@ -100,5 +100,20 @@ clobber customizations and "reset" is deleting the override.
 
 ## Working on it
 
-Any static server works, against the mock bridge: `cd shell && python3 -m http.server` and open it at phone size in a
-browser's device mode. The host-side pieces (Android WebView, PowOS) are phases 2 and 7.
+- **In a browser**, against the mock bridge: `cd shell && python3 -m http.server`, open it at phone size in the
+  browser's device mode.
+- **On the phone**: the app's "PowOS Shell (preview)" entry (`dev.omalauncher.shell.ShellActivity`). Edit live with
+  `shell/push.sh <file>...` - it lands in the app's override folder (`files/shell`) and the shell hot-reloads it;
+  `shell/push.sh --reset` drops the overrides. The WebView is debuggable: `adb forward tcp:9333
+  localabstract:webview_devtools_remote_<pid>`, then Chrome's devtools (or Playwright `connectOverCDP`) on it.
+- A LAN dev server instead of the shipped files: put its URL in the app's `files/shell-dev-url`.
+
+Note: a WebView behind the lock screen doesn't navigate - a reload (and so a hot reload of a module) happens when
+the screen is back on.
+
+## Status
+
+- Phase 1 done: the scaffold, runnable in a browser.
+- Phase 2 done: `ShellActivity` + `ShellBridge` (apps, icons, usage, store, keyboard, insets, apps.changed,
+  files.changed), verified on the phone over CDP: 49 apps, icons served, store round-trips, insets, the override
+  folder served and watched. Not yet: Linux/PowOS apps in the list (the rooted session's apps come with phase 5).

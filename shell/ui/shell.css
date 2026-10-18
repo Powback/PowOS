@@ -5,7 +5,12 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* The host's insets (app.js), else the browser's safe areas; the keyboard lifts the bar above it. */
+  padding:
+    var(--inset-top, env(safe-area-inset-top))
+    var(--inset-right, env(safe-area-inset-right))
+    max(var(--inset-bottom, env(safe-area-inset-bottom)), var(--inset-keyboard, 0px))
+    var(--inset-left, env(safe-area-inset-left));
 }
 .pages { flex: 1; }
 

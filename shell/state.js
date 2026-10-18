@@ -22,7 +22,15 @@ export async function load() {
   dock.value = Array.isArray(pins) ? pins : [];
 }
 
-powos.on("apps.changed", async () => (apps.value = await powos.apps.list()));
+// The host's list arrives after the page (it loads apps in the background): the recent strip, filtered to installed
+// apps, follows it. Back on screen, the strip shows what was opened meanwhile.
+powos.on("apps.changed", async () => {
+  apps.value = await powos.apps.list();
+  recent.value = await powos.usage.recent(5);
+});
+document.addEventListener("visibilitychange", async () => {
+  if (!document.hidden) recent.value = await powos.usage.recent(5);
+});
 
 export async function launch(key) {
   await powos.apps.launch(key);

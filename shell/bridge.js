@@ -58,7 +58,7 @@ function mock() {
       },
     },
     keyboard: { show: async () => {}, hide: async () => {} },
-    system: { insets: async () => ({ top: 0, bottom: 0, left: 0, right: 0 }) },
+    system: { insets: async () => ({ top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 }) },
     on(event, handler) {
       if (!listeners.has(event)) listeners.set(event, new Set());
       listeners.get(event).add(handler);
@@ -67,4 +67,44 @@ function mock() {
   };
 }
 
-export const powos = window.powos ?? mock();
+/**
+ * The phone's WebView (ShellBridge.kt): one native entry, PowosHost.call(id, method, argsJson), answered through
+ * window.__powosHost.resolve / reject; events arrive through window.__powosHost.emit.
+ * @returns {import('./bridge').Bridge}
+ */
+function android(host) {
+  const pending = new Map();
+  const listeners = new Map();
+  let next = 1;
+  window.__powosHost = {
+    resolve: (id, value) => (pending.get(id)?.[0](value), pending.delete(id)),
+    reject: (id, message) => (pending.get(id)?.[1](new Error(message)), pending.delete(id)),
+    emit: (event, data) => listeners.get(event)?.forEach((handler) => handler(data)),
+  };
+  const call = (method, ...args) =>
+    new Promise((resolve, reject) => {
+      const id = next++;
+      pending.set(id, [resolve, reject]);
+      host.call(id, method, JSON.stringify(args));
+    });
+  return {
+    host: "android",
+    apps: {
+      list: () => call("apps.list"),
+      launch: (key) => call("apps.launch", key),
+      info: (key) => call("apps.info", key),
+      uninstall: (key) => call("apps.uninstall", key),
+    },
+    usage: { recent: (limit) => call("usage.recent", limit) },
+    store: { get: (name) => call("store.get", name), set: (name, value) => call("store.set", name, value) },
+    keyboard: { show: () => call("keyboard.show"), hide: () => call("keyboard.hide") },
+    system: { insets: () => call("system.insets") },
+    on(event, handler) {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event).add(handler);
+      return () => listeners.get(event).delete(handler);
+    },
+  };
+}
+
+export const powos = window.powos ?? (window.PowosHost ? android(window.PowosHost) : mock());

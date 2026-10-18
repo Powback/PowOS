@@ -16,7 +16,8 @@ export interface App {
   system?: boolean;
 }
 
-export interface Insets { top: number; bottom: number; left: number; right: number; }
+/** CSS px; [keyboard] is the soft keyboard's height (0 while it's down). */
+export interface Insets { top: number; bottom: number; left: number; right: number; keyboard: number; }
 
 export interface Bridge {
   /** "android" | "powos" | "mock" */

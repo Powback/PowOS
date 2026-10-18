@@ -72,6 +72,16 @@ android {
     }
 }
 
+// The launcher's web UI (the repo's shell/, see shell/DESIGN.md), shipped as assets/shell: the copy the app falls back
+// to under the user's own files. Plain files, copied as they are - the shell has no build step.
+val shellAssets = layout.buildDirectory.dir("generated/shell-assets").get().asFile
+val copyShell by tasks.registering(Sync::class) {
+    from(rootProject.file("../../../shell")) { exclude("DESIGN.md", "**/*.d.ts") }
+    into(shellAssets.resolve("shell"))
+}
+android.sourceSets.getByName("main").assets.srcDir(shellAssets)
+tasks.named("preBuild") { dependsOn(copyShell) }
+
 composeCompiler {
     stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("app/compose-stability.conf"))
 }
