@@ -45,6 +45,8 @@ class ShellActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The launcher's runtime (themes, widgets, the PowOS session), as MainActivity starts it; started once.
+        runtime.start()
         overrides.mkdirs()
         window.setDecorFitsSystemWindows(false)
         web =
@@ -100,6 +102,17 @@ class ShellActivity : Activity() {
         observer.startWatching()
         watchers += observer
         dir.listFiles()?.filter { it.isDirectory }?.forEach(::watch)
+    }
+
+    // A home screen showing: widgets' sources run (they pause while no home is visible).
+    override fun onStart() {
+        super.onStart()
+        runtime.widgets.homeStarted()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        runtime.widgets.homeStopped()
     }
 
     override fun onDestroy() {

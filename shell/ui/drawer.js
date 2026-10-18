@@ -90,12 +90,12 @@ export function Drawer() {
     <div class="drawer">
       <div class="drawer-list" ref=${list}>
         ${searching
-          ? html`<div class="grid">${matches.value.map((app) => html`<${AppCell} key=${app.key} app=${app} />`)}</div>`
+          ? html`<div class="grid">${matches.value.map((app) => html`<${AppCell} key=${app.key} app=${app} drawerCell />`)}</div>`
           : sections.value.map(
               ([letter, group]) => html`
                 <section key=${letter}>
                   <h2 class="heading muted" data-letter=${letter}>${letter}</h2>
-                  <div class="grid">${group.map((app) => html`<${AppCell} key=${app.key} app=${app} />`)}</div>
+                  <div class="grid">${group.map((app) => html`<${AppCell} key=${app.key} app=${app} drawerCell />`)}</div>
                 </section>
               `,
             )}

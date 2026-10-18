@@ -38,6 +38,7 @@ class ShellBridge(
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val data get() = File(activity.filesDir, "shell-data").apply { mkdirs() }
+    private val home = ShellHome(runtime)
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     init {
@@ -46,6 +47,8 @@ class ShellBridge(
             snapshotFlow { runtime.androidApps.apps.size to runtime.linuxApps.size }.drop(1).collect { emit("apps.changed", null) }
         }
         scope.launch { runtime.refreshApps() }
+        // The home screen changed (here, in the Compose launcher, or a widget file arriving): the page re-reads it.
+        scope.launch { snapshotFlow { home.fingerprint() }.drop(1).collect { emit("home.changed", null) } }
     }
 
     @JavascriptInterface
@@ -80,6 +83,11 @@ class ShellBridge(
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
+            "home.get" -> home.snapshot()
+            "home.place" -> home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
+            "home.add" -> home.add(a.getString(0), a.getInt(1), a.optJSONObject(2))
+            "home.remove" -> home.remove(a.getString(0))
+            "home.group" -> home.group(a.getString(0), a.getString(1))
             else -> throw IllegalArgumentException("no such call: $method")
         }
 

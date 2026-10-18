@@ -117,3 +117,10 @@ the screen is back on.
 - Phase 2 done: `ShellActivity` + `ShellBridge` (apps, icons, usage, store, keyboard, insets, apps.changed,
   files.changed), verified on the phone over CDP: 49 apps, icons served, store round-trips, insets, the override
   folder served and watched. Not yet: Linux/PowOS apps in the list (the rooted session's apps come with phase 5).
+- Phase 3 (home) mostly done: the same home as the Compose launcher through `home.*` (ShellHome.kt: its WidgetLayout
+  cells and Shortcuts), laid out on its grid (as many rows as fit square cells, or as far down as tiles reach);
+  pages with an empty one after the last; tap apps and folders; long-press lifts a tile and drags it (page turns at
+  the sides), drop an app on an app or a folder to group them, select a widget to resize or remove it; drag an app
+  out of the drawer onto home. Verified in a browser (mock) and over CDP on the phone (its real widgets and cells).
+  Widgets show as named placeholders until phase 4 (OWL). Not yet: reordering inside an open folder, taking an app
+  out of a folder.

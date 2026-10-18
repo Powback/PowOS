@@ -7,7 +7,8 @@ import { html } from "./html.js";
 import { AppCell } from "./apps.js";
 import { Bar } from "./bar.js";
 import { Drawer } from "./drawer.js";
-import { byKey, drawer, query, recent } from "../state.js";
+import { Pages } from "./grid.js";
+import { byKey, carry, drawer, query, recent, selected } from "../state.js";
 import { powos } from "../bridge.js";
 
 const SWIPE = 48;
@@ -27,7 +28,8 @@ function useSwipe() {
   return {
     onPointerDown: (e) => (from.current = [e.clientX, e.clientY]),
     onPointerUp: (e) => {
-      if (!from.current) return;
+      // A tile being carried or edited owns its touches.
+      if (!from.current || carry.value || selected.value) return (from.current = null);
       const dx = e.clientX - from.current[0];
       const dy = e.clientY - from.current[1];
       from.current = null;
@@ -50,7 +52,7 @@ export function Home() {
   const open = drawer.value > 0;
   return html`
     <div class="home" ...${swipe}>
-      ${!open && html`<div class="pages"></div>`}
+      ${!open && html`<${Pages} />`}
       ${open && html`<div class="scrim" onClick=${close}></div>`}
       ${open && html`<${Drawer} />`}
       ${!open && html`<${RecentStrip} />`}

@@ -28,6 +28,26 @@ function mock() {
   }));
   const recent = ["a:chrome", "l:konsole", "a:spotify", "a:signal", "l:dolphin", "a:youtube"];
   const data = (name) => `powos-shell:${name}`;
+  const pin = (name, x, y) => {
+    const a = apps.find((app) => app.label === name);
+    return { key: "app:" + a.key.slice(2), kind: "app", page: 1, cell: { x, y, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: [1, 1], label: a.label, app: a.key };
+  };
+  const home = {
+    columns: 6,
+    pages: [1, 2],
+    items: [
+      { key: "clock.owl", kind: "widget", page: 1, cell: { x: 0, y: 0, w: 6, h: 2 }, resizable: true, minSize: [2, 1], size: [6, 2], name: "Clock" },
+      { key: "weather.owl", kind: "widget", page: 1, cell: { x: 0, y: 2, w: 3, h: 2 }, resizable: true, minSize: [2, 2], size: [3, 2], name: "Weather" },
+      pin("Chrome", 3, 2),
+      pin("Signal", 4, 2),
+      pin("Spotify", 5, 2),
+      { key: "monitor.owl", kind: "widget", page: 2, cell: { x: 0, y: 0, w: 4, h: 3 }, resizable: true, minSize: [2, 2], size: [4, 3], name: "Monitor" },
+    ],
+  };
+  const changed = () => {
+    home.pages = [...new Set(home.items.map((i) => i.page))].sort((a, b) => a - b);
+    listeners.get("home.changed")?.forEach((h) => h(null));
+  };
   return {
     host: "mock",
     apps: {
@@ -41,6 +61,39 @@ function mock() {
       uninstall: async (key) => console.log("[mock] uninstall", key),
     },
     usage: { recent: async (limit) => recent.slice(0, limit) },
+    home: {
+      get: async () => structuredClone(home),
+      place: async (key, cell, page) => {
+        Object.assign(home.items.find((i) => i.key === key), { cell, page });
+        changed();
+      },
+      add: async (app, page, cell) => {
+        const a = apps.find((x) => x.key === app);
+        const key = (a.kind === "linux" ? "linux:" : "app:") + a.key.slice(2);
+        home.items = home.items.filter((i) => i.key !== key);
+        home.items.push({ key, kind: "app", page, cell: cell ?? null, resizable: false, minSize: [1, 1], size: [1, 1], label: a.label, app });
+        changed();
+        return key;
+      },
+      remove: async (key) => {
+        home.items = home.items.filter((i) => i.key !== key);
+        changed();
+      },
+      group: async (key, target) => {
+        const item = home.items.find((i) => i.key === key);
+        const into = home.items.find((i) => i.key === target);
+        if (!item || !into || item.kind !== "app") return null;
+        home.items = home.items.filter((i) => i.key !== key);
+        const entry = { key: item.key, label: item.label, app: item.app };
+        if (into.kind === "folder") into.apps.push(entry);
+        else {
+          home.items = home.items.filter((i) => i.key !== target);
+          home.items.push({ ...into, key: "folder:" + Date.now(), kind: "folder", apps: [{ key: into.key, label: into.label, app: into.app }, entry] });
+        }
+        changed();
+        return null;
+      },
+    },
     store: {
       get: async (name) => {
         try {
@@ -96,6 +149,13 @@ function android(host) {
       uninstall: (key) => call("apps.uninstall", key),
     },
     usage: { recent: (limit) => call("usage.recent", limit) },
+    home: {
+      get: () => call("home.get"),
+      place: (key, cell, page) => call("home.place", key, cell, page),
+      add: (app, page, cell) => call("home.add", app, page, cell ?? null),
+      remove: (key) => call("home.remove", key),
+      group: (key, target) => call("home.group", key, target),
+    },
     store: { get: (name) => call("store.get", name), set: (name, value) => call("store.set", name, value) },
     keyboard: { show: () => call("keyboard.show"), hide: () => call("keyboard.hide") },
     system: { insets: () => call("system.insets") },

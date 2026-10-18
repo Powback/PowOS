@@ -1,18 +1,24 @@
 /** An app: its icon and label; a tap opens it, a long press shows its actions. */
 import { useRef, useState } from "preact/hooks";
 import { html } from "./html.js";
-import { dock, launch, setDocked } from "../state.js";
+import { dock, drawer, launch, query, setDocked } from "../state.js";
+import { startCarry } from "./grid.js";
 import { powos } from "../bridge.js";
 
 const LONG_PRESS_MS = 450;
 
-/** Press-and-hold without a move opens the menu; a tap launches. */
-function usePress(onTap, onLong) {
+/**
+ * Press-and-hold without a move opens the menu; a tap launches. Held and then moved ([onDrag], the drawer's cells):
+ * the menu gives way to dragging the app onto home.
+ */
+function usePress(onTap, onLong, onDrag) {
   const timer = useRef(0);
   const start = useRef(null);
   const longed = useRef(false);
   return {
     onPointerDown: (e) => {
+      // Its moves stay its own once the menu's scrim is under the finger: a held app can still be dragged out.
+      e.currentTarget.setPointerCapture?.(e.pointerId);
       start.current = [e.clientX, e.clientY];
       longed.current = false;
       timer.current = setTimeout(() => {
@@ -22,8 +28,14 @@ function usePress(onTap, onLong) {
       }, LONG_PRESS_MS);
     },
     onPointerMove: (e) => {
-      const [x, y] = start.current ?? [e.clientX, e.clientY];
-      if (Math.hypot(e.clientX - x, e.clientY - y) > 10) clearTimeout(timer.current);
+      if (!start.current) return;
+      const [x, y] = start.current;
+      const far = Math.hypot(e.clientX - x, e.clientY - y) > 10;
+      if (far && !longed.current) clearTimeout(timer.current);
+      if (far && longed.current && onDrag) {
+        start.current = null;
+        onDrag(e);
+      }
     },
     onPointerUp: () => {
       clearTimeout(timer.current);
@@ -54,9 +66,21 @@ function Menu({ app, onClose }) {
 }
 
 /** [labels]: a drawer cell has its name under it; the strip and the dock show icons alone. */
-export function AppCell({ app, labels = true, size = "var(--icon)" }) {
+export function AppCell({ app, labels = true, size = "var(--icon)", drawerCell = false }) {
   const [menu, setMenu] = useState(false);
-  const press = usePress(() => launch(app.key), () => setMenu(true));
+  const press = usePress(
+    () => launch(app.key),
+    () => setMenu(true),
+    // From the drawer: the drawer closes under the finger and the app goes where it's dropped on home.
+    drawerCell
+      ? (e) => {
+          setMenu(false);
+          drawer.value = 0;
+          query.value = "";
+          startCarry({ app: app.key }, e, { x: 30, y: 30 });
+        }
+      : null,
+  );
   return html`
     <div class="app" ...${press}>
       <img class="app-icon" src=${app.icon} alt="" draggable="false" style=${{ width: size, height: size }} />

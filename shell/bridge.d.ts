@@ -19,6 +19,30 @@ export interface App {
 /** CSS px; [keyboard] is the soft keyboard's height (0 while it's down). */
 export interface Insets { top: number; bottom: number; left: number; right: number; keyboard: number; }
 
+export interface Cell { x: number; y: number; w: number; h: number; }
+
+/** Something on a home page: a widget, a pinned app or a folder of them. */
+export interface HomeItem {
+  key: string;
+  kind: "widget" | "app" | "folder";
+  page: number;
+  /** Its place on the page's grid; null until placed. */
+  cell: Cell | null;
+  resizable: boolean;
+  minSize: [number, number];
+  size: [number, number] | null;
+  /** widget */
+  name?: string;
+  error?: string;
+  /** app: its label and the drawer's key for it */
+  label?: string;
+  app?: string;
+  /** folder */
+  apps?: { key: string; label: string; app: string }[];
+}
+
+export interface Home { columns: number; pages: number[]; items: HomeItem[]; }
+
 export interface Bridge {
   /** "android" | "powos" | "mock" */
   host: string;
@@ -37,6 +61,17 @@ export interface Bridge {
     get<T = unknown>(name: string): Promise<T | null>;
     set(name: string, value: unknown): Promise<void>;
   };
+  /** The home screen, shared with the Compose launcher while both exist. */
+  home: {
+    get(): Promise<Home>;
+    /** Moves or resizes an item (to another page too). */
+    place(key: string, cell: Cell, page: number): Promise<void>;
+    /** Pins an app (a drawer key) to a page, at a cell if given; returns the item's key. */
+    add(app: string, page: number, cell?: Cell): Promise<string>;
+    remove(key: string): Promise<void>;
+    /** Drops an app item on another app or a folder: into one folder. Returns the folder's key. */
+    group(key: string, target: string): Promise<string | null>;
+  };
   keyboard: {
     show(): Promise<void>;
     hide(): Promise<void>;
@@ -45,7 +80,7 @@ export interface Bridge {
     insets(): Promise<Insets>;
   };
   /**
-   * Events: "apps.changed", "keyboard.inset" (px, every frame of its slide), "system.insets",
+   * Events: "apps.changed", "home.changed", "keyboard.inset" (px, every frame of its slide), "system.insets",
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
