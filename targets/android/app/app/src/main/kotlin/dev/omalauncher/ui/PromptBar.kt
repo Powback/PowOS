@@ -209,13 +209,10 @@ internal fun PromptBar(
         }
         state.promptRequest = null
     }
-    // The panel and the bar open and close together: opening it (Super+Space, a widget) focuses the bar, closing it lets go.
+    // Closing the panel lets go of the bar. Opening it doesn't take it: swiped up, the panel is for browsing, and the
+    // keyboard covered half of it; a tap on the bar (or Super+A, Super+Space) is what starts typing (PromptRequest.Type).
     LaunchedEffect(panelShown) {
-        // Opened to dictate, the keyboard stays down.
-        if (panelShown && !speech.listening) {
-            focus.requestFocus()
-            keyboard?.show()
-        } else if (!panelShown && focused) {
+        if (!panelShown && focused) {
             focusManager.clearFocus()
             keyboard?.hide()
         }

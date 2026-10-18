@@ -173,6 +173,8 @@ private fun DesktopScreen(
                 },
                 uninstall = { app -> runtime.androidApps.uninstall(app) },
                 phoneHome = if (powos) { app -> PowosShortcuts.requestPin(context, app) } else null,
+                docked = { hit -> hit.key in runtime.drawerPins },
+                dock = { hit, on -> if (on) runtime.drawerPins.pin(hit.key) else runtime.drawerPins.unpin(hit.key) },
             )
         }
 

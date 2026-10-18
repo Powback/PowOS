@@ -11,6 +11,14 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.abs
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.rememberCoroutineScope
+import java.text.Collator
+import java.text.Normalizer
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
@@ -207,7 +215,16 @@ internal class AppHandlers(
     val uninstall: (AndroidApp) -> Unit,
     /** A PowOS app (rooted mode) onto the phone's own home screen, as an Android shortcut; null where there's none. */
     val phoneHome: ((LinuxApp) -> Unit)? = null,
+    /** Whether an app is on the drawer's dock ([DockRow]), and putting it on or taking it off. */
+    val docked: (AppHit) -> Boolean = { false },
+    val dock: (AppHit, Boolean) -> Unit = { _, _ -> },
 )
+
+/** The menu's dock entry: pins the app to the drawer's dock, or takes it off. */
+private fun AppHit.dockAction(handlers: AppHandlers): Pair<String, () -> Unit> {
+    val on = handlers.docked(this)
+    return (if (on) "unpin from dock" else "pin to dock") to { handlers.dock(this, !on) }
+}
 
 /** The long-press menu of an app cell: pin to home, and for Android apps their info and uninstall. */
 private fun AppHit.actions(handlers: AppHandlers): List<Pair<String, () -> Unit>> =
@@ -215,11 +232,13 @@ private fun AppHit.actions(handlers: AppHandlers): List<Pair<String, () -> Unit>
         is AppHit.Linux ->
             listOfNotNull(
                 "add to home" to { handlers.pin(this) },
+                dockAction(handlers),
                 handlers.phoneHome?.let { add -> "add to phone home" to { add(app) } },
             )
         is AppHit.Android ->
             listOfNotNull(
                 "add to home" to { handlers.pin(this) },
+                dockAction(handlers),
                 "app info" to { handlers.info(app) },
                 if (app.system) null else "uninstall" to { handlers.uninstall(app) },
             )
@@ -244,7 +263,7 @@ private fun HitCell(
 }
 
 /** Height of the recent apps strip; home keeps this much room for it above the bar, even while it's empty. */
-val RecentStripHeight = 64.dp
+val RecentStripHeight = 76.dp
 
 /**
  * The apps opened lately, on home right above the bar, scrolling sideways; [vertical] stands it up
@@ -307,10 +326,10 @@ private fun StripCell(
     val haptics = LocalHapticFeedback.current
     val mono = LauncherStyle.monochromeIcons
     val bare = LauncherStyle.bareAppIcons
-    val size = 48.dp
+    val size = 56.dp
     Box(
         Modifier
-            .size(56.dp)
+            .size(64.dp)
             .alpha(if (paused) PausedAlpha else 1f)
             .clip(LauncherStyle.shape(12.dp))
             .combinedClickable(
@@ -444,7 +463,8 @@ internal fun AppPanel(
             Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.Bottom) {
                 // Clipped, so rows scrolled up or stretched by an overscroll stop short of the settings button.
                 BoxWithConstraints(Modifier.weight(1f, fill = false).clipToBounds().swipeTabs(runtime, state)) {
-                    val columns = (maxWidth / 76.dp).toInt().coerceAtLeast(1)
+                    // Less the A-Z bar, which stands beside the rows.
+                    val columns = ((maxWidth - LetterBarWidth) / 76.dp).toInt().coerceAtLeast(1)
                     // A tab slides in from the side it was swiped or tapped towards; search results just take the list's place.
                     AnimatedContent(
                         targetState = tab.takeIf { query.isBlank() },
@@ -462,73 +482,189 @@ internal fun AppPanel(
                         label = "drawer tab",
                     ) { shown ->
                         val listState = rememberLazyListState()
-                        // New results start at the bar, where the best match is.
-                        if (shown == null) LaunchedEffect(search) { listState.scrollToItem(0) }
-                        // Search results bottom-up, so the best match sits right above the bar; the full list reads
-                        // top-down from its start, like stock drawers, so a drag down there closes the panel right away.
-                        LazyColumn(
-                            state = listState,
-                            reverseLayout = shown == null,
-                            modifier = Modifier.fillMaxWidth().nestedScroll(pullToClose),
-                            contentPadding = PaddingValues(top = 8.dp, bottom = 4.dp),
-                        ) {
-                            fun row(
-                                key: String,
-                                cells: List<AppHit>,
-                                selected: Int = -1,
-                            ) = item(key = key) {
-                                Row(Modifier.fillMaxWidth()) {
-                                    cells.forEachIndexed { i, hit -> Box(Modifier.weight(1f)) { HitCell(runtime, hit, handlers, selected = i == selected) } }
-                                    repeat(columns - cells.size) { Spacer(Modifier.weight(1f)) }
-                                }
-                            }
-
-                            // One with actions shows its title even without apps.
-                            fun section(
-                                title: String,
-                                hits: List<AppHit>,
-                                actions: List<Pair<String, () -> Unit>> = emptyList(),
-                            ) {
-                                if (hits.isEmpty() && actions.isEmpty()) return
-                                item(key = "h:$title") { Section(title, actions) }
-                                hits.chunked(columns).forEachIndexed { r, cells -> row("$title:$r", cells) }
-                            }
-
-                            when (shown) {
-                                null -> search.hits.chunked(columns).forEachIndexed { r, cells -> row("q:$r", cells, highlighted - r * columns) }
-                                DrawerTab.Work -> {
-                                    val paused = apps.workProfiles.any { apps.paused(it) }
-                                    section(
-                                        if (paused) "work apps paused" else "work apps",
-                                        apps.apps.filter { it.work }.map { AppHit.Android(it) },
-                                        listOf((if (paused) "turn on" else "pause") to { apps.pauseWork(!paused) }),
-                                    )
-                                }
+                        val scope = rememberCoroutineScope()
+                        // The personal tab: every app in one list, A to Z under letter headings, as PowOS's start
+                        // menu lists All Applications.
+                        val letters =
+                            if (shown == DrawerTab.Personal) {
+                                val linux =
+                                    if (runtime.powosSession || linuxState == LinuxState.Installed) runtime.linuxApps.map { AppHit.Linux(it) } else emptyList()
                                 // Clones too, as stock drawers list them: second copies of the owner's apps.
-                                DrawerTab.Personal -> {
-                                    if (runtime.powosSession) {
-                                        section("powos", runtime.linuxApps.map { AppHit.Linux(it) })
-                                    } else if (linuxState == LinuxState.Installed) {
-                                        section("linux", runtime.linuxApps.map { AppHit.Linux(it) })
-                                    } else {
-                                        // Linux apps would be listed here; without Linux, one quiet offer instead.
-                                        item(key = "linux-offer") {
-                                            Row(Modifier.padding(top = 12.dp, bottom = 4.dp, start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                BasicText("linux apps", Modifier.weight(1f), style = Mono.copy(color = Palette.muted))
-                                                BracketAction(if (linuxState is LinuxState.Installing) "installing…" else "install linux", Palette.accent) {
-                                                    state.closeNow()
-                                                    state.linuxOpen = true
+                                alphabetical(linux + apps.apps.filter { !it.work }.map { AppHit.Android(it) })
+                            } else {
+                                emptyList()
+                            }
+                        val offer = shown == DrawerTab.Personal && !runtime.powosSession && linuxState != LinuxState.Installed
+                        // Where each letter's heading is in the list: the offer, then per letter its heading and rows.
+                        val starts =
+                            remember(letters, columns, offer) {
+                                var at = if (offer) 1 else 0
+                                letters.associate { (letter, hits) -> letter to at.also { at += 1 + (hits.size + columns - 1) / columns } }
+                            }
+                        var jump by remember { mutableStateOf<Job?>(null) }
+                        Box(Modifier.fillMaxWidth()) {
+                            // New results start at the bar, where the best match is.
+                            if (shown == null) LaunchedEffect(search) { listState.scrollToItem(0) }
+                            // Search results bottom-up, so the best match sits right above the bar; the full list reads
+                            // top-down from its start, like stock drawers, so a drag down there closes the panel right away.
+                            LazyColumn(
+                                state = listState,
+                                reverseLayout = shown == null,
+                                modifier = Modifier.fillMaxWidth().nestedScroll(pullToClose),
+                                contentPadding = PaddingValues(top = 8.dp, bottom = 4.dp, end = if (letters.isEmpty()) 0.dp else LetterBarWidth),
+                            ) {
+                                fun row(
+                                    key: String,
+                                    cells: List<AppHit>,
+                                    selected: Int = -1,
+                                ) = item(key = key) {
+                                    Row(Modifier.fillMaxWidth()) {
+                                        cells.forEachIndexed { i, hit -> Box(Modifier.weight(1f)) { HitCell(runtime, hit, handlers, selected = i == selected) } }
+                                        repeat(columns - cells.size) { Spacer(Modifier.weight(1f)) }
+                                    }
+                                }
+
+                                // One with actions shows its title even without apps.
+                                fun section(
+                                    title: String,
+                                    hits: List<AppHit>,
+                                    actions: List<Pair<String, () -> Unit>> = emptyList(),
+                                ) {
+                                    if (hits.isEmpty() && actions.isEmpty()) return
+                                    item(key = "h:$title") { Section(title, actions) }
+                                    hits.chunked(columns).forEachIndexed { r, cells -> row("$title:$r", cells) }
+                                }
+
+                                when (shown) {
+                                    null -> search.hits.chunked(columns).forEachIndexed { r, cells -> row("q:$r", cells, highlighted - r * columns) }
+                                    DrawerTab.Work -> {
+                                        val paused = apps.workProfiles.any { apps.paused(it) }
+                                        section(
+                                            if (paused) "work apps paused" else "work apps",
+                                            apps.apps.filter { it.work }.map { AppHit.Android(it) },
+                                            listOf((if (paused) "turn on" else "pause") to { apps.pauseWork(!paused) }),
+                                        )
+                                    }
+                                    DrawerTab.Personal -> {
+                                        if (offer) {
+                                            // Linux apps would be listed here; without Linux, one quiet offer instead.
+                                            item(key = "linux-offer") {
+                                                Row(Modifier.padding(top = 12.dp, bottom = 4.dp, start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                    BasicText("linux apps", Modifier.weight(1f), style = Mono.copy(color = Palette.muted))
+                                                    BracketAction(if (linuxState is LinuxState.Installing) "installing…" else "install linux", Palette.accent) {
+                                                        state.closeNow()
+                                                        state.linuxOpen = true
+                                                    }
                                                 }
                                             }
                                         }
+                                        for ((letter, hits) in letters) section(letter, hits)
                                     }
-                                    section("android", apps.apps.filter { !it.work }.map { AppHit.Android(it) })
                                 }
+                            }
+                            if (letters.isNotEmpty()) {
+                                LetterBar(
+                                    onPick = { letter ->
+                                        // Its own heading, else the next letter's, else the last ("#": the first).
+                                        val i = Alphabet.indexOf(letter)
+                                        val target = letters.firstOrNull { Alphabet.indexOf(it.first) >= i } ?: letters.last()
+                                        jump?.cancel()
+                                        jump = scope.launch { listState.animateScrollToItem(starts[target.first] ?: 0) }
+                                    },
+                                    modifier = Modifier.align(Alignment.CenterEnd),
+                                )
                             }
                         }
                     }
                 }
+                if (query.isBlank()) DockRow(runtime, handlers)
                 if (query.isNotBlank()) AskRow(runtime, linuxState == LinuxState.Installed || runtime.powosSession, query, highlighted == -1, onAsk)
+            }
+        }
+    }
+}
+
+/** The apps pinned to the dock: by the bar while nothing's typed, always there, like the iOS dock. */
+@Composable
+private fun DockRow(
+    runtime: Runtime,
+    handlers: AppHandlers,
+) {
+    val byKey = allApps(runtime).associateBy { it.key }
+    val pinned = runtime.drawerPins.keys.mapNotNull { byKey[it] }
+    if (pinned.isEmpty()) return
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        val columns = (maxWidth / 76.dp).toInt().coerceAtLeast(1)
+        Row(Modifier.fillMaxWidth().tile().padding(vertical = 6.dp)) {
+            val shown = pinned.take(columns)
+            shown.forEach { hit -> Box(Modifier.weight(1f)) { HitCell(runtime, hit, handlers) } }
+            repeat(columns - shown.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+}
+
+/** The headings of the A-Z bar, "#" for names that don't start with a letter. */
+private val Alphabet = listOf("#") + ('A'..'Z').map { it.toString() }
+
+/** The A-Z bar's width; the drawer's rows stop short of it. */
+private val LetterBarWidth = 22.dp
+
+/** [hits] by name, A to Z (as the system's language sorts them), under the heading of their first letter. */
+private fun alphabetical(hits: List<AppHit>): List<Pair<String, List<AppHit>>> {
+    val collator = Collator.getInstance().apply { strength = Collator.PRIMARY }
+    return hits
+        .sortedWith { a, b -> collator.compare(a.label, b.label) }
+        .groupBy { heading(it.label) }
+        .toList()
+        .sortedBy { Alphabet.indexOf(it.first) }
+}
+
+/** The A-Z heading of [label]: its first letter without accents ("Ö" is under O), or "#". */
+private fun heading(label: String): String {
+    val first = Normalizer.normalize(label.trim().take(1), Normalizer.Form.NFD).firstOrNull()?.uppercaseChar() ?: return "#"
+    return if (first in 'A'..'Z') first.toString() else "#"
+}
+
+/** The A-Z bar beside the drawer's list, as in PowOS's start menu: tap a letter, or slide along the bar. */
+@Composable
+private fun LetterBar(
+    onPick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var current by remember { mutableStateOf<String?>(null) }
+    val haptics = LocalHapticFeedback.current
+    Column(
+        modifier
+            .width(LetterBarWidth)
+            .fillMaxHeight()
+            .heightIn(max = 18.dp * Alphabet.size)
+            // Its touches are its own: neither the list's scroll nor the panel's pull to close.
+            .pointerInput(onPick) {
+                fun pick(y: Float) {
+                    val letter = Alphabet[(y / size.height * Alphabet.size).toInt().coerceIn(0, Alphabet.lastIndex)]
+                    if (letter == current) return
+                    current = letter
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onPick(letter)
+                }
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    down.consume()
+                    pick(down.position.y)
+                    while (true) {
+                        val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        change.consume()
+                        pick(change.position.y)
+                    }
+                    current = null
+                }
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        for (letter in Alphabet) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                BasicText(letter, style = Mono.copy(fontSize = TextSize.Small, color = if (letter == current) Palette.accent else Palette.muted))
             }
         }
     }

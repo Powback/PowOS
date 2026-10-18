@@ -144,7 +144,12 @@ class MainActivity : ComponentActivity() {
     private fun shortcut(keyCode: Int): Boolean {
         when (keyCode) {
             KeyEvent.KEYCODE_ENTER -> runtime.terminal(null, "Terminal")
-            KeyEvent.KEYCODE_SPACE -> state.toggle()
+            KeyEvent.KEYCODE_SPACE -> {
+                // Opened from the keyboard: to type in.
+                val opening = state.drawer.targetValue <= 0.5f
+                state.toggle()
+                if (opening) state.promptRequest = PromptRequest.Type
+            }
             KeyEvent.KEYCODE_A -> state.promptRequest = PromptRequest.Type
             in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9 -> state.requestedPage = keyCode - KeyEvent.KEYCODE_1
             else -> return false

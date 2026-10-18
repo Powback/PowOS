@@ -177,7 +177,11 @@ private fun PromptRail(
             .width(PromptBarHeight)
             .fillMaxHeight()
             .tile()
-            .clickable { state.open() },
+            // The bar, on its side: a tap on it types, as on the bar itself (which shows with the panel and takes it).
+            .clickable {
+                state.promptRequest = PromptRequest.Type
+                state.open()
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(top = 10.dp), contentAlignment = Alignment.TopCenter) {
