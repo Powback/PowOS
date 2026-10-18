@@ -7,6 +7,8 @@ import { powos } from "./bridge.js";
 
 export const apps = signal(/** @type {import('./bridge').App[]} */ ([]));
 export const byKey = computed(() => new Map(apps.value.map((a) => [a.key, a])));
+/** How many recent apps the strip shows. */
+export const RECENT = 6;
 export const recent = signal(/** @type {string[]} */ ([]));
 /** Apps pinned to the drawer's dock, in pin order. */
 export const dock = signal(/** @type {string[]} */ ([]));
@@ -35,7 +37,7 @@ export const drawer = signal(0);
 export const query = signal("");
 
 export async function load() {
-  const [list, keys, pins, h] = await Promise.all([powos.apps.list(), powos.usage.recent(5), powos.store.get("dock"), powos.home.get()]);
+  const [list, keys, pins, h] = await Promise.all([powos.apps.list(), powos.usage.recent(RECENT), powos.store.get("dock"), powos.home.get()]);
   home.value = h;
   apps.value = list;
   recent.value = keys;
@@ -46,19 +48,19 @@ export async function load() {
 // apps, follows it. Back on screen, the strip shows what was opened meanwhile.
 powos.on("apps.changed", async () => {
   apps.value = await powos.apps.list();
-  recent.value = await powos.usage.recent(5);
+  recent.value = await powos.usage.recent(RECENT);
 });
 powos.on("home.changed", async () => (home.value = await powos.home.get()));
 
 document.addEventListener("visibilitychange", async () => {
-  if (!document.hidden) recent.value = await powos.usage.recent(5);
+  if (!document.hidden) recent.value = await powos.usage.recent(RECENT);
 });
 
 export async function launch(key) {
   await powos.apps.launch(key);
   drawer.value = 0;
   query.value = "";
-  recent.value = await powos.usage.recent(5);
+  recent.value = await powos.usage.recent(RECENT);
 }
 
 export function setDocked(key, on) {

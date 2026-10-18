@@ -56,6 +56,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.text.KeyboardActions
@@ -262,6 +263,12 @@ private fun HitCell(
     AppCell(hit.label, icon, mask, onClick = { handlers.launch(hit) }, actions = { hit.actions(handlers) }, glyph = glyph, selected = selected, spoken = hit.spoken, paused = hit.paused(runtime))
 }
 
+/** How many apps the recent strip shows. */
+private const val RECENT_APPS = 6
+
+/** A strip cell at full size; narrower strips share their length instead. */
+private val StripCellSize = 64.dp
+
 /** Height of the recent apps strip; home keeps this much room for it above the bar, even while it's empty. */
 val RecentStripHeight = 76.dp
 
@@ -277,7 +284,7 @@ internal fun RecentStrip(
     modifier: Modifier = Modifier,
     vertical: Boolean = false,
 ) {
-    val apps = recentApps(runtime, 5)
+    val apps = recentApps(runtime, RECENT_APPS)
     // Nothing opened yet: no strip, but its room stays, so home doesn't shift when the first app shows up.
     if (apps.isEmpty()) {
         Spacer(if (vertical) modifier.width(RecentStripHeight) else modifier.height(RecentStripHeight))
@@ -287,16 +294,18 @@ internal fun RecentStrip(
     val listState = rememberLazyListState()
     // Back on home, the strip starts at the app opened last, wherever it was scrolled to before.
     LaunchedEffect(runtime.usage.settled) { listState.scrollToItem(0) }
-    Box(
+    BoxWithConstraints(
         modifier
             .then(if (vertical) Modifier.fillMaxHeight().width(RecentStripHeight) else Modifier.padding(horizontal = EdgeGap).fillMaxWidth().height(RecentStripHeight))
             .then(if (bare) Modifier else Modifier.tile()),
         contentAlignment = if (vertical) Alignment.TopCenter else Alignment.CenterStart,
     ) {
+        // All of them fit: the strip's length shared, up to a full-size cell (a phone's cover screen is narrow).
+        val cell = minOf(StripCellSize, ((if (vertical) maxHeight else maxWidth) - 8.dp) / RECENT_APPS)
         val cells: LazyListScope.() -> Unit = {
             items(apps, key = { it.key }) { hit ->
                 val (icon, mask, glyph) = hit.icons(runtime)
-                StripCell(hit.label, icon, mask, onClick = { handlers.launch(hit) }, actions = { hit.actions(handlers) }, glyph = glyph, spoken = hit.spoken, paused = hit.paused(runtime))
+                StripCell(hit.label, icon, mask, onClick = { handlers.launch(hit) }, actions = { hit.actions(handlers) }, glyph = glyph, spoken = hit.spoken, paused = hit.paused(runtime), cell = cell)
             }
         }
         if (vertical) {
@@ -321,15 +330,17 @@ private fun StripCell(
     spoken: String = label,
     /** As in [AppHit.paused]: drawn dimmed, like stock launchers. */
     paused: Boolean = false,
+    /** The cell's size; the icon fills most of it. */
+    cell: Dp = StripCellSize,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
     val mono = LauncherStyle.monochromeIcons
     val bare = LauncherStyle.bareAppIcons
-    val size = 56.dp
+    val size = cell * 0.875f
     Box(
         Modifier
-            .size(64.dp)
+            .size(cell)
             .alpha(if (paused) PausedAlpha else 1f)
             .clip(LauncherStyle.shape(12.dp))
             .combinedClickable(

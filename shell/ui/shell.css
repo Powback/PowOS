@@ -23,6 +23,9 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* The apps share the strip's width: all of them fit, at up to the strip's icon size. */
+.strip .app { flex: 1 1 0; min-width: 0; padding: 4px 0; }
+.strip .app-icon { width: min(var(--strip-icon), 100%) !important; height: auto !important; aspect-ratio: 1; }
 
 .bar {
   position: relative;
