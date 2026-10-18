@@ -1,0 +1,146 @@
+/* Home, the bar, the drawer: laid out from theme.css's tokens only. */
+
+.home {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.pages { flex: 1; }
+
+.strip {
+  height: var(--strip-height);
+  margin: 0 var(--edge) var(--gap);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.bar {
+  position: relative;
+  z-index: 3;
+  margin: 0 var(--edge) var(--edge);
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 0 var(--edge);
+}
+.bar:focus-within { border-color: var(--color-accent); }
+.bar .prompt { color: var(--color-accent); }
+.bar input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: 0;
+  color: var(--color-foreground);
+  font: var(--text-item) var(--font);
+}
+.bar input::placeholder { color: var(--color-muted); }
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--color-background) 97%, transparent);
+}
+
+.drawer {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr var(--letter-bar);
+  /* The list shrinks to the room left; it scrolls rather than pushing the dock under the bar. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: var(--edge) var(--edge) 0;
+  animation: drawer-in 180ms ease-out;
+}
+@keyframes drawer-in { from { opacity: 0; transform: translateY(40px); } }
+
+.drawer-list {
+  grid-column: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
+}
+.heading {
+  margin: 12px 0 4px 8px;
+  font: var(--text-body) var(--font);
+  font-weight: normal;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--cell), 1fr));
+}
+
+.letter-bar {
+  grid-column: 2;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-height: 100%;
+  height: calc(27 * 18px);
+  touch-action: none;
+}
+.letter-bar span {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}
+.letter-bar span.on { color: var(--color-accent); }
+
+.dock {
+  grid-column: 1 / -1;
+  margin: 4px 0 var(--gap);
+  display: flex;
+  justify-content: space-around;
+  padding: 6px 0;
+}
+
+.app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 2px;
+  border-radius: var(--radius);
+  touch-action: manipulation;
+}
+.app:active { background: var(--color-surface); }
+.app-icon { display: block; pointer-events: none; }
+.app-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-small);
+}
+
+.menu-scrim { position: fixed; inset: 0; z-index: 10; }
+.menu {
+  position: absolute;
+  z-index: 11;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--color-surface);
+}
+.app .menu { position: absolute; }
+.menu-item { padding: 10px 12px; text-align: left; border-radius: 8px; }
+.menu-item:active { background: var(--color-background); }

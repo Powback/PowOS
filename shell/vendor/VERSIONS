@@ -1,0 +1,6 @@
+Vendored, unmodified ES module builds (npm pack), mapped by index.html's import map:
+preact.js         preact 10.29.8           dist/preact.mjs              MIT
+preact-hooks.js   preact 10.29.8           hooks/dist/hooks.mjs         MIT
+htm.js            htm 3.1.1                dist/htm.mjs                 Apache-2.0
+signals.js        @preact/signals 1.3.4    dist/signals.mjs             MIT
+signals-core.js   @preact/signals-core 1.14.4 dist/signals-core.mjs     MIT

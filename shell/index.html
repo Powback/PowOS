@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>PowOS Shell</title>
+<!-- No build: the shell's modules run as saved. The import map names the vendored libraries (vendor/VERSIONS). -->
+<script type="importmap">
+{
+  "imports": {
+    "preact": "./vendor/preact.js",
+    "preact/hooks": "./vendor/preact-hooks.js",
+    "htm": "./vendor/htm.js",
+    "@preact/signals": "./vendor/signals.js",
+    "@preact/signals-core": "./vendor/signals-core.js"
+  }
+}
+</script>
+<link rel="stylesheet" href="./theme.css" data-hot>
+<script type="module" src="./app.js"></script>
+</head>
+<body></body>
+</html>

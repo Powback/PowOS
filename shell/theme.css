@@ -1,0 +1,52 @@
+/*
+ * The shell's look: tokens first (the theme sets them - Omarchy's colors.toml maps onto --color-*), then base
+ * styles. Components use the tokens only, so a theme is a block of variables.
+ */
+:root {
+  --color-background: #1f1f28;
+  --color-surface: #2a2a37;
+  --color-foreground: #dcd7ba;
+  --color-muted: #727169;
+  --color-accent: #7e9cd8;
+  --color-border: #54546d;
+  --color-red: #e82424;
+
+  --font: ui-monospace, "JetBrainsMono Nerd Font", "DejaVu Sans Mono", monospace;
+  --text-small: 11px;
+  --text-body: 14px;
+  --text-item: 15px;
+
+  --gap: 8px;
+  --edge: 12px;
+  --radius: 12px;
+  --frame: 2px;
+  --cell: 76px;
+  --icon: 48px;
+  --strip-icon: 56px;
+  --strip-height: 76px;
+  --letter-bar: 22px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: transparent;
+  color: var(--color-foreground);
+  font: var(--text-body) var(--font);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
+
+/* A tile: what every home element is drawn on. */
+.tile {
+  background: color-mix(in srgb, var(--color-background) 88%, transparent);
+  border: var(--frame) solid var(--color-border);
+  border-radius: var(--radius);
+}
+.tile.focused { border-color: var(--color-accent); }
+
+.muted { color: var(--color-muted); }
