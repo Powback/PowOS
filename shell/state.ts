@@ -36,10 +36,15 @@ export interface Carry {
   grab: { x: number; y: number };
 }
 export const carry = signal<Carry | null>(null);
-/** Pages to show: the ones with items; while a tile is carried, an empty one after them to drop it on. */
+/**
+ * Edit mode (a long press on home's empty space): tiles move with a long press, the home menu's sheet is up, and
+ * there's an empty page after the last to fill - swiping to an empty page needs it.
+ */
+export const editing = signal(false);
+/** Pages to show: the ones with items; editing or carrying a tile, an empty one after them. */
 export const pages = computed(() => {
   const used = home.value.pages.length ? home.value.pages : [1];
-  return carry.value ? [...used, Math.max(...used) + 1] : used;
+  return carry.value || editing.value ? [...used, Math.max(...used) + 1] : used;
 });
 /** A widget's screen open over home (its onTap's screen()); Back closes it first. */
 export const screen = signal<WidgetScreen>({ key: null });
@@ -96,12 +101,13 @@ export function closeDrawer() {
   powos.keyboard.hide();
 }
 
-/** Back: whatever is on top closes first - a widget's screen, a menu, a folder, edit mode, the drawer. False when nothing was open. */
+/** Back: whatever is on top closes first - a widget's screen, a menu, a folder, a tile's edit, edit mode, the drawer. False when nothing was open. */
 export function back(): boolean {
   if (screen.value.key) powos.widgets.closeScreen();
   else if (menu.value) menu.value = null;
   else if (folder.value) folder.value = null;
   else if (selected.value) selected.value = null;
+  else if (editing.value) editing.value = false;
   else if (drawer.value > 0) closeDrawer();
   else return false;
   return true;
@@ -114,6 +120,7 @@ export function goHome() {
   folder.value = null;
   selected.value = null;
   carry.value = null;
+  editing.value = false;
   closeDrawer();
   page.value = 0;
 }

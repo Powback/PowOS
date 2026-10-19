@@ -269,6 +269,8 @@ const sessions = new Map<string, Session>();
 
 powos.on("term.data", (e: { id: string; run: number; data: string; end: number }) => sessions.get(e.id)?.data(e));
 powos.on("term.exit", (e: { id: string; run: number; code: number }) => sessions.get(e.id)?.exit(e));
+// Another theme: its colors are on the page's tokens a moment later (app.tsx), then in every terminal.
+powos.on("theme.changed", () => setTimeout(() => sessions.forEach((s) => s.restyle()), 50));
 // The terminal font arrived (or the text size changed): every terminal asks again.
 powos.on("term.style", () => {
   styles.clear();

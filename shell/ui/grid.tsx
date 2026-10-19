@@ -16,7 +16,7 @@ import { AppIcon } from "./apps.tsx";
 import { tapTaken } from "./taps.ts";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
-import { byKey, carry, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
+import { byKey, carry, editing, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen } from "./gesture.ts";
 import { OwlWidget } from "./owl.tsx";
@@ -335,8 +335,53 @@ function FolderPanel() {
   );
 }
 
+/** A press on the page itself, not on a tile. */
+const onEmpty = (e: Event) => {
+  const t = e.target as HTMLElement;
+  return t.classList.contains("page") || t.classList.contains("page-track") || t.classList.contains("pages");
+};
+
+/**
+ * Home's empty space: held, it's edit mode (state.ts editing - the home menu's sheet, an empty page to fill); a tap
+ * ends a tile's edit, then edit mode, as on a stock launcher.
+ */
+function useEmptyPress() {
+  const s = useRef<{ x: number; y: number; timer: number; long: boolean } | null>(null);
+  const cancel = () => {
+    if (s.current) clearTimeout(s.current.timer);
+    s.current = null;
+  };
+  return {
+    onPointerDown: (e: PointerEvent) => {
+      if (e.button || !onEmpty(e) || drawerOpen.value) return;
+      const p = { x: e.clientX, y: e.clientY, timer: 0, long: false };
+      p.timer = window.setTimeout(() => {
+        p.long = true;
+        navigator.vibrate?.(10);
+        selected.value = null;
+        editing.value = true;
+      }, LONG_PRESS_MS);
+      s.current = p;
+    },
+    onPointerMove: (e: PointerEvent) => {
+      const p = s.current;
+      // Moved: a swipe (pages, the drawer), not a hold.
+      if (p && !p.long && Math.hypot(e.clientX - p.x, e.clientY - p.y) > SLOP) cancel();
+    },
+    onPointerUp: (e: PointerEvent) => {
+      const p = s.current;
+      cancel();
+      if (!p || p.long || Math.hypot(e.clientX - p.x, e.clientY - p.y) > SLOP) return;
+      if (selected.value) selected.value = null;
+      else if (editing.value) editing.value = false;
+    },
+    onPointerCancel: cancel,
+  };
+}
+
 export function Pages() {
   const el = useRef<HTMLDivElement>(null);
+  const emptyPress = useEmptyPress();
   useEffect(() => {
     const ro = new ResizeObserver(() => measure(el.current!, home.value.columns));
     ro.observe(el.current!);
@@ -350,15 +395,7 @@ export function Pages() {
   // Widgets on the page on screen (and beside it) run their sources; the rest pause.
   useEffect(() => void powos.widgets.page(list[page.value] ?? 1), [page.value, list.join()]);
   return (
-    <div
-      class="pages"
-      ref={el}
-      onClick={(e) => {
-        // A tap on the page itself, not a tile: edit mode ends.
-        const t = e.target as HTMLElement;
-        if (t.classList.contains("page") || t.classList.contains("page-track")) selected.value = null;
-      }}
-    >
+    <div class="pages" ref={el} {...emptyPress}>
       {/* Its position and transition are gesture.ts's (applyTrack), never a render's. */}
       <div class="page-track">
         {list.map((n) => (

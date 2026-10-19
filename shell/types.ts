@@ -48,6 +48,20 @@ export type ChatItem =
   | { kind: "user" | "assistant"; text: string }
   | { kind: "tool"; name: string; hint: string; ok: boolean | null }
   | { kind: "note"; text: string; error: boolean };
+/** The colors in use: the launcher's palette as CSS (background, surface, foreground, muted, accent, border, red, ...), and the theme's own by name (color0-15, cursor, ...). */
+export interface ThemeColors {
+  name: string;
+  light: boolean;
+  css: Record<string, string>;
+  colors: Record<string, string>;
+}
+/** A theme to pick: what its swatch shows (background, foreground, accent, red, yellow, green, magenta). */
+export interface ThemeChoice {
+  name: string;
+  title: string;
+  colors: Record<string, string>;
+}
+
 /** A widget's full-size screen, open over home ([key] null: none). A terminal's is edge to edge, without a title. */
 export interface WidgetScreen {
   key: string | null;
@@ -142,6 +156,22 @@ export interface Bridge {
     read(): Promise<string | null>;
     write(text: string): Promise<void>;
   };
+  /** The theme: the colors in use ("theme.changed" brings them again), the ones to pick from, picking one. */
+  theme: {
+    get(): Promise<ThemeColors>;
+    list(): Promise<ThemeChoice[]>;
+    pick(name: string): Promise<void>;
+  };
+  /** The Compose launcher's screens the shell has no own yet: store, themes, style, aur, linux, agents, settings. */
+  screens: {
+    open(name: string): Promise<void>;
+  };
+  /** The default coding agent: its name, and the home menu's tasks for it (or the screen that sets one up). */
+  agents: {
+    default(): Promise<string | null>;
+    newWidget(): Promise<"started" | "linux" | "agents">;
+    newApp(): Promise<"started" | "linux" | "agents">;
+  };
   /**
    * Speech to text (the phone's recognizer; the page's own has none). "speech.state" ({ listening, text, error })
    * as it hears; "speech.done" ({ text }) once it ends; "speech.permission" ({ granted }) after it asked for the mic.
@@ -160,7 +190,7 @@ export interface Bridge {
     insets(): Promise<Insets>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission",
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

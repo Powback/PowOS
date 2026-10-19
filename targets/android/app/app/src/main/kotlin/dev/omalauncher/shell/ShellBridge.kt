@@ -19,7 +19,13 @@ import androidx.compose.runtime.snapshots.Snapshot
 import dev.omalauncher.PowosAiActivity
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
+import dev.omalauncher.ui.Palette
 import dev.omalauncher.ui.Speech
+import dev.omalauncher.linux.Agent
+import dev.omalauncher.linux.newAppCommand
+import dev.omalauncher.widgets.newWidgetCommand
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import dev.omalauncher.ui.PtyTerminal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +79,8 @@ class ShellBridge(
         }
 
     init {
+        // The theme picked or recolored (here, in the Compose launcher, a theme file edited): the page recolors.
+        scope.launch { snapshotFlow { theme().toString() }.drop(1).collect { emit("theme.changed", JSONObject(it)) } }
         // What's heard so far, while listening (and why it failed).
         scope.launch {
             snapshotFlow { JSONObject().put("listening", speech.listening).put("text", speech.text).put("error", speech.error ?: JSONObject.NULL).toString() }
@@ -128,6 +136,13 @@ class ShellBridge(
                 PowosAiActivity.keepInRecents(activity)
             }
             "ai.open" -> PowosAiActivity.open(activity, null)
+            "theme.get" -> theme()
+            "theme.list" -> themeList()
+            "theme.pick" -> pickTheme(a.getString(0))
+            "screens.open" -> ShellScreensActivity.open(activity, a.getString(0))
+            "agents.default" -> runtime.agents.default?.name
+            "agents.newWidget" -> withAgent { newWidgetCommand(it.bin) to "New widget" }
+            "agents.newApp" -> withAgent { newAppCommand(it.bin) to "New app" }
             "speech.start" -> listen(a.optBoolean(0))
             "speech.stop" -> speech.stop()
             "speech.cancel" -> speech.cancel()
@@ -189,6 +204,56 @@ class ShellBridge(
             )
         }
         return list
+    }
+
+    /** The colors in use: the launcher's palette as CSS (what the page's tokens follow), and the theme's own by name. */
+    private fun theme(): JSONObject {
+        val p = Palette.current
+        fun c(color: Color) = WidgetTree.cssColor(color.toArgb())
+        val css =
+            JSONObject()
+                .put("background", c(p.background))
+                .put("surface", c(p.surface))
+                .put("overlay", c(p.overlay))
+                .put("foreground", c(p.foreground))
+                .put("muted", c(p.muted))
+                .put("accent", c(p.accent))
+                .put("border", c(p.border))
+                .put("red", c(p.red))
+                .put("green", c(p.green))
+        val named = JSONObject()
+        p.named.forEach { (k, v) -> named.put(k, c(v)) }
+        return JSONObject().put("name", runtime.themes.picked).put("light", p.isLight).put("css", css).put("colors", named)
+    }
+
+    /** The themes to pick from (as the home menu's strip): name, title and the colors a swatch shows. */
+    private fun themeList(): JSONArray =
+        JSONArray(
+            runtime.themes.choices.map { t ->
+                val colors = JSONObject()
+                for (k in listOf("background", "foreground", "accent", "red", "yellow", "green", "magenta")) t.colors[k]?.let { colors.put(k, it) }
+                JSONObject().put("name", t.name).put("title", t.title).put("colors", colors)
+            },
+        )
+
+    /** Recolors at once, then applies the whole theme (its background, the guest's configs), as the home menu does. */
+    private fun pickTheme(name: String) {
+        val theme = runtime.themes.choices.firstOrNull { it.name == name } ?: error("no theme $name")
+        runtime.themes.pick(theme)
+        scope.launch { if (runtime.themes.complete) runtime.themes.applyPicked() else runtime.themes.fetchPicked() }
+    }
+
+    /**
+     * Runs the default agent on a task (new widget, new app) in a terminal, as the home menu does; without Linux or
+     * an agent, opens the screen that sets them up. Returns what it did: "started", "linux" or "agents".
+     */
+    private fun withAgent(task: (Agent) -> Pair<String, String>): String {
+        val agent = runtime.agents.default
+        return when {
+            !(runtime.bootstrap.isInstalled || runtime.powosSession) -> "linux".also { ShellScreensActivity.open(activity, ShellScreensActivity.LINUX) }
+            agent == null -> "agents".also { ShellScreensActivity.open(activity, ShellScreensActivity.AGENTS) }
+            else -> "started".also { task(agent).let { (command, title) -> runtime.terminal(command, title, agent) } }
+        }
     }
 
     /**

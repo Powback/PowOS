@@ -130,6 +130,16 @@
 
         <!-- PowOS AI: the chat with PowOS's manager (docs/powos-ai-android.md) - from the launcher, the share sheet, the
              assistant gesture (the app as the phone's digital assistant), Quick Settings and the agents' notifications. -->
+        <!-- The Compose launcher's screens (store, themes, settings...) over the web shell until it has its own. -->
+        <activity
+            android:name=".shell.ShellScreensActivity"
+            android:theme="@style/Theme.Omalauncher.Window"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <activity
             android:name=".PowosAiActivity"
             android:label="PowOS AI"

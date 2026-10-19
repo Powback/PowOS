@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { App, Bridge, Cell, Chat, Home, HomeItem, TermState, WidgetScreen } from "./types.ts";
+import type { App, Bridge, Cell, Chat, Home, HomeItem, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -91,6 +91,17 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       style: (points) => call("term.style", points),
     },
     clipboard: { read: () => call<string | null>("clipboard.read"), write: (text) => call("clipboard.write", text) },
+    theme: {
+      get: () => call<ThemeColors>("theme.get"),
+      list: () => call<ThemeChoice[]>("theme.list"),
+      pick: (name) => call("theme.pick", name),
+    },
+    screens: { open: (name) => call("screens.open", name) },
+    agents: {
+      default: () => call<string | null>("agents.default"),
+      newWidget: () => call("agents.newWidget"),
+      newApp: () => call("agents.newApp"),
+    },
     speech: {
       start: (hold) => call("speech.start", hold),
       stop: () => call("speech.stop"),
@@ -250,6 +261,35 @@ function mock(): Bridge {
     clipboard: {
       read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
+    },
+    // Three of Omarchy's themes; picking one recolors the page as the phone's would.
+    theme: (() => {
+      const themes: ThemeChoice[] = [
+        { name: "kanagawa", title: "Kanagawa", colors: { background: "#1f1f28", foreground: "#dcd7ba", accent: "#7e9cd8", red: "#e82424", yellow: "#e6c384", green: "#98bb6c", magenta: "#957fb8" } },
+        { name: "tokyo-night", title: "Tokyo Night", colors: { background: "#1a1b26", foreground: "#a9b1d6", accent: "#7aa2f7", red: "#f7768e", yellow: "#e0af68", green: "#9ece6a", magenta: "#bb9af7" } },
+        { name: "rose-pine", title: "Rosé Pine", colors: { background: "#faf4ed", foreground: "#575279", accent: "#56949f", red: "#b4637a", yellow: "#ea9d34", green: "#286983", magenta: "#907aa9" } },
+      ];
+      let picked = "kanagawa";
+      const colors = (): ThemeColors => {
+        const c = themes.find((t) => t.name === picked)!.colors;
+        const light = picked === "rose-pine";
+        const mix = (a: string, pct: number) => `color-mix(in srgb, ${a} ${pct}%, ${c.background})`;
+        return { name: picked, light, css: { background: c.background, surface: mix(c.foreground, 8), foreground: c.foreground, muted: mix(c.foreground, 55), accent: c.accent, border: mix(c.foreground, 30), red: c.red }, colors: c };
+      };
+      return {
+        get: async () => colors(),
+        list: async () => themes,
+        pick: async (name: string) => {
+          picked = name;
+          events.emit("theme.changed", colors());
+        },
+      };
+    })(),
+    screens: { open: async (name) => console.log("[mock] open screen", name) },
+    agents: {
+      default: async () => "Claude",
+      newWidget: async () => (console.log("[mock] new widget with claude"), "started" as const),
+      newApp: async () => (console.log("[mock] new app with claude"), "started" as const),
     },
     // Hears the same words every time, a word at a time; a tap ends at the "pause" after them.
     speech: (() => {

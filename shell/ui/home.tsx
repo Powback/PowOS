@@ -13,7 +13,8 @@ import { Drawer } from "./drawer.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gesture.ts";
 import { Pages } from "./grid.tsx";
 import { ScreenPanel } from "./screen.tsx";
-import { byKey, dock, dockDrag, menu, recent, setDock } from "../state.ts";
+import { EditSheet } from "./editsheet.tsx";
+import { byKey, dock, dockDrag, editing, menu, recent, setDock } from "../state.ts";
 
 /**
  * The apps opened lately, last first - not those pinned to the dock, which are at hand already. Six to a width, the
@@ -136,7 +137,7 @@ export function Home() {
   return (
     <>
       <div
-        class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""}`}
+        class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""}`}
         {...homeGestures()}
       >
         <div class="stage">
@@ -156,6 +157,7 @@ export function Home() {
         <Bar />
         <Dock />
         <AppMenu />
+        <EditSheet />
       </div>
       {/* Outside home: its touches never reach home's swipes. */}
       <ScreenPanel />

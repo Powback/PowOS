@@ -12,7 +12,7 @@
  * pointercancel once the browser scrolls something.
  */
 import { computed, effect, signal } from "@preact/signals";
-import { carry, closeDrawer, dockDrag, drawer, menu, page, pages, selected } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, menu, page, pages, selected } from "../state.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
@@ -132,7 +132,8 @@ export function homeGestures() {
     if (!g.mode) {
       if (Math.hypot(dx, dy) < SLOP) return;
       if (Math.abs(dy) > Math.abs(dx)) {
-        if (!g.open && dy < 0) g.mode = "open";
+        // Editing home, up isn't the launcher: the sheet has the bottom.
+        if (!g.open && dy < 0 && !editing.value) g.mode = "open";
         else if (g.open && dy > 0 && (!g.inList || g.listTop)) g.mode = "close";
         else return (g = null); // the list scrolls
       } else if (!g.open && !g.inStrip) {
