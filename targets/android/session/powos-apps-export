@@ -3,7 +3,9 @@
 
 Writes $XDG_RUNTIME_DIR/powos-apps/ (the PowOS app's run dir, which it reads directly):
   apps.tsv       one app per line: id, name, exec, terminal (0/1), StartupWMClass, categories (;-separated)
-  icons/<id>.png its icon from PowOS's icon theme (as Plasma shows it), 192 px
+  icons/<id>.png its icon from PowOS's icon theme (as Plasma shows it), 192 px - every app has one: an Icon= the
+                 theme lacks (lstopo's "hwloc"), or none at all, gets Plasma's generic application icon, else a tile
+                 with the app's initial, so the drawer never waits on an icon that will never come
 
 The apps are the menu's: .desktop entries of type Application in XDG_DATA_HOME and XDG_DATA_DIRS (Flatpak's exports
 included), the first of each id winning (XDG), without NoDisplay/Hidden ones, ones not for KDE, and the phone's
@@ -103,8 +105,40 @@ def icon_theme():
     return "breeze"
 
 
+# What Plasma's menu shows for an app whose icon it can't find (Kickoff falls back to it too).
+GENERIC = "application-x-executable"
+# Bumped when the fallback drawing changes, so icons drawn by an older fallback are drawn again.
+STAMP = "v2"
+
+
+def initial_tile(label):
+    """A rounded tile with the app's initial: the last resort when not even the generic icon is in the theme."""
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QColor, QFont, QImage, QPainter
+
+    image = QImage(SIZE, SIZE, QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.transparent)
+    p = QPainter(image)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor("#3b4252"))
+    p.drawRoundedRect(QRectF(0, 0, SIZE, SIZE), SIZE * 0.22, SIZE * 0.22)
+    font = QFont()
+    font.setPixelSize(int(SIZE * 0.5))
+    font.setBold(True)
+    p.setFont(font)
+    p.setPen(QColor("#eceff4"))
+    p.drawText(QRectF(0, 0, SIZE, SIZE), Qt.AlignCenter, (label.strip()[:1] or "?").upper())
+    p.end()
+    return image
+
+
 def draw_icons(wanted):
-    """Renders [(id, Icon= value)] with Qt (offscreen), only those missing or whose Icon= changed."""
+    """Renders [(id, Icon= value, name)] with Qt (offscreen), only those missing or whose Icon= changed.
+
+    Every app ends up with a PNG: its own icon, else the generic one, else its initial (an app without one was never
+    drawn, and the launcher's drawer showed it as an icon still loading, forever).
+    """
     stamps = os.path.join(ICONS, ".icon-names")
     old = {}
     try:
@@ -112,7 +146,8 @@ def draw_icons(wanted):
             old = dict(line.rstrip("\n").split("\t", 1) for line in f if "\t" in line)
     except OSError:
         pass
-    todo = [(i, n) for i, n in wanted if old.get(i) != n or not os.path.exists(os.path.join(ICONS, i + ".png"))]
+    stamp = {i: f"{STAMP}:{n}" for i, n, _ in wanted}
+    todo = [(i, n, label) for i, n, label in wanted if old.get(i) != stamp[i] or not os.path.exists(os.path.join(ICONS, i + ".png"))]
     if todo:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
         from PySide6.QtGui import QGuiApplication, QIcon
@@ -124,16 +159,18 @@ def draw_icons(wanted):
         QIcon.setFallbackSearchPaths([os.path.join(r, "pixmaps") for r in roots])
         QIcon.setThemeName(icon_theme())
         QIcon.setFallbackThemeName("hicolor")
-        for desktop_id, name in todo:
-            icon = QIcon(name) if name.startswith("/") else QIcon.fromTheme(name)
+        generic = QIcon.fromTheme(GENERIC)
+        for desktop_id, name, label in todo:
+            icon = QIcon() if not name else QIcon(name) if name.startswith("/") else QIcon.fromTheme(name)
             if icon.isNull():
-                continue
-            pixmap = icon.pixmap(SIZE, SIZE)
+                icon = generic
+            pixmap = None if icon.isNull() else icon.pixmap(SIZE, SIZE)
+            picture = initial_tile(label) if pixmap is None or pixmap.isNull() else pixmap
             tmp = os.path.join(ICONS, desktop_id + ".png.tmp")
-            if not pixmap.isNull() and pixmap.save(tmp, "PNG"):
+            if picture.save(tmp, "PNG"):
                 os.replace(tmp, os.path.join(ICONS, desktop_id + ".png"))
     with open(stamps + ".tmp", "w") as f:
-        f.writelines(f"{i}\t{n}\n" for i, n in wanted)
+        f.writelines(f"{i}\t{s}\n" for i, s in stamp.items())
     os.replace(stamps + ".tmp", stamps)
 
 
@@ -151,7 +188,7 @@ def main():
     with open(tmp, "w") as f:
         f.writelines(lines)
     os.replace(tmp, os.path.join(OUT, "apps.tsv"))
-    draw_icons([(i, f["Icon"]) for i, f in entries if f.get("Icon")])
+    draw_icons([(i, f.get("Icon", ""), f["Name"]) for i, f in entries])
     # Icons of apps gone since.
     ids = {i for i, _ in entries}
     for name in os.listdir(ICONS):

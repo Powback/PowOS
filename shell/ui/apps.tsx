@@ -2,7 +2,7 @@
  * An app: its icon and label; a tap opens it, a long press shows its menu (AppMenu, one for the whole shell, drawn
  * over everything so no scrolling list clips it). In the drawer, holding an app and moving it drags it onto home.
  */
-import { useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, page, pages, setDocked } from "../state.ts";
 import { startCarry } from "./grid.tsx";
 import { powos } from "../bridge.ts";
@@ -84,25 +84,53 @@ export function AppCell({ app, labels = true, draggable = false, onDrag, class: 
   );
   return (
     <div class={`app ${cls}`} style={style} {...press}>
-      <AppIcon src={app.icon} />
+      <AppIcon src={app.icon} label={app.label} />
       {labels && <div class="app-label">{app.label}</div>}
     </div>
   );
 }
 
 /**
+ * How long an icon URL that failed may stay unanswered before the app gets its initial instead. The host draws icons
+ * in the background and sends the list again (a new URL) when one is in - well within this on the phone.
+ */
+const ICON_GIVE_UP_MS = 4000;
+
+/**
  * An app's icon: a softly pulsing tile until the picture is in. The host draws icons in the background, so an icon
  * asked for early isn't there yet (a 404); the list comes again when it is (its URL changes), and loads it then.
+ * One that fails and stays failed (no new URL within ICON_GIVE_UP_MS) ends as the app's initial, never as a tile
+ * loading forever; a new URL tries the picture again.
  */
-export function AppIcon({ src }: { src: string }) {
+export function AppIcon({ src, label }: { src: string; label?: string }) {
+  const [missing, setMissing] = useState(false);
+  const timer = useRef(0);
+  useEffect(() => {
+    setMissing(false);
+    return () => clearTimeout(timer.current);
+  }, [src]);
   return (
-    <span class="app-icon loading">
+    <span class={missing ? "app-icon initials" : "app-icon loading"}>
+      {missing && (label ?? "?")[0]}
       <img
         src={src}
         alt=""
         draggable={false}
-        onLoad={(e) => e.currentTarget.parentElement!.classList.remove("loading")}
-        onError={(e) => e.currentTarget.parentElement!.classList.add("loading")}
+        style={missing ? { display: "none" } : undefined}
+        onLoad={(e) => {
+          clearTimeout(timer.current);
+          setMissing(false);
+          e.currentTarget.parentElement!.classList.remove("loading");
+        }}
+        onError={(e) => {
+          e.currentTarget.parentElement!.classList.add("loading");
+          // HACK: a 404 can't tell "not drawn yet" from "this app has no icon", so a failure that lasts is taken as
+          // the latter. Real fix: the host sends icon: null for an app whose lookup failed (ShellBridge.apps(), with
+          // Runtime.refreshApps recording the failures) - not done here while ShellBridge has another change in flight.
+          // On PowOS (rooted) powos-apps-export now draws every app a picture, so this is only the backstop.
+          clearTimeout(timer.current);
+          timer.current = window.setTimeout(() => setMissing(true), ICON_GIVE_UP_MS);
+        }}
       />
     </span>
   );

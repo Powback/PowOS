@@ -248,7 +248,7 @@ function AppFace({ appKey, label }: { appKey: string; label?: string }) {
   const app = byKey.value.get(appKey);
   return (
     <div class="tile-app">
-      {app ? <AppIcon src={app.icon} /> : <div class="app-icon initials">{(label ?? "?")[0]}</div>}
+      {app ? <AppIcon src={app.icon} label={label ?? app.label} /> : <div class="app-icon initials">{(label ?? "?")[0]}</div>}
       <div class="app-label">{label ?? app?.label}</div>
     </div>
   );
