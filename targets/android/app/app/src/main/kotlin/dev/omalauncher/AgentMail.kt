@@ -223,7 +223,7 @@ class AgentMail private constructor(
                         description = "An agent is blocked until you answer (approvals, questions): sounds and vibrates even on silent and in Do not disturb"
                         setSound(Settings.System.DEFAULT_NOTIFICATION_URI, alarmSound)
                         enableVibration(true)
-                        vibrationPattern = longArrayOf(0, 350, 150, 350, 150, 600)
+                        vibrationPattern = URGENT_VIBRATION
                         // Kept by the system only for an app with Do not disturb access (PowOS has it: its notification listener).
                         setBypassDnd(true)
                         lockscreenVisibility = Notification.VISIBILITY_PRIVATE
@@ -307,7 +307,10 @@ class AgentMail private constructor(
                     .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_QUIET, quiet) })
                     .build(),
             )
-            if (urgent && !quiet) wake(context)
+            if (urgent && !quiet) {
+                wake(context)
+                buzzOnSilent(context)
+            }
         }
 
         /** Urgent mail with the screen off: the screen comes on (to the lock face, the mail on it) for a moment. */
@@ -325,6 +328,33 @@ class AgentMail private constructor(
         }
 
         private const val WAKE_MS = 5_000L
+
+        /**
+         * Urgent mail with the ringer on silent (the alert slider): the system plays its alarm-stream sound but drops the
+         * channel's vibration (no buzz on silent, whatever the usage - seen on the phone: notification_alert buzz=0
+         * beep=1), so it vibrates here, as an alarm (VibrationAttributes.USAGE_ALARM isn't muted by the ringer).
+         */
+        private fun buzzOnSilent(context: Context) {
+            val audio = context.getSystemService(android.media.AudioManager::class.java)
+            if (audio.ringerMode != android.media.AudioManager.RINGER_MODE_SILENT) return
+            runCatching {
+                val vibrator =
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        context.getSystemService(android.os.VibratorManager::class.java).defaultVibrator
+                    } else {
+                        context.getSystemService(android.os.Vibrator::class.java)
+                    }
+                val effect = android.os.VibrationEffect.createWaveform(URGENT_VIBRATION, -1)
+                if (Build.VERSION.SDK_INT >= 33) {
+                    vibrator.vibrate(effect, android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_ALARM))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(effect, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
+                }
+            }.onFailure { Log.w(TAG, "can't vibrate for urgent mail", it) }
+        }
+
+        private val URGENT_VIBRATION = longArrayOf(0, 350, 150, 350, 150, 600)
 
         /** The chat opened from a mail's notification: that mail read, and in the chat (which doesn't have it otherwise). */
         fun opened(

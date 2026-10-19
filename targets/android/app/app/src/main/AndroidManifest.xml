@@ -11,6 +11,8 @@
     <!-- PowOS AI's live mode: the screen, with the user's consent each session (assist/LiveCapture.kt). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Urgent agent mail on a silent ringer: the system drops its channel's vibration there (AgentMail.buzzOnSilent). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Speech input for the agent prompt bar; only recognized text reaches Linux. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Home's swipe down pulls the notification shade down. -->
