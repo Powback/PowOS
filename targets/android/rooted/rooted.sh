@@ -48,6 +48,7 @@ deploy)
   adb push -q "$HERE/../../../bin/powos-panel-phone" /data/local/tmp/powos-panel-phone
   adb push -q "$HERE/../../../desktop/autostart/powos-panel-phone.desktop" /data/local/tmp/powos-panel-phone.desktop
   adb push -q "$HERE/../../../lib/powos-tmux-shell" /data/local/tmp/powos-tmux-shell
+  adb push -q "$HERE/../../../config/etc/profile.d/60-powos-picker-key.sh" /data/local/tmp/60-powos-picker-key.sh
   adb push -q "$HERE/../pkgs/fex-emu/Config.json" /data/local/tmp/fex-Config.json
   adb push -q "$HERE/../pkgs/fex-emu/thunks.json" /data/local/tmp/fex-thunks.json
   adb shell rm -rf /data/local/tmp/powos-plasma

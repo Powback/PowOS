@@ -31,7 +31,9 @@ install -m 755 $T/powos-panel-phone $R/usr/bin/powos-panel-phone
 install -m 644 $T/powos-panel-phone.desktop $R/etc/xdg/autostart/powos-panel-phone.desktop
 # The terminals' tmux shell (the launcher's terminal tiles and PowOS's terminals).
 install -m 755 $T/powos-tmux-shell $R/usr/lib/powos/powos-tmux-shell
-rm -f $T/powos-panel-phone $T/powos-panel-phone.desktop $T/powos-tmux-shell
+# Left twice on an empty prompt in a tmux session: back to its session picker (config/etc/profile.d, as the image).
+install -Dm 644 $T/60-powos-picker-key.sh $R/etc/profile.d/60-powos-picker-key.sh
+rm -f $T/powos-panel-phone $T/powos-panel-phone.desktop $T/powos-tmux-shell $T/60-powos-picker-key.sh
 # The desktop over Android's wallpaper (as install-powos-android.sh): transparent wallpaper + its update script.
 W=$R/usr/share/plasma/wallpapers/org.powos.transparent
 install -Dm 644 $T/powos-plasma/org.powos.transparent/metadata.json $W/metadata.json
