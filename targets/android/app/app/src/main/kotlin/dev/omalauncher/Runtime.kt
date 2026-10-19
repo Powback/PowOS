@@ -370,7 +370,16 @@ class Runtime(
                 override fun onLowMemory() = Unit
             },
         )
-        withContext(Dispatchers.IO) { server.start() }
+        withContext(Dispatchers.IO) {
+            runCatching { server.start() }.onFailure {
+                // HACK: rooted, the server's socket can't be made - a priv_app may not create sock_files in its data -
+                // and nothing needs it there (PowOS's windows draw on KWin's display, terminals are PtyTerminal), so the
+                // rest of the rooted start (the session's shells, every widget that runs in it) goes on without it.
+                // Real fix: priv_app sock_file rules in the PowOS system module's sepolicy, or an abstract socket.
+                if (!RootedGuest.enabled) throw it
+                Log.w(TAG, "Wayland server not started (rooted: not needed)", it)
+            }
+        }
     }
 
     /** Terminals run in the PowOS session (rooted mode); see [RootedGuest]. */
