@@ -6,8 +6,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.WindowManager
 import dev.omalauncher.App
 
@@ -77,6 +82,8 @@ class PowosLockActivity : Activity() {
         super.onCreate(savedInstanceState)
         current = this
         setShowWhenLocked(true)
+        // The face has already slid away under the finger by the time it goes (lock.tsx): no window animation after it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
         window.setDecorFitsSystemWindows(false)
         window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         val h = LockFace.host(this)
@@ -94,6 +101,22 @@ class PowosLockActivity : Activity() {
             }
         h.bridge.emit("lock.shown", null)
         setContentView(h.web)
+        // Over the wallpaper, as home: the face lifted away shows what home stands on, not a blank window.
+        window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+        // No navigation handle: on a lock screen it goes nowhere (home is behind the lock), and the swipe up is the
+        // face's. A swipe from the edge brings it back for a moment, as over a full-screen app.
+        window.insetsController?.apply {
+            hide(WindowInsets.Type.navigationBars())
+            systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    override fun finish() {
+        super.finish()
+        // Before Android 14 (from it on, onCreate's says so once).
+        @Suppress("DEPRECATION")
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) overridePendingTransition(0, 0)
     }
 
     // Not locked with the screen on (the lock never followed the screen-off, or it was unlocked meanwhile): it goes.
