@@ -100,6 +100,9 @@ rm -rf out/ && ./build.sh                       [Allow] [Deny] [Reply…]
   window (DESKTOP-WEB-SHELL.md). Phase 2 is a Plasma widget: a minimal QML plasmoid holding a WebEngineView on
   the same page (or the panel role once powos-shell replaces plasmashell). There is one UI codebase. Only the
   transport adapter differs (§4).
+  The existing manager plasmoid (`com.powos.manager`) already has an agent roster with unread badges. Its roster
+  pane should become this view, either by embedding the page or by reading the same spool, so the desktop doesn't
+  end up with a second, competing agent list.
 - The existing "at work" list (tmux) stays as a fallback for agents that have no hooks, such as gemini/ollama
   clients and old sessions. Each entry is marked `· untracked`.
 
