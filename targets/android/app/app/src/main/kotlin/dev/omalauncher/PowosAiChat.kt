@@ -89,6 +89,16 @@ object PowosAiChat {
         Thread({ turn(prompt) }, "powos-ai").start()
     }
 
+    /** A mail an agent sent the user, opened from its notification: in the chat, so it's read where it was opened. */
+    fun mail(
+        context: Context,
+        from: String,
+        text: String,
+    ) {
+        load(context)
+        add(Item.Note("mail from $from: $text"))
+    }
+
     /**
      * Mail arrived in the manager's comms inbox (comms' agent-wake/manager-* marker, [Wake]): one turn made of it
      * (`--once-inbox`), now or once the one under way ends - this chat runs the manager a turn at a time, so between

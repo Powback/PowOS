@@ -8,6 +8,9 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.os.PowerManager
+import android.service.notification.NotificationListenerService.Ranking
+import android.service.notification.StatusBarNotification
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -24,6 +27,7 @@ import dev.omalauncher.App
 import dev.omalauncher.shell.ShellHost
 import dev.omalauncher.system.gesture.GestureConsumer
 import dev.omalauncher.system.gesture.shadeOpens
+import dev.omalauncher.widgets.runtime.MediaListener
 import org.json.JSONObject
 import kotlin.math.abs
 
@@ -51,6 +55,12 @@ import kotlin.math.abs
  * - The shade: TYPE_STATUS_BAR_SUB_PANEL, full screen and transparent (the page dims with its own scrim), above the
  *   status bar and SystemUI's windows. The page is kept warm: the window stays added, hidden while the shade is shut
  *   (the page says so: shade.closed), so the next pull shows it at once.
+ * - Heads-up banners: SystemUI shows none while its shade is off (its peek needs the panel enabled - its log says
+ *   "PEEK=off|disabled panel" for every notification), so the shade shows them ([peek]): for a notification that
+ *   would have had one (Notifications.peeks), the shade window comes up as a strip at the top - its height the page's
+ *   banner's ("shade.peekHeight"), touchable, never focused (the app below keeps the keyboard) - and the page shows
+ *   the banner ("shade.peek"): a tap opens it, up puts it away, down pulls the whole shade ("shade.expand"). Not on
+ *   the lock screen (SystemUI's flags are lifted there, its own heads-up shows) nor with the screen off.
  *
  * Needs what the recents provider is granted (STATUS_BAR_SERVICE for the window types, STATUS_BAR for the flags):
  * [PowosRecentsService] runs it while SystemUI is bound to it.
@@ -88,6 +98,10 @@ class ShadeHost(
     private var statusBarShown = true
     private var shown = false
 
+    /** The window is up as a heads-up banner's strip ([peek]), not the whole shade. */
+    private var peeking = false
+    private val power = service.getSystemService(PowerManager::class.java)
+
     /** The status bar's height (px), from the strip's insets. */
     private var stripHeight = 0
 
@@ -104,13 +118,17 @@ class ShadeHost(
     /** The pull under way (from the monitor or the strip). */
     private val pulling = Pull()
 
-    /** Home pressed (or the switcher) while the shade is down: it goes up, as SystemUI's does. */
+    /** Home pressed (or the switcher) while the shade is down: it goes up, as SystemUI's does. The screen off: a banner goes. */
     private val closer =
         object : BroadcastReceiver() {
             override fun onReceive(
                 context: Context,
                 intent: Intent,
             ) {
+                if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                    if (peeking) unpeek()
+                    return
+                }
                 if (shown) settle(false)
             }
         }
@@ -129,6 +147,10 @@ class ShadeHost(
         h.bridge.shade =
             object : ShadeSlot {
                 override fun closed() = hide()
+
+                override fun expand() = expandPeek()
+
+                override fun peekHeight(px: Int) = sizePeek(px)
             }
         host = h
         val root = Root(shadeContext).apply { addView(h.web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
@@ -142,8 +164,9 @@ class ShadeHost(
         // Out of the way at once if the gesture input already runs.
         edgeLayoutChanged()
         @Suppress("DEPRECATION")
-        service.registerReceiver(closer, IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+        service.registerReceiver(closer, IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS).apply { addAction(Intent.ACTION_SCREEN_OFF) })
         current = this
+        MediaListener.posted = { sbn, ranking -> root.post { peek(sbn, ranking) } }
         flags()
         Log.i(TAG, "PowOS's shade in place of SystemUI's")
         return true
@@ -152,6 +175,7 @@ class ShadeHost(
     /** SystemUI's shade back: the windows gone, the flags lifted. */
     fun stop() {
         if (current === this) current = null
+        MediaListener.posted = null
         runCatching { service.unregisterReceiver(closer) }
         edge?.let { runCatching { edgeWm.removeView(it) } }
         shade?.let { runCatching { shadeWm.removeView(it) } }
@@ -287,28 +311,89 @@ class ShadeHost(
         }.onFailure { Log.w(TAG, "can't set the status bar's disable flags", it) }
     }
 
-    /** Shows the shade window (the pull started): touchable and focused (Back reaches the page). */
+    /** Shows the shade window (the pull started): touchable and focused (Back reaches the page), the whole screen. */
     private fun show() {
         val root = shade ?: return
         if (shown) return
         shown = true
+        peeking = false
         root.visibility = View.VISIBLE
         shadeParams?.let {
             it.flags = it.flags and (WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE).inv()
+            it.height = ViewGroup.LayoutParams.MATCH_PARENT
             shadeWm.updateViewLayout(root, it)
         }
     }
 
-    /** The page shut it (shade.closed): the window hidden, its page kept for the next pull. */
+    /** The page shut it (shade.closed, the shade or its banner): the window hidden, its page kept for the next pull. */
     private fun hide() {
         val root = shade ?: return
-        if (!shown) return
+        if (!shown && !peeking) return
         shown = false
+        peeking = false
         root.visibility = View.GONE
         shadeParams?.let {
             it.flags = it.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            it.height = ViewGroup.LayoutParams.MATCH_PARENT
             shadeWm.updateViewLayout(root, it)
         }
+    }
+
+    /**
+     * A notification was posted: if it would have had SystemUI's heads-up (Notifications.peeks), the banner - the shade
+     * window as a strip at the top, touchable but not focusable, and the page told ("shade.peek").
+     */
+    private fun peek(
+        sbn: StatusBarNotification,
+        ranking: Ranking,
+    ) {
+        val h = host ?: return
+        val root = shade ?: return
+        val notifications = (service.applicationContext as App).runtime.widgets.notifications
+        if (!notifications.peeks(sbn, ranking)) return
+        // The shade down shows it already; locked, SystemUI's own heads-up does (its flags are lifted); screen off: none.
+        if (shown || keyguard || lent || !power.isInteractive) return
+        val item = notifications.item(sbn)
+        if (!peeking) {
+            peeking = true
+            root.visibility = View.VISIBLE
+            shadeParams?.let {
+                it.flags = (it.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()) or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                it.height = stripHeight + (PEEK_HEIGHT_DP * service.resources.displayMetrics.density).toInt()
+                shadeWm.updateViewLayout(root, it)
+            }
+        }
+        h.bridge.emit("shade.peek", h.bridge.notificationJson(item))
+        // The page puts the banner away itself (shade.closed); should it never, the strip mustn't stay over the top.
+        root.removeCallbacks(peekGone)
+        root.postDelayed(peekGone, PEEK_MAX_MS)
+        Log.i(TAG, "banner for ${sbn.packageName} (${sbn.notification.channelId})")
+    }
+
+    /** The banner's strip as tall as the page's banner ([px], from the window's top). */
+    private fun sizePeek(px: Int) {
+        val root = shade ?: return
+        if (!peeking || px <= 0) return
+        shadeParams?.let {
+            if (it.height == px) return
+            it.height = px
+            shadeWm.updateViewLayout(root, it)
+        }
+    }
+
+    /** The banner pulled down (or its Reply): the whole shade, open. */
+    private fun expandPeek() {
+        if (!peeking && !shown) return
+        show()
+        settle(true)
+    }
+
+    private val peekGone = Runnable { if (peeking) unpeek() }
+
+    /** The banner put away without the page (the screen went off, or the page never did). */
+    private fun unpeek() {
+        host?.bridge?.emit("shade.peek", null)
+        hide()
     }
 
     private fun drag(q: Double) = host?.bridge?.emit("shade.drag", JSONObject().put("q", q))
@@ -503,6 +588,12 @@ class ShadeHost(
 
         /** The status bar's right part (from this fraction of its width) pulls the control center, as on OnePlus's. */
         private const val CONTROL_SPLIT = 0.5f
+
+        /** The banner's strip below the status bar until the page says how tall its banner is ("shade.peekHeight"). */
+        private const val PEEK_HEIGHT_DP = 150
+
+        /** Longer than the page keeps any banner (shade.tsx): past this the host takes it away itself. */
+        private const val PEEK_MAX_MS = 30_000L
     }
 }
 
@@ -518,8 +609,14 @@ private enum class PullMove {
     NOT_A_PULL,
 }
 
-/** What the shade page reaches through the bridge (shade.closed). */
+/** What the shade page reaches through the bridge (shade.closed, shade.expand, shade.peekHeight). */
 interface ShadeSlot {
-    /** The panel is shut: the window can go. */
+    /** The panel (or the heads-up banner) is shut: the window can go. */
     fun closed()
+
+    /** The heads-up banner pulled down: the whole shade. */
+    fun expand()
+
+    /** The heads-up banner is [px] (device px) tall from the window's top: the window as tall. */
+    fun peekHeight(px: Int)
 }

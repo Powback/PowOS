@@ -164,6 +164,10 @@ export interface PhoneNotification {
   time: number;
   clearable: boolean;
   profile: string | null;
+  /** Its buttons in order (notifications.action's index); [input]: it takes a typed reply. */
+  actions?: { title: string; input: boolean }[];
+  /** Notification.category ("alarm", "call", "msg", ...): an alarm's or a call's banner stays up longer. */
+  category?: string | null;
 }
 /**
  * A recent task, as the switcher (ui/recents.tsx) shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it
@@ -371,6 +375,8 @@ export interface Bridge {
     clearAll(): Promise<void>;
     /** Opens the setting that grants the launcher notification access. */
     access(): Promise<void>;
+    /** Presses [key]'s action [index]; [text] is the reply typed into it when it takes one. */
+    action(key: string, index: number, text?: string): Promise<void>;
   };
   /**
    * The assistant's screen (index.html?mode=assist, over another app): what that app's screen showed - its text, an
@@ -418,10 +424,14 @@ export interface Bridge {
   /**
    * The shade (index.html?mode=shade, in PowOS's system window above the status bar - the native shade host): the
    * host drives the pull ("shade.drag" { q: 0..1 } while the finger is on the top edge, "shade.settle" { open }), and
-   * hears when the page closed it.
+   * hears when the page closed it. Heads-up banners show here too: "shade.peek" (a PhoneNotification, or null: it's
+   * gone) with the window a strip at the top as tall as [peekHeight] says; [expand] makes it the whole shade, open.
    */
   shade: {
     closed(): Promise<void>;
+    expand(): Promise<void>;
+    /** The banner's bottom edge, CSS px from the top of the window. */
+    peekHeight(px: number): Promise<void>;
   };
   /** Android's recent tasks (the host is the recents provider): newest first; switching to one; removing one. */
   tasks: {
@@ -518,7 +528,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

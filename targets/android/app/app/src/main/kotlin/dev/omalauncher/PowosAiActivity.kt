@@ -92,6 +92,8 @@ class PowosAiActivity : ComponentActivity() {
 
     private fun handle(intent: Intent?) {
         intent ?: return
+        // From an agent's mail notification: that mail read, and shown here.
+        AgentMail.opened(applicationContext, intent)
         intent.getStringExtra(EXTRA_PROMPT)?.let {
             PowosAiChat.send(applicationContext, it)
             return

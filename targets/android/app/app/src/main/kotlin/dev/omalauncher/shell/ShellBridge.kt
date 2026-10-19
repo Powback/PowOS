@@ -205,6 +205,8 @@ class ShellBridge(
             "media.control" -> media.control(a.getString(0))
             "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })
             "shade.closed" -> shade?.closed()
+            "shade.expand" -> shade?.expand()
+            "shade.peekHeight" -> shade?.peekHeight((a.getDouble(0) * density()).toInt())
             "tasks.list" -> tasks()
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(a.getInt(0))
@@ -256,6 +258,7 @@ class ShellBridge(
             "notifications.open" -> runtime.widgets.notifications.control("open", a.getString(0))
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
             "notifications.clearAll" -> runtime.widgets.notifications.clearAll()
+            "notifications.action" -> runtime.widgets.notifications.action(a.getString(0), a.getInt(1), a.optString(2).takeIf { !a.isNull(2) && it.isNotEmpty() })
             "notifications.access" -> runtime.widgets.notifications.askAccess()
             // Android widgets are home items too, kept by AppWidgets ("aw:" keys).
             "home.get" -> panels.merge(appWidgets.merge(home.snapshot()))
@@ -402,24 +405,30 @@ class ShellBridge(
         )
     }
 
-    /** The notification panel's list: { available, items: [{ key, app, icon, title, text, time, clearable, profile }] }. */
+    /** The notification panel's list: { available, items: [notificationJson] }. */
     private fun notificationList(): JSONObject {
         val n = runtime.widgets.notifications
-        val items =
-            n.items().map { item ->
-                // The app's drawer icon (its own profile's, badge and all, when it's from a work or cloned one).
-                val app = runtime.androidApps.apps.firstOrNull { it.component.packageName == item.pkg && (item.profile == null) == (it.profile == null) }
-                JSONObject()
-                    .put("key", item.key)
-                    .put("app", item.app)
-                    .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
-                    .put("title", item.title)
-                    .put("text", item.text)
-                    .put("time", item.time)
-                    .put("clearable", item.clearable)
-                    .put("profile", item.profile ?: JSONObject.NULL)
-            }
-        return JSONObject().put("available", n.available).put("items", JSONArray(items))
+        return JSONObject().put("available", n.available).put("items", JSONArray(n.items().map(::notificationJson)))
+    }
+
+    /**
+     * A notification as the page shows it: { key, app, icon, title, text, time, clearable, profile, actions: [{ title,
+     * input }], category } - the panel's, and the shade's heads-up banner's ("shade.peek").
+     */
+    fun notificationJson(item: dev.omalauncher.widgets.runtime.Notifications.Item): JSONObject {
+        // The app's drawer icon (its own profile's, badge and all, when it's from a work or cloned one).
+        val app = runtime.androidApps.apps.firstOrNull { it.component.packageName == item.pkg && (item.profile == null) == (it.profile == null) }
+        return JSONObject()
+            .put("key", item.key)
+            .put("app", item.app)
+            .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+            .put("title", item.title)
+            .put("text", item.text)
+            .put("time", item.time)
+            .put("clearable", item.clearable)
+            .put("profile", item.profile ?: JSONObject.NULL)
+            .put("actions", JSONArray(item.actions.map { JSONObject().put("title", it.title).put("input", it.input) }))
+            .put("category", item.category ?: JSONObject.NULL)
     }
 
     /** Live mode's state for the page: on or not, frames kept. */

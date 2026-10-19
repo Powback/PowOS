@@ -2,9 +2,14 @@ package dev.omalauncher.widgets.runtime
 
 import android.app.ActivityOptions
 import android.app.Notification
+import android.app.NotificationManager
+import android.app.RemoteInput
 import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.UserHandle
+import android.service.notification.NotificationListenerService.Ranking
 import android.service.notification.StatusBarNotification
 import dev.omalauncher.widgets.lang.Lst
 import dev.omalauncher.widgets.lang.Null
@@ -63,16 +68,106 @@ class Notifications(
         /** Unix seconds. */
         val time: Long,
         val clearable: Boolean,
+        /** Its buttons, in order ([action]'s index): their labels, and whether one takes typed text (a reply). */
+        val actions: List<Action> = emptyList(),
+        /** Notification.category: "alarm" and "call" keep a banner up longer. */
+        val category: String? = null,
     )
+
+    data class Action(
+        val title: String,
+        val input: Boolean,
+    )
+
+    /** [sbn] as listed. */
+    fun item(sbn: StatusBarNotification) =
+        Item(
+            sbn.key,
+            label(sbn.packageName),
+            sbn.packageName,
+            profile(sbn.user),
+            title(sbn).orEmpty(),
+            text(sbn).orEmpty(),
+            sbn.postTime / 1000,
+            sbn.isClearable,
+            sbn.notification.actions.orEmpty().map { a ->
+                Action(a.title?.toString().orEmpty(), a.remoteInputs.orEmpty().any { it.allowFreeFormInput })
+            },
+            sbn.notification.category,
+        )
+
+    /** Keys of what had a banner (the time it was posted), for once-only alerts' updates. */
+    private val alerted = HashMap<String, Long>()
+
+    /**
+     * Whether [sbn], just posted, gets a heads-up banner - as SystemUI decides it (its VisualInterruptionDecisionProvider),
+     * for PowOS's shade, which shows the banner while SystemUI's is off: important enough (IMPORTANCE_HIGH), not held
+     * back by Do not disturb, not a silent or once-only update, not a group's other half by its alert behavior.
+     */
+    fun peeks(
+        sbn: StatusBarNotification,
+        ranking: Ranking,
+    ): Boolean {
+        val n = sbn.notification
+        val before = alerted[sbn.key]
+        if (alerted.size > MAX_ALERTED) {
+            val live = runCatching { MediaListener.connected?.activeNotifications?.map { it.key }?.toSet() }.getOrNull().orEmpty()
+            alerted.keys.retainAll(live)
+        }
+        if (ranking.importance < NotificationManager.IMPORTANCE_HIGH) return false
+        if (!ranking.matchesInterruptionFilter()) return false
+        if (ranking.suppressedVisualEffects and NotificationManager.Policy.SUPPRESSED_EFFECT_PEEK != 0) return false
+        if (n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return false
+        if (n.flags and Notification.FLAG_ONGOING_EVENT != 0 && n.category != Notification.CATEGORY_CALL) return false
+        val summary = n.flags and Notification.FLAG_GROUP_SUMMARY != 0
+        // setSilent(true) is a group child that leaves the alert to its summary; a summary may say the same of its children.
+        if (n.group != null && !summary && n.groupAlertBehavior == Notification.GROUP_ALERT_SUMMARY) return false
+        if (summary && n.groupAlertBehavior != Notification.GROUP_ALERT_SUMMARY) return false
+        if (n.extras.getBoolean(EXTRA_QUIET)) return false
+        if (n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0 && before != null) return false
+        if (title(sbn) == null && text(sbn) == null) return false
+        alerted[sbn.key] = sbn.postTime
+        return true
+    }
+
+    /**
+     * Presses [key]'s action [index] - with [text] typed into it when it takes a reply (its RemoteInputs, as SystemUI's
+     * inline reply fills them).
+     */
+    fun action(
+        key: String,
+        index: Int,
+        text: String?,
+    ) {
+        val listener = MediaListener.connected
+        if (!media.granted || listener == null) return
+        val sbn = runCatching { listener.getActiveNotifications(arrayOf(key)) }.getOrNull()?.firstOrNull() ?: return
+        val action = sbn.notification.actions?.getOrNull(index) ?: return
+        val fill = Intent()
+        val inputs = action.remoteInputs.orEmpty().filter { it.allowFreeFormInput }.toTypedArray()
+        if (text != null && inputs.isNotEmpty()) {
+            val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, text) } }
+            RemoteInput.addResultsToIntent(inputs, fill, results)
+            RemoteInput.setResultsSource(fill, RemoteInput.SOURCE_FREE_FORM_INPUT)
+        }
+        runCatching { action.actionIntent.send(context, 0, fill, null, null, null, startOptions()) }
+    }
+
+    /** The launcher is in front, so it may start the app; since Android 14 it has to say so. */
+    private fun startOptions() =
+        if (Build.VERSION.SDK_INT >= 34) {
+            @Suppress("DEPRECATION")
+            ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED).toBundle()
+        } else {
+            null
+        }
 
     /** Whether the launcher may read notifications (the user granted it notification access). */
     val available get() = media.granted && MediaListener.connected != null
 
     /** The notifications shown, newest first; empty without access. */
     fun items(): List<Item> =
-        (if (available) shown() else emptyList()).take(MAX_ITEMS).map { sbn ->
-            Item(sbn.key, label(sbn.packageName), sbn.packageName, profile(sbn.user), title(sbn).orEmpty(), text(sbn).orEmpty(), sbn.postTime / 1000, sbn.isClearable)
-        }
+        (if (available) shown() else emptyList()).take(MAX_ITEMS).map(::item)
 
     fun value(): Value {
         val items =
@@ -108,15 +203,7 @@ class Notifications(
         when (command) {
             "open" -> {
                 val intent = sbn.notification.contentIntent ?: return
-                // The launcher is in front, so it may start the app; since Android 14 it has to say so.
-                val options =
-                    if (Build.VERSION.SDK_INT >= 34) {
-                        @Suppress("DEPRECATION")
-                        ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED).toBundle()
-                    } else {
-                        null
-                    }
-                runCatching { intent.send(context, 0, null, null, null, null, options) }
+                runCatching { intent.send(context, 0, null, null, null, null, startOptions()) }
                 if (sbn.notification.flags and Notification.FLAG_AUTO_CANCEL != 0) listener.cancelNotification(key)
             }
             "dismiss" -> listener.cancelNotification(key)
@@ -134,5 +221,9 @@ class Notifications(
 
     companion object {
         private const val MAX_ITEMS = 50
+        private const val MAX_ALERTED = 200
+
+        /** In a notification's extras: posted again quietly (dev.omalauncher.AgentMail) - no banner for it. */
+        const val EXTRA_QUIET = "powos.quiet"
     }
 }

@@ -180,7 +180,7 @@ def _idle_hint():
     )
 
 
-def _phone_notify(message, priority="normal"):
+def _phone_notify(message, priority="normal", mid=None):
     """On a phone running PowOS: the message as an Android notification too, where the user is - the PowOS desktop
     may not be on screen. Written into the PowOS app's run dir (agent-mail/, the session's XDG_RUNTIME_DIR); the app
     posts it with an inline reply that comes back to this agent's inbox (targets/android: AgentMail).
@@ -201,7 +201,9 @@ def _phone_notify(message, priority="normal"):
         name = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
         tmp = os.path.join(box, f".{name}.tmp")
         with open(tmp, "w") as f:
-            json.dump({"from": AGENT_ID or "agent", "text": message, "priority": priority}, f)
+            # id: the user-inbox message's (the app keeps the mail by it, read or not); time: Unix seconds.
+            json.dump({"id": mid or name, "from": AGENT_ID or "agent", "text": message, "priority": priority,
+                       "time": int(time.time())}, f)
         os.rename(tmp, os.path.join(box, f"{name}.json"))
     except Exception:
         pass
@@ -269,11 +271,11 @@ def _on_phone():
     return platform == "phone"
 
 
-def _desktop_notify(message, priority):
+def _desktop_notify(message, priority, mid=None):
     """Best-effort desktop toast for notify_user. Never fatal."""
     urgency = {"low": "low", "normal": "normal", "high": "critical",
                "urgent": "critical"}.get(priority, "normal")
-    _phone_notify(message, priority)
+    _phone_notify(message, priority, mid)
     if not shutil.which("notify-send"):
         return
     try:
@@ -316,7 +318,7 @@ def tool_notify_user(args):
         return (f"This agent may not notify the user directly; forwarded to "
                 f"'{PARENT_ID}' instead (id {mid}).")
     mid = _deliver("user", "notify", message, priority)
-    _desktop_notify(message, priority)
+    _desktop_notify(message, priority, mid)
     return f"User notified (id {mid})."
 
 
@@ -566,7 +568,7 @@ def run_cli(argv):
         print(f"Sent to '{a.to}' (id {mid}).")
     elif a.cmd == "notify":
         mid = _deliver("user", "notify", " ".join(a.message), a.priority)
-        _desktop_notify(" ".join(a.message), a.priority)
+        _desktop_notify(" ".join(a.message), a.priority, mid)
         print(f"User notified (id {mid}).")
     elif a.cmd == "inbox":
         msgs = _read_pending(a.agent, drain=not a.peek)

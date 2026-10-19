@@ -149,6 +149,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       dismiss: (key) => call("notifications.dismiss", key),
       clearAll: () => call("notifications.clearAll"),
       access: () => call("notifications.access"),
+      action: (key, index, text) => call("notifications.action", key, index, text ?? null),
     },
     lock: { unlock: () => call("lock.unlock") },
     media: {
@@ -163,7 +164,11 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       set: (name, value) => call<QuickState>("qs.set", name, value),
       listening: (on) => call("qs.listening", on),
     },
-    shade: { closed: () => call("shade.closed") },
+    shade: {
+      closed: () => call("shade.closed"),
+      expand: () => call("shade.expand"),
+      peekHeight: (px) => call("shade.peekHeight", px),
+    },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
       open: (id, from) => call<boolean>("tasks.open", id, from ?? null),
@@ -656,7 +661,11 @@ function mock(): Bridge {
         },
       };
     })(),
-    shade: { closed: async () => console.log("[mock] shade closed") },
+    shade: {
+      closed: async () => console.log("[mock] shade closed"),
+      expand: async () => console.log("[mock] shade expanded"),
+      peekHeight: async (px) => console.log("[mock] banner height", px),
+    },
     tasks: mockTasks(icon, hue),
     recents: {
       slot: async () => {},
@@ -710,6 +719,10 @@ function mock(): Bridge {
           time: now - 7200,
           clearable: true,
           profile: null,
+          actions: [
+            { title: "Reply", input: true },
+            { title: "Mark read", input: false },
+          ],
         },
       ];
       const changed = () => events.emit("notifications.changed", { available: true, items });
@@ -725,6 +738,7 @@ function mock(): Bridge {
           changed();
         },
         access: async () => console.log("[mock] notification access"),
+        action: async (key: string, index: number, text?: string) => console.log("[mock] notification action", key, index, text),
       };
     })(),
     // Three of Omarchy's themes; picking one recolors the page as the phone's would.

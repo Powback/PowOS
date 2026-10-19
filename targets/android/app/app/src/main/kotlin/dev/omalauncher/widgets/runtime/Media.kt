@@ -15,6 +15,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
+import android.service.notification.NotificationListenerService.Ranking
+import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
 import dev.omalauncher.widgets.lang.Null
 import dev.omalauncher.widgets.lang.Num
@@ -50,8 +52,17 @@ class MediaListener : NotificationListenerService() {
         changes.update { it + 1 }
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+    override fun onNotificationPosted(
+        sbn: StatusBarNotification?,
+        rankingMap: RankingMap?,
+    ) {
         changes.update { it + 1 }
+        // A new one, with how the system ranks it (its importance, whether Do not disturb holds it back): PowOS's
+        // shade's heads-up banner decides with it (system/ShadeHost.peek).
+        val to = posted ?: return
+        if (sbn == null || rankingMap == null) return
+        val ranking = Ranking()
+        if (rankingMap.getRanking(sbn.key, ranking)) to(sbn, ranking)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
@@ -71,6 +82,10 @@ class MediaListener : NotificationListenerService() {
 
         /** Bumped whenever the notifications or the connection change. */
         val changes = MutableStateFlow(0)
+
+        /** Told of each notification posted (on the main thread), with its ranking: PowOS's shade's banner. */
+        @Volatile
+        var posted: ((StatusBarNotification, Ranking) -> Unit)? = null
     }
 }
 

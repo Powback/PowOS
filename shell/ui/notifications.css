@@ -1,0 +1,50 @@
+/* The notification panel's actions and inline reply (notifications.tsx), and the shade's heads-up banner (shade.tsx). */
+.notif-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px -6px -4px; }
+.notif-buttons button {
+  font: var(--text-small) var(--font);
+  color: var(--color-accent);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+}
+.notif-buttons button:active { background: var(--color-surface); }
+.notif-reply { display: flex; gap: 6px; margin-top: 6px; }
+.notif-reply input {
+  flex: 1;
+  min-width: 0;
+  font: var(--text-small) var(--font);
+  color: var(--color-foreground);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  user-select: text;
+}
+.notif-reply button {
+  width: 36px;
+  font: 16px var(--font);
+  color: var(--color-background);
+  background: var(--color-accent);
+  border: 0;
+  border-radius: 50%;
+}
+.notif-reply button:disabled { color: var(--color-muted); background: var(--color-surface); }
+
+/* The banner: at the top under the status bar, over whatever app is there (the window is only as tall as it). */
+.peek {
+  position: fixed;
+  z-index: 20;
+  top: calc(var(--inset-top, 0px) + 6px);
+  left: var(--edge);
+  right: var(--edge);
+  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + 25%), transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+  touch-action: none;
+  animation: peek-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes peek-in {
+  from { transform: translateY(-120%); opacity: 0; }
+}

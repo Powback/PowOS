@@ -1,9 +1,11 @@
 /**
  * The launcher's own notification panel: a swipe down on home brings it down under the finger (gesture.ts, as the
  * drawer comes up), in the theme's colors. A tap opens a notification; a card slid sideways is dismissed; "clear all"
- * clears what can be. "controls" turns it into the control center (control.tsx). Its openness is --q (data-q).
+ * clears what can be. A card's buttons are its notification's actions, a reply typed in place for one that takes it
+ * (an agent's mail: Reply, Mark read). "controls" turns it into the control center (control.tsx). Its openness is --q
+ * (data-q).
  */
-import { useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
@@ -14,6 +16,73 @@ import { ago } from "./time.ts";
 import type { NotificationList, PhoneNotification } from "../types.ts";
 
 const list = signal<NotificationList>({ available: true, items: [] });
+
+/** The card whose reply field is open, and which of its actions takes the text (the shade's banner opens one too). */
+export const replying = signal<{ key: string; index: number } | null>(null);
+
+/** A card's (or the banner's) buttons: a touch on them is theirs, not the card's tap or slide. */
+export function Actions({ n, onDone }: { n: PhoneNotification; onDone?: (reply: boolean) => void }) {
+  if (!n.actions?.length) return null;
+  return (
+    <div class="notif-buttons" onPointerDown={(e) => e.stopPropagation()}>
+      {n.actions.map((a, i) => (
+        <button
+          type="button"
+          key={i}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (a.input) replying.value = { key: n.key, index: i };
+            else powos.notifications.action(n.key, i);
+            onDone?.(a.input);
+          }}
+        >
+          {a.title}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The reply typed in place: sent into the notification's action as its inline reply. */
+function Reply({ n, index }: { n: PhoneNotification; index: number }) {
+  const [text, setText] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    // The shade's window takes focus a moment after it's pulled (or the banner expanded): then the keyboard.
+    const t = window.setTimeout(() => {
+      input.current?.focus();
+      powos.keyboard.show();
+    }, 150);
+    return () => clearTimeout(t);
+  }, []);
+  const send = () => {
+    const t = text.trim();
+    if (!t) return;
+    powos.notifications.action(n.key, index, t);
+    replying.value = null;
+  };
+  return (
+    <form
+      class="notif-reply"
+      onPointerDown={(e) => e.stopPropagation()}
+      onSubmit={(e) => {
+        e.preventDefault();
+        send();
+      }}
+    >
+      <input
+        ref={input}
+        value={text}
+        placeholder={n.actions?.[index]?.title ?? "Reply"}
+        onInput={(e) => setText((e.target as HTMLInputElement).value)}
+        enterKeyHint="send"
+      />
+      <button type="submit" aria-label="send" disabled={!text.trim()}>
+        ↑
+      </button>
+    </form>
+  );
+}
 powos.on("notifications.changed", (l: NotificationList) => (list.value = l));
 powos.notifications.list().then((l) => (list.value = l));
 
@@ -93,12 +162,18 @@ function Card({ n }: { n: PhoneNotification }) {
       </div>
       {n.title && <div class="notif-title">{n.title}</div>}
       {n.text && <div class="notif-text">{n.text}</div>}
+      <Actions n={n} />
+      {replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
     </div>
   );
 }
 
 export function NotificationPanel() {
   const shown = notifOpen.value;
+  // Shut: no reply left half-typed in it.
+  useEffect(() => {
+    if (!shown) replying.value = null;
+  }, [shown]);
   const { available, items } = list.value;
   const clearable = items.some((n) => n.clearable);
   return (
