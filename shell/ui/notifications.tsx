@@ -110,38 +110,40 @@ export function NotificationPanel() {
         onClick={() => (notif.value = false)}
       />
       <div class={`notif-panel ${shown ? "shown" : ""}`} data-q ref={followNotif} aria-hidden={!shown}>
-        {panel.value === "control" ? (
-          <ControlCenter />
-        ) : (
-          <>
-            <div class="notif-bar">
-              <span class="muted">
-                {items.length ? `${items.length} notification${items.length > 1 ? "s" : ""}` : "notifications"}
-              </span>
-              <span class="notif-actions icons">
-                {clearable && (
-                  <button type="button" aria-label="clear all" onClick={() => powos.notifications.clearAll()}>
-                    <Icon name="notificationClearAll" />
+        <div class="panel-body">
+          {panel.value === "control" ? (
+            <ControlCenter />
+          ) : (
+            <>
+              <div class="notif-bar">
+                <span class="muted">
+                  {items.length ? `${items.length} notification${items.length > 1 ? "s" : ""}` : "notifications"}
+                </span>
+                <span class="notif-actions icons">
+                  {clearable && (
+                    <button type="button" aria-label="clear all" onClick={() => powos.notifications.clearAll()}>
+                      <Icon name="notificationClearAll" />
+                    </button>
+                  )}
+                  <button type="button" aria-label="controls" onClick={() => (panel.value = "control")}>
+                    <Icon name="tuneVariant" />
                   </button>
+                </span>
+              </div>
+              <div class="notif-list">
+                {!available ? (
+                  <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>
+                    allow the launcher to show your notifications here →
+                  </button>
+                ) : items.length ? (
+                  items.map((n) => <Card key={n.key} n={n} />)
+                ) : (
+                  <div class="notif-empty muted">nothing new</div>
                 )}
-                <button type="button" aria-label="controls" onClick={() => (panel.value = "control")}>
-                  <Icon name="tuneVariant" />
-                </button>
-              </span>
-            </div>
-            <div class="notif-list">
-              {!available ? (
-                <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>
-                  allow the launcher to show your notifications here →
-                </button>
-              ) : items.length ? (
-                items.map((n) => <Card key={n.key} n={n} />)
-              ) : (
-                <div class="notif-empty muted">nothing new</div>
-              )}
-            </div>
-          </>
-        )}
+              </div>
+            </>
+          )}
+        </div>
         <div class="notif-grip" />
       </div>
     </>
