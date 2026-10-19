@@ -101,7 +101,12 @@ class PowosLockActivity : Activity() {
     override fun onResume() {
         super.onResume()
         val on = getSystemService(android.os.PowerManager::class.java).isInteractive
-        if (on && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) finish()
+        if (on && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+            finish()
+            return
+        }
+        // Up since the screen went off: the page's clock and notifications brought up to now.
+        LockFace.host(this).bridge.emit("lock.shown", null)
     }
 
     // Back on a lock screen goes nowhere: the face stays until the phone is unlocked.
