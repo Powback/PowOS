@@ -12,9 +12,23 @@
 #   system [status|stop|off|on]   PowOS's system tier (SpacetimeDB under the supervisor, the uid-locked port)
 #   wifi      adb over Wi-Fi (port 5555, kept across reboots): unplug the cable
 #   widevine-l3 [remove]   Netflix etc. in SD on the unlocked phone (targets/native/widevine-l3.sh)
+#   module <zip>  stage the PowOS system module (system-module/build-module.sh's zip) in Magisk: on at the next reboot
+# install, deploy and module take --note "what changed, for the user" (required): the phone's quiet "update applied"
+# notification (tools/deploy-note.sh).
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+NOTE="" ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in --note) NOTE=${2:-}; shift 2 || shift ;; --note=*) NOTE=${1#--note=}; shift ;; *) ARGS+=("$1"); shift ;; esac
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
+case "${1:-}" in
+  install|deploy|module)
+    [ -n "${NOTE// }" ] || { echo "rooted.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2; exit 2; } ;;
+esac
+# After a deploy: the phone's "update applied" notification (batched: install's own deploy makes the same one).
+noted() { ADB=adb "$HERE/../tools/deploy-note.sh" "$NOTE"; }
 ROOTFS=${ROOTFS:-$HERE/../out/powos-rootfs.tar.gz}
 
 # Magisk's su: on PATH once Magisk finished its setup, always at /debug_ramdisk/su while it runs.
@@ -31,7 +45,7 @@ install)
   got=$(asu "sha256sum /data/local/tmp/powos-rootfs.tar.gz" | awk '{print $1}')
   [ "$want" = "$got" ] || { echo "CHECKSUM MISMATCH after push"; exit 1; }
   asu "mkdir -p /data/powos/root && tar -xzpf /data/local/tmp/powos-rootfs.tar.gz -C /data/powos/root --numeric-owner && rm /data/local/tmp/powos-rootfs.tar.gz"
-  "$0" deploy
+  "$0" deploy --note "$NOTE"
   echo "installed: /data/powos/root ($(asu 'du -sh /data/powos/root' | awk '{print $1}')), boot service in /data/adb/service.d" ;;
 deploy)
   # The rooted-mode scripts (also part of install): the boot/mount script, the desktop session the PowOS app starts
@@ -77,7 +91,14 @@ deploy)
   reg=$HERE/../../../apps/registry/out/module.wasm
   if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
   else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi
-  asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh" ;;
+  asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh"
+  noted ;;
+module)
+  # The system module (system-module/build-module.sh): staged in Magisk, on from the next reboot.
+  [ -f "${2:-}" ] || { echo "usage: rooted.sh module <powos-system-module.zip> --note \"...\""; exit 1; }
+  adb push -q "$2" /data/local/tmp/powos-system-module.zip
+  asu "magisk --install-module /data/local/tmp/powos-system-module.zip; rm -f /data/local/tmp/powos-system-module.zip"
+  NOTE="$NOTE (after a restart)" noted ;;
 start)
   asu "sh /data/powos/powos-start.sh"; asu "tail -5 /data/powos/start.log" ;;
 shell)
@@ -124,5 +145,5 @@ widevine-l3)
     echo "Widevine L3 forced (now and at every boot)"
   fi ;;
 *)
-  sed -n '2,15p' "$0"; exit 1 ;;
+  sed -n '2,18p' "$0"; exit 1 ;;
 esac

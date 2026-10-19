@@ -1,0 +1,18 @@
+#!/bin/bash
+# The phone's quiet "update applied" notification, after anything lands on it (an APK, a shell push, an app, the
+# system module, the rootfs or a package): one plain line for the user - what changed for them ("Switcher now follows
+# your finger"), never a commit or a file. Silent, shade only (comms' low priority), in the PowOS AI feed too; notes
+# within 2 minutes of each other become one notification, the latest first and the whole list on a tap.
+#   targets/android/tools/deploy-note.sh "<what changed, for the user>"
+# Runs `powos comms notify --from deploy --priority low --batch deploy` inside PowOS (one su call). Through $ADB like
+# apps/install.sh: ADB="docker exec powos-vadb adb" (the VPN), or plain adb. Best effort: a phone that can't be reached
+# doesn't fail the deploy that called it.
+set -uo pipefail
+note=${1:-}
+[ -n "${note// }" ] || { echo "deploy-note.sh: a note is required: what changed, for the user" >&2; exit 2; }
+ADB=${ADB:-adb}
+# Base64 through the quoting layers (adb shell -> su -c -> powos-run.sh -> bash -lc); comms reads it from stdin.
+b=$(printf '%s' "$note" | base64 | tr -d '\n')
+$ADB shell "su -c \"sh /data/powos/powos-run.sh 'echo $b | base64 -d | powos comms notify --from deploy --priority low --batch deploy -'\"" >/dev/null ||
+  echo "deploy-note.sh: the phone wasn't told (\"$note\")" >&2
+exit 0

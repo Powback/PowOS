@@ -99,8 +99,10 @@ polling); the model can also Monitor the inbox path directly.
 Usage:
   powos comms send <to> <message...> [--priority low|normal|high|urgent]
                                      Send to an agent role's inbox.
-  powos comms notify <message...> [--priority P] [--from NAME]
+  powos comms notify <message...|-> [--priority P] [--from NAME] [--batch KEY [--window S]]
                                      Notify the human user (+ desktop toast, phone notification).
+                                     -: the message from stdin. --batch: notices with the same key
+                                     within S seconds (default 120) become one notification.
   powos comms read <id...> [--agent R]
                                      Mark messages read by id (default agent: user): out of the
                                      inbox, and on a phone off its notifications and feed.
@@ -114,6 +116,8 @@ Usage:
 Examples:
   powos comms send devops "CI is green, digest changed" --priority high
   powos comms watch --agent devops         # park until devops gets mail
+  powos comms notify --from deploy --priority low --batch deploy "Switcher now follows your finger"
+                                           # "update applied": quiet, shade only, batched
   powos ai --agent devops "check your inbox and act on it"
 
 Disable wiring with POWOS_COMMS_ENABLED=0.

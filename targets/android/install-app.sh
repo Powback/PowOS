@@ -6,11 +6,24 @@
 # targets/android/system-module/privapp-permissions.txt; a new entry only counts once the rebuilt module is installed
 # and the phone has booted with it (the check reads the live /system/etc/permissions file, not the module source).
 #
-# Usage: targets/android/install-app.sh [apk] [--check]   (default: android-app-dev's output/powos.apk; --check: no install)
+# Usage: targets/android/install-app.sh [apk] --note "what changed, for the user" [--check]
+#        (default apk: android-app-dev's output/powos.apk; --check: no install, no note needed). The note becomes the
+#        phone's quiet "update applied" notification (tools/deploy-note.sh): plain words, never a commit hash.
 #        ANDROID_SERIAL picks the phone when several are connected. Needs adb and aapt (the android-builder image has both).
 set -euo pipefail
 cd "$(dirname "$0")"
-apk="${1:-${APK:-$HOME/Projects/android-app-dev/output/powos.apk}}"
+note="" check="" pos=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --note) note=${2:-}; shift 2 || shift ;;
+    --note=*) note=${1#--note=}; shift ;;
+    --check) check=1; shift ;;
+    *) pos+=("$1"); shift ;;
+  esac
+done
+[ -n "$check" ] || [ -n "${note// }" ] ||
+  { echo "install-app.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2; exit 2; }
+apk="${pos[0]:-${APK:-$HOME/Projects/android-app-dev/output/powos.apk}}"
 [ -f "$apk" ] || { echo "install-app.sh: no apk at $apk" >&2; exit 1; }
 aapt="$(command -v aapt || ls /opt/android-sdk/build-tools/*/aapt 2>/dev/null | tail -1 || true)"
 [ -n "$aapt" ] || { echo "install-app.sh: aapt not found (run in the android-builder image)" >&2; exit 1; }
@@ -33,5 +46,6 @@ if [ -n "$missing" ] && [ "$enforce" = "enforce" ]; then
   exit 2
 fi
 echo "install-app.sh: privileged permissions OK (${need:+$(echo $need | wc -w) asked, all allowlisted})"
-[ "${2:-}" = "--check" ] && exit 0
+[ -n "$check" ] && exit 0
 adb install -r "$apk"
+ADB=adb tools/deploy-note.sh "$note"

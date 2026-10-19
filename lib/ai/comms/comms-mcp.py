@@ -163,6 +163,52 @@ def _consume(agent, ids):
     return n
 
 
+def _batched(key, text, window):
+    """--batch: notices of one kind within [window] s of the last become one. Returns (the text to post: the latest
+    note first, then every note of the batch as a list; the batch's previous message id to take back, or None).
+    State: <root>/batches/<key>.json, under a lock (two deploys at once still make one batch)."""
+    import fcntl
+
+    d = os.path.join(ROOT, "batches")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{_safe_name(key)}.json")
+    with open(path + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(path) as f:
+                st = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            st = {}
+        now = time.time()
+        fresh = now - float(st.get("ts", 0)) < window
+        notes = (st.get("notes") or []) if fresh else []
+        prev = st.get("id") if fresh else None
+        notes = [n for n in notes if n != text] + [text]
+        if len(notes) == 1:
+            body = text
+        else:
+            # Line 1 is what the collapsed notification shows; the list is what a tap expands to.
+            body = f"{text} (+{len(notes) - 1} more)\n" + "\n".join(f"• {n}" for n in reversed(notes))
+        st = {"ts": now, "notes": notes[-20:], "id": None}
+        with open(path + ".tmp", "w") as f:
+            json.dump(st, f)
+        os.replace(path + ".tmp", path)
+    return body, prev
+
+
+def _batch_sent(key, mid):
+    path = os.path.join(ROOT, "batches", f"{_safe_name(key)}.json")
+    try:
+        with open(path) as f:
+            st = json.load(f)
+        st["id"] = mid
+        with open(path + ".tmp", "w") as f:
+            json.dump(st, f)
+        os.replace(path + ".tmp", path)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
 def _list_agents():
     """Every known inbox role and its current unread depth."""
     base = os.path.join(ROOT, "agents")
@@ -587,6 +633,10 @@ def run_cli(argv):
     pn.add_argument("--priority", choices=VALID_PRIORITIES, default="normal")
     pn.add_argument("--from", dest="frm", default=AGENT_ID or "user",
                     help="Who it's from (tests: their own name, never 'user').")
+    pn.add_argument("--batch", metavar="KEY",
+                    help="Fold into the last notice with this key if it came within --window s: one notification, "
+                         "the latest line first and all of them as a list (deploys: --batch deploy).")
+    pn.add_argument("--window", type=float, default=120, help="--batch's window in seconds (default 120).")
 
     pr = sub.add_parser("read", help="Mark messages read by id: out of the inbox (the user's: off the phone too).")
     pr.add_argument("ids", nargs="+")
@@ -617,8 +667,21 @@ def run_cli(argv):
         print(f"Sent to '{a.to}' (id {mid}).")
     elif a.cmd == "notify":
         AGENT_ID = a.frm
-        mid = _deliver("user", "notify", " ".join(a.message), a.priority)
-        _desktop_notify(" ".join(a.message), a.priority, mid)
+        # "-": the message from stdin (scripts passing text through layers of shell quoting).
+        text = sys.stdin.read().strip() if a.message == ["-"] else " ".join(a.message)
+        if not text.strip():
+            print("powos comms notify: refusing an empty message", file=sys.stderr)
+            sys.exit(2)
+        prev = None
+        if a.batch:
+            text, prev = _batched(a.batch, text, a.window)
+        mid = _deliver("user", "notify", text, a.priority)
+        if prev:
+            # The batch's earlier notice: out of the inbox, the feed and the shade - this one replaces it.
+            _consume("user", [prev])
+        if a.batch:
+            _batch_sent(a.batch, mid)
+        _desktop_notify(text, a.priority, mid)
         print(f"User notified (id {mid}).")
     elif a.cmd == "inbox":
         msgs = _read_pending(a.agent, drain=not a.peek)

@@ -271,15 +271,16 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 ### Shipping a change (edit → test → ship → roll back)
 | Layer | Edit | Ship | Roll back |
 |---|---|---|---|
-| Web shell UI | `shell/**` | `shell/push.sh <files>` (`ANDROID_SERIAL` picks the phone): every open page reloads | `shell/push.sh --reset [files]` |
+| Web shell UI | `shell/**` | `shell/push.sh --note "<what changed>" <files>` (`--vpn` first over the VPN; `ANDROID_SERIAL` picks the phone): every open page reloads | `shell/push.sh --reset [files]` |
 | OWL widgets | `targets/android/app/app/src/main/assets/widgets/*.owl` | APK; or write the live copy `files/widgets/<name>.owl` (that copy then counts as the user's and isn't updated by later APKs) | restore the previous file |
-| App (Kotlin) | `targets/android/app/**` | `bash targets/android/build-app.sh` → `~/Projects/android-app-dev/output/powos.apk` (also on android.pow) → `adb install -r` | install the previous APK |
-| System slots (priv-app, recents, overlays) | `targets/android/system-module/` | `build-module.sh --priv-app --slot recents` → `magisk --install-module` + reboot | `touch /data/adb/modules/powos-system/disable` + reboot |
-| Rooted scripts | `targets/android/rooted/*` | `targets/android/rooted/rooted.sh deploy` | redeploy the previous version |
+| App (Kotlin) | `targets/android/app/**` | `bash targets/android/build-app.sh` → `~/Projects/android-app-dev/output/powos.apk` (also on android.pow) → `targets/android/install-app.sh <apk> --note "<what changed>"` | install the previous APK |
+| System slots (priv-app, recents, overlays) | `targets/android/system-module/` | `build-module.sh --priv-app --slot recents` → `rooted.sh module <zip> --note "<what changed>"` + reboot | `touch /data/adb/modules/powos-system/disable` + reboot |
+| Rooted scripts | `targets/android/rooted/*` | `targets/android/rooted/rooted.sh deploy --note "<what changed>"` | redeploy the previous version |
 | KWin / packages | `targets/android/pkgs/` | `build-pkgs.sh` (ccache) → rootfs | previous package |
-| Rootfs | `build-rootfs.sh` → `out/powos-rootfs.tar.gz` | `rooted.sh install` (replaces `/data/powos/root`) | reinstall the old tarball |
-| PowOS layer (`lib/`, `bin/`, `config/`) | repo | copy into `/data/powos/root/usr/lib/powos/…` (or `/etc/powos/…`) as root | copy back the old file |
+| Rootfs | `build-rootfs.sh` → `out/powos-rootfs.tar.gz` | `rooted.sh install --note "<what changed>"` (replaces `/data/powos/root`) | reinstall the old tarball |
+| PowOS layer (`lib/`, `bin/`, `config/`) | repo | copy into `/data/powos/root/usr/lib/powos/…` (or `/etc/powos/…`) as root, then `targets/android/tools/deploy-note.sh "<what changed>"` | copy back the old file |
 Built centrally and shipped whole. Never `pacman -Syu` on the phone.
+Every ship to the phone carries `--note`: one plain line of what changed for the user ("Switcher now follows your finger", never a hash or a file) - the phone's quiet "update applied" notification, deploys within 2 min folded into one (`powos comms notify --from deploy --priority low --batch deploy`).
 
 ### `powos` on the phone
 - Works: `status` (Phone: mode, kernel, battery, network), `android {apps,open,running,notifications,notify,screenshot}`,
@@ -329,7 +330,7 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   Landlock: not in this kernel); container = **not ready yet** on the phone (refused, exit 78). Flipping restarts the
   service in seconds; same command, data dir, port and uid. `powos app check` shows what this kernel supports.
 - **Apps**: `powos app install|publish|ui|list|remove` (Mac side: `apps/build.sh <app>` then
-  `ADB="docker exec powos-vadb adb" apps/install.sh <app> [install|publish|ui]`). The registry is the
+  `ADB="docker exec powos-vadb adb" apps/install.sh <app> [install|publish|ui] --note "<what changed>"`). The registry is the
   `powos-registry` database (owner = powos's CLI identity). Installed UIs: `~/.local/share/powos/apps/<id>/<ver>/` =
   the app's `files/apps` (bound by `powos-session.sh`), served to the shell at `https://shell.powos/_app/<id>/`.
   Prototype: `apps/counter` (Rust module `powos-counter` + island widget `widgets/count.js`).
