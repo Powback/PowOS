@@ -418,6 +418,8 @@ class AppWidgets private constructor(
     /** Takes one off home (home.remove): the widget is deleted, as a launcher does. */
     fun remove(key: String) {
         val e = entry(key) ?: return
+        // The only way a widget leaves home (nothing prunes them): said, with who asked, so a lost one can be traced.
+        Log.w(TAG, "widget ${e.id} (${e.provider.flattenToShortString()}) removed from home", Throwable("home.remove"))
         entries.remove(e)
         save()
         renderers.remove(e.id)?.close()
