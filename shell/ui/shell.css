@@ -77,14 +77,14 @@
 .home.open .launcher .drawer { pointer-events: auto; }
 
 /*
- * The recent row heads the panel; as the launcher opens it closes like the dock, a shutter rising to its top edge -
- * the icons cut off at full size, the list coming up under it.
+ * The recent row heads the panel; as the launcher opens it closes towards the top, like a shutter: the icons, kept
+ * at full size and sitting on the row's bottom, disappear into its top edge as the list comes up under it.
  */
 .strip {
   flex: none;
   height: calc(var(--strip-height) * (1 - var(--p)));
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 4px;
   padding: 0 4px;
   overflow: hidden;
