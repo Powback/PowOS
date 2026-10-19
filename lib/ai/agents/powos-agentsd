@@ -19,8 +19,8 @@ agents), and exits after 10 minutes without events and without a working agent; 
 Each batch also goes to the device's SpacetimeDB (the powos-agents module, apps/agents: the same §3 rows), when it
 runs - Phase 2's backend, with the spool as the fallback (class Stdb).
 
---mirror (POWOS_AGENTS_MIRROR, the Mac): also pushes the whole state, folded, to another host's spool at most once a
-second and only when it changed - the Mac's agents on the phone.
+--mirror (POWOS_AGENTS_MIRROR, the Mac): also pushes the whole state, folded, to another host's spool at most once every
+15 s and only when it changed - the Mac's agents on the phone.
 HACK: adb is a dev channel, not a transport; real fix = Phase 2 (the phone subscribes to the Mac's agents module).
 
 Never stored (§3): tool inputs or outputs, file contents, transcripts, env, tokens. Hints come from a fixed whitelist
@@ -49,7 +49,9 @@ IDLE_EXIT_S = 600
 STALE_WORKING_MS = 30 * 60_000
 QUIET_GONE_MS = 15 * 60_000
 DROP_GONE_MS = 60 * 60_000
-MIRROR_EVERY_S = 1.0
+# Each push is an `adb shell su -c` on the phone, and Magisk shows a Superuser toast per su call; a toast window
+# also caps the panel to 60 Hz, so pushing every second made the phone's UI flicker. HACK: the real fix is Phase 2.
+MIRROR_EVERY_S = 15.0
 MIRROR_EVENTS = 20
 MIRROR_MESSAGES = 50
 
