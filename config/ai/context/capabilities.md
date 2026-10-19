@@ -301,7 +301,8 @@ Built centrally and shipped whole. Never `pacman -Syu` on the phone.
 - Share sheet (`ACTION_SEND`) and `ACTION_ASSIST` open PowOS AI.
 - Agents view (docs/AGENTS-VIEW-DESIGN.md, Phase 1): every claude in PowOS reports through async hooks in
   `~powos/.claude/settings.json` (`/usr/lib/powos/ai/agents/powos-agent-hook` → `powos-agentsd` → `/run/powos-app/agents/`);
-  the Mac's sessions are mirrored in (`agents/mirror/mac.json`). Shown as home's Agents widget, PowOS AI's page →
+  the Mac's sessions are mirrored in (`agents/mirror/mac.json`; an adb HACK - every cross-device channel and its
+  replacement, the remote PowOS design: `docs/REMOTE-POWOS.md`). Shown as home's Agents widget, PowOS AI's page →
   Agents, and an ongoing notification while one works. Asks (PermissionRequest) can be allowed/denied from the phone;
   unanswered after 60 s, Claude asks at its terminal.
 - Claude: `ANTHROPIC_BASE_URL=http://claude-auth.pow`, the fleet's OAuth proxy. Never log in or refresh a token on
@@ -361,7 +362,8 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
 - Don't inject touches/keys while the user is using the phone: `dumpsys power | grep lastUserActivityTime` must
   show more than 120000 ms ago.
 - Never weaken SELinux (no setenforce, no broad allow rules). Don't route around a denial; tell the user.
-- Mark every workaround `HACK:` with why and the real fix. Never print secrets or tokens.
+- Mark every workaround `HACK:` with why and the real fix, and add it to the HACK registry (`docs/REMOTE-POWOS.md` §4)
+  in the same commit (`test/tier1/test-hack-registry.sh` checks). Never print secrets or tokens.
 - Recovery if the phone UI breaks: disable the Magisk module (above) and reboot.
 
 ## Game modding (`powos mods`)

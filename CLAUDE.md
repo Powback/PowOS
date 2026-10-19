@@ -1342,6 +1342,13 @@ one, a test says so, with the reason, at the point of breakage:
 | Every verb an agent needs is discoverable in help | `test-mods-core.sh` |
 | Every verb `powos game` documents resolves to a real function | `test-game-facade.sh` |
 | One canonical game id across manifest / harness / `powos games` | `test-mods-harness.sh` |
+| Every `HACK:` marker in the tree has a row in the HACK registry | `test-hack-registry.sh` |
+
+## Workarounds: `HACK:` markers and the registry
+
+Mark every workaround `HACK:` at the spot, with why and the real fix. **Every `HACK:` is also listed in the
+registry, `docs/REMOTE-POWOS.md` §4, in the same commit that adds, moves or removes it** (`test-hack-registry.sh`
+fails otherwise). Cross-device channels (adb, ssh, root between hosts) and their replacement: `docs/REMOTE-POWOS.md`.
 
 ## Shared checkouts: commit only your own paths (agents: READ THIS)
 

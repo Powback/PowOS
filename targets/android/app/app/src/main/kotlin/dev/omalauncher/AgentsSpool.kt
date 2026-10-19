@@ -21,7 +21,7 @@ import java.util.concurrent.CopyOnWriteArraySet
  * The Agents view on the phone (docs/AGENTS-VIEW-DESIGN.md, Phase 1): which agents run, their subagents, tasks and
  * steps, as PowOS's powos-agentsd writes them into the run dir -
  *   agents/state.json, messages.json, events/<agent>.json   this phone's agents (/run/powos-app/agents in PowOS)
- *   agents/mirror/<host>.json                               another host's, folded (the Mac's; HACK, see powos-agentsd)
+ *   agents/mirror/<host>.json                               another host's, folded (the Mac's; HACK: see powos-agentsd)
  * - merged by agent id (ids are host-prefixed, so hosts never collide).
  *
  * Nothing polls: one FileObserver per folder (HotReload's rule: one per path in a process), the files read on a thread
