@@ -150,7 +150,7 @@ class ShellBridge(
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
-            "system.notifications" -> notifications()
+            "system.notifications" -> notifications(a.optBoolean(0, true))
             "home.get" -> home.snapshot()
             "home.place" -> home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
             "home.add" -> home.add(a.getString(0), a.getInt(1), a.optJSONObject(2))
@@ -210,17 +210,18 @@ class ShellBridge(
     }
 
     /**
-     * Pulls the notification shade down (home's swipe down, as a stock launcher's). HACK: StatusBarManager's
-     * expandNotificationsPanel isn't public API - every third-party launcher (Lawnchair, Neo) calls it like this, with
-     * EXPAND_STATUS_BAR; the supported way, an accessibility service's GLOBAL_ACTION_NOTIFICATIONS, needs the user to
-     * turn one on for us. Replace with that if a release blocks the call.
+     * Pulls the notification shade down ([open]) or puts it away: home's swipe down, and back up in the same swipe, as
+     * on a stock launcher. HACK: StatusBarManager's expandNotificationsPanel / collapsePanels aren't public API - every
+     * third-party launcher (Lawnchair, Neo) calls them like this, with EXPAND_STATUS_BAR; the supported way, an
+     * accessibility service's GLOBAL_ACTION_NOTIFICATIONS, needs the user to turn one on for us, and only opens it.
+     * The shade following the finger (as the Pixel launcher's) takes SystemUI's privileged motion proxy.
      */
     @SuppressLint("WrongConstant")
-    private fun notifications(): Boolean =
+    private fun notifications(open: Boolean): Boolean =
         runCatching {
             val bar = activity.getSystemService("statusbar")
-            bar.javaClass.getMethod("expandNotificationsPanel").invoke(bar)
-        }.onFailure { Log.w(TAG, "can't open the notification shade", it) }.isSuccess
+            bar.javaClass.getMethod(if (open) "expandNotificationsPanel" else "collapsePanels").invoke(bar)
+        }.onFailure { Log.w(TAG, "can't ${if (open) "open" else "close"} the notification shade", it) }.isSuccess
 
     /** The colors in use: the launcher's palette as CSS (what the page's tokens follow), and the theme's own by name. */
     private fun theme(): JSONObject {

@@ -190,8 +190,8 @@ export interface Bridge {
   };
   system: {
     insets(): Promise<Insets>;
-    /** Pulls Android's notification shade down. */
-    notifications(): Promise<boolean>;
+    /** Pulls Android's notification shade down ([open], the default) or puts it away. */
+    notifications(open?: boolean): Promise<boolean>;
   };
   /**
    * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors),

@@ -77,6 +77,8 @@ interface Gesture {
   /** On the recent apps row: sideways, it scrolls rather than turning the page. */
   inStrip: boolean;
   listTop: boolean;
+  /** Whether this swipe has the notification shade down. */
+  shade: boolean;
   /** Where it started: a tap closes the launcher unless it was on something that takes taps. */
   target: Element;
   own: boolean;
@@ -114,6 +116,7 @@ export function homeGestures() {
       open: drawer.value > 0,
       inList: !!list,
       inStrip: !!target.closest?.(".strip"),
+      shade: false,
       listTop: !list || list.scrollTop <= 0,
       target,
       // The A-Z bar, a slider, a widget's drag: theirs.
@@ -149,10 +152,12 @@ export function homeGestures() {
     }
     if (e?.cancelable) e.preventDefault();
     if (g.mode === "shade") {
-      // Far enough to mean it: Android's own shade takes over from here.
-      if (dy > SHADE_PX) {
-        g = null;
-        powos.system.notifications();
+      // Far enough down: the shade comes down; back up (the same swipe, the finger still on the glass): it goes away
+      // again. Android keeps sending this swipe here though the shade is over the page.
+      const want = g.shade ? dy > SHADE_PX / 2 : dy > SHADE_PX;
+      if (want !== g.shade) {
+        g.shade = want;
+        powos.system.notifications(want);
       }
       return;
     }
