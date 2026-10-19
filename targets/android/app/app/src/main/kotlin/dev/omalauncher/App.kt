@@ -15,6 +15,8 @@ class App : Application() {
             AgentMail.start(this, File(filesDir, "run"))
             // Mail for the manager runs its turn in PowOS AI's chat, the user's next message not needed.
             PowosAiChat.startWake(this, File(filesDir, "run"))
+            // Which agents run and what they do (the Agents view): the spool PowOS's agentsd writes, and the notification.
+            AgentsSpool.start(this, File(filesDir, "run"))
         }
     }
 }

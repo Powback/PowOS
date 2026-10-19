@@ -35,14 +35,14 @@ export interface Cell {
 /** Something on a home page: a widget, a pinned app or a folder of them. */
 export interface HomeItem {
   key: string;
-  kind: "widget" | "app" | "folder" | "appwidget";
+  kind: "widget" | "app" | "folder" | "appwidget" | "panel";
   page: number;
   /** Its place on the page's grid; null until placed. */
   cell: Cell | null;
   resizable: boolean;
   minSize: [number, number];
   size: [number, number] | null;
-  /** widget */
+  /** widget; panel: which of the shell's own (ui/agents.tsx's "agents") */
   name?: string;
   error?: string;
   /** app: its label and the drawer's key for it */
@@ -238,6 +238,8 @@ export interface Bridge {
     group(key: string, target: string): Promise<string | null>;
     /** Gives items without a cell (a store widget, an app pinned from a menu) the first free spot on a grid this big. */
     arrange(cols: number, rows: number): Promise<void>;
+    /** Puts the shell's own panel [name] ("agents") on [page] at [cell]; returns its key ("panel:<name>"). */
+    addPanel(name: string, page: number, cell: Cell): Promise<string>;
   };
   /**
    * OWL widgets: the host runs them; the page draws their trees, sent as "widget.tree" ({ key, screen, tree }) while
@@ -433,6 +435,22 @@ export interface Bridge {
     default(): Promise<string | null>;
     newWidget(): Promise<"started" | "linux" | "agents">;
     newApp(): Promise<"started" | "linux" | "agents">;
+    /**
+     * The Agents view (agents.ts): everything now (full), then "agents.delta" (AgentsDelta, only what changed) until
+     * unsubscribe - a hidden page unsubscribes and takes a snapshot again when it shows.
+     */
+    snapshot(): Promise<AgentsDelta>;
+    unsubscribe(): Promise<void>;
+    /** Shows [agent]'s events (null: none): they come as "agents.delta" ({ eventsOf, events }), now and on change. */
+    events(agent: string | null): Promise<void>;
+    /** The agents' notification was tapped since last asked ("agents.open" says so to a page that's there). */
+    takeOpen(): Promise<boolean>;
+    /** The user's answer to an ask (AgentAsk.id): allow, or deny with what the agent is told instead. */
+    answer(ask: string, behavior: "allow" | "deny", reason?: string): Promise<void>;
+    /** Mail to an agent's comms inbox (its role), as the user. */
+    message(role: string, text: string): Promise<void>;
+    /** Ends an agent's current turn (SIGINT; the session stays). This phone's agents only. */
+    interrupt(agent: string): Promise<void>;
   };
   /**
    * Speech to text (the phone's recognizer; the page's own has none). "speech.state" ({ listening, text, error })
@@ -457,7 +475,7 @@ export interface Bridge {
   };
   /**
    * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
-   * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
+   * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
 }
@@ -517,4 +535,115 @@ declare global {
       emit(e: string, d: unknown): void;
     };
   }
+}
+
+/**
+ * The Agents view's rows (docs/AGENTS-VIEW-DESIGN.md §3): the same fields as powos-agentsd's spool and, in Phase 2,
+ * SpacetimeDB's tables. Ids are host-prefixed ("phone:<session>", "mac:<session>/<subagent>"); times Unix ms.
+ */
+export interface Agent {
+  id: string;
+  host: string;
+  role: string;
+  /** The parent agent's id; "@<role>" when it's only known by its comms role (resolved to that role's agent). */
+  parent: string | null;
+  state: "working" | "idle" | "needs_you" | "blocked" | "paused" | "gone";
+  title: string;
+  step: string;
+  cwd: string;
+  pid: number;
+  subs: number;
+  unread: number;
+  report: string;
+  started: number;
+  last: number;
+  rev: number;
+}
+export interface AgentTask {
+  id: string;
+  agent: string;
+  subject: string;
+  status: "open" | "in_progress" | "done";
+  order: number;
+  updated: number;
+}
+export interface AgentEvent {
+  id: number;
+  agent: string;
+  ts: number;
+  kind: "tool" | "prompt" | "stop" | "sub_start" | "sub_stop" | "notify" | "fail" | "compact";
+  name: string;
+  hint: string;
+  ok: boolean | null;
+  n: number;
+  ms: number;
+}
+export interface AgentMessage {
+  id: string;
+  from: string;
+  to: string;
+  kind: "message" | "escalate" | "notify" | "ask" | "report";
+  priority: string;
+  ts: number;
+  body: string;
+  read: boolean;
+}
+export interface AgentAsk {
+  id: string;
+  agent: string;
+  tool: string;
+  summary: string;
+  ts: number;
+  expires: number;
+  answer: "allow" | "deny" | null;
+  reason: string | null;
+  by: string | null;
+}
+/**
+ * What changed (§4 The backend swap): rows by id; [gone] agents removed; [tasksOf] agents whose task lists [tasks]
+ * replace; [eventsOf] the agent whose recent events [events] are; [full] everything, replacing what was there.
+ */
+export interface AgentsDelta {
+  agents?: Agent[];
+  gone?: string[];
+  tasks?: AgentTask[];
+  tasksOf?: string[];
+  events?: AgentEvent[];
+  eventsOf?: string;
+  messages?: AgentMessage[];
+  asks?: AgentAsk[];
+  full?: boolean;
+}
+
+export type RemoteTarget = "usb" | "bluetooth";
+export interface RemoteHost {
+  address: string;
+  name: string;
+  /** The one it was with last: Bluetooth reconnects to it. */
+  last?: boolean;
+  connected?: boolean;
+}
+/** Remote input's sides: where reports go, and how each side is. */
+export interface RemoteState {
+  target: RemoteTarget | null;
+  usb: {
+    on: boolean;
+    busy: boolean;
+    /** The phone's USB port: "configured" (a computer has it), "not attached", "off"... */
+    state: string;
+    error: string | null;
+  };
+  bluetooth: {
+    available: boolean;
+    enabled: boolean;
+    registered: boolean;
+    discoverable: boolean;
+    /** The phone's Bluetooth name: what a computer finds when pairing. */
+    name?: string | null;
+    host: RemoteHost | null;
+    connecting: string | null;
+    /** Paired computers, the last one first. */
+    hosts: RemoteHost[];
+    error: string | null;
+  };
 }

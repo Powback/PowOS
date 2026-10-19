@@ -110,6 +110,7 @@ def _deliver(to, kind, message, priority, result=None):
         os.fsync(f.fileno())
     os.replace(tmp, dst)  # atomic: a reader never sees a half-written message
     _phone_wake(to)
+    _agents_note(payload)
     return mid
 
 
@@ -221,6 +222,38 @@ def _phone_wake(agent):
         tmp = os.path.join(box, f".{name}.tmp")
         open(tmp, "w").close()
         os.rename(tmp, os.path.join(box, name))
+    except Exception:
+        pass
+
+
+def _agents_queue():
+    """powos-agentsd's queue (lib/ai/agents; the same choice as powos-agent-hook's), or None while no hook made it."""
+    q = os.environ.get("POWOS_AGENTS_QUEUE")
+    if not q:
+        user = os.environ.get("USER") or os.environ.get("LOGNAME") or "u"
+        if os.path.isdir("/dev/shm"):
+            q = f"/dev/shm/powos-agents-{user}"
+        else:
+            spool = (os.path.join(os.environ["XDG_RUNTIME_DIR"], "agents") if os.environ.get("XDG_RUNTIME_DIR")
+                     else os.path.join(os.environ.get("TMPDIR") or "/tmp", f"powos-agents-{user}"))
+            q = os.path.join(spool, "in")
+    return q if os.path.isdir(q) else None
+
+
+def _agents_note(payload):
+    """The message as a row of the Agents view's comms feed (docs/AGENTS-VIEW-DESIGN.md §3 message): who to whom,
+    its kind and a preview - agentsd caps and scrubs it. Best-effort, never fatal; nothing when no agent reports."""
+    try:
+        q = _agents_queue()
+        if not q:
+            return
+        rec = {"powos_agents": "message", "id": payload["id"], "from": payload["from"], "to": payload["to"],
+               "kind": payload["kind"], "priority": payload["priority"], "ts": int(time.time() * 1000),
+               "body": payload["body"][:400]}
+        name = f"m{payload['id']}"
+        with open(os.path.join(q, f".{name}.tmp"), "w") as f:
+            json.dump(rec, f)
+        os.rename(os.path.join(q, f".{name}.tmp"), os.path.join(q, f"{name}.ev"))
     except Exception:
         pass
 

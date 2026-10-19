@@ -142,6 +142,24 @@ if [ -f $B ] || [ ! -e $R/usr/bin/bwrap ]; then
     'pacman -S --noconfirm bubblewrap >/dev/null 2>&1 || pacman -Sy --noconfirm bubblewrap >/dev/null'
   echo "bwrap: real bubblewrap (shim moved to $B.noroot-engine)"
 fi
+# The Agents view's reporter (lib/ai/agents, docs/AGENTS-VIEW-DESIGN.md Phase 1): the hook and powos-agentsd, and
+# comms writing the view's feed. The hooks go into the powos user's own Claude settings, next to whatever is there
+# (install-hooks.py keeps the rest; a backup of the file as it was, once), so every claude in PowOS reports - the
+# manager and hand-started sessions alike. Async: they never hold a tool call up - but for the approval hook
+# (powos-agent-ask: Allow / Deny from the phone), which waits up to 60 s for an answer and then lets Claude ask at its
+# terminal as it would have. Undo: install-hooks.py ... --remove.
+A=$R/usr/lib/powos/ai/agents
+mkdir -p $A
+install -m 755 $T/powos-agents/powos-agent-hook $T/powos-agents/powos-agent-ask $T/powos-agents/powos-agentsd \
+  $T/powos-agents/install-hooks.py $A/
+install -m 644 $T/powos-agents/claude-hooks.json $A/claude-hooks.json
+install -m 755 $T/comms-mcp.py $R/usr/lib/powos/ai/comms/comms-mcp.py
+rm -rf $T/powos-agents $T/comms-mcp.py
+chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- \
+  /usr/bin/env HOME=/home/powos python3 /usr/lib/powos/ai/agents/install-hooks.py /home/powos/.claude/settings.json \
+  --command "POWOS_AGENTS_HOST=phone /usr/lib/powos/ai/agents/powos-agent-hook" \
+  --ask "POWOS_AGENTS_HOST=phone /usr/lib/powos/ai/agents/powos-agent-ask" \
+  --backup /home/powos/.claude/settings.json.bak-agents-view
 # PowOS apps (docs/POWOS-APPS-FEASIBILITY.md): SpacetimeDB (our package of the official aarch64 binaries, pinned), the
 # runtime switch + the system tier's supervisor + the app CLI (lib/apps -> /usr/lib/powos/apps), the service manifests,
 # the registry's module, and the CLI's front doors (`powos app`, `powos config app-runtime`). The system tier starts

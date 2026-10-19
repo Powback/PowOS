@@ -1,0 +1,33 @@
+#!/bin/sh
+# powos-agent-hook - Claude Code's reporter for the Agents view (docs/AGENTS-VIEW-DESIGN.md §4).
+#
+# Registered for every hook event as an async command hook (claude-hooks.json), so it never holds a tool call up. It
+# copies the event (stdin JSON) into one file in the queue, with a header line naming who sent it, and exits. The
+# queue is RAM (/dev/shm; the Mac: $TMPDIR): powos-agentsd, which folds it into the spool the viewers read, deletes
+# each file once read. When agentsd isn't running (it exits after 10 idle minutes), this starts it - it holds a lock
+# of its own, so two hooks starting it at once leave one running.
+#
+# Header: "#<TAB>role<TAB>parent<TAB>pid" - the role is the comms identity (COMMS_AGENT_ID), else
+# POWOS_AGENTS_ROLE (the hook command's own default, e.g. the Mac's "coder"); parent the role escalate reports to.
+#
+# Phase 1 only reports: no event is ever blocked or denied, and any failure here is silent and exits 0 (a broken
+# reporter must never break a session).
+U=${USER:-${LOGNAME:-u}}
+if [ -n "$POWOS_AGENTS_QUEUE" ]; then
+  Q=$POWOS_AGENTS_QUEUE
+elif [ -d /dev/shm ]; then
+  Q=/dev/shm/powos-agents-$U
+elif [ -n "$XDG_RUNTIME_DIR" ]; then
+  Q=$XDG_RUNTIME_DIR/agents/in
+else
+  Q=${TMPDIR:-/tmp}/powos-agents-$U/in
+fi
+[ -d "$Q" ] || mkdir -p -m 700 "$Q" 2>/dev/null || exit 0
+# One file per hook process: agentsd reads it once it's closed (inotify CLOSE_WRITE; kqueue on the Mac).
+{ printf '#\t%s\t%s\t%s\n' "${COMMS_AGENT_ID:-$POWOS_AGENTS_ROLE}" "$COMMS_PARENT_ID" "$PPID" && cat; } >"$Q/$$.ev" 2>/dev/null || exit 0
+pid=
+[ -f "$Q/pid" ] && read -r pid <"$Q/pid"
+if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+  python3 "${0%/*}/powos-agentsd" </dev/null >/dev/null 2>&1 &
+fi
+exit 0

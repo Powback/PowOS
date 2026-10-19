@@ -293,6 +293,11 @@ Built centrally and shipped whole. Never `pacman -Syu` on the phone.
 - `notify_user` / `powos comms notify` → an Android notification (`agent-mail/`). An inline reply goes to the
   sender's inbox.
 - Share sheet (`ACTION_SEND`) and `ACTION_ASSIST` open PowOS AI.
+- Agents view (docs/AGENTS-VIEW-DESIGN.md, Phase 1): every claude in PowOS reports through async hooks in
+  `~powos/.claude/settings.json` (`/usr/lib/powos/ai/agents/powos-agent-hook` → `powos-agentsd` → `/run/powos-app/agents/`);
+  the Mac's sessions are mirrored in (`agents/mirror/mac.json`). Shown as home's Agents widget, PowOS AI's page →
+  Agents, and an ongoing notification while one works. Asks (PermissionRequest) can be allowed/denied from the phone;
+  unanswered after 60 s, Claude asks at its terminal.
 - Claude: `ANTHROPIC_BASE_URL=http://claude-auth.pow`, the fleet's OAuth proxy. Never log in or refresh a token on
   the phone.
 

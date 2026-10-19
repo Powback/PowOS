@@ -25,6 +25,8 @@ class ShellActivity : Activity() {
         window.setDecorFitsSystemWindows(false)
         host = ShellHost(this, this, runtime)
         setContentView(host.web)
+        // Opened from the agents' notification: the page opens the Agents screen.
+        dev.omalauncher.AgentsSpool.opened(intent)
     }
 
     /**
@@ -34,6 +36,7 @@ class ShellActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME)) host.bridge.emit("system.home", null)
+        dev.omalauncher.AgentsSpool.opened(intent)
     }
 
     /** Back goes to the page: it closes the drawer, a folder or edit mode. A home screen has nowhere to go back to. */

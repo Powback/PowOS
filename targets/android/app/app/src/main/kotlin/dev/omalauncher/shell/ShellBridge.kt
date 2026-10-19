@@ -78,6 +78,10 @@ class ShellBridge(
     private val appWidgets = AppWidgets.get(context)
     private val appWidgetEvents: (String, Any?) -> Unit = { event, payload -> emit(event, payload) }
 
+    /** The home's own panels (the Agents widget), and this page's view of the agents (AgentsSpool). */
+    private val panels = ShellPanels.get(context)
+    private val agentsView = dev.omalauncher.AgentsSpool.Viewer(::emit)
+
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
 
@@ -210,6 +214,14 @@ class ShellBridge(
             "agents.default" -> runtime.agents.default?.name
             "agents.newWidget" -> withAgent { newWidgetCommand(it.bin) to "New widget" }
             "agents.newApp" -> withAgent { newAppCommand(it.bin) to "New app" }
+            // The Agents view (AgentsSpool): its state while this page is subscribed, one agent's events, the notification's Open.
+            "agents.snapshot" -> dev.omalauncher.AgentsSpool.subscribe(agentsView)
+            "agents.unsubscribe" -> dev.omalauncher.AgentsSpool.unsubscribe(agentsView)
+            "agents.events" -> dev.omalauncher.AgentsSpool.watchEvents(agentsView, a.optString(0).takeIf { it.isNotEmpty() && !a.isNull(0) })
+            "agents.takeOpen" -> dev.omalauncher.AgentsSpool.takeOpen()
+            "agents.answer" -> dev.omalauncher.AgentsSpool.answer(a.getString(0), a.getString(1), a.optString(2).takeIf { it.isNotEmpty() && !a.isNull(2) })
+            "agents.message" -> dev.omalauncher.AgentsSpool.message(a.getString(0), a.getString(1))
+            "agents.interrupt" -> dev.omalauncher.AgentsSpool.interrupt(a.getString(0))
             "speech.start" -> listen(a.optBoolean(0))
             "speech.stop" -> speech.stop()
             "speech.cancel" -> speech.cancel()
@@ -224,10 +236,11 @@ class ShellBridge(
             "notifications.clearAll" -> runtime.widgets.notifications.clearAll()
             "notifications.access" -> runtime.widgets.notifications.askAccess()
             // Android widgets are home items too, kept by AppWidgets ("aw:" keys).
-            "home.get" -> appWidgets.merge(home.snapshot())
-            "home.place" -> if (appWidgets.owns(a.getString(0))) appWidgets.place(a.getString(0), a.getJSONObject(1), a.getInt(2)) else home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
+            "home.get" -> panels.merge(appWidgets.merge(home.snapshot()))
+            "home.place" -> if (panels.owns(a.getString(0))) panels.place(a.getString(0), a.getJSONObject(1), a.getInt(2)).also { emit("home.changed", null) } else if (appWidgets.owns(a.getString(0))) appWidgets.place(a.getString(0), a.getJSONObject(1), a.getInt(2)) else home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
             "home.add" -> home.add(a.getString(0), a.getInt(1), a.optJSONObject(2))
-            "home.remove" -> if (appWidgets.owns(a.getString(0))) appWidgets.remove(a.getString(0)) else home.remove(a.getString(0))
+            "home.remove" -> if (panels.owns(a.getString(0))) panels.remove(a.getString(0)).also { emit("home.changed", null) } else if (appWidgets.owns(a.getString(0))) appWidgets.remove(a.getString(0)) else home.remove(a.getString(0))
+            "home.addPanel" -> panels.add(a.getString(0), a.getInt(1), a.getJSONObject(2)).also { emit("home.changed", null) }
             "home.group" -> home.group(a.getString(0), a.getString(1))
             "home.arrange" -> home.arrange(a.getInt(0), a.getInt(1))
             "appwidgets.providers" -> appWidgets.providers()
@@ -583,6 +596,7 @@ class ShellBridge(
 
     fun close() {
         appWidgets.unlisten(appWidgetEvents)
+        dev.omalauncher.AgentsSpool.forget(agentsView)
         quick.close()
         media.close()
         speech.cancel()

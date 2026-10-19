@@ -1150,3 +1150,89 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .aw-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .aw-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aw-desc { font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* The Agents view (agents.tsx): home's widget, a line per agent, and its screen over home. */
+.ag-panel { height: 100%; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; font-size: var(--text-small); }
+.ag-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; white-space: nowrap; }
+.ag-head > :first-child { color: var(--color-foreground); font-weight: bold; }
+.ag-line, .ag-node {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  color: var(--color-foreground);
+  font: inherit;
+  text-align: start;
+  white-space: nowrap;
+}
+.ag-mark { flex: none; width: 1em; text-align: center; color: var(--color-muted); }
+.working > .ag-mark, .ag-mark.working { color: var(--color-accent); animation: icon-wait 0.9s ease-in-out infinite alternate; }
+.needs_you > .ag-mark, .ag-mark.needs_you, .blocked > .ag-mark, .ag-mark.blocked { color: var(--color-red); font-weight: bold; }
+.ag-who { flex: none; }
+.ag-host { flex: none; }
+.ag-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ag-ago { flex: none; }
+.ag-more { padding-top: 2px; }
+.ag-screen {
+  position: fixed;
+  z-index: 15;
+  inset: 0;
+  padding: var(--inset-top, 0px) var(--edge) var(--inset-bottom, 0px);
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ag-top { display: flex; align-items: center; gap: 6px; }
+.ag-top .ai-title { flex: 1; }
+.ag-live { font-size: var(--text-small); color: var(--color-muted); }
+.ag-live.on { color: var(--color-accent); }
+.ag-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 16px;
+}
+.ag-tree { padding: 6px 4px; display: flex; flex-direction: column; font-size: var(--text-small); }
+.ag-node { padding-top: 5px; padding-bottom: 5px; padding-right: 8px; border-radius: var(--radius); }
+.ag-node.picked { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.ag-node.gone { color: var(--color-muted); }
+.ag-step { flex: none; max-width: 35%; overflow: hidden; text-overflow: ellipsis; }
+.ag-detail { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: var(--text-small); line-height: 1.4; }
+.ag-detail-head { color: var(--color-foreground); font-weight: bold; }
+.ag-detail-head .muted { font-weight: normal; }
+.ag-tasks, .ag-tools { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.ag-task.done { color: var(--color-muted); }
+.ag-task.in_progress { color: var(--color-accent); }
+.ag-tool.fail { color: var(--color-red); }
+.ag-report { overflow-wrap: anywhere; }
+.ag-comms { padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--text-small); line-height: 1.4; }
+.ag-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-body { color: var(--color-muted); }
+.ag-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+.ag-say { flex: 1; min-width: 0; }
+.ag-say input, .ag-ask input {
+  width: 100%;
+  font: var(--text-small) var(--font);
+  color: var(--color-foreground);
+  background: none;
+  border: var(--frame) solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+}
+.ag-act { flex: none; font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 6px 12px; }
+.ag-act.danger { color: var(--color-red); }
+.ag-act:disabled { opacity: 0.4; }
+.ag-ask { padding: 10px 12px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 6px; font-size: var(--text-small); }
+.ag-ask-what { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-foreground); }
+.ag-ask-do { display: flex; gap: 8px; justify-content: flex-end; }

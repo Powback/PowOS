@@ -4,7 +4,10 @@
  * the phone, so the shell still runs.
  */
 import type {
+  Agent,
+  AgentEvent,
   AgentMail,
+  AgentsDelta,
   App,
   AppWidgetProvider,
   AssistScreen,
@@ -82,6 +85,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       remove: (key) => call("home.remove", key),
       group: (key, target) => call<string | null>("home.group", key, target),
       arrange: (cols, rows) => call("home.arrange", cols, rows),
+      addPanel: (name, page, cell) => call<string>("home.addPanel", name, page, cell),
     },
     appWidgets: {
       providers: () => call<AppWidgetProvider[]>("appwidgets.providers"),
@@ -177,6 +181,13 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       default: () => call<string | null>("agents.default"),
       newWidget: () => call("agents.newWidget"),
       newApp: () => call("agents.newApp"),
+      snapshot: () => call<AgentsDelta>("agents.snapshot"),
+      unsubscribe: () => call("agents.unsubscribe"),
+      events: (agent) => call("agents.events", agent),
+      takeOpen: () => call<boolean>("agents.takeOpen"),
+      answer: (ask, behavior, reason) => call("agents.answer", ask, behavior, reason ?? null),
+      message: (role, text) => call("agents.message", role, text),
+      interrupt: (agent) => call("agents.interrupt", agent),
     },
     speech: {
       start: (hold) => call("speech.start", hold),
@@ -373,6 +384,13 @@ function mock(): Bridge {
       remove: async (key) => {
         home.items = home.items.filter((i) => i.key !== key);
         changed();
+      },
+      addPanel: async (name, page, cell) => {
+        const key = `panel:${name}`;
+        home.items = home.items.filter((i) => i.key !== key);
+        home.items.push({ key, kind: "panel", name, page, cell, resizable: true, minSize: [2, 1], size: [4, 2] });
+        changed();
+        return key;
       },
       // As WidgetLayout.place: the first free spot at the item's size, on its page.
       arrange: async (cols, rows) => {
@@ -762,6 +780,7 @@ function mock(): Bridge {
       default: async () => "Claude",
       newWidget: async () => (console.log("[mock] new widget with claude"), "started" as const),
       newApp: async () => (console.log("[mock] new app with claude"), "started" as const),
+      ...mockAgents(events),
     },
     // Hears the same words every time, a word at a time; a tap ends at the "pause" after them.
     speech: (() => {
@@ -1044,3 +1063,118 @@ function mockTerm(events: Events): Bridge["term"] {
 }
 
 export const powos: Bridge = window.powos ?? (window.PowosHost ? android(window.PowosHost) : mock());
+
+/**
+ * The mock's agents (as the design's §1.3 sketch): the manager on the phone, a coder on the Mac with two subagents,
+ * devops idle; the coder's step moves every few seconds while a page is subscribed, as "agents.delta" brings it.
+ */
+function mockAgents(
+  events: Events,
+): Pick<Bridge["agents"], "snapshot" | "unsubscribe" | "events" | "takeOpen" | "answer" | "message" | "interrupt"> {
+  const now = Date.now();
+  const row = (
+    id: string,
+    role: string,
+    state: Agent["state"],
+    title: string,
+    step: string,
+    ago: number,
+    parent: string | null = null,
+    subs = 0,
+  ): Agent => ({
+    id,
+    host: id.split(":")[0],
+    role,
+    parent,
+    state,
+    title,
+    step,
+    cwd: "PowOS",
+    pid: 0,
+    subs,
+    unread: 0,
+    report: state === "idle" ? "design drafted, waiting on the survey" : "",
+    started: now - 3_600_000,
+    last: now - ago,
+    rev: 1,
+  });
+  const agents: Agent[] = [
+    row("phone:m1", "manager", "idle", "ship widgets", "", 120_000),
+    row("mac:c1", "coder", "working", "hosted widgets", "Edit ShellBridge.kt", 12_000, "@manager", 2),
+    row("mac:c1/a1", "Explore", "working", "find FileObserver users", "Grep", 4_000, "mac:c1"),
+    row("mac:c1/a2", "general-purpose", "working", "survey SpaceTimeAI", "Read console-views.ts", 9_000, "mac:c1"),
+    row("phone:d1", "devops", "idle", "prune old images", "", 3_600_000, "@manager"),
+  ];
+  const steps = ["Edit grid.tsx", "Bash npx tsc --noEmit", "Read types.ts", "Edit ShellBridge.kt"];
+  let timer = 0;
+  let n = 0;
+  const ring = (agent: string): AgentEvent[] =>
+    ["Read", "Bash", "Edit", "Grep"].map((name, i) => ({
+      id: i + 1,
+      agent,
+      ts: now - (4 - i) * 30_000,
+      kind: "tool",
+      name,
+      hint: steps[i].split(" ").slice(1).join(" "),
+      ok: i !== 1,
+      n: i ? 1 : 6,
+      ms: 200 * i,
+    }));
+  return {
+    snapshot: async () => {
+      clearInterval(timer);
+      timer = window.setInterval(() => {
+        const c = { ...agents[1], step: steps[n++ % steps.length], last: Date.now(), rev: agents[1].rev + 1 };
+        agents[1] = c;
+        events.emit("agents.delta", { agents: [c] });
+      }, 4000);
+      return {
+        full: true,
+        agents,
+        tasks: [
+          { id: "mac:c1#1", agent: "mac:c1", subject: "read context", status: "done", order: 0, updated: now },
+          {
+            id: "mac:c1#2",
+            agent: "mac:c1",
+            subject: "write the widget",
+            status: "in_progress",
+            order: 1,
+            updated: now,
+          },
+          { id: "mac:c1#3", agent: "mac:c1", subject: "commit", status: "open", order: 2, updated: now },
+        ],
+        messages: [
+          {
+            id: "1",
+            from: "manager",
+            to: "coder",
+            kind: "message",
+            priority: "normal",
+            ts: now - 2_400_000,
+            body: "task: agents view",
+            read: true,
+          },
+          {
+            id: "2",
+            from: "coder",
+            to: "manager",
+            kind: "message",
+            priority: "normal",
+            ts: now - 60_000,
+            body: "report: design + goodies",
+            read: false,
+          },
+        ],
+        asks: [],
+      };
+    },
+    unsubscribe: async () => clearInterval(timer),
+    events: async (agent) => {
+      if (agent) setTimeout(() => events.emit("agents.delta", { eventsOf: agent, events: ring(agent) }));
+    },
+    takeOpen: async () => false,
+    answer: async (ask, behavior, reason) => console.log("[mock] answer", ask, behavior, reason),
+    message: async (role, text) => console.log("[mock] message", role, text),
+    interrupt: async (agent) => console.log("[mock] interrupt", agent),
+  };
+}

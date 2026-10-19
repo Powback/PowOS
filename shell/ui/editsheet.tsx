@@ -6,7 +6,7 @@
 import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { carry, editing } from "../state.ts";
+import { carry, editing, home } from "../state.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { placeNew } from "./grid.tsx";
 import type { AppWidgetProvider, ThemeChoice } from "../types.ts";
@@ -93,6 +93,13 @@ export function EditSheet() {
         {item(`new widget with ${who}`, () => powos.agents.newWidget())}
         {item(`new app with ${who}`, () => powos.agents.newApp())}
         {item("android widget", () => (picker.value = true))}
+        {!home.value.items.some((i) => i.key === "panel:agents") &&
+          item("agents widget", () => {
+            // The Agents widget: about 4×2 cells, in the first free spot.
+            const cell = innerWidth / home.value.columns;
+            const spot = placeNew(4 * cell - 8, 2 * cell - 8);
+            powos.home.addPanel("agents", spot.page, spot.cell);
+          })}
         {item("widget store", () => powos.screens.open("store"))}
         {item("AUR app store", () => powos.screens.open("aur"))}
         {item("settings", () => powos.screens.open("settings"))}

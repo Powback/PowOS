@@ -34,6 +34,22 @@ import sys
 import threading
 import time
 
+def _agents_hooks():
+    """The Agents view's reporter (lib/ai/agents, docs/AGENTS-VIEW-DESIGN.md §4): every hook event, async, so the
+    manager shows in the view. Not when the user's own settings run it already (the phone's do): each event would be
+    reported twice. POWOS_AGENTS=0 opts out."""
+    hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agents", "claude-hooks.json")
+    if os.environ.get("POWOS_AGENTS", "1") == "0" or not os.path.isfile(hooks):
+        return []
+    try:
+        with open(os.path.expanduser("~/.claude/settings.json")) as f:
+            if "powos-agent-hook" in f.read():
+                return []
+    except OSError:
+        pass
+    return ["--settings", os.path.normpath(hooks)]
+
+
 # ---- ANSI (skip when not a tty or NO_COLOR) --------------------------------
 _TTY = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 def _c(code, s):
@@ -112,6 +128,7 @@ class Manager:
             cmd += ["--mcp-config", self.args.mcp_config_file]
         if self.session_id:
             cmd += ["--resume", self.session_id]
+        cmd += _agents_hooks()
         return cmd
 
     def start(self):

@@ -1,6 +1,10 @@
 # PowOS Agents view — design
 
-Status: **design only** (2026-10-19). Nothing here is built yet; building starts with the user's OK (see §10).
+Status: **Phase 1 built** (2026-10-19): `lib/ai/agents/` (powos-agent-hook, powos-agentsd, powos-agent-ask,
+install-hooks.py), `AgentsSpool.kt` + `ShellPanels.kt` on the phone, `shell/agents.ts` + `shell/ui/agents.tsx`. Not
+built from Phase 1: the pause gate (a synchronous PreToolUse hook would add a process spawn to every tool call - §5
+allows 0 ms), asyncRewake mail delivery, and actions on the Mac's agents (they need the mirror's reverse path).
+Approvals (§6) are on the phone only; on timeout (60 s) Claude asks at its terminal.
 
 Problem: from the phone the user can't see which agents are running, their subagents, or what each one is
 working on. Today the AI page has "at work" (tmux sessions: a pane title, a spinner glyph, polled every 5 s) and "from

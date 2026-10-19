@@ -22,6 +22,8 @@ import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen } from "./gesture.ts";
 import { OwlWidget } from "./owl.tsx";
 import { AppWidgetFace } from "./appwidget.tsx";
+import { AgentsPanel } from "./agents.tsx";
+import { openAgents } from "../agents.ts";
 import type { Cell, HomeItem } from "../types.ts";
 
 const LONG_PRESS_MS = 420;
@@ -232,6 +234,8 @@ function Tile({ item }: { item: HomeItem }) {
     else if (item.kind === "folder") folder.value = item.key;
     // The widget's own onTap - a terminal's opens its screen, the shell full size.
     else if (item.kind === "widget") powos.widgets.tap(item.key);
+    // The Agents widget: its screen (a line's tap opens it on that agent).
+    else if (item.kind === "panel") openAgents();
     // An Android widget's taps are its own (appwidget.tsx).
   });
   const lifted = carry.value?.item?.key === item.key;
@@ -264,6 +268,7 @@ function Tile({ item }: { item: HomeItem }) {
         ) : (
           <AppWidgetFace item={item} />
         ))}
+      {item.kind === "panel" && item.name === "agents" && <AgentsPanel item={item} />}
       {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
       {item.kind === "folder" && (
         <div class="folder-face tile">

@@ -10,6 +10,7 @@ import { powos } from "../bridge.ts";
 import { chat, openSession, page, sessionView, stored } from "../state.ts";
 import { Mic, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
+import { openAgents } from "../agents.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 
 const sessions = signal<AgentSession[]>([]);
@@ -154,6 +155,13 @@ export function PowAiPage() {
       </header>
       <div class="ai-scroll">
         <Now />
+        <button type="button" class="ai-session tile" onClick={() => openAgents()}>
+          <span class="ai-dot" />
+          <span class="ai-session-main">
+            <span class="ai-session-task">Agents</span>
+            <span class="ai-session-meta muted">what every agent is on: tree, tasks, tools, comms</span>
+          </span>
+        </button>
         <AtWork />
         <FromAgents />
       </div>
