@@ -115,6 +115,14 @@ class Session {
   readonly term: Terminal;
   readonly fit = new FitAddon();
   private resizeTimer = 0;
+  /** The size the pty has ("cols x rows"): asking again for it would only redraw tmux. */
+  private ptySize = "";
+
+  private sizePty(cols: number, rows: number) {
+    if (this.status.value !== "running" || this.ptySize === `${cols}x${rows}`) return;
+    this.ptySize = `${cols}x${rows}`;
+    powos.term.resize(this.id, cols, rows);
+  }
   /** xterm's element's parent: moved into the view that shows it. */
   readonly holder = document.createElement("div");
   readonly views: View[] = [];
@@ -150,7 +158,7 @@ class Session {
     this.term.onResize(({ cols, rows }) => {
       clearTimeout(this.resizeTimer);
       this.resizeTimer = window.setTimeout(() => {
-        if (this.status.value === "running") powos.term.resize(this.id, cols, rows);
+        this.sizePty(cols, rows);
       }, RESIZE_SETTLE_MS);
     });
   }
@@ -192,7 +200,8 @@ class Session {
     this.status.value = st.running ? "running" : "exited";
     for (const q of queued) q.exit ? this.exit(q.e) : this.data(q.e);
     // The pty takes the size it's shown at, which may have changed while it opened.
-    if (this.status.value === "running") powos.term.resize(this.id, this.term.cols, this.term.rows);
+    this.ptySize = "";
+    this.sizePty(this.term.cols, this.term.rows);
   }
 
   /** Bytes ending at offset [end] of the run's output: what's been shown already is skipped. */
