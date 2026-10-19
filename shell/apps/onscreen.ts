@@ -51,3 +51,30 @@ export async function power(): Promise<{ level: number | null; charging: boolean
   const tile = q?.tiles.find((t) => t.id === "battery");
   return { level: b.level, charging: b.charging, saver: tile ? tile.on : null };
 }
+
+/**
+ * An island's own size in CSS px, as laid out - not getBoundingClientRect, which includes home's transforms (a page
+ * sliding, home scaling back in after the switcher) and so read a transient size right after a reload. Measured again
+ * whenever the page comes back (a reload or a clear-all brings home back mid-animation) and on every layout change.
+ */
+export function useLayoutSize(ref: { current: HTMLElement | null }): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () =>
+      setSize((s) => (s.width === el.clientWidth && s.height === el.clientHeight ? s : { width: el.clientWidth, height: el.clientHeight }));
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    const vis = () => !document.hidden && measure();
+    document.addEventListener("visibilitychange", vis);
+    window.addEventListener("pageshow", measure);
+    measure();
+    return () => {
+      ro.disconnect();
+      document.removeEventListener("visibilitychange", vis);
+      window.removeEventListener("pageshow", measure);
+    };
+  }, []);
+  return size;
+}

@@ -500,6 +500,7 @@ function frame() {
 }
 
 function size(w: number, h: number, r: number) {
+  // A new size reallocates the bitmap (transparent) and the next draw is a full one.
   // Device pixels capped at 2x: strokes this thick look the same on the 2.6x panel and cost less to fill.
   dpr = Math.min(r || 1, 2);
   canvas.width = Math.max(1, Math.round(w * dpr));

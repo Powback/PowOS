@@ -13,7 +13,7 @@
  * until that exists the server issues anonymous ones.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
-import { openUrl, power, useOnScreen } from "./onscreen.ts";
+import { openUrl, power, useLayoutSize, useOnScreen } from "./onscreen.ts";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -30,6 +30,8 @@ export interface IslandHost {
   openUrl?(url: string): Promise<unknown>;
   /** The battery: level, charging, battery saver (apps/onscreen.ts). */
   power?(): Promise<{ level: number | null; charging: boolean; saver: boolean | null }>;
+  /** The element's laid-out size (CSS px, no transforms), measured again on resume (apps/onscreen.ts). */
+  useLayoutSize?(ref: { current: HTMLElement | null }): { width: number; height: number };
 }
 
 export interface Builder {
@@ -192,4 +194,4 @@ export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   return rows;
 }
 
-export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl, power };
+export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl, power, useLayoutSize };

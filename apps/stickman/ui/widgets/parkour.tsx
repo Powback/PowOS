@@ -57,6 +57,20 @@ function useOnScreenFallback(ref: { current: Element | null }) {
   return inView && shown;
 }
 
+/** Laid-out size (no transforms), for a shell without host.useLayoutSize. */
+function useLayoutSizeFallback(ref: { current: HTMLElement | null }) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current!;
+    const m = () => setSize((s) => (s.width === el.clientWidth && s.height === el.clientHeight ? s : { width: el.clientWidth, height: el.clientHeight }));
+    const ro = new ResizeObserver(m);
+    ro.observe(el);
+    m();
+    return () => ro.disconnect();
+  }, []);
+  return size;
+}
+
 export default function Parkour({ host, base }: { host: Host; base: string; cells: [number, number] }) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -64,6 +78,7 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
   const [state, setState] = useState<{ status: "idle" | "loading" | "ready" | "error"; text?: string }>({ status: "idle" });
   // (a shell without the host's signal: the tile's own view of it)
   const onScreen = host.useOnScreen ? host.useOnScreen(box) : useOnScreenFallback(box);
+  const size = host.useLayoutSize ? host.useLayoutSize(box) : useLayoutSizeFallback(box);
   const [fps, setFps] = useState(loadFps);
   const [flash, setFlash] = useState<string | null>(null);
   const [resting, setResting] = useState<string | null>(null);
@@ -93,8 +108,7 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
   // The worker, made the first time the tile is on screen (its 11 MB of MuJoCo isn't loaded for a tile never seen) and
   // kept while the tile is on home.
   useEffect(() => {
-    if (!onScreen || worker.current || !canvas.current || !box.current) return;
-    const r = box.current.getBoundingClientRect();
+    if (!onScreen || worker.current || !canvas.current || !box.current || !size.width || !size.height) return;
     const w = new Worker(new URL(`${base}workers/sim.js`, location.href), { type: "module" });
     worker.current = w;
     (globalThis as any).__stickman = w; // for checks over CDP (postMessage({ type: "stats" }))
@@ -106,17 +120,21 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
     w.addEventListener("error", (e) => setState({ status: "error", text: e.message || "the simulation failed to start" }));
     const off = canvas.current.transferControlToOffscreen();
     w.postMessage(
-      { type: "init", canvas: off, base: new URL(base, location.href).href, colors: themeColors(box.current), width: r.width, height: r.height, dpr: devicePixelRatio, fps },
+      { type: "init", canvas: off, base: new URL(base, location.href).href, colors: themeColors(box.current), width: size.width, height: size.height, dpr: devicePixelRatio, fps },
       [off],
     );
-  }, [onScreen]);
+  }, [onScreen, size.width, size.height]);
   useEffect(() => () => worker.current?.terminate(), []);
 
-  // The tile's size, and the theme's colours as they change (the shell sets them on the root's style).
+  // Its size to the worker whenever the layout gives it a new one, and again each time it comes on screen (after a
+  // reload or a clear-all home comes back mid-animation): the bitmap is resized and redrawn whole, from transparent.
+  useEffect(() => {
+    if (size.width && size.height) worker.current?.postMessage({ type: "size", width: size.width, height: size.height, dpr: devicePixelRatio });
+  }, [size.width, size.height, onScreen, state.status]);
+
+  // The theme's colours as they change (the shell sets them on the root's style).
   useEffect(() => {
     const el = box.current!;
-    const ro = new ResizeObserver(([e]) => worker.current?.postMessage({ type: "size", width: e.contentRect.width, height: e.contentRect.height, dpr: devicePixelRatio }));
-    ro.observe(el);
     let last = "";
     const mo = new MutationObserver(() => {
       const c = themeColors(el);
@@ -125,10 +143,7 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
       last = k;
     });
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
-    return () => {
-      ro.disconnect();
-      mo.disconnect();
-    };
+    return () => mo.disconnect();
   }, []);
 
   // Frames on while the tile is on screen, off otherwise. The worker paces itself (at most FPS, on a timer) and
