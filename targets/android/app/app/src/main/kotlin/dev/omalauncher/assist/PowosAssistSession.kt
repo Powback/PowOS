@@ -73,6 +73,9 @@ class PowosAssistSession(
     override fun onHandleAssist(state: AssistState) {
         val structure = state.assistStructure ?: return
         val out = StringBuilder()
+        // What's under the overlay, by name first: a bare list of words made the agent take PowOS's own home (its AI
+        // tile, its widgets) for the assistant it was asked from.
+        out.append("[under the PowOS AI overlay: ").append(appName(structure.activityComponent)).append("]\n")
         for (i in 0 until structure.windowNodeCount) walk(structure.getWindowNodeAt(i).rootViewNode, out, 0)
         screenText = out.toString().take(MAX_TEXT)
         sendScreen()
@@ -95,6 +98,17 @@ class PowosAssistSession(
         host?.bridge?.assist = null
         host = null
         super.onDestroy()
+    }
+
+    /** The app on screen, as the user knows it: PowOS's home is "the PowOS home screen", any other its label (package). */
+    private fun appName(component: android.content.ComponentName?): String {
+        component ?: return "an app"
+        if (component.packageName == context.packageName) {
+            return if (component.className.contains("Shell") || component.className.contains("Home")) "the PowOS home screen" else "PowOS (${component.shortClassName})"
+        }
+        val pm = context.packageManager
+        val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(component.packageName, 0)).toString() }.getOrNull()
+        return if (label != null) "$label (${component.packageName})" else component.packageName
     }
 
     private fun walk(

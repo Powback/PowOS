@@ -61,7 +61,7 @@ async function send() {
   ]
     .filter(Boolean)
     .join("\n");
-  powos.ai.send(context ? `${text}\n\n[What's on my screen right now:]\n${context}` : text);
+  powos.ai.send(context ? `${text}\n\n[What's on my screen right now - the app under this overlay, not PowOS AI itself:]\n${context}` : text);
 }
 
 /** Around the stroke, so a circle drawn tight still holds what it circles (px on screen). */

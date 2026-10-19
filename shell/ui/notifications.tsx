@@ -7,7 +7,8 @@ import { useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
-import { ControlCenter, quick } from "./control.tsx";
+import { ControlCenter, QuickStrip } from "./control.tsx";
+import { Icon } from "./icons.tsx";
 import { followNotif, notifOpen } from "./gesture.ts";
 import { ago } from "./time.ts";
 import type { NotificationList, PhoneNotification } from "../types.ts";
@@ -62,9 +63,7 @@ function Card({ n }: { n: PhoneNotification }) {
         if (!d.sideways) return;
         d.dx = dx;
         el.current!.style.transform = `translateX(${dx}px)`;
-        el.current!.style.opacity = String(
-          1 - Math.min(1, Math.abs(dx) / el.current!.clientWidth),
-        );
+        el.current!.style.opacity = String(1 - Math.min(1, Math.abs(dx) / el.current!.clientWidth));
       }}
       onPointerUp={(e) => {
         const d = drag.current;
@@ -77,10 +76,7 @@ function Card({ n }: { n: PhoneNotification }) {
             settle(Math.sign(d.dx) * w);
             setTimeout(() => powos.notifications.dismiss(n.key), 180);
           } else settle(0);
-        } else if (
-          d.sideways == null &&
-          Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP
-        ) {
+        } else if (d.sideways == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) {
           powos.notifications.open(n.key);
           notif.value = false;
         }
@@ -91,54 +87,12 @@ function Card({ n }: { n: PhoneNotification }) {
       }}
     >
       <div class="notif-head">
-        {n.icon ? (
-          <img class="notif-icon" src={n.icon} alt="" />
-        ) : (
-          <span class="notif-icon blank" />
-        )}
+        {n.icon ? <img class="notif-icon" src={n.icon} alt="" /> : <span class="notif-icon blank" />}
         <span class="notif-app">{n.app}</span>
         <span class="notif-time muted">{ago(n.time)}</span>
       </div>
       {n.title && <div class="notif-title">{n.title}</div>}
       {n.text && <div class="notif-text">{n.text}</div>}
-    </div>
-  );
-}
-
-/** The quick settings row: switches for what the phone lets PowOS switch, Android's panels for the rest. */
-function QuickRow() {
-  const q = quick.value;
-  const toggle = (name: "torch" | "dnd", label: string, on: boolean | null) =>
-    on != null && (
-      <button
-        type="button"
-        class={`qs-tile ${on ? "on" : ""}`}
-        onClick={() =>
-          powos.qs.toggle(name).then((s) => (quick.value = { ...s }))
-        }
-      >
-        {label}
-      </button>
-    );
-  const panel = (
-    name: "wifi" | "bluetooth" | "internet" | "settings",
-    label: string,
-  ) => (
-    <button
-      type="button"
-      class="qs-tile"
-      onClick={() => ((notif.value = false), powos.qs.open(name))}
-    >
-      {label}
-    </button>
-  );
-  return (
-    <div class="qs-row">
-      {panel("internet", "internet")}
-      {panel("bluetooth", "bluetooth")}
-      {toggle("torch", "torch", q.torch)}
-      {toggle("dnd", "do not disturb", q.dnd)}
-      {panel("settings", "settings")}
     </div>
   );
 }
@@ -155,44 +109,30 @@ export function NotificationPanel() {
         ref={followNotif}
         onClick={() => (notif.value = false)}
       />
-      <div
-        class={`notif-panel ${shown ? "shown" : ""}`}
-        data-q
-        ref={followNotif}
-        aria-hidden={!shown}
-      >
+      <div class={`notif-panel ${shown ? "shown" : ""}`} data-q ref={followNotif} aria-hidden={!shown}>
         {panel.value === "control" ? (
           <ControlCenter />
         ) : (
           <>
             <div class="notif-bar">
               <span class="muted">
-                {items.length
-                  ? `${items.length} notification${items.length > 1 ? "s" : ""}`
-                  : "notifications"}
+                {items.length ? `${items.length} notification${items.length > 1 ? "s" : ""}` : "notifications"}
               </span>
-              <span class="notif-actions">
-                <button type="button" onClick={() => (panel.value = "control")}>
-                  controls
-                </button>
+              <span class="notif-actions icons">
                 {clearable && (
-                  <button
-                    type="button"
-                    onClick={() => powos.notifications.clearAll()}
-                  >
-                    clear all
+                  <button type="button" aria-label="clear all" onClick={() => powos.notifications.clearAll()}>
+                    <Icon name="notificationClearAll" />
                   </button>
                 )}
+                <button type="button" aria-label="controls" onClick={() => (panel.value = "control")}>
+                  <Icon name="tuneVariant" />
+                </button>
               </span>
             </div>
-            <QuickRow />
+            <QuickStrip />
             <div class="notif-list">
               {!available ? (
-                <button
-                  type="button"
-                  class="notif tile notif-access"
-                  onClick={() => powos.notifications.access()}
-                >
+                <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>
                   allow the launcher to show your notifications here →
                 </button>
               ) : items.length ? (

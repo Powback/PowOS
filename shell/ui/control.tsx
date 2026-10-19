@@ -10,6 +10,7 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
 import { notifOpen } from "./gesture.ts";
+import { Icon, type IconName } from "./icons.tsx";
 import type { MediaState, QuickState, QuickTile } from "../types.ts";
 
 /** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
@@ -42,6 +43,45 @@ const LEAVES = new Set([
 ]);
 
 const RINGER = ["silent", "vibrate", "ring"];
+const RINGER_ICON: IconName[] = ["bellOffOutline", "vibrate", "bellRingOutline"];
+
+/** Each tile's icon, off and on (one name: the same both ways). */
+const TILE_ICONS: Record<string, IconName | [IconName, IconName]> = {
+  wifi: ["wifiOff", "wifi"],
+  bt: ["bluetoothOff", "bluetooth"],
+  cell: "swapVertical",
+  flashlight: ["flashlightOff", "flashlight"],
+  location: ["mapMarkerOff", "mapMarker"],
+  airplane: "airplane",
+  controls: "homeAutomation",
+  wallet: "walletOutline",
+  rotation: ["screenRotationLock", "screenRotation"],
+  dnd: "minusCircleOutline",
+  darkmode: "themeLightDark",
+  screenshot: "cellphoneScreenshot",
+  screenrecord: "recordRec",
+  hotspot: "accessPoint",
+  calculator: "calculatorVariantOutline",
+  nfc: "nfcVariant",
+  battery: "leaf",
+  lockscreen: "lockOutline",
+  qr_code_scanner: "qrcodeScan",
+};
+
+/** Other apps' tiles by their app: the icon that says what they do. */
+const APP_ICONS: Record<string, IconName> = {
+  "com.oplus.eyeprotect": "eyeOutline",
+  "com.oneplus.oshare": "shareVariantOutline",
+  "com.google.android.gms": "shareVariant",
+  "com.oplus.linker": "cast",
+  "com.microsoft.appmanager": "microsoftWindows",
+};
+
+function tileIcon(t: QuickTile): IconName {
+  const i = TILE_ICONS[t.id];
+  if (Array.isArray(i)) return t.on === false ? i[0] : i[1];
+  return i ?? (t.app && APP_ICONS[t.app]) ?? "apps";
+}
 
 const update = (s: QuickState) => (quick.value = { ...s });
 
@@ -87,9 +127,41 @@ function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
       class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""} ${picked.value === t.id ? "picked" : ""}`}
       {...edit}
     >
-      <span class="cc-label">{t.label}</span>
-      {big && <span class="cc-detail">{t.detail ?? (t.on == null ? "" : t.on ? "on" : "off")}</span>}
+      <span class="cc-icon">
+        <Icon name={tileIcon(t)} />
+      </span>
+      {big ? (
+        <span class="cc-text">
+          <span class="cc-label">{t.label}</span>
+          <span class="cc-detail">{t.detail ?? (t.on == null ? "" : t.on ? "on" : "off")}</span>
+        </span>
+      ) : (
+        <span class="cc-label">{t.label}</span>
+      )}
     </button>
+  );
+}
+
+/** One of the notification panel's quick icons: the tile's icon only, switched (and long-pressed) as in here. */
+function MiniTile({ t }: { t: QuickTile }) {
+  return (
+    <button type="button" class={`cc-mini ${t.on ? "on" : ""}`} aria-label={t.label} {...usePress(t)}>
+      <Icon name={tileIcon(t)} />
+    </button>
+  );
+}
+
+/** The notification panel's row: the control center's first tiles, in the user's order, as icons. */
+export function QuickStrip({ count = 6 }: { count?: number }) {
+  const tiles = quick.value.tiles ?? [];
+  const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter((t): t is QuickTile => !!t);
+  const { shown } = arranged(tiles.filter((t) => !CARDS.includes(t.id)));
+  return (
+    <div class="cc-strip">
+      {[...cards, ...shown].slice(0, count).map((t) => (
+        <MiniTile key={t.id} t={t} />
+      ))}
+    </div>
   );
 }
 
@@ -138,14 +210,14 @@ function EditBar({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] })
     <div class="cc-edit">
       {id ? (
         <span class="cc-edit-tools">
-          <button type="button" class="cc-chip" onClick={() => rearrange(shown, id, -1)}>
-            ◀ earlier
+          <button type="button" class="cc-chip" aria-label="earlier" onClick={() => rearrange(shown, id, -1)}>
+            <Icon name="chevronLeft" />
           </button>
-          <button type="button" class="cc-chip" onClick={() => rearrange(shown, id, 1)}>
-            later ▶
+          <button type="button" class="cc-chip" aria-label="later" onClick={() => rearrange(shown, id, 1)}>
+            <Icon name="chevronRight" />
           </button>
-          <button type="button" class="cc-chip" onClick={() => rearrange(shown, id, "hide")}>
-            hide
+          <button type="button" class="cc-chip" aria-label="hide" onClick={() => rearrange(shown, id, "hide")}>
+            <Icon name="eyeOffOutline" />
           </button>
         </span>
       ) : (
@@ -157,6 +229,9 @@ function EditBar({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] })
           <div class="cc-grid">
             {hidden.map((t) => (
               <button key={t.id} type="button" class="cc-tile off" onClick={() => rearrange(shown, t.id, "show")}>
+                <span class="cc-icon">
+                  <Icon name={tileIcon(t)} />
+                </span>
                 <span class="cc-label">{t.label}</span>
               </button>
             ))}
@@ -168,7 +243,17 @@ function EditBar({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] })
 }
 
 /** A slider sending its value at most once a frame while it moves. */
-function Slider({ name, value, label }: { name: "brightness" | "volume"; value: number; label: string }) {
+function Slider({
+  name,
+  value,
+  label,
+  icon,
+}: {
+  name: "brightness" | "volume";
+  value: number;
+  label: string;
+  icon: IconName;
+}) {
   const [local, setLocal] = useState<number | null>(null);
   const frame = useRef(0);
   const next = useRef(0);
@@ -183,8 +268,10 @@ function Slider({ name, value, label }: { name: "brightness" | "volume"; value: 
   };
   const shown = local ?? value;
   return (
-    <label class="cc-slider" style={{ "--v": String(shown) }}>
-      <span class="cc-label">{label}</span>
+    <label class="cc-slider" style={{ "--v": String(shown) }} aria-label={label}>
+      <span class="cc-slider-icon">
+        <Icon name={icon} />
+      </span>
       <input
         type="range"
         min={0}
@@ -247,17 +334,17 @@ function MediaCard() {
         <span class="cc-detail">{[m.artist, m.app].filter(Boolean).join(" · ")}</span>
       </button>
       <span class="cc-transport">
-        <button type="button" onClick={() => powos.media.control("previous")}>
-          ⏮
+        <button type="button" aria-label="previous" onClick={() => powos.media.control("previous")}>
+          <Icon name="skipPrevious" />
         </button>
-        <button type="button" onClick={() => powos.media.control("toggle")}>
-          {m.playing ? "⏸" : "▶"}
+        <button type="button" aria-label={m.playing ? "pause" : "play"} onClick={() => powos.media.control("toggle")}>
+          <Icon name={m.playing ? "pause" : "play"} />
         </button>
-        <button type="button" onClick={() => powos.media.control("next")}>
-          ⏭
+        <button type="button" aria-label="next" onClick={() => powos.media.control("next")}>
+          <Icon name="skipNext" />
         </button>
-        <button type="button" onClick={() => (shut(), powos.media.output(m.package))}>
-          ⇄
+        <button type="button" aria-label="output" onClick={() => (shut(), powos.media.output(m.package))}>
+          <Icon name="speakerWireless" />
         </button>
       </span>
     </div>
@@ -285,19 +372,24 @@ export function ControlCenter() {
     <div class="cc">
       <div class="notif-bar">
         <Clock />
-        <span class="notif-actions">
-          <button type="button" onClick={() => ((editing.value = !editing.value), (picked.value = null))}>
-            {editing.value ? "done" : "edit"}
+        <span class="notif-actions icons">
+          <button
+            type="button"
+            aria-label={editing.value ? "done" : "edit"}
+            class={editing.value ? "on" : ""}
+            onClick={() => ((editing.value = !editing.value), (picked.value = null))}
+          >
+            <Icon name={editing.value ? "check" : "pencilOutline"} />
           </button>
-          <button type="button" onClick={() => (panel.value = "notifications")}>
-            notifications
+          <button type="button" aria-label="notifications" onClick={() => (panel.value = "notifications")}>
+            <Icon name="bellOutline" />
           </button>
           {/* OnePlus's own, for what PowOS's doesn't have yet. */}
-          <button type="button" onClick={() => powos.system.notifications(true)}>
-            system
+          <button type="button" aria-label="system panel" onClick={() => powos.system.notifications(true)}>
+            <Icon name="android" />
           </button>
-          <button type="button" onClick={() => (shut(), powos.qs.open("settings"))}>
-            settings
+          <button type="button" aria-label="settings" onClick={() => (shut(), powos.qs.open("settings"))}>
+            <Icon name="cogOutline" />
           </button>
         </span>
       </div>
@@ -307,21 +399,23 @@ export function ControlCenter() {
         ))}
       </div>
       <div class="cc-sliders">
-        <Slider name="brightness" value={b.value} label="brightness" />
+        <Slider name="brightness" value={b.value} label="brightness" icon="brightness6" />
         <button
           type="button"
+          aria-label="auto brightness"
           class={`cc-chip ${b.auto ? "on" : ""}`}
           onClick={() => powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)}
         >
-          auto
+          <Icon name="brightnessAuto" />
         </button>
-        <Slider name="volume" value={v.value} label="volume" />
+        <Slider name="volume" value={v.value} label="volume" icon={v.value > 0 ? "volumeHigh" : "volumeOff"} />
         <button
           type="button"
+          aria-label={RINGER[v.ringer] ?? "ring"}
           class="cc-chip"
           onClick={() => powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)}
         >
-          {RINGER[v.ringer] ?? "ring"}
+          <Icon name={RINGER_ICON[v.ringer] ?? "bellRingOutline"} />
         </button>
       </div>
       <MediaCard />
