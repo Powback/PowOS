@@ -1,6 +1,7 @@
 // The stickman's home widget: an island in the shell's one shared page (shell/ui/island.tsx) showing only the stage -
 // robotsupremacy's trained stick figure running its parkour lessons, on the tile's own (themed) background. A tap opens
-// the full page (http://robotsupremacy.pow/stickman) in the browser.
+// the full page (http://robotsupremacy.pow/stickman) in the browser; a tap on the top-right corner cycles the frame rate
+// (10 / 15 / 30, 15 by default). On battery saver, or a low battery not charging, it rests on its last frame.
 //
 // The simulation and the drawing run in a worker (workers/sim.ts) on an OffscreenCanvas, so home's own thread does
 // nothing per frame. The worker draws at most 30 frames a second, and only while this side says the tile is on screen
@@ -12,7 +13,24 @@ import { useEffect, useRef, useState } from "preact/hooks";
 type Host = import("../../../../shell/apps/stdb.ts").IslandHost;
 
 const FULL_PAGE = "http://robotsupremacy.pow/stickman";
-const FPS = 30;
+// Frame rate: a widget setting (a tap on the tile's top-right corner cycles it), 15 by default - the WebView redraws
+// home for every frame the canvas commits, so this is most of what the tile costs (see the report in git: ~2% of a core
+// per fps on the OnePlus Open).
+const RATES = [10, 15, 30];
+const FPS_KEY = "dev.powos.stickman.fps";
+const loadFps = () => {
+  try {
+    const n = Number(localStorage.getItem(FPS_KEY));
+    return RATES.includes(n) ? n : 15;
+  } catch {
+    return 15;
+  }
+};
+const CORNER = 44; // px: the top-right corner that cycles the rate instead of opening the page
+// Battery: it rests (the last frame stays) on battery saver, or under LOW % while not charging. Read when the tile comes
+// on screen and every POWER_MS while it stays there - nothing at all while it's off screen.
+const LOW = 20;
+const POWER_MS = 60_000;
 const TAP_MS = 400;
 const SLOP = 10;
 
@@ -46,6 +64,31 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
   const [state, setState] = useState<{ status: "idle" | "loading" | "ready" | "error"; text?: string }>({ status: "idle" });
   // (a shell without the host's signal: the tile's own view of it)
   const onScreen = host.useOnScreen ? host.useOnScreen(box) : useOnScreenFallback(box);
+  const [fps, setFps] = useState(loadFps);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [resting, setResting] = useState<string | null>(null);
+
+  // The battery, while on screen.
+  useEffect(() => {
+    if (!onScreen || !host.power) return;
+    let live = true;
+    const check = () =>
+      host.power!().then(
+        (p) => {
+          if (!live) return;
+          const why = p.saver ? "battery saver" : p.level != null && p.level < LOW && !p.charging ? `battery ${p.level}%` : null;
+          setResting(why);
+        },
+        () => {},
+      );
+    check();
+    const t = window.setInterval(check, POWER_MS);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [onScreen]);
+  const running = onScreen && !resting;
 
   // The worker, made the first time the tile is on screen (its 11 MB of MuJoCo isn't loaded for a tile never seen) and
   // kept while the tile is on home.
@@ -63,7 +106,7 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
     w.addEventListener("error", (e) => setState({ status: "error", text: e.message || "the simulation failed to start" }));
     const off = canvas.current.transferControlToOffscreen();
     w.postMessage(
-      { type: "init", canvas: off, base: new URL(base, location.href).href, colors: themeColors(box.current), width: r.width, height: r.height, dpr: devicePixelRatio, fps: FPS },
+      { type: "init", canvas: off, base: new URL(base, location.href).href, colors: themeColors(box.current), width: r.width, height: r.height, dpr: devicePixelRatio, fps },
       [off],
     );
   }, [onScreen]);
@@ -94,8 +137,8 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
   useEffect(() => {
     const w = worker.current;
     if (!w) return;
-    w.postMessage({ type: "run", on: onScreen });
-    if (!onScreen) return;
+    w.postMessage({ type: "run", on: running, fps });
+    if (!running) return;
     w.postMessage({ type: "colors", colors: themeColors(box.current!) });
     let timer = 0, raf = 0;
     const beat = () => {
@@ -108,7 +151,17 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
       clearTimeout(timer);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [onScreen, state.status]);
+  }, [running, fps, state.status]);
+
+  const cycleFps = () => {
+    const next = RATES[(RATES.indexOf(fps) + 1) % RATES.length];
+    try {
+      localStorage.setItem(FPS_KEY, String(next));
+    } catch {}
+    setFps(next);
+    setFlash(`${next} fps`);
+    window.setTimeout(() => setFlash(null), 1500);
+  };
 
   // A tap (not the long press that lifts the tile, not a swipe) opens the full page.
   const down = useRef<{ x: number; y: number; t: number } | null>(null);
@@ -121,11 +174,19 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
       onPointerUp={(e) => {
         const d = down.current;
         down.current = null;
-        if (d && performance.now() - d.t < TAP_MS && Math.hypot(e.clientX - d.x, e.clientY - d.y) < SLOP) open();
+        if (!d || performance.now() - d.t >= TAP_MS || Math.hypot(e.clientX - d.x, e.clientY - d.y) >= SLOP) return;
+        const r = box.current!.getBoundingClientRect();
+        if (e.clientX > r.right - CORNER && e.clientY < r.top + CORNER) cycleFps();
+        else open();
       }}
       onPointerCancel={() => (down.current = null)}
     >
       <canvas ref={canvas} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }} />
+      {state.status === "ready" && (flash || resting) && (
+        <div style={{ position: "absolute", right: "8px", bottom: "6px", fontSize: "0.7em", opacity: 0.55, pointerEvents: "none" }}>
+          {flash ?? `paused: ${resting}`}
+        </div>
+      )}
       {state.status !== "ready" && (
         <div
           style={{

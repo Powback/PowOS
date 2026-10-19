@@ -14,6 +14,7 @@
 //               { type: "run", on, fps? }               frames on (the tile is on screen) or off; fps: at most 30
 //               { type: "size", width, height, dpr }    { type: "colors", colors }
 //               { type: "alive" }                       the page is really drawn (about once a second while on)
+//               { type: "nodraw", on }                  checks only: simulate without drawing
 //               { type: "stats" }                       answers { type: "stats", lesson, checkpoint, prof, ... } (checks)
 // Messages out: { type: "ready", brain, lessons } | { type: "error", message }
 //
@@ -401,9 +402,20 @@ function bodyPoint(b: number, l: V2): V2 {
   return [xp[b * 3] + xm[b * 9] * l[0] + xm[b * 9 + 2] * l[1], xp[b * 3 + 2] + xm[b * 9 + 6] * l[0] + xm[b * 9 + 8] * l[1]];
 }
 
+// What the last drawn frame showed (camera, checkpoint, every body part's ends, in device px): a frame that would look
+// the same - the figure standing still, the camera settled - isn't drawn, so the canvas isn't committed and the WebView
+// has nothing to composite. [force] after a resize or a theme change.
+let shown: Float64Array | null = null, shownWp = 0, shownHp = 0;
+let force = true;
+let noDraw = false; // (checks: simulate without drawing, to tell the two costs apart)
+const SAME_PX = 0.5;
+function unchanged(key: Float64Array, Wp: number, Hp: number) {
+  if (force || !shown || shown.length !== key.length || Wp !== shownWp || Hp !== shownHp) return false;
+  for (let i = 0; i < key.length; i++) if (Math.abs(key[i] - shown[i]) > SAME_PX) return false;
+  return true;
+}
 function draw() {
   const Wp = canvas.width, Hp = canvas.height;
-  ctx.clearRect(0, 0, Wp, Hp);
   if (!Wp || !Hp) return;
   // 4.5 m of height at most (the figure ~1.3 m tall stays big in a small tile), all of it if the room is lower; wide
   // tiles show more of the course, never more than the room
@@ -418,6 +430,15 @@ function draw() {
   cam = cam ? [cam[0] + (want[0] - cam[0]) * 0.12, cam[1] + (want[1] - cam[1]) * 0.12] : want;
   const [cx, cz] = cam;
   const X = (x: number) => (x - cx) * scale, Z = (z: number) => Hp - (z - cz) * scale;
+  const key = new Float64Array(5 + meta.draw.length * 4);
+  key[0] = cx * scale; key[1] = cz * scale; key[2] = wpI; key[3] = X(coin[0]); key[4] = Z(coin[1]);
+  meta.draw.forEach((p, i) => {
+    const a = bodyPoint(p.body, p.a), b = bodyPoint(p.body, p.b);
+    key[5 + i * 4] = X(a[0]); key[6 + i * 4] = Z(a[1]); key[7 + i * 4] = X(b[0]); key[8 + i * 4] = Z(b[1]);
+  });
+  if (noDraw || unchanged(key, Wp, Hp)) { prof.skipped++; return; }
+  shown = key; shownWp = Wp; shownHp = Hp; force = false;
+  ctx.clearRect(0, 0, Wp, Hp);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   // the room (its floor and walls) faint, the course's pieces in the foreground colour
@@ -463,7 +484,7 @@ function draw() {
 }
 
 // ---- the loop: one frame per "frame" message; the page sends none while the tile isn't on screen ------------------------
-const prof = { act: 0, step: 0, fwd: 0, draw: 0, frames: 0, steps: 0, gaps: new Array(10).fill(0), maxGap: 0 };
+const prof = { act: 0, step: 0, fwd: 0, draw: 0, frames: 0, steps: 0, gaps: new Array(10).fill(0), maxGap: 0, skipped: 0 };
 function frame() {
   const now = performance.now();
   // Real time, but never more than 0.1 s of it at once: after a pause it carries on where it stopped.
@@ -485,7 +506,7 @@ function size(w: number, h: number, r: number) {
   canvas.height = Math.max(1, Math.round(h * dpr));
 }
 
-let ready = false, running = false, fps = 30, timer = 0, lastAt = 0;
+let ready = false, running = false, fps = 15, timer = 0, lastAt = 0;
 // Paced by a timer: the canvas is committed only when a frame is drawn, so the compositor (and the app's own render
 // threads behind it) have nothing to do in between - a requestAnimationFrame here kept them waking every vsync.
 // A frame never comes sooner than 1/fps after the last.
@@ -529,7 +550,7 @@ self.onmessage = async (e: MessageEvent) => {
     canvas = m.canvas;
     ctx = canvas.getContext("2d")!;
     colors = m.colors;
-    fps = Math.min(30, m.fps || 30);
+    fps = Math.max(1, Math.min(30, m.fps || 15));
     size(m.width, m.height, m.dpr);
     try {
       await load(m.base);
@@ -540,7 +561,7 @@ self.onmessage = async (e: MessageEvent) => {
       (self as any).postMessage({ type: "error", message: String((err as Error)?.message ?? err) });
     }
   } else if (m.type === "run") {
-    if (m.fps) fps = Math.min(30, m.fps);
+    if (m.fps) fps = Math.max(1, Math.min(30, m.fps));
     wantRun = m.on;
     if (ready) run(m.on);
   } else if (m.type === "alive") {
@@ -552,9 +573,13 @@ self.onmessage = async (e: MessageEvent) => {
     }
   } else if (m.type === "size") {
     size(m.width, m.height, m.dpr);
+    force = true;
     if (ready) draw();
   } else if (m.type === "colors") {
+    if (JSON.stringify(m.colors) !== JSON.stringify(colors)) force = true;
     colors = m.colors;
+  } else if (m.type === "nodraw") {
+    noDraw = !!m.on;
   } else if (m.type === "stats") {
     // for checks from the page (CDP): where it is in which lesson, and where the time goes (ms, summed)
     const r = ready ? root() : null;

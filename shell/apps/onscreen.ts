@@ -40,3 +40,14 @@ export function useOnScreen(ref: { current: Element | null }): boolean {
 export function openUrl(url: string) {
   return powos.screens.act("licenses", "open", url);
 }
+
+/**
+ * The battery for islands that should rest on a low one: its level (0-100, null unknown), whether it's charging, and
+ * whether Android's battery saver is on. Both from the bridge as it is: system.battery, and the control center's
+ * battery saver tile (qs.state; null when the phone's tile order has none).
+ */
+export async function power(): Promise<{ level: number | null; charging: boolean; saver: boolean | null }> {
+  const [b, q] = await Promise.all([powos.system.battery(), powos.qs.state().catch(() => null)]);
+  const tile = q?.tiles.find((t) => t.id === "battery");
+  return { level: b.level, charging: b.charging, saver: tile ? tile.on : null };
+}

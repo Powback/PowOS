@@ -13,7 +13,7 @@
  * until that exists the server issues anonymous ones.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
-import { openUrl, useOnScreen } from "./onscreen.ts";
+import { openUrl, power, useOnScreen } from "./onscreen.ts";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -28,6 +28,8 @@ export interface IslandHost {
   useOnScreen?(ref: { current: Element | null }): boolean;
   /** Opens a link outside the shell (the browser). */
   openUrl?(url: string): Promise<unknown>;
+  /** The battery: level, charging, battery saver (apps/onscreen.ts). */
+  power?(): Promise<{ level: number | null; charging: boolean; saver: boolean | null }>;
 }
 
 export interface Builder {
@@ -190,4 +192,4 @@ export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   return rows;
 }
 
-export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl };
+export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl, power };
