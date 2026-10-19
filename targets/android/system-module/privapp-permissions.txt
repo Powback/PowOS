@@ -1,0 +1,6 @@
+# The privileged permissions the PowOS app may hold as a system app - its privapp-permissions allowlist, reviewed:
+# each is a power the app gets. build-module.sh fails when the APK requests a privileged permission not listed here
+# (the phone enforces the list: one missing and Android won't boot). A system UI slot adds its own here.
+
+# Settings in the secure table (the launcher's own settings: default home, gestures, theming the system).
+android.permission.WRITE_SECURE_SETTINGS

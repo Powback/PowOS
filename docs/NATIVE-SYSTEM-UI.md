@@ -13,6 +13,16 @@ and jadx decompiles of the device's `services.jar`, `oplus-services.jar`, `Syste
 `SystemUIPlugin.apk` and `Aod.apk`, plus `aapt2 dump` of `framework-res.apk`. All of that was read-only,
 and the pulled files and decompiles stayed in a local tmp directory. Researched 2026-10-19.
 
+## The rule: one UI codebase, hot-reloaded, in every slot
+
+Each system slot PowOS takes (switcher, shade and quick settings, lock screen face, screen-off display, home) is a
+thin native host: Kotlin that holds the slot's role, its system window, its input and its permissions - nothing more.
+What every one of them shows is the web shell (`shell/`, TypeScript), the same code as the launcher, in a WebView
+with the shell's hot reload: an edit (by the user or an AI agent) pushed to the phone shows in every screen at once,
+no APK, no reboot. A slot's look or behaviour never lives in Kotlin; if a host needs to draw something, that's a
+missing bridge call, not a native view. This is what "native" means here: PowOS owns the screens through the
+platform's own slots - not overlays or hooks on top of the stock UI.
+
 ## TL;DR
 
 - **The key slot is `config_recentsComponentName`.** The package it names gets every permission with
