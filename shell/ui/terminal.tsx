@@ -253,7 +253,8 @@ powos.on("files.changed", ({ path }: { path: string }) => {
 export function closeTerminal(id: string) {
   sessions.get(id)?.term.dispose();
   sessions.delete(id);
-  powos.term.close(id);
+  // A host without terminals (an older bridge.ts in the override folder) has nothing to close.
+  powos.term?.close(id).catch(() => {});
 }
 
 // --- focus, the keyboard and the extra keys ---------------------------------------------------------------------------
