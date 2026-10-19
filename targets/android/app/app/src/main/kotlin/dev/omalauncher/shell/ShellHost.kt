@@ -139,7 +139,6 @@ class ShellHost(
                 return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600") }
             }
             // What settings' screens show: theme previews, backgrounds, store previews (ShellScreens.image).
-            // What settings' screens show: theme previews, backgrounds, store previews (ShellScreens.image).
             if (path.startsWith("_screens/")) {
                 val rest = path.removePrefix("_screens/")
                 val (type, bytes) = bridge.screens.image(rest.substringBefore('/'), URLDecoder.decode(rest.substringAfter('/'), "UTF-8")) ?: return notFound()
