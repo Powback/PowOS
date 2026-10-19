@@ -30,6 +30,7 @@ import dev.omalauncher.widgets.lang.Program
 import dev.omalauncher.widgets.lang.Source
 import dev.omalauncher.widgets.market.Review
 import dev.omalauncher.widgets.market.Shared
+import dev.omalauncher.widgets.recon.WidgetRecon
 import dev.omalauncher.widgets.runtime.WidgetInstance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -349,6 +350,8 @@ class WidgetEngine(
                 inboxDir.mkdirs()
                 market.load()
             }
+            // owl-recon: Android widgets captured for agents to recreate in OWL.
+            WidgetRecon.get(context).watch(File(dir, WidgetRecon.DIR))
             // owl-check asks for a preview the launcher hasn't made yet by writing the file's hash to <file>.want.
             checkObserver =
                 object : FileObserver(checkDir, CLOSE_WRITE or MOVED_TO) {
@@ -762,6 +765,8 @@ class WidgetEngine(
         val assets = context.assets
         return buildList {
             add(asset("widgets/README.md", File(dir, "README.md"), Policy.Owned))
+            // Also reachable as `bash ~/.config/omalauncher/widgets/.recon/owl-recon` in a guest without our /usr/local/bin.
+            add(Managed(File(dir, "${WidgetRecon.DIR}/owl-recon"), Policy.Owned, executable = true) { assets.open("owl-recon.sh").use { it.readBytes() } })
             for (name in assets.list("widgets/examples").orEmpty()) add(asset("widgets/examples/$name", File(dir, "examples/$name"), Policy.Seeded))
             for (name in assets.list("widgets").orEmpty().filter { it.endsWith(".owl") }) add(asset("widgets/$name", File(dir, name), Policy.Seeded))
         }
@@ -770,7 +775,7 @@ class WidgetEngine(
     /** Agents look for AGENTS.md / CLAUDE.md in the guest home; these point them at the widget docs. */
     fun guestManaged(): List<Managed> =
         listOf("AGENTS.md", "CLAUDE.md").map { Managed.text(File(proot.home, it), Policy.Seeded) { AGENT_POINTER } } +
-            listOf("owl-check", "owl-send").map { bin ->
+            listOf("owl-check", "owl-send", "owl-recon").map { bin ->
                 Managed(File(proot.rootfs, "usr/local/bin/$bin"), Policy.Owned, executable = true) { context.assets.open("$bin.sh").use { it.readBytes() } }
             }
 
@@ -788,7 +793,8 @@ class WidgetEngine(
                 "Saved files show up on the phone within seconds. After saving, run `owl-check <file>`: it prints the errors " +
                 "and the path of a PNG of the tile, drawn with live data; look at it to check the layout. " +
                 "examples/ holds more widgets to learn from or move up to use. Scripts, cron jobs and hooks can set a running " +
-                "widget's state or refresh it with `owl-send <file> set <state> <value>` and `owl-send <file> refresh`.\n\n" +
+                "widget's state or refresh it with `owl-send <file> set <state> <value>` and `owl-send <file> refresh`. " +
+                "To recreate an Android app's widget, capture it first with `owl-recon` (README: Recreating an Android widget).\n\n" +
                 "The launcher's look (theme, background, tile spacing and borders, corners, the system bars' colors, the " +
                 "terminals' font) is ~/${StyleStore.GUEST_DIR}/${StyleStore.FILE}; ${StyleStore.DEFAULTS} next to it lists every " +
                 "setting with its default and range. Changes show within a second; ${StyleStore.ERRORS} there says what was ignored and why.\n"

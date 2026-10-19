@@ -310,6 +310,20 @@
             </intent-filter>
         </service>
 
+        <!-- Widget recon (widgets/recon/WidgetRecon.kt): Android's "allow PowOS to create widgets" dialog and a widget's
+             own setup, shown for a recon an agent asked for. -->
+        <activity
+            android:name=".widgets.recon.ReconActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="com.powos.app.recon"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- The same recon from adb (am broadcast): DUMP is held by adb's shell and the system, never by apps. -->
+        <receiver
+            android:name=".widgets.recon.ReconReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <service
             android:name=".LinuxService"
             android:exported="false"

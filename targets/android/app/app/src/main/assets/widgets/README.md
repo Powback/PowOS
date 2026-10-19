@@ -408,6 +408,67 @@ widget "build" {
 }
 ```
 
+## Recreating an Android widget
+
+To rebuild an Android app's widget (a clock, the calendar, a music player) as an OWL widget that
+follows the launcher's theme, first capture what it really is with `owl-recon`
+(`bash ~/.config/omalauncher/widgets/.recon/owl-recon` where it isn't on the PATH):
+
+```
+$ owl-recon list calendar
+com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider	Calendar schedule (Calendar)	203x276dp
+$ owl-recon com.google.android.calendar/com.android.calendar.widget.CalendarAppWidgetProvider 300x280
+~/.config/omalauncher/widgets/.recon/com.google.android.calendar__com.android.calendar.widget.CalendarAppWidgetProvider/recon.json
+~/.config/omalauncher/widgets/.recon/com.google.android.calendar__com.android.calendar.widget.CalendarAppWidgetProvider/screenshot.png
+```
+
+The launcher adds the widget for a few seconds, off screen, at the size you give in dp (default: the
+widget's own), and removes it again. Nothing in it is tapped or opened. The first time, the phone
+asks the user to allow PowOS to create widgets (tell them to tick "always allow"); until they do,
+or with `--static`, you get the widget's layout as the app ships it, without its data. A widget
+with a setup screen (`configure` in `list`) is captured unconfigured unless you pass `--configure`
+and the user fills it in. `--seconds 30` watches it longer, for widgets that update often.
+
+Look at `screenshot.png` first, then read `recon.json`:
+
+- `provider`: label, sizes (`targetCells`, `minSizeDp`), `resizeMode`, `updatePeriodMillis`, `configure`
+- `views`: the view tree as drawn, each node with `class`, `id`, `bounds` (`[x, y, w, h]` in dp,
+  relative to the widget), `layout`/`weight`/`padding`/`margin`, `background` (a color, or a shape
+  with `cornerRadius`), text with `textSizeSp`, `color`, `weight` (400 regular, 700 bold) and `align`,
+  pictures as `image: images/<n>.png`, `onClick: true` where a tap does something, `actions` (what
+  the app set on that view, below) and `owl`, the node to use
+- `remoteViews`: the app's own instructions (`setText`, `setImageViewBitmap`, `setTextColor`,
+  `setOnClickResponse -> activity in com.x`...); taps name the app and kind of screen they open,
+  not the screen itself
+- `updates`: each update the app sent while it was watched (`atMs`), with what it set: what changes
+  and how often tells you which `source` to use
+- `host.systemWidgetRadiusDp` and `nightMode`: the phone's own widget corners and theme at capture time
+
+Then write the widget the usual way:
+
+| Android view | OWL |
+|---|---|
+| `LinearLayout` vertical / horizontal | `Column` / `Row` (`gravity` → `align`, `weight` → `weight`) |
+| `FrameLayout`, `RelativeLayout`, other layouts | `Box`, or a `Column`/`Row` read off the `bounds` |
+| `TextView` | `Text`: `fontSize` from `textSizeSp`, `bold` for weight ≥ 600, `maxLines` |
+| `TextClock` | `Text { text: fmtTime(now, ...) }` with `source now = clock every 1s`; its `format12`/`format24` are the pattern |
+| `ImageView`, `ImageButton` | `Image`; icons via `"app:<package>"` or copied out of `images/` (see below) |
+| `ProgressBar` | `Progress` (or `Ring` for a round one) |
+| `ListView`, `GridView`, `StackView` | `for item in ... { }` over the data; its rows are the children captured |
+| `AnalogClock` | `Canvas` (see `examples/90-analog-clock.owl`) |
+| `background` color / shape | `background` and `radius: 8 * corners` |
+| `onClick` / `setOnClickResponse -> activity in <pkg>` | `onTap: androidApp("<pkg>")` |
+
+- Use theme colors (`surface`, `foreground`, `muted`, `accent`...) instead of the captured hex
+  colors, so the widget matches the launcher; keep a hex color only where it means something (a
+  calendar's event color). The captured colors tell you which role each one plays.
+- Pictures you keep (a logo, an icon that isn't the app's) go into the widget as
+  `asset name = base64"..."` (`base64 -w0 images/3.png`): `.recon` is overwritten by the next capture.
+- The data comes from OWL's own sources, not the captured widget: `clock` for clocks,
+  `android.media` for players, `android.alarm`, `android.battery`, `http(...)` for weather and
+  feeds, `cmd(...)` for anything Linux can fetch. Captured texts are only examples of what goes where.
+- Check the result with `owl-check` and compare its preview with `screenshot.png`.
+
 ## Without Linux
 
 Linux (this Arch system) is an optional download in the launcher. A widget that runs commands,
