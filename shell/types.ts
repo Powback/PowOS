@@ -215,28 +215,11 @@ export interface Bridge {
     watch(key: string, screen?: boolean): Promise<void>;
     unwatch(key: string, screen?: boolean): Promise<void>;
     /** Runs a handler (onTap, onDrag, onChange) of element [id] with its numbers (x, y, dx, dy in dp). */
-    fire(
-      key: string,
-      screen: boolean,
-      id: string,
-      name: string,
-      args: number[],
-    ): Promise<void>;
+    fire(key: string, screen: boolean, id: string, name: string, args: number[]): Promise<void>;
     /** The tile's size: cells (cols, rows) and dp. */
-    size(
-      key: string,
-      cols: number,
-      rows: number,
-      width: number,
-      height: number,
-    ): Promise<void>;
+    size(key: string, cols: number, rows: number, width: number, height: number): Promise<void>;
     /** A Canvas's size in dp: its drawing is evaluated at it. */
-    canvas(
-      key: string,
-      id: string,
-      width: number,
-      height: number,
-    ): Promise<void>;
+    canvas(key: string, id: string, width: number, height: number): Promise<void>;
     /** The home page on screen (a page number): widgets on it and beside it run their sources. */
     page(page: number): Promise<void>;
     /** A tap on the tile that no element took: the widget's own onTap (often screen(), opening it full size). */
@@ -314,9 +297,7 @@ export interface Bridge {
     /** The last moments that changed, tiled into one image where PowOS sees it; its path (null: nothing yet). */
     filmstrip(): Promise<string | null>;
     /** Where the page takes touches (live mode: its bar, CSS px); null: everywhere. */
-    touchable(
-      rect: { left: number; top: number; width: number; height: number } | null,
-    ): Promise<void>;
+    touchable(rect: { left: number; top: number; width: number; height: number } | null): Promise<void>;
   };
   /** The lock screen's face (index.html?mode=lock): unlocking is Android's (its PIN pad, the fingerprint). */
   lock: {
@@ -329,9 +310,7 @@ export interface Bridge {
   /** What's playing ("media.changed" brings it again once asked): the control center's media card. */
   media: {
     state(): Promise<MediaState>;
-    control(
-      command: "toggle" | "play" | "pause" | "next" | "previous" | "open",
-    ): Promise<void>;
+    control(command: "toggle" | "play" | "pause" | "next" | "previous" | "open"): Promise<void>;
     /** The phone's output picker (speaker, Bluetooth, cast) for that app's audio. */
     output(pkg?: string): Promise<void>;
   };
@@ -342,10 +321,9 @@ export interface Bridge {
     /** Android's own page for a tile (its long press), or wifi / bluetooth / internet / settings. */
     open(name: string): Promise<void>;
     /** A slider: "brightness" / "volume" 0..1, "auto-brightness" 0/1, "ringer" 0..1 (silent, vibrate, ring). */
-    set(
-      name: "brightness" | "volume" | "auto-brightness" | "ringer",
-      value: number,
-    ): Promise<QuickState>;
+    set(name: "brightness" | "volume" | "auto-brightness" | "ringer", value: number): Promise<QuickState>;
+    /** The control center shown (true) or shut: other apps' tiles keep their state current while it shows. */
+    listening(on: boolean): Promise<void>;
   };
   /**
    * The shade (index.html?mode=shade, in PowOS's system window above the status bar - the native shade host): the
@@ -409,7 +387,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

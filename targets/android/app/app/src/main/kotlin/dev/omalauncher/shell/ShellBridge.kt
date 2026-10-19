@@ -68,7 +68,11 @@ class ShellBridge(
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
     private val speech = Speech(context.applicationContext)
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
-    private val quick: QuickSettings = QuickSettings(context) { main.post { emit("qs.changed", quick.state()) } }
+    private val quick: QuickSettings =
+        QuickSettings(context) { main.post { emit("qs.changed", quick.state()) } }.also {
+            // A tile opening its activity or dialog: the control center goes, as SystemUI's panel does.
+            it.collapse = { main.post { emit("qs.collapse", null) } }
+        }
 
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
@@ -174,6 +178,7 @@ class ShellBridge(
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
+            "qs.listening" -> quick.listening(a.getBoolean(0))
             "media.state" -> media.state()
             "media.control" -> media.control(a.getString(0))
             "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })

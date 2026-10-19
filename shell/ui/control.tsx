@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
+import { notifOpen } from "./gesture.ts";
 import type { MediaState, QuickState, QuickTile } from "../types.ts";
 
 /** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
@@ -263,7 +264,17 @@ function MediaCard() {
   );
 }
 
+// A tile opened its activity or dialog (TileHost): the panel goes, as SystemUI's does.
+powos.on("qs.collapse", () => shut());
+
 export function ControlCenter() {
+  // Shown: other apps' tiles listen (their state kept current), until it's shut or turned back to notifications.
+  const open = notifOpen.value;
+  useEffect(() => {
+    if (!open) return;
+    powos.qs.listening(true);
+    return () => void powos.qs.listening(false);
+  }, [open]);
   const q = quick.value;
   const tiles = q.tiles ?? [];
   const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter((t): t is QuickTile => !!t);

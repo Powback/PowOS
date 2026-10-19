@@ -77,8 +77,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
     home: {
       get: () => call<Home>("home.get"),
       place: (key, cell, page) => call("home.place", key, cell, page),
-      add: (app, page, cell) =>
-        call<string>("home.add", app, page, cell ?? null),
+      add: (app, page, cell) => call<string>("home.add", app, page, cell ?? null),
       remove: (key) => call("home.remove", key),
       group: (key, target) => call<string | null>("home.group", key, target),
       arrange: (cols, rows) => call("home.arrange", cols, rows),
@@ -86,12 +85,9 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
     widgets: {
       watch: (key, screen) => call("widgets.watch", key, !!screen),
       unwatch: (key, screen) => call("widgets.unwatch", key, !!screen),
-      fire: (key, screen, id, name, args) =>
-        call("widgets.fire", key, !!screen, id, name, args ?? []),
-      size: (key, cols, rows, width, height) =>
-        call("widgets.size", key, cols, rows, width, height),
-      canvas: (key, id, width, height) =>
-        call("widgets.canvas", key, id, width, height),
+      fire: (key, screen, id, name, args) => call("widgets.fire", key, !!screen, id, name, args ?? []),
+      size: (key, cols, rows, width, height) => call("widgets.size", key, cols, rows, width, height),
+      canvas: (key, id, width, height) => call("widgets.canvas", key, id, width, height),
       page: (page) => call("widgets.page", page),
       tap: (key) => call("widgets.tap", key),
       screen: () => call<WidgetScreen>("widgets.screen"),
@@ -139,6 +135,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       toggle: (name) => call<QuickState>("qs.toggle", name),
       open: (name) => call("qs.open", name),
       set: (name, value) => call<QuickState>("qs.set", name, value),
+      listening: (on) => call("qs.listening", on),
     },
     shade: { closed: () => call("shade.closed") },
     tasks: {
@@ -225,17 +222,8 @@ function mock(): Bridge {
     "Ölwerk",
     "7-Zip",
   ];
-  const linux = new Set([
-    "Dolphin",
-    "Kate",
-    "Konsole",
-    "Steam",
-    "System Settings",
-    "Terminal",
-    "Firefox",
-  ]);
-  const hue = (s: string) =>
-    [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+  const linux = new Set(["Dolphin", "Kate", "Konsole", "Steam", "System Settings", "Terminal", "Firefox"]);
+  const hue = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
   const icon = (name: string) =>
     "data:image/svg+xml," +
     encodeURIComponent(
@@ -243,20 +231,12 @@ function mock(): Bridge {
         `<text x="24" y="31" font-family="sans-serif" font-size="20" fill="white" text-anchor="middle">${name[0]}</text></svg>`,
     );
   const apps: App[] = names.map((name) => ({
-    key:
-      (linux.has(name) ? "l:" : "a:") + name.toLowerCase().replace(/\W+/g, "."),
+    key: (linux.has(name) ? "l:" : "a:") + name.toLowerCase().replace(/\W+/g, "."),
     label: name,
     icon: icon(name),
     kind: linux.has(name) ? "linux" : "android",
   }));
-  const recent = [
-    "a:chrome",
-    "l:konsole",
-    "a:spotify",
-    "a:signal",
-    "l:dolphin",
-    "a:youtube",
-  ];
+  const recent = ["a:chrome", "l:konsole", "a:spotify", "a:signal", "l:dolphin", "a:youtube"];
   const data = (name: string) => `powos-shell:${name}`;
   let samples: Promise<Record<string, unknown>> | null = null;
   let chat: Chat = { busy: false, items: [] };
@@ -336,9 +316,7 @@ function mock(): Bridge {
     ],
   };
   const changed = () => {
-    home.pages = [...new Set(home.items.map((i) => i.page))].sort(
-      (a, b) => a - b,
-    );
+    home.pages = [...new Set(home.items.map((i) => i.page))].sort((a, b) => a - b);
     events.emit("home.changed", null);
   };
   return {
@@ -390,20 +368,10 @@ function mock(): Bridge {
         let moved = false;
         for (const item of home.items.filter((i) => !i.cell)) {
           const [w, h] = item.size ?? [Math.floor(cols / 2), 3];
-          const taken = home.items
-            .filter((o) => o !== item && o.page === item.page && o.cell)
-            .map((o) => o.cell!);
+          const taken = home.items.filter((o) => o !== item && o.page === item.page && o.cell).map((o) => o.cell!);
           for (let y = 0; y + h <= rows && !item.cell; y++)
             for (let x = 0; x + w <= cols && !item.cell; x++)
-              if (
-                taken.every(
-                  (c) =>
-                    x >= c.x + c.w ||
-                    c.x >= x + w ||
-                    y >= c.y + c.h ||
-                    c.y >= y + h,
-                )
-              )
+              if (taken.every((c) => x >= c.x + c.w || c.x >= x + w || y >= c.y + c.h || c.y >= y + h))
                 item.cell = { x, y, w, h };
           moved ||= !!item.cell;
         }
@@ -422,10 +390,7 @@ function mock(): Bridge {
             ...into,
             key: "folder:" + Date.now(),
             kind: "folder",
-            apps: [
-              { key: into.key, label: into.label!, app: into.app! },
-              entry,
-            ],
+            apps: [{ key: into.key, label: into.label!, app: into.app! }, entry],
           });
         }
         changed();
@@ -435,9 +400,7 @@ function mock(): Bridge {
     store: {
       get: async <T>(name: string) => {
         try {
-          return JSON.parse(
-            localStorage.getItem(data(name)) ?? "null",
-          ) as T | null;
+          return JSON.parse(localStorage.getItem(data(name)) ?? "null") as T | null;
         } catch {
           return null;
         }
@@ -467,16 +430,11 @@ function mock(): Bridge {
       // The mock's widgets with a screen open it on a tap, as their onTap: screen() does.
       tap: async (key) => {
         if (terminalTrees[`${key}#screen`])
-          events.emit(
-            "widget.screen",
-            (screen = { key, terminal: true, title: key }),
-          );
+          events.emit("widget.screen", (screen = { key, terminal: true, title: key }));
       },
       screen: async () => screen,
-      closeScreen: async () =>
-        void events.emit("widget.screen", (screen = { key: null })),
-      fire: async (key, _screen, id, name, args) =>
-        console.log("[mock] fire", key, id, name, args),
+      closeScreen: async () => void events.emit("widget.screen", (screen = { key: null })),
+      fire: async (key, _screen, id, name, args) => console.log("[mock] fire", key, id, name, args),
       size: async () => {},
       canvas: async () => {},
       page: async () => {},
@@ -485,15 +443,11 @@ function mock(): Bridge {
     ai: {
       chat: async () => chat,
       send: async (text) => {
-        const step = (next: Partial<Chat>) =>
-          events.emit("ai.changed", (chat = { ...chat, ...next }));
+        const step = (next: Partial<Chat>) => events.emit("ai.changed", (chat = { ...chat, ...next }));
         step({ busy: true, items: [...chat.items, { kind: "user", text }] });
         await new Promise((r) => setTimeout(r, 400));
         step({
-          items: [
-            ...chat.items,
-            { kind: "tool", name: "Bash", hint: "powos status", ok: null },
-          ],
+          items: [...chat.items, { kind: "tool", name: "Bash", hint: "powos status", ok: null }],
         });
         await new Promise((r) => setTimeout(r, 600));
         const items = chat.items.slice(0, -1);
@@ -556,10 +510,8 @@ function mock(): Bridge {
     },
     term: mockTerm(events),
     clipboard: {
-      read: async () =>
-        navigator.clipboard?.readText().catch(() => null) ?? null,
-      write: async (text) =>
-        void (await navigator.clipboard?.writeText(text).catch(() => {})),
+      read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
+      write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
     lock: { unlock: async () => console.log("[mock] unlock") },
     media: (() => {
@@ -584,12 +536,12 @@ function mock(): Bridge {
       };
     })(),
     qs: (() => {
-      const tile = (
-        id: string,
-        label: string,
-        on: boolean | null,
-        detail: string | null = null,
-      ) => ({ id, label, on, detail });
+      const tile = (id: string, label: string, on: boolean | null, detail: string | null = null) => ({
+        id,
+        label,
+        on,
+        detail,
+      });
       let st: QuickState = {
         torch: false,
         dnd: false,
@@ -614,11 +566,7 @@ function mock(): Bridge {
           tile("lockscreen", "Lock", null),
           tile("qr_code_scanner", "Scan QR code", null),
           {
-            ...tile(
-              "custom(com.oplus.eyeprotect/.services.EyeProtectTileService)",
-              "Eye comfort",
-              null,
-            ),
+            ...tile("custom(com.oplus.eyeprotect/.services.EyeProtectTileService)", "Eye comfort", null),
             app: "com.oplus.eyeprotect",
           },
         ],
@@ -636,20 +584,16 @@ function mock(): Bridge {
               tiles: st.tiles.map((x) => (x === t ? { ...x, on: !x.on } : x)),
             };
           else console.log("[mock] quick action", name);
-          if (name === "flashlight" || name === "torch")
-            st = { ...st, torch: !st.torch };
+          if (name === "flashlight" || name === "torch") st = { ...st, torch: !st.torch };
           if (name === "dnd") st = { ...st, dnd: !st.dnd };
           return changed();
         },
-        open: async (name: string) =>
-          console.log("[mock] open quick setting", name),
+        open: async (name: string) => console.log("[mock] open quick setting", name),
+        listening: async (on: boolean) => console.log("[mock] tiles listening", on),
         set: async (name, value) => {
-          if (name === "brightness")
-            st = { ...st, brightness: { value, auto: false } };
-          if (name === "auto-brightness")
-            st = { ...st, brightness: { ...st.brightness, auto: value > 0 } };
-          if (name === "volume")
-            st = { ...st, volume: { ...st.volume, value } };
+          if (name === "brightness") st = { ...st, brightness: { value, auto: false } };
+          if (name === "auto-brightness") st = { ...st, brightness: { ...st.brightness, auto: value > 0 } };
+          if (name === "volume") st = { ...st, volume: { ...st.volume, value } };
           if (name === "ringer")
             st = {
               ...st,
@@ -672,13 +616,8 @@ function mock(): Bridge {
         screenshot: null,
       }),
       close: async () => console.log("[mock] assistant closed"),
-      attach: async (image) =>
-        `/run/powos-app/powos-ai-shared/screen-mock.${image ? "png" : "jpg"}`,
-      live: async (on) =>
-        void events.emit(
-          "assist.live",
-          (liveMock = { on, frames: on ? 5 : 0 }),
-        ),
+      attach: async (image) => `/run/powos-app/powos-ai-shared/screen-mock.${image ? "png" : "jpg"}`,
+      live: async (on) => void events.emit("assist.live", (liveMock = { on, frames: on ? 5 : 0 })),
       liveState: async () => liveMock,
       filmstrip: async () => "/run/powos-app/powos-ai-shared/live-mock.jpg",
       touchable: async (rect) => console.log("[mock] touchable", rect),
@@ -718,12 +657,10 @@ function mock(): Bridge {
           profile: null,
         },
       ];
-      const changed = () =>
-        events.emit("notifications.changed", { available: true, items });
+      const changed = () => events.emit("notifications.changed", { available: true, items });
       return {
         list: async () => ({ available: true, items }),
-        open: async (key: string) =>
-          console.log("[mock] open notification", key),
+        open: async (key: string) => console.log("[mock] open notification", key),
         dismiss: async (key: string) => {
           items = items.filter((n) => n.key !== key);
           changed();
@@ -782,8 +719,7 @@ function mock(): Bridge {
       const colors = (): ThemeColors => {
         const c = themes.find((t) => t.name === picked)!.colors;
         const light = picked === "rose-pine";
-        const mix = (a: string, pct: number) =>
-          `color-mix(in srgb, ${a} ${pct}%, ${c.background})`;
+        const mix = (a: string, pct: number) => `color-mix(in srgb, ${a} ${pct}%, ${c.background})`;
         return {
           name: picked,
           light,
@@ -811,14 +747,8 @@ function mock(): Bridge {
     screens: { open: async (name) => console.log("[mock] open screen", name) },
     agents: {
       default: async () => "Claude",
-      newWidget: async () => (
-        console.log("[mock] new widget with claude"),
-        "started" as const
-      ),
-      newApp: async () => (
-        console.log("[mock] new app with claude"),
-        "started" as const
-      ),
+      newWidget: async () => (console.log("[mock] new widget with claude"), "started" as const),
+      newApp: async () => (console.log("[mock] new app with claude"), "started" as const),
     },
     // Hears the same words every time, a word at a time; a tap ends at the "pause" after them.
     speech: (() => {
@@ -826,8 +756,7 @@ function mock(): Bridge {
       let timer = 0;
       let heard = "";
       let held = false;
-      const state = (listening: boolean) =>
-        events.emit("speech.state", { listening, text: heard, error: null });
+      const state = (listening: boolean) => events.emit("speech.state", { listening, text: heard, error: null });
       const done = () => {
         clearInterval(timer);
         state(false);
@@ -863,10 +792,7 @@ function mock(): Bridge {
         right: 0,
         keyboard: 0,
       }),
-      notifications: async (open = true) => (
-        console.log(`[mock] notification shade ${open ? "down" : "up"}`),
-        true
-      ),
+      notifications: async (open = true) => (console.log(`[mock] notification shade ${open ? "down" : "up"}`), true),
       battery: async () => ({ level: 76, charging: false }),
     },
     on: (event, handler) => events.on(event, handler),
@@ -881,9 +807,7 @@ const terminalTrees: Record<string, unknown> = {
     id: "r",
     padding: 0,
     tap: true,
-    c: [
-      { k: "Terminal", id: "r.0", p: { session: "main", interactive: false } },
-    ],
+    c: [{ k: "Terminal", id: "r.0", p: { session: "main", interactive: false } }],
   },
   "terminal.owl#screen": {
     k: "Root",
@@ -909,10 +833,7 @@ const terminalTrees: Record<string, unknown> = {
 /**
  * Recent tasks for the mock: a few apps, each "snapshot" a drawing of a screen in its color; removing one removes it.
  */
-function mockTasks(
-  icon: (name: string) => string,
-  hue: (name: string) => number,
-): Bridge["tasks"] {
+function mockTasks(icon: (name: string) => string, hue: (name: string) => number): Bridge["tasks"] {
   const shot = (name: string) =>
     "data:image/svg+xml," +
     encodeURIComponent(
@@ -926,14 +847,7 @@ function mockTasks(
         ).join("") +
         `</svg>`,
     );
-  let tasks: RecentTask[] = [
-    "Chrome",
-    "Signal",
-    "Spotify",
-    "Maps",
-    "Terminal",
-    "Gmail",
-  ].map((name, i) => ({
+  let tasks: RecentTask[] = ["Chrome", "Signal", "Spotify", "Maps", "Terminal", "Gmail"].map((name, i) => ({
     id: 100 + i,
     label: name,
     key: `a:${name.toLowerCase()}`,
@@ -942,10 +856,7 @@ function mockTasks(
   }));
   return {
     list: async () => tasks.slice(),
-    open: async (id) => (
-      console.log("[mock] switch to task", id),
-      tasks.some((t) => t.id === id)
-    ),
+    open: async (id) => (console.log("[mock] switch to task", id), tasks.some((t) => t.id === id)),
     remove: async (id) => {
       tasks = tasks.filter((t) => t.id !== id);
       return true;
@@ -959,10 +870,8 @@ function mockTasks(
  */
 function mockTerm(events: Events): Bridge["term"] {
   const utf8 = new TextEncoder();
-  const b64 = (bytes: Uint8Array) =>
-    btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
-  const unb64 = (s: string) =>
-    new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)));
+  const b64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
+  const unb64 = (s: string) => new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)));
   interface Shell {
     run: number;
     out: number[];
@@ -984,50 +893,29 @@ function mockTerm(events: Events): Bridge["term"] {
     const bytes = utf8.encode(text);
     sh.out.push(...bytes);
     const end = sh.out.length;
-    setTimeout(
-      () =>
-        events.emit("term.data", { id, run: sh.run, data: b64(bytes), end }),
-      5,
-    );
+    setTimeout(() => events.emit("term.data", { id, run: sh.run, data: b64(bytes), end }), 5);
   };
   const prompt = "\x1b[32mmock\x1b[0m:\x1b[34m~\x1b[0m$ ";
   const exec = (id: string, sh: Shell, line: string) => {
     const [cmd, ...args] = line.trim().split(/\s+/);
     if (cmd === "exit") {
       sh.code = Number(args[0] ?? 0) || 0;
-      setTimeout(
-        () => events.emit("term.exit", { id, run: sh.run, code: sh.code }),
-        10,
-      );
+      setTimeout(() => events.emit("term.exit", { id, run: sh.run, code: sh.code }), 10);
       return;
     }
     if (cmd === "echo") print(id, sh, args.join(" ") + "\r\n");
-    else if (cmd === "seq")
-      for (let i = 1; i <= Number(args[0] ?? 10); i++)
-        print(id, sh, `${i}\r\n`);
+    else if (cmd === "seq") for (let i = 1; i <= Number(args[0] ?? 10); i++) print(id, sh, `${i}\r\n`);
     else if (cmd === "size") print(id, sh, `${sh.cols}x${sh.rows}\r\n`);
     else if (cmd === "colors")
       print(
         id,
         sh,
-        Array.from(
-          { length: 16 },
-          (_, i) => `\x1b[${i < 8 ? 40 + i : 92 + i}m ${i.toString(16)} `,
-        ).join("") + "\x1b[0m\r\n",
+        Array.from({ length: 16 }, (_, i) => `\x1b[${i < 8 ? 40 + i : 92 + i}m ${i.toString(16)} `).join("") +
+          "\x1b[0m\r\n",
       );
     // tmux's mouse: reports in the SGR encoding; "mouse off" ends it.
-    else if (cmd === "mouse")
-      print(
-        id,
-        sh,
-        args[0] === "off" ? "\x1b[?1000l\x1b[?1006l" : "\x1b[?1000h\x1b[?1006h",
-      );
-    else if (cmd)
-      print(
-        id,
-        sh,
-        `${cmd}: not in the mock (echo, seq N, size, colors, mouse [off], exit N)\r\n`,
-      );
+    else if (cmd === "mouse") print(id, sh, args[0] === "off" ? "\x1b[?1000l\x1b[?1006l" : "\x1b[?1000h\x1b[?1006h");
+    else if (cmd) print(id, sh, `${cmd}: not in the mock (echo, seq N, size, colors, mouse [off], exit N)\r\n`);
     print(id, sh, prompt);
   };
   return {
@@ -1036,12 +924,7 @@ function mockTerm(events: Events): Bridge["term"] {
       if (!sh || (restart && sh.code != null)) {
         sh = { run: ++runs, out: [], line: "", cols, rows, code: null };
         shells.set(id, sh);
-        print(
-          id,
-          sh,
-          `mock terminal \x1b[2m(${command ?? "login shell"})\x1b[0m\r\n` +
-            prompt,
-        );
+        print(id, sh, `mock terminal \x1b[2m(${command ?? "login shell"})\x1b[0m\r\n` + prompt);
       }
       return state(sh);
     },
@@ -1049,10 +932,7 @@ function mockTerm(events: Events): Bridge["term"] {
       const sh = shells.get(id);
       if (!sh || sh.code != null) return;
       // Keys that are escape sequences (arrows, mouse reports) do nothing here.
-      for (const ch of unb64(data).replace(
-        /\x1b(\[[\d;?<]*[ -\/]*[@-~]|O.)?/g,
-        "",
-      )) {
+      for (const ch of unb64(data).replace(/\x1b(\[[\d;?<]*[ -\/]*[@-~]|O.)?/g, "")) {
         if (ch === "\r") {
           print(id, sh, "\r\n");
           const line = sh.line;
@@ -1087,5 +967,4 @@ function mockTerm(events: Events): Bridge["term"] {
   };
 }
 
-export const powos: Bridge =
-  window.powos ?? (window.PowosHost ? android(window.PowosHost) : mock());
+export const powos: Bridge = window.powos ?? (window.PowosHost ? android(window.PowosHost) : mock());
