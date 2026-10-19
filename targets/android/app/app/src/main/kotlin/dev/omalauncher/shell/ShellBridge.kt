@@ -82,6 +82,9 @@ class ShellBridge(
     private val panels = ShellPanels.get(context)
     private val agentsView = dev.omalauncher.AgentsSpool.Viewer(::emit)
 
+    /** Remote input (RemoteInput.kt): the phone as a computer's keyboard and mouse, "remote.*" calls. */
+    private val remote = RemoteInput.Client(context, activity, ::emit)
+
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
 
@@ -272,7 +275,7 @@ class ShellBridge(
             "term.style" -> terminalStyle(if (a.isNull(0)) null else a.getDouble(0))
             "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
             "clipboard.write" -> clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
-            else -> throw IllegalArgumentException("no such call: $method")
+            else -> if (method.startsWith("remote.")) remote.call(method.removePrefix("remote."), a) else throw IllegalArgumentException("no such call: $method")
         }
 
     private fun apps(): JSONArray {
@@ -596,6 +599,7 @@ class ShellBridge(
 
     fun close() {
         appWidgets.unlisten(appWidgetEvents)
+        remote.close()
         dev.omalauncher.AgentsSpool.forget(agentsView)
         quick.close()
         media.close()

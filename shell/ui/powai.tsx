@@ -7,6 +7,7 @@
 import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
+import { openRemote } from "../remote.ts";
 import { chat, openSession, page, sessionView, stored } from "../state.ts";
 import { Mic, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
@@ -160,6 +161,13 @@ export function PowAiPage() {
           <span class="ai-session-main">
             <span class="ai-session-task">Agents</span>
             <span class="ai-session-meta muted">what every agent is on: tree, tasks, tools, comms</span>
+          </span>
+        </button>
+        <button type="button" class="ai-session tile" onClick={openRemote}>
+          <span class="ai-dot" />
+          <span class="ai-session-main">
+            <span class="ai-session-task">Remote input</span>
+            <span class="ai-session-meta muted">this phone as the keyboard and touchpad of a computer: USB or Bluetooth</span>
           </span>
         </button>
         <AtWork />

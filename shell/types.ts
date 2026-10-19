@@ -344,6 +344,25 @@ export interface Bridge {
     read(): Promise<string | null>;
     write(text: string): Promise<void>;
   };
+  /**
+   * Remote input (ui/remote.tsx): the phone as a keyboard and mouse for a computer, over its USB cable (HID functions
+   * on the phone's USB gadget) or Bluetooth (the HID device profile). "remote.state" brings each change.
+   */
+  remote: {
+    state(): Promise<RemoteState>;
+    /** Where reports go (null: nowhere), turning that side on first. */
+    target(target: RemoteTarget | null): Promise<RemoteState>;
+    /** Turns a side off: USB, the gadget back as Android had it; Bluetooth, the keyboard unregistered. */
+    off(side: RemoteTarget): Promise<RemoteState>;
+    /** Android's "make visible" dialog, for a new computer to pair with the phone. */
+    discoverable(): Promise<void>;
+    connect(address: string): Promise<void>;
+    disconnect(): Promise<void>;
+    /** Keyboard reports in order, each [modifiers, ...usages held] (remote.ts). */
+    keys(reports: number[][]): Promise<void>;
+    /** A mouse report: buttons (1 left, 2 right, 4 middle), relative motion, wheel and horizontal wheel. */
+    mouse(buttons: number, dx: number, dy: number, wheel?: number, pan?: number): Promise<void>;
+  };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   notifications: {
     list(): Promise<NotificationList>;

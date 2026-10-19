@@ -4,6 +4,7 @@
  */
 import { computed, effect, signal, type Signal } from "@preact/signals";
 import { powos } from "./bridge.ts";
+import { closeRemote, remoteOpen } from "./remote.ts";
 import { agentsView, closeAgents } from "./agents.ts";
 import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
@@ -156,6 +157,7 @@ export function back(): boolean {
   // A session open, or still shrinking back into its card: Back is its (a second Back meanwhile - the keyboard's and
   // the terminal's - mustn't go on to leave PowOS AI's page).
   if (sessionView.value) closeSession();
+  else if (remoteOpen.value) closeRemote();
   else if (agentsView.value) closeAgents();
   else if (screen.value.key) powos.widgets.closeScreen();
   else if (notif.value) notif.value = false;
@@ -180,6 +182,7 @@ export function goHome() {
     return;
   }
   notif.value = false;
+  closeRemote();
   closeAgents();
   menu.value = null;
   folder.value = null;

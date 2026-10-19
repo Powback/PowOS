@@ -132,6 +132,16 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       read: () => call<string | null>("clipboard.read"),
       write: (text) => call("clipboard.write", text),
     },
+    remote: {
+      state: () => call<RemoteState>("remote.state"),
+      target: (t) => call<RemoteState>("remote.target", t),
+      off: (side) => call<RemoteState>("remote.off", side),
+      discoverable: () => call("remote.discoverable"),
+      connect: (address) => call("remote.connect", address),
+      disconnect: () => call("remote.disconnect"),
+      keys: (reports) => call("remote.keys", reports),
+      mouse: (buttons, dx, dy, wheel, pan) => call("remote.mouse", buttons, dx, dy, wheel ?? 0, pan ?? 0),
+    },
     notifications: {
       list: () => call<NotificationList>("notifications.list"),
       open: (key) => call("notifications.open", key),
@@ -544,6 +554,7 @@ function mock(): Bridge {
       read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
+    remote: mockRemote(events),
     lock: { unlock: async () => console.log("[mock] unlock") },
     media: (() => {
       let st: MediaState = {
@@ -1176,5 +1187,62 @@ function mockAgents(
     answer: async (ask, behavior, reason) => console.log("[mock] answer", ask, behavior, reason),
     message: async (role, text) => console.log("[mock] message", role, text),
     interrupt: async (agent) => console.log("[mock] interrupt", agent),
+  };
+}
+
+type RemoteState = import("./types.ts").RemoteState;
+
+/** Remote input in a desktop browser: a pretend USB cable and a paired laptop; reports go to the console. */
+function mockRemote(events: Events): Bridge["remote"] {
+  const state: RemoteState = {
+    target: null,
+    usb: { on: false, busy: false, state: "off", error: null },
+    bluetooth: {
+      available: true,
+      enabled: true,
+      registered: false,
+      discoverable: false,
+      name: "OnePlus Open",
+      host: null,
+      connecting: null,
+      hosts: [{ address: "AA:BB:CC:DD:EE:01", name: "powstation", last: true }],
+      error: null,
+    },
+  };
+  const changed = () => {
+    events.emit("remote.state", structuredClone(state));
+    return structuredClone(state);
+  };
+  return {
+    state: async () => structuredClone(state),
+    target: async (t) => {
+      state.target = t;
+      if (t === "usb") Object.assign(state.usb, { on: true, state: "configured" });
+      if (t === "bluetooth") {
+        state.bluetooth.registered = true;
+        state.bluetooth.host = state.bluetooth.hosts[0];
+      }
+      return changed();
+    },
+    off: async (side) => {
+      if (side === "usb") Object.assign(state.usb, { on: false, state: "off" });
+      else Object.assign(state.bluetooth, { registered: false, host: null });
+      if (state.target === side) state.target = null;
+      return changed();
+    },
+    discoverable: async () => {
+      state.bluetooth.discoverable = true;
+      changed();
+    },
+    connect: async (address) => {
+      state.bluetooth.host = state.bluetooth.hosts.find((h) => h.address === address) ?? null;
+      changed();
+    },
+    disconnect: async () => {
+      state.bluetooth.host = null;
+      changed();
+    },
+    keys: async (reports) => console.log("[mock] keys", JSON.stringify(reports)),
+    mouse: async (buttons, dx, dy, wheel, pan) => console.log("[mock] mouse", buttons, dx, dy, wheel ?? 0, pan ?? 0),
   };
 }
