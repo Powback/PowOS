@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""powos agents - the work board: what the agents are on, in plain words (the PowOS AI page lists it live).
+
+Rows live in the device's powos-agents module (apps/agents: the `work` table, reducers work_set / work_drop), written
+over the SpacetimeDB HTTP API as the PowOS user's CLI identity (the module's owner), like powos-agentsd.
+"""
+
+import base64
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+DB = "powos-agents"
+SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
+STATES = ("working", "blocked", "waiting", "done")
+ALIASES = {
+    "doing": "working", "in_progress": "working", "in-progress": "working", "active": "working", "wip": "working",
+    "wait": "waiting", "waiting-on-user": "waiting", "waiting_on_user": "waiting", "needs_you": "waiting",
+    "needs-you": "waiting", "user": "waiting", "stuck": "blocked", "finished": "done", "landed": "done",
+}
+
+HELP = """powos agents - the work board: every task the agents are on, in plain words
+
+The PowOS AI page (left of home) lists it live: one line per task - title, owner, status, age - newest
+activity first, with the ones done lately folded under "done recently". Write to it on every handoff:
+the manager adds a task when it hands work out, and whoever owns it moves it (blocked, waiting on you,
+done). Titles are short and plain ("Switcher follows finger"), never a commit or a file name.
+
+Usage:
+  powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT] [--id ID]
+                                   Add a task (status default: working). Prints its id (from the title
+                                   unless --id). Adding an id that exists updates it.
+  powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]
+                                   Change a task. <task>: its id, or words of its title (one match).
+  powos agents task done <task> [--note TEXT]
+                                   Mark it done (stays under "done recently" for a week).
+  powos agents task rm <task>      Remove one (a duplicate, a mistake).
+  powos agents task list [--all] [--json]
+                                   The open tasks (--all: with the done ones).
+
+Statuses: working | blocked | waiting (on the user) | done.
+--owner is the agent's role (switcher, manager, coder...); leave it off when nobody has it yet.
+
+Examples:
+  powos agents task add "Switcher follows finger" --owner switcher
+  powos agents task set switcher --status waiting --note "needs a test on the phone"
+  powos agents task done "follows finger" --note "landed in the 0.9 shell push"
+"""
+
+
+def die(msg, code=1):
+    print(f"powos agents: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def token():
+    p = os.path.expanduser("~/.config/spacetime/cli.toml")
+    try:
+        with open(p) as f:
+            for line in f:
+                k, _, v = line.partition("=")
+                if k.strip() == "spacetimedb_token":
+                    return v.strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+
+class Down(Exception):
+    pass
+
+
+def http(path, body, ctype):
+    tok = token()
+    if not tok:
+        raise Down("no SpacetimeDB identity (~/.config/spacetime/cli.toml)")
+    req = urllib.request.Request(f"{SERVER}{path}", data=body, method="POST",
+                                 headers={"Content-Type": ctype, "Authorization": f"Bearer {tok}"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.read().decode()
+    except urllib.error.HTTPError as e:
+        die(f"{path.rsplit('/', 1)[-1]}: {e.read().decode(errors='replace').strip() or e}")
+    except (urllib.error.URLError, OSError) as e:
+        raise Down(str(e))
+
+
+def call(reducer, *args):
+    http(f"/v1/database/{DB}/call/{reducer}", json.dumps(list(args)).encode(), "application/json")
+
+
+def rows():
+    out = json.loads(http(f"/v1/database/{DB}/sql", b"SELECT * FROM work", "text/plain"))
+    res = out[0]
+    names = [e["name"]["some"] for e in res["schema"]["elements"]]
+    return [dict(zip(names, r)) for r in res["rows"]]
+
+
+def slug(title):
+    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return s[:48].rstrip("-") or f"task-{int(time.time())}"
+
+
+def status_of(s):
+    if s is None:
+        return ""
+    s = s.strip().lower().replace(" ", "-")
+    s = ALIASES.get(s, s)
+    if s.startswith("waiting"):
+        s = "waiting"
+    if s not in STATES:
+        die(f"status is one of {' | '.join(STATES)} (got {s!r})")
+    return s
+
+
+def find(key):
+    all_ = rows()
+    for w in all_:
+        if w["id"] == key:
+            return w
+    words = key.lower().split()
+    hits = [w for w in all_ if all(x in (w["id"] + " " + w["title"]).lower() for x in words)]
+    open_hits = [w for w in hits if w["status"] != "done"]
+    if len(open_hits) == 1:
+        return open_hits[0]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        die(f"no task matches {key!r} (powos agents task list --all)")
+    die(f"{key!r} matches {len(hits)} tasks: " + ", ".join(w["id"] for w in hits))
+
+
+def ago(ms):
+    s = max(0, int(time.time() - int(ms) / 1000))
+    for n, u in ((86400, "d"), (3600, "h"), (60, "m")):
+        if s >= n:
+            return f"{s // n}{u}"
+    return f"{s}s"
+
+
+def opts(argv, spec):
+    """--flag VALUE pairs (spec: allowed names; bool flags end in '!'), the rest positional."""
+    got, rest, i = {}, [], 0
+    bools = {s[:-1] for s in spec if s.endswith("!")}
+    vals = {s for s in spec if not s.endswith("!")}
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--"):
+            k, eq, v = a[2:].partition("=")
+            if k in bools:
+                got[k] = True
+            elif k in vals:
+                if not eq:
+                    i += 1
+                    if i >= len(argv):
+                        die(f"--{k} needs a value")
+                    v = argv[i]
+                got[k] = v
+            else:
+                die(f"unknown option --{k} (powos agents help)")
+        else:
+            rest.append(a)
+        i += 1
+    return got, rest
+
+
+def task(argv):
+    verb = argv[0] if argv else "list"
+    argv = argv[1:]
+    if verb == "add":
+        o, rest = opts(argv, ["owner", "status", "note", "id"])
+        title = " ".join(rest).strip()
+        if not title:
+            die("usage: powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT]")
+        wid = o.get("id") or slug(title)
+        call("work_set", wid, title, o.get("owner", ""), status_of(o.get("status")) or "working", o.get("note", ""))
+        print(wid)
+    elif verb == "set":
+        o, rest = opts(argv, ["owner", "status", "note", "title"])
+        if not rest:
+            die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
+        w = find(" ".join(rest))
+        call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), status_of(o.get("status")), o.get("note", ""))
+        print(w["id"])
+    elif verb == "done":
+        o, rest = opts(argv, ["note"])
+        if not rest:
+            die("usage: powos agents task done <task> [--note TEXT]")
+        w = find(" ".join(rest))
+        call("work_set", w["id"], "", "", "done", o.get("note", ""))
+        print(w["id"])
+    elif verb in ("rm", "remove", "drop"):
+        if not argv:
+            die("usage: powos agents task rm <task>")
+        w = find(" ".join(argv))
+        call("work_drop", w["id"])
+        print(w["id"])
+    elif verb in ("list", "ls"):
+        o, _ = opts(argv, ["all!", "json!"])
+        ws = [w for w in rows() if o.get("all") or w["status"] != "done"]
+        ws.sort(key=lambda w: (w["status"] == "done", -int(w["updated"])))
+        if o.get("json"):
+            print(json.dumps(ws, indent=1))
+            return
+        if not ws:
+            print("no tasks (powos agents task add <title>)")
+        for w in ws:
+            owner = w["owner"] or "-"
+            note = f"  - {w['note']}" if w["note"] else ""
+            print(f"{w['status']:<8} {w['title']}  ({owner}, {ago(w['updated'])})  [{w['id']}]{note}")
+    else:
+        die(f"unknown: task {verb} (powos agents help)")
+
+
+def remote(argv):
+    """HACK: off the phone (the Mac's agents, the manager's coders) there is no local powos-agents module yet, so the
+    command runs on the phone over the dev channel (powos-vadb). Real fix: each host's own module plus the Phase 2
+    mirror (docs/AGENTS-VIEW-DESIGN.md §8), the hub merging hosts' boards."""
+    if not shutil.which("docker"):
+        return False
+    b = base64.b64encode(json.dumps(argv).encode()).decode()
+    inner = f"powos agents --argv-b64 {b}"
+    cmd = ["docker", "exec", "powos-vadb", "adb", "shell", f"su -c \"sh /data/powos/powos-run.sh '{inner}'\""]
+    try:
+        r = subprocess.run(cmd, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    sys.exit(r.returncode)
+
+
+def main(argv):
+    if argv[:1] == ["--argv-b64"] and len(argv) == 2:
+        argv = json.loads(base64.b64decode(argv[1]))
+    if not argv or argv[0] in ("help", "--help", "-h"):
+        print(HELP, end="")
+        return 0
+    if argv[0] in ("task", "tasks", "work"):
+        if len(argv) > 1 and argv[1] in ("help", "--help", "-h"):
+            print(HELP, end="")
+            return 0
+        try:
+            task(argv[1:])
+        except Down as e:
+            if os.environ.get("POWOS_AGENTS_REMOTE", "1") != "0" and remote(argv):
+                return 0
+            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+        return 0
+    die(f"unknown: {argv[0]} (powos agents help)")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]) or 0)

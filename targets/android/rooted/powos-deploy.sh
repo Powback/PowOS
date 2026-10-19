@@ -151,7 +151,7 @@ fi
 A=$R/usr/lib/powos/ai/agents
 mkdir -p $A
 install -m 755 $T/powos-agents/powos-agent-hook $T/powos-agents/powos-agent-ask $T/powos-agents/powos-agentsd \
-  $T/powos-agents/install-hooks.py $A/
+  $T/powos-agents/install-hooks.py $T/powos-agents/powos-agents-cli $A/
 install -m 644 $T/powos-agents/claude-hooks.json $A/claude-hooks.json
 install -m 755 $T/comms-mcp.py $R/usr/lib/powos/ai/comms/comms-mcp.py
 rm -rf $T/powos-agents $T/comms-mcp.py

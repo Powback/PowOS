@@ -323,6 +323,15 @@ server is there; what remains, as a PowOS app on that runtime (not done yet - th
 5. Idle cost: the database stays loaded while anything subscribes; the supervisor's idle unload applies otherwise
    (each loaded database costs ~145 wakeups/s on the phone, §8 there).
 
+**The work board (2026-10-20).** The per-session `task` rows are each Claude session's own todo list, replaced on
+every `sync` and gone with the session, so they can't say "what are we working on" across agents. The module has a
+second, durable table for that: `work { id, title, owner, status: working|blocked|waiting|done, note, created,
+updated, done }`, written only through `work_set` / `work_drop` (reporters only) by `powos agents task
+add|set|done|rm` (lib/ai/agents/powos-agents-cli; the manager's prompt makes it record every handoff). The PowOS AI
+page (shell/ui/powai.tsx `Work`) subscribes to it while it shows: one line per open task, newest activity first, the
+ones done within a day folded under "done recently". Done rows leave after a week.
+HACK: off the phone the CLI runs itself on the phone over powos-vadb; real fix = each host's module + the mirror.
+
 ---
 
 ## 9. SpaceTimeAI: goodies worth porting

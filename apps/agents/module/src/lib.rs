@@ -13,6 +13,10 @@ use spacetimedb::{Identity, ReducerContext, Table};
 const RING: usize = 64;
 const MESSAGES: usize = 200;
 const TASKS_PER_AGENT: usize = 50;
+/// The work board keeps what's open, and what's done for this long (the "done recently" list).
+const WORK_DONE_KEEP_MS: u64 = 7 * 24 * 3600 * 1000;
+const WORK_MAX: usize = 200;
+const WORK_STATES: [&str; 4] = ["working", "blocked", "waiting", "done"];
 
 #[spacetimedb::table(accessor = reporter)]
 pub struct Reporter {
@@ -99,6 +103,29 @@ pub struct Ask {
     answer: Option<String>,
     reason: Option<String>,
     by: Option<String>,
+}
+
+/// The work board: the tasks the agents are on, in plain words, across every agent - what the manager hands out
+/// (`powos agents task add|set|done`, on each handoff) and what an agent reports for itself. Not the per-session
+/// `task` rows (those are each Claude session's own todo list, replaced by `sync`): a `work` row outlives sessions
+/// and is written only through `work_set`/`work_drop`. The PowOS AI page lists it.
+#[spacetimedb::table(accessor = work, public)]
+pub struct Work {
+    #[primary_key]
+    id: String,
+    /// Short and plain ("Switcher follows finger").
+    title: String,
+    /// The agent's role ("switcher", "manager"), or "" when nobody has it yet.
+    owner: String,
+    /// "working" | "blocked" | "waiting" (on the user) | "done".
+    status: String,
+    /// One line of detail: what it's blocked on, what's next, what landed.
+    note: String,
+    created: u64,
+    #[index(btree)]
+    updated: u64,
+    /// When it went done (0 while open).
+    done: u64,
 }
 
 // The batch powos-agentsd sends: its spool rows as JSON (§3 field names).
@@ -412,5 +439,85 @@ pub fn sync(ctx: &ReducerContext, host: String, batch: String) -> Result<(), Str
             }
         }
     }
+    Ok(())
+}
+
+fn now_ms(ctx: &ReducerContext) -> u64 {
+    (ctx.timestamp.to_micros_since_unix_epoch().max(0) as u64) / 1000
+}
+
+/// Adds or changes one work item (`powos agents task add|set|done`). Empty strings keep what the row has; a new row
+/// needs a title. Writers: reporters (the device's PowOS user - the CLI's identity - and what it allowed).
+#[spacetimedb::reducer]
+pub fn work_set(ctx: &ReducerContext, id: String, title: String, owner: String, status: String, note: String) -> Result<(), String> {
+    match ctx.db.reporter().identity().find(ctx.sender()) {
+        Some(_) => {}
+        None => return Err("not a reporter".into()),
+    }
+    let id = cut(id.trim().to_string(), 64);
+    if id.is_empty() {
+        return Err("work_set: no id".into());
+    }
+    if !status.is_empty() && !WORK_STATES.contains(&status.as_str()) {
+        return Err(format!("work_set: status is one of {}", WORK_STATES.join("|")));
+    }
+    let now = now_ms(ctx);
+    let old = ctx.db.work().id().find(id.clone());
+    let row = match old {
+        Some(o) => {
+            ctx.db.work().id().delete(id.clone());
+            let st = if status.is_empty() { o.status } else { status };
+            Work {
+                done: if st == "done" { if o.done > 0 { o.done } else { now } } else { 0 },
+                id,
+                title: if title.trim().is_empty() { o.title } else { cut(title.trim().to_string(), 100) },
+                owner: if owner.is_empty() { o.owner } else { cut(owner, 64) },
+                status: st,
+                note: if note.is_empty() { o.note } else { cut(note, 280) },
+                created: o.created,
+                updated: now,
+            }
+        }
+        None => {
+            if title.trim().is_empty() {
+                return Err(format!("work_set: no work item '{id}' (a new one needs a title)"));
+            }
+            let st = if status.is_empty() { "working".to_string() } else { status };
+            Work {
+                done: if st == "done" { now } else { 0 },
+                id,
+                title: cut(title.trim().to_string(), 100),
+                owner: cut(owner, 64),
+                status: st,
+                note: cut(note, 280),
+                created: now,
+                updated: now,
+            }
+        }
+    };
+    ctx.db.work().insert(row);
+    // Bounded: done items leave after a week; past WORK_MAX the oldest done ones go first, then the oldest at all.
+    let stale: Vec<String> = ctx.db.work().iter().filter(|w| w.done > 0 && now.saturating_sub(w.done) > WORK_DONE_KEEP_MS).map(|w| w.id).collect();
+    for id in stale {
+        ctx.db.work().id().delete(id);
+    }
+    let mut all: Vec<(bool, u64, String)> = ctx.db.work().iter().map(|w| (w.done == 0, w.updated, w.id)).collect();
+    if all.len() > WORK_MAX {
+        all.sort();
+        let extra = all.len() - WORK_MAX;
+        for (_, _, id) in all.into_iter().take(extra) {
+            ctx.db.work().id().delete(id);
+        }
+    }
+    Ok(())
+}
+
+/// Removes a work item (a mistake, a duplicate): `powos agents task rm`.
+#[spacetimedb::reducer]
+pub fn work_drop(ctx: &ReducerContext, id: String) -> Result<(), String> {
+    if ctx.db.reporter().identity().find(ctx.sender()).is_none() {
+        return Err("not a reporter".into());
+    }
+    ctx.db.work().id().delete(id);
     Ok(())
 }

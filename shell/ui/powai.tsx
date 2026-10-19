@@ -1,16 +1,19 @@
 /**
  * The PowOS AI page: left of home's first page, the whole screen (home, its bar and dock slide away for it). What
- * PowOS AI is doing now - the last ask, its steps as they run, its answer - the agents at work (PowOS's tmux sessions,
+ * PowOS AI is doing now - the last ask, its steps as they run, its answer - the work in progress (the agents' tasks, one
+ * line each, live from the powos-agents module's work board: `powos agents task ...`), the agents at work (PowOS's tmux sessions,
  * each with the task its pane's title names, a spinner's mark while it works; a tap opens its terminal), what they told
  * you lately, and a field to ask it (the mic: hold to talk and send, tap to dictate).
  */
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { chat, openSession, page, sessionView, stored } from "../state.ts";
 import { Mic, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
 import { openAgents } from "../agents.ts";
+import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
+import { useDb, useRows } from "../apps/stdb.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 
 const sessions = signal<AgentSession[]>([]);
@@ -82,6 +85,94 @@ export function Now() {
         </div>
       ))}
       {busy && !turn.answer && <div class="ai-thinking muted">thinking…</div>}
+    </section>
+  );
+}
+
+/** A work board row (apps/agents `work`; u64s arrive as bigint). */
+interface WorkRow {
+  id: string;
+  title: string;
+  owner: string;
+  status: "working" | "blocked" | "waiting" | "done";
+  note: string;
+  created: bigint | number;
+  updated: bigint | number;
+  done: bigint | number;
+}
+/** The board as last seen: shown at once when the page comes back, before the socket has caught up. */
+const board = signal<WorkRow[]>([]);
+const boardLive = signal(false);
+/** Done this long ago or less: under "done recently". */
+const RECENT_MS = 24 * 3600 * 1000;
+const STATUS: Record<WorkRow["status"], string> = { working: "working", blocked: "blocked", waiting: "waiting on you", done: "done" };
+const sec = (ms: bigint | number) => Number(ms) / 1000;
+
+/** Subscribed only while the page shows: the socket goes 5 s after it's left (apps/stdb.ts), so home holds none. */
+function WorkFeed() {
+  const db = useDb("powos-agents", AgentsDb);
+  const rows = useRows<WorkRow>(db, "work", "SELECT * FROM work");
+  useEffect(() => {
+    if (db.status === "connected") board.value = rows;
+  }, [rows, db.status]);
+  useEffect(() => {
+    boardLive.value = db.status === "connected";
+  }, [db.status]);
+  return null;
+}
+
+function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => void }) {
+  return (
+    <button type="button" class={`ai-work ${w.status} ${open ? "open" : ""}`} onClick={onTap}>
+      <span class="ai-work-line">
+        <span class={`ai-dot ${w.status === "working" ? "on" : ""} ${w.status}`} />
+        <span class="ai-work-title">{w.title}</span>
+        <span class="ai-work-meta">
+          {w.owner && <span class="muted">{w.owner} · </span>}
+          <span class="ai-work-status">{STATUS[w.status] ?? w.status}</span>
+          <span class="muted"> · {ago(sec(w.status === "done" && Number(w.done) ? w.done : w.updated))}</span>
+        </span>
+      </span>
+      {open && (
+        <span class="ai-work-detail muted">
+          {w.note && <span class="ai-work-note">{w.note}</span>}
+          <span>
+            {w.owner ? `${w.owner} · ` : "nobody yet · "}started {ago(sec(w.created))} ago · last {ago(sec(w.updated))} ago · {w.id}
+          </span>
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** Work in progress: every agent's task on one line each, newest activity first; what's done lately folded below. */
+function Work({ shown }: { shown: boolean }) {
+  const [opened, setOpened] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  const all = [...board.value].sort((a, b) => Number(b.updated) - Number(a.updated));
+  const active = all.filter((w) => w.status !== "done");
+  const now = Date.now();
+  const done = all.filter((w) => w.status === "done" && now - Number(w.done || w.updated) < RECENT_MS);
+  const tap = (id: string) => setOpened(opened === id ? null : id);
+  return (
+    <section class="ai-work-list">
+      {shown && <WorkFeed />}
+      <h3 class="ai-heading muted">
+        work in progress{active.length ? ` · ${active.length}` : ""}
+        {!boardLive.value && shown && <span> · connecting…</span>}
+      </h3>
+      <div class="ai-work-box tile">
+        {active.map((w) => (
+          <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />
+        ))}
+        {!active.length && <div class="ai-work-empty muted">nothing in progress</div>}
+        {done.length > 0 && (
+          <button type="button" class="ai-work ai-work-fold muted" onClick={() => setShowDone(!showDone)}>
+            {showDone ? "▾" : "▸"} done recently · {done.length}
+          </button>
+        )}
+        {showDone && done.map((w) => <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />)}
+      </div>
     </section>
   );
 }
@@ -180,6 +271,7 @@ export function PowAiPage() {
       </header>
       <div class="ai-scroll">
         <Now />
+        <Work shown={shown} />
         <button type="button" class="ai-session tile" onClick={() => openAgents()}>
           <span class="ai-dot" />
           <span class="ai-session-main">
