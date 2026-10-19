@@ -260,7 +260,9 @@
 .app-icon { display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: 22%; }
 .app-icon img { display: block; width: 100%; height: 100%; transition: opacity 160ms; }
 /* Not loaded yet (apps.tsx AppIcon): a pulsing tile in its place, not a broken image. */
-.app-icon.loading { background: var(--color-surface); animation: icon-wait 1.2s ease-in-out infinite alternate; }
+/* Pulses ~10 s, not forever: an app with no icon at all (a Linux app like lstopo) stays "loading", and an endless
+   animation kept the compositor drawing 60 frames a second on an idle home (app + renderer ~20% of a core). */
+.app-icon.loading { background: var(--color-surface); animation: icon-wait 1.2s ease-in-out 8 alternate; }
 .app-icon.loading img { opacity: 0; }
 @keyframes icon-wait { from { opacity: 0.35; } to { opacity: 0.8; } }
 .app-label {
