@@ -17,7 +17,10 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
+import dev.omalauncher.AgentMail
 import dev.omalauncher.PowosAiActivity
+import dev.omalauncher.linux.RootedGuest
+import kotlin.concurrent.thread
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
 import dev.omalauncher.ui.Palette
@@ -81,6 +84,8 @@ class ShellBridge(
         }
 
     init {
+        // An agent told the user something: the PowOS AI page lists it.
+        scope.launch { snapshotFlow { AgentMail.recent.toList() }.drop(1).collect { emit("ai.mail", aiMail()) } }
         // A notification posted or gone: the panel lists them again.
         scope.launch { MediaListener.changes.collect { emit("notifications.changed", notificationList()) } }
         // The theme picked or recolored (here, in the Compose launcher, a theme file edited): the page recolors.
@@ -140,6 +145,9 @@ class ShellBridge(
                 PowosAiActivity.keepInRecents(activity)
             }
             "ai.open" -> PowosAiActivity.open(activity, null)
+            "ai.mail" -> aiMail()
+            "ai.sessions" -> aiSessions()
+            "ai.attach" -> aiAttach(a.getString(0))
             "theme.get" -> theme()
             "theme.list" -> themeList()
             "theme.pick" -> pickTheme(a.getString(0))
@@ -317,6 +325,43 @@ class ShellBridge(
 
     /** The answer to the mic permission request ([ShellActivity.onRequestPermissionsResult]). */
     fun micPermission(granted: Boolean) = emit("speech.permission", JSONObject().put("granted", granted))
+
+    private fun aiMail() = JSONArray(AgentMail.recent.map { JSONObject().put("from", it.from).put("text", it.text).put("time", it.time) })
+
+    /**
+     * The agents at work: PowOS's tmux sessions (where agents run), listed off the main thread and sent as
+     * "ai.sessions" - name, last activity (Unix seconds), attached, and the active pane's title (an agent's current
+     * task: Claude Code titles it), folder and command. Only read; nothing is sent to them. Empty off PowOS's session.
+     */
+    private fun aiSessions() {
+        if (!runtime.powosSession) return emit("ai.sessions", JSONArray())
+        thread(name = "ai-sessions", isDaemon = true) {
+            val format = listOf("session_name", "session_activity", "session_attached", "pane_title", "pane_current_path", "pane_current_command").joinToString("\t") { "#{$it}" }
+            val lines = ArrayList<String>()
+            runCatching { RootedGuest.run("tmux list-sessions -F '$format' 2>/dev/null") { lines += it } }
+            val list =
+                JSONArray(
+                    lines.mapNotNull { line ->
+                        val f = line.split('\t')
+                        if (f.size < 6) return@mapNotNull null
+                        JSONObject()
+                            .put("name", f[0])
+                            .put("activity", f[1].toLongOrNull() ?: 0)
+                            .put("attached", f[2] != "0")
+                            .put("title", f[3])
+                            .put("path", f[4])
+                            .put("command", f[5])
+                    },
+                )
+            main.post { emit("ai.sessions", list) }
+        }
+    }
+
+    /** Opens a terminal on tmux session [name] (an agent's), as the tile's picker would. */
+    private fun aiAttach(name: String) {
+        require(name.matches(Regex("[A-Za-z0-9_.:-]+"))) { "bad session name: $name" }
+        runtime.terminal("tmux attach -t '$name'", name)
+    }
 
     private fun aiChat() =
         JSONObject().put("busy", PowosAiChat.busy).put("items", JSONArray(PowosAiChat.items.map { it.json() }))

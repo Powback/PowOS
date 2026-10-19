@@ -15,6 +15,7 @@ import { Pages } from "./grid.tsx";
 import { ScreenPanel } from "./screen.tsx";
 import { EditSheet } from "./editsheet.tsx";
 import { NotificationPanel } from "./notifications.tsx";
+import { PowAiPage } from "./powai.tsx";
 import { byKey, dock, dockDrag, editing, menu, recent, setDock } from "../state.ts";
 
 /**
@@ -137,29 +138,32 @@ export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).
   return (
     <>
-      <div
-        class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""}`}
-        {...homeGestures()}
-      >
-        <div class="stage">
-          <div class="home-content" data-p ref={followOpenness}>
-            <Pages />
-          </div>
-          <div class="launcher-frame tile" data-p ref={followOpenness} />
-          <div class="launcher" data-p ref={followOpenness}>
-            <div class="launcher-inner">
-              <RecentRow />
-              <div class="drawer-clip">
-                <Drawer />
+      {/* PowOS AI's page beside home: the two slide as one, so home's bar and dock go with it (gesture.ts applyScreens). */}
+      <div class="screens" {...homeGestures()}>
+        <PowAiPage />
+        <div
+          class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""}`}
+        >
+          <div class="stage">
+            <div class="home-content" data-p ref={followOpenness}>
+              <Pages />
+            </div>
+            <div class="launcher-frame tile" data-p ref={followOpenness} />
+            <div class="launcher" data-p ref={followOpenness}>
+              <div class="launcher-inner">
+                <RecentRow />
+                <div class="drawer-clip">
+                  <Drawer />
+                </div>
               </div>
             </div>
           </div>
+          <Bar />
+          <Dock />
+          <AppMenu />
+          <EditSheet />
+          <NotificationPanel />
         </div>
-        <Bar />
-        <Dock />
-        <AppMenu />
-        <EditSheet />
-        <NotificationPanel />
       </div>
       {/* Outside home: its touches never reach home's swipes. */}
       <ScreenPanel />

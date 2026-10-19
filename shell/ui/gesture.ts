@@ -63,8 +63,19 @@ effect(() => applyTrack());
 export function applyTrack() {
   // Read first: an effect subscribes to what it reads, and the track may not be there yet on its first run.
   const dx = pageDrag.value;
-  const transform = `translateX(calc(${-page.value * 100}% + ${dx ?? 0}px))`;
+  const at = page.value;
+  // Page -1 is PowOS AI's, left of home: the whole screen slides to it - home (bar and dock with it) and the AI page
+  // move as one; home's own pages stay on the first meanwhile.
+  const toAi = at === -1 || (at === 0 && (dx ?? 0) > 0);
+  const transform = `translateX(calc(${-Math.max(at, 0) * 100}% + ${toAi ? 0 : (dx ?? 0)}px))`;
+  const shift = toAi ? (dx ?? 0) : 0;
   const track = document.querySelector<HTMLElement>(".page-track");
+  for (const [sel, base] of [[".home", at === -1 ? 100 : 0], [".ai-screen", at === -1 ? 0 : -100]] as const) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (!el) continue;
+    el.classList.toggle("sliding", dx != null);
+    el.style.transform = `translateX(calc(${base}% + ${shift}px))`;
+  }
   if (!track) return;
   track.classList.toggle("dragging", dx != null);
   track.style.transform = transform;
@@ -160,6 +171,9 @@ export function homeGestures() {
         // The notification panel down: up drags it shut (the list scrolls until its end); sideways is a card's.
         if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
         else return (g = null);
+      } else if (Math.abs(dy) > Math.abs(dx) && page.value === -1) {
+        // PowOS AI's page: up and down are its own (it scrolls).
+        return (g = null);
       } else if (Math.abs(dy) > Math.abs(dx)) {
         // Editing home, up isn't the launcher: the sheet has the bottom.
         if (!g.open && dy < 0 && !editing.value) g.mode = "open";
@@ -181,7 +195,7 @@ export function homeGestures() {
     else {
       // Past the first and last page it resists.
       const last = pages.value.length - 1;
-      const edge = (page.value === 0 && dx > 0) || (page.value === last && dx < 0);
+      const edge = (page.value === -1 && dx > 0) || (page.value === last && dx < 0);
       pageDrag.value = edge ? dx / 3 : dx;
     }
   };
@@ -209,7 +223,8 @@ export function homeGestures() {
       pageDrag.value = null;
       const width = document.querySelector(".pages")?.clientWidth || innerWidth;
       const step = v < -FLICK || dx < -width / 4 ? 1 : v > FLICK || dx > width / 4 ? -1 : 0;
-      page.value = Math.max(0, Math.min(pages.value.length - 1, page.value + step));
+      // -1: PowOS AI's page, left of the first (not while editing home: the empty page is to the right).
+      page.value = Math.max(editing.value ? 0 : -1, Math.min(pages.value.length - 1, page.value + step));
     }
   };
 

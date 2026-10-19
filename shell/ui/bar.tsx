@@ -16,41 +16,52 @@ const HOLD_MS = 250;
 const CANCEL_PX = 64;
 
 /** What the recognizer hears, as it hears it. */
-const speech = signal<{ listening: boolean; text: string; error: string | null }>({ listening: false, text: "", error: null });
-/** The recognition under way: a hold sends what's heard, a tap leaves it in the field; typed is what was there. */
-let pending: { send: boolean; typed: string } | null = null;
+export const speech = signal<{ listening: boolean; text: string; error: string | null }>({ listening: false, text: "", error: null });
+
+/** Where a recognition's words go: the field it's for (what was typed before it, and what to do with the whole). */
+export interface MicTarget {
+  /** What the field held when it started: the words go after it. */
+  typed(): string;
+  /** The whole text once it ends; [send]: it was held (talk, then send), else a tap (dictate into the field). */
+  heard(full: string, send: boolean): void;
+  /** It started listening (the bar opens the drawer to show what comes). */
+  started?(): void;
+}
+
+/** The recognition under way, and whether it sends what's heard; typed is what its field had before it. */
+let pending: { send: boolean; typed: string; target: MicTarget } | null = null;
 /** It asked for the mic first: the press that asked can't still be held, so a yes dictates. */
-let askedMic = false;
+let asked: MicTarget | null = null;
 
 const join = (...parts: string[]) => parts.map((p) => p.trim()).filter(Boolean).join(" ");
 
-async function listen(hold: boolean) {
-  pending = { send: hold, typed: query.value };
-  // The drawer up, to show what comes (the chat, matches), without the keyboard over it.
-  drawer.value = 1;
+/** What a field shows while it listens: what was typed, then what's heard so far. */
+export const hearing = (target: MicTarget) => (speech.value.listening && pending?.target === target ? join(pending.typed, speech.value.text) : null);
+
+async function listen(hold: boolean, target: MicTarget) {
+  pending = { send: hold, typed: target.typed(), target };
+  target.started?.();
   (document.activeElement as HTMLElement | null)?.blur();
   powos.keyboard.hide();
   navigator.vibrate?.(10);
   const r = await powos.speech.start(hold);
   if (r !== "started") pending = null;
-  if (r === "asked") askedMic = true;
+  if (r === "asked") asked = target;
 }
 
 powos.on("speech.state", (s: { listening: boolean; text: string; error: string | null }) => (speech.value = s));
 powos.on("speech.done", ({ text }: { text: string }) => {
   const p = pending;
   pending = null;
-  if (!p) return;
-  const full = join(p.typed, text);
-  if (p.send && text.trim()) ask(full);
-  else query.value = full;
+  if (p) p.target.heard(join(p.typed, text), p.send && !!text.trim());
 });
 powos.on("speech.permission", ({ granted }: { granted: boolean }) => {
-  if (granted && askedMic) listen(false);
-  askedMic = false;
+  if (granted && asked) listen(false, asked);
+  asked = null;
 });
 
-function Mic() {
+/** A mic for [target]: hold to talk and send, tap to dictate; held and dragged well away, cancelled. */
+export function Mic({ target }: { target: MicTarget }) {
   const press = useRef<{ x: number; y: number; timer: number; held: boolean; cancelled: boolean } | null>(null);
   const on = speech.value.listening;
   return (
@@ -71,7 +82,7 @@ function Mic() {
         const p = { x: e.clientX, y: e.clientY, timer: 0, held: false, cancelled: false };
         p.timer = window.setTimeout(() => {
           p.held = true;
-          listen(true);
+          listen(true, target);
         }, HOLD_MS);
         press.current = p;
       }}
@@ -90,7 +101,7 @@ function Mic() {
         press.current = null;
         if (!p) return;
         clearTimeout(p.timer);
-        if (!p.held) listen(false);
+        if (!p.held) listen(false, target);
         else if (!p.cancelled) powos.speech.stop();
       }}
       onPointerCancel={() => {
@@ -107,11 +118,18 @@ function Mic() {
   );
 }
 
+/** The bar's field: a held mic asks PowOS AI, a tap dictates into the search; the drawer comes up to show either. */
+const barMic: MicTarget = {
+  typed: () => query.value,
+  heard: (full, send) => (send ? ask(full) : (query.value = full)),
+  started: () => (drawer.value = 1),
+};
+
 export function Bar() {
   const input = useRef<HTMLInputElement>(null);
   const s = speech.value;
   // While it listens, the field shows what's heard after what was typed.
-  const shown = s.listening && pending ? join(pending.typed, s.text) : query.value;
+  const shown = hearing(barMic) ?? query.value;
   return (
     <form
       class="bar tile"
@@ -138,7 +156,7 @@ export function Bar() {
         autoCapitalize="off"
         spellcheck={false}
       />
-      <Mic />
+      <Mic target={barMic} />
     </form>
   );
 }

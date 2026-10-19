@@ -43,6 +43,22 @@ export interface HomeItem {
 
 export interface Home { columns: number; pages: number[]; items: HomeItem[]; }
 
+/** Something an agent told the user (time: Unix seconds). */
+export interface AgentMail {
+  from: string;
+  text: string;
+  time: number;
+}
+/** An agent at work: a tmux session in PowOS; [title] its pane's (Claude Code's: the task, a spinner while working). */
+export interface AgentSession {
+  name: string;
+  activity: number;
+  attached: boolean;
+  title: string;
+  path: string;
+  command: string;
+}
+
 /** One entry of PowOS AI's chat; a tool's ok is null while it runs. */
 export type ChatItem =
   | { kind: "user" | "assistant"; text: string }
@@ -153,6 +169,12 @@ export interface Bridge {
     send(text: string): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
+    /** What agents told the user lately, newest first ("ai.mail" brings it again). */
+    mail(): Promise<AgentMail[]>;
+    /** Asks for the agents at work (PowOS's tmux sessions); they come as "ai.sessions" (AgentSession[]). */
+    sessions(): Promise<void>;
+    /** Opens a terminal on one of them. */
+    attach(name: string): Promise<void>;
   };
   /**
    * Terminals: a process on a pty, by an id the page picks (views naming one id share it). Bytes are base64 both ways.
@@ -220,7 +242,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

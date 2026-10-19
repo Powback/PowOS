@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.FileObserver
 import android.util.Log
+import androidx.compose.runtime.mutableStateListOf
 import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.shellQuote
 import org.json.JSONObject
@@ -37,6 +38,9 @@ class AgentMail private constructor(
         file.delete()
         val from = mail.optString("from").ifBlank { "manager" }
         val text = mail.optString("text")
+        // Kept for the launcher's PowOS AI page as well as notified, newest first.
+        recent.add(0, Mail(from, text, System.currentTimeMillis() / 1000))
+        while (recent.size > KEEP) recent.removeAt(recent.lastIndex)
         val urgent = mail.optString("priority") in setOf("high", "urgent")
         val id = (System.currentTimeMillis() and 0x7fffffff).toInt()
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -109,7 +113,18 @@ class AgentMail private constructor(
         }
     }
 
+    /** What an agent told the user: who, what, when (Unix seconds). */
+    data class Mail(
+        val from: String,
+        val text: String,
+        val time: Long,
+    )
+
     companion object {
+        /** The latest mail since the app started, newest first (the launcher's PowOS AI page lists it). */
+        val recent = mutableStateListOf<Mail>()
+        private const val KEEP = 30
+
         private const val TAG = "agent-mail"
         private const val CHANNEL = "powos-ai-agents"
         private const val KEY_TEXT = "text"

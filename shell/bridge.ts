@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { App, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
+import type { AgentMail, App, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -83,6 +83,9 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       chat: () => call<Chat>("ai.chat"),
       send: (text) => call("ai.send", text),
       open: () => call("ai.open"),
+      mail: () => call<AgentMail[]>("ai.mail"),
+      sessions: () => call("ai.sessions"),
+      attach: (name) => call("ai.attach", name),
     },
     term: {
       open: (id, owner, command, cols, rows, restart) => call<TermState>("term.open", id, owner, command, cols, rows, !!restart),
@@ -277,6 +280,23 @@ function mock(): Bridge {
         step({ busy: false, items: [...items, { kind: "tool", name: "Bash", hint: "powos status", ok: true }, { kind: "assistant", text: `(mock) You asked: ${text}` }] });
       },
       open: async () => console.log("[mock] open PowOS AI"),
+      mail: async () => {
+        const now = Math.floor(Date.now() / 1000);
+        return [
+          { from: "coder", text: "Launcher refactor done - 3 commits pushed to master.", time: now - 600 },
+          { from: "health", text: "Disk at 91% on /var - want me to prune old container images?", time: now - 5400 },
+        ];
+      },
+      // Two agents: one working (a spinner in its title, as Claude Code shows), one waiting.
+      sessions: async () => {
+        const now = Math.floor(Date.now() / 1000);
+        events.emit("ai.sessions", [
+          { name: "launcher", activity: now - 4, attached: true, title: "⠂ Port the notification panel", path: "/home/powos/Projects/PowOS", command: "claude" },
+          { name: "spec-llm", activity: now - 2400, attached: false, title: "✳ Benchmark the fusion backbone", path: "/home/powos/Projects/spec-llm", command: "claude" },
+          { name: "main", activity: now - 9000, attached: false, title: "powos@localhost:~", path: "/home/powos", command: "bash" },
+        ]);
+      },
+      attach: async (name) => console.log("[mock] attach", name),
     },
     term: mockTerm(events),
     clipboard: {

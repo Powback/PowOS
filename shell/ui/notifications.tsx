@@ -8,20 +8,12 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif } from "../state.ts";
 import { followNotif, notifOpen } from "./gesture.ts";
+import { ago } from "./time.ts";
 import type { NotificationList, PhoneNotification } from "../types.ts";
 
 const list = signal<NotificationList>({ available: true, items: [] });
 powos.on("notifications.changed", (l: NotificationList) => (list.value = l));
 powos.notifications.list().then((l) => (list.value = l));
-
-/** "now", "5m", "3h", "2d": how long ago, as a shade shows it. */
-function ago(time: number) {
-  const s = Date.now() / 1000 - time;
-  if (s < 60) return "now";
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86400)}d`;
-}
 
 /** Slid this far sideways (of its width), or flicked, a card is dismissed. */
 const DISMISS = 0.35;

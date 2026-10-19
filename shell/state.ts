@@ -18,7 +18,7 @@ export const dockDrag = signal<{ key: string; x: number; slot: number } | null>(
 
 /** The home screen: pages of widgets, pinned apps and folders on a grid. */
 export const home = signal<Home>({ columns: 6, pages: [1], items: [] });
-/** The page on screen, an index into pages (the last, empty one included). */
+/** The page on screen, an index into pages (the last, empty one included); -1 is PowOS AI's, left of the first. */
 export const page = signal(0);
 
 /** The selected tile (edit mode): it shows resize handles and its actions. */
@@ -111,6 +111,8 @@ export function back(): boolean {
   else if (folder.value) folder.value = null;
   else if (selected.value) selected.value = null;
   else if (editing.value) editing.value = false;
+  // PowOS AI's page: back to home.
+  else if (page.value === -1) page.value = 0;
   else if (drawer.value > 0) closeDrawer();
   else return false;
   return true;
