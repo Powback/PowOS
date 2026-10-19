@@ -174,7 +174,13 @@ ok "image is stamped ${built:0:8}"
 # ── in-image tests ────────────────────────────────────────────────
 if [[ $RUN_TESTS -eq 1 ]]; then
     stage "in-image tier1 tests"
-    S podman run --rm -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
+    # label=disable: the checkout is bind-mounted as-is. Under enforcing SELinux a
+    # tree labelled var_lib_t (/var/lib/powos/src) or user_home_t is unreadable
+    # from container_t, which surfaces as 'Permission denied' on every test and
+    # rc=126 here. Relabelling the shared tree (:z) is the wrong fix: other
+    # tools read it too. The test container is our own image reading our own
+    # files; it needs no confinement from them.
+    S podman run --rm --security-opt label=disable -v "$PWD:/powos:rw" -e POWOS_ROOT=/powos \
         --entrypoint /bin/bash "localhost/powos-ci-$VARIANT" -c '
         set -e
         for t in test-hardware-detect test-pinstall test-overlay test-sync \
