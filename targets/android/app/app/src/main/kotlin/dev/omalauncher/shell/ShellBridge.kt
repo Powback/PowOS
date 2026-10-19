@@ -111,7 +111,11 @@ class ShellBridge(
             "store.get" -> store(a.getString(0)).takeIf { it.isFile }?.readText()?.let { RawJson(it) }
             "store.set" -> store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
             "ai.chat" -> aiChat()
-            "ai.send" -> PowosAiChat.send(activity.applicationContext, a.getString(0))
+            "ai.send" -> {
+                PowosAiChat.send(activity.applicationContext, a.getString(0))
+                // Asked here, it's also an app in the switcher, the same conversation a swipe away.
+                PowosAiActivity.keepInRecents(activity)
+            }
             "ai.open" -> PowosAiActivity.open(activity, null)
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)

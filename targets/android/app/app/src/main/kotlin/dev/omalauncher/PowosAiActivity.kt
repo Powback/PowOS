@@ -65,6 +65,12 @@ class PowosAiActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PowosAiChat.load(applicationContext)
+        // Started only to be in the app switcher (the web launcher's chat was used): straight behind home, unseen.
+        if (intent?.getBooleanExtra(EXTRA_BACKGROUND, false) == true && savedInstanceState == null) {
+            moveTaskToBack(true)
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+        }
         applySystemBars(this, Palette.isLight)
         @Suppress("DEPRECATION")
         setTaskDescription(ActivityManager.TaskDescription("PowOS AI", null, Palette.background.toArgb()))
@@ -227,6 +233,22 @@ class PowosAiActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_PROMPT = "prompt"
+        private const val EXTRA_BACKGROUND = "background"
+
+        /**
+         * Puts the chat in the app switcher, if it isn't there, without showing it: asked from the launcher's search
+         * (which shows the same conversation), it's then a task of its own to come back to.
+         */
+        fun keepInRecents(context: Context) {
+            val am = context.getSystemService(ActivityManager::class.java)
+            val there = am.appTasks.any { runCatching { it.taskInfo.baseIntent.component?.className }.getOrNull() == PowosAiActivity::class.java.name }
+            if (there) return
+            context.startActivity(
+                Intent(context, PowosAiActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                    .putExtra(EXTRA_BACKGROUND, true),
+            )
+        }
 
         /** Opens the chat; with [prompt], sends it. */
         fun open(
