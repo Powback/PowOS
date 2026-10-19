@@ -31,6 +31,7 @@ class ShellActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (toHome()) return
+        dropOtherHomes()
         // The launcher's runtime (themes, widgets, the PowOS session); started once.
         runtime.start()
         // The shell has no first-run screen (the Compose launcher's welcome): home shows at once, and the rest of
@@ -72,6 +73,23 @@ class ShellActivity : Activity() {
         )
         finish()
         return true
+    }
+
+    /**
+     * Any other task of this activity goes: a home task left from before (an update, a relaunch as home on another
+     * display or after an alias switch) kept its own WebView, and two homes at different sizes resized the hosted
+     * Android widgets back and forth. One home page, this one.
+     */
+    private fun dropOtherHomes() {
+        val mine = javaClass.name
+        for (task in getSystemService(ActivityManager::class.java).appTasks) {
+            val info = runCatching { task.taskInfo }.getOrNull() ?: continue
+            if (info.taskId == taskId) continue
+            val base = info.baseActivity ?: info.baseIntent.component
+            // By the activity (the alias resolves to it): the HOME alias's tasks and any started by name.
+            val ours = base?.className == mine || base?.className == "andro.marchy.HomeShell" || info.topActivity?.className == mine
+            if (ours) runCatching { task.finishAndRemoveTask() }.onSuccess { Log.i(TAG, "dropped a second home task ${info.taskId}") }
+        }
     }
 
     /** Asks once to become the default home app; Android shows its own chooser. (Rooted PowOS sets it itself.) */
@@ -198,6 +216,7 @@ class ShellActivity : Activity() {
 
     private companion object {
         const val HOME_ROLE_REQUEST = 1
+        const val TAG = "PowosShell"
 
         /** On a HOME intent that [toHome] sent: not Home pressed. */
         const val EXTRA_REDIRECTED = "dev.omalauncher.shell.redirected"
