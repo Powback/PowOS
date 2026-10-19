@@ -13,6 +13,7 @@ import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import dev.omalauncher.PowosAiActivity
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
@@ -47,6 +48,24 @@ class ShellBridge(
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
+
+    /**
+     * What Compose's GlobalSnapshotManager does for a composition: state written outside a snapshot (the widget
+     * engine's, the app lists, PowOS AI's chat) is applied - and every snapshotFlow here hears of it - on the next
+     * main-thread turn. Without a composition nothing applied it but the odd stray frame: a widget's screen opened
+     * a second after its tap.
+     */
+    private var applyPending = false
+    private val applyObserver =
+        Snapshot.registerGlobalWriteObserver {
+            if (!applyPending) {
+                applyPending = true
+                main.post {
+                    applyPending = false
+                    Snapshot.sendApplyNotifications()
+                }
+            }
+        }
 
     init {
         // Installs, removals, Linux apps and icons arriving (they load in the background, after the list): the page
@@ -263,6 +282,7 @@ class ShellBridge(
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
     fun close() {
+        applyObserver.dispose()
         terminals.closeAll()
         scope.cancel()
     }

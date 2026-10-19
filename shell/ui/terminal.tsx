@@ -114,6 +114,7 @@ interface View {
 class Session {
   readonly term: Terminal;
   readonly fit = new FitAddon();
+  private resizeTimer = 0;
   /** xterm's element's parent: moved into the view that shows it. */
   readonly holder = document.createElement("div");
   readonly views: View[] = [];
@@ -144,8 +145,13 @@ class Session {
     this.term.onData((d) => this.send(modify(d)));
     // Mouse reports in the X10 encoding: bytes, not text.
     this.term.onBinary((d) => this.sendBytes(Uint8Array.from(d, (c) => c.charCodeAt(0) & 0xff)));
+    // The pty follows once the size settles: a screen opening or closing passes through a few (the keys docking, the
+    // keyboard sliding), and every one was a full tmux redraw over the bridge. xterm itself refits at once.
     this.term.onResize(({ cols, rows }) => {
-      if (this.status.value === "running") powos.term.resize(this.id, cols, rows);
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = window.setTimeout(() => {
+        if (this.status.value === "running") powos.term.resize(this.id, cols, rows);
+      }, RESIZE_SETTLE_MS);
     });
   }
 
@@ -240,6 +246,9 @@ class Session {
     this.show();
   }
 }
+
+/** How long a terminal's size holds before the pty takes it. */
+const RESIZE_SETTLE_MS = 120;
 
 /** What the fit addon leaves free for a scrollbar (addon-fit 0.11: overviewRuler.width, else 14). */
 const FIT_SCROLLBAR = 14;
