@@ -58,11 +58,17 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Debug builds: `adb shell am start -n dev.omalauncher/.MainActivity --es exec foot`,
+     * `--es app org.kde.dolphin` to open a Linux app as a launcher tap does (its desktop id),
      * or `--es theme kanagawa` to apply a theme (scripts/collage-captures.sh).
      */
     private fun handleDebugExec(intent: Intent) {
         if (!BuildConfig.DEBUG) return
         intent.getStringExtra("exec")?.let(runtime::launch)
+        intent.getStringExtra("app")?.let { id ->
+            lifecycleScope.launch {
+                snapshotFlow { runtime.linuxApps.firstOrNull { it.id == id } }.first { it != null }?.let(runtime::launch)
+            }
+        }
         intent.getStringExtra("theme")?.let { name ->
             lifecycleScope.launch {
                 snapshotFlow { runtime.themes.loaded }.first { it }
