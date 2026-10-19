@@ -287,7 +287,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-81 markers on 2026-10-20.
+82 markers on 2026-10-20.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -303,6 +303,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `lib/ai/agents/powos-rootsh:4` | One long-lived `adb shell su` on the phone for the Mac's tools (mirror, mail): a dev channel as runtime transport (C1, C4, C5). | REMOTE-POWOS.md M2 (mirror) and M6 (mail): nothing on the Mac needs root on the phone; delete it. |
 | `lib/apps/powos-app:672` | `powos app dev` polls source files (stat, 4x/s) because Python's stdlib has no inotify. | inotify through ctypes, or inotifywait when the image ships inotify-tools. |
 | `lib/apps/powos-supervisor:17` | Own supervisor with soft budgets: systemd --user limits need a delegated cgroup v2 subtree Android doesn't give. | The cgroup v2 move (FEASIBILITY §2.4), then one unit per manifest; delete the supervisor. |
+| `shell/apps/pages.ts:98` | The recent strip places PowOS apps by when the host's front app changed: `usage.recent` comes without times. | `usage.recent` with each app's last time (ShellBridge.kt) and PowOS apps' opens recorded there, one list ordered by time. |
 | `shell/apps/stdb.ts:11` | Apps use the server's anonymous per-database tokens: there is no PowOS issuer yet (C15). | REMOTE-POWOS.md M4: the shell mints per-app JWTs from the realm issuer. |
 | `shell/ui/apps.tsx:137` | An icon 404 can't tell "not drawn yet" from "no icon", so a lasting failure is taken as "no icon". | The host sends icon: null for failed lookups (ShellBridge.apps(), Runtime.refreshApps). |
 | `shell/ui/terminal.tsx:240` | xterm's fit addon always reserves a 14 px scrollbar strip; the holder is widened past the view to fill it. | An addon option for the reserve, or fit from the renderer's cell size. |
