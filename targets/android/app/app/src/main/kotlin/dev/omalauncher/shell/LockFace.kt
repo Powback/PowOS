@@ -101,6 +101,12 @@ class PowosLockActivity : Activity() {
             }
         h.bridge.emit("lock.shown", null)
         setContentView(h.web)
+        // A face whose page doesn't answer (it never loaded, it hangs) can't be swiped away - the phone can't be
+        // unlocked through it (2026-10-20). It goes then: Android's own lock screen is under it, locked as before.
+        watchdog =
+            PageWatchdog(h.web, "PowOS lock face", skip = { !getSystemService(android.os.PowerManager::class.java).isInteractive }) {
+                finish()
+            }
         // Over the wallpaper, as home: the face lifted away shows what home stands on, not a blank window.
         window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
@@ -130,7 +136,15 @@ class PowosLockActivity : Activity() {
         }
         // Up since the screen went off: the page's clock and notifications brought up to now.
         LockFace.host(this).bridge.emit("lock.shown", null)
+        watchdog?.start()
     }
+
+    override fun onPause() {
+        watchdog?.stop()
+        super.onPause()
+    }
+
+    private var watchdog: PageWatchdog? = null
 
     // Back on a lock screen goes nowhere: the face stays until the phone is unlocked.
     @Deprecated("Back does nothing on a lock screen", ReplaceWith(""))

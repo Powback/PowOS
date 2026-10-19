@@ -153,6 +153,11 @@ class ShadeHost(
                 override fun peekHeight(px: Int) = sizePeek(px)
             }
         host = h
+        watchdog =
+            dev.omalauncher.shell.PageWatchdog(h.web, "PowOS shade") {
+                if (peeking) host?.bridge?.emit("shade.peek", null)
+                hide()
+            }
         val root = Root(shadeContext).apply { addView(h.web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         root.visibility = View.GONE
         shade = root
@@ -178,6 +183,8 @@ class ShadeHost(
         MediaListener.posted = null
         runCatching { service.unregisterReceiver(closer) }
         edge?.let { runCatching { edgeWm.removeView(it) } }
+        watchdog?.stop()
+        watchdog = null
         shade?.let { runCatching { shadeWm.removeView(it) } }
         edge = null
         shade = null
@@ -311,32 +318,82 @@ class ShadeHost(
         }.onFailure { Log.w(TAG, "can't set the status bar's disable flags", it) }
     }
 
-    /** Shows the shade window (the pull started): touchable and focused (Back reaches the page), the whole screen. */
+    /**
+     * Shows the shade window (the pull started), the whole screen - but not yet touchable or focused: the pull's touches
+     * are the gesture input's, and the window only takes touches once the shade has settled open and its page answered
+     * ([armOpen]). A page that can't (it never loaded, it hangs) must never leave an invisible window over the screen
+     * eating every touch - it did, over the lock face (2026-10-20); [watchdog] takes the window away then.
+     */
     private fun show() {
         val root = shade ?: return
         if (shown) return
         shown = true
         peeking = false
         root.visibility = View.VISIBLE
+        setFlags(touchable = false, focusable = false, height = ViewGroup.LayoutParams.MATCH_PARENT)
+        watchdog?.start()
+    }
+
+    /** The shade settled open: touchable and focused (Back reaches the page) once its page answers it's alive. */
+    private fun armOpen() {
+        val web = host?.web ?: return
+        dev.omalauncher.shell.PageWatchdog.probe(web) { alive, why ->
+            if (!shown) return@probe
+            if (alive) {
+                setFlags(touchable = true, focusable = true, height = ViewGroup.LayoutParams.MATCH_PARENT)
+            } else {
+                Log.w(TAG, "shade page isn't answering ($why): the shade goes")
+                hide()
+            }
+        }
+    }
+
+    /** The shade settled shut: the page hides the window itself (shade.closed); should it not, the host does. */
+    private fun armShut() {
+        val root = shade ?: return
+        root.removeCallbacks(shutGone)
+        root.postDelayed(shutGone, SHUT_MAX_MS)
+    }
+
+    private val shutGone =
+        Runnable {
+            if (shown) {
+                Log.w(TAG, "shade settled shut but its page never said closed: the window goes")
+                hide()
+            }
+        }
+
+    private fun setFlags(
+        touchable: Boolean,
+        focusable: Boolean,
+        height: Int,
+    ) {
+        val root = shade ?: return
         shadeParams?.let {
-            it.flags = it.flags and (WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE).inv()
-            it.height = ViewGroup.LayoutParams.MATCH_PARENT
+            var f = it.flags
+            f = if (touchable) f and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv() else f or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            f = if (focusable) f and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv() else f or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            if (f == it.flags && height == it.height) return
+            it.flags = f
+            it.height = height
             shadeWm.updateViewLayout(root, it)
         }
     }
 
+    /** Whether the page answers, while the window is up (the shade or its banner): no answer, the window goes. */
+    private var watchdog: dev.omalauncher.shell.PageWatchdog? = null
+
     /** The page shut it (shade.closed, the shade or its banner): the window hidden, its page kept for the next pull. */
     private fun hide() {
         val root = shade ?: return
+        watchdog?.stop()
+        root.removeCallbacks(shutGone)
+        root.removeCallbacks(peekGone)
         if (!shown && !peeking) return
         shown = false
         peeking = false
         root.visibility = View.GONE
-        shadeParams?.let {
-            it.flags = it.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-            it.height = ViewGroup.LayoutParams.MATCH_PARENT
-            shadeWm.updateViewLayout(root, it)
-        }
+        setFlags(touchable = false, focusable = false, height = ViewGroup.LayoutParams.MATCH_PARENT)
     }
 
     /**
@@ -357,11 +414,9 @@ class ShadeHost(
         if (!peeking) {
             peeking = true
             root.visibility = View.VISIBLE
-            shadeParams?.let {
-                it.flags = (it.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()) or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                it.height = stripHeight + (PEEK_HEIGHT_DP * service.resources.displayMetrics.density).toInt()
-                shadeWm.updateViewLayout(root, it)
-            }
+            // Not touchable until the page says how tall its banner is (shade.peekHeight: it drew it); never focusable.
+            setFlags(touchable = false, focusable = false, height = stripHeight + (PEEK_HEIGHT_DP * service.resources.displayMetrics.density).toInt())
+            watchdog?.start()
         }
         h.bridge.emit("shade.peek", h.bridge.notificationJson(item))
         // The page puts the banner away itself (shade.closed); should it never, the strip mustn't stay over the top.
@@ -372,13 +427,8 @@ class ShadeHost(
 
     /** The banner's strip as tall as the page's banner ([px], from the window's top). */
     private fun sizePeek(px: Int) {
-        val root = shade ?: return
-        if (!peeking || px <= 0) return
-        shadeParams?.let {
-            if (it.height == px) return
-            it.height = px
-            shadeWm.updateViewLayout(root, it)
-        }
+        if (!peeking || px <= 0 || shade == null) return
+        setFlags(touchable = true, focusable = false, height = px)
     }
 
     /** The banner pulled down (or its Reply): the whole shade, open. */
@@ -398,7 +448,11 @@ class ShadeHost(
 
     private fun drag(q: Double) = host?.bridge?.emit("shade.drag", JSONObject().put("q", q))
 
-    private fun settle(open: Boolean) = host?.bridge?.emit("shade.settle", JSONObject().put("open", open))
+    private fun settle(open: Boolean) {
+        host?.bridge?.emit("shade.settle", JSONObject().put("open", open))
+        if (!shown) return
+        if (open) armOpen() else armShut()
+    }
 
     private fun shadeLayout() =
         WindowManager.LayoutParams(
@@ -591,6 +645,9 @@ class ShadeHost(
 
         /** The banner's strip below the status bar until the page says how tall its banner is ("shade.peekHeight"). */
         private const val PEEK_HEIGHT_DP = 150
+
+        /** Settled shut, the page says closed within this (its slide up is ~300 ms): else the host hides the window. */
+        private const val SHUT_MAX_MS = 1_500L
 
         /** Longer than the page keeps any banner (shade.tsx): past this the host takes it away itself. */
         private const val PEEK_MAX_MS = 30_000L

@@ -65,3 +65,6 @@ if (mode === "aod") {
   measureIcons(restored != null);
   keepSnapshots();
 }
+// The page ran and drew its screen: what the native hosts ask before they let a window of theirs cover the screen
+// (shell/PageWatchdog.kt) - a page that never got here (a module that didn't load) has its window taken away.
+(window as unknown as { __powosAlive?: boolean }).__powosAlive = true;

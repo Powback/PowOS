@@ -67,6 +67,19 @@ class PowosAssistSession(
         // A new summoning: the page forgets the last one (its question, answer view, cut-out).
         host?.bridge?.emit("assist.reset", null)
         sendScreen()
+        // Its page must answer (it never loaded, it hangs: a window over the app that can't be closed from it) - else
+        // the session ends (dev.omalauncher.shell.PageWatchdog).
+        host?.web?.let { web ->
+            watchdog?.stop()
+            watchdog = dev.omalauncher.shell.PageWatchdog(web, "PowOS assistant") { finish() }.also { it.start() }
+        }
+    }
+
+    private var watchdog: dev.omalauncher.shell.PageWatchdog? = null
+
+    override fun onHide() {
+        watchdog?.stop()
+        super.onHide()
     }
 
     /** The screen's text, as an outline of what each window shows (the app's own view text, by the framework). */
@@ -91,6 +104,7 @@ class PowosAssistSession(
     }
 
     override fun onDestroy() {
+        watchdog?.stop()
         // Live mode ends with the session (the capture would otherwise go on, unseen).
         LiveCapture.stop(context)
         // The page stays warm for the next time (AssistWeb); only this session's window lets go of it.
