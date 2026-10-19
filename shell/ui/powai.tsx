@@ -103,6 +103,8 @@ interface WorkRow {
 /** The board as last seen: shown at once when the page comes back, before the socket has caught up. */
 const board = signal<WorkRow[]>([]);
 const boardLive = signal(false);
+/** The board has been read at least once (until then an empty list means "not known yet", not "nothing"). */
+const boardSeen = signal(false);
 /** Done this long ago or less: under "done recently". */
 const RECENT_MS = 24 * 3600 * 1000;
 const STATUS: Record<WorkRow["status"], string> = { working: "working", blocked: "blocked", waiting: "waiting on you", done: "done" };
@@ -113,7 +115,19 @@ function WorkFeed() {
   const db = useDb("powos-agents", AgentsDb);
   const rows = useRows<WorkRow>(db, "work", "SELECT * FROM work");
   useEffect(() => {
-    if (db.status === "connected") board.value = rows;
+    if (db.status !== "connected") return;
+    if (rows.length) {
+      board.value = rows;
+      boardSeen.value = true;
+      return;
+    }
+    // Empty: the subscription's first rows come a moment after the connection, so the board as last seen stays
+    // until it's still empty a while later.
+    const t = window.setTimeout(() => {
+      board.value = [];
+      boardSeen.value = true;
+    }, 1500);
+    return () => clearTimeout(t);
   }, [rows, db.status]);
   useEffect(() => {
     boardLive.value = db.status === "connected";
@@ -165,7 +179,7 @@ function Work({ shown }: { shown: boolean }) {
         {active.map((w) => (
           <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />
         ))}
-        {!active.length && <div class="ai-work-empty muted">nothing in progress</div>}
+        {!active.length && <div class="ai-work-empty muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
         {done.length > 0 && (
           <button type="button" class="ai-work ai-work-fold muted" onClick={() => setShowDone(!showDone)}>
             {showDone ? "▾" : "▸"} done recently · {done.length}
