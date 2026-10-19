@@ -3,7 +3,7 @@
 # layer) as powos-rootfs.tar.gz, natively on an aarch64 Docker host (Apple Silicon Colima: no qemu).
 #
 # Usage: targets/android/build-rootfs.sh [path/to/kwin-*.pkg.tar.zst]
-#   Output: targets/android/out/powos-rootfs.tar.gz (+ .sha256). Default kwin package:
+#   Output: targets/android/out/powos-rootfs.tar.gz (+ .sha256, also pinned into the app when published). Default kwin package:
 #   targets/android/out/pkgs/kwin-*.pkg.tar.* (build it with targets/android/build-pkgs.sh).
 #
 # Install on a phone running the stock Andromarchy app (offline install path of its InstallActivity):
@@ -68,4 +68,10 @@ echo "built: $OUT/powos-rootfs.tar.gz"
 PUBLISH=${POWOS_PUBLISH_DIR:-$HOME/Projects/android-app-dev/output}
 if [ -d "$PUBLISH" ]; then
   ln -f "$OUT/powos-rootfs.tar.gz" "$PUBLISH/powos-rootfs.tar.gz" && echo "published: http://android.pow/apk/powos-rootfs.tar.gz"
+  # The app refuses a rootfs whose sha256 isn't the one pinned in its assets (InstallActivity.PIN_ASSET): pin what
+  # was just published, so the next build-app.sh ships the matching pin. Commit the pin with the rebuild; until the new
+  # APK is out, first installs with the old APK refuse this tarball (by design: the pin is what makes it trusted).
+  PIN=$HERE/app/engine/src/main/assets/powos-rootfs.sha256
+  cut -d' ' -f1 "$OUT/powos-rootfs.tar.gz.sha256" > "$PIN"
+  echo "pinned: $(cat "$PIN") in ${PIN#$HERE/} - rebuild the app (build-app.sh) and commit the pin"
 fi

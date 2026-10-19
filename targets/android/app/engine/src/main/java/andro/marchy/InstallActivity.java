@@ -15,14 +15,21 @@ import org.json.JSONObject;
 import java.util.zip.GZIPInputStream;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
 
 /**
@@ -37,6 +44,10 @@ public class InstallActivity extends Activity {
     /** A local copy in the app's external files dir (Android/data/andro.marchy/files/, no permission needed) is used
      *  instead when present: offline installs and tests. */
     static final String LOCAL_NAME = "powos-rootfs.tar.gz";
+    /** The rootfs's sha256, pinned in the APK: assets/powos-rootfs.sha256, written by targets/android/build-rootfs.sh
+     *  when it publishes the tarball (so the APK built after a publish pins exactly that file). Both the download and
+     *  a local copy are checked against it before anything is unpacked; a mismatch refuses the install. */
+    static final String PIN_ASSET = "powos-rootfs.sha256";
     private static final long NEEDED_BYTES = 12L << 30; // archive + extracted rootfs, with room for apps
 
     // {xkb layout, label}: the common ones; the first selected is the physical keyboard's.
@@ -130,27 +141,56 @@ public class InstallActivity extends Activity {
         File rootfs = SessionService.rootfs(this);
         File partial = new File(rootfs.getPath() + ".partial");
         deleteTree(partial); // a previous attempt that stopped halfway
+        String pin = pinnedSha256();
         File external = new File(getExternalFilesDir(null), LOCAL_NAME);
         // or in files/ (adb run-as, or a rootfs build on the device)
         final File local = external.canRead() ? external : new File(getFilesDir(), LOCAL_NAME);
-        InputStream raw;
-        long total;
-        if (local.canRead()) {
-            raw = new FileInputStream(local);
-            total = local.length();
-        } else {
-            HttpURLConnection c = (HttpURLConnection) new URL(ROOTFS_URL).openConnection();
-            c.setInstanceFollowRedirects(true); // GitHub release assets redirect to their storage host
-            c.connect();
-            if (c.getResponseCode() != 200)
-                throw new IOException("download: HTTP " + c.getResponseCode());
-            raw = c.getInputStream();
-            total = c.getContentLengthLong();
+        // The download goes to a file first and is checked whole before a single entry is unpacked: nothing from an
+        // archive that doesn't match the pin ever lands in the rootfs. Not named LOCAL_NAME, so a leftover is never
+        // mistaken for a local copy.
+        File download = new File(getFilesDir(), LOCAL_NAME + ".download");
+        download.delete();
+        try {
+            File archive;
+            String got;
+            if (local.canRead()) {
+                archive = local;
+                got = sha256(new FileInputStream(local), local.length(), null, "Checking the rootfs");
+            } else {
+                HttpURLConnection c = (HttpURLConnection) new URL(ROOTFS_URL).openConnection();
+                c.setInstanceFollowRedirects(true); // GitHub release assets redirect to their storage host
+                c.connect();
+                if (c.getResponseCode() != 200)
+                    throw new IOException("download: HTTP " + c.getResponseCode());
+                try (OutputStream out = new FileOutputStream(download)) {
+                    got = sha256(c.getInputStream(), c.getContentLengthLong(), out, "Downloading the rootfs");
+                }
+                archive = download;
+            }
+            if (!got.equals(pin))
+                throw new IOException("the rootfs's checksum doesn't match this app's (expected sha256 "
+                        + pin.substring(0, 16) + "…, got " + got.substring(0, 16) + "…): refusing to install it. "
+                        + (archive == local ? "Remove " + local + ", or" : "The published rootfs (" + ROOTFS_URL
+                        + ") is not the one this app was built for:") + " rebuild the app after the rootfs is published");
+            extract(archive, partial);
+        } finally {
+            download.delete();
         }
-        final long size = total;
+        File setup = new File(partial, "root/.config/andromarchy/setup.conf");
+        setup.getParentFile().mkdirs();
+        try (FileWriter w = new FileWriter(setup)) {
+            w.write(conf);
+        }
+        if (!partial.renameTo(rootfs))
+            throw new IOException("could not move the rootfs into place");
+    }
+
+    /** Unpacks the (already checked) archive into partial, with progress. */
+    private void extract(File archive, File partial) throws IOException {
+        final long size = archive.length();
         long[] read = {0};
         long[] shown = {0};
-        InputStream counting = new FilterInputStream(new BufferedInputStream(raw, 1 << 20)) {
+        InputStream counting = new FilterInputStream(new BufferedInputStream(new FileInputStream(archive), 1 << 20)) {
             @Override
             public int read(byte[] b, int off, int len) throws IOException {
                 int n = super.read(b, off, len);
@@ -165,18 +205,56 @@ public class InstallActivity extends Activity {
                 if (now - shown[0] < 200)
                     return;
                 shown[0] = now;
-                String what = (local.canRead() ? "Installing" : "Downloading and installing") + " ("
-                        + (read[0] >> 20) + (size > 0 ? " / " + (size >> 20) : "") + " MB)\n" + entry;
+                String what = "Installing (" + (read[0] >> 20) + (size > 0 ? " / " + (size >> 20) : "") + " MB)\n" + entry;
                 call("progress", size > 0 ? read[0] * 1000 / size : -1, what);
             });
         }
-        File setup = new File(partial, "root/.config/andromarchy/setup.conf");
-        setup.getParentFile().mkdirs();
-        try (FileWriter w = new FileWriter(setup)) {
-            w.write(conf);
+    }
+
+    /** The pinned sha256 (64 lowercase hex), or an error saying this APK has none. */
+    private String pinnedSha256() throws IOException {
+        String line = null;
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(getAssets().open(PIN_ASSET),
+                StandardCharsets.US_ASCII))) {
+            line = r.readLine();
+        } catch (IOException e) {
+            // no asset: handled below
         }
-        if (!partial.renameTo(rootfs))
-            throw new IOException("could not move the rootfs into place");
+        String hex = line == null ? "" : line.trim().split("\\s+")[0].toLowerCase(Locale.ROOT);
+        if (!hex.matches("[0-9a-f]{64}"))
+            throw new IOException("this app has no rootfs checksum pinned (assets/" + PIN_ASSET
+                    + "): rebuild it after targets/android/build-rootfs.sh publishes the rootfs");
+        return hex;
+    }
+
+    /** sha256 of a stream (closed afterwards), copied to out when given, with progress under label. */
+    private String sha256(InputStream raw, long size, OutputStream out, String label) throws IOException {
+        MessageDigest md;
+        try {
+            md = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException(e);
+        }
+        byte[] buf = new byte[1 << 20];
+        long read = 0, shown = 0;
+        try (InputStream in = raw) {
+            for (int n; (n = in.read(buf)) > 0; ) {
+                md.update(buf, 0, n);
+                if (out != null)
+                    out.write(buf, 0, n);
+                read += n;
+                long now = System.currentTimeMillis();
+                if (now - shown >= 200) {
+                    shown = now;
+                    call("progress", size > 0 ? read * 1000 / size : -1,
+                            label + " (" + (read >> 20) + (size > 0 ? " / " + (size >> 20) : "") + " MB)");
+                }
+            }
+        }
+        StringBuilder hex = new StringBuilder(64);
+        for (byte b : md.digest())
+            hex.append(String.format(Locale.ROOT, "%02x", b));
+        return hex.toString();
     }
 
     private static void deleteTree(File f) {
