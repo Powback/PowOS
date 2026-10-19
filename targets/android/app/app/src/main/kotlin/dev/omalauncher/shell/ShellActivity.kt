@@ -169,10 +169,14 @@ class ShellActivity : Activity() {
             }
         }
 
+        /**
+         * The shell's own pages load (its reload, for hot reload, counts as a navigation: refusing it left every edit
+         * unshown); anything else doesn't - links go nowhere from home.
+         */
         override fun shouldOverrideUrlLoading(
             view: WebView,
             request: WebResourceRequest,
-        ) = true
+        ) = "${request.url.scheme}://${request.url.host}" != ORIGIN
     }
 
     /** The override folder's file, else the shipped one. */

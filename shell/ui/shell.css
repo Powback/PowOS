@@ -115,22 +115,20 @@
 }
 .bar input::placeholder { color: var(--color-muted); }
 
-/* The dock: pinned apps under the bar, always there (iOS's dock); it shrinks while the launcher is open. */
+/* The dock: pinned apps under the bar (iOS's dock); it folds away as the launcher opens, leaving it the room. */
 .dock {
-  --dock-scale: calc(1 - var(--p) * 0.4);
+  --dock-scale: calc(1 - var(--p));
   position: relative;
   z-index: 3;
   height: calc(var(--strip-height) * var(--dock-scale));
-  margin: 0 var(--edge) var(--edge);
+  margin: 0 var(--edge) calc(var(--edge) * var(--dock-scale));
+  opacity: var(--dock-scale);
+  overflow: hidden;
+  border-width: calc(var(--frame) * var(--dock-scale));
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 0 4px;
-}
-.dock-hint {
-  margin: 0 var(--edge) var(--edge);
-  text-align: center;
-  font-size: var(--text-small);
 }
 
 /* The drawer: the panel under the recent row. */

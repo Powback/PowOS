@@ -11,7 +11,7 @@ import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { drawerDrag, drawerShown, homeGestures } from "./gesture.ts";
 import { Pages } from "./grid.tsx";
-import { byKey, dock, drawer, recent } from "../state.ts";
+import { byKey, dock, recent } from "../state.ts";
 
 function RecentRow() {
   const shown = recent.value.map((k) => byKey.value.get(k)).filter((a) => a != null);
@@ -24,10 +24,10 @@ function RecentRow() {
   );
 }
 
-/** The dock: pinned apps, always there under the bar. Empty, it says how to fill it - while the drawer is open. */
+/** The dock: pinned apps under the bar, folding away while the launcher is open (shell.css). */
 function Dock() {
   const pinned = dock.value.map((k) => byKey.value.get(k)).filter((a) => a != null);
-  if (!pinned.length) return drawer.value > 0 ? <div class="dock-hint muted">long-press an app › pin to dock</div> : null;
+  if (!pinned.length) return null;
   return (
     <div class="dock tile">
       {pinned.map((app) => (
