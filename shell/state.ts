@@ -126,6 +126,27 @@ export const chat = signal<Chat>({ busy: false, items: [] });
 /** Asked something since the drawer opened: the chat stays up (until the search finds apps again). */
 export const chatting = signal(false);
 
+/**
+ * The apps as last listed, for a page that loads before the host has its list (after an update or a restart it lists
+ * Android's apps in a moment, PowOS's once the session answers): home's pinned apps keep their icons (files the host
+ * still has, ShellIcons) instead of turning into initials meanwhile. A kind (android, linux) the host has none of yet
+ * comes from here - only early on, so apps that really are gone (Linux removed) go once the host has settled.
+ */
+const APPS_KEPT = "powos.apps";
+const KEPT_FOR_MS = 20000;
+function withKept(list: App[]): App[] {
+  let kept: App[] = [];
+  try {
+    if (performance.now() < KEPT_FOR_MS) kept = JSON.parse(localStorage.getItem(APPS_KEPT) ?? "[]");
+  } catch {}
+  const kinds = new Set(list.map((a) => a.kind));
+  const missing = kept.filter((a) => !kinds.has(a.kind));
+  try {
+    if (!missing.length) localStorage.setItem(APPS_KEPT, JSON.stringify(list));
+  } catch {}
+  return missing.length ? [...list, ...missing] : list;
+}
+
 export async function load() {
   const [list, keys, , pins, h, c, scr] = await Promise.all([
     powos.apps.list(),
@@ -139,7 +160,7 @@ export async function load() {
   screen.value = scr;
   chat.value = c;
   home.value = h;
-  hostApps.value = list;
+  hostApps.value = withKept(list);
   noteHostRecent(keys);
   hostRecent.value = keys;
   dock.value = Array.isArray(pins) ? pins : [];
@@ -148,7 +169,7 @@ export async function load() {
 // The host's list arrives after the page (it loads apps and icons in the background): the recent strip, filtered to
 // installed apps, follows it. Back on screen, the strip shows what was opened meanwhile.
 powos.on("apps.changed", async () => {
-  hostApps.value = await powos.apps.list();
+  hostApps.value = withKept(await powos.apps.list());
   await fetchRecent();
 });
 powos.on("ai.changed", (c: Chat) => (chat.value = c));
