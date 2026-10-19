@@ -58,7 +58,11 @@
   right: var(--edge);
   bottom: var(--gap);
   top: calc((1 - var(--p)) * (100% - var(--strip-height) - var(--gap)));
-  background: color-mix(in srgb, var(--color-background) calc(88% + var(--p) * 10%), transparent);
+  /* The wallpaper through it, more of the drawer's own color as it opens (the list stays readable); what's under it on
+     home is blurred (the wallpaper isn't the page's to blur). */
+  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + var(--p) * 14%), transparent);
+  backdrop-filter: blur(calc(var(--p) * 18px));
+  -webkit-backdrop-filter: blur(calc(var(--p) * 18px));
 }
 .launcher {
   position: absolute;
@@ -658,7 +662,9 @@
   display: flex;
   flex-direction: column;
   padding: calc(var(--inset-top, 0px) + 8px) var(--edge) 6px;
-  background: color-mix(in srgb, var(--color-background) 94%, transparent);
+  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + 10%), transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   border-bottom: var(--frame) solid var(--color-border);
   border-radius: 0 0 calc(var(--radius) * 2) calc(var(--radius) * 2);
   transform: translateY(calc((var(--q) - 1) * 100%));
@@ -933,11 +939,6 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-track .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
 .cc-transport { display: flex; gap: 2px; }
 .cc-transport button { font: 18px var(--font); width: 36px; height: 36px; background: none; border: 0; color: var(--color-foreground); }
-.cc-tile.picked { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-.cc-tile.off { opacity: 0.6; border-style: dashed; }
-.cc-edit { display: flex; flex-direction: column; gap: 8px; font-size: var(--text-small); }
-.cc-edit-tools { display: flex; gap: 6px; flex-wrap: wrap; }
-.cc-edit-tools .cc-chip { height: 36px; }
 /* Icons (icons.tsx) and the panels drawn with them: the control center's tiles as round icons over a one-line label,
    the header's actions and the notification panel's quick strip as icon buttons. These come last and win. */
 .icon { display: block; flex: none; }
@@ -946,7 +947,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .notif-actions.icons button.on { color: var(--color-accent); }
 .notif-actions.icons button:active { background: var(--color-surface); }
 .cc-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 12px 6px; }
-.cc-grid .cc-tile, .cc-edit .cc-tile {
+.cc-grid .cc-tile {
   min-height: 0;
   padding: 0;
   background: none;
@@ -956,7 +957,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   text-align: center;
   color: var(--color-foreground);
 }
-.cc-grid .cc-tile .cc-icon, .cc-edit .cc-tile .cc-icon {
+.cc-grid .cc-tile .cc-icon {
   width: 52px;
   height: 52px;
   border-radius: 50%;
@@ -970,7 +971,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 }
 .cc-grid .cc-tile.on .cc-icon { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 .cc-grid .cc-tile.on { background: none; color: var(--color-foreground); }
-.cc-grid .cc-tile .cc-label, .cc-edit .cc-tile .cc-label {
+.cc-grid .cc-tile .cc-label {
   display: block;
   width: 100%;
   font-size: 10px;
@@ -979,32 +980,43 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   text-overflow: ellipsis;
   color: var(--color-muted);
 }
-.cc-grid .cc-tile.picked { outline: 0; }
-.cc-grid .cc-tile.picked .cc-icon { outline: 2px solid var(--color-accent); outline-offset: 3px; }
 .cc-cards .cc-tile { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
 .cc-cards .cc-tile .cc-icon { font-size: 24px; display: flex; }
 .cc-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .cc-slider-icon { position: absolute; left: 12px; font-size: 20px; color: var(--color-foreground); mix-blend-mode: difference; pointer-events: none; display: flex; }
 .cc-chip { display: flex; align-items: center; justify-content: center; font-size: 20px; min-width: 52px; }
-.cc-edit-tools .cc-chip { min-width: 52px; }
 .cc-transport button { display: flex; align-items: center; justify-content: center; font-size: 22px; }
-.cc-strip { display: flex; justify-content: space-between; gap: 6px; padding: 0 0 10px; }
-.cc-mini {
-  width: 44px;
-  height: 44px;
+/* Edit mode (control.tsx's EditGrid): tiles wobble gently, a − to take one out, dragged ones lift under the finger. */
+.cc-editing { display: flex; flex-direction: column; gap: 10px; touch-action: none; }
+.cc-tile.edit { position: relative; user-select: none; -webkit-touch-callout: none; touch-action: none; }
+.cc-tile.edit .cc-icon { animation: cc-wobble 1.6s ease-in-out infinite; }
+.cc-tile.edit:nth-child(2n) .cc-icon { animation-delay: -0.8s; }
+.cc-tile.edit.dragging { z-index: 2; transition: none; }
+.cc-tile.edit.dragging .cc-icon { animation: none; box-shadow: 0 8px 24px rgb(0 0 0 / 45%); border-color: var(--color-accent); }
+.cc-grid .cc-tile.edit:not(.dragging) { transition: transform 160ms ease; }
+.cc-badge {
+  position: absolute;
+  top: -4px;
+  right: calc(50% - 34px);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
-  background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
-  color: var(--color-foreground);
-  user-select: none;
-  -webkit-touch-callout: none;
-  transition: background 150ms ease, color 150ms ease;
+  font-size: 18px;
+  background: var(--color-background);
+  color: var(--color-red);
 }
-.cc-mini.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+.cc-badge.add { color: var(--color-accent); }
+.cc-tray-head { font-size: var(--text-small); padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); }
+.cc-tray .cc-tile .cc-icon { animation: none; opacity: 0.75; }
+@keyframes cc-wobble {
+  0%, 100% { transform: rotate(-1.5deg); }
+  50% { transform: rotate(1.5deg); }
+}
 /* The switcher (switcher.tsx): the recent tasks side by side over the dimmed wallpaper, newest first. */
 html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-background) 72%, transparent); }
 .switcher {

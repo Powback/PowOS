@@ -7,7 +7,7 @@ import { useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
-import { ControlCenter, QuickStrip } from "./control.tsx";
+import { ControlCenter } from "./control.tsx";
 import { Icon } from "./icons.tsx";
 import { followNotif, notifOpen } from "./gesture.ts";
 import { ago } from "./time.ts";
@@ -129,7 +129,6 @@ export function NotificationPanel() {
                 </button>
               </span>
             </div>
-            <QuickStrip />
             <div class="notif-list">
               {!available ? (
                 <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>

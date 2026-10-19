@@ -149,8 +149,8 @@ export function homeGestures() {
       listTop: !list || list.scrollTop <= 0,
       listBottom: !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 1,
       target,
-      // The A-Z bar, a slider, a widget's drag: theirs.
-      own: !!target.closest?.(".letter-bar, input[type=range], .resize-handle, .menu, .mic"),
+      // The A-Z bar, a slider, a widget's drag, the control center's edit mode (its tiles are dragged): theirs.
+      own: !!target.closest?.(".letter-bar, input[type=range], .resize-handle, .menu, .mic, .cc-editing"),
       height: document.querySelector(".home")?.clientHeight || innerHeight,
     };
   };

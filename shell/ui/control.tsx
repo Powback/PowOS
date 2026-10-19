@@ -5,7 +5,7 @@
  * runs it: screenshot, lock), a long press opens its page in Settings. It lives in the notification panel's place, so the
  * pull, the finger following it and the swipe up to shut it are the panel's own (gesture.ts).
  */
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
@@ -118,15 +118,8 @@ function usePress(t: QuickTile) {
 }
 
 function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
-  const press = usePress(t);
-  // Editing: a tap picks the tile (to move or hide), it doesn't switch it.
-  const edit = editing.value ? { onClick: () => (picked.value = picked.value === t.id ? null : t.id) } : press;
   return (
-    <button
-      type="button"
-      class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""} ${picked.value === t.id ? "picked" : ""}`}
-      {...edit}
-    >
+    <button type="button" class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""}`} {...usePress(t)}>
       <span class="cc-icon">
         <Icon name={tileIcon(t)} />
       </span>
@@ -142,29 +135,6 @@ function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
   );
 }
 
-/** One of the notification panel's quick icons: the tile's icon only, switched (and long-pressed) as in here. */
-function MiniTile({ t }: { t: QuickTile }) {
-  return (
-    <button type="button" class={`cc-mini ${t.on ? "on" : ""}`} aria-label={t.label} {...usePress(t)}>
-      <Icon name={tileIcon(t)} />
-    </button>
-  );
-}
-
-/** The notification panel's row: the control center's first tiles, in the user's order, as icons. */
-export function QuickStrip({ count = 6 }: { count?: number }) {
-  const tiles = quick.value.tiles ?? [];
-  const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter((t): t is QuickTile => !!t);
-  const { shown } = arranged(tiles.filter((t) => !CARDS.includes(t.id)));
-  return (
-    <div class="cc-strip">
-      {[...cards, ...shown].slice(0, count).map((t) => (
-        <MiniTile key={t.id} t={t} />
-      ))}
-    </div>
-  );
-}
-
 /**
  * The user's arrangement of the tiles (edit mode): their order and the ones taken out, kept in the store. Tiles it
  * doesn't name yet (a new app's tile) come after, in the phone's own order.
@@ -173,7 +143,6 @@ type Layout = { order: string[]; hidden: string[] };
 const layout = signal<Layout>({ order: [], hidden: [] });
 powos.store.get<Layout>("controls.layout").then((l) => l && (layout.value = l));
 const editing = signal(false);
-const picked = signal<string | null>(null);
 
 function arranged(tiles: QuickTile[]) {
   const { order, hidden } = layout.value;
@@ -189,54 +158,152 @@ function saveLayout(l: Layout) {
   powos.store.set("controls.layout", l);
 }
 
-/** The picked tile [by] places along (−1 earlier, +1 later), or out (hide) / back in. */
-function rearrange(shown: QuickTile[], id: string, by: -1 | 1 | "hide" | "show") {
-  const ids = shown.map((t) => t.id);
-  const hidden = layout.value.hidden.filter((h) => h !== id);
-  if (by === "hide")
-    return (saveLayout({ order: ids.filter((x) => x !== id), hidden: [...hidden, id] }), (picked.value = null));
-  if (by === "show") return saveLayout({ order: [...ids, id], hidden });
-  const i = ids.indexOf(id);
-  const j = i + by;
-  if (i < 0 || j < 0 || j >= ids.length) return;
-  [ids[i], ids[j]] = [ids[j], ids[i]];
-  saveLayout({ order: ids, hidden });
-}
+/** Dragged this far (px) a tile is picked up; less is a tap. */
+const DRAG_SLOP = 6;
 
-/** Edit mode's tools for the picked tile, and the tiles taken out (a tap puts one back). */
-function EditBar({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] }) {
-  const id = picked.value;
+/**
+ * Edit mode: the tiles are dragged into place (the others make room as the finger passes over them), a − takes one
+ * out, a + in the tray below puts it back at the end. Every change is kept at once; "done" (the header's check) ends it.
+ * Its touches are its own (gesture.ts leaves .cc-editing alone), so a drag never pulls the panel shut.
+ */
+function EditGrid({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] }) {
+  const grid = useRef<HTMLDivElement>(null);
+  // The order while a tile is being dragged (null: none is): shown live, kept when it's let go.
+  const [order, setOrder] = useState<string[] | null>(null);
+  const drag = useRef<{
+    id: string;
+    x0: number;
+    y0: number;
+    gx: number;
+    gy: number;
+    started: boolean;
+    x: number;
+    y: number;
+  } | null>(null);
+  const byId = new Map(shown.map((t) => [t.id, t]));
+  const ids = order ?? shown.map((t) => t.id);
+
+  /** The dragged tile under the finger: its offset from its slot (which moves as the order does). */
+  const place = () => {
+    const d = drag.current;
+    const el = grid.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(d?.id ?? "")}"]`);
+    if (!d || !el) return;
+    el.style.transform = "none";
+    const r = el.getBoundingClientRect();
+    el.style.transform = `translate(${d.x - d.gx - r.left}px, ${d.y - d.gy - r.top}px) scale(1.08)`;
+  };
+  useLayoutEffect(place, [order]);
+
+  const down = (e: PointerEvent, id: string) => {
+    const el = e.currentTarget as HTMLElement;
+    // The finger's moves come here even off the tile (a pointer the page doesn't track can't be captured).
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {}
+    const r = el.getBoundingClientRect();
+    drag.current = {
+      id,
+      x0: e.clientX,
+      y0: e.clientY,
+      gx: e.clientX - r.left,
+      gy: e.clientY - r.top,
+      started: false,
+      x: e.clientX,
+      y: e.clientY,
+    };
+  };
+  const move = (e: PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    d.x = e.clientX;
+    d.y = e.clientY;
+    if (!d.started) {
+      if (Math.hypot(d.x - d.x0, d.y - d.y0) < DRAG_SLOP) return;
+      d.started = true;
+      setOrder(ids);
+      return;
+    }
+    // The slot whose middle is nearest the finger is where it goes.
+    let best = -1;
+    let dist = Infinity;
+    grid.current?.querySelectorAll<HTMLElement>("[data-id]").forEach((el, i) => {
+      if (el.dataset.id === d.id) return;
+      const r = el.getBoundingClientRect();
+      const dd = Math.hypot(r.left + r.width / 2 - d.x, r.top + r.height / 2 - d.y);
+      if (dd < dist) ((dist = dd), (best = i));
+    });
+    const from = ids.indexOf(d.id);
+    if (best >= 0 && best !== from && dist < 48) {
+      const next = ids.filter((x) => x !== d.id);
+      next.splice(best, 0, d.id);
+      setOrder(next);
+    } else place();
+  };
+  const up = () => {
+    const d = drag.current;
+    drag.current = null;
+    const el = d && grid.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(d.id)}"]`);
+    if (el) el.style.transform = "";
+    if (d?.started) saveLayout({ order: ids, hidden: layout.value.hidden });
+    setOrder(null);
+  };
+  const remove = (id: string) =>
+    saveLayout({ order: ids.filter((x) => x !== id), hidden: [...layout.value.hidden.filter((h) => h !== id), id] });
+  const add = (id: string) => saveLayout({ order: [...ids, id], hidden: layout.value.hidden.filter((h) => h !== id) });
+
   return (
-    <div class="cc-edit">
-      {id ? (
-        <span class="cc-edit-tools">
-          <button type="button" class="cc-chip" aria-label="earlier" onClick={() => rearrange(shown, id, -1)}>
-            <Icon name="chevronLeft" />
-          </button>
-          <button type="button" class="cc-chip" aria-label="later" onClick={() => rearrange(shown, id, 1)}>
-            <Icon name="chevronRight" />
-          </button>
-          <button type="button" class="cc-chip" aria-label="hide" onClick={() => rearrange(shown, id, "hide")}>
-            <Icon name="eyeOffOutline" />
-          </button>
-        </span>
-      ) : (
-        <span class="muted">tap a tile to move or hide it</span>
-      )}
-      {hidden.length > 0 && (
-        <>
-          <span class="muted">hidden - tap to add back</span>
-          <div class="cc-grid">
-            {hidden.map((t) => (
-              <button key={t.id} type="button" class="cc-tile off" onClick={() => rearrange(shown, t.id, "show")}>
-                <span class="cc-icon">
-                  <Icon name={tileIcon(t)} />
-                </span>
-                <span class="cc-label">{t.label}</span>
+    <div class="cc-editing">
+      <div class="cc-grid" ref={grid}>
+        {ids.map((id) => {
+          const t = byId.get(id)!;
+          return (
+            <div
+              key={id}
+              data-id={id}
+              class={`cc-tile edit ${drag.current?.started && drag.current.id === id ? "dragging" : ""}`}
+              onPointerDown={(e) => down(e, id)}
+              onPointerMove={move}
+              onPointerUp={up}
+              onPointerCancel={up}
+            >
+              <span class="cc-icon">
+                <Icon name={tileIcon(t)} />
+              </span>
+              <span class="cc-label">{t.label}</span>
+              <button
+                type="button"
+                class="cc-badge"
+                aria-label={`remove ${t.label}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => remove(id)}
+              >
+                <Icon name="minusCircleOutline" />
               </button>
-            ))}
-          </div>
-        </>
+            </div>
+          );
+        })}
+      </div>
+      <span class="cc-tray-head muted">{hidden.length ? "more tiles" : "every tile is in"}</span>
+      {hidden.length > 0 && (
+        <div class="cc-grid cc-tray">
+          {hidden.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              class="cc-tile edit"
+              aria-label={`add ${t.label}`}
+              onClick={() => add(t.id)}
+            >
+              <span class="cc-icon">
+                <Icon name={tileIcon(t)} />
+              </span>
+              <span class="cc-label">{t.label}</span>
+              <span class="cc-badge add">
+                <Icon name="plus" />
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -377,7 +444,7 @@ export function ControlCenter() {
             type="button"
             aria-label={editing.value ? "done" : "edit"}
             class={editing.value ? "on" : ""}
-            onClick={() => ((editing.value = !editing.value), (picked.value = null))}
+            onClick={() => (editing.value = !editing.value)}
           >
             <Icon name={editing.value ? "check" : "pencilOutline"} />
           </button>
@@ -419,12 +486,15 @@ export function ControlCenter() {
         </button>
       </div>
       <MediaCard />
-      <div class="cc-grid">
-        {shown.map((t) => (
-          <Tile key={t.id} t={t} />
-        ))}
-      </div>
-      {editing.value && <EditBar shown={shown} hidden={hidden} />}
+      {editing.value ? (
+        <EditGrid shown={shown} hidden={hidden} />
+      ) : (
+        <div class="cc-grid">
+          {shown.map((t) => (
+            <Tile key={t.id} t={t} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

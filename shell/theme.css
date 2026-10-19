@@ -23,6 +23,9 @@
   --text-body: 14px;
   --text-item: 15px;
 
+  /* How much of the background a surface lays over the wallpaper (tiles, the drawer, the panels): one knob for all. */
+  --glass: 72%;
+
   --gap: 8px;
   --edge: 12px;
   --radius: 12px;
@@ -50,7 +53,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 /* A tile: what every home element is drawn on. */
 .tile {
-  background: color-mix(in srgb, var(--color-background) 88%, transparent);
+  background: color-mix(in srgb, var(--color-background) var(--glass), transparent);
   border: var(--frame) solid var(--color-border);
   border-radius: var(--radius);
 }

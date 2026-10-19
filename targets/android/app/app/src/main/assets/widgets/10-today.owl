@@ -112,12 +112,14 @@ widget "today" {
       }
       Spacer { weight: 1 }
       if rows == null || rows >= 3 {
+        // Fixed-width hours spread over the row: shared by weight, the first one came out squeezed ("n…").
         Row {
           gap: 0
+          justify: spaceBetween
           for s in steps.take(hours) key s.hr {
             Column {
               gap: 2
-              weight: 1
+              width: 40
               align: center
               Text { text: s.hr == hourNow - hourNow % 3 ? "now" : pad(s.hr % 24, 2, "0"); style: label; color: muted; align: center }
               Text { text: weatherIcon(s.code, s.hr % 24 < sunHours[0] || s.hr % 24 >= sunHours[1]); font: icon; fontSize: 16; align: center; color: muted }
