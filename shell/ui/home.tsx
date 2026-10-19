@@ -11,10 +11,16 @@ import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { drawerDrag, drawerShown, homeGestures } from "./gesture.ts";
 import { Pages } from "./grid.tsx";
-import { byKey, dock, recent } from "../state.ts";
+import { RECENT, byKey, dock, recent } from "../state.ts";
 
+/** The apps opened lately, last first - not those pinned to the dock, which are at hand already. */
 function RecentRow() {
-  const shown = recent.value.map((k) => byKey.value.get(k)).filter((a) => a != null);
+  const pinned = new Set(dock.value);
+  const shown = recent.value
+    .filter((k) => !pinned.has(k))
+    .map((k) => byKey.value.get(k))
+    .filter((a) => a != null)
+    .slice(0, RECENT);
   return (
     <div class="strip">
       {shown.map((app) => (

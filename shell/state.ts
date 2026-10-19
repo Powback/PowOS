@@ -10,6 +10,8 @@ export const apps = signal<App[]>([]);
 export const byKey = computed(() => new Map(apps.value.map((a) => [a.key, a])));
 /** How many recent apps the strip shows. */
 export const RECENT = 6;
+/** How many it asks for: pinned apps are left out of the strip (they're in the dock), the rest still fill it. */
+const RECENT_FETCH = 24;
 export const recent = signal<string[]>([]);
 /** Apps pinned to the drawer's dock, in pin order. */
 export const dock = signal<string[]>([]);
@@ -51,7 +53,7 @@ export const query = signal("");
 export async function load() {
   const [list, keys, pins, h] = await Promise.all([
     powos.apps.list(),
-    powos.usage.recent(RECENT),
+    powos.usage.recent(RECENT_FETCH),
     powos.store.get<string[]>("dock"),
     powos.home.get(),
   ]);
@@ -65,11 +67,11 @@ export async function load() {
 // installed apps, follows it. Back on screen, the strip shows what was opened meanwhile.
 powos.on("apps.changed", async () => {
   apps.value = await powos.apps.list();
-  recent.value = await powos.usage.recent(RECENT);
+  recent.value = await powos.usage.recent(RECENT_FETCH);
 });
 powos.on("home.changed", async () => (home.value = await powos.home.get()));
 document.addEventListener("visibilitychange", async () => {
-  if (!document.hidden) recent.value = await powos.usage.recent(RECENT);
+  if (!document.hidden) recent.value = await powos.usage.recent(RECENT_FETCH);
 });
 
 /** Closes the drawer: the search cleared, the keyboard down. */
@@ -107,7 +109,7 @@ export async function launch(key: string) {
   menu.value = null;
   await powos.apps.launch(key);
   closeDrawer();
-  recent.value = await powos.usage.recent(RECENT);
+  recent.value = await powos.usage.recent(RECENT_FETCH);
 }
 
 export function setDocked(key: string, on: boolean) {
