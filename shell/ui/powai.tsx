@@ -7,7 +7,7 @@
 import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { chat, page } from "../state.ts";
+import { chat, openSession, page, sessionView } from "../state.ts";
 import { Mic, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
@@ -67,8 +67,8 @@ export function Now() {
         <div class="ai-steps">
           {turn.steps.slice(-6).map((t, i) => (
             <div key={i} class="ai-step">
-              <span class={t.ok == null ? "run" : t.ok ? "ok" : "fail"}>{t.ok == null ? "…" : t.ok ? "✓" : "✗"}</span> {t.name}{" "}
-              <span class="muted">{t.hint}</span>
+              <span class={t.ok == null ? "run" : t.ok ? "ok" : "fail"}>{t.ok == null ? "…" : t.ok ? "✓" : "✗"}</span>{" "}
+              {t.name} <span class="muted">{t.hint}</span>
             </div>
           ))}
         </div>
@@ -91,7 +91,12 @@ function AtWork() {
     <section>
       <h3 class="ai-heading muted">at work</h3>
       {list.map((s) => (
-        <button type="button" key={s.name} class="ai-session tile" onClick={() => powos.ai.attach(s.name)}>
+        <button
+          type="button"
+          key={s.name}
+          class={`ai-session tile ${sessionView.value?.name === s.name ? "opened" : ""}`}
+          onClick={(e) => openSession(s.name, e.currentTarget as HTMLElement, task(s))}
+        >
           <span class={`ai-dot ${working(s) ? "on" : ""}`} />
           <span class="ai-session-main">
             <span class="ai-session-task">{task(s)}</span>
@@ -139,7 +144,9 @@ export function PowAiPage() {
     <div class="ai-screen">
       <header class="ai-top">
         <span class="ai-title">PowOS AI</span>
-        <span class={`ai-state ${busy ? "busy" : ""}`}>{busy ? `working${step && step.kind === "tool" ? ` · ${step.name}` : "…"}` : "ready"}</span>
+        <span class={`ai-state ${busy ? "busy" : ""}`}>
+          {busy ? `working${step && step.kind === "tool" ? ` · ${step.name}` : "…"}` : "ready"}
+        </span>
         <button type="button" class="ai-open" onClick={() => powos.ai.open()}>
           open ↗
         </button>

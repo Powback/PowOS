@@ -505,6 +505,26 @@
   flex-direction: column;
 }
 .screen-panel.terminal .owl { flex: 1; min-height: 0; }
+/* An "at work" session open (session.tsx): grown out of its card to the whole screen, as the terminal widget's screen. */
+.session-screen {
+  position: fixed;
+  z-index: 15;
+  inset: 0;
+  padding-top: var(--inset-top, 0px);
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  transform-origin: 0 0;
+  overflow: hidden;
+  will-change: transform;
+}
+.session-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 8px 4px 2px; font-size: var(--text-small); min-width: 0; }
+.session-back { font: 22px var(--font); line-height: 1; width: 36px; height: 32px; background: none; border: 0; color: var(--color-accent); }
+.session-title { color: var(--color-foreground); white-space: nowrap; }
+.session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.session-term { flex: 1; min-height: 0; }
+/* The card the session grew out of: hidden under it while it's open, so the shrink lands on an empty place. */
+.ai-session.opened { visibility: hidden; }
 .screen-scrim {
   position: fixed;
   z-index: 15;

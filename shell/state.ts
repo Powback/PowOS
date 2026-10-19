@@ -14,9 +14,7 @@ export const recent = signal<string[]>([]);
 /** Apps pinned to the drawer's dock, in pin order. */
 export const dock = signal<string[]>([]);
 /** A pinned app being moved along the dock: which, where the finger is, and the slot it would drop into. */
-export const dockDrag = signal<{ key: string; x: number; slot: number } | null>(
-  null,
-);
+export const dockDrag = signal<{ key: string; x: number; slot: number } | null>(null);
 
 /** The home screen: pages of widgets, pinned apps and folders on a grid. */
 export const home = signal<Home>({ columns: 6, pages: [1], items: [] });
@@ -59,6 +57,31 @@ export const panel = signal<"notifications" | "control">("notifications");
 export const folder = signal<string | null>(null);
 /** An app's long-press menu: which app, and where (the pressed cell's box on screen). */
 export const menu = signal<{ app: App; at: DOMRect } | null>(null);
+
+/**
+ * An "at work" tmux session open over home (session.tsx): which, the card it grew from (it shrinks back into it), and
+ * whether it's on its way out. Back closes it first.
+ */
+export const sessionView = signal<{
+  name: string;
+  task?: string;
+  from: DOMRect | null;
+  card: HTMLElement | null;
+  closing?: boolean;
+} | null>(null);
+
+/** Opens [name] (a tmux session's, as PowOS lists them) from [card]. */
+export function openSession(name: string, card: HTMLElement | null, task?: string) {
+  if (!/^[A-Za-z0-9_.:-]+$/.test(name)) return;
+  sessionView.value = { name, task, card, from: card?.getBoundingClientRect() ?? null };
+}
+
+export function closeSession() {
+  const s = sessionView.value;
+  if (s && !s.closing) sessionView.value = { ...s, closing: true };
+  (document.activeElement as HTMLElement | null)?.blur();
+  powos.keyboard.hide();
+}
 
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */
 export const drawer = signal(0);
@@ -109,7 +132,8 @@ export function closeDrawer() {
 
 /** Back: whatever is on top closes first - a widget's screen, a menu, a folder, a tile's edit, edit mode, the drawer. False when nothing was open. */
 export function back(): boolean {
-  if (screen.value.key) powos.widgets.closeScreen();
+  if (sessionView.value && !sessionView.value.closing) closeSession();
+  else if (screen.value.key) powos.widgets.closeScreen();
   else if (notif.value) notif.value = false;
   else if (menu.value) menu.value = null;
   else if (folder.value) folder.value = null;
@@ -124,6 +148,7 @@ export function back(): boolean {
 
 /** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does. */
 export function goHome() {
+  if (sessionView.value) closeSession();
   if (screen.value.key) powos.widgets.closeScreen();
   notif.value = false;
   menu.value = null;
@@ -155,11 +180,7 @@ export function ask(text: string) {
 }
 
 export function setDocked(key: string, on: boolean) {
-  setDock(
-    on
-      ? [...dock.value.filter((k) => k !== key), key]
-      : dock.value.filter((k) => k !== key),
-  );
+  setDock(on ? [...dock.value.filter((k) => k !== key), key] : dock.value.filter((k) => k !== key));
 }
 
 /** The dock's apps, in this order. */
