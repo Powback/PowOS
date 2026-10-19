@@ -34,7 +34,7 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
-    // aidl: SystemUI's recents provider interface (src/main/aidl, ILauncherProxy).
+    // aidl: SystemUI's recents provider interfaces (src/main/aidl: ILauncherProxy, ISystemUiProxy).
     buildFeatures {
         buildConfig = true
         aidl = true
@@ -104,6 +104,9 @@ dependencies {
     implementation(project(":engine"))
     // The system slots' hidden framework calls (system/HiddenApi.kt), Apache-2.0.
     implementation(libs.hiddenapibypass)
+    // The hidden framework classes the gesture input and the recents animation name (InputEventReceiver, ...):
+    // stand-ins to compile against, the phone's own at run time (hidden-stubs/build.gradle.kts says why).
+    compileOnly(project(":hidden-stubs"))
     testImplementation(libs.junit)
     // android.jar only has stubs of org.json.
     testImplementation(libs.org.json)

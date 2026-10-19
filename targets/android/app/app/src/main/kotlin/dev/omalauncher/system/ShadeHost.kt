@@ -22,7 +22,10 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import dev.omalauncher.App
 import dev.omalauncher.shell.ShellHost
+import dev.omalauncher.system.gesture.GestureConsumer
+import dev.omalauncher.system.gesture.shadeOpens
 import org.json.JSONObject
+import kotlin.math.abs
 
 /**
  * PowOS's notification shade, in the stock shade's place (docs/NATIVE-SYSTEM-UI.md, "Notification shade + quick
@@ -35,10 +38,14 @@ import org.json.JSONObject
  *   the system drops them and SystemUI's shade is back by itself. Lifted while the lock screen shows (its shade stays
  *   SystemUI's until PowOS has a lock screen face), and lent to SystemUI when the page asks for the system's own
  *   panel (system.notifications: its quick settings, which PowOS can't show yet) until that one is closed again.
- * - The pull: a strip over the status bar (TYPE_STATUS_BAR_ADDITIONAL, which sits above the status bar and below
- *   SystemUI's shade window - the lock screen's, while it shows) that takes touches there; dragged down, it sends the
- *   finger to the page ("shade.drag" { q }, "shade.settle" { open }) as home's own swipe does. Not touchable while
- *   the status bar is hidden (a full-screen app's top edge is its own).
+ * - The pull: PowOS's gesture input ([pull], on the recents provider's input monitor - GestureMonitor) sees a finger go
+ *   down on the status bar without taking it, and takes it (the status bar gets a cancel) only once it's dragged down:
+ *   taps on the status bar stay SystemUI's (OnePlus's live capsules). Dragged down, the finger goes to the page
+ *   ("shade.drag" { q }, "shade.settle" { open }) as home's own swipe does. Not while the status bar is hidden (a
+ *   full-screen app's top edge is its own: its first swipe brings the bars back, SystemUI's).
+ * - A strip over the status bar (TYPE_STATUS_BAR_ADDITIONAL, above the status bar and below SystemUI's shade window)
+ *   tells the status bar's height and whether it shows (its insets). Never touchable while the monitor runs; without
+ *   the monitor ([monitored] false) it takes the pull itself, see the HACK below.
  * - The shade: TYPE_STATUS_BAR_SUB_PANEL, full screen and transparent (the page dims with its own scrim), above the
  *   status bar and SystemUI's windows. The page is kept warm: the window stays added, hidden while the shade is shut
  *   (the page says so: shade.closed), so the next pull shows it at once.
@@ -46,9 +53,9 @@ import org.json.JSONObject
  * Needs what the recents provider is granted (STATUS_BAR_SERVICE for the window types, STATUS_BAR for the flags):
  * [PowosRecentsService] runs it while SystemUI is bound to it.
  *
- * HACK: the strip takes the status bar's touches, so a tap on something SystemUI shows there (OnePlus's live
- * capsules) doesn't reach it. Real fix: an input monitor (InputManager.monitorGestureInput, MONITOR_INPUT) that sees
- * the pull without being in the way and pilfers it once it's a pull - the same monitor gesture navigation needs.
+ * HACK (fallback only, when the input monitor can't be had - [monitored] false): the strip then takes the status bar's
+ * touches itself, so a tap on something SystemUI shows there doesn't reach it. Real fix: the monitor, which is what
+ * runs whenever MONITOR_INPUT is granted (it comes with the recents role, like everything here).
  */
 class ShadeHost(
     private val service: Context,
@@ -78,6 +85,22 @@ class ShadeHost(
     /** The status bar is showing: false while a full-screen app hides it. */
     private var statusBarShown = true
     private var shown = false
+
+    /** The status bar's height (px), from the strip's insets. */
+    private var stripHeight = 0
+
+    /**
+     * PowOS's gesture input runs ([pull] gets the status bar's touches from the input monitor): the strip stays out of
+     * the way. False: the strip takes the pull itself (the HACK above).
+     */
+    var monitored = false
+        set(value) {
+            field = value
+            edgeLayoutChanged()
+        }
+
+    /** The pull under way (from the monitor or the strip). */
+    private val pulling = Pull()
 
     /** Home pressed (or the switcher) while the shade is down: it goes up, as SystemUI's does. */
     private val closer =
@@ -112,7 +135,10 @@ class ShadeHost(
         shadeParams = shadeLayout().also { shadeWm.addView(root, it) }
         val strip = Edge(edgeContext)
         edge = strip
-        edgeParams = edgeLayout(statusBarHeight()).also { edgeWm.addView(strip, it) }
+        stripHeight = statusBarHeight()
+        edgeParams = edgeLayout(stripHeight).also { edgeWm.addView(strip, it) }
+        // Out of the way at once if the gesture input already runs.
+        edgeLayoutChanged()
         @Suppress("DEPRECATION")
         service.registerReceiver(closer, IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
         current = this
@@ -170,6 +196,45 @@ class ShadeHost(
             }
         }, LEND_TIMEOUT_MS)
     }
+
+    /** Shuts PowOS's shade if it's down (a swipe up from the bottom edge): true if it was. */
+    fun closeIfOpen(): Boolean {
+        if (!shown) return false
+        settle(false)
+        return true
+    }
+
+    /** Whether a finger down at [y] (display px) may be the shade's pull. */
+    private fun pullable(y: Float): Boolean =
+        host != null && !shown && !keyguard && !lent && statusBarShown && y <= stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
+
+    /**
+     * The shade's pull on PowOS's gesture input (GestureMonitor): a finger down on the status bar is followed, and taken
+     * once it's dragged down.
+     */
+    val pull =
+        object : GestureConsumer {
+            override fun onDown(e: MotionEvent): Boolean {
+                if (!pullable(e.rawY)) return false
+                pulling.down(e)
+                return true
+            }
+
+            override fun onEvent(e: MotionEvent): GestureConsumer.Verdict =
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_MOVE ->
+                        when (pulling.move(e)) {
+                            PullMove.STARTED -> GestureConsumer.Verdict.TAKE
+                            PullMove.NOT_A_PULL -> GestureConsumer.Verdict.DROP
+                            PullMove.NONE -> GestureConsumer.Verdict.FOLLOW
+                        }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        pulling.up(e)
+                        GestureConsumer.Verdict.DROP
+                    }
+                    else -> GestureConsumer.Verdict.FOLLOW
+                }
+        }
 
     private fun flags() {
         if (keyguard || lent) disable(0, 0) else disable(DISABLE_EXPAND, DISABLE2_QUICK_SETTINGS or DISABLE2_NOTIFICATION_SHADE)
@@ -251,7 +316,7 @@ class ShadeHost(
     private fun edgeLayoutChanged(height: Int? = null) {
         val strip = edge ?: return
         val p = edgeParams ?: return
-        val touchable = statusBarShown && !keyguard && !lent
+        val touchable = !monitored && statusBarShown && !keyguard && !lent
         val flags =
             if (touchable) p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv() else p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         val h = height ?: p.height
@@ -282,23 +347,75 @@ class ShadeHost(
     }
 
     /**
-     * The top edge: a drag down from it pulls the shade, the page following the finger as home's swipe does (openness
-     * = the distance over 60% of the screen; a flick or past a third opens it).
+     * The pull, wherever its touches come from (the monitor, or the strip as the fallback): a drag down from the top edge
+     * pulls the shade, the page following the finger as home's swipe does (openness = the distance over 60% of the
+     * screen; a flick or past a third opens it: [shadeOpens]).
      */
-    private inner class Edge(
-        context: Context,
-    ) : View(context) {
-        private val slop = ViewConfiguration.get(context).scaledTouchSlop
+    private inner class Pull {
+        private val slop = ViewConfiguration.get(shadeContext).scaledTouchSlop
+        private var x0 = 0f
         private var y0 = 0f
         private var dragging = false
         private var q = 0.0
         private var velocity: VelocityTracker? = null
 
+        fun down(e: MotionEvent) {
+            x0 = e.rawX
+            y0 = e.rawY
+            dragging = false
+            q = 0.0
+            velocity?.recycle()
+            velocity = VelocityTracker.obtain().also { it.addMovement(e) }
+        }
+
+        fun move(e: MotionEvent): PullMove {
+            velocity?.addMovement(e)
+            val dx = e.rawX - x0
+            val dy = e.rawY - y0
+            var result = PullMove.NONE
+            if (!dragging) {
+                if (dy > slop && dy >= abs(dx)) {
+                    dragging = true
+                    show()
+                    result = PullMove.STARTED
+                } else if (abs(dx) > slop || dy < -slop) {
+                    return PullMove.NOT_A_PULL
+                }
+            }
+            if (dragging) {
+                val height = shade?.height?.takeIf { it > 0 } ?: service.resources.displayMetrics.heightPixels
+                q = (dy / (height * PULL_SPAN)).toDouble().coerceIn(0.0, 1.0)
+                drag(q)
+            }
+            return result
+        }
+
+        fun up(e: MotionEvent) {
+            val v = velocity
+            velocity = null
+            if (dragging) {
+                // px/ms of the screen, in CSS px as the page's flick threshold is.
+                val vy = v?.let { it.computeCurrentVelocity(1); it.yVelocity / service.resources.displayMetrics.density } ?: 0f
+                settle(shadeOpens(vy, q, cancelled = e.actionMasked != MotionEvent.ACTION_UP))
+            }
+            v?.recycle()
+            dragging = false
+        }
+    }
+
+    /**
+     * The strip over the status bar: tells the status bar's height and whether it shows (its insets). It takes the pull's
+     * touches only without the input monitor (the HACK in the class comment).
+     */
+    private inner class Edge(
+        context: Context,
+    ) : View(context) {
         init {
             // The status bar's height (it changes on folding) and whether it shows: from the insets the window gets.
             setOnApplyWindowInsetsListener { _, insets ->
                 statusBarShown = insets.isVisible(WindowInsets.Type.statusBars())
                 val top = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+                if (top > 0) stripHeight = top
                 edgeLayoutChanged(top.takeIf { it > 0 })
                 insets
             }
@@ -307,37 +424,9 @@ class ShadeHost(
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(e: MotionEvent): Boolean {
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    y0 = e.rawY
-                    dragging = false
-                    q = 0.0
-                    velocity = VelocityTracker.obtain().also { it.addMovement(e) }
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    velocity?.addMovement(e)
-                    val dy = e.rawY - y0
-                    if (!dragging && dy > slop) {
-                        dragging = true
-                        show()
-                    }
-                    if (dragging) {
-                        val height = shade?.height?.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
-                        q = (dy / (height * PULL_SPAN)).toDouble().coerceIn(0.0, 1.0)
-                        drag(q)
-                    }
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    val v = velocity
-                    velocity = null
-                    if (dragging) {
-                        // px/ms of the screen, in CSS px as the page's flick threshold is.
-                        val vy = v?.let { it.computeCurrentVelocity(1); it.yVelocity / resources.displayMetrics.density } ?: 0f
-                        val open = e.actionMasked == MotionEvent.ACTION_UP && (vy > FLICK || (vy >= -FLICK && q > OPEN_AT))
-                        settle(open)
-                    }
-                    v?.recycle()
-                    dragging = false
-                }
+                MotionEvent.ACTION_DOWN -> pulling.down(e)
+                MotionEvent.ACTION_MOVE -> pulling.move(e)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> pulling.up(e)
             }
             return true
         }
@@ -370,13 +459,23 @@ class ShadeHost(
         private const val SYSUI_KEYGUARD_SHOWING = 1L shl 6
         private const val SYSUI_QUICK_SETTINGS_VISIBLE = 1L shl 11
 
-        /** As the page's: the pull's span (of the screen's height), a flick (CSS px/ms), the openness it opens at. */
+        /** As the page's: the pull's span (of the screen's height). A flick and the openness it opens at: [shadeOpens]. */
         private const val PULL_SPAN = 0.6f
-        private const val FLICK = 0.45f
-        private const val OPEN_AT = 0.33
 
         private const val LEND_TIMEOUT_MS = 2000L
     }
+}
+
+/** How a move of the shade's pull went. */
+private enum class PullMove {
+    /** Not decided yet. */
+    NONE,
+
+    /** It's a pull: the shade came down with it. */
+    STARTED,
+
+    /** Sideways or up: not a pull. */
+    NOT_A_PULL,
 }
 
 /** What the shade page reaches through the bridge (shade.closed). */

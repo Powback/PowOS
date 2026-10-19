@@ -35,9 +35,16 @@ object Switcher {
         if (showing != null) page(context).bridge.emit("switcher.toggle", null) else show(context)
     }
 
-    fun show(context: Context) {
+    /**
+     * Shows the switcher over the app in front - or, from a swipe that already sent the app home (the recents animation),
+     * over home with [over] as the app it came from.
+     */
+    fun show(
+        context: Context,
+        over: Int? = Tasks.visible(context),
+    ) {
         if (showing != null) return
-        from = Tasks.visible(context)
+        from = over
         // Started by the recents provider: allowed from the background (BackgroundActivityStartController's "Recents
         // Component").
         context.startActivity(

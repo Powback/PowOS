@@ -23,6 +23,10 @@
     <uses-permission android:name="android.permission.STATUS_BAR_SERVICE" />
     <uses-permission android:name="android.permission.STATUS_BAR" />
     <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+    <!-- Gesture navigation (system/gesture/): the input monitor on the display, and WM Shell's recents transition (its
+         IRecentTasks checks MANAGE_ACTIVITY_TASKS). Both signature|recents on the phone, not privileged: no allowlist. -->
+    <uses-permission android:name="android.permission.MONITOR_INPUT" />
+    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
 
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />

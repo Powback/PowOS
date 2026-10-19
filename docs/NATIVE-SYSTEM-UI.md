@@ -342,23 +342,102 @@ What's in the tree, all live only with the module built `--priv-app --slot recen
   caller is recents), `getTaskSnapshot` (served at `/_task/<id>`), `startActivityFromRecents`, `removeTask`.
 - The shade: `system/ShadeHost.kt`. Flags on the process's StatusBarManager token (`DISABLE_EXPAND`,
   `DISABLE2_NOTIFICATION_SHADE | _QUICK_SETTINGS`), lifted while SystemUI reports the keyguard (`SYSUI_STATE` bit 6) and
-  lent back while its own panel is asked for (the panel's "quick settings" button). A `TYPE_STATUS_BAR_ADDITIONAL`
-  strip over the status bar takes the pull (HACK: it also takes taps there; the real fix is the input monitor below);
-  the page is in a `TYPE_STATUS_BAR_SUB_PANEL` window kept warm and hidden on `shade.closed`.
+  lent back while its own panel is asked for (the panel's "quick settings" button). The pull comes from the gesture
+  input's monitor (below); a `TYPE_STATUS_BAR_ADDITIONAL` strip over the status bar only reports the bar's height and
+  visibility, and takes the pull itself only if the monitor can't be had (HACK, fallback: then it also takes the status
+  bar's taps). The page is in a `TYPE_STATUS_BAR_SUB_PANEL` window kept warm and hidden on `shade.closed`.
 - Allowlist: `STATUS_BAR`, `START_TASKS_FROM_RECENTS` (both privileged as well as recents). The rest
-  (`STATUS_BAR_SERVICE`, `READ_FRAME_BUFFER`, `REMOVE_TASKS`, `INTERNAL_SYSTEM_WINDOW`) come with the role.
+  (`STATUS_BAR_SERVICE`, `READ_FRAME_BUFFER`, `REMOVE_TASKS`, `INTERNAL_SYSTEM_WINDOW`, and for gestures
+  `MONITOR_INPUT`, `MANAGE_ACTIVITY_TASKS`) come with the role: `signature|recents`, not privileged, so not on the list.
 - Hidden calls via `org.lsposed.hiddenapibypass`, exempting only the classes used (`system/HiddenApi.kt`).
 
-Only **3-button navigation** works with it. With the overlay on and gesture navigation selected, SystemUI routes the
-swipes to PowOS, which doesn't handle them yet: home and recents gestures do nothing. Gesture navigation still needs:
+### Gesture navigation: built (2026-10-19), compiled, not yet tried on the phone
 
-1. An input monitor (`InputManager.monitorGestureInput`, `MONITOR_INPUT`) over the region `onActiveNavBarRegionChanges`
-   gives, with `pilferPointers` once a swipe is recognised (an `InputEventReceiver` subclass: compile-time stubs).
-2. The recents transition: WM Shell's `IRecentTasks.startRecentsTransition` (its binder is in `onInitialize`'s bundle)
-   with an `IRecentsAnimationRunner`, the leashes animated to home, to the switcher or to the next task (quick switch).
-3. `ISystemUiProxy` calls for what SystemUI expects of the gesture provider (`onBackEvent`, `onStatusBarTouchEvent`,
-   `notifySwipeToRecentFinished` on this phone).
-4. The same monitor replaces the shade's strip (the pull seen without taking the status bar's taps).
+The phone is on gesture navigation (`config_navBarInteractionMode` 2). As the recents provider PowOS takes the swipes
+from the bottom edge; back stays SystemUI's.
+
+| Gesture | What PowOS does | Code |
+|---|---|---|
+| Swipe up from the bottom edge, let go | Home. Over an app: the app's window follows the finger and shrinks into home (WM Shell's recents transition); without it, a plain home intent. With PowOS's shade down: the shade goes up | `gesture/NavGesture.kt`, `gesture/RecentsTransition.kt` |
+| Swipe up and hold (still ~140 ms after 48 dp) | The switcher (mode=switcher), with the app swiped from as the one Back returns to | `NavGestureClassifier`, `Switcher.show(from)` |
+| Swipe along the bottom edge | The previous app (newest recent task that isn't the one in front) | `Tasks.open` |
+| Screen pinned: swipe up and hold | Unpins (`ISystemUiProxy.stopScreenPinning`), as Quickstep; other swipes do nothing | |
+| Pull down from the status bar | PowOS's shade; taps on the status bar (OnePlus's capsules) stay SystemUI's | `ShadeHost.pull` |
+| Back (left/right edge swipe) | SystemUI's own, untouched | see below |
+
+How:
+
+- **Input monitor** (`gesture/GestureMonitor.kt`): `InputManager.monitorGestureInput("powos-gestures", 0)` (hidden,
+  `MONITOR_INPUT` from the role), read by an `InputEventReceiver` subclass on the main looper. It sees every touch; each
+  finger down is offered to the shade's pull (top strip: the status bar's height) and to the nav gesture (bottom strip:
+  `navigation_bar_gesture_height`, or SystemUI's `onActiveNavBarRegionChanges` region). A consumer that recognises its
+  gesture `pilferPointers()` - the windows under it get a cancel; until then (taps) they keep the touch. Ignored while
+  SystemUI says system gestures are off (`SYSUI_STATE`: keyguard or bouncer showing, its own shade or QS open, dozing,
+  home disabled, the nav bar hidden by a full-screen app unless `allow_gesture`), and in 3-button mode.
+- **Classification** (`gesture/NavGestureClassifier.kt`, pure Kotlin): direction decided after the touch slop (mostly
+  up / sideways / down = not ours), hold = under 0.12 dp/ms for 140 ms after 48 dp up (moving on fast un-arms it, a
+  finger silent for 140 ms before the lift counts), home = a fling up (0.9 dp/ms) or 22% of the screen, quick switch =
+  56 dp or a sideways fling. `NavGestureClassifierTest` (13 cases, JVM) covers them and the shade's open/close rule.
+- **Recents transition** (`gesture/RecentsTransition.kt`, Android 16 only): as Quickstep's `SystemUiProxy
+  .startRecentsActivity` - WM Shell's `IRecentTasks` binder from `onInitialize`'s bundle (key: its descriptor),
+  `startRecentsTransition(PendingIntent(package, FILL_IN_COMPONENT), home intent with PowOS's home component,
+  ActivityOptions.setTransientLaunch, IApplicationThread, runner)`; the runner (`IRecentsAnimationRunner`, a hand-written
+  `onTransact`) gets `onAnimationStart(controller, apps, ...)` and PowOS moves the closing apps' leashes
+  (`SurfaceControl.Transaction` scale/position/alpha: the window's bottom edge under the finger, shrinking to 60%), then
+  `IRecentsAnimationController.finish(toHome, ...)` after a short end animation. Only when PowOS is the default home and
+  an app is in front. Every path finishes: no start within 700 ms → the plain way (and a late start is finished at
+  once), `onAnimationCanceled` → the plain way, a task appearing mid-gesture → finished back to the apps (OnePlus's
+  `onTasksAppearedCallback` is answered), a 10 s watchdog, and WM Shell's own death recipient if PowOS dies. Off
+  switch: `settings put global powos_recents_animation 0` (the plain, non-animated path stays).
+- **ISystemUiProxy** (`src/main/aidl/.../ISystemUiProxy.aidl`): AOSP's interface with only the calls a gesture
+  provider makes, ids = the phone's SystemUI transaction codes minus one (checked in its decompiled
+  `ISystemUiProxy.Stub`: `startScreenPinning` 2, `onOverviewShown` 7, `onStatusBarTouchEvent` 10,
+  `stopScreenPinning` 18, `expandNotificationPanel` 30, `onBackEvent` 45, `toggleNotificationPanel` 51, OnePlus's
+  `notifySwipeToRecentFinished` 158; all one-way). Used: `stopScreenPinning`, `onOverviewShown`. Not needed:
+  `notifySwipeToRecentFinished` only sets an `isInRecents` flag SystemUI reads on configuration changes
+  (`LauncherNotifyExImpl`), and the status bar's touches aren't forwarded since PowOS's shade takes the pull.
+- **Back stays SystemUI's** on this build with a third-party recents provider: `EdgeBackGestureHandler.updateIsEnabled`
+  enables it on `mAttachedViewCount > 0 && (mInGestureNavMode || isSupportGestureSideBar)` and
+  `mIsBackGestureAllowed = !navButtonsForcedVisible || mInGestureNavMode` - nothing about which package is the provider
+  (it only listens to the provider for OnePlus's gesture-area ratio and rotation hints). Back works from SystemUI's own
+  input monitor; PowOS never touches the side edges.
+- **Hidden classes at compile time**: `targets/android/app/hidden-stubs/` (an Android library, `compileOnly` in
+  `:app`, so nothing of it ships) holds stand-ins for `InputEventReceiver`, `InputMonitor`, `InputChannel` and
+  `RemoteAnimationTarget`; WM Shell's three interfaces are written by hand as parcels. HACK-marked in each file.
+
+What's not built (next): the app window following the finger *sideways* for quick switch (a plain task switch for now),
+a live app-to-switcher handoff (the transition finishes to home and the switcher opens over it: the window doesn't
+land in the switcher's card), haptics on the hold, the taskbar on the inner screen, and predictive back's animation
+(SystemUI's back is used as is).
+
+Verified: compiles (`targets/android/build-app.sh`, version code 29873239) and `NavGestureClassifierTest` passes. Nothing
+was run on the phone.
+
+**Phone test** (in order; each step needs the one before):
+
+1. Build the module with this APK as the priv-app and the recents slot: `targets/android/system-module/build-module.sh
+   --priv-app --slot recents --check-signer`, install it (`adb push ~/Projects/android-app-dev/output/powos-system-module.zip
+   /data/local/tmp/ && adb shell su -c 'magisk --install-module /data/local/tmp/powos-system-module.zip'`), reboot. The
+   priv-app copy must be this build: `MONITOR_INPUT` and `MANAGE_ACTIVITY_TASKS` are new in the manifest.
+2. Grants: `adb shell dumpsys package com.powos.app | grep -E 'MONITOR_INPUT|MANAGE_ACTIVITY_TASKS|STATUS_BAR'` - all
+   `granted=true`. Then `adb logcat -s PowosRecents PowosGestures PowosNavGesture PowosRecentsAnim PowosShade`; expect
+   `SystemUI connected: [...IRecentTasks...]` and `gesture input on`.
+3. In an app: a quick swipe up (the window should shrink into home; log `gesture: Home (over task N, animated true)`);
+   a short swipe up and back down (the window comes back); swipe up and hold, then let go (the switcher; Back returns
+   to the app); a swipe along the bottom edge (the previous app); swipes from the left and right edges (Back, as
+   before); on home, a swipe up (stays home). If swipes do nothing, look for `not now: SystemUI's state 0x...` (a
+   `SYSUI_STATE` flag PowOS reads as "system gestures off" - send the value) or no `gesture input on` at all.
+4. The status bar: a tap on a OnePlus capsule (SystemUI's, opens as before); a pull down (PowOS's shade); a swipe up
+   from the bottom with the shade down (the shade closes).
+5. Locked: the lock screen's own swipe up (SystemUI's bouncer, PowOS stays out). A full-screen video: the first swipe
+   up only shows the bars. Screen pinning (if used): swipe up and hold unpins.
+6. If the window animation misbehaves: `adb shell settings put global powos_recents_animation 0` (instant, no reboot)
+   and repeat step 3 - the plain path; send the `PowosRecentsAnim` lines.
+
+**Rollback**, least to most: the animation off as in step 6; three-button navigation (Settings → System → Navigation,
+or `adb shell cmd overlay enable-exclusive --category com.android.internal.systemui.navbar.threebutton`), where PowOS
+only gets the overview button; the recents slot off - rebuild the module without `--slot recents` and reinstall it, or
+disable the module in Magisk, then reboot (OnePlus's launcher is the recents provider again and its gestures come back).
 
 ## 4. Safety
 

@@ -5,7 +5,8 @@ import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 /**
  * The hidden framework calls the system slots make (docs/NATIVE-SYSTEM-UI.md): ActivityTaskManager's task calls (a
- * task's snapshot, removing one, starting one from recents), StatusBarManager's disable flags. The system grants their
+ * task's snapshot, removing one, starting one from recents), StatusBarManager's disable flags, the gesture input's
+ * monitor and the recents transition's pieces. The system grants their
  * permissions to PowOS as the recents provider, but the calls themselves are @hide, and a privileged app isn't exempt
  * from the hidden API checks - only a platform-signed one is.
  *
@@ -23,6 +24,16 @@ object HiddenApi {
             "Landroid/app/IActivityTaskManager",
             "Landroid/window/TaskSnapshot",
             "Landroid/app/StatusBarManager",
+            // The gesture input (system/gesture/GestureMonitor): the display's input monitor and its receiver.
+            "Landroid/hardware/input/InputManager",
+            "Landroid/view/InputMonitor",
+            "Landroid/view/InputEventReceiver",
+            // The recents transition (system/gesture/RecentsTransition): its windows, the transient launch, the app's
+            // IApplicationThread.
+            "Landroid/view/RemoteAnimationTarget",
+            "Landroid/app/ActivityOptions",
+            "Landroid/content/ContextWrapper",
+            "Landroid/app/ActivityThread",
         )
 
     @Volatile private var done = false

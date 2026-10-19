@@ -2,6 +2,7 @@ package dev.omalauncher.system
 
 import android.app.Service
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Region
 import android.os.Bundle
 import android.os.Handler
@@ -9,26 +10,38 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Parcel
 import android.util.Log
+import android.view.Display
 import com.android.systemui.shared.recents.ILauncherProxy
+import com.android.systemui.shared.recents.ISystemUiProxy
+import dev.omalauncher.system.gesture.GestureMonitor
+import dev.omalauncher.system.gesture.NavGesture
+import dev.omalauncher.system.gesture.RecentsTransition
 
 /**
  * PowOS as the phone's recents provider (docs/NATIVE-SYSTEM-UI.md, "Switcher and gestures"): the service SystemUI
  * binds in the package config_recentsComponentName names (action QUICKSTEP_SERVICE, guarded by STATUS_BAR_SERVICE so
  * only SystemUI can), as it binds the stock launcher's TouchInteractionService. Through it SystemUI hands over the
- * overview button ([ILauncherProxy.onOverviewToggle]: PowOS's switcher, [Switcher]) and its state, and while it's
- * bound PowOS's shade replaces SystemUI's ([ShadeHost]) - both use what the recents role grants.
+ * overview button ([ILauncherProxy.onOverviewToggle]: PowOS's switcher, [Switcher]), its state and its ISystemUiProxy,
+ * and while it's bound PowOS's shade replaces SystemUI's ([ShadeHost]) - all of it what the recents role grants.
  *
- * Three-button navigation only, for now: home is PowOS as the home app, back stays SystemUI's, the overview button
- * comes here. Gesture navigation needs an input monitor over the navigation bar's region
- * ([ILauncherProxy.onActiveNavBarRegionChanges]) and the recents transition (WM Shell's IRecentTasks, in
- * [onInitialize]'s bundle); without them, with gestures on, a swipe up does nothing.
+ * - Three-button navigation: home is PowOS as the home app, back stays SystemUI's, the overview button comes here.
+ * - Gesture navigation: PowOS's gesture input ([GestureMonitor], an input monitor on the display) takes the swipes from
+ *   the bottom edge ([NavGesture]: home, the switcher, the previous app; the app's window following the finger through
+ *   WM Shell's recents transition, [RecentsTransition]) and the shade's pull from the top ([ShadeHost.pull]). Back stays
+ *   SystemUI's edge swipe.
  */
 class PowosRecentsService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var shade: ShadeHost? = null
+    private var gestures: GestureMonitor? = null
+    private var nav: NavGesture? = null
 
-    /** SystemUI's ISystemUiProxy (for the gesture phase: the back gesture's events, the status bar's touches). */
-    private var systemUi: IBinder? = null
+    /** SystemUI's last state flags and nav bar region (they can come before the gesture input is up). */
+    private var systemUiState = 0L
+    private var navRegion: Region? = null
+
+    /** SystemUI's ISystemUiProxy: what the gestures call back (unpin, the switcher shown). */
+    private var systemUi: ISystemUiProxy? = null
 
     private val proxy =
         object : ILauncherProxy.Stub() {
@@ -48,21 +61,33 @@ class PowosRecentsService : Service() {
             }
 
             override fun onActiveNavBarRegionChanges(activeRegion: Region?) {
-                // Gesture navigation's region: not used until PowOS handles the gestures (three-button only so far).
+                main.post {
+                    navRegion = activeRegion
+                    nav?.activeRegion = activeRegion
+                }
             }
 
             override fun onInitialize(params: Bundle?) {
-                systemUi = params?.getBinder(SYSTEM_UI_PROXY)
+                val sysui = params?.getBinder(SYSTEM_UI_PROXY)?.let { ISystemUiProxy.Stub.asInterface(it) }
+                val recentTasks = params?.getBinder(RecentsTransition.RECENT_TASKS)
                 Log.i(TAG, "SystemUI connected: ${params?.keySet()?.sorted()}")
                 main.post {
+                    systemUi = sysui
                     // The switcher's page warmed now, so the first overview press shows it at once.
                     Switcher.page(this@PowosRecentsService)
                     if (shade == null) shade = ShadeHost(this@PowosRecentsService).takeIf { it.start() }
+                    startGestures()
+                    nav?.systemUi = sysui
+                    nav?.recentTasks = recentTasks
                 }
             }
 
             override fun onSystemUiStateChanged(stateFlags: Long) {
-                main.post { shade?.systemUiState(stateFlags) }
+                main.post {
+                    shade?.systemUiState(stateFlags)
+                    systemUiState = stateFlags
+                    nav?.systemUiState = stateFlags
+                }
             }
 
             override fun onUnbind(reply: IBinder?) {
@@ -81,12 +106,35 @@ class PowosRecentsService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = proxy
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        nav?.refresh()
+    }
+
     override fun onDestroy() {
         release()
         super.onDestroy()
     }
 
+    /** The gesture input: the bottom edge's swipes and the shade's pull, on one input monitor. */
+    private fun startGestures() {
+        if (gestures != null) return
+        val n =
+            nav ?: NavGesture(this).also {
+                it.systemUiState = systemUiState
+                it.activeRegion = navRegion
+                nav = it
+            }
+        val consumers = listOfNotNull(shade?.pull, n)
+        gestures = GestureMonitor.start(this, Display.DEFAULT_DISPLAY, consumers)
+        shade?.monitored = gestures != null
+        Log.i(TAG, if (gestures != null) "gesture input on" else "no gesture input: gesture navigation does nothing, the shade's strip takes the pull")
+    }
+
     private fun release() {
+        gestures?.dispose()
+        gestures = null
+        nav = null
         shade?.stop()
         shade = null
         systemUi = null

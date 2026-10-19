@@ -32,3 +32,5 @@ dependencyResolutionManagement {
 include(":app")
 include(":owl")
 include(":engine")
+// Compile-time stubs of hidden framework classes (compileOnly in :app, not shipped).
+include(":hidden-stubs")
