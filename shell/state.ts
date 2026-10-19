@@ -8,13 +8,23 @@ import { closeRemote, remoteOpen } from "./remote.ts";
 import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
 import { recentsBack, recentsHome } from "./ui/recents.tsx";
+import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
-export const apps = signal<App[]>([]);
+/** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
+const hostApps = signal<App[]>([]);
+export const apps = computed(() => [...hostApps.value, ...powosApps.value]);
 export const byKey = computed(() => new Map(apps.value.map((a) => [a.key, a])));
 /** How many recent apps the strip has (six to a width, scrolling sideways); pinned ones are left out (the dock has them). */
 const RECENT_FETCH = 24;
-export const recent = signal<string[]>([]);
+const hostRecent = signal<string[]>([]);
+/** The recent apps, newest first: the host's, with the PowOS apps opened in the shell. */
+export const recent = computed(() => mergeRecent(hostRecent.value, new Set(powosApps.value.map((a) => a.key))));
+async function fetchRecent() {
+  const keys = await powos.usage.recent(RECENT_FETCH);
+  noteHostRecent(keys);
+  hostRecent.value = keys;
+}
 /** Apps pinned to the drawer's dock, in pin order. */
 export const dock = signal<string[]>([]);
 /** A pinned app being moved along the dock: which, where the finger is, and the slot it would drop into. */
@@ -116,31 +126,11 @@ export const chat = signal<Chat>({ busy: false, items: [] });
 /** Asked something since the drawer opened: the chat stays up (until the search finds apps again). */
 export const chatting = signal(false);
 
-/**
- * The apps as last listed, for a page that loads before the host has its list (after an update or a restart it lists
- * Android's apps in a moment, PowOS's once the session answers): home's pinned apps keep their icons (files the host
- * still has, ShellIcons) instead of turning into initials meanwhile. A kind (android, linux) the host has none of yet
- * comes from here - only early on, so apps that really are gone (Linux removed) go once the host has settled.
- */
-const APPS_KEPT = "powos.apps";
-const KEPT_FOR_MS = 20000;
-function withKept(list: App[]): App[] {
-  let kept: App[] = [];
-  try {
-    if (performance.now() < KEPT_FOR_MS) kept = JSON.parse(localStorage.getItem(APPS_KEPT) ?? "[]");
-  } catch {}
-  const kinds = new Set(list.map((a) => a.kind));
-  const missing = kept.filter((a) => !kinds.has(a.kind));
-  try {
-    if (!missing.length) localStorage.setItem(APPS_KEPT, JSON.stringify(list));
-  } catch {}
-  return missing.length ? [...list, ...missing] : list;
-}
-
 export async function load() {
-  const [list, keys, pins, h, c, scr] = await Promise.all([
+  const [list, keys, , pins, h, c, scr] = await Promise.all([
     powos.apps.list(),
     powos.usage.recent(RECENT_FETCH),
+    initPowosApps(),
     powos.store.get<string[]>("dock"),
     powos.home.get(),
     powos.ai.chat(),
@@ -149,21 +139,22 @@ export async function load() {
   screen.value = scr;
   chat.value = c;
   home.value = h;
-  apps.value = withKept(list);
-  recent.value = keys;
+  hostApps.value = list;
+  noteHostRecent(keys);
+  hostRecent.value = keys;
   dock.value = Array.isArray(pins) ? pins : [];
 }
 
 // The host's list arrives after the page (it loads apps and icons in the background): the recent strip, filtered to
 // installed apps, follows it. Back on screen, the strip shows what was opened meanwhile.
 powos.on("apps.changed", async () => {
-  apps.value = withKept(await powos.apps.list());
-  recent.value = await powos.usage.recent(RECENT_FETCH);
+  hostApps.value = await powos.apps.list();
+  await fetchRecent();
 });
 powos.on("ai.changed", (c: Chat) => (chat.value = c));
 powos.on("home.changed", async () => (home.value = await powos.home.get()));
 document.addEventListener("visibilitychange", async () => {
-  if (!document.hidden) recent.value = await powos.usage.recent(RECENT_FETCH);
+  if (!document.hidden) await fetchRecent();
 });
 
 /** Closes the drawer: the search cleared, the keyboard down. */
@@ -182,6 +173,8 @@ export function back(): boolean {
   // A session open, or still shrinking back into its card: Back is its (a second Back meanwhile - the keyboard's and
   // the terminal's - mustn't go on to leave PowOS AI's page).
   if (sessionView.value) closeSession();
+  // A PowOS app open full screen: back to where it was opened from.
+  else if (appView.value) closeApp();
   else if (remoteOpen.value) closeRemote();
   // Settings and its screens: the top one (or what's open inside it).
   else if (backScreen()) return true;
@@ -204,7 +197,8 @@ export function goHome() {
   recentsHome();
   // A terminal open full screen (an at work session, a widget's screen): Home puts it away and stays where it was
   // opened from - PowOS AI's page, the widget's page - as swiping up out of an app goes back to the screen it came from.
-  if (sessionView.value || screen.value.key) {
+  if (sessionView.value || screen.value.key || appView.value) {
+    if (appView.value) closeApp();
     if (sessionView.value) closeSession();
     if (screen.value.key) powos.widgets.closeScreen();
     return;
@@ -227,9 +221,15 @@ powos.on("system.home", () => goHome());
 
 export async function launch(key: string) {
   menu.value = null;
+  // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
+  if (key.startsWith(PREFIX)) {
+    openApp(key.slice(PREFIX.length));
+    closeDrawer();
+    return;
+  }
   await powos.apps.launch(key);
   closeDrawer();
-  recent.value = await powos.usage.recent(RECENT_FETCH);
+  await fetchRecent();
 }
 
 /** Asks PowOS AI: the field clears for the next question, the chat shows the turn streaming in. */

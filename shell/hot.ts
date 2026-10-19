@@ -5,8 +5,16 @@
  * fast at this size, and always right.
  */
 import { powos } from "./bridge.ts";
+import { appChanged } from "./apps/pages.ts";
 
 powos.on("files.changed", ({ path }: { path: string }) => {
+  // A PowOS app's installed UI (`powos app ui`/`dev`): its page and widgets are imported again in place - the shell
+  // page isn't reloaded (apps/pages.ts).
+  if (path.startsWith("_app/")) {
+    const id = path.split("/")[1];
+    if (id) appChanged(id);
+    return;
+  }
   if (path.endsWith(".css")) {
     // Not on screen: a stylesheet swapped then never loaded its new sheet (the WebView doesn't load while hidden) and
     // the page was left with none - home unstyled. Swapped once it shows instead.

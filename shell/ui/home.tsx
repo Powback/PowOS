@@ -14,6 +14,7 @@ import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gest
 import { Pages } from "./grid.tsx";
 import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
+import { AppScreen } from "./appscreen.tsx";
 import { RemoteScreen } from "./remote.tsx";
 import { AgentsScreen } from "./agents.tsx";
 import { Screens } from "./screens.tsx";
@@ -173,6 +174,7 @@ export function Home() {
       {/* Outside home: its touches never reach home's swipes. */}
       <ScreenPanel />
       <SessionScreen />
+      <AppScreen />
       <RemoteScreen />
       <AgentsScreen />
       <Screens />

@@ -176,6 +176,8 @@ if [ -d $A ]; then
   mkdir -p $L/services $L/registry
   for f in powos-runtime powos-supervisor powos-app; do install -m 755 $A/$f $L/$f; ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
   install -m 644 $A/services/*.json $L/services/
+  # `powos app new`'s templates (lib/apps/templates).
+  if [ -d $A/templates ]; then rm -rf $L/templates && cp -r $A/templates $L/templates && chmod -R a+rX $L/templates; fi
   [ -f $A/registry.wasm ] && install -m 644 $A/registry.wasm $L/registry/module.wasm
   install -m 755 $A/powos $R/usr/bin/powos
   install -m 644 $A/config.sh $R/usr/lib/powos/config.sh

@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { openUrl, power, useLayoutSize, useOnScreen, useQuiet } from "./onscreen.ts";
 import { useSurface, type Surface } from "./native.ts";
+import { openApp } from "./pages.ts";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -23,7 +24,11 @@ export type Status = "connecting" | "connected" | "disconnected" | "error";
 
 /** What an island needs from the host: its database's connection and live rows. */
 export interface IslandHost {
-  useDb(database: string, DbConnection: Builder): Db;
+  /**
+   * [schema]: the bindings' fingerprint (`powos app build` defines it): another one than the connection was made with
+   * (the module's schema changed, the UI rebuilt with its new bindings) makes the connection again with these.
+   */
+  useDb(database: string, DbConnection: Builder, schema?: string): Db;
   useRows<T = any>(db: Db, table: string, query: string): T[];
   /** The element on screen, home shown and uncovered (apps/onscreen.ts): an island that animates stops without it. */
   useOnScreen?(ref: { current: Element | null }): boolean;
@@ -37,6 +42,8 @@ export interface IslandHost {
   useSurface?(ref: { current: Element | null }, wanted: boolean): Surface;
   /** Home quiet - nothing else open or moving, no long frames lately (apps/onscreen.ts): animate only then. */
   useQuiet?(): boolean;
+  /** Opens an installed PowOS app's full-screen page (apps/pages.ts) - a widget's tap opening its app. */
+  openApp?(id: string): void;
 }
 
 export interface Builder {
@@ -54,6 +61,7 @@ export interface Db {
 interface Entry extends Db {
   database: string;
   make: Builder;
+  schema?: string;
   users: number;
   listeners: Set<() => void>;
   drop?: number;
@@ -130,11 +138,20 @@ function release(e: Entry) {
   }, GRACE_MS);
 }
 
-function acquire(database: string, make: Builder): Entry {
+function acquire(database: string, make: Builder, schema?: string): Entry {
   let e = entries.get(database);
   if (!e) {
-    e = { database, make, users: 0, listeners: new Set(), conn: null, status: "connecting", epoch: 0 };
+    e = { database, make, schema, users: 0, listeners: new Set(), conn: null, status: "connecting", epoch: 0 };
     entries.set(database, e);
+    connect(e);
+  } else if (schema && schema !== e.schema) {
+    // The app's UI hot-reloaded with new bindings: the rows of the new schema need them (the old ones would misread
+    // a new column). Everyone on it gets the new connection (epoch: their subscriptions are made again).
+    try {
+      e.conn?.disconnect();
+    } catch {}
+    e.make = make;
+    e.schema = schema;
     connect(e);
   }
   clearTimeout(e.drop);
@@ -153,13 +170,13 @@ function useVisible() {
   return v;
 }
 
-export function useDb(database: string, make: Builder): Db {
+export function useDb(database: string, make: Builder, schema?: string): Db {
   const visible = useVisible();
   const [, force] = useState(0);
   const ref = useRef<Entry | null>(null);
   useEffect(() => {
     if (!visible) return;
-    const e = acquire(database, make);
+    const e = acquire(database, make, schema);
     ref.current = e;
     const l = () => force((n) => n + 1);
     e.listeners.add(l);
@@ -170,7 +187,7 @@ export function useDb(database: string, make: Builder): Db {
       ref.current = null;
       force((n) => n + 1);
     };
-  }, [database, visible]);
+  }, [database, visible, schema]);
   const e = ref.current;
   return e ? { conn: e.conn, status: e.status, error: e.error, epoch: e.epoch } : { conn: null, status: "disconnected", epoch: 0 };
 }
@@ -199,4 +216,74 @@ export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   return rows;
 }
 
-export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl, power, useLayoutSize, useSurface, useQuiet };
+/**
+ * A table's rows outside any component (the shell's own lists - the registry's apps in the drawer): [onRows] on every
+ * change, subscribed while the page is shown, let go 5 s after it's hidden like an island's (so a home nobody looks
+ * at holds no socket). Returns a stop.
+ */
+export function watchRows<T = any>(database: string, make: Builder, table: string, query: string, onRows: (rows: T[]) => void) {
+  let e: Entry | null = null;
+  let detach: (() => void) | null = null;
+  let seen: { conn: any; epoch: number; status: Status } | null = null;
+  const attach = () => {
+    detach?.();
+    detach = null;
+    const t = e?.conn?.db[table];
+    if (!e || !t || e.status !== "connected") return;
+    const refresh = () => onRows([...t.iter()] as T[]);
+    t.onInsert(refresh);
+    t.onDelete(refresh);
+    t.onUpdate?.(refresh);
+    const sub = e.conn.subscriptionBuilder().onApplied(refresh).subscribe(query);
+    detach = () => {
+      t.removeOnInsert(refresh);
+      t.removeOnDelete(refresh);
+      t.removeOnUpdate?.(refresh);
+      try {
+        sub.unsubscribe();
+      } catch {}
+    };
+  };
+  // As useRows: subscribed again on a new connection, a reconnect, or connected again.
+  const listener = () => {
+    if (!e) return;
+    const now = { conn: e.conn, epoch: e.epoch, status: e.status };
+    if (seen && seen.conn === now.conn && seen.epoch === now.epoch && seen.status === now.status) return;
+    seen = now;
+    attach();
+  };
+  const start = () => {
+    if (e) return;
+    e = acquire(database, make);
+    e.listeners.add(listener);
+    listener();
+  };
+  const stop = () => {
+    if (!e) return;
+    detach?.();
+    detach = null;
+    e.listeners.delete(listener);
+    release(e);
+    e = null;
+    seen = null;
+  };
+  const visibility = () => (document.hidden ? stop() : start());
+  document.addEventListener("visibilitychange", visibility);
+  visibility();
+  return () => {
+    document.removeEventListener("visibilitychange", visibility);
+    stop();
+  };
+}
+
+export const host: IslandHost = {
+  useDb,
+  useRows,
+  useOnScreen,
+  openUrl,
+  power,
+  useLayoutSize,
+  useSurface,
+  useQuiet,
+  openApp: (id) => openApp(id),
+};

@@ -333,6 +333,17 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   `powos-registry` database (owner = powos's CLI identity). Installed UIs: `~/.local/share/powos/apps/<id>/<ver>/` =
   the app's `files/apps` (bound by `powos-session.sh`), served to the shell at `https://shell.powos/_app/<id>/`.
   Prototype: `apps/counter` (Rust module `powos-counter` + island widget `widgets/count.js`).
+- **Making apps** ✅ (2026-10-20, `powos app help` is the contract): `powos app new <name> [--name ..] [--template
+  spacetimedb-astro|widget|module-only]` scaffolds `~/Projects/<name>` (Rust module `module/src/lib.rs`, Preact page
+  `ui/pages/main.tsx`, widget `ui/widgets/main.tsx`, hooks `ui/lib/app.ts` = the spacetimedb-astro template's
+  useTable/useReducer/useStatus on the shell's host); `powos app install <dir>` builds and installs; `powos app dev
+  <dir>` hot-reloads every save (UI: the open page and widgets re-import in place, no shell reload; module: republished,
+  clients stay connected). The **module builds on the app builder** (`powos app builder user@host`, on the phone the Mac
+  `macback@192.168.50.99`: source over ssh into a `powos-app-builder` container with the shared cargo cache, wasm back;
+  ~3-4 s warm) - never Rust on the phone's battery; the UI bundles locally with bun (~50 ms), bindings with the local
+  `spacetime generate`. An app with a page is a launcher app (`p:<id>`: drawer, search, recent strip) and opens full
+  screen inside home's page (`shell/ui/appscreen.tsx`); its widgets are in home's edit sheet → PowOS apps. Example:
+  `~/Projects/shopping` on the phone (`local.shopping`, a shared shopping list + widget).
 - Remove an app: `powos app remove <id> [--data]`. Remove everything: `rooted.sh system off`, then delete
   `/var/lib/powos/stdb`.
 

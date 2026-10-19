@@ -13,6 +13,7 @@ import { Component, type ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { host } from "../apps/stdb.ts";
 import { useRegistry } from "../apps/registry.ts";
+import { moduleUrl } from "../apps/pages.ts";
 import type { HomeItem } from "../types.ts";
 
 declare function importShim(url: string): Promise<{ default: ComponentType<any> }>;
@@ -49,7 +50,8 @@ export function Island({ item }: { item: HomeItem }) {
   const app = reg.apps.find((a) => a.id === appId);
   const [mod, setMod] = useState<{ c: ComponentType<any> } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const url = widget && app ? `./_app/${appId}/${widget.entry}?v=${encodeURIComponent(app.version)}` : null;
+  // A new URL for each version and each change of its installed UI (hot reload): imported anew, swapped in once in.
+  const url = widget && app ? moduleUrl(appId, widget.entry, app.version) : null;
   useEffect(() => {
     if (!url) return;
     let live = true;

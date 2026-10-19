@@ -4,12 +4,12 @@
  * without a host gets bridge.ts's mock, so the shell runs anywhere.
  */
 export interface App {
-  /** Stable id: "a:<package/activity[@profile]>" (Android) or "l:<desktop id>" (Linux / PowOS). */
+  /** Stable id: "a:<package/activity[@profile]>" (Android), "l:<desktop id>" (Linux / PowOS), "p:<app id>" (a PowOS app). */
   key: string;
   label: string;
   /** URL of its icon (the host serves them). */
   icon: string;
-  kind: "android" | "linux";
+  kind: "android" | "linux" | "powos";
   /** A work-profile app, a clone, or the system's own (not uninstallable). */
   work?: boolean;
   clone?: boolean;

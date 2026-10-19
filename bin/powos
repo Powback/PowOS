@@ -183,7 +183,6 @@ Dev & AI:
   comms send <to> <msg>   Message another agent's inbox (health/coder/devops...)
   comms watch --agent R   Park until that role gets mail (yield, no polling)
   comms inbox|agents      Show an inbox / list all inboxes
-  agents task add|set|done|list   The work board: what each agent is on (PowOS AI page)
   android apps|open|running   (phone) Android's apps: list, open as a window or full screen, what runs
   android notifications|notify|screenshot   (phone) The phone's notifications, post one, its screen
 
@@ -3077,11 +3076,6 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/ai/comms/comms.sh"
         cmd_comms "$@"
-        ;;
-    agents)
-        # The work board (lib/ai/agents/powos-agents-cli; `powos agents help`).
-        shift
-        exec python3 "$POWOS_LIB/ai/agents/powos-agents-cli" "$@"
         ;;
     android)
         shift

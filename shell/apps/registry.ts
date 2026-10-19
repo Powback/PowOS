@@ -4,7 +4,8 @@
  * and each placed island's entry (ui/island.tsx). Bindings: vendor/powos-registry.js (generated, see vendor/VERSIONS).
  */
 import { DbConnection } from "../vendor/powos-registry.js";
-import { useDb, useRows } from "./stdb.ts";
+import { installedApps } from "./pages.ts";
+import { useDb, useRows, watchRows } from "./stdb.ts";
 
 export const REGISTRY = "powos-registry";
 
@@ -40,4 +41,12 @@ export function useRegistry() {
   const apps = useRows<RegistryApp>(db, "app", "SELECT * FROM app");
   const widgets = useRows<RegistryWidget>(db, "widget", "SELECT * FROM widget");
   return { status: db.status, error: db.error, apps, widgets };
+}
+
+/** The registry's apps into apps/pages.ts installedApps (the drawer, search, recents), live while home shows. */
+let watching = false;
+export function watchRegistry() {
+  if (watching) return;
+  watching = true;
+  watchRows<RegistryApp>(REGISTRY, DbConnection, "app", "SELECT * FROM app", (rows) => (installedApps.value = rows));
 }
