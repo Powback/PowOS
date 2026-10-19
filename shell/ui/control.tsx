@@ -9,9 +9,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
+import { openRemote } from "../remote.ts";
 import { notifOpen } from "./gesture.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import type { MediaState, QuickState, QuickTile } from "../types.ts";
+import type { MediaState, QuickState, QuickTile, RemoteState } from "../types.ts";
 
 /** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
 export const quick = signal<QuickState>({
@@ -23,6 +24,20 @@ export const quick = signal<QuickState>({
 });
 powos.on("qs.changed", (q: QuickState) => (quick.value = { ...q }));
 powos.qs.state().then((q) => (quick.value = q));
+
+/**
+ * Remote input (remote.tsx) as a tile of PowOS's own, after SystemUI's: lit while the phone is a computer's keyboard
+ * and touchpad, saying over what; a tap (or a hold, there is no Settings page for it) opens the screen. It takes part in
+ * the edit mode like the others, so it can be hidden or moved.
+ */
+const REMOTE = "remote";
+const remote = signal<RemoteState | null>(null);
+powos.on("remote.state", (s: RemoteState) => (remote.value = s));
+powos.remote.state().then((s) => (remote.value = s), () => {});
+function remoteTile(): QuickTile {
+  const t = remote.value?.target ?? null;
+  return { id: REMOTE, label: "Remote input", on: t != null, detail: t === "usb" ? "USB" : t === "bluetooth" ? "Bluetooth" : null };
+}
 
 /** Held this long (ms), a tile opens its page instead. */
 const HOLD = 450;
@@ -40,6 +55,7 @@ const LEAVES = new Set([
   "wallet",
   "hotspot",
   "lockscreen",
+  REMOTE,
 ]);
 
 const RINGER = ["silent", "vibrate", "ring"];
@@ -66,6 +82,7 @@ const TILE_ICONS: Record<string, IconName | [IconName, IconName]> = {
   battery: "leaf",
   lockscreen: "lockOutline",
   qr_code_scanner: "qrcodeScan",
+  remote: "keyboardOutline",
 };
 
 /** Other apps' tiles by their app: the icon that says what they do. */
@@ -96,6 +113,7 @@ function usePress(t: QuickTile) {
   const open = () => {
     held.current = true;
     shut();
+    if (t.id === REMOTE) return openRemote();
     powos.qs.open(t.id);
   };
   return {
@@ -109,6 +127,7 @@ function usePress(t: QuickTile) {
     onContextMenu: (e: Event) => e.preventDefault(),
     onClick: () => {
       if (held.current) return;
+      if (t.id === REMOTE) return (shut(), openRemote());
       // Another app's tile not hosted yet (no state from it): its own settings, or its app. Hosted, it switches here.
       if (t.app && t.on == null) return (shut(), powos.qs.open(t.id));
       if (LEAVES.has(t.id) || t.on == null) shut();
@@ -430,7 +449,7 @@ export function ControlCenter() {
     return () => void powos.qs.listening(false);
   }, [open]);
   const q = quick.value;
-  const tiles = q.tiles ?? [];
+  const tiles = [...(q.tiles ?? []), remoteTile()];
   const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter((t): t is QuickTile => !!t);
   const { shown, hidden } = arranged(tiles.filter((t) => !CARDS.includes(t.id)));
   const b = q.brightness ?? { value: 0.5, auto: false };
