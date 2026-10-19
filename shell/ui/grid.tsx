@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { byKey, carry, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
 import { powos } from "../bridge.ts";
-import { pagesDragging } from "./gesture.ts";
+import { drawerOpen, pagesDragging } from "./gesture.ts";
 import { OwlWidget } from "./owl.tsx";
 import type { Cell, HomeItem } from "../types.ts";
 
@@ -48,6 +48,9 @@ const geometry = signal<Geometry>({ left: 0, top: 0, width: 0, height: 0, cellW:
 const usedRows = () => Math.max(0, ...home.value.items.filter((i) => i.cell).map((i) => (i.resizable ? i.cell!.y + i.cell!.h : i.cell!.y + 1)));
 
 function measure(el: HTMLElement, columns: number) {
+  // Under the launcher (open, or a finger opening it) home is faded out and the dock folding away resizes it every
+  // frame: measuring then re-laid-out every tile, every frame. It measures again once the launcher closes.
+  if (drawerOpen.value) return;
   const r = el.getBoundingClientRect();
   if (!r.width || !r.height) return;
   const pad = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--edge")) || 12;
@@ -333,8 +336,8 @@ export function Pages() {
     ro.observe(el.current!);
     return () => ro.disconnect();
   }, []);
-  // Tiles reaching further down add rows: re-measure as the home changes.
-  useEffect(() => void (el.current && measure(el.current, home.value.columns)), [home.value]);
+  // Tiles reaching further down add rows, and the launcher closing gives the room back: re-measure then.
+  useEffect(() => void (el.current && measure(el.current, home.value.columns)), [home.value, drawerOpen.value]);
   const list = pages.value;
   if (page.value >= list.length) page.value = list.length - 1;
   // Widgets on the page on screen (and beside it) run their sources; the rest pause.

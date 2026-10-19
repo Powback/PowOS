@@ -102,7 +102,8 @@
 .strip .app { flex: 1 1 0; min-width: 0; padding: 0; }
 .strip .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 /* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
-.dock .app { flex: 1 1 0; min-width: 0; padding: 0; }
+/* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
+.dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
 .bar {
@@ -129,19 +130,23 @@
 .bar input::placeholder { color: var(--color-muted); }
 
 /*
- * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it closes like a shutter: a clip whose
- * bottom edge rises to the bar, cutting the icons off at full size (a clip, so nothing is laid out again).
+ * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it closes like a shutter - its bottom edge
+ * rises to the bar, cutting the icons off; they keep their size and place. (Its height changes, so the stage above
+ * resizes with it; home's grid doesn't re-measure meanwhile - grid.tsx - it's faded out under the launcher.)
  */
 .dock {
+  --dock-open: calc(1 - var(--p));
   position: relative;
   z-index: 3;
-  height: var(--strip-height);
-  margin: 0 var(--edge) var(--edge);
+  height: calc(var(--strip-height) * var(--dock-open));
+  margin: 0 var(--edge) calc(var(--edge) * var(--dock-open));
+  overflow: hidden;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
   padding: 0 4px;
-  clip-path: inset(0 0 calc(var(--p) * 100%) 0 round var(--radius));
+  /* Its frame goes at the very end, so a closed dock leaves no line under the bar. */
+  border-width: calc(var(--frame) * min(1, var(--dock-open) * 8));
 }
 
 
