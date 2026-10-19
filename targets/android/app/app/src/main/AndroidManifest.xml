@@ -44,12 +44,11 @@
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
-    <!-- Android widgets on home bound silently (shell/AppWidgets.kt: bindAppWidgetIdIfAllowed) needs
-         android.permission.BIND_APPWIDGET (signature|privileged). NOT requested yet: the phone enforces the privapp
-         allowlist (ro.control_privapp_permissions=enforce), and an installed APK asking for it before the system module
-         that allowlists it is installed AND booted once stops the phone at the boot screen. Add the uses-permission back
-         only after `dumpsys package com.powos.app` / the mounted module xml show it allowlisted; install-app.sh refuses
-         an APK that asks for a privileged permission the phone's module doesn't list. -->
+    <!-- Android widgets on home bound silently (shell/AppWidgets.kt: bindAppWidgetIdIfAllowed): signature|privileged,
+         granted through the system module's privapp allowlist (privapp-permissions-com.powos.app.xml, on the phone since
+         powos-system 29873839). The phone enforces that allowlist: an APK asking for a privileged permission the mounted
+         module doesn't list stops the phone at the boot screen - install-app.sh refuses such an APK. -->
+    <uses-permission android:name="android.permission.BIND_APPWIDGET" />
     <uses-feature
         android:name="android.software.live_wallpaper"
         android:required="false" />
