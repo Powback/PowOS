@@ -338,7 +338,9 @@ powos.on("recents.drag", (e: { progress: number; x: number; y: number; home?: nu
 });
 powos.on("recents.end", (e: { to: "switcher" | "home" | "app"; snapshot?: string | null }) => {
   if (e.to === "switcher") landed(e.snapshot ?? null);
-  else collapse(true);
+  // The window's settle drove the layer here frame by frame (its spring, "recents.drag"): it's there - let go at once.
+  // Not from a swipe (or the host gave up on one): collapsed with its own spring.
+  else collapse(phase.value !== "drag");
 });
 powos.on("recents.show", (e: { open: boolean; from: number | null; tasks: RecentTask[] }) => void show(e));
 powos.on("recents.hide", () => collapse(false));

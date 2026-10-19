@@ -177,6 +177,9 @@ class NavGestureClassifier(
      */
     fun homeness(lift: Float = this.lift): Float = ((lift - homeZoneStart) / (homeDistance - homeZoneStart)).coerceIn(0f, 1f)
 
+    /** The finger's speed now (px/ms; x rightwards, y upwards): what a release carries on with. */
+    fun speed(): Pair<Float, Float> = velocity().let { (vx, vy) -> vx to -vy }
+
     /** px/ms over the last [WINDOW_MS] of samples. */
     private fun velocity(): Pair<Float, Float> {
         if (samples.size < 2) return 0f to 0f

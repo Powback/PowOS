@@ -235,7 +235,16 @@ object Switcher {
         home?.emitNow("recents.drag", "{\"progress\":$progress,\"x\":${dx / d},\"y\":${dy / d},\"home\":$homeness}")
     }
 
-    /** The swipe went home or back to the app: the layer collapses. */
+    /**
+     * The swipe was let go for home or back to the app: its window settles there (RecentsTransition's spring) and the
+     * layer follows it frame by frame - it's no longer up (a fresh swipe or Home doesn't see it as open).
+     */
+    fun ending() {
+        if (!gesture) return
+        open = false
+    }
+
+    /** The window got where the swipe went (home or the app): the page lets the layer go - it's already there. */
     fun end(to: String) {
         if (!gesture) return
         gesture = false

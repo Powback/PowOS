@@ -1,6 +1,5 @@
 package dev.omalauncher.system.gesture
 
-import android.animation.ValueAnimator
 import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.content.ComponentName
@@ -20,7 +19,6 @@ import android.util.Log
 import android.view.Choreographer
 import android.view.RemoteAnimationTarget
 import android.view.SurfaceControl
-import android.view.animation.DecelerateInterpolator
 import androidx.annotation.RequiresApi
 import dev.omalauncher.system.HiddenApi
 import dev.omalauncher.system.Switcher
@@ -74,7 +72,6 @@ class RecentsTransition private constructor(
     private var controller: IBinder? = null
     private var apps: List<Leash> = emptyList()
     private var pending: Ending? = null
-    private var animator: ValueAnimator? = null
 
     /** The end under way's callback (until the windows got there, or WM Shell called it off). */
     private var ending: ((Boolean) -> Unit)? = null
@@ -139,8 +136,11 @@ class RecentsTransition private constructor(
     fun end(
         end: End,
         hold: ((() -> Unit) -> Unit)? = null,
+        /** The finger's speed at the release (px/ms, upwards): the settle carries on with it. */
+        liftSpeed: Float = 0f,
         done: (Boolean) -> Unit,
     ) {
+        releaseSpeed = liftSpeed
         when (state) {
             State.STARTING -> {
                 pending = Ending(end, hold, done)
@@ -161,6 +161,12 @@ class RecentsTransition private constructor(
             State.DONE -> done(interrupted)
         }
     }
+
+    /** The finger's upward speed at the release (px/ms). */
+    private var releaseSpeed = 0f
+
+    /** The settle's spring (Choreographer-paced) while it runs. */
+    private var settleFrame: Choreographer.FrameCallback? = null
 
     /** Set when the transition was given up before it started: how a late start is finished. */
     private var abandoned: End? = null
@@ -261,45 +267,81 @@ class RecentsTransition private constructor(
                 End.SWITCHER -> Look(1f, 0f, 0f)
                 End.APP -> Look(0f, 0f, 0f)
             }
-        animator?.cancel()
-        animator =
-            ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = if (toHome) 240 else 200
-                interpolator = DecelerateInterpolator(1.6f)
-                addUpdateListener {
-                    val f = it.animatedValue as Float
-                    look =
-                        Look(
-                            lerp(from.progress, to.progress, f),
-                            lerp(from.dx, to.dx, f),
-                            lerp(from.dy, to.dy, f),
-                            lerp(from.shrink, to.shrink, f),
-                            lerp(from.alpha, to.alpha, f),
-                            lerp(from.home, to.home, f),
-                        )
-                    apply(look)
+        val finish = {
+            if (state == State.ENDING) {
+                stop()
+                if (c != null) control(c) { finishCall(it, toHome, userLeaveHint = end == End.HOME) }
+                ending?.let { cb ->
+                    ending = null
+                    cb(true)
                 }
-                addListener(
-                    object : android.animation.AnimatorListenerAdapter() {
-                        override fun onAnimationEnd(animation: android.animation.Animator) {
-                            if (state != State.ENDING) return
-                            val finish = {
-                                if (state == State.ENDING) {
-                                    stop()
-                                    if (c != null) control(c) { finishCall(it, toHome, userLeaveHint = end == End.HOME) }
-                                    ending?.let { cb ->
-                                        ending = null
-                                        cb(true)
-                                    }
-                                }
-                            }
-                            // The windows stay where they are (on the card) until the holder lets them go.
-                            if (hold != null) hold { main.post(finish) } else finish()
-                        }
-                    },
-                )
-                start()
             }
+        }
+        // From where the finger left the windows, at its speed: the settle's start speed in its own units (fractions
+        // of the way per second) is the finger's speed through the progress it moved (lift / travel).
+        val travel = (screen.bottom - target().bottom).toFloat().coerceAtLeast(screen.height() * 0.12f)
+        val progressPerSec = releaseSpeed * 1000f / travel
+        val span = to.progress - from.progress
+        val v0 = if (kotlin.math.abs(span) > 0.02f) (progressPerSec / span).coerceIn(-4f, 12f) else 0f
+        settle(v0, { f ->
+            look =
+                Look(
+                    lerp(from.progress, to.progress, f),
+                    lerp(from.dx, to.dx, f),
+                    lerp(from.dy, to.dy, f),
+                    lerp(from.shrink, to.shrink, f),
+                    lerp(from.alpha, to.alpha, f).coerceIn(0f, 1f),
+                    lerp(from.home, to.home, f),
+                )
+            apply(look)
+        }) {
+            if (state != State.ENDING) return@settle
+            // The windows stay where they are (on the card) until the holder lets them go.
+            if (hold != null) hold { main.post(finish) } else finish()
+        }
+    }
+
+    /**
+     * A spring from 0 to 1 starting at speed [v0] (per second), each display frame to [onFrame], then [onDone]: the
+     * drawer's and the shade's settle (their 280 ms ease-out, cubic-bezier(0.2, 0.9, 0.3, 1)) with the finger's
+     * momentum kept - critically damped, so it never overshoots a window past its card. Quickstep settles its windows
+     * with a spring the same way (AnimatedFloat + SpringAnimation from the release velocity).
+     */
+    private fun settle(
+        v0: Float,
+        onFrame: (Float) -> Unit,
+        onDone: () -> Unit,
+    ) {
+        settleFrame?.let(choreographer::removeFrameCallback)
+        var x = 0f
+        var v = v0
+        var last = 0L
+        val cb =
+            object : Choreographer.FrameCallback {
+                override fun doFrame(now: Long) {
+                    if (state != State.ENDING) return
+                    val dt = if (last == 0L) 1f / 120 else ((now - last) / 1e9f).coerceIn(0.001f, 0.05f)
+                    last = now
+                    // Semi-implicit Euler in small steps: steady at 60 or 120 Hz.
+                    var left = dt
+                    while (left > 0f) {
+                        val h = minOf(left, 0.004f)
+                        v += (-SPRING_K * (x - 1f) - SPRING_C * v) * h
+                        x += v * h
+                        left -= h
+                    }
+                    val settled = kotlin.math.abs(x - 1f) < 0.003f && kotlin.math.abs(v) < 0.05f
+                    onFrame(if (settled) 1f else x)
+                    if (settled) {
+                        settleFrame = null
+                        onDone()
+                    } else {
+                        choreographer.postFrameCallback(this)
+                    }
+                }
+            }
+        settleFrame = cb
+        choreographer.postFrameCallback(cb)
     }
 
     /** Done with the windows: no more moving them, the leashes let go. */
@@ -308,8 +350,8 @@ class RecentsTransition private constructor(
         if (framePending) choreographer.removeFrameCallback(frame)
         framePending = false
         main.removeCallbacks(watchdog)
-        animator?.cancel()
-        animator = null
+        settleFrame?.let(choreographer::removeFrameCallback)
+        settleFrame = null
         controller = null
         apps.forEach { runCatching { it.surface.release() } }
         apps = emptyList()
@@ -449,6 +491,13 @@ class RecentsTransition private constructor(
         private const val FINISHED_CALLBACK_ON_TRANSITION_FINISHED = 1
 
         private const val START_TIMEOUT_MS = 700L
+
+        /**
+         * The settle's spring (1/s², 1/s): critically damped (c = 2 sqrt k), settled in about 280 ms from rest - the
+         * drawer's and the shade's settle.
+         */
+        private const val SPRING_K = 500f
+        private val SPRING_C = 2f * kotlin.math.sqrt(SPRING_K)
 
         /** Past the card, the window goes up this much of the finger's way. */
         private const val RUBBER = 0.3f

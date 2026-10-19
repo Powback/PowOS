@@ -67,6 +67,9 @@ class NavGesture(
     /** The hold state last logged. */
     private var armedLogged = false
 
+    /** The finger's upward speed at the last release (px/ms): the window's settle carries on with it. */
+    private var releaseLift = 0f
+
     /** Counts swipes: a fallback of one that ended (its transition called off) mustn't act once the next has begun. */
     private var swipe = 0
 
@@ -130,6 +133,7 @@ class NavGesture(
             MotionEvent.ACTION_UP -> {
                 classifier = null
                 val outcome = c.up(e.rawX, e.rawY, e.eventTime)
+                releaseLift = c.speed().second
                 ended(outcome, c.why)
                 return GestureConsumer.Verdict.FOLLOW
             }
@@ -192,7 +196,7 @@ class NavGesture(
                 // Onto its card; the transition finishes to home once the card shows the app's snapshot - home's page is
                 // showing the switcher already, so it simply stays up.
                 val mine = swipe
-                t.end(RecentsTransition.End.SWITCHER, hold = { release -> Switcher.settle(over, release) }) { ok ->
+                t.end(RecentsTransition.End.SWITCHER, hold = { release -> Switcher.settle(over, release) }, liftSpeed = releaseLift) { ok ->
                     Switcher.settled(ok)
                     if (ok) runCatching { systemUi?.onOverviewShown(false) } else if (swipe == mine) switcher(over)
                 }
@@ -208,19 +212,23 @@ class NavGesture(
     /** Let go for home: the window shrinks away, home's switcher layer collapses into home. */
     private fun home(t: RecentsTransition?) {
         if (t == null) return goHome()
-        Switcher.end("home")
+        // The page follows the window's settle frame by frame (the same spring), and hears where it went at its end.
+        Switcher.ending()
         // The recents activity was what came up behind the app (the desktop is home): home is started after it.
         val viaRecents = !Switcher.onHome
         val mine = swipe
         // Called off (a next swipe's transition took over): the plain home intent - unless that next swipe is under way.
-        t.end(RecentsTransition.End.HOME) { ok -> if ((!ok || viaRecents) && swipe == mine) goHome() }
+        t.end(RecentsTransition.End.HOME, liftSpeed = releaseLift) { ok ->
+            Switcher.end("home")
+            if ((!ok || viaRecents) && swipe == mine) goHome()
+        }
     }
 
     /** Back to the app (let go early, or the shade was put away instead): its window full screen again. */
     private fun backToApp(t: RecentsTransition?) {
         if (t == null) return
-        Switcher.end("app")
-        t.end(RecentsTransition.End.APP) {}
+        Switcher.ending()
+        t.end(RecentsTransition.End.APP, liftSpeed = releaseLift) { Switcher.end("app") }
     }
 
     /** Home, as the home button: home comes to the front (its page closes the switcher, as for Home pressed). */
