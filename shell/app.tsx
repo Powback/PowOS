@@ -24,7 +24,7 @@ function applyTheme(t: ThemeColors | null) {
   for (const [k, v] of Object.entries(t.css)) root.setProperty(`--color-${k}`, v);
   for (let i = 0; i < 16; i++) if (t.colors[`color${i}`]) root.setProperty(`--term-color${i}`, t.colors[`color${i}`]);
   if (t.colors.cursor) root.setProperty("--term-cursor", t.colors.cursor);
-  root.setProperty("color-scheme", t.light ? "light" : "dark");
+  // No color-scheme: a dark one paints the WebView's canvas opaque, over the wallpaper home shows through.
 }
 powos.on("theme.changed", applyTheme);
 applyTheme(await powos.theme.get().catch(() => null));
