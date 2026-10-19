@@ -4,6 +4,7 @@ import { powos } from "./bridge.ts";
 import { Home } from "./ui/home.tsx";
 import { Aod } from "./ui/aod.tsx";
 import { Assist } from "./ui/assist.tsx";
+import { Shade } from "./ui/shade.tsx";
 import { chat, load } from "./state.ts";
 import type { Insets, ThemeColors } from "./types.ts";
 import "./hot.ts";
@@ -31,11 +32,17 @@ function applyTheme(t: ThemeColors | null) {
 powos.on("theme.changed", applyTheme);
 applyTheme(await powos.theme.get().catch(() => null));
 
-/** Which screen this page is: the host says (index.html?mode=) - home, or a slot's (aod: screen-off; assist: PowOS AI over an app). */
+/**
+ * Which screen this page is: the host says (index.html?mode=) - home, or a slot's (aod: screen-off; assist: PowOS AI
+ * over an app; shade: the notification shade).
+ */
 const mode = new URLSearchParams(location.search).get("mode");
 document.documentElement.dataset.mode = mode ?? "home";
 if (mode === "aod") {
   render(<Aod />, document.body);
+} else if (mode === "shade") {
+  // The system's shade (the native shade host's window): the notification panel alone.
+  render(<Shade />, document.body);
 } else if (mode === "assist") {
   // Over another app: PowOS AI's chat only (the rest of home isn't loaded).
   chat.value = await powos.ai.chat();

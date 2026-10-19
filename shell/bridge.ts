@@ -102,6 +102,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       clearAll: () => call("notifications.clearAll"),
       access: () => call("notifications.access"),
     },
+    shade: { closed: () => call("shade.closed") },
     assist: {
       screen: () => call<AssistScreen | null>("assist.screen"),
       close: () => call("assist.close"),
@@ -313,6 +314,7 @@ function mock(): Bridge {
       read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
+    shade: { closed: async () => console.log("[mock] shade closed") },
     // A screen it was opened over: some text, no screenshot.
     assist: {
       screen: async () => ({ text: "Inbox\n  Mats - are we still on for tonight?\n  Your order has shipped", screenshot: null }),

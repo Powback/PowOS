@@ -822,3 +822,6 @@ html[data-mode="assist"] .assist {
 /* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
 html[data-mode="assist"] .assist.live { background: none; pointer-events: none; }
 .assist.live .assist-panel { pointer-events: auto; max-height: 45%; }
+/* The shade's own page (shade.tsx): nothing but the panel and its dimming, over whatever is on screen. */
+html[data-mode="shade"], html[data-mode="shade"] body { background: transparent; }
+.shade-screen { padding: 0; }
