@@ -216,6 +216,8 @@ class Runtime(
     fun start() {
         if (started) return
         started = true
+        // The lock screen's face: PowOS's, over Android's (shell/LockFace.kt).
+        dev.omalauncher.shell.LockFace.start(context)
         scope.launch {
             withContext(Dispatchers.IO) {
                 LauncherData.migrate(context)

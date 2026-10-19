@@ -102,6 +102,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       clearAll: () => call("notifications.clearAll"),
       access: () => call("notifications.access"),
     },
+    lock: { unlock: () => call("lock.unlock") },
     qs: {
       state: () => call<QuickState>("qs.state"),
       toggle: (name) => call<QuickState>("qs.toggle", name),
@@ -325,6 +326,7 @@ function mock(): Bridge {
       read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
+    lock: { unlock: async () => console.log("[mock] unlock") },
     qs: (() => {
       let st: QuickState = { torch: false, dnd: false };
       return {

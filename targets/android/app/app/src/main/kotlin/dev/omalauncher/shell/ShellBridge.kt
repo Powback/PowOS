@@ -69,6 +69,9 @@ class ShellBridge(
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
     private val quick: QuickSettings = QuickSettings(context) { main.post { emit("qs.changed", quick.state()) } }
 
+    /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
+    var lock: LockSlot? = null
+
     /** Set by the assistant's session (its page is the assist screen): the screen it was opened over, closing it. */
     var assist: dev.omalauncher.assist.AssistSlot? = null
 
@@ -165,6 +168,7 @@ class ShellBridge(
             "ai.mail" -> aiMail()
             "ai.sessions" -> aiSessions()
             "ai.attach" -> aiAttach(a.getString(0))
+            "lock.unlock" -> lock?.unlock()
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))

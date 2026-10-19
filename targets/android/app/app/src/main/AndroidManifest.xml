@@ -218,6 +218,17 @@
             android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustNothing" />
 
+        <!-- The lock screen's face (shell/LockFace.kt): over Android's lock screen, which keeps the lock. -->
+        <activity
+            android:name=".shell.PowosLockActivity"
+            android:theme="@style/Theme.Omalauncher.Window"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=".lock"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode" />
+
         <!-- The Compose launcher's screens (store, themes, settings...) over the web shell until it has its own. -->
         <activity
             android:name=".shell.ShellScreensActivity"

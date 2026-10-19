@@ -246,6 +246,10 @@ export interface Bridge {
     /** Where the page takes touches (live mode: its bar, CSS px); null: everywhere. */
     touchable(rect: { left: number; top: number; width: number; height: number } | null): Promise<void>;
   };
+  /** The lock screen's face (index.html?mode=lock): unlocking is Android's (its PIN pad, the fingerprint). */
+  lock: {
+    unlock(): Promise<void>;
+  };
   /**
    * The notification panel's quick settings: the flashlight and do not disturb switch here (null: unavailable),
    * Wi-Fi, Bluetooth, internet and settings open Android's own panels. "qs.changed" brings the state again.
@@ -317,7 +321,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "qs.changed" (QuickState), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "qs.changed" (QuickState), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

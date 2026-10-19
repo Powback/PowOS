@@ -5,6 +5,7 @@ import { Home } from "./ui/home.tsx";
 import { Aod } from "./ui/aod.tsx";
 import { Assist } from "./ui/assist.tsx";
 import { Shade } from "./ui/shade.tsx";
+import { Lock } from "./ui/lock.tsx";
 import { Switcher } from "./ui/switcher.tsx";
 import { chat, load } from "./state.ts";
 import type { Insets, ThemeColors } from "./types.ts";
@@ -44,6 +45,9 @@ if (mode === "aod") {
 } else if (mode === "switcher") {
   // The system's recents screen (SwitcherActivity): the recent tasks alone.
   render(<Switcher />, document.body);
+} else if (mode === "lock") {
+  // The lock screen's face (PowosLockActivity), over Android's lock screen.
+  render(<Lock />, document.body);
 } else if (mode === "shade") {
   // The system's shade (the native shade host's window): the notification panel alone.
   render(<Shade />, document.body);
