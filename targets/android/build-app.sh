@@ -10,6 +10,17 @@
 # Usage: targets/android/build-app.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+# The APK ships shell/ and the app sources as they are on disk. In a checkout several agents share, that is other
+# agents' half-done work too (2026-10-20: an in-progress shell/apps/pages.ts in APK 29874211 left home and the lock
+# face without JS). So build only committed code: refuse while either has uncommitted or untracked changes.
+# POWOS_BUILD_DIRTY=1 overrides it, for a deliberate local experiment.
+ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
+dirty=$(git -C "$ROOT" status --porcelain -- shell targets/android/app | grep -v 'app/version.properties$' || true)
+if [ -n "$dirty" ] && [ "${POWOS_BUILD_DIRTY:-}" != 1 ]; then
+  echo "build-app: refusing - uncommitted changes would ship in the APK (commit them, or POWOS_BUILD_DIRTY=1):" >&2
+  echo "$dirty" | sed 's/^/  /' >&2
+  exit 3
+fi
 AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
 want=/Projects${HERE#$HOME/Projects}/app
 link=$AAD/projects/powos
