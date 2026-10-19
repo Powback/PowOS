@@ -12,7 +12,8 @@ pkg=com.powos.app
 if [ "${1:-}" = "--reset" ]; then
   shift
   if [ $# -eq 0 ]; then
-    adb shell "run-as $pkg rm -rf files/shell && run-as $pkg mkdir files/shell"
+    # Its contents, not the folder: the shell watches the folder itself, and a new one would go unwatched.
+    adb shell "run-as $pkg sh -c 'rm -rf files/shell/* files/shell/.[!.]*'"
   else
     for f in "$@"; do adb shell "run-as $pkg rm -f 'files/shell/$f'"; done
   fi

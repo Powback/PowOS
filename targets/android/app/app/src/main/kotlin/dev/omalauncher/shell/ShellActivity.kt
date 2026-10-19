@@ -76,6 +76,16 @@ class ShellActivity : Activity() {
             WindowInsets.CONSUMED
         }
         watch(overrides)
+        // The override folder deleted and made again (a reset): watch the new one - the old watchers went with it.
+        watchers +=
+            object : FileObserver(filesDir, CREATE or MOVED_TO) {
+                override fun onEvent(
+                    event: Int,
+                    path: String?,
+                ) {
+                    if (path == overrides.name) runOnUiThread { watch(overrides) }
+                }
+            }.also { it.startWatching() }
         web.loadUrl(devUrl() ?: "$ORIGIN/index.html")
     }
 

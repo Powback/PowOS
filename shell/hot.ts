@@ -22,9 +22,14 @@ powos.on("files.changed", ({ path }: { path: string }) => {
  * is lost, and a stylesheet swapped meanwhile then lays new styles over old modules. It waits for the shell to show.
  */
 let pending = false;
+let timer = 0;
+/** Once the changes stop: a push of several files reloads once, after the last one is written. */
 function reload() {
-  if (document.hidden) pending = true;
-  else location.reload();
+  clearTimeout(timer);
+  timer = window.setTimeout(() => {
+    if (document.hidden) pending = true;
+    else location.reload();
+  }, 300);
 }
 document.addEventListener("visibilitychange", () => {
   if (pending && !document.hidden) location.reload();

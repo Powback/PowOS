@@ -43,11 +43,23 @@ interface Gesture {
 /** The gesture under way: module state, so a re-render in the middle of one (the drawer moving) keeps it. */
 let g: Gesture | null = null;
 
+/**
+ * A gesture dropped half-way (a long press took over, a second finger, an end that never came): whatever it was
+ * dragging settles where its state says, rather than staying half-open.
+ */
+function abandon() {
+  g = null;
+  drawerDrag.value = null;
+  pageDrag.value = null;
+}
+
 /** Handlers for home's root element. */
 export function homeGestures() {
 
   const start = (x: number, y: number, target: Element) => {
-    if (carry.value || selected.value || menu.value) return (g = null);
+    // A new touch while one is under way: the old one's end was lost.
+    if (g) abandon();
+    if (carry.value || selected.value || menu.value) return;
     const list = document.querySelector(".drawer-list");
     g = {
       x0: x,
@@ -66,7 +78,7 @@ export function homeGestures() {
 
   const move = (x: number, y: number, e: Event | null) => {
     if (!g || g.own) return;
-    if (carry.value) return (g = null);
+    if (carry.value) return abandon();
     const dx = x - g.x0;
     const dy = y - g.y0;
     const now = performance.now();
@@ -117,7 +129,7 @@ export function homeGestures() {
   };
 
   return {
-    onTouchStart: (e: TouchEvent) => (e.touches.length === 1 ? start(e.touches[0].clientX, e.touches[0].clientY, e.target as Element) : (g = null)),
+    onTouchStart: (e: TouchEvent) => (e.touches.length === 1 ? start(e.touches[0].clientX, e.touches[0].clientY, e.target as Element) : abandon()),
     onTouchMove: (e: TouchEvent) => move(e.touches[0].clientX, e.touches[0].clientY, e),
     onTouchEnd: end,
     onTouchCancel: end,
