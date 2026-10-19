@@ -142,5 +142,28 @@ if [ -f $B ] || [ ! -e $R/usr/bin/bwrap ]; then
     'pacman -S --noconfirm bubblewrap >/dev/null 2>&1 || pacman -Sy --noconfirm bubblewrap >/dev/null'
   echo "bwrap: real bubblewrap (shim moved to $B.noroot-engine)"
 fi
+# PowOS apps (docs/POWOS-APPS-FEASIBILITY.md): SpacetimeDB (our package of the official aarch64 binaries, pinned), the
+# runtime switch + the system tier's supervisor + the app CLI (lib/apps -> /usr/lib/powos/apps), the service manifests,
+# the registry's module, and the CLI's front doors (`powos app`, `powos config app-runtime`). The system tier starts
+# from powos-start.sh (at boot, and now); its data and settings are the user's, under /var/lib/powos.
+A=$T/powos-apps
+if [ -d $A ]; then
+  for p in $A/spacetimedb-bin-*.pkg.tar.*; do
+    [ -e "$p" ] || continue
+    cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
+      echo "spacetimedb: $(chroot $R /usr/bin/spacetime --version 2>/dev/null | head -1)"
+  done
+  L=$R/usr/lib/powos/apps
+  mkdir -p $L/services $L/registry
+  for f in powos-runtime powos-supervisor powos-app; do install -m 755 $A/$f $L/$f; ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
+  install -m 644 $A/services/*.json $L/services/
+  [ -f $A/registry.wasm ] && install -m 644 $A/registry.wasm $L/registry/module.wasm
+  install -m 755 $A/powos $R/usr/bin/powos
+  install -m 644 $A/config.sh $R/usr/lib/powos/config.sh
+  U=$(stat -c %u /data/data/com.powos.app)
+  for d in /var/lib/powos/runtime /var/lib/powos/stdb; do mkdir -p $R$d && chown $U:$U $R$d; done
+  mkdir -p $R/var/log/powos
+  rm -rf $A
+fi
 resetprop -p persist.powos.root 1
 echo "deployed (persist.powos.root=$(getprop persist.powos.root))"

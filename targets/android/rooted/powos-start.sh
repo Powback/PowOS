@@ -62,4 +62,58 @@ chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/root /bin/sh -c '
   [ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A
   pgrep -x sshd >/dev/null || /usr/bin/sshd -p 2222
 ' && echo "sshd on 2222"
+
+# PowOS's local services' ports (SpacetimeDB 3410), for the PowOS app's uid only: Android's loopback is shared by
+# every app on the phone, and the PowOS user powos IS the app's uid - so the app's WebViews, the desktop session,
+# agents and root pass, every other Android app gets a reset (docs/POWOS-APPS-FEASIBILITY.md section 3). The uid
+# comes from Android's package list each time (it changes if the app is reinstalled). A changed rule set is built as
+# a new chain and swapped in, never flushed in place (that would leave the port open in between).
+POWOS_PORTS="3410"
+lock_ports() {
+  u=$(awk '$1 == "com.powos.app" {print $2}' /data/system/packages.list)
+  [ -n "$u" ] || { echo "port lock: com.powos.app not in packages.list"; return 1; }
+  want="-A powos-local -m owner --uid-owner $u -j RETURN
+-A powos-local -m owner --uid-owner 0 -j RETURN
+-A powos-local -p tcp -j REJECT --reject-with tcp-reset"
+  have=$(iptables -w -S powos-local 2>/dev/null | grep '^-A')
+  if [ "$have" != "$want" ]; then
+    iptables -w -N powos-local-new 2>/dev/null || iptables -w -F powos-local-new
+    printf '%s\n' "$want" | sed 's/^-A powos-local /-A powos-local-new /' | while read -r rule; do iptables -w $rule; done
+    for p in $POWOS_PORTS; do iptables -w -I OUTPUT 1 -o lo -p tcp --dport "$p" -j powos-local-new; done
+    for p in $POWOS_PORTS; do while iptables -w -D OUTPUT -o lo -p tcp --dport "$p" -j powos-local 2>/dev/null; do :; done; done
+    iptables -w -F powos-local 2>/dev/null && iptables -w -X powos-local
+    iptables -w -E powos-local-new powos-local
+    echo "port lock: $POWOS_PORTS for uid $u (and root)"
+  fi
+  for p in $POWOS_PORTS; do
+    iptables -w -C OUTPUT -o lo -p tcp --dport "$p" -j powos-local 2>/dev/null || iptables -w -I OUTPUT 1 -o lo -p tcp --dport "$p" -j powos-local
+  done
+}
+
+# PowOS's system tier: services that live as long as the phone, not the desktop session (which restarts with every
+# app update and kills its whole process group). Its own persistent mount namespace with PowOS as its root - the same
+# pivot_root as powos-session.sh - made once per boot, running the supervisor (lib/apps/powos-supervisor: SpacetimeDB
+# and other manifests under /usr/lib/powos/apps/services, budgets, idle unload). Never without the port lock above.
+# Off: touch /data/powos/system-tier.off (rooted.sh system off); its state: rooted.sh system status.
+system_tier() {
+  # (the real file: /usr/bin/powos-supervisor is a link that only resolves inside PowOS)
+  [ -x "$R/usr/lib/powos/apps/powos-supervisor" ] || return 0
+  [ -e /data/powos/system-tier.off ] && { echo "system tier: off (/data/powos/system-tier.off)"; return 0; }
+  pid=$(cat "$R/run/powos-system/supervisor.pid" 2>/dev/null)
+  [ -n "$pid" ] && grep -q powos-supervisor "/proc/$pid/cmdline" 2>/dev/null && return 0
+  lock_ports || { echo "system tier: not started (no port lock)"; return 1; }
+  export L="$R/usr/lib/ld-linux-aarch64.so.1 --library-path $R/usr/lib" R
+  setsid nsenter -t 1 -m -- unshare -m sh -c '
+    $L $R/usr/bin/mount --make-rprivate / && $L $R/usr/bin/mount --rbind $R $R && cd $R && mkdir -p .oldroot &&
+      $L $R/usr/bin/pivot_root . .oldroot || exit 1
+    exec /usr/bin/env -i PATH=/usr/bin:/usr/sbin LANG=C.UTF-8 /bin/sh -c "umount -l /.oldroot; exec /usr/bin/powos-supervisor"
+  ' > /dev/null 2>&1 < /dev/null &
+  for _ in $(seq 50); do
+    pid=$(cat "$R/run/powos-system/supervisor.pid" 2>/dev/null)
+    [ -n "$pid" ] && [ -d "/proc/$pid" ] && { echo "system tier: supervisor pid $pid"; return 0; }
+    sleep 0.1
+  done
+  echo "system tier: the supervisor didn't come up (/data/powos/root/var/log/powos/supervisor.log)"
+}
+system_tier
 echo "PowOS up"

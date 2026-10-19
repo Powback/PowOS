@@ -3066,6 +3066,11 @@ case "${1:-}" in
         source "$POWOS_LIB/ai/manager/manager.sh"
         manager_run "$@"
         ;;
+    app|apps)
+        # PowOS apps: install/publish/list, the runtime switch, the system tier (lib/apps/powos-app).
+        shift
+        exec "$POWOS_LIB/apps/powos-app" "$@"
+        ;;
     comms)
         shift
         source "$POWOS_LIB/ai/comms/comms.sh"

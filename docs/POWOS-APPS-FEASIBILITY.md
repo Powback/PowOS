@@ -581,6 +581,32 @@ in agents' tool lists live.
 **Scaffolding.** `powos app new <name>` copies `~/Projects/spacetimedb-astro`. It swaps React for Preact
 (`@astrojs/preact`, `preact/hooks` in `src/lib/db.ts`), adds `powos-app.json`, and adds a `widgets/` entry.
 
+### 5.6 The app runtime: one switch, native first (decided 2026-10-19)
+
+**Lightweight, native and containerless first; containers are a toggle once they are ready on the phone.** The
+manifest says *what* an app needs; a setting decides *how* it runs. `lib/apps/powos-runtime` implements it:
+
+| Mode | What runs | Isolation | Phone status |
+|---|---|---|---|
+| `native` | a plain process under the supervisor (Tier 0 apps: no process at all) | its user; rlimits, nice, ionice | ✅ |
+| `sandbox` | the *same binary* under bubblewrap: `--unshare-user --unshare-pid --unshare-uts --unshare-cgroup-try` (never `--unshare-ipc`/`--unshare-all`: no SysV IPC in Android's kernel), `--ro-bind / /`, private `/tmp` `/run`, `/home` and `/var/lib/powos` hidden, only the data dir (+ `needs.write`) writable, `--unshare-net` when `needs.network` is `"none"`, a seccomp denylist (mount/namespaces/BPF/ptrace/keys/kexec/modules/new mount API; `clone` with namespace flags; `clone3` → ENOSYS) and Landlock where the kernel has it | ✅ (no Landlock: `CONFIG_SECURITY_LANDLOCK` is off in this kernel - a kernel item) |
+| `container` | podman, for apps that need a foreign userland | full | **not ready yet**: refused (exit 78) until `/dev/fuse` and cgroup v2 land (§2) |
+
+- **Settings.** `powos config app-runtime <mode>` is the default, `powos app runtime <id> <mode>` an app's override,
+  both in `/var/lib/powos/runtime/config.json` (the user's, no sudo). The supervisor restarts what a change affects
+  within seconds.
+- **Flipping never changes the app.** The same command, data dir (bound at the same path), port (the host's network
+  namespace), uid (the user namespace maps it to itself, so files and the SpacetimeDB identity stay) - verified on the
+  phone by flipping the live SpacetimeDB to `sandbox` and back mid-session.
+- **Budgets without cgroups** (the same policy everywhere; hard limits once cgroups exist): rlimits from the manifest
+  (`nofile`, `nproc` - per uid, so generous -, `cpuSec` for jobs only, `asMB` only for programs that don't reserve
+  huge address space: never V8/wasmtime), `nice`, `io` (ionice class), and the supervisor watching each service's
+  process tree in `/proc` every 10 s: RSS over `memMB` → restart (after 3 in 5 minutes: held, never a loop), CPU over
+  `cpuPct` for a minute → nice 19 until it calms down. `idle` policies unload (below).
+- **Supervisor.** `lib/apps/powos-supervisor`, the system tier's process (§1.2), runs every manifest in
+  `/usr/lib/powos/apps/services/`. HACK, by design for now: the real one is `systemd --user` with a delegated cgroup v2
+  subtree (§2.4) - one unit per manifest, the same manifests - and this goes.
+
 ## 6. Native surfaces, hot reload and lifecycle
 
 ### 6.1 Integration matrix
@@ -678,3 +704,67 @@ The desktop runs one SpacetimeDB too, as a systemd unit, the same binary built f
 4. **Kernel `containers.config`** (`CGROUP_PIDS`, `CFS_BANDWIDTH`, `TMPFS_XATTR`). Build and kmi-check only; flash
    only if KMI passes and a `fastboot boot` test is clean.
 5. **Pin SpacetimeDB 2.12 fleet-wide** and move the template to Preact. This touches `~/Projects/spacetimedb-astro`.
+
+## 8. The prototype on the phone (2026-10-19)
+
+What now exists on the OnePlus Open (user-approved build of the Tier 0 prototype; containers, `/dev/fuse`, cgroup v2
+and the kernel deferred):
+
+| Piece | Where | State |
+|---|---|---|
+| SpacetimeDB 2.12.0, official aarch64 binaries | `targets/android/pkgs/spacetimedb-bin` → `/usr/lib/spacetimedb/2.12.0/`, `spacetime` on PATH; in the image through `out/pkgs` (`install-powos-android.sh` installs every package there), on a running phone through `rooted.sh deploy` | ✅ |
+| System tier | `powos-start.sh` → `powos-supervisor` in PowOS's own mount namespace, once per boot; survives desktop restarts | ✅ |
+| Port lock | iptables chain `powos-local`: `127.0.0.1:3410` for the app's uid (looked up in `packages.list` each start) and root, `tcp-reset` for the rest | ✅ uid 2000 (shell) and 10200 (another app) refused; root and 10359 pass |
+| Runtime switch | `powos-runtime`, `powos config app-runtime`, `powos app runtime` | ✅ native, sandbox; container stubbed |
+| Registry | `apps/registry` (Rust) → database `powos-registry`, `install(manifest)`/`remove(id)`, owner-only | ✅ |
+| Tier 0 app | `apps/counter` (Rust module `powos-counter`, island `widgets/count.js`, `powos-app.json`) | ✅ installed via `powos app install` |
+| Shell | `shell/apps/stdb.ts` (one socket per database for the page, 5 s grace, closed while hidden), `shell/apps/registry.ts`, `shell/ui/island.tsx`, vendored SDK `vendor/spacetimedb.js` (119 KB) | see below |
+
+**Measured on the phone** (SM8550, as `powos`, tests in `/tmp`, cleaned up):
+
+| | Value | Study (Mac) |
+|---|---|---|
+| SpacetimeDB start → `/v1/ping` | 128 ms | 130-150 ms |
+| SpacetimeDB idle, 0 databases loaded | 50.8 MB RSS, 27 threads, 1.4 % of a core, ~144 wakeups/s | 137 MB, 0.3-0.7 %, ~170/s |
+| … 2 Rust databases loaded (registry + counter) | 74-78 MB RSS, 31 threads, 3.8-4.4 % of a core, ~435 wakeups/s | — |
+| Per loaded Rust database | ~13 MB, **~145 wakeups/s**, ~1.4 % of a core | ~5.5 MB, ~11/s |
+| `TOKIO_WORKER_THREADS=2` | 25 threads, wakeups and CPU unchanged: the cost is per database, not per worker | — |
+| Start `true`: plain exec / `powos-runtime` native / sandbox / podman (vfs store) | 3-6 ms / 70-87 ms / 79-131 ms / 315-367 ms | podman 310-460 ms |
+| Wrapper cost, sandbox | 2 bwrap processes, 0.96 MB + 0.12 MB RSS, 0 wakeups idle | conmon 2.3 MB |
+| Sandbox as seen from inside | uid kept (10359), own pid/user ns, CapEff 0, NoNewPrivs 1, seccomp filter on, `/usr` read-only, `unshare` → EPERM | — |
+| Supervisor | ~0.1 wakeups/s (one `sigtimedwait` per 10 s tick; a child's exit wakes it) | — |
+
+**What follows:**
+- `powos-runtime`'s ~70 ms is Python start-up, paid once per service start, not per request. Sandbox adds ~10-40 ms
+  and ~1 MB; podman adds ~250 ms, a storage driver and (on the phone) blocks on `/dev/fuse`.
+- **Idle wakeups per database are ~13× the Mac's**, so idle unload is not optional on the phone: the supervisor's
+  policy (no client for `idle.quietSec` = 300 s and RSS above `idle.unloadAboveMB` = 180 → restart, which unloads
+  everything) brings an untouched server back to its ~144/s base. Next: ask upstream for idle-database eviction, or
+  profile the per-database timers (the tokio workers wake ~100×/s each with 2 databases). Battery cost: measure over a
+  night with `dumpsys batterystats` before the service is always-on by default.
+
+**Next steps (exact):**
+1. **Islands on home** - wire `app:<id>/<widget>` home items into the `panel` kind (`ShellPanels.kt`), the grid
+   (`grid.tsx` → `ui/island.tsx`) and the edit sheet (a "PowOS apps" list from the registry); APK.
+2. **cgroup v2 memory controller trial** (needs `fastboot boot` over USB - not possible over the VPN):
+   1. Extract the current `init_boot` (`backup/<serial>/init_boot_b.img`), unpack with `magiskboot unpack`.
+   2. Find the file `libprocessgroup` reads (`strings /system/lib64/libprocessgroup.so | grep cgroups`; expected
+      `/system/etc/cgroups.json`, no vendor copy here). Put a copy with `memory` moved from `Cgroups` (v1) to
+      `Cgroups2.Controllers` (`"NeedsActivation": true, "Optional": true, "MaxActivationDepth": 3`) into the
+      ramdisk's Magisk `overlay.d/powos/cgroups.json`, and `overlay.d/powos.rc` with
+      `on early-init` → `mount none /powos/cgroups.json /system/etc/cgroups.json bind` (before `SetupCgroups()`), and
+      `on post-fs-data` → `mkdir /sys/fs/cgroup/powos 0755 <powos uid> <powos uid>` +
+      `write /sys/fs/cgroup/powos/cgroup.subtree_control +memory`.
+   3. `magiskboot repack` → `init_boot-cg2.img`; **`fastboot boot init_boot-cg2.img`** (temporary, nothing flashed).
+   4. Check: `cat /sys/fs/cgroup/cgroup.controllers` lists memory; `dumpsys meminfo`; `logcat -b events | grep lmk`
+      during a memory soak (open 20 apps); the OPlus hybridswap/osense daemons' logcat for errors on
+      `/dev/memcg/*`; compare against a stock boot.
+   5. Only if clean: flash `init_boot_b`, keeping the stock image; then podman `cgroups=enabled` and the supervisor
+      moves services into `/sys/fs/cgroup/powos/<id>` with real `memory.max` (or `systemd --user`).
+3. **Kernel items** (another agent prepares the build): `CGROUP_PIDS`, `CFS_BANDWIDTH`, `TMPFS_XATTR`, and now
+   `SECURITY_LANDLOCK` (+ `landlock` already first in `CONFIG_LSM`), each through `tools/kmi-check.py`, `fastboot boot`
+   first.
+4. Per-app identities from the shell's issuer (HACK in `shell/apps/stdb.ts` until then: server-issued tokens).
+5. Session tier joins the system tier's namespace (`nsenter -t <supervisor pid> -m`) instead of building its own,
+   once the session's bind mounts (`/run/powos-app`, `files/apps`) are made inside it.
+

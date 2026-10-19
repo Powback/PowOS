@@ -296,6 +296,32 @@ Built centrally and shipped whole. Never `pacman -Syu` on the phone.
 - Claude: `ANTHROPIC_BASE_URL=http://claude-auth.pow`, the fleet's OAuth proxy. Never log in or refresh a token on
   the phone.
 
+### PowOS apps on the phone (system tier, SpacetimeDB, runtime switch)
+Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 the prototype on the phone).
+- **System tier** ✅ (2026-10-19): `powos-start.sh` (boot, and every session start) runs `powos-supervisor` once per
+  boot as root in PowOS's own persistent mount namespace, outside the desktop session (which an APK install restarts).
+  It runs every manifest in `/usr/lib/powos/apps/services/` through `powos-runtime`, restarts crashes with backoff
+  and keeps budgets without cgroups (RSS over `memMB` → restart, 3× in 5 min → held; CPU over `cpuPct` for a minute
+  → nice 19; rlimits/nice/ionice at start). `powos app services` = its status (`/run/powos-system/status.json`),
+  logs `/var/log/powos/<id>.log`. Off: `rooted.sh system off` (`/data/powos/system-tier.off`), on: `rooted.sh system on`.
+- **SpacetimeDB 2.12.0** (package `spacetimedb-bin`, official aarch64 binaries; `spacetime` CLI on PATH) as
+  `dev.powos.spacetimedb`: `127.0.0.1:3410`, data/keys `/var/lib/powos/stdb` (owned by powos). The port is locked to
+  the PowOS app's uid (= powos) and root by iptables chain `powos-local` (`xt_owner`); every other Android app gets
+  a reset. Idle unload: no client for 5 min and RSS > 180 MB → a ~150 ms restart that drops every loaded database
+  (each loaded database costs ~145 wakeups/s on this phone).
+- **Runtime switch**: `powos config app-runtime native|sandbox|container` (default), `powos app runtime <id> <mode>`
+  (per app). native = plain process; sandbox = bubblewrap (user/pid/uts/cgroup ns - never `--unshare-ipc`/`--unshare-all`,
+  this kernel has no SysV IPC), read-only system, private /tmp, only the data dir writable, seccomp denylist (no
+  Landlock: not in this kernel); container = **not ready yet** on the phone (refused, exit 78). Flipping restarts the
+  service in seconds; same command, data dir, port and uid. `powos app check` shows what this kernel supports.
+- **Apps**: `powos app install|publish|ui|list|remove` (Mac side: `apps/build.sh <app>` then
+  `ADB="docker exec powos-vadb adb" apps/install.sh <app> [install|publish|ui]`). The registry is the
+  `powos-registry` database (owner = powos's CLI identity). Installed UIs: `~/.local/share/powos/apps/<id>/<ver>/` =
+  the app's `files/apps` (bound by `powos-session.sh`), served to the shell at `https://shell.powos/_app/<id>/`.
+  Prototype: `apps/counter` (Rust module `powos-counter` + island widget `widgets/count.js`).
+- Remove an app: `powos app remove <id> [--data]`. Remove everything: `rooted.sh system off`, then delete
+  `/var/lib/powos/stdb`.
+
 ### Status
 - ✅ On hardware (OnePlus Open, 2026-10-19):
   - rooted desktop, PowOS as home + priv-app + recents provider

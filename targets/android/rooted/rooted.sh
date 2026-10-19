@@ -9,6 +9,7 @@
 #   check     what works: PowOS CLI, systemd-free services, GPU (vulkaninfo through Turnip)
 #   log       /data/powos/start.log
 #   run CMD   one command inside PowOS (no pipes: they would run in Android's shell)
+#   system [status|stop|off|on]   PowOS's system tier (SpacetimeDB under the supervisor, the uid-locked port)
 #   wifi      adb over Wi-Fi (port 5555, kept across reboots): unplug the cable
 #   widevine-l3 [remove]   Netflix etc. in SD on the unlocked phone (targets/native/widevine-l3.sh)
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
@@ -56,6 +57,19 @@ deploy)
   # PowOS's desktop widgets (desktop/plasmoid; the image ships them - a rootfs from an older image lacks their fixes).
   adb shell rm -rf /data/local/tmp/powos-plasmoids
   adb push -q "$HERE/../../../desktop/plasmoid" /data/local/tmp/powos-plasmoids
+  # PowOS apps (docs/POWOS-APPS-FEASIBILITY.md): the runtime switch, the system tier's supervisor, the app CLI and the
+  # service manifests (lib/apps), the CLI's front doors (bin/powos, lib/config.sh), SpacetimeDB (our package of the
+  # official binaries, build-pkgs.sh spacetimedb-bin) and the app registry's module (apps/build.sh registry).
+  adb shell rm -rf /data/local/tmp/powos-apps
+  adb push -q "$HERE/../../../lib/apps" /data/local/tmp/powos-apps
+  adb push -q "$HERE/../../../bin/powos" /data/local/tmp/powos-apps/powos
+  adb push -q "$HERE/../../../lib/config.sh" /data/local/tmp/powos-apps/config.sh
+  stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb-bin)
+  if [ -n "$stdb" ]; then adb push -q "$stdb" "/data/local/tmp/powos-apps/${stdb##*/}"
+  else echo "rooted.sh: no spacetimedb-bin package (targets/android/build-pkgs.sh spacetimedb-bin) - SpacetimeDB not updated"; fi
+  reg=$HERE/../../../apps/registry/out/module.wasm
+  if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
+  else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi
   asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh" ;;
 start)
   asu "sh /data/powos/powos-start.sh"; asu "tail -5 /data/powos/start.log" ;;
@@ -70,6 +84,16 @@ log)
   asu "cat /data/powos/start.log" ;;
 run)
   shift; in_powos "$*" ;;
+system)
+  # The system tier (powos-start.sh: SpacetimeDB and other services under the supervisor, outside the desktop
+  # session). status | stop (until the next boot or session) | off (stopped, and not started at boot) | on.
+  case ${2:-status} in
+    status) asu "cat /data/powos/root/run/powos-system/status.json 2>/dev/null || echo not running; echo; iptables -w -S powos-local 2>/dev/null; tail -5 /data/powos/root/var/log/powos/supervisor.log 2>/dev/null" ;;
+    stop) asu 'kill $(cat /data/powos/root/run/powos-system/supervisor.pid) && echo stopped' ;;
+    off) asu 'touch /data/powos/system-tier.off; kill $(cat /data/powos/root/run/powos-system/supervisor.pid) 2>/dev/null; echo "off (rooted.sh system on)"' ;;
+    on) asu 'rm -f /data/powos/system-tier.off; sh /data/powos/powos-start.sh; tail -3 /data/powos/start.log' ;;
+    *) echo "rooted.sh system status|stop|off|on"; exit 1 ;;
+  esac ;;
 android)
   # A script as root on the Android side (outside PowOS): pushed, then run with Magisk's su.
   [ -f "${2:-}" ] || { echo "usage: rooted.sh android <script>"; exit 1; }
@@ -93,5 +117,5 @@ widevine-l3)
     echo "Widevine L3 forced (now and at every boot)"
   fi ;;
 *)
-  sed -n '2,14p' "$0"; exit 1 ;;
+  sed -n '2,15p' "$0"; exit 1 ;;
 esac

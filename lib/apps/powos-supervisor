@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""powos-supervisor - PowOS's system tier on the phone: services that live as long as the device, not the desktop.
+
+The phone's desktop session restarts with every app update (the session tier); SpacetimeDB and other system
+services must not. rooted/powos-start.sh starts this once per boot, as root, in PowOS's own persistent mount
+namespace (docs/POWOS-APPS-FEASIBILITY.md section 1.2). It runs every service manifest in SERVICES through
+powos-runtime (native / sandbox / container, the user's setting) and keeps each within its budget without cgroups:
+
+  - restarts a service that exits, with backoff (1 s doubling to 60 s; reset after 60 s up)
+  - RSS of the whole process tree over budget.memMB: restarted (logged "over budget") - or, for a service with an
+    idle policy that is idle, unloaded (below)
+  - CPU over budget.cpuPct for a minute: niced to 19 until it stays under for a minute
+  - idle unload: SpacetimeDB loads databases lazily and never unloads them; with no client connected to its port
+    for idle.quietSec and RSS over idle.unloadAboveMB it is restarted (~150 ms), which drops every loaded database
+  - a changed mode (powos-runtime config) restarts the service in the new mode
+
+HACK: a small supervisor of our own, because the proper one - systemd --user with real MemoryMax=/CPUWeight= per
+service - needs a delegated cgroup v2 subtree, and Android binds memory/cpu to cgroup v1 (section 2.4). Real fix:
+the cgroup v2 move, then a unit per manifest (the same manifests) and this goes; budgets then become hard limits.
+
+  powos-supervisor               run (root, the system tier)
+  powos-supervisor status [--json]
+"""
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+
+SERVICES = os.environ.get("POWOS_SERVICES", "/usr/lib/powos/apps/services")
+STATE = "/run/powos-system"
+STATUS = f"{STATE}/status.json"
+LOGS = "/var/log/powos"
+RUNTIME = os.environ.get("POWOS_RUNTIME", "/usr/bin/powos-runtime")
+CONFIG = os.environ.get("POWOS_RUNTIME_CONFIG", "/var/lib/powos/runtime/config.json")
+TICK = 10  # seconds between checks: ~0.1 wakeups/s; a /proc scan costs a few ms
+CLK = os.sysconf("SC_CLK_TCK")
+PAGE = os.sysconf("SC_PAGE_SIZE")
+LOG_MAX = 4 << 20
+WAITED = {signal.SIGCHLD, signal.SIGTERM, signal.SIGINT}
+
+
+def log(msg):
+    print(f"{time.strftime('%F %T')} {msg}", flush=True)
+
+
+def device():
+    try:
+        return open("/etc/powos/platform").read().strip() or "desktop"
+    except OSError:
+        return "desktop"
+
+
+def runtime_config():
+    try:
+        with open(CONFIG) as f:
+            c = json.load(f)
+    except (OSError, ValueError):
+        c = {}
+    return c.get("default", "native"), c.get("apps", {})
+
+
+def procs():
+    """pid -> (ppid, utime+stime ticks, rss bytes) for every process."""
+    out = {}
+    for p in os.listdir("/proc"):
+        if not p.isdigit():
+            continue
+        try:
+            with open(f"/proc/{p}/stat") as f:
+                s = f.read()
+        except OSError:
+            continue
+        f = s[s.rindex(")") + 2:].split()
+        out[int(p)] = (int(f[1]), int(f[11]) + int(f[12]), int(f[21]) * PAGE)
+    return out
+
+
+def tree(root, ps):
+    kids = {}
+    for pid, (ppid, _, _) in ps.items():
+        kids.setdefault(ppid, []).append(pid)
+    todo, seen = [root], []
+    while todo:
+        p = todo.pop()
+        if p in ps:
+            seen.append(p)
+            todo += kids.get(p, [])
+    return seen
+
+
+def connections(port):
+    """Established TCP connections to a local port (server side), from the host's network namespace."""
+    hexport = f"{port:04X}"
+    n = 0
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(table) as f:
+                next(f)
+                for line in f:
+                    c = line.split()
+                    if c[3] == "01" and c[1].rsplit(":", 1)[1] == hexport:
+                        n += 1
+        except OSError:
+            pass
+    return n
+
+
+class Service:
+    def __init__(self, path):
+        self.path = path
+        with open(path) as f:
+            self.m = json.load(f)
+        self.id = self.m["id"]
+        b = self.m.get("budget") or {}
+        self.budget = b.get(device()) or b.get("default") or {}
+        self.idle = self.m.get("idle") or {}
+        self.proc = None
+        self.mode = None
+        self.restarts = 0
+        self.unloads = 0
+        self.fails = 0
+        self.next_start = 0.0
+        self.started = 0.0
+        self.last_exit = None
+        self.ticks = None
+        self.ticked = 0.0
+        self.cpu = 0.0
+        self.rss = 0
+        self.over_cpu = 0
+        self.under_cpu = 0
+        self.niced = False
+        self.quiet_since = None
+        self.conns = 0
+        self.note = ""
+        self.held = False
+        self.budget_kills = []
+
+    def logfile(self):
+        os.makedirs(LOGS, exist_ok=True)
+        p = f"{LOGS}/{self.id}.log"
+        try:
+            if os.path.getsize(p) > LOG_MAX:
+                os.replace(p, p + ".1")
+        except OSError:
+            pass
+        return open(p, "a")
+
+    def start(self, mode):
+        self.mode = mode
+        with self.logfile() as out:
+            out.write(f"--- {time.strftime('%F %T')} start ({mode})\n")
+            out.flush()
+            self.proc = subprocess.Popen([RUNTIME, "run", self.path, "--mode", mode], stdout=out, stderr=out,
+                                         stdin=subprocess.DEVNULL, start_new_session=True,
+                                         preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, WAITED))
+        self.started = time.time()
+        self.ticks = None
+        self.niced = False
+        self.quiet_since = None
+        log(f"{self.id}: started pid {self.proc.pid} ({mode})")
+
+    def stop(self, why):
+        if not self.proc or self.proc.poll() is not None:
+            return
+        log(f"{self.id}: stopping ({why})")
+        try:
+            os.killpg(self.proc.pid, signal.SIGTERM)
+            self.proc.wait(10)
+        except subprocess.TimeoutExpired:
+            os.killpg(self.proc.pid, signal.SIGKILL)
+            self.proc.wait()
+        except ProcessLookupError:
+            pass
+        self.proc = None
+
+    def restart(self, why, mode):
+        self.stop(why)
+        self.restarts += 1
+        self.note = why
+        self.start(mode)
+
+    def check(self, ps, mode, now):
+        # Down: start again when its backoff is up.
+        if self.proc is None or self.proc.poll() is not None:
+            if self.proc is not None:
+                self.last_exit = self.proc.returncode
+                up = now - self.started
+                self.fails = 0 if up > 60 else self.fails + 1
+                self.next_start = now + min(60, 2 ** self.fails if self.fails else 1)
+                log(f"{self.id}: exited {self.last_exit} after {up:.0f}s; again in {self.next_start - now:.0f}s")
+                self.proc = None
+                if self.last_exit == 78:  # EX_CONFIG: the mode can't run here (container on the phone)
+                    self.note = "mode not available here"
+            if self.held:
+                return
+            if now >= self.next_start:
+                if self.proc is None and self.mode is not None:
+                    self.restarts += 1
+                self.start(mode)
+            return
+        if mode != self.mode:
+            self.held = False
+            self.restart(f"mode {self.mode} -> {mode}", mode)
+            return
+        pids = tree(self.proc.pid, ps)
+        ticks = sum(ps[p][1] for p in pids)
+        self.rss = sum(ps[p][2] for p in pids)
+        if self.ticks is not None and now - self.ticked >= 1:
+            self.cpu = 100.0 * (ticks - self.ticks) / CLK / (now - self.ticked)
+        if self.ticks is None or now - self.ticked >= 1:
+            self.ticks, self.ticked = ticks, now
+        rss_mb = self.rss >> 20
+        # Idle unload (SpacetimeDB): nobody connected for a while and databases loaded -> a cheap restart.
+        port = self.idle.get("port")
+        if port:
+            self.conns = connections(int(port))
+            self.quiet_since = (self.quiet_since or now) if self.conns == 0 else None
+            quiet = now - self.quiet_since if self.quiet_since else 0
+            if (quiet >= self.idle.get("quietSec", 300) and rss_mb > self.idle.get("unloadAboveMB", 1 << 30)):
+                self.unloads += 1
+                self.restart(f"idle {quiet:.0f}s at {rss_mb} MB: unloading its databases", mode)
+                return
+        mem = self.budget.get("memMB")
+        if mem and rss_mb > mem:
+            idle_ok = port and self.conns == 0
+            if idle_ok or rss_mb > 1.5 * mem:
+                self.budget_kills = [t for t in self.budget_kills if now - t < 300] + [now]
+                if len(self.budget_kills) >= 3 and not idle_ok:
+                    # Over budget again right after each restart: held down until its mode or the budget changes
+                    # (or the supervisor restarts), never a restart loop.
+                    self.stop(f"over budget 3 times in 5 min ({rss_mb} MB > {mem} MB): held")
+                    self.held = True
+                    self.note = f"held: over its {mem} MB budget 3 times in 5 minutes"
+                    return
+                self.restart(f"over budget: {rss_mb} MB > {mem} MB", mode)
+                return
+            self.note = f"over budget ({rss_mb} MB > {mem} MB): restarts when idle or at {int(1.5 * mem)} MB"
+        cpu_max = self.budget.get("cpuPct")
+        if cpu_max:
+            step = now - getattr(self, "_cpu_at", now)
+            self._cpu_at = now
+            if self.cpu > cpu_max:
+                self.over_cpu += step
+                self.under_cpu = 0
+            else:
+                self.under_cpu += step
+                self.over_cpu = 0
+            if self.over_cpu >= 60 and not self.niced:
+                for p in pids:
+                    try:
+                        os.setpriority(os.PRIO_PROCESS, p, 19)
+                    except OSError:
+                        pass
+                self.niced = True
+                self.note = f"CPU {self.cpu:.0f}% > {cpu_max}% for a minute: niced to 19"
+                log(f"{self.id}: {self.note}")
+            elif self.niced and self.under_cpu >= 60:
+                for p in pids:
+                    try:
+                        os.setpriority(os.PRIO_PROCESS, p, int(self.budget.get("nice", 0)))
+                    except OSError:
+                        pass
+                self.niced = False
+                self.note = "CPU back under budget"
+
+    def status(self, now):
+        running = self.proc is not None and self.proc.poll() is None
+        return {"id": self.id, "mode": self.mode, "state": "running" if running else ("held" if self.held else "down"),
+                "pid": self.proc.pid if running else None, "uptime": round(now - self.started) if running else 0,
+                "rssMB": round(self.rss / 1048576, 1), "cpuPct": round(self.cpu, 1), "niced": self.niced,
+                "restarts": self.restarts, "unloads": self.unloads, "lastExit": self.last_exit,
+                "connections": self.conns, "budget": self.budget, "note": self.note}
+
+
+def serve():
+    if os.getuid() != 0:
+        sys.exit("powos-supervisor: runs as root (the system tier)")
+    os.makedirs(STATE, exist_ok=True)
+    # One supervisor per device: the boot and a session start may both run powos-start.sh at once.
+    import fcntl
+    lock = open(f"{STATE}/lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit("powos-supervisor: already running")
+    os.makedirs(LOGS, exist_ok=True)
+    sys.stdout = sys.stderr = open(f"{LOGS}/supervisor.log", "a", buffering=1)
+    with open(f"{STATE}/supervisor.pid", "w") as f:
+        f.write(str(os.getpid()))
+    services = []
+    for name in sorted(os.listdir(SERVICES)) if os.path.isdir(SERVICES) else []:
+        if name.endswith(".json"):
+            try:
+                services.append(Service(os.path.join(SERVICES, name)))
+            except (OSError, ValueError, KeyError) as e:
+                log(f"{name}: bad manifest: {e}")
+    log(f"up: {', '.join(s.id for s in services) or 'no services'}")
+    stop = []
+    # Signals are waited for, not handled: blocked here and taken by sigtimedwait in the tick's one sleep (~0.1
+    # wakeups/s idle) - a service's exit (SIGCHLD) restarts it at once rather than at the next tick.
+    signal.pthread_sigmask(signal.SIG_BLOCK, WAITED)
+    while not stop:
+        now = time.time()
+        default, apps = runtime_config()
+        ps = procs()
+        for s in services:
+            try:
+                s.check(ps, apps.get(s.id, default), now)
+            except Exception as e:  # one service's trouble never takes the others down
+                log(f"{s.id}: check failed: {e!r}")
+        tmp = STATUS + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"time": round(now), "default": default, "services": [s.status(now) for s in services]}, f)
+        os.replace(tmp, STATUS)
+        # Until the next tick, or sooner when a service's restart backoff is up.
+        due = [s.next_start - time.time() for s in services if s.proc is None and not s.held]
+        got = signal.sigtimedwait(WAITED, max(0.05, min([TICK, *due])))
+        if got and got.si_signo != signal.SIGCHLD:
+            stop.append(1)
+    for s in services:
+        s.stop("supervisor stopping")
+    log("down")
+
+
+def status(as_json):
+    try:
+        with open(STATUS) as f:
+            st = json.load(f)
+    except OSError:
+        sys.exit("powos-supervisor: not running (no /run/powos-system/status.json)")
+    if as_json:
+        print(json.dumps(st, indent=2))
+        return
+    age = time.time() - st["time"]
+    print(f"system tier: default mode {st['default']}, checked {age:.0f}s ago")
+    for s in st["services"]:
+        print(f"  {s['id']:28} {s['state']:7} {s['mode'] or '-':8} pid {s['pid'] or '-':>6}  {s['rssMB']:6.1f} MB "
+              f"{s['cpuPct']:5.1f}% cpu  up {s['uptime']}s  restarts {s['restarts']}  unloads {s['unloads']}"
+              f"  conns {s['connections']}" + (f"\n      {s['note']}" if s['note'] else ""))
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if not a:
+        serve()
+    elif a[0] == "status":
+        status("--json" in a)
+    else:
+        print(__doc__.strip())

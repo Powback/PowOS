@@ -1,0 +1,23 @@
+{
+  "id": "dev.powos.spacetimedb",
+  "name": "SpacetimeDB",
+  "version": "2.12.0",
+  "description": "The device's one SpacetimeDB server: every PowOS app is a database on it (docs/POWOS-APPS-FEASIBILITY.md section 1). Loopback only; on the phone the port is locked to the PowOS uid (rooted/powos-start.sh).",
+  "backend": {
+    "user": "powos",
+    "data": "/var/lib/powos/stdb",
+    "prepare": [
+      "mkdir -p keys data && chmod 700 keys",
+      "[ -s keys/id_ecdsa ] || { openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out keys/id_ecdsa && openssl ec -in keys/id_ecdsa -pubout -out keys/id_ecdsa.pub 2>/dev/null && chmod 600 keys/id_ecdsa; }"
+    ],
+    "exec": ["/usr/bin/spacetimedb-standalone", "start", "--listen-addr", "127.0.0.1:3410", "--data-dir", "${data}/data",
+             "--jwt-pub-key-path", "${data}/keys/id_ecdsa.pub", "--jwt-priv-key-path", "${data}/keys/id_ecdsa",
+             "--non-interactive"]
+  },
+  "needs": { "network": "host", "listen": ["127.0.0.1:3410"] },
+  "budget": {
+    "phone":   { "memMB": 300, "cpuPct": 50, "nofile": 65536, "nice": 5, "io": "be:6" },
+    "desktop": { "memMB": 1536, "nofile": 65536 }
+  },
+  "idle": { "port": 3410, "quietSec": 300, "unloadAboveMB": 180 }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "dev.powos.counter",
+  "name": "Counter",
+  "version": "0.1.0",
+  "description": "The Tier 0 prototype: one shared count, live on every surface that shows it.",
+  "ui": { "dir": "out/ui/" },
+  "module": { "path": "module/", "lang": "rust", "database": "powos-counter", "stdb": "2.12" },
+  "backend": null,
+  "widgets": [
+    { "id": "count", "name": "Counter", "kind": "island", "entry": "widgets/count.js", "size": "4x2", "minSize": "2x1" }
+  ],
+  "surfaces": { "launcher": true, "desktop": true },
+  "permissions": [],
+  "budget": { "phone": { "memMB": 16, "idle": "unload" }, "desktop": { "memMB": 32 } }
+}
