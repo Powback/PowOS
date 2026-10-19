@@ -33,6 +33,7 @@ shell/
   state.ts            signals: apps, home, the drawer, menus; Back and Home
   hot.ts              hot reload: stylesheets swapped, anything else reloads
   ui/gesture.ts       swipes that follow the finger (drawer up/down, pages sideways)
+  ui/terminal.tsx     terminals: xterm.js over the host's ptys, focus, the extra keys
   theme.css           tokens (--color-*, --gap, --radius) + base styles
   ui/                 components: drawer, home grid, dock, recent strip, A-Z bar, ...
   vendor/             preact, htm, signals (pinned versions)
@@ -50,7 +51,8 @@ Native code shrinks to a small, stable API (async calls + events), the same shap
 | store | `store.get(name)`, `store.set(name, json)` — the shell's own data files | |
 | keyboard | `keyboard.show()`, `keyboard.hide()` | `keyboard.inset` (px, per frame) |
 | system | `system.insets()`, `system.wallpaper()`, `system.openSettings(what)` | `system.insets` |
-| terminal | `term.open(cmd?)` → pty id; `term.write(id, data)`, `term.resize(id, cols, rows)` | `term.data` (drawn by xterm.js) |
+| terminal | `term.open(id, owner, cmd, cols, rows, restart?)` → state + recent output; `term.write(id, b64)`, `term.resize(id, cols, rows)`, `term.close(id)`, `term.style(points)` | `term.data`, `term.exit`, `term.style` |
+| clipboard | `clipboard.read()`, `clipboard.write(text)` | |
 | windows | `windows.embed(id, rect)` — a native Linux window placed over the page at a rect the page reports | |
 | widgets | everything OWL widgets call today (`WidgetServices`): battery, media, volume, notifications, alarm, torch, haptic, share, url, terminal, … | per-service |
 | files | `files.watch()` — the hot-reload feed | `files.changed` |
@@ -92,6 +94,33 @@ clobber customizations and "reset" is deleting the override.
 - The soft keyboard and its inset (the page lays out from the inset events).
 - Gestures the system owns (back, home); everything else is the page's (pointer events).
 - The Andromarchy engine, the PowOS session, Wayland — untouched.
+
+## Terminals
+
+A widget's `Terminal` node (and any terminal the shell opens itself) is xterm.js in the page over a pty the host
+owns - not a native view over the page, so it clips, moves and lifts with its tile like any other element.
+
+- **Host** (`ShellTerminals.kt`, `Pty.kt` + `cpp/pty.c`): a process on a pty of the app's own (Termux's pty calls
+  are package-private and its session feeds its own emulator, so the shell has a small pty library). It runs what
+  the Compose tile runs: rooted mode `su -c powos-run.sh <command>` (PowOS's tmux picker when the widget names
+  none), else the app's Linux (proot). Output goes out raw, base64, batched per frame (16 ms, at most 64 KB, the
+  shell waits when the page is 1 MB behind) as `term.data` with a run number and the byte offset after the chunk;
+  the end is `term.exit`. A ring of the last 256 KB lets a new view (a reloaded page, a screen over its tile) start
+  where the shell is: `term.open` answers it with its offset, and the page drops event bytes it has already. A
+  terminal lives on while no view shows it and ends with `term.close`, its widget removed or saved again, or the
+  activity. `term.style` gives the launcher's terminal font (PowOS's file, which `ShellActivity` serves, plus the
+  Nerd Font symbols), text size and pad.
+- **Page** (`ui/terminal.tsx`): one xterm per terminal id (a widget's `session` shares one between a tile and its
+  screen); the newest view shows it and sizes the pty, as PtyTerminal's newest view does. Colors are terminal.css's
+  `--term-*` tokens. A view is inert until tapped (home's swipes pass over it); a tap focuses an interactive one:
+  the soft keyboard comes up, the extra keys (ExtraKeys.kt's: esc, tab, sticky ctrl/alt - a tap latches, a long
+  press locks - arrows, home/end, pgup/pgdn, copy/paste, the keyboard key) dock above it, and home lifts instead of
+  squeezing its grid. While focused, its touches are the terminal's: a drag scrolls the scrollback, or becomes wheel
+  events (tmux's mouse, arrow keys in a full-screen program); a tap is a click. A press elsewhere, Back, or the
+  keyboard closing by itself lets go. `interactive: false` only shows it: taps go to the widget's onTap. An ended
+  shell shows "exited · tap to restart".
+- The mock bridge has a small line-editing shell with the same protocol (echo, seq, size, colors, mouse, exit), and
+  terminal widgets on its second page.
 
 ## Phases
 
@@ -137,3 +166,7 @@ the screen is back on.
   out of the drawer onto home. Verified in a browser (mock) and over CDP on the phone (its real widgets and cells).
   Widgets show as named placeholders until phase 4 (OWL). Not yet: reordering inside an open folder, taking an app
   out of a folder.
+- Phase 5 (terminals) first part done: Terminal widgets as xterm.js over the host's ptys (see Terminals). Verified
+  in a browser against the mock (output, typing, Backspace, IME composition, resize to the pty, sticky ctrl, extra
+  keys, drag scrolling, tmux-mouse wheel and click reports, view-only taps to onTap, exit and tap to restart, a view
+  mounted again showing the shell once). Not yet: embedded Linux windows; Linux/PowOS apps in the drawer.
