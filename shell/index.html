@@ -4,20 +4,45 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>PowOS Shell</title>
-<!-- No build: the shell's modules run as saved. The import map names the vendored libraries (vendor/VERSIONS). -->
-<script type="importmap">
+<!--
+  The shell is TypeScript (TSX), run as saved: es-module-shims loads each module through this fetch hook, which
+  strips the types and compiles the JSX with Sucrase in the page - no build step between an edit and the screen.
+  `npm run check` (tsc --noEmit) type-checks it all. The import map names the vendored libraries (vendor/VERSIONS).
+-->
+<script>
+  window.esmsInitOptions = {
+    shimMode: true,
+    async fetch(url, options) {
+      const res = await fetch(url, options);
+      if (!/\.tsx?(\?|$)/.test(url) || !res.ok) return res;
+      const { transform } = await import("./vendor/sucrase.js");
+      const source = await res.text();
+      const { code } = transform(source, {
+        transforms: ["typescript", "jsx"],
+        jsxRuntime: "automatic",
+        jsxImportSource: "preact",
+        production: true,
+        filePath: url,
+      });
+      return new Response(new Blob([code + "\n//# sourceURL=" + url], { type: "application/javascript" }));
+    },
+  };
+</script>
+<script async src="./vendor/es-module-shims.js"></script>
+<script type="importmap-shim">
 {
   "imports": {
     "preact": "./vendor/preact.js",
     "preact/hooks": "./vendor/preact-hooks.js",
-    "htm": "./vendor/htm.js",
+    "preact/jsx-runtime": "./vendor/preact-jsx-runtime.js",
     "@preact/signals": "./vendor/signals.js",
     "@preact/signals-core": "./vendor/signals-core.js"
   }
 }
 </script>
 <link rel="stylesheet" href="./theme.css" data-hot>
-<script type="module" src="./app.js"></script>
+<link rel="stylesheet" href="./ui/shell.css" data-hot>
+<script type="module-shim" src="./app.tsx"></script>
 </head>
 <body></body>
 </html>

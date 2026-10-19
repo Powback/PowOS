@@ -1,7 +1,7 @@
 /**
- * The host API: the one contract between the shell (this folder) and the native side - the phone's launcher
- * (an Android WebView) or PowOS's desktop host. Calls are async; events come through `on`. A browser without a host
- * gets bridge.js's mock, so the shell runs anywhere.
+ * The host API: the one contract between the shell (this folder) and the native side - the phone's launcher (an
+ * Android WebView, ShellBridge.kt) or PowOS's desktop host. Calls are async; events come through `on`. A browser
+ * without a host gets bridge.ts's mock, so the shell runs anywhere.
  */
 export interface App {
   /** Stable id: "a:<package/activity[@profile]>" (Android) or "l:<desktop id>" (Linux / PowOS). */
@@ -96,12 +96,39 @@ export interface Bridge {
     insets(): Promise<Insets>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "keyboard.inset" (px, every frame of its slide), "system.insets",
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets",
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
 }
 
+
+/** A widget's node tree (WidgetTree.kt): props evaluated, colors as CSS, a Canvas's drawing as ops. */
+export interface OwlNode {
+  k: string;
+  id: string;
+  p?: Record<string, any>;
+  h?: string[];
+  c?: OwlNode[];
+  ops?: OwlOp[];
+}
+
+export interface OwlOp {
+  op: string;
+  a: any[];
+  n?: Record<string, any>;
+  c?: OwlOp[];
+}
+
+export interface OwlRoot extends OwlNode {
+  padding?: number;
+  background?: string | null;
+}
+
 declare global {
-  interface Window { powos?: Bridge; }
+  interface Window {
+    powos?: Bridge;
+    PowosHost?: { call(id: number, method: string, args: string): void };
+    __powosHost?: { resolve(id: number, v: unknown): void; reject(id: number, m: string): void; emit(e: string, d: unknown): void };
+  }
 }

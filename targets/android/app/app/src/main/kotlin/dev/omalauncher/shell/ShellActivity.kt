@@ -104,6 +104,21 @@ class ShellActivity : Activity() {
         dir.listFiles()?.filter { it.isDirectory }?.forEach(::watch)
     }
 
+    /**
+     * Home pressed while the shell is home already (singleTask: the intent comes back here): the page closes what's
+     * open and goes to the first page, as a stock launcher does.
+     */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (intent.hasCategory(android.content.Intent.CATEGORY_HOME)) bridge.emit("system.home", null)
+    }
+
+    /** Back goes to the page: it closes the drawer, a folder or edit mode. A home screen has nowhere to go back to. */
+    @Deprecated("Back reaches the page instead", ReplaceWith(""))
+    override fun onBackPressed() {
+        bridge.emit("system.back", null)
+    }
+
     // A home screen showing: widgets' sources run (they pause while no home is visible).
     override fun onStart() {
         super.onStart()
@@ -187,6 +202,8 @@ class ShellActivity : Activity() {
         when (path.substringAfterLast('.').lowercase()) {
             "html" -> "text/html"
             "js", "mjs" -> "text/javascript"
+            // TypeScript: the page transpiles it itself (index.html's loader).
+            "ts", "tsx" -> "text/plain"
             "css" -> "text/css"
             "json" -> "application/json"
             "svg" -> "image/svg+xml"

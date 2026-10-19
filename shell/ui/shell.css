@@ -1,16 +1,33 @@
-/* Home, the bar, the drawer: laid out from theme.css's tokens only. */
+/* Home, the bar, the drawer, the dock: laid out from theme.css's tokens only. */
 
 .home {
   position: fixed;
   inset: 0;
   display: flex;
   flex-direction: column;
-  /* The host's insets (app.js), else the browser's safe areas; the keyboard lifts the bar above it. */
+  /* The host's insets (app.tsx), else the browser's safe areas; the keyboard lifts the bar above it. */
   padding:
     var(--inset-top, env(safe-area-inset-top))
     var(--inset-right, env(safe-area-inset-right))
     max(var(--inset-bottom, env(safe-area-inset-bottom)), var(--inset-keyboard, 0px))
     var(--inset-left, env(safe-area-inset-left));
+}
+
+/* The pages and the strip; the drawer slides over both, they recede under it. */
+.home-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 260ms ease-out, transform 260ms ease-out;
+}
+.home-content.dragging { transition: none; }
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .strip {
@@ -23,14 +40,16 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
-/* The apps share the strip's width: all of them fit, at up to the strip's icon size. */
-.strip .app { flex: 1 1 0; min-width: 0; padding: 4px 0; }
-.strip .app-icon { width: min(var(--strip-icon), 100%) !important; height: auto !important; aspect-ratio: 1; }
+/* The apps share the row's width: all of them fit, at up to the strip's icon size. */
+.strip .app,
+.dock .app { flex: 1 1 0; min-width: 0; padding: 4px 0; }
+.strip .app-icon,
+.dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
 .bar {
   position: relative;
   z-index: 3;
-  margin: 0 var(--edge) var(--edge);
+  margin: 0 var(--edge) var(--gap);
   min-height: 48px;
   display: flex;
   align-items: center;
@@ -50,26 +69,43 @@
 }
 .bar input::placeholder { color: var(--color-muted); }
 
-.scrim {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: color-mix(in srgb, var(--color-background) 97%, transparent);
+/* The dock: pinned apps under the bar, always there (iOS's dock). */
+.dock {
+  position: relative;
+  z-index: 3;
+  height: var(--strip-height);
+  margin: 0 var(--edge) var(--edge);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+.dock-hint {
+  margin: 0 var(--edge) var(--edge);
+  text-align: center;
+  font-size: var(--text-small);
 }
 
+/*
+ * The drawer: over the stage, sliding with the finger (drawer.tsx sets transform and opacity from the gesture). It
+ * settles with a transition; while a finger drags it, it follows the finger exactly.
+ */
 .drawer {
-  position: relative;
+  position: absolute;
+  inset: 0;
   z-index: 2;
-  flex: 1;
-  min-height: 0;
   display: grid;
   grid-template-columns: 1fr var(--letter-bar);
-  /* The list shrinks to the room left; it scrolls rather than pushing the dock under the bar. */
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   padding: var(--edge) var(--edge) 0;
-  animation: drawer-in 180ms ease-out;
+  background: var(--color-background);
+  border-radius: var(--radius) var(--radius) 0 0;
+  transition: transform 260ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 200ms ease-out;
+  will-change: transform, opacity;
+  pointer-events: none;
 }
-@keyframes drawer-in { from { opacity: 0; transform: translateY(40px); } }
+.drawer.shown { pointer-events: auto; }
+.drawer.dragging { transition: none; }
 
 .drawer-list {
   grid-column: 1;
@@ -89,6 +125,7 @@
 }
 
 .letter-bar {
+  position: relative;
   grid-column: 2;
   align-self: center;
   display: flex;
@@ -105,14 +142,23 @@
   font-size: var(--text-small);
   color: var(--color-muted);
 }
-.letter-bar span.on { color: var(--color-accent); }
-
-.dock {
-  grid-column: 1 / -1;
-  margin: 4px 0 var(--gap);
+.letter-bar span.on { color: var(--color-accent); transform: scale(1.5); }
+/* The letter under the finger, big, beside the bar. */
+.letter-bubble {
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 56px;
+  height: 56px;
   display: flex;
-  justify-content: space-around;
-  padding: 6px 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-background);
+  font: bold 28px var(--font);
+  pointer-events: none;
 }
 
 .app {
@@ -124,9 +170,10 @@
   padding: 6px 2px;
   border-radius: var(--radius);
   touch-action: manipulation;
+  transition: background 120ms;
 }
 .app:active { background: var(--color-surface); }
-.app-icon { display: block; pointer-events: none; }
+.app-icon { display: block; width: var(--icon); height: var(--icon); pointer-events: none; }
 .app-label {
   max-width: 100%;
   overflow: hidden;
@@ -135,24 +182,31 @@
   font-size: var(--text-small);
 }
 
+/* The app menu (apps.tsx AppMenu): one for the shell, over everything, beside the app it belongs to. */
 .menu-scrim { position: fixed; inset: 0; z-index: 10; }
 .menu {
-  position: absolute;
+  position: fixed;
   z-index: 11;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  min-width: 160px;
+  width: 180px;
   display: flex;
   flex-direction: column;
   padding: 4px;
   background: var(--color-surface);
+  animation: menu-in 120ms ease-out;
 }
-.app .menu { position: absolute; }
+@keyframes menu-in { from { opacity: 0; transform: scale(0.95); } }
+.menu-title {
+  padding: 8px 12px 4px;
+  color: var(--color-muted);
+  font-size: var(--text-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .menu-item { padding: 10px 12px; text-align: left; border-radius: 8px; }
 .menu-item:active { background: var(--color-background); }
 
-/* Home pages: tiles on a grid of square cells (grid.js computes the boxes). */
+/* Home pages: tiles on a grid of square cells (grid.tsx computes the boxes). */
 .pages {
   position: relative;
   flex: 1;
@@ -163,8 +217,11 @@
 .page-track {
   display: flex;
   height: 100%;
-  transition: transform 220ms ease-out;
+  transition: transform 300ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  will-change: transform;
 }
+/* A finger is sliding the pages: they follow it exactly. */
+.page-track.dragging { transition: none; }
 .page { position: relative; flex: 0 0 100%; height: 100%; }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
@@ -289,7 +346,7 @@
   background: var(--color-background);
 }
 
-/* OWL widgets (owl.js): the tree fills the tile as Render.kt's WidgetContent, a Column. */
+/* OWL widgets (owl.tsx): the tree fills the tile as Render.kt's WidgetContent, a Column. */
 .owl {
   height: 100%;
   display: flex;

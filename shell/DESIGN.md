@@ -11,12 +11,12 @@ AI-customizable launcher and OS: everything visual and behavioural has to be edi
 A web UI is that already — and it runs on both targets, so the phone's launcher and PowOS's desktop become one
 codebase.
 
-## Stack: no build step
+## Stack: TypeScript, no build step
 
-- **Preact + htm + @preact/signals**, as native ES modules through an import map (`vendor/`, vendored, nothing
-  fetched at runtime). `htm` is JSX in tagged templates, so there's nothing to compile: a file saved is a file run.
-- No bundler, no TypeScript compile. Types are JSDoc, checked in an editor if wanted; `bridge.d.ts` documents the
-  host API.
+- **TypeScript + TSX with Preact and @preact/signals.** The page transpiles each module as it loads it:
+  es-module-shims fetches it through a hook in `index.html` that strips the types and compiles the JSX with Sucrase.
+  A file saved is a file run - on the phone too - and `npm run check` (`tsc --noEmit`, strict) type-checks all of it.
+  Libraries are vendored (`vendor/`, nothing fetched at runtime); `types.ts` is the host API.
 - CSS is plain CSS with custom properties: the theme (Omarchy's colors.toml) is a set of `--color-*` variables.
 
 Not Astro (a content-site framework: build step, server rendering — a launcher has neither), not Svelte/Solid/JSX
@@ -26,11 +26,13 @@ Not Astro (a content-site framework: build step, server rendering — a launcher
 
 ```
 shell/
-  index.html          import map, theme stylesheet, mounts app.js
-  app.js              the shell: home, the bar, the drawer, overlays
-  bridge.js           window.powos (the host's), or a mock in a desktop browser
-  bridge.d.ts         the host API, the one contract between UI and native
-  hot.js              hot reload: modules and stylesheets swapped as files change
+  index.html          the TS loader, import map, stylesheets; mounts app.tsx
+  app.tsx             the shell: insets, state, home
+  types.ts            the host API, the one contract between UI and native
+  bridge.ts           window.powos (the host's), or a mock in a desktop browser
+  state.ts            signals: apps, home, the drawer, menus; Back and Home
+  hot.ts              hot reload: stylesheets swapped, anything else reloads
+  ui/gesture.ts       swipes that follow the finger (drawer up/down, pages sideways)
   theme.css           tokens (--color-*, --gap, --radius) + base styles
   ui/                 components: drawer, home grid, dock, recent strip, A-Z bar, ...
   vendor/             preact, htm, signals (pinned versions)

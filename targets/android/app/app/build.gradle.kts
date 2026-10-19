@@ -76,7 +76,7 @@ android {
 // to under the user's own files. Plain files, copied as they are - the shell has no build step.
 val shellAssets = layout.buildDirectory.dir("generated/shell-assets").get().asFile
 val copyShell by tasks.registering(Sync::class) {
-    from(rootProject.file("../../../shell")) { exclude("DESIGN.md", "**/*.d.ts", "dev/**", "push.sh") }
+    from(rootProject.file("../../../shell")) { exclude("DESIGN.md", "dev/**", "push.sh", "node_modules/**", "package.json", "package-lock.json", "tsconfig.json", ".gitignore") }
     into(shellAssets.resolve("shell"))
 }
 android.sourceSets.getByName("main").assets.srcDir(shellAssets)
