@@ -219,6 +219,8 @@ export interface Bridge {
   assist: {
     screen(): Promise<AssistScreen | null>;
     close(): Promise<void>;
+    /** Saves an image for PowOS AI to look at (a cut-out region as a data: URL, or null: the whole screen); its path. */
+    attach(image: string | null): Promise<string | null>;
   };
   /** The theme: the colors in use ("theme.changed" brings them again), the ones to pick from, picking one. */
   theme: {

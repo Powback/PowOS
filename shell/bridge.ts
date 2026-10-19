@@ -105,6 +105,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
     assist: {
       screen: () => call<AssistScreen | null>("assist.screen"),
       close: () => call("assist.close"),
+      attach: (image) => call<string | null>("assist.attach", image),
     },
     theme: {
       get: () => call<ThemeColors>("theme.get"),
@@ -311,6 +312,7 @@ function mock(): Bridge {
     assist: {
       screen: async () => ({ text: "Inbox\n  Mats - are we still on for tonight?\n  Your order has shipped", screenshot: null }),
       close: async () => console.log("[mock] assistant closed"),
+      attach: async (image) => `/run/powos-app/powos-ai-shared/screen-mock.${image ? "png" : "jpg"}`,
     },
     // A few made-up notifications; dismissing and clearing work on them.
     notifications: (() => {

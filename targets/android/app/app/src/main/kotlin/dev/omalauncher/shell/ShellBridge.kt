@@ -156,6 +156,7 @@ class ShellBridge(
             "ai.attach" -> aiAttach(a.getString(0))
             "assist.screen" -> assist?.screen()
             "assist.close" -> assist?.close()
+            "assist.attach" -> assist?.attach(a.optString(0).takeIf { it.isNotEmpty() && it != "null" })
             "theme.get" -> theme()
             "theme.list" -> themeList()
             "theme.pick" -> pickTheme(a.getString(0))

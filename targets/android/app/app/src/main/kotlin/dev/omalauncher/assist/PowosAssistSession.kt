@@ -6,7 +6,7 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.service.voice.VoiceInteractionSession
 import android.view.View
-import dev.omalauncher.App
+import android.view.ViewGroup
 import dev.omalauncher.shell.ShellHost
 import org.json.JSONObject
 import java.io.File
@@ -25,12 +25,14 @@ class PowosAssistSession(
     private var shot: File? = null
 
     override fun onCreateContentView(): View {
-        val runtime = (context.applicationContext as App).runtime
-        runtime.start()
-        val h = ShellHost(context, null, runtime, MODE)
+        // The warm page (AssistWeb): ready before the power button is held, so the panel is there at once.
+        val h = AssistWeb.get(context)
+        (h.web.parent as? ViewGroup)?.removeView(h.web)
         h.bridge.assist =
             object : AssistSlot {
                 override fun screen() = screenJson()
+
+                override fun attach(image: String?) = share(image)
 
                 override fun close() = finish()
             }
@@ -45,6 +47,8 @@ class PowosAssistSession(
         super.onShow(args, showFlags)
         screenText = ""
         shot = null
+        // A new summoning: the page forgets the last one (its question, answer view, cut-out).
+        host?.bridge?.emit("assist.reset", null)
         sendScreen()
     }
 
@@ -67,7 +71,9 @@ class PowosAssistSession(
     }
 
     override fun onDestroy() {
-        host?.destroy()
+        // The page stays warm for the next time (AssistWeb); only this session's window lets go of it.
+        host?.let { (it.web.parent as? ViewGroup)?.removeView(it.web) }
+        host?.bridge?.assist = null
         host = null
         super.onDestroy()
     }
@@ -88,12 +94,30 @@ class PowosAssistSession(
             // The host serves it (ShellHost /_assist/); the version makes each new screenshot a new URL.
             .put("screenshot", shot?.let { "${ShellHost.ORIGIN}/_assist/screen.jpg?v=${it.lastModified()}" } ?: JSONObject.NULL)
 
+    /**
+     * An image for PowOS AI to look at, where PowOS sees it (the run dir, /run/powos-app in the session - as the share
+     * sheet's files): [image] a region the user cut out (a data: URL from the page), or null for the whole screenshot.
+     * Its path in PowOS; the question names it, and the agent reads it.
+     */
+    private fun share(image: String?): String? {
+        val dir = File(context.filesDir, "run/powos-ai-shared").apply { mkdirs() }
+        val name = "screen-${System.currentTimeMillis()}.${if (image == null) "jpg" else "png"}"
+        val out = File(dir, name)
+        if (image == null) {
+            shot?.copyTo(out, overwrite = true) ?: return null
+        } else {
+            val data = image.substringAfter("base64,", "")
+            if (data.isEmpty()) return null
+            out.writeBytes(android.util.Base64.decode(data, android.util.Base64.DEFAULT))
+        }
+        return "/run/powos-app/powos-ai-shared/$name"
+    }
+
     private fun sendScreen() {
         host?.bridge?.emit("assist.context", screenJson())
     }
 
     private companion object {
-        const val MODE = "assist"
 
         /** The screen's text sent along, at most (a long page is mostly repetition). */
         const val MAX_TEXT = 8000
@@ -103,6 +127,9 @@ class PowosAssistSession(
 /** What the page's assist screen reaches through the bridge (assist.screen, assist.close). */
 interface AssistSlot {
     fun screen(): JSONObject
+
+    /** An image for PowOS AI (a cut-out region as a data: URL, or null: the whole screenshot); its path in PowOS. */
+    fun attach(image: String?): String?
 
     fun close()
 }
