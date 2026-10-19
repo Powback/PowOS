@@ -257,7 +257,7 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 | Displays | `0` = active panel (cover 1116×2484 folded / inner 2268×2440 open); `cmd device_state print-state`: 0 = folded |
 | Hosted Android widgets | private virtual displays `powos-appwidget-N` (not the screen; don't capture them) |
 | Root | Magisk (`su`); SELinux enforcing |
-| adb | phone-local `127.0.0.1:5555` (rooted.sh wifi); LAN `192.168.50.239:5555`; VPN `10.13.13.7:5555`. `emulator-5554` = an AVD, not this phone |
+| adb | phone-local `127.0.0.1:5555` (rooted.sh wifi); LAN `192.168.50.239:5555`; VPN `10.13.13.7:5555`. On the phone itself `emulator-5554` is this same phone's adbd auto-detected on port 5555 (a bare `adb shell` then fails, "more than one device"): always pass `-s 127.0.0.1:5555`. An AVD only on the Mac |
 
 ### Shipping a change (edit → test → ship → roll back)
 | Layer | Edit | Ship | Roll back |
