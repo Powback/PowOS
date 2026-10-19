@@ -48,10 +48,12 @@ function theme(): ITheme {
   const v = (name: string) => css.getPropertyValue(name).trim() || undefined;
   const names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"] as const;
   const t: Record<string, string | undefined> = {
-    background: v("--term-background"),
+    // xterm parses colors itself: "transparent" as the hex it knows.
+    background: v("--term-background") === "transparent" ? "#00000000" : v("--term-background"),
     foreground: v("--term-foreground"),
     cursor: v("--term-cursor"),
-    cursorAccent: v("--term-background"),
+    // The letter under the block cursor: the theme's background (the terminal's own may be transparent).
+    cursorAccent: v("--color-background"),
     selectionBackground: v("--term-selection"),
   };
   names.forEach((n, i) => {
@@ -144,6 +146,7 @@ class Session {
     this.term = new Terminal({
       scrollback: SCROLLBACK,
       theme: theme(),
+      allowTransparency: true,
       fontFamily: "monospace",
       cursorBlink: false,
       allowProposedApi: false,

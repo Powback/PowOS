@@ -3,7 +3,7 @@ widget "performance" {
   page: 1
   order: 7
   size: 6x3
-  minSize: 3x2
+  minSize: 2x2
 
   // One cheap read every 2 s, builtins only (no forks per sensor): GPU busy %, GPU clock (Hz), GPU temp, the
   // hottest CPU sensor, skin and battery temps (m°C), then /proc/stat's total and idle jiffies for the CPU load.
@@ -44,35 +44,89 @@ widget "performance" {
     }
   }
 
-  Row {
-    gap: 14; align: center
-
-    // Adreno as a gauge: the arc fills with load, its color warms with the GPU's temperature.
+  // A gauge: the arc fills with load, its color warms with the temperature; the narrow tiles' layout.
+  component Gauge(what, pct, deg, dim, tint) {
     Box {
-      width: rows && rows < 3 ? 92 : 124; height: rows && rows < 3 ? 92 : 124; align: center
+      width: dim; height: dim; align: center
       Ring {
-        value: gpu ?? 0; max: 100; start: 225; sweep: 270; thickness: 9; fill: true
-        color: tGpu >= 80 ? red : tGpu >= 65 ? orange : accent; track: alpha(muted, 0.25)
+        value: pct ?? 0; max: 100; start: 225; sweep: 270; thickness: dim >= 90 ? 9 : 7; fill: true
+        color: deg >= 80 ? red : deg >= 65 ? orange : tint; track: alpha(muted, 0.25)
         animate value: spring()
       }
       Column {
         gap: 0; align: center
-        Text { text: gpu == null ? "…" : "${round(gpu)}%"; style: title; align: center }
-        Text { text: mhz == null ? "" : "${round(mhz)} MHz"; style: small; color: muted; align: center }
-        Text { text: "adreno"; style: label; align: center }
+        Text { text: pct == null ? "…" : "${round(pct)}%"; fontSize: dim >= 90 ? 22 : 16; bold: true; align: center }
+        Text { text: deg > 0 ? "${what} ${round(deg)}°" : what; style: label; align: center; maxLines: 1 }
       }
     }
+  }
 
+  // Narrow tiles (under 5 columns): the GPU and CPU as two gauges side by side, the temperatures under them when
+  // there's room; 2 columns: the GPU's gauge, the CPU's load under it. Wider: the GPU gauge, the traces and the
+  // temperatures.
+  let narrow = cols != null && cols < 5
+  let across = cols != null && cols < 3 ? 1 : 2
+  let below = rows != null && rows >= 3 ? 64 : across == 1 ? 46 : 28
+  let dim = tileWidth == null || tileHeight == null ? 80 : clamp(min((tileWidth - 24) / across - 8, tileHeight - 24 - below), 44, 124)
+
+  if narrow {
     Column {
-      gap: 8; weight: 1; fill: height
-      Trace { what: "gpu"; pct: gpu; series: gpuHist; tint: accent }
-      Trace { what: "cpu"; pct: cpu; series: cpuHist; tint: magenta }
+      gap: 6; align: center; weight: 1
+      Spacer { weight: 1 }
       Row {
-        gap: 4
-        Temp { sensor: "cpu"; deg: tCpu }
-        Temp { sensor: "gpu"; deg: tGpu }
-        Temp { sensor: "skin"; deg: tSkin }
-        Temp { sensor: "batt"; deg: tBat }
+        gap: 8; align: center
+        Gauge { what: "gpu"; pct: gpu; deg: tGpu; dim: dim; tint: accent }
+        if across == 2 {
+          Gauge { what: "cpu"; pct: cpu; deg: tCpu; dim: dim; tint: magenta }
+        }
+      }
+      if across == 1 {
+        Text { text: cpu == null ? "cpu …" : "cpu ${round(cpu)}%"; style: small; color: magenta; align: center; maxLines: 1 }
+      }
+      Spacer { weight: 1 }
+      if rows != null && rows >= 3 {
+        Row {
+          gap: 4
+          Temp { sensor: "cpu"; deg: tCpu }
+          Temp { sensor: "gpu"; deg: tGpu }
+          if across == 2 {
+            Temp { sensor: "skin"; deg: tSkin }
+            Temp { sensor: "batt"; deg: tBat }
+          }
+        }
+      }
+    }
+  } else {
+    Row {
+      gap: 14; align: center; weight: 1
+
+      // Adreno as a gauge: the arc fills with load, its color warms with the GPU's temperature.
+      Box {
+        width: rows && rows < 3 ? 92 : 124; height: rows && rows < 3 ? 92 : 124; align: center
+        Ring {
+          value: gpu ?? 0; max: 100; start: 225; sweep: 270; thickness: 9; fill: true
+          color: tGpu >= 80 ? red : tGpu >= 65 ? orange : accent; track: alpha(muted, 0.25)
+          animate value: spring()
+        }
+        Column {
+          gap: 0; align: center
+          Text { text: gpu == null ? "…" : "${round(gpu)}%"; style: title; align: center }
+          Text { text: mhz == null ? "" : "${round(mhz)} MHz"; style: small; color: muted; align: center }
+          Text { text: "adreno"; style: label; align: center }
+        }
+      }
+
+      Column {
+        gap: 8; weight: 1; fill: height
+        Trace { what: "gpu"; pct: gpu; series: gpuHist; tint: accent }
+        Trace { what: "cpu"; pct: cpu; series: cpuHist; tint: magenta }
+        Row {
+          gap: 4
+          Temp { sensor: "cpu"; deg: tCpu }
+          Temp { sensor: "gpu"; deg: tGpu }
+          Temp { sensor: "skin"; deg: tSkin }
+          Temp { sensor: "batt"; deg: tBat }
+        }
       }
     }
   }

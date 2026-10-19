@@ -80,6 +80,13 @@ class PowosAiActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Asked from the launcher again: only to come up in the switcher (most recent after home), not to show.
+        if (intent.getBooleanExtra(EXTRA_BACKGROUND, false)) {
+            moveTaskToBack(true)
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+            return
+        }
         handle(intent)
     }
 
@@ -236,13 +243,11 @@ class PowosAiActivity : ComponentActivity() {
         private const val EXTRA_BACKGROUND = "background"
 
         /**
-         * Puts the chat in the app switcher, if it isn't there, without showing it: asked from the launcher's search
-         * (which shows the same conversation), it's then a task of its own to come back to.
+         * Puts the chat in the app switcher as its most recent app, without showing it: asked from the launcher's
+         * search (which shows the same conversation), it's then a task of its own a swipe away. Every time - a task
+         * from earlier sits far down the switcher, as good as gone.
          */
         fun keepInRecents(context: Context) {
-            val am = context.getSystemService(ActivityManager::class.java)
-            val there = am.appTasks.any { runCatching { it.taskInfo?.baseIntent?.component?.className }.getOrNull() == PowosAiActivity::class.java.name }
-            if (there) return
             context.startActivity(
                 Intent(context, PowosAiActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)

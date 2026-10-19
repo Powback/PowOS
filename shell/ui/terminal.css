@@ -4,7 +4,8 @@
  */
 :root {
   /* The terminal's colors (Omarchy's colors.toml: foreground, background, cursor, color0-15), as foot gets them. */
-  --term-background: var(--color-background);
+  /* None of its own: the tile's (translucent, as every widget's) shows through, as in the Compose launcher. */
+  --term-background: transparent;
   --term-foreground: var(--color-foreground);
   --term-cursor: var(--color-foreground);
   --term-selection: color-mix(in srgb, var(--color-accent) 40%, transparent);
