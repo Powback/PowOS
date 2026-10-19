@@ -176,6 +176,9 @@ class AgentMail private constructor(
         /** On the chat's intent: the mail its notification was for ([opened]). */
         const val EXTRA_MAIL = "powos.mail"
 
+        /** Quiet re-posts' group (see post): it alerts through its summary only, and there is none. */
+        private const val QUIET_GROUP = "dev.omalauncher.agentmail.quiet"
+
         /** In a notification's extras: posted again quietly (after a restart) - PowOS's banner doesn't show it again. */
         const val EXTRA_QUIET = dev.omalauncher.widgets.runtime.Notifications.EXTRA_QUIET
 
@@ -295,7 +298,9 @@ class AgentMail private constructor(
                     .setDeleteIntent(op(2, OP_DISMISSED))
                     .setAutoCancel(true)
                     .setOnlyAlertOnce(true)
-                    .apply { if (Build.VERSION.SDK_INT >= 31) setSilent(quiet) }
+                    // Quiet: no sound, vibration or banner - NotificationCompat.setSilent's way (the framework builder
+                    // has no setSilent): a group member that leaves alerting to a summary that never comes.
+                    .apply { if (quiet) setGroup(QUIET_GROUP).setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY) }
                     .addAction(reply)
                     .addAction(markRead)
                     .setCategory(if (urgent) Notification.CATEGORY_ALARM else Notification.CATEGORY_MESSAGE)
