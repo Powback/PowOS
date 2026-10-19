@@ -391,7 +391,28 @@ powos dlss runtime import <path>   # verify + install NVIDIA's nvngx_dlssnr.dll 
 powos dlss nr install              # build + install the NR Vulkan layer (per-user)
 powos dlss nr smoke                # run the layer's smoke test, report evaluates
 powos dlss nr enable [<appid>]     # arm NR session-wide, or for one Steam appid
+powos dlss games                   # every game, its kind (proton|native), what is armed
+powos dlss on [game|--all]         # arm; --flatpak <app-id> for a flatpak app
+powos dlss wrap <name> -- <cmd>    # wrapper for a native launcher (Prism, Lutris)
 ```
+
+**Proton games and native games are armed by different mechanisms.** A Proton
+game is armed once per Proton via `user_settings.py`, which Proton imports for
+every game it runs — no launch options. A **native Linux** game never goes
+through Proton, so that file cannot reach it; it is armed through
+`bin/powos-game-shim`'s env sentinel instead, which needs Steam **closed** once
+to wire the shim in. Anything Steam does not launch at all (Prism Launcher,
+Lutris, a bare ELF) uses `dlss wrap`. Flatpak apps need more still: the flatpak
+runtime ships its own `share/vulkan/implicit_layer.d` that shadows the host's,
+so PowOS generates a manifest with paths rewritten under `/run/host` and points
+`VK_ADD_LAYER_PATH` at it.
+
+Native detection is "ships an ELF **and** has no `.exe` near the top". ELF alone
+is not enough — plenty of Windows games ship a Linux helper binary, and a Proton
+game mislabelled native would be armed through the wrong mechanism. Absence of
+`compatdata` is not a test either: a never-launched Proton game has no prefix
+yet. (That mistake is why Metro Exodus EE briefly looked like a native Vulkan
+port — it is a Windows build.)
 
 **Why one layer covers every game:** on Linux DXVK translates D3D9/10/11 and
 VKD3D-Proton translates D3D12, so *every* DirectX game is already Vulkan by the

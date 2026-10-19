@@ -184,8 +184,6 @@ Dev & AI:
   comms send <to> <msg>   Message another agent's inbox (health/coder/devops...)
   comms watch --agent R   Park until that role gets mail (yield, no polling)
   comms inbox|agents      Show an inbox / list all inboxes
-  android apps|open|running   (phone) Android's apps: list, open as a window or full screen, what runs
-  android notifications|notify|screenshot   (phone) The phone's notifications, post one, its screen
 
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
@@ -205,6 +203,9 @@ Feature Status table in CLAUDE.md before relying on them.
   dlss status        DLSS 5 Neural Rendering readiness (~50-60% fps cost)
   dlss doctor        Measure whether NR actually evaluates on this driver
   dlss nr install    Build the NR Vulkan layer — covers DX9-DX12 + Vulkan, no per-game setup
+  dlss games         List games, whether each is proton or native, and what is armed
+  dlss on|off        Arm/disarm a game (--all, or --flatpak <app-id>)
+  dlss wrap <name>   Wrap a native launcher (Prism, Lutris) so it runs armed
   (CacheFS — lazy-load /home with write-back — opt-in via POWOS_CACHEFS_ENABLED=true)
 
 Examples:
@@ -461,11 +462,6 @@ cmd_status() {
     echo -e "${BOLD}${CYAN}PowOS Status${NC}"
     echo "════════════════════════════════════════"
     echo ""
-    # A phone has no USB drive, layers or RAM overlay to report (lib/phone.sh).
-    if declare -f powos_is_phone >/dev/null && powos_is_phone; then
-        _status_phone
-        return
-    fi
     _status_layers
     _status_ram_overlay
     _status_user_data
@@ -1655,9 +1651,8 @@ cmd_health() {
     _HEALTH_WARNINGS=0
     _HEALTH_USB_STATUS=""
 
-    local probe probes=("${_HEALTH_PROBES[@]}")
-    declare -f powos_is_phone >/dev/null && powos_is_phone && probes=("${_HEALTH_PROBES_PHONE[@]}")
-    for probe in "${probes[@]}"; do
+    local probe
+    for probe in "${_HEALTH_PROBES[@]}"; do
         "_health_$probe"
     done
 
@@ -2167,7 +2162,6 @@ PROJECTS_DIR="${POWOS_ROOT:-/var/lib/powos}/projects"
 [[ -f "$POWOS_LIB/ai/agent.sh" ]]     && source "$POWOS_LIB/ai/agent.sh"
 [[ -f "$POWOS_LIB/sync.sh" ]]         && source "$POWOS_LIB/sync.sh"
 [[ -f "$POWOS_LIB/backup.sh" ]]       && source "$POWOS_LIB/backup.sh"
-[[ -f "$POWOS_LIB/phone.sh" ]]        && source "$POWOS_LIB/phone.sh"
 
 # ═══════════════════════════════════════════════════════════════════
 # Container Commands (Podman/Distrobox)
@@ -3084,20 +3078,10 @@ case "${1:-}" in
         source "$POWOS_LIB/ai/manager/manager.sh"
         manager_run "$@"
         ;;
-    app|apps)
-        # PowOS apps: install/publish/list, the runtime switch, the system tier (lib/apps/powos-app).
-        shift
-        exec "$POWOS_LIB/apps/powos-app" "$@"
-        ;;
     comms)
         shift
         source "$POWOS_LIB/ai/comms/comms.sh"
         cmd_comms "$@"
-        ;;
-    android)
-        shift
-        source "$POWOS_LIB/android.sh"
-        cmd_android "$@"
         ;;
     version|--version|-v)
         cmd_version
