@@ -109,7 +109,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       cancel: () => call("speech.cancel"),
     },
     keyboard: { show: () => call("keyboard.show"), hide: () => call("keyboard.hide") },
-    system: { insets: () => call("system.insets") },
+    system: { insets: () => call("system.insets"), notifications: () => call("system.notifications") },
     on: (event, handler) => events.on(event, handler),
   };
 }
@@ -339,7 +339,7 @@ function mock(): Bridge {
       };
     })(),
     keyboard: { show: async () => {}, hide: async () => {} },
-    system: { insets: async () => ({ top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 }) },
+    system: { insets: async () => ({ top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 }), notifications: async () => (console.log("[mock] notification shade"), true) },
     on: (event, handler) => events.on(event, handler),
   };
 }

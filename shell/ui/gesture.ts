@@ -13,10 +13,13 @@
  */
 import { computed, effect, signal } from "@preact/signals";
 import { carry, closeDrawer, dockDrag, drawer, editing, menu, page, pages, selected } from "../state.ts";
+import { powos } from "../bridge.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
 const FLICK = 0.45;
+/** How far down a swipe on home goes before the notification shade comes down. */
+const SHADE_PX = 48;
 /** What takes a tap in the launcher; a tap anywhere else in it closes it. */
 const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, a, .menu";
 
@@ -68,7 +71,7 @@ interface Gesture {
   last: [number, number, number];
   /** Velocity along the gesture's axis, px/ms. */
   v: number;
-  mode: "open" | "close" | "pages" | null;
+  mode: "open" | "close" | "pages" | "shade" | null;
   open: boolean;
   inList: boolean;
   /** On the recent apps row: sideways, it scrolls rather than turning the page. */
@@ -135,6 +138,8 @@ export function homeGestures() {
         // Editing home, up isn't the launcher: the sheet has the bottom.
         if (!g.open && dy < 0 && !editing.value) g.mode = "open";
         else if (g.open && dy > 0 && (!g.inList || g.listTop)) g.mode = "close";
+        // Down on home: the notification shade, as on a stock launcher.
+        else if (!g.open && dy > 0 && !editing.value) g.mode = "shade";
         else return (g = null); // the list scrolls
       } else if (!g.open && !g.inStrip) {
         g.mode = "pages";
@@ -143,6 +148,14 @@ export function homeGestures() {
       }
     }
     if (e?.cancelable) e.preventDefault();
+    if (g.mode === "shade") {
+      // Far enough to mean it: Android's own shade takes over from here.
+      if (dy > SHADE_PX) {
+        g = null;
+        powos.system.notifications();
+      }
+      return;
+    }
     if (g.mode === "open") drawerDrag.value = clamp(-dy / (g.height * 0.6));
     else if (g.mode === "close") drawerDrag.value = clamp(1 - dy / (g.height * 0.6));
     else {
