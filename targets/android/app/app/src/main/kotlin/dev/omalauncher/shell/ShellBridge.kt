@@ -43,9 +43,10 @@ class ShellBridge(
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     init {
-        // Installs, removals and Linux apps arriving: the page reloads its list.
+        // Installs, removals, Linux apps and icons arriving (they load in the background, after the list): the page
+        // reloads its list, whose icon URLs carry the icon count so a missing icon is asked for again.
         scope.launch {
-            snapshotFlow { runtime.androidApps.apps.size to runtime.linuxApps.size }.drop(1).collect { emit("apps.changed", null) }
+            snapshotFlow { listOf(runtime.androidApps.apps.size, runtime.linuxApps.size, iconCount()) }.drop(1).collect { emit("apps.changed", null) }
         }
         scope.launch { runtime.refreshApps() }
         // The home screen changed (here, in the Compose launcher, or a widget file arriving): the page re-reads it.
@@ -131,7 +132,9 @@ class ShellBridge(
         return list
     }
 
-    private fun icon(key: String) = "${ShellActivity.ORIGIN}/_icon/${Uri.encode(key)}"
+    private fun iconCount() = runtime.androidApps.icons.size + runtime.linuxIcons.size
+
+    private fun icon(key: String) = "${ShellActivity.ORIGIN}/_icon/${Uri.encode(key)}?v=${iconCount()}"
 
     /** Recent keys still installed, in the page's form ("a:…" / "l:…"). */
     private fun installed(keys: List<String>): List<String> {

@@ -19,6 +19,8 @@ final class HomeScreen {
     private static final String TAG = "HomeScreen";
     static final String KEY_HOME_SCREEN = "home_screen";
     static final String[] HOME_SCREENS = {"auto", "desktop", "launcher"};
+    /** Which launcher is "the launcher": the Compose one, or the web shell (shell/, its .HomeShell alias). */
+    static final String KEY_WEB_LAUNCHER = "web_launcher";
     /** Below this smallest width (dp) a screen is phone-sized: the Open's cover screen is 343 dp, its inner 698. */
     private static final int PHONE_MAX_DP = 600;
 
@@ -40,10 +42,23 @@ final class HomeScreen {
         else
             desktop = unfolded != null ? unfolded
                 : ctx.getResources().getConfiguration().smallestScreenWidthDp >= PHONE_MAX_DP;
-        // The new one first: never a moment without a home screen.
-        set(ctx, desktop ? "HomeDesktop" : "HomeLauncher", true);
-        set(ctx, desktop ? "HomeLauncher" : "HomeDesktop", false);
-        return ctx.getPackageName() + "/andro.marchy." + (desktop ? "HomeDesktop" : "HomeLauncher");
+        String launcher = web(ctx) ? "HomeShell" : "HomeLauncher";
+        String home = desktop ? "HomeDesktop" : launcher;
+        // The new one first: never a moment without a home screen. Exactly one of them stays on.
+        set(ctx, home, true);
+        for (String alias : new String[] {"HomeDesktop", "HomeLauncher", "HomeShell"})
+            if (!alias.equals(home)) set(ctx, alias, false);
+        return ctx.getPackageName() + "/andro.marchy." + home;
+    }
+
+    /** The web shell is the launcher (Settings › Home screen). */
+    static boolean web(Context ctx) {
+        return ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE).getBoolean(KEY_WEB_LAUNCHER, false);
+    }
+
+    /** The launcher's activity, to start it by component (FoldWatcher, on the cover screen). */
+    static String launcherActivity(Context ctx) {
+        return ctx.getPackageName() + "/" + (web(ctx) ? "dev.omalauncher.shell.ShellActivity" : "dev.omalauncher.MainActivity");
     }
 
     private static void set(Context ctx, String alias, boolean on) {

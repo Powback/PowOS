@@ -92,6 +92,21 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- The same, with the launcher as a web UI (Settings › Home screen › web launcher): HomeScreen enables this
+             one instead of .HomeLauncher. -->
+        <activity-alias
+            android:name="andro.marchy.HomeShell"
+            android:label="PowOS Shell"
+            android:targetActivity=".shell.ShellActivity"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
         <activity
             android:name=".LinuxWindowActivity"
             android:label="Linux"

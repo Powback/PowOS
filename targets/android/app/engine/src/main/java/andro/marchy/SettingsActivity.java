@@ -1053,6 +1053,18 @@ public class SettingsActivity extends Activity {
         });
         root.addView(spinner);
 
+        // The launcher as a web UI (shell/): Home opens it wherever it would open the launcher.
+        Switch web = new Switch(this);
+        web.setText(R.string.web_launcher);
+        web.setTextSize(14);
+        web.setPadding(0, dp(8), 0, 0);
+        web.setChecked(HomeScreen.web(this));
+        web.setOnCheckedChangeListener((v, checked) -> {
+            prefs.edit().putBoolean(HomeScreen.KEY_WEB_LAUNCHER, checked).commit();
+            HomeScreen.apply(SettingsActivity.this, null);
+        });
+        root.addView(web);
+
         TextView hint = new TextView(this);
         hint.setText(R.string.home_screen_hint);
         hint.setTextSize(12);
