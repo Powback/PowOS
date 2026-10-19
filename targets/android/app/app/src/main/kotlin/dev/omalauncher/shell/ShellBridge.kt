@@ -276,8 +276,9 @@ class ShellBridge(
     @SuppressLint("WrongConstant")
     private fun notifications(open: Boolean): Boolean =
         runCatching {
-            // PowOS's shade in SystemUI's place: SystemUI's own panel is lent back to it for this (its quick settings).
-            if (open) dev.omalauncher.system.ShadeHost.current?.lend()
+            // PowOS's shade in SystemUI's place: SystemUI's own panel is lent back to it for this - its control center.
+            val shade = dev.omalauncher.system.ShadeHost.current
+            if (open && shade != null) return shade.openSystemPanel(settings = true).let { true }
             val bar = context.getSystemService("statusbar")
             bar.javaClass.getMethod(if (open) "expandNotificationsPanel" else "collapsePanels").invoke(bar)
         }.onFailure { Log.w(TAG, "can't ${if (open) "open" else "close"} the notification shade", it) }.isSuccess
