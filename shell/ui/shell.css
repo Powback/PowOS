@@ -13,26 +13,65 @@
     var(--inset-left, env(safe-area-inset-left));
 }
 
-/* The pages and the strip; the drawer slides over both, they recede under it. */
-.home-content {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  transition: opacity 260ms ease-out, transform 260ms ease-out;
+/*
+ * The stage: the pages, and the launcher panel at its foot. The panel is the recent apps bar grown by --p (0..1, the
+ * drawer's openness, gesture.ts): its frame's top edge rises from the bar to the top of the stage, and the drawer is
+ * revealed by a clip at that edge - a frame of the swipe moves an edge, nothing is laid out again.
+ */
+@property --p {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
 }
-.home-content.dragging { transition: none; }
 .stage {
+  --p: 0;
+  --panel-top: calc((1 - var(--p)) * (100% - var(--strip-height) - var(--gap)));
   position: relative;
   flex: 1;
   min-height: 0;
+  transition: --p 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+/* A finger is moving it: it follows the finger exactly. */
+.stage.dragging { transition: none; }
+
+.home-content {
+  position: absolute;
+  inset: 0;
+  /* Room for the bar at the panel's foot. */
+  padding-bottom: calc(var(--strip-height) + var(--gap));
   display: flex;
   flex-direction: column;
+  opacity: calc(1 - var(--p));
+  transform: scale(calc(1 - var(--p) * 0.04));
 }
+.stage.open .home-content { pointer-events: none; }
+
+.launcher-frame {
+  position: absolute;
+  left: var(--edge);
+  right: var(--edge);
+  bottom: var(--gap);
+  top: calc((1 - var(--p)) * (100% - var(--strip-height) - var(--gap)));
+  background: color-mix(in srgb, var(--color-background) calc(88% + var(--p) * 10%), transparent);
+}
+.launcher {
+  position: absolute;
+  left: var(--edge);
+  right: var(--edge);
+  top: 0;
+  bottom: var(--gap);
+  display: flex;
+  flex-direction: column;
+  clip-path: inset(calc((1 - var(--p)) * (100% - var(--strip-height))) 0 0 0 round var(--radius));
+  /* Closed, only the recent apps take touches; the pages under the rest stay reachable. */
+  pointer-events: none;
+}
+.launcher .strip { pointer-events: auto; }
+.stage.open .launcher .drawer { pointer-events: auto; }
 
 .strip {
+  flex: none;
   height: var(--strip-height);
-  margin: 0 var(--edge) var(--gap);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -86,26 +125,23 @@
   font-size: var(--text-small);
 }
 
-/*
- * The drawer: over the stage, sliding with the finger (drawer.tsx sets transform and opacity from the gesture). It
- * settles with a transition; while a finger drags it, it follows the finger exactly.
- */
+/* The drawer: the panel's upper part (clipped there: riding up, it doesn't spill under the recent row). */
+.drawer-clip {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
 .drawer {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 1fr var(--letter-bar);
   grid-template-rows: minmax(0, 1fr);
-  padding: var(--edge) var(--edge) 0;
-  background: var(--color-background);
-  border-radius: var(--radius) var(--radius) 0 0;
-  transition: transform 260ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 200ms ease-out;
-  will-change: transform, opacity;
-  pointer-events: none;
+  padding: var(--edge) 4px 0 var(--edge);
+  /* It rides up with the panel's top edge: its own top comes in first, as the bar grows into it. */
+  transform: translateY(calc((1 - var(--p)) * 100%));
 }
-.drawer.shown { pointer-events: auto; }
-.drawer.dragging { transition: none; }
 
 .drawer-list {
   grid-column: 1;

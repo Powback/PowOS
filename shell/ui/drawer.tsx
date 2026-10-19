@@ -1,12 +1,12 @@
 /**
  * The drawer: every app A to Z under letter headings, with an A-Z bar to tap or slide along (as PowOS's start
- * menu). Typing in the bar narrows it to matches, best first. Always mounted: it slides with the finger that opens
- * or closes it (gesture.ts), and settles with a transition.
+ * menu). Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
+ * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
 import { useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { AppCell } from "./apps.tsx";
-import { drawerDrag, drawerShown } from "./gesture.ts";
+import { drawerShown } from "./gesture.ts";
 import { apps, query } from "../state.ts";
 import type { App } from "../types.ts";
 
@@ -91,14 +91,9 @@ export function Drawer() {
   };
   const searching = query.value.trim() !== "";
   const p = drawerShown();
-  const dragging = drawerDrag.value != null;
   return (
-    <div
-      class={`drawer ${p > 0 ? "shown" : ""} ${dragging ? "dragging" : ""}`}
-      // From the bottom edge, all the way: the finger carries it up. Opaque, so home doesn't show through it.
-      style={{ transform: `translateY(${(1 - p) * 100}%)`, opacity: p > 0 ? 1 : 0 }}
-      aria-hidden={p === 0}
-    >
+    // The launcher panel's upper part (home.tsx): it comes in as the recent bar grows into the panel.
+    <div class={`drawer ${p > 0 ? "shown" : ""}`} style={{ opacity: Math.min(1, p * 1.6) }} aria-hidden={p === 0}>
       <div class="drawer-list" ref={list}>
         {searching ? (
           <div class="grid">

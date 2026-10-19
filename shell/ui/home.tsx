@@ -1,6 +1,10 @@
 /**
- * Home: the pages and the recent apps strip, the drawer that slides up over them, the bar, and under it the dock -
- * the apps pinned to stay at hand, as on iOS. Swipes follow the finger (gesture.ts).
+ * Home: the pages; the launcher panel - the recent apps bar, which a swipe up grows into the drawer, its top edge
+ * following the finger, the recent apps staying its bottom row; the search bar; and under it the dock, the apps
+ * pinned to stay at hand (as on iOS).
+ *
+ * The panel's openness (gesture.ts) is one number, --p, on the stage: the frame's top edge and the clip that reveals
+ * the drawer move with it in CSS, so a frame of the swipe moves an edge, not a re-laid-out list of apps.
  */
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
@@ -9,10 +13,10 @@ import { drawerDrag, drawerShown, homeGestures } from "./gesture.ts";
 import { Pages } from "./grid.tsx";
 import { byKey, dock, drawer, recent } from "../state.ts";
 
-function RecentStrip() {
+function RecentRow() {
   const shown = recent.value.map((k) => byKey.value.get(k)).filter((a) => a != null);
   return (
-    <div class="strip tile">
+    <div class="strip">
       {shown.map((app) => (
         <AppCell key={app.key} app={app} labels={false} />
       ))}
@@ -33,26 +37,22 @@ function Dock() {
   );
 }
 
-/** The pages and the strip: they recede as the drawer comes up over them. */
-function HomeContent() {
-  const p = drawerShown();
-  return (
-    <div
-      class={`home-content ${drawerDrag.value != null ? "dragging" : ""}`}
-      style={{ opacity: 1 - p, transform: `scale(${1 - p * 0.04})`, pointerEvents: p > 0 ? "none" : undefined }}
-    >
-      <Pages />
-      <RecentStrip />
-    </div>
-  );
-}
-
 export function Home() {
+  const p = drawerShown();
+  const dragging = drawerDrag.value != null;
   return (
     <div class="home" {...homeGestures()}>
-      <div class="stage">
-        <HomeContent />
-        <Drawer />
+      <div class={`stage ${dragging ? "dragging" : ""} ${p > 0 ? "open" : ""}`} style={{ "--p": p }}>
+        <div class="home-content">
+          <Pages />
+        </div>
+        <div class="launcher-frame tile" />
+        <div class="launcher">
+          <div class="drawer-clip">
+            <Drawer />
+          </div>
+          <RecentRow />
+        </div>
       </div>
       <Bar />
       <Dock />
