@@ -8,6 +8,7 @@
  * - Drop an app on an app or a folder to put them in one folder.
  * - Long-press an app in the drawer and drag it: the drawer gives way and the app lands where it's dropped
  *   (startCarry, called from apps.tsx).
+ * - Other apps' Android widgets are tiles too (appwidget.tsx): their frames, the finger's touches sent to them.
  *
  * Everything carried follows window-level pointer events, so a drag outlives the element it started on - the drawer
  * closes under the finger, a page turns.
@@ -20,6 +21,7 @@ import { byKey, carry, editing, folder, home, launch, page, pages, selected, typ
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen } from "./gesture.ts";
 import { OwlWidget } from "./owl.tsx";
+import { AppWidgetFace } from "./appwidget.tsx";
 import type { Cell, HomeItem } from "../types.ts";
 
 const LONG_PRESS_MS = 420;
@@ -96,6 +98,34 @@ function aim(c: Carry): Aim | null {
   const y = Math.max(0, Math.min(g.rows - size.h, Math.round((c.y - c.grab.y - g.pad) / g.cellH)));
   const cell = { x, y, ...size };
   return others.some((i) => overlaps(shown(i), cell)) ? null : { cell, page: n };
+}
+
+/**
+ * Where a new tile [wDp] x [hDp] goes (an Android widget from the picker): that many cells (at least one, at most the
+ * grid), in the first free spot on the page on screen, else on a later page, else on a new page after the last; and
+ * the tile's size in dp at those cells, as it will show.
+ */
+export function placeNew(wDp: number, hDp: number) {
+  const g = geometry.value;
+  const cols = home.value.columns;
+  const cellW = g.cellW || 60;
+  const cellH = g.cellH || 60;
+  const rows = g.rows || 8;
+  const w = Math.max(1, Math.min(cols, Math.ceil(wDp / cellW)));
+  const h = Math.max(1, Math.min(rows, Math.ceil(hDp / cellH)));
+  const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 6;
+  const size = { width: w * cellW - gap, height: h * cellH - gap };
+  const used = home.value.pages.length ? home.value.pages : [1];
+  const here = pages.value[page.value] ?? used[0];
+  for (const n of [here, ...used.filter((p) => p > here)]) {
+    const taken = itemsOn(n).map(shown);
+    for (let y = 0; y + h <= rows; y++)
+      for (let x = 0; x + w <= cols; x++) {
+        const cell = { x, y, w, h };
+        if (!taken.some((t) => overlaps(t, cell))) return { page: n, cell, ...size };
+      }
+  }
+  return { page: Math.max(...used) + 1, cell: { x: 0, y: 0, w, h }, ...size };
 }
 
 /**
@@ -202,6 +232,7 @@ function Tile({ item }: { item: HomeItem }) {
     else if (item.kind === "folder") folder.value = item.key;
     // The widget's own onTap - a terminal's opens its screen, the shell full size.
     else if (item.kind === "widget") powos.widgets.tap(item.key);
+    // An Android widget's taps are its own (appwidget.tsx).
   });
   const lifted = carry.value?.item?.key === item.key;
   const isSelected = selected.value === item.key;
@@ -224,6 +255,15 @@ function Tile({ item }: { item: HomeItem }) {
           )}
         </div>
       )}
+      {item.kind === "appwidget" &&
+        (item.error ? (
+          <div class="tile widget-face">
+            <div class="widget-name">{item.name}</div>
+            <div class="widget-error">{item.error}</div>
+          </div>
+        ) : (
+          <AppWidgetFace item={item} />
+        ))}
       {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
       {item.kind === "folder" && (
         <div class="folder-face tile">
@@ -242,6 +282,16 @@ function Tile({ item }: { item: HomeItem }) {
 function Actions({ item }: { item: HomeItem }) {
   return (
     <div class="tile-actions tile" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+      {item.appWidget?.reconfigurable && (
+        <button
+          onClick={() => {
+            selected.value = null;
+            powos.appWidgets.configure(item.appWidget!.id);
+          }}
+        >
+          settings
+        </button>
+      )}
       <button
         class="danger"
         onClick={async () => {
@@ -255,15 +305,32 @@ function Actions({ item }: { item: HomeItem }) {
   );
 }
 
+/**
+ * An Android widget's smallest size in this grid's cells: the fewest whose tile (cells less the gap) covers its
+ * provider's minimum, as a launcher's ceil((dp + gap) / cell) - with the real cell size, which the host doesn't know.
+ */
+function appWidgetMin(item: HomeItem): [number, number] {
+  const g = geometry.value;
+  const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 6;
+  const [w, h] = item.appWidget!.minDp;
+  const cells = (dp: number, cell: number) => Math.max(1, Math.ceil((dp + gap) / (cell || 60) - 0.05));
+  return [cells(w, g.cellW), cells(h, g.cellH)];
+}
+
 /** Drag the corner: the widget grows or shrinks by whole cells, never under its minimum or onto another tile. */
 function ResizeHandle({ item }: { item: HomeItem }) {
   const [size, setSize] = useState<Cell | null>(null);
   const cell0 = item.cell!;
+  // An Android widget: its provider's minimum, and only the sides its resize mode moves.
+  const aw = item.appWidget;
+  const min = aw ? appWidgetMin(item) : item.minSize;
   const fit = (e: PointerEvent): Cell | null => {
     const g = geometry.value;
     const b = box(cell0);
-    const w = Math.max(item.minSize[0], Math.min(home.value.columns - cell0.x, Math.round((e.clientX - g.left - b.left) / g.cellW)));
-    const h = Math.max(item.minSize[1], Math.min(g.rows - cell0.y, Math.round((e.clientY - g.top - b.top) / g.cellH)));
+    let w = Math.max(min[0], Math.min(home.value.columns - cell0.x, Math.round((e.clientX - g.left - b.left) / g.cellW)));
+    let h = Math.max(min[1], Math.min(g.rows - cell0.y, Math.round((e.clientY - g.top - b.top) / g.cellH)));
+    if (aw?.resize === "vertical") w = cell0.w;
+    if (aw?.resize === "horizontal") h = cell0.h;
     const cell = { ...cell0, w, h };
     return itemsOn(item.page).some((i) => i.key !== item.key && overlaps(shown(i), cell)) ? null : cell;
   };

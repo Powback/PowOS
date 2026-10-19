@@ -127,6 +127,15 @@ class ShellHost(
                 val jpeg = path.removePrefix("_task/").toIntOrNull()?.let { dev.omalauncher.system.Tasks.snapshot(it) } ?: return notFound()
                 return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
             }
+            // An Android widget's latest frame (AppWidgets draws it off screen), and a widget's preview for the picker.
+            if (path.startsWith("_appwidget/")) {
+                val png = path.removePrefix("_appwidget/").toIntOrNull()?.let { AppWidgets.get(context).framePng(it) } ?: return notFound()
+                return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
+            }
+            if (path.startsWith("_awpreview/")) {
+                val png = AppWidgets.get(context).previewPng(URLDecoder.decode(path.removePrefix("_awpreview/"), "UTF-8")) ?: return notFound()
+                return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600") }
+            }
             if (".." in path.split('/')) return notFound()
             val stream = open(path) ?: return notFound()
             return WebResourceResponse(mime(path), "utf-8", stream).apply {

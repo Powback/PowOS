@@ -35,7 +35,7 @@ export interface Cell {
 /** Something on a home page: a widget, a pinned app or a folder of them. */
 export interface HomeItem {
   key: string;
-  kind: "widget" | "app" | "folder";
+  kind: "widget" | "app" | "folder" | "appwidget";
   page: number;
   /** Its place on the page's grid; null until placed. */
   cell: Cell | null;
@@ -50,6 +50,38 @@ export interface HomeItem {
   app?: string;
   /** folder */
   apps?: { key: string; label: string; app: string }[];
+  /** appwidget: another app's Android widget (its [name] is the widget's label) */
+  appWidget?: AppWidgetRef;
+}
+
+/** An Android widget on home: the system's id for it, its provider (a component) and that provider's app. */
+export interface AppWidgetRef {
+  id: number;
+  provider: string;
+  package: string;
+  /** It can be set up again after it's placed (its own settings screen). */
+  reconfigurable: boolean;
+  /** The smallest it may be made, dp (its provider's minimum resize size), and which sides of its tile move. */
+  minDp: [number, number];
+  resize: "both" | "horizontal" | "vertical";
+}
+
+/** A widget an Android app offers (the add-widget picker): sizes in dp, [preview] a picture of it (a URL). */
+export interface AppWidgetProvider {
+  /** Its component and profile ("package/class#serial"), what appWidgets.add takes. */
+  provider: string;
+  label: string;
+  app: string;
+  package: string;
+  /** From the work profile. */
+  work: boolean;
+  description: string | null;
+  /** The size a launcher would first give it, and the smallest it may be made. */
+  sizeDp: [number, number];
+  minDp: [number, number];
+  /** It opens its own setup screen when added. */
+  configure: boolean;
+  preview: string;
 }
 
 export interface Home {
@@ -229,6 +261,43 @@ export interface Bridge {
     closeScreen(): Promise<void>;
   };
   /**
+   * Other apps' Android widgets on home (items of kind "appwidget"): the host draws each off screen and sends its
+   * frames ("appwidgets.frame" { id, url } while watched); the page sends touches back. Placed, moved and removed
+   * through home like any item.
+   */
+  appWidgets: {
+    providers(): Promise<AppWidgetProvider[]>;
+    /**
+     * Puts [provider]'s widget at [cell] on [page], [width] x [height] dp. "pending": Android asks the user first
+     * (allow PowOS to create widgets, then the widget's setup) - "home.changed" brings it, "appwidgets.failed" says
+     * it didn't happen.
+     */
+    add(
+      provider: string,
+      page: number,
+      cell: Cell,
+      width: number,
+      height: number,
+    ): Promise<"added" | "pending" | "failed">;
+    /**
+     * Shows widget [id] at [width] x [height] (its tile, CSS px): answers its latest frame's URL (if any) and whether
+     * it has a list to scroll; "appwidgets.frame" ({ id, url, scrolls }) brings each next.
+     */
+    watch(id: number, width: number, height: number): Promise<{ url: string | null; scrolls: boolean } | null>;
+    unwatch(id: number): Promise<void>;
+    /** A touch on its tile at (x, y) of a tile [width] x [height] CSS px; "cancel": the page took the gesture. */
+    touch(
+      id: number,
+      action: "down" | "move" | "up" | "cancel",
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ): Promise<void>;
+    /** Its own setup screen again. */
+    configure(id: number): Promise<void>;
+  };
+  /**
    * PowOS AI: the conversation with PowOS's manager, the one its own app (and the desktop's manager widget) shows.
    * "ai.changed" brings the whole chat ({ busy, items }) as a turn streams in.
    */
@@ -388,7 +457,7 @@ export interface Bridge {
   };
   /**
    * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
-   * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
+   * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
 }

@@ -428,6 +428,14 @@
             android:exported="false"
             android:taskAffinity="com.powos.app.recon"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- Adding another app's widget to home (shell/AppWidgets.kt): Android's "allow PowOS to create widgets"
+             dialog, then the widget's own setup. Invisible itself. -->
+        <activity
+            android:name=".shell.AppWidgets$BindActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="com.powos.app.appwidgets"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- The same recon from adb (am broadcast): DUMP is held by adb's shell and the system, never by apps. -->
         <receiver
             android:name=".widgets.recon.ReconReceiver"

@@ -74,6 +74,10 @@ class ShellBridge(
             it.collapse = { main.post { emit("qs.collapse", null) } }
         }
 
+    /** Other apps' Android widgets on home (AppWidgets.kt): their frames and home's changes come to this page. */
+    private val appWidgets = AppWidgets.get(context)
+    private val appWidgetEvents: (String, Any?) -> Unit = { event, payload -> emit(event, payload) }
+
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
 
@@ -131,6 +135,7 @@ class ShellBridge(
         scope.launch { snapshotFlow { home.fingerprint() }.drop(1).collect { emit("home.changed", null) } }
         // PowOS AI's conversation (shared with its own app): every item and the busy flag, as they stream in.
         PowosAiChat.load(context.applicationContext)
+        appWidgets.listen(appWidgetEvents)
         scope.launch { snapshotFlow { aiChat().toString() }.drop(1).collect { emit("ai.changed", JSONObject(it)) } }
     }
 
@@ -218,12 +223,19 @@ class ShellBridge(
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
             "notifications.clearAll" -> runtime.widgets.notifications.clearAll()
             "notifications.access" -> runtime.widgets.notifications.askAccess()
-            "home.get" -> home.snapshot()
-            "home.place" -> home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
+            // Android widgets are home items too, kept by AppWidgets ("aw:" keys).
+            "home.get" -> appWidgets.merge(home.snapshot())
+            "home.place" -> if (appWidgets.owns(a.getString(0))) appWidgets.place(a.getString(0), a.getJSONObject(1), a.getInt(2)) else home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
             "home.add" -> home.add(a.getString(0), a.getInt(1), a.optJSONObject(2))
-            "home.remove" -> home.remove(a.getString(0))
+            "home.remove" -> if (appWidgets.owns(a.getString(0))) appWidgets.remove(a.getString(0)) else home.remove(a.getString(0))
             "home.group" -> home.group(a.getString(0), a.getString(1))
             "home.arrange" -> home.arrange(a.getInt(0), a.getInt(1))
+            "appwidgets.providers" -> appWidgets.providers()
+            "appwidgets.add" -> appWidgets.add(a.getString(0), a.getInt(1), a.getJSONObject(2), a.getDouble(3), a.getDouble(4))
+            "appwidgets.watch" -> appWidgets.watch(appWidgetEvents, a.getInt(0), a.getDouble(1), a.getDouble(2))
+            "appwidgets.unwatch" -> appWidgets.unwatch(appWidgetEvents, a.getInt(0))
+            "appwidgets.touch" -> appWidgets.touch(a.getInt(0), a.getString(1), a.getDouble(2), a.getDouble(3), a.getDouble(4), a.getDouble(5))
+            "appwidgets.configure" -> appWidgets.reconfigure(a.getInt(0))
             "widgets.watch" -> widgets.watch(a.getString(0), a.optBoolean(1))
             "widgets.unwatch" -> widgets.unwatch(a.getString(0), a.optBoolean(1))
             "widgets.fire" ->
@@ -570,6 +582,7 @@ class ShellBridge(
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
     fun close() {
+        appWidgets.unlisten(appWidgetEvents)
         quick.close()
         media.close()
         speech.cancel()

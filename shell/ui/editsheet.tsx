@@ -7,11 +7,26 @@ import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { carry, editing } from "../state.ts";
-import type { ThemeChoice } from "../types.ts";
+import { AppWidgetPicker, picker } from "./appwidget.tsx";
+import { placeNew } from "./grid.tsx";
+import type { AppWidgetProvider, ThemeChoice } from "../types.ts";
 
 const themes = signal<ThemeChoice[]>([]);
 const picked = signal<string | null>(null);
 const agent = signal<string | null>(null);
+/** What adding an Android widget came to, when it didn't simply land on home. */
+const note = signal<string | null>(null);
+
+powos.on("appwidgets.failed", () => (note.value = "the widget wasn't added"));
+
+/** An Android widget picked: it goes in the first free spot at its size (Android may ask the user first). */
+async function addAppWidget(p: AppWidgetProvider) {
+  picker.value = false;
+  note.value = null;
+  const spot = placeNew(p.sizeDp[0], p.sizeDp[1]);
+  const r = await powos.appWidgets.add(p.provider, spot.page, spot.cell, spot.width, spot.height).catch(() => "failed");
+  if (r === "failed") note.value = `couldn't add ${p.label}`;
+}
 
 powos.on("theme.changed", (t: { name: string }) => (picked.value = t.name));
 
@@ -57,6 +72,8 @@ export function EditSheet() {
   }, [open, themes.value.length]);
   // Out of the way while a tile is carried: the whole page is somewhere to drop it.
   if (!open || carry.value) return null;
+  // The picker in its place while it's open (over home, its own scrolling list).
+  if (picker.value) return <AppWidgetPicker onPick={addAppWidget} />;
   const who = (agent.value ?? "an agent").toLowerCase();
   const item = (label: string, run: () => void) => (
     <button type="button" class="sheet-item" onClick={run}>
@@ -75,10 +92,12 @@ export function EditSheet() {
       <div class="sheet-items">
         {item(`new widget with ${who}`, () => powos.agents.newWidget())}
         {item(`new app with ${who}`, () => powos.agents.newApp())}
+        {item("android widget", () => (picker.value = true))}
         {item("widget store", () => powos.screens.open("store"))}
         {item("AUR app store", () => powos.screens.open("aur"))}
         {item("settings", () => powos.screens.open("settings"))}
       </div>
+      {note.value && <div class="muted">{note.value}</div>}
       <div class="sheet-row">
         <span class="muted">theme</span>
         <span class="muted">{current?.title.toLowerCase()}</span>

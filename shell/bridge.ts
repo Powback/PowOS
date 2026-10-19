@@ -6,6 +6,7 @@
 import type {
   AgentMail,
   App,
+  AppWidgetProvider,
   AssistScreen,
   Bridge,
   Cell,
@@ -81,6 +82,16 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       remove: (key) => call("home.remove", key),
       group: (key, target) => call<string | null>("home.group", key, target),
       arrange: (cols, rows) => call("home.arrange", cols, rows),
+    },
+    appWidgets: {
+      providers: () => call<AppWidgetProvider[]>("appwidgets.providers"),
+      add: (provider, page, cell, width, height) =>
+        call<"added" | "pending" | "failed">("appwidgets.add", provider, page, cell, width, height),
+      watch: (id, width, height) =>
+        call<{ url: string | null; scrolls: boolean } | null>("appwidgets.watch", id, width, height),
+      unwatch: (id) => call("appwidgets.unwatch", id),
+      touch: (id, action, x, y, width, height) => call("appwidgets.touch", id, action, x, y, width, height),
+      configure: (id) => call("appwidgets.configure", id),
     },
     widgets: {
       watch: (key, screen) => call("widgets.watch", key, !!screen),
@@ -413,6 +424,8 @@ function mock(): Bridge {
         }
       },
     },
+    // Android widgets: two made-up providers, drawn as SVG; a tap on one flips it, as a light switch would.
+    appWidgets: mockAppWidgets(home, changed, events),
     // Trees captured from real widgets on the phone (dev/sample-trees.json), keyed by the mock home's widgets.
     widgets: {
       watch: async (key, screen) => {
@@ -796,6 +809,69 @@ function mock(): Bridge {
       battery: async () => ({ level: 76, charging: false }),
     },
     on: (event, handler) => events.on(event, handler),
+  };
+}
+
+/** The mock's Android widgets: a light switch and a note card, their frames SVG data URLs. */
+function mockAppWidgets(home: Home, changed: () => void, events: Events): Bridge["appWidgets"] {
+  const providers: AppWidgetProvider[] = [
+    ["com.example.lights/.Switch#0", "Light switch", "Lights", [57, 57], [40, 40], true],
+    ["com.example.notes/.Card#0", "Note", "Notes", [250, 110], [110, 57], false],
+  ].map(([provider, label, app, sizeDp, minDp, configure]) => ({
+    provider: provider as string,
+    label: label as string,
+    app: app as string,
+    package: (provider as string).split("/")[0],
+    work: false,
+    description: null,
+    sizeDp: sizeDp as [number, number],
+    minDp: minDp as [number, number],
+    configure: configure as boolean,
+    preview: frame(label as string, true),
+  }));
+  const on = new Map<number, boolean>();
+  let next = 100;
+  function frame(label: string, lit: boolean) {
+    const fill = lit ? "#f5c542" : "#444";
+    return (
+      "data:image/svg+xml," +
+      encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="${fill}"/>` +
+          `<text x="50" y="58" font-family="sans-serif" font-size="14" text-anchor="middle">${label}</text></svg>`,
+      )
+    );
+  }
+  const url = (id: number) => {
+    const item = home.items.find((i) => i.appWidget?.id === id);
+    return frame(item?.name ?? "?", on.get(id) ?? false);
+  };
+  return {
+    providers: async () => providers,
+    add: async (provider, page, cell) => {
+      const p = providers.find((x) => x.provider === provider)!;
+      const id = next++;
+      home.items.push({
+        key: `aw:${id}`,
+        kind: "appwidget",
+        page,
+        cell,
+        resizable: true,
+        minSize: [1, 1],
+        size: null,
+        name: p.label,
+        appWidget: { id, provider, package: p.package, reconfigurable: false, minDp: p.minDp, resize: "both" },
+      });
+      changed();
+      return "added";
+    },
+    watch: async (id) => ({ url: url(id), scrolls: false }),
+    unwatch: async () => {},
+    touch: async (id, action) => {
+      if (action !== "up") return;
+      on.set(id, !(on.get(id) ?? false));
+      events.emit("appwidgets.frame", { id, url: url(id), scrolls: false });
+    },
+    configure: async (id) => console.log("[mock] configure", id),
   };
 }
 
