@@ -37,7 +37,9 @@ import kotlin.math.abs
  *   _QUICK_SETTINGS). They're kept per binder token, and the token is this process's StatusBarManager's: if PowOS dies,
  *   the system drops them and SystemUI's shade is back by itself. Lifted while the lock screen shows (its shade stays
  *   SystemUI's until PowOS has a lock screen face), and lent to SystemUI when the page asks for the system's own
- *   panel (system.notifications: its quick settings, which PowOS can't show yet) until that one is closed again.
+ *   panel (system.notifications: OnePlus's control center, from PowOS's control center's own button) until that one is
+ *   closed again. A pull on the status bar's right half brings PowOS's control center (shell/ui/control.tsx), the rest
+ *   its notifications ("shade.panel").
  * - The pull: PowOS's gesture input ([pull], on the recents provider's input monitor - GestureMonitor) sees a finger go
  *   down on the status bar without taking it, and takes it (the status bar gets a cancel) only once it's dragged down:
  *   taps on the status bar stay SystemUI's (OnePlus's live capsules). Dragged down, the finger goes to the page
@@ -191,10 +193,29 @@ class ShadeHost(
         flags()
         edge?.postDelayed({
             if (lent && !lentSeenOpen) {
+                // SystemUI never told of its panel open (its state bits): the flags back, which shuts it if it is.
+                Log.w(TAG, "SystemUI's panel never showed as open; PowOS's shade back")
                 lent = false
                 flags()
             }
         }, LEND_TIMEOUT_MS)
+    }
+
+    /**
+     * SystemUI's own panel, opened: its control center ([settings], OnePlus's quick settings) or its notifications. The
+     * flags lent first; the expand a moment after, so SystemUI has the lifted flags before it's asked to open.
+     * HACK: StatusBarManager.expandSettingsPanel / expandNotificationsPanel are hidden API (EXPAND_STATUS_BAR, granted).
+     * Real fix: PowOS's own quick settings page (shell/ui/notifications.tsx's row grown into the whole control center).
+     */
+    @SuppressLint("WrongConstant")
+    fun openSystemPanel(settings: Boolean) {
+        lend()
+        (edge ?: shade)?.postDelayed({
+            runCatching {
+                HiddenApi.allow()
+                statusBar.javaClass.getMethod(if (settings) "expandSettingsPanel" else "expandNotificationsPanel").invoke(statusBar)
+            }.onFailure { Log.w(TAG, "can't open SystemUI's panel", it) }
+        }, EXPAND_DELAY_MS)
     }
 
     /** Shuts PowOS's shade if it's down (a swipe up from the bottom edge): true if it was. */
@@ -205,8 +226,14 @@ class ShadeHost(
     }
 
     /** Whether a finger down at [y] (display px) may be the shade's pull. */
-    private fun pullable(y: Float): Boolean =
-        host != null && !shown && !keyguard && !lent && statusBarShown && y <= stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
+    private fun pullable(y: Float): Boolean {
+        val edge = stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
+        if (y > edge) return false
+        val ok = host != null && !shown && !keyguard && !lent && statusBarShown
+        // A finger down on the status bar that isn't a pull: why, as it's the first thing to ask when the shade won't come.
+        if (!ok) Log.i(TAG, "not pulling: host=${host != null} shown=$shown keyguard=$keyguard lent=$lent statusBarShown=$statusBarShown")
+        return ok
+    }
 
     /**
      * The shade's pull on PowOS's gesture input (GestureMonitor): a finger down on the status bar is followed, and taken
@@ -216,11 +243,16 @@ class ShadeHost(
         object : GestureConsumer {
             override fun onDown(e: MotionEvent): Boolean {
                 if (!pullable(e.rawY)) return false
+                // The status bar's right half pulls the control center, the rest the notifications - as on OnePlus's.
+                val control = e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
+                host?.bridge?.emit("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
                 pulling.down(e)
                 return true
             }
 
-            override fun onEvent(e: MotionEvent): GestureConsumer.Verdict =
+            override fun onEvent(e: MotionEvent): GestureConsumer.Verdict = shadeEvent(e)
+
+            private fun shadeEvent(e: MotionEvent): GestureConsumer.Verdict =
                 when (e.actionMasked) {
                     MotionEvent.ACTION_MOVE ->
                         when (pulling.move(e)) {
@@ -413,8 +445,10 @@ class ShadeHost(
         init {
             // The status bar's height (it changes on folding) and whether it shows: from the insets the window gets.
             setOnApplyWindowInsetsListener { _, insets ->
-                statusBarShown = insets.isVisible(WindowInsets.Type.statusBars())
                 val top = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+                // Hidden only if this window is told of a status bar at all (top > 0) and it's hidden: a window above the
+                // status bar, as this one is, may be given no status bar inset, and that's not a full-screen app.
+                statusBarShown = top == 0 || insets.isVisible(WindowInsets.Type.statusBars())
                 if (top > 0) stripHeight = top
                 edgeLayoutChanged(top.takeIf { it > 0 })
                 insets
@@ -462,7 +496,13 @@ class ShadeHost(
         /** As the page's: the pull's span (of the screen's height). A flick and the openness it opens at: [shadeOpens]. */
         private const val PULL_SPAN = 0.6f
 
-        private const val LEND_TIMEOUT_MS = 2000L
+        private const val LEND_TIMEOUT_MS = 5000L
+
+        /** Lifted flags first, then the expand. */
+        private const val EXPAND_DELAY_MS = 80L
+
+        /** The status bar's right part (from this fraction of its width) pulls the control center, as on OnePlus's. */
+        private const val CONTROL_SPLIT = 0.5f
     }
 }
 

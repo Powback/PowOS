@@ -59,6 +59,17 @@ static volatile bool running = true;
 /* Listening on "@name" (abstract namespace) rather than a socket file: see main(). */
 static bool abstract_socket;
 
+/* PowOS: the desktop's (surface 0) screen as the app knew it when it started this daemon (--screen WxH@mHz), for a
+ * producer that connects before any consumer did. Without it the producer (KWin's Anland backend, connect_to_deamon)
+ * waited in its handshake for the first consumer - the PowOS desktop on screen - and with it KWin's whole startup and
+ * every client of it (kcminit, the portals, plasmashell): a session the app started while the phone showed anything
+ * else (the launcher after an update, a reboot) came up only once the desktop was opened, seconds of Plasma starting
+ * in front of the user (12 minutes blocked on 2026-10-19). The first consumer's own screen info replaces it; KWin
+ * resizes its output to the consumer's buffers on import (rotation, fold), so a provisional size that differs is
+ * harmless. */
+static struct screen_info provisional_screen;
+static bool has_provisional_screen;
+
 static void daemon_log(const char *format, ...)
 {
     struct timeval now;
@@ -104,18 +115,40 @@ static const char *default_socket_path(void)
     return path;
 }
 
+/* "WxH" or "WxH@mHz" (refresh in milli-Hz, as the consumer reports it). */
+static bool parse_screen(const char *arg, struct screen_info *si)
+{
+    unsigned w = 0, h = 0, mhz = 0;
+    int n = sscanf(arg, "%ux%u@%u", &w, &h, &mhz);
+    if (n < 2 || w == 0 || h == 0 || w > 16384 || h > 16384)
+        return false;
+    si->width = w;
+    si->height = h;
+    si->format = 1; /* PIXEL_FORMAT_RGBA_8888, what the consumer reports (native_consumer.c) */
+    si->refresh = n == 3 ? mhz : 60000;
+    return true;
+}
+
+/* andromarchy [--socket] PATH [--screen WxH[@mHz]] */
 static const char *parse_socket_path(int argc, char **argv)
 {
-    if (argc <= 1)
-        return default_socket_path();
-    if (strcmp(argv[1], "--socket") == 0) {
-        if (argc < 3 || argv[2][0] == '\0') {
-            daemon_log("usage: andromarchy [--socket PATH] [PATH]\n");
-            exit(1);
+    const char *path = NULL;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--screen") == 0 && i + 1 < argc) {
+            has_provisional_screen = parse_screen(argv[++i], &provisional_screen);
+            if (!has_provisional_screen)
+                daemon_log("daemon: ignoring bad --screen %s\n", argv[i]);
+        } else if (strcmp(argv[i], "--socket") == 0) {
+            if (i + 1 >= argc || argv[i + 1][0] == '\0') {
+                daemon_log("usage: andromarchy [--socket PATH] [PATH] [--screen WxH[@mHz]]\n");
+                exit(1);
+            }
+            path = argv[++i];
+        } else if (!path) {
+            path = argv[i];
         }
-        return argv[2];
     }
-    return argv[1];
+    return path ? path : default_socket_path();
 }
 
 static int ensure_socket_parent(const char *sock_path)
@@ -464,6 +497,12 @@ static void handle_new_connection(int listen_fd)
             p->producer_waiting_fds = false;
             daemon_log("daemon: surface %u: producer connected\n", id);
 
+            if (!p->has_screen_info && id == 0 && has_provisional_screen) {
+                p->stored_screen = provisional_screen;
+                p->has_screen_info = true;
+                daemon_log("daemon: surface 0: no consumer yet, provisional screen %ux%u\n",
+                           provisional_screen.width, provisional_screen.height);
+            }
             if (p->has_screen_info)
                 send_screen_info_msg(p, client_fd);
             else

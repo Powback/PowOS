@@ -39,6 +39,7 @@ nvidia-persistence|on,off|now|Keep the NVIDIA GPU initialized between uses (cons
 cachefs|on,off|reboot|CacheFS lazy /home (experimental)
 claude-endpoint|custom|now|Claude authority URL every PowOS agent calls (e.g. http://claude-auth.pow)
 claude-token|custom|now|Token sent to that authority — any non-empty value; it stops the CLI forking the OAuth grant
+app-runtime|native,sandbox,container|now|How app backends run: native, sandbox (bubblewrap) or container (podman); per app: powos app runtime <id> <mode>
 EOF
 }
 
@@ -66,6 +67,11 @@ cfg_file_set() {
         fi
     "
 }
+
+# ── app-runtime (lib/apps/powos-runtime owns the setting; the supervisor applies it) ──
+
+get_app_runtime() { "${POWOS_LIB:-/usr/lib/powos}/apps/powos-runtime" mode 2>/dev/null || echo native; }
+set_app_runtime() { "${POWOS_LIB:-/usr/lib/powos}/apps/powos-runtime" config "$1"; }
 
 # ── ssh ───────────────────────────────────────────────────────────
 

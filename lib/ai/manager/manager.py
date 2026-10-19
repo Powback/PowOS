@@ -34,6 +34,22 @@ import sys
 import threading
 import time
 
+def _agents_hooks():
+    """The Agents view's reporter (lib/ai/agents, docs/AGENTS-VIEW-DESIGN.md §4): every hook event, async, so the
+    manager shows in the view. Not when the user's own settings run it already (the phone's do): each event would be
+    reported twice. POWOS_AGENTS=0 opts out."""
+    hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agents", "claude-hooks.json")
+    if os.environ.get("POWOS_AGENTS", "1") == "0" or not os.path.isfile(hooks):
+        return []
+    try:
+        with open(os.path.expanduser("~/.claude/settings.json")) as f:
+            if "powos-agent-hook" in f.read():
+                return []
+    except OSError:
+        pass
+    return ["--settings", os.path.normpath(hooks)]
+
+
 # ---- ANSI (skip when not a tty or NO_COLOR) --------------------------------
 _TTY = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 def _c(code, s):
@@ -112,6 +128,7 @@ class Manager:
             cmd += ["--mcp-config", self.args.mcp_config_file]
         if self.session_id:
             cmd += ["--resume", self.session_id]
+        cmd += _agents_hooks()
         return cmd
 
     def start(self):
@@ -185,33 +202,40 @@ class Manager:
                 self._emit({"kind": "user", "text": text})
             self._send_event(text)
 
+    def take_inbox(self):
+        """The manager's comms inbox as turn texts, oldest first, taken out of it."""
+        if not self._comms_root or not self._agent_id:
+            return []
+        inbox = os.path.join(self._comms_root, "agents", self._agent_id, "inbox")
+        try:
+            files = sorted(f for f in os.listdir(inbox)
+                           if f.endswith(".json")) if os.path.isdir(inbox) else []
+        except OSError:
+            files = []
+        texts = []
+        for name in files:
+            path = os.path.join(inbox, name)
+            try:
+                with open(path) as f:
+                    m = json.load(f)
+                os.remove(path)
+            except (OSError, json.JSONDecodeError):
+                continue
+            frm = m.get("from", "?")
+            pri = m.get("priority", "normal")
+            body = m.get("body", "")
+            res = f"\nResult: {m['result']}" if m.get("result") else ""
+            texts.append(
+                f"[inbox message from agent '{frm}' ({pri})]: {body}{res}\n\n"
+                f"Handle this: fold it into what you tell me, and act or "
+                f"delegate if needed.")
+        return texts
+
     def inbox_loop(self):
         """Watch the manager's comms inbox; queue arrivals as user turns."""
-        if not self._comms_root or not self._agent_id:
-            return
-        inbox = os.path.join(self._comms_root, "agents", self._agent_id, "inbox")
         while not self.stop.is_set():
-            try:
-                files = sorted(f for f in os.listdir(inbox)
-                               if f.endswith(".json")) if os.path.isdir(inbox) else []
-            except OSError:
-                files = []
-            for name in files:
-                path = os.path.join(inbox, name)
-                try:
-                    with open(path) as f:
-                        m = json.load(f)
-                    os.remove(path)
-                except (OSError, json.JSONDecodeError):
-                    continue
-                frm = m.get("from", "?")
-                pri = m.get("priority", "normal")
-                body = m.get("body", "")
-                res = f"\nResult: {m['result']}" if m.get("result") else ""
-                self.pending.put(("inbox",
-                    f"[inbox message from agent '{frm}' ({pri})]: {body}{res}\n\n"
-                    f"Handle this: fold it into what you tell me, and act or "
-                    f"delegate if needed."))
+            for text in self.take_inbox():
+                self.pending.put(("inbox", text))
             time.sleep(1.0)
 
     def reader_loop(self):
@@ -281,18 +305,25 @@ class Manager:
         if self.enable_inbox:
             threading.Thread(target=self.inbox_loop, daemon=True).start()
 
-    def once(self, text, timeout=300):
+    def once(self, text, timeout=300, source="user"):
         """Run a single turn against the per-dir session, then exit. Widget path."""
         self.enable_inbox = False
         self.start()
         self._spawn_workers()
-        self.pending.put(("user", text))
+        self.pending.put((source, text))
         t0 = time.time()
         while self.turns_done < 1 and not self.stop.is_set():
             if time.time() - t0 > timeout:
                 break
             time.sleep(0.05)
         self.shutdown()
+
+    def once_inbox(self, timeout=300):
+        """One turn made of what's waiting in the inbox (a frontend that runs one turn at a time - the phone's chat -
+        has no watcher between turns; it calls this when mail arrives). Nothing waiting: no turn, no output."""
+        texts = self.take_inbox()
+        if texts:
+            self.once("\n\n".join(texts), timeout=timeout, source="inbox")
 
     def repl(self):
         self.start()
@@ -393,6 +424,9 @@ def main():
     ap.add_argument("--once-stdin", action="store_true",
                     help="Like --once, but read the turn text from stdin "
                          "(lets the widget avoid shell-quoting the message).")
+    ap.add_argument("--once-inbox", action="store_true",
+                    help="One turn made of the comms inbox's waiting mail "
+                         "(nothing waiting: exit without a turn).")
     ap.add_argument("--json-events", action="store_true",
                     help="Emit one normalized JSON event per line (for the widget).")
     ap.add_argument("--list-json", action="store_true",
@@ -411,7 +445,9 @@ def main():
     m = Manager(args)
     if args.json_events:
         m.sink = m._json_sink
-    if args.once_stdin:
+    if args.once_inbox:
+        m.once_inbox()
+    elif args.once_stdin:
         m.once(sys.stdin.read().strip())
     elif args.once is not None:
         m.once(args.once)

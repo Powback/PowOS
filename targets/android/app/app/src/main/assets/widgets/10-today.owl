@@ -3,7 +3,7 @@ widget "today" {
   order: 1
   size: 3x3
   minSize: 3x2
-  meta { description: "The date and the weather where you are, by IP or a city you type. Tap it for the next 24 hours, three days, wind, UV, sun and moon"; version: "1.1"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "The date and the weather where you are, by IP or a city you type. Tap it for the next 24 hours, three days, wind, UV, sun and moon"; version: "1.2"; license: "MIT"; category: "world"; owl: 5 }
 
   source now = clock every 1m
   state city = "" persist
@@ -64,72 +64,73 @@ widget "today" {
     }
   }
 
+  // The tile, kept quiet: the day and place on one line, now large, the next hours as a light strip when it's tall
+  // enough. Everything else (wind, UV, the days ahead, sun and moon) is a tap away, in the screen.
+  // Narrow (a 3-column tile is about 170dp): now stacked - the temperature, then one line of sky, range and place.
+  // Wider: the sky and the range beside the temperature, the place in the top line.
+  let narrow = tileWidth != null && tileWidth < 260
+  let hours = narrow ? 3 : cols != null && cols >= 5 ? 6 : 4
   Column {
     gap: 0
     Row {
-      gap: 10
+      gap: 6
       align: center
-      Text { text: fmtTime(now, "d"); style: huge; width: 60 }
-      Column {
-        gap: 0
-        weight: 1
-        Text { text: lower(fmtTime(now, "EEEE")); style: label; color: accent; maxLines: 1 }
-        Text { text: lower(fmtTime(now, "MMMM yyyy")); style: small; color: muted; maxLines: 1 }
+      Text { text: lower(fmtTime(now, "EEEE")); style: label; color: accent; maxLines: 1 }
+      Text { text: lower(fmtTime(now, "d MMM")); style: label; color: muted; maxLines: 1; weight: 1 }
+      if area != null && !narrow {
+        Text { text: lower(area.areaName[0].value); style: label; color: muted; maxLines: 1; align: end }
       }
     }
     Spacer { weight: 1 }
-    Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-    Spacer { height: 8 }
     if cur != null {
-      Row {
-        gap: 6
-        align: bottom
-        Text { text: weatherIcon(cur.weatherCode, night); font: icon; fontSize: 32; color: sky; width: 26; padding: [0, 0, 0, 3] }
-        Text { text: "${get(cur, "temp_" + unit)}°"; fontSize: 28; color: cyan; width: 68; maxLines: 1 }
-        Column {
-          gap: 0
-          weight: 1
-          Text { text: lower(trim(cur.weatherDesc[0].value)); style: small; align: end; maxLines: 1 }
-          Text { text: "↑${get(day, "maxtemp" + unit)}° ↓${get(day, "mintemp" + unit)}°"; style: small; color: muted; align: end; maxLines: 1; padding: [0, 0, 0, 5] }
+      if narrow {
+        Row {
+          gap: 8
+          align: center
+          Text { text: weatherIcon(cur.weatherCode, night); font: icon; fontSize: 30; color: sky; width: 34; align: center }
+          Text { text: "${get(cur, "temp_" + unit)}°"; fontSize: 36; maxLines: 1; weight: 1 }
+        }
+        Text {
+          text: "${lower(trim(cur.weatherDesc[0].value))} · ${get(day, "maxtemp" + unit)}°/${get(day, "mintemp" + unit)}°${area != null ? " · " + lower(area.areaName[0].value) : ""}"
+          style: small
+          color: muted
+          maxLines: 1
+        }
+      } else {
+        Row {
+          gap: 10
+          align: center
+          Text { text: weatherIcon(cur.weatherCode, night); font: icon; fontSize: 40; color: sky; width: 44; align: center }
+          Text { text: "${get(cur, "temp_" + unit)}°"; fontSize: 44; maxLines: 1 }
+          Column {
+            gap: 2
+            weight: 1
+            Text { text: lower(trim(cur.weatherDesc[0].value)); style: small; align: end; maxLines: 1 }
+            Text { text: "${get(day, "maxtemp" + unit)}° / ${get(day, "mintemp" + unit)}°"; style: small; color: muted; align: end; maxLines: 1 }
+          }
         }
       }
-      Text { text: "feels ${get(cur, "FeelsLike" + unit)}° · ${lower(area.areaName[0].value)}"; style: small; color: muted; maxLines: 1 }
       Spacer { weight: 1 }
-      Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-      Spacer { height: 8 }
-      // The next two days (icon from the noon reading), then sunrise and sunset.
-      Row {
-        gap: 4
-        align: center
-        for d, i in drop(wx.weather, 1) key d.date {
-          Column {
-            gap: 0
-            weight: 1
-            align: center
-            Text { text: lower(fmtTime(now + 86400 * (i + 1), "EEE")); style: label; color: muted; align: center }
-            Text { text: weatherIcon(d.hourly[4].weatherCode, false); font: icon; fontSize: 18; align: center }
-            Text { text: "${get(d, "maxtemp" + unit)}° ${get(d, "mintemp" + unit)}°"; style: small; align: center; maxLines: 1 }
-          }
-        }
-        Column {
-          gap: 4
-          weight: 1.2
-          Row {
-            gap: 4
-            align: center
-            Text { text: ""; font: icon; fontSize: 14; color: yellow; width: 20 }
-            Text { text: sun[0]; style: small; maxLines: 1; weight: 1 }
-          }
-          Row {
-            gap: 4
-            align: center
-            Text { text: ""; font: icon; fontSize: 14; color: orange; width: 20 }
-            Text { text: sun[1]; style: small; maxLines: 1; weight: 1 }
+      if rows == null || rows >= 3 {
+        // Fixed-width hours spread over the row: shared by weight, the first one came out squeezed ("n…").
+        Row {
+          gap: 0
+          justify: spaceBetween
+          for s in steps.take(hours) key s.hr {
+            Column {
+              gap: 2
+              width: 40
+              align: center
+              Text { text: s.hr == hourNow - hourNow % 3 ? "now" : pad(s.hr % 24, 2, "0"); style: label; color: muted; align: center }
+              Text { text: weatherIcon(s.code, s.hr % 24 < sunHours[0] || s.hr % 24 >= sunHours[1]); font: icon; fontSize: 16; align: center; color: muted }
+              Text { text: "${s.t}°"; style: small; align: center; maxLines: 1 }
+            }
           }
         }
       }
     } else {
       Text { text: wx == null ? "weather…" : "weather offline"; style: small; color: muted }
+      Spacer { weight: 1 }
     }
   }
 

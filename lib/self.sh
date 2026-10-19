@@ -6,7 +6,8 @@
 #                       system, transiently (auto-reverts on reboot on installed
 #                       composefs; direct on live/RAM). No commit needed.
 #   powos self pull     SAFE update from upstream — NEVER discards local edits.
-#   powos self push     git add -A + commit + push (helpful errors, not raw git).
+#   powos self push     commit + push (helpful errors, not raw git): `-- <paths>` commits only those; no paths: the
+#                       whole tree, refused when others' changes are already staged (a tree agents share).
 #
 # The bundled source (/var/lib/powos/src) ships as a plain FILE SNAPSHOT with no
 # .git. The image bakes the exact commit it came from into
@@ -405,6 +406,9 @@ self_test() {
 # ══════════════════════════════════════════════════════════════════
 self_push() {
     local src="${1:-$SELF_SRC}"; local msg="${2:-}"
+    # Paths after the message: only those are staged and committed (a shared tree - several agents in one checkout -
+    # must never sweep up what others staged or changed). None: the whole tree, as before.
+    local paths=("${@:3}")
     if [[ ! -d "$src/.git" ]]; then
         perr "No git attached at $src."
         perr "Run 'powos self pull' once to attach to upstream, then push."
@@ -441,8 +445,20 @@ self_push() {
         fi
     fi
 
-    git -C "$src" add -A || { perr "git add failed."; return 1; }
-    if git -C "$src" diff --cached --quiet 2>/dev/null; then
+    if ((${#paths[@]})); then
+        git -C "$src" add -- "${paths[@]}" || { perr "git add failed."; return 1; }
+    else
+        # Someone else's staged changes in the index: `add -A` + commit would ship them under this message. A tree
+        # several agents share must commit by path.
+        if ! git -C "$src" diff --cached --quiet 2>/dev/null; then
+            perr "Other changes are already staged in $src (another agent or tool?):"
+            git -C "$src" diff --cached --name-status 2>/dev/null | self_indent
+            perr "Commit only yours:  powos self push -m \"message\" -- <your files>"
+            return 1
+        fi
+        git -C "$src" add -A || { perr "git add failed."; return 1; }
+    fi
+    if git -C "$src" diff --cached --quiet -- "${paths[@]}" 2>/dev/null; then
         pwarn "Nothing staged — working tree already matches HEAD; pushing anyway."
     else
         # Transparency: `add -A` stages the ENTIRE tree, so a stray/unrelated edit
@@ -450,9 +466,9 @@ self_push() {
         # unrelated vortex.sh change shipped under a mods-fix commit). Always show
         # exactly what's about to be committed so it's a choice, not a surprise.
         plog "Committing these files:"
-        git -C "$src" diff --cached --name-status 2>/dev/null | self_indent
+        git -C "$src" diff --cached --name-status -- "${paths[@]}" 2>/dev/null | self_indent
         # Let git stamp the commit date itself (no build-time timestamp baked in).
-        if ! git -C "$src" commit -m "$msg" 2>&1 | self_indent; then
+        if ! git -C "$src" commit -m "$msg" -- "${paths[@]}" 2>&1 | self_indent; then
             perr "git commit failed."
             return 1
         fi
@@ -512,7 +528,7 @@ PowOS self — edit → test → push loop
   powos self test     Apply local /var/lib/powos/src edits to THIS running system
                       (transient; auto-reverts on reboot on installed composefs)
   powos self pull     SAFE update from upstream (never discards local edits)
-  powos self push     git add -A + commit + push  (-m "message")
+  powos self push     commit + push  (-m "message" [-- <paths>]: only those files; no paths = whole tree)
   powos self reseed   Wipe /var/lib/powos/src and re-copy from the CURRENT image
                       snapshot at /usr/lib/powos/src. Use after bootc-switch when
                       the /var tree was inherited from an older PowOS install and
@@ -541,17 +557,18 @@ cmd_self() {
         pull)       self_safe_pull "$SELF_SRC" ;;
         reseed)     self_reseed "$SELF_SRC" ;;
         push)
-            local msg=""
+            local msg="" paths=()
             while [[ $# -gt 0 ]]; do
                 case "$1" in
                     -m|--message) msg="${2:-}"; shift 2 ;;
-                    *) shift ;;
+                    --) shift; paths+=("$@"); break ;;
+                    *) paths+=("$1"); shift ;;
                 esac
             done
             if [[ -z "$msg" ]] && [[ -t 0 ]]; then
                 read -rp "Commit message [PowOS self: sync local changes]: " msg || true
             fi
-            self_push "$SELF_SRC" "$msg"
+            self_push "$SELF_SRC" "$msg" "${paths[@]}"
             ;;
         help|-h|--help|"") self_usage ;;
         *) perr "Unknown: powos self $sub"; self_usage; return 1 ;;

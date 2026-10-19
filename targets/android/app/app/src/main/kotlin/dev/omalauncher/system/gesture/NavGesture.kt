@@ -17,6 +17,7 @@ import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import com.android.systemui.shared.recents.ISystemUiProxy
+import dev.omalauncher.shell.PowosLockActivity
 import dev.omalauncher.system.ShadeHost
 import dev.omalauncher.system.Switcher
 import dev.omalauncher.system.Tasks
@@ -197,6 +198,9 @@ class NavGesture(
     private fun blocked(): Boolean {
         val s = systemUiState
         if (s and (SYSUI_KEYGUARD_SHOWING or SYSUI_BOUNCER_SHOWING or SYSUI_NOTIFICATION_PANEL_EXPANDED or SYSUI_QUICK_SETTINGS_VISIBLE or SYSUI_DEVICE_DOZING or SYSUI_HOME_DISABLED) != 0L) return true
+        // PowOS's lock face over the lock screen (it occludes it: SystemUI clears KEYGUARD_SHOWING for OCCLUDED): the
+        // swipe up from the bottom is the face's own unlock, not home's - taken here, it cut the face's swipe short.
+        if (s and SYSUI_KEYGUARD_OCCLUDED != 0L && PowosLockActivity.current != null) return true
         return s and SYSUI_NAV_BAR_HIDDEN != 0L && s and SYSUI_ALLOW_GESTURE_IGNORING_BAR_VISIBILITY == 0L
     }
 
@@ -239,6 +243,7 @@ class NavGesture(
         const val SYSUI_NOTIFICATION_PANEL_EXPANDED = 1L shl 2
         const val SYSUI_BOUNCER_SHOWING = 1L shl 3
         const val SYSUI_KEYGUARD_SHOWING = 1L shl 6
+        const val SYSUI_KEYGUARD_OCCLUDED = 1L shl 9
         const val SYSUI_OVERVIEW_DISABLED = 1L shl 7
         const val SYSUI_HOME_DISABLED = 1L shl 8
         const val SYSUI_QUICK_SETTINGS_VISIBLE = 1L shl 11

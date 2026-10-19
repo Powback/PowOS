@@ -1,0 +1,825 @@
+#!/usr/bin/env python3
+"""powos-agentsd - folds agent hook events into the Agents view's spool (docs/AGENTS-VIEW-DESIGN.md §3-§5).
+
+Phase 1 of the design: the hooks (powos-agent-hook) drop one file per event into a RAM queue; this one process per
+host folds them into rows - agents, their tasks, a 64-event ring each, the comms messages - and writes the spool the
+viewers read (the PowOS app's FileObserver on the phone):
+
+    <spool>/state.json            {"v", "host", "ts", "agents": [...], "tasks": [...], "asks": []}
+    <spool>/messages.json         {"v", "host", "messages": [...]}     the last 200 comms messages
+    <spool>/events/<agent>.json   {"agent", "events": [...]}           one agent's ring, rewritten when it changes
+
+Field names and types are the design's §3 schema, so Phase 2 (SpacetimeDB) takes the same rows. Every file is written
+tmp + rename, so a reader never sees half of one and each write is one inotify event.
+
+Not a poller: it blocks on inotify (Linux) or kqueue (the Mac) on the queue, batches 250 ms after the first event,
+writes once per batch, and only what changed. It wakes on a timer only to sweep (once a minute, while it holds
+agents), and exits after 10 minutes without events and without a working agent; the next hook starts it again.
+
+--mirror (POWOS_AGENTS_MIRROR, the Mac): also pushes the whole state, folded, to another host's spool at most once a
+second and only when it changed - the Mac's agents on the phone.
+HACK: adb is a dev channel, not a transport; real fix = Phase 2 (the phone subscribes to the Mac's agents module).
+
+Never stored (§3): tool inputs or outputs, file contents, transcripts, env, tokens. Hints come from a fixed whitelist
+and strings that look like secrets are cut.
+"""
+
+import fcntl
+import json
+import os
+import re
+import select
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+BATCH_S = float(os.environ.get("POWOS_AGENTS_BATCH_MS", "250")) / 1000
+RING = 64
+TASKS_PER_AGENT = 50
+MESSAGES = 200
+COALESCE_MS = 10_000
+SWEEP_S = 60
+IDLE_EXIT_S = 600
+# A working agent that went quiet: a long tool call says nothing until it ends, so this is generous.
+STALE_WORKING_MS = 30 * 60_000
+QUIET_GONE_MS = 15 * 60_000
+DROP_GONE_MS = 60 * 60_000
+MIRROR_EVERY_S = 1.0
+MIRROR_EVENTS = 20
+MIRROR_MESSAGES = 50
+
+
+def _user():
+    return os.environ.get("USER") or os.environ.get("LOGNAME") or "u"
+
+
+def spool_dir():
+    d = os.environ.get("POWOS_AGENTS_DIR")
+    if d:
+        return d
+    run = os.environ.get("XDG_RUNTIME_DIR")
+    if run:
+        return os.path.join(run, "agents")
+    return os.path.join(os.environ.get("TMPDIR") or "/tmp", f"powos-agents-{_user()}")
+
+
+def queue_dir():
+    """The same choice as powos-agent-hook's (and comms-mcp.py's): keep the three in step."""
+    q = os.environ.get("POWOS_AGENTS_QUEUE")
+    if q:
+        return q
+    if os.path.isdir("/dev/shm"):
+        return f"/dev/shm/powos-agents-{_user()}"
+    return os.path.join(spool_dir(), "in")
+
+
+def host_name():
+    h = os.environ.get("POWOS_AGENTS_HOST") or os.environ.get("POWOS_PLATFORM")
+    if h:
+        return h
+    return socket.gethostname().split(".")[0].lower() or "host"
+
+
+def now_ms():
+    return int(time.time() * 1000)
+
+
+# ---- whitelist + scrubbing ---------------------------------------------------------------------------------------
+
+_SECRET = re.compile(
+    r"(sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|xox[abpr]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{12,}"
+    r"|Bearer\s+\S+|\b[A-Za-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|PASSWD)[A-Za-z0-9_]*\s*[=:]\s*\S+)",
+    re.IGNORECASE,
+)
+
+
+def clean(s, n):
+    """One line, secrets cut, at most [n] characters."""
+    if not isinstance(s, str):
+        return ""
+    s = _SECRET.sub("…", " ".join(s.split()))
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def first_line(s, n):
+    if not isinstance(s, str):
+        return ""
+    for line in s.splitlines():
+        if line.strip():
+            return clean(line, n)
+    return ""
+
+
+FILE_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "NotebookRead"}
+
+
+def hint_of(tool, inp):
+    """§3's hint: a file tool's basename, Bash's description (or its command up to the first | or &&), a subagent's
+    description; the tool's name for everything else."""
+    inp = inp if isinstance(inp, dict) else {}
+    if tool in FILE_TOOLS:
+        p = inp.get("file_path") or inp.get("notebook_path") or ""
+        return clean(os.path.basename(str(p)), 60) or tool
+    if tool == "Bash":
+        d = inp.get("description")
+        if isinstance(d, str) and d.strip():
+            return clean(d, 40)
+        cmd = str(inp.get("command") or "")
+        cmd = re.split(r"\||&&|;|\n", cmd, maxsplit=1)[0]
+        return clean(cmd, 40) or tool
+    if tool in ("Agent", "Task"):
+        return clean(inp.get("description") or inp.get("subagent_type") or "", 40) or tool
+    return tool
+
+
+def summary_of(tool, inp):
+    """What an ask shows the user (≤200): the command, the file, the URL - the user decides on it, so it's the real
+    thing, secrets still cut."""
+    inp = inp if isinstance(inp, dict) else {}
+    if tool == "Bash":
+        return clean(str(inp.get("command") or ""), 200)
+    if tool in FILE_TOOLS:
+        return clean(str(inp.get("file_path") or inp.get("notebook_path") or ""), 200)
+    if inp.get("url"):
+        return clean(str(inp["url"]), 200)
+    return clean(json.dumps(inp, ensure_ascii=False)[:400], 200)
+
+
+def safe_file(agent_id):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", agent_id)[:150]
+
+
+# ---- the fold ----------------------------------------------------------------------------------------------------
+
+
+class Spool:
+    def __init__(self, spool, host):
+        self.dir = spool
+        self.host = host
+        self.agents = {}  # id -> row
+        self.tasks = {}  # id -> row
+        self.rings = {}  # agent id -> [event]
+        self.messages = []
+        self.asks = {}  # id -> row (§3 ask): raised by powos-agent-ask, gone once answered or expired
+        self.seq = {}  # agent id -> last event id
+        # Not in the spool: what's needed only to fold (lost on a restart, harmless).
+        self.pending = {}  # tool_use_id -> (agent id, start ms)
+        self.fails = {}  # agent id -> failures in a row
+        self.described = {}  # session agent id -> [descriptions of Agent tool calls not started yet]
+        self.dirty_agents = set()
+        self.dirty_rings = set()
+        self.dirty_messages = False
+        self.dropped = set()
+        self.load()
+
+    # Restart where the last run left off: rows, rings, messages.
+    def load(self):
+        try:
+            with open(os.path.join(self.dir, "state.json")) as f:
+                s = json.load(f)
+            self.agents = {a["id"]: a for a in s.get("agents", [])}
+            self.tasks = {t["id"]: t for t in s.get("tasks", [])}
+            self.asks = {a["id"]: a for a in s.get("asks", [])}
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        try:
+            with open(os.path.join(self.dir, "messages.json")) as f:
+                self.messages = json.load(f).get("messages", [])[-MESSAGES:]
+        except (OSError, ValueError, AttributeError):
+            pass
+        for aid in self.agents:
+            try:
+                with open(os.path.join(self.dir, "events", safe_file(aid) + ".json")) as f:
+                    ring = json.load(f).get("events", [])[-RING:]
+                self.rings[aid] = ring
+                self.seq[aid] = max((e.get("id", 0) for e in ring), default=0)
+            except (OSError, ValueError, AttributeError):
+                pass
+
+    def agent(self, aid, ts, role="claude", parent=None, cwd="", pid=0):
+        a = self.agents.get(aid)
+        if a is None:
+            a = {
+                "id": aid,
+                "host": self.host,
+                "role": role or "claude",
+                "parent": parent,
+                "state": "idle",
+                "title": "",
+                "step": "",
+                "cwd": cwd,
+                "pid": pid,
+                "subs": 0,
+                "unread": 0,
+                "report": "",
+                "started": ts,
+                "last": ts,
+                "rev": 0,
+            }
+            self.agents[aid] = a
+            self.dropped.discard(aid)
+        return a
+
+    def touch(self, a, ts, **changes):
+        for k, v in changes.items():
+            a[k] = v
+        a["last"] = max(a["last"], ts)
+        a["rev"] += 1
+        self.dirty_agents.add(a["id"])
+
+    def event(self, aid, ts, kind, name="", hint="", ok=None, ms=0):
+        ring = self.rings.setdefault(aid, [])
+        last = ring[-1] if ring else None
+        # Coalescing (§3): the same tool again within 10 s is one row, n of them (Read×6).
+        if (
+            kind == "tool"
+            and last
+            and last["kind"] == "tool"
+            and last["name"] == name
+            and ts - last["ts"] <= COALESCE_MS
+        ):
+            last["n"] += 1
+            last["hint"] = hint
+            last["ok"] = last["ok"] is not False and ok is not False
+            last["ms"] += ms
+            last["ts"] = ts
+        else:
+            self.seq[aid] = self.seq.get(aid, 0) + 1
+            ring.append(
+                {"id": self.seq[aid], "agent": aid, "ts": ts, "kind": kind, "name": name, "hint": hint, "ok": ok, "n": 1, "ms": ms}
+            )
+            del ring[:-RING]
+        self.dirty_rings.add(aid)
+
+    def live_subs(self, top):
+        return sum(1 for a in self.agents.values() if a.get("parent") == top and a["state"] not in ("gone",) and "/" in a["id"])
+
+    def recount(self, top):
+        a = self.agents.get(top)
+        if a is not None:
+            n = self.live_subs(top)
+            if a["subs"] != n:
+                a["subs"] = n
+                a["rev"] += 1
+                self.dirty_agents.add(top)
+
+    def set_title(self, a):
+        """§3: the in-progress task's subject, else the last prompt's first line."""
+        doing = [t for t in self.tasks.values() if t["agent"] == a["id"] and t["status"] == "in_progress"]
+        if doing:
+            title = max(doing, key=lambda t: t["updated"])["subject"][:80]
+            if a["title"] != title:
+                a["title"] = title
+
+    def task(self, aid, tid, ts, subject=None, status=None, order=None):
+        if not tid:
+            return
+        key = f"{aid}#{tid}"
+        t = self.tasks.get(key)
+        if t is None:
+            mine = [x for x in self.tasks.values() if x["agent"] == aid]
+            if len(mine) >= TASKS_PER_AGENT:
+                oldest = min(mine, key=lambda x: x["updated"])
+                del self.tasks[oldest["id"]]
+            t = {"id": key, "agent": aid, "subject": "", "status": "open", "order": len(mine), "updated": ts}
+            self.tasks[key] = t
+        if subject:
+            t["subject"] = clean(subject, 100)
+        if status in ("open", "in_progress", "done"):
+            t["status"] = status
+        if order is not None:
+            t["order"] = order
+        t["updated"] = ts
+        self.dirty_agents.add(aid)
+
+    def task_tool(self, aid, tool, inp, resp, ts):
+        """Task lists come from the task tools' own calls (TaskCreate/TaskUpdate, TodoWrite)."""
+        inp = inp if isinstance(inp, dict) else {}
+        status_of = {"pending": "open", "in_progress": "in_progress", "completed": "done", "deleted": None}
+        if tool == "TodoWrite" and isinstance(inp.get("todos"), list):
+            for k in [k for k, t in self.tasks.items() if t["agent"] == aid]:
+                del self.tasks[k]
+            for i, todo in enumerate(inp["todos"][:TASKS_PER_AGENT]):
+                if isinstance(todo, dict):
+                    self.task(aid, str(i), ts, todo.get("content"), status_of.get(todo.get("status"), "open"), i)
+            self.dirty_agents.add(aid)
+        elif tool == "TaskUpdate":
+            tid = str(inp.get("taskId") or inp.get("task_id") or "")
+            st = inp.get("status")
+            if st == "deleted":
+                self.tasks.pop(f"{aid}#{tid}", None)
+                self.dirty_agents.add(aid)
+            else:
+                self.task(aid, tid, ts, inp.get("subject"), status_of.get(st))
+        elif tool == "TaskCreate":
+            tid = ""
+            if isinstance(resp, dict):
+                task = resp.get("task") if isinstance(resp.get("task"), dict) else resp
+                tid = str(task.get("id") or task.get("taskId") or "")
+            if tid:
+                self.task(aid, tid, ts, inp.get("subject"), "open")
+
+    def message(self, rec, ts):
+        mid = str(rec.get("id") or "")
+        if not mid or any(m["id"] == mid for m in self.messages[-50:]):
+            return
+        self.messages.append(
+            {
+                "id": mid,
+                "from": clean(rec.get("from"), 64),
+                "to": clean(rec.get("to"), 64),
+                "kind": rec.get("kind") if rec.get("kind") in ("message", "escalate", "notify", "ask", "report") else "message",
+                "priority": clean(rec.get("priority") or "normal", 16),
+                "ts": int(rec.get("ts") or ts),
+                "body": clean(rec.get("body"), 280),
+                "read": False,
+            }
+        )
+        del self.messages[:-MESSAGES]
+        self.dirty_messages = True
+
+    def fold(self, header, rec, ts):
+        ev = rec.get("hook_event_name") or ""
+        sid = str(rec.get("session_id") or "")
+        if not sid:
+            return
+        role, parent, pid = header
+        top = f"{self.host}:{sid}"
+        sub = rec.get("agent_id")
+        cwd = os.path.basename(str(rec.get("cwd") or "").rstrip("/"))
+        a = self.agent(top, ts, role, f"@{parent}" if parent and parent != "user" else None, cwd, pid)
+        if cwd and a["cwd"] != cwd:
+            a["cwd"] = cwd
+        if pid and a["pid"] != pid and not sub:
+            a["pid"] = pid
+        me = a
+        if sub:
+            me = self.agent(f"{top}/{sub}", ts, rec.get("agent_type") or "agent", top, cwd, 0)
+        aid = me["id"]
+
+        if ev == "SessionStart":
+            self.touch(a, ts, state="idle" if a["state"] in ("gone", "idle", "blocked") else a["state"])
+        elif ev == "UserPromptSubmit":
+            self.fails[top] = 0
+            self.touch(a, ts, state="working", step="", title=first_line(rec.get("prompt"), 80) or a["title"])
+            self.set_title(a)
+            self.event(top, ts, "prompt", "", first_line(rec.get("prompt"), 60))
+        elif ev == "PreToolUse":
+            tool = str(rec.get("tool_name") or "")
+            hint = hint_of(tool, rec.get("tool_input"))
+            if tool in ("Agent", "Task") and not sub:
+                self.described.setdefault(top, []).append(hint)
+                del self.described[top][:-8]
+            if rec.get("tool_use_id"):
+                self.pending[rec["tool_use_id"]] = ts
+                if len(self.pending) > 512:
+                    self.pending.pop(next(iter(self.pending)))
+            step = tool if hint == tool else f"{tool} {hint}"
+            self.touch(me, ts, state="working", step=clean(step, 60))
+            if me is not a and a["state"] != "working":
+                self.touch(a, ts, state="working")
+        elif ev in ("PostToolUse", "PostToolUseFailure"):
+            tool = str(rec.get("tool_name") or "")
+            ok = ev == "PostToolUse"
+            start = self.pending.pop(rec.get("tool_use_id"), None)
+            ms = max(0, ts - start) if start else 0
+            self.event(aid, ts, "tool", tool, hint_of(tool, rec.get("tool_input")), ok, ms)
+            if ok:
+                self.fails[aid] = 0
+                self.task_tool(aid, tool, rec.get("tool_input"), rec.get("tool_response"), ts)
+                self.set_title(me)
+                self.touch(me, ts, state="working" if me["state"] in ("blocked", "needs_you", "idle") else me["state"])
+            else:
+                self.fails[aid] = self.fails.get(aid, 0) + 1
+                # §2: three failures in a row and it's stuck.
+                self.touch(me, ts, state="blocked" if self.fails[aid] >= 3 else "working")
+        elif ev == "SubagentStart":
+            if sub:
+                queued = self.described.get(top) or []
+                title = queued.pop(0) if queued else me["title"]
+                self.touch(me, ts, state="working", title=title, role=rec.get("agent_type") or me["role"])
+                self.event(top, ts, "sub_start", rec.get("agent_type") or "agent", clean(title, 60))
+                self.touch(a, ts, state="working")
+                self.recount(top)
+        elif ev == "SubagentStop":
+            if sub:
+                if not self.rings.get(aid) and not me["title"]:
+                    # One that did nothing of its own to show (Claude Code's own helpers stop like this every turn).
+                    self.drop(aid)
+                else:
+                    self.touch(me, ts, state="gone", step="", report=clean(rec.get("last_assistant_message"), 280))
+                    self.event(top, ts, "sub_stop", me["role"], clean(me["title"], 60))
+                self.recount(top)
+        elif ev == "TaskCreated":
+            self.task(aid, str(rec.get("task_id") or ""), ts, rec.get("task_subject"), "open")
+        elif ev == "TaskCompleted":
+            self.task(aid, str(rec.get("task_id") or ""), ts, rec.get("task_subject"), "done")
+            self.set_title(me)
+        elif ev == "Notification":
+            kind = rec.get("notification_type") or ""
+            if kind == "permission_prompt":
+                self.touch(a, ts, state="needs_you")
+            elif kind == "idle_prompt" and a["state"] == "working":
+                self.touch(a, ts, state="idle")
+            self.event(top, ts, "notify", kind, clean(rec.get("message"), 60))
+        elif ev == "Stop":
+            busy = self.live_subs(top) > 0
+            self.touch(a, ts, state="working" if busy else "idle", step="", report=clean(rec.get("last_assistant_message"), 280) or a["report"])
+            self.event(top, ts, "stop")
+        elif ev == "StopFailure":
+            err = rec.get("error") or rec.get("message") or ""
+            self.touch(a, ts, state="blocked", step=clean(str(err), 60))
+            self.event(top, ts, "fail", "", clean(str(err), 60), False)
+        elif ev == "PreCompact":
+            self.event(top, ts, "compact", rec.get("trigger") or "")
+            self.touch(a, ts)
+        elif ev == "PermissionRequest":
+            ask = str(rec.get("ask_id") or "")
+            if ask:
+                tool = str(rec.get("tool_name") or "")
+                self.asks[ask] = {
+                    "id": ask,
+                    "agent": aid,
+                    "tool": tool,
+                    "summary": summary_of(tool, rec.get("tool_input")),
+                    "ts": ts,
+                    "expires": int(rec.get("expires") or ts + 60_000),
+                    "answer": None,
+                    "reason": None,
+                    "by": None,
+                }
+                self.touch(me, ts, state="needs_you")
+                if me is not a:
+                    self.touch(a, ts, state="needs_you")
+                self.event(top, ts, "notify", "ask", clean(f"{tool} {self.asks[ask]['summary']}", 60))
+        elif ev == "PowosAskDone":
+            ask = self.asks.pop(str(rec.get("ask_id") or ""), None)
+            if ask is not None:
+                answer = rec.get("answer")
+                still = any(x["agent"] == aid for x in self.asks.values())
+                # Expired: the terminal asks now - still the user's to decide, until the agent moves on.
+                if answer in ("allow", "deny") and not still:
+                    self.touch(me, ts, state="working")
+                    if me is not a:
+                        self.touch(a, ts, state="working")
+                else:
+                    self.touch(me, ts)
+                self.event(top, ts, "notify", str(answer), clean(ask["tool"], 60))
+        elif ev == "SessionEnd":
+            self.touch(a, ts, state="gone", step="")
+            for s in self.agents.values():
+                if s.get("parent") == top and s["state"] != "gone":
+                    self.touch(s, ts, state="gone")
+            self.recount(top)
+        else:
+            return
+        if me is not a:
+            self.recount(top)
+
+    def sweep(self, now):
+        for k in [k for k, x in self.asks.items() if now > x["expires"] + 60_000]:
+            del self.asks[k]
+            self.dirty_agents.add(k)
+        for a in list(self.agents.values()):
+            quiet = now - a["last"]
+            if a["state"] == "working" and quiet > STALE_WORKING_MS:
+                self.touch(a, a["last"], state="idle", step="")
+            elif a["state"] in ("idle", "blocked", "needs_you", "paused") and quiet > QUIET_GONE_MS and not alive(a.get("pid")):
+                self.touch(a, a["last"], state="gone", step="")
+            elif a["state"] == "gone" and (quiet > DROP_GONE_MS or ("/" in a["id"] and not self.rings.get(a["id"]) and not a["title"])):
+                self.drop(a["id"])
+        for top in {a["parent"] for a in self.agents.values() if a.get("parent") and not a["parent"].startswith("@")}:
+            self.recount(top)
+
+    def drop(self, aid):
+        self.agents.pop(aid, None)
+        self.rings.pop(aid, None)
+        self.seq.pop(aid, None)
+        for k in [k for k, t in self.tasks.items() if t["agent"] == aid]:
+            del self.tasks[k]
+        self.dropped.add(aid)
+        self.dirty_agents.add(aid)
+
+    def unread(self):
+        """§3 unread: each role's comms inbox depth (the spool comms keeps; counted per write, not watched)."""
+        root = os.environ.get("COMMS_ROOT") or os.path.join(
+            os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "powos", "comms"
+        )
+        for a in self.agents.values():
+            if "/" in a["id"] or a["state"] == "gone":
+                continue
+            try:
+                n = sum(1 for f in os.listdir(os.path.join(root, "agents", a["role"], "inbox")) if f.endswith(".json"))
+            except OSError:
+                n = 0
+            if a["unread"] != n:
+                a["unread"] = n
+                a["rev"] += 1
+
+    # ---- writing ----
+
+    def snapshot(self):
+        return {
+            "v": 1,
+            "host": self.host,
+            "ts": now_ms(),
+            "agents": sorted(self.agents.values(), key=lambda a: a["started"]),
+            "tasks": sorted(self.tasks.values(), key=lambda t: (t["agent"], t["order"])),
+            "asks": sorted(self.asks.values(), key=lambda a: a["ts"]),
+        }
+
+    def flush(self):
+        """Writes what changed; True if anything was."""
+        wrote = False
+        if self.dirty_agents:
+            self.unread()
+            write_json(os.path.join(self.dir, "state.json"), self.snapshot())
+            wrote = True
+        if self.dirty_rings or self.dropped:
+            ev = os.path.join(self.dir, "events")
+            os.makedirs(ev, exist_ok=True)
+            for aid in self.dirty_rings:
+                if aid in self.rings:
+                    write_json(os.path.join(ev, safe_file(aid) + ".json"), {"agent": aid, "events": self.rings[aid]})
+            for aid in self.dropped:
+                try:
+                    os.remove(os.path.join(ev, safe_file(aid) + ".json"))
+                except OSError:
+                    pass
+            wrote = True
+        if self.dirty_messages:
+            write_json(os.path.join(self.dir, "messages.json"), {"v": 1, "host": self.host, "messages": self.messages})
+            wrote = True
+        self.dirty_agents.clear()
+        self.dirty_rings.clear()
+        self.dropped.clear()
+        self.dirty_messages = False
+        return wrote
+
+    def bundle(self):
+        """Everything, smaller: what the mirror sends (the last 20 events per agent, the last 50 messages)."""
+        s = self.snapshot()
+        s["messages"] = self.messages[-MIRROR_MESSAGES:]
+        s["events"] = {aid: ring[-MIRROR_EVENTS:] for aid, ring in self.rings.items() if aid in self.agents}
+        return s
+
+    def working(self):
+        return any(a["state"] == "working" for a in self.agents.values())
+
+
+def alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def write_json(path, obj):
+    tmp = f"{os.path.dirname(path)}/.{os.path.basename(path)}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(obj, f, separators=(",", ":"), ensure_ascii=False)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+
+
+# ---- the queue ---------------------------------------------------------------------------------------------------
+
+
+class Watch:
+    """Blocks until something lands in [path]: inotify on Linux, kqueue on the Mac. Never a poll."""
+
+    def __init__(self, path):
+        self.kq = None
+        if sys.platform.startswith("linux"):
+            import ctypes
+
+            libc = ctypes.CDLL(None, use_errno=True)
+            self.fd = libc.inotify_init1(os.O_CLOEXEC | os.O_NONBLOCK)
+            IN_CLOSE_WRITE, IN_MOVED_TO = 0x8, 0x80
+            if self.fd < 0 or libc.inotify_add_watch(self.fd, path.encode(), IN_CLOSE_WRITE | IN_MOVED_TO) < 0:
+                raise OSError(ctypes.get_errno(), "inotify")
+        else:
+            self.fd = os.open(path, os.O_RDONLY)
+            self.kq = select.kqueue()
+            self.kq.control(
+                [
+                    select.kevent(
+                        self.fd,
+                        filter=select.KQ_FILTER_VNODE,
+                        flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+                        fflags=select.KQ_NOTE_WRITE,
+                    )
+                ],
+                0,
+            )
+
+    def wait(self, timeout):
+        if self.kq is not None:
+            return bool(self.kq.control(None, 4, timeout))
+        r, _, _ = select.select([self.fd], [], [], timeout)
+        if r:
+            try:
+                while os.read(self.fd, 65536):
+                    pass
+            except BlockingIOError:
+                pass
+        return bool(r)
+
+
+def read_queue(q, spool, now):
+    """The queued events, oldest first: [(ts, header, record)], and whether one is still being written (kqueue says
+    when a file is made, not when it's closed): it's left for the next round, 250 ms on, for a few seconds at most.
+    Read files are deleted."""
+    out, waiting = [], False
+    try:
+        names = [n for n in os.listdir(q) if n.endswith(".ev")]
+    except OSError:
+        return out, waiting
+    for n in names:
+        p = os.path.join(q, n)
+        try:
+            st = os.stat(p)
+            with open(p, "rb") as f:
+                data = f.read()
+        except OSError:
+            continue
+        ts = st.st_mtime_ns // 1_000_000
+        try:
+            text = data.decode("utf-8", "replace")
+            if text.startswith("#\t"):
+                head, _, body = text.partition("\n")
+                f = head.split("\t")
+                pid = int(f[3]) if len(f) > 3 and f[3].strip().isdigit() else 0
+                header = ((f[1] if len(f) > 1 else "").strip(), (f[2] if len(f) > 2 else "").strip(), pid)
+                rec = json.loads(body)
+            else:
+                header = None
+                rec = json.loads(text)
+        except ValueError:
+            if now - ts < 5000:
+                waiting = True
+                continue
+            rec = None
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+        if isinstance(rec, dict):
+            out.append((ts, header, rec))
+    out.sort(key=lambda e: e[0])
+    return out, waiting
+
+
+# ---- the mirror (HACK: see the module doc) ---------------------------------------------------------------------
+
+
+class Mirror:
+    def __init__(self, target, host):
+        self.cmd = os.environ.get("POWOS_AGENTS_MIRROR_CMD") or self.default_cmd(target, host)
+        self.proc = None
+        self.last = 0.0
+        self.sent = None
+        self.wanted = False
+
+    @staticmethod
+    def default_cmd(target, host):
+        # The phone over the dev channel the Mac already has: powos-vadb (adb over the user's WireGuard VPN), into the
+        # PowOS app's run dir (/run/powos-app inside PowOS), written as root and read by the app. Only into the folder
+        # the app made (AgentsSpool.kt): without it, an app that doesn't read it, nothing is written.
+        d = "/data/data/com.powos.app/files/run/agents/mirror"
+        f = f"{d}/{host}.json"
+        inner = f"[ -d {d} ] && cat > {d}/.{host}.tmp && chmod 644 {d}/.{host}.tmp && mv {d}/.{host}.tmp {f}"
+        return ["docker", "exec", "-i", "powos-vadb", "adb", "shell", f"su -c '{inner}'"]
+
+    def due(self):
+        return self.wanted and time.monotonic() - self.last >= MIRROR_EVERY_S
+
+    def push(self, spool):
+        if self.proc is not None and self.proc.poll() is None:
+            self.wanted = True
+            return
+        body = json.dumps(spool.bundle(), separators=(",", ":"), ensure_ascii=False)
+        # Only on change (the timestamp aside).
+        key = re.sub(r'^\{"v":1,"host":"[^"]*","ts":\d+', "", body)
+        if key == self.sent:
+            self.wanted = False
+            return
+        try:
+            cmd = self.cmd if isinstance(self.cmd, list) else ["/bin/sh", "-c", self.cmd]
+            self.proc = subprocess.Popen(
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+            )
+            self.proc.stdin.write(body.encode())
+            self.proc.stdin.close()
+            self.sent = key
+        except OSError:
+            self.proc = None
+        self.last = time.monotonic()
+        self.wanted = False
+
+    def finish(self, spool):
+        if self.proc is not None:
+            try:
+                self.proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            self.proc = None
+        self.wanted = True
+        self.push(spool)
+        if self.proc is not None:
+            try:
+                self.proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+
+
+# ---- main --------------------------------------------------------------------------------------------------------
+
+
+def main():
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Folds agent hook events into the Agents view's spool.")
+    ap.add_argument("--mirror", default=os.environ.get("POWOS_AGENTS_MIRROR", ""), help="also push the state to this host (phone)")
+    ap.add_argument("--foreground", action="store_true", help="don't detach (tests)")
+    ap.add_argument("--once", action="store_true", help="fold what's queued, write, exit (tests)")
+    args = ap.parse_args()
+
+    spool, q = spool_dir(), queue_dir()
+    os.makedirs(spool, exist_ok=True)
+    os.makedirs(q, mode=0o700, exist_ok=True)
+    if not args.foreground and not args.once:
+        try:
+            os.setsid()
+        except OSError:
+            pass
+    lock = open(os.path.join(q, "lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0  # one is running
+    pid_file = os.path.join(q, "pid")
+    with open(pid_file, "w") as f:
+        f.write(f"{os.getpid()}\n")
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+
+    s = Spool(spool, host_name())
+    mirror = Mirror(args.mirror, s.host) if args.mirror else None
+    watch = None if args.once else Watch(q)
+    last_event = time.monotonic()
+    next_sweep = time.monotonic()
+    try:
+        while True:
+            got, waiting = read_queue(q, spool, now_ms())
+            for ts, header, rec in got:
+                if header is None:
+                    if rec.get("powos_agents") == "message":
+                        s.message(rec, ts)
+                else:
+                    try:
+                        s.fold(header, rec, ts)
+                    except Exception as e:  # one odd event mustn't take the reporter down
+                        print(f"powos-agentsd: skipped an event: {e!r}", file=sys.stderr)
+            if got:
+                last_event = time.monotonic()
+            if time.monotonic() >= next_sweep:
+                s.sweep(now_ms())
+                next_sweep = time.monotonic() + SWEEP_S
+            changed = s.flush()
+            if mirror and changed:
+                mirror.wanted = True
+            if mirror and mirror.due():
+                mirror.push(s)
+            if args.once:
+                if mirror:
+                    mirror.finish(s)
+                return 0
+            quiet = time.monotonic() - last_event
+            if quiet >= IDLE_EXIT_S and not s.working():
+                if mirror:
+                    mirror.finish(s)
+                return 0
+            timeout = min(max(1.0, next_sweep - time.monotonic()), max(1.0, IDLE_EXIT_S - quiet))
+            if waiting:
+                timeout = BATCH_S
+            if mirror and mirror.wanted:
+                timeout = min(timeout, max(0.05, MIRROR_EVERY_S - (time.monotonic() - mirror.last)))
+            if watch.wait(timeout):
+                # The batch: whatever else arrives in the next 250 ms is folded and written with it.
+                time.sleep(BATCH_S)
+    finally:
+        try:
+            with open(pid_file) as f:
+                if f.read().strip() == str(os.getpid()):
+                    os.remove(pid_file)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())

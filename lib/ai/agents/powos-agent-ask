@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""powos-agent-ask - Claude Code's PermissionRequest hook for the Agents view (docs/AGENTS-VIEW-DESIGN.md §6).
+
+When Claude would ask before running a tool, this raises an `ask` (agentsd folds it into the spool; the phone shows
+an approval notification and the Agents screen Allow / Deny) and waits for the user's answer, blocking on inotify
+(kqueue on the Mac) for <spool>/asks/<id>.json - never polling.
+
+Non-blocking by default: it waits POWOS_AGENTS_ASK_TIMEOUT seconds (60), then exits without a decision, and Claude
+asks at the terminal as it would have (in --print mode: its own default). Any failure here does the same. Only an
+answer file decides, and only "allow" or "deny" in it.
+
+HACK: §7 wants answers writable by the app and root only, never by the agents' uid. On the phone the agents run as
+`powos`, whose uid *is* the app's, so the file's owner can't tell them apart; an agent could write its own answer.
+Real fix = Phase 2: the answer reducer checks ctx.sender is the user's identity.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import time
+import uuid
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_agentsd():
+    import importlib.machinery
+    import importlib.util
+
+    loader = importlib.machinery.SourceFileLoader("powos_agentsd", os.path.join(HERE, "powos-agentsd"))
+    spec = importlib.util.spec_from_loader("powos_agentsd", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def queue(q, rec):
+    name = f"{os.getpid()}-{uuid.uuid4().hex[:6]}"
+    head = f"#\t{os.environ.get('COMMS_AGENT_ID') or os.environ.get('POWOS_AGENTS_ROLE', '')}\t{os.environ.get('COMMS_PARENT_ID', '')}\t{os.getppid()}\n"
+    tmp = os.path.join(q, f".{name}.tmp")
+    with open(tmp, "w") as f:
+        f.write(head + json.dumps(rec))
+    os.rename(tmp, os.path.join(q, f"{name}.ev"))
+
+
+def main():
+    timeout = float(os.environ.get("POWOS_AGENTS_ASK_TIMEOUT", "60"))
+    rec = json.loads(sys.stdin.read() or "{}")
+    if timeout <= 0 or not rec.get("session_id"):
+        return
+    ad = load_agentsd()
+    spool, q = ad.spool_dir(), ad.queue_dir()
+    asks = os.path.join(spool, "asks")
+    if not os.path.isdir(asks):
+        return  # nothing would show it (an app without the Agents view): the terminal asks
+    os.makedirs(q, mode=0o700, exist_ok=True)
+    ask = "ask-" + uuid.uuid4().hex[:12]
+    answer = os.path.join(asks, ask + ".json")
+    rec.update(hook_event_name="PermissionRequest", ask_id=ask, expires=int((time.time() + timeout) * 1000))
+    watch = ad.Watch(asks)
+    queue(q, rec)
+    # agentsd folds it (started as the reporter starts it, when none runs) - detached, holding none of this hook's
+    # pipes: Claude reads the answer from stdout until it closes.
+    try:
+        with open(os.path.join(q, "pid")) as f:
+            os.kill(int(f.read().strip()), 0)
+    except (OSError, ValueError):
+        subprocess.Popen(
+            ["python3", os.path.join(HERE, "powos-agentsd")],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    end = time.monotonic() + timeout
+    decision = None
+    while decision is None and time.monotonic() < end:
+        if os.path.exists(answer):
+            try:
+                with open(answer) as f:
+                    decision = json.load(f)
+            except ValueError:
+                decision = None  # still being written: the next event
+            if decision is not None:
+                break
+        watch.wait(max(0.05, end - time.monotonic()))
+    behavior = decision.get("answer") if isinstance(decision, dict) else None
+    done = {"session_id": rec["session_id"], "hook_event_name": "PowosAskDone", "ask_id": ask, "answer": behavior or "expired"}
+    if rec.get("agent_id"):
+        done["agent_id"] = rec["agent_id"]
+    queue(q, done)
+    try:
+        os.remove(answer)
+    except OSError:
+        pass
+    if behavior not in ("allow", "deny"):
+        return  # expired: no decision, the normal prompt
+    out = {"behavior": behavior}
+    if behavior == "deny":
+        out["message"] = str(decision.get("reason") or "Denied by the user from the phone.")
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": out}}))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        pass  # a broken reporter never decides anything: the terminal asks
+    sys.exit(0)

@@ -172,9 +172,10 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         }
         if (carried == null && !desktopAppActive(ctx)) {
             // The launcher (HomeScreen.apply made it home for the cover screen), not whatever was below the desktop.
-            // By component: a HOME intent made Android ask which home app (ours or OnePlus's) every time - the
-            // home alias switches with the fold, so "remember" never stuck.
-            su("am start --display 0 -n " + HomeScreen.launcherActivity(ctx));
+            // A HOME intent with our alias as its component: without one Android asked which home app (ours or
+            // OnePlus's) every time - the home alias switches with the fold, so "remember" never stuck; without HOME
+            // it was a second launcher beside the home one.
+            su("am start --display 0 " + HomeScreen.launcherStart(ctx));
             Log.i(TAG, "nothing in use: the launcher on the cover screen");
         }
     }

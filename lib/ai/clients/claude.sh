@@ -58,6 +58,13 @@ _claude_add_common() {
     if declare -f comms_enabled &>/dev/null && comms_enabled; then
         _a+=("--mcp-config" "$(comms_mcp_config_json)")
     fi
+    # The Agents view's reporter (lib/ai/agents): every hook event, async - unless the user's own settings run it
+    # already (the phone's do), which would report each event twice. POWOS_AGENTS=0 opts out.
+    local hooks
+    hooks="$(dirname "${BASH_SOURCE[0]}")/../agents/claude-hooks.json"
+    if [[ "${POWOS_AGENTS:-1}" != "0" && -f "$hooks" ]] && ! grep -qs powos-agent-hook "$HOME/.claude/settings.json"; then
+        _a+=("--settings" "$hooks")
+    fi
 }
 
 # Send a prompt and get a response

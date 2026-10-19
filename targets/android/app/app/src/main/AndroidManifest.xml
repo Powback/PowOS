@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Remote input (shell/RemoteInput.kt): the phone as a Bluetooth keyboard and mouse (the HID device profile).
+         Targeting SDK 28, these two; Android grants BLUETOOTH_CONNECT/ADVERTISE with them. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- PowOS AI's live mode: the screen, with the user's consent each session (assist/LiveCapture.kt). -->
@@ -10,6 +14,12 @@
     <!-- Speech input for the agent prompt bar; only recognized text reaches Linux. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Home's swipe down pulls the notification shade down. -->
+    <!-- The control center's state and sliders (shell/QuickSettings.kt). WRITE_SETTINGS is an app op, granted there. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
 
     <!-- PowOS as the recents provider (docs/NATIVE-SYSTEM-UI.md; the system module's recents overlay): granted by the
@@ -27,10 +37,19 @@
          IRecentTasks checks MANAGE_ACTIVITY_TASKS). Both signature|recents on the phone, not privileged: no allowlist. -->
     <uses-permission android:name="android.permission.MONITOR_INPUT" />
     <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
+    <!-- The control center's third-party tiles, hosted as SystemUI hosts them (shell/TileHost.kt): every TileService
+         requires it of its binder. signature|recents on the phone, as the two above. -->
+    <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
 
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
+    <!-- Android widgets on home bound silently (shell/AppWidgets.kt: bindAppWidgetIdIfAllowed) needs
+         android.permission.BIND_APPWIDGET (signature|privileged). NOT requested yet: the phone enforces the privapp
+         allowlist (ro.control_privapp_permissions=enforce), and an installed APK asking for it before the system module
+         that allowlists it is installed AND booted once stops the phone at the boot screen. Add the uses-permission back
+         only after `dumpsys package com.powos.app` / the mounted module xml show it allowlisted; install-app.sh refuses
+         an APK that asks for a privileged permission the phone's module doesn't list. -->
     <uses-feature
         android:name="android.software.live_wallpaper"
         android:required="false" />
@@ -54,38 +73,12 @@
         android:theme="@style/Theme.Omalauncher"
         android:usesCleartextTraffic="true">
 
-        <activity
-            android:name=".MainActivity"
-            android:label="PowOS Launcher"
-            android:taskAffinity="com.powos.app.launcher"
-            android:clearTaskOnLaunch="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
-            android:excludeFromRecents="true"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:resizeableActivity="true"
-            android:stateNotNeeded="true"
-            android:windowSoftInputMode="adjustResize">
-            <!-- PowOS: the PowOS launcher (Home opens it through .HomeLauncher on the cover screen; also its own app
-                 entry). Its own task (taskAffinity): sharing the desktop's task, each singleTask switch to the
-                 desktop finished it, and every Home rebuilt it from scratch (~0.7 s). -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <!-- A widget shared as a link or QR code: https://simonschubert.github.io/omarchy-widgets/w#owl1.<data> (widgets/market/Share.kt). -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="simonschubert.github.io" android:pathPrefix="/omarchy-widgets/w" />
-            </intent-filter>
-        </activity>
-        <!-- The launcher as a web UI (shell/, see shell/DESIGN.md): a preview beside the Compose launcher until it
-             matches it. Its own task and app entry; the page lays itself out around the keyboard (adjustNothing). -->
+        <!-- The launcher: a web UI (shell/, see shell/DESIGN.md), the home screen (through .HomeShell) and its own app
+             entry. Its own task (taskAffinity): sharing the desktop's, each singleTask switch to the desktop finished
+             it. The page lays itself out around the keyboard (adjustNothing). -->
         <activity
             android:name=".shell.ShellActivity"
-            android:label="PowOS Shell (preview)"
+            android:label="PowOS Launcher"
             android:taskAffinity="com.powos.app.shell"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
             android:exported="true"
@@ -100,23 +93,8 @@
         <!-- Android's home screen when it should be the launcher (andro.marchy.HomeScreen switches this and the
              engine's .HomeDesktop alias; one is enabled). -->
         <activity-alias
-            android:name="andro.marchy.HomeLauncher"
-            android:label="PowOS Launcher"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.HOME" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity-alias>
-
-        <!-- The same, with the launcher as a web UI (Settings › Home screen › web launcher): HomeScreen enables this
-             one instead of .HomeLauncher. -->
-        <activity-alias
             android:name="andro.marchy.HomeShell"
-            android:label="PowOS Shell"
+            android:label="PowOS Launcher"
             android:targetActivity=".shell.ShellActivity"
             android:enabled="false"
             android:exported="true">
@@ -233,15 +211,6 @@
             android:showWhenLocked="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode" />
 
-        <!-- The Compose launcher's screens (store, themes, settings...) over the web shell until it has its own. -->
-        <activity
-            android:name=".shell.ShellScreensActivity"
-            android:theme="@style/Theme.Omalauncher.Window"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:taskAffinity=""
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
-            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".PowosAiActivity"
@@ -418,6 +387,14 @@
             android:excludeFromRecents="true"
             android:exported="false"
             android:taskAffinity="com.powos.app.recon"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- Adding another app's widget to home (shell/AppWidgets.kt): Android's "allow PowOS to create widgets"
+             dialog, then the widget's own setup. Invisible itself. -->
+        <activity
+            android:name=".shell.AppWidgets$BindActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="com.powos.app.appwidgets"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- The same recon from adb (am broadcast): DUMP is held by adb's shell and the system, never by apps. -->
         <receiver

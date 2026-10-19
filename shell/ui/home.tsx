@@ -13,6 +13,10 @@ import { Drawer } from "./drawer.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gesture.ts";
 import { Pages } from "./grid.tsx";
 import { ScreenPanel } from "./screen.tsx";
+import { SessionScreen } from "./session.tsx";
+import { RemoteScreen } from "./remote.tsx";
+import { AgentsScreen } from "./agents.tsx";
+import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
 import { NotificationPanel } from "./notifications.tsx";
 import { PowAiPage } from "./powai.tsx";
@@ -167,6 +171,10 @@ export function Home() {
       </div>
       {/* Outside home: its touches never reach home's swipes. */}
       <ScreenPanel />
+      <SessionScreen />
+      <RemoteScreen />
+      <AgentsScreen />
+      <Screens />
     </>
   );
 }

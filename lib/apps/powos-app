@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""powos app - install and run PowOS apps (docs/POWOS-APPS-FEASIBILITY.md section 5).
+
+An app is a directory with powos-app.json (the manifest), its module (out/module.wasm, a SpacetimeDB module) and
+its UI (ui/: static files - widgets are ES modules the shell's one shared host page imports). Installed apps live in
+~/.local/share/powos/apps/<id>/<version>/ with a `current` link; on the phone that directory is the PowOS app's own
+files/apps (bound by rooted/powos-session.sh), which the shell serves at https://shell.powos/_app/<id>/ and watches.
+
+  powos app list                     installed apps and widgets (from the registry)
+  powos app install <dir>            publish its module, put its UI in place (current -> this version), register it
+  powos app publish <dir>            only the module again: a hot swap, clients stay connected (logic hot reload)
+  powos app ui <dir>                 only the UI again: the shell reloads it (UI hot reload)
+  powos app remove <id>              unregister it and remove its files (its database stays; --data drops it too)
+  powos app runtime [<id> [<mode>]]  how an app's process runs: native | sandbox | container (powos-runtime)
+  powos app services                 the system tier (powos-supervisor status)
+  powos app check                    what this machine's runtimes can do (powos-runtime check)
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
+REGISTRY = "powos-registry"
+REGISTRY_WASM = os.environ.get("POWOS_REGISTRY_WASM", "/usr/lib/powos/apps/registry/module.wasm")
+APPS = os.path.expanduser(os.environ.get("POWOS_APPS_DIR", "~/.local/share/powos/apps"))
+LIB = os.path.dirname(os.path.realpath(__file__))
+
+
+def die(msg):
+    print(f"powos app: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def spacetime(*args, check=True, quiet=False):
+    r = subprocess.run(["spacetime", *args], capture_output=True, text=True)
+    out = "\n".join(line for line in (r.stdout + r.stderr).splitlines() if "UNSTABLE" not in line and line.strip())
+    if check and r.returncode != 0:
+        die(f"spacetime {args[0]} failed:\n{out}")
+    if not quiet and out:
+        print(out)
+    return r.returncode, out
+
+
+def sql(db, query):
+    code, out = spacetime("sql", "-s", SERVER, db, query, check=False, quiet=True)
+    return code == 0, out
+
+
+def ensure_registry():
+    ok, _ = sql(REGISTRY, "SELECT id FROM app")
+    if ok:
+        return
+    if not os.path.isfile(REGISTRY_WASM):
+        die(f"no registry on {SERVER} and no {REGISTRY_WASM} to publish it from")
+    print(f"publishing {REGISTRY} (the app registry; you are its owner)")
+    spacetime("publish", "-y", "-s", SERVER, "--bin-path", REGISTRY_WASM, REGISTRY)
+
+
+def manifest(d):
+    p = os.path.join(d, "powos-app.json")
+    try:
+        with open(p) as f:
+            text = f.read()
+        return json.loads(text), text
+    except (OSError, ValueError) as e:
+        die(f"{p}: {e}")
+
+
+def publish_module(d, m):
+    mod = m.get("module")
+    if not mod:
+        return
+    wasm = os.path.join(d, "out", "module.wasm")
+    if not os.path.isfile(wasm):
+        die(f"{wasm} missing (apps/build.sh builds it)")
+    # Additive schema changes migrate in place; anything destructive is refused by the server (no --delete-data).
+    spacetime("publish", "-y", "-s", SERVER, "--bin-path", wasm, mod["database"])
+
+
+def install_ui(d, m):
+    src = os.path.join(d, (m.get("ui") or {}).get("dir", "ui").rstrip("/"))
+    base = os.path.join(APPS, m["id"])
+    dest = os.path.join(base, m["version"])
+    os.makedirs(base, exist_ok=True)
+    if os.path.isdir(src):
+        tmp = tempfile.mkdtemp(dir=base, prefix=".new-")
+        shutil.copytree(src, os.path.join(tmp, "ui"))
+        shutil.copy(os.path.join(d, "powos-app.json"), tmp)
+        os.chmod(tmp, 0o755)
+        if os.path.exists(dest):
+            shutil.rmtree(dest)
+        os.rename(tmp, dest)
+    link = os.path.join(base, ".current-new")
+    if os.path.lexists(link):
+        os.unlink(link)
+    os.symlink(m["version"], link)
+    os.replace(link, os.path.join(base, "current"))  # atomic: the shell sees the old version or the new one
+    # Earlier versions beyond the previous one go (rollback = the previous one, still there).
+    versions = sorted((v for v in os.listdir(base) if not v.startswith(".") and v != "current"),
+                      key=lambda v: os.path.getmtime(os.path.join(base, v)))
+    for v in versions[:-2]:
+        if v != m["version"]:
+            shutil.rmtree(os.path.join(base, v), ignore_errors=True)
+    if not mounted(APPS) and os.path.exists("/run/powos-app"):
+        print(f"note: {APPS} isn't the PowOS app's files/apps here (start a new session): the shell won't see it")
+
+
+def mounted(path):
+    """A mount point, binds of the same filesystem included (os.path.ismount only sees a device change)."""
+    try:
+        with open("/proc/self/mountinfo") as f:
+            return any(line.split()[4] == os.path.realpath(path) for line in f)
+    except OSError:
+        return os.path.ismount(path)
+
+
+def register(text):
+    spacetime("call", "-s", SERVER, REGISTRY, "install", json.dumps(text), quiet=True)
+
+
+def cmd_install(d):
+    m, text = manifest(d)
+    ensure_registry()
+    publish_module(d, m)
+    install_ui(d, m)
+    register(text)
+    print(f"installed {m['id']} {m['version']}")
+
+
+def cmd_list():
+    ok, out = sql(REGISTRY, "SELECT id, name, version, database, tier FROM app")
+    if not ok:
+        die(f"no registry on {SERVER} ({out.strip()[:200]})")
+    print(out)
+    ok, out = sql(REGISTRY, "SELECT key, kind, entry, size FROM widget")
+    print(out)
+
+
+def cmd_remove(app_id, data):
+    ok, out = sql(REGISTRY, f"SELECT database FROM app WHERE id = '{app_id}'")
+    spacetime("call", "-s", SERVER, REGISTRY, "remove", json.dumps(app_id), quiet=True)
+    shutil.rmtree(os.path.join(APPS, app_id), ignore_errors=True)
+    if data:
+        lines = [x.strip() for x in out.splitlines() if x.strip() and not x.startswith(("-", " database"))]
+        db = lines[-1].strip('"') if lines else ""
+        if db and db != "database":
+            spacetime("delete", "-s", SERVER, db, "-y", check=False)
+    print(f"removed {app_id}")
+
+
+def runtime(*args):
+    os.execvp("powos-runtime", ["powos-runtime", *args])
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+    c = a[0]
+    if c == "list":
+        cmd_list()
+    elif c == "install" and len(a) == 2:
+        cmd_install(a[1])
+    elif c == "publish" and len(a) == 2:
+        m, _ = manifest(a[1])
+        publish_module(a[1], m)
+        print(f"{m['id']}: module republished (connected clients carry on)")
+    elif c == "ui" and len(a) == 2:
+        m, text = manifest(a[1])
+        install_ui(a[1], m)
+        register(text)
+        print(f"{m['id']}: UI {m['version']} in place")
+    elif c == "remove" and len(a) >= 2:
+        cmd_remove(a[1], "--data" in a)
+    elif c == "runtime":
+        if len(a) == 1:
+            runtime("check")
+        elif len(a) == 2:
+            runtime("mode", a[1])
+        else:
+            runtime("config", a[2], "--app", a[1])
+    elif c == "services":
+        os.execvp("powos-supervisor", ["powos-supervisor", "status", *a[1:]])
+    elif c == "check":
+        runtime("check")
+    else:
+        die(f"unknown: {' '.join(a)} (powos app help)")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -1383,6 +1383,18 @@ one, a test says so, with the reason, at the point of breakage:
 | Every verb `powos game` documents resolves to a real function | `test-game-facade.sh` |
 | One canonical game id across manifest / harness / `powos games` | `test-mods-harness.sh` |
 
+## Shared checkouts: commit only your own paths (agents: READ THIS)
+
+Several agents often work in one checkout/worktree at once, sharing ONE git index. A whole-index commit ships
+someone else's half-done work under your message (it happened: 05761a3).
+
+- NEVER `git commit -a`, never a bare `git commit` after someone else may have staged, never `git add -A` / `git add .`.
+- Commit ONLY your paths: `git commit -m "..." -- <your files>` (pathspec commits ignore other staged entries), or a
+  private index: `GIT_INDEX_FILE=$(mktemp) git read-tree HEAD && git add <files> && git commit`.
+- Check `git diff --cached --stat` shows only your files before committing.
+- Never reset/checkout/stash files you didn't change: others' uncommitted work lives in the same tree.
+- `powos self push -m "msg" -- <paths>` commits only those; without paths it refuses when others' changes are staged.
+
 ## CI & GitHub API etiquette (agents: READ THIS)
 
 The GitHub REST API allows **5,000 requests/hour shared across every agent and

@@ -7,14 +7,17 @@
 import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { chat, page } from "../state.ts";
+import { openRemote } from "../remote.ts";
+import { chat, openSession, page, sessionView, stored } from "../state.ts";
 import { Mic, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
+import { openAgents } from "../agents.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
-const draft = signal("");
+// What's typed and not sent yet: kept across reloads (an update mustn't lose it).
+const draft = stored("powai.draft");
 
 powos.on("ai.sessions", (s: AgentSession[]) => (sessions.value = s));
 powos.on("ai.mail", (m: AgentMail[]) => (mail.value = m));
@@ -49,7 +52,7 @@ function lastTurn(items: ChatItem[]) {
   const after = items.slice(at + 1);
   return {
     // The question, not the screen text the assistant sends along with it (assist.tsx).
-    asked: (items[at] as { text: string }).text.split("\n\n[What's on my screen right now:]")[0],
+    asked: (items[at] as { text: string }).text.split("\n\n[What's on my screen right now")[0],
     steps: after.filter((i) => i.kind === "tool") as Extract<ChatItem, { kind: "tool" }>[],
     answer: (after.filter((i) => i.kind === "assistant").at(-1) as { text: string } | undefined)?.text ?? null,
     notes: after.filter((i) => i.kind === "note") as Extract<ChatItem, { kind: "note" }>[],
@@ -67,8 +70,8 @@ export function Now() {
         <div class="ai-steps">
           {turn.steps.slice(-6).map((t, i) => (
             <div key={i} class="ai-step">
-              <span class={t.ok == null ? "run" : t.ok ? "ok" : "fail"}>{t.ok == null ? "…" : t.ok ? "✓" : "✗"}</span> {t.name}{" "}
-              <span class="muted">{t.hint}</span>
+              <span class={t.ok == null ? "run" : t.ok ? "ok" : "fail"}>{t.ok == null ? "…" : t.ok ? "✓" : "✗"}</span>{" "}
+              {t.name} <span class="muted">{t.hint}</span>
             </div>
           ))}
         </div>
@@ -91,7 +94,12 @@ function AtWork() {
     <section>
       <h3 class="ai-heading muted">at work</h3>
       {list.map((s) => (
-        <button type="button" key={s.name} class="ai-session tile" onClick={() => powos.ai.attach(s.name)}>
+        <button
+          type="button"
+          key={s.name}
+          class={`ai-session tile ${sessionView.value?.name === s.name ? "opened" : ""}`}
+          onClick={(e) => openSession(s.name, e.currentTarget as HTMLElement, task(s))}
+        >
           <span class={`ai-dot ${working(s) ? "on" : ""}`} />
           <span class="ai-session-main">
             <span class="ai-session-task">{task(s)}</span>
@@ -139,13 +147,29 @@ export function PowAiPage() {
     <div class="ai-screen">
       <header class="ai-top">
         <span class="ai-title">PowOS AI</span>
-        <span class={`ai-state ${busy ? "busy" : ""}`}>{busy ? `working${step && step.kind === "tool" ? ` · ${step.name}` : "…"}` : "ready"}</span>
+        <span class={`ai-state ${busy ? "busy" : ""}`}>
+          {busy ? `working${step && step.kind === "tool" ? ` · ${step.name}` : "…"}` : "ready"}
+        </span>
         <button type="button" class="ai-open" onClick={() => powos.ai.open()}>
           open ↗
         </button>
       </header>
       <div class="ai-scroll">
         <Now />
+        <button type="button" class="ai-session tile" onClick={() => openAgents()}>
+          <span class="ai-dot" />
+          <span class="ai-session-main">
+            <span class="ai-session-task">Agents</span>
+            <span class="ai-session-meta muted">what every agent is on: tree, tasks, tools, comms</span>
+          </span>
+        </button>
+        <button type="button" class="ai-session tile" onClick={openRemote}>
+          <span class="ai-dot" />
+          <span class="ai-session-main">
+            <span class="ai-session-task">Remote input</span>
+            <span class="ai-session-meta muted">this phone as the keyboard and touchpad of a computer: USB or Bluetooth</span>
+          </span>
+        </button>
         <AtWork />
         <FromAgents />
       </div>

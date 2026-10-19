@@ -6,8 +6,8 @@ import android.content.pm.PackageManager;
 import android.util.Log;
 
 /**
- * PowOS: what Android's Home opens - the PowOS desktop (KDE Plasma) or the PowOS launcher (Omalauncher's home: apps,
- * widgets). Two HOME aliases (.HomeDesktop in the engine's manifest, .HomeLauncher in the app's); exactly one is
+ * PowOS: what Android's Home opens - the PowOS desktop (KDE Plasma) or the PowOS launcher (the web shell: apps,
+ * widgets; shell/). Two HOME aliases (.HomeDesktop in the engine's manifest, .HomeShell in the app's); exactly one is
  * enabled, so Home opens it directly. (A trampoline activity picking one per press showed the wallpaper first and
  * cost half a second.)
  *   auto      launcher on the cover screen (folded), desktop on the inner screen (FoldWatcher switches on fold)
@@ -19,8 +19,8 @@ final class HomeScreen {
     private static final String TAG = "HomeScreen";
     static final String KEY_HOME_SCREEN = "home_screen";
     static final String[] HOME_SCREENS = {"auto", "desktop", "launcher"};
-    /** Which launcher is "the launcher": the Compose one, or the web shell (shell/, its .HomeShell alias). */
-    static final String KEY_WEB_LAUNCHER = "web_launcher";
+    /** The launcher's HOME alias (app module's manifest, on dev.omalauncher.shell.ShellActivity). */
+    private static final String LAUNCHER = "HomeShell";
     /** Below this smallest width (dp) a screen is phone-sized: the Open's cover screen is 343 dp, its inner 698. */
     private static final int PHONE_MAX_DP = 600;
 
@@ -42,23 +42,20 @@ final class HomeScreen {
         else
             desktop = unfolded != null ? unfolded
                 : ctx.getResources().getConfiguration().smallestScreenWidthDp >= PHONE_MAX_DP;
-        String launcher = web(ctx) ? "HomeShell" : "HomeLauncher";
-        String home = desktop ? "HomeDesktop" : launcher;
+        String home = desktop ? "HomeDesktop" : LAUNCHER;
         // The new one first: never a moment without a home screen. Exactly one of them stays on.
         set(ctx, home, true);
-        for (String alias : new String[] {"HomeDesktop", "HomeLauncher", "HomeShell"})
+        for (String alias : new String[] {"HomeDesktop", LAUNCHER})
             if (!alias.equals(home)) set(ctx, alias, false);
         return ctx.getPackageName() + "/andro.marchy." + home;
     }
 
-    /** The web shell is the launcher (Settings › Home screen). */
-    static boolean web(Context ctx) {
-        return ctx.getSharedPreferences("andromarchy_settings", Context.MODE_PRIVATE).getBoolean(KEY_WEB_LAUNCHER, false);
-    }
-
-    /** The launcher's activity, to start it by component (FoldWatcher, on the cover screen). */
-    static String launcherActivity(Context ctx) {
-        return ctx.getPackageName() + "/" + (web(ctx) ? "dev.omalauncher.shell.ShellActivity" : "dev.omalauncher.MainActivity");
+    /**
+     * `am start` arguments for the launcher (FoldWatcher, on the cover screen, as root): by its HOME alias, as a home
+     * launch - started by its activity's name it would be a second launcher, an app task beside the home one.
+     */
+    static String launcherStart(Context ctx) {
+        return "-a android.intent.action.MAIN -c android.intent.category.HOME -n " + ctx.getPackageName() + "/andro.marchy." + LAUNCHER;
     }
 
     private static void set(Context ctx, String alias, boolean on) {

@@ -74,7 +74,7 @@ demo() {
   put "$HERE/store-previews-demo.sh" .demo.sh
   put "$WORK/run.sh" .demo-run.sh
   adb shell "rm -f $APP/.demo.done"
-  adb shell am start -n dev.omalauncher/.MainActivity --es exec "'bash .config/omalauncher/widgets/.demo-run.sh'" >/dev/null
+  adb shell am start -n dev.omalauncher/dev.omalauncher.shell.ShellActivity --es exec "'bash .config/omalauncher/widgets/.demo-run.sh'" >/dev/null
   wait_for 60 "test -f $APP/.demo.done" || echo "demo $1 didn't finish" >&2
   adb shell "rm -f $APP/.demo.sh $APP/.demo-run.sh $APP/.demo.done"
 }

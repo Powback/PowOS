@@ -109,6 +109,8 @@ def _deliver(to, kind, message, priority, result=None):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, dst)  # atomic: a reader never sees a half-written message
+    _phone_wake(to)
+    _agents_note(payload)
     return mid
 
 
@@ -203,6 +205,68 @@ def _phone_notify(message, priority="normal"):
         os.rename(tmp, os.path.join(box, f"{name}.json"))
     except Exception:
         pass
+
+
+def _phone_wake(agent):
+    """On a phone running PowOS: tells the PowOS app that [agent] has mail. The phone's chat runs the manager one turn
+    at a time, so between turns nothing watches its inbox and mail sat there until the user wrote again; the app runs
+    the inbox's turn when it sees this (agent-wake/<agent>-<time> in its run dir; targets/android: PowosAiChat).
+    Best-effort, never fatal."""
+    if not _on_phone():
+        return
+    try:
+        run = os.environ.get("XDG_RUNTIME_DIR") or "/run/powos-app"
+        box = os.path.join(run, "agent-wake")
+        os.makedirs(box, exist_ok=True)
+        name = f"{agent}-{int(time.time() * 1000)}"
+        tmp = os.path.join(box, f".{name}.tmp")
+        open(tmp, "w").close()
+        os.rename(tmp, os.path.join(box, name))
+    except Exception:
+        pass
+
+
+def _agents_queue():
+    """powos-agentsd's queue (lib/ai/agents; the same choice as powos-agent-hook's), or None while no hook made it."""
+    q = os.environ.get("POWOS_AGENTS_QUEUE")
+    if not q:
+        user = os.environ.get("USER") or os.environ.get("LOGNAME") or "u"
+        if os.path.isdir("/dev/shm"):
+            q = f"/dev/shm/powos-agents-{user}"
+        else:
+            spool = (os.path.join(os.environ["XDG_RUNTIME_DIR"], "agents") if os.environ.get("XDG_RUNTIME_DIR")
+                     else os.path.join(os.environ.get("TMPDIR") or "/tmp", f"powos-agents-{user}"))
+            q = os.path.join(spool, "in")
+    return q if os.path.isdir(q) else None
+
+
+def _agents_note(payload):
+    """The message as a row of the Agents view's comms feed (docs/AGENTS-VIEW-DESIGN.md §3 message): who to whom,
+    its kind and a preview - agentsd caps and scrubs it. Best-effort, never fatal; nothing when no agent reports."""
+    try:
+        q = _agents_queue()
+        if not q:
+            return
+        rec = {"powos_agents": "message", "id": payload["id"], "from": payload["from"], "to": payload["to"],
+               "kind": payload["kind"], "priority": payload["priority"], "ts": int(time.time() * 1000),
+               "body": payload["body"][:400]}
+        name = f"m{payload['id']}"
+        with open(os.path.join(q, f".{name}.tmp"), "w") as f:
+            json.dump(rec, f)
+        os.rename(os.path.join(q, f".{name}.tmp"), os.path.join(q, f"{name}.ev"))
+    except Exception:
+        pass
+
+
+def _on_phone():
+    platform = os.environ.get("POWOS_PLATFORM", "")
+    if not platform:
+        try:
+            with open("/etc/powos/platform") as f:
+                platform = f.read().strip()
+        except OSError:
+            return False
+    return platform == "phone"
 
 
 def _desktop_notify(message, priority):
@@ -492,7 +556,13 @@ def run_cli(argv):
 
     if a.cmd == "send":
         AGENT_ID = a.frm
-        mid = _deliver(a.to, "message", " ".join(a.message), a.priority)
+        text = " ".join(a.message)
+        # An empty body is always a mistake upstream (an unset shell variable, a file that wasn't there): refuse it
+        # rather than deliver a blank message the recipient can't act on.
+        if not text.strip():
+            print("powos comms send: refusing an empty message", file=sys.stderr)
+            sys.exit(2)
+        mid = _deliver(a.to, "message", text, a.priority)
         print(f"Sent to '{a.to}' (id {mid}).")
     elif a.cmd == "notify":
         mid = _deliver("user", "notify", " ".join(a.message), a.priority)

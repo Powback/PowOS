@@ -1,0 +1,28 @@
+# SpacetimeDB, PowOS's one server per device (docs/POWOS-APPS-FEASIBILITY.md section 1): the official aarch64 release
+# binaries, unchanged - glibc-linked (libstdc++, libgcc_s, libm, libc only), so they run as-is on PowOS's rootfs, and
+# building the Rust/wasmtime/V8 workspace ourselves would buy nothing. One version, pinned fleet-wide (the client SDK's
+# npm version must match): bump pkgver and the checksum together, deliberately.
+#   /usr/lib/spacetimedb/<ver>/   spacetimedb-standalone (the server) and spacetimedb-cli
+#   /usr/bin/spacetime            the CLI; /usr/bin/spacetimedb-standalone the server, for the system tier's run file
+#                                 (targets/android/rooted/system.d/spacetimedb)
+pkgname=spacetimedb-bin
+pkgver=2.12.0
+pkgrel=1
+pkgdesc='SpacetimeDB server and CLI (official release binaries)'
+arch=(aarch64)
+url='https://github.com/clockworklabs/SpacetimeDB'
+license=('BUSL-1.1')
+depends=(gcc-libs glibc)
+provides=(spacetimedb)
+options=(!strip !debug)
+source=("spacetime-$pkgver-aarch64.tar.gz::https://github.com/clockworklabs/SpacetimeDB/releases/download/v$pkgver/spacetime-aarch64-unknown-linux-gnu.tar.gz")
+sha256sums=('3dd4785cf525d1029ab61177db2dc8cd303e04a73728ee611f5e1f4d2065b4ab')
+
+package() {
+  local d=/usr/lib/spacetimedb/$pkgver
+  install -Dm755 spacetimedb-standalone "$pkgdir$d/spacetimedb-standalone"
+  install -Dm755 spacetimedb-cli "$pkgdir$d/spacetimedb-cli"
+  install -d "$pkgdir/usr/bin"
+  ln -s "$d/spacetimedb-cli" "$pkgdir/usr/bin/spacetime"
+  ln -s "$d/spacetimedb-standalone" "$pkgdir/usr/bin/spacetimedb-standalone"
+}

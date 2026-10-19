@@ -57,8 +57,13 @@ object PowosAiChat {
     var busy by mutableStateOf(false)
         private set
     private var file: File? = null
+    private var appContext: Context? = null
+
+    /** Mail came for the manager while a turn was under way: its turn follows that one. */
+    private var inboxWaiting = false
 
     fun load(context: Context) {
+        if (appContext == null) appContext = context.applicationContext
         if (file != null) return
         val f = File(context.filesDir, "powos-ai/chat.jsonl")
         file = f
@@ -84,12 +89,30 @@ object PowosAiChat {
         Thread({ turn(prompt) }, "powos-ai").start()
     }
 
-    private fun turn(prompt: String) {
+    /**
+     * Mail arrived in the manager's comms inbox (comms' agent-wake/manager-* marker, [Wake]): one turn made of it
+     * (`--once-inbox`), now or once the one under way ends - this chat runs the manager a turn at a time, so between
+     * turns nothing else would read the inbox and an agent's message waited for the user's next one.
+     */
+    fun inboxArrived(context: Context) {
+        load(context)
+        if (!RootedGuest.enabled) return
+        if (busy) {
+            inboxWaiting = true
+            return
+        }
+        busy = true
+        Thread({ turn(null) }, "powos-ai-inbox").start()
+    }
+
+    /** One turn: [prompt] the user's, or null for the inbox's (nothing waiting there: no turn, nothing said). */
+    private fun turn(prompt: String?) {
         val errors = ArrayDeque<String>()
         var answered = false
         val exit =
             runCatching {
-                val process = RootedGuest.process("cd ~ && exec powos manager --once-stdin --json-events", mergeErrors = false).start()
+                val mode = if (prompt == null) "--once-inbox" else "--once-stdin"
+                val process = RootedGuest.process("cd ~ && exec powos manager $mode --json-events", mergeErrors = false).start()
                 Thread({
                     process.errorStream.bufferedReader().forEachLine {
                         synchronized(errors) {
@@ -98,7 +121,7 @@ object PowosAiChat {
                         }
                     }
                 }, "powos-ai-stderr").start()
-                process.outputStream.use { it.write(prompt.toByteArray()) }
+                process.outputStream.use { out -> prompt?.let { out.write(it.toByteArray()) } }
                 process.inputStream.bufferedReader().forEachLine { line ->
                     val ev = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
                     when (ev.optString("kind")) {
@@ -108,6 +131,8 @@ object PowosAiChat {
                         }
                         "tool_use" -> post { add(Item.Tool(ev.optString("name"), ev.optString("hint"))) }
                         "tool_result" -> post { finishTool(ev.optBoolean("ok", true)) }
+                        // The mail the turn answers: who it's from, as a line in the chat.
+                        "inbox" -> post { add(Item.Note(inboxLine(ev.optString("text")))) }
                     }
                 }
                 process.waitFor()
@@ -116,11 +141,64 @@ object PowosAiChat {
                 -1
             }
         post {
-            if (exit != 0 || !answered) {
+            // The inbox's turn with nothing waiting (already read): nothing to say.
+            val quiet = prompt == null && exit == 0 && !answered
+            if (!quiet && (exit != 0 || !answered)) {
                 val why = synchronized(errors) { errors.lastOrNull { it.isNotBlank() } }
                 add(Item.Note("PowOS AI didn't answer" + (why?.let { ": $it" } ?: " (exit $exit)"), error = true))
             }
             busy = false
+            if (inboxWaiting) {
+                inboxWaiting = false
+                appContext?.let(::inboxArrived)
+            }
+        }
+    }
+
+    /** "[inbox message from agent 'coder' (normal)]: …" as "mail from coder: …" (its first line, shortened). */
+    private fun inboxLine(text: String): String {
+        val m = Regex("""\[inbox message from agent '([^']+)'[^\]]*\]:\s*(.*)""", RegexOption.DOT_MATCHES_ALL).find(text)
+        val from = m?.groupValues?.get(1) ?: "an agent"
+        val body = (m?.groupValues?.get(2) ?: text).substringBefore("\n\nHandle this:").lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+        return "mail from $from: ${body.take(140)}"
+    }
+
+    /**
+     * Watches [runDir]/agent-wake for comms' "the manager has mail" markers (lib/ai/comms: _phone_wake) and runs the
+     * inbox's turn. Markers already there (mail that came while the app wasn't running) count too.
+     */
+    fun startWake(
+        context: Context,
+        runDir: File,
+    ) {
+        if (wake != null) return
+        val dir = File(runDir, "agent-wake").apply { mkdirs() }
+        // The PowOS session writes the markers (as its user): the app must be able to remove them again.
+        dir.setWritable(true, false)
+        dir.setExecutable(true, false)
+        dir.setReadable(true, false)
+        val app = context.applicationContext
+        val w = Wake(dir) { android.os.Handler(android.os.Looper.getMainLooper()).post { inboxArrived(app) } }
+        wake = w
+        w.startWatching()
+        if (dir.listFiles { f -> f.name.startsWith("manager-") }?.onEach { it.delete() }?.isNotEmpty() == true) w.ring()
+    }
+
+    private var wake: Wake? = null
+
+    private class Wake(
+        private val dir: File,
+        private val ring: () -> Unit,
+    ) : android.os.FileObserver(dir, MOVED_TO or CLOSE_WRITE) {
+        fun ring() = ring.invoke()
+
+        override fun onEvent(
+            event: Int,
+            path: String?,
+        ) {
+            if (path == null || !path.startsWith("manager-")) return
+            File(dir, path).delete()
+            ring()
         }
     }
 

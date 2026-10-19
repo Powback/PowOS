@@ -1,12 +1,9 @@
 package dev.omalauncher.widgets
 
-import android.graphics.BitmapFactory
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import dev.omalauncher.httpGet
 import dev.omalauncher.upgrade.Versioned
 import dev.omalauncher.upgrade.mapEntries
@@ -56,7 +53,7 @@ class Market(
         private set
     val busy = mutableStateMapOf<String, String>()
     val installed = mutableStateMapOf<String, Installed>()
-    private val previews = HashMap<String, ImageBitmap?>()
+    private val previews = HashMap<String, ByteArray?>()
     private val record get() = File(engine.dir, ".market.json")
 
     suspend fun refresh() {
@@ -107,19 +104,16 @@ class Market(
         }
     }
 
-    /** [e]'s preview drawn in [theme] when the store has one, else its default preview. */
+    /** [e]'s preview drawn in [theme] when the store has one, else its default preview: the PNG, downloaded once. */
     suspend fun preview(
         e: CatalogEntry,
         theme: String?,
-    ): ImageBitmap? {
+    ): ByteArray? {
         val path = e.previewFor(theme) ?: return null
         synchronized(previews) { if (path in previews) return previews[path] }
-        val img =
-            withContext(Dispatchers.IO) {
-                runCatching { httpGet(BASE + path).let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }.getOrNull()
-            }
-        synchronized(previews) { previews[path] = img }
-        return img
+        val png = withContext(Dispatchers.IO) { runCatching { httpGet(BASE + path) }.getOrNull() }
+        synchronized(previews) { previews[path] = png }
+        return png
     }
 
     /** Reads the install records; call off the main thread before the store opens. */

@@ -48,6 +48,8 @@ install -Dm 644 $T/powos-plasma/powos-translucent-desktop/metadata.json $K/metad
 install -Dm 644 $T/powos-plasma/powos-translucent-desktop/contents/code/main.js $K/contents/code/main.js
 # Window edges a finger can grab (see the file).
 install -Dm 644 $T/powos-plasma/breezerc $R/etc/xdg/breezerc
+# No KDE splash under the app's own (as install-powos-android.sh; a rootfs from an older image lacks it).
+printf '[KSplash]\nEngine=none\nTheme=None\n' > $R/etc/xdg/ksplashrc
 rm -rf $T/powos-plasma
 # PowOS's desktop widgets, as the image installs them (Containerfile: desktop/plasmoid -> /usr/share/plasma/plasmoids).
 cp -a $T/powos-plasmoids/. $R/usr/share/plasma/plasmoids/
@@ -139,6 +141,47 @@ if [ -f $B ] || [ ! -e $R/usr/bin/bwrap ]; then
   chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c \
     'pacman -S --noconfirm bubblewrap >/dev/null 2>&1 || pacman -Sy --noconfirm bubblewrap >/dev/null'
   echo "bwrap: real bubblewrap (shim moved to $B.noroot-engine)"
+fi
+# The Agents view's reporter (lib/ai/agents, docs/AGENTS-VIEW-DESIGN.md Phase 1): the hook and powos-agentsd, and
+# comms writing the view's feed. The hooks go into the powos user's own Claude settings, next to whatever is there
+# (install-hooks.py keeps the rest; a backup of the file as it was, once), so every claude in PowOS reports - the
+# manager and hand-started sessions alike. Async: they never hold a tool call up - but for the approval hook
+# (powos-agent-ask: Allow / Deny from the phone), which waits up to 60 s for an answer and then lets Claude ask at its
+# terminal as it would have. Undo: install-hooks.py ... --remove.
+A=$R/usr/lib/powos/ai/agents
+mkdir -p $A
+install -m 755 $T/powos-agents/powos-agent-hook $T/powos-agents/powos-agent-ask $T/powos-agents/powos-agentsd \
+  $T/powos-agents/install-hooks.py $A/
+install -m 644 $T/powos-agents/claude-hooks.json $A/claude-hooks.json
+install -m 755 $T/comms-mcp.py $R/usr/lib/powos/ai/comms/comms-mcp.py
+rm -rf $T/powos-agents $T/comms-mcp.py
+chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- \
+  /usr/bin/env HOME=/home/powos python3 /usr/lib/powos/ai/agents/install-hooks.py /home/powos/.claude/settings.json \
+  --command "POWOS_AGENTS_HOST=phone /usr/lib/powos/ai/agents/powos-agent-hook" \
+  --ask "POWOS_AGENTS_HOST=phone /usr/lib/powos/ai/agents/powos-agent-ask" \
+  --backup /home/powos/.claude/settings.json.bak-agents-view
+# PowOS apps (docs/POWOS-APPS-FEASIBILITY.md): SpacetimeDB (our package of the official aarch64 binaries, pinned), the
+# runtime switch + the system tier's supervisor + the app CLI (lib/apps -> /usr/lib/powos/apps), the service manifests,
+# the registry's module, and the CLI's front doors (`powos app`, `powos config app-runtime`). The system tier starts
+# from powos-start.sh (at boot, and now); its data and settings are the user's, under /var/lib/powos.
+A=$T/powos-apps
+if [ -d $A ]; then
+  for p in $A/spacetimedb-bin-*.pkg.tar.*; do
+    [ -e "$p" ] || continue
+    cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
+      echo "spacetimedb: $(chroot $R /usr/bin/spacetime --version 2>/dev/null | head -1)"
+  done
+  L=$R/usr/lib/powos/apps
+  mkdir -p $L/services $L/registry
+  for f in powos-runtime powos-supervisor powos-app; do install -m 755 $A/$f $L/$f; ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
+  install -m 644 $A/services/*.json $L/services/
+  [ -f $A/registry.wasm ] && install -m 644 $A/registry.wasm $L/registry/module.wasm
+  install -m 755 $A/powos $R/usr/bin/powos
+  install -m 644 $A/config.sh $R/usr/lib/powos/config.sh
+  U=$(stat -c %u /data/data/com.powos.app)
+  for d in /var/lib/powos/runtime /var/lib/powos/stdb; do mkdir -p $R$d && chown $U:$U $R$d; done
+  mkdir -p $R/var/log/powos
+  rm -rf $A
 fi
 resetprop -p persist.powos.root 1
 echo "deployed (persist.powos.root=$(getprop persist.powos.root))"

@@ -2,8 +2,11 @@
  * The shell's state, as signals: what changes re-renders only what reads it. Loaded from the host at start and kept
  * current by its events; the user's own (dock pins) goes back through powos.store.
  */
-import { computed, signal } from "@preact/signals";
+import { computed, effect, signal, type Signal } from "@preact/signals";
 import { powos } from "./bridge.ts";
+import { closeRemote, remoteOpen } from "./remote.ts";
+import { agentsView, closeAgents } from "./agents.ts";
+import { backScreen, closeScreens } from "./screens.ts";
 import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
 export const apps = signal<App[]>([]);
@@ -51,10 +54,57 @@ export const screen = signal<WidgetScreen>({ key: null });
 powos.on("widget.screen", (s: WidgetScreen) => (screen.value = s));
 /** The notification panel (notifications.tsx): down or not (a finger dragging it is gesture.ts's notifDrag). */
 export const notif = signal(false);
+/** What the pulled-down panel shows: the notifications or the control center (the status bar's right half's pull). */
+export const panel = signal<"notifications" | "control">("notifications");
 /** The open folder's key. */
 export const folder = signal<string | null>(null);
 /** An app's long-press menu: which app, and where (the pressed cell's box on screen). */
 export const menu = signal<{ app: App; at: DOMRect } | null>(null);
+
+/**
+ * An "at work" tmux session open over home (session.tsx): which, the card it grew from (it shrinks back into it), and
+ * whether it's on its way out. Back closes it first.
+ */
+export const sessionView = signal<{
+  name: string;
+  task?: string;
+  from: DOMRect | null;
+  card: HTMLElement | null;
+  closing?: boolean;
+} | null>(null);
+
+/** Opens [name] (a tmux session's, as PowOS lists them) from [card]. */
+export function openSession(name: string, card: HTMLElement | null, task?: string) {
+  if (!/^[A-Za-z0-9_.:-]+$/.test(name)) return;
+  sessionView.value = { name, task, card, from: card?.getBoundingClientRect() ?? null };
+}
+
+export function closeSession() {
+  const s = sessionView.value;
+  if (s && !s.closing) sessionView.value = { ...s, closing: true };
+  (document.activeElement as HTMLElement | null)?.blur();
+  powos.keyboard.hide();
+}
+
+/**
+ * A signal kept in the page's storage: what's typed survives the page reloading - an update, a hot reload, the app
+ * restarted. (localStorage lives in the app's data, which an update keeps.) Unreadable storage: it just isn't kept.
+ */
+export function stored(key: string, initial = ""): Signal<string> {
+  let first = initial;
+  try {
+    first = localStorage.getItem(`powos.${key}`) ?? initial;
+  } catch {}
+  const s = signal(first);
+  effect(() => {
+    const v = s.value;
+    try {
+      if (v) localStorage.setItem(`powos.${key}`, v);
+      else localStorage.removeItem(`powos.${key}`);
+    } catch {}
+  });
+  return s;
+}
 
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */
 export const drawer = signal(0);
@@ -105,7 +155,14 @@ export function closeDrawer() {
 
 /** Back: whatever is on top closes first - a widget's screen, a menu, a folder, a tile's edit, edit mode, the drawer. False when nothing was open. */
 export function back(): boolean {
-  if (screen.value.key) powos.widgets.closeScreen();
+  // A session open, or still shrinking back into its card: Back is its (a second Back meanwhile - the keyboard's and
+  // the terminal's - mustn't go on to leave PowOS AI's page).
+  if (sessionView.value) closeSession();
+  else if (remoteOpen.value) closeRemote();
+  // Settings and its screens: the top one (or what's open inside it).
+  else if (backScreen()) return true;
+  else if (agentsView.value) closeAgents();
+  else if (screen.value.key) powos.widgets.closeScreen();
   else if (notif.value) notif.value = false;
   else if (menu.value) menu.value = null;
   else if (folder.value) folder.value = null;
@@ -118,10 +175,19 @@ export function back(): boolean {
   return true;
 }
 
-/** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does. */
+/** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does (a full-screen terminal only closes). */
 export function goHome() {
-  if (screen.value.key) powos.widgets.closeScreen();
+  // A terminal open full screen (an at work session, a widget's screen): Home puts it away and stays where it was
+  // opened from - PowOS AI's page, the widget's page - as swiping up out of an app goes back to the screen it came from.
+  if (sessionView.value || screen.value.key) {
+    if (sessionView.value) closeSession();
+    if (screen.value.key) powos.widgets.closeScreen();
+    return;
+  }
   notif.value = false;
+  closeRemote();
+  closeScreens();
+  closeAgents();
   menu.value = null;
   folder.value = null;
   selected.value = null;

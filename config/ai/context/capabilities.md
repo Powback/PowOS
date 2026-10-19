@@ -128,6 +128,12 @@ The full round-trip an agent can drive to fix / improve PowOS itself:
    otherwise.
 
 Rules for agents driving this loop:
+- **Shared checkouts: commit only your own paths.** Several agents often share one tree and one git index. Never
+  `git commit -a`, never a bare `git commit` after someone else may have staged, never `git add -A` / `git add .`.
+  Commit by pathspec (`git commit -m "..." -- <your files>`, which ignores other staged entries) or with a private
+  index (`GIT_INDEX_FILE=$(mktemp) git read-tree HEAD && git add <files> && git commit`); check
+  `git diff --cached --stat` first. Never reset/checkout/stash files you didn't change. `powos self push` takes
+  `-- <paths>` for this and refuses a whole-tree commit when others' changes are already staged.
 - **NEVER `git push --force`** unless a) an isolated branch, b) the user
   explicitly asks, c) confirms twice. Master is atomic-published — a
   force push replaces the running channel for every user.
@@ -226,17 +232,135 @@ Key facts an agent should CHECK before starting:
 
 ## PowOS on a phone (Android)
 
-On a phone (`/etc/powos/platform` = `phone`) PowOS runs inside the PowOS Android app: its KDE desktop is one Android
-task, Android keeps the screen, notifications and the phone's apps. You are the phone's agent too: the launcher
-(Omalauncher) hands its prompt bar, widget editing and "new app" to PowOS AI whenever the PowOS session runs.
+You may be running on a phone: `/etc/powos/platform` reads `phone` and the session exports `POWOS_PLATFORM=phone`.
+Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenOS, unlocked + Magisk. Source:
+`targets/android/` (README.md there), the web shell `shell/`, design `docs/NATIVE-SYSTEM-UI.md`.
 
-- `powos android` reaches Android (see `powos android help`): its apps (list, open as a PowOS window or full screen
-  on the phone), what runs, the phone's notifications (read them, post one), its screen (a screenshot).
-- `notify_user` / `powos comms notify` also post an Android notification on a phone - that is where the user looks.
-- The launcher's widgets and styles are files in `~/.config/omalauncher/{widgets,style}` (OWL widget sources the
-  launcher draws; edits show on the phone's home screen).
-- Windows: maximize on a PowOS window makes it its own Android task; on an Android app's window it hands the app
-  back to Android. Apps going full screen become their own (immersive) task by themselves.
+### Architecture
+- **Rooted mode (this phone)** ✅: PowOS's own Arch Linux ARM system in `/data/powos/root`, run on Android's kernel.
+  Not a VM, kexec or dual-boot: `powos-start.sh` (Magisk boot service) mounts it, and the PowOS app starts the
+  desktop with `su -c sh /data/powos/powos-session.sh …`, which pivots into its own mount namespace. The desktop runs
+  as user `powos` (real sudo). KWin uses its Anland backend: the app owns the screen surface, touch, keys and audio,
+  and relays them to KWin over an abstract socket. GPU: Mesa Turnip on KGSL.
+  Session lifetime: the relay (display daemon) lives in the app's process, so every app restart or APK install
+  restarts the whole desktop (~9 s to KWin, then Plasma). KWin gets the screen size from the daemon at startup; a
+  daemon without `--screen` made it wait for the desktop to be opened (Plasma then started in front of the user).
+- **No-root mode** ⚠️ (Galaxy S25 Ultra, 2026-10-13): the same desktop inside the app through Andromarchy's engine
+  (patched loader, fakechroot, fakeroot). Not this phone's setup.
+- **Android stays in charge** of the kernel, display, notifications and Android apps. The PowOS app `com.powos.app`
+  (Omalauncher + the Andromarchy engine) is the home app. As a privileged system app (Magisk module) it also holds
+  the recents role.
+- **The web shell** (`shell/`, Preact + TypeScript, hot-reloaded in WebViews) draws every PowOS screen on Android:
+  home (`index.html`), notification shade + control center (`?mode=shade`), lock face (`?mode=lock`), switcher
+  (`?mode=switcher`), assistant (`?mode=assist`). Kotlin hosts are thin (`targets/android/app/.../shell/`).
+- **Steam:** FEX (`FEXBash`) + `steam` are installed in the rootfs. ⚠️ Not validated as a daily path.
+
+### Components & paths
+| What | Where |
+|---|---|
+| Linux root | `/data/powos/root` (`/` inside the session); scripts `/data/powos/{powos-start,powos-session,powos-run}.sh` |
+| Run a command in the session (from Android root) | `su -c "sh /data/powos/powos-run.sh '<cmd>'"` |
+| App ↔ PowOS shared dir | app `files/run` = `/run/powos-app` (XDG_RUNTIME_DIR): `agent-mail/`, `agent-wake/`, `powos-ai-shared/` |
+| Launcher widgets / styles | `~/.config/omalauncher/{widgets,style}` (OWL; edits show on home) |
+| Shell overrides (hot reload) | app `files/shell/` (wins over the APK's copy until reset) |
+| Displays | `0` = active panel (cover 1116×2484 folded / inner 2268×2440 open); `cmd device_state print-state`: 0 = folded |
+| Hosted Android widgets | private virtual displays `powos-appwidget-N` (not the screen; don't capture them) |
+| Root | Magisk (`su`); SELinux enforcing |
+| adb | phone-local `127.0.0.1:5555` (rooted.sh wifi); LAN `192.168.50.239:5555`; VPN `10.13.13.7:5555`. On the phone itself `emulator-5554` is this same phone's adbd auto-detected on port 5555 (a bare `adb shell` then fails, "more than one device"): always pass `-s 127.0.0.1:5555`. An AVD only on the Mac |
+
+### Shipping a change (edit → test → ship → roll back)
+| Layer | Edit | Ship | Roll back |
+|---|---|---|---|
+| Web shell UI | `shell/**` | `shell/push.sh <files>` (`ANDROID_SERIAL` picks the phone): every open page reloads | `shell/push.sh --reset [files]` |
+| OWL widgets | `targets/android/app/app/src/main/assets/widgets/*.owl` | APK; or write the live copy `files/widgets/<name>.owl` (that copy then counts as the user's and isn't updated by later APKs) | restore the previous file |
+| App (Kotlin) | `targets/android/app/**` | `bash targets/android/build-app.sh` → `~/Projects/android-app-dev/output/powos.apk` (also on android.pow) → `adb install -r` | install the previous APK |
+| System slots (priv-app, recents, overlays) | `targets/android/system-module/` | `build-module.sh --priv-app --slot recents` → `magisk --install-module` + reboot | `touch /data/adb/modules/powos-system/disable` + reboot |
+| Rooted scripts | `targets/android/rooted/*` | `targets/android/rooted/rooted.sh deploy` | redeploy the previous version |
+| KWin / packages | `targets/android/pkgs/` | `build-pkgs.sh` (ccache) → rootfs | previous package |
+| Rootfs | `build-rootfs.sh` → `out/powos-rootfs.tar.gz` | `rooted.sh install` (replaces `/data/powos/root`) | reinstall the old tarball |
+| PowOS layer (`lib/`, `bin/`, `config/`) | repo | copy into `/data/powos/root/usr/lib/powos/…` (or `/etc/powos/…`) as root | copy back the old file |
+Built centrally and shipped whole. Never `pacman -Syu` on the phone.
+
+### `powos` on the phone
+- Works: `status` (Phone: mode, kernel, battery, network), `android {apps,open,running,notifications,notify,screenshot}`,
+  `ai …`, `manager`, `comms …`, `doctor`, `help`. `podman`, `distrobox`, `flatpak` and `tmux` are installed.
+  ⚠️ Containers aren't validated on the phone.
+- Doesn't apply (no bootc, rpm-ostree or grubby; no USB/RAM layers): `upgrade`, `base`, `driver`, `rollback`,
+  `ramboot`, `sync`/`flush`/`safe`, `install-system`, `boot`, `games storage`, `windows`, `gpu`, `cuda`.
+  `powos help` still lists them: it isn't filtered by platform yet.
+
+### AI hooks on the phone
+- PowOS AI chat (`PowosAiActivity`, the home's AI page, the assistant overlay) → `powos manager --once-stdin --json-events`,
+  one turn at a time. ✅ Mail to `manager` wakes it between turns (verified 2026-10-19) (comms writes `agent-wake/manager-*`; the app runs
+  `powos manager --once-inbox`).
+- Assistant: long-press power = PowOS's VoiceInteractionService. The overlay sends the screen's text (AssistStructure,
+  naming the app under it) plus a screenshot; the user can crop to the part they mean. Shares land in
+  `/run/powos-app/powos-ai-shared/` (a crop is the user's selection, not a capture bug).
+- `notify_user` / `powos comms notify` → an Android notification (`agent-mail/`). An inline reply goes to the
+  sender's inbox.
+- Share sheet (`ACTION_SEND`) and `ACTION_ASSIST` open PowOS AI.
+- Agents view (docs/AGENTS-VIEW-DESIGN.md, Phase 1): every claude in PowOS reports through async hooks in
+  `~powos/.claude/settings.json` (`/usr/lib/powos/ai/agents/powos-agent-hook` → `powos-agentsd` → `/run/powos-app/agents/`);
+  the Mac's sessions are mirrored in (`agents/mirror/mac.json`). Shown as home's Agents widget, PowOS AI's page →
+  Agents, and an ongoing notification while one works. Asks (PermissionRequest) can be allowed/denied from the phone;
+  unanswered after 60 s, Claude asks at its terminal.
+- Claude: `ANTHROPIC_BASE_URL=http://claude-auth.pow`, the fleet's OAuth proxy. Never log in or refresh a token on
+  the phone.
+
+### PowOS apps on the phone (system tier, SpacetimeDB, runtime switch)
+Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 the prototype on the phone).
+- **System tier** ✅ (2026-10-19): `powos-start.sh` (boot, and every session start) runs `powos-supervisor` once per
+  boot as root in PowOS's own persistent mount namespace, outside the desktop session (which an APK install restarts).
+  It runs every manifest in `/usr/lib/powos/apps/services/` through `powos-runtime`, restarts crashes with backoff
+  and keeps budgets without cgroups (RSS over `memMB` → restart, 3× in 5 min → held; CPU over `cpuPct` for a minute
+  → nice 19; rlimits/nice/ionice at start). `powos app services` = its status (`/run/powos-system/status.json`),
+  logs `/var/log/powos/<id>.log`. Off: `rooted.sh system off` (`/data/powos/system-tier.off`), on: `rooted.sh system on`.
+- **SpacetimeDB 2.12.0** (package `spacetimedb-bin`, official aarch64 binaries; `spacetime` CLI on PATH) as
+  `dev.powos.spacetimedb`: `127.0.0.1:3410`, data/keys `/var/lib/powos/stdb` (owned by powos). The port is locked to
+  the PowOS app's uid (= powos) and root by iptables chain `powos-local` (`xt_owner`); every other Android app gets
+  a reset. Idle unload: no client for 5 min and RSS > 60 MB (the bare server is ~51 MB) → a ~150 ms restart that drops every loaded database
+  (each loaded database costs ~145 wakeups/s on this phone).
+- **Runtime switch**: `powos config app-runtime native|sandbox|container` (default), `powos app runtime <id> <mode>`
+  (per app). native = plain process; sandbox = bubblewrap (user/pid/uts/cgroup ns - never `--unshare-ipc`/`--unshare-all`,
+  this kernel has no SysV IPC), read-only system, private /tmp, only the data dir writable, seccomp denylist (no
+  Landlock: not in this kernel); container = **not ready yet** on the phone (refused, exit 78). Flipping restarts the
+  service in seconds; same command, data dir, port and uid. `powos app check` shows what this kernel supports.
+- **Apps**: `powos app install|publish|ui|list|remove` (Mac side: `apps/build.sh <app>` then
+  `ADB="docker exec powos-vadb adb" apps/install.sh <app> [install|publish|ui]`). The registry is the
+  `powos-registry` database (owner = powos's CLI identity). Installed UIs: `~/.local/share/powos/apps/<id>/<ver>/` =
+  the app's `files/apps` (bound by `powos-session.sh`), served to the shell at `https://shell.powos/_app/<id>/`.
+  Prototype: `apps/counter` (Rust module `powos-counter` + island widget `widgets/count.js`).
+- Remove an app: `powos app remove <id> [--data]`. Remove everything: `rooted.sh system off`, then delete
+  `/var/lib/powos/stdb`.
+
+### Status
+- ✅ On hardware (OnePlus Open, 2026-10-19):
+  - rooted desktop, PowOS as home + priv-app + recents provider
+  - gesture nav (swipe home), PowOS shade (left pull) + control center (right pull: phone's own tile order, root
+    toggles, sliders, media, edit mode, hosted 3rd-party tiles)
+  - lock face (one swipe, no PIN), assistant overlay
+  - OWL widgets; Linux sessions in the AI page
+- ⚠️ Built, partly tested:
+  - hosted Android app widgets (sizing, theming, resize, scroll in progress)
+  - switcher / quick switch; the inner-display layouts
+- 🚧 Planned:
+  - AOD/screen-off slot (reverted: laggy)
+  - Android↔PowOS bridge (calendar etc.); fold-aware Plasma layouts
+  - emulator target; PowOS Web; linux-wasm research
+
+### Rules for agents on the phone
+- Reversible PowOS work is autonomous (standing permission from the user, 2026-10-19): build, install and ship - the APK,
+  the system module, rootfs/deploy changes, services, apps, hooks - then report to `manager`. Keep a rollback for each
+  (module disable / service off / remove the app); if the home screen breaks, roll back first, then report.
+- Confirm first (via `manager`): anything irreversible or that can lose data (deleting volumes or user data, wipes,
+  flashing kernel/boot, force-pushing master) and externally visible behaviour (the Discord bot, exposed ports, auth).
+- Deferred by the user for now: containers on the phone, the /dev/fuse rule, cgroup v2, a custom kernel.
+- Never type into existing tmux sessions, on the phone or on the Mac: they are live Claude sessions. Open a fresh shell.
+- Don't inject touches/keys while the user is using the phone: `dumpsys power | grep lastUserActivityTime` must
+  show more than 120000 ms ago.
+- Never weaken SELinux (no setenforce, no broad allow rules). Don't route around a denial; tell the user.
+- Mark every workaround `HACK:` with why and the real fix. Never print secrets or tokens.
+- Recovery if the phone UI breaks: disable the Magisk module (above) and reboot.
 
 ## Game modding (`powos mods`)
 - **Native v2 mod manager (primary path — see docs/MODDING-V2.md).** Per-game
@@ -338,7 +462,7 @@ task, Android keeps the screen, notifications and the phone's apps. You are the 
   booted variant. ⚠️ selection engine done + unit-tested; multi-variant build,
   USB layout, dracut selection, and boot menu are wired (docs/MULTI-VARIANT-USB.md)
   — hardware validation pending.
-  x86-64 only — Mac/Android out of scope. Open needs Turing/GTX-16+; older NVIDIA
+  x86-64 images only (the phone has its own ARM rootfs: see "PowOS on a phone"). Open needs Turing/GTX-16+; older NVIDIA
   (Maxwell/Pascal) needs closed.
 - Driver stack is fixed by the image; hardware profiles tune settings but can't
   swap nvidia↔amd at boot.

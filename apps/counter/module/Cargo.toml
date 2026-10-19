@@ -1,0 +1,12 @@
+[package]
+name = "powos-counter"
+# The module's version: stamped into every row it writes, so a hot republish shows on the next tap.
+version = "0.1.2"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+spacetimedb = "=2.12.0"
+log = "0.4"

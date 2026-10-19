@@ -11,3 +11,8 @@ android.permission.WRITE_SECURE_SETTINGS
 # PowOS's replaces it (StatusBarManager.disable). START_TASKS_FROM_RECENTS: the switcher brings a task back.
 android.permission.STATUS_BAR
 android.permission.START_TASKS_FROM_RECENTS
+
+# Android widgets on PowOS's home (shell/AppWidgets.kt): bound without Android's "allow PowOS to create widgets"
+# dialog, as the system launcher binds them. The manifest requests it only after a module with this entry is booted
+# (targets/android/install-app.sh refuses an APK asking for more than the phone's mounted allowlist).
+android.permission.BIND_APPWIDGET

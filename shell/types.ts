@@ -17,21 +17,32 @@ export interface App {
 }
 
 /** CSS px; [keyboard] is the soft keyboard's height (0 while it's down). */
-export interface Insets { top: number; bottom: number; left: number; right: number; keyboard: number; }
+export interface Insets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+  keyboard: number;
+}
 
-export interface Cell { x: number; y: number; w: number; h: number; }
+export interface Cell {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
 /** Something on a home page: a widget, a pinned app or a folder of them. */
 export interface HomeItem {
   key: string;
-  kind: "widget" | "app" | "folder";
+  kind: "widget" | "app" | "folder" | "appwidget" | "panel";
   page: number;
   /** Its place on the page's grid; null until placed. */
   cell: Cell | null;
   resizable: boolean;
   minSize: [number, number];
   size: [number, number] | null;
-  /** widget */
+  /** widget; panel: which of the shell's own (ui/agents.tsx's "agents") */
   name?: string;
   error?: string;
   /** app: its label and the drawer's key for it */
@@ -39,14 +50,81 @@ export interface HomeItem {
   app?: string;
   /** folder */
   apps?: { key: string; label: string; app: string }[];
+  /** appwidget: another app's Android widget (its [name] is the widget's label) */
+  appWidget?: AppWidgetRef;
 }
 
-export interface Home { columns: number; pages: number[]; items: HomeItem[]; }
+/** An Android widget on home: the system's id for it, its provider (a component) and that provider's app. */
+export interface AppWidgetRef {
+  id: number;
+  provider: string;
+  package: string;
+  /** It can be set up again after it's placed (its own settings screen). */
+  reconfigurable: boolean;
+  /** The smallest it may be made, dp (its provider's minimum resize size), and which sides of its tile move. */
+  minDp: [number, number];
+  resize: "both" | "horizontal" | "vertical";
+}
+
+/** A widget an Android app offers (the add-widget picker): sizes in dp, [preview] a picture of it (a URL). */
+export interface AppWidgetProvider {
+  /** Its component and profile ("package/class#serial"), what appWidgets.add takes. */
+  provider: string;
+  label: string;
+  app: string;
+  package: string;
+  /** From the work profile. */
+  work: boolean;
+  description: string | null;
+  /** The size a launcher would first give it, and the smallest it may be made. */
+  sizeDp: [number, number];
+  minDp: [number, number];
+  /** It opens its own setup screen when added. */
+  configure: boolean;
+  preview: string;
+}
+
+export interface Home {
+  columns: number;
+  pages: number[];
+  items: HomeItem[];
+}
 
 /** The quick settings that switch here: on or off, null where the phone can't (no flashlight, no access). */
 export interface QuickState {
   torch: boolean | null;
   dnd: boolean | null;
+  /** The control center's tiles, in the phone's own order. */
+  tiles: QuickTile[];
+  /** 0..1 (perceptual), and whether the phone sets it itself. */
+  brightness: { value: number; auto: boolean };
+  /** Media volume 0..1; the ringer: 0 silent, 1 vibrate, 2 ring. */
+  volume: { value: number; ringer: number };
+}
+
+/** What's playing: nothing (playing false, no title) or a track. art: an id for /_media/<id>. */
+export interface MediaState {
+  available: boolean;
+  playing: boolean;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  app?: string;
+  package?: string;
+  position?: number | null;
+  duration?: number | null;
+  art?: string | null;
+}
+
+/** One control center tile: a switch (on true/false) or an action/page (on null). */
+export interface QuickTile {
+  id: string;
+  label: string;
+  on: boolean | null;
+  /** A line under the label (the carrier). */
+  detail: string | null;
+  /** A third-party tile's app (custom(...) ids). */
+  app?: string;
 }
 
 /** The screen the assistant was opened over. */
@@ -160,6 +238,8 @@ export interface Bridge {
     group(key: string, target: string): Promise<string | null>;
     /** Gives items without a cell (a store widget, an app pinned from a menu) the first free spot on a grid this big. */
     arrange(cols: number, rows: number): Promise<void>;
+    /** Puts the shell's own panel [name] ("agents") on [page] at [cell]; returns its key ("panel:<name>"). */
+    addPanel(name: string, page: number, cell: Cell): Promise<string>;
   };
   /**
    * OWL widgets: the host runs them; the page draws their trees, sent as "widget.tree" ({ key, screen, tree }) while
@@ -181,6 +261,43 @@ export interface Bridge {
     /** The widget screen open now; "widget.screen" brings each change. */
     screen(): Promise<WidgetScreen>;
     closeScreen(): Promise<void>;
+  };
+  /**
+   * Other apps' Android widgets on home (items of kind "appwidget"): the host draws each off screen and sends its
+   * frames ("appwidgets.frame" { id, url } while watched); the page sends touches back. Placed, moved and removed
+   * through home like any item.
+   */
+  appWidgets: {
+    providers(): Promise<AppWidgetProvider[]>;
+    /**
+     * Puts [provider]'s widget at [cell] on [page], [width] x [height] dp. "pending": Android asks the user first
+     * (allow PowOS to create widgets, then the widget's setup) - "home.changed" brings it, "appwidgets.failed" says
+     * it didn't happen.
+     */
+    add(
+      provider: string,
+      page: number,
+      cell: Cell,
+      width: number,
+      height: number,
+    ): Promise<"added" | "pending" | "failed">;
+    /**
+     * Shows widget [id] at [width] x [height] (its tile, CSS px): answers its latest frame's URL (if any) and whether
+     * it has a list to scroll; "appwidgets.frame" ({ id, url, scrolls }) brings each next.
+     */
+    watch(id: number, width: number, height: number): Promise<{ url: string | null; scrolls: boolean } | null>;
+    unwatch(id: number): Promise<void>;
+    /** A touch on its tile at (x, y) of a tile [width] x [height] CSS px; "cancel": the page took the gesture. */
+    touch(
+      id: number,
+      action: "down" | "move" | "up" | "cancel",
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ): Promise<void>;
+    /** Its own setup screen again. */
+    configure(id: number): Promise<void>;
   };
   /**
    * PowOS AI: the conversation with PowOS's manager, the one its own app (and the desktop's manager widget) shows.
@@ -209,7 +326,14 @@ export interface Bridge {
      * Starts [id] unless it runs ([restart]: also if it ended), running [command] (null: PowOS's tmux picker, or a
      * login shell); [owner] is the widget it ends with. Answers its state, with what it wrote lately to start from.
      */
-    open(id: string, owner: string | null, command: string | null, cols: number, rows: number, restart?: boolean): Promise<TermState>;
+    open(
+      id: string,
+      owner: string | null,
+      command: string | null,
+      cols: number,
+      rows: number,
+      restart?: boolean,
+    ): Promise<TermState>;
     write(id: string, data: string): Promise<void>;
     resize(id: string, cols: number, rows: number): Promise<void>;
     close(id: string): Promise<void>;
@@ -219,6 +343,25 @@ export interface Bridge {
   clipboard: {
     read(): Promise<string | null>;
     write(text: string): Promise<void>;
+  };
+  /**
+   * Remote input (ui/remote.tsx): the phone as a keyboard and mouse for a computer, over its USB cable (HID functions
+   * on the phone's USB gadget) or Bluetooth (the HID device profile). "remote.state" brings each change.
+   */
+  remote: {
+    state(): Promise<RemoteState>;
+    /** Where reports go (null: nowhere), turning that side on first. */
+    target(target: RemoteTarget | null): Promise<RemoteState>;
+    /** Turns a side off: USB, the gadget back as Android had it; Bluetooth, the keyboard unregistered. */
+    off(side: RemoteTarget): Promise<RemoteState>;
+    /** Android's "make visible" dialog, for a new computer to pair with the phone. */
+    discoverable(): Promise<void>;
+    connect(address: string): Promise<void>;
+    disconnect(): Promise<void>;
+    /** Keyboard reports in order, each [modifiers, ...usages held] (remote.ts). */
+    keys(reports: number[][]): Promise<void>;
+    /** A mouse report: buttons (1 left, 2 right, 4 middle), relative motion, wheel and horizontal wheel. */
+    mouse(buttons: number, dx: number, dy: number, wheel?: number, pan?: number): Promise<void>;
   };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   notifications: {
@@ -251,13 +394,26 @@ export interface Bridge {
     unlock(): Promise<void>;
   };
   /**
-   * The notification panel's quick settings: the flashlight and do not disturb switch here (null: unavailable),
-   * Wi-Fi, Bluetooth, internet and settings open Android's own panels. "qs.changed" brings the state again.
+   * The control center (and the notification panel's row): every tile the phone's own control center has, switched
+   * here, and its sliders. "qs.changed" brings the state again.
    */
+  /** What's playing ("media.changed" brings it again once asked): the control center's media card. */
+  media: {
+    state(): Promise<MediaState>;
+    control(command: "toggle" | "play" | "pause" | "next" | "previous" | "open"): Promise<void>;
+    /** The phone's output picker (speaker, Bluetooth, cast) for that app's audio. */
+    output(pkg?: string): Promise<void>;
+  };
   qs: {
     state(): Promise<QuickState>;
-    toggle(name: "torch" | "dnd"): Promise<QuickState>;
-    open(name: "wifi" | "bluetooth" | "internet" | "settings"): Promise<void>;
+    /** A tile tapped: a switch flipped, an action run (screenshot, lock), a page opened. */
+    toggle(name: string): Promise<QuickState>;
+    /** Android's own page for a tile (its long press), or wifi / bluetooth / internet / settings. */
+    open(name: string): Promise<void>;
+    /** A slider: "brightness" / "volume" 0..1, "auto-brightness" 0/1, "ringer" 0..1 (silent, vibrate, ring). */
+    set(name: "brightness" | "volume" | "auto-brightness" | "ringer", value: number): Promise<QuickState>;
+    /** The control center shown (true) or shut: other apps' tiles keep their state current while it shows. */
+    listening(on: boolean): Promise<void>;
   };
   /**
    * The shade (index.html?mode=shade, in PowOS's system window above the status bar - the native shade host): the
@@ -289,15 +445,37 @@ export interface Bridge {
     list(): Promise<ThemeChoice[]>;
     pick(name: string): Promise<void>;
   };
-  /** The Compose launcher's screens the shell has no own yet: store, themes, style, aur, linux, agents, settings. */
+  /**
+   * Settings and the screens it opens (screens.ts, ShellScreens.kt): one's state now, then again as "screens.state"
+   * ({ name, state }) on every change until unwatch; and what's tapped there (the host answers with what it returns).
+   * The host opens one itself as "screens.open" ({ name }), and says a store install is done as "screens.done".
+   */
   screens: {
-    open(name: string): Promise<void>;
+    watch(name: string): Promise<unknown>;
+    unwatch(name: string): Promise<void>;
+    act(name: string, action: string, arg?: unknown): Promise<unknown>;
   };
   /** The default coding agent: its name, and the home menu's tasks for it (or the screen that sets one up). */
   agents: {
     default(): Promise<string | null>;
     newWidget(): Promise<"started" | "linux" | "agents">;
     newApp(): Promise<"started" | "linux" | "agents">;
+    /**
+     * The Agents view (agents.ts): everything now (full), then "agents.delta" (AgentsDelta, only what changed) until
+     * unsubscribe - a hidden page unsubscribes and takes a snapshot again when it shows.
+     */
+    snapshot(): Promise<AgentsDelta>;
+    unsubscribe(): Promise<void>;
+    /** Shows [agent]'s events (null: none): they come as "agents.delta" ({ eventsOf, events }), now and on change. */
+    events(agent: string | null): Promise<void>;
+    /** The agents' notification was tapped since last asked ("agents.open" says so to a page that's there). */
+    takeOpen(): Promise<boolean>;
+    /** The user's answer to an ask (AgentAsk.id): allow, or deny with what the agent is told instead. */
+    answer(ask: string, behavior: "allow" | "deny", reason?: string): Promise<void>;
+    /** Mail to an agent's comms inbox (its role), as the user. */
+    message(role: string, text: string): Promise<void>;
+    /** Ends an agent's current turn (SIGINT; the session stays). This phone's agents only. */
+    interrupt(agent: string): Promise<void>;
   };
   /**
    * Speech to text (the phone's recognizer; the page's own has none). "speech.state" ({ listening, text, error })
@@ -321,12 +499,11 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "qs.changed" (QuickState), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
-   * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
 }
-
 
 export interface TermState {
   running: boolean;
@@ -377,6 +554,121 @@ declare global {
   interface Window {
     powos?: Bridge;
     PowosHost?: { call(id: number, method: string, args: string): void };
-    __powosHost?: { resolve(id: number, v: unknown): void; reject(id: number, m: string): void; emit(e: string, d: unknown): void };
+    __powosHost?: {
+      resolve(id: number, v: unknown): void;
+      reject(id: number, m: string): void;
+      emit(e: string, d: unknown): void;
+    };
   }
+}
+
+/**
+ * The Agents view's rows (docs/AGENTS-VIEW-DESIGN.md §3): the same fields as powos-agentsd's spool and, in Phase 2,
+ * SpacetimeDB's tables. Ids are host-prefixed ("phone:<session>", "mac:<session>/<subagent>"); times Unix ms.
+ */
+export interface Agent {
+  id: string;
+  host: string;
+  role: string;
+  /** The parent agent's id; "@<role>" when it's only known by its comms role (resolved to that role's agent). */
+  parent: string | null;
+  state: "working" | "idle" | "needs_you" | "blocked" | "paused" | "gone";
+  title: string;
+  step: string;
+  cwd: string;
+  pid: number;
+  subs: number;
+  unread: number;
+  report: string;
+  started: number;
+  last: number;
+  rev: number;
+}
+export interface AgentTask {
+  id: string;
+  agent: string;
+  subject: string;
+  status: "open" | "in_progress" | "done";
+  order: number;
+  updated: number;
+}
+export interface AgentEvent {
+  id: number;
+  agent: string;
+  ts: number;
+  kind: "tool" | "prompt" | "stop" | "sub_start" | "sub_stop" | "notify" | "fail" | "compact";
+  name: string;
+  hint: string;
+  ok: boolean | null;
+  n: number;
+  ms: number;
+}
+export interface AgentMessage {
+  id: string;
+  from: string;
+  to: string;
+  kind: "message" | "escalate" | "notify" | "ask" | "report";
+  priority: string;
+  ts: number;
+  body: string;
+  read: boolean;
+}
+export interface AgentAsk {
+  id: string;
+  agent: string;
+  tool: string;
+  summary: string;
+  ts: number;
+  expires: number;
+  answer: "allow" | "deny" | null;
+  reason: string | null;
+  by: string | null;
+}
+/**
+ * What changed (§4 The backend swap): rows by id; [gone] agents removed; [tasksOf] agents whose task lists [tasks]
+ * replace; [eventsOf] the agent whose recent events [events] are; [full] everything, replacing what was there.
+ */
+export interface AgentsDelta {
+  agents?: Agent[];
+  gone?: string[];
+  tasks?: AgentTask[];
+  tasksOf?: string[];
+  events?: AgentEvent[];
+  eventsOf?: string;
+  messages?: AgentMessage[];
+  asks?: AgentAsk[];
+  full?: boolean;
+}
+
+export type RemoteTarget = "usb" | "bluetooth";
+export interface RemoteHost {
+  address: string;
+  name: string;
+  /** The one it was with last: Bluetooth reconnects to it. */
+  last?: boolean;
+  connected?: boolean;
+}
+/** Remote input's sides: where reports go, and how each side is. */
+export interface RemoteState {
+  target: RemoteTarget | null;
+  usb: {
+    on: boolean;
+    busy: boolean;
+    /** The phone's USB port: "configured" (a computer has it), "not attached", "off"... */
+    state: string;
+    error: string | null;
+  };
+  bluetooth: {
+    available: boolean;
+    enabled: boolean;
+    registered: boolean;
+    discoverable: boolean;
+    /** The phone's Bluetooth name: what a computer finds when pairing. */
+    name?: string | null;
+    host: RemoteHost | null;
+    connecting: string | null;
+    /** Paired computers, the last one first. */
+    hosts: RemoteHost[];
+    error: string | null;
+  };
 }

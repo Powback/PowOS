@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""powos-runtime - how a PowOS app's process runs: one switch, the same app (docs/POWOS-APPS-FEASIBILITY.md section 5.6).
+
+An app's manifest (powos-app.json) says WHAT it needs - its command, user, data dir, network, budget. This decides
+HOW it runs, by a global setting plus a per-app override:
+
+  native     a plain process (under the PowOS supervisor): rlimits, nice and ionice, as its user
+  sandbox    the same binary under bubblewrap: its own user/pid/uts/cgroup namespaces (no IPC namespace: Android's
+             kernel has no System V IPC, so --unshare-all fails), a read-only view of the system, a private /tmp, only
+             its data dir writable, network shared or off, a seccomp denylist, and Landlock where the kernel has it
+  container  podman - for apps that need a foreign userland. Not ready on the phone yet (/dev/fuse and cgroup v2 are
+             deferred, section 2): refused with "not ready yet", never silently run some other way
+
+Flipping the mode never changes the app: the same command, data dir (bound at the same path), port (the host's
+network namespace unless the manifest says "none"), uid (the user namespace maps it to itself) and so identity.
+Tier 0 apps (module only) have no process at all; this is for backends and system services (SpacetimeDB itself).
+
+  powos-runtime run <manifest> [--mode M] [--dry-run]   exec the app's backend (the supervisor calls this)
+  powos-runtime mode [<app-id>]                          the mode an app runs in (or the default)
+  powos-runtime config [<mode>] [--app <id>] [--clear]   read or set the default / an app's override
+  powos-runtime check                                    what each mode has on this machine
+"""
+import ctypes
+import json
+import os
+import platform
+import pwd
+import shutil
+import struct
+import sys
+
+MODES = ("native", "sandbox", "container")
+CONFIG = os.environ.get("POWOS_RUNTIME_CONFIG", "/var/lib/powos/runtime/config.json")
+PLATFORM_FILE = "/etc/powos/platform"
+NOT_READY = ("container: not ready yet on this device - rootless podman needs /dev/fuse and cgroup v2 controllers, "
+             "both deferred (docs/POWOS-APPS-FEASIBILITY.md section 2); use native or sandbox")
+
+
+def die(msg, code=1):
+    print(f"powos-runtime: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def device():
+    try:
+        return open(PLATFORM_FILE).read().strip() or "desktop"
+    except OSError:
+        return "desktop"
+
+
+# ── settings ────────────────────────────────────────────────────────────────
+
+def load_config():
+    try:
+        with open(CONFIG) as f:
+            c = json.load(f)
+    except (OSError, ValueError):
+        c = {}
+    c.setdefault("default", "native")
+    c.setdefault("apps", {})
+    return c
+
+
+def save_config(c):
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    tmp = CONFIG + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(c, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp, CONFIG)  # atomic: the supervisor never reads half a file
+
+
+def mode_of(app_id, c=None):
+    c = c or load_config()
+    m = c["apps"].get(app_id) or c["default"]
+    return m if m in MODES else "native"
+
+
+# ── the manifest ────────────────────────────────────────────────────────────
+
+def load_manifest(path):
+    with open(path) as f:
+        m = json.load(f)
+    b = m.get("backend")
+    if not b or not b.get("exec"):
+        die(f"{m.get('id', path)}: no backend.exec - a Tier 0 app has no process to run")
+    return m
+
+
+def budget_of(m):
+    b = m.get("budget") or {}
+    return b.get(device()) or b.get("default") or {}
+
+
+def expand(s, data):
+    return s.replace("${data}", data)
+
+
+# ── budgets without cgroups: rlimits, nice, ionice ──────────────────────────
+
+IOPRIO_SET = {"aarch64": 30, "x86_64": 251}.get(platform.machine())
+IOPRIO_CLASS = {"rt": 1, "be": 2, "idle": 3}
+
+
+def apply_budget(budget):
+    import resource
+    lim = {
+        "nofile": resource.RLIMIT_NOFILE,
+        "nproc": resource.RLIMIT_NPROC,  # per uid: count the user's other processes and threads too
+        "cpuSec": resource.RLIMIT_CPU,   # total CPU seconds: for jobs, never long-running services
+    }
+    for k, r in lim.items():
+        if k in budget:
+            v = int(budget[k])
+            resource.setrlimit(r, (v, v))
+    # Address space: only for programs that don't reserve huge virtual ranges (V8 and wasmtime do: not SpacetimeDB).
+    if "asMB" in budget:
+        v = int(budget["asMB"]) << 20
+        resource.setrlimit(resource.RLIMIT_AS, (v, v))
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    if "nice" in budget:
+        os.setpriority(os.PRIO_PROCESS, 0, int(budget["nice"]))
+    io = budget.get("io")  # "idle" or "be:<0-7>"
+    if io and IOPRIO_SET:
+        cls, _, lvl = io.partition(":")
+        prio = (IOPRIO_CLASS.get(cls, 2) << 13) | (int(lvl or 4) & 7)
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.syscall(IOPRIO_SET, 1, 0, prio)  # IOPRIO_WHO_PROCESS, this process
+
+
+def drop_to(user):
+    """As root: become the app's user (its groups too). Not root: must already be it."""
+    pw = pwd.getpwnam(user)
+    if os.getuid() == 0 and pw.pw_uid != 0:
+        os.initgroups(user, pw.pw_gid)
+        os.setgid(pw.pw_gid)
+        os.setuid(pw.pw_uid)
+    elif os.getuid() != pw.pw_uid:
+        die(f"runs as {user}, not uid {os.getuid()}")
+    return pw
+
+
+# ── seccomp: a denylist, as Flatpak's, in plain BPF (no libseccomp bindings on the phone) ──────────────────────
+
+AUDIT_ARCH = {"aarch64": 0xC00000B7, "x86_64": 0xC000003E}
+# Syscalls a sandboxed app never needs: new namespaces and mounts (its view is bwrap's), kernel modules and keys,
+# tracing, kexec, swap, reboot, BPF, perf, userfaultfd, file handles (escape from bind mounts), and the new mount API.
+DENY = {
+    "aarch64": {"mount": 40, "umount2": 39, "pivot_root": 41, "unshare": 97, "setns": 268, "bpf": 280,
+                "perf_event_open": 241, "kexec_load": 104, "kexec_file_load": 294, "init_module": 105,
+                "finit_module": 273, "delete_module": 106, "add_key": 217, "request_key": 218, "keyctl": 219,
+                "userfaultfd": 282, "quotactl": 60, "swapon": 224, "swapoff": 225, "reboot": 142, "syslog": 116,
+                "acct": 89, "open_by_handle_at": 265, "ptrace": 117, "personality": 92, "fanotify_init": 262,
+                "process_vm_readv": 270, "process_vm_writev": 271, "open_tree": 428, "move_mount": 429,
+                "fsopen": 430, "fsconfig": 431, "fsmount": 432, "fspick": 433, "mount_setattr": 442},
+    "x86_64": {"mount": 165, "umount2": 166, "pivot_root": 155, "unshare": 272, "setns": 308, "bpf": 321,
+               "perf_event_open": 298, "kexec_load": 246, "kexec_file_load": 320, "init_module": 175,
+               "finit_module": 313, "delete_module": 176, "add_key": 248, "request_key": 249, "keyctl": 250,
+               "userfaultfd": 323, "quotactl": 179, "swapon": 167, "swapoff": 168, "reboot": 169, "syslog": 103,
+               "acct": 163, "open_by_handle_at": 304, "ptrace": 101, "personality": 135, "fanotify_init": 300,
+               "process_vm_readv": 310, "process_vm_writev": 311, "open_tree": 428, "move_mount": 429,
+               "fsopen": 430, "fsconfig": 431, "fsmount": 432, "fspick": 433, "mount_setattr": 442},
+}
+CLONE = {"aarch64": 220, "x86_64": 56}
+CLONE3 = 435
+CLONE_NEW = 0x00020000 | 0x02000000 | 0x04000000 | 0x08000000 | 0x10000000 | 0x20000000 | 0x40000000 | 0x00000080
+EPERM, ENOSYS = 1, 38
+RET_ALLOW, RET_ERRNO, RET_KILL = 0x7FFF0000, 0x00050000, 0x80000000
+
+
+def seccomp_bpf():
+    """The filter: wrong arch -> kill; a denied syscall -> EPERM; clone with a namespace flag -> EPERM; clone3 ->
+    ENOSYS (its flags are in memory BPF can't read; libc falls back to clone); everything else allowed."""
+    arch = platform.machine()
+    if arch not in AUDIT_ARCH:
+        return None
+    LD, JEQ, JSET, RET = 0x20, 0x15, 0x45, 0x06
+    deny = sorted(DENY[arch].values())
+    prog = []  # (code, jt, jf, k) with jumps to labels resolved below
+
+    prog.append((LD, 0, 0, 4))                          # 0: A = arch
+    prog.append((JEQ, 0, "kill", AUDIT_ARCH[arch]))     # 1
+    prog.append((LD, 0, 0, 0))                          # 2: A = nr
+    for nr in deny:
+        prog.append((JEQ, "eperm", 0, nr))
+    prog.append((JEQ, "enosys", 0, CLONE3))
+    prog.append((JEQ, 0, "allow", CLONE[arch]))
+    prog.append((LD, 0, 0, 16))                         # A = clone flags (low 32 bits of arg 0)
+    prog.append((JSET, "eperm", 0, CLONE_NEW))
+    labels = {}
+    prog.append(("allow", (RET, 0, 0, RET_ALLOW)))
+    prog.append(("eperm", (RET, 0, 0, RET_ERRNO | EPERM)))
+    prog.append(("enosys", (RET, 0, 0, RET_ERRNO | ENOSYS)))
+    prog.append(("kill", (RET, 0, 0, RET_KILL)))
+    flat = []
+    for p in prog:
+        if isinstance(p[0], str):
+            labels[p[0]] = len(flat)
+            flat.append(p[1])
+        else:
+            flat.append(p)
+    out = b""
+    for i, (code, jt, jf, k) in enumerate(flat):
+        jt = labels[jt] - i - 1 if isinstance(jt, str) else jt
+        jf = labels[jf] - i - 1 if isinstance(jf, str) else jf
+        assert 0 <= jt < 256 and 0 <= jf < 256
+        out += struct.pack("=HBBI", code, jt, jf, k)
+    return out
+
+
+# ── Landlock (defense in depth under bwrap, where the kernel has it) ─────────
+
+def landlock_abi():
+    nr = {"aarch64": 444, "x86_64": 444}.get(platform.machine())
+    if nr is None:
+        return 0
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    v = libc.syscall(nr, None, ctypes.c_size_t(0), ctypes.c_uint32(1))  # LANDLOCK_CREATE_RULESET_VERSION
+    return v if v > 0 else 0
+
+
+def landlock_wrap(writable):
+    """setpriv's Landlock (util-linux >= 2.40): everything readable and executable, writes only where allowed."""
+    if not landlock_abi() or not shutil.which("setpriv"):
+        return []
+    ro = "path-beneath:execute,read-file,read-dir"
+    rw = ("path-beneath:execute,read-file,read-dir,write-file,remove-dir,remove-file,make-dir,make-reg,make-sock,"
+          "make-fifo,make-sym")
+    args = ["setpriv", "--landlock-access", "fs", "--landlock-rule", f"{ro}:/",
+            "--landlock-rule", "path-beneath:read-file,write-file:/dev"]
+    for p in writable:
+        args += ["--landlock-rule", f"{rw}:{p}"]
+    return args + ["--"]
+
+
+# ── the modes ───────────────────────────────────────────────────────────────
+
+def environment(m, pw, data):
+    env = {"HOME": data, "USER": pw.pw_name, "LOGNAME": pw.pw_name, "PATH": "/usr/local/bin:/usr/bin:/usr/sbin",
+           "LANG": os.environ.get("LANG", "C.UTF-8"), "POWOS_APP": m["id"], "POWOS_APP_DATA": data}
+    for k, v in (m["backend"].get("env") or {}).items():
+        env[k] = expand(str(v), data)
+    return env
+
+
+def sandbox_argv(m, data, argv, env):
+    needs = m.get("needs") or {}
+    write = [data, *(expand(p, data) for p in needs.get("write", []))]
+    a = ["bwrap", "--unshare-user", "--unshare-pid", "--unshare-uts", "--unshare-cgroup-try",
+         "--die-with-parent", "--new-session", "--hostname", m["id"].split(".")[-1][:63],
+         "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/run",
+         "--tmpfs", "/home", "--tmpfs", "/root", "--tmpfs", "/var/lib/powos"]
+    for p in write:
+        a += ["--bind", p, p]
+    for p in needs.get("read", []):  # extra paths hidden by the tmpfs above that it may read
+        p = expand(p, data)
+        a += ["--ro-bind", p, p]
+    for d in needs.get("devices", []):
+        a += ["--dev-bind", d, d]
+    if needs.get("network", "host") == "none":
+        a += ["--unshare-net"]
+    elif os.path.exists("/etc/resolv.conf"):
+        a += ["--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf"]
+    a += ["--chdir", data, "--clearenv"]
+    for k, v in env.items():
+        a += ["--setenv", k, v]
+    bpf = seccomp_bpf()
+    if bpf:
+        fd = os.memfd_create("powos-seccomp", 0)
+        os.write(fd, bpf)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.set_inheritable(fd, True)
+        a += ["--seccomp", str(fd)]
+    return a + ["--", *landlock_wrap(write), *argv]
+
+
+def run(path, mode=None, dry=False):
+    m = load_manifest(path)
+    b = m["backend"]
+    mode = mode or mode_of(m["id"])
+    if mode not in MODES:
+        die(f"unknown mode {mode} ({', '.join(MODES)})")
+    if mode == "container":
+        die(NOT_READY, 78)
+    data = b.get("data") or f"/var/lib/powos/apps/{m['id']}"
+    user = b.get("user", "powos")
+    argv = [expand(x, data) for x in b["exec"]]
+    if dry:
+        print(json.dumps({"id": m["id"], "mode": mode, "user": user, "data": data, "budget": budget_of(m),
+                          "argv": argv}, indent=2))
+        return
+    pw = pwd.getpwnam(user)
+    if os.getuid() == 0:
+        os.makedirs(data, exist_ok=True)
+        os.chown(data, pw.pw_uid, pw.pw_gid)
+        os.chmod(data, 0o700)
+    apply_budget(budget_of(m))
+    drop_to(user)
+    env = environment(m, pw, data)
+    os.chdir(data)
+    for step in b.get("prepare") or []:  # natively, as the user: keys, dirs (before any sandbox exists)
+        r = os.spawnvpe(os.P_WAIT, "/bin/sh", ["/bin/sh", "-c", expand(step, data)], env)
+        if r != 0:
+            die(f"{m['id']}: prepare step failed ({r}): {step}")
+    print(f"powos-runtime: {m['id']} {mode} as {user}, data {data}", file=sys.stderr, flush=True)
+    if mode == "native":
+        os.execvpe(argv[0], argv, env)
+    os.execvp("bwrap", sandbox_argv(m, data, argv, env))
+
+
+# ── what this machine has ───────────────────────────────────────────────────
+
+def check():
+    rows = [("native", "yes", "rlimits, nice, ionice; budget watch by the supervisor")]
+    bw = shutil.which("bwrap")
+    ok = "no"
+    if bw:
+        r = os.spawnvp(os.P_WAIT, "bwrap", ["bwrap", "--unshare-user", "--unshare-pid", "--unshare-uts",
+                                             "--unshare-cgroup-try", "--ro-bind", "/", "/", "--dev", "/dev",
+                                             "--proc", "/proc", "true"])
+        ok = "yes" if r == 0 else f"no (bwrap exit {r})"
+    ll = landlock_abi()
+    rows.append(("sandbox", ok, f"bwrap {bw or '-'}, seccomp {'yes' if seccomp_bpf() else 'no'}, "
+                                f"landlock {'ABI ' + str(ll) if ll else 'not in this kernel'}"))
+    fuse = os.access("/dev/fuse", os.R_OK | os.W_OK)
+    rows.append(("container", "no" if device() == "phone" else ("yes" if shutil.which("podman") else "no"),
+                 f"podman {shutil.which('podman') or '-'}, /dev/fuse {'rw' if fuse else 'no access'}"
+                 + (" - not ready yet on the phone" if device() == "phone" else "")))
+    c = load_config()
+    print(f"default: {c['default']}" + "".join(f"\n  {k}: {v}" for k, v in sorted(c["apps"].items())))
+    for r in rows:
+        print(f"{r[0]:10} {r[1]:4} {r[2]}")
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "run":
+        mode = None
+        dry = "--dry-run" in rest
+        rest = [r for r in rest if r != "--dry-run"]
+        if "--mode" in rest:
+            i = rest.index("--mode")
+            mode = rest[i + 1]
+            del rest[i:i + 2]
+        if len(rest) != 1:
+            die("usage: powos-runtime run <manifest> [--mode M] [--dry-run]")
+        run(rest[0], mode, dry)
+    elif cmd == "mode":
+        print(mode_of(rest[0]) if rest else load_config()["default"])
+    elif cmd == "config":
+        app = None
+        if "--app" in rest:
+            i = rest.index("--app")
+            app = rest[i + 1]
+            del rest[i:i + 2]
+        c = load_config()
+        if "--clear" in rest:
+            if not app:
+                die("--clear needs --app")
+            c["apps"].pop(app, None)
+            save_config(c)
+            return
+        if not rest:
+            print(mode_of(app, c) if app else c["default"])
+            return
+        mode = rest[0]
+        if mode not in MODES:
+            die(f"mode must be one of: {', '.join(MODES)}")
+        if mode == "container" and device() == "phone":
+            die(NOT_READY, 78)
+        if app:
+            c["apps"][app] = mode
+        else:
+            c["default"] = mode
+        save_config(c)
+        print(f"{app or 'default'}: {mode} (the supervisor restarts what this changes within seconds)")
+    elif cmd == "check":
+        check()
+    else:
+        die(f"unknown command {cmd} (run, mode, config, check)")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

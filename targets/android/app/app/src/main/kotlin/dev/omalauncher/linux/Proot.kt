@@ -69,6 +69,23 @@ class Proot(
         return File(rootfs, guestPath.removePrefix("/"))
     }
 
+    /**
+     * What [prepare] couldn't delete itself, deleted as root (rooted mode): a socket left in the runtime dir from before
+     * PowOS became a privileged system app - a priv_app may not unlink sock_files, and the whole Linux runtime (every
+     * widget's shell) failed to start over it. Not rooted, the failure stands, as before.
+     * HACK: root clears the app's own dir. Real fix: priv_app sock_file rules in the PowOS system module's sepolicy, or
+     * no sockets in app data at all (abstract sockets, as the session's).
+     */
+    private fun clearAsRoot(
+        dir: File,
+        cause: Throwable,
+    ) {
+        if (!RootedGuest.enabled) throw cause
+        val p = ProcessBuilder("su", "-c", "rm -rf '${dir.absolutePath}'").redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText()
+        if (p.waitFor() != 0 || dir.exists()) throw IllegalStateException("can't clear $dir as root: $out", cause)
+    }
+
     /** The guest path of a host file, the reverse of [hostFile]; null if the guest can't see it. */
     fun guestPath(host: File): String? {
         for ((guest, dir) in binds) {
@@ -84,7 +101,7 @@ class Proot(
      */
     fun prepare() {
         for (dir in listOf(tmpDir, runtimeDir)) {
-            LauncherData.deleteTree(dir)
+            runCatching { LauncherData.deleteTree(dir) }.onFailure { clearAsRoot(dir, it) }
             dir.mkdirs()
         }
         // proot skips a bind whose host directory is missing, and the guest would then write into the rootfs.

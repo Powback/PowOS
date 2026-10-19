@@ -6,11 +6,19 @@
  */
 import { useEffect } from "preact/hooks";
 import { powos } from "../bridge.ts";
-import { notif } from "../state.ts";
+import { notif, panel } from "../state.ts";
 import { homeGestures, notifDrag, notifShown } from "./gesture.ts";
 import { NotificationPanel } from "./notifications.tsx";
 
-powos.on("shade.drag", ({ q }: { q: number }) => (notifDrag.value = Math.max(0, Math.min(1, q))));
+// Which panel the pull brings: the status bar's right half the control center, the rest the notifications.
+powos.on(
+  "shade.panel",
+  ({ panel: p }: { panel: "notifications" | "control" }) => (panel.value = p),
+);
+powos.on(
+  "shade.drag",
+  ({ q }: { q: number }) => (notifDrag.value = Math.max(0, Math.min(1, q))),
+);
 powos.on("shade.settle", ({ open }: { open: boolean }) => {
   notifDrag.value = null;
   notif.value = open;
@@ -21,7 +29,10 @@ export function Shade() {
   const shut = notifShown() === 0;
   useEffect(() => {
     if (!shut) return;
-    const t = window.setTimeout(() => notifShown() === 0 && powos.shade.closed(), 300);
+    const t = window.setTimeout(
+      () => notifShown() === 0 && powos.shade.closed(),
+      300,
+    );
     return () => clearTimeout(t);
   }, [shut]);
   return (

@@ -14,7 +14,7 @@
  * pointercancel once the browser scrolls something.
  */
 import { computed, effect, signal } from "@preact/signals";
-import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, selected } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, selected } from "../state.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
@@ -70,7 +70,10 @@ export function applyTrack() {
   const transform = `translateX(calc(${-Math.max(at, 0) * 100}% + ${toAi ? 0 : (dx ?? 0)}px))`;
   const shift = toAi ? (dx ?? 0) : 0;
   const track = document.querySelector<HTMLElement>(".page-track");
-  for (const [sel, base] of [[".home", at === -1 ? 100 : 0], [".ai-screen", at === -1 ? 0 : -100]] as const) {
+  for (const [sel, base] of [
+    [".home", at === -1 ? 100 : 0],
+    [".ai-screen", at === -1 ? 0 : -100],
+  ] as const) {
     const el = document.querySelector<HTMLElement>(sel);
     if (!el) continue;
     el.classList.toggle("sliding", dx != null);
@@ -97,7 +100,7 @@ interface Gesture {
   last: [number, number, number];
   /** Velocity along the gesture's axis, px/ms. */
   v: number;
-  mode: "open" | "close" | "pages" | "notif" | "notifClose" | null;
+  mode: "open" | "close" | "pages" | "notif" | "notifClose" | "panel" | null;
   open: boolean;
   /** The notification panel was down when it started. */
   notif: boolean;
@@ -129,7 +132,6 @@ function abandon() {
 
 /** Handlers for home's root element. */
 export function homeGestures() {
-
   const start = (x: number, y: number, target: Element) => {
     // A new touch while one is under way: the old one's end was lost.
     if (g) abandon();
@@ -149,8 +151,11 @@ export function homeGestures() {
       listTop: !list || list.scrollTop <= 0,
       listBottom: !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 1,
       target,
-      // The A-Z bar, a slider, a widget's drag: theirs.
-      own: !!target.closest?.(".letter-bar, input[type=range], .resize-handle, .menu, .mic"),
+      // The A-Z bar, a slider, a widget's drag, the control center's edit mode (its tiles are dragged), an Android
+      // widget's list (appwidget.tsx): theirs.
+      own: !!target.closest?.(
+        ".letter-bar, input[type=range], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls",
+      ),
       height: document.querySelector(".home")?.clientHeight || innerHeight,
     };
   };
@@ -163,13 +168,16 @@ export function homeGestures() {
     const dy = y - g.y0;
     const now = performance.now();
     const [lx, ly, lt] = g.last;
-    if (now > lt) g.v = g.mode === "pages" ? (x - lx) / (now - lt) : (y - ly) / (now - lt);
+    if (now > lt) g.v = g.mode === "pages" || g.mode === "panel" ? (x - lx) / (now - lt) : (y - ly) / (now - lt);
     g.last = [x, y, now];
     if (!g.mode) {
       if (Math.hypot(dx, dy) < SLOP) return;
       if (g.notif) {
         // The notification panel down: up drags it shut (the list scrolls until its end); sideways is a card's.
         if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
+        // Sideways, not on a notification (a card slides away by itself): between the notifications and the
+        // control center, as OnePlus's panels.
+        else if (Math.abs(dx) > Math.abs(dy) && !g.target.closest?.(".notif.tile:not(.notif-access)")) g.mode = "panel";
         else return (g = null);
       } else if (Math.abs(dy) > Math.abs(dx) && page.value === -1) {
         // PowOS AI's page: up and down are its own (it scrolls).
@@ -188,6 +196,10 @@ export function homeGestures() {
       }
     }
     if (e?.cancelable) e.preventDefault();
+    if (g.mode === "panel") {
+      lastDx = dx;
+      return panelBody()?.style.setProperty("--panel-dx", `${panelResist(dx)}px`);
+    }
     if (g.mode === "notif") notifDrag.value = clamp(dy / (g.height * 0.6));
     else if (g.mode === "notifClose") notifDrag.value = clamp(1 + dy / (g.height * 0.6));
     else if (g.mode === "open") drawerDrag.value = clamp(-dy / (g.height * 0.6));
@@ -218,6 +230,8 @@ export function homeGestures() {
       notifDrag.value = null;
       // A flick decides; otherwise where it was let go (as the drawer).
       notif.value = v > FLICK ? true : v < -FLICK ? false : mode === "notif" ? q > 0.33 : q > 0.67;
+    } else if (mode === "panel") {
+      settlePanel(lastDx, v);
     } else if (mode === "pages") {
       const dx = pageDrag.value ?? 0;
       pageDrag.value = null;
@@ -229,7 +243,8 @@ export function homeGestures() {
   };
 
   return {
-    onTouchStart: (e: TouchEvent) => (e.touches.length === 1 ? start(e.touches[0].clientX, e.touches[0].clientY, e.target as Element) : abandon()),
+    onTouchStart: (e: TouchEvent) =>
+      e.touches.length === 1 ? start(e.touches[0].clientX, e.touches[0].clientY, e.target as Element) : abandon(),
     onTouchMove: (e: TouchEvent) => move(e.touches[0].clientX, e.touches[0].clientY, e),
     onTouchEnd: end,
     onTouchCancel: end,
@@ -241,3 +256,47 @@ export function homeGestures() {
 }
 
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
+
+/** The panel's content, which a sideways swipe moves (notifications.tsx's .panel-body). */
+const panelBody = () => document.querySelector<HTMLElement>(".notif-panel .panel-body");
+let lastDx = 0;
+
+/** Towards the side there's nothing on (left of the notifications, right of the control center), it resists. */
+function panelResist(dx: number) {
+  const towardControl = dx < 0;
+  const hasNext = panel.value === "notifications" ? towardControl : !towardControl;
+  return hasNext ? dx : dx / 4;
+}
+
+/**
+ * Let go: a flick or a quarter of the width switches the panel - the other one comes in from the side it was swiped
+ * towards - otherwise the content springs back.
+ */
+function settlePanel(dx: number, v: number) {
+  const body = panelBody();
+  const width = body?.clientWidth || innerWidth;
+  const to = dx < -width / 4 || v < -FLICK ? "control" : dx > width / 4 || v > FLICK ? "notifications" : panel.value;
+  const switched = to !== panel.value;
+  lastDx = 0;
+  if (!body) return;
+  if (!switched) {
+    body.classList.add("settling");
+    body.style.setProperty("--panel-dx", "0px");
+    window.setTimeout(() => body.classList.remove("settling"), PANEL_MS);
+    return;
+  }
+  panel.value = to;
+  // The new content starts where the swipe left off, on the far side, and slides in.
+  requestAnimationFrame(() => {
+    const b = panelBody();
+    if (!b) return;
+    b.classList.remove("settling");
+    b.style.setProperty("--panel-dx", `${to === "control" ? width * 0.35 : -width * 0.35}px`);
+    void b.offsetWidth;
+    b.classList.add("settling");
+    b.style.setProperty("--panel-dx", "0px");
+    window.setTimeout(() => b.classList.remove("settling"), PANEL_MS);
+  });
+}
+
+const PANEL_MS = 220;

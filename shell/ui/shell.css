@@ -58,7 +58,11 @@
   right: var(--edge);
   bottom: var(--gap);
   top: calc((1 - var(--p)) * (100% - var(--strip-height) - var(--gap)));
-  background: color-mix(in srgb, var(--color-background) calc(88% + var(--p) * 10%), transparent);
+  /* The wallpaper through it, more of the drawer's own color as it opens (the list stays readable); what's under it on
+     home is blurred (the wallpaper isn't the page's to blur). */
+  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + var(--p) * 14%), transparent);
+  backdrop-filter: blur(calc(var(--p) * 18px));
+  -webkit-backdrop-filter: blur(calc(var(--p) * 18px));
 }
 .launcher {
   position: absolute;
@@ -505,6 +509,26 @@
   flex-direction: column;
 }
 .screen-panel.terminal .owl { flex: 1; min-height: 0; }
+/* An "at work" session open (session.tsx): grown out of its card to the whole screen, as the terminal widget's screen. */
+.session-screen {
+  position: fixed;
+  z-index: 15;
+  inset: 0;
+  padding-top: var(--inset-top, 0px);
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  transform-origin: 0 0;
+  overflow: hidden;
+  will-change: transform;
+}
+.session-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 8px 4px 2px; font-size: var(--text-small); min-width: 0; }
+.session-back { font: 22px var(--font); line-height: 1; width: 36px; height: 32px; background: none; border: 0; color: var(--color-accent); }
+.session-title { color: var(--color-foreground); white-space: nowrap; }
+.session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.session-term { flex: 1; min-height: 0; }
+/* The card the session grew out of: hidden under it while it's open, so the shrink lands on an empty place. */
+.ai-session.opened { visibility: hidden; }
 .screen-scrim {
   position: fixed;
   z-index: 15;
@@ -634,11 +658,15 @@
   top: 0;
   left: 0;
   right: 0;
-  max-height: 88%;
+  /* One height for both panels (the notifications, the control center), however few notifications there are: the
+     list fills it, the control center scrolls in it. */
+  height: 88%;
   display: flex;
   flex-direction: column;
   padding: calc(var(--inset-top, 0px) + 8px) var(--edge) 6px;
-  background: color-mix(in srgb, var(--color-background) 94%, transparent);
+  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + 10%), transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   border-bottom: var(--frame) solid var(--color-border);
   border-radius: 0 0 calc(var(--radius) * 2) calc(var(--radius) * 2);
   transform: translateY(calc((var(--q) - 1) * 100%));
@@ -676,6 +704,8 @@
 }
 .notif-access { font: var(--text-small) var(--font); color: var(--color-accent); text-align: start; }
 .notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
+/* Nothing new: the message in the middle of the (now always full-height) panel. */
+.notif-list:has(> .notif-empty) { display: flex; align-items: center; justify-content: center; }
 .notif-grip { align-self: center; width: 44px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--color-border); }
 
 /*
@@ -836,6 +866,164 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   color: var(--color-foreground);
 }
 .qs-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+/* The control center (control.tsx): in the notification panel's place - the big Wi-Fi and data cards, the sliders, the tiles. */
+.cc { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 6px; }
+.cc-clock { font-size: var(--text-small); color: var(--color-foreground); }
+.cc-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.cc-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: 8px 10px;
+  text-align: left;
+  font: var(--text-small) var(--font);
+  text-transform: lowercase;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  color: var(--color-foreground);
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.cc-tile.big { min-height: 64px; }
+.cc-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+.cc-tile:active { filter: brightness(1.15); }
+.cc-label { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; }
+.cc-slider .cc-label, .cc-tile.big .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.cc-detail { opacity: 0.7; font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-sliders { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.cc-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  border-radius: calc(var(--radius) * 1.5);
+  border: var(--frame) solid var(--color-border);
+  background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--color-surface) 0);
+  overflow: hidden;
+}
+.cc-slider .cc-label {
+  position: absolute;
+  left: 12px;
+  font-size: var(--text-small);
+  color: var(--color-foreground);
+  mix-blend-mode: difference;
+  pointer-events: none;
+}
+.cc-slider input[type="range"] { appearance: none; -webkit-appearance: none; width: 100%; height: 100%; margin: 0; background: transparent; opacity: 0; touch-action: none; }
+.cc-chip {
+  font: var(--text-small) var(--font);
+  min-width: 64px;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  color: var(--color-foreground);
+}
+.cc-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+.cc-media {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 10px;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  overflow: hidden;
+}
+.cc-media::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--p) * 100%); background: var(--color-accent); }
+.cc-art { width: 44px; height: 44px; border-radius: var(--radius); object-fit: cover; }
+.cc-track { display: flex; flex-direction: column; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: var(--text-small) var(--font); color: var(--color-foreground); }
+.cc-track .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.cc-transport { display: flex; gap: 2px; }
+.cc-transport button { font: 18px var(--font); width: 36px; height: 36px; background: none; border: 0; color: var(--color-foreground); }
+/* Icons (icons.tsx) and the panels drawn with them: the control center's tiles as round icons over a one-line label,
+   the header's actions and the notification panel's quick strip as icon buttons. These come last and win. */
+.icon { display: block; flex: none; }
+.notif-actions.icons { gap: 2px; }
+.notif-actions.icons button { width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--color-foreground); border-radius: 50%; }
+.notif-actions.icons button.on { color: var(--color-accent); }
+.notif-actions.icons button:active { background: var(--color-surface); }
+.cc-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 12px 6px; }
+.cc-grid .cc-tile {
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  color: var(--color-foreground);
+}
+.cc-grid .cc-tile .cc-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.cc-grid .cc-tile.on .cc-icon { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+.cc-grid .cc-tile.on { background: none; color: var(--color-foreground); }
+.cc-grid .cc-tile .cc-label {
+  display: block;
+  width: 100%;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-muted);
+}
+.cc-cards .cc-tile { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
+.cc-cards .cc-tile .cc-icon { font-size: 24px; display: flex; }
+.cc-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.cc-slider-icon { position: absolute; left: 12px; font-size: 20px; color: var(--color-foreground); mix-blend-mode: difference; pointer-events: none; display: flex; }
+.cc-chip { display: flex; align-items: center; justify-content: center; font-size: 20px; min-width: 52px; }
+.cc-transport button { display: flex; align-items: center; justify-content: center; font-size: 22px; }
+/* Edit mode (control.tsx's EditGrid): tiles wobble gently, a − to take one out, dragged ones lift under the finger. */
+.cc-editing { display: flex; flex-direction: column; gap: 10px; touch-action: none; }
+.cc-tile.edit { position: relative; user-select: none; -webkit-touch-callout: none; touch-action: none; }
+.cc-tile.edit .cc-icon { animation: cc-wobble 1.6s ease-in-out infinite; }
+.cc-tile.edit:nth-child(2n) .cc-icon { animation-delay: -0.8s; }
+.cc-tile.edit.dragging { z-index: 2; transition: none; }
+.cc-tile.edit.dragging .cc-icon { animation: none; box-shadow: 0 8px 24px rgb(0 0 0 / 45%); border-color: var(--color-accent); }
+.cc-grid .cc-tile.edit:not(.dragging) { transition: transform 160ms ease; }
+.cc-badge {
+  position: absolute;
+  top: -4px;
+  right: calc(50% - 34px);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  background: var(--color-background);
+  color: var(--color-red);
+}
+.cc-badge.add { color: var(--color-accent); }
+.cc-tray-head { font-size: var(--text-small); padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); }
+.cc-tray .cc-tile .cc-icon { animation: none; opacity: 0.75; }
+@keyframes cc-wobble {
+  0%, 100% { transform: rotate(-1.5deg); }
+  50% { transform: rotate(1.5deg); }
+}
+/* The panel's content: a sideways swipe moves it (gesture.ts), between the notifications and the control center. */
+.notif-panel .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; transform: translateX(var(--panel-dx, 0px)); }
+.notif-panel .panel-body.settling { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 /* The switcher (switcher.tsx): the recent tasks side by side over the dimmed wallpaper, newest first. */
 html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-background) 72%, transparent); }
 .switcher {
@@ -877,18 +1065,28 @@ html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-bac
 .task-clear { align-self: center; margin-top: calc(var(--gap) * 3); font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 8px 16px; }
 .task-empty { align-self: center; font-size: var(--text-body); }
 
-/* The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. */
-html[data-mode="lock"], html[data-mode="lock"] body { background: rgb(0 0 0 / 0.35); }
+/*
+ * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lift (0..1,
+ * set on the root on every move) is how far: the face goes up by that much of the screen, fading, and the dimming
+ * with it; lock-settling eases it the rest of the way, or back.
+ */
+html[data-mode="lock"] { background: rgb(0 0 0 / calc(0.55 * (1 - var(--lift, 0)))); }
+html[data-mode="lock"] body { background: none; }
 .lock {
   position: fixed;
   inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: calc(var(--inset-top, 0px) + 12vh) var(--edge) calc(var(--inset-bottom, 0px) + 18px);
+  padding: calc(var(--inset-top, 0px) + 12vh) var(--edge) calc(var(--inset-bottom, 0px) + 28px);
   touch-action: none;
   user-select: none;
+  transform: translateY(calc(var(--lift, 0) * -100%));
+  opacity: calc(1 - var(--lift, 0) * 1.4);
+  will-change: transform, opacity;
 }
+html.lock-settling[data-mode="lock"] { transition: background-color 220ms ease-out; }
+html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms ease-out; }
 .lock-time { font: 300 88px/1 var(--font); color: var(--color-foreground); letter-spacing: 2px; }
 .lock-date { margin-top: 8px; color: var(--color-foreground); font-size: var(--text-body); }
 .lock-notes { margin-top: 28px; width: 100%; display: flex; flex-direction: column; gap: 6px; }
@@ -900,3 +1098,149 @@ html[data-mode="lock"], html[data-mode="lock"] body { background: rgb(0 0 0 / 0.
 .lock-note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
 .lock-note-time { font-size: var(--text-small); }
 .lock-hint { margin-top: auto; font-size: var(--text-small); }
+
+/* Other apps' Android widgets (appwidget.tsx): the widget's own frame fills the tile, drawn by the widget itself (its
+   background, its corners) - no PowOS frame around it; selected, an outline shows it. */
+/* Clipped to PowOS's corners (a widget's own radius is Android's, system_app_widget_background_radius). */
+.aw-face { width: 100%; height: 100%; border-radius: var(--radius); overflow: hidden; }
+.aw-face canvas { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
+.aw-face canvas[hidden] { display: none; }
+.aw-wait { height: 100%; display: flex; align-items: center; justify-content: center; font-size: var(--text-small); text-align: center; }
+.home-tile.selected .aw-face { outline: var(--frame) solid var(--color-accent); outline-offset: 2px; }
+.aw-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 13;
+  display: flex;
+  align-items: flex-end;
+  padding: calc(var(--inset-top, 0px) + var(--edge)) var(--edge) calc(var(--inset-bottom, 0px) + var(--edge));
+  background: color-mix(in srgb, var(--color-background) 50%, transparent);
+}
+.aw-picker { width: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; background: var(--color-background); }
+.aw-search {
+  font: var(--text-item) var(--font);
+  color: var(--color-foreground);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  outline: none;
+}
+.aw-search:focus { border-color: var(--color-accent); }
+.aw-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
+.aw-app-head { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); color: var(--color-foreground); margin-bottom: 6px; }
+.aw-app-head img, .aw-app-blank { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.aw-app-blank { background: var(--color-border); }
+.aw-row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.aw-provider {
+  flex: none;
+  width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  font: var(--text-small) var(--font);
+  color: var(--color-foreground);
+  text-align: left;
+  background: none;
+  border: var(--frame) solid var(--color-border);
+  border-radius: 12px;
+}
+.aw-provider:active { border-color: var(--color-accent); }
+.aw-preview { height: 96px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--color-surface); overflow: hidden; }
+.aw-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.aw-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aw-desc { font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* The Agents view (agents.tsx): home's widget, a line per agent, and its screen over home. */
+.ag-panel { height: 100%; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; font-size: var(--text-small); }
+.ag-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; white-space: nowrap; }
+.ag-head > :first-child { color: var(--color-foreground); font-weight: bold; }
+.ag-line, .ag-node {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  color: var(--color-foreground);
+  font: inherit;
+  text-align: start;
+  white-space: nowrap;
+}
+.ag-mark { flex: none; width: 1em; text-align: center; color: var(--color-muted); }
+.working > .ag-mark, .ag-mark.working { color: var(--color-accent); animation: icon-wait 0.9s ease-in-out infinite alternate; }
+.needs_you > .ag-mark, .ag-mark.needs_you, .blocked > .ag-mark, .ag-mark.blocked { color: var(--color-red); font-weight: bold; }
+.ag-who { flex: none; }
+.ag-host { flex: none; }
+.ag-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ag-ago { flex: none; }
+.ag-more { padding-top: 2px; }
+.ag-screen {
+  position: fixed;
+  z-index: 15;
+  inset: 0;
+  padding: var(--inset-top, 0px) var(--edge) var(--inset-bottom, 0px);
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ag-top { display: flex; align-items: center; gap: 6px; }
+.ag-top .ai-title { flex: 1; }
+.ag-live { font-size: var(--text-small); color: var(--color-muted); }
+.ag-live.on { color: var(--color-accent); }
+.ag-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 16px;
+}
+.ag-tree { padding: 6px 4px; display: flex; flex-direction: column; font-size: var(--text-small); }
+.ag-node { padding-top: 5px; padding-bottom: 5px; padding-right: 8px; border-radius: var(--radius); }
+.ag-node.picked { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.ag-node.gone { color: var(--color-muted); }
+.ag-step { flex: none; max-width: 35%; overflow: hidden; text-overflow: ellipsis; }
+.ag-detail { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: var(--text-small); line-height: 1.4; }
+.ag-detail-head { color: var(--color-foreground); font-weight: bold; }
+.ag-detail-head .muted { font-weight: normal; }
+.ag-tasks, .ag-tools { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.ag-task.done { color: var(--color-muted); }
+.ag-task.in_progress { color: var(--color-accent); }
+.ag-tool.fail { color: var(--color-red); }
+.ag-report { overflow-wrap: anywhere; }
+.ag-comms { padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--text-small); line-height: 1.4; }
+.ag-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-body { color: var(--color-muted); }
+.ag-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+.ag-say { flex: 1; min-width: 0; }
+.ag-say input, .ag-ask input {
+  width: 100%;
+  font: var(--text-small) var(--font);
+  color: var(--color-foreground);
+  background: none;
+  border: var(--frame) solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+}
+.ag-act { flex: none; font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 6px 12px; }
+.ag-act.danger { color: var(--color-red); }
+.ag-act:disabled { opacity: 0.4; }
+.ag-ask { padding: 10px 12px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 6px; font-size: var(--text-small); }
+.ag-ask-what { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-foreground); }
+.ag-ask-do { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* A PowOS app's widget (ui/island.tsx): the module draws itself inside the tile. */
+.island-face {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}

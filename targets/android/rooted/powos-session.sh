@@ -33,6 +33,14 @@ for d in widgets style; do
   m grep -q " $R/home/powos/.config/omalauncher/$d " /proc/mounts ||
     m mount --bind "${RUN%/run}/$d" "$R/home/powos/.config/omalauncher/$d"
 done
+# PowOS apps' installed bundles (`powos app install`: ~/.local/share/powos/apps/<id>/<version>/, a `current` link) are
+# the app's files/apps, which the shell serves (https://shell.powos/_app/<id>/) and watches for UI hot reload.
+F=${RUN%/run}
+U=$(stat -c %u "$F")
+A=$R/home/powos/.local/share/powos/apps
+m mkdir -p "$A" "$F/apps"
+m chown "$U:$U" "$R/home/powos/.local" "$R/home/powos/.local/share" "$R/home/powos/.local/share/powos" "$A" "$F/apps"
+m grep -q " $A " /proc/mounts || m mount --bind "$F/apps" "$A"
 
 # The display socket as PowOS sees it: "@name" is in the abstract namespace (the app's SessionService.DISPLAY_SOCKET),
 # shared with the app as is; a socket file in the run dir is at /run/powos-app.

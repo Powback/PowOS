@@ -52,7 +52,7 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
-        <!-- PowOS: Android's home screen is one of two aliases - this one (the desktop) or .HomeLauncher (the
+        <!-- PowOS: Android's home screen is one of two aliases - this one (the desktop) or .HomeShell (the
              launcher, app module's manifest) - and HomeScreen enables exactly one: Home then opens it directly (no
              in-between activity showing the wallpaper). Settings > Home screen: auto = launcher on the cover screen,
              desktop on the inner one (switched on fold/unfold). -->

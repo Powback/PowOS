@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -108,13 +109,23 @@ class ShellWidgets(
         sent.remove(id)
     }
 
-    /** What the Compose launcher's FrameClock does: `time` advances while an animated widget is on screen. */
+    /**
+     * What the Compose launcher's FrameClock does: `time` advances while an animated widget is on screen. Only then:
+     * this ticked every frame for every widget on the page, animated or not and home shown or not - most of the
+     * launcher's idle CPU (~6% of a core with the screen off). A still one is looked at again each [STILL_MS] (its
+     * file saved again may animate); none while no home shows ([dev.omalauncher.widgets.WidgetEngine.visible]).
+     */
     private suspend fun clock(key: String) {
         val start = System.nanoTime()
         while (true) {
+            if (!engine.visible) snapshotFlow { engine.visible }.first { it }
             val inst = instance(key)
-            if (inst?.program?.animated == true) inst.time = (System.nanoTime() - start) / 1e9
-            delay(FRAME_MS)
+            if (inst?.program?.animated == true) {
+                inst.time = (System.nanoTime() - start) / 1e9
+                delay(FRAME_MS)
+            } else {
+                delay(STILL_MS)
+            }
         }
     }
 
@@ -155,5 +166,6 @@ class ShellWidgets(
 
     private companion object {
         const val FRAME_MS = 33L
+        const val STILL_MS = 1000L
     }
 }

@@ -64,10 +64,29 @@ class ShellBridge(
     private val home = ShellHome(runtime)
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
+    private val media = ShellMedia(context, runtime, scope, ::emit)
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
     private val speech = Speech(context.applicationContext)
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
-    private val quick: QuickSettings = QuickSettings(context) { main.post { emit("qs.changed", quick.state()) } }
+    private val quick: QuickSettings =
+        QuickSettings(context) { main.post { emit("qs.changed", quick.state()) } }.also {
+            // A tile opening its activity or dialog: the control center goes, as SystemUI's panel does.
+            it.collapse = { main.post { emit("qs.collapse", null) } }
+        }
+
+    /** Other apps' Android widgets on home (AppWidgets.kt): their frames and home's changes come to this page. */
+    private val appWidgets = AppWidgets.get(context)
+    private val appWidgetEvents: (String, Any?) -> Unit = { event, payload -> emit(event, payload) }
+
+    /** The home's own panels (the Agents widget), and this page's view of the agents (AgentsSpool). */
+    private val panels = ShellPanels.get(context)
+
+    /** Settings and the screens it opens (style, the stores, Linux, coding agents...): shell/ui/screens.tsx. */
+    val screens = ShellScreens(context, activity, runtime, scope, ::emit)
+    private val agentsView = dev.omalauncher.AgentsSpool.Viewer(::emit)
+
+    /** Remote input (RemoteInput.kt): the phone as a computer's keyboard and mouse, "remote.*" calls. */
+    private val remote = RemoteInput.Client(context, activity, ::emit)
 
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
@@ -126,7 +145,18 @@ class ShellBridge(
         scope.launch { snapshotFlow { home.fingerprint() }.drop(1).collect { emit("home.changed", null) } }
         // PowOS AI's conversation (shared with its own app): every item and the busy flag, as they stream in.
         PowosAiChat.load(context.applicationContext)
+        appWidgets.listen(appWidgetEvents)
         scope.launch { snapshotFlow { aiChat().toString() }.drop(1).collect { emit("ai.changed", JSONObject(it)) } }
+        // Something that needs Linux was asked for without it (a terminal, a Linux widget): home offers to install it.
+        if (activity is ShellActivity) {
+            scope.launch {
+                snapshotFlow { runtime.linuxWanted }.collect { wanted ->
+                    if (!wanted) return@collect
+                    runtime.linuxWanted = false
+                    openScreen(ShellScreens.LINUX)
+                }
+            }
+        }
     }
 
     @JavascriptInterface
@@ -172,6 +202,11 @@ class ShellBridge(
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))
+            "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
+            "qs.listening" -> quick.listening(a.getBoolean(0))
+            "media.state" -> media.state()
+            "media.control" -> media.control(a.getString(0))
+            "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })
             "shade.closed" -> shade?.closed()
             "tasks.list" -> tasks()
             "tasks.open" -> dev.omalauncher.system.Tasks.open(context, a.getInt(0)).also { if (it) switcher?.close() }
@@ -191,10 +226,20 @@ class ShellBridge(
             "theme.get" -> theme()
             "theme.list" -> themeList()
             "theme.pick" -> pickTheme(a.getString(0))
-            "screens.open" -> ShellScreensActivity.open(context, a.getString(0))
+            "screens.watch" -> screens.watch(a.getString(0))
+            "screens.unwatch" -> screens.unwatch(a.getString(0))
+            "screens.act" -> screens.act(a.getString(0), a.getString(1), a.opt(2)?.takeIf { it != JSONObject.NULL })
             "agents.default" -> runtime.agents.default?.name
             "agents.newWidget" -> withAgent { newWidgetCommand(it.bin) to "New widget" }
             "agents.newApp" -> withAgent { newAppCommand(it.bin) to "New app" }
+            // The Agents view (AgentsSpool): its state while this page is subscribed, one agent's events, the notification's Open.
+            "agents.snapshot" -> dev.omalauncher.AgentsSpool.subscribe(agentsView)
+            "agents.unsubscribe" -> dev.omalauncher.AgentsSpool.unsubscribe(agentsView)
+            "agents.events" -> dev.omalauncher.AgentsSpool.watchEvents(agentsView, a.optString(0).takeIf { it.isNotEmpty() && !a.isNull(0) })
+            "agents.takeOpen" -> dev.omalauncher.AgentsSpool.takeOpen()
+            "agents.answer" -> dev.omalauncher.AgentsSpool.answer(a.getString(0), a.getString(1), a.optString(2).takeIf { it.isNotEmpty() && !a.isNull(2) })
+            "agents.message" -> dev.omalauncher.AgentsSpool.message(a.getString(0), a.getString(1))
+            "agents.interrupt" -> dev.omalauncher.AgentsSpool.interrupt(a.getString(0))
             "speech.start" -> listen(a.optBoolean(0))
             "speech.stop" -> speech.stop()
             "speech.cancel" -> speech.cancel()
@@ -208,12 +253,20 @@ class ShellBridge(
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
             "notifications.clearAll" -> runtime.widgets.notifications.clearAll()
             "notifications.access" -> runtime.widgets.notifications.askAccess()
-            "home.get" -> home.snapshot()
-            "home.place" -> home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
+            // Android widgets are home items too, kept by AppWidgets ("aw:" keys).
+            "home.get" -> panels.merge(appWidgets.merge(home.snapshot()))
+            "home.place" -> if (panels.owns(a.getString(0))) panels.place(a.getString(0), a.getJSONObject(1), a.getInt(2)).also { emit("home.changed", null) } else if (appWidgets.owns(a.getString(0))) appWidgets.place(a.getString(0), a.getJSONObject(1), a.getInt(2)) else home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
             "home.add" -> home.add(a.getString(0), a.getInt(1), a.optJSONObject(2))
-            "home.remove" -> home.remove(a.getString(0))
+            "home.remove" -> if (panels.owns(a.getString(0))) panels.remove(a.getString(0)).also { emit("home.changed", null) } else if (appWidgets.owns(a.getString(0))) appWidgets.remove(a.getString(0)) else home.remove(a.getString(0))
+            "home.addPanel" -> panels.add(a.getString(0), a.getInt(1), a.getJSONObject(2)).also { emit("home.changed", null) }
             "home.group" -> home.group(a.getString(0), a.getString(1))
             "home.arrange" -> home.arrange(a.getInt(0), a.getInt(1))
+            "appwidgets.providers" -> appWidgets.providers()
+            "appwidgets.add" -> appWidgets.add(a.getString(0), a.getInt(1), a.getJSONObject(2), a.getDouble(3), a.getDouble(4))
+            "appwidgets.watch" -> appWidgets.watch(appWidgetEvents, a.getInt(0), a.getDouble(1), a.getDouble(2))
+            "appwidgets.unwatch" -> appWidgets.unwatch(appWidgetEvents, a.getInt(0))
+            "appwidgets.touch" -> appWidgets.touch(a.getInt(0), a.getString(1), a.getDouble(2), a.getDouble(3), a.getDouble(4), a.getDouble(5))
+            "appwidgets.configure" -> appWidgets.reconfigure(a.getInt(0))
             "widgets.watch" -> widgets.watch(a.getString(0), a.optBoolean(1))
             "widgets.unwatch" -> widgets.unwatch(a.getString(0), a.optBoolean(1))
             "widgets.fire" ->
@@ -237,7 +290,7 @@ class ShellBridge(
             "term.style" -> terminalStyle(if (a.isNull(0)) null else a.getDouble(0))
             "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
             "clipboard.write" -> clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
-            else -> throw IllegalArgumentException("no such call: $method")
+            else -> if (method.startsWith("remote.")) remote.call(method.removePrefix("remote."), a) else throw IllegalArgumentException("no such call: $method")
         }
 
     private fun apps(): JSONArray {
@@ -276,8 +329,9 @@ class ShellBridge(
     @SuppressLint("WrongConstant")
     private fun notifications(open: Boolean): Boolean =
         runCatching {
-            // PowOS's shade in SystemUI's place: SystemUI's own panel is lent back to it for this (its quick settings).
-            if (open) dev.omalauncher.system.ShadeHost.current?.lend()
+            // PowOS's shade in SystemUI's place: SystemUI's own panel is lent back to it for this - its control center.
+            val shade = dev.omalauncher.system.ShadeHost.current
+            if (open && shade != null) return shade.openSystemPanel(settings = true).let { true }
             val bar = context.getSystemService("statusbar")
             bar.javaClass.getMethod(if (open) "expandNotificationsPanel" else "collapsePanels").invoke(bar)
         }.onFailure { Log.w(TAG, "can't ${if (open) "open" else "close"} the notification shade", it) }.isSuccess
@@ -388,11 +442,14 @@ class ShellBridge(
     private fun withAgent(task: (Agent) -> Pair<String, String>): String {
         val agent = runtime.agents.default
         return when {
-            !(runtime.bootstrap.isInstalled || runtime.powosSession) -> "linux".also { ShellScreensActivity.open(context, ShellScreensActivity.LINUX) }
-            agent == null -> "agents".also { ShellScreensActivity.open(context, ShellScreensActivity.AGENTS) }
+            !(runtime.bootstrap.isInstalled || runtime.powosSession) -> "linux".also { openScreen(ShellScreens.LINUX) }
+            agent == null -> "agents".also { openScreen(ShellScreens.AGENTS_SCREEN) }
             else -> "started".also { task(agent).let { (command, title) -> runtime.terminal(command, title, agent) } }
         }
     }
+
+    /** Opens one of the page's screens (shell/ui/screens.tsx), as if it had been tapped there. */
+    private fun openScreen(name: String) = emit("screens.open", JSONObject().put("name", name))
 
     /**
      * Starts listening ([hold]: across pauses, until speech.stop); the whole text goes to the page as "speech.done".
@@ -559,7 +616,12 @@ class ShellBridge(
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
     fun close() {
+        screens.close()
+        appWidgets.unlisten(appWidgetEvents)
+        remote.close()
+        dev.omalauncher.AgentsSpool.forget(agentsView)
         quick.close()
+        media.close()
         speech.cancel()
         applyObserver.dispose()
         terminals.closeAll()
