@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { byKey, carry, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
 import { powos } from "../bridge.ts";
-import { pageDrag } from "./gesture.ts";
+import { pagesDragging } from "./gesture.ts";
 import { OwlWidget } from "./owl.tsx";
 import type { Cell, HomeItem } from "../types.ts";
 
@@ -339,7 +339,6 @@ export function Pages() {
   if (page.value >= list.length) page.value = list.length - 1;
   // Widgets on the page on screen (and beside it) run their sources; the rest pause.
   useEffect(() => void powos.widgets.page(list[page.value] ?? 1), [page.value, list.join()]);
-  const dx = pageDrag.value;
   return (
     <div
       class="pages"
@@ -350,7 +349,10 @@ export function Pages() {
         if (t.classList.contains("page") || t.classList.contains("page-track")) selected.value = null;
       }}
     >
-      <div class={`page-track ${dx != null ? "dragging" : ""}`} style={{ transform: `translateX(calc(${-page.value * 100}% + ${dx ?? 0}px))` }}>
+      {/* Its transform follows the finger and the page from gesture.ts, not through a render. */}
+      <div class={`page-track ${pagesDragging.value ? "dragging" : ""}`} ref={(el) => {
+          if (el) el.style.transform = `translateX(${-page.value * 100}%)`;
+        }}>
         {list.map((n) => (
           <div class="page" key={n}>
             {itemsOn(n).map((item) => (

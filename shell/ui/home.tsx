@@ -9,7 +9,7 @@
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
-import { drawerDrag, drawerShown, homeGestures } from "./gesture.ts";
+import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gesture.ts";
 import { Pages } from "./grid.tsx";
 import { RECENT, byKey, dock, recent } from "../state.ts";
 
@@ -35,7 +35,7 @@ function Dock() {
   const pinned = dock.value.map((k) => byKey.value.get(k)).filter((a) => a != null);
   if (!pinned.length) return null;
   return (
-    <div class="dock tile">
+    <div class="dock tile" data-p ref={followOpenness}>
       {pinned.map((app) => (
         <AppCell key={app.key} app={app} labels={false} />
       ))}
@@ -44,17 +44,15 @@ function Dock() {
 }
 
 export function Home() {
-  const p = drawerShown();
-  const dragging = drawerDrag.value != null;
+  // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).
   return (
-    // --p on home itself: the panel and the dock under the bar both follow it.
-    <div class={`home ${dragging ? "dragging" : ""} ${p > 0 ? "open" : ""}`} style={{ "--p": p }} {...homeGestures()}>
+    <div class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""}`} {...homeGestures()}>
       <div class="stage">
-        <div class="home-content">
+        <div class="home-content" data-p ref={followOpenness}>
           <Pages />
         </div>
-        <div class="launcher-frame tile" />
-        <div class="launcher">
+        <div class="launcher-frame tile" data-p ref={followOpenness} />
+        <div class="launcher" data-p ref={followOpenness}>
           <div class="launcher-inner">
             <RecentRow />
             <div class="drawer-clip">

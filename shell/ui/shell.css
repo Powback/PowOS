@@ -1,8 +1,6 @@
 /* Home, the bar, the drawer, the dock: laid out from theme.css's tokens only. */
 
 .home {
-  --p: 0;
-  transition: --p 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
   position: fixed;
   inset: 0;
   display: flex;
@@ -25,8 +23,16 @@
   inherits: true;
   initial-value: 0;
 }
-/* A finger is moving the panel: it, and everything following it, track the finger exactly. */
-.home.dragging { transition: none; }
+/*
+ * What follows the panel's openness (data-p): --p is written on each by gesture.ts and transitions between settled
+ * values; while a finger moves the panel, it tracks the finger exactly. Only clips, transforms and opacity read it -
+ * nothing that lays anything out again.
+ */
+[data-p] {
+  --p: 0;
+  transition: --p 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.home.dragging [data-p] { transition: none; }
 
 .stage {
   position: relative;
@@ -77,23 +83,26 @@
 .home.open .launcher .drawer { pointer-events: auto; }
 
 /*
- * The recent row heads the panel; as the launcher opens it closes towards the top, like a shutter: the icons, kept
- * at full size and sitting on the row's bottom, disappear into its top edge as the list comes up under it.
+ * The recent row heads the panel; as the launcher opens it closes towards the top: it moves up by its openness and
+ * is clipped by as much from its top, so the icons (full size) disappear into its top edge - with transforms and a
+ * clip only. The list under it rides up by the same amount.
  */
 .strip {
   flex: none;
-  height: calc(var(--strip-height) * (1 - var(--p)));
+  height: var(--strip-height);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 4px;
   padding: 0 4px;
   overflow: hidden;
+  transform: translateY(calc(var(--p) * -1 * var(--strip-height)));
+  clip-path: inset(calc(var(--p) * 100%) 0 0 0);
 }
 /* The apps share the row's width: all of them fit, at up to the strip's icon size. */
-.strip .app { flex: 1 1 0; min-width: 0; height: var(--strip-height); justify-content: center; padding: 0; }
+.strip .app { flex: 1 1 0; min-width: 0; padding: 0; }
 .strip .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 /* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
-.dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
+.dock .app { flex: 1 1 0; min-width: 0; padding: 0; }
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
 .bar {
@@ -120,22 +129,19 @@
 .bar input::placeholder { color: var(--color-muted); }
 
 /*
- * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it closes like a shutter - its bottom edge
- * rises to the bar, cutting the icons off; they keep their size and place.
+ * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it closes like a shutter: a clip whose
+ * bottom edge rises to the bar, cutting the icons off at full size (a clip, so nothing is laid out again).
  */
 .dock {
-  --dock-open: calc(1 - var(--p));
   position: relative;
   z-index: 3;
-  height: calc(var(--strip-height) * var(--dock-open));
-  margin: 0 var(--edge) calc(var(--edge) * var(--dock-open));
-  overflow: hidden;
+  height: var(--strip-height);
+  margin: 0 var(--edge) var(--edge);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 4px;
   padding: 0 4px;
-  /* Its frame goes at the very end, so a closed dock leaves no line under the bar. */
-  border-width: calc(var(--frame) * min(1, var(--dock-open) * 8));
+  clip-path: inset(0 0 calc(var(--p) * 100%) 0 round var(--radius));
 }
 
 
@@ -145,8 +151,12 @@
   min-height: 0;
   display: flex;
   overflow: hidden;
+  /* Taller by the recent row, and riding up by as much as it closes: open, it reaches the panel's foot. */
+  margin-bottom: calc(-1 * var(--strip-height));
+  transform: translateY(calc(var(--p) * -1 * var(--strip-height)));
 }
 .drawer {
+  opacity: min(1, calc(var(--p) * 1.6));
   flex: 1;
   min-height: 0;
   display: grid;
@@ -171,6 +181,17 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--cell), 1fr));
 }
+/* Search results sit at the foot of the list, by the bar, and fill upward: the best match nearest the bar. */
+.drawer-list.results {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.drawer-list.results .grid {
+  display: flex;
+  flex-wrap: wrap-reverse;
+}
+.drawer-list.results .app { flex: 0 0 25%; }
 
 .letter-bar {
   position: relative;

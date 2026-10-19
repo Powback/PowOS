@@ -6,7 +6,7 @@
 import { useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { AppCell } from "./apps.tsx";
-import { drawerShown } from "./gesture.ts";
+import { drawerOpen } from "./gesture.ts";
 import { apps, query } from "../state.ts";
 import type { App } from "../types.ts";
 
@@ -90,12 +90,13 @@ export function Drawer() {
     if (el) list.current!.scrollTop = el.offsetTop - list.current!.offsetTop;
   };
   const searching = query.value.trim() !== "";
-  const p = drawerShown();
+  const open = drawerOpen.value;
   return (
-    // The launcher panel's upper part (home.tsx): it comes in as the recent bar grows into the panel.
-    <div class={`drawer ${p > 0 ? "shown" : ""}`} style={{ opacity: Math.min(1, p * 1.6) }} aria-hidden={p === 0}>
-      <div class="drawer-list" ref={list}>
+    // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
+    <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
+      <div class={`drawer-list ${searching ? "results" : ""}`} ref={list}>
         {searching ? (
+          // By the bar, bottom-up: the best match nearest to it (shell.css .results).
           <div class="grid">
             {matches.value.map((app) => (
               <AppCell key={app.key} app={app} draggable />
