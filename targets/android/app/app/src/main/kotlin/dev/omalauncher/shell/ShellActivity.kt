@@ -30,6 +30,8 @@ class ShellActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Each home made, and why (the manager saw home's task change: an app update, a recreation, a second home).
+        Log.i(TAG, "home created: task $taskId, restored ${savedInstanceState != null}, intent ${intent.component?.shortClassName} ${intent.categories} ${intent.extras?.keySet()}, from ${referrer}")
         if (toHome()) return
         dropOtherHomes()
         // The launcher's runtime (themes, widgets, the PowOS session); started once.
@@ -218,6 +220,7 @@ class ShellActivity : Activity() {
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "home destroyed: task $taskId, finishing $isFinishing, config change $isChangingConfigurations")
         scope.cancel()
         // Not there when it went on to the home screen's instance (toHome).
         if (::host.isInitialized) {

@@ -390,9 +390,9 @@ class QuickSettings(
         /** A command in a su shell: its output, null if it failed. */
         private fun rootOut(cmd: String): String? =
             runCatching {
-                val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
-                val text = p.inputStream.bufferedReader().readText()
-                if (p.waitFor() == 0) text else null.also { Log.w(TAG, "$cmd: $text") }
+                // Through the app's one root shell: no new su (and its Magisk toast) per tile read.
+                val r = andro.marchy.RootShell.run(cmd)
+                if (r.code == 0) r.output else null.also { Log.w(TAG, "$cmd: ${r.output}") }
             }.getOrNull()
     }
 }

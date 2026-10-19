@@ -60,8 +60,6 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             dm.unregisterDisplayListener(this);
         if (thread != null)
             thread.quitSafely();
-        if (shell != null)
-            shell.destroy();
     }
 
     private Boolean isBig() {
@@ -76,14 +74,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
         return null; // in between (tent, half open) or unknown: no change
     }
 
-    // One root shell for the whole session: a new `su` per command took long enough that, on unfold, the cover
+    // One root shell (RootShell, the app's): a new `su` per command took long enough that, on unfold, the cover
     // screen's app showed on the inner screen before the desktop came up.
-    private Process shell;
-    private java.io.BufferedWriter shellIn;
-    private java.io.BufferedReader shellOut;
-    private static final String END = "__powos_fold_end__";
-
-    /** Runs a command as root and returns its output (on this watcher's thread only). */
     /**
      * The enabled home alias as Android's default home: switching aliases drops the remembered choice, and Home
      * (or a fold) then asked "open with" PowOS or OnePlus's launcher every time, "always" or not.
@@ -98,24 +90,9 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
 
     private String preferredHome;
 
+    /** [cmd] as root, its output: through the app's one root shell, shared with everything else (RootShell). */
     private String root(String cmd) {
-        try {
-            if (shell == null || !shell.isAlive()) {
-                shell = new ProcessBuilder("su").redirectErrorStream(true).start();
-                shellIn = new java.io.BufferedWriter(new java.io.OutputStreamWriter(shell.getOutputStream()));
-                shellOut = new java.io.BufferedReader(new java.io.InputStreamReader(shell.getInputStream()));
-            }
-            shellIn.write(cmd + "; echo " + END + "\n");
-            shellIn.flush();
-            StringBuilder out = new StringBuilder();
-            for (String line; (line = shellOut.readLine()) != null && !line.equals(END); )
-                out.append(line).append('\n');
-            return out.toString();
-        } catch (java.io.IOException e) {
-            Log.w(TAG, "root shell: " + e);
-            shell = null;
-            return "";
-        }
+        return RootShell.run(cmd).output + "\n";
     }
 
     @Override

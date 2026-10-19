@@ -121,9 +121,8 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
 
     static void su(String cmd) {
         try {
-            Process proc = new ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start();
-            proc.getInputStream().readAllBytes(); // drained, so a chatty command can never block on a full pipe
-            Log.i(TAG, "su " + cmd + " -> " + proc.waitFor());
+            // The app's one root shell: no new su (and Magisk toast) per command.
+            Log.i(TAG, "su " + cmd + " -> " + RootShell.run(cmd).code);
         } catch (Exception e) {
             Log.w(TAG, "su " + cmd + ": " + e);
         }

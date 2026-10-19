@@ -240,9 +240,9 @@ object RemoteInput {
 
     /** Runs [command] as root: its output (stderr too) and exit code. */
     private fun su(command: String): Pair<Int, String> {
-        val p = ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
-        val out = p.inputStream.bufferedReader().readText()
-        return p.waitFor() to out
+        // Through the app's one root shell (no su - and Magisk toast - per command).
+        val r = andro.marchy.RootShell.run(command)
+        return r.code to r.output
     }
 
     private fun usbUp() {

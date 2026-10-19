@@ -660,7 +660,7 @@ class Runtime(
         if (rooted) showDesktop()
         thread(name = "guest-launch", isDaemon = true) {
             val log: (String) -> Unit = { Log.i(TAG, "[${command.take(24)}] $it") }
-            val code = runCatching { if (rooted) RootedGuest.run("exec $command", log) else proot.run("exec $command", log) }.getOrElse { -1 }
+            val code = runCatching { if (rooted) RootedGuest.runOwn("exec $command", log) else proot.run("exec $command", log) }.getOrElse { -1 }
             Log.i(TAG, "exited $code: $command")
             onExit()
         }

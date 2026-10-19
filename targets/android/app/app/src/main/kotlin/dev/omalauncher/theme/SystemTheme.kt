@@ -101,8 +101,6 @@ object SystemTheme {
                 "\"android.theme.customization.color_source\":\"preset\"," +
                 "\"_applied_timestamp\":${System.currentTimeMillis()}}"
         val cmd = "settings put secure theme_customization_overlay_packages '$json' && cmd uimode night ${if (p.isLight) "no" else "yes"}"
-        val process = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
-        process.inputStream.bufferedReader().forEachLine { Log.i(TAG, it) }
-        Log.i(TAG, "Android colors: exit ${process.waitFor()}")
+        Log.i(TAG, "Android colors: exit ${andro.marchy.RootShell.run(cmd) { Log.i(TAG, it) }}")
     }
 }
