@@ -1,59 +1,36 @@
 /**
- * The switcher (index.html?mode=switcher): Android's recents screen, PowOS's when it's the recents provider (the
- * native host is SwitcherActivity, the overview button brings it up). The recent tasks side by side, newest first, each
- * its app and its last frame: a tap switches to it, a swipe up removes it, "clear all" removes them all. A tap beside
- * the cards goes home; Back (and the overview button again, to the task before) goes back.
+ * A task's card in the switcher (recents.tsx, a layer of home): its app and its last frame. A tap opens it (from the
+ * card's frame, which the host grows the app out of); a swipe up removes it; sideways the row scrolls.
  */
-import { useEffect, useRef } from "preact/hooks";
-import { signal } from "@preact/signals";
-import { powos } from "../bridge.ts";
+import { useRef } from "preact/hooks";
 import type { RecentTask } from "../types.ts";
-
-const tasks = signal<RecentTask[]>([]);
-/** The task the switcher was opened over (null: home). */
-const from = signal<number | null>(null);
-
-const refresh = () => powos.tasks.list().then((t) => (tasks.value = t));
-
-/** The host's events, while the switcher is the page (app.tsx loads this module in every mode). */
-function listen(row: () => HTMLElement | null) {
-  const offs = [
-    powos.on("switcher.shown", (e: { from: number | null }) => {
-      from.value = e.from;
-      refresh();
-      // Each time it comes up, the newest card first in view.
-      row()?.scrollTo({ left: 0 });
-    }),
-    // The overview button again: the task before the one it was opened over (or the newest, from home), as Android's.
-    powos.on("switcher.toggle", () => {
-      const list = tasks.value;
-      const next = list[0]?.id === from.value ? list[1] : list[0];
-      if (next) open(next.id);
-      else powos.switcher.close();
-    }),
-    // Back: what was under it, the app or home.
-    powos.on("system.back", () => powos.switcher.close()),
-  ];
-  refresh();
-  return () => offs.forEach((off) => off());
-}
 
 /** Slid up this far (of its height), or flicked (px/ms), a card is removed. */
 const REMOVE = 0.3;
 const FLICK = 0.6;
 const SLOP = 10;
 
-function open(id: number) {
-  powos.tasks.open(id).then((ok) => void (ok || refresh()));
+export interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
-function remove(id: number) {
-  powos.tasks.remove(id).then(refresh);
-  tasks.value = tasks.value.filter((t) => t.id !== id);
-}
-
-function Card({ t }: { t: RecentTask }) {
+export function TaskCard({
+  t,
+  current,
+  onOpen,
+  onRemove,
+}: {
+  t: RecentTask;
+  /** The first card: where the window of the app the switcher was opened over lands (recents.tsx). */
+  current?: boolean;
+  onOpen: (id: number, from: Rect) => void;
+  onRemove: (id: number) => void;
+}) {
   const el = useRef<HTMLDivElement>(null);
+  const shot = useRef<HTMLImageElement>(null);
   const drag = useRef<{ x: number; y: number; t: number; dy: number; up: boolean | null } | null>(null);
   const settle = (dy: number) => {
     const card = el.current!;
@@ -64,7 +41,8 @@ function Card({ t }: { t: RecentTask }) {
   return (
     <div
       ref={el}
-      class="task"
+      class={`task ${current ? "current" : ""}`}
+      data-task={t.id}
       onPointerDown={(e) => {
         drag.current = { x: e.clientX, y: e.clientY, t: performance.now(), dy: 0, up: null };
         el.current!.style.transition = "none";
@@ -93,10 +71,11 @@ function Card({ t }: { t: RecentTask }) {
           const v = d.dy / Math.max(1, performance.now() - d.t);
           if (-d.dy > h * REMOVE || v < -FLICK) {
             settle(-h);
-            setTimeout(() => remove(t.id), 180);
+            el.current!.addEventListener("transitionend", () => onRemove(t.id), { once: true });
           } else settle(0);
         } else if (d.up == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) {
-          open(t.id);
+          const r = shot.current!.getBoundingClientRect();
+          onOpen(t.id, { left: r.left, top: r.top, width: r.width, height: r.height });
         }
       }}
       onPointerCancel={() => {
@@ -108,35 +87,17 @@ function Card({ t }: { t: RecentTask }) {
         {t.icon ? <img class="task-icon" src={t.icon} alt="" /> : <span class="task-icon blank" />}
         <span class="task-label">{t.label}</span>
       </div>
-      <img class="task-shot" src={t.snapshot} alt="" draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")} />
-    </div>
-  );
-}
-
-export function Switcher() {
-  const row = useRef<HTMLDivElement>(null);
-  const list = tasks.value;
-  useEffect(() => listen(() => row.current), []);
-  return (
-    <div
-      class="switcher"
-      style={{ "--screen-ratio": `${innerWidth} / ${innerHeight}` }}
-      onClick={(e) => e.target === e.currentTarget && powos.switcher.home()}
-    >
-      {list.length ? (
-        <>
-          <div class="task-row" ref={row} onClick={(e) => e.target === e.currentTarget && powos.switcher.home()}>
-            {list.map((t) => (
-              <Card key={t.id} t={t} />
-            ))}
-          </div>
-          <button type="button" class="task-clear" onClick={() => list.forEach((t) => remove(t.id))}>
-            clear all
-          </button>
-        </>
-      ) : (
-        <div class="task-empty muted">no recent apps</div>
-      )}
+      <img
+        ref={shot}
+        class="task-shot"
+        src={t.snapshot}
+        alt=""
+        draggable={false}
+        // The first card's at once (a window lands on it); the rest as they scroll into view.
+        loading={current ? "eager" : "lazy"}
+        onLoad={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "")}
+        onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
+      />
     </div>
   );
 }

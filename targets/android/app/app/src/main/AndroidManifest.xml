@@ -178,8 +178,9 @@
         </service>
 
         <!-- PowOS as the recents provider (the system module's recents overlay names this package): SystemUI binds the
-             service (only it holds STATUS_BAR_SERVICE) and hands it the overview button; the activity is the switcher,
-             the system's recents screen (config_recentsComponentName). -->
+             service (only it holds STATUS_BAR_SERVICE) and hands it the overview button. The activity is the one
+             config_recentsComponentName names: the switcher is a layer of home's page, so it only brings home up with
+             it shown - unless the desktop is home, then it shows the layer itself (system/Switcher.kt). -->
         <service
             android:name="dev.omalauncher.system.PowosRecentsService"
             android:exported="true"

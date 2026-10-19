@@ -7,6 +7,7 @@ import { powos } from "./bridge.ts";
 import { closeRemote, remoteOpen } from "./remote.ts";
 import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
+import { recentsBack, recentsHome } from "./ui/recents.tsx";
 import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
 export const apps = signal<App[]>([]);
@@ -155,6 +156,8 @@ export function closeDrawer() {
 
 /** Back: whatever is on top closes first - a widget's screen, a menu, a folder, a tile's edit, edit mode, the drawer. False when nothing was open. */
 export function back(): boolean {
+  // The switcher up: Back goes back to the app it was opened over (or closes it, over home).
+  if (recentsBack()) return true;
   // A session open, or still shrinking back into its card: Back is its (a second Back meanwhile - the keyboard's and
   // the terminal's - mustn't go on to leave PowOS AI's page).
   if (sessionView.value) closeSession();
@@ -177,6 +180,7 @@ export function back(): boolean {
 
 /** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does (a full-screen terminal only closes). */
 export function goHome() {
+  recentsHome();
   // A terminal open full screen (an at work session, a widget's screen): Home puts it away and stays where it was
   // opened from - PowOS AI's page, the widget's page - as swiping up out of an app goes back to the screen it came from.
   if (sessionView.value || screen.value.key) {

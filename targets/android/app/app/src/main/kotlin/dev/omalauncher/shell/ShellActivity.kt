@@ -43,6 +43,8 @@ class ShellActivity : Activity() {
         window.setDecorFitsSystemWindows(false)
         host = ShellHost(this, this, runtime)
         setContentView(host.web)
+        // The switcher is a layer of this page: the gestures and the overview button reach it here.
+        dev.omalauncher.system.Switcher.attach(host.bridge) { host.highRefresh?.boost(it) }
         // Opened from the agents' notification: the page opens the Agents screen.
         dev.omalauncher.AgentsSpool.opened(intent)
         handleDebugExec(intent)
@@ -161,7 +163,9 @@ class ShellActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // Home pressed - not a notification's or the app entry's way here (toHome), which carries what it opens.
-        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED)) host.bridge.emit("system.home", null)
+        // Nor the recents transition's launch of home or the switcher's (Switcher.EXTRA_RECENTS): its layer is coming up.
+        val recents = intent.getBooleanExtra(dev.omalauncher.system.Switcher.EXTRA_RECENTS, false)
+        if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents) host.bridge.emit("system.home", null)
         dev.omalauncher.AgentsSpool.opened(intent)
         handleDebugExec(intent)
     }
@@ -175,12 +179,15 @@ class ShellActivity : Activity() {
     // A home screen showing: widgets' sources run (they pause while no home is visible), the guest's on-screen helpers.
     override fun onStart() {
         super.onStart()
+        if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStarted(host.bridge)
         runtime.widgets.homeStarted()
         runtime.screenStarted()
     }
 
     override fun onStop() {
         super.onStop()
+        // Out of sight: the switcher layer goes (an app was opened from it, or came up over it).
+        if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStopped(host.bridge)
         // An app was just opened from home: it moves to the front of the recent apps, out of sight.
         runtime.usage.settle()
         runtime.widgets.homeStopped()
@@ -210,7 +217,10 @@ class ShellActivity : Activity() {
     override fun onDestroy() {
         scope.cancel()
         // Not there when it went on to the home screen's instance (toHome).
-        if (::host.isInitialized) host.destroy()
+        if (::host.isInitialized) {
+            dev.omalauncher.system.Switcher.detach(host.bridge)
+            host.destroy()
+        }
         super.onDestroy()
     }
 

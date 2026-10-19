@@ -1,61 +1,53 @@
 package dev.omalauncher.shell
 
 import android.app.Activity
-import android.content.Intent
 import android.os.Bundle
 import android.view.ViewGroup
 import dev.omalauncher.system.Switcher
-import dev.omalauncher.system.SwitcherSlot
+import dev.omalauncher.system.Tasks
 
 /**
- * The switcher's window: Android's recents activity when PowOS is the recents provider (the system module's overlay
- * sets config_recentsComponentName to it, so the system treats it as the recents screen). A thin host: it shows the
- * warm switcher page ([Switcher]) over the wallpaper; the page lists the tasks, switches and removes them.
+ * The system's recents activity (the system module's overlay names it in config_recentsComponentName: the recents
+ * role's package and uid come from it). The switcher is a layer of a shell page (shell/ui/recents.tsx, [Switcher]):
  *
- * Gone once it's not on screen (an app switched to, Home): the page stays warm, the next press shows it again.
+ * - PowOS's web home is the home app: the layer is home's page; this only brings home up with it shown, and is gone.
+ * - The desktop is home (no web page there): this shows the layer itself, on the warm recents page - the window a
+ *   swipe up's recents transition launches behind the app, as Quickstep's fallback recents activity. Gone once it's
+ *   out of sight (an app opened, home brought up).
  */
 class SwitcherActivity : Activity() {
     private var host: ShellHost? = null
-    private var slot: SwitcherSlot? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Switcher.homeIsShell(this)) {
+            // The app under this activity (it never drew) is still the visible one.
+            Switcher.show(this, Tasks.visible(this))
+            finish()
+            return
+        }
         window.setDecorFitsSystemWindows(false)
         val h = Switcher.page(this)
         (h.web.parent as? ViewGroup)?.removeView(h.web)
-        val mine =
-            object : SwitcherSlot {
-                override fun close() = finish()
-
-                override fun home() {
-                    startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    finish()
-                }
-            }
-        h.bridge.switcher = mine
-        slot = mine
-        host = h
         setContentView(h.web)
+        val refresh = HighRefresh(window, h.web)
+        Switcher.attachHost { refresh.boost(it) }
+        host = h
     }
 
-    override fun onResume() {
-        super.onResume()
-        Switcher.showing = this
-        host?.bridge?.emit("switcher.shown", Switcher.shownEvent())
-    }
-
-    override fun onPause() {
-        super.onPause()
-        if (Switcher.showing === this) Switcher.showing = null
+    override fun onStart() {
+        super.onStart()
+        host?.let { Switcher.homeStarted(it.bridge) }
     }
 
     override fun onStop() {
         super.onStop()
-        // Not a screen to come back to: the next overview press opens it afresh, with the tasks as they are then.
-        if (!isChangingConfigurations) finish()
+        host?.let { Switcher.homeStopped(it.bridge) }
+        // Not a screen to come back to: the next swipe or overview press brings it up afresh.
+        if (host != null && !isChangingConfigurations) finish()
     }
 
-    /** Back goes to the page (it goes back to the app the switcher was opened over, or home). */
+    /** Back goes to the page (back to the app the switcher was opened over, or home). */
     @Deprecated("Back reaches the page instead", ReplaceWith(""))
     override fun onBackPressed() {
         host?.bridge?.emit("system.back", null)
@@ -63,10 +55,7 @@ class SwitcherActivity : Activity() {
 
     override fun onDestroy() {
         // The page stays warm for the next time; only this window lets go of it (unless a newer one has it already).
-        host?.let { h ->
-            (h.web.parent as? ViewGroup)?.takeIf { it.rootView === window.decorView }?.removeView(h.web)
-            if (h.bridge.switcher === slot) h.bridge.switcher = null
-        }
+        host?.let { h -> (h.web.parent as? ViewGroup)?.takeIf { it.rootView === window.decorView }?.removeView(h.web) }
         host = null
         super.onDestroy()
     }

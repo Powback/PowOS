@@ -21,8 +21,9 @@ import dev.omalauncher.system.gesture.RecentsTransition
  * PowOS as the phone's recents provider (docs/NATIVE-SYSTEM-UI.md, "Switcher and gestures"): the service SystemUI
  * binds in the package config_recentsComponentName names (action QUICKSTEP_SERVICE, guarded by STATUS_BAR_SERVICE so
  * only SystemUI can), as it binds the stock launcher's TouchInteractionService. Through it SystemUI hands over the
- * overview button ([ILauncherProxy.onOverviewToggle]: PowOS's switcher, [Switcher]), its state and its ISystemUiProxy,
- * and while it's bound PowOS's shade replaces SystemUI's ([ShadeHost]) - all of it what the recents role grants.
+ * overview button ([ILauncherProxy.onOverviewToggle]: PowOS's switcher, a layer of home's page, [Switcher]), its
+ * state and its ISystemUiProxy, and while it's bound PowOS's shade replaces SystemUI's ([ShadeHost]) - all of it what
+ * the recents role grants.
  *
  * - Three-button navigation: home is PowOS as the home app, back stays SystemUI's, the overview button comes here.
  * - Gesture navigation: PowOS's gesture input ([GestureMonitor], an input monitor on the display) takes the swipes from
@@ -73,8 +74,8 @@ class PowosRecentsService : Service() {
                 Log.i(TAG, "SystemUI connected: ${params?.keySet()?.sorted()}")
                 main.post {
                     systemUi = sysui
-                    // The switcher's page warmed now, so the first overview press shows it at once.
-                    Switcher.page(this@PowosRecentsService)
+                    // The desktop home has no web page to carry the switcher: the recents activity's is warmed now.
+                    Switcher.prepare(this@PowosRecentsService)
                     if (shade == null) shade = ShadeHost(this@PowosRecentsService).takeIf { it.start() }
                     startGestures()
                     nav?.systemUi = sysui

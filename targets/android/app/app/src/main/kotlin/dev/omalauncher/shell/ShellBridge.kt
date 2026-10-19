@@ -97,9 +97,6 @@ class ShellBridge(
     /** Set by the shade host (its page is the shade): the window to put away once the panel is shut. */
     var shade: dev.omalauncher.system.ShadeSlot? = null
 
-    /** Set by the switcher's activity (its page is the switcher): leaving it. */
-    var switcher: dev.omalauncher.system.SwitcherSlot? = null
-
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     /**
@@ -209,10 +206,13 @@ class ShellBridge(
             "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })
             "shade.closed" -> shade?.closed()
             "tasks.list" -> tasks()
-            "tasks.open" -> dev.omalauncher.system.Tasks.open(context, a.getInt(0)).also { if (it) switcher?.close() }
+            "tasks.open" -> openTask(a.getInt(0), a.optJSONObject(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(a.getInt(0))
-            "switcher.close" -> switcher?.close()
-            "switcher.home" -> switcher?.home()
+            // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
+            "recents.slot" -> a.optJSONObject(0)?.let { dev.omalauncher.system.Switcher.slot(this, screenRect(it), it.optDouble("radius", 0.0).toFloat() * density()) }
+            "recents.ready" -> dev.omalauncher.system.Switcher.ready(this)
+            "recents.closed" -> dev.omalauncher.system.Switcher.closed(context, this)
+            "recents.state" -> dev.omalauncher.system.Switcher.state()
             "assist.screen" -> assist?.screen()
             "assist.close" -> assist?.close()
             "assist.attach" -> assist?.attach(a.optString(0).takeIf { it.isNotEmpty() && it != "null" })
@@ -335,6 +335,41 @@ class ShellBridge(
             val bar = context.getSystemService("statusbar")
             bar.javaClass.getMethod(if (open) "expandNotificationsPanel" else "collapsePanels").invoke(bar)
         }.onFailure { Log.w(TAG, "can't ${if (open) "open" else "close"} the notification shade", it) }.isSuccess
+
+    /**
+     * Brings task [id] back - from its card at [from] (CSS px, the page's), growing out of it to full screen
+     * (ActivityOptions.makeScaleUpAnimation) when given.
+     */
+    private fun openTask(
+        id: Int,
+        from: JSONObject?,
+    ): Boolean {
+        val options =
+            from?.let {
+                val r = viewRect(it)
+                android.app.ActivityOptions.makeScaleUpAnimation(web, r.left, r.top, r.width(), r.height())
+            } ?: android.app.ActivityOptions.makeBasic()
+        return dev.omalauncher.system.Tasks.open(context, id, options)
+    }
+
+    private fun density() = context.resources.displayMetrics.density
+
+    /** A page rect { left, top, width, height } (CSS px) in the WebView's own px. */
+    private fun viewRect(o: JSONObject): android.graphics.Rect {
+        val d = density()
+        val l = (o.optDouble("left") * d).toInt()
+        val t = (o.optDouble("top") * d).toInt()
+        return android.graphics.Rect(l, t, l + (o.optDouble("width") * d).toInt(), t + (o.optDouble("height") * d).toInt())
+    }
+
+    /** A page rect (CSS px) on the screen (px). */
+    private fun screenRect(o: JSONObject): android.graphics.Rect {
+        val at = IntArray(2).also(web::getLocationOnScreen)
+        return viewRect(o).apply { offset(at[0], at[1]) }
+    }
+
+    /** The recent tasks, as the page lists them (the switcher's events carry them). */
+    fun recentTasks(): JSONArray = tasks()
 
     /**
      * The recent tasks (the switcher's): [{ id, label, key, icon, snapshot }] newest first - the app's drawer key and

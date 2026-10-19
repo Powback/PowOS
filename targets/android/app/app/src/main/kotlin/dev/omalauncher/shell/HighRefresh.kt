@@ -36,6 +36,15 @@ internal class HighRefresh(
         }
     }
 
+    /**
+     * The page animates without a finger on it (the switcher layer following a swipe up over an app): fastest while
+     * [on], given back a moment after.
+     */
+    fun boost(on: Boolean) {
+        main.removeCallbacks(release)
+        if (on) prefer(fastest()) else main.postDelayed(release, HOLD_MS)
+    }
+
     private fun touched(e: MotionEvent) {
         main.removeCallbacks(release)
         when (e.actionMasked) {

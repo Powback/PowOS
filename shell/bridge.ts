@@ -166,12 +166,14 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
     shade: { closed: () => call("shade.closed") },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
-      open: (id) => call<boolean>("tasks.open", id),
+      open: (id, from) => call<boolean>("tasks.open", id, from ?? null),
       remove: (id) => call<boolean>("tasks.remove", id),
     },
-    switcher: {
-      close: () => call("switcher.close"),
-      home: () => call("switcher.home"),
+    recents: {
+      slot: (rect) => call("recents.slot", rect),
+      ready: () => call("recents.ready"),
+      closed: () => call("recents.closed"),
+      state: () => call("recents.state"),
     },
     assist: {
       screen: () => call<AssistScreen | null>("assist.screen"),
@@ -652,9 +654,11 @@ function mock(): Bridge {
     })(),
     shade: { closed: async () => console.log("[mock] shade closed") },
     tasks: mockTasks(icon, hue),
-    switcher: {
-      close: async () => console.log("[mock] switcher closed"),
-      home: async () => console.log("[mock] switcher: home"),
+    recents: {
+      slot: async () => {},
+      ready: async () => {},
+      closed: async () => {},
+      state: async () => ({ open: false, from: null, tasks: [] }),
     },
     // A screen it was opened over: some text, no screenshot.
     assist: {

@@ -20,6 +20,7 @@ import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
 import { NotificationPanel } from "./notifications.tsx";
 import { PowAiPage } from "./powai.tsx";
+import { Recents } from "./recents.tsx";
 import { byKey, dock, dockDrag, editing, menu, recent, setDock } from "../state.ts";
 
 /**
@@ -175,6 +176,8 @@ export function Home() {
       <RemoteScreen />
       <AgentsScreen />
       <Screens />
+      {/* The switcher: a layer over all of home (a swipe up over an app builds it; the overview button shows it). */}
+      <Recents />
     </>
   );
 }

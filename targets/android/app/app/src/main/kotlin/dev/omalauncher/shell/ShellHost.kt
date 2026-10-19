@@ -72,6 +72,9 @@ class ShellHost(
 
     val bridge = ShellBridge(context, activity, runtime, web)
 
+    /** An activity's page (home) at the panel's fastest rate while touched - or while a swipe up shows its switcher. */
+    internal val highRefresh: HighRefresh? = activity?.window?.let { HighRefresh(it, web) }
+
     init {
         overrides.mkdirs()
         web.addJavascriptInterface(bridge, "PowosHost")
@@ -83,8 +86,6 @@ class ShellHost(
             WindowInsets.CONSUMED
         }
         HotReload.add(this)
-        // An activity's page (home, the switcher) scrolls at the panel's fastest rate while touched.
-        activity?.window?.let { HighRefresh(it, web) }
         val page = devUrl() ?: "$ORIGIN/index.html"
         web.loadUrl(mode?.let { "$page?mode=$it" } ?: page)
     }

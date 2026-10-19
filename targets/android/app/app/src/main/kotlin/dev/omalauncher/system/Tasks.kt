@@ -56,12 +56,13 @@ object Tasks {
     fun open(
         context: Context,
         id: Int,
+        options: ActivityOptions = ActivityOptions.makeBasic(),
     ): Boolean {
         val result =
             runCatching {
                 HiddenApi.allow()
                 atm().javaClass.getMethod("startActivityFromRecents", Int::class.javaPrimitiveType, android.os.Bundle::class.java)
-                    .invoke(atm(), id, ActivityOptions.makeBasic().toBundle()) as Int
+                    .invoke(atm(), id, options.toBundle()) as Int
             }.onFailure { Log.w(TAG, "can't start task $id from recents", it) }.getOrNull()
         // START_SUCCESS (0) and the other non-negative codes (delivered to top, task to front) are a switch.
         if (result != null) return result >= 0
@@ -75,6 +76,20 @@ object Tasks {
             HiddenApi.allow()
             atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean
         }.onFailure { Log.w(TAG, "can't remove task $id", it) }.getOrDefault(false)
+
+    /**
+     * Takes task [id]'s snapshot now (its window as it is this moment) into the system's cache, which [snapshot] then
+     * serves: the switcher's card of the app it was opened over shows the app as it was left, not as it was last time.
+     * As WM Shell's recents controller does for Quickstep (screenshotTask: IActivityTaskManager.takeTaskSnapshot(id,
+     * updateCache)). Blocking (a screen capture in the system server): off the main thread.
+     */
+    fun capture(id: Int): Boolean =
+        runCatching {
+            HiddenApi.allow()
+            val m = atm().javaClass.methods.first { it.name == "takeTaskSnapshot" }
+            val args: Array<Any?> = if (m.parameterTypes.size >= 2) arrayOf(id, true) else arrayOf(id)
+            m.invoke(atm(), *args) != null
+        }.onFailure { Log.w(TAG, "can't take task $id's snapshot", it) }.getOrDefault(false)
 
     /**
      * Task [id]'s last frame (the system's task snapshot) as a JPEG at most [width] px wide, or null if it has none.

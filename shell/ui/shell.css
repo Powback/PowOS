@@ -1026,16 +1026,44 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 /* The panel's content: a sideways swipe moves it (gesture.ts), between the notifications and the control center. */
 .notif-panel .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; transform: translateX(var(--panel-dx, 0px)); }
 .notif-panel .panel-body.settling { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-/* The switcher (switcher.tsx): the recent tasks side by side over the dimmed wallpaper, newest first. */
-html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-background) 72%, transparent); }
-.switcher {
+/*
+ * The switcher (recents.tsx): a layer of home, the recent tasks side by side over the dimmed wallpaper, the app it was
+ * opened over first. --rp (0..1) is how far it's up - a swipe up drives it every frame, the host's window landing on
+ * the first card - and --rx / --ry move the row with the finger: transforms and opacity only, nothing lays out again.
+ */
+.recents {
+  --rp: 0;
+  --rx: 0px;
+  --ry: 0px;
+  --card-w: min(70vw, 420px, calc(60vh * var(--screen-ratio-n, 0.45)));
   position: fixed;
   inset: 0;
+  z-index: 40;
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: var(--inset-top, 0px) 0 calc(var(--inset-bottom, 0px) + var(--edge));
+  visibility: hidden;
+  pointer-events: none;
 }
+.recents.open { visibility: visible; }
+.recents.shown { pointer-events: auto; }
+/* Collapsing: it stays visible till the cards are gone. */
+.recents.closed.settling { transition: visibility 0s linear 240ms; }
+.recents-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-background) 72%, transparent); opacity: var(--rp); pointer-events: none; }
+.recents .task-row { position: relative; padding: 0 calc((100vw - var(--card-w)) / 2); transform: translate(var(--rx), var(--ry)); }
+.recents .task { width: var(--card-w); max-width: none; }
+.recents .task-shot { max-height: none; }
+/* The first card is where the app's window lands; the others slide in from the side with the finger. */
+.recents .task:not(:first-child) { transform: translateX(calc((1 - var(--rp)) * 45vw)); opacity: var(--rp); }
+.recents .task:first-child .task-head, .recents .task-clear { opacity: var(--rp); }
+.recents.live .task:first-child .task-shot { visibility: hidden; }
+.recents .task[aria-hidden] { visibility: hidden; }
+.recents.settling .recents-scrim,
+.recents.settling .task-row,
+.recents.settling .task:not(:first-child),
+.recents.settling .task:first-child .task-head,
+.recents.settling .task-clear { transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 240ms ease; }
 .task-row {
   display: flex;
   gap: calc(var(--gap) * 2);
@@ -1048,7 +1076,7 @@ html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-bac
 .task-row::-webkit-scrollbar { display: none; }
 .task { flex: none; width: 70vw; max-width: 420px; scroll-snap-align: center; touch-action: pan-x; }
 .task-head { display: flex; align-items: center; gap: 8px; padding: 0 2px 8px; font-size: var(--text-small); }
-.task-icon { width: 22px; height: 22px; border-radius: 6px; }
+.task-icon { width: 22px; height: 22px; border-radius: 6px; flex: none; }
 .task-icon.blank { background: var(--color-surface); }
 .task-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .task-shot {
@@ -1065,7 +1093,6 @@ html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-bac
   -webkit-user-drag: none;
 }
 .task-clear { align-self: center; margin-top: calc(var(--gap) * 3); font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 8px 16px; }
-.task-empty { align-self: center; font-size: var(--text-body); }
 
 /*
  * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lift (0..1,

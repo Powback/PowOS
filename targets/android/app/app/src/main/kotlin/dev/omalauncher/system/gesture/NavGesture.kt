@@ -1,10 +1,8 @@
 package dev.omalauncher.system.gesture
 
 import android.annotation.SuppressLint
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.graphics.Region
 import android.hardware.display.DisplayManager
@@ -32,8 +30,9 @@ import dev.omalauncher.system.Tasks
  *   gestures are off: the lock screen or its bouncer, SystemUI's own shade, the device dozing, a full-screen app's
  *   hidden bar (its first swipe only brings the bar back - SystemUI's).
  * - A swipe up over an app: the app's window follows the finger ([RecentsTransition]) when WM Shell's recents transition
- *   can be had, and shrinks into home or the switcher; without it (or over home, the switcher) the swipe goes the plain
- *   way - a home intent, the switcher's activity, a task brought to the front.
+ *   can be had, toward its card in the switcher - a layer of home's own page that comes up behind it ([Switcher]) -
+ *   and lands on home (let go), on its card (held: the switcher stays up, it's home's) or back full screen; without it
+ *   (or over home) the swipe goes the plain way - a home intent, home with the switcher up, a task brought to the front.
  * - The screen pinned: only swipe up and hold does something - it unpins (ISystemUiProxy.stopScreenPinning), as
  *   Quickstep's.
  * - Back stays SystemUI's (its EdgeBackGestureHandler takes the left and right edges, whichever app is the recents
@@ -62,6 +61,9 @@ class NavGesture(
     private var transition: RecentsTransition? = null
     private var pinned = false
 
+    /** Where the finger went down (screen px): the window follows it sideways. */
+    private var downX = 0f
+
     /** The task the swipe began over (null: home, or PowOS's own screens). */
     private var from: Int? = null
 
@@ -83,6 +85,7 @@ class NavGesture(
         pinned = systemUiState and SYSUI_SCREEN_PINNED != 0L
         transition = null
         from = null
+        downX = e.rawX
         classifier = NavGestureClassifier(displayContext.resources.displayMetrics.density, screen.height().toFloat(), slop).also { it.down(e.rawX, e.rawY, e.eventTime) }
         return true
     }
@@ -100,7 +103,7 @@ class NavGesture(
                     NavGestureClassifier.Axis.IGNORED -> return drop()
                     else -> {}
                 }
-                if (c.axis == NavGestureClassifier.Axis.UP) transition?.drag(c.lift)
+                if (c.axis == NavGestureClassifier.Axis.UP) transition?.drag(c.lift, e.rawX - downX)
                 return GestureConsumer.Verdict.FOLLOW
             }
             MotionEvent.ACTION_POINTER_DOWN ->
@@ -128,11 +131,18 @@ class NavGesture(
     /** The swipe up is on: the app under it starts following the finger, if it can. */
     private fun began() {
         if (pinned) return
-        from = if (Switcher.showing != null) null else Tasks.visible(service)
+        // Over home's switcher there's no app under the finger: home's (the plain way).
+        from = if (Switcher.open && Switcher.homeVisible) null else Tasks.visible(service)
         val tasks = recentTasks ?: return
         if (from == null || !RecentsTransition.enabled(service) || Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) return
-        val home = homeActivity() ?: return
-        transition = RecentsTransition.start(service, tasks, home, screen.height().toFloat())
+        // Behind the app: PowOS's web home (the switcher is a layer of it), or the recents activity (the desktop is home).
+        val home = Switcher.target(service) ?: return
+        val t = RecentsTransition.start(service, tasks, home, Rect(screen)) ?: return
+        // The window heads for its card in home's switcher layer, which follows the window frame by frame.
+        t.slot = { Switcher.slot }
+        t.onFrame = Switcher::drag
+        Switcher.begin(from)
+        transition = t
     }
 
     private fun ended(outcome: NavGestureClassifier.Outcome) {
@@ -148,26 +158,47 @@ class NavGesture(
             NavGestureClassifier.Outcome.Home -> {
                 // Up with PowOS's shade down: the shade goes up, as SystemUI's does.
                 if (ShadeHost.current?.closeIfOpen() == true) {
-                    t?.end(RecentsTransition.End.APP) {}
+                    backToApp(t)
                     return
                 }
-                if (t != null) t.end(RecentsTransition.End.HOME) { ok -> if (!ok) goHome() } else goHome()
+                home(t)
             }
             NavGestureClassifier.Outcome.Switcher -> {
-                if (systemUiState and SYSUI_OVERVIEW_DISABLED != 0L) {
-                    if (t != null) t.end(RecentsTransition.End.HOME) { ok -> if (!ok) goHome() } else goHome()
-                    return
+                if (systemUiState and SYSUI_OVERVIEW_DISABLED != 0L) return home(t)
+                if (t == null) return switcher(over)
+                // Onto its card; the transition finishes to home once the card shows the app's snapshot - home's page is
+                // showing the switcher already, so it simply stays up.
+                t.end(RecentsTransition.End.SWITCHER, hold = { release -> Switcher.settle(over, release) }) { ok ->
+                    Switcher.settled()
+                    if (ok) runCatching { systemUi?.onOverviewShown(false) } else switcher(over)
                 }
-                if (t != null) t.end(RecentsTransition.End.SWITCHER) { switcher(over) } else switcher(over)
             }
-            is NavGestureClassifier.Outcome.QuickSwitch -> quickSwitch()
-            NavGestureClassifier.Outcome.None -> if (t != null) t.end(RecentsTransition.End.APP) {}
+            is NavGestureClassifier.Outcome.QuickSwitch -> {
+                backToApp(t)
+                quickSwitch()
+            }
+            NavGestureClassifier.Outcome.None -> backToApp(t)
         }
     }
 
-    /** Home, as the home button: the switcher goes, home comes to the front. */
+    /** Let go for home: the window shrinks away, home's switcher layer collapses into home. */
+    private fun home(t: RecentsTransition?) {
+        if (t == null) return goHome()
+        Switcher.end("home")
+        // The recents activity was what came up behind the app (the desktop is home): home is started after it.
+        val viaRecents = !Switcher.onHome
+        t.end(RecentsTransition.End.HOME) { ok -> if (!ok || viaRecents) goHome() }
+    }
+
+    /** Back to the app (let go early, or the shade was put away instead): its window full screen again. */
+    private fun backToApp(t: RecentsTransition?) {
+        if (t == null) return
+        Switcher.end("app")
+        t.end(RecentsTransition.End.APP) {}
+    }
+
+    /** Home, as the home button: home comes to the front (its page closes the switcher, as for Home pressed). */
     private fun goHome() {
-        Switcher.hide()
         runCatching {
             service.startActivity(
                 Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
@@ -176,6 +207,7 @@ class NavGesture(
         }.onFailure { Log.w(TAG, "can't go home", it) }
     }
 
+    /** The switcher without the transition: home brought to the front with it up. */
     private fun switcher(over: Int?) {
         Switcher.show(service, over)
         runCatching { systemUi?.onOverviewShown(over == null) }
@@ -183,16 +215,10 @@ class NavGesture(
 
     /** To the app used before this one (the newest task that isn't the one in front). */
     private fun quickSwitch() {
-        val current = if (Switcher.showing != null) null else Tasks.visible(service)
+        val current = if (Switcher.open && Switcher.homeVisible) null else Tasks.visible(service)
         val previous = runCatching { Tasks.list(service, 6) }.getOrDefault(emptyList()).firstOrNull { it.id != current } ?: return
-        Switcher.hide()
+        // Over the switcher: it goes once home is out of sight (Switcher.homeStopped), not before the app is there.
         Tasks.open(service, previous.id)
-    }
-
-    /** PowOS's home activity, when it's the home app (the transition launches it behind the app). */
-    private fun homeActivity(): ComponentName? {
-        val info = service.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo ?: return null
-        return if (info.packageName == service.packageName) ComponentName(info.packageName, info.name) else null
     }
 
     private fun blocked(): Boolean {

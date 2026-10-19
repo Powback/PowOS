@@ -6,7 +6,7 @@ import { Aod } from "./ui/aod.tsx";
 import { Assist } from "./ui/assist.tsx";
 import { Shade } from "./ui/shade.tsx";
 import { Lock } from "./ui/lock.tsx";
-import { Switcher } from "./ui/switcher.tsx";
+import { Recents } from "./ui/recents.tsx";
 import { chat, load } from "./state.ts";
 import type { Insets, ThemeColors } from "./types.ts";
 import "./hot.ts";
@@ -35,16 +35,17 @@ powos.on("theme.changed", applyTheme);
 applyTheme(await powos.theme.get().catch(() => null));
 
 /**
- * Which screen this page is: the host says (index.html?mode=) - home, or a slot's (aod: screen-off; assist: PowOS AI
- * over an app; shade: the notification shade; switcher: the recent apps).
+ * Which screen this page is: the host says (index.html?mode=) - home (its switcher is a layer of it, ui/recents.tsx),
+ * or a slot's (aod: screen-off; assist: PowOS AI over an app; shade: the notification shade; lock: the lock face;
+ * recents: the switcher alone, when the desktop is home).
  */
 const mode = new URLSearchParams(location.search).get("mode");
 document.documentElement.dataset.mode = mode ?? "home";
 if (mode === "aod") {
   render(<Aod />, document.body);
-} else if (mode === "switcher") {
-  // The system's recents screen (SwitcherActivity): the recent tasks alone.
-  render(<Switcher />, document.body);
+} else if (mode === "recents") {
+  // The switcher on its own (the recents activity's page, when the desktop is home): home's layer, alone.
+  render(<Recents />, document.body);
 } else if (mode === "lock") {
   // The lock screen's face (PowosLockActivity), over Android's lock screen.
   render(<Lock />, document.body);

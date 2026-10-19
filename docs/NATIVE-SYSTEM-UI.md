@@ -184,6 +184,19 @@ PowOS's `TouchInteractionService`. What PowOS must implement:
 5. The taskbar on the inner screen (`TYPE_NAVIGATION_BAR_PANEL`, 2024) and split/float through
    `ISplitScreen` and freeform. This replaces what `oplus-hook` patches into OnePlus's launcher today.
 
+**As built (the switcher is a layer of home, as Quickstep's RecentsView lives in the launcher).** There is
+no switcher window: `shell/ui/recents.tsx` is a layer of home's own page. A swipe up over an app starts
+the recents transition with home (`ShellActivity`) as its target; home's page shows the layer from the
+first frame (`recents.begin`), says where the first card's frame is (`powos.recents.slot`), and the
+app's real window leash is moved onto that rect as the finger goes (`RecentsTransition`, Kotlin), the
+progress going to the page every frame (`recents.drag`: transforms and CSS variables only). Up and hold:
+the window lands on its card, the app's snapshot is taken (`takeTaskSnapshot`), the page puts it on the
+card and says `recents.ready`, and only then does the transition finish to home - which is already
+showing the switcher, so nothing is started afterwards and nothing can arrive in the wrong order. The
+overview button brings home up with the layer shown (`Switcher.show`). `SwitcherActivity`, the
+component `config_recentsComponentName` names (it sets the recents uid), is now only a `Theme.NoDisplay`
+trampoline to that.
+
 Base it on AOSP `android16-release` Launcher3's `quickstep/` (Apache-2.0) as a reference and for the
 AIDL. Write a slim Kotlin implementation, not a Launcher3 fork: Quickstep alone is around 100k lines and
 tied to Launcher's own UI. Effort: about 3-5 weeks for gestures, home, the switcher and quick switch with
