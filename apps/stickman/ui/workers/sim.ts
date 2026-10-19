@@ -526,26 +526,27 @@ function draw() {
   if (noDraw || unchanged(key, Wp, Hp)) { prof.skipped++; return; }
   shown = key; shownWp = Wp; shownHp = Hp; force = false;
   const pen: Pen = native ? new ListPen(Wp, Hp, dpr, card, colors) : new CanvasPen(ctx, Wp, Hp);
-  // One ink, solid: the figure, the floor and the course in the theme's foreground at full alpha (faint or blended
-  // lines read differently over every wallpaper); only the checkpoints and the finish in the accent.
-  const ink = colors.fg;
-  pen.lines(ink, 1, 0.06 * scale, [X(0), Z(0), X(W), Z(0), ...segs.flatMap((sg) => [X(sg.a[0]), Z(sg.a[1]), X(sg.b[0]), Z(sg.b[1])])]);
+  // the room (its floor and walls) faint, the course's pieces in the foreground colour
+  pen.rect(colors.muted, 0.35, 0.04 * scale, X(0), Z(H), W * scale, H * scale);
+  pen.lines(colors.fg, 0.85, 0.06 * scale, segs.flatMap((sg) => [X(sg.a[0]), Z(sg.a[1]), X(sg.b[0]), Z(sg.b[1])]));
+  // the checkpoints still to come, faint; the next one, and the finish flag, in the accent
   const dots: number[] = [];
-  for (let i = wpI + 1; i < route.length; i++) dots.push(X(route[i][0]), Z(route[i][1]), 0.07 * scale);
-  pen.circles(colors.accent, 1, dots);
+  for (let i = wpI + 1; i < route.length; i++) dots.push(X(route[i][0]), Z(route[i][1]), 0.08 * scale);
+  pen.circles(colors.accent, 0.35, dots);
   const f = route[route.length - 1];
-  pen.lines(ink, 1, 0.03 * scale, [X(f[0]), Z(f[1] - 0.55), X(f[0]), Z(f[1] + 0.45)]);
+  pen.lines(colors.muted, 1, 0.03 * scale, [X(f[0]), Z(f[1] - 0.55), X(f[0]), Z(f[1] + 0.45)]);
   pen.poly(colors.accent, 1, [X(f[0]), Z(f[1] + 0.45), X(f[0] + 0.35), Z(f[1] + 0.33), X(f[0]), Z(f[1] + 0.21)]);
   pen.circles(colors.accent, 1, [X(coin[0]), Z(coin[1]), 0.15 * scale]);
-  // the figure, Pivot style: far limbs (_l) drawn first and a little thinner, then torso and head, then near limbs
+  // the figure, Pivot style: far limbs (_l) behind and muted, then torso and head, then near limbs (_r)
   const order = (n: string) => (n.endsWith("_l") ? 0 : n.endsWith("_r") ? 2 : 1);
   for (const p of [...meta.draw].sort((p, q) => order(p.name) - order(q.name))) {
     const far = order(p.name) === 0;
+    const c = far ? colors.muted : colors.fg;
     const a = bodyPoint(p.body, p.a);
-    if (p.kind === "circle") pen.circles(ink, 1, [X(a[0]), Z(a[1]), (p.name === "head" ? p.r * 1.15 : p.r * 1.2) * scale]);
+    if (p.kind === "circle") pen.circles(c, 1, [X(a[0]), Z(a[1]), (p.name === "head" ? p.r * 1.15 : p.r * 1.2) * scale]);
     else {
       const b = bodyPoint(p.body, p.b);
-      pen.lines(ink, 1, (p.r * 2 + (far ? -0.01 : 0.02)) * scale, [X(a[0]), Z(a[1]), X(b[0]), Z(b[1])]);
+      pen.lines(c, 1, (p.r * 2 + (far ? 0 : 0.02)) * scale, [X(a[0]), Z(a[1]), X(b[0]), Z(b[1])]);
     }
   }
   if (pen instanceof ListPen) (self as any).postMessage({ type: "frame", frame: pen.text() });
