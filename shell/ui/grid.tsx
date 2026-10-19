@@ -60,12 +60,34 @@ function measure(el: HTMLElement, columns: number) {
   if (drawerOpen.value) return;
   const r = el.getBoundingClientRect();
   if (!r.width || !r.height) return;
-  const pad = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--edge")) || 12;
+  const root = getComputedStyle(document.documentElement);
+  const pad = parseFloat(root.getPropertyValue("--edge")) || 12;
+  // The grid is laid out for home at rest, not for this frame: the dock folding away under the launcher and the
+  // keyboard sliding in give the pages more or less height while they animate, and measuring that re-laid-out (and
+  // resized) every tile and widget each frame - the flicker as the launcher closes. So the height the dock has
+  // folded away and the room the keyboard takes are counted back in: the same grid in every frame of either.
+  const height = r.height - dockFolded(root) + keyboardRoom(root);
   const across = r.width - 2 * pad;
-  const down = r.height - 2 * pad;
+  const down = height - 2 * pad;
   const square = Math.max(1, Math.min(MAX_SQUARE_ROWS, Math.floor(down / (across / columns))));
   const rows = Math.max(square, usedRows());
-  geometry.value = { left: r.left, top: r.top, width: r.width, height: r.height, cellW: across / columns, cellH: down / rows, rows, pad };
+  geometry.value = { left: r.left, top: r.top, width: r.width, height, cellW: across / columns, cellH: down / rows, rows, pad };
+}
+
+/** How much of its resting height (the strip's, and the margin under it) the dock has folded away right now. */
+function dockFolded(root: CSSStyleDeclaration) {
+  const dock = document.querySelector<HTMLElement>(".home .dock");
+  if (!dock) return 0;
+  const rest = (parseFloat(root.getPropertyValue("--strip-height")) || 0) + (parseFloat(root.getPropertyValue("--edge")) || 12);
+  const now = dock.getBoundingClientRect().height + (parseFloat(getComputedStyle(dock).marginBottom) || 0);
+  return Math.max(0, rest - now);
+}
+
+/** The height the keyboard takes from home beyond the navigation bar's inset (it lifts the bar and the dock). */
+function keyboardRoom(root: CSSStyleDeclaration) {
+  const kb = parseFloat(root.getPropertyValue("--inset-keyboard")) || 0;
+  const nav = parseFloat(root.getPropertyValue("--inset-bottom")) || 0;
+  return Math.max(0, kb - nav);
 }
 
 /** A cell's box, in the page's coordinates. */
