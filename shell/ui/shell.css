@@ -76,18 +76,21 @@
 .launcher .strip { pointer-events: auto; }
 .home.open .launcher .drawer { pointer-events: auto; }
 
+/*
+ * The recent row heads the panel; as the launcher opens it closes like the dock, a shutter rising to its top edge -
+ * the icons cut off at full size, the list coming up under it.
+ */
 .strip {
   flex: none;
-  height: var(--strip-height);
+  height: calc(var(--strip-height) * (1 - var(--p)));
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
   padding: 0 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: hidden;
 }
 /* The apps share the row's width: all of them fit, at up to the strip's icon size. */
-.strip .app { flex: 1 1 0; min-width: 0; padding: 4px 0; }
+.strip .app { flex: 1 1 0; min-width: 0; height: var(--strip-height); justify-content: center; padding: 0; }
 .strip .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 /* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
 .dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
