@@ -150,7 +150,7 @@ export function Bar() {
         ref={input}
         value={shown}
         onInput={(e) => (query.value = (e.currentTarget as HTMLInputElement).value)}
-        placeholder={s.listening ? "listening…" : s.error ?? "find an app or ask AI"}
+        placeholder={s.listening ? "listening…" : s.error ?? "search"}
         enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
         autocomplete="off"
         autoCapitalize="off"
