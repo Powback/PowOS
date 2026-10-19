@@ -57,7 +57,11 @@ export function Island({ item }: { item: HomeItem }) {
     let live = true;
     importShim(url).then(
       (m) => live && setMod({ c: m.default }),
-      (e) => live && setError(String(e?.message ?? e)),
+      (e) => {
+        // Reported (the shell's error capture reads console.error) as well as shown on the tile.
+        console.error(`[powos-app] ${appId}: widget ${url} didn't load: ${e?.message ?? e}`, e);
+        if (live) setError(String(e?.message ?? e));
+      },
     );
     return () => {
       live = false;

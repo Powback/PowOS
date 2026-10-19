@@ -34,23 +34,38 @@ const own = {
   onPointerDown: (e: PointerEvent) => e.stopPropagation(),
 };
 
-class Boundary extends Component<{ children?: any }, { error: string | null }> {
+/** A failure, reported (console.error: the shell's error capture reads it from the console) and shown. */
+function fail(id: string, what: string, e: unknown) {
+  const detail = String((e as Error)?.message ?? e);
+  console.error(`[powos-app] ${id}: ${what}: ${detail}`, e);
+  return detail;
+}
+
+class Boundary extends Component<{ id: string; name: string; children?: any }, { error: string | null }> {
   state = { error: null as string | null };
   componentDidCatch(e: unknown) {
-    this.setState({ error: String((e as Error)?.stack ?? (e as Error)?.message ?? e) });
+    this.setState({ error: fail(this.props.id, "page crashed", e) });
   }
   render() {
-    return this.state.error ? <Fault error={this.state.error} /> : this.props.children;
+    return this.state.error ? <Fault name={this.props.name} error={this.state.error} /> : this.props.children;
   }
 }
 
-function Fault({ error }: { error: string }) {
+/** What went wrong in words, the detail small under it, and the way back. */
+function Fault({ name, error }: { name: string; error: string }) {
+  const missing = /404|not found|failed to fetch|not installed/i.test(error);
   return (
-    <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
-      <button type="button" class="session-back" onClick={closeApp}>
+    <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "14px", height: "100%", boxSizing: "border-box" }}>
+      <button type="button" class="session-back" onClick={closeApp} aria-label="back">
         ‹
       </button>
-      <pre style={{ whiteSpace: "pre-wrap", color: "var(--color-red, #e66)", fontSize: "var(--text-small)" }}>{error}</pre>
+      <div style={{ fontSize: "1.2em", fontWeight: 600 }}>{name} couldn't open</div>
+      <div style={{ opacity: 0.8 }}>
+        {missing ? "Its page isn't installed on this device. Install the app again (powos app install <its folder>)." : "Its page stopped with an error. Fix it and save: the page reloads by itself."}
+      </div>
+      <div class="muted" style={{ fontSize: "var(--text-small)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        {error}
+      </div>
     </div>
   );
 }
@@ -76,7 +91,7 @@ export function AppScreen() {
         setError(null);
         (window as any).__powosApps.loaded = { id: v.id, url, ms: Math.round(performance.now() - t0), at: Date.now() };
       },
-      (e) => live && setError(String(e?.message ?? e)),
+      (e) => live && setError(fail(v.id, `page ${url} didn't load`, e)),
     );
     return () => {
       live = false;
@@ -108,6 +123,7 @@ export function AppScreen() {
   }, [v?.closing]);
   if (!v) return null;
   const C = mod && mod.id === v.id ? mod.c : null;
+  const name = app?.name ?? v.id;
   return (
     <div
       ref={box}
@@ -131,12 +147,12 @@ export function AppScreen() {
       {...own}
     >
       {error ? (
-        <Fault error={error} />
+        <Fault name={name} error={error} />
       ) : !app && installedApps.value.length ? (
-        <Fault error={`${v.id}: not installed`} />
+        <Fault name={name} error={`${v.id}: not installed`} />
       ) : C ? (
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-          <Boundary key={mod!.url}>
+          <Boundary key={mod!.url} id={v.id} name={name}>
             <C host={host} app={v.id} base={`./_app/${v.id}/`} close={closeApp} />
           </Boundary>
         </div>

@@ -401,8 +401,13 @@ def build_module(d, m, where=None, force=False):
             t.add(mod, arcname="module", filter=lambda ti: None if ti.name.startswith("module/target") else ti)
         env = " ".join(f"{k}={shlex.quote(v)}" for k, v in
                        {"IMAGE": BUILDER_IMAGE, "VOLUME": CACHE_VOLUME, "CRATE": crate, "INNER": REMOTE_INNER}.items())
-        r = subprocess.run(ssh_cmd(b, f"{env} bash -c {shlex.quote(REMOTE_BUILD)}"), input=buf.getvalue(),
-                           stdout=subprocess.PIPE)
+        for attempt in range(3):
+            r = subprocess.run(ssh_cmd(b, f"{env} bash -c {shlex.quote(REMOTE_BUILD)}"), input=buf.getvalue(),
+                               stdout=subprocess.PIPE)
+            # 255: ssh itself failed (no route yet after a wake, a refused login) - not the build: again, shortly.
+            if r.returncode != 255:
+                break
+            time.sleep(1 + attempt)
         if r.returncode != 0:
             die(f"module: the build on {b} failed (exit {r.returncode})")
         with tarfile.open(fileobj=io.BytesIO(r.stdout), mode="r:gz") as t:
@@ -462,7 +467,7 @@ def build_ui(d, m):
                     workers.append(rel)
                 continue
             os.makedirs(os.path.join(new, os.path.dirname(rel)), exist_ok=True)
-            shutil.copy2(os.path.join(ui, rel), os.path.join(new, rel))
+            shutil.copyfile(os.path.join(ui, rel), os.path.join(new, rel))
     schema = tree_hash(os.path.join(ui, "bindings"))[:16]
     if entries:
         bundle(ui, entries, new, externals=UI_EXTERNALS, define={"__POWOS_SCHEMA__": json.dumps(schema)})
@@ -548,8 +553,14 @@ def install_ui(d, m):
     else:
         if os.path.isdir(src):
             tmp = tempfile.mkdtemp(dir=base, prefix=".new-")
-            shutil.copytree(src, os.path.join(tmp, "ui"))
-            shutil.copy(os.path.join(d, "powos-app.json"), tmp)
+            # Plain writes, not copytree/copy2: those copy extended attributes too, security.selinux among them - the
+            # source tree's label (system_data_root_file on the phone) landed on the installed dir and the PowOS
+            # app (privapp_data_file only) could read none of it. New files get their dir's label.
+            sync(src, os.path.join(tmp, "ui"))
+            sync_file(os.path.join(d, "powos-app.json"), os.path.join(tmp, "powos-app.json"))
+            for root, dirs, _ in os.walk(tmp):
+                for x in dirs:
+                    os.chmod(os.path.join(root, x), 0o755)
             os.chmod(tmp, 0o755)
             if os.path.exists(dest):
                 shutil.rmtree(dest)
