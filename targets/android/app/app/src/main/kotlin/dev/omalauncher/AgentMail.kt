@@ -199,7 +199,13 @@ class AgentMail private constructor(
         private const val GROUP = "powos-ai-agents"
 
         /** Channels of earlier versions, removed. */
-        private val OLD_CHANNELS = listOf("powos-ai-agents", "powos-agents-ask")
+        private val OLD_CHANNELS = listOf("powos-ai-agents", "powos-agents-ask", "agents-urgent-v2")
+
+        /**
+         * urgent's own version: v2 was made before PowOS had Do not disturb access, so the system dropped its
+         * setBypassDnd (mBypassDnd=false), and an app can't turn it on for a channel that exists - v3 is made with it.
+         */
+        private const val URGENT_VERSION = 3
 
         private val main = Handler(Looper.getMainLooper())
         private var watcher: AgentMail? = null
@@ -215,7 +221,7 @@ class AgentMail private constructor(
             return channelId(priority.takeIf { it in PRIORITIES } ?: "normal")
         }
 
-        private fun channelId(priority: String) = "agents-$priority-v$CHANNEL_VERSION"
+        private fun channelId(priority: String) = "agents-$priority-v${if (priority == "urgent") URGENT_VERSION else CHANNEL_VERSION}"
 
         @Synchronized
         private fun ensureChannels(context: Context) {
