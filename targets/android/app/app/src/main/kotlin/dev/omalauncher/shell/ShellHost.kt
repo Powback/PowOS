@@ -83,6 +83,8 @@ class ShellHost(
             WindowInsets.CONSUMED
         }
         HotReload.add(this)
+        // An activity's page (home, the switcher) scrolls at the panel's fastest rate while touched.
+        activity?.window?.let { HighRefresh(it, web) }
         val page = devUrl() ?: "$ORIGIN/index.html"
         web.loadUrl(mode?.let { "$page?mode=$it" } ?: page)
     }
@@ -129,8 +131,8 @@ class ShellHost(
             }
             // An Android widget's latest frame (AppWidgets draws it off screen), and a widget's preview for the picker.
             if (path.startsWith("_appwidget/")) {
-                val png = path.removePrefix("_appwidget/").toIntOrNull()?.let { AppWidgets.get(context).framePng(it) } ?: return notFound()
-                return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
+                val frame = path.removePrefix("_appwidget/").toIntOrNull()?.let { AppWidgets.get(context).frameStream(it) } ?: return notFound()
+                return WebResourceResponse(AppWidgets.FRAME_TYPE, null, frame).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
             }
             if (path.startsWith("_awpreview/")) {
                 val png = AppWidgets.get(context).previewPng(URLDecoder.decode(path.removePrefix("_awpreview/"), "UTF-8")) ?: return notFound()

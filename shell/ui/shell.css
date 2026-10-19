@@ -1103,7 +1103,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
    background, its corners) - no PowOS frame around it; selected, an outline shows it. */
 /* Clipped to PowOS's corners (a widget's own radius is Android's, system_app_widget_background_radius). */
 .aw-face { width: 100%; height: 100%; border-radius: var(--radius); overflow: hidden; }
-.aw-face img { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+.aw-face canvas { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
+.aw-face canvas[hidden] { display: none; }
 .aw-wait { height: 100%; display: flex; align-items: center; justify-content: center; font-size: var(--text-small); text-align: center; }
 .home-tile.selected .aw-face { outline: var(--frame) solid var(--color-accent); outline-offset: 2px; }
 .aw-scrim {

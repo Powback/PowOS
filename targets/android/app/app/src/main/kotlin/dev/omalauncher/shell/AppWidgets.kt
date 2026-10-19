@@ -27,6 +27,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.os.UserHandle
@@ -58,11 +59,18 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import org.lsposed.hiddenapibypass.HiddenApiBypass
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.FilterInputStream
+import java.io.InputStream
+import java.io.SequenceInputStream
 import java.lang.reflect.Proxy
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
@@ -74,10 +82,21 @@ import kotlin.math.roundToInt
  * views, which can't be a DOM element, and a native view laid over the page would be outside it - not clipped, moved or
  * faded with its tile, not under the page's swipes and edit mode. So each widget is hosted off screen, as the widget
  * recon does it ([dev.omalauncher.widgets.recon.WidgetRecon]'s Offscreen): an AppWidgetHostView in a Presentation on a
- * private VirtualDisplay exactly the tile's size, drawn into an ImageReader. Its frames go to the page as images
- * (ShellHost serves the latest at /_appwidget/<id>, "appwidgets.frame" says when it changed); the page's touches on
- * the tile come back as MotionEvents dispatched into the hosted view, so its buttons press, ripple and click as on any
- * launcher. The tile is an <img> in the grid, moved, resized and removed like PowOS's own widgets.
+ * private VirtualDisplay exactly the tile's size, drawn into an ImageReader. Its frames go to the page as raw pixels
+ * (ShellHost serves the latest at /_appwidget/<id>, "appwidgets.frame" says when it changed - [Frames]); the page's
+ * touches on the tile come back as MotionEvents dispatched into the hosted view, so its buttons press, ripple and click
+ * as on any launcher. The tile is a <canvas> in the grid, moved, resized and removed like PowOS's own widgets.
+ *
+ * Kept alive: a widget's display is made once and lives until the widget is removed or no page has shown it for
+ * [RELEASE_MS]. A new tile size (the fold, the keyboard, a resize, a second home of another size) resizes the display
+ * in place ([Renderer.resize]); making it again - a new display, surface and window, the widget laid out from nothing -
+ * flickered, and with every fold and home recreated it happened hundreds of times an hour.
+ *
+ * Why images and not the widget's own surface: a SurfaceControl can be reparented under another window's surface,
+ * but the page is one WebView surface whose DOM decides what is drawn where - a tile that moves with a page swipe,
+ * fades, is clipped to its corners and drawn under the edit sheet can't be a separate surface without the shell
+ * leaving the page (a native overlay kept in sync with the DOM every frame). So the pixels go to the page; they're
+ * copied off the ImageReader once, sent uncompressed, and only when they changed.
  *
  * Placement is the home's: each widget's cell is in the same WidgetLayout as every other home item (key "aw:<id>"),
  * its page and provider in this class's preferences, and home.get lists them with the rest ([merge]).
@@ -91,7 +110,8 @@ import kotlin.math.roundToInt
  * the first widget shows Android's "allow PowOS to create widgets" dialog (ACTION_APPWIDGET_BIND, [BindActivity]);
  * ticking "always allow" makes later ones silent. Then the widget's own setup screen, when it has one.
  *
- * Main thread, except what ShellHost's loader thread reads: [framePng] and [previewPng].
+ * Main thread, except the frames' thread (each [Renderer]'s ImageReader, [Frames]) and what ShellHost's loader thread
+ * reads: [frameStream] and [previewPng].
  */
 class AppWidgets private constructor(
     context: Context,
@@ -129,9 +149,14 @@ class AppWidgets private constructor(
 
     private val renderers = HashMap<Int, Renderer>()
 
-    /** Each widget's latest frame and its number, read by ShellHost's loader thread. */
-    private val frames = ConcurrentHashMap<Int, Bitmap>()
-    private val stamps = HashMap<Int, Long>()
+    /** Each widget's latest frame, read by ShellHost's loader thread; kept while its renderer is let go. */
+    private val frames = ConcurrentHashMap<Int, Frames>()
+
+    /** Where frames are copied off the renderers' ImageReaders, not to take the main thread's time from the page. */
+    private val frameThread = Handler(HandlerThread("PowosAppWidgetFrames").apply { start() }.looper)
+
+    /** A widget no page shows, let go of after [RELEASE_MS] (its renderer: the display, the window). */
+    private val releases = HashMap<Int, Runnable>()
     private var listening = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -158,7 +183,8 @@ class AppWidgets private constructor(
     }
 
     fun unlisten(events: (String, Any?) -> Unit) {
-        listeners.remove(events)
+        val shown = listeners.remove(events).orEmpty()
+        shown.forEach(::updateShown)
         updateListening()
     }
 
@@ -358,6 +384,7 @@ class AppWidgets private constructor(
         save()
         renderers.remove(e.id)?.close()
         frames.remove(e.id)
+        releases.remove(e.id)?.let(main::removeCallbacks)
         listeners.values.forEach { it.remove(e.id) }
         runCatching { host.deleteAppWidgetId(e.id) }
         layout.remove(key)
@@ -380,9 +407,9 @@ class AppWidgets private constructor(
     // Shown: rendered off screen, frames to the page, touches back.
 
     /**
-     * A page shows [id] at [wDp] x [hDp] (its tile, CSS px = dp): it's drawn at that size (made again if the size
-     * changed - the provider hears of it, OPTION_APPWIDGET_SIZES) and the provider's updates are listened to. Answers
-     * { url: the latest frame's, if there is one; scrolls }; "appwidgets.frame" brings each next.
+     * A page shows [id] at [wDp] x [hDp] (its tile, CSS px = dp): it's drawn at that size (its display resized if the
+     * size changed - the provider hears of it, OPTION_APPWIDGET_SIZES) and the provider's updates are listened to.
+     * Answers { url: the latest frame's, if there is one; scrolls }; "appwidgets.frame" brings each next.
      */
     fun watch(
         events: (String, Any?) -> Unit,
@@ -402,11 +429,15 @@ class AppWidgets private constructor(
         val h = (hDp * d).roundToInt().coerceIn(1, 4096)
         val r = renderers[id]
         if (r == null || r.w != w || r.h != h) {
-            r?.close()
             awm.updateAppWidgetOptions(id, sizeOptions(wDp.roundToInt(), hDp.roundToInt()))
-            renderers[id] = Renderer(info, w, h, bound = id) { frame(id, it) }
+            if (r == null || !r.resize(w, h)) {
+                r?.close()
+                val store = frames.getOrPut(id, ::Frames)
+                renderers[id] = Renderer(info, w, h, bound = id) { image -> if (store.offer(image)) main.post { frame(id) } }
+            }
         }
-        return JSONObject().put("url", frameUrl(id) ?: JSONObject.NULL).put("scrolls", renderers[id]?.scrolls == true)
+        updateShown(id)
+        return JSONObject().put("url", frameUrl(id) ?: JSONObject.NULL).put("scrolls", renderers[id]?.let { hasCollection(it.view) } == true)
     }
 
     fun unwatch(
@@ -414,7 +445,25 @@ class AppWidgets private constructor(
         id: Int,
     ) {
         listeners[events]?.remove(id)
+        updateShown(id)
         updateListening()
+    }
+
+    /**
+     * Whether any page shows [id]: its frames are copied only then (it's drawn regardless - a clock ticks on), and one
+     * no page has shown for [RELEASE_MS] is let go of, its last frame kept for the tile to show when it's back.
+     */
+    private fun updateShown(id: Int) {
+        val shown = listeners.values.any { id in it }
+        renderers[id]?.shown = shown
+        releases.remove(id)?.let(main::removeCallbacks)
+        if (!shown && id in renderers) {
+            releases[id] =
+                Runnable {
+                    releases.remove(id)
+                    if (listeners.values.none { id in it }) renderers.remove(id)?.close()
+                }.also { main.postDelayed(it, RELEASE_MS) }
+        }
     }
 
     /**
@@ -428,20 +477,17 @@ class AppWidgets private constructor(
         runCatching { if (want) host.startListening() else host.stopListening() }.onFailure { Log.w(TAG, "listening $want", it) }
     }
 
-    private fun frame(
-        id: Int,
-        bitmap: Bitmap,
-    ) {
-        frames[id] = bitmap
-        stamps[id] = (stamps[id] ?: 0) + 1
-        val payload = JSONObject().put("id", id).put("url", frameUrl(id)).put("scrolls", renderers[id]?.scrolls == true)
+    /** A new frame of [id] (main thread): the pages showing it fetch it. */
+    private fun frame(id: Int) {
+        val r = renderers[id] ?: return
+        val payload = JSONObject().put("id", id).put("url", frameUrl(id)).put("scrolls", hasCollection(r.view))
         for ((events, shown) in listeners.entries.toList()) if (id in shown) events("appwidgets.frame", payload)
     }
 
-    private fun frameUrl(id: Int) = stamps[id]?.let { "${ShellHost.ORIGIN}/_appwidget/$id?v=$it" }
+    private fun frameUrl(id: Int) = frames[id]?.stamp?.takeIf { it > 0 }?.let { "${ShellHost.ORIGIN}/_appwidget/$id?v=$it" }
 
-    /** The latest frame of [id] as PNG (ShellHost's loader thread). */
-    fun framePng(id: Int): ByteArray? = frames[id]?.let(::png)
+    /** The latest frame of [id] for ShellHost's loader thread: [Frames.open]'s stream, [FRAME_TYPE]. */
+    fun frameStream(id: Int): InputStream? = frames[id]?.open()
 
     /**
      * A touch on the tile, at ([x], [y]) in a tile [wCss] x [hCss] CSS px big: "down", "move", "up" or "cancel" (the
@@ -459,6 +505,8 @@ class AppWidgets private constructor(
         val r = renderers[id] ?: return
         val now = SystemClock.uptimeMillis()
         if (action == "down") r.downAt = now
+        // A finger on it: its frames at the display's pace, till a while after (a list flinging on, a ripple fading).
+        r.live(now + LIVE_MS)
         val a =
             when (action) {
                 "down" -> MotionEvent.ACTION_DOWN
@@ -552,8 +600,24 @@ class AppWidgets private constructor(
 
     // Previews, for the picker.
 
-    private val previews = LruCache<String, ByteArray>(48)
+    /** Pictures made, by provider: by their size (PNG bytes), so a phone's hundred-odd widgets stay drawn once. */
+    private val previews =
+        object : LruCache<String, ByteArray>(PREVIEW_CACHE_BYTES) {
+            override fun sizeOf(
+                key: String,
+                value: ByteArray,
+            ) = value.size
+        }
     private val previewLock = Any()
+
+    /** The previews' renderer, one for them all (main thread): made with the first, let go of once the picker's done. */
+    private var previewer: Renderer? = null
+    private val dropPreviewer =
+        Runnable {
+            previewer?.close()
+            previewer = null
+        }
+    private var previewDone: Runnable? = null
 
     /**
      * [providerName]'s picture for the picker, PNG (ShellHost's loader thread): its preview image, else its generated
@@ -588,24 +652,47 @@ class AppWidgets private constructor(
             (if (Build.VERSION.SDK_INT >= 35 && info.generatedPreviewCategories and AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN != 0) runCatching { awm.getWidgetPreview(info.provider, info.profile, AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN) }.getOrNull() else null)
                 ?: if (Build.VERSION.SDK_INT >= 31 && info.previewLayout != 0) RemoteViews(info.provider.packageName, info.previewLayout) else null
                 ?: return null
-        var result: Bitmap? = null
+        val result = AtomicReference<Bitmap?>()
         val done = CountDownLatch(1)
         main.post {
-            var r: Renderer? = null
-            val timeout = Runnable { r?.close(); done.countDown() }
-            r =
+            main.removeCallbacks(dropPreviewer)
+            previewDone?.let(main::removeCallbacks)
+            val timeout =
+                Runnable {
+                    done.countDown()
+                    main.removeCallbacks(dropPreviewer)
+                    main.postDelayed(dropPreviewer, PREVIEW_KEEP_MS)
+                }
+            val onImage: (Image) -> Unit = { image ->
+                result.set(bitmap(image))
+                // The first frame can be the views before their images arrive: the one after settling.
+                main.removeCallbacks(timeout)
+                main.postDelayed(timeout, PREVIEW_SETTLE_MS)
+            }
+            // One display for every preview, resized to each (a display a preview made hundreds when the picker
+            // opened); a new one only when it can't be (before Android 12).
+            val r =
                 runCatching {
-                    Renderer(info, w, h, preview = views) { frame ->
-                        result = frame
-                        // The first frame can be the views before their images arrive: the one after settling.
-                        main.removeCallbacks(timeout)
-                        main.postDelayed(timeout, PREVIEW_SETTLE_MS)
-                    }
+                    previewer?.takeIf { it.preview(info, views, w, h, onImage) }
+                        ?: Renderer(info, w, h, preview = views, onImage = onImage).also {
+                            previewer?.close()
+                            previewer = it
+                        }
                 }.onFailure { Log.w(TAG, "preview of ${info.provider}", it) }.getOrNull()
+            previewDone = timeout
             if (r == null) done.countDown() else main.postDelayed(timeout, PREVIEW_TIMEOUT_MS)
         }
         done.await(PREVIEW_TIMEOUT_MS + 1000, TimeUnit.MILLISECONDS)
-        return result
+        return result.get()
+    }
+
+    /** A frame as a Bitmap (a preview's). */
+    private fun bitmap(image: Image): Bitmap {
+        val plane = image.planes[0]
+        val full = Bitmap.createBitmap(plane.rowStride / plane.pixelStride, image.height, Bitmap.Config.ARGB_8888)
+        plane.buffer.rewind()
+        full.copyPixelsFromBuffer(plane.buffer)
+        return if (full.width == image.width) full else Bitmap.createBitmap(full, 0, 0, image.width, image.height).also { full.recycle() }
     }
 
     private fun bitmap(
@@ -629,30 +716,52 @@ class AppWidgets private constructor(
      * drawn exactly as on a home screen (collections load, hardware bitmaps draw) - WidgetRecon's Offscreen, kept
      * running. [bound]: the widget's id (its views are the provider's, live); else [preview] is drawn once. It's drawn
      * exactly [w] x [h] px, the tile's size in the screen's pixels, so the page shows each frame 1:1.
+     *
+     * Each frame the display gets is handed to [onImage] on the frames' thread - at most one every [FRAME_MS] while
+     * it's [live] (a finger on it), else every [IDLE_FRAME_MS]: a widget nobody touches that animates (a clock's
+     * seconds) isn't copied 60 times a second. One that doesn't draw costs nothing: no frame comes.
      */
     private inner class Renderer(
         info: AppWidgetProviderInfo,
-        val w: Int,
-        val h: Int,
+        w: Int,
+        h: Int,
         bound: Int? = null,
         preview: RemoteViews? = null,
-        private val onFrame: (Bitmap) -> Unit,
+        @Volatile private var onImage: (Image) -> Unit,
     ) {
-        private val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 3)
+        var w = w
+            private set
+        var h = h
+            private set
+        private val dpi = context.resources.displayMetrics.densityDpi
+
+        /** Swapped for one of the new size by [resize]; read on the frames' thread. */
+        @Volatile private var reader = reader(w, h)
         private val display: VirtualDisplay =
             context.getSystemService(DisplayManager::class.java)
-                .createVirtualDisplay("powos-appwidget-${bound ?: "preview"}", w, h, context.resources.displayMetrics.densityDpi, reader.surface, 0)
+                .createVirtualDisplay("powos-appwidget-${bound ?: "preview"}", w, h, dpi, reader.surface, 0)
         private val presentation = Presentation(context, display.display)
         val root: FrameLayout
         val view: AppWidgetHostView
         var downAt = 0L
 
-        /** Its views have a collection (a list, a grid, a stack): its drags are its own, to scroll it. */
-        var scrolls = false
-            private set
-        private var latest: Image? = null
+        /** A page shows it: else its frames aren't copied (the latest is, once it's shown again). */
+        @Volatile var shown = true
+            set(value) {
+                field = value
+                if (value) frameThread.post { if (pending != null && !queued) copy() }
+            }
+
+        /** Until when (uptimeMillis) its frames go at the display's pace. */
+        @Volatile private var liveUntil = 0L
+
+        // The frames' thread's.
+        private var pending: Image? = null
         private var queued = false
-        private var closed = false
+        private var copied = 0L
+        private val copier = Runnable { copy() }
+
+        @Volatile private var closed = false
 
         init {
             presentation.window?.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
@@ -664,32 +773,101 @@ class AppWidgets private constructor(
                 }
             colors?.let { if (Build.VERSION.SDK_INT >= 31) view.setColorResources(it) }
             root = FrameLayout(presentation.context).apply { addView(view, FrameLayout.LayoutParams(w, h)) }
-            // A frame each time it draws: held (one of the reader's three), turned into a bitmap at most every FRAME_MS.
-            reader.setOnImageAvailableListener({ r ->
-                r.acquireLatestImage()?.let { image ->
-                    latest?.close()
-                    latest = image
-                    if (!queued) {
-                        queued = true
-                        main.postDelayed(::copy, FRAME_MS)
-                    }
-                }
-            }, main)
             presentation.setContentView(root, ViewGroup.LayoutParams(w, h))
             presentation.show()
             if (preview != null) view.updateAppWidget(preview)
         }
 
+        /** An ImageReader [w] x [h] whose frames come to [arrived], three of them (one held, one drawn, one spare). */
+        private fun reader(
+            w: Int,
+            h: Int,
+        ) = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 3).apply { setOnImageAvailableListener(::arrived, frameThread) }
+
+        private fun arrived(r: ImageReader) {
+            val image = runCatching { r.acquireLatestImage() }.getOrNull() ?: return
+            // A frame of the size before a resize, or after close.
+            if (closed || r !== reader) return image.close()
+            pending?.close()
+            pending = image
+            if (queued || !shown) return
+            queued = true
+            val gap = if (SystemClock.uptimeMillis() < liveUntil) FRAME_MS else IDLE_FRAME_MS
+            frameThread.postAtTime(copier, copied + gap)
+        }
+
         private fun copy() {
             queued = false
-            if (closed) return
-            val image = latest ?: return
-            val plane = image.planes[0]
-            val full = Bitmap.createBitmap(plane.rowStride / plane.pixelStride, h, Bitmap.Config.ARGB_8888)
-            plane.buffer.rewind()
-            full.copyPixelsFromBuffer(plane.buffer)
-            scrolls = hasCollection(view)
-            onFrame(if (full.width == w) full else Bitmap.createBitmap(full, 0, 0, w, h).also { full.recycle() })
+            val image = pending ?: return
+            pending = null
+            copied = SystemClock.uptimeMillis()
+            try {
+                if (!closed) onImage(image)
+            } catch (e: Exception) {
+                Log.w(TAG, "frame", e)
+            } finally {
+                image.close()
+            }
+        }
+
+        /** Its frames at the display's pace until [until]; one waiting for its idle turn goes now. */
+        fun live(until: Long) {
+            val was = liveUntil
+            liveUntil = until
+            if (was < SystemClock.uptimeMillis()) {
+                frameThread.post {
+                    if (queued) {
+                        frameThread.removeCallbacks(copier)
+                        copy()
+                    }
+                }
+            }
+        }
+
+        /**
+         * Draws it [nw] x [nh] from now on, on the same display - resized, a new ImageReader its size, the window laid
+         * out again - so nothing flickers and the widget isn't inflated again. False before Android 12, where a
+         * Presentation dismisses itself when its display changes (its caller makes a new renderer then).
+         */
+        fun resize(
+            nw: Int,
+            nh: Int,
+        ): Boolean {
+            if (Build.VERSION.SDK_INT < 31 || closed) return false
+            val old = reader
+            reader = reader(nw, nh)
+            display.resize(nw, nh, dpi)
+            display.surface = reader.surface
+            w = nw
+            h = nh
+            root.layoutParams =
+                root.layoutParams.apply {
+                    width = nw
+                    height = nh
+                }
+            view.layoutParams = FrameLayout.LayoutParams(nw, nh)
+            frameThread.post {
+                // A frame of the old size, not wanted now.
+                pending?.close()
+                pending = null
+                old.close()
+            }
+            return true
+        }
+
+        /** Shows [views], [info]'s preview, [nw] x [nh] from now on, its frames to [then] - false if it can't be resized. */
+        fun preview(
+            info: AppWidgetProviderInfo,
+            views: RemoteViews,
+            nw: Int,
+            nh: Int,
+            then: (Image) -> Unit,
+        ): Boolean {
+            if ((nw != w || nh != h) && !resize(nw, nh)) return false
+            onImage = then
+            view.setAppWidget(AppWidgetManager.INVALID_APPWIDGET_ID, info)
+            view.updateAppWidget(views)
+            return true
         }
 
         fun close() {
@@ -697,9 +875,107 @@ class AppWidgets private constructor(
             closed = true
             runCatching { presentation.dismiss() }
             display.release()
-            latest?.close()
-            latest = null
-            reader.close()
+            val r = reader
+            frameThread.post {
+                pending?.close()
+                pending = null
+                r.close()
+            }
+        }
+    }
+
+    /**
+     * One widget's latest frame for the page, as raw pixels: [FRAME_TYPE], an 8-byte header (its width and height,
+     * little-endian ints) and then RGBA, not premultiplied - ImageData's own layout, so the page puts it on its
+     * canvas as it is. PNG cost too much a frame: a 6x3 tile took ~70 ms to encode and ~20 to decode, a list scrolling
+     * at ~10 frames a second; its pixels take a few ms to copy, send and put. A frame that's the same as the one
+     * shown isn't sent (a widget redrawing what it showed). Its buffers are reused: two, the one the page reads and
+     * the next, more only while a page still reads an old one.
+     */
+    private class Frames {
+        private class Frame(
+            val w: Int,
+            val h: Int,
+            val bytes: ByteArray,
+        ) {
+            var readers = 0
+            var retired = false
+        }
+
+        private var current: Frame? = null
+        private var spare: ByteArray? = null
+
+        /** The latest frame's number, for its URL. */
+        @Volatile var stamp = 0L
+            private set
+
+        /** [image] as the latest frame (the frames' thread), unless it's the one shown: whether it's new. */
+        fun offer(image: Image): Boolean {
+            val w = image.width
+            val h = image.height
+            val row = w * 4
+            val bytes = synchronized(this) { spare?.takeIf { it.size == row * h }?.also { spare = null } } ?: ByteArray(row * h)
+            val plane = image.planes[0]
+            val buffer = plane.buffer
+            if (plane.rowStride == row) {
+                buffer.rewind()
+                buffer.get(bytes, 0, row * h)
+            } else {
+                for (y in 0 until h) {
+                    buffer.position(y * plane.rowStride)
+                    buffer.get(bytes, y * row, row)
+                }
+            }
+            unpremultiply(bytes)
+            synchronized(this) {
+                val c = current
+                if (c != null && c.w == w && c.h == h && c.bytes.contentEquals(bytes)) {
+                    spare = bytes
+                    return false
+                }
+                if (c != null) {
+                    c.retired = true
+                    if (c.readers == 0) spare = c.bytes
+                }
+                current = Frame(w, h, bytes)
+                stamp++
+            }
+            return true
+        }
+
+        /** The latest frame, for one request (ShellHost's loader thread); its buffer is the page's till it's read. */
+        @Synchronized
+        fun open(): InputStream? {
+            val f = current ?: return null
+            f.readers++
+            val header = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putInt(f.w).putInt(f.h).array()
+            return object : FilterInputStream(SequenceInputStream(ByteArrayInputStream(header), ByteArrayInputStream(f.bytes))) {
+                private var done = false
+
+                override fun close() {
+                    super.close()
+                    synchronized(this@Frames) {
+                        if (done) return
+                        done = true
+                        f.readers--
+                        if (f.retired && f.readers == 0 && spare == null) spare = f.bytes
+                    }
+                }
+            }
+        }
+
+        /** The display's pixels are premultiplied (alpha already in the colors); ImageData's aren't. */
+        private fun unpremultiply(p: ByteArray) {
+            var i = 3
+            while (i < p.size) {
+                val a = p[i].toInt() and 0xff
+                if (a != 255 && a != 0) {
+                    p[i - 3] = minOf(255, (p[i - 3].toInt() and 0xff) * 255 / a).toByte()
+                    p[i - 2] = minOf(255, (p[i - 2].toInt() and 0xff) * 255 / a).toByte()
+                    p[i - 1] = minOf(255, (p[i - 1].toInt() and 0xff) * 255 / a).toByte()
+                }
+                i += 4
+            }
         }
     }
 
@@ -800,8 +1076,27 @@ class AppWidgets private constructor(
 
         /** At most a frame a display frame goes to the page (a list scrolling, a ripple); it asks for each when shown. */
         private const val FRAME_MS = 16L
+
+        /** Untouched, at most five frames a second (an animation nobody's touching, a player's progress). */
+        private const val IDLE_FRAME_MS = 200L
+
+        /** How long after the finger's last touch frames keep the display's pace: a fling, a ripple fading. */
+        private const val LIVE_MS = 2500L
+
+        /** A widget no page has shown this long has its display and window let go of. */
+        private const val RELEASE_MS = 10 * 60_000L
+
+        /** [Frames]' format, for ShellHost and the page (appwidget.tsx). */
+        const val FRAME_TYPE = "application/x-powos-rgba"
+
         private const val PREVIEW_SETTLE_MS = 400L
         private const val PREVIEW_TIMEOUT_MS = 2500L
+
+        /** The previews' renderer, kept this long after the last (the picker scrolled on, searched). */
+        private const val PREVIEW_KEEP_MS = 30_000L
+
+        /** The previews' cache, by their PNGs' bytes. */
+        private const val PREVIEW_CACHE_BYTES = 16 * 1024 * 1024
 
         /** Android's widget sizing guide: a cell is about 73 dp, minus 16 dp of margins overall. */
         private const val CELL_DP = 73

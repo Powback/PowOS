@@ -2,13 +2,15 @@
  * Other apps' Android widgets on home (AppWidgets.kt): Hue's light switch, a weather card, a player.
  *
  * - A tile is the widget's latest frame: the host draws the real widget off screen at the tile's size, and says when
- *   it redrew ("appwidgets.frame"). The page stays in charge - the tile is an <img> in the grid, so it moves, resizes,
- *   fades and slides with the pages like any tile, and home's swipes and long presses work over it.
+ *   it redrew ("appwidgets.frame"). The page stays in charge - the tile is a <canvas> in the grid, so it moves,
+ *   resizes, fades and slides with the pages like any tile, and home's swipes and long presses work over it. A frame
+ *   is the widget's raw pixels (AppWidgets.Frames: no PNG to encode there and decode here), put on the canvas as
+ *   they come; anything else (the mock's pictures) is drawn as an image.
  * - The finger on it goes back to the widget: down, moves and up, at the tile's coordinates, so its buttons press,
  *   ripple and click as on any launcher. When home takes the gesture (a page swipe, the drawer, the tile lifted) the
  *   widget gets a cancel instead, as a view whose parent intercepts does. A widget with a list (a calendar's agenda)
  *   keeps its drags - "scrolls", which gesture.ts leaves alone - so the list scrolls; on others, swipes are home's.
- * - Frames as fast as the page shows them: the next is asked for once the last one is on screen.
+ * - Frames as fast as the page shows them: the next is fetched once the last one is on the canvas.
  * - The picker: every widget the phone's apps offer, by app, with their pictures and a search; the edit sheet places
  *   the one picked (editsheet.tsx).
  */
@@ -32,6 +34,31 @@ powos.on("appwidgets.frame", (f: Frame & { id: number }) => (frameOf(f.id).value
 /** How long a tile's size must hold before the widget is drawn at it. */
 const SETTLE_MS = 300;
 
+/** AppWidgets.FRAME_TYPE: an 8-byte header (width, height, little-endian) and RGBA, not premultiplied. */
+const RAW = "application/x-powos-rgba";
+
+/** [url]'s frame onto [canvas], sized to it: the host's raw pixels, or an image (the mock's). */
+async function draw(canvas: HTMLCanvasElement, url: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`frame ${res.status}`);
+  if (res.headers.get("content-type")?.startsWith(RAW)) {
+    const buf = await res.arrayBuffer();
+    const head = new DataView(buf, 0, 8);
+    const w = head.getInt32(0, true);
+    const h = head.getInt32(4, true);
+    if (canvas.width !== w || canvas.height !== h) Object.assign(canvas, { width: w, height: h });
+    canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(buf, 8, w * h * 4), w, h), 0, 0);
+    return;
+  }
+  const img = new Image();
+  img.src = URL.createObjectURL(await res.blob());
+  await img.decode().finally(() => URL.revokeObjectURL(img.src));
+  if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) Object.assign(canvas, { width: img.naturalWidth, height: img.naturalHeight });
+  const g = canvas.getContext("2d")!;
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  g.drawImage(img, 0, 0);
+}
+
 /** Home has the finger now: the widget's press ends as a cancel. */
 const homeTook = () => !!carry.value || pageDrag.value != null || drawerDrag.value != null || notifDrag.value != null;
 
@@ -41,14 +68,19 @@ export function AppWidgetFace({ item }: { item: HomeItem }) {
   const el = useRef<HTMLDivElement>(null);
   const press = useRef<number | null>(null);
   const latest = frameOf(id).value;
-  // The frame on screen; the next replaces it once it has loaded, so a list scrolling never queues frames up.
-  const [shown, setShown] = useState<string | null>(null);
+  // The frame on the canvas; the next is fetched once it's drawn, so a list scrolling never queues frames up.
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const shown = useRef<string | null>(null);
   const loading = useRef(false);
+  const [drawn, setDrawn] = useState(false);
   const next = () => {
     const url = frameOf(id).value?.url;
-    if (!url || url === shown) return void (loading.current = false);
+    if (!url || url === shown.current || !canvas.current) return void (loading.current = false);
     loading.current = true;
-    setShown(url);
+    shown.current = url;
+    draw(canvas.current, url)
+      .then(() => setDrawn(true), () => {})
+      .finally(next);
   };
   useEffect(() => void (loading.current || next()), [latest?.url]);
 
@@ -126,11 +158,8 @@ export function AppWidgetFace({ item }: { item: HomeItem }) {
       }}
       onPointerCancel={(e) => end(e, "cancel")}
     >
-      {shown ? (
-        <img src={shown} alt="" draggable={false} onLoad={next} onError={next} />
-      ) : (
-        <div class="aw-wait muted">{item.name}</div>
-      )}
+      <canvas ref={canvas} hidden={!drawn} />
+      {!drawn && <div class="aw-wait muted">{item.name}</div>}
     </div>
   );
 }
