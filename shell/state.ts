@@ -148,10 +148,15 @@ export function back(): boolean {
   return true;
 }
 
-/** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does. */
+/** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does (a full-screen terminal only closes). */
 export function goHome() {
-  if (sessionView.value) closeSession();
-  if (screen.value.key) powos.widgets.closeScreen();
+  // A terminal open full screen (an at work session, a widget's screen): Home puts it away and stays where it was
+  // opened from - PowOS AI's page, the widget's page - as swiping up out of an app goes back to the screen it came from.
+  if (sessionView.value || screen.value.key) {
+    if (sessionView.value) closeSession();
+    if (screen.value.key) powos.widgets.closeScreen();
+    return;
+  }
   notif.value = false;
   menu.value = null;
   folder.value = null;
