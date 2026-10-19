@@ -1,3 +1,4 @@
+#define _GNU_SOURCE /* accept4 */
 #include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -55,6 +56,8 @@ static struct pair pairs[MAX_PAIRS];
 static struct client *controls[2];
 static int epoll_fd;
 static volatile bool running = true;
+/* Listening on "@name" (abstract namespace) rather than a socket file: see main(). */
+static bool abstract_socket;
 
 static void daemon_log(const char *format, ...)
 {
@@ -378,9 +381,15 @@ static void handle_client_data(struct client *c)
 
 static void handle_new_connection(int listen_fd)
 {
-    int client_fd = accept(listen_fd, NULL, NULL);
+    int client_fd = accept4(listen_fd, NULL, NULL, SOCK_CLOEXEC);
     if (client_fd < 0)
         return;
+    /* An abstract socket has no file permissions: only this user (the app, KWin as powos) and root may connect. */
+    if (abstract_socket && !unix_peer_trusted(client_fd)) {
+        daemon_log("daemon: refused a connection from another user\n");
+        close(client_fd);
+        return;
+    }
 
     struct ctrl_msg hdr;
     int fds[MAX_FDS];
@@ -496,26 +505,37 @@ int main(int argc, char **argv)
     signal(SIGTERM, handle_signal);
     signal(SIGPIPE, SIG_IGN);
 
-    if (ensure_socket_parent(sock_path) < 0)
-        return 1;
-
-    unlink(sock_path);
-    int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    /* PowOS: "@name" listens in the abstract namespace (socket_utils.c), no file: what the rooted session uses, as
+     * a privileged app may not create socket files in its data. A path is a socket file, as before. */
+    abstract_socket = sock_path[0] == '@';
+    if (!abstract_socket) {
+        if (ensure_socket_parent(sock_path) < 0)
+            return 1;
+        unlink(sock_path);
+    }
+    int listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (listen_fd < 0) {
         daemon_perror("socket");
         return 1;
     }
 
     struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    if (strlen(sock_path) >= sizeof(addr.sun_path)) {
-        daemon_log("daemon: socket path is too long\n");
+    socklen_t addr_len;
+    if (unix_address(sock_path, &addr, &addr_len) < 0) {
+        daemon_log("daemon: bad socket address %s\n", sock_path);
         return 1;
     }
-    memcpy(addr.sun_path, sock_path, strlen(sock_path) + 1);
 
-    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    /* An abstract name is held for as long as its socket is open: a daemon of the previous session that is still
+     * exiting holds it for a moment (the app ends leftover daemons before it starts this one, SessionService). */
+    int bound = -1;
+    for (int attempt = 0; attempt < 50; attempt++) {
+        bound = bind(listen_fd, (struct sockaddr *)&addr, addr_len);
+        if (bound == 0 || !abstract_socket || errno != EADDRINUSE)
+            break;
+        usleep(100 * 1000);
+    }
+    if (bound < 0) {
         daemon_perror("bind");
         return 1;
     }
@@ -563,7 +583,8 @@ int main(int argc, char **argv)
     client_free(controls[1]);
     close(listen_fd);
     close(epoll_fd);
-    unlink(sock_path);
+    if (!abstract_socket)
+        unlink(sock_path);
     daemon_log("daemon: shutdown\n");
     return 0;
 }

@@ -19,7 +19,8 @@
 #   on the list: privapp-permissions.txt, reviewed by hand - each entry is a power the app gets.
 # - overlays/<slot>/: one resource overlay per system UI slot (config_dozeComponent, ...). Static, as the system server
 #   only takes immutable framework overlays: each is on while the module is (off: disable it in Magisk, reboot).
-#   Signed with a key of their own (~/.local/share/powos/overlay.jks, made once; not the app's).
+#   Signed with a key of their own (~/.local/share/powos/overlay.jks, made once; not the app's). overlays-disabled/
+#   keeps slots that aren't shipped: doze (PowOS as the screen-off display) felt laggy on the phone and was reverted.
 # - module/: the boot watchdog (post-fs-data.sh counts boots, service.sh clears the count once Android is up; two
 #   that never finish and the module disables itself).
 #
@@ -101,8 +102,9 @@ cp "$HERE/module/post-fs-data.sh" "$HERE/module/service.sh" "$M/"
 
 # The slots' overlays: compiled, linked against the platform, signed.
 KEYS=~/.local/share/powos
-mkdir -p "$KEYS" "$M/system/product/overlay"
-cp -R "$HERE/overlays" "$WORK/overlays"
+mkdir -p "$KEYS" "$M/system/product/overlay" "$WORK/overlays"
+shopt -s nullglob  # no overlays at all is fine: the module is then the priv-app (or just the watchdog)
+for dir in "$HERE"/overlays/*/; do cp -R "$dir" "$WORK/overlays/"; done
 [ -f "$KEYS/overlay.jks" ] || {
     sdk keytool -genkeypair -keystore /t/overlay.jks -storepass powos-overlay -keypass powos-overlay -alias overlay \
         -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=PowOS system overlays" >/dev/null 2>&1

@@ -52,7 +52,7 @@ final class SplashScreen {
             public String state() {
                 File[] wl = run.listFiles((d, n) -> n.startsWith("wayland-") && !n.endsWith(".lock"));
                 boolean[] done = {
-                    SessionService.daemonSocket(a).exists(), new File(run, "bus").exists(),
+                    SessionService.daemonListening(a), new File(run, "bus").exists(),
                     new File(run, "pipewire-0").exists(), new File(run, "hypr").isDirectory(),
                     wl != null && wl.length > 0, new File(run, "desktop-ready").exists(),
                 };

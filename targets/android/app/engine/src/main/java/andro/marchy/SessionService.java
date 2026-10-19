@@ -32,7 +32,7 @@ import java.util.Map;
  * Layout, all under getFilesDir() (short: Unix socket paths are limited to 108 bytes):
  *   rootfs/            the Arch Linux ARM system
  *   run/               XDG_RUNTIME_DIR (Wayland, PipeWire, Hyprland sockets), excluded from fakechroot
- *   run/andromarchy/        the display daemon's socket
+ *   run/andromarchy/        the display daemon's socket (no-root engine; rooted mode: DISPLAY_SOCKET, no file)
  *   run/*.log          output of each process
  */
 public class SessionService extends Service {
@@ -54,8 +54,44 @@ public class SessionService extends Service {
         return new File(ctx.getFilesDir(), "run");
     }
 
-    public static File daemonSocket(Context ctx) {
-        return new File(runDir(ctx), "andromarchy/display_daemon.sock");
+    /**
+     * The display daemon's socket in rooted mode: Linux's abstract namespace (no file), where KWin (as root's user
+     * powos) and this app's own connections reach it. As a privileged app (the PowOS system module), this app may not
+     * create or connect to socket files in its own data (SELinux gives priv_app no sock_file rights there), and an
+     * abstract socket needs none. Without files, the daemon and its clients check each other's uid instead
+     * (socket_utils.c). The no-root engine keeps the socket file: its programs run as this app (fakechroot), whose
+     * domain may make one, and its Linux side knows only paths.
+     */
+    static final String DISPLAY_SOCKET = "@powos.display";
+
+    /** The display daemon's address: a socket path, or "@name" in the abstract namespace (see DISPLAY_SOCKET). */
+    public static String daemonSocket(Context ctx) {
+        return RootMode.enabled() ? DISPLAY_SOCKET : new File(runDir(ctx), "andromarchy/display_daemon.sock").getPath();
+    }
+
+    /** The display daemon is up: its socket file exists, or (abstract, no file) this app's control channel reached it. */
+    static boolean daemonListening(Context ctx) {
+        String address = daemonSocket(ctx);
+        return address.startsWith("@") ? WindowTasks.connected() : new File(address).exists();
+    }
+
+    /** A daemon address (daemonSocket, PadHub's) for android.net.LocalSocket. */
+    static android.net.LocalSocketAddress localAddress(String address) {
+        return address.startsWith("@")
+                ? new android.net.LocalSocketAddress(address.substring(1), android.net.LocalSocketAddress.Namespace.ABSTRACT)
+                : new android.net.LocalSocketAddress(address, android.net.LocalSocketAddress.Namespace.FILESYSTEM);
+    }
+
+    /**
+     * An abstract name can be bound by any process first: a connection to one only counts when the other end is
+     * this app's uid or root (the daemons of this app and of the rooted session). A socket file is protected by its
+     * directory instead.
+     */
+    static boolean trustedPeer(android.net.LocalSocket s, String address) throws IOException {
+        if (!address.startsWith("@"))
+            return true;
+        int uid = s.getPeerCredentials().getUid();
+        return uid == android.os.Process.myUid() || uid == 0;
     }
 
     /** True once the Arch rootfs (built by build/build-rootfs.sh) is in place. */
@@ -122,11 +158,14 @@ public class SessionService extends Service {
 
     private void startSession() throws IOException {
         File run = runDir(this);
-        File sock = daemonSocket(this);
-        sock.getParentFile().mkdirs();
-        // A stale socket from a killed session would make the daemon's bind fail - and with it the whole session.
-        if (sock.exists() && !sock.delete())
-            Log.e(TAG, "can't remove the stale display socket " + sock + ": the display daemon won't start");
+        String sock = daemonSocket(this);
+        if (!sock.startsWith("@")) {
+            File file = new File(sock);
+            file.getParentFile().mkdirs();
+            // A stale socket from a killed session would make the daemon's bind fail - and with it the whole session.
+            if (file.exists() && !file.delete())
+                Log.e(TAG, "can't remove the stale display socket " + file + ": the display daemon won't start");
+        }
 
         String libDir = getApplicationInfo().nativeLibraryDir;
         String launcher = libDir + "/liblotfixrun.so";
@@ -134,17 +173,20 @@ public class SessionService extends Service {
         // PowOS rooted mode (RootMode): the display daemon here as always, then the whole session as root inside
         // PowOS's own system - D-Bus, PipeWire, the stand-in services and the desktop (rooted/powos-rooted-session).
         // Nothing of the no-root engine below runs. The session sees this run dir at /run/powos-app (bind mount), so
-        // the daemon socket, the phone-state files and desktop-ready (SplashScreen) are shared as they are.
+        // the phone-state files and desktop-ready (SplashScreen) are shared as they are; the daemon listens in the
+        // abstract namespace (DISPLAY_SOCKET), which the session shares too.
         if (RootMode.enabled()) {
-            spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock.getPath()), null);
-            // Hardware video for PowOS (VA-API through Mesa's termuxva bridge -> MediaCodec), as below; the rooted
-            // session points LIBVA at its socket (/run/powos-app/termux-va.sock).
-            spawn("termux-va", List.of(libDir + "/libtermuxva.so", "--sock", new File(run, "termux-va.sock").getPath()),
-                    null);
+            // A daemon this app's previous process left (killed without onDestroy) still holds the abstract name.
+            endLeftovers("libandromarchy.so");
+            spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock), null);
+            // Hardware video for PowOS (VA-API through Mesa's termuxva bridge -> MediaCodec), as below - here started
+            // by the root session (powos-session.sh, from this app's libtermuxva.so): Mesa's termuxva client only
+            // connects to a socket file, which a privileged app can't make, and root can.
+            endLeftovers("libtermuxva.so"); // one an older version of this app started
             Map<String, String> env = archEnv(run, sock);
             spawn("powos-root-session", List.of("su", "-c", "sh " + RootMode.SESSION + " " + run.getPath() + " "
-                    + sock.getPath() + " " + env.get("ANDROMARCHY_PHYSICAL_MM") + " " + env.get("LANG") + " "
-                    + env.get("TZ")), null);
+                    + sock + " " + env.get("ANDROMARCHY_PHYSICAL_MM") + " " + env.get("LANG") + " "
+                    + env.get("TZ") + " " + libDir + "/libtermuxva.so"), null);
             return;
         }
 
@@ -181,7 +223,7 @@ public class SessionService extends Service {
                 + " || for p in $P; do sudo pacman --config $C -S --noconfirm --needed $p; done"), archEnv(run, sock));
 
         // 1. Display daemon: relays buffers and input between this app's display and Hyprland.
-        spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock.getPath()), null);
+        spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock), null);
 
         // 2. Session D-Bus (systemd provides it on a normal Linux login). Browsers, file dialogs, portals and tray
         //    apps need it; archEnv() gives every program its address.
@@ -236,6 +278,32 @@ public class SessionService extends Service {
                 archEnv(run, sock));
     }
 
+    /**
+     * Ends this app's processes running nativeLibraryDir's [lib] that this process didn't start: left by a previous
+     * process of the app that was killed outright. Only this app's uid is visible and killable here.
+     */
+    private static void endLeftovers(String lib) {
+        File[] procs = new File("/proc").listFiles((d, n) -> n.chars().allMatch(Character::isDigit));
+        if (procs == null)
+            return;
+        for (File p : procs) {
+            String cmd;
+            try {
+                byte[] b = java.nio.file.Files.readAllBytes(new File(p, "cmdline").toPath());
+                int end = 0;
+                while (end < b.length && b[end] != 0)
+                    end++;
+                cmd = new String(b, 0, end, java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IOException | SecurityException e) {
+                continue;
+            }
+            if (cmd.endsWith("/" + lib)) {
+                Log.i(TAG, "ending a leftover " + lib + " (pid " + p.getName() + ")");
+                android.os.Process.killProcess(Integer.parseInt(p.getName()));
+            }
+        }
+    }
+
     /** Android's language as a glibc locale name (fr_FR.UTF-8); C.UTF-8 when it has no country. */
     static String androidLocale(Context ctx) {
         java.util.Locale l = ctx.getResources().getConfiguration().getLocales().get(0);
@@ -243,7 +311,7 @@ public class SessionService extends Service {
     }
 
     /** Environment for programs of the rootfs; lotfix-run sets the rest (loader, fakechroot, GPU...). */
-    private Map<String, String> archEnv(File run, File sock) {
+    private Map<String, String> archEnv(File run, String sock) {
         Map<String, String> env = new java.util.HashMap<>(System.getenv());
         env.put("ARCH_ROOTFS", rootfs(this).getPath());
         // sockets: real paths, not rewritten into the rootfs. PowOS: also the phone's shared storage (/storage,
@@ -254,7 +322,7 @@ public class SessionService extends Service {
         env.put("LANG", androidLocale(this)); // Android's language (first-boot.sh compiles its locale)
         env.put("ANDROMARCHY_UID", String.valueOf(android.os.Process.myUid()));
         env.put("ANDROMARCHY_GID", String.valueOf(android.os.Process.myUid()));
-        env.put("ANDROMARCHY_SOCKET", sock.getPath());
+        env.put("ANDROMARCHY_SOCKET", sock);
         // The display's physical size (landscape, mm) for the compositor's output: clients size themselves from it
         android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
         ((android.view.WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(dm);

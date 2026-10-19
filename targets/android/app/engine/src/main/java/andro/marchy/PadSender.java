@@ -1,7 +1,6 @@
 package andro.marchy;
 
 import android.net.LocalSocket;
-import android.net.LocalSocketAddress;
 import android.util.Log;
 
 import java.io.IOException;
@@ -88,7 +87,9 @@ final class PadSender extends Thread {
             try {
                 if (sock == null) {
                     sock = new LocalSocket();
-                    sock.connect(new LocalSocketAddress(path, LocalSocketAddress.Namespace.FILESYSTEM));
+                    sock.connect(SessionService.localAddress(path));
+                    if (!SessionService.trustedPeer(sock, path))
+                        throw new IOException(path + " is not powos-padd (another user's socket)");
                     out = sock.getOutputStream();
                     Log.i(TAG, "connected to " + path);
                 }

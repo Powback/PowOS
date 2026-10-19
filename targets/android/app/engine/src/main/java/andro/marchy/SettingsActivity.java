@@ -55,7 +55,7 @@ public class SettingsActivity extends Activity {
     private static final String KEY_SCREEN_ORIENTATION = "screen_orientation";
     private static final String KEY_PIP_MODE = "pip_mode";
     // PowOS: from the app's real files dir (was a /data/data/andro.marchy literal; the app id is now com.powos.app).
-    private String defaultSocketPath() { return SessionService.daemonSocket(this).getPath(); }
+    private String defaultSocketPath() { return SessionService.daemonSocket(this); }
     private static final int UNBOUND = -1;
 
     // Stored values match Termux:X11's forceOrientation preference.

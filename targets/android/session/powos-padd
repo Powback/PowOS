@@ -25,9 +25,13 @@ Buttons, by bit: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 Back, 7 Start, 8 Guide, 9 LS,
 23 right pad click. Sticks/pads: -32768..32767, y down positive. One client at a time; on disconnect everything is
 released, so a lost connection never leaves a button held.
 """
-import fcntl, glob, grp, os, pwd, select, socket, struct, sys, time
+import errno, fcntl, glob, grp, os, pwd, select, socket, struct, sys, time
 
-SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app"), "powos-padd.sock")
+RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
+# The app connects here: Linux's abstract namespace, no socket file (the app's PadHub.PADD_SOCKET, the same name). As
+# a privileged app, PowOS may not connect to socket files in its own data (SELinux); an abstract socket needs no
+# file permission, so who connects is checked instead (trusted()).
+SOCK = "\0powos.padd"
 USER = "powos"
 PAD1 = struct.Struct("<4sIhhhhBBxx")
 PAD2 = struct.Struct("<4sIhhhhBBxx10h")
@@ -265,7 +269,7 @@ def make_pad():
 def take_over():
     """One daemon only: a second one would add a second controller to Steam. A new start replaces the old one
     (a session restart, or a manual restart while the session's copy still runs)."""
-    pidfile = os.path.join(os.path.dirname(SOCK), "powos-padd.pid")
+    pidfile = os.path.join(RUN, "powos-padd.pid")
     try:
         old = int(open(pidfile).read())
         if old != os.getpid() and "powos-padd" in open(f"/proc/{old}/cmdline").read():
@@ -281,19 +285,32 @@ def take_over():
         f.write(str(os.getpid()))
 
 
+def trusted(conn):
+    """The connecting process is the PowOS app (the user powos has the app's uid) or root: anyone may connect to an
+    abstract socket."""
+    pid, uid, gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+    return uid in (0, pwd.getpwnam(USER).pw_uid)
+
+
 def main():
     take_over()
     pad = make_pad()
     try:
-        os.unlink(SOCK)
-    except FileNotFoundError:
+        os.unlink(os.path.join(RUN, "powos-padd.sock"))  # the socket file of versions before the abstract one
+    except OSError:
         pass
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(SOCK)
-    give(SOCK)
-    os.chmod(SOCK, 0o600)
+    # The replaced instance (take_over) holds the name until it has exited.
+    for attempt in range(50):
+        try:
+            srv.bind(SOCK)
+            break
+        except OSError as e:
+            if e.errno != errno.EADDRINUSE or attempt == 49:
+                raise
+            time.sleep(0.1)
     srv.listen(2)
-    log("listening on", SOCK)
+    log("listening on", "@" + SOCK[1:])
     client, buf = None, b""
     while True:
         fds = [srv] + ([client] if client else []) + ([pad.fd] if pad.fd is not None else [])
@@ -303,6 +320,10 @@ def main():
             pad.on_readable()
         if srv in r:
             new, _ = srv.accept()
+            if not trusted(new):
+                log("refused a connection from another user")
+                new.close()
+                continue
             if client:  # the newest overlay wins (an app restart reconnects before the old socket times out)
                 client.close()
                 pad.apply(NEUTRAL)

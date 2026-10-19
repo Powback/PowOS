@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # The PowOS desktop on a rooted phone: started by the PowOS app (SessionService, rooted mode) through
-# `su -c sh /data/powos/powos-session.sh <run dir> <display socket> <physical mm> <LANG> <TZ>`.
+# `su -c sh /data/powos/powos-session.sh <run dir> <display socket> <physical mm> <LANG> <TZ> [<termux-va>]`.
 #
 # The app keeps what only an Android app can do: the screen surface and its display daemon (buffers, touch, keyboard,
 # audio relayed to KWin's Anland backend over <display socket>), plus the phone's state files in <run dir> (battery,
@@ -8,7 +8,7 @@
 # the user powos (powos-rooted-session drops to it; sudo works for real) - no
 # patched loader, fakechroot or fakeroot as in the no-root engine. The app's run dir appears inside PowOS at
 # /run/powos-app (XDG_RUNTIME_DIR), so sockets, logs and desktop-ready are shared as-is.
-RUN=$1 SOCK=$2 MM=$3 LANG_=$4 TZ_=$5
+RUN=$1 SOCK=$2 MM=$3 LANG_=$4 TZ_=$5 TVA=$6
 R=/data/powos/root
 exec >> /data/powos/session.log 2>&1
 echo "--- $(date) powos-session run=$RUN"
@@ -34,8 +34,26 @@ for d in widgets style; do
     m mount --bind "${RUN%/run}/$d" "$R/home/powos/.config/omalauncher/$d"
 done
 
-# The display socket as PowOS sees it.
-sock=/run/powos-app/${SOCK#$RUN/}
+# The display socket as PowOS sees it: "@name" is in the abstract namespace (the app's SessionService.DISPLAY_SOCKET),
+# shared with the app as is; a socket file in the run dir is at /run/powos-app.
+case $SOCK in
+  @*) sock=$SOCK ;;
+  *)  sock=/run/powos-app/${SOCK#$RUN/} ;;
+esac
+
+# Hardware video (VA-API through Mesa's termuxva driver -> Android's MediaCodec): the app's termux-va daemon <termux-va>,
+# run here as root on Android's side, listening on <run dir>/termux-va.sock (/run/powos-app/termux-va.sock in PowOS,
+# powos-rooted-session). Not run by the app: Mesa's client only connects to a socket file, and as a privileged app the
+# app may not make one in its data (SELinux); root may. It lives as long as this session (this shell's pid survives the
+# execs below) and is replaced by the next one.
+if [ -n "$TVA" ] && [ -x "$TVA" ]; then
+  old=$(cat /data/powos/termux-va.pid 2>/dev/null)
+  [ -n "$old" ] && grep -q libtermuxva "/proc/$old/cmdline" 2>/dev/null && kill "$old"
+  "$TVA" --sock "$RUN/termux-va.sock" > "$RUN/termux-va.log" 2>&1 < /dev/null &
+  tva=$!
+  echo $tva > /data/powos/termux-va.pid
+  ( while kill -0 $$ 2>/dev/null; do sleep 10; done; kill $tva 2>/dev/null ) > /dev/null 2>&1 < /dev/null &
+fi
 # PowOS as the real root of its own mount namespace (pivot_root), not a chroot: Linux refuses user namespaces inside
 # a chroot ("unshare: Operation not permitted"), and Steam (pressure-vessel/bubblewrap), Flatpak and rootless podman
 # need them. Made private first (pivot_root fails on shared mounts); PowOS's own mount/pivot_root, through its

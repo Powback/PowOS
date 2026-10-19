@@ -2,8 +2,6 @@ package andro.marchy;
 
 import android.content.Context;
 
-import java.io.File;
-
 /**
  * The one connection to powos-padd (the virtual controller in PowOS), shared by every control surface in the app:
  * the on-screen overlay (GamepadOverlay) and the cover screen (CoverPadActivity). The daemon takes one client, and
@@ -17,12 +15,17 @@ final class PadHub {
     /** Deck-only button bits (powos-padd PAD2), after PadSender's 0..14. */
     static final int L4 = 1 << 15, L5 = 1 << 16, R4 = 1 << 17, R5 = 1 << 18, QUICK_ACCESS = 1 << 19;
 
+    /**
+     * powos-padd's socket, in the abstract namespace (no file, SessionService.DISPLAY_SOCKET says why); the same name
+     * as SOCK in targets/android/session/powos-padd. padd is root, so the peer check is root's uid.
+     */
+    static final String PADD_SOCKET = "@powos.padd";
+
     private static PadHub instance;
 
     static synchronized PadHub get(Context ctx) {
         if (instance == null) {
-            instance = new PadHub(new File(SessionService.runDir(ctx.getApplicationContext()), "powos-padd.sock")
-                .getPath());
+            instance = new PadHub(PADD_SOCKET);
         }
         return instance;
     }

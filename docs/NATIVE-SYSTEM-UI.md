@@ -292,8 +292,30 @@ back to overlays only (`build-module.sh` without `--priv-app`), and the app is a
 
 Before priv-app comes back, the session's sockets must not be files in the app's data: abstract-namespace Unix
 sockets for the daemon and termux-va (the session shares the network namespace), or sockets the root session owns
-that the app connects to. Slots that need no privilege don't wait for it: the doze component (below) is live with an
-overlay-only module.
+that the app connects to. Slots that need no privilege don't wait for it: the doze component (below) went live with an
+overlay-only module (since reverted: it felt laggy; its overlay is kept in `system-module/overlays-disabled/`, which
+the module build doesn't ship).
+
+**Fixed by design (2026-10-19)**, no policy change. In rooted mode the app binds and connects to no socket file:
+
+| Socket | Listens | Connects | Address |
+|---|---|---|---|
+| Display daemon | `libandromarchy` (the app's domain) | KWin's Anland backend (Magisk's domain, as powos), the app's display and control channel | `@powos.display` (SessionService.DISPLAY_SOCKET), passed to the session as `<display socket>` |
+| Gamepad | `powos-padd` (root) | the app (PadSender) | `@powos.padd` (PadHub.PADD_SOCKET = powos-padd's SOCK) |
+| termux-va | `libtermuxva` started by the root session (powos-session.sh), not by the app | Mesa's termuxva driver | `<run dir>/termux-va.sock`, a file root makes: Mesa's client only connects to paths (and checks the endpoint's inode) |
+
+The phone's policy allows all of it: `priv_app` (and `untrusted_app_*`) may bind, listen, accept and `connectto` its
+own `unix_stream_socket`; Magisk's domain is permissive, so KWin may `connectto` the app's socket; and Magisk's rules
+let every app domain `connectto` a Magisk-domain socket (padd). An abstract name has no file permissions and any
+process may take it first, so each end checks the other's uid (`SO_PEERCRED`: the app's uid or root;
+`socket_utils.c`, KWin patch 0015, SessionService.trustedPeer, powos-padd's `trusted()`). A daemon of a killed app
+process still holds its name: SessionService ends such leftovers before starting the daemon, which also retries its
+bind for a few seconds. The no-root engine keeps its socket files (the app is `untrusted_app` there, and its Linux
+side knows only paths).
+
+Still path sockets in the app, outside the rooted session: Omalauncher's own Wayland server (its proot Linux, not
+installed with rooted PowOS) and Andromarchy's "connect with root" setting (the fd helper's bridge socket in the
+cache dir, off by default). Both would fail as a priv-app if used.
 
 **Overlays must be static.** On Android 16 the system server only takes immutable framework overlays (zygote builds
 their idmaps); a mutable overlay reached apps (`cmd overlay lookup` showed it) but DreamManagerService kept the stock

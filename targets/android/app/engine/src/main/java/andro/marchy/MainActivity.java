@@ -86,7 +86,7 @@ public class MainActivity extends Activity
     private AudioManager mAudioManager;
     private AudioFocusRequest mAudioFocusRequest;
     // PowOS: from the app's real files dir (was a /data/data/andro.marchy literal; the app id is now com.powos.app).
-    private String defaultSocketPath() { return SessionService.daemonSocket(this).getPath(); }
+    private String defaultSocketPath() { return SessionService.daemonSocket(this); }
     private static final String KEY_ACCESSIBILITY_ENABLED = "accessibility_key_intercept";
     private static final String KEY_EXTRA_KEYS_ENABLED = "extra_keys_bar";
     private static final String KEY_AUTO_SHOW_EXTRA_KEYS = "auto_show_extra_keys";
@@ -285,7 +285,10 @@ public class MainActivity extends Activity
     private void applyConnectionConfig() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String sock = prefs.getString(KEY_SOCKET_PATH, defaultSocketPath());
-        if (sock == null || sock.trim().isEmpty())
+        // PowOS: in rooted mode the daemon has no socket file any more (SessionService.DISPLAY_SOCKET); a saved path
+        // into this app's own run dir is a default from before, not a daemon of the user's.
+        if (sock == null || sock.trim().isEmpty() || (RootMode.enabled()
+                && sock.trim().startsWith(SessionService.runDir(this).getPath() + "/")))
             sock = defaultSocketPath();
         boolean useRoot = prefs.getBoolean(KEY_USE_ROOT, false);
         String helperPath = getApplicationInfo().nativeLibraryDir + "/libfdhelper.so";
@@ -550,8 +553,7 @@ public class MainActivity extends Activity
         });
         // On-screen game controls (GamepadOverlay; virtual gamepad through powos-padd in PowOS). Over the surface,
         // under the floating buttons; hidden until toggled.
-        mGamepadOverlay = new GamepadOverlay(this,
-            new java.io.File(SessionService.runDir(this), "powos-padd.sock").getPath());
+        mGamepadOverlay = new GamepadOverlay(this, PadHub.PADD_SOCKET);
         mGamepadOverlay.setMouse(new OverlayMouse());
         // Per-game layouts: powos-focus-watch (PowOS) writes the focused window's class into the run dir.
         java.io.File runDir = SessionService.runDir(this);

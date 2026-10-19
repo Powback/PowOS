@@ -3,7 +3,6 @@ package andro.marchy;
 import android.content.Context;
 import android.content.Intent;
 import android.net.LocalSocket;
-import android.net.LocalSocketAddress;
 import android.net.Uri;
 import android.util.Log;
 
@@ -45,16 +44,23 @@ public final class WindowTasks {
         if (thread != null)
             return;
         Context app = context.getApplicationContext();
-        String socket = SessionService.daemonSocket(app).getPath();
+        String socket = SessionService.daemonSocket(app);
         thread = new Thread(() -> run(app, socket), "window-tasks");
         thread.setDaemon(true);
         thread.start();
     }
 
+    /** The control channel reached the display daemon. */
+    static boolean connected() {
+        return out != null;
+    }
+
     private static void run(Context context, String socket) {
         while (true) {
             try (LocalSocket s = new LocalSocket()) {
-                s.connect(new LocalSocketAddress(socket, LocalSocketAddress.Namespace.FILESYSTEM));
+                s.connect(SessionService.localAddress(socket));
+                if (!SessionService.trustedPeer(s, socket))
+                    throw new IOException("display socket " + socket + " is not this app's daemon");
                 OutputStream o = s.getOutputStream();
                 o.write(frame(CTRL_MSG_CONTROL_HELLO, le32(CONTROL_ROLE_APP)));
                 out = o;

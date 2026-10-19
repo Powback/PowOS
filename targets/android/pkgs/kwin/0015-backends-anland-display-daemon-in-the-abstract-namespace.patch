@@ -1,0 +1,77 @@
+From: PowOS <noreply@powback.com>
+Subject: [PATCH] backends/anland: the display daemon in the abstract namespace
+
+ANLAND_SOCKET may name an abstract-namespace socket, "@name": on a rooted phone the PowOS app's display daemon
+listens on @powos.display, because as a privileged Android app (priv_app) it may not create or connect to socket
+files in its own data - SELinux gives priv_app no sock_file rights there, and an abstract socket needs none. A path
+still means a socket file (the no-root app, Andromarchy). An abstract name has no file permissions, so the daemon on
+the other end must run as KWin's user (powos has the app's uid) or root: any process could bind the name first.
+---
+--- a/src/backends/anland/socket_utils.c	2026-10-19 05:29:37
++++ b/src/backends/anland/socket_utils.c	2026-10-19 05:35:33
+@@ -1,6 +1,10 @@
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE /* struct ucred */
++#endif
+ #include "socket_utils.h"
+ 
+ #include <errno.h>
++#include <stddef.h>
+ #include <stdint.h>
+ #include <string.h>
+ #include <sys/socket.h>
+@@ -70,21 +74,48 @@
+     return (int)n;
+ }
+ 
++/* PowOS: path is a socket file, or "@name" in Linux's abstract namespace - the PowOS app's display daemon on a rooted
++ * phone (@powos.display): as a privileged Android app it may not make socket files in its data. The name is exactly
++ * the bytes after '@' (abstract names are length-exact, no NUL). An abstract name has no file permissions and any
++ * process may bind it first, so the daemon must run as this user (powos has the app's uid) or as root. */
+ int connect_unix(const char *path)
+ {
+-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+-    if (fd < 0)
+-        return -1;
+-
+     struct sockaddr_un addr;
++    socklen_t addr_len;
++    size_t n = strlen(path);
++    int abstract = path[0] == '@';
++
++    if (n == 0 || n >= sizeof(addr.sun_path) || (abstract && n == 1)) {
++        errno = EINVAL;
++        return -1;
++    }
+     memset(&addr, 0, sizeof(addr));
+     addr.sun_family = AF_UNIX;
+-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
++    if (abstract) {
++        memcpy(addr.sun_path + 1, path + 1, n - 1); /* sun_path[0] stays 0 */
++        addr_len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + n);
++    } else {
++        memcpy(addr.sun_path, path, n);
++        addr_len = (socklen_t)sizeof(addr);
++    }
+ 
+-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
++    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
++    if (fd < 0)
++        return -1;
++    if (connect(fd, (struct sockaddr *)&addr, addr_len) < 0) {
+         close(fd);
+         return -1;
+     }
++    if (abstract) {
++        struct ucred cred;
++        socklen_t len = sizeof(cred);
++        if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) < 0
++            || (cred.uid != getuid() && cred.uid != 0)) {
++            close(fd);
++            errno = EPERM;
++            return -1;
++        }
++    }
+     return fd;
+ }
+ 

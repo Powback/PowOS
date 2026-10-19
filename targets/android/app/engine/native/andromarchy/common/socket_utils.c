@@ -1,6 +1,10 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* struct ucred */
+#endif
 #include "socket_utils.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -70,19 +74,60 @@ int recv_fds(int sock, void *data, size_t data_len,
     return (int)n;
 }
 
+/* PowOS: a socket address is a path, or "@name" for Linux's abstract namespace. An abstract socket is no file: it
+ * needs no directory and no SELinux sock_file permission, which a privileged app (priv_app) has nowhere in its own
+ * data. It has no file permissions either, so both ends check who is on the other side (unix_peer_trusted). The
+ * name is exactly the bytes after '@', without a NUL: abstract names are length-exact. */
+int unix_address(const char *address, struct sockaddr_un *addr, socklen_t *len)
+{
+    size_t n = strlen(address);
+
+    memset(addr, 0, sizeof(*addr));
+    addr->sun_family = AF_UNIX;
+    if (n == 0 || n >= sizeof(addr->sun_path) || (address[0] == '@' && n == 1)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (address[0] == '@') {
+        memcpy(addr->sun_path + 1, address + 1, n - 1); /* sun_path[0] stays 0: abstract */
+        *len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + n);
+    } else {
+        memcpy(addr->sun_path, address, n);
+        *len = (socklen_t)sizeof(*addr);
+    }
+    return 0;
+}
+
+/* The process on the other end of a connected socket runs as this process's user or as root: the display daemon,
+ * the app and the rooted session's KWin (the user powos, whose uid is the app's) share one uid. */
+int unix_peer_trusted(int fd)
+{
+    struct ucred cred;
+    socklen_t len = sizeof(cred);
+
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) < 0)
+        return 0;
+    return cred.uid == getuid() || cred.uid == 0;
+}
+
 int connect_unix(const char *path)
 {
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un addr;
+    socklen_t addr_len;
+
+    if (unix_address(path, &addr, &addr_len) < 0)
+        return -1;
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0)
         return -1;
-
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
-
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (connect(fd, (struct sockaddr *)&addr, addr_len) < 0) {
         close(fd);
+        return -1;
+    }
+    /* Any process may bind an abstract name first: talk only to a daemon of this user (or root). */
+    if (path[0] == '@' && !unix_peer_trusted(fd)) {
+        close(fd);
+        errno = EPERM;
         return -1;
     }
     return fd;
