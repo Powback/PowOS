@@ -14,5 +14,18 @@ powos.on("files.changed", ({ path }: { path: string }) => {
     }
     return;
   }
-  location.reload();
+  reload();
+});
+
+/**
+ * A WebView that isn't on screen (the shell behind an app, the screen off) doesn't navigate: a reload asked for then
+ * is lost, and a stylesheet swapped meanwhile then lays new styles over old modules. It waits for the shell to show.
+ */
+let pending = false;
+function reload() {
+  if (document.hidden) pending = true;
+  else location.reload();
+}
+document.addEventListener("visibilitychange", () => {
+  if (pending && !document.hidden) location.reload();
 });
