@@ -1,0 +1,11 @@
+{
+  "id": "dev.powos.agents",
+  "name": "Agents",
+  "version": "0.1.0",
+  "description": "The Agents view's data (docs/AGENTS-VIEW-DESIGN.md §3): every Claude session and subagent, its tasks, last events, the comms messages and asks - written by powos-agentsd, read by the Agents widget and screen.",
+  "module": { "path": "module/", "lang": "rust", "database": "powos-agents", "stdb": "2.12" },
+  "backend": null,
+  "widgets": [],
+  "surfaces": { "launcher": false, "desktop": true },
+  "budget": { "phone": { "memMB": 24 }, "desktop": { "memMB": 64 } }
+}

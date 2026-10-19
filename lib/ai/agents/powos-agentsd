@@ -16,6 +16,9 @@ Not a poller: it blocks on inotify (Linux) or kqueue (the Mac) on the queue, bat
 writes once per batch, and only what changed. It wakes on a timer only to sweep (once a minute, while it holds
 agents), and exits after 10 minutes without events and without a working agent; the next hook starts it again.
 
+Each batch also goes to the device's SpacetimeDB (the powos-agents module, apps/agents: the same §3 rows), when it
+runs - Phase 2's backend, with the spool as the fallback (class Stdb).
+
 --mirror (POWOS_AGENTS_MIRROR, the Mac): also pushes the whole state, folded, to another host's spool at most once a
 second and only when it changed - the Mac's agents on the phone.
 HACK: adb is a dev channel, not a transport; real fix = Phase 2 (the phone subscribes to the Mac's agents module).
@@ -530,8 +533,10 @@ class Spool:
             "asks": sorted(self.asks.values(), key=lambda a: a["ts"]),
         }
 
-    def flush(self):
-        """Writes what changed; True if anything was."""
+    def flush(self, sink=None):
+        """Writes what changed; True if anything was. [sink] (Stdb) also gets the change, as one batch."""
+        if sink is not None and (self.dirty_agents or self.dirty_rings or self.dropped or self.dirty_messages or sink.full):
+            sink.send(self.batch(full=sink.full))
         wrote = False
         if self.dirty_agents:
             self.unread()
@@ -557,6 +562,20 @@ class Spool:
         self.dropped.clear()
         self.dirty_messages = False
         return wrote
+
+    def batch(self, full=False):
+        """What changed, for the powos-agents module's `sync` (apps/agents): §3 rows as the spool has them. [full]:
+        everything (the first batch, or after the server was unreachable)."""
+        b = {}
+        if full or self.dirty_agents:
+            st = self.snapshot()
+            b["state"] = {"agents": st["agents"], "tasks": st["tasks"], "asks": st["asks"]}
+        rings = self.rings.keys() if full else self.dirty_rings
+        b["events"] = {aid: self.rings[aid] for aid in rings if aid in self.rings}
+        b["dropped"] = sorted(self.dropped)
+        if full or self.dirty_messages:
+            b["messages"] = self.messages
+        return b
 
     def bundle(self):
         """Everything, smaller: what the mirror sends (the last 20 events per agent, the last 50 messages)."""
@@ -741,6 +760,58 @@ class Mirror:
 # ---- main --------------------------------------------------------------------------------------------------------
 
 
+class Stdb:
+    """The device's SpacetimeDB (docs/POWOS-APPS-FEASIBILITY.md §8) as a second target: each batch also goes to the
+    powos-agents module's `sync` (apps/agents) over the server's HTTP call endpoint, as the PowOS user's CLI identity
+    (the module's owner). Best effort: the spool stays the source of truth; while the server is unreachable nothing is
+    sent, and the next batch that gets through is a full one. POWOS_AGENTS_STDB=0 turns it off."""
+
+    def __init__(self, host):
+        self.host = host
+        self.url = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410") + "/v1/database/powos-agents/call/sync"
+        self.full = True
+        self.token = None
+        self.retry_at = 0.0
+        self.warned = False
+
+    def _token(self):
+        p = os.path.expanduser("~/.config/spacetime/cli.toml")
+        try:
+            with open(p) as f:
+                for line in f:
+                    k, _, v = line.partition("=")
+                    if k.strip() == "spacetimedb_token":
+                        return v.strip().strip('"')
+        except OSError:
+            pass
+        return None
+
+    def send(self, batch):
+        import urllib.request
+
+        if time.monotonic() < self.retry_at:
+            self.full = True
+            return
+        self.token = self.token or self._token()
+        if not self.token:
+            self.retry_at = time.monotonic() + 60
+            return
+        body = json.dumps([self.host, json.dumps(batch, separators=(",", ":"))]).encode()
+        req = urllib.request.Request(self.url, data=body, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": f"Bearer {self.token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=2) as r:
+                r.read()
+            self.full = False
+            self.warned = False
+        except Exception as e:  # down, not published, or refused: the spool has it all
+            self.full = True
+            self.retry_at = time.monotonic() + 30
+            if not self.warned:
+                print(f"powos-agentsd: SpacetimeDB sync off until it answers ({e})", file=sys.stderr)
+                self.warned = True
+
+
 def main():
     import argparse
 
@@ -770,6 +841,7 @@ def main():
 
     s = Spool(spool, host_name())
     mirror = Mirror(args.mirror, s.host) if args.mirror else None
+    stdb = None if os.environ.get("POWOS_AGENTS_STDB", "1") == "0" else Stdb(s.host)
     watch = None if args.once else Watch(q)
     last_event = time.monotonic()
     next_sweep = time.monotonic()
@@ -790,7 +862,7 @@ def main():
             if time.monotonic() >= next_sweep:
                 s.sweep(now_ms())
                 next_sweep = time.monotonic() + SWEEP_S
-            changed = s.flush()
+            changed = s.flush(stdb)
             if mirror and changed:
                 mirror.wanted = True
             if mirror and mirror.due():
