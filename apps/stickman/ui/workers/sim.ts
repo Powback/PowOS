@@ -14,6 +14,7 @@
 //               { type: "run", on, fps? }               frames on (the tile is on screen) or off; fps: at most 30
 //               { type: "size", width, height, dpr }    { type: "colors", colors }
 //               { type: "alive" }                       the page is really drawn (about once a second while on)
+//               { type: "card", card }                  the card around the canvas (CSS px), for the native surface
 //               { type: "target", native }              frames to the native surface (as display lists) or the canvas
 //               { type: "nodraw", on }                  checks only: simulate without drawing
 //               { type: "stats" }                       answers { type: "stats", lesson, checkpoint, prof, ... } (checks)
@@ -46,7 +47,7 @@ type Meta = {
 type World = { W: number; H: number; pieces: number[][]; phi: number; spawn: V2; wps: V2[]; pit_z?: number };
 type Lesson = { name: string; episode_s: number; worlds: World[] };
 type Seg = { a: V2; b: V2 };
-type Colors = { fg: string; muted: string; accent: string };
+type Colors = { fg: string; muted: string; accent: string; card?: string; cardAlpha?: number };
 
 let canvas: OffscreenCanvas;
 let ctx: OffscreenCanvasRenderingContext2D;
@@ -453,23 +454,48 @@ class CanvasPen implements Pen {
     this.g.fill();
   }
 }
-/** ShellNative.kt Tile.draw's format: "<w> <h>" then ops, numbers rounded to 0.1 px. */
+/**
+ * ShellNative.kt Tile.draw's format: "<w> <h>" then ops, numbers rounded to 0.1 px. The native surface covers the
+ * whole card (the page's card is see-through over it, so the surface is drawn under no tint): it starts with the card's
+ * own fill, rounded as the card is, and the stage is drawn offset into it.
+ */
+type Card = { w: number; h: number; x: number; y: number; r: number };
+let card: Card | null = null; // the card around the canvas, CSS px (the canvas at x, y in it)
 class ListPen implements Pen {
   private out: string[];
-  constructor(w: number, h: number) { this.out = [String(w), String(h)]; }
+  private ox = 0;
+  private oy = 0;
+  constructor(w: number, h: number, d: number, c: Card | null, col: Colors) {
+    if (!c) { this.out = [String(w), String(h)]; return; }
+    const cw = c.w * d, ch = c.h * d, r = Math.min(c.r * d, cw / 2, ch / 2);
+    this.out = [this.n(cw), this.n(ch)];
+    if (col.card) {
+      const pts: number[] = [];
+      const corner = (cx: number, cy: number, a0: number) => {
+        for (let k = 0; k <= 6; k++) { const a = a0 + (k / 6) * (Math.PI / 2); pts.push(cx + r * Math.cos(a), cy + r * Math.sin(a)); }
+      };
+      corner(cw - r, r, -Math.PI / 2); corner(cw - r, ch - r, 0); corner(r, ch - r, Math.PI / 2); corner(r, r, Math.PI);
+      this.poly(col.card, col.cardAlpha ?? 1, pts);
+    }
+    this.ox = c.x * d; this.oy = c.y * d;
+  }
   private n = (v: number) => String(Math.round(v * 10) / 10);
   private a = (v: number) => String(Math.round(v * 100) / 100);
+  private xy = (v: number[]) => v.map((p, i) => this.n(p + (i % 2 ? this.oy : this.ox)));
   rect(c: string, alpha: number, width: number, x: number, y: number, w: number, h: number) {
-    this.out.push("R", c, this.a(alpha), this.n(width), this.n(x), this.n(y), this.n(w), this.n(h));
+    this.out.push("R", c, this.a(alpha), this.n(width), this.n(x + this.ox), this.n(y + this.oy), this.n(w), this.n(h));
   }
   lines(c: string, alpha: number, width: number, xy: number[]) {
-    if (xy.length) this.out.push("S", c, this.a(alpha), this.n(width), String(xy.length / 4), ...xy.map(this.n));
+    if (xy.length) this.out.push("S", c, this.a(alpha), this.n(width), String(xy.length / 4), ...this.xy(xy));
   }
   circles(c: string, alpha: number, xyr: number[]) {
-    if (xyr.length) this.out.push("C", c, this.a(alpha), String(xyr.length / 3), ...xyr.map(this.n));
+    if (!xyr.length) return;
+    const v: string[] = [];
+    for (let i = 0; i < xyr.length; i += 3) v.push(this.n(xyr[i] + this.ox), this.n(xyr[i + 1] + this.oy), this.n(xyr[i + 2]));
+    this.out.push("C", c, this.a(alpha), String(xyr.length / 3), ...v);
   }
   poly(c: string, alpha: number, xy: number[]) {
-    this.out.push("P", c, this.a(alpha), String(xy.length / 2), ...xy.map(this.n));
+    this.out.push("P", c, this.a(alpha), String(xy.length / 2), ...this.xy(xy));
   }
   text() { return this.out.join(" "); }
 }
@@ -499,28 +525,27 @@ function draw() {
   });
   if (noDraw || unchanged(key, Wp, Hp)) { prof.skipped++; return; }
   shown = key; shownWp = Wp; shownHp = Hp; force = false;
-  const pen: Pen = native ? new ListPen(Wp, Hp) : new CanvasPen(ctx, Wp, Hp);
-  // the room (its floor and walls) faint, the course's pieces in the foreground colour
-  pen.rect(colors.muted, 0.35, 0.04 * scale, X(0), Z(H), W * scale, H * scale);
-  pen.lines(colors.fg, 0.85, 0.06 * scale, segs.flatMap((sg) => [X(sg.a[0]), Z(sg.a[1]), X(sg.b[0]), Z(sg.b[1])]));
-  // the checkpoints still to come, faint; the next one, and the finish flag, in the accent
+  const pen: Pen = native ? new ListPen(Wp, Hp, dpr, card, colors) : new CanvasPen(ctx, Wp, Hp);
+  // One ink, solid: the figure, the floor and the course in the theme's foreground at full alpha (faint or blended
+  // lines read differently over every wallpaper); only the checkpoints and the finish in the accent.
+  const ink = colors.fg;
+  pen.lines(ink, 1, 0.06 * scale, [X(0), Z(0), X(W), Z(0), ...segs.flatMap((sg) => [X(sg.a[0]), Z(sg.a[1]), X(sg.b[0]), Z(sg.b[1])])]);
   const dots: number[] = [];
-  for (let i = wpI + 1; i < route.length; i++) dots.push(X(route[i][0]), Z(route[i][1]), 0.08 * scale);
-  pen.circles(colors.accent, 0.35, dots);
+  for (let i = wpI + 1; i < route.length; i++) dots.push(X(route[i][0]), Z(route[i][1]), 0.07 * scale);
+  pen.circles(colors.accent, 1, dots);
   const f = route[route.length - 1];
-  pen.lines(colors.muted, 1, 0.03 * scale, [X(f[0]), Z(f[1] - 0.55), X(f[0]), Z(f[1] + 0.45)]);
+  pen.lines(ink, 1, 0.03 * scale, [X(f[0]), Z(f[1] - 0.55), X(f[0]), Z(f[1] + 0.45)]);
   pen.poly(colors.accent, 1, [X(f[0]), Z(f[1] + 0.45), X(f[0] + 0.35), Z(f[1] + 0.33), X(f[0]), Z(f[1] + 0.21)]);
   pen.circles(colors.accent, 1, [X(coin[0]), Z(coin[1]), 0.15 * scale]);
-  // the figure, Pivot style: far limbs (_l) behind and muted, then torso and head, then near limbs (_r)
+  // the figure, Pivot style: far limbs (_l) drawn first and a little thinner, then torso and head, then near limbs
   const order = (n: string) => (n.endsWith("_l") ? 0 : n.endsWith("_r") ? 2 : 1);
   for (const p of [...meta.draw].sort((p, q) => order(p.name) - order(q.name))) {
     const far = order(p.name) === 0;
-    const c = far ? colors.muted : colors.fg;
     const a = bodyPoint(p.body, p.a);
-    if (p.kind === "circle") pen.circles(c, 1, [X(a[0]), Z(a[1]), (p.name === "head" ? p.r * 1.15 : p.r * 1.2) * scale]);
+    if (p.kind === "circle") pen.circles(ink, 1, [X(a[0]), Z(a[1]), (p.name === "head" ? p.r * 1.15 : p.r * 1.2) * scale]);
     else {
       const b = bodyPoint(p.body, p.b);
-      pen.lines(c, 1, (p.r * 2 + (far ? 0 : 0.02)) * scale, [X(a[0]), Z(a[1]), X(b[0]), Z(b[1])]);
+      pen.lines(ink, 1, (p.r * 2 + (far ? -0.01 : 0.02)) * scale, [X(a[0]), Z(a[1]), X(b[0]), Z(b[1])]);
     }
   }
   if (pen instanceof ListPen) (self as any).postMessage({ type: "frame", frame: pen.text() });
@@ -622,6 +647,10 @@ self.onmessage = async (e: MessageEvent) => {
   } else if (m.type === "colors") {
     if (JSON.stringify(m.colors) !== JSON.stringify(colors)) force = true;
     colors = m.colors;
+  } else if (m.type === "card") {
+    card = m.card;
+    force = true;
+    if (ready && native) draw();
   } else if (m.type === "target") {
     // to the native surface (the canvas emptied: it'd show over it) or back to the canvas; drawn at once either way
     if (m.native !== native) {
