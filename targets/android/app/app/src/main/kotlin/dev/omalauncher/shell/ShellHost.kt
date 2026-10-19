@@ -46,8 +46,10 @@ class ShellHost(
     private val mode: String? = null,
 ) {
     private val main = Handler(Looper.getMainLooper())
-    private val watchers = mutableListOf<FileObserver>()
     private val overrides get() = File(context.filesDir, "shell")
+
+    /** Where the override folder is (HotReload watches it). */
+    internal val filesDir: File get() = context.filesDir
     private val devUrlFile get() = File(context.filesDir, "shell-dev-url")
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -80,51 +82,19 @@ class ShellHost(
             v.onApplyWindowInsets(insets)
             WindowInsets.CONSUMED
         }
-        watch(overrides)
-        // The override folder deleted and made again (a reset): watch the new one - the old watchers went with it.
-        watchers +=
-            object : FileObserver(context.filesDir, CREATE or MOVED_TO) {
-                override fun onEvent(
-                    event: Int,
-                    path: String?,
-                ) {
-                    if (path == overrides.name) main.post { watch(overrides) }
-                }
-            }.also { it.startWatching() }
+        HotReload.add(this)
         val page = devUrl() ?: "$ORIGIN/index.html"
         web.loadUrl(mode?.let { "$page?mode=$it" } ?: page)
     }
 
     fun destroy() {
-        watchers.forEach { it.stopWatching() }
+        HotReload.remove(this)
         bridge.close()
         web.destroy()
     }
 
     private fun devUrl(): String? =
         devUrlFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-
-    /** Hot reload: every directory of the override folder, since FileObserver isn't recursive. */
-    private fun watch(dir: File) {
-        val observer =
-            object : FileObserver(dir, CLOSE_WRITE or MOVED_TO or DELETE or CREATE) {
-                override fun onEvent(
-                    event: Int,
-                    path: String?,
-                ) {
-                    val file = File(dir, path ?: return)
-                    if (event and CREATE != 0 && file.isDirectory) main.post { watch(file) }
-                    if (event and (CLOSE_WRITE or MOVED_TO or DELETE) != 0) {
-                        val changed = file.relativeTo(overrides).path
-                        Log.i(TAG, "changed: $changed")
-                        bridge.emit("files.changed", mapOf("path" to changed))
-                    }
-                }
-            }
-        observer.startWatching()
-        watchers += observer
-        dir.listFiles()?.filter { it.isDirectory }?.forEach(::watch)
-    }
 
     /** Serves [ORIGIN]: the shell's files, and app icons at /_icon/<key>. */
     private inner class Client : WebViewClient() {
@@ -239,4 +209,71 @@ class ShellHost(
         /** Where the page lives: never resolved, every request is answered from the app. */
         const val ORIGIN = "https://shell.powos"
     }
+}
+
+/**
+ * Hot reload, for every page the process shows (home, the shade, the lock screen, the switcher, the assistant): one
+ * watcher on the override folder, its changes to each [ShellHost] ("files.changed"). One, not one per page: FileObserver
+ * keeps a single inotify watch per path in a process, so a second observer on the folder took the events from the
+ * first - only the page made last reloaded.
+ */
+private object HotReload {
+    private val main = Handler(Looper.getMainLooper())
+    private val hosts = mutableSetOf<ShellHost>()
+    private val watchers = mutableListOf<FileObserver>()
+    private var overrides: File? = null
+
+    fun add(host: ShellHost) {
+        hosts += host
+        if (overrides != null) return
+        val dir = File(host.filesDir, "shell").also { overrides = it }
+        watch(dir)
+        // The override folder deleted and made again (a reset): watch the new one - the old watchers went with it.
+        watchers +=
+            object : FileObserver(host.filesDir, CREATE or MOVED_TO) {
+                override fun onEvent(
+                    event: Int,
+                    path: String?,
+                ) {
+                    if (path == dir.name) main.post { watch(dir) }
+                }
+            }.also { it.startWatching() }
+    }
+
+    fun remove(host: ShellHost) {
+        hosts -= host
+    }
+
+    /** Every directory of the override folder, since FileObserver isn't recursive. */
+    private fun watch(dir: File) {
+        val observer =
+            object : FileObserver(dir, CLOSE_WRITE or MOVED_TO or DELETE or CREATE) {
+                override fun onEvent(
+                    event: Int,
+                    path: String?,
+                ) {
+                    val file = File(dir, path ?: return)
+                    if (event and CREATE != 0 && file.isDirectory) {
+                        main.post {
+                            watch(file)
+                            // Written before its watcher started (a push making the folder, then a file in it at once):
+                            // those changes, which no watcher saw.
+                            file.walkTopDown().filter { it.isFile }.forEach(::changed)
+                        }
+                    }
+                    if (event and (CLOSE_WRITE or MOVED_TO or DELETE) != 0) main.post { changed(file) }
+                }
+            }
+        observer.startWatching()
+        watchers += observer
+        dir.listFiles()?.filter { it.isDirectory }?.forEach(::watch)
+    }
+
+    private fun changed(file: File) {
+        val path = file.relativeTo(overrides ?: return).path
+        Log.i(TAG, "changed: $path (${hosts.size} pages)")
+        for (h in hosts.toList()) h.bridge.emit("files.changed", mapOf("path" to path))
+    }
+
+    private const val TAG = "PowosShell"
 }

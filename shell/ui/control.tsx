@@ -1,0 +1,226 @@
+/**
+ * The control center: PowOS's in place of OnePlus's (a pull on the status bar's right half, or "controls" on the
+ * notification panel). Everything the phone's own one has, in its order (QuickState.tiles is SystemUI's tile list): Wi-Fi
+ * and mobile data as the two big cards, the brightness and volume sliders, then the tiles. A tap switches a tile (or
+ * runs it: screenshot, lock), a long press opens its page in Settings. It lives in the notification panel's place, so the
+ * pull, the finger following it and the swipe up to shut it are the panel's own (gesture.ts).
+ */
+import { useEffect, useRef, useState } from "preact/hooks";
+import { signal } from "@preact/signals";
+import { powos } from "../bridge.ts";
+import { notif, panel } from "../state.ts";
+import type { QuickState, QuickTile } from "../types.ts";
+
+/** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
+export const quick = signal<QuickState>({
+  torch: null,
+  dnd: null,
+  tiles: [],
+  brightness: { value: 0.5, auto: false },
+  volume: { value: 0.5, ringer: 2 },
+});
+powos.on("qs.changed", (q: QuickState) => (quick.value = { ...q }));
+powos.qs.state().then((q) => (quick.value = q));
+
+/** Held this long (ms), a tile opens its page instead. */
+const HOLD = 450;
+
+/** The big cards on top, as OnePlus's. */
+const CARDS = ["wifi", "cell"];
+
+/** Tiles that leave the panel (a page, an app, a screenshot of what's under it): it shuts first. */
+const LEAVES = new Set([
+  "screenshot",
+  "screenrecord",
+  "calculator",
+  "qr_code_scanner",
+  "controls",
+  "wallet",
+  "hotspot",
+  "lockscreen",
+]);
+
+const RINGER = ["silent", "vibrate", "ring"];
+
+const update = (s: QuickState) => (quick.value = { ...s });
+
+function shut() {
+  notif.value = false;
+}
+
+/** A tile's tap and long press. */
+function usePress(t: QuickTile) {
+  const timer = useRef(0);
+  const held = useRef(false);
+  const open = () => {
+    held.current = true;
+    shut();
+    powos.qs.open(t.id);
+  };
+  return {
+    onPointerDown: () => {
+      held.current = false;
+      timer.current = window.setTimeout(open, HOLD);
+    },
+    onPointerUp: () => clearTimeout(timer.current),
+    onPointerCancel: () => clearTimeout(timer.current),
+    onPointerLeave: () => clearTimeout(timer.current),
+    onContextMenu: (e: Event) => e.preventDefault(),
+    onClick: () => {
+      if (held.current) return;
+      // A third-party tile PowOS can't switch yet: its own settings, or its app.
+      if (t.app) return (shut(), powos.qs.open(t.id));
+      if (LEAVES.has(t.id) || t.on == null) shut();
+      powos.qs.toggle(t.id).then(update);
+    },
+  };
+}
+
+function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
+  return (
+    <button
+      type="button"
+      class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""}`}
+      {...usePress(t)}
+    >
+      <span class="cc-label">{t.label}</span>
+      {big && (
+        <span class="cc-detail">
+          {t.detail ?? (t.on == null ? "" : t.on ? "on" : "off")}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** A slider sending its value at most once a frame while it moves. */
+function Slider({
+  name,
+  value,
+  label,
+}: {
+  name: "brightness" | "volume";
+  value: number;
+  label: string;
+}) {
+  const [local, setLocal] = useState<number | null>(null);
+  const frame = useRef(0);
+  const next = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  const send = (v: number) => {
+    next.current = v;
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      powos.qs.set(name, next.current).then(update);
+    });
+  };
+  const shown = local ?? value;
+  return (
+    <label class="cc-slider" style={{ "--v": String(shown) }}>
+      <span class="cc-label">{label}</span>
+      <input
+        type="range"
+        min={0}
+        max={1000}
+        value={Math.round(shown * 1000)}
+        onInput={(e) => {
+          const v = Number((e.currentTarget as HTMLInputElement).value) / 1000;
+          setLocal(v);
+          send(v);
+        }}
+        onChange={() => setLocal(null)}
+      />
+    </label>
+  );
+}
+
+function Clock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(new Date()), 10_000);
+    return () => clearInterval(t);
+  }, []);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return (
+    <span class="cc-clock">
+      {two(now.getHours())}:{two(now.getMinutes())}
+      <span class="muted">
+        {" "}
+        {now.toLocaleDateString(undefined, {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+        })}
+      </span>
+    </span>
+  );
+}
+
+export function ControlCenter() {
+  const q = quick.value;
+  const tiles = q.tiles ?? [];
+  const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter(
+    (t): t is QuickTile => !!t,
+  );
+  const rest = tiles.filter((t) => !CARDS.includes(t.id));
+  const b = q.brightness ?? { value: 0.5, auto: false };
+  const v = q.volume ?? { value: 0.5, ringer: 2 };
+  return (
+    <div class="cc">
+      <div class="notif-bar">
+        <Clock />
+        <span class="notif-actions">
+          <button type="button" onClick={() => (panel.value = "notifications")}>
+            notifications
+          </button>
+          {/* OnePlus's own, for what PowOS's doesn't have yet. */}
+          <button
+            type="button"
+            onClick={() => powos.system.notifications(true)}
+          >
+            system
+          </button>
+          <button
+            type="button"
+            onClick={() => (shut(), powos.qs.open("settings"))}
+          >
+            settings
+          </button>
+        </span>
+      </div>
+      <div class="cc-cards">
+        {cards.map((t) => (
+          <Tile key={t.id} t={t} big />
+        ))}
+      </div>
+      <div class="cc-sliders">
+        <Slider name="brightness" value={b.value} label="brightness" />
+        <button
+          type="button"
+          class={`cc-chip ${b.auto ? "on" : ""}`}
+          onClick={() =>
+            powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)
+          }
+        >
+          auto
+        </button>
+        <Slider name="volume" value={v.value} label="volume" />
+        <button
+          type="button"
+          class="cc-chip"
+          onClick={() =>
+            powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)
+          }
+        >
+          {RINGER[v.ringer] ?? "ring"}
+        </button>
+      </div>
+      <div class="cc-grid">
+        {rest.map((t) => (
+          <Tile key={t.id} t={t} />
+        ))}
+      </div>
+    </div>
+  );
+}

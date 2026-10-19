@@ -37,8 +37,9 @@ import kotlin.math.abs
  *   _QUICK_SETTINGS). They're kept per binder token, and the token is this process's StatusBarManager's: if PowOS dies,
  *   the system drops them and SystemUI's shade is back by itself. Lifted while the lock screen shows (its shade stays
  *   SystemUI's until PowOS has a lock screen face), and lent to SystemUI when the page asks for the system's own
- *   panel (system.notifications: its quick settings, which PowOS can't show yet) until that one is closed again - and
- *   for a pull on the status bar's right half, which is OnePlus's control center, SystemUI's as on the stock phone.
+ *   panel (system.notifications: OnePlus's control center, from PowOS's control center's own button) until that one is
+ *   closed again. A pull on the status bar's right half brings PowOS's control center (shell/ui/control.tsx), the rest
+ *   its notifications ("shade.panel").
  * - The pull: PowOS's gesture input ([pull], on the recents provider's input monitor - GestureMonitor) sees a finger go
  *   down on the status bar without taking it, and takes it (the status bar gets a cancel) only once it's dragged down:
  *   taps on the status bar stay SystemUI's (OnePlus's live capsules). Dragged down, the finger goes to the page
@@ -240,34 +241,16 @@ class ShadeHost(
      */
     val pull =
         object : GestureConsumer {
-            /** The pull began on the status bar's right half: OnePlus's control center, SystemUI's (as on the stock phone). */
-            private var control = false
-            private var controlOpened = false
-
             override fun onDown(e: MotionEvent): Boolean {
                 if (!pullable(e.rawY)) return false
-                control = e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
-                controlOpened = false
-                if (!control) pulling.down(e) else pulling.downOnly(e)
+                // The status bar's right half pulls the control center, the rest the notifications - as on OnePlus's.
+                val control = e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
+                host?.bridge?.emit("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
+                pulling.down(e)
                 return true
             }
 
-            override fun onEvent(e: MotionEvent): GestureConsumer.Verdict =
-                if (control) controlEvent(e) else shadeEvent(e)
-
-            private fun controlEvent(e: MotionEvent): GestureConsumer.Verdict {
-                if (controlOpened) return GestureConsumer.Verdict.DROP
-                if (e.actionMasked != MotionEvent.ACTION_MOVE) return GestureConsumer.Verdict.DROP
-                return when (pulling.direction(e)) {
-                    PullMove.STARTED -> {
-                        controlOpened = true
-                        openSystemPanel(settings = true)
-                        GestureConsumer.Verdict.TAKE
-                    }
-                    PullMove.NOT_A_PULL -> GestureConsumer.Verdict.DROP
-                    PullMove.NONE -> GestureConsumer.Verdict.FOLLOW
-                }
-            }
+            override fun onEvent(e: MotionEvent): GestureConsumer.Verdict = shadeEvent(e)
 
             private fun shadeEvent(e: MotionEvent): GestureConsumer.Verdict =
                 when (e.actionMasked) {
@@ -417,23 +400,6 @@ class ShadeHost(
             velocity = VelocityTracker.obtain().also { it.addMovement(e) }
         }
 
-        /** A finger down to be told only its direction ([direction]): nothing follows it. */
-        fun downOnly(e: MotionEvent) {
-            x0 = e.rawX
-            y0 = e.rawY
-        }
-
-        /** Down past the slop (a pull), sideways or up (not one), or not yet either. */
-        fun direction(e: MotionEvent): PullMove {
-            val dx = e.rawX - x0
-            val dy = e.rawY - y0
-            return when {
-                dy > slop && dy >= abs(dx) -> PullMove.STARTED
-                abs(dx) > slop || dy < -slop -> PullMove.NOT_A_PULL
-                else -> PullMove.NONE
-            }
-        }
-
         fun move(e: MotionEvent): PullMove {
             velocity?.addMovement(e)
             val dx = e.rawX - x0
@@ -535,7 +501,7 @@ class ShadeHost(
         /** Lifted flags first, then the expand. */
         private const val EXPAND_DELAY_MS = 80L
 
-        /** The status bar's right part (from this fraction of its width) pulls the control center, as on OnePlus's own. */
+        /** The status bar's right part (from this fraction of its width) pulls the control center, as on OnePlus's. */
         private const val CONTROL_SPLIT = 0.5f
     }
 }

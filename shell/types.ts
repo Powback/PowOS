@@ -17,9 +17,20 @@ export interface App {
 }
 
 /** CSS px; [keyboard] is the soft keyboard's height (0 while it's down). */
-export interface Insets { top: number; bottom: number; left: number; right: number; keyboard: number; }
+export interface Insets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+  keyboard: number;
+}
 
-export interface Cell { x: number; y: number; w: number; h: number; }
+export interface Cell {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
 /** Something on a home page: a widget, a pinned app or a folder of them. */
 export interface HomeItem {
@@ -41,12 +52,33 @@ export interface HomeItem {
   apps?: { key: string; label: string; app: string }[];
 }
 
-export interface Home { columns: number; pages: number[]; items: HomeItem[]; }
+export interface Home {
+  columns: number;
+  pages: number[];
+  items: HomeItem[];
+}
 
 /** The quick settings that switch here: on or off, null where the phone can't (no flashlight, no access). */
 export interface QuickState {
   torch: boolean | null;
   dnd: boolean | null;
+  /** The control center's tiles, in the phone's own order. */
+  tiles: QuickTile[];
+  /** 0..1 (perceptual), and whether the phone sets it itself. */
+  brightness: { value: number; auto: boolean };
+  /** Media volume 0..1; the ringer: 0 silent, 1 vibrate, 2 ring. */
+  volume: { value: number; ringer: number };
+}
+
+/** One control center tile: a switch (on true/false) or an action/page (on null). */
+export interface QuickTile {
+  id: string;
+  label: string;
+  on: boolean | null;
+  /** A line under the label (the carrier). */
+  detail: string | null;
+  /** A third-party tile's app (custom(...) ids). */
+  app?: string;
 }
 
 /** The screen the assistant was opened over. */
@@ -169,11 +201,28 @@ export interface Bridge {
     watch(key: string, screen?: boolean): Promise<void>;
     unwatch(key: string, screen?: boolean): Promise<void>;
     /** Runs a handler (onTap, onDrag, onChange) of element [id] with its numbers (x, y, dx, dy in dp). */
-    fire(key: string, screen: boolean, id: string, name: string, args: number[]): Promise<void>;
+    fire(
+      key: string,
+      screen: boolean,
+      id: string,
+      name: string,
+      args: number[],
+    ): Promise<void>;
     /** The tile's size: cells (cols, rows) and dp. */
-    size(key: string, cols: number, rows: number, width: number, height: number): Promise<void>;
+    size(
+      key: string,
+      cols: number,
+      rows: number,
+      width: number,
+      height: number,
+    ): Promise<void>;
     /** A Canvas's size in dp: its drawing is evaluated at it. */
-    canvas(key: string, id: string, width: number, height: number): Promise<void>;
+    canvas(
+      key: string,
+      id: string,
+      width: number,
+      height: number,
+    ): Promise<void>;
     /** The home page on screen (a page number): widgets on it and beside it run their sources. */
     page(page: number): Promise<void>;
     /** A tap on the tile that no element took: the widget's own onTap (often screen(), opening it full size). */
@@ -209,7 +258,14 @@ export interface Bridge {
      * Starts [id] unless it runs ([restart]: also if it ended), running [command] (null: PowOS's tmux picker, or a
      * login shell); [owner] is the widget it ends with. Answers its state, with what it wrote lately to start from.
      */
-    open(id: string, owner: string | null, command: string | null, cols: number, rows: number, restart?: boolean): Promise<TermState>;
+    open(
+      id: string,
+      owner: string | null,
+      command: string | null,
+      cols: number,
+      rows: number,
+      restart?: boolean,
+    ): Promise<TermState>;
     write(id: string, data: string): Promise<void>;
     resize(id: string, cols: number, rows: number): Promise<void>;
     close(id: string): Promise<void>;
@@ -244,20 +300,29 @@ export interface Bridge {
     /** The last moments that changed, tiled into one image where PowOS sees it; its path (null: nothing yet). */
     filmstrip(): Promise<string | null>;
     /** Where the page takes touches (live mode: its bar, CSS px); null: everywhere. */
-    touchable(rect: { left: number; top: number; width: number; height: number } | null): Promise<void>;
+    touchable(
+      rect: { left: number; top: number; width: number; height: number } | null,
+    ): Promise<void>;
   };
   /** The lock screen's face (index.html?mode=lock): unlocking is Android's (its PIN pad, the fingerprint). */
   lock: {
     unlock(): Promise<void>;
   };
   /**
-   * The notification panel's quick settings: the flashlight and do not disturb switch here (null: unavailable),
-   * Wi-Fi, Bluetooth, internet and settings open Android's own panels. "qs.changed" brings the state again.
+   * The control center (and the notification panel's row): every tile the phone's own control center has, switched
+   * here, and its sliders. "qs.changed" brings the state again.
    */
   qs: {
     state(): Promise<QuickState>;
-    toggle(name: "torch" | "dnd"): Promise<QuickState>;
-    open(name: "wifi" | "bluetooth" | "internet" | "settings"): Promise<void>;
+    /** A tile tapped: a switch flipped, an action run (screenshot, lock), a page opened. */
+    toggle(name: string): Promise<QuickState>;
+    /** Android's own page for a tile (its long press), or wifi / bluetooth / internet / settings. */
+    open(name: string): Promise<void>;
+    /** A slider: "brightness" / "volume" 0..1, "auto-brightness" 0/1, "ringer" 0..1 (silent, vibrate, ring). */
+    set(
+      name: "brightness" | "volume" | "auto-brightness" | "ringer",
+      value: number,
+    ): Promise<QuickState>;
   };
   /**
    * The shade (index.html?mode=shade, in PowOS's system window above the status bar - the native shade host): the
@@ -321,12 +386,11 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "qs.changed" (QuickState), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "qs.changed" (QuickState), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
 }
-
 
 export interface TermState {
   running: boolean;
@@ -377,6 +441,10 @@ declare global {
   interface Window {
     powos?: Bridge;
     PowosHost?: { call(id: number, method: string, args: string): void };
-    __powosHost?: { resolve(id: number, v: unknown): void; reject(id: number, m: string): void; emit(e: string, d: unknown): void };
+    __powosHost?: {
+      resolve(id: number, v: unknown): void;
+      reject(id: number, m: string): void;
+      emit(e: string, d: unknown): void;
+    };
   }
 }

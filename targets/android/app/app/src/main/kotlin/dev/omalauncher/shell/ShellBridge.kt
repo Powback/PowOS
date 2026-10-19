@@ -172,6 +172,7 @@ class ShellBridge(
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))
+            "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
             "shade.closed" -> shade?.closed()
             "tasks.list" -> tasks()
             "tasks.open" -> dev.omalauncher.system.Tasks.open(context, a.getInt(0)).also { if (it) switcher?.close() }

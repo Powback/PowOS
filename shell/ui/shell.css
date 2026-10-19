@@ -836,6 +836,65 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   color: var(--color-foreground);
 }
 .qs-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+/* The control center (control.tsx): in the notification panel's place - the big Wi-Fi and data cards, the sliders, the tiles. */
+.cc { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 6px; }
+.cc-clock { font-size: var(--text-small); color: var(--color-foreground); }
+.cc-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.cc-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: 8px 10px;
+  text-align: left;
+  font: var(--text-small) var(--font);
+  text-transform: lowercase;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  color: var(--color-foreground);
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.cc-tile.big { min-height: 64px; }
+.cc-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+.cc-tile:active { filter: brightness(1.15); }
+.cc-label { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; }
+.cc-slider .cc-label, .cc-tile.big .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.cc-detail { opacity: 0.7; font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-sliders { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.cc-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  border-radius: calc(var(--radius) * 1.5);
+  border: var(--frame) solid var(--color-border);
+  background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--color-surface) 0);
+  overflow: hidden;
+}
+.cc-slider .cc-label {
+  position: absolute;
+  left: 12px;
+  font-size: var(--text-small);
+  color: var(--color-foreground);
+  mix-blend-mode: difference;
+  pointer-events: none;
+}
+.cc-slider input[type="range"] { appearance: none; -webkit-appearance: none; width: 100%; height: 100%; margin: 0; background: transparent; opacity: 0; touch-action: none; }
+.cc-chip {
+  font: var(--text-small) var(--font);
+  min-width: 64px;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  color: var(--color-foreground);
+}
+.cc-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 /* The switcher (switcher.tsx): the recent tasks side by side over the dimmed wallpaper, newest first. */
 html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-background) 72%, transparent); }
 .switcher {

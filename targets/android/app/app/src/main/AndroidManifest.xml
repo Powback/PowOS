@@ -10,6 +10,12 @@
     <!-- Speech input for the agent prompt bar; only recognized text reaches Linux. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Home's swipe down pulls the notification shade down. -->
+    <!-- The control center's state and sliders (shell/QuickSettings.kt). WRITE_SETTINGS is an app op, granted there. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
 
     <!-- PowOS as the recents provider (docs/NATIVE-SYSTEM-UI.md; the system module's recents overlay): granted by the

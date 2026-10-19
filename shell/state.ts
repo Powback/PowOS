@@ -14,7 +14,9 @@ export const recent = signal<string[]>([]);
 /** Apps pinned to the drawer's dock, in pin order. */
 export const dock = signal<string[]>([]);
 /** A pinned app being moved along the dock: which, where the finger is, and the slot it would drop into. */
-export const dockDrag = signal<{ key: string; x: number; slot: number } | null>(null);
+export const dockDrag = signal<{ key: string; x: number; slot: number } | null>(
+  null,
+);
 
 /** The home screen: pages of widgets, pinned apps and folders on a grid. */
 export const home = signal<Home>({ columns: 6, pages: [1], items: [] });
@@ -51,6 +53,8 @@ export const screen = signal<WidgetScreen>({ key: null });
 powos.on("widget.screen", (s: WidgetScreen) => (screen.value = s));
 /** The notification panel (notifications.tsx): down or not (a finger dragging it is gesture.ts's notifDrag). */
 export const notif = signal(false);
+/** What the pulled-down panel shows: the notifications or the control center (the status bar's right half's pull). */
+export const panel = signal<"notifications" | "control">("notifications");
 /** The open folder's key. */
 export const folder = signal<string | null>(null);
 /** An app's long-press menu: which app, and where (the pressed cell's box on screen). */
@@ -151,7 +155,11 @@ export function ask(text: string) {
 }
 
 export function setDocked(key: string, on: boolean) {
-  setDock(on ? [...dock.value.filter((k) => k !== key), key] : dock.value.filter((k) => k !== key));
+  setDock(
+    on
+      ? [...dock.value.filter((k) => k !== key), key]
+      : dock.value.filter((k) => k !== key),
+  );
 }
 
 /** The dock's apps, in this order. */
