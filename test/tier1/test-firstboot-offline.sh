@@ -27,7 +27,12 @@ check() { if ( eval "$2" ) >/dev/null 2>&1; then echo "  ok   - $1"; PASS=$((PAS
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIB="$ROOT/lib/install-system.sh"; [[ -f "$LIB" ]] || LIB=/usr/lib/powos/install-system.sh
-HWS=/usr/libexec/bazzite-hardware-setup
+HWS="${HWS:-/usr/libexec/bazzite-hardware-setup}"
+# The pure checks assume the script version that APPENDS amd_iommu=off on a
+# handheld; the replay below follows whatever version is actually installed.
+APPENDS=$(mktemp); echo 'NEEDED_KARGS+=("--append-if-missing=amd_iommu=off")' > "$APPENDS"
+DELETES=$(mktemp); echo 'NEEDED_KARGS+=("--delete-if-present=amd_iommu=off")' > "$DELETES"
+export ISV_HWS="$APPENDS"
 
 echo "== first boot needs no network =="
 
@@ -54,6 +59,10 @@ check "DMI fallback: a Deck OLED (Galileo) gets amd_iommu=off" \
       'd=$(mktemp -d); printf Galileo > "$d/product_name"
        o=$(ISV_DMI=$d ISV_HWSUPPORT=$d/absent isv_hardware_kargs)
        grep -qx "amd_iommu=off" <<< "$o"; r=$?; rm -rf "$d"; exit $r'
+check "a Deck gets NO amd_iommu=off when the image's script deletes that karg" \
+      'd=$(mktemp -d); printf Jupiter > "$d/product_name"
+       o=$(ISV_HWS="$DELETES" ISV_DMI=$d ISV_HWSUPPORT=$d/absent isv_hardware_kargs)
+       grep -qx "amd_iommu=off" <<< "$o" && r=1 || r=0; rm -rf "$d"; exit $r'
 check "a desktop does NOT get amd_iommu=off" \
       'd=$(mktemp -d); printf "System Product Name" > "$d/product_name"
        o=$(ISV_DMI=$d ISV_HWSUPPORT=$d/absent isv_hardware_kargs)
@@ -105,7 +114,7 @@ else
     # stubs the replay does, or we compare a desktop's answer against a
     # handheld's question and the mismatch looks like a broken fix.
     deck_kargs() {
-        ISV_DMI="$DMI" ISV_HWSUPPORT="$STUB" ISV_PPFEATUREMASK_FILE="$PPF" \
+        ISV_HWS="$HWS" ISV_DMI="$DMI" ISV_HWSUPPORT="$STUB" ISV_PPFEATUREMASK_FILE="$PPF" \
             isv_hardware_kargs
     }
 
@@ -149,6 +158,7 @@ else
           'miss=$(sim "$POST" seed); [ "$miss" = 0 ]'
     rm -rf "$STUB" "$PPF" "$DMI"
 fi
+rm -f "$APPENDS" "$DELETES"
 
 echo
 echo "== Results: $PASS passed, $FAIL failed =="

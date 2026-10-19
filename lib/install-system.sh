@@ -262,6 +262,21 @@ isv__is_handheld() {
     return 1
 }
 
+# What the image's own bazzite-hardware-setup does about amd_iommu=off on a
+# handheld: "append" (through 44.20260914) or "delete" (the Bazzite after it
+# reversed the karg, so a pre-applied one would be the thing left to undo on
+# first boot -- with the network). We run from the live image, so the script
+# read here is the one that will run on first boot. Unreadable: the historical
+# append, which is also what the pure unit checks assume.
+isv__script_iommu_mode() {
+    local f="${ISV_HWS:-/usr/libexec/bazzite-hardware-setup}"
+    if [[ -r "$f" ]] && grep -q 'delete-if-present=amd_iommu=off' "$f" 2>/dev/null; then
+        echo delete
+    else
+        echo append
+    fi
+}
+
 # Build the --karg argument list for bootc from isv_hardware_kargs.
 # Extracted because both install paths need it and inlining it twice added
 # branch count to two already-large functions for no benefit.
@@ -301,7 +316,7 @@ isv_hardware_kargs() {
     # amd_iommu=off — Valve handhelds plus the Lenovo/ASUS list.
     if isv__is_valve || [[ -n "$id" && \
        ":83N0:83N1:83E1:ROG Ally RC71L:ROG Ally X RC72LA:" == *":$id:"* ]]; then
-        echo "amd_iommu=off"
+        [[ "$(isv__script_iommu_mode)" == delete ]] || echo "amd_iommu=off"
     fi
 
     # bluetooth.disable_ertm=1 is added on EVERY machine, not just handhelds.
