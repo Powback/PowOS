@@ -14,6 +14,7 @@
  * pointercancel once the browser scrolls something.
  */
 import { computed, effect, signal } from "@preact/signals";
+import { powos } from "../bridge.ts";
 import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, selected } from "../state.ts";
 
 const SLOP = 10;
@@ -32,6 +33,21 @@ export const notifOpen = computed(() => notifShown() > 0);
 export const notifDragging = computed(() => notifDrag.value != null);
 /** While a finger drags the pages: their offset in px; null otherwise. */
 export const pageDrag = signal<number | null>(null);
+
+/** Takes the keyboard down: blurs the focused field and hides the IME. A page or an overlay that changes leaves no keyboard behind. */
+function dropKeyboard() {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el || !el.matches?.("input, textarea, [contenteditable]")) return;
+  el.blur();
+  powos.keyboard.hide();
+}
+// The page, the shade/control panel opening or switching: the same, whatever started it (a swipe, a tap, the bridge).
+let seen = "";
+effect(() => {
+  const now = `${page.value}|${notif.value}|${panel.value}`;
+  if (seen && now !== seen) dropKeyboard();
+  seen = now;
+});
 
 /** The drawer's openness on screen: dragged, or settled. */
 export const drawerShown = () => drawerDrag.value ?? (drawer.value > 0 ? 1 : 0);
@@ -194,6 +210,8 @@ export function homeGestures() {
       } else {
         return (g = null);
       }
+      // A page swipe or an overlay change takes the keyboard down as it starts, not once it settles.
+      dropKeyboard();
     }
     if (e?.cancelable) e.preventDefault();
     if (g.mode === "panel") {
