@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { AgentMail, App, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
+import type { AgentMail, App, AssistScreen, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -101,6 +101,10 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       dismiss: (key) => call("notifications.dismiss", key),
       clearAll: () => call("notifications.clearAll"),
       access: () => call("notifications.access"),
+    },
+    assist: {
+      screen: () => call<AssistScreen | null>("assist.screen"),
+      close: () => call("assist.close"),
     },
     theme: {
       get: () => call<ThemeColors>("theme.get"),
@@ -302,6 +306,11 @@ function mock(): Bridge {
     clipboard: {
       read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
+    },
+    // A screen it was opened over: some text, no screenshot.
+    assist: {
+      screen: async () => ({ text: "Inbox\n  Mats - are we still on for tonight?\n  Your order has shipped", screenshot: null }),
+      close: async () => console.log("[mock] assistant closed"),
     },
     // A few made-up notifications; dismissing and clearing work on them.
     notifications: (() => {

@@ -779,3 +779,26 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
 .aod-date, .aod-battery { font-size: var(--text-small); }
 .aod-apps { display: flex; gap: 10px; margin-top: 14px; }
 .aod-apps img { width: 22px; height: 22px; border-radius: 6px; opacity: 0.7; filter: grayscale(0.4); }
+
+/* PowOS AI over another app (assist.tsx): the app dimmed a little, the panel at the bottom above the keyboard. */
+html[data-mode="assist"] .assist {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 var(--edge) calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
+  background: rgb(0 0 0 / 0.25);
+}
+.assist-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-height: 75%; }
+.assist-head { display: flex; align-items: center; gap: 10px; }
+.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--color-border); }
+.assist-shot.blank { background: var(--color-surface); }
+.assist-title { font-weight: bold; }
+.assist-sub { flex: 1; font-size: var(--text-small); }
+.assist-open { font: var(--text-small) var(--font); color: var(--color-accent); }
+.assist-panel .ai-card { overflow-y: auto; min-height: 0; }
+.assist-ask { display: flex; align-items: center; gap: var(--gap); min-height: 46px; padding: 0 4px 0 10px; border: var(--frame) solid var(--color-border); border-radius: var(--radius); }
+.assist-ask input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--color-foreground); font: var(--text-item) var(--font); }
+.assist-ask .mic { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius); color: var(--color-foreground); touch-action: none; }
+.assist-ask .mic.on { background: var(--color-red); color: var(--color-background); }

@@ -43,6 +43,12 @@ export interface HomeItem {
 
 export interface Home { columns: number; pages: number[]; items: HomeItem[]; }
 
+/** The screen the assistant was opened over. */
+export interface AssistScreen {
+  text: string;
+  screenshot: string | null;
+}
+
 /** Something an agent told the user (time: Unix seconds). */
 export interface AgentMail {
   from: string;
@@ -206,6 +212,14 @@ export interface Bridge {
     /** Opens the setting that grants the launcher notification access. */
     access(): Promise<void>;
   };
+  /**
+   * The assistant's screen (index.html?mode=assist, over another app): what that app's screen showed - its text, an
+   * outline, and a screenshot URL ("assist.context" brings them as they arrive) - and closing the assistant.
+   */
+  assist: {
+    screen(): Promise<AssistScreen | null>;
+    close(): Promise<void>;
+  };
   /** The theme: the colors in use ("theme.changed" brings them again), the ones to pick from, picking one. */
   theme: {
     get(): Promise<ThemeColors>;
@@ -244,7 +258,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

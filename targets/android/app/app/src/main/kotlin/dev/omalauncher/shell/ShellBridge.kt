@@ -66,6 +66,9 @@ class ShellBridge(
     private val terminals = ShellTerminals(runtime, scope, ::emit)
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
     private val speech = Speech(context.applicationContext)
+    /** Set by the assistant's session (its page is the assist screen): the screen it was opened over, closing it. */
+    var assist: dev.omalauncher.assist.AssistSlot? = null
+
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     /**
@@ -151,6 +154,8 @@ class ShellBridge(
             "ai.mail" -> aiMail()
             "ai.sessions" -> aiSessions()
             "ai.attach" -> aiAttach(a.getString(0))
+            "assist.screen" -> assist?.screen()
+            "assist.close" -> assist?.close()
             "theme.get" -> theme()
             "theme.list" -> themeList()
             "theme.pick" -> pickTheme(a.getString(0))

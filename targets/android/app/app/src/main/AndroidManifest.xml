@@ -132,6 +132,32 @@
 
         <!-- PowOS AI: the chat with PowOS's manager (docs/powos-ai-android.md) - from the launcher, the share sheet, the
              assistant gesture (the app as the phone's digital assistant), Quick Settings and the agents' notifications. -->
+        <!-- PowOS AI as the digital assistant (assist/, docs/POWAI-ASSISTANT.md): holding the power button opens it over
+             the screen. Chosen under Settings > Default apps > Digital assistant app. -->
+        <service
+            android:name="dev.omalauncher.assist.PowosVoiceInteractionService"
+            android:label="PowOS AI"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data android:name="android.voice_interaction" android:resource="@xml/powos_voice_interaction" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+        <service
+            android:name="dev.omalauncher.assist.PowosAssistSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <service
+            android:name="dev.omalauncher.assist.PowosRecognitionService"
+            android:label="PowOS AI"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
         <!-- The screen-off display: the shell's aod screen as the doze component (the system module's overlay names it),
              and a screensaver. -->
         <service

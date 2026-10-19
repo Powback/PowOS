@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PowOS AI as the digital assistant (assist/): what the assistant role checks - a session service, a recognition
+     service of its own, and assist support (the screen's text and a screenshot on the power button's hold). -->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="dev.omalauncher.assist.PowosAssistSessionService"
+    android:recognitionService="dev.omalauncher.assist.PowosRecognitionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false"
+    android:supportsLocalInteraction="false" />

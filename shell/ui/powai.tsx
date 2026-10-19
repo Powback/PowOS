@@ -48,14 +48,15 @@ function lastTurn(items: ChatItem[]) {
   if (at < 0) return null;
   const after = items.slice(at + 1);
   return {
-    asked: (items[at] as { text: string }).text,
+    // The question, not the screen text the assistant sends along with it (assist.tsx).
+    asked: (items[at] as { text: string }).text.split("\n\n[What's on my screen right now:]")[0],
     steps: after.filter((i) => i.kind === "tool") as Extract<ChatItem, { kind: "tool" }>[],
     answer: (after.filter((i) => i.kind === "assistant").at(-1) as { text: string } | undefined)?.text ?? null,
     notes: after.filter((i) => i.kind === "note") as Extract<ChatItem, { kind: "note" }>[],
   };
 }
 
-function Now() {
+export function Now() {
   const { busy, items } = chat.value;
   const turn = lastTurn(items);
   if (!turn) return <div class="ai-empty muted">Ask PowOS AI anything - about PowOS, the phone, your projects.</div>;

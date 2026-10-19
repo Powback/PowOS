@@ -141,6 +141,11 @@ class ShellHost(
                 return widgetImage(URLDecoder.decode(rest.substringBefore('/'), "UTF-8"), URLDecoder.decode(rest.substringAfter('/'), "UTF-8"))
             }
             if (path.startsWith("_font/")) return font(path.removePrefix("_font/"))
+            // The assistant's screenshot of the screen it was opened over (PowosAssistSession writes it).
+            if (path.startsWith("_assist/")) {
+                val file = File(File(context.cacheDir, "assist"), path.removePrefix("_assist/").substringAfterLast('/'))
+                return if (file.isFile) WebResourceResponse("image/jpeg", null, file.inputStream()).apply { responseHeaders = mapOf("Cache-Control" to "no-store") } else notFound()
+            }
             if (".." in path.split('/')) return notFound()
             val stream = open(path) ?: return notFound()
             return WebResourceResponse(mime(path), "utf-8", stream).apply {
