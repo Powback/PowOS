@@ -312,7 +312,12 @@ Built centrally and shipped whole. Never `pacman -Syu` on the phone.
   - emulator target; PowOS Web; linux-wasm research
 
 ### Rules for agents on the phone
-- Ask the user before changing their phone or setup unless they asked for that change. Report first; act on their OK.
+- Reversible PowOS work is autonomous (standing permission from the user, 2026-10-19): build, install and ship - the APK,
+  the system module, rootfs/deploy changes, services, apps, hooks - then report to `manager`. Keep a rollback for each
+  (module disable / service off / remove the app); if the home screen breaks, roll back first, then report.
+- Confirm first (via `manager`): anything irreversible or that can lose data (deleting volumes or user data, wipes,
+  flashing kernel/boot, force-pushing master) and externally visible behaviour (the Discord bot, exposed ports, auth).
+- Deferred by the user for now: containers on the phone, the /dev/fuse rule, cgroup v2, a custom kernel.
 - Never type into existing tmux sessions, on the phone or on the Mac: they are live Claude sessions. Open a fresh shell.
 - Don't inject touches/keys while the user is using the phone: `dumpsys power | grep lastUserActivityTime` must
   show more than 120000 ms ago.
