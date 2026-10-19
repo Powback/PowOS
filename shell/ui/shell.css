@@ -825,3 +825,14 @@ html[data-mode="assist"] .assist.live { background: none; pointer-events: none; 
 /* The shade's own page (shade.tsx): nothing but the panel and its dimming, over whatever is on screen. */
 html[data-mode="shade"], html[data-mode="shade"] body { background: transparent; }
 .shade-screen { padding: 0; }
+/* The panel's quick settings (notifications.tsx QuickRow). */
+.qs-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 10px; }
+.qs-tile {
+  font: var(--text-small) var(--font);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  color: var(--color-foreground);
+}
+.qs-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }

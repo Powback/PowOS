@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { AgentMail, App, AssistScreen, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
+import type { AgentMail, App, AssistScreen, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, QuickState, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -101,6 +101,11 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       dismiss: (key) => call("notifications.dismiss", key),
       clearAll: () => call("notifications.clearAll"),
       access: () => call("notifications.access"),
+    },
+    qs: {
+      state: () => call<QuickState>("qs.state"),
+      toggle: (name) => call<QuickState>("qs.toggle", name),
+      open: (name) => call("qs.open", name),
     },
     shade: { closed: () => call("shade.closed") },
     assist: {
@@ -314,6 +319,18 @@ function mock(): Bridge {
       read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
+    qs: (() => {
+      let st: QuickState = { torch: false, dnd: false };
+      return {
+        state: async () => st,
+        toggle: async (name: "torch" | "dnd") => {
+          st = { ...st, [name]: !st[name] };
+          events.emit("qs.changed", st);
+          return st;
+        },
+        open: async (name: string) => console.log("[mock] open quick setting", name),
+      };
+    })(),
     shade: { closed: async () => console.log("[mock] shade closed") },
     // A screen it was opened over: some text, no screenshot.
     assist: {

@@ -9,9 +9,12 @@ import { powos } from "../bridge.ts";
 import { notif } from "../state.ts";
 import { followNotif, notifOpen } from "./gesture.ts";
 import { ago } from "./time.ts";
-import type { NotificationList, PhoneNotification } from "../types.ts";
+import type { NotificationList, PhoneNotification, QuickState } from "../types.ts";
 
 const list = signal<NotificationList>({ available: true, items: [] });
+const quick = signal<QuickState>({ torch: null, dnd: null });
+powos.on("qs.changed", (q: QuickState) => (quick.value = { ...q }));
+powos.qs.state().then((q) => (quick.value = q));
 powos.on("notifications.changed", (l: NotificationList) => (list.value = l));
 powos.notifications.list().then((l) => (list.value = l));
 
@@ -83,6 +86,31 @@ function Card({ n }: { n: PhoneNotification }) {
   );
 }
 
+/** The quick settings row: switches for what the phone lets PowOS switch, Android's panels for the rest. */
+function QuickRow() {
+  const q = quick.value;
+  const toggle = (name: "torch" | "dnd", label: string, on: boolean | null) =>
+    on != null && (
+      <button type="button" class={`qs-tile ${on ? "on" : ""}`} onClick={() => powos.qs.toggle(name).then((s) => (quick.value = { ...s }))}>
+        {label}
+      </button>
+    );
+  const panel = (name: "wifi" | "bluetooth" | "internet" | "settings", label: string) => (
+    <button type="button" class="qs-tile" onClick={() => ((notif.value = false), powos.qs.open(name))}>
+      {label}
+    </button>
+  );
+  return (
+    <div class="qs-row">
+      {panel("internet", "internet")}
+      {panel("bluetooth", "bluetooth")}
+      {toggle("torch", "torch", q.torch)}
+      {toggle("dnd", "do not disturb", q.dnd)}
+      {panel("settings", "settings")}
+    </div>
+  );
+}
+
 export function NotificationPanel() {
   const shown = notifOpen.value;
   const { available, items } = list.value;
@@ -105,6 +133,7 @@ export function NotificationPanel() {
             )}
           </span>
         </div>
+        <QuickRow />
         <div class="notif-list">
           {!available ? (
             <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>

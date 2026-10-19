@@ -43,6 +43,12 @@ export interface HomeItem {
 
 export interface Home { columns: number; pages: number[]; items: HomeItem[]; }
 
+/** The quick settings that switch here: on or off, null where the phone can't (no flashlight, no access). */
+export interface QuickState {
+  torch: boolean | null;
+  dnd: boolean | null;
+}
+
 /** The screen the assistant was opened over. */
 export interface AssistScreen {
   text: string;
@@ -230,6 +236,15 @@ export interface Bridge {
     touchable(rect: { left: number; top: number; width: number; height: number } | null): Promise<void>;
   };
   /**
+   * The notification panel's quick settings: the flashlight and do not disturb switch here (null: unavailable),
+   * Wi-Fi, Bluetooth, internet and settings open Android's own panels. "qs.changed" brings the state again.
+   */
+  qs: {
+    state(): Promise<QuickState>;
+    toggle(name: "torch" | "dnd"): Promise<QuickState>;
+    open(name: "wifi" | "bluetooth" | "internet" | "settings"): Promise<void>;
+  };
+  /**
    * The shade (index.html?mode=shade, in PowOS's system window above the status bar - the native shade host): the
    * host drives the pull ("shade.drag" { q: 0..1 } while the finger is on the top edge, "shade.settle" { open }), and
    * hears when the page closed it.
@@ -275,7 +290,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.settle" ({ open }), "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "qs.changed" (QuickState), "shade.settle" ({ open }), "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
