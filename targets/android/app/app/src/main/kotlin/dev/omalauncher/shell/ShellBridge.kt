@@ -154,6 +154,7 @@ class ShellBridge(
             "home.add" -> home.add(a.getString(0), a.getInt(1), a.optJSONObject(2))
             "home.remove" -> home.remove(a.getString(0))
             "home.group" -> home.group(a.getString(0), a.getString(1))
+            "home.arrange" -> home.arrange(a.getInt(0), a.getInt(1))
             "widgets.watch" -> widgets.watch(a.getString(0), a.optBoolean(1))
             "widgets.unwatch" -> widgets.unwatch(a.getString(0), a.optBoolean(1))
             "widgets.fire" ->

@@ -102,6 +102,8 @@ export interface Bridge {
     remove(key: string): Promise<void>;
     /** Drops an app item on another app or a folder: into one folder. Returns the folder's key. */
     group(key: string, target: string): Promise<string | null>;
+    /** Gives items without a cell (a store widget, an app pinned from a menu) the first free spot on a grid this big. */
+    arrange(cols: number, rows: number): Promise<void>;
   };
   /**
    * OWL widgets: the host runs them; the page draws their trees, sent as "widget.tree" ({ key, screen, tree }) while

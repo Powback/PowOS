@@ -391,6 +391,12 @@ export function Pages() {
   }, []);
   // Tiles reaching further down add rows, and the launcher closing gives the room back: re-measure then.
   useEffect(() => void (el.current && measure(el.current, home.value.columns)), [home.value, drawerOpen.value]);
+  // Items without a cell yet (a widget from the store, an app pinned from a menu): the host gives them the first free
+  // spot, once the grid's rows are known - as the Compose home does laying a page out.
+  const rows = geometry.value.rows;
+  useEffect(() => {
+    if (rows > 0 && home.value.items.some((i) => !i.cell)) powos.home.arrange(home.value.columns, rows);
+  }, [home.value, rows]);
   useEffect(() => applyTrack(), []);
   const list = pages.value;
   if (page.value >= list.length) page.value = list.length - 1;

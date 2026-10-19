@@ -30,6 +30,18 @@ class ShellHome(
         return JSONObject().put("columns", GRID_COLUMNS).put("pages", JSONArray(pages)).put("items", items)
     }
 
+    /**
+     * Gives the items that have no cell yet (a widget from the store, an app pinned from a menu) one: the first free
+     * spot at their size on a grid of [cols] x [rows], as the Compose home does when it lays a page out
+     * (HomeGrid.kt); one that doesn't fit goes to a page with room. The page asks once it knows its grid.
+     */
+    fun arrange(
+        cols: Int,
+        rows: Int,
+    ) {
+        for (page in engine.pages) engine.layout.place(engine.itemsOn(page), cols, rows).forEach { engine.moveToFreePage(it) }
+    }
+
     /** What changes the home screen: read inside snapshotFlow, so any of it changing sends home.changed. */
     fun fingerprint(): String = snapshot().toString()
 

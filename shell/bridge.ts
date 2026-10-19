@@ -62,6 +62,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       add: (app, page, cell) => call<string>("home.add", app, page, cell ?? null),
       remove: (key) => call("home.remove", key),
       group: (key, target) => call<string | null>("home.group", key, target),
+      arrange: (cols, rows) => call("home.arrange", cols, rows),
     },
     widgets: {
       watch: (key, screen) => call("widgets.watch", key, !!screen),
@@ -192,6 +193,19 @@ function mock(): Bridge {
       remove: async (key) => {
         home.items = home.items.filter((i) => i.key !== key);
         changed();
+      },
+      // As WidgetLayout.place: the first free spot at the item's size, on its page.
+      arrange: async (cols, rows) => {
+        let moved = false;
+        for (const item of home.items.filter((i) => !i.cell)) {
+          const [w, h] = item.size ?? [Math.floor(cols / 2), 3];
+          const taken = home.items.filter((o) => o !== item && o.page === item.page && o.cell).map((o) => o.cell!);
+          for (let y = 0; y + h <= rows && !item.cell; y++)
+            for (let x = 0; x + w <= cols && !item.cell; x++)
+              if (taken.every((c) => x >= c.x + c.w || c.x >= x + w || y >= c.y + c.h || c.y >= y + h)) item.cell = { x, y, w, h };
+          moved ||= !!item.cell;
+        }
+        if (moved) changed();
       },
       group: async (key, target) => {
         const item = home.items.find((i) => i.key === key);
