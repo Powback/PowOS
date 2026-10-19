@@ -73,38 +73,12 @@
         android:theme="@style/Theme.Omalauncher"
         android:usesCleartextTraffic="true">
 
-        <activity
-            android:name=".MainActivity"
-            android:label="PowOS Launcher"
-            android:taskAffinity="com.powos.app.launcher"
-            android:clearTaskOnLaunch="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
-            android:excludeFromRecents="true"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:resizeableActivity="true"
-            android:stateNotNeeded="true"
-            android:windowSoftInputMode="adjustResize">
-            <!-- PowOS: the PowOS launcher (Home opens it through .HomeLauncher on the cover screen; also its own app
-                 entry). Its own task (taskAffinity): sharing the desktop's task, each singleTask switch to the
-                 desktop finished it, and every Home rebuilt it from scratch (~0.7 s). -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <!-- A widget shared as a link or QR code: https://simonschubert.github.io/omarchy-widgets/w#owl1.<data> (widgets/market/Share.kt). -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="simonschubert.github.io" android:pathPrefix="/omarchy-widgets/w" />
-            </intent-filter>
-        </activity>
-        <!-- The launcher as a web UI (shell/, see shell/DESIGN.md): a preview beside the Compose launcher until it
-             matches it. Its own task and app entry; the page lays itself out around the keyboard (adjustNothing). -->
+        <!-- The launcher: a web UI (shell/, see shell/DESIGN.md), the home screen (through .HomeShell) and its own app
+             entry. Its own task (taskAffinity): sharing the desktop's, each singleTask switch to the desktop finished
+             it. The page lays itself out around the keyboard (adjustNothing). -->
         <activity
             android:name=".shell.ShellActivity"
-            android:label="PowOS Shell (preview)"
+            android:label="PowOS Launcher"
             android:taskAffinity="com.powos.app.shell"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
             android:exported="true"
@@ -119,23 +93,8 @@
         <!-- Android's home screen when it should be the launcher (andro.marchy.HomeScreen switches this and the
              engine's .HomeDesktop alias; one is enabled). -->
         <activity-alias
-            android:name="andro.marchy.HomeLauncher"
-            android:label="PowOS Launcher"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.HOME" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity-alias>
-
-        <!-- The same, with the launcher as a web UI (Settings › Home screen › web launcher): HomeScreen enables this
-             one instead of .HomeLauncher. -->
-        <activity-alias
             android:name="andro.marchy.HomeShell"
-            android:label="PowOS Shell"
+            android:label="PowOS Launcher"
             android:targetActivity=".shell.ShellActivity"
             android:enabled="false"
             android:exported="true">

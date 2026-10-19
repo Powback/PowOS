@@ -28,7 +28,6 @@ import android.os.UserHandle
 import android.os.UserManager
 import android.util.Log
 import android.widget.Toast
-import dev.omalauncher.MainActivity
 import dev.omalauncher.R
 import dev.omalauncher.Runtime
 import dev.omalauncher.linux.GuestShell
@@ -410,7 +409,7 @@ class WidgetServices(
             return
         }
         nm.createNotificationChannel(NotificationChannel(NOTIFY_CHANNEL, "Widgets", NotificationManager.IMPORTANCE_DEFAULT))
-        val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(context, 0, Intent(context, dev.omalauncher.shell.ShellActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n =
             Notification
                 .Builder(context, NOTIFY_CHANNEL)

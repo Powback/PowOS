@@ -45,7 +45,7 @@ adb shell "cd $DATA && tar cf $BACKUP files/widgets shared_prefs"
 restore() {
   adb shell am force-stop $PKG
   adb shell "cd $DATA && rm -rf files/widgets/*.owl && tar xf $BACKUP && chown -R $owner files/widgets shared_prefs && chcon -R $label files/widgets shared_prefs && rm $BACKUP"
-  adb shell am start -n $PKG/.MainActivity >/dev/null
+  adb shell am start -n $PKG/dev.omalauncher.shell.ShellActivity >/dev/null
   echo "restored the launcher's widgets and theme"
 }
 trap restore EXIT
@@ -73,7 +73,7 @@ for scene in "${SCENES[@]}"; do
   adb shell am force-stop $PKG
   # A bare home: no widgets, no layout, no pinned apps.
   adb shell "rm -f $DATA/files/widgets/*.owl $DATA/shared_prefs/widget_grid.xml $DATA/shared_prefs/shortcuts.xml"
-  adb shell am start -n $PKG/.MainActivity --es theme "$theme" >/dev/null
+  adb shell am start -n $PKG/dev.omalauncher.shell.ShellActivity --es theme "$theme" >/dev/null
   sleep 3
   # One at a time, each once the one before has its spot: the launcher places tiles as they
   # load, so adding them all at once mixes up the order.
