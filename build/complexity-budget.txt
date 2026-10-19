@@ -21,6 +21,7 @@ lib/ai/agent.sh:_ai_resume_picker 20
 lib/ai/agent.sh:ai_interactive 30
 lib/ai/helpers.sh:ai_parse_files_to_dir 16
 lib/ai/helpers.sh:ai_parse_markdown_to_dir 24
+lib/android.sh:cmd_android 32
 lib/backup.sh:cmd_backup 16
 lib/backup.sh:sync_from_working_dirs 18
 lib/backup.sh:sync_pull 22
@@ -33,6 +34,9 @@ lib/dev-commands.sh:dev_fork 19
 lib/dev-commands.sh:dev_new 16
 lib/dev-commands.sh:dev_override 17
 lib/dev-commands.sh:dev_patch 16
+lib/dlss.sh:cmd_dlss_nr_install 17
+lib/dlss.sh:cmd_dlss_off 16
+lib/dlss.sh:dlss_on_one 16
 lib/doctor.sh:cmd_doctor 17
 lib/dracut/90powos-ramboot/ramboot-setup.sh:powos_select_base_variant 16
 lib/game.sh:cmd_game 45
@@ -81,7 +85,8 @@ lib/overlay-manager.sh:main 18
 lib/ramboot.sh:rb_enable 17
 lib/registry.sh:registry_login 18
 lib/reload.sh:cmd_reload 23
-lib/self.sh:cmd_self 16
+lib/self.sh:cmd_self 17
+lib/self.sh:self_push 17
 lib/setup.sh:setup_nexus_cmd 17
 lib/stream.sh:cmd_stream 16
 lib/sync.sh:cmd_sync 17
