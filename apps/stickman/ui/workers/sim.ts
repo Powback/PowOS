@@ -14,9 +14,10 @@
 //               { type: "run", on, fps? }               frames on (the tile is on screen) or off; fps: at most 30
 //               { type: "size", width, height, dpr }    { type: "colors", colors }
 //               { type: "alive" }                       the page is really drawn (about once a second while on)
+//               { type: "target", native }              frames to the native surface (as display lists) or the canvas
 //               { type: "nodraw", on }                  checks only: simulate without drawing
 //               { type: "stats" }                       answers { type: "stats", lesson, checkpoint, prof, ... } (checks)
-// Messages out: { type: "ready", brain, lessons } | { type: "error", message }
+// Messages out: { type: "ready", brain, lessons } | { type: "error", message } | { type: "frame", frame } (native)
 //
 // Pacing: while on, a frame at most every 1/fps s on a timer, and only while the page's heartbeat ("alive", from its
 // requestAnimationFrame) keeps coming. Off: nothing scheduled at all, no timer, no physics; it carries on where it
@@ -414,6 +415,66 @@ function unchanged(key: Float64Array, Wp: number, Hp: number) {
   for (let i = 0; i < key.length; i++) if (Math.abs(key[i] - shown[i]) > SAME_PX) return false;
   return true;
 }
+// Where a frame goes: the OffscreenCanvas (the page composites it), or - on a shell with surface tiles - a display
+// list for the app to draw on a native surface under the page (shell/apps/native.ts, ShellNative.kt), which the page
+// never composites. One drawing, two pens.
+interface Pen {
+  rect(c: string, alpha: number, width: number, x: number, y: number, w: number, h: number): void;
+  lines(c: string, alpha: number, width: number, xy: number[]): void;
+  circles(c: string, alpha: number, xyr: number[]): void;
+  poly(c: string, alpha: number, xy: number[]): void;
+}
+class CanvasPen implements Pen {
+  constructor(private g: OffscreenCanvasRenderingContext2D, w: number, h: number) {
+    g.clearRect(0, 0, w, h);
+    g.lineCap = "round";
+    g.lineJoin = "round";
+  }
+  rect(c: string, alpha: number, width: number, x: number, y: number, w: number, h: number) {
+    Object.assign(this.g, { globalAlpha: alpha, strokeStyle: c, lineWidth: width });
+    this.g.strokeRect(x, y, w, h);
+  }
+  lines(c: string, alpha: number, width: number, xy: number[]) {
+    Object.assign(this.g, { globalAlpha: alpha, strokeStyle: c, lineWidth: width });
+    this.g.beginPath();
+    for (let i = 0; i < xy.length; i += 4) { this.g.moveTo(xy[i], xy[i + 1]); this.g.lineTo(xy[i + 2], xy[i + 3]); }
+    this.g.stroke();
+  }
+  circles(c: string, alpha: number, xyr: number[]) {
+    Object.assign(this.g, { globalAlpha: alpha, fillStyle: c });
+    this.g.beginPath();
+    for (let i = 0; i < xyr.length; i += 3) { this.g.moveTo(xyr[i] + xyr[i + 2], xyr[i + 1]); this.g.arc(xyr[i], xyr[i + 1], xyr[i + 2], 0, 2 * Math.PI); }
+    this.g.fill();
+  }
+  poly(c: string, alpha: number, xy: number[]) {
+    Object.assign(this.g, { globalAlpha: alpha, fillStyle: c });
+    this.g.beginPath();
+    for (let i = 0; i < xy.length; i += 2) (i ? this.g.lineTo : this.g.moveTo).call(this.g, xy[i], xy[i + 1]);
+    this.g.fill();
+  }
+}
+/** ShellNative.kt Tile.draw's format: "<w> <h>" then ops, numbers rounded to 0.1 px. */
+class ListPen implements Pen {
+  private out: string[];
+  constructor(w: number, h: number) { this.out = [String(w), String(h)]; }
+  private n = (v: number) => String(Math.round(v * 10) / 10);
+  private a = (v: number) => String(Math.round(v * 100) / 100);
+  rect(c: string, alpha: number, width: number, x: number, y: number, w: number, h: number) {
+    this.out.push("R", c, this.a(alpha), this.n(width), this.n(x), this.n(y), this.n(w), this.n(h));
+  }
+  lines(c: string, alpha: number, width: number, xy: number[]) {
+    if (xy.length) this.out.push("S", c, this.a(alpha), this.n(width), String(xy.length / 4), ...xy.map(this.n));
+  }
+  circles(c: string, alpha: number, xyr: number[]) {
+    if (xyr.length) this.out.push("C", c, this.a(alpha), String(xyr.length / 3), ...xyr.map(this.n));
+  }
+  poly(c: string, alpha: number, xy: number[]) {
+    this.out.push("P", c, this.a(alpha), String(xy.length / 2), ...xy.map(this.n));
+  }
+  text() { return this.out.join(" "); }
+}
+let native = false; // frames to the page's native surface ("target")
+
 function draw() {
   const Wp = canvas.width, Hp = canvas.height;
   if (!Wp || !Hp) return;
@@ -438,49 +499,31 @@ function draw() {
   });
   if (noDraw || unchanged(key, Wp, Hp)) { prof.skipped++; return; }
   shown = key; shownWp = Wp; shownHp = Hp; force = false;
-  ctx.clearRect(0, 0, Wp, Hp);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+  const pen: Pen = native ? new ListPen(Wp, Hp) : new CanvasPen(ctx, Wp, Hp);
   // the room (its floor and walls) faint, the course's pieces in the foreground colour
-  ctx.globalAlpha = 0.35;
-  ctx.strokeStyle = colors.muted;
-  ctx.lineWidth = 0.04 * scale;
-  ctx.strokeRect(X(0), Z(H), W * scale, H * scale);
-  ctx.globalAlpha = 0.85;
-  ctx.strokeStyle = colors.fg;
-  ctx.lineWidth = 0.06 * scale;
-  ctx.beginPath();
-  for (const s of segs) { ctx.moveTo(X(s.a[0]), Z(s.a[1])); ctx.lineTo(X(s.b[0]), Z(s.b[1])); }
-  ctx.stroke();
+  pen.rect(colors.muted, 0.35, 0.04 * scale, X(0), Z(H), W * scale, H * scale);
+  pen.lines(colors.fg, 0.85, 0.06 * scale, segs.flatMap((sg) => [X(sg.a[0]), Z(sg.a[1]), X(sg.b[0]), Z(sg.b[1])]));
   // the checkpoints still to come, faint; the next one, and the finish flag, in the accent
-  ctx.globalAlpha = 0.35;
-  ctx.fillStyle = colors.accent;
-  ctx.beginPath();
-  for (let i = wpI + 1; i < route.length; i++) { ctx.moveTo(X(route[i][0]) + 0.08 * scale, Z(route[i][1])); ctx.arc(X(route[i][0]), Z(route[i][1]), 0.08 * scale, 0, 2 * Math.PI); }
-  ctx.fill();
-  ctx.globalAlpha = 1;
+  const dots: number[] = [];
+  for (let i = wpI + 1; i < route.length; i++) dots.push(X(route[i][0]), Z(route[i][1]), 0.08 * scale);
+  pen.circles(colors.accent, 0.35, dots);
   const f = route[route.length - 1];
-  ctx.strokeStyle = colors.muted;
-  ctx.lineWidth = 0.03 * scale;
-  ctx.beginPath(); ctx.moveTo(X(f[0]), Z(f[1] - 0.55)); ctx.lineTo(X(f[0]), Z(f[1] + 0.45)); ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(X(f[0]), Z(f[1] + 0.45)); ctx.lineTo(X(f[0] + 0.35), Z(f[1] + 0.33)); ctx.lineTo(X(f[0]), Z(f[1] + 0.21));
-  ctx.fill();
-  ctx.beginPath(); ctx.arc(X(coin[0]), Z(coin[1]), 0.15 * scale, 0, 2 * Math.PI); ctx.fill();
+  pen.lines(colors.muted, 1, 0.03 * scale, [X(f[0]), Z(f[1] - 0.55), X(f[0]), Z(f[1] + 0.45)]);
+  pen.poly(colors.accent, 1, [X(f[0]), Z(f[1] + 0.45), X(f[0] + 0.35), Z(f[1] + 0.33), X(f[0]), Z(f[1] + 0.21)]);
+  pen.circles(colors.accent, 1, [X(coin[0]), Z(coin[1]), 0.15 * scale]);
   // the figure, Pivot style: far limbs (_l) behind and muted, then torso and head, then near limbs (_r)
   const order = (n: string) => (n.endsWith("_l") ? 0 : n.endsWith("_r") ? 2 : 1);
   for (const p of [...meta.draw].sort((p, q) => order(p.name) - order(q.name))) {
     const far = order(p.name) === 0;
-    ctx.strokeStyle = ctx.fillStyle = far ? colors.muted : colors.fg;
+    const c = far ? colors.muted : colors.fg;
     const a = bodyPoint(p.body, p.a);
-    if (p.kind === "circle") {
-      ctx.beginPath(); ctx.arc(X(a[0]), Z(a[1]), (p.name === "head" ? p.r * 1.15 : p.r * 1.2) * scale, 0, 2 * Math.PI); ctx.fill();
-    } else {
+    if (p.kind === "circle") pen.circles(c, 1, [X(a[0]), Z(a[1]), (p.name === "head" ? p.r * 1.15 : p.r * 1.2) * scale]);
+    else {
       const b = bodyPoint(p.body, p.b);
-      ctx.lineWidth = (p.r * 2 + (far ? 0 : 0.02)) * scale;
-      ctx.beginPath(); ctx.moveTo(X(a[0]), Z(a[1])); ctx.lineTo(X(b[0]), Z(b[1])); ctx.stroke();
+      pen.lines(c, 1, (p.r * 2 + (far ? 0 : 0.02)) * scale, [X(a[0]), Z(a[1]), X(b[0]), Z(b[1])]);
     }
   }
+  if (pen instanceof ListPen) (self as any).postMessage({ type: "frame", frame: pen.text() });
 }
 
 // ---- the loop: one frame per "frame" message; the page sends none while the tile isn't on screen ------------------------
@@ -579,6 +622,14 @@ self.onmessage = async (e: MessageEvent) => {
   } else if (m.type === "colors") {
     if (JSON.stringify(m.colors) !== JSON.stringify(colors)) force = true;
     colors = m.colors;
+  } else if (m.type === "target") {
+    // to the native surface (the canvas emptied: it'd show over it) or back to the canvas; drawn at once either way
+    if (m.native !== native) {
+      native = !!m.native;
+      if (native) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      force = true;
+      if (ready) { mj.mj_forward(model, data); draw(); }
+    }
   } else if (m.type === "nodraw") {
     noDraw = !!m.on;
   } else if (m.type === "stats") {

@@ -14,6 +14,7 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { openUrl, power, useLayoutSize, useOnScreen } from "./onscreen.ts";
+import { useSurface, type Surface } from "./native.ts";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -32,6 +33,8 @@ export interface IslandHost {
   power?(): Promise<{ level: number | null; charging: boolean; saver: boolean | null }>;
   /** The element's laid-out size (CSS px, no transforms), measured again on resume (apps/onscreen.ts). */
   useLayoutSize?(ref: { current: HTMLElement | null }): { width: number; height: number };
+  /** A native surface at the element's place (apps/native.ts): frames to it cost no page composite. */
+  useSurface?(ref: { current: Element | null }, wanted: boolean): Surface;
 }
 
 export interface Builder {
@@ -194,4 +197,4 @@ export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   return rows;
 }
 
-export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl, power, useLayoutSize };
+export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl, power, useLayoutSize, useSurface };

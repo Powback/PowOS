@@ -34,9 +34,22 @@ const POWER_MS = 60_000;
 const TAP_MS = 400;
 const SLOP = 10;
 
+/** A CSS colour as #rrggbb or #aarrggbb (what the native surface's Color.parseColor reads, and canvas too). */
+let probe: CanvasRenderingContext2D | null = null;
+function hex(c: string) {
+  probe ??= document.createElement("canvas").getContext("2d");
+  if (!probe) return c;
+  probe.fillStyle = "#000";
+  probe.fillStyle = c;
+  const v = String(probe.fillStyle);
+  const m = v.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/);
+  if (!m) return v;
+  const h = (n: number) => Math.round(n).toString(16).padStart(2, "0");
+  return `#${h(Number(m[4] ?? 1) * 255)}${h(+m[1])}${h(+m[2])}${h(+m[3])}`;
+}
 function themeColors(el: Element) {
   const s = getComputedStyle(el);
-  const v = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback;
+  const v = (name: string, fallback: string) => hex(s.getPropertyValue(name).trim() || fallback);
   return { fg: v("--color-foreground", "#ddd"), muted: v("--color-muted", "#888"), accent: v("--color-accent", "#e8a33d") };
 }
 
@@ -104,6 +117,13 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
     };
   }, [onScreen]);
   const running = onScreen && !resting;
+  // A native surface under the page while the tile is on screen and home is still (a shell/APK without one: null, and
+  // the worker draws on its canvas as before). It keeps its last frame while resting on a low battery.
+  const surface = host.useSurface ? host.useSurface(box, onScreen && state.status === "ready") : null;
+  const toNative = !!surface?.native;
+  const surfaceRef = useRef(surface);
+  surfaceRef.current = surface;
+  useEffect(() => void worker.current?.postMessage({ type: "target", native: toNative }), [toNative, state.status]);
 
   // The worker, made the first time the tile is on screen (its 11 MB of MuJoCo isn't loaded for a tile never seen) and
   // kept while the tile is on home.
@@ -114,7 +134,8 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
     (globalThis as any).__stickman = w; // for checks over CDP (postMessage({ type: "stats" }))
     setState({ status: "loading" });
     w.addEventListener("message", (e) => {
-      if (e.data.type === "ready") setState({ status: "ready", text: e.data.brain });
+      if (e.data.type === "frame") surfaceRef.current?.draw(e.data.frame);
+      else if (e.data.type === "ready") setState({ status: "ready", text: e.data.brain });
       else if (e.data.type === "error") setState({ status: "error", text: e.data.message });
     });
     w.addEventListener("error", (e) => setState({ status: "error", text: e.message || "the simulation failed to start" }));

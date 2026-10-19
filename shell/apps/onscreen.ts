@@ -13,6 +13,7 @@ import { useEffect, useState } from "preact/hooks";
 import { drawerOpen } from "../ui/gesture.ts";
 import { screen, sessionView } from "../state.ts";
 import { powos } from "../bridge.ts";
+import { openLink } from "./native.ts";
 
 export function useOnScreen(ref: { current: Element | null }): boolean {
   const [inView, setInView] = useState(false);
@@ -33,11 +34,12 @@ export function useOnScreen(ref: { current: Element | null }): boolean {
 }
 
 /**
- * Opens [url] outside the shell. HACK: through the licenses screen's "open" action, the bridge's only way to hand a URL
- * to Android (ShellScreens.kt: an ACTION_VIEW intent); the real fix is a bridge call of its own (powos.open(url)) in the
- * next APK.
+ * Opens [url] outside the shell (the browser, or the app that handles it): through the page's own port to the app
+ * (apps/native.ts, origin-scoped). HACK, for an APK without that port: the licenses screen's "open" action, the old
+ * bridge's only way to hand a URL to Android - goes once every phone runs an APK with ShellNative.
  */
 export function openUrl(url: string) {
+  if (openLink(url)) return Promise.resolve();
   return powos.screens.act("licenses", "open", url);
 }
 

@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
 import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
@@ -75,9 +76,13 @@ class ShellHost(
     /** An activity's page (home) at the panel's fastest rate while touched - or while a swipe up shows its switcher. */
     internal val highRefresh: HighRefresh? = activity?.window?.let { HighRefresh(it, web) }
 
+    /** The page's own port (open, surface tiles): [ShellNative], handed only to the top frame at the page's origin. */
+    private val native = ShellNative(context, web, devUrl()?.let { Uri.parse(it).let { u -> "${u.scheme}://${u.authority}" } } ?: ORIGIN)
+
     init {
         overrides.mkdirs()
         web.addJavascriptInterface(bridge, "PowosHost")
+        web.addJavascriptInterface(native, "PowosNative")
         // Insets to the page (CSS px), as they change: the bar sits above the navigation bar, the drawer clears
         // the status bar, the keyboard's height lifts the bar.
         web.setOnApplyWindowInsetsListener { v, insets ->
@@ -93,6 +98,7 @@ class ShellHost(
     fun destroy() {
         HotReload.remove(this)
         bridge.close()
+        native.close()
         web.destroy()
     }
 
@@ -234,6 +240,8 @@ class ShellHost(
             "ts", "tsx" -> "text/plain"
             "css" -> "text/css"
             "json" -> "application/json"
+            // (WebAssembly.instantiateStreaming refuses anything else)
+            "wasm" -> "application/wasm"
             "svg" -> "image/svg+xml"
             "png" -> "image/png"
             "webp" -> "image/webp"
