@@ -25,6 +25,8 @@ object Tasks {
         val id: Int,
         val component: ComponentName?,
         val label: String?,
+        /** When it was last in front (SystemClock.uptimeMillis): its snapshot is new only when this is. */
+        val lastActive: Long = 0,
     )
 
     /** Recent tasks, newest first: what's listed in the switcher (home and the switcher itself aren't). */
@@ -38,9 +40,13 @@ object Tasks {
         val tasks = am.getRecentTasks(max, ActivityManager.RECENT_IGNORE_UNAVAILABLE)
         return tasks.map { t ->
             val component = t.baseIntent.component ?: t.baseActivity ?: t.topActivity
-            Task(t.taskId, component, t.taskDescription?.label)
+            Task(t.taskId, component, t.taskDescription?.label, lastActive(t))
         }
     }
+
+    /** TaskInfo.lastActiveTime (a hidden field; 0 where it can't be read). */
+    private fun lastActive(t: ActivityManager.RecentTaskInfo): Long =
+        runCatching { android.app.TaskInfo::class.java.getField("lastActiveTime").getLong(t) }.getOrDefault(0L)
 
     /** The task the user was in (shown when the switcher opened): the newest one that's visible, or null (home). */
     fun visible(context: Context): Int? {
@@ -69,6 +75,102 @@ object Tasks {
         // Not reachable (not the recents provider): a task still running can be brought to the front publicly.
         return runCatching { context.getSystemService(ActivityManager::class.java).moveTaskToFront(id, 0) }.isSuccess
     }
+
+    /** WM Shell's ISplitScreen (ILauncherProxy.onInitialize hands it over): the switcher's split screen. */
+    @Volatile
+    var splitScreen: android.os.IBinder? = null
+
+    /**
+     * Tasks [first] (left / top) and [second] side by side, half and half: WM Shell's split screen, as Quickstep's
+     * split from overview (ISplitScreen.startTasks). False when WM Shell can't be asked.
+     *
+     * HACK: ISplitScreen is WM Shell's, hidden and not in the SDK: its call is written by hand as the generated AIDL
+     * would (this phone's SystemUI: startTasks is transaction 11; SNAP_TO_2_50_50 is 1; InstanceId's parcel is its
+     * int). Real fix: none for an app - Quickstep compiles against the platform's copy.
+     */
+    fun split(
+        first: Int,
+        second: Int,
+    ): Boolean {
+        val binder = splitScreen ?: return false.also { Log.w(TAG, "no ISplitScreen from SystemUI") }
+        return runCatching {
+            val data = android.os.Parcel.obtain()
+            try {
+                data.writeInterfaceToken("com.android.wm.shell.splitscreen.ISplitScreen")
+                data.writeInt(first)
+                data.writeTypedObject(null as android.os.Bundle?, 0)
+                data.writeInt(second)
+                data.writeTypedObject(null as android.os.Bundle?, 0)
+                data.writeInt(SPLIT_POSITION_TOP_OR_LEFT)
+                data.writeInt(SNAP_TO_2_50_50)
+                // No remote transition (WM Shell animates it); an InstanceId (its parcel: present, then its id).
+                data.writeInt(0)
+                data.writeInt(1)
+                data.writeInt((System.nanoTime() and 0xFFFFF).toInt().coerceAtLeast(1))
+                binder.transact(SPLIT_START_TASKS, data, null, android.os.IBinder.FLAG_ONEWAY)
+            } finally {
+                data.recycle()
+            }
+        }.onFailure { Log.w(TAG, "can't split $first and $second", it) }.isSuccess
+    }
+
+    /**
+     * Task [id] in a floating window (freeform: the OS's pop-up view), in the middle of the screen. HACK:
+     * ActivityOptions.setLaunchWindowingMode is hidden (reflected); real fix: none for an app.
+     */
+    fun float(
+        context: Context,
+        id: Int,
+    ): Boolean {
+        val screen = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
+        val w = screen.width() * 3 / 4
+        val h = screen.height() / 2
+        val options = ActivityOptions.makeBasic().setLaunchBounds(android.graphics.Rect(screen.centerX() - w / 2, screen.centerY() - h / 2, screen.centerX() + w / 2, screen.centerY() + h / 2))
+        runCatching {
+            HiddenApi.allow()
+            ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(options, WINDOWING_MODE_FREEFORM)
+        }.onFailure { Log.w(TAG, "no freeform launch", it) }
+        return open(context, id, options)
+    }
+
+    /** Task [id]'s app's info screen (Settings). */
+    fun info(
+        context: Context,
+        id: Int,
+    ): Boolean {
+        val pkg = list(context).firstOrNull { it.id == id }?.component?.packageName ?: return false
+        return runCatching {
+            context.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", pkg, null))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.isSuccess
+    }
+
+    /** Task [id]'s last frame saved as a screenshot (Pictures/Screenshots); its name, or null. */
+    fun screenshot(
+        context: Context,
+        id: Int,
+    ): String? {
+        val jpeg = snapshot(id, Int.MAX_VALUE) ?: return null
+        val name = "Screenshot_${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())}.jpg"
+        return runCatching {
+            val values =
+                android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Screenshots")
+                }
+            val uri = context.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+            context.contentResolver.openOutputStream(uri)?.use { it.write(jpeg) }
+            name
+        }.onFailure { Log.w(TAG, "can't save task $id's screenshot", it) }.getOrNull()
+    }
+
+    private const val SPLIT_START_TASKS = 11
+    private const val SPLIT_POSITION_TOP_OR_LEFT = 0
+    private const val SNAP_TO_2_50_50 = 1
+    private const val WINDOWING_MODE_FREEFORM = 5
 
     /** Removes task [id] from recents (and ends its activities, as the stock switcher's swipe away). */
     fun remove(id: Int): Boolean =

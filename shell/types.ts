@@ -426,15 +426,27 @@ export interface Bridge {
   /** Android's recent tasks (the host is the recents provider): newest first; switching to one; removing one. */
   tasks: {
     list(): Promise<RecentTask[]>;
-    /** Brings the task back, growing out of [from] (its card, CSS px) when given; false if it's gone. */
-    open(id: number, from?: { left: number; top: number; width: number; height: number }): Promise<boolean>;
+    /**
+     * Brings the task back: growing out of [from] (its card, CSS px), or "instant" (the page grew the card to the
+     * screen itself); false if it's gone.
+     */
+    open(id: number, from?: { left: number; top: number; width: number; height: number } | "instant"): Promise<boolean>;
     remove(id: number): Promise<boolean>;
+    /** Two tasks side by side (WM Shell's split screen): [first] left / top. */
+    split(first: number, second: number): Promise<boolean>;
+    /** The task in a floating window (freeform). */
+    float(id: number): Promise<boolean>;
+    /** Its app's info screen. */
+    info(id: number): Promise<boolean>;
+    /** Its last frame saved to Pictures/Screenshots: the file's name, or null. */
+    screenshot(id: number): Promise<string | null>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up
    * over task [from] began, its window following the finger), "recents.drag" ({ progress 0..1, x, y }: every frame of
    * it, CSS px), "recents.end" ({ to: "switcher" | "home" | "app", snapshot }), "recents.show" ({ open, from, tasks }:
-   * up without a swipe), "recents.hide" (home went away), "switcher.toggle" (the overview button again).
+   * up without a swipe), "recents.hide" (home went away), "recents.tasks" ({ tasks }: the list for next time, laid out
+   * ahead), "switcher.toggle" (the overview button again).
    */
   recents: {
     /** Where the first card's frame is (CSS px, its corner radius): a swiped-up window lands there. */
@@ -506,7 +518,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

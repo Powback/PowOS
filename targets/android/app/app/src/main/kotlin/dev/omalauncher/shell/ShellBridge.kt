@@ -206,8 +206,12 @@ class ShellBridge(
             "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })
             "shade.closed" -> shade?.closed()
             "tasks.list" -> tasks()
-            "tasks.open" -> openTask(a.getInt(0), a.optJSONObject(1))
+            "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(a.getInt(0))
+            "tasks.split" -> dev.omalauncher.system.Tasks.split(a.getInt(0), a.getInt(1))
+            "tasks.float" -> dev.omalauncher.system.Tasks.float(context, a.getInt(0))
+            "tasks.info" -> dev.omalauncher.system.Tasks.info(context, a.getInt(0))
+            "tasks.screenshot" -> dev.omalauncher.system.Tasks.screenshot(context, a.getInt(0))
             // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
             "recents.slot" -> a.optJSONObject(0)?.let { dev.omalauncher.system.Switcher.slot(this, screenRect(it), it.optDouble("radius", 0.0).toFloat() * density()) }
             "recents.ready" -> dev.omalauncher.system.Switcher.ready(this)
@@ -342,13 +346,18 @@ class ShellBridge(
      */
     private fun openTask(
         id: Int,
-        from: JSONObject?,
+        from: Any?,
     ): Boolean {
         val options =
-            from?.let {
-                val r = viewRect(it)
-                android.app.ActivityOptions.makeScaleUpAnimation(web, r.left, r.top, r.width(), r.height())
-            } ?: android.app.ActivityOptions.makeBasic()
+            when {
+                // The page grew the card to the screen already: the app appears at once over its own snapshot.
+                from == "instant" -> android.app.ActivityOptions.makeCustomAnimation(context, dev.omalauncher.R.anim.powos_none, dev.omalauncher.R.anim.powos_none)
+                from is JSONObject -> {
+                    val r = viewRect(from)
+                    android.app.ActivityOptions.makeScaleUpAnimation(web, r.left, r.top, r.width(), r.height())
+                }
+                else -> android.app.ActivityOptions.makeBasic()
+            }
         return dev.omalauncher.system.Tasks.open(context, id, options)
     }
 
@@ -376,6 +385,8 @@ class ShellBridge(
      * icon when it's in the drawer, its last frame served by ShellHost (/_task/<id>, new each time it's asked).
      */
     private fun tasks(): JSONArray {
+        // A snapshot URL per task and per time it was last in front: the page's cache keeps a card's picture till the
+        // task was used again (the switcher's own app gets a fresh one when its window lands, Switcher.settle).
         val stamp = System.currentTimeMillis()
         return JSONArray(
             dev.omalauncher.system.Tasks.list(context).map { t ->
@@ -386,7 +397,7 @@ class ShellBridge(
                     .put("label", t.label ?: app?.label ?: pkg ?: "")
                     .put("key", app?.let { "a:${it.key}" } ?: JSONObject.NULL)
                     .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
-                    .put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=$stamp")
+                    .put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=${t.lastActive.takeIf { it > 0 } ?: stamp}")
             },
         )
     }
@@ -619,6 +630,14 @@ class ShellBridge(
         if (next.toString() == lastInsets.toString()) return
         lastInsets = next
         emit("system.insets", next)
+    }
+
+    /** [emit] now, on the main thread (a frame's worth of the switcher's drag: no extra hop). */
+    fun emitNow(
+        event: String,
+        payload: String,
+    ) {
+        js("window.__powosHost && window.__powosHost.emit(${JSONObject.quote(event)}, $payload)")
     }
 
     fun emit(

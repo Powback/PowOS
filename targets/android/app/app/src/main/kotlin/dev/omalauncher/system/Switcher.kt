@@ -1,5 +1,6 @@
 package dev.omalauncher.system
 
+import android.animation.ValueAnimator
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -49,10 +50,12 @@ object Switcher {
     /** Home's page (ShellActivity's, while it lives) and its window's refresh-rate boost. */
     private var shell: ShellBridge? = null
     private var shellBoost: ((Boolean) -> Unit)? = null
+    private var shellBlur: ((Float) -> Unit)? = null
 
     /** The recents activity's page (kept warm: a swipe shows it from its first frame) and its window's boost. */
     private var warm: ShellHost? = null
     private var hostBoost: ((Boolean) -> Unit)? = null
+    private var hostBlur: ((Float) -> Unit)? = null
 
     /** The layer is home's page's (PowOS's web home is the home app), else the recents activity's. */
     var onHome = true
@@ -61,6 +64,32 @@ object Switcher {
     /** The page that carries the layer now. */
     private val home: ShellBridge? get() = if (onHome) shell else warm?.bridge
     private val boost: ((Boolean) -> Unit)? get() = if (onHome) shellBoost else hostBoost
+    private val blur: ((Float) -> Unit)? get() = if (onHome) shellBlur else hostBlur
+
+    /** How far the wallpaper behind the layer is blurred (0..1), and the animation taking it somewhere. */
+    private var depth = 0f
+    private var depthAnim: ValueAnimator? = null
+
+    private fun depthNow(v: Float) {
+        depthAnim?.cancel()
+        depthAnim = null
+        depth = v
+        blur?.invoke(v)
+    }
+
+    /** The blur eased to [target], as the page's layer settles (its 240 ms). */
+    private fun depthTo(target: Float) {
+        depthAnim?.cancel()
+        depthAnim =
+            ValueAnimator.ofFloat(depth, target).apply {
+                duration = 240
+                addUpdateListener {
+                    depth = it.animatedValue as Float
+                    blur?.invoke(depth)
+                }
+                start()
+            }
+    }
 
     /** The layer's page is started (on screen, or being brought there by a recents transition). */
     var homeVisible = false
@@ -93,20 +122,27 @@ object Switcher {
     fun attach(
         bridge: ShellBridge,
         refresh: (Boolean) -> Unit,
+        blurBehind: (Float) -> Unit,
     ) {
         shell = bridge
         shellBoost = refresh
+        shellBlur = blurBehind
     }
 
     fun detach(bridge: ShellBridge) {
         if (shell !== bridge) return
         shell = null
         shellBoost = null
+        shellBlur = null
     }
 
     /** The recents activity shows the warm page (the desktop is home): its window's boost. */
-    fun attachHost(refresh: ((Boolean) -> Unit)?) {
+    fun attachHost(
+        refresh: ((Boolean) -> Unit)?,
+        blurBehind: ((Float) -> Unit)?,
+    ) {
         hostBoost = refresh
+        hostBlur = blurBehind
     }
 
     /** The recents activity's page, made once and kept warm (no window of its own: the activity borrows it). */
@@ -150,12 +186,16 @@ object Switcher {
         if (bridge !== home) return
         homeVisible = false
         hideStopped()
+        // The app that just came up is the newest task now: the cards are laid out for the next swipe already (the
+        // page renders them hidden, their snapshots load), so it shows them from its first frame.
+        if (!gesture) bridge.emit("recents.tasks", JSONObject().put("tasks", tasks()))
     }
 
     private fun hideStopped() {
         if (gesture || !open) return
         open = false
         from = null
+        depthNow(0f)
         home?.emit("recents.hide", null)
     }
 
@@ -188,8 +228,9 @@ object Switcher {
     ) {
         if (!gesture) return
         val d = density()
-        // A string, not a JSONObject: every frame, as cheap as it can be.
-        home?.emit("recents.drag", "{\"progress\":$progress,\"x\":${dx / d},\"y\":${dy / d}}")
+        depthNow(progress)
+        // A string, not a JSONObject, sent now (this is the display frame's callback): every frame, as cheap as it can be.
+        home?.emitNow("recents.drag", "{\"progress\":$progress,\"x\":${dx / d},\"y\":${dy / d}}")
     }
 
     /** The swipe went home or back to the app: the layer collapses. */
@@ -200,6 +241,7 @@ object Switcher {
         from = null
         release = null
         boost?.invoke(false)
+        depthTo(0f)
         home?.emit("recents.end", JSONObject().put("to", to))
     }
 
@@ -267,6 +309,7 @@ object Switcher {
                 if (gesture) return@post
                 open = true
                 from = over
+                depthTo(1f)
                 home?.emit("recents.show", state())
                 // Started by the recents provider: allowed from the background (BackgroundActivityStartController's
                 // "Recents Component").
@@ -295,6 +338,7 @@ object Switcher {
         if (gesture || !open) return
         open = false
         from = null
+        depthNow(0f)
         home?.emit("recents.hide", null)
     }
 
@@ -309,6 +353,7 @@ object Switcher {
         if (bridge !== home || gesture) return
         open = false
         from = null
+        depthTo(0f)
         if (!onHome) {
             runCatching {
                 context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -317,7 +362,7 @@ object Switcher {
     }
 
     /** For a page that just loaded (home started cold for the switcher): whether the layer is up, over what. */
-    fun state(): JSONObject = JSONObject().put("open", open).put("from", from ?: JSONObject.NULL).put("tasks", if (open) tasks() else JSONArray())
+    fun state(): JSONObject = JSONObject().put("open", open).put("from", from ?: JSONObject.NULL).put("tasks", tasks())
 
     private fun tasks(): JSONArray = home?.recentTasks() ?: JSONArray()
 

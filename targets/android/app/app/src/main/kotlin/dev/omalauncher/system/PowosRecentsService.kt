@@ -71,6 +71,8 @@ class PowosRecentsService : Service() {
             override fun onInitialize(params: Bundle?) {
                 val sysui = params?.getBinder(SYSTEM_UI_PROXY)?.let { ISystemUiProxy.Stub.asInterface(it) }
                 val recentTasks = params?.getBinder(RecentsTransition.RECENT_TASKS)
+                // The switcher's split screen (WM Shell's).
+                Tasks.splitScreen = params?.getBinder("com.android.wm.shell.splitscreen.ISplitScreen")
                 Log.i(TAG, "SystemUI connected: ${params?.keySet()?.sorted()}")
                 main.post {
                     systemUi = sysui

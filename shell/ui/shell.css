@@ -1027,15 +1027,18 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .notif-panel .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; transform: translateX(var(--panel-dx, 0px)); }
 .notif-panel .panel-body.settling { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 /*
- * The switcher (recents.tsx): a layer of home, the recent tasks side by side over the dimmed wallpaper, the app it was
- * opened over first. --rp (0..1) is how far it's up - a swipe up drives it every frame, the host's window landing on
- * the first card - and --rx / --ry move the row with the finger: transforms and opacity only, nothing lays out again.
+ * The switcher (recents.tsx): a layer of home, the recent tasks side by side over the blurred, dimmed wallpaper (the
+ * blur is the host's, behind the window). --rp (0..1) is how far it's up - a swipe up drives it every frame, the
+ * host's window landing on the first card - and --rx / --ry move the row with the finger: transforms and opacity only,
+ * nothing lays out again. The row runs right to left as Android's: the app it was opened over in the middle, the ones
+ * before it to its left.
  */
 .recents {
   --rp: 0;
   --rx: 0px;
   --ry: 0px;
-  --card-w: min(70vw, 420px, calc(60vh * var(--screen-ratio-n, 0.45)));
+  --card-w: min(72vw, 440px, calc(62vh * var(--screen-ratio-n, 0.45)));
+  --card-radius: max(var(--radius), 22px);
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -1050,12 +1053,27 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents.shown { pointer-events: auto; }
 /* Collapsing: it stays visible till the cards are gone. */
 .recents.closed.settling { transition: visibility 0s linear 240ms; }
-.recents-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-background) 72%, transparent); opacity: var(--rp); pointer-events: none; }
-.recents .task-row { position: relative; padding: 0 calc((100vw - var(--card-w)) / 2); transform: translate(var(--rx), var(--ry)); }
-.recents .task { width: var(--card-w); max-width: none; }
-.recents .task-shot { max-height: none; }
-/* The first card is where the app's window lands; the others slide in from the side with the finger. */
-.recents .task:not(:first-child) { transform: translateX(calc((1 - var(--rp)) * 45vw)); opacity: var(--rp); }
+.recents-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-background) 45%, transparent); opacity: var(--rp); pointer-events: none; }
+.recents .task-row {
+  direction: rtl;
+  position: relative;
+  gap: calc(var(--gap) * 3);
+  padding: 0 calc((100vw - var(--card-w)) / 2);
+  scroll-snap-type: x proximity;
+  transform: translate(var(--rx), var(--ry));
+}
+.recents .task { direction: ltr; width: var(--card-w); max-width: none; }
+.recents .task-head { justify-content: center; gap: 10px; padding: 0 4px 12px; font: 500 var(--text-small) var(--font); color: var(--color-foreground); }
+.recents .task-icon { width: 28px; height: 28px; border-radius: 8px; }
+.recents .task-shot {
+  max-height: none;
+  border: none;
+  border-radius: var(--card-radius);
+  box-shadow: 0 10px 30px color-mix(in srgb, #000 35%, transparent);
+}
+.recents .task.pinned .task-label::after { content: " \00b7 pinned"; color: var(--color-accent); }
+/* The first card is where the app's window lands; the others slide in from the left with the finger. */
+.recents .task:not(:first-child) { transform: translateX(calc((var(--rp) - 1) * 45vw)); opacity: var(--rp); }
 .recents .task:first-child .task-head, .recents .task-clear { opacity: var(--rp); }
 .recents.live .task:first-child .task-shot { visibility: hidden; }
 .recents .task[aria-hidden] { visibility: hidden; }
@@ -1063,7 +1081,33 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents.settling .task-row,
 .recents.settling .task:not(:first-child),
 .recents.settling .task:first-child .task-head,
-.recents.settling .task-clear { transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 240ms ease; }
+.recents.settling .task-clear { transition: transform var(--spring-ms, 300ms) var(--spring, ease), opacity 240ms ease; }
+/* Split screen: picking the second app - the first one set apart. */
+.recents.splitting .task.picked { opacity: 0.45; transform: scale(0.94); }
+.recents-banner {
+  position: absolute; left: 50%; top: calc(var(--inset-top, 0px) + 24px); transform: translateX(-50%);
+  padding: 10px 18px; border-radius: 999px; font: var(--text-small) var(--font);
+  background: var(--color-surface); color: var(--color-foreground); border: var(--frame) solid var(--color-border);
+}
+.recents-menu-scrim { position: fixed; inset: 0; z-index: 1; }
+.recents-menu {
+  position: fixed; z-index: 2; width: 220px; display: flex; flex-direction: column; padding: 6px 0;
+  border-radius: 16px; background: var(--color-surface); box-shadow: 0 12px 32px color-mix(in srgb, #000 40%, transparent);
+  animation: recents-menu-in 160ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  transform-origin: top left;
+}
+.recents-menu button { text-align: left; padding: 12px 18px; font: var(--text-small) var(--font); color: var(--color-foreground); background: none; border: none; }
+.recents-menu button:active { background: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+@keyframes recents-menu-in { from { opacity: 0; transform: scale(0.92); } }
+/* A card growing to the screen as its app opens (its transform is animated from the card's frame). */
+.recents-expand { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 3; object-fit: cover; object-position: top; transform-origin: 0 0; pointer-events: none; }
+.recents-note {
+  position: absolute; left: 50%; bottom: calc(var(--inset-bottom, 0px) + 24px); transform: translateX(-50%);
+  padding: 10px 16px; border-radius: 999px; font: var(--text-small) var(--font);
+  background: var(--color-surface); color: var(--color-foreground);
+  animation: recents-note 2.4s ease forwards;
+}
+@keyframes recents-note { 0% { opacity: 0; } 8%, 85% { opacity: 1; } 100% { opacity: 0; } }
 .task-row {
   display: flex;
   gap: calc(var(--gap) * 2);
@@ -1092,7 +1136,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   user-select: none;
   -webkit-user-drag: none;
 }
-.task-clear { align-self: center; margin-top: calc(var(--gap) * 3); font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 8px 16px; }
+.task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: 500 var(--text-small) var(--font); color: var(--color-foreground); background: color-mix(in srgb, var(--color-surface) 80%, transparent); border: none; border-radius: 999px; padding: 10px 22px; }
 
 /*
  * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lift (0..1,

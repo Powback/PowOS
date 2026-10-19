@@ -128,7 +128,8 @@ class ShellHost(
             // A recent task's last frame, for the switcher (on the WebView's loader thread: the snapshot is a binder call).
             if (path.startsWith("_task/")) {
                 val jpeg = path.removePrefix("_task/").toIntOrNull()?.let { dev.omalauncher.system.Tasks.snapshot(it) } ?: return notFound()
-                return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
+                // The URL names the snapshot's version (?v=, the task's last time in front, or a fresh capture's): kept.
+                return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=86400") }
             }
             // An Android widget's latest frame (AppWidgets draws it off screen), and a widget's preview for the picker.
             if (path.startsWith("_appwidget/")) {

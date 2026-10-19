@@ -31,7 +31,7 @@ class SwitcherActivity : Activity() {
         (h.web.parent as? ViewGroup)?.removeView(h.web)
         setContentView(h.web)
         val refresh = HighRefresh(window, h.web)
-        Switcher.attachHost { refresh.boost(it) }
+        Switcher.attachHost({ refresh.boost(it) }, WindowBlur(window)::set)
         host = h
     }
 

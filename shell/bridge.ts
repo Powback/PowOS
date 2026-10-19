@@ -168,6 +168,10 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       list: () => call<RecentTask[]>("tasks.list"),
       open: (id, from) => call<boolean>("tasks.open", id, from ?? null),
       remove: (id) => call<boolean>("tasks.remove", id),
+      split: (first, second) => call<boolean>("tasks.split", first, second),
+      float: (id) => call<boolean>("tasks.float", id),
+      info: (id) => call<boolean>("tasks.info", id),
+      screenshot: (id) => call<string | null>("tasks.screenshot", id),
     },
     recents: {
       slot: (rect) => call("recents.slot", rect),
@@ -976,6 +980,10 @@ function mockTasks(icon: (name: string) => string, hue: (name: string) => number
       tasks = tasks.filter((t) => t.id !== id);
       return true;
     },
+    split: async (a, b) => (console.log("[mock] split", a, b), true),
+    float: async (id) => (console.log("[mock] float", id), true),
+    info: async (id) => (console.log("[mock] info", id), true),
+    screenshot: async (id) => (console.log("[mock] screenshot", id), "Screenshot_mock.jpg"),
   };
 }
 

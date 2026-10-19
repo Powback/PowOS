@@ -64,6 +64,9 @@ class NavGesture(
     /** Where the finger went down (screen px): the window follows it sideways. */
     private var downX = 0f
 
+    /** The hold state last logged. */
+    private var armedLogged = false
+
     /** The task the swipe began over (null: home, or PowOS's own screens). */
     private var from: Int? = null
 
@@ -86,6 +89,8 @@ class NavGesture(
         transition = null
         from = null
         downX = e.rawX
+        armedLogged = false
+        Log.i(TAG, "gesture: down at ${e.rawX.toInt()},${e.rawY.toInt()}")
         classifier = NavGestureClassifier(displayContext.resources.displayMetrics.density, screen.height().toFloat(), slop).also { it.down(e.rawX, e.rawY, e.eventTime) }
         return true
     }
@@ -94,13 +99,22 @@ class NavGesture(
         val c = classifier ?: return GestureConsumer.Verdict.DROP
         when (e.actionMasked) {
             MotionEvent.ACTION_MOVE -> {
-                when (c.move(e.rawX, e.rawY, e.eventTime)) {
+                val axis = c.move(e.rawX, e.rawY, e.eventTime)
+                if (axis != null) Log.i(TAG, "gesture: $axis after ${e.eventTime - e.downTime} ms")
+                if (c.axis == NavGestureClassifier.Axis.UP && c.armed != armedLogged) {
+                    armedLogged = c.armed
+                    Log.i(TAG, "gesture: ${if (c.armed) "held (the switcher on release)" else "moving again"} at lift ${c.lift.toInt()} px")
+                }
+                when (axis) {
                     NavGestureClassifier.Axis.UP -> {
                         began()
                         return GestureConsumer.Verdict.TAKE
                     }
                     NavGestureClassifier.Axis.SIDEWAYS -> return if (pinned) drop() else GestureConsumer.Verdict.TAKE
-                    NavGestureClassifier.Axis.IGNORED -> return drop()
+                    NavGestureClassifier.Axis.IGNORED -> {
+                        Log.i(TAG, "gesture: downwards from the bar - not ours")
+                        return drop()
+                    }
                     else -> {}
                 }
                 if (c.axis == NavGestureClassifier.Axis.UP) transition?.drag(c.lift, e.rawX - downX)
@@ -111,12 +125,13 @@ class NavGesture(
                 if (c.axis == NavGestureClassifier.Axis.NONE) return drop()
             MotionEvent.ACTION_UP -> {
                 classifier = null
-                ended(c.up(e.rawX, e.rawY, e.eventTime))
+                val outcome = c.up(e.rawX, e.rawY, e.eventTime)
+                ended(outcome, c.why)
                 return GestureConsumer.Verdict.FOLLOW
             }
             MotionEvent.ACTION_CANCEL -> {
                 classifier = null
-                ended(NavGestureClassifier.Outcome.None)
+                ended(NavGestureClassifier.Outcome.None, "cancelled (the touch was taken)")
                 return GestureConsumer.Verdict.DROP
             }
         }
@@ -133,10 +148,11 @@ class NavGesture(
         if (pinned) return
         // Over home's switcher there's no app under the finger: home's (the plain way).
         from = if (Switcher.open && Switcher.homeVisible) null else Tasks.visible(service)
-        val tasks = recentTasks ?: return
-        if (from == null || !RecentsTransition.enabled(service) || Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) return
+        val tasks = recentTasks ?: run { Log.i(TAG, "gesture: no recents transition - SystemUI gave no IRecentTasks"); return }
+        if (from == null) run { Log.i(TAG, "gesture: over home (no app's window to move): the plain way"); return }
+        if (!RecentsTransition.enabled(service) || Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) run { Log.i(TAG, "gesture: the recents transition is off"); return }
         // Behind the app: PowOS's web home (the switcher is a layer of it), or the recents activity (the desktop is home).
-        val home = Switcher.target(service) ?: return
+        val home = Switcher.target(service) ?: run { Log.i(TAG, "gesture: no recents transition - PowOS isn't the home app"); return }
         val t = RecentsTransition.start(service, tasks, home, Rect(screen)) ?: return
         // The window heads for its card in home's switcher layer, which follows the window frame by frame.
         t.slot = { Switcher.slot }
@@ -145,11 +161,14 @@ class NavGesture(
         transition = t
     }
 
-    private fun ended(outcome: NavGestureClassifier.Outcome) {
+    private fun ended(
+        outcome: NavGestureClassifier.Outcome,
+        why: String = "",
+    ) {
         val t = transition
         transition = null
         val over = from
-        if (outcome != NavGestureClassifier.Outcome.None || t != null) Log.i(TAG, "gesture: $outcome (over task $over, animated ${t != null})")
+        Log.i(TAG, "gesture: $outcome (over task $over, animated ${t != null}; $why)")
         if (pinned) {
             if (outcome == NavGestureClassifier.Outcome.Switcher) runCatching { systemUi?.stopScreenPinning() }.onFailure { Log.w(TAG, "can't unpin", it) }
             return

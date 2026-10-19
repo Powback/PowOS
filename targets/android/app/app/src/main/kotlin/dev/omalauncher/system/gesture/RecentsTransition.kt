@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.Parcel
 import android.provider.Settings
 import android.util.Log
+import android.view.Choreographer
 import android.view.RemoteAnimationTarget
 import android.view.SurfaceControl
 import android.view.animation.DecelerateInterpolator
@@ -112,8 +113,21 @@ class RecentsTransition private constructor(
     ) {
         if (state == State.DONE || state == State.ENDING) return
         look = dragLook(lift, dx)
-        apply(look)
+        // Once per display frame (touch comes in faster than the screen refreshes): the window and the page move
+        // together on the frame, with the newest finger position.
+        if (!framePending) {
+            framePending = true
+            choreographer.postFrameCallback(frame)
+        }
     }
+
+    private val choreographer = Choreographer.getInstance()
+    private var framePending = false
+    private val frame =
+        Choreographer.FrameCallback {
+            framePending = false
+            if (state == State.RUNNING) apply(look)
+        }
 
     /**
      * The gesture ended as [end]: animate there and finish; [done] hears whether the transition did it. [hold], when
@@ -166,6 +180,16 @@ class RecentsTransition private constructor(
                 Leash(it.leash, it.screenSpaceBounds ?: Rect(0, 0, 0, 0))
             }
         state = State.RUNNING
+        // Home (the opening target) is what the switcher is drawn in: shown from the first frame, under the app. WM
+        // Shell leaves the recents target's surface to the recents provider (Quickstep shows its launcher itself).
+        runCatching {
+            val t = SurfaceControl.Transaction()
+            targets.filterNotNull().filter { it.mode == RemoteAnimationTarget.MODE_OPENING && it.leash != null }.forEach {
+                t.setVisibility(it.leash, true)
+                t.setAlpha(it.leash, 1f)
+            }
+            t.apply()
+        }.onFailure { Log.w(TAG, "can't show home under the app", it) }
         apply(look)
         main.postDelayed(watchdog, WATCHDOG_MS)
         pending?.let { p ->
@@ -276,6 +300,8 @@ class RecentsTransition private constructor(
     /** Done with the windows: no more moving them, the leashes let go. */
     private fun stop() {
         state = State.DONE
+        if (framePending) choreographer.removeFrameCallback(frame)
+        framePending = false
         main.removeCallbacks(watchdog)
         animator?.cancel()
         animator = null

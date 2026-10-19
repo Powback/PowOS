@@ -12,14 +12,15 @@ import kotlin.math.hypot
  *   switch, down is nothing (the windows under it keep the touch).
  * - "Hold": after at least [holdMinDistance] up, the finger slower than [pauseSpeed] for [holdMs]. Moving on fast again
  *   un-arms it (as Quickstep's MotionPauseDetector).
- * - Let go: armed and not flung up → switcher; flung up ([flingSpeed]) or past [homeDistance] → home; else nothing
- *   (back to the app). Sideways: past [switchDistance] or flung sideways → quick switch.
+ * - Let go, as Quickstep's end target: flung up ([homeFlingSpeed]) → home; armed, or let go slowly past
+ *   [homeDistance] (the window on its card by then) → switcher; else nothing (back to the app). Sideways: past
+ *   [switchDistance] or flung sideways → quick switch.
  *
  * Ported in spirit from AOSP Launcher3 Quickstep (Apache-2.0: OtherActivityInputConsumer, MotionPauseDetector), with
  * thresholds of its own.
  */
 class NavGestureClassifier(
-    density: Float,
+    private val density: Float,
     /** The screen's height (px): the distances that go home scale with it. */
     screenHeight: Float,
     /** The system's touch slop (px). */
@@ -29,6 +30,9 @@ class NavGestureClassifier(
     private val pauseSpeed = 0.12f * density // px/ms
     private val holdMs = 140L
     private val flingSpeed = 0.9f * density // px/ms
+
+    /** Up this fast at the release goes home (Quickstep's quickstep_fling_threshold_speed, 0.5 dp/ms). */
+    private val homeFlingSpeed = 0.5f * density // px/ms
     private val homeDistance = screenHeight * 0.22f
     private val switchDistance = 56f * density
 
@@ -56,6 +60,10 @@ class NavGestureClassifier(
 
     /** How far the finger went up since it went down (px, never negative). */
     var lift = 0f
+        private set
+
+    /** Why [up] decided what it did (for the log: the numbers it went by). */
+    var why = ""
         private set
 
     private var x0 = 0f
@@ -133,13 +141,14 @@ class NavGestureClassifier(
             if (t - previous >= holdMs || (pauseSince >= 0 && t - pauseSince >= holdMs)) armed = true
         }
         val (vx, vy) = velocity()
+        why = "lift ${lift.toInt()}/${homeDistance.toInt()} px, vy ${"%.2f".format(-vy / density)} dp/ms (home over ${"%.2f".format(homeFlingSpeed / density)}), armed $armed"
         return when (axis) {
             Axis.UP ->
                 when {
-                    -vy >= flingSpeed -> Outcome.Home
+                    -vy >= homeFlingSpeed -> Outcome.Home
                     armed -> Outcome.Switcher
                     vy >= flingSpeed -> Outcome.None
-                    lift >= homeDistance -> Outcome.Home
+                    lift >= homeDistance -> Outcome.Switcher
                     else -> Outcome.None
                 }
             Axis.SIDEWAYS -> {

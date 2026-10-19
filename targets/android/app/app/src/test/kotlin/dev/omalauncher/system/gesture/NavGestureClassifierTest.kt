@@ -41,13 +41,23 @@ class NavGestureClassifierTest {
     }
 
     @Test
-    fun aSlowLongSwipeUpGoesHomeToo() {
+    fun aSlowLongSwipeUpLetGoIsTheSwitcher() {
         val c = classifier()
         c.down(540f, bottom, 0)
-        // 700 px in 1.4 s: never a fling, never still, past the home distance (22% of the screen).
+        // 700 px in 1.4 s: never a fling, never still, past the home distance (22% of the screen): the window is on
+        // its card by then, and a slow release leaves it there (Quickstep's non-fling end target).
         val t = c.drag(540f, bottom, 540f, bottom - 700f, 1400)
         assertFalse(c.armed)
-        assertEquals(NavGestureClassifier.Outcome.Home, c.up(540f, bottom - 700f, t + 8))
+        assertEquals(NavGestureClassifier.Outcome.Switcher, c.up(540f, bottom - 700f, t + 8))
+    }
+
+    @Test
+    fun aModerateFlickUpGoesHome() {
+        val c = classifier()
+        c.down(540f, bottom, 0)
+        // 1.6 px/ms (0.64 dp/ms): over Quickstep's 0.5 dp/ms fling threshold.
+        val t = c.drag(540f, bottom, 540f, bottom - 480f, 300)
+        assertEquals(NavGestureClassifier.Outcome.Home, c.up(540f, bottom - 480f, t + 8))
     }
 
     @Test

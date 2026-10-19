@@ -1,23 +1,27 @@
 /**
  * The switcher: a layer of home's own page, as Quickstep's recents view lives in the launcher. The recent tasks side by
- * side, newest first, the app it was opened over first; a tap opens one (it grows out of its card), a swipe up removes
- * it, "clear all" removes them all, a tap beside the cards or Back closes it (Back goes back to the app it was opened
- * over).
+ * side as Android lays them out: the app it was opened over in the middle, the ones used before it to its left (the
+ * one just left right next to it), older further left - a sideways swipe scrolls them, with momentum. A tap opens one
+ * (its card grows to the screen, then the app is there), a swipe up removes it, "clear all" removes all but the pinned
+ * ones, a tap beside the cards or Back closes it (Back goes back to the app it was opened over). A card's icon (or a
+ * long press) opens its menu: split screen (then pick the second app), floating window, screenshot, app info, pin.
  *
  * A swipe up over an app builds it under the finger (system/Switcher.kt, the native side): home comes up behind the
  * app ("recents.begin"), the app's window shrinks onto the first card's slot - where that slot is, the page tells the
- * host ([reportSlot]) - while the other cards slide in with the finger ("recents.drag", every frame: only CSS
- * variables and transforms change, nothing re-renders). Let go:
- * - held ("recents.end" to: switcher): the window is on its card; the card gets the app's fresh snapshot, and once it
+ * host ([reportSlot]) - while the other cards slide in with the finger ("recents.drag", every display frame: only CSS
+ * variables and transforms change, nothing re-renders). The cards are laid out before that, while the app is in front
+ * ("recents.tasks"), their snapshots loaded, so the first frame of a swipe has them. Let go:
+ * - held, or slowly (to: switcher): the window is on its card; the card gets the app's fresh snapshot, and once it
  *   shows it the host lets the window go (powos.recents.ready) - the layer is simply up, it's home's own page.
- * - flung or far (to: home), or early (to: app): the layer collapses back into home.
+ * - flung up (to: home), or early (to: app): the layer collapses back into home.
  * The overview button shows it without a swipe ("recents.show"); home going away hides it ("recents.hide").
  */
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { RecentTask } from "../types.ts";
 import { TaskCard, type Rect } from "./switcher.tsx";
+import { spring } from "./spring.ts";
 
 type Phase = "closed" | "drag" | "shown";
 
@@ -31,6 +35,23 @@ const live = signal(false);
 const settling = signal(false);
 /** The screen's size: the cards are the screen's shape. */
 const size = signal({ w: innerWidth, h: innerHeight });
+/** A card's menu, open over it. */
+const menu = signal<{ id: number; left: number; top: number } | null>(null);
+/** Split screen: the first app picked, waiting for the second. */
+const splitFirst = signal<number | null>(null);
+/** A card growing to the screen as its app opens. */
+const opening = signal<{ id: number; rect: Rect; src: string; radius: string } | null>(null);
+/** Apps kept from "clear all" (by app, as Android's lock: task ids don't outlive a reboot). */
+const pinned = signal<Set<string>>(new Set());
+/** A short note (a screenshot saved). */
+const note = signal<string | null>(null);
+
+powos.store
+  .get<string[]>("recents.pinned")
+  .then((keys) => keys && (pinned.value = new Set(keys)))
+  .catch(() => {});
+
+const pinKey = (t: RecentTask) => t.key ?? `label:${t.label}`;
 
 let layer: HTMLDivElement | null = null;
 let row: HTMLDivElement | null = null;
@@ -64,13 +85,20 @@ function frame(p: number, x = 0, y = 0) {
 function settle(on: boolean) {
   settling.value = on;
   const s = screens();
-  if (s) s.style.transition = on ? "transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 240ms ease" : "none";
+  if (s) s.style.transition = on ? `transform ${spring.ms}ms ${spring.easing}, opacity 240ms ease` : "none";
 }
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
+function reset() {
+  menu.value = null;
+  splitFirst.value = null;
+  opening.value = null;
+}
+
 function begin(e: { from: number | null; tasks: RecentTask[] }) {
   settle(false);
+  reset();
   from.value = e.from;
   tasks.value = order(e.tasks, e.from);
   live.value = e.from != null;
@@ -79,9 +107,10 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
   frame(0);
 }
 
-/** Shown without a swipe (the overview button, up and hold over home): it fades in over home. */
+/** Shown without a swipe (the overview button, up and hold over home): it comes up over home. */
 async function show(e: { from: number | null; tasks: RecentTask[] }) {
   settle(false);
+  reset();
   from.value = e.from;
   tasks.value = order(e.tasks, e.from);
   live.value = false;
@@ -96,6 +125,7 @@ async function show(e: { from: number | null; tasks: RecentTask[] }) {
 /** The switcher goes, back into home: animated ([animate]) or at once (home went out of sight). */
 function collapse(animate: boolean) {
   settle(animate);
+  reset();
   phase.value = "closed";
   frame(0);
 }
@@ -126,18 +156,100 @@ async function landed(snapshot: string | null) {
   powos.recents.ready();
 }
 
-function open(id: number, rect?: Rect) {
-  // The layer stays until home is out of sight ("recents.hide"): the app grows out of its card over it.
-  powos.tasks.open(id, rect).then((ok) => void (ok || refresh()));
+/**
+ * Opens task [id] from its card: the card's frame grows to the screen (a spring), then the app is opened with no
+ * animation of its own - it appears over its own snapshot. The layer stays till home is out of sight ("recents.hide").
+ */
+function open(id: number, shot?: HTMLElement) {
+  menu.value = null;
+  const t = tasks.value.find((x) => x.id === id);
+  const img = shot as HTMLImageElement | undefined;
+  if (!t || !img || !img.complete || !img.naturalWidth) {
+    powos.tasks.open(id).then((ok) => void (ok || refresh()));
+    return;
+  }
+  const r = img.getBoundingClientRect();
+  opening.value = { id, rect: { left: r.left, top: r.top, width: r.width, height: r.height }, src: img.currentSrc || img.src, radius: getComputedStyle(img).borderTopLeftRadius };
+}
+
+/** The growing card reached the screen's edges: the app now. */
+function opened(id: number) {
+  powos.tasks.open(id, "instant").then((ok) => {
+    if (ok) return;
+    opening.value = null;
+    refresh();
+  });
+}
+
+/** Where every card is now (for [flip]: the others close the gap a removed one leaves). */
+let flipFrom: Map<number, number> | null = null;
+function cardPositions() {
+  const m = new Map<number, number>();
+  row?.querySelectorAll<HTMLElement>(".task[data-task]").forEach((c) => m.set(Number(c.dataset.task), c.getBoundingClientRect().left));
+  return m;
 }
 
 function remove(id: number) {
+  menu.value = null;
   powos.tasks.remove(id);
+  flipFrom = cardPositions();
   tasks.value = tasks.value.filter((t) => t.id !== id);
+  if (splitFirst.value === id) splitFirst.value = null;
   if (!tasks.value.length) close();
 }
 
+/** All but the pinned ones fly up and go; with nothing left, the switcher closes. */
+function clearAll() {
+  const keep = tasks.value.filter((t) => pinned.value.has(pinKey(t)));
+  const going = tasks.value.filter((t) => !pinned.value.has(pinKey(t)));
+  if (!going.length) return;
+  let left = going.length;
+  going.forEach((t, i) => {
+    const card = row?.querySelector<HTMLElement>(`.task[data-task="${t.id}"]`);
+    const done = () => {
+      powos.tasks.remove(t.id);
+      if (--left) return;
+      flipFrom = cardPositions();
+      tasks.value = keep;
+      if (!keep.length) close();
+    };
+    if (!card) return done();
+    card.animate([{ transform: "none", opacity: 1 }, { transform: `translateY(-${innerHeight}px)`, opacity: 0 }], {
+      duration: 260,
+      delay: Math.min(i, 6) * 30,
+      easing: "cubic-bezier(0.4, 0, 1, 1)",
+      fill: "forwards",
+    }).onfinish = done;
+  });
+}
+
 const refresh = () => powos.tasks.list().then((t) => (tasks.value = order(t, from.value)));
+
+function togglePin(t: RecentTask) {
+  const next = new Set(pinned.value);
+  const k = pinKey(t);
+  if (next.has(k)) next.delete(k);
+  else next.add(k);
+  pinned.value = next;
+  powos.store.set("recents.pinned", [...next]);
+}
+
+/** A card picked for split screen: the first one waits for the second; the second splits them. */
+function pickForSplit(id: number) {
+  const first = splitFirst.value;
+  if (first == null) {
+    splitFirst.value = id;
+    return;
+  }
+  splitFirst.value = null;
+  if (first !== id) powos.tasks.split(first, id);
+}
+
+function showNote(text: string) {
+  note.value = text;
+  // The note goes with its own fade (CSS); the next one replaces it.
+  layer?.querySelector(".recents-note")?.getAnimations().forEach((a) => a.cancel());
+}
 
 /** The first card's frame (inside its border), where a swiped-up window lands. */
 function firstShot() {
@@ -150,8 +262,8 @@ let reported = "";
  * discounted, so it's right mid-swipe too (the page resized under a swipe: a window just made for it). Not scrolled.
  */
 function reportSlot() {
-  // Not while the row is animating (settling): its box is between places.
-  if (!row || !layer || row.scrollLeft !== 0 || row.getAnimations().length) return;
+  // Not while the row is animating (settling) or scrolled: its box is between places.
+  if (!row || !layer || Math.abs(row.scrollLeft) >= 1 || row.getAnimations().length) return;
   const shot = firstShot();
   if (!shot) return;
   const r = shot.getBoundingClientRect();
@@ -171,14 +283,13 @@ function reportSlot() {
   powos.recents.slot(slot);
 }
 
-/** Back: to the app it was opened over, or home. False when it isn't up. */
+/** Back: out of a menu or split screen's pick, else to the app it was opened over, or home. False when it isn't up. */
 export function recentsBack(): boolean {
   if (phase.value === "closed") return false;
-  const id = from.value;
-  if (id != null) {
-    const r = firstShot()?.getBoundingClientRect();
-    open(id, r && { left: r.left, top: r.top, width: r.width, height: r.height });
-  } else close();
+  if (menu.value) menu.value = null;
+  else if (splitFirst.value != null) splitFirst.value = null;
+  else if (from.value != null) open(from.value, firstShot() ?? undefined);
+  else close();
   return true;
 }
 
@@ -197,11 +308,17 @@ powos.on("recents.end", (e: { to: "switcher" | "home" | "app"; snapshot?: string
 });
 powos.on("recents.show", (e: { open: boolean; from: number | null; tasks: RecentTask[] }) => void show(e));
 powos.on("recents.hide", () => collapse(false));
+// The list for the next swipe, while an app is in front: laid out (hidden) now, snapshots loading.
+powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {
+  if (phase.value !== "closed") return;
+  tasks.value = e.tasks;
+  row?.scrollTo({ left: 0 });
+});
 // The overview button again: the task before the one it was opened over (or the newest, from home), as Android's.
 powos.on("switcher.toggle", () => {
   const list = tasks.value;
   const next = list[0]?.id === from.value ? list[1] : list[0];
-  if (next) open(next.id);
+  if (next) open(next.id, row?.querySelector<HTMLElement>(`.task[data-task="${next.id}"] .task-shot`) ?? undefined);
   else close();
 });
 addEventListener("resize", () => (size.value = { w: innerWidth, h: innerHeight }));
@@ -219,6 +336,66 @@ function Placeholder() {
   );
 }
 
+/** The card growing to the screen as its app opens (over everything, the layer included). */
+function Opening() {
+  const o = opening.value;
+  const el = useRef<HTMLImageElement>(null);
+  useLayoutEffect(() => {
+    if (!o || !el.current) return;
+    const { left, top, width, height } = o.rect;
+    const sx = width / innerWidth;
+    const sy = height / innerHeight;
+    el.current.animate(
+      [
+        { transform: `translate(${left}px, ${top}px) scale(${sx}, ${sy})`, borderRadius: `${parseFloat(o.radius) / sx}px` },
+        { transform: "none", borderRadius: "0px" },
+      ],
+      { duration: Math.min(spring.ms, 320), easing: "cubic-bezier(0.2, 0.9, 0.2, 1)", fill: "forwards" },
+    ).onfinish = () => opened(o.id);
+  }, [o?.id]);
+  if (!o) return null;
+  return <img ref={el} class="recents-expand" src={o.src} alt="" />;
+}
+
+function Menu() {
+  const m = menu.value;
+  if (!m) return null;
+  const t = tasks.value.find((x) => x.id === m.id);
+  if (!t) return null;
+  const isPinned = pinned.value.has(pinKey(t));
+  const act = (f: () => void) => () => {
+    menu.value = null;
+    f();
+  };
+  return (
+    <>
+      <div class="recents-menu-scrim" onPointerDown={() => (menu.value = null)} />
+      <div class="recents-menu tile" style={{ left: `${m.left}px`, top: `${m.top}px` }}>
+        <button type="button" onClick={act(() => pickForSplit(t.id))}>
+          Split screen
+        </button>
+        <button type="button" onClick={act(() => powos.tasks.float(t.id))}>
+          Floating window
+        </button>
+        <button
+          type="button"
+          onClick={act(() =>
+            powos.tasks.screenshot(t.id).then((name) => showNote(name ? `Saved ${name}` : "No screenshot of this app yet")),
+          )}
+        >
+          Screenshot
+        </button>
+        <button type="button" onClick={act(() => togglePin(t))}>
+          {isPinned ? "Unpin" : "Pin (keep on clear all)"}
+        </button>
+        <button type="button" onClick={act(() => powos.tasks.info(t.id))}>
+          App info
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function Recents() {
   const el = useRef<HTMLDivElement>(null);
   const rowEl = useRef<HTMLDivElement>(null);
@@ -226,9 +403,12 @@ export function Recents() {
     layer = el.current;
     row = rowEl.current;
     frame(0);
-    // Opened before this page loaded (home started cold for the switcher): up at once.
+    // Its list now (laid out ahead of the first swipe); opened before this page loaded (home started cold for the
+    // switcher): up at once.
     powos.recents.state().then((s) => {
-      if (s?.open && phase.value === "closed") show(s);
+      if (!s) return;
+      if (s.open && phase.value === "closed") show(s);
+      else if (phase.value === "closed" && s.tasks?.length) tasks.value = s.tasks;
     });
     // The slot moves when the screen does (rotation, folding) or the insets change.
     const observer = new ResizeObserver(() => reportSlot());
@@ -245,37 +425,66 @@ export function Recents() {
   useEffect(() => {
     requestAnimationFrame(reportSlot);
   }, [phase.value, size.value, tasks.value]);
+  // A card went: the others slide into its place (from where they were, as a spring).
+  useLayoutEffect(() => {
+    const before = flipFrom;
+    flipFrom = null;
+    if (!before || !row) return;
+    row.querySelectorAll<HTMLElement>(".task[data-task]").forEach((c) => {
+      const was = before.get(Number(c.dataset.task));
+      if (was == null) return;
+      const dx = was - c.getBoundingClientRect().left;
+      if (Math.abs(dx) > 1) c.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], { duration: spring.ms, easing: spring.easing });
+    });
+  }, [tasks.value]);
   const list = tasks.value;
   const p = phase.value;
   const { w, h } = size.value;
+  const first = splitFirst.value;
   return (
     <div
       ref={el}
-      class={`recents ${p} ${p === "closed" ? "" : "open"} ${live.value ? "live" : ""} ${settling.value ? "settling" : ""}`}
+      class={`recents ${p} ${p === "closed" ? "" : "open"} ${live.value ? "live" : ""} ${settling.value ? "settling" : ""} ${first != null ? "splitting" : ""}`}
       style={{ "--screen-ratio": `${w} / ${h}`, "--screen-ratio-n": String(w / h) }}
-      onClick={(e) => e.target === e.currentTarget && close()}
+      onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}
       onTransitionEnd={(e) => {
         if (e.target === row) reportSlot();
-        // Collapsed: the cards (and their snapshots) let go, till the next time.
-        if (e.target === e.currentTarget && phase.value === "closed" && tasks.value.length) tasks.value = [];
       }}
     >
       <div class="recents-scrim" />
-      <div class="task-row" ref={rowEl} onClick={(e) => e.target === e.currentTarget && close()}>
-        {list.length ? list.map((t, i) => <TaskCard key={t.id} t={t} current={i === 0} onOpen={open} onRemove={remove} />) : <Placeholder />}
+      {first != null && <div class="recents-banner">Pick an app to split the screen with</div>}
+      <div class="task-row" ref={rowEl} onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}>
+        {list.length ? (
+          list.map((t, i) => (
+            <TaskCard
+              key={t.id}
+              t={t}
+              current={i === 0}
+              eager={i < 4}
+              pinned={pinned.value.has(pinKey(t))}
+              picked={first === t.id}
+              onOpen={(id, shot) => (first != null ? pickForSplit(id) : open(id, shot))}
+              onRemove={remove}
+              onMenu={(id, card) => {
+                const r = card.getBoundingClientRect();
+                menu.value = { id, left: Math.max(8, Math.min(innerWidth - 228, r.left + 8)), top: r.top + 36 };
+              }}
+            />
+          ))
+        ) : (
+          <Placeholder />
+        )}
       </div>
-      <button
-        type="button"
-        class="task-clear"
-        style={{ visibility: list.length ? undefined : "hidden" }}
-        onClick={() => {
-          tasks.value.forEach((t) => powos.tasks.remove(t.id));
-          tasks.value = [];
-          close();
-        }}
-      >
-        clear all
+      <button type="button" class="task-clear" style={{ visibility: list.length ? undefined : "hidden" }} onClick={clearAll}>
+        Clear all
       </button>
+      {note.value && (
+        <div class="recents-note" key={note.value} onAnimationEnd={() => (note.value = null)}>
+          {note.value}
+        </div>
+      )}
+      <Menu />
+      <Opening />
     </div>
   );
 }
