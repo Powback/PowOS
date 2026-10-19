@@ -12,6 +12,7 @@
  * Everything carried follows window-level pointer events, so a drag outlives the element it started on - the drawer
  * closes under the finger, a page turns.
  */
+import { AppIcon } from "./apps.tsx";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { byKey, carry, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
@@ -184,7 +185,7 @@ function AppFace({ appKey, label }: { appKey: string; label?: string }) {
   const app = byKey.value.get(appKey);
   return (
     <div class="tile-app">
-      {app ? <img class="app-icon" src={app.icon} alt="" draggable={false} /> : <div class="app-icon initials">{(label ?? "?")[0]}</div>}
+      {app ? <AppIcon src={app.icon} /> : <div class="app-icon initials">{(label ?? "?")[0]}</div>}
       <div class="app-label">{label ?? app?.label}</div>
     </div>
   );

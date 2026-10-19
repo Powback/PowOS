@@ -2,6 +2,13 @@
  * The shell's look: tokens first (the theme sets them - Omarchy's colors.toml maps onto --color-*), then base
  * styles. Components use the tokens only, so a theme is a block of variables.
  */
+/* Widgets' `font: icon` (owl.tsx): the Nerd Font symbols the Compose launcher draws them with - the same file. */
+@font-face {
+  font-family: "Symbols Nerd Font";
+  src: url("./fonts/nerd_symbols.ttf") format("truetype");
+  font-display: block;
+}
+
 :root {
   --color-background: #1f1f28;
   --color-surface: #2a2a37;

@@ -15,6 +15,8 @@ const RECENT_FETCH = 24;
 export const recent = signal<string[]>([]);
 /** Apps pinned to the drawer's dock, in pin order. */
 export const dock = signal<string[]>([]);
+/** A pinned app being moved along the dock: which, where the finger is, and the slot it would drop into. */
+export const dockDrag = signal<{ key: string; x: number; slot: number } | null>(null);
 
 /** The home screen: pages of widgets, pinned apps and folders on a grid. */
 export const home = signal<Home>({ columns: 6, pages: [1], items: [] });
@@ -131,7 +133,11 @@ export function ask(text: string) {
 }
 
 export function setDocked(key: string, on: boolean) {
-  const next = on ? [...dock.value.filter((k) => k !== key), key] : dock.value.filter((k) => k !== key);
-  dock.value = next;
-  powos.store.set("dock", next);
+  setDock(on ? [...dock.value.filter((k) => k !== key), key] : dock.value.filter((k) => k !== key));
+}
+
+/** The dock's apps, in this order. */
+export function setDock(keys: string[]) {
+  dock.value = keys;
+  powos.store.set("dock", keys);
 }

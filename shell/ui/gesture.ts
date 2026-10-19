@@ -12,11 +12,13 @@
  * pointercancel once the browser scrolls something.
  */
 import { computed, effect, signal } from "@preact/signals";
-import { carry, closeDrawer, drawer, menu, page, pages, selected } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, menu, page, pages, selected } from "../state.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
 const FLICK = 0.45;
+/** What takes a tap in the launcher; a tap anywhere else in it closes it. */
+const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, a, .menu";
 
 /** While a finger drags the drawer: its openness, 0..1; null otherwise (then the drawer signal decides). */
 export const drawerDrag = signal<number | null>(null);
@@ -70,6 +72,8 @@ interface Gesture {
   open: boolean;
   inList: boolean;
   listTop: boolean;
+  /** Where it started: a tap closes the launcher unless it was on something that takes taps. */
+  target: Element;
   own: boolean;
   height: number;
 }
@@ -94,7 +98,8 @@ export function homeGestures() {
     // A new touch while one is under way: the old one's end was lost.
     if (g) abandon();
     if (carry.value || selected.value || menu.value) return;
-    const list = document.querySelector(".drawer-list");
+    // The scrolling list under the finger - the drawer's, or PowOS AI's chat: it scrolls until its top.
+    const list = target.closest?.(".drawer-list, .chat") ?? null;
     g = {
       x0: x,
       y0: y,
@@ -102,8 +107,9 @@ export function homeGestures() {
       v: 0,
       mode: null,
       open: drawer.value > 0,
-      inList: !!(list && list.contains(target)),
+      inList: !!list,
       listTop: !list || list.scrollTop <= 0,
+      target,
       // The A-Z bar, a slider, a widget's drag: theirs.
       own: !!target.closest?.(".letter-bar, input[type=range], .resize-handle, .menu"),
       height: document.querySelector(".home")?.clientHeight || innerHeight,
@@ -112,7 +118,8 @@ export function homeGestures() {
 
   const move = (x: number, y: number, e: Event | null) => {
     if (!g || g.own) return;
-    if (carry.value) return abandon();
+    // An app picked up (onto home, or along the dock) has the finger now.
+    if (carry.value || dockDrag.value) return abandon();
     const dx = x - g.x0;
     const dy = y - g.y0;
     const now = performance.now();
@@ -144,8 +151,10 @@ export function homeGestures() {
 
   const end = () => {
     if (!g) return;
-    const { mode, v } = g;
+    const { mode, v, open, target, own } = g;
     g = null;
+    // A tap on the open launcher's empty space (not an app, a message, a control): it closes, as tapping outside does.
+    if (!mode && open && !own && target.closest?.(".launcher") && !target.closest(TAPPABLE)) return closeDrawer();
     if (mode === "open" || mode === "close") {
       const p = drawerDrag.value ?? 0;
       drawerDrag.value = null;

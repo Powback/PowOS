@@ -224,6 +224,7 @@ class ShellActivity : Activity() {
             "png" -> "image/png"
             "webp" -> "image/webp"
             "woff2" -> "font/woff2"
+            "ttf" -> "font/ttf"
             else -> "application/octet-stream"
         }
 

@@ -3,7 +3,7 @@
  * over everything so no scrolling list clips it). In the drawer, holding an app and moving it drags it onto home.
  */
 import { useRef } from "preact/hooks";
-import { closeDrawer, dock, launch, menu, setDocked } from "../state.ts";
+import { closeDrawer, dock, launch, menu, page, pages, setDocked } from "../state.ts";
 import { startCarry } from "./grid.tsx";
 import { powos } from "../bridge.ts";
 import type { App } from "../types.ts";
@@ -63,25 +63,48 @@ interface CellProps {
   /** A drawer cell: its name under it, and it can be dragged onto home. */
   labels?: boolean;
   draggable?: boolean;
+  /** Held and moved: this instead of dragging it onto home (the dock reorders its own). */
+  onDrag?: (e: PointerEvent, el: HTMLElement) => void;
+  class?: string;
+  style?: Record<string, string>;
 }
 
-export function AppCell({ app, labels = true, draggable = false }: CellProps) {
+/** Holding [key] and moving: the menu gives way, the launcher closes, and the app follows the finger onto home. */
+export function dragHome(key: string, e: PointerEvent) {
+  menu.value = null;
+  closeDrawer();
+  startCarry({ app: key }, e, { x: 30, y: 30 });
+}
+
+export function AppCell({ app, labels = true, draggable = false, onDrag, class: cls = "", style }: CellProps) {
   const press = usePress(
     () => launch(app.key),
     (el) => (menu.value = { app, at: el.getBoundingClientRect() }),
-    draggable
-      ? (e) => {
-          menu.value = null;
-          closeDrawer();
-          startCarry({ app: app.key }, e, { x: 30, y: 30 });
-        }
-      : null,
+    onDrag ? (e) => onDrag(e, e.currentTarget as HTMLElement) : draggable ? (e) => dragHome(app.key, e) : null,
   );
   return (
-    <div class="app" {...press}>
-      <img class="app-icon" src={app.icon} alt="" draggable={false} />
+    <div class={`app ${cls}`} style={style} {...press}>
+      <AppIcon src={app.icon} />
       {labels && <div class="app-label">{app.label}</div>}
     </div>
+  );
+}
+
+/**
+ * An app's icon: a softly pulsing tile until the picture is in. The host draws icons in the background, so an icon
+ * asked for early isn't there yet (a 404); the list comes again when it is (its URL changes), and loads it then.
+ */
+export function AppIcon({ src }: { src: string }) {
+  return (
+    <span class="app-icon loading">
+      <img
+        src={src}
+        alt=""
+        draggable={false}
+        onLoad={(e) => e.currentTarget.parentElement!.classList.remove("loading")}
+        onError={(e) => e.currentTarget.parentElement!.classList.add("loading")}
+      />
+    </span>
   );
 }
 
@@ -93,6 +116,8 @@ export function AppMenu() {
   const docked = dock.value.includes(app.key);
   const items: [string, () => void][] = [
     [docked ? "unpin from dock" : "pin to dock", () => setDocked(app.key, !docked)],
+    // On the page on screen, in its first free cell.
+    ["add to home", () => powos.home.add(app.key, pages.value[page.value] ?? 1)],
     ...(app.kind === "android" ? ([["app info", () => powos.apps.info(app.key)]] as [string, () => void][]) : []),
     ...(app.kind === "android" && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as [string, () => void][]) : []),
   ];
