@@ -3,12 +3,17 @@
 # and its TypeScript client bindings, with the SpacetimeDB CLI pinned in targets/android/pkgs/spacetimedb-bin.
 #   apps/build.sh <app>        e.g. apps/build.sh counter
 # Output: apps/<app>/out/module.wasm, and apps/<app>/ui/bindings/ (generated; the UI imports it).
+# An app without a module (UI only: "module": null, e.g. stickman) skips that half. An app with an assets.sh runs it
+# first: it fetches what the UI ships but git doesn't keep (stickman: MuJoCo's wasm, a trained brain).
 # Installing on the phone: apps/install.sh <app> (the module published, the UI and manifest in place, the registry).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 APP=${1:?usage: apps/build.sh <app>}
 D=$HERE/$APP
-[ -f "$D/module/Cargo.toml" ] || { echo "build.sh: no $D/module/Cargo.toml" >&2; exit 1; }
+[ -f "$D/module/Cargo.toml" ] || [ -d "$D/ui" ] || { echo "build.sh: $D has neither module/Cargo.toml nor ui/" >&2; exit 1; }
+[ -x "$D/assets.sh" ] && "$D/assets.sh"
+mkdir -p "$D/out"
+if [ -f "$D/module/Cargo.toml" ]; then
 VER=$(sed -n 's/^pkgver=//p' "$HERE/../targets/android/pkgs/spacetimedb-bin/PKGBUILD")
 SUM=$(sed -n "s/^sha256sums=('\(.*\)')/\1/p" "$HERE/../targets/android/pkgs/spacetimedb-bin/PKGBUILD")
 mkdir -p "$D/out"
@@ -31,8 +36,10 @@ docker run --rm --platform linux/arm64 --cpus 6 --memory 8g -v powos-apps-cargo:
   fi
   chown -R $HOST_UID /app/out /app/ui/bindings 2>/dev/null || true
   ls -la /app/out/module.wasm'
+fi
 # The UI: static files as they are, widgets (ui/widgets/*.tsx) bundled one ES module each with their bindings -
 # Preact and the SpacetimeDB SDK stay imports, which the shell's import map resolves to its own (one copy per page).
+# Workers (ui/workers/*.ts) are bundled whole: a worker has no import map.
 if [ -d "$D/ui" ]; then
   docker run --rm --platform linux/arm64 -v powos-apps-cargo:/cache -v "$D:/app" -e HOST_UID="$(id -u)" node:22 bash -c '
     set -euo pipefail
@@ -43,5 +50,7 @@ if [ -d "$D/ui" ]; then
     [ -z "$w" ] || $E/node_modules/.bin/esbuild $w --bundle --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact \
       --external:preact --external:preact/hooks --external:preact/jsx-runtime --external:@preact/signals --external:spacetimedb \
       --minify --outdir=/app/out/ui/widgets --log-level=warning
+    k=$(ls workers/*.ts 2>/dev/null || true)
+    [ -z "$k" ] || $E/node_modules/.bin/esbuild $k --bundle --format=esm --target=es2022 --minify --outdir=/app/out/ui/workers --log-level=warning
     chown -R $HOST_UID /app/out/ui; ls -la /app/out/ui/widgets 2>/dev/null || true'
 fi

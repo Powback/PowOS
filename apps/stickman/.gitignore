@@ -1,0 +1,4 @@
+# Fetched by assets.sh (MuJoCo's wasm, robotsupremacy's brain and courses): built into the app, not kept in git.
+ui/data/
+ui/mujoco/
+.stage/

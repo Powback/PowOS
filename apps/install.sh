@@ -9,7 +9,9 @@ APP=${1:?usage: apps/install.sh <app> [install|publish|ui]}
 VERB=${2:-install}
 D=$HERE/$APP
 ADB=${ADB:-adb}
-[ -f "$D/powos-app.json" ] && [ -f "$D/out/module.wasm" ] || { echo "install.sh: build it first (apps/build.sh $APP)" >&2; exit 1; }
+# Built: the module (an app that has one) and the UI.
+[ -f "$D/powos-app.json" ] && { [ -f "$D/out/module.wasm" ] || [ ! -f "$D/module/Cargo.toml" ]; } && [ -d "$D/out" ] ||
+  { echo "install.sh: build it first (apps/build.sh $APP)" >&2; exit 1; }
 ID=$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$D/powos-app.json" | head -1)
 T=/data/local/tmp/powos-app-$ID
 STAGE=$(mktemp -d); trap 'rm -rf "$STAGE"' EXIT

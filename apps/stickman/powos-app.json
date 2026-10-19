@@ -1,0 +1,15 @@
+{
+  "id": "dev.powos.stickman",
+  "name": "Stickman",
+  "version": "0.1.0",
+  "description": "robotsupremacy's trained stickman running its parkour courses on home: the same MuJoCo model and brain as http://robotsupremacy.pow/stickman, simulated in a worker and drawn by the shell. Its assets (the MuJoCo wasm, the brain, the courses) ship with the app (assets.sh), so it runs offline.",
+  "ui": { "dir": "out/ui/" },
+  "module": null,
+  "backend": null,
+  "widgets": [
+    { "id": "parkour", "name": "Stickman parkour", "kind": "island", "entry": "widgets/parkour.js", "size": "4x2", "minSize": "2x1" }
+  ],
+  "surfaces": { "launcher": true, "desktop": true },
+  "permissions": [],
+  "budget": { "phone": { "memMB": 64, "idle": "unload" }, "desktop": { "memMB": 96 } }
+}

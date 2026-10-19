@@ -13,6 +13,7 @@
  * until that exists the server issues anonymous ones.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
+import { openUrl, useOnScreen } from "./onscreen.ts";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -23,6 +24,10 @@ export type Status = "connecting" | "connected" | "disconnected" | "error";
 export interface IslandHost {
   useDb(database: string, DbConnection: Builder): Db;
   useRows<T = any>(db: Db, table: string, query: string): T[];
+  /** The element on screen, home shown and uncovered (apps/onscreen.ts): an island that animates stops without it. */
+  useOnScreen?(ref: { current: Element | null }): boolean;
+  /** Opens a link outside the shell (the browser). */
+  openUrl?(url: string): Promise<unknown>;
 }
 
 export interface Builder {
@@ -185,4 +190,4 @@ export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   return rows;
 }
 
-export const host: IslandHost = { useDb, useRows };
+export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl };
