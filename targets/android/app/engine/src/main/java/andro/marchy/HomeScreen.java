@@ -27,6 +27,9 @@ final class HomeScreen {
     private HomeScreen() {
     }
 
+    /** The alias last made home ("HomeDesktop" or "HomeShell"; null before the first apply). */
+    static volatile String current;
+
     /**
      * Enable the alias that fits now. {@code unfolded}: the hinge state when known (FoldWatcher), else null -
      * then the screen size decides. Returns the alias's component (FoldWatcher makes it the default home).
@@ -43,11 +46,22 @@ final class HomeScreen {
             desktop = unfolded != null ? unfolded
                 : ctx.getResources().getConfiguration().smallestScreenWidthDp >= PHONE_MAX_DP;
         String home = desktop ? "HomeDesktop" : LAUNCHER;
-        // The new one first: never a moment without a home screen. Exactly one of them stays on.
+        String component = ctx.getPackageName() + "/andro.marchy." + home;
+        current = home;
+        // The new one first: never a moment without a home screen.
         set(ctx, home, true);
-        for (String alias : new String[] {"HomeDesktop", LAUNCHER})
-            if (!alias.equals(home)) set(ctx, alias, false);
-        return ctx.getPackageName() + "/andro.marchy." + home;
+        if (RootMode.enabled()) {
+            // Rooted: both stay on, and the one that fits is made Android's default home. Disabling an alias finishes
+            // every activity started through it - the web home (ShellActivity, started as .HomeShell) was destroyed on
+            // each unfold and made again on each fold: its page reloaded, its Android widgets bound again (a flash).
+            for (String alias : new String[] {"HomeDesktop", LAUNCHER}) set(ctx, alias, true);
+            new Thread(() -> RootShell.run("cmd package set-home-activity --user 0 " + component), "home-default").start();
+        } else {
+            // Without root the default home can't be set: exactly one alias stays on, so Home opens it directly.
+            for (String alias : new String[] {"HomeDesktop", LAUNCHER})
+                if (!alias.equals(home)) set(ctx, alias, false);
+        }
+        return component;
     }
 
     /**

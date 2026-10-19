@@ -193,9 +193,8 @@ final class FoldWatcher implements DisplayManager.DisplayListener {
             return;
         // The home alias when it is the desktop: the same activity instance Home opens. By class name it was a
         // second instance of the desktop beside the home one, and the two fought over the one connection.
-        android.content.ComponentName home = new android.content.ComponentName(ctx, "andro.marchy.HomeDesktop");
-        boolean homeIsDesktop = ctx.getPackageManager().getComponentEnabledSetting(home)
-            == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+        // (Rooted, both aliases stay enabled - HomeScreen: which one is home is the one it made the default.)
+        boolean homeIsDesktop = "HomeDesktop".equals(HomeScreen.current);
         su("am start --display 0 -n " + ctx.getPackageName() + "/"
             + (homeIsDesktop ? "andro.marchy.HomeDesktop" : MainActivity.class.getName()));
         if (carried != null) {

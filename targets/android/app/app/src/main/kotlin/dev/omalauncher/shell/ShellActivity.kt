@@ -71,7 +71,9 @@ class ShellActivity : Activity() {
         startActivity(
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_HOME)
-                .setPackage(packageName)
+                // The launcher's alias itself: rooted, both home aliases stay on (HomeScreen) and the default home may
+                // be the desktop - a HOME intent for the package would open that.
+                .setComponent(alias)
                 .putExtras(intent)
                 .putExtra(EXTRA_REDIRECTED, true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
