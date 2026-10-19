@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.service.quicksettings.Tile
 import android.service.notification.NotificationListenerService
 import android.telephony.TelephonyManager
 import android.util.Log
@@ -43,6 +44,12 @@ class QuickSettings(
     private val context: Context,
     private val changed: () -> Unit,
 ) {
+    /** A third-party tile opened something (its activity, its dialog): the control center to go, as SystemUI's does. */
+    var collapse: () -> Unit = {}
+
+    /** The third-party tiles, hosted once per process ([TileHost]): their changes come here as the rest do. */
+    private val tileListener = TileHost.Listener(changed = { changed() }, collapse = { collapse() })
+
     private val main = Handler(Looper.getMainLooper())
     private val cameras = context.getSystemService(CameraManager::class.java)
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -84,6 +91,7 @@ class QuickSettings(
             context.contentResolver.registerContentObserver(uri, true, settingsObserver)
         }
         grantWriteSettings()
+        TileHost.attach(context, tileListener)
         loadOrder()
     }
 
@@ -133,7 +141,15 @@ class QuickSettings(
                 if (id.contains("com.oplus.battery/")) {
                     tile("battery")
                 } else {
-                    custom(id)?.let { (cn, label) -> sw(label, null).put("app", cn.packageName) }
+                    custom(id)?.let { (cn, label) ->
+                        // Hosted ([TileHost]) and reported: its own state, a switch here. Until then, null: it opens.
+                        val hosted = TileHost.state(id)
+                        when {
+                            hosted == null -> sw(label, null)
+                            hosted.state == Tile.STATE_UNAVAILABLE -> sw(hosted.label?.toString() ?: label, null, "unavailable")
+                            else -> sw(hosted.label?.toString() ?: label, hosted.state == Tile.STATE_ACTIVE, hosted.subtitle?.toString())
+                        }.put("app", cn.packageName)
+                    }
                 }
         }
     }
@@ -170,9 +186,13 @@ class QuickSettings(
             // Actions, not switches: the panel shuts first (the page does), then they run.
             "screenshot" -> main.postDelayed({ root("input keyevent KEYCODE_SYSRQ") }, PANEL_GONE_MS)
             "lockscreen" -> root("input keyevent KEYCODE_SLEEP")
-            else -> open(name)
+            // A third-party tile switches in place when it's hosted ([TileHost]), else opens.
+            else -> if (!TileHost.click(name)) open(name)
         }
     }
+
+    /** Whether this page shows the control center: the third-party tiles listen (and report) while one does. */
+    fun listening(on: Boolean) = TileHost.listening(this, on)
 
     /** A slider moved: brightness or volume, 0..1. */
     fun set(
@@ -304,13 +324,20 @@ class QuickSettings(
 
     /** The phone's own tile order (SystemUI's sysui_qs_tiles, a secure setting apps can't read): once per process. */
     private fun loadOrder() {
-        if (order != null) return
+        order?.let { return hostTiles(it) }
         io.execute {
             val tiles = rootOut("settings get secure sysui_qs_tiles")?.trim()?.takeIf { it.isNotEmpty() && it != "null" } ?: return@execute
-            order = split(tiles)
-            main.post(changed)
+            val ids = split(tiles)
+            order = ids
+            main.post {
+                hostTiles(ids)
+                changed()
+            }
         }
     }
+
+    /** The order's third-party tiles to [TileHost] - not OnePlus's battery saver, which is the system's own switch. */
+    private fun hostTiles(ids: List<String>) = TileHost.host(ids.filter { it.startsWith("custom(") && !it.contains("com.oplus.battery/") })
 
     private fun root(cmd: String) =
         io.execute {
@@ -323,6 +350,7 @@ class QuickSettings(
         cameras.unregisterTorchCallback(torchCallback)
         context.contentResolver.unregisterContentObserver(settingsObserver)
         main.removeCallbacks(pending)
+        TileHost.detach(tileListener, this)
     }
 
     companion object {
