@@ -132,7 +132,9 @@ export function closeDrawer() {
 
 /** Back: whatever is on top closes first - a widget's screen, a menu, a folder, a tile's edit, edit mode, the drawer. False when nothing was open. */
 export function back(): boolean {
-  if (sessionView.value && !sessionView.value.closing) closeSession();
+  // A session open, or still shrinking back into its card: Back is its (a second Back meanwhile - the keyboard's and
+  // the terminal's - mustn't go on to leave PowOS AI's page).
+  if (sessionView.value) closeSession();
   else if (screen.value.key) powos.widgets.closeScreen();
   else if (notif.value) notif.value = false;
   else if (menu.value) menu.value = null;
