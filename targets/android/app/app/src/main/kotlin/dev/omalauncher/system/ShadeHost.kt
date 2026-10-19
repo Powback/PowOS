@@ -205,8 +205,14 @@ class ShadeHost(
     }
 
     /** Whether a finger down at [y] (display px) may be the shade's pull. */
-    private fun pullable(y: Float): Boolean =
-        host != null && !shown && !keyguard && !lent && statusBarShown && y <= stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
+    private fun pullable(y: Float): Boolean {
+        val edge = stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
+        if (y > edge) return false
+        val ok = host != null && !shown && !keyguard && !lent && statusBarShown
+        // A finger down on the status bar that isn't a pull: why, as it's the first thing to ask when the shade won't come.
+        if (!ok) Log.i(TAG, "not pulling: host=${host != null} shown=$shown keyguard=$keyguard lent=$lent statusBarShown=$statusBarShown")
+        return ok
+    }
 
     /**
      * The shade's pull on PowOS's gesture input (GestureMonitor): a finger down on the status bar is followed, and taken
@@ -413,8 +419,10 @@ class ShadeHost(
         init {
             // The status bar's height (it changes on folding) and whether it shows: from the insets the window gets.
             setOnApplyWindowInsetsListener { _, insets ->
-                statusBarShown = insets.isVisible(WindowInsets.Type.statusBars())
                 val top = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+                // Hidden only if this window is told of a status bar at all (top > 0) and it's hidden: a window above the
+                // status bar, as this one is, may be given no status bar inset, and that's not a full-screen app.
+                statusBarShown = top == 0 || insets.isVisible(WindowInsets.Type.statusBars())
                 if (top > 0) stripHeight = top
                 edgeLayoutChanged(top.takeIf { it > 0 })
                 insets

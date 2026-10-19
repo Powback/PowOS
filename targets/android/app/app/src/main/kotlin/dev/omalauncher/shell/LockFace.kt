@@ -13,7 +13,7 @@ import dev.omalauncher.App
 
 /**
  * The lock screen's face (docs/NATIVE-SYSTEM-UI.md, "Lock screen: PowOS is the face, SystemUI keeps the lock"):
- * when the screen comes on with the phone locked, PowOS's lock screen shows over Android's (an activity shown when
+ * when the screen goes off (and so is there as it comes on, the phone locked), PowOS's lock screen shows over Android's (an activity shown when
  * locked: [PowosLockActivity]) - the shell's lock screen (shell/ui/lock.tsx), hot-reloaded as every PowOS screen.
  * Unlocking stays Android's: swiping up asks it (requestDismissKeyguard: its PIN pad, the fingerprint), and once the
  * phone is unlocked the face goes. Underneath it Android's own lock screen is always there - whatever happens to the
@@ -33,22 +33,31 @@ object LockFace {
                     intent: Intent,
                 ) {
                     when (intent.action) {
+                        // Up as the screen goes off, so it's there the moment the screen comes on - started on screen-on,
+                        // Android's own lock screen showed first, the face a moment later: two lock screens. Not locked
+                        // by the time the screen is back on (a lock delay): the face goes by itself (onResume).
+                        Intent.ACTION_SCREEN_OFF -> show(app)
+                        // Still the fallback (the face was closed meanwhile, or the off broadcast came late).
                         Intent.ACTION_SCREEN_ON ->
-                            if (app.getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
-                                app.startActivity(
-                                    Intent(app, PowosLockActivity::class.java)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
-                                )
-                            }
+                            if (app.getSystemService(KeyguardManager::class.java).isKeyguardLocked) show(app) else PowosLockActivity.current?.finish()
                         // Unlocked (by the face's handoff, the fingerprint, anything): the face goes.
                         Intent.ACTION_USER_PRESENT -> PowosLockActivity.current?.finish()
                     }
                 }
             },
             IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_USER_PRESENT)
             },
+        )
+    }
+
+    private fun show(app: Context) {
+        if (PowosLockActivity.current != null) return
+        app.startActivity(
+            Intent(app, PowosLockActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
         )
     }
 
@@ -85,6 +94,14 @@ class PowosLockActivity : Activity() {
             }
         h.bridge.emit("lock.shown", null)
         setContentView(h.web)
+    }
+
+    // Not locked with the screen on (the lock never followed the screen-off, or it was unlocked meanwhile): it goes.
+    // Screen off, it stays: the lock may come a moment after the face.
+    override fun onResume() {
+        super.onResume()
+        val on = getSystemService(android.os.PowerManager::class.java).isInteractive
+        if (on && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) finish()
     }
 
     // Back on a lock screen goes nowhere: the face stays until the phone is unlocked.
