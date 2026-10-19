@@ -1,0 +1,57 @@
+# powos-vadb: adb to the phone over the WireGuard VPN, for the Mac (docs/REMOTE-POWOS.md C7).
+#
+# What uses it: the Mac's agents mirror (lib/ai/agents/powos-agentsd -> powos-rootsh, one long-lived `adb shell -T su`
+# through `docker exec -i powos-vadb`), the Mac's mail to the phone (`powos-rootsh send`), and the dev scripts with
+# ADB="docker exec powos-vadb adb" (apps/install.sh, kernel/phone-test.sh). A dev channel; REMOTE-POWOS.md M2/M6/M8
+# replace every runtime use of it.
+#
+#   docker compose -f targets/android/vadb/compose.yaml up -d                 (from the checkout whose shell/ to mount)
+#   docker inspect --format '{{.State.Health.Status}}' powos-vadb            healthy | unhealthy
+#   docker logs powos-vadb                                                    keepalive + health check lines
+#
+# Mounts: the Mac's ~/.android (the adb key the phone authorized) at /root/.android; android-app-dev's output (the APK
+# store) at /out; this checkout's shell/ at /shell; and a stable state dir (VADB_STATE, default
+# ~/.local/state/powos/vadb, the same dir powos-rootsh keeps its socket and per-tag status in) at /state, with its
+# xfer/ at /t for files to `adb push` (was one Claude job's tmp dir).
+#
+# Health (vadb-health.sh, every minute): unhealthy when adb has no device, or when the agents mirror is stale - pushes
+# tried and none landed for VADB_STALE_MIN minutes. Stale mails the phone's manager once (`powos comms send manager ...
+# --from vadb`) and again when it recovers; with adb down the mail waits until adb is back.
+#
+# Test instance next to the live one (no clash: own name, own state dir, no alerts):
+#   VADB_NAME=powos-vadb-test VADB_STATE=$HOME/.local/state/powos/vadb-test VADB_ALERT=0 VADB_ADB_PORT=5038 \
+#     docker compose -p powos-vadb-test -f targets/android/vadb/compose.yaml up -d
+name: powos-vadb
+
+services:
+  vadb:
+    image: android-app-dev-android-builder:latest   # built by ~/Projects/android-app-dev (adb, platform-tools)
+    pull_policy: never
+    container_name: ${VADB_NAME:-powos-vadb}
+    restart: unless-stopped
+    # HACK: borrows the WireGuard container's network namespace, because the Mac itself is not a WireGuard peer and
+    # the phone (10.13.13.7) is only reachable inside the VPN. If the wireguard container is recreated this one loses
+    # its network until restarted (`docker restart powos-vadb`). Real fix: REMOTE-POWOS.md M2/M8 (no adb at run time;
+    # the hub joins the VPN as a peer of its own).
+    network_mode: container:wireguard
+    command: ["sh", "/vadb/vadb-keepalive.sh"]
+    environment:
+      ANDROID_SERIAL: ${VADB_SERIAL:-10.13.13.7:5555}
+      # The netns is wireguard's, shared by every container that borrows it: a test instance needs its own adb server
+      # port, or it would drive (and disconnect) the live one's server on 127.0.0.1:5037.
+      ANDROID_ADB_SERVER_PORT: ${VADB_ADB_PORT:-5037}
+      VADB_STALE_MIN: ${VADB_STALE_MIN:-10}
+      VADB_ALERT: ${VADB_ALERT:-1}
+    volumes:
+      - ${HOME}/.android:/root/.android
+      - ${HOME}/Projects/android-app-dev/output:/out
+      - ../../../shell:/shell
+      - ${VADB_STATE:-${HOME}/.local/state/powos/vadb}:/state
+      - ${VADB_STATE:-${HOME}/.local/state/powos/vadb}/xfer:/t
+      - ./:/vadb:ro
+    healthcheck:
+      test: ["CMD", "sh", "/vadb/vadb-health.sh"]
+      interval: 60s
+      timeout: 45s
+      start_period: 30s
+      retries: 1
