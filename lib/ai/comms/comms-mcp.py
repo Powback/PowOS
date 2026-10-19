@@ -556,7 +556,13 @@ def run_cli(argv):
 
     if a.cmd == "send":
         AGENT_ID = a.frm
-        mid = _deliver(a.to, "message", " ".join(a.message), a.priority)
+        text = " ".join(a.message)
+        # An empty body is always a mistake upstream (an unset shell variable, a file that wasn't there): refuse it
+        # rather than deliver a blank message the recipient can't act on.
+        if not text.strip():
+            print("powos comms send: refusing an empty message", file=sys.stderr)
+            sys.exit(2)
+        mid = _deliver(a.to, "message", text, a.priority)
         print(f"Sent to '{a.to}' (id {mid}).")
     elif a.cmd == "notify":
         mid = _deliver("user", "notify", " ".join(a.message), a.priority)
