@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
-import type { QuickState, QuickTile } from "../types.ts";
+import type { MediaState, QuickState, QuickTile } from "../types.ts";
 
 /** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
 export const quick = signal<QuickState>({
@@ -157,6 +157,62 @@ function Clock() {
   );
 }
 
+/** What's playing: asked for once a control center is shown, then kept up to date ("media.changed"). */
+const media = signal<MediaState | null>(null);
+let mediaAsked = false;
+function askMedia() {
+  if (mediaAsked) return;
+  mediaAsked = true;
+  powos.on("media.changed", (m: MediaState) => (media.value = m));
+  powos.media.state().then((m) => (media.value = m));
+}
+
+/** The media card, as OnePlus's: the track, its art, play/pause and skip, the output picker. Nothing playing: none. */
+function MediaCard() {
+  useEffect(askMedia, []);
+  const m = media.value;
+  if (!m?.available || !m.title) return null;
+  const progress = m.duration ? Math.min(1, (m.position ?? 0) / m.duration) : 0;
+  return (
+    <div class="cc-media" style={{ "--p": String(progress) }}>
+      {m.art && (
+        <img
+          class="cc-art"
+          src={`/_media/${encodeURIComponent(m.art)}`}
+          alt=""
+        />
+      )}
+      <button
+        type="button"
+        class="cc-track"
+        onClick={() => (shut(), powos.media.control("open"))}
+      >
+        <span class="cc-label">{m.title}</span>
+        <span class="cc-detail">
+          {[m.artist, m.app].filter(Boolean).join(" · ")}
+        </span>
+      </button>
+      <span class="cc-transport">
+        <button type="button" onClick={() => powos.media.control("previous")}>
+          ⏮
+        </button>
+        <button type="button" onClick={() => powos.media.control("toggle")}>
+          {m.playing ? "⏸" : "▶"}
+        </button>
+        <button type="button" onClick={() => powos.media.control("next")}>
+          ⏭
+        </button>
+        <button
+          type="button"
+          onClick={() => (shut(), powos.media.output(m.package))}
+        >
+          ⇄
+        </button>
+      </span>
+    </div>
+  );
+}
+
 export function ControlCenter() {
   const q = quick.value;
   const tiles = q.tiles ?? [];
@@ -216,6 +272,7 @@ export function ControlCenter() {
           {RINGER[v.ringer] ?? "ring"}
         </button>
       </div>
+      <MediaCard />
       <div class="cc-grid">
         {rest.map((t) => (
           <Tile key={t.id} t={t} />

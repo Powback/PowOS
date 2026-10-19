@@ -111,6 +111,12 @@ class ShellHost(
                 return widgetImage(URLDecoder.decode(rest.substringBefore('/'), "UTF-8"), URLDecoder.decode(rest.substringAfter('/'), "UTF-8"))
             }
             if (path.startsWith("_font/")) return font(path.removePrefix("_font/"))
+            // What's playing's album art, for the control center's media card (its id from media.state).
+            if (path.startsWith("_media/")) {
+                val bitmap = runtime.widgets.media.art(URLDecoder.decode(path.removePrefix("_media/"), "UTF-8")) ?: return notFound()
+                val png = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+                return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
+            }
             // The assistant's screenshot of the screen it was opened over (PowosAssistSession writes it).
             if (path.startsWith("_assist/")) {
                 val file = File(File(context.cacheDir, "assist"), path.removePrefix("_assist/").substringAfterLast('/'))

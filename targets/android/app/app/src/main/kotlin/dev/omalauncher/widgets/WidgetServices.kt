@@ -89,8 +89,8 @@ class WidgetServices(
     private val actionShell = GuestShell(proot)
     private val streams = Streams(proot, scope)
 
-    /** What's playing on the phone. */
-    private val media = Media(context)
+    /** What's playing on the phone: widgets' android.media, and the web shell's media card. */
+    val media = Media(context)
     /** The phone's notifications: widgets' android.notifications, and the web shell's notification panel. */
     val notifications = Notifications(context, media, ::profileKind)
     private val volume = Volume(context)

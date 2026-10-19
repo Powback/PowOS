@@ -895,6 +895,24 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   color: var(--color-foreground);
 }
 .cc-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+.cc-media {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 10px;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  overflow: hidden;
+}
+.cc-media::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--p) * 100%); background: var(--color-accent); }
+.cc-art { width: 44px; height: 44px; border-radius: var(--radius); object-fit: cover; }
+.cc-track { display: flex; flex-direction: column; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: var(--text-small) var(--font); color: var(--color-foreground); }
+.cc-track .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.cc-transport { display: flex; gap: 2px; }
+.cc-transport button { font: 18px var(--font); width: 36px; height: 36px; background: none; border: 0; color: var(--color-foreground); }
 /* The switcher (switcher.tsx): the recent tasks side by side over the dimmed wallpaper, newest first. */
 html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-background) 72%, transparent); }
 .switcher {
@@ -936,18 +954,28 @@ html[data-mode="switcher"] body { background: color-mix(in srgb, var(--color-bac
 .task-clear { align-self: center; margin-top: calc(var(--gap) * 3); font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 8px 16px; }
 .task-empty { align-self: center; font-size: var(--text-body); }
 
-/* The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. */
-html[data-mode="lock"], html[data-mode="lock"] body { background: rgb(0 0 0 / 0.35); }
+/*
+ * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lift (0..1,
+ * set on the root on every move) is how far: the face goes up by that much of the screen, fading, and the dimming
+ * with it; lock-settling eases it the rest of the way, or back.
+ */
+html[data-mode="lock"] { background: rgb(0 0 0 / calc(0.55 * (1 - var(--lift, 0)))); }
+html[data-mode="lock"] body { background: none; }
 .lock {
   position: fixed;
   inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: calc(var(--inset-top, 0px) + 12vh) var(--edge) calc(var(--inset-bottom, 0px) + 18px);
+  padding: calc(var(--inset-top, 0px) + 12vh) var(--edge) calc(var(--inset-bottom, 0px) + 28px);
   touch-action: none;
   user-select: none;
+  transform: translateY(calc(var(--lift, 0) * -100%));
+  opacity: calc(1 - var(--lift, 0) * 1.4);
+  will-change: transform, opacity;
 }
+html.lock-settling[data-mode="lock"] { transition: background-color 220ms ease-out; }
+html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms ease-out; }
 .lock-time { font: 300 88px/1 var(--font); color: var(--color-foreground); letter-spacing: 2px; }
 .lock-date { margin-top: 8px; color: var(--color-foreground); font-size: var(--text-body); }
 .lock-notes { margin-top: 28px; width: 100%; display: flex; flex-direction: column; gap: 6px; }

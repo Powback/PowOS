@@ -64,6 +64,7 @@ class ShellBridge(
     private val home = ShellHome(runtime)
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
+    private val media = ShellMedia(context, runtime, scope, ::emit)
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
     private val speech = Speech(context.applicationContext)
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
@@ -173,6 +174,9 @@ class ShellBridge(
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
+            "media.state" -> media.state()
+            "media.control" -> media.control(a.getString(0))
+            "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })
             "shade.closed" -> shade?.closed()
             "tasks.list" -> tasks()
             "tasks.open" -> dev.omalauncher.system.Tasks.open(context, a.getInt(0)).also { if (it) switcher?.close() }
@@ -562,6 +566,7 @@ class ShellBridge(
 
     fun close() {
         quick.close()
+        media.close()
         speech.cancel()
         applyObserver.dispose()
         terminals.closeAll()

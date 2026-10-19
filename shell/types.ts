@@ -70,6 +70,20 @@ export interface QuickState {
   volume: { value: number; ringer: number };
 }
 
+/** What's playing: nothing (playing false, no title) or a track. art: an id for /_media/<id>. */
+export interface MediaState {
+  available: boolean;
+  playing: boolean;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  app?: string;
+  package?: string;
+  position?: number | null;
+  duration?: number | null;
+  art?: string | null;
+}
+
 /** One control center tile: a switch (on true/false) or an action/page (on null). */
 export interface QuickTile {
   id: string;
@@ -312,6 +326,15 @@ export interface Bridge {
    * The control center (and the notification panel's row): every tile the phone's own control center has, switched
    * here, and its sliders. "qs.changed" brings the state again.
    */
+  /** What's playing ("media.changed" brings it again once asked): the control center's media card. */
+  media: {
+    state(): Promise<MediaState>;
+    control(
+      command: "toggle" | "play" | "pause" | "next" | "previous" | "open",
+    ): Promise<void>;
+    /** The phone's output picker (speaker, Bluetooth, cast) for that app's audio. */
+    output(pkg?: string): Promise<void>;
+  };
   qs: {
     state(): Promise<QuickState>;
     /** A tile tapped: a switch flipped, an action run (screenshot, lock), a page opened. */
@@ -386,7 +409,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "qs.changed" (QuickState), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "lock.shown" (the face shown again), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

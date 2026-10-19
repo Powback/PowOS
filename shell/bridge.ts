@@ -20,6 +20,7 @@ import type {
   ThemeChoice,
   ThemeColors,
   WidgetScreen,
+  MediaState,
 } from "./types.ts";
 
 type Handler = (data: any) => void;
@@ -128,6 +129,11 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       access: () => call("notifications.access"),
     },
     lock: { unlock: () => call("lock.unlock") },
+    media: {
+      state: () => call<MediaState>("media.state"),
+      control: (command) => call("media.control", command),
+      output: (pkg) => call("media.output", pkg ?? ""),
+    },
     qs: {
       state: () => call<QuickState>("qs.state"),
       toggle: (name) => call<QuickState>("qs.toggle", name),
@@ -556,6 +562,27 @@ function mock(): Bridge {
         void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
     lock: { unlock: async () => console.log("[mock] unlock") },
+    media: (() => {
+      let st: MediaState = {
+        available: true,
+        playing: true,
+        title: "Teardrop",
+        artist: "Massive Attack",
+        app: "Spotify",
+        package: "com.spotify.music",
+        position: 42,
+        duration: 330,
+        art: null,
+      };
+      return {
+        state: async () => st,
+        control: async (command: string) => {
+          if (command === "toggle") st = { ...st, playing: !st.playing };
+          events.emit("media.changed", st);
+        },
+        output: async () => console.log("[mock] media output picker"),
+      };
+    })(),
     qs: (() => {
       const tile = (
         id: string,

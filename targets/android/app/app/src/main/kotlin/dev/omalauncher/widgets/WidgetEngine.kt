@@ -104,6 +104,9 @@ class WidgetEngine(
     /** The phone's notifications (the web shell's panel reads and acts on them). */
     val notifications get() = services.notifications
 
+    /** What's playing (the web shell's control center shows it). */
+    val media get() = services.media
+
     /** The home screen's view, for haptic(); set by the UI. */
     var view by services::view
 
