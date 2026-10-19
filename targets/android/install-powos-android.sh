@@ -113,6 +113,9 @@ if [ "$POWOS_TARGET" = phone ]; then
 # No systemd on Android: startplasma must start the session's services itself, not ask systemd to.
 mkdir -p /etc/xdg
 printf '[General]\nsystemdBoot=false\n' > /etc/xdg/startkderc
+# No KDE splash: the PowOS app shows its own while the session starts (SplashScreen), over the desktop's surface;
+# ksplashqml only drew on a screen nobody sees, a QML+GPU client competing with plasmashell at startup.
+printf '[KSplash]\nEngine=none\nTheme=None\n' > /etc/xdg/ksplashrc
 # Android's own lock screen guards the phone; KDE's idle lock on top asked for a password nobody set (the session
 # runs as root).
 printf '[Daemon]\nAutolock=false\nLockOnResume=false\n' > /etc/xdg/kscreenlockerrc

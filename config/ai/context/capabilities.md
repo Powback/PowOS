@@ -236,6 +236,9 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
   desktop with `su -c sh /data/powos/powos-session.sh …`, which pivots into its own mount namespace. The desktop runs
   as user `powos` (real sudo). KWin uses its Anland backend: the app owns the screen surface, touch, keys and audio,
   and relays them to KWin over an abstract socket. GPU: Mesa Turnip on KGSL.
+  Session lifetime: the relay (display daemon) lives in the app's process, so every app restart or APK install
+  restarts the whole desktop (~9 s to KWin, then Plasma). KWin gets the screen size from the daemon at startup; a
+  daemon without `--screen` made it wait for the desktop to be opened (Plasma then started in front of the user).
 - **No-root mode** ⚠️ (Galaxy S25 Ultra, 2026-10-13): the same desktop inside the app through Andromarchy's engine
   (patched loader, fakechroot, fakeroot). Not this phone's setup.
 - **Android stays in charge** of the kernel, display, notifications and Android apps. The PowOS app `com.powos.app`

@@ -48,6 +48,8 @@ install -Dm 644 $T/powos-plasma/powos-translucent-desktop/metadata.json $K/metad
 install -Dm 644 $T/powos-plasma/powos-translucent-desktop/contents/code/main.js $K/contents/code/main.js
 # Window edges a finger can grab (see the file).
 install -Dm 644 $T/powos-plasma/breezerc $R/etc/xdg/breezerc
+# No KDE splash under the app's own (as install-powos-android.sh; a rootfs from an older image lacks it).
+printf '[KSplash]\nEngine=none\nTheme=None\n' > $R/etc/xdg/ksplashrc
 rm -rf $T/powos-plasma
 # PowOS's desktop widgets, as the image installs them (Containerfile: desktop/plasmoid -> /usr/share/plasma/plasmoids).
 cp -a $T/powos-plasmoids/. $R/usr/share/plasma/plasmoids/

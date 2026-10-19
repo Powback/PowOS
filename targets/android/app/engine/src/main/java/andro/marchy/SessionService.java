@@ -178,7 +178,9 @@ public class SessionService extends Service {
         if (RootMode.enabled()) {
             // A daemon this app's previous process left (killed without onDestroy) still holds the abstract name.
             endLeftovers("libandromarchy.so");
-            spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock), null);
+            // The screen the desktop will get, for KWin before the desktop is first shown (see andromarchy.c,
+            // provisional_screen): else KWin's startup - and all of Plasma's - waited for it to be opened.
+            spawn("andromarchy", List.of(libDir + "/libandromarchy.so", sock, "--screen", screenArg()), null);
             // Hardware video for PowOS (VA-API through Mesa's termuxva bridge -> MediaCodec), as below - here started
             // by the root session (powos-session.sh, from this app's libtermuxva.so): Mesa's termuxva client only
             // connects to a socket file, which a privileged app can't make, and root can.
@@ -276,6 +278,18 @@ public class SessionService extends Service {
         spawn("desktop-ready", List.of(launcher, "-c", "for i in $(seq 600); do pgrep -x quickshell >/dev/null"
                 + " || pgrep -x qs >/dev/null && break; sleep 0.2; done; sleep 1; touch \"$XDG_RUNTIME_DIR/desktop-ready\""),
                 archEnv(run, sock));
+    }
+
+    /**
+     * The default display's current size and refresh rate as "WxH@mHz" - what the desktop's surface reports once it is
+     * on screen (native_consumer.c: the full-screen SurfaceView's size, in the display's current rotation).
+     */
+    private String screenArg() {
+        android.view.Display d = getSystemService(android.hardware.display.DisplayManager.class)
+                .getDisplay(android.view.Display.DEFAULT_DISPLAY);
+        android.util.DisplayMetrics m = new android.util.DisplayMetrics();
+        d.getRealMetrics(m); // deprecated for window sizes; here it is the panel's, which is what is wanted
+        return m.widthPixels + "x" + m.heightPixels + "@" + Math.round(d.getRefreshRate() * 1000);
     }
 
     /**
