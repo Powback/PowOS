@@ -1069,6 +1069,8 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   gap: calc(var(--gap) * 3);
   padding: 0 calc((100vw - var(--card-w)) / 2);
   scroll-snap-type: x proximity;
+  /* A card added before the one in view must not keep that one in view (the row rewinds to its start instead). */
+  overflow-anchor: none;
   transform: translate(var(--rx), var(--ry)) scale(calc(1 - 0.12 * var(--rh)));
 }
 .recents .task { direction: ltr; width: var(--card-w); max-width: none; }

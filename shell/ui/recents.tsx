@@ -58,6 +58,17 @@ const pinKey = (t: RecentTask) => t.key ?? `label:${t.label}`;
 let layer: HTMLDivElement | null = null;
 let row: HTMLDivElement | null = null;
 
+/**
+ * The row back at its start (the first card - the app it was opened over - in the middle) once the new list has
+ * rendered: scrolled before the render, the browser kept the card that was in view where it was (scroll anchoring)
+ * and the window landed on the wrong card.
+ */
+let rewind = false;
+function toStart() {
+  rewind = true;
+  row?.scrollTo({ left: 0 });
+}
+
 /** Home's content (the pages, the bar, the dock): it recedes as the switcher comes up. */
 const screens = () => document.querySelector<HTMLElement>(".screens");
 
@@ -115,7 +126,7 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
   tasks.value = order(e.tasks, e.from);
   live.value = e.from != null;
   phase.value = "drag";
-  row?.scrollTo({ left: 0 });
+  toStart();
   frame(0);
 }
 
@@ -128,7 +139,7 @@ async function show(e: { from: number | null; tasks: RecentTask[] }) {
   tasks.value = order(e.tasks, e.from);
   live.value = false;
   phase.value = "shown";
-  row?.scrollTo({ left: 0 });
+  toStart();
   frame(0);
   await nextFrame();
   settle(true);
@@ -315,8 +326,9 @@ export function recentsBack(): boolean {
   return true;
 }
 
-/** Home pressed: the switcher goes with everything else. */
+/** Home pressed: the switcher goes with everything else - not one a swipe is building now (a late home intent). */
 export function recentsHome() {
+  if (phase.value === "drag") return;
   close();
 }
 
@@ -334,7 +346,7 @@ powos.on("recents.hide", () => collapse(false));
 powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {
   if (phase.value !== "closed") return;
   tasks.value = e.tasks;
-  row?.scrollTo({ left: 0 });
+  toStart();
   prefetch(e.tasks);
 });
 // The overview button again: the task before the one it was opened over (or the newest, from home), as Android's.
@@ -451,6 +463,13 @@ export function Recents() {
   useEffect(() => {
     requestAnimationFrame(reportSlot);
   }, [phase.value, size.value, tasks.value]);
+  // A new list: the row at its start (see rewind).
+  useLayoutEffect(() => {
+    if (!rewind || !row) return;
+    rewind = false;
+    row.scrollLeft = 0;
+    reportSlot();
+  }, [tasks.value]);
   // A card went: the others slide into its place (from where they were, as a spring).
   useLayoutEffect(() => {
     const before = flipFrom;

@@ -42,15 +42,15 @@
     <!-- The control center's third-party tiles, hosted as SystemUI hosts them (shell/TileHost.kt): every TileService
          requires it of its binder. signature|recents on the phone, as the two above. -->
     <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
-
-    <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
-    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
-
     <!-- Android widgets on home bound silently (shell/AppWidgets.kt: bindAppWidgetIdIfAllowed): signature|privileged,
          granted through the system module's privapp allowlist (privapp-permissions-com.powos.app.xml, on the phone since
          powos-system 29873839). The phone enforces that allowlist: an APK asking for a privileged permission the mounted
          module doesn't list stops the phone at the boot screen - install-app.sh refuses such an APK. -->
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
+
+    <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
     <uses-feature
         android:name="android.software.live_wallpaper"
         android:required="false" />
@@ -91,6 +91,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
         <!-- Android's home screen when it should be the launcher (andro.marchy.HomeScreen switches this and the
              engine's .HomeDesktop alias; one is enabled). -->
         <activity-alias

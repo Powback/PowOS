@@ -145,7 +145,24 @@ export function TaskCard({
         cancelPress();
         drag.current = null;
         if (!d || gone.current) return;
+        const mx = e.clientX - d.x;
+        const my = e.clientY - d.y;
+        // Moved without the moves coming in (a quick swipe whose moves the page got coalesced into the release): what
+        // it was is decided now, from where it ended - up a long way is a removal, not a tap.
+        if (d.up == null && Math.hypot(mx, my) > SLOP) {
+          if (my < 0 && Math.abs(my) > Math.abs(mx)) {
+            d.up = true;
+            d.dy = my;
+            d.samples.push({ y: e.clientY, t: e.timeStamp });
+          } else return; // sideways: the row's scroll
+        }
         if (d.up) {
+          // The click this release makes (on whatever is under it now - the layer beside the cards, which closes the
+          // switcher) isn't one: swallowed.
+          // (Only the click of this release: one that never came is no longer waited for at the next touch.)
+          const swallow = (c: MouseEvent) => c.stopPropagation();
+          window.addEventListener("click", swallow, { capture: true, once: true });
+          window.addEventListener("pointerdown", () => window.removeEventListener("click", swallow, true), { capture: true, once: true });
           const first = d.samples[0];
           const v = (e.clientY - first.y) / Math.max(1, e.timeStamp - first.t);
           const h = el.current!.clientHeight;

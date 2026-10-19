@@ -67,6 +67,9 @@ class NavGesture(
     /** The hold state last logged. */
     private var armedLogged = false
 
+    /** Counts swipes: a fallback of one that ended (its transition called off) mustn't act once the next has begun. */
+    private var swipe = 0
+
     /** The task the swipe began over (null: home, or PowOS's own screens). */
     private var from: Int? = null
 
@@ -90,6 +93,7 @@ class NavGesture(
         from = null
         downX = e.rawX
         armedLogged = false
+        swipe++
         Log.i(TAG, "gesture: down at ${e.rawX.toInt()},${e.rawY.toInt()}")
         classifier = NavGestureClassifier(displayContext.resources.displayMetrics.density, screen.height().toFloat(), slop).also { it.down(e.rawX, e.rawY, e.eventTime) }
         return true
@@ -187,9 +191,10 @@ class NavGesture(
                 if (t == null) return switcher(over)
                 // Onto its card; the transition finishes to home once the card shows the app's snapshot - home's page is
                 // showing the switcher already, so it simply stays up.
+                val mine = swipe
                 t.end(RecentsTransition.End.SWITCHER, hold = { release -> Switcher.settle(over, release) }) { ok ->
-                    Switcher.settled()
-                    if (ok) runCatching { systemUi?.onOverviewShown(false) } else switcher(over)
+                    Switcher.settled(ok)
+                    if (ok) runCatching { systemUi?.onOverviewShown(false) } else if (swipe == mine) switcher(over)
                 }
             }
             is NavGestureClassifier.Outcome.QuickSwitch -> {
@@ -206,7 +211,9 @@ class NavGesture(
         Switcher.end("home")
         // The recents activity was what came up behind the app (the desktop is home): home is started after it.
         val viaRecents = !Switcher.onHome
-        t.end(RecentsTransition.End.HOME) { ok -> if (!ok || viaRecents) goHome() }
+        val mine = swipe
+        // Called off (a next swipe's transition took over): the plain home intent - unless that next swipe is under way.
+        t.end(RecentsTransition.End.HOME) { ok -> if ((!ok || viaRecents) && swipe == mine) goHome() }
     }
 
     /** Back to the app (let go early, or the shade was put away instead): its window full screen again. */

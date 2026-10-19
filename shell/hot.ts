@@ -8,13 +8,26 @@ import { powos } from "./bridge.ts";
 
 powos.on("files.changed", ({ path }: { path: string }) => {
   if (path.endsWith(".css")) {
-    for (const link of document.querySelectorAll<HTMLLinkElement>("link[rel=stylesheet][data-hot]")) {
-      const href = link.getAttribute("href")!.split("?")[0];
-      if (path.endsWith(href.replace(/^\.\//, ""))) link.href = `${href}?t=${Date.now()}`;
-    }
+    // Not on screen: a stylesheet swapped then never loaded its new sheet (the WebView doesn't load while hidden) and
+    // the page was left with none - home unstyled. Swapped once it shows instead.
+    if (document.hidden) pendingCss.add(path);
+    else swapCss(path);
     return;
   }
   reload();
+});
+
+const pendingCss = new Set<string>();
+function swapCss(path: string) {
+  for (const link of document.querySelectorAll<HTMLLinkElement>("link[rel=stylesheet][data-hot]")) {
+    const href = link.getAttribute("href")!.split("?")[0];
+    if (path.endsWith(href.replace(/^\.\//, ""))) link.href = `${href}?t=${Date.now()}`;
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  pendingCss.forEach(swapCss);
+  pendingCss.clear();
 });
 
 /**

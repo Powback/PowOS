@@ -279,12 +279,19 @@ object Switcher {
         r()
     }
 
-    /** The transition to the switcher is over (finished, or called off by an app that opened meanwhile). */
-    fun settled() {
+    /**
+     * The transition to the switcher is over (finished, or called off by an app that opened meanwhile); not [ok]: it
+     * never came up - the layer the swipe opened is let go, so the plain way ([show]) can bring it up.
+     */
+    fun settled(ok: Boolean = true) {
         if (!gesture) return
         gesture = false
         boost?.invoke(false)
         release = null
+        if (!ok) {
+            open = false
+            from = null
+        }
         // An app came up instead: home is going (or gone) - the layer with it.
         if (!homeVisible) hideStopped()
     }
