@@ -271,7 +271,7 @@ export function diff(before: string, after: string, caret: number): { reports: n
   return { reports, caret: p + added.length, missing: typed.missing };
 }
 
-/** The Remote input screen open (PowOS AI's page opens it; Back closes it, state.ts). */
+/** The Remote input screen open (the control center's tile opens it; Back closes it, state.ts). */
 export const remoteOpen = signal(false);
 export const openRemote = () => (remoteOpen.value = true);
 export function closeRemote() {

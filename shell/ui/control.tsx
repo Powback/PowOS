@@ -11,7 +11,8 @@ import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
 import { notifOpen } from "./gesture.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import type { MediaState, QuickState, QuickTile } from "../types.ts";
+import { openRemote } from "../remote.ts";
+import type { MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
 
 /** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
 export const quick = signal<QuickState>({
@@ -23,6 +24,9 @@ export const quick = signal<QuickState>({
 });
 powos.on("qs.changed", (q: QuickState) => (quick.value = { ...q }));
 powos.qs.state().then((q) => (quick.value = q));
+
+/** PowOS's own tile, not one of the phone's: Remote input (ui/remote.tsx). */
+const REMOTE_ID = "powos.remote";
 
 /** Held this long (ms), a tile opens its page instead. */
 const HOLD = 450;
@@ -66,6 +70,7 @@ const TILE_ICONS: Record<string, IconName | [IconName, IconName]> = {
   battery: "leaf",
   lockscreen: "lockOutline",
   qr_code_scanner: "qrcodeScan",
+  [REMOTE_ID]: "keyboardOutline",
 };
 
 /** Other apps' tiles by their app: the icon that says what they do. */
@@ -115,6 +120,106 @@ function usePress(t: QuickTile) {
       powos.qs.toggle(t.id).then(update);
     },
   };
+}
+
+/**
+ * Remote input's side and its computer, asked for while the control center shows ("remote.state" brings changes; the
+ * cable has no event, so it's asked again now and then).
+ */
+const remote = signal<RemoteState | null>(null);
+powos.on("remote.state", (s: RemoteState) => (remote.value = s));
+const askRemote = () =>
+  powos.remote.state().then(
+    (s) => (remote.value = s),
+    () => {},
+  );
+/** The long press's picker (USB or Bluetooth) showing. */
+const picking = signal(false);
+
+/** Whom remote input's picked side is with: a Bluetooth computer's name, "computer" for a USB one, null for none. */
+function remoteHost(s: RemoteState | null): string | null {
+  if (s?.target === "usb") return s.usb.state === "configured" ? "computer (USB)" : null;
+  if (s?.target === "bluetooth") return s.bluetooth.host?.name ?? null;
+  return null;
+}
+
+/** Remote input as a tile: on with a computer connected (its name the label); a tap opens it, a long press picks the side. */
+function remoteTile(): QuickTile {
+  const s = remote.value;
+  const host = remoteHost(s);
+  return {
+    id: REMOTE_ID,
+    label: host ?? "remote input",
+    on: !!host,
+    detail: host ? `connected to ${host}` : s?.target ? `${s.target === "usb" ? "USB" : "Bluetooth"}, not connected` : "off",
+  };
+}
+
+function RemoteTile({ t }: { t: QuickTile }) {
+  const timer = useRef(0);
+  const held = useRef(false);
+  const side = remote.value?.target;
+  const clear = () => clearTimeout(timer.current);
+  return (
+    <button
+      type="button"
+      class={`cc-tile ${t.on ? "on" : ""} ${picking.value ? "picking" : ""}`}
+      aria-label={`remote input: ${t.detail}`}
+      onPointerDown={() => {
+        held.current = false;
+        timer.current = window.setTimeout(() => {
+          held.current = true;
+          picking.value = !picking.value;
+        }, HOLD);
+      }}
+      onPointerUp={clear}
+      onPointerCancel={clear}
+      onPointerLeave={clear}
+      onContextMenu={(e: Event) => e.preventDefault()}
+      onClick={() => {
+        if (held.current) return;
+        picking.value = false;
+        shut();
+        openRemote();
+      }}
+    >
+      <span class="cc-icon">
+        <Icon name={side === "usb" ? "usb" : side === "bluetooth" ? "bluetooth" : "keyboardOutline"} />
+      </span>
+      <span class="cc-label">{t.label}</span>
+    </button>
+  );
+}
+
+/** The long press's picker: where remote input's keys and touchpad go (that side turned on), or nowhere. */
+function RemotePick() {
+  if (!picking.value) return null;
+  const s = remote.value;
+  const pick = (side: RemoteTarget | null) => {
+    picking.value = false;
+    powos.remote.target(side).then(
+      (st) => (remote.value = st),
+      () => {},
+    );
+  };
+  const chip = (side: RemoteTarget, label: string, icon: IconName) => (
+    <button type="button" class={`cc-chip ${s?.target === side ? "on" : ""}`} onClick={() => pick(side)}>
+      <Icon name={icon} />
+      <span>{label}</span>
+    </button>
+  );
+  return (
+    <div class="cc-pick">
+      <span class="cc-pick-head muted">remote input: {remoteTile().detail}</span>
+      <span class="cc-pick-row">
+        {chip("usb", "USB", "usb")}
+        {chip("bluetooth", "Bluetooth", "bluetooth")}
+        <button type="button" class={`cc-chip ${s?.target ? "" : "on"}`} onClick={() => pick(null)}>
+          <span>none</span>
+        </button>
+      </span>
+    </div>
+  );
 }
 
 function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
@@ -427,12 +532,19 @@ export function ControlCenter() {
   useEffect(() => {
     if (!open) return;
     powos.qs.listening(true);
-    return () => void powos.qs.listening(false);
+    askRemote();
+    const timer = window.setInterval(askRemote, 3000);
+    return () => {
+      powos.qs.listening(false);
+      clearInterval(timer);
+      picking.value = false;
+    };
   }, [open]);
   const q = quick.value;
   const tiles = q.tiles ?? [];
   const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter((t): t is QuickTile => !!t);
-  const { shown, hidden } = arranged(tiles.filter((t) => !CARDS.includes(t.id)));
+  // Remote input's tile joins the phone's: a layout kept before it was there gets it at the end (arranged's new tiles).
+  const { shown, hidden } = arranged([...tiles.filter((t) => !CARDS.includes(t.id)), remoteTile()]);
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
   return (
@@ -490,11 +602,10 @@ export function ControlCenter() {
         <EditGrid shown={shown} hidden={hidden} />
       ) : (
         <div class="cc-grid">
-          {shown.map((t) => (
-            <Tile key={t.id} t={t} />
-          ))}
+          {shown.map((t) => (t.id === REMOTE_ID ? <RemoteTile key={t.id} t={t} /> : <Tile key={t.id} t={t} />))}
         </div>
       )}
+      {!editing.value && <RemotePick />}
     </div>
   );
 }
