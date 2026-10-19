@@ -6,6 +6,7 @@ import { computed, effect, signal, type Signal } from "@preact/signals";
 import { powos } from "./bridge.ts";
 import { closeRemote, remoteOpen } from "./remote.ts";
 import { agentsView, closeAgents } from "./agents.ts";
+import { backScreen, closeScreens } from "./screens.ts";
 import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
 export const apps = signal<App[]>([]);
@@ -158,6 +159,8 @@ export function back(): boolean {
   // the terminal's - mustn't go on to leave PowOS AI's page).
   if (sessionView.value) closeSession();
   else if (remoteOpen.value) closeRemote();
+  // Settings and its screens: the top one (or what's open inside it).
+  else if (backScreen()) return true;
   else if (agentsView.value) closeAgents();
   else if (screen.value.key) powos.widgets.closeScreen();
   else if (notif.value) notif.value = false;
@@ -183,6 +186,7 @@ export function goHome() {
   }
   notif.value = false;
   closeRemote();
+  closeScreens();
   closeAgents();
   menu.value = null;
   folder.value = null;

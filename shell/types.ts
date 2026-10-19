@@ -445,9 +445,15 @@ export interface Bridge {
     list(): Promise<ThemeChoice[]>;
     pick(name: string): Promise<void>;
   };
-  /** The Compose launcher's screens the shell has no own yet: store, themes, style, aur, linux, agents, settings. */
+  /**
+   * Settings and the screens it opens (screens.ts, ShellScreens.kt): one's state now, then again as "screens.state"
+   * ({ name, state }) on every change until unwatch; and what's tapped there (the host answers with what it returns).
+   * The host opens one itself as "screens.open" ({ name }), and says a store install is done as "screens.done".
+   */
   screens: {
-    open(name: string): Promise<void>;
+    watch(name: string): Promise<unknown>;
+    unwatch(name: string): Promise<void>;
+    act(name: string, action: string, arg?: unknown): Promise<unknown>;
   };
   /** The default coding agent: its name, and the home menu's tasks for it (or the screen that sets one up). */
   agents: {

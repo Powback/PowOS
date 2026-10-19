@@ -56,7 +56,7 @@ class ShellPanels private constructor(
         page: Int,
         cell: JSONObject,
     ): String {
-        require(name in SIZES) { "no panel $name" }
+        require(name in SIZES || ISLAND.matches(name)) { "no panel $name" }
         entries[name] = page
         save()
         layout.set(key(name), cell(cell))
@@ -93,6 +93,12 @@ class ShellPanels private constructor(
     companion object {
         private const val ENTRIES = "entries"
         const val PREFIX = "panel:"
+
+        /**
+         * A PowOS app's widget, drawn by the shell as an island (shell/ui/island.tsx): "app:<app id>/<widget id>",
+         * from the registry (`powos app install`). Its size is the cell the page placed it in.
+         */
+        private val ISLAND = Regex("app:[a-z0-9.-]{1,64}/[a-z0-9.-]{1,64}")
 
         /** The panels there are, and the size each starts at; the smallest each may be made. */
         private val SIZES = mapOf("agents" to (4 to 2))

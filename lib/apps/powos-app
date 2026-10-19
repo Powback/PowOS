@@ -104,8 +104,17 @@ def install_ui(d, m):
     for v in versions[:-2]:
         if v != m["version"]:
             shutil.rmtree(os.path.join(base, v), ignore_errors=True)
-    if not os.path.ismount(APPS) and os.path.exists("/run/powos-app"):
+    if not mounted(APPS) and os.path.exists("/run/powos-app"):
         print(f"note: {APPS} isn't the PowOS app's files/apps here (start a new session): the shell won't see it")
+
+
+def mounted(path):
+    """A mount point, binds of the same filesystem included (os.path.ismount only sees a device change)."""
+    try:
+        with open("/proc/self/mountinfo") as f:
+            return any(line.split()[4] == os.path.realpath(path) for line in f)
+    except OSError:
+        return os.path.ismount(path)
 
 
 def register(text):

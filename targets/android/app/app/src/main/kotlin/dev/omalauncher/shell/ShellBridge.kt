@@ -80,6 +80,9 @@ class ShellBridge(
 
     /** The home's own panels (the Agents widget), and this page's view of the agents (AgentsSpool). */
     private val panels = ShellPanels.get(context)
+
+    /** Settings and the screens it opens (style, the stores, Linux, coding agents...): shell/ui/screens.tsx. */
+    val screens = ShellScreens(context, activity, runtime, scope, ::emit)
     private val agentsView = dev.omalauncher.AgentsSpool.Viewer(::emit)
 
     /** Remote input (RemoteInput.kt): the phone as a computer's keyboard and mouse, "remote.*" calls. */
@@ -144,6 +147,16 @@ class ShellBridge(
         PowosAiChat.load(context.applicationContext)
         appWidgets.listen(appWidgetEvents)
         scope.launch { snapshotFlow { aiChat().toString() }.drop(1).collect { emit("ai.changed", JSONObject(it)) } }
+        // Something that needs Linux was asked for without it (a terminal, a Linux widget): home offers to install it.
+        if (activity is ShellActivity) {
+            scope.launch {
+                snapshotFlow { runtime.linuxWanted }.collect { wanted ->
+                    if (!wanted) return@collect
+                    runtime.linuxWanted = false
+                    openScreen(ShellScreens.LINUX)
+                }
+            }
+        }
     }
 
     @JavascriptInterface
@@ -213,7 +226,9 @@ class ShellBridge(
             "theme.get" -> theme()
             "theme.list" -> themeList()
             "theme.pick" -> pickTheme(a.getString(0))
-            "screens.open" -> ShellScreensActivity.open(context, a.getString(0))
+            "screens.watch" -> screens.watch(a.getString(0))
+            "screens.unwatch" -> screens.unwatch(a.getString(0))
+            "screens.act" -> screens.act(a.getString(0), a.getString(1), a.opt(2)?.takeIf { it != JSONObject.NULL })
             "agents.default" -> runtime.agents.default?.name
             "agents.newWidget" -> withAgent { newWidgetCommand(it.bin) to "New widget" }
             "agents.newApp" -> withAgent { newAppCommand(it.bin) to "New app" }
@@ -427,11 +442,14 @@ class ShellBridge(
     private fun withAgent(task: (Agent) -> Pair<String, String>): String {
         val agent = runtime.agents.default
         return when {
-            !(runtime.bootstrap.isInstalled || runtime.powosSession) -> "linux".also { ShellScreensActivity.open(context, ShellScreensActivity.LINUX) }
-            agent == null -> "agents".also { ShellScreensActivity.open(context, ShellScreensActivity.AGENTS) }
+            !(runtime.bootstrap.isInstalled || runtime.powosSession) -> "linux".also { openScreen(ShellScreens.LINUX) }
+            agent == null -> "agents".also { openScreen(ShellScreens.AGENTS_SCREEN) }
             else -> "started".also { task(agent).let { (command, title) -> runtime.terminal(command, title, agent) } }
         }
     }
+
+    /** Opens one of the page's screens (shell/ui/screens.tsx), as if it had been tapped there. */
+    private fun openScreen(name: String) = emit("screens.open", JSONObject().put("name", name))
 
     /**
      * Starts listening ([hold]: across pauses, until speech.stop); the whole text goes to the page as "speech.done".
@@ -598,6 +616,7 @@ class ShellBridge(
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
     fun close() {
+        screens.close()
         appWidgets.unlisten(appWidgetEvents)
         remote.close()
         dev.omalauncher.AgentsSpool.forget(agentsView)

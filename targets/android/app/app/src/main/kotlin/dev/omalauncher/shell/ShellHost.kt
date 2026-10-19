@@ -138,7 +138,17 @@ class ShellHost(
                 val png = AppWidgets.get(context).previewPng(URLDecoder.decode(path.removePrefix("_awpreview/"), "UTF-8")) ?: return notFound()
                 return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600") }
             }
+            // What settings' screens show: theme previews, backgrounds, store previews (ShellScreens.image).
+            // What settings' screens show: theme previews, backgrounds, store previews (ShellScreens.image).
+            if (path.startsWith("_screens/")) {
+                val rest = path.removePrefix("_screens/")
+                val (type, bytes) = bridge.screens.image(rest.substringBefore('/'), URLDecoder.decode(rest.substringAfter('/'), "UTF-8")) ?: return notFound()
+                return WebResourceResponse(type, null, ByteArrayInputStream(bytes)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600") }
+            }
             if (".." in path.split('/')) return notFound()
+            // A PowOS app's own files (`powos app install`: files/apps/<id>/current/ui/), for its islands on home
+            // (shell/ui/island.tsx) - the same origin as the page, so it imports them as its own modules.
+            if (path.startsWith("_app/")) return appFile(path.removePrefix("_app/"))
             val stream = open(path) ?: return notFound()
             return WebResourceResponse(mime(path), "utf-8", stream).apply {
                 // Always the file as it is now: an edit must show on the next load, not a cached copy.
@@ -154,6 +164,17 @@ class ShellHost(
             view: WebView,
             request: WebResourceRequest,
         ) = "${request.url.scheme}://${request.url.host}" != ORIGIN
+    }
+
+    /** One file of an installed PowOS app's UI: "<app id>/<path>", never outside that app's current version. */
+    private fun appFile(rest: String): WebResourceResponse {
+        val id = rest.substringBefore('/')
+        val name = rest.substringAfter('/', "")
+        if (!APP_ID.matches(id) || name.isEmpty()) return notFound()
+        val ui = File(context.filesDir, "apps/$id/current/ui")
+        val file = File(ui, name)
+        if (!file.isFile || !file.canonicalPath.startsWith(ui.canonicalPath + "/")) return notFound()
+        return WebResourceResponse(mime(name), "utf-8", file.inputStream()).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
     }
 
     /** The override folder's file, else the shipped one. */
@@ -225,6 +246,9 @@ class ShellHost(
 
         /** Where the page lives: never resolved, every request is answered from the app. */
         const val ORIGIN = "https://shell.powos"
+
+        /** A PowOS app's id (powos-app.json; the registry allows the same). */
+        private val APP_ID = Regex("[a-z0-9.-]{1,64}")
     }
 }
 
@@ -244,7 +268,11 @@ private object HotReload {
         hosts += host
         if (overrides != null) return
         val dir = File(host.filesDir, "shell").also { overrides = it }
-        watch(dir)
+        watch(dir, dir, "")
+        // PowOS apps' installed UIs (files/apps/<id>/current/ui): a new version or a changed file reloads the pages
+        // showing their islands, as "_app/<id>/..." (the path the page loads them by, ShellHost.appFile).
+        val apps = File(host.filesDir, "apps").also { it.mkdirs() }
+        watch(apps, apps, "_app/")
         // The override folder deleted and made again (a reset): watch the new one - the old watchers went with it.
         watchers +=
             object : FileObserver(host.filesDir, CREATE or MOVED_TO) {
@@ -252,7 +280,7 @@ private object HotReload {
                     event: Int,
                     path: String?,
                 ) {
-                    if (path == dir.name) main.post { watch(dir) }
+                    if (path == dir.name) main.post { watch(dir, dir, "") }
                 }
             }.also { it.startWatching() }
     }
@@ -261,8 +289,16 @@ private object HotReload {
         hosts -= host
     }
 
-    /** Every directory of the override folder, since FileObserver isn't recursive. */
-    private fun watch(dir: File) {
+    /**
+     * Every directory under [root] (the override folder, the apps), since FileObserver isn't recursive; a change is
+     * sent as its path under [root] after [prefix]. Links aren't followed: an app's `current` points at a version dir
+     * watched already (one inotify watch per inode in a process - a second observer would take the first's events).
+     */
+    private fun watch(
+        dir: File,
+        root: File,
+        prefix: String,
+    ) {
         val observer =
             object : FileObserver(dir, CLOSE_WRITE or MOVED_TO or DELETE or CREATE) {
                 override fun onEvent(
@@ -270,24 +306,30 @@ private object HotReload {
                     path: String?,
                 ) {
                     val file = File(dir, path ?: return)
-                    if (event and CREATE != 0 && file.isDirectory) {
+                    if (event and (CREATE or MOVED_TO) != 0 && file.isDirectory && !isLink(file)) {
                         main.post {
-                            watch(file)
+                            watch(file, root, prefix)
                             // Written before its watcher started (a push making the folder, then a file in it at once):
                             // those changes, which no watcher saw.
-                            file.walkTopDown().filter { it.isFile }.forEach(::changed)
+                            file.walkTopDown().filter { it.isFile }.forEach { changed(it, root, prefix) }
                         }
                     }
-                    if (event and (CLOSE_WRITE or MOVED_TO or DELETE) != 0) main.post { changed(file) }
+                    if (event and (CLOSE_WRITE or MOVED_TO or DELETE) != 0) main.post { changed(file, root, prefix) }
                 }
             }
         observer.startWatching()
         watchers += observer
-        dir.listFiles()?.filter { it.isDirectory }?.forEach(::watch)
+        dir.listFiles()?.filter { it.isDirectory && !isLink(it) }?.forEach { watch(it, root, prefix) }
     }
 
-    private fun changed(file: File) {
-        val path = file.relativeTo(overrides ?: return).path
+    private fun isLink(f: File) = java.nio.file.Files.isSymbolicLink(f.toPath())
+
+    private fun changed(
+        file: File,
+        root: File,
+        prefix: String,
+    ) {
+        val path = prefix + file.relativeTo(root).path
         Log.i(TAG, "changed: $path (${hosts.size} pages)")
         for (h in hosts.toList()) h.bridge.emit("files.changed", mapOf("path" to path))
     }

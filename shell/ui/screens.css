@@ -1,0 +1,236 @@
+/* Settings and its screens (screens.tsx): full screen over home, from theme.css's tokens only. */
+
+.scr {
+  position: fixed;
+  z-index: 16;
+  inset: 0;
+  padding: var(--inset-top, 0px) var(--edge) 0;
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scr .accent { color: var(--color-accent); }
+.scr .danger { color: var(--color-red); }
+.scr .green { color: var(--color-green, var(--color-accent)); }
+
+.scr-top { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.scr-back { width: 36px; height: 40px; display: grid; place-items: center; color: var(--color-accent); margin-left: -8px; }
+.scr-icon { color: var(--color-accent); flex: none; }
+.scr-title { flex: 1; min-width: 0; font-size: var(--text-item); font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scr-iconbtn { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 999px; color: var(--color-accent); }
+.scr-iconbtn:active { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.scr-iconbtn.danger { color: var(--color-red); }
+.scr-iconbtn.muted { color: var(--color-muted); }
+
+.scr-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Clear of the navigation bar, and of the keyboard while a field has it (the window doesn't resize). */
+  padding-bottom: calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + 16px);
+}
+
+.scr-section { display: flex; flex-direction: column; gap: 8px; }
+.scr-heading { margin: 8px 0 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-small); font-weight: normal; color: var(--color-accent); min-height: 38px; }
+.scr-heading-actions { margin-left: auto; display: flex; gap: 2px; }
+
+.scr-note { font-size: var(--text-small); line-height: 1.45; text-align: left; }
+.scr-link { display: inline-flex; gap: 4px; align-items: center; }
+.scr-text { line-height: 1.45; }
+.scr-big { font-size: var(--text-item); font-weight: bold; margin-top: 4px; }
+.scr-sub { font-size: var(--text-small); line-height: 1.4; }
+.scr-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.scr-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* The settings hub: a grid of icon tiles. */
+.scr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: var(--gap); }
+.scr-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px 12px 12px;
+  text-align: left;
+  min-height: 112px;
+}
+.scr-tile:active { border-color: var(--color-accent); }
+.scr-tile-icon { color: var(--color-accent); margin-bottom: 6px; }
+.scr-tile-title { font-size: var(--text-item); }
+.scr-tile-sub { font-size: var(--text-small); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* A card: a row (icon, text, actions) and what goes under it. */
+.scr-card { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; text-align: left; width: 100%; }
+.scr-card:disabled { opacity: 0.6; }
+.scr-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
+.scr-row:disabled { opacity: 1; }
+.scr-row-icon { flex: none; color: var(--color-accent); }
+.scr-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.scr-pick.on { border-color: var(--color-accent); }
+.scr-pick:not(.on) .scr-row-icon { color: var(--color-muted); }
+.scr-builtin:active { border-color: var(--color-accent); }
+.scr-wallpaper { padding: 4px 0; }
+.scr-wallpaper:not(.done) .scr-row-text { color: var(--color-accent); }
+.scr-wallpaper.done .scr-row-icon { color: var(--color-green, var(--color-accent)); }
+
+.scr-act {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font: var(--text-small) var(--font);
+  color: var(--color-accent);
+  border: var(--frame) solid var(--color-border);
+  border-radius: 999px;
+  padding: 7px 12px;
+}
+.scr-row .scr-act { align-self: center; }
+.scr-act.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
+.scr-act.danger { color: var(--color-red); }
+.scr-act.muted { color: var(--color-muted); }
+.scr-act:disabled { opacity: 0.4; }
+
+.scr-log { font-size: var(--text-small); color: var(--color-muted); overflow: hidden; }
+.scr-log > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scr-log.failed, .scr-log.failed > div { color: var(--color-red); white-space: normal; }
+
+/* A text field with its icon. */
+.scr-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  border: var(--frame) solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-muted);
+}
+.scr-field:focus-within { border-color: var(--color-accent); }
+.scr-field input {
+  flex: 1;
+  min-width: 0;
+  font: var(--text-body) var(--font);
+  color: var(--color-foreground);
+  background: none;
+  border: 0;
+  outline: none;
+  padding: 10px 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.scr-field-clear { color: var(--color-muted); display: grid; place-items: center; width: 28px; height: 28px; }
+.scr-inline { display: flex; gap: 8px; align-items: center; }
+
+/* Options: a label column, then its control. */
+.scr-option { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.scr-option-label { flex: none; width: 104px; font-size: var(--text-small); }
+.scr-option-control { flex: 1; min-width: 0; }
+.scr-seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius); overflow: hidden; }
+.scr-seg button { padding: 8px 14px; white-space: nowrap; font-size: var(--text-small); }
+.scr-seg button.on { background: var(--color-accent); color: var(--color-background); }
+.scr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.scr-chips.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; margin: 0 calc(-1 * var(--edge)); padding: 0 var(--edge); flex: none; }
+.scr-chip { flex: none; padding: 7px 12px; border: 1px solid var(--color-border); border-radius: 999px; font-size: var(--text-small); white-space: nowrap; }
+.scr-chip.on { border-color: var(--color-accent); color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 15%, transparent); }
+
+/* Sideways strips: the themes, the backgrounds. They scroll to the screen's edge. */
+.scr-strip {
+  display: flex;
+  gap: var(--gap);
+  overflow-x: auto;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  margin: 0 calc(-1 * var(--edge));
+  padding: 2px var(--edge);
+  flex: none;
+}
+.scr-theme {
+  flex: none;
+  width: 160px;
+  border: var(--frame) solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.scr-theme.on { border-color: var(--color-accent); }
+.scr-theme img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; background: var(--color-surface); }
+.scr-theme-name { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: var(--text-small); text-align: left; }
+.scr-theme-name > span:first-child { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scr-dots { display: flex; gap: 2px; }
+.scr-dots i { width: 8px; height: 8px; display: block; }
+.scr-thumb {
+  flex: none;
+  width: 120px;
+  aspect-ratio: 16 / 10;
+  border: var(--frame) solid transparent;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+.scr-thumb.on { border-color: var(--color-accent); }
+.scr-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scr-thumb.add { border-color: var(--color-border); color: var(--color-accent); display: grid; place-items: center; }
+
+/* Grids of cards: the community themes, the store's widgets. */
+.scr-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--gap); }
+.scr-card-pick { display: flex; flex-direction: column; gap: 4px; padding: 6px; text-align: left; min-width: 0; }
+.scr-card-pick.on { border-color: var(--color-accent); }
+.scr-card-pick:active { border-color: var(--color-accent); }
+.scr-card-name { font-size: var(--text-body); }
+.scr-shot { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: calc(var(--radius) * 0.6); background: var(--color-surface); display: block; }
+.scr-widget { width: 100%; height: 104px; object-fit: contain; display: block; }
+.scr-widget.empty { display: grid; place-items: center; background: var(--color-surface); border-radius: calc(var(--radius) * 0.6); font-size: var(--text-small); }
+.scr-preview { max-width: 100%; max-height: 320px; object-fit: contain; align-self: center; }
+.scr-code {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--color-surface);
+  border-radius: calc(var(--radius) * 0.5);
+  font: var(--text-small) var(--font);
+  white-space: pre;
+  overflow-x: auto;
+  touch-action: pan-x pan-y;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.scr-license { display: flex; flex-direction: column; gap: 8px; }
+.scr-license .scr-code { white-space: pre-wrap; }
+.scr-rot { transform: rotate(-90deg); }
+
+/* Linux's setup stages. */
+.scr-stages { display: flex; flex-direction: column; gap: 14px; margin: 8px 0; }
+.scr-stage { display: flex; gap: 10px; align-items: flex-start; }
+.scr-stage > .icon { flex: none; margin-top: 1px; }
+.scr-stage > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.scr-stage.done > .icon { color: var(--color-green, var(--color-accent)); }
+.scr-stage.running > .icon { color: var(--color-accent); animation: scr-spin 1.2s linear infinite; }
+.scr-stage.failed { color: var(--color-red); }
+.scr-stage.pending { color: var(--color-muted); }
+.scr-bar { height: 4px; border-radius: 2px; background: var(--color-surface); overflow: hidden; }
+.scr-bar i { display: block; height: 100%; background: var(--color-accent); }
+@keyframes scr-spin { to { transform: rotate(360deg); } }
+
+/* A question over the screen. */
+.scr-scrim {
+  position: fixed;
+  z-index: 17;
+  inset: 0;
+  background: color-mix(in srgb, var(--color-background) 60%, transparent);
+  display: flex;
+  align-items: flex-end;
+  padding: var(--edge) var(--edge) calc(var(--inset-bottom, 0px) + var(--edge));
+}
+.scr-confirm { width: 100%; max-width: 560px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--color-background); }
+.scr-confirm-title { font-size: var(--text-item); }
+.scr-confirm-title.danger { color: var(--color-red); }
+.scr-confirm-text { font-size: var(--text-small); line-height: 1.45; }
+.scr-confirm-do { display: flex; gap: 8px; justify-content: flex-end; }

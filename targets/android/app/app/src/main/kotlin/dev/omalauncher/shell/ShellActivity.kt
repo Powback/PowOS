@@ -169,6 +169,17 @@ class ShellActivity : Activity() {
         runtime.screenStopped()
     }
 
+    /** The photo picker's answer (a background of one's own, from Style). */
+    @Deprecated("The page's requests come back here", ReplaceWith(""))
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?,
+    ) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == ShellScreens.PICK_IMAGE_REQUEST) host.bridge.screens.imagePicked(data?.data?.takeIf { resultCode == RESULT_OK })
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,

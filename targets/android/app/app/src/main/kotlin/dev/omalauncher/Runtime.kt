@@ -45,7 +45,6 @@ import dev.omalauncher.linux.shellQuote
 import dev.omalauncher.theme.Style
 import dev.omalauncher.theme.StyleStore
 import dev.omalauncher.theme.ThemeStore
-import dev.omalauncher.ui.Gestures
 import dev.omalauncher.ui.KeyboardBridge
 import dev.omalauncher.ui.TerminalTiles
 import dev.omalauncher.ui.WindowManager
@@ -90,7 +89,6 @@ class Runtime(
     val terminals = TerminalTiles(this)
     val style = StyleStore(context)
     val terminalFont = TerminalFont(proot, style)
-    val gestures = Gestures(context)
     val linuxApps = mutableStateListOf<LinuxApp>()
 
     /** Icons of [linuxApps] by desktop id; apps without a PNG icon have no entry. */

@@ -22,6 +22,7 @@ import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen } from "./gesture.ts";
 import { OwlWidget } from "./owl.tsx";
 import { AppWidgetFace } from "./appwidget.tsx";
+import { Island } from "./island.tsx";
 import { AgentsPanel } from "./agents.tsx";
 import { openAgents } from "../agents.ts";
 import type { Cell, HomeItem } from "../types.ts";
@@ -130,6 +131,9 @@ export function placeNew(wDp: number, hDp: number) {
   return { page: Math.max(...used) + 1, cell: { x: 0, y: 0, w, h }, ...size };
 }
 
+/** [placeNew] in cells (a PowOS app's widget states its size in cells, ui/apppicker.tsx). */
+export const placeNewCells = (w: number, h: number) => placeNew(w * (geometry.value.cellW || 60) - 1, h * (geometry.value.cellH || 60) - 1);
+
 /**
  * Starts carrying [what] ({ item } or { app }) with the pointer of [e]: follows it on the window until it lifts, then
  * drops. [grab] is where the finger holds the tile.
@@ -235,7 +239,8 @@ function Tile({ item }: { item: HomeItem }) {
     // The widget's own onTap - a terminal's opens its screen, the shell full size.
     else if (item.kind === "widget") powos.widgets.tap(item.key);
     // The Agents widget: its screen (a line's tap opens it on that agent).
-    else if (item.kind === "panel") openAgents();
+    else if (item.kind === "panel" && item.name === "agents") openAgents();
+    // A PowOS app's island takes its own taps (ui/island.tsx).
     // An Android widget's taps are its own (appwidget.tsx).
   });
   const lifted = carry.value?.item?.key === item.key;
@@ -269,6 +274,7 @@ function Tile({ item }: { item: HomeItem }) {
           <AppWidgetFace item={item} />
         ))}
       {item.kind === "panel" && item.name === "agents" && <AgentsPanel item={item} />}
+      {item.kind === "panel" && item.name?.startsWith("app:") && <Island item={item} />}
       {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
       {item.kind === "folder" && (
         <div class="folder-face tile">

@@ -14,7 +14,7 @@ ID=$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$D/powos-app.json" | head -1)
 T=/data/local/tmp/powos-app-$ID
 STAGE=$(mktemp -d); trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/app" && cp "$D/powos-app.json" "$STAGE/app/" && cp -R "$D/out" "$STAGE/app/out"
-tar -C "$STAGE" -czf "$STAGE/app.tgz" app
+COPYFILE_DISABLE=1 tar -C "$STAGE" -czf "$STAGE/app.tgz" app
 # Through a file the adb side can read (powos-vadb has the Mac's tmp mounted only at /t: copy in there if so).
 if [[ $ADB == docker\ exec* ]]; then
   c=$(echo "$ADB" | awk '{print $3}'); docker cp "$STAGE/app.tgz" "$c:/tmp/powos-app.tgz"; src=/tmp/powos-app.tgz

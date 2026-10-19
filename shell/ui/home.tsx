@@ -16,6 +16,7 @@ import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
 import { RemoteScreen } from "./remote.tsx";
 import { AgentsScreen } from "./agents.tsx";
+import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
 import { NotificationPanel } from "./notifications.tsx";
 import { PowAiPage } from "./powai.tsx";
@@ -173,6 +174,7 @@ export function Home() {
       <SessionScreen />
       <RemoteScreen />
       <AgentsScreen />
+      <Screens />
     </>
   );
 }

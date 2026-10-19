@@ -7,6 +7,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { carry, editing, home } from "../state.ts";
+import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { placeNew } from "./grid.tsx";
 import type { AppWidgetProvider, ThemeChoice } from "../types.ts";
@@ -100,9 +101,9 @@ export function EditSheet() {
             const spot = placeNew(4 * cell - 8, 2 * cell - 8);
             powos.home.addPanel("agents", spot.page, spot.cell);
           })}
-        {item("widget store", () => powos.screens.open("store"))}
-        {item("AUR app store", () => powos.screens.open("aur"))}
-        {item("settings", () => powos.screens.open("settings"))}
+        {item("widget store", () => openScreen("store"))}
+        {item("AUR app store", () => openScreen("aur"))}
+        {item("settings", () => openScreen("settings"))}
       </div>
       {note.value && <div class="muted">{note.value}</div>}
       <div class="sheet-row">
@@ -113,7 +114,7 @@ export function EditSheet() {
         {themes.value.map((t) => (
           <Swatch key={t.name} theme={t} />
         ))}
-        <button type="button" class="swatch browse" onClick={() => powos.screens.open("themes")}>
+        <button type="button" class="swatch browse" onClick={() => openScreen("themes")}>
           <span class="swatch-name">browse…</span>
         </button>
       </div>

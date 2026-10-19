@@ -14,6 +14,7 @@
  * - The picker: every widget the phone's apps offer, by app, with their pictures and a search; the edit sheet places
  *   the one picked (editsheet.tsx).
  */
+import { AppWidgetList } from "./apppicker.tsx";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal, type Signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
@@ -209,6 +210,8 @@ export function AppWidgetPicker({ onPick }: { onPick: (p: AppWidgetProvider) => 
           onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
         />
         <div class="aw-list">
+          {/* PowOS apps' widgets first (the registry: ui/apppicker.tsx), then every Android app's. */}
+          {!q && <AppWidgetList onAdded={close} />}
           {list == null && <div class="muted">loading…</div>}
           {list != null && !shown.length && <div class="muted">no widgets{q ? ` for "${query}"` : ""}</div>}
           {[...groups].map(([app, items]) => {

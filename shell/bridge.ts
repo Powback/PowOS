@@ -26,6 +26,7 @@ import type {
   WidgetScreen,
   MediaState,
 } from "./types.ts";
+import { mockScreens } from "./screens-mock.ts";
 
 type Handler = (data: any) => void;
 
@@ -186,7 +187,11 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       list: () => call<ThemeChoice[]>("theme.list"),
       pick: (name) => call("theme.pick", name),
     },
-    screens: { open: (name) => call("screens.open", name) },
+    screens: {
+      watch: (name) => call("screens.watch", name),
+      unwatch: (name) => call("screens.unwatch", name),
+      act: (name, action, arg) => call("screens.act", name, action, arg ?? null),
+    },
     agents: {
       default: () => call<string | null>("agents.default"),
       newWidget: () => call("agents.newWidget"),
@@ -786,7 +791,7 @@ function mock(): Bridge {
         },
       };
     })(),
-    screens: { open: async (name) => console.log("[mock] open screen", name) },
+    screens: mockScreens(events),
     agents: {
       default: async () => "Claude",
       newWidget: async () => (console.log("[mock] new widget with claude"), "started" as const),

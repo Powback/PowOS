@@ -105,10 +105,12 @@ import kotlin.math.roundToInt
  * Android 14's Material tokens) is PowOS's theme's, set on each hosted view (setColorResources), and the app is in
  * the theme's light or dark - widgets pick their night resources from it. The page clips each to PowOS's corners.
  *
- * Binding: PowOS doesn't hold BIND_APPWIDGET (signature|privileged: it would have to be on the system module's
- * privapp allowlist, and a privileged permission the manifest asks for that isn't there stops the phone booting), so
- * the first widget shows Android's "allow PowOS to create widgets" dialog (ACTION_APPWIDGET_BIND, [BindActivity]);
- * ticking "always allow" makes later ones silent. Then the widget's own setup screen, when it has one.
+ * Binding: as a privileged system app PowOS can hold BIND_APPWIDGET (signature|privileged), and then
+ * bindAppWidgetIdIfAllowed succeeds and a widget is bound silently, as by the system launcher. The system module's
+ * allowlist carries it (system-module/privapp-permissions.txt); the manifest requests it only once a module with that
+ * entry is booted (install-app.sh refuses an APK asking for more than the mounted allowlist: the phone wouldn't boot).
+ * Until then the first widget shows Android's "allow PowOS to create widgets" dialog (ACTION_APPWIDGET_BIND,
+ * [BindActivity]); ticking "always allow" makes later ones silent. Then the widget's own setup screen, when it has one.
  *
  * Main thread, except the frames' thread (each [Renderer]'s ImageReader, [Frames]) and what ShellHost's loader thread
  * reads: [frameStream] and [previewPng].
