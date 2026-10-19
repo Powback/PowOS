@@ -13,6 +13,7 @@
  * closes under the finger, a page turns.
  */
 import { AppIcon } from "./apps.tsx";
+import { tapTaken } from "./taps.ts";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { byKey, carry, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
@@ -174,6 +175,8 @@ function useTilePress(item: HomeItem, onTap: () => void) {
       const s = state.current;
       cancel();
       if (!s || s.long || Math.hypot(e.clientX - s.x, e.clientY - s.y) > SLOP) return;
+      // An element of the widget took it (its own onTap, a terminal's focus).
+      if (tapTaken(e)) return;
       if (selected.value) selected.value = null;
       else onTap();
     },
@@ -195,6 +198,8 @@ function Tile({ item }: { item: HomeItem }) {
   const press = useTilePress(item, () => {
     if (item.kind === "app") launch(item.app!);
     else if (item.kind === "folder") folder.value = item.key;
+    // The widget's own onTap - a terminal's opens its screen, the shell full size.
+    else if (item.kind === "widget") powos.widgets.tap(item.key);
   });
   const lifted = carry.value?.item?.key === item.key;
   const isSelected = selected.value === item.key;

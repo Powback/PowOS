@@ -12,6 +12,7 @@ import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gesture.ts";
 import { Pages } from "./grid.tsx";
+import { ScreenPanel } from "./screen.tsx";
 import { RECENT, byKey, dock, dockDrag, menu, recent, setDock } from "../state.ts";
 
 /** The apps opened lately, last first - not those pinned to the dock, which are at hand already. */
@@ -126,24 +127,31 @@ function Dock() {
 export function Home() {
   // data-p: these follow the panel's openness (--p, written by gesture.ts, not through a render).
   return (
-    <div class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""}`} {...homeGestures()}>
-      <div class="stage">
-        <div class="home-content" data-p ref={followOpenness}>
-          <Pages />
-        </div>
-        <div class="launcher-frame tile" data-p ref={followOpenness} />
-        <div class="launcher" data-p ref={followOpenness}>
-          <div class="launcher-inner">
-            <RecentRow />
-            <div class="drawer-clip">
-              <Drawer />
+    <>
+      <div
+        class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""}`}
+        {...homeGestures()}
+      >
+        <div class="stage">
+          <div class="home-content" data-p ref={followOpenness}>
+            <Pages />
+          </div>
+          <div class="launcher-frame tile" data-p ref={followOpenness} />
+          <div class="launcher" data-p ref={followOpenness}>
+            <div class="launcher-inner">
+              <RecentRow />
+              <div class="drawer-clip">
+                <Drawer />
+              </div>
             </div>
           </div>
         </div>
+        <Bar />
+        <Dock />
+        <AppMenu />
       </div>
-      <Bar />
-      <Dock />
-      <AppMenu />
-    </div>
+      {/* Outside home: its touches never reach home's swipes. */}
+      <ScreenPanel />
+    </>
   );
 }

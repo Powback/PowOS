@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { App, Bridge, Cell, Chat, Home, HomeItem, TermState } from "./types.ts";
+import type { App, Bridge, Cell, Chat, Home, HomeItem, TermState, WidgetScreen } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -70,6 +70,9 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       size: (key, cols, rows, width, height) => call("widgets.size", key, cols, rows, width, height),
       canvas: (key, id, width, height) => call("widgets.canvas", key, id, width, height),
       page: (page) => call("widgets.page", page),
+      tap: (key) => call("widgets.tap", key),
+      screen: () => call<WidgetScreen>("widgets.screen"),
+      closeScreen: () => call("widgets.closeScreen"),
     },
     store: {
       get: <T>(name: string) => call<T | null>("store.get", name),
@@ -120,6 +123,7 @@ function mock(): Bridge {
   const data = (name: string) => `powos-shell:${name}`;
   let samples: Promise<Record<string, unknown>> | null = null;
   let chat: Chat = { busy: false, items: [] };
+  let screen: WidgetScreen = { key: null };
   const pin = (name: string, x: number, y: number): HomeItem => {
     const a = apps.find((app) => app.label === name)!;
     return { key: "app:" + a.key.slice(2), kind: "app", page: 1, cell: { x, y, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: [1, 1], label: a.label, app: a.key };
@@ -208,9 +212,16 @@ function mock(): Bridge {
     widgets: {
       watch: async (key, screen) => {
         samples ??= fetch("./dev/sample-trees.json").then((r) => r.json()).catch(() => ({}));
-        events.emit("widget.tree", { key, screen: !!screen, tree: (await samples)[key] ?? terminalTrees[key] ?? null });
+        const id = screen ? `${key}#screen` : key;
+        events.emit("widget.tree", { key, screen: !!screen, tree: (await samples)[id] ?? terminalTrees[id] ?? null });
       },
       unwatch: async () => {},
+      // The mock's widgets with a screen open it on a tap, as their onTap: screen() does.
+      tap: async (key) => {
+        if (terminalTrees[`${key}#screen`]) events.emit("widget.screen", (screen = { key, terminal: true, title: key }));
+      },
+      screen: async () => screen,
+      closeScreen: async () => void events.emit("widget.screen", (screen = { key: null })),
       fire: async (key, _screen, id, name, args) => console.log("[mock] fire", key, id, name, args),
       size: async () => {},
       canvas: async () => {},
@@ -243,7 +254,9 @@ function mock(): Bridge {
 
 /** The mock's terminal widgets: a shell to type in, and one only shown (its taps are the widget's). */
 const terminalTrees: Record<string, unknown> = {
-  "terminal.owl": { k: "Root", id: "r", padding: 0, c: [{ k: "Terminal", id: "r.0", p: { session: "main" } }] },
+  // As the bundled 45-terminal.owl: the tile only shows the shell; a tap opens it full size (its screen), typing there.
+  "terminal.owl": { k: "Root", id: "r", padding: 0, tap: true, c: [{ k: "Terminal", id: "r.0", p: { session: "main", interactive: false } }] },
+  "terminal.owl#screen": { k: "Root", id: "s", padding: 0, c: [{ k: "Terminal", id: "s.0", p: { session: "main", focus: true } }] },
   "glance.owl": {
     k: "Root",
     id: "r",

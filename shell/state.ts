@@ -4,7 +4,7 @@
  */
 import { computed, signal } from "@preact/signals";
 import { powos } from "./bridge.ts";
-import type { App, Chat, Home, HomeItem } from "./types.ts";
+import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
 export const apps = signal<App[]>([]);
 export const byKey = computed(() => new Map(apps.value.map((a) => [a.key, a])));
@@ -43,6 +43,9 @@ export const pages = computed(() => {
   const used = home.value.pages.length ? home.value.pages : [1];
   return carry.value ? [...used, Math.max(...used) + 1] : used;
 });
+/** A widget's screen open over home (its onTap's screen()); Back closes it first. */
+export const screen = signal<WidgetScreen>({ key: null });
+powos.on("widget.screen", (s: WidgetScreen) => (screen.value = s));
 /** The open folder's key. */
 export const folder = signal<string | null>(null);
 /** An app's long-press menu: which app, and where (the pressed cell's box on screen). */
@@ -58,13 +61,15 @@ export const chat = signal<Chat>({ busy: false, items: [] });
 export const chatting = signal(false);
 
 export async function load() {
-  const [list, keys, pins, h, c] = await Promise.all([
+  const [list, keys, pins, h, c, scr] = await Promise.all([
     powos.apps.list(),
     powos.usage.recent(RECENT_FETCH),
     powos.store.get<string[]>("dock"),
     powos.home.get(),
     powos.ai.chat(),
+    powos.widgets.screen(),
   ]);
+  screen.value = scr;
   chat.value = c;
   home.value = h;
   apps.value = list;
@@ -93,9 +98,10 @@ export function closeDrawer() {
   powos.keyboard.hide();
 }
 
-/** Back: whatever is on top closes first - a menu, a folder, edit mode, the drawer. False when nothing was open. */
+/** Back: whatever is on top closes first - a widget's screen, a menu, a folder, edit mode, the drawer. False when nothing was open. */
 export function back(): boolean {
-  if (menu.value) menu.value = null;
+  if (screen.value.key) powos.widgets.closeScreen();
+  else if (menu.value) menu.value = null;
   else if (folder.value) folder.value = null;
   else if (selected.value) selected.value = null;
   else if (drawer.value > 0) closeDrawer();
@@ -105,6 +111,7 @@ export function back(): boolean {
 
 /** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does. */
 export function goHome() {
+  if (screen.value.key) powos.widgets.closeScreen();
   menu.value = null;
   folder.value = null;
   selected.value = null;

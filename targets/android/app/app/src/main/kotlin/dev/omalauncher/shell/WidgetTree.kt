@@ -47,6 +47,8 @@ class WidgetTree(
                 .put("k", "Root")
                 .put("id", if (screen) "s" else "r")
                 .put("padding", program.padding)
+                // The tile has an onTap of its own (a tap that no element takes runs it).
+                .put("tap", !screen && program.onTap != null)
                 .putOpt("background", program.background?.let { css(inst.eval(it, inst.root, "background")) })
                 .put("c", nodes(nodes, inst.root, if (screen) "s" else "r"))
         return root

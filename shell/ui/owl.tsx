@@ -17,6 +17,8 @@ type Props = Record<string, any>;
 
 interface Ctx {
   key: string;
+  /** Drawing the widget's screen (full size), not its tile. */
+  screen: boolean;
   fire(id: string, name: string, args: number[]): void;
   canvas(id: string, w: number, h: number): void;
   image(src: string): HTMLImageElement;
@@ -281,7 +283,8 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
             interactive={p.interactive !== false}
             fontSize={typeof p.fontSize === "number" ? p.fontSize : null}
             textSize={typeof p.textSize === "number" ? p.textSize : null}
-            focus={p.focus === true}
+            // Only a screen takes the keyboard by itself (Render.kt's LocalInputFocus); a tile waits for a tap.
+            focus={ctx.screen && p.focus === true}
             style={{ width: "100%", height: "100%" }}
           />
         </div>
@@ -530,15 +533,18 @@ export function OwlWidget({ widget, cells, screen = false }: { widget: string; c
     return () => void powos.widgets.unwatch(widget, screen);
   }, [widget, screen]);
   useLayoutEffect(() => {
+    // The tile's size (its cells and dp): a screen drawn full size isn't the tile.
+    if (screen) return;
     const ro = new ResizeObserver(() => {
       const r = el.current!.getBoundingClientRect();
       powos.widgets.size(widget, cells?.w ?? 0, cells?.h ?? 0, r.width, r.height);
     });
     ro.observe(el.current!);
     return () => ro.disconnect();
-  }, [widget, cells?.w, cells?.h]);
+  }, [widget, screen, cells?.w, cells?.h]);
   const ctx: Ctx = {
     key: widget,
+    screen,
     fire: (id, name, args) => void powos.widgets.fire(widget, screen, id, name, args),
     canvas: (id, w, h) => void powos.widgets.canvas(widget, id, w, h),
     image: (src) => {

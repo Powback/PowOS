@@ -3,6 +3,7 @@ package dev.omalauncher.shell
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshotFlow
 import dev.omalauncher.Runtime
+import dev.omalauncher.widgets.lang.text
 import dev.omalauncher.widgets.runtime.WidgetInstance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -33,6 +34,29 @@ class ShellWidgets(
 
     /** Canvas sizes by "<widget key>#<element id>", in dp: state, so a new size redraws the widget. */
     private val canvasSizes = mutableStateMapOf<String, Pair<Double, Double>>()
+
+    init {
+        // A widget's screen opening or closing (its onTap's screen(), Back): the page draws it over home.
+        scope.launch { snapshotFlow { screen().toString() }.collect { emit("widget.screen", JSONObject(it)) } }
+    }
+
+    /** The open screen: { key, terminal, title }, or key null. */
+    fun screen(): JSONObject {
+        val key = engine.openScreen ?: return JSONObject().put("key", JSONObject.NULL)
+        val spec = engine.specs.firstOrNull { it.file.name == key }
+        val inst = spec?.let(engine::instance) ?: return JSONObject().put("key", JSONObject.NULL)
+        val title = inst.program.screenTitle?.let { inst.eval(it, inst.root, "title").text() } ?: spec.name
+        return JSONObject().put("key", key).put("terminal", inst.program.terminal).put("title", title)
+    }
+
+    /** A tap on the tile itself, not on an element with its own onTap: the widget's onTap (screen(), say). */
+    fun tap(key: String) {
+        engine.specs.firstOrNull { it.file.name == key }?.let(engine::tap)
+    }
+
+    fun closeScreen() {
+        engine.openScreen = null
+    }
 
     private fun instance(key: String): WidgetInstance? = engine.specs.firstOrNull { it.file.name == key }?.let(engine::instance)
 

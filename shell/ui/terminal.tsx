@@ -14,11 +14,12 @@
  */
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import { signal } from "@preact/signals";
+import { effect, signal } from "@preact/signals";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { powos } from "../bridge.ts";
 import { takeTap } from "./taps.ts";
+import { page, screen } from "../state.ts";
 import type { TermState, TermStyle } from "../types.ts";
 
 /** As PtyTerminal's transcript; tmux keeps its own. */
@@ -314,11 +315,21 @@ document.addEventListener(
   },
   true,
 );
-powos.on("system.back", () => release());
+// Back: a widget's screen closes first (state.ts back), its terminal letting go as it goes; on home, the tile lets go.
+powos.on("system.back", () => screen.value.key == null && release());
+// Another home page: the tile typed in is off screen (Home.kt), so it lets go.
+let shownPage = page.peek();
+effect(() => {
+  if (page.value !== shownPage) {
+    shownPage = page.value;
+    if (screen.peek().key == null) release();
+  }
+});
 powos.on("system.insets", (i: { keyboard: number }) => {
   keyboardHeight = i.keyboard;
-  // The keyboard gone by itself (Back closes it before the page sees Back): the terminal lets go, as the Compose one.
-  if (keyboardUp && i.keyboard === 0 && !ownHide) release();
+  // The keyboard gone by itself (Back closes it before the page sees Back): a tile lets go, as the Compose one; a
+  // screen's terminal keeps the keys (the next Back closes the screen).
+  if (keyboardUp && i.keyboard === 0 && !ownHide && screen.value.key == null) release();
   keyboardUp = i.keyboard > 0;
   if (keyboardUp) ownHide = false;
   extraKeysState.value = { keyboard: keyboardUp };

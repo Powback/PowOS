@@ -48,6 +48,13 @@ export type ChatItem =
   | { kind: "user" | "assistant"; text: string }
   | { kind: "tool"; name: string; hint: string; ok: boolean | null }
   | { kind: "note"; text: string; error: boolean };
+/** A widget's full-size screen, open over home ([key] null: none). A terminal's is edge to edge, without a title. */
+export interface WidgetScreen {
+  key: string | null;
+  terminal?: boolean;
+  title?: string;
+}
+
 export interface Chat {
   busy: boolean;
   items: ChatItem[];
@@ -97,6 +104,11 @@ export interface Bridge {
     canvas(key: string, id: string, width: number, height: number): Promise<void>;
     /** The home page on screen (a page number): widgets on it and beside it run their sources. */
     page(page: number): Promise<void>;
+    /** A tap on the tile that no element took: the widget's own onTap (often screen(), opening it full size). */
+    tap(key: string): Promise<void>;
+    /** The widget screen open now; "widget.screen" brings each change. */
+    screen(): Promise<WidgetScreen>;
+    closeScreen(): Promise<void>;
   };
   /**
    * PowOS AI: the conversation with PowOS's manager, the one its own app (and the desktop's manager widget) shows.
@@ -138,7 +150,7 @@ export interface Bridge {
     insets(): Promise<Insets>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
@@ -185,6 +197,8 @@ export interface OwlOp {
 
 export interface OwlRoot extends OwlNode {
   padding?: number;
+  /** The widget has an onTap: a tap on the tile that no element takes runs it (widgets.tap). */
+  tap?: boolean;
   background?: string | null;
 }
 
