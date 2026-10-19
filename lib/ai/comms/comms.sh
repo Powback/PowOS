@@ -99,7 +99,11 @@ polling); the model can also Monitor the inbox path directly.
 Usage:
   powos comms send <to> <message...> [--priority low|normal|high|urgent]
                                      Send to an agent role's inbox.
-  powos comms notify <message...>    Notify the human user (+ desktop toast).
+  powos comms notify <message...> [--priority P] [--from NAME]
+                                     Notify the human user (+ desktop toast, phone notification).
+  powos comms read <id...> [--agent R]
+                                     Mark messages read by id (default agent: user): out of the
+                                     inbox, and on a phone off its notifications and feed.
   powos comms inbox [--agent R] [--peek]
                                      Show (and clear, unless --peek) an inbox.
                                      Default agent: $COMMS_AGENT_ID or 'user'.

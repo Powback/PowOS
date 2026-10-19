@@ -133,11 +133,13 @@ export interface AssistScreen {
   screenshot: string | null;
 }
 
-/** Something an agent told the user (time: Unix seconds). */
+/** Something an agent told the user, unread (time: Unix seconds; id: comms' message id). */
 export interface AgentMail {
+  id?: string;
   from: string;
   text: string;
   time: number;
+  priority?: string;
 }
 /** An agent at work: a tmux session in PowOS; [title] its pane's (Claude Code's: the task, a spinner while working). */
 export interface AgentSession {
@@ -315,8 +317,14 @@ export interface Bridge {
     send(text: string): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
-    /** What agents told the user lately, newest first ("ai.mail" brings it again). */
+    /** What agents told the user and is unread, newest first ("ai.mail" brings it again). */
     mail(): Promise<AgentMail[]>;
+    /**
+     * Marks one read ([mailRead]) or all ([mailClear]): read everywhere - its notification goes, and it's out of the
+     * user's comms inbox.
+     */
+    mailRead(id: string): Promise<void>;
+    mailClear(): Promise<void>;
     /** Asks for the agents at work (PowOS's tmux sessions); they come as "ai.sessions" (AgentSession[]). */
     sessions(): Promise<void>;
     /** Opens a terminal on one of them. */

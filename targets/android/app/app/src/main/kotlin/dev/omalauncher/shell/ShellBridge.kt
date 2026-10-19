@@ -193,6 +193,8 @@ class ShellBridge(
             }
             "ai.open" -> PowosAiActivity.open(context, null)
             "ai.mail" -> aiMail()
+            "ai.mailRead" -> AgentMail.read(context, a.getString(0))
+            "ai.mailClear" -> AgentMail.readAll(context)
             "ai.sessions" -> aiSessions()
             "ai.attach" -> aiAttach(a.getString(0))
             "lock.unlock" -> lock?.unlock()
@@ -528,7 +530,8 @@ class ShellBridge(
     /** The answer to the mic permission request ([ShellActivity.onRequestPermissionsResult]). */
     fun micPermission(granted: Boolean) = emit("speech.permission", JSONObject().put("granted", granted))
 
-    private fun aiMail() = JSONArray(AgentMail.recent.map { JSONObject().put("from", it.from).put("text", it.text).put("time", it.time) })
+    private fun aiMail() =
+        JSONArray(AgentMail.recent.map { JSONObject().put("id", it.id).put("from", it.from).put("text", it.text).put("time", it.time).put("priority", it.priority) })
 
     /**
      * The agents at work: PowOS's tmux sessions (where agents run), listed off the main thread and sent as

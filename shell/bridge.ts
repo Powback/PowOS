@@ -118,6 +118,8 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       send: (text) => call("ai.send", text),
       open: () => call("ai.open"),
       mail: () => call<AgentMail[]>("ai.mail"),
+      mailRead: (id) => call("ai.mailRead", id),
+      mailClear: () => call("ai.mailClear"),
       sessions: () => call("ai.sessions"),
       attach: (name) => call("ai.attach", name),
     },
@@ -518,15 +520,19 @@ function mock(): Bridge {
         });
       },
       open: async () => console.log("[mock] open PowOS AI"),
+      mailRead: async (id) => console.log("[mock] mail read", id),
+      mailClear: async () => console.log("[mock] all mail read"),
       mail: async () => {
         const now = Math.floor(Date.now() / 1000);
         return [
           {
+            id: "m1",
             from: "coder",
             text: "Launcher refactor done - 3 commits pushed to master.",
             time: now - 600,
           },
           {
+            id: "m2",
             from: "health",
             text: "Disk at 91% on /var - want me to prune old container images?",
             time: now - 5400,

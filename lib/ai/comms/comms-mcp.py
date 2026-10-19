@@ -135,7 +135,32 @@ def _read_pending(agent, drain):
                 os.remove(path)
             except OSError:
                 pass
+    if drain and _safe_name(agent) == "user":
+        # The user's mail read here: the phone's notifications of it go too (one read state).
+        _phone_read([m.get("id") for m in msgs if m.get("id")])
     return msgs
+
+
+def _consume(agent, ids):
+    """Removes the messages with these ids from ``agent``'s inbox (read elsewhere: on the phone, by a test's clean-up).
+    Returns how many were there. The user's: the phone is told too."""
+    want = set(ids)
+    n = 0
+    for path in _pending_files(agent):
+        try:
+            with open(path) as f:
+                mid = json.load(f).get("id")
+        except (OSError, json.JSONDecodeError):
+            continue
+        if mid in want:
+            try:
+                os.remove(path)
+                n += 1
+            except OSError:
+                pass
+    if _safe_name(agent) == "user":
+        _phone_read(list(want))
+    return n
 
 
 def _list_agents():
@@ -204,6 +229,24 @@ def _phone_notify(message, priority="normal", mid=None):
             # id: the user-inbox message's (the app keeps the mail by it, read or not); time: Unix seconds.
             json.dump({"id": mid or name, "from": AGENT_ID or "agent", "text": message, "priority": priority,
                        "time": int(time.time())}, f)
+        os.rename(tmp, os.path.join(box, f"{name}.json"))
+    except Exception:
+        pass
+
+
+def _phone_read(ids):
+    """On a phone running PowOS: these user-mail ids are read - the app marks them read and takes their
+    notifications away (agent-mail/ again, {"op": "read", "ids": [...]}). Best-effort, never fatal."""
+    if not ids or not _on_phone():
+        return
+    try:
+        run = os.environ.get("XDG_RUNTIME_DIR") or "/run/powos-app"
+        box = os.path.join(run, "agent-mail")
+        os.makedirs(box, exist_ok=True)
+        name = f"{int(time.time() * 1000)}-read-{uuid.uuid4().hex[:8]}"
+        tmp = os.path.join(box, f".{name}.tmp")
+        with open(tmp, "w") as f:
+            json.dump({"op": "read", "ids": list(ids)}, f)
         os.rename(tmp, os.path.join(box, f"{name}.json"))
     except Exception:
         pass
@@ -542,6 +585,12 @@ def run_cli(argv):
     pn = sub.add_parser("notify", help="Notify the human user.")
     pn.add_argument("message", nargs="+")
     pn.add_argument("--priority", choices=VALID_PRIORITIES, default="normal")
+    pn.add_argument("--from", dest="frm", default=AGENT_ID or "user",
+                    help="Who it's from (tests: their own name, never 'user').")
+
+    pr = sub.add_parser("read", help="Mark messages read by id: out of the inbox (the user's: off the phone too).")
+    pr.add_argument("ids", nargs="+")
+    pr.add_argument("--agent", default="user")
 
     pi = sub.add_parser("inbox", help="Show an inbox (default: yours / user).")
     pi.add_argument("--agent", default=AGENT_ID or "user")
@@ -567,6 +616,7 @@ def run_cli(argv):
         mid = _deliver(a.to, "message", text, a.priority)
         print(f"Sent to '{a.to}' (id {mid}).")
     elif a.cmd == "notify":
+        AGENT_ID = a.frm
         mid = _deliver("user", "notify", " ".join(a.message), a.priority)
         _desktop_notify(" ".join(a.message), a.priority, mid)
         print(f"User notified (id {mid}).")
@@ -587,6 +637,9 @@ def run_cli(argv):
             time.sleep(0.5)
         print("(timed out, no messages)", file=sys.stderr)
         return 0
+    elif a.cmd == "read":
+        n = _consume(a.agent, a.ids)
+        print(f"Read {len(a.ids)} id(s); {n} were waiting in '{a.agent}'.")
     elif a.cmd == "agents":
         for row in _list_agents():
             print(f"{row['agent']:20s} {row['pending']} pending")

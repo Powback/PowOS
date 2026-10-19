@@ -113,15 +113,40 @@ function AtWork() {
   );
 }
 
+/** Read: out of the feed at once (the host's "ai.mail" confirms), its notification and inbox entry gone too. */
+function readMail(m: AgentMail) {
+  mail.value = mail.value.filter((x) => x !== m);
+  // ?.: an APK from before mailRead (the page is hot-pushed ahead of it) has no such call.
+  if (m.id) powos.ai.mailRead?.(m.id);
+}
+
+/** The unread mail agents sent the user: dismissed one by one (×) or all at once - read everywhere. */
 function FromAgents() {
   if (!mail.value.length) return null;
   return (
     <section>
-      <h3 class="ai-heading muted">from agents</h3>
-      {mail.value.slice(0, 5).map((m, i) => (
-        <div key={i} class="ai-mail tile">
+      <h3 class="ai-heading muted ai-mail-bar">
+        <span>from agents</span>
+        <button
+          type="button"
+          class="ai-mail-clear"
+          onClick={() => {
+            mail.value = [];
+            powos.ai.mailClear?.();
+          }}
+        >
+          clear all
+        </button>
+      </h3>
+      {mail.value.slice(0, 5).map((m) => (
+        <div key={m.id ?? `${m.from}-${m.time}`} class="ai-mail tile">
           <div class="ai-mail-head muted">
-            {m.from} · {ago(m.time)}
+            <span>
+              {m.from} · {ago(m.time)}
+            </span>
+            <button type="button" class="ai-mail-x" aria-label="mark read" onClick={() => readMail(m)}>
+              ×
+            </button>
           </div>
           <div>{m.text}</div>
         </div>

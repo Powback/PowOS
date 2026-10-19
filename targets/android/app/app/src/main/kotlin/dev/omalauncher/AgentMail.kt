@@ -61,6 +61,13 @@ class AgentMail private constructor(
     private fun arrived(file: File) {
         val json = runCatching { JSONObject(file.readText()) }.getOrNull() ?: return
         file.delete()
+        // Read elsewhere (comms: `powos comms read`, the user's inbox drained): read here too, its notification gone.
+        if (json.optString("op") == "read") {
+            val ids = json.optJSONArray("ids") ?: return
+            val list = (0 until ids.length()).map { ids.optString(it) }.filter { it.isNotEmpty() }
+            main.post { markRead(context, list, fromComms = true) }
+            return
+        }
         val now = System.currentTimeMillis()
         val mail =
             Mail(
@@ -108,17 +115,20 @@ class AgentMail private constructor(
                     }.getOrDefault(false)
                 if (ok) {
                     read(app, id)
-                    // The notification says so (Android shows the reply as sending until it's updated), then goes.
-                    app.getSystemService(NotificationManager::class.java).notify(
-                        TAG,
-                        n,
-                        Notification.Builder(app, channel(app, "low"))
-                            .setSmallIcon(R.drawable.ic_notification)
-                            .setContentTitle("PowOS AI · $agent")
-                            .setContentText("You: $text")
-                            .setTimeoutAfter(4000)
-                            .build(),
-                    )
+                    // The notification says so (Android shows the reply as sending until it's updated), then goes -
+                    // posted after the read (which cancels the mail's notification) on the same queue.
+                    main.post {
+                        app.getSystemService(NotificationManager::class.java).notify(
+                            TAG,
+                            n,
+                            Notification.Builder(app, channel(app, "low"))
+                                .setSmallIcon(R.drawable.ic_notification)
+                                .setContentTitle("PowOS AI · $agent")
+                                .setContentText("You: $text")
+                                .setTimeoutAfter(4000)
+                                .build(),
+                        )
+                    }
                 } else {
                     // Not sent: the mail stays unread, its notification back with what went wrong.
                     main.post {
@@ -154,7 +164,7 @@ class AgentMail private constructor(
     }
 
     companion object {
-        /** The latest mail, newest first (the launcher's PowOS AI page lists it); kept across restarts. */
+        /** The unread mail, newest first (the launcher's PowOS AI page's feed); kept across restarts. */
         val recent = mutableStateListOf<Mail>()
 
         /** Every mail kept (newest first): [recent] shows the first [KEEP_SHOWN]. */
@@ -373,19 +383,52 @@ class AgentMail private constructor(
         /** Mail put in the chat since the app started. */
         private val inChat = HashSet<String>()
 
-        /** [id] read by the user: kept, not posted again. */
+        /**
+         * [id] read by the user (a tap, a reply, a swipe, the feed's dismiss): kept as read, not posted again, its
+         * notification gone, and out of the user's comms inbox - one read state for the shade, the notification, the
+         * PowOS AI page's feed and comms.
+         */
         fun read(
             context: Context,
             id: String,
         ) {
             if (id.isEmpty()) return
+            main.post { markRead(context, listOf(id), fromComms = false) }
+        }
+
+        /** Every unread mail read (the feed's "clear all"). */
+        fun readAll(context: Context) {
             main.post {
-                load(context)
-                val i = store.indexOfFirst { it.id == id }
-                if (i < 0 || store[i].read) return@post
-                store[i] = store[i].copy(read = true)
-                changed()
+                load(context.applicationContext)
+                markRead(context, store.filter { !it.read }.map { it.id }, fromComms = false)
             }
+        }
+
+        /** On the main thread. [fromComms]: comms said so - it needn't be told back. */
+        private fun markRead(
+            context: Context,
+            ids: List<String>,
+            fromComms: Boolean,
+        ) {
+            val app = context.applicationContext
+            load(app)
+            val nm = app.getSystemService(NotificationManager::class.java)
+            val newly = ArrayList<String>()
+            for (id in ids) {
+                val i = store.indexOfFirst { it.id == id }
+                if (i < 0 || store[i].read) continue
+                store[i] = store[i].copy(read = true)
+                nm.cancel(TAG, store[i].notificationId)
+                newly += id
+            }
+            if (newly.isEmpty()) return
+            changed()
+            if (fromComms || !RootedGuest.enabled) return
+            // Out of the user's inbox too (comms ids: the ones it sent; others aren't there and are ignored).
+            Thread({
+                runCatching { RootedGuest.run("powos comms read --agent user ${newly.joinToString(" ") { shellQuote(it) }}") }
+                    .onFailure { Log.w(TAG, "can't mark ${newly.size} read in comms", it) }
+            }, "agent-mail-read").start()
         }
 
         private fun add(mail: Mail) {
@@ -398,7 +441,7 @@ class AgentMail private constructor(
             var read = 0
             var unread = 0
             store.retainAll { if (it.read) ++read <= KEEP_READ else ++unread <= KEEP_UNREAD }
-            val shown = store.take(KEEP_SHOWN)
+            val shown = unread()
             if (recent.toList() != shown) {
                 recent.clear()
                 recent.addAll(shown)
@@ -422,8 +465,11 @@ class AgentMail private constructor(
             }
             store.sortByDescending { it.time }
             recent.clear()
-            recent.addAll(store.take(KEEP_SHOWN))
+            recent.addAll(unread())
         }
+
+        /** What the feed shows: the unread mail, newest first - read is read, wherever it was read. */
+        private fun unread() = store.filter { !it.read }.take(KEEP_SHOWN)
 
         /**
          * Watches [runDir]/agent-mail (the PowOS session's /run/powos-app/agent-mail); mail already there is posted, and
