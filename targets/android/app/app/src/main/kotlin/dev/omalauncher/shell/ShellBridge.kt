@@ -11,6 +11,8 @@ import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.compose.runtime.snapshotFlow
+import dev.omalauncher.PowosAiActivity
+import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +53,9 @@ class ShellBridge(
         scope.launch { runtime.refreshApps() }
         // The home screen changed (here, in the Compose launcher, or a widget file arriving): the page re-reads it.
         scope.launch { snapshotFlow { home.fingerprint() }.drop(1).collect { emit("home.changed", null) } }
+        // PowOS AI's conversation (shared with its own app): every item and the busy flag, as they stream in.
+        PowosAiChat.load(activity.applicationContext)
+        scope.launch { snapshotFlow { aiChat().toString() }.drop(1).collect { emit("ai.changed", JSONObject(it)) } }
     }
 
     @JavascriptInterface
@@ -82,6 +87,9 @@ class ShellBridge(
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))
             "store.get" -> store(a.getString(0)).takeIf { it.isFile }?.readText()?.let { RawJson(it) }
             "store.set" -> store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
+            "ai.chat" -> aiChat()
+            "ai.send" -> PowosAiChat.send(activity.applicationContext, a.getString(0))
+            "ai.open" -> PowosAiActivity.open(activity, null)
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
@@ -131,6 +139,9 @@ class ShellBridge(
         }
         return list
     }
+
+    private fun aiChat() =
+        JSONObject().put("busy", PowosAiChat.busy).put("items", JSONArray(PowosAiChat.items.map { it.json() }))
 
     private fun iconCount() = runtime.androidApps.icons.size + runtime.linuxIcons.size
 

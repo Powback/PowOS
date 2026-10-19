@@ -426,3 +426,58 @@
   color: var(--color-muted);
   background: var(--color-background);
 }
+
+/* PowOS AI's chat (chat.tsx): in the drawer's place, newest by the bar. */
+.chat {
+  grid-column: 1 / -1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 4px 10px 0;
+}
+/* At the bottom while short; margin, not justify-content, so a long chat still scrolls to its top. */
+.chat-head {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--text-small);
+}
+.chat-open {
+  font: inherit;
+  color: var(--color-accent);
+  background: none;
+  border: 0;
+  padding: 4px 0 4px 8px;
+}
+.msg {
+  max-width: 85%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-body);
+  line-height: 1.35;
+  user-select: text;
+}
+.msg.user {
+  align-self: flex-end;
+  background: var(--color-accent);
+  color: var(--color-background);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+}
+.msg.assistant {
+  align-self: flex-start;
+  background: var(--color-surface);
+  border: var(--frame) solid var(--color-border);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+}
+.msg.tool, .msg.note, .msg.ask { font-size: var(--text-small); max-width: 100%; }
+.msg.tool .hint { opacity: 0.7; }
+.msg.tool .ok { color: var(--color-accent); }
+.msg.tool .fail, .msg.note.error { color: var(--color-red); }
+.msg.ask { align-self: flex-end; }

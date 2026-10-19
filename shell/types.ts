@@ -43,6 +43,16 @@ export interface HomeItem {
 
 export interface Home { columns: number; pages: number[]; items: HomeItem[]; }
 
+/** One entry of PowOS AI's chat; a tool's ok is null while it runs. */
+export type ChatItem =
+  | { kind: "user" | "assistant"; text: string }
+  | { kind: "tool"; name: string; hint: string; ok: boolean | null }
+  | { kind: "note"; text: string; error: boolean };
+export interface Chat {
+  busy: boolean;
+  items: ChatItem[];
+}
+
 export interface Bridge {
   /** "android" | "powos" | "mock" */
   host: string;
@@ -88,6 +98,17 @@ export interface Bridge {
     /** The home page on screen (a page number): widgets on it and beside it run their sources. */
     page(page: number): Promise<void>;
   };
+  /**
+   * PowOS AI: the conversation with PowOS's manager, the one its own app (and the desktop's manager widget) shows.
+   * "ai.changed" brings the whole chat ({ busy, items }) as a turn streams in.
+   */
+  ai: {
+    chat(): Promise<Chat>;
+    /** Asks it: one turn, streamed into the chat. */
+    send(text: string): Promise<void>;
+    /** Opens PowOS AI's own app. */
+    open(): Promise<void>;
+  };
   keyboard: {
     show(): Promise<void>;
     hide(): Promise<void>;
@@ -96,7 +117,7 @@ export interface Bridge {
     insets(): Promise<Insets>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets",
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

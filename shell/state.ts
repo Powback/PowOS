@@ -4,7 +4,7 @@
  */
 import { computed, signal } from "@preact/signals";
 import { powos } from "./bridge.ts";
-import type { App, Home, HomeItem } from "./types.ts";
+import type { App, Chat, Home, HomeItem } from "./types.ts";
 
 export const apps = signal<App[]>([]);
 export const byKey = computed(() => new Map(apps.value.map((a) => [a.key, a])));
@@ -50,13 +50,20 @@ export const menu = signal<{ app: App; at: DOMRect } | null>(null);
 export const drawer = signal(0);
 export const query = signal("");
 
+/** PowOS AI's chat, as the host streams it. */
+export const chat = signal<Chat>({ busy: false, items: [] });
+/** Asked something since the drawer opened: the chat stays up (until the search finds apps again). */
+export const chatting = signal(false);
+
 export async function load() {
-  const [list, keys, pins, h] = await Promise.all([
+  const [list, keys, pins, h, c] = await Promise.all([
     powos.apps.list(),
     powos.usage.recent(RECENT_FETCH),
     powos.store.get<string[]>("dock"),
     powos.home.get(),
+    powos.ai.chat(),
   ]);
+  chat.value = c;
   home.value = h;
   apps.value = list;
   recent.value = keys;
@@ -69,6 +76,7 @@ powos.on("apps.changed", async () => {
   apps.value = await powos.apps.list();
   recent.value = await powos.usage.recent(RECENT_FETCH);
 });
+powos.on("ai.changed", (c: Chat) => (chat.value = c));
 powos.on("home.changed", async () => (home.value = await powos.home.get()));
 document.addEventListener("visibilitychange", async () => {
   if (!document.hidden) recent.value = await powos.usage.recent(RECENT_FETCH);
@@ -78,6 +86,7 @@ document.addEventListener("visibilitychange", async () => {
 export function closeDrawer() {
   drawer.value = 0;
   query.value = "";
+  chatting.value = false;
   (document.activeElement as HTMLElement | null)?.blur();
   powos.keyboard.hide();
 }
@@ -110,6 +119,15 @@ export async function launch(key: string) {
   await powos.apps.launch(key);
   closeDrawer();
   recent.value = await powos.usage.recent(RECENT_FETCH);
+}
+
+/** Asks PowOS AI: the field clears for the next question, the chat shows the turn streaming in. */
+export function ask(text: string) {
+  const t = text.trim();
+  if (!t) return;
+  chatting.value = true;
+  query.value = "";
+  powos.ai.send(t);
 }
 
 export function setDocked(key: string, on: boolean) {

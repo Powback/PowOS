@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { App, Bridge, Cell, Home, HomeItem } from "./types.ts";
+import type { App, Bridge, Cell, Chat, Home, HomeItem } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -75,6 +75,11 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       get: <T>(name: string) => call<T | null>("store.get", name),
       set: (name, value) => call("store.set", name, value),
     },
+    ai: {
+      chat: () => call<Chat>("ai.chat"),
+      send: (text) => call("ai.send", text),
+      open: () => call("ai.open"),
+    },
     keyboard: { show: () => call("keyboard.show"), hide: () => call("keyboard.hide") },
     system: { insets: () => call("system.insets") },
     on: (event, handler) => events.on(event, handler),
@@ -106,6 +111,7 @@ function mock(): Bridge {
   const recent = ["a:chrome", "l:konsole", "a:spotify", "a:signal", "l:dolphin", "a:youtube"];
   const data = (name: string) => `powos-shell:${name}`;
   let samples: Promise<Record<string, unknown>> | null = null;
+  let chat: Chat = { busy: false, items: [] };
   const pin = (name: string, x: number, y: number): HomeItem => {
     const a = apps.find((app) => app.label === name)!;
     return { key: "app:" + a.key.slice(2), kind: "app", page: 1, cell: { x, y, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: [1, 1], label: a.label, app: a.key };
@@ -199,6 +205,20 @@ function mock(): Bridge {
       size: async () => {},
       canvas: async () => {},
       page: async () => {},
+    },
+    // A stand-in that answers after a tool call, as a streamed turn does.
+    ai: {
+      chat: async () => chat,
+      send: async (text) => {
+        const step = (next: Partial<Chat>) => events.emit("ai.changed", (chat = { ...chat, ...next }));
+        step({ busy: true, items: [...chat.items, { kind: "user", text }] });
+        await new Promise((r) => setTimeout(r, 400));
+        step({ items: [...chat.items, { kind: "tool", name: "Bash", hint: "powos status", ok: null }] });
+        await new Promise((r) => setTimeout(r, 600));
+        const items = chat.items.slice(0, -1);
+        step({ busy: false, items: [...items, { kind: "tool", name: "Bash", hint: "powos status", ok: true }, { kind: "assistant", text: `(mock) You asked: ${text}` }] });
+      },
+      open: async () => console.log("[mock] open PowOS AI"),
     },
     keyboard: { show: async () => {}, hide: async () => {} },
     system: { insets: async () => ({ top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 }) },

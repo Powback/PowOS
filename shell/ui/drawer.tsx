@@ -6,8 +6,9 @@
 import { useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { AppCell } from "./apps.tsx";
+import { ChatView } from "./chat.tsx";
 import { drawerOpen } from "./gesture.ts";
-import { apps, query } from "../state.ts";
+import { apps, chatting, query } from "../state.ts";
 import type { App } from "../types.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
@@ -90,34 +91,40 @@ export function Drawer() {
     if (el) list.current!.scrollTop = el.offsetTop - list.current!.offsetTop;
   };
   const searching = query.value.trim() !== "";
+  // No app by that name: it's a question for PowOS AI. Asked, the chat stays until the search finds apps again.
+  const asking = searching ? matches.value.length === 0 : chatting.value;
   const open = drawerOpen.value;
   return (
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
     <div class={`drawer ${open ? "shown" : ""}`} aria-hidden={!open}>
-      <div class={`drawer-list ${searching ? "results" : ""}`} ref={list}>
-        {searching ? (
-          // By the bar, bottom-up: the best match nearest to it (shell.css .results).
-          <div class="grid">
-            {matches.value.map((app) => (
-              <AppCell key={app.key} app={app} draggable />
-            ))}
-          </div>
-        ) : (
-          sections.value.map(([letter, group]) => (
-            <section key={letter}>
-              <h2 class="heading muted" data-letter={letter}>
-                {letter}
-              </h2>
-              <div class="grid">
-                {group.map((app) => (
-                  <AppCell key={app.key} app={app} draggable />
-                ))}
-              </div>
-            </section>
-          ))
-        )}
-      </div>
-      {!searching && <LetterBar onPick={jump} />}
+      {asking ? (
+        <ChatView />
+      ) : (
+        <div class={`drawer-list ${searching ? "results" : ""}`} ref={list}>
+          {searching ? (
+            // By the bar, bottom-up: the best match nearest to it (shell.css .results).
+            <div class="grid">
+              {matches.value.map((app) => (
+                <AppCell key={app.key} app={app} draggable />
+              ))}
+            </div>
+          ) : (
+            sections.value.map(([letter, group]) => (
+              <section key={letter}>
+                <h2 class="heading muted" data-letter={letter}>
+                  {letter}
+                </h2>
+                <div class="grid">
+                  {group.map((app) => (
+                    <AppCell key={app.key} app={app} draggable />
+                  ))}
+                </div>
+              </section>
+            ))
+          )}
+        </div>
+      )}
+      {!searching && !asking && <LetterBar onPick={jump} />}
     </div>
   );
 }
