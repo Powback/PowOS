@@ -128,6 +128,12 @@ The full round-trip an agent can drive to fix / improve PowOS itself:
    otherwise.
 
 Rules for agents driving this loop:
+- **Shared checkouts: commit only your own paths.** Several agents often share one tree and one git index. Never
+  `git commit -a`, never a bare `git commit` after someone else may have staged, never `git add -A` / `git add .`.
+  Commit by pathspec (`git commit -m "..." -- <your files>`, which ignores other staged entries) or with a private
+  index (`GIT_INDEX_FILE=$(mktemp) git read-tree HEAD && git add <files> && git commit`); check
+  `git diff --cached --stat` first. Never reset/checkout/stash files you didn't change. `powos self push` takes
+  `-- <paths>` for this and refuses a whole-tree commit when others' changes are already staged.
 - **NEVER `git push --force`** unless a) an isolated branch, b) the user
   explicitly asks, c) confirms twice. Master is atomic-published — a
   force push replaces the running channel for every user.
