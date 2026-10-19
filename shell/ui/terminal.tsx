@@ -218,6 +218,11 @@ class Session {
     if (this.views[this.views.length - 1] !== view) return;
     this.holder.style.inset = `${style.pad}px`;
     this.holder.style.bottom = `${style.pad + view.cut}px`;
+    // HACK: the fit addon keeps a scrollbar's width (14px) free at the right, always - a phone has no scrollbar (a
+    // drag scrolls), so that was an empty strip down the tile. The holder reaches that far past the view (.term clips
+    // it), so the columns fill the width as the Compose terminal's do. Real fix: an addon option for the reserve (or
+    // fitting from the renderer's cell size ourselves once xterm exposes it).
+    this.holder.style.right = `${style.pad - FIT_SCROLLBAR}px`;
     this.term.options.fontSize = view.textSize != null ? view.textSize * style.fontScale : style.size;
     this.term.options.fontFamily = await fontFamily(style);
     this.refit();
@@ -234,6 +239,9 @@ class Session {
     this.show();
   }
 }
+
+/** What the fit addon leaves free for a scrollbar (addon-fit 0.11: overviewRuler.width, else 14). */
+const FIT_SCROLLBAR = 14;
 
 const sessions = new Map<string, Session>();
 
