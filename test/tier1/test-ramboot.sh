@@ -318,6 +318,24 @@ check "unknown subcommand exits 1" '[[ $? -eq 1 ]]'
 cmd_ramboot enable --bogus-opt >/dev/null 2>&1
 check "unknown option exits 1"     '[[ $? -eq 1 ]]'
 
+# ── a plugged-in stick does not make an installed box the USB model ──
+echo "== POWOS-DATA counts only on the boot disk =="
+reset_globals
+RB_STATE_FILE="$TMP/does-not-exist"
+rb_cmdline() { echo "ro quiet root=UUID=x ostree=/ostree/boot.0/x"; }
+rb_have_powos_data() { return 0; }
+findmnt() { echo "/dev/nvme9n1p3[/root]"; }
+lsblk() { case "$3" in /dev/sdz5) echo sdz ;; /dev/nvme9n1p3) echo nvme9n1 ;; /dev/nvme9n1p5) echo nvme9n1 ;; esac; }
+blkid() { echo /dev/sdz5; }
+check "stick on another disk: not on the boot disk" '! rb_powos_data_on_boot_disk'
+check "stick on another disk: not the USB model"    '! rb_is_usb_model'
+blkid() { echo /dev/nvme9n1p5; }
+check "POWOS-DATA on the boot disk: on it"          'rb_powos_data_on_boot_disk'
+check "POWOS-DATA on the boot disk: the USB model"  'rb_is_usb_model'
+blkid() { return 2; }
+check "unresolvable: keeps the historical answer"   'rb_powos_data_on_boot_disk'
+unset -f rb_cmdline rb_have_powos_data findmnt lsblk blkid
+
 # ── Summary ───────────────────────────────────────────────────────
 echo
 echo "== Results: $PASS passed, $FAIL failed =="

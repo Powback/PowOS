@@ -111,6 +111,26 @@ rb_os_size_kib() {
 # Is there a POWOS-DATA partition anywhere (i.e. the USB live model)?
 rb_have_powos_data() { blkid -L POWOS-DATA >/dev/null 2>&1; }
 
+# Is the POWOS-DATA partition on the disk this system booted from? A PowOS
+# stick plugged into an INSTALLED box has one too, and its mere presence used to
+# make the box read as the USB-live model -- so `powos upgrade` refused with
+# "USB not connected" on a desktop whose OS lives on its own NVMe. Compare the
+# parent disks of POWOS-DATA and of the booted root (/sysroot on a composefs
+# deployment, / otherwise). When either side cannot be resolved -- no blkid, a
+# test fixture, an exotic root -- answer yes, which keeps the historical
+# behaviour rather than inventing a new failure.
+rb_powos_data_on_boot_disk() {
+    local data root
+    data=$(blkid -L POWOS-DATA 2>/dev/null) || return 0
+    root=$(findmnt -no SOURCE /sysroot 2>/dev/null || findmnt -no SOURCE / 2>/dev/null)
+    root=${root%%\[*}
+    local dd rd
+    dd=$(lsblk -no PKNAME "$data" 2>/dev/null | head -1)
+    rd=$(lsblk -no PKNAME "$root" 2>/dev/null | head -1)
+    [[ -n "$dd" && -n "$rd" ]] || return 0
+    [[ "$dd" == "$rd" ]]
+}
+
 # Is this an installed bootc/composefs system (not the USB model)?
 rb_is_installed() {
     [[ -e /run/ostree-booted ]] && return 0
@@ -263,7 +283,7 @@ rb_active_mode() {
 rb_is_usb_model() {
     [[ "$(rb_active_mode)" == "usb" ]] && return 0
     [[ "$(rb_mode_from_cmdline "$(rb_cmdline)")" == "usb" ]] && return 0
-    rb_have_powos_data && return 0
+    rb_have_powos_data && rb_powos_data_on_boot_disk && return 0
     return 1
 }
 
