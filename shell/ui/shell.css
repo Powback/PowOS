@@ -424,13 +424,6 @@
   color: var(--color-foreground);
 }
 .owl-box > * { grid-area: 1 / 1; }
-.owl-terminal {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-muted);
-  background: var(--color-background);
-}
 
 /* PowOS AI's chat (chat.tsx): in the drawer's place, newest by the bar. */
 .chat {

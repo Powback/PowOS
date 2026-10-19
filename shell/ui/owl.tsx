@@ -8,6 +8,8 @@ import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { signal, type Signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { carry, selected } from "../state.ts";
+import { takeTap, tapTaken } from "./taps.ts";
+import { TerminalView } from "./terminal.tsx";
 import type { Cell, OwlNode, OwlOp, OwlRoot } from "../types.ts";
 
 type Style = JSX.CSSProperties;
@@ -106,9 +108,9 @@ function handlers(node: OwlNode, fire: Ctx["fire"]) {
     onPointerUp: (e: PointerEvent) => {
       const f = from;
       from = last = null;
-      if (!tap || !f || carry.value || selected.value) return;
+      if (!tap || !f || carry.value || selected.value || tapTaken(e)) return;
       if (performance.now() - f.t > TAP_MS || Math.hypot(e.clientX - f.x, e.clientY - f.y) >= 10) return;
-      e.stopPropagation(); // the tile's tap (nothing, for a widget) doesn't also run
+      takeTap(e); // an onTap further out doesn't also run
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       fire(node.id, "onTap", [e.clientX - r.left, e.clientY - r.top]);
     },
@@ -266,13 +268,25 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
       );
     case "Input":
       return <div class="muted" style={{ font: "13px var(--font)", ...style }}>{text(p.placeholder ?? p.text)}</div>;
-    case "Terminal":
-      // Phase 5: xterm.js over the pty bridge.
+    case "Terminal": {
+      // A command still loading (null) waits for its value, rather than starting a shell and restarting it (Render.kt).
+      if ("command" in p && p.command == null) return null;
+      // Terminals naming one session are one shell (a tile and its screen); else each node is its own.
       return (
-        <div {...on} class="owl-terminal" style={{ ...full, ...style }}>
-          terminal
+        <div {...on} style={{ ...full, ...style }}>
+          <TerminalView
+            id={`${ctx.key}#${p.session != null ? `session:${text(p.session)}` : node.id}`}
+            owner={ctx.key}
+            command={p.command != null ? text(p.command) : null}
+            interactive={p.interactive !== false}
+            fontSize={typeof p.fontSize === "number" ? p.fontSize : null}
+            textSize={typeof p.textSize === "number" ? p.textSize : null}
+            focus={p.focus === true}
+            style={{ width: "100%", height: "100%" }}
+          />
         </div>
       );
+    }
     default:
       return (
         <div style={style}>

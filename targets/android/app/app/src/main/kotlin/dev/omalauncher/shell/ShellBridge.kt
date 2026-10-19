@@ -1,6 +1,8 @@
 package dev.omalauncher.shell
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.os.Handler
@@ -14,6 +16,7 @@ import androidx.compose.runtime.snapshotFlow
 import dev.omalauncher.PowosAiActivity
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
+import dev.omalauncher.ui.PtyTerminal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,6 +45,7 @@ class ShellBridge(
     private val data get() = File(activity.filesDir, "shell-data").apply { mkdirs() }
     private val home = ShellHome(runtime)
     private val widgets = ShellWidgets(runtime, scope, ::emit)
+    private val terminals = ShellTerminals(runtime, scope, ::emit)
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     init {
@@ -111,6 +115,13 @@ class ShellBridge(
             "widgets.size" -> widgets.size(a.getString(0), a.getInt(1), a.getInt(2), a.getDouble(3), a.getDouble(4))
             "widgets.canvas" -> widgets.canvas(a.getString(0), a.getString(1), a.getDouble(2), a.getDouble(3))
             "widgets.page" -> widgets.page(a.getInt(0))
+            "term.open" -> terminals.open(a.getString(0), a.optStringOrNull(1), a.optStringOrNull(2), a.getInt(3), a.getInt(4), a.optBoolean(5))
+            "term.write" -> terminals.write(a.getString(0), a.getString(1))
+            "term.resize" -> terminals.resize(a.getString(0), a.getInt(1), a.getInt(2))
+            "term.close" -> terminals.close(a.getString(0))
+            "term.style" -> terminalStyle(if (a.isNull(0)) null else a.getDouble(0))
+            "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(activity)?.toString()
+            "clipboard.write" -> clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
             else -> throw IllegalArgumentException("no such call: $method")
         }
 
@@ -181,6 +192,27 @@ class ShellBridge(
         }
     }
 
+    /**
+     * How the launcher's terminals look (PtyTerminal): text of [points] (null: the terminal text size) in CSS px, the
+     * pad around it, Android's font scale (for a widget's textSize in sp), and the terminal font family, whose file
+     * ShellActivity serves once PowOS's copy is fetched ("font": false until then; "term.style" says when it's there).
+     */
+    private fun terminalStyle(points: Double?): JSONObject {
+        val font = runtime.terminalFont
+        val metrics = activity.resources.displayMetrics
+        val file = PtyTerminal.fontFile(activity, font.family) { emit("term.style", null) }
+        return JSONObject()
+            .put("size", font.pixels(points ?: font.size) / metrics.density)
+            .put("pad", font.padPixels / metrics.density)
+            .put("fontScale", activity.resources.configuration.fontScale)
+            .put("family", font.family)
+            .put("font", file != null)
+    }
+
+    private fun clipboard() = activity.getSystemService(ClipboardManager::class.java)
+
+    private fun JSONArray.optStringOrNull(i: Int) = if (isNull(i)) null else getString(i)
+
     /** The window's insets in CSS px, sent as "system.insets" when they change (the keyboard's included). */
     fun insets(w: WindowInsets) {
         val d = activity.resources.displayMetrics.density
@@ -227,7 +259,10 @@ class ShellBridge(
 
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
-    fun close() = scope.cancel()
+    fun close() {
+        terminals.closeAll()
+        scope.cancel()
+    }
 
     /** Stored JSON, passed through as it is. */
     private class RawJson(

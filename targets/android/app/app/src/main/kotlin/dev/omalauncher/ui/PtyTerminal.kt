@@ -306,18 +306,18 @@ class PtyTerminal(
 
     override fun codePoint(cp: Int) = session.writeCodePoint(KEY_LEFTALT in held, cp)
 
-    private companion object {
-        const val TAG = "PtyTerminal"
+    companion object {
+        private const val TAG = "PtyTerminal"
 
         /** Scrollback; tmux keeps its own, this is for a plain shell. */
-        const val TRANSCRIPT_ROWS = 2000
+        private const val TRANSCRIPT_ROWS = 2000
 
-        const val KEY_LEFTSHIFT = 42
-        const val KEY_RIGHTSHIFT = 54
-        const val KEY_LEFTCTRL = 29
-        const val KEY_RIGHTCTRL = 97
-        const val KEY_LEFTALT = 56
-        const val KEY_RIGHTALT = 100
+        private const val KEY_LEFTSHIFT = 42
+        private const val KEY_RIGHTSHIFT = 54
+        private const val KEY_LEFTCTRL = 29
+        private const val KEY_RIGHTCTRL = 97
+        private const val KEY_LEFTALT = 56
+        private const val KEY_RIGHTALT = 100
 
         /** Typefaces by family, with the Nerd Font symbols tmux's and the prompt's icons use as fallback, as in foot. */
         private val typefaces = HashMap<String, Typeface>()
@@ -326,9 +326,8 @@ class PtyTerminal(
         private val fetching = HashSet<String>()
 
         /**
-         * [family] as an Android typeface. Its font file is PowOS's, out of the app's reach (rooted mode: /data/powos), so
-         * the first time it's looked up with PowOS's fontconfig and copied into the app's files, in the background:
-         * meanwhile, and if that fails, the system's monospace font. [onLoaded] runs (main thread) once it's there.
+         * [family] as an Android typeface: its [fontFile], else (meanwhile, and if that fails) the system's monospace
+         * font. [onLoaded] runs (main thread) once the file is there.
          */
         fun typeface(
             context: Context,
@@ -336,13 +335,28 @@ class PtyTerminal(
             onLoaded: () -> Unit,
         ): Typeface {
             typefaces[family]?.let { return it }
-            val file = java.io.File(context.filesDir, "fonts/" + family.replace(Regex("[^A-Za-z0-9]+"), "-") + ".font")
-            if (file.length() > 0) {
+            fontFile(context, family, onLoaded)?.let { file ->
                 withSymbols(context, runCatching { Font.Builder(file).build() }.getOrNull())?.let {
                     typefaces[family] = it
                     return it
                 }
             }
+            return withSymbols(context, null) ?: Typeface.MONOSPACE
+        }
+
+        /**
+         * [family]'s font file, or null while it isn't there yet. The file is PowOS's, out of the app's reach (rooted
+         * mode: /data/powos), so the first time it's looked up with PowOS's fontconfig and copied into the app's
+         * files, in the background; [onLoaded] runs (main thread) once it's there. The web shell's terminals use it
+         * too (ShellActivity serves it).
+         */
+        fun fontFile(
+            context: Context,
+            family: String,
+            onLoaded: () -> Unit,
+        ): java.io.File? {
+            val file = java.io.File(context.filesDir, "fonts/" + family.replace(Regex("[^A-Za-z0-9]+"), "-") + ".font")
+            if (file.length() > 0) return file
             if (RootedGuest.enabled && fetching.add(family)) {
                 val main = android.os.Handler(android.os.Looper.getMainLooper())
                 Thread {
@@ -359,7 +373,7 @@ class PtyTerminal(
                     }
                 }.start()
             }
-            return withSymbols(context, null) ?: Typeface.MONOSPACE
+            return null
         }
 
         /** [font] (else the system's monospace font, Droid Sans Mono), then the Nerd Font symbols. */

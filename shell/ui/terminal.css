@@ -1,0 +1,85 @@
+/*
+ * Terminals (terminal.tsx): xterm.js in a view, the extra keys over the soft keyboard, the home screen lifted so a
+ * focused terminal clears them. xterm's own stylesheet (vendor/xterm.css) comes first.
+ */
+:root {
+  /* The terminal's colors (Omarchy's colors.toml: foreground, background, cursor, color0-15), as foot gets them. */
+  --term-background: var(--color-background);
+  --term-foreground: var(--color-foreground);
+  --term-cursor: var(--color-foreground);
+  --term-selection: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  --term-color0: #090618;
+  --term-color1: #c34043;
+  --term-color2: #76946a;
+  --term-color3: #c0a36e;
+  --term-color4: #7e9cd8;
+  --term-color5: #957fb8;
+  --term-color6: #6a9589;
+  --term-color7: #c8c093;
+  --term-color8: #727169;
+  --term-color9: #e82424;
+  --term-color10: #98bb6c;
+  --term-color11: #e6c384;
+  --term-color12: #7fb4ca;
+  --term-color13: #938aa9;
+  --term-color14: #7aa89f;
+  --term-color15: #dcd7ba;
+}
+
+.term {
+  position: relative;
+  overflow: hidden;
+  background: var(--term-background);
+  border-radius: inherit;
+}
+.term-screen { position: absolute; inset: 0; }
+/* xterm's parent: inset by the pad (set from the host's terminal style), its bottom cut while the keyboard needs it. */
+.term-holder { position: absolute; inset: 0; }
+.term-holder .xterm { height: 100%; }
+/* Under the last row, where the rows don't fill the view: the terminal's background, not xterm's black. */
+.term-holder .xterm .xterm-viewport { background-color: var(--term-background); }
+
+/* Over the terminal while it isn't focused: its touches are the tile's (and the widget's taps). */
+.term-cover { position: absolute; inset: 0; }
+.term-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-muted);
+  font: var(--text-small) var(--font);
+  background: var(--term-background);
+}
+
+/* Focused: the home screen keeps its size (the grid doesn't squeeze over the keyboard), lifted instead. */
+html.term-focus .home { padding-bottom: var(--inset-bottom, env(safe-area-inset-bottom)); }
+html.term-focus .stage { transform: translateY(calc(-1 * var(--term-lift, 0px))); }
+html.term-focus :is(.bar, .dock, .launcher, .launcher-frame) { visibility: hidden; }
+.widget-face:has(.term.focused) { border-color: var(--color-accent); }
+
+/* The extra keys (ExtraKeys.kt): two rows of keycaps docked above the keyboard, a keyboard key at either end. */
+.term-extra-host { position: fixed; z-index: 20; left: 0; right: 0; bottom: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)); }
+.term-extra {
+  display: flex;
+  gap: 3px;
+  margin: 0 6px 6px;
+  padding: 3px;
+  touch-action: none;
+}
+.term-rows { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.term-row { display: flex; gap: 3px; }
+.term-key {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  font: var(--text-small) var(--font);
+  touch-action: none;
+}
+.term-key:active { background: var(--color-border); }
+.term-key.sticky.on { color: var(--color-accent); }
+.term-key.sticky.locked { background: var(--color-accent); color: var(--color-background); }
+.term-key.keyboard { flex: 0 0 40px; height: auto; display: grid; place-items: center; }
+.term-key.keyboard svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.term-arrow { display: inline-block; font-size: 16px; line-height: 1; }

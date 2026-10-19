@@ -4,3 +4,6 @@ add_library(wlbridge SHARED wlbridge.c)
 # Pixel copies and compositing run per frame; debug builds would otherwise use -O0.
 target_compile_options(wlbridge PRIVATE -O3 -Wall)
 target_link_libraries(wlbridge android log)
+# The web shell's terminals: processes on pseudoterminals (shell/Pty.kt).
+add_library(pty SHARED pty.c)
+target_compile_options(pty PRIVATE -O2 -Wall)

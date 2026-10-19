@@ -16,6 +16,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.ui.graphics.asAndroidBitmap
 import dev.omalauncher.App
+import dev.omalauncher.R
+import dev.omalauncher.ui.PtyTerminal
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -161,6 +163,7 @@ class ShellActivity : Activity() {
                 val rest = path.removePrefix("_wimg/")
                 return widgetImage(URLDecoder.decode(rest.substringBefore('/'), "UTF-8"), URLDecoder.decode(rest.substringAfter('/'), "UTF-8"))
             }
+            if (path.startsWith("_font/")) return font(path.removePrefix("_font/"))
             if (".." in path.split('/')) return notFound()
             val stream = open(path) ?: return notFound()
             return WebResourceResponse(mime(path), "utf-8", stream).apply {
@@ -208,6 +211,21 @@ class ShellActivity : Activity() {
         val bitmap = inst.image(src) ?: return notFound()
         val png = ByteArrayOutputStream().also { bitmap.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
         return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
+    }
+
+    /**
+     * The terminal font (PtyTerminal's copy of PowOS's file for the family named, "terminal/<family>") or the Nerd
+     * Font symbols ("symbols"), for the page's terminals.
+     */
+    private fun font(name: String): WebResourceResponse {
+        val stream =
+            when {
+                name == "symbols" -> resources.openRawResource(R.font.nerd_symbols)
+                name.startsWith("terminal/") ->
+                    PtyTerminal.fontFile(this, URLDecoder.decode(name.removePrefix("terminal/"), "UTF-8")) {}?.inputStream()
+                else -> null
+            } ?: return notFound()
+        return WebResourceResponse("font/ttf", null, stream).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600", "Access-Control-Allow-Origin" to ORIGIN) }
     }
 
     private fun notFound() = WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)))

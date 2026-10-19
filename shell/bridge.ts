@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { App, Bridge, Cell, Chat, Home, HomeItem } from "./types.ts";
+import type { App, Bridge, Cell, Chat, Home, HomeItem, TermState } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -80,6 +80,14 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       send: (text) => call("ai.send", text),
       open: () => call("ai.open"),
     },
+    term: {
+      open: (id, owner, command, cols, rows, restart) => call<TermState>("term.open", id, owner, command, cols, rows, !!restart),
+      write: (id, data) => call("term.write", id, data),
+      resize: (id, cols, rows) => call("term.resize", id, cols, rows),
+      close: (id) => call("term.close", id),
+      style: (points) => call("term.style", points),
+    },
+    clipboard: { read: () => call<string | null>("clipboard.read"), write: (text) => call("clipboard.write", text) },
     keyboard: { show: () => call("keyboard.show"), hide: () => call("keyboard.hide") },
     system: { insets: () => call("system.insets") },
     on: (event, handler) => events.on(event, handler),
@@ -126,6 +134,8 @@ function mock(): Bridge {
       pin("Signal", 4, 2),
       pin("Spotify", 5, 2),
       { key: "monitor.owl", kind: "widget", page: 2, cell: { x: 0, y: 0, w: 4, h: 3 }, resizable: true, minSize: [2, 2], size: [4, 3], name: "Monitor" },
+      { key: "glance.owl", kind: "widget", page: 2, cell: { x: 4, y: 0, w: 2, h: 3 }, resizable: true, minSize: [2, 2], size: [2, 3], name: "Glance" },
+      { key: "terminal.owl", kind: "widget", page: 2, cell: { x: 0, y: 3, w: 6, h: 4 }, resizable: true, minSize: [2, 2], size: [6, 4], name: "Terminal" },
     ],
   };
   const changed = () => {
@@ -198,7 +208,7 @@ function mock(): Bridge {
     widgets: {
       watch: async (key, screen) => {
         samples ??= fetch("./dev/sample-trees.json").then((r) => r.json()).catch(() => ({}));
-        events.emit("widget.tree", { key, screen: !!screen, tree: (await samples)[key] ?? null });
+        events.emit("widget.tree", { key, screen: !!screen, tree: (await samples)[key] ?? terminalTrees[key] ?? null });
       },
       unwatch: async () => {},
       fire: async (key, _screen, id, name, args) => console.log("[mock] fire", key, id, name, args),
@@ -220,9 +230,103 @@ function mock(): Bridge {
       },
       open: async () => console.log("[mock] open PowOS AI"),
     },
+    term: mockTerm(events),
+    clipboard: {
+      read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
+      write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
+    },
     keyboard: { show: async () => {}, hide: async () => {} },
     system: { insets: async () => ({ top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 }) },
     on: (event, handler) => events.on(event, handler),
+  };
+}
+
+/** The mock's terminal widgets: a shell to type in, and one only shown (its taps are the widget's). */
+const terminalTrees: Record<string, unknown> = {
+  "terminal.owl": { k: "Root", id: "r", padding: 0, c: [{ k: "Terminal", id: "r.0", p: { session: "main" } }] },
+  "glance.owl": {
+    k: "Root",
+    id: "r",
+    padding: 0,
+    c: [{ k: "Terminal", id: "r.0", p: { command: "seq 40", interactive: false, textSize: 9 }, h: ["onTap"] }],
+  },
+};
+
+/**
+ * Terminals for the mock: a tiny line-editing shell instead of a pty (echo, seq, size, colors, mouse, exit), with the host's
+ * protocol - base64 both ways, output offsets, runs - so the page's terminal code runs as on the phone.
+ */
+function mockTerm(events: Events): Bridge["term"] {
+  const utf8 = new TextEncoder();
+  const b64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
+  const unb64 = (s: string) => new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)));
+  interface Shell { run: number; out: number[]; line: string; cols: number; rows: number; code: number | null; }
+  const shells = new Map<string, Shell>();
+  let runs = 0;
+  const state = (sh: Shell): TermState => ({ running: sh.code == null, code: sh.code, run: sh.run, history: b64(Uint8Array.from(sh.out)), end: sh.out.length });
+  const print = (id: string, sh: Shell, text: string) => {
+    const bytes = utf8.encode(text);
+    sh.out.push(...bytes);
+    const end = sh.out.length;
+    setTimeout(() => events.emit("term.data", { id, run: sh.run, data: b64(bytes), end }), 5);
+  };
+  const prompt = "\x1b[32mmock\x1b[0m:\x1b[34m~\x1b[0m$ ";
+  const exec = (id: string, sh: Shell, line: string) => {
+    const [cmd, ...args] = line.trim().split(/\s+/);
+    if (cmd === "exit") {
+      sh.code = Number(args[0] ?? 0) || 0;
+      setTimeout(() => events.emit("term.exit", { id, run: sh.run, code: sh.code }), 10);
+      return;
+    }
+    if (cmd === "echo") print(id, sh, args.join(" ") + "\r\n");
+    else if (cmd === "seq") for (let i = 1; i <= Number(args[0] ?? 10); i++) print(id, sh, `${i}\r\n`);
+    else if (cmd === "size") print(id, sh, `${sh.cols}x${sh.rows}\r\n`);
+    else if (cmd === "colors") print(id, sh, Array.from({ length: 16 }, (_, i) => `\x1b[${i < 8 ? 40 + i : 92 + i}m ${i.toString(16)} `).join("") + "\x1b[0m\r\n");
+    // tmux's mouse: reports in the SGR encoding; "mouse off" ends it.
+    else if (cmd === "mouse") print(id, sh, args[0] === "off" ? "\x1b[?1000l\x1b[?1006l" : "\x1b[?1000h\x1b[?1006h");
+    else if (cmd) print(id, sh, `${cmd}: not in the mock (echo, seq N, size, colors, mouse [off], exit N)\r\n`);
+    print(id, sh, prompt);
+  };
+  return {
+    open: async (id, _owner, command, cols, rows, restart) => {
+      let sh = shells.get(id);
+      if (!sh || (restart && sh.code != null)) {
+        sh = { run: ++runs, out: [], line: "", cols, rows, code: null };
+        shells.set(id, sh);
+        print(id, sh, `mock terminal \x1b[2m(${command ?? "login shell"})\x1b[0m\r\n` + prompt);
+      }
+      return state(sh);
+    },
+    write: async (id, data) => {
+      const sh = shells.get(id);
+      if (!sh || sh.code != null) return;
+      // Keys that are escape sequences (arrows, mouse reports) do nothing here.
+      for (const ch of unb64(data).replace(/\x1b(\[[\d;?<]*[ -\/]*[@-~]|O.)?/g, "")) {
+        if (ch === "\r") {
+          print(id, sh, "\r\n");
+          const line = sh.line;
+          sh.line = "";
+          exec(id, sh, line);
+        } else if (ch === "\x7f") {
+          if (sh.line) {
+            sh.line = [...sh.line].slice(0, -1).join("");
+            print(id, sh, "\b \b");
+          }
+        } else if (ch === "\x03") {
+          sh.line = "";
+          print(id, sh, "^C\r\n" + prompt);
+        } else if (ch >= " ") {
+          sh.line += ch;
+          print(id, sh, ch);
+        }
+      }
+    },
+    resize: async (id, cols, rows) => {
+      const sh = shells.get(id);
+      if (sh) Object.assign(sh, { cols, rows });
+    },
+    close: async (id) => void shells.delete(id),
+    style: async () => ({ size: 13, pad: 6, fontScale: 1, family: "JetBrainsMono Nerd Font", font: false }),
   };
 }
 

@@ -109,6 +109,27 @@ export interface Bridge {
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
   };
+  /**
+   * Terminals: a process on a pty, by an id the page picks (views naming one id share it). Bytes are base64 both ways.
+   * Output comes as "term.data" ({ id, run, data, end }: [end] the offset after it in the run's output) and its end as
+   * "term.exit" ({ id, run, code }); "term.style" says the style changed (the terminal font arrived).
+   */
+  term: {
+    /**
+     * Starts [id] unless it runs ([restart]: also if it ended), running [command] (null: PowOS's tmux picker, or a
+     * login shell); [owner] is the widget it ends with. Answers its state, with what it wrote lately to start from.
+     */
+    open(id: string, owner: string | null, command: string | null, cols: number, rows: number, restart?: boolean): Promise<TermState>;
+    write(id: string, data: string): Promise<void>;
+    resize(id: string, cols: number, rows: number): Promise<void>;
+    close(id: string): Promise<void>;
+    /** How terminals look: the launcher's terminal font, at [points] (null: the terminal text size). */
+    style(points: number | null): Promise<TermStyle>;
+  };
+  clipboard: {
+    read(): Promise<string | null>;
+    write(text: string): Promise<void>;
+  };
   keyboard: {
     show(): Promise<void>;
     hide(): Promise<void>;
@@ -123,6 +144,27 @@ export interface Bridge {
   on(event: string, handler: (data: any) => void): () => void;
 }
 
+
+export interface TermState {
+  running: boolean;
+  /** The exit status once it ended (-signal if a signal ended it). */
+  code: number | null;
+  /** Which start of [id] this is: events of an earlier one are stale. */
+  run: number;
+  /** Its latest output (base64), up to [end], the offset after it. */
+  history: string;
+  end: number;
+}
+
+export interface TermStyle {
+  /** Text size, CSS px; the pad around the text, CSS px; Android's font scale (a widget's textSize is in sp). */
+  size: number;
+  pad: number;
+  fontScale: number;
+  family: string;
+  /** The family's file is there (/_font/terminal/<family>); the Nerd Font symbols are at /_font/symbols. */
+  font: boolean;
+}
 
 /** A widget's node tree (WidgetTree.kt): props evaluated, colors as CSS, a Canvas's drawing as ops. */
 export interface OwlNode {
