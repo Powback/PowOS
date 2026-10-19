@@ -57,6 +57,32 @@ object RootedGuest {
         return process.waitFor()
     }
 
+    /**
+     * Opens a PowOS app like a phone app: its window as its own Android task (session/powos-open-task - KWin exports
+     * the window, docs/powos-window-tasks.md), the app's existing window if it has one. [showDesktop] runs when it
+     * opens on the PowOS desktop instead (no window tasks yet, a window KWin doesn't export, or a PowOS without
+     * powos-open-task - rooted.sh deploy installs it). Blocking for as long as the app writes output, like [run].
+     */
+    fun openAsTask(
+        appId: String,
+        wmClass: String?,
+        exec: String,
+        showDesktop: () -> Unit,
+        onLine: (String) -> Unit = {},
+    ): Int {
+        val ids = listOfNotNull(appId, wmClass).filter { it.isNotBlank() }.joinToString("") { " --app-id " + shellQuote(it) }
+        val command =
+            "if command -v powos-open-task >/dev/null; then exec powos-open-task$ids -- ${shellQuote(exec)}; " +
+                "else echo '$OPEN_DESKTOP'; exec $exec; fi"
+        return run(command) { line ->
+            if (line == OPEN_DESKTOP) showDesktop()
+            onLine(line)
+        }
+    }
+
+    /** powos-open-task's status line: the app opens on the desktop, not as a task. */
+    private const val OPEN_DESKTOP = "powos-open-task: desktop"
+
     /** The session's LANG (SessionService.androidLocale; the session's first boot compiled that locale). */
     private fun locale() = java.util.Locale.getDefault().let { if (it.country.isEmpty()) "C.UTF-8" else "${it.language}_${it.country}.UTF-8" }
 }

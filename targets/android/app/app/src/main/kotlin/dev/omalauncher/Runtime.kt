@@ -569,6 +569,8 @@ class Runtime(
         // Our own Files app: open it directly rather than round-tripping through the guest.
         if (app.exec == FILES_COMMAND) return openFiles()
         if (app.terminal) return terminal(app.exec, app.name)
+        // PowOS rooted mode: like a phone app, its window as its own Android task (KWin exports it), not the desktop.
+        if (!linux && rootedTerminals) return openRooted(app)
         // Like an Android icon: an app that already has a window comes back to it. Single-instance
         // apps would otherwise just exit on a second launch, showing nothing. Quickshell apps (App Finder)
         // all share the app_id org.quickshell, so their window title, which is their name, decides.
@@ -576,6 +578,19 @@ class Runtime(
             .firstOrNull { (it.appId.isNotEmpty() && app.matches(it.appId)) || it.title.equals(app.name, ignoreCase = true) }
             ?.let { if (bringToFront(it)) return }
         launch(app.exec)
+    }
+
+    /**
+     * Rooted mode: [app] in its own Android task (RootedGuest.openAsTask) - its window if it has one, else it starts.
+     * Where it can't be a task (no window tasks yet, a window KWin doesn't export), the desktop comes up to show it.
+     */
+    private fun openRooted(app: LinuxApp) {
+        Log.i(TAG, "open as task: ${app.id}")
+        thread(name = "guest-open", isDaemon = true) {
+            val log: (String) -> Unit = { Log.i(TAG, "[${app.id.take(24)}] $it") }
+            val code = runCatching { RootedGuest.openAsTask(app.id, app.wmClass, app.exec, ::showDesktop, log) }.getOrElse { -1 }
+            Log.i(TAG, "exited $code: ${app.exec}")
+        }
     }
 
     /** Moves [window]'s Android task to the front; false if it has none (yet). */

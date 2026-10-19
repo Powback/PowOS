@@ -39,7 +39,8 @@ deploy)
   for f in powos-start.sh powos-session.sh powos-run.sh powos-rooted-session powos-deploy.sh; do
     adb push -q "$HERE/$f" "/data/local/tmp/$f"
   done
-  for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch powos-apps-export; do
+  for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch powos-apps-export \
+    powos-open-task; do
     adb push -q "$HERE/../session/$f" "/data/local/tmp/$f"
   done
   # PowOS's own scripts the phone's features rely on (shipped in the PowOS image - a rootfs from an older image

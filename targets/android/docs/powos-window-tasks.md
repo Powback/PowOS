@@ -58,10 +58,29 @@ Control messages are one line of UTF-8 each, fields separated by tabs: `open <id
 `open` may end in `fullscreen`; `focus 0` is the desktop's task coming to the front (a window shown as its own task
 then gives up KWin's focus, so the taskbar activates it instead of minimizing it).
 
+## From the launcher
+
+A PowOS app tapped in the PowOS app's launcher (drawer, home, search, the web shell: `Runtime.launch`) opens like a
+phone app, straight into its own task: `session/powos-open-task --app-id <desktop id> -- <Exec>`
+(`RootedGuest.openAsTask`). It loads a KWin script that reports windows back to it over D-Bus (the existing ones,
+then each new one); if the app already has a window (by app id: desktop file name / resource class) that one is
+shown - again a task, or brought to the front if it is one - and nothing starts; else the command starts and its
+first normal window (by app id, or by being one of the command's processes) is shown. "Shown" is
+`org.powos.WindowTasks.show` (un-minimized first), the same as the title bar's maximize.
+
+It prints `powos-open-task: desktop` when the app opens on the desktop instead, and the app then brings the desktop
+up: no window tasks (the app isn't connected to KWin), a window KWin doesn't export, nothing within 30 s, or an older
+PowOS without the script. KWin itself only comes up once the desktop's task has given it a screen (the producer
+handshake waits for the screen info): right after a session start the desktop comes up first, and the app opens as
+its own task over it once KWin is there.
+
 ## Then
 
-- Every new window opens as its own task (a setting), and a PowOS app launched from Android (PowosShortcuts, the
-  launcher) opens straight into one.
+- Every new window opens as its own task (a setting), and a PowOS app launched from Android's own shortcuts
+  (PowosShortcuts -> OpenPowosApp) opens straight into one: OpenPowosApp is a no-display trampoline that has finished
+  by the time KWin asks for the task, so Android may refuse that start from the background - it needs to stay until
+  the task is up (or the window task started from the trampoline itself).
+- KWin up without the desktop's task: the anland producer handshake not waiting for the consumer's screen info.
 - The desktop's taskbar: an exported window's entry brings its task to the front.
 - The Android keyboard in a task (keyboard visibility goes to the desktop's connection today).
 - Pointer, scroll and gamepad input from the task; the task's density instead of the desktop's scale.
