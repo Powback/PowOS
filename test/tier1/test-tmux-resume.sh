@@ -39,7 +39,22 @@ cat > "$BIN/tmux" <<'STUB'
 #!/usr/bin/env bash
 cmd="$1"; shift
 case "$cmd" in
-  list-sessions) printf '%s\n' "${SESSIONS:-}" | grep -v '^$' ;;
+  # SESSIONS is "<attached> <name>" per line, MOST RECENT FIRST (the first line
+  # gets the highest session_activity). The wrapper asks with -F for several
+  # formats; answer each the way tmux would.
+  list-sessions)
+    fmt=""; while [ $# -gt 0 ]; do [ "$1" = "-F" ] && { fmt="$2"; shift; }; shift; done
+    i=0
+    printf '%s\n' "${SESSIONS:-}" | grep -v '^$' | while read -r att name; do
+      i=$((i+1))
+      case "$fmt" in
+        *session_activity*) printf '%s\t%s\t%s\t%s\n' "$((1000 - i))" "$att" "$name" "$HOME" ;;
+        '#{session_name}')  printf '%s\n' "$name" ;;
+        '#{session_windows}') echo 1 ;;
+        x)                  echo x ;;
+        *)                  printf '%s %s\n' "$att" "$name" ;;
+      esac
+    done ;;
   display-message|capture-pane|list-windows) echo "x" ;;
   start-server) exit 0 ;;
   has-session) exit 0 ;;
@@ -113,14 +128,16 @@ grep -q '^new:' "$ACTION_FILE" && ok "empty state auto-starts tmux" \
   || bad "empty state did not auto-start: $(cat "$ACTION_FILE")"
 [ -s "$MENU_FILE" ] && bad "showed a menu with no sessions" || ok "no menu when nothing to resume"
 
-# 4. Sessions exist → DETACHED before ATTACHED, attached tagged, no divider row.
+# 4. Sessions exist → most recent first (the picker groups by Claude state and
+#    directory, then orders by activity; attached or not no longer decides),
+#    attached tagged, no divider row. lost-work is the newest, so it leads.
 run_wrapper SESSIONS=$'0 lost-work\n2 live-tab\n0 scratch'
 plain=$(tr -d '\r' < "$MENU_FILE" | perl -pe 's/\e\[[0-9;]*m//g' 2>/dev/null \
         || tr -d '\r' < "$MENU_FILE")
 d_line=$(printf '%s\n' "$plain" | grep -n 'lost-work' | head -1 | cut -d: -f1)
 a_line=$(printf '%s\n' "$plain" | grep -n 'live-tab'  | head -1 | cut -d: -f1)
 if [ -n "$d_line" ] && [ -n "$a_line" ] && [ "$d_line" -lt "$a_line" ]; then
-  ok "detached listed before attached"
+  ok "most recent session listed first"
 else
   bad "ordering wrong (detached=$d_line attached=$a_line)"
 fi

@@ -108,14 +108,27 @@ grep -qi "not attached" <<<"$out" && ok "self_status flags snapshot as not-attac
 
 # ═══════════════════════════════════════════════════════════════════
 echo "== self_push: failing push → helpful auth hint, non-zero =="
+# The checkout is shared between agents, so a push names its paths (`-- <files>`):
+# only those are staged and committed. The fake git reports staged changes
+# (diff rc=1), which is what a path push must commit.
 PUSHSRC="$WORK/pushsrc"; mkdir -p "$PUSHSRC/.git"
 : > "$GIT_LOG"
 out="$(FAKE_GIT_PUSH_RC=1 FAKE_GIT_PUSH_ERR="fatal: no configured push destination" \
-       self_push "$PUSHSRC" "msg" 2>&1)"
+       self_push "$PUSHSRC" "msg" bin/powos 2>&1)"
 rc=$?
 [[ $rc -ne 0 ]] && ok "returns non-zero when push fails" || bad "push failure returned 0"
 grep -qi "gh auth login" <<<"$out" && ok "prints 'gh auth login' hint" || bad "no auth hint in output"
 grep -q "commit -m" "$GIT_LOG" && ok "commits staged changes before push" || bad "did not commit"
+grep -q "add -- bin/powos" "$GIT_LOG" && ok "stages only the named path" || bad "did not stage by path"
+
+echo "== self_push: no paths + something already staged → refuses, commits nothing =="
+: > "$GIT_LOG"
+out="$(self_push "$PUSHSRC" "msg" 2>&1)"
+rc=$?
+[[ $rc -ne 0 ]] && ok "refuses a path-less push over staged changes" || bad "swept up others' staged changes"
+grep -q -- "-- <your files>" <<<"$out" && ok "says how to commit only yours" || bad "no per-path hint"
+grep -q "commit -m" "$GIT_LOG" && bad "committed despite the refusal" || ok "nothing committed"
+grep -q "add -A" "$GIT_LOG" && bad "ran add -A over others' staged changes" || ok "never ran add -A"
 
 echo "== self_push: no .git attached → refuse with guidance =="
 NOGIT="$WORK/nogit"; mkdir -p "$NOGIT"
