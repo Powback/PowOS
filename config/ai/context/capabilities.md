@@ -312,7 +312,7 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
 - **SpacetimeDB 2.12.0** (package `spacetimedb-bin`, official aarch64 binaries; `spacetime` CLI on PATH) as
   `dev.powos.spacetimedb`: `127.0.0.1:3410`, data/keys `/var/lib/powos/stdb` (owned by powos). The port is locked to
   the PowOS app's uid (= powos) and root by iptables chain `powos-local` (`xt_owner`); every other Android app gets
-  a reset. Idle unload: no client for 5 min and RSS > 180 MB → a ~150 ms restart that drops every loaded database
+  a reset. Idle unload: no client for 5 min and RSS > 60 MB (the bare server is ~51 MB) → a ~150 ms restart that drops every loaded database
   (each loaded database costs ~145 wakeups/s on this phone).
 - **Runtime switch**: `powos config app-runtime native|sandbox|container` (default), `powos app runtime <id> <mode>`
   (per app). native = plain process; sandbox = bubblewrap (user/pid/uts/cgroup ns - never `--unshare-ipc`/`--unshare-all`,

@@ -738,7 +738,7 @@ and the kernel deferred):
 - `powos-runtime`'s ~70 ms is Python start-up, paid once per service start, not per request. Sandbox adds ~10-40 ms
   and ~1 MB; podman adds ~250 ms, a storage driver and (on the phone) blocks on `/dev/fuse`.
 - **Idle wakeups per database are ~13× the Mac's**, so idle unload is not optional on the phone: the supervisor's
-  policy (no client for `idle.quietSec` = 300 s and RSS above `idle.unloadAboveMB` = 180 → restart, which unloads
+  policy (no client for `idle.quietSec` = 300 s and RSS above `idle.unloadAboveMB` - 60 MB on the phone, 180 on a Mac, per device since the base differs - → restart, which unloads
   everything) brings an untouched server back to its ~144/s base. Next: ask upstream for idle-database eviction, or
   profile the per-database timers (the tokio workers wake ~100×/s each with 2 databases). Battery cost: measure over a
   night with `dumpsys batterystats` before the service is always-on by default.

@@ -52,6 +52,11 @@ def device():
         return "desktop"
 
 
+def per_device(v):
+    """A manifest number, or {"phone": n, "desktop": m} (the same server idles at 51 MB on the phone, 137 on a Mac)."""
+    return v.get(device(), v.get("default", 1 << 30)) if isinstance(v, dict) else v
+
+
 def runtime_config():
     try:
         with open(CONFIG) as f:
@@ -218,7 +223,7 @@ class Service:
             self.conns = connections(int(port))
             self.quiet_since = (self.quiet_since or now) if self.conns == 0 else None
             quiet = now - self.quiet_since if self.quiet_since else 0
-            if (quiet >= self.idle.get("quietSec", 300) and rss_mb > self.idle.get("unloadAboveMB", 1 << 30)):
+            if quiet >= per_device(self.idle.get("quietSec", 300)) and rss_mb > per_device(self.idle.get("unloadAboveMB", 1 << 30)):
                 self.unloads += 1
                 self.restart(f"idle {quiet:.0f}s at {rss_mb} MB: unloading its databases", mode)
                 return

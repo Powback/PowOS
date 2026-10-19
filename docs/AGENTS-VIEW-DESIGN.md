@@ -307,6 +307,22 @@ The hook binary must exit 0 silently on any error of its own. A broken reporter 
 - Phase 3: a SpacetimeDB standalone on the phone (aarch64), started on demand. Phone hooks switch `--sink stdb`
   and the spool is retired.
 
+**Decided 2026-10-19 (manager): each device runs its own SpacetimeDB; the phone never depends on a hub.** The phone's
+server exists now (docs/POWOS-APPS-FEASIBILITY.md §8: `127.0.0.1:3410`, the system tier, uid-locked), so Phase 3's
+server is there; what remains, as a PowOS app on that runtime (not done yet - the plan):
+1. `apps/agents/` like `apps/counter`: a Rust module, database `powos-agents`, with exactly §3's tables (`agent`,
+   `task`, `event`, `message`, `ask`) and §8's reducers - the spool schema is the contract, so the shell's
+   AgentsSource swap is a backend change only. `powos-app.json` with the Agents widget as `kind: "panel"` for now.
+2. `powos-agentsd` keeps writing the spool (the fallback) and also calls `ingest(host, batch)` through one
+   long-lived connection (Python: the SpacetimeDB HTTP `call` endpoint with the powos CLI identity is enough for the
+   rate here; a WebSocket client only if batches need it). Unreachable server → spool only, nothing lost.
+3. The Mac's sessions are mirrored in as rows with `host = "mac"` by the same `ingest` (the adb mirror stays the
+   transport); the hub may run its own copy of the module for the desktop.
+4. Shell: `AgentsSource` gains a SpacetimeDB implementation on `shell/apps/stdb.ts` (one socket, closed while home
+   is hidden); AgentsSpool.kt stays for when the server is down.
+5. Idle cost: the database stays loaded while anything subscribes; the supervisor's idle unload applies otherwise
+   (each loaded database costs ~145 wakeups/s on the phone, §8 there).
+
 ---
 
 ## 9. SpaceTimeAI: goodies worth porting
