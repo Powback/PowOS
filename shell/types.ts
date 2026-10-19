@@ -48,6 +48,23 @@ export type ChatItem =
   | { kind: "user" | "assistant"; text: string }
   | { kind: "tool"; name: string; hint: string; ok: boolean | null }
   | { kind: "note"; text: string; error: boolean };
+/** A notification as the panel shows it; [icon] its app's drawer icon, [time] Unix seconds. */
+export interface PhoneNotification {
+  key: string;
+  app: string;
+  icon: string | null;
+  title: string;
+  text: string;
+  time: number;
+  clearable: boolean;
+  profile: string | null;
+}
+/** [available]: the launcher may read them (it has notification access). */
+export interface NotificationList {
+  available: boolean;
+  items: PhoneNotification[];
+}
+
 /** The colors in use: the launcher's palette as CSS (background, surface, foreground, muted, accent, border, red, ...), and the theme's own by name (color0-15, cursor, ...). */
 export interface ThemeColors {
   name: string;
@@ -158,6 +175,15 @@ export interface Bridge {
     read(): Promise<string | null>;
     write(text: string): Promise<void>;
   };
+  /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
+  notifications: {
+    list(): Promise<NotificationList>;
+    open(key: string): Promise<void>;
+    dismiss(key: string): Promise<void>;
+    clearAll(): Promise<void>;
+    /** Opens the setting that grants the launcher notification access. */
+    access(): Promise<void>;
+  };
   /** The theme: the colors in use ("theme.changed" brings them again), the ones to pick from, picking one. */
   theme: {
     get(): Promise<ThemeColors>;
@@ -194,7 +220,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

@@ -52,31 +52,49 @@ class Notifications(
             }.getOrDefault(pkg)
         }
 
+    /** A notification as shown: [profile] is "work" or "clone" beside the launcher's own profile, else null. */
+    data class Item(
+        val key: String,
+        val app: String,
+        val pkg: String,
+        val profile: String?,
+        val title: String,
+        val text: String,
+        /** Unix seconds. */
+        val time: Long,
+        val clearable: Boolean,
+    )
+
+    /** Whether the launcher may read notifications (the user granted it notification access). */
+    val available get() = media.granted && MediaListener.connected != null
+
+    /** The notifications shown, newest first; empty without access. */
+    fun items(): List<Item> =
+        (if (available) shown() else emptyList()).take(MAX_ITEMS).map { sbn ->
+            Item(sbn.key, label(sbn.packageName), sbn.packageName, profile(sbn.user), title(sbn).orEmpty(), text(sbn).orEmpty(), sbn.postTime / 1000, sbn.isClearable)
+        }
+
     fun value(): Value {
-        val available = media.granted && MediaListener.connected != null
-        val shown = if (available) shown() else emptyList()
         val items =
-            shown.take(MAX_ITEMS).map { sbn ->
-                val kind = profile(sbn.user)
+            items().map { n ->
                 Obj(
                     mapOf(
-                        "key" to Str(sbn.key),
-                        "app" to Str(label(sbn.packageName)),
-                        "package" to Str(sbn.packageName),
+                        "key" to Str(n.key),
+                        "app" to Str(n.app),
+                        "package" to Str(n.pkg),
                         // From a work profile or a cloned app; icon is the app's icon from that profile, badge included.
-                        "profile" to (kind?.let(::Str) ?: Null),
-                        "icon" to Str("app:" + sbn.packageName + (kind?.let { "@$it" } ?: "")),
-                        "title" to Str(title(sbn).orEmpty()),
-                        "text" to Str(text(sbn).orEmpty()),
-                        "time" to Num(Math.floor(sbn.postTime / 1000.0)),
-                        "clearable" to bool(sbn.isClearable),
+                        "profile" to (n.profile?.let(::Str) ?: Null),
+                        "icon" to Str("app:" + n.pkg + (n.profile?.let { "@$it" } ?: "")),
+                        "title" to Str(n.title),
+                        "text" to Str(n.text),
+                        "time" to Num(n.time.toDouble()),
+                        "clearable" to bool(n.clearable),
                     ),
                 )
             }
-        return Obj(mapOf("available" to bool(available), "count" to Num(shown.size.toDouble()), "items" to Lst(items)))
+        return Obj(mapOf("available" to bool(available), "count" to Num(items.size.toDouble()), "items" to Lst(items)))
     }
 
-    /** Emits whenever a notification is posted or removed, or access is granted or revoked. */
     fun updates(): Flow<Value> = MediaListener.changes.map { value() }.distinctUntilChanged()
 
     /** "open" runs the notification's tap action, "dismiss" clears it; without access, opens the setting that grants it. */
@@ -104,6 +122,15 @@ class Notifications(
             "dismiss" -> listener.cancelNotification(key)
         }
     }
+
+    /** Clears every notification that can be cleared, as the shade's "clear all". */
+    fun clearAll() {
+        val listener = MediaListener.connected ?: return
+        if (media.granted) runCatching { listener.cancelAllNotifications() }
+    }
+
+    /** Opens the setting that grants the launcher notification access. */
+    fun askAccess() = media.openAccessSettings()
 
     companion object {
         private const val MAX_ITEMS = 50

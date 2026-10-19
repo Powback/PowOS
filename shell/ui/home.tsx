@@ -14,6 +14,7 @@ import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gest
 import { Pages } from "./grid.tsx";
 import { ScreenPanel } from "./screen.tsx";
 import { EditSheet } from "./editsheet.tsx";
+import { NotificationPanel } from "./notifications.tsx";
 import { byKey, dock, dockDrag, editing, menu, recent, setDock } from "../state.ts";
 
 /**
@@ -158,6 +159,7 @@ export function Home() {
         <Dock />
         <AppMenu />
         <EditSheet />
+        <NotificationPanel />
       </div>
       {/* Outside home: its touches never reach home's swipes. */}
       <ScreenPanel />

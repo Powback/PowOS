@@ -607,3 +607,73 @@
 .swatch-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .swatch-bars { display: flex; gap: 3px; }
 .swatch-bars i { width: 14px; height: 6px; }
+
+/*
+ * The notification panel (notifications.tsx): down from the top as --q goes 0 -> 1 (gesture.ts follows the finger with
+ * it, as --p for the drawer), the home dimmed under it.
+ */
+@property --q {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+[data-q] { --q: 0; transition: --q 280ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.home.dragging [data-q] { transition: none; }
+.notif-scrim {
+  position: fixed;
+  z-index: 13;
+  inset: 0;
+  background: rgb(0 0 0 / 0.55);
+  opacity: var(--q);
+  pointer-events: none;
+}
+.notif-scrim.shown { pointer-events: auto; }
+.notif-panel {
+  position: fixed;
+  z-index: 14;
+  top: 0;
+  left: 0;
+  right: 0;
+  max-height: 88%;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--inset-top, 0px) + 8px) var(--edge) 6px;
+  background: color-mix(in srgb, var(--color-background) 94%, transparent);
+  border-bottom: var(--frame) solid var(--color-border);
+  border-radius: 0 0 calc(var(--radius) * 2) calc(var(--radius) * 2);
+  transform: translateY(calc((var(--q) - 1) * 100%));
+  visibility: hidden;
+}
+.notif-panel.shown { visibility: visible; }
+.notif-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 2px 8px; font-size: var(--text-small); }
+.notif-actions { display: flex; gap: 4px; }
+.notif-actions button { font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: 0; padding: 6px 6px; }
+.notif-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
+.notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }
+.notif-icon { width: 18px; height: 18px; border-radius: 5px; }
+.notif-icon.blank { background: var(--color-border); }
+.notif-app { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); }
+.notif-title { margin-top: 5px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif-text {
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--color-foreground) 80%, transparent);
+  font-size: var(--text-small);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notif-access { font: var(--text-small) var(--font); color: var(--color-accent); text-align: start; }
+.notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
+.notif-grip { align-self: center; width: 44px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--color-border); }

@@ -49,6 +49,8 @@ export const pages = computed(() => {
 /** A widget's screen open over home (its onTap's screen()); Back closes it first. */
 export const screen = signal<WidgetScreen>({ key: null });
 powos.on("widget.screen", (s: WidgetScreen) => (screen.value = s));
+/** The notification panel (notifications.tsx): down or not (a finger dragging it is gesture.ts's notifDrag). */
+export const notif = signal(false);
 /** The open folder's key. */
 export const folder = signal<string | null>(null);
 /** An app's long-press menu: which app, and where (the pressed cell's box on screen). */
@@ -104,6 +106,7 @@ export function closeDrawer() {
 /** Back: whatever is on top closes first - a widget's screen, a menu, a folder, a tile's edit, edit mode, the drawer. False when nothing was open. */
 export function back(): boolean {
   if (screen.value.key) powos.widgets.closeScreen();
+  else if (notif.value) notif.value = false;
   else if (menu.value) menu.value = null;
   else if (folder.value) folder.value = null;
   else if (selected.value) selected.value = null;
@@ -116,6 +119,7 @@ export function back(): boolean {
 /** Home, pressed on home: everything closes, and the first page shows - as a stock launcher does. */
 export function goHome() {
   if (screen.value.key) powos.widgets.closeScreen();
+  notif.value = false;
   menu.value = null;
   folder.value = null;
   selected.value = null;

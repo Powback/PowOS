@@ -6,25 +6,30 @@
  * - Down on the open drawer - from the top of its list, or anywhere outside the list - drags it closed the same way.
  *   A list that's scrolled down just scrolls.
  * - Sideways on home: the pages slide under the finger and snap to the next one past a quarter of the width or a flick.
+ * - Down on home: the notification panel (notifications.tsx) slides down under the finger the same way; up on it - from
+ *   the bottom of its list, or outside the list - drags it shut.
  *
  * A gesture is only claimed once its direction is clear (SLOP), so taps, long presses (moving and resizing tiles),
  * the drawer's scrolling and the A-Z bar keep their touches. Touch events, not pointer events: those end in a
  * pointercancel once the browser scrolls something.
  */
 import { computed, effect, signal } from "@preact/signals";
-import { carry, closeDrawer, dockDrag, drawer, editing, menu, page, pages, selected } from "../state.ts";
-import { powos } from "../bridge.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, selected } from "../state.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
 const FLICK = 0.45;
-/** How far down a swipe on home goes before the notification shade comes down. */
-const SHADE_PX = 48;
 /** What takes a tap in the launcher; a tap anywhere else in it closes it. */
 const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, a, .menu";
 
 /** While a finger drags the drawer: its openness, 0..1; null otherwise (then the drawer signal decides). */
 export const drawerDrag = signal<number | null>(null);
+/** While a finger drags the notification panel: its openness, 0..1; null otherwise (then the notif signal decides). */
+export const notifDrag = signal<number | null>(null);
+/** The notification panel's openness on screen: dragged, or settled. */
+export const notifShown = () => notifDrag.value ?? (notif.value ? 1 : 0);
+export const notifOpen = computed(() => notifShown() > 0);
+export const notifDragging = computed(() => notifDrag.value != null);
 /** While a finger drags the pages: their offset in px; null otherwise. */
 export const pageDrag = signal<number | null>(null);
 
@@ -38,11 +43,16 @@ export const drawerShown = () => drawerDrag.value ?? (drawer.value > 0 ? 1 : 0);
  * drawer's every app and home's every tile.
  */
 export const drawerOpen = computed(() => drawerShown() > 0);
-export const drawerDragging = computed(() => drawerDrag.value != null);
+export const drawerDragging = computed(() => drawerDrag.value != null || notifDrag.value != null);
 
 effect(() => {
   const p = String(drawerShown());
   for (const el of document.querySelectorAll<HTMLElement>("[data-p]")) el.style.setProperty("--p", p);
+});
+// The notification panel's openness, as the drawer's: --q on whatever follows it (data-q).
+effect(() => {
+  const q = String(notifShown());
+  for (const el of document.querySelectorAll<HTMLElement>("[data-q]")) el.style.setProperty("--q", q);
 });
 /**
  * The pages' track: its position and whether it follows the finger (no transition) are set here only, never by a
@@ -65,20 +75,27 @@ export function followOpenness(el: HTMLElement | null) {
   el?.style.setProperty("--p", String(drawerShown()));
 }
 
+/** The same for the notification panel's (--q). */
+export function followNotif(el: HTMLElement | null) {
+  el?.style.setProperty("--q", String(notifShown()));
+}
+
 interface Gesture {
   x0: number;
   y0: number;
   last: [number, number, number];
   /** Velocity along the gesture's axis, px/ms. */
   v: number;
-  mode: "open" | "close" | "pages" | "shade" | null;
+  mode: "open" | "close" | "pages" | "notif" | "notifClose" | null;
   open: boolean;
+  /** The notification panel was down when it started. */
+  notif: boolean;
   inList: boolean;
   /** On the recent apps row: sideways, it scrolls rather than turning the page. */
   inStrip: boolean;
   listTop: boolean;
-  /** Whether this swipe has the notification shade down. */
-  shade: boolean;
+  /** The list under the finger is scrolled to its end (the notification list: up from there drags the panel shut). */
+  listBottom: boolean;
   /** Where it started: a tap closes the launcher unless it was on something that takes taps. */
   target: Element;
   own: boolean;
@@ -95,6 +112,7 @@ let g: Gesture | null = null;
 function abandon() {
   g = null;
   drawerDrag.value = null;
+  notifDrag.value = null;
   pageDrag.value = null;
 }
 
@@ -105,8 +123,8 @@ export function homeGestures() {
     // A new touch while one is under way: the old one's end was lost.
     if (g) abandon();
     if (carry.value || selected.value || menu.value) return;
-    // The scrolling list under the finger - the drawer's, or PowOS AI's chat: it scrolls until its top.
-    const list = target.closest?.(".drawer-list, .chat") ?? null;
+    // The scrolling list under the finger - the drawer's, PowOS AI's chat, the notifications: it scrolls until its end.
+    const list = target.closest?.(".drawer-list, .chat, .notif-list") ?? null;
     g = {
       x0: x,
       y0: y,
@@ -114,10 +132,11 @@ export function homeGestures() {
       v: 0,
       mode: null,
       open: drawer.value > 0,
+      notif: notif.value,
       inList: !!list,
       inStrip: !!target.closest?.(".strip"),
-      shade: false,
       listTop: !list || list.scrollTop <= 0,
+      listBottom: !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 1,
       target,
       // The A-Z bar, a slider, a widget's drag: theirs.
       own: !!target.closest?.(".letter-bar, input[type=range], .resize-handle, .menu, .mic"),
@@ -137,12 +156,16 @@ export function homeGestures() {
     g.last = [x, y, now];
     if (!g.mode) {
       if (Math.hypot(dx, dy) < SLOP) return;
-      if (Math.abs(dy) > Math.abs(dx)) {
+      if (g.notif) {
+        // The notification panel down: up drags it shut (the list scrolls until its end); sideways is a card's.
+        if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
+        else return (g = null);
+      } else if (Math.abs(dy) > Math.abs(dx)) {
         // Editing home, up isn't the launcher: the sheet has the bottom.
         if (!g.open && dy < 0 && !editing.value) g.mode = "open";
         else if (g.open && dy > 0 && (!g.inList || g.listTop)) g.mode = "close";
-        // Down on home: the notification shade, as on a stock launcher.
-        else if (!g.open && dy > 0 && !editing.value) g.mode = "shade";
+        // Down on home: the notifications, as a stock launcher's shade.
+        else if (!g.open && dy > 0 && !editing.value) g.mode = "notif";
         else return (g = null); // the list scrolls
       } else if (!g.open && !g.inStrip) {
         g.mode = "pages";
@@ -151,17 +174,9 @@ export function homeGestures() {
       }
     }
     if (e?.cancelable) e.preventDefault();
-    if (g.mode === "shade") {
-      // Far enough down: the shade comes down; back up (the same swipe, the finger still on the glass): it goes away
-      // again. Android keeps sending this swipe here though the shade is over the page.
-      const want = g.shade ? dy > SHADE_PX / 2 : dy > SHADE_PX;
-      if (want !== g.shade) {
-        g.shade = want;
-        powos.system.notifications(want);
-      }
-      return;
-    }
-    if (g.mode === "open") drawerDrag.value = clamp(-dy / (g.height * 0.6));
+    if (g.mode === "notif") notifDrag.value = clamp(dy / (g.height * 0.6));
+    else if (g.mode === "notifClose") notifDrag.value = clamp(1 + dy / (g.height * 0.6));
+    else if (g.mode === "open") drawerDrag.value = clamp(-dy / (g.height * 0.6));
     else if (g.mode === "close") drawerDrag.value = clamp(1 - dy / (g.height * 0.6));
     else {
       // Past the first and last page it resists.
@@ -184,6 +199,11 @@ export function homeGestures() {
       const open = v < -FLICK ? true : v > FLICK ? false : mode === "open" ? p > 0.33 : p > 0.67;
       if (open) drawer.value = 1;
       else closeDrawer();
+    } else if (mode === "notif" || mode === "notifClose") {
+      const q = notifDrag.value ?? 0;
+      notifDrag.value = null;
+      // A flick decides; otherwise where it was let go (as the drawer).
+      notif.value = v > FLICK ? true : v < -FLICK ? false : mode === "notif" ? q > 0.33 : q > 0.67;
     } else if (mode === "pages") {
       const dx = pageDrag.value ?? 0;
       pageDrag.value = null;

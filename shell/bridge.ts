@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { App, Bridge, Cell, Chat, Home, HomeItem, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
+import type { App, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -92,6 +92,13 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       style: (points) => call("term.style", points),
     },
     clipboard: { read: () => call<string | null>("clipboard.read"), write: (text) => call("clipboard.write", text) },
+    notifications: {
+      list: () => call<NotificationList>("notifications.list"),
+      open: (key) => call("notifications.open", key),
+      dismiss: (key) => call("notifications.dismiss", key),
+      clearAll: () => call("notifications.clearAll"),
+      access: () => call("notifications.access"),
+    },
     theme: {
       get: () => call<ThemeColors>("theme.get"),
       list: () => call<ThemeChoice[]>("theme.list"),
@@ -276,6 +283,29 @@ function mock(): Bridge {
       read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
+    // A few made-up notifications; dismissing and clearing work on them.
+    notifications: (() => {
+      const now = Math.floor(Date.now() / 1000);
+      let items: PhoneNotification[] = [
+        { key: "1", app: "Signal", icon: null, title: "Mats", text: "are we still on for tonight?", time: now - 120, clearable: true, profile: null },
+        { key: "2", app: "Gmail", icon: null, title: "Your order has shipped", text: "Track your package: it arrives Thursday.", time: now - 3600, clearable: true, profile: null },
+        { key: "3", app: "PowOS AI", icon: null, title: "coder", text: "Finished the launcher refactor - 3 commits pushed.", time: now - 7200, clearable: true, profile: null },
+      ];
+      const changed = () => events.emit("notifications.changed", { available: true, items });
+      return {
+        list: async () => ({ available: true, items }),
+        open: async (key: string) => console.log("[mock] open notification", key),
+        dismiss: async (key: string) => {
+          items = items.filter((n) => n.key !== key);
+          changed();
+        },
+        clearAll: async () => {
+          items = items.filter((n) => !n.clearable);
+          changed();
+        },
+        access: async () => console.log("[mock] notification access"),
+      };
+    })(),
     // Three of Omarchy's themes; picking one recolors the page as the phone's would.
     theme: (() => {
       const themes: ThemeChoice[] = [

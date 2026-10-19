@@ -21,6 +21,7 @@ import dev.omalauncher.PowosAiActivity
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
 import dev.omalauncher.ui.Palette
+import dev.omalauncher.widgets.runtime.MediaListener
 import dev.omalauncher.ui.Speech
 import dev.omalauncher.linux.Agent
 import dev.omalauncher.linux.newAppCommand
@@ -80,6 +81,8 @@ class ShellBridge(
         }
 
     init {
+        // A notification posted or gone: the panel lists them again.
+        scope.launch { MediaListener.changes.collect { emit("notifications.changed", notificationList()) } }
         // The theme picked or recolored (here, in the Compose launcher, a theme file edited): the page recolors.
         scope.launch { snapshotFlow { theme().toString() }.drop(1).collect { emit("theme.changed", JSONObject(it)) } }
         // What's heard so far, while listening (and why it failed).
@@ -151,6 +154,11 @@ class ShellBridge(
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
             "system.notifications" -> notifications(a.optBoolean(0, true))
+            "notifications.list" -> notificationList()
+            "notifications.open" -> runtime.widgets.notifications.control("open", a.getString(0))
+            "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
+            "notifications.clearAll" -> runtime.widgets.notifications.clearAll()
+            "notifications.access" -> runtime.widgets.notifications.askAccess()
             "home.get" -> home.snapshot()
             "home.place" -> home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))
             "home.add" -> home.add(a.getString(0), a.getInt(1), a.optJSONObject(2))
@@ -222,6 +230,26 @@ class ShellBridge(
             val bar = activity.getSystemService("statusbar")
             bar.javaClass.getMethod(if (open) "expandNotificationsPanel" else "collapsePanels").invoke(bar)
         }.onFailure { Log.w(TAG, "can't ${if (open) "open" else "close"} the notification shade", it) }.isSuccess
+
+    /** The notification panel's list: { available, items: [{ key, app, icon, title, text, time, clearable, profile }] }. */
+    private fun notificationList(): JSONObject {
+        val n = runtime.widgets.notifications
+        val items =
+            n.items().map { item ->
+                // The app's drawer icon (its own profile's, badge and all, when it's from a work or cloned one).
+                val app = runtime.androidApps.apps.firstOrNull { it.component.packageName == item.pkg && (item.profile == null) == (it.profile == null) }
+                JSONObject()
+                    .put("key", item.key)
+                    .put("app", item.app)
+                    .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+                    .put("title", item.title)
+                    .put("text", item.text)
+                    .put("time", item.time)
+                    .put("clearable", item.clearable)
+                    .put("profile", item.profile ?: JSONObject.NULL)
+            }
+        return JSONObject().put("available", n.available).put("items", JSONArray(items))
+    }
 
     /** The colors in use: the launcher's palette as CSS (what the page's tokens follow), and the theme's own by name. */
     private fun theme(): JSONObject {

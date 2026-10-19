@@ -100,6 +100,9 @@ class WidgetEngine(
     /** Opens launcher screens ("style" or "themes", "agents", "drawer"); set by the UI. */
     var launcherAction by services::launcherAction
 
+    /** The phone's notifications (the web shell's panel reads and acts on them). */
+    val notifications get() = services.notifications
+
     /** The home screen's view, for haptic(); set by the UI. */
     var view by services::view
 
