@@ -327,6 +327,39 @@ their idmaps); a mutable overlay reached apps (`cmd overlay lookup` showed it) b
 doze component. With `isStatic="true"` it switched. OnePlus also gates the doze component on its
 `oplus.software.display.aod_support` feature (AmbientDisplayConfiguration.ambientDisplayComponent), which this phone has.
 
+## Recents slot and shade: built (2026-10-19), not yet tried on the phone
+
+What's in the tree, all live only with the module built `--priv-app --slot recents` (the overlay sits in
+`system-module/overlays-disabled/recents/` until it's verified; then it moves to `overlays/`):
+
+- `system/PowosRecentsService.kt`: the `QUICKSTEP_SERVICE` (guarded by `STATUS_BAR_SERVICE`) returning
+  `ILauncherProxy` (`src/main/aidl`, AOSP's interface with this device's ids, only the calls PowOS takes; the rest,
+  OnePlus's 151+ included, are dropped one-way calls). `onOverviewToggle` → the switcher; `onInitialize` keeps the
+  `ISystemUiProxy` binder and starts the shade; `onSystemUiStateChanged` feeds it; `onUnbind` answers its
+  `IRemoteCallback` by hand.
+- The switcher: `shell/SwitcherActivity.kt` (the `config_recentsComponentName` activity) borrowing a warm page
+  (`system/Switcher.kt`, mode=switcher, `shell/ui/switcher.tsx`). `system/Tasks.kt`: `getRecentTasks` (all tasks: the
+  caller is recents), `getTaskSnapshot` (served at `/_task/<id>`), `startActivityFromRecents`, `removeTask`.
+- The shade: `system/ShadeHost.kt`. Flags on the process's StatusBarManager token (`DISABLE_EXPAND`,
+  `DISABLE2_NOTIFICATION_SHADE | _QUICK_SETTINGS`), lifted while SystemUI reports the keyguard (`SYSUI_STATE` bit 6) and
+  lent back while its own panel is asked for (the panel's "quick settings" button). A `TYPE_STATUS_BAR_ADDITIONAL`
+  strip over the status bar takes the pull (HACK: it also takes taps there; the real fix is the input monitor below);
+  the page is in a `TYPE_STATUS_BAR_SUB_PANEL` window kept warm and hidden on `shade.closed`.
+- Allowlist: `STATUS_BAR`, `START_TASKS_FROM_RECENTS` (both privileged as well as recents). The rest
+  (`STATUS_BAR_SERVICE`, `READ_FRAME_BUFFER`, `REMOVE_TASKS`, `INTERNAL_SYSTEM_WINDOW`) come with the role.
+- Hidden calls via `org.lsposed.hiddenapibypass`, exempting only the classes used (`system/HiddenApi.kt`).
+
+Only **3-button navigation** works with it. With the overlay on and gesture navigation selected, SystemUI routes the
+swipes to PowOS, which doesn't handle them yet: home and recents gestures do nothing. Gesture navigation still needs:
+
+1. An input monitor (`InputManager.monitorGestureInput`, `MONITOR_INPUT`) over the region `onActiveNavBarRegionChanges`
+   gives, with `pilferPointers` once a swipe is recognised (an `InputEventReceiver` subclass: compile-time stubs).
+2. The recents transition: WM Shell's `IRecentTasks.startRecentsTransition` (its binder is in `onInitialize`'s bundle)
+   with an `IRecentsAnimationRunner`, the leashes animated to home, to the switcher or to the next task (quick switch).
+3. `ISystemUiProxy` calls for what SystemUI expects of the gesture provider (`onBackEvent`, `onStatusBarTouchEvent`,
+   `notifySwipeToRecentFinished` on this phone).
+4. The same monitor replaces the shade's strip (the pull seen without taking the status bar's taps).
+
 ## 4. Safety
 
 | Step | What can go wrong | Bootloop? | Recovery |
