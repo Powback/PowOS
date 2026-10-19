@@ -87,10 +87,11 @@
   scrollbar-width: none;
 }
 /* The apps share the row's width: all of them fit, at up to the strip's icon size. */
-.strip .app,
-.dock .app { flex: 1 1 0; min-width: 0; padding: 4px 0; }
+.strip .app { flex: 1 1 0; min-width: 0; padding: 4px 0; }
 .strip .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
-.dock .app-icon { width: min(calc(var(--strip-icon) * var(--dock-scale)), 100%); height: auto; aspect-ratio: 1; }
+/* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
+.dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
+.dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
 .bar {
   position: relative;
@@ -115,21 +116,25 @@
 }
 .bar input::placeholder { color: var(--color-muted); }
 
-/* The dock: pinned apps under the bar (iOS's dock); it folds away as the launcher opens, leaving it the room. */
+/*
+ * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it closes like a shutter - its bottom edge
+ * rises to the bar, cutting the icons off; they keep their size and place.
+ */
 .dock {
-  --dock-scale: calc(1 - var(--p));
+  --dock-open: calc(1 - var(--p));
   position: relative;
   z-index: 3;
-  height: calc(var(--strip-height) * var(--dock-scale));
-  margin: 0 var(--edge) calc(var(--edge) * var(--dock-scale));
-  opacity: var(--dock-scale);
+  height: calc(var(--strip-height) * var(--dock-open));
+  margin: 0 var(--edge) calc(var(--edge) * var(--dock-open));
   overflow: hidden;
-  border-width: calc(var(--frame) * var(--dock-scale));
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
   padding: 0 4px;
+  /* Its frame goes at the very end, so a closed dock leaves no line under the bar. */
+  border-width: calc(var(--frame) * min(1, var(--dock-open) * 8));
 }
+
 
 /* The drawer: the panel under the recent row. */
 .drawer-clip {
