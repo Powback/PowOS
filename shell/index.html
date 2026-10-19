@@ -10,6 +10,8 @@
   `npm run check` (tsc --noEmit) type-checks it all. The import map names the vendored libraries (vendor/VERSIONS).
 -->
 <script>
+  // Room for every request of a slow start (ui/iconperf.ts counts the icon ones; the default 250 fills up).
+  performance.setResourceTimingBufferSize?.(2000);
   window.esmsInitOptions = {
     shimMode: true,
     async fetch(url, options) {
@@ -43,6 +45,11 @@
   }
 }
 </script>
+<style>
+  /* Home's last frame (ui/snapshot.ts) stays up while the live page under it lays itself out, hidden. */
+  .snapshot { position: fixed; inset: 0; pointer-events: none; }
+  body.booting > :not(.snapshot) { visibility: hidden; }
+</style>
 <link rel="stylesheet" href="./theme.css" data-hot>
 <link rel="stylesheet" href="./ui/shell.css" data-hot>
 <link rel="stylesheet" href="./vendor/xterm.css">
@@ -52,5 +59,23 @@
 <link rel="stylesheet" href="./ui/notifications.css" data-hot>
 <script type="module-shim" src="./app.tsx"></script>
 </head>
-<body></body>
+<body>
+<script>
+  // Home's last frame (ui/snapshot.ts, version 1), up before the modules have loaded: icons and all on the first
+  // frame. The shell's first render replaces it (app.tsx). Its icons' arrival is counted for ui/iconperf.ts.
+  try {
+    const shot = !new URLSearchParams(location.search).get("mode") && JSON.parse(localStorage.getItem("powos.snapshot." + Math.round(innerWidth)) || "null");
+    if (shot && shot.v === 1) {
+      document.documentElement.setAttribute("style", shot.style);
+      document.documentElement.dataset.mode = "home";
+      document.body.innerHTML = shot.html;
+      document.body.inert = true;
+      const imgs = document.body.querySelectorAll("img");
+      const s = (window.__snapshot = { v: 1, at: performance.now(), icons: imgs.length, loaded: 0, last: 0 });
+      const one = () => { s.loaded++; s.last = performance.now(); };
+      for (const i of imgs) if (i.complete && i.naturalWidth) one(); else i.addEventListener("load", one, { once: true });
+    }
+  } catch {}
+</script>
+</body>
 </html>

@@ -132,10 +132,10 @@ class ShellBridge(
                 .drop(1)
                 .collect { emit("speech.state", JSONObject(it)) }
         }
-        // Installs, removals, Linux apps and icons arriving (they load in the background, after the list): the page
-        // reloads its list, whose icon URLs carry the icon count so a missing icon is asked for again.
+        // Installs, removals, Linux apps, and an app's icon drawn anew or for the first time (ShellIcons names each by
+        // its pixels): the page reloads its list. An icon arriving that looks as it did last time changes nothing.
         scope.launch {
-            snapshotFlow { listOf(runtime.androidApps.apps.size, runtime.linuxApps.size, iconCount()) }.drop(1).collect { emit("apps.changed", null) }
+            snapshotFlow { listOf(runtime.androidApps.apps.size, runtime.linuxApps.size, ShellIcons.version.intValue) }.drop(1).collect { emit("apps.changed", null) }
         }
         scope.launch { runtime.refreshApps() }
         // The home screen changed (here, in the Compose launcher, or a widget file arriving): the page re-reads it.
@@ -571,9 +571,19 @@ class ShellBridge(
     private fun aiChat() =
         JSONObject().put("busy", PowosAiChat.busy).put("items", JSONArray(PowosAiChat.items.map { it.json() }))
 
-    private fun iconCount() = runtime.androidApps.icons.size + runtime.linuxIcons.size
-
-    private fun icon(key: String) = "${ShellHost.ORIGIN}/_icon/${Uri.encode(key)}?v=${iconCount()}"
+    /**
+     * [key]'s icon ("a:<key>" / "l:<id>"): its file's URL (ShellIcons), the same until the icon changes. One never
+     * drawn yet is asked for by key - a 404 until the catalog has it, when the list comes again with its file.
+     */
+    private fun icon(key: String): String {
+        val bitmap =
+            when {
+                key.startsWith("a:") -> runtime.androidApps.icons[key.removePrefix("a:")]
+                key.startsWith("l:") -> runtime.linuxIcons[key.removePrefix("l:")]
+                else -> null
+            }
+        return ShellIcons.url(key, bitmap) ?: "${ShellHost.ORIGIN}/_icon/${Uri.encode(key)}"
+    }
 
     /** Recent keys still installed, in the page's form ("a:…" / "l:…"). */
     private fun installed(keys: List<String>): List<String> {

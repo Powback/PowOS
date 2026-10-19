@@ -2,7 +2,7 @@
  * An app: its icon and label; a tap opens it, a long press shows its menu (AppMenu, one for the whole shell, drawn
  * over everything so no scrolling list clips it). In the drawer, holding an app and moving it drags it onto home.
  */
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, page, pages, setDocked } from "../state.ts";
 import { startCarry } from "./grid.tsx";
 import { powos } from "../bridge.ts";
@@ -97,25 +97,35 @@ export function AppCell({ app, labels = true, draggable = false, onDrag, class: 
 const ICON_GIVE_UP_MS = 4000;
 
 /**
- * An app's icon: a softly pulsing tile until the picture is in. The host draws icons in the background, so an icon
- * asked for early isn't there yet (a 404); the list comes again when it is (its URL changes), and loads it then.
- * One that fails and stays failed (no new URL within ICON_GIVE_UP_MS) ends as the app's initial, never as a tile
- * loading forever; a new URL tries the picture again.
+ * An app's icon. One the page has already (the WebView keeps each icon's file - its URL names its pixels, ShellIcons)
+ * shows in the first frame, as it is; only one still on its way is a softly pulsing tile until the picture is in.
+ * The host draws icons in the background, so an icon asked for early may not be there yet (a 404); the list comes
+ * again when it is (its URL changes), and loads it then. One that fails and stays failed (no new URL within
+ * ICON_GIVE_UP_MS) ends as the app's initial, never as a tile loading forever; a new URL tries the picture again.
  */
 export function AppIcon({ src, label }: { src: string; label?: string }) {
   const [missing, setMissing] = useState(false);
   const timer = useRef(0);
+  const img = useRef<HTMLImageElement>(null);
   useEffect(() => {
     setMissing(false);
     return () => clearTimeout(timer.current);
   }, [src]);
+  // Before the frame is drawn: an image not decoded yet gets the pulsing tile - one that is shows as it is, with no
+  // fade-in (a page reload, home recreated, a fold: every icon is in the WebView's cache by then).
+  useLayoutEffect(() => {
+    const i = img.current;
+    if (i && !(i.complete && i.naturalWidth)) i.parentElement!.classList.add("loading");
+  }, [src]);
   return (
-    <span class={missing ? "app-icon initials" : "app-icon loading"}>
+    <span class={missing ? "app-icon initials" : "app-icon"}>
       {missing && (label ?? "?")[0]}
       <img
+        ref={img}
         src={src}
         alt=""
         draggable={false}
+        decoding="sync"
         style={missing ? { display: "none" } : undefined}
         onLoad={(e) => {
           clearTimeout(timer.current);

@@ -83,6 +83,7 @@ class ShellHost(
     private val native = ShellNative(context, web, devUrl()?.let { Uri.parse(it).let { u -> "${u.scheme}://${u.authority}" } } ?: ORIGIN)
 
     init {
+        ShellIcons.init(context.applicationContext, runtime)
         overrides.mkdirs()
         web.addJavascriptInterface(bridge, "PowosHost")
         web.addJavascriptInterface(native, "PowosNative")
@@ -193,7 +194,16 @@ class ShellHost(
         return runCatching { context.assets.open("shell/$path") }.getOrNull()
     }
 
+    /**
+     * An app's icon: by name (ShellIcons' file, which never changes - kept by the page for good), or, until it has
+     * one, by key from the catalog as it is now (a 404 while it isn't drawn).
+     */
     private fun icon(key: String): WebResourceResponse {
+        ShellIcons.file(key)?.let { file ->
+            return WebResourceResponse("image/png", null, file.inputStream()).apply {
+                responseHeaders = mapOf("Cache-Control" to "public, max-age=31536000, immutable")
+            }
+        }
         val bitmap =
             when {
                 key.startsWith("a:") -> runtime.androidApps.icons[key.removePrefix("a:")]
@@ -202,7 +212,7 @@ class ShellHost(
             } ?: return notFound()
         val png = ByteArrayOutputStream().also { bitmap.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
         return WebResourceResponse("image/png", null, ByteArrayInputStream(png)).apply {
-            responseHeaders = mapOf("Cache-Control" to "max-age=3600")
+            responseHeaders = mapOf("Cache-Control" to "no-cache")
         }
     }
 

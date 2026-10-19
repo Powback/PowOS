@@ -10,6 +10,8 @@ import { Recents } from "./ui/recents.tsx";
 import { chat, load } from "./state.ts";
 import type { Insets, ThemeColors } from "./types.ts";
 import "./hot.ts";
+import { measureIcons } from "./ui/iconperf.ts";
+import { handOff, keepSnapshots, restored } from "./ui/snapshot.ts";
 
 /** The host's insets (system bars, cutout, keyboard) as --inset-* custom properties, kept current. */
 function applyInsets(i: Partial<Insets> | null) {
@@ -58,5 +60,8 @@ if (mode === "aod") {
   render(<Assist />, document.body);
 } else {
   await load();
-  render(<Home />, document.body);
+  // Home's last frame (index.html) gives way to home itself once it's laid out: no blank frame between.
+  handOff(() => render(<Home />, document.body));
+  measureIcons(restored != null);
+  keepSnapshots();
 }
