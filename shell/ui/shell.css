@@ -361,19 +361,6 @@
   pointer-events: none;
 }
 
-.dots {
-  position: absolute;
-  bottom: 2px;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  pointer-events: none;
-}
-.dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--color-muted); opacity: 0.5; }
-.dots span.on { background: var(--color-accent); opacity: 1; }
-
 .folder-scrim {
   position: absolute;
   inset: 0;

@@ -18,11 +18,7 @@ export const dock = signal<string[]>([]);
 export const home = signal<Home>({ columns: 6, pages: [1], items: [] });
 /** The page on screen, an index into pages (the last, empty one included). */
 export const page = signal(0);
-/** Pages to show: the ones with items, and one empty page after them to drop things on. */
-export const pages = computed(() => {
-  const used = home.value.pages.length ? home.value.pages : [1];
-  return [...used, Math.max(...used) + 1];
-});
+
 /** The selected tile (edit mode): it shows resize handles and its actions. */
 export const selected = signal<string | null>(null);
 
@@ -38,6 +34,11 @@ export interface Carry {
   grab: { x: number; y: number };
 }
 export const carry = signal<Carry | null>(null);
+/** Pages to show: the ones with items; while a tile is carried, an empty one after them to drop it on. */
+export const pages = computed(() => {
+  const used = home.value.pages.length ? home.value.pages : [1];
+  return carry.value ? [...used, Math.max(...used) + 1] : used;
+});
 /** The open folder's key. */
 export const folder = signal<string | null>(null);
 /** An app's long-press menu: which app, and where (the pressed cell's box on screen). */

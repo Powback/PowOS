@@ -360,11 +360,6 @@ export function Pages() {
         ))}
       </div>
       <Preview />
-      <div class="dots">
-        {list.map((_, i) => (
-          <span class={i === page.value ? "on" : ""} />
-        ))}
-      </div>
       <FolderPanel />
     </div>
   );
