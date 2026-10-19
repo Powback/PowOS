@@ -317,6 +317,11 @@ Still path sockets in the app, outside the rooted session: Omalauncher's own Way
 installed with rooted PowOS) and Andromarchy's "connect with root" setting (the fd helper's bridge socket in the
 cache dir, off by default). Both would fail as a priv-app if used.
 
+Verified on the phone 2026-10-19 with `build-module.sh --priv-app` (no overlays): PowOS `SYSTEM`/`PRIVILEGED`, the
+app in `priv_app` with `privapp_data_file` data; the session came up (daemon on `@powos.display`, KWin's producer
+connected, padd on `@powos.padd`), terminals (`powos-run.sh`) and a VA-API H.264 encode through termux-va worked. As an
+ordinary app the same build also showed the desktop.
+
 **Overlays must be static.** On Android 16 the system server only takes immutable framework overlays (zygote builds
 their idmaps); a mutable overlay reached apps (`cmd overlay lookup` showed it) but DreamManagerService kept the stock
 doze component. With `isStatic="true"` it switched. OnePlus also gates the doze component on its

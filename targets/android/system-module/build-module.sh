@@ -4,11 +4,10 @@
 #
 #   build-module.sh [--priv-app] [--apk powos.apk] [--refresh-perms] [--check-signer]
 #
-# Without --priv-app the module carries only the slots' overlays (overlays/): the app stays an ordinary app. That's the
-# default for now: as a privileged app (priv_app) PowOS may not create Unix sockets in its own data (no sock_file rules
-# for privapp_data_file on this phone), which the rooted PowOS session's display daemon needs - phase 0 broke the
-# session (docs/NATIVE-SYSTEM-UI.md, "priv_app and sockets"). A slot that needs no privilege (the doze component) works
-# without it.
+# Without --priv-app the module carries only the slots' overlays (overlays/): the app stays an ordinary app. As a
+# privileged app (priv_app) PowOS may not create or connect to socket files in its own data (no sock_file rules for
+# privapp_data_file on this phone); the rooted session's sockets on the app's side are abstract ones since 2026-10-19,
+# so --priv-app runs the session too (docs/NATIVE-SYSTEM-UI.md, "priv_app and sockets").
 #
 # - The APK is the release build (targets/android/build-app.sh's output): the same one the phone has installed, signed
 #   with the same key - a system copy signed otherwise would make Android drop the installed app and its data
