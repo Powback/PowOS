@@ -241,7 +241,7 @@ class PowosAiActivity : ComponentActivity() {
          */
         fun keepInRecents(context: Context) {
             val am = context.getSystemService(ActivityManager::class.java)
-            val there = am.appTasks.any { runCatching { it.taskInfo.baseIntent.component?.className }.getOrNull() == PowosAiActivity::class.java.name }
+            val there = am.appTasks.any { runCatching { it.taskInfo?.baseIntent?.component?.className }.getOrNull() == PowosAiActivity::class.java.name }
             if (there) return
             context.startActivity(
                 Intent(context, PowosAiActivity::class.java)
