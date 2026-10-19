@@ -176,6 +176,42 @@ class AppWidgets private constructor(
         // A widget being added when the launcher died stays bound to us, owned by nothing: let it go.
         val kept = entries.map { it.id }.toSet()
         runCatching { host.appWidgetIds.filter { it !in kept }.forEach(host::deleteAppWidgetId) }
+        // A widget's off-screen display gone (the system took it, its Presentation dismissed): drawn again.
+        context.getSystemService(DisplayManager::class.java).registerDisplayListener(
+            object : DisplayManager.DisplayListener {
+                override fun onDisplayAdded(displayId: Int) {}
+
+                override fun onDisplayChanged(displayId: Int) {}
+
+                override fun onDisplayRemoved(displayId: Int) {
+                    if (renderers.values.any { it.displayId == displayId }) heal()
+                }
+            },
+            main,
+        )
+    }
+
+    /** The apps whose widgets are on home: their tasks are kept by the switcher's clear all (system/Switcher). */
+    fun providerPackages(): Set<String> = entries.map { it.provider.packageName }.toSet()
+
+    /**
+     * Every widget a page shows that lost its drawing (its display or Presentation gone - its provider's process
+     * killed under it, a display torn down) is drawn again at its size; one whose binding is gone is logged (it needs
+     * adding again). On home coming up, a display removed, a task removed by the switcher.
+     */
+    fun heal() {
+        for ((id, r) in renderers.toList()) {
+            if (!r.broken) continue
+            Log.w(TAG, "widget $id lost its display: drawing it again")
+            renderers.remove(id)
+            r.close()
+            if (listeners.values.none { id in it }) continue
+            val info = awm.getAppWidgetInfo(id) ?: run { Log.w(TAG, "widget $id is not bound any more"); null } ?: continue
+            val store = frames.getOrPut(id, ::Frames)
+            renderers[id] = Renderer(info, r.w, r.h, bound = id) { image -> if (store.offer(image)) main.post { frame(id) } }
+            updateShown(id)
+        }
+        for (e in entries) if (awm.getAppWidgetInfo(e.id) == null) Log.w(TAG, "widget ${e.id} (${e.provider.flattenToShortString()}) isn't bound to PowOS any more")
     }
 
     // The page's channel.
@@ -743,6 +779,12 @@ class AppWidgets private constructor(
             context.getSystemService(DisplayManager::class.java)
                 .createVirtualDisplay("powos-appwidget-${bound ?: "preview"}", w, h, dpi, reader.surface, 0)
         private val presentation = Presentation(context, display.display)
+
+        /** Its display (for the display listener). */
+        val displayId: Int = display.display.displayId
+
+        /** It can't draw any more: closed, its Presentation dismissed, or its display gone. */
+        val broken: Boolean get() = closed || !presentation.isShowing || display.display?.isValid != true
         val root: FrameLayout
         val view: AppWidgetHostView
         var downAt = 0L

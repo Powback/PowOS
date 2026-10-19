@@ -42,7 +42,8 @@ export function TaskCard({
   /** Picked as split screen's first app (the second is being picked). */
   picked?: boolean;
   onOpen: (id: number, shot: HTMLElement) => void;
-  onRemove: (id: number) => void;
+  /** False: it stays (the card springs back). */
+  onRemove: (id: number) => boolean | void;
   onMenu: (id: number, card: HTMLElement) => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
@@ -74,6 +75,10 @@ export function TaskCard({
   /** Removed: on up and out at the finger's speed (at least a brisk one), then gone from the list. */
   const flingAway = (dy: number, v: number) => {
     const card = el.current!;
+    if (t.kept) {
+      onRemove(t.id);
+      return springBack(dy);
+    }
     gone.current = true;
     const to = -(card.getBoundingClientRect().bottom + 40);
     const speed = Math.max(Math.abs(v), 1.6); // px/ms

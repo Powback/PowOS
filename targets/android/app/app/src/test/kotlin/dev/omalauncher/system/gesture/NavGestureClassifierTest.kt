@@ -52,12 +52,32 @@ class NavGestureClassifierTest {
     }
 
     @Test
-    fun aModerateFlickUpGoesHome() {
+    fun aRelaxedSwipeAndReleaseIsTheSwitcher() {
         val c = classifier()
         c.down(540f, bottom, 0)
-        // 1.6 px/ms (0.64 dp/ms): over Quickstep's 0.5 dp/ms fling threshold.
+        // 480 px in 300 ms (1.6 px/ms, 0.64 dp/ms) and let go moving: no pause, no hold - the switcher all the same.
         val t = c.drag(540f, bottom, 540f, bottom - 480f, 300)
-        assertEquals(NavGestureClassifier.Outcome.Home, c.up(540f, bottom - 480f, t + 8))
+        assertFalse(c.armed)
+        assertEquals(NavGestureClassifier.Outcome.Switcher, c.up(540f, bottom - 480f, t + 8))
+    }
+
+    @Test
+    fun letGoNearTheTopGoesHome() {
+        val c = classifier()
+        c.down(540f, bottom, 0)
+        // Slowly up past half the screen (1200 px of 2400): the home zone.
+        val t = c.drag(540f, bottom, 540f, bottom - 1300f, 1600)
+        assertEquals(1f, c.homeness(), 0f)
+        assertEquals(NavGestureClassifier.Outcome.Home, c.up(540f, bottom - 1300f, t + 8))
+    }
+
+    @Test
+    fun theHomeZoneFadesInBetween() {
+        val c = classifier()
+        // 30% of the screen up: still all switcher; 40%: halfway; 50%: home.
+        assertEquals(0f, c.homeness(720f), 0.001f)
+        assertEquals(0.5f, c.homeness(960f), 0.001f)
+        assertEquals(1f, c.homeness(1200f), 0.001f)
     }
 
     @Test

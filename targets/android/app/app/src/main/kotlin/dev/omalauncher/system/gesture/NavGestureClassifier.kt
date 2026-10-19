@@ -7,14 +7,15 @@ import kotlin.math.hypot
  * What a finger that went down on the navigation bar's strip means (gesture navigation): pure logic, no Android, so it's
  * unit-tested (NavGestureClassifierTest). Coordinates are screen pixels (y grows downwards), times milliseconds.
  *
- * - Swipe up and let go: home. Swipe up and hold still a moment: the switcher. Along the bottom edge: the previous app.
+ * - A swipe up shows the switcher from its start (the app's window shrinks into its card); where it's let go decides,
+ *   by position and speed only - no waiting, no hold needed:
+ *   - flung up ([homeFlingSpeed]) or let go high ([homeDistance], near the top: the home zone, [homeness]) → home;
+ *   - let go anywhere between, at a relaxed speed → the switcher;
+ *   - hardly moved ([minDistance]) or flung back down → nothing (back to the app).
  * - The direction is decided once the finger has moved [slop] px: mostly up is the swipe up, mostly sideways the quick
- *   switch, down is nothing (the windows under it keep the touch).
- * - "Hold": after at least [holdMinDistance] up, the finger slower than [pauseSpeed] for [holdMs]. Moving on fast again
- *   un-arms it (as Quickstep's MotionPauseDetector).
- * - Let go, as Quickstep's end target: flung up ([homeFlingSpeed]) → home; armed, or let go slowly past
- *   [homeDistance] (the window on its card by then) → switcher; else nothing (back to the app). Sideways: past
- *   [switchDistance] or flung sideways → quick switch.
+ *   switch (past [switchDistance] or flung sideways), down is nothing (the windows under it keep the touch).
+ * - [armed] (held still a moment, as Quickstep's MotionPauseDetector) is kept for the log and the feel only: a hold
+ *   lands in the switcher like any relaxed release.
  *
  * Ported in spirit from AOSP Launcher3 Quickstep (Apache-2.0: OtherActivityInputConsumer, MotionPauseDetector), with
  * thresholds of its own.
@@ -27,13 +28,24 @@ class NavGestureClassifier(
     private val slop: Float = 8f * density,
 ) {
     private val holdMinDistance = 48f * density
+
+    /** Less than this up and let go: back to the app (a nudge, not a swipe). */
+    private val minDistance = 48f * density
     private val pauseSpeed = 0.12f * density // px/ms
     private val holdMs = 140L
     private val flingSpeed = 0.9f * density // px/ms
 
-    /** Up this fast at the release goes home (Quickstep's quickstep_fling_threshold_speed, 0.5 dp/ms). */
-    private val homeFlingSpeed = 0.5f * density // px/ms
-    private val homeDistance = screenHeight * 0.22f
+    /**
+     * Up this fast at the release goes home: a flick (1.2 dp/ms - a relaxed swipe slows to under half that by its
+     * release, so it lands in the switcher).
+     */
+    private val homeFlingSpeed = 1.2f * density // px/ms
+
+    /** Let go this high (half the screen up): home - the home zone the switcher fades out over ([homeness]). */
+    private val homeDistance = screenHeight * 0.5f
+
+    /** Where the home zone starts fading the switcher out (the cards fully up by here). */
+    private val homeZoneStart = screenHeight * 0.3f
     private val switchDistance = 56f * density
 
     enum class Axis { NONE, UP, SIDEWAYS, IGNORED }
@@ -141,15 +153,15 @@ class NavGestureClassifier(
             if (t - previous >= holdMs || (pauseSince >= 0 && t - pauseSince >= holdMs)) armed = true
         }
         val (vx, vy) = velocity()
-        why = "lift ${lift.toInt()}/${homeDistance.toInt()} px, vy ${"%.2f".format(-vy / density)} dp/ms (home over ${"%.2f".format(homeFlingSpeed / density)}), armed $armed"
+        why = "lift ${lift.toInt()} px (app under ${minDistance.toInt()}, home over ${homeDistance.toInt()}), vy ${"%.2f".format(-vy / density)} dp/ms (home over ${"%.2f".format(homeFlingSpeed / density)}), armed $armed"
         return when (axis) {
             Axis.UP ->
                 when {
-                    -vy >= homeFlingSpeed -> Outcome.Home
-                    armed -> Outcome.Switcher
                     vy >= flingSpeed -> Outcome.None
-                    lift >= homeDistance -> Outcome.Switcher
-                    else -> Outcome.None
+                    lift < minDistance -> Outcome.None
+                    -vy >= homeFlingSpeed -> Outcome.Home
+                    lift >= homeDistance -> Outcome.Home
+                    else -> Outcome.Switcher
                 }
             Axis.SIDEWAYS -> {
                 val dx = x - x0
@@ -158,6 +170,12 @@ class NavGestureClassifier(
             Axis.NONE, Axis.IGNORED -> Outcome.None
         }
     }
+
+    /**
+     * How far into the home zone [lift] is: 0 below [homeZoneStart], 1 at [homeDistance] - where letting go goes home.
+     * The switcher fades out and home comes in as it rises, so it's plain where the release will land.
+     */
+    fun homeness(lift: Float = this.lift): Float = ((lift - homeZoneStart) / (homeDistance - homeZoneStart)).coerceIn(0f, 1f)
 
     /** px/ms over the last [WINDOW_MS] of samples. */
     private fun velocity(): Pair<Float, Float> {

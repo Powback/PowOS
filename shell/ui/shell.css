@@ -1037,6 +1037,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   --rp: 0;
   --rx: 0px;
   --ry: 0px;
+  --rh: 0;
   --card-w: min(72vw, 440px, calc(62vh * var(--screen-ratio-n, 0.45)));
   --card-radius: max(var(--radius), 22px);
   position: fixed;
@@ -1053,14 +1054,15 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents.shown { pointer-events: auto; }
 /* Collapsing: it stays visible till the cards are gone. */
 .recents.closed.settling { transition: visibility 0s linear 240ms; }
-.recents-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-background) 45%, transparent); opacity: var(--rp); pointer-events: none; }
+.recents-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-background) 45%, transparent); opacity: calc(var(--rp) * (1 - var(--rh))); pointer-events: none; }
 .recents .task-row {
   direction: rtl;
   position: relative;
+  opacity: calc(1 - var(--rh));
   gap: calc(var(--gap) * 3);
   padding: 0 calc((100vw - var(--card-w)) / 2);
   scroll-snap-type: x proximity;
-  transform: translate(var(--rx), var(--ry));
+  transform: translate(var(--rx), var(--ry)) scale(calc(1 - 0.12 * var(--rh)));
 }
 .recents .task { direction: ltr; width: var(--card-w); max-width: none; }
 .recents .task-head { justify-content: center; gap: 10px; padding: 0 4px 12px; font: 500 var(--text-small) var(--font); color: var(--color-foreground); }

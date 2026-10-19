@@ -172,12 +172,31 @@ object Tasks {
     private const val SNAP_TO_2_50_50 = 1
     private const val WINDOWING_MODE_FREEFORM = 5
 
-    /** Removes task [id] from recents (and ends its activities, as the stock switcher's swipe away). */
-    fun remove(id: Int): Boolean =
-        runCatching {
+    /**
+     * Removes task [id] from recents (and ends its activities, as the stock switcher's swipe away). Never a task the
+     * home's widgets depend on: one of an app whose widget is on home ([kept]: removing it kills the provider's
+     * process under its hosted widget), refused; PowOS's own (the assistant, a window) is finished as a task of ours -
+     * its activities only, never the process that hosts home, its widgets and the gestures.
+     */
+    fun remove(
+        context: Context,
+        id: Int,
+    ): Boolean {
+        val task = list(context).firstOrNull { it.id == id }
+        val pkg = task?.component?.packageName
+        if (pkg != null && pkg in kept(context)) return false.also { Log.i(TAG, "task $id ($pkg) kept: its widget is on home") }
+        if (pkg == context.packageName) {
+            val own = context.getSystemService(ActivityManager::class.java).appTasks.firstOrNull { runCatching { it.taskInfo?.taskId }.getOrNull() == id }
+            if (own != null) return runCatching { own.finishAndRemoveTask() }.isSuccess
+        }
+        return runCatching {
             HiddenApi.allow()
             atm().javaClass.getMethod("removeTask", Int::class.javaPrimitiveType).invoke(atm(), id) as Boolean
         }.onFailure { Log.w(TAG, "can't remove task $id", it) }.getOrDefault(false)
+    }
+
+    /** The apps whose tasks clear all and a swipe leave alone: those with a widget on home. */
+    fun kept(context: Context): Set<String> = runCatching { dev.omalauncher.shell.AppWidgets.get(context).providerPackages() }.getOrDefault(emptySet())
 
     /**
      * Takes task [id]'s snapshot now (its window as it is this moment) into the system's cache, which [snapshot] then

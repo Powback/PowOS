@@ -63,7 +63,7 @@ class RecentsTransition private constructor(
     var slot: () -> Rect? = { null }
 
     /** Every frame the windows move: progress 0 (full screen) .. 1 (on the card), and the sideways / upwards offset (px). */
-    var onFrame: ((progress: Float, dx: Float, dy: Float) -> Unit)? = null
+    var onFrame: ((progress: Float, dx: Float, dy: Float, home: Float) -> Unit)? = null
 
     enum class End { HOME, SWITCHER, APP }
 
@@ -95,6 +95,8 @@ class RecentsTransition private constructor(
         val dy: Float,
         val shrink: Float = 1f,
         val alpha: Float = 1f,
+        /** How far into the home zone (0..1): where letting go goes home - the page fades the switcher out with it. */
+        val home: Float = 0f,
     )
 
     private var look = Look(0f, 0f, 0f)
@@ -110,9 +112,10 @@ class RecentsTransition private constructor(
     fun drag(
         lift: Float,
         dx: Float,
+        home: Float = 0f,
     ) {
         if (state == State.DONE || state == State.ENDING) return
-        look = dragLook(lift, dx)
+        look = dragLook(lift, dx, home)
         // Once per display frame (touch comes in faster than the screen refreshes): the window and the page move
         // together on the frame, with the newest finger position.
         if (!framePending) {
@@ -175,6 +178,7 @@ class RecentsTransition private constructor(
             return
         }
         this.controller = controller
+        Log.i(TAG, "started: " + targets.filterNotNull().joinToString { "task ${it.taskId} mode ${it.mode} at ${it.screenSpaceBounds}" })
         apps =
             targets.filterNotNull().filter { it.mode == RemoteAnimationTarget.MODE_CLOSING && it.leash != null }.map {
                 Leash(it.leash, it.screenSpaceBounds ?: Rect(0, 0, 0, 0))
@@ -252,7 +256,7 @@ class RecentsTransition private constructor(
         val to =
             when (end) {
                 // Shrinks away into home (the layer collapses behind it).
-                End.HOME -> Look(1f, 0f, -screen.height() * 0.04f, shrink = 0.6f, alpha = 0f)
+                End.HOME -> Look(1f, 0f, -screen.height() * 0.04f, shrink = 0.6f, alpha = 0f, home = 1f)
                 // Onto its card exactly.
                 End.SWITCHER -> Look(1f, 0f, 0f)
                 End.APP -> Look(0f, 0f, 0f)
@@ -271,6 +275,7 @@ class RecentsTransition private constructor(
                             lerp(from.dy, to.dy, f),
                             lerp(from.shrink, to.shrink, f),
                             lerp(from.alpha, to.alpha, f),
+                            lerp(from.home, to.home, f),
                         )
                     apply(look)
                 }
@@ -327,17 +332,19 @@ class RecentsTransition private constructor(
     private fun dragLook(
         lift: Float,
         dx: Float,
+        home: Float,
     ): Look {
         val travel = (screen.bottom - target().bottom).toFloat().coerceAtLeast(screen.height() * 0.12f)
         val progress = (lift / travel).coerceIn(0f, 1f)
         val over = (lift - travel).coerceAtLeast(0f)
-        return Look(progress, dx, -over * RUBBER)
+        // Into the home zone the window shrinks and fades toward home, as the release there will take it.
+        return Look(progress, dx, -over * RUBBER, shrink = 1f - 0.35f * home, alpha = 1f - 0.6f * home, home = home)
     }
 
     /** The windows as [look] says: their frame between full screen and the card, moved, shrunk, faded. */
     private fun apply(look: Look) {
         if (state != State.RUNNING && state != State.ENDING) return
-        onFrame?.invoke(look.progress, look.dx, look.dy)
+        onFrame?.invoke(look.progress, look.dx, look.dy, look.home)
         if (apps.isEmpty()) return
         val card = target()
         val p = look.progress

@@ -181,6 +181,8 @@ class ShellActivity : Activity() {
     override fun onStart() {
         super.onStart()
         if (::host.isInitialized) dev.omalauncher.system.Switcher.homeStarted(host.bridge)
+        // A hosted widget that lost its drawing while home was away (its provider killed, a display gone): again.
+        AppWidgets.get(this).heal()
         runtime.widgets.homeStarted()
         runtime.screenStarted()
     }

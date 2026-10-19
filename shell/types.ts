@@ -179,6 +179,8 @@ export interface RecentTask {
   key: string | null;
   icon: string | null;
   snapshot: string;
+  /** Its app has a widget on home: clear all and a swipe leave it (removing it kills that widget's provider). */
+  kept?: boolean;
 }
 /** [available]: the launcher may read them (it has notification access). */
 export interface NotificationList {

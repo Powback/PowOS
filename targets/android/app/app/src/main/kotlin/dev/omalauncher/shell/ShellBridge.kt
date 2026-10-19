@@ -209,7 +209,7 @@ class ShellBridge(
             "shade.peekHeight" -> shade?.peekHeight((a.getDouble(0) * density()).toInt())
             "tasks.list" -> tasks()
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
-            "tasks.remove" -> dev.omalauncher.system.Tasks.remove(a.getInt(0))
+            "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }
             "tasks.split" -> dev.omalauncher.system.Tasks.split(a.getInt(0), a.getInt(1))
             "tasks.float" -> dev.omalauncher.system.Tasks.float(context, a.getInt(0))
             "tasks.info" -> dev.omalauncher.system.Tasks.info(context, a.getInt(0))
@@ -391,6 +391,7 @@ class ShellBridge(
         // A snapshot URL per task and per time it was last in front: the page's cache keeps a card's picture till the
         // task was used again (the switcher's own app gets a fresh one when its window lands, Switcher.settle).
         val stamp = System.currentTimeMillis()
+        val kept = dev.omalauncher.system.Tasks.kept(context)
         return JSONArray(
             dev.omalauncher.system.Tasks.list(context).map { t ->
                 val pkg = t.component?.packageName
@@ -401,6 +402,8 @@ class ShellBridge(
                     .put("key", app?.let { "a:${it.key}" } ?: JSONObject.NULL)
                     .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
                     .put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=${t.lastActive.takeIf { it > 0 } ?: stamp}")
+                    // Its widget is on home: clear all and a swipe leave it (its process hosts that widget).
+                    .put("kept", pkg != null && pkg in kept)
             },
         )
     }

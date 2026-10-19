@@ -117,7 +117,7 @@ class NavGesture(
                     }
                     else -> {}
                 }
-                if (c.axis == NavGestureClassifier.Axis.UP) transition?.drag(c.lift, e.rawX - downX)
+                if (c.axis == NavGestureClassifier.Axis.UP) transition?.drag(c.lift, e.rawX - downX, c.homeness())
                 return GestureConsumer.Verdict.FOLLOW
             }
             MotionEvent.ACTION_POINTER_DOWN ->

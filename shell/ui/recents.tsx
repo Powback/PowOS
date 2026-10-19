@@ -69,16 +69,19 @@ function order(list: RecentTask[], over: number | null) {
  * A frame: [p] 0 (the app full screen, home as it was) .. 1 (the switcher up), the row moved by [x], [y] (CSS px).
  * Custom properties on the layer (its few nodes restyle) and an inline transform on home's content - no render.
  */
-function frame(p: number, x = 0, y = 0) {
+function frame(p: number, x = 0, y = 0, home = 0) {
   if (layer) {
     layer.style.setProperty("--rp", String(p));
     layer.style.setProperty("--rx", `${x}px`);
     layer.style.setProperty("--ry", `${y}px`);
+    // Into the home zone (near the top): the cards fade and shrink away, home's icons come in - letting go there goes home.
+    layer.style.setProperty("--rh", String(home));
   }
   const s = screens();
   if (s) {
-    s.style.transform = p ? `scale(${1 - 0.08 * p})` : "";
-    s.style.opacity = p ? String(1 - p) : "";
+    const shown = Math.max(1 - p, home);
+    s.style.transform = shown < 1 ? `scale(${0.92 + 0.08 * shown})` : "";
+    s.style.opacity = shown < 1 ? String(shown) : "";
   }
 }
 
@@ -97,6 +100,7 @@ function reset() {
 }
 
 function begin(e: { from: number | null; tasks: RecentTask[] }) {
+  console.log(`recents: begin over ${e.from}, ${e.tasks.length} tasks, visible ${document.visibilityState}`);
   settle(false);
   reset();
   from.value = e.from;
@@ -191,17 +195,24 @@ function cardPositions() {
 
 function remove(id: number) {
   menu.value = null;
+  const t = tasks.value.find((x) => x.id === id);
+  if (t?.kept) {
+    showNote(`${t.label} stays: its widget is on home`);
+    return false;
+  }
   powos.tasks.remove(id);
   flipFrom = cardPositions();
   tasks.value = tasks.value.filter((t) => t.id !== id);
   if (splitFirst.value === id) splitFirst.value = null;
   if (!tasks.value.length) close();
+  return true;
 }
 
-/** All but the pinned ones fly up and go; with nothing left, the switcher closes. */
+/** All but the pinned ones (and those with a widget on home) fly up and go; with nothing left, the switcher closes. */
 function clearAll() {
-  const keep = tasks.value.filter((t) => pinned.value.has(pinKey(t)));
-  const going = tasks.value.filter((t) => !pinned.value.has(pinKey(t)));
+  const stays = (t: RecentTask) => t.kept || pinned.value.has(pinKey(t));
+  const keep = tasks.value.filter(stays);
+  const going = tasks.value.filter((t) => !stays(t));
   if (!going.length) return;
   let left = going.length;
   going.forEach((t, i) => {
@@ -299,8 +310,8 @@ export function recentsHome() {
 }
 
 powos.on("recents.begin", begin);
-powos.on("recents.drag", (e: { progress: number; x: number; y: number }) => {
-  if (phase.value === "drag") frame(e.progress, e.x, e.y);
+powos.on("recents.drag", (e: { progress: number; x: number; y: number; home?: number }) => {
+  if (phase.value === "drag") frame(e.progress, e.x, e.y, e.home ?? 0);
 });
 powos.on("recents.end", (e: { to: "switcher" | "home" | "app"; snapshot?: string | null }) => {
   if (e.to === "switcher") landed(e.snapshot ?? null);

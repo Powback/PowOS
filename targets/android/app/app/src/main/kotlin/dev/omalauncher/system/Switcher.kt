@@ -217,6 +217,7 @@ object Switcher {
         from = over
         release = null
         boost?.invoke(true)
+        Log.i(TAG, "begin over $over: ${if (home == null) "no page to show it" else "on ${if (onHome) "home's page" else "the recents activity"}"}, home ${if (homeVisible) "started" else "not started"}, slot $slot")
         home?.emit("recents.begin", JSONObject().put("from", over ?: JSONObject.NULL).put("tasks", tasks()))
     }
 
@@ -225,12 +226,13 @@ object Switcher {
         progress: Float,
         dx: Float,
         dy: Float,
+        homeness: Float,
     ) {
         if (!gesture) return
         val d = density()
-        depthNow(progress)
+        depthNow(progress * (1f - homeness))
         // A string, not a JSONObject, sent now (this is the display frame's callback): every frame, as cheap as it can be.
-        home?.emitNow("recents.drag", "{\"progress\":$progress,\"x\":${dx / d},\"y\":${dy / d}}")
+        home?.emitNow("recents.drag", "{\"progress\":$progress,\"x\":${dx / d},\"y\":${dy / d},\"home\":$homeness}")
     }
 
     /** The swipe went home or back to the app: the layer collapses. */
