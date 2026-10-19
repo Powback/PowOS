@@ -166,9 +166,10 @@ chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos
 # from powos-start.sh (at boot, and now); its data and settings are the user's, under /var/lib/powos.
 A=$T/powos-apps
 if [ -d $A ]; then
-  for p in $A/spacetimedb-bin-*.pkg.tar.*; do
+  for p in $A/spacetimedb-*.pkg.tar.*; do
     [ -e "$p" ] || continue
-    cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
+    # --ask 4: the patched build replaces spacetimedb-bin (pacman's "remove the conflicting package?" answered yes).
+    cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --ask 4 --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
       echo "spacetimedb: $(chroot $R /usr/bin/spacetime --version 2>/dev/null | head -1)"
   done
   L=$R/usr/lib/powos/apps

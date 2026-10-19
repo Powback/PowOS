@@ -239,7 +239,8 @@ def landlock_wrap(writable):
 def environment(m, pw, data):
     env = {"HOME": data, "USER": pw.pw_name, "LOGNAME": pw.pw_name, "PATH": "/usr/local/bin:/usr/bin:/usr/sbin",
            "LANG": os.environ.get("LANG", "C.UTF-8"), "POWOS_APP": m["id"], "POWOS_APP_DATA": data}
-    for k, v in (m["backend"].get("env") or {}).items():
+    # The backend's env, then the device's budget env (thread pools sized for a phone, say).
+    for k, v in {**(m["backend"].get("env") or {}), **(budget_of(m).get("env") or {})}.items():
         env[k] = expand(str(v), data)
     return env
 

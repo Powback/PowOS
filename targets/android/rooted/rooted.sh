@@ -69,9 +69,11 @@ deploy)
   adb push -q "$HERE/../../../lib/apps" /data/local/tmp/powos-apps
   adb push -q "$HERE/../../../bin/powos" /data/local/tmp/powos-apps/powos
   adb push -q "$HERE/../../../lib/config.sh" /data/local/tmp/powos-apps/config.sh
-  stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb-bin)
+  # The patched source build (pkgs/spacetimedb) when there is one, else the official binaries (pkgs/spacetimedb-bin).
+  stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb)
+  [ -n "$stdb" ] || stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb-bin)
   if [ -n "$stdb" ]; then adb push -q "$stdb" "/data/local/tmp/powos-apps/${stdb##*/}"
-  else echo "rooted.sh: no spacetimedb-bin package (targets/android/build-pkgs.sh spacetimedb-bin) - SpacetimeDB not updated"; fi
+  else echo "rooted.sh: no spacetimedb package (targets/android/build-pkgs.sh spacetimedb) - SpacetimeDB not updated"; fi
   reg=$HERE/../../../apps/registry/out/module.wasm
   if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
   else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi
