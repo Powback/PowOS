@@ -1,7 +1,7 @@
 /**
- * Home: the pages; the launcher panel - the recent apps bar, which a swipe up grows into the drawer, its top edge
- * following the finger, the recent apps staying its bottom row; the search bar; and under it the dock, the apps
- * pinned to stay at hand (as on iOS).
+ * Home: the pages; the launcher panel - the recent apps bar, which a swipe up grows into the drawer: the recent row
+ * rides the top edge as it follows the finger, and all the apps unfold under it - one component, the bar is the
+ * launcher's head; the search bar; and under it the dock, the apps pinned to stay at hand (as on iOS).
  *
  * The panel's openness (gesture.ts) is one number, --p, on the stage: the frame's top edge and the clip that reveals
  * the drawer move with it in CSS, so a frame of the swipe moves an edge, not a re-laid-out list of apps.
@@ -48,10 +48,12 @@ export function Home() {
         </div>
         <div class="launcher-frame tile" />
         <div class="launcher">
-          <div class="drawer-clip">
-            <Drawer />
+          <div class="launcher-inner">
+            <RecentRow />
+            <div class="drawer-clip">
+              <Drawer />
+            </div>
           </div>
-          <RecentRow />
         </div>
       </div>
       <Bar />

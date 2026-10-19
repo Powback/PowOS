@@ -66,6 +66,13 @@
   /* Closed, only the recent apps take touches; the pages under the rest stay reachable. */
   pointer-events: none;
 }
+/* The panel's content, the recent row first: it moves with the top edge as one piece (the clip cuts what's below). */
+.launcher-inner {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  transform: translateY(calc((1 - var(--p)) * (100% - var(--strip-height))));
+}
 .launcher .strip { pointer-events: auto; }
 .stage.open .launcher .drawer { pointer-events: auto; }
 
@@ -125,7 +132,7 @@
   font-size: var(--text-small);
 }
 
-/* The drawer: the panel's upper part (clipped there: riding up, it doesn't spill under the recent row). */
+/* The drawer: the panel under the recent row. */
 .drawer-clip {
   flex: 1;
   min-height: 0;
@@ -138,9 +145,7 @@
   display: grid;
   grid-template-columns: 1fr var(--letter-bar);
   grid-template-rows: minmax(0, 1fr);
-  padding: var(--edge) 4px 0 var(--edge);
-  /* It rides up with the panel's top edge: its own top comes in first, as the bar grows into it. */
-  transform: translateY(calc((1 - var(--p)) * 100%));
+  padding: 0 4px 0 var(--edge);
 }
 
 .drawer-list {
