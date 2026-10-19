@@ -28,6 +28,9 @@ class ShellWidgets(
     private val watched = HashMap<String, Job>()
     private val trees = HashMap<String, WidgetTree>()
 
+    /** The last tree sent for each watch: a page loaded again (hot reload) asks again and gets it at once. */
+    private val sent = HashMap<String, String?>()
+
     /** Canvas sizes by "<widget key>#<element id>", in dp: state, so a new size redraws the widget. */
     private val canvasSizes = mutableStateMapOf<String, Pair<Double, Double>>()
 
@@ -39,7 +42,11 @@ class ShellWidgets(
         screen: Boolean,
     ) {
         val id = if (screen) "$key#screen" else key
-        if (id in watched) return
+        if (id in watched) {
+            // Watched already - by this page before it reloaded: the flow only sends changes, so send it as it is.
+            if (id in sent) send(key, screen, sent[id])
+            return
+        }
         watched[id] =
             scope.launch {
                 launch { clock(key) }
@@ -54,18 +61,27 @@ class ShellWidgets(
                 }.distinctUntilChanged()
                     .conflate()
                     .collect { json ->
-                        emit("widget.tree", JSONObject().put("key", key).put("screen", screen).put("tree", json?.let(::JSONObject) ?: JSONObject.NULL))
+                        sent[id] = json
+                        send(key, screen, json)
                         // Every frame at most: a widget whose state changes faster is drawn at this rate.
                         delay(FRAME_MS)
                     }
             }
     }
 
+    private fun send(
+        key: String,
+        screen: Boolean,
+        json: String?,
+    ) = emit("widget.tree", JSONObject().put("key", key).put("screen", screen).put("tree", json?.let(::JSONObject) ?: JSONObject.NULL))
+
     fun unwatch(
         key: String,
         screen: Boolean,
     ) {
-        watched.remove(if (screen) "$key#screen" else key)?.cancel()
+        val id = if (screen) "$key#screen" else key
+        watched.remove(id)?.cancel()
+        sent.remove(id)
     }
 
     /** What the Compose launcher's FrameClock does: `time` advances while an animated widget is on screen. */

@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { byKey, carry, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
 import { powos } from "../bridge.ts";
-import { drawerOpen, pagesDragging } from "./gesture.ts";
+import { applyTrack, drawerOpen } from "./gesture.ts";
 import { OwlWidget } from "./owl.tsx";
 import type { Cell, HomeItem } from "../types.ts";
 
@@ -338,6 +338,7 @@ export function Pages() {
   }, []);
   // Tiles reaching further down add rows, and the launcher closing gives the room back: re-measure then.
   useEffect(() => void (el.current && measure(el.current, home.value.columns)), [home.value, drawerOpen.value]);
+  useEffect(() => applyTrack(), []);
   const list = pages.value;
   if (page.value >= list.length) page.value = list.length - 1;
   // Widgets on the page on screen (and beside it) run their sources; the rest pause.
@@ -352,10 +353,8 @@ export function Pages() {
         if (t.classList.contains("page") || t.classList.contains("page-track")) selected.value = null;
       }}
     >
-      {/* Its transform follows the finger and the page from gesture.ts, not through a render. */}
-      <div class={`page-track ${pagesDragging.value ? "dragging" : ""}`} ref={(el) => {
-          if (el) el.style.transform = `translateX(${-page.value * 100}%)`;
-        }}>
+      {/* Its position and transition are gesture.ts's (applyTrack), never a render's. */}
+      <div class="page-track">
         {list.map((n) => (
           <div class="page" key={n}>
             {itemsOn(n).map((item) => (

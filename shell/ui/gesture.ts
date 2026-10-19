@@ -27,25 +27,33 @@ export const pageDrag = signal<number | null>(null);
 export const drawerShown = () => drawerDrag.value ?? (drawer.value > 0 ? 1 : 0);
 
 /**
- * What rendering reads - whether the drawer shows at all, whether a finger holds it or the pages - changes a few
+ * What rendering reads - whether the drawer shows at all, whether a finger holds it - changes a few
  * times a gesture. The openness itself changes every frame of it, and goes straight to the elements that follow it
  * (data-p: their --p; .page-track: its transform), never through a render: a render per frame of a swipe rebuilt the
  * drawer's every app and home's every tile.
  */
 export const drawerOpen = computed(() => drawerShown() > 0);
 export const drawerDragging = computed(() => drawerDrag.value != null);
-export const pagesDragging = computed(() => pageDrag.value != null);
 
 effect(() => {
   const p = String(drawerShown());
   for (const el of document.querySelectorAll<HTMLElement>("[data-p]")) el.style.setProperty("--p", p);
 });
-effect(() => {
+/**
+ * The pages' track: its position and whether it follows the finger (no transition) are set here only, never by a
+ * render - a render in the middle of a swipe put it back where the page rests, and the next move took it to the
+ * finger again: it jumped back and forth.
+ */
+effect(() => applyTrack());
+export function applyTrack() {
   // Read first: an effect subscribes to what it reads, and the track may not be there yet on its first run.
-  const transform = `translateX(calc(${-page.value * 100}% + ${pageDrag.value ?? 0}px))`;
+  const dx = pageDrag.value;
+  const transform = `translateX(calc(${-page.value * 100}% + ${dx ?? 0}px))`;
   const track = document.querySelector<HTMLElement>(".page-track");
-  if (track) track.style.transform = transform;
-});
+  if (!track) return;
+  track.classList.toggle("dragging", dx != null);
+  track.style.transform = transform;
+}
 
 /** Elements that follow the openness, newly mounted: given its current value. */
 export function followOpenness(el: HTMLElement | null) {
