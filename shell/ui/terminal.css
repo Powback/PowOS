@@ -57,7 +57,7 @@ html.term-focus .stage { transform: translateY(calc(-1 * var(--term-lift, 0px)))
 html.term-focus :is(.bar, .dock, .launcher, .launcher-frame) { visibility: hidden; }
 .widget-face:has(.term.focused) { border-color: var(--color-accent); }
 
-/* The extra keys (ExtraKeys.kt): two rows of keycaps docked above the keyboard, a keyboard key at either end. */
+/* The extra keys (ExtraKeys.kt): two rows of keycaps docked above the keyboard. */
 .term-extra-host { position: fixed; z-index: 20; left: 0; right: 0; bottom: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)); }
 .term-extra {
   display: flex;
@@ -81,6 +81,4 @@ html.term-focus :is(.bar, .dock, .launcher, .launcher-frame) { visibility: hidde
 .term-key:active { background: var(--color-border); }
 .term-key.sticky.on { color: var(--color-accent); }
 .term-key.sticky.locked { background: var(--color-accent); color: var(--color-background); }
-.term-key.keyboard { flex: 0 0 40px; height: auto; display: grid; place-items: center; }
-.term-key.keyboard svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 .term-arrow { display: inline-block; font-size: 16px; line-height: 1; }

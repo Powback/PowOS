@@ -293,8 +293,6 @@ export function closeTerminal(id: string) {
 const focused = signal<View | null>(null);
 /** The session it shows. */
 const focusedSession = () => [...sessions.values()].find((s) => focused.value && s.views.includes(focused.value)) ?? null;
-/** The keyboard was put away by the extra keys' own key (not Back): the terminal keeps the keys. */
-let ownHide = false;
 let keyboardUp = false;
 let keyboardHeight = 0;
 
@@ -306,7 +304,6 @@ function focus(view: View) {
   s.views.push(view);
   s.show();
   focused.value = view;
-  ownHide = false;
   document.documentElement.classList.add("term-focus");
   mountExtraKeys();
   s.term.focus();
@@ -350,9 +347,8 @@ powos.on("system.insets", (i: { keyboard: number }) => {
   keyboardHeight = i.keyboard;
   // The keyboard gone by itself (Back closes it before the page sees Back): a tile lets go, as the Compose one; a
   // screen's terminal keeps the keys (the next Back closes the screen).
-  if (keyboardUp && i.keyboard === 0 && !ownHide && screen.value.key == null) release();
+  if (keyboardUp && i.keyboard === 0 && screen.value.key == null) release();
   keyboardUp = i.keyboard > 0;
-  if (keyboardUp) ownHide = false;
   extraKeysState.value = { keyboard: keyboardUp };
   requestAnimationFrame(lift);
 });
@@ -515,36 +511,10 @@ function Sticky({ name, mod }: { name: string; mod: typeof ctrl }) {
   );
 }
 
-/** The keyboard's own key, at either end: puts it away (the terminal keeps the keys) or brings it back. */
-function KeyboardKey() {
-  const up = extraKeysState.value.keyboard;
-  return (
-    <button
-      class="term-key keyboard"
-      onPointerDown={(e) => {
-        e.preventDefault();
-        if (up) {
-          ownHide = true;
-          powos.keyboard.hide();
-        } else {
-          focusedSession()?.term.focus();
-          powos.keyboard.show();
-        }
-      }}
-    >
-      <svg viewBox="0 0 24 24">
-        <rect x="2.5" y="6" width="19" height="12" rx="2" />
-        <path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 13.5h.01M18 13.5h.01M9 14.5h6" />
-      </svg>
-    </button>
-  );
-}
-
 function ExtraKeys() {
   if (!focused.value) return null;
   return (
     <div class="term-extra tile">
-      <KeyboardKey />
       <div class="term-rows">
         {ROWS.map((row, i) => (
           <div class="term-row" key={i}>
@@ -552,7 +522,6 @@ function ExtraKeys() {
           </div>
         ))}
       </div>
-      <KeyboardKey />
     </div>
   );
 }
@@ -632,11 +601,11 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
   // Focused, its touches are the terminal's: kept from the home screen's swipes. A drag scrolls - the scrollback, or
   // what the program does with the wheel (tmux's mouse: its history; a full-screen program: arrow keys), which xterm
   // works out from a wheel event; a tap is a click (the browser's mouse events, which xterm reports to tmux).
-  const drag = useRef<{ y: number; id: number; rest: number } | null>(null);
+  const drag = useRef<{ y: number; y0: number; id: number; rest: number } | null>(null);
   const focusedHandlers = {
     onPointerDown: (e: PointerEvent) => {
       e.stopPropagation();
-      drag.current = { y: e.clientY, id: e.pointerId, rest: 0 };
+      drag.current = { y: e.clientY, y0: e.clientY, id: e.pointerId, rest: 0 };
     },
     onPointerMove: (e: PointerEvent) => {
       const d = drag.current;
@@ -659,7 +628,15 @@ export function TerminalView({ id, owner = null, command = null, interactive = t
         new WheelEvent("wheel", { deltaY: -dy, deltaMode: WheelEvent.DOM_DELTA_PIXEL, clientX: e.clientX, clientY: e.clientY, bubbles: true, cancelable: true }),
       );
     },
-    onPointerUp: () => (drag.current = null),
+    onPointerUp: (e: PointerEvent) => {
+      const d = drag.current;
+      drag.current = null;
+      // A tap with the keyboard down (Back put it away in a screen) brings it back, as Termux's view does.
+      if (d && Math.abs(e.clientY - d.y0) < SLOP && !extraKeysState.peek().keyboard) {
+        session.term.focus();
+        powos.keyboard.show();
+      }
+    },
     onPointerCancel: () => (drag.current = null),
   };
 
