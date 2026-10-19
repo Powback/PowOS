@@ -90,6 +90,8 @@ class ShellBridge(
         }
 
     init {
+        // Live mode on or off (its consent answered, its capture stopped): the assistant's page follows.
+        dev.omalauncher.assist.LiveCapture.onChange = { main.post { emit("assist.live", liveState()) } }
         // An agent told the user something: the PowOS AI page lists it.
         scope.launch { snapshotFlow { AgentMail.recent.toList() }.drop(1).collect { emit("ai.mail", aiMail()) } }
         // A notification posted or gone: the panel lists them again.
@@ -157,6 +159,13 @@ class ShellBridge(
             "assist.screen" -> assist?.screen()
             "assist.close" -> assist?.close()
             "assist.attach" -> assist?.attach(a.optString(0).takeIf { it.isNotEmpty() && it != "null" })
+            "assist.touchable" -> assist?.touchable(a.optJSONObject(0)?.let { touchRect(it) })
+            "assist.live" -> {
+                if (a.optBoolean(0)) dev.omalauncher.assist.LiveCapture.start(context) else dev.omalauncher.assist.LiveCapture.stop(context)
+                null
+            }
+            "assist.liveState" -> liveState()
+            "assist.filmstrip" -> dev.omalauncher.assist.LiveCapture.filmstrip(context)
             "theme.get" -> theme()
             "theme.list" -> themeList()
             "theme.pick" -> pickTheme(a.getString(0))
@@ -267,6 +276,18 @@ class ShellBridge(
                     .put("profile", item.profile ?: JSONObject.NULL)
             }
         return JSONObject().put("available", n.available).put("items", JSONArray(items))
+    }
+
+    /** Live mode's state for the page: on or not, frames kept. */
+    private fun liveState() =
+        JSONObject().put("on", dev.omalauncher.assist.LiveCapture.running).put("frames", dev.omalauncher.assist.LiveCapture.count())
+
+    /** A rectangle from the page (CSS px: left, top, width, height) in device px. */
+    private fun touchRect(r: JSONObject): android.graphics.Rect {
+        val d = context.resources.displayMetrics.density
+        val l = (r.getDouble("left") * d).toInt()
+        val t = (r.getDouble("top") * d).toInt()
+        return android.graphics.Rect(l, t, l + (r.getDouble("width") * d).toInt(), t + (r.getDouble("height") * d).toInt())
     }
 
     /** The battery: its level (0-100) and whether it's charging, from Android's sticky battery broadcast. */

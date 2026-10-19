@@ -24,6 +24,16 @@ class PowosAssistSession(
     private var screenText = ""
     private var shot: File? = null
 
+    /** Live mode: only the page's bar takes touches (device px); null: the whole window, as when it's a panel. */
+    private var touchArea: android.graphics.Rect? = null
+
+    override fun onComputeInsets(outInsets: Insets) {
+        super.onComputeInsets(outInsets)
+        val area = touchArea ?: return
+        outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+        outInsets.touchableRegion.set(area)
+    }
+
     override fun onCreateContentView(): View {
         // The warm page (AssistWeb): ready before the power button is held, so the panel is there at once.
         val h = AssistWeb.get(context)
@@ -33,6 +43,13 @@ class PowosAssistSession(
                 override fun screen() = screenJson()
 
                 override fun attach(image: String?) = share(image)
+
+                override fun touchable(rect: android.graphics.Rect?) {
+                    touchArea = rect
+                    // A layout pass makes the window ask for its insets again (onComputeInsets): the app below gets the
+                    // touches outside the bar from now on.
+                    host?.web?.requestLayout()
+                }
 
                 override fun close() = finish()
             }
@@ -71,6 +88,8 @@ class PowosAssistSession(
     }
 
     override fun onDestroy() {
+        // Live mode ends with the session (the capture would otherwise go on, unseen).
+        LiveCapture.stop(context)
         // The page stays warm for the next time (AssistWeb); only this session's window lets go of it.
         host?.let { (it.web.parent as? ViewGroup)?.removeView(it.web) }
         host?.bridge?.assist = null
@@ -127,6 +146,9 @@ class PowosAssistSession(
 /** What the page's assist screen reaches through the bridge (assist.screen, assist.close). */
 interface AssistSlot {
     fun screen(): JSONObject
+
+    /** Where the page takes touches (live mode: its bar), in device px; null: everywhere. */
+    fun touchable(rect: android.graphics.Rect?)
 
     /** An image for PowOS AI (a cut-out region as a data: URL, or null: the whole screenshot); its path in PowOS. */
     fun attach(image: String?): String?

@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- PowOS AI's live mode: the screen, with the user's consent each session (assist/LiveCapture.kt). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Speech input for the agent prompt bar; only recognized text reaches Linux. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -148,6 +150,16 @@
             android:name="dev.omalauncher.assist.PowosAssistSessionService"
             android:exported="true"
             android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <activity
+            android:name="dev.omalauncher.assist.LiveConsentActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:exported="false" />
+        <service
+            android:name="dev.omalauncher.assist.LiveCaptureService"
+            android:foregroundServiceType="mediaProjection"
+            android:exported="false" />
         <service
             android:name="dev.omalauncher.assist.PowosRecognitionService"
             android:label="PowOS AI"

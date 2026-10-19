@@ -817,3 +817,8 @@ html[data-mode="assist"] .assist {
 .crop-bar button { font: var(--text-small) var(--font); padding: 8px 12px; color: var(--color-foreground); }
 .crop-bar button.on { color: var(--color-accent); }
 .crop-bar button:disabled { opacity: 0.4; }
+.assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
+.assist-live.on { border-color: var(--color-red); color: var(--color-red); }
+/* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
+html[data-mode="assist"] .assist.live { background: none; pointer-events: none; }
+.assist.live .assist-panel { pointer-events: auto; max-height: 45%; }

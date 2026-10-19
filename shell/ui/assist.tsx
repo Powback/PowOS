@@ -6,6 +6,10 @@
  *
  * The screenshot goes along too (PowOS AI reads it: the host saves it where PowOS sees it, the question names the
  * path). Tapping the thumbnail opens it full size to circle what you mean instead - letting go cuts that part out.
+ *
+ * Live mode: the screen a frame a second (LiveCapture; Android asks once), the panel a bar at the bottom - the app
+ * under it stays usable (only the bar takes touches) - and each question takes the last moments that changed as one
+ * filmstrip image.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
@@ -22,6 +26,9 @@ const asked = signal(false);
 const image = signal<{ region: string | null } | null>({ region: null });
 /** The cut-out view, open. */
 const cropping = signal(false);
+/** Live mode: on, and how many different moments it holds. */
+const live = signal({ on: false, frames: 0 });
+powos.on("assist.live", (l: { on: boolean; frames: number }) => (live.value = l));
 
 powos.on("assist.context", (s: AssistScreen) => (screen.value = s));
 // Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go.
@@ -43,9 +50,15 @@ async function send() {
   asked.value = true;
   const seen = screen.value?.text.trim();
   // The image first (the host saves it where PowOS sees it), then the screen's text: both after the question, which is
-  // all the chat shows of it (powai.tsx).
-  const path = image.value && screen.value?.screenshot ? await powos.assist.attach(image.value.region) : null;
-  const context = [path && `(image of it: ${path} - read it to see the screen${image.value?.region ? ", the part I mean" : ""})`, seen?.slice(0, SCREEN_TEXT)]
+  // all the chat shows of it (powai.tsx). Live: the filmstrip of the last moments instead of the one screenshot.
+  const strip = live.value.on ? await powos.assist.filmstrip() : null;
+  const path = !strip && image.value && screen.value?.screenshot ? await powos.assist.attach(image.value.region) : null;
+  const context = [
+    strip &&
+      `(live view of my screen: ${strip} - the last moments that changed, a frame a second, oldest first, left to right then down, each labelled with how long ago; read it)`,
+    path && `(image of it: ${path} - read it to see the screen${image.value?.region ? ", the part I mean" : ""})`,
+    seen?.slice(0, SCREEN_TEXT),
+  ]
     .filter(Boolean)
     .join("\n");
   powos.ai.send(context ? `${text}\n\n[What's on my screen right now:]\n${context}` : text);
@@ -123,26 +136,46 @@ const mic: MicTarget = {
 };
 
 export function Assist() {
+  const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     powos.assist.screen().then((s) => s && (screen.value = s));
+    powos.assist.liveState().then((l) => (live.value = l));
   }, []);
+  const on = live.value.on;
+  // Live: only the bar takes touches (the app under it is in use), kept as it moves and resizes; and its count of
+  // moments kept fresh. Off: the whole window again.
+  useEffect(() => {
+    if (!on) return void powos.assist.touchable(null);
+    const report = () => {
+      const r = panel.current?.getBoundingClientRect();
+      if (r) powos.assist.touchable({ left: r.left, top: r.top, width: r.width, height: r.height });
+    };
+    const ro = new ResizeObserver(report);
+    if (panel.current) ro.observe(panel.current);
+    report();
+    const poll = window.setInterval(() => powos.assist.liveState().then((l) => (live.value = l)), 1500);
+    return () => (ro.disconnect(), clearInterval(poll));
+  }, [on]);
   const s = screen.value;
   return (
-    <div class="assist" onClick={(e) => e.target === e.currentTarget && powos.assist.close()}>
-      <div class="assist-panel tile">
+    <div class={`assist ${on ? "live" : ""}`} onClick={(e) => !on && e.target === e.currentTarget && powos.assist.close()}>
+      <div class="assist-panel tile" ref={panel}>
         <div class="assist-head">
-          {s?.screenshot ? (
+          {!on && s?.screenshot ? (
             <img class="assist-shot" src={image.value?.region ?? s.screenshot} alt="" onClick={() => (cropping.value = true)} />
           ) : (
-            <span class="assist-shot blank" />
+            !on && <span class="assist-shot blank" />
           )}
           <span class="assist-title">PowOS AI</span>
-          <span class="muted assist-sub">{s?.text ? "sees your screen" : "…"}</span>
+          <span class="muted assist-sub">{on ? `● live · ${live.value.frames} moments` : s?.text ? "sees your screen" : "…"}</span>
+          <button type="button" class={`assist-live ${on ? "on" : ""}`} onClick={() => powos.assist.live(!on)}>
+            {on ? "stop" : "live"}
+          </button>
           <button type="button" class="assist-open" onClick={() => (powos.ai.open(), powos.assist.close())}>
             open ↗
           </button>
         </div>
-        {s?.screenshot && (
+        {!on && s?.screenshot && (
           <div class="assist-attach">
             {image.value ? (
               <button type="button" class="chip" onClick={() => (image.value = null)}>

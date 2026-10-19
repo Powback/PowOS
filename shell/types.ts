@@ -221,6 +221,13 @@ export interface Bridge {
     close(): Promise<void>;
     /** Saves an image for PowOS AI to look at (a cut-out region as a data: URL, or null: the whole screen); its path. */
     attach(image: string | null): Promise<string | null>;
+    /** Live mode: the screen a frame a second (Android asks for consent); "assist.live" brings its state. */
+    live(on: boolean): Promise<void>;
+    liveState(): Promise<{ on: boolean; frames: number }>;
+    /** The last moments that changed, tiled into one image where PowOS sees it; its path (null: nothing yet). */
+    filmstrip(): Promise<string | null>;
+    /** Where the page takes touches (live mode: its bar, CSS px); null: everywhere. */
+    touchable(rect: { left: number; top: number; width: number; height: number } | null): Promise<void>;
   };
   /** The theme: the colors in use ("theme.changed" brings them again), the ones to pick from, picking one. */
   theme: {

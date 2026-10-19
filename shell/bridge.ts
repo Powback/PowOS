@@ -106,6 +106,10 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       screen: () => call<AssistScreen | null>("assist.screen"),
       close: () => call("assist.close"),
       attach: (image) => call<string | null>("assist.attach", image),
+      live: (on) => call("assist.live", on),
+      liveState: () => call("assist.liveState"),
+      filmstrip: () => call<string | null>("assist.filmstrip"),
+      touchable: (rect) => call("assist.touchable", rect),
     },
     theme: {
       get: () => call<ThemeColors>("theme.get"),
@@ -156,6 +160,7 @@ function mock(): Bridge {
   let samples: Promise<Record<string, unknown>> | null = null;
   let chat: Chat = { busy: false, items: [] };
   let screen: WidgetScreen = { key: null };
+  let liveMock = { on: false, frames: 0 };
   const pin = (name: string, x: number, y: number): HomeItem => {
     const a = apps.find((app) => app.label === name)!;
     return { key: "app:" + a.key.slice(2), kind: "app", page: 1, cell: { x, y, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: [1, 1], label: a.label, app: a.key };
@@ -313,6 +318,10 @@ function mock(): Bridge {
       screen: async () => ({ text: "Inbox\n  Mats - are we still on for tonight?\n  Your order has shipped", screenshot: null }),
       close: async () => console.log("[mock] assistant closed"),
       attach: async (image) => `/run/powos-app/powos-ai-shared/screen-mock.${image ? "png" : "jpg"}`,
+      live: async (on) => void events.emit("assist.live", (liveMock = { on, frames: on ? 5 : 0 })),
+      liveState: async () => liveMock,
+      filmstrip: async () => "/run/powos-app/powos-ai-shared/live-mock.jpg",
+      touchable: async (rect) => console.log("[mock] touchable", rect),
     },
     // A few made-up notifications; dismissing and clearing work on them.
     notifications: (() => {
