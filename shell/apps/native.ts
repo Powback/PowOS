@@ -49,7 +49,7 @@ export function openLink(url: string): boolean {
  * while home is still (the page moves it with transforms the app doesn't see); otherwise the island draws in the page.
  */
 const SETTLE_MS = 450;
-const still = signal(true);
+export const still = signal(true);
 let fingers = 0;
 let settle = 0;
 function stir() {

@@ -554,19 +554,31 @@ function draw() {
 }
 
 // ---- the loop: one frame per "frame" message; the page sends none while the tile isn't on screen ------------------------
-const prof = { act: 0, step: 0, fwd: 0, draw: 0, frames: 0, steps: 0, gaps: new Array(10).fill(0), maxGap: 0, skipped: 0 };
+const prof = { act: 0, step: 0, fwd: 0, draw: 0, frames: 0, steps: 0, gaps: new Array(10).fill(0), maxGap: 0, skipped: 0, dropped: 0 };
+// Frame budget: this worker may use BUDGET of the time between frames (a quarter: at 10 fps, 25 ms of every 100).
+// A frame that overruns it - the CPU contended, hot, throttled - runs fewer physics steps next time and the stickman
+// slows down rather than taking more; it speeds back up (up to real time) as frames come in under half the budget.
+// The page's frames never wait for it: this is a worker, and it only ever drops its own steps.
+const BUDGET = 0.25;
+let maxSteps = 8;
 function frame() {
   const now = performance.now();
   // Real time, but never more than 0.1 s of it at once: after a pause it carries on where it stopped.
   acc = Math.min(acc + (last ? (now - last) / 1000 : 0), 0.1);
   last = now;
   const dt = meta.timestep * meta.decimation;
-  while (acc >= dt) { controlStep(); acc -= dt; prof.steps++; }
+  let n = 0;
+  while (acc >= dt && n < maxSteps) { controlStep(); acc -= dt; prof.steps++; n++; }
+  if (acc >= dt) { prof.dropped += Math.floor(acc / dt); acc %= dt; } // (the steps it had no budget for: skipped)
   const t1 = performance.now();
   mj.mj_forward(model, data);
   const t2 = performance.now();
   draw();
-  prof.fwd += t2 - t1; prof.draw += performance.now() - t2; prof.frames++;
+  const end = performance.now();
+  prof.fwd += t2 - t1; prof.draw += end - t2; prof.frames++;
+  const budget = (BUDGET * 1000) / fps;
+  if (end - now > budget && maxSteps > 1) maxSteps--;
+  else if (end - now < budget / 2 && maxSteps < 8) maxSteps++;
 }
 
 function size(w: number, h: number, r: number) {
@@ -577,7 +589,7 @@ function size(w: number, h: number, r: number) {
   canvas.height = Math.max(1, Math.round(h * dpr));
 }
 
-let ready = false, running = false, fps = 15, timer = 0, lastAt = 0;
+let ready = false, running = false, fps = 10, timer = 0, lastAt = 0;
 // Paced by a timer: the canvas is committed only when a frame is drawn, so the compositor (and the app's own render
 // threads behind it) have nothing to do in between - a requestAnimationFrame here kept them waking every vsync.
 // A frame never comes sooner than 1/fps after the last.
@@ -621,7 +633,7 @@ self.onmessage = async (e: MessageEvent) => {
     canvas = m.canvas;
     ctx = canvas.getContext("2d")!;
     colors = m.colors;
-    fps = Math.max(1, Math.min(30, m.fps || 15));
+    fps = Math.max(1, Math.min(30, m.fps || 10));
     size(m.width, m.height, m.dpr);
     try {
       await load(m.base);
@@ -668,6 +680,6 @@ self.onmessage = async (e: MessageEvent) => {
   } else if (m.type === "stats") {
     // for checks from the page (CDP): where it is in which lesson, and where the time goes (ms, summed)
     const r = ready ? root() : null;
-    (self as any).postMessage({ type: "stats", running, lesson: lessons[lessonIdx]?.name, t: lessonT, checkpoint: wpI, of: route.length, x: r?.x, z: r?.z, stamina, prof });
+    (self as any).postMessage({ type: "stats", running, lesson: lessons[lessonIdx]?.name, t: lessonT, checkpoint: wpI, of: route.length, x: r?.x, z: r?.z, stamina, prof, maxSteps });
   }
 };

@@ -13,7 +13,8 @@ import { useEffect, useState } from "preact/hooks";
 import { drawerOpen } from "../ui/gesture.ts";
 import { screen, sessionView } from "../state.ts";
 import { powos } from "../bridge.ts";
-import { openLink } from "./native.ts";
+import { openLink, still } from "./native.ts";
+import { computed, signal } from "@preact/signals";
 
 export function useOnScreen(ref: { current: Element | null }): boolean {
   const [inView, setInView] = useState(false);
@@ -80,3 +81,40 @@ export function useLayoutSize(ref: { current: HTMLElement | null }): { width: nu
   }, []);
   return size;
 }
+
+/**
+ * Home is quiet: nothing else of PowOS's is open or moving, and the page isn't struggling. An island that animates
+ * (apps/stickman) runs only while it is - UI input, scrolling and the other surfaces always win over a widget's frames:
+ *   - no finger on home, no page turn, no switcher (native.ts still), no launcher, widget screen or session over home;
+ *   - the page's window has focus: the shade, the control center and the assistant are windows of their own over home,
+ *     and take it (blur) - a touch on home or focus back clears that;
+ *   - no long frame on the page's main thread lately (PerformanceObserver "long-animation-frame": >50 ms - home
+ *     starved by something, the CPU busy or hot).
+ * It turns quiet again only after QUIET_MS of all that.
+ */
+const QUIET_MS = 2000;
+const blurred = signal(false);
+const strained = signal(false);
+addEventListener("blur", () => (blurred.value = true));
+addEventListener("focus", () => (blurred.value = false));
+addEventListener("pointerdown", () => (blurred.value = false), { capture: true });
+let strainTimer = 0;
+try {
+  new PerformanceObserver(() => {
+    strained.value = true;
+    clearTimeout(strainTimer);
+    strainTimer = window.setTimeout(() => (strained.value = false), QUIET_MS);
+  }).observe({ type: "long-animation-frame", buffered: false });
+} catch {}
+const busyNow = computed(
+  () => !still.value || drawerOpen.value || screen.value.key !== null || sessionView.value !== null || blurred.value || strained.value,
+);
+/** Quiet, as above (settles QUIET_MS after the last busy moment; goes busy at once). */
+export const quiet = signal(true);
+let quietTimer = 0;
+busyNow.subscribe((busy) => {
+  clearTimeout(quietTimer);
+  if (busy) quiet.value = false;
+  else quietTimer = window.setTimeout(() => (quiet.value = true), QUIET_MS);
+});
+export const useQuiet = () => quiet.value;

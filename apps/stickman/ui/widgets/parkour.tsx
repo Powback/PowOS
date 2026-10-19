@@ -1,7 +1,7 @@
 // The stickman's home widget: an island in the shell's one shared page (shell/ui/island.tsx) showing only the stage -
 // robotsupremacy's trained stick figure running its parkour lessons, on the tile's own (themed) background. A tap opens
 // the full page (http://robotsupremacy.pow/stickman) in the browser; a tap on the top-right corner cycles the frame rate
-// (10 / 15 / 30, 15 by default). On battery saver, or a low battery not charging, it rests on its last frame.
+// (10 / 15 / 30, 10 by default). On battery saver, or a low battery not charging, it rests on its last frame.
 //
 // The simulation and the drawing run in a worker (workers/sim.ts) on an OffscreenCanvas, so home's own thread does
 // nothing per frame. The worker draws at most 30 frames a second, and only while this side says the tile is on screen
@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 type Host = import("../../../../shell/apps/stdb.ts").IslandHost;
 
 const FULL_PAGE = "http://robotsupremacy.pow/stickman";
-// Frame rate: a widget setting (a tap on the tile's top-right corner cycles it), 15 by default - the WebView redraws
+// Frame rate: a widget setting (a tap on the tile's top-right corner cycles it), 10 by default - the WebView redraws
 // home for every frame the canvas commits, so this is most of what the tile costs (see the report in git: ~2% of a core
 // per fps on the OnePlus Open).
 const RATES = [10, 15, 30];
@@ -21,9 +21,9 @@ const FPS_KEY = "dev.powos.stickman.fps";
 const loadFps = () => {
   try {
     const n = Number(localStorage.getItem(FPS_KEY));
-    return RATES.includes(n) ? n : 15;
+    return RATES.includes(n) ? n : 10;
   } catch {
-    return 15;
+    return 10;
   }
 };
 const CORNER = 44; // px: the top-right corner that cycles the rate instead of opening the page
@@ -124,7 +124,10 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
       clearInterval(t);
     };
   }, [onScreen]);
-  const running = onScreen && !resting;
+  // Home quiet (host.useQuiet: nothing else of PowOS's open or moving - the shade, the assistant, the switcher, the
+  // launcher, a finger on home - and no long frames lately): the stickman rests on its last frame otherwise.
+  const quiet = host.useQuiet ? host.useQuiet() : true;
+  const running = onScreen && !resting && quiet;
   // A native surface under the page while the tile is on screen and home is still (a shell/APK without one: null, and
   // the worker draws on its canvas as before). It keeps its last frame while resting on a low battery.
   // The surface covers the whole card (the tile around this island), and draws the card's fill itself: the page's card

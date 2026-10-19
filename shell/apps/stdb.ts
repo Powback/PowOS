@@ -13,7 +13,7 @@
  * until that exists the server issues anonymous ones.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
-import { openUrl, power, useLayoutSize, useOnScreen } from "./onscreen.ts";
+import { openUrl, power, useLayoutSize, useOnScreen, useQuiet } from "./onscreen.ts";
 import { useSurface, type Surface } from "./native.ts";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
@@ -35,6 +35,8 @@ export interface IslandHost {
   useLayoutSize?(ref: { current: HTMLElement | null }): { width: number; height: number };
   /** A native surface at the element's place (apps/native.ts): frames to it cost no page composite. */
   useSurface?(ref: { current: Element | null }, wanted: boolean): Surface;
+  /** Home quiet - nothing else open or moving, no long frames lately (apps/onscreen.ts): animate only then. */
+  useQuiet?(): boolean;
 }
 
 export interface Builder {
@@ -197,4 +199,4 @@ export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   return rows;
 }
 
-export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl, power, useLayoutSize, useSurface };
+export const host: IslandHost = { useDb, useRows, useOnScreen, openUrl, power, useLayoutSize, useSurface, useQuiet };
