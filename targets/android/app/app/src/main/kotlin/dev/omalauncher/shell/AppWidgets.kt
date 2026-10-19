@@ -136,6 +136,8 @@ class AppWidgets private constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     init {
+        // The home's own placement (a store widget, a pinned app given the first free spot) steps around these.
+        layout.occupied = { page -> entries.filter { it.page == page }.mapNotNull { layout.cell(key(it.id)) } }
         load()
         theme()
         // PowOS's theme picked or recolored: widgets redraw in it.

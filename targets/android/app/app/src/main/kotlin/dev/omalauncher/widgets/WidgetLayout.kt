@@ -110,6 +110,12 @@ class WidgetLayout(
     private var grid: Pair<Int, Int>? = null
 
     /**
+     * Cells taken on a page by tiles that aren't [HomeItem]s - other apps' Android widgets (shell/AppWidgets, "aw:"
+     * keys in this same layout, their pages in its own store) - so a free spot never lands on one of them.
+     */
+    var occupied: (page: Int) -> List<Cell> = { emptyList() }
+
+    /**
      * Gives widgets that have no cell yet one at their declared size, in the
      * first free spot. Saved cells are never rewritten here: a temporarily
      * small page (keyboard, rotation) must not destroy the user's layout.
@@ -165,7 +171,8 @@ class WidgetLayout(
         rows: Int,
     ): Cell? {
         // Shortcuts always show as 1x1, whatever an old saved cell says.
-        val others = items.mapNotNull { other -> if (other.key == item.key) null else cells[other.key]?.let { if (other.resizable) it else it.copy(w = 1, h = 1) } }
+        val others = items.mapNotNull { other -> if (other.key == item.key) null else cells[other.key]?.let { if (other.resizable) it else it.copy(w = 1, h = 1) } }+
+            occupied(item.page)
         val (pw, ph) = item.size ?: (cols / 2 to 3)
         val w = pw.coerceIn(1, cols)
         val h = ph.coerceIn(1, rows)
