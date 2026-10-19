@@ -162,6 +162,8 @@ function useTilePress(item: HomeItem, onTap: () => void) {
         s.long = true;
         navigator.vibrate?.(10);
         selected.value = item.key;
+        // Picking a tile up is editing home: the sheet and the empty page to move it to come with it.
+        editing.value = true;
         startCarry({ item }, e, grab);
       }, LONG_PRESS_MS);
       state.current = s;
