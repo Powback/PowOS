@@ -1,6 +1,8 @@
 /* Home, the bar, the drawer, the dock: laid out from theme.css's tokens only. */
 
 .home {
+  --p: 0;
+  transition: --p 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
   position: fixed;
   inset: 0;
   display: flex;
@@ -23,16 +25,14 @@
   inherits: true;
   initial-value: 0;
 }
+/* A finger is moving the panel: it, and everything following it, track the finger exactly. */
+.home.dragging { transition: none; }
+
 .stage {
-  --p: 0;
-  --panel-top: calc((1 - var(--p)) * (100% - var(--strip-height) - var(--gap)));
   position: relative;
   flex: 1;
   min-height: 0;
-  transition: --p 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-/* A finger is moving it: it follows the finger exactly. */
-.stage.dragging { transition: none; }
 
 .home-content {
   position: absolute;
@@ -44,7 +44,7 @@
   opacity: calc(1 - var(--p));
   transform: scale(calc(1 - var(--p) * 0.04));
 }
-.stage.open .home-content { pointer-events: none; }
+.home.open .home-content { pointer-events: none; }
 
 .launcher-frame {
   position: absolute;
@@ -74,7 +74,7 @@
   transform: translateY(calc((1 - var(--p)) * (100% - var(--strip-height))));
 }
 .launcher .strip { pointer-events: auto; }
-.stage.open .launcher .drawer { pointer-events: auto; }
+.home.open .launcher .drawer { pointer-events: auto; }
 
 .strip {
   flex: none;
@@ -89,8 +89,8 @@
 /* The apps share the row's width: all of them fit, at up to the strip's icon size. */
 .strip .app,
 .dock .app { flex: 1 1 0; min-width: 0; padding: 4px 0; }
-.strip .app-icon,
-.dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
+.strip .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
+.dock .app-icon { width: min(calc(var(--strip-icon) * var(--dock-scale)), 100%); height: auto; aspect-ratio: 1; }
 
 .bar {
   position: relative;
@@ -115,11 +115,12 @@
 }
 .bar input::placeholder { color: var(--color-muted); }
 
-/* The dock: pinned apps under the bar, always there (iOS's dock). */
+/* The dock: pinned apps under the bar, always there (iOS's dock); it shrinks while the launcher is open. */
 .dock {
+  --dock-scale: calc(1 - var(--p) * 0.4);
   position: relative;
   z-index: 3;
-  height: var(--strip-height);
+  height: calc(var(--strip-height) * var(--dock-scale));
   margin: 0 var(--edge) var(--edge);
   display: flex;
   align-items: center;

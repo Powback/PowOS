@@ -41,8 +41,9 @@ export function Home() {
   const p = drawerShown();
   const dragging = drawerDrag.value != null;
   return (
-    <div class="home" {...homeGestures()}>
-      <div class={`stage ${dragging ? "dragging" : ""} ${p > 0 ? "open" : ""}`} style={{ "--p": p }}>
+    // --p on home itself: the panel and the dock under the bar both follow it.
+    <div class={`home ${dragging ? "dragging" : ""} ${p > 0 ? "open" : ""}`} style={{ "--p": p }} {...homeGestures()}>
+      <div class="stage">
         <div class="home-content">
           <Pages />
         </div>
