@@ -69,6 +69,10 @@ class RecentsTransition private constructor(
 
     private val main = Handler(Looper.getMainLooper())
     private var state = State.STARTING
+
+    /** When it was asked for (uptimeMillis): how long WM Shell took is logged. */
+    private val askedAt = android.os.SystemClock.uptimeMillis()
+    private var firstFrameLogged = false
     private var controller: IBinder? = null
     private var apps: List<Leash> = emptyList()
     private var pending: Ending? = null
@@ -184,7 +188,7 @@ class RecentsTransition private constructor(
             return
         }
         this.controller = controller
-        Log.i(TAG, "started: " + targets.filterNotNull().joinToString { "task ${it.taskId} mode ${it.mode} at ${it.screenSpaceBounds}" })
+        Log.i(TAG, "started ${android.os.SystemClock.uptimeMillis() - askedAt} ms after it was asked for: " + targets.filterNotNull().joinToString { "task ${it.taskId} mode ${it.mode} at ${it.screenSpaceBounds}" })
         apps =
             targets.filterNotNull().filter { it.mode == RemoteAnimationTarget.MODE_CLOSING && it.leash != null }.map {
                 Leash(it.leash, it.screenSpaceBounds ?: Rect(0, 0, 0, 0))
@@ -387,6 +391,10 @@ class RecentsTransition private constructor(
     private fun apply(look: Look) {
         if (state != State.RUNNING && state != State.ENDING) return
         onFrame?.invoke(look.progress, look.dx, look.dy, look.home)
+        if (!firstFrameLogged && look.progress > 0f) {
+            firstFrameLogged = true
+            Log.i(TAG, "window moving ${android.os.SystemClock.uptimeMillis() - askedAt} ms after the down")
+        }
         if (apps.isEmpty()) return
         val card = target()
         val p = look.progress

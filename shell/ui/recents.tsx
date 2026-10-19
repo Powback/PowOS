@@ -344,6 +344,13 @@ powos.on("recents.end", (e: { to: "switcher" | "home" | "app"; snapshot?: string
 });
 powos.on("recents.show", (e: { open: boolean; from: number | null; tasks: RecentTask[] }) => void show(e));
 powos.on("recents.hide", () => collapse(false));
+// The swipe's list as it is now (the one it began with was laid out ahead): swapped in under the finger.
+powos.on("recents.update", (e: { tasks: RecentTask[] }) => {
+  if (phase.value === "closed") return;
+  const next = order(e.tasks, from.value);
+  const same = next.length === tasks.value.length && next.every((t, i) => t.id === tasks.value[i].id);
+  if (!same) tasks.value = next.map((t) => tasks.value.find((o) => o.id === t.id) ?? t);
+});
 // The list for the next swipe, while an app is in front: laid out (hidden) now, snapshots loading.
 powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {
   if (phase.value !== "closed") return;

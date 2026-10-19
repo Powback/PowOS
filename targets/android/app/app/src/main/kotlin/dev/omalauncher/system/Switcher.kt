@@ -115,6 +115,9 @@ object Switcher {
     /** The card's corner radius (screen px). */
     val slotRadius: Float get() = home?.let { slots[it]?.second } ?: 0f
 
+    /** The task list laid out ahead for the next swipe ([homeStopped]); null before the first. */
+    private var cachedTasks: JSONArray? = null
+
     /** The transition waiting for the page to show the app's card before its window goes (see [settle]). */
     private var release: (() -> Unit)? = null
 
@@ -188,7 +191,7 @@ object Switcher {
         hideStopped()
         // The app that just came up is the newest task now: the cards are laid out for the next swipe already (the
         // page renders them hidden, their snapshots load), so it shows them from its first frame.
-        if (!gesture) bridge.emit("recents.tasks", JSONObject().put("tasks", tasks()))
+        if (!gesture) bridge.emit("recents.tasks", JSONObject().put("tasks", tasks().also { cachedTasks = it }))
     }
 
     private fun hideStopped() {
@@ -217,8 +220,22 @@ object Switcher {
         from = over
         release = null
         boost?.invoke(true)
+        // The list as laid out ahead (home's last stop): listing them now (binder calls, icons) held the first frames.
+        val list = cachedTasks ?: tasks()
         Log.i(TAG, "begin over $over: ${if (home == null) "no page to show it" else "on ${if (onHome) "home's page" else "the recents activity"}"}, home ${if (homeVisible) "started" else "not started"}, slot $slot")
-        home?.emit("recents.begin", JSONObject().put("from", over ?: JSONObject.NULL).put("tasks", tasks()))
+        home?.emit("recents.begin", JSONObject().put("from", over ?: JSONObject.NULL).put("tasks", list))
+        // Then the list as it is now, off the gesture's thread (an app opened since home last stopped isn't in the
+        // cached one): the page swaps it in under the swipe.
+        val page = home
+        if (cachedTasks != null && page != null) {
+            thread(name = "powos-recents-list") {
+                val fresh = page.recentTasks()
+                main.post {
+                    cachedTasks = fresh
+                    if (gesture && page === home) page.emit("recents.update", JSONObject().put("tasks", fresh))
+                }
+            }
+        }
     }
 
     /** A frame of the swipe: [progress] 0 (the app full screen) .. 1 (on its card); [dx], [dy] screen px. */

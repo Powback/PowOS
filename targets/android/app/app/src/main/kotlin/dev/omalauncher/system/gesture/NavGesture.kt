@@ -99,6 +99,11 @@ class NavGesture(
         swipe++
         Log.i(TAG, "gesture: down at ${e.rawX.toInt()},${e.rawY.toInt()}")
         classifier = NavGestureClassifier(displayContext.resources.displayMetrics.density, screen.height().toFloat(), slop).also { it.down(e.rawX, e.rawY, e.eventTime) }
+        // The recents transition asked for at once, on the finger's down (as Quickstep preloads its recents on down):
+        // WM Shell takes 50-80 ms to hand over the app's window, as long as a quick swipe lasts - asked for after the
+        // touch slop, the window only came loose once the finger was gone. A tap or a sideways swipe ends it straight
+        // back to the app.
+        began()
         return true
     }
 
@@ -114,10 +119,15 @@ class NavGesture(
                 }
                 when (axis) {
                     NavGestureClassifier.Axis.UP -> {
-                        began()
+                        transition?.drag(c.lift, e.rawX - downX, c.homeness())
                         return GestureConsumer.Verdict.TAKE
                     }
-                    NavGestureClassifier.Axis.SIDEWAYS -> return if (pinned) drop() else GestureConsumer.Verdict.TAKE
+                    NavGestureClassifier.Axis.SIDEWAYS -> {
+                        // Along the bar: the quick switch's, not the window's - back where it was.
+                        backToApp(transition)
+                        transition = null
+                        return if (pinned) drop() else GestureConsumer.Verdict.TAKE
+                    }
                     NavGestureClassifier.Axis.IGNORED -> {
                         Log.i(TAG, "gesture: downwards from the bar - not ours")
                         return drop()
@@ -148,6 +158,9 @@ class NavGesture(
 
     private fun drop(): GestureConsumer.Verdict {
         classifier = null
+        // Not a swipe up after all: the transition asked for on the down goes back to the app.
+        backToApp(transition)
+        transition = null
         return GestureConsumer.Verdict.DROP
     }
 

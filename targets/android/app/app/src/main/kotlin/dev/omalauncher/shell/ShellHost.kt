@@ -59,6 +59,9 @@ class ShellHost(
             setBackgroundColor(Color.TRANSPARENT)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            // Its tiles kept rasterized while it's out of sight (home behind an app): a swipe up shows it from its
+            // first frame, not after it's drawn again from scratch.
+            settings.offscreenPreRaster = true
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             webViewClient = Client()
