@@ -68,8 +68,8 @@ function usePress(t: QuickTile) {
     onContextMenu: (e: Event) => e.preventDefault(),
     onClick: () => {
       if (held.current) return;
-      // A third-party tile PowOS can't switch yet: its own settings, or its app.
-      if (t.app) return (shut(), powos.qs.open(t.id));
+      // Another app's tile not hosted yet (no state from it): its own settings, or its app. Hosted, it switches here.
+      if (t.app && t.on == null) return (shut(), powos.qs.open(t.id));
       if (LEAVES.has(t.id) || t.on == null) shut();
       powos.qs.toggle(t.id).then(update);
     },
@@ -77,32 +77,97 @@ function usePress(t: QuickTile) {
 }
 
 function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
+  const press = usePress(t);
+  // Editing: a tap picks the tile (to move or hide), it doesn't switch it.
+  const edit = editing.value ? { onClick: () => (picked.value = picked.value === t.id ? null : t.id) } : press;
   return (
     <button
       type="button"
-      class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""}`}
-      {...usePress(t)}
+      class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""} ${picked.value === t.id ? "picked" : ""}`}
+      {...edit}
     >
       <span class="cc-label">{t.label}</span>
-      {big && (
-        <span class="cc-detail">
-          {t.detail ?? (t.on == null ? "" : t.on ? "on" : "off")}
-        </span>
-      )}
+      {big && <span class="cc-detail">{t.detail ?? (t.on == null ? "" : t.on ? "on" : "off")}</span>}
     </button>
   );
 }
 
+/**
+ * The user's arrangement of the tiles (edit mode): their order and the ones taken out, kept in the store. Tiles it
+ * doesn't name yet (a new app's tile) come after, in the phone's own order.
+ */
+type Layout = { order: string[]; hidden: string[] };
+const layout = signal<Layout>({ order: [], hidden: [] });
+powos.store.get<Layout>("controls.layout").then((l) => l && (layout.value = l));
+const editing = signal(false);
+const picked = signal<string | null>(null);
+
+function arranged(tiles: QuickTile[]) {
+  const { order, hidden } = layout.value;
+  const byId = new Map(tiles.map((t) => [t.id, t]));
+  const shown = [...order.filter((id) => byId.has(id)), ...tiles.map((t) => t.id).filter((id) => !order.includes(id))]
+    .filter((id) => !hidden.includes(id))
+    .map((id) => byId.get(id)!);
+  return { shown, hidden: hidden.filter((id) => byId.has(id)).map((id) => byId.get(id)!) };
+}
+
+function saveLayout(l: Layout) {
+  layout.value = l;
+  powos.store.set("controls.layout", l);
+}
+
+/** The picked tile [by] places along (−1 earlier, +1 later), or out (hide) / back in. */
+function rearrange(shown: QuickTile[], id: string, by: -1 | 1 | "hide" | "show") {
+  const ids = shown.map((t) => t.id);
+  const hidden = layout.value.hidden.filter((h) => h !== id);
+  if (by === "hide")
+    return (saveLayout({ order: ids.filter((x) => x !== id), hidden: [...hidden, id] }), (picked.value = null));
+  if (by === "show") return saveLayout({ order: [...ids, id], hidden });
+  const i = ids.indexOf(id);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  saveLayout({ order: ids, hidden });
+}
+
+/** Edit mode's tools for the picked tile, and the tiles taken out (a tap puts one back). */
+function EditBar({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] }) {
+  const id = picked.value;
+  return (
+    <div class="cc-edit">
+      {id ? (
+        <span class="cc-edit-tools">
+          <button type="button" class="cc-chip" onClick={() => rearrange(shown, id, -1)}>
+            ◀ earlier
+          </button>
+          <button type="button" class="cc-chip" onClick={() => rearrange(shown, id, 1)}>
+            later ▶
+          </button>
+          <button type="button" class="cc-chip" onClick={() => rearrange(shown, id, "hide")}>
+            hide
+          </button>
+        </span>
+      ) : (
+        <span class="muted">tap a tile to move or hide it</span>
+      )}
+      {hidden.length > 0 && (
+        <>
+          <span class="muted">hidden - tap to add back</span>
+          <div class="cc-grid">
+            {hidden.map((t) => (
+              <button key={t.id} type="button" class="cc-tile off" onClick={() => rearrange(shown, t.id, "show")}>
+                <span class="cc-label">{t.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** A slider sending its value at most once a frame while it moves. */
-function Slider({
-  name,
-  value,
-  label,
-}: {
-  name: "brightness" | "volume";
-  value: number;
-  label: string;
-}) {
+function Slider({ name, value, label }: { name: "brightness" | "volume"; value: number; label: string }) {
   const [local, setLocal] = useState<number | null>(null);
   const frame = useRef(0);
   const next = useRef(0);
@@ -175,22 +240,10 @@ function MediaCard() {
   const progress = m.duration ? Math.min(1, (m.position ?? 0) / m.duration) : 0;
   return (
     <div class="cc-media" style={{ "--p": String(progress) }}>
-      {m.art && (
-        <img
-          class="cc-art"
-          src={`/_media/${encodeURIComponent(m.art)}`}
-          alt=""
-        />
-      )}
-      <button
-        type="button"
-        class="cc-track"
-        onClick={() => (shut(), powos.media.control("open"))}
-      >
+      {m.art && <img class="cc-art" src={`/_media/${encodeURIComponent(m.art)}`} alt="" />}
+      <button type="button" class="cc-track" onClick={() => (shut(), powos.media.control("open"))}>
         <span class="cc-label">{m.title}</span>
-        <span class="cc-detail">
-          {[m.artist, m.app].filter(Boolean).join(" · ")}
-        </span>
+        <span class="cc-detail">{[m.artist, m.app].filter(Boolean).join(" · ")}</span>
       </button>
       <span class="cc-transport">
         <button type="button" onClick={() => powos.media.control("previous")}>
@@ -202,10 +255,7 @@ function MediaCard() {
         <button type="button" onClick={() => powos.media.control("next")}>
           ⏭
         </button>
-        <button
-          type="button"
-          onClick={() => (shut(), powos.media.output(m.package))}
-        >
+        <button type="button" onClick={() => (shut(), powos.media.output(m.package))}>
           ⇄
         </button>
       </span>
@@ -216,10 +266,8 @@ function MediaCard() {
 export function ControlCenter() {
   const q = quick.value;
   const tiles = q.tiles ?? [];
-  const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter(
-    (t): t is QuickTile => !!t,
-  );
-  const rest = tiles.filter((t) => !CARDS.includes(t.id));
+  const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter((t): t is QuickTile => !!t);
+  const { shown, hidden } = arranged(tiles.filter((t) => !CARDS.includes(t.id)));
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
   return (
@@ -227,20 +275,17 @@ export function ControlCenter() {
       <div class="notif-bar">
         <Clock />
         <span class="notif-actions">
+          <button type="button" onClick={() => ((editing.value = !editing.value), (picked.value = null))}>
+            {editing.value ? "done" : "edit"}
+          </button>
           <button type="button" onClick={() => (panel.value = "notifications")}>
             notifications
           </button>
           {/* OnePlus's own, for what PowOS's doesn't have yet. */}
-          <button
-            type="button"
-            onClick={() => powos.system.notifications(true)}
-          >
+          <button type="button" onClick={() => powos.system.notifications(true)}>
             system
           </button>
-          <button
-            type="button"
-            onClick={() => (shut(), powos.qs.open("settings"))}
-          >
+          <button type="button" onClick={() => (shut(), powos.qs.open("settings"))}>
             settings
           </button>
         </span>
@@ -255,9 +300,7 @@ export function ControlCenter() {
         <button
           type="button"
           class={`cc-chip ${b.auto ? "on" : ""}`}
-          onClick={() =>
-            powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)
-          }
+          onClick={() => powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)}
         >
           auto
         </button>
@@ -265,19 +308,18 @@ export function ControlCenter() {
         <button
           type="button"
           class="cc-chip"
-          onClick={() =>
-            powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)
-          }
+          onClick={() => powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)}
         >
           {RINGER[v.ringer] ?? "ring"}
         </button>
       </div>
       <MediaCard />
       <div class="cc-grid">
-        {rest.map((t) => (
+        {shown.map((t) => (
           <Tile key={t.id} t={t} />
         ))}
       </div>
+      {editing.value && <EditBar shown={shown} hidden={hidden} />}
     </div>
   );
 }
