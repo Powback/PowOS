@@ -418,6 +418,8 @@ object AgentsSpool {
                         .addAction(action("Reply…", "deny", reply = true))
                         .build(),
                 )
+                // Its sound (ringer on only), vibration and the screen on: the urgent channel has none of its own.
+                AgentMail.alertUrgent(context)
             }
         }
 

@@ -37,9 +37,10 @@ import java.io.File
  *
  * How loud, by the mail's priority - a channel each, as a channel's sound, vibration and importance can't be changed
  * by the app once it exists (hence the versioned ids, [CHANNEL_VERSION]):
- * - urgent: an agent blocked on the user (approval asks too - [AgentsSpool]'s asks post here). Heads-up, the alarm
- *   stream's sound and a vibration - so it's heard with the ringer on silent - and it bypasses Do not disturb. With the
- *   screen off it's woken, to the lock face.
+ * - urgent: an agent blocked on the user (approval asks too - [AgentsSpool]'s asks post here). Heads-up, the screen
+ *   woken (to the lock face), a vibration, and the alarm-stream sound only with the ringer on - silent and vibrate
+ *   mode are respected ([alertUrgent]). Passes Do not disturb's priority mode as an alarm. At most one alerting urgent
+ *   per sender per 10 minutes: repeats collapse silently into its notification ([arrivedUrgent]).
  * - high: heads-up, the notification sound and a vibration - silent when the ringer is, held back by Do not disturb.
  * - normal: in the shade with a badge, no sound.
  * - low: in the shade only, silent, no badge.
@@ -79,6 +80,7 @@ class AgentMail private constructor(
             )
         main.post {
             if (store.any { it.id == mail.id }) return@post
+            if (mail.priority == "urgent") return@post arrivedUrgent(context, mail)
             add(mail)
             post(context, mail, quiet = false)
         }
@@ -150,16 +152,18 @@ class AgentMail private constructor(
         val id: String = "",
         val priority: String = "normal",
         val read: Boolean = false,
+        /** An urgent repeat collapsed into an earlier one's notification: that one's id (it shares its notification). */
+        val lead: String = "",
     ) {
         fun json(): JSONObject =
-            JSONObject().put("id", id).put("from", from).put("text", text).put("time", time).put("priority", priority).put("read", read)
+            JSONObject().put("id", id).put("from", from).put("text", text).put("time", time).put("priority", priority).put("read", read).put("lead", lead)
 
-        /** The notification's id: the same for the same mail, so posting it again replaces it. */
-        val notificationId get() = id.hashCode() and 0x7fffffff
+        /** The notification's id: the same for the same mail (and its collapsed repeats), so posting again replaces it. */
+        val notificationId get() = lead.ifEmpty { id }.hashCode() and 0x7fffffff
 
         companion object {
             fun from(o: JSONObject) =
-                Mail(o.optString("from"), o.optString("text"), o.optLong("time"), o.optString("id"), o.optString("priority", "normal"), o.optBoolean("read"))
+                Mail(o.optString("from"), o.optString("text"), o.optLong("time"), o.optString("id"), o.optString("priority", "normal"), o.optBoolean("read"), o.optString("lead"))
         }
     }
 
@@ -199,13 +203,13 @@ class AgentMail private constructor(
         private const val GROUP = "powos-ai-agents"
 
         /** Channels of earlier versions, removed. */
-        private val OLD_CHANNELS = listOf("powos-ai-agents", "powos-agents-ask", "agents-urgent-v2")
+        private val OLD_CHANNELS = listOf("powos-ai-agents", "powos-agents-ask", "agents-urgent-v2", "agents-urgent-v3")
 
         /**
-         * urgent's own version: v2 was made before PowOS had Do not disturb access, so the system dropped its
-         * setBypassDnd (mBypassDnd=false), and an app can't turn it on for a channel that exists - v3 is made with it.
+         * urgent's own version: v3 tried for setBypassDnd (this phone's system drops it either way; urgent passes Do not
+         * disturb's priority mode as an alarm instead), v4 has no sound of its own (the app's, ringer on only).
          */
-        private const val URGENT_VERSION = 3
+        private const val URGENT_VERSION = 4
 
         private val main = Handler(Looper.getMainLooper())
         private var watcher: AgentMail? = null
@@ -236,10 +240,12 @@ class AgentMail private constructor(
             val channels =
                 listOf(
                     NotificationChannel(channelId("urgent"), "Needs you", NotificationManager.IMPORTANCE_HIGH).apply {
-                        description = "An agent is blocked until you answer (approvals, questions): sounds and vibrates even on silent and in Do not disturb"
-                        setSound(Settings.System.DEFAULT_NOTIFICATION_URI, alarmSound)
-                        enableVibration(true)
-                        vibrationPattern = URGENT_VIBRATION
+                        description = "An agent is blocked until you answer (approvals, questions): a banner, the screen on, vibration; " +
+                            "the alarm sound only with the ringer on. Through Do not disturb's priority mode"
+                        // No sound of the channel's own: the app plays it, only with the ringer on (alertUrgent).
+                        setSound(null, alarmSound)
+                        // Nor a vibration: the app's (alertUrgent), as the system drops it on silent.
+                        enableVibration(false)
                         // Kept by the system only for an app with Do not disturb access (PowOS has it: its notification listener).
                         setBypassDnd(true)
                         lockscreenVisibility = Notification.VISIBILITY_PRIVATE
@@ -323,10 +329,7 @@ class AgentMail private constructor(
                     .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_QUIET, quiet) })
                     .build(),
             )
-            if (urgent && !quiet) {
-                wake(context)
-                buzzOnSilent(context)
-            }
+            if (urgent && !quiet) alertUrgent(context)
         }
 
         /** Urgent mail with the screen off: the screen comes on (to the lock face, the mail on it) for a moment. */
@@ -345,14 +348,56 @@ class AgentMail private constructor(
 
         private const val WAKE_MS = 5_000L
 
+        /** When each sender's last urgent mail alerted (ms): at most one per [URGENT_WINDOW_MS] per sender. */
+        private val urgentAlerted = HashMap<String, Long>()
+        private const val URGENT_WINDOW_MS = 10 * 60_000L
+
         /**
-         * Urgent mail with the ringer on silent (the alert slider): the system plays its alarm-stream sound but drops the
-         * channel's vibration (no buzz on silent, whatever the usage - seen on the phone: notification_alert buzz=0
-         * beep=1), so it vibrates here, as an alarm (VibrationAttributes.USAGE_ALARM isn't muted by the ringer).
+         * An urgent mail: it alerts (banner, screen, vibration, the sound with the ringer on) unless its sender's last one
+         * alerted under [URGENT_WINDOW_MS] ago - then it's collapsed into that one's notification if still unread (its
+         * text and count updated), silently: no sound, vibration or banner.
          */
-        private fun buzzOnSilent(context: Context) {
+        private fun arrivedUrgent(
+            context: Context,
+            mail: Mail,
+        ) {
+            val now = System.currentTimeMillis()
+            val last = urgentAlerted[mail.from]
+            if (last == null || now - last >= URGENT_WINDOW_MS) {
+                urgentAlerted[mail.from] = now
+                add(mail)
+                post(context, mail, quiet = false)
+                return
+            }
+            // The sender's unread urgent notification, if there's one: this joins it.
+            val lead = store.firstOrNull { !it.read && it.priority == "urgent" && it.from == mail.from && it.lead.isEmpty() }
+            val joined = if (lead != null) mail.copy(lead = lead.id) else mail
+            add(joined)
+            val count = store.count { !it.read && it.notificationId == joined.notificationId }
+            post(context, if (count > 1) joined.copy(text = "($count) ${joined.text}") else joined, quiet = true)
+            Log.i(TAG, "urgent from ${mail.from} within ${URGENT_WINDOW_MS / 60_000} min of the last: collapsed, silent ($count)")
+        }
+
+        /**
+         * An urgent mail's alert besides its banner: the screen on, a vibration, and the alarm-stream sound - only with
+         * the ringer on (normal mode); vibrate mode vibrates only, silent too (the user chose no sound, not no alert).
+         * Nothing in Do not disturb's total silence. The vibration is the app's own (as an alarm): the system drops a
+         * notification's vibration on silent (seen on the phone: notification_alert buzz=0).
+         */
+        fun alertUrgent(context: Context) {
+            val nm = context.getSystemService(NotificationManager::class.java)
+            if (nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_NONE) return
+            wake(context)
             val audio = context.getSystemService(android.media.AudioManager::class.java)
-            if (audio.ringerMode != android.media.AudioManager.RINGER_MODE_SILENT) return
+            if (audio.ringerMode == android.media.AudioManager.RINGER_MODE_NORMAL) {
+                runCatching {
+                    android.media.RingtoneManager.getRingtone(context, Settings.System.DEFAULT_NOTIFICATION_URI)?.apply {
+                        audioAttributes =
+                            AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+                        play()
+                    }
+                }.onFailure { Log.w(TAG, "can't play the urgent sound", it) }
+            }
             runCatching {
                 val vibrator =
                     if (Build.VERSION.SDK_INT >= 31) {
@@ -420,12 +465,14 @@ class AgentMail private constructor(
             load(app)
             val nm = app.getSystemService(NotificationManager::class.java)
             val newly = ArrayList<String>()
-            for (id in ids) {
-                val i = store.indexOfFirst { it.id == id }
-                if (i < 0 || store[i].read) continue
-                store[i] = store[i].copy(read = true)
-                nm.cancel(TAG, store[i].notificationId)
-                newly += id
+            // A collapsed urgent notification stands for all its mail: reading one reads them all.
+            val shared = store.filter { it.id in ids }.map { it.notificationId }.toSet()
+            for (i in store.indices) {
+                val m = store[i]
+                if (m.read || (m.id !in ids && m.notificationId !in shared)) continue
+                store[i] = m.copy(read = true)
+                nm.cancel(TAG, m.notificationId)
+                newly += m.id
             }
             if (newly.isEmpty()) return
             changed()
