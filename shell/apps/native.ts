@@ -66,16 +66,21 @@ page.subscribe(stir);
 let nextId = 1;
 
 export interface Surface {
-  /** Frames go to the native surface now: send them with draw(); otherwise draw in the page. */
-  native: boolean;
+  /** The surface is up and placed: the island may move its frames to it (show(true), then draw()). */
+  want: boolean;
   /** A frame: "<w> <h> <ops...>" (ShellNative.kt Tile.draw). */
   draw(frame: string): void;
+  /**
+   * Shown or not. The island decides when, so a handover is seamless: it shows the surface before its first native
+   * frame, and hides it only once its own canvas has the current frame again (home starting to move).
+   */
+  show(on: boolean): void;
 }
 
 /**
- * A native surface at [ref]'s place while [wanted] (the island on screen) and home is still. Shown stays shown - with
- * its last frame - until [wanted] goes; it's placed again whenever the element's box changes (checked once a second
- * while it's up, and on every resize).
+ * A native surface at [ref]'s place while [wanted] (the island on screen) and home is still: created, placed (again
+ * whenever the element's box changes - checked once a second while it's up, and on every resize), and destroyed with
+ * the island. Showing it is the island's call (Surface.show); it keeps its last frame while shown.
  */
 export function useSurface(ref: { current: Element | null }, wanted: boolean): Surface {
   const id = useRef(0);
@@ -99,7 +104,6 @@ export function useSurface(ref: { current: Element | null }, wanted: boolean): S
       last = k;
     };
     place();
-    send(`s.show ${n} 1`);
     setUp(true);
     const ro = new ResizeObserver(place);
     ro.observe(el);
@@ -107,10 +111,13 @@ export function useSurface(ref: { current: Element | null }, wanted: boolean): S
     return () => {
       ro.disconnect();
       clearInterval(t);
-      send(`s.show ${n} 0`);
       setUp(false);
     };
   }, [active, port]);
   useEffect(() => () => void (id.current && send(`s.destroy ${id.current}`)), []);
-  return { native: up && active, draw: (frame) => id.current && send(`s.draw ${id.current} ${frame}`) };
+  return {
+    want: up && active,
+    draw: (frame) => void (id.current && send(`s.draw ${id.current} ${frame}`)),
+    show: (on) => void (id.current && send(`s.show ${id.current} ${on ? 1 : 0}`)),
+  };
 }

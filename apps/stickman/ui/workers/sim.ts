@@ -16,9 +16,10 @@
 //               { type: "alive" }                       the page is really drawn (about once a second while on)
 //               { type: "card", card }                  the card around the canvas (CSS px), for the native surface
 //               { type: "target", native }              frames to the native surface (as display lists) or the canvas
+//               { type: "clear" }                       (native) the surface shows the stage: the canvas emptied
 //               { type: "nodraw", on }                  checks only: simulate without drawing
 //               { type: "stats" }                       answers { type: "stats", lesson, checkpoint, prof, ... } (checks)
-// Messages out: { type: "ready", brain, lessons } | { type: "error", message } | { type: "frame", frame } (native)
+// Messages out: { type: "ready", brain, lessons } | { type: "error", message } | { type: "frame", frame } (native) | { type: "canvas" } (the canvas has the frame)
 //
 // Pacing: while on, a frame at most every 1/fps s on a timer, and only while the page's heartbeat ("alive", from its
 // requestAnimationFrame) keeps coming. Off: nothing scheduled at all, no timer, no physics; it carries on where it
@@ -653,13 +654,15 @@ self.onmessage = async (e: MessageEvent) => {
     force = true;
     if (ready && native) draw();
   } else if (m.type === "target") {
-    // to the native surface (the canvas emptied: it'd show over it) or back to the canvas; drawn at once either way
-    if (m.native !== native) {
-      native = !!m.native;
-      if (native) ctx.clearRect(0, 0, canvas.width, canvas.height);
-      force = true;
-      if (ready) { mj.mj_forward(model, data); draw(); }
-    }
+    // Native: the next frames as display lists; the canvas keeps its last frame until the page says "clear" (once the
+    // surface shows the stage). Canvas: this frame drawn on it at once, then "canvas" - the page hides the surface only
+    // then, so the handover never shows an empty tile.
+    native = !!m.native;
+    force = true;
+    if (ready) { mj.mj_forward(model, data); draw(); }
+    if (!native) (self as any).postMessage({ type: "canvas" });
+  } else if (m.type === "clear") {
+    if (native) ctx.clearRect(0, 0, canvas.width, canvas.height);
   } else if (m.type === "nodraw") {
     noDraw = !!m.on;
   } else if (m.type === "stats") {

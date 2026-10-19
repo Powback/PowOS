@@ -132,22 +132,46 @@ export default function Parkour({ host, base }: { host: Host; base: string; cell
   const cardEl = useRef<HTMLElement | null>(null);
   useEffect(() => void (cardEl.current = box.current?.parentElement ?? null), []);
   const surface = host.useSurface ? host.useSurface(cardEl, onScreen && state.status === "ready") : null;
-  const toNative = !!surface?.native;
+  const toNative = !!surface?.want;
   const surfaceRef = useRef(surface);
   surfaceRef.current = surface;
+  // The handover, never an empty or faded frame between the two:
+  //   to the surface: surface shown, the worker's first native frame drawn there, then (two page frames later, the
+  //     surface has it on screen) the page's card goes see-through and the canvas is emptied;
+  //   back to the canvas (home starts moving): the worker draws the current frame on the canvas first ("canvas"),
+  //     and only then the card's glass comes back and the surface hides.
   useEffect(() => {
-    const w = worker.current, c = cardEl.current, b = box.current;
-    if (!w || !c || !b) return;
+    const w = worker.current, c = cardEl.current, b = box.current, sf = surfaceRef.current;
+    if (!w || !c || !b || !sf || state.status !== "ready") return;
+    let raf = 0, timer = 0;
     if (toNative) {
       const cr = c.getBoundingClientRect(), br = b.getBoundingClientRect();
       w.postMessage({
         type: "card",
         card: { w: cr.width, h: cr.height, x: br.left - cr.left, y: br.top - cr.top, r: parseFloat(getComputedStyle(c).borderTopLeftRadius) || 0 },
       });
-      c.style.background = "transparent";
+      sf.show(true);
+      w.postMessage({ type: "target", native: true });
+      raf = requestAnimationFrame(() => (raf = requestAnimationFrame(() => {
+        raf = 0;
+        c.style.background = "transparent";
+        w.postMessage({ type: "clear" });
+      })));
     }
-    w.postMessage({ type: "target", native: toNative });
-    return () => void (c.style.background = "");
+    return () => {
+      cancelAnimationFrame(raf);
+      if (!toNative) return;
+      const done = () => {
+        clearTimeout(timer);
+        w.removeEventListener("message", onCanvas);
+        c.style.background = "";
+        surfaceRef.current?.show(false);
+      };
+      const onCanvas = (e: MessageEvent) => e.data.type === "canvas" && done();
+      w.addEventListener("message", onCanvas);
+      timer = window.setTimeout(done, 300); // (a worker that never answers: hide anyway)
+      w.postMessage({ type: "target", native: false });
+    };
   }, [toNative, state.status, size.width, size.height]);
 
   // The worker, made the first time the tile is on screen (its 11 MB of MuJoCo isn't loaded for a tile never seen) and
