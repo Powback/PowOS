@@ -769,6 +769,23 @@
 .ai-session-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-session-meta { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
+.ai-work-box { padding: 4px 0; display: flex; flex-direction: column; }
+.ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }
+.ai-work + .ai-work { border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent); }
+.ai-work-line { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ai-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-work-meta { flex: none; font-size: var(--text-small); white-space: nowrap; }
+.ai-work.blocked .ai-work-status, .ai-dot.blocked { color: var(--color-red); background: var(--color-red); }
+.ai-work.blocked .ai-work-status { background: none; }
+.ai-work.waiting .ai-work-status { color: var(--color-accent); font-weight: bold; }
+.ai-dot.waiting { background: none; box-shadow: inset 0 0 0 2px var(--color-accent); }
+.ai-work.done .ai-work-title { color: var(--color-muted); }
+.ai-dot.done { background: var(--color-muted); }
+.ai-work-detail { display: flex; flex-direction: column; gap: 3px; padding-left: 17px; font-size: var(--text-small); line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.ai-work-note { color: var(--color-foreground); }
+.ai-work-fold { flex-direction: row; font-size: var(--text-small); }
+.ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
 .ai-mail { padding: 10px 12px; margin-bottom: 6px; font-size: var(--text-small); line-height: 1.4; }
 .ai-mail-head { margin-bottom: 3px; }
 .ai-compose { display: flex; align-items: center; gap: var(--gap); min-height: 48px; padding: 0 var(--edge); }
@@ -838,17 +855,12 @@ html[data-mode="assist"] .assist {
 .assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
 .assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--color-accent); }
 .assist-attach .chip.off { border-color: var(--color-border); color: var(--color-muted); }
-.assist-shot { cursor: pointer; }
-/* The screenshot full size, to cut a region out of (assist.tsx Crop). */
-.crop { position: fixed; inset: 0; z-index: 5; background: #000; display: flex; flex-direction: column; }
-.crop-area { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; touch-action: none; }
-.crop-area img { max-width: 100%; max-height: 100%; user-select: none; -webkit-user-drag: none; }
+/* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
+.assist-draw { position: absolute; inset: 0; touch-action: none; }
+.assist-panel { position: relative; z-index: 1; }
+.assist-hint { font-size: var(--text-small); }
 .crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .crop-stroke polyline { fill: none; stroke: var(--color-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
-.crop-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--text-small); margin: 8px var(--edge) calc(var(--inset-bottom, 0px) + var(--edge)); padding: 8px; }
-.crop-bar button { font: var(--text-small) var(--font); padding: 8px 12px; color: var(--color-foreground); }
-.crop-bar button.on { color: var(--color-accent); }
-.crop-bar button:disabled { opacity: 0.4; }
 .assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
 .assist-live.on { border-color: var(--color-red); color: var(--color-red); }
 /* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
