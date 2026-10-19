@@ -3,7 +3,7 @@
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
-import type { AgentMail, App, AssistScreen, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, QuickState, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
+import type { AgentMail, App, AssistScreen, Bridge, Cell, Chat, Home, HomeItem, NotificationList, PhoneNotification, RecentTask, QuickState, TermState, ThemeChoice, ThemeColors, WidgetScreen } from "./types.ts";
 
 type Handler = (data: any) => void;
 
@@ -108,6 +108,12 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       open: (name) => call("qs.open", name),
     },
     shade: { closed: () => call("shade.closed") },
+    tasks: {
+      list: () => call<RecentTask[]>("tasks.list"),
+      open: (id) => call<boolean>("tasks.open", id),
+      remove: (id) => call<boolean>("tasks.remove", id),
+    },
+    switcher: { close: () => call("switcher.close"), home: () => call("switcher.home") },
     assist: {
       screen: () => call<AssistScreen | null>("assist.screen"),
       close: () => call("assist.close"),
@@ -332,6 +338,8 @@ function mock(): Bridge {
       };
     })(),
     shade: { closed: async () => console.log("[mock] shade closed") },
+    tasks: mockTasks(icon, hue),
+    switcher: { close: async () => console.log("[mock] switcher closed"), home: async () => console.log("[mock] switcher: home") },
     // A screen it was opened over: some text, no screenshot.
     assist: {
       screen: async () => ({ text: "Inbox\n  Mats - are we still on for tonight?\n  Your order has shipped", screenshot: null }),
@@ -445,6 +453,36 @@ const terminalTrees: Record<string, unknown> = {
     c: [{ k: "Terminal", id: "r.0", p: { command: "seq 40", interactive: false, textSize: 9 }, h: ["onTap"] }],
   },
 };
+
+/**
+ * Recent tasks for the mock: a few apps, each "snapshot" a drawing of a screen in its color; removing one removes it.
+ */
+function mockTasks(icon: (name: string) => string, hue: (name: string) => number): Bridge["tasks"] {
+  const shot = (name: string) =>
+    "data:image/svg+xml," +
+    encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 780"><rect width="360" height="780" fill="hsl(${hue(name)} 30% 18%)"/>` +
+        `<rect y="0" width="360" height="96" fill="hsl(${hue(name)} 55% 40%)"/>` +
+        `<text x="24" y="66" font-family="sans-serif" font-size="30" fill="white">${name}</text>` +
+        Array.from({ length: 7 }, (_, i) => `<rect x="24" y="${130 + i * 86}" width="${312 - (i % 3) * 60}" height="54" rx="10" fill="hsl(${hue(name)} 20% 28%)"/>`).join("") +
+        `</svg>`,
+    );
+  let tasks: RecentTask[] = ["Chrome", "Signal", "Spotify", "Maps", "Terminal", "Gmail"].map((name, i) => ({
+    id: 100 + i,
+    label: name,
+    key: `a:${name.toLowerCase()}`,
+    icon: icon(name),
+    snapshot: shot(name),
+  }));
+  return {
+    list: async () => tasks.slice(),
+    open: async (id) => (console.log("[mock] switch to task", id), tasks.some((t) => t.id === id)),
+    remove: async (id) => {
+      tasks = tasks.filter((t) => t.id !== id);
+      return true;
+    },
+  };
+}
 
 /**
  * Terminals for the mock: a tiny line-editing shell instead of a pty (echo, seq, size, colors, mouse, exit), with the host's

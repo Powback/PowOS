@@ -1,0 +1,39 @@
+package dev.omalauncher.system
+
+import android.util.Log
+import org.lsposed.hiddenapibypass.HiddenApiBypass
+
+/**
+ * The hidden framework calls the system slots make (docs/NATIVE-SYSTEM-UI.md): ActivityTaskManager's task calls (a
+ * task's snapshot, removing one, starting one from recents), StatusBarManager's disable flags. The system grants their
+ * permissions to PowOS as the recents provider, but the calls themselves are @hide, and a privileged app isn't exempt
+ * from the hidden API checks - only a platform-signed one is.
+ *
+ * HACK: lifts the hidden API checks for those classes only, with org.lsposed.hiddenapibypass (Apache-2.0, what
+ * Lawnchair ships). Real fix: none for an app - the calls are the system UI's own, made from a platform-signed
+ * process, which PowOS can't be without OnePlus's key.
+ */
+object HiddenApi {
+    private const val TAG = "PowosHiddenApi"
+
+    /** Class prefixes (JNI signatures) the slots call into. */
+    private val classes =
+        arrayOf(
+            "Landroid/app/ActivityTaskManager",
+            "Landroid/app/IActivityTaskManager",
+            "Landroid/window/TaskSnapshot",
+            "Landroid/app/StatusBarManager",
+        )
+
+    @Volatile private var done = false
+
+    /** Once per process, before the first hidden call; false if this Android refuses (the calls then fail alone). */
+    fun allow(): Boolean {
+        if (done) return true
+        synchronized(this) {
+            if (done) return true
+            done = runCatching { HiddenApiBypass.addHiddenApiExemptions(*classes) }.onFailure { Log.w(TAG, "can't lift the hidden API checks", it) }.getOrDefault(false)
+            return done
+        }
+    }
+}

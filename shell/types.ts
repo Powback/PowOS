@@ -87,6 +87,17 @@ export interface PhoneNotification {
   clearable: boolean;
   profile: string | null;
 }
+/**
+ * A recent task, as the switcher shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it
+ * isn't there), [snapshot] its last frame (a new URL each listing).
+ */
+export interface RecentTask {
+  id: number;
+  label: string;
+  key: string | null;
+  icon: string | null;
+  snapshot: string;
+}
 /** [available]: the launcher may read them (it has notification access). */
 export interface NotificationList {
   available: boolean;
@@ -252,6 +263,22 @@ export interface Bridge {
   shade: {
     closed(): Promise<void>;
   };
+  /** Android's recent tasks (the host is the recents provider): newest first; switching to one; removing one. */
+  tasks: {
+    list(): Promise<RecentTask[]>;
+    /** Brings the task back (the switcher goes away); false if it's gone. */
+    open(id: number): Promise<boolean>;
+    remove(id: number): Promise<boolean>;
+  };
+  /**
+   * The switcher (index.html?mode=switcher, the system's recents screen): "switcher.shown" ({ from: the task it was
+   * opened over, or null }) each time it comes up, "switcher.toggle" when the overview button is pressed again.
+   */
+  switcher: {
+    /** Away: what was under it shows again. */
+    close(): Promise<void>;
+    home(): Promise<void>;
+  };
   /** The theme: the colors in use ("theme.changed" brings them again), the ones to pick from, picking one. */
   theme: {
     get(): Promise<ThemeColors>;
@@ -290,7 +317,7 @@ export interface Bridge {
     notifications(open?: boolean): Promise<boolean>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "qs.changed" (QuickState), "shade.settle" ({ open }), "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "qs.changed" (QuickState), "shade.settle" ({ open }), "switcher.shown" ({ from }), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

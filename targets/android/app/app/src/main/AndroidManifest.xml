@@ -12,6 +12,18 @@
     <!-- Home's swipe down pulls the notification shade down. -->
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
 
+    <!-- PowOS as the recents provider (docs/NATIVE-SYSTEM-UI.md; the system module's recents overlay): granted by the
+         recents role, not asked for - STATUS_BAR and START_TASKS_FROM_RECENTS are also privileged, so they're on the
+         system module's allowlist (privapp-permissions.txt). The switcher: tasks' last frames, removing tasks, switching
+         to them (system/Tasks.kt); the shade: its system windows and SystemUI's shade switched off (system/ShadeHost.kt). -->
+    <uses-permission android:name="android.permission.READ_FRAME_BUFFER" />
+    <uses-permission android:name="android.permission.REMOVE_TASKS" />
+    <uses-permission android:name="android.permission.START_TASKS_FROM_RECENTS" />
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
+    <uses-permission android:name="android.permission.STATUS_BAR_SERVICE" />
+    <uses-permission android:name="android.permission.STATUS_BAR" />
+    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
@@ -182,6 +194,29 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </service>
+
+        <!-- PowOS as the recents provider (the system module's recents overlay names this package): SystemUI binds the
+             service (only it holds STATUS_BAR_SERVICE) and hands it the overview button; the activity is the switcher,
+             the system's recents screen (config_recentsComponentName). -->
+        <service
+            android:name="dev.omalauncher.system.PowosRecentsService"
+            android:exported="true"
+            android:permission="android.permission.STATUS_BAR_SERVICE">
+            <intent-filter>
+                <action android:name="android.intent.action.QUICKSTEP_SERVICE" />
+            </intent-filter>
+        </service>
+        <activity
+            android:name=".shell.SwitcherActivity"
+            android:label="Recents"
+            android:taskAffinity="com.powos.app.switcher"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:stateNotNeeded="true"
+            android:windowSoftInputMode="adjustNothing" />
 
         <!-- The Compose launcher's screens (store, themes, settings...) over the web shell until it has its own. -->
         <activity

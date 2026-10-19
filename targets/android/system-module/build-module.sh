@@ -2,7 +2,7 @@
 # Builds the PowOS system module: a Magisk module that installs the PowOS app as a privileged system app
 # (/system/priv-app, systemless), the first step to PowOS filling the phone's system UI slots (docs/NATIVE-SYSTEM-UI.md).
 #
-#   build-module.sh [--priv-app] [--apk powos.apk] [--refresh-perms] [--check-signer]
+#   build-module.sh [--priv-app] [--slot NAME]... [--apk powos.apk] [--refresh-perms] [--check-signer]
 #
 # Without --priv-app the module carries only the slots' overlays (overlays/): the app stays an ordinary app. As a
 # privileged app (priv_app) PowOS may not create or connect to socket files in its own data (no sock_file rules for
@@ -20,6 +20,8 @@
 #   only takes immutable framework overlays: each is on while the module is (off: disable it in Magisk, reboot).
 #   Signed with a key of their own (~/.local/share/powos/overlay.jks, made once; not the app's). overlays-disabled/
 #   keeps slots that aren't shipped: doze (PowOS as the screen-off display) felt laggy on the phone and was reverted.
+#   --slot NAME ships one of those too, for trying it on the phone before it moves to overlays/. The recents slot
+#   (PowOS as the recents provider: switcher, shade) needs --priv-app: SystemUI binds only a system package's service.
 # - module/: the boot watchdog (post-fs-data.sh counts boots, service.sh clears the count once Android is up; two
 #   that never finish and the module disables itself).
 #
@@ -32,17 +34,25 @@ PHONE=${ANDROID_SERIAL:-192.168.50.239:5555}
 IMAGE=android-app-dev-android-builder:latest
 AAPT2=/opt/android-sdk/build-tools/35.0.0/aapt2
 APKSIGNER=/opt/android-sdk/build-tools/35.0.0/apksigner
-refresh=0 signer=0 priv=0
+refresh=0 signer=0 priv=0 slots=()
 while [ $# -gt 0 ]; do
     case $1 in
         --apk) APK=$2; shift ;;
         --priv-app) priv=1 ;;
+        --slot) slots+=("$2"); shift ;;
         --refresh-perms) refresh=1 ;;
         --check-signer) signer=1 ;;
         *) echo "build-module.sh: unknown option $1" >&2; exit 2 ;;
     esac
     shift
 done
+for slot in ${slots[@]+"${slots[@]}"}; do
+    [ -d "$HERE/overlays-disabled/$slot" ] || { echo "build-module.sh: no slot $slot in overlays-disabled/" >&2; exit 2; }
+done
+if [ $priv = 0 ] && { [ -d "$HERE/overlays/recents" ] || [[ " ${slots[*]-} " == *" recents "* ]]; }; then
+    echo "build-module.sh: the recents slot needs --priv-app (SystemUI binds only a system package's QUICKSTEP_SERVICE; without it the overview button and gestures do nothing)" >&2
+    exit 2
+fi
 [ -f "$APK" ] || { echo "build-module.sh: no APK at $APK (targets/android/build-app.sh builds it)" >&2; exit 1; }
 APK=$(cd "$(dirname "$APK")" && pwd)/$(basename "$APK")
 
@@ -104,6 +114,7 @@ KEYS=~/.local/share/powos
 mkdir -p "$KEYS" "$M/system/product/overlay" "$WORK/overlays"
 shopt -s nullglob  # no overlays at all is fine: the module is then the priv-app (or just the watchdog)
 for dir in "$HERE"/overlays/*/; do cp -R "$dir" "$WORK/overlays/"; done
+for slot in ${slots[@]+"${slots[@]}"}; do cp -R "$HERE/overlays-disabled/$slot" "$WORK/overlays/"; done
 [ -f "$KEYS/overlay.jks" ] || {
     sdk keytool -genkeypair -keystore /t/overlay.jks -storepass powos-overlay -keypass powos-overlay -alias overlay \
         -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=PowOS system overlays" >/dev/null 2>&1

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android's recents screen: PowOS's switcher (the shell's switcher page). Its package's QUICKSTEP_SERVICE is what
+         SystemUI binds (PowosRecentsService). -->
+    <string name="config_recentsComponentName" translatable="false">com.powos.app/dev.omalauncher.shell.SwitcherActivity</string>
+</resources>

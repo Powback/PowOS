@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PowOS as the recents provider (docs/NATIVE-SYSTEM-UI.md, switcher): SystemUI binds PowOS's QUICKSTEP_SERVICE for the
+     overview button, the system grants PowOS the recents role's permissions, and PowOS's shade can replace SystemUI's.
+     Needs the priv-app (build-module.sh --priv-app): SystemUI only binds a system package's service. Static, as the
+     system server only takes immutable framework overlays. Off again: disable the module (Magisk) and reboot. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.powos.config.recents">
+    <application android:hasCode="false" />
+    <overlay android:targetPackage="android" android:isStatic="true" android:priority="901" />
+</manifest>

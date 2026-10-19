@@ -146,6 +146,11 @@ class ShellHost(
                 val file = File(File(context.cacheDir, "assist"), path.removePrefix("_assist/").substringAfterLast('/'))
                 return if (file.isFile) WebResourceResponse("image/jpeg", null, file.inputStream()).apply { responseHeaders = mapOf("Cache-Control" to "no-store") } else notFound()
             }
+            // A recent task's last frame, for the switcher (on the WebView's loader thread: the snapshot is a binder call).
+            if (path.startsWith("_task/")) {
+                val jpeg = path.removePrefix("_task/").toIntOrNull()?.let { dev.omalauncher.system.Tasks.snapshot(it) } ?: return notFound()
+                return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "no-store") }
+            }
             if (".." in path.split('/')) return notFound()
             val stream = open(path) ?: return notFound()
             return WebResourceResponse(mime(path), "utf-8", stream).apply {

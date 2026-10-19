@@ -72,6 +72,12 @@ class ShellBridge(
     /** Set by the assistant's session (its page is the assist screen): the screen it was opened over, closing it. */
     var assist: dev.omalauncher.assist.AssistSlot? = null
 
+    /** Set by the shade host (its page is the shade): the window to put away once the panel is shut. */
+    var shade: dev.omalauncher.system.ShadeSlot? = null
+
+    /** Set by the switcher's activity (its page is the switcher): leaving it. */
+    var switcher: dev.omalauncher.system.SwitcherSlot? = null
+
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     /**
@@ -162,6 +168,12 @@ class ShellBridge(
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))
+            "shade.closed" -> shade?.closed()
+            "tasks.list" -> tasks()
+            "tasks.open" -> dev.omalauncher.system.Tasks.open(context, a.getInt(0)).also { if (it) switcher?.close() }
+            "tasks.remove" -> dev.omalauncher.system.Tasks.remove(a.getInt(0))
+            "switcher.close" -> switcher?.close()
+            "switcher.home" -> switcher?.home()
             "assist.screen" -> assist?.screen()
             "assist.close" -> assist?.close()
             "assist.attach" -> assist?.attach(a.optString(0).takeIf { it.isNotEmpty() && it != "null" })
@@ -260,9 +272,31 @@ class ShellBridge(
     @SuppressLint("WrongConstant")
     private fun notifications(open: Boolean): Boolean =
         runCatching {
+            // PowOS's shade in SystemUI's place: SystemUI's own panel is lent back to it for this (its quick settings).
+            if (open) dev.omalauncher.system.ShadeHost.current?.lend()
             val bar = context.getSystemService("statusbar")
             bar.javaClass.getMethod(if (open) "expandNotificationsPanel" else "collapsePanels").invoke(bar)
         }.onFailure { Log.w(TAG, "can't ${if (open) "open" else "close"} the notification shade", it) }.isSuccess
+
+    /**
+     * The recent tasks (the switcher's): [{ id, label, key, icon, snapshot }] newest first - the app's drawer key and
+     * icon when it's in the drawer, its last frame served by ShellHost (/_task/<id>, new each time it's asked).
+     */
+    private fun tasks(): JSONArray {
+        val stamp = System.currentTimeMillis()
+        return JSONArray(
+            dev.omalauncher.system.Tasks.list(context).map { t ->
+                val pkg = t.component?.packageName
+                val app = runtime.androidApps.apps.firstOrNull { it.component == t.component && it.profile == null } ?: runtime.androidApps.apps.firstOrNull { it.component.packageName == pkg && it.profile == null }
+                JSONObject()
+                    .put("id", t.id)
+                    .put("label", t.label ?: app?.label ?: pkg ?: "")
+                    .put("key", app?.let { "a:${it.key}" } ?: JSONObject.NULL)
+                    .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
+                    .put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=$stamp")
+            },
+        )
+    }
 
     /** The notification panel's list: { available, items: [{ key, app, icon, title, text, time, clearable, profile }] }. */
     private fun notificationList(): JSONObject {

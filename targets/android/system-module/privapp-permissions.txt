@@ -4,3 +4,10 @@
 
 # Settings in the secure table (the launcher's own settings: default home, gestures, theming the system).
 android.permission.WRITE_SECURE_SETTINGS
+
+# The recents provider (the recents slot: switcher and shade). Its other permissions (STATUS_BAR_SERVICE,
+# READ_FRAME_BUFFER, REMOVE_TASKS, INTERNAL_SYSTEM_WINDOW) are recents-only and granted by the role; these two are
+# also privileged, so the allowlist is checked for them first. STATUS_BAR: SystemUI's shade switched off while
+# PowOS's replaces it (StatusBarManager.disable). START_TASKS_FROM_RECENTS: the switcher brings a task back.
+android.permission.STATUS_BAR
+android.permission.START_TASKS_FROM_RECENTS

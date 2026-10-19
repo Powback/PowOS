@@ -34,7 +34,11 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
-    buildFeatures { buildConfig = true }
+    // aidl: SystemUI's recents provider interface (src/main/aidl, ILauncherProxy).
+    buildFeatures {
+        buildConfig = true
+        aidl = true
+    }
 
     externalNativeBuild {
         cmake { path = file("src/main/cpp/CMakeLists.txt") }
@@ -98,6 +102,8 @@ dependencies {
     implementation(project(":owl"))
     // PowOS: Andromarchy's engine (display, session, rootfs install), GPL-3.0; the app is GPL-3.0 as a whole.
     implementation(project(":engine"))
+    // The system slots' hidden framework calls (system/HiddenApi.kt), Apache-2.0.
+    implementation(libs.hiddenapibypass)
     testImplementation(libs.junit)
     // android.jar only has stubs of org.json.
     testImplementation(libs.org.json)
