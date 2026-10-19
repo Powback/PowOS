@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android's screen-off display: PowOS's, the shell's aod screen (PowosDozeService). -->
+    <string name="config_dozeComponent" translatable="false">com.powos.app/dev.omalauncher.shell.PowosDozeService</string>
+</resources>

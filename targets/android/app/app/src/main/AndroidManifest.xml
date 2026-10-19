@@ -132,6 +132,19 @@
 
         <!-- PowOS AI: the chat with PowOS's manager (docs/powos-ai-android.md) - from the launcher, the share sheet, the
              assistant gesture (the app as the phone's digital assistant), Quick Settings and the agents' notifications. -->
+        <!-- The screen-off display: the shell's aod screen as the doze component (the system module's overlay names it),
+             and a screensaver. -->
+        <service
+            android:name=".shell.PowosDozeService"
+            android:label="PowOS"
+            android:exported="true"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
         <!-- The Compose launcher's screens (store, themes, settings...) over the web shell until it has its own. -->
         <activity
             android:name=".shell.ShellScreensActivity"

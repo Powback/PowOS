@@ -3,6 +3,7 @@ import { render } from "preact";
 import { powos } from "./bridge.ts";
 import { load } from "./state.ts";
 import { Home } from "./ui/home.tsx";
+import { Aod } from "./ui/aod.tsx";
 import type { Insets, ThemeColors } from "./types.ts";
 import "./hot.ts";
 
@@ -29,5 +30,12 @@ function applyTheme(t: ThemeColors | null) {
 powos.on("theme.changed", applyTheme);
 applyTheme(await powos.theme.get().catch(() => null));
 
-await load();
-render(<Home />, document.body);
+/** Which screen this page is: the host says (index.html?mode=) - home, or a system slot's (aod: the screen-off display). */
+const mode = new URLSearchParams(location.search).get("mode");
+document.documentElement.dataset.mode = mode ?? "home";
+if (mode === "aod") {
+  render(<Aod />, document.body);
+} else {
+  await load();
+  render(<Home />, document.body);
+}

@@ -109,7 +109,12 @@ class ShellScreensActivity : ComponentActivity() {
             screen: String,
         ) {
             require(screen in ALL) { "no screen $screen" }
-            context.startActivity(Intent(context, ShellScreensActivity::class.java).putExtra(EXTRA_SCREEN, screen))
+            context.startActivity(
+                Intent(context, ShellScreensActivity::class.java)
+                    .putExtra(EXTRA_SCREEN, screen)
+                    // From a slot's window (no activity): a task of its own.
+                    .apply { if (context !is android.app.Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
+            )
         }
     }
 }

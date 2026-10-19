@@ -2,7 +2,13 @@
 # Builds the PowOS system module: a Magisk module that installs the PowOS app as a privileged system app
 # (/system/priv-app, systemless), the first step to PowOS filling the phone's system UI slots (docs/NATIVE-SYSTEM-UI.md).
 #
-#   build-module.sh [--apk powos.apk] [--refresh-perms] [--check-signer]
+#   build-module.sh [--priv-app] [--apk powos.apk] [--refresh-perms] [--check-signer]
+#
+# Without --priv-app the module carries only the slots' overlays (overlays/): the app stays an ordinary app. That's the
+# default for now: as a privileged app (priv_app) PowOS may not create Unix sockets in its own data (no sock_file rules
+# for privapp_data_file on this phone), which the rooted PowOS session's display daemon needs - phase 0 broke the
+# session (docs/NATIVE-SYSTEM-UI.md, "priv_app and sockets"). A slot that needs no privilege (the doze component) works
+# without it.
 #
 # - The APK is the release build (targets/android/build-app.sh's output): the same one the phone has installed, signed
 #   with the same key - a system copy signed otherwise would make Android drop the installed app and its data
@@ -11,6 +17,9 @@
 #   (ro.control_privapp_permissions=enforce): one missing and Android won't boot. So the build fails if any requested
 #   permission that's privileged (privileged-perms.txt: the phone's own list, --refresh-perms reads it again) isn't
 #   on the list: privapp-permissions.txt, reviewed by hand - each entry is a power the app gets.
+# - overlays/<slot>/: one resource overlay per system UI slot (config_dozeComponent, ...). Static, as the system server
+#   only takes immutable framework overlays: each is on while the module is (off: disable it in Magisk, reboot).
+#   Signed with a key of their own (~/.local/share/powos/overlay.jks, made once; not the app's).
 # - module/: the boot watchdog (post-fs-data.sh counts boots, service.sh clears the count once Android is up; two
 #   that never finish and the module disables itself).
 #
@@ -23,10 +32,11 @@ PHONE=${ANDROID_SERIAL:-192.168.50.239:5555}
 IMAGE=android-app-dev-android-builder:latest
 AAPT2=/opt/android-sdk/build-tools/35.0.0/aapt2
 APKSIGNER=/opt/android-sdk/build-tools/35.0.0/apksigner
-refresh=0 signer=0
+refresh=0 signer=0 priv=0
 while [ $# -gt 0 ]; do
     case $1 in
         --apk) APK=$2; shift ;;
+        --priv-app) priv=1 ;;
         --refresh-perms) refresh=1 ;;
         --check-signer) signer=1 ;;
         *) echo "build-module.sh: unknown option $1" >&2; exit 2 ;;
@@ -73,6 +83,8 @@ if [ $signer = 1 ]; then
 fi
 
 M=$WORK/module
+mkdir -p "$M"
+if [ $priv = 1 ]; then
 mkdir -p "$M/system/priv-app/PowOS" "$M/system/etc/permissions"
 cp "$APK" "$M/system/priv-app/PowOS/PowOS.apk"
 {
@@ -84,15 +96,35 @@ cp "$APK" "$M/system/priv-app/PowOS/PowOS.apk"
     echo '    </privapp-permissions>'
     echo '</permissions>'
 } > "$M/system/etc/permissions/privapp-permissions-com.powos.app.xml"
+fi
 cp "$HERE/module/post-fs-data.sh" "$HERE/module/service.sh" "$M/"
+
+# The slots' overlays: compiled, linked against the platform, signed.
+KEYS=~/.local/share/powos
+mkdir -p "$KEYS" "$M/system/product/overlay"
+cp -R "$HERE/overlays" "$WORK/overlays"
+[ -f "$KEYS/overlay.jks" ] || {
+    sdk keytool -genkeypair -keystore /t/overlay.jks -storepass powos-overlay -keypass powos-overlay -alias overlay \
+        -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=PowOS system overlays" >/dev/null 2>&1
+    cp "$WORK/overlay.jks" "$KEYS/overlay.jks"
+}
+cp "$KEYS/overlay.jks" "$WORK/overlay.jks"
+for dir in "$WORK"/overlays/*/; do
+    slot=$(basename "$dir")
+    o=/t/overlays/$slot
+    sdk "$AAPT2" compile --dir "$o/res" -o "$o/res.zip"
+    sdk "$AAPT2" link -o "$o/unsigned.apk" -I /opt/android-sdk/platforms/android-36/android.jar --manifest "$o/AndroidManifest.xml" "$o/res.zip"
+    sdk "$APKSIGNER" sign --ks /t/overlay.jks --ks-pass pass:powos-overlay --ks-key-alias overlay --out "$o/overlay.apk" "$o/unsigned.apk"
+    cp "$dir/overlay.apk" "$M/system/product/overlay/PowOS-$slot.apk"
+done
 cat > "$M/module.prop" <<PROP
 id=powos-system
 name=PowOS system
 version=$version
 versionCode=$version
 author=PowOS
-description=The PowOS app as a privileged system app: the base for PowOS's own switcher, shade, lock screen and screen-off display. Turns itself off after two boots that don't finish.
+description=PowOS's system UI slots (overlays: the screen-off display, ...)$([ $priv = 1 ] && echo ", and the PowOS app as a privileged system app"). Turns itself off after two boots that don't finish.
 PROP
 rm -f "$OUT"
 (cd "$M" && zip -qr "$OUT" .)
-echo "$OUT: PowOS $version, allowlisted: $(tr '\n' ' ' < "$WORK/allow")"
+echo "$OUT: PowOS $version, priv-app: $([ $priv = 1 ] && echo yes || echo no), allowlisted: $(tr '\n' ' ' < "$WORK/allow"), overlays: $(ls "$M/system/product/overlay" | tr '\n' ' ')"

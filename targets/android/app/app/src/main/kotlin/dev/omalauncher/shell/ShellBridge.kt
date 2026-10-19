@@ -51,18 +51,21 @@ import java.io.File
  * there, as the Compose launcher does.
  */
 class ShellBridge(
-    private val activity: Activity,
+    /** Where it runs: the launcher's activity, or a system slot's window (a dream, an overlay) - no activity there. */
+    private val context: Context,
+    /** The activity, when there is one: only asking for a permission needs it. */
+    private val activity: Activity?,
     private val runtime: Runtime,
     private val web: WebView,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val data get() = File(activity.filesDir, "shell-data").apply { mkdirs() }
+    private val data get() = File(context.filesDir, "shell-data").apply { mkdirs() }
     private val home = ShellHome(runtime)
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
-    private val speech = Speech(activity.applicationContext)
+    private val speech = Speech(context.applicationContext)
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     /**
@@ -105,7 +108,7 @@ class ShellBridge(
         // The home screen changed (here, in the Compose launcher, or a widget file arriving): the page re-reads it.
         scope.launch { snapshotFlow { home.fingerprint() }.drop(1).collect { emit("home.changed", null) } }
         // PowOS AI's conversation (shared with its own app): every item and the busy flag, as they stream in.
-        PowosAiChat.load(activity.applicationContext)
+        PowosAiChat.load(context.applicationContext)
         scope.launch { snapshotFlow { aiChat().toString() }.drop(1).collect { emit("ai.changed", JSONObject(it)) } }
     }
 
@@ -140,18 +143,18 @@ class ShellBridge(
             "store.set" -> store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
             "ai.chat" -> aiChat()
             "ai.send" -> {
-                PowosAiChat.send(activity.applicationContext, a.getString(0))
+                PowosAiChat.send(context.applicationContext, a.getString(0))
                 // Asked here, it's also an app in the switcher, the same conversation a swipe away.
-                PowosAiActivity.keepInRecents(activity)
+                PowosAiActivity.keepInRecents(context)
             }
-            "ai.open" -> PowosAiActivity.open(activity, null)
+            "ai.open" -> PowosAiActivity.open(context, null)
             "ai.mail" -> aiMail()
             "ai.sessions" -> aiSessions()
             "ai.attach" -> aiAttach(a.getString(0))
             "theme.get" -> theme()
             "theme.list" -> themeList()
             "theme.pick" -> pickTheme(a.getString(0))
-            "screens.open" -> ShellScreensActivity.open(activity, a.getString(0))
+            "screens.open" -> ShellScreensActivity.open(context, a.getString(0))
             "agents.default" -> runtime.agents.default?.name
             "agents.newWidget" -> withAgent { newWidgetCommand(it.bin) to "New widget" }
             "agents.newApp" -> withAgent { newAppCommand(it.bin) to "New app" }
@@ -162,6 +165,7 @@ class ShellBridge(
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
             "system.notifications" -> notifications(a.optBoolean(0, true))
+            "system.battery" -> battery()
             "notifications.list" -> notificationList()
             "notifications.open" -> runtime.widgets.notifications.control("open", a.getString(0))
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
@@ -194,7 +198,7 @@ class ShellBridge(
             "term.resize" -> terminals.resize(a.getString(0), a.getInt(1), a.getInt(2))
             "term.close" -> terminals.close(a.getString(0))
             "term.style" -> terminalStyle(if (a.isNull(0)) null else a.getDouble(0))
-            "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(activity)?.toString()
+            "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
             "clipboard.write" -> clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
             else -> throw IllegalArgumentException("no such call: $method")
         }
@@ -235,7 +239,7 @@ class ShellBridge(
     @SuppressLint("WrongConstant")
     private fun notifications(open: Boolean): Boolean =
         runCatching {
-            val bar = activity.getSystemService("statusbar")
+            val bar = context.getSystemService("statusbar")
             bar.javaClass.getMethod(if (open) "expandNotificationsPanel" else "collapsePanels").invoke(bar)
         }.onFailure { Log.w(TAG, "can't ${if (open) "open" else "close"} the notification shade", it) }.isSuccess
 
@@ -257,6 +261,16 @@ class ShellBridge(
                     .put("profile", item.profile ?: JSONObject.NULL)
             }
         return JSONObject().put("available", n.available).put("items", JSONArray(items))
+    }
+
+    /** The battery: its level (0-100) and whether it's charging, from Android's sticky battery broadcast. */
+    private fun battery(): JSONObject {
+        val b = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val level = b?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = b?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
+        val status = b?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING || status == android.os.BatteryManager.BATTERY_STATUS_FULL
+        return JSONObject().put("level", if (level < 0) JSONObject.NULL else level * 100 / scale).put("charging", charging)
     }
 
     /** The colors in use: the launcher's palette as CSS (what the page's tokens follow), and the theme's own by name. */
@@ -303,8 +317,8 @@ class ShellBridge(
     private fun withAgent(task: (Agent) -> Pair<String, String>): String {
         val agent = runtime.agents.default
         return when {
-            !(runtime.bootstrap.isInstalled || runtime.powosSession) -> "linux".also { ShellScreensActivity.open(activity, ShellScreensActivity.LINUX) }
-            agent == null -> "agents".also { ShellScreensActivity.open(activity, ShellScreensActivity.AGENTS) }
+            !(runtime.bootstrap.isInstalled || runtime.powosSession) -> "linux".also { ShellScreensActivity.open(context, ShellScreensActivity.LINUX) }
+            agent == null -> "agents".also { ShellScreensActivity.open(context, ShellScreensActivity.AGENTS) }
             else -> "started".also { task(agent).let { (command, title) -> runtime.terminal(command, title, agent) } }
         }
     }
@@ -314,8 +328,10 @@ class ShellBridge(
      * Without the mic permission it asks for it first: "asked" (the answer comes as "speech.permission").
      */
     private fun listen(hold: Boolean): String {
-        if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            activity.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_REQUEST)
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            // Asked from an activity only (a slot's window can't): elsewhere the mic isn't there until it's granted.
+            val asker = activity ?: return "unavailable"
+            asker.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_REQUEST)
             return "asked"
         }
         if (!speech.available) return "unavailable"
@@ -368,7 +384,7 @@ class ShellBridge(
 
     private fun iconCount() = runtime.androidApps.icons.size + runtime.linuxIcons.size
 
-    private fun icon(key: String) = "${ShellActivity.ORIGIN}/_icon/${Uri.encode(key)}?v=${iconCount()}"
+    private fun icon(key: String) = "${ShellHost.ORIGIN}/_icon/${Uri.encode(key)}?v=${iconCount()}"
 
     /** Recent keys still installed, in the page's form ("a:…" / "l:…"). */
     private fun installed(keys: List<String>): List<String> {
@@ -395,7 +411,7 @@ class ShellBridge(
     }
 
     private fun keyboard(show: Boolean) {
-        val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         if (show) {
             web.requestFocus()
             imm.showSoftInput(web, 0)
@@ -411,23 +427,23 @@ class ShellBridge(
      */
     private fun terminalStyle(points: Double?): JSONObject {
         val font = runtime.terminalFont
-        val metrics = activity.resources.displayMetrics
-        val file = PtyTerminal.fontFile(activity, font.family) { emit("term.style", null) }
+        val metrics = context.resources.displayMetrics
+        val file = PtyTerminal.fontFile(context, font.family) { emit("term.style", null) }
         return JSONObject()
             .put("size", font.pixels(points ?: font.size) / metrics.density)
             .put("pad", font.padPixels / metrics.density)
-            .put("fontScale", activity.resources.configuration.fontScale)
+            .put("fontScale", context.resources.configuration.fontScale)
             .put("family", font.family)
             .put("font", file != null)
     }
 
-    private fun clipboard() = activity.getSystemService(ClipboardManager::class.java)
+    private fun clipboard() = context.getSystemService(ClipboardManager::class.java)
 
     private fun JSONArray.optStringOrNull(i: Int) = if (isNull(i)) null else getString(i)
 
     /** The window's insets in CSS px, sent as "system.insets" when they change (the keyboard's included). */
     fun insets(w: WindowInsets) {
-        val d = activity.resources.displayMetrics.density
+        val d = context.resources.displayMetrics.density
         val bars = w.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
         val ime = w.getInsets(WindowInsets.Type.ime())
         val next =

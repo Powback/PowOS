@@ -238,6 +238,8 @@ export interface Bridge {
   };
   system: {
     insets(): Promise<Insets>;
+    /** The battery: level 0-100 (null when unknown) and whether it's charging. */
+    battery(): Promise<{ level: number | null; charging: boolean }>;
     /** Pulls Android's notification shade down ([open], the default) or puts it away. */
     notifications(open?: boolean): Promise<boolean>;
   };

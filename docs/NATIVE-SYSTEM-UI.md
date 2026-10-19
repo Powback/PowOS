@@ -280,6 +280,26 @@ freeform and split through WM Shell). That replaces the split-pick plumbing thro
 provider: phone home on the cover screen, desktop on the inner screen. `oplus-hook` retires once PowOS
 owns recents.
 
+## priv_app and sockets (found on the phone, 2026-10-19)
+
+Phase 0 (PowOS as a priv-app) broke the rooted PowOS session. As `priv_app` the app's data is `privapp_data_file`,
+and this phone's policy gives `priv_app` no `sock_file` permissions there (nor anywhere: only `untrusted_app_all`
+may create sockets in its data). The display daemon (`libandromarchy`, run by SessionService) binds
+`files/run/andromarchy/display_daemon.sock`; it couldn't (`bind: Address already in use` on the stale socket it could
+neither remove nor replace), KWin's anland backend then had no display, and the session ended - terminal tiles, PowOS
+apps, folding went with it. Adding an SELinux rule is off the table (never weaken SELinux), so the module was rolled
+back to overlays only (`build-module.sh` without `--priv-app`), and the app is an ordinary app again.
+
+Before priv-app comes back, the session's sockets must not be files in the app's data: abstract-namespace Unix
+sockets for the daemon and termux-va (the session shares the network namespace), or sockets the root session owns
+that the app connects to. Slots that need no privilege don't wait for it: the doze component (below) is live with an
+overlay-only module.
+
+**Overlays must be static.** On Android 16 the system server only takes immutable framework overlays (zygote builds
+their idmaps); a mutable overlay reached apps (`cmd overlay lookup` showed it) but DreamManagerService kept the stock
+doze component. With `isStatic="true"` it switched. OnePlus also gates the doze component on its
+`oplus.software.display.aod_support` feature (AmbientDisplayConfiguration.ambientDisplayComponent), which this phone has.
+
 ## 4. Safety
 
 | Step | What can go wrong | Bootloop? | Recovery |

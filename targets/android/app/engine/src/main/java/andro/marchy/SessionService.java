@@ -124,7 +124,9 @@ public class SessionService extends Service {
         File run = runDir(this);
         File sock = daemonSocket(this);
         sock.getParentFile().mkdirs();
-        sock.delete(); // a stale socket from a killed session would make the daemon's bind fail
+        // A stale socket from a killed session would make the daemon's bind fail - and with it the whole session.
+        if (sock.exists() && !sock.delete())
+            Log.e(TAG, "can't remove the stale display socket " + sock + ": the display daemon won't start");
 
         String libDir = getApplicationInfo().nativeLibraryDir;
         String launcher = libDir + "/liblotfixrun.so";

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PowOS's screen-off display as Android's doze component (docs/NATIVE-SYSTEM-UI.md, AOD). Static: the system server
+     only takes immutable framework overlays (zygote builds their idmaps at boot) - a mutable one reached apps, never
+     DreamManagerService's own resources. Off again: disable the module (Magisk) and reboot. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.powos.config.doze">
+    <application android:hasCode="false" />
+    <overlay android:targetPackage="android" android:isStatic="true" android:priority="900" />
+</manifest>
