@@ -6,25 +6,32 @@
  * The panel's openness (gesture.ts) is one number, --p, on the stage: the frame's top edge and the clip that reveals
  * the drawer move with it in CSS, so a frame of the swipe moves an edge, not a re-laid-out list of apps.
  */
-import { useRef } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { AppCell, AppMenu, dragHome } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gesture.ts";
 import { Pages } from "./grid.tsx";
 import { ScreenPanel } from "./screen.tsx";
-import { RECENT, byKey, dock, dockDrag, menu, recent, setDock } from "../state.ts";
+import { byKey, dock, dockDrag, menu, recent, setDock } from "../state.ts";
 
-/** The apps opened lately, last first - not those pinned to the dock, which are at hand already. */
+/**
+ * The apps opened lately, last first - not those pinned to the dock, which are at hand already. Six to a width, the
+ * rest a sideways scroll away; back at the newest whenever the list changes.
+ */
 function RecentRow() {
+  const row = useRef<HTMLDivElement>(null);
   const pinned = new Set(dock.value);
   const shown = recent.value
     .filter((k) => !pinned.has(k))
     .map((k) => byKey.value.get(k))
-    .filter((a) => a != null)
-    .slice(0, RECENT);
+    .filter((a) => a != null);
+  const first = shown[0]?.key;
+  useEffect(() => {
+    row.current?.scrollTo({ left: 0 });
+  }, [first]);
   return (
-    <div class="strip">
+    <div class="strip" ref={row}>
       {shown.map((app) => (
         <AppCell key={app.key} app={app} labels={false} draggable />
       ))}

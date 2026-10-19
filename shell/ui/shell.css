@@ -94,14 +94,20 @@
   align-items: center;
   gap: 4px;
   padding: 0 4px;
-  overflow: hidden;
+  /* Sideways it scrolls (six to a width, snapping to them); up and down are the launcher's swipe (gesture.ts). */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0 4px;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
   transform: translateY(calc(var(--p) * -1 * var(--strip-height)));
   clip-path: inset(calc(var(--p) * 100%) 0 0 0);
 }
 /* The apps share the row's width: all of them fit, at up to the strip's icon size. */
-.strip .app { flex: 1 1 0; min-width: 0; padding: 0; }
+.strip .app { flex: 0 0 calc((100% - 5 * 4px) / 6); min-width: 0; padding: 0; scroll-snap-align: start; }
 .strip .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
-/* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
 /* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
 .dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }

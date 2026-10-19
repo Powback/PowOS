@@ -8,9 +8,7 @@ import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
 export const apps = signal<App[]>([]);
 export const byKey = computed(() => new Map(apps.value.map((a) => [a.key, a])));
-/** How many recent apps the strip shows. */
-export const RECENT = 6;
-/** How many it asks for: pinned apps are left out of the strip (they're in the dock), the rest still fill it. */
+/** How many recent apps the strip has (six to a width, scrolling sideways); pinned ones are left out (the dock has them). */
 const RECENT_FETCH = 24;
 export const recent = signal<string[]>([]);
 /** Apps pinned to the drawer's dock, in pin order. */

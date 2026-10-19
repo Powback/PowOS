@@ -71,6 +71,8 @@ interface Gesture {
   mode: "open" | "close" | "pages" | null;
   open: boolean;
   inList: boolean;
+  /** On the recent apps row: sideways, it scrolls rather than turning the page. */
+  inStrip: boolean;
   listTop: boolean;
   /** Where it started: a tap closes the launcher unless it was on something that takes taps. */
   target: Element;
@@ -108,6 +110,7 @@ export function homeGestures() {
       mode: null,
       open: drawer.value > 0,
       inList: !!list,
+      inStrip: !!target.closest?.(".strip"),
       listTop: !list || list.scrollTop <= 0,
       target,
       // The A-Z bar, a slider, a widget's drag: theirs.
@@ -132,7 +135,7 @@ export function homeGestures() {
         if (!g.open && dy < 0) g.mode = "open";
         else if (g.open && dy > 0 && (!g.inList || g.listTop)) g.mode = "close";
         else return (g = null); // the list scrolls
-      } else if (!g.open) {
+      } else if (!g.open && !g.inStrip) {
         g.mode = "pages";
       } else {
         return (g = null);
