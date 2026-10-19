@@ -658,7 +658,9 @@
   top: 0;
   left: 0;
   right: 0;
-  max-height: 88%;
+  /* One height for both panels (the notifications, the control center), however few notifications there are: the
+     list fills it, the control center scrolls in it. */
+  height: 88%;
   display: flex;
   flex-direction: column;
   padding: calc(var(--inset-top, 0px) + 8px) var(--edge) 6px;
@@ -702,6 +704,8 @@
 }
 .notif-access { font: var(--text-small) var(--font); color: var(--color-accent); text-align: start; }
 .notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
+/* Nothing new: the message in the middle of the (now always full-height) panel. */
+.notif-list:has(> .notif-empty) { display: flex; align-items: center; justify-content: center; }
 .notif-grip { align-self: center; width: 44px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--color-border); }
 
 /*
