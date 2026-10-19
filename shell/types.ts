@@ -142,6 +142,16 @@ export interface Bridge {
     read(): Promise<string | null>;
     write(text: string): Promise<void>;
   };
+  /**
+   * Speech to text (the phone's recognizer; the page's own has none). "speech.state" ({ listening, text, error })
+   * as it hears; "speech.done" ({ text }) once it ends; "speech.permission" ({ granted }) after it asked for the mic.
+   */
+  speech: {
+    /** [hold]: listens across pauses until stop(). "asked": it asked for the mic first, nothing started. */
+    start(hold: boolean): Promise<"started" | "asked" | "unavailable">;
+    stop(): Promise<void>;
+    cancel(): Promise<void>;
+  };
   keyboard: {
     show(): Promise<void>;
     hide(): Promise<void>;
@@ -150,7 +160,7 @@ export interface Bridge {
     insets(): Promise<Insets>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission",
    * "files.changed" ({ path }, for hot reload). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

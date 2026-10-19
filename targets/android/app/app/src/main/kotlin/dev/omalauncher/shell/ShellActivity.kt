@@ -2,6 +2,7 @@ package dev.omalauncher.shell
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
@@ -140,6 +141,15 @@ class ShellActivity : Activity() {
     override fun onStop() {
         super.onStop()
         runtime.widgets.homeStopped()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == ShellBridge.MIC_REQUEST) bridge.micPermission(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
     }
 
     override fun onDestroy() {

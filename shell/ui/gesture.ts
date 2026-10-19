@@ -114,7 +114,7 @@ export function homeGestures() {
       listTop: !list || list.scrollTop <= 0,
       target,
       // The A-Z bar, a slider, a widget's drag: theirs.
-      own: !!target.closest?.(".letter-bar, input[type=range], .resize-handle, .menu"),
+      own: !!target.closest?.(".letter-bar, input[type=range], .resize-handle, .menu, .mic"),
       height: document.querySelector(".home")?.clientHeight || innerHeight,
     };
   };

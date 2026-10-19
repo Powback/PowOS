@@ -1,6 +1,8 @@
 package dev.omalauncher.shell
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -17,6 +19,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import dev.omalauncher.PowosAiActivity
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
+import dev.omalauncher.ui.Speech
 import dev.omalauncher.ui.PtyTerminal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +50,8 @@ class ShellBridge(
     private val home = ShellHome(runtime)
     private val widgets = ShellWidgets(runtime, scope, ::emit)
     private val terminals = ShellTerminals(runtime, scope, ::emit)
+    /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
+    private val speech = Speech(activity.applicationContext)
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     /**
@@ -68,6 +73,12 @@ class ShellBridge(
         }
 
     init {
+        // What's heard so far, while listening (and why it failed).
+        scope.launch {
+            snapshotFlow { JSONObject().put("listening", speech.listening).put("text", speech.text).put("error", speech.error ?: JSONObject.NULL).toString() }
+                .drop(1)
+                .collect { emit("speech.state", JSONObject(it)) }
+        }
         // Installs, removals, Linux apps and icons arriving (they load in the background, after the list): the page
         // reloads its list, whose icon URLs carry the icon count so a missing icon is asked for again.
         scope.launch {
@@ -117,6 +128,9 @@ class ShellBridge(
                 PowosAiActivity.keepInRecents(activity)
             }
             "ai.open" -> PowosAiActivity.open(activity, null)
+            "speech.start" -> listen(a.optBoolean(0))
+            "speech.stop" -> speech.stop()
+            "speech.cancel" -> speech.cancel()
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
@@ -176,6 +190,23 @@ class ShellBridge(
         }
         return list
     }
+
+    /**
+     * Starts listening ([hold]: across pauses, until speech.stop); the whole text goes to the page as "speech.done".
+     * Without the mic permission it asks for it first: "asked" (the answer comes as "speech.permission").
+     */
+    private fun listen(hold: Boolean): String {
+        if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            activity.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_REQUEST)
+            return "asked"
+        }
+        if (!speech.available) return "unavailable"
+        speech.start(hold) { heard -> emit("speech.done", JSONObject().put("text", heard)) }
+        return "started"
+    }
+
+    /** The answer to the mic permission request ([ShellActivity.onRequestPermissionsResult]). */
+    fun micPermission(granted: Boolean) = emit("speech.permission", JSONObject().put("granted", granted))
 
     private fun aiChat() =
         JSONObject().put("busy", PowosAiChat.busy).put("items", JSONArray(PowosAiChat.items.map { it.json() }))
@@ -286,6 +317,7 @@ class ShellBridge(
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
     fun close() {
+        speech.cancel()
         applyObserver.dispose()
         terminals.closeAll()
         scope.cancel()
@@ -296,7 +328,10 @@ class ShellBridge(
         val text: String,
     )
 
-    private companion object {
-        const val TAG = "PowosShell"
+    companion object {
+        private const val TAG = "PowosShell"
+
+        /** ShellActivity's request code for the mic permission. */
+        const val MIC_REQUEST = 41
     }
 }

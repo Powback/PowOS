@@ -91,6 +91,11 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       style: (points) => call("term.style", points),
     },
     clipboard: { read: () => call<string | null>("clipboard.read"), write: (text) => call("clipboard.write", text) },
+    speech: {
+      start: (hold) => call("speech.start", hold),
+      stop: () => call("speech.stop"),
+      cancel: () => call("speech.cancel"),
+    },
     keyboard: { show: () => call("keyboard.show"), hide: () => call("keyboard.hide") },
     system: { insets: () => call("system.insets") },
     on: (event, handler) => events.on(event, handler),
@@ -246,6 +251,39 @@ function mock(): Bridge {
       read: async () => navigator.clipboard?.readText().catch(() => null) ?? null,
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
+    // Hears the same words every time, a word at a time; a tap ends at the "pause" after them.
+    speech: (() => {
+      const words = "how much battery is left".split(" ");
+      let timer = 0;
+      let heard = "";
+      let held = false;
+      const state = (listening: boolean) => events.emit("speech.state", { listening, text: heard, error: null });
+      const done = () => {
+        clearInterval(timer);
+        state(false);
+        events.emit("speech.done", { text: heard });
+      };
+      return {
+        start: async (hold: boolean) => {
+          clearInterval(timer);
+          held = hold;
+          heard = "";
+          state(true);
+          let i = 0;
+          timer = window.setInterval(() => {
+            if (i < words.length) heard = words.slice(0, ++i).join(" ");
+            state(true);
+            if (i >= words.length && !held) done();
+          }, 150);
+          return "started" as const;
+        },
+        stop: async () => done(),
+        cancel: async () => {
+          clearInterval(timer);
+          state(false);
+        },
+      };
+    })(),
     keyboard: { show: async () => {}, hide: async () => {} },
     system: { insets: async () => ({ top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 }) },
     on: (event, handler) => events.on(event, handler),
