@@ -43,6 +43,8 @@ const splitFirst = signal<number | null>(null);
 const opening = signal<{ id: number; rect: Rect; src: string; radius: string } | null>(null);
 /** Apps kept from "clear all" (by app, as Android's lock: task ids don't outlive a reboot). */
 const pinned = signal<Set<string>>(new Set());
+/** The cards' snapshots are in the page (the switcher up, or on its way up or down); off at rest. */
+const loaded = signal(false);
 /** A short note (a screenshot saved). */
 const note = signal<string | null>(null);
 
@@ -99,7 +101,13 @@ function reset() {
   opening.value = null;
 }
 
+/** The next swipe's snapshots fetched ahead into the HTTP cache (not decoded, not in the page: no GPU memory held). */
+function prefetch(list: RecentTask[]) {
+  for (const t of list.slice(0, 4)) fetch(t.snapshot).catch(() => {});
+}
+
 function begin(e: { from: number | null; tasks: RecentTask[] }) {
+  loaded.value = true;
   console.log(`recents: begin over ${e.from}, ${e.tasks.length} tasks, visible ${document.visibilityState}`);
   settle(false);
   reset();
@@ -113,6 +121,7 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
 
 /** Shown without a swipe (the overview button, up and hold over home): it comes up over home. */
 async function show(e: { from: number | null; tasks: RecentTask[] }) {
+  loaded.value = true;
   settle(false);
   reset();
   from.value = e.from;
@@ -132,6 +141,8 @@ function collapse(animate: boolean) {
   reset();
   phase.value = "closed";
   frame(0);
+  // At once when it's gone at once; else when the collapse is over (the layer's visibility transition ends).
+  if (!animate) loaded.value = false;
 }
 
 /** The page closes it itself (beside the cards, Back over home, the last card gone, Home). */
@@ -324,6 +335,7 @@ powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {
   if (phase.value !== "closed") return;
   tasks.value = e.tasks;
   row?.scrollTo({ left: 0 });
+  prefetch(e.tasks);
 });
 // The overview button again: the task before the one it was opened over (or the newest, from home), as Android's.
 powos.on("switcher.toggle", () => {
@@ -419,7 +431,10 @@ export function Recents() {
     powos.recents.state().then((s) => {
       if (!s) return;
       if (s.open && phase.value === "closed") show(s);
-      else if (phase.value === "closed" && s.tasks?.length) tasks.value = s.tasks;
+      else if (phase.value === "closed" && s.tasks?.length) {
+        tasks.value = s.tasks;
+        prefetch(s.tasks);
+      }
     });
     // The slot moves when the screen does (rotation, folding) or the insets change.
     const observer = new ResizeObserver(() => reportSlot());
@@ -460,6 +475,8 @@ export function Recents() {
       onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}
       onTransitionEnd={(e) => {
         if (e.target === row) reportSlot();
+        // Collapsed: its snapshots leave the page.
+        if (e.target === e.currentTarget && phase.value === "closed") loaded.value = false;
       }}
     >
       <div class="recents-scrim" />
@@ -472,6 +489,7 @@ export function Recents() {
               t={t}
               current={i === 0}
               eager={i < 4}
+              load={loaded.value}
               pinned={pinned.value.has(pinKey(t))}
               picked={first === t.id}
               onOpen={(id, shot) => (first != null ? pickForSplit(id) : open(id, shot))}

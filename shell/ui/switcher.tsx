@@ -28,6 +28,7 @@ export function TaskCard({
   eager,
   pinned,
   picked,
+  load = true,
   onOpen,
   onRemove,
   onMenu,
@@ -41,6 +42,11 @@ export function TaskCard({
   pinned?: boolean;
   /** Picked as split screen's first app (the second is being picked). */
   picked?: boolean;
+  /**
+   * Its snapshot in the page: off while the switcher is closed - a hidden layer of decoded snapshots took the page's
+   * GPU memory from home's own tiles (hosted widgets blanked mid-swipe). They're in the HTTP cache for the next time.
+   */
+  load?: boolean;
   onOpen: (id: number, shot: HTMLElement) => void;
   /** False: it stays (the card springs back). */
   onRemove: (id: number) => boolean | void;
@@ -166,7 +172,7 @@ export function TaskCard({
       <img
         ref={shot}
         class="task-shot"
-        src={t.snapshot}
+        src={load ? t.snapshot : undefined}
         alt=""
         draggable={false}
         decoding="async"

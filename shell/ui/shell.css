@@ -1071,8 +1071,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   max-height: none;
   border: none;
   border-radius: var(--card-radius);
-  box-shadow: 0 10px 30px color-mix(in srgb, #000 35%, transparent);
 }
+/* Shadows only while it's up: a closed layer costs the page nothing to keep. */
+.recents.open .task-shot { box-shadow: 0 10px 30px color-mix(in srgb, #000 35%, transparent); }
 .recents .task.pinned .task-label::after { content: " \00b7 pinned"; color: var(--color-accent); }
 /* The first card is where the app's window lands; the others slide in from the left with the finger. */
 .recents .task:not(:first-child) { transform: translateX(calc((var(--rp) - 1) * 45vw)); opacity: var(--rp); }
