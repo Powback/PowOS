@@ -109,6 +109,7 @@ def _deliver(to, kind, message, priority, result=None):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, dst)  # atomic: a reader never sees a half-written message
+    _phone_wake(to)
     return mid
 
 
@@ -203,6 +204,36 @@ def _phone_notify(message, priority="normal"):
         os.rename(tmp, os.path.join(box, f"{name}.json"))
     except Exception:
         pass
+
+
+def _phone_wake(agent):
+    """On a phone running PowOS: tells the PowOS app that [agent] has mail. The phone's chat runs the manager one turn
+    at a time, so between turns nothing watches its inbox and mail sat there until the user wrote again; the app runs
+    the inbox's turn when it sees this (agent-wake/<agent>-<time> in its run dir; targets/android: PowosAiChat).
+    Best-effort, never fatal."""
+    if not _on_phone():
+        return
+    try:
+        run = os.environ.get("XDG_RUNTIME_DIR") or "/run/powos-app"
+        box = os.path.join(run, "agent-wake")
+        os.makedirs(box, exist_ok=True)
+        name = f"{agent}-{int(time.time() * 1000)}"
+        tmp = os.path.join(box, f".{name}.tmp")
+        open(tmp, "w").close()
+        os.rename(tmp, os.path.join(box, name))
+    except Exception:
+        pass
+
+
+def _on_phone():
+    platform = os.environ.get("POWOS_PLATFORM", "")
+    if not platform:
+        try:
+            with open("/etc/powos/platform") as f:
+                platform = f.read().strip()
+        except OSError:
+            return False
+    return platform == "phone"
 
 
 def _desktop_notify(message, priority):

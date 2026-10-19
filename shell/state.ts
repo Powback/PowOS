@@ -2,7 +2,7 @@
  * The shell's state, as signals: what changes re-renders only what reads it. Loaded from the host at start and kept
  * current by its events; the user's own (dock pins) goes back through powos.store.
  */
-import { computed, signal } from "@preact/signals";
+import { computed, effect, signal, type Signal } from "@preact/signals";
 import { powos } from "./bridge.ts";
 import type { App, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
 
@@ -81,6 +81,26 @@ export function closeSession() {
   if (s && !s.closing) sessionView.value = { ...s, closing: true };
   (document.activeElement as HTMLElement | null)?.blur();
   powos.keyboard.hide();
+}
+
+/**
+ * A signal kept in the page's storage: what's typed survives the page reloading - an update, a hot reload, the app
+ * restarted. (localStorage lives in the app's data, which an update keeps.) Unreadable storage: it just isn't kept.
+ */
+export function stored(key: string, initial = ""): Signal<string> {
+  let first = initial;
+  try {
+    first = localStorage.getItem(`powos.${key}`) ?? initial;
+  } catch {}
+  const s = signal(first);
+  effect(() => {
+    const v = s.value;
+    try {
+      if (v) localStorage.setItem(`powos.${key}`, v);
+      else localStorage.removeItem(`powos.${key}`);
+    } catch {}
+  });
+  return s;
 }
 
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */

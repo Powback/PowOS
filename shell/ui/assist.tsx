@@ -14,12 +14,14 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
+import { stored } from "../state.ts";
 import { Mic, hearing, type MicTarget } from "./bar.tsx";
 import { Now } from "./powai.tsx";
 import type { AssistScreen } from "../types.ts";
 
 const screen = signal<AssistScreen | null>(null);
-const draft = signal("");
+// What's typed and not sent yet: kept across reloads and summonings (an update, a closed panel mustn't lose it).
+const draft = stored("assist.draft");
 /** Asked something since it opened: the answer shows. */
 const asked = signal(false);
 /** What PowOS AI gets to look at with the question: the whole screen, a region cut out of it (a PNG), or nothing. */
@@ -34,7 +36,6 @@ powos.on("assist.context", (s: AssistScreen) => (screen.value = s));
 // Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go.
 powos.on("assist.reset", () => {
   screen.value = null;
-  draft.value = "";
   asked.value = false;
   image.value = { region: null };
   cropping.value = false;

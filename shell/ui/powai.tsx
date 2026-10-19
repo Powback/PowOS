@@ -7,14 +7,15 @@
 import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { chat, openSession, page, sessionView } from "../state.ts";
+import { chat, openSession, page, sessionView, stored } from "../state.ts";
 import { Mic, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
-const draft = signal("");
+// What's typed and not sent yet: kept across reloads (an update mustn't lose it).
+const draft = stored("powai.draft");
 
 powos.on("ai.sessions", (s: AgentSession[]) => (sessions.value = s));
 powos.on("ai.mail", (m: AgentMail[]) => (mail.value = m));
