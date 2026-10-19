@@ -282,7 +282,7 @@ Built centrally and shipped whole. Never `pacman -Syu` on the phone.
 
 ### AI hooks on the phone
 - PowOS AI chat (`PowosAiActivity`, the home's AI page, the assistant overlay) → `powos manager --once-stdin --json-events`,
-  one turn at a time. 🚧 Mail to `manager` wakes it between turns (comms writes `agent-wake/manager-*`; the app runs
+  one turn at a time. ✅ Mail to `manager` wakes it between turns (verified 2026-10-19) (comms writes `agent-wake/manager-*`; the app runs
   `powos manager --once-inbox`).
 - Assistant: long-press power = PowOS's VoiceInteractionService. The overlay sends the screen's text (AssistStructure,
   naming the app under it) plus a screenshot; the user can crop to the part they mean. Shares land in
