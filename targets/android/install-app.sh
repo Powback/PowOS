@@ -48,4 +48,7 @@ fi
 echo "install-app.sh: privileged permissions OK (${need:+$(echo $need | wc -w) asked, all allowlisted})"
 [ -n "$check" ] && exit 0
 adb install -r "$apk"
+# A one-shot re-base of the app (pm uninstall-system-updates + reinstall, e.g. powos-idle-sysupdate.sh) reinstalls
+# /data/local/tmp/powos-current.apk: keep it the APK just installed, or it would put an older build back.
+adb push "$apk" /data/local/tmp/powos-current.apk >/dev/null && adb shell chmod 0644 /data/local/tmp/powos-current.apk
 ADB=adb tools/deploy-note.sh "$note"
