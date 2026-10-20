@@ -1,0 +1,13 @@
+{
+  "id": "steam",
+  "name": "Steam (instant resume)",
+  "kind": "app",
+  "owner": "agent:steam-sleep",
+  "purpose": "The user's Steam client in the PowOS session (native ARM64, games through FEX; its package is x86-games'). Started once, then frozen (cgroup v2 freezer: no CPU, kept in RAM) 15 s after it's out of sight - unfocused, minimized, closed to the tray, or PowOS off screen - and thawed before it's shown again (its launch paths: /usr/bin/steam, powos-open-task, focus). Never frozen in its first 2 minutes (update, login, the launch it was started for), while it runs a game, or while it reads/writes the disk (downloads, updates, installs). docs/UNIFIED-SLEEP.md (Steam).",
+  "processes": [{"pidfile": "/home/powos/.steam/steam.pid", "tree": true, "user": "powos"}],
+  "windowClass": ["steam"],
+  "autosleep": {"idle": "15s", "mode": "pause"},
+  "sleepBusy": {"cmdline": "SteamLaunch", "io": "disk", "cpu": false, "startGrace": "2m"},
+  "unbounded": "the user's Steam and the games it starts take what they need; a cgroup of its own would also keep powos-sleepd from freezing it (it moves only processes in the root v2 cgroup)",
+  "remove": {"commands": ["powos sleep never steam (keeps Steam awake; the unit's manifest can stay)", "rm /etc/powos/units.d/steam.json (Steam then follows the generic 10 min GUI rule)"]}
+}

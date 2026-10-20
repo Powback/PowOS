@@ -29,6 +29,7 @@ root v2 cgroup are ever moved - never anything in Android's own groups (uid_*/pi
 
 Socket /run/powos-sleep/sleepd.sock (root and the PowOS uid), one line in, one JSON line out:
   status | wake <id> | gui-hello | gui-freeze <pid> <name> | gui-thaw <pid> <why> | gui-active <pid>
+  (a GUI app woken by `wake` is named to the watcher in its next reply: "woken": [pid, ...])
 
   powos-sleepd            run (root)
   powos-sleepd status     the same as `powos sleep status --json`
@@ -437,6 +438,7 @@ class Daemon:
         self.gui = {}  # pid -> {"frozen": Frozen, "name", "since", "why", "sleepMs"}
         self.gui_last = {}  # pid -> last thaw (name, wakeMs)
         self.gui_conn = None
+        self.gui_woken = []  # thawed by `wake` (not the watcher): told to the watcher with its next request
         self.gui_report = []  # the watcher's view of the windows that are awake (and why)
         self.active_pid = None
         self.inbox = []
@@ -686,10 +688,11 @@ class Daemon:
                 return {"ok": True, "wakeMs": s.wake_ms}
             if key.startswith("gui:"):
                 key = key[4:]
-            if key.isdigit() and int(key) in self.gui:
-                return self.gui_thaw(int(key), "asked")
             for pid, g in list(self.gui.items()):
-                if g["name"].lower() == key.lower():
+                # its key, any process of its tree (a launcher knows the window's), or its name (window class)
+                if (key.isdigit() and (int(key) == pid or int(key) in g["frozen"].home)) \
+                        or g["name"].lower() == key.lower():
+                    self.gui_woken.append(pid)
                     return self.gui_thaw(pid, "asked")
             return {"error": f"{key}: nothing asleep by that name here"}
         if cmd.startswith("gui-") and cmd != "gui-hello" and conn is not self.gui_conn:
@@ -799,6 +802,8 @@ class Daemon:
                             r = self.handle(c, line.decode())
                         except Exception as e:  # noqa: BLE001 - one bad request never takes the daemon down
                             r = {"error": repr(e)}
+                        if c is self.gui_conn and self.gui_woken and isinstance(r, dict):
+                            r["woken"], self.gui_woken = self.gui_woken, []
                         try:
                             c.sendall(json.dumps(r).encode() + b"\n")
                         except OSError:

@@ -8,6 +8,7 @@ One config surface and one status command cover every kind of workload. Containe
 |---|---|---|---|---|
 | app backend (native, sandbox) | `powos-sleepd` (root, system tier) | idle for the manifest's `autosleep.idle` (default 5m): no TCP connection to its listen ports and under 1% CPU (the supervisor's measure) | a connection to its port, `powos sleep wake <id>` | cgroup v2 freezer (pause), plus MADV_PAGEOUT (hibernate), or the supervisor stopping it (stop) |
 | GUI app in Plasma | `powos-sleep-gui` (session), frozen by `powos-sleepd` | no window focused for 10 min (`POWOS_SLEEP_GUI_IDLE`) | focus, raise or un-minimize (KWin), any D-Bus message addressed to it, `powos sleep wake` | cgroup v2 freezer |
+| Steam (a GUI app with a unit) | the same | out of sight 15 s (unit `steam`: no game, no disk I/O, started over 2 min ago) | its launch paths (`/usr/bin/steam`, `powos-open-task`) before showing it, focus, PowOS back on screen | cgroup v2 freezer, the client's whole tree |
 | container | `powos-autosleep` | see §13 there | a connection, `powos containers wake` | freezer or stop |
 | SpacetimeDB database | not slept one by one (see below) | - | - | the supervisor's whole-server idle restart |
 | shell island (app widget) | the shell (`shell/apps/onscreen.ts`) | off screen | on screen | its own pause; reported to status |
@@ -43,6 +44,25 @@ When an app's idle time is up, the watcher checks it:
 powos-sleepd then re-checks the never list against the whole process tree and against Android's cgroups, and refuses to freeze the focused app.
 
 While an app is frozen, a D-Bus monitor watches only its bus names (`BecomeMonitor` with `destination=` rules). That catches method calls, the tray's Activate, and a notification's targeted ActionInvoked signal. An app woken by D-Bus but still unfocused sleeps again after 60 s. If the watcher's connection drops, powos-sleepd thaws every GUI app. If powos-sleepd stops or restarts, it thaws everything it froze.
+
+On the phone, focus also needs PowOS on screen. The PowOS app's display daemon pairs one consumer per visible surface (the desktop is surface 0, each window task its own) and logs every connect and disconnect; powos-sleep-gui watches that log with inotify. With no consumer connected (Android's home, another app, Recents, the screen off) no window counts as focused, and the focused app comes back the moment a surface does. Reading the log is a workaround (the HACK registry row for `powos-sleep-gui`); the real fix is the daemon publishing its connected surfaces.
+
+**Apps with a unit: Steam's instant resume.** A unit manifest with `"windowClass"` gives that app's windows its own rule (`powos-sleep-gui`'s docstring has the keys). `units/phone/steam.json`:
+
+| key | Steam's | what it does |
+|---|---|---|
+| `autosleep.idle` | `15s` | out of sight for 15 s (unfocused, minimized, closed to the tray, PowOS off screen), then 5 s sampled, then frozen |
+| `processes[].pidfile` | `~/.steam/steam.pid` | the app is the client's whole tree: its windows belong to `steamwebhelper`, but the freeze takes `steam` and every helper at once, and it stays tracked with no window (tray) |
+| `sleepBusy.cmdline` | `SteamLaunch` | a game running (Steam's `reaper SteamLaunch AppId=...`) keeps Steam awake; the game's own windows are never frozen (games are a later phase) |
+| `sleepBusy.io` | `disk` | busy = disk reads+writes over 256 KB/s (downloads, updates, installs); not `rchar/wchar`, which counts CEF's IPC |
+| `sleepBusy.cpu` | `false` | its idle CPU (~20% of a core, the webhelper) is what freezing saves, so it doesn't keep it awake |
+| `sleepBusy.startGrace` | `2m` | never frozen in its first 2 min: updating, logging in, and handing over the game it was started for |
+
+Thawing comes before showing, on every way in:
+- `/usr/bin/steam` (the games widget, the launcher's Exec, `steam steam://...`): a Steam whose `/proc/<pid>/cgroup` says `powos/sleep` is woken first with `dbus-send ... dev.powos.Sleep.Gui.Wake string:steam` (`powos sleep wake <pid>` as the fallback), then the launch goes to the running Steam instead of waiting on a frozen one.
+- `powos-open-task` (an app tapped in the PowOS app's launcher): the existing window's process is woken before KWin exports it as a task.
+- Focus (the taskbar, a task brought back from Recents, PowOS coming back on screen) thaws it as for any GUI app.
+- `powos sleep wake steam` thaws through powos-sleepd, which names the app to the watcher in its next reply (`"woken"`), so the watcher counts it as awake and lets it sleep again when idle.
 
 **SpacetimeDB.** Unloading single databases is not possible in 2.12, so it is skipped:
 - Databases load lazily (`get_or_launch_module_host`).
