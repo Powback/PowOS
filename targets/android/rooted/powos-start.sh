@@ -7,6 +7,7 @@
 # /run, the phone's storage at /mnt/sdcard, DNS. Then starts PowOS's SSH server on port 2222.
 # Nothing outside /data/powos is changed; to remove PowOS: stop the phone's use of it, delete /data/powos and
 # /data/adb/service.d/powos.sh.
+# powos-units: deploy - what this installs on the phone is checked against units/ (test/tier1/test-units-registry.py)
 R=/data/powos/root
 LOG=/data/powos/start.log
 exec >> "$LOG" 2>&1
@@ -136,4 +137,13 @@ sleep_tier() {
   echo "sleep: powos-sleepd started"
 }
 sleep_tier
+# Every running unit with limits in a cgroup of its own (lib/apps/powos-units enforce): the supervisor, the app-data
+# watcher; SpacetimeDB places itself (powos-runtime). In the background: a slow /proc scan never holds the boot up.
+# HACK: a fixed 20 s wait for the supervisor and the watcher to be up, then one enforce pass. Real fix: each of them
+# places itself in its unit's cgroup as it starts (as powos-runtime does for services), and this pass goes.
+# Then both sides' units go to the PowOS AI page (powos units publish).
+(sleep 20; chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin python3 /usr/lib/powos/apps/powos-units enforce
+ [ -f /data/powos/powos-units.sh ] && sh /data/powos/powos-units.sh enforce
+ chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin python3 /usr/lib/powos/apps/powos-units publish
+ [ -f /data/powos/powos-units.sh ] && sh /data/powos/powos-units.sh publish) > /dev/null 2>&1 < /dev/null &
 echo "PowOS up"

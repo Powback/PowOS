@@ -1,0 +1,30 @@
+{
+  "id": "appdata-watcher",
+  "name": "App-data backup watcher",
+  "kind": "watcher",
+  "owner": "system:powos-deploy",
+  "host": "phone-android",
+  "purpose": "backs the PowOS app's home layout and store up once an hour (docs/APP-DATA-BACKUP.md); also the backup/restore the re-base needs",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (started by powos-start.sh)",
+  "files": [
+    "/data/powos/powos-appdata.sh",
+    "/data/powos/appdata.log",
+    "/data/powos/backup"
+  ],
+  "processes": [
+    {
+      "pidfile": "/data/powos/appdata-watch.pid",
+      "tree": true
+    }
+  ],
+  "limits": {
+    "memory": "128m",
+    "pids": 16
+  },
+  "autosleep": "never",
+  "remove": {
+    "keep": [
+      "/data/powos/backup"
+    ]
+  }
+}

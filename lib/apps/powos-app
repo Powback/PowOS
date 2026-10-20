@@ -698,6 +698,44 @@ def register(text):
     spacetime("call", "-s", SERVER, REGISTRY, "install", json.dumps(text), quiet=True)
 
 
+def units():
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+    p = os.path.join(os.path.dirname(os.path.realpath(__file__)), "powos-units")
+    if not os.path.exists(p):
+        return None
+    loader = SourceFileLoader("powos_units", p)
+    mod = module_from_spec(spec_from_loader("powos_units", loader))
+    loader.exec_module(mod)
+    return mod
+
+
+def register_unit(m):
+    """The installed app as a unit (lib/apps/powos-units): its files, its backend's process and limits, its owner,
+    how it goes (powos app remove). An app's dependencies live in its module or its container, never on the host."""
+    u = units()
+    if u is None:
+        return
+    b = m.get("backend") or {}
+    unit = {"id": m["id"], "name": m.get("name", m["id"]), "kind": "app", "owner": u.owner_default(),
+            "purpose": (m.get("description") or f"the PowOS app {m.get('name', m['id'])}")[:300],
+            "installedBy": "powos app install", "files": [os.path.join(APPS, m["id"])],
+            "database": (m.get("module") or {}).get("database", ""),
+            "remove": {"commands": [f"powos app remove {m['id']}"]}}
+    if b.get("exec"):
+        unit["processes"] = [{"match": re.escape(b["exec"][0])}]
+        budget = (m.get("budget") or {})
+        bud = budget.get(u.HOST if u.HOST in budget else "phone" if u.HOST.startswith("phone") else "desktop") or {}
+        if bud.get("memMB"):
+            unit["limits"] = {"memory": f"{int(bud['memMB']) * 2}m", "pids": int(bud.get("pids", 512))}
+    if m.get("autosleep") is not None:
+        unit["autosleep"] = m["autosleep"]
+    try:
+        u.register(unit, quiet=True)
+    except (OSError, ValueError) as e:
+        log(f"note: not registered as a unit ({e})")
+
+
 def cmd_install(d):
     m, text = manifest(d)
     # Always: an unchanged module isn't rebuilt (its source hash), and the UI bundles in ~0.1 s - an install never
@@ -707,6 +745,7 @@ def cmd_install(d):
     ensure_published(d, m)
     install_ui(d, m)
     register(text)
+    register_unit(m)
     page = (m.get("page") or {}).get("entry")
     log(f"installed {m['id']} {m['version']}" + (" - in the drawer" if page else "")
         + (f", {len(m.get('widgets') or [])} widget(s) in home's edit sheet" if m.get("widgets") else ""))
@@ -796,6 +835,9 @@ def cmd_remove(app_id, data):
         db = lines[-1].strip('"') if lines else ""
         if db and db != "database":
             spacetime("delete", "-s", SERVER, db, "-y", check=False)
+    u = units()
+    if u is not None:
+        u.unregister(app_id, quiet=True)
     print(f"removed {app_id}")
 
 

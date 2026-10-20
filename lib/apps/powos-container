@@ -317,6 +317,9 @@ def hook(stage):
     if stage == "stop":
         remove_groups(name)
         log(f"{name}: stopped, groups removed")
+        # A --rm container goes now (podman marks it in the annotations): its unit with it.
+        if str((st.get("annotations") or {}).get("io.podman.annotations.autoremove", "")).upper() == "TRUE":
+            unit_forget(name)
         return
     pid = st.get("pid")
     try:
@@ -540,6 +543,43 @@ def autosleep():
     return m
 
 
+def units():
+    """lib/apps/powos-units, next to this file: what `run` starts is registered as a unit (None if not installed)."""
+    m = sys.modules.get("powos_units")
+    if m is None:
+        from importlib.machinery import SourceFileLoader
+        from importlib.util import module_from_spec, spec_from_loader
+        p = os.path.join(os.path.dirname(SELF), "powos-units")
+        if not os.path.exists(p):
+            return None
+        loader = SourceFileLoader("powos_units", p)
+        m = module_from_spec(spec_from_loader("powos_units", loader))
+        loader.exec_module(m)
+        sys.modules["powos_units"] = m
+    return m
+
+
+def unit_register(name, lim, rest, rule):
+    """The container as a unit (container.<name>): owner, purpose, cgroup, limits, autosleep, how to remove it.
+    Never blocks the container: a registry that can't be written is a warning."""
+    u = units()
+    if u is None:
+        return
+    try:
+        u.register_container(name, lim, " ".join(rest), autosleep=autosleep().encode(rule) if rule else None)
+    except (OSError, ValueError) as e:
+        warn(f"not registered as a unit ({e})")
+
+
+def unit_forget(*names):
+    u = units()
+    for n in names:
+        try:
+            u and u.unregister(f"container.{n}", quiet=True)
+        except OSError:
+            pass
+
+
 def parse_run(args):
     lim, rest, i, net = {}, [], 0, None
     while i < len(args):
@@ -611,13 +651,17 @@ def cmd_run(argv, args):
     rule = asl.rule_from_flags(lim, rm="--rm" in rest)
     label = [f"--label={asl.LABEL}={asl.encode(rule)}"] if rule else []
     base = prepare(argv)
+    unit_register(name, lim, rest, rule)
     if not PHONE:  # podman's own cgroups do it
         native = {"mem": "--memory", "memsw": "--memory-swap", "cpus": "--cpus", "cpuset": "--cpuset-cpus",
                   "pids": "--pids-limit"}
         flags = [f"{native[k]}={v}" for k, v in lim.items()]
         if rule and not rule.get("never"):
             asl.ensure_watcher()
-        return podman(base, "run", f"--name={name}", *flags, *label, *rest).returncode
+        code = podman(base, "run", f"--name={name}", *flags, *label, *rest).returncode
+        if "--rm" in rest and not detached(rest):
+            unit_forget(name)
+        return code
     mode = (net or "host").split(":")[0]
     if mode in ("pasta", "slirp4netns", "bridge") or mode.startswith("bridge"):
         die(f"--network {mode}: not on this phone yet. pasta can't sandbox itself without IPC namespaces (this "
@@ -640,6 +684,8 @@ def cmd_run(argv, args):
     code = r.wait()
     if not detached(rest):
         gc()
+        if "--rm" in rest:
+            unit_forget(name)
     return code
 
 
@@ -788,6 +834,8 @@ def cmd_life(argv, verb, args):
     r = podman(base, verb, *flags, *names)
     if PHONE:
         gc()
+    if verb in ("rm", "remove", "delete", "destroy") and r.returncode == 0:
+        unit_forget(*names)  # gone with its unit
     return r.returncode
 
 

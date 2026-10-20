@@ -1,0 +1,17 @@
+{
+  "id": "container-autosleep",
+  "name": "Container autosleep watcher",
+  "kind": "watcher",
+  "owner": "system:powos-containers",
+  "purpose": "Idle containers sleep (cgroup freezer pause, or stop) and wake on a connection, `powos containers wake|start`, or an app opening them (docs/PHONE-KERNEL-CONTAINERS.md section 13).",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/apps/powos-autosleep, powos-sleep-common; feat-autosleep)",
+  "files": ["/usr/lib/powos/apps/powos-autosleep", "/usr/lib/powos/apps/powos-sleep-common",
+            "/var/lib/powos/containers/autosleep.json", "/run/powos-containers/autosleep.pid",
+            "/run/powos-containers/autosleep.sock", "/run/powos-containers/autosleep-status.json"],
+  "processes": [{"match": "powos-container autosleep watch$"}],
+  "processes_note": "one watcher (root, the system tier's mount namespace), started on demand by powos containers, gone 10 min after the last container; on exit or failure it thaws every container it paused. A sleeping container's cgroup.freeze is in /sys/fs/cgroup/powos/<container>/",
+  "limits": {"memory": "96m", "pids": 64},
+  "cost": "a /proc scan every 30 s and epoll in between (no polling of sockets); ~1 nsenter `cmd settings` call per scan on the phone (battery saver, ~30 ms)",
+  "autosleep": "never",
+  "remove": {"stop": ["kill $(cat /run/powos-containers/autosleep.pid)   # thaws everything it paused"]}
+}

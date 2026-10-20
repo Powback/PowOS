@@ -16,6 +16,7 @@
 # install, deploy and module take --note "what changed, for the user" (required): the phone's quiet "update applied"
 # notification (tools/deploy-note.sh).
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
+# powos-units: deploy - what this installs on the phone is checked against units/ (test/tier1/test-units-registry.py)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 NOTE="" ARGS=()
@@ -52,7 +53,7 @@ deploy)
   # (powos-session.sh -> /usr/bin/powos-rooted-session inside PowOS), and the flag the app checks
   # (persist.powos.root=1, set with Magisk's resetprop - readable without a root prompt).
   for f in powos-start.sh powos-session.sh powos-run.sh powos-rooted-session powos-deploy.sh powos-appdata.sh \
-    powos-idle-sysupdate.sh; do
+    powos-idle-sysupdate.sh powos-units.sh; do
     adb push -q "$HERE/$f" "/data/local/tmp/$f"
   done
   for f in powos-android-app powos-android-tasks powos-android-tasks.desktop powos-padd powos-focus-watch powos-apps-export \
@@ -92,6 +93,10 @@ deploy)
   reg=$HERE/../../../apps/registry/out/module.wasm
   if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
   else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi
+  # The units: what this deploy installs and runs, with owner, purpose, limits and how to remove it (units/phone,
+  # units/phone-android; lib/apps/powos-units). powos-deploy.sh registers them on both sides.
+  adb shell rm -rf /data/local/tmp/powos-units
+  adb push -q "$HERE/../../../units" /data/local/tmp/powos-units
   asu "sh /data/local/tmp/powos-deploy.sh; rm -f /data/local/tmp/powos-deploy.sh"
   noted ;;
 module)

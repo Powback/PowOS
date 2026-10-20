@@ -1,0 +1,36 @@
+{
+  "id": "android-apps",
+  "name": "Android apps in PowOS",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "Android apps as PowOS windows and PowOS apps as Android tasks: scrcpy over adb to the phone itself, the app list export, the task bridge",
+  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "packages": [
+    "scrcpy",
+    "android-tools",
+    "pyside6"
+  ],
+  "files": [
+    "/usr/local/bin/powos-android-app",
+    "/usr/local/bin/powos-android-tasks",
+    "/usr/local/bin/powos-apps-export",
+    "/usr/local/bin/powos-open-task",
+    "/etc/xdg/autostart/powos-android-tasks.desktop",
+    "/etc/xdg/menus/applications-merged/powos-android.menu",
+    "/usr/share/desktop-directories/powos-android.directory",
+    "/home/powos/.android/adbkey*"
+  ],
+  "processes": [
+    {
+      "match": "^python3 /usr/local/bin/powos-android-tasks"
+    },
+    {
+      "match": "^adb .*fork-server"
+    }
+  ],
+  "limits": {
+    "memory": "256m",
+    "pids": 64
+  },
+  "autosleep": "never"
+}

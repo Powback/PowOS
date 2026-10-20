@@ -1,0 +1,26 @@
+{
+  "id": "agents-reporter-mac",
+  "name": "Agents reporter (Mac)",
+  "kind": "watcher",
+  "owner": "system:powos-agents",
+  "host": "mac",
+  "purpose": "the Mac's claude sessions report to the PowOS AI page: the hooks (powos-agent-hook, -ask) and powos-agentsd mirroring them to the phone (docs/REMOTE-POWOS.md C14: copies outside any package)",
+  "installedBy": "by hand from lib/ai/agents (install-hooks.py ~/.claude/settings.json)",
+  "files": [
+    "~/.claude/hooks/powos-agents"
+  ],
+  "edits": [
+    "~/.claude/settings.json"
+  ],
+  "processes": [
+    {
+      "match": "/\\.claude/hooks/powos-agents/powos-agentsd"
+    }
+  ],
+  "unbounded": "macOS has no cgroups; one small python daemon",
+  "remove": {
+    "commands": [
+      "python3 ~/.claude/hooks/powos-agents/install-hooks.py ~/.claude/settings.json --remove"
+    ]
+  }
+}

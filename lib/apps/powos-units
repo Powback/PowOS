@@ -1,0 +1,1343 @@
+#!/usr/bin/env python3
+"""powos units - everything installed or running on a host, with an owner, a purpose, limits and a clean way out.
+
+A unit is anything that installs files or runs processes on a host: a PowOS app, a container, a system component, a
+package dependency, a watcher/daemon. Each has a manifest, /etc/powos/units.d/<id>.json on its host (the phone's
+Android side: /data/powos/units.d; the Mac: ~/.config/powos/units.d). Nothing is installed host-wide without one:
+the install paths write it (powos app install, powos containers run, the deploy scripts, the system module) and
+`powos units check` flags whatever has none. Dependencies belong INSIDE an app or a container, not on the host.
+
+Usage:
+  powos units [list] [--json [--check]] [--all]
+                                        this host's units: status (running/asleep/stopped/installed), owner,
+                                        memory and CPU, limits; orphans marked. --all: the repo's every host (units/)
+  powos units show <id>                 one unit: everything its manifest says, what is running, its cgroup
+  powos units check [--json]            drift: packages, files and processes no unit claims, processes of a unit with
+                                        limits that run outside its cgroup, units whose files are gone. Exit 1 on drift
+  powos units remove <id> [--dry-run] [--yes]
+                                        uninstall it cleanly: shows the plan first (stop, packages, files, commands,
+                                        what is kept); --dry-run stops there; without --yes it asks
+  powos units register <manifest.json|->   add or replace a unit (validated); the install paths call this
+  powos units unregister <id>           forget a unit (removes only its manifest, never what it installed)
+  powos units enforce [<id>]            put each running unit with limits into a cgroup of its own with them
+                                        (the containers' hybrid cgroups on the phone, cgroup v2 elsewhere)
+  powos units baseline <id> --before YYYY-MM-DD [--owner O] [--purpose P]
+                                        adopt what was installed before a date as one unit (the image, the user's
+                                        own tools); what came after stays unclaimed for check to show
+  powos units publish [--stdin]         this host's units to the PowOS AI page (the powos-agents module's `unit`
+                                        table); --stdin: another host's `list --json --check` (the Colima VM's)
+
+A manifest:
+  {"id": "spacetimedb", "name": "SpacetimeDB", "kind": "service", "owner": "system:powos-deploy",
+   "purpose": "the device's one SpacetimeDB server", "host": "phone",
+   "packages": ["spacetimedb"], "files": ["/usr/lib/powos/apps/services/*.json"],
+   "processes": [{"match": "spacetimedb-standalone start"}],          also {"pidfile": P, "tree": true},
+                                                                       {"cgroup": NAME}, {"container": NAME}
+   "limits": {"memory": "600m", "cpus": 2, "pids": 512},              or "unbounded": "why there is none"
+   "autosleep": "never",                                               powos-sleep-common's key
+   "remove": {"stop": ["cmd"], "commands": ["cmd"], "keep": ["/var/lib/powos/stdb"]},
+   "orphan": true, "decide": "the question for the user"}             found with no clear owner: the user decides
+  kind: app | service | container | system | package | watcher | compose | scratch.
+  owner: app:<id> | agent:<role> | user | system:<what installed it>.
+
+Hosts: phone (PowOS's root), phone-android (Android's side: Magisk, /data/powos, /data/local/tmp), colima (the Docker
+VM), mac, powstation (the Docker containers, checked where docker runs), desktop. POWOS_UNITS_HOST overrides it,
+POWOS_UNITS_DIR the directory. Docs: config/ai/context/capabilities.md (Units).
+"""
+import fnmatch
+import glob
+import json
+import os
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+KINDS = ("app", "service", "container", "system", "package", "watcher", "compose", "scratch")
+ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,80}$")
+PLATFORM_FILE = "/etc/powos/platform"
+AUTOSLEEP_STATUS = "/run/powos-containers/autosleep-status.json"   # powos-autosleep's (feat-autosleep)
+SUPERVISOR_STATUS = "/run/powos-system/status.json"
+REPO_UNITS = os.path.join(HERE, "..", "..", "units")              # the fleet's manifests, in the repo
+
+
+def die(msg, code=1):
+    print(f"powos units: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def rd(path, default=""):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+def run(*cmd, timeout=30):
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return p.stdout if p.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+# ── hosts ───────────────────────────────────────────────────────────────────
+
+def detect_host():
+    h = os.environ.get("POWOS_UNITS_HOST")
+    if h:
+        return h
+    if sys.platform == "darwin":
+        return "mac"
+    if os.path.isdir("/data/adb") and os.path.exists("/system/build.prop"):
+        return "phone-android"
+    plat = rd(PLATFORM_FILE)
+    if plat == "phone":
+        return "phone"
+    if socket.gethostname().startswith("colima"):
+        return "colima"
+    return plat or "desktop"
+
+
+HOSTS = ("phone", "phone-android", "mac", "colima", "powstation", "desktop")
+HOST = detect_host()
+DIRS = {"phone-android": "/data/powos/units.d", "mac": os.path.expanduser("~/.config/powos/units.d")}
+UNITS_DIR = os.environ.get("POWOS_UNITS_DIR") or DIRS.get(HOST, "/etc/powos/units.d")
+# What a user installs without root (powos app install as the user powos) is registered in their own directory; the
+# host's check reads every user's.
+USER_DIR = os.path.expanduser("~/.config/powos/units.d")
+# What a host's check also covers: PowStation's Docker runs in the Colima VM, its CLI and compose dirs are the Mac's.
+SCOPE = {"mac": ("mac", "powstation")}
+
+# Where host-wide installs land, per host: (path, depth). depth 0 = the path itself, 1 = its entries, -1 = all below.
+# Package-owned files are never drift; the rest must be a unit's.
+WATCH = {
+    "phone": [("/usr/local/bin", 1), ("/usr/local/lib", 1), ("/usr/lib/powos", 1), ("/usr/lib/powos/apps", 1),
+              ("/etc/powos", 1), ("/etc/xdg/autostart", 1), ("/etc/profile.d", 1), ("/etc/sudoers.d", 1),
+              ("/etc/containers/containers.conf.d", 1), ("/usr/share/containers/oci/hooks.d", 1),
+              ("/etc/containers/oci/hooks.d", 1), ("/opt", 1), ("/var/lib/containers", 1), ("/var/lib/powos", 1),
+              ("/etc/systemd/system", 1), ("/etc/cron.d", 1)],
+    "phone-android": [("/data/adb/service.d", 1), ("/data/adb/post-fs-data.d", 1), ("/data/adb/modules", 1),
+                      ("/data/powos", 1), ("/data/local/tmp", 1)],
+    "colima": [("/etc/apt/sources.list.d", 1), ("/etc/apt/keyrings", 1), ("/usr/local/bin", 1),
+               ("/usr/local/sbin", 1), ("/opt", 1), ("/etc/docker", 1), ("/etc/systemd/system", 1),
+               ("/etc/cron.d", 1), ("/etc/powos", 1)],
+    "mac": [("~/Library/LaunchAgents", 1), ("/Library/LaunchAgents", 1), ("/Library/LaunchDaemons", 1),
+            ("~/.claude/hooks", 1), ("~/.local/state/powos", 1), ("~/.local/bin", 1)],
+    "desktop": [("/usr/local/bin", 1), ("/opt", 1), ("/etc/powos", 1), ("/etc/systemd/system", 1)],
+}
+# Generated or managed in place by their owner; never drift.
+IGNORE = ("/etc/powos/units.d", "*/__pycache__", "*.pid", "*.lock", "*/.DS_Store", "/var/lib/powos/units*")
+
+
+def package_manager():
+    if HOST == "phone-android":
+        return "magisk"
+    if HOST == "mac":
+        return "brew" if shutil.which("brew") else None
+    for pm in ("pacman", "dpkg", "rpm"):
+        if shutil.which(pm):
+            return pm
+    return None
+
+
+# ── manifests ───────────────────────────────────────────────────────────────
+
+def norm(u, src=""):
+    """A manifest as written (some hand-written ones use plain strings) -> the shape everything here reads."""
+    u = dict(u)
+    u["_src"] = src
+    u.setdefault("name", u.get("id", "?"))
+    u.setdefault("kind", "system")
+    u.setdefault("host", HOST)
+    if u["host"] not in HOSTS:  # free text ("Colima VM (192.168.50.100)"): the host whose directory holds it
+        u["hostNote"], u["host"] = u["host"], HOST
+    if isinstance(u.get("owner"), dict):
+        o = u["owner"]
+        u["owner"] = f"{o.get('type', 'user')}:{o.get('name', '')}".rstrip(":")
+    u.setdefault("owner", "?")
+    u["packages"] = [str(p).split()[0] for p in (u.get("packages") or []) if str(p).strip()]
+    u["files"] = [os.path.expanduser(f) for f in (u.get("files") or [])]
+    u["edits"] = [os.path.expanduser(f) for f in (u.get("edits") or [])]
+    procs = u.get("processes")
+    if isinstance(procs, str):
+        u["processes_note"], procs = procs, []
+    u["processes"] = [p if isinstance(p, dict) else {"match": str(p)} for p in (procs or [])]
+    for e in u["processes"]:  # {"name": "powos-sleepd", "user": "root"} (a hand-written manifest): that program
+        if "name" in e and not any(k in e for k in ("match", "pidfile", "cgroup", "container", "systemd")):
+            e["match"] = rf"(^|/){re.escape(e['name'])}(\s|$)"
+        if "user" in e and any(k in e for k in ("match", "pidfile", "cgroup", "container", "systemd")):
+            e["as_user"] = e.pop("user")  # with a program named, "user" says whose it is - not all of theirs
+    lim = u.get("limits")
+    if isinstance(lim, str):
+        u["unbounded"], lim = u.get("unbounded") or lim, None
+    if isinstance(lim, dict):  # a supervisor budget's spelling (memMB, cpuPct) is the same limit
+        lim = dict(lim)
+        if "memMB" in lim:
+            lim.setdefault("memory", f"{int(lim.pop('memMB'))}m")
+        if "cpuPct" in lim:
+            lim.setdefault("cpus", round(float(lim.pop("cpuPct")) / 100, 2))
+    u["limits"] = lim or None
+    rm = u.get("remove")
+    if isinstance(rm, str):
+        rm = {"commands": [rm]}
+    u["remove"] = rm or {}
+    return u
+
+
+def validate(u):
+    errs = []
+    if not ID_RE.match(str(u.get("id", ""))):
+        errs.append("id: letters, digits, . _ - @ (max 81)")
+    for k in ("owner", "purpose"):
+        if not str(u.get(k, "")).strip():
+            errs.append(f"{k}: required (who installed it and why)")
+    if u.get("kind", "system") not in KINDS:
+        errs.append(f"kind: one of {', '.join(KINDS)}")
+    if not (u.get("files") or u.get("edits") or u.get("packages") or u.get("processes")):
+        errs.append("nothing to own: needs files, edits, packages or processes")
+    lim = u.get("limits")
+    if isinstance(lim, dict):
+        for k in lim:
+            if k not in ("memory", "memory_swap", "cpus", "cpuset", "pids", "memMB", "cpuPct"):
+                errs.append(f"limits.{k}: memory | memory_swap | cpus | cpuset | pids")
+    return errs
+
+
+def load_dir(d):
+    out = []
+    for p in sorted(glob.glob(os.path.join(d, "*.json"))):
+        try:
+            with open(p) as f:
+                out.append(norm(json.load(f), p))
+        except (OSError, ValueError) as e:
+            print(f"powos units: warning: {p}: {e}", file=sys.stderr)
+    return out
+
+
+def user_dirs():
+    if os.environ.get("POWOS_UNITS_DIR"):
+        return []
+    dirs = {USER_DIR} | set(glob.glob("/home/*/.config/powos/units.d")) | set(glob.glob("/root/.config/powos/units.d"))
+    return sorted(d for d in dirs if os.path.realpath(d) != os.path.realpath(UNITS_DIR))
+
+
+def load(host=None):
+    units = load_dir(UNITS_DIR)
+    for d in user_dirs():
+        units += load_dir(d)
+    units = dedupe(units)
+    if HOST == "phone-android":  # a Magisk module carries its own manifest (the system module)
+        for p in sorted(glob.glob("/data/adb/modules/*/powos-units/*.json")):
+            try:
+                with open(p) as f:
+                    units.append(norm(json.load(f), p))
+            except (OSError, ValueError):
+                pass
+    return dedupe(units)
+
+
+def dedupe(units):
+    """One unit per id: the first found wins (the host's directory before a user's and a Magisk module's copy)."""
+    seen, out = set(), []
+    for u in units:
+        if u.get("id") not in seen:
+            seen.add(u.get("id"))
+            out.append(u)
+    return out
+
+
+def load_repo():
+    """The fleet: the repo's units/<host>/*.json (what the deploys install on each host)."""
+    out = []
+    for d in sorted(glob.glob(os.path.join(REPO_UNITS, "*", ""))):
+        out += load_dir(d)
+    return out
+
+
+def find(units, uid):
+    for u in units:
+        if u["id"] == uid:
+            return u
+    return None
+
+
+def writable_dir():
+    """The host's directory when this process may write it (root, or the Mac's own), else the user's."""
+    d = UNITS_DIR
+    probe = d if os.path.isdir(d) else os.path.dirname(d)
+    return d if os.access(probe, os.W_OK) else USER_DIR
+
+
+def manifest_path(uid, d=None):
+    return os.path.join(d or writable_dir(), f"{uid}.json")
+
+
+def register(u, quiet=False):
+    """Write (or replace) a unit's manifest. Returns its path. The API the install paths use."""
+    clean = {k: v for k, v in u.items() if not k.startswith("_")}
+    errs = validate(clean)
+    if errs:
+        raise ValueError(f"{clean.get('id', '?')}: " + "; ".join(errs))
+    clean.setdefault("host", HOST)
+    clean.setdefault("registered", time.strftime("%Y-%m-%d"))
+    d = writable_dir()
+    os.makedirs(d, exist_ok=True)
+    p = manifest_path(clean["id"], d)
+    tmp = p + ".new"
+    with open(tmp, "w") as f:
+        json.dump(clean, f, indent=2)
+        f.write("\n")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, p)
+    if not quiet:
+        print(f"registered {clean['id']} ({p})")
+    return p
+
+
+def unregister(uid, quiet=False):
+    for d in [UNITS_DIR] + user_dirs():
+        p = manifest_path(uid, d)
+        if os.path.exists(p):
+            os.remove(p)
+            if not quiet:
+                print(f"unregistered {uid} (its files and processes were not touched)")
+            return True
+    return False
+
+
+def owner_default():
+    return os.environ.get("POWOS_UNIT_OWNER") or f"user:{os.environ.get('SUDO_USER') or os.environ.get('USER') or 'root'}"
+
+
+def register_container(name, lim, command, autosleep=None):
+    """`powos containers run` registers what it starts: container.<name>, its cgroup, its limits, how it goes.
+    lim: powos-container's own encoding (mem/memsw in bytes, cpus, cpuset, pids). POWOS_UNIT_OWNER/_PURPOSE name
+    who asked and why (powos-runtime sets them for an app)."""
+    limits = {}
+    if lim.get("mem"):
+        limits["memory"] = f"{int(lim['mem']) >> 20}m"
+    if int(lim.get("memsw", -1) or -1) > 0:
+        limits["memory_swap"] = f"{int(lim['memsw']) >> 20}m"
+    for k, n in (("cpus", "cpus"), ("cpuset", "cpuset"), ("pids", "pids")):
+        if lim.get(k):
+            limits[n] = lim[k]
+    u = {"id": f"container.{name}", "name": name, "kind": "container", "host": HOST, "owner": owner_default(),
+         "purpose": os.environ.get("POWOS_UNIT_PURPOSE") or f"powos containers run {command}"[:240],
+         "installedBy": "powos containers run", "processes": [{"cgroup": name}, {"container": name}],
+         "remove": {"stop": [f"powos containers rm -f {name}"]}}
+    if limits:
+        u["limits"] = limits
+    else:
+        u["unbounded"] = "run without --memory/--cpus/--pids-limit"
+    if autosleep:
+        u["autosleep"] = autosleep
+    return register(u, quiet=True)
+
+
+# ── packages ────────────────────────────────────────────────────────────────
+
+def installed_packages(pm):
+    """Explicitly installed packages (dependencies come with them) -> {name: install time or 0}."""
+    if pm == "pacman":
+        names = run("pacman", "-Qqe").split()
+        when = {}
+        for line in open_lines("/var/log/pacman.log"):
+            m = re.match(r"\[(\d{4}-\d\d-\d\d)T(\d\d:\d\d)[^\]]*\] \[ALPM\] installed (\S+)", line)
+            if m:
+                when[m.group(3)] = time.mktime(time.strptime(f"{m.group(1)} {m.group(2)}", "%Y-%m-%d %H:%M"))
+        return {n: when.get(n, 0) for n in names}
+    if pm == "dpkg":
+        out = {}
+        for n in run("apt-mark", "showmanual").split():
+            base = n.split(":")[0]
+            p = next((x for x in glob.glob(f"/var/lib/dpkg/info/{base}*.list")
+                      if os.path.basename(x).split(":")[0] in (f"{base}.list", base)), None)
+            out[base] = os.path.getmtime(p) if p else 0
+        return out
+    if pm == "brew":
+        out = {}
+        cellar = run("brew", "--cellar").strip()
+        for n in run("brew", "leaves").split():
+            p = os.path.join(cellar, n.split("/")[-1])
+            out[n] = os.path.getmtime(p) if os.path.exists(p) else 0
+        cask = run("brew", "--caskroom").strip()
+        for n in run("brew", "list", "--cask").split():
+            p = os.path.join(cask, n)
+            out[f"cask:{n}"] = os.path.getmtime(p) if os.path.exists(p) else 0
+        return out
+    if pm == "magisk":
+        return {os.path.basename(p): os.path.getmtime(p) for p in glob.glob("/data/adb/modules/*") if os.path.isdir(p)}
+    if pm == "rpm":  # an image-based desktop: only what was layered on top of the image is the user's
+        try:
+            st = json.loads(run("rpm-ostree", "status", "--json") or "{}")
+            dep = next((d for d in st.get("deployments", []) if d.get("booted")), {})
+            return {n: 0 for n in dep.get("requested-packages", [])}
+        except ValueError:
+            return {}
+    return {}
+
+
+def open_lines(path):
+    try:
+        with open(path, errors="replace") as f:
+            return f.readlines()
+    except OSError:
+        return []
+
+
+def package_files(pm):
+    """Every path a package owns (not drift)."""
+    if pm == "pacman":
+        return {x.rstrip("/") for x in run("pacman", "-Qlq", timeout=120).splitlines()}
+    if pm == "dpkg":
+        s = set()
+        for p in glob.glob("/var/lib/dpkg/info/*.list"):
+            s.update(x.rstrip("\n") for x in open_lines(p))
+        for p in glob.glob("/var/lib/dpkg/info/*.conffiles"):
+            s.update(x.rstrip("\n") for x in open_lines(p))
+        return s
+    return set()
+
+
+def remove_package_cmd(pm, names):
+    if not names:
+        return None
+    if pm == "magisk":  # one module at a time (magisk --remove-modules would take every module): gone at next boot
+        return ["/system/bin/sh", "-c", "; ".join(f"touch /data/adb/modules/{n}/remove" for n in names)]
+    if pm == "brew":
+        return ["brew", "uninstall"] + [w for n in names for w in (["--cask", n[5:]] if n.startswith("cask:") else [n])]
+    return {"pacman": ["pacman", "-Rns", "--noconfirm"], "dpkg": ["apt-get", "remove", "-y"],
+            "rpm": ["rpm-ostree", "uninstall"]}.get(pm, ["false"]) + list(names)
+
+
+# ── files ───────────────────────────────────────────────────────────────────
+
+def watched_paths(host):
+    out = []
+    for root, depth in WATCH.get(host, []):
+        root = os.path.expanduser(root)
+        if depth == 0:
+            if os.path.lexists(root):
+                out.append(root)
+            continue
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for n in names:
+            out.append(os.path.join(root, n))
+    return out
+
+
+def ignored(p):
+    return any(fnmatch.fnmatch(p, g) or p == g or p.startswith(g.rstrip("*") + "/") for g in IGNORE)
+
+
+def claims(pattern, path):
+    """A unit's file entry claims a path: the same, a glob match, or a directory above it."""
+    pattern = pattern.rstrip("/")
+    return path == pattern or fnmatch.fnmatch(path, pattern) or path.startswith(pattern + "/")
+
+
+def claimed(units, path):
+    """The units claiming a path: their files (theirs to delete on remove) or edits (shared files they change -
+    /etc/passwd, adb_keys, a settings.json - undone by their remove commands, never deleted). A watched directory is
+    also claimed by a unit that claims something inside it (its own data dir)."""
+    inside = path.rstrip("/") + "/"
+    return [u for u in units if any(claims(f, path) or f.startswith(inside) for f in u["files"] + u["edits"])]
+
+
+def expand_files(u):
+    out = []
+    for f in u["files"]:
+        if any(c in f for c in "*?["):
+            out += glob.glob(f)
+        elif os.path.lexists(f):
+            out.append(f)
+    return out
+
+
+# ── processes ───────────────────────────────────────────────────────────────
+
+CLK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") and sys.platform != "darwin" else 100
+PAGE = os.sysconf("SC_PAGE_SIZE") if sys.platform != "darwin" else 4096
+
+
+def proc_table():
+    """pid -> {ppid, uid, cmd, rss (KB), cpu (ticks), cg, root, ctx, state}."""
+    if sys.platform == "darwin":
+        return mac_procs()
+    try:  # PowOS's own root: "/" in it, /data/powos/root seen from Android's side
+        me = os.stat("/data/powos/root" if HOST == "phone-android" else "/")
+        here = (me.st_dev, me.st_ino)
+    except OSError:
+        here = None
+    out = {}
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        p = f"/proc/{d}"
+        try:
+            with open(f"{p}/stat") as f:
+                st = f.read()
+            with open(f"{p}/cmdline", "rb") as f:
+                cmd = f.read().replace(b"\0", b" ").decode(errors="replace").strip()
+        except OSError:
+            continue
+        if not cmd:  # kernel threads
+            continue
+        rest = st[st.rindex(")") + 2:].split()
+        try:
+            r = os.stat(f"{p}/root")
+            root = (r.st_dev, r.st_ino)
+        except OSError:
+            root = None
+        out[int(d)] = {
+            "pid": int(d), "ppid": int(rest[1]), "state": rest[0], "cmd": cmd,
+            "uid": os.stat(p).st_uid, "cpu": int(rest[11]) + int(rest[12]), "rss": int(rest[21]) * PAGE // 1024,
+            "cg": rd(f"{p}/cgroup"), "ctx": rd(f"{p}/attr/current").rstrip("\0"), "powos": root == here,
+        }
+    return out
+
+
+def mac_procs():
+    out = {}
+    for line in run("ps", "-axo", "pid=,ppid=,uid=,rss=,time=,stat=,command=").splitlines():
+        f = line.split(None, 6)
+        if len(f) < 7:
+            continue
+        t = f[4].replace("-", ":").split(":")
+        secs = 0.0
+        for x in t:
+            secs = secs * 60 + float(x)
+        out[int(f[0])] = {"pid": int(f[0]), "ppid": int(f[1]), "uid": int(f[2]), "rss": int(f[3]), "cpu": secs * 100,
+                          "state": f[5][:1], "cmd": f[6], "cg": "", "ctx": "", "powos": False}
+    return out
+
+
+def in_scope(p, host):
+    """The processes a host's check answers for."""
+    if host == "phone":
+        return p["powos"]                                  # PowOS's own root, whatever the namespace
+    if host == "phone-android":                            # what root started on Android's side (Magisk's context)
+        return "magisk" in p["ctx"] and not p["powos"] and not p["cmd"].startswith("magiskd")
+    if host == "mac":
+        return (p["ppid"] == 1 and p["uid"] == os.getuid()
+                and not p["cmd"].startswith(("/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/Library/Apple",
+                                             "/Applications/", "/Library/", "/opt/homebrew/Caskroom", "/private/"))
+                and ".app/Contents/" not in p["cmd"].split()[0])
+    if host in ("colima", "desktop"):
+        cg = p["cg"]
+        return not re.search(r"docker[-/]|containerd|/libpod", cg) and p["uid"] >= 0
+    return False
+
+
+def descendants(pid, table):
+    kids, todo = {pid}, [pid]
+    children = {}
+    for q in table.values():
+        children.setdefault(q["ppid"], []).append(q["pid"])
+    while todo:
+        for c in children.get(todo.pop(), []):
+            if c not in kids:
+                kids.add(c)
+                todo.append(c)
+    return kids
+
+
+def unit_claims(u, table):
+    """pid -> how directly the unit claims it: 1 named (match, pidfile, cgroup, container, systemd), 2 a descendant
+    of one of those (tree), 3 one of its user's processes (user)."""
+    got = {}
+
+    def add(pids, rank):
+        for p in pids:
+            if got.get(p, 9) > rank:
+                got[p] = rank
+
+    for e in u["processes"]:
+        tree = bool(e.get("tree"))
+        if "pidfile" in e:
+            try:
+                pid = int(rd(os.path.expanduser(e["pidfile"])) or 0)
+            except ValueError:
+                pid = 0
+            if pid in table:
+                add({pid}, 1)
+                if tree:
+                    add(descendants(pid, table) - {pid}, 2)
+        if "match" in e:
+            rx = re.compile(e["match"])
+            uid = user_id(e["as_user"]) if "as_user" in e else None
+            hit = {q["pid"] for q in table.values() if rx.search(q["cmd"]) and (uid is None or q["uid"] == uid)}
+            add(hit, 1)
+            if tree:
+                for h in hit:
+                    add(descendants(h, table) - {h}, 2)
+        if "cgroup" in e:
+            name = e["cgroup"]
+            add({q["pid"] for q in table.values()
+                 if re.search(rf"(^|\n)\d+:[^:\n]*:/powos/{re.escape(name)}(/|$|\n)", q["cg"])}, 1)
+        if "systemd" in e:
+            add({q["pid"] for q in table.values() if f"/{e['systemd']}" in q["cg"]}, 1)
+        if "user" in e:  # everything that user runs on this host (the desktop session's user: their programs)
+            uid = user_id(e["user"])
+            add({q["pid"] for q in table.values() if q["uid"] == uid and in_scope(q, HOST)}, 3)
+    return got
+
+
+def owners(units, table):
+    """pid -> the unit it belongs to: the most direct claim wins (a service's own unit over the tree it runs in, over
+    its user's session); a tie goes to the first unit."""
+    best = {}
+    for u in units:
+        for pid, rank in unit_claims(u, table).items():
+            if pid not in best or rank < best[pid][0]:
+                best[pid] = (rank, u["id"])
+    return {pid: uid for pid, (_, uid) in best.items()}
+
+
+def unit_pids(u, table, own=None):
+    """The pids that are a unit's (with own = owners(...): only those no more direct unit claims)."""
+    pids = set(unit_claims(u, table))
+    return {p for p in pids if own.get(p) == u["id"]} if own is not None else pids
+
+
+def user_id(name):
+    try:
+        import pwd
+        return pwd.getpwnam(name).pw_uid
+    except (KeyError, ImportError):
+        return -2
+
+
+def group_name(uid):
+    return f"unit.{uid}"[:63]
+
+
+def in_group(p, uid, u=None):
+    """In the unit's cgroup: ours (powos/unit.<id>), or the ones a self-managed unit names (its "cgroups")."""
+    names = [group_name(uid)] + [os.path.basename(c.split(" ")[0].rstrip("/")) for c in (u or {}).get("cgroups") or []]
+    return any(f"/powos/{n}" in p["cg"] for n in names if n) or f"/powos-units/{uid}" in p["cg"]
+
+
+# ── containers (PowStation's Docker) ───────────────────────────────────────
+
+def docker_containers():
+    if not shutil.which("docker"):
+        return None
+    out = []
+    # Named fields, not {{json .}}: that one computes sizes, and one container with a lost layer fails the whole list.
+    fmt = "\t".join(("{{.ID}}", "{{.Names}}", "{{.State}}", "{{.Status}}", "{{.Image}}", "{{.CreatedAt}}", "{{.Labels}}"))
+    for line in run("docker", "ps", "-a", "--format", fmt, timeout=20).splitlines():
+        f = line.split("\t")
+        if len(f) < 7:
+            continue
+        c = {"ID": f[0], "Names": f[1] or f[0], "State": f[2], "Status": f[3], "Image": f[4], "CreatedAt": f[5],
+             "Labels": f[6]}
+        labels = dict(kv.split("=", 1) for kv in (c.get("Labels") or "").split(",") if "=" in kv)
+        out.append({"name": c.get("Names", ""), "state": c.get("State", ""), "status": c.get("Status", ""),
+                    "image": c.get("Image", ""), "created": c.get("CreatedAt", ""),
+                    "project": labels.get("com.docker.compose.project", ""),
+                    "workdir": labels.get("com.docker.compose.project.working_dir", ""),
+                    "owner": labels.get("io.powos.unit", "")})
+    return out
+
+
+def container_unit(units, c):
+    for u in units:
+        for e in u["processes"]:
+            n = e.get("container")
+            if n and (n == c["name"] or re.fullmatch(n, c["name"])):
+                return u
+    return find(units, c["owner"]) if c["owner"] else None
+
+
+# ── status (shared with the sleepers: powos-autosleep, powos sleep) ─────────
+
+def sleep_states():
+    """name -> "asleep" | "stopped", from the sleepers' own status files (never their logic)."""
+    out = {}
+    try:
+        with open(AUTOSLEEP_STATUS) as f:
+            st = json.load(f)
+        for name, c in (st.get("containers") or {}).items():
+            s = c.get("state", "")
+            if s in ("asleep", "paused", "frozen", "hibernated"):
+                out[name] = "asleep"
+            elif s == "stopped":
+                out[name] = "stopped"
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def frozen(uid, entries):
+    names = [group_name(uid)] + [e["cgroup"] for e in entries if "cgroup" in e]
+    return any(rd(f"/sys/fs/cgroup/powos/{n}/cgroup.freeze") == "1" for n in names)
+
+
+def cpu_sample(table, delay=0.4):
+    """pid -> CPU % of one core over a short window (Linux; the Mac's ps gives cumulative time only)."""
+    if sys.platform == "darwin":
+        return {pid: float(x) for pid, x in (l.split() for l in run("ps", "-axo", "pid=,%cpu=").splitlines()
+                                              if len(l.split()) == 2)}
+    a = {pid: p["cpu"] for pid, p in table.items()}
+    time.sleep(delay)
+    out = {}
+    for pid, t0 in a.items():
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                st = f.read()
+            rest = st[st.rindex(")") + 2:].split()
+            out[pid] = (int(rest[11]) + int(rest[12]) - t0) * 100.0 / CLK / delay
+        except (OSError, ValueError, IndexError):
+            pass
+    return out
+
+
+def status_of(u, table, sleeps, pids):
+    if u.get("orphan") and not pids and not u["processes"]:
+        return "installed"
+    if u["processes"] or u.get("processes_note"):
+        if pids:
+            if frozen(u["id"], u["processes"]) or all(table[p]["state"] == "T" for p in pids):
+                return "asleep"
+            return "running"
+        for e in u["processes"]:
+            n = e.get("cgroup") or e.get("container")
+            if n and n in sleeps:
+                return sleeps[n]
+        return "stopped" if u["processes"] else "installed"
+    if u["files"] and not expand_files(u) and not u["packages"]:
+        return "missing"
+    return "installed"
+
+
+def describe_limits(u):
+    lim = u.get("limits")
+    if lim:
+        return " ".join(f"{k}={v}" for k, v in lim.items())
+    return f"unbounded ({u['unbounded']})" if u.get("unbounded") else "-"
+
+
+def describe_sleep(u):
+    v = u.get("autosleep")
+    if v is None:
+        return "-"
+    try:
+        c = sleep_common()
+        r = c.from_manifest(v)
+        return c.describe(r) if r else "-"
+    except Exception:  # noqa: BLE001 - shown, never fatal
+        return str(v)
+
+
+_COMMON = None
+
+
+def sleep_common():
+    global _COMMON
+    if _COMMON is None:
+        p = os.path.join(HERE, "powos-sleep-common")
+        loader = SourceFileLoader("powos_sleep_common", p)
+        m = module_from_spec(spec_from_loader("powos_sleep_common", loader))
+        loader.exec_module(m)
+        _COMMON = m
+    return _COMMON
+
+
+def snapshot(units=None, sample=True):
+    """Every unit of this host's scope with its live state: the rows of list, the overview and publish."""
+    units = load() if units is None else units
+    table = proc_table() if HOST != "powstation" else {}
+    cpu = cpu_sample(table) if sample and table else {}
+    sleeps = sleep_states()
+    scope = SCOPE.get(HOST, (HOST,))
+    rows = []
+    own = owners([u for u in units if u.get("host", HOST) in scope], table)
+    for u in units:
+        if u.get("host", HOST) not in scope:
+            continue
+        if u.get("host") == "powstation":
+            continue  # by container, below
+        pids = unit_pids(u, table, own)
+        rows.append({
+            "id": u["id"], "name": u["name"], "kind": u["kind"], "owner": u["owner"], "host": u.get("host", HOST),
+            "purpose": u.get("purpose", ""), "status": status_of(u, table, sleeps, pids), "pids": sorted(pids),
+            "memKB": sum(table[p]["rss"] for p in pids), "cpuPct": round(sum(cpu.get(p, 0) for p in pids), 1),
+            "limits": describe_limits(u), "bounded": bool(u.get("limits")),
+            "inGroup": bool(pids) and all(in_group(table[p], u["id"], u) for p in pids),
+            "autosleep": describe_sleep(u), "orphan": bool(u.get("orphan")), "decide": u.get("decide", ""),
+        })
+    if "powstation" in scope:
+        rows += docker_rows(units)
+    return rows
+
+
+def docker_rows(units):
+    """PowStation's containers as rows: one per compose project (a project is self-describing: its directory owns
+    it), one per unit that claims containers, one per container nothing claims (an orphan until registered)."""
+    cs = docker_containers()
+    if cs is None:
+        return []
+    rows, projects, by_unit = [], {}, {}
+    for c in cs:
+        if c["project"]:
+            projects.setdefault(c["project"], []).append(c)
+            continue
+        u = container_unit(units, c)
+        if u:
+            by_unit.setdefault(u["id"], (u, []))[1].append(c)
+            continue
+        rows.append({
+            "id": f"container:{c['name']}", "name": c["name"], "kind": "container", "owner": "?",
+            "host": "powstation", "purpose": f"{c['image']} (no compose project, no unit; created {c['created'][:10]})",
+            "status": docker_state(c), "pids": [], "memKB": 0, "cpuPct": 0, "limits": "-", "bounded": False,
+            "inGroup": False, "autosleep": "-", "orphan": True,
+            "decide": "no compose project and no unit: whose is it?", "registered": False,
+        })
+    for uid, (u, cs2) in sorted(by_unit.items()):
+        up = sum(1 for c in cs2 if docker_state(c) == "running")
+        asleep = sum(1 for c in cs2 if docker_state(c) == "asleep")
+        rows.append({
+            "id": uid, "name": u["name"], "kind": u["kind"], "owner": u["owner"], "host": "powstation",
+            "purpose": u.get("purpose", ""), "status": "running" if up else "asleep" if asleep else "stopped",
+            "pids": [], "memKB": 0, "cpuPct": 0, "limits": describe_limits(u), "bounded": bool(u.get("limits")),
+            "inGroup": False, "autosleep": describe_sleep(u), "orphan": bool(u.get("orphan")),
+            "decide": u.get("decide", ""), "registered": True, "detail": f"{up}/{len(cs2)} up",
+        })
+    for proj, cs2 in sorted(projects.items()):
+        up = sum(1 for c in cs2 if c["state"] == "running")
+        rows.append({
+            "id": f"compose:{proj}", "name": proj, "kind": "compose",
+            "owner": f"user:{os.path.basename(cs2[0]['workdir'].rstrip('/')) or proj}",
+            "host": "powstation", "purpose": f"compose project ({len(cs2)} containers, {up} up)",
+            "status": "running" if up else "stopped", "pids": [], "memKB": 0, "cpuPct": 0,
+            "limits": "-", "bounded": False, "inGroup": False, "autosleep": "-", "orphan": False, "decide": "",
+            "registered": True, "detail": f"{up}/{len(cs2)} up",
+        })
+    return rows
+
+
+def docker_state(c):
+    if c["state"] == "running":
+        return "asleep" if "Paused" in c["status"] else "running"
+    return "stopped"
+
+
+# ── list / show ─────────────────────────────────────────────────────────────
+
+def mb(kb):
+    return f"{kb / 1024:.0f}M" if kb else "-"
+
+
+def cmd_list(args):
+    as_json = "--json" in args
+    if "--all" in args:
+        units = load_repo()
+        if as_json:
+            print(json.dumps([{k: v for k, v in u.items() if not k.startswith("_")} for u in units], indent=2))
+            return 0
+        for host in sorted({u["host"] for u in units}):
+            print(f"{host}:")
+            for u in sorted((u for u in units if u["host"] == host), key=lambda u: u["id"]):
+                print(f"  {'!' if u.get('orphan') else ' '} {u['id']:<34} {u['kind']:<9} {u['owner']:<28} "
+                      f"{describe_limits(u)}")
+        return 0
+    if as_json:
+        print(json.dumps(overview(with_check="--check" in args), indent=2))
+        return 0
+    rows = snapshot()
+    print(f"{HOST}: {len(rows)} units ({UNITS_DIR})")
+    print(f"  {'id':<34} {'status':<9} {'kind':<9} {'owner':<26} {'mem':>6} {'cpu':>6}  limits")
+    for r in sorted(rows, key=lambda r: (r["host"], r["orphan"], r["kind"], r["id"])):
+        mark = "!" if r["orphan"] else " "
+        cpu = f"{r['cpuPct']:.1f}%" if r["pids"] else "-"
+        print(f"{mark} {r['id'][:34]:<34} {r['status']:<9} {r['kind']:<9} {r['owner'][:26]:<26} "
+              f"{mb(r['memKB']):>6} {cpu:>6}  {r['limits'][:48]}")
+    orphans = [r for r in rows if r["orphan"]]
+    if orphans:
+        print(f"\n! {len(orphans)} orphan(s): no clear owner or purpose - yours to decide (powos units show <id>):")
+        for r in orphans:
+            print(f"  {r['id']}: {r['decide'] or r['purpose']}")
+    return 0
+
+
+def cmd_show(args):
+    if not args:
+        die("usage: powos units show <id>")
+    units = load()
+    u = find(units, args[0])
+    if not u:
+        rows = [r for r in snapshot(units, sample=False) if r["id"] == args[0]]
+        if rows:
+            print(json.dumps(rows[0], indent=2))
+            return 0
+        die(f"no unit {args[0]} on {HOST} (powos units list)")
+    table = proc_table()
+    pids = unit_pids(u, table, owners(units, table))
+    for k in ("id", "name", "kind", "host", "owner", "purpose", "installedBy", "registered"):
+        if u.get(k):
+            print(f"{k + ':':<13}{u[k]}")
+    print(f"{'status:':<13}{status_of(u, table, sleep_states(), pids)}")
+    if u.get("orphan"):
+        print(f"{'ORPHAN:':<13}{u.get('decide') or 'no clear owner/purpose: yours to decide'}")
+    if u["packages"]:
+        print(f"{'packages:':<13}{' '.join(u['packages'])}")
+    for f in u["files"]:
+        print(f"{'file:':<13}{f}{'' if expand_files({'files': [f]}) else '   (not present)'}")
+    for e in u["processes"]:
+        print(f"{'process:':<13}{json.dumps(e)}")
+    if u.get("processes_note"):
+        print(f"{'processes:':<13}{u['processes_note']}")
+    for p in sorted(pids):
+        q = table[p]
+        print(f"  pid {p:<7} {mb(q['rss']):>6}  {'in its cgroup' if in_group(q, u['id'], u) else 'no cgroup of its own'}"
+              f"  {q['cmd'][:90]}")
+    print(f"{'limits:':<13}{describe_limits(u)}")
+    print(f"{'autosleep:':<13}{describe_sleep(u)}")
+    if u["remove"]:
+        print(f"{'remove:':<13}{json.dumps(u['remove'])}")
+    print(f"{'manifest:':<13}{u['_src']}")
+    return 0
+
+
+# ── check ───────────────────────────────────────────────────────────────────
+
+def drift(units=None):
+    units = load() if units is None else units
+    pm = package_manager()
+    scope = SCOPE.get(HOST, (HOST,))
+    mine = [u for u in units if u.get("host", HOST) in scope]
+    out = {"host": HOST, "packages": [], "files": [], "processes": [], "unbounded": [], "missing": [],
+           "containers": [], "orphans": [u["id"] for u in mine if u.get("orphan")]}
+    claimed_pkgs = {p for u in mine for p in u["packages"]}
+    for name, when in sorted(installed_packages(pm).items()):
+        if name not in claimed_pkgs:
+            out["packages"].append({"name": name, "installed": time.strftime("%Y-%m-%d", time.localtime(when))
+                                    if when else "?"})
+    owned = package_files(pm) if WATCH.get(HOST) else set()
+    for p in watched_paths(HOST):
+        if ignored(p) or p in owned or claimed(mine, p):
+            continue
+        try:
+            t = os.lstat(p).st_mtime
+        except OSError:
+            continue
+        out["files"].append({"path": p, "changed": time.strftime("%Y-%m-%d", time.localtime(t))})
+    table = proc_table()
+    by_id = {u["id"]: u for u in mine}
+    taken = {pid: by_id[uid] for pid, uid in owners(mine, table).items()}
+    for pid, p in sorted(table.items()):
+        if pid == os.getpid() or pid in descendants(os.getpid(), table) or not in_scope(p, HOST):
+            continue
+        u = taken.get(pid)
+        if not u:
+            out["processes"].append({"pid": pid, "cmd": p["cmd"][:160], "memKB": p["rss"]})
+        elif u.get("limits") and not in_group(p, u["id"], u):
+            out["unbounded"].append({"unit": u["id"], "pid": pid, "cmd": p["cmd"][:100]})
+    for u in mine:
+        if u.get("host") == "powstation":
+            continue
+        if u["files"] and not expand_files(u) and not u["packages"] and not u["processes"]:
+            out["missing"].append(u["id"])
+    if "powstation" in scope:
+        for c in docker_containers() or []:
+            if not c["project"] and not container_unit(mine, c):
+                out["containers"].append({"name": c["name"], "state": c["state"], "image": c["image"][:40],
+                                          "created": c["created"][:10]})
+    return out
+
+
+def cmd_check(args):
+    d = drift()
+    n = sum(len(d[k]) for k in ("packages", "files", "processes", "containers"))
+    if "--json" in args:
+        print(json.dumps(d, indent=2))
+        return 1 if n else 0
+    print(f"{HOST}: {'no drift' if not n else f'{n} unregistered'} ({UNITS_DIR})")
+    sections = (("packages", "packages no unit lists", lambda x: f"{x['name']}  (installed {x['installed']})"),
+                ("files", "files outside every package and unit", lambda x: f"{x['path']}  ({x['changed']})"),
+                ("processes", "processes no unit claims", lambda x: f"{x['pid']:<7} {mb(x['memKB']):>6}  {x['cmd']}"),
+                ("containers", "containers with no compose project and no unit",
+                 lambda x: f"{x['name']}  {x['state']}  {x['image']}  ({x['created']})"),
+                ("unbounded", "a unit's processes outside its cgroup (powos units enforce)",
+                 lambda x: f"{x['unit']}: pid {x['pid']}  {x['cmd']}"),
+                ("missing", "units whose files are all gone (powos units unregister?)", str),
+                ("orphans", "orphans: registered, no clear owner - yours to decide", str))
+    for key, title, fmt in sections:
+        if d[key]:
+            print(f"\n{title} ({len(d[key])}):")
+            for x in d[key][:200]:
+                print(f"  {fmt(x)}")
+    if n:
+        print("\nEach one: register it (powos units register), or remove it; dependencies belong inside an app or a "
+              "container (capabilities.md, Units).")
+    return 1 if n else 0
+
+
+# ── remove ──────────────────────────────────────────────────────────────────
+
+def plan_remove(u, units):
+    others = [x for x in units if x["id"] != u["id"]]
+    shared_pkgs = {p for x in others for p in x["packages"]}
+    pm = package_manager()
+    owned = package_files(pm) if u["files"] else set()
+    keep = [os.path.expanduser(k) for k in u["remove"].get("keep", [])]
+    table = proc_table()
+    pids = sorted(unit_pids(u, table, owners(units, table)))
+    steps = []
+    for c in u["remove"].get("stop", []):
+        steps.append(("stop", c))
+    if pids and not u["remove"].get("stop"):
+        steps.append(("kill", pids))
+    pkgs = [p for p in u["packages"] if p not in shared_pkgs]
+    kept_pkgs = [p for p in u["packages"] if p in shared_pkgs]
+    if pkgs:
+        steps.append(("packages", remove_package_cmd(pm, pkgs)))
+    files, kept = [], []
+    magisk = {f"/data/adb/modules/{p}" for p in pkgs} if pm == "magisk" else set()
+    for f in sorted(set(expand_files(u))):
+        if any(claims(m, f) for m in magisk):
+            kept.append(f"{f} (Magisk removes the module at the next boot)")
+        elif any(claims(k, f) for k in keep) or f in owned or any(any(claims(g, f) for g in x["files"]) for x in others):
+            kept.append(f)
+        elif os.path.isdir(f) and not os.path.islink(f) and any(o.startswith(f + "/") for o in owned):
+            kept.append(f"{f} (holds package files)")
+        else:
+            files.append(f)
+    if files:
+        steps.append(("files", files))
+    for c in u["remove"].get("commands", []):
+        steps.append(("command", c))
+    steps.append(("manifest", u["_src"]))
+    return steps, kept + [f"package {p} (another unit lists it)" for p in kept_pkgs] + keep
+
+
+def cmd_remove(args):
+    ids = [a for a in args if not a.startswith("--")]
+    if not ids:
+        die("usage: powos units remove <id> [--dry-run] [--yes]")
+    units = load()
+    u = find(units, ids[0])
+    if not u:
+        die(f"no unit {ids[0]} on {HOST}")
+    steps, kept = plan_remove(u, units)
+    print(f"Removing {u['id']} ({u['purpose']}) - the plan:")
+    for i, (kind, what) in enumerate(steps, 1):
+        if kind == "kill":
+            print(f"  {i}. stop its processes: SIGTERM {' '.join(map(str, what))} (then SIGKILL after 5 s)")
+        elif kind in ("stop", "command"):
+            print(f"  {i}. run: {what}")
+        elif kind == "packages":
+            print(f"  {i}. uninstall: {' '.join(what)}")
+        elif kind == "files":
+            print(f"  {i}. delete {len(what)} file(s):")
+            for f in what:
+                print(f"       {f}")
+        elif kind == "manifest":
+            print(f"  {i}. forget the unit: {what}")
+    for k in kept:
+        print(f"  kept: {k}")
+    if "--dry-run" in args:
+        print("(dry run: nothing changed)")
+        return 0
+    if "--yes" not in args:
+        if not sys.stdin.isatty():
+            die("not removing without --yes (non-interactive)")
+        if input(f"Type {u['id']} to remove it: ").strip() != u["id"]:
+            die("not removed")
+    for kind, what in steps:
+        if kind == "kill":
+            for p in what:
+                try:
+                    os.kill(p, signal.SIGTERM)
+                except OSError:
+                    pass
+            time.sleep(5)
+            for p in what:
+                try:
+                    os.kill(p, signal.SIGKILL)
+                except OSError:
+                    pass
+        elif kind in ("stop", "command"):
+            subprocess.run(["/bin/sh", "-c", what], check=False)
+        elif kind == "packages":
+            subprocess.run(what, check=False)
+        elif kind == "files":
+            for f in what:
+                if os.path.isdir(f) and not os.path.islink(f):
+                    shutil.rmtree(f, ignore_errors=True)
+                else:
+                    try:
+                        os.remove(f)
+                    except OSError as e:
+                        print(f"  {f}: {e}", file=sys.stderr)
+        elif kind == "manifest" and os.path.exists(what):
+            os.remove(what)
+    print(f"removed {u['id']}")
+    return 0
+
+
+# ── limits: a cgroup per long-running unit ──────────────────────────────────
+
+_PC = None
+
+
+def container_module():
+    """powos-container: its hybrid cgroups (Android's v1 memcg/cpuctl/cpuset + v2 pids) are the phone's limits."""
+    global _PC
+    if _PC is None:
+        p = os.path.join(HERE, "powos-container")
+        loader = SourceFileLoader("powos_container", p)
+        m = module_from_spec(spec_from_loader("powos_container", loader))
+        loader.exec_module(m)
+        _PC = m
+    return _PC
+
+
+def limits_of(lim):
+    pc = container_module()
+    out = {}
+    if lim.get("memory"):
+        out["mem"] = pc.size(lim["memory"])
+        out["memsw"] = pc.size(lim["memory_swap"]) if lim.get("memory_swap") else -1
+    if lim.get("cpus"):
+        out["cpus"] = str(lim["cpus"])
+    if lim.get("cpuset"):
+        out["cpuset"] = str(lim["cpuset"])
+    if lim.get("pids"):
+        out["pids"] = int(lim["pids"])
+    return out
+
+
+def place(uid, pids, lim):
+    """Put pids into the unit's own cgroup with its limits. Returns what was enforced (or why nothing was).
+    The API powos-runtime and the supervisor use; fails closed only on a write to a controller that exists."""
+    if not lim:
+        return []
+    if sys.platform == "darwin":
+        return ["none: macOS has no cgroups"]
+    if HOST in ("phone", "phone-android") or os.path.isdir("/dev/memcg"):
+        pc = container_module()
+        done = pc.apply(group_name(uid), limits_of(lim), pid=pids[0]) if pids else []
+        for pid in pids[1:]:
+            pc.apply(group_name(uid), limits_of(lim), pid=pid)
+        return done
+    return place_v2(uid, pids, lim)
+
+
+def place_v2(uid, pids, lim):
+    base = "/sys/fs/cgroup/powos-units"
+    g = f"{base}/{uid}"
+    try:
+        os.makedirs(g, exist_ok=True)
+        ctl = rd(f"{base}/cgroup.controllers").split()
+        want = [c for c in ("memory", "cpu", "pids") if c in ctl]
+        with open(f"{base}/../cgroup.subtree_control", "w") as f:
+            f.write(" ".join(f"+{c}" for c in want))
+    except OSError as e:
+        return [f"none: no writable cgroup v2 ({e})"]
+    done = []
+    pc = container_module()
+    wr = [("memory.max", pc.size(lim["memory"])) if lim.get("memory") else None,
+          ("cpu.max", f"{int(float(lim['cpus']) * 100000)} 100000") if lim.get("cpus") else None,
+          ("pids.max", lim["pids"]) if lim.get("pids") else None]
+    for w in filter(None, wr):
+        try:
+            with open(f"{g}/{w[0]}", "w") as f:
+                f.write(str(w[1]))
+            done.append(f"{w[0]}={w[1]}")
+        except OSError:
+            pass
+    for pid in pids:
+        try:
+            with open(f"{g}/cgroup.procs", "w") as f:
+                f.write(str(pid))
+        except OSError:
+            pass
+    return done
+
+
+def cmd_enforce(args):
+    units = load()
+    table = proc_table()
+    todo = [find(units, a) for a in args] if args else units
+    if None in todo:
+        die(f"no such unit: {args}")
+    own = owners([u for u in units if u.get("host", HOST) in SCOPE.get(HOST, (HOST,))], table)
+    n = 0
+    for u in todo:
+        if not u.get("limits"):
+            continue
+        if u.get("cgroups"):  # it manages its own cgroups (powos-sleepd): reported by check, never moved here
+            continue
+        pids = sorted(p for p in unit_pids(u, table, own) if not in_group(table[p], u["id"], u))
+        if not pids:
+            continue
+        # Only the top of each tree: its children follow it on the next fork, the running ones are moved too.
+        try:
+            done = place(u["id"], pids, u["limits"])
+        except OSError as e:
+            print(f"  {u['id']}: {e}", file=sys.stderr)
+            continue
+        n += 1
+        print(f"  {u['id']}: {len(pids)} process(es) -> {group_name(u['id'])}: {', '.join(done) or 'nothing enforceable'}")
+    print(f"{n} unit(s) placed" if n else "every running unit with limits is in its cgroup")
+    return 0
+
+
+# ── baseline ────────────────────────────────────────────────────────────────
+
+def cmd_baseline(args):
+    ids = [a for a in args if not a.startswith("--")]
+    opts = {a: b for a, b in zip(args, args[1:]) if a.startswith("--")}
+    before = opts.get("--before")
+    if not ids or not before:
+        die("usage: powos units baseline <id> --before YYYY-MM-DD [--owner O] [--purpose P]")
+    for v in opts.values():
+        ids = [i for i in ids if i != v]
+    cut = time.mktime(time.strptime(before, "%Y-%m-%d"))
+    units = load()
+    pkgs = installed_packages(package_manager())
+    keep = sorted(n for n, t in pkgs.items() if not t or t < cut)
+    files = []
+    for p in watched_paths(HOST):
+        try:
+            old = os.lstat(p).st_mtime < cut
+        except OSError:
+            continue
+        if old and not ignored(p) and not claimed(units, p):
+            files.append(p)
+    procs = []
+    if shutil.which("systemctl") and HOST not in ("phone", "phone-android"):
+        out = run("systemctl", "list-units", "--type=service", "--state=running", "--no-legend", "--plain")
+        procs = [{"systemd": l.split()[0]} for l in out.splitlines() if l.strip()]
+        procs += [{"systemd": "init.scope"}, {"systemd": "user.slice"}]
+    u = {"id": ids[0], "name": opts.get("--name", ids[0]), "kind": "system", "host": HOST,
+         "owner": opts.get("--owner", "system:image"),
+         "purpose": opts.get("--purpose", f"what this host had before {before} (adopted by powos units baseline)"),
+         "packages": keep, "files": sorted(files), "processes": procs, "baseline": before,
+         "unbounded": "the host's own base system"}
+    register(u)
+    print(f"{len(keep)} package(s), {len(files)} file(s), {len(procs)} service(s) adopted; "
+          f"{len(pkgs) - len(keep)} later package(s) stay for check to show")
+    return 0
+
+
+# ── publish (the PowOS AI page) ─────────────────────────────────────────────
+
+ROW_KEYS = ("id", "name", "kind", "owner", "purpose", "status", "memKB", "cpuPct", "limits", "autosleep", "orphan",
+            "decide", "host")
+
+
+def check_counts(d):
+    return {k: len(d[k]) for k in ("packages", "files", "processes", "containers", "unbounded", "missing")}
+
+
+def overview(with_check=True):
+    """This host's units and its drift counts: what list --json --check prints and publish sends."""
+    rows = snapshot()
+    out = {"host": HOST, "at": int(time.time()), "units": rows}
+    if with_check:
+        out["check"] = check_counts(drift())
+    return out
+
+
+def cmd_publish(args):
+    """The rows for the PowOS AI page, one sync per host (the Mac's view carries PowStation's containers as host
+    "powstation"). --stdin: another host's `powos units list --json --check` (the Colima VM's), published from here."""
+    ov = json.load(sys.stdin) if "--stdin" in args else overview()
+    n = ov.get("check") or {}
+    by_host = {}
+    for r in ov["units"]:
+        row = {k: (r.get(k) or ("" if k not in ("memKB", "cpuPct", "orphan") else 0)) for k in ROW_KEYS}
+        row["purpose"], row["orphan"] = row["purpose"][:200], bool(row["orphan"])
+        by_host.setdefault(row["host"] or ov["host"], []).append(row)
+    by_host.setdefault(ov["host"], [])
+    code = 0
+    for host, rows in sorted(by_host.items()):
+        keys = ("containers",) if host == "powstation" else ("packages", "files", "processes", "unbounded")
+        counts = {k: n.get(k, 0) for k in keys}
+        drifted = any(counts.get(k) for k in ("packages", "files", "processes", "containers"))
+        rows.append({"id": "_check", "name": "check", "kind": "system", "owner": "", "host": host,
+                     "purpose": ", ".join(f"{v} {k}" for k, v in counts.items() if v) or "no drift",
+                     "status": "drift" if drifted else "clean", "memKB": 0, "cpuPct": 0, "limits": "",
+                     "autosleep": "", "orphan": False, "decide": ""})
+        code = sync_rows(host, rows) or code
+    return code
+
+
+def sync_rows(host, rows):
+    """One host's rows to the powos-agents module's `unit` table, through the work board's CLI."""
+    import base64
+    payload = json.dumps({"host": host, "units": rows}, separators=(",", ":"))
+    b64 = base64.b64encode(payload.encode()).decode()
+    if HOST in ("phone", "phone-android") and os.getuid() == 0:
+        # The snapshot needs root (every process's /proc); the board's writer is the PowOS user's CLI identity.
+        run_as = ["/usr/bin/setpriv", "--reuid=powos", "--regid=powos", "--init-groups", "/usr/bin/env", "-i",
+                  "PATH=/usr/bin:/usr/sbin", "HOME=/home/powos", "python3",
+                  "/usr/lib/powos/ai/agents/powos-agents-cli", "units", "sync", b64]
+        cmd = (["chroot", "/data/powos/root"] + run_as) if HOST == "phone-android" else run_as
+    else:
+        cli = os.environ.get("POWOS_AGENTS_CLI") or next(
+            (p for p in (os.path.join(HERE, "..", "ai", "agents", "powos-agents-cli"),
+                         "/usr/lib/powos/ai/agents/powos-agents-cli") if os.path.exists(p)), None)
+        if not cli:
+            die("no powos-agents-cli here")
+        cmd = [sys.executable, cli, "units", "sync", b64]
+    r = subprocess.run(cmd)
+    if r.returncode == 0:
+        print(f"published {len(rows) - 1} unit(s) of {host}")
+    return r.returncode
+
+
+# ── main ────────────────────────────────────────────────────────────────────
+
+def cmd_register(args):
+    if not args:
+        die("usage: powos units register <manifest.json|->")
+    src = sys.stdin.read() if args[0] == "-" else open(args[0]).read()
+    try:
+        u = json.loads(src)
+    except ValueError as e:
+        die(f"not JSON: {e}")
+    try:
+        register(u)
+    except (ValueError, OSError) as e:
+        die(str(e))
+    return 0
+
+
+def main(argv):
+    verb, rest = (argv[0], argv[1:]) if argv else ("list", [])
+    if verb.startswith("--") and verb not in ("--help", "-h"):
+        verb, rest = "list", argv
+    if verb in ("help", "--help", "-h"):
+        print(__doc__.strip())
+        return 0
+    if verb not in COMMANDS:
+        die(f"unknown: {verb} (powos units --help)")
+    return COMMANDS[verb](rest) or 0
+
+
+COMMANDS = {"list": cmd_list, "ls": cmd_list, "show": cmd_show, "check": cmd_check, "remove": cmd_remove,
+            "rm": cmd_remove, "register": cmd_register, "enforce": cmd_enforce, "baseline": cmd_baseline,
+            "publish": cmd_publish,
+            "unregister": lambda a: 0 if a and unregister(a[0]) else die(f"no unit {a[0] if a else '?'}")}
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except BrokenPipeError:
+        sys.exit(0)

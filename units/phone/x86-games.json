@@ -1,0 +1,18 @@
+{
+  "id": "x86-games",
+  "name": "x86 games (FEX, Steam)",
+  "kind": "package",
+  "owner": "agent:phone-proton",
+  "purpose": "x86 programs through FEX (Steam, Proton games): fex-emu + its config and binfmt rules, box64, Steam",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (FEX config) + pacman by the phone-proton work, 2026-10-15",
+  "packages": [
+    "fex-emu",
+    "box64",
+    "steam",
+    "fmt"
+  ],
+  "files": [
+    "/usr/share/fex-emu/Config.json",
+    "/usr/share/fex-emu/thunks.json"
+  ]
+}

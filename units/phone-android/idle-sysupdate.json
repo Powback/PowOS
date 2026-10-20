@@ -1,0 +1,24 @@
+{
+  "id": "idle-sysupdate",
+  "name": "Idle re-base (one-shot)",
+  "kind": "watcher",
+  "owner": "agent:manager",
+  "host": "phone-android",
+  "purpose": "one-shot armed by the manager: re-bases com.powos.app on its system copy when the user is away, with the app data backed up and restored",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (armed by the manager into /data/local/tmp)",
+  "files": [
+    "/data/powos/powos-idle-sysupdate.sh",
+    "/data/local/tmp/powos-idle-sysupdate.log",
+    "/data/local/tmp/powos-current.apk"
+  ],
+  "processes": [
+    {
+      "match": "powos-idle-sysupdate\\.sh"
+    }
+  ],
+  "limits": {
+    "memory": "128m",
+    "pids": 16
+  },
+  "autosleep": "never"
+}

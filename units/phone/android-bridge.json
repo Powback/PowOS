@@ -1,0 +1,21 @@
+{
+  "id": "android-bridge",
+  "name": "Android bridge daemons",
+  "kind": "watcher",
+  "owner": "system:andromarchy-rootfs",
+  "purpose": "Android's network, battery, clipboard and system services as the desktop's NetworkManager/UPower/portals (android-nm, android-upower, android-system-services, android-session-services)",
+  "installedBy": "the rootfs (session/first-boot.sh, 2026-10-13)",
+  "files": [
+    "/usr/local/bin/android-*"
+  ],
+  "processes": [
+    {
+      "match": "^python3 /usr/local/bin/android-(nm|upower|system-services|session-services)"
+    }
+  ],
+  "limits": {
+    "memory": "192m",
+    "pids": 64
+  },
+  "autosleep": "never"
+}

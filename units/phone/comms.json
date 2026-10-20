@@ -1,0 +1,11 @@
+{
+  "id": "comms",
+  "name": "Agent comms",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "powos comms: the agents' role mailboxes (daemonless MCP, runs inside each claude session)",
+  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "files": [
+    "/usr/lib/powos/ai/comms"
+  ]
+}

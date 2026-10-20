@@ -136,6 +136,36 @@ def apply_budget(budget):
         libc.syscall(IOPRIO_SET, 1, 0, prio)  # IOPRIO_WHO_PROCESS, this process
 
 
+def place_in_unit(m):
+    """As root, before exec: this process (the app's backend, native or sandbox) into its unit's own cgroup with hard
+    limits (lib/apps/powos-units place: the containers' hybrid cgroups on the phone), so it never runs unbounded.
+    The limits: its unit manifest's (units/<host>/<id>.json), else from the budget - memory twice memMB (the
+    supervisor's own restart at memMB comes first), 512 pids. Never blocks the start: a failure is a warning."""
+    if os.getuid() != 0:
+        return
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+    p = os.path.join(os.path.dirname(os.path.realpath(__file__)), "powos-units")
+    if not os.path.exists(p):
+        return
+    try:
+        loader = SourceFileLoader("powos_units", p)
+        units = module_from_spec(spec_from_loader("powos_units", loader))
+        loader.exec_module(units)
+        u = units.find(units.load(), m["id"])
+        lim = (u or {}).get("limits")
+        if not lim and not (u or {}).get("unbounded"):
+            b = budget_of(m)
+            lim = {"pids": int(b.get("pids", 512))}
+            if "memMB" in b:
+                lim["memory"] = f"{int(b['memMB']) * 2}m"
+        done = units.place(m["id"], [os.getpid()], lim)
+        print(f"powos-runtime: {m['id']} in its unit's cgroup: {', '.join(done) or 'no limits this kernel enforces'}",
+              file=sys.stderr, flush=True)
+    except Exception as e:  # noqa: BLE001 - the service starts regardless; check shows it outside its cgroup
+        print(f"powos-runtime: {m['id']}: not placed in its unit's cgroup ({e})", file=sys.stderr, flush=True)
+
+
 def drop_to(user):
     """As root: become the app's user (its groups too). Not root: must already be it."""
     pw = pwd.getpwnam(user)
@@ -308,6 +338,7 @@ def run(path, mode=None, dry=False):
         os.chmod(data, 0o700)
     if mode == "container":
         return run_container(m, data, argv, pw)
+    place_in_unit(m)
     apply_budget(budget_of(m))
     drop_to(user)
     env = environment(m, pw, data)
@@ -396,6 +427,10 @@ def run_container(m, data, argv, pw):
             die(f"{m['id']}: prepare step failed ({os.waitstatus_to_exitcode(st)}): {step}")
     a = container_argv(m, data, argv, env, pw)
     print(f"powos-runtime: {m['id']} container as {pw.pw_name}, data {data}", file=sys.stderr, flush=True)
+    # The container's unit (powos containers run registers it) says whose it is and why: the app's.
+    os.environ.setdefault("POWOS_UNIT_OWNER", f"app:{m['id']}")
+    os.environ.setdefault("POWOS_UNIT_PURPOSE", f"{m.get('name', m['id'])}'s backend, container mode: "
+                          + (m.get("description") or "")[:160])
     os.execv(a[0], a)
 
 

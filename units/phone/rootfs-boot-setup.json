@@ -1,0 +1,12 @@
+{
+  "id": "rootfs-boot-setup",
+  "name": "PowOS root at boot",
+  "kind": "system",
+  "owner": "system:powos-start",
+  "host": "phone",
+  "purpose": "what powos-start.sh sets up in PowOS's root at every boot: /dev, /proc, /sys bound in, private /tmp and /run, the X11 socket dirs, DNS (resolv.conf: Android's resolver, else the LAN's Pi-hole), FEX's binfmt rules",
+  "installedBy": "targets/android/rooted/powos-start.sh",
+  "edits": [
+    "/etc/resolv.conf"
+  ]
+}

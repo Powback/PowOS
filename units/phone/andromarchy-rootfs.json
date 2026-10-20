@@ -1,0 +1,25 @@
+{
+  "id": "andromarchy-rootfs",
+  "name": "Rootfs tools",
+  "kind": "system",
+  "owner": "system:andromarchy-rootfs",
+  "purpose": "the PowOS-on-Android rootfs's own tools: stand-ins for what Android lacks (systemctl, journalctl, udevadm, uwsm, pkexec), the no-root engine's shims kept aside, lotfix, yay, Brave",
+  "installedBy": "the rootfs (2026-10-13)",
+  "files": [
+    "/usr/local/bin/faked",
+    "/usr/local/bin/fakeroot",
+    "/usr/local/bin/journalctl",
+    "/usr/local/bin/systemctl",
+    "/usr/local/bin/udevadm",
+    "/usr/local/bin/uwsm",
+    "/usr/local/bin/pkexec",
+    "/usr/local/bin/omarchy-*",
+    "/usr/local/bin/andromarchy-*",
+    "/usr/local/bin/wtype",
+    "/usr/local/bin/yay",
+    "/usr/local/bin/sudo.noroot-engine",
+    "/usr/local/bin/bwrap.noroot-engine",
+    "/opt/lotfix",
+    "/opt/brave-origin-bin"
+  ]
+}

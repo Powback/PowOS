@@ -1346,12 +1346,22 @@ one, a test says so, with the reason, at the point of breakage:
 | Every verb `powos game` documents resolves to a real function | `test-game-facade.sh` |
 | One canonical game id across manifest / harness / `powos games` | `test-mods-harness.sh` |
 | Every `HACK:` marker in the tree has a row in the HACK registry | `test-hack-registry.sh` |
+| Everything a deploy script installs on a host is claimed by a unit in `units/<host>/` | `test-units-registry.py` |
 
 ## Workarounds: `HACK:` markers and the registry
 
 Mark every workaround `HACK:` at the spot, with why and the real fix. **Every `HACK:` is also listed in the
 registry, `docs/REMOTE-POWOS.md` §4, in the same commit that adds, moves or removes it** (`test-hack-registry.sh`
 fails otherwise). Cross-device channels (adb, ssh, root between hosts) and their replacement: `docs/REMOTE-POWOS.md`.
+
+## Host installs: units, and dependencies inside apps/containers
+
+Nothing is installed or left running on a host without a **unit** (`powos units`, `lib/apps/powos-units`): a
+manifest with owner, purpose, files/packages/processes, limits and how to remove it. **Prefer dependencies INSIDE an
+app or a container** (`backend.container.image`, `powos containers run`) over host installs. A host install needs its
+unit in `units/<host>/` in the same commit (`test-units-registry.py` fails a deploy script that installs anything no
+unit claims); `powos units check` flags what was installed by hand, `powos units remove <id> --dry-run` shows the way
+out. Details: `config/ai/context/capabilities.md` (Units).
 
 ## Shared checkouts: commit only your own paths (agents: READ THIS)
 

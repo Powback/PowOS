@@ -1,0 +1,22 @@
+{
+  "id": "adb-self",
+  "name": "adb to itself",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "host": "phone-android",
+  "purpose": "PowOS's adb key authorized on the phone and adbd on 127.0.0.1:5555 (persist.adb.tcp.port), so PowOS shows Android apps as windows (scrcpy to itself)",
+  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "edits": [
+    "/data/misc/adb/adb_keys"
+  ],
+  "props": {
+    "persist.adb.tcp.port": "5555",
+    "persist.powos.root": "1"
+  },
+  "remove": {
+    "commands": [
+      "sed -i \"\\|$(cat /data/powos/root/home/powos/.android/adbkey.pub)|d\" /data/misc/adb/adb_keys",
+      "setprop persist.adb.tcp.port ''"
+    ]
+  }
+}

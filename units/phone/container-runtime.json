@@ -1,0 +1,44 @@
+{
+  "id": "container-runtime",
+  "name": "Container runtime",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "podman (rootful: powos containers, hard limits in Android's cgroups via an OCI hook; rootless: distrobox) - the place dependencies go instead of the host",
+  "installedBy": "targets/android/rooted/powos-deploy.sh + lib/apps/powos-container (hooks, storage image on first use)",
+  "packages": [
+    "podman",
+    "distrobox",
+    "fuse-overlayfs"
+  ],
+  "files": [
+    "/usr/lib/powos/apps/powos-container",
+    "/usr/bin/powos-container",
+    "/usr/share/containers/oci/hooks.d/50-powos-limits-*.json",
+    "/etc/containers/containers.conf.d/50-powos-phone.conf",
+    "/etc/distrobox/distrobox.conf",
+    "/home/powos/.config/containers/storage.conf",
+    "/var/lib/containers/powos.img",
+    "/var/lib/containers/powos",
+    "/var/lib/containers/storage",
+    "/var/lib/containers/vfs",
+    "/var/lib/containers/cache",
+    "/var/lib/containers/sigstore",
+    "/var/lib/powos/containers/storage",
+    "/var/log/powos/containers.log",
+    "/var/lib/powos/containers"
+  ],
+  "processes": [
+    {
+      "match": "^/usr/bin/conmon "
+    },
+    {
+      "match": "^catatonit -P$"
+    }
+  ],
+  "unbounded": "conmon and the rootless pause process only; each container is a unit of its own with hard limits",
+  "remove": {
+    "keep": [
+      "/var/lib/containers/powos.img"
+    ]
+  }
+}

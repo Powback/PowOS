@@ -1,0 +1,18 @@
+{
+  "id": "widevine-l3",
+  "name": "Widevine L3 (Netflix)",
+  "kind": "system",
+  "owner": "user",
+  "host": "phone-android",
+  "purpose": "hides the L1 Widevine library at boot so Netflix plays (SD) on the unlocked phone (rooted.sh widevine-l3)",
+  "installedBy": "targets/android/rooted/rooted.sh widevine-l3",
+  "files": [
+    "/data/adb/post-fs-data.d/widevine-l3.sh",
+    "/data/adb/powos/empty-liboemcrypto.so"
+  ],
+  "remove": {
+    "commands": [
+      "sh /data/local/tmp/rooted.sh widevine-l3 remove 2>/dev/null || true"
+    ]
+  }
+}

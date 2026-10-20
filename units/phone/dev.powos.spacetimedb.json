@@ -1,0 +1,29 @@
+{
+  "id": "dev.powos.spacetimedb",
+  "name": "SpacetimeDB",
+  "kind": "service",
+  "owner": "system:powos-deploy",
+  "purpose": "the device's one SpacetimeDB server (127.0.0.1:3410): every PowOS app is a database on it, the agents' board too",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (our package of the official aarch64 binaries, targets/android/pkgs/spacetimedb-bin)",
+  "packages": [
+    "spacetimedb"
+  ],
+  "files": [
+    "/var/lib/powos/stdb"
+  ],
+  "processes": [
+    {
+      "match": "^/usr/bin/spacetimedb-standalone start"
+    }
+  ],
+  "limits": {
+    "memory": "640m",
+    "pids": 256
+  },
+  "autosleep": "never",
+  "remove": {
+    "keep": [
+      "/var/lib/powos/stdb"
+    ]
+  }
+}

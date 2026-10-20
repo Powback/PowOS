@@ -369,6 +369,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/pkgs/steam/steam:63` | -cef-disable-gpu-sandbox: Chromium's GPU sandbox only opens /dev/dri, the Adreno is KGSL. | A GPU sandbox policy that allows /dev/kgsl-3d0 (upstream). |
 | `targets/android/pkgs/steamos-manager-powerstation/PKGBUILD:20` | gamescope-session-ogui-steam comes from the image bundle, invisible to pacman. | The content step registers bundled RPMs as file-less pacman packages. |
 | `targets/android/recipes/mangohud.sh:1` | Arch's mangohud recipe needs libxnvctrl, which has no aarch64 build. | Arch Linux ARM packaging mangohud. |
+| `targets/android/rooted/powos-start.sh:142` | Boot-time `powos units enforce` waits a fixed 20 s for the supervisor and the app-data watcher, then puts them in their units' cgroups in one pass. | Each places itself in its unit's cgroup as it starts (as powos-runtime does for services); the pass goes. |
 | `targets/android/rooted/powos-rooted-session:41` | FD_MESA_DEBUG=noubwc: UBWC on KGSL corrupts Plasma's SVG textures. | Find and report the UBWC bug in Mesa's KGSL path. |
 | `targets/android/rootfs-in-container.sh:15` | Same pacman Landlock-sandbox workaround as the build container. | Same as build-pkgs.sh. |
 | `targets/android/session/Hyprland:4` | The session launcher is named Hyprland because Andromarchy's app hardcodes it. | The app reads the session command from the rootfs (our own app). |

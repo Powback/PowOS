@@ -411,7 +411,34 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
 - Never weaken SELinux (no setenforce, no broad allow rules). Don't route around a denial; tell the user.
 - Mark every workaround `HACK:` with why and the real fix, and add it to the HACK registry (`docs/REMOTE-POWOS.md` §4)
   in the same commit (`test/tier1/test-hack-registry.sh` checks). Never print secrets or tokens.
+- Nothing goes on a host without a unit (`powos units`, below): every package, file, watcher or daemon you install has
+  a manifest with owner, purpose, limits and removal, and dependencies go INSIDE an app or a container, not the host.
 - Recovery if the phone UI breaks: disable the Magisk module (above) and reboot.
+
+## Units: what is installed and running, on every host (`powos units`)
+The rule: nothing is installed or left running host-wide without an overview or a limit. A **unit** is anything that
+installs files or runs processes on a host - a PowOS app, a container, a system component, a package dependency, a
+watcher/daemon. Each has a manifest (`/etc/powos/units.d/<id>.json`; the phone's Android side `/data/powos/units.d`,
+the Magisk module's own `powos-units/`; the Mac `~/.config/powos/units.d`; a user's own installs
+`~/.config/powos/units.d`): id, owner (`app:<id>` | `agent:<role>` | `user` | `system:<installer>`), purpose, host,
+what it installs (`packages`, `files`, `edits` = shared files it changes, never deleted), what it runs (`processes`:
+`match` regex | `pidfile` + `tree` | `cgroup` | `container` | `systemd`), `limits` (memory, cpus, pids - or
+`unbounded` with the reason), `autosleep` (powos-sleep-common's key), and `remove` (stop, commands, keep).
+- `powos units` - this host's units: running / asleep / stopped / installed, owner, memory, CPU, limits; orphans
+  (found with no clear owner) marked for the user. `show <id>`, `check` (drift: packages, files, processes and
+  Docker containers no unit claims; a unit's process outside its cgroup), `remove <id> [--dry-run] [--yes]` (the plan
+  first), `register`, `unregister`, `enforce` (each running unit with limits into a cgroup of its own - the
+  containers' hybrid cgroups on the phone, cgroup v2 elsewhere; macOS has none), `baseline` (adopt a host's
+  pre-existing base once), `publish` (to the PowOS AI page's "installed & running" section, per host).
+- The install paths register by themselves: `powos app install` (the app; `remove` unregisters), `powos containers run`
+  (`container.<name>`, its cgroup and limits; `rm` / `--rm` unregister), the rooted deploy (`units/phone/`,
+  `units/phone-android/`), the system module (`units/system-module/`). A native/sandbox service is put in its unit's
+  cgroup by powos-runtime before it execs (limits: its manifest's, else twice its budget's memMB) - nothing long-running
+  is unbounded. On the phone: `sh /data/powos/powos-units.sh ...` for Android's side.
+- **Dependencies belong inside an app or a container, not on the host.** Need a tool or a library? Put it in the
+  app's container image (`backend.container.image`) or `powos containers run` it. A host install is the exception: it
+  needs a unit in `units/<host>/` in the same commit (`test/tier1/test-units-registry.py` fails a deploy script that
+  installs anything no unit claims), and `powos units check` shows anything installed by hand.
 
 ## Game modding (`powos mods`)
 - **Native v2 mod manager (primary path — see docs/MODDING-V2.md).** Per-game

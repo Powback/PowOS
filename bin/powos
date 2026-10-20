@@ -156,6 +156,7 @@ Layers & rollback:
   rollback reset      Clear rollback flags
 
 Packages, containers & build:
+  units               What is installed/running here: owner, purpose, status, limits (check/remove/enforce)
   containers          List containers and images
   containers run      Run a container with hard limits (--memory/--cpus/--pids-limit; phone too)
   containers ps       Containers with their limits; exec/limits/check: see containers --help
@@ -3110,6 +3111,11 @@ case "${1:-}" in
         # Unified sleep: everything that sleeps, of every kind (lib/apps/powos-sleep; `powos sleep --help`).
         shift
         exec python3 "$POWOS_LIB/apps/powos-sleep" "$@"
+        ;;
+    units|unit)
+        # Everything installed or running on this host, with owner, purpose, limits and removal (lib/apps/powos-units).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-units" "$@"
         ;;
     comms)
         shift

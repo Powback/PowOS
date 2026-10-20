@@ -17,6 +17,8 @@ install -m 755 $T/powos-run.sh /data/powos/powos-run.sh
 # runner, which refuses without it. Never `pm uninstall-system-updates com.powos.app` by hand: it wipes the app's data.
 install -m 755 $T/powos-appdata.sh /data/powos/powos-appdata.sh
 install -m 755 $T/powos-idle-sysupdate.sh /data/powos/powos-idle-sysupdate.sh
+# `powos units` for Android's side (Magisk, /data/powos, /data/local/tmp), PowOS's python run from there.
+install -m 755 $T/powos-units.sh /data/powos/powos-units.sh
 install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
 install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
 install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
@@ -56,6 +58,7 @@ install -Dm 644 $T/powos-plasma/breezerc $R/etc/xdg/breezerc
 printf '[KSplash]\nEngine=none\nTheme=None\n' > $R/etc/xdg/ksplashrc
 rm -rf $T/powos-plasma
 # PowOS's desktop widgets, as the image installs them (Containerfile: desktop/plasmoid -> /usr/share/plasma/plasmoids).
+# powos-units: /data/powos/root/usr/share/plasma/plasmoids/com.powos.*
 cp -a $T/powos-plasmoids/. $R/usr/share/plasma/plasmoids/
 rm -rf $T/powos-plasmoids
 # FEX's config (as the fex-emu package installs it): RootFS + thunks, GPU on, ALSA off (see pkgs/fex-emu/PKGBUILD).
@@ -63,6 +66,7 @@ install -Dm644 $T/fex-Config.json $R/usr/share/fex-emu/Config.json
 install -Dm644 $T/fex-thunks.json $R/usr/share/fex-emu/thunks.json
 rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
+  $T/powos-units.sh \
   $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task
 
 # The user: powos, as on every PowOS (password powos, sudo through wheel). Its uid is the PowOS app's Android uid:
@@ -170,6 +174,7 @@ chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos
 # from powos-start.sh (at boot, and now); its data and settings are the user's, under /var/lib/powos.
 A=$T/powos-apps
 if [ -d $A ]; then
+  # powos-units: pkg:spacetimedb
   for p in $A/spacetimedb-*.pkg.tar.*; do
     [ -e "$p" ] || continue
     # --ask 4: the patched build replaces spacetimedb-bin (pacman's "remove the conflicting package?" answered yes).
@@ -180,17 +185,18 @@ if [ -d $A ]; then
   mkdir -p $L/services $L/registry
   # powos-container: containers with hard limits in Android's cgroups (docs/PHONE-KERNEL-CONTAINERS.md section 12;
   # `powos containers run`, the runtime's container mode). It installs its OCI hooks itself on first use.
-  for f in powos-runtime powos-supervisor powos-app powos-container; do install -m 755 $A/$f $L/$f; ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
+  # powos-units: /data/powos/root/usr/lib/powos/apps/powos-runtime /data/powos/root/usr/lib/powos/apps/powos-supervisor /data/powos/root/usr/lib/powos/apps/powos-app /data/powos/root/usr/lib/powos/apps/powos-container /data/powos/root/usr/lib/powos/apps/powos-units /data/powos/root/usr/bin/powos-runtime /data/powos/root/usr/bin/powos-supervisor /data/powos/root/usr/bin/powos-app /data/powos/root/usr/bin/powos-container /data/powos/root/usr/bin/powos-units
+  for f in powos-runtime powos-supervisor powos-app powos-container powos-units; do install -m 755 $A/$f $L/$f; ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
   # powos-container's autosleep (section 13) and the never-sleep list + manifest key every sleeper shares: modules,
-  # loaded from next to powos-container.
+  # loaded from next to powos-container. Their unit manifests come with the rest (units/phone, below).
   for f in powos-autosleep powos-sleep-common; do install -m 755 $A/$f $L/$f; done
   # Unified sleep (docs/UNIFIED-SLEEP.md): `powos sleep`, the system-tier sleeper (powos-start.sh starts it) and the
   # session's GUI watcher with its KWin script (powos-rooted-session starts it).
   for f in powos-sleep powos-sleepd powos-sleep-gui; do install -m 755 $A/$f $L/$f; done
+  # powos-units: /data/powos/root/usr/bin/powos-sleepd /data/powos/root/usr/bin/powos-sleep-gui
   for f in powos-sleepd powos-sleep-gui; do ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
   rm -rf $L/sleep && cp -r $A/sleep $L/sleep && chmod -R a+rX $L/sleep
-  # What each of these adds to the system, for `powos units` (the unit manifests: owner, files, processes, limits, removal).
-  mkdir -p $R/etc/powos/units.d && install -m 644 $A/units.d/*.json $R/etc/powos/units.d/
+  # Their unit manifests come with the rest (units/phone, below).
   install -m 644 $A/services/*.json $L/services/
   # `powos app new`'s templates (lib/apps/templates).
   if [ -d $A/templates ]; then rm -rf $L/templates && cp -r $A/templates $L/templates && chmod -R a+rX $L/templates; fi
@@ -201,6 +207,21 @@ if [ -d $A ]; then
   for d in /var/lib/powos/runtime /var/lib/powos/stdb /var/lib/powos/sleep; do mkdir -p $R$d && chown $U:$U $R$d; done
   mkdir -p $R/var/log/powos
   rm -rf $A
+fi
+# The units (lib/apps/powos-units): every file and process this deploy put on the phone, registered with its owner,
+# purpose, limits and how to remove it - PowOS's side in /etc/powos/units.d, Android's in /data/powos/units.d. Then the
+# running ones with limits go into cgroups of their own (the containers' hybrid cgroups). `powos units check` flags
+# whatever has no unit (test/tier1/test-units-registry.sh: a deploy that installs without one fails).
+U=$T/powos-units
+if [ -d $U ]; then
+  mkdir -p $R/etc/powos/units.d /data/powos/units.d
+  install -m 644 $U/phone/*.json $R/etc/powos/units.d/
+  install -m 644 $U/phone-android/*.json /data/powos/units.d/
+  rm -rf $U
+  chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin python3 /usr/lib/powos/apps/powos-units enforce || true
+  sh /data/powos/powos-units.sh enforce || true
+  chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin python3 /usr/lib/powos/apps/powos-units publish || true
+  sh /data/powos/powos-units.sh publish || true
 fi
 resetprop -p persist.powos.root 1
 echo "deployed (persist.powos.root=$(getprop persist.powos.root))"

@@ -109,6 +109,9 @@ cp "$APK" "$M/system/priv-app/PowOS/PowOS.apk"
 } > "$M/system/etc/permissions/privapp-permissions-com.powos.app.xml"
 fi
 cp "$HERE/module/post-fs-data.sh" "$HERE/module/service.sh" "$HERE/module/load-kernel-modules.sh" "$M/"
+# What the module installs and runs, as units (lib/apps/powos-units: `powos units` on the phone's Android side reads
+# /data/adb/modules/*/powos-units/*.json): the module registers itself, and goes with itself.
+mkdir -p "$M/powos-units" && cp "$HERE/../../../units/system-module/"*.json "$M/powos-units/"
 # The containers kernel's nftables modules (kernel/build-containers-kernel.sh's out/modules), loaded at boot by
 # load-kernel-modules.sh; refused cleanly by any other kernel. Not built: the module just doesn't carry them.
 KM=$HERE/../kernel/out/modules
