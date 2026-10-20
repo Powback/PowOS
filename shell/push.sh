@@ -28,7 +28,7 @@ if [ "${1:-}" = "--vpn" ]; then
   addr=${POWOS_PHONE_ADDR:-10.13.13.7:5555}
   # The gate here, on the Mac (docker and git are here, not in the adb container); the phone's overrides aren't
   # reachable from here, so it checks the committed shell + the files pushed.
-  if [ -z "${POWOS_GATE_DONE:-}" ]; then
+  if [ -z "${POWOS_GATE_DONE:-}" ] && [[ " $* " != *" --reset "* ]] && [[ " $* " != *" --errors "* ]]; then
     gf=(); for a in "$@"; do case "$a" in --*) ;; *) [ -f "$a" ] && gf+=("$a") ;; esac; done
     if [ ${#gf[@]} -gt 0 ] && ! dev/gate.sh "${gf[@]}"; then
       [ -n "$force" ] || { echo "push.sh: refused - the gate failed (above). Fix it, or --force to push anyway." >&2; exit 1; }
