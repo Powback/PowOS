@@ -482,7 +482,7 @@ private object HotReload {
     private const val PUSH_HOLD_MS = 30_000L
     private var holding = false
     private val held = linkedMapOf<String, File>()
-    private val release =
+    private val release: Runnable =
         Runnable {
             main.removeCallbacks(releaseLater)
             holding = false
@@ -492,7 +492,7 @@ private object HotReload {
             overrides?.let { root -> files.forEach { changed(it, root, "") } }
         }
 
-    private val releaseLater = Runnable { release.run() }
+    private val releaseLater: Runnable = Runnable { release.run() }
 
     private const val TAG = "PowosShell"
 }
