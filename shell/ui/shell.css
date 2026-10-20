@@ -1579,3 +1579,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   height: 100%;
   overflow: hidden;
 }
+
+/* A theme picked (app.tsx applyTheme): its colors fade in over 200 ms - colors and fills only, for a moment. */
+html.theme-fade, html.theme-fade * {
+  transition: color 200ms ease, background-color 200ms ease, border-color 200ms ease, fill 200ms ease, stroke 200ms ease !important;
+}

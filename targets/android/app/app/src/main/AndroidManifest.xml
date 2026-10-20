@@ -86,12 +86,14 @@
 
         <!-- The launcher: a web UI (shell/, see shell/DESIGN.md), the home screen (through .HomeShell) and its own app
              entry. Its own task (taskAffinity): sharing the desktop's, each singleTask switch to the desktop finished
-             it. The page lays itself out around the keyboard (adjustNothing). -->
+             it. The page lays itself out around the keyboard (adjustNothing). resourcesUnused: picking a theme sets the
+             system palette (SystemTheme), an overlay change - asset paths - that relaunched home, and the page with it,
+             on every pick; the page uses no Android resources, it recolors itself (theme.changed). -->
         <activity
             android:name=".shell.ShellActivity"
             android:label="PowOS Launcher"
             android:taskAffinity="com.powos.app.shell"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|resourcesUnused"
             android:exported="true"
             android:launchMode="singleTask"
             android:resizeableActivity="true"

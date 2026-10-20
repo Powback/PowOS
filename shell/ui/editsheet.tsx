@@ -46,6 +46,11 @@ function Swatch({ theme }: { theme: ThemeChoice }) {
       style={{ background: c.background, color: c.foreground }}
       onClick={() => {
         picked.value = theme.name;
+        try {
+          localStorage.setItem(POP_KEY, String(Date.now()));
+        } catch {
+          // Only the fallback above needs it.
+        }
         powos.theme.pick(theme.name);
       }}
     >
@@ -61,6 +66,26 @@ function Swatch({ theme }: { theme: ThemeChoice }) {
 
 /** The theme popover (the bar's "theme"): open or not. */
 const themesOpen = signal(false);
+
+/**
+ * A theme picked moments ago, and the page loaded anew since (an older app relaunched home on every pick - the system
+ * palette's overlay): edit mode and the popover as they were, so trying several themes goes on where it was.
+ */
+const POP_KEY = "powos.themePop";
+let reopen = false;
+try {
+  // Home's page only (every page loads this module).
+  if (!new URLSearchParams(location.search).get("mode")) {
+    const at = Number(localStorage.getItem(POP_KEY));
+    localStorage.removeItem(POP_KEY);
+    if (at && Date.now() - at < 15000) {
+      reopen = true;
+      editing.value = true;
+    }
+  }
+} catch {
+  // No local storage: nothing to restore.
+}
 
 /**
  * What the "+ widget" picker offers besides Android's widgets (ui/appwidget.tsx AppWidgetPicker heads its list with
@@ -116,7 +141,8 @@ export function EditSheet() {
   useEffect(() => {
     if (!open) return;
     // Fresh each time it opens: themes download and get added, the agent can change.
-    themesOpen.value = false;
+    themesOpen.value = reopen;
+    reopen = false;
     powos.theme.list().then((l) => (themes.value = l));
     powos.theme.get().then((t) => (picked.value = t.name));
     powos.agents.default().then((a) => (agent.value = a));
