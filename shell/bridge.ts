@@ -1,5 +1,6 @@
 /**
- * The host (types.ts Bridge): window.powos when a host sets it, the phone's WebView (window.PowosHost), or - in a
+ * The host (types.ts Bridge): window.powos when a host sets it, a native host's window.PowosHost (the phone's WebView,
+ * or the desktop's powos-shell over QWebChannel - one contract, sources/powos-shell/src/bridge.cpp), or - in a
  * desktop browser, for working on the shell - a mock with sample apps, a sample home and widget trees captured from
  * the phone, so the shell still runs.
  */
@@ -14,6 +15,7 @@ import type {
   Bridge,
   Cell,
   Chat,
+  DesktopWindow,
   Home,
   HomeItem,
   NotificationList,
@@ -46,10 +48,11 @@ class Events {
 }
 
 /**
- * The phone's WebView (ShellBridge.kt): one native entry, PowosHost.call(id, method, argsJson), answered through
- * window.__powosHost.resolve / reject; events arrive through window.__powosHost.emit.
+ * A native host - the phone's WebView (ShellBridge.kt) or the desktop's powos-shell (bridge.cpp): one native entry,
+ * PowosHost.call(id, method, argsJson), answered through window.__powosHost.resolve / reject; events arrive through
+ * window.__powosHost.emit. An area a host doesn't have rejects ("no such call" / "unsupported").
  */
-function android(host: NonNullable<Window["PowosHost"]>): Bridge {
+function native(host: NonNullable<Window["PowosHost"]>): Bridge {
   const pending = new Map<number, [(v: any) => void, (e: Error) => void]>();
   const events = new Events();
   let next = 1;
@@ -71,7 +74,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       host.call(id, method, JSON.stringify(args));
     });
   return {
-    host: "android",
+    host: host.name ?? "android",
     apps: {
       list: () => call<App[]>("apps.list"),
       launch: (key) => call("apps.launch", key),
@@ -173,6 +176,12 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       expand: () => call("shade.expand"),
       peekHeight: (px) => call("shade.peekHeight", px),
     },
+    windows: {
+      list: () => call<DesktopWindow[]>("windows.list"),
+      activate: (id) => call<boolean>("windows.activate", id),
+      minimize: (id) => call<boolean>("windows.minimize", id),
+    },
+    panel: { height: (px) => call("panel.height", px) },
     tasks: {
       list: () => call<RecentTask[]>("tasks.list"),
       open: (id, from) => call<boolean>("tasks.open", id, from ?? null),
@@ -687,6 +696,8 @@ function mock(): Bridge {
       expand: async () => console.log("[mock] shade expanded"),
       peekHeight: async (px) => console.log("[mock] banner height", px),
     },
+    windows: mockWindows(events, icon),
+    panel: { height: async (px) => console.log("[mock] panel height", px) },
     tasks: mockTasks(icon, hue),
     recents: {
       slot: async () => {},
@@ -987,6 +998,47 @@ const terminalTrees: Record<string, unknown> = {
 /**
  * Recent tasks for the mock: a few apps, each "snapshot" a drawing of a screen in its color; removing one removes it.
  */
+/** The desktop's windows in a browser: a few, one active; activating / minimizing them as KWin would. */
+function mockWindows(events: Events, icon: (name: string) => string): Bridge["windows"] {
+  const w = (id: string, title: string, app: string, appName: string, active = false, minimized = false): DesktopWindow => ({
+    id,
+    title,
+    app,
+    appName,
+    icon: icon(appName),
+    active,
+    minimized,
+  });
+  const list = [
+    w("w1", "~/Projects/PowOS : bash - Konsole", "org.kde.konsole", "Konsole", true),
+    w("w2", "PowOS - Dolphin", "org.kde.dolphin", "Dolphin"),
+    w("w3", "DESKTOP-WEB-SHELL.md - Kate", "org.kde.kate", "Kate"),
+    w("w4", "Steam", "steam", "Steam", false, true),
+  ];
+  const changed = () => events.emit("windows.changed", structuredClone(list));
+  const find = (id: string) => list.find((x) => x.id === id);
+  return {
+    list: async () => structuredClone(list),
+    activate: async (id) => {
+      const target = find(id);
+      if (!target) return false;
+      for (const x of list) x.active = x === target;
+      target.minimized = false;
+      changed();
+      return true;
+    },
+    minimize: async (id) => {
+      const target = find(id);
+      if (!target) return false;
+      target.minimized = !target.minimized;
+      target.active = !target.minimized;
+      if (target.minimized) for (const x of list) if (x !== target) x.active = false;
+      changed();
+      return true;
+    },
+  };
+}
+
 function mockTasks(icon: (name: string) => string, hue: (name: string) => number): Bridge["tasks"] {
   const shot = (name: string) =>
     "data:image/svg+xml," +
@@ -1125,7 +1177,7 @@ function mockTerm(events: Events): Bridge["term"] {
   };
 }
 
-export const powos: Bridge = window.powos ?? (window.PowosHost ? android(window.PowosHost) : mock());
+export const powos: Bridge = window.powos ?? (window.PowosHost ? native(window.PowosHost) : mock());
 
 /**
  * The mock's agents (as the design's §1.3 sketch): the manager on the phone, a coder on the Mac with two subagents,

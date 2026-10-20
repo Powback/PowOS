@@ -39,7 +39,7 @@ applyTheme(await powos.theme.get().catch(() => null));
 /**
  * Which screen this page is: the host says (index.html?mode=) - home (its switcher is a layer of it, ui/recents.tsx),
  * or a slot's (aod: screen-off; assist: PowOS AI over an app; shade: the notification shade; lock: the lock face;
- * recents: the switcher alone, when the desktop is home).
+ * recents: the switcher alone, when the desktop is home; panel: the desktop's taskbar, from powos-shell).
  */
 const mode = new URLSearchParams(location.search).get("mode");
 document.documentElement.dataset.mode = mode ?? "home";
@@ -54,6 +54,10 @@ if (mode === "aod") {
 } else if (mode === "shade") {
   // The system's shade (the native shade host's window): the notification panel alone.
   render(<Shade />, document.body);
+} else if (mode === "panel") {
+  // The desktop's panel (powos-shell: a layer surface per screen, docs/DESKTOP-WEB-SHELL.md): the bar alone.
+  const { Panel } = await import("./ui/panel.tsx");
+  render(<Panel />, document.body);
 } else if (mode === "gate-test") {
   // Tests only (test/gate-test.tsx; in the APK, so a rollback has it to fall back to): the page a test of the gate,
   // the watchdog and the rollback breaks instead of a live one. Imported here alone: a broken one breaks nothing else.

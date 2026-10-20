@@ -183,6 +183,21 @@ export interface RecentTask {
   snapshot: string;
 }
 /** [available]: the launcher may read them (it has notification access). */
+/**
+ * A window on the desktop (PowOS's desktop host: KWin's window list through libtaskmanager). [id] is the host's
+ * (KWin's window uuid); [icon] a URL the host serves.
+ */
+export interface DesktopWindow {
+  id: string;
+  title: string;
+  /** Its app id (the .desktop name: "org.kde.konsole"), "" when unknown. */
+  app: string;
+  appName: string;
+  icon: string;
+  active: boolean;
+  minimized: boolean;
+}
+
 export interface NotificationList {
   available: boolean;
   items: PhoneNotification[];
@@ -450,6 +465,25 @@ export interface Bridge {
     /** The banner's bottom edge, CSS px from the top of the window. */
     peekHeight(px: number): Promise<void>;
   };
+  /**
+   * The desktop's windows (PowOS's desktop host only; the phone rejects these): every window, ungrouped, in the
+   * taskbar's order; "windows.changed" (DesktopWindow[]) brings the whole list again on any change.
+   */
+  windows: {
+    list(): Promise<DesktopWindow[]>;
+    /** Raises and focuses it (a minimized one comes back); false: no such window. */
+    activate(id: string): Promise<boolean>;
+    /** Minimizes it, or brings a minimized one back. */
+    minimize(id: string): Promise<boolean>;
+  };
+  /**
+   * The desktop panel's own surface (index.html?mode=panel, a layer surface along the screen's bottom edge): [px]
+   * tall while something opens above the bar (the launcher), the bar alone again with 0. The space kept free of
+   * maximized windows stays the bar's.
+   */
+  panel: {
+    height(px: number): Promise<void>;
+  };
   /** Android's recent tasks (the host is the recents provider): newest first; switching to one; removing one. */
   tasks: {
     list(): Promise<RecentTask[]>;
@@ -546,7 +580,7 @@ export interface Bridge {
   };
   /**
    * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
-   * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
+   * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "windows.changed" (DesktopWindow[]), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
 }
@@ -599,7 +633,8 @@ export interface OwlRoot extends OwlNode {
 declare global {
   interface Window {
     powos?: Bridge;
-    PowosHost?: { call(id: number, method: string, args: string): void };
+    /** [name]: which host ("powos": the desktop's powos-shell; none: the phone's WebView, "android"). */
+    PowosHost?: { name?: string; call(id: number, method: string, args: string): void };
     __powosHost?: {
       resolve(id: number, v: unknown): void;
       reject(id: number, m: string): void;

@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Evaluate JS in powos-shell's panel page over DevTools (QTWEBENGINE_REMOTE_DEBUGGING=9222), standard library only:
+the nested bench (dev/nested.sh) has no node or websocket module.
+
+    cdp-eval.py 'document.querySelectorAll(".panel-task").length'
+    cdp-eval.py 'document.querySelector(".panel-task:not(.active)").click()'
+
+Awaits a promise result; prints the value as JSON. PORT env: the DevTools port (9222).
+"""
+import base64
+import json
+import os
+import socket
+import struct
+import sys
+import urllib.request
+
+port = int(os.environ.get("PORT", "9222"))
+pages = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json"))
+page = next(p for p in pages if p.get("type") == "page" and p["url"].startswith("powos://"))
+path = page["webSocketDebuggerUrl"].split(str(port), 1)[1]
+
+sock = socket.create_connection(("127.0.0.1", port))
+key = base64.b64encode(os.urandom(16)).decode()
+sock.sendall(
+    f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+    f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode()
+)
+buf = b""
+while b"\r\n\r\n" not in buf:
+    buf += sock.recv(4096)
+rest = buf.split(b"\r\n\r\n", 1)[1]
+
+
+def send(obj):
+    data = json.dumps(obj).encode()
+    mask = os.urandom(4)
+    n = len(data)
+    head = bytes([0x81]) + (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack(">H", n) if n < 65536
+                            else bytes([0x80 | 127]) + struct.pack(">Q", n))
+    sock.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+
+
+def read_exact(n):
+    global rest
+    while len(rest) < n:
+        rest += sock.recv(65536)
+    out, rest = rest[:n], rest[n:]
+    return out
+
+
+def recv():
+    b1, b2 = read_exact(2)
+    n = b2 & 0x7F
+    if n == 126:
+        n = struct.unpack(">H", read_exact(2))[0]
+    elif n == 127:
+        n = struct.unpack(">Q", read_exact(8))[0]
+    return json.loads(read_exact(n))
+
+
+send({"id": 1, "method": "Runtime.evaluate",
+      "params": {"expression": sys.argv[1], "awaitPromise": True, "returnByValue": True}})
+while True:
+    msg = recv()
+    if msg.get("id") == 1:
+        res = msg["result"]
+        if "exceptionDetails" in res:
+            print(json.dumps(res["exceptionDetails"].get("exception", res["exceptionDetails"])), file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(res["result"].get("value")))
+        break

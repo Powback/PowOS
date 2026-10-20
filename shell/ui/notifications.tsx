@@ -84,7 +84,8 @@ function Reply({ n, index }: { n: PhoneNotification; index: number }) {
   );
 }
 powos.on("notifications.changed", (l: NotificationList) => (list.value = l));
-powos.notifications.list().then((l) => (list.value = l));
+// A host without notifications yet (the desktop's powos-shell) rejects: an empty list, not an uncaught error.
+powos.notifications.list().then((l) => (list.value = l), () => {});
 
 /** Slid this far sideways (of its width), or flicked, a card is dismissed. */
 const DISMISS = 0.35;

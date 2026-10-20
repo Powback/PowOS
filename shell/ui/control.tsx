@@ -24,7 +24,8 @@ export const quick = signal<QuickState>({
   volume: { value: 0.5, ringer: 2 },
 });
 powos.on("qs.changed", (q: QuickState) => (quick.value = { ...q }));
-powos.qs.state().then((q) => (quick.value = q));
+// A host without quick settings (the desktop's powos-shell, for now) rejects: no state, not an uncaught error.
+powos.qs.state().then((q) => (quick.value = q), () => {});
 
 /** PowOS's own tile, not one of the phone's: Remote input (ui/remote.tsx). */
 const REMOTE_ID = "powos.remote";

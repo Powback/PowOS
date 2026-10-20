@@ -1,0 +1,16 @@
+# The nested-KWin test bench for powos-shell (sources/powos-shell/dev/nested.sh): Fedora 44 with Plasma's build
+# deps and a kwin_wayland to run the panel against, headless (Xvfb + kwin_wayland --x11-display --windowed). For a
+# machine with no KVM (the Mac): not a VM - the panel's surface, exclusive zone and task list are real KWin, the
+# session around it isn't (no plasmashell, no logind seat).
+FROM fedora:44
+RUN dnf -y install --setopt=install_weak_deps=False \
+      gcc-c++ cmake ninja-build extra-cmake-modules \
+      qt6-qtbase-devel qt6-qtwebengine-devel qt6-qtwebchannel-devel qt6-qtwayland-devel \
+      layer-shell-qt-devel plasma-workspace-devel kf6-kitemmodels-devel \
+      kf6-kservice-devel kf6-kio-devel kf6-kwindowsystem-devel kf6-kconfig-devel kf6-kcoreaddons-devel \
+      kwin-wayland xorg-x11-server-Xvfb xwd ImageMagick dbus-daemon dbus-tools \
+      mesa-dri-drivers mesa-libEGL breeze-icon-theme \
+      kwrite konsole qt6-qtwayland procps-ng libcap xdotool \
+    && dnf clean all \
+    # kwin_wayland carries cap_sys_nice as a file capability: outside a container's bounding set, exec is EPERM.
+    && setcap -r /usr/bin/kwin_wayland

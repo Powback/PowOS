@@ -1,7 +1,8 @@
 # The web shell as the PowOS desktop shell
 
-Status: research, 2026-10-19. Nothing here is built yet. This is phase 7 of `shell/DESIGN.md` ("the same `shell/`
-as the desktop shell under KWin, replacing plasmashell"), worked out far enough to start.
+Status: research, 2026-10-19; **phase 0 built 2026-10-20** (`sources/powos-shell/`, `shell/ui/panel.tsx`; see "Phase 0:
+what runs" at the end). This is phase 7 of `shell/DESIGN.md` ("the same `shell/` as the desktop shell under KWin,
+replacing plasmashell"), worked out far enough to start.
 
 Goal: the PowOS desktop's panel/taskbar, launcher, home with widgets, notifications, system tray, quick settings,
 OSDs, lock-screen face and window overview are the web shell (`shell/`, Preact + TypeScript, hot-reloaded), the
@@ -340,3 +341,21 @@ sources). About 600 lines of C++:
 5. Try it in a VM (`docs/DUAL-BOOT-VM.md` / the Tier-C VM), never on a running workstation session first.
    Success: the panel reserves space, maximized windows stop above it, clicking a task activates or minimizes it,
    and saving `ui/panel.tsx` in the override folder redraws the panel in place.
+
+### Phase 0: what runs (2026-10-20)
+
+`sources/powos-shell/` (CMake; built in the image by the Containerfile's `powos-shell-builder` stage, shipped but not
+started) and `shell/ui/panel.tsx` (`index.html?mode=panel`). Tested in a nested KWin 6.7 (X11-windowed, Xvfb, llvmpipe)
+in a Fedora 44 container - `sources/powos-shell/dev/nested.sh`, because this Mac has no KVM for the VM. There:
+
+- the panel is a layer surface along the bottom (top layer, exclusive zone 48): a maximized KWrite stops at y=752 of 800;
+- the window list is live over `org_kde_plasma_window_management` (granted by `org.powos.shell.desktop`, the real KWin
+  check): clicking a task activates it, clicking the active one minimizes it, again restores it;
+- the launcher button grows the surface to 520 px (`panel.height`), lists KSycoca's apps with theme icons on
+  `powos://icon/`, and starts one through `KIO::ApplicationLauncherJob`;
+- saving `ui/panel.tsx` into `~/.config/powos/shell/` reloads the panel in place (`files.changed`);
+- first paint 0.6 s after navigation; RSS 550 MB host + 280 MB renderer + 2x65 MB zygotes, under software GL.
+
+Not tested yet: a real Plasma session next to plasmashell (its own panel removed), a VM boot of the image, multiple
+screens, real GPU numbers. One `HACK:` (all of the process's windows are layer surfaces, `src/main.cpp`).
+
