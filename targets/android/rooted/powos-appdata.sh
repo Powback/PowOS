@@ -34,6 +34,13 @@ B=/data/powos/backup
 LB=/data/powos/root/var/backups/powos-app
 LOG=/data/powos/appdata.log
 KEEP_FULL=5 KEEP_LIGHT=48
+# Android's own tools, by path: Magisk runs boot scripts (service.d -> powos-start.sh -> watch) in its busybox ash in
+# standalone mode, where a bare `tar` is busybox's applet - no --selinux, so every light backup failed ("light backup
+# failed", 2026-10-20 17:49). Functions win over applets; a full path is never an applet.
+tar() { /system/bin/toybox tar "$@"; }
+stat() { /system/bin/toybox stat "$@"; }
+restorecon() { /system/bin/restorecon "$@"; }
+chcon() { /system/bin/chcon "$@"; }
 
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; echo "$*" >&2; }
 die() { log "powos-appdata: $*"; exit "${2:-1}"; }
@@ -130,15 +137,31 @@ light() {
   echo "$out"
 }
 
+# Never exits on a failed backup: `light` runs in a subshell (its die ends only that), the failure is logged, the next
+# try is the next hour; after 2 failures in a row the manager hears about it (once per streak), and again on recovery.
 watch() {
   pidf=/data/powos/appdata-watch.pid
   old=$(cat "$pidf" 2>/dev/null)
   [ -n "$old" ] && grep -q powos-appdata "/proc/$old/cmdline" 2>/dev/null && exit 0
   echo $$ > "$pidf"
+  fails=0
   while :; do
-    light > /dev/null
+    if (light > /dev/null); then
+      [ $fails -ge 2 ] && tell "the hourly app-data backup works again (after $fails failed tries)" low
+      fails=0
+    else
+      fails=$((fails + 1))
+      log "watch: light backup failed ($fails in a row); retrying in an hour"
+      [ $fails -eq 2 ] && tell "the hourly backup of the PowOS app's home layout + store failed twice in a row (/data/powos/appdata.log on the phone); a data wipe now would lose more than an hour" high
+    fi
     sleep 3600
   done
+}
+
+# Mail to the manager (powos comms, inside the PowOS session); best effort, never blocks the watcher for long.
+tell() {
+  timeout 60 sh /data/powos/powos-run.sh "powos comms send manager 'powos-appdata: $1' --from appdata --priority ${2:-normal}" \
+    >> "$LOG" 2>&1 < /dev/null || log "watch: couldn't reach the manager ($1)"
 }
 
 rebase() {
