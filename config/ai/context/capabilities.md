@@ -294,6 +294,9 @@ Every ship to the phone carries `--note`: one plain line of what changed for the
   `shell/push.sh --errors` (Mac). A page that fails to boot within 2 min of a push has the push rolled back by the app
   (previous overrides restored, else the APK's files) and the manager gets "rolled back <files> because <error>".
   `powos shell help` has the details.
+- **Testing it: never break a live page (home, lock, shade).** Break the test-only page `shell/dev/gate-test.tsx`
+  (`?mode=gate-test`, loaded off screen by the app when that file is pushed) and push with `--test`; its reports are
+  marked "[test]", low priority, and read again after 2 min.
 
 ### `powos` on the phone
 - Works: `status` (Phone: mode, kernel, battery, network), `android {apps,open,running,notifications,notify,screenshot}`,

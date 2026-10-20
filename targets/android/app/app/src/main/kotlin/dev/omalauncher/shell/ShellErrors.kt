@@ -61,7 +61,7 @@ object ShellErrors {
         val line = e.optInt("line")
         val where = if (file.isNotEmpty()) " ($file${if (line > 0) ":$line" else ""})" else ""
         val phase = if (e.optBoolean("ready")) "" else " [before ready]"
-        record(context, "$kind$where: $message", signature = "$kind|${normalize(message)}|$file:$line", mode = mode, detail = phase)
+        record(context, "$kind$where: $message", signature = "${if (mode == GateTest.MODE) "test|" else ""}$kind|${normalize(message)}|$file:$line", mode = mode, detail = phase)
     }
 
     /** The page never became ready (no window.__powosAlive): [why], and the errors it reported meanwhile, if any. */
@@ -107,7 +107,7 @@ object ShellErrors {
                 "because the page didn't boot: $cause. The phone is on ${if (done.any { File(prev, it).isFile }) "the previous overrides" else "the APK's own files"} for them now; " +
                 "fix and push again (shell/push.sh runs the gate)."
         log(context, mode, "ROLLBACK", text)
-        send(context, text, force = true)
+        send(context, text, test = isTest(context, mode), force = true)
         return done
     }
 
@@ -126,7 +126,7 @@ object ShellErrors {
             val n = repeats.remove(signature) ?: 0
             lastSent[signature] = now
             status = "sent"
-            send(context, "shell $mode: $text$detail${if (n > 0) " (and $n more since the last report)" else ""}. ${situation(context)}")
+            send(context, "shell $mode: $text$detail${if (n > 0) " (and $n more since the last report)" else ""}. ${situation(context)}", test = isTest(context, mode))
         } else {
             repeats[signature] = (repeats[signature] ?: 0) + 1
             status = "repeat"
@@ -151,24 +151,51 @@ object ShellErrors {
             "Log: powos shell errors."
     }
 
-    /** One message to the manager's inbox; not on a phone without the rooted PowOS session (the log has it). */
+    /**
+     * A test's report, not a real one: the test-only page failed (dev/gate-test.tsx, ?mode=gate-test), or the last push
+     * was marked a test (shell/push.sh --test) and is still the one in the manifest.
+     */
+    private fun isTest(
+        context: Context,
+        mode: String,
+    ) = mode == GateTest.MODE ||
+        runCatching { JSONObject(File(context.filesDir, "shell-push.json").readText()).optBoolean("test") }.getOrDefault(false)
+
+    /**
+     * One message to the manager's inbox; not on a phone without the rooted PowOS session (the log has it). A [test]'s
+     * is marked "[test]", at low priority, and marked read again after [TEST_READ_MS] - a test leaves no mail behind.
+     */
     private fun send(
         context: Context,
         text: String,
+        test: Boolean = false,
         force: Boolean = false,
     ) {
-        Log.w(TAG, text)
+        Log.w(TAG, if (test) "[test] $text" else text)
         if (!RootedGuest.enabled) return
-        val message = text.take(3000)
+        val message = (if (test) "[test] $text" else text).take(3000)
+        val priority = if (test) "low" else "high"
         worker.execute {
             val out = StringBuilder()
             val code =
                 runCatching {
-                    RootedGuest.run("powos comms send --from shell --priority high manager ${shellQuote(message)}") { out.appendLine(it) }
+                    RootedGuest.run("powos comms send --from shell --priority $priority manager ${shellQuote(message)}") { out.appendLine(it) }
                 }.getOrElse { -1 }
             if (code != 0) Log.w(TAG, "powos comms send failed ($code${if (force) ", a rollback report" else ""}): ${out.toString().take(300)}")
+            // "Sent to 'manager' (id <id>)": read again once the test is over.
+            val id = Regex("\\(id ([0-9a-f]+)\\)").find(out)?.groupValues?.get(1)
+            if (test && id != null) {
+                cleanup.schedule({
+                    runCatching { RootedGuest.run("powos comms read --agent manager $id") }
+                        .onFailure { Log.w(TAG, "can't mark test mail $id read", it) }
+                }, TEST_READ_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
         }
     }
+
+    /** A test's mail stays this long - long enough to check it arrived - then it's marked read. */
+    private const val TEST_READ_MS = 2 * 60_000L
+    private val cleanup = Executors.newSingleThreadScheduledExecutor { Thread(it, "shell-errors-cleanup").apply { isDaemon = true } }
 
     /** The ring buffer: files/shell-errors.log, and its copy in the run dir (/run/powos-app inside PowOS). */
     private fun log(

@@ -180,10 +180,14 @@ class ShellHost(
         }
     }
 
-    /** The page again, from scratch (after a rollback: its modules as they are now). */
-    internal fun reload() {
-        web.reload()
+    /** The page again, from scratch (after a rollback: its modules as they are now) - only one that isn't up: a live
+     * page reloads itself on the rollback's files.changed (hot.ts), or isn't affected at all (a test page's). */
+    internal fun reloadIfDown() {
+        if (!bootReady) web.reload()
     }
+
+    /** The app, for what outlives a page (GateTest). */
+    internal val appContext: Context get() = context.applicationContext
 
     private fun devUrl(): String? =
         devUrlFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
@@ -403,9 +407,9 @@ private object HotReload {
         hosts -= host
     }
 
-    /** Every page loaded again (a rollback: a dead page's hot.ts can't reload it). */
+    /** Every page that isn't up loaded again (a rollback: a dead page's hot.ts can't reload it). */
     fun reloadAll() {
-        for (h in hosts.toList()) h.reload()
+        for (h in hosts.toList()) h.reloadIfDown()
     }
 
     /**
@@ -450,6 +454,8 @@ private object HotReload {
     ) {
         val path = prefix + file.relativeTo(root).path
         Log.i(TAG, "changed: $path (${hosts.size} pages)")
+        // The test-only page: loaded off screen for the test (GateTest), never in a live page.
+        if (path == GateTest.FILE && file.isFile) hosts.firstOrNull()?.appContext?.let(GateTest::changed)
         for (h in hosts.toList()) h.bridge.emit("files.changed", mapOf("path" to path))
     }
 
