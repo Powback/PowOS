@@ -174,7 +174,6 @@ Dev & AI:
   dev build|enable|disable <name>  Build / install (overlay) / remove a project
   dev update <name>   Pull upstream changes (forks only)
   app new|build|install|dev   PowOS apps (a SpacetimeDB module + a page/widgets): make, hot-reload (powos app help)
-  app new|build|install|dev   PowOS apps (a SpacetimeDB module + a page/widgets): make, hot-reload (powos app help)
   ai "prompt"         Ask AI for help (uses default agent)
   ai --agent coder|devops|health   Pick an agent
   ai -i               Interactive chat mode
