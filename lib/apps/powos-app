@@ -45,7 +45,9 @@ Writing one (what to edit after `new`):
   ui/pages/main.tsx   the full-screen page: export default function ({ host, close }) - app.useTable("x"),
                       app.useReducer("y") from ui/lib/app.ts. Reducer args are an object: add({ text }); u64 is
                       a bigint; snake_case fields arrive camelCase.
-  ui/widgets/*.tsx    a home widget each (list it in powos-app.json "widgets"): ({ host, app, cells }).
+  ui/widgets/*.tsx    a home widget each (list it in powos-app.json "widgets"): ({ host, app, cells }). Make it
+                      USABLE IN PLACE, not a preview: its actions inline (tick, -/+, remove), an add field, and
+                      the header opening the page (host.openApp(app)); controls stop pointerdown propagating.
   Styling: inline styles with the shell's theme variables (var(--color-accent), var(--color-foreground), ...).
   Imports: preact, preact/hooks, @preact/signals and spacetimedb come from the shell; anything else is bundled.
 

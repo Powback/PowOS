@@ -2,7 +2,8 @@
  * The Agents view (docs/AGENTS-VIEW-DESIGN.md §1): which agents run - here and on the Mac - what each one is on, its
  * subagents, tasks and tools, and who handed what to whom.
  *
- * - AgentsPanel: home's Agents widget (a "panel" home item): a line per session agent, needs-you first; a tap opens
+ * - AgentsPanel: home's Agents widget (a "panel" home item): open asks allowed/denied in place, a line per session agent
+ *   (this phone's working ones stoppable in place), needs-you first; a tap on a line opens
  *   the screen on it. 4×1 shows the count line only.
  * - AgentsScreen: the tree (manager → its agents → their subagents), the picked agent's step, tasks, recent tools and
  *   last report, and the comms feed. Opened from the widget, PowOS AI's page and the agents' notification.
@@ -43,20 +44,40 @@ const doing = (a: Agent) =>
         ? "done"
         : a.title || a.step || (a.state === "idle" ? "idle" : a.cwd);
 
-function Line({ id }: { id: string }) {
+/** A button on the widget: its tap is its own (not the tile's, not the line's). */
+const tapOnly = (run: () => void) => ({
+  onPointerUp: takeTap,
+  onClick: (e: Event) => {
+    e.stopPropagation();
+    run();
+  },
+});
+
+function Line({ id, inline = false }: { id: string; inline?: boolean }) {
   const a = agent(id)?.value;
+  const [sure, setSure] = useState(false);
+  useEffect(() => setSure(false), [a?.state]);
   if (!a) return null;
+  // On the widget: this phone's agent, working, can be stopped right there (a second tap, so a stray one doesn't).
+  const stoppable = inline && a.host === "phone" && a.state === "working" && a.pid > 1;
   return (
-    <button type="button" class={`ag-line ${a.state}`} onPointerUp={takeTap} onClick={() => openAgents(id)}>
-      <span class="ag-mark">{mark(a)}</span>
-      <span class="ag-who">{a.role}</span>
-      <span class="ag-host muted">· {a.host} ·</span>
-      <span class="ag-what">
-        {doing(a)}
-        {a.subs > 0 && <span class="muted"> ({a.subs} sub)</span>}
-      </span>
-      <span class="ag-ago muted">{since(a.last)}</span>
-    </button>
+    <div class="ag-line-row" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+      <button type="button" class={`ag-line ${a.state}`} style={{ flex: 1, minWidth: 0 }} onPointerUp={takeTap} onClick={() => openAgents(id)}>
+        <span class="ag-mark">{mark(a)}</span>
+        <span class="ag-who">{a.role}</span>
+        <span class="ag-host muted">· {a.host} ·</span>
+        <span class="ag-what">
+          {doing(a)}
+          {a.subs > 0 && <span class="muted"> ({a.subs} sub)</span>}
+        </span>
+        <span class="ag-ago muted">{since(a.last)}</span>
+      </button>
+      {stoppable && (
+        <button type="button" class={`ag-act ${sure ? "danger" : ""}`} {...tapOnly(() => (sure ? (powos.agents.interrupt(a.id), setSure(false)) : setSure(true)))}>
+          {sure ? "stop?" : "stop"}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -83,12 +104,35 @@ export function AgentsPanel({ item }: { item: HomeItem }) {
         <span>Agents</span>
         <span class="muted">{count(ids)}</span>
       </div>
+      {rows > 0 && <InlineAsks max={2} />}
       {shown.map((id) => (
-        <Line key={id} id={id} />
+        <Line key={id} id={id} inline />
       ))}
       {rows > 0 && ids.length > rows && <div class="ag-more muted">+{ids.length - rows} more</div>}
       {rows > 0 && !ids.length && <div class="ag-more muted">no agent reports yet</div>}
     </div>
+  );
+}
+
+/** The widget's open asks, decided in place: allow or deny (telling it what to do instead is on the screen). */
+function InlineAsks({ max }: { max: number }) {
+  const open = asks.value.filter((x) => x.answer == null).slice(0, max);
+  return (
+    <>
+      {open.map((x) => (
+        <div key={x.id} class="ag-ask-line" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <b>{agent(x.agent)?.value.role ?? "an agent"}</b> wants {x.tool}: <span class="muted">{x.summary}</span>
+          </span>
+          <button type="button" class="ag-act" {...tapOnly(() => powos.agents.answer(x.id, "allow"))}>
+            allow
+          </button>
+          <button type="button" class="ag-act danger" {...tapOnly(() => powos.agents.answer(x.id, "deny"))}>
+            deny
+          </button>
+        </div>
+      ))}
+    </>
   );
 }
 
