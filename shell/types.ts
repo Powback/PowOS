@@ -313,8 +313,8 @@ export interface Bridge {
    */
   ai: {
     chat(): Promise<Chat>;
-    /** Asks it: one turn, streamed into the chat. */
-    send(text: string): Promise<void>;
+    /** Asks it: one turn, streamed into the chat. [recents] false: not also put into the app switcher (that briefly shows the chat activity over home). */
+    send(text: string, recents?: boolean): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
     /** What agents told the user and is unread, newest first ("ai.mail" brings it again). */

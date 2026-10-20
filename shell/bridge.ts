@@ -115,7 +115,7 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     ai: {
       chat: () => call<Chat>("ai.chat"),
-      send: (text) => call("ai.send", text),
+      send: (text, recents = true) => call("ai.send", text, recents),
       open: () => call("ai.open"),
       mail: () => call<AgentMail[]>("ai.mail"),
       mailRead: (id) => call("ai.mailRead", id),

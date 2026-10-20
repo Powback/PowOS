@@ -36,7 +36,8 @@ const send = () => {
   const text = draft.value.trim();
   if (!text) return;
   draft.value = "";
-  powos.ai.send(text);
+  // false: not into the app switcher - doing that briefly showed the chat activity over home (a black screen).
+  powos.ai.send(text, false);
 };
 
 const pageMic: MicTarget = {

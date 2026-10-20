@@ -188,8 +188,11 @@ class ShellBridge(
             "ai.chat" -> aiChat()
             "ai.send" -> {
                 PowosAiChat.send(context.applicationContext, a.getString(0))
-                // Asked here, it's also an app in the switcher, the same conversation a swipe away.
-                PowosAiActivity.keepInRecents(context)
+                // Asked here, it's also an app in the switcher, the same conversation a swipe away. Not from home's
+                // PowOS AI page (second arg false): putting the task in recents starts the chat activity for a
+                // moment, and its window covered home - a ~1 s black screen on every send. That page is the
+                // conversation already, a swipe from home.
+                if (a.optBoolean(1, true)) PowosAiActivity.keepInRecents(context)
             }
             "ai.open" -> PowosAiActivity.open(context, null)
             "ai.mail" -> aiMail()
