@@ -540,6 +540,14 @@ def in_scope(p, host):
     return False
 
 
+def ancestors(pid, table):
+    out = set()
+    while pid in table and pid not in out and pid > 1:
+        out.add(pid)
+        pid = table[pid]["ppid"]
+    return out
+
+
 def descendants(pid, table):
     kids, todo = {pid}, [pid]
     children = {}
@@ -994,7 +1002,10 @@ def plan_remove(u, units):
     owned = package_files(pm) if u["files"] else set()
     keep = [os.path.expanduser(k) for k in u["remove"].get("keep", [])]
     table = proc_table()
-    pids = sorted(unit_pids(u, table, owners(units, table)))
+    # Never ourselves or the shell that runs us: a `match` regex can match the command line that invoked remove
+    # (it did: `powos units remove ...; pgrep -f '<the pattern>'` in one shell got that shell SIGTERMed mid-remove).
+    pids = sorted(unit_pids(u, table, owners(units, table)) - ancestors(os.getpid(), table)
+                  - descendants(os.getpid(), table))
     steps = []
     for c in u["remove"].get("stop", []):
         steps.append(("stop", c))
@@ -1058,17 +1069,21 @@ def cmd_remove(args):
             die("not removed")
     for kind, what in steps:
         if kind == "kill":
+            table = proc_table()
+            cmds = {p: (table.get(p) or {}).get("cmd") for p in what}
             for p in what:
                 try:
                     os.kill(p, signal.SIGTERM)
                 except OSError:
                     pass
             time.sleep(5)
-            for p in what:
-                try:
-                    os.kill(p, signal.SIGKILL)
-                except OSError:
-                    pass
+            now = proc_table()
+            for p in what:  # only what is still there and still the same process (not a reused pid)
+                if p in now and now[p]["cmd"] == cmds[p]:
+                    try:
+                        os.kill(p, signal.SIGKILL)
+                    except OSError:
+                        pass
         elif kind in ("stop", "command"):
             subprocess.run(["/bin/sh", "-c", what], check=False)
         elif kind == "packages":

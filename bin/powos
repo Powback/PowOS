@@ -2577,7 +2577,9 @@ _containers_runtime() { exec "$POWOS_LIB/apps/powos-container" "$@"; }
 _containers_by_runtime() {
     case "$1" in run|ps|exec|limits|check|autosleep|wake) return 0 ;; esac
     declare -f powos_is_phone >/dev/null && powos_is_phone || return 1
-    case "$1" in stop|start|restart|remove|rm|delete|destroy) return 0 ;; esac
+    # podman/gc too: on the phone the containers live in PowOS's overlay storage image, which plain podman (the
+    # passthrough below) doesn't see - an image imported with it was invisible to `powos containers run`.
+    case "$1" in stop|start|restart|remove|rm|delete|destroy|podman|gc) return 0 ;; esac
     return 1
 }
 

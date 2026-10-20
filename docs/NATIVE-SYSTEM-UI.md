@@ -429,8 +429,9 @@ was run on the phone.
 **Phone test** (in order; each step needs the one before):
 
 1. Build the module with this APK as the priv-app and the recents slot: `targets/android/system-module/build-module.sh
-   --priv-app --slot recents --check-signer`, install it (`adb push ~/Projects/android-app-dev/output/powos-system-module.zip
-   /data/local/tmp/ && adb shell su -c 'magisk --install-module /data/local/tmp/powos-system-module.zip'`), reboot. The
+   --priv-app --slot recents --check-signer`, install it (`targets/android/rooted/rooted.sh module
+   ~/Projects/android-app-dev/output/powos-system-module.zip --note "..."`: push, `magisk --install-module`, and the zip
+   deleted again), reboot. The
    priv-app copy must be this build: `MONITOR_INPUT` and `MANAGE_ACTIVITY_TASKS` are new in the manifest.
 2. Grants: `adb shell dumpsys package com.powos.app | grep -E 'MONITOR_INPUT|MANAGE_ACTIVITY_TASKS|STATUS_BAR'` - all
    `granted=true`. Then `adb logcat -s PowosRecents PowosGestures PowosNavGesture PowosRecentsAnim PowosShade`; expect

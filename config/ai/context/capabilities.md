@@ -439,6 +439,9 @@ what it installs (`packages`, `files`, `edits` = shared files it changes, never 
   app's container image (`backend.container.image`) or `powos containers run` it. A host install is the exception: it
   needs a unit in `units/<host>/` in the same commit (`test/tier1/test-units-registry.py` fails a deploy script that
   installs anything no unit claims), and `powos units check` shows anything installed by hand.
+- What was removed or registered on a host, and how to undo it: `docs/UNITS-LOG.md` (one row per action). GPU
+  benchmarks on the phone belong in a container, not host packages: `powos-gpu-bench build|vk|gl` (unit `gpu-bench`;
+  not run yet - see the log).
 
 ## Game modding (`powos mods`)
 - **Native v2 mod manager (primary path — see docs/MODDING-V2.md).** Per-game

@@ -1,0 +1,88 @@
+#!/bin/bash
+# powos-gpu-bench - the GPU benchmarks (glmark2, vkmark) as a container on the phone, not host packages.
+#
+#   powos-gpu-bench build            build localhost/powos-gpu-bench from this phone's own Mesa (see below)
+#   powos-gpu-bench vk [args...]     vkmark, headless (default: a short run of a few scenes)
+#   powos-gpu-bench gl [args...]     glmark2-es2-wayland on the running session's Wayland socket (--off-screen default)
+#   powos-gpu-bench sh               a shell in it
+#   powos-gpu-bench rmi              remove the image (the unit's way out)
+#
+# Why the image is built here and not pulled: the phone's Mesa is our own build (Turnip/freedreno with the KGSL
+# kernel driver, -Dfreedreno-kmds=kgsl, targets/android/patches/andromarchy); Arch Linux ARM's mesa only speaks msm and
+# finds no GPU on /dev/kgsl-3d0. So the image is glmark2 + vkmark + their dependencies from the phone's own pacman
+# mirrors (the same versions the host runs), with the host's installed mesa + vulkan-freedreno files laid over the
+# stock ones. Rebuild after a Mesa update (the image is tagged with the Mesa version it carries).
+#
+# Runs with --rm, hard limits (1 GB, 4 CPUs, 256 pids), no network, and only the GPU node (/dev/kgsl-3d0).
+# The unit: units/phone/gpu-bench.json. Root only (podman's storage is PowOS's: powos containers).
+set -euo pipefail
+
+IMAGE=localhost/powos-gpu-bench
+NAME=gpu-bench
+LIMITS=(--memory 1g --cpus 4 --pids-limit 256)
+PKGS=(glmark2 vkmark mesa vulkan-freedreno bash coreutils)
+# The host's own Mesa build (pacman.conf IgnorePkg keeps the mirrors' versions off it): these replace the stock ones.
+HOST_MESA=(mesa vulkan-freedreno vulkan-mesa-implicit-layers)
+PODMAN=(powos containers podman)
+
+[[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+
+mesa_ver() { pacman -Q mesa | awk '{print $2}' | tr ':' '_'; }
+
+build() {
+    local ver
+    ver=$(mesa_ver)
+    w=$(mktemp -d /var/tmp/gpu-bench.XXXXXX)   # global: the EXIT trap runs after build() returns
+    trap 'rm -rf "$w"' EXIT
+    mkdir -p "$w/root/var/lib/pacman"
+    # The host's pacman.conf without its IgnorePkg (that line pins the host's Mesa; here the stock one is only a stand-in).
+    grep -v -E '^[[:space:]]*Ignore(Pkg|Group)' /etc/pacman.conf >"$w/pacman.conf"
+    echo "gpu-bench: installing ${PKGS[*]} into a fresh root (the host's mirrors and package cache)"
+    pacman --config "$w/pacman.conf" --root "$w/root" --dbpath "$w/root/var/lib/pacman" --cachedir /var/cache/pacman/pkg \
+        --noconfirm --noprogressbar -Sy "${PKGS[@]}" >"$w/pacman.log" 2>&1 \
+        || { tail -20 "$w/pacman.log"; echo "gpu-bench: pacman failed" >&2; exit 1; }
+    # The stock Mesa out, the host's KGSL build in (every file the host's Mesa packages own).
+    local stock=() host=() p
+    for p in "${HOST_MESA[@]}"; do
+        pacman --root "$w/root" --dbpath "$w/root/var/lib/pacman" -Q "$p" >/dev/null 2>&1 && stock+=("$p")
+        pacman -Q "$p" >/dev/null 2>&1 && host+=("$p")
+    done
+    pacman --root "$w/root" --dbpath "$w/root/var/lib/pacman" --noconfirm -Rdd "${stock[@]}" >/dev/null
+    pacman -Qlq "${host[@]}" | grep -v '/$' | tar -cf - -T - 2>/dev/null | tar -xf - -C "$w/root"
+    # Nothing a benchmark reads: package caches, headers, docs, translations.
+    rm -rf "$w/root/var/cache/pacman/pkg/"* "$w/root/var/lib/pacman/sync" "$w/root/usr/include" \
+        "$w/root/usr/share/"{man,doc,info,locale,i18n,gtk-doc}
+    echo "gpu-bench: importing $IMAGE:$ver ($(du -sh "$w/root" | cut -f1))"
+    tar -C "$w/root" -cf - . | "${PODMAN[@]}" import \
+        --change "ENV TURNIP_KMD=kgsl FD_FORCE_KGSL=1 MESA_LOADER_DRIVER_OVERRIDE=kgsl XDG_RUNTIME_DIR=/run/xdg" \
+        --change "LABEL io.powos.unit=gpu-bench io.powos.mesa=$ver" \
+        --change 'CMD ["vkmark","--winsys","headless"]' - "$IMAGE:$ver" >/dev/null
+    "${PODMAN[@]}" tag "$IMAGE:$ver" "$IMAGE:latest"
+    echo "gpu-bench: built $IMAGE:$ver (and :latest)"
+}
+
+have_image() { "${PODMAN[@]}" image exists "$IMAGE:latest"; }
+
+run() {  # run <extra podman args...> -- <command...>
+    local extra=()
+    while [[ $# -gt 0 && $1 != -- ]]; do extra+=("$1"); shift; done
+    shift
+    have_image || { echo "gpu-bench: no image yet - powos-gpu-bench build" >&2; exit 1; }
+    # --pull=never: the image is local only (this phone's Mesa); podman would otherwise try a registry called localhost.
+    exec powos containers run --rm --name "$NAME" "${LIMITS[@]}" --network none --autosleep never --pull=never \
+        --device /dev/kgsl-3d0 "${extra[@]}" "$IMAGE:latest" "$@"
+}
+
+case "${1:-help}" in
+    build) build ;;
+    vk) shift; [[ $# -gt 0 ]] || set -- --winsys headless -b vertex:duration=2 -b texture:duration=2 -b shading:duration=2
+        run -- vkmark "$@" ;;
+    gl) shift
+        sock=$(ls /run/user/*/wayland-0 2>/dev/null | head -1)
+        [[ -n $sock ]] || { echo "gpu-bench: no Wayland session socket (/run/user/*/wayland-0)" >&2; exit 1; }
+        [[ $# -gt 0 ]] || set -- --off-screen
+        run -v "$(dirname "$sock"):/run/xdg" -e WAYLAND_DISPLAY=wayland-0 -- glmark2-es2-wayland "$@" ;;
+    sh) run -it -- bash ;;
+    rmi) "${PODMAN[@]}" images --format '{{.Repository}}:{{.Tag}}' | grep "^$IMAGE:" | xargs -r "${PODMAN[@]}" rmi ;;
+    *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; [[ ${1:-help} == help ]] ;;
+esac

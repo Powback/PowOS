@@ -3,13 +3,14 @@
   "name": "x86 games (FEX, Steam)",
   "kind": "package",
   "owner": "agent:phone-proton",
-  "purpose": "x86 programs through FEX (Steam, Proton games): fex-emu + its config and binfmt rules, box64, Steam",
+  "purpose": "x86 programs through FEX (Steam, Proton games): fex-emu + its config and binfmt rules, box64, Steam; gtk2 is the native ARM64 Steam client's (steamui.so needs libgtk-x11-2.0; targets/android/pkgs/steam depends on it, recipes.list builds it from the AUR)",
   "installedBy": "targets/android/rooted/powos-deploy.sh (FEX config) + pacman by the phone-proton work, 2026-10-15",
   "packages": [
     "fex-emu",
     "box64",
     "steam",
-    "fmt"
+    "fmt",
+    "gtk2"
   ],
   "files": [
     "/usr/share/fex-emu/Config.json",
