@@ -25,13 +25,22 @@ object GateTest {
     private var host: ShellHost? = null
     private val done = Runnable { close() }
 
-    /** Its module changed: the page loaded anew (a page already up from a test before goes first). */
+    /**
+     * Its module changed: the page loaded anew (a page already up from a test before goes first) - once the writes
+     * stop: one push is several file events.
+     */
     fun changed(context: Context) {
-        close()
         val app = context.applicationContext as App
-        host = ShellHost(app, null, app.runtime, MODE)
-        main.postDelayed(done, KEEP_MS)
+        main.removeCallbacks(start)
+        start = Runnable {
+            close()
+            host = ShellHost(app, null, app.runtime, MODE)
+            main.postDelayed(done, KEEP_MS)
+        }
+        main.postDelayed(start, 300)
     }
+
+    private var start = Runnable {}
 
     private fun close() {
         main.removeCallbacks(done)

@@ -152,8 +152,9 @@ class ShellHost(
         bootReady = false
         bootFailed = false
         bootError = null
-        web.postDelayed({ checkBoot(serial, BOOT_ERROR_MS) }, BOOT_ERROR_MS)
-        web.postDelayed({ checkBoot(serial, BOOT_MS) }, BOOT_MS)
+        // On the main handler, not web.postDelayed: a WebView in no window (GateTest's) never runs what's posted to it.
+        main.postDelayed({ checkBoot(serial, BOOT_ERROR_MS) }, BOOT_ERROR_MS)
+        main.postDelayed({ checkBoot(serial, BOOT_MS) }, BOOT_MS)
     }
 
     private fun checkBoot(
@@ -163,7 +164,7 @@ class ShellHost(
         if (serial != bootSerial || bootReady || bootFailed) return
         if (after < BOOT_MS && bootError == null) return
         if (!context.getSystemService(android.os.PowerManager::class.java).isInteractive) {
-            web.postDelayed({ checkBoot(serial, after) }, 2_000)
+            main.postDelayed({ checkBoot(serial, after) }, 2_000)
             return
         }
         PageWatchdog.probe(web) { alive, _ ->
