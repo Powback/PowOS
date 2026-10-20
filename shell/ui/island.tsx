@@ -10,8 +10,10 @@
  * (their own origin, a scoped bridge) - section 3.
  */
 import { Component, type ComponentType } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { host } from "../apps/stdb.ts";
+import { useOnScreen } from "../apps/onscreen.ts";
+import { useSleepReport } from "../apps/sleepreport.ts";
 import { useRegistry } from "../apps/registry.ts";
 import { moduleUrl, retryDelay, retryUrl } from "../apps/pages.ts";
 import type { HomeItem } from "../types.ts";
@@ -42,6 +44,18 @@ export const islandOf = (name: string) => {
   const key = name.slice("app:".length);
   return [key.split("/")[0], key] as const;
 };
+
+/** The loaded island's tile; reported to `powos sleep status` as on screen (working) or paused off screen - the same
+ * signal the island itself pauses on. */
+function Face({ id, name, children }: { id: string; name: string; children?: any }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useSleepReport(id, name, useOnScreen(ref));
+  return (
+    <div class="tile island-face" ref={ref}>
+      {children}
+    </div>
+  );
+}
 
 export function Island({ item }: { item: HomeItem }) {
   const [appId, key] = islandOf(item.name ?? "");
@@ -88,9 +102,9 @@ export function Island({ item }: { item: HomeItem }) {
   const C = mod.c;
   return (
     <Boundary key={base ?? ""} name={name}>
-      <div class="tile island-face">
+      <Face id={key} name={`${app?.name ?? appId}: ${name}`}>
         <C host={host} app={appId} cells={item.cell ? [item.cell.w, item.cell.h] : [4, 2]} base={`./_app/${appId}/`} />
-      </div>
+      </Face>
     </Boundary>
   );
 }

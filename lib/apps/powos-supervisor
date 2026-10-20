@@ -13,6 +13,8 @@ powos-runtime (native / sandbox / container, the user's setting) and keeps each 
   - idle unload: SpacetimeDB loads databases lazily and never unloads them; with no client connected to its port
     for idle.quietSec and RSS over idle.unloadAboveMB it is restarted (~150 ms), which drops every loaded database
   - a changed mode (powos-runtime config) restarts the service in the new mode
+  - asleep in stop mode (powos-sleepd: /run/powos-sleep/stopped/<id>): stopped and not restarted until the file goes;
+    SIGUSR1 checks at once (powos-sleepd sends it either way)
 
 HACK: a small supervisor of our own, because the proper one - systemd --user with real MemoryMax=/CPUWeight= per
 service - needs a delegated cgroup v2 subtree, and Android binds memory/cpu to cgroup v1 (section 2.4). Real fix:
@@ -38,7 +40,8 @@ TICK = 10  # seconds between checks: ~0.1 wakeups/s; a /proc scan costs a few ms
 CLK = os.sysconf("SC_CLK_TCK")
 PAGE = os.sysconf("SC_PAGE_SIZE")
 LOG_MAX = 4 << 20
-WAITED = {signal.SIGCHLD, signal.SIGTERM, signal.SIGINT}
+WAITED = {signal.SIGCHLD, signal.SIGTERM, signal.SIGINT, signal.SIGUSR1}
+SLEPT = "/run/powos-sleep/stopped"  # powos-sleepd's stop mode: <id> present = keep it stopped
 
 
 def log(msg):
@@ -187,6 +190,13 @@ class Service:
         self.start(mode)
 
     def check(self, ps, mode, now):
+        if os.path.exists(f"{SLEPT}/{self.id}"):
+            if self.proc is not None and self.proc.poll() is None:
+                self.stop("asleep (powos-sleepd, stop mode)")
+            self.proc, self.note, self.fails, self.next_start = None, "asleep (stop mode): starts on a connection", 0, 0
+            return
+        if self.note.startswith("asleep (stop mode)"):
+            self.note = "woken"
         # Down: start again when its backoff is up.
         if self.proc is None or self.proc.poll() is not None:
             if self.proc is not None:
@@ -320,9 +330,10 @@ def serve():
             json.dump({"time": round(now), "default": default, "services": [s.status(now) for s in services]}, f)
         os.replace(tmp, STATUS)
         # Until the next tick, or sooner when a service's restart backoff is up.
-        due = [s.next_start - time.time() for s in services if s.proc is None and not s.held]
+        due = [s.next_start - time.time() for s in services
+               if s.proc is None and not s.held and not os.path.exists(f"{SLEPT}/{s.id}")]
         got = signal.sigtimedwait(WAITED, max(0.05, min([TICK, *due])))
-        if got and got.si_signo != signal.SIGCHLD:
+        if got and got.si_signo not in (signal.SIGCHLD, signal.SIGUSR1):
             stop.append(1)
     for s in services:
         s.stop("supervisor stopping")

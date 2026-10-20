@@ -184,6 +184,11 @@ if [ -d $A ]; then
   # powos-container's autosleep (section 13) and the never-sleep list + manifest key every sleeper shares: modules,
   # loaded from next to powos-container.
   for f in powos-autosleep powos-sleep-common; do install -m 755 $A/$f $L/$f; done
+  # Unified sleep (docs/UNIFIED-SLEEP.md): `powos sleep`, the system-tier sleeper (powos-start.sh starts it) and the
+  # session's GUI watcher with its KWin script (powos-rooted-session starts it).
+  for f in powos-sleep powos-sleepd powos-sleep-gui; do install -m 755 $A/$f $L/$f; done
+  for f in powos-sleepd powos-sleep-gui; do ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
+  rm -rf $L/sleep && cp -r $A/sleep $L/sleep && chmod -R a+rX $L/sleep
   # What each of these adds to the system, for `powos units` (the unit manifests: owner, files, processes, limits, removal).
   mkdir -p $R/etc/powos/units.d && install -m 644 $A/units.d/*.json $R/etc/powos/units.d/
   install -m 644 $A/services/*.json $L/services/
@@ -193,7 +198,7 @@ if [ -d $A ]; then
   install -m 755 $A/powos $R/usr/bin/powos
   install -m 644 $A/config.sh $R/usr/lib/powos/config.sh
   U=$(stat -c %u /data/data/com.powos.app)
-  for d in /var/lib/powos/runtime /var/lib/powos/stdb; do mkdir -p $R$d && chown $U:$U $R$d; done
+  for d in /var/lib/powos/runtime /var/lib/powos/stdb /var/lib/powos/sleep; do mkdir -p $R$d && chown $U:$U $R$d; done
   mkdir -p $R/var/log/powos
   rm -rf $A
 fi

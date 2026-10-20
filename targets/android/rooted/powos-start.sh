@@ -120,4 +120,20 @@ system_tier() {
   echo "system tier: the supervisor didn't come up (/data/powos/root/var/log/powos/supervisor.log)"
 }
 system_tier
+
+# Unified sleep's sleeper (lib/apps/powos-sleepd, docs/UNIFIED-SLEEP.md): idle app backends frozen and woken by a
+# connection, unfocused GUI apps frozen for the session's watcher. In the system tier's namespace (it reads the
+# supervisor's state and borrows its services' sockets), in limits of its own; it thaws everything when it stops.
+sleep_tier() {
+  [ -x "$R/usr/lib/powos/apps/powos-sleepd" ] || return 0
+  pid=$(cat "$R/run/powos-sleep/sleepd.pid" 2>/dev/null)
+  [ -n "$pid" ] && grep -q powos-sleepd "/proc/$pid/cmdline" 2>/dev/null && return 0
+  sup=$(cat "$R/run/powos-system/supervisor.pid" 2>/dev/null)
+  [ -n "$sup" ] && [ -d "/proc/$sup" ] || { echo "sleep: no system tier"; return 0; }
+  L="$R/usr/lib/ld-linux-aarch64.so.1 --library-path $R/usr/lib"
+  setsid $L $R/usr/bin/nsenter -t "$sup" -m -r -w -- /usr/bin/env -i PATH=/usr/bin:/usr/sbin LANG=C.UTF-8 \
+    /usr/bin/powos-sleepd > /dev/null 2>&1 < /dev/null &
+  echo "sleep: powos-sleepd started"
+}
+sleep_tier
 echo "PowOS up"

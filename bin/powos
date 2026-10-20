@@ -163,6 +163,8 @@ Packages, containers & build:
   containers enter    Enter a distrobox container
   containers assemble Create all predefined containers
   containers prune    Clean up unused resources
+  sleep status        What is asleep - apps, containers, GUI apps, databases, shell pages - and why (--all, --json)
+  sleep wake <thing>  Wake it now (an agent call); sleep never <thing>: keep it awake (powos sleep --help)
   build [path] [tag]  Build container from Dockerfile/Containerfile
   build iso           Build the bootable PowOS image
   build test          Build container image only (for testing)
@@ -3103,6 +3105,11 @@ case "${1:-}" in
         # PowOS apps: install/publish/list, the runtime switch, the system tier (lib/apps/powos-app).
         shift
         exec "$POWOS_LIB/apps/powos-app" "$@"
+        ;;
+    sleep)
+        # Unified sleep: everything that sleeps, of every kind (lib/apps/powos-sleep; `powos sleep --help`).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-sleep" "$@"
         ;;
     comms)
         shift

@@ -89,6 +89,9 @@ bg powos-padd powos-padd
 bg powos-focus-watch as_user powos-focus-watch
 wait_sock "$R/bus"
 bg android-session-services as_user android-session-services
+# Unified sleep's session side: Linux apps unfocused for 10 min are frozen, thawed on focus or D-Bus (the file; limits:
+# powos-sleepd puts it in its own groups).
+bg powos-sleep-gui as_user powos-sleep-gui
 as_user sh -c 'K=$HOME/.local/share/keyrings; mkdir -p "$K" && chmod 700 "$K"
   [ -f "$K/login.keyring" ] || printf "[keyring]\ndisplay-name=Login\nctime=0\nmtime=0\nlock-on-idle=false\nlock-after=false\n" > "$K/login.keyring"
   [ -f "$K/default" ] || printf login > "$K/default"'

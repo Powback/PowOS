@@ -288,7 +288,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-97 markers on 2026-10-20.
+98 markers on 2026-10-20.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -311,7 +311,8 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `lib/apps/powos-container:463` | Overlay storage on an ext4 filesystem in a file (`/var/lib/containers/powos.img`, loop): overlayfs refuses f2fs as its upper layer. | An f2fs/overlayfs combination that works, or an ext4 partition of our own. |
 | `lib/apps/powos-container:665` | `powos containers exec` stops the exec'd shell, moves it into the container's groups and continues it: crun exec joins no cgroup with `--cgroups=disabled`. | Memory/cpu on cgroup v2 (§9.3), so crun's exec joins the container's cgroup itself. |
 | `lib/apps/powos-container:704` | `--rootfs /` (the runtime's container mode without an image) becomes a read-only non-recursive bind of / at `/run/powos-containers/hostroot`: crun can't pivot_root onto its own root (EBUSY). | crun binding such a rootfs itself before pivot_root (upstream). |
-| `lib/apps/powos-supervisor:17` | Own supervisor with soft budgets: systemd --user limits need a delegated cgroup v2 subtree Android doesn't give. | The cgroup v2 move (FEASIBILITY §2.4), then one unit per manifest; delete the supervisor. |
+| `lib/apps/powos-sleepd:357` | Stop-mode sleep hands a service's port back by closing powos-sleepd's listener once the backend restarts: a connection in that gap is refused, a fast backend may fail to bind once. | Socket activation proper: the listening socket passed to the backend (LISTEN_FDS); backends take one. |
+| `lib/apps/powos-supervisor:19` | Own supervisor with soft budgets: systemd --user limits need a delegated cgroup v2 subtree Android doesn't give. | The cgroup v2 move (FEASIBILITY §2.4), then one unit per manifest; delete the supervisor. |
 | `shell/apps/pages.ts:98` | The recent strip places PowOS apps by when the host's front app changed: `usage.recent` comes without times. | `usage.recent` with each app's last time (ShellBridge.kt) and PowOS apps' opens recorded there, one list ordered by time. |
 | `shell/apps/stdb.ts:11` | Apps use the server's anonymous per-database tokens: there is no PowOS issuer yet (C15). | REMOTE-POWOS.md M4: the shell mints per-app JWTs from the realm issuer. |
 | `shell/index.html:28` | The boot guard names a failed module's blob: URL through es-module-shims' private registry (`importShim._r`): there is no public lookup. | es-module-shims naming the source URL in its link errors (upstream), or a loader of our own. |
