@@ -192,7 +192,8 @@ Key facts an agent should CHECK before starting:
 - Cloud backup `powos backup {status|push|pull|setup}` — git-based USB state backup. ✅ CLI exists.
 - Sync conflicts `powos sync {status|resolve|--keep-ram|--keep-usb|--merge}` — detection ✅, `--merge` basic ⚠️.
 - CacheFS (lazy user-data FUSE) — ❌ incomplete: write-back to USB NOT implemented (written data is lost); must remain disabled (`POWOS_CACHEFS_ENABLED`).
-- Containers `powos containers …` (Podman/Distrobox), install/export GUI apps. ✅
+- Containers `powos containers …` (Podman/Distrobox), install/export GUI apps. ✅ `powos containers run` with
+  `--memory/--cpus/--pids-limit` enforced everywhere, the phone included (no pasta/bridge networking there yet). ✅
 - Desktop widgets (KDE plasmoids in `desktop/plasmoid/`, shipped to
   `/usr/share/plasma/plasmoids/`) — add from "Add Widgets" or the System Tray: ✅
   - `com.powos.manager` — **two-pane chat with the PowOS manager**: left sidebar of
@@ -350,7 +351,8 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
 - **Runtime switch**: `powos config app-runtime native|sandbox|container` (default), `powos app runtime <id> <mode>`
   (per app). native = plain process; sandbox = bubblewrap (user/pid/uts/cgroup ns - never `--unshare-ipc`/`--unshare-all`,
   this kernel has no SysV IPC), read-only system, private /tmp, only the data dir writable, seccomp denylist (no
-  Landlock: not in this kernel); container = **not ready yet** on the phone (refused, exit 78). Flipping restarts the
+  Landlock: not in this kernel); container = podman via `powos containers run` with the budget as hard limits (phone:
+  Android's v1 memcg/cpuctl + v2 pids, `docs/PHONE-KERNEL-CONTAINERS.md` §12). Flipping restarts the
   service in seconds; same command, data dir, port and uid. `powos app check` shows what this kernel supports.
 - **Apps**: `powos app install|publish|ui|list|remove` (Mac side: `apps/build.sh <app>` then
   `ADB="docker exec powos-vadb adb" apps/install.sh <app> [install|publish|ui] --note "<what changed>"`). The registry is the
@@ -401,7 +403,8 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   (module disable / service off / remove the app); if the home screen breaks, roll back first, then report.
 - Confirm first (via `manager`): anything irreversible or that can lose data (deleting volumes or user data, wipes,
   flashing kernel/boot, force-pushing master) and externally visible behaviour (the Discord bot, exposed ports, auth).
-- Deferred by the user for now: containers on the phone, the /dev/fuse rule, cgroup v2, a custom kernel.
+- Deferred by the user for now: the /dev/fuse rule, moving memory/cpu to cgroup v2. (The containers kernel is flashed
+  and phone containers run with hard limits since 2026-10-20.)
 - Never type into existing tmux sessions, on the phone or on the Mac: they are live Claude sessions. Open a fresh shell.
 - Don't inject touches/keys while the user is using the phone: `dumpsys power | grep lastUserActivityTime` must
   show more than 120000 ms ago.

@@ -590,7 +590,7 @@ manifest says *what* an app needs; a setting decides *how* it runs. `lib/apps/po
 |---|---|---|---|
 | `native` | a plain process under the supervisor (Tier 0 apps: no process at all) | its user; rlimits, nice, ionice | ✅ |
 | `sandbox` | the *same binary* under bubblewrap: `--unshare-user --unshare-pid --unshare-uts --unshare-cgroup-try` (never `--unshare-ipc`/`--unshare-all`: no SysV IPC in Android's kernel), `--ro-bind / /`, private `/tmp` `/run`, `/home` and `/var/lib/powos` hidden, only the data dir (+ `needs.write`) writable, `--unshare-net` when `needs.network` is `"none"`, a seccomp denylist (mount/namespaces/BPF/ptrace/keys/kexec/modules/new mount API; `clone` with namespace flags; `clone3` → ENOSYS) and Landlock where the kernel has it | ✅ (no Landlock: `CONFIG_SECURITY_LANDLOCK` is off in this kernel - a kernel item) |
-| `container` | podman, for apps that need a foreign userland | full | **not ready yet**: refused (exit 78) until `/dev/fuse` and cgroup v2 land (§2) |
+| `container` | podman through `powos-container` (PHONE-KERNEL-CONTAINERS §12): `backend.container.image`, else PowOS's own `/` read-only - the same binary | full; the budget as hard limits (memMB/cpuPct/pids) in Android's v1 memcg/cpuctl + v2 pids | ✅ since 2026-10-20 (hybrid cgroups; host or no network) |
 
 - **Settings.** `powos config app-runtime <mode>` is the default, `powos app runtime <id> <mode>` an app's override,
   both in `/var/lib/powos/runtime/config.json` (the user's, no sudo). The supervisor restarts what a change affects
@@ -715,7 +715,7 @@ and the kernel deferred):
 | SpacetimeDB 2.12.0, official aarch64 binaries | `targets/android/pkgs/spacetimedb-bin` → `/usr/lib/spacetimedb/2.12.0/`, `spacetime` on PATH; in the image through `out/pkgs` (`install-powos-android.sh` installs every package there), on a running phone through `rooted.sh deploy` | ✅ |
 | System tier | `powos-start.sh` → `powos-supervisor` in PowOS's own mount namespace, once per boot; survives desktop restarts | ✅ |
 | Port lock | iptables chain `powos-local`: `127.0.0.1:3410` for the app's uid (looked up in `packages.list` each start) and root, `tcp-reset` for the rest | ✅ uid 2000 (shell) and 10200 (another app) refused; root and 10359 pass |
-| Runtime switch | `powos-runtime`, `powos config app-runtime`, `powos app runtime` | ✅ native, sandbox; container stubbed |
+| Runtime switch | `powos-runtime`, `powos config app-runtime`, `powos app runtime` | ✅ native, sandbox, container (2026-10-20: PHONE-KERNEL-CONTAINERS §12) |
 | Registry | `apps/registry` (Rust) → database `powos-registry`, `install(manifest)`/`remove(id)`, owner-only | ✅ |
 | Tier 0 app | `apps/counter` (Rust module `powos-counter`, island `widgets/count.js`, `powos-app.json`) | ✅ installed via `powos app install` |
 | Shell | `shell/apps/stdb.ts` (one socket per database for the page, 5 s grace, closed while hidden), `shell/apps/registry.ts`, `shell/ui/island.tsx`, vendored SDK `vendor/spacetimedb.js` (119 KB) | see below |

@@ -4,9 +4,9 @@ PowOS runs rootless podman on the OnePlus Open. This kernel lets it put hard lim
 count (`pids.max`), CPU quota (`cpu.max` / `cpu.cfs_quota_us`) and memory, and it adds nftables for netavark.
 The prior analysis is in `docs/POWOS-APPS-FEASIBILITY.md` §2.4–2.5.
 
-**Status (2026-10-20): built and checked on the Mac. Not booted yet.** Nothing was flashed or written to the
-phone, and it was not rebooted. The next step is a `fastboot boot` session with the phone on USB and the user
-present (§7).
+**Status (2026-10-20): flashed to boot_b and in use** (user-approved, §9). PowOS's container runtime enforces
+memory, CPU and pids limits on it without taking Android's cgroups away (§12: `powos containers run`); the nftables
+modules load at boot from the PowOS system module (§9 step 2).
 
 | | |
 |---|---|
@@ -283,27 +283,32 @@ Undo images for a later flash, all sha256-verified against the live partitions o
 ## 9. Making it permanent
 
 **Step 1 done 2026-10-20:** `boot-powos-containers.img` flashed to boot_b (user-approved). The phone booted normally:
-pids in /proc/cgroups, `cpu.cfs_quota_us` present, root/Plasma/STDB up. Undo: the boot_b backup below. Steps 2-3 are in
-progress (nft modules at boot; PowOS's hybrid-cgroup container runtime).
+pids in /proc/cgroups, `cpu.cfs_quota_us` present, root/Plasma/STDB up. Undo: the boot_b backup below.
+**Step 2 done:** `system-module/module/load-kernel-modules.sh`. **Step 3: the hybrid is built** (§12); the v2 move
+itself stays open.
 
 Only after every go check in §7 passes:
 1. `fastboot flash boot_b out/boot-powos-containers.img`, or write it with root `dd` the way the futex kernel
    went in (PLAN.md).
    - Undo: `fastboot flash boot_b ~/Projects/PowOS/backups/oneplus-open/2026-10-19-before-containers-kernel/boot_b.img`.
    - init_boot (Magisk), vendor_boot and vendor_dlkm are not touched.
-2. Load the nftables modules at boot from the PowOS system module (`targets/android/system-module`), e.g.
-   `post-fs-data.sh` `insmod`s `out/modules/` in `load-order.txt` order from the module directory. They are
-   signed with the kernel's key and vermagic-compatible. A mismatching kernel (stock, after an OTA) refuses them
-   cleanly with "disagrees about version"; nothing crashes.
+2. Load the nftables modules at boot from the PowOS system module (`targets/android/system-module`). **Done:**
+   `build-module.sh` packs `kernel/out/modules/` (when built) into the module's `kernel-modules/`, and `service.sh`
+   runs `load-kernel-modules.sh` in the background, which `insmod`s them in `load-order.txt` order (service.sh, not
+   post-fs-data.sh: nothing in Android's boot needs them, so an insmod can never hold the boot up). They are signed
+   with the kernel's key and vermagic-compatible. A mismatching kernel (stock, after an OTA) refuses the first one
+   cleanly ("disagrees about version"); the loader logs it (`logcat -s powos-system`) and stops. Nothing crashes.
+   - On the phone now: the loader and the 22 modules were copied into the installed module
+     (`/data/adb/modules/powos-system/`, its `--priv-app` APK untouched) and run once by hand: "kernel modules: 22
+     loaded", an `nft` table added, listed and deleted. The next boot loads them by itself (not rebooted to check).
 3. Put memory and cpu on cgroup v2 for podman `--memory/--cpus`. This is Android userspace, not this kernel,
    and is still open:
    - `cgroups.json` is read before Magisk mounts modules (feasibility §2.4).
    - `cgroup_no_v1=` on the boot cmdline works (the `-v2test` image) but takes per-app memcg and the cpuctl
      boost groups away from Android.
-   - Until that's solved, PowOS can enforce the same limits **today** through the v1 files the `limits` test
-     uses: run podman with `--cgroups=disabled` (as now) and have the supervisor put the container's conmon in
-     `/dev/memcg/powos/<app>` (`memory.limit_in_bytes`), `/dev/cpuctl/powos/<app>` (`cpu.cfs_quota_us`) and
-     `/sys/fs/cgroup/powos/<app>` (`pids.max`) before it starts. Children inherit all three.
+   - Until that's solved, PowOS enforces the same limits through the v1 files the `limits` test uses: podman with
+     `--cgroups=disabled`, and the container's init in `/dev/memcg/powos/<name>`, `/dev/cpuctl/powos/<name>` and
+     `/sys/fs/cgroup/powos/<name>` before its workload starts. **Built: §12.**
 
 ## 10. OTAs
 
@@ -361,3 +366,88 @@ What it took, all in `phone-test.sh podman`:
 - **Temp dir:** `TMPDIR=/var/tmp`, so podman doesn't inherit Android's `/data/local/tmp`.
 
 Still cgroup-v1 for Android's memcg/cpuctl. The v2 layout stays a RAM-only experiment until §9 decides.
+
+## 12. PowOS's container runtime on the phone (2026-10-20)
+
+`lib/apps/powos-container`, the CLI's `powos containers run|ps|exec|stop|start|restart|rm|limits|check|podman`
+(`powos containers --help`). Desktop: plain podman with its own cgroups. Phone: the hybrid of §9 step 3, so Android
+keeps its memcg/cpuctl tuning (nothing of Android's is moved, re-parented or limited; no cgroups.json, no cmdline).
+
+### 12.1 How a container is limited
+
+| flag | group (created per container) | file | on the old kernel |
+|---|---|---|---|
+| `--memory 64m` | `/dev/memcg/powos/<name>` (v1) | `memory.limit_in_bytes` | hard |
+| `--memory-swap` (default 2x memory, `-1` any) | same | `memory.memsw.limit_in_bytes` | hard |
+| `--cpus 0.2` | `/dev/cpuctl/powos/<name>` (v1) | `cpu.cfs_period_us` 100000, `cpu.cfs_quota_us` | **degrades**: `cpu.shares` = cpus x 1024, a weight under contention, with a warning |
+| `--cpuset-cpus 0-2` | `/dev/cpuset/powos/<name>` (v1, `noprefix`) | `cpus`, `mems` (the parent copies the root's) | hard |
+| `--pids-limit 10` | `/sys/fs/cgroup/powos/<name>` (v2) | `pids.max` (`+pids` in the root's and `powos/`'s `subtree_control`: Android's v2 groups get pids files, no limit) | **degrades**: not enforced, with a warning |
+
+- podman runs with `--cgroups=disabled` and an annotation `io.powos.limits=name=..,mem=..,cpus=..,pids=..`. An OCI
+  `createRuntime` hook (`/usr/share/containers/oci/hooks.d/50-powos-limits-create.json`, written by the runtime on
+  first use; podman's default hooks dir) makes the groups, writes the limits and moves the container's init in. That
+  is after crun created the init and before it execs the workload, so everything the container runs inherits them;
+  conmon and the podman client stay outside (their memory isn't the container's). A failed write fails the
+  container (closed); a missing controller is a warning (degrade). `podman start` of a stopped container re-applies
+  them (the annotation is in its config).
+- Cleanup: the `poststop` hook removes the groups when a container is removed (`--rm`, `rm`), and every command
+  removes groups that are empty.
+- `powos containers exec` joins the limits too (podman exec alone would not: crun exec joins no cgroup without a
+  manager). The exec'd `/bin/sh` stops itself, is moved into the groups, and is continued before it execs the
+  command (HACK, registry).
+- oom_score_adj: under Magisk's su everything has -1000, which podman hands on; the memcg OOM killer then couldn't
+  kill the workload and killed the container's init (or nothing). The runtime sets its own to 0 first.
+
+### 12.2 Where it runs
+
+- **Root**, rootful podman (it writes Android's cgroups). As the user powos it re-runs itself with `sudo` in a
+  terminal; without a terminal (agents, widgets) `sudo -n` only, never PowOS's askpass dialog on the phone's
+  screen. From the Mac: `rooted.sh run 'powos containers ...'`.
+- **Mount namespace:** the system tier's (powos-start.sh: persistent, PowOS pivoted to /, private). Every call enters
+  it (nsenter to the supervisor's pid), so containers outlive the desktop session and every call sees the same
+  storage mount. A chroot is refused (crun's pivot_root fails there with EINVAL).
+- **Storage:** overlay on an ext4 image, `/var/lib/containers/powos.img` (sparse 16G, ~4.5 MB used empty; mounted at
+  `/var/lib/containers/powos` through a loop device from `/dev/loop-control`: Android keeps the nodes in
+  `/dev/block`). The image carries the SELinux label `vold_data_file`: the loop driver does its I/O as the kernel
+  domain, and with /data's label every read is an I/O error. vfs (`/var/lib/containers/vfs`, the earlier tests'
+  store, kept) is the fallback when the image can't be made; the choice is kept in `/var/lib/powos/containers/storage`.
+- `TMPDIR=/var/tmp`, `HOME=/root`, a clean PATH.
+
+### 12.3 Networking
+
+| mode | state |
+|---|---|
+| `host` (default, as `50-powos-phone.conf`) | ✅ the phone's network (wget from a container) |
+| `none` | ✅ loopback only |
+| `pasta` | ❌ podman refuses rootful pasta, and pasta attached by hand to a container's netns can't sandbox itself: it unshares an IPC namespace, which this kernel doesn't have ("Failed to detach isolating namespaces"). Needs `IPC_NS` (§2) |
+| `slirp4netns` | not installed |
+| bridge (netavark) | later: netavark isn't installed; the nftables modules it needs are loaded (§9 step 2); Android's policy routing would also need an `ip rule` for the bridge's traffic (as tethering adds), which is a change to Android's networking |
+
+### 12.4 The app runtime's container mode
+
+`powos-runtime` (`lib/apps/powos-runtime`) `container` mode is no longer stubbed: it runs the app through
+`powos-container run --rm --replace --init`, with
+- the budget as hard limits: `memMB` -> `--memory`, `cpuPct` -> `--cpus`, `pids` -> `--pids-limit`, `nofile` -> `--ulimit`;
+- the same uid (`--user`), data dir bound at its own path (+ `needs.write/read/devices`), host network (or none);
+- `backend.container.image` when the manifest has one; otherwise PowOS's own `/`, read-only, as the container's root:
+  the same binary as in native and sandbox mode. "/" becomes a non-recursive read-only bind at
+  `/run/powos-containers/hostroot` (crun can't pivot_root onto its own root, EBUSY; an overlay with / as lower is
+  refused).
+
+Tested with a throwaway manifest (python http.server, 64 MB / 20 % / 32 pids): served on 127.0.0.1, uid powos, `/` read
+only, its groups at 15 MB / 64 MB, 0.2 cores, 1/32 pids; SIGTERM to the runtime stopped it and the groups went.
+SpacetimeDB stays native (not flipped).
+
+### 12.5 Tested on the phone (2026-10-20)
+
+`targets/android/kernel/phone-test.sh containers` (alpine, `--memory 64m --memory-swap 64m --cpus 0.2 --pids-limit 10`):
+
+| | old kernel (5.15.180 #4, Oct 16) | containers kernel (flashed, Oct 20) |
+|---|---|---|
+| memory | ✅ 200 MB hog OOM-killed (`CONSTRAINT_MEMCG`, oom_kill 1) | ✅ the same |
+| cpu | weight only (`cpu.shares 204`, warning); `--cpuset-cpus 0` pinned (nproc 1) | ✅ quota: a 5 s loop throttled 51/60 periods, 4.2 s |
+| pids | not enforced (warning) | ✅ `pids.events max 1`: forks refused at 10 |
+
+Battery 100 % on USB, 27-30 °C throughout. Nothing flashed or rebooted by these tests. Tier 1:
+`test/tier1/test-powos-container.py` (fake cgroup trees).
+

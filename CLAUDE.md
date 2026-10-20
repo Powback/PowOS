@@ -467,6 +467,8 @@ feature updates are blocked (`--fixed-vhd` is the escape hatch; see WINDOWS.md).
 
 ### Container Management
 ```bash
+powos containers run --rm --memory 64m --cpus 0.5 --pids-limit 64 IMG CMD  # hard limits (phone too)
+powos containers ps | exec | limits | check   # limits in use, exec inside them, what the kernel enforces
 powos containers list             # List all containers
 powos containers create NAME IMG  # Create new container
 powos containers enter NAME       # Enter container shell
