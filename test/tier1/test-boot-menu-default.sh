@@ -2,7 +2,8 @@
 # The boot menu default must name an entry that EXISTS.
 #
 # `set default="ostree-1"` was written into grub.cfg for every medium ever
-# burned. grub's blscfg ids each entry by its FILENAME INCLUDING ".conf", so it
+# burned. (That note once claimed blscfg ids INCLUDE ".conf"; measured since: they
+# do NOT — see the stripped-suffix check below. The ordering problem was real:)
 # matched nothing, GRUB fell back to entry 0, and BLS entries sort filename-
 # DESCENDING — putting powos-safe.conf first. The menu therefore defaulted to
 # "Recovery — Safe mode", which carries no powos.install: the installer service
@@ -23,8 +24,13 @@ check(){ if ( eval "$2" ) >/dev/null 2>&1; then echo "  ok   - $1"; PASS=$((PASS
 U="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/build/install-to-usb.sh"
 
 echo "== boot menu default =="
-check "the live-entry id is NOT stripped of .conf" \
-      '! grep -q "live=\"\${live%\.conf}\"" "$U"'
+# Measured on the real medium under QEMU (2026-10-20): default="ostree-3.conf"
+# matched nothing and grub booted its FIRST entry (Recovery — Safe mode, with
+# powos.mode=safe on the kernel command line); default="ostree-3" booted the
+# NVIDIA live entry. grub's blscfg ids an entry by its filename WITHOUT ".conf".
+# The earlier reading of a Deck landing on ostree:0 was coincidence of ordering.
+check "the live-entry id IS stripped of .conf (blscfg ids have no suffix)" \
+      'grep -q "live=\"\${live%\.conf}\"" "$U"'
 check "the fix records why (blscfg ids include the extension)" \
       'grep -q "blscfg ids each entry by its FILENAME INCLUDING" "$U"'
 check "a default naming no entry file is reported, not shipped silently" \

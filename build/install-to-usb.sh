@@ -764,6 +764,14 @@ _grub_menu_defaults() {
     # bazzite-hardware-setup applied its Deck kargs.
     live=$(find "$boot_mp/loader/entries" -maxdepth 1 -name '*.conf' \
              ! -name 'powos-*' -printf '%f\n' 2>/dev/null | sort -V | tail -1)
+    # grub's blscfg ids an entry by its filename WITHOUT ".conf". Measured on the
+    # real medium under QEMU (2026-10-20): default="ostree-3.conf" matched nothing
+    # and grub booted its first entry — Recovery, Safe mode — with
+    # powos.mode=safe on the command line; default="ostree-3" booted that entry.
+    # The earlier note claiming the opposite was reasoning from a Deck that
+    # happened to land on ostree:0 for another reason. powos-boot-entries strips
+    # it the same way.
+    live="${live%.conf}"
     if [[ -z "$live" ]]; then
         log_warn "Could not identify the live BLS entry — default entry left as-is."
         return 0
