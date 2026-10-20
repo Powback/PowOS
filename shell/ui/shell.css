@@ -60,7 +60,7 @@
   top: calc((1 - var(--p)) * (100% - var(--strip-height)));
   /* The wallpaper through it, more of the drawer's own color as it opens (the list stays readable); what's under it on
      home is blurred (the wallpaper isn't the page's to blur). */
-  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + var(--p) * 14%), transparent);
+  background: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--p) * 40%), transparent);
   backdrop-filter: blur(calc(var(--p) * 18px));
   -webkit-backdrop-filter: blur(calc(var(--p) * 18px));
 }
@@ -177,7 +177,7 @@
   right: 0;
   bottom: 0;
   height: max(var(--inset-bottom, env(safe-area-inset-bottom)), var(--inset-keyboard, 0px));
-  background: color-mix(in srgb, var(--color-background) var(--glass), transparent);
+  background: var(--glass-fill);
   pointer-events: none;
 }
 .home.editing::after { visibility: hidden; }
@@ -791,8 +791,8 @@
     calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
 }
 .ai-top { display: flex; align-items: center; gap: 10px; }
-/* Solid, not glass: the page is the theme's background, what's on it subtle fills on that. */
-.ai-screen { background: var(--color-background); padding-bottom: 0; }
+/* One calm layer, not glass: a dark tint of the theme's background over the wallpaper, what's on it subtle fills. */
+.ai-screen { background: color-mix(in srgb, var(--color-background) 80%, transparent); padding-bottom: 0; }
 .ai-screen .tile { background: var(--soft-fill); border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .ai-screen .ai-work-chip.on { background: var(--color-accent); }
 .ai-screen .ai-compose {
@@ -987,7 +987,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   font: var(--text-small) var(--font);
   padding: 8px 12px;
   border-radius: var(--radius);
-  background: var(--color-surface);
+  background: var(--control-fill);
   border: var(--frame) solid var(--line);
   color: var(--color-foreground);
   box-shadow: var(--lift);
@@ -1009,7 +1009,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   font: var(--text-small) var(--font);
   text-transform: lowercase;
   border-radius: calc(var(--radius) * 1.5);
-  background: var(--color-surface);
+  background: var(--control-fill);
   border: var(--frame) solid var(--line);
   color: var(--color-foreground);
   user-select: none;
@@ -1030,7 +1030,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   height: 44px;
   border-radius: calc(var(--radius) * 1.5);
   border: var(--frame) solid var(--line);
-  background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--color-surface) 0);
+  background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--control-fill) 0);
   overflow: hidden;
   box-shadow: var(--lift);
 }
@@ -1049,7 +1049,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   height: 44px;
   padding: 0 10px;
   border-radius: calc(var(--radius) * 1.5);
-  background: var(--color-surface);
+  background: var(--control-fill);
   border: var(--frame) solid var(--line);
   color: var(--color-foreground);
   box-shadow: var(--lift);
@@ -1063,7 +1063,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   gap: 10px;
   padding: 8px 10px 10px;
   border-radius: calc(var(--radius) * 1.5);
-  background: var(--color-surface);
+  background: var(--control-fill);
   border: var(--frame) solid var(--line);
   overflow: hidden;
   box-shadow: var(--lift);
@@ -1100,7 +1100,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   align-items: center;
   justify-content: center;
   font-size: 24px;
-  background: var(--color-surface);
+  background: var(--control-fill);
   border: var(--frame) solid var(--line);
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
   box-shadow: var(--lift);
@@ -1124,7 +1124,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-transport button { display: flex; align-items: center; justify-content: center; font-size: 22px; }
 /* Remote input's tile held (control.tsx's RemotePick): its side, USB or Bluetooth, picked under the tiles. */
 .cc-grid .cc-tile.picking .cc-icon { border-color: var(--color-accent); }
-.cc-pick { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: calc(var(--radius) * 1.5); background: var(--color-surface); border: var(--frame) solid var(--line); box-shadow: var(--lift); }
+.cc-pick { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: calc(var(--radius) * 1.5); background: var(--control-fill); border: var(--frame) solid var(--line); box-shadow: var(--lift); }
 .cc-pick-head { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-pick-row { display: flex; gap: 8px; }
 .cc-pick-row .cc-chip { flex: 1; gap: 6px; font-size: var(--text-small); }

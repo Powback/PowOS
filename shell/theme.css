@@ -36,6 +36,26 @@
   --divider: color-mix(in srgb, var(--color-foreground) 7%, transparent);
   --soft-fill: color-mix(in srgb, var(--color-foreground) 8%, transparent);
   --lift: inset 0 0 0 1px rgb(255 255 255 / 6%), inset 0 1px 0 rgb(255 255 255 / 7%), 0 6px 20px -10px rgb(0 0 0 / 50%);
+  /* What a control on a panel (a quick setting, a slider, a chip) is filled with: on glass, a soft fill instead. */
+  --control-fill: var(--color-surface);
+
+  /*
+   * Glass (ui/glass.ts): on home, surfaces are frosted - a copy of the wallpaper blurred once (never live: every
+   * surface draws the same pre-blurred picture at its own place on the screen) under a tint of the theme's
+   * background (also the plain fill, a little more of it, without a wallpaper to frost). --glass-tint: how much tint
+   * (text stays readable on any wallpaper); --glass-blur, --glass-saturate,
+   * --glass-brightness: how the copy is frosted (read when it's made). --glass-behind-tint: the shade's tint, over the
+   * app the host blurs behind it. Without a wallpaper to frost (a host without system.glass), the plain --glass fill.
+   */
+  --glass-tint: 42%;
+  --glass-blur: 28px;
+  --glass-saturate: 1.6;
+  --glass-brightness: 0.8;
+  --glass-behind-tint: 58%;
+  /* The tint: the theme's background lifted a little towards its foreground (a dark wallpaper reads as glass, not as
+     a black slab), see-through by --glass-tint. */
+  --glass-base: color-mix(in srgb, var(--color-foreground) 12%, var(--color-background));
+  --glass-fill: color-mix(in srgb, var(--glass-base) var(--glass-tint), transparent);
 
   --gap: 8px;
   --edge: 12px;
@@ -47,6 +67,19 @@
   --strip-height: 76px;
   --letter-bar: 22px;
 }
+
+:root[data-light="true"] {
+  --glass-tint: 50%;
+  --glass-brightness: 1.08;
+  --glass-behind-tint: 66%;
+}
+.glass { --glass-tint: 32%; }
+.glass[data-light="true"] { --glass-tint: 40%; }
+.glass, .glass-behind { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+/* Where a glass surface is on the screen (ui/glass.ts), its own: not inherited, so setting one restyles one element. */
+@property --gx { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --gy { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --gb { syntax: "<length>"; inherits: false; initial-value: 0px; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -64,11 +97,27 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 /* A tile: what every home element is drawn on. */
 .tile {
-  background: color-mix(in srgb, var(--color-background) var(--glass), transparent);
+  background: var(--glass-fill);
   border: var(--frame) solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--lift);
 }
 .tile.focused { border-color: var(--color-accent); }
+
+/*
+ * A surface on glass: the tint over the frosted wallpaper, that picture placed so its pixels sit where the wallpaper's
+ * are (--gx/--gy: where the surface is on the screen). A surface inside another is only a soft fill on it; PowOS AI's
+ * page is solid (shell.css). No live blur anywhere.
+ */
+.glass :is(.tile, .notif-panel):not(.ai-screen *) {
+  background:
+    linear-gradient(var(--glass-fill), var(--glass-fill)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.glass :is(.tile, .notif-panel) .tile:not(.ai-screen *) { background: var(--soft-fill); }
+/* The shade over an app (its window blurred behind by the host): tinted only. */
+.glass-behind .notif-panel { background: color-mix(in srgb, var(--color-background) var(--glass-behind-tint), transparent); }
 
 .muted { color: var(--color-muted); }
