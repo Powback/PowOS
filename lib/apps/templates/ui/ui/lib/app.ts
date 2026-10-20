@@ -52,6 +52,9 @@ export interface Props {
   close?: () => void;
 }
 
+/** The SDK names reducers and tables in camelCase (set_qty -> setQty); the module's own names work here too. */
+const camel = (s: string) => s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+
 export function useApp(host: Host) {
   const db = host.useDb(DATABASE, DbConnection, SCHEMA);
   return {
@@ -59,15 +62,24 @@ export function useApp(host: Host) {
     /** "connected" once it's live. */
     useStatus: () => db.status,
     /** A table's rows, live (default query: the whole table). */
-    useTable: <T = any>(table: string, query = `SELECT * FROM ${table}`) => host.useRows<T>(db, table, query),
+    useTable: <T = any>(table: string, query = `SELECT * FROM ${table}`) =>
+      host.useRows<T>(db, db.conn && !db.conn.db?.[table] ? camel(table) : table, query),
     /** A reducer as an async function: resolves once the server ran it, throws its error message. */
     useReducer:
       <A extends object = Record<string, unknown>>(name: string) =>
       async (args: A = {} as A) => {
         if (!db.conn) throw new Error(`not connected (${db.status})`);
-        const r = db.conn.reducers[name];
-        if (!r) throw new Error(`no reducer ${name}`);
-        return r.call(db.conn.reducers, args);
+        const r = db.conn.reducers[name] ?? db.conn.reducers[camel(name)];
+        if (!r) throw new Error(`this app's bindings have no reducer ${name} - rebuild it: powos app install <its folder>`);
+        try {
+          return await r.call(db.conn.reducers, args);
+        } catch (e) {
+          const msg = String((e as Error)?.message ?? e);
+          // The module live on this device is another (older) one than the UI was built against.
+          if (/no such reducer|reducer .*not found|unknown reducer/i.test(msg))
+            throw new Error(`The app's module on this device is older than its UI (it has no ${name}): powos app install <its folder>`);
+          throw e;
+        }
       },
   };
 }

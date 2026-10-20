@@ -193,11 +193,14 @@ export function useDb(database: string, make: Builder, schema?: string): Db {
 }
 
 /** A table's rows as [query] subscribes them, live: re-rendered on every insert, update and delete. */
+/** The SDK's accessor for a table: its name in camelCase (shopping_item -> shoppingItem). */
+const accessor = (conn: any, table: string) => conn.db[table] ?? conn.db[table.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase())];
+
 export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   const [rows, setRows] = useState<T[]>([]);
   useEffect(() => {
     if (!db.conn || db.status !== "connected") return;
-    const t = db.conn.db[table];
+    const t = accessor(db.conn, table);
     if (!t) return;
     const refresh = () => setRows([...t.iter()] as T[]);
     t.onInsert(refresh);
@@ -228,7 +231,7 @@ export function watchRows<T = any>(database: string, make: Builder, table: strin
   const attach = () => {
     detach?.();
     detach = null;
-    const t = e?.conn?.db[table];
+    const t = e?.conn ? accessor(e.conn, table) : null;
     if (!e || !t || e.status !== "connected") return;
     const refresh = () => onRows([...t.iter()] as T[]);
     t.onInsert(refresh);

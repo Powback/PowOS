@@ -18,7 +18,9 @@ Make one (the whole loop, from a sentence to the phone - each step is one comman
                                      The module (Rust -> wasm) builds on the app builder (powos app builder) over
                                      ssh when one is set, else here if cargo + wasm32 are installed; the UI always
                                      builds here (bun, ~0.1 s). An unchanged module isn't rebuilt.
-  powos app install <dir>            build if needed, publish the module, put the UI in place, register it
+  powos app install <dir>            build if needed, publish the module (unless the device's live module is this
+                                     very build - checked against the database, not the local build), put the UI
+                                     in place, register it
   powos app dev <dir>                hot reload while you edit: every save rebuilds what changed and pushes it -
                                      ui/ -> the open page and the widgets update in place (no restart, the data
                                      and the connection kept); module/ -> republished (schema kept, additive changes
@@ -180,7 +182,8 @@ def cmd_new(a):
     # It goes into TSX text and a Rust comment: nothing that would break either.
     name = re.sub(r"[{}<>`\\\"$]", "", name).strip() or slug
     d = os.path.abspath(os.path.expanduser(opts.get("--dir") or os.path.join("~/Projects", slug)))
-    if os.path.exists(d) and os.listdir(d):
+    # Dotfiles don't count (an agent's own state in its fresh working directory).
+    if os.path.exists(d) and [x for x in os.listdir(d) if not x.startswith(".")]:
         die(f"{d} exists and isn't empty (--dir elsewhere)")
     db = app_id.replace(".", "-")
     crate = "powos-app-" + slug
@@ -524,6 +527,17 @@ def cmd_build(d, a):
 # ------------------------------------------------------------------------------------------------------ install
 
 
+def live_schema(db):
+    """The module live in [db] on this device, as its schema's fingerprint (spacetime describe); None: no such db."""
+    code, out = spacetime("describe", "-s", SERVER, "--json", db, check=False, quiet=True)
+    return hashlib.sha256(out.encode()).hexdigest() if code == 0 and out.strip() else None
+
+
+def file_sha(p):
+    with open(p, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
 def publish_module(d, m):
     mod = m.get("module")
     if not mod:
@@ -534,7 +548,33 @@ def publish_module(d, m):
     t0 = time.monotonic()
     # Additive schema changes migrate in place; anything destructive is refused by the server (no --delete-data).
     spacetime("publish", "-y", "-s", SERVER, "--bin-path", wasm, mod["database"], quiet=True)
+    # What's live now, to compare with next time (ensure_published).
+    with open(os.path.join(d, "out", ".published"), "w") as f:
+        json.dump({"database": mod["database"], "wasm": file_sha(wasm), "live": live_schema(mod["database"])}, f)
     log(f"module: published to {mod['database']} in {ms(t0)} ms (clients stay connected)")
+
+
+def ensure_published(d, m):
+    """Publishes the module unless the device already runs this very build: the wasm is the one last published from
+    here AND the live module's schema is the one it had then. Not trusted: "the local build didn't change" - the
+    database may run another module (an older publish from elsewhere, a reset), whatever this directory built."""
+    mod = m.get("module")
+    wasm = os.path.join(d, "out", "module.wasm")
+    if not mod or not os.path.isfile(wasm):
+        return publish_module(d, m)
+    try:
+        with open(os.path.join(d, "out", ".published")) as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        rec = {}
+    live = live_schema(mod["database"])
+    if (live and rec.get("database") == mod["database"] and rec.get("wasm") == file_sha(wasm)
+            and rec.get("live") == live):
+        log(f"module: live in {mod['database']} is this build")
+        return
+    if live and rec.get("live") and rec.get("live") != live:
+        log(f"module: {mod['database']} runs another module than this build's - publishing this one")
+    publish_module(d, m)
 
 
 def install_ui(d, m):
@@ -640,7 +680,7 @@ def cmd_install(d):
                            and os.path.isfile(os.path.join(d, "module", "Cargo.toml"))):
         cmd_build(d, [])
     ensure_registry()
-    publish_module(d, m)
+    ensure_published(d, m)
     install_ui(d, m)
     register(text)
     page = (m.get("page") or {}).get("entry")
@@ -676,8 +716,8 @@ def cmd_dev(d):
     if not os.path.isdir(os.path.join(APPS, m["id"], "current")):
         cmd_install(d)
     else:
-        if build_module(d, m):
-            publish_module(d, m)
+        build_module(d, m)
+        ensure_published(d, m)
         build_ui(d, m)
         install_ui(d, m)
     log(f"dev: watching {d} - save a file and it's live (Ctrl-C stops)")
