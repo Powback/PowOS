@@ -7,12 +7,12 @@
  * the drawer move with it in CSS, so a frame of the swipe moves an edge, not a re-laid-out list of apps.
  */
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { signal } from "@preact/signals";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gesture.ts";
 import { Carried, Pages, startCarry } from "./grid.tsx";
-import { hasRecentsWidget, RecentRow } from "./recentwidget.tsx";
 import { carriedApp, shownLess } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
@@ -110,6 +110,29 @@ function useGlide(el: { current: HTMLDivElement | null }, keys: string) {
  * (dockdrop.ts) opens a gap where it would go - or, the dock full, marks the app it would swap out; one carried out of
  * it leaves no gap. With nothing pinned it's only there while an app is carried: a drop zone over the bar's foot.
  */
+/**
+ * The dock's second page: the apps opened lately, last first, not those pinned (they're on the first) - as many as a
+ * page holds, no scrolling of its own.
+ */
+function DockRecents({ count }: { count: number }) {
+  const pinned = new Set(dock.value);
+  const shown = recent.value
+    .filter((k) => !pinned.has(k))
+    .map((k) => byKey.value.get(k))
+    .filter((a) => a != null)
+    .slice(0, count);
+  return (
+    <>
+      {shown.map((app) => (
+        <AppCell key={app.key} app={app} labels={false} draggable />
+      ))}
+    </>
+  );
+}
+
+/** Which of the dock's pages shows (0 pinned, 1 recent): its dots follow it, told when a scroll ends - never per frame. */
+const dockPage = signal(0);
+
 function Dock() {
   const el = useRef<HTMLDivElement>(null);
   const d = dockDrag.value;
@@ -126,9 +149,21 @@ function Dock() {
   const pinned = keys.map((k) => byKey.value.get(k)).filter((a) => a != null);
   const swapOut = aim?.swap ? pinned[aim.slot]?.key : undefined;
   useGlide(el, `${pinned.map((a) => a.key).join()}|${gap}`);
-  // Nothing pinned at all (not just the one carried out of it): no dock in home's layout, only the drop zone.
+  // The page the dock settled on, once a swipe's scroll has ended (scrollend: no work while it moves).
+  const pagesEl = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = pagesEl.current;
+    if (!node) return;
+    const settle = () => (dockPage.value = Math.round(node.scrollLeft / Math.max(1, node.clientWidth)));
+    node.addEventListener("scrollend", settle);
+    return () => node.removeEventListener("scrollend", settle);
+  });
+  // Nothing pinned at all (not just the one carried out of it): no pinned page, only the drop zone while carrying.
   const ghost = !dock.value.some((k) => byKey.value.has(k));
-  if (ghost && !carried) return null;
+  const recents = recent.value.some((k) => !dock.value.includes(k) && byKey.value.has(k));
+  if (ghost && !carried && !recents) return null;
+  // While an app is carried or moved along it, the dock is its pinned page only.
+  const paged = recents && !carried && !d && !ghost;
   const slots = pinned.length + (gap >= 0 ? 1 : 0);
   const cells = pinned.map((app, i) => {
     // The held one follows the finger from its new slot; the others have moved aside (a slot each, equal widths).
@@ -153,15 +188,34 @@ function Dock() {
   const r = aim?.swap && el.current?.getBoundingClientRect();
   return (
     <>
-      <div
-        class={`dock tile ${ghost ? "dock-ghost" : ""} ${aim ? "aimed" : ""}`}
-        data-p
-        ref={(node) => {
-          el.current = node;
-          followOpenness(node);
-        }}
-      >
-        {ghost && gap < 0 ? <div class="dock-empty">drop here to pin</div> : cells}
+      {/*
+       * Two pages side by side, swiped between by the browser's own scroll snapping (on the compositor): the pinned
+       * apps, then the recent ones. The dots below follow when a scroll settles.
+       */}
+      <div class={`dock tile ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followOpenness}>
+        <div class="dock-pages" ref={pagesEl}>
+          {(!ghost || carried) && (
+            <div
+              class="dock-page"
+              ref={(node) => {
+                el.current = node;
+              }}
+            >
+              {ghost && gap < 0 ? <div class="dock-empty">drop here to pin</div> : cells}
+            </div>
+          )}
+          {(paged || (ghost && !carried)) && (
+            <div class="dock-page dock-recent">
+              <DockRecents count={6} />
+            </div>
+          )}
+        </div>
+        {paged && (
+          <div class="dock-dots">
+            <i class={dockPage.value === 0 ? "on" : ""} />
+            <i class={dockPage.value === 1 ? "on" : ""} />
+          </div>
+        )}
       </div>
       {r && (
         <div class="dock-hint tile" style={{ bottom: `${innerHeight - r.top + 6}px` }}>
@@ -180,7 +234,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${hasRecentsWidget() ? "recents-widget" : ""}`}
+          class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
@@ -189,7 +243,6 @@ export function Home() {
             <div class="launcher-frame tile" data-p ref={followOpenness} />
             <div class="launcher" data-p ref={followOpenness}>
               <div class="launcher-inner">
-                <RecentRow />
                 <div class="drawer-clip">
                   <Drawer />
                 </div>

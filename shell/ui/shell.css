@@ -1,8 +1,8 @@
 /* Home, the bar, the drawer, the dock: laid out from theme.css's tokens only. */
 
 .home {
-  /* The launcher's head: the recent row, unless that's a widget on home (ui/recentwidget.tsx) - then none. */
-  --launcher-head: var(--strip-height);
+  /* The launcher's head: none - the recent apps are the dock's second page (home.tsx Dock), or a widget. */
+  --launcher-head: 0px;
   position: fixed;
   inset: 0;
   display: flex;
@@ -115,6 +115,27 @@
 .strip .app { flex: 0 0 calc((100% - 5 * 4px) / 6); min-width: 0; padding: 0; scroll-snap-align: start; }
 .strip .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 /* Full size always, in the full-height row's place: the shutter cuts them, it doesn't scale them. */
+/*
+ * The dock's pages (home.tsx Dock): the pinned apps, a swipe sideways the recent ones - the browser's own scroll
+ * snapping, a page at a time, on the compositor; small dots under them say which.
+ */
+.dock-pages {
+  flex: none;
+  width: 100%;
+  height: var(--strip-height);
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+}
+.dock-pages::-webkit-scrollbar { display: none; }
+.dock-page { flex: 0 0 100%; display: flex; align-items: flex-start; gap: 4px; padding: 0 4px; scroll-snap-align: start; scroll-snap-stop: always; }
+.dock-dots { position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%); display: flex; gap: 5px; pointer-events: none; }
+.dock-dots i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); }
+.dock-dots i.on { background: color-mix(in srgb, var(--color-foreground) 80%, transparent); }
 .dock .app { flex: 1 1 0; min-width: 0; height: calc(var(--strip-height) - 2 * var(--frame)); justify-content: center; padding: 0; }
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
@@ -155,8 +176,7 @@
   overflow: hidden;
   display: flex;
   align-items: flex-start;
-  gap: 4px;
-  padding: 0 4px;
+  padding: 0;
   /* Its frame goes at the very end, so a closed dock leaves no line under the bar. */
   border-width: calc(var(--frame) * min(1, var(--dock-open) * 8));
 }
@@ -403,10 +423,9 @@
 }
 
 /* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
-.home.recents-widget { --launcher-head: 0px; }
-.home.recents-widget .launcher .strip { display: none; }
+
 /* No head: closed, the launcher's frame is nothing; it shows as soon as the drawer starts to rise. */
-.home.recents-widget .launcher-frame { opacity: min(1, calc(var(--p) * 20)); }
+.home .launcher-frame { opacity: min(1, calc(var(--p) * 20)); }
 .recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
 .recents-face .strip { flex: 1; height: 100%; transform: none; clip-path: none; }
 .recents-face .strip .app { flex-basis: calc((100% - (var(--recent-n) - 1) * 4px) / var(--recent-n)); }

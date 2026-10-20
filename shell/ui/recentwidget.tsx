@@ -1,10 +1,8 @@
 /**
  * The recent apps: a row of the apps opened lately, last first (not those pinned to the dock, at hand already).
  *
- * A home widget of its own (a "panel" home item, "recents": moved and resized as any other), placed once by default
- * where the hard-wired row used to be - the bottom row of home's first page, full width, over the search bar. While
- * it's on home the launcher has no head of its own (shell.css .home.recents-widget); a host that can't keep it
- * (before ShellPanels knew "recents") keeps the old row heading the launcher.
+ * A home widget of its own (a "panel" home item, "recents": moved and resized as any other), added from the edit
+ * bar's picker; by default the recent apps are the dock's second page (home.tsx Dock).
  */
 import { useEffect, useRef } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -49,11 +47,6 @@ export const hasRecentsWidget = () => home.value.items.some((i) => i.kind === "p
 
 const STORE = "recents-widget";
 let migrating = false;
-/**
- * Just placed: its row was the grid's last with the launcher's head still there; without it the grid can gain a row,
- * and the widget is moved down onto the new last one once the grid has measured again.
- */
-let settle = false;
 
 /** Where the widget goes: the lowest free full-width row of page [page], else the first free one-row spot anywhere. */
 export function recentsSpot(page: number, rows: number): { page: number; cell: Cell } | null {
@@ -69,35 +62,21 @@ export function recentsSpot(page: number, rows: number): { page: number; cell: C
 }
 
 /**
- * Once per phone: the old row becomes the widget, at its default spot (a layout from before it, so it shows where the
- * row was). Not again after that - removed from home, it stays removed (the edit sheet brings it back).
+ * Once per phone: the recent apps moved into the dock (its second page, home.tsx Dock), so the widget this placed by
+ * itself at the bottom of the first page goes again - moved or resized by the user or not (nothing records which).
+ * Added from the picker afterwards, it stays.
  */
 export async function migrateRecents(rows: number) {
-  if (settle && rows > 0) {
-    const it = home.value.items.find((i) => i.kind === "panel" && i.name === "recents");
-    if (it?.cell) {
-      settle = false;
-      const c = it.cell;
-      const below = home.value.items.some((i) => i !== it && i.page === it.page && i.cell && i.cell.y + i.cell.h > c.y + c.h);
-      if (c.y + c.h < rows && !below) await powos.home.place(it.key, { ...c, y: rows - c.h }, it.page).catch(() => {});
-    }
-    return;
-  }
-  if (migrating || rows <= 0 || hasRecentsWidget()) return;
+  if (migrating || rows <= 0) return;
   migrating = true;
   try {
-    if (await powos.store.get(STORE)) return;
-    const first = home.value.pages.length ? Math.min(...home.value.pages) : 1;
-    const spot = recentsSpot(first, rows) ?? recentsSpot(Math.max(first, ...home.value.pages) + 1, rows);
-    if (!spot) return;
-    await powos.home.addPanel("recents", spot.page, spot.cell);
-    await powos.store.set(STORE, { placed: Date.now() });
-    settle = true;
-    // Only right after placing it: a later re-measure (a fold) leaves it where it is.
-    setTimeout(() => (settle = false), 5000);
+    const was = (await powos.store.get(STORE)) as { placed?: number; dock?: number } | null;
+    if (was?.dock) return;
+    const it = home.value.items.find((i) => i.kind === "panel" && i.name === "recents");
+    if (it && was?.placed) await powos.home.remove(it.key);
+    await powos.store.set(STORE, { ...(was ?? {}), dock: Date.now() });
   } catch (e) {
-    // A host without the "recents" panel (an older APK): the launcher keeps its row.
-    console.warn("recents widget: not placed", e);
+    console.warn("recents widget: not migrated", e);
   } finally {
     migrating = false;
   }

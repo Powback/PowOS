@@ -164,7 +164,8 @@ export function homeGestures() {
       open: drawer.value > 0,
       notif: notif.value,
       inList: !!list,
-      inStrip: !!target.closest?.(".strip"),
+      // A strip that scrolls sideways itself (the recent apps, the dock's pages): sideways is its own.
+      inStrip: !!target.closest?.(".strip, .dock-pages"),
       listTop: !list || list.scrollTop <= 0,
       listBottom: !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 1,
       target,
