@@ -454,11 +454,45 @@ private object HotReload {
         prefix: String,
     ) {
         val path = prefix + file.relativeTo(root).path
+        // push.sh's commit marker: while files/shell/.pushing is there a push's files are being moved in, so their
+        // changes are held and sent together when it goes - a page reloaded halfway through a push imported a module
+        // not there yet (a 404, the push rolled back). A marker left behind (a push killed) is let go after
+        // PUSH_HOLD_MS.
+        if (prefix.isEmpty() && path == PUSHING) {
+            if (file.exists()) {
+                holding = true
+                main.removeCallbacks(releaseLater)
+                main.postDelayed(releaseLater, PUSH_HOLD_MS)
+            } else {
+                release.run()
+            }
+            return
+        }
+        if (holding && prefix.isEmpty()) {
+            held[path] = file
+            return
+        }
         Log.i(TAG, "changed: $path (${hosts.size} pages)")
         // The test-only page: loaded off screen for the test (GateTest), never in a live page.
         if (path == GateTest.FILE && file.isFile) hosts.firstOrNull()?.appContext?.let(GateTest::changed)
         for (h in hosts.toList()) h.bridge.emit("files.changed", mapOf("path" to path))
     }
+
+    private const val PUSHING = ".pushing"
+    private const val PUSH_HOLD_MS = 30_000L
+    private var holding = false
+    private val held = linkedMapOf<String, File>()
+    private val release =
+        Runnable {
+            main.removeCallbacks(releaseLater)
+            holding = false
+            val files = held.values.toList()
+            held.clear()
+            Log.i(TAG, "push committed: ${files.size} file(s)")
+            overrides?.let { root -> files.forEach { changed(it, root, "") } }
+        }
+
+    private val releaseLater = Runnable { release.run() }
 
     private const val TAG = "PowosShell"
 }

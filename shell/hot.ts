@@ -15,6 +15,8 @@ powos.on("files.changed", ({ path }: { path: string }) => {
     if (id) appChanged(id);
     return;
   }
+  // push.sh's commit marker (.pushing, there while a push's files are moved in): the files themselves reload the page.
+  if (path.startsWith(".")) return;
   // The shell's dev and test files (dev/: the mock's data; test/: the gate-test page): no live page loads them.
   if (path.startsWith("dev/") || path.startsWith("test/")) return;
   if (path.endsWith(".css")) {

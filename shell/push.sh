@@ -109,12 +109,28 @@ files_json=$(printf '"%s",' "$@"); files_json="[${files_json%,}]"
 json_note=$(printf '%s' "$note" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g' | cut -c1-300)
 manifest=$(printf '{"at":%s,"files":%s,"note":"%s","from":"%s","test":%s,"testTo":"%s"}' "$(date +%s)" "$files_json" "$json_note" "$(hostname -s 2>/dev/null || echo mac)" "$([ -n "$test" ] && echo true || echo false)" "$test_to" | base64 | tr -d '\n')
 as_app "rm -rf files/shell-prev && echo $manifest | base64 -d > files/shell-push.json"
+# Atomic: every file staged on the phone first (one adb push of a tar, unpacked into files/shell-staging - the same
+# filesystem as files/shell), then all of them renamed into files/shell in one call, between files/shell/.pushing
+# written (echo, a CLOSE_WRITE - touch only opens it read-only) and removed. A page reloads once, on the whole push:
+# ShellHost's HotReload holds every change while .pushing is there and sends them when it goes; an older APK sends
+# each, and the renames all land within hot.ts's 300 ms debounce. File by file (each its own adb round trip, ~1 s), a
+# page reloaded between an importer and the new module it imports, and the import 404'd (2026-10-20 02:59: gesture.ts
+# landed, ui/keyboard.ts a second later).
+tmp=/data/local/tmp/powos-shell-push.tar
+tarf=$(mktemp "${TMPDIR:-/tmp}/powos-shell-push.XXXXXX")
+tflags=(); tar --version 2>/dev/null | grep -q bsdtar && tflags=(--no-xattrs --no-mac-metadata --format ustar)
+COPYFILE_DISABLE=1 tar ${tflags[@]+"${tflags[@]}"} -cf "$tarf" "$@"
+adb push -q "$tarf" "$tmp"
+rm -f "$tarf"
+moves=""
 for f in "$@"; do
-  tmp=/data/local/tmp/powos-shell-push
-  adb push -q "$f" "$tmp"
-  as_app "if [ -f files/shell/$f ]; then mkdir -p files/shell-prev/$(dirname "$f") && cp files/shell/$f files/shell-prev/$f; fi; mkdir -p files/shell/$(dirname "$f") && cat $tmp > files/shell/$f" && adb shell "rm -f $tmp"
-  echo "pushed $f"
+  moves="$moves if [ -f shell/$f ]; then mkdir -p shell-prev/$(dirname "$f") && cp shell/$f shell-prev/$f; fi; mkdir -p shell/$(dirname "$f") && mv -f shell-staging/$f shell/$f || ok=0;"
 done
+as_app "cd files && rm -rf shell-staging && mkdir -p shell-staging && tar -xf $tmp -C shell-staging && echo > shell/.pushing && ok=1 && {$moves true; }; rm -f shell/.pushing; rm -rf shell-staging; [ \${ok:-0} = 1 ]" || {
+  as_app "rm -f files/shell/.pushing; rm -rf files/shell-staging"; adb shell "rm -f $tmp"
+  echo "push.sh: staging or moving the files on the phone failed" >&2; exit 1; }
+adb shell "rm -f $tmp"
+for f in "$@"; do echo "pushed $f"; done
 # The phone's "update applied" notification (as targets/android/tools/deploy-note.sh, which this folder alone - the
 # --vpn container mounts only shell/ - can't reach): one su call, comms batches it with the other deploys.
 b=$(printf '%s' "$note" | base64 | tr -d '\n')
