@@ -194,5 +194,18 @@ check "boot source not on resolved disk → no destructive calls" \
 
 # ──────────────────────────────────────────────────────────────────
 echo ""
+echo "== live variants: entry titles by deployment index =="
+LV="$WORK/live/entries"; mkdir -p "$LV"
+printf 'title Bazzite (ostree:0)\noptions root=UUID=x\n' > "$LV/ostree-3.conf"
+printf 'title Bazzite (ostree:1)\noptions root=UUID=x\n' > "$LV/ostree-2.conf"
+printf 'title Bazzite (ostree:2)\noptions root=UUID=x\n' > "$LV/ostree-1.conf"
+_retitle_live_entries "$LV" 0=bazzite-nvidia-open 1=bazzite-deck 2=bazzite
+check "index 0 (newest) is the NVIDIA entry"  'grep -q "^title PowOS Live — NVIDIA (nvidia-open)$" "$LV/ostree-3.conf"'
+check "index 1 is the Deck entry"             'grep -q "^title PowOS Live — Steam Deck (deck)$" "$LV/ostree-2.conf"'
+check "index 2 is the AMD/Intel entry"        'grep -q "^title PowOS Live — AMD / Intel (main)$" "$LV/ostree-1.conf"'
+check "options lines untouched"               '[[ $(cat "$LV"/ostree-*.conf | grep -c "^options root=UUID=x$") -eq 3 ]]'
+check "unknown variant gets a generic title"  '[[ "$(_variant_title bazzite-foo)" == "PowOS Live (bazzite-foo)" ]]'
+check "default variant is nvidia-open"        '[[ "$LIVE_DEFAULT" == nvidia-open ]]'
+
 echo "== Results: $PASS passed, $FAIL failed =="
 [[ $FAIL -eq 0 ]]

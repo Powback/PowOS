@@ -7,6 +7,8 @@
 # Usage:
 #   sudo ./install-to-usb.sh /dev/sdX               # Write raw image + setup POWOS-DATA
 #   sudo ./install-to-usb.sh --setup-data-only /dev/sdX  # Only add POWOS-DATA to existing image
+#   sudo ./install-to-usb.sh --with-variants STORE --live-variants "deck main nvidia-open" /dev/sdX
+#                                                     # one stick that boots every variant (menu)
 #
 # WARNING: This ERASES ALL DATA on the TARGET USB DRIVE (/dev/sdX)!
 # It will NOT touch your internal SSD, NVMe, or SD cards.
@@ -1028,6 +1030,157 @@ add_install_boot_entry() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Live variants: every published variant as its OWN ostree deployment on the
+# medium's root, each with its own kernel, initramfs and boot entry.
+#
+# One stick, any machine. The raw image carries one deployment (deck); on an
+# NVIDIA desktop that image has no NVIDIA driver, falls to nouveau, and this
+# kernel's nouveau panics (see no_nouveau). The layered design under
+# add_base_variants cannot fix that: it swaps the rootfs under the deck
+# kernel, and the variants do not share a kernel (deck 7.2.0, the others
+# 7.2.9), so the swapped-in rootfs has no modules for the kernel that booted.
+# ostree already solves this — a sysroot holds several deployments, each
+# booting its own kernel — so that is what is used:
+#
+#   * the images come from the offline store (--with-variants), no network;
+#   * `ostree admin deploy --retain`, because the default prunes to two;
+#   * each origin names the REGISTRY image, so `powos upgrade` on the stick
+#     updates that variant like an installed system would;
+#   * the default variant is deployed LAST: ostree numbers newest highest,
+#     and both the menu-default logic here and powos-boot-entries pick the
+#     highest — one rule, two places, no new state;
+#   * entries are titled by variant; the ones PowOS adds afterwards (install,
+#     basic graphics, recovery) template from an entry as before.
+#
+# Measured: three variants share the Bazzite userland, so the root grows from
+# 9.5 to 17 GiB, well inside the 26.8 GiB root. All three boot to SDDM under
+# QEMU through a throwaway overlay (2026-10-20); nvidia-open with no GPU
+# present loads the nvidia module and backs off cleanly.
+#
+# What auto-detect would need is a GRUB-side GPU test, which GRUB does not
+# have; the menu is the selector, and the default is the variant that boots
+# on everything.
+# ─────────────────────────────────────────────────────────────────
+LIVE_DEFAULT="${LIVE_DEFAULT:-nvidia-open}"
+LIVE_IMAGE="${LIVE_IMAGE:-ghcr.io/powback/powos}"
+
+_variant_title() {
+    case "$1" in
+        bazzite-nvidia-open|nvidia-open) echo "PowOS Live — NVIDIA (nvidia-open)" ;;
+        bazzite-deck|deck)               echo "PowOS Live — Steam Deck (deck)" ;;
+        bazzite|main)                    echo "PowOS Live — AMD / Intel (main)" ;;
+        *)                               echo "PowOS Live ($1)" ;;
+    esac
+}
+
+# Retitle ostree-*.conf in $1. ostree titles them "<name> (ostree:N)", N the
+# deployment index; the rest are "N=<variant-id>" pairs in that index order.
+_retitle_live_entries() {
+    local entries="$1"; shift
+    local e idx v p
+    for e in "$entries"/ostree-*.conf; do
+        [[ -f "$e" ]] || continue
+        idx=$(grep -oE '\(ostree:[0-9]+\)' "$e" | tr -dc 0-9)
+        v=""
+        for p in "$@"; do [[ "${p%%=*}" == "$idx" ]] && v="${p#*=}"; done
+        [[ -n "$v" ]] || continue
+        sed -i "s|^title .*|title $(_variant_title "$v")|" "$e"
+    done
+}
+
+# The deployment order as "N=<VARIANT_ID>" pairs, index 0 (newest) first.
+_live_deployment_map() {
+    local sysroot="$1" i=0 dep v
+    while read -r dep; do
+        [[ -n "$dep" ]] || continue
+        v=$(grep '^VARIANT_ID=' "$sysroot/ostree/deploy/default/deploy/$dep/usr/lib/os-release" 2>/dev/null | cut -d= -f2 | tr -d '"')
+        printf '%d=%s\n' "$i" "${v:-unknown}"; i=$((i+1))
+    done < <(ostree admin --sysroot="$sysroot" status 2>/dev/null | awk '$1=="default" && $2 ~ /\.[0-9]$/ {print $2}')
+}
+
+# Mount the medium's root/boot/ESP as an ostree sysroot; prints the mount point.
+_live_mount_sysroot() {
+    local device="$1" root_part boot_part esp_part S
+    partprobe "$device" 2>/dev/null || true; sleep 1
+    root_part=$(lsblk -ln -o NAME,LABEL "$device" | awk '$2=="root"{print "/dev/"$1; exit}')
+    boot_part=$(lsblk -ln -o NAME,LABEL "$device" | awk '$2=="boot"{print "/dev/"$1; exit}')
+    esp_part=$(lsblk -ln -o NAME,LABEL "$device" | awk '$2=="EFI-SYSTEM"{print "/dev/"$1; exit}')
+    [[ -n "$root_part" && -n "$boot_part" && -n "$esp_part" ]] || { log_error "live variants: root/boot/EFI partitions not found on $device"; return 1; }
+    S=$(mktemp -d); POWOS_TMP_MOUNTS+=("$S/boot/efi" "$S/boot" "$S")
+    mount -o subvol=/root "$root_part" "$S" || { log_error "mount $root_part failed"; return 1; }
+    mount "$boot_part" "$S/boot" && mount "$esp_part" "$S/boot/efi" || { log_error "mount boot/esp failed"; return 1; }
+    echo "$S"
+}
+
+# The kernel args the raw booted with, as --karg=... words, minus ostree=
+# (which is per deployment and written by ostree itself).
+_live_kargs() {
+    local opts k
+    opts=$(grep -h -m1 '^options ' "$1"/boot/loader/entries/ostree-*.conf | head -1 | sed 's/^options //')
+    for k in $opts; do case "$k" in ostree=*) ;; *) printf -- '--karg=%s\n' "$k" ;; esac; done
+}
+
+# Pull one variant from the offline store into the medium's repo and deploy it,
+# retained, with its origin naming the registry image.
+_live_deploy_one() {
+    local S="$1" store="$2" v="$3"; shift 3
+    local R="$S/ostree/repo" ref origin
+    log "  deploying $v from the offline store..."
+    ostree container image pull "$R" "ostree-unverified-image:oci:$store:$v" >/dev/null 2>&1 \
+        || { log_error "  pull of $v into the medium's repo failed"; return 1; }
+    ref=$(ostree refs --repo="$R" 2>/dev/null | grep -E "^ostree/container/image/.*_3A_${v}\$" | tail -1)
+    [[ -n "$ref" ]] || { log_error "  no ref for $v after the pull"; return 1; }
+    origin=$(mktemp); printf '[origin]\ncontainer-image-reference=ostree-unverified-registry:%s:%s\n' "$LIVE_IMAGE" "$v" > "$origin"
+    ostree admin --sysroot="$S" deploy --os=default --retain --karg-none "$@" --origin-file="$origin" "$ref" >/dev/null 2>&1
+    local rc=$?; rm -f "$origin"
+    [[ $rc -eq 0 ]] || { log_error "  deploy of $v failed"; return 1; }
+    log_success "  $v deployed"
+}
+
+_live_preflight() {
+    [[ -f "$1/index.json" ]] || { log_error "--live-variants needs --with-variants <oci-store>; $1 has no index.json"; return 1; }
+    command -v ostree >/dev/null 2>&1 || { log_error "ostree is required for --live-variants"; return 1; }
+}
+
+# main's hook: a no-op unless --live-variants was given.
+_live_variants_step() {
+    [[ -n "${LIVE_VARIANTS:-}" ]] || return 0
+    # shellcheck disable=SC2086  # the list is space-separated on purpose
+    add_live_variants "$1" "$WITH_VARIANTS" $LIVE_VARIANTS
+}
+
+add_live_variants() {
+    local device="$1" store="$2"; shift 2
+    local want=("$@")
+    _live_preflight "$store" || return 1
+    local S; S=$(_live_mount_sysroot "$device") || return 1
+    local existing; existing=$(_live_deployment_map "$S" | head -1 | cut -d= -f2)
+    log "Live variants: medium carries $existing; adding ${want[*]} (default: $LIVE_DEFAULT)"
+    local args=(); mapfile -t args < <(_live_kargs "$S")
+
+    # Default last. The one already on the medium is skipped unless it IS the
+    # default (then it is re-deployed last so it ends up newest).
+    local order=() v idx
+    for v in "${want[@]}"; do [[ "$v" != "$LIVE_DEFAULT" ]] && order+=("$v"); done
+    order+=("$LIVE_DEFAULT")
+    for v in "${order[@]}"; do
+        if [[ "bazzite-$v" == "$existing" || ( "$v" == main && "$existing" == bazzite ) ]]; then
+            [[ "$v" == "$LIVE_DEFAULT" ]] || continue
+            idx=$(_live_deployment_map "$S" | awk -F= -v e="$existing" '$2==e{print $1; exit}')
+            [[ -n "$idx" ]] && ostree admin --sysroot="$S" undeploy "$idx" >/dev/null 2>&1
+        fi
+        _live_deploy_one "$S" "$store" "$v" "${args[@]}" || return 1
+    done
+    local map; map=$(_live_deployment_map "$S" | tr '\n' ' ')
+    # shellcheck disable=SC2086
+    _retitle_live_entries "$S/boot/loader/entries" $map
+    log "  live entries: $(grep -h '^title' "$S"/boot/loader/entries/ostree-*.conf | cut -c7- | tr '\n' ';')"
+    log "  root used: $(btrfs filesystem usage -h "$S" 2>/dev/null | awk '/^ *Used:/{print $2}')"
+    sync
+    umount "$S/boot/efi" "$S/boot" "$S" 2>/dev/null || true; rmdir "$S" 2>/dev/null || true
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Multi-variant USB: copy build/output/base-<variant>/ rootfs dirs onto the
 # POWOS-DATA partition under layers/base-<variant>/, and add a boot-menu entry
 # per variant (rd.powos.variant=). At boot, ramboot-setup.sh selects one.
@@ -1478,6 +1631,8 @@ main() {
                 ;;
             --with-variants)
                 WITH_VARIANTS="${2:-}"; shift 2 ;;
+            --live-variants)
+                LIVE_VARIANTS="${2:-}"; shift 2 ;;
             --image)
                 image="$2"
                 shift 2
@@ -1561,6 +1716,7 @@ main() {
     confirm_usb_erase "$device"
 
     write_raw_image "$device" "$image"
+    _live_variants_step "$device"   # before any entry is written: a deploy swaps the loader slot
     add_data_partition "$device"
     add_install_boot_entry "$device"
     setup_persistence "$device"

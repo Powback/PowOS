@@ -119,7 +119,8 @@ Run build/media.sh, or pass --allow-ungated if you accept that."
     stage "write"
     S umount "$DEV"?* 2>/dev/null
     printf 'YES\n' | S env POWOS_OVERRIDE_REMOVABLE=1 \
-        ./build/install-to-usb.sh --with-variants build/output/variants "$DEV" \
+        ./build/install-to-usb.sh --with-variants build/output/variants \
+            --live-variants "deck main nvidia-open" "$DEV" \
         > /var/tmp/burn-write.log 2>&1
     rc=$?
     [[ $rc -eq 0 ]] || { tail -15 /var/tmp/burn-write.log; die "write failed (rc=$rc)"; }
@@ -165,8 +166,14 @@ else bad "mount boot partition"; fi
 R=$(lsblk -nro NAME,LABEL "$DEV" | awk '$2=="root"{print "/dev/"$1}')
 if [ -n "$R" ] && mount -o ro "$R" "$M" 2>/dev/null; then
   d=$(ls -d $M/root/ostree/deploy/*/deploy/*.[0-9] 2>/dev/null | wc -l)
-  [ "$d" = "1" ] && ok "exactly one deployment (no self-redeploy)" \
-                 || bad "$d deployments on a fresh stick"
+  # One deployment per live variant (deck main nvidia-open), nothing else: a
+  # fourth would be the self-redeploy this check was written to catch.
+  [ "$d" = "3" ] && ok "three deployments: one per live variant" \
+                 || bad "$d deployments on a fresh stick (expected 3: deck, main, nvidia-open)"
+  for v in bazzite-deck bazzite bazzite-nvidia-open; do
+    grep -lqx "VARIANT_ID=$v" $M/root/ostree/deploy/*/deploy/*.0/usr/lib/os-release 2>/dev/null \
+      && ok "live variant deployed: $v" || bad "live variant missing: $v"
+  done
   if ls -l $M/root/ostree/deploy/*/deploy/*.0/etc/systemd/system/bazzite-hardware-setup.service 2>/dev/null | grep -q '/dev/null'; then
     ok "bazzite-hardware-setup masked on the medium"
   else bad "hardware-setup NOT masked — stick will redeploy itself"; fi

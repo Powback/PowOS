@@ -11,7 +11,7 @@ build/install-to-usb.sh:_fstab_containers_on_data 20
 build/install-to-usb.sh:add_data_partition 21
 build/install-to-usb.sh:add_install_boot_entry 19
 build/install-to-usb.sh:add_variant_boot_entries 24
-build/install-to-usb.sh:main 18
+build/install-to-usb.sh:main 19
 build/install-to-usb.sh:self_complete_boot_disk 16
 build/install-to-usb.sh:setup_persistence 17
 lib/ai-healer.sh:auto_heal 16
