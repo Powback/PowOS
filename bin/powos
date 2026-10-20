@@ -2547,7 +2547,7 @@ _containers_do_usage() {
     echo "  logs <name> [--lines N] Show the last N log lines (default 200)"
     echo "  create <name> [image]   Create a new distrobox container"
     echo "  enter <name>            Enter a distrobox container"
-    echo "  remove|rm [-f] <name>   Remove a container (distrobox or podman; phone: and its limit groups)"
+    echo "  remove <name>           Remove a container (distrobox or podman; rm -f on the phone: and its limit groups)"
     echo "  assemble                Create all predefined containers"
     echo "  export <name> <app>     Export app from container to host"
     echo "  prune                   Clean up unused resources"
@@ -2567,17 +2567,18 @@ _containers_do_usage() {
 # lifecycle verbs too, since its podman is the rootful one in PowOS's system tier with Android's cgroups (the
 # rootless/sudo paths below never see those containers).
 _containers_runtime() { exec "$POWOS_LIB/apps/powos-container" "$@"; }
+_containers_by_runtime() {
+    case "$1" in run|ps|exec|limits|check) return 0 ;; esac
+    declare -f powos_is_phone >/dev/null && powos_is_phone || return 1
+    case "$1" in stop|start|restart|remove|rm|delete|destroy) return 0 ;; esac
+    return 1
+}
 
 cmd_containers() {
     local action="${1:-list}"
 
-    if declare -f powos_is_phone >/dev/null && powos_is_phone; then
-        case "$action" in
-            ps|stop|start|restart|remove|rm|delete|destroy) _containers_runtime "$@" ;;
-        esac
-    fi
+    _containers_by_runtime "$action" && _containers_runtime "$@"
     case "$action" in
-        run|ps|exec|limits|check) _containers_runtime "$@" ;;
         list|ls)                  _containers_do_list "${2:-}" ;;
         create)                   _containers_do_create "${2:-}" "${3:-}" ;;
         enter)                    _containers_do_enter "${2:-}" ;;
