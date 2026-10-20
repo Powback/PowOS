@@ -146,6 +146,27 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         if (hinge != null) sensors.registerListener(this, hinge, SensorManager.SENSOR_DELAY_NORMAL);
     }
 
+    /**
+     * Opening this on the cover display makes it Android's top (focused) activity, but its window is not focusable:
+     * Android then has a focused app with no focused window, and the next key event (power, volume, a gamepad
+     * button, the keyboard) waits for one - after 5 s an ANR ("Application does not have a focused window") that
+     * kills the whole app, and the PowOS session with it (2026-10-20, Broforce: a power press while the pad was up).
+     * So whenever this becomes top, the desktop's task goes back to the front: keys and focus stay with the desktop,
+     * and touches still reach this pad (a tap on a non-focusable window never takes the focus).
+     */
+    @Override
+    public void onTopResumedActivityChanged(boolean top) {
+        super.onTopResumedActivityChanged(top);
+        MainActivity main = MainActivity.sInstance;
+        if (!top || main == null || main.isFinishing()) return;
+        try {
+            getSystemService(android.app.ActivityManager.class).moveTaskToFront(main.getTaskId(), 0);
+            Log.i(TAG, "focus back to the desktop (task " + main.getTaskId() + ")");
+        } catch (RuntimeException e) {
+            Log.w(TAG, "focus back to the desktop: " + e);
+        }
+    }
+
     @Override
     public void onSensorChanged(SensorEvent e) {
         if (e.values[0] < 150f) { // folding: give the screens back to the phone

@@ -1709,6 +1709,26 @@ public class MainActivity extends Activity
         return super.onGenericMotionEvent(event);
     }
 
+    /**
+     * Valve's (vendor 0x28de) pads are PowOS's own: powos-padd's Deck controller and the Xbox pad Steam Input makes
+     * from it for each game, both created inside PowOS. Android's input stack sees them too (they are kernel input
+     * devices) and hands their buttons to this activity - forwarded, every press would reach the game twice (once as
+     * a pad button, once as a keyboard BTN_* key from here), B would fire the Back action (Android's fallback key),
+     * and a key with no focused window to go to makes an ANR. They already reach Linux directly: drop them here.
+     */
+    private static boolean isPowosPad(KeyEvent event) {
+        InputDevice d = event.getDevice();
+        return d != null && d.getVendorId() == 0x28de
+            && (event.isFromSource(InputDevice.SOURCE_GAMEPAD) || event.isFromSource(InputDevice.SOURCE_JOYSTICK));
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (isPowosPad(event))
+            return true; // consumed: no fallback key either
+        return super.dispatchKeyEvent(event);
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (handleSoftKeyboardToggleKey(event))

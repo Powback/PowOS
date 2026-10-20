@@ -76,12 +76,24 @@ rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-sess
 # root:uhid 0660 (SteamOS lets the desktop user write it, by udev rule; there's no udev here). So powos joins a group
 # "uhid" with Android's gid - Android's node stays as it is. Without it Steam logs "Couldn't initialize virtual
 # gamepad: Couldn't open /dev/uinput for writing" and games get no controller.
+# The same for the game's side: the pad Steam Input writes to /dev/uinput turns up as /dev/input/eventN, created by
+# Android's kernel as root:input(Android's gid 1004) 0660 - and games (Proton's winebus/SDL, native SDL) open that
+# node as powos. With no udev to hand it over, PowOS's "input" group takes Android's input gid, so powos (in it, as on
+# any desktop) can read every pad node the moment it appears. Without it Steam shows the controller, but games see
+# none ("controller doesn't do anything in games", 2026-10-20). Running processes keep their old groups: restart Steam.
 U=$(stat -c %u /data/data/com.powos.app)
 UHID=$(stat -c %g /dev/uinput)
-chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/bash -s "$U" "$UHID" <<'EOF'
-u=$1 uhid=$2
+INPUT=$(stat -c %g /dev/input/event0)
+chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/bash -s "$U" "$UHID" "$INPUT" <<'EOF'
+u=$1 uhid=$2 input=$3
 getent group uhid >/dev/null || groupadd -g "$uhid" uhid
 [ "$(getent group uhid | cut -d: -f3)" = "$uhid" ] || groupmod -g "$uhid" uhid
+getent group input >/dev/null || groupadd -g "$input" input
+old=$(getent group input | cut -d: -f3)
+if [ "$old" != "$input" ]; then
+  groupmod -g "$input" input
+  find / -xdev -gid "$old" -exec chgrp -h input {} + 2>/dev/null   # files that had the old number
+fi
 id alarm >/dev/null 2>&1 && userdel -r alarm 2>/dev/null
 sed -i "/^android:x:$u:/d" /etc/passwd            # the no-root engine's name for the app uid (session/first-boot.sh)
 getent group powos >/dev/null || groupadd -g "$u" powos
