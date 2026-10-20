@@ -214,6 +214,8 @@ export interface WidgetScreen {
 export interface Chat {
   busy: boolean;
   items: ChatItem[];
+  /** A thread of its own open instead of the main conversation (PowosAiChat.Thread): "create app"'s. */
+  thread?: { dir: string; title: string; kind: string } | null;
 }
 
 export interface Bridge {
@@ -317,6 +319,13 @@ export interface Bridge {
     send(text: string, recents?: boolean): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
+    /**
+     * "Create app": a fresh thread in a new directory, building [description] as a PowOS app (`powos app new` /
+     * `install`). False while a turn is under way (or PowOS isn't running).
+     */
+    newApp(description: string): Promise<boolean>;
+    /** Back from a thread to the main conversation. False while a turn is under way. */
+    closeThread(): Promise<boolean>;
     /** What agents told the user and is unread, newest first ("ai.mail" brings it again). */
     mail(): Promise<AgentMail[]>;
     /**

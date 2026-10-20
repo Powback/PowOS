@@ -15,6 +15,7 @@ import { openAgents } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { useDb, useRows } from "../apps/stdb.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
+import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
@@ -63,6 +64,9 @@ function lastTurn(items: ChatItem[]) {
 }
 
 export function Now() {
+  // "Create app": its own thread's view (steps, the finished app), or the question that starts one.
+  if (chat.value.thread?.kind === "app") return <AppBuild />;
+  if (newAppAsk.value) return <NewAppAsk />;
   const { busy, items } = chat.value;
   const turn = lastTurn(items);
   if (!turn) return <div class="ai-empty muted">Ask PowOS AI anything - about PowOS, the phone, your projects.</div>;

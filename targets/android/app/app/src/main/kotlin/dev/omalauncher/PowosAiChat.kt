@@ -59,28 +59,98 @@ object PowosAiChat {
     private var file: File? = null
     private var appContext: Context? = null
 
+    /**
+     * A conversation of its own beside the manager's main one: [dir] (under ~) is its working directory - the manager
+     * keeps one session per directory, so a fresh dir is a fresh thread, not the main one's busy history. [kind] "app":
+     * building a PowOS app (the shell shows its steps as such). Its items are kept in their own file; the chat shows the
+     * thread while it's open, the main conversation again once it's closed.
+     */
+    data class Thread(val dir: String, val title: String, val kind: String) {
+        fun json() = JSONObject().put("dir", dir).put("title", title).put("kind", kind)
+    }
+
+    var thread by mutableStateOf<Thread?>(null)
+        private set
+
     /** Mail came for the manager while a turn was under way: its turn follows that one. */
     private var inboxWaiting = false
 
     fun load(context: Context) {
         if (appContext == null) appContext = context.applicationContext
         if (file != null) return
-        val f = File(context.filesDir, "powos-ai/chat.jsonl")
+        thread =
+            runCatching {
+                JSONObject(threadFile(context).readText()).let { Thread(it.getString("dir"), it.getString("title"), it.optString("kind")) }
+            }.getOrNull()
+        show(context)
+    }
+
+    private fun threadFile(context: Context) = File(context.filesDir, "powos-ai/thread.json")
+
+    /** The open thread's items (or the main conversation's) into [items]. */
+    private fun show(context: Context) {
+        val t = thread
+        val f = if (t == null) File(context.filesDir, "powos-ai/chat.jsonl") else File(context.filesDir, "powos-ai/threads/${t.dir.replace('/', '_')}.jsonl")
         file = f
+        items.clear()
         runCatching {
             f.readLines().mapNotNull { runCatching { Item.from(JSONObject(it)) }.getOrNull() }
         }.getOrNull()?.let { items.addAll(it) }
+    }
+
+    /**
+     * "Create app": a fresh thread in a new directory (~/Projects/new-app-<time>), its first turn [description] wrapped
+     * in what building a PowOS app takes (powos app new / install). False while a turn is under way.
+     */
+    fun newApp(
+        context: Context,
+        description: String,
+    ): Boolean {
+        load(context)
+        if (busy || description.isBlank() || !RootedGuest.enabled) return false
+        val stamp = java.text.SimpleDateFormat("yyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())
+        open(context, Thread("Projects/new-app-$stamp", "New app", "app"))
+        send(context, description.trim(), dev.omalauncher.linux.newAppPrompt(description.trim()))
+        return true
+    }
+
+    /** Back to the main conversation (the thread's files and its directory stay). False while a turn is under way. */
+    fun closeThread(context: Context): Boolean {
+        load(context)
+        if (busy) return false
+        open(context, null)
+        if (inboxWaiting) {
+            inboxWaiting = false
+            inboxArrived(context)
+        }
+        return true
+    }
+
+    private fun open(
+        context: Context,
+        t: Thread?,
+    ) {
+        thread = t
+        val f = threadFile(context)
+        runCatching {
+            f.parentFile?.mkdirs()
+            if (t == null) f.delete() else f.writeText(t.json().toString())
+        }
+        show(context)
     }
 
     /** Sends [text] to the manager: one turn, its events into [items] as they come. */
     fun send(
         context: Context,
         text: String,
+        /** What the manager gets, if not [text] as shown (a "create app" request wrapped in its instructions). */
+        asked: String? = null,
     ) {
         load(context)
-        val prompt = text.trim()
-        if (prompt.isEmpty() || busy) return
-        add(Item.User(prompt))
+        val shown = text.trim()
+        val prompt = asked ?: shown
+        if (shown.isEmpty() || busy) return
+        add(Item.User(shown))
         if (!RootedGuest.enabled) {
             add(Item.Note("PowOS AI runs in the PowOS session (rooted mode), which isn't set up on this phone.", error = true))
             return
@@ -107,7 +177,8 @@ object PowosAiChat {
     fun inboxArrived(context: Context) {
         load(context)
         if (!RootedGuest.enabled) return
-        if (busy) {
+        // A thread is open: the inbox's turn is the main conversation's, once the thread is closed.
+        if (busy || thread != null) {
             inboxWaiting = true
             return
         }
@@ -122,7 +193,9 @@ object PowosAiChat {
         val exit =
             runCatching {
                 val mode = if (prompt == null) "--once-inbox" else "--once-stdin"
-                val process = RootedGuest.process("cd ~ && exec powos manager $mode --json-events", mergeErrors = false).start()
+                // The open thread's own directory (a fresh one, a fresh manager session), else home's.
+                val cd = thread?.dir?.let { "mkdir -p ~/$it && cd ~/$it" } ?: "cd ~"
+                val process = RootedGuest.process("$cd && exec powos manager $mode --json-events", mergeErrors = false).start()
                 Thread({
                     process.errorStream.bufferedReader().forEachLine {
                         synchronized(errors) {

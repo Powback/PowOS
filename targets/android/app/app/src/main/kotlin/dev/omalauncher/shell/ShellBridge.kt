@@ -195,6 +195,9 @@ class ShellBridge(
                 if (a.optBoolean(1, true)) PowosAiActivity.keepInRecents(context) else Unit
             }
             "ai.open" -> PowosAiActivity.open(context, null)
+            // "Create app": PowOS AI in a fresh thread of its own building it (PowosAiChat.newApp); back to the main one.
+            "ai.newApp" -> PowosAiChat.newApp(context.applicationContext, a.getString(0))
+            "ai.closeThread" -> PowosAiChat.closeThread(context.applicationContext)
             "ai.mail" -> aiMail()
             "ai.mailRead" -> AgentMail.read(context, a.getString(0))
             "ai.mailClear" -> AgentMail.readAll(context)
@@ -572,7 +575,10 @@ class ShellBridge(
     }
 
     private fun aiChat() =
-        JSONObject().put("busy", PowosAiChat.busy).put("items", JSONArray(PowosAiChat.items.map { it.json() }))
+        JSONObject()
+            .put("busy", PowosAiChat.busy)
+            .put("items", JSONArray(PowosAiChat.items.map { it.json() }))
+            .put("thread", PowosAiChat.thread?.json() ?: JSONObject.NULL)
 
     /**
      * [key]'s icon ("a:<key>" / "l:<id>"): its file's URL (ShellIcons), the same until the icon changes. One never

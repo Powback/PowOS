@@ -117,6 +117,8 @@ function android(host: NonNullable<Window["PowosHost"]>): Bridge {
       chat: () => call<Chat>("ai.chat"),
       send: (text, recents = true) => call("ai.send", text, recents),
       open: () => call("ai.open"),
+      newApp: (description) => call<boolean>("ai.newApp", description),
+      closeThread: () => call<boolean>("ai.closeThread"),
       mail: () => call<AgentMail[]>("ai.mail"),
       mailRead: (id) => call("ai.mailRead", id),
       mailClear: () => call("ai.mailClear"),
@@ -520,6 +522,19 @@ function mock(): Bridge {
         });
       },
       open: async () => console.log("[mock] open PowOS AI"),
+      newApp: async (description) => {
+        const step = (next: Partial<Chat>) => events.emit("ai.changed", (chat = { ...chat, ...next }));
+        const thread = { dir: "Projects/new-app-mock", title: "New app", kind: "app" };
+        step({ busy: true, thread, items: [{ kind: "user", text: description }] });
+        const tool = (hint: string, name = "Bash") => ({ kind: "tool" as const, name, hint, ok: true });
+        for (const it of [tool("powos app new notes --name Notes --dir ."), tool("module/src/lib.rs", "Write"), tool("ui/pages/main.tsx", "Write"), tool("powos app install .")]) {
+          await new Promise((r) => setTimeout(r, 300));
+          step({ items: [...chat.items, it] });
+        }
+        step({ busy: false, items: [...chat.items, { kind: "assistant", text: "(mock) Notes: a list of notes, in your drawer." }] });
+        return true;
+      },
+      closeThread: async () => (events.emit("ai.changed", (chat = { busy: false, items: [], thread: null })), true),
       mailRead: async (id) => console.log("[mock] mail read", id),
       mailClear: async () => console.log("[mock] all mail read"),
       mail: async () => {

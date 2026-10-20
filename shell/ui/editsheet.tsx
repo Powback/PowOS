@@ -10,6 +10,7 @@ import { carry, editing, home } from "../state.ts";
 import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { placeNew } from "./grid.tsx";
+import { startNewApp } from "./appbuild.tsx";
 import type { AppWidgetProvider, ThemeChoice } from "../types.ts";
 
 const themes = signal<ThemeChoice[]>([]);
@@ -92,7 +93,8 @@ export function EditSheet() {
       </div>
       <div class="sheet-items">
         {item(`new widget with ${who}`, () => powos.agents.newWidget())}
-        {item(`new app with ${who}`, () => powos.agents.newApp())}
+        {/* PowOS AI builds a PowOS app in its own chat thread (ui/appbuild.tsx); another agent, in a terminal. */}
+        {item(`new app with ${who}`, () => (agent.value === "PowOS AI" ? startNewApp() : powos.agents.newApp()))}
         {item("android widget", () => (picker.value = true))}
         {!home.value.items.some((i) => i.key === "panel:agents") &&
           item("agents widget", () => {
