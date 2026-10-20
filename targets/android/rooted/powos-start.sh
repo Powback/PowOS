@@ -57,6 +57,10 @@ done
 dns=$(getprop net.dns1); [ -n "$dns" ] || dns=192.168.50.100
 printf 'nameserver %s\nnameserver 1.1.1.1\n' "$dns" > "$R/etc/resolv.conf"
 
+# The PowOS app's home layout and store, backed up into PowOS's root once an hour when they changed (one instance;
+# docs/APP-DATA-BACKUP.md): an app-data wipe then loses at most that hour.
+[ -f /data/powos/powos-appdata.sh ] && (sh /data/powos/powos-appdata.sh watch > /dev/null 2>&1 < /dev/null &)
+
 # SSH into PowOS (port 2222: Android may use 22). Keys are generated on first start.
 chroot "$R" /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/root /bin/sh -c '
   [ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A

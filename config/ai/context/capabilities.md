@@ -266,6 +266,7 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 | Displays | `0` = active panel (cover 1116×2484 folded / inner 2268×2440 open); `cmd device_state print-state`: 0 = folded |
 | Hosted Android widgets | private virtual displays `powos-appwidget-N` (not the screen; don't capture them) |
 | Root | Magisk (`su`); SELinux enforcing |
+| App data backups | full: `/data/powos/backup/app-data-<time>.tar`; hourly layout + store: `/data/powos/root/var/backups/powos-app/light-<time>.tar` - `su -c "sh /data/powos/powos-appdata.sh list\|backup\|restore <tar>"` (`docs/APP-DATA-BACKUP.md`) |
 | adb | phone-local `127.0.0.1:5555` (rooted.sh wifi); LAN `192.168.50.239:5555`; VPN `10.13.13.7:5555`. On the phone itself `emulator-5554` is this same phone's adbd auto-detected on port 5555 (a bare `adb shell` then fails, "more than one device"): always pass `-s 127.0.0.1:5555`. An AVD only on the Mac |
 
 ### Shipping a change (edit → test → ship → roll back)
@@ -280,6 +281,11 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 | Rootfs | `build-rootfs.sh` → `out/powos-rootfs.tar.gz` | `rooted.sh install --note "<what changed>"` (replaces `/data/powos/root`) | reinstall the old tarball |
 | PowOS layer (`lib/`, `bin/`, `config/`) | repo | copy into `/data/powos/root/usr/lib/powos/…` (or `/etc/powos/…`) as root, then `targets/android/tools/deploy-note.sh "<what changed>"` | copy back the old file |
 Built centrally and shipped whole. Never `pacman -Syu` on the phone.
+**Never `pm uninstall-system-updates com.powos.app` (nor `pm clear`, nor a downgrade) without the backup step: it
+deletes the app's whole data dir** - home layout, hosted widgets, installed PowOS app UIs, chat, mail, the shell's
+store (lost for good on 2026-10-20). Re-basing on the system copy is only `su -c "sh /data/powos/powos-appdata.sh
+rebase <apk>"` (backup, refuses without one, restore after); afterwards check PowOS still has Magisk Superuser (the
+user re-grants it). `docs/APP-DATA-BACKUP.md`; `test/tier1/test-appdata-guard.sh` enforces it.
 Every ship to the phone carries `--note`: one plain line of what changed for the user ("Switcher now follows your finger", never a hash or a file) - the phone's quiet "update applied" notification, deploys within 2 min folded into one (`powos comms notify --from deploy --priority low --batch deploy`).
 
 ### Shell errors reach the manager (nothing only in logcat)

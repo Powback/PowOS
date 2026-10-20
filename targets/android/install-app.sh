@@ -47,6 +47,16 @@ if [ -n "$missing" ] && [ "$enforce" = "enforce" ]; then
 fi
 echo "install-app.sh: privileged permissions OK (${need:+$(echo $need | wc -w) asked, all allowlisted})"
 [ -n "$check" ] && exit 0
+# The app's data first (rooted/powos-appdata.sh: /data/powos/backup/app-data-<time>-install.tar). `install -r` keeps
+# the data, but an install that goes wrong (or one followed by a re-base) must never be the moment it's all lost.
+# No downgrade here (no -d); going back to the system copy is `powos-appdata.sh rebase` on the phone, never a bare
+# `pm uninstall-system-updates` (it wipes the data: docs/APP-DATA-BACKUP.md).
+if adb shell "[ -f /data/powos/powos-appdata.sh ]"; then
+  adb shell "su -c 'sh /data/powos/powos-appdata.sh backup install'" ||
+    { echo "install-app.sh: REFUSED - backing up the app's data failed (/data/powos/appdata.log on the phone)" >&2; exit 2; }
+else
+  echo "install-app.sh: warning - no /data/powos/powos-appdata.sh on the phone (rooted.sh deploy): no app-data backup" >&2
+fi
 adb install -r "$apk"
 # A one-shot re-base of the app (pm uninstall-system-updates + reinstall, e.g. powos-idle-sysupdate.sh) reinstalls
 # /data/local/tmp/powos-current.apk: keep it the APK just installed, or it would put an older build back.

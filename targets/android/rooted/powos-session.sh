@@ -23,15 +23,23 @@ m() { nsenter -t 1 -m -- "$@"; }
 APP_DOMAIN=$(ps -AZ | awk '$NF == "com.powos.app" {split($1, c, ":"); print c[3]; exit}')
 [ -n "$APP_DOMAIN" ] && magiskpolicy --live "allow $APP_DOMAIN magisk fd use" \
   "allow $APP_DOMAIN tmpfs file { read write map getattr }" && echo "sepolicy: $APP_DOMAIN may use PowOS's Wayland buffers"
+# The app's directories, bound into PowOS. A bind an earlier session left whose source has since been deleted (the
+# app's data dir made anew: `pm uninstall-system-updates`, a clear-data) still shows as mounted, onto the dead
+# directory: the session would keep running there, its apps installed where the app never looks. Replaced, not kept.
+appbind() {
+  while [ -n "$(m awk -v d="$2" '$5 == d && $4 ~ /deleted/' /proc/self/mountinfo)" ]; do
+    echo "bind $2: its source was deleted (the app's data made anew) - bound again"; m umount -l "$2" || break
+  done
+  m grep -q " $2 " /proc/mounts || m mount --bind "$1" "$2"
+}
 m mkdir -p "$R/run/powos-app"
-m grep -q " $R/run/powos-app " /proc/mounts || m mount --bind "$RUN" "$R/run/powos-app"
+appbind "$RUN" "$R/run/powos-app"
 # The launcher's widgets and styles, at the place its agents work on them (~/.config/omalauncher, as in the no-root
 # guest): PowOS AI - the launcher's agent in a PowOS session - and the PowOS shell edit the very files the launcher
 # draws. The app's files are the run dir's parent; powos owns them (its uid is the app's).
 for d in widgets style; do
   m mkdir -p "$R/home/powos/.config/omalauncher/$d" "${RUN%/run}/$d"
-  m grep -q " $R/home/powos/.config/omalauncher/$d " /proc/mounts ||
-    m mount --bind "${RUN%/run}/$d" "$R/home/powos/.config/omalauncher/$d"
+  appbind "${RUN%/run}/$d" "$R/home/powos/.config/omalauncher/$d"
 done
 # PowOS apps' installed bundles (`powos app install`: ~/.local/share/powos/apps/<id>/<version>/, a `current` link) are
 # the app's files/apps, which the shell serves (https://shell.powos/_app/<id>/) and watches for UI hot reload.
@@ -40,7 +48,7 @@ U=$(stat -c %u "$F")
 A=$R/home/powos/.local/share/powos/apps
 m mkdir -p "$A" "$F/apps"
 m chown "$U:$U" "$R/home/powos/.local" "$R/home/powos/.local/share" "$R/home/powos/.local/share/powos" "$A" "$F/apps"
-m grep -q " $A " /proc/mounts || m mount --bind "$F/apps" "$A"
+appbind "$F/apps" "$A"
 
 # The display socket as PowOS sees it: "@name" is in the abstract namespace (the app's SessionService.DISPLAY_SOCKET),
 # shared with the app as is; a socket file in the run dir is at /run/powos-app.

@@ -13,6 +13,10 @@ mkdir -p /data/adb/service.d
 install -m 755 $T/powos-start.sh /data/adb/service.d/powos.sh
 install -m 755 $T/powos-session.sh /data/powos/powos-session.sh
 install -m 755 $T/powos-run.sh /data/powos/powos-run.sh
+# The app's data kept safe (backup/restore/rebase + the hourly light backup powos-start.sh starts); the idle re-base
+# runner, which refuses without it. Never `pm uninstall-system-updates com.powos.app` by hand: it wipes the app's data.
+install -m 755 $T/powos-appdata.sh /data/powos/powos-appdata.sh
+install -m 755 $T/powos-idle-sysupdate.sh /data/powos/powos-idle-sysupdate.sh
 install -m 755 $T/powos-rooted-session $R/usr/bin/powos-rooted-session
 install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
 install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
