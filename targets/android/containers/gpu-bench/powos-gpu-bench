@@ -13,7 +13,8 @@
 # mirrors (the same versions the host runs), with the host's installed mesa + vulkan-freedreno files laid over the
 # stock ones. Rebuild after a Mesa update (the image is tagged with the Mesa version it carries).
 #
-# Runs with --rm, hard limits (1 GB, 4 CPUs, 256 pids), no network, and only the GPU node (/dev/kgsl-3d0).
+# Runs with --rm, hard limits (1 GB, 4 CPUs, 256 pids), no network, and only the GPU nodes: /dev/kgsl-3d0 and the
+# system dma-heap (Turnip allocates exportable memory - vkmark's headless swapchain - from it).
 # The unit: units/phone/gpu-bench.json. Root only (podman's storage is PowOS's: powos containers).
 set -euo pipefail
 
@@ -70,7 +71,7 @@ run() {  # run <extra podman args...> -- <command...>
     have_image || { echo "gpu-bench: no image yet - powos-gpu-bench build" >&2; exit 1; }
     # --pull=never: the image is local only (this phone's Mesa); podman would otherwise try a registry called localhost.
     exec powos containers run --rm --name "$NAME" "${LIMITS[@]}" --network none --autosleep never --pull=never \
-        --device /dev/kgsl-3d0 "${extra[@]}" "$IMAGE:latest" "$@"
+        --device /dev/kgsl-3d0 --device /dev/dma_heap/system "${extra[@]}" "$IMAGE:latest" "$@"
 }
 
 case "${1:-help}" in

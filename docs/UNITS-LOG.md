@@ -7,6 +7,13 @@ Backups named below live on the Mac under `~/Projects/PowOS/backups/oneplus-open
 `/data/powos/backup/`. Phone hosts: `phone` = PowOS's root (`powos units`), `phone-android` = Android's side
 (`sh /data/powos/powos-units.sh`). `powstation` = the Docker containers, checked from the Mac.
 
+## 2026-10-20 - gpu-benchmarks finished (container replaces the host packages)
+
+| host | item | action | undo |
+|---|---|---|---|
+| phone | `gpu-bench` | The misplaced image moved into PowOS's storage (`podman save` from plain storage, `powos containers podman load`, re-tagged `:latest`), then the plain copy removed (`podman rmi`, `/var/lib/containers/storage` 461 MB -> 160 KB). `powos-gpu-bench` now also passes `/dev/dma_heap/system` (Turnip's exportable memory; without it vkmark's headless swapchain failed with ErrorOutOfDeviceMemory). `powos-gpu-bench vk`: Turnip Adreno 740, vkmark score 4133. | `powos units remove gpu-bench` |
+| phone | `gpu-benchmarks` | `powos units remove gpu-benchmarks --dry-run` (plan: `pacman -Rns glmark2 vkmark`; required by nothing), then `--yes`. | `pacman -U /var/cache/pacman/pkg/{glmark2-2023.01-2,vkmark-1:2025.01-2}-aarch64.pkg.tar.xz` (both still in the cache) and re-register the manifest from git |
+
 ## 2026-10-20 - the first registry's orphans (board task `orphans`)
 
 Every removal ran `remove <id> --dry-run` first (or, where only part of a unit went, the list was shown and backed up
