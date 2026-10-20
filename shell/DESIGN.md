@@ -90,8 +90,10 @@ things stop moving (a per-frame placement cost a second style pass per frame of 
 4x CPU throttle, page swipes + drawer: plain fills 21.3 ms mean / 37.6 ms p95, glass 19.2 / 33.4, live
 `backdrop-filter` per tile 31.8 / 50.0. On the phone (OnePlus Open, 60 Hz, scripted over CDP): page swipes 0-2 late
 frames of 165 either way; the drawer 2-5 late of 46 with glass, 2-4 plain; live backdrop blur doubled the late frames.
-The shade's window is over an app: the host blurs behind it (WindowBlur), its page only tints. PowOS AI's page is a
-calm dark tint, no glass.
+Every page shares the tokens. Over the wallpaper in the page (home, the drawer, PowOS AI's page - a darker tint for
+its text - the lock face, islands): the frosted copy. Windows over apps: the shade's and the switcher's are blurred
+behind by the host (WindowBlur), their pages only tint; the assistant's is tinted only, darker (the app under it is
+what it circles on - blurring it would hide it).
 
 ## Hot reload
 

@@ -14,8 +14,8 @@
  *
  * Frosted again only when the picture changes ("system.glass": another wallpaper, the theme's), the screen's size
  * changes (fold/unfold), or the theme does (the light ones frost lighter). Without system.glass (an older host, the
- * desktop's) or without a wallpaper the page keeps the plain fills; in the shade's window (over an app, which the host
- * blurs itself) surfaces are only tinted (html.glass-behind).
+ * desktop's) or without a wallpaper the page keeps the plain fills; in the windows over apps (the shade's and the
+ * switcher's, which the host blurs behind; the assistant's) surfaces are only tinted (html.glass-behind).
  */
 import { powos } from "../bridge.ts";
 import type { GlassSource } from "../types.ts";
@@ -23,9 +23,8 @@ import type { GlassSource } from "../types.ts";
 const root = document.documentElement;
 /** Which page this is (index.html?mode=): home is over the wallpaper; the shade's window over an app; others neither. */
 const mode = new URLSearchParams(location.search).get("mode") ?? "home";
-/** The surfaces that get the glass: every tile and the notification panel, but not on PowOS AI's page (solid). */
-const SURFACES = ".tile, .notif-panel";
-const SOLID = ".ai-screen";
+/** The surfaces that get the glass: every tile, the notification panel, PowOS AI's page. */
+const SURFACES = ".tile, .notif-panel, .ai-screen";
 
 let source: string | null = null;
 let frosted: string | null = null;
@@ -105,10 +104,17 @@ function refrost(): Promise<void> {
   return run;
 }
 
+/**
+ * Which way each page gets its glass: home and the lock face stand on the wallpaper (the frosted copy); the shade's
+ * and the switcher's windows have what's behind them blurred by the host (tint only); the assistant's is over an app
+ * it circles on, not blurred (tint only, more of it). The rest (the screen-off clock, the glasses') have none.
+ */
+const OVER_WALLPAPER = new Set(["home", "lock"]);
+const TINT_ONLY = new Set(["shade", "recents", "assist"]);
+
 function use(g: GlassSource | null) {
-  root.classList.toggle("glass-behind", mode === "shade" && !!g?.blurBehind);
-  // Only home has the wallpaper right behind it: the shade's window, the assistant's, the switcher's are over apps.
-  source = mode === "home" ? (g?.wallpaper?.url ?? null) : null;
+  root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && (g != null || mode === "assist"));
+  source = OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : null;
   void refrost();
 }
 
@@ -147,7 +153,6 @@ function place() {
   pending = false;
   if (!root.classList.contains("glass")) return;
   for (const el of document.querySelectorAll<HTMLElement>(SURFACES)) {
-    if (el.closest(SOLID)) continue;
     const at = where(el);
     if (!at) continue;
     const b = innerHeight - (at[1] + el.offsetHeight);

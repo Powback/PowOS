@@ -846,8 +846,10 @@
     calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
 }
 .ai-top { display: flex; align-items: center; gap: 10px; }
-/* One calm layer, not glass: a dark tint of the theme's background over the wallpaper, what's on it subtle fills. */
+/* One calm layer: a dark tint of the theme's background over the wallpaper (frosted on glass), what's on it subtle fills. */
 .ai-screen { background: color-mix(in srgb, var(--color-background) 80%, transparent); padding-bottom: 0; }
+/* On glass, the page is one frosted sheet (theme.css), darker than home's for its text; what's on it soft fills. */
+.glass .ai-screen { --glass-fill: color-mix(in srgb, var(--color-background) calc(var(--glass-tint) + 30%), transparent); }
 .ai-screen .tile { background: var(--soft-fill); border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .ai-screen .ai-work-chip.on { background: var(--color-accent); }
 .ai-screen .ai-compose {

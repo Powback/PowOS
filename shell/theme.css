@@ -40,12 +40,13 @@
   --control-fill: var(--color-surface);
 
   /*
-   * Glass (ui/glass.ts): on home, surfaces are frosted - a copy of the wallpaper blurred once (never live: every
-   * surface draws the same pre-blurred picture at its own place on the screen) under a tint of the theme's
-   * background (also the plain fill, a little more of it, without a wallpaper to frost). --glass-tint: how much tint
-   * (text stays readable on any wallpaper); --glass-blur, --glass-saturate,
-   * --glass-brightness: how the copy is frosted (read when it's made). --glass-behind-tint: the shade's tint, over the
-   * app the host blurs behind it. Without a wallpaper to frost (a host without system.glass), the plain --glass fill.
+   * Glass (ui/glass.ts), one look for every page: home, the drawer, PowOS AI's page (a darker tint, for its text), the
+   * lock face, PowOS apps' islands - frosted: a copy of the wallpaper blurred once (never live: every surface draws the
+   * same pre-blurred picture at its own place on the screen) under a tint of the theme's background (also the plain
+   * fill, a little more of it, without a wallpaper to frost). The shade, the switcher and the assistant are windows
+   * over apps: tinted only (--glass-behind-tint), over what the host blurs behind them (the assistant's isn't: it's
+   * drawn on). --glass-tint: how much tint (text stays readable on any wallpaper); --glass-blur, --glass-saturate,
+   * --glass-brightness: how the copy is frosted (read when it's made).
    */
   --glass-tint: 42%;
   --glass-blur: 28px;
@@ -109,15 +110,24 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
  * are (--gx/--gy: where the surface is on the screen). A surface inside another is only a soft fill on it; PowOS AI's
  * page is solid (shell.css). No live blur anywhere.
  */
-.glass :is(.tile, .notif-panel):not(.ai-screen *) {
+.glass :is(.tile, .notif-panel, .ai-screen) {
   background:
     linear-gradient(var(--glass-fill), var(--glass-fill)) border-box,
     var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-.glass :is(.tile, .notif-panel) .tile:not(.ai-screen *) { background: var(--soft-fill); }
-/* The shade over an app (its window blurred behind by the host): tinted only. */
-.glass-behind .notif-panel { background: color-mix(in srgb, var(--color-background) var(--glass-behind-tint), transparent); }
+.glass :is(.tile, .notif-panel, .ai-screen) .tile { background: var(--soft-fill); }
+/*
+ * Glass over what the host blurs behind the window (the shade's, the switcher's) or over an app (the assistant's
+ * panel, which can't blur the app it circles on): the same surfaces, tinted only - --glass-behind-tint, more of it.
+ */
+.glass-behind :is(.tile, .notif-panel), .recents :is(.tile, .recents-banner) {
+  background: color-mix(in srgb, var(--color-background) var(--glass-behind-tint), transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.glass-behind :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
+html[data-mode="assist"] { --glass-behind-tint: 84%; }
 
 .muted { color: var(--color-muted); }
