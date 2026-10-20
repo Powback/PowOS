@@ -1,0 +1,32 @@
+# gpu-195 voice core: speech to text. faster-whisper (CUDA) large-v3-turbo, float16, resident on GPU0 (~2 GB).
+# OpenAI API: POST /v1/audio/transcriptions (VoiceAgent sends no model, so WHISPER__MODEL is the one used).
+# Unit: powos units show voice-stt  (repo units/gpu-195/voice-stt.json)
+[Unit]
+Description=PowOS voice core - STT (faster-whisper large-v3-turbo, GPU0)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=voice-stt
+Image=docker.io/fedirz/faster-whisper-server:latest-cuda
+Network=voice.network
+PublishPort=8000:8000
+AddDevice=nvidia.com/gpu=0
+SecurityLabelDisable=true
+Volume=/var/lib/powos/models/hf:/root/.cache/huggingface
+Environment=WHISPER__MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+Environment=WHISPER__INFERENCE_DEVICE=cuda
+Environment=WHISPER__COMPUTE_TYPE=float16
+Environment=WHISPER__TTL=-1
+Environment=WHISPER__CPU_THREADS=4
+Environment=LOG_LEVEL=info
+Label=io.powos.unit=voice-stt
+PodmanArgs=--memory=6g --memory-swap=6g --cpus=4 --pids-limit=512
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

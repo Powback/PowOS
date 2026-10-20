@@ -1,0 +1,45 @@
+{
+  "id": "voice-web",
+  "name": "VoiceAgent web UI",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
+  "owner": "system:voice",
+  "purpose": "VoiceAgent's Astro web UI (image built on the box from ~/Projects/VoiceAgent/VoiceAgentWeb) on :4321; Traefik on .100 routes voiceagent.pow here (/ws, /transcribe to voice-agent)",
+  "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
+  "image": "localhost/voiceagent-web:latest",
+  "ports": [
+    "4321/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.config/containers/systemd/voice-web.container"
+  ],
+  "processes": [
+    {
+      "systemd": "voice-web.service"
+    },
+    {
+      "container": "voice-web"
+    }
+  ],
+  "limits": {
+    "memory": "1g",
+    "memory_swap": "1g",
+    "cpus": 1,
+    "pids": 256
+  },
+  "autosleep": "never",
+  "gpu": "none (CPU)",
+  "health": "http://voiceagent.pow/",
+  "remove": {
+    "stop": [
+      "systemctl --user stop voice-web.service"
+    ],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/voice-web.container",
+      "systemctl --user daemon-reload",
+      "podman rmi localhost/voiceagent-web:latest"
+    ],
+    "keep": []
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "voice-network",
+  "name": "voice podman network",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
+  "owner": "system:voice",
+  "purpose": "the rootless podman network the voice units talk over by container name (voice-stt, voice-tts, voice-llm, voice-agent, voice-web)",
+  "installedBy": "hosts/gpu-195/install.sh",
+  "files": [
+    "/var/home/powos/.config/containers/systemd/voice.network"
+  ],
+  "processes": [
+    {
+      "systemd": "voice-network.service"
+    }
+  ],
+  "unbounded": "a network definition, nothing runs",
+  "autosleep": "never",
+  "remove": {
+    "stop": [],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/voice.network",
+      "systemctl --user daemon-reload",
+      "podman network rm voice"
+    ],
+    "keep": []
+  }
+}

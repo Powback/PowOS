@@ -1,0 +1,23 @@
+{
+  "id": "powos-units-shim",
+  "name": "powos units (from the repo checkout)",
+  "kind": "system",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
+  "owner": "system:gpu-195-setup",
+  "purpose": "HACK: the image (powos 0.3.0, 0f5e878, built from master) has no `powos units`; /usr/local/bin/powos routes `units` to the git checkout /var/home/powos/Projects/PowOS (branch worktree-powos-multiplatform, `git pull` updates it) and everything else to /usr/bin/powos. Real fix: an image with powos-units, rpm-ostree upgrade + reboot at a quiet time, then remove this",
+  "files": [
+    "/usr/local/bin/powos",
+    "/var/home/powos/Projects/PowOS"
+  ],
+  "unbounded": "a CLI shim, nothing resident",
+  "remove": {
+    "stop": [],
+    "commands": [
+      "sudo rm -f /usr/local/bin/powos"
+    ],
+    "keep": [
+      "/var/home/powos/Projects/PowOS"
+    ]
+  }
+}

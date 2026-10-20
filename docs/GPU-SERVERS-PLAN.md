@@ -1,7 +1,8 @@
 # GPU servers: the plan (2026-10-21)
 
 PowOS now has real GPU servers on the LAN. This is how inference (voice, LLMs, everything AI) is laid out across
-them, how it's run and managed, and the order to build it in. Status: **plan, not built**.
+them, how it's run and managed, and the order to build it in. Status: **phases 1-3 built on `.195` (2026-10-21), see
+[Status](#status-2026-10-21); phases 4-6 not started**.
 
 ## What we have
 
@@ -155,3 +156,84 @@ Target: end of speech -> first audio in **< 800 ms** (STT ~150 ms, first token ~
 - **Public voice endpoint:** `voiceagent.powback.com` behind Authelia, as before.
 - **The 5090 box stays** the big-model host. If it's going away, `coder-32b` moves to tensor-parallel on the two
   3090s with voice off-hours, or to a 14B on GPU1.
+
+## Status (2026-10-21)
+
+Phases 1-3 are up on `.195`, deployed by `hosts/gpu-195/install.sh` (quadlets, env, image builds, unit registration;
+idempotent, run as `powos` from `~/Projects/PowOS`). Units: `units/gpu-195/*.json` (host `desktop`, the box's
+platform). VoiceAgent ran unchanged: config only (branch `server-gpu195` in `~/Projects/VoiceAgent`, not pushed).
+
+**Base.**
+- CDI: nothing to do. The image's `nvidia-cdi-refresh` already writes `/var/run/cdi/nvidia.yaml` at boot and on driver
+  changes, and podman reads it. A static `/etc/cdi` copy would go stale on the next driver update, so none was made.
+  `podman run --device nvidia.com/gpu=0|1 --security-opt label=disable ... nvidia-smi -L` works on both 3090s, rootless.
+- `powos units`: the box runs image 0.3.0 (0f5e878, built from master), which has no units tool, and an image update
+  means `rpm-ostree` + a reboot. The desktop session (seat0, auto-login, screen locked) was live, so there was no
+  reboot. `/usr/local/bin/powos` (unit `powos-units-shim`, a marked HACK) routes `units` to a git checkout of
+  `worktree-powos-multiplatform` at `~/Projects/PowOS`, and everything else to the image's `/usr/bin/powos`.
+  - Real fix: an image with powos-units, then `rpm-ostree upgrade` + reboot at a quiet time, then remove the shim.
+- Linger was already on. Firewalld's FedoraWorkstation zone already allows 1025-65535/tcp, so the service ports
+  needed no change.
+- Models: `/var/lib/powos/models` (unit `models-store`).
+  - `hf/` is the HF cache shared by vLLM, faster-whisper and the backend.
+  - `torch/` holds Silero VAD; `vllm/` is vLLM's compile cache.
+  - 8.2 GB used.
+- `powos units check` passes for everything added here. It still lists the base OS (Bazzite's own /etc/systemd links,
+  the desktop's processes, and an unexplained `/etc/systemd/system/powback-stripe.service`) because the box has no
+  baseline unit yet. That is phase 6: `powos units baseline`, after someone looks at powback-stripe.
+
+**Voice core on GPU0** (rootless podman quadlets, `Restart=always`, started at boot, `autosleep: never`):
+
+| unit | image | port | VRAM measured | RAM (limit) |
+|---|---|---|---|---|
+| `voice-stt` | `fedirz/faster-whisper-server:latest-cuda`, `deepdml/faster-whisper-large-v3-turbo-ct2` float16 | 8000 | 2.3 GiB | 0.7 GB (6g) |
+| `voice-tts` | `remsky/kokoro-fastapi-gpu:latest`, bf_emma | 8880 | 1.0 GiB | 1.6 GB (4g) |
+| `voice-llm` | `vllm/vllm-openai:latest`, `Qwen/Qwen3-8B-AWQ` as `qwen3-8b` | 8100 | 10.9 GiB | 2.9 GB (16g) |
+
+GPU0 total: 15.5 GiB of 24, including about 30 MB for the desktop's kwin. It sits at P2, about 130 W, with everything
+resident; GPU1 is idle at P8, about 19 W.
+
+- vLLM's budget: 0.42 with the default `--max-num-seqs` (256) left 1.35 GiB of KV cache, and one 16k sequence needs
+  2.25 GiB, so vLLM refused to start. With `--max-num-seqs 16` and `--gpu-memory-utilization 0.45`, it gets 4.5 GiB
+  of KV (33k tokens).
+
+Each service measured alone (`hosts/gpu-195/bench/voice-bench.py`, median of 5, warm):
+
+| | |
+|---|---|
+| STT, 1.9 s utterance | 250 ms (300 ms with `--cpus=2`, hence 4 threads/4 CPUs). The old faster-whisper-server always decodes beam 5 and pads to a 30 s window, so the 150 ms target needs a different server, not config. |
+| TTS, first audio (streamed PCM) | 55 ms. A one-sentence WAV takes 48 ms. |
+| LLM first token | 27 ms |
+| LLM decode | 129 tok/s |
+
+**VoiceAgent** (`voice-agent` :9000 and `voice-web` :4321, images built on the box from the repo, config in
+`~/.config/voiceagent/voiceagent.env` plus `secrets.env` at mode 600):
+- `VLLM_ENABLE_THINKING=false`: a Qwen3 think block would delay the first spoken word.
+- Traefik on `.100`: `PowStation/config/traefik/dynamic/voiceagent.yml`.
+  - `voiceagent.pow` goes to the web UI. `/ws` and `/transcribe` go straight to the backend.
+  - Pi-hole already had `voiceagent.pow`.
+  - Rewriting the file from inside the Colima VM (`colima ssh`) fires the file provider's watch, so Traefik was not
+    restarted.
+- Verified with a scripted WebSocket client. A Kokoro-made "Hey Luna, what time is it?" was streamed in real time and
+  returned a transcript, LLM tokens (with a tool call) and TTS audio.
+  - Wake word: after a `sleep`, plain speech got no reply, and "Hey Luna..." woke it and got one.
+  - Barge-in has not been tested; it needs a client that plays the audio back.
+- End of speech -> first audio byte: 1.35 s median direct (1.29-1.75 s), and 1.4-1.9 s through Traefik. Not yet the
+  800 ms target. Where the time goes, from the backend log:
+
+| step | time |
+|---|---|
+| VAD end-of-speech wait (`VAD_MIN_SILENCE_MS=500`) | 500 ms |
+| STT | 170 ms |
+| speaker identification (speechbrain, CPU, before the LLM call) | 310 ms |
+| LLM with VoiceAgent's tool-call buffering + long system prompt | 350 ms |
+| first TTS sentence | 150 ms |
+
+- The knobs that would close the gap are VoiceAgent code, not config, so they were left alone ("don't port, just
+  init"): diarization off the critical path, a faster STT server, and a shorter VAD tail.
+
+**Left for later:**
+- The public `voiceagent.powback.com`. `/ws` has no auth of its own on the upgrade, so it can't take the Authelia
+  WebSocket bypass, and behind forwardAuth it hangs. Decide this with the phase 5 clients.
+- Phase 4 (router / `llm.pow`): the `litellm` provider is configured, but nothing answers.
+- Phases 5-6.

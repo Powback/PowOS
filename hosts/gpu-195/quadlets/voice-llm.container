@@ -1,0 +1,41 @@
+# gpu-195 voice core: the voice agent's fast LLM. vLLM, Qwen3-8B-AWQ (awq_marlin), tool calling (hermes parser),
+# 16k context, resident on GPU0 in a ~11 GB budget (--gpu-memory-utilization 0.45 of 24 GB) so STT + TTS fit beside it.
+# Measured: 0.42 with vLLM's default --max-num-seqs (256) left 1.35 GiB of KV cache after the 5.7 GiB of weights and the
+# activation peak, and one 16k sequence needs 2.25 GiB, so vLLM refused to start. --max-num-seqs 16 (the voice path
+# serves a handful of conversations, not a batch) shrinks the peak: 0.45 gives 4.5 GiB of KV (33k tokens, two full 16k sequences).
+# OpenAI API on :8100 (served model name qwen3-8b). Phase 4: the router maps `voice-fast` here.
+# Unit: powos units show voice-llm  (repo units/gpu-195/voice-llm.json)
+[Unit]
+Description=PowOS voice core - LLM (vLLM Qwen3-8B-AWQ, GPU0)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=voice-llm
+Image=docker.io/vllm/vllm-openai:latest
+Network=voice.network
+PublishPort=8100:8000
+AddDevice=nvidia.com/gpu=0
+SecurityLabelDisable=true
+ShmSize=4g
+Volume=/var/lib/powos/models/hf:/root/.cache/huggingface
+Volume=/var/lib/powos/models/vllm:/root/.cache/vllm
+Label=io.powos.unit=voice-llm
+PodmanArgs=--memory=16g --memory-swap=16g --cpus=4 --pids-limit=4096
+Exec=--model Qwen/Qwen3-8B-AWQ \
+     --served-model-name qwen3-8b \
+     --quantization awq_marlin \
+     --enable-auto-tool-choice \
+     --tool-call-parser hermes \
+     --max-model-len 16384 \
+     --gpu-memory-utilization 0.45 \
+     --max-num-seqs 16 \
+     --port 8000
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=default.target

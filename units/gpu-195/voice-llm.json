@@ -1,0 +1,51 @@
+{
+  "id": "voice-llm",
+  "name": "Voice LLM (vLLM Qwen3-8B-AWQ)",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
+  "owner": "system:voice",
+  "purpose": "the voice agent's fast LLM: vLLM Qwen/Qwen3-8B-AWQ (awq_marlin, hermes tool calls, 16k context, max 16 seqs, --gpu-memory-utilization 0.45), resident; OpenAI API on :8100 as qwen3-8b (phase 4: the router's voice-fast)",
+  "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
+  "image": "docker.io/vllm/vllm-openai:latest",
+  "ports": [
+    "8100/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.config/containers/systemd/voice-llm.container"
+  ],
+  "processes": [
+    {
+      "systemd": "voice-llm.service"
+    },
+    {
+      "container": "voice-llm"
+    }
+  ],
+  "limits": {
+    "memory": "16g",
+    "memory_swap": "16g",
+    "cpus": 4,
+    "pids": 4096
+  },
+  "autosleep": "never",
+  "gpu": "nvidia.com/gpu=0",
+  "vramBudget": "11g",
+  "vramMeasured": "10.9 GiB",
+  "health": "http://192.168.50.195:8100/health",
+  "remove": {
+    "stop": [
+      "systemctl --user stop voice-llm.service"
+    ],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/voice-llm.container",
+      "systemctl --user daemon-reload",
+      "podman rmi docker.io/vllm/vllm-openai:latest"
+    ],
+    "keep": [
+      "/var/lib/powos/models/hf",
+      "/var/lib/powos/models/vllm"
+    ]
+  },
+  "vramNote": "GPU0 belongs to the realtime voice path (docs/GPU-SERVERS-PLAN.md); nothing else allocates on it"
+}

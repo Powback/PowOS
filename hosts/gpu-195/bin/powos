@@ -1,0 +1,16 @@
+#!/bin/bash
+# /usr/local/bin/powos on gpu-195 (192.168.50.195): `powos units` from the repo checkout, everything else from the image.
+#
+# HACK: this box runs ghcr.io/powback/powos:nvidia-open 0.3.0 (0f5e878), built from master, which predates
+# `powos units` (lib/apps/powos-units lives on worktree-powos-multiplatform only). An rpm-ostree rebase + reboot is
+# the way an image update lands, and the box's desktop session was in use, so the units tool runs from a git
+# checkout (/var/home/powos/Projects/PowOS, branch worktree-powos-multiplatform; `git pull` there updates it) and
+# only `units` is routed to it - the rest of the CLI stays the image's, so a newer bin/powos can't break an older
+# image's commands.
+# Real fix: once powos-units is in the image the box tracks, `rpm-ostree upgrade` + reboot at a quiet time, then
+# `sudo rm /usr/local/bin/powos` (unit `powos-units-shim`).
+POWOS_CHECKOUT=/var/home/powos/Projects/PowOS
+case "${1:-}" in
+    units|unit) shift; exec python3 "$POWOS_CHECKOUT/lib/apps/powos-units" "$@" ;;
+esac
+exec /usr/bin/powos "$@"
