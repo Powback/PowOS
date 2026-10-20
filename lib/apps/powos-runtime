@@ -8,8 +8,11 @@ HOW it runs, by a global setting plus a per-app override:
   sandbox    the same binary under bubblewrap: its own user/pid/uts/cgroup namespaces (no IPC namespace: Android's
              kernel has no System V IPC, so --unshare-all fails), a read-only view of the system, a private /tmp, only
              its data dir writable, network shared or off, a seccomp denylist, and Landlock where the kernel has it
-  container  podman - for apps that need a foreign userland. Not ready on the phone yet (/dev/fuse and cgroup v2 are
-             deferred, section 2): refused with "not ready yet", never silently run some other way
+  container  podman through powos-container (docs/PHONE-KERNEL-CONTAINERS.md section 12): the manifest's
+             backend.container.image (a foreign userland), else PowOS's own / read-only as the container's root - the
+             same binary. Hard limits from the budget: memMB -> --memory, cpuPct -> --cpus, pids -> --pids-limit
+             (on the phone in Android's cgroup v1 memcg/cpuctl + v2 pids; one the kernel lacks: a warning, not a
+             refusal). Network: the host's, or none (needs.network)
 
 Flipping the mode never changes the app: the same command, data dir (bound at the same path), port (the host's
 network namespace unless the manifest says "none"), uid (the user namespace maps it to itself) and so identity.
@@ -32,8 +35,13 @@ import sys
 MODES = ("native", "sandbox", "container")
 CONFIG = os.environ.get("POWOS_RUNTIME_CONFIG", "/var/lib/powos/runtime/config.json")
 PLATFORM_FILE = "/etc/powos/platform"
-NOT_READY = ("container: not ready yet on this device - rootless podman needs /dev/fuse and cgroup v2 controllers, "
-             "both deferred (docs/POWOS-APPS-FEASIBILITY.md section 2); use native or sandbox")
+CONTAINER = os.environ.get("POWOS_CONTAINER", "/usr/lib/powos/apps/powos-container")
+NOT_READY = ("container: no podman or powos-container on this machine (docs/PHONE-KERNEL-CONTAINERS.md section 12); "
+             "use native or sandbox")
+
+
+def container_ready():
+    return bool(shutil.which("podman")) and os.access(CONTAINER, os.X_OK)
 
 
 def die(msg, code=1):
@@ -282,20 +290,24 @@ def run(path, mode=None, dry=False):
     mode = mode or mode_of(m["id"])
     if mode not in MODES:
         die(f"unknown mode {mode} ({', '.join(MODES)})")
-    if mode == "container":
+    if mode == "container" and not container_ready():
         die(NOT_READY, 78)
     data = b.get("data") or f"/var/lib/powos/apps/{m['id']}"
     user = b.get("user", "powos")
     argv = [expand(x, data) for x in b["exec"]]
     if dry:
-        print(json.dumps({"id": m["id"], "mode": mode, "user": user, "data": data, "budget": budget_of(m),
-                          "argv": argv}, indent=2))
+        out = {"id": m["id"], "mode": mode, "user": user, "data": data, "budget": budget_of(m), "argv": argv}
+        if mode == "container":
+            out["container"] = container_argv(m, data, argv, environment(m, pwd.getpwnam(user), data), pwd.getpwnam(user))
+        print(json.dumps(out, indent=2))
         return
     pw = pwd.getpwnam(user)
     if os.getuid() == 0:
         os.makedirs(data, exist_ok=True)
         os.chown(data, pw.pw_uid, pw.pw_gid)
         os.chmod(data, 0o700)
+    if mode == "container":
+        return run_container(m, data, argv, pw)
     apply_budget(budget_of(m))
     drop_to(user)
     env = environment(m, pw, data)
@@ -308,6 +320,61 @@ def run(path, mode=None, dry=False):
     if mode == "native":
         os.execvpe(argv[0], argv, env)
     os.execvp("bwrap", sandbox_argv(m, data, argv, env))
+
+
+def container_argv(m, data, argv, env, pw):
+    """powos-container run ... for this app: its limits from the budget, its data dir at the same path, its uid."""
+    needs = m.get("needs") or {}
+    budget = budget_of(m)
+    c = m["backend"].get("container") or {}
+    name = "powos-app-" + "".join(ch if ch.isalnum() or ch in "_.-" else "-" for ch in m["id"])[:50]
+    # --init: the app isn't PID 1, which ignores SIGTERM without a handler (the supervisor's stop would hang).
+    a = [CONTAINER, "run", "--name", name, "--rm", "--replace", "--init", "--user", f"{pw.pw_uid}:{pw.pw_gid}",
+         "--workdir", data, "-v", f"{data}:{data}"]
+    if "memMB" in budget:
+        a += ["--memory", f"{int(budget['memMB'])}m"]
+    if "cpuPct" in budget:
+        a += ["--cpus", f"{float(budget['cpuPct']) / 100:g}"]
+    if "pids" in budget:
+        a += ["--pids-limit", str(int(budget["pids"]))]
+    if "nofile" in budget:
+        a += ["--ulimit", f"nofile={int(budget['nofile'])}:{int(budget['nofile'])}"]
+    a += ["--network", "none" if needs.get("network", "host") == "none" else "host"]
+    for p in needs.get("write", []):
+        p = expand(p, data)
+        a += ["-v", f"{p}:{p}"]
+    for p in needs.get("read", []):
+        p = expand(p, data)
+        a += ["-v", f"{p}:{p}:ro"]
+    for d in needs.get("devices", []):
+        a += ["--device", d]
+    for k, v in env.items():
+        a += ["-e", f"{k}={v}"]
+    if c.get("image"):
+        return a + [c["image"], *[expand(x, data) for x in c.get("exec", argv)]]
+    # No image: PowOS's own userland, read-only, as the container's root - the same binary as native and sandbox
+    # (powos-container turns "/" into a bind of it that crun can pivot_root into).
+    return a + ["--read-only", "--rootfs", "/", *argv]
+
+
+def run_container(m, data, argv, pw):
+    """As root: the prepare steps as the app's user (natively, as in the other modes), then the container."""
+    env = environment(m, pw, data)
+    for step in m["backend"].get("prepare") or []:
+        pid = os.fork()
+        if pid == 0:
+            try:
+                drop_to(pw.pw_name)
+                os.chdir(data)
+                os.execve("/bin/sh", ["/bin/sh", "-c", expand(step, data)], env)
+            finally:
+                os._exit(127)
+        _, st = os.waitpid(pid, 0)
+        if os.waitstatus_to_exitcode(st) != 0:
+            die(f"{m['id']}: prepare step failed ({os.waitstatus_to_exitcode(st)}): {step}")
+    a = container_argv(m, data, argv, env, pw)
+    print(f"powos-runtime: {m['id']} container as {pw.pw_name}, data {data}", file=sys.stderr, flush=True)
+    os.execv(a[0], a)
 
 
 # ── what this machine has ───────────────────────────────────────────────────
@@ -324,10 +391,8 @@ def check():
     ll = landlock_abi()
     rows.append(("sandbox", ok, f"bwrap {bw or '-'}, seccomp {'yes' if seccomp_bpf() else 'no'}, "
                                 f"landlock {'ABI ' + str(ll) if ll else 'not in this kernel'}"))
-    fuse = os.access("/dev/fuse", os.R_OK | os.W_OK)
-    rows.append(("container", "no" if device() == "phone" else ("yes" if shutil.which("podman") else "no"),
-                 f"podman {shutil.which('podman') or '-'}, /dev/fuse {'rw' if fuse else 'no access'}"
-                 + (" - not ready yet on the phone" if device() == "phone" else "")))
+    rows.append(("container", "yes" if container_ready() else "no",
+                 f"podman {shutil.which('podman') or '-'}, limits: {CONTAINER} check"))
     c = load_config()
     print(f"default: {c['default']}" + "".join(f"\n  {k}: {v}" for k, v in sorted(c["apps"].items())))
     for r in rows:
@@ -371,7 +436,7 @@ def main(argv):
         mode = rest[0]
         if mode not in MODES:
             die(f"mode must be one of: {', '.join(MODES)}")
-        if mode == "container" and device() == "phone":
+        if mode == "container" and not container_ready():
             die(NOT_READY, 78)
         if app:
             c["apps"][app] = mode

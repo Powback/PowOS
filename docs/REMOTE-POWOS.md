@@ -288,7 +288,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-86 markers on 2026-10-20.
+95 markers on 2026-10-20.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -303,6 +303,12 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `lib/ai/agents/powos-agentsd:699` | The Mirror class itself: a shell command (docker exec powos-vadb adb shell su) as transport (C1). | REMOTE-POWOS.md M2. |
 | `lib/ai/agents/powos-rootsh:4` | One long-lived `adb shell su` on the phone for the Mac's tools (mirror, mail): a dev channel as runtime transport (C1, C4, C5). | REMOTE-POWOS.md M2 (mirror) and M6 (mail): nothing on the Mac needs root on the phone; delete it. |
 | `lib/apps/powos-app:672` | `powos app dev` polls source files (stat, 4x/s) because Python's stdlib has no inotify. | inotify through ctypes, or inotifywait when the image ships inotify-tools. |
+| `lib/apps/powos-container:292` | On the phone an OCI hook is each container's cgroup manager (podman `--cgroups=disabled`): Android keeps memory/cpu on cgroup v1 at `/dev/memcg` / `/dev/cpuctl`, which crun's manager can't drive. | Memory and cpu on cgroup v2 beside Android's own use (PHONE-KERNEL-CONTAINERS §9.3), then podman's own limits; delete the hook. |
+| `lib/apps/powos-container:410` | vfs storage (a full copy per container) when the ext4 image can't be made: overlayfs refuses f2fs as its upper layer. | The ext4 image (the overlay path), or an f2fs overlayfs accepts. |
+| `lib/apps/powos-container:424` | The container storage image carries vold's SELinux label (`vold_data_file`): the loop driver does its I/O as the kernel domain, which may only read/write a few types. | A type of our own in the system module's sepolicy (`allow kernel powos_container_image:file { read write }`). |
+| `lib/apps/powos-container:450` | Overlay storage on an ext4 filesystem in a file (`/var/lib/containers/powos.img`, loop): overlayfs refuses f2fs as its upper layer. | An f2fs/overlayfs combination that works, or an ext4 partition of our own. |
+| `lib/apps/powos-container:623` | `powos containers exec` stops the exec'd shell, moves it into the container's groups and continues it: crun exec joins no cgroup with `--cgroups=disabled`. | Memory/cpu on cgroup v2 (§9.3), so crun's exec joins the container's cgroup itself. |
+| `lib/apps/powos-container:662` | `--rootfs /` (the runtime's container mode without an image) becomes a read-only non-recursive bind of / at `/run/powos-containers/hostroot`: crun can't pivot_root onto its own root (EBUSY). | crun binding such a rootfs itself before pivot_root (upstream). |
 | `lib/apps/powos-supervisor:17` | Own supervisor with soft budgets: systemd --user limits need a delegated cgroup v2 subtree Android doesn't give. | The cgroup v2 move (FEASIBILITY §2.4), then one unit per manifest; delete the supervisor. |
 | `shell/apps/pages.ts:98` | The recent strip places PowOS apps by when the host's front app changed: `usage.recent` comes without times. | `usage.recent` with each app's last time (ShellBridge.kt) and PowOS apps' opens recorded there, one list ordered by time. |
 | `shell/apps/stdb.ts:11` | Apps use the server's anonymous per-database tokens: there is no PowOS issuer yet (C15). | REMOTE-POWOS.md M4: the shell mints per-app JWTs from the realm issuer. |

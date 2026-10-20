@@ -157,6 +157,8 @@ Layers & rollback:
 
 Packages, containers & build:
   containers          List containers and images
+  containers run      Run a container with hard limits (--memory/--cpus/--pids-limit; phone too)
+  containers ps       Containers with their limits; exec/limits/check: see containers --help
   containers create   Create a new distrobox container
   containers enter    Enter a distrobox container
   containers assemble Create all predefined containers
@@ -2529,6 +2531,15 @@ _containers_do_usage() {
     echo "Usage: powos containers <command>"
     echo ""
     echo "Commands:"
+    echo "  run [options] <image> [cmd...]  Run a container with hard limits (options before the image):"
+    echo "                          --memory 64m  --memory-swap 128m  --cpus 0.5  --cpuset-cpus 0-2"
+    echo "                          --pids-limit 64  --name N  --network host|none  -d  --rm  -it  -e  -v  ..."
+    echo "                          (phone: Android's cgroup v1 memcg/cpuctl + v2 pids; a limit the kernel"
+    echo "                          can't enforce runs with a warning, never silently)"
+    echo "  ps [-a] [--json]        Containers with their limits (memory used/limit, CPU, pids)"
+    echo "  exec [-it] <name> <cmd> Run a command in a container, inside its limits"
+    echo "  limits <name>           A container's limits and counters (throttling, OOM kills)"
+    echo "  check                   What this kernel enforces; storage, namespace, network"
     echo "  list [--json]           List all containers and images (--json for widgets)"
     echo "  start <name>            Start a stopped container"
     echo "  stop <name>             Stop a container (keeps it — restartable)"
@@ -2536,23 +2547,37 @@ _containers_do_usage() {
     echo "  logs <name> [--lines N] Show the last N log lines (default 200)"
     echo "  create <name> [image]   Create a new distrobox container"
     echo "  enter <name>            Enter a distrobox container"
-    echo "  remove <name>           Remove a distrobox container"
+    echo "  remove|rm [-f] <name>   Remove a container (distrobox or podman; phone: and its limit groups)"
     echo "  assemble                Create all predefined containers"
     echo "  export <name> <app>     Export app from container to host"
     echo "  prune                   Clean up unused resources"
     echo "  podman <args>           Pass through to podman"
     echo "  sync <user@host>        Wire this box into a PowStation pihole-sync"
     echo ""
+    echo "Full details: powos containers run --help"
+    echo ""
     echo "Examples:"
+    echo "  powos containers run --rm --memory 64m --cpus 0.2 --pids-limit 32 alpine sh"
     echo "  powos containers create dev"
     echo "  powos containers enter dev"
     echo "  powos containers assemble"
 }
 
+# Containers with hard limits (lib/apps/powos-container): run/ps/exec/limits/check everywhere; on the phone the
+# lifecycle verbs too, since its podman is the rootful one in PowOS's system tier with Android's cgroups (the
+# rootless/sudo paths below never see those containers).
+_containers_runtime() { exec "$POWOS_LIB/apps/powos-container" "$@"; }
+
 cmd_containers() {
     local action="${1:-list}"
 
+    if declare -f powos_is_phone >/dev/null && powos_is_phone; then
+        case "$action" in
+            ps|stop|start|restart|remove|rm|delete|destroy) _containers_runtime "$@" ;;
+        esac
+    fi
     case "$action" in
+        run|ps|exec|limits|check) _containers_runtime "$@" ;;
         list|ls)                  _containers_do_list "${2:-}" ;;
         create)                   _containers_do_create "${2:-}" "${3:-}" ;;
         enter)                    _containers_do_enter "${2:-}" ;;

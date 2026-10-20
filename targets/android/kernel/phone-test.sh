@@ -9,6 +9,9 @@
 #                              plain cgroup files, no podman
 #   ./phone-test.sh podman     `podman run --pids-limit 10 --cpus 0.2 --memory 64m alpine` in the PowOS root
 #                              (needs the controllers on cgroup v2: the -v2test boot image)
+#   ./phone-test.sh containers the real runtime: `powos-container run` (hybrid: Android's v1 memcg/cpuctl, v2 pids)
+#                              with --memory 64m --memory-swap 64m --cpus 0.2 --pids-limit 10, then pids, a CPU loop and
+#                              a 200 MB hog through `powos-container exec`; any kernel (what it lacks: a warning)
 # ADB="docker exec -i powos-vadb adb" ./phone-test.sh check     when the phone is only reachable through the VPN
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -95,5 +98,29 @@ B=/data/adb/magisk/busybox; $B unshare -m $B sh -c "$B mount --make-rprivate / &
 POD
 EOF
   ;;
-*) sed -n 2,13p "$0"; exit 1 ;;
+containers)
+  su_sh <<'EOF'
+P="chroot /data/powos/root /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/usr/sbin HOME=/root /usr/bin/powos-container"
+$P check
+$P rm -f -t 0 powos-limits-test >/dev/null 2>&1
+$P run -d --name powos-limits-test --memory 64m --memory-swap 64m --cpus 0.2 --pids-limit 10 docker.io/library/alpine \
+  sleep 300 >/dev/null || exit 1
+tail -1 /data/powos/root/var/log/powos/containers.log
+G=powos/powos-limits-test
+echo "== pids 10: 15 forks"
+$P exec powos-limits-test sh -c 'for i in $(seq 15); do sleep 3 & done 2>&1 | grep -c fork | sed "s/^/refused: /"; wait'
+[ -f /sys/fs/cgroup/$G/pids.events ] && echo "pids.events: $(cat /sys/fs/cgroup/$G/pids.events)   (max > 0 = refused)"
+echo "== cpu 0.2: a 5 s busy loop"
+$P exec powos-limits-test timeout 5 sh -c 'while :; do :; done'
+grep -E 'nr_periods|nr_throttled|throttled_time' /dev/cpuctl/$G/cpu.stat | tr '\n' ' '; echo
+[ -f /dev/cpuctl/$G/cpu.cfs_quota_us ] || echo "(no CFS quota in this kernel: cpu.shares only, nothing is throttled)"
+echo "== memory 64m, no swap: a 200 MB hog"
+$P exec powos-limits-test sh -c 'head -c 209715200 /dev/zero | tail > /dev/null; echo "hog exit: $? (137 = OOM-killed)"'
+grep oom_kill /dev/memcg/$G/memory.oom_control | tr '\n' ' '; echo
+$P ps
+$P rm -f -t 0 powos-limits-test >/dev/null
+ls -d /dev/memcg/$G /dev/cpuctl/$G /sys/fs/cgroup/$G 2>/dev/null || echo "groups removed"
+EOF
+  ;;
+*) sed -n 2,16p "$0"; exit 1 ;;
 esac
