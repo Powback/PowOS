@@ -1110,10 +1110,14 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   --rx: 0px;
   --ry: 0px;
   --rh: 0;
-  --card-w: min(72vw, 440px, calc(62vh * var(--screen-ratio-n, 0.45)));
+  /* --screen-h: the screen's height without the keyboard (recents.tsx bounds), not 100vh. */
+  --card-w: min(72vw, 440px, calc(0.62 * var(--screen-h, 100vh) * var(--screen-ratio-n, 0.45)));
   --card-radius: max(var(--radius), 22px);
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--screen-h, 100vh);
   z-index: 40;
   display: flex;
   flex-direction: column;

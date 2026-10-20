@@ -22,6 +22,7 @@ import { powos } from "../bridge.ts";
 import type { RecentTask } from "../types.ts";
 import { TaskCard, type Rect } from "./switcher.tsx";
 import { spring } from "./spring.ts";
+import { dropKeyboard } from "./keyboard.ts";
 import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from "../apps/pages.ts";
 
 type Phase = "closed" | "drag" | "shown";
@@ -34,8 +35,18 @@ const from = signal<number | null>(null);
 const live = signal(false);
 /** Animating between states (CSS transitions on), rather than following a finger. */
 const settling = signal(false);
-/** The screen's size: the cards are the screen's shape. */
-const size = signal({ w: innerWidth, h: innerHeight });
+/**
+ * The screen's size, the keyboard left out: the cards are the screen's shape. A height that shrinks at the same width
+ * while the keyboard is up is the keyboard's, not the screen's - the cards keep the full one (a switcher opened over
+ * the PowOS AI page's open keyboard laid its cards out short and off center).
+ */
+const keyboardUp = () => (parseFloat(document.documentElement.style.getPropertyValue("--inset-keyboard")) || 0) > 0;
+function bounds(was?: { w: number; h: number }) {
+  const w = innerWidth;
+  const h = was && was.w === w && innerHeight < was.h && keyboardUp() ? was.h : innerHeight;
+  return { w, h };
+}
+const size = signal(bounds());
 /** A card's menu, open over it. */
 const menu = signal<{ id: number; left: number; top: number } | null>(null);
 /** Split screen: the first app picked, waiting for the second. */
@@ -121,6 +132,8 @@ function prefetch(list: RecentTask[]) {
 }
 
 function begin(e: { from: number | null; tasks: RecentTask[] }) {
+  // The keyboard goes as the swipe starts, as for a page swipe (gesture.ts): the cards are laid out without it.
+  dropKeyboard();
   loaded.value = true;
   console.log(`recents: begin over ${e.from}, ${e.tasks.length} tasks, visible ${document.visibilityState}`);
   settle(false);
@@ -135,13 +148,16 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
 
 /** Shown without a swipe (the overview button, up and hold over home): it comes up over home. */
 async function show(e: { from: number | null; tasks: RecentTask[] }) {
-  // A PowOS app open full screen in home: it goes into its card (its picture taken as it closes).
+  dropKeyboard();
+  // Ordered while a PowOS app open full screen in home still counts as showing: its card comes first.
+  const list = order(e.tasks, e.from);
+  // That app goes into its card (its picture taken as it closes).
   if (appView.value) closeApp();
   loaded.value = true;
   settle(false);
   reset();
   from.value = e.from;
-  tasks.value = order(e.tasks, e.from);
+  tasks.value = list;
   live.value = false;
   phase.value = "shown";
   toStart();
@@ -379,7 +395,10 @@ powos.on("switcher.toggle", () => {
   if (next) open(next.id, row?.querySelector<HTMLElement>(`.task[data-task="${next.id}"] .task-shot`) ?? undefined);
   else close();
 });
-addEventListener("resize", () => (size.value = { w: innerWidth, h: innerHeight }));
+addEventListener("resize", () => {
+  const next = bounds(size.value);
+  if (next.w !== size.value.w || next.h !== size.value.h) size.value = next;
+});
 
 /** A card's stand-in while there are no tasks: the first card's slot stays laid out (it's measured). */
 function Placeholder() {
@@ -520,7 +539,7 @@ export function Recents() {
     <div
       ref={el}
       class={`recents ${p} ${p === "closed" ? "" : "open"} ${live.value ? "live" : ""} ${settling.value ? "settling" : ""} ${first != null ? "splitting" : ""}`}
-      style={{ "--screen-ratio": `${w} / ${h}`, "--screen-ratio-n": String(w / h) }}
+      style={{ "--screen-ratio": `${w} / ${h}`, "--screen-ratio-n": String(w / h), "--screen-h": `${h}px` }}
       onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}
       onTransitionEnd={(e) => {
         if (e.target === row) reportSlot();
