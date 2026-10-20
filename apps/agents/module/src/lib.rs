@@ -132,6 +132,101 @@ pub struct Work {
     project: String,
 }
 
+/// The unit registry's fleet view (lib/apps/powos-units, `powos units publish`): every unit on every host - what is
+/// installed or running, whose it is, why, its status and resource use, its limits - plus one `_check` row per host
+/// with its drift. Each publish replaces that host's rows. The PowOS AI page lists it per host, orphans first.
+#[spacetimedb::table(accessor = unit, public)]
+pub struct Unit {
+    /// "<host>/<id>".
+    #[primary_key]
+    key: String,
+    #[index(btree)]
+    host: String,
+    id: String,
+    name: String,
+    /// app | service | container | system | package | watcher | compose | scratch.
+    kind: String,
+    /// app:<id> | agent:<role> | user | system:<what installed it>.
+    owner: String,
+    purpose: String,
+    /// running | asleep | stopped | installed | missing (the `_check` row: clean | drift).
+    status: String,
+    mem_kb: u64,
+    /// CPU in tenths of a percent of one core.
+    cpu_permille: u32,
+    limits: String,
+    autosleep: String,
+    /// Found with no clear owner or purpose: the user decides (`decide` is the question).
+    orphan: bool,
+    decide: String,
+    updated: u64,
+}
+
+#[derive(Deserialize)]
+struct UnitIn {
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    owner: String,
+    #[serde(default)]
+    purpose: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default, rename = "memKB")]
+    mem_kb: u64,
+    #[serde(default, rename = "cpuPct")]
+    cpu_pct: f64,
+    #[serde(default)]
+    limits: String,
+    #[serde(default)]
+    autosleep: String,
+    #[serde(default)]
+    orphan: bool,
+    #[serde(default)]
+    decide: String,
+}
+
+const UNITS_PER_HOST: usize = 400;
+
+/// One host's units (`powos units publish`): replaces every row of that host. Writers: the host's reporters.
+#[spacetimedb::reducer]
+pub fn unit_sync(ctx: &ReducerContext, host: String, units: String) -> Result<(), String> {
+    may_write(ctx, &host)?;
+    let rows: Vec<UnitIn> = serde_json::from_str(&units).map_err(|e| format!("units: {e}"))?;
+    let now = now_ms(ctx);
+    let keep: std::collections::HashSet<String> =
+        rows.iter().take(UNITS_PER_HOST).map(|u| format!("{host}/{}", u.id)).collect();
+    let gone: Vec<String> = ctx.db.unit().host().filter(&host).map(|u| u.key).filter(|k| !keep.contains(k)).collect();
+    for k in gone {
+        ctx.db.unit().key().delete(k);
+    }
+    for u in rows.into_iter().take(UNITS_PER_HOST) {
+        let key = format!("{host}/{}", u.id);
+        ctx.db.unit().key().delete(key.clone());
+        ctx.db.unit().insert(Unit {
+            key,
+            host: host.clone(),
+            id: cut(u.id, 96),
+            name: cut(u.name, 96),
+            kind: cut(u.kind, 16),
+            owner: cut(u.owner, 96),
+            purpose: cut(u.purpose, 300),
+            status: cut(u.status, 16),
+            mem_kb: u.mem_kb,
+            cpu_permille: (u.cpu_pct.max(0.0) * 10.0) as u32,
+            limits: cut(u.limits, 120),
+            autosleep: cut(u.autosleep, 48),
+            orphan: u.orphan,
+            decide: cut(u.decide, 300),
+            updated: now,
+        });
+    }
+    Ok(())
+}
+
 // The batch powos-agentsd sends: its spool rows as JSON (§3 field names).
 #[derive(Deserialize)]
 struct Batch {

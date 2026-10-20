@@ -324,6 +324,21 @@ def main(argv):
                 return 0
             die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
         return 0
+    if argv[0] == "units":
+        # powos units publish: one host's units (lib/apps/powos-units snapshot) replace that host's rows in the `unit`
+        # table, which the PowOS AI page lists. argv: units sync <base64 of {"host", "units": [...]}>.
+        if len(argv) != 3 or argv[1] != "sync":
+            die("usage: powos agents units sync <base64 JSON> (powos units publish writes it)")
+        try:
+            body = json.loads(base64.b64decode(argv[2]))
+            call("unit_sync", body["host"], json.dumps(body["units"], separators=(",", ":")))
+        except Down as e:
+            if os.environ.get("POWOS_AGENTS_REMOTE", "1") != "0" and remote(argv):
+                return 0
+            die(f"the powos-agents module isn't reachable at {SERVER} ({e})")
+        except (ValueError, KeyError) as e:
+            die(f"units sync: {e}")
+        return 0
     die(f"unknown: {argv[0]} (powos agents help)")
 
 

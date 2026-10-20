@@ -16,6 +16,7 @@ import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import { useDb, useRows } from "../apps/stdb.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
+import { Units } from "./units.tsx";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
@@ -377,6 +378,7 @@ export function PowAiPage() {
       <div class="ai-scroll">
         <Now />
         <Work shown={shown} />
+        <Units shown={shown} />
         <button type="button" class="ai-session tile" onClick={() => openAgents()}>
           <span class="ai-dot" />
           <span class="ai-session-main">

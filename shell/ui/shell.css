@@ -839,6 +839,12 @@
 .ai-work-caret { flex: none; width: 8px; font-size: var(--text-small); }
 .ai-work-wait { color: var(--color-accent); font-weight: bold; }
 .ai-work-blocked { color: var(--color-red); }
+/* installed & running (units.tsx): orphans marked for the user to decide; asleep dimmed */
+.ai-unit.orphan { box-shadow: inset 3px 0 0 var(--color-accent); }
+.ai-unit-flag { color: var(--color-accent); font-weight: bold; }
+.ai-unit-decide { color: var(--color-accent); }
+.ai-dot.asleep { background: color-mix(in srgb, var(--color-accent) 45%, transparent); }
+.ai-unit .ai-work-meta { max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
 /* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
 .ai-work-box { padding: 4px 0; display: flex; flex-direction: column; }
 .ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }
