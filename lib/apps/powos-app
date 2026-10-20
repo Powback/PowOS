@@ -18,7 +18,7 @@ Make one (the whole loop, from a sentence to the phone - each step is one comman
                                      The module (Rust -> wasm) builds on the app builder (powos app builder) over
                                      ssh when one is set, else here if cargo + wasm32 are installed; the UI always
                                      builds here (bun, ~0.1 s). An unchanged module isn't rebuilt.
-  powos app install <dir>            build if needed, publish the module (unless the device's live module is this
+  powos app install <dir>            build (what changed), publish the module (unless the device's live module is this
                                      very build - checked against the database, not the local build), put the UI
                                      in place, register it
   powos app dev <dir>                hot reload while you edit: every save rebuilds what changed and pushes it -
@@ -676,9 +676,9 @@ def register(text):
 
 def cmd_install(d):
     m, text = manifest(d)
-    if not built(d, m) or (m.get("module") and not os.path.isfile(os.path.join(d, "out", ".module.sha"))
-                           and os.path.isfile(os.path.join(d, "module", "Cargo.toml"))):
-        cmd_build(d, [])
+    # Always: an unchanged module isn't rebuilt (its source hash), and the UI bundles in ~0.1 s - an install never
+    # ships a UI older than its source (it did: ui/lib edited, out/ui kept).
+    cmd_build(d, [])
     ensure_registry()
     ensure_published(d, m)
     install_ui(d, m)
