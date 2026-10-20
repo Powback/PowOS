@@ -322,6 +322,27 @@ def run(path, mode=None, dry=False):
     os.execvp("bwrap", sandbox_argv(m, data, argv, env))
 
 
+def autosleep_flags(value):
+    """The manifest's "autosleep" key (powos-sleep-common, shared by every sleeper) -> powos-container run flags."""
+    if value is None:
+        return []
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+    here = [os.path.dirname(CONTAINER), os.path.dirname(os.path.realpath(__file__))]
+    path = next((p for p in (os.path.join(d, "powos-sleep-common") for d in here) if os.path.exists(p)), None)
+    if not path:
+        return []  # an older install without autosleep: the container runs without a rule (the default)
+    loader = SourceFileLoader("powos_sleep_common", path)
+    common = module_from_spec(spec_from_loader("powos_sleep_common", loader))
+    loader.exec_module(common)
+    r = common.from_manifest(value)
+    if r is None:
+        return []
+    if r.get("never"):
+        return ["--autosleep", "never"]
+    return ["--autosleep", str(r["idle"]), "--sleep-mode", r["mode"]] + (["--autostop", str(r["stop"])] if r["stop"] else [])
+
+
 def container_argv(m, data, argv, env, pw):
     """powos-container run ... for this app: its limits from the budget, its data dir at the same path, its uid."""
     needs = m.get("needs") or {}
@@ -340,6 +361,7 @@ def container_argv(m, data, argv, env, pw):
     if "nofile" in budget:
         a += ["--ulimit", f"nofile={int(budget['nofile'])}:{int(budget['nofile'])}"]
     a += ["--network", "none" if needs.get("network", "host") == "none" else "host"]
+    a += autosleep_flags(m.get("autosleep"))
     for p in needs.get("write", []):
         p = expand(p, data)
         a += ["-v", f"{p}:{p}"]

@@ -451,3 +451,70 @@ SpacetimeDB stays native (not flipped).
 Battery 100 % on USB, 27-30 °C throughout. Nothing flashed or rebooted by these tests. Tier 1:
 `test/tier1/test-powos-container.py` (fake cgroup trees).
 
+
+## 13. Autosleep: idle containers sleep, and wake on demand (2026-10-20)
+
+`lib/apps/powos-autosleep` (loaded by powos-container; `powos containers autosleep --help`). The never-sleep list,
+the manifest key and durations are `lib/apps/powos-sleep-common`, shared with every other sleeper (`powos sleep`:
+native/sandbox apps, GUI apps, SpacetimeDB databases); containers publish to the same status board.
+
+### 13.1 Rules
+
+| where | how |
+|---|---|
+| run flags | `--autosleep 5m\|never`, `--sleep-mode pause\|stop`, `--autostop 6h` (stored as the label `io.powos.autosleep`) |
+| app manifest | `"autosleep": {"idle": "5m", "mode": "pause"\|"hibernate"\|"stop", "stop": "6h"}` or `"never"` (powos-runtime's container mode turns it into the flags) |
+| later | `powos containers autosleep set <name> 5m\|never\|off [--sleep-mode ...] [--autostop ...]` |
+| default | phone: every container, 5 min idle, pause. Desktop: only with `--autosleep` |
+| never | `spacetimedb`, `spacetime`, `comms`, `agentsd` as a word of the name (system services), and anything set to never |
+
+`hibernate` (CRIU) pauses here: the phone's kernel has no CRIU yet (docs/POWOS-COMPUTE-MESH.md). `--rm` containers
+only pause (a stop would remove them); that includes every app the runtime runs in container mode.
+
+### 13.2 Idle, and the device
+
+Idle = no established TCP connection on the container's sockets, CPU under 2 % of one core, no exec session (a
+process in the container's pid namespace whose parent is outside it), for the whole idle time. While any device
+trigger holds, the idle time is 1 min: screen off for over 2 min (every `card0-DSI-*` panel's `dpms` Off: the fold
+has two), battery under 20 % and not charging, battery saver on (`cmd settings get global low_power`, HACK), battery
+over 42 C or skin (`skin-msm-therm`) over 45 C.
+
+### 13.3 Sleeping and waking
+
+- **pause**: the container's processes go into `/sys/fs/cgroup/powos/<name>` (the v2 group the pids limit already
+  uses, made if missing) and `cgroup.freeze` is set (podman refuses `pause` with `--cgroups=disabled`, HACK). Memory
+  stays; the container takes no CPU; a frozen container keeps its listening sockets, so the kernel still completes
+  the TCP handshake and queues the connection.
+- **wake on a connection**: the watcher holds a duplicate of each listening socket (`pidfd_getfd`) in epoll; the
+  first queued connection makes it readable, the watcher thaws the group, and the container accepts the connection
+  as if nothing happened. Event-driven: nothing polls a socket.
+- **stop** (asked for, or `--autostop` after a long pause): `podman stop`, then a socket-activation proxy on the ports
+  it listened on; the first connection starts it (`podman start`), waits for the port and forwards that connection.
+- **wake on request**: `powos containers wake <name>` or `start <name>` (what an app or widget calls when it opens
+  one); `exec` wakes it first (an exec into a frozen container would hang). `stop`/`restart`/`rm` thaw it first.
+- **the watcher**: one process (`powos-container autosleep watch`), started by the first `powos containers` call that
+  needs it, gone 10 min after the last container. One /proc scan every 30 s, epoll in between. If it stops or
+  fails, it thaws every container it paused (a paused container with no watcher would never wake on a connection).
+  Unit manifest: `/etc/powos/units.d/container-autosleep.json`.
+- `powos containers autosleep status [--json]`: the watcher, the device line and its triggers, and per container
+  its rule, state (awake / asleep / stopped), for how long, and why. `powos containers ps` shows `asleep`.
+
+### 13.4 Tested on the phone (2026-10-20, containers kernel, nothing flashed or rebooted)
+
+Throwaway containers (python http.server on 127.0.0.1, `--rootfs /`), the watcher at a 5 s tick for the test:
+
+| | result |
+|---|---|
+| idle 20 s, pause | frozen (`cgroup.events frozen 1`), `ps` shows `asleep`, 12 MB kept |
+| a request to the paused one | **200 in 7 ms** end to end; the thaw itself 0.3 ms |
+| idle 20 s, stop | `podman stop`; proxy on its port |
+| a request to the stopped one | **200 in 397 ms** (podman start 387 ms), the connection forwarded |
+| `powos containers start` of a paused one | thawed in 0.2 ms (131 ms for the whole CLI call) |
+| a container named `...-comms` | `never (system service)`, stayed awake |
+
+A real app in the runtime's container mode (a throwaway manifest, `dev.powos.sleeptest`: a counter page served by
+its own backend, its count in its data dir; budget 64 MB / 20 % / 32 pids, `"autosleep": {"idle": "30s"}`):
+UI served, the count written to its data dir as the app's uid (10359), `/` read-only; the budget enforced (a 200 MB
+hog OOM-killed with exit 137, a busy loop throttled 76 of 86 periods, forks refused at 32); paused after 30 s idle;
+a request while asleep **200 in 8 ms**, the count kept; `powos containers wake` 0.2 ms (146 ms CLI end to end).
+Tier 1: `test/tier1/test-powos-autosleep.py`.

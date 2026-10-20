@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""powos-sleep-common - what every PowOS sleeper shares: the never-sleep list, the manifest's "autosleep" key, durations.
+
+One config surface for every kind of thing that sleeps (containers: powos-autosleep; native/sandbox apps, GUI apps,
+SpacetimeDB databases: powos sleep). Loaded as a module (SourceFileLoader), not run.
+
+  manifest:  "autosleep": {"idle": "5m", "mode": "pause" | "hibernate" | "stop", "stop": "6h"}   or   "never"
+  rule:      {"idle": 300, "mode": "pause", "stop": 0}   or   {"never": True}
+
+  idle   how long it must be idle before it sleeps (default 5m)
+  mode   pause = frozen in memory (cgroup freezer), wakes in ms - the default
+         hibernate = checkpointed to disk (CRIU), wakes in ~1-3 s; where there is no CRIU it pauses instead
+         stop = stopped, started again on demand
+  stop   after this long asleep, stop it (0 = never)
+"""
+import re
+
+DEFAULT = {"idle": 300, "mode": "pause", "stop": 0}
+MODES = ("pause", "hibernate", "stop")
+
+# System services never sleep, wherever they run (matched as a word in the name or the app id).
+NEVER = ("spacetimedb", "spacetime", "comms", "agentsd")
+NEVER_RE = re.compile(r"(^|[-_.])(" + "|".join(NEVER) + r")([-_.]|$)", re.I)
+
+
+def is_never(name):
+    return bool(NEVER_RE.search(name or ""))
+
+
+def seconds(s):
+    """5m / 30s / 6h / 1d / 300 -> seconds."""
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)([smhd]?)", str(s).strip().lower())
+    if not m:
+        raise ValueError(f"not a duration: {s} (e.g. 30s, 5m, 6h)")
+    return int(float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)])
+
+
+def fmt(sec):
+    sec = int(sec)
+    for unit, n in (("d", 86400), ("h", 3600), ("m", 60)):
+        if (sec >= n and sec % n == 0) or sec >= 10 * n:
+            return f"{sec // n}{unit}"
+    return f"{sec}s"
+
+
+def rule(idle=None, mode=None, stop=None):
+    """A rule from loose values (flags or a manifest). Raises ValueError on bad ones."""
+    if str(idle).strip().lower() in ("never", "off", "no", "false", "0"):
+        return {"never": True}
+    r = {"idle": seconds(idle) if idle is not None else DEFAULT["idle"], "mode": (mode or DEFAULT["mode"]).lower(),
+         "stop": seconds(stop) if stop else 0}
+    if r["mode"] not in MODES:
+        raise ValueError(f"mode: one of {', '.join(MODES)}, not {r['mode']}")
+    return r
+
+
+def from_manifest(value):
+    """The manifest's "autosleep" value -> a rule, or None when the key is absent (the sleeper's default applies)."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return dict(DEFAULT) if value else {"never": True}
+    if isinstance(value, str):
+        return rule(value)
+    return rule(value.get("idle"), value.get("mode"), value.get("stop"))
+
+
+def encode(r):
+    return "never" if r.get("never") else f"idle={r['idle']},mode={r['mode']},stop={r.get('stop', 0)}"
+
+
+def decode(s):
+    if not s:
+        return None
+    if s.strip() == "never":
+        return {"never": True}
+    r = dict(DEFAULT)
+    for kv in s.split(","):
+        k, _, v = kv.partition("=")
+        if k in ("idle", "stop") and v.isdigit():
+            r[k] = int(v)
+        elif k == "mode" and v in MODES:
+            r[k] = v
+    return r
+
+
+def describe(r):
+    if r.get("never"):
+        return "never"
+    s = f"{fmt(r['idle'])} {r['mode']}"
+    return s + (f", stop {fmt(r['stop'])}" if r.get("stop") else "")

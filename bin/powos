@@ -2540,6 +2540,9 @@ _containers_do_usage() {
     echo "  exec [-it] <name> <cmd> Run a command in a container, inside its limits"
     echo "  limits <name>           A container's limits and counters (throttling, OOM kills)"
     echo "  check                   What this kernel enforces; storage, namespace, network"
+    echo "  autosleep status        What is asleep and why (idle containers pause; phone: after 5 min by default)"
+    echo "  autosleep set <name> 5m|never|off   A container's rule (run: --autosleep 5m --sleep-mode pause|stop)"
+    echo "  wake <name>             Wake a sleeping container (start and a connection to its ports do too)"
     echo "  list [--json]           List all containers and images (--json for widgets)"
     echo "  start <name>            Start a stopped container"
     echo "  stop <name>             Stop a container (keeps it — restartable)"
@@ -2558,6 +2561,7 @@ _containers_do_usage() {
     echo ""
     echo "Examples:"
     echo "  powos containers run --rm --memory 64m --cpus 0.2 --pids-limit 32 alpine sh"
+    echo "  powos containers run -d --autosleep 5m --sleep-mode pause IMG   (autosleep status|set|sleep, wake NAME)"
     echo "  powos containers create dev"
     echo "  powos containers enter dev"
     echo "  powos containers assemble"
@@ -2568,7 +2572,7 @@ _containers_do_usage() {
 # rootless/sudo paths below never see those containers).
 _containers_runtime() { exec "$POWOS_LIB/apps/powos-container" "$@"; }
 _containers_by_runtime() {
-    case "$1" in run|ps|exec|limits|check) return 0 ;; esac
+    case "$1" in run|ps|exec|limits|check|autosleep|wake) return 0 ;; esac
     declare -f powos_is_phone >/dev/null && powos_is_phone || return 1
     case "$1" in stop|start|restart|remove|rm|delete|destroy) return 0 ;; esac
     return 1

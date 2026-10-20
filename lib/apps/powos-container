@@ -32,6 +32,15 @@ it runs in if it is a real root, never a chroot: crun's pivot_root fails there),
   powos containers limits <name>                        its groups: limits, usage, throttling, OOM kills
   powos containers check                                what this kernel enforces, storage, namespace, network
   powos containers podman <args...>                     podman with PowOS's storage and namespace (pull, images, logs, inspect)
+
+Autosleep (section 13; on the phone every container sleeps after 5 min idle unless told otherwise):
+      --autosleep 5m|never   idle time before it sleeps    --sleep-mode pause|stop   (default pause: frozen, ms wake)
+      --autostop 6h          stop it after this long paused (not for --rm containers)
+  powos containers autosleep status [--json]            what is asleep and why, the device triggers
+  powos containers autosleep set <name> 5m|never|off    change a container's rule (--sleep-mode, --autostop)
+  powos containers autosleep sleep <name>               put it to sleep now
+  powos containers wake <name>                          wake it (start does too; so does a connection to its ports)
+  powos containers autosleep --help                     the whole story: idle, triggers, waking
 """
 import json
 import os
@@ -270,11 +279,15 @@ def remove_groups(name):
     return left
 
 
+NOT_OURS = {"sleep"}  # /sys/fs/cgroup/powos/sleep: powos sleep's frozen app/GUI groups, never a container's
+
+
 def our_groups():
     names = set()
     for k, d in groups("").items():
         try:
-            names.update(n for n in os.listdir(d) if os.path.isdir(f"{d}/{n}") and NAME_RE.match(n))
+            names.update(n for n in os.listdir(d) if os.path.isdir(f"{d}/{n}") and NAME_RE.match(n)
+                         and n not in NOT_OURS)
         except OSError:
             pass
     return names
@@ -508,7 +521,23 @@ BOOL = {"-d", "--detach", "--rm", "-i", "--interactive", "-t", "--tty", "--privi
         "--replace", "-q", "--quiet", "--rmi", "--no-healthcheck", "--no-hosts", "-P", "--publish-all",
         "--read-only-tmpfs", "--sig-proxy", "--oom-kill-disable", "--http-proxy", "--env-host", "--systemd"}
 OURS = {"--memory": "mem", "-m": "mem", "--memory-swap": "memsw", "--cpus": "cpus", "--cpuset-cpus": "cpuset",
-        "--pids-limit": "pids", "--name": "name"}
+        "--pids-limit": "pids", "--name": "name", "--autosleep": "as_idle", "--sleep-mode": "as_mode",
+        "--autostop": "as_stop"}
+AS_FLAGS = ("as_idle", "as_mode", "as_stop")
+
+
+def autosleep():
+    """lib/apps/powos-autosleep (sleeping and waking idle containers), next to this file."""
+    m = sys.modules.get("powos_autosleep")
+    if m is None:
+        from importlib.machinery import SourceFileLoader
+        from importlib.util import module_from_spec, spec_from_loader
+        loader = SourceFileLoader("powos_autosleep", os.path.join(os.path.dirname(SELF), "powos-autosleep"))
+        m = module_from_spec(spec_from_loader("powos_autosleep", loader))
+        loader.exec_module(m)
+        sys.modules["powos_autosleep"] = m
+    m.pc = sys.modules[__name__]
+    return m
 
 
 def parse_run(args):
@@ -568,17 +597,27 @@ def parse_run(args):
         if not lim["pids"].isdigit() or int(lim["pids"]) < 1:
             die(f"--pids-limit: a positive number: {lim['pids']}")
         out["pids"] = lim["pids"]
+    out.update({k: lim[k] for k in AS_FLAGS if k in lim})  # cmd_run takes these out again (the autosleep rule)
     return name, out, rest, net
+
+
+def detached(rest):
+    return any(a == "--detach" or re.fullmatch(r"-[itP]*d[ditP]*", a) for a in rest)
 
 
 def cmd_run(argv, args):
     name, lim, rest, net = parse_run(args)
+    asl = autosleep()
+    rule = asl.rule_from_flags(lim, rm="--rm" in rest)
+    label = [f"--label={asl.LABEL}={asl.encode(rule)}"] if rule else []
     base = prepare(argv)
     if not PHONE:  # podman's own cgroups do it
         native = {"mem": "--memory", "memsw": "--memory-swap", "cpus": "--cpus", "cpuset": "--cpuset-cpus",
                   "pids": "--pids-limit"}
         flags = [f"{native[k]}={v}" for k, v in lim.items()]
-        return podman(base, "run", f"--name={name}", *flags, *rest).returncode
+        if rule and not rule.get("never"):
+            asl.ensure_watcher()
+        return podman(base, "run", f"--name={name}", *flags, *label, *rest).returncode
     mode = (net or "host").split(":")[0]
     if mode in ("pasta", "slirp4netns", "bridge") or mode.startswith("bridge"):
         die(f"--network {mode}: not on this phone yet. pasta can't sandbox itself without IPC namespaces (this "
@@ -592,12 +631,14 @@ def cmd_run(argv, args):
     extra = [] if net else ["--network=host"]  # the phone's network, as 50-powos-phone.conf says
     rest = host_rootfs(rest)
     r = podman(base, "run", "--cgroups=disabled", f"--annotation={ANNOT}={encode({'name': name, **lim})}",
-               f"--name={name}", *extra, *rest, background=True)
+               f"--name={name}", *extra, *label, *rest, background=True)
+    if not (rule or {}).get("never") and not asl.common.is_never(name):
+        asl.ensure_watcher()
     # Signals to us (the supervisor stopping an app, ^C) go to podman, which hands them to the container.
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, lambda s, _f: r.send_signal(s))
     code = r.wait()
-    if not any(a == "--detach" or re.fullmatch(r"-[itP]*d[ditP]*", a) for a in rest):
+    if not detached(rest):
         gc()
     return code
 
@@ -618,6 +659,7 @@ def cmd_exec(argv, args):
         die("usage: powos containers exec [-it] [-e K=V] [-u user] <name> <command...>")
     name, cmd = args[i], args[i + 1:]
     base = prepare(argv)
+    autosleep().wake(base, name)  # exec into a frozen container would hang; the session keeps it awake
     if not PHONE or not any(os.path.isdir(d) for d in groups(name).values()):
         return podman(base, "exec", *flags, name, *cmd).returncode
     # HACK: crun exec joins no cgroup when podman runs with --cgroups=disabled, so a plain `podman exec` would run
@@ -706,10 +748,11 @@ def cmd_ps(argv, args):
     if r.returncode:
         sys.stderr.write(r.stderr)
         return r.returncode
-    rows = []
+    rows, asleep = [], autosleep().load()["asleep"]
     for c in json.loads(r.stdout or "[]"):
         n = c["Names"][0] if isinstance(c.get("Names"), list) else c.get("Names", "")
-        rows.append({"name": n, "image": c.get("Image", ""), "state": c.get("State", ""),
+        state = "asleep" if c.get("State") == "running" and n in asleep else c.get("State", "")
+        rows.append({"name": n, "image": c.get("Image", ""), "state": state,
                      "status": c.get("Status", ""), "limits": usage_of(n) if PHONE else {}})
     if "--json" in args:
         print(json.dumps(rows))
@@ -733,6 +776,15 @@ def cmd_life(argv, verb, args):
             die(f"invalid name: {n}")
     base = prepare(argv)
     flags = [a for a in args if a.startswith("-")]
+    asl = autosleep()
+    if verb == "start":  # a sleeping one is woken (thawed, or started through the watcher that holds its ports)
+        woke = [n for n in names if asl.wake(base, n) == 0]
+        names = [n for n in names if n not in woke]
+        if not names:
+            return 0
+    else:
+        for n in names:
+            asl.release(base, n)  # stop/restart/rm of a sleeping one: thawed first, its watch dropped
     r = podman(base, verb, *flags, *names)
     if PHONE:
         gc()
@@ -805,7 +857,7 @@ def main(argv):
         print(__doc__.strip())
         return 0
     cmd, rest = argv[0], argv[1:]
-    if rest[:1] in (["-h"], ["--help"]):
+    if rest[:1] in (["-h"], ["--help"]) and cmd != "autosleep":
         print(__doc__.strip())
         return 0
     if cmd == "hook":
@@ -831,7 +883,14 @@ def main(argv):
         return 0
     if cmd == "podman":
         return podman(prepare(argv), *rest).returncode
-    die(f"unknown command {cmd} (run, ps, exec, stop, start, restart, rm, limits, check, podman)")
+    if cmd == "autosleep":
+        if rest[:1] in (["-h"], ["--help"], ["help"]):
+            print(autosleep().__doc__.strip())
+            return 0
+        return autosleep().cmd(prepare(argv), rest)
+    if cmd == "wake":
+        return autosleep().cmd(prepare(argv), ["wake", *rest])
+    die(f"unknown command {cmd} (run, ps, exec, stop, start, restart, rm, wake, autosleep, limits, check, podman)")
 
 
 if __name__ == "__main__":

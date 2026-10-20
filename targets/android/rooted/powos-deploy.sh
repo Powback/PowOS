@@ -181,6 +181,11 @@ if [ -d $A ]; then
   # powos-container: containers with hard limits in Android's cgroups (docs/PHONE-KERNEL-CONTAINERS.md section 12;
   # `powos containers run`, the runtime's container mode). It installs its OCI hooks itself on first use.
   for f in powos-runtime powos-supervisor powos-app powos-container; do install -m 755 $A/$f $L/$f; ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
+  # powos-container's autosleep (section 13) and the never-sleep list + manifest key every sleeper shares: modules,
+  # loaded from next to powos-container.
+  for f in powos-autosleep powos-sleep-common; do install -m 755 $A/$f $L/$f; done
+  # What each of these adds to the system, for `powos units` (the unit manifests: owner, files, processes, limits, removal).
+  mkdir -p $R/etc/powos/units.d && install -m 644 $A/units.d/*.json $R/etc/powos/units.d/
   install -m 644 $A/services/*.json $L/services/
   # `powos app new`'s templates (lib/apps/templates).
   if [ -d $A/templates ]; then rm -rf $L/templates && cp -r $A/templates $L/templates && chmod -R a+rX $L/templates; fi
