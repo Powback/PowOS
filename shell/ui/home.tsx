@@ -12,6 +12,7 @@ import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gesture.ts";
 import { Carried, Pages, startCarry } from "./grid.tsx";
+import { hasRecentsWidget, RecentRow } from "./recentwidget.tsx";
 import { carriedApp, shownLess } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
@@ -25,30 +26,6 @@ import { NotificationPanel } from "./notifications.tsx";
 import { PowAiPage } from "./powai.tsx";
 import { Recents } from "./recents.tsx";
 import { byKey, carry, dock, dockAim, dockDrag, editing, menu, recent, setDock } from "../state.ts";
-
-/**
- * The apps opened lately, last first - not those pinned to the dock, which are at hand already. Six to a width, the
- * rest a sideways scroll away; back at the newest whenever the list changes.
- */
-function RecentRow() {
-  const row = useRef<HTMLDivElement>(null);
-  const pinned = new Set(dock.value);
-  const shown = recent.value
-    .filter((k) => !pinned.has(k))
-    .map((k) => byKey.value.get(k))
-    .filter((a) => a != null);
-  const first = shown[0]?.key;
-  useEffect(() => {
-    row.current?.scrollTo({ left: 0 });
-  }, [first]);
-  return (
-    <div class="strip" ref={row}>
-      {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} draggable />
-      ))}
-    </div>
-  );
-}
 
 /** How far above the dock a held app has to go to leave it for the home screen. */
 const DOCK_EXIT = 48;
@@ -203,7 +180,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
+          class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${hasRecentsWidget() ? "recents-widget" : ""}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>

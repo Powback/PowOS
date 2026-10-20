@@ -7,7 +7,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Home items the shell draws itself, kind "panel" (shell/types.ts HomeItem): the Agents widget (shell/ui/agents.tsx).
+ * Home items the shell draws itself, kind "panel" (shell/types.ts HomeItem): the Agents widget (shell/ui/agents.tsx),
+ * the recent apps (shell/ui/recentwidget.tsx).
  * Not an OWL widget - its data is the shell's already (AgentsSpool), and an OWL tree would be sent again on every
  * change. Each is a name and a page, kept here; its cell is the home layout's, as other apps' Android widgets' are
  * (AppWidgets), and the home's own placement steps around it. Keys "panel:<name>", one of each.
@@ -100,9 +101,12 @@ class ShellPanels private constructor(
          */
         private val ISLAND = Regex("app:[a-z0-9.-]{1,64}/[a-z0-9.-]{1,64}")
 
-        /** The panels there are, and the size each starts at; the smallest each may be made. */
-        private val SIZES = mapOf("agents" to (4 to 2))
-        private val MIN = mapOf("agents" to (2 to 1))
+        /**
+         * The panels there are, and the size each starts at; the smallest each may be made. "recents": the recent apps
+         * row as a home widget (shell/ui/recentwidget.tsx), a full-width row by default.
+         */
+        private val SIZES = mapOf("agents" to (4 to 2), "recents" to (6 to 1))
+        private val MIN = mapOf("agents" to (2 to 1), "recents" to (2 to 1))
 
         fun key(name: String) = "$PREFIX$name"
 

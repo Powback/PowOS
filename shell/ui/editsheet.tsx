@@ -6,10 +6,11 @@
 import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { carry, editing, home } from "../state.ts";
+import { carry, editing, home, page, pages } from "../state.ts";
 import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
-import { placeNew } from "./grid.tsx";
+import { geometry, placeNew, placeNewCells } from "./grid.tsx";
+import { hasRecentsWidget, recentsSpot } from "./recentwidget.tsx";
 import { startNewApp } from "./appbuild.tsx";
 import type { AppWidgetProvider, ThemeChoice } from "../types.ts";
 
@@ -102,6 +103,13 @@ export function EditSheet() {
             const cell = innerWidth / home.value.columns;
             const spot = placeNew(4 * cell - 8, 2 * cell - 8);
             powos.home.addPanel("agents", spot.page, spot.cell);
+          })}
+        {!hasRecentsWidget() &&
+          item("recent apps widget", () => {
+            // A row, full width: the lowest free row of the page on screen, else the first free spot.
+            const n = pages.value[page.value] ?? 1;
+            const spot = recentsSpot(n, geometry.value.rows || 6) ?? placeNewCells(home.value.columns, 1);
+            powos.home.addPanel("recents", spot.page, spot.cell);
           })}
         {item("widget store", () => openScreen("store"))}
         {item("AUR app store", () => openScreen("aur"))}

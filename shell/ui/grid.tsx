@@ -25,6 +25,7 @@ import { OwlWidget } from "./owl.tsx";
 import { AppWidgetFace } from "./appwidget.tsx";
 import { Island } from "./island.tsx";
 import { AgentsPanel } from "./agents.tsx";
+import { migrateRecents, RecentsPanel } from "./recentwidget.tsx";
 import { openAgents } from "../agents.ts";
 import type { Cell, HomeItem } from "../types.ts";
 
@@ -50,7 +51,7 @@ interface Geometry {
  * launcher lays it out (HomeGrid.kt Grid), so both show one home: as many rows as fit square cells, or more if the
  * tiles reach further down; the rows then share the height.
  */
-const geometry = signal<Geometry>({ left: 0, top: 0, width: 0, height: 0, cellW: 0, cellH: 0, rows: 0, pad: 12 });
+export const geometry = signal<Geometry>({ left: 0, top: 0, width: 0, height: 0, cellW: 0, cellH: 0, rows: 0, pad: 12 });
 
 /** Rows the tiles on every page reach down to (apps count as 1x1). */
 const usedRows = () => Math.max(0, ...home.value.items.filter((i) => i.cell).map((i) => (i.resizable ? i.cell!.y + i.cell!.h : i.cell!.y + 1)));
@@ -274,7 +275,51 @@ function AppFace({ appKey, label }: { appKey: string; label?: string }) {
   );
 }
 
-function Tile({ item }: { item: HomeItem }) {
+/** Drawn on a box of its own (a .tile face): what merges with its neighbours. Apps, folders, Android widgets don't. */
+const boxed = (i: HomeItem) => i.kind === "widget" || i.kind === "panel" || (i.kind === "appwidget" && !!i.error);
+
+/**
+ * Neighbouring widgets as one surface: for each boxed tile on a page, which of its sides touch another boxed tile (no
+ * gap there: the tile reaches its cells' edge) and which of its corners are inside a group (square) - only a group's
+ * outer corners stay round. One pass over a grid of the page's cells; recomputed with the page's items.
+ */
+function joins(items: HomeItem[]): Map<string, Record<string, number>> {
+  const at = new Map<string, string>();
+  for (const i of items) {
+    if (!boxed(i)) continue;
+    const c = shown(i);
+    for (let y = c.y; y < c.y + c.h; y++) for (let x = c.x; x < c.x + c.w; x++) at.set(`${x},${y}`, i.key);
+  }
+  const out = new Map<string, Record<string, number>>();
+  for (const i of items) {
+    if (!boxed(i)) continue;
+    const c = shown(i);
+    const other = (x: number, y: number) => {
+      const k = at.get(`${x},${y}`);
+      return k != null && k !== i.key ? 1 : 0;
+    };
+    const along = (f: (n: number) => number, n: number) => {
+      for (let k = 0; k < n; k++) if (f(k)) return 1;
+      return 0;
+    };
+    const r = c.x + c.w;
+    const b = c.y + c.h;
+    const j = {
+      "--jt": along((k) => other(c.x + k, c.y - 1), c.w),
+      "--jr": along((k) => other(r, c.y + k), c.h),
+      "--jb": along((k) => other(c.x + k, b), c.w),
+      "--jl": along((k) => other(c.x - 1, c.y + k), c.h),
+      "--ctl": 1 - Math.max(other(c.x - 1, c.y), other(c.x, c.y - 1)),
+      "--ctr": 1 - Math.max(other(r, c.y), other(r - 1, c.y - 1)),
+      "--cbr": 1 - Math.max(other(r, b - 1), other(r - 1, b)),
+      "--cbl": 1 - Math.max(other(c.x - 1, b - 1), other(c.x, b)),
+    };
+    if (j["--jt"] || j["--jr"] || j["--jb"] || j["--jl"]) out.set(i.key, j);
+  }
+  return out;
+}
+
+function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> }) {
   const press = useTilePress(item, () => {
     if (item.kind === "app") launch(item.app!);
     else if (item.kind === "folder") folder.value = item.key;
@@ -290,8 +335,8 @@ function Tile({ item }: { item: HomeItem }) {
   const b = box(shown(item));
   return (
     <div
-      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${lifted ? "lifted" : ""}`}
-      style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` }}
+      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${lifted ? "lifted" : ""} ${join ? "joined" : ""}`}
+      style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`, ...join }}
       {...press}
     >
       {item.kind === "widget" && (
@@ -317,6 +362,7 @@ function Tile({ item }: { item: HomeItem }) {
         ))}
       {item.kind === "panel" && item.name === "agents" && <AgentsPanel item={item} />}
       {item.kind === "panel" && item.name?.startsWith("app:") && <Island item={item} />}
+      {item.kind === "panel" && item.name === "recents" && <RecentsPanel item={item} />}
       {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
       {item.kind === "folder" && (
         <div class="folder-face tile">
@@ -528,6 +574,8 @@ export function Pages() {
   useEffect(() => {
     if (rows > 0 && home.value.items.some((i) => !i.cell)) powos.home.arrange(home.value.columns, rows);
   }, [home.value, rows]);
+  // The recent apps row, once, as a widget of home's (ui/recentwidget.tsx), at the bottom of the first page.
+  useEffect(() => void migrateRecents(rows), [rows]);
   useEffect(() => applyTrack(), []);
   const list = pages.value;
   if (page.value >= list.length) page.value = list.length - 1;
@@ -540,9 +588,10 @@ export function Pages() {
         {list.map((n, i) => (
           // Not the page on screen: its animations pause (shell.css .page.away).
           <div class={i === page.value ? "page" : "page away"} key={n}>
-            {itemsOn(n).map((item) => (
-              <Tile key={item.key} item={item} />
-            ))}
+            {((on) => {
+              const joined = joins(on);
+              return on.map((item) => <Tile key={item.key} item={item} join={joined.get(item.key)} />);
+            })(itemsOn(n))}
           </div>
         ))}
       </div>

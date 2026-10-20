@@ -1,6 +1,8 @@
 /* Home, the bar, the drawer, the dock: laid out from theme.css's tokens only. */
 
 .home {
+  /* The launcher's head: the recent row, unless that's a widget on home (ui/recentwidget.tsx) - then none. */
+  --launcher-head: var(--strip-height);
   position: fixed;
   inset: 0;
   display: flex;
@@ -44,7 +46,7 @@
   position: absolute;
   inset: 0;
   /* Room for the bar at the panel's foot. */
-  padding-bottom: calc(var(--strip-height) + var(--gap));
+  padding-bottom: calc(var(--launcher-head) + var(--gap));
   display: flex;
   flex-direction: column;
   opacity: calc(1 - var(--p));
@@ -57,7 +59,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  top: calc((1 - var(--p)) * (100% - var(--strip-height)));
+  top: calc((1 - var(--p)) * (100% - var(--launcher-head)));
   /* The wallpaper through it, more of the drawer's own color as it opens (the list stays readable); what's under it on
      home is blurred (the wallpaper isn't the page's to blur). */
   background: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--p) * 40%), transparent);
@@ -72,7 +74,7 @@
   bottom: 0;
   display: flex;
   flex-direction: column;
-  clip-path: inset(calc((1 - var(--p)) * (100% - var(--strip-height))) 0 0 0 round var(--radius) var(--radius) 0 0);
+  clip-path: inset(calc((1 - var(--p)) * (100% - var(--launcher-head))) 0 0 0 round var(--radius) var(--radius) 0 0);
   /* Closed, only the recent apps take touches; the pages under the rest stay reachable. */
   pointer-events: none;
 }
@@ -81,7 +83,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  transform: translateY(calc((1 - var(--p)) * (100% - var(--strip-height))));
+  transform: translateY(calc((1 - var(--p)) * (100% - var(--launcher-head))));
 }
 .launcher .strip { pointer-events: auto; }
 .home.open .launcher .drawer { pointer-events: auto; }
@@ -189,8 +191,8 @@
   display: flex;
   overflow: hidden;
   /* Taller by the recent row, and riding up by as much as it closes: open, it reaches the panel's foot. */
-  margin-bottom: calc(-1 * var(--strip-height));
-  transform: translateY(calc(var(--p) * -1 * var(--strip-height)));
+  margin-bottom: calc(-1 * var(--launcher-head));
+  transform: translateY(calc(var(--p) * -1 * var(--launcher-head)));
 }
 .drawer {
   opacity: min(1, calc(var(--p) * 1.6));
@@ -338,6 +340,37 @@
 .page { position: relative; flex: 0 0 100%; height: 100%; }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
+/*
+ * Neighbouring widgets are one surface (grid.tsx joins): no gap on a side that touches another, square corners inside
+ * the group, round ones only on its outside; no edge light or shadow between them.
+ */
+.home-tile.joined {
+  padding:
+    calc(var(--gap) / 2 * (1 - var(--jt))) calc(var(--gap) / 2 * (1 - var(--jr)))
+    calc(var(--gap) / 2 * (1 - var(--jb))) calc(var(--gap) / 2 * (1 - var(--jl)));
+}
+.home-tile.joined > .tile {
+  border-radius:
+    calc(var(--radius) * var(--ctl)) calc(var(--radius) * var(--ctr))
+    calc(var(--radius) * var(--cbr)) calc(var(--radius) * var(--cbl));
+  box-shadow: none;
+}
+
+/* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
+.home.recents-widget { --launcher-head: 0px; }
+.home.recents-widget .launcher .strip { display: none; }
+/* No head: closed, the launcher's frame is nothing; it shows as soon as the drawer starts to rise. */
+.home.recents-widget .launcher-frame { opacity: min(1, calc(var(--p) * 20)); }
+.recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
+.recents-face .strip { flex: 1; height: 100%; transform: none; clip-path: none; }
+.recents-face .strip .app { flex-basis: calc((100% - (var(--recent-n) - 1) * 4px) / var(--recent-n)); }
+.recents-face.rows .strip {
+  display: grid;
+  grid-template-columns: repeat(var(--recent-n), minmax(0, 1fr));
+  grid-auto-rows: calc(100% / var(--recent-rows));
+  overflow: hidden;
+  scroll-snap-type: none;
+}
 .widget-face {
   height: 100%;
   padding: 0;
