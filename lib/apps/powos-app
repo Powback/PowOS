@@ -839,6 +839,10 @@ def dispatch(a):
         print(__doc__.strip())
         return
     c = a[0]
+    # A directory argument as an absolute path: the build runs its tools in other directories (bun in ui/), where a
+    # relative "." meant something else - `powos app install .` bundled into ui/out/ and installed no page.
+    if c in ("build", "install", "dev", "publish", "ui") and len(a) >= 2:
+        a = [c, os.path.abspath(os.path.expanduser(a[1])), *a[2:]]
     if c == "list":
         cmd_list()
     elif c == "new":
