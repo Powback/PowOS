@@ -36,6 +36,7 @@ class PowosRecentsService : Service() {
     private var shade: ShadeHost? = null
     private var gestures: GestureMonitor? = null
     private var nav: NavGesture? = null
+    private var gestureRetries = 0
 
     /** SystemUI's last state flags and nav bar region (they can come before the gesture input is up). */
     private var systemUiState = 0L
@@ -75,6 +76,7 @@ class PowosRecentsService : Service() {
                 Tasks.splitScreen = params?.getBinder("com.android.wm.shell.splitscreen.ISplitScreen")
                 Log.i(TAG, "SystemUI connected: ${params?.keySet()?.sorted()}")
                 main.post {
+                    RecentsWatchdog.onConnected()
                     systemUi = sysui
                     // The desktop home has no web page to carry the switcher: the recents activity's is warmed now.
                     Switcher.prepare(this@PowosRecentsService)
@@ -97,6 +99,7 @@ class PowosRecentsService : Service() {
                 // SystemUI waits for this before it binds a new instance (LauncherProxyService.mIsPrevServiceCleanedUp).
                 main.post {
                     release()
+                    RecentsWatchdog.onDisconnected()
                     reply?.let(::sendResult)
                 }
             }
@@ -116,6 +119,7 @@ class PowosRecentsService : Service() {
 
     override fun onDestroy() {
         release()
+        RecentsWatchdog.onDisconnected()
         super.onDestroy()
     }
 
@@ -131,6 +135,9 @@ class PowosRecentsService : Service() {
         val consumers = listOfNotNull(shade?.pull, n)
         gestures = GestureMonitor.start(this, Display.DEFAULT_DISPLAY, consumers)
         shade?.monitored = gestures != null
+        // Still bound but no monitor (the input system refused it for now): try again shortly, a few times.
+        if (gestures == null && systemUi != null && gestureRetries++ < 5) main.postDelayed({ if (systemUi != null) startGestures() }, 2_000L)
+        if (gestures != null) gestureRetries = 0
         Log.i(TAG, if (gestures != null) "gesture input on" else "no gesture input: gesture navigation does nothing, the shade's strip takes the pull")
     }
 
