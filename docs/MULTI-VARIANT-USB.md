@@ -1,4 +1,57 @@
-# One USB, many machines: GPU variant auto-select at boot
+# One USB, many machines: every variant on the stick
+
+**Status (2026-10-20): SHIPPED as ostree deployments — see "How it works now".**
+The layered design below it (`layers/base-<variant>/` swapped under one kernel
+at RAM boot) is retained for history but is **superseded**: it never reached a
+stick, and it cannot work on today's media — the live medium boots its bootc
+root directly (no `rd.powos.ramboot=1`, so `ramboot-setup.sh`'s selector never
+runs), and the variants do not share a kernel (deck 7.2.0-ogc6.1, main and
+nvidia-open 7.2.9-ogc3.1), so a rootfs swapped under the deck kernel has no
+modules for it. On an NVIDIA desktop the deck image fell to nouveau and this
+kernel's nouveau panicked at 13 s (NULL deref in
+`nouveau_abi16_ioctl_get_zcull_info`, fixed upstream 2026-08, not in the OGC
+kernel yet).
+
+## How it works now
+
+`build/install-to-usb.sh --with-variants STORE --live-variants "deck main nvidia-open"`
+(what `build/burn.sh` runs):
+
+1. The raw image is written as before (one deployment: deck).
+2. Each other variant is pulled from the **offline OCI store** already on the
+   medium's host side (`build/fetch-variants.sh`) into the stick's ostree repo
+   and deployed with `ostree admin deploy --retain` — its own kernel, initramfs
+   and BLS entry. (`ostree container image deploy` would prune to two.)
+3. Each deployment's origin names the **registry** image
+   (`ostree-unverified-registry:ghcr.io/powback/powos:<variant>`), so
+   `powos upgrade` on the stick updates that variant exactly like an installed
+   system.
+4. The default variant (`LIVE_DEFAULT`, `nvidia-open`) is deployed **last**.
+   ostree numbers the newest deployment highest, and both menu-default writers
+   (`install-to-usb.sh`, `bin/powos-boot-entries`) pick the highest — one rule.
+5. Entries are titled by variant: *PowOS Live — NVIDIA (nvidia-open)*,
+   *— Steam Deck (deck)*, *— AMD / Intel (main)*. PowOS's own entries (Install,
+   basic graphics, Recovery) template from an entry as before.
+
+Cost: the three share the Bazzite userland; the root grows from 9.5 to 17 GiB
+of 26.8. Verified: each entry boots to SDDM under QEMU through a throwaway
+overlay of the real stick (nvidia-open with no GPU present loads `nvidia` and
+backs off cleanly).
+
+**Selection is the menu.** Auto-detect would need a GPU test inside GRUB, which
+GRUB does not have; the default is the variant that boots everywhere, and
+nvidia-open on an AMD/Intel box is mesa with an unused driver. A later
+refinement can let the booted system record the right default in `grubenv`.
+
+**Secure Boot:** every variant's kernel is signed with the Universal Blue key
+(`CN=ublue kernel`); a machine with Secure Boot on needs it enrolled
+(`ujust enroll-secure-boot-key`, password `universalblue`) or Secure Boot off —
+otherwise GRUB stops at "bad shim signature / you need to load the kernel first".
+
+---
+
+## The earlier design (superseded, kept for the record)
+
 
 Goal: a single x86-64 PowOS USB that boots cleanly on an NVIDIA desktop, an
 AMD box, and a Steam Deck — auto-detecting the GPU at boot, or letting you pick
