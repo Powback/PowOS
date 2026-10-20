@@ -75,8 +75,11 @@ widget "today" {
   let narrow = iw < 236
   let big = clamp(floor(ih * (narrow ? 0.28 : 0.32)), 30, 64)
   let hours = clamp(floor(iw / (narrow ? 38 : 46)), 3, 8)
-  let detailed = ih >= 108
-  let hourly = (rows == null || rows >= 3) && ih >= 140
+  // Lines are added by priority only while they fit the tile's real height (never half-clipped): the top line and now
+  // (about 16 + the temperature's line + one small line) always, then the place/wind-and-rain line, then the hours.
+  let base = 16 + big * 1.25 + 16
+  let detailed = ih >= base + 18
+  let hourly = (rows == null || rows >= 3) && ih >= base + (detailed ? 18 : 0) + 50
   let rainToday = max((day.hourly ?? []).map(h => num(h.chanceofrain)))
   let wind = imperial ? "${cur.windspeedMiles} mph" : "${cur.windspeedKmph} km/h"
   Column {
@@ -101,7 +104,7 @@ widget "today" {
           Text { text: "${get(cur, "temp_" + unit)}°"; fontSize: big; maxLines: 1; weight: 1 }
         }
         Text {
-          text: "${lower(trim(cur.weatherDesc[0].value))} · ${get(day, "maxtemp" + unit)}°/${get(day, "mintemp" + unit)}°${area != null ? " · " + lower(area.areaName[0].value) : ""}"
+          text: "${lower(trim(cur.weatherDesc[0].value))} · ${get(day, "maxtemp" + unit)}°/${get(day, "mintemp" + unit)}°"
           style: small
           color: muted
           maxLines: 1
@@ -122,12 +125,17 @@ widget "today" {
       }
       if detailed {
         Spacer { weight: 1 }
-        // Wind and today's rain chance: what decides a jacket or an umbrella, on the tile instead of a tap away.
+        // Today's rain chance (what decides an umbrella) on one line with the place when narrow (it has no room in the
+        // top line there), with the wind when wide (the place is in the top line).
         Row {
           gap: 6
           align: center
-          Text { text: "wind ${wind}"; style: small; color: cyan; maxLines: 1; weight: 1 }
-          Text { text: "rain ${rainToday}%"; style: small; color: rainToday >= 30 ? blue : muted; maxLines: 1; align: end }
+          if narrow {
+            Text { text: area != null ? lower(area.areaName[0].value) : ""; style: small; color: muted; maxLines: 1; weight: 1 }
+          } else {
+            Text { text: "wind ${wind}"; style: small; color: cyan; maxLines: 1; weight: 1 }
+          }
+          Text { text: "rain ${rainToday}%"; style: small; color: rainToday >= 30 ? blue : muted; maxLines: 1 }
         }
       }
       if hourly {

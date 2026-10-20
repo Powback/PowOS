@@ -79,7 +79,8 @@ widget "performance" {
   // The gauges as big as the tile allows (6 dp between two), so they fill the card instead of floating in it.
   let dim = tileWidth == null || tileHeight == null ? 80 : clamp(min((tileWidth - 24 - (across - 1) * 6) / across, tileHeight - 24 - below), 44, 160)
   // Room left under the gauges on a short tile: the GPU clock and the skin temperature in it.
-  let spare = tileHeight != null && rows != null && rows < 3 && tileHeight - 24 - below - dim >= 16
+  // Only when a whole line fits (the column has no gaps, so the line needs just its own ~16 dp): never half-clipped.
+  let spare = tileHeight != null && rows != null && rows < 3 && tileHeight - 24 - below - dim >= 18
   // Wide and tall: both gauges as big as half the width and about half the height allow.
   // Wide and short or 3 rows: the GPU's gauge the tile's full inner height, beside the traces.
   let side = tileWidth == null || tileHeight == null ? (short ? 84 : 124) : clamp(min(tileHeight - 24, (tileWidth - 24) * 0.42), 72, 170)
@@ -87,7 +88,7 @@ widget "performance" {
 
   if narrow {
     Column {
-      gap: 4; align: center; weight: 1
+      gap: 0; align: center; weight: 1
       Spacer { weight: 1 }
       Row {
         gap: 6; align: center
