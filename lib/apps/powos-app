@@ -31,8 +31,10 @@ Make one (the whole loop, from a sentence to the phone - each step is one comman
                                      Rust never builds on its battery. Shown without an argument.
 
 Change one:
-  powos app publish <dir>            only the module again: a hot swap, clients stay connected (logic hot reload)
-  powos app ui <dir>                 only the UI again (a new dir, `current` flipped atomically): the shell hot-reloads it
+  powos app publish <dir>            only the module again (rebuilt first if it changed): a hot swap, clients stay
+                                     connected (logic hot reload)
+  powos app ui <dir>                 only the UI again (rebuilt first; a new dir, `current` flipped atomically): the
+                                     shell hot-reloads it
   --note "..."                       on install/publish/ui: what changed, in plain words - the phone's quiet
                                      "update applied" notification (default: "<Name> app installed/updated")
   powos app list                     installed apps and widgets (from the registry)
@@ -909,9 +911,13 @@ def dispatch(a):
     elif c == "builder":
         cmd_builder(a[1:])
     elif c == "publish" and len(a) == 2:
+        # Built first, as install does: an unchanged module isn't rebuilt, an edited one is - never the stale wasm.
+        cmd_build(a[1], ["--module"])
         m, _ = manifest(a[1])
         publish_module(a[1], m)
     elif c == "ui" and len(a) == 2:
+        # Built first (~0.1 s), as install does: it shipped the stale out/ui ("0 files changed") after an edit.
+        cmd_build(a[1], ["--ui"])
         m, text = manifest(a[1])
         n = install_ui(a[1], m)
         register(text)
