@@ -649,6 +649,11 @@ def read_queue(q, spool, now):
         except OSError:
             continue
         ts = st.st_mtime_ns // 1_000_000
+        # Order by the nanosecond stamp the hook put in the name (see powos-agent-hook): mtime is a coarse
+        # clock and ties within a tick came back in directory order. A name without the stamp (the Mac,
+        # a hand-written file) sorts by mtime as before.
+        stamp = n.split("-", 1)[0] if "-" in n else ""
+        order = int(stamp) if stamp.isdigit() and len(stamp) >= 16 else st.st_mtime_ns
         try:
             text = data.decode("utf-8", "replace")
             if text.startswith("#\t"):
@@ -670,9 +675,9 @@ def read_queue(q, spool, now):
         except OSError:
             pass
         if isinstance(rec, dict):
-            out.append((ts, header, rec))
+            out.append((order, ts, header, rec))
     out.sort(key=lambda e: e[0])
-    return out, waiting
+    return [e[1:] for e in out], waiting
 
 
 # ---- the mirror (HACK: see the module doc) ---------------------------------------------------------------------

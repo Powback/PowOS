@@ -24,7 +24,14 @@ else
 fi
 [ -d "$Q" ] || mkdir -p -m 700 "$Q" 2>/dev/null || exit 0
 # One file per hook process: agentsd reads it once it's closed (inotify CLOSE_WRITE; kqueue on the Mac).
-{ printf '#\t%s\t%s\t%s\n' "${COMMS_AGENT_ID:-$POWOS_AGENTS_ROLE}" "$COMMS_PARENT_ID" "$PPID" && cat; } >"$Q/$$.ev" 2>/dev/null || exit 0
+# Named <ns-since-epoch>-<pid>.ev so the daemon can fold events in the order
+# they were raised. Filesystem mtimes cannot: the kernel stamps them with a
+# coarse clock (one tick, 1-4 ms), so two hooks in one tick tied and fell into
+# directory order -- SubagentStart folded before the Agent call that names it,
+# Stop before SubagentStop. The Mac's date has no %N; there the name falls
+# back to the pid alone and the daemon uses mtime, as before.
+ts=$(date +%s%N 2>/dev/null); case "$ts" in ''|*[!0-9]*) ts= ;; esac
+{ printf '#\t%s\t%s\t%s\n' "${COMMS_AGENT_ID:-$POWOS_AGENTS_ROLE}" "$COMMS_PARENT_ID" "$PPID" && cat; } >"$Q/${ts:+$ts-}$$.ev" 2>/dev/null || exit 0
 pid=
 [ -f "$Q/pid" ] && read -r pid <"$Q/pid"
 if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
