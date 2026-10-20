@@ -54,10 +54,10 @@
 
 .launcher-frame {
   position: absolute;
-  left: var(--edge);
-  right: var(--edge);
-  bottom: var(--gap);
-  top: calc((1 - var(--p)) * (100% - var(--strip-height) - var(--gap)));
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: calc((1 - var(--p)) * (100% - var(--strip-height)));
   /* The wallpaper through it, more of the drawer's own color as it opens (the list stays readable); what's under it on
      home is blurred (the wallpaper isn't the page's to blur). */
   background: color-mix(in srgb, var(--color-background) calc(var(--glass) + var(--p) * 14%), transparent);
@@ -66,13 +66,13 @@
 }
 .launcher {
   position: absolute;
-  left: var(--edge);
-  right: var(--edge);
+  left: 0;
+  right: 0;
   top: 0;
-  bottom: var(--gap);
+  bottom: 0;
   display: flex;
   flex-direction: column;
-  clip-path: inset(calc((1 - var(--p)) * (100% - var(--strip-height))) 0 0 0 round var(--radius));
+  clip-path: inset(calc((1 - var(--p)) * (100% - var(--strip-height))) 0 0 0 round var(--radius) var(--radius) 0 0);
   /* Closed, only the recent apps take touches; the pages under the rest stay reachable. */
   pointer-events: none;
 }
@@ -119,7 +119,7 @@
 .bar {
   position: relative;
   z-index: 3;
-  margin: 0 var(--edge) var(--gap);
+  margin: 0;
   min-height: 48px;
   display: flex;
   align-items: center;
@@ -149,7 +149,7 @@
   position: relative;
   z-index: 3;
   height: calc(var(--strip-height) * var(--dock-open));
-  margin: 0 var(--edge) calc(var(--edge) * var(--dock-open));
+  margin: 0;
   overflow: hidden;
   display: flex;
   align-items: flex-start;
@@ -159,6 +159,28 @@
   border-width: calc(var(--frame) * min(1, var(--dock-open) * 8));
 }
 
+/*
+ * Home's foot - the recent row (the launcher panel, closed), the bar and the dock - is one sheet: edge to edge, the
+ * pieces flush against each other and the sheet against the screen's foot (the filler under it fills the navigation
+ * bar's inset), the same fill everywhere so no seam shows; only the sheet's top corners are rounded, only its top
+ * edge catches the light.
+ */
+.launcher-frame, .bar, .dock { border-color: transparent; box-shadow: none; }
+.launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 -6px 20px -12px rgb(0 0 0 / 50%); }
+.bar, .dock { border-radius: 0; }
+.bar:focus-within { border-color: transparent; }
+.bar:focus-within .prompt { color: var(--color-foreground); }
+.home::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: max(var(--inset-bottom, env(safe-area-inset-bottom)), var(--inset-keyboard, 0px));
+  background: color-mix(in srgb, var(--color-background) var(--glass), transparent);
+  pointer-events: none;
+}
+.home.editing::after { visibility: hidden; }
 
 /* The drawer: the panel under the recent row. */
 .drawer-clip {
@@ -481,7 +503,7 @@
 }
 .msg.assistant {
   align-self: flex-start;
-  background: var(--color-surface);
+  background: var(--soft-fill);
   border: var(--frame) solid var(--line);
   padding: 6px 10px;
   border-radius: var(--radius);
@@ -769,6 +791,16 @@
     calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--edge));
 }
 .ai-top { display: flex; align-items: center; gap: 10px; }
+/* Solid, not glass: the page is the theme's background, what's on it subtle fills on that. */
+.ai-screen { background: var(--color-background); padding-bottom: 0; }
+.ai-screen .tile { background: var(--soft-fill); border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.ai-screen .ai-work-chip.on { background: var(--color-accent); }
+.ai-screen .ai-compose {
+  margin: 0 calc(-1 * var(--edge));
+  padding-bottom: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px));
+  min-height: calc(48px + max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)));
+  border-radius: 0;
+}
 .ai-title { font-size: var(--text-item); font-weight: bold; }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
 .ai-state.busy { color: var(--color-accent); }
