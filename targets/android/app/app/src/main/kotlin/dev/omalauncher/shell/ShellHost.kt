@@ -208,6 +208,11 @@ class ShellHost(
                 return widgetImage(URLDecoder.decode(rest.substringBefore('/'), "UTF-8"), URLDecoder.decode(rest.substringAfter('/'), "UTF-8"))
             }
             if (path.startsWith("_font/")) return font(path.removePrefix("_font/"))
+            // The wallpaper's picture, for the glass (ShellWallpaper; the URL names its revision: kept).
+            if (path == "_wallpaper") {
+                val jpeg = ShellWallpaper.jpeg(context) ?: return notFound()
+                return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=31536000") }
+            }
             // What's playing's album art, for the control center's media card (its id from media.state).
             if (path.startsWith("_media/")) {
                 val bitmap = runtime.widgets.media.art(URLDecoder.decode(path.removePrefix("_media/"), "UTF-8")) ?: return notFound()

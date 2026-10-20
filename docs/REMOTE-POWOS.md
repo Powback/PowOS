@@ -288,7 +288,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-100 markers on 2026-10-20.
+101 markers on 2026-10-20.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -343,6 +343,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/TileHost.kt:368` | Hidden TileService extra names and Intent.putExtra(String, IBinder); binders passed in a Bundle. | None public. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/TileHost.kt:444` | Tile's constructors are hidden; built from a Parcel in Tile.writeToParcel's layout. | None public; a layout change shows as a garbled tile. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/WindowBlur.kt:14` | Hidden ViewRootImpl.getSurfaceControl / Transaction.setBackgroundBlurRadius, reflected. | None for an app (the public blur relayouts the window). |
+| `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/ShellWallpaper.kt:105` | Another app's live wallpaper has no picture an app can ask for: OxygenOS's own screenshot of it (`/data/system/users/<u>/wallpaper_screenshot.png`) read as root, for the shell's glass. | None in the platform API; elsewhere the wallpaper's thumbnail. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/HiddenApi.kt:13` | Lifts hidden-API checks for the listed classes (org.lsposed.hiddenapibypass). | None for an app: the calls are the platform-signed system UI's. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/ShadeHost.kt:231` | Hidden StatusBarManager.expandSettingsPanel / expandNotificationsPanel. | PowOS's own quick-settings page (notifications.tsx grown into the control center). |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/ShadeHost.kt:300` | Hidden StatusBarManager.disable/disable2, reflected. | None public (kiosk/setup flows use them the same way). |

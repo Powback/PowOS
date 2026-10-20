@@ -120,7 +120,17 @@ class ShellBridge(
             }
         }
 
+    /** The wallpaper's picture another one (ShellWallpaper): the page frosts it again. */
+    private val wallpaperChanged: () -> Unit = { emit("system.glass", ShellWallpaper.info(context, blurBehind = shade != null)) }
+
+    /** Android's wallpaper changed (its colors are recomputed for every change), or the theme's background did. */
+    private val wallpaperColors = android.app.WallpaperManager.OnColorsChangedListener { _, _ -> ShellWallpaper.refresh(context) }
+    private val themeChanged: () -> Unit = { ShellWallpaper.refresh(context) }
+
     init {
+        ShellWallpaper.onChange.add(wallpaperChanged)
+        runCatching { android.app.WallpaperManager.getInstance(context).addOnColorsChangedListener(wallpaperColors, main) }
+        dev.omalauncher.theme.ThemeStore.changeListeners.add(themeChanged)
         // Live mode on or off (its consent answered, its capture stopped): the assistant's page follows.
         dev.omalauncher.assist.LiveCapture.onChange = { main.post { emit("assist.live", liveState()) } }
         // An agent told the user something: the PowOS AI page lists it.
@@ -265,6 +275,8 @@ class ShellBridge(
             "system.insets" -> lastInsets
             "system.notifications" -> notifications(a.optBoolean(0, true))
             "system.battery" -> battery()
+            // The shade's window blurs what's behind it itself (ShadeHost): its page only tints.
+            "system.glass" -> ShellWallpaper.info(context, blurBehind = shade != null)
             "notifications.list" -> notificationList()
             "notifications.open" -> runtime.widgets.notifications.control("open", a.getString(0))
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
@@ -717,6 +729,9 @@ class ShellBridge(
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
     fun close() {
+        ShellWallpaper.onChange.remove(wallpaperChanged)
+        runCatching { android.app.WallpaperManager.getInstance(context).removeOnColorsChangedListener(wallpaperColors) }
+        dev.omalauncher.theme.ThemeStore.changeListeners.remove(themeChanged)
         screens.close()
         appWidgets.unlisten(appWidgetEvents)
         remote.close()

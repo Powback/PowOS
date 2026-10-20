@@ -17,19 +17,23 @@ import dev.omalauncher.system.HiddenApi
  * it relayouts the window (not per frame).
  */
 internal class WindowBlur(
-    private val window: Window,
+    /** A view of the window (its root): the window's surface is its view root's. */
+    private val view: () -> View?,
     private val maxRadiusDp: Float = 28f,
 ) {
+    constructor(window: Window, maxRadiusDp: Float = 28f) : this({ window.decorView }, maxRadiusDp)
+
     private var radius = -1
     private var broken = false
 
     fun set(amount: Float) {
         if (broken) return
-        val r = (amount.coerceIn(0f, 1f) * maxRadiusDp * window.context.resources.displayMetrics.density).toInt()
+        val v = view() ?: return
+        val r = (amount.coerceIn(0f, 1f) * maxRadiusDp * v.resources.displayMetrics.density).toInt()
         if (r == radius) return
         runCatching {
             HiddenApi.allow()
-            val root = View::class.java.getMethod("getViewRootImpl").invoke(window.decorView) ?: return
+            val root = View::class.java.getMethod("getViewRootImpl").invoke(v) ?: return
             val surface = root.javaClass.getMethod("getSurfaceControl").invoke(root) as SurfaceControl
             if (!surface.isValid) return
             val t = SurfaceControl.Transaction()

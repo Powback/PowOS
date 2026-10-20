@@ -50,7 +50,7 @@ Native code shrinks to a small, stable API (async calls + events), the same shap
 | usage | `usage.recent(n)`, `usage.record(key)` | |
 | store | `store.get(name)`, `store.set(name, json)` — the shell's own data files | |
 | keyboard | `keyboard.show()`, `keyboard.hide()` | `keyboard.inset` (px, per frame) |
-| system | `system.insets()`, `system.wallpaper()`, `system.openSettings(what)` | `system.insets` |
+| system | `system.insets()`, `system.glass()` (the wallpaper as a picture, for the glass), `system.openSettings(what)` | `system.insets`, `system.glass` |
 | terminal | `term.open(id, owner, cmd, cols, rows, restart?)` → state + recent output; `term.write(id, b64)`, `term.resize(id, cols, rows)`, `term.close(id)`, `term.style(points)` | `term.data`, `term.exit`, `term.style` |
 | clipboard | `clipboard.read()`, `clipboard.write(text)` | |
 | windows | `windows.embed(id, rect)` — a native Linux window placed over the page at a rect the page reports | |
@@ -77,6 +77,18 @@ published widget are unchanged.
 
 This is the one compiled piece, and it's the engine, not the UI: users and agents edit widgets (OWL) and the shell
 (JS/CSS), never the interpreter.
+
+## Glass
+
+Home's surfaces (tiles, the foot, the drawer, the notification panel) are frosted glass over the wallpaper. Android
+draws the wallpaper behind the window, so CSS `backdrop-filter` over the transparent page has nothing to blur - and a
+live backdrop blur per tile is a render pass each, every frame. Instead the host hands over the wallpaper as a picture
+(`system.glass`, ShellWallpaper.kt: our theme's background, a still wallpaper, or - rooted - OxygenOS's screenshot of a
+live one), `ui/glass.ts` blurs it once (half size, canvas filter) and every surface draws that one frosted picture at
+its own place on the screen under the theme's tint (theme.css `--glass-*`). Headless, 4x CPU throttle, swiping pages
+and the drawer: plain fills 21.3 ms mean / 37.6 ms p95, glass 19.2 / 33.4, live `backdrop-filter` per tile 31.8 / 50.0.
+The shade's window is over an app: the host blurs behind it (WindowBlur), its page only tints. PowOS AI's page is a
+calm dark tint, no glass.
 
 ## Hot reload
 

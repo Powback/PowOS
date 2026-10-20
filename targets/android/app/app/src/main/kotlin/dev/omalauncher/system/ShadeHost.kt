@@ -392,6 +392,7 @@ class ShadeHost(
         if (!shown && !peeking) return
         shown = false
         peeking = false
+        blur.set(0f)
         root.visibility = View.GONE
         setFlags(touchable = false, focusable = false, height = ViewGroup.LayoutParams.MATCH_PARENT)
     }
@@ -446,9 +447,19 @@ class ShadeHost(
         hide()
     }
 
-    private fun drag(q: Double) = host?.bridge?.emit("shade.drag", JSONObject().put("q", q))
+    /**
+     * What's behind the shade (the app, home) blurred as it comes down, as SystemUI's shade blurs it: the shade page
+     * only tints its panel over it (shell/ui/glass.ts, html.glass-behind). Not for the banner (a strip of the window).
+     */
+    private val blur = dev.omalauncher.shell.WindowBlur({ shade })
+
+    private fun drag(q: Double) {
+        if (shown) blur.set(q.toFloat())
+        host?.bridge?.emit("shade.drag", JSONObject().put("q", q))
+    }
 
     private fun settle(open: Boolean) {
+        if (shown) blur.set(if (open) 1f else 0f)
         host?.bridge?.emit("shade.settle", JSONObject().put("open", open))
         if (!shown) return
         if (open) armOpen() else armShut()

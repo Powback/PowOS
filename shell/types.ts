@@ -210,6 +210,11 @@ export interface ThemeColors {
   css: Record<string, string>;
   colors: Record<string, string>;
 }
+/** The wallpaper as an image ([url] on the page's origin, [rev] new whenever it's another picture), or none. */
+export interface GlassSource {
+  wallpaper: { url: string; rev: string; source: string } | null;
+  blurBehind: boolean;
+}
 /** A theme to pick: what its swatch shows (background, foreground, accent, red, yellow, green, magenta). */
 export interface ThemeChoice {
   name: string;
@@ -608,9 +613,16 @@ export interface Bridge {
     battery(): Promise<{ level: number | null; charging: boolean }>;
     /** Pulls Android's notification shade down ([open], the default) or puts it away. */
     notifications(open?: boolean): Promise<boolean>;
+    /**
+     * What the shell's glass (ui/glass.ts) has to work with: the wallpaper behind the page as an image (Android draws
+     * it behind the window, out of the page's reach - the page frosts this copy of it once), and whether the host
+     * blurs what's behind this window itself (the shade's, over an app). "system.glass" brings it again when the
+     * wallpaper changes. Hosts without it reject: no glass, the plain fills.
+     */
+    glass(): Promise<GlassSource>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
    * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "windows.changed" (DesktopWindow[]), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

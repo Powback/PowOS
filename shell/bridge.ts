@@ -24,6 +24,7 @@ import type {
   QuickState,
   TermState,
   ThemeChoice,
+  GlassSource,
   ThemeColors,
   WidgetScreen,
   MediaState,
@@ -257,6 +258,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       insets: () => call("system.insets"),
       notifications: (open = true) => call("system.notifications", open),
       battery: () => call("system.battery"),
+      glass: () => call<GlassSource>("system.glass"),
     },
     on: (event, handler) => events.on(event, handler),
   };
@@ -913,6 +915,8 @@ function mock(): Bridge {
       }),
       notifications: async (open = true) => (console.log(`[mock] notification shade ${open ? "down" : "up"}`), true),
       battery: async () => ({ level: 76, charging: false }),
+      // No wallpaper to frost in a browser: the plain fills (ui/glass.ts's __glass.use() tries one by hand).
+      glass: async () => ({ wallpaper: null, blurBehind: false }),
     },
     on: (event, handler) => events.on(event, handler),
   };

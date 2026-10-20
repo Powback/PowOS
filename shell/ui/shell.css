@@ -183,6 +183,28 @@
   pointer-events: none;
 }
 .home.editing::after { visibility: hidden; }
+/*
+ * On glass (theme.css, ui/glass.ts): the foot's filler is the frosted wallpaper at the screen's foot; the launcher's
+ * frame keeps its picture pinned at its bottom edge (its top rises with the drawer, --gb is where its foot is) and
+ * takes more tint as it opens, so the list stays readable; the notification panel a little more tint too.
+ */
+.glass .home::after {
+  background:
+    linear-gradient(var(--glass-fill), var(--glass-fill)),
+    var(--glass-image) left 0 bottom 0 / var(--glass-w) var(--glass-h) no-repeat;
+}
+.glass .launcher-frame.tile {
+  --frame-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--p) * 40%), transparent);
+  background:
+    linear-gradient(var(--frame-fill), var(--frame-fill)) border-box,
+    var(--glass-image) left calc(-1 * var(--gx)) bottom calc(-1 * var(--gb)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
+.glass .home .notif-panel {
+  --panel-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + 24%), transparent);
+  background:
+    linear-gradient(var(--panel-fill), var(--panel-fill)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
 
 /* The drawer: the panel under the recent row. */
 .drawer-clip {

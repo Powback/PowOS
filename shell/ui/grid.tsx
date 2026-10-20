@@ -76,11 +76,11 @@ function measure(el: HTMLElement, columns: number) {
   geometry.value = { left: r.left, top: r.top, width: r.width, height, cellW: across / columns, cellH: down / rows, rows, pad };
 }
 
-/** How much of its resting height (the strip's, and the margin under it) the dock has folded away right now. */
+/** How much of its resting height (the strip's; it sits flush on the bar, no margin) the dock has folded away right now. */
 function dockFolded(root: CSSStyleDeclaration) {
   const dock = document.querySelector<HTMLElement>(".home .dock");
   if (!dock) return 0;
-  const rest = (parseFloat(root.getPropertyValue("--strip-height")) || 0) + (parseFloat(root.getPropertyValue("--edge")) || 12);
+  const rest = parseFloat(root.getPropertyValue("--strip-height")) || 0;
   const now = dock.getBoundingClientRect().height + (parseFloat(getComputedStyle(dock).marginBottom) || 0);
   return Math.max(0, rest - now);
 }
