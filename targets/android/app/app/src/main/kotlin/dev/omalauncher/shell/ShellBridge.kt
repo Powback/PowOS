@@ -168,7 +168,7 @@ class ShellBridge(
                 respond(id, dispatch(method, a))
             } catch (e: Exception) {
                 Log.w(TAG, "$method failed", e)
-                js("window.__powosHost.reject($id, ${JSONObject.quote(e.message ?: e.toString())})")
+                js(reply("reject($id, ${JSONObject.quote(e.message ?: e.toString())})"))
             }
         }
     }
@@ -689,8 +689,16 @@ class ShellBridge(
                 is RawJson -> result.text
                 else -> result.toString()
             }
-        js("window.__powosHost.resolve($id, $json)")
+        js(reply("resolve($id, $json)"))
     }
+
+    /**
+     * An answer to the page - dropped (counted in window.__powosLate) when the page that asked is gone: a reload with
+     * calls in flight answered into the new page before its bridge.ts loaded, "Cannot read properties of undefined
+     * (reading 'resolve')" (2026-10-20 01:51:37).
+     */
+    private fun reply(call: String) =
+        "window.__powosHost && window.__powosHost.${call.substringBefore('(')} ? window.__powosHost.$call : (window.__powosLate = (window.__powosLate | 0) + 1)"
 
     private fun js(code: String) = web.evaluateJavascript(code, null)
 

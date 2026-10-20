@@ -5,11 +5,13 @@
 #                                    publish = only the module (hot swap); ui = only the UI (hot reload). The note is
 #                                    the phone's quiet "update applied" notification (`powos app ... --note`).
 # Runs adb from wherever adb reaches the phone: ADB="docker exec powos-vadb adb" (the VPN), or plain adb.
+# The UI goes through the shell's gate first (shell/dev/gate.sh --app): each page/widget entry of out/ui imported in a
+# headless Chromium as the shell imports it - one that doesn't load refuses the install. --force installs anyway.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-NOTE="" ARGS=()
+NOTE="" ARGS=() FORCE=""
 while [ $# -gt 0 ]; do
-  case "$1" in --note) NOTE=${2:-}; shift 2 || shift ;; --note=*) NOTE=${1#--note=}; shift ;; *) ARGS+=("$1"); shift ;; esac
+  case "$1" in --force) FORCE=1; shift ;; --note) NOTE=${2:-}; shift 2 || shift ;; --note=*) NOTE=${1#--note=}; shift ;; *) ARGS+=("$1"); shift ;; esac
 done
 set -- ${ARGS[@]+"${ARGS[@]}"}
 APP=${1:?usage: apps/install.sh <app> [install|publish|ui] --note "what changed, for the user"}
@@ -21,6 +23,13 @@ ADB=${ADB:-adb}
 # Built: the module (an app that has one) and the UI.
 [ -f "$D/powos-app.json" ] && { [ -f "$D/out/module.wasm" ] || [ ! -f "$D/module/Cargo.toml" ]; } && [ -d "$D/out" ] ||
   { echo "install.sh: build it first (apps/build.sh $APP)" >&2; exit 1; }
+# The gate: the UI's modules, loaded as the shell loads them (not for publish: the module alone, no UI).
+if [ "$VERB" != publish ] && [ -d "$D/out/ui" ]; then
+  if ! GATE_SHELL_PAGES=0 "$HERE/../shell/dev/gate.sh" --app "$D"; then
+    [ -n "$FORCE" ] || { echo "install.sh: refused - the gate failed (above). Fix it, or --force to install anyway." >&2; exit 1; }
+    echo "install.sh: the gate failed - installing anyway (--force)" >&2
+  fi
+fi
 ID=$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$D/powos-app.json" | head -1)
 T=/data/local/tmp/powos-app-$ID
 STAGE=$(mktemp -d); trap 'rm -rf "$STAGE"' EXIT

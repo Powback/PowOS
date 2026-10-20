@@ -187,6 +187,7 @@ Dev & AI:
   agents task add|set|done|list   The work board: what each agent is on (PowOS AI page)
   android apps|open|running   (phone) Android's apps: list, open as a window or full screen, what runs
   android notifications|notify|screenshot   (phone) The phone's notifications, post one, its screen
+  shell errors [N]    (phone) The web shell's last errors (each one also went to the manager's inbox)
 
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
@@ -3078,6 +3079,46 @@ case "${1:-}" in
         shift
         source "$POWOS_LIB/ai/comms/comms.sh"
         cmd_comms "$@"
+        ;;
+    shell)
+        # The web shell on a phone (shell/ in the repo, the PowOS app's WebViews): its errors. The app writes them to
+        # its files/shell-errors.log and the run dir's copy, /run/powos-app/shell-errors.log (ShellErrors.kt).
+        shift
+        _shell_log=${POWOS_SHELL_ERRORS:-/run/powos-app/shell-errors.log}
+        case "${1:-help}" in
+            errors)
+                if [ "${2:-}" = "--follow" ] || [ "${2:-}" = "-f" ]; then exec tail -n 20 -F "$_shell_log"; fi
+                if [ -f "$_shell_log" ]; then tail -n "${2:-40}" "$_shell_log"; else echo "No shell errors logged ($_shell_log)."; fi
+                ;;
+            help|--help|-h)
+                cat <<'SHELLHELP'
+powos shell - the PowOS web shell on a phone (home, lock face, shade, assistant, switcher, AOD)
+
+Usage:
+  powos shell errors [N]       The last N (default 40) shell errors, newest last
+  powos shell errors --follow  Follow them as they come
+
+Every shell page reports its own errors to the app: uncaught errors, unhandled rejections, modules that
+didn't load (an import cycle, a missing export, a 404, a MIME refusal), and a page that never became
+ready (app.tsx's window.__powosAlive; 3 s after it started loading if it reported an error, else 8 s).
+Each one:
+  - is logged: one line per error - time, page (home|lock|shade|assist|aod|recents), status, error with
+    file:line. Status: sent (told the manager), repeat (the same error within 10 min: not told again),
+    ROLLBACK (a push undone);
+  - goes to the manager agent's inbox: `powos comms send manager "shell <page>: <error> (file:line) ...
+    APK <version>; overrides: <files (when pushed)>; last push <time> from <host>: <files>" --from shell
+    --priority high` - once per error per 10 minutes (the same error on every page is one message).
+A page that fails to boot within 2 min of a hot push (shell/push.sh) has that push rolled back by the app:
+the pushed files restored to the overrides they replaced, or removed (the APK's own shell under them),
+every page reloaded, and the manager told "rolled back <files> because <error>".
+
+From the Mac: shell/push.sh --errors [N] reads the same log; shell/push.sh runs a gate before pushing
+(tsc + every page booted in a headless Chromium: shell/dev/gate.sh), refusing a shell that doesn't
+load (--force overrides). apps/install.sh gates a PowOS app's UI the same way.
+SHELLHELP
+                ;;
+            *) echo "Unknown shell command: $1 (powos shell help)" >&2; exit 1 ;;
+        esac
         ;;
     agents)
         # The work board (lib/ai/agents/powos-agents-cli; `powos agents help`).

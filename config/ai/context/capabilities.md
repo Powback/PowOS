@@ -271,7 +271,7 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 ### Shipping a change (edit → test → ship → roll back)
 | Layer | Edit | Ship | Roll back |
 |---|---|---|---|
-| Web shell UI | `shell/**` | `shell/push.sh --note "<what changed>" <files>` (`--vpn` first over the VPN; `ANDROID_SERIAL` picks the phone): every open page reloads | `shell/push.sh --reset [files]` |
+| Web shell UI | `shell/**` | `shell/push.sh --note "<what changed>" <files>` (`--vpn` first over the VPN; `ANDROID_SERIAL` picks the phone): gated first (below), then every open page reloads | `shell/push.sh --reset [files]`; automatic when a page fails to boot within 2 min of the push |
 | OWL widgets | `targets/android/app/app/src/main/assets/widgets/*.owl` | APK; or write the live copy `files/widgets/<name>.owl` (that copy then counts as the user's and isn't updated by later APKs) | restore the previous file |
 | App (Kotlin) | `targets/android/app/**` | `bash targets/android/build-app.sh` → `~/Projects/android-app-dev/output/powos.apk` (also on android.pow) → `targets/android/install-app.sh <apk> --note "<what changed>"` | install the previous APK |
 | System slots (priv-app, recents, overlays) | `targets/android/system-module/` | `build-module.sh --priv-app --slot recents` → `rooted.sh module <zip> --note "<what changed>"` + reboot | `touch /data/adb/modules/powos-system/disable` + reboot |
@@ -282,9 +282,22 @@ Device in use: OnePlus Open (foldable, SM8550, Adreno 740), Android 16 / OxygenO
 Built centrally and shipped whole. Never `pacman -Syu` on the phone.
 Every ship to the phone carries `--note`: one plain line of what changed for the user ("Switcher now follows your finger", never a hash or a file) - the phone's quiet "update applied" notification, deploys within 2 min folded into one (`powos comms notify --from deploy --priority low --batch deploy`).
 
+### Shell errors reach the manager (nothing only in logcat)
+- **Before a push**: `shell/push.sh` runs `shell/dev/gate.sh` - tsc, then every page (home, lock, shade, assist, aod,
+  recents) booted in a headless Chromium against the mock bridge, as the phone serves it (committed shell + the phone's
+  overrides + the pushed files). Any uncaught error, failed module load, missing export, import-cycle error or a page
+  not ready in 8 s refuses the push with the error; `--force` overrides. `apps/install.sh` gates an app's UI modules
+  the same way. Run it alone: `shell/dev/gate.sh [--tree] [files]`.
+- **On the phone**: every page's uncaught errors, rejections, module-load failures and "never became ready" go to the
+  manager's inbox (`--from shell --priority high`: page, file:line, APK version, override files and when they were
+  pushed, the last push), once per error per 10 min, and to a log: `powos shell errors [N]` (phone),
+  `shell/push.sh --errors` (Mac). A page that fails to boot within 2 min of a push has the push rolled back by the app
+  (previous overrides restored, else the APK's files) and the manager gets "rolled back <files> because <error>".
+  `powos shell help` has the details.
+
 ### `powos` on the phone
 - Works: `status` (Phone: mode, kernel, battery, network), `android {apps,open,running,notifications,notify,screenshot}`,
-  `ai …`, `manager`, `comms …`, `doctor`, `help`. `podman`, `distrobox`, `flatpak` and `tmux` are installed.
+  `ai …`, `manager`, `comms …`, `shell errors`, `doctor`, `help`. `podman`, `distrobox`, `flatpak` and `tmux` are installed.
   ⚠️ Containers aren't validated on the phone.
 - Doesn't apply (no bootc, rpm-ostree or grubby; no USB/RAM layers): `upgrade`, `base`, `driver`, `rollback`,
   `ramboot`, `sync`/`flush`/`safe`, `install-system`, `boot`, `games storage`, `windows`, `gpu`, `cuda`.

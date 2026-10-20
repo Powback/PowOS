@@ -12,6 +12,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.WindowInsets
 import android.webkit.ConsoleMessage
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -79,6 +80,9 @@ class ShellHost(
     /** An activity's page (home) at the panel's fastest rate while touched - or while a swipe up shows its switcher. */
     internal val highRefresh: HighRefresh? = activity?.window?.let { HighRefresh(it, web) }
 
+    /** The page's boot: its errors and its ready (index.html's boot guard), watched by [checkBoot]. */
+    private val boot = Boot()
+
     /** The page's own port (open, surface tiles): [ShellNative], handed only to the top frame at the page's origin. */
     private val native = ShellNative(context, web, devUrl()?.let { Uri.parse(it).let { u -> "${u.scheme}://${u.authority}" } } ?: ORIGIN)
 
@@ -87,6 +91,7 @@ class ShellHost(
         overrides.mkdirs()
         web.addJavascriptInterface(bridge, "PowosHost")
         web.addJavascriptInterface(native, "PowosNative")
+        web.addJavascriptInterface(boot, "PowosBoot")
         // Insets to the page (CSS px), as they change: the bar sits above the navigation bar, the drawer clears
         // the status bar, the keyboard's height lifts the bar.
         web.setOnApplyWindowInsetsListener { v, insets ->
@@ -100,10 +105,84 @@ class ShellHost(
     }
 
     fun destroy() {
+        bootSerial++
         HotReload.remove(this)
         bridge.close()
         native.close()
         web.destroy()
+    }
+
+    /** Which load of the page this is (each navigation a new one): a late check of an earlier load does nothing. */
+    private var bootSerial = 0
+    private var bootReady = false
+    private var bootFailed = false
+
+    /** The first error the page reported before it was ready: what a boot failure is blamed on. */
+    private var bootError: String? = null
+
+    /**
+     * index.html's boot guard: each error of the page (once per message per load) and its ready (window.__powosAlive
+     * set: app.tsx rendered its screen) - to [ShellErrors], which logs it and tells the manager.
+     */
+    private inner class Boot {
+        @JavascriptInterface
+        fun error(json: String) {
+            main.post {
+                val e = runCatching { org.json.JSONObject(json) }.getOrNull()
+                if (e != null && !e.optBoolean("ready") && bootError == null) {
+                    bootError = "${e.optString("message").take(300)}${e.optString("file").takeIf { it.isNotEmpty() }?.let { " ($it:${e.optInt("line")})" } ?: ""}"
+                }
+                ShellErrors.report(context, mode ?: "home", json)
+            }
+        }
+
+        @JavascriptInterface
+        fun ready(page: String) {
+            main.post { bootReady = true }
+        }
+    }
+
+    /**
+     * A load started: the page has [BOOT_ERROR_MS] to be ready if it reported an error meanwhile, [BOOT_MS] if not
+     * (an old page without the guard, a slow start: its window.__powosAlive is asked before it's judged). Not judged
+     * with the screen off (a page may be throttled then).
+     */
+    private fun bootStarted() {
+        val serial = ++bootSerial
+        bootReady = false
+        bootFailed = false
+        bootError = null
+        web.postDelayed({ checkBoot(serial, BOOT_ERROR_MS) }, BOOT_ERROR_MS)
+        web.postDelayed({ checkBoot(serial, BOOT_MS) }, BOOT_MS)
+    }
+
+    private fun checkBoot(
+        serial: Int,
+        after: Long,
+    ) {
+        if (serial != bootSerial || bootReady || bootFailed) return
+        if (after < BOOT_MS && bootError == null) return
+        if (!context.getSystemService(android.os.PowerManager::class.java).isInteractive) {
+            web.postDelayed({ checkBoot(serial, after) }, 2_000)
+            return
+        }
+        PageWatchdog.probe(web) { alive, _ ->
+            if (serial != bootSerial || bootReady || bootFailed) return@probe
+            if (alive) {
+                bootReady = true
+                return@probe
+            }
+            bootFailed = true
+            val cause = bootError ?: "no window.__powosAlive ${after / 1000} s after the page started loading, and no error reported"
+            ShellErrors.notReady(context, mode ?: "home", "${after / 1000} s after load: $cause")
+            // Broken right after a hot push: the push rolled back, every page loaded again on what was there before.
+            if (ShellErrors.rollback(context, mode ?: "home", cause).isNotEmpty()) main.postDelayed({ HotReload.reloadAll() }, 300)
+        }
+    }
+
+    /** The page again, from scratch (after a rollback: its modules as they are now). */
+    internal fun reload() {
+        web.reload()
     }
 
     private fun devUrl(): String? =
@@ -165,6 +244,15 @@ class ShellHost(
                 // Always the file as it is now: an edit must show on the next load, not a cached copy.
                 responseHeaders = mapOf("Cache-Control" to "no-store", "Access-Control-Allow-Origin" to ORIGIN)
             }
+        }
+
+        override fun onPageStarted(
+            view: WebView,
+            url: String?,
+            favicon: Bitmap?,
+        ) {
+            super.onPageStarted(view, url, favicon)
+            bootStarted()
         }
 
         /**
@@ -266,6 +354,10 @@ class ShellHost(
     companion object {
         private const val TAG = "PowosShell"
 
+        /** A page that reported an error has this long to be ready; one that didn't, [BOOT_MS]. */
+        private const val BOOT_ERROR_MS = 3_000L
+        private const val BOOT_MS = 8_000L
+
         /** Where the page lives: never resolved, every request is answered from the app. */
         const val ORIGIN = "https://shell.powos"
 
@@ -309,6 +401,11 @@ private object HotReload {
 
     fun remove(host: ShellHost) {
         hosts -= host
+    }
+
+    /** Every page loaded again (a rollback: a dead page's hot.ts can't reload it). */
+    fun reloadAll() {
+        for (h in hosts.toList()) h.reload()
     }
 
     /**
