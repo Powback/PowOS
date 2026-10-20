@@ -2,7 +2,7 @@
 # hosts/gpu-195/install.sh - (re)deploy the realtime voice path on the GPU server gpu-195 (192.168.50.195).
 # Run as the user powos on the box, from the PowOS checkout (~/Projects/PowOS, `git pull` first). Idempotent.
 #
-#   GPU0: voice-stt (faster-whisper large-v3-turbo) + voice-tts (Kokoro) + voice-llm (vLLM Qwen3-8B-AWQ), resident
+#   GPU0: voice-stt (faster-whisper large-v3-turbo, whisper-fast) + voice-tts (Kokoro) + voice-llm (vLLM Qwen3-8B-AWQ), resident
 #   CPU:  voice-agent (VoiceAgent backend, /ws) + voice-web (Astro UI)
 #
 # Everything is a rootless podman quadlet (~/.config/containers/systemd -> systemd --user, linger on, so it starts at
@@ -34,6 +34,7 @@ chmod 600 "$CONF/secrets.env"
 
 if [[ "${1:-}" != "--no-build" ]]; then
     [[ -d "$VA/.git" ]] || { echo "no VoiceAgent checkout at $VA (git clone it, branch server-gpu195)" >&2; exit 1; }
+    podman build -t localhost/voice-stt-fast:latest "$VA/services/whisper-fast"
     podman build -t localhost/voiceagent-backend:latest "$VA/VoiceAgentWeb/services/voice-agent"
     podman build -t localhost/voiceagent-web:latest "$VA/VoiceAgentWeb"
 fi

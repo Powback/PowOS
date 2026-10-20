@@ -3,7 +3,12 @@
 
 Runs inside the voiceagent-backend image (it has httpx, websockets, numpy), on the voice network:
   podman run --rm --network voice --security-opt label=disable -v ~/Projects/PowOS/hosts/gpu-195/bench:/bench:ro \
-      localhost/voiceagent-backend:latest python /bench/voice-bench.py [stt|tts|llm|ws|all] [--n 5]
+      localhost/voiceagent-backend:latest python /bench/voice-bench.py [stt|tts|llm|ws|all|bargein|merge|wake] [--n 5]
+
+  ws       end of speech -> final transcript / first LLM token / first audio byte, over /ws, real-time pacing
+  bargein  ask for a long story; 0.6 s into its audio, speak over it: expects interrupt + the new turn answered
+  merge    "Remind me to buy milk and" + a 380 ms pause + "eggs tomorrow": expects ONE turn with both halves
+  wake     asleep: plain speech gets no reply, "Hey Luna, what time is it?" wakes it and gets one
 
 The test utterance is synthesized by the TTS unit itself ("Hey Luna, what time is it?"), resampled to 16 kHz.
 Prints one line per measurement plus a JSON summary. Env: STT, TTS, LLM, WS override the URLs.
@@ -33,6 +38,17 @@ def wav_to_pcm16k(data):
     return a.astype(np.int16)
 
 
+def trim(pcm, rel=0.02, keep=0.03):
+    """Cut Kokoro's leading/trailing silence (it pads ~0.2-0.3 s): "end of speech" must be the last voiced sample,
+    not the end of the file, or every latency reads ~0.25 s too good and pauses between phrases come out longer."""
+    a = np.abs(pcm.astype(np.int32))
+    idx = np.nonzero(a > rel * a.max())[0]
+    if not len(idx):
+        return pcm
+    k = int(keep * 16000)
+    return pcm[max(0, idx[0] - k):idx[-1] + k]
+
+
 def pcm_to_wav(pcm, sr=16000):
     b = io.BytesIO()
     with wave.open(b, "wb") as w:
@@ -52,7 +68,7 @@ def summary(name, xs):
 def utterance(c):
     r = c.post(f"{TTS}/v1/audio/speech", json={"input": PHRASE, "voice": "bf_emma", "response_format": "wav"})
     r.raise_for_status()
-    return wav_to_pcm16k(r.content)
+    return trim(wav_to_pcm16k(r.content))
 
 
 def bench_stt(c, pcm):
@@ -170,6 +186,8 @@ async def ws_once(pcm, verbose=True):
             await ws.send(audio[i:i + frame].tobytes())
             if t_speech_end is None and i + frame >= speech_end_sample:
                 t_speech_end = time.perf_counter()
+                if os.environ.get("WALL"):                      # to line up with the backend's log
+                    print(f"  speech ended at wall {time.time():.3f}")
             target = t0 + (i + frame) / 16000                   # real time pacing
             await asyncio.sleep(max(0, target - time.perf_counter()))
         await asyncio.sleep(3)
@@ -182,6 +200,123 @@ async def ws_once(pcm, verbose=True):
                   f" ms, first audio byte {r['first_audio']} ms ({r['audio_bytes']} bytes audio)\n"
                   f"      heard {r['heard']!r}; reply {r['reply']!r}")
         return r
+
+
+def say_pcm(c, text):
+    r = c.post(f"{TTS}/v1/audio/speech", json={"input": text, "voice": "bf_emma", "response_format": "wav"})
+    r.raise_for_status()
+    return trim(wav_to_pcm16k(r.content))
+
+
+async def session(script):
+    """Run one /ws session: script(ws, send_audio, events) drives it; events collects (t, kind, data)."""
+    import websockets
+    events = []
+    async with websockets.connect(WS, max_size=None) as ws:
+        async def reader():
+            async for m in ws:
+                now = time.perf_counter()
+                if isinstance(m, bytes):
+                    events.append((now, "audio", len(m)))
+                else:
+                    d = json.loads(m)
+                    events.append((now, d.get("type"), d))
+        rt = asyncio.create_task(reader())
+        await asyncio.sleep(0.5)
+        await ws.send(json.dumps({"type": "config", "enable_thinking": False, "provider": "vllm",
+                                  "model": os.environ.get("MODEL", "qwen3-8b"), "enable_interruptions": True}))
+        await ws.send(json.dumps({"type": "start"}))
+
+        async def send_audio(pcm, lead=0.3, tail=0.0):
+            a = np.concatenate([np.zeros(int(16000 * lead), np.int16), pcm, np.zeros(int(16000 * tail), np.int16)])
+            t0 = time.perf_counter()
+            for i in range(0, len(a), 512):
+                await ws.send(a[i:i + 512].tobytes())
+                await asyncio.sleep(max(0, t0 + (i + 512) / 16000 - time.perf_counter()))
+            return time.perf_counter()
+
+        async def silence(seconds):
+            await send_audio(np.zeros(0, np.int16), lead=seconds)
+
+        await script(ws, send_audio, silence, events)
+        rt.cancel()
+    return events
+
+
+def finals(events, after=0.0):
+    return [d.get("text") for t, k, d in events if k == "transcript" and d.get("final") and t >= after]
+
+
+def bench_bargein(c):
+    story, stop = say_pcm(c, "Tell me a long story about a lighthouse keeper."), say_pcm(c, "Stop. What's two plus two?")
+    marks = {}
+
+    async def script(ws, send_audio, silence, events):
+        await send_audio(story, tail=0.4)
+        end = time.perf_counter() + 20
+        while time.perf_counter() < end and not any(k == "audio" for _, k, _ in events):
+            await silence(0.064)
+        first_audio = next((t for t, k, _ in events if k == "audio"), None)
+        if first_audio is None:
+            return
+        await silence(0.6)                                   # let the story play for a moment
+        marks["speak"] = time.perf_counter()
+        await send_audio(stop, lead=0.0, tail=0.4)
+        end = time.perf_counter() + 15
+        while time.perf_counter() < end:
+            await silence(0.1)
+            if any(k == "audio" and t > marks["speak"] + 0.3 for t, k, _ in events) and \
+               any(k == "interrupt" for _, k, _ in events):
+                await silence(1.0)
+                break
+
+    ev = asyncio.run(session(script))
+    sp = marks.get("speak")
+    intr = next((t for t, k, _ in ev if k == "interrupt" and sp and t > sp), None)
+    new = finals(ev, sp or 0)
+    t_new = next((t for t, k, d in ev if k == "transcript" and d.get("final") and sp and t > sp), None)
+    reply = "".join(d.get("token", "") for t, k, d in ev if k == "llm_token" and t_new and t > t_new).strip()
+    ok = bool(intr and new and reply)
+    OUT["bargein"] = {"ok": ok, "interrupt_after_ms": ms(intr - sp) if intr else None, "heard": new,
+                      "reply": reply[:160]}
+    print(f"bargein: {'OK' if ok else 'FAIL'}; interrupt {OUT['bargein']['interrupt_after_ms']} ms after speaking "
+          f"over the story; heard {new}; reply {reply[:120]!r}")
+
+
+def bench_merge(c):
+    a, b = say_pcm(c, "Remind me to buy milk and"), say_pcm(c, "eggs tomorrow.")
+
+    async def script(ws, send_audio, silence, events):
+        await send_audio(a, tail=0.0)
+        await silence(0.38)                                   # longer than the 250 ms base, shorter than the cap
+        await send_audio(b, lead=0.0, tail=4.0)
+
+    ev = asyncio.run(session(script))
+    f = finals(ev)
+    ok = len(f) == 1 and "milk" in f[0].lower() and "egg" in f[0].lower()
+    OUT["merge"] = {"ok": ok, "turns": f}
+    print(f"merge: {'OK' if ok else 'FAIL'}; final transcripts {f}")
+
+
+def bench_wake(c):
+    plain, wake = say_pcm(c, "The weather was nice yesterday."), utterance(c)
+
+    async def script(ws, send_audio, silence, events):
+        await ws.send(json.dumps({"type": "sleep"}))
+        await asyncio.sleep(0.3)
+        events.append((time.perf_counter(), "mark", "plain"))
+        await send_audio(plain, tail=3.0)
+        events.append((time.perf_counter(), "mark", "wake"))
+        await send_audio(wake, tail=5.0)
+
+    ev = asyncio.run(session(script))
+    tw = next(t for t, k, d in ev if k == "mark" and d == "wake")
+    asleep_audio = sum(1 for t, k, _ in ev if k == "audio" and t < tw)
+    woke_audio = sum(1 for t, k, _ in ev if k == "audio" and t >= tw)
+    ok = asleep_audio == 0 and woke_audio > 0
+    OUT["wake"] = {"ok": ok, "audio_while_asleep": asleep_audio, "audio_after_wake_word": woke_audio}
+    print(f"wake: {'OK' if ok else 'FAIL'}; audio chunks while asleep {asleep_audio}, after the wake word {woke_audio}")
+    asyncio.run(session(lambda ws, *_: ws.send(json.dumps({"type": "wake"}))))
 
 
 def bench_ws(pcm):
@@ -205,6 +340,13 @@ def main():
             bench_llm(c)
     if what in ("ws", "all"):
         bench_ws(pcm)
+    with httpx.Client(timeout=120) as c:
+        if what in ("bargein", "all"):
+            bench_bargein(c)
+        if what in ("merge", "all"):
+            bench_merge(c)
+        if what in ("wake", "all"):
+            bench_wake(c)
     print(json.dumps(OUT))
 
 

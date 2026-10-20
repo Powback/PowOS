@@ -190,7 +190,7 @@ platform). VoiceAgent ran unchanged: config only (branch `server-gpu195` in `~/P
 
 | unit | image | port | VRAM measured | RAM (limit) |
 |---|---|---|---|---|
-| `voice-stt` | `fedirz/faster-whisper-server:latest-cuda`, `deepdml/faster-whisper-large-v3-turbo-ct2` float16 | 8000 | 2.3 GiB | 0.7 GB (6g) |
+| `voice-stt` | `localhost/voice-stt-fast` (VoiceAgent `services/whisper-fast` on faster-whisper-server's CUDA image), `deepdml/faster-whisper-large-v3-turbo-ct2` float16 | 8000 | 2.3 GiB | 0.7 GB (6g) |
 | `voice-tts` | `remsky/kokoro-fastapi-gpu:latest`, bf_emma | 8880 | 1.0 GiB | 1.6 GB (4g) |
 | `voice-llm` | `vllm/vllm-openai:latest`, `Qwen/Qwen3-8B-AWQ` as `qwen3-8b` | 8100 | 10.9 GiB | 2.9 GB (16g) |
 
@@ -205,7 +205,7 @@ Each service measured alone (`hosts/gpu-195/bench/voice-bench.py`, median of 5, 
 
 | | |
 |---|---|
-| STT, 1.9 s utterance | 250 ms (300 ms with `--cpus=2`, hence 4 threads/4 CPUs). The old faster-whisper-server always decodes beam 5 and pads to a 30 s window, so the 150 ms target needs a different server, not config. |
+| STT, 1.9 s utterance | 59 ms with whisper-fast (greedy, no timestamps, encoder window sized to the audio, 4 CPUs). faster-whisper-server took 250-300 ms (beam 5, timestamps, a fixed 30 s window). 5 s: 169 vs 264 ms; 7 s: 182 vs 350 ms; same transcripts. |
 | TTS, first audio (streamed PCM) | 55 ms. A one-sentence WAV takes 48 ms. |
 | LLM first token | 27 ms |
 | LLM decode | 129 tok/s |
@@ -221,20 +221,64 @@ Each service measured alone (`hosts/gpu-195/bench/voice-bench.py`, median of 5, 
 - Verified with a scripted WebSocket client. A Kokoro-made "Hey Luna, what time is it?" was streamed in real time and
   returned a transcript, LLM tokens (with a tool call) and TTS audio.
   - Wake word: after a `sleep`, plain speech got no reply, and "Hey Luna..." woke it and got one.
-  - Barge-in has not been tested; it needs a client that plays the audio back.
-- End of speech -> first audio byte: 1.35 s median direct (1.29-1.75 s), and 1.4-1.9 s through Traefik. Not yet the
-  800 ms target. Where the time goes, from the backend log:
+  - Barge-in: see below.
+
+**Latency pass (2026-10-21, VoiceAgent branch `server-gpu195`):** end of speech -> first audio byte went from
+**1.73 s to 0.67 s** median, measured direct and through Traefik.
+
+All numbers are medians from `voice-bench.py ws`: 8-10 real-time turns over `/ws`, with Kokoro's leading and trailing
+silence trimmed so "end of speech" is the last voiced sample. The 1.35 s reported before used untrimmed audio and read
+about 0.3 s too good. The "before" stack was the old image and old STT server, run side by side on the same box.
+
+| | before | after (direct) | after (via Traefik) |
+|---|---|---|---|
+| end of speech -> final transcript | 906 ms | 429 ms | 428 ms |
+| end of speech -> first LLM token | 1595 ms | 532 ms | 526 ms |
+| end of speech -> first audio byte | 1728 ms | 676 ms | 671 ms |
+
+One turn from the backend log (after):
 
 | step | time |
 |---|---|
-| VAD end-of-speech wait (`VAD_MIN_SILENCE_MS=500`) | 500 ms |
-| STT | 170 ms |
-| speaker identification (speechbrain, CPU, before the LLM call) | 310 ms |
-| LLM with VoiceAgent's tool-call buffering + long system prompt | 350 ms |
-| first TTS sentence | 150 ms |
+| VAD end, after 250 ms of silence plus Silero's decay | ~350 ms |
+| STT | ~60-90 ms |
+| commit and request | ~30 ms |
+| LLM to the first sentence | ~90 ms |
+| first TTS sentence (one WAV) | ~105 ms |
 
-- The knobs that would close the gap are VoiceAgent code, not config, so they were left alone ("don't port, just
-  init"): diarization off the critical path, a faster STT server, and a shorter VAD tail.
+What changed:
+
+1. **Adaptive end of speech** (`VAD_BASE_SILENCE_MS=250`; the cap is `VAD_MIN_SILENCE_MS=500`).
+   - The turn is transcribed speculatively while still listening.
+   - It commits at once unless the transcript looks unfinished: a trailing conjunction or filler, a comma or
+     ellipsis, or a bare wake word. Then it waits out the cap.
+   - Speech that resumes before the commit cancels the speculative turn and merges its audio.
+   - While asleep, the cap is always waited.
+2. **Speaker ID off the event loop.**
+   - speechbrain ran synchronously inside a coroutine, which blocked everything for ~300 ms right before the LLM call.
+   - It now runs in a worker thread, and the wake-word path no longer waits for it.
+3. **LLM prefix cache.** The prompt was already streamed into TTS sentence by sentence, and the tool-call deltas
+   arrive separately. The cost was elsewhere:
+   - The few-shot examples interpolated `datetime.now()` (seconds) right after the system prompt.
+   - So every request missed vLLM's prefix cache from there on, re-prefilling about 3k tokens plus the history.
+   - Fixed example values took the first sentence from ~500 ms to ~90 ms after the request.
+4. **STT.**
+   - `WHISPER_STREAMING=false`: one plain request, with no server-side VAD pass and no SSE.
+   - whisper-fast, as in the table above.
+   - `--cpus=4`: with 2 CPUs the CPU side was throttled to ~190 ms.
+5. **Barge-in bug.** After a spoken interrupt, the next turn was silent: `barge_in()` left `cancelled` set.
+   - A new turn now clears it.
+   - The interrupt also cancels the interrupted turn's task.
+
+Behaviour checks (`voice-bench.py bargein|merge|wake`), all passing:
+- **bargein:** speaking over the story's audio produces an `interrupt` ~325 ms later, and the new question gets
+  answered ("2 plus 2 is 4.").
+- **merge:** "Remind me to buy milk and" + a 380 ms pause + "eggs tomorrow." arrives as one turn.
+- **wake:** asleep, plain speech gets no reply, and "Hey Luna..." does.
+- **recall:** transcripts are still stored, and speaker ID still runs.
+
+What's left: the first TTS chunk is one WAV per sentence (~105 ms). A streamed or clause-sized first chunk would save
+~50 ms, but the web client decodes whole WAVs.
 
 **Left for later:**
 - The public `voiceagent.powback.com`. `/ws` has no auth of its own on the upgrade, so it can't take the Authelia
