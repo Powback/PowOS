@@ -5,6 +5,9 @@
 #   recipes.list           PowOS packages Arch Linux ARM doesn't build: the upstream Arch/AUR recipe, built
 #                          unchanged for aarch64 (makepkg --ignorearch, as Arch Linux ARM does)
 # Usage: targets/android/build-pkgs.sh [package...]   (default: everything in pkgs/ and recipes.list)
+#   pkgs/<name>/FORKS     local git repos the package builds from (a fork of ours that has no remote, e.g. SpacetimeDB):
+#                          "<name> <host path>" per line, mounted read-only at /forks/<name>; the PKGBUILD takes
+#                          git+file:///forks/<name>#commit=<hash>, pinned, so the build stays reproducible.
 #   pkgs/<name>/BUILD_ON_ROOTFS   build in PowOS's own rootfs (out/powos-rootfs.tar.gz), not in today's Arch Linux ARM:
 #                          for packages tied to the Plasma version PowOS ships (kwin). Arch Linux ARM moves on (on
 #                          2026-10-17 it had half of Plasma at 6.8: kscreenlocker 6.8 broke KWin 6.7.5's build);
@@ -40,6 +43,15 @@ for p in "${pkgs[@]}"; do
   docker volume rm -f "powos-android-pkg-$p" >/dev/null 2>&1 || true
   trap 'docker volume rm -f "powos-android-pkg-'"$p"'" >/dev/null 2>&1 || true' EXIT
   local_mount=(); [ "$src" = local ] && local_mount=(-v "$HERE/pkgs/$p:/pkg:ro")
+  forks=""
+  if [ -f "$HERE/pkgs/$p/FORKS" ]; then
+    while read -r fname fpath; do
+      case $fname in ''|'#'*) continue ;; esac
+      fpath=${fpath/#\~/$HOME}
+      [ -d "$fpath/.git" ] || { echo "build-pkgs: $p needs the git repo $fpath (pkgs/$p/FORKS)" >&2; exit 1; }
+      local_mount+=(-v "$fpath:/forks/$fname:ro"); forks="$forks /forks/$fname"
+    done < "$HERE/pkgs/$p/FORKS"
+  fi
   image=$IMAGE base=repo
   if [ -f "$HERE/pkgs/$p/BUILD_ON_ROOTFS" ]; then image=$(rootfs_image) base=rootfs; fi
   scratch="powos-android-pkg-$p"
@@ -52,7 +64,7 @@ for p in "${pkgs[@]}"; do
   # one re-applied the patches), so without it a one-file change to KWin recompiled all of it (~20 min).
   docker run --rm --platform linux/arm64 --cpus 8 --memory 16g ${local_mount[@]+"${local_mount[@]}"} \
     -v powos-android-ccache:/ccache \
-    -e PKG="$p" -e SRC="$src" -e BASE="$base" -v "$HERE/recipes:/fixups:ro" -v "$HERE/tools:/tools:ro" -v "$OUT:/out" -v "$scratch:/build" "$image" bash -c '
+    -e PKG="$p" -e SRC="$src" -e BASE="$base" -e FORKS="$forks" -v "$HERE/recipes:/fixups:ro" -v "$HERE/tools:/tools:ro" -v "$OUT:/out" -v "$scratch:/build" "$image" bash -c '
       set -euo pipefail
       # HACK: pacman 7 download sandbox (Landlock) is not permitted in Docker.
       grep -q "^DisableSandbox" /etc/pacman.conf || sed -i "/^\[options\]/a DisableSandbox" /etc/pacman.conf
@@ -69,6 +81,9 @@ for p in "${pkgs[@]}"; do
       pacman -S --noconfirm --needed ccache >/dev/null 2> >(grep -v "is up to date -- skipping" >&2)
       sed -i "s/^BUILDENV=(\(.*\)!ccache/BUILDENV=(\1ccache/" /etc/makepkg.conf
       id builder >/dev/null 2>&1 || useradd -m builder
+      # A fork mounted from the Mac is owned by another uid (virtiofs): git refuses to clone it ("dubious ownership")
+      # unless it is trusted, by name, for this container only.
+      for f in $FORKS; do git config --system --add safe.directory "$f"; git config --system --add safe.directory "$f/.git"; done
       chown builder /ccache
       echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
       case $SRC in

@@ -745,7 +745,8 @@ and the kernel deferred):
   3. the control database (sled) fsyncing every 50 ms (20/s, always).
 
   Not the tokio worker count (`TOKIO_WORKER_THREADS` changed nothing), WebSocket pings or disk I/O. Three small
-  patches on the v2.12.0 source (`targets/android/pkgs/spacetimedb`: the recorder parks while idle and keeps its 5 ms
+  commits on the v2.12.0 source (the local fork `~/Projects/SpacetimeDB`, branch `powos/v2.12`, which
+  `targets/android/pkgs/spacetimedb` builds from by pinned hash and SpaceTimeAI's hub image too: the recorder parks while idle and keeps its 5 ms
   batching under load; the epoch ticks only while a WASM call runs; the control db fsyncs once a second), same
   version, the official CLI. Upstream candidates.
 

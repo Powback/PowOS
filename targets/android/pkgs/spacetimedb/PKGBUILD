@@ -1,18 +1,23 @@
-# SpacetimeDB 2.12.0 built from its source with two patches that make an idle server idle (replaces spacetimedb-bin,
-# the unpatched official binaries; the same paths, the same CLI). Measured on the OnePlus Open
+# SpacetimeDB 2.12.0 built from the PowOS fork (~/Projects/SpacetimeDB, branch powos/v2.12: upstream v2.12.0 plus three
+# commits that make an idle server idle; see FORK.md there). Replaces spacetimedb-bin (the unpatched official
+# binaries; the same paths, the same CLI). Measured on the OnePlus Open
 # (docs/POWOS-APPS-FEASIBILITY.md §8): every loaded database cost ~145 wakeups/s and ~1.4% of a core doing nothing,
 # and the bare server another ~100/s - on a phone that keeps its home (and so its databases) open, that's battery.
-#   0001: the per-database transaction-metrics recorder slept 5 ms and polled its queue forever; it now parks on the
+#   engine:     the per-database transaction-metrics recorder slept 5 ms and polled its queue forever; it now parks on the
 #         queue while no transactions run and keeps the 5 ms batching while they do.
-#   0002: wasmtime's 10 ms epoch ticker (it only serves to log calls running over a second) ticks only while a call
+#   wasmtime:   wasmtime's 10 ms epoch ticker (it only serves to log calls running over a second) ticks only while a call
 #         into WASM runs. V8's budget ticker is untouched.
-#   0003: the control database (sled) fsynced every 50 ms, idle or not; now once a second.
+#   standalone: the control database (sled) fsynced every 50 ms, idle or not; now once a second.
 # Result on the phone: 556 -> 10-15 wakeups/s with 4 clients and 2-3 databases, 161 -> 9 with none; CPU ~0.
-# Both are for upstream (clockworklabs/SpacetimeDB); drop each patch once a release has it.
+# All three are for upstream (clockworklabs/SpacetimeDB, none sent yet); a release that has one drops it on the next
+# rebase of the fork. The fork is local only (no remote of ours): build-pkgs.sh mounts it read-only at /forks/SpacetimeDB
+# (FORKS in this folder), and the source is pinned to one commit of it, so the build is reproducible.
+# Upgrading: rebase the fork onto the new tag (FORK.md), then set pkgver and _commit here.
 pkgname=spacetimedb
 pkgver=2.12.0
-pkgrel=1
-pkgdesc='SpacetimeDB server (idle-wakeup patches) and CLI'
+pkgrel=2
+_commit=48e5b47ce076f99e6faecc774ad2543c681be702   # powos/v2.12 (v2.12.0 + the three idle commits + FORK.md)
+pkgdesc='SpacetimeDB server (PowOS fork: idle-wakeup commits) and CLI'
 arch=(aarch64)
 url='https://github.com/clockworklabs/SpacetimeDB'
 license=('BUSL-1.1')
@@ -23,21 +28,14 @@ conflicts=(spacetimedb-bin)
 replaces=(spacetimedb-bin)
 # !ccache: nothing for Rust to gain (and the shared cache's tmp is another user's).
 options=(!strip !debug !lto !ccache)
-source=("SpacetimeDB::git+https://github.com/clockworklabs/SpacetimeDB.git#tag=v$pkgver"
-        "spacetime-$pkgver-aarch64.tar.gz::https://github.com/clockworklabs/SpacetimeDB/releases/download/v$pkgver/spacetime-aarch64-unknown-linux-gnu.tar.gz"
-        0001-engine-tx-metrics-recorder-parks-while-idle.patch
-        0002-wasmtime-epoch-ticker-only-while-wasm-runs.patch
-        0003-standalone-control-db-flushes-once-a-second.patch)
+source=("SpacetimeDB::git+file:///forks/SpacetimeDB#commit=$_commit"
+        "spacetime-$pkgver-aarch64.tar.gz::https://github.com/clockworklabs/SpacetimeDB/releases/download/v$pkgver/spacetime-aarch64-unknown-linux-gnu.tar.gz")
 sha256sums=('SKIP'
-            '3dd4785cf525d1029ab61177db2dc8cd303e04a73728ee611f5e1f4d2065b4ab'
-            '0f84db8d6d84504e0d467148406dc4eedfa34a8787b47511949ad0ca2bca2076'
-            'c2923208c6f9f3509fee58b1af9c47291573048b7039531ea56fade32f1967ca'
-            '8c9f6aef087a099aff42361481061766c1c49c84435de2beaec32a507ad439ad')
+            '3dd4785cf525d1029ab61177db2dc8cd303e04a73728ee611f5e1f4d2065b4ab')
 noextract=("spacetime-$pkgver-aarch64.tar.gz")
 
 prepare() {
   cd SpacetimeDB
-  for p in "$srcdir"/000*.patch; do patch -p1 < "$p"; done
   # The toolchain upstream pins (rust-toolchain.toml), through rustup.
   rustup show active-toolchain >/dev/null 2>&1 || rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal
   # The CLI is the official one (nothing in it changed).
