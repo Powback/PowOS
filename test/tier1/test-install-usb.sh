@@ -70,6 +70,15 @@ write_bls_entries "$ENTRIES" >/dev/null 2>&1
 check "install entry created"        '[[ -f "$ENTRIES/powos-install.conf" ]]'
 check "safe entry created"           '[[ -f "$ENTRIES/powos-safe.conf" ]]'
 check "aidebug entry created"        '[[ -f "$ENTRIES/powos-aidebug.conf" ]]'
+check "basic-graphics entry created" '[[ -f "$ENTRIES/powos-basicgfx.conf" ]]'
+check "basic-graphics entry keeps nouveau out" \
+    'grep -q "modprobe.blacklist=nouveau nouveau.modeset=0" "$ENTRIES/powos-basicgfx.conf"'
+check "basic-graphics entry is a LIVE boot (no powos.mode, no multi-user)" \
+    '! grep -qE "powos.mode=|multi-user" "$ENTRIES/powos-basicgfx.conf"'
+check "basic-graphics entry keeps the template kernel args" \
+    'grep -q "^options .*root=" "$ENTRIES/powos-basicgfx.conf"'
+check "recovery entries keep nouveau out too" \
+    'grep -q "modprobe.blacklist=nouveau" "$ENTRIES/powos-safe.conf" && grep -q "modprobe.blacklist=nouveau" "$ENTRIES/powos-aidebug.conf"'
 
 check "install entry carries powos.install=1" \
     'grep -q "powos.install=1" "$ENTRIES/powos-install.conf"'

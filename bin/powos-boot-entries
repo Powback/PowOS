@@ -106,10 +106,16 @@ write_entry() {
 
 write_entry powos-install.conf "Install PowOS to disk" \
     "powos.install=1 systemd.unit=multi-user.target plymouth.enable=0"
+# nouveau kept out of the recovery and basic-graphics entries: this kernel's
+# nouveau panics on NVIDIA hardware whose engines did not come up (see
+# build/install-to-usb.sh, no_nouveau). Same list as the medium is written with.
+NO_NOUVEAU="modprobe.blacklist=nouveau nouveau.modeset=0"
 write_entry powos-safe.conf    "Recovery — Safe mode (RAM boot off)" \
-    "rd.powos.ramboot=0 powos.mode=safe systemd.unit=multi-user.target plymouth.enable=0"
+    "rd.powos.ramboot=0 powos.mode=safe systemd.unit=multi-user.target plymouth.enable=0 $NO_NOUVEAU"
 write_entry powos-aidebug.conf "Recovery — AI Debug (diagnose boot)" \
-    "rd.powos.ramboot=0 powos.mode=aidebug systemd.unit=multi-user.target plymouth.enable=0"
+    "rd.powos.ramboot=0 powos.mode=aidebug systemd.unit=multi-user.target plymouth.enable=0 $NO_NOUVEAU"
+write_entry powos-basicgfx.conf "PowOS Live (basic graphics — no nouveau)" \
+    "$NO_NOUVEAU"
 
 # The ostree entries are regenerated too, so re-apply the console fix to them.
 for f in "$ENTRIES"/*.conf; do [[ -f "$f" ]] && console_to_display "$f"; done

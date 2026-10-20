@@ -896,12 +896,22 @@ write_bls_entries() {
     #   safe    → recovery menu (offer AI debug, rollback, reset, shell)
     #   aidebug → run `powos doctor --ai` straight away
     # systemd.unit=multi-user.target keeps SDDM off tty1 so the console shows.
+    # The live medium is the deck image on every machine, so on an NVIDIA box
+    # its GPU driver is nouveau -- and this kernel's nouveau panics on the first
+    # render-node ioctl when the GPU's engines are not up (NULL deref in
+    # nouveau_abi16_ioctl_get_zcull_info; fixed upstream Aug 2026, not in the
+    # OGC kernel yet). Recovery entries must not die to that, and a plain live
+    # boot needs a way around it too: "basic graphics" keeps nouveau from
+    # registering a DRM device at all, so the session comes up on simpledrm.
+    # Harmless on AMD/Intel; an install from either entry still lays down the
+    # right variant from the offline store.
+    local no_nouveau="modprobe.blacklist=nouveau nouveau.modeset=0"
     _write_recovery_entry() {
         local name="$1" title="$2" mode="$3"
         local out="${entries_dir}/${name}.conf"
-        awk -v t="$title" -v m="$mode" '
+        awk -v t="$title" -v m="$mode" -v nognk="$no_nouveau" '
             /^title / { print "title " t; next }
-            /^options / { print $0 " rd.powos.ramboot=0 powos.mode=" m " systemd.unit=multi-user.target plymouth.enable=0"; next }
+            /^options / { print $0 " rd.powos.ramboot=0 powos.mode=" m " systemd.unit=multi-user.target plymouth.enable=0 " nognk; next }
             { print }
         ' "$template" > "$out"
         grep -q '^title ' "$out" || echo "title $title" >> "$out"
@@ -915,6 +925,24 @@ write_bls_entries() {
     }
     _write_recovery_entry "powos-safe"    "Recovery — Safe mode (RAM boot off)" "safe"
     _write_recovery_entry "powos-aidebug" "Recovery — AI Debug (diagnose boot)" "aidebug"
+
+    # ── Live, basic graphics ──────────────────────────────────────
+    # The normal live boot with nouveau kept out (see no_nouveau above). Sorted
+    # right after the install entry, before the recovery ones.
+    local basic="${entries_dir}/powos-basicgfx.conf"
+    awk -v t="PowOS Live (basic graphics — no nouveau)" -v nognk="$no_nouveau" '
+        /^title / { print "title " t; next }
+        /^options / { print $0 " " nognk; next }
+        { print }
+    ' "$template" > "$basic"
+    grep -q '^title ' "$basic" || echo "title PowOS Live (basic graphics — no nouveau)" >> "$basic"
+    if grep -q 'modprobe.blacklist=nouveau' "$basic"; then
+        _bls_sort_key "$basic" "powos-3-basicgfx"
+        log_success "Added boot entry: 'PowOS Live (basic graphics — no nouveau)'"
+    else
+        log_warn "Failed to build the basic-graphics entry — removing."
+        rm -f "$basic"
+    fi
     # Point every entry on this medium at the display (see
     # _bls_console_to_display). Includes the image's own ostree entries, which
     # we did not write but which boot on the same hardware.

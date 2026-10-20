@@ -143,7 +143,7 @@ M=$(mktemp -d)
 B=$(lsblk -nro NAME,LABEL "$DEV" | awk '$2=="boot"{print "/dev/"$1}')
 if [ -n "$B" ] && mount -o ro "$B" "$M" 2>/dev/null; then
   E="$M/loader/entries"
-  for e in powos-install powos-safe powos-aidebug; do
+  for e in powos-install powos-basicgfx powos-safe powos-aidebug; do
     [ -f "$E/$e.conf" ] && ok "entry: $e" || bad "entry missing: $e"
   done
   # Capture first: under pipefail, grep -q exiting early kills the producers and
