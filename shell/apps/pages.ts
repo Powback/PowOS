@@ -89,7 +89,13 @@ export function openApp(id: string, from: DOMRect | null = null) {
 
 export function closeApp() {
   const v = appView.value;
-  if (v && !v.closing) appView.value = { ...v, closing: true };
+  if (v && !v.closing) {
+    // Its look as it goes, taken before anything moves: the picture on its switcher card.
+    const el = document.querySelector<HTMLElement>(`.app-screen[data-app="${v.id}"]`);
+    const shot = el && shotOf(el);
+    if (shot) appShots.set(PREFIX + v.id, shot);
+    appView.value = { ...v, closing: true };
+  }
   (document.activeElement as HTMLElement | null)?.blur();
   powos.keyboard.hide();
 }
@@ -139,4 +145,97 @@ export function mergeRecent(hostKeys: string[], installed: Set<string>): string[
 export async function initPowosApps() {
   const v = await powos.store.get<Opened>(STORE).catch(() => null);
   if (v && Array.isArray(v.list)) opened.value = { list: v.list, front: v.front ?? null };
+}
+
+/**
+ * PowOS apps in the switcher, as cards beside Android's tasks (ui/recents.tsx): one per app opened here lately, with a
+ * negative task id (Android's are positive), its last look as the card's picture ([appShots], taken as its page
+ * closes), its icon and name. A tap opens it full screen again; a swipe up or clear all forgets it.
+ */
+const taskIds = new Map<string, number>();
+const taskKeys = new Map<number, string>();
+function taskId(key: string) {
+  let id = taskIds.get(key);
+  if (id == null) {
+    id = -(taskIds.size + 1);
+    taskIds.set(key, id);
+    taskKeys.set(id, key);
+  }
+  return id;
+}
+/** A PowOS app's card id -> its app id (null: an Android task). */
+export const taskApp = (id: number) => (id < 0 ? (taskKeys.get(id)?.slice(PREFIX.length) ?? null) : null);
+
+/** Each app's page as it last looked (an SVG of its DOM), by launcher key: its switcher card's picture. */
+export const appShots = new Map<string, string>();
+
+/** [el] (an open app's page) as a picture: its DOM in an SVG foreignObject, the theme's custom properties with it. */
+export function shotOf(el: HTMLElement): string | null {
+  try {
+    const w = innerWidth;
+    const h = innerHeight;
+    const root = getComputedStyle(document.documentElement);
+    let vars = "";
+    for (let i = 0; i < root.length; i++) {
+      const p = root[i];
+      if (p.startsWith("--")) vars += `${p}:${root.getPropertyValue(p)};`;
+    }
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.style.transform = "none";
+    clone.style.opacity = "1";
+    clone.style.position = "absolute";
+    const body = getComputedStyle(document.body);
+    const xhtml = new XMLSerializer().serializeToString(clone);
+    const style = `${vars}width:${w}px;height:${h}px;position:relative;overflow:hidden;font-family:${body.fontFamily};font-size:${body.fontSize}`.replace(/"/g, "'");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="${style}">${xhtml}</div></foreignObject></svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  } catch (e) {
+    console.error("[powos-app] snapshot failed", e);
+    return null;
+  }
+}
+
+/** No picture of it yet: its icon and name on the theme's background. */
+function cardFace(label: string, icon: string) {
+  const w = innerWidth;
+  const h = innerHeight;
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--color-background").trim() || "#222";
+  const fg = getComputedStyle(document.documentElement).getPropertyValue("--color-foreground").trim() || "#ddd";
+  const esc = (s: string) => s.replace(/[<&"]/g, "");
+  const href = icon.startsWith("data:") ? icon : new URL(icon, location.href).href;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${esc(bg)}"/><image href="${esc(href)}" x="${w / 2 - 48}" y="${h / 2 - 96}" width="96" height="96"/><text x="${w / 2}" y="${h / 2 + 40}" fill="${esc(fg)}" font-family="sans-serif" font-size="22" text-anchor="middle">${esc(label)}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** Forgets [key] from the recents (a swipe up on its card, clear all). */
+export function forgetOpened(key: string) {
+  opened.value = { ...opened.value, list: opened.value.list.filter((o) => o.key !== key) };
+  appShots.delete(key);
+  save();
+}
+
+/**
+ * Android's task list with the PowOS apps' cards in it. The task the switcher was opened over stays first (a swiped-up
+ * window lands on the first card); then, as in [mergeRecent], PowOS apps opened since Android's front app changed,
+ * that app, the older PowOS apps, the rest. An app open full screen now (the overview button over it) comes first.
+ */
+export function mergeTasks<T extends { id: number; label: string; key: string | null; icon: string | null; snapshot: string }>(
+  host: T[],
+  over: number | null,
+): T[] {
+  const apps = new Map(powosApps.value.map((a) => [a.key, a]));
+  const mine = opened.value.list.filter((o) => apps.has(o.key));
+  if (!mine.length) return host;
+  const frontAt = opened.value.front?.at ?? 0;
+  const card = (o: { key: string }) => {
+    const a = apps.get(o.key)!;
+    return { id: taskId(o.key), label: a.label, key: o.key, icon: a.icon, snapshot: appShots.get(o.key) ?? cardFace(a.label, a.icon) } as T;
+  };
+  const showing = appView.value && !appView.value.closing ? PREFIX + appView.value.id : null;
+  const newer = mine.filter((o) => o.key === showing || o.at > frontAt).map(card);
+  const older = mine.filter((o) => !(o.key === showing || o.at > frontAt)).map(card);
+  const i = over == null ? -1 : host.findIndex((t) => t.id === over);
+  const first = i >= 0 ? [host[i]] : [];
+  const rest = i >= 0 ? [...host.slice(0, i), ...host.slice(i + 1)] : host;
+  return first.length ? [...first, ...newer, ...older, ...rest] : [...newer, ...rest.slice(0, 1), ...older, ...rest.slice(1)];
 }

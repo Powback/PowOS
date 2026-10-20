@@ -22,6 +22,7 @@ import { powos } from "../bridge.ts";
 import type { RecentTask } from "../types.ts";
 import { TaskCard, type Rect } from "./switcher.tsx";
 import { spring } from "./spring.ts";
+import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from "../apps/pages.ts";
 
 type Phase = "closed" | "drag" | "shown";
 
@@ -72,10 +73,12 @@ function toStart() {
 /** Home's content (the pages, the bar, the dock): it recedes as the switcher comes up. */
 const screens = () => document.querySelector<HTMLElement>(".screens");
 
-/** The app it was opened over first (its window lands on the first card), then the rest, newest first. */
+/**
+ * The app it was opened over first (its window lands on the first card), then the rest, newest first - the PowOS
+ * apps opened in home among them (apps/pages.ts mergeTasks: negative ids).
+ */
 function order(list: RecentTask[], over: number | null) {
-  const i = list.findIndex((t) => t.id === over);
-  return i > 0 ? [list[i], ...list.slice(0, i), ...list.slice(i + 1)] : list;
+  return mergeTasks(list, over);
 }
 
 /**
@@ -132,6 +135,8 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
 
 /** Shown without a swipe (the overview button, up and hold over home): it comes up over home. */
 async function show(e: { from: number | null; tasks: RecentTask[] }) {
+  // A PowOS app open full screen in home: it goes into its card (its picture taken as it closes).
+  if (appView.value) closeApp();
   loaded.value = true;
   settle(false);
   reset();
@@ -188,6 +193,13 @@ async function landed(snapshot: string | null) {
  */
 function open(id: number, shot?: HTMLElement) {
   menu.value = null;
+  // A PowOS app's card: the switcher goes back into home and the app opens full screen there (ui/appscreen.tsx).
+  const app = taskApp(id);
+  if (app) {
+    close();
+    openApp(app);
+    return;
+  }
   const t = tasks.value.find((x) => x.id === id);
   const img = shot as HTMLImageElement | undefined;
   if (!t || !img || !img.complete || !img.naturalWidth) {
@@ -222,7 +234,8 @@ function remove(id: number) {
     showNote(`${t.label} stays: its widget is on home`);
     return false;
   }
-  powos.tasks.remove(id);
+  if (id < 0) forgetOpened(t!.key!);
+  else powos.tasks.remove(id);
   flipFrom = cardPositions();
   tasks.value = tasks.value.filter((t) => t.id !== id);
   if (splitFirst.value === id) splitFirst.value = null;
@@ -240,7 +253,8 @@ function clearAll() {
   going.forEach((t, i) => {
     const card = row?.querySelector<HTMLElement>(`.task[data-task="${t.id}"]`);
     const done = () => {
-      powos.tasks.remove(t.id);
+      if (t.id < 0) forgetOpened(t.key!);
+      else powos.tasks.remove(t.id);
       if (--left) return;
       flipFrom = cardPositions();
       tasks.value = keep;
@@ -354,7 +368,7 @@ powos.on("recents.update", (e: { tasks: RecentTask[] }) => {
 // The list for the next swipe, while an app is in front: laid out (hidden) now, snapshots loading.
 powos.on("recents.tasks", (e: { tasks: RecentTask[] }) => {
   if (phase.value !== "closed") return;
-  tasks.value = e.tasks;
+  tasks.value = order(e.tasks, null);
   toStart();
   prefetch(e.tasks);
 });
@@ -415,26 +429,33 @@ function Menu() {
     <>
       <div class="recents-menu-scrim" onPointerDown={() => (menu.value = null)} />
       <div class="recents-menu tile" style={{ left: `${m.left}px`, top: `${m.top}px` }}>
-        <button type="button" onClick={act(() => pickForSplit(t.id))}>
-          Split screen
-        </button>
-        <button type="button" onClick={act(() => powos.tasks.float(t.id))}>
-          Floating window
-        </button>
-        <button
-          type="button"
-          onClick={act(() =>
-            powos.tasks.screenshot(t.id).then((name) => showNote(name ? `Saved ${name}` : "No screenshot of this app yet")),
-          )}
-        >
-          Screenshot
-        </button>
+        {/* A PowOS app's card (negative id) is no Android task: no split, window, screenshot or app info for it. */}
+        {t.id >= 0 && (
+          <>
+            <button type="button" onClick={act(() => pickForSplit(t.id))}>
+              Split screen
+            </button>
+            <button type="button" onClick={act(() => powos.tasks.float(t.id))}>
+              Floating window
+            </button>
+            <button
+              type="button"
+              onClick={act(() =>
+                powos.tasks.screenshot(t.id).then((name) => showNote(name ? `Saved ${name}` : "No screenshot of this app yet")),
+              )}
+            >
+              Screenshot
+            </button>
+          </>
+        )}
         <button type="button" onClick={act(() => togglePin(t))}>
           {isPinned ? "Unpin" : "Pin (keep on clear all)"}
         </button>
-        <button type="button" onClick={act(() => powos.tasks.info(t.id))}>
-          App info
-        </button>
+        {t.id >= 0 && (
+          <button type="button" onClick={act(() => powos.tasks.info(t.id))}>
+            App info
+          </button>
+        )}
       </div>
     </>
   );
