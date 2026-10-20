@@ -447,8 +447,9 @@ class AppWidgets private constructor(
     // Shown: rendered off screen, frames to the page, touches back.
 
     /**
-     * A page shows [id] at [wDp] x [hDp] (its tile, CSS px = dp): it's drawn at that size (its display resized if the
-     * size changed - the provider hears of it, OPTION_APPWIDGET_SIZES) and the provider's updates are listened to.
+     * A page shows [id] at [wDp] x [hDp] (its tile, CSS px = dp): it's drawn at that size - scaled up to a stock
+     * cell's if the tile is smaller - (its display resized if the size changed - the provider hears of it,
+     * OPTION_APPWIDGET_SIZES) and the provider's updates are listened to.
      * Answers { url: the latest frame's, if there is one; scrolls }; "appwidgets.frame" brings each next.
      */
     fun watch(
@@ -461,15 +462,23 @@ class AppWidgets private constructor(
         val info = awm.getAppWidgetInfo(e.id) ?: return null
         listeners.getOrPut(events) { HashSet() } += id
         updateListening()
-        // Exactly the tile, in the screen's pixels (CSS px are dp here: the WebView's pixel ratio is the density), and
-        // that size in dp to the provider: the widget decides what fits, as on a launcher, and the page shows the
-        // frame 1:1.
+        // The tile, in the screen's pixels (CSS px are dp here: the WebView's pixel ratio is the density), and that
+        // size in dp to the provider: the widget decides what fits, as on a launcher. Never smaller than a stock
+        // launcher's one cell nor the provider's minimum, though: PowOS's cells are finer (a 1x1 tile is ~55 dp to a
+        // stock cell's ~81), and a widget laid out under the size it was made for falls back to a cramped layout (Hue's
+        // switch: a tiny icon, "Mats'..."). Such a tile gets the widget laid out at that floor, the same shape, and its
+        // frame scaled down to the tile by the page (touches map by the ratio) - the same layout as a bigger twin.
+        val (minW, minH) = minSizeDp(info)
+        val floor = (stockCellDp() - 16).toDouble()
+        val s = maxOf(1.0, floor / minOf(wDp, hDp).coerceAtLeast(1.0), minW / wDp.coerceAtLeast(1.0), minH / hDp.coerceAtLeast(1.0))
+        val lw = wDp * s
+        val lh = hDp * s
         val d = context.resources.displayMetrics.density
-        val w = (wDp * d).roundToInt().coerceIn(1, 4096)
-        val h = (hDp * d).roundToInt().coerceIn(1, 4096)
+        val w = (lw * d).roundToInt().coerceIn(1, 4096)
+        val h = (lh * d).roundToInt().coerceIn(1, 4096)
         val r = renderers[id]
         if (r == null || r.w != w || r.h != h) {
-            awm.updateAppWidgetOptions(id, sizeOptions(wDp.roundToInt(), hDp.roundToInt()))
+            awm.updateAppWidgetOptions(id, sizeOptions(lw.roundToInt(), lh.roundToInt()))
             if (r == null || !r.resize(w, h)) {
                 r?.close()
                 val store = frames.getOrPut(id, ::Frames)
