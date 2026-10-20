@@ -172,15 +172,19 @@ platform). VoiceAgent ran unchanged: config only (branch `server-gpu195` in `~/P
   reboot. `/usr/local/bin/powos` (unit `powos-units-shim`, a marked HACK) routes `units` to a git checkout of
   `worktree-powos-multiplatform` at `~/Projects/PowOS`, and everything else to the image's `/usr/bin/powos`.
   - Real fix: an image with powos-units, then `rpm-ostree upgrade` + reboot at a quiet time, then remove the shim.
+- Fleet docs: `~/Projects/CLAUDE.md` network table has the box.
 - Linger was already on. Firewalld's FedoraWorkstation zone already allows 1025-65535/tcp, so the service ports
   needed no change.
 - Models: `/var/lib/powos/models` (unit `models-store`).
   - `hf/` is the HF cache shared by vLLM, faster-whisper and the backend.
   - `torch/` holds Silero VAD; `vllm/` is vLLM's compile cache.
   - 8.2 GB used.
-- `powos units check` passes for everything added here. It still lists the base OS (Bazzite's own /etc/systemd links,
-  the desktop's processes, and an unexplained `/etc/systemd/system/powback-stripe.service`) because the box has no
-  baseline unit yet. That is phase 6: `powos units baseline`, after someone looks at powback-stripe.
+- `powos units check` claims every process the units added.
+  - Its "outside its cgroup" list shows only podman's own helpers (conmon, rootlessport). They sit in each quadlet's
+    service cgroup, next to the container payload, and podman enforces the unit's limits on that payload.
+  - It still lists the base OS: Bazzite's own /etc/systemd links, the desktop's processes, and an unexplained
+    `/etc/systemd/system/powback-stripe.service`. The box has no baseline unit yet.
+  - That is phase 6: `powos units baseline`, after someone looks at powback-stripe.
 
 **Voice core on GPU0** (rootless podman quadlets, `Restart=always`, started at boot, `autosleep: never`):
 
