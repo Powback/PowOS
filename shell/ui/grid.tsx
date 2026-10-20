@@ -60,20 +60,35 @@ function measure(el: HTMLElement, columns: number) {
   // Under the launcher (open, or a finger opening it) home is faded out and the dock folding away resizes it every
   // frame: measuring then re-laid-out every tile, every frame. It measures again once the launcher closes.
   if (drawerOpen.value) return;
+  // Layout sizes, not the box on screen: closing, the launcher scales home's content back up (shell.css .home-content)
+  // and its box on screen grows every frame of that - a new grid, every tile re-rendered, each frame.
   const r = el.getBoundingClientRect();
-  if (!r.width || !r.height) return;
+  const size = { width: el.offsetWidth, height: el.offsetHeight };
+  if (!size.width || !size.height) return;
   const root = getComputedStyle(document.documentElement);
   const pad = parseFloat(root.getPropertyValue("--edge")) || 12;
   // The grid is laid out for home at rest, not for this frame: the dock folding away under the launcher and the
   // keyboard sliding in give the pages more or less height while they animate, and measuring that re-laid-out (and
   // resized) every tile and widget each frame - the flicker as the launcher closes. So the height the dock has
   // folded away and the room the keyboard takes are counted back in: the same grid in every frame of either.
-  const height = r.height - dockFolded(root) + keyboardRoom(root);
-  const across = r.width - 2 * pad;
+  const height = size.height - dockFolded(root) + keyboardRoom(root);
+  const across = size.width - 2 * pad;
   const down = height - 2 * pad;
   const square = Math.max(1, Math.min(MAX_SQUARE_ROWS, Math.floor(down / (across / columns))));
   const rows = Math.max(square, usedRows());
-  geometry.value = { left: r.left, top: r.top, width: r.width, height, cellW: across / columns, cellH: down / rows, rows, pad };
+  const next = { left: r.left, top: r.top, width: size.width, height, cellW: across / columns, cellH: down / rows, rows, pad };
+  // The same grid again: no new value, so no render (the launcher settling shut animates the dock back every frame;
+  // the folded height counted back in leaves the grid as it was). Where the grid is on screen (left, top: read by a
+  // drop, never by a render) is kept current without one.
+  const g = geometry.peek();
+  // Within a pixel and a half: the layout height is whole pixels, the dock's folded height isn't - their sum wobbles by
+  // a fraction each frame of the dock's animation.
+  const same = g.rows === next.rows && g.pad === next.pad && Math.abs(g.width - next.width) < 1.5 && Math.abs(g.height - next.height) < 1.5;
+  if (!same) geometry.value = next;
+  else {
+    g.left = next.left;
+    g.top = next.top;
+  }
 }
 
 /** How much of its resting height (the strip's; it sits flush on the bar, no margin) the dock has folded away right now. */
