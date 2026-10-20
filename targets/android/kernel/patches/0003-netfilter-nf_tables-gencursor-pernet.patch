@@ -71,10 +71,19 @@ index 9ee225cff..ac6a320fd 100644
  	struct list_head	commit_list;
  	struct list_head	binding_list;
 diff --git a/net/netfilter/nf_tables_api.c b/net/netfilter/nf_tables_api.c
-index 07fdd5f18..46ac3e408 100644
+index 07fdd5f18..0fa5e2ea2 100644
 --- a/net/netfilter/nf_tables_api.c
 +++ b/net/netfilter/nf_tables_api.c
-@@ -9502,7 +9502,7 @@ static int nf_tables_commit(struct net *net, struct sk_buff *skb)
+@@ -27,6 +27,8 @@
+ #define NFT_SET_MAX_ANONLEN 16
+ 
+ unsigned int nf_tables_net_id __read_mostly;
++/* PowOS: the nft_* modules reach the gencursor through it (nft_gencursor_ptr()) */
++EXPORT_SYMBOL_GPL(nf_tables_net_id);
+ 
+ static LIST_HEAD(nf_tables_expressions);
+ static LIST_HEAD(nf_tables_objects);
+@@ -9502,7 +9504,7 @@ static int nf_tables_commit(struct net *net, struct sk_buff *skb)
  	gc_seq = nft_gc_seq_begin(nft_net);
  
  	/* step 3. Start new generation, rules_gen_X now in use. */
@@ -83,7 +92,7 @@ index 07fdd5f18..46ac3e408 100644
  
  	list_for_each_entry_safe(trans, next, &nft_net->commit_list, list) {
  		nf_tables_commit_audit_collect(&adl, trans->ctx.table,
-@@ -10598,6 +10598,7 @@ static int __net_init nf_tables_init_net(struct net *net)
+@@ -10598,6 +10600,7 @@ static int __net_init nf_tables_init_net(struct net *net)
  {
  	struct nftables_pernet *nft_net = nft_pernet(net);
  

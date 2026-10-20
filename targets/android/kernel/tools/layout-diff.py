@@ -4,7 +4,8 @@ struct/union/enum with member offsets, sizes and holes) of a baseline kernel and
 
 Vendor modules are compiled against the baseline's headers, so any type both kernels have must be
 byte-for-byte the same in the new one - symbol CRCs (kmi-check.py) only catch what genksyms sees, this
-catches the rest. Types only the new kernel has are fine (nothing old can reference them).
+catches the rest. Types only the new kernel has are fine (nothing old can reference them). Zero-size members
+(empty structs) are ignored: removing one moves no byte.
 
     layout-diff.py base.pahole new.pahole [allowed type ...]     exit 1 if a shared, non-allowed type differs
 """
@@ -19,6 +20,11 @@ def load(path):
             cur = f'{m.group(1)} {m.group(2)}'
             types[cur] = []
         if cur:
+            # A zero-size member (an empty struct) occupies no bytes: dropping one changes nothing a module
+            # can see, so it is left out of the comparison along with the member count it shifts.
+            if re.search(r'/\*\s+\d+\s+0 \*/\s*$', line):
+                continue
+            line = re.sub(r', members: \d+', '', line)
             types[cur].append(line.rstrip('\n'))
             if line.startswith('}'):
                 cur = None
