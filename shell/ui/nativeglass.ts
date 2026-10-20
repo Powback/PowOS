@@ -203,19 +203,28 @@ function changed() {
   kick();
 }
 
+/** A node added or removed is (or holds) a surface. */
+const holds = (nodes: NodeList) => {
+  for (const n of nodes) if (n instanceof Element && (n.matches(SURFACES) || n.querySelector(SURFACES))) return true;
+  return false;
+};
 new MutationObserver((records) => {
   if (!nativeGlass.value) return;
   for (const r of records) {
-    if (r.type === "childList" || r.attributeName === "class") return changed();
+    // A clock's text, a widget's frame: nothing that has glass came or went.
+    if (r.type === "childList" ? holds(r.addedNodes) || holds(r.removedNodes) : r.attributeName === "class" || (r.target as Element).matches(SURFACES)) return changed();
   }
   kick();
 }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"] });
 
-addEventListener("touchstart", () => (fingers++, kick()), { capture: true, passive: true });
-addEventListener("touchmove", kick, { capture: true, passive: true });
-const lift = () => ((fingers = Math.max(0, fingers - 1)), kick());
-addEventListener("touchend", lift, { capture: true, passive: true });
-addEventListener("touchcancel", lift, { capture: true, passive: true });
+// Fingers down: measured every frame until they're up (the event's own count - one lost end can't leave it running).
+const touch = (e: TouchEvent) => ((fingers = e.touches.length), kick());
+for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) addEventListener(ev, touch, { capture: true, passive: true });
+document.addEventListener("visibilitychange", () => {
+  fingers = 0;
+  transitions = 0;
+  if (!document.hidden) changed();
+});
 addEventListener("transitionrun", () => (transitions++, kick()), { capture: true, passive: true });
 const settled = () => ((transitions = Math.max(0, transitions - 1)), kick());
 addEventListener("transitionend", settled, { capture: true, passive: true });
