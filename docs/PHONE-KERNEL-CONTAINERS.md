@@ -280,7 +280,11 @@ Undo images for a later flash, all sha256-verified against the live partitions o
 | init_boot_b (Magisk), vendor_boot_b, dtbo_b, vbmeta_b, vbmeta_system_b, vbmeta_vendor_b, vendor_dlkm_b | same folder, see `SHA256SUMS`; all identical to the 2026-10-16 backups, only boot_b changed since |
 | persist, modemst1, modemst2, fsg, everything else | `targets/native/backup/8e5d600d/` (2026-10-16) + NAS `~/nas/PowCache/backups/oneplus-open-8e5d600d/` |
 
-## 9. Making it permanent (separate decision, not done)
+## 9. Making it permanent
+
+**Step 1 done 2026-10-20:** `boot-powos-containers.img` flashed to boot_b (user-approved). The phone booted normally:
+pids in /proc/cgroups, `cpu.cfs_quota_us` present, root/Plasma/STDB up. Undo: the boot_b backup below. Steps 2-3 are in
+progress (nft modules at boot; PowOS's hybrid-cgroup container runtime).
 
 Only after every go check in §7 passes:
 1. `fastboot flash boot_b out/boot-powos-containers.img`, or write it with root `dd` the way the futex kernel
