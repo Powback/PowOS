@@ -91,6 +91,14 @@ export function applyTrack() {
   if (!track) return;
   track.classList.toggle("dragging", dx != null);
   track.style.transform = transform;
+  // Each page's glass layer (grid.tsx PageGlass) the other way, in the same frame and with the same transition: it
+  // stays put on screen - over the wallpaper - while the page slides.
+  const back = Math.max(at, 0);
+  const pull = toAi ? 0 : (dx ?? 0);
+  track.querySelectorAll<HTMLElement>(":scope > .page").forEach((p, i) => {
+    const img = p.querySelector<HTMLElement>(":scope > .page-glass > .page-glass-img");
+    if (img) img.style.transform = `translateX(calc(${back - i} * 100% - ${pull}px))`;
+  });
 }
 
 /** Elements that follow the openness, newly mounted: given its current value. */

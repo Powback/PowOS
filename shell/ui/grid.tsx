@@ -334,6 +334,57 @@ function joins(items: HomeItem[]): Map<string, Record<string, number>> {
   return out;
 }
 
+/**
+ * A page's glass (theme.css, ui/glass.ts): ONE frosted wallpaper layer per page, under its tiles, showing only through
+ * their faces (a mask of the faces' rounded boxes, made when the page's tiles change - never per frame). The layer is
+ * moved the other way as the pages slide (gesture.ts applyTrack, the same transition as the track's), so on the
+ * compositor it stays where the wallpaper is while the tiles slide over it. Only the page on screen and those beside it
+ * have one.
+ */
+const textured = (i: HomeItem) => boxed(i) || i.kind === "folder";
+
+function faceMask(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined) {
+  const css = getComputedStyle(document.documentElement);
+  const half = (parseFloat(css.getPropertyValue("--gap")) || 8) / 2;
+  const radius = parseFloat(css.getPropertyValue("--radius")) || 12;
+  let w = 1;
+  let h = 1;
+  const paths: string[] = [];
+  for (const i of items) {
+    if (!textured(i) || i.key === lifted) continue;
+    const b = box(shown(i));
+    const j = joined.get(i.key) ?? {};
+    const x0 = b.left + half * (1 - (j["--jl"] ?? 0));
+    const y0 = b.top + half * (1 - (j["--jt"] ?? 0));
+    const x1 = b.left + b.width - half * (1 - (j["--jr"] ?? 0));
+    const y1 = b.top + b.height - half * (1 - (j["--jb"] ?? 0));
+    const [tl, tr, br, bl] = ["--ctl", "--ctr", "--cbr", "--cbl"].map((k) => radius * (j[k] ?? 1));
+    const f = (n: number) => +n.toFixed(1);
+    paths.push(
+      `M${f(x0 + tl)} ${f(y0)}H${f(x1 - tr)}A${tr} ${tr} 0 0 1 ${f(x1)} ${f(y0 + tr)}V${f(y1 - br)}A${br} ${br} 0 0 1 ${f(x1 - br)} ${f(y1)}` +
+        `H${f(x0 + bl)}A${bl} ${bl} 0 0 1 ${f(x0)} ${f(y1 - bl)}V${f(y0 + tl)}A${tl} ${tl} 0 0 1 ${f(x0 + tl)} ${f(y0)}Z`,
+    );
+    w = Math.max(w, Math.ceil(x1));
+    h = Math.max(h, Math.ceil(y1));
+  }
+  if (!paths.length) return null;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><path d="${paths.join("")}"/></svg>`;
+  return { "--glass-mask": `url("data:image/svg+xml,${encodeURIComponent(svg)}")`, "--glass-mask-size": `${w}px ${h}px` };
+}
+
+function PageGlass({ items, joined, index }: { items: HomeItem[]; joined: Map<string, Record<string, number>>; index: number }) {
+  const mask = faceMask(items, joined, carry.value?.item?.key);
+  if (!mask) return null;
+  const g = geometry.peek();
+  // Where applyTrack puts it at rest, from the start (a transition from nowhere would slide it in).
+  const transform = `translateX(calc(${Math.max(page.value, 0) - index} * 100%))`;
+  return (
+    <div class="page-glass" style={mask}>
+      <div class="page-glass-img" style={{ "--pg-left": `${g.left}px`, "--pg-top": `${g.top}px`, transform }} />
+    </div>
+  );
+}
+
 function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> }) {
   const press = useTilePress(item, () => {
     if (item.kind === "app") launch(item.app!);
@@ -591,7 +642,8 @@ export function Pages() {
   }, [home.value, rows]);
   // The recent apps row, once, as a widget of home's (ui/recentwidget.tsx), at the bottom of the first page.
   useEffect(() => void migrateRecents(rows), [rows]);
-  useEffect(() => applyTrack(), []);
+  // Also each render: a page's glass layer just mounted takes the track's place at once.
+  useEffect(() => applyTrack());
   const list = pages.value;
   if (page.value >= list.length) page.value = list.length - 1;
   // Widgets on the page on screen (and beside it) run their sources; the rest pause.
@@ -605,7 +657,14 @@ export function Pages() {
           <div class={i === page.value ? "page" : "page away"} key={n}>
             {((on) => {
               const joined = joins(on);
-              return on.map((item) => <Tile key={item.key} item={item} join={joined.get(item.key)} />);
+              return (
+                <>
+                  {Math.abs(i - page.value) <= 1 && <PageGlass items={on} joined={joined} index={i} />}
+                  {on.map((item) => (
+                    <Tile key={item.key} item={item} join={joined.get(item.key)} />
+                  ))}
+                </>
+              );
             })(itemsOn(n))}
           </div>
         ))}
