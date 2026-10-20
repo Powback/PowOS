@@ -76,6 +76,26 @@ class NavGesture(
     /** The task the swipe began over (null: home, or PowOS's own screens). */
     private var from: Int? = null
 
+    /**
+     * Over PowOS's web home there is no app window to move: the switcher layer itself follows the finger (home's own
+     * page, [Switcher.begin] / [Switcher.drag] as the transition drives them), then settles onto the cards or back
+     * into home with [homeSettle]. Before this the layer only came up on the release.
+     */
+    private var overHome = false
+
+    /** The layer was begun (the swipe went up; a tap or a sideways swipe never begins it). */
+    private var homeBegun = false
+    private var homeProgress = 0f
+    private var homeness = 0f
+    private var homeDx = 0f
+    private var homeFramePending = false
+    private var homeSettle: android.animation.ValueAnimator? = null
+    private val homeFrame =
+        android.view.Choreographer.FrameCallback {
+            homeFramePending = false
+            if (overHome) Switcher.drag(homeProgress, homeDx, 0f, homeness)
+        }
+
     init {
         refresh()
     }
@@ -120,6 +140,7 @@ class NavGesture(
                 when (axis) {
                     NavGestureClassifier.Axis.UP -> {
                         transition?.drag(c.lift, e.rawX - downX, c.homeness())
+                        homeDrag(c.lift, e.rawX - downX, c.homeness())
                         return GestureConsumer.Verdict.TAKE
                     }
                     NavGestureClassifier.Axis.SIDEWAYS -> {
@@ -134,7 +155,10 @@ class NavGesture(
                     }
                     else -> {}
                 }
-                if (c.axis == NavGestureClassifier.Axis.UP) transition?.drag(c.lift, e.rawX - downX, c.homeness())
+                if (c.axis == NavGestureClassifier.Axis.UP) {
+                    transition?.drag(c.lift, e.rawX - downX, c.homeness())
+                    homeDrag(c.lift, e.rawX - downX, c.homeness())
+                }
                 return GestureConsumer.Verdict.FOLLOW
             }
             MotionEvent.ACTION_POINTER_DOWN ->
@@ -158,6 +182,9 @@ class NavGesture(
 
     private fun drop(): GestureConsumer.Verdict {
         classifier = null
+        // A layer begun over home goes back down with it.
+        if (overHome && homeBegun) endOverHome(NavGestureClassifier.Outcome.None)
+        overHome = false
         // Not a swipe up after all: the transition asked for on the down goes back to the app.
         backToApp(transition)
         transition = null
@@ -170,7 +197,20 @@ class NavGesture(
         // Over home's switcher there's no app under the finger: home's (the plain way).
         from = if (Switcher.open && Switcher.homeVisible) null else Tasks.visible(service)
         val tasks = recentTasks ?: run { Log.i(TAG, "gesture: no recents transition - SystemUI gave no IRecentTasks"); return }
-        if (from == null) run { Log.i(TAG, "gesture: over home (no app's window to move): the plain way"); return }
+        if (from == null) {
+            if (!Switcher.open && Switcher.target(service) != null && Switcher.onHome && Switcher.homeVisible) {
+                homeSettle?.cancel()
+                homeSettle = null
+                overHome = true
+                homeBegun = false
+                homeProgress = 0f
+                homeness = 0f
+                homeDx = 0f
+            } else {
+                Log.i(TAG, "gesture: over home (no app's window to move): the plain way")
+            }
+            return
+        }
         if (!RecentsTransition.enabled(service) || Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) run { Log.i(TAG, "gesture: the recents transition is off"); return }
         // Behind the app: PowOS's web home (the switcher is a layer of it), or the recents activity (the desktop is home).
         val home = Switcher.target(service) ?: run { Log.i(TAG, "gesture: no recents transition - PowOS isn't the home app"); return }
@@ -189,7 +229,9 @@ class NavGesture(
         val t = transition
         transition = null
         val over = from
-        Log.i(TAG, "gesture: $outcome (over task $over, animated ${t != null}; $why)")
+        Log.i(TAG, "gesture: $outcome (over task $over, animated ${t != null || overHome}; $why)")
+        if (overHome && homeBegun) return endOverHome(outcome)
+        overHome = false
         if (pinned) {
             if (outcome == NavGestureClassifier.Outcome.Switcher) runCatching { systemUi?.stopScreenPinning() }.onFailure { Log.w(TAG, "can't unpin", it) }
             return
@@ -235,6 +277,79 @@ class NavGesture(
             Switcher.end("home")
             if ((!ok || viaRecents) && swipe == mine) goHome()
         }
+    }
+
+    /** A frame of the swipe over home: the layer at the finger, once per display frame. */
+    private fun homeDrag(
+        lift: Float,
+        dx: Float,
+        home: Float,
+    ) {
+        if (!overHome) return
+        if (!homeBegun) {
+            homeBegun = true
+            Switcher.begin(null)
+            Log.i(TAG, "gesture: over home: the switcher layer follows the finger")
+        }
+        // The same travel the app's window has to its card: the layer comes up at the speed the cards do over an app.
+        homeProgress = (lift / (screen.height() * HOME_TRAVEL)).coerceIn(0f, 1f)
+        homeDx = dx
+        homeness = home
+        if (!homeFramePending) {
+            homeFramePending = true
+            android.view.Choreographer.getInstance().postFrameCallback(homeFrame)
+        }
+    }
+
+    /** The swipe over home let go: the layer springs onto the cards (the switcher) or back into home. */
+    private fun endOverHome(outcome: NavGestureClassifier.Outcome) {
+        overHome = false
+        android.view.Choreographer.getInstance().removeFrameCallback(homeFrame)
+        homeFramePending = false
+        val toSwitcher = outcome == NavGestureClassifier.Outcome.Switcher && systemUiState and SYSUI_OVERVIEW_DISABLED == 0L
+        if (!toSwitcher) Switcher.ending()
+        val from0 = homeProgress
+        val home0 = homeness
+        val dx0 = homeDx
+        val target = if (toSwitcher) 1f else 0f
+        homeSettle =
+            android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = HOME_SETTLE_MS
+                interpolator = android.view.animation.PathInterpolator(0.2f, 0.9f, 0.3f, 1f)
+                addUpdateListener {
+                    val f = it.animatedValue as Float
+                    Switcher.drag(from0 + (target - from0) * f, dx0 * (1f - f), 0f, home0 * (1f - f))
+                }
+                addListener(
+                    object : android.animation.AnimatorListenerAdapter() {
+                        private var cancelled = false
+
+                        override fun onAnimationCancel(animation: android.animation.Animator) {
+                            cancelled = true
+                        }
+
+                        override fun onAnimationEnd(animation: android.animation.Animator) {
+                            if (homeSettle === animation) homeSettle = null
+                            if (cancelled) return
+                            when {
+                                toSwitcher -> {
+                                    Switcher.settle(null) { Switcher.settled(true) }
+                                    runCatching { systemUi?.onOverviewShown(true) }
+                                }
+                                outcome is NavGestureClassifier.Outcome.QuickSwitch -> {
+                                    Switcher.end("app")
+                                    quickSwitch()
+                                }
+                                else -> {
+                                    Switcher.end("home")
+                                    if (outcome == NavGestureClassifier.Outcome.Home) goHome()
+                                }
+                            }
+                        }
+                    },
+                )
+                start()
+            }
     }
 
     /** Back to the app (let go early, or the shade was put away instead): its window full screen again. */
@@ -308,6 +423,9 @@ class NavGesture(
 
     private companion object {
         const val TAG = "PowosNavGesture"
+        /** Over home: the lift (a share of the screen height) that brings the switcher layer all the way up. */
+        const val HOME_TRAVEL = 0.3f
+        const val HOME_SETTLE_MS = 220L
         const val NAV_MODE_GESTURAL = 2
 
         // QuickStepContract.SYSUI_STATE_* (this phone's SystemUI: QuickStepContract.getSystemUiStateString).
