@@ -30,6 +30,38 @@ export interface Host {
   useOnScreen?(ref: { current: Element | null }): boolean;
   /** Nothing else open or moving on home: animate only then. */
   useQuiet?(): boolean;
+  /**
+   * The devices and services powos-app.json declares in "net" (exact hosts, or "lan" for any private address),
+   * reached by the PowOS app itself - no CORS, a LAN device's self-signed certificate pinned on first use, secrets kept
+   * per app (`capture` stores one out of a response, "${secret:name}" in a header sends it). An older PowOS app has
+   * none: check for it.
+   */
+  net?: Net;
+}
+
+export interface NetResponse {
+  status: number;
+  body: string;
+  json<T = any>(): T;
+}
+
+export interface Net {
+  fetch(
+    app: string,
+    url: string,
+    init?: { method?: string; headers?: Record<string, string>; body?: string | object; capture?: { secret: string; path: string } },
+  ): Promise<NetResponse>;
+  /** DNS-SD on the LAN ("_hue._tcp"): needs "lan". */
+  mdns(app: string, type: string, ms?: number): Promise<{ name: string; host: string; port: number; txt: Record<string, string> }[]>;
+  hasSecret(app: string, name: string): Promise<boolean>;
+  forget(app: string, what: { host?: string; secret?: string }): Promise<void>;
+  /** Server-sent events, one connection per app + URL for the whole shell, only while it's shown (a hook). */
+  useEvents(
+    app: string,
+    url: string | null,
+    headers: Record<string, string>,
+    onEvent: (data: string, event: string) => void,
+  ): "off" | "open" | "retry" | "closed" | "unavailable";
 }
 
 export interface Db {

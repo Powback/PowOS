@@ -361,6 +361,15 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   `spacetime generate`. An app with a page is a launcher app (`p:<id>`: drawer, search, recent strip) and opens full
   screen inside home's page (`shell/ui/appscreen.tsx`); its widgets are in home's edit sheet → PowOS apps. Example:
   `~/Projects/shopping` on the phone (`local.shopping`, a shared shopping list + widget).
+- **Apps on the network** ✅ (2026-10-20, `host.net`, the PowOS app's `ShellNet.kt` - no process of the app's own):
+  an app declares what it may reach in powos-app.json `"net": ["lan", "discovery.meethue.com"]` (exact hosts, or
+  `"lan"` = any private address / `*.local`); nothing declared, nothing reachable. `host.net.fetch(app, url, {method,
+  headers, body, capture})`, `host.net.useEvents(app, url, headers, onEvent)` (server-sent events: one connection per
+  app + URL for the whole shell, closed 5 s after home/the page is hidden or the screen goes off), `host.net.mdns(app,
+  "_hue._tcp")`, `hasSecret`, `forget`. A LAN device's self-signed certificate is pinned on first use per app +
+  host:port (a changed one fails until `forget`); public hosts use the system CAs. Secrets stay in the PowOS app's
+  private storage per app: `capture: {secret, path}` takes one out of a response, `${secret:name}` in a header sends it
+  - the page never sees it. Example: `~/Projects/lights` (`local.lights`, Philips Hue: rooms, brightness, scenes).
 - Remove an app: `powos app remove <id> [--data]`. Remove everything: `rooted.sh system off`, then delete
   `/var/lib/powos/stdb`.
 

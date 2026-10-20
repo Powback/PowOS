@@ -48,6 +48,12 @@ Writing one (what to edit after `new`):
   ui/widgets/*.tsx    a home widget each (list it in powos-app.json "widgets"): ({ host, app, cells }). Make it
                       USABLE IN PLACE, not a preview: its actions inline (tick, -/+, remove), an add field, and
                       the header opening the page (host.openApp(app)); controls stop pointerdown propagating.
+  The network:         "net": ["lan", "host.example"] in powos-app.json: what the app may reach ("lan" = any private
+                      address). host.net.fetch(app, url, {method, headers, body}), host.net.useEvents(app, url,
+                      headers, onEvent) (server-sent events, only while shown), host.net.mdns(app, "_x._tcp").
+                      No CORS; a LAN device's self-signed certificate is pinned on first use. Keys stay in the
+                      PowOS app: {capture: {secret: "k", path: "0.success.username"}} keeps one from a response,
+                      "${secret:k}" in a header sends it. Example: ~/Projects/lights (Philips Hue).
   Styling: inline styles with the shell's theme variables (var(--color-accent), var(--color-foreground), ...).
   Imports: preact, preact/hooks, @preact/signals and spacetimedb come from the shell; anything else is bundled.
 

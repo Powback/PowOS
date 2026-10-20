@@ -21,12 +21,18 @@ declare global {
 /** The port, once the app has handed it over (null: an APK without ShellNative, or not yet). */
 export const native = signal<MessagePort | null>(null);
 
+/** What the app says back over the port ("n.res ...": apps/net.ts), to each listener. */
+export const fromNative = new Set<(text: string) => void>();
+
 addEventListener("message", (e: MessageEvent) => {
   if (e.data !== "powos-native" || !e.ports?.[0]) return;
   native.value?.close();
   const p = e.ports[0];
   // A page that reloaded leaves the last one's tiles behind: they go first.
   p.postMessage("s.reset");
+  p.onmessage = (m: MessageEvent) => {
+    if (typeof m.data === "string") for (const f of fromNative) f(m.data);
+  };
   native.value = p;
 });
 try {

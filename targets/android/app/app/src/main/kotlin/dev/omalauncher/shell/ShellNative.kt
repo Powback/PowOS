@@ -36,6 +36,7 @@ import android.widget.FrameLayout
  *   s.show <id> <0|1>                  shown (its last frame stays while it is) or not (its surface goes)
  *   s.draw <id> <w> <h> <ops...>       a frame: a display list in a w x h space ([draw])
  *   s.destroy <id> / s.reset           one tile / every tile (the page reloaded)
+ *   n.req <json>                       PowOS apps' network capability ([ShellNet]): answered with n.res / n.ev / n.st
  *
  * Why surfaces: a canvas in the page, however it's drawn (an OffscreenCanvas in a worker included), makes the whole
  * WebView composite again for each frame - in the app's own render threads - which cost ~2% of a core per frame per
@@ -57,11 +58,13 @@ class ShellNative(
     private val renderer = Handler(render.looper)
     private var port: WebMessagePort? = null
     private val tiles = HashMap<Int, Tile>()
+    private val net = ShellNet(context) { text -> main.post { port?.postMessage(WebMessage(text)) } }
 
     @JavascriptInterface
     fun connect() {
         main.post {
             port?.close()
+            net.reset()
             val (mine, theirs) = web.createWebMessageChannel()
             mine.setWebMessageCallback(
                 object : WebMessagePort.WebMessageCallback() {
@@ -81,6 +84,7 @@ class ShellNative(
         main.post {
             port?.close()
             port = null
+            net.reset()
             tiles.values.forEach { it.remove() }
             tiles.clear()
         }
@@ -94,6 +98,7 @@ class ShellNative(
         try {
             when (verb) {
                 "open" -> open(rest.trim())
+                "n.req" -> net.command(rest)
                 "s.draw" -> {
                     val id = rest.substringBefore(' ').toInt()
                     synchronized(tiles) { tiles[id] }?.draw(rest.substringAfter(' '))

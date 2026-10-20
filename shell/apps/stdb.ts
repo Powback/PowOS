@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { openUrl, power, useLayoutSize, useOnScreen, useQuiet } from "./onscreen.ts";
 import { useSurface, type Surface } from "./native.ts";
 import { openApp } from "./pages.ts";
+import { net, type Net } from "./net.ts";
 
 export const STDB_URL = "ws://127.0.0.1:3410";
 const GRACE_MS = 5000;
@@ -44,6 +45,8 @@ export interface IslandHost {
   useQuiet?(): boolean;
   /** Opens an installed PowOS app's full-screen page (apps/pages.ts) - a widget's tap opening its app. */
   openApp?(id: string): void;
+  /** The devices and services the app's manifest declares in "net" (apps/net.ts): fetch, server-sent events, mDNS. */
+  net?: Net;
 }
 
 export interface Builder {
@@ -289,4 +292,5 @@ export const host: IslandHost = {
   useSurface,
   useQuiet,
   openApp: (id) => openApp(id),
+  net,
 };
