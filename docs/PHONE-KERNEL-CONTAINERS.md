@@ -323,3 +323,18 @@ Re-apply:
 
 Never flash an image built for an older firmware onto a newer slot just because it booted before. The KMI check
 must pass against the modules that are actually on the slot.
+
+## 11. Test result (2026-10-20, RAM boot of boot-powos-containers.img, sha256 e8205808…)
+
+`fastboot boot` over the Mac's USB, nothing flashed; Android booted normally (boot_completed ~12 s after adb).
+- `phone-test.sh check`: identical to the baseline on the running kernel - 526 modules loaded, taint 12804, 17 input
+  devices, Wi-Fi up, 8 cameras, fingerprint present, modem OUT_OF_SERVICE (the existing baseline). New: `pids` in
+  /proc/cgroups (net_prio's slot) and as a v2 controller; `/dev/cpuctl/cpu.cfs_quota_us` + `cfs_period_us` present.
+  No "disagrees about version" / "Unknown symbol" in dmesg. dmesg has WARNINGs (proc_register at 3.4 s,
+  __flush_work, sched.h:1492 in oplus_locking_strategy); the taint value equals the baseline's (which already has
+  the W flag), but the old kernel's dmesg wasn't captured, so whether they're new isn't proven - capture
+  `dmesg` on the stock boot next time and diff.
+- `nft`: 22 modules loaded; a throwaway inet table created, listed and deleted - OK.
+- `limits`: pids.max=5 refused forks (pids.events max 6); cpu quota 20 % throttled 51/51 periods, 4.19 s
+  throttled over a 5 s loop; memcg 64M: not killed, failcnt 15846 (reclaim held it - stock behaviour, unchanged).
+Not done: the -v2test podman run, a long soak, the warnings diff. Permanent use stays a separate decision (§9).
