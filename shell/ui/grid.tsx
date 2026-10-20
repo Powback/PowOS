@@ -17,7 +17,8 @@ import { AppIcon } from "./apps.tsx";
 import { tapTaken } from "./taps.ts";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
-import { byKey, carry, editing, folder, home, launch, page, pages, selected, type Carry } from "../state.ts";
+import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, selected, setDocked, type Carry } from "../state.ts";
+import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen } from "./gesture.ts";
 import { OwlWidget } from "./owl.tsx";
@@ -160,9 +161,10 @@ export const placeNewCells = (w: number, h: number) => placeNew(w * (geometry.va
  * Starts carrying [what] ({ item } or { app }) with the pointer of [e]: follows it on the window until it lifts, then
  * drops. [grab] is where the finger holds the tile.
  */
-export function startCarry(what: { item?: HomeItem; app?: string }, e: PointerEvent, grab = { x: 0, y: 0 }) {
+export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boolean }, e: PointerEvent, grab = { x: 0, y: 0 }) {
   const g = geometry.value;
   carry.value = { ...what, x: e.clientX - g.left, y: e.clientY - g.top, grab };
+  hoverDock(carry.value, e.clientX, e.clientY);
   let edgeSince = 0;
   const turner = window.setInterval(() => {
     const c = carry.value;
@@ -183,6 +185,8 @@ export function startCarry(what: { item?: HomeItem; app?: string }, e: PointerEv
     if (ev.pointerId !== e.pointerId || !carry.value) return;
     const geo = geometry.value;
     carry.value = { ...carry.value, x: ev.clientX - geo.left, y: ev.clientY - geo.top };
+    // Over the dock, the dock makes room for it (an app; a widget or a folder passes over it).
+    hoverDock(carry.value, ev.clientX, ev.clientY);
   };
   const up = async (ev: PointerEvent) => {
     if (ev.pointerId !== e.pointerId) return;
@@ -191,9 +195,25 @@ export function startCarry(what: { item?: HomeItem; app?: string }, e: PointerEv
     window.removeEventListener("pointercancel", up);
     clearInterval(turner);
     const c = carry.value;
-    const target = ev.type === "pointerup" && c ? aim(c) : null;
+    if (ev.type !== "pointerup" || !c) {
+      dockAim.value = null;
+      carry.value = null;
+      return;
+    }
+    // Let go over the dock: pinned there (dockdrop.ts) - not dropped on home under it.
+    const docked = dropOnDock(c, ev.clientX, ev.clientY);
+    const target = docked ? null : aim(c);
     carry.value = null;
-    if (!c || !target) return;
+    if (docked) return;
+    // Taken out of the dock and let go off it: unpinned, and on home where it's let go (if there's room there).
+    if (c.fromDock && c.app) {
+      setDocked(c.app, false);
+      navigator.vibrate?.(10);
+      if (target?.cell) await addHome(c.app, target.page, target.cell);
+      return;
+    }
+    if (!target) return;
+    navigator.vibrate?.(10);
     if (c.app) await powos.home.add(c.app, target.page, target.cell);
     else if (target.group) await powos.home.group(c.item!.key, target.group);
     else await powos.home.place(c.item!.key, target.cell!, target.page);
@@ -389,28 +409,39 @@ function ResizeHandle({ item }: { item: HomeItem }) {
   );
 }
 
+/** Where a carried tile would land on home: its spot outlined (none over the dock - it goes there). */
 function Preview() {
   const c = carry.value;
   if (!c) return null;
-  const target = aim(c);
+  const target = dockAim.value ? null : aim(c);
+  const spot = target?.cell ? box(target.cell) : null;
+  return spot && <div class="drop-spot" style={{ left: `${spot.left}px`, top: `${spot.top}px`, width: `${spot.width}px`, height: `${spot.height}px` }} />;
+}
+
+/**
+ * The carried tile itself, under the finger: a layer over all of home (home.tsx), not inside the pages, which clip
+ * at their foot - an app carried down to the dock stays in sight over it.
+ */
+export function Carried() {
+  const c = carry.value;
+  if (!c) return null;
   const g = geometry.value;
   const size = c.item?.resizable ? c.item.cell! : { w: 1, h: 1 };
-  const spot = target?.cell ? box(target.cell) : null;
   return (
-    <>
-      {spot && <div class="drop-spot" style={{ left: `${spot.left}px`, top: `${spot.top}px`, width: `${spot.width}px`, height: `${spot.height}px` }} />}
-      <div class="carried" style={{ left: `${c.x - c.grab.x}px`, top: `${c.y - c.grab.y}px`, width: `${size.w * g.cellW}px`, height: `${size.h * g.cellH}px` }}>
-        {c.app ? (
-          <AppFace appKey={c.app} />
-        ) : c.item!.kind === "app" ? (
-          <AppFace appKey={c.item!.app!} label={c.item!.label} />
-        ) : (
-          <div class="tile widget-face focused">
-            <div class="widget-name">{c.item!.name ?? "folder"}</div>
-          </div>
-        )}
-      </div>
-    </>
+    <div
+      class="carried"
+      style={{ left: `${g.left + c.x - c.grab.x}px`, top: `${g.top + c.y - c.grab.y}px`, width: `${size.w * g.cellW}px`, height: `${size.h * g.cellH}px` }}
+    >
+      {c.app ? (
+        <AppFace appKey={c.app} />
+      ) : c.item!.kind === "app" ? (
+        <AppFace appKey={c.item!.app!} label={c.item!.label} />
+      ) : (
+        <div class="tile widget-face focused">
+          <div class="widget-name">{c.item!.name ?? "folder"}</div>
+        </div>
+      )}
+    </div>
   );
 }
 

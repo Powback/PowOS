@@ -29,6 +29,11 @@ async function fetchRecent() {
 export const dock = signal<string[]>([]);
 /** A pinned app being moved along the dock: which, where the finger is, and the slot it would drop into. */
 export const dockDrag = signal<{ key: string; x: number; slot: number } | null>(null);
+/**
+ * An app carried over the dock (ui/dockdrop.ts): the slot it would drop into - the others make room there - or, the
+ * dock full, the pinned app it would swap out.
+ */
+export const dockAim = signal<{ key: string; slot: number; swap: boolean } | null>(null);
 
 /** The home screen: pages of widgets, pinned apps and folders on a grid. */
 export const home = signal<Home>({ columns: 6, pages: [1], items: [] });
@@ -45,6 +50,8 @@ export const selected = signal<string | null>(null);
 export interface Carry {
   item?: HomeItem;
   app?: string;
+  /** Taken up out of the dock: let go anywhere off it, it's unpinned. */
+  fromDock?: boolean;
   x: number;
   y: number;
   grab: { x: number; y: number };

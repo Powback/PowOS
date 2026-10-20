@@ -83,7 +83,7 @@ export function AppCell({ app, labels = true, draggable = false, onDrag, class: 
     onDrag ? (e) => onDrag(e, e.currentTarget as HTMLElement) : draggable ? (e) => dragHome(app.key, e) : null,
   );
   return (
-    <div class={`app ${cls}`} style={style} {...press}>
+    <div class={`app ${cls}`} style={style} data-key={app.key} {...press}>
       <AppIcon src={app.icon} label={app.label} />
       {labels && <div class="app-label">{app.label}</div>}
     </div>

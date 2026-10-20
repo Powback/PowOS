@@ -368,8 +368,8 @@
   pointer-events: none;
 }
 .carried {
-  position: absolute;
-  z-index: 5;
+  position: fixed;
+  z-index: 20;
   pointer-events: none;
   transform: scale(1.06);
   filter: drop-shadow(0 8px 16px rgb(0 0 0 / 0.4));
@@ -491,6 +491,42 @@
 .msg.tool .ok { color: var(--color-accent); }
 .msg.tool .fail, .msg.note.error { color: var(--color-red); }
 .msg.ask { align-self: flex-end; }
+
+/*
+ * An app carried over the dock (dockdrop.ts): the gap it would drop into, or - the dock full - the app it would swap
+ * out; the hint over the dock says which. Nothing pinned yet, the dock is only a drop zone at the foot of home while
+ * an app is carried. Picked up from home's grid (edit mode hides the dock) it comes back to be dropped on.
+ */
+.dock .dock-gap {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 6px 2px;
+  border: var(--frame) dashed var(--color-accent);
+  border-radius: var(--radius);
+}
+.dock.aimed { border-color: var(--color-accent); }
+.dock .app.swap-out { opacity: 0.35; scale: 0.8; transition: scale 120ms, opacity 120ms; }
+.dock.dock-ghost {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--inset-bottom, 0px));
+  z-index: 4;
+  align-items: center;
+  justify-content: center;
+}
+.dock .dock-empty { flex: 1; text-align: center; color: var(--color-muted); font-size: 13px; }
+.dock-hint {
+  position: fixed;
+  z-index: 6;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  font-size: 13px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.home.editing.carry-app .dock { visibility: visible; }
 
 /* A pinned app held and moved along the dock (home.tsx): it rides over the others as they make room. */
 .dock .app.lifted {

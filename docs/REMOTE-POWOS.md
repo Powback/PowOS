@@ -287,7 +287,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-83 markers on 2026-10-20.
+84 markers on 2026-10-20.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -307,6 +307,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `shell/apps/stdb.ts:11` | Apps use the server's anonymous per-database tokens: there is no PowOS issuer yet (C15). | REMOTE-POWOS.md M4: the shell mints per-app JWTs from the realm issuer. |
 | `shell/index.html:28` | The boot guard names a failed module's blob: URL through es-module-shims' private registry (`importShim._r`): there is no public lookup. | es-module-shims naming the source URL in its link errors (upstream), or a loader of our own. |
 | `shell/ui/apps.tsx:137` | An icon 404 can't tell "not drawn yet" from "no icon", so a lasting failure is taken as "no icon". | The host sends icon: null for failed lookups (ShellBridge.apps(), Runtime.refreshApps). |
+| `shell/ui/dockdrop.ts:86` | The Android host's home (ShellHome.add) refuses a PowOS app's p: key, so a PowOS app dragged off the dock (or swapped out of it) is only unpinned, not put on home. | ShellHome.add stores p: apps as shortcuts the page launches (openApp), as it does Android's and Linux's. |
 | `shell/ui/terminal.tsx:240` | xterm's fit addon always reserves a 14 px scrollbar strip; the holder is widened past the view to fill it. | An addon option for the reserve, or fit from the renderer's cell size. |
 | `targets/android/app/app/src/main/aidl/dev/omalauncher/shell/tiles/IQSService.aidl:30` | Copy of a hidden framework interface (IQSService) under its own name, to host quick-settings tiles. | None for an app (only SystemUI hosts tiles); a public tile-host API. |
 | `targets/android/app/app/src/main/aidl/dev/omalauncher/shell/tiles/IQSTileService.aidl:25` | Copy of the hidden IQSTileService interface (as IQSService.aidl). | Same as IQSService.aidl. |
