@@ -123,7 +123,56 @@ class AppWidgets private constructor(
     private val awm = AppWidgetManager.getInstance(this.context)
     private val users = this.context.getSystemService(UserManager::class.java)
     private val prefs = this.context.getSharedPreferences("appwidgets", Context.MODE_PRIVATE)
-    internal val host = AppWidgetHost(this.context, HOST_ID)
+    internal val host =
+        object : AppWidgetHost(this.context, HOST_ID) {
+            override fun onCreateView(
+                context: Context,
+                appWidgetId: Int,
+                appWidget: AppWidgetProviderInfo?,
+            ): AppWidgetHostView = KeptView(context, appWidgetId)
+        }
+
+    /**
+     * A hosted widget that never turns into a dead tile. Its app's process is the app's business - the switcher's clear
+     * all ends it like any other (a widget is RemoteViews the system hands PowOS, they don't need the provider running) -
+     * so whatever happens to it, the tile keeps its last good look: an update with no views (the provider's cleared)
+     * keeps the ones shown, and views that fail to inflate (Android's "can't load widget") aren't drawn - [failed] holds
+     * its frames back, the page keeps the last one - while the provider is asked for new ones ([refresh]); the next
+     * update that inflates draws it again.
+     */
+    private inner class KeptView(
+        context: Context,
+        private val widget: Int,
+    ) : AppWidgetHostView(context) {
+        private var last: RemoteViews? = null
+
+        @Volatile var failed = false
+            private set
+
+        override fun updateAppWidget(remoteViews: RemoteViews?) {
+            if (remoteViews == null && last != null) return Log.i(TAG, "widget $widget: an update without views - its last ones stay")
+            failed = false
+            if (remoteViews != null) last = remoteViews
+            super.updateAppWidget(remoteViews)
+        }
+
+        override fun getErrorView(): View {
+            failed = true
+            Log.w(TAG, "widget $widget: its views didn't load - the tile keeps its last frame, its app is asked for new ones")
+            main.postDelayed({ if (failed) refresh(widget) }, REFRESH_MS)
+            return super.getErrorView()
+        }
+    }
+
+    /** Asks widget [id]'s provider for its views again (ACTION_APPWIDGET_UPDATE: its process started if it isn't). */
+    private fun refresh(id: Int) {
+        val info = awm.getAppWidgetInfo(id) ?: return
+        runCatching {
+            context.sendBroadcast(
+                Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE).setComponent(info.provider).putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, intArrayOf(id)),
+            )
+        }.onFailure { Log.w(TAG, "widget $id: can't ask for an update", it) }
+    }
     private val layout get() = (context as App).runtime.widgets.layout
 
     /** A widget on home: its id (the system's), provider and page; its cell is the layout's. */
@@ -191,13 +240,10 @@ class AppWidgets private constructor(
         )
     }
 
-    /** The apps whose widgets are on home: their tasks are kept by the switcher's clear all (system/Switcher). */
-    fun providerPackages(): Set<String> = entries.map { it.provider.packageName }.toSet()
-
     /**
-     * Every widget a page shows that lost its drawing (its display or Presentation gone - its provider's process
-     * killed under it, a display torn down) is drawn again at its size; one whose binding is gone is logged (it needs
-     * adding again). On home coming up, a display removed, a task removed by the switcher.
+     * Every widget a page shows that lost its drawing (its display or Presentation gone - a display torn down) is drawn
+     * again at its size, one whose views failed to load has its app asked for new ones ([KeptView]); one whose binding
+     * is gone is logged (it needs adding again). On home coming up, a display removed, a task removed by the switcher.
      */
     fun heal() {
         for ((id, r) in renderers.toList()) {
@@ -211,6 +257,8 @@ class AppWidgets private constructor(
             renderers[id] = Renderer(info, r.w, r.h, bound = id) { image -> if (store.offer(image)) main.post { frame(id) } }
             updateShown(id)
         }
+        // One drawing, but whose views failed to load: its app asked again.
+        for ((id, r) in renderers) if ((r.view as? KeptView)?.failed == true) refresh(id)
         for (e in entries) if (awm.getAppWidgetInfo(e.id) == null) Log.w(TAG, "widget ${e.id} (${e.provider.flattenToShortString()}) isn't bound to PowOS any more")
     }
 
@@ -857,7 +905,8 @@ class AppWidgets private constructor(
             pending = null
             copied = SystemClock.uptimeMillis()
             try {
-                if (!closed) onImage(image)
+                // Views that failed to load: not drawn over the tile's last good frame (KeptView).
+                if (!closed && (view as? KeptView)?.failed != true) onImage(image)
             } catch (e: Exception) {
                 Log.w(TAG, "frame", e)
             } finally {
@@ -1143,6 +1192,9 @@ class AppWidgets private constructor(
 
         /** [Frames]' format, for ShellHost and the page (appwidget.tsx). */
         const val FRAME_TYPE = "application/x-powos-rgba"
+
+        /** A widget whose views failed to load asks its app for new ones after this. */
+        private const val REFRESH_MS = 1500L
 
         private const val PREVIEW_SETTLE_MS = 400L
         private const val PREVIEW_TIMEOUT_MS = 2500L

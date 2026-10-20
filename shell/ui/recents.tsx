@@ -249,10 +249,6 @@ function cardPositions() {
 function remove(id: number) {
   menu.value = null;
   const t = tasks.value.find((x) => x.id === id);
-  if (t?.kept) {
-    showNote(`${t.label} stays: its widget is on home`);
-    return false;
-  }
   if (id < 0) forgetOpened(t!.key!);
   else powos.tasks.remove(id);
   flipFrom = cardPositions();
@@ -262,9 +258,12 @@ function remove(id: number) {
   return true;
 }
 
-/** All but the pinned ones (and those with a widget on home) fly up and go; with nothing left, the switcher closes. */
+/**
+ * All but the pinned ones fly up and go - an app with a widget on home too (the widget is the host's RemoteViews, not
+ * the app's process: AppWidgets keeps drawing it); with nothing left, the switcher closes.
+ */
 function clearAll() {
-  const stays = (t: RecentTask) => t.kept || pinned.value.has(pinKey(t));
+  const stays = (t: RecentTask) => pinned.value.has(pinKey(t));
   const keep = tasks.value.filter(stays);
   const going = tasks.value.filter((t) => !stays(t));
   if (!going.length) return;
