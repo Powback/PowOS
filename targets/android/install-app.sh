@@ -51,7 +51,9 @@ echo "install-app.sh: privileged permissions OK (${need:+$(echo $need | wc -w) a
 # the data, but an install that goes wrong (or one followed by a re-base) must never be the moment it's all lost.
 # No downgrade here (no -d); going back to the system copy is `powos-appdata.sh rebase` on the phone, never a bare
 # `pm uninstall-system-updates` (it wipes the data: docs/APP-DATA-BACKUP.md).
-if adb shell "[ -f /data/powos/powos-appdata.sh ]"; then
+# Checked as root: /data/powos isn't readable by adb's shell user, so a plain test never saw the script (every install
+# then skipped the backup with a warning).
+if adb shell "su -c '[ -f /data/powos/powos-appdata.sh ]'"; then
   adb shell "su -c 'sh /data/powos/powos-appdata.sh backup install'" ||
     { echo "install-app.sh: REFUSED - backing up the app's data failed (/data/powos/appdata.log on the phone)" >&2; exit 2; }
 else
