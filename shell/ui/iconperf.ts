@@ -25,9 +25,17 @@ const perf: IconPerf = { paint: null, shown: null, icons: 0, fetched: 0, unique:
 (window as unknown as { __iconperf: IconPerf }).__iconperf = perf;
 
 const iconRequests: PerformanceResourceTiming[] = [];
+/** Told when icon requests came in (after the first measure: a refetch to log). */
+let onIcons: (() => void) | null = null;
 try {
   new PerformanceObserver((l) => {
-    for (const e of l.getEntries()) if (e.name.includes("/_icon/")) iconRequests.push(e as PerformanceResourceTiming);
+    let any = false;
+    for (const e of l.getEntries())
+      if (e.name.includes("/_icon/")) {
+        iconRequests.push(e as PerformanceResourceTiming);
+        any = true;
+      }
+    if (any) onIcons?.();
   }).observe({ type: "resource", buffered: true });
   new PerformanceObserver((l) => {
     for (const e of l.getEntries()) if (e.name === "first-paint") perf.paint = Math.round(e.startTime);
@@ -67,16 +75,17 @@ function done(icons: number, pending: number) {
     `iconperf paint ${perf.paint}ms shown ${perf.shown}ms icons ${icons}${pending ? ` (${pending} never came)` : ""} fetched ${perf.unique}/${perf.fetched} slowest ${perf.slowest}ms` +
       (snap ? ` | snapshot up ${Math.round(snap.at)}ms, its icons ${snap.loaded}/${snap.icons} in by ${Math.round(snap.last)}ms` : " | no snapshot"),
   );
-  // From here, a list change that asks for icons again is logged on its own.
+  // From here, a list change that asks for icons again is logged on its own, a second after its last request - when
+  // requests come (the resource observer), never on a timer of its own: it was a 1 s interval for the page's whole
+  // life, a wake-up a second on an idle home.
   let seen = iconRequests.length;
   let timer = 0;
-  setInterval(() => {
-    if (iconRequests.length === seen || timer) return;
+  onIcons = () => {
+    clearTimeout(timer);
     timer = window.setTimeout(() => {
       const batch = iconRequests.slice(seen);
       seen = iconRequests.length;
-      timer = 0;
-      console.info(`iconperf refetch ${batch.length} icons, slowest ${Math.round(Math.max(0, ...batch.map((e) => e.duration)))}ms`);
+      if (batch.length) console.info(`iconperf refetch ${batch.length} icons, slowest ${Math.round(Math.max(0, ...batch.map((e) => e.duration)))}ms`);
     }, 1000);
-  }, 1000);
+  };
 }

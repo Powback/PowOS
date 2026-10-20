@@ -802,6 +802,11 @@
 }
 .ai-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-border); }
 .ai-dot.on { background: var(--color-accent); animation: icon-wait 0.9s ease-in-out infinite alternate; }
+/* Off screen (home on another page: PowOS AI and home's other pages are kept laid out beside it), nothing on it animates - the work list's
+   "working" dots pulse forever, and an infinite animation anywhere in the page keeps the compositor drawing every
+   frame on an idle home (the app's and the renderer's CPU). */
+.ai-screen:not(.shown) *, .ai-screen:not(.shown) *::before, .ai-screen:not(.shown) *::after,
+.page.away *, .page.away *::before, .page.away *::after { animation-play-state: paused !important; }
 .ai-session-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-session-meta { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

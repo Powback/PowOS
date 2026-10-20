@@ -64,7 +64,7 @@ function Remote() {
     get();
     const off = powos.on("remote.state", (s: RemoteState) => live && setSt(s));
     // The cable's state (plugged in, unplugged) has no event: asked while the screen shows.
-    const timer = window.setInterval(get, 2000);
+    const timer = window.setInterval(() => document.hidden || get(), 2000);
     return () => {
       live = false;
       off();

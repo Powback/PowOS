@@ -12,6 +12,7 @@ import { notif, panel } from "../state.ts";
 import { notifOpen } from "./gesture.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
+import { useMinuteClock } from "./time.ts";
 import type { MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
 
 /** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
@@ -461,11 +462,7 @@ function Slider({
 }
 
 function Clock() {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(new Date()), 10_000);
-    return () => clearInterval(t);
-  }, []);
+  const now = useMinuteClock();
   const two = (n: number) => String(n).padStart(2, "0");
   return (
     <span class="cc-clock">
@@ -533,7 +530,8 @@ export function ControlCenter() {
     if (!open) return;
     powos.qs.listening(true);
     askRemote();
-    const timer = window.setInterval(askRemote, 3000);
+    // The cable's state has no event: asked while the panel shows - not while its window is put away.
+    const timer = window.setInterval(() => document.hidden || askRemote(), 3000);
     return () => {
       powos.qs.listening(false);
       clearInterval(timer);

@@ -157,12 +157,26 @@ class AppWidgets private constructor(
             failed = false
             if (remoteViews != null) last = remoteViews
             super.updateAppWidget(remoteViews)
+            // Inflated (getErrorView wasn't called on the way): the next failure starts its backoff from the start.
+            if (!failed) asked = 0
         }
+
+        /** How often its app has been asked since its views last loaded: the next ask waits longer ([REFRESH_MS]). */
+        private var asked = 0
 
         override fun getErrorView(): View {
             failed = true
-            Log.w(TAG, "widget $widget: its views didn't load - the tile keeps its last frame, its app is asked for new ones")
-            main.postDelayed({ if (failed) refresh(widget) }, REFRESH_MS)
+            // Backed off, and given up after the last step: an app whose views never inflate answered each ask with
+            // views that failed again - an ask every 1.5 s for as long as home was up (its process started each time).
+            // heal() (home coming up, a task removed) asks again; an update that inflates resets it.
+            val wait = REFRESH_MS.getOrNull(asked)
+            if (wait == null) {
+                Log.w(TAG, "widget $widget: its views didn't load, again - not asked any more until home comes back")
+            } else {
+                Log.w(TAG, "widget $widget: its views didn't load - the tile keeps its last frame, its app is asked again in $wait ms")
+                asked++
+                main.postDelayed({ if (failed) refresh(widget) }, wait)
+            }
             return super.getErrorView()
         }
     }
@@ -1196,8 +1210,8 @@ class AppWidgets private constructor(
         /** [Frames]' format, for ShellHost and the page (appwidget.tsx). */
         const val FRAME_TYPE = "application/x-powos-rgba"
 
-        /** A widget whose views failed to load asks its app for new ones after this. */
-        private const val REFRESH_MS = 1500L
+        /** A widget whose views failed to load asks its app for new ones after these, one per failure in a row; then not. */
+        private val REFRESH_MS = longArrayOf(1_500L, 5_000L, 20_000L, 60_000L)
 
         private const val PREVIEW_SETTLE_MS = 400L
         private const val PREVIEW_TIMEOUT_MS = 2500L

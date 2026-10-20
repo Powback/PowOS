@@ -85,8 +85,11 @@ export interface Surface {
 
 /**
  * A native surface at [ref]'s place while [wanted] (the island on screen) and home is still: created, placed (again
- * whenever the element's box changes - checked once a second while it's up, and on every resize), and destroyed with
- * the island. Showing it is the island's call (Surface.show); it keeps its last frame while shown.
+ * whenever the element's box can have moved - its own size (ResizeObserver), the window's or the visual viewport's, the
+ * insets; a page turn or the switcher makes home not still, which takes the surface down and places it anew when it
+ * settles), and destroyed with the island. Showing it is the island's call (Surface.show); it keeps its last frame
+ * while shown. No timer: nothing runs while it's up and nothing moves (it was a 1 s poll - a wake-up a second on an
+ * idle home), and nothing at all while no surface is active.
  */
 export function useSurface(ref: { current: Element | null }, wanted: boolean): Surface {
   const id = useRef(0);
@@ -113,10 +116,19 @@ export function useSurface(ref: { current: Element | null }, wanted: boolean): S
     setUp(true);
     const ro = new ResizeObserver(place);
     ro.observe(el);
-    const t = window.setInterval(place, 1000);
+    // Its place can change with no change of its own size: the window, the visual viewport (the keyboard), the insets.
+    const later = () => requestAnimationFrame(place);
+    const vv = window.visualViewport;
+    addEventListener("resize", later);
+    vv?.addEventListener("resize", later);
+    vv?.addEventListener("scroll", later);
+    const offInsets = powos.on("system.insets", later);
     return () => {
       ro.disconnect();
-      clearInterval(t);
+      removeEventListener("resize", later);
+      vv?.removeEventListener("resize", later);
+      vv?.removeEventListener("scroll", later);
+      offInsets();
       setUp(false);
     };
   }, [active, port]);

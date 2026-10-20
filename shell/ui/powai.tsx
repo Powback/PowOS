@@ -351,14 +351,20 @@ export function PowAiPage() {
     if (!shown) return;
     powos.ai.sessions();
     powos.ai.mail().then((m) => (mail.value = m));
-    const timer = window.setInterval(() => powos.ai.sessions(), REFRESH_MS);
-    return () => clearInterval(timer);
+    // Not while home is behind an app or the screen is off (the page left on PowOS AI): asked again as it shows.
+    const timer = window.setInterval(() => document.hidden || powos.ai.sessions(), REFRESH_MS);
+    const vis = () => document.hidden || powos.ai.sessions();
+    document.addEventListener("visibilitychange", vis);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", vis);
+    };
   }, [shown]);
   const input = useRef<HTMLInputElement>(null);
   const { busy, items } = chat.value;
   const step = busy ? [...items].reverse().find((i) => i.kind === "tool" && i.ok == null) : null;
   return (
-    <div class="ai-screen">
+    <div class={`ai-screen ${shown ? "shown" : ""}`}>
       <header class="ai-top">
         <span class="ai-title">PowOS AI</span>
         <span class={`ai-state ${busy ? "busy" : ""}`}>

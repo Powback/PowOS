@@ -99,13 +99,33 @@ addEventListener("blur", () => (blurred.value = true));
 addEventListener("focus", () => (blurred.value = false));
 addEventListener("pointerdown", () => (blurred.value = false), { capture: true });
 let strainTimer = 0;
-try {
-  new PerformanceObserver(() => {
-    strained.value = true;
+/**
+ * The long-frame watch runs only while an island asks whether home is quiet (useQuiet mounted): observing
+ * long-animation-frame has the renderer time and attribute every frame's scripts, work an idle home without such a
+ * widget needn't do.
+ */
+let strainWatch: PerformanceObserver | null = null;
+let quietUsers = 0;
+function watchStrain(on: boolean) {
+  quietUsers += on ? 1 : -1;
+  if (quietUsers > 0 && !strainWatch) {
+    try {
+      strainWatch = new PerformanceObserver(() => {
+        strained.value = true;
+        clearTimeout(strainTimer);
+        strainTimer = window.setTimeout(() => (strained.value = false), QUIET_MS);
+      });
+      strainWatch.observe({ type: "long-animation-frame", buffered: false });
+    } catch {
+      strainWatch = null;
+    }
+  } else if (quietUsers <= 0 && strainWatch) {
+    strainWatch.disconnect();
+    strainWatch = null;
     clearTimeout(strainTimer);
-    strainTimer = window.setTimeout(() => (strained.value = false), QUIET_MS);
-  }).observe({ type: "long-animation-frame", buffered: false });
-} catch {}
+    strained.value = false;
+  }
+}
 const busyNow = computed(
   () => !still.value || drawerOpen.value || screen.value.key !== null || sessionView.value !== null || blurred.value || strained.value,
 );
@@ -117,4 +137,10 @@ busyNow.subscribe((busy) => {
   if (busy) quiet.value = false;
   else quietTimer = window.setTimeout(() => (quiet.value = true), QUIET_MS);
 });
-export const useQuiet = () => quiet.value;
+export function useQuiet(): boolean {
+  useEffect(() => {
+    watchStrain(true);
+    return () => watchStrain(false);
+  }, []);
+  return quiet.value;
+}

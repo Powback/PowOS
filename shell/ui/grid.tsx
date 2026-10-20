@@ -537,8 +537,9 @@ export function Pages() {
     <div class="pages" ref={el} {...emptyPress}>
       {/* Its position and transition are gesture.ts's (applyTrack), never a render's. */}
       <div class="page-track">
-        {list.map((n) => (
-          <div class="page" key={n}>
+        {list.map((n, i) => (
+          // Not the page on screen: its animations pause (shell.css .page.away).
+          <div class={i === page.value ? "page" : "page away"} key={n}>
             {itemsOn(n).map((item) => (
               <Tile key={item.key} item={item} />
             ))}

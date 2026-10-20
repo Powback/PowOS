@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
-import { ago } from "./time.ts";
+import { ago, useMinuteClock } from "./time.ts";
 import type { NotificationList } from "../types.ts";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
@@ -34,7 +34,8 @@ function lift(p: number, settling: boolean) {
 }
 
 export function Lock() {
-  const [now, setNow] = useState(new Date());
+  // On the minute's turn, nothing while the face is hidden (it was every 10 s, put away or not).
+  const now = useMinuteClock();
   const [battery, setBattery] = useState<{
     level: number | null;
     charging: boolean;
@@ -54,7 +55,6 @@ export function Lock() {
   const going = useRef<number | null>(null);
   useEffect(() => {
     const refresh = () => {
-      setNow(new Date());
       // Shown again (the screen back on, the PIN pad backed out of): the face whole, wherever it was left.
       if (going.current != null) clearTimeout(going.current);
       going.current = null;
@@ -66,8 +66,7 @@ export function Lock() {
     refresh();
     const offShown = powos.on("lock.shown", refresh);
     const offList = powos.on("notifications.changed", setList);
-    const timer = window.setInterval(() => setNow(new Date()), 10_000);
-    return () => (offShown(), offList(), clearInterval(timer));
+    return () => (offShown(), offList());
   }, []);
 
   const end = (e: PointerEvent, cancelled = false) => {
