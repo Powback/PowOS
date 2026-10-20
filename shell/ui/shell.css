@@ -823,9 +823,12 @@
 .ai-work-fold { flex-direction: row; font-size: var(--text-small); }
 .ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
 /* Project groups and the chips that show one project (powai.tsx Work). */
-.ai-work-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 0 8px; touch-action: pan-x; }
-.ai-work-chip { flex: none; font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-muted); background: none; white-space: nowrap; }
-.ai-work-chip.on { border-color: var(--color-accent); color: var(--color-accent); }
+/* Chips wrap rather than scroll: a sideways drag on home turns the page. On the tiles' own fill: readable over any
+   wallpaper. */
+.ai-work-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.ai-work-chip { flex: none; font: var(--text-small) var(--font); padding: 6px 12px; border-radius: 999px; color: var(--color-foreground); white-space: nowrap; }
+.ai-work-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); font-weight: bold; }
+.ai-work-head { display: inline-block; padding: 4px 10px; border-radius: 999px; color: var(--color-foreground); }
 .ai-work-group + .ai-work-group { border-top: 1px solid var(--color-border); }
 .ai-work-project .ai-work-title { font-weight: bold; }
 .ai-work-caret { flex: none; width: 8px; font-size: var(--text-small); }

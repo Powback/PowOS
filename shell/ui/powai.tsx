@@ -177,6 +177,20 @@ const closedSet = () => {
   }
 };
 const projectOf = (w: WorkRow) => w.project || "Other";
+/** A chip's label: short ("UI", "Apps", "STAI") - the project's last part, PowOS's prefix dropped. */
+const SHORT: Record<string, string> = {
+  "phone ui": "UI",
+  "apps platform": "Apps",
+  "shopping app": "Shopping",
+  spacetimeai: "STAI",
+};
+const chipLabel = (p: string) => {
+  const last = (p.split("·").at(-1) ?? p).trim();
+  const known = SHORT[last.toLowerCase()];
+  if (known) return known;
+  const word = last.split(/\s+/)[0] ?? last;
+  return word.charAt(0).toUpperCase() + word.slice(1, 10);
+};
 
 /**
  * Work in progress: every agent's task on one line each, grouped by project (a group folds; its header counts what's
@@ -206,15 +220,21 @@ function Work({ shown }: { shown: boolean }) {
   return (
     <section class="ai-work-list">
       {shown && <WorkFeed />}
-      <h3 class="ai-heading muted">
+      <h3 class="ai-heading ai-work-head tile">
         work in progress{active.length ? ` · ${active.length}` : ""}
         {!boardLive.value && shown && <span> · connecting…</span>}
       </h3>
       {projects.length > 1 && (
         <div class="ai-work-chips">
           {["", ...projects].map((p) => (
-            <button type="button" key={p || "all"} class={`ai-work-chip ${only === p ? "on" : ""}`} onClick={() => (workFilter.value = p)}>
-              {p || "all"}
+            <button
+              type="button"
+              key={p || "all"}
+              title={p || "all projects"}
+              class={`ai-work-chip tile ${only === p ? "on" : ""}`}
+              onClick={() => (workFilter.value = p)}
+            >
+              {p ? chipLabel(p) : "All"}
             </button>
           ))}
         </div>
