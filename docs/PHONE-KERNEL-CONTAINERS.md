@@ -338,3 +338,22 @@ must pass against the modules that are actually on the slot.
 - `limits`: pids.max=5 refused forks (pids.events max 6); cpu quota 20 % throttled 51/51 periods, 4.19 s
   throttled over a 5 s loop; memcg 64M: not killed, failcnt 15846 (reclaim held it - stock behaviour, unchanged).
 Not done: the -v2test podman run, a long soak, the warnings diff. Permanent use stays a separate decision (§9).
+
+### 11.1 podman (RAM boot of the -v2test image, same day)
+
+Real `podman run` (crun, alpine) works on the phone with limits enforced:
+- **Inside the container:** `pids.max=10`, `cpu.max=20000 100000`, `memory.max=67108864`.
+- **cpu:** a 20 % cap on a 5 s busy loop throttled 51/51 periods (4.20 s throttled).
+- **memory:** 64M with no swap held a 200 MB hog at about 66 MB RSS. The kernel reclaimed and throttled, and did
+  not OOM-kill (oom_kill 0).
+- **pids:** the limit is set, but the counter couldn't be printed once the limit was hit (the test shell itself
+  couldn't fork). Plain-cgroup proof is in §11.
+
+What it took, all in `phone-test.sh podman`:
+- **Storage:** `--storage-driver=vfs` with its own `--root`, because overlayfs can't use f2fs as an upper layer.
+  The real fix is an ext4 image or fuse-overlayfs.
+- **Mount namespace:** a private one (busybox `unshare -m` + `mount --make-rprivate /` + a bind of the PowOS root,
+  with proc/sys/dev). Otherwise crun's `pivot_root` returns EINVAL under a plain chroot.
+- **Temp dir:** `TMPDIR=/var/tmp`, so podman doesn't inherit Android's `/data/local/tmp`.
+
+Still cgroup-v1 for Android's memcg/cpuctl. The v2 layout stays a RAM-only experiment until §9 decides.

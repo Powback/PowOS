@@ -83,12 +83,16 @@ podman)
 C=/sys/fs/cgroup
 echo "v2 controllers: $(cat $C/cgroup.controllers)  (need: cpu memory pids - boot the -v2test image)"
 for c in pids cpu memory; do echo +$c > $C/cgroup.subtree_control || echo "no $c on v2"; done
-chroot /data/powos/root /usr/bin/podman --cgroup-manager=cgroupfs run --rm --cgroups=enabled \
+# vfs storage: the phone's /data is f2fs, which overlayfs can't use as its upper layer (real fix: an ext4 image or
+# fuse-overlayfs as podman's storage).
+B=/data/adb/magisk/busybox; $B unshare -m $B sh -c "$B mount --make-rprivate / && $B mount --bind /data/powos/root /data/powos/root && $B mount -t proc proc /data/powos/root/proc 2>/dev/null; $B mount --rbind /sys /data/powos/root/sys; $B mount --rbind /dev /data/powos/root/dev; exec $B chroot /data/powos/root /usr/bin/env PATH=/usr/bin:/bin TMPDIR=/var/tmp HOME=/root /bin/sh -s" <<'POD'
+/usr/bin/podman --storage-driver=vfs --root /var/lib/containers/vfs --runroot /run/containers/vfs --cgroup-manager=cgroupfs run --rm --cgroups=enabled \
   --pids-limit 10 --cpus 0.2 --memory 64m docker.io/library/alpine sh -c '
   echo "pids.max=$(cat /sys/fs/cgroup/pids.max) cpu.max=$(cat /sys/fs/cgroup/cpu.max) memory.max=$(cat /sys/fs/cgroup/memory.max)"
   for i in $(seq 15); do sleep 2 & done 2>&1 | grep -c "can.t fork" | sed "s/^/refused forks: /"; wait
   timeout 5 sh -c "while :; do :; done"; grep -E "nr_throttled|throttled_usec" /sys/fs/cgroup/cpu.stat
   head -c 209715200 /dev/zero | tail > /dev/null; echo "memory hog exit: $? (137 = OOM-killed at 64m)"'
+POD
 EOF
   ;;
 *) sed -n 2,13p "$0"; exit 1 ;;
