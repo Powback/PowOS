@@ -288,7 +288,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-102 markers on 2026-10-21.
+104 markers on 2026-10-21.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -296,6 +296,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `apps/stickman/ui/workers/sim.ts:10` | The stickman sim and brain are copied from robotsupremacy's stickman.ts: there is no browser core library to import. | robotsupremacy's stickman/web/PLAN.md step 1 (sim + brain as a library); import it. |
 | `docs/AGENTS-VIEW-DESIGN.md:218` | The design's own copy of the mirror's marker: adb used as the cross-host transport (C1). | REMOTE-POWOS.md M2: the phone subscribes to the hub's powos-agents module; delete the mirror. |
 | `docs/AGENTS-VIEW-DESIGN.md:333` | The work board's note of the CLI's own marker: `powos agents task` off the phone runs on the phone over powos-vadb (C4/C7). | Each host's own powos-agents module and the M2 subscription; the hub merges the hosts' boards. |
+| `hosts/gpu-195/bin/powos:4` | gpu-195's image (powos 0.3.0, built from master) has no `powos units`, an image update needs rpm-ostree + a reboot, and the box's desktop was in use: `/usr/local/bin/powos` routes `units` to a git checkout of worktree-powos-multiplatform, the rest to the image's CLI. | An image with powos-units on the branch the box tracks; `rpm-ostree upgrade` + reboot at a quiet time; `sudo rm /usr/local/bin/powos` (unit `powos-units-shim`). |
 | `lib/ai/agents/powos-agents-cli:222` | `powos agents task ...` off the phone (no local powos-agents module) runs itself on the phone through `docker exec powos-vadb adb shell su` (C4/C7): one `su` per call. | Each host's own powos-agents module and the M2 subscription; the hub merges the hosts' boards. |
 | `lib/ai/agents/powos-agent-ask:12` | On the phone the agents' uid is the app's, so an answer file's owner can't prove the user wrote it (C3). | REMOTE-POWOS.md M3: an `answer` reducer that checks ctx.sender is a user identity. |
 | `lib/ai/agents/powos-agentsd:24` | The Mac's agents reach the phone through `adb shell su -c` via powos-vadb (C1). | REMOTE-POWOS.md M2: the phone subscribes to the hub's powos-agents; the mirror is deleted. |
@@ -398,6 +399,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/web/linux-wasm/patch-qtbase.py:19` | musl's sigaction() can lock a mutex for SIGABRT in the vfork child; skipped. | A vfork-safe sigaction in our musl, or Qt resetting SIGABRT by raw syscall. |
 | `targets/web/linux-wasm/support/powos-wasm-support.c:20` | C++ exception entry points stubbed as fatal (libc++abi built without exceptions). | Wasm exception handling (-fwasm-exceptions) in libc++abi and the runtime. |
 | `targets/web/rootfs-in-container.sh:9` | Same pacman Landlock-sandbox workaround in Docker. | Same as build-pkgs.sh. |
+| `units/gpu-195/powos-units-shim.json:8` | The unit for that shim (its purpose names the hack). | Same; then `powos units unregister powos-units-shim`. |
 <!-- hack-registry:end -->
 
 ---
