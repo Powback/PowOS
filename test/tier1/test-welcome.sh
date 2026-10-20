@@ -17,8 +17,11 @@
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BIN="/usr/bin/powos-welcome"
-[[ -f "$BIN" ]] || BIN="$REPO/bin/powos-welcome"
+# The WORKING TREE first, the installed copy only as a fallback: the other way
+# round tests whatever is baked into the running image instead of the change
+# under test (test-self.sh hit the same trap).
+BIN="$REPO/bin/powos-welcome"
+[[ -f "$BIN" ]] || BIN="/usr/bin/powos-welcome"
 DESK="$REPO/desktop/welcome"
 [[ -d "$DESK" ]] || DESK="/usr/share/applications"
 
@@ -159,7 +162,7 @@ HOME_E="$TMP/home-actions"
 
 : > "$CALLS"
 run_welcome "$HOME_E" live "$LIBDIR" "3\ny\nq\n" > /dev/null
-check "install → sudo powos install-system" 'grep -qx "sudo powos install-system" "$CALLS"'
+check "install → sudo powos install-wizard" 'grep -qx "sudo powos install-wizard" "$CALLS"'
 
 : > "$CALLS"
 # item 4 (games) → confirm → size prompt (512) → quit. `games create` REQUIRES
@@ -285,7 +288,7 @@ for f in "$DESK"/powos-welcome.desktop "$DESK"/powos-welcome-autostart.desktop "
 done
 grep -q -- '--autostart' "$DESK/powos-welcome-autostart.desktop" 2>/dev/null \
     && ok "autostart entry passes --autostart" || bad "autostart entry lacks --autostart"
-grep -q 'sudo powos install-system' "$DESK/powos-install.desktop" 2>/dev/null \
+grep -q 'sudo powos install-wizard' "$DESK/powos-install.desktop" 2>/dev/null \
     && ok "install entry launches the real installer" || bad "install entry Exec wrong"
 
 echo
