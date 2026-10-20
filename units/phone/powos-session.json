@@ -4,7 +4,7 @@
   "kind": "system",
   "owner": "system:powos-deploy",
   "purpose": "the phone's KDE desktop session (kwin, plasmashell, Xwayland, pipewire) the PowOS app starts, the user's terminals and programs in it, and the desktop's PowOS layer (wallpaper, KWin script, widgets, launcher, picker key)",
-  "installedBy": "targets/android/rooted/powos-deploy.sh",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (Xwayland: our package, targets/android/pkgs/xwayland-kgsl)",
   "packages": [
     "foot",
     "fzf",
@@ -12,7 +12,8 @@
     "libnm",
     "openal",
     "pipewire-pulse",
-    "qmltermwidget"
+    "qmltermwidget",
+    "xwayland-kgsl"
   ],
   "files": [
     "/usr/bin/powos-rooted-session",
@@ -20,7 +21,6 @@
     "/usr/bin/powos-focus-watch",
     "/usr/bin/powos-panel-phone",
     "/usr/lib/powos/powos-tmux-shell",
-    "/usr/local/bin/Xwayland",
     "/etc/xdg/autostart/powos-panel-phone.desktop",
     "/etc/profile.d/60-powos-picker-key.sh",
     "/usr/share/plasma/wallpapers/org.powos.transparent",

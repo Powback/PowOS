@@ -193,6 +193,14 @@ if [ -d $A ]; then
     cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --ask 4 --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
       echo "spacetimedb: $(chroot $R /usr/bin/spacetime --version 2>/dev/null | head -1)"
   done
+  # The desktop's Xwayland, our package (pkgs/xwayland-kgsl), in /usr/local/bin ahead of Arch's: --overwrite takes over
+  # the copy an older rootfs's build left there unowned. The running session keeps its Xwayland until it restarts.
+  # powos-units: pkg:xwayland-kgsl
+  for p in $A/xwayland-kgsl-*.pkg.tar.*; do
+    [ -e "$p" ] || continue
+    cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed --overwrite /usr/local/bin/Xwayland /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
+      echo "xwayland-kgsl: $(chroot $R /usr/bin/pacman -Q xwayland-kgsl 2>/dev/null)"
+  done
   L=$R/usr/lib/powos/apps
   mkdir -p $L/services $L/registry
   # powos-container: containers with hard limits in Android's cgroups (docs/PHONE-KERNEL-CONTAINERS.md section 12;

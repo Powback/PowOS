@@ -1,0 +1,26 @@
+PowOS: Xwayland comes from our xwayland-kgsl package instead of being compiled here.
+
+Against lotfibennour/andromarchy @ 220754d390f743aa5a8227e689402de1a6eb0281, build/build-inside.sh. The same
+Xwayland (24.1.13 + lfdevs's KGSL patches from this repo's patches/xwayland, same meson options) plus PowOS's fixes,
+built by targets/android/build-pkgs.sh from targets/android/pkgs/xwayland-kgsl and installed by
+install-powos-android.sh with our other packages. A package reaches installed phones (rooted.sh deploy) without a
+new rootfs; PowOS's Xwayland patches live there (they used to be added here as patches/xwayland/0005, 0006).
+
+--- a/build/build-inside.sh
++++ b/build/build-inside.sh
+@@ -181,12 +181,9 @@
+ # XWayland with GPU acceleration without /dev/dri (glamor + DRI3 on KGSL surfaceless): lfdevs's patches
+ # (lfdevs/xwayland, test/support-xwayland-surfaceless) on the official 24.1.13. In /usr/local/bin, first in PATH:
+ # Arch's xorg-xwayland stays as installed (pacman never touches ours).
+-pacman -S --noconfirm --needed xtrans xorgproto libxkbfile xorg-font-util libxfont2 libxcvt libdecor libtirpc libei
+-rm -rf /tmp/xwayland && git clone -q --depth 1 -b xwayland-24.1.13 https://gitlab.freedesktop.org/xorg/xserver.git /tmp/xwayland
+-for p in $L/patches/xwayland/*.patch; do git -C /tmp/xwayland apply "$p"; done
+-(cd /tmp/xwayland && meson setup build --prefix=/usr --buildtype=release -Dxvfb=false -Dxdmcp=false -Dglamor=true   -Dxkb_dir=/usr/share/X11/xkb -Dxkb_output_dir=/var/lib/xkb && ninja -C build)
+-install -m 755 /tmp/xwayland/build/hw/xwayland/Xwayland /usr/local/bin/Xwayland
+-rm -rf /tmp/xwayland
++# PowOS: built as our package (targets/android/pkgs/xwayland-kgsl: these patches + PowOS's fixes), which
++# install-powos-android.sh installed above with our other packages - so a fix reaches phones without a new rootfs.
++pacman -Q xwayland-kgsl >/dev/null && [ -x /usr/local/bin/Xwayland ]
+ 
+ # Build-only tools out of the image (~250 MB): Mesa's compilers, cargo's cache. llvm-libs (Mesa's runtime) stays.
+ pacman -Rns --noconfirm clang llvm libclc spirv-llvm-translator cbindgen 2>/dev/null || true

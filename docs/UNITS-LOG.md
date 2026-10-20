@@ -7,6 +7,12 @@ Backups named below live on the Mac under `~/Projects/PowOS/backups/oneplus-open
 `/data/powos/backup/`. Phone hosts: `phone` = PowOS's root (`powos units`), `phone-android` = Android's side
 (`sh /data/powos/powos-units.sh`). `powstation` = the Docker containers, checked from the Mac.
 
+## 2026-10-21 - the desktop's Xwayland becomes a package (dma-buf leak fix)
+
+| host | item | action | undo |
+|---|---|---|---|
+| phone | `powos-session` | `/usr/local/bin/Xwayland` (unowned, built by hand in `/var/tmp/xwayland`) replaced by our package `xwayland-kgsl 24.1.13-1` (`pacman -U --overwrite /usr/local/bin/Xwayland`, powos-deploy.sh's step); the unit lists the package instead of the file. Xwayland restarted (KWin respawned it). | The old binary (sha256 5349c69c...) in `backups/oneplus-open/xwayland-before-pkg-2026-10-21/Xwayland`: `pacman -R xwayland-kgsl`, then `adb push` it to `/data/powos/root/usr/local/bin/Xwayland` as root |
+
 ## 2026-10-20 - gpu-benchmarks finished (container replaces the host packages)
 
 | host | item | action | undo |

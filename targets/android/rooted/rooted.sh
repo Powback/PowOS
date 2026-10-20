@@ -90,6 +90,10 @@ deploy)
   [ -n "$stdb" ] || stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb-bin)
   if [ -n "$stdb" ]; then adb push -q "$stdb" "/data/local/tmp/powos-apps/${stdb##*/}"
   else echo "rooted.sh: no spacetimedb package (targets/android/build-pkgs.sh spacetimedb) - SpacetimeDB not updated"; fi
+  # The desktop's Xwayland (pkgs/xwayland-kgsl: Xwayland on KGSL + our fixes): build-pkgs.sh xwayland-kgsl.
+  xwl=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" xwayland-kgsl)
+  if [ -n "$xwl" ]; then adb push -q "$xwl" "/data/local/tmp/powos-apps/${xwl##*/}"
+  else echo "rooted.sh: no xwayland-kgsl package (targets/android/build-pkgs.sh xwayland-kgsl) - Xwayland not updated"; fi
   reg=$HERE/../../../apps/registry/out/module.wasm
   if [ -f "$reg" ]; then adb push -q "$reg" /data/local/tmp/powos-apps/registry.wasm
   else echo "rooted.sh: no apps/registry/out/module.wasm (apps/build.sh registry) - the registry not updated"; fi

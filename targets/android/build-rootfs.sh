@@ -23,6 +23,9 @@ IMAGE=menci/archlinuxarm:latest   # build host userland only; the rootfs itself 
 
 KWIN_PKG=${1:-$("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs" kwin)}
 [ -f "${KWIN_PKG:-}" ] || { echo "no kwin package: run targets/android/build-pkgs.sh first" >&2; exit 1; }
+# Xwayland too (patches/andromarchy/0005: build-inside.sh installs it from our package instead of compiling it).
+[ -n "$("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs" xwayland-kgsl)" ] ||
+  { echo "no xwayland-kgsl package: run targets/android/build-pkgs.sh xwayland-kgsl first" >&2; exit 1; }
 
 # 1. Andromarchy at the pinned commit, with our build patch.
 rm -rf "$W/andromarchy"

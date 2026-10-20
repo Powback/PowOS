@@ -1,0 +1,221 @@
+From: PowOS
+Subject: xwayland/kgsl: window buffers come back after a forced commit (dma-buf leak)
+
+lfdevs's KGSL frame-callback recovery (0003/0004) drops a frame callback that
+has blocked 64 damage passes, commits anyway and gives the new commit a fresh
+wl_buffer (xwl_glamor_kgsl_refresh_wl_buffer). That refresh also deleted the
+pixmap's buffer-release callback - the one xwl_window_swap_pixmap() had armed
+a moment earlier for this very commit. The new wl_buffer still reports its
+release (same pixmap, same listener), but with no callback left the window
+buffer never left window_buffers_unavailable and its reference was never
+dropped: the pixmap, its dma-buf and the compositor's import of it stayed
+until Xwayland exited. Every forced commit leaked one window-sized buffer.
+
+A Proton game presenting at full speed forces commits constantly (64 passes go
+by in a fraction of a frame): on the OnePlus Open a 1116x2484 window (12 MB
+buffers) pinned ~150 MB/s of ION memory, 458 buffers / 6 GB held by Xwayland
+and kwin_wayland after a few minutes, until lmkd killed the session.
+
+- Keep the release callback across the refresh, so the buffer is reused or
+  freed once the compositor lets go of it, as without KGSL.
+- Bound what forced commits can pin: past 4 window buffers held by the
+  compositor, a forced commit waits for one to come back (or for the frame
+  callback). The compositor releases a buffer per frame it paints, so a
+  painted window is not held back; one it doesn't paint (screen off, hidden)
+  stops at 4 buffers instead of growing.
+- One log line per 30 s in which the recovery fired: commits, forced commits,
+  commits held back, releases and the most buffers held - so a compositor that
+  stops releasing shows up in the session log.
+---
+diff --git a/hw/xwayland/xwayland-glamor-gbm.c b/hw/xwayland/xwayland-glamor-gbm.c
+index bf0bb19..6c07ac5 100644
+--- a/hw/xwayland/xwayland-glamor-gbm.c
++++ b/hw/xwayland/xwayland-glamor-gbm.c
+@@ -174,7 +174,11 @@ xwl_glamor_kgsl_refresh_wl_buffer(PixmapPtr pixmap)
+         !xwl_pixmap || !xwl_pixmap->buffer)
+         return;
+ 
+-    xwl_pixmap_del_buffer_release_cb(pixmap);
++    /* Keep the pixmap's release callback: it belongs to the window buffer
++     * xwl_window_swap_pixmap() just armed for this commit, and the new
++     * wl_buffer reports its release through it (same pixmap, same listener).
++     * Dropping it left the window buffer referenced forever: one leaked
++     * window-sized dma-buf per forced commit. */
+     wl_buffer_destroy(xwl_pixmap->buffer);
+     xwl_pixmap->buffer = NULL;
+ }
+diff --git a/hw/xwayland/xwayland-screen.c b/hw/xwayland/xwayland-screen.c
+index 34dfd55..e5fed6c 100644
+--- a/hw/xwayland/xwayland-screen.c
++++ b/hw/xwayland/xwayland-screen.c
+@@ -26,6 +26,7 @@
+ #include <xwayland-config.h>
+ 
+ #include <math.h>
++#include <string.h>
+ #include <stdio.h>
+ #include <unistd.h>
+ #include <errno.h>
+@@ -49,6 +50,7 @@
+ #include "xwayland-cursor.h"
+ #include "xwayland-screen.h"
+ #include "xwayland-window.h"
++#include "xwayland-window-buffers.h"
+ #include "xwayland-input.h"
+ #include "xwayland-output.h"
+ #include "xwayland-pixmap.h"
+@@ -434,6 +436,51 @@ xwl_screen_check_resolution_change_emulation(struct xwl_screen *xwl_screen)
+         xwl_window_check_resolution_change_emulation(xwl_window);
+ }
+ 
++#ifdef XWL_HAS_GLAMOR
++/* HACK: KGSL frame-callback recovery (lfdevs, 0003/0004) commits past a frame
++ * callback that never came; this bounds it. The real fix is a compositor that
++ * sends the callback for every frame it paints on the KGSL surfaceless path
++ * (KWin's Anland backend), and then neither is needed.
++ * At most this many window buffers held by the
++ * compositor before a forced commit waits for one back. A forced commit while
++ * every buffer is held allocates another window-sized dma-buf; the compositor
++ * releases one per frame it paints, so this bounds what a window can pin
++ * (a 1116x2484 window: 12 MB each) without stalling a window that is painted. */
++#define KGSL_FORCED_COMMIT_MAX_HELD 4
++#define KGSL_STATS_INTERVAL 30000 /* ms */
++
++static struct {
++    CARD32 since;
++    unsigned int commits, forced, capped;
++    int max_held;
++} kgsl_stats;
++
++/* One line per interval in which the recovery did anything: how often it
++ * fired, whether the compositor gave the buffers back, how many it held. */
++static void
++kgsl_stats_report(void)
++{
++    CARD32 now = GetTimeInMillis();
++    unsigned int releases;
++
++    if (!kgsl_stats.since)
++        kgsl_stats.since = now;
++    if ((int32_t) (now - kgsl_stats.since) < KGSL_STATS_INTERVAL)
++        return;
++
++    xwl_window_buffers_stats(&releases);
++    if (kgsl_stats.forced || kgsl_stats.capped)
++        ErrorF("Xwayland KGSL: last %us: %u commits (%u forced past a stale "
++               "frame callback, %u held back at %d buffers), %u buffers "
++               "released, up to %d held by the compositor\n",
++               (unsigned) ((now - kgsl_stats.since) / 1000), kgsl_stats.commits,
++               kgsl_stats.forced, kgsl_stats.capped,
++               KGSL_FORCED_COMMIT_MAX_HELD, releases, kgsl_stats.max_held);
++    memset(&kgsl_stats, 0, sizeof(kgsl_stats));
++    kgsl_stats.since = now;
++}
++#endif
++
+ void
+ xwl_screen_post_damage(struct xwl_screen *xwl_screen)
+ {
+@@ -452,9 +499,20 @@ xwl_screen_post_damage(struct xwl_screen *xwl_screen)
+         if (xwl_window->frame_callback) {
+ #ifdef XWL_HAS_GLAMOR
+             if (kgsl) {
++                int held;
++
+                 xwl_window->blocked_frame_callback_count++;
+                 if (xwl_window->blocked_frame_callback_count < 64)
+                     continue;
++                held = xwl_window_buffers_held(xwl_window);
++                if (held >= KGSL_FORCED_COMMIT_MAX_HELD) {
++                    /* Wait for a release (or the frame callback); the
++                     * count stays past the threshold, so the commit goes
++                     * out on the first pass after a buffer comes back. */
++                    kgsl_stats.capped++;
++                    continue;
++                }
++                kgsl_stats.forced++;
+                 xwl_window->blocked_frame_callback_count = 0;
+                 wl_callback_destroy(xwl_window->frame_callback);
+                 xwl_window->frame_callback = NULL;
+@@ -473,10 +531,24 @@ xwl_screen_post_damage(struct xwl_screen *xwl_screen)
+ 
+         xwl_window_post_damage(xwl_window);
+         xwl_window->blocked_frame_callback_count = 0;
++#ifdef XWL_HAS_GLAMOR
++        if (kgsl) {
++            int held = xwl_window_buffers_held(xwl_window);
++
++            kgsl_stats.commits++;
++            if (held > kgsl_stats.max_held)
++                kgsl_stats.max_held = held;
++        }
++#endif
+         xorg_list_del(&xwl_window->link_damage);
+         xorg_list_append(&xwl_window->link_damage, &commit_window_list);
+     }
+ 
++#ifdef XWL_HAS_GLAMOR
++    if (kgsl)
++        kgsl_stats_report();
++#endif
++
+     if (xorg_list_is_empty(&commit_window_list))
+         return;
+ 
+diff --git a/hw/xwayland/xwayland-window-buffers.c b/hw/xwayland/xwayland-window-buffers.c
+index a470ef3..13b061b 100644
+--- a/hw/xwayland/xwayland-window-buffers.c
++++ b/hw/xwayland/xwayland-window-buffers.c
+@@ -195,6 +195,31 @@ xwl_window_buffer_timer_callback(OsTimerPtr timer, CARD32 time, void *arg)
+     return 0;
+ }
+ 
++static unsigned int xwl_window_buffer_releases;
++
++/* Window buffers committed and not released by the compositor yet. */
++int
++xwl_window_buffers_held(struct xwl_window *xwl_window)
++{
++    struct xwl_window_buffer *xwl_window_buffer;
++    int n = 0;
++
++    xorg_list_for_each_entry(xwl_window_buffer,
++                             &xwl_window->window_buffers_unavailable,
++                             link_buffer)
++        n++;
++
++    return n;
++}
++
++/* Releases since the last call (the KGSL recovery's periodic log). */
++void
++xwl_window_buffers_stats(unsigned int *releases)
++{
++    *releases = xwl_window_buffer_releases;
++    xwl_window_buffer_releases = 0;
++}
++
+ static void
+ xwl_window_buffer_release_callback(void *data)
+ {
+@@ -202,6 +227,8 @@ xwl_window_buffer_release_callback(void *data)
+     struct xwl_window *xwl_window = xwl_window_buffer->xwl_window;
+     struct xwl_window_buffer *oldest_available_buffer;
+ 
++    xwl_window_buffer_releases++;
++
+     /* Drop the reference on the buffer we took in get_pixmap. If that
+      * frees the window buffer, we're done.
+      */
+diff --git a/hw/xwayland/xwayland-window-buffers.h b/hw/xwayland/xwayland-window-buffers.h
+index dabb343..973de1a 100644
+--- a/hw/xwayland/xwayland-window-buffers.h
++++ b/hw/xwayland/xwayland-window-buffers.h
+@@ -37,5 +37,7 @@ void xwl_window_buffers_init(struct xwl_window *xwl_window);
+ void xwl_window_buffers_dispose(struct xwl_window *xwl_window, Bool force);
+ void xwl_window_realloc_pixmap(struct xwl_window *xwl_window);
+ PixmapPtr xwl_window_swap_pixmap(struct xwl_window *xwl_window, Bool handle_sync);
++int xwl_window_buffers_held(struct xwl_window *xwl_window);
++void xwl_window_buffers_stats(unsigned int *releases);
+ 
+ #endif /* XWAYLAND_WINDOW_BUFFERS_H */
