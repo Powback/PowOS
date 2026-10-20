@@ -150,7 +150,10 @@ class AppWidgets private constructor(
             private set
 
         override fun updateAppWidget(remoteViews: RemoteViews?) {
-            if (remoteViews == null && last != null) return Log.i(TAG, "widget $widget: an update without views - its last ones stay")
+            if (remoteViews == null && last != null) {
+                Log.i(TAG, "widget $widget: an update without views - its last ones stay")
+                return
+            }
             failed = false
             if (remoteViews != null) last = remoteViews
             super.updateAppWidget(remoteViews)
