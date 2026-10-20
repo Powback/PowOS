@@ -33,22 +33,28 @@ the manager adds a task when it hands work out, and whoever owns it moves it (bl
 done). Titles are short and plain ("Switcher follows finger"), never a commit or a file name.
 
 Usage:
-  powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT] [--id ID]
+  powos agents task add <title...> [--project P] [--owner ROLE] [--status S] [--note TEXT] [--id ID]
                                    Add a task (status default: working). Prints its id (from the title
-                                   unless --id). Adding an id that exists updates it.
-  powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]
+                                   unless --id). A task that's already there - the same id, or an open
+                                   task with a very similar title - isn't added twice: its id is printed
+                                   (use set to change it). No --project: inferred from owner and title.
+  powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT] [--project P]
                                    Change a task. <task>: its id, or words of its title (one match).
   powos agents task done <task> [--note TEXT]
                                    Mark it done (stays under "done recently" for a week).
   powos agents task rm <task>      Remove one (a duplicate, a mistake).
-  powos agents task list [--all] [--json]
-                                   The open tasks (--all: with the done ones).
+  powos agents task list [--all] [--json] [--project P]
+                                   The open tasks, by project (--all: with the done ones).
+  powos agents task infer          Give every task without a project the inferred one.
 
 Statuses: working | blocked | waiting (on the user) | done.
+Projects group the page: one per product or area, "<product> · <area>" for PowOS's parts -
+"PowOS · phone UI", "PowOS · kernel", "PowOS · apps platform", "Shopping app", "SpaceTimeAI".
+Reuse a project name that's on the board (task list shows them) rather than a new spelling.
 --owner is the agent's role (switcher, manager, coder...); leave it off when nobody has it yet.
 
 Examples:
-  powos agents task add "Switcher follows finger" --owner switcher
+  powos agents task add "Switcher follows finger" --owner switcher --project "PowOS · phone UI"
   powos agents task set switcher --status waiting --note "needs a test on the phone"
   powos agents task done "follows finger" --note "landed in the 0.9 shell push"
 """
@@ -100,6 +106,50 @@ def rows():
     res = out[0]
     names = [e["name"]["some"] for e in res["schema"]["elements"]]
     return [dict(zip(names, r)) for r in res["rows"]]
+
+
+# Inference for a task given no --project: first match on owner, then on id + title words.
+PROJECT_OWNERS = {
+    "switcher": "PowOS · phone UI", "icons": "PowOS · phone UI", "widgets": "PowOS · phone UI",
+    "assist": "PowOS · phone UI", "notify": "PowOS · phone UI", "shell": "PowOS · phone UI",
+    "kernel": "PowOS · kernel", "apps": "PowOS · apps platform", "remote": "PowOS · remote",
+}
+PROJECT_WORDS = [
+    (r"spacetimeai", "SpaceTimeAI"),
+    (r"shopping", "Shopping app"),
+    (r"kernel|netfilter|\bgki\b", "PowOS · kernel"),
+    (r"powos app|app creation|create-app|apps platform|registry|module|spacetimedb", "PowOS · apps platform"),
+    (r"remote", "PowOS · remote"),
+    (r"switcher|icon|widget|keyboard|search|shell|home|notification|alert|flicker|toast|control center|"
+     r"circle|assist|lock|swipe|page|update-applied|work-in-progress|"
+     r"board|powos ai|black flash|push", "PowOS · phone UI"),
+]
+
+
+def infer_project(owner, wid, title):
+    if owner in PROJECT_OWNERS:
+        return PROJECT_OWNERS[owner]
+    text = f"{wid} {title}".lower()
+    for rx, proj in PROJECT_WORDS:
+        if re.search(rx, text):
+            return proj
+    return "PowOS"
+
+
+def _words(t):
+    return set(re.findall(r"[a-z0-9]+", t.lower())) - {"the", "a", "an", "on", "in", "of", "to", "for", "and"}
+
+
+def similar(a, b):
+    """Two titles for one task: nearly the same text, or the same words."""
+    import difflib
+
+    x, y = " ".join(sorted(_words(a))), " ".join(sorted(_words(b)))
+    if not x or not y:
+        return False
+    wa, wb = _words(a), _words(b)
+    jac = len(wa & wb) / len(wa | wb)
+    return jac >= 0.75 or difflib.SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio() >= 0.85
 
 
 def slug(title):
@@ -174,26 +224,37 @@ def task(argv):
     verb = argv[0] if argv else "list"
     argv = argv[1:]
     if verb == "add":
-        o, rest = opts(argv, ["owner", "status", "note", "id"])
+        o, rest = opts(argv, ["owner", "status", "note", "id", "project"])
         title = " ".join(rest).strip()
         if not title:
             die("usage: powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT]")
         wid = o.get("id") or slug(title)
-        call("work_set", wid, title, o.get("owner", ""), status_of(o.get("status")) or "working", o.get("note", ""))
+        have = rows()
+        dup = next((w for w in have if w["id"] == wid), None) or next(
+            (w for w in have if w["status"] != "done" and similar(w["title"], title)), None)
+        if dup:
+            print(f"powos agents: already on the board: {dup['title']!r} [{dup['id']}] (task set to change it)",
+                  file=sys.stderr)
+            print(dup["id"])
+            return
+        owner = o.get("owner", "")
+        project = o.get("project") or infer_project(owner, wid, title)
+        call("work_set", wid, title, owner, status_of(o.get("status")) or "working", o.get("note", ""), project)
         print(wid)
     elif verb == "set":
-        o, rest = opts(argv, ["owner", "status", "note", "title"])
+        o, rest = opts(argv, ["owner", "status", "note", "title", "project"])
         if not rest:
             die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
         w = find(" ".join(rest))
-        call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), status_of(o.get("status")), o.get("note", ""))
+        call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), status_of(o.get("status")), o.get("note", ""),
+             o.get("project", ""))
         print(w["id"])
     elif verb == "done":
         o, rest = opts(argv, ["note"])
         if not rest:
             die("usage: powos agents task done <task> [--note TEXT]")
         w = find(" ".join(rest))
-        call("work_set", w["id"], "", "", "done", o.get("note", ""))
+        call("work_set", w["id"], "", "", "done", o.get("note", ""), "")
         print(w["id"])
     elif verb in ("rm", "remove", "drop"):
         if not argv:
@@ -201,16 +262,28 @@ def task(argv):
         w = find(" ".join(argv))
         call("work_drop", w["id"])
         print(w["id"])
+    elif verb == "infer":
+        n = 0
+        for w in rows():
+            if not w.get("project"):
+                call("work_set", w["id"], "", "", "", "", infer_project(w["owner"], w["id"], w["title"]))
+                n += 1
+        print(f"{n} task(s) given a project")
     elif verb in ("list", "ls"):
-        o, _ = opts(argv, ["all!", "json!"])
-        ws = [w for w in rows() if o.get("all") or w["status"] != "done"]
-        ws.sort(key=lambda w: (w["status"] == "done", -int(w["updated"])))
+        o, _ = opts(argv, ["all!", "json!", "project"])
+        ws = [w for w in rows() if (o.get("all") or w["status"] != "done")
+              and (not o.get("project") or w.get("project") == o["project"])]
+        ws.sort(key=lambda w: (w.get("project") or "~", w["status"] == "done", -int(w["updated"])))
         if o.get("json"):
             print(json.dumps(ws, indent=1))
             return
         if not ws:
             print("no tasks (powos agents task add <title>)")
+        last = None
         for w in ws:
+            if w.get("project") != last:
+                last = w.get("project")
+                print(f"== {last or '(no project)'}")
             owner = w["owner"] or "-"
             note = f"  - {w['note']}" if w["note"] else ""
             print(f"{w['status']:<8} {w['title']}  ({owner}, {ago(w['updated'])})  [{w['id']}]{note}")

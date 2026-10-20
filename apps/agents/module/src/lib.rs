@@ -126,6 +126,10 @@ pub struct Work {
     updated: u64,
     /// When it went done (0 while open).
     done: u64,
+    /// What it belongs to ("PowOS · phone UI", "Shopping app"): the page groups by it. Last, with a default, so the
+    /// table migrates in place.
+    #[default("")]
+    project: String,
 }
 
 // The batch powos-agentsd sends: its spool rows as JSON (§3 field names).
@@ -449,7 +453,15 @@ fn now_ms(ctx: &ReducerContext) -> u64 {
 /// Adds or changes one work item (`powos agents task add|set|done`). Empty strings keep what the row has; a new row
 /// needs a title. Writers: reporters (the device's PowOS user - the CLI's identity - and what it allowed).
 #[spacetimedb::reducer]
-pub fn work_set(ctx: &ReducerContext, id: String, title: String, owner: String, status: String, note: String) -> Result<(), String> {
+pub fn work_set(
+    ctx: &ReducerContext,
+    id: String,
+    title: String,
+    owner: String,
+    status: String,
+    note: String,
+    project: String,
+) -> Result<(), String> {
     match ctx.db.reporter().identity().find(ctx.sender()) {
         Some(_) => {}
         None => return Err("not a reporter".into()),
@@ -476,6 +488,7 @@ pub fn work_set(ctx: &ReducerContext, id: String, title: String, owner: String, 
                 note: if note.is_empty() { o.note } else { cut(note, 280) },
                 created: o.created,
                 updated: now,
+                project: if project.is_empty() { o.project } else { cut(project, 64) },
             }
         }
         None => {
@@ -492,6 +505,7 @@ pub fn work_set(ctx: &ReducerContext, id: String, title: String, owner: String, 
                 note: cut(note, 280),
                 created: now,
                 updated: now,
+                project: cut(project, 64),
             }
         }
     };

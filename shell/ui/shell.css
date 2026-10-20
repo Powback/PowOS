@@ -822,6 +822,15 @@
 .ai-work-note { color: var(--color-foreground); }
 .ai-work-fold { flex-direction: row; font-size: var(--text-small); }
 .ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
+/* Project groups and the chips that show one project (powai.tsx Work). */
+.ai-work-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 0 8px; touch-action: pan-x; }
+.ai-work-chip { flex: none; font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-muted); background: none; white-space: nowrap; }
+.ai-work-chip.on { border-color: var(--color-accent); color: var(--color-accent); }
+.ai-work-group + .ai-work-group { border-top: 1px solid var(--color-border); }
+.ai-work-project .ai-work-title { font-weight: bold; }
+.ai-work-caret { flex: none; width: 8px; font-size: var(--text-small); }
+.ai-work-wait { color: var(--color-accent); font-weight: bold; }
+.ai-work-blocked { color: var(--color-red); }
 /* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
 .ai-work-box { padding: 4px 0; display: flex; flex-direction: column; }
 .ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }

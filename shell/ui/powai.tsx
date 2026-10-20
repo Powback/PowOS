@@ -100,6 +100,8 @@ interface WorkRow {
   created: bigint | number;
   updated: bigint | number;
   done: bigint | number;
+  /** "" on rows from before projects (the module's column default). */
+  project: string;
 }
 /** The board as last seen: shown at once when the page comes back, before the socket has caught up. */
 const board = signal<WorkRow[]>([]);
@@ -160,15 +162,43 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
   );
 }
 
-/** Work in progress: every agent's task on one line each, newest activity first; what's done lately folded below. */
+/** Which project the chips show ("" = all), and the project groups folded shut: kept across reloads. */
+const workFilter = stored("powai.work.project");
+const workClosed = stored("powai.work.closed", "[]");
+const closedSet = () => {
+  try {
+    return new Set<string>(JSON.parse(workClosed.value));
+  } catch {
+    return new Set<string>();
+  }
+};
+const projectOf = (w: WorkRow) => w.project || "Other";
+
+/**
+ * Work in progress: every agent's task on one line each, grouped by project (a group folds; its header counts what's
+ * working and what waits on you), newest activity first in a group and the group with the newest activity first. A
+ * chip shows one project alone. What's done lately is folded below.
+ */
 function Work({ shown }: { shown: boolean }) {
   const [opened, setOpened] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
   const all = [...board.value].sort((a, b) => Number(b.updated) - Number(a.updated));
-  const active = all.filter((w) => w.status !== "done");
+  const projects = [...new Set(all.filter((w) => w.status !== "done").map(projectOf))];
+  const only = projects.includes(workFilter.value) ? workFilter.value : "";
+  const mine = (w: WorkRow) => !only || projectOf(w) === only;
+  const active = all.filter((w) => w.status !== "done" && mine(w));
   const now = Date.now();
-  const done = all.filter((w) => w.status === "done" && now - Number(w.done || w.updated) < RECENT_MS);
+  const done = all.filter((w) => w.status === "done" && mine(w) && now - Number(w.done || w.updated) < RECENT_MS);
   const tap = (id: string) => setOpened(opened === id ? null : id);
+  const closed = closedSet();
+  const toggle = (p: string) => {
+    const c = closedSet();
+    c.has(p) ? c.delete(p) : c.add(p);
+    workClosed.value = JSON.stringify([...c]);
+  };
+  // Groups in the order of their newest activity (active is newest first, so first seen = newest).
+  const groups = new Map<string, WorkRow[]>();
+  for (const w of active) groups.set(projectOf(w), [...(groups.get(projectOf(w)) ?? []), w]);
   return (
     <section class="ai-work-list">
       {shown && <WorkFeed />}
@@ -176,10 +206,40 @@ function Work({ shown }: { shown: boolean }) {
         work in progress{active.length ? ` · ${active.length}` : ""}
         {!boardLive.value && shown && <span> · connecting…</span>}
       </h3>
+      {projects.length > 1 && (
+        <div class="ai-work-chips">
+          {["", ...projects].map((p) => (
+            <button type="button" key={p || "all"} class={`ai-work-chip ${only === p ? "on" : ""}`} onClick={() => (workFilter.value = p)}>
+              {p || "all"}
+            </button>
+          ))}
+        </div>
+      )}
       <div class="ai-work-box tile">
-        {active.map((w) => (
-          <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />
-        ))}
+        {[...groups].map(([p, ws]) => {
+          const shut = closed.has(p) && !only;
+          const working = ws.filter((w) => w.status === "working").length;
+          const waiting = ws.filter((w) => w.status === "waiting").length;
+          const blocked = ws.filter((w) => w.status === "blocked").length;
+          return (
+            <div key={p} class="ai-work-group">
+              {!only && (
+                <button type="button" class="ai-work ai-work-project" onClick={() => toggle(p)}>
+                  <span class="ai-work-line">
+                    <span class="ai-work-caret muted">{shut ? "▸" : "▾"}</span>
+                    <span class="ai-work-title">{p}</span>
+                    <span class="ai-work-meta muted">
+                      {working} working
+                      {waiting > 0 && <span class="ai-work-wait"> · {waiting} waiting</span>}
+                      {blocked > 0 && <span class="ai-work-blocked"> · {blocked} blocked</span>}
+                    </span>
+                  </span>
+                </button>
+              )}
+              {!shut && ws.map((w) => <WorkLine key={w.id} w={w} open={opened === w.id} onTap={() => tap(w.id)} />)}
+            </div>
+          );
+        })}
         {!active.length && <div class="ai-work-empty muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
         {done.length > 0 && (
           <button type="button" class="ai-work ai-work-fold muted" onClick={() => setShowDone(!showDone)}>
