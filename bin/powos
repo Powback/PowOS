@@ -3111,11 +3111,12 @@ A page that fails to boot within 2 min of a hot push (shell/push.sh) has that pu
 the pushed files restored to the overrides they replaced, or removed (the APK's own shell under them),
 every page reloaded, and the manager told "rolled back <files> because <error>".
 
-Testing this safety net: never break a live page. Break the test-only page instead, dev/gate-test.tsx
+Testing this safety net: never break a live page. Break the test-only page instead, test/gate-test.tsx
 (?mode=gate-test: loaded off screen by the app when that file is pushed), and push with --test:
-  shell/push.sh --force --test --note "..." dev/gate-test.tsx
-Its reports reach the manager as "[test] ..." at low priority and are marked read after 2 min; its
-push is rolled back like any other.
+  shell/push.sh --force --test --note "..." test/gate-test.tsx
+Its reports never reach the manager or the user: they go to the test's role (--test=ROLE; default
+shelltest, a scratch inbox) as "[test] ...", low priority, read again after 2 min. Its push is rolled
+back like any other.
 
 From the Mac: shell/push.sh --errors [N] reads the same log; shell/push.sh runs a gate before pushing
 (tsc + every page booted in a headless Chromium: shell/dev/gate.sh), refusing a shell that doesn't

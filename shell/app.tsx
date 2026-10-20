@@ -55,9 +55,9 @@ if (mode === "aod") {
   // The system's shade (the native shade host's window): the notification panel alone.
   render(<Shade />, document.body);
 } else if (mode === "gate-test") {
-  // Tests only (dev/gate-test.tsx): the page a test of the gate, the watchdog and the rollback breaks instead of a live
-  // one. Imported here alone, so a broken one breaks nothing else.
-  const { GateTest } = await import("./dev/gate-test.tsx");
+  // Tests only (test/gate-test.tsx; in the APK, so a rollback has it to fall back to): the page a test of the gate,
+  // the watchdog and the rollback breaks instead of a live one. Imported here alone: a broken one breaks nothing else.
+  const { GateTest } = await import("./test/gate-test.tsx");
   render(<GateTest />, document.body);
 } else if (mode === "assist") {
   // Over another app: PowOS AI's chat only (the rest of home isn't loaded).

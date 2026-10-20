@@ -19,8 +19,9 @@
 # (ShellHost/ShellErrors.kt) and the manager told. Every shell error on the phone reaches the manager's comms inbox and
 # files/shell-errors.log:
 #        shell/push.sh --errors [N]   the phone's last N (default 40) shell errors (`powos shell errors` on the phone)
-# Testing the safety net: break dev/gate-test.tsx (the test-only page, ?mode=gate-test), never a live page, and push it
-# with --test (the manifest says so: its reports go to the manager as "[test]", low priority, read again after 2 min).
+# Testing the safety net: break test/gate-test.tsx (the test-only page, ?mode=gate-test), never a live page, and push it
+# with --test[=ROLE] (the manifest says so: its reports go to ROLE's inbox - default shelltest, a scratch role, never
+# the manager or the user - as "[test]", low priority, read again after 2 min).
 set -euo pipefail
 cd "$(dirname "$0")"
 force=""
@@ -41,14 +42,15 @@ if [ "${1:-}" = "--vpn" ]; then
     -e ANDROID_SERIAL="$addr" -e POWOS_GATE_DONE=1 android-app-dev-android-builder:latest \
     bash -c 'adb connect "$ANDROID_SERIAL" >/dev/null 2>&1; sleep 1; bash /shell/push.sh "$@"' _ "$@"
 fi
-note="" test=""
+note="" test="" test_to=""
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --note) note=${2:-}; shift 2 || shift ;;
     --note=*) note=${1#--note=}; shift ;;
     --force) shift ;;
-    --test) test=1; shift ;;
+    --test) test=1; test_to=shelltest; shift ;;
+    --test=*) test=1; test_to=${1#--test=}; shift ;;
     *) args+=("$1"); shift ;;
   esac
 done
@@ -105,7 +107,7 @@ fi
 # overrides it replaces kept (files/shell-prev/): what the app's rollback restores (ShellErrors.kt).
 files_json=$(printf '"%s",' "$@"); files_json="[${files_json%,}]"
 json_note=$(printf '%s' "$note" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g' | cut -c1-300)
-manifest=$(printf '{"at":%s,"files":%s,"note":"%s","from":"%s","test":%s}' "$(date +%s)" "$files_json" "$json_note" "$(hostname -s 2>/dev/null || echo mac)" "$([ -n "$test" ] && echo true || echo false)" | base64 | tr -d '\n')
+manifest=$(printf '{"at":%s,"files":%s,"note":"%s","from":"%s","test":%s,"testTo":"%s"}' "$(date +%s)" "$files_json" "$json_note" "$(hostname -s 2>/dev/null || echo mac)" "$([ -n "$test" ] && echo true || echo false)" "$test_to" | base64 | tr -d '\n')
 as_app "rm -rf files/shell-prev && echo $manifest | base64 -d > files/shell-push.json"
 for f in "$@"; do
   tmp=/data/local/tmp/powos-shell-push

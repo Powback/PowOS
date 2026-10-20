@@ -152,7 +152,7 @@ object ShellErrors {
     }
 
     /**
-     * A test's report, not a real one: the test-only page failed (dev/gate-test.tsx, ?mode=gate-test), or the last push
+     * A test's report, not a real one: the test-only page failed (test/gate-test.tsx, ?mode=gate-test), or the last push
      * was marked a test (shell/push.sh --test) and is still the one in the manifest.
      */
     private fun isTest(
@@ -163,7 +163,9 @@ object ShellErrors {
 
     /**
      * One message to the manager's inbox; not on a phone without the rooted PowOS session (the log has it). A [test]'s
-     * is marked "[test]", at low priority, and marked read again after [TEST_READ_MS] - a test leaves no mail behind.
+     * never goes to the manager (real incidents only): to the test's own role instead - the push manifest's "testTo"
+     * (shell/push.sh --test=ROLE), else [TEST_ROLE], a scratch inbox - marked "[test]", at low priority, and read again
+     * after [TEST_READ_MS].
      */
     private fun send(
         context: Context,
@@ -175,23 +177,31 @@ object ShellErrors {
         if (!RootedGuest.enabled) return
         val message = (if (test) "[test] $text" else text).take(3000)
         val priority = if (test) "low" else "high"
+        val to = if (test) testRole(context) else "manager"
         worker.execute {
             val out = StringBuilder()
             val code =
                 runCatching {
-                    RootedGuest.run("powos comms send --from shell --priority $priority manager ${shellQuote(message)}") { out.appendLine(it) }
+                    RootedGuest.run("powos comms send --from shell --priority $priority ${shellQuote(to)} ${shellQuote(message)}") { out.appendLine(it) }
                 }.getOrElse { -1 }
             if (code != 0) Log.w(TAG, "powos comms send failed ($code${if (force) ", a rollback report" else ""}): ${out.toString().take(300)}")
             // "Sent to 'manager' (id <id>)": read again once the test is over.
             val id = Regex("\\(id ([0-9a-f]+)\\)").find(out)?.groupValues?.get(1)
             if (test && id != null) {
                 cleanup.schedule({
-                    runCatching { RootedGuest.run("powos comms read --agent manager $id") }
+                    runCatching { RootedGuest.run("powos comms read --agent ${shellQuote(to)} $id") }
                         .onFailure { Log.w(TAG, "can't mark test mail $id read", it) }
                 }, TEST_READ_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             }
         }
     }
+
+    /** Where a test's reports go when its push names no role: a scratch inbox, never the manager's or the user's. */
+    private const val TEST_ROLE = "shelltest"
+
+    private fun testRole(context: Context) =
+        runCatching { JSONObject(File(context.filesDir, "shell-push.json").readText()).optString("testTo") }.getOrNull()
+            ?.takeIf { Regex("[a-z0-9_-]{1,32}").matches(it) && it != "manager" && it != "user" } ?: TEST_ROLE
 
     /** A test's mail stays this long - long enough to check it arrived - then it's marked read. */
     private const val TEST_READ_MS = 2 * 60_000L

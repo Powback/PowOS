@@ -15,8 +15,8 @@ powos.on("files.changed", ({ path }: { path: string }) => {
     if (id) appChanged(id);
     return;
   }
-  // The shell's dev and test files (dev/: the mock's data, the gate-test page): no live page loads them.
-  if (path.startsWith("dev/")) return;
+  // The shell's dev and test files (dev/: the mock's data; test/: the gate-test page): no live page loads them.
+  if (path.startsWith("dev/") || path.startsWith("test/")) return;
   if (path.endsWith(".css")) {
     // Not on screen: a stylesheet swapped then never loaded its new sheet (the WebView doesn't load while hidden) and
     // the page was left with none - home unstyled. Swapped once it shows instead.
