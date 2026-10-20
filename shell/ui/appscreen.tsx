@@ -11,7 +11,7 @@
  */
 import { Component, type ComponentType } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { appRev, appView, closeApp, installedApps, manifestOf, moduleUrl, openApp } from "../apps/pages.ts";
+import { appRev, appView, closeApp, installedApps, manifestOf, moduleUrl, openApp, retryDelay, retryUrl } from "../apps/pages.ts";
 import { watchRegistry } from "../apps/registry.ts";
 import { host } from "../apps/stdb.ts";
 import { addIsland } from "./apppicker.tsx";
@@ -77,12 +77,17 @@ export function AppScreen() {
   const box = useRef<HTMLDivElement>(null);
   const app = v ? installedApps.value.find((a) => a.id === v.id) : undefined;
   const entry = app ? manifestOf(app).page?.entry : undefined;
-  const url = app && entry ? moduleUrl(app.id, entry, app.version) : null;
+  const base = app && entry ? moduleUrl(app.id, entry, app.version) : null;
+  const [tries, setTries] = useState(0);
+  useEffect(() => setTries(0), [base]);
+  // Tried again while it fails (a 404 mid-install, an error being fixed): never a dead page.
+  const url = base ? retryUrl(base, tries) : null;
   const [mod, setMod] = useState<{ id: string; url: string; c: ComponentType<any> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!url || !v || v.closing) return;
     let live = true;
+    let timer = 0;
     const t0 = performance.now();
     importShim(url).then(
       (m) => {
@@ -91,10 +96,15 @@ export function AppScreen() {
         setError(null);
         (window as any).__powosApps.loaded = { id: v.id, url, ms: Math.round(performance.now() - t0), at: Date.now() };
       },
-      (e) => live && setError(fail(v.id, `page ${url} didn't load`, e)),
+      (e) => {
+        if (!live) return;
+        setError(fail(v.id, `page ${url} didn't load`, e));
+        timer = window.setTimeout(() => live && setTries((n) => n + 1), retryDelay(tries));
+      },
     );
     return () => {
       live = false;
+      clearTimeout(timer);
     };
   }, [url, v?.closing]);
   // Opened: from where it was tapped (or a little below) to the screen.
@@ -146,7 +156,7 @@ export function AppScreen() {
       }}
       {...own}
     >
-      {error ? (
+      {error && !(mod && mod.id === v.id) ? (
         <Fault name={name} error={error} />
       ) : !app && installedApps.value.length ? (
         <Fault name={name} error={`${v.id}: not installed`} />

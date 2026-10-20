@@ -59,6 +59,15 @@ export function appChanged(id: string) {
   );
 }
 
+/**
+ * A module that didn't load (a 404 mid-install, a syntax error being fixed) is tried again after these waits (ms),
+ * the last one repeating - and at once when the app changes (a new URL). A failed import is cached by its URL, so
+ * each try asks for a new one ([retryUrl]). Never a dead tile.
+ */
+const RETRY_MS = [1000, 3000, 10000, 30000];
+export const retryDelay = (n: number) => RETRY_MS[Math.min(n, RETRY_MS.length - 1)];
+export const retryUrl = (url: string, n: number) => (n ? `${url}&t=${n}` : url);
+
 /** A module of [id]'s UI (its page, a widget): a new URL for every version and every change, so it's imported anew. */
 export const moduleUrl = (id: string, entry: string, version: string) =>
   `./_app/${id}/${entry}?v=${encodeURIComponent(version)}&r=${appRev.value[id] ?? 0}`;

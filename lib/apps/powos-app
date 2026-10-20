@@ -32,7 +32,7 @@ Make one (the whole loop, from a sentence to the phone - each step is one comman
 
 Change one:
   powos app publish <dir>            only the module again: a hot swap, clients stay connected (logic hot reload)
-  powos app ui <dir>                 only the UI again (changed files in place): the shell hot-reloads it
+  powos app ui <dir>                 only the UI again (a new dir, `current` flipped atomically): the shell hot-reloads it
   --note "..."                       on install/publish/ui: what changed, in plain words - the phone's quiet
                                      "update applied" notification (default: "<Name> app installed/updated")
   powos app list                     installed apps and widgets (from the registry)
@@ -578,48 +578,64 @@ def ensure_published(d, m):
 
 
 def install_ui(d, m):
-    """The UI into the installed version's dir. The same version as installed: only the files that changed, each
-    written beside and renamed over (the shell's watcher sees each once, whole) - the hot reload. A new version: a
-    new dir, then `current` flipped (the shell sees the old version or the new one, never half)."""
+    """The UI installed atomically, every time: written whole into a new dir (<version>+<time>), then `current`
+    flipped to it in one rename - the shell sees the old UI or the new one, never a half-copied one (a widget that
+    loaded mid-copy 404'd and stayed broken). The previous one stays (rollback = flip back); older ones go.
+    Returns how many files differ from the previous one."""
     src = os.path.join(d, (m.get("ui") or {}).get("dir", "ui").rstrip("/"))
     base = os.path.join(APPS, m["id"])
-    dest = os.path.join(base, m["version"])
     os.makedirs(base, exist_ok=True)
     current = os.path.join(base, "current")
-    changed = 0
-    if os.path.isdir(src) and os.path.isdir(dest) and os.path.realpath(current) == os.path.realpath(dest):
-        changed = sync(src, os.path.join(dest, "ui"))
-        changed += sync_file(os.path.join(d, "powos-app.json"), os.path.join(dest, "powos-app.json"))
-    else:
-        if os.path.isdir(src):
-            tmp = tempfile.mkdtemp(dir=base, prefix=".new-")
-            # Plain writes, not copytree/copy2: those copy extended attributes too, security.selinux among them - the
-            # source tree's label (system_data_root_file on the phone) landed on the installed dir and the PowOS
-            # app (privapp_data_file only) could read none of it. New files get their dir's label.
-            sync(src, os.path.join(tmp, "ui"))
-            sync_file(os.path.join(d, "powos-app.json"), os.path.join(tmp, "powos-app.json"))
-            for root, dirs, _ in os.walk(tmp):
-                for x in dirs:
-                    os.chmod(os.path.join(root, x), 0o755)
-            os.chmod(tmp, 0o755)
-            if os.path.exists(dest):
-                shutil.rmtree(dest)
-            os.rename(tmp, dest)
-        link = os.path.join(base, ".current-new")
-        if os.path.lexists(link):
-            os.unlink(link)
-        os.symlink(m["version"], link)
-        os.replace(link, current)  # atomic: the shell sees the old version or the new one
-        changed = -1
-        # Earlier versions beyond the previous one go (rollback = the previous one, still there).
-        versions = sorted((v for v in os.listdir(base) if not v.startswith(".") and v != "current"),
-                          key=lambda v: os.path.getmtime(os.path.join(base, v)))
-        for v in versions[:-2]:
-            if v != m["version"]:
-                shutil.rmtree(os.path.join(base, v), ignore_errors=True)
+    previous = os.path.realpath(current) if os.path.lexists(current) else None
+    name = f"{m['version']}+{int(time.time() * 1000)}"
+    tmp = tempfile.mkdtemp(dir=base, prefix=".new-")
+    # Plain writes, not copytree/copy2: those copy extended attributes too, security.selinux among them - the
+    # source tree's label (system_data_root_file on the phone) landed on the installed dir and the PowOS app
+    # (privapp_data_file only) could read none of it. New files get their dir's label.
+    if os.path.isdir(src):
+        sync(src, os.path.join(tmp, "ui"))
+    sync_file(os.path.join(d, "powos-app.json"), os.path.join(tmp, "powos-app.json"))
+    for root, dirs, _ in os.walk(tmp):
+        for x in dirs:
+            os.chmod(os.path.join(root, x), 0o755)
+    os.chmod(tmp, 0o755)
+    os.rename(tmp, os.path.join(base, name))
+    link = os.path.join(base, ".current-new")
+    if os.path.lexists(link):
+        os.unlink(link)
+    os.symlink(name, link)
+    os.replace(link, current)  # atomic: the shell sees the old version or the new one
+    changed = -1
+    if previous and os.path.isdir(os.path.join(previous, "ui")):
+        changed = sum(1 for _ in diff_files(os.path.join(previous, "ui"), os.path.join(base, name, "ui")))
+    # Everything but this one and the previous one goes (half-made .new- dirs of a crashed install too).
+    keep = {name, os.path.basename(previous) if previous else None}
+    for v in os.listdir(base):
+        if v == "current" or v in keep or v == ".current-new":
+            continue
+        shutil.rmtree(os.path.join(base, v), ignore_errors=True)
     if not mounted(APPS) and os.path.exists("/run/powos-app"):
         print(f"note: {APPS} isn't the PowOS app's files/apps here (start a new session): the shell won't see it")
     return changed
+
+
+def diff_files(a, b):
+    """Paths that differ between two trees (added, removed or changed)."""
+    def files(r):
+        out = {}
+        for root, _, fs in os.walk(r):
+            for f in fs:
+                p = os.path.join(root, f)
+                out[os.path.relpath(p, r)] = p
+        return out
+    fa, fb = files(a), files(b)
+    for rel in set(fa) | set(fb):
+        if rel not in fa or rel not in fb:
+            yield rel
+            continue
+        with open(fa[rel], "rb") as x, open(fb[rel], "rb") as y:
+            if x.read() != y.read():
+                yield rel
 
 
 def sync_file(a, b):
@@ -845,7 +861,7 @@ def dispatch(a):
         m, text = manifest(a[1])
         n = install_ui(a[1], m)
         register(text)
-        log(f"{m['id']}: UI {m['version']} in place" + (f" ({n} files changed)" if n >= 0 else " (new version)"))
+        log(f"{m['id']}: UI {m['version']} in place" + (f" ({n} files changed)" if n >= 0 else ""))
     elif c == "remove" and len(a) >= 2:
         cmd_remove(a[1], "--data" in a)
     elif c == "runtime":
