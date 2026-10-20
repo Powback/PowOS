@@ -139,6 +139,11 @@ object Switcher {
         shellBlur = null
     }
 
+    /** Home's activity went (not a configuration change): made again in the background, for the next swipe. */
+    fun homeGone(context: Context) {
+        main.post { if (shell == null && homeIsShell(context)) preloadHome(context) }
+    }
+
     /** The recents activity shows the warm page (the desktop is home): its window's boost. */
     fun attachHost(
         refresh: ((Boolean) -> Unit)?,
@@ -156,9 +161,37 @@ object Switcher {
             ShellHost(app, null, app.runtime, "recents").also { warm = it }
         }
 
-    /** SystemUI connected: when the desktop is home, the recents page is made now, so a swipe has it at once. */
+    /**
+     * SystemUI connected (the process just started): the page a swipe up shows is made now, not by the swipe - when
+     * the desktop is home, the recents activity's warm page; else home itself, preloaded ([preloadHome]).
+     */
     fun prepare(context: Context) {
-        if (!homeIsShell(context)) page(context)
+        if (!homeIsShell(context)) page(context) else preloadHome(context)
+    }
+
+    /**
+     * Home's activity made in the background, invisible (created and stopped, its page loaded and its tiles
+     * rasterized), when it isn't there - as Quickstep preloads its recents activity: a swipe up after a restart (an
+     * update, the process killed) otherwise waited for WM to create home and its WebView to load, ~160 ms, as long as
+     * the swipe. IActivityTaskManager.preloadRecentsActivity, which the recents provider may call.
+     *
+     * HACK: preloadRecentsActivity is hidden (reflected past the checks, HiddenApi); nothing happens where it isn't
+     * there. Real fix: none for an app - Quickstep calls it through the platform's own ActivityManagerWrapper.
+     */
+    fun preloadHome(context: Context) {
+        if (shell != null) return
+        val app = context.applicationContext
+        thread(name = "powos-home-preload") {
+            runCatching {
+                HiddenApi.allow()
+                val atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
+                val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setPackage(app.packageName)
+                    .setComponent(ComponentName(app, "andro.marchy.HomeShell"))
+                    .putExtra(EXTRA_RECENTS, true)
+                atm.javaClass.getMethod("preloadRecentsActivity", Intent::class.java).invoke(atm, home)
+                Log.i(TAG, "home preloaded")
+            }.onFailure { Log.w(TAG, "can't preload home", it) }
+        }
     }
 
     /** Whether PowOS's web home (ShellActivity, through .HomeShell) is the home app now. */

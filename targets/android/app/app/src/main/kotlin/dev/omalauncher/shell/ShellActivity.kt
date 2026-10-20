@@ -228,6 +228,8 @@ class ShellActivity : Activity() {
         if (::host.isInitialized) {
             dev.omalauncher.system.Switcher.detach(host.bridge)
             host.destroy()
+            // Not just recreated: a swipe up shouldn't find no home - made again in the background.
+            if (isFinishing && !isChangingConfigurations) dev.omalauncher.system.Switcher.homeGone(this)
         }
         super.onDestroy()
     }
