@@ -26,6 +26,17 @@
   /* How much of the background a surface lays over the wallpaper (tiles, the drawer, the panels): one knob for all. */
   --glass: 72%;
 
+  /*
+   * Surfaces are told apart by their fill and a soft shadow, not by lines. --line is a surface's outline (none; a
+   * theme can bring one back), --divider the faint seam between rows inside one surface, --soft-fill what a control
+   * that's only a shape (a chip, a field, a button) is filled with, --lift a surface's light inner edge and the soft
+   * shadow it casts.
+   */
+  --line: transparent;
+  --divider: color-mix(in srgb, var(--color-foreground) 7%, transparent);
+  --soft-fill: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  --lift: inset 0 0 0 1px rgb(255 255 255 / 6%), inset 0 1px 0 rgb(255 255 255 / 7%), 0 6px 20px -10px rgb(0 0 0 / 50%);
+
   --gap: 8px;
   --edge: 12px;
   --radius: 12px;
@@ -54,8 +65,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 /* A tile: what every home element is drawn on. */
 .tile {
   background: color-mix(in srgb, var(--color-background) var(--glass), transparent);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: var(--radius);
+  box-shadow: var(--lift);
 }
 .tile.focused { border-color: var(--color-accent); }
 

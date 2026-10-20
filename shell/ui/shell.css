@@ -482,9 +482,10 @@
 .msg.assistant {
   align-self: flex-start;
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   padding: 6px 10px;
   border-radius: var(--radius);
+  box-shadow: var(--lift);
 }
 .msg.tool, .msg.note, .msg.ask { font-size: var(--text-small); max-width: 100%; }
 .msg.tool .hint { opacity: 0.7; }
@@ -638,10 +639,11 @@
 .sheet-item {
   font: var(--text-small) var(--font);
   color: var(--color-foreground);
-  background: none;
-  border: var(--frame) solid var(--color-border);
+  background: var(--soft-fill);
+  border: var(--frame) solid var(--line);
   border-radius: 10px;
   padding: 7px 10px;
+  box-shadow: var(--lift);
 }
 .sheet-item:active { color: var(--color-accent); }
 .swatches {
@@ -659,10 +661,11 @@
   flex-direction: column;
   gap: 10px;
   padding: 10px;
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: 12px;
   font: var(--text-small) var(--font);
   text-align: start;
+  box-shadow: var(--lift);
 }
 .swatch.on { border: 2px solid var(--color-accent); }
 .swatch.browse { justify-content: center; background: none; color: var(--color-muted); }
@@ -705,10 +708,11 @@
   background: color-mix(in srgb, var(--color-background) calc(var(--glass) + 10%), transparent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border-bottom: var(--frame) solid var(--color-border);
+  border-bottom: 0;
   border-radius: 0 0 calc(var(--radius) * 2) calc(var(--radius) * 2);
   transform: translateY(calc((var(--q) - 1) * 100%));
   visibility: hidden;
+  box-shadow: var(--lift);
 }
 .notif-panel.shown { visibility: visible; }
 .notif-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 2px 8px; font-size: var(--text-small); }
@@ -813,7 +817,7 @@
 /* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
 .ai-work-box { padding: 4px 0; display: flex; flex-direction: column; }
 .ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }
-.ai-work + .ai-work { border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent); }
+.ai-work + .ai-work { border-top: 1px solid var(--divider); }
 .ai-work-line { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .ai-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-work-meta { flex: none; font-size: var(--text-small); white-space: nowrap; }
@@ -834,7 +838,7 @@
 .ai-work-chip { flex: none; font: var(--text-small) var(--font); padding: 6px 12px; border-radius: 999px; color: var(--color-foreground); white-space: nowrap; }
 .ai-work-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); font-weight: bold; }
 .ai-work-head { display: inline-block; padding: 4px 10px; border-radius: 999px; color: var(--color-foreground); }
-.ai-work-group + .ai-work-group { border-top: 1px solid var(--color-border); }
+.ai-work-group + .ai-work-group { border-top: 1px solid var(--divider); }
 .ai-work-project .ai-work-title { font-weight: bold; }
 .ai-work-caret { flex: none; width: 8px; font-size: var(--text-small); }
 .ai-work-wait { color: var(--color-accent); font-weight: bold; }
@@ -848,7 +852,7 @@
 /* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
 .ai-work-box { padding: 4px 0; display: flex; flex-direction: column; }
 .ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }
-.ai-work + .ai-work { border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent); }
+.ai-work + .ai-work { border-top: 1px solid var(--divider); }
 .ai-work-line { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .ai-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-work-meta { flex: none; font-size: var(--text-small); white-space: nowrap; }
@@ -918,26 +922,26 @@ html[data-mode="assist"] .assist {
 /* Solid: over another app, what's under it would show through the field. */
 .assist-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-height: 75%; background: var(--color-background); }
 .assist-head { display: flex; align-items: center; gap: 10px; }
-.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--color-border); }
+.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--line); }
 .assist-shot.blank { background: var(--color-surface); }
 .assist-title { font-weight: bold; }
 .assist-sub { flex: 1; font-size: var(--text-small); }
 .assist-open { font: var(--text-small) var(--font); color: var(--color-accent); }
 .assist-panel .ai-card { overflow-y: auto; min-height: 0; }
-.assist-ask { display: flex; align-items: center; gap: var(--gap); min-height: 46px; padding: 0 4px 0 10px; border: var(--frame) solid var(--color-border); border-radius: var(--radius); }
+.assist-ask { display: flex; align-items: center; gap: var(--gap); min-height: 46px; padding: 0 4px 0 10px; border: var(--frame) solid var(--line); border-radius: var(--radius); background: var(--soft-fill); box-shadow: var(--lift); }
 .assist-ask input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--color-foreground); font: var(--text-item) var(--font); }
 .assist-ask .mic { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius); color: var(--color-foreground); touch-action: none; }
 .assist-ask .mic.on { background: var(--color-red); color: var(--color-background); }
 .assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
-.assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--color-accent); }
-.assist-attach .chip.off { border-color: var(--color-border); color: var(--color-muted); }
+.assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid transparent; background: color-mix(in srgb, var(--color-accent) 16%, transparent); color: var(--color-accent); }
+.assist-attach .chip.off { border-color: var(--line); background: var(--soft-fill); color: var(--color-muted); }
 /* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
 .assist-draw { position: absolute; inset: 0; touch-action: none; }
 .assist-panel { position: relative; z-index: 1; }
 .assist-hint { font-size: var(--text-small); }
 .crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .crop-stroke polyline { fill: none; stroke: var(--color-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
-.assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
+.assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--line); color: var(--color-foreground); background: var(--soft-fill); box-shadow: var(--lift); }
 .assist-live.on { border-color: var(--color-red); color: var(--color-red); }
 /* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
 html[data-mode="assist"] .assist.live { background: none; pointer-events: none; }
@@ -952,8 +956,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   padding: 8px 12px;
   border-radius: var(--radius);
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   color: var(--color-foreground);
+  box-shadow: var(--lift);
 }
 .qs-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 /* The control center (control.tsx): in the notification panel's place - the big Wi-Fi and data cards, the sliders, the tiles. */
@@ -973,10 +978,11 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   text-transform: lowercase;
   border-radius: calc(var(--radius) * 1.5);
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   color: var(--color-foreground);
   user-select: none;
   -webkit-touch-callout: none;
+  box-shadow: var(--lift);
 }
 .cc-tile.big { min-height: 64px; }
 .cc-tile.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
@@ -991,9 +997,10 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   align-items: center;
   height: 44px;
   border-radius: calc(var(--radius) * 1.5);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--color-surface) 0);
   overflow: hidden;
+  box-shadow: var(--lift);
 }
 .cc-slider .cc-label {
   position: absolute;
@@ -1011,8 +1018,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   padding: 0 10px;
   border-radius: calc(var(--radius) * 1.5);
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   color: var(--color-foreground);
+  box-shadow: var(--lift);
 }
 .cc-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 .cc-media {
@@ -1024,8 +1032,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   padding: 8px 10px 10px;
   border-radius: calc(var(--radius) * 1.5);
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   overflow: hidden;
+  box-shadow: var(--lift);
 }
 .cc-media::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--p) * 100%); background: var(--color-accent); }
 .cc-art { width: 44px; height: 44px; border-radius: var(--radius); object-fit: cover; }
@@ -1060,8 +1069,9 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   justify-content: center;
   font-size: 24px;
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  box-shadow: var(--lift);
 }
 .cc-grid .cc-tile.on .cc-icon { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
 .cc-grid .cc-tile.on { background: none; color: var(--color-foreground); }
@@ -1082,7 +1092,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-transport button { display: flex; align-items: center; justify-content: center; font-size: 22px; }
 /* Remote input's tile held (control.tsx's RemotePick): its side, USB or Bluetooth, picked under the tiles. */
 .cc-grid .cc-tile.picking .cc-icon { border-color: var(--color-accent); }
-.cc-pick { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: calc(var(--radius) * 1.5); background: var(--color-surface); border: var(--frame) solid var(--color-border); }
+.cc-pick { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: calc(var(--radius) * 1.5); background: var(--color-surface); border: var(--frame) solid var(--line); box-shadow: var(--lift); }
 .cc-pick-head { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-pick-row { display: flex; gap: 8px; }
 .cc-pick-row .cc-chip { flex: 1; gap: 6px; font-size: var(--text-small); }
@@ -1112,7 +1122,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   color: var(--color-red);
 }
 .cc-badge.add { color: var(--color-accent); }
-.cc-tray-head { font-size: var(--text-small); padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); }
+.cc-tray-head { font-size: var(--text-small); padding-top: 4px; border-top: 1px solid var(--divider); }
 .cc-tray .cc-tile .cc-icon { animation: none; opacity: 0.75; }
 @keyframes cc-wobble {
   0%, 100% { transform: rotate(-1.5deg); }
@@ -1197,7 +1207,8 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents-banner {
   position: absolute; left: 50%; top: calc(var(--inset-top, 0px) + 24px); transform: translateX(-50%);
   padding: 10px 18px; border-radius: 999px; font: var(--text-small) var(--font);
-  background: var(--color-surface); color: var(--color-foreground); border: var(--frame) solid var(--color-border);
+  background: var(--color-surface); color: var(--color-foreground); border: var(--frame) solid var(--line);
+  box-shadow: var(--lift);
 }
 .recents-menu-scrim { position: fixed; inset: 0; z-index: 1; }
 .recents-menu {
@@ -1241,10 +1252,11 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   object-fit: cover;
   object-position: top;
   border-radius: var(--radius);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   background: var(--color-surface);
   user-select: none;
   -webkit-user-drag: none;
+  box-shadow: var(--lift);
 }
 .task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: 500 var(--text-small) var(--font); color: var(--color-foreground); background: color-mix(in srgb, var(--color-surface) 80%, transparent); border: none; border-radius: 999px; padding: 10px 22px; }
 
@@ -1304,10 +1316,11 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   font: var(--text-item) var(--font);
   color: var(--color-foreground);
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: 10px;
   padding: 8px 10px;
   outline: none;
+  box-shadow: var(--lift);
 }
 .aw-search:focus { border-color: var(--color-accent); }
 .aw-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
@@ -1325,9 +1338,10 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   font: var(--text-small) var(--font);
   color: var(--color-foreground);
   text-align: left;
-  background: none;
-  border: var(--frame) solid var(--color-border);
+  background: var(--soft-fill);
+  border: var(--frame) solid var(--line);
   border-radius: 12px;
+  box-shadow: var(--lift);
 }
 .aw-provider:active { border-color: var(--color-accent); }
 .aw-preview { height: 96px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--color-surface); overflow: hidden; }
@@ -1409,12 +1423,12 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   width: 100%;
   font: var(--text-small) var(--font);
   color: var(--color-foreground);
-  background: none;
-  border: var(--frame) solid var(--color-border);
+  background: var(--soft-fill);
+  border: var(--frame) solid var(--line);
   border-radius: var(--radius);
   padding: 7px 9px;
 }
-.ag-act { flex: none; font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: var(--frame) solid var(--color-border); border-radius: 999px; padding: 6px 12px; }
+.ag-act { flex: none; font: var(--text-small) var(--font); color: var(--color-accent); background: var(--soft-fill); border: var(--frame) solid var(--line); border-radius: 999px; padding: 6px 12px; box-shadow: var(--lift); }
 .ag-act.danger { color: var(--color-red); }
 .ag-act:disabled { opacity: 0.4; }
 .ag-ask { padding: 10px 12px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 6px; font-size: var(--text-small); }

@@ -16,7 +16,7 @@
   font: var(--text-small) var(--font);
   color: var(--color-foreground);
   background: var(--color-surface);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: var(--radius);
   padding: 8px 10px;
   user-select: text;

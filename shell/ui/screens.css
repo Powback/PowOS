@@ -87,9 +87,11 @@
   align-self: flex-start;
   font: var(--text-small) var(--font);
   color: var(--color-accent);
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: 999px;
   padding: 7px 12px;
+  background: var(--soft-fill);
+  box-shadow: var(--lift);
 }
 .scr-row .scr-act { align-self: center; }
 .scr-act.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
@@ -109,9 +111,11 @@
   flex: 1;
   min-width: 0;
   padding: 0 10px;
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: var(--radius);
   color: var(--color-muted);
+  background: var(--soft-fill);
+  box-shadow: var(--lift);
 }
 .scr-field:focus-within { border-color: var(--color-accent); }
 .scr-field input {
@@ -133,12 +137,12 @@
 .scr-option { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 .scr-option-label { flex: none; width: 104px; font-size: var(--text-small); }
 .scr-option-control { flex: 1; min-width: 0; }
-.scr-seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius); overflow: hidden; }
+.scr-seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--soft-fill); box-shadow: var(--lift); }
 .scr-seg button { padding: 8px 14px; white-space: nowrap; font-size: var(--text-small); }
 .scr-seg button.on { background: var(--color-accent); color: var(--color-background); }
 .scr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .scr-chips.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; margin: 0 calc(-1 * var(--edge)); padding: 0 var(--edge); flex: none; }
-.scr-chip { flex: none; padding: 7px 12px; border: 1px solid var(--color-border); border-radius: 999px; font-size: var(--text-small); white-space: nowrap; }
+.scr-chip { flex: none; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: var(--text-small); white-space: nowrap; background: var(--soft-fill); box-shadow: var(--lift); }
 .scr-chip.on { border-color: var(--color-accent); color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 15%, transparent); }
 
 /* Sideways strips: the themes, the backgrounds. They scroll to the screen's edge. */
@@ -155,11 +159,13 @@
 .scr-theme {
   flex: none;
   width: 160px;
-  border: var(--frame) solid var(--color-border);
+  border: var(--frame) solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: var(--soft-fill);
+  box-shadow: var(--lift);
 }
 .scr-theme.on { border-color: var(--color-accent); }
 .scr-theme img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; background: var(--color-surface); }
@@ -178,7 +184,7 @@
 }
 .scr-thumb.on { border-color: var(--color-accent); }
 .scr-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.scr-thumb.add { border-color: var(--color-border); color: var(--color-accent); display: grid; place-items: center; }
+.scr-thumb.add { background: var(--soft-fill); color: var(--color-accent); display: grid; place-items: center; }
 
 /* Grids of cards: the community themes, the store's widgets. */
 .scr-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--gap); }

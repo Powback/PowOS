@@ -20,7 +20,8 @@ html[data-mode="panel"] .panel-bar {
   gap: 4px;
   padding: 0 6px;
   background: color-mix(in srgb, var(--color-background) 92%, transparent);
-  border-top: 1px solid var(--color-border);
+  border-top: 0;
+  box-shadow: var(--lift);
 }
 
 html[data-mode="panel"] button {
@@ -97,18 +98,20 @@ html[data-mode="panel"] .panel-launcher {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--color-background) 96%, transparent);
+  box-shadow: var(--lift);
 }
 html[data-mode="panel"] .panel-search {
   font: inherit;
   color: inherit;
   padding: 8px 10px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--color-surface);
   outline: none;
+  box-shadow: var(--lift);
 }
 html[data-mode="panel"] .panel-search:focus { border-color: var(--color-accent); }
 html[data-mode="panel"] .panel-apps {
