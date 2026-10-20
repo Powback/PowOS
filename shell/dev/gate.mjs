@@ -6,7 +6,7 @@
  * cycle's "does not provide an export named"), unhandled rejection, or not reaching ready (window.__powosAlive, set
  * by app.tsx once its screen rendered) within READY_MS.
  *
- * Also, with /apps mounted (apps/install.sh): every page and widget entry of each PowOS app UI there
+ * Also, with /apps mounted (apps/install.sh): every page, glasses and widget entry of each PowOS app UI there
  * (/apps/<id>/powos-app.json + /apps/<id>/ui/), imported as the shell imports them (./_app/<id>/<entry>, the shell's
  * import map) - a module that doesn't load fails.
  *
@@ -60,7 +60,7 @@ function apps() {
     const mf = path.join(APPS, id, "powos-app.json");
     if (!fs.existsSync(mf)) return [];
     const m = JSON.parse(fs.readFileSync(mf, "utf8"));
-    const entries = [m.page?.entry, ...(m.widgets ?? []).map((w) => w.entry)].filter(Boolean);
+    const entries = [m.page?.entry, m.glasses?.entry, ...(m.widgets ?? []).map((w) => w.entry)].filter(Boolean);
     return [{ id, entries }];
   });
 }

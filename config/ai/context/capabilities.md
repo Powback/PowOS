@@ -382,6 +382,20 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
 - Remove an app: `powos app remove <id> [--data]`. Remove everything: `rooted.sh system off`, then delete
   `/var/lib/powos/stdb`.
 
+### Smart glasses (Even Realities G2 / G1) - docs/GLASSES.md
+- The PowOS app drives the glasses over raw BLE (no Even app): `targets/android/app/.../glasses/` (G2: app-layer auth,
+  heartbeat, teleprompter text, input, mic; G1: Nordic UART, text, 1-bit bitmaps, wear/battery events).
+- Pairing is on the phone: control center -> glasses tile -> pair (Android's companion dialogs, one per arm); then they
+  reconnect by themselves (Android's background connect + companion presence; no polling).
+- Their screen is a shell page, `shell/glasses/` (mode `glasses`, loaded off screen while connected): the HUD
+  (`glasses/hud.tsx`: time, newest notification, PowOS AI's last reply; tap = next view, double tap = ask PowOS AI
+  by voice on the G2, scroll = through it), or a PowOS app's manifest `"glasses": {"entry": ...}` picked on the phone's
+  glasses screen. Hot-reloaded as any shell file (`shell/push.sh`).
+- The G2 gets TEXT (its teleprompter - the confirmed path); pictures to the G2 are an unverified guess, behind the
+  `g2Raster` option. The G1 gets 1-bit pictures.
+- `powos glasses [status|show TEXT|clear|connect|disconnect|mic on|off]` from PowOS (through the app's run dir).
+- Bridge: `powos.glasses.*` + events `glasses.state|input|transcript|audio|message` (shell/types.ts).
+
 ### Status
 - ✅ On hardware (OnePlus Open, 2026-10-19):
   - rooted desktop, PowOS as home + priv-app + recents provider

@@ -11,6 +11,9 @@ class App : Application() {
         super.onCreate()
         // SystemUI's binding to the recents service (and with it the gesture input) back after the process dies.
         dev.omalauncher.system.RecentsWatchdog.start(this)
+        // The smart glasses: reconnect if they were connected when the app last ran; `powos glasses`'s commands. In the
+        // main process only (the engine's ":restart" runs this too): one process owns the BLE link.
+        if (Application.getProcessName() == packageName) dev.omalauncher.glasses.Glasses.init(this)
         // PowOS AI's agents reach the user whenever the app runs (the PowOS session keeps it alive), not only once the
         // launcher has been opened: their notifications with inline replies (AgentMail).
         if (RootedGuest.enabled) {

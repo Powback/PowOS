@@ -399,6 +399,37 @@ export interface Bridge {
     /** A mouse report: buttons (1 left, 2 right, 4 middle), relative motion, wheel and horizontal wheel. */
     mouse(buttons: number, dx: number, dy: number, wheel?: number, pan?: number): Promise<void>;
   };
+  /**
+   * Smart glasses (Even Realities G2/G1: glasses/Glasses.kt, docs/GLASSES.md): the pair, its connection, its display,
+   * input and microphone. "glasses.state" (GlassesState) on every change; "glasses.input" ({ input, side }: input
+   * "click" | "double" | "up" | "down" | "enter" | "exit" | "headUp" | "headDown" ...); "glasses.transcript" ({ text,
+   * final }: the G2's own speech recognition); "glasses.audio" ({ data: base64, codec, rate }, to a page that asked
+   * with audio(true)); "glasses.message" ({ text, seconds }: `powos glasses show`, to the surface page).
+   */
+  glasses: {
+    state(): Promise<GlassesState>;
+    /** Android's companion pairing dialogs (one per arm). "started" | "unavailable". */
+    pair(): Promise<"started" | "unavailable">;
+    /** Forgets the pair (disconnects, drops the associations). */
+    forget(): Promise<GlassesState>;
+    /** Connects (and keeps reconnecting) the paired glasses. False: none paired. */
+    connect(): Promise<boolean>;
+    disconnect(): Promise<GlassesState>;
+    /** The glasses' own text rendering (the G2's teleprompter, the G1's text screen). False: not ready. */
+    showText(text: string): Promise<boolean>;
+    /** A picture (data: URL or base64 PNG), scaled to the canvas and converted (4-bit greys / 1-bit). [dither]: G1. */
+    showImage(image: string, dither?: boolean): Promise<boolean>;
+    clear(): Promise<boolean>;
+    mic(on: boolean): Promise<boolean>;
+    /** This page wants "glasses.audio" events (many: only while it uses them). */
+    audio(on: boolean): Promise<boolean>;
+    /** This page is the glasses' screen (shell/glasses/surface.tsx): `powos glasses show` comes to it. */
+    surface(on: boolean): Promise<boolean>;
+    /** The glasses' screen loads its app again (another one picked: store "glasses"). */
+    reload(): Promise<void>;
+    /** An option's value; with [value], sets it. "g2Raster": pictures to the G2 over its unverified render channel. */
+    option(name: string, value?: boolean): Promise<boolean>;
+  };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   notifications: {
     list(): Promise<NotificationList>;
@@ -752,4 +783,36 @@ export interface RemoteState {
     hosts: RemoteHost[];
     error: string | null;
   };
+}
+
+/** An arm of the glasses: its address, advertised name, and link ("off" | "connecting" | "discovering" | "authenticating" | "ready"). */
+export interface GlassesArm {
+  address: string;
+  name: string | null;
+  phase: string;
+}
+/** The glasses as the host has them (Glasses.state). */
+export interface GlassesState {
+  /** Bluetooth there, and on. */
+  available: boolean;
+  enabled: boolean;
+  /** The paired pair: "G2" | "G1" and its id ("G2_84"); null: none paired. */
+  paired: { model: "G1" | "G2"; pairId: string } | null;
+  /** Connected or reconnecting on purpose. */
+  wanted: boolean;
+  phase: "off" | "connecting" | "ready";
+  left: GlassesArm | null;
+  right: GlassesArm | null;
+  /** On the face (null: the glasses don't say - the G2). */
+  worn: boolean | null;
+  /** False while the display is cleared because they're off the face. */
+  shown: boolean;
+  battery: Record<string, number>;
+  mic: boolean;
+  error: string | null;
+  /** The display: 576x288 at 4 bits (G2), 576x136 at 1 bit (G1). */
+  canvas: { width: number; height: number; bits: number } | null;
+  /** Pictures: confirmed on real glasses (G1), and usable now (G2 only with the g2Raster option). */
+  image: { verified: boolean; usable: boolean };
+  options: Record<string, boolean>;
 }

@@ -17,6 +17,7 @@ import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
 import { AppScreen } from "./appscreen.tsx";
 import { RemoteScreen } from "./remote.tsx";
+import { GlassesScreen } from "./glasses.tsx";
 import { AgentsScreen } from "./agents.tsx";
 import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
@@ -230,6 +231,7 @@ export function Home() {
       <SessionScreen />
       <AppScreen />
       <RemoteScreen />
+      <GlassesScreen />
       <AgentsScreen />
       <Screens />
       {/* The switcher: a layer over all of home (a swipe up over an app builds it; the overview button shows it). */}

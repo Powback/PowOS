@@ -1,0 +1,22 @@
+{
+  "id": "glasses",
+  "name": "Smart glasses (Even G2/G1)",
+  "kind": "service",
+  "owner": "system:powos-app (glasses/Glasses.kt)",
+  "host": "phone-android",
+  "purpose": "the PowOS app's link to the paired Even Realities glasses while connected: a connected-device foreground service, the BLE links (heartbeat only when idle), the glasses' screen as an off-screen shell page, `powos glasses`'s command folder and status file (docs/GLASSES.md)",
+  "installedBy": "the PowOS app (targets/android/app: glasses/), started when the user pairs or connects glasses",
+  "files": [
+    "/data/data/com.powos.app/files/run/glasses",
+    "/data/data/com.powos.app/shared_prefs/glasses.xml"
+  ],
+  "unbounded": "runs inside the PowOS app's own process (com.powos.app): a foreground service, two GATT links and one WebView page there - no process of its own to limit",
+  "autosleep": "never",
+  "remove": {
+    "commands": [
+      "powos glasses disconnect",
+      "forget the pair on the phone: control center -> glasses -> forget"
+    ],
+    "keep": []
+  }
+}

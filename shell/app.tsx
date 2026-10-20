@@ -39,7 +39,8 @@ applyTheme(await powos.theme.get().catch(() => null));
 /**
  * Which screen this page is: the host says (index.html?mode=) - home (its switcher is a layer of it, ui/recents.tsx),
  * or a slot's (aod: screen-off; assist: PowOS AI over an app; shade: the notification shade; lock: the lock face;
- * recents: the switcher alone, when the desktop is home; panel: the desktop's taskbar, from powos-shell).
+ * recents: the switcher alone, when the desktop is home; panel: the desktop's taskbar, from powos-shell; glasses: the
+ * smart glasses' screen, off screen).
  */
 const mode = new URLSearchParams(location.search).get("mode");
 document.documentElement.dataset.mode = mode ?? "home";
@@ -58,6 +59,11 @@ if (mode === "aod") {
   // The desktop's panel (powos-shell: a layer surface per screen, docs/DESKTOP-WEB-SHELL.md): the bar alone.
   const { Panel } = await import("./ui/panel.tsx");
   render(<Panel />, document.body);
+} else if (mode === "glasses") {
+  // The smart glasses' screen (glasses/Glasses.kt loads it off screen while they're connected): what they show,
+  // pushed to them as it changes. Imported here alone: the rest of home isn't loaded.
+  const { GlassesSurface } = await import("./glasses/surface.tsx");
+  render(<GlassesSurface />, document.body);
 } else if (mode === "gate-test") {
   // Tests only (test/gate-test.tsx; in the APK, so a rollback has it to fall back to): the page a test of the gate,
   // the watchdog and the rollback breaks instead of a live one. Imported here alone: a broken one breaks nothing else.

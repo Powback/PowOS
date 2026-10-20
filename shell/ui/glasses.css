@@ -1,0 +1,41 @@
+/* The smart glasses: their screen (glasses/surface.tsx, ?mode=glasses) and the phone's glasses screen (ui/glasses.tsx). */
+
+/* What the glasses show: white on black (black is off on their micro-LEDs), a grid of lines (glasses/hud.tsx). */
+:root[data-mode="glasses"] body { margin: 0; background: #000; }
+.glasses-surface { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.glasses-root {
+  position: relative;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: "DejaVu Sans Mono", "Roboto Mono", monospace;
+}
+.glasses-hud { padding: 0 6px; }
+.glasses-line { white-space: pre; overflow: hidden; text-overflow: clip; }
+.glasses-dev { margin: 0 6px; color: #8a8; font: 12px monospace; }
+
+/* The phone's glasses screen: full screen over home, as remote input's. */
+.glasses-screen { overflow-y: auto; }
+.glasses-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.glasses-preview {
+  align-self: center;
+  border-radius: 10px;
+  overflow: hidden;
+  border: var(--frame, 1px) solid var(--color-border);
+  background: #000;
+}
+.glasses-preview .glasses-root { color: #9f9; transform-origin: 0 0; }
+.glasses-keys { display: flex; justify-content: center; gap: 6px; }
+.glasses-send { display: flex; gap: 6px; }
+.glasses-send input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-foreground);
+}
+.glasses-option { display: flex; align-items: center; gap: 8px; font-size: var(--text-small); }
+.glasses-note { font-size: var(--text-small); color: var(--color-muted); line-height: 1.4; }

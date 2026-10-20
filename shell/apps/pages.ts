@@ -27,6 +27,8 @@ export interface AppManifest {
   /** Its icon, a file in its UI dir. */
   icon?: string;
   surfaces?: { launcher?: boolean };
+  /** Its screen for the smart glasses (glasses/api.ts): an ES module in its UI dir, picked on the phone's glasses screen. */
+  glasses?: { entry: string };
 }
 
 const parsed = new Map<string, AppManifest>();

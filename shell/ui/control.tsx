@@ -12,8 +12,9 @@ import { notif, panel } from "../state.ts";
 import { notifOpen } from "./gesture.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
+import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
-import type { MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
+import type { GlassesState, MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
 
 /** The phone's quick settings, kept up to date ("qs.changed"): the control center's and the notification panel's row. */
 export const quick = signal<QuickState>({
@@ -29,6 +30,8 @@ powos.qs.state().then((q) => (quick.value = q), () => {});
 
 /** PowOS's own tile, not one of the phone's: Remote input (ui/remote.tsx). */
 const REMOTE_ID = "powos.remote";
+/** PowOS's own tile too: the smart glasses (ui/glasses.tsx). */
+const GLASSES_ID = "powos.glasses";
 
 /** Held this long (ms), a tile opens its page instead. */
 const HOLD = 450;
@@ -73,6 +76,7 @@ const TILE_ICONS: Record<string, IconName | [IconName, IconName]> = {
   lockscreen: "lockOutline",
   qr_code_scanner: "qrcodeScan",
   [REMOTE_ID]: "keyboardOutline",
+  [GLASSES_ID]: "glasses",
 };
 
 /** Other apps' tiles by their app: the icon that says what they do. */
@@ -135,6 +139,45 @@ const askRemote = () =>
     (s) => (remote.value = s),
     () => {},
   );
+/** The glasses' state ("glasses.state"), for their tile; a host without glasses (the desktop) has none. */
+const glasses = signal<GlassesState | null>(null);
+powos.on("glasses.state", (s: GlassesState) => (glasses.value = s));
+powos.glasses.state().then(
+  (s) => (glasses.value = s),
+  () => {},
+);
+
+/** The glasses as a tile: on while connected; a tap opens their screen (pairing, connecting, what they show). */
+function glassesTile(): QuickTile {
+  const s = glasses.value;
+  const model = s?.paired?.model;
+  return {
+    id: GLASSES_ID,
+    label: model ? `${model} glasses` : "glasses",
+    on: s?.phase === "ready",
+    detail: !s?.paired ? "not paired" : s.phase === "ready" ? "connected" : s.phase === "connecting" ? "connecting" : "not connected",
+  };
+}
+
+function GlassesTile({ t }: { t: QuickTile }) {
+  return (
+    <button
+      type="button"
+      class={`cc-tile ${t.on ? "on" : ""}`}
+      aria-label={`glasses: ${t.detail}`}
+      onClick={() => {
+        shut();
+        openGlasses();
+      }}
+    >
+      <span class="cc-icon">
+        <Icon name="glasses" />
+      </span>
+      <span class="cc-label">{t.label}</span>
+    </button>
+  );
+}
+
 /** The long press's picker (USB or Bluetooth) showing. */
 const picking = signal(false);
 
@@ -543,7 +586,7 @@ export function ControlCenter() {
   const tiles = q.tiles ?? [];
   const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter((t): t is QuickTile => !!t);
   // Remote input's tile joins the phone's: a layout kept before it was there gets it at the end (arranged's new tiles).
-  const { shown, hidden } = arranged([...tiles.filter((t) => !CARDS.includes(t.id)), remoteTile()]);
+  const { shown, hidden } = arranged([...tiles.filter((t) => !CARDS.includes(t.id)), remoteTile(), ...(glasses.value ? [glassesTile()] : [])]);
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
   return (
@@ -601,7 +644,9 @@ export function ControlCenter() {
         <EditGrid shown={shown} hidden={hidden} />
       ) : (
         <div class="cc-grid">
-          {shown.map((t) => (t.id === REMOTE_ID ? <RemoteTile key={t.id} t={t} /> : <Tile key={t.id} t={t} />))}
+          {shown.map((t) =>
+            t.id === REMOTE_ID ? <RemoteTile key={t.id} t={t} /> : t.id === GLASSES_ID ? <GlassesTile key={t.id} t={t} /> : <Tile key={t.id} t={t} />,
+          )}
         </div>
       )}
       {!editing.value && <RemotePick />}

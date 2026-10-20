@@ -192,6 +192,8 @@ Dev & AI:
   android apps|open|running   (phone) Android's apps: list, open as a window or full screen, what runs
   android notifications|notify|screenshot   (phone) The phone's notifications, post one, its screen
   shell errors [N]    (phone) The web shell's last errors (each one also went to the manager's inbox)
+  glasses [status]    (phone) The smart glasses (Even G2/G1): connected, arms, worn, battery
+  glasses show|clear|connect|disconnect|mic   (phone) Text on them, blank them, the link, the mic (powos glasses help)
 
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
@@ -3113,6 +3115,11 @@ case "${1:-}" in
         # Unified sleep: everything that sleeps, of every kind (lib/apps/powos-sleep; `powos sleep --help`).
         shift
         exec python3 "$POWOS_LIB/apps/powos-sleep" "$@"
+        ;;
+    glasses)
+        # The smart glasses the phone's PowOS app drives (lib/apps/powos-glasses, docs/GLASSES.md).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-glasses" "$@"
         ;;
     units|unit)
         # Everything installed or running on this host, with owner, purpose, limits and removal (lib/apps/powos-units).

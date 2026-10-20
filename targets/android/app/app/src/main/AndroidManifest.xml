@@ -48,6 +48,16 @@
          module doesn't list stops the phone at the boot screen - install-app.sh refuses such an APK. -->
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
 
+    <!-- Smart glasses (glasses/, docs/GLASSES.md): BLE links to the arms (BLUETOOTH/BLUETOOTH_ADMIN above), paired through
+         Android's companion flow (no location permission: the system scans), which also tells PowOS when they're in
+         range again (OBSERVE_..._PRESENCE); a connected-device foreground service while connected. All normal
+         (install-time) permissions - none privileged, none on system-module/privileged-perms.txt. -->
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-feature
+        android:name="android.software.companion_device_setup"
+        android:required="false" />
+
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
@@ -404,6 +414,27 @@
             android:name=".widgets.recon.ReconReceiver"
             android:exported="true"
             android:permission="android.permission.DUMP" />
+
+        <!-- Smart glasses (glasses/): the connection's foreground service, the companion pairing flow (invisible: only the
+             system's dialogs), and the companion presence callbacks (the system binds it; the permission says so). -->
+        <service
+            android:name=".glasses.GlassesService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+        <activity
+            android:name=".glasses.GlassesPairActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="com.powos.app.glasses"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <service
+            android:name=".glasses.GlassesPresenceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".LinuxService"

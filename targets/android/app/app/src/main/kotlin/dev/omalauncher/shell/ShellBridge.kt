@@ -88,6 +88,9 @@ class ShellBridge(
     /** Remote input (RemoteInput.kt): the phone as a computer's keyboard and mouse, "remote.*" calls. */
     private val remote = RemoteInput.Client(context, activity, ::emit)
 
+    /** The smart glasses (glasses/Glasses.kt): pairing, connection, their display, input and mic - "glasses.*" calls. */
+    private val glasses = dev.omalauncher.glasses.Glasses.Client(context, activity, ::emit)
+
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
 
@@ -305,7 +308,12 @@ class ShellBridge(
             "term.style" -> terminalStyle(if (a.isNull(0)) null else a.getDouble(0))
             "clipboard.read" -> clipboard().primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
             "clipboard.write" -> clipboard().setPrimaryClip(ClipData.newPlainText("PowOS", a.getString(0)))
-            else -> if (method.startsWith("remote.")) remote.call(method.removePrefix("remote."), a) else throw IllegalArgumentException("no such call: $method")
+            else ->
+                when {
+                    method.startsWith("remote.") -> remote.call(method.removePrefix("remote."), a)
+                    method.startsWith("glasses.") -> glasses.call(method.removePrefix("glasses."), a)
+                    else -> throw IllegalArgumentException("no such call: $method")
+                }
         }
 
     private fun apps(): JSONArray {
@@ -712,6 +720,7 @@ class ShellBridge(
         screens.close()
         appWidgets.unlisten(appWidgetEvents)
         remote.close()
+        glasses.close()
         dev.omalauncher.AgentsSpool.forget(agentsView)
         quick.close()
         media.close()

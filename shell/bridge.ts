@@ -27,6 +27,7 @@ import type {
   ThemeColors,
   WidgetScreen,
   MediaState,
+  GlassesState,
 } from "./types.ts";
 import { mockScreens } from "./screens-mock.ts";
 
@@ -149,6 +150,21 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       disconnect: () => call("remote.disconnect"),
       keys: (reports) => call("remote.keys", reports),
       mouse: (buttons, dx, dy, wheel, pan) => call("remote.mouse", buttons, dx, dy, wheel ?? 0, pan ?? 0),
+    },
+    glasses: {
+      state: () => call<GlassesState>("glasses.state"),
+      pair: () => call<"started" | "unavailable">("glasses.pair"),
+      forget: () => call<GlassesState>("glasses.forget"),
+      connect: () => call<boolean>("glasses.connect"),
+      disconnect: () => call<GlassesState>("glasses.disconnect"),
+      showText: (text) => call<boolean>("glasses.showText", text),
+      showImage: (image, dither) => call<boolean>("glasses.showImage", image, dither ?? true),
+      clear: () => call<boolean>("glasses.clear"),
+      mic: (on) => call<boolean>("glasses.mic", on),
+      audio: (on) => call<boolean>("glasses.audio", on),
+      surface: (on) => call<boolean>("glasses.surface", on),
+      reload: () => call("glasses.reload"),
+      option: (name, value) => call<boolean>("glasses.option", name, value ?? null),
     },
     notifications: {
       list: () => call<NotificationList>("notifications.list"),
@@ -601,6 +617,7 @@ function mock(): Bridge {
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
     remote: mockRemote(events),
+    glasses: mockGlasses(events),
     lock: { unlock: async () => console.log("[mock] unlock") },
     media: (() => {
       let st: MediaState = {
@@ -1295,6 +1312,73 @@ function mockAgents(
 }
 
 type RemoteState = import("./types.ts").RemoteState;
+
+/**
+ * Glasses in a desktop browser: a pretend G2 pair, connected; what's shown goes to the console (the glasses page,
+ * index.html?mode=glasses, shows its own frame on screen, and keys stand in for the touch bars: surface.tsx).
+ */
+function mockGlasses(events: Events): Bridge["glasses"] {
+  const arm = (side: string, phase: string) => ({ address: `AA:BB:CC:DD:EE:0${side === "L" ? 1 : 2}`, name: `Even G2_84_${side}_8AF0B1`, phase });
+  const state: GlassesState = {
+    available: true,
+    enabled: true,
+    paired: { model: "G2", pairId: "G2_84" },
+    wanted: true,
+    phase: "ready",
+    left: arm("L", "ready"),
+    right: arm("R", "ready"),
+    worn: null,
+    shown: true,
+    battery: {},
+    mic: false,
+    error: null,
+    canvas: { width: 576, height: 288, bits: 4 },
+    image: { verified: false, usable: false },
+    options: { g2Raster: false },
+  };
+  const changed = () => {
+    events.emit("glasses.state", structuredClone(state));
+    return structuredClone(state);
+  };
+  const ready = () => state.phase === "ready";
+  return {
+    state: async () => structuredClone(state),
+    pair: async () => (console.log("[mock] glasses pairing dialog"), "started" as const),
+    forget: async () => {
+      Object.assign(state, { paired: null, left: null, right: null, wanted: false, phase: "off", canvas: null });
+      return changed();
+    },
+    connect: async () => {
+      if (!state.paired) return false;
+      Object.assign(state, { wanted: true, phase: "ready", left: arm("L", "ready"), right: arm("R", "ready") });
+      changed();
+      return true;
+    },
+    disconnect: async () => {
+      Object.assign(state, { wanted: false, phase: "off", left: arm("L", "off"), right: arm("R", "off"), mic: false });
+      return changed();
+    },
+    showText: async (text) => (ready() && console.log("[mock] glasses text\n" + text), ready()),
+    showImage: async (image) => (ready() && console.log("[mock] glasses image", image.length, "chars"), ready() && state.image.usable),
+    clear: async () => (console.log("[mock] glasses cleared"), ready()),
+    mic: async (on) => {
+      state.mic = on && ready();
+      changed();
+      return state.mic === on;
+    },
+    audio: async (on) => on,
+    surface: async (on) => on,
+    reload: async () => events.emit("glasses.reload", null),
+    option: async (name, value) => {
+      if (value != null) {
+        state.options[name] = value;
+        if (name === "g2Raster") state.image.usable = value;
+        changed();
+      }
+      return !!state.options[name];
+    },
+  };
+}
 
 /** Remote input in a desktop browser: a pretend USB cable and a paired laptop; reports go to the console. */
 function mockRemote(events: Events): Bridge["remote"] {

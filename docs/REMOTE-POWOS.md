@@ -288,7 +288,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-98 markers on 2026-10-20.
+100 markers on 2026-10-20.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -311,6 +311,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `lib/apps/powos-container:463` | Overlay storage on an ext4 filesystem in a file (`/var/lib/containers/powos.img`, loop): overlayfs refuses f2fs as its upper layer. | An f2fs/overlayfs combination that works, or an ext4 partition of our own. |
 | `lib/apps/powos-container:665` | `powos containers exec` stops the exec'd shell, moves it into the container's groups and continues it: crun exec joins no cgroup with `--cgroups=disabled`. | Memory/cpu on cgroup v2 (§9.3), so crun's exec joins the container's cgroup itself. |
 | `lib/apps/powos-container:704` | `--rootfs /` (the runtime's container mode without an image) becomes a read-only non-recursive bind of / at `/run/powos-containers/hostroot`: crun can't pivot_root onto its own root (EBUSY). | crun binding such a rootfs itself before pivot_root (upstream). |
+| `lib/apps/powos-glasses:94` | `powos glasses` waits for the app's answer by re-reading status.json every 100 ms (5 s at most): a bounded poll. | A reply to block on: an inotify watch on status.json, or the app answering on a socket. |
 | `lib/apps/powos-sleepd:357` | Stop-mode sleep hands a service's port back by closing powos-sleepd's listener once the backend restarts: a connection in that gap is refused, a fast backend may fail to bind once. | Socket activation proper: the listening socket passed to the backend (LISTEN_FDS); backends take one. |
 | `lib/apps/powos-supervisor:19` | Own supervisor with soft budgets: systemd --user limits need a delegated cgroup v2 subtree Android doesn't give. | The cgroup v2 move (FEASIBILITY §2.4), then one unit per manifest; delete the supervisor. |
 | `shell/apps/pages.ts:98` | The recent strip places PowOS apps by when the host's front app changed: `usage.recent` comes without times. | `usage.recent` with each app's last time (ShellBridge.kt) and PowOS apps' opens recorded there, one list ordered by time. |
@@ -326,6 +327,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/AgentsSpool.kt:24` | Reads agents/mirror/<host>.json, written by the adb mirror (C1). | REMOTE-POWOS.md M2: StdbSource subscriptions per host replace the mirror folder. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/AgentsSpool.kt:154` | Ask answers are files the agents' uid could also write (C3). | REMOTE-POWOS.md M3: the `answer` reducer. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/Runtime.kt:373` | Rooted: the server socket can't be created (priv_app may not create sock_files in its data); start continues without it. | priv_app sock_file rules in the system module's sepolicy, or an abstract socket. |
+| `targets/android/app/app/src/main/kotlin/dev/omalauncher/glasses/G2Glasses.kt:269` | No clear/exit command is known for the G2: blanking sends an empty teleprompter page (a whole ~2.5 s text sequence). | Capture the Even app closing its display (HCI log) - the module's EvenHub shutdown (0x14-20) is an unverified guess - and send that. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/linux/Proot.kt:76` | Root clears the app's own dir (sock_files a priv_app can't remove). | Same sepolicy rule, or no sockets in app data (abstract sockets). |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/AppWidgets.kt:566` | Widget clicks would launch on the private virtual display; the hidden interaction handler is set by reflection. | None for a launcher; a public "launch on this display" option for AppWidgetHostView. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/HighRefresh.kt:14` | ColorOS caps unlisted packages at 60 Hz; the window asks for the fastest mode while touched. | None in PowOS; ColorOS listing the package or honouring AOSP frame-rate votes. |

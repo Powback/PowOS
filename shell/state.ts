@@ -5,6 +5,7 @@
 import { computed, effect, signal, type Signal } from "@preact/signals";
 import { powos } from "./bridge.ts";
 import { closeRemote, remoteOpen } from "./remote.ts";
+import { closeGlasses, glassesOpen } from "./glasses/open.ts";
 import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
 import { recentsBack, recentsHome } from "./ui/recents.tsx";
@@ -204,6 +205,7 @@ export function back(): boolean {
   // A PowOS app open full screen: back to where it was opened from.
   else if (appView.value) closeApp();
   else if (remoteOpen.value) closeRemote();
+  else if (glassesOpen.value) closeGlasses();
   // Settings and its screens: the top one (or what's open inside it).
   else if (backScreen()) return true;
   else if (agentsView.value) closeAgents();
