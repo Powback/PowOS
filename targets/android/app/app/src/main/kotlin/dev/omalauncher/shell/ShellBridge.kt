@@ -192,7 +192,7 @@ class ShellBridge(
                 // PowOS AI page (second arg false): putting the task in recents starts the chat activity for a
                 // moment, and its window covered home - a ~1 s black screen on every send. That page is the
                 // conversation already, a swipe from home.
-                if (a.optBoolean(1, true)) PowosAiActivity.keepInRecents(context)
+                if (a.optBoolean(1, true)) PowosAiActivity.keepInRecents(context) else Unit
             }
             "ai.open" -> PowosAiActivity.open(context, null)
             "ai.mail" -> aiMail()
