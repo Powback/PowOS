@@ -328,6 +328,7 @@ Every ship to the phone carries `--note`: one plain line of what changed for the
   replacement, the remote PowOS design: `docs/REMOTE-POWOS.md`). Shown as home's Agents widget, PowOS AI's page →
   Agents, and an ongoing notification while one works. Asks (PermissionRequest) can be allowed/denied from the phone;
   unanswered after 60 s, Claude asks at its terminal.
+- Compute mesh (moving containers between PowOS hosts, resource sharing): design only, ❌ not implemented - `docs/POWOS-COMPUTE-MESH.md`.
 - Claude: `ANTHROPIC_BASE_URL=http://claude-auth.pow`, the fleet's OAuth proxy. Never log in or refresh a token on
   the phone.
 

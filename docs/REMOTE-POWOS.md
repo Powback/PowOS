@@ -13,6 +13,7 @@ doc lists what exists, designs the replacement, and orders the work.
 Related: `docs/AGENTS-VIEW-DESIGN.md` (§4 cross-host, §6 actions, §7 who may do what, §10 phases),
 `docs/POWOS-APPS-FEASIBILITY.md` (§3 identity, §4 cross-device sync), `docs/SYNC-ARCHITECTURE.md` (code and config
 through git), `~/Projects/CLAUDE.md` (PowStation, Pi-hole, WireGuard, claude-auth).
+Built on this: `docs/POWOS-COMPUTE-MESH.md` (resource sharing and moving containers between hosts).
 
 Terms used here:
 
