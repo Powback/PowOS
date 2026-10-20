@@ -341,7 +341,7 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   and keeps budgets without cgroups (RSS over `memMB` → restart, 3× in 5 min → held; CPU over `cpuPct` for a minute
   → nice 19; rlimits/nice/ionice at start). `powos app services` = its status (`/run/powos-system/status.json`),
   logs `/var/log/powos/<id>.log`. Off: `rooted.sh system off` (`/data/powos/system-tier.off`), on: `rooted.sh system on`.
-- **SpacetimeDB 2.12.0** (package `spacetimedb`: built from the v2.12.0 source with three idle-wakeup patches -
+- **SpacetimeDB 2.12.0** (package `spacetimedb`: built from the local SpacetimeDB fork, `~/Projects/SpacetimeDB` branch `powos/v2.12` = v2.12.0 + three idle-wakeup commits, pinned by hash -
   idle server ~9 wakeups/s instead of 161, ~0 per loaded database instead of ~145; `spacetimedb-bin` = the unpatched
   official binaries; `spacetime` CLI on PATH) as
   `dev.powos.spacetimedb`: `127.0.0.1:3410`, data/keys `/var/lib/powos/stdb` (owned by powos). The port is locked to
