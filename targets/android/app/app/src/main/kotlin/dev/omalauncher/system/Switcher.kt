@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import dev.omalauncher.App
 import dev.omalauncher.shell.ShellActivity
@@ -41,6 +42,7 @@ import kotlin.concurrent.thread
  */
 object Switcher {
     private const val TAG = "PowosSwitcher"
+    private const val STALE_GESTURE_MS = 2_000L
 
     /** On the home intents that show the layer: home's page isn't sent "system.home" for them (it would close it). */
     const val EXTRA_RECENTS = "dev.omalauncher.recents"
@@ -105,6 +107,9 @@ object Switcher {
 
     /** A swipe up owns the layer (its begin until it ended): home's stop or start doesn't touch it meanwhile. */
     private var gesture = false
+
+    /** When the swipe that owns the layer last did anything (begin, a frame, its ending): uptime ms. */
+    private var gestureAt = 0L
 
     /** Where each page laid the first card out (screen px) and its corner radius. */
     private val slots = WeakHashMap<ShellBridge, Pair<Rect, Float>>()
@@ -249,6 +254,7 @@ object Switcher {
     /** A swipe up began over task [over], its window following the finger: the layer comes up behind it. */
     fun begin(over: Int?) {
         gesture = true
+        gestureAt = SystemClock.uptimeMillis()
         open = true
         from = over
         release = null
@@ -279,6 +285,7 @@ object Switcher {
         homeness: Float,
     ) {
         if (!gesture) return
+        gestureAt = SystemClock.uptimeMillis()
         val d = density()
         depthNow(progress * (1f - homeness))
         // A string, not a JSONObject, sent now (this is the display frame's callback): every frame, as cheap as it can be.
@@ -291,6 +298,7 @@ object Switcher {
      */
     fun ending() {
         if (!gesture) return
+        gestureAt = SystemClock.uptimeMillis()
         open = false
     }
 
@@ -366,8 +374,26 @@ object Switcher {
         context: Context,
         over: Int? = if (open && homeVisible) from else Tasks.visible(context),
     ) {
-        if (gesture) return
-        if (open && homeVisible) return
+        // A swipe whose transition never came back (WM Shell had no controller for it: its end, settled, never
+        // called) left the layer owned - every switcher after it did nothing (2026-10-20). Owned but quiet for
+        // [STALE_GESTURE_MS], with the finger long gone: let go of it.
+        if (gesture && SystemClock.uptimeMillis() - gestureAt > STALE_GESTURE_MS) {
+            Log.w(TAG, "show: the last swipe never ended (${SystemClock.uptimeMillis() - gestureAt} ms quiet): let go of it")
+            gesture = false
+            release = null
+            boost?.invoke(false)
+        }
+        if (gesture) {
+            Log.i(TAG, "show: a swipe owns the layer")
+            return
+        }
+        // Up already by our account: the page is told again (its show is idempotent) - had it closed the layer without
+        // telling us, a bare return here left the switcher dead from home.
+        if (open && homeVisible) {
+            Log.i(TAG, "show: up already - the page told again")
+            home?.emit("recents.show", state())
+            return
+        }
         val app = context.applicationContext
         onHome = homeIsShell(app)
         if (!onHome) page(app)
