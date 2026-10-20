@@ -36,14 +36,17 @@ const live = signal(false);
 /** Animating between states (CSS transitions on), rather than following a finger. */
 const settling = signal(false);
 /**
- * The screen's size, the keyboard left out: the cards are the screen's shape. A height that shrinks at the same width
- * while the keyboard is up is the keyboard's, not the screen's - the cards keep the full one (a switcher opened over
- * the PowOS AI page's open keyboard laid its cards out short and off center).
+ * The screen's size as the eye sees it (the visual viewport), the keyboard left out: the cards are the screen's shape.
+ * Not innerWidth / innerHeight - the layout viewport, which over the PowOS AI page with the keyboard up grew to
+ * 759x1690 on a 404x899 screen, and the cards landed off center. A height that shrinks at the same width while the
+ * keyboard is up is the keyboard's: the cards keep the full one.
  */
 const keyboardUp = () => (parseFloat(document.documentElement.style.getPropertyValue("--inset-keyboard")) || 0) > 0;
 function bounds(was?: { w: number; h: number }) {
-  const w = innerWidth;
-  const h = was && was.w === w && innerHeight < was.h && keyboardUp() ? was.h : innerHeight;
+  const vv = window.visualViewport;
+  const w = Math.round(vv?.width ?? innerWidth);
+  const full = Math.round(vv?.height ?? innerHeight);
+  const h = was && was.w === w && full < was.h && keyboardUp() ? was.h : full;
   return { w, h };
 }
 const size = signal(bounds());
@@ -395,10 +398,12 @@ powos.on("switcher.toggle", () => {
   if (next) open(next.id, row?.querySelector<HTMLElement>(`.task[data-task="${next.id}"] .task-shot`) ?? undefined);
   else close();
 });
-addEventListener("resize", () => {
+function resized() {
   const next = bounds(size.value);
   if (next.w !== size.value.w || next.h !== size.value.h) size.value = next;
-});
+}
+addEventListener("resize", resized);
+window.visualViewport?.addEventListener("resize", resized);
 
 /** A card's stand-in while there are no tasks: the first card's slot stays laid out (it's measured). */
 function Placeholder() {
@@ -420,8 +425,8 @@ function Opening() {
   useLayoutEffect(() => {
     if (!o || !el.current) return;
     const { left, top, width, height } = o.rect;
-    const sx = width / innerWidth;
-    const sy = height / innerHeight;
+    const sx = width / size.value.w;
+    const sy = height / size.value.h;
     el.current.animate(
       [
         { transform: `translate(${left}px, ${top}px) scale(${sx}, ${sy})`, borderRadius: `${parseFloat(o.radius) / sx}px` },
@@ -539,7 +544,7 @@ export function Recents() {
     <div
       ref={el}
       class={`recents ${p} ${p === "closed" ? "" : "open"} ${live.value ? "live" : ""} ${settling.value ? "settling" : ""} ${first != null ? "splitting" : ""}`}
-      style={{ "--screen-ratio": `${w} / ${h}`, "--screen-ratio-n": String(w / h), "--screen-h": `${h}px` }}
+      style={{ "--screen-ratio": `${w} / ${h}`, "--screen-ratio-n": String(w / h), "--screen-w": `${w}px`, "--screen-h": `${h}px` }}
       onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}
       onTransitionEnd={(e) => {
         if (e.target === row) reportSlot();

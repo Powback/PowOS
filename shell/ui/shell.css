@@ -1122,13 +1122,17 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   --rx: 0px;
   --ry: 0px;
   --rh: 0;
-  /* --screen-h: the screen's height without the keyboard (recents.tsx bounds), not 100vh. */
-  --card-w: min(72vw, 440px, calc(0.62 * var(--screen-h, 100vh) * var(--screen-ratio-n, 0.45)));
+  /*
+   * --screen-w / --screen-h: the screen as the eye sees it, the keyboard left out (recents.tsx bounds) - not vw/vh,
+   * which follow the layout viewport: over the PowOS AI page with the keyboard up it grew (759x1690 CSS px on a
+   * 404x899 screen) and the cards landed off center, small.
+   */
+  --card-w: min(calc(0.72 * var(--screen-w, 100vw)), 440px, calc(0.62 * var(--screen-h, 100vh) * var(--screen-ratio-n, 0.45)));
   --card-radius: max(var(--radius), 22px);
   position: fixed;
   left: 0;
-  right: 0;
   top: 0;
+  width: var(--screen-w, 100vw);
   height: var(--screen-h, 100vh);
   z-index: 40;
   display: flex;
@@ -1148,7 +1152,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   position: relative;
   opacity: calc(1 - var(--rh));
   gap: calc(var(--gap) * 3);
-  padding: 0 calc((100vw - var(--card-w)) / 2);
+  padding: 0 calc((var(--screen-w, 100vw) - var(--card-w)) / 2);
   scroll-snap-type: x proximity;
   /* A card added before the one in view must not keep that one in view (the row rewinds to its start instead). */
   overflow-anchor: none;
@@ -1166,7 +1170,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents.open .task-shot { box-shadow: 0 10px 30px color-mix(in srgb, #000 35%, transparent); }
 .recents .task.pinned .task-label::after { content: " \00b7 pinned"; color: var(--color-accent); }
 /* The first card is where the app's window lands; the others slide in from the left with the finger. */
-.recents .task:not(:first-child) { transform: translateX(calc((var(--rp) - 1) * 45vw)); opacity: var(--rp); }
+.recents .task:not(:first-child) { transform: translateX(calc((var(--rp) - 1) * 0.45 * var(--screen-w, 100vw))); opacity: var(--rp); }
 .recents .task:first-child .task-head, .recents .task-clear { opacity: var(--rp); }
 .recents.live .task:first-child .task-shot { visibility: hidden; }
 .recents .task[aria-hidden] { visibility: hidden; }
@@ -1193,7 +1197,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents-menu button:active { background: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
 @keyframes recents-menu-in { from { opacity: 0; transform: scale(0.92); } }
 /* A card growing to the screen as its app opens (its transform is animated from the card's frame). */
-.recents-expand { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 3; object-fit: cover; object-position: top; transform-origin: 0 0; pointer-events: none; }
+.recents-expand { position: fixed; left: 0; top: 0; width: var(--screen-w, 100vw); height: var(--screen-h, 100vh); z-index: 3; object-fit: cover; object-position: top; transform-origin: 0 0; pointer-events: none; }
 .recents-note {
   position: absolute; left: 50%; bottom: calc(var(--inset-bottom, 0px) + 24px); transform: translateX(-50%);
   padding: 10px 16px; border-radius: 999px; font: var(--text-small) var(--font);
