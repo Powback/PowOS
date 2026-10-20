@@ -60,6 +60,9 @@
         if (t.tagName === "SCRIPT" || t.tagName === "LINK") boot.report("resource", "failed to load " + (t.src || t.href));
         return;
       }
+      // The browser's ResizeObserver loop warning: an observer's callback resized something it observes and the rest
+      // waits a frame - nothing failed, nothing thrown (an error event with no error). Not a crash: never reported.
+      if (!ev.error && /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/.test(ev.message || "")) return;
       boot.report("error", ev.error || ev.message, ev.filename, ev.lineno);
     }, true);
     addEventListener("unhandledrejection", (ev) => boot.report("rejection", ev.reason));
