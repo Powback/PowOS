@@ -37,6 +37,10 @@ import android.widget.FrameLayout
  *   s.draw <id> <w> <h> <ops...>       a frame: a display list in a w x h space ([draw])
  *   s.destroy <id> / s.reset           one tile / every tile (the page reloaded)
  *   n.req <json>                       PowOS apps' network capability ([ShellNet]): answered with n.res / n.ev / n.st
+ *   b.hello                            the page's glass asks whether the compositor blurs for it: "b.state 1|0" back
+ *                                      (again whenever that changes) - [GlassBlur]
+ *   b.r <dpr> <n> <region...>          the glass surfaces' rounded rectangles, blurred live by the compositor
+ *   b.lag <frames>                     test knob: when the regions apply (-1 at once, 0 on the next draw, n later)
  *
  * Why surfaces: a canvas in the page, however it's drawn (an OffscreenCanvas in a worker included), makes the whole
  * WebView composite again for each frame - in the app's own render threads - which cost ~2% of a core per frame per
@@ -60,6 +64,16 @@ class ShellNative(
     private val tiles = HashMap<Int, Tile>()
     private val net = ShellNet(context) { text -> main.post { port?.postMessage(WebMessage(text)) } }
 
+    /** The glass's live blur (Android 13+: the window's surface control), for a page in a window. */
+    internal val glass: GlassBlur? =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            GlassBlur(web) { on -> port?.postMessage(WebMessage("b.state ${if (on) 1 else 0}")) }.also { g ->
+                g.holes = { synchronized(tiles) { tiles.values.mapNotNull { it.shownRect() } } }
+            }
+        } else {
+            null
+        }
+
     @JavascriptInterface
     fun connect() {
         main.post {
@@ -77,6 +91,8 @@ class ShellNative(
             )
             port = mine
             web.postWebMessage(WebMessage("powos-native", arrayOf(theirs)), Uri.parse(origin))
+            // A new page: its glass asks again (b.hello); the last page's regions go with it.
+            glass?.reset()
         }
     }
 
@@ -88,6 +104,7 @@ class ShellNative(
             tiles.values.forEach { it.remove() }
             tiles.clear()
         }
+        glass?.close()
         render.quitSafely()
     }
 
@@ -99,6 +116,9 @@ class ShellNative(
             when (verb) {
                 "open" -> open(rest.trim())
                 "n.req" -> net.command(rest)
+                "b.hello" -> if (glass != null) glass.hello() else main.post { port?.postMessage(WebMessage("b.state 0")) }
+                "b.r" -> glass?.command(rest)
+                "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }
                 "s.draw" -> {
                     val id = rest.substringBefore(' ').toInt()
                     synchronized(tiles) { tiles[id] }?.draw(rest.substringAfter(' '))
@@ -108,11 +128,17 @@ class ShellNative(
                     val a = rest.trim().split(' ')
                     val id = a[0].toInt()
                     val n = a.drop(1).map { it.toFloat() }
-                    main.post { synchronized(tiles) { tiles[id] }?.place(n[0], n[1], n[2], n[3], n[4]) }
+                    main.post {
+                        synchronized(tiles) { tiles[id] }?.place(n[0], n[1], n[2], n[3], n[4])
+                        glass?.holesChanged()
+                    }
                 }
                 "s.show" -> {
                     val (id, on) = rest.trim().split(' ')
-                    main.post { synchronized(tiles) { tiles[id.toInt()] }?.show(on == "1") }
+                    main.post {
+                        synchronized(tiles) { tiles[id.toInt()] }?.show(on == "1")
+                        glass?.holesChanged()
+                    }
                 }
                 "s.destroy" -> rest.trim().toInt().let { id -> main.post { synchronized(tiles) { tiles.remove(id) }?.remove() } }
                 "s.reset" -> main.post { synchronized(tiles) { tiles.values.toList().also { tiles.clear() } }.forEach { it.remove() } }
@@ -199,6 +225,14 @@ class ShellNative(
         fun show(on: Boolean) {
             view.visibility = if (on) View.VISIBLE else View.INVISIBLE
         }
+
+        /** Where it shows (the window's px), if it does: the live glass leaves it unblurred ([GlassBlur.holes]). */
+        fun shownRect(): android.graphics.RectF? =
+            if (view.visibility != View.VISIBLE) {
+                null
+            } else {
+                android.graphics.RectF(view.x, view.y, view.x + view.layoutParams.width, view.y + view.layoutParams.height)
+            }
 
         fun remove() {
             ready = false

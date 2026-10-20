@@ -74,9 +74,9 @@
   --glass-brightness: 1.08;
   --glass-behind-tint: 66%;
 }
-.glass { --glass-tint: 32%; }
-.glass[data-light="true"] { --glass-tint: 40%; }
-.glass, .glass-behind { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+.glass, .glass-native { --glass-tint: 32%; }
+:is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }
+.glass, .glass-behind, .glass-native { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
 /* Where a glass surface is on the screen (ui/glass.ts), its own: not inherited, so setting one restyles one element. */
 @property --gx { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --gy { syntax: "<length>"; inherits: false; initial-value: 0px; }
@@ -118,6 +118,12 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   -webkit-backdrop-filter: none;
 }
 .glass :is(.tile, .notif-panel, .ai-screen) .tile { background: var(--soft-fill); }
+/*
+ * Live glass (ui/nativeglass.ts, html.glass-native): the display compositor blurs what's behind each surface (the
+ * wallpaper), the page only tints it - no picture, and no backdrop blur of its own.
+ */
+.glass-native :is(.tile, .notif-panel, .ai-screen) { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.glass-native :is(.tile, .notif-panel, .ai-screen) .tile { background: var(--soft-fill); }
 /*
  * Glass over what the host blurs behind the window (the shade's, the switcher's) or over an app (the assistant's
  * panel, which can't blur the app it circles on): the same surfaces, tinted only - --glass-behind-tint, more of it.

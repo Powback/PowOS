@@ -34,6 +34,11 @@ object HiddenApi {
             "Landroid/app/ActivityOptions",
             "Landroid/content/ContextWrapper",
             "Landroid/app/ActivityThread",
+            // The window blurs (shell/WindowBlur, shell/GlassBlur): a window's surface (View.getViewRootImpl,
+            // ViewRootImpl.getSurfaceControl) and its blur (Transaction.setBackgroundBlurRadius / setBlurRegions).
+            "Landroid/view/View;",
+            "Landroid/view/ViewRootImpl",
+            "Landroid/view/SurfaceControl",
         )
 
     @Volatile private var done = false

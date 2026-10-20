@@ -19,6 +19,8 @@
  */
 import { powos } from "../bridge.ts";
 import type { GlassSource } from "../types.ts";
+// Live glass (ui/nativeglass.ts): while the compositor blurs behind the surfaces, no frosted picture here.
+import { debug as nativeDebug, nativeGlass } from "./nativeglass.ts";
 
 const root = document.documentElement;
 /** Which page this is (index.html?mode=): home is over the wallpaper; the shade's window over an app; others neither. */
@@ -75,11 +77,12 @@ async function frost(url: string): Promise<string> {
 
 /** Frosts [source] for the screen as it is now, unless that's what's up already; no source: the plain fills. */
 function refrost(): Promise<void> {
-  const key = `${source}|${innerWidth}x${innerHeight}|${root.dataset.light ?? ""}`;
+  const live = nativeGlass.value;
+  const key = `${live ? "live" : source}|${innerWidth}x${innerHeight}|${root.dataset.light ?? ""}`;
   if (key === frostedFor) return busy ?? Promise.resolve();
   frostedFor = key;
   const run = (async () => {
-    if (!source) {
+    if (!source || live) {
       root.classList.remove("glass");
       root.style.removeProperty("--glass-image");
       return;
@@ -214,6 +217,7 @@ document.addEventListener(
   { capture: true, passive: true },
 );
 powos.on("system.glass", use);
+nativeGlass.subscribe(() => void refrost());
 powos.on("theme.changed", () => setTimeout(() => void refrost(), 0));
 powos.system.glass().then(use, () => use(null));
 
@@ -224,4 +228,6 @@ powos.system.glass().then(use, () => use(null));
     return frosted;
   },
   place,
+  /** The live glass (ui/nativeglass.ts): `__glass.live.native(false)` back to the picture on this page, its state. */
+  live: nativeDebug,
 };

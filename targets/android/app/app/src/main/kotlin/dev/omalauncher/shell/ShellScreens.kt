@@ -375,6 +375,7 @@ class ShellScreens(
         flag(Style.MONOCHROME_ICONS, "icons", "monochrome", "colored")
         flag(Style.THEMED_ICONS, "icon colors", "theme", "original")
         if (RootedGuest.enabled) flag(Style.SYSTEM_THEME, "system colors", "theme", "own")
+        flag(Style.LIVE_BLUR, "glass", "live blur", "still picture")
         return JSONObject()
             .put("current", current?.name ?: JSONObject.NULL)
             .put("themes", themes)
@@ -628,7 +629,7 @@ class ShellScreens(
 
         private const val LOG_LINES = 4
 
-        private val FLAGS = listOf(Style.MONOCHROME_ICONS, Style.THEMED_ICONS, Style.SYSTEM_THEME)
+        private val FLAGS = listOf(Style.MONOCHROME_ICONS, Style.THEMED_ICONS, Style.SYSTEM_THEME, Style.LIVE_BLUR)
 
         /** Bytes in [dir], without following symlinks (the rootfs is full of absolute guest links). */
         private fun diskUsage(dir: File): Long {

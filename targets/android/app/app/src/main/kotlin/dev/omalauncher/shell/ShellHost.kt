@@ -27,6 +27,8 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.net.URLDecoder
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * The web shell (the repo's shell/, see shell/DESIGN.md) in a WebView, for whatever shows it: the launcher
@@ -104,7 +106,16 @@ class ShellHost(
         web.loadUrl(mode?.let { "$page?mode=$it" } ?: page)
     }
 
+    /** The style's live-blur switch to the page's glass ([GlassBlur]), as it changes. */
+    private val styleWatch =
+        native.glass?.let { glass ->
+            kotlinx.coroutines.MainScope().also { scope ->
+                scope.launch { androidx.compose.runtime.snapshotFlow { runtime.style.style[dev.omalauncher.theme.Style.LIVE_BLUR] }.collect { glass.allow(it) } }
+            }
+        }
+
     fun destroy() {
+        styleWatch?.cancel()
         bootSerial++
         HotReload.remove(this)
         bridge.close()
