@@ -266,7 +266,8 @@ export function ask(text: string) {
   if (!t) return;
   chatting.value = true;
   query.value = "";
-  powos.ai.send(t);
+  // false: not into the app switcher - doing that briefly started the chat activity over home (a ~1 s black screen).
+  powos.ai.send(t, false);
 }
 
 export function setDocked(key: string, on: boolean) {
