@@ -197,8 +197,10 @@ do_password() {
 
 do_install() {
     powos_supports install-system || { not_yet "install-system"; return 0; }
-    w_yesno "This opens the interactive PowOS disk installer in a terminal.\n\nYou pick the target — nothing is wiped without an explicit choice and confirmation. Dual-boot alongside Windows is supported.\n\nOpen the installer now?" || return 0
-    run_in_terminal sudo powos install-system
+    w_yesno "This opens the guided PowOS installer (dialogs on the desktop).\n\nYou pick the target — nothing is wiped without an explicit choice and confirmation. Dual-boot alongside Windows is supported.\n\nOpen the installer now?" || return 0
+    # The guided wizard: dialogs on a desktop (kdialog), text on a console. It
+    # wraps install-system; the raw command stays for scripts and --dry-run.
+    run_in_terminal sudo powos install-wizard
 }
 
 do_games() {

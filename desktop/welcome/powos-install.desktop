@@ -2,8 +2,8 @@
 Type=Application
 Name=Install PowOS
 GenericName=System installer
-Comment=Install PowOS to an internal disk — interactive, dual-boot friendly; nothing is wiped without an explicit target and confirmation
-Exec=konsole -e sudo powos install-system
+Comment=Install PowOS to an internal disk — guided, with dialogs on the desktop; dual-boot friendly, nothing is wiped without an explicit target and confirmation
+Exec=konsole -e sudo powos install-wizard
 Icon=system-software-install
 Terminal=false
 Categories=System;
