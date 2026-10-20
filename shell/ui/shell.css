@@ -1184,6 +1184,8 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents .task:not(:first-child) { transform: translateX(calc((var(--rp) - 1) * 0.45 * var(--screen-w, 100vw))); opacity: var(--rp); }
 .recents .task:first-child .task-head, .recents .task-clear { opacity: var(--rp); }
 .recents.live .task:first-child .task-shot { visibility: hidden; }
+/* A swipe up over home has no app window growing into the first card: it rises and fades in with the finger too. */
+.recents.homeswipe .task:first-child .task-shot { opacity: var(--rp); transform: translateY(calc((1 - var(--rp)) * 10vh)) scale(calc(0.92 + 0.08 * var(--rp))); }
 .recents .task[aria-hidden] { visibility: hidden; }
 .recents.settling .recents-scrim,
 .recents.settling .task-row,

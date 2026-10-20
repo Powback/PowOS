@@ -542,7 +542,7 @@ export function Recents() {
   return (
     <div
       ref={el}
-      class={`recents ${p} ${p === "closed" ? "" : "open"} ${live.value ? "live" : ""} ${settling.value ? "settling" : ""} ${first != null ? "splitting" : ""}`}
+      class={`recents ${p} ${p === "closed" ? "" : "open"} ${live.value ? "live" : ""} ${settling.value ? "settling" : ""} ${first != null ? "splitting" : ""} ${p === "drag" && from.value == null ? "homeswipe" : ""}`}
       style={{ "--screen-ratio": `${w} / ${h}`, "--screen-ratio-n": String(w / h), "--screen-w": `${w}px`, "--screen-h": `${h}px` }}
       onClick={(e) => e.target === e.currentTarget && (first != null ? (splitFirst.value = null) : close())}
       onTransitionEnd={(e) => {

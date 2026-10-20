@@ -294,7 +294,8 @@ class NavGesture(
         // The same travel the app's window has to its card: the layer comes up at the speed the cards do over an app.
         homeProgress = (lift / (screen.height() * HOME_TRAVEL)).coerceIn(0f, 1f)
         homeDx = dx
-        homeness = home
+        // No home zone fade over home: home is what's under the cards already (it made them come and go mid-swipe).
+        homeness = 0f
         if (!homeFramePending) {
             homeFramePending = true
             android.view.Choreographer.getInstance().postFrameCallback(homeFrame)
@@ -424,7 +425,7 @@ class NavGesture(
     private companion object {
         const val TAG = "PowosNavGesture"
         /** Over home: the lift (a share of the screen height) that brings the switcher layer all the way up. */
-        const val HOME_TRAVEL = 0.3f
+        const val HOME_TRAVEL = 0.4f
         const val HOME_SETTLE_MS = 220L
         const val NAV_MODE_GESTURAL = 2
 
