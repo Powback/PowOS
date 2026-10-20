@@ -85,8 +85,11 @@ draws the wallpaper behind the window, so CSS `backdrop-filter` over the transpa
 live backdrop blur per tile is a render pass each, every frame. Instead the host hands over the wallpaper as a picture
 (`system.glass`, ShellWallpaper.kt: our theme's background, a still wallpaper, or - rooted - OxygenOS's screenshot of a
 live one), `ui/glass.ts` blurs it once (half size, canvas filter) and every surface draws that one frosted picture at
-its own place on the screen under the theme's tint (theme.css `--glass-*`). Headless, 4x CPU throttle, swiping pages
-and the drawer: plain fills 21.3 ms mean / 37.6 ms p95, glass 19.2 / 33.4, live `backdrop-filter` per tile 31.8 / 50.0.
+its own place on the screen under the theme's tint (theme.css `--glass-*`); positions are placed again only once
+things stop moving (a per-frame placement cost a second style pass per frame of the drawer's swipe). Measured: headless,
+4x CPU throttle, page swipes + drawer: plain fills 21.3 ms mean / 37.6 ms p95, glass 19.2 / 33.4, live
+`backdrop-filter` per tile 31.8 / 50.0. On the phone (OnePlus Open, 60 Hz, scripted over CDP): page swipes 0-2 late
+frames of 165 either way; the drawer 2-5 late of 46 with glass, 2-4 plain; live backdrop blur doubled the late frames.
 The shade's window is over an app: the host blurs behind it (WindowBlur), its page only tints. PowOS AI's page is a
 calm dark tint, no glass.
 

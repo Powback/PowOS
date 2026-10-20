@@ -141,18 +141,13 @@ function where(el: HTMLElement): [number, number] | null {
 }
 
 const placed = new WeakMap<HTMLElement, string>();
-const sized = new ResizeObserver(() => schedule());
-const watched = new Set<HTMLElement>();
 
 /** Every glass surface told where it is (only those that moved get new values: a style change is a restyle). */
 function place() {
   pending = false;
   if (!root.classList.contains("glass")) return;
-  const now = new Set<HTMLElement>();
   for (const el of document.querySelectorAll<HTMLElement>(SURFACES)) {
     if (el.closest(SOLID)) continue;
-    now.add(el);
-    if (!watched.has(el) && !el.hasAttribute("data-p")) sized.observe(el);
     const at = where(el);
     if (!at) continue;
     const b = innerHeight - (at[1] + el.offsetHeight);
@@ -163,22 +158,31 @@ function place() {
     el.style.setProperty("--gy", `${at[1]}px`);
     el.style.setProperty("--gb", `${b}px`);
   }
-  for (const el of watched) if (!now.has(el)) sized.unobserve(el);
-  watched.clear();
-  for (const el of now) watched.add(el);
-}
-
-let pending = false;
-function schedule() {
-  if (pending) return;
-  pending = true;
-  requestAnimationFrame(place);
 }
 
 /**
- * Surfaces come and go, and move (edit mode, a widget resized, the drawer's list): placed again on the next frame.
- * Not for what changes every frame of a swipe on its own - the openness (--p, --q) and the pages' track - which
- * moves nothing's layout.
+ * Placed once things have stopped moving (SETTLE_MS without a change), in a frame of its own: during a swipe home
+ * re-renders its tiles every frame (their style written again), and placing them each time read their layout mid-frame
+ * - a second style pass per frame, measured: a dropped frame in eight of the drawer's swipe. A surface's glass moves
+ * with it until then, as on a page swipe.
+ */
+const SETTLE_MS = 120;
+let pending = false;
+let settleTimer = 0;
+function schedule() {
+  clearTimeout(settleTimer);
+  settleTimer = window.setTimeout(() => {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(place);
+  }, SETTLE_MS);
+}
+
+/**
+ * Surfaces come and go, and move (edit mode, a widget resized, the launcher settling open or shut): placed again on
+ * the next frame. Not for what changes every frame of a swipe on its own - the openness (--p, --q), the pages' track,
+ * the dock folding under the launcher: a surface it moves (the bar) is placed again when the swipe settles. No
+ * ResizeObserver either: it fired every frame of the drawer's swipe (the dock's height).
  */
 new MutationObserver((records) => {
   if (!root.classList.contains("glass")) return;
