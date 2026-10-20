@@ -338,8 +338,9 @@ function joins(items: HomeItem[]): Map<string, Record<string, number>> {
  * A page's glass (theme.css, ui/glass.ts): ONE frosted wallpaper layer per page, under its tiles, showing only through
  * their faces (a mask of the faces' rounded boxes, made when the page's tiles change - never per frame). The layer is
  * moved the other way as the pages slide (gesture.ts applyTrack, the same transition as the track's), so on the
- * compositor it stays where the wallpaper is while the tiles slide over it. Only the page on screen and those beside it
- * have one.
+ * compositor it stays where the wallpaper is while the tiles slide over it. Every page has its own, always: one mounted
+ * as its page came near (going home moves home to its first page) had no picture for a frame or two - a blank
+ * flash as home showed.
  */
 const textured = (i: HomeItem) => boxed(i) || i.kind === "folder";
 
@@ -377,7 +378,7 @@ function PageGlass({ items, joined, index }: { items: HomeItem[]; joined: Map<st
   if (!mask) return null;
   const g = geometry.peek();
   // Where applyTrack puts it at rest, from the start (a transition from nowhere would slide it in).
-  const transform = `translateX(calc(${Math.max(page.value, 0) - index} * 100%))`;
+  const transform = `translateX(calc(${Math.max(page.value, 0) - index - (page.value === -1 ? 1 : 0)} * 100%))`;
   return (
     <div class="page-glass" style={mask}>
       <div class="page-glass-img" style={{ "--pg-left": `${g.left}px`, "--pg-top": `${g.top}px`, transform }} />
@@ -659,7 +660,7 @@ export function Pages() {
               const joined = joins(on);
               return (
                 <>
-                  {Math.abs(i - page.value) <= 1 && <PageGlass items={on} joined={joined} index={i} />}
+                  <PageGlass items={on} joined={joined} index={i} />
                   {on.map((item) => (
                     <Tile key={item.key} item={item} join={joined.get(item.key)} />
                   ))}
