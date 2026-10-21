@@ -107,4 +107,14 @@ class SpeechDictationTest {
         d.partial("second")
         assertEquals("first part second", d.text)
     }
+
+    /** A GPU dictation's fallback after the release: its recording ended, so the recognizer doesn't listen again. */
+    @Test
+    fun anEndedRecordingEndsTheDictationEvenHeld() {
+        val d = dictation(hold = true)
+        assertTrue(d.goOn(feedDone = false))
+        assertFalse(d.goOn(feedDone = true))
+        d.stopping = true
+        assertFalse(d.goOn(feedDone = false))
+    }
 }

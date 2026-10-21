@@ -657,7 +657,7 @@ internal object NativeSpeech {
          * restart's few hundred ms of audio.
          */
         fun next(p: Plan) {
-            if (!d.goOn()) return end(null)
+            if (!d.goOn(feedDone = feed?.done == true)) return end(null)
             // A recognizer that ends a segment the moment it starts (no mic, nothing to hear) mustn't spin.
             if (SystemClock.elapsedRealtime() - attemptAt < 500) main.postDelayed({ listen(p) }, 300) else listen(p)
         }
@@ -870,8 +870,11 @@ internal class Dictation(
         if (t.isNotBlank()) voice()
     }
 
-    /** At the end of a segment: listen on? */
-    fun goOn() = !stopping && (hold || clock() - lastVoice < silenceMs)
+    /**
+     * At the end of a segment: listen on? Never when its audio is PowOS's recording and that has ended ([feedDone]: a
+     * GPU dictation's fallback after the release) - a new listen would read an ended pipe, error, and restart, over and over.
+     */
+    fun goOn(feedDone: Boolean = false) = !feedDone && !stopping && (hold || clock() - lastVoice < silenceMs)
 
     /** A tap's dictation has been quiet long enough to end (checked while listening). */
     fun silent() = !hold && !stopping && clock() - lastVoice >= silenceMs

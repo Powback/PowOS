@@ -281,6 +281,8 @@ class ShellBridge(
             "speech.quiet" -> speech.quiet(a.optLong(0, 1500))
             "speech.warm" -> speech.warm()
             "speech.cancel" -> speech.cancel()
+            // Tests with recorded audio instead of the mic (GpuSpeech.kt SpeechEngines.test): logged, nothing reaches a page.
+            "speech.test" -> dev.omalauncher.ui.SpeechEngines.test(context, a.getString(0), a.optString(1, "gpu"))
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)
             "system.insets" -> lastInsets
