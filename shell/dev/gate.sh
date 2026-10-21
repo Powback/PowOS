@@ -19,6 +19,13 @@
 #      (default 8000) fails it. Then the idle check: settled, a page draws nothing - no requestAnimationFrame, no layer
 #      paint, no endless animation for IDLE_MS (default 2000; IDLE_MS=0 skips it).
 #   --app APPDIR (apps/<app>): also every page/widget entry of that app's built UI (out/ui), imported as the shell does.
+#   3. the widgets (dev/preview.sh --fast): every widget at every size it allows, minSize to 4x4, on both screens'
+#      cells, checked for fit - clipped text, a row cut in half, a side >12% empty, content covering <25% of the tile,
+#      a tile that scrolls, a hard border; a widget's screen across the screen, its backdrop hiding what's behind.
+#      A problem not in dev/preview/baseline.json fails it, with the widget and the size. Runs when the push brings
+#      what draws widgets (ui/owl.tsx, island.tsx, grid.tsx, the panels, theme.css, shell.css, apps/stdb.ts,
+#      dev/preview/), for --app (that app's widgets), with --widgets, or GATE_WIDGETS=1; GATE_WIDGETS=0 skips it.
+#      ~1-2 min.
 #   --shots DIR [--wallpaper FILE]: after the pages boot, every surface rendered at the phone's two screens into DIR
 #      (dev/shots.mjs: PNGs + report.json with each text's measured contrast) - design QA's renders, never a pass/fail.
 #      SHOTS_THEME / SHOTS_ONLY pass through.
@@ -27,7 +34,7 @@
 set -euo pipefail
 SHELL_DIR=$(cd "$(dirname "$0")/.." && pwd)
 IMAGE=${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}
-base=head dir="" installed="" overrides="" app="" shots="" wallpaper="" files=()
+base=head dir="" installed="" overrides="" app="" shots="" wallpaper="" widgets=${GATE_WIDGETS:-} files=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --tree) base=tree; shift ;;
@@ -40,7 +47,8 @@ while [ $# -gt 0 ]; do
     --app) app=$(cd "$2" && pwd); shift 2 ;;
     --shots) mkdir -p "$2"; shots=$(cd "$2" && pwd); shift 2 ;;
     --wallpaper) wallpaper=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
-    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+    --widgets) widgets=1; shift ;;
+    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
     *) files+=("$1"); shift ;;
   esac
 done
@@ -118,6 +126,27 @@ docker run --rm --platform linux/arm64 --shm-size 512m "${mounts[@]}" -e READY_M
 rc=$?
 set -e
 [ $rc -eq 0 ] || fail=1
+# 2b. The widgets' fit (dev/preview.sh): when this push brings what draws them, or asked.
+if [ -z "$widgets" ]; then
+  for f in ${files[@]+"${files[@]}"}; do
+    case $f in ui/owl.tsx|ui/island.tsx|ui/grid.tsx|ui/agents.tsx|ui/recentwidget.tsx|theme.css|ui/shell.css|apps/stdb.ts|dev/preview/*) widgets=1 ;; esac
+  done
+  [ -n "$app" ] && widgets=1
+fi
+if [ "$widgets" = 1 ]; then
+  wargs=(--dir "$S" --fast --out "$work/widgets")
+  if [ -n "$app" ]; then
+    wargs+=(--app "$app")
+    # An app's UI alone (apps/install.sh): its widgets, not every widget there is.
+    [ "${GATE_SHELL_PAGES:-1}" = 0 ] && wargs+=(--only "^$(sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$app/powos-app.json" | head -1 | sed 's/\./\\./g')\\.")
+  fi
+  set +e
+  "$SHELL_DIR/dev/preview.sh" "${wargs[@]}" > "$work/widgets.log" 2>&1
+  wrc=$?
+  set -e
+  grep -E "^(FAIL|known|       |preview:|     owl)" "$work/widgets.log" | sed 's/^FAIL /FAIL widget /' | head -80
+  [ $wrc = 0 ] || fail=1
+fi
 # 3. Design QA's renders (not a check: they're looked at).
 if [ -n "$shots" ]; then
   smounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/shots.mjs:/usr/src/app/shots.mjs:ro" -v "$shots:/out")

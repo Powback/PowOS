@@ -456,7 +456,9 @@ try {
       // Known problems (the gate's baseline, dev/preview/baseline.json): listed, not failed - a new one fails.
       const known = fs.existsSync(path.join(ROOT, "dev/preview/baseline.json")) && process.env.PREVIEW_BASELINE !== "0" ? JSON.parse(fs.readFileSync(path.join(ROOT, "dev/preview/baseline.json"), "utf8")) : {};
       // Compared without the theme and the exact amounts (a percentage moves with a font's metrics).
-      const norm = (p) => p.replace(/ \((gruvbox|nord|[a-z-]+)\)/, "").replace(/\d+(\.\d+)?%/g, "N%").replace(/detail [\d.]+/, "detail N");
+      // Quoted text without its digits too (a clock's "09:18").
+      const norm = (p) =>
+        p.replace(/ \((gruvbox|nord|[a-z-]+)\)/, "").replace(/\d+(\.\d+)?%/g, "N%").replace(/detail [\d.]+/, "detail N").replace(/"[^"]*"/g, (q) => q.replace(/\d/g, "N"));
       const baseline = {};
       for (const [id, problems] of lines) {
         const old = new Set(known[id] ?? []);
