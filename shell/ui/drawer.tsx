@@ -1,7 +1,7 @@
 /**
  * The drawer: every app A to Z in one grid, no headings or breaks between letters, with an A-Z bar to tap or slide along
- * (as PowOS's start menu), and under it, by the search pill (thumb reach), a fixed row of the apps opened lately - the
- * bar's "#". Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
+ * (as PowOS's start menu; its "#", for names that don't start with a letter, only when there are any), and under it, by
+ * the search pill (thumb reach), a fixed row of the apps opened lately. Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
  * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
 import { useRef, useState } from "preact/hooks";
@@ -70,20 +70,23 @@ function RecentRow() {
 
 /** Tap a letter or slide along the bar: the list jumps there at once, every letter the finger crosses. */
 function LetterBar({ onPick }: { onPick: (letter: string) => void }) {
+  // "#" only when some name doesn't start with a letter: a "#" with nothing under it would do nothing.
+  const letters = sorted.value.first.has("#") ? ALPHABET : ALPHABET.slice(1);
   const [current, setCurrent] = useState<string | null>(null);
   const bar = useRef<HTMLDivElement>(null);
   const pick = (y: number) => {
     const r = bar.current!.getBoundingClientRect();
-    const i = Math.max(0, Math.min(ALPHABET.length - 1, Math.floor(((y - r.top) / r.height) * ALPHABET.length)));
-    if (ALPHABET[i] === current) return;
-    setCurrent(ALPHABET[i]);
+    const i = Math.max(0, Math.min(letters.length - 1, Math.floor(((y - r.top) / r.height) * letters.length)));
+    if (letters[i] === current) return;
+    setCurrent(letters[i]);
     navigator.vibrate?.(5);
-    onPick(ALPHABET[i]);
+    onPick(letters[i]);
   };
   return (
     <div
       class="letter-bar"
       ref={bar}
+      style={{ "--letters": letters.length }}
       onPointerDown={(e) => {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         e.stopPropagation();
@@ -93,7 +96,7 @@ function LetterBar({ onPick }: { onPick: (letter: string) => void }) {
       onPointerUp={() => setCurrent(null)}
       onPointerCancel={() => setCurrent(null)}
     >
-      {ALPHABET.map((l) => (
+      {letters.map((l) => (
         <span class={l === current ? "on" : ""}>{l}</span>
       ))}
       {current && <div class="letter-bubble">{current}</div>}
@@ -106,7 +109,6 @@ export function Drawer() {
   const jump = (letter: string) => {
     // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
     // letter a sliding finger crosses lagged behind it.
-    if (letter === "#") return; // The recent row: always in view, under the list.
     const { first } = sorted.value;
     const i = ALPHABET.indexOf(letter);
     const l = ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x));

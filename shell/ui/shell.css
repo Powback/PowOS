@@ -357,7 +357,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   flex-direction: column;
   align-items: center;
   max-height: 100%;
-  height: calc(27 * 18px);
+  height: calc(var(--letters, 27) * 18px);
   touch-action: none;
 }
 .letter-bar span {
