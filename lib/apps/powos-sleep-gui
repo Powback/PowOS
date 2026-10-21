@@ -13,7 +13,8 @@ by powos-sleepd (root) - unless:
   - it's a game Steam started (games don't sleep yet).
 On the phone "focus" also needs PowOS on screen: the PowOS app showing the desktop or one of its window tasks (the
 display daemon's consumers, read from its log - HACK, see Screen). Off screen (Android's home, another app, the
-screen off) no window has focus.
+screen off) no window has focus. The desktop shell (plasmashell) itself sleeps while PowOS is off screen
+(DESKTOP_IDLE), that process alone, and wakes when PowOS is back, on D-Bus to it, and briefly every 5 minutes.
 
 Apps with a unit of their own (/etc/powos/units.d/<id>.json with "windowClass") get their unit's rule:
   "windowClass": ["steam"]                     its windows (resource class)
@@ -59,6 +60,13 @@ SOCK = f"{common.STATE_DIR}/sleepd.sock"
 IDLE = common.seconds(os.environ.get("POWOS_SLEEP_GUI_IDLE", "10m"))
 GRACE = 60  # woken by D-Bus but still unfocused: asleep again after this
 SAMPLE = 5  # seconds of CPU/IO measured before freezing
+# The desktop shell (plasmashell) while PowOS is off screen (phone): frozen this long after PowOS went off screen
+# ("off": never), thawed the moment it's back, and for DESKTOP_DRAIN s every DESKTOP_AWAKE s meanwhile - long enough
+# to read what KWin sent it (a Wayland client that never reads its socket is disconnected once the buffer fills).
+# Measured 2026-10-21: plasmashell 1.5-2.7% of a core with Android's home on screen and the desktop unseen.
+DESKTOP_IDLE = os.environ.get("POWOS_SLEEP_DESKTOP_IDLE", "15s")
+DESKTOP_AWAKE = 300
+DESKTOP_DRAIN = 2
 IO_MAX = 256 << 10  # bytes/s
 CPU_MAX = 20  # % of a core
 CLK = os.sysconf("SC_CLK_TCK")
@@ -339,6 +347,8 @@ class Gui(dbus.service.Object):
         self.monitor = None
         self.active = None
         self.units, self.units_mtime = [], None
+        self.desk = None  # the desktop shell's pid while frozen (also in self.frozen, for D-Bus to wake it)
+        self.desk_timer = None
         self.screen = Screen(SCREEN_LOG, self.screen_changed)
 
     # the apps' units --------------------------------------------------------
@@ -430,6 +440,11 @@ class Gui(dbus.service.Object):
     def woken(self, pids):
         """powos-sleepd thawed these for someone else (`powos sleep wake`): awake here too, asleep again when idle."""
         for pid in pids:
+            if int(pid) == self.desk:
+                self.desk = None
+                self.frozen.pop(int(pid), None)
+                self.desktop(self.screen.on)
+                continue
             if self.frozen.pop(int(pid), None) is not None:
                 log(f"{self.cls(int(pid))} ({pid}): woken through powos-sleepd")
                 if not self.pid_active(int(pid)):
@@ -450,6 +465,50 @@ class Gui(dbus.service.Object):
                 self.idle_since[pid] = now
         self.update_active()
         self.schedule()
+        self.desktop(on)
+
+    # the desktop shell off screen -------------------------------------------
+    def desktop(self, on):
+        """PowOS on screen: the desktop shell awake at once. Off: frozen after DESKTOP_IDLE (phone only)."""
+        if self.desk_timer:
+            GLib.source_remove(self.desk_timer)
+            self.desk_timer = None
+        if on or not self.screen.known:
+            if self.desk is not None:
+                self.thaw(self.desk, "PowOS on screen")
+            return
+        if DESKTOP_IDLE != "off":
+            self.desk_timer = GLib.timeout_add(int(common.seconds(DESKTOP_IDLE) * 1000), self.desktop_sleep)
+
+    def desktop_sleep(self):
+        self.desk_timer = None
+        if self.screen.on or self.desk is not None:
+            return False
+        me = os.getuid()
+        pid = next((int(p) for p in os.listdir("/proc") if p.isdigit() and (stat(p) or {}).get("comm") == "plasmashell"
+                    and os.stat(f"/proc/{p}").st_uid == me), None)
+        if pid is None:
+            return False
+        r = self.sleepd.ask(f"gui-desktop-freeze {pid}")
+        if not r.get("ok"):
+            log(f"desktop shell ({pid}): not frozen: {r.get('refused') or r.get('error')}")
+            return False
+        self.desk = pid
+        self.frozen[pid] = {"cls": "plasmashell", "names": self.bus_names({pid}), "cpu": None, "pids": {pid}}
+        log(f"desktop shell ({pid}): frozen in {r.get('ms')} ms (PowOS off screen), "
+            f"thaws on screen or on D-Bus to {', '.join(self.frozen[pid]['names']) or '-'}")
+        self.rebuild_monitor()
+        # Awake for a moment every few minutes: it reads what KWin queued for it (title changes, ...).
+        self.desk_timer = GLib.timeout_add_seconds(DESKTOP_AWAKE, self.desktop_drain)
+        return False
+
+    def desktop_drain(self):
+        self.desk_timer = None
+        if self.desk is not None:
+            self.thaw(self.desk, "draining its socket")
+        if not self.screen.on:
+            self.desk_timer = GLib.timeout_add_seconds(DESKTOP_DRAIN, self.desktop_sleep)
+        return False
 
     def update_active(self):
         # Which app has focus, for powos-sleepd's own check (it never freezes that one); 0 = none of ours.
@@ -466,7 +525,9 @@ class Gui(dbus.service.Object):
     def reset(self):
         log(f"powos-sleepd reconnected: {len(self.frozen)} app(s) it had thawed, counting from now")
         self.frozen.clear()
+        self.desk = None
         self.rebuild_monitor()
+        self.desktop(self.screen.on)
         now = time.time()
         for pid in self.idle_since:
             self.idle_since[pid] = now
@@ -587,6 +648,8 @@ class Gui(dbus.service.Object):
         self.rebuild_monitor()
 
     def thaw(self, pid, why):
+        if pid == self.desk:
+            self.desk = None
         f = self.frozen.pop(pid, None)
         t = time.monotonic()
         r = self.sleepd.ask(f"gui-thaw {pid} {why}")
@@ -640,6 +703,13 @@ class Gui(dbus.service.Object):
         self.monitor = m
 
     def dbus_wake(self, pid, why):
+        if pid in self.frozen and pid == self.desk:
+            # The desktop shell: awake while it answers, asleep again a minute later if PowOS is still off screen.
+            self.thaw(pid, why)
+            if self.desk_timer:
+                GLib.source_remove(self.desk_timer)
+            self.desk_timer = GLib.timeout_add_seconds(GRACE, self.desktop_sleep)
+            return False
         if pid in self.frozen:
             self.thaw(pid, why)
             self.idle_since[pid] = time.time() - IDLE + GRACE
