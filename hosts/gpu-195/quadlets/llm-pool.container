@@ -1,0 +1,35 @@
+# gpu-195: the general LLM pool on GPU1 - llama-swap (:9292, http://llm-gpu.pow) starting vLLM per model on demand:
+# general (Qwen3-14B-AWQ), vision (Qwen2.5-VL-7B-AWQ), embed (bge-m3). Idle 10 min = unloaded, so an idle GPU1
+# holds only stt-batch. Never GPU0: that's the realtime voice path's (docs/GPU-SERVERS-PLAN.md).
+# CPU: 3 CPUs at cpu-shares 256 (cpu.weight ~10 vs the voice units' 100), so under contention the voice path wins.
+# Memory 28g: a loading vLLM holds a model's weights in host RAM on the way to the GPU, up to two of them at once.
+# Image: hosts/gpu-195/llm-pool/Containerfile; config: hosts/gpu-195/llm-pool/config.yaml.
+# Unit: powos units show llm-pool  (repo units/gpu-195/llm-pool.json)
+[Unit]
+Description=PowOS general LLM pool (llama-swap + vLLM, GPU1) - llm-gpu.pow
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=llm-pool
+Image=localhost/llm-pool:latest
+PublishPort=9292:8080
+AddDevice=nvidia.com/gpu=1
+SecurityLabelDisable=true
+ShmSize=8g
+# The directory, not the file: install(1) replaces config.yaml with a new inode, which a file bind would never see.
+Volume=%h/.config/llm-pool:/etc/llama-swap:ro
+Volume=/var/lib/powos/models/hf:/root/.cache/huggingface
+Volume=/var/lib/powos/models/vllm:/root/.cache/vllm
+Environment=HF_HUB_OFFLINE=1
+Environment=VLLM_NO_USAGE_STATS=1
+Label=io.powos.unit=llm-pool
+PodmanArgs=--memory=28g --memory-swap=28g --cpus=3 --cpu-shares=256 --pids-limit=8192
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

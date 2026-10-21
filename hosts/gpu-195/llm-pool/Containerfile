@@ -1,0 +1,20 @@
+# gpu-195 general LLM pool image: llama-swap in front of vLLM, in one container on GPU1.
+# llama-swap starts a model's `vllm serve` as a child process on first request and stops it after its TTL, so the
+# pool's models share GPU1 one (plus the small embedder) at a time. Both come from here, not from the host: the vLLM
+# image the voice path already runs (pinned by digest, so a pull for voice-llm can't change the pool under us) plus
+# the llama-swap release binary (pinned version + sha256).
+# Built by hosts/gpu-195/install.sh as localhost/llm-pool:latest. Config: hosts/gpu-195/llm-pool/config.yaml.
+FROM docker.io/vllm/vllm-openai@sha256:6ee133356d49ed24cee03dd0cda3d3980279a11c107ce3e752c89e76540f41c9
+
+ARG LLAMA_SWAP_VERSION=265
+ARG LLAMA_SWAP_SHA256=cb1f9a94be05afa129d3c17868f1dd2ca710b919333c7b868239dc31575dcfa1
+RUN set -eu; \
+    curl -fsSL -o /tmp/ls.tgz \
+      "https://github.com/mostlygeek/llama-swap/releases/download/v${LLAMA_SWAP_VERSION}/llama-swap_${LLAMA_SWAP_VERSION}_linux_amd64.tar.gz"; \
+    echo "${LLAMA_SWAP_SHA256}  /tmp/ls.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/ls.tgz -C /usr/local/bin llama-swap; \
+    rm /tmp/ls.tgz; \
+    llama-swap -version
+
+EXPOSE 8080
+ENTRYPOINT ["llama-swap", "-config", "/etc/llama-swap/config.yaml", "-listen", ":8080", "-watch-config"]

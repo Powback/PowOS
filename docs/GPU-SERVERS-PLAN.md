@@ -2,7 +2,8 @@
 
 PowOS now has real GPU servers on the LAN. This is how inference (voice, LLMs, everything AI) is laid out across
 them, how it's run and managed, and the order to build it in. Status: **phases 1-3 built on `.195` (2026-10-21), see
-[Status](#status-2026-10-21); phases 4-6 not started**.
+[Status](#status-2026-10-21); phase 4 started: the GPU1 pool is live at `llm-gpu.pow`, the router (`llm.pow`) and
+`.58` are not done; phases 5-6 not started**.
 
 ## What we have
 
@@ -63,7 +64,8 @@ Target: end of speech -> first audio in **< 800 ms** (STT ~150 ms, first token ~
   - `general`: Qwen3-14B-AWQ (agents, summaries, tools).
   - `vision`: Qwen2.5-VL-7B (screenshots from PowOS AI's assistant).
   - `embed`: bge-m3 for recall/RAG (small, can co-reside).
-- Ollama (:11434) stays for quick model trials, on the same GPU under the same VRAM gate.
+- Ollama (:11434) stays for quick model trials, on the same GPU under the same VRAM gate. (Not deployed on `.195`
+  yet: the pool covers the named models, and Ollama would need its own share of GPU1's budget.)
 - Batch jobs (transcribing meetings, embeddings, image gen later) queue here, never on GPU0.
 
 ### `.58` RTX 5090: big models (as today, cleaned up)
@@ -295,8 +297,68 @@ Behaviour checks (`voice-bench.py bargein|merge|wake`), all passing:
 What's left: the first TTS chunk is one WAV per sentence (~105 ms). A streamed or clause-sized first chunk would save
 ~50 ms, but the web client decodes whole WAVs.
 
+**General LLM pool on GPU1** (2026-10-21, phase 4's "GPU1 llama-swap profiles"): unit `llm-pool`, one rootless
+quadlet (`hosts/gpu-195/quadlets/llm-pool.container`) running llama-swap v265 on :9292. llama-swap starts `vllm serve`
+per model as a child process on the first request and stops it after 10 idle minutes.
+- The image `localhost/llm-pool` (`hosts/gpu-195/llm-pool/Containerfile`) is voice-llm's vLLM image, pinned by
+  digest, plus the llama-swap release binary, pinned by version and sha256. Nothing is installed on the host.
+- Config: `hosts/gpu-195/llm-pool/config.yaml` goes to `~/.config/llm-pool/`. The directory is mounted, not the file:
+  `install` writes a new inode, which a file bind never sees. `-watch-config` reloads it, and a reload unloads
+  whatever is running.
+- Served as `http://llm-gpu.pow` by Traefik on `.100` (PowStation `config/traefik/dynamic/llm-gpu.yml`, 16 requests in
+  flight per client IP; Pi-hole `dns.hosts`). LAN and VPN only, no auth, like stt.pow.
+- Limits: 28g RAM, 3 CPUs at cpu-shares 256 (the voice units have 4 CPUs at the default 1024), pids 8192, GPU1 only.
+  llama-swap answers 429 past 32 requests at once.
+
+| model name | what | VRAM | status |
+|---|---|---|---|
+| `general` | `Qwen/Qwen3-14B-AWQ` (awq_marlin), 32k context, 32 seqs, hermes tool calls, thinking on (`reasoning_content` separate, `--reasoning-parser qwen3`) | 0.70 = 16.5 GiB (9.4 weights, 5.3 KV = 35k tokens) | verified |
+| `general-nothink` | the same loaded model with `chat_template_kwargs.enable_thinking=false` (a llama-swap alias, no second load) | - | verified |
+| `vision` | `Qwen/Qwen2.5-VL-7B-Instruct-AWQ`, 16k, up to 4 images | 0.70 | configured, not yet loaded |
+| `embed` | `BAAI/bge-m3` (`--runner pooling`), 8k | 0.10 = 2.4 GiB | configured, not yet loaded |
+
+The routing is a llama-swap matrix: `general & embed` or `vision & embed`, never general with vision. GPU1's
+budget: stt-batch 2.4 + embed 2.4 + one big model 16.5 = 21.3 of 24 GiB. Measured with `general` loaded: GPU1 at
+19.4 GiB. vLLM's `--gpu-memory-utilization` is a share of the whole card, checked against what is free when it
+starts, which is why the shares have to add up with stt-batch's.
+
+Measured with `hosts/gpu-195/bench/llm-bench.py` (stdlib only, run on the box):
+
+| | |
+|---|---|
+| cold start `general` (load, compile, first answer) | 81 s the first time (36 s of it torch.compile); 39.5 s once the compile cache in `/var/lib/powos/models/vllm` is warm |
+| first token, warm | 32 ms thinking off, 56 ms thinking on (median of 3; that's to the first reasoning token) |
+| decode, one stream | **83 tok/s** |
+| decode, 4 streams | **~297 tok/s** aggregate, 82 tok/s each |
+| tool call (`get_weather`, thinking off) | returns `tool_calls` with `{"city": "Oslo"}`, 0.34 s |
+| GPU1 during 4 streams | 100%, 280-308 W |
+
+Voice path (`voice-bench.py ws`, n=10, median end of speech -> first audio byte):
+
+| | final transcript | first LLM token | first audio |
+|---|---|---|---|
+| before (no pool) | 409 ms | 498 ms | **640 ms** |
+| pool running 4 streams on GPU1 the whole time | 421 ms | 517 ms | **665 ms** |
+
+The voice turn is about 25 ms slower while GPU1 is busy, probably CPU contention (the box has 8 cores; GPU0 is
+untouched). It stays well under the 800 ms target. stt-batch kept answering `/health` throughout (stt.pow).
+
+Noise: a 3090 under the pool's full load runs at 100%, ~300 W, with its fan near 100%. The cards are ASUS blowers
+(subsystem 1043:87B3). The user stopped the load test because the box was loud.
+- Idle, they still run their fans at 56-77% at P8 (GPU0 36 W at 58 °C, with the voice path and the desktop on it;
+  GPU1 22 W at 50 °C). That is the vBIOS fan curve.
+- Setting a power cap or the fan speed needs root. Proposed for the user:
+  - `sudo nvidia-smi -i 0,1 -pl 250`, a cap for load noise, made persistent as a oneshot unit. Decode is
+    memory-bound, so it should cost only a few percent.
+  - An NVML fan floor, which needs root and is riskier.
+
 **Left for later:**
 - The public `voiceagent.powback.com`. `/ws` has no auth of its own on the upgrade, so it can't take the Authelia
   WebSocket bypass, and behind forwardAuth it hangs. Decide this with the phase 5 clients.
-- Phase 4 (router / `llm.pow`): the `litellm` provider is configured, but nothing answers.
+- Phase 4 still to do:
+  - Load and measure `vision` and `embed` (configured; the load test stopped before them).
+  - The router: LiteLLM as `llm.pow` on Colima, with `general`/`vision`/`embed` mapped to `llm-gpu.pow`, `voice-fast`
+    to `.195:8100` and `coder-32b` to `.58`. VoiceAgent's `litellm` provider is configured, but nothing answers yet.
+  - `.58`: the `run-vllm-32b.sh` continuation bug, and `coder-32b` behind its llama-swap, with a fallback to
+    `general` when `.58` is off.
 - Phases 5-6.

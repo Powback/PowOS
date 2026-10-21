@@ -46,5 +46,5 @@
       "localhost/voice-stt-fast:latest (voice-stt's image)"
     ]
   },
-  "vramNote": "GPU1 is the general pool (docs/GPU-SERVERS-PLAN.md); this resident ~2 GB is the only thing on it so far. Off GPU0 on purpose: the voice path never waits behind a file"
+  "vramNote": "GPU1 is the general pool (docs/GPU-SERVERS-PLAN.md): this resident 2.4 GiB plus llm-pool's on-demand models (19.2 GiB budget). Off GPU0 on purpose: the voice path never waits behind a file"
 }

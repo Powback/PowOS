@@ -5,12 +5,12 @@
   "host": "desktop",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:voice",
-  "purpose": "the box's one model store on the NVMe: /var/lib/powos/models/hf = the HF cache shared by vLLM and faster-whisper (and the VoiceAgent backend's sentence-transformers/speechbrain), torch = torch.hub (Silero VAD), vllm = vLLM's compile cache. One copy of each model. Ollama's own dir joins it in phase 4",
+  "purpose": "the box's one model store on the NVMe: /var/lib/powos/models/hf = the HF cache shared by vLLM and faster-whisper (and the VoiceAgent backend's sentence-transformers/speechbrain), torch = torch.hub (Silero VAD), vllm = vLLM's compile cache. One copy of each model; its users are voice-*, stt-batch and llm-pool",
   "files": [
     "/var/lib/powos/models"
   ],
   "sizeBudget": "500g",
-  "sizeMeasured": "8.2 GiB (2026-10-21)",
+  "sizeMeasured": "31 GiB (2026-10-21, with llm-pool's Qwen3-14B-AWQ, Qwen2.5-VL-7B-Instruct-AWQ, bge-m3)",
   "unbounded": "files only; budget is sizeBudget (du -sh /var/lib/powos/models)",
   "remove": {
     "stop": [],
