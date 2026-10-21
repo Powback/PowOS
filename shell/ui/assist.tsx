@@ -1,8 +1,9 @@
 /**
  * PowOS AI over another app (index.html?mode=assist; PowosAssistSession, the phone's digital assistant: holding the
  * power button). A panel at the bottom: the screen it was opened over (a thumbnail), the question - typed, or the mic
- * (hold to talk and send, tap to dictate) - and PowOS AI's answer as it comes. What's asked goes with the screen's text,
- * so "what's this?" means the screen. A tap above the panel puts it away.
+ * (hold to talk and send, tap to dictate) - and, once asked, the one chat (assistant.ts: the pill's conversation and
+ * its ChatView, asks through askQueued - not a chat of its own). What's asked goes with the screen's text, so "what's
+ * this?" means the screen. A tap above the panel puts it away.
  *
  * Summoned (the side button), it listens at once and sends by itself: what's said goes into the field, and when it ends
  * - the side button let go when it was held (PowerKey reads the release as root: assist.held / assist.keyup), else
@@ -25,13 +26,14 @@ import { powos } from "../bridge.ts";
 import { stored } from "../state.ts";
 import { Mic, dictate, hearing, interrupt, speech, type MicTarget } from "./bar.tsx";
 import { makeHold, release } from "./dictation.ts";
+import { askQueued, setAskContext } from "./assistant.ts";
+import { ChatView } from "./chat.tsx";
 
 /** The side button is held to talk (assist.held): its release sends at once. */
 let pushToTalk = false;
 
 /** A summoning with the side button already let go: its dictation ends after this much silence. */
 const QUICK_SILENCE_MS = 1500;
-import { Now } from "./powai.tsx";
 import type { AssistScreen } from "../types.ts";
 
 const screen = signal<AssistScreen | null>(null);
@@ -78,11 +80,11 @@ powos.on("assist.keyup", () => {
 /** The screen's text that goes along with a question, at most (the host caps it too). */
 const SCREEN_TEXT = 4000;
 
-async function send() {
-  const text = draft.value.trim();
-  if (!text) return;
-  draft.value = "";
-  asked.value = true;
+/**
+ * What goes with every question asked here (assistant.ts setAskContext): the question, then the screen - the image
+ * first (the host saves it where PowOS sees it), then the screen's text; the chat shows only the question (chat.tsx).
+ */
+async function withScreen(text: string) {
   const seen = screen.value?.text.trim();
   // The image first (the host saves it where PowOS sees it), then the screen's text: both after the question, which is
   // all the chat shows of it (powai.tsx). Live: the filmstrip of the last moments instead of the one screenshot.
@@ -99,7 +101,21 @@ async function send() {
   ]
     .filter(Boolean)
     .join("\n");
-  powos.ai.send(context ? `${text}\n\n[What's on my screen right now - the app under this overlay, not PowOS AI itself:]\n${context}` : text);
+  return context ? `${text}\n\n[What's on my screen right now - the app under this overlay, not PowOS AI itself:]\n${context}` : text;
+}
+// Over an app, asks also put the chat in the app switcher (as this panel always did).
+setAskContext(withScreen, true);
+
+/**
+ * Asks the one conversation (assistant.ts askQueued, as the pill and the pet do): asked mid-turn, it waits for that
+ * turn instead of being dropped; the screen goes along (withScreen).
+ */
+function send() {
+  const text = draft.value.trim();
+  if (!text) return;
+  draft.value = "";
+  asked.value = true;
+  askQueued(text);
 }
 
 /** Around the stroke, so a circle drawn tight still holds what it circles (px on screen). */
@@ -275,7 +291,9 @@ export function Assist() {
             )}
           </div>
         )}
-        {asked.value && <Now />}
+        {/* The one chat (the pill's, chat.tsx): this conversation's newest, once something's asked here - until then
+            the screen above stays free to circle. */}
+        {asked.value && <ChatView head={false} />}
         <form
           class="assist-ask"
           onSubmit={(e) => {

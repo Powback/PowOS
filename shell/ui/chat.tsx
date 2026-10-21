@@ -26,7 +26,8 @@ export function Item({ item, reply = null }: { item: ChatItem; reply?: string | 
   }
 }
 
-export function ChatView() {
+/** [head]: its "PowOS AI · open" line (the assistant's panel over an app has its own). */
+export function ChatView({ head = true }: { head?: boolean } = {}) {
   const list = useRef<HTMLDivElement>(null);
   const { busy, items } = chat.value;
   const typed = query.value.trim();
@@ -36,13 +37,15 @@ export function ChatView() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length, items.at(-1), typed]);
   return (
-    <div class="chat" ref={list}>
-      <div class="chat-head">
-        <span class="muted">PowOS AI</span>
-        <button type="button" class="chat-open" onClick={() => powos.ai.open()}>
-          open ↗
-        </button>
-      </div>
+    <div class={`chat ${head ? "" : "headless"}`} ref={list}>
+      {head && (
+        <div class="chat-head">
+          <span class="muted">PowOS AI</span>
+          <button type="button" class="chat-open" onClick={() => powos.ai.open()}>
+            open ↗
+          </button>
+        </div>
+      )}
       <Thread items={items.slice(-SHOWN)} render={(item, reply) => <Item item={item} reply={reply} />} />
       {busy && <div class="msg tool muted thinking">thinking…</div>}
       {typed && !busy && <div class="msg ask muted">↵ ask “{typed}”</div>}

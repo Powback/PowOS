@@ -208,7 +208,8 @@ interface Choices {
 function answerOwnWords() {
   openAssistant();
   window.setTimeout(() => {
-    document.querySelector<HTMLTextAreaElement>(".bar textarea")?.focus();
+    // Home: the pill; over an app (assist mode): the panel's own field.
+    document.querySelector<HTMLElement>(".bar textarea, .assist-ask input")?.focus();
     powos.keyboard.show();
   }, 60);
 }

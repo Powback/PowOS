@@ -10,6 +10,8 @@
  *     autosend  what's heard is asked at once (else it waits in the field)
  *     text      put into the field
  *     context   the screen as context - the side button's (assist.tsx registers it: setAskContext), never the pet's
+ * The side button's panel over an app (assist.tsx) is this same chat: the conversation (chat.tsx ChatView) and asks
+ * through askQueued, with the screen, its circled part and live frames as context - its crop screen kept around it.
  *   askQueued(text)  asks; while a turn is under way it waits for it (PowosAiChat.send drops what's sent meanwhile)
  *
  * Autosend: when the dictation ends (~4 s with nothing heard, the mic tapped, a hold let go) the words show in the
@@ -37,16 +39,22 @@ export function askQueued(text: string) {
 
 /** What goes along with a question (the side button's screen, crop, live frames: assist.tsx); null: nothing. */
 let askContext: ((text: string) => Promise<string>) | null = null;
+/** Asks also put the chat in the app switcher (ai.send's recents): over an app (assist mode), not from home. */
+let askRecents = false;
 
-/** The page that has context to add to every question (assist mode) registers it here. */
-export function setAskContext(f: ((text: string) => Promise<string>) | null) {
+/**
+ * The page that has context to add to every question (assist mode) registers it here; [recents]: its asks also put
+ * the chat in the app switcher (from home that briefly covered home with the chat activity, so home never does).
+ */
+export function setAskContext(f: ((text: string) => Promise<string>) | null, recents = false) {
   askContext = f;
+  askRecents = recents;
 }
 
 async function send(t: string) {
   sent = { text: t, at: Date.now() };
   // The question first, the context after it: the chat shows the question (powai.tsx), and `sent` matches it by prefix.
-  powos.ai.send(askContext ? await askContext(t) : t, false);
+  powos.ai.send(askContext ? await askContext(t) : t, askRecents);
 }
 
 /** What's waiting to be asked (the chat shows it, greyed, until it goes). */

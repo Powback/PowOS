@@ -1171,8 +1171,10 @@ html.glass[data-mode="assist"] .assist-panel {
 }
 /* What's on the panel: soft fills (a surface inside a surface), the pill too. */
 html:root .assist-panel .tile.pill { background: var(--soft-fill); }
-/* The shared chat surface in the panel (assistant.ts), when the newer assist.tsx is in: the conversation, the pill. */
+/* The one chat in the panel (assistant.ts, chat.tsx ChatView), under the crop screen's head and above its field. */
 .assist-panel .chat { flex: 1 1 auto; min-height: 0; }
+/* Without its head line (the panel has its own), the chat still sits at the bottom while short. */
+.chat.headless > :first-child { margin-top: auto; }
 .assist-panel .bar { flex: none; }
 .assist-hint { font-size: var(--text-small); }
 .crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
