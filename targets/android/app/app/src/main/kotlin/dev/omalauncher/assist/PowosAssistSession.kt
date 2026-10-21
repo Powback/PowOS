@@ -62,6 +62,8 @@ class PowosAssistSession(
         showFlags: Int,
     ) {
         super.onShow(args, showFlags)
+        // The pet over apps keeps out of the assistant (its crop screen) while it shows.
+        dev.omalauncher.system.PetOverlay.assistShowing = true
         // Drawn again (paused while hidden, onHide).
         host?.web?.onResume()
         screenText = ""
@@ -110,6 +112,7 @@ class PowosAssistSession(
     }
 
     override fun onHide() {
+        dev.omalauncher.system.PetOverlay.assistShowing = false
         watchdog?.stop()
         PowerKey.onRelease = null
         // The page stays warm after the panel goes: it stops listening (a summoning starts dictation, assist.tsx).

@@ -33,6 +33,7 @@ import { askQueued, openAssistant } from "./assistant.ts";
 import { agent, agentIds, asks, tasks, useAgents } from "../agents.ts";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { installedApps } from "../apps/pages.ts";
+import { watchRegistry } from "../apps/registry.ts";
 import { PetBody, type BodyHandle } from "./petbody.tsx";
 import { edges, fall, perchAt, placeOn, where as perchWhere, type Edge, type Perch } from "./petperch.ts";
 import { DbConnection as PetDb } from "../vendor/local-pet.js";
@@ -400,6 +401,8 @@ interface PetRow {
   name: string;
   mood: string;
   moodUntil: bigint | number;
+  /** Over apps too (`powos pet overlay on|off`); a module from before it: undefined = on. */
+  overlay?: boolean;
 }
 interface SaidRow {
   id: bigint | number;
@@ -431,6 +434,8 @@ function PetFeed() {
     const p = pets[0];
     if (!p) return;
     name.value = p.name;
+    // The pet over apps follows the module's switch (the CLI sets it there; the host keeps it).
+    if (typeof p.overlay === "boolean") powos.pet?.overlay(p.overlay).catch(() => {});
     moodSet.value = { mood: p.mood, until: Number(p.moodUntil) };
   }, [pets]);
   useEffect(() => {
@@ -903,4 +908,49 @@ function useShown() {
     return () => document.removeEventListener("visibilitychange", on);
   }, []);
   return v;
+}
+
+/**
+ * The pet over apps (app.tsx mode "petover", in system/PetOverlay.kt's small window): the same creature and state as
+ * on home, alone - no perch, no bubble. Its touches are the host's (drag, tap, hold): the page only hears them, for
+ * the body (a wobble while dragged, a squash on a tap or a drop).
+ */
+export function PetOver() {
+  const shown = useShown();
+  // This page isn't home: the registry (is the pet installed?) is watched here too - its socket only while shown.
+  useEffect(() => watchRegistry(), []);
+  useClocks(shown);
+  const body = useRef<BodyHandle | null>(null);
+  useEffect(() => {
+    const offs = [
+      powos.on("petover.drag", ({ dx, dy }: { dx: number; dy: number }) => body.current?.push(dx * 0.35, dy * 0.35)),
+      powos.on("petover.drop", () => body.current?.squash(0.6)),
+      powos.on("petover.down", () => body.current?.squash(0.25)),
+      powos.on("petover.tap", () => body.current?.squash(0.4)),
+      powos.on("petover.hold", () => body.current?.stretch(0.5)),
+    ];
+    return () => offs.forEach((off) => off());
+  }, []);
+  // A blink now and then, as on home (no timer while the window's hidden: the page is paused then).
+  useEffect(() => {
+    if (!shown) return;
+    let t = 0;
+    const next = () => (t = window.setTimeout(() => (state.peek() !== "sleepy" && body.current?.blink(), next()), 6000 + Math.random() * 4000));
+    next();
+    return () => clearTimeout(t);
+  }, [shown]);
+  if (!(installedApps?.value ?? []).some((a) => a.id === APP)) return null;
+  const s = state.value;
+  return (
+    <>
+      {shown && <PetFeed />}
+      <div class="pet over" data-state={s} data-night={night(clock.value) ? "" : undefined}>
+        <span class="pet-body">
+          <span class="pet-inner">
+            <PetBody handle={body} />
+          </span>
+        </span>
+      </div>
+    </>
+  );
 }

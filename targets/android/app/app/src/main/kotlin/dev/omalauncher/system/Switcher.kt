@@ -250,12 +250,14 @@ object Switcher {
     fun homeStarted(bridge: ShellBridge) {
         if (bridge !== home) return
         homeVisible = true
+        PetOverlay.current?.homeVisible(true)
     }
 
     /** The layer's page went out of sight (an app opened from a card, or over it): the layer goes, unless a swipe owns it. */
     fun homeStopped(bridge: ShellBridge) {
         if (bridge !== home) return
         homeVisible = false
+        PetOverlay.current?.homeVisible(false)
         hideStopped()
         // The app that just came up is the newest task now: the cards are laid out for the next swipe already (the
         // page renders them hidden, their snapshots load), so it shows them from its first frame.

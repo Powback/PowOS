@@ -42,6 +42,7 @@ class PowosRecentsService : Service() {
     private var edge: EdgeGestures? = null
     private var quickTools: QuickToolsHost? = null
     private var pull: PullHost? = null
+    private var pet: PetOverlay? = null
     private var gestureRetries = 0
 
     /** SystemUI's last state flags and nav bar region (they can come before the gesture input is up). */
@@ -89,6 +90,9 @@ class PowosRecentsService : Service() {
                     if (shade == null) shade = ShadeHost(this@PowosRecentsService).takeIf { it.start() }
                     if (quickTools == null) quickTools = runCatching { QuickToolsHost(this@PowosRecentsService).takeIf { it.begin() } }.onFailure { Log.w(TAG, "no Quick Tools", it) }.getOrNull()
                     if (pull == null) pull = runCatching { PullHost(this@PowosRecentsService).takeIf { it.begin() } }.onFailure { Log.w(TAG, "no pull-up panels over apps", it) }.getOrNull()
+                    // The pet over apps (docs/PET.md step d).
+                    if (pet == null) pet = runCatching { PetOverlay(this@PowosRecentsService).takeIf { it.start() } }.onFailure { Log.w(TAG, "no pet overlay", it) }.getOrNull()
+                    pet?.homeVisible(Switcher.homeVisible)
                     startGestures()
                     nav?.systemUi = sysui
                     edge?.systemUi = sysui
@@ -99,6 +103,7 @@ class PowosRecentsService : Service() {
             override fun onSystemUiStateChanged(stateFlags: Long) {
                 main.post {
                     shade?.systemUiState(stateFlags)
+                    pet?.systemUiState(stateFlags)
                     systemUiState = stateFlags
                     nav?.systemUiState = stateFlags
                     edge?.systemUiState = stateFlags
@@ -171,6 +176,8 @@ class PowosRecentsService : Service() {
         quickTools = null
         pull?.stop()
         pull = null
+        pet?.stop()
+        pet = null
         shade?.stop()
         shade = null
         systemUi = null

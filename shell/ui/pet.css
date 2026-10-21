@@ -156,3 +156,7 @@
 /* Standing ON a tile's edge: a small, firmer contact shadow on it. */
 .pet-shadow { transform-box: fill-box; transform-origin: center; }
 .pet.perched .pet-shadow { transform: scale(0.72, 0.8); fill: color-mix(in srgb, var(--color-background) 70%, transparent); }
+
+/* Over apps (mode petover): the pet alone in its small window, centred; the window is the host's to move. */
+html[data-mode="petover"], html[data-mode="petover"] body { background: transparent; overflow: hidden; }
+.pet.over { left: calc(50% - var(--pet-size) / 2); top: calc(50% - var(--pet-size) / 2); pointer-events: none; }

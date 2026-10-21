@@ -31,6 +31,9 @@ pub struct Pet {
     xp: u32,
     level: u32,
     updated: u64,
+    /** Over apps too (the PowOS app's pet window, docs/PET.md step d): `powos pet overlay on|off`. */
+    #[default(true)]
+    overlay: bool,
 }
 
 #[spacetimedb::table(accessor = said, public)]
@@ -55,7 +58,7 @@ fn level_of(xp: u32) -> u32 {
 
 fn fresh(ctx: &ReducerContext) -> Pet {
     let t = now(ctx);
-    Pet { id: 0, name: "Pow".into(), mood: String::new(), mood_until: 0, energy: 80, fed: t, xp: 0, level: 1, updated: t }
+    Pet { id: 0, name: "Pow".into(), mood: String::new(), mood_until: 0, energy: 80, fed: t, xp: 0, level: 1, updated: t, overlay: true }
 }
 
 /// The pet's row (made the first time), changed by [f] and written back.
@@ -165,4 +168,10 @@ pub fn hush(ctx: &ReducerContext) {
     for id in ids {
         ctx.db.said().id().delete(id);
     }
+}
+
+/// The pet over apps on or off (the shell passes it to the PowOS app).
+#[spacetimedb::reducer]
+pub fn set_overlay(ctx: &ReducerContext, on: bool) {
+    with_pet(ctx, |p, _| p.overlay = on);
 }

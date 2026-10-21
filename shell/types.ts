@@ -640,6 +640,10 @@ export interface Bridge {
     show(): Promise<void>;
     hide(): Promise<void>;
   };
+  /** The pet over apps (system/PetOverlay.kt): on or off; no argument reads it. An older host has none: check. */
+  pet?: {
+    overlay(on?: boolean): Promise<boolean>;
+  };
   system: {
     insets(): Promise<Insets>;
     /** The battery: level 0-100 (null when unknown) and whether it's charging. */

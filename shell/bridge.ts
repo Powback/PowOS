@@ -269,6 +269,9 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       show: () => call("keyboard.show"),
       hide: () => call("keyboard.hide"),
     },
+    pet: {
+      overlay: (on) => call<boolean>("pet.overlay", on ?? null),
+    },
     system: {
       insets: () => call("system.insets"),
       notifications: (open = true) => call("system.notifications", open),
@@ -935,6 +938,9 @@ function mock(): Bridge {
       };
     })(),
     keyboard: { show: async () => {}, hide: async () => {} },
+    pet: {
+      overlay: async () => true,
+    },
     system: {
       insets: async () => ({
         top: 0,

@@ -32,6 +32,8 @@ Usage:
   powos pet status [--json]   Its name, level, xp, energy, mood.
   powos pet log [N] [--json]  The last N (default 10) lines said through it.
   powos pet hush          Forget what it said (the history).
+  powos pet overlay on|off
+                          Show it over apps too (a small window at a screen edge; on by default) or not.
 
 Moods: idle, happy, working, looking (at the user), worried, sleepy, hungry.
 The user talks to it by tapping it (dictation, sent to the manager; the reply streams into its
@@ -162,6 +164,10 @@ def main(argv):
         call("rename", name)
     elif cmd == "hush":
         call("hush")
+    elif cmd == "overlay":
+        if not rest or rest[0] not in ("on", "off"):
+            die("overlay: powos pet overlay on|off")
+        call("set_overlay", rest[0] == "on")
     elif cmd == "status":
         _, f = opts(rest, ())
         r = rows("SELECT * FROM pet")

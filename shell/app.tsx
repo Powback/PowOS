@@ -79,6 +79,10 @@ if (mode === "aod") {
   // The desktop's panel (powos-shell: a layer surface per screen, docs/DESKTOP-WEB-SHELL.md): the bar alone.
   const { Panel } = await import("./ui/panel.tsx");
   render(<Panel />, document.body);
+} else if (mode === "petover") {
+  // The pet over apps (system/PetOverlay.kt's small window at a screen edge): the pet alone, its state live.
+  const { PetOver } = await import("./ui/pet.tsx");
+  render(<PetOver />, document.body);
 } else if (mode === "glasses") {
   // The smart glasses' screen (glasses/Glasses.kt loads it off screen while they're connected): what they show,
   // pushed to them as it changes. Imported here alone: the rest of home isn't loaded.
