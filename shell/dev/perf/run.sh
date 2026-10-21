@@ -25,11 +25,23 @@ s = open(sys.argv[1]).read()
 a = """        console.log(`probe ${name}-${sizeName}:`, JSON.stringify(await page.evaluate(process.env.SHOTS_PROBE).catch((e) => e.message)));"""
 assert a in s, "shots.mjs's SHOTS_PROBE line changed: update run.sh"
 s = s.replace(a, """      {
+        // Paints per layer while the probe runs (LayerTree.layerPainted): which layers redraw, how much of them.
+        const cdp = await page.createCDPSession();
+        const painted = new Map();
+        cdp.on("LayerTree.layerPainted", ({ layerId, clip }) => {
+          const e = painted.get(layerId) ?? { n: 0, px: 0 };
+          e.n++; e.px += clip.width * clip.height; painted.set(layerId, e);
+        });
+        const names = new Map();
+        cdp.on("LayerTree.layerTreeDidChange", ({ layers }) => (layers ?? []).forEach((l) => names.set(l.layerId, `${l.width}x${l.height}${l.backendNodeId ? " node " + l.backendNodeId : ""}`)));
+        await cdp.send("LayerTree.enable");
         const m0 = await page.metrics();
         const v = await page.evaluate(process.env.SHOTS_PROBE).catch((e) => e.message);
         const m1 = await page.metrics();
+        await cdp.send("LayerTree.disable").catch(() => {});
+        const paints = [...painted].map(([id, e]) => ({ layer: names.get(id) ?? id, n: e.n, mpx: +(e.px / 1e6).toFixed(2) })).sort((a, b) => b.mpx - a.mpx).slice(0, 6);
         const d = Object.fromEntries(["LayoutCount", "RecalcStyleCount", "LayoutDuration", "RecalcStyleDuration", "ScriptDuration"].map((k) => [k, +((m1[k] - m0[k]) * (k.endsWith("Duration") ? 1000 : 1)).toFixed(1)]));
-        console.log(`probe ${name}-${sizeName}:`, JSON.stringify({ v, d }));
+        console.log(`probe ${name}-${sizeName}:`, JSON.stringify({ v, d, paints }));
       }""")
 open(sys.argv[2], "w").write(s)
 PY

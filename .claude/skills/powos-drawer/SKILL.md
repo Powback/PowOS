@@ -59,5 +59,14 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   worst, Chromium metrics; devperf.ts in powos-vadb). Read-only checks any time: `tools/phone/cdp.sh eval "" '<js>'`
   reading computed opacity/transform, `cdp.sh idle 3 ""`. Setting --p on [data-p] (transition none) to read values at
   a given p ONLY inside that free window and restored in the same call - it shows on the user's screen.
+- What a drag costs to DRAW on the phone, one free window: `shell/dev/perf/drag-raster.sh [secs] ["label=css" ...]`
+  (injected swipes as perf-window.sh; cdp.sh raster + cpu.sh per run; each "label=css" is a <style> added for that
+  run only). TRACE=1: shell/dev/perf/trace.ts instead - Paint by page and DOM node, script time by url:line, raster
+  tasks. SWIPES=up: up + Back (no down swipe). The trace spans every page of the one renderer (shade, pull, ...).
+- Found 2026-10-21 (drag at 120 Hz, app ~130%, renderer ~100%, SF ~60%): the drawer itself ~2 ms/s script, no paints.
+  The cost is others': the pet riding the drawer's edge repaints the whole document ~65/s (pet hidden: 10/s, GPU
+  raster 192 -> 93 ms/s; will-change on .pet doesn't help - its art repaints); a DOWN swipe on the open drawer
+  makes the hidden shade page repaint full-screen ~73/s (200 Mpx/s); nativeglass's per-frame measure ~107 ms/s.
+  Own layers for home-content/dock/bar, content-visibility on the grid, no label shadows, no group fade: no change.
 - Baselines: headless 60-frame slow drag, style recalc 260 ms -> 64 (layout 64 -> 0) -> 37 ms (WAAPI). No device
   drag numbers yet.
