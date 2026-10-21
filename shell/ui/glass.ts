@@ -125,8 +125,36 @@ let lastSource: GlassSource | null = null;
 let assistShot: string | null = null;
 let assistLive = false;
 
+/**
+ * The wallpaper's tone (html[data-wallpaper] light | dark): its picture's mean luminance, read small once per picture.
+ * A theme on a wallpaper of the other tone (dark glass over a bright picture, light glass over a dark one) needs more
+ * tint for its text to keep 4.5:1 (theme.css); without a picture, none is set and the reference stays as it is.
+ */
+let toneFor: string | null = null;
+async function tone(url: string | null) {
+  if (url === toneFor) return;
+  toneFor = url;
+  if (!url) return void delete root.dataset.wallpaper;
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = c.height = 16;
+    const x = c.getContext("2d", { willReadFrequently: true })!;
+    x.drawImage(img, 0, 0, 16, 16);
+    const d = x.getImageData(0, 0, 16, 16).data;
+    let l = 0;
+    for (let i = 0; i < d.length; i += 4) l += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    if (toneFor === url) root.dataset.wallpaper = l / 256 / 255 > 0.5 ? "light" : "dark";
+  } catch {
+    if (toneFor === url) delete root.dataset.wallpaper;
+  }
+}
+
 function use(g: GlassSource | null) {
   lastSource = g;
+  void tone(OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : null);
   root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && g != null);
   source = OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : mode === "assist" && !assistLive ? assistShot : null;
   void refrost();
@@ -254,6 +282,8 @@ powos.system.glass().then(use, () => use(null));
     return frosted;
   },
   place,
+  /** The wallpaper's tone only (no picture glass): what a page under the compositor's glass is told. */
+  tone: (url: string | null) => tone(url),
   /** The live glass (ui/nativeglass.ts): `__glass.live.native(false)` back to the picture on this page, its state. */
   live: nativeDebug,
 };

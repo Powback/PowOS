@@ -213,6 +213,9 @@ const collectText = () => {
     range.selectNodeContents(n);
     const r = range.getBoundingClientRect();
     if (r.width < 2 || r.height < 4 || r.right < 0 || r.bottom < 0 || r.left > innerWidth || r.top > innerHeight) continue;
+    // Clipped away (scrolled out of its list, under a panel): what's on top at its middle isn't it - not seen, not measured.
+    const at = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)), Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+    if (at && !el.contains(at) && !at.contains(el) && getComputedStyle(at).pointerEvents !== "none") continue;
     const cs = getComputedStyle(el);
     let o = 1;
     for (let a = el; a; a = a.parentElement) o *= parseFloat(getComputedStyle(a).opacity);
@@ -231,6 +234,7 @@ const collectText = () => {
   for (const f of document.querySelectorAll("input, textarea")) {
     if (f.value || !f.placeholder || !f.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
     const r = f.getBoundingClientRect();
+    if (r.right < 0 || r.left > innerWidth || r.bottom < 0 || r.top > innerHeight) continue;
     const cs = getComputedStyle(f, "::placeholder");
     out.push({ text: `[${f.placeholder.slice(0, 30)}]`, cls: `${f.tagName.toLowerCase()}::placeholder`, color: cs.color, opacity: 1, size: parseFloat(cs.fontSize), bold: false,
       x: r.left + 4, y: r.top + r.height * 0.25, w: Math.min(r.width - 8, f.placeholder.length * parseFloat(cs.fontSize) * 0.6), h: r.height * 0.5 });
@@ -339,7 +343,11 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
                   : `html { background: url("${window.__shotsApp}") 0 0 / 100% 100% no-repeat; }`;
             document.head.append(back);
             if (glassMode === "page" || !["home", "desktop"].includes(root.dataset.mode)) window.__glass?.use(wp);
-            else root.classList.add("glass-native");
+            else {
+              root.classList.add("glass-native");
+              // The wallpaper's tone, as glass.ts reads it from the host's picture.
+              await window.__glass?.tone?.(wp);
+            }
             await new Promise((r) => setTimeout(r, 200)); // the wallpaper decoded
             const S = await importShim("./state.ts");
             const U = (p) => importShim(p);

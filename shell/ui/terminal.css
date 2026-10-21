@@ -79,6 +79,6 @@ html.term-focus :is(.bar, .dock, .launcher, .launcher-frame) { visibility: hidde
   touch-action: none;
 }
 .term-key:active { background: var(--color-border); }
-.term-key.sticky.on { color: var(--color-accent); }
+.term-key.sticky.on { color: var(--accent-text); }
 .term-key.sticky.locked { background: var(--color-accent); color: var(--color-background); }
 .term-arrow { display: inline-block; font-size: 16px; line-height: 1; }

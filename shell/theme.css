@@ -35,7 +35,7 @@
    * shadow it casts.
    */
   --line: transparent;
-  --soft-fill: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  --soft-fill: color-mix(in srgb, var(--color-foreground) 6%, transparent);
   /* --lift's parts, for a surface made of several (a merged widget group, the foot): its top edge, its shadow. */
   --lift-edge: inset 0 1px 0 rgb(255 255 255 / 7%);
   --lift-shadow: 0 6px 20px -10px rgb(0 0 0 / 50%);
@@ -44,7 +44,15 @@
   /* A thing held up by a finger (a carried tile), as a filter: its shadow, larger. */
   --lift-drop: drop-shadow(0 8px 16px rgb(0 0 0 / 40%));
   /* Labels straight on the wallpaper (home's app labels): the one text shadow, so they read on any picture. */
-  --label-shadow: 0 1px 3px rgb(0 0 0 / 80%);
+  /* A halo of the theme's background round text on the wallpaper (any picture, any theme): 4.5:1 where it's bright. */
+  --label-shadow: 0 0 2px var(--on-wallpaper-halo), 0 0 6px var(--on-wallpaper-halo), 0 0 12px color-mix(in srgb, var(--on-wallpaper-halo) 70%, transparent);
+  /* Text straight on the wallpaper (home's app labels, PowOS AI's page header): the theme's foreground with a halo of
+     its background - turned round over a wallpaper of the other tone (data-wallpaper, below), as iOS does. */
+  --on-wallpaper: var(--color-foreground);
+  --on-wallpaper-halo: var(--color-background);
+  /* Text in the accent (links, "open ↗", a text button): the accent drawn a little towards the foreground - on glass
+     over any wallpaper, in any theme, >= 4.5:1. Fills (an on tile, a switch) keep the accent itself. */
+  --accent-text: color-mix(in srgb, var(--color-accent) 50%, var(--color-foreground));
   /* What a control on a panel (a quick setting, a slider, a chip) is filled with: on glass, a soft fill instead. */
   --control-fill: var(--color-surface);
 
@@ -84,7 +92,7 @@
      a black slab), see-through by --glass-tint. */
   --glass-base: color-mix(in srgb, var(--color-foreground) 18%, var(--color-background));
   /* The one darkening for a page that is mostly text (PowOS AI's): more of the same tint, nothing else. */
-  --glass-dim: 20%;
+  --glass-dim: 26%;
   /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
   --glass-fill: var(--text-fill);
   /*
@@ -106,6 +114,15 @@
   --pill-foot: 6px;
 }
 
+/*
+ * A wallpaper of the other tone than the theme (dark glass over a bright picture, light glass over a dark one:
+ * glass.ts data-wallpaper): the text needs more of the tint - nearly opaque (measured: 4.5:1 over a white wallpaper).
+ */
+:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] {
+  --glass-dim: 68%;
+  --on-wallpaper: var(--color-background);
+  --on-wallpaper-halo: var(--color-foreground);
+}
 :root[data-light="true"] {
   --glass-tint: 50%;
   --glass-brightness: 1.08;

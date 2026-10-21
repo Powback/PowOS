@@ -145,7 +145,7 @@
 .pet-bubble.open { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; }
 .pet-short { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pet-from { font-size: var(--text-small); }
-.pet-more-link { align-self: flex-end; color: var(--color-accent); font-size: var(--text-small); padding: 2px 0; }
+.pet-more-link { align-self: flex-end; color: var(--accent-text); font-size: var(--text-small); padding: 2px 0; }
 @keyframes pet-bubble-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .pet-bubble.below { animation-name: pet-bubble-in-below; }
 @keyframes pet-bubble-in-below { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }

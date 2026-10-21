@@ -9,15 +9,15 @@
   flex-direction: column;
   gap: 8px;
 }
-.scr .accent { color: var(--color-accent); }
+.scr .accent { color: var(--accent-text); }
 .scr .danger { color: var(--color-red); }
 .scr .green { color: var(--color-green, var(--color-accent)); }
 
 .scr-top { display: flex; align-items: center; gap: 8px; min-height: 44px; }
-.scr-back { width: 36px; height: 40px; display: grid; place-items: center; color: var(--color-accent); margin-left: -8px; }
-.scr-icon { color: var(--color-accent); flex: none; }
+.scr-back { width: 36px; height: 40px; display: grid; place-items: center; color: var(--accent-text); margin-left: -8px; }
+.scr-icon { color: var(--accent-text); flex: none; }
 .scr-title { flex: 1; min-width: 0; font-size: var(--text-item); font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.scr-iconbtn { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 999px; color: var(--color-accent); }
+.scr-iconbtn { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 999px; color: var(--accent-text); }
 .scr-iconbtn:active { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
 .scr-iconbtn.danger { color: var(--color-red); }
 .scr-iconbtn.muted { color: var(--color-muted); }
@@ -37,7 +37,7 @@
 }
 
 .scr-section { display: flex; flex-direction: column; gap: 8px; }
-.scr-heading { margin: 8px 0 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-small); font-weight: normal; color: var(--color-accent); min-height: 38px; }
+.scr-heading { margin: 8px 0 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-small); font-weight: normal; color: var(--accent-text); min-height: 38px; }
 .scr-heading-actions { margin-left: auto; display: flex; gap: 2px; }
 
 .scr-note { font-size: var(--text-small); line-height: 1.45; text-align: left; }
@@ -60,7 +60,7 @@
   min-height: 112px;
 }
 .scr-tile:active { border-color: var(--color-accent); }
-.scr-tile-icon { color: var(--color-accent); margin-bottom: 6px; }
+.scr-tile-icon { color: var(--accent-text); margin-bottom: 6px; }
 .scr-tile-title { font-size: var(--text-item); }
 .scr-tile-sub { font-size: var(--text-small); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
@@ -69,13 +69,13 @@
 .scr-card:disabled { opacity: 0.6; }
 .scr-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
 .scr-row:disabled { opacity: 1; }
-.scr-row-icon { flex: none; color: var(--color-accent); }
+.scr-row-icon { flex: none; color: var(--accent-text); }
 .scr-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .scr-pick.on { border-color: var(--color-accent); }
 .scr-pick:not(.on) .scr-row-icon { color: var(--color-muted); }
 .scr-builtin:active { border-color: var(--color-accent); }
 .scr-wallpaper { padding: 4px 0; }
-.scr-wallpaper:not(.done) .scr-row-text { color: var(--color-accent); }
+.scr-wallpaper:not(.done) .scr-row-text { color: var(--accent-text); }
 .scr-wallpaper.done .scr-row-icon { color: var(--color-green, var(--color-accent)); }
 
 .scr-act {
@@ -85,7 +85,7 @@
   gap: 6px;
   align-self: flex-start;
   font: var(--text-small) var(--font);
-  color: var(--color-accent);
+  color: var(--accent-text);
   border: var(--frame) solid var(--line);
   border-radius: 999px;
   padding: 7px 12px;
@@ -142,7 +142,7 @@
 .scr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .scr-chips.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; margin: 0 calc(-1 * var(--edge)); padding: 0 var(--edge); flex: none; }
 .scr-chip { flex: none; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: var(--text-small); white-space: nowrap; background: var(--soft-fill); box-shadow: var(--lift); }
-.scr-chip.on { border-color: var(--color-accent); color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 15%, transparent); }
+.scr-chip.on { border-color: var(--color-accent); color: var(--accent-text); background: color-mix(in srgb, var(--color-accent) 15%, transparent); }
 
 /* Sideways strips: the themes, the backgrounds. They scroll to the screen's edge. */
 .scr-strip {
@@ -183,7 +183,7 @@
 }
 .scr-thumb.on { border-color: var(--color-accent); }
 .scr-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.scr-thumb.add { background: var(--soft-fill); box-shadow: var(--lift); color: var(--color-accent); display: grid; place-items: center; }
+.scr-thumb.add { background: var(--soft-fill); box-shadow: var(--lift); color: var(--accent-text); display: grid; place-items: center; }
 
 /* Grids of cards: the community themes, the store's widgets. */
 .scr-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--gap); }
@@ -217,7 +217,7 @@
 .scr-stage > .icon { flex: none; margin-top: 1px; }
 .scr-stage > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .scr-stage.done > .icon { color: var(--color-green, var(--color-accent)); }
-.scr-stage.running > .icon { color: var(--color-accent); animation: scr-spin 1.2s linear infinite; }
+.scr-stage.running > .icon { color: var(--accent-text); animation: scr-spin 1.2s linear infinite; }
 .scr-stage.failed { color: var(--color-red); }
 .scr-stage.pending { color: var(--color-muted); }
 .scr-bar { height: 4px; border-radius: 2px; background: var(--color-surface); overflow: hidden; }
@@ -241,6 +241,6 @@
 
 /* Gestures (screens.tsx GesturesScreen): each edge gesture a row, its action on the right; a tap lists the actions. */
 .scr-edge-gesture { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
-.scr-edge-action { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); color: var(--color-accent); }
+.scr-edge-action { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); color: var(--accent-text); }
 .scr-edge-picks { padding-left: 28px; }
 .scr-row-icon.flip { transform: scaleX(-1); }

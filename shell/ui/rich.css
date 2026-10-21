@@ -130,7 +130,7 @@
 .md ul, .md ol { padding-left: 1.4em; }
 .md li { margin: 2px 0; }
 .md li > ul, .md li > ol { margin: 2px 0 0; }
-.md a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.md a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .md code { padding: 1px 4px; background: var(--soft-fill); border-radius: 4px; font: inherit; }
 .md pre { padding: 8px 10px; overflow-x: auto; background: var(--soft-fill); border-radius: 8px; white-space: pre; }
 .md pre code { padding: 0; background: none; }
