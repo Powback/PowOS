@@ -124,6 +124,30 @@ function handlers(node: OwlNode, fire: Ctx["fire"]) {
   };
 }
 
+/** Kinds Render.kt draws at the full width they're offered when nothing sizes them (fillMaxWidth / fillMaxSize). */
+const FILLS = new Set(["Text", "Grid", "Canvas", "Sparkline", "Progress", "Slider", "Shader", "Terminal"]);
+const wideSeen = new WeakMap<OwlNode, boolean>();
+
+/**
+ * Compose's measuring, which CSS's shrink-to-fit doesn't do: an unsized Text, Grid, Canvas or chart, a `fill: width`,
+ * or a Row whose children share it by weight takes the whole width it's offered - and so does whatever holds one. In a
+ * Column (align-items: start) such a node is stretched; without it a screen's chart, list or grid came out at its
+ * content's width - half the screen (the weather screen's 24 h chart and 3-day list).
+ */
+function wide(n: OwlNode): boolean {
+  const seen = wideSeen.get(n);
+  if (seen != null) return seen;
+  const p = n.p ?? {};
+  let w: boolean;
+  if (p.width != null || p.size != null || p.fill === "height") w = false;
+  else if (p.fill === true || p.fill === "width") w = true;
+  else if (FILLS.has(n.k)) w = p.weight == null;
+  else if ((n.k === "Row" || n.k === "Flow") && n.c?.some((c) => num(c.p?.weight, 0) > 0)) w = true;
+  else w = !!n.c?.some(wide);
+  wideSeen.set(n, w);
+  return w;
+}
+
 function Nodes({ nodes, ctx, parent }: { nodes?: OwlNode[]; ctx: Ctx; parent: string }) {
   return <>{nodes?.map((n) => <Node key={n.id} node={n} ctx={ctx} parent={parent} />)}</>;
 }
@@ -131,6 +155,8 @@ function Nodes({ nodes, ctx, parent }: { nodes?: OwlNode[]; ctx: Ctx; parent: st
 function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }) {
   const p = node.p ?? {};
   const style = common(p, parent);
+  if (parent === "Column" && wide(node)) style.alignSelf = "stretch";
+  else if (parent === "Box" && wide(node)) style.justifySelf = "stretch";
   const on = handlers(node, ctx.fire);
   const sized = ["width", "height", "size", "fill", "weight"].some((k) => p[k] != null);
   const full: Style = sized ? {} : { width: "100%", height: "100%" };
@@ -193,7 +219,9 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
         <div
           {...on}
           style={{
-            width: p.width == null && p.weight == null && p.fill == null ? "100%" : undefined,
+            // Across its column; in a Row only as wide as its text (shrinking to an ellipsis) - Render.kt's fillMaxWidth
+            // there takes all the room a weighted sibling was meant to share ("8° / 5°" and "21 oct" drawn 0 wide).
+            ...(p.width == null && p.weight == null && p.fill == null ? (parent === "Row" ? { flex: "0 1 auto", minWidth: 0 } : { width: "100%" }) : {}),
             color: p.color ?? (muted ? "var(--color-muted)" : "var(--color-foreground)"),
             font: `${p.italic ? "italic " : ""}${p.bold ? "bold " : ""}${num(p.fontSize, SIZES[p.style] ?? 13)}px ${FONTS[p.font] ?? "var(--font)"}`,
             textAlign: (({ center: "center", end: "end" } as Record<string, string>)[p.align] ?? "start") as any,
