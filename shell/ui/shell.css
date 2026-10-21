@@ -539,6 +539,13 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
 .recents-face .strip { flex: 1; height: 100%; }
 .recents-face .strip .app { flex-basis: calc((100% - (var(--recent-n) - 1) * 4px) / var(--recent-n)); }
+.recents-face.fit { padding: 4px; }
+.recents-grid {
+  flex: 1; height: 100%; display: grid; overflow: hidden;
+  grid-template-columns: repeat(var(--recent-c), minmax(0, 1fr)); grid-template-rows: repeat(var(--recent-r), minmax(0, 1fr));
+}
+.recents-grid .app { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; padding: 0; }
+.recents-grid .app-icon { width: var(--recent-icon); height: var(--recent-icon); }
 .recents-face.rows .strip {
   display: grid;
   grid-template-columns: repeat(var(--recent-n), minmax(0, 1fr));
