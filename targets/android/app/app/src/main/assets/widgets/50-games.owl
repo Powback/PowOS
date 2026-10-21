@@ -42,13 +42,15 @@ widget "games" {
   // header (16 + 8) and the hero (its badge + 8 + 8).
   let iw = tileWidth == null ? 340 : tileWidth - 24
   let ih = tileHeight == null ? 180 : tileHeight - 24
-  let heroSide = clamp(round(min(iw * 0.15, ih * 0.2)), 34, 72)
+  let heroSide = clamp(round(min(iw * 0.16, ih * 0.32)), 34, 88)
   let listCols = iw < 360 ? 1 : 2
   let avail = ih - 24 - (heroSide + 8) - 8
-  let listRows = max(floor((avail + 6) / 32), 0)
+  // Rows no smaller than the tile warrants (a big tile: fewer, bigger rows rather than many small ones).
+  let minSide = clamp(round(min(iw / listCols, ih) * 0.16), 26, 48)
+  let listRows = max(floor((avail + 6) / (minSide + 6)), 0)
   // Fewer games than rows: each row taller (its badge up to 54), so the list still reaches the tile's foot.
   let need = max(ceil((len(games) - 1) / listCols), 1)
-  let rowSide = clamp(floor((avail + 6) / max(min(need, listRows), 1)) - 6, 26, 54)
+  let rowSide = clamp(floor((avail + 6) / max(min(need, listRows), 1)) - 6, minSide, 60)
   // Text in step with its badge (its two lines about the badge's height), and a name of ~18 characters fitting its column.
   let rowFs = clamp(min(round(rowSide * 0.38), floor((iw / listCols - rowSide - 14) / (18 * 0.62))), 10, 20)
   let heroFs = clamp(round(heroSide * 0.36), 13, 24)
