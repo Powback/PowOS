@@ -12,22 +12,27 @@ const HOME = "desktop-home";
 const RECENT = "desktop-recent";
 
 /**
- * A first home: PowOS AI's work board and PowOS apps' islands, a row across a desktop-wide grid (placed by the grid:
- * no cells, arrange puts each in the first free spot). About 110 px a column, 4 or more. Apps stay in the drawer.
+ * A first home: PowOS AI's work board and PowOS apps' islands, side by side across a desktop-wide grid (about 110 px
+ * a column, 4 or more), a free column and row between them - touching tiles merge into one surface on home, and these
+ * are three. Apps stay in the drawer.
  */
 function firstHome(): Home {
   const columns = Math.max(4, Math.round(innerWidth / 110));
-  const panel = (name: string, w: number, h: number): HomeItem => ({
+  const w = columns >= 8 ? 3 : Math.max(2, Math.floor((columns - 1) / 2));
+  const h = 2;
+  const across = Math.max(1, Math.floor((columns + 1) / (w + 1)));
+  const names = ["agents", "app:local.lights/main", "app:local.shopping/main"];
+  const items = names.map((name, i): HomeItem => ({
     key: `panel:${name}`,
     kind: "panel",
     name,
     page: 1,
-    cell: null,
+    cell: { x: (i % across) * (w + 1), y: Math.floor(i / across) * (h + 1), w, h },
     resizable: true,
     minSize: [2, 1],
-    size: [Math.min(w, columns), h],
-  });
-  return { columns, pages: [1], items: [panel("agents", 4, 3), panel("app:local.lights/main", 4, 3), panel("app:local.shopping/main", 4, 3)] };
+    size: [w, h],
+  }));
+  return { columns, pages: [1], items };
 }
 
 export function desktop(n: Bridge): Bridge {
