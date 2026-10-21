@@ -34,7 +34,7 @@ import { agent, agentIds, asks, tasks, useAgents } from "../agents.ts";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { installedApps } from "../apps/pages.ts";
 import { PetBody, type BodyHandle } from "./petbody.tsx";
-import { edges, fall, perchAt, placeOn, where as perchWhere, type Perch } from "./petperch.ts";
+import { edges, fall, perchAt, placeOn, where as perchWhere, type Edge, type Perch } from "./petperch.ts";
 import { DbConnection as PetDb } from "../vendor/local-pet.js";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import type { AgentMail } from "../types.ts";
@@ -51,7 +51,7 @@ if (!document.querySelector('link[href="./ui/pet.css"]')) {
 
 const APP = "local.pet";
 
-type State = "idle" | "happy" | "working" | "looking" | "worried" | "sleepy" | "hungry" | "listening";
+type State = "idle" | "happy" | "working" | "looking" | "worried" | "sleepy" | "hungry" | "eating" | "listening";
 
 /** Its size (CSS px): a touch bigger unfolded (pet.css --pet-size says the same). */
 const size = () => (innerWidth >= 600 ? 72 : 64);
@@ -131,6 +131,39 @@ const needsYou = computed(() => {
   );
 });
 
+/** Its hop to an edge (PetLayer sets it while it's on screen; a no-op otherwise). */
+let hopTo: (e: Edge, fx: number, then?: () => void) => void = () => {};
+/** A tap on a tile it stands on (a deploy it brings): a short press of its body and a nudge of the tile. */
+function tapTile(key: string) {
+  const tile = document.querySelector<HTMLElement>(`.page:not(.away) .home-tile[data-key="${CSS.escape(key)}"]`);
+  tile?.animate([{ transform: "none" }, { transform: "translateY(2px) scale(0.99)" }, { transform: "none" }], { duration: 260, easing: "ease-out" });
+}
+
+/**
+ * A deploy note: the tile it's about (its name in the note - "Lights got rooms" -> the Lights widget), on the page
+ * showing. The pet hops onto it and taps it; the note shows in its bubble there.
+ */
+function deployTarget(note: string): Edge | null {
+  const words = note.toLowerCase();
+  const byKey = new Map(home.peek().items.map((i) => [i.key, i] as const));
+  let best: { e: Edge; n: number } | null = null;
+  for (const e of edges()) {
+    const item = byKey.get(e.key) as { name?: string; app?: string } | undefined;
+    const name = (item?.name ?? item?.app?.split(/[./]/).at(-1) ?? "").toLowerCase().trim();
+    if (name.length < 3) continue;
+    if (new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(words) && (!best || name.length > best.n)) best = { e, n: name.length };
+  }
+  return best?.e ?? null;
+}
+
+/** A new piece of work started (an agent went working): it carries its parcel toward the board (PowOS AI's side). */
+function carryToBoard() {
+  const list = edges();
+  if (!list.length) return;
+  const left = list.reduce((m, e) => (e.left < m.left || (e.left === m.left && e.top > m.top) ? e : m));
+  hopTo(left, 0.12);
+}
+
 /** A state forced from outside (review renders, CDP: `__pet.force("worried")`, null to let go). */
 const forced = signal<State | null>(null);
 (window as unknown as { __pet?: object }).__pet = {
@@ -138,6 +171,8 @@ const forced = signal<State | null>(null);
   /** Put it on a perch (a tile's key or "bar", 0..1 along the edge); null: floating. */
   perch: (key: string | null, fx = 0.5) => (perchStored.value = key ? JSON.stringify({ key, fx }) : ""),
   edges,
+  /** What an agent starting work makes it do (review renders). */
+  carry: () => carryToBoard(),
 };
 
 const state = computed<State>(() => {
@@ -152,7 +187,9 @@ const state = computed<State>(() => {
   if (worriedUntil.value > t) return "worried";
   if (needsYou.value) return "looking";
   const b = battery.value;
+  // Low battery: sleepy (slow); charging (not full yet): eating. A display only - nothing is switched off.
   if (b.level != null && b.level < 20 && !b.charging) return "hungry";
+  if (b.charging && b.level != null && b.level < 95 && !busy.value) return "eating";
   if (busy.value) return "working";
   if (night(t) || t - touched.value > IDLE_MS) return "sleepy";
   return "idle";
@@ -349,6 +386,8 @@ function gotMail(got: AgentMail[] | null | undefined) {
   for (const m of list) mailSeen.add(key(m));
   for (const m of fresh) {
     if (m.from === "deploy" && FAILED.test(m.text)) worriedUntil.value = Date.now() + DEPLOY_MS;
+    const target = m.from === "deploy" && !FAILED.test(m.text) ? deployTarget(m.text) : null;
+    if (target) hopTo(target, 0.5, () => tapTile(target.key));
     say({ text: m.text, from: m.from });
   }
 }
@@ -630,6 +669,14 @@ function PetLayer() {
       removeEventListener("resize", resize);
     };
   }, []);
+  // An agent got to work: it carries its parcel toward the board (once per start, while home shows).
+  useEffect(() => {
+    let was = busy.peek();
+    return busy.subscribe((now) => {
+      if (now && !was && shown && !document.hidden) carryToBoard();
+      was = now;
+    });
+  }, [shown]);
   // A bubble goes at the first touch somewhere else (it said its line; the user is doing something).
   const hasBubble = !!bubble.value || !!talk.value?.done;
   useEffect(() => {
@@ -642,6 +689,37 @@ function PetLayer() {
     addEventListener("pointerdown", away, { capture: true, passive: true });
     return () => removeEventListener("pointerdown", away, { capture: true });
   }, [hasBubble]);
+  // A hop from its perch to [e] at [fx] along it: a short arc (one compositor animation), a squash on landing.
+  // [then]: after it landed (a tap on the tile, a bubble).
+  hopTo = (e: Edge, fx: number, then?: () => void) => {
+    const node = el.current;
+    const sz = size();
+    const r = node?.getBoundingClientRect();
+    if (!node || !r || document.hidden) return;
+    const to = placeOn(e, fx, sz);
+    const dx = to.left - r.left;
+    const dy = to.top - r.top;
+    if (Math.hypot(dx, dy) < 4) {
+      perchStored.value = JSON.stringify({ key: e.key, fx });
+      then?.();
+      return;
+    }
+    const up = Math.min(r.top, to.top) - r.top - 36;
+    body.current?.stretch(0.5);
+    node.classList.add("falling");
+    const a = node.animate(
+      [{ transform: "none" }, { transform: `translate(${dx / 2}px, ${up}px)`, offset: 0.45 }, { transform: `translate(${dx}px, ${dy}px)` }],
+      { duration: 560 + Math.min(400, Math.hypot(dx, dy)), easing: "cubic-bezier(0.35, 0, 0.45, 1)" },
+    );
+    a.onfinish = () => {
+      node.style.left = `${to.left}px`;
+      node.style.top = `${to.top}px`;
+      node.classList.remove("falling");
+      perchStored.value = JSON.stringify({ key: e.key, fx });
+      body.current?.squash(0.55);
+      then?.();
+    };
+  };
   // Now and then (every few minutes, screen on, home untouched a while, nothing to say) it hops to a neighbouring
   // edge by itself - one timer between hops, the hop itself one short compositor animation.
   useEffect(() => {
@@ -661,22 +739,7 @@ function PetLayer() {
       const others = list.filter((e) => e.key !== cur.key).map((e) => ({ e, at: placeOn(e, 0.2 + Math.random() * 0.6, sz) }));
       const to = others.sort((a, b) => Math.hypot(a.at.left - from.left, a.at.top - from.top) - Math.hypot(b.at.left - from.left, b.at.top - from.top))[0];
       if (!to) return;
-      const dx = to.at.left - from.left;
-      const dy = to.at.top - from.top;
-      const up = Math.min(from.top, to.at.top) - from.top - 36;
-      body.current?.stretch(0.5);
-      node.classList.add("falling");
-      const a = node.animate(
-        [{ transform: "none" }, { transform: `translate(${dx / 2}px, ${up}px)`, offset: 0.45 }, { transform: `translate(${dx}px, ${dy}px)` }],
-        { duration: 560 + Math.min(400, Math.hypot(dx, dy)), easing: "cubic-bezier(0.35, 0, 0.45, 1)" },
-      );
-      a.onfinish = () => {
-        node.style.left = `${to.at.left}px`;
-        node.style.top = `${to.at.top}px`;
-        node.classList.remove("falling");
-        perchStored.value = JSON.stringify({ key: to.e.key, fx: (to.at.left + sz / 2 - to.e.left) / Math.max(1, to.e.right - to.e.left) });
-        body.current?.squash(0.55);
-      };
+      hopTo(to.e, (to.at.left + sz / 2 - to.e.left) / Math.max(1, to.e.right - to.e.left));
     };
     next();
     return () => clearTimeout(t);
@@ -733,6 +796,7 @@ function PetLayer() {
         ref={el}
         class={`pet ${hidden ? "away" : ""} ${face ? "face" : ""} ${perched ? "perched" : ""}`}
         data-state={s}
+        data-night={night(clock.value) ? "" : undefined}
         aria-label={`${name.value}: ${s} - tap to talk, hold for PowOS AI's page`}
         style={{ left: `${at.left}px`, top: `${at.top}px` }}
         onPointerDown={(e) => {

@@ -697,12 +697,21 @@ class Gui(dbus.service.Object):
         def seen(_conn, msg):
             pid = names.get(msg.get_destination())
             if pid in self.frozen:
-                why = f"D-Bus {msg.get_member()} from {msg.get_sender()}"
+                why = f"D-Bus {msg.get_member()} from {msg.get_sender()}{self.who(msg.get_sender())}"
                 GLib.idle_add(self.dbus_wake, pid, why)
             return None
 
         m.add_message_filter(seen)
         self.monitor = m
+
+    def who(self, sender):
+        """A bus client's process, for the log (" (comm pid)"), or ""."""
+        try:
+            dbo = self.bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+            p = int(dbus.Interface(dbo, "org.freedesktop.DBus").GetConnectionUnixProcessID(sender))
+            return f" ({(stat(p) or {}).get('comm', '?')} {p})"
+        except (dbus.DBusException, TypeError, ValueError):
+            return ""
 
     def dbus_wake(self, pid, why):
         if pid in self.frozen and pid == self.desk:

@@ -38,6 +38,20 @@ export function edges(): Edge[] {
     if (r.width < 40 || r.right < 0 || r.left > W || r.top < 40 || r.top > H - 40) continue;
     out.push({ key: el.dataset.key!, left: r.left, right: r.right, top: r.top });
   }
+  // An edge under another tile (a joined group: the lower tile's top is inside the upper one) isn't a floor: the part
+  // that's open is kept, the covered rest cut off; an edge covered all along goes.
+  const rects = [...document.querySelectorAll<HTMLElement>(".page:not(.away) .home-tile[data-key]")].map((el) => ({ key: el.dataset.key!, r: el.getBoundingClientRect() }));
+  for (let i = out.length - 1; i >= 0; i--) {
+    const e = out[i];
+    for (const { key, r } of rects) {
+      if (key === e.key || !(e.top - 3 > r.top && e.top - 3 < r.bottom)) continue;
+      // [r] covers the strip just above this edge from r.left to r.right: keep the longer open side.
+      if (r.left <= e.left && r.right >= e.right) e.right = e.left; // all covered
+      else if (r.left <= e.left) e.left = Math.max(e.left, r.right);
+      else if (r.right >= e.right) e.right = Math.min(e.right, r.left);
+    }
+    if (e.right - e.left < 40) out.splice(i, 1);
+  }
   // Home's foot: the search pill's top edge (the dock is under the pill - standing on it would be inside the pill).
   const pill = document.querySelector<HTMLElement>(".bar .bar-pill") ?? document.querySelector<HTMLElement>(".bar");
   if (pill) {

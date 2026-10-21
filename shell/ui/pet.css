@@ -76,6 +76,13 @@
 .pet[data-state="working"] .pet-inner { transform: rotate(7deg) translateY(2%); }
 .pet[data-state="listening"] .pet-inner { transform: scale(0.97, 1.09); }
 .pet[data-state="looking"] .pet-inner { transform: translateY(-2%); }
+/* Night: curled up asleep - lower and rounder than a nap. */
+.pet[data-state="sleepy"][data-night] .pet-inner { transform: translateY(6%) scale(1.12, 0.76) rotate(-3deg); }
+/* Charging: eating - a few munches when it starts, then content. */
+.pet[data-state="eating"] .pet-mouth.smile { display: none; }
+.pet[data-state="eating"] .pet-mouth.open { display: inline; transform-box: fill-box; transform-origin: center; animation: pet-munch 420ms ease-in-out 4; }
+.pet[data-state="eating"] .pet-eye.glad { display: inline; }
+.pet[data-state="eating"] :is(.pet-eye.open, .pet-glint) { display: none; }
 /* - and the move that comes with it, once: */
 .pet[data-state="idle"] .pet-body { animation: pet-settle 900ms ease-out 1; }
 .pet[data-state="happy"] .pet-body { animation: pet-jump 700ms cubic-bezier(0.3, 0.7, 0.4, 1) 1; }
@@ -93,6 +100,7 @@
 @keyframes pet-shiver { 0%, 100% { transform: none; } 25% { transform: translateX(-1.5px); } 75% { transform: translateX(1.5px); } }
 @keyframes pet-breathe { 0%, 100% { transform: none; } 50% { transform: scale(1.03, 0.96); } }
 @keyframes pet-sag { 0% { transform: translateY(-4px); } 100% { transform: none; } }
+@keyframes pet-munch { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.2, 0.35); } }
 @keyframes pet-perk { 0% { transform: scale(0.94); } 100% { transform: none; } }
 
 /* The bubble: home's tile material, one short line; tapped open, every line batched into it. */

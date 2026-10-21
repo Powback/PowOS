@@ -5,9 +5,10 @@ widget "performance" {
   size: 6x3
   minSize: 2x2
 
-  // One cheap read every 2 s, builtins only (no forks per sensor): GPU busy %, GPU clock (Hz), GPU temp, the
+  // One cheap read every 5 s (each changes the widget: home repaints, the glass under it re-composites - at most one
+  // a 5 s on an idle home, 2026-10-21), builtins only (no forks per sensor): GPU busy %, GPU clock (Hz), GPU temp, the
   // hottest CPU sensor, skin and battery temps (m°C), then /proc/stat's total and idle jiffies for the CPU load.
-  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; read b x < $k/gpu_busy_percentage; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat; echo $b $f $g $c $s $bt $((u+n+y+i+w+q+r)) $((i+w))') every 2s
+  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; read b x < $k/gpu_busy_percentage; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat; echo $b $f $g $c $s $bt $((u+n+y+i+w+q+r)) $((i+w))') every 5s
 
   let v = words(raw ?? "").map(w => num(w, 0))
   let gpu = raw == null ? null : v[0]
