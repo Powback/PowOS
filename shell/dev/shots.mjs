@@ -226,7 +226,7 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
       const wp = WALLPAPER ? `${ORIGIN}/__wallpaper.jpg` : FALLBACK_WP;
       await page
         .evaluate(
-          async ({ theme, insets, wp, behind, setup }) => {
+          async ({ theme, insets, wp, behind, setup, glassMode }) => {
             const root = document.documentElement;
             const css = { background: theme.bg, surface: theme.surface, overlay: `color-mix(in srgb, ${theme.bg} 90%, transparent)`, foreground: theme.fg,
               muted: theme.muted, accent: theme.accent, border: theme.border, red: theme.red, green: theme.green };
@@ -241,14 +241,19 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
             window.__shotsApp = "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${innerWidth}" height="${innerHeight}"><rect width="100%" height="100%" fill="#f6f6f6"/><rect width="100%" height="110" fill="#3b6fb6"/><text x="20" y="80" font-family="sans-serif" font-size="28" fill="#fff">Inbox</text>${Array.from({ length: 9 }, (_, i) => `<rect x="20" y="${140 + i * 80}" width="${innerWidth - 40}" height="60" rx="8" fill="#e2e2e2"/><text x="36" y="${178 + i * 80}" font-family="sans-serif" font-size="18" fill="#333">Message ${i + 1}</text>`).join("")}</svg>`);
             const back = document.createElement("style");
             const pic = `url("${wp}") center / cover no-repeat fixed`;
+            // SHOTS_GLASS=native (default, the live path): the compositor's regions emulated - the wallpaper behind the
+            // window, a backdrop blur on each top-level glass surface; =page: the page draws the wallpaper (glass.ts).
             back.textContent =
               behind === "wallpaper"
-                ? "" // the page draws the wallpaper itself (glass.ts)
+                ? glassMode === "page"
+                  ? ""
+                  : `html { background: ${pic}; } .glass-native :is(.tile, .notif-panel):not(:is(.tile, .notif-panel) *) { backdrop-filter: blur(30px); }`
                 : behind === "blurred"
                   ? `html::before { content: ""; position: fixed; inset: -40px; z-index: -1; background: ${pic}; filter: blur(30px) brightness(.8); }`
                   : `html { background: url("${window.__shotsApp}") 0 0 / 100% 100% no-repeat; }`;
             document.head.append(back);
-            if (window.__glass) window.__glass.use(wp);
+            if (glassMode === "page" || root.dataset.mode !== "home") window.__glass?.use(wp);
+            else root.classList.add("glass-native");
             await new Promise((r) => setTimeout(r, 200)); // the wallpaper decoded
             const S = await importShim("./state.ts");
             const U = (p) => importShim(p);
@@ -256,7 +261,7 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
             const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
             await new (Object.getPrototypeOf(async function () {}).constructor)("S", "U", "E", "sleep", setup)(S, U, E, sleep);
           },
-          { theme: THEME, insets: size.insets, wp, behind, setup },
+          { theme: THEME, insets: size.insets, wp, behind, setup, glassMode: process.env.SHOTS_GLASS || "native" },
         )
         .catch((e) => errors.push(`setup: ${e.message.split("\n")[0]}`));
       step("setup");
