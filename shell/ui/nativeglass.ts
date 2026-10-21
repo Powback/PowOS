@@ -24,7 +24,7 @@ const mode = new URLSearchParams(location.search).get("mode") ?? "home";
  */
 const OVER_WALLPAPER = new Set(["home"]);
 /** The surfaces with glass (theme.css): one inside another is only a soft fill on it, not glass of its own. */
-const SURFACES = ".tile, .notif-panel, .ai-screen";
+const SURFACES = ".tile, .notif-panel";
 
 /** The host blurs for this page (b.state 1). */
 const hostBlurs = signal(false);
@@ -127,7 +127,10 @@ function measure(): string {
   if (shapesDirty) reshape();
   const W = innerWidth;
   const H = innerHeight;
-  const blur = parseFloat(getComputedStyle(root).getPropertyValue("--glass-blur")) || 28;
+  // The compositor's radius, not a Gaussian's sigma: its blur is ~0.15-0.3 of what it's given (measured on the phone,
+  // 2026-10-21), so the theme says it on its own (--glass-blur-native); without it, --glass-blur.
+  const css = getComputedStyle(root);
+  const blur = parseFloat(css.getPropertyValue("--glass-blur-native")) || parseFloat(css.getPropertyValue("--glass-blur")) || 28;
   const out: string[] = [];
   let n = 0;
   // Ancestors are shared (a page's tiles): each one's opacity read once a frame.
