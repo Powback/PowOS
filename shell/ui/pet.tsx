@@ -114,6 +114,9 @@ const toPx = (p: { x: number; y: number }) => ({
 const clock = signal(Date.now());
 const tick = () => (clock.value = Date.now());
 const touched = signal(Date.now());
+/** Blinks only within this long of the last touch on home; its own hops only within HOP_IDLE_MS (nobody looking after). */
+const LOOKED_MS = 90_000;
+const HOP_IDLE_MS = 8 * 60_000;
 const battery = signal<{ level: number | null; charging: boolean }>({ level: null, charging: true });
 const worriedUntil = signal(0);
 const mailNow = signal<AgentMail[]>([]);
@@ -908,7 +911,15 @@ function PetLayer() {
   useEffect(() => {
     if (!shown) return;
     let t = 0;
-    const next = () => (t = window.setTimeout(hop, 180_000 + Math.random() * 240_000));
+    // Its own hops only while someone was here a little while ago (home left untouched past HOP_IDLE_MS: nobody to
+    // see it - no timer until the next touch).
+    const next = () => {
+      clearTimeout(t);
+      t = 0;
+      if (Date.now() - touched.peek() > HOP_IDLE_MS) return;
+      t = window.setTimeout(hop, 180_000 + Math.random() * 240_000);
+    };
+    const offTouch = touched.subscribe(() => t || next());
     const hop = () => {
       next();
       const node = el.current;
@@ -926,13 +937,21 @@ function PetLayer() {
       hopTo(to.e, (to.at.left + sz / 2 - to.e.left) / Math.max(1, to.e.right - to.e.left));
     };
     next();
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      offTouch();
+    };
   }, [shown]);
-  // Alive at rest: a blink every 6-10 s (one short compositor animation; no timer while hidden or asleep).
+  // Alive at rest: a blink every 6-10 s (one short compositor animation on the eyes' own layer) - only while someone's
+  // been at home lately (a touch in the last 90 s). Untouched longer, nobody's looking: no timer, no frame at all; the
+  // next touch starts it again.
   useEffect(() => {
     if (!shown) return;
     let t = 0;
     const next = () => {
+      clearTimeout(t);
+      t = 0;
+      if (Date.now() - touched.peek() > LOOKED_MS) return;
       t = window.setTimeout(() => {
         const s = state.peek();
         if (s !== "sleepy" && s !== "happy") body.current?.blink();
@@ -940,7 +959,11 @@ function PetLayer() {
       }, 6000 + Math.random() * 4000);
     };
     next();
-    return () => clearTimeout(t);
+    const off = touched.subscribe(() => t || next());
+    return () => {
+      clearTimeout(t);
+      off();
+    };
   }, [shown]);
   // Listening: its ears glow with each word heard.
   useEffect(
@@ -1132,9 +1155,21 @@ export function PetOver() {
   useEffect(() => {
     if (!shown) return;
     let t = 0;
-    const next = () => (t = window.setTimeout(() => (state.peek() !== "sleepy" && body.current?.blink(), next()), 6000 + Math.random() * 4000));
+    // Over an app nobody may be looking either: blinks only within LOOKED_MS of its window showing or being touched.
+    let since = Date.now();
+    const next = () => {
+      clearTimeout(t);
+      t = 0;
+      if (Date.now() - since > LOOKED_MS) return;
+      t = window.setTimeout(() => (state.peek() !== "sleepy" && body.current?.blink(), next()), 6000 + Math.random() * 4000);
+    };
+    const poke = () => ((since = Date.now()), t || next());
+    const offs = ["petover.down", "petover.drag", "petover.tap"].map((ev) => powos.on(ev, poke));
     next();
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      offs.forEach((off) => off());
+    };
   }, [shown]);
   if (!(installedApps?.value ?? []).some((a) => a.id === APP)) return null;
   const s = state.value;
