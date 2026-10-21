@@ -12,5 +12,7 @@ class PowosVoiceInteractionService : VoiceInteractionService() {
     override fun onReady() {
         super.onReady()
         AssistWeb.get(this)
+        // The side button's release, for hold-to-talk (PowosAssistSession): read from now on, so the first hold has it.
+        PowerKey.start()
     }
 }

@@ -64,8 +64,21 @@ class PowosAssistSession(
         super.onShow(args, showFlags)
         screenText = ""
         shot = null
-        // A new summoning: the page forgets the last one (its question, answer view, cut-out).
+        // A new summoning: the page forgets the last one (its question, answer view, cut-out) - and listens.
         host?.bridge?.emit("assist.reset", null)
+        // Hold to talk: the side button still down, the dictation lasts until it's let go, and then sends (PowerKey
+        // reads the release as root; Android doesn't pass it on). Already up (or no reader): it ends at a short pause.
+        PowerKey.start()
+        if (PowerKey.down) {
+            host?.bridge?.emit("assist.held", null)
+            PowerKey.onRelease = {
+                android.util.Log.i("speech", "assist: side button let go")
+                host?.bridge?.emit("assist.keyup", null)
+            }
+        } else {
+            PowerKey.onRelease = null
+            host?.bridge?.emit("assist.quick", null)
+        }
         sendScreen()
         // Its page must answer (it never loaded, it hangs: a window over the app that can't be closed from it) - else
         // the session ends (dev.omalauncher.shell.PageWatchdog).
@@ -96,6 +109,7 @@ class PowosAssistSession(
 
     override fun onHide() {
         watchdog?.stop()
+        PowerKey.onRelease = null
         // The page stays warm after the panel goes: it stops listening (a summoning starts dictation, assist.tsx).
         host?.bridge?.emit("assist.hidden", null)
         super.onHide()

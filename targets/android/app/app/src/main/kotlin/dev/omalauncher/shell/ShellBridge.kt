@@ -270,6 +270,7 @@ class ShellBridge(
             "speech.start" -> listen(a.optBoolean(0))
             "speech.stop" -> speech.stop()
             "speech.hold" -> speech.hold()
+            "speech.quiet" -> speech.quiet(a.optLong(0, 1500))
             "speech.warm" -> speech.warm()
             "speech.cancel" -> speech.cancel()
             "keyboard.show" -> keyboard(true)

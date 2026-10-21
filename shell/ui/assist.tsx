@@ -21,8 +21,11 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { Bar } from "./bar.tsx";
 import { ChatView } from "./chat.tsx";
-import { openAssistant, setAskContext, takeOver } from "./assistant.ts";
-import { speech } from "./dictation.ts";
+import { openAssistant, pillTarget, setAskContext, takeOver } from "./assistant.ts";
+import { makeHold, speech } from "./dictation.ts";
+
+/** A summoning with the side button already let go: its dictation ends after this much silence. */
+const QUICK_SILENCE_MS = 1500;
 import type { AssistScreen } from "../types.ts";
 
 const screen = signal<AssistScreen | null>(null);
@@ -47,7 +50,10 @@ powos.on("assist.reset", () => {
 });
 // Put away: nothing listens or sends on (the words heard stay in the pill).
 powos.on("assist.hidden", () => takeOver());
-// The side button let go (when Android passes it on, PowosAssistSession.onKeyUp): the dictation ends - and so sends.
+// Hold to talk: the side button is still down - the dictation lasts until it's let go (assist.keyup: PowerKey reads the
+// release as root), then ends, and so sends. Already up: the dictation ends at a short pause instead of ~4 s.
+powos.on("assist.held", () => makeHold(pillTarget));
+powos.on("assist.quick", () => powos.speech.quiet(QUICK_SILENCE_MS));
 powos.on("assist.keyup", () => {
   if (speech.value.listening) powos.speech.stop();
 });

@@ -100,6 +100,11 @@ class Speech(
         session?.hold()
     }
 
+    /** A tap's dictation ends after [ms] with nothing heard instead of the usual ~4 s (the side button's quick ask). */
+    fun quiet(ms: Long) {
+        session?.quiet(ms)
+    }
+
     /** Binds the recognizer and works out its plan, without listening, so a press starts at once. */
     fun warm() = NativeSpeech.warm(context)
 
@@ -123,6 +128,9 @@ interface SpeechSession {
 
     /** Ends only at [stop] (a press still held). */
     fun hold()
+
+    /** Ends after [ms] with nothing heard (a tap's). */
+    fun quiet(ms: Long)
 
     /** Ends without onEnd. */
     fun cancel()
@@ -528,6 +536,10 @@ internal object NativeSpeech {
             d.hold = true
         }
 
+        override fun quiet(ms: Long) {
+            d.silenceMs = ms.coerceIn(800, 10_000)
+        }
+
         override fun cancel() {
             if (ended) return
             ended = true
@@ -705,7 +717,7 @@ internal object NativeSpeech {
  */
 internal class Dictation(
     var hold: Boolean,
-    private val silenceMs: Long,
+    var silenceMs: Long,
     private val clock: () -> Long,
 ) {
     /** Asked to stop: the next end of a segment is the end. */

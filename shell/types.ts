@@ -450,7 +450,8 @@ export interface Bridge {
    * The assistant's screen (index.html?mode=assist, over another app): what that app's screen showed - its text, an
    * outline, and a screenshot URL ("assist.context" brings them as they arrive) - and closing the assistant.
    * "assist.reset" comes with each summoning (the page starts dictating then), "assist.hidden" when it goes away,
-   * "assist.keyup" when the side button is let go (if Android passes that on).
+   * "assist.held" right after it when the side button is still down (hold to talk: a hold's dictation), then
+   * "assist.keyup" when it's let go; "assist.quick" instead when it was already up (the dictation ends at a short pause).
    */
   assist: {
     screen(): Promise<AssistScreen | null>;
@@ -611,6 +612,8 @@ export interface Bridge {
     hold(): Promise<void>;
     /** Binds the recognizer without listening (the mic stays closed), so the next start is immediate. */
     warm(): Promise<void>;
+    /** The dictation under way (a tap's) ends after [ms] with nothing heard instead of ~4 s. */
+    quiet(ms: number): Promise<void>;
   };
   keyboard: {
     show(): Promise<void>;
