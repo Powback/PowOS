@@ -350,14 +350,13 @@ function FromAgents() {
   );
 }
 
-export function PowAiPage() {
-  const shown = page.value === -1;
-  // Listed when the page comes into view, and again while it shows.
+/** Its sessions and mail, read when it comes into view and every few seconds while it shows (not while hidden). */
+function useAiRefresh(shown: boolean) {
   useEffect(() => {
     if (!shown) return;
     powos.ai.sessions();
     powos.ai.mail().then((m) => (mail.value = m));
-    // Not while home is behind an app or the screen is off (the page left on PowOS AI): asked again as it shows.
+    // Not while home is behind an app or the screen is off: asked again as it shows.
     const timer = window.setInterval(() => document.hidden || powos.ai.sessions(), REFRESH_MS);
     const vis = () => document.hidden || powos.ai.sessions();
     document.addEventListener("visibilitychange", vis);
@@ -366,52 +365,82 @@ export function PowAiPage() {
       document.removeEventListener("visibilitychange", vis);
     };
   }, [shown]);
+}
+
+/** Its header: the name and what the manager is doing. */
+export function AiHeader() {
   const { busy, items } = chat.value;
   const step = busy ? [...items].reverse().find((i) => i.kind === "tool" && i.ok == null) : null;
   return (
-    <div class={`ai-screen ${shown ? "shown" : ""}`}>
-      <header class="ai-top">
-        <span class="ai-title">PowOS AI</span>
-        <span class={`ai-state ${busy ? "busy" : ""}`}>
-          {busy ? `working${step && step.kind === "tool" ? ` · ${step.name}` : "…"}` : "ready"}
-        </span>
-      </header>
-      <div class="ai-scroll">
-        <Now />
-        <History />
-        <Work shown={shown} />
-        <Units shown={shown} />
-        <button type="button" class="ai-session tile" onClick={() => openAgents()}>
-          <span class="ai-dot" />
-          <span class="ai-session-main">
-            <span class="ai-session-task">Agents</span>
-            <span class="ai-session-meta muted">what every agent is on: tree, tasks, tools, comms</span>
-          </span>
-        </button>
-        <AtWork />
-        <FromAgents />
-      </div>
-      {/*
-       * Not a chat of its own (one assistant, one chat surface - ui/assistant.ts): the pill opens home's, where the
-       * conversation goes on; its mic opens it listening.
-       */}
-      <button type="button" class="ai-compose pill tile ai-ask" onClick={() => openAssistant()}>
-        <span class="ai-ask-text muted">ask PowOS AI</span>
-        <span
-          class="mic"
-          role="button"
-          aria-label="speak"
-          onClick={(e) => {
-            e.stopPropagation();
-            openAssistant({ listen: true, autosend: true });
-          }}
-        >
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="9" y="2" width="6" height="12" rx="3" />
-            <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" />
-          </svg>
+    <header class="ai-top">
+      <span class="ai-title">PowOS AI</span>
+      <span class={`ai-state ${busy ? "busy" : ""}`}>
+        {busy ? `working${step && step.kind === "tool" ? ` · ${step.name}` : "…"}` : "ready"}
+      </span>
+    </header>
+  );
+}
+
+/**
+ * What PowOS AI shows (the page now, the AI panel next - the same content in whatever holds it): the latest turn, the
+ * whole conversation folded, the work board, units, the agents. [shown]: on screen - its feeds run only then.
+ */
+export function AiContent({ shown }: { shown: boolean }) {
+  useAiRefresh(shown);
+  return (
+    <>
+      <Now />
+      <History />
+      <Work shown={shown} />
+      <Units shown={shown} />
+      <button type="button" class="ai-session tile" onClick={() => openAgents()}>
+        <span class="ai-dot" />
+        <span class="ai-session-main">
+          <span class="ai-session-task">Agents</span>
+          <span class="ai-session-meta muted">what every agent is on: tree, tasks, tools, comms</span>
         </span>
       </button>
+      <AtWork />
+      <FromAgents />
+    </>
+  );
+}
+
+/**
+ * Its ask pill: not a chat of its own (one assistant, one chat surface - ui/assistant.ts) - it opens home's, where the
+ * conversation goes on; its mic opens it listening.
+ */
+export function AiAskPill() {
+  return (
+    <button type="button" class="ai-compose pill tile ai-ask" onClick={() => openAssistant()}>
+      <span class="ai-ask-text muted">ask PowOS AI</span>
+      <span
+        class="mic"
+        role="button"
+        aria-label="speak"
+        onClick={(e) => {
+          e.stopPropagation();
+          openAssistant({ listen: true, autosend: true });
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
+export function PowAiPage() {
+  const shown = page.value === -1;
+  return (
+    <div class={`ai-screen ${shown ? "shown" : ""}`}>
+      <AiHeader />
+      <div class="ai-scroll">
+        <AiContent shown={shown} />
+      </div>
+      <AiAskPill />
     </div>
   );
 }
