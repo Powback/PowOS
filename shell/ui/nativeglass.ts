@@ -170,8 +170,11 @@ function measure(): string {
   if (home && !home.classList.contains("editing")) {
     const h = parseFloat(getComputedStyle(home, "::after").height) || 0;
     const r = home.getBoundingClientRect();
-    if (h >= 1 && r.width >= 1) {
-      out.push(`${f(Math.max(r.left, 0))} ${f(r.bottom - h)} ${f(Math.min(r.right, W) - Math.max(r.left, 0))} ${f(h)} 0 0 0 0 1 ${blur}`);
+    const x0 = Math.max(r.left, 0);
+    const w = Math.min(r.right, W) - x0;
+    // Off screen (home slid aside for PowOS AI's page): none.
+    if (h >= 1 && w >= 1) {
+      out.push(`${f(x0)} ${f(r.bottom - h)} ${f(w)} ${f(h)} 0 0 0 0 1 ${blur}`);
       n++;
     }
   }

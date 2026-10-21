@@ -145,14 +145,14 @@ internal class LiquidGlass(
     override fun onDraw(canvas: Canvas) {
         if (broken || look.off || light == null || heavy == null || rims.isEmpty()) return
         try {
-            draw(canvas)
+            drawRims(canvas)
         } catch (e: RuntimeException) {
             Log.w(TAG, "liquid glass failed: the plain blur stays", e)
             broken = true
         }
     }
 
-    private fun draw(canvas: Canvas) {
+    private fun drawRims(canvas: Canvas) {
         val band = look.band
         shader.setFloatUniform("look", band, look.refraction, look.rim, look.dispersion)
         for (r in rims) {
