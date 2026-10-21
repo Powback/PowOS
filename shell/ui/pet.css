@@ -100,3 +100,5 @@
 .ai-ask { display: flex; align-items: center; width: 100%; text-align: left; }
 .ai-ask-text { flex: 1; padding: 0 4px; }
 .ai-history-list { max-height: none; overflow: visible; padding: 0; }
+.pet-talk .pet-asked { font-size: var(--text-small); }
+.pet-talk .pet-reply { -webkit-line-clamp: 4; }

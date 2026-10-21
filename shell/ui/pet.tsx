@@ -12,8 +12,9 @@
  * An agent can set a mood for a while (`powos pet mood`, `powos pet say --mood`): the local.pet app's module (apps/pet).
  *
  * One assistant (ui/assistant.ts): the pet is the face and notifier of the ONE conversation (the manager's) and its
- * ONE chat surface, home's search pill in chat mode. Tap it: that surface opens, listening (what's heard is asked);
- * while it's open the pet sits on it, by the pill. Closed, the pet only speaks in short bubbles (3-6 s, one at a time,
+ * ONE chat surface, home's search pill in chat mode. Tap it: it listens right there - its bubble shows what it hears,
+ * then the reply, a few lines; nothing else opens (a tap on that bubble opens the chat surface). While the chat surface
+ * is open the pet sits on it, by the pill. Otherwise the pet only speaks in short bubbles (3-6 s, one at a time,
  * lines arriving together batched; a tap opens them, "more" opens PowOS AI's page): what's said through it (`powos pet
  * say`), deploy notes and agents' mail as they arrive (their notifications stay), and the manager's answers nobody
  * was looking at. Long press: PowOS AI's page (the conversation's history and the work board).
@@ -26,8 +27,8 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { carry, chat, chatting, closeDrawer, editing, menu, page, stored } from "../state.ts";
 import { drawerOpen, notifOpen } from "./gesture.ts";
-import { speech } from "./bar.tsx";
-import { openAssistant } from "./assistant.ts";
+import { dictate, hearing, speech, type MicTarget } from "./bar.tsx";
+import { askQueued, openAssistant } from "./assistant.ts";
 import { agent, agentIds, asks, tasks, useAgents } from "../agents.ts";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { installedApps } from "../apps/pages.ts";
@@ -116,7 +117,8 @@ const needsYou = computed(() => {
 
 const state = computed<State>(() => {
   const t = clock.value;
-  if (listening.value && chatOpen.value) return "listening";
+  if ((listening.value && chatOpen.value) || petListening.value) return "listening";
+  if (talk.value?.asked && !talk.value.done) return "working";
   if (chatOpen.value && chat.value.busy) return "working";
   const m = moodSet.value;
   if (m.mood && m.until > t) return m.mood as State;
@@ -180,6 +182,104 @@ document.addEventListener("visibilitychange", () => {
 const chatOpen = computed(() => drawerOpen.value && chatting.value);
 const listening = computed(() => speech.value.listening);
 
+// ---- talking, right there --------------------------------------------------------------------------------------------
+
+/**
+ * A tap on the pet: it listens where it is - its bubble shows what it hears, then the manager's reply (a few lines).
+ * Nothing else opens; a tap on that bubble opens the full chat surface. The question goes the one way every ask goes
+ * (assistant.ts askQueued: one conversation, waiting for a turn under way).
+ */
+const talk = signal<{ asked: string | null; done: boolean } | null>(null);
+const petListening = signal(false);
+let talkTimer = 0;
+const petMic: MicTarget = {
+  typed: () => "",
+  started: () => (petListening.value = true),
+  heard: (full) => {
+    petListening.value = false;
+    const text = full.trim();
+    if (!text) {
+      talk.value = null;
+      return;
+    }
+    talk.value = { asked: text, done: false };
+    askQueued(text);
+  },
+};
+// The recognizer stopped without a result (an error, cancelled, unavailable): the talk bubble goes.
+effect(() => {
+  if (!speech.value.listening && petListening.value && speech.value.error) {
+    petListening.value = false;
+    talk.value = null;
+  }
+});
+
+/** The reply to what was asked through the pet so far ("" until it starts; null: not asked yet - waiting its turn). */
+const reply = computed(() => {
+  const t = talk.value;
+  if (!t?.asked) return null;
+  const items = chat.value.items;
+  const at = items.findLastIndex((i) => i.kind === "user" && (i as { text: string }).text.startsWith(t.asked!));
+  if (at < 0) return null;
+  const a = items.slice(at + 1).findLast((i) => i.kind === "assistant") as { text: string } | undefined;
+  return a?.text ?? "";
+});
+// The reply finished: shown a while (longer for more words), then the bubble goes - unless it was tapped open.
+effect(() => {
+  const t = talk.value;
+  const r = reply.value;
+  const busy = chat.value.busy;
+  if (!t || t.done || r == null || busy || !r) return;
+  talk.value = { ...t, done: true };
+  clearTimeout(talkTimer);
+  talkTimer = window.setTimeout(() => (talk.value = null), Math.min(12000, 4000 + r.length * 40));
+});
+
+function startTalk() {
+  clearTimeout(talkTimer);
+  bubble.value = null;
+  talk.value = { asked: null, done: false };
+  dictate(petMic);
+  // The recognizer didn't start (no mic, unavailable): not left listening.
+  window.setTimeout(() => {
+    if (talk.value?.asked == null && !speech.value.listening) {
+      petListening.value = false;
+      if (talk.value && !talk.value.asked) talk.value = null;
+    }
+  }, 2500);
+}
+
+/** Its talk bubble: what it hears, then the reply - a tap opens the full chat surface. */
+function TalkBubble({ style, cls }: { style: Record<string, string>; cls: string }) {
+  const t = talk.value!;
+  const heard = petListening.value ? (hearing(petMic) ?? "") : null;
+  const r = reply.value;
+  return (
+    <div
+      class={`pet-bubble tile pet-talk ${cls}`}
+      style={style}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={() => {
+        clearTimeout(talkTimer);
+        talk.value = null;
+        if (petListening.value) powos.speech.stop();
+        openAssistant();
+      }}
+    >
+      {heard != null ? (
+        <div class="pet-line">{heard || <span class="muted">listening…</span>}</div>
+      ) : (
+        <>
+          {t.asked && <div class="pet-line pet-asked muted">{t.asked}</div>}
+          <div class="pet-line pet-short pet-reply">
+            {r == null ? <span class="muted">{chat.value.busy ? "it's busy - asking when it's done" : "…"}</span> : r || <span class="muted">thinking…</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** The chat's latest turn: its answer so far. */
 function latestAnswer() {
   const items = chat.value.items;
@@ -193,7 +293,7 @@ effect(() => {
   const c = chat.value;
   // A turn ended (the manager answering mail, or a question asked and the chat closed since) with nobody looking at
   // the conversation - not the chat surface, not PowOS AI's page: a short bubble.
-  if (wasBusy && !c.busy && !chatOpen.peek() && page.peek() !== -1) {
+  if (wasBusy && !c.busy && !chatOpen.peek() && page.peek() !== -1 && !talk.peek()) {
     const a = latestAnswer();
     if (a) say({ text: a.slice(0, 160), from: "manager" });
   }
@@ -369,13 +469,15 @@ function Sprite() {
 
 function Bubble({ at }: { at: { left: number; top: number } }) {
   const b = bubble.value;
-  if (!b) return null;
+  if (!b && !talk.value) return null;
   const right = at.left + SIZE / 2 > innerWidth / 2;
   const below = at.top < 140;
   const style: Record<string, string> = {
     [right ? "right" : "left"]: `${Math.max(MARGIN, right ? innerWidth - at.left - SIZE : at.left)}px`,
     [below ? "top" : "bottom"]: below ? `${at.top + SIZE + 6}px` : `${innerHeight - at.top + 6}px`,
   };
+  if (talk.value) return <TalkBubble style={style} cls={`${right ? "right" : "left"} ${below ? "below" : "above"}`} />;
+  if (!b) return null;
   const lines = b.lines;
   const last = lines.at(-1);
   return (
@@ -501,12 +603,10 @@ function PetLayer() {
             return;
           }
           if (p.long) return;
-          // A tap: the chat surface, listening (what's heard is asked); listening already, it stops (and asks).
-          if (listening.value) powos.speech.stop();
-          else {
-            bubble.value = null;
-            openAssistant({ listen: true, autosend: true });
-          }
+          // A tap: it listens right there (its bubble shows what it hears, then the reply); listening, it stops.
+          if (petListening.value) powos.speech.stop();
+          else if (!face) startTalk();
+          else openAssistant({ listen: true, autosend: true });
         }}
         onPointerCancel={() => {
           const p = press.current;
