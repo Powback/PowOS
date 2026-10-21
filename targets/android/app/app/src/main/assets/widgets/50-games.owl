@@ -19,11 +19,11 @@ widget "games" {
   // Launching: app() starts `steam steam://rungameid/...` as a graphical app - it hands the game to the running Steam
   // (or starts Steam) - and brings the PowOS desktop up, where the game opens.
 
-  component Ago(stamp) {
+  component Ago(stamp, size = 11) {
     let d = now - stamp
     Text {
       text: stamp == 0 ? "never played" : d < 3600 ? "${max(floor(d / 60), 1)}m ago" : d < 86400 ? "${floor(d / 3600)}h ago" : d < 86400 * 60 ? "${floor(d / 86400)}d ago" : fmtTime(stamp, "MMM yyyy")
-      style: small; color: muted; maxLines: 1
+      fontSize: size; color: muted; maxLines: 1
     }
   }
 
@@ -42,13 +42,16 @@ widget "games" {
   // header (16 + 8) and the hero (its badge + 8 + 8).
   let iw = tileWidth == null ? 340 : tileWidth - 24
   let ih = tileHeight == null ? 180 : tileHeight - 24
-  let heroSide = iw < 260 ? 34 : 46
-  let listCols = iw < 330 ? 1 : 2
+  let heroSide = clamp(round(min(iw * 0.15, ih * 0.2)), 34, 72)
+  let listCols = iw < 360 ? 1 : 2
   let avail = ih - 24 - (heroSide + 8) - 8
   let listRows = max(floor((avail + 6) / 32), 0)
   // Fewer games than rows: each row taller (its badge up to 54), so the list still reaches the tile's foot.
   let need = max(ceil((len(games) - 1) / listCols), 1)
   let rowSide = clamp(floor((avail + 6) / max(min(need, listRows), 1)) - 6, 26, 54)
+  // Text in step with its badge (its two lines about the badge's height), and a name of ~18 characters fitting its column.
+  let rowFs = clamp(min(round(rowSide * 0.38), floor((iw / listCols - rowSide - 14) / (18 * 0.62))), 10, 20)
+  let heroFs = clamp(round(heroSide * 0.36), 13, 24)
 
   let rest = drop(games, 1).take(listRows * listCols)
 
@@ -73,10 +76,10 @@ widget "games" {
         Badge { game: hero; side: heroSide }
         Column {
           gap: 2; weight: 1
-          Text { text: hero.name; style: body; bold: true; maxLines: 1 }
-          Ago { stamp: hero.last }
+          Text { text: hero.name; fontSize: heroFs; bold: true; maxLines: 1 }
+          Ago { stamp: hero.last; size: round(heroFs * 0.8) }
         }
-        Text { text: "▶"; color: accent; fontSize: 15; width: 18; align: center }
+        Text { text: "▶"; color: accent; fontSize: round(heroFs * 1.1); width: round(heroFs * 1.3); align: center }
       }
       Grid {
         columns: listCols; gap: 6
@@ -87,8 +90,8 @@ widget "games" {
             Badge { game: g; side: rowSide }
             Column {
               gap: 0; weight: 1
-              Text { text: g.name; style: small; maxLines: 1 }
-              Ago { stamp: g.last }
+              Text { text: g.name; fontSize: rowFs; maxLines: 1 }
+              Ago { stamp: g.last; size: round(rowFs * 0.85) }
             }
           }
         }

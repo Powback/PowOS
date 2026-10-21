@@ -95,6 +95,9 @@ owl_trees() {
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
 browser() { # PASS
   local mounts=(-v "$S:/shell:ro" -v "$work:/work" -v "$out:/out" -v "$SHELL_DIR/dev/preview/preview.mjs:/usr/src/app/preview.mjs:ro" -v "$work/apps:/apps:ro")
+  # shell/fonts/nerd_symbols.ttf links out of the shell (../../targets/android/.../res/font): where it points, so OWL's
+  # icons draw as on the phone instead of as empty boxes the fit checks can't see.
+  mounts+=(-v "$REPO/targets/android/app/app/src/main/res/font:/targets/android/app/app/src/main/res/font:ro")
   [ -n "$wallpaper" ] && mounts+=(-v "$(cd "$(dirname "$wallpaper")" && pwd)/$(basename "$wallpaper"):/wallpaper.jpg:ro")
   docker run --rm --platform linux/arm64 --shm-size 1g "${mounts[@]}" -e PASS="$1" -e HOST_WORK="$work" -e PREVIEW_THEMES="$themes" \
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \

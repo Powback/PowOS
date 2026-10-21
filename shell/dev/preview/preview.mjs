@@ -27,6 +27,7 @@ const PASS = process.env.PASS || "render";
 const THEMES = (process.env.PREVIEW_THEMES || "gruvbox nord").split(/\s+/).filter(Boolean);
 const ONLY = process.env.PREVIEW_ONLY ? new RegExp(process.env.PREVIEW_ONLY) : null;
 const EMPTY = Number(process.env.PREVIEW_EMPTY || 0.12);
+const COVER = Number(process.env.PREVIEW_COVER || 0.25);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The gate's quick run: checks only (no contact sheets), the first theme, the cover screen's screen. */
 const FAST = process.env.PREVIEW_FAST === "1";
@@ -241,7 +242,7 @@ async function sheet(browser, w, t, max) {
     window.__pv = m;
     await m.mount(spec);
   }, { title: w.title, kind: w.kind, app: w.app, entry: w.entry, panel: w.panel, data: w.data, cells: w.cells });
-  dbg(w.id, t.name, "mounted");
+  dbg(w.id, t.name, "mounted", process.env.PREVIEW_DEBUG ? await page.evaluate(() => [...document.fonts].map((f) => `${f.family}:${f.status}`).join(" ")) : "");
   return { page, errors };
 }
 
@@ -424,7 +425,7 @@ try {
         for (const name of FAST ? THEMES.slice(0, 1) : THEMES) {
           const t = theme(name);
           const { page, errors } = await sheet(browser, w, t, 1500);
-          const found = await page.evaluate((e) => window.__pv.check(e), EMPTY);
+          const found = await page.evaluate((e, c) => window.__pv.check(e, c), EMPTY, COVER);
           await sleep(100);
           if (!FAST) perTheme.push({ t: name, png: await page.screenshot({ encoding: "base64", fullPage: true }) });
           for (const [key, list] of Object.entries(found)) {
