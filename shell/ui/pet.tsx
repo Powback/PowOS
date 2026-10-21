@@ -919,7 +919,6 @@ function PetLayer() {
       if (Date.now() - touched.peek() > HOP_IDLE_MS) return;
       t = window.setTimeout(hop, 180_000 + Math.random() * 240_000);
     };
-    const offTouch = touched.subscribe(() => t || next());
     const hop = () => {
       next();
       const node = el.current;
@@ -936,6 +935,8 @@ function PetLayer() {
       if (!to) return;
       hopTo(to.e, (to.at.left + sz / 2 - to.e.left) / Math.max(1, to.e.right - to.e.left));
     };
+    // After hop's declaration: subscribe() calls back at once, and next() schedules hop (a TDZ error before it).
+    const offTouch = touched.subscribe(() => t || next());
     next();
     return () => {
       clearTimeout(t);
