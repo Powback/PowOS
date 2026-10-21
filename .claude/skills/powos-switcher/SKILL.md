@@ -32,15 +32,15 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
 - Wallpaper loop (760cf6b): an announcement of a new picture must not re-look at the wallpaper (info(look=false));
   a live video wallpaper differs every frame and looped captures several times a second.
 
-## Verify: record + frame-step (~/hg, Mac)
+## Verify: record + frame-step (tools/phone/record/)
 - Wait: ONE `tools/phone/idle.sh --wait 120 1800` (never loop adb). Screen must already be on.
-- ~/hg/rec.js: CDP recorder injected into home's page (hooks __powosHost.emit for recents.*/system.*, logs every rAF
+- rec.js: CDP recorder injected into home's page (hooks __powosHost.emit for recents.*/system.*, logs every rAF
   where .screens' opacity/transform or the layer's classes change, rAF gaps, visibility). Install/read with
-  ~/hg/cdp.ts through powos-vadb (adb forward tcp:9333 to webview_devtools_remote_<pid>).
-- ~/hg/swipe.sh (run as root on the phone): touch-IRQ guard, home -> AI page, am start Settings, screenrecord on the
+  cdp.ts through powos-vadb (adb forward tcp:9333 to webview_devtools_remote_<pid>).
+- swipe.sh (run as root on the phone): touch-IRQ guard, home -> AI page, am start Settings, screenrecord on the
   cover display (--display-id 4630946316123810436; /sdcard is not writable for root's screenrecord: use
-  /data/local/tmp + chmod 644), `input swipe 558 2475 558 1300 140`, screencaps, logcat -v epoch. ~/hg/run2.sh <tag>
-  does it all and pulls to ~/hg/<tag>/.
+  /data/local/tmp + chmod 644), `input swipe 558 2475 558 1300 140`, screencaps, logcat -v epoch. `tools/phone/record/run.sh <tag>`
+  does it all and pulls to ~/powos-rec/<tag>/ ($OUT).
 - Frame-step: `ffmpeg -i hg.mp4 -vf scale=170:-1 -fps_mode passthrough k%02d.png`, then `tile=13x3` contact sheets;
   every frame between the swipe and the settle must show home's content.
 - Logcat tags: PowosNavGesture (down/UP/outcome, lift, speed), PowosSwitcher (begin/show), PowosRecents
