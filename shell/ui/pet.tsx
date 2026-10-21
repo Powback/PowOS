@@ -25,9 +25,9 @@
 import { computed, effect, signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
-import { carry, chat, chatting, closeDrawer, editing, menu, page, stored } from "../state.ts";
+import { carry, chat, chatting, closeDrawer, editing, menu, openPanel, page, pullPanels, stored } from "../state.ts";
 import { drawerOpen, notifOpen } from "./gesture.ts";
-import { dictate, hearing, speech, type MicTarget } from "./bar.tsx";
+import { dictate, hearing, speech, type MicTarget } from "./dictation.ts";
 import { askQueued, openAssistant } from "./assistant.ts";
 import { agent, agentIds, asks, tasks, useAgents } from "../agents.ts";
 import { useDb, useRows } from "../apps/stdb.ts";
@@ -234,6 +234,12 @@ effect(() => {
   clearTimeout(talkTimer);
   talkTimer = window.setTimeout(() => (talk.value = null), Math.min(12000, 4000 + r.length * 40));
 });
+
+/** PowOS AI: its pull-up panel while that experiment is on (state.ts pullPanels), else its page left of home. */
+function openAi() {
+  if (pullPanels.peek() === "on") openPanel("ai");
+  else page.value = -1;
+}
 
 function startTalk() {
   clearTimeout(talkTimer);
@@ -509,7 +515,7 @@ function Bubble({ at }: { at: { left: number; top: number } }) {
             onClick={(e) => {
               e.stopPropagation();
               bubble.value = null;
-              page.value = -1;
+              openAi();
             }}
           >
             more ›
@@ -569,7 +575,7 @@ function PetLayer() {
             p.long = true;
             navigator.vibrate?.(12);
             if (chatOpen.peek()) closeDrawer();
-            page.value = -1;
+            openAi();
           }, LONG_MS);
           press.current = p;
         }}
