@@ -79,6 +79,8 @@ class PowosAssistSession(
 
     override fun onHide() {
         watchdog?.stop()
+        // The page stays warm after the panel goes: it stops listening (a summoning starts dictation, assist.tsx).
+        host?.bridge?.emit("assist.hidden", null)
         super.onHide()
     }
 

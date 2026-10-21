@@ -49,6 +49,25 @@ async function listen(hold: boolean, target: MicTarget) {
   if (r === "asked") asked = target;
 }
 
+/** Dictates into [target] as a tap on its mic does (ends at the next pause, nothing is sent), unless it's listening. */
+export function dictate(target: MicTarget) {
+  if (pending || asked || speech.value.listening) return;
+  listen(false, target);
+}
+
+/**
+ * Stops listening for [target] without waiting for the end: what's heard so far goes into its field (as a dictation,
+ * never sent) - the user started typing, tapped the field, or the field went away.
+ */
+export function interrupt(target: MicTarget) {
+  const p = pending;
+  if (!p || p.target !== target) return;
+  const now = join(p.typed, speech.value.text);
+  pending = null;
+  powos.speech.cancel();
+  p.target.heard(now, false);
+}
+
 powos.on("speech.state", (s: { listening: boolean; text: string; error: string | null }) => (speech.value = s));
 powos.on("speech.done", ({ text }: { text: string }) => {
   const p = pending;
