@@ -35,10 +35,12 @@ object HiddenApi {
             "Landroid/content/ContextWrapper",
             "Landroid/app/ActivityThread",
             // The window blurs (shell/WindowBlur, shell/GlassBlur): a window's surface (View.getViewRootImpl,
-            // ViewRootImpl.getSurfaceControl) and its blur (Transaction.setBackgroundBlurRadius / setBlurRegions).
+            // ViewRootImpl.getSurfaceControl / createBackgroundBlurDrawable) and its blur (Transaction.setBackgroundBlurRadius / setBlurRegions).
             "Landroid/view/View;",
             "Landroid/view/ViewRootImpl",
             "Landroid/view/SurfaceControl",
+            // The framework's own blur-region encoding (GlassBlur.Codec): the OEM's region layout, never guessed.
+            "Lcom/android/internal/graphics/drawable/BackgroundBlurDrawable",
         )
 
     @Volatile private var done = false
