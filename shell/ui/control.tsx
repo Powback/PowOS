@@ -5,12 +5,12 @@
  * runs it: screenshot, lock), a long press opens its page in Settings. It lives in the notification panel's place, so the
  * pull, the finger following it and the swipe up to shut it are the panel's own (gesture.ts).
  */
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Fragment, type ComponentChildren } from "preact";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
-import { notifOpen } from "./gesture.ts";
+import { held, notifOpen } from "./gesture.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
 import { openGlasses } from "../glasses/open.ts";
@@ -108,7 +108,7 @@ function shut() {
 }
 
 /** A tile's tap and long press. */
-function usePress(t: QuickTile) {
+function usePress(t: QuickTile, hold = true) {
   const timer = useRef(0);
   const held = useRef(false);
   const open = () => {
@@ -122,7 +122,8 @@ function usePress(t: QuickTile) {
   return {
     onPointerDown: () => {
       held.current = false;
-      timer.current = window.setTimeout(open, HOLD);
+      // In a reorderable row the long press is the pickup's (useReorder); its page opens from a still hold there.
+      if (hold) timer.current = window.setTimeout(open, HOLD);
     },
     onPointerUp: () => clearTimeout(timer.current),
     onPointerCancel: () => clearTimeout(timer.current),
@@ -277,9 +278,9 @@ function RemotePick() {
   );
 }
 
-export function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
+export function Tile({ t, big = false, hold = true }: { t: QuickTile; big?: boolean; hold?: boolean }) {
   return (
-    <button type="button" class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""}`} {...usePress(t)}>
+    <button type="button" class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""}`} {...usePress(t, hold)}>
       <span class="cc-icon">
         <Icon name={tileIcon(t)} />
       </span>
@@ -515,9 +516,7 @@ const opened = signal<string | null>(null);
 
 function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
   const first = ts[0];
-  const press = usePress(first);
-  const timer = useRef(0);
-  const held = useRef(false);
+  const press = usePress(first, false);
   const st = groupState(g, ts);
   const several = ts.length > 1;
   const open = opened.value === g.id;
@@ -525,23 +524,12 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
   return (
     <button
       type="button"
+      data-key={g.id}
       class={`cc-tile ${st.on ? "on" : ""} ${open ? "opened" : ""}`}
       aria-label={`${g.label}: ${st.detail}`}
       aria-expanded={several ? open : undefined}
-      onPointerDown={() => {
-        held.current = false;
-        timer.current = window.setTimeout(() => {
-          held.current = true;
-          if (several) toggle();
-          else press.onPointerDown();
-        }, HOLD);
-      }}
-      onPointerUp={() => clearTimeout(timer.current)}
-      onPointerCancel={() => clearTimeout(timer.current)}
-      onPointerLeave={() => clearTimeout(timer.current)}
       onContextMenu={(e: Event) => e.preventDefault()}
       onClick={() => {
-        if (held.current) return;
         // Remote input and the glasses open their own screens; the rest switch or run.
         if (first.id === REMOTE_ID) return (shut(), openRemote());
         if (first.id === GLASSES_ID) return (shut(), openGlasses());
@@ -573,32 +561,206 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
 
 /** A member under an open category: a small round toggle over its name (remote input and the glasses their own). */
 function Sub({ t }: { t: QuickTile }) {
-  if (t.id === REMOTE_ID) return <RemoteTile t={t} />;
-  if (t.id === GLASSES_ID) return <GlassesTile t={t} />;
+  let face;
+  if (t.id === REMOTE_ID) face = <RemoteTile t={t} />;
+  else if (t.id === GLASSES_ID) face = <GlassesTile t={t} />;
   // OnePlus Share and Google's Quick Share are one member: "quick share".
-  if (t.app === "com.oneplus.oshare" || t.app === "com.google.android.gms") return <Tile t={{ ...t, label: "quick share" }} />;
-  return <Tile t={t} />;
+  else if (t.app === "com.oneplus.oshare" || t.app === "com.google.android.gms") face = <Tile t={{ ...t, label: "quick share" }} hold={false} />;
+  else face = <Tile t={t} hold={false} />;
+  return (
+    <div class="cc-sub" data-key={t.id}>
+      {face}
+    </div>
+  );
+}
+
+/** Dragged this far (px) before the long press, it's a scroll or a swipe, not a pickup. */
+const PICK_SLOP = 8;
+
+/**
+ * Long-press-drag reordering of a container's items (children with data-key, direct or in rows): held still for HOLD
+ * a tile is picked up (a light haptic) and follows the finger; the others make room live - each eased from where it
+ * was (a FLIP: its old place as a transform, played to none), nothing laid out by hand. Let go: the new order to
+ * [done]. Held and let go without moving: [still] (a category's open/close, a member's page). While one is held the
+ * finger is the control center's (gesture.ts held: the shade's close lets go), and the page doesn't scroll under it.
+ */
+function useReorder(keys: string[], done: (keys: string[]) => void, still: (key: string) => void, onPick?: () => void) {
+  const box = useRef<HTMLDivElement>(null);
+  const [live, setLive] = useState<string[] | null>(null);
+  const d = useRef<{
+    key: string;
+    x0: number;
+    y0: number;
+    x: number;
+    y: number;
+    gx: number;
+    gy: number;
+    picked: boolean;
+    moved: boolean;
+    timer: number;
+  } | null>(null);
+  const swallowClick = useRef(false);
+  const order = live ?? keys;
+  const item = (k: string) => box.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(k)}"]`) ?? null;
+  const own = (el: Element | null) => el && el.closest("[data-reorder]") === box.current;
+  /** The held one under the finger: its offset from its slot (which moves as the order does). */
+  const place = () => {
+    const c = d.current;
+    const el = c?.picked ? item(c.key) : null;
+    if (!c || !el) return;
+    el.style.transform = "none";
+    const r = el.getBoundingClientRect();
+    el.style.transform = `translate(${c.x - c.gx - r.left}px, ${c.y - c.gy - r.top}px) scale(1.06)`;
+  };
+  // FLIP: every item that moved since the last order eases from its old place.
+  const rects = useRef(new Map<string, DOMRect>());
+  useLayoutEffect(() => {
+    const next = new Map<string, DOMRect>();
+    for (const k of order) {
+      const el = item(k);
+      if (!el) continue;
+      if (d.current?.picked && d.current.key === k) continue;
+      const r = el.getBoundingClientRect();
+      next.set(k, r);
+      const was = rects.current.get(k);
+      if (live && was && (Math.abs(was.left - r.left) > 0.5 || Math.abs(was.top - r.top) > 0.5))
+        el.animate([{ transform: `translate(${was.left - r.left}px, ${was.top - r.top}px)` }, { transform: "none" }], {
+          duration: 180,
+          easing: "cubic-bezier(0.2, 0.9, 0.3, 1)",
+        });
+    }
+    rects.current = next;
+    place();
+  }, [order.join()]);
+  const end = () => {
+    const c = d.current;
+    d.current = null;
+    if (!c) return;
+    clearTimeout(c.timer);
+    if (!c.picked) return;
+    held.value = false;
+    swallowClick.current = true;
+    const el = item(c.key);
+    el?.classList.remove("held");
+    if (el) el.style.transform = "";
+    if (!c.moved) still(c.key);
+    else if (live) done(live);
+    setLive(null);
+  };
+  const handlers = {
+    ref: box,
+    "data-reorder": "",
+    onPointerDown: (e: PointerEvent) => {
+      const el = (e.target as Element).closest<HTMLElement>("[data-key]");
+      if (!el || !own(el) || (e.target as Element).closest(".cc-more")) return;
+      const key = el.dataset.key!;
+      swallowClick.current = false;
+      const r = el.getBoundingClientRect();
+      const c = { key, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, gx: e.clientX - r.left, gy: e.clientY - r.top, picked: false, moved: false, timer: 0 };
+      c.timer = window.setTimeout(() => {
+        if (d.current !== c) return;
+        c.picked = true;
+        held.value = true;
+        onPick?.();
+        navigator.vibrate?.(8);
+        try {
+          box.current?.setPointerCapture(e.pointerId);
+        } catch {}
+        item(key)?.classList.add("held");
+        rects.current = new Map(order.map((k) => [k, item(k)?.getBoundingClientRect()]).filter((x): x is [string, DOMRect] => !!x[1]));
+        setLive([...order]);
+      }, HOLD);
+      d.current = c;
+    },
+    onPointerMove: (e: PointerEvent) => {
+      const c = d.current;
+      if (!c) return;
+      c.x = e.clientX;
+      c.y = e.clientY;
+      const far = Math.hypot(c.x - c.x0, c.y - c.y0) > PICK_SLOP;
+      if (!c.picked) {
+        // Moving before the hold: a scroll, a swipe, a tap that slid - not a pickup.
+        if (far) {
+          clearTimeout(c.timer);
+          d.current = null;
+        }
+        return;
+      }
+      if (far) c.moved = true;
+      // The slot whose middle is nearest the finger is where it goes.
+      const now = live ?? order;
+      let best = -1;
+      let dist = Infinity;
+      now.forEach((k, i) => {
+        if (k === c.key) return;
+        const r = item(k)?.getBoundingClientRect();
+        if (!r) return;
+        const dd = Math.hypot(r.left + r.width / 2 - c.x, r.top + r.height / 2 - c.y);
+        if (dd < dist) ((dist = dd), (best = i));
+      });
+      const from = now.indexOf(c.key);
+      const r0 = item(now[best])?.getBoundingClientRect();
+      if (best >= 0 && best !== from && r0 && dist < Math.max(r0.width, r0.height) * 0.6) {
+        const next = now.filter((k) => k !== c.key);
+        next.splice(best, 0, c.key);
+        setLive(next);
+      } else place();
+    },
+    onPointerUp: end,
+    onPointerCancel: end,
+    // Held: the page under it doesn't scroll (and so doesn't cancel the pointer).
+    onTouchMove: (e: TouchEvent) => d.current?.picked && e.cancelable && e.preventDefault(),
+    // A pickup's release isn't also a tap on what was held.
+    onClickCapture: (e: Event) => {
+      if (!swallowClick.current) return;
+      swallowClick.current = false;
+      e.stopPropagation();
+      e.preventDefault();
+    },
+    onContextMenu: (e: Event) => e.preventDefault(),
+  };
+  return { order, handlers, dragging: live != null };
+}
+
+/**
+ * Saves an order of the eight and their members as the control center's arrangement (controls.layout's order): the
+ * categories one after another, each with its members in their order - so a category's first member (its tap) is the
+ * one put first.
+ */
+function saveArrangement(groups: { g: Group; ts: QuickTile[] }[]) {
+  const ids = groups.flatMap((x) => x.ts.map((t) => t.id));
+  const l = { order: [...ids, ...layout.value.order.filter((id) => !ids.includes(id))], hidden: layout.value.hidden };
+  layout.value = l;
+  powos.store.set("controls.layout", l);
 }
 
 /**
  * A row's unfolding: under each row of four, the open category's members when it's in that row. The height animates
  * (a grid row from 0fr to 1fr); closing, the members stay drawn while it folds away.
  */
-function Unfold({ group }: { group: { g: Group; ts: QuickTile[] } | undefined }) {
+function Unfold({ group, reorder }: { group: { g: Group; ts: QuickTile[] } | undefined; reorder: (gid: string, ids: string[]) => void }) {
   const last = useRef(group);
   if (group) last.current = group;
   const shown = group ?? last.current;
   return (
     <div class={`cc-unfold ${group ? "open" : ""}`} aria-hidden={!group}>
-      <div>
-        {shown && (
-          <div class="cc-subs">
-            {shown.ts.map((t) => (
-              <Sub key={t.id} t={t} />
-            ))}
-          </div>
-        )}
-      </div>
+      <div>{shown && <Members key={shown.g.id} group={shown} reorder={reorder} />}</div>
+    </div>
+  );
+}
+
+/** An open category's members: one sideways row; held and dragged, a member moves (first = the category's tap). */
+function Members({ group, reorder }: { group: { g: Group; ts: QuickTile[] }; reorder: (gid: string, ids: string[]) => void }) {
+  const byId = new Map(group.ts.map((t) => [t.id, t]));
+  const { order, handlers, dragging } = useReorder(
+    group.ts.map((t) => t.id),
+    (ids) => reorder(group.g.id, ids),
+    // Held still: the member's own page, as its long press did.
+    (id) => !NO_PAGE.has(id) && (shut(), powos.qs.open(id).catch(() => {})),
+  );
+  return (
+    <div class={`cc-subs ${dragging ? "dragging" : ""}`} {...handlers}>
+      {order.map((id) => byId.get(id) && <Sub key={id} t={byId.get(id)!} />)}
     </div>
   );
 }
@@ -636,14 +798,36 @@ export function ControlCenter() {
   const tools = groups.find((x) => x.g.id === "tools");
   if (tools) tools.ts.push(...every.filter((t) => !placed.has(t) && !leftOut(t)));
   const live = groups.filter((x) => x.ts.length > 0);
-  // The user's arrangement orders the eight, by where their primary tiles are in it.
-  const pos = (id: string) => {
-    const i = shown.findIndex((t) => t.id === id);
-    return i < 0 ? 999 : i;
-  };
-  if (layout.value.order.length) live.sort((a, b2) => pos(a.ts[0].id) - pos(b2.ts[0].id));
+  // The user's arrangement (controls.layout: dragged into place here) orders the eight and each one's members - the
+  // first member is the category's tap; what it doesn't name keeps the curated order, after.
+  const saved = layout.value.order;
+  if (saved.length) {
+    const pos = (id: string) => {
+      const i = saved.indexOf(id);
+      return i < 0 ? 1e6 : i;
+    };
+    for (const x of live) x.ts = x.ts.map((t, i) => ({ t, i })).sort((a, b2) => pos(a.t.id) - pos(b2.t.id) || a.i - b2.i).map((x2) => x2.t);
+    live.sort((a, b2) => Math.min(...a.ts.map((t) => pos(t.id))) - Math.min(...b2.ts.map((t) => pos(t.id))));
+  }
+  const byGid = new Map(live.map((x) => [x.g.id, x]));
+  const grid = useReorder(
+    live.map((x) => x.g.id),
+    (gids) => saveArrangement(gids.map((id) => byGid.get(id)!).filter(Boolean)),
+    // Held still: a category with members opens or closes (its long press); a single one opens its page.
+    (gid) => {
+      const x = byGid.get(gid);
+      if (!x) return;
+      if (x.ts.length > 1) opened.value = opened.value === gid ? null : gid;
+      else if (!NO_PAGE.has(x.ts[0].id)) (shut(), powos.qs.open(x.ts[0].id).catch(() => {}));
+    },
+    // Picked up: no category open (the rows move as one grid).
+    () => (opened.value = null),
+  );
+  const ordered = grid.order.map((id) => byGid.get(id)).filter((x): x is (typeof live)[number] => !!x);
+  const reorderMembers = (gid: string, ids: string[]) =>
+    saveArrangement(ordered.map((x) => (x.g.id === gid ? { ...x, ts: ids.map((id) => x.ts.find((t) => t.id === id)!).filter(Boolean) } : x)));
   const rows: (typeof live)[] = [];
-  for (let i = 0; i < live.length; i += 4) rows.push(live.slice(i, i + 4));
+  for (let i = 0; i < ordered.length; i += 4) rows.push(ordered.slice(i, i + 4));
   return (
     <div class="cc">
       <div class="notif-bar">
@@ -680,7 +864,7 @@ export function ControlCenter() {
         />
       </div>
       <MediaCard />
-      <div class="cc-main">
+      <div class={`cc-main ${grid.dragging ? "dragging" : ""}`} {...grid.handlers}>
         {rows.map((row, r) => (
           <Fragment key={r}>
             <div class="cc-grid">
@@ -688,7 +872,7 @@ export function ControlCenter() {
                 <GroupTile key={g.id} g={g} ts={ts} />
               ))}
             </div>
-            <Unfold group={row.find((x) => x.g.id === opened.value)} />
+            <Unfold group={row.find((x) => x.g.id === opened.value)} reorder={reorderMembers} />
           </Fragment>
         ))}
       </div>

@@ -44,6 +44,11 @@ export const notifDragging = computed(() => notifDrag.value != null);
  * gesture input): a swipe down on home asks for the shade (shade.open), not following the finger.
  */
 export const shadeTakesHome = signal(true);
+/**
+ * Something picked up by a long press and dragged (the control center's tiles, control.tsx useReorder): the finger is
+ * its own - a pull, a close or a page swipe under way lets go of it.
+ */
+export const held = signal(false);
 /** While a finger drags the pages: their offset in px; null otherwise. */
 export const pageDrag = signal<number | null>(null);
 
@@ -318,7 +323,7 @@ export function homeGestures() {
   const move = (x: number, y: number, e: Event | null) => {
     if (!g || g.own) return;
     // An app picked up (onto home, or along the dock) has the finger now.
-    if (carry.value || dockDrag.value) return abandon();
+    if (carry.value || dockDrag.value || held.value) return abandon();
     const dx = x - g.x0;
     const dy = y - g.y0;
     const now = performance.now();
