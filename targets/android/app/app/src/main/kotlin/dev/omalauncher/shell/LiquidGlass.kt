@@ -139,8 +139,20 @@ internal class LiquidGlass(
     /** Asked again for the picture (a new size). */
     var onResize: (() -> Unit)? = null
 
+    /** The shader failed once (a driver that won't take it): never drawn again - the plain blur stays. */
+    private var broken = false
+
     override fun onDraw(canvas: Canvas) {
-        if (look.off || light == null || heavy == null || rims.isEmpty()) return
+        if (broken || look.off || light == null || heavy == null || rims.isEmpty()) return
+        try {
+            draw(canvas)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "liquid glass failed: the plain blur stays", e)
+            broken = true
+        }
+    }
+
+    private fun draw(canvas: Canvas) {
         val band = look.band
         shader.setFloatUniform("look", band, look.refraction, look.rim, look.dispersion)
         for (r in rims) {

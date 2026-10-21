@@ -120,7 +120,15 @@ internal class GlassBlur(
     private fun liquidView(): LiquidGlass? {
         liquid?.let { return it }
         val parent = view.parent as? android.view.ViewGroup ?: return null
-        val l = LiquidGlass(view.context)
+        // Its shader is compiled here: a driver that won't take it leaves the plain blur, never the app down.
+        val l =
+            try {
+                LiquidGlass(view.context)
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "no liquid glass here", e)
+                liquidAllowed = false
+                return null
+            }
         parent.addView(l, parent.indexOfChild(view), android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
         l.look(look)
         l.onResize = { main.post { feed(l) } }
