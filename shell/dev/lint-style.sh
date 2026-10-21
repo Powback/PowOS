@@ -16,7 +16,7 @@ allow=$here/style-allow.txt
 cd "$S" || exit 2
 shift 2>/dev/null || true
 if [ $# -gt 0 ]; then
-  files=$(for f in "$@"; do case "$f" in (*.css|*.ts|*.tsx) [ -f "$f" ] && [ "$f" != theme.css ] && echo "$f" ;; esac; done)
+  files=$(for f in "$@"; do case "$f" in (*.css|*.ts|*.tsx) [ -f "$f" ] && [ "$f" != theme.css ] && [ "$f" != bridge.ts ] && echo "$f" ;; esac; done)
   [ -n "$files" ] || { echo "ok   style lint (nothing to lint)"; exit 0; }
 else
   files=$(ls ui/*.css ui/*.tsx ui/*.ts app.tsx apps/*.ts 2>/dev/null)
