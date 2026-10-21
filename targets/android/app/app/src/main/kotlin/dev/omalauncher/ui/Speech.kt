@@ -177,6 +177,13 @@ internal object NativeSpeech {
     /** A segmented session's minimum length: the session lasts until stopped, its pauses only end segments. */
     private const val SESSION_MIN_MS = 30 * 60_000L
 
+    /**
+     * Listening with no callback at all (no RMS, no ready, no results) for this long: the recognizer is wedged (its
+     * session stuck in system_server or the service), so it's destroyed and a new one listens. A live mic reports RMS
+     * many times a second, so this never fires on a working session, silent room or not.
+     */
+    private const val STALL_MS = 6000L
+
     /** How a recognizer that can't do what the intent asks refuses it (before hearing anything). */
     private val REFUSALS = setOf(SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_SERVER_DISCONNECTED)
 
@@ -201,6 +208,7 @@ internal object NativeSpeech {
     private var regularComponent: ComponentName? = null
     private var active: Session? = null
     private var downloadAsked = false
+    private var sessionIds = 0
 
     private fun onDeviceAvailable(c: Context) = Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(c)
 
@@ -230,9 +238,12 @@ internal object NativeSpeech {
         hold: Boolean,
         callbacks: SpeechCallbacks,
     ): SpeechSession {
-        active?.cancel()
-        val s = Session(c.applicationContext, hold, callbacks)
-        Log.i(TAG, "start (${if (hold) "hold" else "tap"})")
+        active?.let {
+            Log.i(TAG, "session #${it.id}: superseded by a new start")
+            it.cancel()
+        }
+        val s = Session(++sessionIds, c.applicationContext, hold, callbacks)
+        Log.i(TAG, "session #${s.id}: start (${if (hold) "hold" else "tap"})")
         active = s
         // Never synchronously: the caller holds the session before any of its callbacks.
         main.post { if (active === s) withPlan(s.c) { p -> if (active === s) s.listen(p) } }
@@ -247,7 +258,10 @@ internal object NativeSpeech {
             Kind.ON_DEVICE ->
                 onDevice
                     ?: (if (Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(c) else error("no on-device recognizer"))
-                        .also { onDevice = it }
+                        .also {
+                            Log.i(TAG, "recognizer: created ON_DEVICE")
+                            onDevice = it
+                        }
             Kind.REGULAR -> {
                 val component = regularService(c)
                 regular?.takeIf { component == regularComponent }
@@ -263,12 +277,18 @@ internal object NativeSpeech {
             }
         }
 
-    /** A recognizer that misbehaved (disconnected, client error): the next use gets a new one. */
-    private fun drop(kind: Kind) {
-        when (kind) {
-            Kind.ON_DEVICE -> onDevice?.destroy().also { onDevice = null }
-            Kind.REGULAR -> regular?.destroy().also { regular = null }
-        }
+    /** A recognizer that misbehaved (busy, disconnected, client error, stalled): destroyed; the next use gets a new one. */
+    private fun drop(
+        kind: Kind,
+        why: String,
+    ) {
+        val r =
+            when (kind) {
+                Kind.ON_DEVICE -> onDevice.also { onDevice = null }
+                Kind.REGULAR -> regular.also { regular = null }
+            } ?: return
+        Log.i(TAG, "recognizer: destroyed $kind ($why)")
+        runCatching { r.destroy() }.onFailure { Log.w(TAG, "destroy $kind", it) }
     }
 
     private fun intent(p: Plan?) =
@@ -483,6 +503,7 @@ internal object NativeSpeech {
     }
 
     private class Session(
+        val id: Int,
         val c: Context,
         hold: Boolean,
         val cb: SpeechCallbacks,
@@ -497,6 +518,15 @@ internal object NativeSpeech {
         var retries = 0
         var ended = false
 
+        /** The last callback of any kind from the recognizer (or the last listen): the stall watchdog's clock. */
+        var lastSign = SystemClock.elapsedRealtime()
+
+        /** The plan of the latest listen (the stall watchdog's retry). */
+        var lastPlan: Plan? = null
+
+        /** BUSY/CLIENT already answered with a fresh recognizer once in this session (the free retry). */
+        var renewed = false
+
         /** Heard anything in this attempt (an error before that, with segmenting asked for, blames the segmenting). */
         var heard = false
 
@@ -505,12 +535,24 @@ internal object NativeSpeech {
             object : Runnable {
                 override fun run() {
                     if (ended) return
+                    val now = SystemClock.elapsedRealtime()
                     if (d.silent()) {
-                        Log.i(TAG, "silence: ending the dictation")
+                        Log.i(TAG, "session #$id: silence, ending the dictation")
                         stop()
-                    } else if (SystemClock.elapsedRealtime() - startedAt > MAX_SESSION_MS) {
-                        Log.w(TAG, "listened ${MAX_SESSION_MS / 60_000} min: ending the dictation")
+                    } else if (now - startedAt > MAX_SESSION_MS) {
+                        Log.w(TAG, "session #$id: listened ${MAX_SESSION_MS / 60_000} min, ending the dictation")
                         stop()
+                    } else if (current != null && !d.stopping && now - lastSign > STALL_MS) {
+                        // Wedged: "listening" with no sign of the mic. A new recognizer, once; else the end.
+                        Log.w(TAG, "session #$id: no recognizer activity for ${now - lastSign} ms, resetting it")
+                        val p = lastPlan
+                        lastSign = now
+                        current?.let { r -> runCatching { r.cancel() } }
+                        current = null
+                        if (p == null) return end("the speech recognizer stopped responding")
+                        drop(p.kind, "stalled")
+                        retry(p, 0) { "the speech recognizer stopped responding" }
+                        main.postDelayed(this, 250)
                     } else {
                         main.postDelayed(this, 250)
                     }
@@ -523,6 +565,7 @@ internal object NativeSpeech {
 
         override fun stop() {
             if (ended) return
+            Log.i(TAG, "session #$id: stop")
             d.stopping = true
             val r = current ?: return end(null)
             r.stopListening()
@@ -546,7 +589,8 @@ internal object NativeSpeech {
             if (ended) return
             ended = true
             main.removeCallbacks(watch)
-            current?.cancel()
+            Log.i(TAG, "session #$id: cancel (recognizer ${if (current != null) "cancelled" else "idle"})")
+            current?.let { runCatching { it.cancel() } }
             current = null
             if (active === this) active = null
         }
@@ -555,9 +599,12 @@ internal object NativeSpeech {
             if (ended) return
             ended = true
             main.removeCallbacks(watch)
+            // Always release the recognizer's session: a stop whose final result never came (the grace ran out) left it
+            // listening in system_server, and the next start on it was refused as busy. Harmless when already idle.
+            current?.let { runCatching { it.cancel() } }
             current = null
             if (active === this) active = null
-            if (why != null) Log.w(TAG, why)
+            Log.i(TAG, "session #$id: end (${d.text.length} chars${if (why != null) ", $why" else ""})")
             cb.onEnd(d.text, why)
         }
 
@@ -566,11 +613,15 @@ internal object NativeSpeech {
             val r = runCatching { recognizer(c, p.kind) }.getOrElse { return end("no speech recognizer (${it.message})") }
             val a = ++attempt
             attemptAt = SystemClock.elapsedRealtime()
+            lastSign = attemptAt
+            lastPlan = p
             current = r
             heard = false
             r.setRecognitionListener(Listener(a, p))
+            Log.i(TAG, "session #$id: listen, attempt $a (${p.kind}${if (p.offline) ", offline" else ""})")
             runCatching { r.startListening(intent(p)) }.onFailure {
-                drop(p.kind)
+                current = null
+                drop(p.kind, "startListening threw")
                 retry(p) { "speech recognition failed (${it.message})" }
             }
         }
@@ -593,7 +644,8 @@ internal object NativeSpeech {
             why: () -> String,
         ) {
             if (retries++ >= MAX_RETRIES) return end(why())
-            current?.cancel()
+            current?.let { runCatching { it.cancel() } }
+            current = null
             main.postDelayed({ listen(p) }, delayMs)
         }
 
@@ -604,7 +656,7 @@ internal object NativeSpeech {
             private val a: Int,
             private val p: Plan,
         ) : RecognitionListener {
-            private val current get() = !ended && a == attempt
+            private val current get() = (!ended && a == attempt).also { if (it) lastSign = SystemClock.elapsedRealtime() }
 
             override fun onPartialResults(partial: Bundle) {
                 if (!current) return
@@ -650,7 +702,29 @@ internal object NativeSpeech {
 
             override fun onError(code: Int) {
                 if (!current) return
-                Log.i(TAG, "error $code ($p)")
+                Log.i(TAG, "session #$id: error $code, attempt $a ($p)")
+                if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || code == SpeechRecognizer.ERROR_CLIENT) {
+                    // The shared recognizer stuck in a bad state (a session of ours that never ended in system_server,
+                    // or a client error): destroy it and listen on a new one - once for free, then within the retries.
+                    if (d.stopping) return end(null)
+                    if (code == SpeechRecognizer.ERROR_CLIENT && Build.VERSION.SDK_INT >= 33 && !segmentedOff && !heard &&
+                        ++segmentedRefusals >= 2
+                    ) {
+                        Log.i(TAG, "no segmented sessions with this recognizer ($code): restarting segments instead")
+                        segmentedOff = true
+                    }
+                    this@Session.current = null
+                    drop(p.kind, "error $code")
+                    if (!renewed) {
+                        renewed = true
+                        Log.i(TAG, "session #$id: retrying on a new recognizer")
+                        main.post { listen(p) }
+                        return
+                    }
+                    return retry(p, 300) {
+                        if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) "the speech recognizer is busy" else "the speech recognizer stopped ($code)"
+                    }
+                }
                 if (Build.VERSION.SDK_INT >= 33 && !segmentedOff && !heard && (code in REFUSALS || code > 15)) {
                     // A recognizer that won't take a segmented session as asked: plain sessions (restarted) from now on.
                     // Twice in a row, not once: a start right after a cancel gets a CLIENT error once too (a page
@@ -682,10 +756,10 @@ internal object NativeSpeech {
                             retry(next, 0) { "speech isn't available in ${p.language ?: "this language"}" }
                         }
                     }
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> retry(p, 400) { "the speech recognizer is busy" }
-                    SpeechRecognizer.ERROR_SERVER_DISCONNECTED, SpeechRecognizer.ERROR_CLIENT -> {
+                    SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> {
                         if (d.stopping) return end(null)
-                        drop(p.kind)
+                        this@Session.current = null
+                        drop(p.kind, "error $code")
                         retry(p) { "the speech recognizer stopped ($code)" }
                     }
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> end("microphone permission needed")
