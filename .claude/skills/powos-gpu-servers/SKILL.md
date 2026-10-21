@@ -39,9 +39,7 @@ GPU1 budget: 2.4 + 2.4 + 16.5 = 21.3 of 24. vLLM util is a share of the WHOLE ca
   "$PWD/bench:/bench:ro" localhost/voiceagent-backend:latest python /bench/voice-bench.py ws --n 10` (baseline
   ~640-665 ms median; run variance ~25 ms).
 - Units: `python3 lib/apps/powos-units register units/<host>/<id>.json` (.195 via the shim). .58 has no units tool,
-  so run the repo's over ssh with the repo manifest:
-  `ssh powos@192.168.50.58 "POWOS_UNITS_DIR=\$HOME/.config/powos/units.d python3 - register /dev/stdin" ...` won't
-  work (stdin is the script), so: `scp units/gpu-58/llama-swap-58.json powos@192.168.50.58:/tmp/u.json && ssh
+  so pipe the repo's tool over ssh (stdin is the script, so the manifest goes over by scp): `scp units/gpu-58/llama-swap-58.json powos@192.168.50.58:/tmp/u.json && ssh
   powos@192.168.50.58 'POWOS_UNITS_DIR=$HOME/.config/powos/units.d python3 - register /tmp/u.json && rm /tmp/u.json'
   < lib/apps/powos-units`.
 - Every script this skill uses is in a repo: `hosts/gpu-195/bench/{llm,voice}-bench.py`, `hosts/gpu-195/install.sh`,
