@@ -44,6 +44,22 @@ for (one line each).
 - Agents/board: `powos agents task list|add|done`, spool /run/powos-app/agents (agentsd).
 - GPU box 192.168.50.195: voice stack units (hosts/gpu-195/, units/gpu-195/), voiceagent.pow; plan docs/GPU-SERVERS-PLAN.md.
 
+## Native/hidden-API work (learned the hard way)
+- Check an OEM framework call's real shape BEFORE coding against it: pull `/system/framework/framework.jar` with
+  adb.sh, unzip classes*.dex, `dexdump -d` it in powos-vadb (`/opt/android-sdk/build-tools/35.0.0/dexdump`). OxygenOS 16
+  differs from AOSP: `SurfaceControl.Transaction.setBlurRegions` takes 31 floats per region (AOSP 10 + blur colour +
+  OPlus params) - a wrong array length aborts the whole app in JNI (home crash-looped). Encode through the framework's
+  own class (BackgroundBlurDrawable.BlurRegion.toFloatArray) instead of building layouts by hand.
+- PowOS holds READ_FRAME_BUFFER (signature|recents) through the recents role: `IWindowManager.mirrorWallpaperSurface`
+  + `ScreenCapture.captureLayers` work, but a mirror is boundless - pass a source crop or SF answers BAD_VALUE (-22).
+- Screenshots: two displays - `screencap -d <id>` with an id from `dumpsys SurfaceFlinger --display-id` (the cover
+  screen was the 2nd one listed); a bare screencap picks one and may be the dark inner panel.
+- The app's pid changes on every install/crash: re-run the devtools `adb forward` after one.
+- Measuring: `dumpsys gfxinfo com.powos.app reset` / summary (per-window frames, janky %, GPU percentiles);
+  per-thread CPU from /proc/<pid>/task/*/stat (utime+stime ticks, HZ=100); touch activity also shows as touch-0x IRQ
+  counts in /proc/interrupts. Logcat's main buffer rolls over within minutes on this phone: grep soon, or
+  `logcat -d -v time` into a file under $HOME.
+
 ## Rules that bite
 - Commit only your paths; never force-push; rebase often (several agents edit shell/ui at once).
 - `HACK:` markers need a row in docs/REMOTE-POWOS.md section 4 (test-hack-registry).
