@@ -194,6 +194,7 @@ Dev & AI:
   shell errors [N]    (phone) The web shell's last errors (each one also went to the manager's inbox)
   glasses [status]    (phone) The smart glasses (Even G2/G1): connected, arms, worn, battery
   glasses show|clear|connect|disconnect|mic   (phone) Text on them, blank them, the link, the mic (powos glasses help)
+  pet say "<text>" [--mood M]   (phone) Speak through the pet on home (powos pet help)
 
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
@@ -3115,6 +3116,11 @@ case "${1:-}" in
         # Unified sleep: everything that sleeps, of every kind (lib/apps/powos-sleep; `powos sleep --help`).
         shift
         exec python3 "$POWOS_LIB/apps/powos-sleep" "$@"
+        ;;
+    pet)
+        # The pet on home, the face of the agents (lib/apps/powos-pet; the local.pet app, shell/ui/pet.tsx).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-pet" "$@"
         ;;
     glasses)
         # The smart glasses the phone's PowOS app drives (lib/apps/powos-glasses, docs/GLASSES.md).

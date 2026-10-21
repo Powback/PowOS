@@ -1,0 +1,89 @@
+/*
+ * The pet (ui/pet.tsx): a small creature over home and the PowOS AI page, and its speech bubble.
+ * Calm: still at rest. A state's animation plays once when the state changes (or home comes back) and stops - only
+ * transform and opacity, on its own layer (the compositor's, no page paint). Colours are the theme's tokens only.
+ */
+.pet {
+  position: fixed;
+  z-index: 5;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  touch-action: none;
+  --pet-fill: color-mix(in srgb, var(--color-accent) 82%, var(--color-foreground));
+  --pet-ink: var(--color-background);
+  transition: opacity 200ms ease;
+}
+.pet.away { opacity: 0; pointer-events: none; }
+.pet.dragging { transition: none; }
+.pet.dragging .pet-body { transform: scale(1.08); }
+.pet-body { display: block; width: 52px; height: 52px; transform-origin: 50% 90%; will-change: transform; }
+.pet-svg { display: block; overflow: visible; }
+.pet-shape { fill: var(--pet-fill); stroke: color-mix(in srgb, var(--color-background) 35%, transparent); stroke-width: 1.2; transition: fill 400ms ease; }
+.pet-eye.open { fill: var(--pet-ink); transform-box: fill-box; transform-origin: center; }
+.pet-eye.closed, .pet-eye.glad, .pet-brows, .pet-mouth { fill: none; stroke: var(--pet-ink); stroke-width: 2; stroke-linecap: round; }
+.pet-mouth.open { fill: var(--pet-ink); stroke: none; }
+.pet-z { font: 600 10px var(--font); fill: var(--color-foreground); opacity: 0; }
+
+/* Which face each state shows: everything else hidden. */
+.pet-eye.closed, .pet-eye.glad, .pet-brows, .pet-mouth, .pet-z { display: none; }
+.pet .pet-mouth.smile { display: inline; }
+.pet[data-state="happy"] .pet-eye.open, .pet[data-state="sleepy"] .pet-eye.open { display: none; }
+.pet[data-state="happy"] .pet-eye.glad { display: inline; }
+.pet[data-state="sleepy"] .pet-eye.closed { display: inline; }
+.pet[data-state="sleepy"] .pet-z { display: inline; opacity: 0.7; }
+.pet:is([data-state="working"], [data-state="sleepy"], [data-state="looking"]) .pet-mouth.smile { display: none; }
+.pet:is([data-state="working"], [data-state="sleepy"]) .pet-mouth.flat { display: inline; }
+.pet[data-state="looking"] .pet-mouth.open, .pet[data-state="hungry"] .pet-mouth.open, .pet[data-state="listening"] .pet-mouth.open { display: inline; }
+.pet:is([data-state="hungry"], [data-state="listening"]) .pet-mouth.smile { display: none; }
+.pet[data-state="worried"] .pet-mouth.smile { display: none; }
+.pet[data-state="worried"] .pet-mouth.wavy, .pet[data-state="worried"] .pet-brows { display: inline; }
+/* Looking at you: bigger eyes. Working: eyes down at the work. */
+.pet[data-state="looking"] .pet-eye.open, .pet[data-state="listening"] .pet-eye.open { transform: scale(1.25); }
+.pet[data-state="working"] .pet-eyes { transform: translateY(2px); }
+/* Tints: worried warms toward red, hungry and sleepy fade toward the muted colour. */
+.pet[data-state="worried"] { --pet-fill: color-mix(in srgb, var(--color-red) 45%, var(--color-accent)); }
+.pet:is([data-state="hungry"], [data-state="sleepy"]) { --pet-fill: color-mix(in srgb, var(--color-muted) 60%, var(--color-accent)); }
+
+/* Once per state change (the body is re-keyed: the animation starts over), then still. */
+.pet[data-state="idle"] .pet-body { animation: pet-settle 900ms ease-out 1; }
+.pet[data-state="happy"] .pet-body { animation: pet-jump 700ms cubic-bezier(0.3, 0.7, 0.4, 1) 1; }
+.pet[data-state="working"] .pet-body { animation: pet-bob 900ms ease-in-out 3; }
+.pet[data-state="looking"] .pet-body { animation: pet-lean 1200ms ease-in-out 1; }
+.pet[data-state="worried"] .pet-body { animation: pet-shiver 360ms ease-in-out 3; }
+.pet[data-state="sleepy"] .pet-body { animation: pet-breathe 2600ms ease-in-out 2; }
+.pet[data-state="hungry"] .pet-body { animation: pet-sag 1400ms ease-in-out 1; }
+.pet[data-state="listening"] .pet-body { animation: pet-perk 500ms ease-out 1; }
+.pet:is([data-state="idle"], [data-state="looking"]) .pet-eye.open { animation: pet-blink 180ms ease-in-out 1 1100ms; }
+
+@keyframes pet-settle { 0% { transform: translateY(3px) scale(1.04, 0.96); } 60% { transform: translateY(-1px); } 100% { transform: none; } }
+@keyframes pet-jump { 0%, 100% { transform: none; } 20% { transform: scale(1.08, 0.9); } 50% { transform: translateY(-14px) scale(0.96, 1.05); } 80% { transform: scale(1.05, 0.95); } }
+@keyframes pet-bob { 0%, 100% { transform: none; } 50% { transform: translateY(-3px); } }
+@keyframes pet-lean { 0%, 100% { transform: none; } 40%, 70% { transform: rotate(-6deg) translateY(-2px); } }
+@keyframes pet-shiver { 0%, 100% { transform: none; } 25% { transform: translateX(-1.5px); } 75% { transform: translateX(1.5px); } }
+@keyframes pet-breathe { 0%, 100% { transform: none; } 50% { transform: scale(1.03, 0.97); } }
+@keyframes pet-sag { 0% { transform: none; } 100% { transform: translateY(2px) scale(1.03, 0.96); } }
+@keyframes pet-perk { 0% { transform: scale(0.94); } 100% { transform: none; } }
+@keyframes pet-blink { 0%, 100% { transform: none; } 50% { transform: scaleY(0.1); } }
+.pet[data-state="hungry"] .pet-body { transform: translateY(2px) scale(1.03, 0.96); }
+
+/* The bubble: home's tile material, one short line; tapped open, every line batched into it. */
+.pet-bubble {
+  position: fixed;
+  z-index: 5;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: 8px 12px;
+  font-size: var(--text-body);
+  line-height: 1.35;
+  animation: pet-bubble-in 160ms ease-out 1;
+}
+.pet-bubble.open { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; }
+.pet-short { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pet-from { font-size: var(--text-small); }
+@keyframes pet-bubble-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.pet-bubble.below { animation-name: pet-bubble-in-below; }
+@keyframes pet-bubble-in-below { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-body, .pet-eye.open, .pet-bubble { animation: none !important; }
+}

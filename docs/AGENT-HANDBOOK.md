@@ -42,6 +42,11 @@ for (one line each).
 - Deploy notes/errors to the user: deploy notes = tools/deploy-note.sh -> notification; shell errors are captured in
   shell/index.html (boot.report) and sent to the manager; manager mail = ai.mail events.
 - Agents/board: `powos agents task list|add|done`, spool /run/powos-app/agents (agentsd).
+- In the shell, deploy notes and agents' mail to the user both arrive as "ai.mail" (AgentMail[], deploy notes `from: "deploy"`);
+  the page's own errors are window error/unhandledrejection events (index.html's boot.report also keeps them in window.__powosBoot.errors).
+- A shell layer that needs a PowOS app's tables vendors its bindings: `apps/build.sh <app>`, esbuild-bundle
+  ui/bindings/index.ts (spacetimedb external) to shell/vendor/<db>.js + .d.ts, a line in vendor/VERSIONS; then
+  useDb/useRows from shell/apps/stdb.ts (socket closed 5 s after the page hides). Example: shell/ui/pet.tsx.
 - GPU box 192.168.50.195: voice stack units (hosts/gpu-195/, units/gpu-195/), voiceagent.pow; plan docs/GPU-SERVERS-PLAN.md.
 
 ## Native/hidden-API work (learned the hard way)

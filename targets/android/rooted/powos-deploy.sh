@@ -215,6 +215,8 @@ if [ -d $A ]; then
   for f in powos-sleep powos-sleepd powos-sleep-gui; do install -m 755 $A/$f $L/$f; done
   # `powos glasses` (docs/GLASSES.md): the smart glasses the app drives, through its run dir.
   install -m 755 $A/powos-glasses $L/powos-glasses
+  # `powos pet` (the pet on home, the local.pet app): speaks through the app's module.
+  install -m 755 $A/powos-pet $L/powos-pet
   # powos-units: /data/powos/root/usr/bin/powos-sleepd /data/powos/root/usr/bin/powos-sleep-gui
   for f in powos-sleepd powos-sleep-gui; do ln -sf /usr/lib/powos/apps/$f $R/usr/bin/$f; done
   rm -rf $L/sleep && cp -r $A/sleep $L/sleep && chmod -R a+rX $L/sleep
