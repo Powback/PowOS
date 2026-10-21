@@ -92,6 +92,8 @@ composeCompiler {
 
 dependencies {
     implementation(libs.androidx.activity.compose)
+    // Web message listeners: the shell page's native objects, to its own top frame only (shell/ShellOrigin.kt).
+    implementation(libs.androidx.webkit)
     implementation(libs.compose.runtime)
     implementation(libs.compose.foundation)
     implementation(libs.compose.ui)

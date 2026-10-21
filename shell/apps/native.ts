@@ -1,7 +1,7 @@
 /**
  * The page's own port to the app (ShellNative.kt): a MessagePort the app gives only to this page's top frame at its
- * origin, so an iframe on the page can't use it (the PowosHost bridge, a JavaScript interface, reaches every frame).
- * Asked for once at load with PowosNative.connect(); an APK without it leaves `native` null and callers fall back.
+ * origin, so an iframe on the page can't use it. Asked for once at load with PowosNative.postMessage("connect") (an older
+ * APK: PowosNative.connect()); an APK without it leaves `native` null and callers fall back.
  *
  * What goes through it: opening links (openLink), and surface tiles (useSurface) - a native surface under the page
  * at an island's place, drawn by the app from display lists, so a moving picture on home costs no WebView composite
@@ -14,7 +14,7 @@ import { powos } from "../bridge.ts";
 
 declare global {
   interface Window {
-    PowosNative?: { connect(): void };
+    PowosNative?: { connect?(): void; postMessage?(message: string): void };
   }
 }
 
@@ -36,7 +36,9 @@ addEventListener("message", (e: MessageEvent) => {
   native.value = p;
 });
 try {
-  window.PowosNative?.connect();
+  const n = window.PowosNative;
+  if (n?.postMessage) n.postMessage("connect");
+  else n?.connect?.();
 } catch {}
 
 export const send = (command: string) => native.value?.postMessage(command);

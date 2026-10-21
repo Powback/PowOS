@@ -65,6 +65,15 @@ for (one line each).
   counts in /proc/interrupts. Logcat's main buffer rolls over within minutes on this phone: grep soon, or
   `logcat -d -v time` into a file under $HOME.
 
+## Security
+- The shell page's native objects (PowosHost, PowosNative, PowosBoot) reach ONLY its own top frame at
+  https://shell.powos (or the dev URL's origin): web message listeners (androidx.webkit addWebMessageListener) with
+  that origin rule, plus a per-message check (app .../shell/ShellOrigin.kt: top frame + exact origin; "null"/opaque, other
+  origins and every iframe - even a same-origin srcdoc/about:blank one - refused, logged "refused a message"). Never
+  add a WebView.addJavascriptInterface to a shell WebView: it reaches every frame and can't see the caller. PowOS
+  apps' UIs stay modules in the page's own frame (./_app/<id>/); anything in an iframe is bridge-less by design.
+  Check on the phone: `tools/phone/bridge-check.sh [page]` (probe iframes over CDP; the gate's mock can't see it).
+
 ## Rules that bite
 - Commit only your paths; never force-push; rebase often (several agents edit shell/ui at once).
 - `HACK:` markers need a row in docs/REMOTE-POWOS.md section 4 (test-hack-registry).

@@ -18,7 +18,6 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.JavascriptInterface
 import android.webkit.WebMessage
 import android.webkit.WebMessagePort
 import android.webkit.WebView
@@ -27,8 +26,7 @@ import android.widget.FrameLayout
 /**
  * The shell page's second channel to the app (shell/apps/native.ts), beside the PowosHost bridge: a WebMessagePort
  * the app hands only to the page's top frame at its own origin ([WebView.postWebMessage] with that target origin), so
- * an iframe on the page - which does get every JavaScript interface - can't use it. Messages are strings, one command
- * each, never answered unless they say so:
+ * only the page's top frame holds it. Messages are strings, one command each, never answered unless they say so:
  *
  *   open <url>                         an http(s) / mailto / tel / geo / market link to the app that handles it
  *   s.create <id>                      a surface tile: a SurfaceView under the page, drawn by the app ([Tile])
@@ -51,8 +49,8 @@ import android.widget.FrameLayout
  * where the tile shows it) above it, so everything the page draws over the tile - its frame, a launcher, a sheet -
  * stays over it, and touches go to the page as before.
  *
- * The page asks for its port with PowosNative.connect() (window.PowosNative: the one JavaScript interface here;
- * any frame may call it, and all it does is hand a new port to the top frame).
+ * The page asks for its port with PowosNative.postMessage("connect") (window.PowosNative, a web message listener that
+ * only the top frame at the shell's origin gets and may use: ShellHost.listen, ShellOrigin).
  */
 class ShellNative(
     private val context: Context,
@@ -76,7 +74,6 @@ class ShellNative(
             null
         }
 
-    @JavascriptInterface
     fun connect() {
         main.post {
             port?.close()

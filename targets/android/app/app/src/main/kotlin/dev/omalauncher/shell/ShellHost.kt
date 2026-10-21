@@ -12,13 +12,14 @@ import android.os.Looper
 import android.util.Log
 import android.view.WindowInsets
 import android.webkit.ConsoleMessage
-import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import dev.omalauncher.R
 import dev.omalauncher.Runtime
 import dev.omalauncher.ui.PtyTerminal
@@ -27,6 +28,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.net.URLDecoder
+import org.json.JSONArray
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
@@ -34,7 +36,8 @@ import kotlinx.coroutines.launch
  * The web shell (the repo's shell/, see shell/DESIGN.md) in a WebView, for whatever shows it: the launcher
  * ([ShellActivity]) and the system slots PowOS fills (the screen-off display, ...: docs/NATIVE-SYSTEM-UI.md). Each is
  * a thin host - its window, its role - around one of these; what it shows is the shell, the same code everywhere,
- * with the host API as window.powos ([ShellBridge]). [mode] tells the page which screen it is (index.html?mode=).
+ * with the host API as window.powos ([ShellBridge]) - reachable from the page's own top frame only ([ShellOrigin]).
+ * [mode] tells the page which screen it is (index.html?mode=).
  *
  * The page is served from [ORIGIN], a name that never reaches the network: each file comes from the override folder
  * ([overrides], where the user or an agent changes the shell - a file there wins over the shipped one) or the copy
@@ -91,9 +94,25 @@ class ShellHost(
     init {
         ShellIcons.init(context.applicationContext, runtime)
         overrides.mkdirs()
-        web.addJavascriptInterface(bridge, "PowosHost")
-        web.addJavascriptInterface(native, "PowosNative")
-        web.addJavascriptInterface(boot, "PowosBoot")
+        // The page's native objects, to its own top frame only (ShellOrigin: no iframe, no other origin).
+        val rules = ShellOrigin.rules(devUrl())
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            listen("PowosHost", rules) { text ->
+                val m = JSONArray(text)
+                bridge.call(m.getInt(0), m.getString(1), m.optString(2, ""))
+            }
+            listen("PowosNative", rules) { text -> if (text == "connect") native.connect() }
+            listen("PowosBoot", rules) { text ->
+                when (text.substringBefore(' ')) {
+                    "error" -> boot.error(text.substringAfter(' ', ""))
+                    "ready" -> boot.ready(text.substringAfter(' ', ""))
+                }
+            }
+        } else {
+            // Fail closed: a WebView without web message listeners gets no bridge at all (never the frame-blind
+            // JavaScript interfaces). Every current Android System WebView has them (Chromium 82+).
+            Log.e(TAG, "WebView without WEB_MESSAGE_LISTENER: the shell page gets no native bridge")
+        }
         // Insets to the page (CSS px), as they change: the bar sits above the navigation bar, the drawer clears
         // the status bar, the keyboard's height lifts the bar.
         web.setOnApplyWindowInsetsListener { v, insets ->
@@ -104,6 +123,42 @@ class ShellHost(
         HotReload.add(this)
         val page = devUrl() ?: "$ORIGIN/index.html"
         web.loadUrl(mode?.let { "$page?mode=$it" } ?: page)
+    }
+
+    /**
+     * One native object, [name] on the page (postMessage(text)), heard only from the top frame at [rules]' origins:
+     * the WebView injects it only into frames at those origins, and [ShellOrigin.allowed] checks each message's
+     * sender again (a same-origin srcdoc/about:blank iframe would get the object too - it is refused here).
+     */
+    private fun listen(
+        name: String,
+        rules: Set<String>,
+        handle: (String) -> Unit,
+    ) {
+        val rulesOk = runCatching { WebViewCompat.addWebMessageListener(web, name, rules, listener(name, rules, handle)) }
+        if (rulesOk.isFailure) {
+            // A dev URL the WebView won't take as a rule: the shell's own origin only.
+            Log.w(TAG, "$name: origin rules $rules refused (${rulesOk.exceptionOrNull()?.message}); shell origin only")
+            WebViewCompat.addWebMessageListener(web, name, setOf(ShellOrigin.SHELL), listener(name, setOf(ShellOrigin.SHELL), handle))
+        }
+    }
+
+    private fun listener(
+        name: String,
+        rules: Set<String>,
+        handle: (String) -> Unit,
+    ) = WebViewCompat.WebMessageListener { _, message, sourceOrigin, isMainFrame, _ ->
+        val origin = sourceOrigin.toString()
+        if (!ShellOrigin.allowed(origin, isMainFrame, rules)) {
+            Log.w(TAG, "$name: refused a message from ${if (isMainFrame) "the top frame" else "an iframe"} at $origin")
+            return@WebMessageListener
+        }
+        val text = message.data ?: return@WebMessageListener
+        try {
+            handle(text)
+        } catch (e: Exception) {
+            Log.w(TAG, "$name: bad message", e)
+        }
     }
 
     /** The style's live-blur switch to the page's glass ([GlassBlur]), as it changes. */
@@ -143,7 +198,6 @@ class ShellHost(
      * set: app.tsx rendered its screen) - to [ShellErrors], which logs it and tells the manager.
      */
     private inner class Boot {
-        @JavascriptInterface
         fun error(json: String) {
             main.post {
                 val e = runCatching { org.json.JSONObject(json) }.getOrNull()
@@ -154,7 +208,6 @@ class ShellHost(
             }
         }
 
-        @JavascriptInterface
         fun ready(page: String) {
             main.post { bootReady = true }
         }
@@ -387,7 +440,7 @@ class ShellHost(
         private const val BOOT_MS = 8_000L
 
         /** Where the page lives: never resolved, every request is answered from the app. */
-        const val ORIGIN = "https://shell.powos"
+        const val ORIGIN = ShellOrigin.SHELL
 
         /** A PowOS app's id (powos-app.json; the registry allows the same). */
         private val APP_ID = Regex("[a-z0-9.-]{1,64}")

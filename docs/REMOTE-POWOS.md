@@ -249,6 +249,10 @@ agent hours late. Action rows are the audit log.
 - **Rows carry no secrets** (AGENTS-VIEW-DESIGN §3 already scrubs them); tokens are never stored in rows or logs.
 - **Signed software.** The pacman repo is signed (removes the `SessionService.java` `HACK:`); the rootfs and app
   bundles carry a checksum signed by the realm or the build key, checked before install.
+- **The shell's native bridge is top-frame-only** (2026-10-21): PowosHost/PowosNative/PowosBoot are web message
+  listeners limited to https://shell.powos's top frame (ShellOrigin.kt), no longer JavaScript interfaces injected into
+  every iframe - so a presentation, web content or a third-party app's frame can't reach host.net.fetch's secrets,
+  app launch/uninstall or settings. No workaround left (no `HACK:` row); check: `tools/phone/bridge-check.sh`.
 - **Step-up for remote approval.** `answer` and `act` from a host other than the agent's own require a `user:` token
   minted within the last 5 minutes after an unlock, so a phone left unlocked on a table can't approve tool calls for
   long.

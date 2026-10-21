@@ -51,10 +51,15 @@ class Events {
 
 /**
  * A native host - the phone's WebView (ShellBridge.kt) or the desktop's powos-shell (bridge.cpp): one native entry,
- * PowosHost.call(id, method, argsJson), answered through window.__powosHost.resolve / reject; events arrive through
- * window.__powosHost.emit. An area a host doesn't have rejects ("no such call" / "unsupported").
+ * PowosHost.call(id, method, argsJson) on the desktop, PowosHost.postMessage(JSON [id, method, argsJson]) on the phone
+ * (a web message listener the app gives only to this page's top frame at its origin: ShellOrigin.kt), answered through
+ * window.__powosHost.resolve / reject; events arrive through window.__powosHost.emit. An area a host doesn't have
+ * rejects ("no such call" / "unsupported").
  */
 function native(host: NonNullable<Window["PowosHost"]>): Bridge {
+  const send = host.call
+    ? (id: number, method: string, args: string) => host.call!(id, method, args)
+    : (id: number, method: string, args: string) => host.postMessage!(JSON.stringify([id, method, args]));
   const pending = new Map<number, [(v: any) => void, (e: Error) => void]>();
   const events = new Events();
   let next = 1;
@@ -73,7 +78,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     new Promise<T>((resolve, reject) => {
       const id = next++;
       pending.set(id, [resolve, reject]);
-      host.call(id, method, JSON.stringify(args));
+      send(id, method, JSON.stringify(args));
     });
   return {
     host: host.name ?? "android",
