@@ -32,9 +32,11 @@ object PowosAiChat {
             override fun json() = JSONObject().put("kind", "assistant").put("text", text)
         }
 
-        /** A tool the agent used; [ok] null while it runs. */
-        data class Tool(val name: String, val hint: String, val ok: Boolean? = null) : Item() {
-            override fun json() = JSONObject().put("kind", "tool").put("name", name).put("hint", hint).put("ok", ok ?: JSONObject.NULL)
+        /** A tool the agent used; [ok] null while it runs; [out] the head of what it returned (the chat's card shows it expanded). */
+        data class Tool(val name: String, val hint: String, val ok: Boolean? = null, val out: String = "") : Item() {
+            override fun json() =
+                JSONObject().put("kind", "tool").put("name", name).put("hint", hint).put("ok", ok ?: JSONObject.NULL)
+                    .apply { if (out.isNotEmpty()) put("out", out) }
         }
 
         data class Note(val text: String, val error: Boolean = false) : Item() {
@@ -46,7 +48,7 @@ object PowosAiChat {
                 when (o.optString("kind")) {
                     "user" -> User(o.optString("text"))
                     "assistant" -> Assistant(o.optString("text"))
-                    "tool" -> Tool(o.optString("name"), o.optString("hint"), if (o.isNull("ok")) null else o.optBoolean("ok"))
+                    "tool" -> Tool(o.optString("name"), o.optString("hint"), if (o.isNull("ok")) null else o.optBoolean("ok"), o.optString("out"))
                     "note" -> Note(o.optString("text"), o.optBoolean("error"))
                     else -> null
                 }
@@ -213,7 +215,7 @@ object PowosAiChat {
                             post { add(Item.Assistant(ev.optString("text"))) }
                         }
                         "tool_use" -> post { add(Item.Tool(ev.optString("name"), ev.optString("hint"))) }
-                        "tool_result" -> post { finishTool(ev.optBoolean("ok", true)) }
+                        "tool_result" -> post { finishTool(ev.optBoolean("ok", true), ev.optString("out").take(2000)) }
                         // The mail the turn answers: who it's from, as a line in the chat.
                         "inbox" -> post { add(Item.Note(inboxLine(ev.optString("text")))) }
                     }
@@ -285,10 +287,10 @@ object PowosAiChat {
         }
     }
 
-    private fun finishTool(ok: Boolean) {
+    private fun finishTool(ok: Boolean, out: String) {
         val i = items.indexOfLast { it is Item.Tool && it.ok == null }
         if (i >= 0) {
-            items[i] = (items[i] as Item.Tool).copy(ok = ok)
+            items[i] = (items[i] as Item.Tool).copy(ok = ok, out = out)
             save()
         }
     }
