@@ -11,6 +11,12 @@ note="" now=""
 while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --now) now=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
 [ -n "${note// }" ] || { echo "ship-apk: --note \"...\" required" >&2; exit 2; }
 lock=$HOME/.cache/powos-ship.lock; mkdir -p "$HOME/.cache"
+# Never ship a build that lacks what's installed: the last shipped commit must be in HEAD (two agents' APKs
+# overwrote each other's work). Rebase onto worktree-powos-multiplatform first.
+last=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
+if [ -n "$last" ] && ! git merge-base --is-ancestor "$last" HEAD 2>/dev/null; then
+  echo "ship-apk: REFUSED - HEAD lacks the installed build's commit $last (git rebase worktree-powos-multiplatform)" >&2; exit 3
+fi
 until mkdir "$lock" 2>/dev/null; do
   echo "ship-apk: waiting for $(cat "$lock/who" 2>/dev/null || echo another build)"; sleep 15
 done
@@ -35,5 +41,6 @@ docker run --rm --network container:powos-vadb -v "$PWD/targets/android":/ta:ro 
   android-app-dev-android-builder:latest -c 'export PATH=$PATH:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/35.0.0
     adb connect 10.13.13.7:5555 >/dev/null; export ANDROID_SERIAL=10.13.13.7:5555
     cp -r /ta /tmp/ta && cd /tmp/ta && ./install-app.sh /powos.apk --note "'"${note//\"/}"'"' 2>&1 | tail -4
+git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
 sleep 15
 tools/phone/adb.sh shell "dumpsys package com.powos.app | grep -m1 versionCode; logcat -d -v time -T '$start.000' | grep -E 'gesture input on|Fatal signal|FATAL EXCEPTION' | tail -4"
