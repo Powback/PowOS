@@ -700,6 +700,7 @@ internal object NativeSpeech {
 
             override fun onResults(results: Bundle) {
                 if (!current) return
+                Log.i(TAG, "session #$id: results, attempt $a (${results.best().length} chars)")
                 d.segment(results.best())
                 cb.onText(d.text)
                 retries = 0
@@ -710,6 +711,7 @@ internal object NativeSpeech {
             // to the end - no restarts at all.
             override fun onSegmentResults(segmentResults: Bundle) {
                 if (!current) return
+                Log.i(TAG, "session #$id: segment, attempt $a (${segmentResults.best().length} chars)")
                 if (!segmentsSeen) {
                     segmentsSeen = true
                     Log.i(TAG, "segmented session: the recognizer sends segments (no restarts)")
@@ -722,6 +724,7 @@ internal object NativeSpeech {
 
             override fun onEndOfSegmentedSession() {
                 if (!current) return
+                Log.i(TAG, "session #$id: end of the segmented session, attempt $a")
                 next(p)
             }
 
@@ -736,10 +739,12 @@ internal object NativeSpeech {
                 }
                 if (code == SpeechRecognizer.ERROR_CLIENT && heard && !d.stopping) {
                     // After words: the end of an utterance the recognizer reported as a client error (Android System
-                    // Intelligence does, reading PowOS's recording) - a segment's end, on a new recognizer, no retry spent.
-                    this@Session.current = null
-                    drop(p.kind, "error $code after words")
-                    return next(p)
+                    // Intelligence does, reading PowOS's recording) - a segment's end, no retry spent. The same
+                    // recognizer, a moment later: a new one right after destroying the old raced system_server's
+                    // unbinding (SERVER_DISCONNECTED, 11, on every listen after it).
+                    Log.i(TAG, "session #$id: error $code after words: a segment's end")
+                    main.postDelayed({ if (!ended) next(p) }, 250)
+                    return
                 }
                 if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || code == SpeechRecognizer.ERROR_CLIENT) {
                     // The shared recognizer stuck in a bad state (a session of ours that never ended in system_server,
