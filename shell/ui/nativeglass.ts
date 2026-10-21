@@ -33,8 +33,13 @@ const wanted = signal(true);
 /** The live glass is on: ui/glass.ts leaves its picture off, theme.css tints only. */
 export const nativeGlass = signal(false);
 
-/** CDP's override for the liquid edges on this page: false leaves the plain blur. */
-const liquidWanted = signal(true);
+/**
+ * The liquid edges (LiquidGlass.kt) on this page: off. They bend a picture of the wallpaper, and OxygenOS's live video
+ * wallpaper is never at the frame its screenshot caught (2026-10-21: the crystal ~225 px higher live than in the
+ * picture), so the band showed another picture than the live blur next to it - a grey frame inside every surface, and
+ * lines between joined ones. `__glass.live.liquid(true)` from CDP to look again.
+ */
+const liquidWanted = signal(false);
 
 /** Liquid glass's look, from the theme (theme.css --liquid-*), to the host: on with the live glass, again per theme. */
 function sendLook() {
