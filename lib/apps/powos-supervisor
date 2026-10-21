@@ -27,6 +27,7 @@ the cgroup v2 move, then a unit per manifest (the same manifests) and this goes;
 import glob
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -308,7 +309,8 @@ class Service:
 
 class IdleSample:
     """The phone's daily idle-CPU sample (the regression check's phone half; the shell gate's idle check is the other):
-    once a day, the first time the screen is on and nobody has touched it for IDLE_TOUCH s, every process's CPU over
+    once a day, the first time the screen is on and no input came for IDLE_TOUCH s (touch IRQs, and Android's last user activity
+    for injected input: dumpsys power), every process's CPU over
     IDLE_WINDOW s - one line in IDLE_LOG, the PowOS processes' sum against IDLE_BUDGET (% of one core), and a low
     priority note to the user (`powos comms notify --from perf`) when over it. Discarded (tried again later) if the
     screen goes off or a finger comes during the window. Costs two small reads a tick until it has sampled that day.
@@ -365,6 +367,19 @@ class IdleSample:
             out[p] = (t[t.index("(") + 1:t.rindex(")")], int(f[11]) + int(f[12]))
         return out
 
+    @staticmethod
+    def android_idle():
+        """(awake, seconds since Android's last user activity) from `dumpsys power` in Android's mount namespace -
+        injected input (an agent's `input swipe`, uinput) counts there but raises no touch IRQ. Called only at a
+        window's start and end. (False, 0) when it can't be read: no sample then."""
+        try:
+            out = subprocess.run(["nsenter", "-t", "1", "-m", "--", "/system/bin/dumpsys", "power"], capture_output=True,
+                                 text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return False, 0
+        m = re.search(r"lastUserActivityTime=\d+ \((\d+) ms ago\)", out)
+        return "mWakefulness=Awake" in out, (int(m.group(1)) / 1000 if m else 0)
+
     def tick(self, now):
         today = time.strftime("%F", time.localtime(now))
         if self.day == today:
@@ -379,10 +394,19 @@ class IdleSample:
             return
         if self.start is None:
             if now - self.touched >= self.IDLE_TOUCH:
-                self.start = (now, self.named())
+                awake, quiet = self.android_idle()
+                if awake and quiet >= self.IDLE_TOUCH:
+                    self.start = (now, self.named())
+                else:
+                    self.touched = now - min(quiet, self.IDLE_TOUCH)  # looked at again once it's been quiet long enough
             return
         t0, a = self.start
         if now - t0 < self.IDLE_WINDOW:
+            return
+        awake, quiet = self.android_idle()
+        if not awake or quiet < now - t0:  # the screen went off, or input (injected too) came during the window
+            self.start = None
+            self.touched = now - min(quiet, self.IDLE_TOUCH)
             return
         b = self.named()
         secs = now - t0
@@ -393,7 +417,7 @@ class IdleSample:
         total = sum(per.values())
         ours = sum(v for (comm, _), v in per.items() if any(comm.startswith(o) or o in comm for o in self.OURS))
         top = sorted(per.items(), key=lambda kv: -kv[1])[:8]
-        line = (f"{time.strftime('%F %T', time.localtime(now))} screen on, untouched {now - self.touched:.0f}s: "
+        line = (f"{time.strftime('%F %T', time.localtime(now))} screen on, no input {quiet:.0f}s: "
                 f"powos {ours:.1f}% (budget {self.IDLE_BUDGET:g}%), all {total:.1f}% of one core over {secs:.0f}s | "
                 + ", ".join(f"{c} {v:.1f}" for (c, _), v in top))
         self.day, self.start = today, None

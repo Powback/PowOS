@@ -419,6 +419,7 @@ try {
         return r;
       });
       async function one(w, browser) {
+        let fill = {};
         const perTheme = [];
         const problems = [];
         const screens = [];
@@ -426,6 +427,9 @@ try {
           const t = theme(name);
           const { page, errors } = await sheet(browser, w, t, 1500);
           const found = await page.evaluate((e, c) => window.__pv.check(e, c), EMPTY, COVER);
+          if (name === THEMES[0]) fill = await page.evaluate(() => ({ ...window.__pv.fills }));
+          if (process.env.PREVIEW_DEBUG_KEY)
+            console.log(await page.evaluate((k) => [...document.querySelectorAll(`.pv-cell[data-key="${k}"] .owl div`)].filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())).map((e) => `${e.textContent.slice(0, 12)} sw=${e.scrollWidth} cw=${e.clientWidth} ov=${getComputedStyle(e).overflowX}`).join("\n"), process.env.PREVIEW_DEBUG_KEY));
           await sleep(100);
           if (!FAST) perTheme.push({ t: name, png: await page.screenshot({ encoding: "base64", fullPage: true }) });
           for (const [key, list] of Object.entries(found)) {
@@ -444,7 +448,9 @@ try {
         const trees = THEMES.map((t) => path.join(WORK, "trees", `${w.id}.${t}.json`)).filter((f) => fs.existsSync(f));
         for (const f of trees.slice(0, 1)) for (const e of JSON.parse(fs.readFileSync(f, "utf8")).errors ?? []) problems.push(`widget error: ${e}`);
         if (!FAST) await compose(browser, w, perTheme, screens, problems);
-        report[w.id] = { title: w.title, kind: w.kind, problems, sheet: FAST ? null : `${w.id}.png` };
+        // Each tile's fill (% of it the content covers), by size: "folded 3x2": 41.
+        const fills = Object.fromEntries(w.cells.map((c) => [`${c.screen} ${c.cols}x${c.rows}`, fill[c.key]]));
+        report[w.id] = { title: w.title, kind: w.kind, problems, fills, sheet: FAST ? null : `${w.id}.png` };
         return [w.id, problems];
       }
       // Known problems (the gate's baseline, dev/preview/baseline.json): listed, not failed - a new one fails.

@@ -210,6 +210,9 @@ const painted = (cs: CSSStyleDeclaration) =>
  *   that scrolls sideways and says so (touch-action: pan-x: it took the gesture);
  * - hard border: a drawn 1px+ line round content (the design language: no lines).
  */
+/** How much of each tile its content covered, %, by tile key: the last check()'s. */
+export const fills: Record<string, number> = {};
+
 export function check(EMPTY = 0.12, COVER = 0.25) {
   const out: Record<string, string[]> = {};
   for (const cellEl of document.querySelectorAll<HTMLElement>(".pv-cell")) {
@@ -312,6 +315,7 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
       let n = 0;
       for (let i = 0; i < grid.length; i++) n += grid[i];
       const covered = n / grid.length;
+      fills[key] = Math.round(covered * 100);
       if (covered < COVER) problems.push(`small content: covers ${Math.round(covered * 100)}% of the tile`);
     } else problems.push("nothing drawn");
     const list = [...new Set(problems)];
