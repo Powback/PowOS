@@ -402,7 +402,9 @@ internal object NativeSpeech {
         reg: RecognitionSupport?,
     ): Plan {
         Log.i(TAG, "on-device installed ${onDev?.installedOnDeviceLanguages}; regular installed ${reg?.installedOnDeviceLanguages}, online ${reg?.onlineLanguages?.size}")
-        onDev?.let { closest(listOf(it.installedOnDeviceLanguages)) }?.let { return Plan(Kind.ON_DEVICE, it, true) }
+        if (System.currentTimeMillis() > onDeviceBusyUntil) {
+            onDev?.let { closest(listOf(it.installedOnDeviceLanguages)) }?.let { return Plan(Kind.ON_DEVICE, it, true) }
+        }
         reg?.let { closest(listOf(it.installedOnDeviceLanguages)) }?.let { return Plan(Kind.REGULAR, it, true) }
         // No offline model (or a recognizer that can't say - Speech Services by Google answers the support check with
         // ERROR_CANNOT_CHECK_SUPPORT): ask both recognizers once for the language's model; it downloads in the
@@ -419,6 +421,14 @@ internal object NativeSpeech {
         val online = reg?.let { closest(listOf(it.onlineLanguages)) }
         return Plan(Kind.REGULAR, online ?: language, guessOffline)
     }
+
+    /**
+     * Until when the on-device recognizer is known to be full: Android System Intelligence takes one session at a time
+     * ("#startListening received when the service's capacity is full"), and a session that never ended there (one of
+     * ours before 2026-10-21's fix, or its own) refuses every start as BUSY, whatever recognizer object asks. Meanwhile
+     * the regular recognizer listens.
+     */
+    private var onDeviceBusyUntil = 0L
 
     /** Until when the regular recognizer's offline model is known to be missing (a failed offline try). */
     private var offlineMissingUntil = 0L
@@ -715,6 +725,15 @@ internal object NativeSpeech {
                     }
                     this@Session.current = null
                     drop(p.kind, "error $code")
+                    if (renewed && p.kind == Kind.ON_DEVICE && code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                        // Still busy on a new recognizer: the service itself is full. The regular recognizer, now and
+                        // for the next 10 minutes.
+                        onDeviceBusyUntil = System.currentTimeMillis() + 10 * 60_000L
+                        val other = remember(Plan(Kind.REGULAR, p.language, false))
+                        Log.w(TAG, "session #$id: the on-device recognizer is full, using the regular one")
+                        main.post { listen(other) }
+                        return
+                    }
                     if (!renewed) {
                         renewed = true
                         Log.i(TAG, "session #$id: retrying on a new recognizer")
