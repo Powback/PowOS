@@ -211,8 +211,7 @@
  */
 .launcher-frame, .dock { border-color: transparent; box-shadow: none; }
 .dock { background: none; }
-/* The dock: no slab - a light frost behind each icon only (each a .tile: the glass, the native blur's region). */
-.dock .app.tile { margin: 6px 4px; height: calc(var(--strip-height) - 12px); border-radius: 18px; }
+/* The dock: no slab and no plates - the icons bare on the wallpaper, as the search pill floats above them. */
 .launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--lift-edge), var(--lift-shadow-up); }
 .dock { border-radius: 0; }
 /* The navigation bar's band: no filler any more (the foot has no slab); the rule stays for the edit sheet's sake. */

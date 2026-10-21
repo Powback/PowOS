@@ -125,7 +125,7 @@ function DockRecents({ count }: { count: number }) {
   return (
     <>
       {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} draggable class="tile" />
+        <AppCell key={app.key} app={app} labels={false} draggable />
       ))}
     </>
   );
@@ -179,7 +179,7 @@ function Dock() {
         key={app.key}
         app={app}
         labels={false}
-        class={`tile ${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""}`}
+        class={d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""}
         style={style}
         onDrag={(e) => el.current && moveInDock(app.key, e, el.current)}
       />
