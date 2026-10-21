@@ -40,6 +40,9 @@ if [ -z "$now" ]; then
   # 60 s of idle (or the screen off); if none comes, leave the built APK for the next ship and exit 4 - don't install.
   waited=0; ok=""
   while [ $waited -lt $(( ${SHIP_WAIT_MIN:-60} * 60 )) ]; do
+    # A verifier's measurement window has priority (an install restarts the app mid-run and voids it):
+    # ~/.cache/powos-verify.lock (mkdir; who/why inside) holds the install until it's gone.
+    if [ -d "$HOME/.cache/powos-verify.lock" ]; then sleep 15; waited=$((waited + 15)); continue; fi
     i2=$(tools/phone/idle.sh); s=${i2#idle=}; s=${s%% *}
     # Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s without a touch; anything else (an empty or
     # unreadable state) = NOT safe - it installed over an active user once when the state came back empty.
