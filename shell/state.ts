@@ -127,6 +127,22 @@ export function stored(key: string, initial = ""): Signal<string> {
 
 /** The drawer: open or not (a finger dragging it is gesture.ts's drawerDrag). */
 export const drawer = signal(0);
+/**
+ * What the pull-up panel (the drawer's frame) holds: the apps, or PowOS AI's (its history, the board - powai.tsx
+ * AiContent). Set by what opens it; it stays while it closes, so nothing swaps under a closing panel.
+ */
+export const pullKind = signal<"apps" | "ai">("apps");
+/**
+ * The pull-up corners, an experiment beside everything else (docs/DESIGN-LANGUAGE.md): on, a swipe up from home's
+ * left half brings up PowOS AI's panel, from the right half the drawer; off ("off"), up anywhere is the drawer, as
+ * before. PowOS AI's page to the left of home stays either way.
+ */
+export const pullPanels = stored("pullPanels", "on");
+/** Opens the pull-up panel with [kind] in it (the pet's long press, a bubble's "more": "ai"). */
+export function openPanel(kind: "apps" | "ai") {
+  pullKind.value = kind;
+  drawer.value = 1;
+}
 export const query = signal("");
 
 /** PowOS AI's chat, as the host streams it. */
@@ -185,6 +201,9 @@ powos.on("home.changed", async () => (home.value = await powos.home.get()));
 document.addEventListener("visibilitychange", async () => {
   if (!document.hidden) await fetchRecent();
 });
+
+/** Closes the pull-up panel (the drawer or PowOS AI's). */
+export const closePanel = () => closeDrawer();
 
 /** Closes the drawer: the search cleared, the keyboard down. */
 export function closeDrawer() {

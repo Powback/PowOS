@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { GrowField } from "./grow.tsx";
 import { signal } from "@preact/signals";
 import { matches } from "./drawer.tsx";
-import { ask, drawer, launch, query } from "../state.ts";
+import { ask, drawer, launch, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
@@ -159,9 +159,21 @@ export function Mic({ target }: { target: MicTarget }) {
 /** The bar's field: a held mic asks PowOS AI, a tap dictates into the search; the drawer comes up to show either. */
 const barMic: MicTarget = {
   typed: () => query.value,
-  heard: (full, send) => (send ? ask(full) : (query.value = full)),
-  started: () => (drawer.value = 1),
+  heard: (full, send) => (send ? askHere(full) : (query.value = full)),
+  started: () => openHere(),
 };
+
+/** Up from the pill: the drawer, unless the pull-up panel is already up (PowOS AI's stays). */
+function openHere() {
+  if (drawer.value === 0) pullKind.value = "apps";
+  drawer.value = 1;
+}
+
+/** Asked from the pill: the one chat surface (the drawer's chat) takes it - from PowOS AI's panel too. */
+function askHere(text: string) {
+  pullKind.value = "apps";
+  ask(text);
+}
 
 /**
  * The search/ask bar: the pill PowOS AI's page asks in (shell.css .pill - the reference material, the field growing to
@@ -179,12 +191,12 @@ export function Bar() {
       class={`bar ${active ? "active" : ""}`}
       onSubmit={(e) => {
         e.preventDefault();
-        const best = matches.value[0];
+        const best = pullKind.value === "apps" ? matches.value[0] : null;
         if (best) launch(best.key);
-        else ask(query.value);
+        else askHere(query.value);
       }}
       onClick={() => {
-        drawer.value = 1;
+        openHere();
         input.current?.focus();
         powos.keyboard.show();
       }}
@@ -198,7 +210,7 @@ export function Bar() {
           onInput={(v) => (query.value = v)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder={s.listening ? "listening…" : s.error ?? "search"}
+          placeholder={s.listening ? "listening…" : (s.error ?? (pullKind.value === "ai" && drawer.value > 0 ? "ask PowOS AI" : "search"))}
           enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
           autocomplete="off"
           autoCapitalize="off"

@@ -13,7 +13,7 @@
  *   askQueued(text)  asks; while a turn is under way it waits for it (PowosAiChat.send drops what's sent meanwhile)
  */
 import { effect } from "@preact/signals";
-import { chat, chatting, drawer, page, query } from "../state.ts";
+import { chat, chatting, drawer, page, pullKind, query } from "../state.ts";
 import { dictate, type MicTarget } from "./bar.tsx";
 import { powos } from "../bridge.ts";
 
@@ -77,6 +77,8 @@ export interface OpenAssistant {
 /** Opens the chat surface: home's drawer in chat mode (from PowOS AI's page, home slides back first). */
 export function openAssistant(o: OpenAssistant = {}) {
   if (page.value === -1) page.value = 0;
+  // The chat surface is the drawer's (from PowOS AI's pull-up panel too).
+  pullKind.value = "apps";
   drawer.value = 1;
   chatting.value = true;
   if (o.text != null) query.value = o.text;

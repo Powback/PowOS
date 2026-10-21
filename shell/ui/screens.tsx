@@ -31,6 +31,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
+import { pullPanels } from "../state.ts";
 
 /** Its touches are its own: home's swipes under it don't see them. */
 const own = {
@@ -468,6 +469,11 @@ function StyleScreen() {
           </button>
         </Section>
       )}
+      <Section icon="apps" title="home">
+        <Option label="swipe up from the left: PowOS AI">
+          <Segmented options={["on", "off"]} picked={pullPanels.value === "on" ? 0 : 1} onPick={(i) => (pullPanels.value = i === 0 ? "on" : "off")} />
+        </Option>
+      </Section>
       <Section icon="apps" title="icons">
         {s.flags.map((f) => (
           <Option key={f.key} label={f.label}>

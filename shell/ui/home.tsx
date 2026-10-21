@@ -23,10 +23,10 @@ import { AgentsScreen } from "./agents.tsx";
 import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
 import { NotificationPanel } from "./notifications.tsx";
-import { PowAiPage } from "./powai.tsx";
+import { AiContent, AiHeader, PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
-import { byKey, carry, dock, dockAim, dockDrag, editing, menu, recent, setDock } from "../state.ts";
+import { byKey, carry, dock, dockAim, dockDrag, editing, menu, pullKind, recent, setDock } from "../state.ts";
 
 /** How far above the dock a held app has to go to leave it for the home screen. */
 const DOCK_EXIT = 48;
@@ -245,7 +245,14 @@ export function Home() {
             <div class="launcher" data-p ref={followOpenness}>
               <div class="launcher-inner">
                 <div class="drawer-clip">
-                  <Drawer />
+                  {pullKind.value === "ai" ? (
+                    <div class="ai-panel">
+                      <AiHeader />
+                      <AiContent shown={drawerOpen.value} />
+                    </div>
+                  ) : (
+                    <Drawer />
+                  )}
                 </div>
               </div>
             </div>

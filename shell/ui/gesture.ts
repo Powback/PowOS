@@ -15,7 +15,7 @@
  */
 import { computed, effect, signal } from "@preact/signals";
 import { dropKeyboard } from "./keyboard.ts";
-import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, selected } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, pullKind, pullPanels, selected } from "../state.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
@@ -156,7 +156,7 @@ export function homeGestures() {
     if (g) abandon();
     if (carry.value || selected.value || menu.value) return;
     // The scrolling list under the finger - the drawer's, PowOS AI's chat, the notifications: it scrolls until its end.
-    const list = target.closest?.(".drawer-list, .chat, .notif-list") ?? null;
+    const list = target.closest?.(".drawer-list, .ai-panel, .chat, .notif-list") ?? null;
     g = {
       x0: x,
       y0: y,
@@ -204,7 +204,11 @@ export function homeGestures() {
         return (g = null);
       } else if (Math.abs(dy) > Math.abs(dx)) {
         // Editing home, up isn't the launcher: the sheet has the bottom.
-        if (!g.open && dy < 0 && !editing.value) g.mode = "open";
+        if (!g.open && dy < 0 && !editing.value) {
+          g.mode = "open";
+          // The pull-up corners (state.ts pullPanels): from the left half PowOS AI's panel, from the right the apps.
+          pullKind.value = pullPanels.value === "on" && g.x0 < innerWidth / 2 ? "ai" : "apps";
+        }
         else if (g.open && dy > 0 && (!g.inList || g.listTop)) g.mode = "close";
         // Down on home: the notifications, as a stock launcher's shade.
         else if (!g.open && dy > 0 && !editing.value) g.mode = "notif";

@@ -87,7 +87,7 @@
   transform: translateY(calc((1 - var(--p)) * (100% - var(--launcher-head))));
 }
 .launcher .strip { pointer-events: auto; }
-.home.open .launcher .drawer { pointer-events: auto; }
+.home.open .launcher :is(.drawer, .ai-panel) { pointer-events: auto; }
 
 /*
  * The recent row heads the panel; as the launcher opens it closes towards the top: it moves up by its openness and
@@ -264,6 +264,22 @@
   margin-bottom: calc(-1 * var(--launcher-head));
   transform: translateY(calc(var(--p) * -1 * var(--launcher-head)));
 }
+/* PowOS AI's pull-up panel (state.ts pullKind "ai"): its content in the drawer's place, scrolling; its cards on the
+   panel's frost are a soft fill (a surface inside a surface). */
+.ai-panel {
+  opacity: min(1, calc(var(--p) * 1.6));
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: var(--edge) var(--edge) 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
+}
+html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer {
   opacity: min(1, calc(var(--p) * 1.6));
   flex: 1;

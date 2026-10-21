@@ -61,6 +61,17 @@ bare icons, and the search pill floats. The drawer's frost runs to the screen's 
 - Liquid glass (refraction at the edges, native) stays off by default. It may come back only as a very faint
   edge effect, never in the middle, after a reviewed contact sheet.
 
+### The pull-up corners (experiment, beside everything else)
+
+The drawer and PowOS AI share one pull-up panel, `state.ts` `pullKind`. A swipe up from the right half of home
+brings up the drawer, and a swipe up from the left half brings up PowOS AI's panel.
+
+- Both use the same mechanics: the panel follows the finger, wears the same frost, and home fades under it.
+- Both dismiss the same way and have the same pill at the foot ("search" or "ask PowOS AI").
+- The toggle is settings → style → home, or `pullPanels` = "off". With it off, a swipe up anywhere is the drawer,
+  as before.
+- PowOS AI's sideways page stays either way.
+
 ## 4. Colour
 
 Colours come from the active theme only: `--color-*`, `--glass-*`, `--soft-fill`. No raw colours in
