@@ -66,7 +66,7 @@ class ShellBridge(
     private val terminals = ShellTerminals(runtime, scope, ::emit)
     private val media = ShellMedia(context, runtime, scope, ::emit)
     /** Speech to text for the bar's mic (the Compose prompt bar's): the page gets its state as it changes. */
-    private val speech = Speech(context.applicationContext)
+    private val speech = Speech(context.applicationContext).also { it.warm() }
     /** The panel's quick settings: what an app may switch, and Android's panels for the rest. */
     private val quick: QuickSettings =
         QuickSettings(context) { main.post { emit("qs.changed", quick.state()) } }.also {
@@ -269,6 +269,8 @@ class ShellBridge(
             "agents.interrupt" -> dev.omalauncher.AgentsSpool.interrupt(a.getString(0))
             "speech.start" -> listen(a.optBoolean(0))
             "speech.stop" -> speech.stop()
+            "speech.hold" -> speech.hold()
+            "speech.warm" -> speech.warm()
             "speech.cancel" -> speech.cancel()
             "keyboard.show" -> keyboard(true)
             "keyboard.hide" -> keyboard(false)

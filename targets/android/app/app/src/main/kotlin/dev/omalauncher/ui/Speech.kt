@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognitionService
@@ -89,10 +90,18 @@ class Speech(
         session?.stop()
     }
 
-    /** Keeps listening, but ends at the next pause instead of at [stop]. */
+    /** Keeps listening, but ends after a tap's silence instead of at [stop]. */
     fun letGo() {
         session?.letGo()
     }
+
+    /** A tap's dictation becomes a hold's (the press that started it is still down): it ends only at [stop]. */
+    fun hold() {
+        session?.hold()
+    }
+
+    /** Binds the recognizer and works out its plan, without listening, so a press starts at once. */
+    fun warm() = NativeSpeech.warm(context)
 
     /** Ends recognition without calling onDone. */
     fun cancel() {
@@ -109,8 +118,11 @@ interface SpeechSession {
     /** Ends now: what's been heard goes to onEnd. */
     fun stop()
 
-    /** Ends at the next pause instead of at [stop]. */
+    /** Ends after a tap's silence instead of at [stop]. */
     fun letGo()
+
+    /** Ends only at [stop] (a press still held). */
+    fun hold()
 
     /** Ends without onEnd. */
     fun cancel()
@@ -141,6 +153,27 @@ internal object NativeSpeech {
     private const val TAG = "speech"
     private const val PLAN_TTL_MS = 5 * 60_000L
     private const val MAX_RETRIES = 2
+
+    /** A tap's dictation ends after this long with nothing new heard (a hold's only when let go). */
+    const val TAP_SILENCE_MS = 4000L
+
+    /** No dictation listens longer than this (a hold whose release never came: the mic mustn't stay open). */
+    private const val MAX_SESSION_MS = 5 * 60_000L
+
+    /** After stopListening, the final result's wait at most. */
+    private const val STOP_GRACE_MS = 2000L
+
+    /** The silence after which a recognizer may consider an utterance complete (most ignore it; Google's may not). */
+    private const val UTTERANCE_SILENCE_MS = 3000L
+
+    /** A segmented session's minimum length: the session lasts until stopped, its pauses only end segments. */
+    private const val SESSION_MIN_MS = 30 * 60_000L
+
+    /** How a recognizer that can't do what the intent asks refuses it (before hearing anything). */
+    private val REFUSALS = setOf(SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_SERVER_DISCONNECTED)
+
+    /** The recognizer refused a segmented session once: plain sessions, restarted at each pause, from then on. */
+    private var segmentedOff = false
 
     private enum class Kind { ON_DEVICE, REGULAR }
 
@@ -189,6 +222,7 @@ internal object NativeSpeech {
     ): SpeechSession {
         active?.cancel()
         val s = Session(c.applicationContext, hold, callbacks)
+        Log.i(TAG, "start (${if (hold) "hold" else "tap"})")
         active = s
         // Never synchronously: the caller holds the session before any of its callbacks.
         main.post { if (active === s) withPlan(s.c) { p -> if (active === s) s.listen(p) } }
@@ -235,17 +269,58 @@ internal object NativeSpeech {
             .apply {
                 if (p?.offline == true) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 p?.language?.let { putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) }
+                if (p == null) return@apply
+                // Longer pauses before a segment ends (where the recognizer honours it).
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, UTTERANCE_SILENCE_MS)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, UTTERANCE_SILENCE_MS)
+                // One session for the whole dictation, pauses ending only segments (onSegmentResults), until stopped.
+                if (Build.VERSION.SDK_INT >= 33 && !segmentedOff) {
+                    putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, SESSION_MIN_MS)
+                }
             }
 
+    /**
+     * The plan, at once when there is one (a stale one too: it's checked again in the background for next time, so a
+     * press never waits for the support checks); else after them.
+     */
     private fun withPlan(
         c: Context,
         then: (Plan) -> Unit,
     ) {
-        plan?.takeIf { System.currentTimeMillis() - planAt < PLAN_TTL_MS }?.let { return then(it) }
-        if (Build.VERSION.SDK_INT < 33) return then(remember(Plan(Kind.REGULAR, null, false)))
-        support(c, Kind.ON_DEVICE) { onDev ->
-            support(c, Kind.REGULAR) { reg -> then(remember(decide(c, onDev, reg))) }
+        val known = plan
+        if (known != null) {
+            then(known)
+            if (System.currentTimeMillis() - planAt >= PLAN_TTL_MS) main.post { refresh(c) {} }
+            return
         }
+        refresh(c, then)
+    }
+
+    private var refreshing = false
+
+    private fun refresh(
+        c: Context,
+        then: (Plan) -> Unit,
+    ) {
+        if (Build.VERSION.SDK_INT < 33) return then(remember(Plan(Kind.REGULAR, null, false)))
+        if (refreshing && plan != null) return then(plan!!)
+        refreshing = true
+        support(c, Kind.ON_DEVICE) { onDev ->
+            support(c, Kind.REGULAR) { reg ->
+                refreshing = false
+                then(remember(decide(c, onDev, reg)))
+            }
+        }
+    }
+
+    /**
+     * Ready for a press: the recognizer created and bound (its support check binds it) and the plan worked out -
+     * nothing listens, the mic stays closed. Cheap when it's been done: the plan is cached.
+     */
+    fun warm(c: Context) {
+        if (active != null) return
+        main.post { if (active == null && (plan == null || System.currentTimeMillis() - planAt >= PLAN_TTL_MS)) refresh(c.applicationContext) {} }
     }
 
     private fun remember(p: Plan): Plan {
@@ -355,26 +430,61 @@ internal object NativeSpeech {
         hold: Boolean,
         val cb: SpeechCallbacks,
     ) : SpeechSession {
-        var held = hold
-        var finished = ""
-        var text = ""
+        val d = Dictation(hold, TAP_SILENCE_MS) { SystemClock.elapsedRealtime() }
+        val startedAt = SystemClock.elapsedRealtime()
+        var ready = false
+        var partialSeen = false
         var current: SpeechRecognizer? = null
         var attempt = 0
+        var attemptAt = 0L
         var retries = 0
         var ended = false
 
+        /** Heard anything in this attempt (an error before that, with segmenting asked for, blames the segmenting). */
+        var heard = false
+
+        /** A tap's dictation: ends after [TAP_SILENCE_MS] of nothing new heard, whatever the recognizer does. */
+        private val watch =
+            object : Runnable {
+                override fun run() {
+                    if (ended) return
+                    if (d.silent()) {
+                        Log.i(TAG, "silence: ending the dictation")
+                        stop()
+                    } else if (SystemClock.elapsedRealtime() - startedAt > MAX_SESSION_MS) {
+                        Log.w(TAG, "listened ${MAX_SESSION_MS / 60_000} min: ending the dictation")
+                        stop()
+                    } else {
+                        main.postDelayed(this, 250)
+                    }
+                }
+            }
+
+        init {
+            main.postDelayed(watch, 250)
+        }
+
         override fun stop() {
-            held = false
-            current?.stopListening() ?: end(null)
+            if (ended) return
+            d.stopping = true
+            val r = current ?: return end(null)
+            r.stopListening()
+            // The final result comes within moments; a recognizer that never sends it mustn't keep the session open.
+            main.postDelayed({ end(null) }, STOP_GRACE_MS)
         }
 
         override fun letGo() {
-            held = false
+            d.hold = false
+        }
+
+        override fun hold() {
+            d.hold = true
         }
 
         override fun cancel() {
             if (ended) return
             ended = true
+            main.removeCallbacks(watch)
             current?.cancel()
             current = null
             if (active === this) active = null
@@ -383,22 +493,36 @@ internal object NativeSpeech {
         fun end(why: String?) {
             if (ended) return
             ended = true
+            main.removeCallbacks(watch)
             current = null
             if (active === this) active = null
             if (why != null) Log.w(TAG, why)
-            cb.onEnd(text.trim(), why)
+            cb.onEnd(d.text, why)
         }
 
         fun listen(p: Plan) {
             if (ended) return
             val r = runCatching { recognizer(c, p.kind) }.getOrElse { return end("no speech recognizer (${it.message})") }
             val a = ++attempt
+            attemptAt = SystemClock.elapsedRealtime()
             current = r
+            heard = false
             r.setRecognitionListener(Listener(a, p))
             runCatching { r.startListening(intent(p)) }.onFailure {
                 drop(p.kind)
                 retry(p) { "speech recognition failed (${it.message})" }
             }
+        }
+
+        /**
+         * A segment ended (results, a pause with nothing understood): listen again at once, on the same recognizer, while
+         * the session goes on ([Dictation.goOn]) - the field keeps "listening" throughout, nothing is lost but the
+         * restart's few hundred ms of audio.
+         */
+        fun next(p: Plan) {
+            if (!d.goOn()) return end(null)
+            // A recognizer that ends a segment the moment it starts (no mic, nothing to hear) mustn't spin.
+            if (SystemClock.elapsedRealtime() - attemptAt < 500) main.postDelayed({ listen(p) }, 300) else listen(p)
         }
 
         /** Tries [p] again (after a moment), at most [MAX_RETRIES] times a session; then ends with [why]. */
@@ -412,11 +536,6 @@ internal object NativeSpeech {
             main.postDelayed({ listen(p) }, delayMs)
         }
 
-        private fun join(
-            a: String,
-            b: String,
-        ) = listOf(a, b).filter { it.isNotBlank() }.joinToString(" ") { it.trim() }
-
         private fun Bundle.best() = getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
 
         /** Listens to one attempt; callbacks from an earlier one (or after the end) are ignored. */
@@ -428,25 +547,50 @@ internal object NativeSpeech {
 
             override fun onPartialResults(partial: Bundle) {
                 if (!current) return
-                text = join(finished, partial.best())
-                cb.onText(text)
+                val t = partial.best()
+                if (t.isNotBlank()) heard = true
+                if (t.isNotBlank() && !partialSeen) {
+                    partialSeen = true
+                    Log.i(TAG, "first words ${SystemClock.elapsedRealtime() - startedAt} ms after the start")
+                }
+                d.partial(t)
+                cb.onText(d.text)
             }
 
             override fun onResults(results: Bundle) {
                 if (!current) return
-                finished = join(finished, results.best())
-                text = finished
-                cb.onText(text)
+                d.segment(results.best())
+                cb.onText(d.text)
                 retries = 0
-                if (held) listen(p) else end(null)
+                next(p)
+            }
+
+            // Segmented sessions (API 33+, a recognizer that supports them): each pause's text as it ends, one session
+            // to the end - no restarts at all.
+            override fun onSegmentResults(segmentResults: Bundle) {
+                if (!current) return
+                heard = true
+                d.segment(segmentResults.best())
+                cb.onText(d.text)
+            }
+
+            override fun onEndOfSegmentedSession() {
+                if (!current) return
+                next(p)
             }
 
             override fun onError(code: Int) {
                 if (!current) return
                 Log.i(TAG, "error $code ($p)")
+                if (Build.VERSION.SDK_INT >= 33 && !segmentedOff && !heard && (code in REFUSALS || code > 15)) {
+                    // A recognizer that won't take a segmented session as asked: plain sessions (restarted) from now on.
+                    Log.i(TAG, "no segmented sessions with this recognizer ($code): restarting segments instead")
+                    segmentedOff = true
+                    return retry(p, 0) { "speech recognition failed ($code)" }
+                }
                 when (code) {
-                    // Silence or nothing understood: fine while the button is held.
-                    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> if (held) listen(p) else end(null)
+                    // Silence or nothing understood: a pause, not the end - unless the session is over.
+                    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> next(p)
                     SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> {
                         // The model went away or never came: online with the system default recognizer, then without
                         // naming a language, before giving up.
@@ -466,6 +610,7 @@ internal object NativeSpeech {
                     }
                     SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> retry(p, 400) { "the speech recognizer is busy" }
                     SpeechRecognizer.ERROR_SERVER_DISCONNECTED, SpeechRecognizer.ERROR_CLIENT -> {
+                        if (d.stopping) return end(null)
                         drop(p.kind)
                         retry(p) { "the speech recognizer stopped ($code)" }
                     }
@@ -482,9 +627,15 @@ internal object NativeSpeech {
                 if (current) cb.onLevel(((rmsdB + 2f) / 12f).coerceIn(0f, 1f))
             }
 
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {
+                if (current) d.voice()
+            }
 
-            override fun onBeginningOfSpeech() {}
+            override fun onReadyForSpeech(params: Bundle?) {
+                if (!current || ready) return
+                ready = true
+                Log.i(TAG, "listening ${SystemClock.elapsedRealtime() - startedAt} ms after the start")
+            }
 
             override fun onBufferReceived(buffer: ByteArray?) {}
 
@@ -496,4 +647,55 @@ internal object NativeSpeech {
             ) {}
         }
     }
+
+}
+
+/**
+ * What a dictation has heard and whether it goes on - Android's recognizers end at every short pause, a dictation
+ * doesn't: held (the mic held down) it goes on until let go; a tap's goes on until [silenceMs] pass with nothing new
+ * heard (or the mic is tapped again). Pure (a clock passed in), so the rules are unit-tested (SpeechDictationTest).
+ */
+internal class Dictation(
+    var hold: Boolean,
+    private val silenceMs: Long,
+    private val clock: () -> Long,
+) {
+    /** Asked to stop: the next end of a segment is the end. */
+    var stopping = false
+    private var lastVoice = clock()
+    private var finished = ""
+    private var partial = ""
+
+    /** Everything heard: the finished segments, then the current one so far. */
+    val text get() = join(finished, partial)
+
+    /** Speech began (the recognizer said so). */
+    fun voice() {
+        lastVoice = clock()
+    }
+
+    /** The current segment so far; new words count as voice. */
+    fun partial(t: String) {
+        if (t.isNotBlank() && t != partial) voice()
+        partial = t
+    }
+
+    /** A segment ended with [t]; empty (some recognizers' final for a short tail) keeps what the partial had. */
+    fun segment(t: String) {
+        val words = t.ifBlank { partial }
+        finished = join(finished, words)
+        partial = ""
+        if (t.isNotBlank()) voice()
+    }
+
+    /** At the end of a segment: listen on? */
+    fun goOn() = !stopping && (hold || clock() - lastVoice < silenceMs)
+
+    /** A tap's dictation has been quiet long enough to end (checked while listening). */
+    fun silent() = !hold && !stopping && clock() - lastVoice >= silenceMs
+
+    private fun join(
+        a: String,
+        b: String,
+    ) = listOf(a, b).filter { it.isNotBlank() }.joinToString(" ") { it.trim() }
 }

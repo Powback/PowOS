@@ -249,6 +249,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       start: (hold) => call("speech.start", hold),
       stop: () => call("speech.stop"),
       cancel: () => call("speech.cancel"),
+      hold: () => call("speech.hold"),
+      warm: () => call("speech.warm"),
     },
     keyboard: {
       show: () => call("keyboard.show"),
@@ -904,6 +906,8 @@ function mock(): Bridge {
           clearInterval(timer);
           state(false);
         },
+        hold: async () => void (held = true),
+        warm: async () => {},
       };
     })(),
     keyboard: { show: async () => {}, hide: async () => {} },

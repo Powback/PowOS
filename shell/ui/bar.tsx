@@ -2,9 +2,11 @@
  * The bar at the bottom: it finds apps and asks PowOS AI. Tapping it types - the keyboard comes up then, not when the
  * drawer is swiped open, which is for browsing. Enter opens the best match; with none, it asks PowOS AI (chat.tsx).
  * The mic (the Compose prompt bar's): hold to talk, let go to ask PowOS AI; a tap dictates into the field instead,
- * ending at the next pause; held and dragged well away, it's cancelled.
+ * until ~4 s with nothing heard or the next tap (pauses don't end either); held and dragged well away, it's cancelled.
+ * It listens from the moment the finger lands: a press that lasts becomes a hold (speech.hold) - no first words lost
+ * to deciding which it is.
  */
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { GrowField } from "./grow.tsx";
 import { signal } from "@preact/signals";
 import { matches } from "./drawer.tsx";
@@ -40,17 +42,24 @@ const join = (...parts: string[]) => parts.map((p) => p.trim()).filter(Boolean).
 export const hearing = (target: MicTarget) => (speech.value.listening && pending?.target === target ? join(pending.typed, speech.value.text) : null);
 
 async function listen(hold: boolean, target: MicTarget) {
+  // The recognizer first, then the UI: the call is on its way before anything else runs.
+  const starting = powos.speech.start(hold);
   pending = { send: hold, typed: target.typed(), target };
+  // Listening shows in this frame, not when the recognizer reports it.
+  speech.value = { listening: true, text: "", error: null };
   target.started?.();
   (document.activeElement as HTMLElement | null)?.blur();
   powos.keyboard.hide();
   navigator.vibrate?.(10);
-  const r = await powos.speech.start(hold);
-  if (r !== "started") pending = null;
+  const r = await starting;
+  if (r !== "started") {
+    if (pending?.target === target) pending = null;
+    speech.value = { ...speech.value, listening: false };
+  }
   if (r === "asked") asked = target;
 }
 
-/** Dictates into [target] as a tap on its mic does (ends at the next pause, nothing is sent), unless it's listening. */
+/** Dictates into [target] as a tap on its mic does (ends after ~4 s of silence, nothing is sent), unless it's listening. */
 export function dictate(target: MicTarget) {
   if (pending || asked || speech.value.listening) return;
   listen(false, target);
@@ -83,7 +92,9 @@ powos.on("speech.permission", ({ granted }: { granted: boolean }) => {
 /** A mic for [target]: hold to talk and send, tap to dictate; held and dragged well away, cancelled. */
 export function Mic({ target }: { target: MicTarget }) {
   const press = useRef<{ x: number; y: number; timer: number; held: boolean; cancelled: boolean } | null>(null);
-  const on = speech.value.listening;
+  const on = speech.value.listening || pending?.target === target;
+  // Shown: the recognizer bound and ready (it doesn't listen), so a press starts at once.
+  useEffect(() => void powos.speech.warm(), []);
   return (
     <button
       type="button"
@@ -99,10 +110,14 @@ export function Mic({ target }: { target: MicTarget }) {
           powos.speech.stop();
           return;
         }
+        // Listens now, as a tap's dictation; still down after HOLD_MS, it's a hold: it sends when let go.
         const p = { x: e.clientX, y: e.clientY, timer: 0, held: false, cancelled: false };
+        listen(false, target);
         p.timer = window.setTimeout(() => {
           p.held = true;
-          listen(true, target);
+          if (pending?.target !== target) return;
+          pending.send = true;
+          powos.speech.hold();
         }, HOLD_MS);
         press.current = p;
       }}
@@ -121,13 +136,16 @@ export function Mic({ target }: { target: MicTarget }) {
         press.current = null;
         if (!p) return;
         clearTimeout(p.timer);
-        if (!p.held) listen(false, target);
-        else if (!p.cancelled) powos.speech.stop();
+        // A hold ends (and sends) when let go; a tap's dictation goes on until its silence or the next tap.
+        if (p.held && !p.cancelled) powos.speech.stop();
       }}
       onPointerCancel={() => {
         const p = press.current;
         press.current = null;
-        if (p) clearTimeout(p.timer);
+        if (!p) return;
+        clearTimeout(p.timer);
+        // The press was taken away (the panel went, a gesture): a hold must not stay listening without its release.
+        if (p.held && !p.cancelled) powos.speech.stop();
       }}
     >
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">

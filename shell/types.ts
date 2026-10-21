@@ -599,10 +599,17 @@ export interface Bridge {
    * as it hears; "speech.done" ({ text }) once it ends; "speech.permission" ({ granted }) after it asked for the mic.
    */
   speech: {
-    /** [hold]: listens across pauses until stop(). "asked": it asked for the mic first, nothing started. */
+    /**
+     * Listens across pauses: [hold] until stop(), else until ~4 s with nothing heard (or stop()). "asked": it asked for
+     * the mic first, nothing started.
+     */
     start(hold: boolean): Promise<"started" | "asked" | "unavailable">;
     stop(): Promise<void>;
     cancel(): Promise<void>;
+    /** The dictation under way becomes a hold's: it ends only at stop() (the press that started it is still down). */
+    hold(): Promise<void>;
+    /** Binds the recognizer without listening (the mic stays closed), so the next start is immediate. */
+    warm(): Promise<void>;
   };
   keyboard: {
     show(): Promise<void>;
