@@ -19,12 +19,10 @@ import { powos } from "../bridge.ts";
 const root = document.documentElement;
 const mode = new URLSearchParams(location.search).get("mode") ?? "home";
 /**
- * Pages whose tiles the compositor blurs (blur regions on their window): none now. Home draws the wallpaper itself as
- * the page's bottom layer and its surfaces blur what's really behind them with CSS backdrop-filter (the wallpaper and
- * the other UI - ui/glass.ts, theme.css), so regions would blur a wallpaper nobody sees. Native blur stays where the
- * backdrop isn't the page's: windows over home or apps (the shade, the switcher - WindowBlur/GlassBlur.wholeWindow).
+ * Pages whose window is over the wallpaper and nothing else: what's behind it is what the glass shows. Home only - the
+ * lock face's window can be over an app (its glass would blur the app, not the wallpaper): it keeps the picture.
  */
-const OVER_WALLPAPER = new Set<string>();
+const OVER_WALLPAPER = new Set(["home"]);
 /** The surfaces with glass (theme.css): one inside another is only a soft fill on it, not glass of its own. */
 const SURFACES = ".tile, .notif-panel";
 
