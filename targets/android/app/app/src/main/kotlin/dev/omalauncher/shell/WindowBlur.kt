@@ -31,7 +31,11 @@ internal class WindowBlur(
     fun set(amount: Float) {
         if (broken) return
         val v = view() ?: return
-        val r = (amount.coerceIn(0f, 1f) * maxRadiusDp * v.resources.displayMetrics.density).toInt()
+        // Android's own switch (battery saver, the developer option): no blur while it says so - never forced.
+        val allowed =
+            android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S ||
+                runCatching { v.context.getSystemService(android.view.WindowManager::class.java).isCrossWindowBlurEnabled }.getOrDefault(true)
+        val r = if (allowed) (amount.coerceIn(0f, 1f) * maxRadiusDp * v.resources.displayMetrics.density).toInt() else 0
         if (r == radius) return
         // A blur region over the window: the way this compositor blurs (the background
         // blur radius left home's widgets sharp under the shade, 2026-10-21). The page's own glass, on home, merges it.
