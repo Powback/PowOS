@@ -88,6 +88,20 @@ fi
 # 1b. The design language's style lint (docs/DESIGN-LANGUAGE.md): no raw colours, lines or shadows outside the tokens.
 # A push: the files it brings (what's already on the phone isn't this push's to answer for); otherwise all of the shell.
 if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
+# 1c. Every local file a page names (an html's href/src) or a script links in (a "./ui/x.css" it adds) is in what the
+# phone will serve: the boot check below doesn't fail a stylesheet that 404s (2026-10-21: index.html's override named
+# ui/rich.css before rich.css itself was on the phone - the assist page loaded without it). Push a page with what it
+# names, in one push.
+missing=$(cd "$S" && {
+  for h in *.html; do
+    grep -oE '(href|src)="[^"#?]+"' "$h" | sed -E 's/^(href|src)="//; s/"$//' |
+      grep -vE '^([a-z]+:|/)' | while IFS= read -r r; do [ -e "${r#./}" ] || echo "$h names $r"; done
+  done
+  grep -ohE '"\./[A-Za-z0-9_/.-]+\.css"' ui/*.ts ui/*.tsx *.ts *.tsx 2>/dev/null | tr -d '"' | sort -u |
+    while IFS= read -r r; do [ -e "${r#./}" ] || echo "a script links $r"; done
+} 2>/dev/null)
+if [ -z "$missing" ]; then echo "ok   referenced files"
+else echo "$missing" | sed 's/^/FAIL missing: /; s/$/ (not in what the phone will serve: push it with this)/'; fail=1; fi
 # 2. The pages, booted.
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
 mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro")
