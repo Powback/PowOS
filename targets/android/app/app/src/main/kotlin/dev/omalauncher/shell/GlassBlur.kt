@@ -204,12 +204,8 @@ internal class GlassBlur(
             try {
                 val m = methods ?: error("no hidden calls")
                 val c = Codec(m, m.viewRoot.invoke(view) ?: error("no view root"))
-                val a = c.encode(Region(10f, 20f, 110f, 220f, 1f, 2f, 3f, 4f, 0.5f, 30f))
-                val ok =
-                    a.size >= 10 && a[0] == 30f && kotlin.math.abs(a[1] - 0.5f) < 0.01f && a[2] == 10f && a[3] == 20f &&
-                        a[4] == 110f && a[5] == 220f && a[6] == 1f && a[7] == 2f && a[8] == 4f && a[9] == 3f
+                val ok = valid(c)
                 if (ok) codec = c
-                Log.i(TAG, "blur regions ${if (ok) "usable" else "NOT usable"}: ${a.size} floats per region (${a.take(10)})")
                 ok
             } catch (e: Throwable) {
                 Log.w(TAG, "no blur regions here: the page keeps its own glass", e)
@@ -255,6 +251,23 @@ internal class GlassBlur(
         if (regions.isNotEmpty()) set(emptyList(), -1)
     }
 
+    /** The whole window's blur (the switcher's depth over home), px; added to the surfaces' regions. */
+    private var whole = 0f
+
+    /**
+     * What's behind the whole window blurred by [radiusPx] (0: none), as a blur region over the window beside the
+     * surfaces' own - the blur this compositor draws for PowOS (blur regions; the shade's background blur radius showed home
+     * sharp, 2026-10-21). False where blur regions can't be used here: the caller's fallback then.
+     */
+    fun wholeWindow(radiusPx: Float): Boolean {
+        if (checked == null && !broken) check()
+        if (broken || checked != true) return false
+        if (whole == radiusPx) return true
+        whole = radiusPx
+        set(regions, -1)
+        return true
+    }
+
     /** A surface tile came or went: the regions again without what's over it. */
     fun holesChanged() = main.post { if (on && regions.isNotEmpty()) set(regions, -1) }
 
@@ -279,7 +292,7 @@ internal class GlassBlur(
             if (!surface.isValid) return
             // Clearing needs no encoder; anything else only the checked one.
             val c = codec
-            if (regions.isNotEmpty() && c == null) return
+            if ((regions.isNotEmpty() || whole >= 1f) && c == null) return
             // The window's own offset (none for home: full screen) - regions are in the window surface's space.
             val at = IntArray(2).also(view::getLocationInWindow)
             val holes = holes()
@@ -287,7 +300,9 @@ internal class GlassBlur(
                 regions
                     .filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
                     .map { r -> c!!.encode(r.moved(at[0].toFloat(), at[1].toFloat())) }
-                    .toTypedArray()
+                    .let { list ->
+                        if (whole < 1f) list else listOf(c!!.encode(Region(0f, 0f, view.rootView.width.toFloat(), view.rootView.height.toFloat(), 0f, 0f, 0f, 0f, 1f, whole))) + list
+                    }.toTypedArray()
             // The liquid rims, drawn by a view in this window: on the same frame as the blur's transaction.
             val kept = regions.filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
             // Not over the system bars: the backdrop may be the display's capture (WallpaperBackdrop DISPLAY), the bars
@@ -390,6 +405,51 @@ internal class GlassBlur(
 
     companion object {
         private const val TAG = "PowosGlassBlur"
+
+        /** A test region must come back with its values where AOSP's layout has them (the OEM's extras after them). */
+        private fun valid(c: Codec): Boolean {
+            val a = c.encode(Region(10f, 20f, 110f, 220f, 1f, 2f, 3f, 4f, 0.5f, 30f))
+            val ok =
+                a.size >= 10 && a[0] == 30f && kotlin.math.abs(a[1] - 0.5f) < 0.01f && a[2] == 10f && a[3] == 20f &&
+                    a[4] == 110f && a[5] == 220f && a[6] == 1f && a[7] == 2f && a[8] == 4f && a[9] == 3f
+            Log.i(TAG, "blur regions ${if (ok) "usable" else "NOT usable"}: ${a.size} floats per region (${a.take(10)})")
+            return ok
+        }
+
+        /** Checked encoders of windows without a page glass of their own (the shade's, the switcher activity's). */
+        private val windowCodecs = java.util.WeakHashMap<Any, Codec>()
+        private val badWindows = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Any, Boolean>())
+
+        /**
+         * [view]'s whole window: what's behind it blurred by [radiusPx] (0: none), as one blur region (WindowBlur's
+         * way where it works). False: blur regions can't be used here.
+         */
+        fun wholeWindowOf(
+            view: View,
+            radiusPx: Float,
+        ): Boolean {
+            val m = methods ?: return false
+            return try {
+                val viewRoot = m.viewRoot.invoke(view) ?: return true
+                if (viewRoot in badWindows) return false
+                val surface = m.surface.invoke(viewRoot) as SurfaceControl? ?: return true
+                if (!surface.isValid) return true
+                val c =
+                    windowCodecs[viewRoot] ?: Codec(m, viewRoot).takeIf(::valid)?.also { windowCodecs[viewRoot] = it } ?: run {
+                        badWindows.add(viewRoot)
+                        return false
+                    }
+                val r = view.rootView
+                val regions = if (radiusPx < 1f) emptyArray() else arrayOf(c.encode(Region(0f, 0f, r.width.toFloat(), r.height.toFloat(), 0f, 0f, 0f, 0f, 1f, radiusPx)))
+                val t = SurfaceControl.Transaction()
+                m.setBlurRegions.invoke(t, surface, regions)
+                t.apply()
+                true
+            } catch (e: Throwable) {
+                Log.w(TAG, "no blur region over the window", e)
+                false
+            }
+        }
 
         private val methods: Methods? by lazy {
             runCatching {

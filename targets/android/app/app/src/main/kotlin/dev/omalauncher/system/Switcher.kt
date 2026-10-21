@@ -72,11 +72,28 @@ object Switcher {
     private var depth = 0f
     private var depthAnim: ValueAnimator? = null
 
+    /** The window the depth was last set on: another one now (home's page vs the recents activity), the old one cleared. */
+    private var blurOn: ((Float) -> Unit)? = null
+
+    /**
+     * The depth to the window the layer is on now. A layer that moved windows (onHome changed between a swipe's
+     * blur and its settle) left its old window blurred - at 140 dp the whole wallpaper behind home ("my whole
+     * background is blurred"): cleared first.
+     */
+    private fun applyDepth(v: Float) {
+        val b = blur
+        if (b !== blurOn) {
+            blurOn?.invoke(0f)
+            blurOn = b
+        }
+        b?.invoke(v)
+    }
+
     private fun depthNow(v: Float) {
         depthAnim?.cancel()
         depthAnim = null
         depth = v
-        blur?.invoke(v)
+        applyDepth(v)
     }
 
     /** The blur eased to [target], as the page's layer settles (its 240 ms). */
@@ -87,7 +104,20 @@ object Switcher {
                 duration = 240
                 addUpdateListener {
                     depth = it.animatedValue as Float
-                    blur?.invoke(depth)
+                    applyDepth(depth)
+                }
+                // Settled shut: no window keeps any of it (an animation cut short, a stale target).
+                if (target == 0f) {
+                    addListener(
+                        object : android.animation.AnimatorListenerAdapter() {
+                            override fun onAnimationEnd(animation: android.animation.Animator) {
+                                if (depth == 0f) {
+                                    shellBlur?.invoke(0f)
+                                    hostBlur?.invoke(0f)
+                                }
+                            }
+                        },
+                    )
                 }
                 start()
             }

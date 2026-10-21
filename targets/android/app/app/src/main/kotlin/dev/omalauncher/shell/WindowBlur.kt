@@ -20,8 +20,10 @@ internal class WindowBlur(
     /** A view of the window (its root): the window's surface is its view root's. */
     private val view: () -> View?,
     private val maxRadiusDp: Float = MAX_RADIUS_DP,
+    /** The window's page glass (home's GlassBlur.wholeWindow), which keeps its surfaces' regions beside this one. */
+    private val glass: ((Float) -> Boolean)? = null,
 ) {
-    constructor(window: Window, maxRadiusDp: Float = MAX_RADIUS_DP) : this({ window.decorView }, maxRadiusDp)
+    constructor(window: Window, maxRadiusDp: Float = MAX_RADIUS_DP, glass: ((Float) -> Boolean)? = null) : this({ window.decorView }, maxRadiusDp, glass)
 
     private var radius = -1
     private var broken = false
@@ -31,6 +33,15 @@ internal class WindowBlur(
         val v = view() ?: return
         val r = (amount.coerceIn(0f, 1f) * maxRadiusDp * v.resources.displayMetrics.density).toInt()
         if (r == radius) return
+        // A blur region over the window: the way this compositor blurs (the background
+        // blur radius left home's widgets sharp under the shade, 2026-10-21). The page's own glass, on home, merges it.
+        val glassHandled = runCatching {
+                glass?.invoke(r.toFloat()) ?: (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU && GlassBlur.wholeWindowOf(v, r.toFloat()))
+            }.getOrDefault(false)
+        if (glassHandled) {
+            radius = r
+            return
+        }
         runCatching {
             HiddenApi.allow()
             val root = View::class.java.getMethod("getViewRootImpl").invoke(v) ?: return

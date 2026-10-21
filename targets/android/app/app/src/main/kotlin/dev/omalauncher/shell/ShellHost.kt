@@ -115,6 +115,9 @@ class ShellHost(
             }
         }
 
+    /** The whole window blurred behind (the switcher's depth), beside the glass's regions; false: not this way. */
+    fun wholeWindow(radiusPx: Float): Boolean = native.glass?.wholeWindow(radiusPx) ?: false
+
     fun destroy() {
         styleWatch?.cancel()
         bootSerial++

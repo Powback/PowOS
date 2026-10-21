@@ -46,7 +46,7 @@ class ShellActivity : Activity() {
         host = ShellHost(this, this, runtime)
         setContentView(host.web)
         // The switcher is a layer of this page: the gestures and the overview button reach it here.
-        val blur = WindowBlur(window)
+        val blur = WindowBlur(window, glass = host::wholeWindow)
         dev.omalauncher.system.Switcher.attach(host.bridge, { host.highRefresh?.boost(it) }, blur::set)
         // Opened from the agents' notification: the page opens the Agents screen.
         dev.omalauncher.AgentsSpool.opened(intent)
