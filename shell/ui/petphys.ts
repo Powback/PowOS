@@ -92,23 +92,23 @@ export interface Pet {
 
 /** Tuning for a 64 px creature (k = 1); px and seconds. */
 export const T = {
-  runMax: 300,
+  runMax: 330,
   runAcc: 3600,
   turnAcc: 6400,
   friction: 4400,
   airAcc: 2600,
   airDrag: 260,
-  gravity: 3400,
+  gravity: 5200,
   fallMult: 1.6,
-  jumpH: 170,
+  jumpH: 280,
   jumpCut: 0.45,
-  maxFall: 1500,
+  maxFall: 1900,
   coyote: 0.09,
   buffer: 0.11,
-  wallSlide: 160,
+  wallSlide: 220,
   wallCoyote: 0.07,
-  wjVx: 230,
-  wjVy: 900,
+  wjVx: 300,
+  wjVy: 1300,
   wjLock: 0.07,
 };
 

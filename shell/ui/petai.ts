@@ -12,7 +12,7 @@
  * hop ends anywhere but where it should (a rect moved or went, it missed), it replans from where it is - never a reset.
  * A goal it can't reach: as close as it can get (the surface nearest the goal it can reach).
  */
-import { DT, FLOOR, NO_INPUT, T, jumpV, step, type Input, type Pet, type Rect, type World } from "./petphys.ts";
+import { DT, FLOOR, NO_INPUT, T, step, type Input, type Pet, type Rect, type World } from "./petphys.ts";
 
 export interface Goal {
   key: string;
@@ -28,6 +28,8 @@ interface Hop {
   tx: number;
   /** Stop at x0 before jumping (a standing jump: up a wall beside it), else run through it. */
   stand?: boolean;
+  /** Up the screen's side (-1 left, 1 right): wall jumps up it until [to]'s top is in reach. */
+  side?: number;
 }
 
 export interface Route {
@@ -44,6 +46,7 @@ function surface(world: World, key: string): Rect | null {
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 const inset = (p: Pet, r: Rect, x: number) => {
   const m = Math.min(p.hw * 0.5, (r.r - r.l) / 2);
   return clamp(x, r.l + m, r.r - m);
@@ -118,6 +121,9 @@ export class HopDriver {
     let aim = h.tx;
     const toWall = below && apex > to.t - 6 && h.to !== FLOOR && (outsideL || outsideR);
     if (toWall) aim = outsideL ? to.l - half - 0.3 : to.r + half + 0.3;
+    // Up the screen's side: to it, and up it, until a jump clears [to]'s top.
+    const edge = !toWall && !!h.side && below && apex > to.t - 6;
+    if (edge) aim = h.side! < 0 ? half - 0.3 : world.w - half + 0.3;
     // When it comes down to [to]'s top (the falling branch), or soon if it can't get that high.
     const g = p.rising ? T.gravity * k : fallG;
     const dy = to.t - p.y;
@@ -129,8 +135,9 @@ export class HopDriver {
     // Close to the wall it's going for: pressed into it (the wall stops it; pressing is what makes it slide).
     // (Only with its feet at the wall's height: lower, there's no wall yet and pressing would take it in under.)
     if (toWall && Math.abs(aim - p.x) < 8 * k) d = p.y < to.b - 10 * k ? (outsideL ? 1 : -1) : Math.sign(Math.round((aim - p.x - p.vx * 0.08) / 2));
+    if (edge && Math.abs(aim - p.x) < 8 * k) d = h.side!;
     // Against a wall below the top: keep pressing into it (slide) and kick off it when the climb has slowed.
-    if (p.wall !== 0 && below && toWall && p.wall === (outsideL ? 1 : -1)) {
+    if (p.wall !== 0 && below && ((toWall && p.wall === (outsideL ? 1 : -1)) || (edge && p.wall === h.side))) {
       d = p.wall;
       if (p.vy > -140 * k && !p.jumpWas) {
         jump = true;
@@ -179,7 +186,7 @@ export function playHop(world: World, start: Pet, hop: Hop): { ok: boolean; t: n
 }
 
 /** The hops worth trying from [a] (standing at x) to [b], cheapest-looking first. */
-function candidates(p: Pet, a: Rect, x: number, b: Rect, goalX: number | null): Hop[] {
+function candidates(p: Pet, world: World, a: Rect, x: number, b: Rect, goalX: number | null): Hop[] {
   const half = p.hw / 2;
   const right = (b.l + b.r) / 2 > (a.l + a.r) / 2;
   const near = inset(p, b, goalX ?? clamp(x, b.l, b.r));
@@ -198,6 +205,15 @@ function candidates(p: Pet, a: Rect, x: number, b: Rect, goalX: number | null): 
   // Up its side: from just beside it, a full jump to its wall, then wall jumps.
   if (higher)
     for (const wx of [b.l - half - 2, b.r + half + 2]) if (wx > a.l && wx < a.r) out.push({ to: b.key, x0: wx, mode: "full", tx: near, stand: true });
+  // Up the screen's side nearest [b] (home's tiles stand far above the pill, with no wall between): from the end of
+  // [a] toward that side, a jump to the screen's edge and wall jumps up it.
+  if (higher) {
+    const sides = (b.l + b.r) / 2 < world.w / 2 ? [-1, 1] : [1, -1];
+    for (const side of sides) {
+      const x0 = side < 0 ? Math.max(a.l + 2, half + 1) : Math.min(a.r - 2, world.w - half - 1);
+      if (Math.abs((side < 0 ? 0 : world.w) - x0) < world.w * 0.3) out.push({ to: b.key, x0, mode: "full", tx: near, side });
+    }
+  }
   return out;
 }
 
@@ -209,14 +225,24 @@ const surfaces = (world: World) => [...world.rects, surface(world, FLOOR)!];
  * Out of reach: the route to the reachable surface nearest the goal, partial.
  */
 export function plan(world: World, p: Pet, goal: Goal): Route | null {
+  const g = planner(world, p, goal);
+  for (;;) {
+    const r = g.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** plan(), one played hop at a time (a yield after each): the live driver spreads it over frames. */
+export function* planner(world: World, p: Pet, goal: Goal): Generator<void, Route | null> {
   if (!p.ground) return null;
+  p = { ...p };
   const all = surfaces(world);
   const goalR = surface(world, goal.key);
   if (!goalR) return null;
   const gx = inset(p, goalR, goal.x);
-  const reachUp = jumpV(p.k) ** 2 / (2 * T.gravity * p.k) * 3.2;
   type Node = { t: number; x: number; hops: Hop[] };
-  const best = new Map<string, Node>([[p.ground, { t: 0, x: p.x, hops: [] }]]);
+  const start: string = p.ground!;
+  const best = new Map<string, Node>([[start, { t: 0, x: p.x, hops: [] }]]);
   const done = new Set<string>();
   for (;;) {
     let k: string | null = null;
@@ -226,13 +252,14 @@ export function plan(world: World, p: Pet, goal: Goal): Route | null {
     if (k === goal.key) break;
     const cur = best.get(k)!;
     const a = surface(world, k)!;
-    const from = k === p.ground && cur.hops.length === 0 ? { ...p } : standing(p, world, k, cur.x);
+    const from = k === start && cur.hops.length === 0 ? { ...p } : standing(p, world, k, cur.x);
     for (const b of all) {
       if (b.key === k || done.has(b.key)) continue;
-      // Too high to climb, or a long way across: not worth playing.
-      if (a.t - b.t > reachUp || Math.max(b.l - a.r, a.l - b.r) > world.w * 0.6) continue;
-      for (const hop of candidates(p, a, cur.x, b, b.key === goal.key ? gx : null)) {
+      // A long way across: not worth playing (any height is: the screen's sides climb).
+      if (Math.max(b.l - a.r, a.l - b.r) > world.w * 0.6) continue;
+      for (const hop of candidates(p, world, a, cur.x, b, b.key === goal.key ? gx : null)) {
         const r = playHop(world, from, hop);
+        yield;
         if (!r.ok) continue;
         const t = cur.t + r.t;
         const seen = best.get(b.key);
@@ -266,17 +293,34 @@ export class Driver {
   private replans = 0;
   goal: Goal;
   private done: (reached: boolean) => void;
-  constructor(goal: Goal, done: (reached: boolean) => void) {
+  /** Planning time per step (ms): the route is worked out a slice at a time while it already sets off. */
+  private budget: number;
+  private gen: Generator<void, Route | null> | null = null;
+  constructor(goal: Goal, done: (reached: boolean) => void, budgetMs = Infinity) {
     this.goal = goal;
     this.done = done;
+    this.budget = budgetMs;
   }
 
   /** What to press this step; null when it has arrived (or given up) - done() was called. */
   input(p: Pet, world: World): Input | null {
     if (!surface(world, this.goal.key)) return this.finish(false);
     if (!this.route) {
-      if (!p.ground) return { ...NO_INPUT };
-      this.route = plan(world, p, this.goal);
+      if (!this.gen) {
+        if (!p.ground) return { ...NO_INPUT };
+        this.gen = planner(world, p, this.goal);
+      }
+      // A slice of the planning this step; meanwhile it already heads the goal's way along what it stands on.
+      const until = this.budget === Infinity ? Infinity : now() + this.budget;
+      let r = this.gen.next();
+      while (!r.done && now() < until) r = this.gen.next();
+      if (!r.done) {
+        const g = p.ground && surface(world, p.ground);
+        const w = g && p.ground !== FLOOR ? walkInput(p, inset(p, g, this.goal.x)) : g ? walkInput(p, clamp(this.goal.x, p.hw, world.w - p.hw)) : null;
+        return w ?? { ...NO_INPUT };
+      }
+      this.gen = null;
+      this.route = r.value;
       this.i = 0;
       this.hop = null;
       if (!this.route) return this.finish(false);
@@ -307,6 +351,7 @@ export class Driver {
     if (++this.replans > 5) return this.finish(false);
     this.route = null;
     this.hop = null;
+    this.gen = null;
     return { ...NO_INPUT };
   }
 

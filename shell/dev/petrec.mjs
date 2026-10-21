@@ -57,6 +57,7 @@ await page.waitForSelector(".pet", { timeout: 10000 });
 // A sample layout of tiles to stand on (the mock home has few): plain .home-tile boxes on the page showing.
 await page.evaluate((W, H) => {
   const pg = document.querySelector(".page:not(.away)");
+  for (const t of pg.querySelectorAll(".home-tile")) t.style.visibility = "hidden", t.classList.add("lifted");
   const at = (key, l, t, w, h) => {
     const d = document.createElement("div");
     d.className = "home-tile tile";
@@ -64,12 +65,10 @@ await page.evaluate((W, H) => {
     Object.assign(d.style, { position: "fixed", left: `${l}px`, top: `${t}px`, width: `${w}px`, height: `${h}px`, zIndex: 1 });
     pg.append(d);
   };
+  // As on the phone's home (2026-10-21): two tiles at the top, the pill far below.
   const c = (W - 32) / 2;
-  at("t-a", 12, 300, c, 110);
-  at("t-b", 20 + c, 340, c, 90);
-  at("t-c", 12, 418, c, 150);
-  at("t-d", 20 + c, 438, c, 70);
-  at("t-e", 20 + c, 600, c, 80);
+  at("t-a", 12, 58, c, 204);
+  at("t-b", 20 + c, 58, c, 136);
 }, W, H);
 await page.evaluate(() => window.dispatchEvent(new Event("resize")));
 await sleep(600);

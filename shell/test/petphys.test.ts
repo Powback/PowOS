@@ -168,7 +168,7 @@ test("stays continuous when its rect moves, jumps away, or goes", () => {
   const run = sim(p, w(), hold({}), (q) => q.ground != null && q.ground !== "m");
   assert.equal(p.ground, FLOOR);
   assert.ok(Math.abs(p.x - x0) < 1, "fell straight down");
-  assert.ok(run.maxStep < 14, `max ${run.maxStep.toFixed(1)} px a step`);
+  assert.ok(run.maxStep < T.maxFall * DT * 1.1, `max ${run.maxStep.toFixed(1)} px a step`);
   // Gone under it: falls to the floor.
   const q = makePet(180, 300, SIZE);
   let rects: Rect[] = [{ key: "g", l: 100, t: 300, r: 260, b: 360 }];
@@ -212,7 +212,7 @@ test("reaches 5 targets on home by pressing buttons only", () => {
     assert.equal(reached, true, `reached ${g.key} (route ${JSON.stringify(d.route?.hops.map((h) => h.to + ":" + h.mode))})`);
     assert.equal(p.ground, g.key);
     assert.ok(Math.abs(p.x - g.x) < 6, `${g.key}: at ${p.x.toFixed(0)}, wanted ${g.x}`);
-    assert.ok(run.maxStep < 14, `max ${run.maxStep.toFixed(1)} px a step`);
+    assert.ok(run.maxStep < T.maxFall * DT * 1.1, `max ${run.maxStep.toFixed(1)} px a step`);
     console.log(`  ${g.key}: ${(run.steps * DT).toFixed(2)} s, ${d.route!.hops.length} hops (${d.route!.hops.map((h) => h.mode).join(" ")}), max ${run.maxStep.toFixed(1)} px/step`);
   }
 });
@@ -234,6 +234,31 @@ test("replans from where it is when the next rect of its route goes", () => {
   assert.ok(gone, "a rect of its route went");
   assert.equal(reached, true, `reached clock without ${gone}`);
   assert.equal(p.ground, "clock");
+});
+
+test("the phone's real home: from the pill up to a top tile (500 px up, no walls between) and back", () => {
+  // As measured on the phone (404x899 CSS px, folded): two top tiles (their tops lowered under the status bar by
+  // petperch.ts), the search pill 500 px below them, nothing in between.
+  const w: World = {
+    w: 404,
+    h: 899,
+    top: 24,
+    rects: [
+      { key: "today", l: 12, t: 92, r: 202, b: 262 },
+      { key: "perf", l: 202, t: 92, r: 392, b: 194 },
+      { key: "bar", l: 36, t: 759, r: 368, b: 807 },
+    ],
+  };
+  const p = makePet(300, 759, SIZE);
+  standOn(p, w.rects[2], w);
+  for (const g of [{ key: "today", x: 100 }, { key: "perf", x: 300 }, { key: "bar", x: 200 }]) {
+    let reached: boolean | null = null;
+    const d = new Driver(g, (ok) => (reached = ok), 0.5);
+    const run = sim(p, w, (q) => d.input(q, w), () => false, 120 * 20);
+    assert.equal(reached, true, `reached ${g.key} (route ${JSON.stringify(d.route?.hops.map((h) => h.to + ":" + h.mode + (h.side ?? "")))})`);
+    assert.equal(p.ground, g.key);
+    console.log(`  real home -> ${g.key}: ${(run.steps * DT).toFixed(2)} s, ${d.route!.hops.map((h) => h.mode + (h.side ? " side" : "")).join(", ")}`);
+  }
 });
 
 test("an unreachable goal: as near as it can, no snap", () => {

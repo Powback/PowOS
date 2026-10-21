@@ -46,8 +46,10 @@ export function edges(): Edge[] {
     if (el.classList.contains("lifted")) continue;
     const r = el.getBoundingClientRect();
     // On screen, and wide enough to stand on.
-    if (r.width < 40 || r.right < 0 || r.left > W || r.top < minTop || r.top > H - 40) continue;
-    out.push({ key: el.dataset.key!, left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    if (r.width < 40 || r.right < 0 || r.left > W || r.bottom < minTop + 24 || r.top > H - 40) continue;
+    // A tile so high its head would be under the status bar: still a floor, just lower - it stands a little into
+    // the tile's top (feet at minTop), so the top row is reachable too.
+    out.push({ key: el.dataset.key!, left: r.left, right: r.right, top: Math.max(r.top, minTop), bottom: r.bottom });
   }
   // Lines of text in the tiles (their rendered line boxes, Range.getClientRects): platforms too, inside their tile.
   let n = 0;
@@ -67,7 +69,7 @@ export function edges(): Edge[] {
   }
   // An edge under another tile (a joined group: the lower tile's top is inside the upper one) isn't a floor: the part
   // that's open is kept, the covered rest cut off; an edge covered all along goes.
-  const rects = [...document.querySelectorAll<HTMLElement>(".page:not(.away) .home-tile[data-key]")].map((el) => ({ key: el.dataset.key!, r: el.getBoundingClientRect() }));
+  const rects = [...document.querySelectorAll<HTMLElement>(".page:not(.away) .home-tile[data-key]:not(.lifted)")].map((el) => ({ key: el.dataset.key!, r: el.getBoundingClientRect() }));
   for (let i = out.length - 1; i >= 0; i--) {
     const e = out[i];
     for (const { key, r } of rects) {

@@ -72,6 +72,9 @@ name, mood (+ until), energy, xp/level, **perch** (tile key + offset), **memorie
   goes drops it; a smaller screen walks it back in. No step moves it more than petphys.ts MAX_STEP.
 - **The planner presses buttons**: routes are hops between surfaces, each one played first in a copy of the world with
   the same physics; live it drives closed-loop and replans from where it is when a hop ends elsewhere.
+- **Reach**: a jump of ~280 px (held), wall jumps up tile sides AND the screen's sides, so the top row is reached
+  from the pill; a top row under the status bar is still a floor, stood on a little lower (petperch.ts minTop).
+- **No hitch**: the route is planned a slice at a time (3 ms a step) while it already sets off.
 - **Squash/stretch**: one spring from its real velocity and landings, clamped to +-25%, on the same transform.
 - **Frames**: rAF only while it moves (fixed steps, drawn interpolated); at rest none.
 - Flag: localStorage `powos.pet.physics` = on/off (`__pet.physics("on")`); pet.tsx PHYSICS_DEFAULT is the default ("on" since 2026-10-21).

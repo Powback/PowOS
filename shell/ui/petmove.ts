@@ -105,10 +105,11 @@ export class Mover {
 
   /** Go to [goal] (a surface's key and an x on it) by its own moves; [then] when it's there (or as near as it gets). */
   goTo(goal: Goal, then?: (reached: boolean) => void) {
+    // 3 ms of planning a step at most: it sets off at once, the route follows within a few frames.
     this.driver = new Driver(goal, (ok) => {
       this.driver = null;
       then?.(ok);
-    });
+    }, 3);
     this.wake();
   }
 
