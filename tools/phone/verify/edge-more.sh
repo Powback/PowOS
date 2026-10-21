@@ -44,12 +44,13 @@ subpage; touched; a=$(focus); sh_ logcat -c; edgeback left; sleep 1.5; b=$(focus
 sh_ "logcat -d -v time | grep -E PowosEdge" > "$OUT/back-left.log"
 [ "$a" != "$b" ] && grep -q "short.straight -> back" "$OUT/back-left.log" && res pass "back (left)" "$a -> $b" || res fail "back (left)" "$a -> $b, $(tail -1 "$OUT/back-left.log")"
 sh_ "su -c 'rm -f $CFG'"; [ "$had" = yes ] && sh_ "su -c 'cp -p /data/local/tmp/edge-cfg.bak $CFG'"; sleep 1
-# (2) Landscape: the Quick Tools swipe (right edge in and up) and the handle laid out for it.
+# (2) Landscape: the Quick Tools swipe (right edge in and up, ~42 degrees: a flatter one is straight in = Back) and the
+# handle laid out for it.
 sh_ input keyevent KEYCODE_HOME; sleep 1
 sh_ settings put system accelerometer_rotation 0; sh_ settings put system user_rotation 1; sleep 2.5; touched
 read W H <<<"$(size)"
 sh_ logcat -c
-sh_ "input motionevent DOWN $((W-3)) $((H*75/100)); for i in 1 2 3 4 5 6 7 8 9 10; do input motionevent MOVE \$(($((W-3)) - i*$((W*2/100)))) \$(($((H*75/100)) - i*$((H*2/100)))); done; input motionevent UP $((W*80/100)) $((H*55/100))"
+sh_ "input motionevent DOWN $((W-3)) $((H*75/100)); for i in 1 2 3 4 5 6 7 8 9 10; do input motionevent MOVE \$(($((W-3)) - i*$((W*2/100)))) \$(($((H*75/100)) - i*$((W*2/100*9/10)))); done; input motionevent UP $((W*80/100)) $((H*55/100))"
 sleep 1.2; vis=$(sh_ "dumpsys window windows | grep -E 'Window #.*PowOS quick tools' -A20 | grep -m1 -o 'mViewVisibility=0x[0-9]'")
 sh_ "screencap -p /data/local/tmp/edge-land.png" ; "$A" pull /data/local/tmp/edge-land.png "$OUT/" >/dev/null 2>&1; sh_ rm -f /data/local/tmp/edge-land.png
 sh_ "logcat -d -v time | grep -E PowosEdge" > "$OUT/landscape.log"; touched
