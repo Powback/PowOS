@@ -74,7 +74,7 @@ name, mood (+ until), energy, xp/level, **perch** (tile key + offset), **memorie
   the same physics; live it drives closed-loop and replans from where it is when a hop ends elsewhere.
 - **Squash/stretch**: one spring from its real velocity and landings, clamped to +-25%, on the same transform.
 - **Frames**: rAF only while it moves (fixed steps, drawn interpolated); at rest none.
-- Flag: localStorage `powos.pet.physics` = on/off (`__pet.physics("on")`); pet.tsx PHYSICS_DEFAULT is the default.
+- Flag: localStorage `powos.pet.physics` = on/off (`__pet.physics("on")`); pet.tsx PHYSICS_DEFAULT is the default ("on" since 2026-10-21).
 - Tests: `node --test shell/test/petphys.test.ts`; in the real page headless: shell/dev/petrec.mjs.
 
 ## Steps (each one gated, reviewed by the manager BEFORE it reaches the phone)

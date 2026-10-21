@@ -95,7 +95,7 @@ const perch = (): Perch | null => {
  * `__pet.physics("on" | "off" | "")` sets it (the page reloads its layer).
  */
 const physics = stored("pet.physics", "");
-const PHYSICS_DEFAULT = "off";
+const PHYSICS_DEFAULT = "on";
 const physicsOn = () => (physics.value || PHYSICS_DEFAULT) === "on";
 /** With physics on: it stands on a tile or the pill (the contact shadow), and its place at rest (the bubble's). */
 const physPerched = signal(false);
