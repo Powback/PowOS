@@ -174,7 +174,12 @@ install -m 755 $T/powos-agents/powos-agent-hook $T/powos-agents/powos-agent-ask 
   $T/powos-agents/install-hooks.py $T/powos-agents/powos-agents-cli $A/
 install -m 644 $T/powos-agents/claude-hooks.json $A/claude-hooks.json
 install -m 755 $T/comms-mcp.py $R/usr/lib/powos/ai/comms/comms-mcp.py
-rm -rf $T/powos-agents $T/comms-mcp.py
+# The manager (unit ai-manager): PowOS AI's chat starts a turn of it per message.
+if [ -d $T/powos-manager ]; then
+  mkdir -p $R/usr/lib/powos/ai/manager
+  install -m 644 $T/powos-manager/manager.py $T/powos-manager/manager.sh $R/usr/lib/powos/ai/manager/
+fi
+rm -rf $T/powos-agents $T/comms-mcp.py $T/powos-manager
 chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- \
   /usr/bin/env HOME=/home/powos python3 /usr/lib/powos/ai/agents/install-hooks.py /home/powos/.claude/settings.json \
   --command "POWOS_AGENTS_HOST=phone /usr/lib/powos/ai/agents/powos-agent-hook" \

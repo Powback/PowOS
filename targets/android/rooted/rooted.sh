@@ -71,6 +71,9 @@ deploy)
   adb shell rm -rf /data/local/tmp/powos-agents
   adb push -q "$HERE/../../../lib/ai/agents" /data/local/tmp/powos-agents
   adb push -q "$HERE/../../../lib/ai/comms/comms-mcp.py" /data/local/tmp/comms-mcp.py
+  # The manager (lib/ai/manager: PowOS AI's chat runs a turn of it per message, so a new one takes the next turn).
+  adb shell rm -rf /data/local/tmp/powos-manager
+  adb push -q "$HERE/../../../lib/ai/manager" /data/local/tmp/powos-manager
   adb push -q "$HERE/../pkgs/fex-emu/Config.json" /data/local/tmp/fex-Config.json
   adb push -q "$HERE/../pkgs/fex-emu/thunks.json" /data/local/tmp/fex-thunks.json
   adb shell rm -rf /data/local/tmp/powos-plasma
