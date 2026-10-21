@@ -24,7 +24,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { stored } from "../state.ts";
-import { Mic, dictate, hearing, interrupt, speech, type MicTarget } from "./bar.tsx";
+import { Pill, dictate, hearing, interrupt, speech, type MicTarget } from "./bar.tsx";
 import { makeHold, release } from "./dictation.ts";
 import { askQueued, setAskContext } from "./assistant.ts";
 import { ChatView } from "./chat.tsx";
@@ -301,21 +301,22 @@ export function Assist() {
             send();
           }}
         >
-          <input
-            class={sending.value ? "sending" : ""}
+          {/* The one pill (bar.tsx Pill, as home's search and PowOS AI's page): three rows, then it scrolls; what's
+              heard streams in as it's said, newest in view, and stays editable. */}
+          <Pill
+            target={mic}
+            sending={sending.value}
             value={hearing(mic) ?? draft.value}
-            onInput={(e) => {
-              const typed = (e.currentTarget as HTMLInputElement).value;
+            onInput={(v: string) => {
               takeOver();
-              draft.value = typed;
+              draft.value = v;
             }}
             onPointerDown={() => takeOver()}
             onFocus={() => (takeOver(), powos.keyboard.show())}
-            placeholder="ask about this screen"
+            placeholder={speech.value.listening ? "listening…" : "ask about this screen"}
             enterKeyHint="send"
             autocomplete="off"
           />
-          <Mic target={mic} />
         </form>
       </div>
     </div>

@@ -1149,10 +1149,8 @@ html[data-mode="assist"] .assist {
 .assist-sub { flex: 1; font-size: var(--text-small); }
 .assist-open { font: var(--text-small) var(--font); color: var(--color-accent); }
 .assist-panel .ai-card { overflow-y: auto; min-height: 0; }
-.assist-ask { display: flex; align-items: center; gap: var(--gap); min-height: 46px; padding: 0 4px 0 10px; border: var(--frame) solid var(--color-border); border-radius: var(--radius); }
-.assist-ask input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--color-foreground); font: var(--text-item) var(--font); }
-.assist-ask .mic { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius); color: var(--color-foreground); touch-action: none; }
-.assist-ask .mic.on { background: var(--color-red); color: var(--color-background); }
+/* Its field is the one pill (bar.tsx Pill, .pill above): no styles of its own. */
+.assist-ask { flex: none; }
 .assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
 .assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--color-accent); }
 .assist-attach .chip.off { border-color: var(--color-border); color: var(--color-muted); }

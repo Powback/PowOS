@@ -7,6 +7,7 @@
  * to deciding which it is.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
+import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
 import { matches } from "./drawer.tsx";
 import { drawer, launch, pullKind, query } from "../state.ts";
@@ -87,6 +88,34 @@ export function Mic({ target }: { target: MicTarget }) {
   );
 }
 
+/**
+ * The pill (shell.css .pill): THE compose field - home's search, PowOS AI's page, the side button's panel. Its field
+ * grows to three rows, then scrolls inside, newest words in view (grow.tsx); the mic on its right ([target]: hold to
+ * talk and send, tap to dictate). [value] is what it shows - the caller passes hearing(target) ?? its text, so what's
+ * heard streams in as it's said and stays editable. [sending]: an autosend's words, about to go.
+ */
+export function Pill({
+  target,
+  sending = false,
+  class: cls = "",
+  ...field
+}: {
+  target: MicTarget;
+  value: string;
+  onInput: (v: string) => void;
+  sending?: boolean;
+  class?: string;
+  inputRef?: Ref<HTMLTextAreaElement>;
+  [attr: string]: any;
+}) {
+  return (
+    <div class={`${cls} pill tile ${sending ? "sending" : ""}`}>
+      <GrowField {...(field as { value: string; onInput: (v: string) => void })} />
+      <Mic target={target} />
+    </div>
+  );
+}
+
 /** The bar's field: a held mic asks PowOS AI, a tap dictates into the search; the drawer comes up to show either. */
 const barMic: MicTarget = {
   typed: () => query.value,
@@ -136,25 +165,25 @@ export function Bar() {
     >
       {/* The pill (shell.css .pill, as PowOS AI's compose): its own box over the bar's place, growing upward - the bar's
           height (home's layout) never changes. */}
-      <div class={`bar-pill pill tile ${sending.value ? "sending" : ""}`}>
-        <GrowField
-          inputRef={input}
-          value={shown}
-          onInput={(v) => {
-            // Typing over a dictation: it stops, what it heard stays (and nothing sends by itself).
-            takeOver();
-            query.value = v;
-          }}
-          onFocus={() => (takeOver(), setFocused(true))}
-          onBlur={() => setFocused(false)}
-          placeholder={s.listening ? "listening…" : (s.error ?? (pullKind.value === "ai" && drawer.value > 0 ? "ask PowOS AI" : "search"))}
-          enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
-          autocomplete="off"
-          autoCapitalize="off"
-          spellcheck={false}
-        />
-        <Mic target={barMic} />
-      </div>
+      <Pill
+        class="bar-pill"
+        target={barMic}
+        sending={sending.value}
+        inputRef={input}
+        value={shown}
+        onInput={(v: string) => {
+          // Typing over a dictation: it stops, what it heard stays (and nothing sends by itself).
+          takeOver();
+          query.value = v;
+        }}
+        onFocus={() => (takeOver(), setFocused(true))}
+        onBlur={() => setFocused(false)}
+        placeholder={s.listening ? "listening…" : (s.error ?? (pullKind.value === "ai" && drawer.value > 0 ? "ask PowOS AI" : "search"))}
+        enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
+        autocomplete="off"
+        autoCapitalize="off"
+        spellcheck={false}
+      />
     </form>
   );
 }

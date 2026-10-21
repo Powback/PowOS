@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { chat, openSession, page, sessionView, stored } from "../state.ts";
-import { Mic, hearing, type MicTarget } from "./bar.tsx";
+import { Pill, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
 import { openAgents } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
@@ -19,7 +19,6 @@ import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
 import { Said, Thread, ToolRun, toolLabel } from "./rich.tsx";
-import { GrowField } from "./grow.tsx";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
@@ -431,22 +430,22 @@ export function AiCompose() {
   const input = useRef<HTMLTextAreaElement>(null);
   return (
     <form
-      class="ai-compose pill tile"
+      class="ai-compose"
       onSubmit={(e) => {
         e.preventDefault();
         send();
       }}
     >
-      <GrowField
+      <Pill
+        target={pageMic}
         inputRef={input}
         value={hearing(pageMic) ?? draft.value}
-        onInput={(v) => (draft.value = v)}
+        onInput={(v: string) => (draft.value = v)}
         onFocus={() => powos.keyboard.show()}
         placeholder="ask PowOS AI"
         enterKeyHint="send"
         autocomplete="off"
       />
-      <Mic target={pageMic} />
     </form>
   );
 }
