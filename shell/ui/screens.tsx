@@ -31,7 +31,7 @@ import {
   useScreen,
 } from "../screens.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { apps, pullOverApps, pullPanels } from "../state.ts";
+import { apps, pullOverApps, pullPanels, speechEngine } from "../state.ts";
 
 /** Its touches are its own: home's swipes under it don't see them. */
 const own = {
@@ -311,6 +311,13 @@ function SettingsScreen() {
     ["packageVariant", "packages", installed ? "pacman and the AUR" : "needs linux", needs("aur")],
     ["cellphoneCog", "android settings", "the phone's own", () => act("settings", "android")],
     ["arrowLeft", "gestures", "edge gestures, quick tools", () => openScreen("gestures")],
+    // Dictation's engine: a tap switches it (Whisper on the GPU server, else the phone's own).
+    [
+      "microphoneOutline",
+      "voice",
+      speechEngine.value === "ondevice" ? "transcription: on the phone" : "transcription: GPU (Whisper)",
+      () => (speechEngine.value = speechEngine.value === "ondevice" ? "gpu" : "ondevice"),
+    ],
     ["scaleBalance", "licenses", "open source in PowOS", () => openScreen("licenses")],
   ];
   return (

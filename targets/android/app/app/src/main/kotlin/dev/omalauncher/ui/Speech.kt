@@ -81,7 +81,8 @@ class Speech(
                     }
                 },
             )
-        mine = NativeSpeech.start(context, hold, callbacks)
+        // Which engine (Settings > voice > transcription): stt.pow on the GPU box, or Android's own (GpuSpeech.kt).
+        mine = SpeechEngines.start(context, hold, callbacks)
         session = mine
     }
 
@@ -106,7 +107,7 @@ class Speech(
     }
 
     /** Binds the recognizer and works out its plan, without listening, so a press starts at once. */
-    fun warm() = NativeSpeech.warm(context)
+    fun warm() = SpeechEngines.warm(context)
 
     /** Ends recognition without calling onDone. */
     fun cancel() {
@@ -141,6 +142,8 @@ class SpeechCallbacks(
     val onLevel: (Float) -> Unit,
     /** The whole text (maybe empty) and why it failed, if it did. */
     val onEnd: (String, String?) -> Unit,
+    /** Which engine it runs on now (SpeechEngines.GPU / ON_DEVICE): at its start, and again on a fallback. */
+    val onEngine: (String) -> Unit = {},
 )
 
 /**
@@ -237,12 +240,14 @@ internal object NativeSpeech {
         c: Context,
         hold: Boolean,
         callbacks: SpeechCallbacks,
+        /** Audio from PowOS's own recording (a GPU dictation's fallback, replayed): the recognizer reads it, not the mic. */
+        feed: AudioFeed? = null,
     ): SpeechSession {
         active?.let {
             Log.i(TAG, "session #${it.id}: superseded by a new start")
             it.cancel()
         }
-        val s = Session(++sessionIds, c.applicationContext, hold, callbacks)
+        val s = Session(++sessionIds, c.applicationContext, hold, callbacks, feed)
         Log.i(TAG, "session #${s.id}: start (${if (hold) "hold" else "tap"})")
         active = s
         // Never synchronously: the caller holds the session before any of its callbacks.
@@ -291,8 +296,10 @@ internal object NativeSpeech {
         runCatching { r.destroy() }.onFailure { Log.w(TAG, "destroy $kind", it) }
     }
 
-    private fun intent(p: Plan?) =
-        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+    private fun intent(
+        p: Plan?,
+        feed: AudioFeed? = null,
+    ) = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
@@ -300,6 +307,13 @@ internal object NativeSpeech {
                 if (p?.offline == true) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 p?.language?.let { putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) }
                 if (p == null) return@apply
+                // From PowOS's own recording (16 kHz mono PCM, a pipe per listen) instead of the mic (API 33+).
+                if (feed != null && Build.VERSION.SDK_INT >= 33) {
+                    putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, feed.open())
+                    putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+                    putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, android.media.AudioFormat.ENCODING_PCM_16BIT)
+                    putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, SttServer.RATE)
+                }
                 // Longer pauses before a segment ends (where the recognizer honours it).
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, UTTERANCE_SILENCE_MS)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, UTTERANCE_SILENCE_MS)
@@ -517,6 +531,7 @@ internal object NativeSpeech {
         val c: Context,
         hold: Boolean,
         val cb: SpeechCallbacks,
+        val feed: AudioFeed? = null,
     ) : SpeechSession {
         val d = Dictation(hold, TAP_SILENCE_MS) { SystemClock.elapsedRealtime() }
         val startedAt = SystemClock.elapsedRealtime()
@@ -629,7 +644,7 @@ internal object NativeSpeech {
             heard = false
             r.setRecognitionListener(Listener(a, p))
             Log.i(TAG, "session #$id: listen, attempt $a (${p.kind}${if (p.offline) ", offline" else ""})")
-            runCatching { r.startListening(intent(p)) }.onFailure {
+            runCatching { r.startListening(intent(p, feed)) }.onFailure {
                 current = null
                 drop(p.kind, "startListening threw")
                 retry(p) { "speech recognition failed (${it.message})" }

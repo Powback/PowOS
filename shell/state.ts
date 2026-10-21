@@ -144,6 +144,13 @@ export const pullPanels = stored("pullPanels", "on");
  */
 export const pullOverApps = stored("pullOverApps", "on");
 effect(() => void powos.store.set("pullOverApps", JSON.stringify(pullOverApps.value)).catch(() => {}));
+/**
+ * Which engine dictates (settings -> voice): "gpu" - Whisper on the GPU server (stt.pow), on-device when it can't be
+ * reached - or "ondevice" (Android's own). Read by the app from the shell's store (files/shell-data/speech.json,
+ * GpuSpeech.kt SpeechEngines), so it's written there too.
+ */
+export const speechEngine = stored("speechEngine", "gpu");
+effect(() => void powos.store.set("speech", JSON.stringify({ engine: speechEngine.value })).catch(() => {}));
 /** Opens the pull-up panel with [kind] in it (the pet's long press, a bubble's "more": "ai"). */
 export function openPanel(kind: "apps" | "ai") {
   pullKind.value = kind;
