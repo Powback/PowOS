@@ -4,13 +4,13 @@
  */
 import { useEffect, useRef } from "preact/hooks";
 import { chat, query } from "../state.ts";
-import { powos } from "../bridge.ts";
 import type { ChatItem } from "../types.ts";
 
-/** How much of the conversation the launcher shows; the rest is in PowOS AI's own app. */
+/** How much of the conversation the launcher shows; the rest is in PowOS AI's page (left of home). */
 const SHOWN = 40;
 
-function Item({ item }: { item: ChatItem }) {
+/** One line of the conversation: here, and in PowOS AI's page (its whole history). */
+export function Item({ item }: { item: ChatItem }) {
   switch (item.kind) {
     case "user":
       return <div class="msg user">{item.text}</div>;
@@ -39,11 +39,9 @@ export function ChatView() {
   }, [items.length, items.at(-1), typed]);
   return (
     <div class="chat" ref={list}>
+      {/* The one chat surface (ui/assistant.ts): no "open" elsewhere - its history and the work board are PowOS AI's page. */}
       <div class="chat-head">
         <span class="muted">PowOS AI</span>
-        <button type="button" class="chat-open" onClick={() => powos.ai.open()}>
-          open ↗
-        </button>
       </div>
       {items.slice(-SHOWN).map((item, i) => (
         <Item key={i} item={item} />

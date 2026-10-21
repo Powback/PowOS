@@ -393,8 +393,10 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
   "I need you" moments; it doesn't replace `notify_user` (deploy notes and agent mail already show in the bubble too,
   alongside their notification). `powos pet mood <M> [--for S]`, `feed`, `name`, `status`, `log`, `hush`; `powos pet
   help`. Moods: idle, happy, working, looking, worried, sleepy, hungry.
-- The user taps it to talk (the phone's recognizer -> the manager, as PowOS AI's chat sends; the answer streams into
-  its bubble); a long press opens PowOS AI. Removing the app (`powos app remove local.pet`) removes the pet.
+- One assistant: ONE conversation (the manager's) and ONE chat surface, home's search pill in chat mode
+  (shell/ui/assistant.ts `openAssistant`); PowOS AI's page is that conversation's history + the work board. The pet is
+  its face: a tap listens right there (its bubble shows the transcript, then the reply; a tap on the bubble opens the
+  chat surface), a long press opens PowOS AI's page. Removing the app (`powos app remove local.pet`) removes the pet.
 
 ### Smart glasses (Even Realities G2 / G1) - docs/GLASSES.md
 - The PowOS app drives the glasses over raw BLE (no Even app): `targets/android/app/.../glasses/` (G2: app-layer auth,
