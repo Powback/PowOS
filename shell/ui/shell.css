@@ -167,6 +167,8 @@
   touch-action: none;
 }
 .pill .mic.on { background: var(--color-red); color: var(--color-background); }
+/* An autosend dictation's words, a moment before they go (assistant.ts): a touch keeps them to edit. */
+.pill.sending .grow { color: var(--color-accent); }
 /* The search bar's place in home's layout is a fixed 48 px; the pill sits in it and grows upward, over home. */
 .bar { position: relative; z-index: 3; margin: 0; height: 48px; padding: 0; }
 .bar-pill { position: absolute; left: var(--edge); right: var(--edge); bottom: 4px; }
@@ -1091,18 +1093,10 @@ html[data-mode="assist"] .assist {
 }
 /* Solid: over another app, what's under it would show through the field. */
 .assist-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-height: 75%; background: var(--color-background); }
-.assist-head { display: flex; align-items: center; gap: 10px; }
-.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--line); }
-.assist-shot.blank { background: var(--color-surface); }
-.assist-title { font-weight: bold; }
-.assist-sub { flex: 1; font-size: var(--text-small); }
-.assist-open { font: var(--text-small) var(--font); color: var(--color-accent); }
-.assist-panel .ai-card { overflow-y: auto; min-height: 0; }
-.assist-ask { display: flex; align-items: center; gap: var(--gap); min-height: 46px; padding: 0 4px 0 10px; border: var(--frame) solid var(--line); border-radius: var(--radius); background: var(--soft-fill); box-shadow: var(--lift); }
-.assist-ask input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--color-foreground); font: var(--text-item) var(--font); }
-.assist-ask .mic { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius); color: var(--color-foreground); touch-action: none; }
-.assist-ask .mic.on { background: var(--color-red); color: var(--color-background); }
-.assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
+/* The shared chat surface in the panel (assistant.ts): the conversation above, the home pill under it. */
+.assist-panel .chat { flex: 1 1 auto; min-height: 0; }
+.assist-panel .bar { flex: none; }
+.assist-attach { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid transparent; background: color-mix(in srgb, var(--color-accent) 16%, transparent); color: var(--color-accent); }
 .assist-attach .chip.off { border-color: var(--line); background: var(--soft-fill); color: var(--color-muted); }
 .assist-attach .chip { box-shadow: var(--lift); }
@@ -1112,8 +1106,6 @@ html[data-mode="assist"] .assist {
 .assist-hint { font-size: var(--text-small); }
 .crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .crop-stroke polyline { fill: none; stroke: var(--color-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
-.assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--line); color: var(--color-foreground); background: var(--soft-fill); box-shadow: var(--lift); }
-.assist-live.on { border-color: var(--color-red); color: var(--color-red); }
 /* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
 html[data-mode="assist"] .assist.live { background: none; pointer-events: none; }
 .assist.live .assist-panel { pointer-events: auto; max-height: 45%; }

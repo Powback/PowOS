@@ -77,6 +77,23 @@ class PowosAssistSession(
 
     private var watchdog: dev.omalauncher.shell.PageWatchdog? = null
 
+    /**
+     * The side button let go, if Android passes it on (the power key's release usually stays with the system; the
+     * assist key's may come): the page's dictation ends there and sends (assist.tsx). Logged, to know which this phone
+     * does.
+     */
+    override fun onKeyUp(
+        keyCode: Int,
+        event: android.view.KeyEvent,
+    ): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_POWER || keyCode == android.view.KeyEvent.KEYCODE_ASSIST) {
+            android.util.Log.i("speech", "assist: key up $keyCode")
+            host?.bridge?.emit("assist.keyup", null)
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
     override fun onHide() {
         watchdog?.stop()
         // The page stays warm after the panel goes: it stops listening (a summoning starts dictation, assist.tsx).

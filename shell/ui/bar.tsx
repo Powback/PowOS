@@ -8,91 +8,23 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { GrowField } from "./grow.tsx";
-import { signal } from "@preact/signals";
 import { matches } from "./drawer.tsx";
-import { ask, drawer, launch, pullKind, query } from "../state.ts";
+import { drawer, launch, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
+import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
+import { forget, hearing, listen, listeningFor, makeHold, speech, type MicTarget } from "./dictation.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
 /** Held and moved this far off the mic: cancelled. */
 const CANCEL_PX = 64;
 
-/** What the recognizer hears, as it hears it. */
-export const speech = signal<{ listening: boolean; text: string; error: string | null }>({ listening: false, text: "", error: null });
-
-/** Where a recognition's words go: the field it's for (what was typed before it, and what to do with the whole). */
-export interface MicTarget {
-  /** What the field held when it started: the words go after it. */
-  typed(): string;
-  /** The whole text once it ends; [send]: it was held (talk, then send), else a tap (dictate into the field). */
-  heard(full: string, send: boolean): void;
-  /** It started listening (the bar opens the drawer to show what comes). */
-  started?(): void;
-}
-
-/** The recognition under way, and whether it sends what's heard; typed is what its field had before it. */
-let pending: { send: boolean; typed: string; target: MicTarget } | null = null;
-/** It asked for the mic first: the press that asked can't still be held, so a yes dictates. */
-let asked: MicTarget | null = null;
-
-const join = (...parts: string[]) => parts.map((p) => p.trim()).filter(Boolean).join(" ");
-
-/** What a field shows while it listens: what was typed, then what's heard so far. */
-export const hearing = (target: MicTarget) => (speech.value.listening && pending?.target === target ? join(pending.typed, speech.value.text) : null);
-
-async function listen(hold: boolean, target: MicTarget) {
-  // The recognizer first, then the UI: the call is on its way before anything else runs.
-  const starting = powos.speech.start(hold);
-  pending = { send: hold, typed: target.typed(), target };
-  // Listening shows in this frame, not when the recognizer reports it.
-  speech.value = { listening: true, text: "", error: null };
-  target.started?.();
-  (document.activeElement as HTMLElement | null)?.blur();
-  powos.keyboard.hide();
-  navigator.vibrate?.(10);
-  const r = await starting;
-  if (r !== "started") {
-    if (pending?.target === target) pending = null;
-    speech.value = { ...speech.value, listening: false };
-  }
-  if (r === "asked") asked = target;
-}
-
-/** Dictates into [target] as a tap on its mic does (ends after ~4 s of silence, nothing is sent), unless it's listening. */
-export function dictate(target: MicTarget) {
-  if (pending || asked || speech.value.listening) return;
-  listen(false, target);
-}
-
-/**
- * Stops listening for [target] without waiting for the end: what's heard so far goes into its field (as a dictation,
- * never sent) - the user started typing, tapped the field, or the field went away.
- */
-export function interrupt(target: MicTarget) {
-  const p = pending;
-  if (!p || p.target !== target) return;
-  const now = join(p.typed, speech.value.text);
-  pending = null;
-  powos.speech.cancel();
-  p.target.heard(now, false);
-}
-
-powos.on("speech.state", (s: { listening: boolean; text: string; error: string | null }) => (speech.value = s));
-powos.on("speech.done", ({ text }: { text: string }) => {
-  const p = pending;
-  pending = null;
-  if (p) p.target.heard(join(p.typed, text), p.send && !!text.trim());
-});
-powos.on("speech.permission", ({ granted }: { granted: boolean }) => {
-  if (granted && asked) listen(false, asked);
-  asked = null;
-});
+export { dictate, hearing, interrupt, speech, type MicTarget } from "./dictation.ts";
 
 /** A mic for [target]: hold to talk and send, tap to dictate; held and dragged well away, cancelled. */
 export function Mic({ target }: { target: MicTarget }) {
   const press = useRef<{ x: number; y: number; timer: number; held: boolean; cancelled: boolean } | null>(null);
-  const on = speech.value.listening || pending?.target === target;
+  const on = speech.value.listening || listeningFor(target);
   // Shown: the recognizer bound and ready (it doesn't listen), so a press starts at once.
   useEffect(() => void powos.speech.warm(), []);
   return (
@@ -115,9 +47,7 @@ export function Mic({ target }: { target: MicTarget }) {
         listen(false, target);
         p.timer = window.setTimeout(() => {
           p.held = true;
-          if (pending?.target !== target) return;
-          pending.send = true;
-          powos.speech.hold();
+          makeHold(target);
         }, HOLD_MS);
         press.current = p;
       }}
@@ -126,7 +56,7 @@ export function Mic({ target }: { target: MicTarget }) {
         if (!p?.held || p.cancelled) return;
         if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > CANCEL_PX) {
           p.cancelled = true;
-          pending = null;
+          forget(target);
           powos.speech.cancel();
           navigator.vibrate?.(5);
         }
@@ -172,7 +102,7 @@ function openHere() {
 /** Asked from the pill: the one chat surface (the drawer's chat) takes it - from PowOS AI's panel too. */
 function askHere(text: string) {
   pullKind.value = "apps";
-  ask(text);
+  askQueued(text);
 }
 
 /**
@@ -184,7 +114,8 @@ export function Bar() {
   const [focused, setFocused] = useState(false);
   const s = speech.value;
   // While it listens, the field shows what's heard after what was typed.
-  const shown = hearing(barMic) ?? query.value;
+  // The assistant's dictation (the side button, the pet) writes into this field too.
+  const shown = hearing(barMic) ?? hearing(pillTarget) ?? query.value;
   const active = focused || !!shown || s.listening;
   return (
     <form
@@ -203,12 +134,16 @@ export function Bar() {
     >
       {/* The pill (shell.css .pill, as PowOS AI's compose): its own box over the bar's place, growing upward - the bar's
           height (home's layout) never changes. */}
-      <div class="bar-pill pill tile">
+      <div class={`bar-pill pill tile ${sending.value ? "sending" : ""}`}>
         <GrowField
           inputRef={input}
           value={shown}
-          onInput={(v) => (query.value = v)}
-          onFocus={() => setFocused(true)}
+          onInput={(v) => {
+            // Typing over a dictation: it stops, what it heard stays (and nothing sends by itself).
+            takeOver();
+            query.value = v;
+          }}
+          onFocus={() => (takeOver(), setFocused(true))}
           onBlur={() => setFocused(false)}
           placeholder={s.listening ? "listening…" : (s.error ?? (pullKind.value === "ai" && drawer.value > 0 ? "ask PowOS AI" : "search"))}
           enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}

@@ -449,7 +449,8 @@ export interface Bridge {
   /**
    * The assistant's screen (index.html?mode=assist, over another app): what that app's screen showed - its text, an
    * outline, and a screenshot URL ("assist.context" brings them as they arrive) - and closing the assistant.
-   * "assist.reset" comes with each summoning (the page starts dictating then), "assist.hidden" when it goes away.
+   * "assist.reset" comes with each summoning (the page starts dictating then), "assist.hidden" when it goes away,
+   * "assist.keyup" when the side button is let go (if Android passes that on).
    */
   assist: {
     screen(): Promise<AssistScreen | null>;
