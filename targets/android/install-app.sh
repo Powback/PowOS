@@ -59,7 +59,17 @@ if adb shell "su -c '[ -f /data/powos/powos-appdata.sh ]'"; then
 else
   echo "install-app.sh: warning - no /data/powos/powos-appdata.sh on the phone (rooted.sh deploy): no app-data backup" >&2
 fi
-adb install -r "$apk"
+# Compiled ahead of time as it installs (`speed`), not left to the interpreter: the APK carries no profile, so
+# Android's install filter (speed-profile) compiles nothing ("verify") and the app ran interpreted, warming its JIT,
+# after each of the many installs a day - measured 2026-10-21 on an idle home: the app's main thread ~4.7% of a core,
+# mostly the interpreter. Only for this install: the property is put back right after (every other app keeps it).
+# HACK: a system property flipped around our own install. Real fix: a baseline profile in the APK
+# (src/main/baseline-prof.txt + a .dm next to the APK at install), so speed-profile compiles what matters.
+was=$(adb shell getprop pm.dexopt.install | tr -d '\r')
+adb shell "su -c 'setprop pm.dexopt.install speed'" >/dev/null 2>&1 || true
+adb install -r "$apk"; rc=$?
+adb shell "su -c 'setprop pm.dexopt.install ${was:-speed-profile}'" >/dev/null 2>&1 || true
+[ $rc -eq 0 ] || exit $rc
 # A one-shot re-base of the app (pm uninstall-system-updates + reinstall, e.g. powos-idle-sysupdate.sh) reinstalls
 # /data/local/tmp/powos-current.apk: keep it the APK just installed, or it would put an older build back.
 adb push "$apk" /data/local/tmp/powos-current.apk >/dev/null && adb shell chmod 0644 /data/local/tmp/powos-current.apk

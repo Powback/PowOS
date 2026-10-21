@@ -292,7 +292,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-106 markers on 2026-10-21.
+107 markers on 2026-10-21.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -319,6 +319,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `lib/apps/powos-glasses:94` | `powos glasses` waits for the app's answer by re-reading status.json every 100 ms (5 s at most): a bounded poll. | A reply to block on: an inotify watch on status.json, or the app answering on a socket. |
 | `lib/apps/powos-sleep-gui:161` | GUI sleep's "is PowOS on screen" signal (Steam's instant resume) is parsed from the display daemon's log (`andromarchy.log`: "surface N: consumer connected/disconnected"), watched with inotify: nothing publishes the visible surfaces as state. | The display daemon (or SessionService) writes the connected surfaces to a state file in the run dir, or KWin's anland backend exposes them (D-Bus / a KWin script property). |
 | `lib/apps/powos-sleepd:358` | Stop-mode sleep hands a service's port back by closing powos-sleepd's listener once the backend restarts: a connection in that gap is refused, a fast backend may fail to bind once. | Socket activation proper: the listening socket passed to the backend (LISTEN_FDS); backends take one. |
+| `targets/android/install-app.sh:66` | The app is compiled at install (`speed`) by flipping `pm.dexopt.install` around our own `adb install` and putting it back: the APK has no profile, so the default filter compiled nothing and the app ran interpreted after every install. | A baseline profile in the APK (`src/main/baseline-prof.txt`, a `.dm` installed with it) so speed-profile compiles the hot code. |
 | `lib/apps/powos-supervisor:19` | Own supervisor with soft budgets: systemd --user limits need a delegated cgroup v2 subtree Android doesn't give. | The cgroup v2 move (FEASIBILITY §2.4), then one unit per manifest; delete the supervisor. |
 | `shell/apps/pages.ts:98` | The recent strip places PowOS apps by when the host's front app changed: `usage.recent` comes without times. | `usage.recent` with each app's last time (ShellBridge.kt) and PowOS apps' opens recorded there, one list ordered by time. |
 | `shell/apps/stdb.ts:11` | Apps use the server's anonymous per-database tokens: there is no PowOS issuer yet (C15). | REMOTE-POWOS.md M4: the shell mints per-app JWTs from the realm issuer. |

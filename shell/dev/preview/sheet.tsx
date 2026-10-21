@@ -203,11 +203,14 @@ const painted = (cs: CSSStyleDeclaration) =>
  * - clipped text: a text box wider (or taller) than the box that shows it - ellipsis, a cut line;
  * - a row cut in half: content partly hidden by the tile's (or a container's) edge - between 8% and 92% of it shows;
  * - unfilled: the content's box leaves more than [EMPTY] of a side of the tile's inside empty;
+ * - small content: what's drawn (text boxes, painted boxes, a canvas's ink, an SVG) covers less than [COVER] of it
+ *   (calibrated 2026-10-21 on the manager's review: the big tiles flagged as "a tiny 5° in a huge box" measured 8-15%,
+ *   the folded ones approved as they were 27-44%);
  * - scroll: a scrolling container in a tile (a home tile can't take a scroll gesture from the page) - but a strip
  *   that scrolls sideways and says so (touch-action: pan-x: it took the gesture);
  * - hard border: a drawn 1px+ line round content (the design language: no lines).
  */
-export function check(EMPTY = 0.12) {
+export function check(EMPTY = 0.12, COVER = 0.25) {
   const out: Record<string, string[]> = {};
   for (const cellEl of document.querySelectorAll<HTMLElement>(".pv-cell")) {
     const key = cellEl.dataset.key!;
@@ -224,8 +227,17 @@ export function check(EMPTY = 0.12) {
     const [a, b] = [pad(face), pad(owl)];
     const inner = { left: fr.left + a[0] + b[0], top: fr.top + a[1] + b[1], right: fr.right - a[2] - b[2], bottom: fr.bottom - a[3] - b[3] };
     const ink = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+    // How much of the inside the content covers: a 2 px grid over it, each cell under some ink marked once.
+    const GW = Math.max(1, Math.ceil((inner.right - inner.left) / 2));
+    const GH = Math.max(1, Math.ceil((inner.bottom - inner.top) / 2));
+    const grid = new Uint8Array(GW * GH);
     const add = (r: { left: number; top: number; right: number; bottom: number }) => {
       if (r.right - r.left < 1 || r.bottom - r.top < 1) return;
+      const x0 = Math.max(0, Math.floor((r.left - inner.left) / 2));
+      const x1 = Math.min(GW, Math.ceil((r.right - inner.left) / 2));
+      const y0 = Math.max(0, Math.floor((r.top - inner.top) / 2));
+      const y1 = Math.min(GH, Math.ceil((r.bottom - inner.top) / 2));
+      for (let y = y0; y < y1; y++) grid.fill(1, y * GW + x0, Math.max(y * GW + x0, y * GW + x1));
       ink.left = Math.min(ink.left, r.left);
       ink.top = Math.min(ink.top, r.top);
       ink.right = Math.max(ink.right, r.right);
@@ -258,7 +270,7 @@ export function check(EMPTY = 0.12) {
         continue;
       }
       if (el instanceof SVGElement) continue;
-      if (el instanceof HTMLImageElement || painted(cs)) add(visible(el, el.getBoundingClientRect(), face));
+      if (el instanceof HTMLImageElement || el instanceof HTMLInputElement || painted(cs)) add(visible(el, el.getBoundingClientRect(), face));
       // Its own text: clipped by itself (ellipsis, line clamp) or by what holds it.
       const own = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent!.trim());
       if (own.length) {
@@ -295,6 +307,12 @@ export function check(EMPTY = 0.12) {
       };
       const empty = Object.entries(gaps).filter(([, g]) => g > EMPTY).map(([s, g]) => `${s} ${Math.round(g * 100)}%`);
       if (empty.length) problems.push(`unfilled: ${empty.join(", ")} empty`);
+      // Spread thin: content reaching the edges but small in the middle of a big tile (a "5°" in a box) - it should
+      // scale with the tile, not only spread out.
+      let n = 0;
+      for (let i = 0; i < grid.length; i++) n += grid[i];
+      const covered = n / grid.length;
+      if (covered < COVER) problems.push(`small content: covers ${Math.round(covered * 100)}% of the tile`);
     } else problems.push("nothing drawn");
     const list = [...new Set(problems)];
     if (list.length) {
