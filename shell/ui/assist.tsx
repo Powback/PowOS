@@ -24,7 +24,10 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { stored } from "../state.ts";
 import { Mic, dictate, hearing, interrupt, speech, type MicTarget } from "./bar.tsx";
-import { makeHold } from "./dictation.ts";
+import { makeHold, release } from "./dictation.ts";
+
+/** The side button is held to talk (assist.held): its release sends at once. */
+let pushToTalk = false;
 
 /** A summoning with the side button already let go: its dictation ends after this much silence. */
 const QUICK_SILENCE_MS = 1500;
@@ -58,10 +61,18 @@ powos.on("assist.hidden", () => takeOver());
 // The side button let go (when Android passes it on, PowosAssistSession.onKeyUp): the dictation ends, and so sends.
 // Hold to talk: the side button still down - the dictation lasts until it's let go (assist.keyup: PowerKey reads the
 // release as root), then ends, and so sends. Already up: it ends after QUICK_SILENCE_MS of nothing heard.
-powos.on("assist.held", () => autoSend && makeHold(mic));
+// Push to talk: no preview, no silence - the release sends what's heard at once (release()).
+powos.on("assist.held", () => {
+  if (!autoSend) return;
+  autoSend = false;
+  pushToTalk = true;
+  makeHold(mic);
+});
 powos.on("assist.quick", () => autoSend && powos.speech.quiet(QUICK_SILENCE_MS));
 powos.on("assist.keyup", () => {
-  if (autoSend && speech.value.listening) powos.speech.stop();
+  if (!pushToTalk) return;
+  pushToTalk = false;
+  release(mic);
 });
 
 /** The screen's text that goes along with a question, at most (the host caps it too). */
@@ -173,6 +184,7 @@ let sendTimer = 0;
 
 function holdBack() {
   autoSend = false;
+  pushToTalk = false;
   clearTimeout(sendTimer);
   sending.value = false;
 }

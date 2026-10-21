@@ -86,6 +86,20 @@ export function interrupt(target?: MicTarget) {
   p.target.heard(now, false);
 }
 
+/**
+ * Push-to-talk's release: what's been heard up to now - the finished segments and the words still pending in the
+ * current one - goes to [target] as a send AT ONCE, and the recognizer is let go. No waiting for its final result (that
+ * waited up to 2 s; the partial already holds the last words), no silence, no preview.
+ */
+export function release(target?: MicTarget) {
+  const p = pending;
+  if (!p || (target && p.target !== target)) return;
+  const now = join(p.typed, speech.value.text);
+  pending = null;
+  powos.speech.cancel();
+  p.target.heard(now, !!now.trim());
+}
+
 powos.on("speech.state", (s: { listening: boolean; text: string; error: string | null }) => (speech.value = s));
 powos.on("speech.done", ({ text }: { text: string }) => {
   const p = pending;

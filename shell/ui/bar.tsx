@@ -12,7 +12,7 @@ import { matches } from "./drawer.tsx";
 import { drawer, launch, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
-import { forget, hearing, listen, listeningFor, makeHold, speech, type MicTarget } from "./dictation.ts";
+import { forget, hearing, listen, listeningFor, makeHold, release, speech, type MicTarget } from "./dictation.ts";
 
 /** A press longer than this is a hold (talk, then send); shorter, a tap (dictate). */
 const HOLD_MS = 250;
@@ -66,8 +66,9 @@ export function Mic({ target }: { target: MicTarget }) {
         press.current = null;
         if (!p) return;
         clearTimeout(p.timer);
-        // A hold ends (and sends) when let go; a tap's dictation goes on until its silence or the next tap.
-        if (p.held && !p.cancelled) powos.speech.stop();
+        // Push to talk: let go, and what's heard is sent at once (release); a tap's dictation goes on until its
+        // silence or the next tap.
+        if (p.held && !p.cancelled) release(target);
       }}
       onPointerCancel={() => {
         const p = press.current;
