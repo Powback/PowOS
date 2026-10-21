@@ -8,8 +8,11 @@ import android.speech.SpeechRecognizer
 
 /**
  * The assistant role asks for a recognition service of the assistant's own (the role's requirement), and the system
- * may make it the phone's default speech recognizer: this one passes every request on to the phone's on-device
- * recognizer (or its regular one), as is, and its results back - nothing of its own.
+ * may make it the phone's default speech recognizer: this one passes every request on to the phone's real recognizer
+ * (NativeSpeech.regularService: the system default unless that's this service, then Google's speech services), as
+ * is, and its results back - nothing of its own. Never to "the default" blindly: with this service as the default
+ * that would be itself, forever. Not to the on-device one either: on this phone (Android System Intelligence) it
+ * often has no model for the language, and the caller's intent may ask for offline itself.
  */
 class PowosRecognitionService : RecognitionService() {
     private var recognizer: SpeechRecognizer? = null
@@ -19,9 +22,8 @@ class PowosRecognitionService : RecognitionService() {
         callback: Callback,
     ) {
         recognizer?.destroy()
-        val r =
-            if (SpeechRecognizer.isOnDeviceRecognitionAvailable(this)) SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
-            else SpeechRecognizer.createSpeechRecognizer(this)
+        val target = dev.omalauncher.ui.NativeSpeech.regularService(this) ?: return callback.error(SpeechRecognizer.ERROR_CLIENT)
+        val r = SpeechRecognizer.createSpeechRecognizer(this, target)
         r.setRecognitionListener(
             object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) = callback.readyForSpeech(params ?: Bundle())
