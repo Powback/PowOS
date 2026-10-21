@@ -38,8 +38,15 @@ GPU1 budget: 2.4 + 2.4 + 16.5 = 21.3 of 24. vLLM util is a share of the WHOLE ca
 - Voice first audio: `cd hosts/gpu-195 && podman run --rm --network voice --security-opt label=disable -v
   "$PWD/bench:/bench:ro" localhost/voiceagent-backend:latest python /bench/voice-bench.py ws --n 10` (baseline
   ~640-665 ms median; run variance ~25 ms).
-- Units: `python3 lib/apps/powos-units register units/<host>/<id>.json` (.195 via the shim). .58 has no units tool:
-  `ssh .58 'POWOS_UNITS_DIR=$HOME/.config/powos/units.d python3 - register /tmp/u.json' < lib/apps/powos-units`.
+- Units: `python3 lib/apps/powos-units register units/<host>/<id>.json` (.195 via the shim). .58 has no units tool,
+  so run the repo's over ssh with the repo manifest:
+  `ssh powos@192.168.50.58 "POWOS_UNITS_DIR=\$HOME/.config/powos/units.d python3 - register /dev/stdin" ...` won't
+  work (stdin is the script), so: `scp units/gpu-58/llama-swap-58.json powos@192.168.50.58:/tmp/u.json && ssh
+  powos@192.168.50.58 'POWOS_UNITS_DIR=$HOME/.config/powos/units.d python3 - register /tmp/u.json && rm /tmp/u.json'
+  < lib/apps/powos-units`.
+- Every script this skill uses is in a repo: `hosts/gpu-195/bench/{llm,voice}-bench.py`, `hosts/gpu-195/install.sh`,
+  `lib/apps/powos-units` (PowOS), `powos/run-vllm-32b.sh` + `powos/llama-swap.yaml` (local-llm-stack). To run a bench
+  from the Mac, `scp` it from the checkout; on .195 run it from `~/Projects/PowOS` after `git pull`.
 - Noise check: `nvidia-smi --query-gpu=index,pstate,power.draw,fan.speed,temperature.gpu --format=csv`.
 
 ## Measured (2026-10-21)
