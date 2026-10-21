@@ -230,6 +230,10 @@ class ShellBridge(
             "shade.closed" -> shade?.closed()
             "shade.expand" -> shade?.expand()
             "shade.peekHeight" -> shade?.peekHeight((a.getDouble(0) * density()).toInt())
+            // Home's page: whether a pull down on it is the shade's now. True: PowOS's shade takes it (on the gesture input).
+            "shade.homePull" -> homePull(a.getBoolean(0))
+            // Home without the gesture input: the shade down, not following the finger.
+            "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()
             "pull.launched" -> overlay?.launched()
             "tasks.list" -> tasks()
@@ -361,6 +365,12 @@ class ShellBridge(
             )
         }
         return list
+    }
+
+    private fun homePull(on: Boolean): Boolean {
+        val shade = dev.omalauncher.system.ShadeHost.current ?: return false
+        main.post { shade.homePull = on }
+        return shade.monitored
     }
 
     /**

@@ -7,11 +7,12 @@
  * the drawer move with it in CSS, so a frame of the swipe moves an edge, not a re-laid-out list of apps.
  */
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import { signal } from "@preact/signals";
+import { computed, effect, signal } from "@preact/signals";
+import { powos } from "../bridge.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
-import { drawerDragging, drawerOpen, followNotif, followOpenness, homeGestures } from "./gesture.ts";
+import { drawerDragging, drawerOpen, followOpenness, homeGestures, shadeTakesHome } from "./gesture.ts";
 import { Carried, Pages, startCarry } from "./grid.tsx";
 import { carriedApp, shownLess } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
@@ -22,12 +23,48 @@ import { GlassesScreen } from "./glasses.tsx";
 import { AgentsScreen } from "./agents.tsx";
 import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
-import { NotificationPanel } from "./notifications.tsx";
 import { AiContent, AiHeader, PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
 import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
-import { byKey, carry, dock, dockAim, dockDrag, editing, menu, pullKind, recent, setDock } from "../state.ts";
+import { byKey, carry, dock, dockAim, dockDrag, drawer, editing, folder, menu, page, pullKind, recent, screen, selected, sessionView, setDock } from "../state.ts";
+import { screens } from "../screens.ts";
+import { appView } from "../apps/pages.ts";
+import { remoteOpen } from "../remote.ts";
+import { glassesOpen } from "../glasses/open.ts";
+import { agentsView } from "../agents.ts";
+
+/**
+ * A pull down on home is the system shade's (ShadeHost, the same window, pull and blur as over an app): home has no
+ * notification panel of its own. While nothing is open over home's pages - and it isn't PowOS AI's page, whose up and
+ * down are its own - the host takes a finger dragged down anywhere on home ("shade.homePull"); otherwise home keeps it.
+ */
+const homePullOk = computed(
+  () =>
+    page.value >= 0 &&
+    drawer.value === 0 &&
+    !drawerOpen.value &&
+    !editing.value &&
+    !menu.value &&
+    !folder.value &&
+    !selected.value &&
+    !carry.value &&
+    !screen.value.key &&
+    !sessionView.value &&
+    !appView.value &&
+    !remoteOpen.value &&
+    !glassesOpen.value &&
+    !agentsView.value &&
+    screens.value.length === 0,
+);
+// Home's page only (app.tsx imports this module in every mode).
+if (!new URLSearchParams(location.search).get("mode")) effect(() => {
+  const on = homePullOk.value;
+  powos.shade.homePull(on).then(
+    (taken) => (shadeTakesHome.value = !!taken),
+    () => (shadeTakesHome.value = false),
+  );
+});
 
 /** How far above the dock a held app has to go to leave it for the home screen. */
 const DOCK_EXIT = 48;
@@ -194,7 +231,7 @@ function Dock() {
        * Two pages side by side, swiped between by the browser's own scroll snapping (on the compositor): the pinned
        * apps, then the recent ones. The dots below follow when a scroll settles.
        */}
-      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p data-q ref={(n) => (followOpenness(n), followNotif(n))}>
+      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followOpenness}>
         <div class="dock-pages" ref={pagesEl}>
           {(!ghost || carried) && (
             <div
@@ -238,9 +275,7 @@ export function Home() {
         <div
           class={`home ${footBelow.value ? "pill-below" : ""} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
         >
-          {/* data-q: it fades out as the notification panel / control center comes down (shell.css) - nothing of home
-              shows through them. */}
-          <div class="stage" data-q ref={followNotif}>
+          <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
               <Pages />
             </div>
@@ -264,7 +299,6 @@ export function Home() {
           <Dock />
           <AppMenu />
           <EditSheet />
-          <NotificationPanel />
         </div>
       </div>
       {/* The pet (the agents' face): over home and PowOS AI's page, outside their swipes; the screens below cover it. */}

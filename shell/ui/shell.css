@@ -282,12 +282,6 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
     linear-gradient(var(--text-fill), var(--text-fill)) border-box,
     var(--glass-image) left calc(-1 * var(--gx)) bottom calc(-1 * var(--gb)) / var(--glass-w) var(--glass-h) no-repeat border-box;
 }
-.glass .home .notif-panel {
-  --panel-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + 24%), transparent);
-  background:
-    linear-gradient(var(--panel-fill), var(--panel-fill)) border-box,
-    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
-}
 
 /* The drawer: the panel under the recent row. */
 .drawer-clip {
@@ -903,8 +897,8 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .swatch-bars i { width: 14px; height: 6px; }
 
 /*
- * The notification panel (notifications.tsx): down from the top as --q goes 0 -> 1 (gesture.ts follows the finger with
- * it, as --p for the drawer), the home dimmed under it.
+ * The notification panel (notifications.tsx, in the shade's window - mode=shade, over apps and home alike): down from
+ * the top as --q goes 0 -> 1 (the host follows the finger with it).
  */
 @property --q {
   syntax: "<number>";
@@ -912,8 +906,6 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   initial-value: 0;
 }
 [data-q] { --q: 0; transition: --q 280ms cubic-bezier(0.2, 0.9, 0.3, 1); }
-/* Home's content goes as the notification panel / control center comes down (with the finger): nothing shows through. */
-.home > :is(.stage, .bar, .dock)[data-q] { opacity: calc(1 - var(--q)); }
 .home.dragging [data-q] { transition: none; }
 .notif-scrim {
   position: fixed;

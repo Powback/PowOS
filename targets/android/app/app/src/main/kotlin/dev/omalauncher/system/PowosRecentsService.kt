@@ -154,8 +154,9 @@ class PowosRecentsService : Service() {
                 it.systemUi = systemUi
                 edge = it
             }
-        // The bottom corners' pull-up panels wrap gesture navigation's swipes (both start in the bar's strip).
-        val consumers = listOfNotNull(shade?.pull, CornerPull(this, n), e)
+        // The bottom corners' pull-up panels wrap gesture navigation's swipes (both start in the bar's strip). The shade's
+        // pull last: on home it follows any finger down on home's body, so the bar's strip and the edge handles come first.
+        val consumers = listOfNotNull(CornerPull(this, n), e, shade?.pull)
         gestures = GestureMonitor.start(this, Display.DEFAULT_DISPLAY, consumers)
         // The handles are drawn only where the gestures can be taken.
         if (gestures != null) e.start()

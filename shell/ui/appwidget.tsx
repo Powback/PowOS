@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { signal, type Signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { apps, carry, editing, selected } from "../state.ts";
-import { drawerDrag, notifDrag, pageDrag } from "./gesture.ts";
+import { drawerDrag, pageDrag } from "./gesture.ts";
 import { takeTap } from "./taps.ts";
 import type { AppWidgetProvider, HomeItem } from "../types.ts";
 
@@ -61,7 +61,7 @@ async function draw(canvas: HTMLCanvasElement, url: string) {
 }
 
 /** Home has the finger now: the widget's press ends as a cancel. */
-const homeTook = () => !!carry.value || pageDrag.value != null || drawerDrag.value != null || notifDrag.value != null;
+const homeTook = () => !!carry.value || pageDrag.value != null || drawerDrag.value != null;
 
 /** One Android widget's tile: its frame, watched while it's on screen, at its size; touches to the widget. */
 export function AppWidgetFace({ item }: { item: HomeItem }) {

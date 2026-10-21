@@ -277,14 +277,27 @@ class ShadeHost(
         return true
     }
 
-    /** Whether a finger down at [y] (display px) may be the shade's pull. */
-    private fun pullable(y: Float): Boolean {
+    /**
+     * Home's page says a pull down on it is the shade's now (shade.homePull: home's first pages showing, nothing open
+     * over them, not editing): a finger down anywhere on home is followed and taken once it's dragged down - the same
+     * window, pull and blur as from the status bar over an app. Home has no notification panel of its own.
+     */
+    var homePull = false
+
+    /** Where a pull may start: the status bar (anywhere), or home's body (while [homePull]). */
+    private enum class From { STATUS_BAR, HOME }
+
+    /** Whether a finger down at [y] (display px) may be the shade's pull, and from where. */
+    private fun pullable(y: Float): From? {
         val edge = stripHeight.coerceAtLeast((24 * service.resources.displayMetrics.density).toInt())
-        if (y > edge) return false
+        if (y > edge) {
+            val home = homePull && Switcher.onHome && Switcher.homeVisible && !Switcher.open && host != null && !shown && !keyguard && !lent
+            return if (home) From.HOME else null
+        }
         val ok = host != null && !shown && !keyguard && !lent && statusBarShown
         // A finger down on the status bar that isn't a pull: why, as it's the first thing to ask when the shade won't come.
         if (!ok) Log.i(TAG, "not pulling: host=${host != null} shown=$shown keyguard=$keyguard lent=$lent statusBarShown=$statusBarShown")
-        return ok
+        return if (ok) From.STATUS_BAR else null
     }
 
     /**
@@ -294,9 +307,11 @@ class ShadeHost(
     val pull =
         object : GestureConsumer {
             override fun onDown(e: MotionEvent): Boolean {
-                if (!pullable(e.rawY)) return false
+                val from = pullable(e.rawY) ?: return false
                 // The status bar's right half pulls the control center, the rest the notifications - as on OnePlus's.
-                val control = e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
+                // Down on home's body: the notifications, as a stock launcher's.
+                val control = from == From.STATUS_BAR && e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
+                pulling.fromHome = from == From.HOME
                 host?.bridge?.emit("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
                 pulling.down(e)
                 return true
@@ -562,6 +577,9 @@ class ShadeHost(
         private var q = 0.0
         private var velocity: VelocityTracker? = null
 
+        /** Started on home's body: only a swipe is a pull there - not a hold that then moves (a tile being picked up). */
+        var fromHome = false
+
         fun down(e: MotionEvent) {
             x0 = e.rawX
             y0 = e.rawY
@@ -577,6 +595,7 @@ class ShadeHost(
             val dy = e.rawY - y0
             var result = PullMove.NONE
             if (!dragging) {
+                if (fromHome && e.eventTime - e.downTime > HOME_SWIPE_MS && (dy > slop || abs(dx) > slop)) return PullMove.NOT_A_PULL
                 if (dy > slop && dy >= abs(dx)) {
                     dragging = true
                     show()
@@ -674,6 +693,9 @@ class ShadeHost(
 
         /** The status bar's right part (from this fraction of its width) pulls the control center, as on OnePlus's. */
         private const val CONTROL_SPLIT = 0.5f
+
+        /** On home's body, the finger must be moving down within this of its down (ms): later is a long press's drag. */
+        private const val HOME_SWIPE_MS = 250L
 
         /** The banner's strip below the status bar until the page says how tall its banner is ("shade.peekHeight"). */
         private const val PEEK_HEIGHT_DP = 150

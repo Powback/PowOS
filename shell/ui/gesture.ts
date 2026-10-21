@@ -6,14 +6,17 @@
  * - Down on the open drawer - from the top of its list, or anywhere outside the list - drags it closed the same way.
  *   A list that's scrolled down just scrolls.
  * - Sideways on home: the pages slide under the finger and snap to the next one past a quarter of the width or a flick.
- * - Down on home: the notification panel (notifications.tsx) slides down under the finger the same way; up on it - from
- *   the bottom of its list, or outside the list - drags it shut.
+ * - Down on home: the system shade's window (ShadeHost, mode=shade) - the host takes that finger itself on its gesture
+ *   input, as from the status bar over an app ([shadeTakesHome]); home has no notification panel of its own.
+ * - The shade's page (shade.tsx) uses these too: up on its panel - from the bottom of its list, or outside the list -
+ *   drags it shut, sideways switches notifications / control center.
  *
  * A gesture is only claimed once its direction is clear (SLOP), so taps, long presses (moving and resizing tiles),
  * the drawer's scrolling and the A-Z bar keep their touches. Touch events, not pointer events: those end in a
  * pointercancel once the browser scrolls something.
  */
 import { computed, effect, signal } from "@preact/signals";
+import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, pullKind, pullPanels, selected } from "../state.ts";
 
@@ -36,6 +39,11 @@ export const notifDrag = signal<number | null>(null);
 export const notifShown = () => notifDrag.value ?? (notif.value ? 1 : 0);
 export const notifOpen = computed(() => notifShown() > 0);
 export const notifDragging = computed(() => notifDrag.value != null);
+/**
+ * The host takes a pull down on home itself (shade.homePull answered true): home claims nothing for it. False (no
+ * gesture input): a swipe down on home asks for the shade (shade.open), not following the finger.
+ */
+export const shadeTakesHome = signal(true);
 /** While a finger drags the pages: their offset in px; null otherwise. */
 export const pageDrag = signal<number | null>(null);
 
@@ -124,7 +132,7 @@ interface Gesture {
   last: [number, number, number];
   /** Velocity along the gesture's axis, px/ms. */
   v: number;
-  mode: "open" | "close" | "pages" | "notif" | "notifClose" | "panel" | null;
+  mode: "open" | "close" | "pages" | "notifClose" | "panel" | null;
   open: boolean;
   /** The notification panel was down when it started. */
   notif: boolean;
@@ -220,9 +228,11 @@ export function homeGestures() {
           pullKind.value = pullPanels.value === "on" && g.x0 < innerWidth / 2 ? "ai" : "apps";
         }
         else if (g.open && dy > 0 && (!g.inList || g.listTop)) g.mode = "close";
-        // Down on home: the notifications, as a stock launcher's shade.
-        else if (!g.open && dy > 0 && !editing.value) g.mode = "notif";
-        else return (g = null); // the list scrolls
+        // Down on home: the shade's - the host's own pull (it takes the finger); without it, the shade is asked for.
+        else if (!g.open && dy > 0 && !editing.value) {
+          if (!shadeTakesHome.value && document.documentElement.dataset.mode === "home") void powos.shade.open();
+          return (g = null);
+        } else return (g = null); // the list scrolls
       } else if (!g.open && !g.inStrip) {
         g.mode = "pages";
       } else {
@@ -236,8 +246,7 @@ export function homeGestures() {
       lastDx = dx;
       return panelBody()?.style.setProperty("--panel-dx", `${panelResist(dx)}px`);
     }
-    if (g.mode === "notif") notifDrag.value = clamp(dy / (g.height * 0.6));
-    else if (g.mode === "notifClose") notifDrag.value = clamp(1 + dy / (g.height * 0.6));
+    if (g.mode === "notifClose") notifDrag.value = clamp(1 + dy / (g.height * 0.6));
     else if (g.mode === "open") drawerDrag.value = clamp((-dy * GAIN) / g.travel);
     else if (g.mode === "close") drawerDrag.value = clamp(1 - (dy * GAIN) / g.travel);
     else {
@@ -267,11 +276,11 @@ export function homeGestures() {
       const open = v < -(mode === "open" ? OPEN_FLICK : FLICK) ? true : v > FLICK ? false : mode === "open" ? p > OPEN_AT : p > 0.67;
       if (open) drawer.value = 1;
       else closeDrawer();
-    } else if (mode === "notif" || mode === "notifClose") {
+    } else if (mode === "notifClose") {
       const q = notifDrag.value ?? 0;
       notifDrag.value = null;
       // A flick decides; otherwise where it was let go (as the drawer).
-      notif.value = v > FLICK ? true : v < -FLICK ? false : mode === "notif" ? q > 0.33 : q > 0.67;
+      notif.value = v > FLICK ? true : v < -FLICK ? false : q > 0.67;
     } else if (mode === "panel") {
       settlePanel(lastDx, v);
     } else if (mode === "pages") {

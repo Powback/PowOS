@@ -150,7 +150,6 @@ export function Bar() {
   return (
     <form
       class={`bar ${active ? "active" : ""}`}
-      data-q
       onSubmit={(e) => {
         e.preventDefault();
         const best = pullKind.value === "apps" ? matches.value[0] : null;

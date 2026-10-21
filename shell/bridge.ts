@@ -197,6 +197,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       closed: () => call("shade.closed"),
       expand: () => call("shade.expand"),
       peekHeight: (px) => call("shade.peekHeight", px),
+      homePull: (on) => call<boolean>("shade.homePull", on),
+      open: () => call("shade.open"),
     },
     overlay: {
       closed: () => call("overlay.closed"),
@@ -740,6 +742,8 @@ function mock(): Bridge {
       closed: async () => console.log("[mock] shade closed"),
       expand: async () => console.log("[mock] shade expanded"),
       peekHeight: async (px) => console.log("[mock] banner height", px),
+      homePull: async () => true,
+      open: async () => console.log("[mock] shade open"),
     },
     overlay: { closed: async () => console.log("[mock] overlay closed") },
     pull: {

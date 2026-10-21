@@ -26,7 +26,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { carry, chat, chatting, closeDrawer, editing, home, menu, openPanel, page, pullPanels, stored } from "../state.ts";
-import { drawerOpen, notifOpen } from "./gesture.ts";
+import { drawerOpen } from "./gesture.ts";
 // From bar.tsx, which re-exports ui/dictation.ts: the phone runs an older bar.tsx until the dictation rework ships.
 import { dictate, hearing, speech, type MicTarget } from "./bar.tsx";
 import { askQueued, openAssistant } from "./assistant.ts";
@@ -954,7 +954,7 @@ function PetLayer() {
   const press = useRef<{ x: number; y: number; dx: number; dy: number; lx: number; ly: number; moved: boolean; timer: number; long: boolean; fx?: number; fy?: number } | null>(null);
   // On the chat surface it's the chat's face (pet.css .face: by the pill); over the app list, menus, edit mode: away.
   const face = chatOpen.value;
-  const hidden = (drawerOpen.value && !face) || editing.value || notifOpen.value || !!carry.value || !!menu.value;
+  const hidden = (drawerOpen.value && !face) || editing.value || !!carry.value || !!menu.value;
   // Physics: held still while hidden (petmove.ts pause), carried on when shown.
   useEffect(() => mover.current?.pause(hidden), [hidden]);
   // Where it is: by the pill as the chat's face; on its perch (or, its edge not on screen, the nearest edge there
