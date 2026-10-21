@@ -244,8 +244,9 @@ case "${1:-}" in
         fi
         last=""
         while true; do
-            if [[ -n "${DISPLAY:-}" ]] && command -v xrandr >/dev/null 2>&1 \
-               && now=$(xrandr --listmonitors 2>/dev/null); then
+            if [[ -n "${DISPLAY:-}" ]] && command -v xrandr >/dev/null 2>&1; then
+                # X gone (the session ended, its Xwayland with it): so is this session's plasmashell - done.
+                now=$(xrandr --listmonitors 2>/dev/null) || exit 0
                 [[ "$now" != "$last" ]] && apply >/dev/null
                 last=$now
             else
