@@ -156,10 +156,20 @@ async function settle(run, check) {
   for (const e of guard) run.problems.push(`${e.kind}: ${e.message}${e.file ? ` (${e.file}${e.line ? ":" + e.line : ""})` : ""}`);
   const alive = await page.evaluate(() => window.__powosAlive === true).catch(() => false);
   if (!ready || (!alive && run.name.indexOf("app ") !== 0)) run.problems.push(`not ready (window.__powosAlive) within ${ms} ms`);
+  // What the page must still have once it's up: a feature gone with a redesign fails here, not in the user's hand.
+  if (ready && MUST[run.name]) for (const [sel, what] of MUST[run.name]) if (!(await page.$(sel).catch(() => null))) run.problems.push(`missing ${what} (no ${sel})`);
   if (ready && IDLE_MS > 0 && run.name.indexOf("app ") !== 0) await idle(run);
   run.problems = [...new Set(run.problems)];
   return { ...run, ready, ms };
 }
+
+/**
+ * Per page, what must be there once it's ready - [selector, what it is]. 2026-10-21: a redesign of the side button's
+ * panel dropped its circle-to-crop flow and nothing noticed until the user did.
+ */
+const MUST = {
+  assist: [[".assist-draw", "the circle-to-crop layer over the screen (assist.tsx Draw)"]],
+};
 
 /** The idle check (see the top): after the page settled, IDLE_MS of nothing - no rAF, no paint, no endless animation. */
 async function idle(run) {
