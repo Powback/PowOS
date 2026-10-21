@@ -22,9 +22,12 @@
  */
 @property --p {
   syntax: "<number>";
-  inherits: true;
+  /* Not inherited: set on a [data-p] element, a change restyled every app cell and widget under it on each frame of
+     a drag (3.3 ms of the frame headless on the M4, ~0.6 without). The few inside that read it inherit it by name. */
+  inherits: false;
   initial-value: 0;
 }
+.launcher-inner, .drawer-clip, .drawer, .ai-panel, .cc-media::after { --p: inherit; }
 /*
  * What follows the panel's openness (data-p): --p is written on each by gesture.ts and transitions between settled
  * values; while a finger moves the panel, it tracks the finger exactly. Only clips, transforms and opacity read it -
@@ -62,14 +65,8 @@
   /* Down to the screen's foot, under the search pill, the closing dock and the navigation bar: one frost behind all of
      the drawer, no strip of bare wallpaper at its foot. */
   bottom: calc(-1 * (48px + var(--strip-height) * (1 - var(--p)) + max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px))));
-  top: calc(var(--shut) * (100% - var(--launcher-head)));
+  top: calc((1 - var(--p)) * (100% - var(--launcher-head)));
 }
-/*
- * How far down the panel's top edge is, 0..1: it isn't a panel growing out of the screen's foot, so the open starts
- * half-way up - the first frame past closed it's at 50% (fading in, .drawer) and travels the remaining half
- * (gesture.ts maps the finger onto that half). Closed (--p 0) it's all the way down: nothing shows.
- */
-.launcher-frame, .launcher { --shut: calc((1 - var(--p)) * 0.5 + (1 - min(1, var(--p) * 1000)) * 0.5); }
 /* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
 .home .launcher-frame.tile {
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -82,7 +79,7 @@
   bottom: 0;
   display: flex;
   flex-direction: column;
-  clip-path: inset(calc(var(--shut) * (100% - var(--launcher-head))) 0 0 0 round var(--radius) var(--radius) 0 0);
+  clip-path: inset(calc((1 - var(--p)) * (100% - var(--launcher-head))) 0 0 0 round var(--radius) var(--radius) 0 0);
   /* Closed, only the recent apps take touches; the pages under the rest stay reachable. */
   pointer-events: none;
 }
@@ -91,7 +88,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  transform: translateY(calc(var(--shut) * (100% - var(--launcher-head))));
+  transform: translateY(calc((1 - var(--p)) * (100% - var(--launcher-head))));
 }
 .launcher .strip { pointer-events: auto; }
 .home.open .launcher :is(.drawer, .ai-panel) { pointer-events: auto; }
@@ -515,10 +512,9 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 
 /* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
 
-/* No head: closed, the launcher's frame is nothing; it shows as soon as the drawer starts to rise. */
-.home .launcher-frame { opacity: min(1, calc(var(--p) * 20)); }
-/* Opening, the frost is whole from the first frame; closing, it fades over the last few percent. */
-.home.open .launcher-frame { opacity: min(1, calc(var(--p) * 1000)); }
+/* The frost fades in with the drawer's content, on the same curve (.drawer): nothing pops in.
+   The compositor's blur under it fades with it (nativeglass.ts: a region's alpha is its opacity). */
+.home .launcher-frame { opacity: min(1, calc(var(--p) * 1.6)); }
 .recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
 .recents-face .strip { flex: 1; height: 100%; transform: none; clip-path: none; }
 .recents-face .strip .app { flex-basis: calc((100% - (var(--recent-n) - 1) * 4px) / var(--recent-n)); }

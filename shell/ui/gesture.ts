@@ -23,8 +23,8 @@ const FLICK = 0.45;
 /** Up, opening the drawer: a short flick is enough (px per ms), or past this much of the way. */
 const OPEN_FLICK = 0.2;
 const OPEN_AT = 0.15;
-/** The drawer's travel, of the home's height: it opens from half-way up (shell.css --shut), under the finger. */
-const TRAVEL = 0.5;
+/** The drawer moves this much faster than the finger (clamped at the top): its edge covers the screen in 2/3 of the swipe. */
+const GAIN = 1.5;
 /** What takes a tap in the launcher; a tap anywhere else in it closes it. */
 const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, textarea, a, .menu, .tile, [role=button], [role=slider]";
 
@@ -138,6 +138,8 @@ interface Gesture {
   target: Element;
   own: boolean;
   height: number;
+  /** The drawer's edge's way, closed to open: the launcher's height. */
+  travel: number;
 }
 
 /** The gesture under way: module state, so a re-render in the middle of one (the drawer moving) keeps it. */
@@ -182,6 +184,7 @@ export function homeGestures() {
         ".letter-bar, input[type=range], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls",
       ),
       height: document.querySelector(".home")?.clientHeight || innerHeight,
+      travel: document.querySelector(".launcher")?.clientHeight || innerHeight,
     };
   };
 
@@ -233,8 +236,8 @@ export function homeGestures() {
     }
     if (g.mode === "notif") notifDrag.value = clamp(dy / (g.height * 0.6));
     else if (g.mode === "notifClose") notifDrag.value = clamp(1 + dy / (g.height * 0.6));
-    else if (g.mode === "open") drawerDrag.value = clamp(-dy / (g.height * TRAVEL));
-    else if (g.mode === "close") drawerDrag.value = clamp(1 - dy / (g.height * TRAVEL));
+    else if (g.mode === "open") drawerDrag.value = clamp((-dy * GAIN) / g.travel);
+    else if (g.mode === "close") drawerDrag.value = clamp(1 - (dy * GAIN) / g.travel);
     else {
       // Past the first and last page it resists.
       const last = pages.value.length - 1;
