@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QIcon>
 #include <QMimeDatabase>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QUrlQuery>
@@ -60,6 +61,8 @@ void ShellServer::requestStarted(QWebEngineUrlRequestJob *job)
         return job->fail(QWebEngineUrlRequestJob::RequestDenied);
     if (rel.startsWith(QLatin1String("_app/")))
         return appFile(job, rel.mid(5));
+    if (rel == QLatin1String("_font/symbols"))
+        return symbols(job);
     for (const QString &root : shellRoots()) {
         QFile file(root + QLatin1Char('/') + rel);
         if (!file.open(QIODevice::ReadOnly))
@@ -90,6 +93,25 @@ void ShellServer::appFile(QWebEngineUrlRequestJob *job, const QString &rest)
     auto *buffer = new QBuffer(job);
     buffer->setData(file.readAll());
     job->reply(mimeOf(name), buffer);
+}
+
+void ShellServer::symbols(QWebEngineUrlRequestJob *job)
+{
+    // The terminals' icon glyphs (ui/terminal.tsx loads "/_font/symbols": Nerd Font's symbols, the phone's
+    // res/font/nerd_symbols.ttf): the system's, found once through fontconfig.
+    static const QString path = [] {
+        QProcess fc;
+        fc.start(QStringLiteral("fc-match"), {QStringLiteral("-f"), QStringLiteral("%{file}"), QStringLiteral("Symbols Nerd Font")});
+        fc.waitForFinished(3000);
+        const QString file = QString::fromLocal8Bit(fc.readAllStandardOutput()).trimmed();
+        return file.contains(QLatin1String("Nerd"), Qt::CaseInsensitive) ? file : QString();
+    }();
+    QFile file(path);
+    if (path.isEmpty() || !file.open(QIODevice::ReadOnly))
+        return job->fail(QWebEngineUrlRequestJob::UrlNotFound);
+    auto *buffer = new QBuffer(job);
+    buffer->setData(file.readAll());
+    job->reply("font/ttf", buffer);
 }
 
 void ShellServer::icon(QWebEngineUrlRequestJob *job)

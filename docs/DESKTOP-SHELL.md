@@ -13,8 +13,8 @@ longer road (replacing plasmashell), is `docs/DESKTOP-WEB-SHELL.md`.
 
 - **Why QtWebEngine**: it is Chromium, the engine family of the phone's WebView, so the CSS and JS render the same
   in both places. It is also Qt, so LayerShellQt, KF6, QWebChannel and KWindowEffects come with it. WebKitGTK would
-  be a second engine to test against. Measured on the phone: QtWebEngine 6.11 runs fine against Qt 6.12 (host
-  ~230 MB RSS plus about 70 MB per zygote).
+  be a second engine to test against. Measured on the phone (2026-10-21): QtWebEngine 6.11 runs fine against
+  Qt 6.12, with ~250 MB RSS for the host, 230 MB for the renderer and ~145 MB for the zygotes, the GPU in-process.
 - **home** role (the default): index.html?mode=desktop on the **bottom** layer, anchored to every edge, exclusive
   zone 0. It sits over plasmashell's desktop window and its wallpaper, under every window, inside Plasma's panel.
   KWin puts the *background* layer in the same stacking layer as plasmashell's desktop window, so a background
@@ -40,9 +40,10 @@ Android bridge is untouched. bridge.ts picks `desktop(native(host))` when `Powos
 | store.get / set | `~/.local/share/powos/shell-data/<name>.json`: the same names and contents as the phone | C++ |
 | theme.get / theme.changed | Omarchy's `~/.local/state/omarchy/current/theme/colors.toml`, mapped the way the phone maps it, watched | C++ |
 | ai.chat / send / ai.changed | `powos manager --once-stdin --json-events`, one turn per ask, streamed into the chat items | C++ |
-| glass (`b.hello`, `b.r`) | KWin blur behind the rects the page reports (`KWindowEffects::enableBlurBehind`) | C++ |
+| glass (`b.hello`, `b.r`) | KWin blur behind the rects the page reports (`KWindowEffects::enableBlurBehind`, which KWin 6.7 serves as `ext_background_effect_v1`; its capability arrives ~0.5 s late, so a "no" is asked again, a `HACK:`) | C++ |
 | islands (SpacetimeDB) | the page's own WebSocket to `ws://127.0.0.1:3410`; apps' UIs on `powos://shell/_app/<id>/` | page + C++ |
 | windows.* | TasksModel (the panel's) | C++ |
+| `_font/symbols` | the terminals' Nerd Font symbols, through fontconfig | C++ |
 | keyboard, widget screens, speech | no-ops for now: the desktop has a hardware keyboard and no OWL engine; dictation comes in round 2 | page |
 
 ## Shared and host-specific
@@ -52,19 +53,22 @@ Android bridge is untouched. bridge.ts picks `desktop(native(host))` when `Powos
   and touch, resize from the corner), PowOS apps' islands, the pill, the launcher and the chat (one conversation),
   the pet.
 - **Desktop-only, small**: `ui/desktop.tsx` (home's parts without the dock, the side pages, the switcher and the
-  shade, because Plasma keeps its own), `ui/desktop.css` (the pill and the launcher as a centred column, no mic),
-  and `hosts/desktop.ts`.
+  shade, because Plasma keeps its own), `ui/desktop.css` (the pill and the launcher as a centred column, no mic,
+  and a darker fill under the launcher's text: tint + 42%, measured to reach 4.5:1), and `hosts/desktop.ts`.
 - **Not on the desktop yet**: OWL widgets. They need the OWL engine's Kotlin Multiplatform JS port
   (`shell/DESIGN.md`). Until then the desktop's catalogue is the shell's own panels plus the PowOS apps' islands.
   Android's widgets will not come to the desktop.
 
 ## Perf and checks
 
-- 0 frames at rest, the same rule as the phone: the page draws nothing at rest, and glass is measured only while
-  something moves. Check it on the device with QTWEBENGINE_REMOTE_DEBUGGING plus the idle sample, and with
-  `powos-desktop-shell status` (CPU ticks per process).
-- `shell/dev/gate.sh` (tsc, style lint, every page headless) covers the shared code. `mode=desktop` runs on the
-  mock bridge in a browser like any other mode.
+- 0 frames at rest, the same rule as the phone. Measured on the phone over 60 s once settled: host 3 ticks,
+  renderer 0, zygotes 0, no running animations, glass measured only at start. Check it with
+  `powos-desktop-shell status` (CPU ticks per process) and `dev/phone.sh cdp`.
+- `shell/dev/gate.sh` boots `mode=desktop` with the rest (its idle check included). `gate.sh --shots DIR` renders
+  `desktop`, `desktop-launcher` and `desktop-chat` at the phone's Plasma size (558x1198) and at 1280x800.
+- Captures on the phone: `dev/phone.sh page NAME` is Chromium's render of the page (no compositor), and
+  `dev/phone.sh shot NAME` is KWin's own (spectacle). While the "PowOS" activity is not in front, the session is
+  frozen and KWin's capture shows its last painted frame, not the desktop as it is now.
 
 ## Round 2
 

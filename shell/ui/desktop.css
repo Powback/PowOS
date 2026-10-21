@@ -16,6 +16,16 @@ html[data-mode="desktop"] .launcher {
   right: max(0px, calc(50% - var(--desk-column) / 2));
   bottom: calc(-1 * (48px + var(--edge)));
 }
+/*
+ * The launcher and its chat float as a column over the whole wallpaper (the phone's drawer is the screen's width):
+ * a darker fill under their text. Measured (gate.sh --shots, 2026-10-21): the reference fill left 14 of 67 labels at
+ * 3.5-4.4:1 over the phone's wallpaper and 51 over a light one; tint + 42% leaves 0-1, in gruvbox, kanagawa and
+ * flexoki-light. --text-fill is redefined here because :root resolved it with its own --glass-dim.
+ */
+html[data-mode="desktop"] .launcher {
+  --glass-dim: 42%;
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+}
 html[data-mode="desktop"] .launcher-frame {
   border-radius: var(--radius);
 }

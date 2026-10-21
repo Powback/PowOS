@@ -28,6 +28,11 @@ const SIZES = {
   folded: { width: 404, height: 899, insets: { top: 45.6, bottom: 16.3 } },
   unfolded: { width: 821, height: 883, insets: { top: 45.6, bottom: 16.3 } },
 };
+/** The desktop's home (mode=desktop, powos-shell): the phone's own Plasma session's screen, and a laptop's. */
+const DESKTOP_SIZES = {
+  plasma: { width: 558, height: 1198, insets: { top: 0, bottom: 0 } },
+  laptop: { width: 1280, height: 800, insets: { top: 0, bottom: 0 } },
+};
 
 /**
  * Themes as the host hands them over (ShellBridge.themeColors from ui/Theme.kt's palette: surface = lighter_background,
@@ -113,6 +118,8 @@ const PRESENT_SAMPLE = JSON.stringify([
  * mock's events, sleep). `behind`: what the window is over - "wallpaper" (home: native glass), "blurred" (the shade,
  * the switcher: the host blurs the app under them), "app" (the assistant, over an app as it is).
  */
+/** The desktop's first home as hosts/desktop.ts makes it (no OWL widgets there): panels and apps, placed by the grid. */
+const DESKTOP_HOME = `{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); await B.home.addPanel('agents', 1, { x: 0, y: 0, w: 4, h: 3 }); await B.home.addPanel('recents', 1, { x: 0, y: 3, w: 4, h: 1 }); let x = 4; for (const k of ['l:konsole', 'l:dolphin', 'l:firefox']) await B.home.add(k, 1, { x: x++, y: 0, w: 1, h: 1 }); await sleep(300); S.home.value = { ...S.home.value, columns: Math.max(4, Math.round(innerWidth / 110)) }; await sleep(300); }`;
 const SCENES = [
   ["home", "home", "", "wallpaper"],
   ["home-p2", "home", "S.page.value = 1;", "wallpaper"],
@@ -136,6 +143,10 @@ const SCENES = [
   ["ai-compose", "home", "S.page.value = -1; await sleep(300); const f = document.querySelector('.ai-compose textarea, .ai-compose input'); f?.focus(); if (f) { f.value = 'summarise what the agents did overnight and what needs me'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
   ["settings", "home", "(await U('./screens.ts')).openScreen('settings');", "wallpaper"],
+  // The desktop's home: a laptop-wide grid (as hosts/desktop.ts's first home: ~110 px a column), the launcher, the chat.
+  ["desktop", "desktop", DESKTOP_HOME, "wallpaper"],
+  ["desktop-launcher", "desktop", DESKTOP_HOME + " S.drawer.value = 1;", "wallpaper"],
+  ["desktop-chat", "desktop", DESKTOP_HOME + ` S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["pull-apps", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
   ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
   ["assist", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
@@ -260,7 +271,7 @@ const contrastOf = async (png, runs) => {
 
 try {
   for (const [name, mode, setup, behind, touch] of SCENES) {
-    for (const [sizeName, size] of Object.entries(SIZES)) {
+    for (const [sizeName, size] of Object.entries(mode === "desktop" ? DESKTOP_SIZES : SIZES)) {
       let timer;
       const limit = new Promise((_, no) => (timer = setTimeout(() => no(new Error("timed out (40 s)")), 40000)));
       await Promise.race([shoot(name, mode, setup, behind, sizeName, size, touch), limit])
@@ -323,7 +334,7 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
                   ? `html::before { content: ""; position: fixed; inset: -40px; z-index: -1; background: ${pic}; filter: blur(30px) brightness(.8); }`
                   : `html { background: url("${window.__shotsApp}") 0 0 / 100% 100% no-repeat; }`;
             document.head.append(back);
-            if (glassMode === "page" || root.dataset.mode !== "home") window.__glass?.use(wp);
+            if (glassMode === "page" || !["home", "desktop"].includes(root.dataset.mode)) window.__glass?.use(wp);
             else root.classList.add("glass-native");
             await new Promise((r) => setTimeout(r, 200)); // the wallpaper decoded
             const S = await importShim("./state.ts");

@@ -28,7 +28,7 @@
 #      ~1-2 min.
 #   --shots DIR [--wallpaper FILE]: after the pages boot, every surface rendered at the phone's two screens into DIR
 #      (dev/shots.mjs: PNGs + report.json with each text's measured contrast) - design QA's renders, never a pass/fail.
-#      SHOTS_THEME / SHOTS_ONLY pass through.
+#      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE pass through.
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
 # GATE_IMAGE overrides the Chromium image. Docker's build cache and images are never pruned here.
 set -euo pipefail
@@ -152,7 +152,7 @@ if [ -n "$shots" ]; then
   smounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/shots.mjs:/usr/src/app/shots.mjs:ro" -v "$shots:/out")
   [ -n "$wallpaper" ] && smounts+=(-v "$wallpaper:/wallpaper.jpg:ro")
   docker run --rm --platform linux/arm64 --shm-size 512m "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
-    ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} -w /usr/src/app --entrypoint node "$IMAGE" shots.mjs ||
+    ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} ${SHOTS_PROBE:+-e SHOTS_PROBE="$SHOTS_PROBE"} -w /usr/src/app --entrypoint node "$IMAGE" shots.mjs ||
     echo "     shots: the render run failed"
 fi
 [ $rc -le 1 ] || echo "FAIL gate: the browser run itself failed (exit $rc)"
