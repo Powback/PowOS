@@ -94,8 +94,13 @@ class ShadeHost(
     private var lent = false
     private var lentSeenOpen = false
 
-    /** The status bar is showing: false while a full-screen app hides it. */
-    private var statusBarShown = true
+    /** The status bar is showing: false while a full-screen app hides it (the pet over apps keeps out then). */
+    var statusBarShown = true
+        private set(value) {
+            if (field == value) return
+            field = value
+            PetOverlay.current?.update()
+        }
     private var shown = false
 
     /** The window is up as a heads-up banner's strip ([peek]), not the whole shade. */

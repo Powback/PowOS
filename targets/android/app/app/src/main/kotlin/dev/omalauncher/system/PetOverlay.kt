@@ -11,7 +11,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
-import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
@@ -50,7 +49,6 @@ class PetOverlay(
     private var homeVisible = true
     private var keyguard = false
     private var shadeOpen = false
-    private var fullScreen = false
     private var ime = false
     private var peeking = false
     private val tuck = Runnable { peek(true) }
@@ -66,15 +64,9 @@ class PetOverlay(
         host = h
         val r = Root(context).apply { addView(h.web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         r.visibility = View.GONE
-        // Full screen apps: the status bar hidden (an app's immersive mode) - no pet over it.
-        r.setOnApplyWindowInsetsListener { v, insets ->
-            val full = !insets.isVisible(WindowInsets.Type.statusBars())
-            if (full != fullScreen) {
-                fullScreen = full
-                v.post { update() }
-            }
-            insets
-        }
+        // Full screen apps (the status bar hidden: a game, a video): what the shade's strip over the status bar sees
+        // (ShadeHost.statusBarShown). This small window's own insets have no status bar in them at all - read here it
+        // counted every app as full screen and the pet never showed over apps (2026-10-21).
         root = r
         params = layout().also { wm.addView(r, it) }
         h.web.onPause()
@@ -106,6 +98,7 @@ class PetOverlay(
     }
 
     fun update() {
+        val fullScreen = ShadeHost.current?.statusBarShown == false
         val want = enabled(service) && !homeVisible && !keyguard && !shadeOpen && !assistShowing && !fullScreen && !ime
         val r = root ?: return
         if (want == shown) return
