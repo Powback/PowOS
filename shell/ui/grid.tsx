@@ -58,9 +58,6 @@ export const geometry = signal<Geometry>({ left: 0, top: 0, width: 0, height: 0,
 const usedRows = () => Math.max(0, ...home.value.items.filter((i) => i.cell).map((i) => (i.resizable ? i.cell!.y + i.cell!.h : i.cell!.y + 1)));
 
 function measure(el: HTMLElement, columns: number) {
-  // Under the launcher (open, or a finger opening it) home is faded out and the dock folding away resizes it every
-  // frame: measuring then re-laid-out every tile, every frame. It measures again once the launcher closes.
-  if (drawerOpen.value) return;
   // Layout sizes, not the box on screen: closing, the launcher scales home's content back up (shell.css .home-content)
   // and its box on screen grows every frame of that - a new grid, every tile re-rendered, each frame.
   const r = el.getBoundingClientRect();
@@ -678,8 +675,10 @@ export function Pages() {
     ro.observe(el.current!);
     return () => ro.disconnect();
   }, []);
-  // Tiles reaching further down add rows, and the launcher closing gives the room back: re-measure then.
-  useEffect(() => void (el.current && measure(el.current, home.value.columns)), [home.value, drawerOpen.value]);
+  // Tiles reaching further down add rows: re-measure then. (Not on the drawer opening or closing: nothing of home's
+  // layout changes with it - shell.css .launcher - and reading drawerOpen here re-rendered every page, its glass mask
+  // rebuilt, at each open and close.)
+  useEffect(() => void (el.current && measure(el.current, home.value.columns)), [home.value]);
   // Items without a cell yet (a widget from the store, an app pinned from a menu): the host gives them the first free
   // spot, once the grid's rows are known - as the Compose home does laying a page out.
   const rows = geometry.value.rows;
