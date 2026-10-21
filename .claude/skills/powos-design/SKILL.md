@@ -37,13 +37,14 @@ description: How the PowOS phone shell's design is built and checked - the desig
   the review images were wrong; keep the mock in step with `settings get secure sysui_qs_tiles`.
 
 ## Render, check, ship
-- Targeted renders: run the gate's container on shell/dev/shots.mjs with SHOTS_ONLY=<regex> (scenes listed at its
-  top; SHOTS_SCALE=2 for readable crops, SHOTS_PROBE='<js>' to print page state, SHOTS_GLASS=native|page). Output PNGs
-  + report.json (each text's contrast vs the rendered pixels). Whole sweep: `shell/dev/gate.sh --tree --shots DIR
+- Targeted renders: `shell/dev/shot.sh OUTDIR 'REGEX' [SHELL_DIR] [WALLPAPER]` (scenes at the top of shots.mjs;
+  SHOTS_SCALE=2 for readable crops, SHOTS_PROBE='<js>' to print page state, SHOTS_GLASS=native|page). Output PNGs +
+  report.json (each text's contrast vs the rendered pixels). The phone's own wallpaper for renders:
+  `su -c cat /data/system/users/0/wallpaper_screenshot.png` when it isn't empty. Whole sweep: `shell/dev/gate.sh --tree --shots DIR
   --wallpaper FILE`. Contact sheet: shell/dev/sheet.mjs (/a before, /b after).
 - Headless isn't the device: verify layout on the phone over CDP (render the component offscreen in the live home
   WebView, read computed display/rects) - a drawer strip once passed headless and broke on the device.
 - Style lint (in the gate): raw colours, coloured borders, shadows outside tokens fail; exceptions in style-allow.txt.
 - Gate base = the installed APK's own shell + the phone's overrides + your files; READY_MS=15000 when the Mac is loaded.
-- Phone: dual display, screencap needs `-d 4630946316123810436` (cover); idle.sh --wait for a window; review images to
-  /home/powos/design-qa/ (chown 10359:10359) before each push.
+- Phone: dual display, screencap needs `-d 4630946316123810436` (cover); idle.sh --wait for a window; review images with
+  `tools/phone/review-image.sh FILE...` (-> /home/powos/design-qa/) before each push.
