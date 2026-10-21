@@ -207,7 +207,9 @@ const painted = (cs: CSSStyleDeclaration) =>
  *   (calibrated 2026-10-21 on the manager's review: the big tiles flagged as "a tiny 5° in a huge box" measured 8-15%,
  *   the folded ones approved as they were 27-44%);
  * - scroll: a scrolling container in a tile (a home tile can't take a scroll gesture from the page) - but a strip
- *   that scrolls sideways and says so (touch-action: pan-x: it took the gesture);
+ *   that scrolls sideways and says so (touch-action: pan-x: it took the gesture), or a list that scrolls up and down
+ *   in whole rows (pan-y, scroll-snap y);
+ * - a slider (a range, role=slider: a drag-to-dim pill) inside something that scrolls sideways;
  * - hard border: a drawn 1px+ line round content (the design language: no lines).
  */
 /** How much of each tile its content covered, %, by tile key: the last check()'s. */
@@ -255,6 +257,24 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
       const cs = getComputedStyle(e);
       return /(auto|scroll)/.test(cs.overflowX) && cs.touchAction.includes("pan-x");
     };
+    // A list that scrolls up and down on purpose: it takes the vertical gesture (pan-y) and snaps to whole rows.
+    const column = (e: Element) => {
+      const cs = getComputedStyle(e);
+      return /(auto|scroll)/.test(cs.overflowY) && cs.touchAction.includes("pan-y") && cs.scrollSnapType.startsWith("y");
+    };
+    const inColumn = (e: Element) => {
+      for (let a = e.parentElement; a && a !== face; a = a.parentElement) if (column(a)) return true;
+      return false;
+    };
+    // Something dragged sideways (a slider, a range, a drag-to-dim pill): never inside what scrolls sideways - the
+    // scroll would take its drag (Lights' strip of pills that couldn't be dimmed).
+    const sideways = (e: Element) => {
+      for (let a = e.parentElement; a && a !== face; a = a.parentElement) {
+        const cs = getComputedStyle(a);
+        if (/(auto|scroll)/.test(cs.overflowX) && a.scrollWidth > a.clientWidth + 1) return true;
+      }
+      return false;
+    };
     const inStrip = (e: Element) => {
       for (let a = e.parentElement; a && a !== face; a = a.parentElement) if (strip(a)) return true;
       return false;
@@ -285,14 +305,16 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
           for (const r of range.getClientRects()) {
             const v = visible(el, r, face);
             const shown = (v.w * v.h) / Math.max(1, r.width * r.height);
-            if (shown > 0.08 && shown < 0.92 && r.height > 4 && !inStrip(el)) cut.add(t.length > 28 ? t.slice(0, 27) + "…" : t);
+            if (shown > 0.08 && shown < 0.92 && r.height > 4 && !inStrip(el) && !inColumn(el)) cut.add(t.length > 28 ? t.slice(0, 27) + "…" : t);
             if (shown > 0.08) add(v);
           }
         }
       }
       const scrollsY = /(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1;
       const scrollsX = /(auto|scroll)/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1;
-      if (scrollsY || (scrollsX && !strip(el))) problems.push("scrolls (a tile can't)");
+      if ((scrollsY && !column(el)) || (scrollsX && !strip(el))) problems.push("scrolls (a tile can't)");
+      const drags = (el instanceof HTMLInputElement && el.type === "range") || el.getAttribute("role") === "slider";
+      if (drags && sideways(el)) problems.push("a slider in a sideways scroller (the scroll takes its drag)");
       const bw = Math.max(parseFloat(cs.borderTopWidth), parseFloat(cs.borderLeftWidth));
       if (bw >= 1 && cs.borderTopStyle !== "none" && !/rgba\(0, 0, 0, 0\)|transparent/.test(cs.borderTopColor)) problems.push("hard border");
     }

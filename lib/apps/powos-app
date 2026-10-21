@@ -35,6 +35,15 @@ Change one:
                                      connected (logic hot reload)
   powos app ui <dir>                 only the UI again (rebuilt first; a new dir, `current` flipped atomically): the
                                      shell hot-reloads it
+  powos app preview <dir|file.owl|widget-id> [--live] [--out D]
+                                     every widget of it at every size it allows (minSize to 4x4), on the phone's
+                                     cover and inner screens, in two themes, against mock data (shell/dev/preview/
+                                     data/<id>.json): one contact sheet per widget, and the fit checks (clipped text,
+                                     a row cut in half, a side >12% empty, content <25% of the tile, scrolling, a
+                                     slider in a sideways scroller, hard borders). Exit 1 on a problem, each with its
+                                     size. Runs shell/dev/preview.sh - where docker is (the Mac, a PowStation), from a
+                                     PowOS checkout (POWOS_PREVIEW=<its preview.sh> elsewhere). A widget id is an OWL
+                                     file's name (10-today), an app's widget (local.lights.main) or a panel (panel.agents).
   --note "..."                       on install/publish/ui: what changed, in plain words - the phone's quiet
                                      "update applied" notification (default: "<Name> app installed/updated")
   powos app list                     installed apps and widgets (from the registry)
@@ -879,6 +888,33 @@ def deployed(verb, d, note):
         pass
 
 
+def cmd_preview(a):
+    """powos app preview: shell/dev/preview.sh for one app's widgets, one OWL file, or a widget id."""
+    if not a:
+        die("usage: powos app preview <dir|file.owl|widget-id> [--live] [--out D]")
+    tool = os.environ.get("POWOS_PREVIEW") or os.path.join(LIB, "..", "..", "shell", "dev", "preview.sh")
+    if not os.path.isfile(tool):
+        die(f"no widget preview here ({tool}): it runs from a PowOS checkout where docker is - POWOS_PREVIEW=<preview.sh>")
+    if not shutil.which("docker"):
+        die("the widget preview needs docker (a headless Chromium and the OWL engine run in containers)")
+    what, rest = a[0], a[1:]
+    target = os.path.abspath(os.path.expanduser(what))
+    args = []
+    if os.path.isdir(target) and os.path.isfile(os.path.join(target, "powos-app.json")):
+        m, _ = manifest(target)
+        if not os.path.isdir(os.path.join(target, "out", "ui")):
+            cmd_build(target, ["--ui"])
+        args = ["--no-defaults", "--app", target, "--only", "^" + re.escape(m["id"]) + r"\."]
+        if "--out" not in rest:
+            args += ["--out", os.path.join(target, "out", "preview")]
+    elif target.endswith(".owl") and os.path.isfile(target):
+        name = os.path.basename(target)[: -len(".owl")]
+        args = ["--no-defaults", "--owl", target, "--only", "^" + re.escape(name) + "$"]
+    else:
+        args = ["--only", "^" + re.escape(what) + r"(\.|$)"]
+    os.execvp("bash", ["bash", tool, *args, *rest])
+
+
 def main(a):
     a, note = take_note(a)
     dispatch(a)
@@ -922,6 +958,8 @@ def dispatch(a):
         n = install_ui(a[1], m)
         register(text)
         log(f"{m['id']}: UI {m['version']} in place" + (f" ({n} files changed)" if n >= 0 else ""))
+    elif c == "preview":
+        cmd_preview(a[1:])
     elif c == "remove" and len(a) >= 2:
         cmd_remove(a[1], "--data" in a)
     elif c == "runtime":

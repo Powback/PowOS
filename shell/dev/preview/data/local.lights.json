@@ -8,7 +8,23 @@
 "name": "Hue Bridge"
 }
 ],
-"pref": []
+"pref": [
+{
+"rid": "room-0",
+"hidden": false,
+"order": 0
+},
+{
+"rid": "room-1",
+"hidden": true,
+"order": 1
+},
+{
+"rid": "room-2",
+"hidden": true,
+"order": 2
+}
+]
 },
 "net": [
 {
