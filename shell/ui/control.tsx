@@ -51,6 +51,9 @@ const LEAVES = new Set([
   "lockscreen",
 ]);
 
+/** Tiles that are only an action: nothing to open on a hold. */
+const NO_PAGE = new Set(["lockscreen", "screenshot"]);
+
 const RINGER = ["silent", "vibrate", "ring"];
 const RINGER_ICON: IconName[] = ["bellOffOutline", "vibrate", "bellRingOutline"];
 
@@ -106,8 +109,11 @@ function usePress(t: QuickTile) {
   const held = useRef(false);
   const open = () => {
     held.current = true;
+    // An action with no page of its own (Lock, Screenshot): a hold is nothing - the host has no page to open
+    // ("no quick setting lockscreen", 2026-10-21 home rejection).
+    if (NO_PAGE.has(t.id)) return;
     shut();
-    powos.qs.open(t.id);
+    powos.qs.open(t.id).catch((e) => console.warn("qs: no page for", t.id, e));
   };
   return {
     onPointerDown: () => {
