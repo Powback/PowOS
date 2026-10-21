@@ -26,6 +26,7 @@ the minimal change and tell them.
 | native bridge security: PowosHost/Native/Boot, ShellOrigin, iframes, bridge-check.sh | powos-bridge-security |
 | PowOS AI's chat: rich messages, present/present_choices, PowosAiChat items | powos-chat |
 | on-device verification (journeys, frame-stepping, idle CPU samples, Broforce), closing board items with evidence | powos-verify |
+| the desktop shell: powos-shell (Plasma host), hosts/desktop.ts, mode=desktop, dev/phone.sh | powos-desktop |
 | other shell (web UI) work no expert owns | powos-shell-dev |
 | other Android app (Kotlin) work no expert owns | powos-android-dev |
 
