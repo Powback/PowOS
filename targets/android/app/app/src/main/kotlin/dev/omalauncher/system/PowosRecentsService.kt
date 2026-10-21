@@ -13,6 +13,7 @@ import android.util.Log
 import android.view.Display
 import com.android.systemui.shared.recents.ILauncherProxy
 import com.android.systemui.shared.recents.ISystemUiProxy
+import dev.omalauncher.system.gesture.CornerPull
 import dev.omalauncher.system.gesture.EdgeGestures
 import dev.omalauncher.system.gesture.GestureMonitor
 import dev.omalauncher.system.gesture.NavGesture
@@ -31,6 +32,7 @@ import dev.omalauncher.system.gesture.RecentsTransition
  *   the bottom edge ([NavGesture]: home, the switcher, the previous app; the app's window following the finger through
  *   WM Shell's recents transition, [RecentsTransition]) and the shade's pull from the top ([ShadeHost.pull]). Back stays
  *   SystemUI's edge swipe, except on PowOS's edge handles ([EdgeGestures]: Good Lock-style edge swipes, Quick Tools).
+ *   Up from a bottom corner over an app: home's pull-up panels ([CornerPull], [PullHost]).
  */
 class PowosRecentsService : Service() {
     private val main = Handler(Looper.getMainLooper())
@@ -39,6 +41,7 @@ class PowosRecentsService : Service() {
     private var nav: NavGesture? = null
     private var edge: EdgeGestures? = null
     private var quickTools: QuickToolsHost? = null
+    private var pull: PullHost? = null
     private var gestureRetries = 0
 
     /** SystemUI's last state flags and nav bar region (they can come before the gesture input is up). */
@@ -85,6 +88,7 @@ class PowosRecentsService : Service() {
                     Switcher.prepare(this@PowosRecentsService)
                     if (shade == null) shade = ShadeHost(this@PowosRecentsService).takeIf { it.start() }
                     if (quickTools == null) quickTools = runCatching { QuickToolsHost(this@PowosRecentsService).takeIf { it.begin() } }.onFailure { Log.w(TAG, "no Quick Tools", it) }.getOrNull()
+                    if (pull == null) pull = runCatching { PullHost(this@PowosRecentsService).takeIf { it.begin() } }.onFailure { Log.w(TAG, "no pull-up panels over apps", it) }.getOrNull()
                     startGestures()
                     nav?.systemUi = sysui
                     edge?.systemUi = sysui
@@ -145,7 +149,8 @@ class PowosRecentsService : Service() {
                 it.systemUi = systemUi
                 edge = it
             }
-        val consumers = listOfNotNull(shade?.pull, n, e)
+        // The bottom corners' pull-up panels wrap gesture navigation's swipes (both start in the bar's strip).
+        val consumers = listOfNotNull(shade?.pull, CornerPull(this, n), e)
         gestures = GestureMonitor.start(this, Display.DEFAULT_DISPLAY, consumers)
         // The handles are drawn only where the gestures can be taken.
         if (gestures != null) e.start()
@@ -164,6 +169,8 @@ class PowosRecentsService : Service() {
         edge = null
         quickTools?.stop()
         quickTools = null
+        pull?.stop()
+        pull = null
         shade?.stop()
         shade = null
         systemUi = null
