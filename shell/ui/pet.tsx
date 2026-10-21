@@ -27,7 +27,8 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { carry, chat, chatting, closeDrawer, editing, menu, openPanel, page, pullPanels, stored } from "../state.ts";
 import { drawerOpen, notifOpen } from "./gesture.ts";
-import { dictate, hearing, speech, type MicTarget } from "./dictation.ts";
+// From bar.tsx, which re-exports ui/dictation.ts: the phone runs an older bar.tsx until the dictation rework ships.
+import { dictate, hearing, speech, type MicTarget } from "./bar.tsx";
 import { askQueued, openAssistant } from "./assistant.ts";
 import { agent, agentIds, asks, tasks, useAgents } from "../agents.ts";
 import { useDb, useRows } from "../apps/stdb.ts";
