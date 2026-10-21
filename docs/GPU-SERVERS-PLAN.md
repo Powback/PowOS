@@ -2,8 +2,8 @@
 
 PowOS now has real GPU servers on the LAN. This is how inference (voice, LLMs, everything AI) is laid out across
 them, how it's run and managed, and the order to build it in. Status: **phases 1-3 built on `.195` (2026-10-21), see
-[Status](#status-2026-10-21); phase 4 started: the GPU1 pool is live at `llm-gpu.pow`, the router (`llm.pow`) and
-`.58` are not done; phases 5-6 not started**.
+[Status](#status-2026-10-21); phase 4 mostly built: the GPU1 pool (`llm-gpu.pow`) and the router (`llm.pow`) are live, `.58`'s
+`coder-32b` is fixed in its repo but not deployed or loaded yet; phases 5-6 not started**.
 
 ## What we have
 
@@ -353,13 +353,50 @@ Noise: a 3090 under the pool's full load runs at 100%, ~300 W, with its fan near
     memory-bound, so it should cost only a few percent.
   - An NVML fan floor, which needs root and is riskier.
 
+**Router: `llm.pow`** (2026-10-21, phase 4). LiteLLM v1.106.2, pinned by digest. It runs as the PowStation compose
+service `llm-router` on Colima: `config/litellm/config.yaml` plus a `docker-compose.yaml` block, Traefik labels,
+the `local-only` allowlist, and a Pi-hole entry from pihole-sync. It needs no database, cache or volume, and its limits
+are 2g RAM, 2 CPUs and 512 pids.
+- Auth: newer LiteLLM refuses to start without a master key. The key is `LLM_ROUTER_MASTER_KEY` in PowStation's
+  `.env` (gitignored), and clients send it as `Authorization: Bearer <key>`. A request without it gets 401.
+- Model names:
+  - `voice-fast` goes to `.195:8100` (GPU0). The router lets at most 2 requests through at once, so other clients
+    can't crowd out live voice turns.
+  - `general`, `general-nothink`, `vision` and `embed` go to `.195:9292`.
+  - `coder-32b` goes to `.58:9292` (`qwen-32b-vllm`), with a fallback to `general`.
+  - `anthropic/*` and `claude-haiku|sonnet|opus` go to `claude-auth.pow`.
+  - `.58`'s `powos/*`, `powos-vllm/*` and `powos-anthropic/*` wildcards stay as before.
+- Carried over from local-llm-stack's old Mac-side LiteLLM (:4000, not running since 2026-08), each with its reason
+  in the config: no local -> Claude fallback, the `api.anthropic.com` blackhole, `thinking` dropped on the local
+  routes, and the Anthropic /v1/messages chat-completions path.
+- Verified: `/v1/models` lists every name; `claude-haiku` answers `pong` through `claude-auth.pow`; nothing reached
+  `api.anthropic.com`. The local models through the router are not checked yet, because a request would load one.
+
+**`.58` `coder-32b`** (local-llm-stack branch `gpu-plan-coder-32b`, `powos/run-vllm-32b.sh`; not deployed). The
+Qwen2.5-Coder-32B-AWQ fast path had never served a request:
+- its HF cache on `.58` is empty;
+- the comment inside the backslash continuation cut `--max-model-len 65536 --port 8000` off the command;
+- with no `--served-model-name`, llama-swap's `qwen-32b-vllm` would have got a 404;
+- 64k context doesn't fit in 0.78 of the 5090.
+
+The fix:
+- served names `qwen-32b-vllm` and `coder-32b`;
+- YaRN x2 through `--hf-overrides rope_parameters`, because the image has transformers 5;
+- an fp8 KV cache, 128 KB a token;
+- utilization 0.92 and 8 sequences, which should leave about 8 GiB, about 65k tokens of KV;
+- hermes tool calls;
+- a VRAM gate of 30000 MiB.
+
+Checked with a stub podman: every argument reaches vLLM. Loading the model is the next check.
+
 **Left for later:**
 - The public `voiceagent.powback.com`. `/ws` has no auth of its own on the upgrade, so it can't take the Authelia
   WebSocket bypass, and behind forwardAuth it hangs. Decide this with the phase 5 clients.
-- Phase 4 still to do:
+- Phase 4 still to do (each needs a model load, which waits for the user's go-ahead because of fan noise):
   - Load and measure `vision` and `embed` (configured; the load test stopped before them).
-  - The router: LiteLLM as `llm.pow` on Colima, with `general`/`vision`/`embed` mapped to `llm-gpu.pow`, `voice-fast`
-    to `.195:8100` and `coder-32b` to `.58`. VoiceAgent's `litellm` provider is configured, but nothing answers yet.
-  - `.58`: the `run-vllm-32b.sh` continuation bug, and `coder-32b` behind its llama-swap, with a fallback to
-    `general` when `.58` is off.
+  - Check `general`/`coder-32b` end to end through `llm.pow`, and the `coder-32b` -> `general` fallback.
+  - Deploy `.58`'s fixed script (branch `gpu-plan-coder-32b`) and download the model first (~19 GB; llama-swap's
+    600 s health timeout would cut a first-start download short), then one load to confirm 64k fits.
+  - Point VoiceAgent's `litellm` provider at `http://llm.pow` with the router key, if it should use it.
+  - `.58`'s llama-swap (a `systemd --user` service from local-llm-stack) has no PowOS unit yet.
 - Phases 5-6.
