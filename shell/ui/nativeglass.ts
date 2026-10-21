@@ -125,6 +125,9 @@ function reshape() {
   for (const el of document.querySelectorAll<HTMLElement>(SURFACES)) {
     // A surface inside another: a soft fill on that one's glass (theme.css), none of its own.
     if (el.parentElement?.closest(SURFACES)) continue;
+    // In the launcher (the pull-up AI panel's cards): soft fills on the launcher frame's glass, under a clip-path that
+    // cuts them away mid-swipe - a region of their own blurred blobs above the rising frame.
+    if (el.closest(".launcher")) continue;
     next.set(el, shapeOf(el));
   }
   shapes = next;
