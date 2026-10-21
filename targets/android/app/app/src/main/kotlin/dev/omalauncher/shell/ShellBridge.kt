@@ -123,7 +123,7 @@ class ShellBridge(
         }
 
     /** The wallpaper's picture another one (ShellWallpaper): the page frosts it again. */
-    private val wallpaperChanged: () -> Unit = { emit("system.glass", ShellWallpaper.info(context, blurBehind = shade != null || overlay != null)) }
+    private val wallpaperChanged: () -> Unit = { emit("system.glass", ShellWallpaper.info(context, blurBehind = shade != null || overlay != null, look = false)) }
 
     /** Android's wallpaper changed (its colors are recomputed for every change), or the theme's background did. */
     private val wallpaperColors = android.app.WallpaperManager.OnColorsChangedListener { _, _ -> ShellWallpaper.refresh(context) }

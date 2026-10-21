@@ -51,14 +51,23 @@ internal object ShellWallpaper {
     /** Told (on the main thread) when the picture is another one: the bridges emit "system.glass". */
     val onChange = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
 
-    /** What the page gets (system.glass): the picture's URL and revision (null until there is one), and [blurBehind]. */
+    /**
+     * What the page gets (system.glass): the picture's URL and revision (null until there is one), and [blurBehind].
+     * [look]: the page asked (it loaded, or folded) - the wallpaper is looked at again. Not when the answer is the
+     * announcement of a new picture ([onChange]): looking again there found a live (video) wallpaper's next frame, a
+     * new picture, announced again - a loop, several compositor captures a second in every page, for as long as the
+     * wallpaper played (seen 2026-10-21: 339 pictures in the log's few minutes).
+     */
     fun info(
         context: Context,
         blurBehind: Boolean,
+        look: Boolean = true,
     ): JSONObject {
-        refresh(context)
-        // A live wallpaper (a fold just asked again): looked at once more when its playing is over.
-        if (cached?.source == "live") refresh(context, LIVE_SETTLE_MS)
+        if (look) {
+            refresh(context)
+            // A live wallpaper (a fold just asked again): looked at once more when its playing is over.
+            if (cached?.source == "live") refresh(context, LIVE_SETTLE_MS)
+        }
         val p = cached
         val wp = p?.let { JSONObject().put("url", "/_wallpaper?v=${Uri.encode(it.rev)}").put("rev", it.rev).put("source", it.source) }
         return JSONObject().put("wallpaper", wp ?: JSONObject.NULL).put("blurBehind", blurBehind)
