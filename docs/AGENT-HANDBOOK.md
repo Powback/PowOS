@@ -82,10 +82,8 @@ the minimal change and tell them.
   by design. Recognise it: right after an install your change is gone on the phone -> check it is on origin, then
   push it again from the tip.
 - Kotlin: compile before you push it to origin - a committed but uncompiled Kotlin change on the tip fails EVERY
-  agent's next ship. `docker run --rm -v $HOME/Projects:/Projects -v android-app-dev_gradle-cache:/root/.gradle -e
-  ANDROID_SDK_ROOT=/opt/android-sdk -w /Projects/PowOS/<your worktree>/targets/android/app --entrypoint bash
-  android-app-dev-android-builder:latest -c './gradlew :app:compileDebugKotlin --no-daemon -q'` (needs
-  local.properties sdk.dir=/opt/android-sdk). Found someone else's broken tip? Tell its author/the coordinator with
+  agent's next ship: `tools/phone/compile-check.sh` (your worktree, a throwaway builder; never touches the shared APK
+  output, safe while a ship runs; prints the compiler's errors, exit 0 = compiles). Found someone else's broken tip? Tell its author/the coordinator with
   the compiler error; don't ship around it.
 ### PowOS (Linux) side
 - lib/ai (manager, comms): `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note "..."`
