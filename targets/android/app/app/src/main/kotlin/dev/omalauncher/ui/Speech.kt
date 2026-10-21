@@ -374,16 +374,63 @@ internal object NativeSpeech {
         Log.i(TAG, "on-device installed ${onDev?.installedOnDeviceLanguages}; regular installed ${reg?.installedOnDeviceLanguages}, online ${reg?.onlineLanguages?.size}")
         onDev?.let { closest(listOf(it.installedOnDeviceLanguages)) }?.let { return Plan(Kind.ON_DEVICE, it, true) }
         reg?.let { closest(listOf(it.installedOnDeviceLanguages)) }?.let { return Plan(Kind.REGULAR, it, true) }
-        // No offline model: ask for one once (it downloads in the background), and recognize online meanwhile.
-        val downloadable = reg?.let { closest(listOf(it.pendingOnDeviceLanguages, it.supportedOnDeviceLanguages)) }
-        if (downloadable != null && !downloadAsked) {
+        // No offline model (or a recognizer that can't say - Speech Services by Google answers the support check with
+        // ERROR_CANNOT_CHECK_SUPPORT): ask both recognizers once for the language's model; it downloads in the
+        // background. Offline is faster to start and works without a network.
+        val language = reg?.let { closest(listOf(it.pendingOnDeviceLanguages, it.supportedOnDeviceLanguages, it.onlineLanguages)) } ?: fallbackLanguage()
+        if (!downloadAsked) {
             downloadAsked = true
-            Log.i(TAG, "asking for the offline speech model $downloadable")
-            runCatching { recognizer(c, Kind.REGULAR).triggerModelDownload(intent(Plan(Kind.REGULAR, downloadable, true))) }
-                .onFailure { Log.w(TAG, "model download", it) }
+            download(c, Kind.REGULAR, language)
+            onDev?.let { closest(listOf(it.pendingOnDeviceLanguages, it.supportedOnDeviceLanguages)) }?.let { download(c, Kind.ON_DEVICE, it) }
         }
+        // A recognizer that can't say what it has: try its offline model (a missing one fails at once, ~50 ms, and
+        // online takes over - LANGUAGE_UNAVAILABLE below), unless that failed lately.
+        val guessOffline = reg == null && System.currentTimeMillis() > offlineMissingUntil
         val online = reg?.let { closest(listOf(it.onlineLanguages)) }
-        return Plan(Kind.REGULAR, online ?: downloadable ?: fallbackLanguage(), false)
+        return Plan(Kind.REGULAR, online ?: language, guessOffline)
+    }
+
+    /** Until when the regular recognizer's offline model is known to be missing (a failed offline try). */
+    private var offlineMissingUntil = 0L
+
+    /** Asks [kind]'s recognizer to download its model for [language]; when it's there, the plan is worked out again. */
+    private fun download(
+        c: Context,
+        kind: Kind,
+        language: String,
+    ) {
+        Log.i(TAG, "asking $kind for the offline speech model $language")
+        val i = intent(Plan(kind, language, true))
+        runCatching {
+            val r = recognizer(c, kind)
+            if (Build.VERSION.SDK_INT >= 34) {
+                r.triggerModelDownload(
+                    i,
+                    c.mainExecutor,
+                    object : android.speech.ModelDownloadListener {
+                        override fun onProgress(completedPercent: Int) {
+                            if (completedPercent % 25 == 0) Log.i(TAG, "$kind model $language: $completedPercent%")
+                        }
+
+                        override fun onSuccess() {
+                            Log.i(TAG, "$kind model $language downloaded")
+                            offlineMissingUntil = 0
+                            plan = null
+                        }
+
+                        override fun onScheduled() {
+                            Log.i(TAG, "$kind model $language: download scheduled")
+                        }
+
+                        override fun onError(error: Int) {
+                            Log.i(TAG, "$kind model $language: download failed ($error)")
+                        }
+                    },
+                )
+            } else {
+                r.triggerModelDownload(i)
+            }
+        }.onFailure { Log.w(TAG, "model download ($kind)", it) }
     }
 
     /**
@@ -600,6 +647,7 @@ internal object NativeSpeech {
                                 p.language != null -> Plan(Kind.REGULAR, null, false)
                                 else -> null
                             }
+                        if (p.kind == Kind.REGULAR && p.offline) offlineMissingUntil = System.currentTimeMillis() + 30 * 60_000L
                         if (next == null) {
                             plan = null
                             end("no speech model for ${Locale.getDefault().toLanguageTag()} on this phone (check Settings > speech recognition)")
