@@ -984,6 +984,7 @@ function PetLayer() {
         type="button"
         ref={el}
         class={`pet ${phys ? "phys" : ""} ${hidden ? "away" : ""} ${face ? "face" : ""} ${perched ? "perched" : ""}`}
+        data-glass-ignore=""
         data-state={s}
         data-night={night(clock.value) ? "" : undefined}
         aria-label={`${name.value}: ${s} - tap to talk, hold for PowOS AI's page`}

@@ -282,10 +282,17 @@ const content = (n: Node) => {
   const s = e?.closest(SURFACES);
   return !!s && s !== e;
 };
+/**
+ * An overlay that holds no glass and moves none (data-glass-ignore: the pet, fixed over home and drawn by a transform
+ * every frame while it moves). 2026-10-21: each of its frames set off a glass measure here - one rAF of ours per pet
+ * frame, and its class changes (perched, dragging) re-read every surface's shape: the UI lagged whenever it moved.
+ */
+const ignored = (n: Node) => !!(n instanceof Element ? n : n.parentElement)?.closest("[data-glass-ignore]");
 new MutationObserver((records) => {
   if (!nativeGlass.value) return;
   let moved = false;
   for (const r of records) {
+    if (r.type === "attributes" && ignored(r.target)) continue;
     if (r.type === "childList" ? holds(r.addedNodes) || holds(r.removedNodes) : !content(r.target) && (r.attributeName === "class" || (r.target as Element).matches(SURFACES))) return changed();
     if (!content(r.target)) moved = true;
   }

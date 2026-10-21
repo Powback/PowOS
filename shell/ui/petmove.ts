@@ -147,6 +147,9 @@ export class Mover {
   /** Something may have moved under it (a layout change): measured again, stepped until it's at rest. */
   wake() {
     this.calm = 0;
+    // The rects are measured for a moment after something may have moved them (a layout change, a page settling),
+    // then the world is the cached one: no layout reads in the frames of a move.
+    this.measureUntil = performance.now() + 450;
     this.floorTried = false;
     if (this.raf || document.hidden || this.paused) return;
     this.last = 0;
@@ -172,6 +175,7 @@ export class Mover {
   private paused = false;
   private floorTried = false;
   private driverStarted = 0;
+  private measureUntil = 0;
   private lastX = 0;
   private lastY = 0;
   private stillFrames = 0;
@@ -189,7 +193,7 @@ export class Mover {
     const dt = this.last ? Math.min(2 * DT, (now - this.last) / 1000) : DT;
     this.last = now;
     this.acc += dt;
-    this.world = measure();
+    if (now < this.measureUntil) this.world = measure();
     while (this.acc >= DT) {
       this.acc -= DT;
       this.prev = { x: this.p.x, y: this.p.y, s: this.p.s };

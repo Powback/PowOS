@@ -98,6 +98,28 @@ const idle = async (label) => {
   return b - a;
 };
 const report = { idle: [], moves: [], errors };
+// PET_PERF=1: native glass on (as the phone), then one climb measured - main-thread work and who asks for frames.
+if (process.env.PET_PERF) {
+  await page.evaluate(async () => ((await window.importShim("./ui/nativeglass.ts")).nativeGlass.value = true));
+  await sleep(1500);
+  const cdp = await page.createCDPSession();
+  await cdp.send("Performance.enable");
+  const met = async () => Object.fromEntries((await cdp.send("Performance.getMetrics")).metrics.map((m) => [m.name, m.value]));
+  for (const key of ["t-a", "bar"]) {
+    await page.evaluate(() => ((window.__rafLog = true), (window.__rafWho = []), (window.__raf0 = window.__raf)));
+    const m0 = await met();
+    await page.evaluate((k) => window.__pet.go(k, 0.5), key);
+    await sleep(3000);
+    const m1 = await met();
+    const who = await page.evaluate(() => ((window.__rafLog = false), { n: window.__raf - window.__raf0, who: window.__rafWho }));
+    const by = {};
+    for (const w of who.who) { const f = (/(\w+)\.tsx?:\d+/.exec(w) || ["", "other"])[1]; by[f] = (by[f] || 0) + 1; }
+    const d = (k) => +(m1[k] - m0[k]).toFixed(3);
+    console.log("perf", key, JSON.stringify({ rafs: who.n, rafBy: by, taskSec: d("TaskDuration"), layoutSec: d("LayoutDuration"), styleSec: d("RecalcStyleDuration"), scriptSec: d("ScriptDuration"), layouts: d("LayoutCount"), styles: d("RecalcStyleCount") }));
+  }
+  await browser.close();
+  process.exit(0);
+}
 report.idle.push(await idle("after boot"));
 const edges = await page.evaluate(() => window.__pet.edges().filter((e) => !e.owner).map((e) => ({ key: e.key, left: e.left, right: e.right, top: e.top })));
 console.log("edges:", edges.map((e) => `${e.key}@${Math.round(e.left)},${Math.round(e.top)}`).join(" "));

@@ -24,7 +24,7 @@
 @media (min-width: 600px) { .pet { --pet-size: 72px; } }
 .pet.falling { transition: opacity 200ms ease; }
 /* Physics on (pet.tsx, petmove.ts): its place is one transform the simulation writes - no left/top, no glide. */
-.pet.phys { left: 0; top: 0; transition: opacity 200ms ease; }
+.pet.phys { left: 0; top: 0; transition: opacity 200ms ease; will-change: transform; }
 .pet.away { opacity: 0; pointer-events: none; }
 /* The chat's face: on the search pill's top edge while it's in chat mode (pet.tsx places it; its perch is kept). */
 .pet.dragging { transition: none; }
