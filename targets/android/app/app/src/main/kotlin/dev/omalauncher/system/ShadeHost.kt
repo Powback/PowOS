@@ -374,7 +374,7 @@ class ShadeHost(
     private fun armOpen() {
         val web = host?.web ?: return
         dev.omalauncher.shell.PageWatchdog.probeShown(web) { alive, why ->
-            if (!shown) return@probe
+            if (!shown) return@probeShown
             if (alive) {
                 setFlags(touchable = true, focusable = true, height = ViewGroup.LayoutParams.MATCH_PARENT)
             } else {

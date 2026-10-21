@@ -131,7 +131,7 @@ abstract class OverlayHost(
         val web = host?.web ?: return
         root?.removeCallbacks(shutGone)
         PageWatchdog.probeShown(web) { alive, why ->
-            if (!shown) return@probe
+            if (!shown) return@probeShown
             if (alive) {
                 open = true
                 setFlags(touchable = true, focusable = true)
