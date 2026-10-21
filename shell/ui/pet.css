@@ -118,9 +118,10 @@
 }
 .pet-bubble.above::after { bottom: -4px; }
 .pet-bubble.below::after { top: -4px; }
-.pet-bubble.right::after { right: calc(var(--pet-size, 64px) / 2 - 5px); }
-.pet-bubble.left::after { left: calc(var(--pet-size, 64px) / 2 - 5px); }
+.pet-bubble::after { left: var(--tail, 24px); }
 .pet-bubble.open::after { display: none; }
+/* Far from the pet (no free place next to it): no tail. */
+.pet-bubble.far::after { display: none; }
 .pet-bubble.open { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; }
 .pet-short { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pet-from { font-size: var(--text-small); }
@@ -138,4 +139,6 @@
 .ai-history-list { max-height: none; overflow: visible; padding: 0; }
 .pet-talk .pet-asked { font-size: var(--text-small); }
 .pet-talk .pet-reply { -webkit-line-clamp: 4; }
-@media (min-width: 600px) { .pet-bubble { --pet-size: 72px; } }
+/* Standing ON a tile's edge: a small, firmer contact shadow on it. */
+.pet-shadow { transform-box: fill-box; transform-origin: center; }
+.pet.perched .pet-shadow { transform: scale(0.72, 0.8); fill: color-mix(in srgb, var(--color-background) 70%, transparent); }

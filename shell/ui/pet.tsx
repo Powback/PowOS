@@ -479,22 +479,63 @@ function nextNightEdge(t: number) {
 
 // ---- the creature ---------------------------------------------------------------------------------------------------
 
+/** The text the bubble will show, for sizing its place (roughly: the last line, or what's heard / the reply). */
+function bubbleText() {
+  const t = talk.value;
+  if (t) return `${t.asked ?? ""} ${reply.value ?? ""}`.trim() || "listening…";
+  return bubble.value?.lines.at(-1)?.text ?? "";
+}
+
+/**
+ * Where the bubble goes: beside the pet - above it, else below, on the side with room - in the nearest place that
+ * covers no home tile (widget content stays readable); flipped at the screen's edges. Its size is estimated from the
+ * text (14 px, 300 px wide at most, 3 lines shown).
+ */
+function bubbleSpot(at: { left: number; top: number }, text: string) {
+  const s = size();
+  const w = Math.min(300, innerWidth - 32, 28 + text.length * 8);
+  const lines = Math.min(3, Math.max(1, Math.ceil((text.length * 8) / Math.max(1, w - 28))));
+  const h = 22 + lines * 20;
+  const tiles = [...document.querySelectorAll<HTMLElement>(".page:not(.away) .home-tile, .bar")].map((e) => e.getBoundingClientRect());
+  const hits = (x: number, y: number) => tiles.some((r) => x < r.right && x + w > r.left && y < r.bottom && y + h > r.top);
+  const fits = (x: number, y: number) => x >= MARGIN && x + w <= innerWidth - MARGIN && y >= MARGIN + 30 && y + h <= innerHeight - MARGIN;
+  const cands: { x: number; y: number; right: boolean; below: boolean }[] = [];
+  for (const below of [false, true])
+    for (const right of [at.left + s / 2 > innerWidth / 2, at.left + s / 2 <= innerWidth / 2]) {
+      const x = right ? at.left + s - w : at.left;
+      const y = below ? at.top + s + 6 : at.top - h - 6;
+      cands.push({ x: Math.min(innerWidth - MARGIN - w, Math.max(MARGIN, x)), y, right, below });
+    }
+  // Beside it, at its height.
+  for (const right of [false, true]) {
+    const x = right ? at.left - w - 6 : at.left + s + 6;
+    cands.push({ x, y: at.top + s / 2 - h / 2, right, below: false });
+  }
+  // Still nothing free: the nearest free band of the screen, straight down or up from it.
+  for (let d = 12; d < innerHeight; d += 12)
+    for (const y of [at.top + s + 6 + d, at.top - h - 6 - d]) {
+      const x = Math.min(innerWidth - MARGIN - w, Math.max(MARGIN, at.left + s / 2 - w / 2));
+      cands.push({ x, y, right: false, below: y > at.top });
+    }
+  const pick = cands.find((c) => fits(c.x, c.y) && !hits(c.x, c.y)) ?? cands.find((c) => fits(c.x, c.y)) ?? cands[0];
+  // The tail under/over the pet's middle, wherever the bubble ended up.
+  const tail = Math.min(w - 18, Math.max(8, at.left + s / 2 - pick.x - 5));
+  const style: Record<string, string> = { left: `${pick.x}px`, top: `${pick.y}px`, "--tail": `${tail}px` };
+  const far = pick.y > at.top + s + 30 || pick.y + h < at.top - 30;
+  return { right: pick.right, below: pick.below, style, far };
+}
+
 function Bubble({ at }: { at: { left: number; top: number } }) {
   const b = bubble.value;
   if (!b && !talk.value) return null;
-  const right = at.left + size() / 2 > innerWidth / 2;
-  const below = at.top < 140;
-  const style: Record<string, string> = {
-    [right ? "right" : "left"]: `${Math.max(MARGIN, right ? innerWidth - at.left - size() : at.left)}px`,
-    [below ? "top" : "bottom"]: below ? `${at.top + size() + 6}px` : `${innerHeight - at.top + 6}px`,
-  };
-  if (talk.value) return <TalkBubble style={style} cls={`${right ? "right" : "left"} ${below ? "below" : "above"}`} />;
+  const { right, below, style, far } = bubbleSpot(at, bubbleText());
+  if (talk.value) return <TalkBubble style={style} cls={`${right ? "right" : "left"} ${below ? "below" : "above"} ${far ? "far" : ""}`} />;
   if (!b) return null;
   const lines = b.lines;
   const last = lines.at(-1);
   return (
     <div
-      class={`pet-bubble tile ${b.open ? "open" : ""} ${right ? "right" : "left"} ${below ? "below" : "above"}`}
+      class={`pet-bubble tile ${b.open ? "open" : ""} ${right ? "right" : "left"} ${below ? "below" : "above"} ${far ? "far" : ""}`}
       style={style}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => {
@@ -589,6 +630,57 @@ function PetLayer() {
       removeEventListener("resize", resize);
     };
   }, []);
+  // A bubble goes at the first touch somewhere else (it said its line; the user is doing something).
+  const hasBubble = !!bubble.value || !!talk.value?.done;
+  useEffect(() => {
+    if (!hasBubble) return;
+    const away = (e: PointerEvent) => {
+      if ((e.target as Element | null)?.closest?.(".pet, .pet-bubble")) return;
+      bubble.value = null;
+      if (talk.peek()?.done) talk.value = null;
+    };
+    addEventListener("pointerdown", away, { capture: true, passive: true });
+    return () => removeEventListener("pointerdown", away, { capture: true });
+  }, [hasBubble]);
+  // Now and then (every few minutes, screen on, home untouched a while, nothing to say) it hops to a neighbouring
+  // edge by itself - one timer between hops, the hop itself one short compositor animation.
+  useEffect(() => {
+    if (!shown) return;
+    let t = 0;
+    const next = () => (t = window.setTimeout(hop, 180_000 + Math.random() * 240_000));
+    const hop = () => {
+      next();
+      const node = el.current;
+      const cur = perch();
+      if (!node || !cur || bubble.peek() || talk.peek() || state.peek() !== "idle" || Date.now() - touched.peek() < 60_000) return;
+      const sz = size();
+      const list = edges();
+      const from = perchWhere(cur, sz, list);
+      if (!from) return;
+      // The nearest other edge (by where it'd stand), a random spot along it.
+      const others = list.filter((e) => e.key !== cur.key).map((e) => ({ e, at: placeOn(e, 0.2 + Math.random() * 0.6, sz) }));
+      const to = others.sort((a, b) => Math.hypot(a.at.left - from.left, a.at.top - from.top) - Math.hypot(b.at.left - from.left, b.at.top - from.top))[0];
+      if (!to) return;
+      const dx = to.at.left - from.left;
+      const dy = to.at.top - from.top;
+      const up = Math.min(from.top, to.at.top) - from.top - 36;
+      body.current?.stretch(0.5);
+      node.classList.add("falling");
+      const a = node.animate(
+        [{ transform: "none" }, { transform: `translate(${dx / 2}px, ${up}px)`, offset: 0.45 }, { transform: `translate(${dx}px, ${dy}px)` }],
+        { duration: 560 + Math.min(400, Math.hypot(dx, dy)), easing: "cubic-bezier(0.35, 0, 0.45, 1)" },
+      );
+      a.onfinish = () => {
+        node.style.left = `${to.at.left}px`;
+        node.style.top = `${to.at.top}px`;
+        node.classList.remove("falling");
+        perchStored.value = JSON.stringify({ key: to.e.key, fx: (to.at.left + sz / 2 - to.e.left) / Math.max(1, to.e.right - to.e.left) });
+        body.current?.squash(0.55);
+      };
+    };
+    next();
+    return () => clearTimeout(t);
+  }, [shown]);
   // Alive at rest: a blink every 6-10 s (one short compositor animation; no timer while hidden or asleep).
   useEffect(() => {
     if (!shown) return;
@@ -625,6 +717,7 @@ function PetLayer() {
   const pill = face ? document.querySelector<HTMLElement>(".bar .bar-pill, .bar")?.getBoundingClientRect() : null;
   const list = face ? [] : edges();
   const mine = perch();
+  const perched = !face && !!perchWhere(mine, sz, list);
   const at =
     (pill && placeOn({ key: "pill", left: pill.left, right: pill.right, top: pill.top }, 0.88, sz)) ||
     perchWhere(mine, sz, list) ||
@@ -638,7 +731,7 @@ function PetLayer() {
       <button
         type="button"
         ref={el}
-        class={`pet ${hidden ? "away" : ""} ${face ? "face" : ""}`}
+        class={`pet ${hidden ? "away" : ""} ${face ? "face" : ""} ${perched ? "perched" : ""}`}
         data-state={s}
         aria-label={`${name.value}: ${s} - tap to talk, hold for PowOS AI's page`}
         style={{ left: `${at.left}px`, top: `${at.top}px` }}
