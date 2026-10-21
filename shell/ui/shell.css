@@ -987,6 +987,9 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   flex-direction: column;
   gap: 14px;
 }
+/* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
+.ai-board { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
+html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-heading { margin: 0 0 6px 2px; font-size: var(--text-small); font-weight: normal; }
 .ai-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .ai-asked { font-weight: bold; }

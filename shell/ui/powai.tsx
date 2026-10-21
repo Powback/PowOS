@@ -413,15 +413,18 @@ export function AiContent({ shown }: { shown: boolean }) {
     <>
       <Now />
       <History />
-      <Work shown={shown} />
-      <Units shown={shown} />
-      <button type="button" class="ai-session tile" onClick={() => openAgents()}>
-        <span class="ai-dot" />
-        <span class="ai-session-main">
-          <span class="ai-session-task">Agents</span>
-          <span class="ai-session-meta muted">what every agent is on: tree, tasks, tools, comms</span>
-        </span>
-      </button>
+      {/* The board: work in progress, what's installed and running, the agents - one surface, its parts by spacing. */}
+      <section class="ai-board tile">
+        <Work shown={shown} />
+        <Units shown={shown} />
+        <button type="button" class="ai-session tile" onClick={() => openAgents()}>
+          <span class="ai-dot" />
+          <span class="ai-session-main">
+            <span class="ai-session-task">Agents</span>
+            <span class="ai-session-meta muted">what every agent is on: tree, tasks, tools, comms</span>
+          </span>
+        </button>
+      </section>
       <AtWork />
       <FromAgents />
     </>
