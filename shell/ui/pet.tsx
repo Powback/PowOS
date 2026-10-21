@@ -76,8 +76,8 @@ const pos = () => {
     return { x: 1, y: 0.68 };
   }
 };
-/** Its perch (petperch.ts): a tile's top edge, or the search pill's - kept. "" = none yet (it floats at [where]). */
-const perchStored = stored("pet.perch", "");
+/** Its perch (petperch.ts): a tile's top edge, or the search pill's - kept; at first, the pill's right end. */
+const perchStored = stored("pet.perch", JSON.stringify({ key: "bar", fx: 0.85 }));
 const perch = (): Perch | null => {
   try {
     const p = JSON.parse(perchStored.value || "null");
