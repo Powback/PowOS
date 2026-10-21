@@ -88,6 +88,9 @@ widget "koi pond" {
     let feeding = fed < 25
 
     clip(0, 0, width, height) {
+      // The water: the whole tile a faint pool of the theme's blue, deeper towards the bottom - the pond is the tile,
+      // not two fish on the glass.
+      rect(0, 0, width, height, fill: linear(0, 0, 0, height, [alpha(mix(blue, cyan, 0.4), 0.14), alpha(mix(blue, background, 0.3), 0.30)]))
       // Food: a pixel ring where it landed, and pellets the koi nibble away.
       if fed < 2.5 {
         for q in range(20) {

@@ -1110,7 +1110,13 @@ function mockTranscript(kind: string) {
     `${p("~/Projects/powos")}journalctl --user -n 40 --no-pager`,
     ...Array.from({ length: 40 }, (_, i) => {
       const t = `Oct 21 23:${String(10 + Math.floor(i / 2)).padStart(2, "0")}:${String((i * 17) % 60).padStart(2, "0")}`;
-      const what = ["powos-agentsd[812]: spool: 3 agents, 1 working", "pipewire[1204]: client 51 connected", "kwin_wayland[901]: output DSI-1 mode 2440x2268@120", "powos-shell[1330]: home: 0 frames at rest"][i % 4];
+      const what = [
+        "powos-agentsd[812]: spool: 3 agents, 1 working",
+        "pipewire[1204]: client 51 connected",
+        "kwin_wayland[901]: output DSI-1 mode 2440x2268@120, scale 2.75, adaptive sync on, the cover display DSI-0 asleep",
+        "powos-shell[1330]: home: 0 frames at rest",
+        "systemd[1]: Started powos-apps-cargo.service - the app builder's cache volume, mounted for 2 builds of local.lights and local.shopping",
+      ][i % 5];
       return `${t} cph2551 ${what}`;
     }),
     p("~/Projects/powos"),
