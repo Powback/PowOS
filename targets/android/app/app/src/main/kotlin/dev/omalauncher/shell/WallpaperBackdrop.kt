@@ -1,7 +1,6 @@
 package dev.omalauncher.shell
 
 import android.graphics.Bitmap
-import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -23,8 +22,8 @@ import dev.omalauncher.system.HiddenApi
  * OxygenOS's video wallpapers play), when the screen changes; [burst] captures at up to [FPS] for a while then stops.
  * While home is still, or while only the page's surfaces move over an unchanged wallpaper, nothing is captured.
  *
- * HACK: IWindowManager.mirrorWallpaperSurface and ScreenCapture.captureLayers are hidden (the system UI's calls; the
- * permission they check, READ_FRAME_BUFFER, PowOS holds legitimately), reflected past the checks ([HiddenApi]). Real
+ * HACK: IWindowManager.mirrorWallpaperSurface / captureDisplay and ScreenCapture.captureLayers are hidden (the system
+ * UI's calls; the permission they check, READ_FRAME_BUFFER, PowOS holds legitimately), reflected ([HiddenApi]). Real
  * fix: a public wallpaper-backdrop API (none: apps can't sample what's behind their window), or the frames handed over
  * by PowOS's system module (a platform-signed hook) through a HardwareBuffer.
  */
@@ -32,6 +31,8 @@ import dev.omalauncher.system.HiddenApi
 internal class WallpaperBackdrop(
     /** The display home is on. */
     private val display: () -> Int,
+    /** Home's window surface: left out of a display capture. */
+    private val window: () -> SurfaceControl?,
     /** A new frame (main thread): the wallpaper at [SHARP] and [SOFT] of its size. */
     private val frame: (sharp: Bitmap, soft: Bitmap) -> Unit,
     /** It can't (no permission, no such call, nothing comes back): the liquid glass goes. */
@@ -74,49 +75,120 @@ internal class WallpaperBackdrop(
             }
         }
 
+    /**
+     * How it's captured. MIRROR: the wallpaper's own surface, mirrored (exactly the wallpaper). DISPLAY: the display
+     * without home's window (the window manager's captureDisplay, our window excluded) - the wallpaper, and the
+     * system bars over it - where the mirror can't be captured (an offscreen layer: on OxygenOS 16 captureLayers
+     * returned nothing for it). Picked once: the first that gives a frame.
+     */
+    private enum class Way { MIRROR, DISPLAY }
+
+    private var way = Way.MIRROR
+
     /** On the worker. */
     private fun capture() {
         try {
             val m = methods ?: error("no capture calls")
             val id = display()
-            val mir =
-                mirror?.takeIf { mirrorDisplay == id && it.isValid } ?: run {
-                    mirror?.release()
-                    (m.mirror.invoke(m.wm, id) as SurfaceControl?).also {
-                        mirror = it
-                        mirrorDisplay = id
-                    } ?: error("no wallpaper surface to mirror on display $id")
-                }
-            val sharp = shot(m, mir, SHARP) ?: return again(mir, "no frame")
-            val soft = shot(m, mir, SOFT) ?: return again(mir, "no soft frame")
+            val sharp = shot(m, id, SHARP) ?: return
+            val soft = shot(m, id, SOFT) ?: return
             if (!logged) {
                 logged = true
-                Log.i(TAG, "live wallpaper backdrop: ${sharp.width}x${sharp.height} (+${soft.width}x${soft.height}), display $id")
+                Log.i(TAG, "live wallpaper backdrop ($way): ${sharp.width}x${sharp.height} (+${soft.width}x${soft.height}), display $id")
             }
             main.post { frame(sharp, soft) }
         } catch (e: Throwable) {
-            Log.w(TAG, "no live wallpaper backdrop: the liquid glass goes", e)
-            dead = true
-            main.post(failed)
+            give(e.toString(), e)
         }
     }
 
-    /** Nothing came back: the mirror is likely stale (another wallpaper) - a new one next time. */
-    private fun again(
-        mir: SurfaceControl,
+    private fun give(
         why: String,
+        e: Throwable? = null,
     ) {
-        Log.w(TAG, "$why: mirroring the wallpaper again")
-        mir.release()
-        mirror = null
+        Log.w(TAG, "no live wallpaper backdrop ($why): the liquid glass goes", e)
+        dead = true
+        until = 0
+        main.post(failed)
     }
 
+    /** One frame at [scale], the way that works ([way]; the mirror falls back to the display once); null: none now. */
     private fun shot(
         m: Methods,
-        mir: SurfaceControl,
+        id: Int,
         scale: Float,
     ): Bitmap? {
-        val buffer = m.capture.invoke(null, mir, null as Rect?, scale) ?: return null
+        if (way == Way.MIRROR) {
+            val (buffer, status) = mirrorShot(m, id, scale)
+            if (buffer != null) return bitmap(m, buffer)
+            Log.w(TAG, "the wallpaper's mirror gave no frame (status $status): capturing the display without home instead")
+            mirror?.release()
+            mirror = null
+            way = Way.DISPLAY
+        }
+        val (buffer, status) = displayShot(m, id, scale)
+        if (buffer != null) return bitmap(m, buffer)
+        give("display capture status $status")
+        return null
+    }
+
+    private fun mirrorShot(
+        m: Methods,
+        id: Int,
+        scale: Float,
+    ): Pair<Any?, Int> {
+        val mir =
+            mirror?.takeIf { mirrorDisplay == id && it.isValid } ?: run {
+                mirror?.release()
+                (m.mirror.invoke(m.wm, id) as SurfaceControl?).also {
+                    mirror = it
+                    mirrorDisplay = id
+                } ?: return null to -1
+            }
+        val args = m.layerArgs.newInstance(mir)
+        m.setScale.invoke(args, scale)
+        return await { listener -> m.captureLayers.invoke(null, m.layerBuild.invoke(args), listener) as Int }
+    }
+
+    private fun displayShot(
+        m: Methods,
+        id: Int,
+        scale: Float,
+    ): Pair<Any?, Int> {
+        val home = window() ?: return null to -2
+        val args = m.argsBuilder.newInstance()
+        m.setScale.invoke(args, scale)
+        m.exclude.invoke(args, arrayOf(home))
+        return await { listener ->
+            m.captureDisplay.invoke(m.wm, id, m.argsBuild.invoke(args), listener)
+            0
+        }
+    }
+
+    /** Asks with a listener and waits (at most [WAIT_MS]) for its buffer and status. */
+    private fun await(ask: (Any) -> Int): Pair<Any?, Int> {
+        val m = methods!!
+        val done = java.util.concurrent.CountDownLatch(1)
+        var got: Any? = null
+        var status = 0
+        val listener =
+            m.listener.newInstance(
+                java.util.function.ObjIntConsumer<Any?> { buffer, s ->
+                    got = buffer
+                    status = s
+                    done.countDown()
+                },
+            )
+        val asked = ask(listener)
+        if (asked != 0) return null to asked
+        if (!done.await(WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) return null to -3
+        return (if (status == 0) got else null) to status
+    }
+
+    private fun bitmap(
+        m: Methods,
+        buffer: Any,
+    ): Bitmap? {
         val bitmap = m.asBitmap.invoke(buffer) as Bitmap? ?: return null
         // The bitmap holds the buffer now; our own reference goes.
         runCatching { (m.hardwareBuffer.invoke(buffer) as android.hardware.HardwareBuffer).close() }
@@ -135,7 +207,15 @@ internal class WallpaperBackdrop(
     private class Methods(
         val wm: Any,
         val mirror: java.lang.reflect.Method,
-        val capture: java.lang.reflect.Method,
+        val listener: java.lang.reflect.Constructor<*>,
+        val layerArgs: java.lang.reflect.Constructor<*>,
+        val layerBuild: java.lang.reflect.Method,
+        val captureLayers: java.lang.reflect.Method,
+        val argsBuilder: java.lang.reflect.Constructor<*>,
+        val argsBuild: java.lang.reflect.Method,
+        val setScale: java.lang.reflect.Method,
+        val exclude: java.lang.reflect.Method,
+        val captureDisplay: java.lang.reflect.Method,
         val asBitmap: java.lang.reflect.Method,
         val hardwareBuffer: java.lang.reflect.Method,
     )
@@ -144,6 +224,7 @@ internal class WallpaperBackdrop(
         private const val TAG = "PowosBackdrop"
         const val FPS = 30
         const val BURST_MS = 3_000L
+        const val WAIT_MS = 500L
 
         /** The two sizes captured: lightly blurred by the scaling (the edge's), and as soft as the inside's blur. */
         const val SHARP = 0.25f
@@ -156,11 +237,24 @@ internal class WallpaperBackdrop(
                 val wm = wmg.getMethod("getWindowManagerService").invoke(null) ?: error("no window manager")
                 val iwm = Class.forName("android.view.IWindowManager")
                 val sc = Class.forName("android.window.ScreenCapture")
+                val listener = Class.forName("android.window.ScreenCapture\$ScreenCaptureListener")
+                val args = Class.forName("android.window.ScreenCapture\$CaptureArgs")
+                val argsBuilder = Class.forName("android.window.ScreenCapture\$CaptureArgs\$Builder")
+                val layerArgs = Class.forName("android.window.ScreenCapture\$LayerCaptureArgs")
+                val layerBuilder = Class.forName("android.window.ScreenCapture\$LayerCaptureArgs\$Builder")
                 val shb = Class.forName("android.window.ScreenCapture\$ScreenshotHardwareBuffer")
                 Methods(
                     wm,
                     iwm.getMethod("mirrorWallpaperSurface", Int::class.javaPrimitiveType),
-                    sc.getMethod("captureLayers", SurfaceControl::class.java, Rect::class.java, Float::class.javaPrimitiveType),
+                    listener.getDeclaredConstructor(java.util.function.ObjIntConsumer::class.java).apply { isAccessible = true },
+                    layerBuilder.getConstructor(SurfaceControl::class.java),
+                    layerBuilder.getMethod("build"),
+                    sc.getMethod("captureLayers", layerArgs, listener),
+                    argsBuilder.getConstructor(),
+                    argsBuilder.getMethod("build"),
+                    argsBuilder.getMethod("setFrameScale", Float::class.javaPrimitiveType),
+                    argsBuilder.getMethod("setExcludeLayers", Array<SurfaceControl>::class.java),
+                    iwm.getMethod("captureDisplay", Int::class.javaPrimitiveType, args, listener),
                     shb.getMethod("asBitmap"),
                     shb.getMethod("getHardwareBuffer"),
                 )

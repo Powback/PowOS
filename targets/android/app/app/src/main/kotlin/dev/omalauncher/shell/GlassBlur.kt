@@ -138,6 +138,7 @@ internal class GlassBlur(
         val b =
             WallpaperBackdrop(
                 display = { view.display?.displayId ?: 0 },
+                window = { methods?.let { m -> runCatching { m.viewRoot.invoke(view)?.let { m.surface.invoke(it) as SurfaceControl? } }.getOrNull() } },
                 frame = { sharp, soft -> l.frame(sharp, soft) },
                 // No live wallpaper to bend: no liquid glass (never a stale picture of it) - the plain blur stays.
                 failed = {
