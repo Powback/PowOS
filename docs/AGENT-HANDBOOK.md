@@ -75,5 +75,7 @@ for (one line each).
 - Review images (contact sheets, before/after, pet steps) go to the PHONE before you push, so the manager can look
   first: /home/powos/design-qa/ (pet: /home/powos/pet-review/) inside PowOS =
   /data/powos/root/home/powos/... (push with tools/phone/adb.sh, then `su -c cp` + chown 10359:10359).
+- Poll the phone sparingly: >= 60 s between idle/state checks, and batch commands into ONE adb call (each call is a
+  new VPN connection; agents' adb polling was most of the phone's WireGuard traffic and CPU).
 - Commit before you push a shell file: an APK install resets all shell overrides (only committed work survives).
 - The assist overlay's circle-to-select + crop flow is core, never "chrome": never remove it.
