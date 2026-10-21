@@ -154,7 +154,7 @@ event { id: u64 /*per-agent seq*/, agent: string, ts: u64,
         name: string /*tool name*/, hint: string(≤60) /*file basename / command head*/,
         ok: bool|null, n: u16 /*coalesced count*/, ms: u32 /*duration*/ }
 message { id: string /*comms id*/, from: string, to: string, kind: "message"|"escalate"|"notify"|"ask"|"report",
-          priority: string, ts: u64, body: string(≤280 preview), read: bool }
+          priority: string, ts: u64, body: string /*whole, secrets scrubbed; the feed previews a line*/, read: bool }
 ask   { id: string, agent: string, tool: string, summary: string(≤200), ts: u64, expires: u64,
         answer: "allow"|"deny"|null, reason: string|null, by: string|null }
 ```

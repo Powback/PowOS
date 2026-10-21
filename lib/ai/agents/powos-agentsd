@@ -6,7 +6,7 @@ host folds them into rows - agents, their tasks, a 64-event ring each, the comms
 viewers read (the PowOS app's FileObserver on the phone):
 
     <spool>/state.json            {"v", "host", "ts", "agents": [...], "tasks": [...], "asks": []}
-    <spool>/messages.json         {"v", "host", "messages": [...]}     the last 200 comms messages
+    <spool>/messages.json         {"v", "host", "messages": [...]}     the last 200 comms messages, bodies whole
     <spool>/events/<agent>.json   {"agent", "events": [...]}           one agent's ring, rewritten when it changes
 
 Field names and types are the design's §3 schema, so Phase 2 (SpacetimeDB) takes the same rows. Every file is written
@@ -106,6 +106,12 @@ def clean(s, n):
         return ""
     s = _SECRET.sub("…", " ".join(s.split()))
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def scrub(s):
+    """All of [s], its lines kept, with what looks like a secret cut: a comms message's body - the view previews it
+    and opens the rest, so it's never shortened here."""
+    return _SECRET.sub("…", s) if isinstance(s, str) else ""
 
 
 def first_line(s, n):
@@ -338,7 +344,7 @@ class Spool:
                 "kind": rec.get("kind") if rec.get("kind") in ("message", "escalate", "notify", "ask", "report") else "message",
                 "priority": clean(rec.get("priority") or "normal", 16),
                 "ts": int(rec.get("ts") or ts),
-                "body": clean(rec.get("body"), 280),
+                "body": scrub(rec.get("body")),
                 "read": False,
             }
         )
