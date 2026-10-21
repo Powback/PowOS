@@ -56,7 +56,8 @@ if [ -z "$now" ]; then
     # without a touch; anything else (an empty or unreadable state) = NOT safe - it installed over an active user once
     # when the state came back empty.
     chunk=$(( ${SHIP_WAIT_MIN:-60} * 60 - waited )); [ $chunk -gt 600 ] && chunk=600
-    i2=$(tools/phone/idle.sh --wait 60 $chunk)
+    # exit 1 = this chunk passed without a free phone: wait the next one (set -e would end the whole ship here).
+    i2=$(tools/phone/idle.sh --wait 60 $chunk || true)
     case "$i2" in *screen=Asleep*|*screen=Dozing*|*screen=Awake*) ok=1; break ;; esac
     waited=$((waited + chunk))
   done
