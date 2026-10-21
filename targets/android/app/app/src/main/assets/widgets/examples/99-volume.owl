@@ -4,18 +4,50 @@ widget "volume" {
   size: 6x1
   minSize: 4x1
 
-  meta { owl: 4; description: "The phone's media volume as a slider, with a mute button."; version: "1.0"; license: "MIT"; category: "system" }
+  meta { owl: 6; description: "The phone's media volume as a slider, with a mute button."; version: "1.0"; license: "MIT"; category: "system" }
 
   // Follows the hardware buttons and other apps as well.
   source v = android.volume
 
-  Row {
-    gap: 10
-    fill: true
-    Text { text: "vol"; style: label; width: 28 }
-    // One step per volume step of the phone; live sets the volume while dragging.
-    Slider { value: v.muted ? 0 : v.level; step: 100 / v.steps; live: true; weight: 1; onChange: volume(value) }
-    Text { text: v.muted ? "muted" : "${v.level}%"; style: small; width: 48; align: end }
-    Button { text: v.muted ? "on" : "off"; color: muted; onTap: volume("toggle") }
+  // Sized from the tile, never fixed (monospace: 0.6 em a character): the label and the level as big as the tile's
+  // height allows, the slider as tall, and a soft mute chip. On a taller tile the level goes big over the slider.
+  let iw = tileWidth == null ? 230 : tileWidth - 24
+  let ih = tileHeight == null ? 44 : tileHeight - 24
+  let tall = ih >= 90 && iw < ih * 3.5
+  let lvl = v.muted ? "muted" : "${v.level}%"
+  let fs = clamp(floor(min(ih * 0.4, iw / 16)), 10, 28)
+  let sh = clamp(floor(tall ? ih * 0.25 : ih * 0.8), 28, 120)
+  // The level big in what the label row and the slider leave.
+  let big = clamp(floor(min((ih - fs * 2 - sh - 26) / 1.5, iw / (6 * 0.6))), 12, 120)
+
+  if tall {
+    Column {
+      gap: 6; fill: height
+      Row {
+        align: center
+        Text { text: "volume"; fontSize: fs; color: muted; weight: 1; maxLines: 1 }
+        Box {
+          height: fs * 2; padding: [round(fs * 0.7), 0]; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+          onTap: volume("toggle")
+          Text { text: v.muted ? "unmute" : "mute"; fontSize: fs; color: muted; maxLines: 1 }
+        }
+      }
+      Spacer { weight: 1 }
+      Text { text: lvl; fontSize: big; maxLines: 1 }
+      Slider { value: v.muted ? 0 : v.level; step: 100 / v.steps; live: true; height: sh; fill: width; onChange: volume(value) }
+    }
+  } else {
+    Row {
+      gap: 10; align: center; fill: true
+      Text { text: "vol"; fontSize: fs; color: muted; width: round(fs * 2); maxLines: 1 }
+      // One step per volume step of the phone; live sets the volume while dragging.
+      Slider { value: v.muted ? 0 : v.level; step: 100 / v.steps; live: true; weight: 1; height: sh; onChange: volume(value) }
+      Text { text: lvl; fontSize: fs; width: round(fs * 3.4); align: end; maxLines: 1 }
+      Box {
+        fill: height; padding: [round(fs * 0.7), 0]; align: center; background: alpha(foreground, 0.08); radius: 8 * corners
+        onTap: volume("toggle")
+        Text { text: v.muted ? "on" : "off"; fontSize: fs; color: muted; maxLines: 1 }
+      }
+    }
   }
 }
