@@ -28,6 +28,11 @@
 .pet-svg { display: block; overflow: visible; }
 .pet-shape { fill: var(--pet-fill); stroke: color-mix(in srgb, var(--color-background) 35%, transparent); stroke-width: 1.2; transition: fill 400ms ease; }
 .pet-eye.open { fill: var(--pet-ink); transform-box: fill-box; transform-origin: center; }
+.pet-inner { display: block; }
+/* The feet: the body's colour, a shade deeper; the glints: a touch of light in the eyes. */
+.pet-foot { fill: color-mix(in srgb, var(--pet-fill) 70%, var(--pet-ink)); }
+.pet-glint { fill: color-mix(in srgb, var(--color-foreground) 85%, transparent); pointer-events: none; }
+.pet:is([data-state="happy"], [data-state="sleepy"]) .pet-glint { display: none; }
 .pet-eye.closed, .pet-eye.glad, .pet-brows, .pet-mouth { fill: none; stroke: var(--pet-ink); stroke-width: 2; stroke-linecap: round; }
 .pet-mouth.open { fill: var(--pet-ink); stroke: none; }
 .pet-z { font: 600 10px var(--font); fill: var(--color-foreground); opacity: 0; }

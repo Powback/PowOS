@@ -33,6 +33,7 @@ import { askQueued, openAssistant } from "./assistant.ts";
 import { agent, agentIds, asks, tasks, useAgents } from "../agents.ts";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { installedApps } from "../apps/pages.ts";
+import { PetBody, type BodyHandle } from "./petbody.tsx";
 import { DbConnection as PetDb } from "../vendor/local-pet.js";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import type { AgentMail } from "../types.ts";
@@ -116,7 +117,12 @@ const needsYou = computed(() => {
   );
 });
 
+/** A state forced from outside (review renders, CDP: `__pet.force("worried")`, null to let go). */
+const forced = signal<State | null>(null);
+(window as unknown as { __pet?: object }).__pet = { force: (s: State | null) => (forced.value = s) };
+
 const state = computed<State>(() => {
+  if (forced.value) return forced.value;
   const t = clock.value;
   if ((listening.value && chatOpen.value) || petListening.value) return "listening";
   if (talk.value?.asked && !talk.value.done) return "working";
@@ -454,28 +460,6 @@ function nextNightEdge(t: number) {
 
 // ---- the creature ---------------------------------------------------------------------------------------------------
 
-function Sprite() {
-  return (
-    <svg class="pet-svg" viewBox="0 0 52 52" width={SIZE} height={SIZE} aria-hidden="true">
-      <path class="pet-shape" d="M26 6c11 0 20 8.5 20 21.5C46 39 38 46 26 46S6 39 6 27.5C6 14.5 15 6 26 6z" />
-      <g class="pet-face">
-        <g class="pet-eyes">
-          <ellipse class="pet-eye open" cx="19" cy="25" rx="3" ry="3.6" />
-          <ellipse class="pet-eye open" cx="33" cy="25" rx="3" ry="3.6" />
-          <path class="pet-eye closed" d="M15.5 26q3.5 2.5 7 0M29.5 26q3.5 2.5 7 0" />
-          <path class="pet-eye glad" d="M15.5 26.5q3.5-4 7 0M29.5 26.5q3.5-4 7 0" />
-        </g>
-        <path class="pet-brows" d="M15 19.5l6 1.8M37 19.5l-6 1.8" />
-        <path class="pet-mouth smile" d="M22 33q4 3 8 0" />
-        <path class="pet-mouth flat" d="M22.5 34h7" />
-        <path class="pet-mouth wavy" d="M21 34q2-2 4 0t4 0t2 0" />
-        <ellipse class="pet-mouth open" cx="26" cy="34" rx="2.6" ry="2.2" />
-      </g>
-      <text class="pet-z" x="40" y="12">z</text>
-    </svg>
-  );
-}
-
 function Bubble({ at }: { at: { left: number; top: number } }) {
   const b = bubble.value;
   if (!b && !talk.value) return null;
@@ -548,7 +532,26 @@ function PetLayer() {
   const shown = useShown();
   useClocks(shown);
   const el = useRef<HTMLButtonElement>(null);
-  const press = useRef<{ x: number; y: number; dx: number; dy: number; moved: boolean; timer: number; long: boolean } | null>(null);
+  const body = useRef<BodyHandle | null>(null);
+  // Its eyes follow a finger anywhere on home while it's awake (touches only: no frames without one).
+  useEffect(() => {
+    if (!shown) return;
+    const look = (e: PointerEvent) => {
+      if (state.peek() !== "sleepy") body.current?.look(e.clientX, e.clientY);
+    };
+    const away = () => body.current?.look(null, null);
+    addEventListener("pointerdown", look, { capture: true, passive: true });
+    addEventListener("pointermove", look, { capture: true, passive: true });
+    addEventListener("pointerup", away, { capture: true, passive: true });
+    addEventListener("pointercancel", away, { capture: true, passive: true });
+    return () => {
+      removeEventListener("pointerdown", look, { capture: true });
+      removeEventListener("pointermove", look, { capture: true });
+      removeEventListener("pointerup", away, { capture: true });
+      removeEventListener("pointercancel", away, { capture: true });
+    };
+  }, [shown]);
+  const press = useRef<{ x: number; y: number; dx: number; dy: number; lx: number; ly: number; moved: boolean; timer: number; long: boolean } | null>(null);
   // A new "hello" each time home comes back: the state's animation plays once more.
   const [hello, setHello] = useState(0);
   useEffect(() => {
@@ -573,7 +576,7 @@ function PetLayer() {
         onPointerDown={(e) => {
           e.stopPropagation();
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-          const p = { x: e.clientX, y: e.clientY, dx: 0, dy: 0, moved: false, timer: 0, long: false };
+          const p = { x: e.clientX, y: e.clientY, dx: 0, dy: 0, lx: 0, ly: 0, moved: false, timer: 0, long: false };
           p.timer = window.setTimeout(() => {
             p.long = true;
             navigator.vibrate?.(12);
@@ -593,7 +596,13 @@ function PetLayer() {
             clearTimeout(p.timer);
             el.current?.classList.add("dragging");
           }
-          if (p.moved && el.current) el.current.style.transform = `translate(${p.dx}px, ${p.dy}px)`;
+          if (p.moved && el.current) {
+            // The body lags the finger: this move's step, as a push (it wobbles back when the finger rests).
+            body.current?.push((p.dx - p.lx) * 0.35, (p.dy - p.ly) * 0.35);
+            el.current.style.transform = `translate(${p.dx}px, ${p.dy}px)`;
+          }
+          p.lx = p.dx;
+          p.ly = p.dy;
         }}
         onPointerUp={() => {
           const p = press.current;
@@ -605,6 +614,8 @@ function PetLayer() {
             const x = (at.left + p.dx - MARGIN) / free(innerWidth);
             const y = (at.top + p.dy - MARGIN) / free(innerHeight);
             where.value = JSON.stringify({ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) });
+            // Set down: a squash.
+            body.current?.squash(0.7);
             if (el.current) {
               el.current.style.transform = "";
               el.current.classList.remove("dragging");
@@ -612,6 +623,7 @@ function PetLayer() {
             return;
           }
           if (p.long) return;
+          body.current?.squash(0.35);
           // A tap: it listens right there (its bubble shows what it hears, then the reply); listening, it stops.
           if (petListening.value) powos.speech.stop();
           else if (!face) startTalk();
@@ -627,11 +639,11 @@ function PetLayer() {
           }
         }}
       >
-        <span
-          key={`${s}-${hello}`}
-          class="pet-body"
-        >
-          <Sprite />
+        {/* The state's one-shot animation restarts on the wrapper (re-keyed); the body inside keeps its springs. */}
+        <span key={`${s}-${hello}`} class="pet-body">
+          <span class="pet-inner">
+            <PetBody handle={body} />
+          </span>
         </span>
       </button>
     </>
