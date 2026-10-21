@@ -250,6 +250,56 @@ try {
       runs.push(open(browser, url, mode).then((r) => settle(r, () => window.__powosAlive === true || window.__powosBoot?.failed === true)));
     }
   }
+  // The pet (ui/pet.tsx): home with local.pet installed, driven through what the user does - shown, touched, each
+  // state, a talk bubble, a deploy note, a move - so an error in its effects and timers (2026-10-21: a TDZ in the hop
+  // timer's effect threw on every show) fails here; the plain home run never mounts it (the mock has no local.pet).
+  if (process.env.SHELL_PAGES !== "0" && process.env.GATE_PET !== "0" && fs.existsSync(path.join(ROOT, "ui/pet.tsx"))) {
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "pet").then(async (r) => {
+        await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        const out = await r.page
+          .evaluate(async () => {
+            const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+            const fails = [];
+            const P = await importShim("./apps/pages.ts");
+            P.installedApps.value = [...P.installedApps.value, { id: "local.pet", name: "Pet", version: "0.1.0", database: "local-pet", tier: 0, manifest: "{}" }];
+            await sleep(600);
+            const pet = document.querySelector(".pet");
+            if (!pet) return ["the pet didn't mount with local.pet installed"];
+            const at = pet.getBoundingClientRect();
+            const touch = (el, x, y) => {
+              for (const t of ["pointerdown", "pointerup"]) el.dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: x, clientY: y, pointerId: 7, isPrimary: true }));
+            };
+            // A touch elsewhere on home (the timers that wait for one), then each state, the hooks a review uses.
+            touch(document.body, 20, 400);
+            await sleep(200);
+            for (const st of ["idle", "looking", "working", "worried", "sleepy", "hungry", "eating", "happy", "listening"]) {
+              window.__pet?.force(st);
+              await sleep(120);
+            }
+            window.__pet?.force(null);
+            window.__mockEvents?.emit("ai.mail", [{ id: "gate-pet", from: "deploy", text: "Clock got a gate check", time: Date.now() / 1000 }]);
+            await sleep(300);
+            window.__pet?.carry?.();
+            await sleep(300);
+            // A tap on the pet itself (talk: the mock recognizer), and a touch away (the bubble goes).
+            touch(pet, at.left + at.width / 2, at.top + at.height / 2);
+            await sleep(400);
+            touch(document.body, 20, 300);
+            await sleep(400);
+            if (!document.querySelector(".pet")) fails.push("the pet went away after being used");
+            return fails;
+          })
+          .catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
+        r.problems.push(...out);
+        const guard = await r.page.evaluate(() => window.__powosBoot?.errors ?? []).catch(() => []);
+        for (const e of guard) r.problems.push(`${e.kind}: ${e.message}${e.file ? ` (${e.file}${e.line ? ":" + e.line : ""})` : ""}`);
+        if (!guard.length) r.problems.push(...r.uncaught);
+        r.problems = [...new Set(r.problems)];
+        return { ...r, ready: true, ms: Date.now() - r.started };
+      }),
+    );
+  }
   for (const app of apps()) {
     runs.push(
       open(browser, `${ORIGIN}/__gate_app.html`, `app ${app.id}`).then(async (r) => {

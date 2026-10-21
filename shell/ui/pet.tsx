@@ -1015,7 +1015,10 @@ function PetLayer() {
         style={phys ? { left: "0px", top: "0px" } : { left: `${at.left}px`, top: `${at.top}px` }}
         onPointerDown={(e) => {
           e.stopPropagation();
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          // The pointer can be gone already (a synthetic event, a cancelled touch): the press still counts.
+          try {
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          } catch {}
           const p = { x: e.clientX, y: e.clientY, dx: 0, dy: 0, lx: 0, ly: 0, moved: false, timer: 0, long: false };
           p.timer = window.setTimeout(() => {
             p.long = true;
