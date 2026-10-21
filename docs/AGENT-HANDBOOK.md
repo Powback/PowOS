@@ -69,4 +69,10 @@ for (one line each).
 - Commit only your paths; never force-push; rebase often (several agents edit shell/ui at once).
 - `HACK:` markers need a row in docs/REMOTE-POWOS.md section 4 (test-hack-registry).
 - The Mac's bash is 3.2: no `declare -A`, guard empty arrays under `set -u`.
-- Battery under 40%: keep on-device testing light.
+- Battery under 40%: keep on-device testing light; under 30% on battery: no heavy on-device QA, benchmarks or builds
+  (light pushes ok) until charging or above 30% (`tools/phone/adb.sh shell dumpsys battery`).
+- Review images (contact sheets, before/after, pet steps) go to the PHONE before you push, so the manager can look
+  first: /home/powos/design-qa/ (pet: /home/powos/pet-review/) inside PowOS =
+  /data/powos/root/home/powos/... (push with tools/phone/adb.sh, then `su -c cp` + chown 10359:10359).
+- Commit before you push a shell file: an APK install resets all shell overrides (only committed work survives).
+- The assist overlay's circle-to-select + crop flow is core, never "chrome": never remove it.
