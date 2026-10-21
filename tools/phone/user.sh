@@ -6,4 +6,4 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd); s=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); n=powos-user-$$.sh
 "$here/adb.sh" push "$s" /data/local/tmp/$n >/dev/null
-"$here/adb.sh" shell "su -c 'cp /data/local/tmp/$n /data/powos/root/tmp/$n && rm /data/local/tmp/$n && chmod 755 /data/powos/root/tmp/$n && sh /data/powos/powos-run.sh \"bash /tmp/$n; rm -f /tmp/$n\"'"
+"$here/adb.sh" shell "su -c 'cp /data/local/tmp/$n /data/powos/root/tmp/$n && rm /data/local/tmp/$n && chmod 755 /data/powos/root/tmp/$n && sh /data/powos/powos-run.sh \"bash /tmp/$n\"; rc=\$?; rm -f /data/powos/root/tmp/$n; exit \$rc'"
