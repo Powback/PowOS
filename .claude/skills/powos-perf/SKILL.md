@@ -17,12 +17,15 @@ rest. Keep the blur - make it cheap.
   rAF, timers, layouts, running animations from one devtools.timeline trace (tracing is browser-wide: one tracer,
   events split by frame/layer tree). `raster`: busiest cc/viz/gpu/blink events per thread. All read-only.
 - `idle-sample.sh [secs]`: refuses unless idle>=120 + Awake; cpu.sh + cdp idle + gfxinfo; logs one line to
-  ~/.cache/powos-perf/idle.log.
+  ~/.local/state/powos-perf/idle.log.
 - Per-thread: /proc/<pid>/task/*/stat (utime+stime, HZ=100). Java hot spots: `simpleperf record -t <tid> -g
   --duration 15` then `simpleperf report --children --sort symbol`.
 - Finding what changes the DOM: a MutationObserver/rAF wrapper via `cdp.sh eval` - only inside a free idle window.
 - Headless: `shell/dev/gate.sh --tree` runs the idle check (2 s after a 3 s settle: no rAF, no layer paint, no
   endless animation). On a busy Mac pages may need `READY_MS=20000`.
+- Deploying rooted-side files over the VPN (rooted.sh calls plain `adb`): `PATH="$PWD/tools/phone/bin:$PATH"
+  targets/android/rooted/rooted.sh deploy --note "..."` (tools/phone/bin/adb wraps adb.sh). A restart of the
+  supervisor/sleepd afterwards: kill their pids (/data/powos/root/run/...) and `sh /data/powos/powos-start.sh`.
 - Phone side: powos-supervisor's daily IdleSample -> /var/log/powos/idle-cpu.log (+ `powos-supervisor status`),
   a low-priority note when over 3%. Screen on = DRM `/sys/class/drm/card*-DSI-*/dpms` On (backlight files read 0).
 

@@ -3,7 +3,7 @@
 #   - refuses unless idle>=120 s and the screen is on (tools/phone/idle.sh) - never wakes it, never touches input;
 #   - per-process CPU over the window (tools/phone/cpu.sh), the WebView pages' frames/paints/rAF (tools/phone/cdp.sh
 #     idle, the first 20 s), and the app's window frames (dumpsys gfxinfo, reset at the start);
-#   - appends one summary line to ~/.cache/powos-perf/idle.log (Mac) and prints everything.
+#   - appends one summary line to ~/.local/state/powos-perf/idle.log (Mac) and prints everything.
 # Budget (2026-10-21, the user): ~3% CPU idle on home with the screen on (the PowOS processes together: app, WebView
 # renderer, its share of system_server/surfaceflinger aside).
 set -uo pipefail
@@ -26,6 +26,6 @@ echo "== WebView pages (20 s)"; cat "${TMPDIR:-/tmp}/powos-idle-cdp.json"
 echo "== app windows' frames over ${secs}s"; echo "$gfx"
 echo "== after: $after"
 pick() { echo "$cpu" | awk -v n="$1" '$3 ~ n { s += $1 } END { printf "%.1f", s }'; }
-mkdir -p ~/.cache/powos-perf
+mkdir -p ~/.local/state/powos-perf
 line="$(date '+%F %T') idle=${i}s fg=$fg total=$(echo "$cpu" | awk '/total/{print $1}') app=$(pick '^com.powos.app$') webview=$(pick 'ocessService') system_server=$(pick '^system_server$') sf=$(pick '^surfaceflinger$') wg=$(pick 'reguard') plasma=$(pick '^plasmashell$') kwin=$(pick '^kwin_wayland$') touched_during=$([ "${after#idle=}" != "$after" ] && a=${after#idle=} && [ "${a%% *}" -lt "$i" ] && echo yes || echo no)"
-echo "$line" | tee -a ~/.cache/powos-perf/idle.log
+echo "$line" | tee -a ~/.local/state/powos-perf/idle.log
