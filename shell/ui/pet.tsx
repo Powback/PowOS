@@ -954,6 +954,8 @@ function PetLayer() {
   // On the chat surface it's the chat's face (pet.css .face: by the pill); over the app list, menus, edit mode: away.
   const face = chatOpen.value;
   const hidden = (drawerOpen.value && !face) || editing.value || notifOpen.value || !!carry.value || !!menu.value;
+  // Physics: held still while hidden (petmove.ts pause), carried on when shown.
+  useEffect(() => mover.current?.pause(hidden), [hidden]);
   // Where it is: by the pill as the chat's face; on its perch (or, its edge not on screen, the nearest edge there
   // is); else floating where it was put.
   void layout.value;

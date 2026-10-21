@@ -261,6 +261,29 @@ test("the phone's real home: from the pill up to a top tile (500 px up, no walls
   }
 });
 
+test("the phone's real home: today -> performance stays up on the tops (the recording's fall)", () => {
+  const w: World = {
+    w: 404,
+    h: 899,
+    top: 46,
+    rects: [
+      { key: "today", l: 12, t: 114, r: 202, b: 262 },
+      { key: "perf", l: 202, t: 114, r: 392, b: 194 },
+      { key: "bar", l: 36, t: 759, r: 368, b: 807 },
+    ],
+  };
+  for (const x of [40, 107, 190]) {
+    const p = makePet(x, 114, SIZE);
+    standOn(p, w.rects[0], w);
+    let reached: boolean | null = null;
+    const d = new Driver({ key: "perf", x: 297 }, (ok) => (reached = ok), 0.5);
+    let lowest = 0;
+    sim(p, w, (q) => d.input(q, w), (q) => ((lowest = Math.max(lowest, q.y)), false), 120 * 10);
+    assert.equal(reached, true, `from x=${x}`);
+    assert.ok(lowest <= 114.01, `from x=${x}: never below the tops (lowest ${lowest.toFixed(0)})`);
+  }
+});
+
 test("an unreachable goal: as near as it can, no snap", () => {
   const w: World = { w: 384, h: 840, top: 0, rects: [{ key: "sky", l: 150, t: 100, r: 250, b: 110 }] };
   const p = makePet(60, 840, SIZE);

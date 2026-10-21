@@ -23,7 +23,7 @@ const THROW = 1800;
 export function measure(): World {
   const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 24;
   const rects: Rect[] = [];
-  for (const e of edges()) {
+  for (const e of edges(false)) {
     if (e.owner || e.key.startsWith("text:")) continue;
     rects.push({ key: e.key, l: e.left, t: e.top, r: e.right, b: e.bottom ?? e.top + 44 });
   }
@@ -144,16 +144,28 @@ export class Mover {
   /** Something may have moved under it (a layout change): measured again, stepped until it's at rest. */
   wake() {
     this.calm = 0;
-    if (this.raf || document.hidden) return;
+    if (this.raf || document.hidden || this.paused) return;
     this.last = 0;
     this.raf = requestAnimationFrame(this.frame);
   }
 
-  stop() {
+  stop(keepRoute = false) {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
-    this.driver = null;
+    if (!keepRoute) this.driver = null;
   }
+
+  /**
+   * Hidden (the drawer, a panel, the shade over home): it holds still where it is - nothing measured or stepped, so
+   * home's tiles going away under a panel don't drop it while nobody sees it; shown again, it carries on from there.
+   */
+  pause(on: boolean) {
+    if (on === this.paused) return;
+    this.paused = on;
+    if (on) this.stop(true);
+    else this.wake();
+  }
+  private paused = false;
 
   /** On its way somewhere (a route playing). */
   busy() {
@@ -162,9 +174,10 @@ export class Mover {
 
   private frame = (now: number) => {
     this.raf = 0;
-    if (document.hidden) return;
-    // The frame's time in fixed steps (a long frame is slowed down, not skipped: at most 4 steps a frame).
-    const dt = this.last ? Math.min(4 * DT, (now - this.last) / 1000) : DT;
+    if (document.hidden || this.paused) return;
+    // The frame's time in fixed steps. A long frame (the page busy elsewhere) is slowed down, never caught up: at
+    // most 2 steps a frame, the rest of the time dropped - so it moves at most two steps' worth between two frames.
+    const dt = this.last ? Math.min(2 * DT, (now - this.last) / 1000) : DT;
     this.last = now;
     this.acc += dt;
     this.world = measure();

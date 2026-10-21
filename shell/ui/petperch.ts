@@ -34,7 +34,8 @@ export interface Perch {
 const SINK = 0.06;
 
 /** The edges on screen now: the tiles of the page showing, and the dock. */
-export function edges(): Edge[] {
+/** [text]: also lines of text inside the tiles (the movement's world doesn't use them: skipped, it's measured every frame). */
+export function edges(text = true): Edge[] {
   const out: Edge[] = [];
   const W = innerWidth;
   const H = innerHeight;
@@ -52,7 +53,7 @@ export function edges(): Edge[] {
     out.push({ key: el.dataset.key!, left: r.left, right: r.right, top: Math.max(r.top, minTop), bottom: r.bottom });
   }
   // Lines of text in the tiles (their rendered line boxes, Range.getClientRects): platforms too, inside their tile.
-  let n = 0;
+  let n = text ? 0 : TEXT_LINES;
   const range = document.createRange();
   for (const el of document.querySelectorAll<HTMLElement>(".page:not(.away) .home-tile[data-key]")) {
     if (n >= TEXT_LINES) break;
