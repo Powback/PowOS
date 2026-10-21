@@ -1499,7 +1499,8 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   -webkit-user-drag: none;
   box-shadow: var(--lift);
 }
-.task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: 500 var(--text-small) var(--font); color: var(--color-foreground); background: color-mix(in srgb, var(--color-surface) 80%, transparent); border: none; border-radius: 999px; padding: 10px 22px; }
+/* "clear all": calm - a quiet text button on the blur, no plate. */
+.task-clear { align-self: center; margin-top: calc(var(--gap) * 4); font: var(--text-small) var(--font); color: var(--color-muted); background: none; border: none; border-radius: 999px; padding: 10px 22px; }
 
 /*
  * The lock screen's face (lock.tsx): over the wallpaper, dimmed; the whole of it follows the finger up. --lift (0..1,

@@ -1100,13 +1100,14 @@ function mockTasks(icon: (name: string) => string, hue: (name: string) => number
   const shot = (name: string) =>
     "data:image/svg+xml," +
     encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 780"><rect width="360" height="780" fill="hsl(${hue(name)} 30% 18%)"/>` +
-        `<rect y="0" width="360" height="96" fill="hsl(${hue(name)} 55% 40%)"/>` +
+      // A stand-in for the app's last frame, as an app looks: a light page, a thin app bar in its colour, grey rows.
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 780"><rect width="360" height="780" fill="#f4f4f5"/>` +
+        `<rect y="0" width="360" height="96" fill="hsl(${hue(name)} 35% 45%)"/>` +
         `<text x="24" y="66" font-family="sans-serif" font-size="30" fill="white">${name}</text>` +
         Array.from(
           { length: 7 },
           (_, i) =>
-            `<rect x="24" y="${130 + i * 86}" width="${312 - (i % 3) * 60}" height="54" rx="10" fill="hsl(${hue(name)} 20% 28%)"/>`,
+            `<rect x="24" y="${130 + i * 86}" width="${312 - (i % 3) * 60}" height="54" rx="10" fill="#e1e1e4"/>`,
         ).join("") +
         `</svg>`,
     );
