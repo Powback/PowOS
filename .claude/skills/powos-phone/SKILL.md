@@ -10,7 +10,8 @@ Tools (repo `tools/phone/`, all one adb call each):
 - `adb.sh <args>` - adb to the phone from any session (files under $HOME only).
 - `root.sh <script>` / `user.sh <script>` - run a local script inside PowOS as root / as the session user.
 - `idle.sh` - `idle=<s> screen=<Awake|Dozing|Asleep> act=<s>`; drive the phone only at idle>=120 and screen=Awake;
-  never wake it. To WAIT: ONE `idle.sh --wait 120 MAX_S` (the wait runs on the phone) - never a polling loop.
+  never wake it. To WAIT: ONE `idle.sh --wait 120 MAX_S` (the wait runs on the phone) - never a polling loop;
+  `AWAKE_ONLY=1` in front when you need the screen on (it otherwise also returns when the screen is off).
 - `cdp.sh pages|eval <page> '<js>'|idle|raster` - WebView devtools, READ-ONLY on live pages.
 - `ship-apk.sh --note "..." [--now]` - the ONLY way to build+install the APK: origin's tip only, gate on HEAD, lock,
   waits for a free phone, installs, bindings-check, resets every shell override, re-pushes shell files committed

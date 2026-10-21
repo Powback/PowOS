@@ -9,8 +9,8 @@ Budget (the user, 2026-10-21): ~3% of one core idle on home, screen on; 0 frames
 rest. Keep the blur - make it cheap.
 
 ## Tools (repo tools/phone/)
-- `idle.sh --wait 120 1800`: one call that returns when the phone is free. It also returns on screen OFF - for an
-  idle-home sample you need `screen=Awake` and `idle>=120` (check again after it returns).
+- `AWAKE_ONLY=1 idle.sh --wait 120 1800`: one call that returns when the screen is on and nobody touched it for 120 s
+  (without AWAKE_ONLY it also returns on screen OFF - no use for an idle-home sample).
 - `cpu.sh [secs] [top]`: per-process CPU from /proc (% of ONE core; the phone has 8: 800 = all busy). Read-only.
 - `cdp.sh pages | eval <page> '<js>' | idle [secs] [page] | raster [secs]`: forwards the app's devtools socket
   (pid changes per install) and runs cdp.ts in powos-vadb's network. `idle`: per page compositor frames, paints,

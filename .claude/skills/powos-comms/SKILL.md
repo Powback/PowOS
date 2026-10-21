@@ -38,8 +38,8 @@ output, not messages. agentsd still scrubs secret-shaped strings (deliberate).
 ## Deploy
 - lib/ai -> phone: `targets/android/rooted/rooted.sh deploy --note "..."` (pushes comms-mcp.py, lib/ai/manager,
   lib/ai/agents, plus everything else rooted needs; powos-deploy.sh installs to /data/powos/root/usr/lib/powos/ai/).
-  It calls a bare `adb`: put a shim first on PATH that execs tools/phone/adb.sh AND realpath's existing absolute
-  args - adb.sh mounts dirname into a container and a `..` path ("rooted/../session/...") fails "cannot stat".
+  It calls a bare `adb`: run it as `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy ...`
+  (tools/phone/bin/adb execs adb.sh with canonical paths - a `..` path "rooted/../session/..." failed "cannot stat").
 - The phone's manager runs one process per chat turn, so a deploy takes effect next turn (no restart).
 - Agents module changes need an STDB module publish (not done by rooted.sh deploy).
 - Verify with ONE batched adb call (md5sum the installed files). Never poll.

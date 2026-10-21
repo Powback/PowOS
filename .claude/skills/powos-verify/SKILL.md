@@ -55,7 +55,7 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   - the live one's ownerPid = `pidof com.powos.app`. Expected: exactly one "[Gesture Monitor] powos-gestures".
 
 ## Idle CPU
-- `tools/phone/idle-sample.sh [secs]` (perf agent's; per process, appends ~/.cache/powos-perf/idle.log), `cpu.sh`, or
+- `tools/phone/idle-sample.sh [secs]` (perf agent's; per process, appends ~/.local/state/powos-perf/idle.log), `cpu.sh`, or
   `verify/cpu-sample.sh` (app / renderer / session split + touch IRQs during the window).
   Count app + its WebView renderer (`webview:sandboxed_process`, comm `ocessService0:0`) + the session (plasmashell,
   kwin_wayland, Xwayland, python3 services). Budget ~3% of one core idle on home, screen on. The supervisor's daily

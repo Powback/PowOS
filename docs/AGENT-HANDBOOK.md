@@ -41,6 +41,9 @@ the minimal change and tell them.
   act = lastUserActivity, NOT a user signal). Drive the phone (input, screenrecord, journeys, session-restarting
   installs) only at idle>=120 and screen=Awake. Never wake the screen with key events (refused - don't route around it).
   To WAIT: `tools/phone/idle.sh --wait IDLE_S MAX_S` (one held call; the waiting runs on the phone; exit 1 = timeout).
+  It also returns at once when the screen is off (fine for installs); for work that needs the screen on (recordings,
+  journeys, CDP idle samples, screencaps) use `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX_S` (waits through doze,
+  never wakes it).
 - WebView devtools: `tools/phone/cdp.sh pages | eval <page> '<js>' | idle [secs] [page] | raster [secs]` (forwards
   the app's devtools socket again each call - the pid changes per install - and runs tools/phone/cdp.ts in
   powos-vadb's network; page = home/"" , lock, shade, assist, ...). READ-ONLY on live pages (see Rules).
@@ -85,7 +88,8 @@ the minimal change and tell them.
   local.properties sdk.dir=/opt/android-sdk). Found someone else's broken tip? Tell its author/the coordinator with
   the compiler error; don't ship around it.
 ### PowOS (Linux) side
-- lib/ai (manager, comms): `targets/android/rooted/rooted.sh deploy --note "..."`. Other PowOS files through the deploy
+- lib/ai (manager, comms): `PATH="$PWD/tools/phone/bin:$PATH" targets/android/rooted/rooted.sh deploy --note "..."`
+  (rooted.sh calls plain adb; tools/phone/bin/adb routes it through adb.sh over the VPN). Other PowOS files through the deploy
   scripts (targets/android/rooted/powos-deploy.sh) as registered units (`powos units`, units/<host>/*.json); never
   unmanaged host installs.
 - PowOS apps: `powos app new|build|install|ui|publish|dev` (lib/apps/powos-app), run inside PowOS; the repo's apps/*

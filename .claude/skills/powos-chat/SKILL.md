@@ -46,8 +46,8 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
   page with what it names, in one push.
 - An APK install resets every override (handbook Shipping): only what is on origin survives it.
 - Before pushing, compare the installed APK's shell (~/.cache/powos-gate/installed/<key>/shell) with yours.
-- manager.py / comms-mcp.py reach the phone only through `targets/android/rooted/rooted.sh deploy --note ".."` (needs
-  local adb to the phone; it installs lib/ai/manager since a27042e). Check inside PowOS:
+- manager.py / comms-mcp.py reach the phone only through `targets/android/rooted/rooted.sh deploy --note ".."` (with
+  `PATH="$PWD/tools/phone/bin:$PATH"` so its plain adb goes over the VPN; it installs lib/ai/manager since a27042e). Check inside PowOS:
   `tools/phone/root.sh` a script that greps /usr/lib/powos/ai/manager/manager.py and runs comms-mcp.py tools/list with
   COMMS_AGENT_ID=manager.
 - No endless animation (the compositor re-blurs every frame): a running step is a still accent dot.
