@@ -37,6 +37,7 @@ import { watchRegistry } from "../apps/registry.ts";
 import { PetBody, type BodyHandle } from "./petbody.tsx";
 import { edges, fall, perchAt, placeOn, where as perchWhere, type Edge, type Perch } from "./petperch.ts";
 import { keyframes, plan } from "./petpath.ts";
+import { Mover } from "./petmove.ts";
 import { DbConnection as PetDb } from "../vendor/local-pet.js";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import type { AgentMail } from "../types.ts";
@@ -88,6 +89,18 @@ const perch = (): Perch | null => {
     return null;
   }
 };
+/**
+ * Its movement: "on" = the platformer controller (petphys.ts: it runs, jumps and climbs on home's live rects, one
+ * continuous position, no teleports); "off" = the keyframe hops (petpath.ts). Empty: the default below.
+ * `__pet.physics("on" | "off" | "")` sets it (the page reloads its layer).
+ */
+const physics = stored("pet.physics", "");
+const PHYSICS_DEFAULT = "off";
+const physicsOn = () => (physics.value || PHYSICS_DEFAULT) === "on";
+/** With physics on: it stands on a tile or the pill (the contact shadow), and its place at rest (the bubble's). */
+const physPerched = signal(false);
+const physRest = signal(0);
+
 /** Bumped when home's layout may have moved under it (a page settled, tiles changed, the screen resized). */
 const layout = signal(0);
 const toPx = (p: { x: number; y: number }) => ({
@@ -228,6 +241,8 @@ const forced = signal<State | null>(null);
     const e = edges().find((x) => x.key === key);
     if (e) hopTo(e, fx);
   },
+  /** Its movement: "on" (the platformer), "off" (keyframe hops), "" (the default). */
+  physics: (v: "on" | "off" | "") => (physics.value = v),
   /** `powos pet goto` from the page (review renders). */
   goto: (where: string, say = "") => goTo(where, say),
   /** The plan it would take there (review). */
@@ -711,6 +726,50 @@ function PetLayer() {
   useClocks(shown);
   const el = useRef<HTMLButtonElement>(null);
   const body = useRef<BodyHandle | null>(null);
+  // Physics on: one Mover drives the element (petmove.ts); its place is the simulation's, nothing else writes it.
+  const phys = physicsOn();
+  const mover = useRef<Mover | null>(null);
+  useEffect(() => {
+    const node = el.current;
+    if (!phys || !node) return;
+    const m = new Mover(node, size(), {
+      rest: (at) => {
+        if (at) perchStored.value = JSON.stringify(at);
+        physRest.value++;
+      },
+      ground: () => (physPerched.value = !!m.standing()),
+    });
+    mover.current = m;
+    // It first appears once home's layout has settled (the first layout bump), on its perch - before that it isn't
+    // shown, so the layout settling under it is never a move.
+    let spawned = false;
+    node.style.visibility = "hidden";
+    const offLayout = layout.subscribe((n) => {
+      if (!n) return;
+      if (!spawned) {
+        spawned = true;
+        const p = perch();
+        const start = toPx(pos());
+        m.spawn(p?.key ?? null, p?.fx ?? 0.5, start.left + size() / 2, start.top + size() * 0.94);
+        physPerched.value = !!m.standing();
+        node.style.visibility = "";
+        physRest.value++;
+        return;
+      }
+      m.resize(size());
+      m.wake();
+    });
+    const vis = () => !document.hidden && m.wake();
+    document.addEventListener("visibilitychange", vis);
+    return () => {
+      offLayout();
+      document.removeEventListener("visibilitychange", vis);
+      m.stop();
+      mover.current = null;
+      node.style.transform = "";
+      node.style.visibility = "";
+    };
+  }, [phys]);
   // Its eyes follow a finger anywhere on home while it's awake (touches only: no frames without one).
   useEffect(() => {
     if (!shown) return;
@@ -748,6 +807,13 @@ function PetLayer() {
       removeEventListener("resize", resize);
     };
   }, []);
+  // Physics: the chat surface opened - it goes to the pill as the chat's face (by its own moves).
+  const faceNow = chatOpen.value;
+  useEffect(() => {
+    if (!faceNow || !mover.current) return;
+    const bar = edges().find((x) => x.key === "bar");
+    if (bar) mover.current.goTo({ key: "bar", x: bar.left + 0.88 * (bar.right - bar.left) });
+  }, [faceNow]);
   // An agent got to work: it carries its parcel toward the board (once per start, while home shows).
   useEffect(() => {
     let was = busy.peek();
@@ -771,6 +837,13 @@ function PetLayer() {
   // A hop from its perch to [e] at [fx] along it: a short arc (one compositor animation), a squash on landing.
   // [then]: after it landed (a tap on the tile, a bubble).
   hopTo = (e: Edge, fx: number, then?: () => void, retries = 2) => {
+    if (mover.current) {
+      // Physics: it goes there by its own moves (petai.ts presses its buttons); [then] once it's there or as near as
+      // it gets. The planner re-plans on its own when the layout moves under it.
+      if (document.hidden) return;
+      mover.current.goTo({ key: e.key, x: e.left + fx * (e.right - e.left) }, () => then?.());
+      return;
+    }
     const node = el.current;
     const sz = size();
     // Its laid-out place (left/top), not its rect: a pose or a squash transforms the rect, and the path's keyframes
@@ -877,7 +950,7 @@ function PetLayer() {
       }),
     [],
   );
-  const press = useRef<{ x: number; y: number; dx: number; dy: number; lx: number; ly: number; moved: boolean; timer: number; long: boolean } | null>(null);
+  const press = useRef<{ x: number; y: number; dx: number; dy: number; lx: number; ly: number; moved: boolean; timer: number; long: boolean; fx?: number; fy?: number } | null>(null);
   // On the chat surface it's the chat's face (pet.css .face: by the pill); over the app list, menus, edit mode: away.
   const face = chatOpen.value;
   const hidden = (drawerOpen.value && !face) || editing.value || notifOpen.value || !!carry.value || !!menu.value;
@@ -887,14 +960,17 @@ function PetLayer() {
   void page.value;
   void home.value;
   const sz = size();
-  const pill = face ? document.querySelector<HTMLElement>(".bar .bar-pill, .bar")?.getBoundingClientRect() : null;
-  const list = face ? [] : edges();
+  // Physics: where the simulation has it (read at rest - physRest - for the bubble); nothing here moves it.
+  void physRest.value;
+  const pill = face && !phys ? document.querySelector<HTMLElement>(".bar .bar-pill, .bar")?.getBoundingClientRect() : null;
+  const list = face || phys ? [] : edges();
   const mine = perch();
-  const perched = !face && !!perchWhere(mine, sz, list);
+  const perched = phys ? physPerched.value : !face && !!perchWhere(mine, sz, list);
   const at =
+    (phys && mover.current?.pos()) ||
     (pill && placeOn({ key: "pill", left: pill.left, right: pill.right, top: pill.top }, 0.88, sz)) ||
-    perchWhere(mine, sz, list) ||
-    (mine && list.length ? perchWhere(perchAt(innerWidth - sz, innerHeight * 0.68, list), sz, list) : null) ||
+    (phys ? null : perchWhere(mine, sz, list)) ||
+    (!phys && mine && list.length ? perchWhere(perchAt(innerWidth - sz, innerHeight * 0.68, list), sz, list) : null) ||
     toPx(pos());
   const s = state.value;
   return (
@@ -904,11 +980,11 @@ function PetLayer() {
       <button
         type="button"
         ref={el}
-        class={`pet ${hidden ? "away" : ""} ${face ? "face" : ""} ${perched ? "perched" : ""}`}
+        class={`pet ${phys ? "phys" : ""} ${hidden ? "away" : ""} ${face ? "face" : ""} ${perched ? "perched" : ""}`}
         data-state={s}
         data-night={night(clock.value) ? "" : undefined}
         aria-label={`${name.value}: ${s} - tap to talk, hold for PowOS AI's page`}
-        style={{ left: `${at.left}px`, top: `${at.top}px` }}
+        style={phys ? undefined : { left: `${at.left}px`, top: `${at.top}px` }}
         onPointerDown={(e) => {
           e.stopPropagation();
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -931,11 +1007,15 @@ function PetLayer() {
             p.moved = true;
             clearTimeout(p.timer);
             el.current?.classList.add("dragging");
+            // Physics: the finger holds it by its feet from where they are now.
+            const g = mover.current?.grab();
+            if (g) Object.assign(p, { fx: g.x, fy: g.y });
           }
           if (p.moved && el.current) {
             // The body lags the finger: this move's step, as a push (it wobbles back when the finger rests).
             body.current?.push((p.dx - p.lx) * 0.35, (p.dy - p.ly) * 0.35);
-            el.current.style.transform = `translate(${p.dx}px, ${p.dy}px)`;
+            if (mover.current) mover.current.drag((p.fx ?? 0) + p.dx, (p.fy ?? 0) + p.dy);
+            else el.current.style.transform = `translate(${p.dx}px, ${p.dy}px)`;
           }
           p.lx = p.dx;
           p.ly = p.dy;
@@ -945,6 +1025,12 @@ function PetLayer() {
           press.current = null;
           if (!p) return;
           clearTimeout(p.timer);
+          if (p.moved && mover.current) {
+            // Physics: let go with the finger's speed; it falls and lands where it lands.
+            el.current?.classList.remove("dragging");
+            mover.current.release();
+            return;
+          }
           if (p.moved) {
             const node = el.current;
             if (!node) return;
@@ -987,7 +1073,9 @@ function PetLayer() {
           const p = press.current;
           press.current = null;
           if (p) clearTimeout(p.timer);
-          if (el.current) {
+          mover.current?.release();
+          if (el.current && mover.current) el.current.classList.remove("dragging");
+          else if (el.current) {
             el.current.style.transform = "";
             el.current.classList.remove("dragging", "falling");
           }

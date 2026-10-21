@@ -64,6 +64,19 @@ The same pet in Plasma (a KWin effect or plasmoid) from the same `local.pet` sta
 name, mood (+ until), energy, xp/level, **perch** (tile key + offset), **memories** (short facts it shows sometimes:
 "you named me Pow on Oct 21"). Additive schema changes only.
 
+## Movement (step e, the platformer) - shell/ui/petphys.ts, petai.ts, petmove.ts
+- **One position source**: a fixed-step (120 Hz) controller - gravity, run acceleration/friction, a jump as high as
+  it's held, coyote time, a jump buffer, wall slide, wall jump (a climbing jump when held into the wall), down through
+  a floor. Tiles and the pill are one-way floors (their sides walls at its feet's height), the screen's sides walls,
+  its foot a floor. Per axis, swept: nothing tunnels; a moving rect carries it (capped px a step), one that jumps or
+  goes drops it; a smaller screen walks it back in. No step moves it more than petphys.ts MAX_STEP.
+- **The planner presses buttons**: routes are hops between surfaces, each one played first in a copy of the world with
+  the same physics; live it drives closed-loop and replans from where it is when a hop ends elsewhere.
+- **Squash/stretch**: one spring from its real velocity and landings, clamped to +-25%, on the same transform.
+- **Frames**: rAF only while it moves (fixed steps, drawn interpolated); at rest none.
+- Flag: localStorage `powos.pet.physics` = on/off (`__pet.physics("on")`); pet.tsx PHYSICS_DEFAULT is the default.
+- Tests: `node --test shell/test/petphys.test.ts`; in the real page headless: shell/dev/petrec.mjs.
+
 ## Steps (each one gated, reviewed by the manager BEFORE it reaches the phone)
 1. (a) body + spring physics + eye tracking (still floating where v1 sits) - **0 frames idle**.
 2. (b) perching: tile edges as floors, walk, hop, fling, remembered perch; shade/pill behaviour.
