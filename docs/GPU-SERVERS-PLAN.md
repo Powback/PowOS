@@ -197,6 +197,21 @@ platform). VoiceAgent ran unchanged: config only (branch `server-gpu195` in `~/P
 GPU0 total: 15.5 GiB of 24, including about 30 MB for the desktop's kwin. It sits at P2, about 130 W, with everything
 resident; GPU1 is idle at P8, about 19 W.
 
+**STT for everything else on GPU1** (2026-10-21): `stt-batch`, the same whisper-fast image and model as `voice-stt`,
+resident on GPU1 (2.4 GiB), :8001, served as `http://stt.pow` (Traefik on `.100`, PowStation
+`config/traefik/dynamic/stt.yml`; Pi-hole `dns.hosts`). Files and dictation from every PowOS (`powos transcribe`,
+anything OpenAI-compatible) never queue a voice turn: GPU0 stays the voice path's alone, and the batch container gets
+2 CPUs at cpu-shares 128. Settings: Silero VAD, timestamps on for audio over one 30 s window (without them
+faster-whisper drops the words at window boundaries: 84% of a 12 min recording's words came back instead of ~100%),
+500 MB uploads (413), 4 requests running or waiting (503; Traefik inFlightReq 4 -> 429), `stream=true` SSE.
+
+| measured 2026-10-21 | |
+|---|---|
+| 3.3 s clip via stt.pow (Mac, LAN) | 0.08-0.13 s round trip |
+| 12 min 12 s speech (23 MB wav / 3 MB m4a) | 12.0-12.8 s (~60x realtime), GPU1 ~86% |
+| voice-bench `stt` / `ws` idle | 55.9 ms; end of speech -> first audio 644 ms |
+| same, while 12 min files transcribe back to back on stt.pow | 60.2 ms; 615 ms (unchanged) |
+
 - vLLM's budget: 0.42 with the default `--max-num-seqs` (256) left 1.35 GiB of KV cache, and one 16k sequence needs
   2.25 GiB, so vLLM refused to start. With `--max-num-seqs 16` and `--gpu-memory-utilization 0.45`, it gets 4.5 GiB
   of KV (33k tokens).

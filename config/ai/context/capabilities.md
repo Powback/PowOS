@@ -231,6 +231,17 @@ Key facts an agent should CHECK before starting:
   validation. See docs/HIBERNATION.md. `powos boot windows` (UEFI BootNext,
   one-shot reboot to Windows) IS built. ✅
 
+## Speech (speech to text)
+- `powos transcribe FILE|- [--lang xx] [--json] [--format srt|vtt]` (`powos transcribe --help`): any audio/video file
+  to text on the GPU server, from any PowOS (desktop, phone, the Mac). Text streams as it's recognized; ~0.1 s for a
+  short clip, ~12 s for 12 minutes of speech. Endpoint: `POWOS_STT_URL` (env or /etc/powos/config), else
+  `http://stt.pow` (LAN + VPN only; no public route).
+- `stt.pow` is OpenAI-compatible (`POST /v1/audio/transcriptions`, multipart `file` + `language` + `response_format`
+  json|text|verbose_json|srt|vtt, `stream=true` for SSE): whisper large-v3-turbo on gpu-195's GPU1 (unit `stt-batch`),
+  500 MB uploads, 4 requests at a time (then 429/503: retry). Any tool that speaks the OpenAI audio API can use it.
+- The realtime voice path (voiceagent.pow, unit `voice-stt` on GPU0) is separate on purpose: files never delay it.
+- The phone's dictation (prompt bar, PowOS AI, assist) is Android's own recognizer, not stt.pow.
+
 ## PowOS on a phone (Android)
 
 You may be running on a phone: `/etc/powos/platform` reads `phone` and the session exports `POWOS_PLATFORM=phone`.

@@ -3,6 +3,7 @@
 # Run as the user powos on the box, from the PowOS checkout (~/Projects/PowOS, `git pull` first). Idempotent.
 #
 #   GPU0: voice-stt (faster-whisper large-v3-turbo, whisper-fast) + voice-tts (Kokoro) + voice-llm (vLLM Qwen3-8B-AWQ), resident
+#   GPU1: stt-batch (the same whisper-fast, for files and dictation: http://stt.pow), resident
 #   CPU:  voice-agent (VoiceAgent backend, /ws) + voice-web (Astro UI)
 #
 # Everything is a rootless podman quadlet (~/.config/containers/systemd -> systemd --user, linger on, so it starts at
@@ -44,6 +45,6 @@ systemctl --user daemon-reload
 for m in "$REPO"/units/gpu-195/*.json; do
     python3 "$REPO/lib/apps/powos-units" register "$m"
 done
-systemctl --user start voice-stt.service voice-tts.service voice-llm.service
+systemctl --user start voice-stt.service voice-tts.service voice-llm.service stt-batch.service
 systemctl --user restart voice-agent.service voice-web.service
-echo "voice path up: http://voiceagent.pow (Traefik on .100), backend :9000, stt :8000, tts :8880, llm :8100"
+echo "voice path up: http://voiceagent.pow (Traefik on .100), backend :9000, stt :8000, tts :8880, llm :8100; stt.pow :8001"
