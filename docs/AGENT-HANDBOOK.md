@@ -107,5 +107,10 @@ for (one line each).
   Waiting for the phone to be free is `tools/phone/idle.sh --wait IDLE_S MAX_S` (one held call; the waiting runs on the
   phone) - ship-apk uses it. Batch several commands into one adb call. Not a battery-based behaviour: the product and
   your work never change with the battery level; this is about not wasting the phone.
+- CDP on the LIVE pages is READ-ONLY: read state, computed styles, rects. Never set signals, CSS variables, classes or
+  call actions that change what the user sees (2026-10-21: checks that set the drawer's --p and opened panels in the live
+  home showed the drawer and the AI page opening on the user's screen, in a recording too). To exercise UI, use the
+  headless gate (shell/dev/gate.sh --shots / --tree), or a separate offscreen page; on the phone, only in a free window
+  (idle.sh --wait) and restored in the same call. Never drive real devices (lights, Hue) without the user's say.
 - Commit before you push a shell file: an APK install resets all shell overrides (only committed work survives).
 - The assist overlay's circle-to-select + crop flow is core, never "chrome": never remove it.
