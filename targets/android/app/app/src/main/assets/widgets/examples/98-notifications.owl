@@ -4,7 +4,7 @@ widget "notifications" {
   size: 6x4
   minSize: 3x2
 
-  meta { owl: 4; description: "The phone's notifications: tap one to open it, x to clear it."; version: "1.0"; license: "MIT"; category: "productivity" }
+  meta { owl: 6; description: "The phone's notifications: tap one to open it, x to clear it."; version: "1.0"; license: "MIT"; category: "productivity" }
 
   // Android's notification shade, updated as notifications come and go. No shell involved.
   source n = android.notifications
@@ -19,32 +19,52 @@ widget "notifications" {
       Button { text: "allow"; onTap: notification("open", "") }
     }
   } else {
+    // Whole notifications only, never a scroll (a tile can't take one): each one's height counted from its wrapped
+    // lines (monospace: 0.6 em a character, a line 1.4 em), as many as fit shown, spread over the tile's height.
+    // Each a soft card (no lines); one alone fills the tile. The app as its package's last name. Sized from the
+    // tile, never fixed.
+    let iw = tileWidth == null ? 340 : tileWidth - 24
+    let ih = tileHeight == null ? 250 : tileHeight - 24
+    let ls = clamp(floor(min(ih * 0.045, iw / 26)), 9, 16)
+    let fs = clamp(floor(min(iw / 18, ih * 0.09)), 11, 26)
+    let ts = clamp(floor(fs * 0.85), 10, 19)
+    let tw = iw - 36 - 20
+    let cpf = max(1, floor(tw / (fs * 0.6)))
+    let cpt = max(1, floor(tw / (ts * 0.6)))
+    let heights = n.items.map(i => (ls + fs * min(2, ceil(max(len(i.title ?? ""), 1) / cpf)) + (i.text == "" || i.text == null ? 0 : ts * min(3, ceil(len(i.text) / cpt)))) * 1.4 + 14)
+    let budget = ih - ls * 1.4 - 6
+    let fits = count(range(len(n.items)), k => sum(take(heights, k + 1)) + k * 8 <= budget)
+
     Column {
       gap: 6
       fill: true
       Row {
-        Text { text: "notifications"; style: muted; weight: 1 }
-        Text { text: n.count; style: muted; width: 40; align: end }
+        Text { text: "notifications"; fontSize: ls; color: muted; weight: 1; maxLines: 1 }
+        Text { text: n.count; fontSize: ls; color: muted; width: ls * 3; align: end; maxLines: 1 }
       }
       if n.count == 0 {
-        Text { text: "all clear"; style: small }
+        Text { text: "all clear"; fontSize: fs; color: muted }
       }
       Column {
         gap: 8
         weight: 1
-        scroll: true
-        for item in n.items key item.key {
+        justify: fits > 1 ? "spaceBetween" : "start"
+        for item in take(n.items, fits) key item.key {
           Row {
             gap: 8
             align: top
+            padding: [10, 6]
+            background: alpha(foreground, 0.07)
+            radius: 8 * corners
+            weight: fits == 1 ? 1 : null
             Column {
               gap: 0
               weight: 1
               onTap: notification("open", item.key)
-              Text { text: "${item.app} · ${fmtTime(item.time, "HH:mm")}"; style: label; maxLines: 1 }
-              Text { text: item.title; bold: true; maxLines: 1 }
+              Text { text: "${last(split(item.app ?? "", "."))} · ${fmtTime(item.time, "HH:mm")}"; fontSize: ls; color: muted; maxLines: 1 }
+              Text { text: item.title; fontSize: fs; bold: true; maxLines: 2 }
               if item.text != "" {
-                Text { text: item.text; style: small; maxLines: 2 }
+                Text { text: item.text; fontSize: ts; maxLines: 3 }
               }
             }
             if item.clearable {

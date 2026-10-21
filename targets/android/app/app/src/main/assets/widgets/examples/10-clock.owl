@@ -10,10 +10,66 @@ widget "clock" {
 
   onTap: launcher("themes")
 
+  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.35 em tall - 1.4 budgeted). Four ways
+  // to lay it out - the time on one line "HH:mm" or stacked "HH" over "mm", the date on one line or as weekday over
+  // day and month - each sized so the date fills the width (at most 0.4 of the time) and the time takes the height
+  // left (at most its own width): the one covering most of the tile wins, the time stacked only
+  // where that covers clearly more. The theme's name goes in what's left over.
+  // One line each, never cut.
+  let iw = tileWidth == null ? 340 : tileWidth - 24
+  let ih = tileHeight == null ? 180 : tileHeight - 24
+  let day = fmtTime(now, "EEEE, d MMMM")
+  let wday = fmtTime(now, "EEEE")
+  let dm = fmtTime(now, "d MMMM")
+  let label = "omarchy · ${trim(theme)}"
+  let d1 = iw / (len(day) * 0.6)
+  let d2 = iw / (max(len(wday), len(dm)) * 0.6)
+  let f1 = iw / (5 * 0.6)
+  let f2 = iw / (2 * 0.6)
+  // [time lines, date lines] -> the time's size T and the date's D, and how much of the tile they cover.
+  let tA = min(f1, (ih - min(d1, f1 * 0.4) * 1.4) / 1.4)
+  let dA = min(d1, tA * 0.4)
+  let cA = min(1, (tA + dA) * 1.4 / ih) * min(1, max(tA * 5 * 0.57, dA * len(day) * 0.6) / iw)
+  let tB = min(f1, (ih - min(d2, f1 * 0.4) * 2.8) / 1.4)
+  let dB = min(d2, tB * 0.4)
+  let cB = min(1, (tB + dB * 2) * 1.4 / ih) * min(1, max(tB * 5 * 0.57, dB * max(len(wday), len(dm)) * 0.6) / iw)
+  let tC = min(f2, (ih - min(d1, f2 * 0.4) * 1.4) / 2.8)
+  let dC = min(d1, tC * 0.4)
+  let cC = min(1, (tC * 2 + dC) * 1.4 / ih) * min(1, max(tC * 2 * 0.57, dC * len(day) * 0.6) / iw)
+  let tD = min(f2, (ih - min(d2, f2 * 0.4) * 2.8) / 2.8)
+  let dD = min(d2, tD * 0.4)
+  let cD = min(1, (tD + dD) * 2.8 / ih) * min(1, max(tD * 2 * 0.57, dD * max(len(wday), len(dm)) * 0.6) / iw)
+  // The time reads best on one line: stacked only where that covers clearly more (by 15%).
+  let flat = max(cA, cB)
+  let tall = max(cC, cD)
+  let stacked = tall > flat * 1.15
+  let best = stacked ? tall : flat
+  let split = best == cB || best == cD
+  let tz = clamp(floor(best == cA ? tA : best == cB ? tB : best == cC ? tC : tD), 12, 240)
+  let ds = clamp(floor(best == cA ? dA : best == cB ? dB : best == cC ? dC : dD), 8, 60)
+  let used = (tz * (stacked ? 2 : 1) + ds * (split ? 2 : 1)) * 1.4
+  let ls = clamp(floor(min(ds * 0.8, iw / (len(label) * 0.6))), 8, 40)
+  let withTheme = ih - used >= ls * 1.4 + 6
+
   Column {
-    Text { text: fmtTime(now, "HH:mm"); style: huge; color: accent }
-    Text { text: fmtTime(now, "EEEE, d MMMM"); style: title }
-    Spacer { size: 8 }
-    Text { text: "omarchy · ${theme}"; style: muted }
+    fill: height; align: center; gap: 0
+    Spacer { weight: 1 }
+    if stacked {
+      Text { text: fmtTime(now, "HH"); fontSize: tz; color: accent; align: center; maxLines: 1 }
+      Text { text: fmtTime(now, "mm"); fontSize: tz; color: accent; align: center; maxLines: 1 }
+    } else {
+      Text { text: fmtTime(now, "HH:mm"); fontSize: tz; color: accent; align: center; maxLines: 1 }
+    }
+    if split {
+      Text { text: wday; fontSize: ds; align: center; maxLines: 1 }
+      Text { text: dm; fontSize: ds; align: center; maxLines: 1 }
+    } else {
+      Text { text: day; fontSize: ds; align: center; maxLines: 1 }
+    }
+    if withTheme {
+      Spacer { size: 6 }
+      Text { text: label; fontSize: ls; color: muted; align: center; maxLines: 1 }
+    }
+    Spacer { weight: 1 }
   }
 }

@@ -13,24 +13,37 @@ widget "now playing" {
   let allowed = m == null || m.available != false
   let dur = num(m.duration, 0)
   let pos = dur > 0 ? clamp(num(m.position, 0), 0, dur) : num(m.position, 0)
-  let narrow = cols != null && cols < 5
-  let art = clamp((tileHeight ?? 130) - 26, 40, 132)
-  // A tile taller than wide (landscape home screen, or a tall portrait tile) stacks
-  // art, text and controls vertically instead of side by side.
-  let tall = tileWidth != null && tileHeight != null && tileHeight > tileWidth * 1.3
-  let tallArt = tall ? clamp(min(tileWidth - 26, tileHeight * 0.45), 40, 240) : 0
+  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted). Side by side - the
+  // art square, as tall as the tile (at most 0.42 of its width), where the width leaves the words ~110 dp - or, a
+  // tile taller than wide, stacked: art, words, progress and controls. The words as big as their width and the
+  // height allow, the controls a share of the height.
+  let iw = tileWidth == null ? 340 : tileWidth - 24
+  let ih = tileHeight == null ? 106 : tileHeight - 24
+  let tall = ih > iw * 1.15
+  let title = m.title ?? ""
+  let both = [m.artist, m.album].filter(x => x != null && x != "").join(" · ")
+  let artD = tall ? clamp(floor(min(iw, ih * 0.42)), 40, 360) : floor(min(ih, iw * 0.42))
+  let side = !tall && iw - artD - 12 >= 110
+  let tw = tall ? iw : side ? iw - artD - 12 : iw
+  let ctl = clamp(floor(min(tall ? ih * 0.12 : ih * 0.3, tw / 4.5)), 28, 84)
+  let ls = clamp(floor(min(ih * 0.07, tw / 22)), 9, 18)
+  let words = (tall ? ih - artD - 8 : ih) - ctl - (dur > 0 ? ls * 1.4 + 8 : 0) - ls * 1.4 - 8
+  let fs = clamp(floor(min(tw / (max(len(title), 4) * 0.6), words * 0.55 / 1.4)), 11, 44)
+  // Artist and album where they fit at 9 dp or more, else the artist alone.
+  let who = tw / (max(len(both), 4) * 0.6) >= 9 ? both : (m.artist ?? both)
+  let ws = clamp(floor(min(tw / (max(len(who), 4) * 0.6), fs * 0.75, words * 0.4 / 1.4)), 9, 32)
 
   onTap: media("open")
 
   component Clock(s) {
-    Text { text: s == null ? "" : "${floor(s / 60)}:${pad(floor(s % 60), 2, "0")}"; style: label; color: muted; font: mono; maxLines: 1; width: len("${floor(s / 60)}") * 7 + 22 }
+    Text { text: s == null ? "" : "${floor(s / 60)}:${pad(floor(s % 60), 2, "0")}"; fontSize: ls; color: muted; font: mono; maxLines: 1; width: (len("${floor(s / 60)}") + 3) * ls * 0.62 + 4 }
   }
 
   // Drawn, not glyphs: the launcher's icon font only carries weather symbols. Paths need an
   // explicit fill: to be filled. Play/pause is a solid disc with the glyph in the background color.
   component Control(kind, big = false) {
     Box {
-      size: big ? 38 : 32
+      size: big ? ctl : round(ctl * 0.84)
       onTap: media(kind)
       Canvas {
         let cx = width / 2
@@ -92,7 +105,7 @@ widget "now playing" {
       if m.playing == true {
         Bars { }
       }
-      Text { text: lower(m.app ?? ""); style: label; color: m.playing == true ? accent : muted; maxLines: 1; weight: 1 }
+      Text { text: lower(m.app ?? ""); fontSize: ls; color: m.playing == true ? accent : muted; maxLines: 1; weight: 1 }
     }
   }
 
@@ -100,46 +113,46 @@ widget "now playing" {
     Column {
       justify: center
       gap: 6
-      Text { text: "now playing"; style: muted }
-      Text { text: "Allow notification access so the launcher can see what's playing. Tap to open the setting."; style: small; maxLines: 3 }
+      fill: height
+      Text { text: "now playing"; fontSize: ls; color: muted }
+      Text { text: "Allow notification access so the launcher can see what's playing. Tap to open the setting."; fontSize: clamp(floor(min(tw / 16, ih / 6)), 11, 22); maxLines: 4 }
     }
   } else {
     if !has {
+      // Nothing playing: the art's note and two lines, at the same sizes.
       if tall {
         Column {
-          gap: 10
-          Art { src: null; d: tallArt }
-          Text { text: "nothing playing"; style: body; color: muted }
-          Text { text: "start music in any app"; style: small; color: muted; maxLines: 2 }
+          gap: 8; fill: height; align: center
+          Art { src: null; d: artD }
+          Spacer { weight: 1 }
+          Text { text: "nothing playing"; fontSize: clamp(floor(iw / (15 * 0.6)), 11, 40); color: muted; align: center; maxLines: 1 }
+          Text { text: "start music in any app"; fontSize: clamp(floor(iw / (22 * 0.6)), 9, 28); color: muted; align: center; maxLines: 1 }
+          Spacer { weight: 1 }
         }
       } else {
         Row {
-          align: center
-          gap: 12
-          Art { src: null; d: art }
+          align: center; gap: 12; fill: height
+          if side { Art { src: null; d: artD } }
           Column {
-            weight: 1
-            gap: 2
-            Text { text: "nothing playing"; style: body; color: muted }
-            Text { text: "start music in any app"; style: small; color: muted; maxLines: 1 }
+            weight: 1; gap: 2
+            Text { text: "nothing playing"; fontSize: clamp(floor(min(tw / (15 * 0.6), ih * 0.3)), 11, 40); color: muted; maxLines: 1 }
+            Text { text: "start music in any app"; fontSize: clamp(floor(min(tw / (22 * 0.6), ih * 0.2)), 9, 28); color: muted; maxLines: 1 }
           }
         }
       }
     } else {
       if tall {
         Column {
-          gap: 8
-          Art { src: m.art; d: tallArt }
+          gap: 8; fill: height
+          Art { src: m.art; d: artD }
           Column {
-            gap: 2
+            gap: 2; weight: 1; justify: center
             AppLine { }
-            Text { text: m.title; style: body; bold: true; maxLines: 3 }
-            Text { text: m.artist ?? ""; style: small; color: muted; maxLines: 2 }
-            Text { text: m.album ?? ""; style: small; color: muted; maxLines: 1 }
+            Text { text: title; fontSize: fs; bold: true; maxLines: 1 }
+            if who != "" { Text { text: who; fontSize: ws; color: muted; maxLines: 1 } }
           }
-          Spacer { weight: 1 }
           if dur > 0 {
-            Progress { value: pos; max: dur; color: accent; track: alpha(muted, 0.2); animate value: tween(900ms, "linear") }
+            Progress { value: pos; max: dur; color: accent; track: alpha(muted, 0.2); height: clamp(round(ctl * 0.1), 3, 8); animate value: tween(900ms, "linear") }
             Row {
               align: center
               gap: 4
@@ -150,7 +163,7 @@ widget "now playing" {
           }
           Row {
             align: center
-            gap: 4
+            gap: round(ctl * 0.3)
             Spacer { weight: 1 }
             Control { kind: "previous" }
             Control { kind: "toggle"; big: true }
@@ -162,25 +175,28 @@ widget "now playing" {
         Row {
           align: center
           gap: 12
-          if !narrow {
-            Art { src: m.art; d: art }
+          fill: height
+          if side {
+            Art { src: m.art; d: artD }
           }
           Column {
             weight: 1
             gap: 2
+            fill: height
             AppLine { }
-            Text { text: m.title; style: body; bold: true; maxLines: narrow ? 2 : 1 }
-            Text { text: [m.artist, narrow ? null : m.album].filter(x => x != null).join(" · "); style: small; color: muted; maxLines: 1 }
+            Spacer { weight: 1 }
+            Text { text: title; fontSize: fs; bold: true; maxLines: 1 }
+            if who != "" { Text { text: who; fontSize: ws; color: muted; maxLines: 1 } }
             Spacer { weight: 1 }
             if dur > 0 {
-              Progress { value: pos; max: dur; color: accent; track: alpha(muted, 0.2); animate value: tween(900ms, "linear") }
+              Progress { value: pos; max: dur; color: accent; track: alpha(muted, 0.2); height: clamp(round(ctl * 0.1), 3, 8); animate value: tween(900ms, "linear") }
             }
             Row {
               align: center
               gap: 4
               if dur > 0 {
                 Clock { s: pos }
-                Text { text: "/"; style: label; color: alpha(muted, 0.5); width: 8 }
+                Text { text: "/"; fontSize: ls; color: alpha(muted, 0.5); width: round(ls * 0.8) }
                 Clock { s: dur }
               }
               Spacer { weight: 1 }

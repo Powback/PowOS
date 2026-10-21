@@ -6,7 +6,7 @@
  },
  "m": {
   "dnd": false,
-  "ringer": 2,
+  "ringer": "normal",
   "saver": false,
   "torch": false
  }
