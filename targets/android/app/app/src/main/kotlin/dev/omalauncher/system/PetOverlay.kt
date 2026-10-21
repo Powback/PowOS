@@ -32,6 +32,8 @@ import kotlin.math.hypot
  * - Its touches are native (no page round trip): a drag moves the window (the page gets "petover.drag" for the body's
  *   wobble), let go it glides to the nearest side edge and stays at that height; a tap opens the assistant (listening,
  *   no screen); a hold (550 ms) asks about this screen - the side button's session, with the screen's text and picture.
+ * - Out of the way: 10 s untouched it tucks half behind its edge and fades to 70% (peeking); a touch pulls it out
+ *   first. The keyboard up: it goes (the IME flag in SystemUI's state).
  */
 class PetOverlay(
     private val service: Context,
@@ -49,6 +51,9 @@ class PetOverlay(
     private var keyguard = false
     private var shadeOpen = false
     private var fullScreen = false
+    private var ime = false
+    private var peeking = false
+    private val tuck = Runnable { peek(true) }
 
     private val density get() = context.resources.displayMetrics.density
     private val sizePx get() = (SIZE_DP * density).toInt()
@@ -90,6 +95,7 @@ class PetOverlay(
     fun systemUiState(flags: Long) {
         keyguard = flags and (SYSUI_KEYGUARD_SHOWING or SYSUI_BOUNCER_SHOWING) != 0L && flags and SYSUI_KEYGUARD_OCCLUDED == 0L
         shadeOpen = flags and (SYSUI_NOTIFICATION_PANEL_EXPANDED or SYSUI_QUICK_SETTINGS_VISIBLE) != 0L
+        ime = flags and SYSUI_IME_VISIBLE != 0L
         update()
     }
 
@@ -100,12 +106,14 @@ class PetOverlay(
     }
 
     fun update() {
-        val want = enabled(service) && !homeVisible && !keyguard && !shadeOpen && !assistShowing && !fullScreen
+        val want = enabled(service) && !homeVisible && !keyguard && !shadeOpen && !assistShowing && !fullScreen && !ime
         val r = root ?: return
         if (want == shown) return
         shown = want
         r.visibility = if (want) View.VISIBLE else View.GONE
         host?.web?.let { if (want) it.onResume() else it.onPause() }
+        r.removeCallbacks(tuck)
+        if (want) r.postDelayed(tuck, PEEK_AFTER_MS)
         Log.i(TAG, "pet over apps ${if (want) "shown" else "hidden"}")
     }
 
@@ -121,7 +129,9 @@ class PetOverlay(
             sizePx,
             sizePx,
             TYPE,
+            // NO_LIMITS: it can tuck half off screen (peeking).
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
@@ -154,6 +164,28 @@ class PetOverlay(
         emit("petover.drop", null)
     }
 
+    /** Tucked half behind its edge and faded ([on]), or out in full. */
+    private fun peek(on: Boolean) {
+        val p = params ?: return
+        val r = root ?: return
+        if (on == peeking) return
+        peeking = on
+        val m = context.resources.displayMetrics
+        val right = p.x + sizePx / 2 > m.widthPixels / 2
+        val out = if (right) m.widthPixels - sizePx else 0
+        val to = if (!on) out else if (right) m.widthPixels - sizePx / 2 else -sizePx / 2
+        r.animate().alpha(if (on) PEEK_ALPHA else 1f).setDuration(220).start()
+        ValueAnimator.ofInt(p.x, to).apply {
+            duration = 240
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                p.x = it.animatedValue as Int
+                runCatching { wm.updateViewLayout(r, p) }
+            }
+            start()
+        }
+    }
+
     private inner class Root(
         context: Context,
     ) : FrameLayout(context) {
@@ -182,11 +214,16 @@ class PetOverlay(
             val p = params ?: return false
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    // A touch pulls it out of its peek, and the 10 s start again.
+                    removeCallbacks(tuck)
+                    // Out of its peek: the drag starts from where it's sliding to (in full at its edge).
+                    val w = context.resources.displayMetrics.widthPixels
+                    startX = if (peeking) (if (p.x + sizePx / 2 > w / 2) w - sizePx else 0) else p.x
+                    if (peeking) peek(false)
                     downX = ev.rawX
                     downY = ev.rawY
                     lastX = ev.rawX
                     lastY = ev.rawY
-                    startX = p.x
                     startY = p.y
                     dragging = false
                     held = false
@@ -213,6 +250,7 @@ class PetOverlay(
                 }
                 MotionEvent.ACTION_UP -> {
                     removeCallbacks(hold)
+                    postDelayed(tuck, PEEK_AFTER_MS)
                     when {
                         dragging -> settle()
                         held -> Unit
@@ -224,6 +262,7 @@ class PetOverlay(
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     removeCallbacks(hold)
+                    postDelayed(tuck, PEEK_AFTER_MS)
                     if (dragging) settle()
                 }
             }
@@ -238,6 +277,8 @@ class PetOverlay(
         private const val TYPE = 2017
         private const val SIZE_DP = 84
         private const val HOLD_MS = 550L
+        private const val PEEK_AFTER_MS = 10_000L
+        private const val PEEK_ALPHA = 0.7f
 
         // QuickStepContract.SYSUI_STATE_* (this phone's SystemUI: getSystemUiStateString).
         private const val SYSUI_NOTIFICATION_PANEL_EXPANDED = 1L shl 2
@@ -245,6 +286,7 @@ class PetOverlay(
         private const val SYSUI_KEYGUARD_SHOWING = 1L shl 6
         private const val SYSUI_KEYGUARD_OCCLUDED = 1L shl 9
         private const val SYSUI_QUICK_SETTINGS_VISIBLE = 1L shl 11
+        private const val SYSUI_IME_VISIBLE = 1L shl 18
 
         var current: PetOverlay? = null
             private set
