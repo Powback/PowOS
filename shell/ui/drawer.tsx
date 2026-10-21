@@ -1,5 +1,5 @@
 /**
- * The drawer: every app A to Z under letter headings, with an A-Z bar to tap or slide along (as PowOS's start
+ * The drawer: every app A to Z in one grid, no headings or breaks between letters, with an A-Z bar to tap or slide along (as PowOS's start
  * menu). Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
  * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
@@ -20,14 +20,15 @@ function heading(label: string) {
   return first >= "A" && first <= "Z" ? first : "#";
 }
 
-const sections = computed(() => {
-  const groups = new Map<string, App[]>();
-  for (const app of [...apps.value].sort((a, b) => collator.compare(a.label, b.label))) {
+/** Every app A to Z, and where each letter's first app is in that list. */
+const sorted = computed(() => {
+  const list = [...apps.value].sort((a, b) => collator.compare(a.label, b.label));
+  const first = new Map<string, number>();
+  list.forEach((app, i) => {
     const h = heading(app.label);
-    if (!groups.has(h)) groups.set(h, []);
-    groups.get(h)!.push(app);
-  }
-  return ALPHABET.filter((l) => groups.has(l)).map((l) => [l, groups.get(l)!] as const);
+    if (!first.has(h)) first.set(h, i);
+  });
+  return { list, first };
 });
 
 /** Matches for what's typed: names starting with it first, then words starting with it, then anywhere in them. */
@@ -83,12 +84,13 @@ function LetterBar({ onPick }: { onPick: (letter: string) => void }) {
 export function Drawer() {
   const list = useRef<HTMLDivElement>(null);
   const jump = (letter: string) => {
-    // Its own heading, else the next letter's, else the last ("#": the first). At once: a smooth scroll restarted for
-    // every letter a sliding finger crosses lagged behind it.
+    // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
+    // letter a sliding finger crosses lagged behind it.
+    const { first } = sorted.value;
     const i = ALPHABET.indexOf(letter);
-    const target = sections.value.find(([l]) => ALPHABET.indexOf(l) >= i) ?? sections.value.at(-1);
-    const el = target && list.current?.querySelector<HTMLElement>(`[data-letter="${target[0]}"]`);
-    if (el) list.current!.scrollTop = el.offsetTop - list.current!.offsetTop;
+    const l = ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x));
+    const el = l != null ? list.current?.querySelector<HTMLElement>(`.grid > :nth-child(${first.get(l)! + 1})`) : null;
+    if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
   const searching = query.value.trim() !== "";
   // No app by that name: it's a question for PowOS AI. Asked, the chat stays until the search finds apps again.
@@ -109,18 +111,11 @@ export function Drawer() {
               ))}
             </div>
           ) : (
-            sections.value.map(([letter, group]) => (
-              <section key={letter}>
-                <h2 class="heading muted" data-letter={letter}>
-                  {letter}
-                </h2>
-                <div class="grid">
-                  {group.map((app) => (
-                    <AppCell key={app.key} app={app} draggable />
-                  ))}
-                </div>
-              </section>
-            ))
+            <div class="grid">
+              {sorted.value.list.map((app) => (
+                <AppCell key={app.key} app={app} draggable />
+              ))}
+            </div>
           )}
         </div>
       )}
