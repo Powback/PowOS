@@ -118,6 +118,9 @@ class ShellHost(
     /** The whole window blurred behind (the switcher's depth), beside the glass's regions; false: not this way. */
     fun wholeWindow(radiusPx: Float): Boolean = native.glass?.wholeWindow(radiusPx) ?: false
 
+    /** The page's window surface (home's), for WallpaperBackdrop to leave out. */
+    fun windowSurface(): android.view.SurfaceControl? = native.glass?.windowSurface()
+
     fun destroy() {
         styleWatch?.cancel()
         bootSerial++

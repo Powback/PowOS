@@ -98,6 +98,14 @@ internal class WallpaperBackdrop(
             val id = display()
             val sharp = shot(m, id, SHARP) ?: return
             val soft = shot(m, id, SOFT) ?: return
+            // The mirror can come back all black (OxygenOS 16: the wallpaper's mirror renders nothing): the display then.
+            if (way == Way.MIRROR && black(soft.copy(Bitmap.Config.ARGB_8888, false))) {
+                Log.w(TAG, "the wallpaper's mirror came back black: capturing the display without home instead")
+                mirror?.release()
+                mirror = null
+                way = Way.DISPLAY
+                return
+            }
             if (!logged) {
                 logged = true
                 Log.i(TAG, "live wallpaper backdrop ($way): ${sharp.width}x${sharp.height} (+${soft.width}x${soft.height}), display $id")
@@ -281,7 +289,68 @@ internal class WallpaperBackdrop(
          * never the system's stale screenshot of it): its mirror captured at [scale] within [crop], copied into a plain
          * bitmap. Blocks up to [WAIT_MS]: not on the main thread. Null: it can't (no permission, no wallpaper surface).
          */
+        /** Home's window surface, while home is up (ShellActivity sets it): left out of a display capture. */
+        @Volatile var homeWindow: (() -> SurfaceControl?)? = null
+
+        /** All but black: a 16 x 16 grid of its pixels darker than 8 in every channel. */
+        fun black(b: Bitmap): Boolean {
+            for (y in 0 until 16) for (x in 0 until 16) {
+                val c = b.getPixel(x * (b.width - 1) / 15, y * (b.height - 1) / 15)
+                if ((c shr 16 and 0xff) > 8 || (c shr 8 and 0xff) > 8 || (c and 0xff) > 8) return false
+            }
+            return true
+        }
+
+        /**
+         * The wallpaper as it is on screen now, once: its mirror; if that comes back black (as on OxygenOS 16), the
+         * display with home's window left out ([homeWindow]) - the wallpaper and the system bars over it.
+         */
         fun still(
+            displayId: Int,
+            crop: android.graphics.Rect,
+            scale: Float,
+        ): Bitmap? {
+            mirrorStill(displayId, crop, scale)?.let { if (!black(it)) return it else it.recycle() }
+            return displayStill(displayId, scale)
+        }
+
+        private fun displayStill(
+            displayId: Int,
+            scale: Float,
+        ): Bitmap? {
+            val m = methods ?: return null
+            val home = homeWindow?.invoke() ?: return null.also { Log.w(TAG, "no still: home's window isn't up") }
+            try {
+                val args = m.argsBuilder.newInstance()
+                m.setScale.invoke(args, scale)
+                m.exclude.invoke(args, arrayOf(home))
+                val done = java.util.concurrent.CountDownLatch(1)
+                var got: Any? = null
+                var status = -1
+                val listener =
+                    m.listener.newInstance(
+                        java.util.function.ObjIntConsumer<Any?> { b, st ->
+                            got = b
+                            status = st
+                            done.countDown()
+                        },
+                    )
+                m.captureDisplay.invoke(m.wm, displayId, m.argsBuild.invoke(args), listener)
+                if (!done.await(WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS) || status != 0 || got == null) {
+                    Log.w(TAG, "no still of the display: status $status")
+                    return null
+                }
+                val buffer = got!!
+                val hw = m.asBitmap.invoke(buffer) as Bitmap? ?: return null
+                runCatching { (m.hardwareBuffer.invoke(buffer) as android.hardware.HardwareBuffer).close() }
+                return hw.copy(Bitmap.Config.ARGB_8888, false).also { hw.recycle() }
+            } catch (e: Throwable) {
+                Log.w(TAG, "no still of the display", e)
+                return null
+            }
+        }
+
+        private fun mirrorStill(
             displayId: Int,
             crop: android.graphics.Rect,
             scale: Float,

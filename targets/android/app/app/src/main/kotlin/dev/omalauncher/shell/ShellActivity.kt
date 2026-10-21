@@ -27,6 +27,9 @@ const val EXTRA_HOME_PANEL = "dev.omalauncher.shell.panel"
  */
 class ShellActivity : Activity() {
     private lateinit var host: ShellHost
+
+    /** Home is the app in front (resumed): only then is the display without its window the wallpaper. */
+    @Volatile private var inFront = false
     private val scope: CoroutineScope = MainScope()
 
     private val runtime get() = (application as App).runtime
@@ -50,6 +53,8 @@ class ShellActivity : Activity() {
         setContentView(host.web)
         // The switcher is a layer of this page: the gestures and the overview button reach it here.
         val blur = WindowBlur(window, glass = host::wholeWindow)
+        // Home's window, left out when the wallpaper's picture is taken from the display (WallpaperBackdrop.still).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) WallpaperBackdrop.homeWindow = { if (inFront) host.windowSurface() else null }
         dev.omalauncher.system.Switcher.attach(host.bridge, { host.highRefresh?.boost(it) }, blur::set)
         // Opened from the agents' notification: the page opens the Agents screen.
         dev.omalauncher.AgentsSpool.opened(intent)
@@ -134,8 +139,14 @@ class ShellActivity : Activity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        inFront = false
+    }
+
     override fun onResume() {
         super.onResume()
+        inFront = true
         runtime.wm.focus(null)
         removeStaleWindowTasks()
         // Back from the engine's installer (or anything else): whether PowOS is installed now.

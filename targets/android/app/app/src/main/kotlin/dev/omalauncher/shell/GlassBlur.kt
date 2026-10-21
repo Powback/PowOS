@@ -251,6 +251,9 @@ internal class GlassBlur(
         if (regions.isNotEmpty()) set(emptyList(), -1)
     }
 
+    /** The window's own surface (home's: left out of WallpaperBackdrop's display captures). */
+    fun windowSurface(): SurfaceControl? = methods?.let { m -> runCatching { m.viewRoot.invoke(view)?.let { m.surface.invoke(it) as SurfaceControl? } }.getOrNull() }
+
     /** The whole window's blur (the switcher's depth over home), px; added to the surfaces' regions. */
     private var whole = 0f
 
