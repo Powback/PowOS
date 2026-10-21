@@ -5,7 +5,7 @@
  * (an agent's mail: Reply, Mark read). "controls" turns it into the control center (control.tsx). Its openness is --q
  * (data-q).
  */
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
@@ -294,6 +294,13 @@ export function NotificationPanel() {
   }, [shown]);
   const { available, items } = list.value;
   const clearable = items.some((n) => n.clearable);
+  // Opened, or a new notification: the list at its foot, the newest in view (the top end is the older ones).
+  const listEl = useRef<HTMLDivElement>(null);
+  const newest = items.reduce((m, n) => Math.max(m, n.time), 0);
+  useLayoutEffect(() => {
+    const l = listEl.current;
+    if (l && shown) l.scrollTop = l.scrollHeight;
+  }, [shown, newest, items.length]);
   return (
     <>
       <div
@@ -323,13 +330,20 @@ export function NotificationPanel() {
                   </button>
                 </span>
               </div>
-              <div class="notif-list">
+              {/*
+                * Bottom-aligned, near the thumb: the newest at the foot, older above it; few of them sit at the bottom
+                * (the space above), many fill up to the header and scroll under it - shown scrolled to the newest.
+                */}
+              <div class="notif-list" ref={listEl}>
+                <span class="notif-spacer" aria-hidden="true" />
                 {!available ? (
                   <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>
                     allow the launcher to show your notifications here →
                   </button>
                 ) : items.length ? (
-                  grouped(items).map((g) => <Stack key={g.id} g={g} />)
+                  grouped(items)
+                    .reverse()
+                    .map((g) => <Stack key={g.id} g={g} />)
                 ) : (
                   <div class="notif-empty muted">nothing new</div>
                 )}

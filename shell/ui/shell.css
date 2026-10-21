@@ -956,6 +956,8 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   flex-direction: column;
   gap: 6px;
 }
+/* Bottom-aligned (notifications.tsx): the spacer takes whatever room is left above the cards - none once they fill it. */
+.notif-spacer { flex: 1 0 0; }
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
 .notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }
 .notif-icon { width: 18px; height: 18px; border-radius: 5px; }
