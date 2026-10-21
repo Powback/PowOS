@@ -2,7 +2,8 @@
 # Builds a PowOS app's module (Rust -> wasm, in an arm64 Rust container: no Rust toolchain on the Mac or the phone)
 # and its TypeScript client bindings, with the SpacetimeDB CLI pinned in targets/android/pkgs/spacetimedb-bin.
 #   apps/build.sh <app>        e.g. apps/build.sh counter
-# Output: apps/<app>/out/module.wasm, and apps/<app>/ui/bindings/ (generated; the UI imports it).
+# Output: apps/<app>/out/module.wasm, and its TS bindings in apps/<app>/ui/bindings/ (the UI imports them; no UI:
+# out/bindings/, for apps/vendor.sh).
 # An app without a module (UI only: "module": null, e.g. stickman) skips that half. An app with an assets.sh runs it
 # first: it fetches what the UI ships but git doesn't keep (stickman: MuJoCo's wasm, a trained brain).
 # Installing on the phone: apps/install.sh <app> (the module published, the UI and manifest in place, the registry).
@@ -31,10 +32,10 @@ docker run --rm --platform linux/arm64 --cpus 6 --memory 8g -v powos-apps-cargo:
   CARGO_TARGET_DIR=/cache/target-$(basename "$(dirname "$PWD")") cargo build --release --target wasm32-unknown-unknown -q
   W=/cache/target-$(basename "$(dirname "$PWD")")/wasm32-unknown-unknown/release/$(sed -n "s/^name = \"\(.*\)\"/\1/p" Cargo.toml | head -1 | tr - _).wasm
   cp "$W" /app/out/module.wasm
-  if [ -d /app/ui ]; then
-    rm -rf /app/ui/bindings && $S/spacetimedb-cli generate --lang typescript --out-dir /app/ui/bindings --bin-path /app/out/module.wasm -y >/dev/null
-  fi
-  chown -R $HOST_UID /app/out /app/ui/bindings 2>/dev/null || true
+  # The TS bindings: the UI imports ui/bindings; an app without a UI keeps them in out/bindings (apps/vendor.sh).
+  B=/app/out/bindings; [ -d /app/ui ] && B=/app/ui/bindings
+  rm -rf $B && $S/spacetimedb-cli generate --lang typescript --out-dir $B --bin-path /app/out/module.wasm -y >/dev/null
+  chown -R $HOST_UID /app/out $B 2>/dev/null || true
   ls -la /app/out/module.wasm'
 fi
 # The UI: static files as they are, widgets (ui/widgets/*.tsx) bundled one ES module each with their bindings -

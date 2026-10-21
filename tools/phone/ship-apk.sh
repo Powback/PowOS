@@ -69,6 +69,10 @@ docker run --rm --network container:powos-vadb -v "$PWD/targets/android":/ta:ro 
     adb connect 10.13.13.7:5555 >/dev/null; export ANDROID_SERIAL=10.13.13.7:5555
     cp -r /ta /tmp/ta && cd /tmp/ta && ./install-app.sh /powos.apk --note "'"${note//\"/}"'"' 2>&1 | tail -4
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
+# The shell it just installed decodes the phone's live modules only with bindings of their shape (home couldn't read
+# local-pet's rows twice on 2026-10-21): checked in one call; bindings ahead of a module that this commit builds are
+# published, anything else is reported with its fix (the install stands either way).
+tools/phone/bindings-check.sh || echo "ship-apk: the shell's bindings don't match the phone's modules - fix above" >&2
 # The APK was built from HEAD, which holds every committed shell push: drop ALL shell overrides so the phone runs
 # one consistent shell (a stale override of assistant.ts shadowing the new APK's assist.tsx froze home, the shade
 # and assist at 09:47). Uncommitted pushes are lost by design - commit before you push.
