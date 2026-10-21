@@ -349,7 +349,15 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 }
 /* The recent row (drawer.tsx RecentRow): fixed under the scrolling list, by the search pill; the first row of its grid
    only, as many as fit across, columns as the list's; spacing, no line, above it. */
-.drawer-recents { grid-column: 1; grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; margin-top: 16px; padding-right: var(--letter-bar); }
+/* A strip, not a grid row: as many as fit at the grid's own cell size, the rest a sideways swipe away - snapping per icon,
+   the browser's own momentum (no JS); the letter bar's width kept clear, no scrollbar. */
+.drawer-recents {
+  grid-column: 1; display: flex; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory; scrollbar-width: none; touch-action: pan-x;
+  margin-top: 16px; padding-right: var(--letter-bar); scroll-padding-right: var(--letter-bar);
+}
+.drawer-recents::-webkit-scrollbar { display: none; }
+.drawer-recents > .app { flex: 0 0 var(--cell); scroll-snap-align: start; }
 /* Search results sit at the foot of the list, by the bar, and fill upward: the best match nearest the bar. */
 .drawer-list.results {
   display: flex;
