@@ -49,8 +49,23 @@ if [ "${1:-}" = "--vpn" ]; then
         echo "push.sh: couldn't pull the phone's overrides - gating the committed shell + these files only" >&2
       fi
       set +e
-      dev/gate.sh ${ga[@]+"${ga[@]}"} "${gf[@]}"
+      out=$(dev/gate.sh ${ga[@]+"${ga[@]}"} "${gf[@]}" 2>&1)
       gate=$?
+      echo "$out"
+      # HEAD + the phone's overrides can be broken without this push (the APK on the phone isn't HEAD, other agents'
+      # overrides are half a change): then only failures this push ADDS refuse it - the same gate without its files
+      # is the baseline (failures compared without their timings).
+      if [ $gate -ne 0 ] && [ ${#ga[@]} -gt 0 ]; then
+        norm() { grep '^FAIL' | sed 's/ within [0-9]* ms//; s/([0-9]* ms)//' | sort -u; }
+        base=$(dev/gate.sh "${ga[@]}" 2>&1 | norm)
+        added=$(comm -13 <(echo "$base") <(echo "$out" | norm))
+        if [ -z "$added" ]; then
+          echo "push.sh: those failures are the phone's already (the same without these files) - this push adds none" >&2
+          gate=0
+        else
+          echo "push.sh: this push adds:" >&2; echo "$added" >&2
+        fi
+      fi
       set -e
       rm -rf "$ov"
       if [ $gate -ne 0 ]; then
