@@ -58,13 +58,14 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* Down to the screen's foot, under the search pill, the closing dock and the navigation bar: one frost behind all of
+     the drawer, no strip of bare wallpaper at its foot. */
+  bottom: calc(-1 * (48px + var(--strip-height) * (1 - var(--p)) + max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px))));
   top: calc((1 - var(--p)) * (100% - var(--launcher-head)));
-  /* The wallpaper through it, more of the drawer's own color as it opens (the list stays readable); what's under it on
-     home is blurred (the wallpaper isn't the page's to blur). */
-  background: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--p) * 40%), transparent);
-  backdrop-filter: blur(calc(var(--p) * 18px));
-  -webkit-backdrop-filter: blur(calc(var(--p) * 18px));
+}
+/* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
+.home .launcher-frame.tile {
+  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
 }
 .launcher {
   position: absolute;
@@ -140,31 +141,35 @@
 .dock .app-icon { width: min(var(--strip-icon), 100%); height: auto; aspect-ratio: 1; }
 
 /*
- * The search/ask bar (bar.tsx): its place in home's layout is a fixed 48 px; what shows is the pill in it. At rest no
- * surface - a faint "› search" and the mic over the wallpaper; active (focused, text, dictating) a lifted glass pill
- * (.tile) whose field grows to three rows upward, over home, laying nothing out again.
+ * The pill (bar.tsx's search, PowOS AI's compose): one component - the reference material (theme.css .tile.pill), round,
+ * its field growing to three rows (grow.tsx), the mic on its right. Only the placeholder differs.
  */
-.bar { position: relative; z-index: 3; margin: 0; height: 48px; padding: 0; }
-.bar-pill {
-  position: absolute;
-  left: var(--edge);
-  right: var(--edge);
-  bottom: 4px;
-  min-height: 40px;
+.pill {
   display: flex;
   align-items: flex-end;
   gap: var(--gap);
+  min-height: 40px;
   padding: 0 4px 0 var(--edge);
   border-radius: 20px;
-  background: none;
-  box-shadow: none;
-  transition: background-color 180ms ease, box-shadow 180ms ease;
 }
-.bar-pill .prompt { align-self: center; color: var(--color-accent); }
-.bar:not(.active) .bar-pill { text-shadow: 0 1px 3px rgb(0 0 0 / 70%); }
-.bar:not(.active) .prompt { color: color-mix(in srgb, var(--color-foreground) 55%, transparent); }
-.bar .grow::placeholder { color: var(--color-muted); }
-.bar:not(.active) .grow::placeholder { color: color-mix(in srgb, var(--color-foreground) 60%, transparent); }
+.pill .grow::placeholder { color: var(--color-muted); }
+.pill .mic {
+  flex: none;
+  align-self: flex-end;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 20px;
+  background: none;
+  color: var(--color-foreground);
+  touch-action: none;
+}
+.pill .mic.on { background: var(--color-red); color: var(--color-background); }
+/* The search bar's place in home's layout is a fixed 48 px; the pill sits in it and grows upward, over home. */
+.bar { position: relative; z-index: 3; margin: 0; height: 48px; padding: 0; }
+.bar-pill { position: absolute; left: var(--edge); right: var(--edge); bottom: 4px; }
 /* The fields that grow with their text (grow.tsx): their height animates, they scroll past their last row. */
 .grow {
   flex: 1;
@@ -237,10 +242,9 @@
     linear-gradient(var(--glass-fill), var(--glass-fill)),
     var(--glass-image) left 0 bottom 0 / var(--glass-w) var(--glass-h) no-repeat;
 }
-.glass .launcher-frame.tile {
-  --frame-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--p) * 40%), transparent);
+.glass .home .launcher-frame.tile {
   background:
-    linear-gradient(var(--frame-fill), var(--frame-fill)) border-box,
+    linear-gradient(var(--text-fill), var(--text-fill)) border-box,
     var(--glass-image) left calc(-1 * var(--gx)) bottom calc(-1 * var(--gb)) / var(--glass-w) var(--glass-h) no-repeat border-box;
 }
 .glass .home .notif-panel {
@@ -753,22 +757,6 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
 .screen-close { font: inherit; color: var(--color-muted); background: none; border: 0; padding: 4px 8px; }
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }
 
-/* The bar's mic (bar.tsx): red while it listens, as the Compose bar's. */
-.bar .mic {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  margin-right: calc(-1 * var(--edge) / 2);
-  border: 0;
-  border-radius: var(--radius);
-  background: none;
-  color: var(--color-foreground);
-  touch-action: none;
-}
-.bar .mic.on { background: var(--color-red); color: var(--color-background); }
-
 /* Edit mode (editsheet.tsx, state.ts editing): the pages step back, outlined, the sheet under them. */
 .home.editing .bar,
 .home.editing .dock,
@@ -967,15 +955,8 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
 }
 html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-screen .ai-work-chip.on { background: var(--color-accent); }
-/* Its compose bar: home's search pill, active. */
-.ai-screen .ai-compose {
-  margin: 0 0 calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + 6px);
-  min-height: 40px;
-  align-items: flex-end;
-  padding: 0 4px 0 var(--edge);
-  border-radius: 20px;
-}
-.ai-compose .mic { align-self: flex-end; }
+/* Its compose bar: the pill (.pill), where home's search sits. */
+.ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + 6px); }
 .ai-title { font-size: var(--text-item); font-weight: bold; }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
 .ai-state.busy { color: var(--color-accent); }
@@ -1022,9 +1003,8 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-session-task { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-session-meta { font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
-.ai-work-box { padding: 4px 0; display: flex; flex-direction: column; }
+.ai-work-box { padding: 4px 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }
-.ai-work + .ai-work { border-top: 1px solid var(--divider); }
 .ai-work-line { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .ai-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-work-meta { flex: none; font-size: var(--text-small); white-space: nowrap; }
@@ -1048,7 +1028,7 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 /* The task list is one home tile: its heading, chips and rows inside it. */
 .ai-work-list.tile { padding: 8px 6px 4px; }
 .ai-work-list.tile > .ai-work-head { padding: 2px 8px 6px; }
-.ai-work-group + .ai-work-group { border-top: 1px solid var(--divider); }
+.ai-work-group + .ai-work-group { margin-top: 10px; }
 .ai-work-project .ai-work-title { font-weight: bold; }
 .ai-work-caret { flex: none; width: 8px; font-size: var(--text-small); }
 .ai-work-wait { color: var(--color-accent); font-weight: bold; }
@@ -1059,14 +1039,6 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-unit-decide { color: var(--color-accent); }
 .ai-dot.asleep { background: color-mix(in srgb, var(--color-accent) 45%, transparent); }
 .ai-unit .ai-work-meta { max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
-/* Work in progress (powai.tsx Work): one line per task, the detail under it on a tap. */
-.ai-work-box { padding: 4px 0; display: flex; flex-direction: column; }
-.ai-work { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 9px 12px; text-align: start; font: inherit; color: inherit; }
-.ai-work + .ai-work { border-top: 1px solid var(--divider); }
-.ai-work-line { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.ai-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-work-meta { flex: none; font-size: var(--text-small); white-space: nowrap; }
-.ai-work.blocked .ai-work-status, .ai-dot.blocked { color: var(--color-red); background: var(--color-red); }
 .ai-work.blocked .ai-work-status { background: none; }
 .ai-work.waiting .ai-work-status { color: var(--color-accent); font-weight: bold; }
 .ai-dot.waiting { background: none; box-shadow: inset 0 0 0 2px var(--color-accent); }
@@ -1078,19 +1050,6 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
 .ai-mail { padding: 10px 12px; margin-bottom: 6px; font-size: var(--text-small); line-height: 1.4; }
 .ai-mail-head { margin-bottom: 3px; }
-.ai-compose { display: flex; align-items: center; gap: var(--gap); min-height: 48px; padding: 0 var(--edge); }
-.ai-compose .mic {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  margin-right: calc(-1 * var(--edge) / 2);
-  border-radius: var(--radius);
-  color: var(--color-foreground);
-  touch-action: none;
-}
-.ai-compose .mic.on { background: var(--color-red); color: var(--color-background); }
 
 /* The screen-off display (aod.tsx): black (an OLED panel's off pixels), dim, in the middle, drifting a little. */
 html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
@@ -1324,7 +1283,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   color: var(--color-red);
 }
 .cc-badge.add { color: var(--color-accent); }
-.cc-tray-head { font-size: var(--text-small); padding-top: 4px; border-top: 1px solid var(--divider); }
+.cc-tray-head { font-size: var(--text-small); padding-top: 10px; }
 .cc-tray .cc-tile .cc-icon { animation: none; opacity: 0.75; }
 @keyframes cc-wobble {
   0%, 100% { transform: rotate(-1.5deg); }

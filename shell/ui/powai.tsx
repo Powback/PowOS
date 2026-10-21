@@ -391,7 +391,7 @@ export function PowAiPage() {
         <FromAgents />
       </div>
       <form
-        class="ai-compose tile"
+        class="ai-compose pill tile"
         onSubmit={(e) => {
           e.preventDefault();
           send();

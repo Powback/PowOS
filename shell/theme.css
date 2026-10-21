@@ -28,12 +28,11 @@
 
   /*
    * Surfaces are told apart by their fill and a soft shadow, not by lines. --line is a surface's outline (none; a
-   * theme can bring one back), --divider the faint seam between rows inside one surface, --soft-fill what a control
+   * theme can bring one back; rows inside a surface are told apart by spacing, never a line), --soft-fill what a control
    * that's only a shape (a chip, a field, a button) is filled with, --lift a surface's light inner edge and the soft
    * shadow it casts.
    */
   --line: transparent;
-  --divider: color-mix(in srgb, var(--color-foreground) 4%, transparent);
   --soft-fill: color-mix(in srgb, var(--color-foreground) 8%, transparent);
   /* --lift's parts, for a surface made of several (a merged widget group, the foot): its top edge, its shadow. */
   --lift-ring: inset 0 0 0 1px rgb(255 255 255 / 6%);
@@ -115,7 +114,7 @@
  * page-sized sheet home's content steps out (shell.css: html:has(...)), and only the frosted wallpaper is behind it.
  * A small popover (.pop: a menu, the theme strip) leaves home in place and blurs what's under it itself.
  */
-html .tile.sheet, html .sheet {
+html .tile.sheet, html .sheet, html .tile.pill {
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
 }
 html .sheet.pop {
@@ -123,7 +122,7 @@ html .sheet.pop {
   backdrop-filter: blur(var(--glass-blur));
 }
 /* The picture glass (no compositor blur): the frosted wallpaper under it, as a tile's. */
-html.glass .tile.sheet {
+html.glass :is(.tile.sheet, .tile.pill) {
   background:
     linear-gradient(var(--text-fill), var(--text-fill)) border-box,
     var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;

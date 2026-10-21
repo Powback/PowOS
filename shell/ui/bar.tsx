@@ -146,9 +146,8 @@ const barMic: MicTarget = {
 };
 
 /**
- * The search/ask bar. At rest it's no surface at all - a faint "› search" and the mic over the wallpaper; focused,
- * holding text or dictating, it becomes a lifted glass pill (a .tile: frosted, the native blur's region too), whose
- * field grows to three rows (ui/grow.tsx) upward over home without moving anything under it.
+ * The search/ask bar: the pill PowOS AI's page asks in (shell.css .pill - the reference material, the field growing to
+ * three rows upward over home without moving anything under it, the mic on its right), "search" its placeholder.
  */
 export function Bar() {
   const input = useRef<HTMLTextAreaElement>(null);
@@ -172,9 +171,9 @@ export function Bar() {
         powos.keyboard.show();
       }}
     >
-      {/* The pill: its own box over the bar's place, growing upward - the bar's height (home's layout) never changes. */}
-      <div class={`bar-pill ${active ? "tile" : ""}`}>
-        <span class="prompt">❯</span>
+      {/* The pill (shell.css .pill, as PowOS AI's compose): its own box over the bar's place, growing upward - the bar's
+          height (home's layout) never changes. */}
+      <div class="bar-pill pill tile">
         <GrowField
           inputRef={input}
           value={shown}
