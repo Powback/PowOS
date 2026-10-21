@@ -77,6 +77,12 @@ internal class GlassBlur(
      */
     @Volatile var lag = 0
 
+    /** Liquid glass on top ([LiquidGlass]): the style's switch, the theme's look, the view (made when first needed). */
+    private var liquidAllowed = true
+    private var look = LiquidGlass.Look(0f, 0f, 0f, 0f)
+    private var liquid: LiquidGlass? = null
+    private val pictureChanged: () -> Unit = { liquid?.let(::feed) }
+
     private val blurListener = Consumer<Boolean> { on -> compositorBlurs = on; update() }
 
     init {
@@ -89,6 +95,48 @@ internal class GlassBlur(
     fun allow(on: Boolean) {
         allowed = on
         update()
+    }
+
+    fun allowLiquid(on: Boolean) =
+        main.post {
+            liquidAllowed = on
+            if (on && regions.isNotEmpty()) set(regions, -1) else liquid?.set(emptyList())
+        }
+
+    /** "b.liquid <dpr> <band> <refraction> <rim> <dispersion>" (CSS px; rim and dispersion as they are). */
+    fun liquidCommand(rest: String) {
+        val t = rest.trim().split(' ').map { it.toFloat() }
+        val l = LiquidGlass.Look(t[1] * t[0], t[2] * t[0], t[3], t[4])
+        main.post {
+            look = l
+            liquid?.look(l)
+            if (regions.isNotEmpty()) set(regions, -1)
+        }
+    }
+
+    private val liquidOn get() = liquidAllowed && !look.off
+
+    /** The liquid layer: under the page, the page's size, made the first time it's wanted. */
+    private fun liquidView(): LiquidGlass? {
+        liquid?.let { return it }
+        val parent = view.parent as? android.view.ViewGroup ?: return null
+        val l = LiquidGlass(view.context)
+        parent.addView(l, parent.indexOfChild(view), android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+        l.look(look)
+        l.onResize = { main.post { feed(l) } }
+        ShellWallpaper.onChange.add(pictureChanged)
+        liquid = l
+        main.post { feed(l) }
+        return l
+    }
+
+    private fun feed(l: LiquidGlass) {
+        val p = ShellWallpaper.current()
+        if (p == null) {
+            ShellWallpaper.refresh(view.context)
+            return
+        }
+        l.picture(p.first, p.second)
     }
 
     /** The page asked (again, on its reload): tell it. */
@@ -185,6 +233,7 @@ internal class GlassBlur(
     fun holesChanged() = main.post { if (on && regions.isNotEmpty()) set(regions, -1) }
 
     fun close() {
+        ShellWallpaper.onChange.remove(pictureChanged)
         runCatching { windows.removeCrossWindowBlurEnabledListener(blurListener) }
         main.post { if (regions.isNotEmpty()) set(emptyList(), -1) }
     }
@@ -212,6 +261,13 @@ internal class GlassBlur(
                     .filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
                     .map { r -> c!!.encode(r.moved(at[0].toFloat(), at[1].toFloat())) }
                     .toTypedArray()
+            // The liquid rims, drawn by a view in this window: on the same frame as the blur's transaction.
+            val kept = regions.filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
+            if (liquidOn && kept.isNotEmpty()) {
+                liquidView()?.set(kept.map { LiquidGlass.Rim(it.l, it.t, it.r, it.b, it.tl, it.tr, it.br, it.bl, it.alpha) })
+            } else {
+                liquid?.set(emptyList())
+            }
             val t = SurfaceControl.Transaction()
             m.setBlurRegions.invoke(t, surface, shown)
             when {

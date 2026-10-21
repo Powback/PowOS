@@ -41,6 +41,7 @@ import android.widget.FrameLayout
  *                                      (again whenever that changes) - [GlassBlur]
  *   b.r <dpr> <n> <region...>          the glass surfaces' rounded rectangles, blurred live by the compositor
  *   b.lag <frames>                     test knob: when the regions apply (-1 at once, 0 on the next draw, n later)
+ *   b.liquid <dpr> <band> <refraction> <rim> <dispersion>   liquid glass's look (theme.css --liquid-*): [LiquidGlass]
  *
  * Why surfaces: a canvas in the page, however it's drawn (an OffscreenCanvas in a worker included), makes the whole
  * WebView composite again for each frame - in the app's own render threads - which cost ~2% of a core per frame per
@@ -119,6 +120,7 @@ class ShellNative(
                 "b.hello" -> if (glass != null) glass.hello() else main.post { port?.postMessage(WebMessage("b.state 0")) }
                 "b.r" -> glass?.command(rest)
                 "b.lag" -> glass?.let { it.lag = rest.trim().toInt() }
+                "b.liquid" -> glass?.liquidCommand(rest)
                 "s.draw" -> {
                     val id = rest.substringBefore(' ').toInt()
                     synchronized(tiles) { tiles[id] }?.draw(rest.substringAfter(' '))

@@ -58,6 +58,16 @@
   --glass-saturate: 1.6;
   --glass-brightness: 0.8;
   --glass-behind-tint: 58%;
+  /*
+   * Liquid glass (live blur on, GlassBlur/LiquidGlass.kt): each surface's edge bends what's behind it like a lens's
+   * rim. --liquid-band: how wide the bent edge is; --liquid-refraction: how far its outer edge pulls the picture in;
+   * --liquid-rim: the bright line along the shape (0-1, lit from the top left); --liquid-dispersion: how far red and
+   * blue part (0-1). A band or both refraction and rim of 0: off.
+   */
+  --liquid-band: 14px;
+  --liquid-refraction: 9px;
+  --liquid-rim: 0.5;
+  --liquid-dispersion: 0.25;
   /* The tint: the theme's background lifted a little towards its foreground (a dark wallpaper reads as glass, not as
      a black slab), see-through by --glass-tint. */
   --glass-base: color-mix(in srgb, var(--color-foreground) 18%, var(--color-background));

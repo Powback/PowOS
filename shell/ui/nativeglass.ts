@@ -33,12 +33,31 @@ const wanted = signal(true);
 /** The live glass is on: ui/glass.ts leaves its picture off, theme.css tints only. */
 export const nativeGlass = signal(false);
 
+/** CDP's override for the liquid edges on this page: false leaves the plain blur. */
+const liquidWanted = signal(true);
+
+/** Liquid glass's look, from the theme (theme.css --liquid-*), to the host: on with the live glass, again per theme. */
+function sendLook() {
+  if (!nativeGlass.value) return;
+  const css = getComputedStyle(root);
+  // A theme without the tokens (an older theme.css): theme.css's own defaults.
+  const n = (name: string, fallback: number) => {
+    const v = parseFloat(css.getPropertyValue(name));
+    return Number.isFinite(v) ? v : fallback;
+  };
+  const on = liquidWanted.value;
+  send(`b.liquid ${devicePixelRatio} ${on ? n("--liquid-band", 14) : 0} ${n("--liquid-refraction", 9)} ${n("--liquid-rim", 0.5)} ${n("--liquid-dispersion", 0.25)}`);
+}
+powos.on("theme.changed", () => setTimeout(sendLook, 0));
+liquidWanted.subscribe(() => sendLook());
+
 function update() {
   const on = OVER_WALLPAPER.has(mode) && hostBlurs.value && wanted.value && !!native.value;
   if (on === nativeGlass.value) return;
   nativeGlass.value = on;
   root.classList.toggle("glass-native", on);
   last = "";
+  sendLook();
   if (on) kick();
   else send("b.r 1 0");
 }
@@ -237,6 +256,7 @@ for (const ev of ["theme.changed", "system.insets", "recents.begin", "recents.dr
 /** For CDP: on or off for this page (`__glass.native(false)`: the CSS glass), the regions as sent, the host's knob. */
 export const debug = {
   native: (on: boolean) => void (wanted.value = on),
+  liquid: (on: boolean) => void (liquidWanted.value = on),
   get state(): { native: boolean; host: boolean; port: boolean; last: string } {
     return { native: nativeGlass.value, host: hostBlurs.value, port: !!native.value, last };
   },

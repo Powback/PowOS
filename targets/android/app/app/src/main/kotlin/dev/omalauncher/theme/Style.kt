@@ -157,6 +157,8 @@ class Style(
 
         val LIVE_BLUR = Setting.Flag("glass.live-blur", true, "Glass blurred live by the display compositor (what's behind each surface, as it moves); false draws one pre-blurred copy of the wallpaper in the page. Off by itself where Android turns window blurs off (battery saver).")
 
+        val LIQUID_GLASS = Setting.Flag("glass.liquid", true, "With live blur: the glass's edges bend what's behind them like a lens, with a bright rim (theme.css --liquid-*); false leaves the plain blur.")
+
         val CORNER_SCALE = Setting.Number("corners.scale", 0.0, 0.0..2.0, "Multiplies every frame's corner radius: 0 square (Omarchy), 0.5 soft, 1 round like stock Android.")
 
         val STATUS_BAR = Bar("status-bar", "Android's status bar at the top of home")

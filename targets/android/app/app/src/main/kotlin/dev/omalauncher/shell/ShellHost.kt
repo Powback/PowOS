@@ -111,6 +111,7 @@ class ShellHost(
         native.glass?.let { glass ->
             kotlinx.coroutines.MainScope().also { scope ->
                 scope.launch { androidx.compose.runtime.snapshotFlow { runtime.style.style[dev.omalauncher.theme.Style.LIVE_BLUR] }.collect { glass.allow(it) } }
+                scope.launch { androidx.compose.runtime.snapshotFlow { runtime.style.style[dev.omalauncher.theme.Style.LIQUID_GLASS] }.collect { glass.allowLiquid(it) } }
             }
         }
 

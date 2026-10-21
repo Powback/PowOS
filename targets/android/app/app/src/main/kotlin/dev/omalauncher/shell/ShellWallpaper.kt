@@ -61,6 +61,9 @@ internal object ShellWallpaper {
         return JSONObject().put("wallpaper", wp ?: JSONObject.NULL).put("blurBehind", blurBehind)
     }
 
+    /** The picture as it is now (its revision, its bytes), if it's been read; [refresh] reads it. */
+    fun current(): Pair<String, ByteArray>? = cached?.let { it.rev to it.jpeg }
+
     /** The picture's bytes (ShellHost's /_wallpaper, on the WebView's loader thread). */
     fun jpeg(context: Context): ByteArray? = cached?.jpeg ?: load(context)?.jpeg
 
