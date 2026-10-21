@@ -266,6 +266,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
 
 function mock(): Bridge {
   const events = new Events();
+  // Dev tools (dev/shots.mjs, a desktop browser's console): host events emitted by hand - __mockEvents.emit(name, e).
+  (window as unknown as { __mockEvents: Events }).__mockEvents = events;
   const names = [
     "Brave",
     "Calculator",

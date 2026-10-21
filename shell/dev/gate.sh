@@ -17,19 +17,24 @@
 #      error, failed module load, missing export or import-cycle error, or no ready (window.__powosAlive) in READY_MS
 #      (default 8000) fails it.
 #   --app APPDIR (apps/<app>): also every page/widget entry of that app's built UI (out/ui), imported as the shell does.
+#   --shots DIR [--wallpaper FILE]: after the pages boot, every surface rendered at the phone's two screens into DIR
+#      (dev/shots.mjs: PNGs + report.json with each text's measured contrast) - design QA's renders, never a pass/fail.
+#      SHOTS_THEME / SHOTS_ONLY pass through.
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run (no docker...). Time: ~5-10 s, the image cached.
 # GATE_IMAGE overrides the Chromium image. Docker's build cache and images are never pruned here.
 set -euo pipefail
 SHELL_DIR=$(cd "$(dirname "$0")/.." && pwd)
 IMAGE=${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}
-base=head dir="" overrides="" app="" files=()
+base=head dir="" overrides="" app="" shots="" wallpaper="" files=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --tree) base=tree; shift ;;
     --dir) base=dir; dir=$(cd "$2" && pwd); shift 2 ;;
     --overrides) overrides=$2; shift 2 ;;
     --app) app=$(cd "$2" && pwd); shift 2 ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    --shots) mkdir -p "$2"; shots=$(cd "$2" && pwd); shift 2 ;;
+    --wallpaper) wallpaper=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
     *) files+=("$1"); shift ;;
   esac
 done
@@ -85,6 +90,14 @@ docker run --rm --platform linux/arm64 --shm-size 512m "${mounts[@]}" -e READY_M
 rc=$?
 set -e
 [ $rc -eq 0 ] || fail=1
+# 3. Design QA's renders (not a check: they're looked at).
+if [ -n "$shots" ]; then
+  smounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/shots.mjs:/usr/src/app/shots.mjs:ro" -v "$shots:/out")
+  [ -n "$wallpaper" ] && smounts+=(-v "$wallpaper:/wallpaper.jpg:ro")
+  docker run --rm --platform linux/arm64 --shm-size 512m "${smounts[@]}" ${SHOTS_THEME:+-e SHOTS_THEME="$SHOTS_THEME"} \
+    ${SHOTS_ONLY:+-e SHOTS_ONLY="$SHOTS_ONLY"} ${SHOTS_SCALE:+-e SHOTS_SCALE="$SHOTS_SCALE"} -w /usr/src/app --entrypoint node "$IMAGE" shots.mjs ||
+    echo "     shots: the render run failed"
+fi
 [ $rc -le 1 ] || echo "FAIL gate: the browser run itself failed (exit $rc)"
 echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)"))"
 exit $fail
