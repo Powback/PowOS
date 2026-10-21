@@ -196,7 +196,7 @@ export function AppWidgetPicker({ onPick, head }: { onPick: (p: AppWidgetProvide
   const stop = (e: Event) => e.stopPropagation();
   return (
     <div class="aw-scrim" onClick={close} onPointerDown={stop} onTouchStart={stop}>
-      <div class="aw-picker tile" onClick={stop}>
+      <div class="aw-picker tile sheet" onClick={stop}>
         <div class="sheet-head">
           <span class="muted">add to home</span>
           <button type="button" class="sheet-done" onClick={close}>

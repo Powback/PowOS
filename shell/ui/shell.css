@@ -373,7 +373,6 @@
   display: flex;
   flex-direction: column;
   padding: 4px;
-  background: var(--color-surface);
   animation: menu-in 120ms ease-out;
 }
 @keyframes menu-in { from { opacity: 0; transform: scale(0.95); } }
@@ -386,7 +385,7 @@
   white-space: nowrap;
 }
 .menu-item { padding: 10px 12px; text-align: left; border-radius: 8px; }
-.menu-item:active { background: var(--color-background); }
+.menu-item:active { background: var(--soft-fill); }
 
 /* Home pages: tiles on a grid of square cells (grid.tsx computes the boxes). */
 .pages {
@@ -407,6 +406,18 @@
 .page { position: relative; flex: 0 0 100%; height: 100%; }
 /* PowOS apps' own controls (islands on home, their pages) get the shell's borderless look too: their buttons' and
    chips' outlines go (their styles are inline - hence !important), a bare one takes a soft fill. */
+/*
+ * Under a page-sized sheet (a widget's screen, an app's page, the widget picker: theme.css .sheet) home's content steps
+ * out - faded, then hidden (the compositor drops its glass regions too) - so only the frosted wallpaper is behind it.
+ */
+.stage, .bar, .dock, .ai-screen .ai-scroll { transition: opacity 180ms ease-out, visibility 0s; }
+html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 180ms ease-out, visibility 0s 180ms;
+}
+/* A PowOS app's page (appscreen.tsx): a sheet, the whole screen - no corners, no edge of its own. */
+.app-screen.tile { border: 0; border-radius: 0; box-shadow: none; }
 :is(.island-face, .app-screen) button { border-color: transparent !important; }
 :is(.island-face, .app-screen) button[style*="background: transparent"] { background: var(--soft-fill) !important; box-shadow: var(--lift) !important; }
 /*
@@ -721,7 +732,6 @@
   position: fixed;
   z-index: 15;
   inset: 0;
-  background: color-mix(in srgb, var(--color-background) 60%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -953,11 +963,10 @@
 .ai-screen { background: none; padding-bottom: 0; }
 /* Its cards: home's tile material, a little more tint for their text (never a page dim). */
 .ai-screen .tile {
-  background: linear-gradient(var(--ai-fill), var(--ai-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
-  --ai-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
+  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
   border-color: transparent;
 }
-html:not(.glass-native) .ai-screen .tile { background: var(--ai-fill); }
+html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-screen .ai-work-chip.on { background: var(--color-accent); }
 /* Its compose bar: home's search pill, active. */
 .ai-screen .ai-compose {
@@ -1503,9 +1512,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   display: flex;
   align-items: flex-end;
   padding: calc(var(--inset-top, 0px) + var(--edge)) var(--edge) calc(var(--inset-bottom, 0px) + var(--edge));
-  background: color-mix(in srgb, var(--color-background) 50%, transparent);
 }
-.aw-picker { width: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; background: var(--color-background); }
+.aw-picker { width: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
 .aw-search {
   font: var(--text-item) var(--font);
   color: var(--color-foreground);

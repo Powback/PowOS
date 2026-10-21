@@ -83,6 +83,7 @@ const SCENES = [
   ["search-typing", "home", "const f = document.querySelector('.bar textarea, .bar input'); f?.focus(); if (f) { f.value = 'weather tomorrow in oslo and remind me to bring an umbrella'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   ["ai", "home", "S.page.value = -1;", "wallpaper"],
   ["ai-compose", "home", "S.page.value = -1; await sleep(300); const f = document.querySelector('.ai-compose textarea, .ai-compose input'); f?.focus(); if (f) { f.value = 'summarise what the agents did overnight and what needs me'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
+  ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
   ["notifications", "home", "S.panel.value = 'notifications'; S.notif.value = true;", "wallpaper"],
   ["settings", "home", "(await U('./screens.ts')).openScreen('settings');", "wallpaper"],
   ["assist", "assist", "", "app"],
@@ -159,12 +160,10 @@ const contrastOf = async (png, runs) => {
   const g = c.getContext("2d", { willReadFrequently: true });
   g.drawImage(img, 0, 0);
   const k = img.width / innerWidth;
+  // Computed colours: rgb()/rgba(), or color(srgb r g b / a) (0-1) from a color-mix.
   const parse = (s) => {
-    const p = document.createElement("i");
-    p.style.color = s;
-    document.body.append(p);
-    const m = getComputedStyle(p).color.match(/[\d.]+/g).map(Number);
-    p.remove();
+    const m = (s.match(/[\d.]+/g) ?? ["0", "0", "0"]).map(Number);
+    if (s.startsWith("color(")) return { r: m[0] * 255, g: m[1] * 255, b: m[2] * 255, a: m[3] ?? 1 };
     return { r: m[0], g: m[1], b: m[2], a: m[3] ?? 1 };
   };
   const lum = ({ r, g: gg, b }) => {
@@ -184,12 +183,28 @@ const contrastOf = async (png, runs) => {
   });
 };
 
-const scratch = await browser.newPage();
-await scratch.setContent("<body></body>");
 
 try {
   for (const [name, mode, setup, behind] of SCENES) {
     for (const [sizeName, size] of Object.entries(SIZES)) {
+      let timer;
+      const limit = new Promise((_, no) => (timer = setTimeout(() => no(new Error("timed out (40 s)")), 40000)));
+      await Promise.race([shoot(name, mode, setup, behind, sizeName, size), limit])
+        .catch((e) => { console.log(`shot ${name}-${sizeName}: FAILED ${e.message}`); report.push({ shot: `${name}-${sizeName}`, errors: [e.message] }); })
+        .finally(() => clearTimeout(timer));
+    }
+  }
+} finally {
+  fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify(report, null, 1));
+  await browser.close();
+  process.exit(0);
+}
+
+async function shoot(name, mode, setup, behind, sizeName, size) {
+  {
+    {
+      const t0 = Date.now();
+      const step = (what) => process.env.SHOTS_DEBUG && console.log(`  ${name}-${sizeName} ${what} +${Date.now() - t0} ms`);
       const page = await browser.newPage();
       await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: SCALE });
       const errors = [];
@@ -242,22 +257,23 @@ try {
           { theme: THEME, insets: size.insets, wp, behind, setup },
         )
         .catch((e) => errors.push(`setup: ${e.message.split("\n")[0]}`));
+      step("setup");
       await sleep(900);
       const out = path.join(OUT, `${name}-${sizeName}.png`);
       await page.screenshot({ path: out });
       // Contrast: the same frame without its text, under each run of text.
+      step("shot");
       const runs = await page.evaluate(collectText).catch(() => []);
+      step("texts");
       await page.addStyleTag({ content: "*, *::placeholder { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }" });
       await sleep(80);
       const bare = await page.screenshot({ encoding: "base64" });
-      const measured = await scratch.evaluate(contrastOf, bare, runs).catch((e) => (errors.push(`contrast: ${e.message}`), []));
+      step("bare");
+      const measured = await page.evaluate(contrastOf, bare, runs).catch((e) => (errors.push(`contrast: ${e.message}`), []));
       const low = measured.filter((t) => t.ratio < (t.size >= 24 || (t.size >= 18.66 && t.bold) ? 3 : 4.5));
       report.push({ shot: `${name}-${sizeName}`, errors: [...new Set(errors)].slice(0, 8), lowContrast: low, texts: measured.length });
       console.log(`shot ${name}-${sizeName}: ${measured.length} texts, ${low.length} below contrast${errors.length ? `, ${errors.length} errors` : ""}`);
       await page.close();
     }
   }
-} finally {
-  fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify(report, null, 1));
-  await browser.close();
 }

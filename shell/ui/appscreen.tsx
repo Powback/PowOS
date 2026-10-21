@@ -137,7 +137,7 @@ export function AppScreen() {
   return (
     <div
       ref={box}
-      class="app-screen"
+      class="app-screen tile sheet"
       data-app={v.id}
       style={{
         position: "fixed",
@@ -148,7 +148,6 @@ export function AppScreen() {
         paddingLeft: "var(--inset-left, 0px)",
         paddingRight: "var(--inset-right, 0px)",
         boxSizing: "border-box",
-        background: "var(--color-background)",
         color: "var(--color-foreground)",
         display: "flex",
         flexDirection: "column",

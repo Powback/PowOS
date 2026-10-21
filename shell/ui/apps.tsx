@@ -165,7 +165,7 @@ export function AppMenu() {
   return (
     <>
       <div class="menu-scrim" onPointerDown={close} />
-      <div class="menu tile" style={{ left: `${left}px`, ...(below ? { top: `${at.bottom + 4}px` } : { bottom: `${innerHeight - at.top + 4}px` }) }}>
+      <div class="menu tile sheet pop" style={{ left: `${left}px`, ...(below ? { top: `${at.bottom + 4}px` } : { bottom: `${innerHeight - at.top + 4}px` }) }}>
         <div class="menu-title">{app.label}</div>
         {items.map(([label, run]) => (
           <button

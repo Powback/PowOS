@@ -80,7 +80,12 @@ function common(p: Props, parent: string): Style {
   if (p.clip) s.overflow = "hidden";
   if (radius) s.borderRadius = px(radius);
   if (p.background) s.background = p.background;
-  if (num(p.border, 0) > 0) s.border = `${px(p.border)} solid ${p.borderColor ?? "var(--color-border)"}`;
+  // No hard outlines (docs/DESIGN-LANGUAGE.md): a bordered box is a surface - the soft fill and --lift - and a border
+  // in a colour of its own (a selection, a state) a soft ring of that colour.
+  if (num(p.border, 0) > 0) {
+    s.background ??= "var(--soft-fill)";
+    s.boxShadow = p.borderColor ? `inset 0 0 0 1px color-mix(in srgb, ${p.borderColor} 55%, transparent)` : "var(--lift)";
+  }
   const pad = padding(p.padding);
   if (pad) s.padding = pad;
   return s;
@@ -208,7 +213,8 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
         <div
           {...on}
           style={{
-            border: `1px solid ${p.color ?? "var(--color-accent)"}`,
+            background: "var(--soft-fill)",
+            boxShadow: "var(--lift)",
             borderRadius: px(num(p.radius, 8)),
             padding: "6px 10px",
             color: p.color ?? "var(--color-accent)",

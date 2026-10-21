@@ -27,7 +27,7 @@ export function ScreenPanel() {
   }
   return (
     <div class="screen-scrim" {...own} onClick={(e) => e.target === e.currentTarget && powos.widgets.closeScreen()}>
-      <div class="screen-panel tile">
+      <div class="screen-panel tile sheet">
         <div class="screen-head">
           <span>{s.title}</span>
           <button type="button" class="screen-close" onClick={() => powos.widgets.closeScreen()}>

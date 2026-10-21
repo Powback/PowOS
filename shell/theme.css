@@ -82,6 +82,11 @@
   /* The one darkening for a page that is mostly text (PowOS AI's): more of the same tint, nothing else. */
   --glass-dim: 16%;
   --glass-fill: color-mix(in srgb, var(--glass-base) var(--glass-tint), transparent);
+  /*
+   * The reference material (docs/DESIGN-LANGUAGE.md: PowOS AI's page, 2026-10-21): the glass tint and --glass-dim more
+   * of it, over --glass-veil. What a surface with text on it is filled with - PowOS AI's cards, and every sheet.
+   */
+  --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
 
   --gap: 8px;
   --edge: 12px;
@@ -103,6 +108,26 @@
 .glass, .glass-native { --glass-tint: 32%; }
 :is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }
 .glass, .glass-behind, .glass-native { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+/*
+ * A sheet: anything over home's own content - a widget's screen, a PowOS app's page, the widget picker, menus,
+ * popovers: the reference material (--text-fill over --glass-veil), a .tile too (its region for the compositor, its
+ * lift). The compositor's blur reaches only the wallpaper under the window, never home's tiles in it - so under a
+ * page-sized sheet home's content steps out (shell.css: html:has(...)), and only the frosted wallpaper is behind it.
+ * A small popover (.pop: a menu, the theme strip) leaves home in place and blurs what's under it itself.
+ */
+html .tile.sheet, html .sheet {
+  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
+html .sheet.pop {
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+}
+/* The picture glass (no compositor blur): the frosted wallpaper under it, as a tile's. */
+html.glass .tile.sheet {
+  background:
+    linear-gradient(var(--text-fill), var(--text-fill)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
 /* Where a glass surface is on the screen (ui/glass.ts), its own: not inherited, so setting one restyles one element. */
 @property --gx { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --gy { syntax: "<length>"; inherits: false; initial-value: 0px; }

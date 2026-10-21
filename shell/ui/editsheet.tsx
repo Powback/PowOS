@@ -160,7 +160,7 @@ export function EditSheet() {
   return (
     <>
       {themesOpen.value && (
-        <div class="theme-pop tile" onPointerDown={stop} onTouchStart={stop}>
+        <div class="theme-pop tile sheet pop" onPointerDown={stop} onTouchStart={stop}>
           <div class="sheet-row">
             <span class="muted">theme · {current?.title.toLowerCase()}</span>
             <button type="button" class="sheet-done" onClick={() => ((themesOpen.value = false), openScreen("settings"))}>
