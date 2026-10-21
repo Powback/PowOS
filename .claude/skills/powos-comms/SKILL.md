@@ -19,7 +19,8 @@ description: Use when working on PowOS inter-agent comms - `powos comms` (send/w
   with `\n\n`; `--json-events` emits `{"kind":"inbox","text":...}` which PowosAiChat shows as a note.
 
 ## CLI facts
-- `watch` and `inbox` (without `--peek`) CONSUME the messages; a crash after the read loses them. Use `--peek` to look.
+- `watch` and `inbox` (without `--peek`) CONSUME the messages; a crash or a cut-off output after the read loses them.
+  Use `--peek` to look; consume with `--json` into a file you keep (handbook, Comms).
 - `--json` (inbox/watch): one JSON object per message per line, the exact stored body. Text form: header
   `• [prio] from X (kind) at ISO [id ID]`, then every body line indented 4 spaces (strip 4 to recover).
 - `send <to> -` / `notify -`: body from stdin; only ONE trailing newline is dropped. `send <to> -- -text`: a body
@@ -47,4 +48,5 @@ output, not messages. agentsd still scrubs secret-shaped strings (deliberate).
 python3 test/tier1/test-comms-fulltext.py   # 10 KB unicode/quotes/$/CRLF round-trip: CLI, MCP stdio, manager, phone files
 python3 test/tier1/test-comms.py; python3 test/tier1/test-manager.py; python3 test/tier1/test-agents.py
 (`just test` / run-all.sh needs bash 4: CI/Linux; the Mac's bash 3.2 can't run run-all.sh.)
-Shell tsc: the worktree has no shell/node_modules - push.sh's gate skips tsc; symlink another worktree's to check.
+Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; symlink another worktree's
+(`ln -s <other>/shell/node_modules shell/`; .gitignore's `node_modules` ignores the link, so the tree stays clean).

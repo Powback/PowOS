@@ -13,7 +13,8 @@ Rules:
   open the contact sheet PNG and look at it yourself before you report anything as done.
 - Never test against real devices (lights, Hue, anything physical) without the user's say: mock data or stubs.
 - shell/push.sh only pushes origin's versions: commit, rebase, push to origin first; diff the phone's override first.
-- CDP is read-only except the agreed synthetic check; no touch injection while the user is active
+- CDP on live pages is read-only (a synthetic check only in a free idle window, restored in the same call, never one that
+  reaches a real device); no touch injection while the user is active
   (tools/phone/idle.sh); never poll the phone in loops (idle.sh --wait instead).
 Work in your own git worktree off worktree-powos-multiplatform, rebase often, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push.

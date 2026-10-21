@@ -44,7 +44,7 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
 - The gate (shell/dev/gate.sh) refuses a push when a local file a page names (html href/src, a script's "./ui/x.css")
   isn't in what the phone will serve: an index.html override once named ui/rich.css before rich.css was there. Push a
   page with what it names, in one push.
-- An APK install resets every override: commit + push to origin first, or a later APK drops your shell push.
+- An APK install resets every override (handbook Shipping): only what is on origin survives it.
 - Before pushing, compare the installed APK's shell (~/.cache/powos-gate/installed/<key>/shell) with yours.
 - manager.py / comms-mcp.py reach the phone only through `targets/android/rooted/rooted.sh deploy --note ".."` (needs
   local adb to the phone; it installs lib/ai/manager since a27042e). Check inside PowOS:
@@ -54,7 +54,8 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
 
 ## Tests
 - `python3 test/tier1/test-manager.py` (RichBlockTests), `python3 test/tier1/test-comms.py` (PresentTests).
-- Shell: link node_modules into your worktree's shell/ (remove it before ship-apk: it needs a clean tree), then
+- Shell: link node_modules into your worktree's shell/ (`ln -s <other>/shell/node_modules shell/`; ignored by
+  .gitignore, so ship-apk's clean-tree check is fine), then
   `shell/node_modules/.bin/tsc --noEmit -p shell` and
   `SHOTS_ONLY='^(chat|chat-open|ai-chat|present|present-md|present-html)$' shell/dev/gate.sh --tree --shots DIR`
   (sample conversations: CHAT_SAMPLE / PRESENT_SAMPLE in shell/dev/shots.mjs). Read the PNGs and report.json's

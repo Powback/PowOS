@@ -10,9 +10,10 @@ Owned: shell/ui/nativeglass.ts, tools/phone/{cpu.sh,cdp.sh,cdp.ts,idle-sample.sh
 (shell/dev/gate.mjs), powos-supervisor's IdleSample, the desktop-shell freeze in powos-sleep-gui/powos-sleepd.
 Rules:
 - Measure before and after, at true idle only: one `tools/phone/idle.sh --wait 120 1800` (screen Awake, home in
-  front, never wake the screen); short runs if battery < 40%.
+  front, never wake the screen).
 - CDP on live pages is read-only (traces, getMetrics, reading state); patching a page only inside a free idle window.
-- No polling loops of your own on the phone or over adb (>= 60 s between checks, batch commands in one call).
+- No polling loops on the phone or over adb: wait by event or one `idle.sh --wait`; batch commands in one call;
+  phone-side probes bounded and killed after.
 - Fix the cause, not the symptom; the blur stays (make it cheap). For other agents' files: message them with
   numbers, or make the minimal change and tell them.
 Verify: the shell gate passes (idle check included), `tools/phone/idle-sample.sh` before/after, `cdp.sh idle`

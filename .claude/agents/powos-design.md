@@ -8,7 +8,7 @@ docs/DESIGN-LANGUAGE.md and the powos-design skill; use the powos-phone skill fo
 Rule 1: less is more - every change removes before it adds. The user's latest brief wins; ask the manager if two clash.
 Owned: docs/DESIGN-LANGUAGE.md, shell/theme.css tokens, shell/ui/{notifications.tsx,notifications.css,control.tsx},
 the look in shell/ui/shell.css, shell/dev/{shots.mjs,sheet.mjs,lint-style.sh,style-allow.txt}. Not yours: nativeglass.ts
-and the Kotlin blur (native-blur), assist.tsx/assistant.ts/dictation.ts (speech), widget internals, home's in-page panel.
+(powos-perf) and the Kotlin blur, assist.tsx/assistant.ts/dictation.ts (powos-speech/powos-pet), widget internals, home's in-page panel.
 Rules:
 - Work in your own worktree off worktree-powos-multiplatform; commit only your paths ("Co-Authored-By: Claude Opus 5.5
   <noreply@anthropic.com>"), merge origin in, fast-forward push, never force-push. push.sh ships only origin's versions.

@@ -58,8 +58,9 @@ strip only - not the cause when a drag in a tile fails.
   push keeps each file's owner, runs `powos app ui .` as the user, prints local vs phone md5, and refuses a file
   the phone changed since the pull. The repo's own apps (apps/*) build with apps/build.sh, install with apps/install.sh.
 - NEVER drag a real room to test. Test with a mock room in the preview (data/local.lights.json) or CDP with the
-  reducer/onDim stubbed. To set a value back if you must: call the pill's own handlers (element.l.pointerdownfalse /
-  pointermovefalse / pointerupfalse with a fake event) - no input reaches the screen.
+  reducer/onDim stubbed. A test once left the user's real room light changed. Setting a
+  value back (only with the user's say): call the pill's own handlers (element.l.pointerdownfalse / pointermovefalse /
+  pointerupfalse with a fake event) - no input reaches the screen, but the light does change.
 
 ## Phone pitfalls
 - adb push DIR into an existing DIR nests it (dir/dir): rm -rf the target first, or push to /data/local/tmp/<new>.

@@ -10,7 +10,8 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   `bf-run.sh` (Broforce ~10 min check; `NO_START=1` while the user plays it themselves).
 - Phone (pushed by the above, or `adb.sh push` + `su -c sh`): `gest.sh`, `cpu-sample.sh`, `bf-sample.sh`, `sf-latency.sh`;
   in the session as powos: `bf-start.sh`, `bf-stop.sh`.
-- Artefacts go to `~/.cache/powos-verify/<date>` (pruned after a few days: put the evidence that matters in the report).
+- Artefacts go to `~/.cache/powos-verify/<date>` (scratch: not on the disk watchdog's list today, but put the evidence
+  that matters in the report).
 
 ## Is the user there? (touch IRQs, not lastUserActivity)
 - `tools/phone/idle.sh` -> `idle=<s> screen=<Awake|Dozing|Asleep> act=<s>`. `idle` = seconds since the touch panels'

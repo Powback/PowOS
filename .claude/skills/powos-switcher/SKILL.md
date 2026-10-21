@@ -33,7 +33,8 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   a live video wallpaper differs every frame and looped captures several times a second.
 
 ## Verify: record + frame-step (tools/phone/record/)
-- Wait: ONE `tools/phone/idle.sh --wait 120 1800` (never loop adb). Screen must already be on.
+- Wait: ONE `tools/phone/idle.sh --wait 120 1800 && tools/phone/record/run.sh <tag>` (run.sh doesn't wait itself;
+  never loop adb). Screen must already be on; check idle.sh's answer says screen=Awake (it also returns on screen off).
 - rec.js: CDP recorder injected into home's page (hooks __powosHost.emit for recents.*/system.*, logs every rAF
   where .screens' opacity/transform or the layer's classes change, rAF gaps, visibility). Install/read with
   cdp.ts through powos-vadb (adb forward tcp:9333 to webview_devtools_remote_<pid>).

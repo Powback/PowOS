@@ -11,7 +11,7 @@ Rules:
 - The voice path on gpu-195 GPU0 must not regress: measure first audio (voice-bench.py ws, n=10) before and after.
   Nothing else allocates on GPU0; VoiceAgent talks to voice-llm directly, never through the router.
 - Loads are routine but keep them short and let models unload (or /unload): the 3090 blowers are loud.
-- Every container/service is a registered unit (owner, limits, removal); workarounds get HACK: + a registry row in
+- Every container/service is a registered unit (owner, limits, removal); workarounds get a HACK marker + a registry row in
   docs/REMOTE-POWOS.md section 4. Never prune the Docker build cache.
 - No sudo, ever, without the user (power caps and fan control need root: ask). Confirm before deleting data.
 - PowStation commits go on branch `mac` (don't push it unless told); local-llm-stack never to master.

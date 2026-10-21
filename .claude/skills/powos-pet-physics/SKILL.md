@@ -51,5 +51,5 @@ impact speed, take-off kick 2.6.
   -v "$PWD/shell/dev/petrec.mjs:/usr/src/app/petrec.mjs:ro" -v "$OUT:/out" -w /usr/src/app --entrypoint node
   zenika/alpine-chrome:with-puppeteer petrec.mjs (frames + report.json; idle rAF must be 0 from pet code;
   PET_PERF=1: native glass on, rAF by file + main-thread time per climb; PET_PHYS=off compares the old path).
-- Device, read-only: adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>, then bun cdp.ts index.html
-  '<expr>' in the powos-vadb network; __pet.edges(), localStorage powos.pet.perch/physics, .pet classes.
+- Device, read-only: `tools/phone/cdp.sh eval home '<expr>'`: __pet.edges(), localStorage powos.pet.perch/physics,
+  .pet classes. Never force/goto the live pet.

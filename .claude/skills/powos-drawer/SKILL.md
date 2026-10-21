@@ -38,8 +38,10 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   computed boolean.
 - "Start half-way up" was tried and reverted by the user: full travel from the bottom, faster (GAIN), front-loaded fade.
 - Frost at full alpha from frame 1 "popped": frost and content must share one fade.
-- A stale shell.css from another tree once clobbered the drawer on the phone (one column): push.sh now refuses files
-  that aren't origin's. Always commit -> rebase -> push origin -> push.sh, then verify on the device.
+- A stale shell.css from another tree once clobbered the drawer on the phone (one column; first blamed on the recents
+  strip): push.sh now refuses files that aren't origin's (handbook Shipping). shell.css and gesture.ts are shared with
+  design/switcher/widgets/gestures: rebase right before you push them, then verify on the device.
+- Agents' CDP checks that set --p in the LIVE home opened the drawer on the user's screen: live CDP is read-only.
 - The gate times out ("not ready") when the Mac is loaded: READY_MS=30000.
 
 ## Test / measure
@@ -54,7 +56,8 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   Bisect a cost by injecting CSS or removing data-p at the top of a probe.
 - Device (screen on, home visible, user idle - one `tools/phone/idle.sh --wait 120 1800` first):
   `shell/dev/perf/device.sh [slow2s.js]` - metrics 3 s at rest, then a 2 s slow drag + close (frames, dropped,
-  worst, Chromium metrics; devperf.ts in powos-vadb). Read-only checks: `tools/phone/cdp.sh eval "" '<js>'` - set
-  --p on [data-p] with transition none, read opacity/transform, restore in the same call; `cdp.sh idle 3 ""`.
+  worst, Chromium metrics; devperf.ts in powos-vadb). Read-only checks any time: `tools/phone/cdp.sh eval "" '<js>'`
+  reading computed opacity/transform, `cdp.sh idle 3 ""`. Setting --p on [data-p] (transition none) to read values at
+  a given p ONLY inside that free window and restored in the same call - it shows on the user's screen.
 - Baselines: headless 60-frame slow drag, style recalc 260 ms -> 64 (layout 64 -> 0) -> 37 ms (WAAPI). No device
   drag numbers yet.

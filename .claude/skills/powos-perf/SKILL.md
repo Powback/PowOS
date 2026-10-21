@@ -22,7 +22,7 @@ rest. Keep the blur - make it cheap.
   --duration 15` then `simpleperf report --children --sort symbol`.
 - Finding what changes the DOM: a MutationObserver/rAF wrapper via `cdp.sh eval` - only inside a free idle window.
 - Headless: `shell/dev/gate.sh --tree` runs the idle check (2 s after a 3 s settle: no rAF, no layer paint, no
-  endless animation). On a busy Mac pages may need `READY_MS=20000`.
+  endless animation). On a busy Mac `READY_MS=30000`. Drawer drag probes: shell/dev/perf/ (powos-drawer skill).
 - Deploying rooted-side files over the VPN (rooted.sh calls plain `adb`): `PATH="$PWD/tools/phone/bin:$PATH"
   targets/android/rooted/rooted.sh deploy --note "..."` (tools/phone/bin/adb wraps adb.sh). A restart of the
   supervisor/sleepd afterwards: kill their pids (/data/powos/root/run/...) and `sh /data/powos/powos-start.sh`.
@@ -50,3 +50,5 @@ rest. Keep the blur - make it cheap.
 - My own probes show up (a stuck `tr` loop hit 100%): kill them, keep phone-side loops bounded.
 - An idle sample while another agent installs an APK or a page is broken is not a sample.
 - Ship only pushed commits (ship-apk enforces it); commit, rebase, push, then ship.
+- Cross-cutting causes (endless animations, nativeglass MutationObserver, inherited custom properties): handbook
+  "Rendering cost". Each new one found goes there, not only here.

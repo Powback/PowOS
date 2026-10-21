@@ -14,8 +14,8 @@ Rules:
   zone, and the defaults keep "straight in" = Back on the right handle.
 - Hand-offs are finger-tied: the window follows from the first move (warm windows, the gesture input's events), never
   a page that opens after the release.
-- APK only via tools/phone/ship-apk.sh --note "..." from origin's tip; commit a shell file with everything it imports.
-- HACK: markers need a docs/REMOTE-POWOS.md section 4 row in the same commit.
+- APK only via tools/phone/ship-apk.sh --note "..." from origin's tip (compile Kotlin before pushing it: handbook Shipping); commit a shell file with everything it imports.
+- HACK markers need a docs/REMOTE-POWOS.md section 4 row in the same commit.
 - CDP on live pages is read-only. Never poll the phone: one `tools/phone/idle.sh --wait 120 1800`, Awake only.
 - Own worktree off worktree-powos-multiplatform, commit only your paths with
   "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", rebase, fast-forward push, never force-push.

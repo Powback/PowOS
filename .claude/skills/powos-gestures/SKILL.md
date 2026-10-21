@@ -46,8 +46,9 @@ description: Use when working on PowOS's edge gestures (Good Lock-style handles,
   -> gesture.ts asks shade.open on a swipe down. openPanel(control) opens it without a pull (edge actions).
 
 ## Pitfalls already paid for
-- A shell file pushed/overridden without what it imports breaks every page (17:09, 2026-10-21: an old gesture.ts
-  override shadowed the APK's). Commit related shell files together; ship-apk resets overrides.
+- A shell file pushed/overridden without what it imports breaks every page (17:09, 2026-10-21: home.tsx imported a
+  gesture.ts export only a later commit added; every page failed after the install). Commit related shell files
+  together; ship-apk now gates HEAD's own shell before building. gesture.ts is shared with the drawer and widgets.
 - Kotlin: `return Log.w(...)` in a Unit function is a type error; ShellActivity's companion is private (top-level
   EXTRA_HOME_PANEL). OxygenOS framework shapes: check with dexdump first (handbook).
 - The gate's assist page can time out once (flaky); rerun before blaming your change.
