@@ -62,6 +62,8 @@ class PowosAssistSession(
         showFlags: Int,
     ) {
         super.onShow(args, showFlags)
+        // Drawn again (paused while hidden, onHide).
+        host?.web?.onResume()
         screenText = ""
         shot = null
         // A new summoning: the page forgets the last one (its question, answer view, cut-out) - and listens.
@@ -112,6 +114,10 @@ class PowosAssistSession(
         PowerKey.onRelease = null
         // The page stays warm after the panel goes: it stops listening (a summoning starts dictation, assist.tsx).
         host?.bridge?.emit("assist.hidden", null)
+        // The warm page stays in the session's hidden window, and a WebView there still counts itself visible: it kept
+        // drawing (measured 2026-10-21: ~2 frames and 8 begin-frames a second with the panel gone). Paused, it's hidden
+        // to the page (document.hidden) and gets no frames; its JS still runs (assist.hidden above is handled).
+        host?.web?.onPause()
         super.onHide()
     }
 
