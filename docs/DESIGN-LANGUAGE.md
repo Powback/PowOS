@@ -72,11 +72,17 @@ brings up the drawer, and a swipe up from the left half brings up PowOS AI's pan
   as before.
 - PowOS AI's sideways page stays either way.
 
-### The exception: the assistant overlay
+### The exception: the assistant overlay. The chrome is glass, the screen is 1:1
 
-The side button's overlay (`?mode=assist`) shows the real screen 1:1 so it can be circled. It gets no glass, no
-tint over the shot, and a solid panel. Its styles are yesterday's (before `be049e7`), restored on 2026-10-21.
-`glass.ts` leaves this page alone.
+The side button's overlay (`?mode=assist`) leaves the screen it was opened on exactly as it is, so it can be
+circled. Nothing is drawn over or behind that screen: no frost, no blur, no scaling, no second copy.
+
+- Only its chrome (the panel with the chat and the pill) is glass. The panel is frosted from the screenshot of
+  that same screen (`glass.ts`), so its frost shows what is really under it.
+- The panel's tint is the theme's background at 84%, more than the reference, because an app's screen is often
+  light and the text must keep 4.5:1.
+- Until the screenshot arrives, and in live mode, the panel is solid.
+- The panel's other styles are the ones from before `be049e7`, restored on 2026-10-21.
 
 ## 4. Colour
 

@@ -1115,8 +1115,24 @@ html[data-mode="assist"] .assist {
 /* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
 .assist-draw { position: absolute; inset: 0; touch-action: none; }
 .assist-panel { position: relative; z-index: 1; }
-/* Solid whatever the page's glass says (html.glass-behind tints tiles): nothing of the app shows through the panel. */
-html[data-mode="assist"] .assist-panel.tile { background: var(--color-background); backdrop-filter: none; -webkit-backdrop-filter: none; }
+/*
+ * Its chrome is the reference material: the panel frosted from the screenshot of the screen under it (glass.ts), the
+ * text fill over it - the screen above the panel untouched, 1:1. Until the screenshot is in (and live): solid.
+ */
+html[data-mode="assist"] .assist-panel { background: var(--color-background); backdrop-filter: none; -webkit-backdrop-filter: none; }
+html.glass[data-mode="assist"] .assist-panel {
+  /* The theme's background as the tint, more of it than the reference: an app's screen is often light (the wallpaper
+     rarely) - its text keeps 4.5:1 over any app. */
+  --assist-fill: color-mix(in srgb, var(--color-background) 84%, transparent);
+  background:
+    linear-gradient(var(--assist-fill), var(--assist-fill)) border-box,
+    linear-gradient(var(--glass-veil), var(--glass-veil)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+  border-radius: var(--radius);
+  box-shadow: var(--lift);
+}
+/* What's on the panel: soft fills (a surface inside a surface), the pill too. */
+html:root .assist-panel .tile.pill { background: var(--soft-fill); }
 /* The shared chat surface in the panel (assistant.ts), when the newer assist.tsx is in: the conversation, the pill. */
 .assist-panel .chat { flex: 1 1 auto; min-height: 0; }
 .assist-panel .bar { flex: none; }

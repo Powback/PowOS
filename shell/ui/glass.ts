@@ -29,7 +29,7 @@ const mode = new URLSearchParams(location.search).get("mode") ?? "home";
  * The surfaces that get the glass: every tile and the notification panel (PowOS AI's page shows the wallpaper as home
  * does; its cards are tiles).
  */
-const SURFACES = ".tile, .notif-panel";
+const SURFACES = ".tile, .notif-panel, .assist-panel";
 
 let source: string | null = null;
 let frosted: string | null = null;
@@ -112,17 +112,39 @@ function refrost(): Promise<void> {
 
 /**
  * Which way each page gets its glass: home and the lock face stand on the wallpaper (the frosted copy); the shade's
- * and the switcher's windows have what's behind them blurred by the host (tint only); the assistant's is over an app
- * it circles on: none at all (the real screen 1:1). The rest (the screen-off clock, the glasses') have none.
+ * and the switcher's windows have what's behind them blurred by the host (tint only). The assistant's is over the
+ * screen it circles on, which stays 1:1: only its chrome (the panel) is glass - frosted from the screenshot of that
+ * same screen, so what's under the panel is what its frost shows (docs/DESIGN-LANGUAGE.md, the exception); live (the
+ * screen moving under it), none. The rest (the screen-off clock, the glasses') have none.
  */
 const OVER_WALLPAPER = new Set(["home", "lock"]);
-// Not the assistant's: it shows the real screen 1:1 for circling - no glass, no tint (docs/DESIGN-LANGUAGE.md).
 const TINT_ONLY = new Set(["shade", "recents"]);
 
+let lastSource: GlassSource | null = null;
+/** The assistant's: the screen it was opened over (its screenshot), and whether it's live (then no picture). */
+let assistShot: string | null = null;
+let assistLive = false;
+
 function use(g: GlassSource | null) {
+  lastSource = g;
   root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && g != null);
-  source = OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : null;
+  source = OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : mode === "assist" && !assistLive ? assistShot : null;
   void refrost();
+}
+
+if (mode === "assist") {
+  const shot = (s: { screenshot?: string | null } | null) => {
+    assistShot = s?.screenshot ?? null;
+    use(lastSource);
+  };
+  powos.on("assist.context", shot);
+  // A new summoning: last time's screen is gone until this one's arrives.
+  powos.on("assist.reset", () => shot(null));
+  powos.on("assist.live", (l: { on: boolean }) => {
+    assistLive = !!l?.on;
+    use(lastSource);
+  });
+  powos.assist?.screen?.().then(shot, () => {});
 }
 
 /**
