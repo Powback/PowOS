@@ -39,7 +39,9 @@ export const nativeGlass = signal(false);
  * screenshot of the video wallpaper, never the frame on screen - a grey frame inside every surface - so without that
  * word, none. `__glass.live.liquid(false)` from CDP turns them off for this page.
  */
-const liquidWanted = signal(true);
+// OFF by default (2026-10-21 08:53): the user found the refraction "a bit broken, looks weird" (smears, fringes,
+// seams) - "less is more". Calm plain frost until the design agent signs off on a reviewed contact sheet.
+const liquidWanted = signal(false);
 const liveBackdrop = signal(false);
 fromNative.add((text) => {
   if (text === "b.backdrop live") liveBackdrop.value = true;
