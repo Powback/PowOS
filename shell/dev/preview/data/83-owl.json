@@ -1,0 +1,11 @@
+{
+ "bat": {
+  "level": 64,
+  "charging": false
+ },
+ "m": {
+  "available": true,
+  "playing": true,
+  "title": "Weightless"
+ }
+}
