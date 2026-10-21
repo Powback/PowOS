@@ -4,7 +4,7 @@
  *   Thread    the items, consecutive tool calls folded into one ToolRun
  *   ToolRun   a run of tool calls on one line - the newest (or the running one) and how many; a tap lists them all, a
  *             tap on one shows what it returned
- *   Said      an assistant message: its prose, and the blocks the manager's comms tools put in it (manager.py
+ *   Said      an assistant message: its prose (Markdown: md.ts), and the blocks the manager's comms tools put in it (manager.py
  *             _rich_block: a fence named for the block, one JSON line) - ```choices: the question with tappable options
  *             (a tap answers it: the next turn, in the user's words); ```present: a document (Markdown, or an HTML page)
  *             as a card with its beginning, a tap opens it full screen
@@ -157,7 +157,10 @@ export function Thread({
 
 type Part = { text: string } | { block: string; body: string };
 
-/** Prose and fenced blocks, in order. A fence left open (a reply cut off) runs to the end. */
+/** The fences that are blocks of their own (manager.py _rich_block); any other fence is code, part of the prose. */
+const BLOCK = /^\s*```(choices|present)\s*$/;
+
+/** Prose (Markdown, its code fences in it) and blocks, in order. A fence left open (a reply cut off) runs to the end. */
 export function parts(text: string): Part[] {
   const out: Part[] = [];
   const lines = text.split("\n");
@@ -168,14 +171,17 @@ export function parts(text: string): Part[] {
     prose = [];
   };
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^\s*```\s*([\w-]*)/);
+    const open = /^\s*```/.test(lines[i]);
+    const end = open ? lines.findIndex((l, j) => j > i && /^\s*```\s*$/.test(l)) : -1;
+    const stop = end < 0 ? lines.length : end;
+    const m = lines[i].match(BLOCK);
     if (!m) {
-      prose.push(lines[i]);
+      // A code fence goes to the prose whole: a "```present" line inside it is code.
+      prose.push(...lines.slice(i, open ? stop + 1 : i + 1));
+      if (open) i = stop;
       continue;
     }
     flush();
-    const end = lines.findIndex((l, j) => j > i && /^\s*```\s*$/.test(l));
-    const stop = end < 0 ? lines.length : end;
     out.push({ block: m[1], body: lines.slice(i + 1, stop).join("\n") });
     i = stop;
   }
@@ -323,17 +329,12 @@ export function PresentCard({ p }: { p: Presented }) {
   );
 }
 
-/** An assistant message: prose as a bubble, its blocks as what they are; a code fence as code. */
+/** An assistant message: its prose as Markdown in a bubble, its blocks as what they are. */
 export function Said({ text, reply }: { text: string; reply: string | null }) {
   return (
     <>
       {parts(text).map((p, i) => {
-        if ("text" in p)
-          return (
-            <div key={i} class="msg assistant">
-              {p.text}
-            </div>
-          );
+        if ("text" in p) return <div key={i} class="msg assistant md" onClick={onLink} dangerouslySetInnerHTML={{ __html: md(p.text) }} />;
         if (p.block === "choices") {
           const c = json<Choices>(p.body);
           if (c && Array.isArray(c.options)) return <ChoiceCard key={i} c={c} reply={reply} />;
@@ -342,11 +343,8 @@ export function Said({ text, reply }: { text: string; reply: string | null }) {
           const d = json<Presented>(p.body);
           if (d && typeof d.body === "string") return <PresentCard key={i} p={d} />;
         }
-        return (
-          <pre key={i} class="msg assistant code">
-            {p.body}
-          </pre>
-        );
+        // A block that can't be read: shown as what it is.
+        return <div key={i} class="msg assistant md" dangerouslySetInnerHTML={{ __html: md("```\n" + p.body + "\n```") }} />;
       })}
     </>
   );
