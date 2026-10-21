@@ -130,10 +130,12 @@ if [ "${1:-}" = "--reset" ]; then
   shift
   if [ $# -eq 0 ]; then
     # Its contents, not the folder: the shell watches the folder itself, and a new one would go unwatched. No push
-    # left to roll back either.
-    as_app "rm -rf files/shell/* files/shell/.[!.]*; rm -rf files/shell-push.json files/shell-prev"
+    # left to roll back either. Between .pushing and its removal like a push: HotReload holds the deletions and the
+    # pages reload once, on the APK's shell - not per file on a half-removed mix (home failed on one, 2026-10-21).
+    as_app "cd files/shell && echo > .pushing && find . -mindepth 1 -maxdepth 1 ! -name .pushing -exec rm -rf {} + ; rm -f .pushing; rm -rf ../shell-push.json ../shell-prev"
   else
-    for f in "$@"; do as_app "rm -f files/shell/$f"; done
+    m=""; for f in "$@"; do m="$m files/shell/$f"; done
+    as_app "echo > files/shell/.pushing; rm -f$m; rm -f files/shell/.pushing"
   fi
   exit 0
 fi
