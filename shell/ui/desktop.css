@@ -41,3 +41,7 @@ html[data-mode="desktop"] .home.chatting .launcher {
   top: auto;
   max-height: 100%;
 }
+/* No scrollbars drawn: QtWebEngine draws classic ones (the phone's WebView overlays its own, unseen). Scrolling stays. */
+html[data-mode="desktop"] * {
+  scrollbar-width: none;
+}
