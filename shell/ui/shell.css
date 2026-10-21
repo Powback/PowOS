@@ -972,7 +972,7 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-title { font-size: var(--text-item); font-weight: bold; }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
 .ai-state.busy { color: var(--color-accent); }
-.ai-state.busy::before { content: "● "; animation: icon-wait 0.9s ease-in-out infinite alternate; }
+.ai-state.busy::before { content: "● "; }
 .ai-open { font: var(--text-small) var(--font); color: var(--color-accent); }
 /* Unfolded, PowOS AI reads as a column, not a 2268 px line: its content capped and centred (the folded width is less). */
 .ai-screen > *, .ai-panel > * { width: 100%; max-width: 720px; margin-inline: auto; }
@@ -1010,7 +1010,10 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
   text-align: start;
 }
 .ai-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-border); }
-.ai-dot.on { background: var(--color-accent); animation: icon-wait 0.9s ease-in-out infinite alternate; }
+/* "Working" is a still accent dot - no pulse: an endless animation keeps the page
+   drawing 60 frames a second, and the compositor re-blurring every glass surface under it with each one (measured
+   2026-10-21: 62 frames/s on an idle home while PowOS AI's page showed working agents). */
+.ai-dot.on { background: var(--color-accent); }
 /* Off screen (home on another page: PowOS AI and home's other pages are kept laid out beside it), nothing on it animates - the work list's
    "working" dots pulse forever, and an infinite animation anywhere in the page keeps the compositor drawing every
    frame on an idle home (the app's and the renderer's CPU). */
@@ -1570,7 +1573,7 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   white-space: nowrap;
 }
 .ag-mark { flex: none; width: 1em; text-align: center; color: var(--color-muted); }
-.working > .ag-mark, .ag-mark.working { color: var(--color-accent); animation: icon-wait 0.9s ease-in-out infinite alternate; }
+.working > .ag-mark, .ag-mark.working { color: var(--color-accent); }
 .needs_you > .ag-mark, .ag-mark.needs_you, .blocked > .ag-mark, .ag-mark.blocked { color: var(--color-red); font-weight: bold; }
 .ag-who { flex: none; }
 .ag-host { flex: none; }
