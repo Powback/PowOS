@@ -139,7 +139,7 @@ function reshape() {
 }
 
 /** The surfaces' own size changes (their content, not their place: the triggers below see those). */
-const sized = new ResizeObserver(() => kick());
+const sized = new ResizeObserver((es) => (why("resized", es[0]?.target), kick()));
 
 /** How far a joined side reaches into its neighbour (CSS px; ~1.4 device px at 2.76). */
 const JOIN_OVERLAP = 0.5;
@@ -272,6 +272,16 @@ function frame() {
   else running = false;
 }
 
+/** For CDP (`__glass.live.kicks`): what set off the last measures - the cause and when (a ring of 30). */
+const kicks: string[] = [];
+const why = (cause: string, t?: EventTarget | Node | null) => {
+  if (running) return;
+  const e = t instanceof Element ? t : t instanceof Node ? t.parentElement : null;
+  const name = e ? e.tagName.toLowerCase() + (typeof e.className === "string" && e.className ? "." + e.className.trim().split(/\s+/).slice(0, 2).join(".") : "") : "";
+  kicks.push(`${Math.round(performance.now() / 1000)}s ${cause} ${name}`);
+  if (kicks.length > 30) kicks.shift();
+};
+
 /** Something may move: measured every frame until it's still. */
 function kick() {
   still = 0;
@@ -296,12 +306,13 @@ new MutationObserver((records) => {
   let moved = false;
   for (const r of records) {
     if (r.type === "childList") {
-      if (holds(r.addedNodes) || holds(r.removedNodes)) return changed();
+      if (holds(r.addedNodes) || holds(r.removedNodes)) return why("nodes", r.target), changed();
       continue;
     }
     if (!carries(r.target)) continue;
     // A surface's own class (its corners, a join): its shape again. A holder's style or class: it may have moved.
-    if (r.attributeName === "class" && (r.target as Element).matches(SURFACES)) return changed();
+    if (r.attributeName === "class" && (r.target as Element).matches(SURFACES)) return why("class", r.target), changed();
+    if (!moved) why(r.attributeName ?? "attr", r.target);
     moved = true;
   }
   if (moved) kick();
@@ -309,25 +320,25 @@ new MutationObserver((records) => {
 
 // A finger moving: measured until still again (a drag that scrubs a paused animation by currentTime writes no style;
 // its touchmoves are what says it moved). A finger resting moves nothing: the loop stops after STILL_FRAMES.
-const touch = () => kick();
+const touch = (e: Event) => (why(e.type), kick());
 for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) addEventListener(ev, touch, { capture: true, passive: true });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) changed();
+  if (!document.hidden) why("shown"), changed();
 });
-const animated = (e: Event) => carries(e.target) && kick();
+const animated = (e: Event) => carries(e.target) && (why(e.type, e.target), kick());
 for (const ev of ["transitionrun", "transitionend", "transitioncancel", "animationstart", "animationend"]) addEventListener(ev, animated, { capture: true, passive: true });
-addEventListener("resize", changed);
+addEventListener("resize", () => (why("resize"), changed()));
 // A scroll moves only what's in the scrolled box: the drawer's list holds no glass (the launcher's is its frame's), so
 // its scroll measures nothing - nothing re-sent, nothing re-read, a frame of the list is the list's alone.
 document.addEventListener(
   "scroll",
   (e) => {
     const t = e.target;
-    if (t === document || (t instanceof Element && t.querySelector(SURFACES))) kick();
+    if (t === document || (t instanceof Element && t.querySelector(SURFACES))) why("scroll", t instanceof Node ? t : null), kick();
   },
   { capture: true, passive: true },
 );
-for (const ev of ["theme.changed", "system.insets", "recents.begin", "recents.drag", "recents.end", "recents.show", "recents.hide"]) powos.on(ev, changed);
+for (const ev of ["theme.changed", "system.insets", "recents.begin", "recents.drag", "recents.end", "recents.show", "recents.hide"]) powos.on(ev, () => (why(ev), changed()));
 
 /** For CDP: on or off for this page (`__glass.native(false)`: the CSS glass), the regions as sent, the host's knob. */
 export const debug = {
@@ -339,6 +350,10 @@ export const debug = {
   measure,
   lag: (frames: number) => send(`b.lag ${frames}`),
   hold: (on: boolean) => void (held = on),
+  /** What set off the last measures (cause, element), oldest first. */
+  get kicks() {
+    return [...kicks];
+  },
   /** Measured frames and region sets sent per second since the last read (and reset). */
   get counts() {
     const secs = (performance.now() - counts.since) / 1000;
