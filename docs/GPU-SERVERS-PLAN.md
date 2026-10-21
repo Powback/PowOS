@@ -2,8 +2,8 @@
 
 PowOS now has real GPU servers on the LAN. This is how inference (voice, LLMs, everything AI) is laid out across
 them, how it's run and managed, and the order to build it in. Status: **phases 1-3 built on `.195` (2026-10-21), see
-[Status](#status-2026-10-21); phase 4 built: the GPU1 pool (`llm-gpu.pow`), the router (`llm.pow`) and `.58`'s `coder-32b` are live
-and verified end to end; `vision`/`embed` are configured but not yet loaded; phases 5-6 not started**.
+[Status](#status-2026-10-21); phase 4 done (2026-10-21): the GPU1 pool (`llm-gpu.pow`: general, vision, embed), the router
+(`llm.pow`) and `.58`'s `coder-32b` are live and verified end to end; phases 5-6 not started**.
 
 ## What we have
 
@@ -314,8 +314,8 @@ per model as a child process on the first request and stops it after 10 idle min
 |---|---|---|---|
 | `general` | `Qwen/Qwen3-14B-AWQ` (awq_marlin), 32k context, 32 seqs, hermes tool calls, thinking on (`reasoning_content` separate, `--reasoning-parser qwen3`) | 0.70 = 16.5 GiB (9.4 weights, 5.3 KV = 35k tokens) | verified |
 | `general-nothink` | the same loaded model with `chat_template_kwargs.enable_thinking=false` (a llama-swap alias, no second load) | - | verified |
-| `vision` | `Qwen/Qwen2.5-VL-7B-Instruct-AWQ`, 16k, up to 4 images | 0.70 | configured, not yet loaded |
-| `embed` | `BAAI/bge-m3` (`--runner pooling`), 8k | 0.10 = 2.4 GiB | configured, not yet loaded |
+| `vision` | `Qwen/Qwen2.5-VL-7B-Instruct-AWQ`, 16k, up to 4 images | 0.70 (KV 138,832 tokens) | verified |
+| `embed` | `BAAI/bge-m3` (`--runner pooling`), 8k | 0.10 = 2.4 GiB | verified |
 
 The routing is a llama-swap matrix: `general & embed` or `vision & embed`, never general with vision. GPU1's
 budget: stt-batch 2.4 + embed 2.4 + one big model 16.5 = 21.3 of 24 GiB. Measured with `general` loaded: GPU1 at
@@ -332,6 +332,10 @@ Measured with `hosts/gpu-195/bench/llm-bench.py` (stdlib only, run on the box):
 | decode, 4 streams | **~297 tok/s** aggregate, 82 tok/s each |
 | tool call (`get_weather`, thinking off) | returns `tool_calls` with `{"city": "Oslo"}`, 0.34 s |
 | GPU1 during 4 streams | 100%, 280-308 W |
+| cold start `embed` / `vision` | 47 s / 81 s |
+| `embed`: 64 short texts | 122 ms (524 texts/s), 1024-d |
+| `vision`: a generated red square | "The image shows a red square." (0.07 s warm); text decode 145 tok/s, first token 34 ms |
+| `vision` + `embed` loaded together, plus stt-batch | GPU1 at 19.1 GiB of 24 |
 
 Voice path (`voice-bench.py ws`, n=10, median end of speech -> first audio byte):
 
@@ -352,6 +356,68 @@ Noise: a 3090 under the pool's full load runs at 100%, ~300 W, with its fan near
   - `sudo nvidia-smi -i 0,1 -pl 250`, a cap for load noise, made persistent as a oneshot unit. Decode is
     memory-bound, so it should cost only a few percent.
   - An NVML fan floor, which needs root and is riskier.
+
+**Router: `llm.pow`** (2026-10-21, phase 4). LiteLLM v1.106.2, pinned by digest. It runs as the PowStation compose
+service `llm-router` on Colima: `config/litellm/config.yaml` plus a `docker-compose.yaml` block, Traefik labels,
+the `local-only` allowlist, and a Pi-hole entry from pihole-sync. It needs no database, cache or volume, and its limits
+are 2g RAM, 2 CPUs and 512 pids.
+- Auth: newer LiteLLM refuses to start without a master key. The key is `LLM_ROUTER_MASTER_KEY` in PowStation's
+  `.env` (gitignored), and clients send it as `Authorization: Bearer <key>`. A request without it gets 401.
+- Model names:
+  - `voice-fast` goes to `.195:8100` (GPU0), for clients other than the voice path. The router lets at most 2
+    requests through at once, so they can't crowd out live voice turns. VoiceAgent itself stays direct on
+    `voice-llm` (`VLLM_URL=http://voice-llm:8000`): no router hop on the latency-critical path (decided
+    2026-10-21). Its `litellm` provider stays unused.
+  - `general`, `general-nothink`, `vision` and `embed` go to `.195:9292`.
+  - `coder-32b` goes to `.58:9292` (`qwen-32b-vllm`), with a fallback to `general`.
+  - `anthropic/*` and `claude-haiku|sonnet|opus` go to `claude-auth.pow`.
+  - `.58`'s `powos/*`, `powos-vllm/*` and `powos-anthropic/*` wildcards stay as before.
+- Carried over from local-llm-stack's old Mac-side LiteLLM (:4000, not running since 2026-08), each with its reason
+  in the config: no local -> Claude fallback, the `api.anthropic.com` blackhole, `thinking` dropped on the local
+  routes, and the Anthropic /v1/messages chat-completions path.
+- Verified (2026-10-21): `/v1/models` lists every name; a request without the key gets 401.
+  - `claude-haiku` answers through `claude-auth.pow`, and nothing reached `api.anthropic.com`.
+  - `general` cold-loaded through the router in 39 s. Thinking on and off both answer; `general-nothink` made a
+    correct `get_weather` tool call, and `voice-fast` answers.
+  - Fallback: with `.58`'s llama-swap stopped, `coder-32b` was answered by `general` (`x-litellm-attempted-fallbacks:
+    1`, 4.2 s).
+
+**`.58` `coder-32b`** (2026-10-21; local-llm-stack branch `gpu-plan-coder-32b`, `powos/run-vllm-32b.sh`, checked out
+on `.58`; unit `llama-swap-58`, `units/gpu-58/`, registered on the box with the repo's `powos-units`, since `.58`'s
+PowOS image has no units tool). The fast path had never served a request:
+- its HF cache on `.58` was empty;
+- the comment inside the backslash continuation cut `--max-model-len 65536 --port 8000` off the command;
+- with no `--served-model-name`, llama-swap's `qwen-32b-vllm` would have got a 404;
+- 64k context didn't fit in 0.78 of the 5090.
+
+The fix:
+- served names `qwen-32b-vllm` and `coder-32b`;
+- YaRN x2 through `--hf-overrides rope_parameters`, because the image has transformers 5;
+- an fp8 KV cache, 128 KB a token;
+- utilization 0.92 and 8 sequences;
+- hermes tool calls;
+- a VRAM gate of 30000 MiB.
+
+The model is now **Qwen3-32B-AWQ**. Qwen2.5-Coder-32B-AWQ loaded and handled 64k, but it writes its tool calls as
+`<tools>{...}</tools>` (or bare JSON) in the text, which vLLM's hermes parser doesn't pick up: 0 of 3 came back as
+`tool_calls`. That's useless to agents. Qwen3 gets 3 of 3. The router adds `coder-32b-nothink` (thinking off, falls
+back to `general-nothink`). Qwen3-32B-AWQ (19 GB) was pre-downloaded into the `vllm-hf-cache` volume; the
+Qwen2.5-Coder download was deleted from it.
+
+Measured through `llm.pow` (warm unless noted):
+
+| | Qwen3-32B-AWQ |
+|---|---|
+| cold start (load, compile, first answer) | 75 s (Qwen2.5-Coder: 71 s) |
+| KV cache | 73,488 tokens (fp8), so a 64k request fits; 30.4 GiB of 32 used |
+| decode, one stream | 76-79 tok/s; first token 44-249 ms |
+| tool calls (thinking off) | 3 of 3 parsed into `tool_calls` |
+| 53.5k-token prompt, a code word at the very start | recalled correctly, 32.6 s |
+
+**Left for later:**
+- The public `voiceagent.powback.com`. `/ws` has no auth of its own on the upgrade, so it can't take the Authelia
+  WebSocket bypass, and behind forwardAuth it hangs. Decide this with the phase 5 clients.
+- Ollama on `.195` GPU1 (not deployed; the pool covers the named models).
 
 **Router: `llm.pow`** (2026-10-21, phase 4). LiteLLM v1.106.2, pinned by digest. It runs as the PowStation compose
 service `llm-router` on Colima: `config/litellm/config.yaml` plus a `docker-compose.yaml` block, Traefik labels,

@@ -41,7 +41,7 @@
       "systemctl --user daemon-reload"
     ],
     "keep": [
-      "vllm-hf-cache (podman volume, 38 GB: Qwen3-32B-AWQ, and Qwen2.5-Coder-32B-Instruct-AWQ, unused since 2026-10-21; podman volume rm vllm-hf-cache to drop both)",
+      "vllm-hf-cache (podman volume, 19 GB: Qwen3-32B-AWQ; podman volume rm vllm-hf-cache to drop it)",
       "~/Projects/local-llm-stack (the checkout; also holds the Ollama compose)"
     ]
   }
