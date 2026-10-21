@@ -199,7 +199,7 @@ resident; GPU1 is idle at P8, about 19 W.
 
 **STT for everything else on GPU1** (2026-10-21): `stt-batch`, the same whisper-fast image and model as `voice-stt`,
 resident on GPU1 (2.4 GiB), :8001, served as `http://stt.pow` (Traefik on `.100`, PowStation
-`config/traefik/dynamic/stt.yml`; Pi-hole `dns.hosts`). Files and dictation from every PowOS (`powos transcribe`,
+`config/traefik/dynamic/stt.yml`; Pi-hole `dns.hosts`). Files and recordings from every PowOS (`powos transcribe`,
 anything OpenAI-compatible) never queue a voice turn: GPU0 stays the voice path's alone, and the batch container gets
 2 CPUs at cpu-shares 128. Settings: Silero VAD, timestamps on for audio over one 30 s window (without them
 faster-whisper drops the words at window boundaries: 84% of a 12 min recording's words came back instead of ~100%),
