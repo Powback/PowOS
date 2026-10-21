@@ -302,7 +302,6 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 /* PowOS AI's pull-up panel (state.ts pullKind "ai"): its content in the drawer's place, scrolling; its cards on the
    panel's frost are a soft fill (a surface inside a surface). */
 .ai-panel {
-  opacity: min(1, calc(var(--p) * 1.6));
   flex: 1;
   min-height: 0;
   display: flex;
@@ -316,7 +315,6 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 }
 html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer {
-  opacity: min(1, calc(var(--p) * 1.6));
   flex: 1;
   /* Unfolded, a column of at most ~7 apps, centred with its A-Z bar: an A-Z section of three apps across 2268 px left
      most of the frost empty. */
@@ -528,9 +526,15 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 
 /* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
 
-/* The frost fades in with the drawer's content, on the same curve (.drawer): nothing pops in.
-   The compositor's blur under it fades with it (nativeglass.ts: a region's alpha is its opacity). */
-.home .launcher-frame { opacity: min(1, calc(var(--p) * 1.6)); }
+/*
+ * The drawer's fade, one curve for the frost and what's on it: an ease-out, 1 - (1 - q)^3 with q = p / 0.8 - ~95%
+ * there half-way, whole by 80% of the way; the rest of the travel is motion only. Closing, the same in reverse. The
+ * compositor's blur under the frost fades with it (nativeglass.ts: a region's alpha is its opacity).
+ */
+.home .launcher-frame, .drawer, .ai-panel {
+  --fade: calc(1 - min(1, var(--p) * 1.25));
+  opacity: calc(1 - var(--fade) * var(--fade) * var(--fade));
+}
 .recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
 .recents-face .strip { flex: 1; height: 100%; transform: none; clip-path: none; }
 .recents-face .strip .app { flex-basis: calc((100% - (var(--recent-n) - 1) * 4px) / var(--recent-n)); }

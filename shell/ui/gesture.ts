@@ -179,9 +179,11 @@ export function homeGestures() {
       listBottom: !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 1,
       target,
       // The A-Z bar, a slider, a widget's drag, the control center's edit mode (its tiles are dragged), an Android
-      // widget's list (appwidget.tsx): theirs.
+      // widget's list (appwidget.tsx): theirs. Any widget's slider or drag control too - a range, role=slider, or
+      // anything marked data-owns-gesture: its sideways drag is its own (a pill dimming a light), never a page swipe.
+      // (Home's swipes are touch events on .home: a control's pointerdown stopPropagation doesn't reach them.)
       own: !!target.closest?.(
-        ".letter-bar, input[type=range], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls",
+        ".letter-bar, input[type=range], [role=slider], [data-owns-gesture], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls",
       ),
       height: document.querySelector(".home")?.clientHeight || innerHeight,
       travel: document.querySelector(".launcher")?.clientHeight || innerHeight,

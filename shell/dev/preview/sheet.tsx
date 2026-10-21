@@ -210,6 +210,7 @@ const painted = (cs: CSSStyleDeclaration) =>
  *   that scrolls sideways and says so (touch-action: pan-x: it took the gesture), or a list that scrolls up and down
  *   in whole rows (pan-y, scroll-snap y);
  * - a slider (a range, role=slider: a drag-to-dim pill) inside something that scrolls sideways;
+ * - a sideways drag (touch-action none / pan-y) without the flag home's pager respects (role=slider, data-owns-gesture);
  * - hard border: a drawn 1px+ line round content (the design language: no lines).
  */
 /** How much of each tile its content covered, %, by tile key: the last check()'s. */
@@ -315,6 +316,12 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
       if ((scrollsY && !column(el)) || (scrollsX && !strip(el))) problems.push("scrolls (a tile can't)");
       const drags = (el instanceof HTMLInputElement && el.type === "range") || el.getAttribute("role") === "slider";
       if (drags && sideways(el)) problems.push("a slider in a sideways scroller (the scroll takes its drag)");
+      // It asks for sideways drags itself (touch-action none / pan-y, not a list that scrolls) but doesn't say it owns
+      // them: home's pager (shell/ui/gesture.ts) takes the drag and swipes the page. A range, role=slider or
+      // data-owns-gesture is the flag.
+      const wantsX = /^(none|pan-y)$/.test(cs.touchAction) && !/(auto|scroll)/.test(cs.overflowY) && !(el instanceof HTMLInputElement);
+      if (wantsX && !el.closest("input[type=range], [role=slider], [data-owns-gesture]"))
+        problems.push("a drag the home pager takes (mark it role=slider or data-owns-gesture)");
       const bw = Math.max(parseFloat(cs.borderTopWidth), parseFloat(cs.borderLeftWidth));
       if (bw >= 1 && cs.borderTopStyle !== "none" && !/rgba\(0, 0, 0, 0\)|transparent/.test(cs.borderTopColor)) problems.push("hard border");
     }
