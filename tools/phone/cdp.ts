@@ -195,6 +195,10 @@ if (cmd === "profile") {
   console.log(top(self, 15).join("\n"));
   console.log("-- total (inclusive)");
   console.log(top(total, 25).join("\n"));
+  // Components that rendered (a capitalised function of a .tsx module): which re-render, and how much.
+  const comps = new Map([...total].filter(([k]) => /^[A-Z]\w*@\[[^\]]+\.tsx\]/.test(k)));
+  console.log("-- components (inclusive)");
+  console.log(top(comps, 15).join("\n"));
   process.exit(0);
 }
 if (cmd === "net") {
