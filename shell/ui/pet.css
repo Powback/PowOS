@@ -95,3 +95,8 @@
 @media (prefers-reduced-motion: reduce) {
   .pet-body, .pet-eye.open, .pet-bubble { animation: none !important; }
 }
+
+/* PowOS AI's page: its pill opens the one chat surface (ui/assistant.ts); the history folded under the latest turn. */
+.ai-ask { display: flex; align-items: center; width: 100%; text-align: left; }
+.ai-ask-text { flex: 1; padding: 0 4px; }
+.ai-history-list { max-height: none; overflow: visible; padding: 0; }
