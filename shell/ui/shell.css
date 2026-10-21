@@ -223,6 +223,13 @@
  * edge catches the light.
  */
 .launcher-frame, .dock { border-color: transparent; box-shadow: none; }
+/*
+ * The chat in the drawer (chat.tsx): a page of text over the frost - the frame takes the theme's background at 84%
+ * (as the assistant's panel), so its text keeps 4.5:1 over a bright wallpaper (the reference fill measured 3.7-4.4).
+ */
+html:root .home:has(.drawer .chat) .launcher-frame.tile {
+  background: color-mix(in srgb, var(--color-background) 84%, transparent);
+}
 .dock { background: none; }
 /* The dock: no slab and no plates - the icons bare on the wallpaper, as the search pill floats above them. */
 .launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--lift-edge), var(--lift-shadow-up); }
