@@ -963,7 +963,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
  * --q changes per frame; continuous, no jump. A list that fills the panel has no room: it slides with the sheet.
  */
 .notif-items { display: flex; flex-direction: column; gap: 6px; flex: none; }
-.notif-panel.riding .notif-items { transform: translateY(min(calc((1 - var(--q)) * var(--ph, 0px)), var(--free, 0px))); }
+.notif-panel.riding :is(.notif-items, .cc) { transform: translateY(min(calc((1 - var(--q)) * var(--ph, 0px)), var(--free, 0px))); }
 .notif-list:has(> .notif-items > .notif-empty) .notif-items { flex: 1; justify-content: center; }
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
 .notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }

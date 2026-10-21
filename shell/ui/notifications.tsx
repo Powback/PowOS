@@ -317,9 +317,11 @@ export function NotificationPanel() {
   const itemsEl = useRef<HTMLDivElement>(null);
   const panelEl = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    const l = listEl.current;
-    const c = itemsEl.current;
     const p = panelEl.current;
+    // The notifications: their list and its cards; the control center: the panel's body and its content - the same ride.
+    const control = panel.value === "control";
+    const l = control ? p?.querySelector<HTMLElement>(".panel-body") : listEl.current;
+    const c = control ? p?.querySelector<HTMLElement>(".cc") : itemsEl.current;
     if (!l || !c || !p) return;
     const measure = () => {
       p.style.setProperty("--free", `${Math.max(0, l.clientHeight - c.offsetHeight)}px`);
