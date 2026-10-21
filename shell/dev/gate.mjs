@@ -10,6 +10,12 @@
  * (/apps/<id>/powos-app.json + /apps/<id>/ui/), imported as the shell imports them (./_app/<id>/<entry>, the shell's
  * import map) - a module that doesn't load fails.
  *
+ * Idle (IDLE_MS, default 2000; 0 skips it): once a shell page is ready and has settled (IDLE_WAIT_MS more, default
+ * 3000), nothing on it may keep drawing - over IDLE_MS it must run no requestAnimationFrame callback, paint no layer
+ * (CDP LayerTree.layerPainted) and have no infinite CSS/Web animation running. An idle home that draws costs the phone
+ * its CPU and battery for as long as the screen is on (2026-10-21: ~60 compositor frames a second from a hidden page's
+ * pulsing dots). The mock bridge's own timed events are paused for it (window.__powosMockQuiet).
+ *
  * Mounted: /shell (the composed shell, read only), optionally /apps. Prints one line per page and exits 1 on any
  * failure; the reasons go to stdout as "FAIL <page>: <reason>".
  */
@@ -23,6 +29,8 @@ const APPS = "/apps";
 const READY_MS = Number(process.env.READY_MS || 8000);
 /** After ready: errors this soon after the first render are boot errors too (an effect throwing, a lazy import). */
 const SETTLE_MS = Number(process.env.SETTLE_MS || 400);
+const IDLE_MS = Number(process.env.IDLE_MS ?? 2000);
+const IDLE_WAIT_MS = Number(process.env.IDLE_WAIT_MS || 3000);
 
 /** As ShellHost.mime: what the phone serves, so a module the phone refuses is refused here. */
 function mime(p) {
@@ -87,7 +95,8 @@ function appPage() {
 }
 
 async function open(browser, url, name) {
-  const page = await browser.newPage();
+  // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
+  const page = await (await browser.createBrowserContext()).newPage();
   await page.setViewport({ width: 412, height: 915, deviceScaleFactor: 1 });
   const problems = [];
   const warnings = [];
@@ -121,6 +130,12 @@ async function open(browser, url, name) {
       problems.push(`console: ${text.split("\n")[0]}`);
     else if (!/Failed to load resource|^JSHandle@|^powos-shell-error /.test(text)) warnings.push(text.split("\n")[0]);
   });
+  // Counts the page's requestAnimationFrame callbacks (the idle check): counted as they run, nothing else changes.
+  await page.evaluateOnNewDocument(() => {
+    const raf = window.requestAnimationFrame.bind(window);
+    window.__gateRaf = 0;
+    window.requestAnimationFrame = (cb) => raf((t) => (window.__gateRaf++, cb(t)));
+  });
   const started = Date.now();
   await page.goto(url, { waitUntil: "domcontentloaded" }).catch((e) => problems.push(`navigation: ${e.message}`));
   return { page, name, problems, warnings, uncaught, started };
@@ -141,14 +156,79 @@ async function settle(run, check) {
   for (const e of guard) run.problems.push(`${e.kind}: ${e.message}${e.file ? ` (${e.file}${e.line ? ":" + e.line : ""})` : ""}`);
   const alive = await page.evaluate(() => window.__powosAlive === true).catch(() => false);
   if (!ready || (!alive && run.name.indexOf("app ") !== 0)) run.problems.push(`not ready (window.__powosAlive) within ${ms} ms`);
+  if (ready && IDLE_MS > 0 && run.name.indexOf("app ") !== 0) await idle(run);
   run.problems = [...new Set(run.problems)];
   return { ...run, ready, ms };
+}
+
+/** The idle check (see the top): after the page settled, IDLE_MS of nothing - no rAF, no paint, no endless animation. */
+async function idle(run) {
+  await run.page.evaluate(() => (window.__powosMockQuiet = true)).catch(() => {});
+  await new Promise((r) => setTimeout(r, IDLE_WAIT_MS));
+  const t0 = Date.now();
+  let found = await idleWindow(run);
+  // A minute turned over in the window: the clocks' (time.ts, the lock face, aod) one redraw a minute - again once.
+  if (found.length && Math.floor((t0 - 1000) / 60_000) !== Math.floor((Date.now() + 500) / 60_000)) found = await idleWindow(run);
+  run.problems.push(...found);
+}
+
+async function idleWindow(run) {
+  const { page } = run;
+  const found = [];
+  const cdp = await page.target().createCDPSession();
+  const painted = [];
+  const layers = new Map();
+  cdp.on("LayerTree.layerPainted", (e) => painted.push(e));
+  cdp.on("LayerTree.layerTreeDidChange", (e) => e.layers?.forEach((l) => layers.set(l.layerId, l)));
+  await cdp.send("LayerTree.enable").catch(() => {});
+  const raf0 = await page.evaluate(() => window.__gateRaf).catch(() => 0);
+  if (await page.evaluate(() => document.hidden).catch(() => false)) found.push("idle check: the page is hidden in the gate's browser (no frames to count)");
+  await new Promise((r) => setTimeout(r, IDLE_MS));
+  const { raf, anims } = await page
+    .evaluate(() => ({
+      raf: window.__gateRaf,
+      // Running and endless (an iteration count of Infinity): a finite one ends by itself.
+      anims: document
+        .getAnimations()
+        .filter((a) => a.playState === "running" && a.effect?.getComputedTiming().endTime === Infinity)
+        .map((a) => {
+          const t = a.effect?.target;
+          const cls = t && typeof t.className === "string" ? "." + t.className.trim().split(/\s+/).join(".") : "";
+          return `${a.animationName ?? a.constructor.name} on ${t ? t.tagName.toLowerCase() + cls : "?"}`;
+        }),
+    }))
+    .catch(() => ({ raf: raf0, anims: [] }));
+  const secs = IDLE_MS / 1000;
+  if (raf > raf0) found.push(`not idle: ${raf - raf0} requestAnimationFrame callbacks in ${secs} s after settling (an idle page draws nothing)`);
+  if (painted.length) {
+    // Which: the painted layers' elements (what to look at), and the areas.
+    const what = new Map();
+    for (const e of painted) {
+      const l = layers.get(e.layerId);
+      let name = `layer ${e.layerId}`;
+      if (l?.backendNodeId) {
+        const d = await cdp.send("DOM.describeNode", { backendNodeId: l.backendNodeId }).catch(() => null);
+        const n = d?.node;
+        if (n) name = n.localName + (n.attributes?.includes("class") ? "." + n.attributes[n.attributes.indexOf("class") + 1].trim().split(/\s+/).join(".") : "");
+      } else if (l && !l.parentLayerId) name = "the root layer";
+      const c = e.clip;
+      what.set(name, [...(what.get(name) ?? []), `${c.width}x${c.height}@${c.x},${c.y}`]);
+    }
+    const list = [...what].map(([k, v]) => `${k} (${v.length}x: ${[...new Set(v)].slice(0, 2).join(" ")})`).join("; ");
+    found.push(`not idle: ${painted.length} layer paints in ${secs} s after settling - ${list}`);
+  }
+  if (anims.length) found.push(`not idle: endless animations running - ${[...new Set(anims)].slice(0, 4).join(", ")}`);
+  await cdp.detach().catch(() => {});
+  return found;
 }
 
 const browser = await puppeteer.launch({
   executablePath: process.env.CHROME || "/usr/bin/chromium-browser",
   headless: true,
-  args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--mute-audio"],
+  // Every page drawn as if on screen (the pages run side by side): a backgrounded or occluded one gets no frames, and
+  // the idle check would see nothing.
+  args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--mute-audio",
+    "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--disable-background-timer-throttling"],
 });
 let failed = 0;
 try {

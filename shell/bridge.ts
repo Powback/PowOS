@@ -1266,6 +1266,8 @@ function mockAgents(
     snapshot: async () => {
       clearInterval(timer);
       timer = window.setInterval(() => {
+        // The gate's idle check (dev/gate.mjs): the mock's own news would be a change, not idle drawing.
+        if ((window as { __powosMockQuiet?: boolean }).__powosMockQuiet) return;
         const c = { ...agents[1], step: steps[n++ % steps.length], last: Date.now(), rev: agents[1].rev + 1 };
         agents[1] = c;
         events.emit("agents.delta", { agents: [c] });

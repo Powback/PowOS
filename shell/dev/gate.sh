@@ -16,7 +16,8 @@
 #   2. every page of it (home, lock, shade, assist, aod, recents: each mode app.tsx renders) booted in a headless
 #      Chromium against the mock bridge, served as the phone's WebView serves it (shell/dev/gate.mjs): any uncaught
 #      error, failed module load, missing export or import-cycle error, or no ready (window.__powosAlive) in READY_MS
-#      (default 8000) fails it.
+#      (default 8000) fails it. Then the idle check: settled, a page draws nothing - no requestAnimationFrame, no layer
+#      paint, no endless animation for IDLE_MS (default 2000; IDLE_MS=0 skips it).
 #   --app APPDIR (apps/<app>): also every page/widget entry of that app's built UI (out/ui), imported as the shell does.
 #   --shots DIR [--wallpaper FILE]: after the pages boot, every surface rendered at the phone's two screens into DIR
 #      (dev/shots.mjs: PNGs + report.json with each text's measured contrast) - design QA's renders, never a pass/fail.
@@ -88,7 +89,7 @@ if [ -n "$app" ]; then
 fi
 set +e
 docker run --rm --platform linux/arm64 --shm-size 512m "${mounts[@]}" -e READY_MS="${READY_MS:-8000}" \
-  ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} \
+  ${GATE_SHELL_PAGES:+-e SHELL_PAGES="$GATE_SHELL_PAGES"} ${IDLE_MS:+-e IDLE_MS="$IDLE_MS"} ${IDLE_WAIT_MS:+-e IDLE_WAIT_MS="$IDLE_WAIT_MS"} \
   -w /usr/src/app --entrypoint node "$IMAGE" gate.mjs
 rc=$?
 set -e

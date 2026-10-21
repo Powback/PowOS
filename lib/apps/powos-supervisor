@@ -69,20 +69,32 @@ def runtime_config():
     return c.get("default", "native"), c.get("apps", {})
 
 
+def stat(pid):
+    """(ppid, utime+stime ticks, rss bytes) of one process, or None when it's gone."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            s = f.read()
+    except OSError:
+        return None
+    f = s[s.rindex(")") + 2:].split()
+    return int(f[1]), int(f[11]) + int(f[12]), int(f[21]) * PAGE
+
+
 def procs():
     """pid -> (ppid, utime+stime ticks, rss bytes) for every process."""
     out = {}
     for p in os.listdir("/proc"):
-        if not p.isdigit():
-            continue
-        try:
-            with open(f"/proc/{p}/stat") as f:
-                s = f.read()
-        except OSError:
-            continue
-        f = s[s.rindex(")") + 2:].split()
-        out[int(p)] = (int(f[1]), int(f[11]) + int(f[12]), int(f[21]) * PAGE)
+        if p.isdigit():
+            st = stat(p)
+            if st:
+                out[int(p)] = st
     return out
+
+
+# The whole /proc (~1300 processes on the phone, ~60 ms of Python) is read only every RESCAN s, to find a service's
+# new children; the ticks between re-read the trees found then (a few files). 2026-10-21: the supervisor was 0.6% of a
+# core on an idle phone, nearly all of it the 10 s full scan.
+RESCAN = 60
 
 
 def tree(root, ps):
@@ -144,6 +156,7 @@ class Service:
         self.note = ""
         self.held = False
         self.budget_kills = []
+        self.pids = None  # the process tree from the last full /proc scan (None: scan again)
 
     def logfile(self):
         os.makedirs(LOGS, exist_ok=True)
@@ -165,6 +178,7 @@ class Service:
                                          preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, WAITED))
         self.started = time.time()
         self.ticks = None
+        self.pids = None
         self.niced = False
         self.quiet_since = None
         log(f"{self.id}: started pid {self.proc.pid} ({mode})")
@@ -219,7 +233,8 @@ class Service:
             self.held = False
             self.restart(f"mode {self.mode} -> {mode}", mode)
             return
-        pids = tree(self.proc.pid, ps)
+        # The tree as found by the last full scan (procs()), or found now when this tick has it.
+        pids = self.pids = tree(self.proc.pid, ps) if self.pids is None else [p for p in self.pids if p in ps]
         ticks = sum(ps[p][1] for p in pids)
         self.rss = sum(ps[p][2] for p in pids)
         if self.ticks is not None and now - self.ticked >= 1:
@@ -313,13 +328,24 @@ def serve():
                 log(f"{name}: bad manifest: {e}")
     log(f"up: {', '.join(s.id for s in services) or 'no services'}")
     stop = []
+    scanned = 0.0
     # Signals are waited for, not handled: blocked here and taken by sigtimedwait in the tick's one sleep (~0.1
     # wakeups/s idle) - a service's exit (SIGCHLD) restarts it at once rather than at the next tick.
     signal.pthread_sigmask(signal.SIG_BLOCK, WAITED)
     while not stop:
         now = time.time()
         default, apps = runtime_config()
-        ps = procs()
+        if now - scanned >= RESCAN or any(s.pids is None and s.proc is not None for s in services):
+            ps, scanned = procs(), now
+            for s in services:
+                s.pids = None
+        else:
+            ps = {}
+            for s in services:
+                for p in s.pids or ():
+                    st = stat(p)
+                    if st:
+                        ps[p] = st
         for s in services:
             try:
                 s.check(ps, apps.get(s.id, default), now)
