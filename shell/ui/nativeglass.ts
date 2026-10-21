@@ -223,9 +223,17 @@ function measureRaw(followers: Element[] = []): Raw[] {
 }
 
 /** The regions as the host wants them: "x y w h tl tr br bl alpha radius" per surface on screen, CSS px. */
+/**
+ * The viewport, read on resize only: innerWidth/innerHeight/devicePixelRatio bring the page's style and layout up to
+ * date when read - in a drag frame, right after gesture.ts set its animations' time, that was a forced style recalc
+ * every frame (format's 28 ms a second of a drawer drag on the phone, 2026-10-22).
+ */
+let view = { w: innerWidth, h: innerHeight, dpr: devicePixelRatio };
+addEventListener("resize", () => (view = { w: innerWidth, h: innerHeight, dpr: devicePixelRatio }));
+
 function format(raws: Raw[]): string {
-  const W = innerWidth;
-  const H = innerHeight;
+  const W = view.w;
+  const H = view.h;
   const out: string[] = [];
   for (const g of raws) {
     if (g.alpha < 0.01) continue;
@@ -256,7 +264,7 @@ function format(raws: Raw[]): string {
       `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} ${f(cut(L || T, tl))} ${f(cut(R || T, tr))} ${f(cut(R || B, br))} ${f(cut(L || B, bl))} ${g.alpha.toFixed(2)} ${blur}`,
     );
   }
-  return `${devicePixelRatio} ${out.length}${out.length ? " " + out.join(" ") : ""}`;
+  return `${view.dpr} ${out.length}${out.length ? " " + out.join(" ") : ""}`;
 }
 
 const measure = () => format(measureRaw());
