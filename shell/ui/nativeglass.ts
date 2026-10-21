@@ -133,7 +133,13 @@ function reshape() {
     next.set(el, shapeOf(el));
   }
   shapes = next;
+  // A surface's size changing with its content (a widget's text, a list growing): measured then, and only then.
+  sized.disconnect();
+  for (const el of shapes.keys()) sized.observe(el);
 }
+
+/** The surfaces' own size changes (their content, not their place: the triggers below see those). */
+const sized = new ResizeObserver(() => kick());
 
 /** How far a joined side reaches into its neighbour (CSS px; ~1.4 device px at 2.76). */
 const JOIN_OVERLAP = 0.5;
@@ -266,13 +272,24 @@ const holds = (nodes: NodeList) => {
   for (const n of nodes) if (n instanceof Element && (n.matches(SURFACES) || n.querySelector(SURFACES))) return true;
   return false;
 };
+/**
+ * Inside a surface, not the surface: its content (a widget's numbers and graph, a clock). That moves no glass - and if
+ * it resizes the surface, the ResizeObserver says so. 2026-10-21: the performance widget's update every 2 s (~10
+ * mutations) set off 6 measured frames each - ~17 rAF/s and the page repainting on an idle home.
+ */
+const content = (n: Node) => {
+  const e = n instanceof Element ? n : n.parentElement;
+  const s = e?.closest(SURFACES);
+  return !!s && s !== e;
+};
 new MutationObserver((records) => {
   if (!nativeGlass.value) return;
+  let moved = false;
   for (const r of records) {
-    // A clock's text, a widget's frame: nothing that has glass came or went.
-    if (r.type === "childList" ? holds(r.addedNodes) || holds(r.removedNodes) : r.attributeName === "class" || (r.target as Element).matches(SURFACES)) return changed();
+    if (r.type === "childList" ? holds(r.addedNodes) || holds(r.removedNodes) : !content(r.target) && (r.attributeName === "class" || (r.target as Element).matches(SURFACES))) return changed();
+    if (!content(r.target)) moved = true;
   }
-  kick();
+  if (moved) kick();
 }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"] });
 
 // Fingers down: measured every frame until they're up (the event's own count - one lost end can't leave it running).
