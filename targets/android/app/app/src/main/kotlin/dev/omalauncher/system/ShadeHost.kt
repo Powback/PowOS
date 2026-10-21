@@ -373,7 +373,7 @@ class ShadeHost(
     /** The shade settled open: touchable and focused (Back reaches the page) once its page answers it's alive. */
     private fun armOpen() {
         val web = host?.web ?: return
-        dev.omalauncher.shell.PageWatchdog.probe(web) { alive, why ->
+        dev.omalauncher.shell.PageWatchdog.probeShown(web) { alive, why ->
             if (!shown) return@probe
             if (alive) {
                 setFlags(touchable = true, focusable = true, height = ViewGroup.LayoutParams.MATCH_PARENT)

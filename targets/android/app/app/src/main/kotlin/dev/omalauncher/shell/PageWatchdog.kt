@@ -63,6 +63,34 @@ class PageWatchdog(
         private const val EVERY_MS = 2_000L
         private const val ANSWER_MS = 1_500L
 
+        /**
+         * As [probe], for a window that has just been shown: a page still booting gets [graceMs] to render. A kept-warm
+         * window's page that was reloaded while hidden (an install, a shell push) only runs once its window shows, so
+         * the first pull after one found it "not rendered" and put the window straight away (2026-10-21: the shade and
+         * the pull-up panel, each once after an install). It is asked again every [RETRY_MS] until then; a page that
+         * never renders, or doesn't answer, still loses its window.
+         */
+        fun probeShown(
+            web: WebView,
+            graceMs: Long = SHOWN_GRACE_MS,
+            result: (Boolean, String) -> Unit,
+        ) {
+            val until = android.os.SystemClock.uptimeMillis() + graceMs
+            fun ask() {
+                probe(web) { alive, why ->
+                    if (!alive && why.startsWith("not rendered") && android.os.SystemClock.uptimeMillis() < until) {
+                        web.postDelayed({ ask() }, RETRY_MS)
+                    } else {
+                        result(alive, why)
+                    }
+                }
+            }
+            ask()
+        }
+
+        private const val SHOWN_GRACE_MS = 3_000L
+        private const val RETRY_MS = 150L
+
         /** Asks [web]'s page once: [result] (alive, and why not) within [ANSWER_MS], on the main thread. */
         fun probe(
             web: WebView,

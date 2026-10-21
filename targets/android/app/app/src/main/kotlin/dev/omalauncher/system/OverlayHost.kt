@@ -130,7 +130,7 @@ abstract class OverlayHost(
     protected fun armOpen() {
         val web = host?.web ?: return
         root?.removeCallbacks(shutGone)
-        PageWatchdog.probe(web) { alive, why ->
+        PageWatchdog.probeShown(web) { alive, why ->
             if (!shown) return@probe
             if (alive) {
                 open = true
