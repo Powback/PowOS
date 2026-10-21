@@ -1311,13 +1311,32 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-grid .cc-tile .cc-detail { display: block; width: 100%; font-size: 10px; }
 .cc-grid .cc-tile.on { background: var(--color-accent); color: var(--color-background); }
 .cc-grid .cc-tile.on .cc-detail { color: var(--color-background); }
-/* A group's chevron: its sheet, with all its members. */
-.cc-more { margin-left: auto; display: flex; font-size: 18px; opacity: 0.8; padding: 2px; margin-right: -4px; }
-.cc-tile.sheet-open .cc-more { transform: rotate(90deg); }
-.cc-sheet { padding: 8px; border-radius: calc(var(--radius) * 1.5); background: var(--soft-fill); animation: menu-in 120ms ease-out; }
-.cc-sheet .cc-tile { min-height: 64px; }
-.cc-all { display: flex; align-items: center; justify-content: center; gap: 2px; padding: 6px; font: var(--text-small) var(--font); color: var(--color-muted); background: none; border: 0; }
-.cc-back { display: flex; align-items: center; gap: 4px; font: var(--text-small) var(--font); color: var(--color-foreground); background: none; border: 0; padding: 4px 0; }
+/* A category's chevron: it opens the category in place. */
+.cc-more { margin-left: auto; display: flex; font-size: 18px; opacity: 0.8; padding: 2px; margin-right: -4px; transition: transform 200ms ease; }
+.cc-tile.opened .cc-more { transform: rotate(90deg); }
+.cc-main { display: flex; flex-direction: column; }
+/* A row's unfolding (control.tsx Unfold): the open category's members, its height animated - the grid below moves. */
+.cc-unfold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.cc-unfold > div { min-height: 0; overflow: hidden; }
+.cc-unfold.open { grid-template-rows: 1fr; }
+.cc-main > .cc-grid + .cc-unfold + .cc-grid { margin-top: 8px; }
+.cc-subs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 6px; margin-top: 8px; padding: 10px 4px; border-radius: calc(var(--radius) * 1.5); background: var(--soft-fill); }
+/* Its members: small round toggles over their names. */
+.cc-subs .cc-tile { min-height: 0; padding: 0; background: none; box-shadow: none; border: 0; align-items: center; gap: 4px; text-align: center; color: var(--color-foreground); }
+.cc-subs .cc-tile .cc-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: var(--control-fill);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.cc-subs .cc-tile.on { background: none; }
+.cc-subs .cc-tile.on .cc-icon { background: var(--color-accent); color: var(--color-background); }
+.cc-subs .cc-tile .cc-label { display: block; width: 100%; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cc-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .cc-slider-icon { position: absolute; left: 10px; font-size: 18px; color: var(--color-foreground); mix-blend-mode: difference; pointer-events: none; display: flex; }
 /* The volume's icon is a button: silent, vibrate, ring. */
@@ -1344,37 +1363,6 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-pick-row { display: flex; gap: 8px; }
 .cc-pick-row .cc-chip { flex: 1; gap: 6px; font-size: var(--text-small); }
 .cc-pick-row .cc-chip .icon { font-size: 18px; }
-/* Edit mode (control.tsx's EditGrid): tiles wobble gently, a − to take one out, dragged ones lift under the finger. */
-.cc-editing { display: flex; flex-direction: column; gap: 10px; touch-action: none; }
-.cc-tile.edit { position: relative; user-select: none; -webkit-touch-callout: none; touch-action: none; }
-.cc-tile.edit .cc-icon { animation: cc-wobble 1.6s ease-in-out infinite; }
-.cc-tile.edit:nth-child(2n) .cc-icon { animation-delay: -0.8s; }
-.cc-tile.edit.dragging { z-index: 2; transition: none; }
-.cc-tile.edit.dragging .cc-icon { animation: none; box-shadow: var(--lift-shadow), 0 0 0 2px var(--color-accent); }
-.cc-grid .cc-tile.edit:not(.dragging) { transition: transform 160ms ease; }
-.cc-badge {
-  position: absolute;
-  top: -4px;
-  right: calc(50% - 34px);
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  background: var(--color-background);
-  color: var(--color-red);
-}
-.cc-badge.add { color: var(--color-accent); }
-.cc-tray-head { font-size: var(--text-small); padding-top: 10px; }
-.cc-tray .cc-tile .cc-icon { animation: none; opacity: 0.75; }
-@keyframes cc-wobble {
-  0%, 100% { transform: rotate(-1.5deg); }
-  50% { transform: rotate(1.5deg); }
-}
 /* The panel's content: a sideways swipe moves it (gesture.ts), between the notifications and the control center. */
 .notif-panel .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; transform: translateX(var(--panel-dx, 0px)); }
 .notif-panel .panel-body.settling { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }

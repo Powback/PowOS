@@ -5,8 +5,8 @@
  * runs it: screenshot, lock), a long press opens its page in Settings. It lives in the notification panel's place, so the
  * pull, the finger following it and the swipe up to shut it are the panel's own (gesture.ts).
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { ComponentChildren } from "preact";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { Fragment, type ComponentChildren } from "preact";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
@@ -296,13 +296,12 @@ export function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
 }
 
 /**
- * The user's arrangement of the tiles (edit mode): their order and the ones taken out, kept in the store. Tiles it
+ * The user's arrangement of the tiles (kept from the earlier edit mode): their order and the ones taken out, in the store. Tiles it
  * doesn't name yet (a new app's tile) come after, in the phone's own order.
  */
 type Layout = { order: string[]; hidden: string[] };
 const layout = signal<Layout>({ order: [], hidden: [] });
 powos.store.get<Layout>("controls.layout").then((l) => l && (layout.value = l));
-const editing = signal(false);
 
 function arranged(tiles: QuickTile[]) {
   const { order, hidden } = layout.value;
@@ -313,161 +312,6 @@ function arranged(tiles: QuickTile[]) {
   return { shown, hidden: hidden.filter((id) => byId.has(id)).map((id) => byId.get(id)!) };
 }
 
-function saveLayout(l: Layout) {
-  layout.value = l;
-  powos.store.set("controls.layout", l);
-}
-
-/** Dragged this far (px) a tile is picked up; less is a tap. */
-const DRAG_SLOP = 6;
-
-/**
- * Edit mode: the tiles are dragged into place (the others make room as the finger passes over them), a − takes one
- * out, a + in the tray below puts it back at the end. Every change is kept at once; "done" (the header's check) ends it.
- * Its touches are its own (gesture.ts leaves .cc-editing alone), so a drag never pulls the panel shut.
- */
-function EditGrid({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] }) {
-  const grid = useRef<HTMLDivElement>(null);
-  // The order while a tile is being dragged (null: none is): shown live, kept when it's let go.
-  const [order, setOrder] = useState<string[] | null>(null);
-  const drag = useRef<{
-    id: string;
-    x0: number;
-    y0: number;
-    gx: number;
-    gy: number;
-    started: boolean;
-    x: number;
-    y: number;
-  } | null>(null);
-  const byId = new Map(shown.map((t) => [t.id, t]));
-  const ids = order ?? shown.map((t) => t.id);
-
-  /** The dragged tile under the finger: its offset from its slot (which moves as the order does). */
-  const place = () => {
-    const d = drag.current;
-    const el = grid.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(d?.id ?? "")}"]`);
-    if (!d || !el) return;
-    el.style.transform = "none";
-    const r = el.getBoundingClientRect();
-    el.style.transform = `translate(${d.x - d.gx - r.left}px, ${d.y - d.gy - r.top}px) scale(1.08)`;
-  };
-  useLayoutEffect(place, [order]);
-
-  const down = (e: PointerEvent, id: string) => {
-    const el = e.currentTarget as HTMLElement;
-    // The finger's moves come here even off the tile (a pointer the page doesn't track can't be captured).
-    try {
-      el.setPointerCapture(e.pointerId);
-    } catch {}
-    const r = el.getBoundingClientRect();
-    drag.current = {
-      id,
-      x0: e.clientX,
-      y0: e.clientY,
-      gx: e.clientX - r.left,
-      gy: e.clientY - r.top,
-      started: false,
-      x: e.clientX,
-      y: e.clientY,
-    };
-  };
-  const move = (e: PointerEvent) => {
-    const d = drag.current;
-    if (!d) return;
-    d.x = e.clientX;
-    d.y = e.clientY;
-    if (!d.started) {
-      if (Math.hypot(d.x - d.x0, d.y - d.y0) < DRAG_SLOP) return;
-      d.started = true;
-      setOrder(ids);
-      return;
-    }
-    // The slot whose middle is nearest the finger is where it goes.
-    let best = -1;
-    let dist = Infinity;
-    grid.current?.querySelectorAll<HTMLElement>("[data-id]").forEach((el, i) => {
-      if (el.dataset.id === d.id) return;
-      const r = el.getBoundingClientRect();
-      const dd = Math.hypot(r.left + r.width / 2 - d.x, r.top + r.height / 2 - d.y);
-      if (dd < dist) ((dist = dd), (best = i));
-    });
-    const from = ids.indexOf(d.id);
-    if (best >= 0 && best !== from && dist < 48) {
-      const next = ids.filter((x) => x !== d.id);
-      next.splice(best, 0, d.id);
-      setOrder(next);
-    } else place();
-  };
-  const up = () => {
-    const d = drag.current;
-    drag.current = null;
-    const el = d && grid.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(d.id)}"]`);
-    if (el) el.style.transform = "";
-    if (d?.started) saveLayout({ order: ids, hidden: layout.value.hidden });
-    setOrder(null);
-  };
-  const remove = (id: string) =>
-    saveLayout({ order: ids.filter((x) => x !== id), hidden: [...layout.value.hidden.filter((h) => h !== id), id] });
-  const add = (id: string) => saveLayout({ order: [...ids, id], hidden: layout.value.hidden.filter((h) => h !== id) });
-
-  return (
-    <div class="cc-editing">
-      <div class="cc-grid" ref={grid}>
-        {ids.map((id) => {
-          const t = byId.get(id)!;
-          return (
-            <div
-              key={id}
-              data-id={id}
-              class={`cc-tile edit ${drag.current?.started && drag.current.id === id ? "dragging" : ""}`}
-              onPointerDown={(e) => down(e, id)}
-              onPointerMove={move}
-              onPointerUp={up}
-              onPointerCancel={up}
-            >
-              <span class="cc-icon">
-                <Icon name={tileIcon(t)} />
-              </span>
-              <span class="cc-label">{t.label}</span>
-              <button
-                type="button"
-                class="cc-badge"
-                aria-label={`remove ${t.label}`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => remove(id)}
-              >
-                <Icon name="minusCircleOutline" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-      <span class="cc-tray-head muted">{hidden.length ? "more tiles" : "every tile is in"}</span>
-      {hidden.length > 0 && (
-        <div class="cc-grid cc-tray">
-          {hidden.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              class="cc-tile edit"
-              aria-label={`add ${t.label}`}
-              onClick={() => add(t.id)}
-            >
-              <span class="cc-icon">
-                <Icon name={tileIcon(t)} />
-              </span>
-              <span class="cc-label">{t.label}</span>
-              <span class="cc-badge add">
-                <Icon name="plus" />
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /**
  * A slider sending its value at most once a frame while it moves. Its icon can be a button of its own ([onIcon]: the
@@ -593,10 +437,11 @@ function MediaCard() {
 powos.on("qs.collapse", () => shut());
 
 /**
- * The control center's eight tiles (the main view): each one shape - a rounded tile, the accent when on - for one thing
- * or a few that belong together. A tap does the first member's (switches it, or runs it); the chevron or a long press
- * opens the group's sheet with all of its members. A member the phone doesn't have is left out; a group with none, too.
- * Everything else is on the all-tiles page, never gone.
+ * The control center's eight category tiles: every control the phone has lives under one of them - nothing hidden on
+ * a page of its own. A tap does the category's primary action (its first member: wi-fi, bluetooth, dark mode,
+ * screenshot, do not disturb, battery saver, the torch, location); the chevron or a long press opens the category in
+ * place - the row under it unfolds (its height animates, the grid below moves down) into its members as small round
+ * toggles; one category open at a time. A tile the phone has that no category names goes under Tools.
  */
 interface Group {
   id: string;
@@ -611,21 +456,25 @@ const GROUPS: Group[] = [
     id: "connect",
     label: "connect",
     icon: "bluetooth",
-    members: ["bt", "nfc", "app:com.oneplus.oshare", "app:com.oplus.linker", "app:com.microsoft.appmanager"],
+    members: ["bt", "nfc", "app:com.oneplus.oshare", "app:com.google.android.gms", "app:com.oplus.linker", "app:com.microsoft.appmanager", GLASSES_ID, REMOTE_ID],
   },
-  { id: "torch", label: "torch", icon: "flashlight", members: ["flashlight"] },
-  { id: "focus", label: "focus", icon: "minusCircleOutline", members: ["dnd"] },
   { id: "display", label: "display", icon: "themeLightDark", members: ["darkmode", "app:com.oplus.eyeprotect", "rotation"] },
-  { id: "battery", label: "battery", icon: "leaf", members: ["battery"] },
+  { id: "capture", label: "capture", icon: "cellphoneScreenshot", members: ["screenshot", "screenrecord", "qr_code_scanner"] },
+  { id: "focus", label: "focus", icon: "minusCircleOutline", members: ["dnd"] },
+  { id: "power", label: "power", icon: "leaf", members: ["battery", "lockscreen"] },
+  { id: "tools", label: "tools", icon: "flashlight", members: ["flashlight", "calculator", "wallet", "controls"] },
   { id: "location", label: "location", icon: "mapMarker", members: ["location"] },
-  { id: "capture", label: "capture", icon: "cellphoneScreenshot", members: ["screenshot", "screenrecord"] },
 ];
 
 const member = (tiles: QuickTile[], m: string) => (m.startsWith("app:") ? tiles.find((t) => t.app === m.slice(4)) : tiles.find((t) => t.id === m));
 
-/** What a group's tile says under its name: Internet "Home-WiFi · 5G" / "airplane", the first member's otherwise. */
+/** A short name for a member in a category's state line ("wi-fi · 5G", "bt · nfc"). */
+const SHORT: Record<string, string> = { bt: "bt", nfc: "nfc", darkmode: "dark", rotation: "rotate", battery: "saver", flashlight: "torch", dnd: "on", location: "on", lockscreen: "lock" };
+
+/** What a category's tile says under its name: what's on inside it. */
 function groupState(g: Group, ts: QuickTile[]): { on: boolean; detail: string } {
   const by = (id: string) => ts.find((t) => t.id === id);
+  const first = ts[0];
   if (g.id === "internet") {
     if (by("airplane")?.on) return { on: true, detail: "airplane" };
     const wifi = by("wifi");
@@ -633,17 +482,14 @@ function groupState(g: Group, ts: QuickTile[]): { on: boolean; detail: string } 
     const parts = [wifi?.on ? wifi.detail || "wi-fi" : null, cell?.on ? cell.detail || "data" : null].filter(Boolean);
     return { on: !!wifi?.on, detail: parts.length ? parts.join(" · ") : "off" };
   }
-  const first = ts[0];
-  const onCount = ts.filter((t) => t.on).length;
   if (g.id === "capture") return { on: false, detail: "" };
-  if (g.id === "battery") return { on: !!first.on, detail: first.on ? "saver on" : "saver off" };
-  if (ts.length > 1) return { on: !!first.on, detail: onCount ? ts.filter((t) => t.on).map((t) => t.label.toLowerCase()).join(" · ") : "off" };
-  return { on: !!first.on, detail: first.on == null ? "" : first.on ? "on" : "off" };
+  const on = ts.filter((t) => t.on);
+  const name = (t: QuickTile) => SHORT[t.id] ?? t.label.toLowerCase();
+  return { on: !!first.on, detail: on.length ? on.map(name).join(" · ") : "off" };
 }
 
-/** The group whose sheet is open (its members as tiles, under the eight), and the all-tiles page. */
-const sheet = signal<string | null>(null);
-const allTiles = signal(false);
+/** The category open in place (its members unfolded under its row). */
+const opened = signal<string | null>(null);
 
 function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
   const first = ts[0];
@@ -652,17 +498,19 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
   const held = useRef(false);
   const st = groupState(g, ts);
   const several = ts.length > 1;
-  const open = sheet.value === g.id;
+  const open = opened.value === g.id;
+  const toggle = () => (opened.value = open ? null : g.id);
   return (
     <button
       type="button"
-      class={`cc-tile ${st.on ? "on" : ""} ${open ? "sheet-open" : ""}`}
+      class={`cc-tile ${st.on ? "on" : ""} ${open ? "opened" : ""}`}
       aria-label={`${g.label}: ${st.detail}`}
+      aria-expanded={several ? open : undefined}
       onPointerDown={() => {
         held.current = false;
         timer.current = window.setTimeout(() => {
           held.current = true;
-          if (several) sheet.value = open ? null : g.id;
+          if (several) toggle();
           else press.onPointerDown();
         }, HOLD);
       }}
@@ -672,20 +520,23 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
       onContextMenu={(e: Event) => e.preventDefault()}
       onClick={() => {
         if (held.current) return;
+        // Remote input and the glasses open their own screens; the rest switch or run.
+        if (first.id === REMOTE_ID) return (shut(), openRemote());
+        if (first.id === GLASSES_ID) return (shut(), openGlasses());
         press.onClick();
       }}
     >
       <span class="cc-icon">
-        <Icon name={g.id === "internet" && !st.on ? "wifiOff" : g.id === "torch" && !st.on ? "flashlightOff" : g.icon} />
+        <Icon name={g.id === "internet" && !st.on ? "wifiOff" : g.id === "tools" && !st.on ? "flashlightOff" : g.icon} />
         {several && (
           <span
             class="cc-more"
             role="button"
-            aria-label={`${g.label}: all`}
+            aria-label={`${g.label}: ${open ? "close" : "open"}`}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
-              sheet.value = open ? null : g.id;
+              toggle();
             }}
           >
             <Icon name="chevronRight" />
@@ -698,13 +549,32 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
   );
 }
 
-/** A group's sheet: its members, each its own tile (a tap switches it, a long press its page). */
-function Sheet({ ts }: { ts: QuickTile[] }) {
+/** A member under an open category: a small round toggle over its name (remote input and the glasses their own). */
+function Sub({ t }: { t: QuickTile }) {
+  if (t.id === REMOTE_ID) return <RemoteTile t={t} />;
+  if (t.id === GLASSES_ID) return <GlassesTile t={t} />;
+  return <Tile t={t} />;
+}
+
+/**
+ * A row's unfolding: under each row of four, the open category's members when it's in that row. The height animates
+ * (a grid row from 0fr to 1fr); closing, the members stay drawn while it folds away.
+ */
+function Unfold({ group }: { group: { g: Group; ts: QuickTile[] } | undefined }) {
+  const last = useRef(group);
+  if (group) last.current = group;
+  const shown = group ?? last.current;
   return (
-    <div class="cc-sheet cc-grid">
-      {ts.map((t) => (
-        <Tile key={t.id} t={t} />
-      ))}
+    <div class={`cc-unfold ${group ? "open" : ""}`} aria-hidden={!group}>
+      <div>
+        {shown && (
+          <div class="cc-subs">
+            {shown.ts.map((t) => (
+              <Sub key={t.id} t={t} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -722,60 +592,34 @@ export function ControlCenter() {
       powos.qs.listening(false);
       clearInterval(timer);
       picking.value = false;
-      sheet.value = null;
-      allTiles.value = false;
-      editing.value = false;
+      opened.value = null;
     };
   }, [open]);
   const q = quick.value;
   const tiles = q.tiles ?? [];
-  // Remote input's and the glasses' tiles join the phone's: a layout kept before they were there gets them at the end.
+  // Remote input's and the glasses' tiles join the phone's.
   const every = [...tiles, remoteTile(), ...(glasses.value ? [glassesTile()] : [])];
-  const { shown, hidden } = arranged(every);
+  const { shown } = arranged(every);
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
-  const groups = GROUPS.map((g) => ({ g, ts: g.members.map((m) => member(tiles, m)).filter((t): t is QuickTile => !!t) })).filter(
-    (x) => x.ts.length > 0,
-  );
-  // The user's arrangement orders the eight too, by where their first members are in it.
+  const named = new Set<QuickTile>();
+  const groups = GROUPS.map((g) => {
+    const ts = g.members.map((m) => member(every, m)).filter((t): t is QuickTile => !!t);
+    ts.forEach((t) => named.add(t));
+    return { g, ts };
+  });
+  // Nothing is lost: a tile no category names (another app's, a new one) goes under Tools.
+  const tools = groups.find((x) => x.g.id === "tools");
+  if (tools) tools.ts.push(...every.filter((t) => !named.has(t)));
+  const live = groups.filter((x) => x.ts.length > 0);
+  // The user's arrangement orders the eight, by where their primary tiles are in it.
   const pos = (id: string) => {
     const i = shown.findIndex((t) => t.id === id);
     return i < 0 ? 999 : i;
   };
-  if (layout.value.order.length) groups.sort((a, b2) => pos(a.ts[0].id) - pos(b2.ts[0].id));
-  const open$ = groups.find((x) => x.g.id === sheet.value);
-  if (allTiles.value) {
-    return (
-      <div class="cc">
-        <div class="notif-bar">
-          <button type="button" class="cc-back" onClick={() => ((allTiles.value = false), (editing.value = false))}>
-            <Icon name="chevronLeft" />
-            <span>all tiles</span>
-          </button>
-          <span class="notif-actions icons">
-            <button
-              type="button"
-              aria-label={editing.value ? "done" : "edit"}
-              class={editing.value ? "on" : ""}
-              onClick={() => (editing.value = !editing.value)}
-            >
-              <Icon name={editing.value ? "check" : "pencilOutline"} />
-            </button>
-          </span>
-        </div>
-        {editing.value ? (
-          <EditGrid shown={shown} hidden={hidden} />
-        ) : (
-          <div class="cc-grid">
-            {shown.map((t) =>
-              t.id === REMOTE_ID ? <RemoteTile key={t.id} t={t} /> : t.id === GLASSES_ID ? <GlassesTile key={t.id} t={t} /> : <Tile key={t.id} t={t} />,
-            )}
-          </div>
-        )}
-        {!editing.value && <RemotePick />}
-      </div>
-    );
-  }
+  if (layout.value.order.length) live.sort((a, b2) => pos(a.ts[0].id) - pos(b2.ts[0].id));
+  const rows: (typeof live)[] = [];
+  for (let i = 0; i < live.length; i += 4) rows.push(live.slice(i, i + 4));
   return (
     <div class="cc">
       <div class="notif-bar">
@@ -812,16 +656,19 @@ export function ControlCenter() {
         />
       </div>
       <MediaCard />
-      <div class="cc-grid cc-main">
-        {groups.map(({ g, ts }) => (
-          <GroupTile key={g.id} g={g} ts={ts} />
+      <div class="cc-main">
+        {rows.map((row, r) => (
+          <Fragment key={r}>
+            <div class="cc-grid">
+              {row.map(({ g, ts }) => (
+                <GroupTile key={g.id} g={g} ts={ts} />
+              ))}
+            </div>
+            <Unfold group={row.find((x) => x.g.id === opened.value)} />
+          </Fragment>
         ))}
       </div>
-      {open$ && <Sheet ts={open$.ts} />}
-      <button type="button" class="cc-all" onClick={() => ((sheet.value = null), (allTiles.value = true))}>
-        all tiles
-        <Icon name="chevronRight" />
-      </button>
+      <RemotePick />
     </div>
   );
 }

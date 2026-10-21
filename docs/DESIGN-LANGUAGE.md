@@ -96,24 +96,26 @@ instead: deploy notes go into a single "PowOS · updates" group.
   A tap unfolds it in place without a jump, and a tap on its head folds it again.
 - **Swipes:** swiping a folded stack dismisses the whole group. In an unfolded group, a swipe dismisses one card.
 
-### Control center: eight tiles
+### Control center: eight category tiles
 
 - **Header:** the time and date, and the settings gear.
 - **Sliders:** two slim ones.
   - Brightness has its "auto" as a small "A" at the end.
   - Volume's icon cycles silent, vibrate and ring.
-- **Eight tiles,** one shape each: a rounded tile in the accent colour when on. Tapping a tile does its first
-  member's action; the chevron or a long press opens a sheet with all of its members.
+- **Eight category tiles,** 2x4, in one shape: a rounded tile in the accent colour when on.
+  - A tap does the category's primary action. Its subtitle says what's on inside it ("wi-fi · 5G", "bt · nfc").
+  - The chevron or a long press unfolds the category in place: the row under it opens (its height animates, the
+    grid below moves down) into the members as small round toggles. One category is open at a time.
+- **Every control lives under a category.** There is no tiles page, and anything unnamed goes under Tools.
   - Internet: wi-fi, mobile data, airplane, hotspot.
-  - Connect: bluetooth, NFC, quick share, cast, Link to Windows.
-  - Torch.
-  - Focus.
+  - Connect: bluetooth, NFC, quick share, cast, Link to Windows, glasses, remote input.
   - Display: dark mode, eye comfort, auto-rotate.
-  - Battery saver.
+  - Capture: screenshot, screen record, scan QR.
+  - Focus: do not disturb.
+  - Power: battery saver, lock.
+  - Tools: torch (its tap), calculator, wallet, device controls.
   - Location.
-  - Capture: screenshot, screen record.
-- **All tiles:** a page for every other tile. Nothing is ever lost; the edit pencil lives on that page.
-- **What's behind:** home's content fades out as the panel comes down, so nothing shows through it.
+- **What's behind:** home's content fades out as the panel comes down.
 
 ## 4. Colour
 
