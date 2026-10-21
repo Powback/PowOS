@@ -3,6 +3,7 @@ widget "scripts" {
   order: 1
   size: 6x3
   minSize: 3x2
+  meta { owl: 6 }
 
   requires { pacman: ["jq"] }
 
@@ -34,23 +35,38 @@ widget "scripts" {
 
   onTap: terminal("cd ~/.config/omalauncher/scripts && ls", "scripts")
 
+  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted): the label, then a soft
+  // row for each script - its name and the line it printed - whole rows only, sharing the height, the rest counted.
+  let iw = tileWidth == null ? 340 : tileWidth - 24
+  let ih = tileHeight == null ? 180 : tileHeight - 24
+  let ls = clamp(floor(min(ih * 0.07, iw / (8 * 0.6))), 10, 18)
+  let n = rows == null ? 0 : len(rows)
+  let fit = clamp(floor((ih - ls * 1.4 - 6 + 6) / (30 + 6)), 1, max(1, n))
+  let shown = n <= fit ? n : fit - 1
+  let used = shown + (shown < n ? 1 : 0)
+  let rowH = (ih - ls * 1.4 - 6 - (max(used, 1) - 1) * 6) / max(used, 1)
+  let nameW = clamp(floor(iw * 0.32), 40, 160)
+  let rs = clamp(floor(min(rowH * 0.42, (nameW - 8) / (7 * 0.6), (iw - nameW - 28) / (16 * 0.6))), 9, 26)
+
   Column {
-    gap: 4
-    Text { text: "scripts"; style: muted }
-    if rows != null && len(rows) == 0 {
-      Text { text: "put scripts in ~/.config/omalauncher/scripts"; style: small; color: muted }
+    gap: 6; fill: height
+    Text { text: "scripts"; fontSize: ls; color: muted; maxLines: 1 }
+    if rows != null && n == 0 {
+      Text { text: "put scripts in ~/.config/omalauncher/scripts"; fontSize: rs; color: muted; maxLines: 3 }
     }
-    Column {
-      scroll: true
-      weight: 1
-      gap: 4
-      for r in rows key r.path {
-        let j = startsWith(r.out, "{") ? parseJson(r.out) : null
-        Row {
-          onTap: terminal(r.path, r.name)
-          Text { text: r.name; fontSize: 12; color: muted; width: 88; maxLines: 1 }
-          Text { text: j.text ?? r.out; fontSize: 12; font: mono; maxLines: 1; weight: 1; color: j.color ?? foreground }
-        }
+    for r in take(rows ?? [], shown) key r.path {
+      let j = startsWith(r.out, "{") ? parseJson(r.out) : null
+      Row {
+        weight: 1; align: center; gap: 8; padding: [10, 0]; background: alpha(foreground, 0.07); radius: 6 * corners
+        onTap: terminal(r.path, r.name)
+        Text { text: r.name; fontSize: rs; color: muted; width: nameW; maxLines: 1 }
+        Text { text: j.text ?? r.out; fontSize: rs; font: mono; maxLines: 1; weight: 1; color: j.color ?? foreground }
+      }
+    }
+    if shown < n {
+      Box {
+        weight: 1; fill: width; align: start; padding: [10, 0]; background: alpha(foreground, 0.04); radius: 6 * corners
+        Text { text: "+${n - shown} more"; fontSize: rs; color: muted; maxLines: 1 }
       }
     }
   }

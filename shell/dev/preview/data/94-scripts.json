@@ -1,0 +1,29 @@
+{
+ "rows": [
+  {
+   "path": "/home/powos/.config/omalauncher/scripts/disk.sh",
+   "name": "disk",
+   "out": "41G free"
+  },
+  {
+   "path": "/home/powos/.config/omalauncher/scripts/ci.sh",
+   "name": "ci",
+   "out": "{\"text\": \"3 failing\", \"color\": \"red\"}"
+  },
+  {
+   "path": "/home/powos/.config/omalauncher/scripts/mail.sh",
+   "name": "mail",
+   "out": "2 unread"
+  },
+  {
+   "path": "/home/powos/.config/omalauncher/scripts/backup.sh",
+   "name": "backup",
+   "out": "last 04:12, ok"
+  },
+  {
+   "path": "/home/powos/.config/omalauncher/scripts/ip.sh",
+   "name": "ip",
+   "out": "192.168.50.58"
+  }
+ ]
+}
