@@ -35,8 +35,20 @@ for (one line each).
   docs/DESIGN-LANGUAGE.md (rule 1: less is more, reduce complexity).
 - Glass: CSS frost picture shell/ui/glass.ts (lock face); live compositor blur for home shell/ui/nativeglass.ts ->
   GlassBlur.kt (SurfaceFlinger blur regions); liquid refraction LiquidGlass.kt + WallpaperBackdrop.kt (OFF by default).
-- Widgets: shell built-ins (shell/ui), OWL widgets (rendered by the Kotlin OWL engine ON THE PHONE ONLY - the mock has
-  no trees; shell/dev/sample-trees.json is empty), PowOS-app islands (apps' ui/widgets).
+- Widgets: shell built-ins (shell/ui panels), OWL widgets (.owl: evaluated by the Kotlin engine, drawn by
+  shell/ui/owl.tsx from the trees it sends), PowOS-app islands (apps' ui/widgets). See EVERY widget at every size:
+  `shell/dev/preview.sh` (or `powos app preview <dir|file.owl|id>`) - contact sheets + fit checks, mock data in
+  shell/dev/preview/data/<id>.json; the gate runs it (--fast) when a push touches what draws widgets.
+  - OWL off the phone: `owl trees` (targets/android/app/owl/src/cli/.../Trees.kt, a port of WidgetTree.kt - keep in
+    step) evaluates a widget per tile size; preview.sh builds owl.jar with
+    `./gradlew -q --offline --configure-on-demand :owl:owlJar` in android-app-dev-android-builder (volume
+    powos-android-gradle; it's locked while an APK builds - the old jar is used then). `java -jar owl.jar check f.owl`.
+  - OWL widgets on the phone: files/widgets/*.owl (= PowOS's ~/.config/omalauncher/widgets), hot-reloaded; push
+    with adb to /data/local/tmp (rm the folder first: adb push into an existing folder nests it), su cp + chown
+    u0_a359 + `restorecon -F`, then md5 against the repo's assets/widgets.
+  - OWL layout = Compose's: an unsized Text/Grid/Canvas/chart or a Row of weights takes the column's width; a Row's
+    fixed-width items don't spread without `fill: width`; size text from tileWidth/tileHeight, never a fixed cap.
+  - Islands get { host, app, cells }: measure the real area (ResizeObserver) - never guess rows from cells.
 - Speech: one shared recognizer (targets/android/app .../ui/Speech.kt), bridge events speech.state/done/permission.
 - Assist overlay: VoiceInteractionService session (PowosAssistSession.kt) hosting shell mode=assist.
 - Deploy notes/errors to the user: deploy notes = tools/deploy-note.sh -> notification; shell errors are captured in
