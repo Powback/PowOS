@@ -85,6 +85,7 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
   const clip = useRef<SVGPathElement>(null);
   const hl = useRef<SVGPathElement>(null);
   const face = useRef<SVGGElement>(null);
+  const feet = useRef<SVGGElement>(null);
   const eyes = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     const ps = ring();
@@ -122,7 +123,9 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
       eye.y = ey;
       draw(ps);
       // The face rides the body's centre of mass (a squash takes it down with it); the eyes also look.
-      face.current?.setAttribute("transform", `translate(${(mx - CX).toFixed(2)} ${(my - CY).toFixed(2)})`);
+      const shift = `translate(${(mx - CX).toFixed(2)} ${(my - CY).toFixed(2)})`;
+      face.current?.setAttribute("transform", shift);
+      feet.current?.setAttribute("transform", shift);
       // Eyes: their own layer (an HTML box, composited) - viewBox units to its px.
       const k = (eyes.current?.offsetWidth ?? BODY) / BODY;
       if (eyes.current) eyes.current.style.transform = `translate(${((mx - CX + eye.x) * k).toFixed(2)}px, ${((my - CY + eye.y) * k).toFixed(2)}px)`;
@@ -139,6 +142,9 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
     };
     handle.current = {
       push(vx, vy) {
+        // A fast finger mustn't tear it: at most this much per move.
+        vx = Math.max(-5, Math.min(5, vx));
+        vy = Math.max(-5, Math.min(5, vy));
         // The rim lags the motion: points on the leading side pressed in, trailing side pulled out.
         for (const p of ps) {
           const along = (p.rx * vx + p.ry * vy) / (RX * Math.hypot(vx, vy) || 1);
@@ -215,8 +221,11 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
         </defs>
         {/* Its soft shadow on whatever it stands on. */}
         <ellipse class="pet-shadow" cx="26" cy="49.2" rx="15" ry="2.4" />
-        <ellipse class="pet-foot" cx="19" cy="46.5" rx="4" ry="2.2" />
-        <ellipse class="pet-foot" cx="33" cy="46.5" rx="4" ry="2.2" />
+        {/* Feet under the body, riding its centre of mass with the face. */}
+        <g ref={feet}>
+          <ellipse class="pet-foot" cx="19" cy="46.5" rx="4" ry="2.2" />
+          <ellipse class="pet-foot" cx="33" cy="46.5" rx="4" ry="2.2" />
+        </g>
         {/* Listening: two small "ears" that glow with the voice (pet.tsx pulses them as words come). */}
         <circle class="pet-ear" cx="15" cy="14.5" r="2.2" />
         <circle class="pet-ear" cx="37" cy="14.5" r="2.2" />

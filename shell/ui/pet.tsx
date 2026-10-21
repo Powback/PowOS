@@ -25,7 +25,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
-import { carry, chat, chatting, closeDrawer, editing, menu, openPanel, page, pullPanels, stored } from "../state.ts";
+import { carry, chat, chatting, closeDrawer, editing, home, menu, openPanel, page, pullPanels, stored } from "../state.ts";
 import { drawerOpen, notifOpen } from "./gesture.ts";
 // From bar.tsx, which re-exports ui/dictation.ts: the phone runs an older bar.tsx until the dictation rework ships.
 import { dictate, hearing, speech, type MicTarget } from "./bar.tsx";
@@ -34,6 +34,7 @@ import { agent, agentIds, asks, tasks, useAgents } from "../agents.ts";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { installedApps } from "../apps/pages.ts";
 import { PetBody, type BodyHandle } from "./petbody.tsx";
+import { edges, fall, perchAt, placeOn, where as perchWhere, type Perch } from "./petperch.ts";
 import { DbConnection as PetDb } from "../vendor/local-pet.js";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import type { AgentMail } from "../types.ts";
@@ -75,6 +76,18 @@ const pos = () => {
     return { x: 1, y: 0.68 };
   }
 };
+/** Its perch (petperch.ts): a tile's top edge, or the search pill's - kept. "" = none yet (it floats at [where]). */
+const perchStored = stored("pet.perch", "");
+const perch = (): Perch | null => {
+  try {
+    const p = JSON.parse(perchStored.value || "null");
+    return p && typeof p.key === "string" ? { key: p.key, fx: +p.fx || 0 } : null;
+  } catch {
+    return null;
+  }
+};
+/** Bumped when home's layout may have moved under it (a page settled, tiles changed, the screen resized). */
+const layout = signal(0);
 const toPx = (p: { x: number; y: number }) => ({
   left: MARGIN + p.x * Math.max(0, innerWidth - size() - 2 * MARGIN),
   top: MARGIN + p.y * Math.max(0, innerHeight - size() - 2 * MARGIN),
@@ -120,7 +133,12 @@ const needsYou = computed(() => {
 
 /** A state forced from outside (review renders, CDP: `__pet.force("worried")`, null to let go). */
 const forced = signal<State | null>(null);
-(window as unknown as { __pet?: object }).__pet = { force: (s: State | null) => (forced.value = s) };
+(window as unknown as { __pet?: object }).__pet = {
+  force: (s: State | null) => (forced.value = s),
+  /** Put it on a perch (a tile's key or "bar", 0..1 along the edge); null: floating. */
+  perch: (key: string | null, fx = 0.5) => (perchStored.value = key ? JSON.stringify({ key, fx }) : ""),
+  edges,
+};
 
 const state = computed<State>(() => {
   if (forced.value) return forced.value;
@@ -552,6 +570,25 @@ function PetLayer() {
       removeEventListener("pointercancel", away, { capture: true });
     };
   }, [shown]);
+  // Home's layout moved under its perch: measured again once things settle (a page slide, tiles moved, a resize).
+  useEffect(() => {
+    let t = 0;
+    const later = (ms: number) => {
+      clearTimeout(t);
+      t = window.setTimeout(() => layout.value++, ms);
+    };
+    const offPage = page.subscribe(() => later(340));
+    const offHome = home.subscribe(() => later(60));
+    const resize = () => later(120);
+    addEventListener("resize", resize);
+    later(400);
+    return () => {
+      clearTimeout(t);
+      offPage();
+      offHome();
+      removeEventListener("resize", resize);
+    };
+  }, []);
   // Alive at rest: a blink every 6-10 s (one short compositor animation; no timer while hidden or asleep).
   useEffect(() => {
     if (!shown) return;
@@ -579,7 +616,20 @@ function PetLayer() {
   // On the chat surface it's the chat's face (pet.css .face: by the pill); over the app list, menus, edit mode: away.
   const face = chatOpen.value;
   const hidden = (drawerOpen.value && !face) || editing.value || notifOpen.value || !!carry.value || !!menu.value;
-  const at = toPx(pos());
+  // Where it is: by the pill as the chat's face; on its perch (or, its edge not on screen, the nearest edge there
+  // is); else floating where it was put.
+  void layout.value;
+  void page.value;
+  void home.value;
+  const sz = size();
+  const pill = face ? document.querySelector<HTMLElement>(".bar .bar-pill, .bar")?.getBoundingClientRect() : null;
+  const list = face ? [] : edges();
+  const mine = perch();
+  const at =
+    (pill && placeOn({ key: "pill", left: pill.left, right: pill.right, top: pill.top }, 0.88, sz)) ||
+    perchWhere(mine, sz, list) ||
+    (mine && list.length ? perchWhere(perchAt(innerWidth - sz, innerHeight * 0.68, list), sz, list) : null) ||
+    toPx(pos());
   const s = state.value;
   return (
     <>
@@ -629,16 +679,34 @@ function PetLayer() {
           if (!p) return;
           clearTimeout(p.timer);
           if (p.moved) {
-            const free = (n: number) => Math.max(1, n - size() - 2 * MARGIN);
-            const x = (at.left + p.dx - MARGIN) / free(innerWidth);
-            const y = (at.top + p.dy - MARGIN) / free(innerHeight);
-            where.value = JSON.stringify({ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) });
-            // Set down: a squash.
-            body.current?.squash(0.7);
-            if (el.current) {
-              el.current.style.transform = "";
-              el.current.classList.remove("dragging");
+            const node = el.current;
+            if (!node) return;
+            // Let go: it falls (with the finger's last speed) onto the first edge below - a tile's, the search pill's.
+            const x0 = at.left + p.dx;
+            const y0 = at.top + p.dy;
+            if (!edges().length) {
+              // Nothing to stand on (PowOS AI's page): it stays where it was put, floating.
+              const free = (n: number) => Math.max(1, n - sz - 2 * MARGIN);
+              where.value = JSON.stringify({ x: Math.min(1, Math.max(0, (x0 - MARGIN) / free(innerWidth))), y: Math.min(1, Math.max(0, (y0 - MARGIN) / free(innerHeight))) });
+              body.current?.squash(0.6);
+              node.style.transform = "";
+              node.classList.remove("dragging");
+              return;
             }
+            node.classList.add("falling");
+            node.classList.remove("dragging");
+            fall(x0, y0, (p.dx - p.lx) * 0.9, (p.dy - p.ly) * 0.9, sz, (x, y) => (node.style.transform = `translate(${x - at.left}px, ${y - at.top}px)`), (landed, speed) => {
+              // Landed: its place written straight away (no frame between the fall's last and the render's first).
+              const to = perchWhere(landed, sz);
+              if (to) {
+                node.style.left = `${to.left}px`;
+                node.style.top = `${to.top}px`;
+              }
+              node.style.transform = "";
+              node.classList.remove("falling");
+              perchStored.value = JSON.stringify(landed);
+              body.current?.squash(Math.min(1, 0.3 + speed / 22));
+            });
             return;
           }
           if (p.long) return;
@@ -654,7 +722,7 @@ function PetLayer() {
           if (p) clearTimeout(p.timer);
           if (el.current) {
             el.current.style.transform = "";
-            el.current.classList.remove("dragging");
+            el.current.classList.remove("dragging", "falling");
           }
         }}
       >

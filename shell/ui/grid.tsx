@@ -445,6 +445,8 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
   return (
     <div
       class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${lifted ? "lifted" : ""} ${join ? "joined" : ""}`}
+      /* Its key: what finds it from outside (the pet perches on a tile by it - ui/petperch.ts). */
+      data-key={item.key}
       style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`, ...join }}
       {...press}
     >

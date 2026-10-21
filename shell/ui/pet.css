@@ -15,17 +15,13 @@
   touch-action: none;
   --pet-fill: color-mix(in srgb, var(--color-accent) 82%, var(--color-foreground));
   --pet-ink: var(--color-background);
-  transition: opacity 200ms ease;
+  /* A perch that moved (a page settled, a tile moved): it goes there in a short glide. */
+  transition: opacity 200ms ease, left 280ms cubic-bezier(0.3, 0.8, 0.3, 1), top 280ms cubic-bezier(0.3, 0.8, 0.3, 1);
 }
 @media (min-width: 600px) { .pet { --pet-size: 72px; } }
+.pet.falling { transition: opacity 200ms ease; }
 .pet.away { opacity: 0; pointer-events: none; }
-/* The chat's face: by the search pill while it's in chat mode (its own place is kept for when the chat closes). */
-.pet.face {
-  left: auto !important;
-  top: auto !important;
-  right: 14px;
-  bottom: calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + 56px);
-}
+/* The chat's face: on the search pill's top edge while it's in chat mode (pet.tsx places it; its perch is kept). */
 .pet.dragging { transition: none; }
 .pet-body, .pet-inner { display: block; width: 100%; height: 100%; transform-origin: 50% 92%; }
 .pet-body { will-change: transform; }
