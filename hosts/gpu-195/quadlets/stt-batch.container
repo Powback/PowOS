@@ -1,5 +1,5 @@
-# gpu-195: speech to text for everything that isn't the realtime voice path - files, dictation from phones and
-# desktops (`powos transcribe`, PowOS AI's mic), behind http://stt.pow (Traefik on .100, PowStation
+# gpu-195: speech to text for everything that isn't the realtime voice path - files and recordings from any PowOS
+# (`powos transcribe`) or any OpenAI-compatible client, behind http://stt.pow (Traefik on .100, PowStation
 # config/traefik/dynamic/stt.yml). Same whisper-fast image and model as voice-stt, but on GPU1 with its own copy of
 # the model: a long file never queues voice-agent's turns (GPU0 is the voice path's alone, docs/GPU-SERVERS-PLAN.md),
 # and CPU contention goes to the voice path first (2 CPUs at a low cpu weight; voice-stt has 4 at the default).
@@ -7,7 +7,7 @@
 # OpenAI API: POST /v1/audio/transcriptions (json|text|verbose_json|srt|vtt, stream=true for SSE deltas), GET /health.
 # Unit: powos units show stt-batch  (repo units/gpu-195/stt-batch.json)
 [Unit]
-Description=PowOS STT for files and dictation (whisper-fast large-v3-turbo, GPU1) - stt.pow
+Description=PowOS STT for files (whisper-fast large-v3-turbo, GPU1) - stt.pow
 After=network-online.target
 Wants=network-online.target
 
