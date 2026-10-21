@@ -12,6 +12,7 @@
     "/var/tmp/powos-shell-src/",
     "/var/tmp/powos-shell-build/",
     "/home/powos/.local/share/powos/shell-data/",
+    "/home/powos/.local/share/powos/net/",
     "/home/powos/.local/state/powos/desktop-shell.log",
     "/home/powos/.local/share/powos-shell/",
     "/home/powos/.cache/powos-shell/"
@@ -29,5 +30,5 @@
     "cpuPct": 25,
     "pids": 64
   },
-  "remove": "powos-desktop-shell stop; rm -rf /usr/lib/powos/desktop-shell /usr/bin/powos-desktop-shell /usr/share/applications/org.powos.shell.desktop /var/tmp/powos-shell-src /var/tmp/powos-shell-build /home/powos/.local/share/powos-shell /home/powos/.cache/powos-shell (shell-data's desktop-* files are the desktop's layout and chat)"
+  "remove": "powos-desktop-shell stop; rm -rf /usr/lib/powos/desktop-shell /usr/bin/powos-desktop-shell /usr/share/applications/org.powos.shell.desktop /var/tmp/powos-shell-src /var/tmp/powos-shell-build /home/powos/.local/share/powos-shell /home/powos/.cache/powos-shell /home/powos/.local/share/powos/net (host.net's pins and app secrets) (shell-data's desktop-* files are the desktop's layout and chat)"
 }

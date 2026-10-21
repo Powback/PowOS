@@ -21,7 +21,7 @@ Rules:
 - CDP is read-only on the phone's pages. The desktop page is yours, but read it, don't drive it, while anyone could see
   it. Never run KWin's debug console or other KWin UI from a probe. Never bring the PowOS activity to the front
   (it takes over the user's screen). Never poll the phone (one idle.sh --wait).
-- Mark workarounds HACK: with a row in docs/REMOTE-POWOS.md section 4.
+- Mark workarounds `HACK:` with a row in docs/REMOTE-POWOS.md section 4.
 Work in your own git worktree off worktree-powos-multiplatform, rebase often, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push. C++ compiles on the
 phone (dev/phone.sh build) before you push it.

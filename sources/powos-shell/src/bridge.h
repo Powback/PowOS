@@ -7,6 +7,7 @@
 #include <QJsonValue>
 #include <QObject>
 
+class Net;
 struct Services;
 
 class Bridge : public QObject {
@@ -43,6 +44,8 @@ Q_SIGNALS:
 private:
     QJsonValue dispatch(const QString &method, const QJsonArray &a);
     const Services &m_services;
+    /** host.net for this page's islands (its streams go with the page). */
+    Net *m_net;
 };
 
 /** The script every page gets at DocumentCreation: qwebchannel.js, then window.PowosHost over the channel. */

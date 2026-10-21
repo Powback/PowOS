@@ -52,8 +52,9 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
 - The launcher on the desktop has a deeper dim (tint + 42%, desktop.css), measured with the blur emulated: the
   reference fill left 54 of 67 labels under 4.5:1 over a light wallpaper. Contrast wins over the reference look;
   re-measure (both wallpapers, three themes) before changing it.
-- Islands that use host.net (apps/net.ts over the native port, e.g. Lights reaching Hue) hang at "…": the desktop
-  host has no net channel yet.
+- host.net (src/net.cpp, apps/net.ts's n.req over the native port) mirrors ShellNet.kt. Its secrets and pins are
+  the desktop's own (~/.local/share/powos/net): Lights shows "no secret hue" until it's paired here or the key is
+  brought over (the user's call - never pair or switch a light yourself).
 - Shell files ship as usual: commit, rebase, push, `READY_MS=30000 shell/push.sh --vpn --note "..." <files>`; the
   desktop host's own copy of shell/ only changes with dev/phone.sh build.
 
@@ -61,4 +62,4 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
 Global hotkey (KGlobalAccel), dictation (GPU box STT), the phone's theme mirrored into the rooted session (Android
 app, Omarchy current/theme), a desktop widget picker, agents' mail into the page, x86 Plasma (image-build.sh), a user
 unit for autostart with powos-desktop-shell as its switch, an input region so clicks off the tiles reach Plasma's desktop,
-host.net for islands (Lights), OWL widgets (weather, sysinfo) once the engine's JS port exists.
+OWL widgets (weather, sysinfo) once the engine's JS port exists.

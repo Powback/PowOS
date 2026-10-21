@@ -41,6 +41,7 @@ Android bridge is untouched. bridge.ts picks `desktop(native(host))` when `Powos
 | theme.get / theme.changed | Omarchy's `~/.local/state/omarchy/current/theme/colors.toml`, mapped the way the phone maps it, watched | C++ |
 | ai.chat / send / ai.changed | `powos manager --once-stdin --json-events`, one turn per ask, streamed into the chat items | C++ |
 | glass (`b.hello`, `b.r`) | KWin blur behind the rects the page reports (`KWindowEffects::enableBlurBehind`, which KWin 6.7 serves as `ext_background_effect_v1`; its capability arrives ~0.5 s late, so a "no" is asked again, a `HACK:`) | C++ |
+| host.net (islands' devices: `n.req` fetch/events/mdns/secret/forget) | QtNetwork as ShellNet.kt: the manifest's `net` scope, LAN certificates pinned on first use, secrets kept in `~/.local/share/powos/net` (0600), mDNS through avahi-browse. Its secrets are the desktop's own (a Hue key captured on the phone's Android side isn't here) | C++ |
 | islands (SpacetimeDB) | the page's own WebSocket to `ws://127.0.0.1:3410`; apps' UIs on `powos://shell/_app/<id>/` | page + C++ |
 | windows.* | TasksModel (the panel's) | C++ |
 | `_font/symbols` | the terminals' Nerd Font symbols, through fontconfig | C++ |

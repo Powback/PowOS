@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 include(GNUInstallDirs)
 
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets WebEngineCore WebEngineWidgets WebChannel)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets WebEngineCore WebEngineWidgets WebChannel Network)
 find_package(KF6Service REQUIRED)
 find_package(KF6KIO REQUIRED)
 find_package(KF6WindowSystem REQUIRED)
@@ -24,9 +24,10 @@ add_executable(powos-shell
   src/server.cpp
   src/bridge.cpp
   src/services.cpp
+  src/net.cpp
 )
 target_link_libraries(powos-shell PRIVATE
-  Qt6::Widgets Qt6::WebEngineCore Qt6::WebEngineWidgets Qt6::WebChannel
+  Qt6::Widgets Qt6::Network Qt6::WebEngineCore Qt6::WebEngineWidgets Qt6::WebChannel
   KF6::Service KF6::KIOGui KF6::WindowSystem
   LayerShellQt::Interface
   PW::LibTaskManager

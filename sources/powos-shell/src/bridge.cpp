@@ -1,4 +1,5 @@
 #include "bridge.h"
+#include "net.h"
 #include "services.h"
 
 #include <KWindowEffects>
@@ -26,7 +27,9 @@ struct Unsupported : std::runtime_error {
 Bridge::Bridge(const Services &services, QObject *parent)
     : QObject(parent)
     , m_services(services)
+    , m_net(new Net(this))
 {
+    connect(m_net, &Net::reply, this, &Bridge::nativeMessage);
     connect(services.windows, &Windows::changed, this, [this](const QJsonArray &list) { emitEvent(QStringLiteral("windows.changed"), list); });
     connect(services.apps, &Apps::changed, this, [this] { emitEvent(QStringLiteral("apps.changed"), QJsonValue::Null); });
     connect(services.theme, &Theme::changed, this, [this](const QJsonValue &t) { emitEvent(QStringLiteral("theme.changed"), t); });
@@ -51,6 +54,11 @@ void Bridge::native(const QString &message)
                 });
     } else if (message.startsWith(QLatin1String("b.r "))) {
         Q_EMIT glass(message.mid(4));
+    } else if (message.startsWith(QLatin1String("n.req "))) {
+        m_net->command(message.mid(6));
+    } else if (message == QLatin1String("s.reset")) {
+        // A new port (the page loaded again): what the last one had open goes.
+        m_net->reset();
     } else if (message.startsWith(QLatin1String("open "))) {
         const QUrl url(message.mid(5));
         if (url.scheme() == QLatin1String("https") || url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("mailto"))

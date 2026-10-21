@@ -292,7 +292,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-108 markers on 2026-10-21.
+109 markers on 2026-10-21.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -346,6 +346,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/QuickSettings.kt:318` | WRITE_SETTINGS app-op granted through root on the user's behalf. | The user grants it on the Settings page. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/ShellBridge.kt:333` | StatusBarManager expand/collapse panels are not public API (as every third-party launcher does). | An accessibility GLOBAL_ACTION_NOTIFICATIONS (user opt-in, open only) or SystemUI's motion proxy. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/ShellNet.kt:55` | host.net takes the app id the island gives: islands share the shell page's one origin, so one could name another app's id and use its "net" grants and secrets. | Per-app origins (islands in `<id>.app.powos` frames, FEASIBILITY §6.1) and the id taken from the calling frame's origin. |
+| `sources/powos-shell/src/net.cpp:183` | The desktop host's host.net takes the app id the island gives, as ShellNet.kt does (one page, one origin). | Per-app origins (islands in `<id>.app.powos` frames, FEASIBILITY §6.1) and the id taken from the calling frame's origin. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/ShellMedia.kt:43` | Media output switch through SystemUI's internal MediaOutputDialogReceiver. | None public (switching another app's output takes MEDIA_CONTENT_CONTROL). |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/TileHost.kt:46` | Hosting tiles at all uses hidden framework interfaces copied into aidl/. | None for an app; only SystemUI hosts tiles. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/TileHost.kt:69` | Hidden BIND_FOREGROUND_SERVICE_WHILE_AWAKE bind flag (SystemUI's). | None public; BIND_IMPORTANT is close but keeps the process up with the screen off. |
