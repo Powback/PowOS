@@ -34,6 +34,11 @@ Three kinds of widget, one home grid (docs/AGENT-HANDBOOK.md, Widgets):
   up/down in whole rows (overflowY auto, scroll-snap y mandatory, touch-action pan-y). Never guess rows from cells:
   measure the real area (ResizeObserver) if you must compute.
 - No lines: fields and chips are a soft fill (color-mix currentColor 8%). Never a sideways strip of controls.
+- Cards that share the height (the Agents panel, shell/ui/agents.tsx): measure only the container (ResizeObserver),
+  then fit each card's lines IN RENDER from that box - the font is monospace, so wrapping is counting (wrapped(),
+  fitLines()). Measuring inside each card in a layout effect went stale when a signal changed its text (the cut
+  "coder" card). Soft-filled cards count as ink for the coverage check; an empty state is one card, not blank glass.
+  Variants with other mock data: preview.mjs widgets with `agents: [...]` (panel.agents-idle / -empty).
 - OWL layout is Compose's: an unsized Text/Grid/Canvas/chart or a Row of weights takes the column's width; a Row's
   fixed-width items don't spread without `fill: width`; size text from tileWidth/tileHeight, never a fixed cap.
 
