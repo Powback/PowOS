@@ -3,7 +3,8 @@
 # (a lock: two builds at once overwrote the shared out/powos.apk), through install-app.sh (privapp allowlist
 # guard + app-data backup), then verify the app came back (gesture input, no new crash).
 #   tools/phone/ship-apk.sh --note "what changed, plain words" [--now]
-# Waits for the user to be idle >= 60 s before installing (an install restarts the PowOS session); --now skips that.
+# Waits for the user to be idle >= 60 s (or the screen off) before installing - an install restarts the PowOS session;
+# never installs over an active user (exit 4 after SHIP_WAIT_MIN minutes). --now skips the wait (only for urgent fixes).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 note="" now=""
@@ -18,8 +19,16 @@ trap 'rm -rf "$lock"' EXIT
 targets/android/build-app.sh 2>&1 | grep -E "^e: |BUILD|version code|refus|error:" 
 apk=$HOME/Projects/android-app-dev/output/powos.apk
 if [ -z "$now" ]; then
-  for i in $(seq 1 90); do i2=$(tools/phone/idle.sh); s=${i2#idle=}; s=${s%% *}; [ "$s" -ge 60 ] && break; sleep 10; done
+  # Never install over an active user (it restarts their session): wait up to SHIP_WAIT_MIN (default 60) minutes for
+  # 60 s of idle (or the screen off); if none comes, leave the built APK for the next ship and exit 4 - don't install.
+  waited=0; ok=""
+  while [ $waited -lt $(( ${SHIP_WAIT_MIN:-60} * 60 )) ]; do
+    i2=$(tools/phone/idle.sh); s=${i2#idle=}; s=${s%% *}
+    case "$i2" in *screen=Awake*) [ "$s" -ge 60 ] && { ok=1; break; } ;; *) ok=1; break ;; esac
+    sleep 15; waited=$((waited + 15))
+  done
   echo "ship-apk: $i2"
+  [ -n "$ok" ] || { echo "ship-apk: the user stayed active for ${SHIP_WAIT_MIN:-60} min - NOT installing (APK built, kept)"; exit 4; }
 fi
 start=$(tools/phone/adb.sh shell 'date +%m-%d\ %H:%M:%S' | tr -d '\r')
 docker run --rm --network container:powos-vadb -v "$PWD/targets/android":/ta:ro -v "$apk":/powos.apk:ro --entrypoint bash \
