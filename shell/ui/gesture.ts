@@ -21,7 +21,7 @@ const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
 const FLICK = 0.45;
 /** What takes a tap in the launcher; a tap anywhere else in it closes it. */
-const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, a, .menu";
+const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, textarea, a, .menu, .tile, [role=button], [role=slider]";
 
 /** While a finger drags the drawer: its openness, 0..1; null otherwise (then the drawer signal decides). */
 export const drawerDrag = signal<number | null>(null);
@@ -240,8 +240,14 @@ export function homeGestures() {
 
   const end = () => {
     if (!g) return;
-    const { mode, v, open, target, own } = g;
+    const { mode, v, open, target, own, notif: wasNotif } = g;
     g = null;
+    // A clean tap (no gesture claimed) on the notification panel's or the control center's empty space: it closes,
+    // with its own animation - as a tap beside the open launcher closes it.
+    if (!mode && wasNotif && notif.value && !own && !target.closest?.(`${TAPPABLE}, .notif, .cc-tile`)) {
+      notif.value = false;
+      return;
+    }
     // A tap on the open launcher's empty space (not an app, a message, a control): it closes, as tapping outside does.
     if (!mode && open && !own && target.closest?.(".launcher") && !target.closest(TAPPABLE)) return closeDrawer();
     if (mode === "open" || mode === "close") {
