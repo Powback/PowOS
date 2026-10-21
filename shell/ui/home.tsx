@@ -26,6 +26,7 @@ import { NotificationPanel } from "./notifications.tsx";
 import { AiContent, AiHeader, PowAiPage } from "./powai.tsx";
 import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
+import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
 import { byKey, carry, dock, dockAim, dockDrag, editing, menu, pullKind, recent, setDock } from "../state.ts";
 
 /** How far above the dock a held app has to go to leave it for the home screen. */
@@ -235,7 +236,7 @@ export function Home() {
       <div class="screens" {...homeGestures()}>
         <PowAiPage />
         <div
-          class={`home ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
+          class={`home ${footBelow.value ? "pill-below" : ""} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
         >
           <div class="stage">
             <div class="home-content" data-p ref={followOpenness}>
@@ -257,7 +258,7 @@ export function Home() {
               </div>
             </div>
           </div>
-          <Bar />
+          {!hasSearchWidget() && <Bar />}
           <Dock />
           <AppMenu />
           <EditSheet />

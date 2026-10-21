@@ -26,6 +26,7 @@ import { AppWidgetFace } from "./appwidget.tsx";
 import { Island } from "./island.tsx";
 import { AgentsPanel } from "./agents.tsx";
 import { migrateRecents, RecentsPanel } from "./recentwidget.tsx";
+import { SearchPanel } from "./searchwidget.tsx";
 import { openAgents } from "../agents.ts";
 import type { Cell, HomeItem } from "../types.ts";
 
@@ -291,7 +292,9 @@ function AppFace({ appKey, label }: { appKey: string; label?: string }) {
 }
 
 /** Drawn on a box of its own (a .tile face): what merges with its neighbours. Apps, folders, Android widgets don't. */
-const boxed = (i: HomeItem) => i.kind === "widget" || i.kind === "panel" || (i.kind === "appwidget" && !!i.error);
+// The search widget's pill is its own surface (no box around it, no page glass behind its cells).
+const boxed = (i: HomeItem) =>
+  i.kind === "widget" || (i.kind === "panel" && i.name !== "search") || (i.kind === "appwidget" && !!i.error);
 
 /**
  * Neighbouring widgets as one surface: for each boxed tile on a page, which of its sides touch another boxed tile (no
@@ -459,6 +462,7 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
       {item.kind === "panel" && item.name === "agents" && <AgentsPanel item={item} />}
       {item.kind === "panel" && item.name?.startsWith("app:") && <Island item={item} />}
       {item.kind === "panel" && item.name === "recents" && <RecentsPanel item={item} />}
+      {item.kind === "panel" && item.name === "search" && <SearchPanel />}
       {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
       {item.kind === "folder" && (
         <div class="folder-face tile">

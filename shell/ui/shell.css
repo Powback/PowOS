@@ -168,6 +168,12 @@
 /* The search bar's place in home's layout is a fixed 48 px; the pill sits in it and grows upward, over home. */
 .bar { position: relative; z-index: 3; margin: 0; height: 48px; padding: 0; }
 .bar-pill { position: absolute; left: var(--edge); right: var(--edge); bottom: 4px; }
+/* Under the dock (searchwidget.tsx footBelow): the foot's order swapped. */
+.home.pill-below .bar { order: 1; }
+/* The search widget (searchwidget.tsx): the pill centred in its cells, growing upward from there as in the foot. */
+.search-face { position: relative; height: 100%; }
+.search-face .bar { position: absolute; left: 0; right: 0; top: 50%; height: 24px; }
+.search-face .bar-pill { left: calc(var(--gap) / 2); right: calc(var(--gap) / 2); bottom: -20px; }
 /* The fields that grow with their text (grow.tsx): their height animates, they scroll past their last row. */
 .grow {
   flex: 1;

@@ -105,7 +105,7 @@ class ShellPanels private constructor(
          * The panels there are, and the size each starts at; the smallest each may be made. "recents": the recent apps
          * row as a home widget (shell/ui/recentwidget.tsx), a full-width row by default.
          */
-        private val SIZES = mapOf("agents" to (4 to 2), "recents" to (6 to 1))
+        private val SIZES = mapOf("agents" to (4 to 2), "recents" to (6 to 1), "search" to (6 to 1))
         private val MIN = mapOf("agents" to (2 to 1), "recents" to (2 to 1))
 
         fun key(name: String) = "$PREFIX$name"

@@ -11,6 +11,7 @@ import { openScreen } from "../screens.ts";
 import { AppWidgetPicker, picker } from "./appwidget.tsx";
 import { geometry, placeNew, placeNewCells } from "./grid.tsx";
 import { hasRecentsWidget, recentsSpot } from "./recentwidget.tsx";
+import { footBelow, hasSearchWidget } from "./searchwidget.tsx";
 import { startNewApp } from "./appbuild.tsx";
 import type { AppWidgetProvider, ThemeChoice } from "../types.ts";
 
@@ -117,6 +118,14 @@ function ShellAdds({ done }: { done: () => void }) {
           const spot = placeNew(4 * cell - 8, 2 * cell - 8);
           powos.home.addPanel("agents", spot.page, spot.cell);
         })}
+      {!hasSearchWidget() &&
+        chip("search bar on home", () => {
+          // A full-width row (the pill is as wide as its cells): the lowest free row of the page on screen.
+          const n = pages.value[page.value] ?? 1;
+          const spot = recentsSpot(n, geometry.value.rows || 6) ?? placeNewCells(home.value.columns, 1);
+          powos.home.addPanel("search", spot.page, spot.cell).catch(() => (note.value = "the search widget needs the app updated"));
+        })}
+      {!hasSearchWidget() && chip(footBelow.value ? "search above the dock" : "search below the dock", () => (footBelow.value = footBelow.value ? "" : "1"))}
       {!hasRecentsWidget() &&
         chip("recent apps", () => {
           // A row, full width: the lowest free row of the page on screen, else the first free spot.
