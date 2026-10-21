@@ -46,12 +46,16 @@
 .pet-mouth.open { fill: var(--pet-ink); stroke: none; }
 .pet-z { font: 600 10px var(--font); fill: var(--color-foreground); }
 .pet-ear { fill: color-mix(in srgb, var(--color-accent) 55%, var(--color-foreground)); opacity: 0; }
-.pet-parcel-glow { fill: color-mix(in srgb, var(--color-accent) 50%, var(--color-foreground)); opacity: 0.32; }
+.pet-parcel-glow { fill: var(--color-accent); opacity: 0.55; filter: blur(2.2px); }
 .pet-parcel-box { fill: color-mix(in srgb, var(--color-foreground) 75%, var(--color-accent)); }
 .pet-parcel-tie { fill: none; stroke: var(--pet-ink); stroke-width: 0.8; opacity: 0.6; }
 
 /* Which face and props each state shows: everything else hidden. */
-.pet-eye.closed, .pet-eye.glad, .pet-brows, .pet-mouth, .pet-z, .pet-parcel { display: none; }
+.pet-eye.closed, .pet-eye.glad, .pet-brows, .pet-mouth, .pet-z, .pet-parcel, .pet-arm, .pet-crumb { display: none; }
+.pet-arm { fill: var(--pet-fill); transform-box: fill-box; transform-origin: 30% 90%; }
+.pet-crumb { transform-box: fill-box; transform-origin: center; fill: color-mix(in srgb, var(--color-foreground) 88%, var(--color-accent)); stroke: var(--pet-ink); stroke-width: 0.5; stroke-linejoin: round; }
+.pet[data-state="looking"] .pet-arm { display: inline; animation: pet-arm-wave 380ms ease-in-out 3 alternate; }
+.pet[data-state="eating"] .pet-crumb { display: inline; animation: pet-crumb 1680ms ease-in 1 forwards; }
 .pet .pet-mouth.smile { display: inline; }
 .pet:is([data-state="happy"], [data-state="sleepy"]) :is(.pet-eye.open, .pet-glint) { display: none; }
 .pet[data-state="happy"] .pet-eye.glad { display: inline; }
@@ -100,6 +104,8 @@
 @keyframes pet-shiver { 0%, 100% { transform: none; } 25% { transform: translateX(-1.5px); } 75% { transform: translateX(1.5px); } }
 @keyframes pet-breathe { 0%, 100% { transform: none; } 50% { transform: scale(1.03, 0.96); } }
 @keyframes pet-sag { 0% { transform: translateY(-4px); } 100% { transform: none; } }
+@keyframes pet-arm-wave { from { transform: rotate(-10deg); } to { transform: rotate(32deg); } }
+@keyframes pet-crumb { 0% { transform: none; } 100% { transform: translateY(-1px) scale(0.8); } }
 @keyframes pet-munch { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.2, 0.35); } }
 @keyframes pet-perk { 0% { transform: scale(0.94); } 100% { transform: none; } }
 

@@ -237,9 +237,13 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
           <path class="pet-mouth flat" d="M23.5 35h5" />
           <path class="pet-mouth wavy" d="M22 35q1.7-1.6 3.4 0t3.4 0" />
           <ellipse class="pet-mouth open" cx="26" cy="35" rx="2.2" ry="1.9" />
+          {/* Waiting on you: a tiny nub arm that waves (2-3 swings, pet.css). */}
+          <ellipse class="pet-arm" cx="44" cy="27" rx="2.6" ry="4.4" />
+          {/* Charging: a tiny lightning-bolt crumb it eats. */}
+          <path class="pet-crumb" d="M28.6 36l-4.2 5.8h3.2l-1.9 4.8 5.1-6.4h-3.4l1.8-4.2z" />
           {/* Working: a tiny parcel it carries, softly lit. */}
           <g class="pet-parcel">
-            <circle class="pet-parcel-glow" cx="38" cy="38" r="6" />
+            <circle class="pet-parcel-glow" cx="38" cy="38" r="7" />
             <rect class="pet-parcel-box" x="34.5" y="34.8" width="7" height="6.2" rx="1.6" />
             <path class="pet-parcel-tie" d="M38 34.8v6.2M34.5 37.6h7" />
           </g>
