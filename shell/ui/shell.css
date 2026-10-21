@@ -188,7 +188,9 @@
  * edge catches the light.
  */
 .launcher-frame, .bar, .dock { border-color: transparent; box-shadow: none; }
-.launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 -6px 20px -12px rgb(0 0 0 / 50%); }
+/* The foot's --lift on its outline: the light edge along its top (the bar's), its shadow cast up over home. */
+.bar { box-shadow: var(--lift-edge), var(--lift-shadow-up); }
+.launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--lift-edge), var(--lift-shadow-up); }
 .bar, .dock { border-radius: 0; }
 .bar:focus-within { border-color: transparent; }
 .bar:focus-within .prompt { color: var(--color-foreground); }
@@ -383,7 +385,7 @@
 /* PowOS apps' own controls (islands on home, their pages) get the shell's borderless look too: their buttons' and
    chips' outlines go (their styles are inline - hence !important), a bare one takes a soft fill. */
 :is(.island-face, .app-screen) button { border-color: transparent !important; }
-:is(.island-face, .app-screen) button[style*="background: transparent"] { background: var(--soft-fill) !important; }
+:is(.island-face, .app-screen) button[style*="background: transparent"] { background: var(--soft-fill) !important; box-shadow: var(--lift) !important; }
 /*
  * A page's glass (grid.tsx PageGlass): the frosted wallpaper once per page, under its tiles, masked to their faces;
  * gesture.ts moves it against the track (same transition) so it holds still on screen as the page slides. The faces
@@ -419,8 +421,12 @@
   border-radius:
     calc(var(--radius) * var(--ctl)) calc(var(--radius) * var(--ctr))
     calc(var(--radius) * var(--cbr)) calc(var(--radius) * var(--cbl));
+  /* The group's --lift: the light edge only along the group's top (a tile with nothing above), the shadow under the
+     whole group (grid.tsx GroupShadow). */
   box-shadow: none;
 }
+.home-tile.joined[style*="--jt: 0"] > .tile { box-shadow: var(--lift-edge); }
+.group-shadow { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 
 /* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
 
@@ -759,11 +765,12 @@
   font: var(--text-item) var(--font);
   color: var(--color-foreground);
   background: var(--soft-fill);
+  box-shadow: var(--lift);
   border-radius: 999px;
   padding: 8px 14px;
 }
 .edit-act.on { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--color-accent); }
-.edit-act.done { background: none; color: var(--color-accent); padding-right: 0; }
+.edit-act.done { box-shadow: none; background: none; color: var(--color-accent); padding-right: 0; }
 .edit-note { flex: 1; min-width: 0; font-size: var(--text-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The theme popover, just above the bar. */
 .theme-pop {
@@ -919,7 +926,7 @@
 /* On glass, the page is one frosted sheet (theme.css), darker than home's for its text; what's on it soft fills. */
 /* Tinted, not frosted, until the compositor blurs it (native glass): its own copy of the picture slid away with it. */
 .glass .ai-screen { background: color-mix(in srgb, var(--color-background) calc(var(--glass-tint) + 40%), transparent); }
-.ai-screen .tile { background: var(--soft-fill); border-color: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.ai-screen .tile { background: var(--soft-fill); border-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .ai-screen .ai-work-chip.on { background: var(--color-accent); }
 .ai-screen .ai-compose {
   margin: 0 calc(-1 * var(--edge));
@@ -1093,6 +1100,7 @@ html[data-mode="assist"] .assist {
 .assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
 .assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid transparent; background: color-mix(in srgb, var(--color-accent) 16%, transparent); color: var(--color-accent); }
 .assist-attach .chip.off { border-color: var(--line); background: var(--soft-fill); color: var(--color-muted); }
+.assist-attach .chip { box-shadow: var(--lift); }
 /* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
 .assist-draw { position: absolute; inset: 0; touch-action: none; }
 .assist-panel { position: relative; z-index: 1; }

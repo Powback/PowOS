@@ -344,13 +344,15 @@ function joins(items: HomeItem[]): Map<string, Record<string, number>> {
  */
 const textured = (i: HomeItem) => boxed(i) || i.kind === "folder";
 
-function faceMask(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined) {
+/** The faces' rounded boxes on a page, as SVG path data: all of them, and those in a merged group; the extent. */
+function faces(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined) {
   const css = getComputedStyle(document.documentElement);
   const half = (parseFloat(css.getPropertyValue("--gap")) || 8) / 2;
   const radius = parseFloat(css.getPropertyValue("--radius")) || 12;
   let w = 1;
   let h = 1;
   const paths: string[] = [];
+  const grouped: string[] = [];
   for (const i of items) {
     if (!textured(i) || i.key === lifted) continue;
     const b = box(shown(i));
@@ -361,16 +363,51 @@ function faceMask(items: HomeItem[], joined: Map<string, Record<string, number>>
     const y1 = b.top + b.height - half * (1 - (j["--jb"] ?? 0));
     const [tl, tr, br, bl] = ["--ctl", "--ctr", "--cbr", "--cbl"].map((k) => radius * (j[k] ?? 1));
     const f = (n: number) => +n.toFixed(1);
-    paths.push(
+    const d =
       `M${f(x0 + tl)} ${f(y0)}H${f(x1 - tr)}A${tr} ${tr} 0 0 1 ${f(x1)} ${f(y0 + tr)}V${f(y1 - br)}A${br} ${br} 0 0 1 ${f(x1 - br)} ${f(y1)}` +
-        `H${f(x0 + bl)}A${bl} ${bl} 0 0 1 ${f(x0)} ${f(y1 - bl)}V${f(y0 + tl)}A${tl} ${tl} 0 0 1 ${f(x0 + tl)} ${f(y0)}Z`,
-    );
+      `H${f(x0 + bl)}A${bl} ${bl} 0 0 1 ${f(x0)} ${f(y1 - bl)}V${f(y0 + tl)}A${tl} ${tl} 0 0 1 ${f(x0 + tl)} ${f(y0)}Z`;
+    paths.push(d);
+    if (joined.has(i.key)) grouped.push(d);
     w = Math.max(w, Math.ceil(x1));
     h = Math.max(h, Math.ceil(y1));
   }
-  if (!paths.length) return null;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><path d="${paths.join("")}"/></svg>`;
-  return { "--glass-mask": `url("data:image/svg+xml,${encodeURIComponent(svg)}")`, "--glass-mask-size": `${w}px ${h}px` };
+  return { all: paths.join(""), grouped: grouped.join(""), w, h };
+}
+
+function faceMask(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined) {
+  const f = faces(items, joined, lifted);
+  if (!f.all) return null;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${f.w}" height="${f.h}" viewBox="0 0 ${f.w} ${f.h}"><path d="${f.all}"/></svg>`;
+  return { "--glass-mask": `url("data:image/svg+xml,${encodeURIComponent(svg)}")`, "--glass-mask-size": `${f.w}px ${f.h}px` };
+}
+
+/**
+ * A merged group's --lift (theme.css) as one surface's: the shadow under the GROUP's outline, not under each tile
+ * (each tile's own would fall on its neighbours, through them). One static SVG per page, drawn when its tiles change:
+ * the group outlines, blurred and dropped, cut away wherever a face is. The light top edge is the tiles' own
+ * (shell.css .home-tile.joined: only where a tile's top is the group's).
+ */
+function GroupShadow({ items, joined, id }: { items: HomeItem[]; joined: Map<string, Record<string, number>>; id: string }) {
+  const f = faces(items, joined, carry.value?.item?.key);
+  if (!f.grouped) return null;
+  const W = f.w + 40;
+  const H = f.h + 40;
+  return (
+    <svg class="group-shadow" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+      <defs>
+        <filter id={`gs-${id}`} x="-10%" y="-10%" width="120%" height="120%">
+          <feGaussianBlur stdDeviation="7" />
+        </filter>
+        <mask id={`gm-${id}`} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}>
+          <rect width={W} height={H} fill="#fff" />
+          <path d={f.all} fill="#000" />
+        </mask>
+      </defs>
+      <g mask={`url(#gm-${id})`}>
+        <path d={f.grouped} fill="rgb(0 0 0 / 0.42)" transform="translate(0 7)" filter={`url(#gs-${id})`} />
+      </g>
+    </svg>
+  );
 }
 
 function PageGlass({ items, joined, index }: { items: HomeItem[]; joined: Map<string, Record<string, number>>; index: number }) {
@@ -661,6 +698,7 @@ export function Pages() {
               return (
                 <>
                   <PageGlass items={on} joined={joined} index={i} />
+                  <GroupShadow items={on} joined={joined} id={String(n)} />
                   {on.map((item) => (
                     <Tile key={item.key} item={item} join={joined.get(item.key)} />
                   ))}

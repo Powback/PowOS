@@ -35,7 +35,12 @@
   --line: transparent;
   --divider: color-mix(in srgb, var(--color-foreground) 7%, transparent);
   --soft-fill: color-mix(in srgb, var(--color-foreground) 8%, transparent);
-  --lift: inset 0 0 0 1px rgb(255 255 255 / 6%), inset 0 1px 0 rgb(255 255 255 / 7%), 0 6px 20px -10px rgb(0 0 0 / 50%);
+  /* --lift's parts, for a surface made of several (a merged widget group, the foot): its top edge, its shadow. */
+  --lift-ring: inset 0 0 0 1px rgb(255 255 255 / 6%);
+  --lift-edge: inset 0 1px 0 rgb(255 255 255 / 7%);
+  --lift-shadow: 0 6px 20px -10px rgb(0 0 0 / 50%);
+  --lift-shadow-up: 0 -6px 20px -12px rgb(0 0 0 / 50%);
+  --lift: var(--lift-ring), var(--lift-edge), var(--lift-shadow);
   /* What a control on a panel (a quick setting, a slider, a chip) is filled with: on glass, a soft fill instead. */
   --control-fill: var(--color-surface);
 
@@ -95,6 +100,14 @@ body {
   touch-action: none;
 }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
+
+/*
+ * The one surface look every page shares: a fill and --lift (the light top edge, a faint ring, the soft shadow under
+ * it). A surface gets it by being a .tile (the glass fill: tiles, panels, PowOS apps' islands) or a .surface (a soft
+ * fill: chips, fields, buttons on a surface) - nothing else to set. A surface made of several - a merged widget
+ * group, home's foot - carries it on its outline (--lift-edge on top, --lift-shadow under it).
+ */
+.surface { background: var(--soft-fill); border-radius: var(--radius); box-shadow: var(--lift); }
 
 /* A tile: what every home element is drawn on. */
 .tile {

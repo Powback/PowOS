@@ -184,7 +184,7 @@
 }
 .scr-thumb.on { border-color: var(--color-accent); }
 .scr-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.scr-thumb.add { background: var(--soft-fill); color: var(--color-accent); display: grid; place-items: center; }
+.scr-thumb.add { background: var(--soft-fill); box-shadow: var(--lift); color: var(--color-accent); display: grid; place-items: center; }
 
 /* Grids of cards: the community themes, the store's widgets. */
 .scr-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--gap); }
