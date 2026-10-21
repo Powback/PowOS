@@ -136,8 +136,8 @@ def cgroup_v2(pid):
 class Frozen:
     """One sleeping thing's process tree, frozen in /sys/fs/cgroup/powos/sleep/<key>."""
 
-    def __init__(self, key, root):
-        self.key, self.root = key, root
+    def __init__(self, key, root, only=False):
+        self.key, self.root, self.only = key, root, only  # only: that process alone, not its children
         self.cg = f"{SLEEP_CG}/{key}"
         self.home = {}  # pid -> its cgroup before
         self.ms = 0.0
@@ -147,7 +147,7 @@ class Frozen:
         os.makedirs(self.cg, exist_ok=True)
         kids = children()
         for n in range(2):  # again: a child forked while the first pass moved its parent (frozen now: no more forks)
-            for p in tree(self.root, kids if n == 0 else children()):
+            for p in [self.root] if self.only else tree(self.root, kids if n == 0 else children()):
                 if p in self.home:
                     continue
                 cg = cgroup_v2(p)
@@ -606,6 +606,27 @@ class Daemon:
         self.publish()
         return {"ok": True, "ms": round(ms, 2), "pids": sorted(f.home)}
 
+    def desktop_freeze(self, pid):
+        """The desktop shell (plasmashell) while PowOS is off screen (powos-sleep-gui asks): that process alone - the
+        apps it launched are its children and sleep by their own rules - though it's on the never list for everything
+        else. Thawed as PowOS comes back on screen, by D-Bus to it, and every few minutes to read its Wayland socket."""
+        if pid in self.gui:
+            return {"ok": True, "already": True}
+        st = stat(pid)
+        if not st or st[0] != "plasmashell":
+            return {"refused": "not the desktop shell (plasmashell)"}
+        if cgroup_v2(pid) != "/":
+            return {"refused": f"in Android's cgroup {cgroup_v2(pid)}"}
+        f = Frozen(f"gui-{pid}", pid, only=True)
+        try:
+            ms = f.freeze()
+        except OSError as e:
+            return {"refused": str(e)}
+        self.gui[pid] = {"frozen": f, "name": "plasmashell", "since": time.time(), "sleepMs": round(ms, 1), "n": 1}
+        log(f"desktop shell ({pid}): frozen in {ms:.1f} ms (PowOS off screen)")
+        self.publish()
+        return {"ok": True, "ms": round(ms, 2), "pids": [pid]}
+
     def gui_thaw(self, pid, why):
         g = self.gui.pop(pid, None)
         if not g:
@@ -722,6 +743,16 @@ class Daemon:
             if uid != 0 and owner != uid:
                 return {"refused": "not the session user's process"}  # the watcher freezes its own apps only
             return self.gui_freeze(int(pid), name.strip())
+        if cmd == "gui-desktop-freeze":
+            pid = int(rest.strip())
+            uid = peer(conn)[0]
+            try:
+                owner = os.stat(f"/proc/{pid}").st_uid
+            except OSError:
+                return {"refused": "no such process"}
+            if uid != 0 and owner != uid:
+                return {"refused": "not the session user's process"}
+            return self.desktop_freeze(pid)
         if cmd == "gui-thaw":
             pid, _, why = rest.partition(" ")
             return self.gui_thaw(int(pid), why.strip() or "asked")

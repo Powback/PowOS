@@ -8,6 +8,7 @@ One config surface and one status command cover every kind of workload. Containe
 |---|---|---|---|---|
 | app backend (native, sandbox) | `powos-sleepd` (root, system tier) | idle for the manifest's `autosleep.idle` (default 5m): no TCP connection to its listen ports and under 1% CPU (the supervisor's measure) | a connection to its port, `powos sleep wake <id>` | cgroup v2 freezer (pause), plus MADV_PAGEOUT (hibernate), or the supervisor stopping it (stop) |
 | GUI app in Plasma | `powos-sleep-gui` (session), frozen by `powos-sleepd` | no window focused for 10 min (`POWOS_SLEEP_GUI_IDLE`) | focus, raise or un-minimize (KWin), any D-Bus message addressed to it, `powos sleep wake` | cgroup v2 freezer |
+| the desktop shell (plasmashell, phone) | `powos-sleep-gui`, frozen by `powos-sleepd` (that process alone, though it's session core) | PowOS off screen for 15 s (`POWOS_SLEEP_DESKTOP_IDLE`, `off` = never) | PowOS back on screen, any D-Bus message to it (asleep again a minute later), 2 s every 5 min to read its Wayland socket | cgroup v2 freezer |
 | Steam (a GUI app with a unit) | the same | out of sight 15 s (unit `steam`: no game, no disk I/O, started over 2 min ago) | its launch paths (`/usr/bin/steam`, `powos-open-task`) before showing it, focus, PowOS back on screen | cgroup v2 freezer, the client's whole tree |
 | container | `powos-autosleep` | see §13 there | a connection, `powos containers wake` | freezer or stop |
 | SpacetimeDB database | not slept one by one (see below) | - | - | the supervisor's whole-server idle restart |

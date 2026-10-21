@@ -15,6 +15,7 @@ powos-runtime (native / sandbox / container, the user's setting) and keeps each 
   - a changed mode (powos-runtime config) restarts the service in the new mode
   - asleep in stop mode (powos-sleepd: /run/powos-sleep/stopped/<id>): stopped and not restarted until the file goes;
     SIGUSR1 checks at once (powos-sleepd sends it either way)
+  - the phone's daily idle-CPU sample (IdleSample): /var/log/powos/idle-cpu.log, a note to the user when over budget
 
 HACK: a small supervisor of our own, because the proper one - systemd --user with real MemoryMax=/CPUWeight= per
 service - needs a delegated cgroup v2 subtree, and Android binds memory/cpu to cgroup v1 (section 2.4). Real fix:
@@ -23,6 +24,7 @@ the cgroup v2 move, then a unit per manifest (the same manifests) and this goes;
   powos-supervisor               run (root, the system tier)
   powos-supervisor status [--json]
 """
+import glob
 import json
 import os
 import signal
@@ -304,6 +306,113 @@ class Service:
                 "connections": self.conns, "budget": self.budget, "note": self.note}
 
 
+class IdleSample:
+    """The phone's daily idle-CPU sample (the regression check's phone half; the shell gate's idle check is the other):
+    once a day, the first time the screen is on and nobody has touched it for IDLE_TOUCH s, every process's CPU over
+    IDLE_WINDOW s - one line in IDLE_LOG, the PowOS processes' sum against IDLE_BUDGET (% of one core), and a low
+    priority note to the user (`powos comms notify --from perf`) when over it. Discarded (tried again later) if the
+    screen goes off or a finger comes during the window. Costs two small reads a tick until it has sampled that day.
+
+    Budget: the user's, 2026-10-21 - ~3% CPU with the screen on, idle on home. Which app is in front isn't known from
+    here: the line says only that the screen was on and untouched."""
+
+    IDLE_LOG = f"{LOGS}/idle-cpu.log"
+    IDLE_TOUCH = 120
+    IDLE_WINDOW = 60
+    IDLE_BUDGET = float(os.environ.get("POWOS_IDLE_BUDGET", "3"))
+    # PowOS's own processes (comm): the app, its WebView renderer, the desktop session, the system tier.
+    OURS = ("com.powos.app", "sandboxed_process", "ocessService", "plasmashell", "kwin_wayland", "Xwayland",
+            "powos-", "spacetimedb", "python3")
+
+    def __init__(self):
+        self.day = None
+        self.touches, self.touched = None, time.time()
+        self.start = None
+
+    @staticmethod
+    def screen_on():
+        for b in glob.glob("/sys/class/backlight/*/brightness"):
+            try:
+                if int(open(b).read().strip() or 0) > 0:
+                    return True
+            except (OSError, ValueError):
+                pass
+        return False
+
+    @staticmethod
+    def touch_count():
+        try:
+            with open("/proc/interrupts") as f:
+                return sum(int(x) for line in f if "touch-0" in line for x in line.split()[1:] if x.isdigit())
+        except OSError:
+            return None
+
+    @staticmethod
+    def named():
+        """pid -> (comm, ticks)."""
+        out = {}
+        for p in os.listdir("/proc"):
+            if not p.isdigit():
+                continue
+            try:
+                with open(f"/proc/{p}/stat") as f:
+                    t = f.read()
+            except OSError:
+                continue
+            f = t[t.rindex(")") + 2:].split()
+            out[p] = (t[t.index("(") + 1:t.rindex(")")], int(f[11]) + int(f[12]))
+        return out
+
+    def tick(self, now):
+        today = time.strftime("%F", time.localtime(now))
+        if self.day == today:
+            return
+        c = self.touch_count()
+        if c != self.touches:
+            self.touches, self.touched = c, now
+            self.start = None  # a finger: the window (if any) is void
+            return
+        if not self.screen_on():
+            self.start = None
+            return
+        if self.start is None:
+            if now - self.touched >= self.IDLE_TOUCH:
+                self.start = (now, self.named())
+            return
+        t0, a = self.start
+        if now - t0 < self.IDLE_WINDOW:
+            return
+        b = self.named()
+        secs = now - t0
+        per = {}
+        for pid, (comm, ticks) in b.items():
+            if pid in a and a[pid][0] == comm and ticks > a[pid][1]:
+                per[(comm, pid)] = 100.0 * (ticks - a[pid][1]) / CLK / secs
+        total = sum(per.values())
+        ours = sum(v for (comm, _), v in per.items() if any(comm.startswith(o) or o in comm for o in self.OURS))
+        top = sorted(per.items(), key=lambda kv: -kv[1])[:8]
+        line = (f"{time.strftime('%F %T', time.localtime(now))} screen on, untouched {now - self.touched:.0f}s: "
+                f"powos {ours:.1f}% (budget {self.IDLE_BUDGET:g}%), all {total:.1f}% of one core over {secs:.0f}s | "
+                + ", ".join(f"{c} {v:.1f}" for (c, _), v in top))
+        self.day, self.start = today, None
+        try:
+            with open(self.IDLE_LOG, "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+        log(f"idle sample: {line}")
+        if ours > self.IDLE_BUDGET:
+            try:
+                subprocess.Popen(["powos", "comms", "notify", "--from", "perf", "--priority", "low", "--",
+                                  f"Idle CPU over budget: PowOS used {ours:.1f}% of a core with the screen on and "
+                                  f"nobody touching it (budget {self.IDLE_BUDGET:g}%). Top: "
+                                  + ", ".join(f"{c} {v:.1f}%" for (c, _), v in top[:4])],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            except OSError:
+                pass
+
+
 def serve():
     if os.getuid() != 0:
         sys.exit("powos-supervisor: runs as root (the system tier)")
@@ -329,6 +438,7 @@ def serve():
     log(f"up: {', '.join(s.id for s in services) or 'no services'}")
     stop = []
     scanned = 0.0
+    sampler = IdleSample() if device() == "phone" else None
     # Signals are waited for, not handled: blocked here and taken by sigtimedwait in the tick's one sleep (~0.1
     # wakeups/s idle) - a service's exit (SIGCHLD) restarts it at once rather than at the next tick.
     signal.pthread_sigmask(signal.SIG_BLOCK, WAITED)
@@ -351,6 +461,11 @@ def serve():
                 s.check(ps, apps.get(s.id, default), now)
             except Exception as e:  # one service's trouble never takes the others down
                 log(f"{s.id}: check failed: {e!r}")
+        if sampler:
+            try:
+                sampler.tick(now)
+            except Exception as e:  # never the services' problem
+                log(f"idle sample failed: {e!r}")
         tmp = STATUS + ".tmp"
         with open(tmp, "w") as f:
             json.dump({"time": round(now), "default": default, "services": [s.status(now) for s in services]}, f)
@@ -375,6 +490,12 @@ def status(as_json):
     if as_json:
         print(json.dumps(st, indent=2))
         return
+    try:
+        with open(IdleSample.IDLE_LOG) as f:
+            last = f.readlines()[-1:]
+        print("idle cpu (daily sample): " + (last[0].strip() if last else "none yet"))
+    except OSError:
+        pass
     age = time.time() - st["time"]
     print(f"system tier: default mode {st['default']}, checked {age:.0f}s ago")
     for s in st["services"]:
