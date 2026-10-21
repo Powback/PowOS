@@ -709,7 +709,9 @@ class Gui(dbus.service.Object):
         try:
             dbo = self.bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
             p = int(dbus.Interface(dbo, "org.freedesktop.DBus").GetConnectionUnixProcessID(sender))
-            return f" ({(stat(p) or {}).get('comm', '?')} {p})"
+            st = stat(p) or {}
+            parent = (stat(st.get("ppid", 0)) or {}).get("comm", "?")
+            return f" ({st.get('comm', '?')} {p}, from {parent} {st.get('ppid', '?')}: {cmdline(st.get('ppid', 0))[:80]})"
         except (dbus.DBusException, TypeError, ValueError):
             return ""
 
