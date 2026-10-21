@@ -91,6 +91,16 @@ export function applyTrack() {
   if (!track) return;
   track.classList.toggle("dragging", dx != null);
   track.style.transform = transform;
+  // Each page's glass layer (grid.tsx PageGlass) the other way - against the track, and against home sliding over to
+  // PowOS AI's page - in the same frame and with the same transition: it stays put on screen, over the wallpaper.
+  const back = Math.max(at, 0) - (at === -1 ? 1 : 0);
+  const pull = (toAi ? 0 : (dx ?? 0)) + shift;
+  track.querySelectorAll<HTMLElement>(":scope > .page").forEach((p, i) => {
+    const img = p.querySelector<HTMLElement>(":scope > .page-glass > .page-glass-img");
+    if (!img) return;
+    img.classList.toggle("sliding", dx != null);
+    img.style.transform = `translateX(calc(${back - i} * 100% - ${pull}px))`;
+  });
 }
 
 /** Elements that follow the openness, newly mounted: given its current value. */
