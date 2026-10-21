@@ -44,15 +44,21 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
 - shell/dev/gate.sh boots mode=desktop with the other pages, idle check included.
 - `SHOTS_ONLY='^desktop' shell/dev/gate.sh --tree --shots DIR --wallpaper FILE`: desktop, desktop-launcher,
   desktop-chat at plasma (558x1198) and laptop (1280x800) sizes; report.json has contrast per text.
-  Use the phone's real wallpaper too, not only the light fallback. The launcher's blur isn't emulated (its opacity
-  makes it a backdrop root). SHOTS_PROBE='JS' prints a value per shot (e.g. 404s from performance entries).
+  Use the phone's real wallpaper too, not only the light fallback. The desktop scenes drop the launcher's transform
+  and will-change, else the emulated backdrop blur never reaches the wallpaper (an unblurred render under-states
+  contrast). SHOTS_PROBE='JS' prints a value per shot (e.g. 404s from performance entries). Islands show their fault
+  tile headless (no STDB); real island data only from `dev/phone.sh page`.
   Headless-only errors: STDB refused (no STDB in the container), /_font/symbols 404 (the mock doesn't serve it).
-- The launcher on the desktop has a darker fill (tint + 42%, desktop.css), measured to keep 4.5:1. Re-measure before
-  changing it.
+- The launcher on the desktop has a deeper dim (tint + 42%, desktop.css), measured with the blur emulated: the
+  reference fill left 54 of 67 labels under 4.5:1 over a light wallpaper. Contrast wins over the reference look;
+  re-measure (both wallpapers, three themes) before changing it.
+- Islands that use host.net (apps/net.ts over the native port, e.g. Lights reaching Hue) hang at "…": the desktop
+  host has no net channel yet.
 - Shell files ship as usual: commit, rebase, push, `READY_MS=30000 shell/push.sh --vpn --note "..." <files>`; the
   desktop host's own copy of shell/ only changes with dev/phone.sh build.
 
-## Next (round 2)
+## Next
 Global hotkey (KGlobalAccel), dictation (GPU box STT), the phone's theme mirrored into the rooted session (Android
 app, Omarchy current/theme), a desktop widget picker, agents' mail into the page, x86 Plasma (image-build.sh), a user
-unit for autostart with powos-desktop-shell as its switch, an input region so clicks off the tiles reach Plasma's desktop.
+unit for autostart with powos-desktop-shell as its switch, an input region so clicks off the tiles reach Plasma's desktop,
+host.net for islands (Lights), OWL widgets (weather, sysinfo) once the engine's JS port exists.
