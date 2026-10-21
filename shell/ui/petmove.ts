@@ -106,10 +106,13 @@ export class Mover {
   /** Go to [goal] (a surface's key and an x on it) by its own moves; [then] when it's there (or as near as it gets). */
   goTo(goal: Goal, then?: (reached: boolean) => void) {
     // 3 ms of planning a step at most: it sets off at once, the route follows within a few frames.
-    this.driver = new Driver(goal, (ok) => {
-      this.driver = null;
+    const started = performance.now();
+    const d = new Driver(goal, (ok) => {
+      if (this.driver === d) this.driver = null;
       then?.(ok);
     }, 3);
+    this.driver = d;
+    this.driverStarted = started;
     this.wake();
   }
 
@@ -168,6 +171,10 @@ export class Mover {
   }
   private paused = false;
   private floorTried = false;
+  private driverStarted = 0;
+  private lastX = 0;
+  private lastY = 0;
+  private stillFrames = 0;
 
   /** On its way somewhere (a route playing). */
   busy() {
@@ -202,10 +209,18 @@ export class Mover {
       this.wasGround = g;
       this.ev.ground(g);
     }
-    // At rest a few frames in a row: the loop stops (an idle page draws nothing).
-    const resting = !this.hold && !this.driver && atRest(this.p, this.world);
+    // At rest a few frames in a row: the loop stops (an idle page draws nothing). Also when it just isn't moving any
+    // more though atRest() never says so (a rect under it that jitters by a fraction of a pixel, a carry that can't be
+    // paid): still for half a second with nothing to do - stopped all the same; a real change wakes it (layout events).
+    const free = !this.hold && !this.driver;
+    const still = Math.abs(this.p.x - this.lastX) < 0.35 && Math.abs(this.p.y - this.lastY) < 0.35 && Math.abs(this.p.s) < 0.01;
+    this.lastX = this.p.x;
+    this.lastY = this.p.y;
+    this.stillFrames = free && still ? this.stillFrames + 1 : 0;
+    const resting = free && atRest(this.p, this.world);
     this.calm = resting ? this.calm + 1 : 0;
-    if (this.calm >= 3) {
+    if (this.calm >= 3 || this.stillFrames >= 30) {
+      this.stillFrames = 0;
       this.acc = 0;
       this.prev = { x: this.p.x, y: this.p.y, s: this.p.s };
       this.draw(1);
@@ -236,6 +251,8 @@ export class Mover {
       p.sv = 0;
       return;
     }
+    // A route that's still going after 20 s won't get there: given up where it is (no endless replanning).
+    if (this.driver && performance.now() - this.driverStarted > 20_000) this.driver = null;
     const input: Input = this.driver?.input(p, this.world) ?? NO_INPUT;
     step(p, input, this.world);
   }

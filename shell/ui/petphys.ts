@@ -408,5 +408,6 @@ export function atRest(p: Pet, world: World) {
   if (!p.ground || Math.abs(p.vx) > 0.5 || Math.abs(p.s) > 0.004 || Math.abs(p.sv) > 0.03) return false;
   if (p.ground === FLOOR) return Math.abs(p.y - world.h) < 0.01;
   const r = world.rects.find((q) => q.key === p.ground);
-  return !!r && r.l === p.gl && r.t === p.gt && Math.abs(p.y - r.t) < 0.01;
+  // (A rect that moves by a fraction of a pixel - a transform settling, rounding - isn't movement to wait out.)
+  return !!r && Math.abs(r.l - p.gl) < 0.5 && Math.abs(r.t - p.gt) < 0.5 && Math.abs(p.y - p.gt) < 0.01;
 }
