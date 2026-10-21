@@ -608,6 +608,8 @@ function useReorder(keys: string[], done: (keys: string[]) => void, still: (key:
     const c = d.current;
     const el = c?.picked ? item(c.key) : null;
     if (!c || !el) return;
+    // A render rewrites its class: lifted again each time.
+    el.classList.add("held");
     el.style.transform = "none";
     const r = el.getBoundingClientRect();
     el.style.transform = `translate(${c.x - c.gx - r.left}px, ${c.y - c.gy - r.top}px) scale(1.06)`;
