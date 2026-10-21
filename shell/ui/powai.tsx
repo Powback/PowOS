@@ -3,13 +3,13 @@
  * PowOS AI is doing now - the last ask, its steps as they run, its answer - the work in progress (the agents' tasks, one
  * line each, live from the powos-agents module's work board: `powos agents task ...`), the agents at work (PowOS's tmux sessions,
  * each with the task its pane's title names, a spinner's mark while it works; a tap opens its terminal), what they told
- * you lately - the conversation's history and the work board, not a chat of its own: its pill opens the one chat
- * surface, home's (ui/assistant.ts).
+ * you lately, the whole conversation (folded), and a field to ask it (the mic: hold to talk and send, tap to dictate).
  */
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { chat, openSession, page, sessionView, stored } from "../state.ts";
+import { Mic, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
 import { openAgents } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
@@ -18,7 +18,7 @@ import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { openAssistant } from "./assistant.ts";
+import { GrowField } from "./grow.tsx";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
@@ -33,6 +33,25 @@ const REFRESH_MS = 5000;
 const working = (s: AgentSession) => /^[⠀-⣿]/.test(s.title);
 const task = (s: AgentSession) => s.title.replace(/^[⠀-⣿✳*·\s]+/, "") || s.command;
 const folder = (path: string) => path.split("/").filter(Boolean).at(-1) ?? "~";
+
+// What's typed and not sent yet: kept across reloads (an update mustn't lose it).
+const draft = stored("powai.draft");
+
+const send = () => {
+  const text = draft.value.trim();
+  if (!text) return;
+  draft.value = "";
+  // false: not into the app switcher - doing that briefly showed the chat activity over home (a black screen).
+  powos.ai.send(text, false);
+};
+
+const pageMic: MicTarget = {
+  typed: () => draft.value,
+  heard: (full, sendIt) => {
+    draft.value = full;
+    if (sendIt) send();
+  },
+};
 
 /** The latest turn: what was asked, the steps since, and the answer so far. */
 function lastTurn(items: ChatItem[]) {
@@ -377,6 +396,9 @@ export function AiHeader() {
       <span class={`ai-state ${busy ? "busy" : ""}`}>
         {busy ? `working${step && step.kind === "tool" ? ` · ${step.name}` : "…"}` : "ready"}
       </span>
+      <button type="button" class="ai-open" onClick={() => powos.ai.open()}>
+        open ↗
+      </button>
     </header>
   );
 }
@@ -406,29 +428,28 @@ export function AiContent({ shown }: { shown: boolean }) {
   );
 }
 
-/**
- * Its ask pill: not a chat of its own (one assistant, one chat surface - ui/assistant.ts) - it opens home's, where the
- * conversation goes on; its mic opens it listening.
- */
-export function AiAskPill() {
+/** Its compose field: ask PowOS AI right here (the mic: hold to talk and send, tap to dictate). */
+export function AiCompose() {
+  const input = useRef<HTMLTextAreaElement>(null);
   return (
-    <button type="button" class="ai-compose pill tile ai-ask" onClick={() => openAssistant()}>
-      <span class="ai-ask-text muted">ask PowOS AI</span>
-      <span
-        class="mic"
-        role="button"
-        aria-label="speak"
-        onClick={(e) => {
-          e.stopPropagation();
-          openAssistant({ listen: true, autosend: true });
-        }}
-      >
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <rect x="9" y="2" width="6" height="12" rx="3" />
-          <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" />
-        </svg>
-      </span>
-    </button>
+    <form
+      class="ai-compose pill tile"
+      onSubmit={(e) => {
+        e.preventDefault();
+        send();
+      }}
+    >
+      <GrowField
+        inputRef={input}
+        value={hearing(pageMic) ?? draft.value}
+        onInput={(v) => (draft.value = v)}
+        onFocus={() => powos.keyboard.show()}
+        placeholder="ask PowOS AI"
+        enterKeyHint="send"
+        autocomplete="off"
+      />
+      <Mic target={pageMic} />
+    </form>
   );
 }
 
@@ -440,7 +461,7 @@ export function PowAiPage() {
       <div class="ai-scroll">
         <AiContent shown={shown} />
       </div>
-      <AiAskPill />
+      <AiCompose />
     </div>
   );
 }
