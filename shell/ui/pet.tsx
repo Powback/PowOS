@@ -11,10 +11,12 @@
  *   happy     a task just got done: a small jump
  * An agent can set a mood for a while (`powos pet mood`, `powos pet say --mood`): the local.pet app's module (apps/pet).
  *
- * It speaks in a bubble (3-6 s, one at a time, lines that come together batched: a tap opens them all): what's said
- * through it (`powos pet say`), deploy notes and agents' mail as they arrive (their notifications stay as they are),
- * and the manager's answers. Tap it to talk: the phone's own recognizer (bar.tsx's, the one every field uses) hears
- * you, it goes to the manager as PowOS AI's chat sends it, and the answer streams into its bubble. Long press: PowOS AI.
+ * One assistant (ui/assistant.ts): the pet is the face and notifier of the ONE conversation (the manager's) and its
+ * ONE chat surface, home's search pill in chat mode. Tap it: that surface opens, listening (what's heard is asked);
+ * while it's open the pet sits on it, by the pill. Closed, the pet only speaks in short bubbles (3-6 s, one at a time,
+ * lines arriving together batched; a tap opens them, "more" opens PowOS AI's page): what's said through it (`powos pet
+ * say`), deploy notes and agents' mail as they arrive (their notifications stay), and the manager's answers nobody
+ * was looking at. Long press: PowOS AI's page (the conversation's history and the work board).
  *
  * Cost: it animates only when its state changes (a short CSS animation on the compositor, then still); no timers while
  * the page is hidden; its sockets go with the page (apps/stdb.ts).
@@ -22,9 +24,10 @@
 import { computed, effect, signal } from "@preact/signals";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
-import { carry, chat, editing, menu, page, stored } from "../state.ts";
+import { carry, chat, chatting, closeDrawer, editing, menu, page, stored } from "../state.ts";
 import { drawerOpen, notifOpen } from "./gesture.ts";
-import { dictate, hearing, speech, type MicTarget } from "./bar.tsx";
+import { speech } from "./bar.tsx";
+import { openAssistant } from "./assistant.ts";
 import { agent, agentIds, asks, tasks, useAgents } from "../agents.ts";
 import { useDb, useRows } from "../apps/stdb.ts";
 import { installedApps } from "../apps/pages.ts";
@@ -113,7 +116,8 @@ const needsYou = computed(() => {
 
 const state = computed<State>(() => {
   const t = clock.value;
-  if (listening.value) return "listening";
+  if (listening.value && chatOpen.value) return "listening";
+  if (chatOpen.value && chat.value.busy) return "working";
   const m = moodSet.value;
   if (m.mood && m.until > t) return m.mood as State;
   if (jump.value) return "happy";
@@ -139,8 +143,6 @@ addEventListener("unhandledrejection", () => (worriedUntil.value = Date.now() + 
 interface Line {
   text: string;
   from: string;
-  /** Still streaming in (the manager's answer): not timed out until it ends. */
-  live?: boolean;
 }
 const bubble = signal<{ lines: Line[]; open: boolean } | null>(null);
 let hideTimer = 0;
@@ -151,7 +153,7 @@ const holdMs = (text: string) => Math.min(6000, Math.max(3000, 1800 + text.lengt
 function armHide() {
   clearTimeout(hideTimer);
   const b = bubble.peek();
-  if (!b || b.open || document.hidden || b.lines.some((l) => l.live)) return;
+  if (!b || b.open || document.hidden) return;
   hideTimer = window.setTimeout(() => (bubble.value = null), holdMs(b.lines.at(-1)!.text));
 }
 
@@ -164,105 +166,36 @@ function say(line: Line) {
   armHide();
 }
 
-/** The live line (a reply streaming in) changed, or ended. */
-function setLive(text: string, live: boolean) {
-  const b = bubble.peek();
-  const lines = b?.lines ?? [];
-  const i = lines.findLastIndex((l) => l.live);
-  const line = { text: text || "…", from: "manager", live };
-  bubble.value = { lines: i < 0 ? [...lines, line] : lines.map((l, j) => (j === i ? line : l)), open: b?.open ?? false };
-  armHide();
-}
-
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) clearTimeout(hideTimer);
   else armHide();
 });
 
-// ---- talking --------------------------------------------------------------------------------------------------------
+// ---- the chat surface ------------------------------------------------------------------------------------------------
 
-/** Dictating into the pet now (bar.tsx's recognizer, for this target). */
-const listening = signal(false);
-/** What was asked through the pet: its answer streams into the bubble. */
-let asked: string | null = null;
-let askedAt = 0;
 /**
- * Asked while the manager is in the middle of a turn: PowOS AI's chat takes one turn at a time and drops a message
- * sent meanwhile (PowosAiChat.send), so it waits here and goes when that turn ends.
+ * The one chat surface (ui/assistant.ts): home's search pill in chat mode. While it's open the pet sits on it as its
+ * face (busy while a turn runs, all ears while the recognizer is) and says nothing itself - the chat shows the words.
  */
-let queued: string | null = null;
-const BUSY = "busy with something - I'll ask when it's done";
+const chatOpen = computed(() => drawerOpen.value && chatting.value);
+const listening = computed(() => speech.value.listening);
 
-function ask(text: string) {
-  // A reply still marked live from an earlier ask that never came: not waited on any more.
-  const b = bubble.peek();
-  if (b) bubble.value = { ...b, lines: b.lines.filter((l) => !(l.live && (l.text === "…" || l.text === BUSY))) };
-  say({ text: `“${text}”`, from: "you" });
-  if (chat.peek().busy) {
-    queued = queued ? `${queued}\n${text}` : text;
-    setLive(BUSY, true);
-    return;
-  }
-  sendNow(text);
-}
-
-function sendNow(text: string) {
-  asked = text;
-  askedAt = Date.now();
-  setLive("…", true);
-  powos.ai.send(text, false);
-}
-
-const petMic: MicTarget = {
-  typed: () => "",
-  started: () => (listening.value = true),
-  heard: (full) => {
-    listening.value = false;
-    const text = full.trim();
-    if (!text) return;
-    ask(text);
-  },
-};
-// The recognizer stopped without a result (an error, cancelled): not listening any more.
-effect(() => {
-  if (!speech.value.listening && listening.value && speech.value.error) listening.value = false;
-});
-
-/** The chat's latest turn: what was asked, and its answer so far (as powai.tsx reads it). */
-function latest() {
+/** The chat's latest turn: its answer so far. */
+function latestAnswer() {
   const items = chat.value.items;
   const at = items.findLastIndex((i) => i.kind === "user");
-  if (at < 0) return null;
   const answer = items.slice(at + 1).findLast((i) => i.kind === "assistant") as { text: string } | undefined;
-  return { asked: (items[at] as { text: string }).text, answer: answer?.text ?? "" };
+  return answer?.text ?? "";
 }
 
-let wasBusy = chat.value.busy;
+let wasBusy = chat.peek().busy;
 effect(() => {
   const c = chat.value;
-  const t = latest();
-  if (queued && !c.busy) {
-    const q = queued;
-    queued = null;
-    sendNow(q);
-    wasBusy = c.busy;
-    return;
-  }
-  // Sent, but another turn took the chat first (an agent's mail): dropped there - queued again for after it.
-  if (asked && c.busy && Date.now() - askedAt < 3000 && !(t && t.asked.startsWith(asked))) {
-    queued = asked;
-    asked = null;
-    setLive(BUSY, true);
-  } else if (asked && t && t.asked.startsWith(asked)) {
-    // Ours: streamed in as it comes.
-    if (t.answer) setLive(t.answer, c.busy);
-    if (!c.busy && wasBusy) {
-      if (!t.answer) setLive("(no answer)", false);
-      asked = null;
-    }
-  } else if (wasBusy && !c.busy && t?.answer && page.value !== -1) {
-    // Someone else's turn (the bar, the assistant) ended while PowOS AI's page isn't showing it: a short bubble.
-    say({ text: t.answer.slice(0, 160), from: "manager" });
+  // A turn ended (the manager answering mail, or a question asked and the chat closed since) with nobody looking at
+  // the conversation - not the chat surface, not PowOS AI's page: a short bubble.
+  if (wasBusy && !c.busy && !chatOpen.peek() && page.peek() !== -1) {
+    const a = latestAnswer();
+    if (a) say({ text: a.slice(0, 160), from: "manager" });
   }
   wasBusy = c.busy;
 });
@@ -436,23 +369,21 @@ function Sprite() {
 
 function Bubble({ at }: { at: { left: number; top: number } }) {
   const b = bubble.value;
-  const heard = listening.value ? (hearing(petMic) ?? "") : null;
-  if (!b && heard == null) return null;
+  if (!b) return null;
   const right = at.left + SIZE / 2 > innerWidth / 2;
   const below = at.top < 140;
   const style: Record<string, string> = {
     [right ? "right" : "left"]: `${Math.max(MARGIN, right ? innerWidth - at.left - SIZE : at.left)}px`,
     [below ? "top" : "bottom"]: below ? `${at.top + SIZE + 6}px` : `${innerHeight - at.top + 6}px`,
   };
-  const lines = b?.lines ?? [];
+  const lines = b.lines;
   const last = lines.at(-1);
   return (
     <div
-      class={`pet-bubble tile ${b?.open ? "open" : ""} ${right ? "right" : "left"} ${below ? "below" : "above"}`}
+      class={`pet-bubble tile ${b.open ? "open" : ""} ${right ? "right" : "left"} ${below ? "below" : "above"}`}
       style={style}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => {
-        if (!b) return;
         if (b.open) {
           bubble.value = null;
           return;
@@ -461,15 +392,27 @@ function Bubble({ at }: { at: { left: number; top: number } }) {
         clearTimeout(hideTimer);
       }}
     >
-      {heard != null ? (
-        <div class="pet-line">{heard || <span class="muted">listening…</span>}</div>
-      ) : b?.open ? (
-        lines.map((l, i) => (
-          <div key={i} class="pet-line">
-            {l.from !== "you" && <span class="pet-from muted">{l.from} </span>}
-            {l.text}
-          </div>
-        ))
+      {b.open ? (
+        <>
+          {lines.map((l, i) => (
+            <div key={i} class="pet-line">
+              <span class="pet-from muted">{l.from} </span>
+              {l.text}
+            </div>
+          ))}
+          {/* More: the whole conversation and the work board - PowOS AI's page. */}
+          <button
+            type="button"
+            class="pet-more-link"
+            onClick={(e) => {
+              e.stopPropagation();
+              bubble.value = null;
+              page.value = -1;
+            }}
+          >
+            more ›
+          </button>
+        </>
       ) : (
         last && (
           <div class="pet-line pet-short">
@@ -500,19 +443,21 @@ function PetLayer() {
   useEffect(() => {
     if (shown) setHello((n) => n + 1);
   }, [shown]);
-  const hidden = drawerOpen.value || editing.value || notifOpen.value || !!carry.value || !!menu.value;
+  // On the chat surface it's the chat's face (pet.css .face: by the pill); over the app list, menus, edit mode: away.
+  const face = chatOpen.value;
+  const hidden = (drawerOpen.value && !face) || editing.value || notifOpen.value || !!carry.value || !!menu.value;
   const at = toPx(pos());
   const s = state.value;
   return (
     <>
       {shown && <PetFeed />}
-      {!hidden && <Bubble at={at} />}
+      {!hidden && !face && <Bubble at={at} />}
       <button
         type="button"
         ref={el}
-        class={`pet ${hidden ? "away" : ""}`}
+        class={`pet ${hidden ? "away" : ""} ${face ? "face" : ""}`}
         data-state={s}
-        aria-label={`${name.value}: ${s} - tap to talk, hold for PowOS AI`}
+        aria-label={`${name.value}: ${s} - tap to talk, hold for PowOS AI's page`}
         style={{ left: `${at.left}px`, top: `${at.top}px` }}
         onPointerDown={(e) => {
           e.stopPropagation();
@@ -521,8 +466,8 @@ function PetLayer() {
           p.timer = window.setTimeout(() => {
             p.long = true;
             navigator.vibrate?.(12);
-            if (page.value === -1) powos.ai.open();
-            else page.value = -1;
+            if (chatOpen.peek()) closeDrawer();
+            page.value = -1;
           }, LONG_MS);
           press.current = p;
         }}
@@ -531,7 +476,8 @@ function PetLayer() {
           if (!p || p.long) return;
           p.dx = e.clientX - p.x;
           p.dy = e.clientY - p.y;
-          if (!p.moved && Math.hypot(p.dx, p.dy) > MOVE_PX) {
+          // As the chat's face it stays by the pill: not dragged.
+          if (!p.moved && !face && Math.hypot(p.dx, p.dy) > MOVE_PX) {
             p.moved = true;
             clearTimeout(p.timer);
             el.current?.classList.add("dragging");
@@ -555,14 +501,11 @@ function PetLayer() {
             return;
           }
           if (p.long) return;
-          // A tap: talk (or, listening, stop and send what's heard).
+          // A tap: the chat surface, listening (what's heard is asked); listening already, it stops (and asks).
           if (listening.value) powos.speech.stop();
           else {
-            dictate(petMic);
-            // The recognizer didn't start (no mic, unavailable): not left "listening".
-            window.setTimeout(() => {
-              if (listening.value && !speech.value.listening) listening.value = false;
-            }, 2500);
+            bubble.value = null;
+            openAssistant({ listen: true, autosend: true });
           }
         }}
         onPointerCancel={() => {

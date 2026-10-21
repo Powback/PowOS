@@ -15,6 +15,13 @@
   transition: opacity 200ms ease;
 }
 .pet.away { opacity: 0; pointer-events: none; }
+/* The chat's face: by the search pill while it's in chat mode (its own place is kept for when the chat closes). */
+.pet.face {
+  left: auto !important;
+  top: auto !important;
+  right: 14px;
+  bottom: calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + 56px);
+}
 .pet.dragging { transition: none; }
 .pet.dragging .pet-body { transform: scale(1.08); }
 .pet-body { display: block; width: 52px; height: 52px; transform-origin: 50% 90%; will-change: transform; }
@@ -80,6 +87,7 @@
 .pet-bubble.open { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; }
 .pet-short { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pet-from { font-size: var(--text-small); }
+.pet-more-link { align-self: flex-end; color: var(--color-accent); font-size: var(--text-small); padding: 2px 0; }
 @keyframes pet-bubble-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .pet-bubble.below { animation-name: pet-bubble-in-below; }
 @keyframes pet-bubble-in-below { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
