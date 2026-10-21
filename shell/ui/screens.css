@@ -238,3 +238,9 @@
 .scr-confirm-title.danger { color: var(--color-red); }
 .scr-confirm-text { font-size: var(--text-small); line-height: 1.45; }
 .scr-confirm-do { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Gestures (screens.tsx GesturesScreen): each edge gesture a row, its action on the right; a tap lists the actions. */
+.scr-edge-gesture { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+.scr-edge-action { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); color: var(--color-accent); }
+.scr-edge-picks { padding-left: 28px; }
+.scr-row-icon.flip { transform: scaleX(-1); }

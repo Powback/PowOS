@@ -17,6 +17,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+/** Home with its pull-up panel up ("apps" or "ai"): an edge gesture's (EdgeGestures). */
+const val EXTRA_HOME_PANEL = "dev.omalauncher.shell.panel"
+
 /**
  * The launcher: a full-screen [ShellHost] over the wallpaper (the shell's home), as the Home app - the only one (the
  * Compose launcher it replaced is gone, docs/COMPOSE-REMOVAL.md). Home pressed and Back go to the page; the widgets'
@@ -176,6 +179,8 @@ class ShellActivity : Activity() {
         val recents = intent.getBooleanExtra(dev.omalauncher.system.Switcher.EXTRA_RECENTS, false)
         if (intent.hasCategory(Intent.CATEGORY_HOME) && !intent.hasExtra(EXTRA_REDIRECTED) && !recents) host.bridge.emit("system.home", null)
         dev.omalauncher.AgentsSpool.opened(intent)
+        // An edge gesture's "app drawer": home with its pull-up panel up.
+        intent.getStringExtra(EXTRA_HOME_PANEL)?.let { host.bridge.emit("home.panel", org.json.JSONObject().put("kind", it)) }
         handleDebugExec(intent)
     }
 

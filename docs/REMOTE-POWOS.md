@@ -288,7 +288,7 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-105 markers on 2026-10-21.
+106 markers on 2026-10-21.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
@@ -352,6 +352,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/HiddenApi.kt:13` | Lifts hidden-API checks for the listed classes (org.lsposed.hiddenapibypass). | None for an app: the calls are the platform-signed system UI's. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/ShadeHost.kt:231` | Hidden StatusBarManager.expandSettingsPanel / expandNotificationsPanel. | PowOS's own quick-settings page (notifications.tsx grown into the control center). |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/ShadeHost.kt:300` | Hidden StatusBarManager.disable/disable2, reflected. | None public (kiosk/setup flows use them the same way). |
+| `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/gesture/EdgeGestures.kt:48` | Edge gestures' Back through SystemUI's ISystemUiProxy.onBackEvent(null) (the recents provider's binder). | None without INJECT_EVENTS; Quickstep's taskbar back calls the same. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/Switcher.kt:178` | `preloadRecentsActivity` is a hidden API, reached by reflection past the hidden-API checks, to create home invisibly before the first swipe. | A system-side preload hook (the recents provider owning home's lifecycle) instead of reflection. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/RecentsWatchdog.kt:29` | SystemUI's LauncherProxyService gives up re-binding the recents service after the app dies several times in a row (low-memory kills), which drops PowOS's gesture input; a no-op ENABLED/DEFAULT flip of the service component (DONT_KILL_APP) sends the PACKAGE_CHANGED that makes it bind again. | LauncherProxyService re-binding without giving up (a SystemUI patch via the system module), or PowOS's own system UI owning the binding. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/system/Switcher.kt:326` | A timeout releases the card if the page never answers. | None needed while the page answers; a safety net. |

@@ -71,6 +71,10 @@ if (mode === "aod") {
 } else if (mode === "shade") {
   // The system's shade (the native shade host's window): the notification panel alone.
   render(<Shade />, document.body);
+} else if (mode === "quicktools") {
+  // Quick Tools (QuickToolsHost.kt): the control center's tiles in a card by the thumb, over any app.
+  const { QuickTools } = await import("./ui/quicktools.tsx");
+  render(<QuickTools />, document.body);
 } else if (mode === "panel") {
   // The desktop's panel (powos-shell: a layer surface per screen, docs/DESKTOP-WEB-SHELL.md): the bar alone.
   const { Panel } = await import("./ui/panel.tsx");

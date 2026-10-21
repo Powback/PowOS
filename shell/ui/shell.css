@@ -1658,3 +1658,26 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 html.theme-fade, html.theme-fade * {
   transition: color 200ms ease, background-color 200ms ease, border-color 200ms ease, fill 200ms ease, stroke 200ms ease !important;
 }
+/*
+ * Quick Tools (quicktools.tsx, mode=quicktools): a small control center by the thumb, over any app. The window is the
+ * screen; the card comes in from its edge with the finger (--q 0..1) and springs on release. The compositor blurs
+ * what's under the card (a native region), the card only tints (html.glass-behind).
+ */
+html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: transparent; }
+.qt-root { position: fixed; inset: 0; }
+.qt-card {
+  position: absolute;
+  width: min(304px, calc(100vw - 2 * var(--edge)));
+  padding: 14px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: calc(var(--radius) * 2);
+  opacity: min(1, calc(var(--q) * 2.5));
+  will-change: transform, opacity;
+}
+.qt-root.right .qt-card { right: var(--edge); transform: translateX(calc((1 - var(--q)) * 60%)) scale(calc(0.92 + 0.08 * var(--q))); transform-origin: right center; }
+.qt-root.left .qt-card { left: var(--edge); transform: translateX(calc((var(--q) - 1) * 60%)) scale(calc(0.92 + 0.08 * var(--q))); transform-origin: left center; }
+.qt-root.settling .qt-card { transition: transform 240ms cubic-bezier(0.2, 0.9, 0.3, 1.05), opacity 200ms ease-out; }
+.qt-grid { grid-template-columns: repeat(3, 1fr); gap: 12px 6px; }
+.qt-sliders { display: grid; gap: 8px; }

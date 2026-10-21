@@ -249,6 +249,22 @@ class ShadeHost(
         }, EXPAND_DELAY_MS)
     }
 
+    /** PowOS's shade is down (or coming down): other gestures leave the screen alone meanwhile. */
+    val isShown get() = shown
+
+    /**
+     * Brings the shade down without a pull (an edge gesture): its control center ([control]) or its notifications.
+     * False when it isn't PowOS's to show now (locked, lent to SystemUI).
+     */
+    fun openPanel(control: Boolean): Boolean {
+        val h = host ?: return false
+        if (keyguard || lent) return false
+        h.bridge.emit("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
+        show()
+        settle(true)
+        return true
+    }
+
     /** Shuts PowOS's shade if it's down (a swipe up from the bottom edge): true if it was. */
     fun closeIfOpen(): Boolean {
         if (!shown) return false

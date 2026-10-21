@@ -22,7 +22,9 @@ const mode = new URLSearchParams(location.search).get("mode") ?? "home";
  * Pages whose window is over the wallpaper and nothing else: what's behind it is what the glass shows. Home only - the
  * lock face's window can be over an app (its glass would blur the app, not the wallpaper): it keeps the picture.
  */
-const OVER_WALLPAPER = new Set(["home"]);
+// Quick Tools (ui/quicktools.tsx) too: a card in a window over any app, the compositor blurring what's under the card
+// alone (a region of that window - the app under it, as it is).
+const OVER_WALLPAPER = new Set(["home", "quicktools"]);
 /** The surfaces with glass (theme.css): one inside another is only a soft fill on it, not glass of its own. */
 const SURFACES = ".tile, .notif-panel";
 

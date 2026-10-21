@@ -100,6 +100,9 @@ class ShellBridge(
     /** Set by the shade host (its page is the shade): the window to put away once the panel is shut. */
     var shade: dev.omalauncher.system.ShadeSlot? = null
 
+    /** Set by an overlay host (Quick Tools, the pull-up panels over apps): its window, put away once the page is shut. */
+    var overlay: dev.omalauncher.system.OverlaySlot? = null
+
     private var lastInsets = JSONObject().put("top", 0).put("bottom", 0).put("left", 0).put("right", 0).put("keyboard", 0)
 
     /**
@@ -121,7 +124,7 @@ class ShellBridge(
         }
 
     /** The wallpaper's picture another one (ShellWallpaper): the page frosts it again. */
-    private val wallpaperChanged: () -> Unit = { emit("system.glass", ShellWallpaper.info(context, blurBehind = shade != null)) }
+    private val wallpaperChanged: () -> Unit = { emit("system.glass", ShellWallpaper.info(context, blurBehind = shade != null || overlay != null)) }
 
     /** Android's wallpaper changed (its colors are recomputed for every change), or the theme's background did. */
     private val wallpaperColors = android.app.WallpaperManager.OnColorsChangedListener { _, _ -> ShellWallpaper.refresh(context) }
@@ -228,6 +231,8 @@ class ShellBridge(
             "shade.closed" -> shade?.closed()
             "shade.expand" -> shade?.expand()
             "shade.peekHeight" -> shade?.peekHeight((a.getDouble(0) * density()).toInt())
+            "overlay.closed", "pull.closed" -> overlay?.closed()
+            "pull.launched" -> overlay?.launched()
             "tasks.list" -> tasks()
             "tasks.open" -> openTask(a.getInt(0), a.opt(1))
             "tasks.remove" -> dev.omalauncher.system.Tasks.remove(context, a.getInt(0)).also { appWidgets.heal() }
@@ -279,7 +284,7 @@ class ShellBridge(
             "system.notifications" -> notifications(a.optBoolean(0, true))
             "system.battery" -> battery()
             // The shade's window blurs what's behind it itself (ShadeHost): its page only tints.
-            "system.glass" -> ShellWallpaper.info(context, blurBehind = shade != null)
+            "system.glass" -> ShellWallpaper.info(context, blurBehind = shade != null || overlay != null)
             "notifications.list" -> notificationList()
             "notifications.open" -> runtime.widgets.notifications.control("open", a.getString(0))
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))

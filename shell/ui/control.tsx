@@ -97,10 +97,17 @@ function tileIcon(t: QuickTile): IconName {
   return i ?? (t.app && APP_ICONS[t.app]) ?? "apps";
 }
 
-const update = (s: QuickState) => (quick.value = { ...s });
+export const update = (s: QuickState) => (quick.value = { ...s });
 
-function shut() {
+/** What "shut" means on this page: the panel goes (the shade, home); Quick Tools (ui/quicktools.tsx) sets its own. */
+let shutHook = () => {
   notif.value = false;
+};
+export function onShut(f: () => void) {
+  shutHook = f;
+}
+function shut() {
+  shutHook();
 }
 
 /** A tile's tap and long press. */
@@ -273,7 +280,7 @@ function RemotePick() {
   );
 }
 
-function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
+export function Tile({ t, big = false }: { t: QuickTile; big?: boolean }) {
   return (
     <button type="button" class={`cc-tile ${big ? "big" : ""} ${t.on ? "on" : ""}`} {...usePress(t)}>
       <span class="cc-icon">
@@ -466,7 +473,7 @@ function EditGrid({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] }
 }
 
 /** A slider sending its value at most once a frame while it moves. */
-function Slider({
+export function Slider({
   name,
   value,
   label,

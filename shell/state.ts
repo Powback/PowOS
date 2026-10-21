@@ -273,6 +273,8 @@ export function goHome() {
 
 powos.on("system.back", () => back());
 powos.on("system.home", () => goHome());
+// An edge gesture's "app drawer" (EdgeGestures.kt): home with its pull-up panel up.
+powos.on("home.panel", ({ kind }: { kind: "apps" | "ai" }) => openPanel(kind === "ai" ? "ai" : "apps"));
 
 export async function launch(key: string) {
   menu.value = null;

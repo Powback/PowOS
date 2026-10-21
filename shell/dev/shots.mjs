@@ -112,6 +112,8 @@ const SCENES = [
   ["control", "shade", "S.panel.value = 'control'; S.notif.value = true;", "blurred"],
   ["switcher", "recents", "E.emit('recents.show', { open: true, from: 100, tasks: await (await U('./bridge.ts')).powos.tasks.list() });", "blurred"],
   ["lock", "lock", "", "wallpaper"],
+  ["quicktools", "quicktools", "E.emit('qt.drag', { side: 'right', y: innerHeight * 0.7, q: 1 }); E.emit('qt.settle', { open: true }); await sleep(400);", "blurred"],
+  ["gestures", "home", "(await U('./screens.ts')).openScreen('gestures'); await sleep(300); document.querySelector('.scr-edge-gesture .scr-row')?.click();", "wallpaper"],
 ].filter(([n]) => !ONLY || ONLY.test(n));
 
 function file(url) {

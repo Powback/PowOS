@@ -193,6 +193,13 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       expand: () => call("shade.expand"),
       peekHeight: (px) => call("shade.peekHeight", px),
     },
+    overlay: {
+      closed: () => call("overlay.closed"),
+    },
+    pull: {
+      closed: () => call("pull.closed"),
+      launched: () => call("pull.launched"),
+    },
     windows: {
       list: () => call<DesktopWindow[]>("windows.list"),
       activate: (id) => call<boolean>("windows.activate", id),
@@ -719,6 +726,11 @@ function mock(): Bridge {
       closed: async () => console.log("[mock] shade closed"),
       expand: async () => console.log("[mock] shade expanded"),
       peekHeight: async (px) => console.log("[mock] banner height", px),
+    },
+    overlay: { closed: async () => console.log("[mock] overlay closed") },
+    pull: {
+      closed: async () => console.log("[mock] pull closed"),
+      launched: async () => console.log("[mock] pull launched"),
     },
     windows: mockWindows(events, icon),
     panel: { height: async (px) => console.log("[mock] panel height", px) },

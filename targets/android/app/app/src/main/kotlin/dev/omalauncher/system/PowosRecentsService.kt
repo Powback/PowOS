@@ -13,6 +13,7 @@ import android.util.Log
 import android.view.Display
 import com.android.systemui.shared.recents.ILauncherProxy
 import com.android.systemui.shared.recents.ISystemUiProxy
+import dev.omalauncher.system.gesture.EdgeGestures
 import dev.omalauncher.system.gesture.GestureMonitor
 import dev.omalauncher.system.gesture.NavGesture
 import dev.omalauncher.system.gesture.RecentsTransition
@@ -29,13 +30,15 @@ import dev.omalauncher.system.gesture.RecentsTransition
  * - Gesture navigation: PowOS's gesture input ([GestureMonitor], an input monitor on the display) takes the swipes from
  *   the bottom edge ([NavGesture]: home, the switcher, the previous app; the app's window following the finger through
  *   WM Shell's recents transition, [RecentsTransition]) and the shade's pull from the top ([ShadeHost.pull]). Back stays
- *   SystemUI's edge swipe.
+ *   SystemUI's edge swipe, except on PowOS's edge handles ([EdgeGestures]: Good Lock-style edge swipes, Quick Tools).
  */
 class PowosRecentsService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var shade: ShadeHost? = null
     private var gestures: GestureMonitor? = null
     private var nav: NavGesture? = null
+    private var edge: EdgeGestures? = null
+    private var quickTools: QuickToolsHost? = null
     private var gestureRetries = 0
 
     /** SystemUI's last state flags and nav bar region (they can come before the gesture input is up). */
@@ -81,8 +84,10 @@ class PowosRecentsService : Service() {
                     // The desktop home has no web page to carry the switcher: the recents activity's is warmed now.
                     Switcher.prepare(this@PowosRecentsService)
                     if (shade == null) shade = ShadeHost(this@PowosRecentsService).takeIf { it.start() }
+                    if (quickTools == null) quickTools = runCatching { QuickToolsHost(this@PowosRecentsService).takeIf { it.begin() } }.onFailure { Log.w(TAG, "no Quick Tools", it) }.getOrNull()
                     startGestures()
                     nav?.systemUi = sysui
+                    edge?.systemUi = sysui
                     nav?.recentTasks = recentTasks
                 }
             }
@@ -92,6 +97,7 @@ class PowosRecentsService : Service() {
                     shade?.systemUiState(stateFlags)
                     systemUiState = stateFlags
                     nav?.systemUiState = stateFlags
+                    edge?.systemUiState = stateFlags
                 }
             }
 
@@ -115,6 +121,7 @@ class PowosRecentsService : Service() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         nav?.refresh()
+        edge?.refresh()
     }
 
     override fun onDestroy() {
@@ -132,8 +139,16 @@ class PowosRecentsService : Service() {
                 it.activeRegion = navRegion
                 nav = it
             }
-        val consumers = listOfNotNull(shade?.pull, n)
+        val e =
+            edge ?: EdgeGestures(this).also {
+                it.systemUiState = systemUiState
+                it.systemUi = systemUi
+                edge = it
+            }
+        val consumers = listOfNotNull(shade?.pull, n, e)
         gestures = GestureMonitor.start(this, Display.DEFAULT_DISPLAY, consumers)
+        // The handles are drawn only where the gestures can be taken.
+        if (gestures != null) e.start()
         shade?.monitored = gestures != null
         // Still bound but no monitor (the input system refused it for now): try again shortly, a few times.
         if (gestures == null && systemUi != null && gestureRetries++ < 5) main.postDelayed({ if (systemUi != null) startGestures() }, 2_000L)
@@ -145,6 +160,10 @@ class PowosRecentsService : Service() {
         gestures?.dispose()
         gestures = null
         nav = null
+        edge?.stop()
+        edge = null
+        quickTools?.stop()
+        quickTools = null
         shade?.stop()
         shade = null
         systemUi = null
