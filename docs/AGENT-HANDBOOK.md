@@ -59,6 +59,8 @@ for (one line each).
 - A shell layer that needs a PowOS app's tables vendors its bindings: `apps/build.sh <app>`, esbuild-bundle
   ui/bindings/index.ts (spacetimedb external) to shell/vendor/<db>.js + .d.ts, a line in vendor/VERSIONS; then
   useDb/useRows from shell/apps/stdb.ts (socket closed 5 s after the page hides). Example: shell/ui/pet.tsx.
+  A module change ships with its vendored bindings: publish it too (`apps/install.sh <app> publish`), or the shell can't
+  decode its rows - shell-errors then says `stdb: <db>: ... bindings stale for <table>` and that table isn't subscribed.
 - GPU box 192.168.50.195: voice stack units (hosts/gpu-195/, units/gpu-195/), voiceagent.pow; plan docs/GPU-SERVERS-PLAN.md.
 
 ## Native/hidden-API work (learned the hard way)
