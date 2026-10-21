@@ -67,9 +67,126 @@ export const drawerShown = () => drawerDrag.value ?? (drawer.value > 0 ? 1 : 0);
 export const drawerOpen = computed(() => drawerShown() > 0);
 export const drawerDragging = computed(() => drawerDrag.value != null || notifDrag.value != null);
 
+/*
+ * A finger on the drawer drives Web Animations, not --p: each element that follows it ([data-p]) gets one paused
+ * animation of its transform and opacity, its keyframes read once from its own CSS (shell.css: what --p 0..1 gives it),
+ * and the finger only sets their currentTime - nothing restyled through a custom property each frame. Let go, it
+ * settles along the same curve as a --p transition (180 ms, shell.css [data-p]), then --p takes over at rest. Opened
+ * or closed without a finger (a tap, Back, a launch), --p's own transition still does it.
+ */
+const SPAN = 1000;
+const SAMPLES = 41;
+const SETTLE_MS = 180;
+const SETTLE_CURVE = [0.1, 0.8, 0.2, 1] as const;
+interface Follower {
+  el: HTMLElement;
+  /** Its transform and opacity at --p 0, 1/40, ... 1. */
+  table: Keyframe[];
+  anim: Animation;
+}
+let followers: Follower[] | null = null;
+/** Keyframes per element, kept while its size and home's foot layout stay as they were. */
+const tables = new WeakMap<HTMLElement, { key: string; table: Keyframe[] }>();
+
+function tableOf(el: HTMLElement): Keyframe[] {
+  const key = `${innerWidth}x${innerHeight} ${el.offsetWidth}x${el.offsetHeight} ${el.closest(".home")?.classList.contains("pill-below")}`;
+  const had = tables.get(el);
+  if (had?.key === key) return had.table;
+  const st = el.style;
+  const [p0, t0] = [st.getPropertyValue("--p"), st.transition];
+  st.transition = "none";
+  const table: Keyframe[] = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    const p = i / (SAMPLES - 1);
+    st.setProperty("--p", String(p));
+    const cs = getComputedStyle(el);
+    table.push({ offset: p, transform: cs.transform, opacity: cs.opacity });
+  }
+  st.setProperty("--p", p0);
+  st.transition = t0;
+  tables.set(el, { key, table });
+  return table;
+}
+
+/** The settle curve's progress at time fraction t (a CSS cubic-bezier with these control points). */
+function bezier(t: number) {
+  const [x1, y1, x2, y2] = SETTLE_CURVE;
+  const at = (s: number, a: number, b: number) => 3 * a * s * (1 - s) ** 2 + 3 * b * s * s * (1 - s) + s ** 3;
+  // The curve's own parameter for time t (x is monotonic): bisection is plenty for keyframe offsets.
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const m = (lo + hi) / 2;
+    if (at(m, x1, x2) < t) lo = m;
+    else hi = m;
+  }
+  return at((lo + hi) / 2, y1, y2);
+}
+/** When along the settle (0..1 of its time) it has come fraction f of the way: bezier's inverse. */
+function settleAt(f: number) {
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const m = (lo + hi) / 2;
+    if (bezier(m) < f) lo = m;
+    else hi = m;
+  }
+  return (lo + hi) / 2;
+}
+
+function follow(p: number) {
+  if (!followers) {
+    for (const el of document.querySelectorAll<HTMLElement>("[data-p]")) el.getAnimations().forEach((a) => a.id === "drawer" && a.cancel());
+    followers = [...document.querySelectorAll<HTMLElement>("[data-p]")].map((el) => {
+      const table = tableOf(el);
+      const anim = el.animate(table, { duration: SPAN, fill: "both", easing: "linear", id: "drawer" });
+      anim.pause();
+      return { el, table, anim };
+    });
+  }
+  for (const f of followers) f.anim.currentTime = p * SPAN;
+}
+
+/** Let go at p: from there to `to` along the settle curve, then --p (at `to` already, under it) shows through. */
+function settle(p: number, to: number) {
+  const list = followers!;
+  followers = null;
+  for (const { el, table, anim } of list) {
+    const now = getComputedStyle(el);
+    const frames: Keyframe[] = [{ offset: 0, transform: now.transform, opacity: now.opacity }];
+    const span = to - p;
+    for (const k of table) {
+      const f = span === 0 ? 1 : ((k.offset as number) - p) / span;
+      if (f > 0 && f < 1) frames.push({ ...k, offset: settleAt(f) });
+    }
+    frames.sort((a, b) => (a.offset as number) - (b.offset as number));
+    frames.push({ ...table[Math.round(to * (SAMPLES - 1))], offset: 1 });
+    anim.cancel();
+    el.style.transition = "none";
+    el.style.setProperty("--p", String(to));
+    const done = el.animate(frames, { duration: span === 0 ? 0 : SETTLE_MS, easing: "linear", id: "drawer" });
+    done.finished.then(
+      () => {
+        done.cancel();
+        el.style.transition = "";
+      },
+      () => (el.style.transition = ""),
+    );
+  }
+}
+
 effect(() => {
-  const p = String(drawerShown());
-  for (const el of document.querySelectorAll<HTMLElement>("[data-p]")) el.style.setProperty("--p", p);
+  const drag = drawerDrag.value;
+  if (drag != null) return follow(drag);
+  const shown = drawer.value > 0 ? 1 : 0;
+  if (followers) {
+    // The drag's end and the drawer's new state come as two writes (gesture.ts end, pull.tsx): settle once both are in.
+    const p = followers[0] ? Number(followers[0].anim.currentTime ?? 0) / SPAN : shown;
+    queueMicrotask(() => followers && drawerDrag.value == null && settle(p, drawer.value > 0 ? 1 : 0));
+    return;
+  }
+  const v = String(shown);
+  for (const el of document.querySelectorAll<HTMLElement>("[data-p]")) el.style.setProperty("--p", v);
 });
 // The notification panel's openness, as the drawer's: --q on whatever follows it (data-q).
 effect(() => {
