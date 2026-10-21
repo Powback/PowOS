@@ -1,33 +1,31 @@
 /**
  * PowOS AI over another app (index.html?mode=assist; PowosAssistSession, the phone's digital assistant: holding the
- * power button). A panel at the bottom: the screen it was opened over (a thumbnail), the question - typed, or the mic
- * (hold to talk and send, tap to dictate) - and PowOS AI's answer as it comes. What's asked goes with the screen's text,
- * so "what's this?" means the screen. A tap above the panel puts it away.
+ * side button). The ONE chat surface (ui/assistant.ts): the home pill and its chat (bar.tsx Bar, chat.tsx ChatView),
+ * over the screen it was opened on - dimmed, for circling - and nothing of its own besides what the screen needs.
  *
- * Summoned, it listens at once, as a tap on the mic does: what's said goes into the field and a pause ends it, ready to
- * send (or edit). Typing or tapping the field stops listening and keeps what was heard; so does the panel going away.
+ * Summoned, it listens at once and sends by itself (openAssistant listen + autosend): when the dictation ends - ~4 s
+ * with nothing heard, the mic tapped, or the side button let go if Android passes that on (assist.keyup) - the words
+ * show a moment and go. Touching the pill first keeps them to edit (takeOver); so does the panel going away.
  *
- * The screenshot always goes along (PowOS AI reads it: the host saves it where PowOS sees it, the question names the
- * path). Circling is always on, no mode: draw around anything on the screen above the panel and that part is cut out
- * of the screenshot and sent too, the whole screen with it for context. A tap there (no stroke) puts the panel away.
+ * Every question takes the screen along (setAskContext): its screenshot (PowOS AI reads it: the host saves it where
+ * PowOS sees it, the question names the path) and its text. Circling is always on, no mode: draw around anything on
+ * the screen above the panel and that part is cut out of the screenshot and sent too. A tap there (no stroke) puts the
+ * panel away.
  *
  * Live mode: the screen a frame a second (LiveCapture; Android asks once), the panel a bar at the bottom - the app
- * under it stays usable (only the bar takes touches) - and each question takes the last moments that changed as one
+ * under it stays usable (only the panel takes touches) - and each question takes the last moments that changed as one
  * filmstrip image.
  */
 import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { stored } from "../state.ts";
-import { Mic, dictate, hearing, interrupt, type MicTarget } from "./bar.tsx";
-import { Now } from "./powai.tsx";
+import { Bar } from "./bar.tsx";
+import { ChatView } from "./chat.tsx";
+import { openAssistant, setAskContext, takeOver } from "./assistant.ts";
+import { speech } from "./dictation.ts";
 import type { AssistScreen } from "../types.ts";
 
 const screen = signal<AssistScreen | null>(null);
-// What's typed and not sent yet: kept across reloads and summonings (an update, a closed panel mustn't lose it).
-const draft = stored("assist.draft");
-/** Asked something since it opened: the answer shows. */
-const asked = signal(false);
 /** The part of the screen circled (a PNG cut out of the screenshot), sent with the whole screen; null: just the screen. */
 const region = signal<string | null>(null);
 /** The circle drawn over the screen (px), left showing so it's clear what goes along. */
@@ -36,29 +34,33 @@ const stroke = signal<[number, number][]>([]);
 const live = signal({ on: false, frames: 0 });
 powos.on("assist.live", (l: { on: boolean; frames: number }) => (live.value = l));
 
+/** A summoning: listen, and send what's heard with the screen. */
+const summoned = () => openAssistant({ listen: true, autosend: true, context: true });
+
 powos.on("assist.context", (s: AssistScreen) => (screen.value = s));
-// Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go,
-// and it listens.
+// Summoned again (the page stays warm between summonings, AssistWeb): last time's cut-out goes, and it listens.
 powos.on("assist.reset", () => {
   screen.value = null;
-  asked.value = false;
   region.value = null;
   stroke.value = [];
-  dictate(mic);
+  summoned();
 });
-powos.on("assist.hidden", () => interrupt(mic));
+// Put away: nothing listens or sends on (the words heard stay in the pill).
+powos.on("assist.hidden", () => takeOver());
+// The side button let go (when Android passes it on, PowosAssistSession.onKeyUp): the dictation ends - and so sends.
+powos.on("assist.keyup", () => {
+  if (speech.value.listening) powos.speech.stop();
+});
 
 /** The screen's text that goes along with a question, at most (the host caps it too). */
 const SCREEN_TEXT = 4000;
 
-async function send() {
-  const text = draft.value.trim();
-  if (!text) return;
-  draft.value = "";
-  asked.value = true;
+/**
+ * The question with the screen: the image first (the host saves it where PowOS sees it), then the screen's text, both
+ * after the question, which is all the chat shows of it (powai.tsx). Live: the filmstrip of the last moments instead.
+ */
+setAskContext(async (text) => {
   const seen = screen.value?.text.trim();
-  // The image first (the host saves it where PowOS sees it), then the screen's text: both after the question, which is
-  // all the chat shows of it (powai.tsx). Live: the filmstrip of the last moments instead of the one screenshot.
   const strip = live.value.on ? await powos.assist.filmstrip() : null;
   const shot = !strip && screen.value?.screenshot;
   const part = shot && region.value ? await powos.assist.attach(region.value) : null;
@@ -72,8 +74,8 @@ async function send() {
   ]
     .filter(Boolean)
     .join("\n");
-  powos.ai.send(context ? `${text}\n\n[What's on my screen right now - the app under this overlay, not PowOS AI itself:]\n${context}` : text);
-}
+  return context ? `${text}\n\n[What's on my screen right now - the app under this overlay, not PowOS AI itself:]\n${context}` : text;
+});
 
 /** Around the stroke, so a circle drawn tight still holds what it circles (px on screen). */
 const PAD = 12;
@@ -147,14 +149,6 @@ function Draw({ src }: { src: string | undefined }) {
   );
 }
 
-const mic: MicTarget = {
-  typed: () => draft.value,
-  heard: (full, sendIt) => {
-    draft.value = full;
-    if (sendIt) send();
-  },
-};
-
 export function Assist() {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -162,12 +156,12 @@ export function Assist() {
     powos.assist.screen().then((s) => {
       if (!s) return;
       screen.value = s;
-      dictate(mic);
+      summoned();
     });
     powos.assist.liveState().then((l) => (live.value = l));
   }, []);
   const on = live.value.on;
-  // Live: only the bar takes touches (the app under it is in use), kept as it moves and resizes; and its count of
+  // Live: only the panel takes touches (the app under it is in use), kept as it moves and resizes; and its count of
   // moments kept fresh. Off: the whole window again.
   useEffect(() => {
     if (!on) return void powos.assist.touchable(null);
@@ -185,56 +179,22 @@ export function Assist() {
   return (
     <div class={`assist ${on ? "live" : ""}`}>
       {!on && <Draw src={s?.screenshot ?? undefined} />}
-      <div class="assist-panel tile" ref={panel}>
-        <div class="assist-head">
-          {!on && s?.screenshot ? (
-            <img class="assist-shot" src={region.value ?? s.screenshot} alt="" />
+      <div class="assist-panel" ref={panel}>
+        {/* What goes along with a question: the screen (and the circled part), or live moments. */}
+        <div class="assist-attach">
+          {region.value ? (
+            <button type="button" class="chip" onClick={() => ((region.value = null), (stroke.value = []))}>
+              the part you circled + the screen ✕
+            </button>
           ) : (
-            !on && <span class="assist-shot blank" />
+            <span class="muted assist-hint">{on ? `● live · ${live.value.frames} moments` : s?.screenshot ? "the screen goes along · circle anything above" : "…"}</span>
           )}
-          <span class="assist-title">PowOS AI</span>
-          <span class="muted assist-sub">{on ? `● live · ${live.value.frames} moments` : s?.text ? "sees your screen" : "…"}</span>
-          <button type="button" class={`assist-live ${on ? "on" : ""}`} onClick={() => powos.assist.live(!on)}>
-            {on ? "stop" : "live"}
-          </button>
-          <button type="button" class="assist-open" onClick={() => (powos.ai.open(), powos.assist.close())}>
-            open ↗
+          <button type="button" class={`chip ${on ? "" : "off"}`} onClick={() => powos.assist.live(!on)}>
+            {on ? "stop live" : "live"}
           </button>
         </div>
-        {!on && s?.screenshot && (
-          <div class="assist-attach">
-            {region.value ? (
-              <button type="button" class="chip" onClick={() => ((region.value = null), (stroke.value = []))}>
-                the part you circled + the screen ✕
-              </button>
-            ) : (
-              <span class="muted assist-hint">the screen goes along · circle anything above to point at it</span>
-            )}
-          </div>
-        )}
-        {asked.value && <Now />}
-        <form
-          class="assist-ask"
-          onSubmit={(e) => {
-            e.preventDefault();
-            send();
-          }}
-        >
-          <input
-            value={hearing(mic) ?? draft.value}
-            onInput={(e) => {
-              const typed = (e.currentTarget as HTMLInputElement).value;
-              interrupt(mic);
-              draft.value = typed;
-            }}
-            onPointerDown={() => interrupt(mic)}
-            onFocus={() => (interrupt(mic), powos.keyboard.show())}
-            placeholder="ask about this screen"
-            enterKeyHint="send"
-            autocomplete="off"
-          />
-          <Mic target={mic} />
-        </form>
+        <ChatView />
+        <Bar />
       </div>
     </div>
   );

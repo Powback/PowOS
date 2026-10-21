@@ -14,7 +14,8 @@ const SHOWN = 40;
 export function Item({ item }: { item: ChatItem }) {
   switch (item.kind) {
     case "user":
-      return <div class="msg user">{item.text}</div>;
+      // The question only: the screen the side button sent along with it (assist.tsx) isn't part of what was said.
+      return <div class="msg user">{item.text.split("\n\n[What's on my screen right now")[0]}</div>;
     case "assistant":
       return <div class="msg assistant">{item.text}</div>;
     case "tool":

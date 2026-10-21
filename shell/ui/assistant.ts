@@ -9,12 +9,16 @@
  *     listen    the shared recognizer starts (bar.tsx's), heard words go into the pill's field
  *     autosend  what's heard is asked at once (else it waits in the field)
  *     text      put into the field
- *     context   the screen as context - the side button's (assist), never the pet's; ignored here for now
+ *     context   the screen as context - the side button's (assist.tsx registers it: setAskContext), never the pet's
  *   askQueued(text)  asks; while a turn is under way it waits for it (PowosAiChat.send drops what's sent meanwhile)
+ *
+ * Autosend: when the dictation ends (~4 s with nothing heard, the mic tapped, a hold let go) the words show in the
+ * pill for PREVIEW_MS, then go ("sending"); touching the pill in that moment - or typing, or tapping it while it
+ * listens - keeps them there to edit (takeOver).
  */
-import { effect } from "@preact/signals";
+import { effect, signal } from "@preact/signals";
 import { chat, chatting, drawer, page, query } from "../state.ts";
-import { dictate, type MicTarget } from "./bar.tsx";
+import { dictate, interrupt, type MicTarget } from "./dictation.ts";
 import { powos } from "../bridge.ts";
 
 /** Asked while the manager was mid-turn: sent when that turn ends. */
@@ -31,9 +35,18 @@ export function askQueued(text: string) {
   else send(t);
 }
 
-function send(t: string) {
+/** What goes along with a question (the side button's screen, crop, live frames: assist.tsx); null: nothing. */
+let askContext: ((text: string) => Promise<string>) | null = null;
+
+/** The page that has context to add to every question (assist mode) registers it here. */
+export function setAskContext(f: ((text: string) => Promise<string>) | null) {
+  askContext = f;
+}
+
+async function send(t: string) {
   sent = { text: t, at: Date.now() };
-  powos.ai.send(t, false);
+  // The question first, the context after it: the chat shows the question (powai.tsx), and `sent` matches it by prefix.
+  powos.ai.send(askContext ? await askContext(t) : t, false);
 }
 
 /** What's waiting to be asked (the chat shows it, greyed, until it goes). */
@@ -57,20 +70,47 @@ effect(() => {
   } else if (Date.now() - sent.at >= 3000) sent = null;
 });
 
-/** Dictation into the pill: what's heard goes into its field, or is asked at once. */
-function target(autosend: boolean): MicTarget {
-  return {
-    typed: () => query.value,
-    heard: (full, send) => (send || autosend ? askQueued(full) : (query.value = full)),
-    started: () => (drawer.value = 1),
-  };
+/** The words of an autosend dictation are on show, about to go (the pill marks it: bar.tsx). */
+export const sending = signal(false);
+/** How long they show before they go. */
+const PREVIEW_MS = 300;
+let sendTimer = 0;
+/** This dictation sends by itself when it ends (openAssistant's autosend), until the user takes over. */
+let autosend = false;
+
+/** The user took over the pill (a touch, typing): no sending by itself; a dictation stops, its words stay. */
+export function takeOver() {
+  autosend = false;
+  clearTimeout(sendTimer);
+  sending.value = false;
+  interrupt();
 }
+
+/**
+ * Dictation into the pill (one target, so the pill shows what it hears: bar.tsx): the words go into its field; a send
+ * (a held mic let go, or autosend's end) asks them - autosend's after showing them for PREVIEW_MS.
+ */
+export const pillTarget: MicTarget = {
+  typed: () => query.value,
+  heard: (full, send) => {
+    query.value = full;
+    if (!send || !full.trim()) return;
+    if (!autosend) return askQueued(full);
+    autosend = false;
+    sending.value = true;
+    sendTimer = window.setTimeout(() => {
+      sending.value = false;
+      askQueued(full);
+    }, PREVIEW_MS);
+  },
+  started: () => (drawer.value = 1),
+};
 
 export interface OpenAssistant {
   listen?: boolean;
   autosend?: boolean;
   text?: string;
-  /** The screen as context (the side button's); not used by the home surface yet. */
+  /** The screen as context (the side button's): what setAskContext registered goes with each question. */
   context?: boolean;
 }
 
@@ -80,5 +120,9 @@ export function openAssistant(o: OpenAssistant = {}) {
   drawer.value = 1;
   chatting.value = true;
   if (o.text != null) query.value = o.text;
-  if (o.listen) dictate(target(!!o.autosend));
+  if (!o.listen) return;
+  clearTimeout(sendTimer);
+  sending.value = false;
+  autosend = !!o.autosend;
+  dictate(pillTarget, autosend);
 }
