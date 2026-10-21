@@ -17,6 +17,7 @@ import { useDb, useRows } from "../apps/stdb.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
+import { GrowField } from "./grow.tsx";
 
 const sessions = signal<AgentSession[]>([]);
 const mail = signal<AgentMail[]>([]);
@@ -219,9 +220,9 @@ function Work({ shown }: { shown: boolean }) {
   const groups = new Map<string, WorkRow[]>();
   for (const w of active) groups.set(projectOf(w), [...(groups.get(projectOf(w)) ?? []), w]);
   return (
-    <section class="ai-work-list">
+    <section class="ai-work-list tile">
       {shown && <WorkFeed />}
-      <h3 class="ai-heading ai-work-head tile">
+      <h3 class="ai-heading ai-work-head">
         work in progress{active.length ? ` · ${active.length}` : ""}
         {!boardLive.value && shown && <span> · connecting…</span>}
       </h3>
@@ -232,7 +233,7 @@ function Work({ shown }: { shown: boolean }) {
               type="button"
               key={p || "all"}
               title={p || "all projects"}
-              class={`ai-work-chip tile ${only === p ? "on" : ""}`}
+              class={`ai-work-chip surface ${only === p ? "on" : ""}`}
               onClick={() => (workFilter.value = p)}
             >
               {p ? chipLabel(p) : "All"}
@@ -240,7 +241,7 @@ function Work({ shown }: { shown: boolean }) {
           ))}
         </div>
       )}
-      <div class="ai-work-box tile">
+      <div class="ai-work-box">
         {[...groups].map(([p, ws]) => {
           const shut = closed.has(p) && !only;
           const working = ws.filter((w) => w.status === "working").length;
@@ -361,7 +362,7 @@ export function PowAiPage() {
       document.removeEventListener("visibilitychange", vis);
     };
   }, [shown]);
-  const input = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
   const { busy, items } = chat.value;
   const step = busy ? [...items].reverse().find((i) => i.kind === "tool" && i.ok == null) : null;
   return (
@@ -396,10 +397,10 @@ export function PowAiPage() {
           send();
         }}
       >
-        <input
-          ref={input}
+        <GrowField
+          inputRef={input}
           value={hearing(pageMic) ?? draft.value}
-          onInput={(e) => (draft.value = (e.currentTarget as HTMLInputElement).value)}
+          onInput={(v) => (draft.value = v)}
           onFocus={() => powos.keyboard.show()}
           placeholder="ask PowOS AI"
           enterKeyHint="send"

@@ -57,6 +57,14 @@
   --glass-blur: 28px;
   --glass-saturate: 1.6;
   --glass-brightness: 0.8;
+  /*
+   * The same frost from the compositor (native glass, ui/nativeglass.ts): its blur radius, which SurfaceFlinger takes as
+   * about a fifth of a Gaussian's sigma (measured on the phone: radius 77 device px blurred like sigma 12-20), so the
+   * lock screen's blur(--glass-blur) is about five times --glass-blur here; and --glass-brightness as a veil under the
+   * tint (a compositor blur can't darken or saturate - the saturation is the one thing that doesn't carry over).
+   */
+  --glass-blur-native: 140px;
+  --glass-veil: rgb(0 0 0 / 20%);
   --glass-behind-tint: 58%;
   /*
    * Liquid glass (live blur on, GlassBlur/LiquidGlass.kt): each surface's edge bends what's behind it like a lens's
@@ -89,6 +97,7 @@
 :root[data-light="true"] {
   --glass-tint: 50%;
   --glass-brightness: 1.08;
+  --glass-veil: rgb(255 255 255 / 8%);
   --glass-behind-tint: 66%;
 }
 .glass, .glass-native { --glass-tint: 32%; }
@@ -135,20 +144,24 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
  * are (--gx/--gy: where the surface is on the screen). A surface inside another is only a soft fill on it; PowOS AI's
  * page is solid (shell.css). No live blur anywhere.
  */
-.glass :is(.tile, .notif-panel, .ai-screen) {
+.glass :is(.tile, .notif-panel) {
   background:
     linear-gradient(var(--glass-fill), var(--glass-fill)) border-box,
     var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-.glass :is(.tile, .notif-panel, .ai-screen) .tile { background: var(--soft-fill); }
+.glass :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
 /*
  * Live glass (ui/nativeglass.ts, html.glass-native): the display compositor blurs what's behind each surface (the
  * wallpaper), the page only tints it - no picture, and no backdrop blur of its own.
  */
-.glass-native :is(.tile, .notif-panel, .ai-screen) { backdrop-filter: none; -webkit-backdrop-filter: none; }
-.glass-native :is(.tile, .notif-panel, .ai-screen) .tile { background: var(--soft-fill); }
+.glass-native :is(.tile, .notif-panel) {
+  background: linear-gradient(var(--glass-fill), var(--glass-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.glass-native :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
 /*
  * Glass over what the host blurs behind the window (the shade's, the switcher's) or over an app (the assistant's
  * panel, which can't blur the app it circles on): the same surfaces, tinted only - --glass-behind-tint, more of it.

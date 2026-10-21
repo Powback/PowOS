@@ -99,12 +99,12 @@ export function Units({ shown }: { shown: boolean }) {
   };
   const orphans = all.filter((u) => u.orphan).length;
   return (
-    <section class="ai-work-list">
+    <section class="ai-work-list tile">
       {shown && <Feed />}
-      <h3 class="ai-heading ai-work-head tile">
+      <h3 class="ai-heading ai-work-head">
         installed & running{orphans ? ` · ${orphans} to decide` : ""}
       </h3>
-      <div class="ai-work-box tile">
+      <div class="ai-work-box">
         {hosts.map((h) => {
           const rows = all.filter((u) => u.host === h && u.id !== "_check");
           const check = all.find((u) => u.host === h && u.id === "_check");

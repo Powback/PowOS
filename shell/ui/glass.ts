@@ -25,8 +25,11 @@ import { debug as nativeDebug, nativeGlass } from "./nativeglass.ts";
 const root = document.documentElement;
 /** Which page this is (index.html?mode=): home is over the wallpaper; the shade's window over an app; others neither. */
 const mode = new URLSearchParams(location.search).get("mode") ?? "home";
-/** The surfaces that get the glass: every tile, the notification panel, PowOS AI's page. */
-const SURFACES = ".tile, .notif-panel, .ai-screen";
+/**
+ * The surfaces that get the glass: every tile and the notification panel (PowOS AI's page shows the wallpaper as home
+ * does; its cards are tiles).
+ */
+const SURFACES = ".tile, .notif-panel";
 
 let source: string | null = null;
 let frosted: string | null = null;

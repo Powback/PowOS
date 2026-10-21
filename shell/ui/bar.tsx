@@ -4,7 +4,8 @@
  * The mic (the Compose prompt bar's): hold to talk, let go to ask PowOS AI; a tap dictates into the field instead,
  * ending at the next pause; held and dragged well away, it's cancelled.
  */
-import { useRef } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
+import { GrowField } from "./grow.tsx";
 import { signal } from "@preact/signals";
 import { matches } from "./drawer.tsx";
 import { ask, drawer, launch, query } from "../state.ts";
@@ -144,14 +145,21 @@ const barMic: MicTarget = {
   started: () => (drawer.value = 1),
 };
 
+/**
+ * The search/ask bar. At rest it's no surface at all - a faint "› search" and the mic over the wallpaper; focused,
+ * holding text or dictating, it becomes a lifted glass pill (a .tile: frosted, the native blur's region too), whose
+ * field grows to three rows (ui/grow.tsx) upward over home without moving anything under it.
+ */
 export function Bar() {
-  const input = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const [focused, setFocused] = useState(false);
   const s = speech.value;
   // While it listens, the field shows what's heard after what was typed.
   const shown = hearing(barMic) ?? query.value;
+  const active = focused || !!shown || s.listening;
   return (
     <form
-      class="bar tile"
+      class={`bar ${active ? "active" : ""}`}
       onSubmit={(e) => {
         e.preventDefault();
         const best = matches.value[0];
@@ -164,18 +172,23 @@ export function Bar() {
         powos.keyboard.show();
       }}
     >
-      <span class="prompt">❯</span>
-      <input
-        ref={input}
-        value={shown}
-        onInput={(e) => (query.value = (e.currentTarget as HTMLInputElement).value)}
-        placeholder={s.listening ? "listening…" : s.error ?? "search"}
-        enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
-        autocomplete="off"
-        autoCapitalize="off"
-        spellcheck={false}
-      />
-      <Mic target={barMic} />
+      {/* The pill: its own box over the bar's place, growing upward - the bar's height (home's layout) never changes. */}
+      <div class={`bar-pill ${active ? "tile" : ""}`}>
+        <span class="prompt">❯</span>
+        <GrowField
+          inputRef={input}
+          value={shown}
+          onInput={(v) => (query.value = v)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={s.listening ? "listening…" : s.error ?? "search"}
+          enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
+          autocomplete="off"
+          autoCapitalize="off"
+          spellcheck={false}
+        />
+        <Mic target={barMic} />
+      </div>
     </form>
   );
 }

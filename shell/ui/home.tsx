@@ -124,7 +124,7 @@ function DockRecents({ count }: { count: number }) {
   return (
     <>
       {shown.map((app) => (
-        <AppCell key={app.key} app={app} labels={false} draggable />
+        <AppCell key={app.key} app={app} labels={false} draggable class="tile" />
       ))}
     </>
   );
@@ -178,7 +178,7 @@ function Dock() {
         key={app.key}
         app={app}
         labels={false}
-        class={d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""}
+        class={`tile ${d?.key === app.key ? "lifted" : swapOut === app.key ? "swap-out" : ""}`}
         style={style}
         onDrag={(e) => el.current && moveInDock(app.key, e, el.current)}
       />
@@ -192,7 +192,7 @@ function Dock() {
        * Two pages side by side, swiped between by the browser's own scroll snapping (on the compositor): the pinned
        * apps, then the recent ones. The dots below follow when a scroll settles.
        */}
-      <div class={`dock tile ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followOpenness}>
+      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followOpenness}>
         <div class="dock-pages" ref={pagesEl}>
           {(!ghost || carried) && (
             <div
