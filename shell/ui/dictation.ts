@@ -106,7 +106,12 @@ powos.on("speech.done", ({ text }: { text: string }) => {
   pending = null;
   if (p) p.target.heard(join(p.typed, text), p.send && !!text.trim());
 });
-powos.on("speech.permission", ({ granted }: { granted: boolean }) => {
+// The page went away mid-dictation (the assist closed, an app came up over home): a release that never comes would
+// leave the recognizer listening until the native watchdog or cap. What's heard stays in the field; nothing is sent.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && pending) interrupt();
+});
+powos.on("speech.permission",({ granted }: { granted: boolean }) => {
   if (granted && asked) listen(false, asked);
   asked = null;
 });
