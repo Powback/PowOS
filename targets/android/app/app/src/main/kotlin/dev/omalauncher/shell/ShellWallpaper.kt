@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.ImageDecoder
 import android.graphics.drawable.Drawable
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -27,7 +28,8 @@ import kotlin.math.roundToInt
  * Where the picture comes from, the first that has one:
  * - our own live wallpaper (OmarchyWallpaperService): the theme's background - exactly what it draws;
  * - a still wallpaper: WallpaperManager's picture (READ_EXTERNAL_STORAGE, at the app's target SDK);
- * - another app's live wallpaper (OxygenOS's video ones): rooted, the system's own screenshot of it; else its thumbnail.
+ * - another app's live wallpaper (OxygenOS's video ones): the frame it shows now, from the compositor; failing that,
+ *   rooted, the system's own screenshot of it (a stale frame); else its thumbnail.
  *
  * Scaled to at most [MAX_SIDE] (the page blurs it hard: plenty) and kept until its revision changes. Worked out off
  * the main thread: [info] answers with what's cached and looks again in the background; a new picture is announced
@@ -36,6 +38,7 @@ import kotlin.math.roundToInt
 internal object ShellWallpaper {
     private const val TAG = "PowosWallpaper"
     private const val MAX_SIDE = 720
+    private const val LIVE_SETTLE_MS = 2_500L
 
     private class Pic(
         val rev: String,
@@ -56,6 +59,8 @@ internal object ShellWallpaper {
         blurBehind: Boolean,
     ): JSONObject {
         refresh(context)
+        // A live wallpaper (a fold just asked again): looked at once more when its playing is over.
+        if (cached?.source == "live") refresh(context, LIVE_SETTLE_MS)
         val p = cached
         val wp = p?.let { JSONObject().put("url", "/_wallpaper?v=${Uri.encode(it.rev)}").put("rev", it.rev).put("source", it.source) }
         return JSONObject().put("wallpaper", wp ?: JSONObject.NULL).put("blurBehind", blurBehind)
@@ -104,6 +109,16 @@ internal object ShellWallpaper {
             val file = ThemeStore.savedSelection(context)?.second ?: return null
             return Triple("theme-${file.path.hashCode()}-${file.lastModified()}", "theme") { decode(ImageDecoder.createSource(file)) }
         }
+        // Another app's live wallpaper (OxygenOS's video ones): the frame it shows now, from the compositor (its surface
+        // mirrored - WallpaperBackdrop.still, READ_FRAME_BUFFER through the recents role). Its revision is the picture's
+        // own (a sampled hash): another frame - after an unlock, a fold - is another picture; the same one isn't.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val shot = liveFrame(context)
+            if (shot != null) {
+                val rev = "live-${info.component.flattenToShortString().hashCode()}-${sample(shot)}"
+                return Triple(rev, "live") { shot }
+            }
+        }
         if (andro.marchy.RootMode.enabled()) {
             // HACK: another app's live wallpaper has no picture an app can ask for (WallpaperManager hands out still
             // ones only); OxygenOS keeps a screenshot of it for its own previews, read here as root. Real fix: none in
@@ -119,6 +134,25 @@ internal object ShellWallpaper {
             }
         }
         return Triple("thumb-${info.component.flattenToShortString()}", "thumbnail") { info.loadThumbnail(context.packageManager)?.let(::draw) }
+    }
+
+    /** The live wallpaper's current frame, at most [MAX_SIDE] (null: not this way). */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun liveFrame(context: Context): Bitmap? {
+        val display = context.getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(android.view.Display.DEFAULT_DISPLAY) ?: return null
+        val size = android.graphics.Point()
+        @Suppress("DEPRECATION")
+        display.getRealSize(size)
+        if (size.x <= 0 || size.y <= 0) return null
+        val scale = minOf(1f, MAX_SIDE.toFloat() / max(size.x, size.y))
+        return WallpaperBackdrop.still(display.displayId, android.graphics.Rect(0, 0, size.x, size.y), scale)
+    }
+
+    /** A cheap fingerprint of a picture: a 16 x 16 grid of its pixels. */
+    private fun sample(b: Bitmap): Int {
+        var h = b.width * 31 + b.height
+        for (y in 0 until 16) for (x in 0 until 16) h = h * 31 + b.getPixel(x * (b.width - 1) / 15, y * (b.height - 1) / 15)
+        return h
     }
 
     private fun decode(src: ImageDecoder.Source): Bitmap =

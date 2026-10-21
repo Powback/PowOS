@@ -139,6 +139,10 @@ class ShellActivity : Activity() {
         runtime.refreshLinuxState()
         // The user may have set or replaced the wallpaper while we were in the background.
         scope.launch { runtime.themes.refreshLiveWallpaper() }
+        // A live wallpaper shows another frame after an unlock or a fold (OxygenOS's video ones play then): the page's
+        // picture of it again now, and once more when that has played out.
+        ShellWallpaper.refresh(this)
+        ShellWallpaper.refresh(this, WALLPAPER_SETTLE_MS)
     }
 
     /** Drops Recents cards whose Linux window no longer exists (app exited or process restarted). */
@@ -239,6 +243,8 @@ class ShellActivity : Activity() {
         const val TAG = "PowosShell"
 
         /** On a HOME intent that [toHome] sent: not Home pressed. */
+        /** How long OxygenOS's video wallpapers play after an unlock or a fold. */
+        const val WALLPAPER_SETTLE_MS = 2_500L
         const val EXTRA_REDIRECTED = "dev.omalauncher.shell.redirected"
     }
 }

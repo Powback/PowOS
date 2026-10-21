@@ -276,6 +276,47 @@ internal class WallpaperBackdrop(
         const val SHARP = 0.25f
         const val SOFT = 1f / 32f
 
+        /**
+         * The wallpaper as it is on screen now, once (ShellWallpaper's picture of a live wallpaper - the exact frame,
+         * never the system's stale screenshot of it): its mirror captured at [scale] within [crop], copied into a plain
+         * bitmap. Blocks up to [WAIT_MS]: not on the main thread. Null: it can't (no permission, no wallpaper surface).
+         */
+        fun still(
+            displayId: Int,
+            crop: android.graphics.Rect,
+            scale: Float,
+        ): Bitmap? {
+            val m = methods ?: return null
+            val mir = (runCatching { m.mirror.invoke(m.wm, displayId) as SurfaceControl? }.getOrNull()) ?: return null
+            try {
+                val args = m.layerArgs.newInstance(mir)
+                m.setScale.invoke(args, scale)
+                m.setCrop.invoke(args, crop)
+                val done = java.util.concurrent.CountDownLatch(1)
+                var got: Any? = null
+                var status = -1
+                val listener =
+                    m.listener.newInstance(
+                        java.util.function.ObjIntConsumer<Any?> { b, st ->
+                            got = b
+                            status = st
+                            done.countDown()
+                        },
+                    )
+                if (m.captureLayers.invoke(null, m.layerBuild.invoke(args), listener) as Int != 0) return null
+                if (!done.await(WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS) || status != 0) return null
+                val buffer = got ?: return null
+                val hw = m.asBitmap.invoke(buffer) as Bitmap? ?: return null
+                runCatching { (m.hardwareBuffer.invoke(buffer) as android.hardware.HardwareBuffer).close() }
+                return hw.copy(Bitmap.Config.ARGB_8888, false).also { hw.recycle() }
+            } catch (e: Throwable) {
+                Log.w(TAG, "no still of the wallpaper", e)
+                return null
+            } finally {
+                mir.release()
+            }
+        }
+
         private val methods: Methods? by lazy {
             runCatching {
                 HiddenApi.allow()
