@@ -4,6 +4,7 @@
 # processes - for the shell as it is, then for each variant: a CSS snippet added to the home page as a <style> for
 # that run only (removed at once after it). Leaves the drawer closed.
 #   shell/dev/perf/drag-raster.sh [secs=12] ["label=css" ...]
+#   PROFILE=1: the home page JS CPU profile (cdp.sh profile: ms/s per function) instead of cdp.sh raster.
 #   TRACE=1: trace.ts instead of cdp.sh raster - Paint by DOM node, raster/decode tasks.
 #   "label=js:ON|OFF": a page setting instead of CSS (ON evaluated for the run, OFF after), e.g.
 #     "measured=js:__glass.live.compute(false)|__glass.live.compute(true)"
@@ -47,7 +48,9 @@ run() {
   [ "${SWIPES:-updown}" = up ] && close="input keyevent 4"
   "$phone/adb.sh" shell "t=\$((\$(date +%s)+$secs)); while [ \$(date +%s) -lt \$t ]; do input swipe $x $y0 $x $y1 700; sleep 0.4; $close; sleep 0.4; done" &
   local d=$!
-  if [ "${TRACE:-0}" = 1 ]; then
+  if [ "${PROFILE:-0}" = 1 ]; then
+    "$phone/cdp.sh" profile $((secs - 2)) home &
+  elif [ "${TRACE:-0}" = 1 ]; then
     docker run --rm -i --network container:powos-vadb -v "$here:/t:ro" oven/bun:1 bun /t/trace.ts $((secs - 2)) &
   else
     "$phone/cdp.sh" raster $((secs - 2)) | head -16 &

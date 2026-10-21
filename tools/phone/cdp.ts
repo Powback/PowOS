@@ -1,6 +1,7 @@
 // CDP to the PowOS shell's WebView pages (run by tools/phone/cdp.sh inside powos-vadb's network, port 9333 forwarded).
 //   pages                      the pages (url, title)
 //   eval <suffix> <expr>       evaluate in the page whose url ends with <suffix> ("" = home: the url without ?mode)
+//   profile [secs] [page]       the page JS CPU profile: self and inclusive ms/s per function
 //   net [secs=10]               per page: WebSocket frames (by socket URL) and requests per second
 //   raster [secs=10]            the busiest renderer/GPU/viz trace events (what draws per frame at rest)
 //   idle [secs=20] [suffix]    what every page (or one) does while nothing happens: frames, paints, layouts, style
@@ -135,6 +136,65 @@ if (cmd === "idle") {
   const un = new Map<string, number>();
   for (const e of unattributed) un.set(e.name, (un.get(e.name) ?? 0) + 1);
   console.log(JSON.stringify({ secs, traceEvents: trace.length, pages: out, unattributedPerSec: Object.fromEntries([...un].map(([k, v]) => [k, +(v / secs).toFixed(2)])) }, null, 1));
+  process.exit(0);
+}
+if (cmd === "profile") {
+  // profile [secs=10] [page=home]: the page's JS CPU profile (V8 sampling, 1 ms) over the window - self and inclusive
+  // time per function (url:line). Read-only.
+  const secs = Number(a1 ?? 10);
+  const [p] = pick(a2 ?? "home");
+  if (!p) (console.log("no page"), process.exit(1));
+  const s = new Session(p.webSocketDebuggerUrl);
+  await s.open;
+  await s.send("Profiler.enable");
+  await s.send("Profiler.setSamplingInterval", { interval: 1000 });
+  await s.send("Profiler.start");
+  await new Promise((r) => setTimeout(r, secs * 1000));
+  const prof = (await s.send("Profiler.stop")).result.profile;
+  // The shell's modules run from blob: URLs (es-module-shims): named by their source's first doc line.
+  const scripts = new Map<string, string>();
+  s.events.push((d) => d.method === "Debugger.scriptParsed" && scripts.set(d.params.scriptId, d.params.url));
+  await s.send("Debugger.enable");
+  await new Promise((r) => setTimeout(r, 500));
+  const label = new Map<string, string>();
+  for (const n of prof.nodes) {
+    const id = n.callFrame.scriptId;
+    if (label.has(id) || !String(n.callFrame.url).startsWith("blob:")) continue;
+    const src = String((await s.send("Debugger.getScriptSource", { scriptId: id })).result?.scriptSource ?? "");
+    const m = src.match(/sourceURL=(\S+)/) ?? src.match(/^\s*\/\*\*?\s*\n?\s*\*?\s*([^\n]{0,50})/);
+    label.set(id, m ? `[${m[1].replace(/^.*shell\.powos\//, "").trim()}]` : id);
+  }
+  await s.send("Debugger.disable");
+  for (const n of prof.nodes) if (label.has(n.callFrame.scriptId)) n.callFrame.url = label.get(n.callFrame.scriptId);
+  const nodes = new Map<number, any>(prof.nodes.map((n: any) => [n.id, n]));
+  const parent = new Map<number, number>();
+  for (const n of prof.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+  const dt = (prof.endTime - prof.startTime) / 1000 / Math.max(1, prof.samples.length);
+  const name = (n: any) => {
+    const f = n.callFrame;
+    return `${f.functionName || "(anon)"}@${String(f.url).replace(/^.*shell\.powos\//, "") || "(native)"}:${f.lineNumber + 1}`;
+  };
+  const self = new Map<string, number>();
+  const total = new Map<string, number>();
+  for (const id of prof.samples) {
+    const n = nodes.get(id);
+    self.set(name(n), (self.get(name(n)) ?? 0) + dt);
+    const seen = new Set<string>();
+    for (let c: number | undefined = id; c != null; c = parent.get(c)) {
+      const k = name(nodes.get(c));
+      if (!seen.has(k)) (seen.add(k), total.set(k, (total.get(k) ?? 0) + dt));
+    }
+  }
+  const top = (m: Map<string, number>, n: number) =>
+    [...m]
+      .filter(([k]) => !/^\((program|idle|root|garbage collector)\)/.test(k))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map(([k, v]) => `${(v / secs).toFixed(1).padStart(6)} ms/s  ${k}`);
+  console.log(`JS profile of ${short(p.url)}, ${secs}s (${prof.samples.length} samples):\n-- self`);
+  console.log(top(self, 15).join("\n"));
+  console.log("-- total (inclusive)");
+  console.log(top(total, 25).join("\n"));
   process.exit(0);
 }
 if (cmd === "net") {
