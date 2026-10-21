@@ -7,13 +7,20 @@
 # Justified exceptions are listed in dev/style-allow.txt: "<file> <text on the line>  # why" - the line matches when
 # it contains that text, so an exception survives the file moving around it.
 #
-#   shell/dev/lint-style.sh [DIR]     DIR: the shell to check (default: this one). Exit 0 clean, 1 with findings.
+#   shell/dev/lint-style.sh [DIR [FILE...]]   DIR: the shell to check (default: this one); FILEs: only those (paths in
+#                                             it, e.g. the files a push brings). Exit 0 clean, 1 with findings.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 S=${1:-$here/..}
 allow=$here/style-allow.txt
 cd "$S" || exit 2
-files=$(ls ui/*.css ui/*.tsx ui/*.ts app.tsx apps/*.ts 2>/dev/null)
+shift 2>/dev/null || true
+if [ $# -gt 0 ]; then
+  files=$(for f in "$@"; do case "$f" in (*.css|*.ts|*.tsx) [ -f "$f" ] && [ "$f" != theme.css ] && echo "$f" ;; esac; done)
+  [ -n "$files" ] || { echo "ok   style lint (nothing to lint)"; exit 0; }
+else
+  files=$(ls ui/*.css ui/*.tsx ui/*.ts app.tsx apps/*.ts 2>/dev/null)
+fi
 found=0
 check() { # kind regex
   local kind=$1 re=$2

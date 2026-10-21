@@ -4,7 +4,7 @@
 # with an import cycle - home and the lock face dead, the shade's window over everything), and nobody is told: so it
 # never gets there.
 #
-#   shell/dev/gate.sh [--tree | --dir DIR] [--overrides DIR] [--app APPDIR] [file...]
+#   shell/dev/gate.sh [--tree | --dir DIR | --installed DIR] [--overrides DIR] [--app APPDIR] [file...]
 #
 # The shell it checks is the one the phone will run after the push: the committed shell (git HEAD: what an APK is
 # built from - build-app.sh refuses a dirty tree), the phone's current overrides over it (--overrides: push.sh pulls
@@ -27,11 +27,15 @@
 set -euo pipefail
 SHELL_DIR=$(cd "$(dirname "$0")/.." && pwd)
 IMAGE=${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}
-base=head dir="" overrides="" app="" shots="" wallpaper="" files=()
+base=head dir="" installed="" overrides="" app="" shots="" wallpaper="" files=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --tree) base=tree; shift ;;
     --dir) base=dir; dir=$(cd "$2" && pwd); shift 2 ;;
+    # The shell the installed APK ships (its assets/shell, push.sh pulls it): the base instead of git HEAD - the phone
+    # runs that, not HEAD, while the APK lags behind (2026-10-21: HEAD's assist.tsx failed against the phone's
+    # overrides though the phone ran the APK's). Composed like HEAD: the overrides and the files over it.
+    --installed) base=installed; installed=$(cd "$2" && pwd); shift 2 ;;
     --overrides) overrides=$2; shift 2 ;;
     --app) app=$(cd "$2" && pwd); shift 2 ;;
     --shots) mkdir -p "$2"; shots=$(cd "$2" && pwd); shift 2 ;;
@@ -50,6 +54,11 @@ S=$work/shell
 case $base in
   dir) S=$dir ;;
   tree) mkdir -p "$S" && (cd "$SHELL_DIR" && tar --exclude ./node_modules -cf - .) | tar -xf - -C "$S" ;;
+  installed)
+    mkdir -p "$S" && (cd "$installed" && tar -cf - .) | tar -xf - -C "$S"
+    # The APK doesn't ship the type-checker's config: the committed one.
+    [ -f "$S/tsconfig.json" ] || cp "$SHELL_DIR/tsconfig.json" "$S/tsconfig.json"
+    ;;
   head)
     top=$(git -C "$SHELL_DIR" rev-parse --show-toplevel)
     rel=${SHELL_DIR#"$top"/}
@@ -77,7 +86,8 @@ else
   echo "     tsc: skipped (no shell/node_modules - npm ci in shell/)"
 fi
 # 1b. The design language's style lint (docs/DESIGN-LANGUAGE.md): no raw colours, lines or shadows outside the tokens.
-if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
+# A push: the files it brings (what's already on the phone isn't this push's to answer for); otherwise all of the shell.
+if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" ${files[@]+"${files[@]}"} 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
 # 2. The pages, booted.
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
 mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro")

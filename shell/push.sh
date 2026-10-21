@@ -12,7 +12,8 @@
 # ANDROID_SERIAL picks the phone when several are connected.
 #
 # The gate (shell/dev/gate.sh) runs first: tsc, then every page (home, lock, shade, assist, aod, recents) booted in a
-# headless Chromium - the committed shell + the phone's current overrides + these files, as the phone will serve them.
+# headless Chromium - the installed APK's shell (with --vpn; else the committed one) + the phone's current overrides +
+# these files, as the phone will serve them.
 # A page that doesn't load refuses the push, with the error. --force pushes anyway (the gate still runs and says so).
 # A push writes a manifest (files/shell-push.json: when, which files, the note) and keeps the overrides it replaced
 # (files/shell-prev/): a page that fails to boot within 2 min of it has that push rolled back by the app
@@ -40,11 +41,28 @@ if [ "${1:-}" = "--vpn" ]; then
       mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate"
       ov=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/vpn-overrides.XXXXXX")
       ga=()
-      if docker run --rm --network container:wireguard -v "$HOME/.android:/root/.android" -v "$ov:/ov" \
-        -e ANDROID_SERIAL="$addr" android-app-dev-android-builder:latest bash -c \
-        'adb connect "$ANDROID_SERIAL" >/dev/null 2>&1; adb -s "$ANDROID_SERIAL" exec-out "su -c \"cd /data/data/com.powos.app/files && tar -cf - shell\"" | tar -xf - -C /ov' \
+      # The installed APK's own shell (its assets/shell): what the phone runs under the overrides - not HEAD while the
+      # APK lags behind (2026-10-21: HEAD's assist.tsx failed against the phone's overrides, and a fix that passed on
+      # the phone's real shell couldn't go). Pulled once per install (cached by the APK's path and update time).
+      cache="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/installed"
+      mkdir -p "$cache"
+      if docker run --rm --network container:wireguard -v "$HOME/.android:/root/.android" -v "$ov:/ov" -v "$cache:/cache" \
+        -e ANDROID_SERIAL="$addr" android-app-dev-android-builder:latest bash -c '
+          adb connect "$ANDROID_SERIAL" >/dev/null 2>&1
+          adb -s "$ANDROID_SERIAL" exec-out "su -c \"cd /data/data/com.powos.app/files && tar -cf - shell\"" | tar -xf - -C /ov || exit 1
+          apk=$(adb -s "$ANDROID_SERIAL" shell pm path com.powos.app | tr -d "\r" | head -1 | sed "s/^package://")
+          key=$(adb -s "$ANDROID_SERIAL" shell dumpsys package com.powos.app | tr -d "\r" | grep -m1 lastUpdateTime | tr -cd "0-9")
+          [ -n "$apk" ] && [ -n "$key" ] || exit 0
+          [ -f "/cache/$key.apk" ] || { rm -f /cache/*.apk; adb -s "$ANDROID_SERIAL" exec-out "su -c \"cat $apk\"" > "/cache/$key.apk.part" && mv "/cache/$key.apk.part" "/cache/$key.apk"; }
+          echo "$key" > /cache/current' \
         >/dev/null 2>&1 && [ -d "$ov/shell" ]; then
         ga=(--overrides "$ov/shell")
+        key=$(cat "$cache/current" 2>/dev/null || true)
+        if [ -n "$key" ] && [ -f "$cache/$key.apk" ]; then
+          [ -d "$cache/$key/shell" ] || { rm -rf "$cache"/[0-9]*/; mkdir -p "$cache/$key" && unzip -q -o "$cache/$key.apk" 'assets/shell/*' -d "$cache/$key" && mv "$cache/$key/assets/shell" "$cache/$key/shell"; }
+          [ -d "$cache/$key/shell" ] && ga+=(--installed "$cache/$key/shell")
+        fi
+        [ ${#ga[@]} -gt 2 ] || echo "push.sh: couldn't read the installed APK's shell - gating the committed shell + overrides + these files" >&2
       else
         echo "push.sh: couldn't pull the phone's overrides - gating the committed shell + these files only" >&2
       fi
