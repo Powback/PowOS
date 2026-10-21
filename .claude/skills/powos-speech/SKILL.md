@@ -63,7 +63,8 @@ gives `language`, `prompt`, `language`). `GET /health` returns `{"status":"ok",.
   files/speech-test/ in place of the mic and logs `test (mode): "<text>"`. It is NOT wired to a bridge call yet; add
   one (e.g. `speech.test`) before relying on it. Push the WAV with adb.sh, then `su -c cp` it into
   /data/data/com.powos.app/files/speech-test/ (chown to the app uid).
-- Double-start / BUSY check over CDP (devtools forward, see the handbook): post `[id,"speech.start","[false]"]` twice
-  via `window.PowosHost.postMessage(JSON.stringify(...))`, then `speech.cancel` within the 8 s eval timeout. That opens
-  the mic: only at idle >= 120 s.
+- Double-start / BUSY check over CDP with `tools/phone/cdp.sh eval home '<js>'` (the repo's: it forwards the devtools
+  socket and runs tools/phone/cdp.ts; don't use copies in job tmp or ~/.cache, they get pruned). The js:
+  `(async()=>{const h=window.PowosHost;for(const i of [1,2])h.postMessage(JSON.stringify([900000+i,"speech.start","[false]"]));await new Promise(r=>setTimeout(r,4000));h.postMessage(JSON.stringify([900003,"speech.cancel","[]"]));return "ok"})()`
+  (cancel within the 8 s eval timeout). That opens the mic: only at idle >= 120 s.
 - Unit tests: `targets/android/app/app/src/test/kotlin/dev/omalauncher/ui/SpeechDictationTest.kt` (the Dictation rules).
