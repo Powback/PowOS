@@ -19,9 +19,9 @@ import dev.omalauncher.system.HiddenApi
 internal class WindowBlur(
     /** A view of the window (its root): the window's surface is its view root's. */
     private val view: () -> View?,
-    private val maxRadiusDp: Float = 28f,
+    private val maxRadiusDp: Float = MAX_RADIUS_DP,
 ) {
-    constructor(window: Window, maxRadiusDp: Float = 28f) : this({ window.decorView }, maxRadiusDp)
+    constructor(window: Window, maxRadiusDp: Float = MAX_RADIUS_DP) : this({ window.decorView }, maxRadiusDp)
 
     private var radius = -1
     private var broken = false
@@ -46,8 +46,15 @@ internal class WindowBlur(
         }
     }
 
-    private companion object {
-        val setBlur: java.lang.reflect.Method by lazy {
+    companion object {
+        /**
+         * The compositor's radius at full openness, dp: the same as home's glass (theme.css --glass-blur-native,
+         * 140). Its blur is only ~0.15-0.3 of the radius it's given (measured on the phone, 2026-10-21): at the old
+         * 28 dp, home's widgets under the shade stayed readable - "sharp straight through".
+         */
+        const val MAX_RADIUS_DP = 140f
+
+        private val setBlur: java.lang.reflect.Method by lazy {
             SurfaceControl.Transaction::class.java.getMethod("setBackgroundBlurRadius", SurfaceControl::class.java, Int::class.javaPrimitiveType)
         }
     }
