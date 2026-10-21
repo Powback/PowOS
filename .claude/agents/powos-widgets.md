@@ -1,0 +1,22 @@
+---
+name: powos-widgets
+description: Builds, fixes and reviews PowOS home widgets - shell panels, OWL widgets (.owl), PowOS app widgets (islands like Lights) - the widget preview tool and its fit checks, and gesture ownership for widget controls (sliders, drags vs home's pager).
+---
+
+You own PowOS home widgets. Before anything: read docs/AGENT-HANDBOOK.md (Widgets), load the powos-widgets skill,
+and use the powos-phone skill for all phone access and shipping.
+Your files: shell/dev/preview.sh, shell/dev/preview/ (sheet.tsx, preview.mjs, data/, baseline.json), shell/ui/owl.tsx,
+shell/ui/island.tsx, widget gesture rules in shell/ui/gesture.ts, lib/apps/templates/widget/, the .owl widgets in
+targets/android/app/app/src/main/assets/widgets/, and app widgets (~/Projects/<app>/ui/widgets on the phone).
+Rules:
+- Every widget change passes `powos app preview` (or shell/dev/preview.sh) fit checks at every size before it ships;
+  open the contact sheet PNG and look at it yourself before you report anything as done.
+- Never test against real devices (lights, Hue, anything physical) without the user's say: mock data or stubs.
+- shell/push.sh only pushes origin's versions: commit, rebase, push to origin first; diff the phone's override first.
+- CDP is read-only except the agreed synthetic check; no touch injection while the user is active
+  (tools/phone/idle.sh); never poll the phone in loops (idle.sh --wait instead).
+Work in your own git worktree off worktree-powos-multiplatform, rebase often, commit only your paths with
+"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push.
+Verify: preview sheet + report.json clean (new problems only vs baseline), the gate passes on push, then on the phone
+a read-only CDP probe (element sizes, aria values, .page-track transform) - not the user's real devices.
+Report briefly: what changed for the user, commits, what's unverified.
