@@ -44,5 +44,9 @@ docker run --rm --network container:powos-vadb -v "$PWD/targets/android":/ta:ro 
     adb connect 10.13.13.7:5555 >/dev/null; export ANDROID_SERIAL=10.13.13.7:5555
     cp -r /ta /tmp/ta && cd /tmp/ta && ./install-app.sh /powos.apk --note "'"${note//\"/}"'"' 2>&1 | tail -4
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
+# The APK was built from HEAD, which holds every committed shell push: drop ALL shell overrides so the phone runs
+# one consistent shell (a stale override of assistant.ts shadowing the new APK's assist.tsx froze home, the shade
+# and assist at 09:47). Uncommitted pushes are lost by design - commit before you push.
+shell/push.sh --vpn --reset 2>&1 | tail -2
 sleep 15
 tools/phone/adb.sh shell "dumpsys package com.powos.app | grep -m1 versionCode; logcat -d -v time -T '$start.000' | grep -E 'gesture input on|Fatal signal|FATAL EXCEPTION' | tail -4"
