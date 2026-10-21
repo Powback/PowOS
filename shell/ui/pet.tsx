@@ -773,7 +773,8 @@ function PetLayer() {
       node.style.visibility = "";
     };
   }, [phys]);
-  // Its eyes follow a finger anywhere on home while it's awake (touches only: no frames without one).
+  // Its eyes go to a finger that touches home while it's awake - where it lands, not along a drag: following every move
+  // of a drag (the drawer pulled up, a page swiped) repainted it every frame of the drag (the drawer's biggest cost).
   useEffect(() => {
     if (!shown) return;
     const look = (e: PointerEvent) => {
@@ -781,12 +782,10 @@ function PetLayer() {
     };
     const away = () => body.current?.look(null, null);
     addEventListener("pointerdown", look, { capture: true, passive: true });
-    addEventListener("pointermove", look, { capture: true, passive: true });
     addEventListener("pointerup", away, { capture: true, passive: true });
     addEventListener("pointercancel", away, { capture: true, passive: true });
     return () => {
       removeEventListener("pointerdown", look, { capture: true });
-      removeEventListener("pointermove", look, { capture: true });
       removeEventListener("pointerup", away, { capture: true });
       removeEventListener("pointercancel", away, { capture: true });
     };

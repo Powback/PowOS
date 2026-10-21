@@ -92,8 +92,14 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
     const eye = { x: 0, y: 0, tx: 0, ty: 0 };
     let raf = 0;
     let still = 0;
+    // The last face/feet shift and eye offset written: a frame that changes nothing writes nothing (an attribute or a
+    // style written is a restyle and a repaint of the art, ~55/s while the pet rode the drawer's edge).
+    let lastShift = "";
+    let lastEyes = "";
+    let rimStill = 0;
     const step = () => {
       let moved = 0;
+      let rim = 0;
       // Centre of mass: the eyes and feet ride on it.
       let mx = 0;
       let my = 0;
@@ -114,21 +120,31 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
         p.vy = (p.vy + fy) * DAMP;
         p.x += p.vx;
         p.y += p.vy;
-        moved = Math.max(moved, Math.abs(p.vx), Math.abs(p.vy));
+        rim = Math.max(rim, Math.abs(p.vx), Math.abs(p.vy));
       }
+      moved = rim;
       const ex = eye.x + (eye.tx - eye.x) * 0.25;
       const ey = eye.y + (eye.ty - eye.y) * 0.25;
       moved = Math.max(moved, Math.abs(ex - eye.x), Math.abs(ey - eye.y));
       eye.x = ex;
       eye.y = ey;
-      draw(ps);
+      // The rim (the art's paths): drawn only while it moves - eyes looking alone don't repaint the body.
+      rimStill = rim < STILL ? rimStill + 1 : 0;
+      if (rimStill < 2) draw(ps);
       // The face rides the body's centre of mass (a squash takes it down with it); the eyes also look.
-      const shift = `translate(${(mx - CX).toFixed(2)} ${(my - CY).toFixed(2)})`;
-      face.current?.setAttribute("transform", shift);
-      feet.current?.setAttribute("transform", shift);
-      // Eyes: their own layer (an HTML box, composited) - viewBox units to its px.
+      const shift = `translate(${(mx - CX).toFixed(1)} ${(my - CY).toFixed(1)})`;
+      if (shift !== lastShift) {
+        lastShift = shift;
+        face.current?.setAttribute("transform", shift);
+        feet.current?.setAttribute("transform", shift);
+      }
+      // Eyes: their own layer (an HTML box, composited: a transform only re-composites) - viewBox units to its px.
       const k = (eyes.current?.offsetWidth ?? BODY) / BODY;
-      if (eyes.current) eyes.current.style.transform = `translate(${((mx - CX + eye.x) * k).toFixed(2)}px, ${((my - CY + eye.y) * k).toFixed(2)}px)`;
+      const et = `translate(${((mx - CX + eye.x) * k).toFixed(1)}px, ${((my - CY + eye.y) * k).toFixed(1)}px)`;
+      if (eyes.current && et !== lastEyes) {
+        lastEyes = et;
+        eyes.current.style.transform = et;
+      }
       still = moved < STILL ? still + 1 : 0;
       if (still >= 6 || document.hidden) {
         raf = 0;
