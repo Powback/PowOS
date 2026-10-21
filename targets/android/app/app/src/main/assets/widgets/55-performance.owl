@@ -55,8 +55,8 @@ widget "performance" {
       }
       Column {
         gap: 0; align: center
-        Text { text: pct == null ? "…" : "${round(pct)}%"; fontSize: clamp(round(dim * 0.24), 15, 34); bold: true; align: center }
-        Text { text: deg > 0 ? "${what} ${round(deg)}°" : what; style: label; align: center; maxLines: 1 }
+        Text { text: pct == null ? "…" : "${round(pct)}%"; fontSize: clamp(round(dim * 0.24), 15, 60); bold: true; align: center }
+        Text { text: deg > 0 ? "${what} ${round(deg)}°" : what; fontSize: clamp(round(dim * 0.09), 11, 20); color: muted; align: center; maxLines: 1 }
       }
     }
   }
@@ -72,24 +72,32 @@ widget "performance" {
   let short = rows != null && rows < 3
   let tall = rows != null && rows >= 4
   let across = cols != null && cols < 3 ? 1 : 2
-  let traced = narrow && rows != null && rows >= 5
-  // What sits under the gauges: the temperatures (3+ rows), the CPU's line (one gauge), the traces (5+ rows). Two
+  // What sits under the gauges: the temperatures (3+ rows), the CPU's line (one gauge), and the traces when the tile is
+  // tall enough for them under gauges as wide as it (the inner screen's tall tiles: not a gap down the middle). Two
   // gauges on a short tile have nothing under them, so they take the whole height instead of reserving a strip.
-  let below = (rows != null && rows >= 3 ? 64 : across == 1 ? 22 : 0) + (traced ? 110 : 0)
+  let baseBelow = rows != null && rows >= 3 ? 64 : across == 1 ? 22 : 0
+  let wDim = tileWidth == null ? 80 : (tileWidth - 24 - (across - 1) * 6) / across
+  let traced = narrow && tileHeight != null && tileHeight - 24 - baseBelow - min(wDim, 280) >= 120
+  let below = baseBelow + (traced ? 110 : 0)
   // The gauges as big as the tile allows (6 dp between two), so they fill the card instead of floating in it.
-  let dim = tileWidth == null || tileHeight == null ? 80 : clamp(min((tileWidth - 24 - (across - 1) * 6) / across, tileHeight - 24 - below), 44, 160)
+  // No cap but the tile: a 160 dp cap left the inner screen's big tiles a small gauge in a lot of glass.
+  let dim = tileWidth == null || tileHeight == null ? 80 : clamp(min(wDim, tileHeight - 24 - below), 44, 280)
   // Room left under the gauges on a short tile: the GPU clock and the skin temperature in it.
   // Only when a whole line fits (the column has no gaps, so the line needs just its own ~16 dp): never half-clipped.
   let spare = tileHeight != null && rows != null && rows < 3 && tileHeight - 24 - below - dim >= 18
   // Wide and tall: both gauges as big as half the width and about half the height allow.
   // Wide and short or 3 rows: the GPU's gauge the tile's full inner height, beside the traces.
-  let side = tileWidth == null || tileHeight == null ? (short ? 84 : 124) : clamp(min(tileHeight - 24, (tileWidth - 24) * 0.42), 72, 170)
-  let big = tileWidth == null || tileHeight == null ? 124 : clamp(min((tileWidth - 40) / 2, (tileHeight - 24) * 0.45), 90, 180)
+  let side = tileWidth == null || tileHeight == null ? (short ? 84 : 124) : clamp(min(tileHeight - 24, (tileWidth - 24) * 0.42), 72, 260)
+  let big = tileWidth == null || tileHeight == null ? 124 : clamp(min((tileWidth - 40) / 2, (tileHeight - 24) * 0.45), 90, 260)
 
   if narrow {
     Column {
       gap: 0; align: center; weight: 1
-      Spacer { weight: 1 }
+      // Centred when the gauges are all there is; with the temperatures under them, the gauges at the top and the
+      // temperatures at the foot - the room between, not above and below the whole.
+      if rows == null || rows < 3 {
+        Spacer { weight: 1 }
+      }
       Row {
         gap: 6; align: center
         Gauge { what: "gpu"; pct: gpu; deg: tGpu; dim: dim; tint: accent }
