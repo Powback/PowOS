@@ -32,7 +32,7 @@ rest. Keep the blur - make it cheap.
   carries glass (a surface or its ancestors), plus ResizeObserver on surfaces; `__glass.live.counts` for sends/s.
 - A widget whose value changes re-renders its tile: performance widget 2 s -> 5 s (budget: <= 1 update / 5 s).
 - The warm assist WebView in a hidden session window counted itself visible: WebView.onPause in onHide.
-- The app ran uninterpreted-JIT after every install (no profile, dexopt status=verify): install-app.sh installs
+- The app ran interpreted after every install (no profile, dexopt status=verify): install-app.sh installs
   with pm.dexopt.install=speed (HACK until a baseline profile).
 - plasmashell behind Android's home: powos-panel-responsive polled it with evaluateScript every 3 s (now RandR
   events); plasmashell itself is frozen 15 s after PowOS goes off screen (powos-sleep-gui -> sleepd
