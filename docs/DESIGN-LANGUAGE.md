@@ -96,6 +96,25 @@ instead: deploy notes go into a single "PowOS · updates" group.
   A tap unfolds it in place without a jump, and a tap on its head folds it again.
 - **Swipes:** swiping a folded stack dismisses the whole group. In an unfolded group, a swipe dismisses one card.
 
+### Control center: eight tiles
+
+- **Header:** the time and date, and the settings gear.
+- **Sliders:** two slim ones.
+  - Brightness has its "auto" as a small "A" at the end.
+  - Volume's icon cycles silent, vibrate and ring.
+- **Eight tiles,** one shape each: a rounded tile in the accent colour when on. Tapping a tile does its first
+  member's action; the chevron or a long press opens a sheet with all of its members.
+  - Internet: wi-fi, mobile data, airplane, hotspot.
+  - Connect: bluetooth, NFC, quick share, cast, Link to Windows.
+  - Torch.
+  - Focus.
+  - Display: dark mode, eye comfort, auto-rotate.
+  - Battery saver.
+  - Location.
+  - Capture: screenshot, screen record.
+- **All tiles:** a page for every other tile. Nothing is ever lost; the edit pencil lives on that page.
+- **What's behind:** home's content fades out as the panel comes down, so nothing shows through it.
+
 ## 4. Colour
 
 Colours come from the active theme only: `--color-*`, `--glass-*`, `--soft-fill`. No raw colours in

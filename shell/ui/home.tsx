@@ -11,7 +11,7 @@ import { signal } from "@preact/signals";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
-import { drawerDragging, drawerOpen, followOpenness, homeGestures } from "./gesture.ts";
+import { drawerDragging, drawerOpen, followNotif, followOpenness, homeGestures } from "./gesture.ts";
 import { Carried, Pages, startCarry } from "./grid.tsx";
 import { carriedApp, shownLess } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
@@ -194,7 +194,7 @@ function Dock() {
        * Two pages side by side, swiped between by the browser's own scroll snapping (on the compositor): the pinned
        * apps, then the recent ones. The dots below follow when a scroll settles.
        */}
-      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p ref={followOpenness}>
+      <div class={`dock ${ghost && carried ? "dock-ghost" : ""} ${aim ? "aimed" : ""} ${paged ? "paged" : ""}`} data-p data-q ref={(n) => (followOpenness(n), followNotif(n))}>
         <div class="dock-pages" ref={pagesEl}>
           {(!ghost || carried) && (
             <div
@@ -238,7 +238,9 @@ export function Home() {
         <div
           class={`home ${footBelow.value ? "pill-below" : ""} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${carriedApp(carry.value) ? "carry-app" : ""}`}
         >
-          <div class="stage">
+          {/* data-q: it fades out as the notification panel / control center comes down (shell.css) - nothing of home
+              shows through them. */}
+          <div class="stage" data-q ref={followNotif}>
             <div class="home-content" data-p ref={followOpenness}>
               <Pages />
             </div>

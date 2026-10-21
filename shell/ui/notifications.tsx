@@ -172,8 +172,12 @@ function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, cl
       }}
     >
       <div class="notif-head">
-        {/* No icon (PowOS's own notifications - its app isn't in the drawer): no placeholder square, just the name. */}
-        {n.icon && <img class="notif-icon" src={n.icon} alt="" />}
+        {/* PowOS's own (its app isn't in the drawer, no icon from the host): PowOS's mark; another without one: none. */}
+        {n.icon ? (
+          <img class="notif-icon" src={n.icon} alt="" />
+        ) : POWOS.has((n as GroupedNotification).pkg ?? "") || POWOS.has(n.app) ? (
+          <img class="notif-icon" src="./icons/powos.svg" alt="" />
+        ) : null}
         <span class="notif-app">{name ?? n.app}</span>
         {more > 0 && <span class="notif-more">+{more}</span>}
         <span class="notif-time muted">{ago(n.time)}</span>

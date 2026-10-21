@@ -6,6 +6,7 @@
  * pull, the finger following it and the swipe up to shut it are the panel's own (gesture.ts).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import type { ComponentChildren } from "preact";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
@@ -36,9 +37,6 @@ const GLASSES_ID = "powos.glasses";
 /** Held this long (ms), a tile opens its page instead. */
 const HOLD = 450;
 
-/** The big cards on top, as OnePlus's. */
-const CARDS = ["wifi", "cell"];
-
 /** Tiles that leave the panel (a page, an app, a screenshot of what's under it): it shuts first. */
 const LEAVES = new Set([
   "screenshot",
@@ -55,7 +53,6 @@ const LEAVES = new Set([
 const NO_PAGE = new Set(["lockscreen", "screenshot"]);
 
 const RINGER = ["silent", "vibrate", "ring"];
-const RINGER_ICON: IconName[] = ["bellOffOutline", "vibrate", "bellRingOutline"];
 
 /** Each tile's icon, off and on (one name: the same both ways). */
 const TILE_ICONS: Record<string, IconName | [IconName, IconName]> = {
@@ -472,17 +469,24 @@ function EditGrid({ shown, hidden }: { shown: QuickTile[]; hidden: QuickTile[] }
   );
 }
 
-/** A slider sending its value at most once a frame while it moves. */
+/**
+ * A slider sending its value at most once a frame while it moves. Its icon can be a button of its own ([onIcon]: the
+ * volume's cycles silent / vibrate / ring), and something can sit at its end ([end]: the brightness's auto "A").
+ */
 export function Slider({
   name,
   value,
   label,
   icon,
+  onIcon,
+  end,
 }: {
   name: "brightness" | "volume";
   value: number;
   label: string;
   icon: IconName;
+  onIcon?: () => void;
+  end?: ComponentChildren;
 }) {
   const [local, setLocal] = useState<number | null>(null);
   const frame = useRef(0);
@@ -498,12 +502,10 @@ export function Slider({
   };
   const shown = local ?? value;
   return (
-    <label class="cc-slider" style={{ "--v": String(shown) }} aria-label={label}>
-      <span class="cc-slider-icon">
-        <Icon name={icon} />
-      </span>
+    <div class="cc-slider" style={{ "--v": String(shown) }}>
       <input
         type="range"
+        aria-label={label}
         min={0}
         max={1000}
         value={Math.round(shown * 1000)}
@@ -514,7 +516,17 @@ export function Slider({
         }}
         onChange={() => setLocal(null)}
       />
-    </label>
+      {onIcon ? (
+        <button type="button" class="cc-slider-icon tap" aria-label={label} onClick={onIcon}>
+          <Icon name={icon} />
+        </button>
+      ) : (
+        <span class="cc-slider-icon">
+          <Icon name={icon} />
+        </span>
+      )}
+      {end}
+    </div>
   );
 }
 
@@ -580,6 +592,123 @@ function MediaCard() {
 // A tile opened its activity or dialog (TileHost): the panel goes, as SystemUI's does.
 powos.on("qs.collapse", () => shut());
 
+/**
+ * The control center's eight tiles (the main view): each one shape - a rounded tile, the accent when on - for one thing
+ * or a few that belong together. A tap does the first member's (switches it, or runs it); the chevron or a long press
+ * opens the group's sheet with all of its members. A member the phone doesn't have is left out; a group with none, too.
+ * Everything else is on the all-tiles page, never gone.
+ */
+interface Group {
+  id: string;
+  label: string;
+  icon: IconName;
+  /** Tile ids, or "app:<package>" for another app's tile. The first one present is the tap's. */
+  members: string[];
+}
+const GROUPS: Group[] = [
+  { id: "internet", label: "internet", icon: "wifi", members: ["wifi", "cell", "airplane", "hotspot"] },
+  {
+    id: "connect",
+    label: "connect",
+    icon: "bluetooth",
+    members: ["bt", "nfc", "app:com.oneplus.oshare", "app:com.oplus.linker", "app:com.microsoft.appmanager"],
+  },
+  { id: "torch", label: "torch", icon: "flashlight", members: ["flashlight"] },
+  { id: "focus", label: "focus", icon: "minusCircleOutline", members: ["dnd"] },
+  { id: "display", label: "display", icon: "themeLightDark", members: ["darkmode", "app:com.oplus.eyeprotect", "rotation"] },
+  { id: "battery", label: "battery", icon: "leaf", members: ["battery"] },
+  { id: "location", label: "location", icon: "mapMarker", members: ["location"] },
+  { id: "capture", label: "capture", icon: "cellphoneScreenshot", members: ["screenshot", "screenrecord"] },
+];
+
+const member = (tiles: QuickTile[], m: string) => (m.startsWith("app:") ? tiles.find((t) => t.app === m.slice(4)) : tiles.find((t) => t.id === m));
+
+/** What a group's tile says under its name: Internet "Home-WiFi · 5G" / "airplane", the first member's otherwise. */
+function groupState(g: Group, ts: QuickTile[]): { on: boolean; detail: string } {
+  const by = (id: string) => ts.find((t) => t.id === id);
+  if (g.id === "internet") {
+    if (by("airplane")?.on) return { on: true, detail: "airplane" };
+    const wifi = by("wifi");
+    const cell = by("cell");
+    const parts = [wifi?.on ? wifi.detail || "wi-fi" : null, cell?.on ? cell.detail || "data" : null].filter(Boolean);
+    return { on: !!wifi?.on, detail: parts.length ? parts.join(" · ") : "off" };
+  }
+  const first = ts[0];
+  const onCount = ts.filter((t) => t.on).length;
+  if (g.id === "capture") return { on: false, detail: "" };
+  if (g.id === "battery") return { on: !!first.on, detail: first.on ? "saver on" : "saver off" };
+  if (ts.length > 1) return { on: !!first.on, detail: onCount ? ts.filter((t) => t.on).map((t) => t.label.toLowerCase()).join(" · ") : "off" };
+  return { on: !!first.on, detail: first.on == null ? "" : first.on ? "on" : "off" };
+}
+
+/** The group whose sheet is open (its members as tiles, under the eight), and the all-tiles page. */
+const sheet = signal<string | null>(null);
+const allTiles = signal(false);
+
+function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
+  const first = ts[0];
+  const press = usePress(first);
+  const timer = useRef(0);
+  const held = useRef(false);
+  const st = groupState(g, ts);
+  const several = ts.length > 1;
+  const open = sheet.value === g.id;
+  return (
+    <button
+      type="button"
+      class={`cc-tile ${st.on ? "on" : ""} ${open ? "sheet-open" : ""}`}
+      aria-label={`${g.label}: ${st.detail}`}
+      onPointerDown={() => {
+        held.current = false;
+        timer.current = window.setTimeout(() => {
+          held.current = true;
+          if (several) sheet.value = open ? null : g.id;
+          else press.onPointerDown();
+        }, HOLD);
+      }}
+      onPointerUp={() => clearTimeout(timer.current)}
+      onPointerCancel={() => clearTimeout(timer.current)}
+      onPointerLeave={() => clearTimeout(timer.current)}
+      onContextMenu={(e: Event) => e.preventDefault()}
+      onClick={() => {
+        if (held.current) return;
+        press.onClick();
+      }}
+    >
+      <span class="cc-icon">
+        <Icon name={g.id === "internet" && !st.on ? "wifiOff" : g.id === "torch" && !st.on ? "flashlightOff" : g.icon} />
+        {several && (
+          <span
+            class="cc-more"
+            role="button"
+            aria-label={`${g.label}: all`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              sheet.value = open ? null : g.id;
+            }}
+          >
+            <Icon name="chevronRight" />
+          </span>
+        )}
+      </span>
+      <span class="cc-label">{g.label}</span>
+      {st.detail && <span class="cc-detail">{st.detail}</span>}
+    </button>
+  );
+}
+
+/** A group's sheet: its members, each its own tile (a tap switches it, a long press its page). */
+function Sheet({ ts }: { ts: QuickTile[] }) {
+  return (
+    <div class="cc-sheet cc-grid">
+      {ts.map((t) => (
+        <Tile key={t.id} t={t} />
+      ))}
+    </div>
+  );
+}
+
 export function ControlCenter() {
   // Shown: other apps' tiles listen (their state kept current), until it's shut or turned back to notifications.
   const open = notifOpen.value;
@@ -593,76 +722,106 @@ export function ControlCenter() {
       powos.qs.listening(false);
       clearInterval(timer);
       picking.value = false;
+      sheet.value = null;
+      allTiles.value = false;
+      editing.value = false;
     };
   }, [open]);
   const q = quick.value;
   const tiles = q.tiles ?? [];
-  const cards = CARDS.map((id) => tiles.find((t) => t.id === id)).filter((t): t is QuickTile => !!t);
-  // Remote input's tile joins the phone's: a layout kept before it was there gets it at the end (arranged's new tiles).
-  const { shown, hidden } = arranged([...tiles.filter((t) => !CARDS.includes(t.id)), remoteTile(), ...(glasses.value ? [glassesTile()] : [])]);
+  // Remote input's and the glasses' tiles join the phone's: a layout kept before they were there gets them at the end.
+  const every = [...tiles, remoteTile(), ...(glasses.value ? [glassesTile()] : [])];
+  const { shown, hidden } = arranged(every);
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
+  const groups = GROUPS.map((g) => ({ g, ts: g.members.map((m) => member(tiles, m)).filter((t): t is QuickTile => !!t) })).filter(
+    (x) => x.ts.length > 0,
+  );
+  // The user's arrangement orders the eight too, by where their first members are in it.
+  const pos = (id: string) => {
+    const i = shown.findIndex((t) => t.id === id);
+    return i < 0 ? 999 : i;
+  };
+  if (layout.value.order.length) groups.sort((a, b2) => pos(a.ts[0].id) - pos(b2.ts[0].id));
+  const open$ = groups.find((x) => x.g.id === sheet.value);
+  if (allTiles.value) {
+    return (
+      <div class="cc">
+        <div class="notif-bar">
+          <button type="button" class="cc-back" onClick={() => ((allTiles.value = false), (editing.value = false))}>
+            <Icon name="chevronLeft" />
+            <span>all tiles</span>
+          </button>
+          <span class="notif-actions icons">
+            <button
+              type="button"
+              aria-label={editing.value ? "done" : "edit"}
+              class={editing.value ? "on" : ""}
+              onClick={() => (editing.value = !editing.value)}
+            >
+              <Icon name={editing.value ? "check" : "pencilOutline"} />
+            </button>
+          </span>
+        </div>
+        {editing.value ? (
+          <EditGrid shown={shown} hidden={hidden} />
+        ) : (
+          <div class="cc-grid">
+            {shown.map((t) =>
+              t.id === REMOTE_ID ? <RemoteTile key={t.id} t={t} /> : t.id === GLASSES_ID ? <GlassesTile key={t.id} t={t} /> : <Tile key={t.id} t={t} />,
+            )}
+          </div>
+        )}
+        {!editing.value && <RemotePick />}
+      </div>
+    );
+  }
   return (
     <div class="cc">
       <div class="notif-bar">
         <Clock />
         <span class="notif-actions icons">
-          <button
-            type="button"
-            aria-label={editing.value ? "done" : "edit"}
-            class={editing.value ? "on" : ""}
-            onClick={() => (editing.value = !editing.value)}
-          >
-            <Icon name={editing.value ? "check" : "pencilOutline"} />
-          </button>
-          <button type="button" aria-label="notifications" onClick={() => (panel.value = "notifications")}>
-            <Icon name="bellOutline" />
-          </button>
-          {/* OnePlus's own, for what PowOS's doesn't have yet. */}
-          <button type="button" aria-label="system panel" onClick={() => powos.system.notifications(true)}>
-            <Icon name="android" />
-          </button>
           <button type="button" aria-label="settings" onClick={() => (shut(), powos.qs.open("settings"))}>
             <Icon name="cogOutline" />
           </button>
         </span>
       </div>
-      <div class="cc-cards">
-        {cards.map((t) => (
-          <Tile key={t.id} t={t} big />
-        ))}
-      </div>
       <div class="cc-sliders">
-        <Slider name="brightness" value={b.value} label="brightness" icon="brightness6" />
-        <button
-          type="button"
-          aria-label="auto brightness"
-          class={`cc-chip ${b.auto ? "on" : ""}`}
-          onClick={() => powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)}
-        >
-          <Icon name="brightnessAuto" />
-        </button>
-        <Slider name="volume" value={v.value} label="volume" icon={v.value > 0 ? "volumeHigh" : "volumeOff"} />
-        <button
-          type="button"
-          aria-label={RINGER[v.ringer] ?? "ring"}
-          class="cc-chip"
-          onClick={() => powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)}
-        >
-          <Icon name={RINGER_ICON[v.ringer] ?? "bellRingOutline"} />
-        </button>
+        <Slider
+          name="brightness"
+          value={b.value}
+          label="brightness"
+          icon="brightness6"
+          end={
+            <button
+              type="button"
+              aria-label="auto brightness"
+              class={`cc-auto ${b.auto ? "on" : ""}`}
+              onClick={() => powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)}
+            >
+              A
+            </button>
+          }
+        />
+        <Slider
+          name="volume"
+          value={v.value}
+          label={`volume · ${RINGER[v.ringer] ?? "ring"}`}
+          icon={v.ringer === 0 ? "bellOffOutline" : v.ringer === 1 ? "vibrate" : v.value <= 0 ? "volumeOff" : "volumeHigh"}
+          onIcon={() => powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)}
+        />
       </div>
       <MediaCard />
-      {editing.value ? (
-        <EditGrid shown={shown} hidden={hidden} />
-      ) : (
-        <div class="cc-grid">
-          {shown.map((t) =>
-            t.id === REMOTE_ID ? <RemoteTile key={t.id} t={t} /> : t.id === GLASSES_ID ? <GlassesTile key={t.id} t={t} /> : <Tile key={t.id} t={t} />,
-          )}
-        </div>
-      )}
-      {!editing.value && <RemotePick />}
+      <div class="cc-grid cc-main">
+        {groups.map(({ g, ts }) => (
+          <GroupTile key={g.id} g={g} ts={ts} />
+        ))}
+      </div>
+      {open$ && <Sheet ts={open$.ts} />}
+      <button type="button" class="cc-all" onClick={() => ((sheet.value = null), (allTiles.value = true))}>
+        all tiles
+        <Icon name="chevronRight" />
+      </button>
     </div>
   );
 }

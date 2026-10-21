@@ -882,6 +882,8 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   initial-value: 0;
 }
 [data-q] { --q: 0; transition: --q 280ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+/* Home's content goes as the notification panel / control center comes down (with the finger): nothing shows through. */
+.home > :is(.stage, .bar, .dock)[data-q] { opacity: calc(1 - var(--q)); }
 .home.dragging [data-q] { transition: none; }
 .notif-scrim {
   position: fixed;
@@ -1184,7 +1186,6 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 /* The control center (control.tsx): in the notification panel's place - the big Wi-Fi and data cards, the sliders, the tiles. */
 .cc { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 6px; }
 .cc-clock { font-size: var(--text-small); color: var(--color-foreground); }
-.cc-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
 .cc-tile {
   display: flex;
@@ -1210,14 +1211,14 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-label { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; }
 .cc-slider .cc-label, .cc-tile.big .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
 .cc-detail { color: var(--color-muted); font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cc-sliders { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.cc-sliders { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .cc-slider {
   position: relative;
   display: flex;
   align-items: center;
-  height: 44px;
-  border-radius: calc(var(--radius) * 1.5);
-  border: var(--frame) solid var(--line);
+  height: 36px;
+  border-radius: 18px;
+  border: 0;
   background: linear-gradient(90deg, var(--color-accent) calc(var(--v) * 100%), var(--control-fill) 0);
   overflow: hidden;
   box-shadow: var(--lift);
@@ -1269,45 +1270,51 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .notif-actions.icons button { width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--color-foreground); border-radius: 50%; }
 .notif-actions.icons button.on { color: var(--color-accent); }
 .notif-actions.icons button:active { background: var(--color-surface); }
-.cc-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 12px 6px; }
+/*
+ * The control center's tiles (control.tsx): one shape - a rounded tile, its icon over its name (and a state line), the
+ * accent when on. Four to a row; the eight on the main view, all of them on the all-tiles page.
+ */
+.cc-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .cc-grid .cc-tile {
-  min-height: 0;
-  padding: 0;
-  background: none;
+  position: relative;
+  min-height: 72px;
+  padding: 10px 10px 8px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 3px;
   border: 0;
-  align-items: center;
-  gap: 6px;
-  text-align: center;
   color: var(--color-foreground);
+  transition: background-color 150ms ease, color 150ms ease;
 }
-.cc-grid .cc-tile .cc-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  background: var(--control-fill);
-  border: var(--frame) solid var(--line);
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-  box-shadow: var(--lift);
-}
-.cc-grid .cc-tile.on .cc-icon { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); }
-.cc-grid .cc-tile.on { background: none; color: var(--color-foreground); }
-.cc-grid .cc-tile .cc-label {
-  display: block;
-  width: 100%;
-  font-size: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--color-muted);
-}
-.cc-cards .cc-tile { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
-.cc-cards .cc-tile .cc-icon { font-size: 24px; display: flex; }
+.cc-grid .cc-tile .cc-icon { display: flex; align-items: center; width: 100%; font-size: 22px; margin-bottom: 4px; }
+.cc-grid .cc-tile .cc-label { display: block; width: 100%; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-grid .cc-tile .cc-detail { display: block; width: 100%; font-size: 10px; }
+.cc-grid .cc-tile.on { background: var(--color-accent); color: var(--color-background); }
+.cc-grid .cc-tile.on .cc-detail { color: var(--color-background); }
+/* A group's chevron: its sheet, with all its members. */
+.cc-more { margin-left: auto; display: flex; font-size: 18px; opacity: 0.8; padding: 2px; margin-right: -4px; }
+.cc-tile.sheet-open .cc-more { transform: rotate(90deg); }
+.cc-sheet { padding: 8px; border-radius: calc(var(--radius) * 1.5); background: var(--soft-fill); animation: menu-in 120ms ease-out; }
+.cc-sheet .cc-tile { min-height: 64px; }
+.cc-all { display: flex; align-items: center; justify-content: center; gap: 2px; padding: 6px; font: var(--text-small) var(--font); color: var(--color-muted); background: none; border: 0; }
+.cc-back { display: flex; align-items: center; gap: 4px; font: var(--text-small) var(--font); color: var(--color-foreground); background: none; border: 0; padding: 4px 0; }
 .cc-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.cc-slider-icon { position: absolute; left: 12px; font-size: 20px; color: var(--color-foreground); mix-blend-mode: difference; pointer-events: none; display: flex; }
+.cc-slider-icon { position: absolute; left: 10px; font-size: 18px; color: var(--color-foreground); mix-blend-mode: difference; pointer-events: none; display: flex; }
+/* The volume's icon is a button: silent, vibrate, ring. */
+.cc-slider-icon.tap { pointer-events: auto; background: none; border: 0; padding: 4px; left: 6px; }
+/* The brightness's auto: a small "A" at its end, the accent when on. */
+.cc-auto {
+  position: absolute;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  border: 0;
+  font: bold 12px var(--font);
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+}
+.cc-auto.on { background: var(--color-background); color: var(--color-accent); }
 .cc-chip { display: flex; align-items: center; justify-content: center; font-size: 20px; min-width: 52px; }
 .cc-transport button { display: flex; align-items: center; justify-content: center; font-size: 22px; }
 /* Remote input's tile held (control.tsx's RemotePick): its side, USB or Bluetooth, picked under the tiles. */
