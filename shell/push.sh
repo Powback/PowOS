@@ -29,13 +29,34 @@ for a in "$@"; do [ "$a" = --force ] && force=1; done
 if [ "${1:-}" = "--vpn" ]; then
   shift
   addr=${POWOS_PHONE_ADDR:-10.13.13.7:5555}
-  # The gate here, on the Mac (docker and git are here, not in the adb container); the phone's overrides aren't
-  # reachable from here, so it checks the committed shell + the files pushed.
+  # The gate here, on the Mac (docker and git are here, not in the adb container): the committed shell + the phone's
+  # current overrides (pulled through the adb container, as the local path pulls them) + the files pushed - the shell
+  # the phone will run. Without the overrides it checked a shell the phone doesn't have (2026-10-21: a push that passed
+  # was followed by a home error). Overrides that can't be pulled: the committed shell + the files, as before.
   if [ -z "${POWOS_GATE_DONE:-}" ] && [[ " $* " != *" --reset "* ]] && [[ " $* " != *" --errors "* ]]; then
     gf=(); for a in "$@"; do case "$a" in --*) ;; *) [ -f "$a" ] && gf+=("$a") ;; esac; done
-    if [ ${#gf[@]} -gt 0 ] && ! dev/gate.sh "${gf[@]}"; then
-      [ -n "$force" ] || { echo "push.sh: refused - the gate failed (above). Fix it, or --force to push anyway." >&2; exit 1; }
-      echo "push.sh: the gate failed - pushing anyway (--force)" >&2
+    if [ ${#gf[@]} -gt 0 ]; then
+      # Under $HOME: Colima mounts only the home folder into containers.
+      mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate"
+      ov=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/vpn-overrides.XXXXXX")
+      ga=()
+      if docker run --rm --network container:wireguard -v "$HOME/.android:/root/.android" -v "$ov:/ov" \
+        -e ANDROID_SERIAL="$addr" android-app-dev-android-builder:latest bash -c \
+        'adb connect "$ANDROID_SERIAL" >/dev/null 2>&1; adb -s "$ANDROID_SERIAL" exec-out "su -c \"cd /data/data/com.powos.app/files && tar -cf - shell\"" | tar -xf - -C /ov' \
+        >/dev/null 2>&1 && [ -d "$ov/shell" ]; then
+        ga=(--overrides "$ov/shell")
+      else
+        echo "push.sh: couldn't pull the phone's overrides - gating the committed shell + these files only" >&2
+      fi
+      set +e
+      dev/gate.sh ${ga[@]+"${ga[@]}"} "${gf[@]}"
+      gate=$?
+      set -e
+      rm -rf "$ov"
+      if [ $gate -ne 0 ]; then
+        [ -n "$force" ] || { echo "push.sh: refused - the gate failed (above). Fix it, or --force to push anyway." >&2; exit 1; }
+        echo "push.sh: the gate failed - pushing anyway (--force)" >&2
+      fi
     fi
   fi
   exec docker run --rm -i --network container:wireguard -v "$HOME/.android:/root/.android" -v "$PWD:/shell" \
