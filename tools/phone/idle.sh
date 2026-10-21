@@ -13,7 +13,25 @@
 # (conservative). The watcher is ephemeral, not a service: it exits by itself when idle.sh hasn't asked for 30 min
 # (each call touches /data/local/tmp/powos-touchmon.ask), so nothing stays running on the phone between sessions.
 # Not covered: a Bluetooth gamepad (no IRQ of its own) - check act= too if a pad is connected.
+#
+#   tools/phone/idle.sh --wait IDLE_S MAX_S   one call that RETURNS when the phone is free: the screen off
+#        (Asleep/Dozing), or Awake with no touch for IDLE_S; exit 1 after MAX_S without that. The waiting runs ON THE
+#        PHONE (a local 5 s check) over one held adb connection - no VPN round trip per check. Agents never poll the
+#        phone in loops (docs/AGENT-HANDBOOK.md); this is what to call instead.
 here=$(dirname "$0")
+if [ "${1:-}" = "--wait" ]; then
+  need=${2:-60}; max=${3:-600}
+  "$0" >/dev/null   # starts the touch watcher if it isn't running
+  out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $max )); while [ \$(date +%s) -lt \$end ]; do
+      touch /data/local/tmp/powos-touchmon.ask
+      w=\$(dumpsys power | grep -m1 mWakefulness= | cut -d= -f2)
+      t=\$(( \$(date +%s) - \$(cat /data/local/tmp/powos-lasttouch 2>/dev/null || date +%s) ))
+      case \$w in Asleep|Dozing) echo idle=\$t screen=\$w; exit 0 ;; Awake) [ \$t -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
+      sleep 5
+    done; echo timeout" 2>/dev/null | tr -d '\r' | tail -1)
+  echo "$out"
+  case "$out" in idle=*) exit 0 ;; *) exit 1 ;; esac
+fi
 "$here/adb.sh" shell 'cat > /data/local/tmp/powos-touchmon.sh' <<'EOF'
 # powos-touchmon.sh: every 2 s, the epoch of the last touch-panel IRQ count change -> /data/local/tmp/powos-lasttouch
 # (started by tools/phone/idle.sh on the Mac; stop: pkill -f powos-touchmon.sh)

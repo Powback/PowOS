@@ -96,7 +96,12 @@ for (one line each).
 - Review images (contact sheets, before/after, pet steps) go to the PHONE before you push, so the manager can look
   first: /home/powos/design-qa/ (pet: /home/powos/pet-review/) inside PowOS =
   /data/powos/root/home/powos/... (push with tools/phone/adb.sh, then `su -c cp` + chown 10359:10359).
-- Poll the phone sparingly: >= 60 s between idle/state checks, and batch commands into ONE adb call (each call is a
-  new VPN connection; agents' adb polling was most of the phone's WireGuard traffic and CPU).
+- NEVER poll the phone in a loop (no 10 s / 60 s adb checks, no "until idle" loops from the Mac): each call is a new VPN
+  connection and keeps the phone's radio awake - agents' polling was most of its WireGuard traffic and CPU, and the
+  battery ran flat on 2026-10-21 with several agents polling all afternoon. Instead, wait for an EVENT: comms mail
+  (`powos comms watch`, wait_for_message), a push/ship result, shell-error mail; or make ONE check when you need it.
+  Waiting for the phone to be free is `tools/phone/idle.sh --wait IDLE_S MAX_S` (one held call; the waiting runs on the
+  phone) - ship-apk uses it. Batch several commands into one adb call. Not a battery-based behaviour: the product and
+  your work never change with the battery level; this is about not wasting the phone.
 - Commit before you push a shell file: an APK install resets all shell overrides (only committed work survives).
 - The assist overlay's circle-to-select + crop flow is core, never "chrome": never remove it.

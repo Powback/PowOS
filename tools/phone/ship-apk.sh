@@ -51,11 +51,14 @@ if [ -z "$now" ]; then
     # A verifier's measurement window has priority (an install restarts the app mid-run and voids it):
     # ~/.cache/powos-verify.lock (mkdir; who/why inside) holds the install until it's gone.
     if [ -d "$HOME/.cache/powos-verify.lock" ]; then sleep 15; waited=$((waited + 15)); continue; fi
-    i2=$(tools/phone/idle.sh); s=${i2#idle=}; s=${s%% *}
-    # Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s without a touch; anything else (an empty or
-    # unreadable state) = NOT safe - it installed over an active user once when the state came back empty.
-    case "$i2" in *screen=Asleep*|*screen=Dozing*) ok=1; break ;; *screen=Awake*) [ "$s" -ge 60 ] && { ok=1; break; } ;; esac
-    sleep 15; waited=$((waited + 15))
+    # One held call that returns when the phone is free (the waiting runs on the phone: no poll over the VPN), in
+    # 10-min chunks so the verify lock above is seen. Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s
+    # without a touch; anything else (an empty or unreadable state) = NOT safe - it installed over an active user once
+    # when the state came back empty.
+    chunk=$(( ${SHIP_WAIT_MIN:-60} * 60 - waited )); [ $chunk -gt 600 ] && chunk=600
+    i2=$(tools/phone/idle.sh --wait 60 $chunk)
+    case "$i2" in *screen=Asleep*|*screen=Dozing*|*screen=Awake*) ok=1; break ;; esac
+    waited=$((waited + chunk))
   done
   echo "ship-apk: $i2"
   [ -n "$ok" ] || { echo "ship-apk: the user stayed active for ${SHIP_WAIT_MIN:-60} min - NOT installing (APK built, kept)"; exit 4; }

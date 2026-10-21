@@ -9,6 +9,8 @@ Tools (repo `tools/phone/`):
 - `adb.sh <args>` - adb to the phone from any session (files under $HOME only).
 - `root.sh <script>` - run a script as root inside PowOS.
 - `idle.sh` - `idle=<s> screen=<state>`; drive the phone only at idle>=120 and screen=Awake; never wake it.
+  To WAIT for that, `idle.sh --wait 120 MAX_S` (one held call, the wait runs on the phone) - never a polling loop from
+  the Mac (docs/AGENT-HANDBOOK.md).
 - `ship-apk.sh --note "..."` - the ONLY way to build+install the APK (lock, clean tree, idle wait, verify).
 Shell files: `shell/push.sh --vpn --note "..." <files>` (gate must pass; check the phone's overrides first).
 
