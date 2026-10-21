@@ -40,8 +40,9 @@ and the latest start wins.
 - An ended recording ends the session: `Dictation.goOn(feedDone)` (a fallback after the release doesn't listen again on
   an ended pipe).
 - ASI reading PowOS's recording (`EXTRA_AUDIO_SOURCE`) ends each utterance with ERROR_CLIENT (5), not results. A CLIENT
-  error after words counts as a segment's end: the partial is committed, a new recognizer is used, and no retry is
-  spent. Before this fix the replay kept only the last sentence.
+  error after words counts as a segment's end: the partial is committed, and the SAME recognizer listens again 250 ms
+  later, with no retry spent. A new recognizer right after destroying the old got SERVER_DISCONNECTED (11) on every
+  listen. Before this fix the replay kept only the last sentence.
 - stt.pow answers HTTP 500 to audio with no speech (silence, clips under ~0.5 s): GpuSession pads clips to 1 s and
   reads a 500 as "nothing heard", failing over only after 3 in a row (a `HACK:`; the real fix is in stt-batch).
 - Release with GPU: the last ~300 ms before release can be missing (partials are chunked).
