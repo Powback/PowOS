@@ -172,7 +172,8 @@ function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, cl
       }}
     >
       <div class="notif-head">
-        {n.icon ? <img class="notif-icon" src={n.icon} alt="" /> : <span class="notif-icon blank" />}
+        {/* No icon (PowOS's own notifications - its app isn't in the drawer): no placeholder square, just the name. */}
+        {n.icon && <img class="notif-icon" src={n.icon} alt="" />}
         <span class="notif-app">{name ?? n.app}</span>
         {more > 0 && <span class="notif-more">+{more}</span>}
         <span class="notif-time muted">{ago(n.time)}</span>

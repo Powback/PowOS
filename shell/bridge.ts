@@ -777,7 +777,7 @@ function mock(): Bridge {
         {
           key: "2",
           app: "Gmail",
-          icon: null,
+          icon: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><rect width="18" height="18" rx="5" fill="#d44"/><text x="9" y="13" font-size="11" text-anchor="middle" fill="#fff" font-family="sans-serif">M</text></svg>'),
           title: "Your order has shipped",
           text: "Track your package: it arrives Thursday.",
           time: now - 3600,

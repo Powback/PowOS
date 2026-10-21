@@ -931,7 +931,6 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
 .notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }
 .notif-icon { width: 18px; height: 18px; border-radius: 5px; }
-.notif-icon.blank { background: var(--color-border); }
 .notif-app { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); }
 .notif-title { margin-top: 5px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notif-text {
