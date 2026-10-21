@@ -175,7 +175,15 @@
 .pill.sending .grow { color: var(--color-accent); }
 /* The search bar's place in home's layout is a fixed 48 px; the pill sits in it and grows upward, over home. */
 .bar { position: relative; z-index: 3; margin: 0; height: 48px; padding: 0; }
-.bar-pill { position: absolute; left: var(--edge); right: var(--edge); bottom: 4px; }
+.bar-pill {
+  position: absolute;
+  left: var(--edge);
+  right: var(--edge);
+  bottom: 4px;
+  /* Its own layer, always: the drawer's list scrolling by above it flickered it (a layer re-promoted, re-rastered). */
+  will-change: transform;
+  contain: paint;
+}
 /* Under the dock (searchwidget.tsx footBelow): the foot's order swapped. */
 .home.pill-below .bar { order: 1; }
 /* The search widget (searchwidget.tsx): the pill centred in its cells, growing upward from there as in the foot. */

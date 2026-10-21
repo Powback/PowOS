@@ -306,7 +306,16 @@ addEventListener("transitionend", settled, { capture: true, passive: true });
 addEventListener("transitioncancel", settled, { capture: true, passive: true });
 addEventListener("animationstart", kick, { capture: true, passive: true });
 addEventListener("resize", changed);
-document.addEventListener("scroll", kick, { capture: true, passive: true });
+// A scroll moves only what's in the scrolled box: the drawer's list holds no glass (the launcher's is its frame's), so
+// its scroll measures nothing - nothing re-sent, nothing re-read, a frame of the list is the list's alone.
+document.addEventListener(
+  "scroll",
+  (e) => {
+    const t = e.target;
+    if (t === document || (t instanceof Element && t.querySelector(SURFACES))) kick();
+  },
+  { capture: true, passive: true },
+);
 for (const ev of ["theme.changed", "system.insets", "recents.begin", "recents.drag", "recents.end", "recents.show", "recents.hide"]) powos.on(ev, changed);
 
 /** For CDP: on or off for this page (`__glass.native(false)`: the CSS glass), the regions as sent, the host's knob. */
