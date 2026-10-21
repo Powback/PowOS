@@ -55,7 +55,8 @@ applyTheme(await powos.theme.get().catch(() => null));
 /**
  * Which screen this page is: the host says (index.html?mode=) - home (its switcher is a layer of it, ui/recents.tsx),
  * or a slot's (aod: screen-off; assist: PowOS AI over an app; shade: the notification shade; lock: the lock face;
- * recents: the switcher alone, when the desktop is home; panel: the desktop's taskbar, from powos-shell; glasses: the
+ * recents: the switcher alone, when the desktop is home; panel: the desktop's taskbar, from powos-shell; desktop: the
+ * desktop's home, from powos-shell; glasses: the
  * smart glasses' screen, off screen).
  */
 const mode = new URLSearchParams(location.search).get("mode");
@@ -79,6 +80,12 @@ if (mode === "aod") {
   // The desktop's panel (powos-shell: a layer surface per screen, docs/DESKTOP-WEB-SHELL.md): the bar alone.
   const { Panel } = await import("./ui/panel.tsx");
   render(<Panel />, document.body);
+} else if (mode === "desktop") {
+  // The desktop's home (powos-shell: a layer surface under every window, docs/DESKTOP-SHELL.md): home's grid, the pill
+  // and its launcher and chat, the pet - Plasma keeps its own panel, notifications and switcher.
+  await load();
+  const { Desktop } = await import("./ui/desktop.tsx");
+  render(<Desktop />, document.body);
 } else if (mode === "petover") {
   // The pet over apps (system/PetOverlay.kt's small window at a screen edge): the pet alone, its state live.
   const { PetOver } = await import("./ui/pet.tsx");

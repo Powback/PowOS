@@ -5,7 +5,10 @@ the nested bench (dev/nested.sh) has no node or websocket module.
     cdp-eval.py 'document.querySelectorAll(".panel-task").length'
     cdp-eval.py 'document.querySelector(".panel-task:not(.active)").click()'
 
-Awaits a promise result; prints the value as JSON. PORT env: the DevTools port (9222).
+    cdp-eval.py --shot out.png      the page as Chromium drew it (no compositor: KWin's blur and the wallpaper aren't in it)
+
+Awaits a promise result; prints the value as JSON. PORT env: the DevTools port (9222). MODE env: the page whose
+?mode= it is (any powos: page if unset). Read-only checks on a page someone may be looking at.
 """
 import base64
 import json
@@ -17,7 +20,8 @@ import urllib.request
 
 port = int(os.environ.get("PORT", "9222"))
 pages = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json"))
-page = next(p for p in pages if p.get("type") == "page" and p["url"].startswith("powos://"))
+mode = os.environ.get("MODE")
+page = next(p for p in pages if p.get("type") == "page" and p["url"].startswith("powos://") and (not mode or f"mode={mode}" in p["url"]))
 path = page["webSocketDebuggerUrl"].split(str(port), 1)[1]
 
 sock = socket.create_connection(("127.0.0.1", port))
@@ -58,6 +62,15 @@ def recv():
         n = struct.unpack(">Q", read_exact(8))[0]
     return json.loads(read_exact(n))
 
+
+if sys.argv[1] == "--shot":
+    send({"id": 1, "method": "Page.captureScreenshot", "params": {"format": "png"}})
+    while True:
+        msg = recv()
+        if msg.get("id") == 1:
+            open(sys.argv[2], "wb").write(base64.b64decode(msg["result"]["data"]))
+            print(sys.argv[2])
+            sys.exit(0)
 
 send({"id": 1, "method": "Runtime.evaluate",
       "params": {"expression": sys.argv[1], "awaitPromise": True, "returnByValue": True}})

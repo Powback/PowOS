@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QIcon>
 #include <QMimeDatabase>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QUrlQuery>
 #include <QWebEngineUrlRequestJob>
@@ -57,6 +58,8 @@ void ShellServer::requestStarted(QWebEngineUrlRequestJob *job)
         rel = QStringLiteral("index.html");
     if (rel.startsWith(QLatin1String("..")))
         return job->fail(QWebEngineUrlRequestJob::RequestDenied);
+    if (rel.startsWith(QLatin1String("_app/")))
+        return appFile(job, rel.mid(5));
     for (const QString &root : shellRoots()) {
         QFile file(root + QLatin1Char('/') + rel);
         if (!file.open(QIODevice::ReadOnly))
@@ -67,6 +70,26 @@ void ShellServer::requestStarted(QWebEngineUrlRequestJob *job)
         return;
     }
     job->fail(QWebEngineUrlRequestJob::UrlNotFound);
+}
+
+void ShellServer::appFile(QWebEngineUrlRequestJob *job, const QString &rest)
+{
+    // "<app id>/<path>": a file of an installed PowOS app's UI (powos app install: ~/.local/share/powos/apps/<id>/
+    // current/ui), never outside it - as the phone's ShellHost.appFile.
+    static const QRegularExpression appId(QStringLiteral("^[a-z0-9][a-z0-9._-]*$"));
+    const QString id = rest.section(QLatin1Char('/'), 0, 0);
+    const QString name = rest.section(QLatin1Char('/'), 1);
+    if (!appId.match(id).hasMatch() || name.isEmpty())
+        return job->fail(QWebEngineUrlRequestJob::UrlNotFound);
+    const QString apps = qEnvironmentVariable("POWOS_APPS_DIR", QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/powos/apps"));
+    const QString ui = QDir(apps + QLatin1Char('/') + id + QStringLiteral("/current/ui")).canonicalPath();
+    const QString path = QFileInfo(ui + QLatin1Char('/') + name).canonicalFilePath();
+    QFile file(path);
+    if (ui.isEmpty() || !path.startsWith(ui + QLatin1Char('/')) || !file.open(QIODevice::ReadOnly))
+        return job->fail(QWebEngineUrlRequestJob::UrlNotFound);
+    auto *buffer = new QBuffer(job);
+    buffer->setData(file.readAll());
+    job->reply(mimeOf(name), buffer);
 }
 
 void ShellServer::icon(QWebEngineUrlRequestJob *job)

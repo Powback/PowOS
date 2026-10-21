@@ -1,0 +1,24 @@
+/*
+ * The desktop's home (ui/desktop.tsx): the phone's home on a desktop-sized screen. Only what differs from the phone:
+ * the pill and the launcher are a column in the middle, not the screen's width; no mic yet (dictation on the desktop
+ * is round 2, docs/DESKTOP-SHELL.md).
+ */
+html[data-mode="desktop"] {
+  --desk-column: 640px;
+}
+html[data-mode="desktop"] .home > .bar {
+  width: min(var(--desk-column), 100%);
+  margin: 0 auto var(--edge);
+  transform: none;
+}
+html[data-mode="desktop"] .launcher {
+  left: max(0px, calc(50% - var(--desk-column) / 2));
+  right: max(0px, calc(50% - var(--desk-column) / 2));
+  bottom: calc(-1 * (48px + var(--edge)));
+}
+html[data-mode="desktop"] .launcher-frame {
+  border-radius: var(--radius);
+}
+html[data-mode="desktop"] .mic {
+  display: none;
+}

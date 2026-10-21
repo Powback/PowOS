@@ -31,6 +31,8 @@ import type {
   GlassesState,
 } from "./types.ts";
 import { mockScreens } from "./screens-mock.ts";
+import { homeLayout } from "./hosts/layout.ts";
+import { desktop } from "./hosts/desktop.ts";
 
 type Handler = (data: any) => void;
 
@@ -433,78 +435,7 @@ function mock(): Bridge {
       uninstall: async (key) => console.log("[mock] uninstall", key),
     },
     usage: { recent: async (limit) => recent.slice(0, limit) },
-    home: {
-      get: async () => structuredClone(home),
-      place: async (key: string, cell: Cell, page: number) => {
-        Object.assign(
-          home.items.find((i) => i.key === key)!,
-          { cell, page },
-        );
-        changed();
-      },
-      add: async (app, page, cell) => {
-        const a = apps.find((x) => x.key === app)!;
-        const key = (a.kind === "linux" ? "linux:" : "app:") + a.key.slice(2);
-        home.items = home.items.filter((i) => i.key !== key);
-        home.items.push({
-          key,
-          kind: "app",
-          page,
-          cell: cell ?? null,
-          resizable: false,
-          minSize: [1, 1],
-          size: [1, 1],
-          label: a.label,
-          app,
-        });
-        changed();
-        return key;
-      },
-      remove: async (key) => {
-        home.items = home.items.filter((i) => i.key !== key);
-        changed();
-      },
-      addPanel: async (name, page, cell) => {
-        const key = `panel:${name}`;
-        home.items = home.items.filter((i) => i.key !== key);
-        home.items.push({ key, kind: "panel", name, page, cell, resizable: true, minSize: [2, 1], size: [4, 2] });
-        changed();
-        return key;
-      },
-      // As WidgetLayout.place: the first free spot at the item's size, on its page.
-      arrange: async (cols, rows) => {
-        let moved = false;
-        for (const item of home.items.filter((i) => !i.cell)) {
-          const [w, h] = item.size ?? [Math.floor(cols / 2), 3];
-          const taken = home.items.filter((o) => o !== item && o.page === item.page && o.cell).map((o) => o.cell!);
-          for (let y = 0; y + h <= rows && !item.cell; y++)
-            for (let x = 0; x + w <= cols && !item.cell; x++)
-              if (taken.every((c) => x >= c.x + c.w || c.x >= x + w || y >= c.y + c.h || c.y >= y + h))
-                item.cell = { x, y, w, h };
-          moved ||= !!item.cell;
-        }
-        if (moved) changed();
-      },
-      group: async (key, target) => {
-        const item = home.items.find((i) => i.key === key);
-        const into = home.items.find((i) => i.key === target);
-        if (!item || !into || item.kind !== "app") return null;
-        home.items = home.items.filter((i) => i.key !== key);
-        const entry = { key: item.key, label: item.label!, app: item.app! };
-        if (into.kind === "folder") into.apps!.push(entry);
-        else {
-          home.items = home.items.filter((i) => i.key !== target);
-          home.items.push({
-            ...into,
-            key: "folder:" + Date.now(),
-            kind: "folder",
-            apps: [{ key: into.key, label: into.label!, app: into.app! }, entry],
-          });
-        }
-        changed();
-        return null;
-      },
-    },
+    home: homeLayout(home, () => events.emit("home.changed", null), () => apps),
     store: {
       get: async <T>(name: string) => {
         try {
@@ -1245,7 +1176,10 @@ function mockTerm(events: Events): Bridge["term"] {
   };
 }
 
-export const powos: Bridge = window.powos ?? (window.PowosHost ? native(window.PowosHost) : mock());
+export const powos: Bridge =
+  window.powos ??
+  // The desktop's host (powos-shell) has fewer areas natively; hosts/desktop.ts adds the ones kept in the page.
+  (window.PowosHost ? (window.PowosHost.name === "powos" ? desktop(native(window.PowosHost)) : native(window.PowosHost)) : mock());
 
 /**
  * The mock's agents (as the design's §1.3 sketch): the manager on the phone, a coder on the Mac with two subagents,

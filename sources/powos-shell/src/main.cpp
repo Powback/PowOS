@@ -1,17 +1,19 @@
-// powos-shell: the PowOS desktop shell's host (docs/DESKTOP-WEB-SHELL.md). Phase 0: a bottom panel per screen,
-// next to plasmashell. Everything you see is shell/ (index.html?mode=panel); this process holds the slots and
-// bridges KDE's models to it.
+// powos-shell: the PowOS desktop shell's host (docs/DESKTOP-SHELL.md, docs/DESKTOP-WEB-SHELL.md). Next to
+// plasmashell: everything you see is shell/; this process holds the slots and bridges KDE's models to it.
 //
-//   powos-shell                      the shell from ~/.config/powos/shell over /usr/share/powos/shell
+//   powos-shell [home] [panel]       the roles, one surface per screen each (default: home - the desktop's home, under
+//                                    windows; panel: phase 0's bar, for when Plasma's own panel is gone)
+//                                    the shell from ~/.config/powos/shell over /usr/share/powos/shell
 //   POWOS_SHELL_DIR=~/src/shell ...  a checkout as the base instead (dev)
 //   QTWEBENGINE_REMOTE_DEBUGGING=9222 powos-shell   DevTools / Playwright connectOverCDP
 #include "bridge.h"
+#include "home.h"
 #include "panel.h"
 #include "server.h"
 #include "services.h"
 
 #include <QApplication>
-#include <QHash>
+#include <QMultiHash>
 #include <QJsonObject>
 #include <QScreen>
 #include <QWebEngineProfile>
@@ -52,7 +54,11 @@ int main(int argc, char **argv)
     app.setDesktopFileName(QStringLiteral("org.powos.shell"));
     app.setQuitOnLastWindowClosed(false);
 
-    Services services{new Apps(&app), new Windows(&app)};
+    QStringList roles = app.arguments().mid(1);
+    if (roles.isEmpty())
+        roles = {QStringLiteral("home")};
+    auto *store = new Store(&app);
+    Services services{new Apps(&app), new Windows(&app), store, new Theme(&app), new Ai(store, &app)};
 
     auto *profile = new QWebEngineProfile(QStringLiteral("powos-shell"), &app);
     profile->installUrlSchemeHandler("powos", new ShellServer(services.windows, &app));
@@ -64,12 +70,22 @@ int main(int argc, char **argv)
     script.setRunsOnSubFrames(false);
     profile->scripts()->insert(script);
 
-    // One panel per screen, following screens as they come and go.
-    QHash<QScreen *, Panel *> panels;
+    // Each role's surface per screen, following screens as they come and go.
+    QMultiHash<QScreen *, ShellView *> views;
     auto add = [&](QScreen *screen) {
-        auto *panel = new Panel(screen, profile, services);
-        panels.insert(screen, panel);
-        panel->show();
+        for (const QString &role : std::as_const(roles)) {
+            ShellView *view = nullptr;
+            if (role == QLatin1String("home"))
+                view = new Home(screen, profile, services);
+            else if (role == QLatin1String("panel"))
+                view = new Panel(screen, profile, services);
+            else
+                qWarning().noquote() << "powos-shell: no role" << role << "(home, panel)";
+            if (!view)
+                continue;
+            views.insert(screen, view);
+            view->show();
+        }
     };
     for (QScreen *screen : app.screens())
         add(screen);
@@ -77,18 +93,19 @@ int main(int argc, char **argv)
         qunsetenv("QT_WAYLAND_SHELL_INTEGRATION");
     QObject::connect(&app, &QGuiApplication::screenAdded, &app, add);
     QObject::connect(&app, &QGuiApplication::screenRemoved, &app, [&](QScreen *screen) {
-        if (Panel *panel = panels.take(screen))
-            panel->deleteLater();
+        for (ShellView *view : views.values(screen))
+            view->deleteLater();
+        views.remove(screen);
     });
 
     // Hot reload: a saved shell file reaches every page as "files.changed" (shell/hot.ts reloads or swaps the CSS).
     Watcher watcher(shellRoots());
     QObject::connect(&watcher, &Watcher::changed, &app, [&](const QString &path) {
-        for (Panel *panel : std::as_const(panels))
-            panel->bridge()->emitEvent(QStringLiteral("files.changed"), QJsonObject{{QStringLiteral("path"), path}});
+        for (ShellView *view : std::as_const(views))
+            view->bridge()->emitEvent(QStringLiteral("files.changed"), QJsonObject{{QStringLiteral("path"), path}});
     });
 
     const int rc = app.exec();
-    qDeleteAll(panels); // the pages go before their profile
+    qDeleteAll(views); // the pages go before their profile
     return rc;
 }

@@ -25,6 +25,7 @@ public:
 
 private:
     void icon(QWebEngineUrlRequestJob *job);
+    void appFile(QWebEngineUrlRequestJob *job, const QString &rest);
     Windows *m_windows;
 };
 

@@ -24,7 +24,8 @@ const mode = new URLSearchParams(location.search).get("mode") ?? "home";
  */
 // Quick Tools (ui/quicktools.tsx) too: a card in a window over any app, the compositor blurring what's under the card
 // alone (a region of that window - the app under it, as it is).
-const OVER_WALLPAPER = new Set(["home", "quicktools"]);
+// The desktop's home (powos-shell) too: a surface under every window, KWin blurring the wallpaper under its tiles.
+const OVER_WALLPAPER = new Set(["home", "quicktools", "desktop"]);
 /** The surfaces with glass (theme.css): one inside another is only a soft fill on it, not glass of its own. */
 const SURFACES = ".tile, .notif-panel";
 
