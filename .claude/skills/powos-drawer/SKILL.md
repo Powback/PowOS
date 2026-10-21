@@ -45,16 +45,16 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
 ## Test / measure
 - Renders: `READY_MS=30000 SHOTS_ONLY='^(drawer|home|pull-apps|pull-ai|ai|search-typing)$' shell/dev/gate.sh --tree
   --shots DIR`; mid-drag: SHOTS_PROBE that sets `(await importShim("./ui/gesture.ts")).drawerDrag.value = 0.35`.
-- Headless perf: ~/.cache/drawer-perf/perf.mjs (dev/shots.mjs copy printing Chromium metrics around SHOTS_PROBE):
-  `docker run --rm --platform linux/arm64 --shm-size 512m -v TREE:/shell:ro -v ~/.cache/drawer-perf/perf.mjs:/usr/src/app/shots.mjs:ro
-  -v OUT:/out -e SHOTS_ONLY='^home$' -e SHOTS_PROBE="$(cat ~/.cache/drawer-perf/slow.js)" -w /usr/src/app --entrypoint
-  node zenika/alpine-chrome:with-puppeteer shots.mjs` (TREE: `tar` of shell/ without node_modules). Probes:
-  slow.js (60-frame drag), drag.js (per-frame forced style/layout), open.js (flick -> settled ms), scroll.js (region
-  sets / mutations per scroll frame), check.js / check2.js (open + close settle to rest, 0 animations left).
-  Bisect a cost by injecting CSS or removing data-p in the probe. Numbers are noisy under load: run back to back.
-- Device (screen on, home visible, user idle): forward with tools/phone/cdp.sh, then in powos-vadb
-  `bun ~/.cache/drawer-perf/devperf.ts ~/.cache/drawer-perf/slow2s.js` (3 s at rest + 2 s slow drag: frames,
-  dropped, worst, metrics). Read-only checks: `tools/phone/cdp.sh eval "" '<js>'` - set --p on [data-p] with
-  transition none, read opacity/transform, restore in the same call; `cdp.sh idle 3 ""` for work at rest.
+- Headless perf/behaviour: `shell/dev/perf/run.sh <probe.js> [shell-dir] [scene]` - shots.mjs patched on the fly
+  to print Chromium's metrics (LayoutCount, RecalcStyleCount, durations) around the probe, both screens. For a
+  before/after, extract the old shell (`git archive <rev> shell | tar -x -C DIR`) and pass DIR/shell; run them back
+  to back (the Mac's load skews timings, not counts). Probes in shell/dev/perf/: slow.js (60-frame slow drag),
+  drag.js (per-frame forced style/layout), open.js (flick -> settled ms, from the drawn transform), scroll.js (blur
+  region sets / mutations per drawer-scroll frame), check.js (open and close settle to rest, 0 animations left).
+  Bisect a cost by injecting CSS or removing data-p at the top of a probe.
+- Device (screen on, home visible, user idle - one `tools/phone/idle.sh --wait 120 1800` first):
+  `shell/dev/perf/device.sh [slow2s.js]` - metrics 3 s at rest, then a 2 s slow drag + close (frames, dropped,
+  worst, Chromium metrics; devperf.ts in powos-vadb). Read-only checks: `tools/phone/cdp.sh eval "" '<js>'` - set
+  --p on [data-p] with transition none, read opacity/transform, restore in the same call; `cdp.sh idle 3 ""`.
 - Baselines: headless 60-frame slow drag, style recalc 260 ms -> 64 (layout 64 -> 0) -> 37 ms (WAAPI). No device
   drag numbers yet.
