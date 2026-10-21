@@ -175,6 +175,11 @@ internal object SttServer {
         checkedAt = SystemClock.elapsedRealtime()
     }
 
+    /** stt.pow answered, but not 200. A 500 is mostly "no speech in this audio" (its VAD found none), not "down". */
+    class HttpError(
+        val code: Int,
+    ) : IOException("HTTP $code")
+
     class Heard(
         val text: String,
         val language: String?,
@@ -211,7 +216,7 @@ internal object SttServer {
         try {
             h.outputStream.use { body.writeTo(it) }
             val code = h.responseCode
-            if (code != 200) throw IOException("HTTP $code")
+            if (code != 200) throw HttpError(code)
             val j = JSONObject(h.inputStream.bufferedReader().readText())
             return Heard(j.optString("text").trim(), j.optString("language").takeIf { it.isNotBlank() })
         } finally {
@@ -280,7 +285,12 @@ internal class MicSource : PcmSource {
 internal class FileSource(
     f: File,
 ) : PcmSource {
-    private val pcm = f.readBytes().let { it.copyOfRange(minOf(44, it.size), it.size) }
+    // After the "data" chunk's header, wherever it is (afconvert's WAVs put a 4 KB FLLR chunk first; a plain one is 44).
+    private val pcm =
+        f.readBytes().let { b ->
+            val at = (12 until minOf(b.size - 8, 1 shl 16)).firstOrNull { b[it] == 'd'.code.toByte() && b[it + 1] == 'a'.code.toByte() && b[it + 2] == 't'.code.toByte() && b[it + 3] == 'a'.code.toByte() }
+            b.copyOfRange(if (at != null) at + 8 else minOf(44, b.size), b.size)
+        }
     val durationMs = pcm.size / 32L
 
     @Volatile private var running = false
@@ -448,6 +458,9 @@ internal class GpuSession(
     private var lastVoiceAt = -1
     private var firstVoiceAt = 0L
     private var answers = 0
+
+    /** stt.pow's 500s in a row (its "no speech" answer, [SttServer.HttpError]); touched on the network thread only. */
+    @Volatile private var emptyRuns = 0
     private var inFlight = false
     private var inFlightSince = 0L
     private var partialUpTo = 0
@@ -534,7 +547,8 @@ internal class GpuSession(
         final: Boolean,
     ) {
         val to = if (final) s.end else recorded()
-        val audio = slice(s.start, to)
+        // At least 1 s: stt.pow answers 500 to a clip under ~0.5 s (2026-10-21); trailing silence doesn't change the words.
+        val audio = slice(s.start, to).let { if (it.size < 1000 * BYTES_PER_MS) it.copyOf(1000 * BYTES_PER_MS) else it }
         val prompt = segs.takeWhile { it !== s }.joinToString(" ") { it.text }
         val lang = language
         inFlight = true
@@ -544,12 +558,21 @@ internal class GpuSession(
             val r =
                 runCatching {
                     if (failAfterFirst && answers > 0) throw IOException("test: made to fail")
-                    SttServer.transcribe(audio, lang, prompt, if (final) FINAL_READ_MS else PARTIAL_READ_MS)
+                    try {
+                        SttServer.transcribe(audio, lang, prompt, if (final) FINAL_READ_MS else PARTIAL_READ_MS)
+                    } catch (e: SttServer.HttpError) {
+                        // HACK: stt-batch answers 500 for audio its VAD finds no speech in (silence, a breath) instead
+                        // of {"text": ""}. Real fix: return empty text there (gpu-195 stt-batch). Until then a 500 is
+                        // "nothing heard" - it's up, it answered - and only three in a row count as failing.
+                        if (e.code != 500 || ++emptyRuns >= 3) throw e
+                        SttServer.Heard("", null)
+                    }
                 }
             main.post {
                 inFlight = false
                 if (ended || inner != null) return@post
                 r.onSuccess { h ->
+                    if (h.text.isNotEmpty()) emptyRuns = 0
                     answers++
                     SttServer.markUp()
                     if (language == null && audio.size >= 1500 * BYTES_PER_MS) language = h.language

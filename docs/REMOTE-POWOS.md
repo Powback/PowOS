@@ -292,11 +292,12 @@ this table; the test compares per-file counts, not lines, because other edits mo
 convention itself written as `` `HACK:` `` (in backticks) is not a marker. Vendored code (`targets/web/third_party/`)
 is not scanned. A marker in the code says *why* and *the real fix* where it stands; the row here is the one-line index.
 
-107 markers on 2026-10-21.
+108 markers on 2026-10-21.
 
 <!-- hack-registry:start -->
 | marker | why | real fix |
 |---|---|---|
+| `targets/android/app/app/src/main/kotlin/dev/omalauncher/ui/GpuSpeech.kt:564` | stt-batch answers HTTP 500 for audio its VAD finds no speech in (silence, under ~0.5 s); the GPU dictation reads a 500 as "nothing heard", and only 3 in a row as failing. | stt-batch (gpu-195) returns `{"text": ""}` for no speech; drop the special case. |
 | `apps/stickman/ui/workers/sim.ts:10` | The stickman sim and brain are copied from robotsupremacy's stickman.ts: there is no browser core library to import. | robotsupremacy's stickman/web/PLAN.md step 1 (sim + brain as a library); import it. |
 | `docs/AGENTS-VIEW-DESIGN.md:218` | The design's own copy of the mirror's marker: adb used as the cross-host transport (C1). | REMOTE-POWOS.md M2: the phone subscribes to the hub's powos-agents module; delete the mirror. |
 | `docs/AGENTS-VIEW-DESIGN.md:333` | The work board's note of the CLI's own marker: `powos agents task` off the phone runs on the phone over powos-vadb (C4/C7). | Each host's own powos-agents module and the M2 subscription; the hub merges the hosts' boards. |

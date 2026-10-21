@@ -37,15 +37,20 @@ and the latest start wins.
 - system_server allows one session per caller per recognizer: never keep two live recognizers of one kind.
 - A start right after a cancel can get CLIENT once: segmenting turns off only after 2 refusals in a row.
 - A doubled dictation was the user testing two engines back to back, not a bug. Check the logs before "fixing" text.
-- Open: NativeSpeech `next()` doesn't check `feed.done`. After a fallback that follows a release, a restart may listen
-  on an ended pipe until its error ends it.
+- An ended recording ends the session: `Dictation.goOn(feedDone)` (a fallback after the release doesn't listen again on
+  an ended pipe).
+- ASI reading PowOS's recording (`EXTRA_AUDIO_SOURCE`) ends each utterance with ERROR_CLIENT (5), not results. A CLIENT
+  error after words counts as a segment's end: the partial is committed, a new recognizer is used, and no retry is
+  spent. Before this fix the replay kept only the last sentence.
+- stt.pow answers HTTP 500 to audio with no speech (silence, clips under ~0.5 s): GpuSession pads clips to 1 s and
+  reads a 500 as "nothing heard", failing over only after 3 in a row (a `HACK:`; the real fix is in stt-batch).
 - Release with GPU: the last ~300 ms before release can be missing (partials are chunked).
 
 ## stt.pow facts
 stt-batch (whisper-fast large-v3-turbo, gpu-195 GPU1 :8001, Traefik `http://stt.pow`, LAN/VPN, no auth).
 OpenAI-compatible `POST /v1/audio/transcriptions` (multipart `file`, `model=whisper-1`, `response_format=verbose_json`
 gives `language`, `prompt`, `language`). `GET /health` returns `{"status":"ok",...}`. **No live streaming:**
-`stream=true` is SSE of the already-uploaded file only. A 2-3 s clip takes ~60-150 ms; the phone (Wi-Fi) pings it at
+`stream=true` is SSE of the already-uploaded file only. No speech gives 500, not empty text. A 2-3 s clip takes ~60-150 ms; the phone (Wi-Fi) pings it at
 ~12 ms. Server-side VAD is on. "Thank you."-style hallucinations on silence are filtered in GpuSession.
 
 ## Logs and checks
@@ -59,10 +64,14 @@ gives `language`, `prompt`, `language`). `GET /health` returns `{"status":"ok",.
 ## Testing without the mic (the user may be using the phone)
 - Server: `say -o /tmp/t.aiff "Testing one two three"; afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/t.aiff /tmp/t.wav;
   curl -F file=@/tmp/t.wav -F model=whisper-1 http://stt.pow/v1/audio/transcriptions`.
-- On the phone: `SpeechEngines.test(context, "<name>.wav", "gpu"|"fallback"|"down")` plays a 16 kHz mono WAV from
-  files/speech-test/ in place of the mic and logs `test (mode): "<text>"`. It is NOT wired to a bridge call yet; add
-  one (e.g. `speech.test`) before relying on it. Push the WAV with adb.sh, then `su -c cp` it into
-  /data/data/com.powos.app/files/speech-test/ (chown to the app uid).
+- On the phone (no mic, fine while the user is active): bridge `speech.test(name, mode)` calls
+  `SpeechEngines.test`, which plays a 16 kHz mono 16-bit WAV from files/speech-test/ in place of the mic and logs
+  `test (mode): "<text>"`. Modes: `gpu`, `fallback` (stt.pow made to fail after its first answer), `down` (on-device
+  from the file). Make a WAV: `say -o a.aiff "One sentence. [[slnc 1500]] Another."; afconvert -f WAVE -d
+  LEI16@16000 -c 1 a.aiff t.wav`. Push: `tools/phone/adb.sh push t.wav /data/local/tmp/speech-t.wav`, then `su -c`
+  to cp it to /data/data/com.powos.app/files/speech-test/t.wav and chown it to the app uid (`stat -c %u
+  /data/data/com.powos.app`). Run: `tools/phone/cdp.sh eval home "(()=>{window.PowosHost.postMessage(JSON.stringify([910001,'speech.test',JSON.stringify(['t.wav','gpu'])]));return 1})()"`,
+  wait ~15 s, then grep logcat for `test (`.
 - Double-start / BUSY check over CDP with `tools/phone/cdp.sh eval home '<js>'` (the repo's: it forwards the devtools
   socket and runs tools/phone/cdp.ts; don't use copies in job tmp or ~/.cache, they get pruned). The js:
   `(async()=>{const h=window.PowosHost;for(const i of [1,2])h.postMessage(JSON.stringify([900000+i,"speech.start","[false]"]));await new Promise(r=>setTimeout(r,4000));h.postMessage(JSON.stringify([900003,"speech.cancel","[]"]));return "ok"})()`

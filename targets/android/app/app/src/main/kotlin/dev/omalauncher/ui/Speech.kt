@@ -728,6 +728,19 @@ internal object NativeSpeech {
             override fun onError(code: Int) {
                 if (!current) return
                 Log.i(TAG, "session #$id: error $code, attempt $a ($p)")
+                // Words already heard in this attempt are kept whatever comes next: the restart below starts a new
+                // partial, and the audio they came from is gone (from PowOS's recording, too, a pipe read once).
+                if (heard) {
+                    d.segment("")
+                    cb.onText(d.text)
+                }
+                if (code == SpeechRecognizer.ERROR_CLIENT && heard && !d.stopping) {
+                    // After words: the end of an utterance the recognizer reported as a client error (Android System
+                    // Intelligence does, reading PowOS's recording) - a segment's end, on a new recognizer, no retry spent.
+                    this@Session.current = null
+                    drop(p.kind, "error $code after words")
+                    return next(p)
+                }
                 if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || code == SpeechRecognizer.ERROR_CLIENT) {
                     // The shared recognizer stuck in a bad state (a session of ours that never ended in system_server,
                     // or a client error): destroy it and listen on a new one - once for free, then within the retries.
