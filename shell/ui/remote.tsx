@@ -72,7 +72,7 @@ function Remote() {
     };
   }, []);
   return (
-    <div class="remote-screen" {...own}>
+    <div class="remote-screen tile sheet" {...own}>
       <header class="remote-top">
         <button type="button" class="session-back" onClick={closeRemote}>
           ‹

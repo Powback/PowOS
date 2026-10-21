@@ -318,8 +318,9 @@
   display: flex;
   align-items: center;
   font-size: var(--text-small);
-  color: var(--color-muted);
 }
+/* The drawer's labels can sit over the brightest part of the wallpaper: the label shadow, as home's. */
+.drawer :is(.app-label, .heading), .letter-bar span { text-shadow: var(--label-shadow); }
 .letter-bar span.on { color: var(--color-accent); transform: scale(1.5); }
 /* The letter under the finger, big, beside the bar. */
 .letter-bubble {
@@ -410,17 +411,17 @@
 /* PowOS apps' own controls (islands on home, their pages) get the shell's borderless look too: their buttons' and
    chips' outlines go (their styles are inline - hence !important), a bare one takes a soft fill. */
 /*
- * Under a page-sized sheet (a widget's screen, an app's page, the widget picker: theme.css .sheet) home's content steps
+ * Under a page-sized sheet (any .sheet but a .pop: a widget's screen, an app's page, the picker, settings) home's content steps
  * out - faded, then hidden (the compositor drops its glass regions too) - so only the frosted wallpaper is behind it.
  */
 .stage, .bar, .dock, .ai-screen .ai-scroll { transition: opacity 180ms ease-out, visibility 0s; }
-html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
+html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   opacity: 0;
   visibility: hidden;
   transition: opacity 180ms ease-out, visibility 0s 180ms;
 }
-/* A PowOS app's page (appscreen.tsx): a sheet, the whole screen - no corners, no edge of its own. */
-.app-screen.tile { border: 0; border-radius: 0; box-shadow: none; }
+/* The whole-screen sheets (an app's page, settings and its screens, agents, remote input): no corners, no edge. */
+:is(.app-screen, .scr, .ag-screen, .remote-screen).tile { border: 0; border-radius: 0; box-shadow: none; }
 :is(.island-face, .app-screen) button { border-color: transparent !important; }
 :is(.island-face, .app-screen) button[style*="background: transparent"] { background: var(--soft-fill) !important; box-shadow: var(--lift) !important; }
 /*
@@ -577,14 +578,12 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--color-background) 60%, transparent);
 }
 .folder-panel {
   display: grid;
   grid-template-columns: repeat(3, var(--cell));
   gap: var(--gap);
   padding: var(--edge);
-  background: var(--color-background);
 }
 
 /* OWL widgets (owl.tsx): the tree fills the tile as Render.kt's WidgetContent, a Column. */
@@ -1535,7 +1534,6 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
   z-index: 15;
   inset: 0;
   padding: var(--inset-top, 0px) var(--edge) var(--inset-bottom, 0px);
-  background: var(--color-background);
   display: flex;
   flex-direction: column;
   gap: 8px;

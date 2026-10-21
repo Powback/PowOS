@@ -228,7 +228,8 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
             const css = { background: theme.bg, surface: theme.surface, overlay: `color-mix(in srgb, ${theme.bg} 90%, transparent)`, foreground: theme.fg,
               muted: theme.muted, accent: theme.accent, border: theme.border, red: theme.red, green: theme.green };
             // As the host would: through app.tsx's applyTheme (what it derives from the theme included).
-            window.__mockEvents.emit("theme.changed", { name: "shots", light: theme.light, css, colors: { background: theme.bg, foreground: theme.fg } });
+            if (window.__mockEvents) window.__mockEvents.emit("theme.changed", { name: "shots", light: theme.light, css, colors: { background: theme.bg, foreground: theme.fg } });
+            else for (const [k, v] of Object.entries(css)) root.style.setProperty(`--color-${k}`, v), (root.dataset.light = String(theme.light));
             await new Promise((r) => setTimeout(r, 300)); // the theme crossfade (html.theme-fade, 260 ms)
             root.style.setProperty("--inset-top", `${insets.top}px`);
             root.style.setProperty("--inset-bottom", `${insets.bottom}px`);
@@ -266,7 +267,7 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
       step("shot");
       const runs = await page.evaluate(collectText).catch(() => []);
       step("texts");
-      await page.addStyleTag({ content: "*, *::placeholder { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }" });
+      await page.addStyleTag({ content: "*, *::placeholder { color: transparent !important; -webkit-text-fill-color: transparent !important; caret-color: transparent !important; }" });
       await sleep(80);
       const bare = await page.screenshot({ encoding: "base64" });
       step("bare");

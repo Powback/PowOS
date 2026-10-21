@@ -57,7 +57,7 @@ function Frame({
   const body = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => body.current?.scrollTo(0, 0), [title]);
   return (
-    <div class="scr" {...own}>
+    <div class="scr tile sheet" {...own}>
       <header class="scr-top">
         <button type="button" class="scr-back" aria-label="back" onClick={() => (onBack ? onBack() : closeScreen())}>
           <Icon name="chevronLeft" size={26} />
@@ -224,7 +224,7 @@ function Confirm({
   }, []);
   return (
     <div class="scr-scrim" onClick={(e) => e.target === e.currentTarget && onNo()}>
-      <div class="scr-confirm tile">
+      <div class="scr-confirm tile sheet pop">
         <div class={`scr-confirm-title ${danger ? "danger" : ""}`}>{title}</div>
         <div class="scr-confirm-text muted">{text}</div>
         <div class="scr-confirm-do">

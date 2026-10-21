@@ -352,7 +352,7 @@ function Screen({ picked }: { picked: string | null }) {
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => scroller.current?.scrollTo(0, 0), []);
   return (
-    <div class="ag-screen" {...own}>
+    <div class="ag-screen tile sheet" {...own}>
       <header class="ag-top">
         <button type="button" class="session-back" onClick={closeAgents}>
           ‹

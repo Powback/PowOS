@@ -602,7 +602,7 @@ function FolderPanel() {
   if (!f) return null;
   return (
     <div class="folder-scrim" onClick={() => (folder.value = null)}>
-      <div class="folder-panel tile" onClick={(e) => e.stopPropagation()}>
+      <div class="folder-panel tile sheet pop" onClick={(e) => e.stopPropagation()}>
         {f.apps!.map((a) => (
           <div
             class="app"

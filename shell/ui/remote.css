@@ -4,7 +4,6 @@
   z-index: 15;
   inset: 0;
   padding: var(--inset-top, 0px) var(--edge) max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px));
-  background: var(--color-background);
   display: flex;
   flex-direction: column;
   gap: var(--gap);
