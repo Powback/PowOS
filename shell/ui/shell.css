@@ -32,7 +32,8 @@
  */
 [data-p] {
   --p: 0;
-  transition: --p 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  /* Fast out, no slow tail: let go, it's there within 180 ms (the user: "snappier"). */
+  transition: --p 180ms cubic-bezier(0.1, 0.8, 0.2, 1);
 }
 .home.dragging [data-p] { transition: none; }
 
@@ -296,7 +297,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 }
 html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer {
-  opacity: min(1, calc(var(--p) * 1.6));
+  /* No fade: the apps are there from the panel's first frame, riding up with its edge. */
   flex: 1;
   /* Unfolded, a column of at most ~7 apps, centred with its A-Z bar: an A-Z section of three apps across 2268 px left
      most of the frost empty. */
@@ -311,6 +312,8 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 
 .drawer-list {
   grid-column: 1;
+  /* The A-Z bar's width kept clear: a long name in the last column ran into its letters. */
+  padding-right: var(--letter-bar);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -325,6 +328,8 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--cell), 1fr));
 }
+/* The recent row (drawer.tsx RecentRow): the first row of its grid only, as many as fit across; spacing, no line, under it. */
+.drawer-recents { grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; margin-bottom: 16px; }
 /* Search results sit at the foot of the list, by the bar, and fill upward: the best match nearest the bar. */
 .drawer-list.results {
   display: flex;
@@ -505,6 +510,8 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 
 /* No head: closed, the launcher's frame is nothing; it shows as soon as the drawer starts to rise. */
 .home .launcher-frame { opacity: min(1, calc(var(--p) * 20)); }
+/* Opening, the frost is whole from the first frame; closing, it fades over the last few percent. */
+.home.open .launcher-frame { opacity: min(1, calc(var(--p) * 1000)); }
 .recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
 .recents-face .strip { flex: 1; height: 100%; transform: none; clip-path: none; }
 .recents-face .strip .app { flex-basis: calc((100% - (var(--recent-n) - 1) * 4px) / var(--recent-n)); }

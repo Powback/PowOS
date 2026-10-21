@@ -1,8 +1,8 @@
 /**
  * Home's swipes, following the finger like a stock launcher's:
  *
- * - Up anywhere on home: the drawer slides up under the finger; released past a third of the way, or flicked up, it
- *   opens, else it falls back.
+ * - Up anywhere on home: the drawer slides up under the finger; released past 15% of the way, or flicked up (even a
+ *   short flick), it opens, else it falls back.
  * - Down on the open drawer - from the top of its list, or anywhere outside the list - drags it closed the same way.
  *   A list that's scrolled down just scrolls.
  * - Sideways on home: the pages slide under the finger and snap to the next one past a quarter of the width or a flick.
@@ -20,6 +20,9 @@ import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
 const FLICK = 0.45;
+/** Up, opening the drawer: a short flick is enough (px per ms), or past this much of the way. */
+const OPEN_FLICK = 0.2;
+const OPEN_AT = 0.15;
 /** What takes a tap in the launcher; a tap anywhere else in it closes it. */
 const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, textarea, a, .menu, .tile, [role=button], [role=slider]";
 
@@ -254,7 +257,7 @@ export function homeGestures() {
       const p = drawerDrag.value ?? 0;
       drawerDrag.value = null;
       // A flick decides; otherwise where it was let go.
-      const open = v < -FLICK ? true : v > FLICK ? false : mode === "open" ? p > 0.33 : p > 0.67;
+      const open = v < -(mode === "open" ? OPEN_FLICK : FLICK) ? true : v > FLICK ? false : mode === "open" ? p > OPEN_AT : p > 0.67;
       if (open) drawer.value = 1;
       else closeDrawer();
     } else if (mode === "notif" || mode === "notifClose") {

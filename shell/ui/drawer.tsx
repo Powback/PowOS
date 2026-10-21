@@ -1,6 +1,6 @@
 /**
- * The drawer: every app A to Z in one grid, no headings or breaks between letters, with an A-Z bar to tap or slide along (as PowOS's start
- * menu). Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
+ * The drawer: a row of the apps opened lately, then every app A to Z in one grid, no headings or breaks between letters,
+ * with an A-Z bar to tap or slide along (as PowOS's start menu; its "#" is the top, the recent row). Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
  * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
 import { useRef, useState } from "preact/hooks";
@@ -8,7 +8,7 @@ import { computed } from "@preact/signals";
 import { AppCell } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen } from "./gesture.ts";
-import { apps, chatting, query } from "../state.ts";
+import { apps, byKey, chatting, query, recent } from "../state.ts";
 import type { App } from "../types.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
@@ -48,6 +48,25 @@ export const matches = computed(() => {
     .map(([, app]) => app);
 });
 
+/**
+ * The apps opened lately, newest first (the switcher's and the dock's source): one row - as many as fit across, the
+ * rest cut off (shell.css .drawer-recents), so folded and unfolded each get a full row.
+ */
+function RecentRow() {
+  const shown = recent.value
+    .map((k) => byKey.value.get(k))
+    .filter((a) => a != null)
+    .slice(0, 8);
+  if (!shown.length) return null;
+  return (
+    <div class="grid drawer-recents">
+      {shown.map((app) => (
+        <AppCell key={app.key} app={app} draggable />
+      ))}
+    </div>
+  );
+}
+
 /** Tap a letter or slide along the bar: the list jumps there at once, every letter the finger crosses. */
 function LetterBar({ onPick }: { onPick: (letter: string) => void }) {
   const [current, setCurrent] = useState<string | null>(null);
@@ -86,10 +105,11 @@ export function Drawer() {
   const jump = (letter: string) => {
     // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
     // letter a sliding finger crosses lagged behind it.
+    if (letter === "#") return void (list.current!.scrollTop = 0);
     const { first } = sorted.value;
     const i = ALPHABET.indexOf(letter);
     const l = ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x));
-    const el = l != null ? list.current?.querySelector<HTMLElement>(`.grid > :nth-child(${first.get(l)! + 1})`) : null;
+    const el = l != null ? list.current?.querySelector<HTMLElement>(`.az > :nth-child(${first.get(l)! + 1})`) : null;
     if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
   const searching = query.value.trim() !== "";
@@ -111,11 +131,14 @@ export function Drawer() {
               ))}
             </div>
           ) : (
-            <div class="grid">
-              {sorted.value.list.map((app) => (
-                <AppCell key={app.key} app={app} draggable />
-              ))}
-            </div>
+            <>
+              <RecentRow />
+              <div class="grid az">
+                {sorted.value.list.map((app) => (
+                  <AppCell key={app.key} app={app} draggable />
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
