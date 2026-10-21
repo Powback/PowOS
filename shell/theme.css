@@ -102,6 +102,8 @@
   --strip-icon: 56px;
   --strip-height: 76px;
   --letter-bar: 22px;
+  /* The pill's space above the screen's foot (over the navigation bar's inset): home's search, the drawer's, PowOS AI's compose. */
+  --pill-foot: 6px;
 }
 
 :root[data-light="true"] {

@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
 import { matches } from "./drawer.tsx";
+import { followOpenness } from "./gesture.ts";
 import { drawer, launch, pullKind, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
@@ -150,6 +151,8 @@ export function Bar() {
   return (
     <form
       class={`bar ${active ? "active" : ""}`}
+      data-p
+      ref={followOpenness}
       onSubmit={(e) => {
         e.preventDefault();
         const best = pullKind.value === "apps" ? matches.value[0] : null;

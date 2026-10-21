@@ -9,8 +9,6 @@
 .screens { position: absolute; inset: 0; }
 
 .home {
-  /* The launcher's head: none - the recent apps are the dock's second page (home.tsx Dock), or a widget. */
-  --launcher-head: 0px;
   position: fixed;
   inset: 0;
   display: flex;
@@ -24,9 +22,9 @@
 }
 
 /*
- * The stage: the pages, and the launcher panel at its foot. The panel is the recent apps bar grown by --p (0..1, the
- * drawer's openness, gesture.ts): its frame's top edge rises from the bar to the top of the stage, and the drawer is
- * revealed by a clip at that edge - a frame of the swipe moves an edge, nothing is laid out again.
+ * The stage: the pages, and the launcher panel over them. The panel is laid out once, at its open size, and --p (0..1,
+ * the drawer's openness, gesture.ts) only moves and fades it as one layer - nothing changes size or place in layout
+ * while a finger drags it (the user: a slow open lagged while the dock and the frame's edges were laid out each frame).
  */
 @property --p {
   syntax: "<number>";
@@ -35,11 +33,17 @@
   inherits: false;
   initial-value: 0;
 }
-.launcher-inner, .drawer-clip, .drawer, .ai-panel, .cc-media::after { --p: inherit; }
+.cc-media::after { --p: inherit; }
+/* The launcher's fade (below), worked out from --p: not inherited either, for the same reason. */
+@property --fade {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
 /*
  * What follows the panel's openness (data-p): --p is written on each by gesture.ts and transitions between settled
- * values; while a finger moves the panel, it tracks the finger exactly. Only clips, transforms and opacity read it -
- * nothing that lays anything out again.
+ * values; while a finger moves the panel, it tracks the finger exactly. Only transforms and opacity read it - nothing
+ * that lays anything out again.
  */
 [data-p] {
   --p: 0;
@@ -58,7 +62,7 @@
   position: absolute;
   inset: 0;
   /* Room for the bar at the panel's foot. */
-  padding-bottom: calc(var(--launcher-head) + var(--gap));
+  padding-bottom: var(--gap);
   display: flex;
   flex-direction: column;
   opacity: calc(1 - var(--p));
@@ -66,46 +70,52 @@
 }
 .home.open .home-content { pointer-events: none; }
 
-.launcher-frame {
-  position: absolute;
-  left: 0;
-  right: 0;
-  /* Down to the screen's foot, under the search pill, the closing dock and the navigation bar: one frost behind all of
-     the drawer, no strip of bare wallpaper at its foot. */
-  bottom: calc(-1 * (48px + var(--strip-height) * (1 - var(--p)) + max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px))));
-  top: calc((1 - var(--p)) * (100% - var(--launcher-head)));
-}
-/* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
-.home .launcher-frame.tile {
-  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
-}
+/*
+ * The panel: from the stage's top down to the screen's foot - over the dock's place, under the search pill and the
+ * navigation bar - one frost behind all of the drawer. The drag moves it up from below the screen and fades it in
+ * (an ease-out, 1 - (1 - p/0.8)^3: ~95% there half-way, whole by 80% of the way, the rest is motion only; closing the
+ * same in reverse); its own compositor layer, so a frame of the drag is a transform and an opacity, nothing else.
+ */
 .launcher {
+  --foot: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px));
+  --fade: calc(1 - min(1, var(--p) * 1.25));
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
-  bottom: 0;
+  bottom: calc(-1 * (48px + var(--strip-height) + var(--foot)));
   display: flex;
   flex-direction: column;
-  clip-path: inset(calc((1 - var(--p)) * (100% - var(--launcher-head))) 0 0 0 round var(--radius) var(--radius) 0 0);
-  /* Closed, only the recent apps take touches; the pages under the rest stay reachable. */
+  transform: translateY(calc((1 - var(--p)) * 100%));
+  opacity: calc(1 - var(--fade) * var(--fade) * var(--fade));
+  will-change: transform, opacity;
   pointer-events: none;
 }
-/* The panel's content, the recent row first: it moves with the top edge as one piece (the clip cuts what's below). */
+/* No search bar at the foot (the search widget): down over the dock's place only. Over an app (pull.tsx): no dock. */
+.home:not(:has(> .bar)) .launcher { bottom: calc(-1 * (var(--strip-height) + var(--foot))); }
+.pull-screen .launcher { bottom: calc(-1 * (48px + var(--foot))); }
+/* The frost (the compositor's blur under it fades with the panel: nativeglass.ts, a region's alpha is its opacity). */
+.launcher-frame { position: absolute; inset: 0; }
+/* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
+.home .launcher-frame.tile {
+  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
+/* The drawer, above the search pill's place. */
 .launcher-inner {
-  height: 100%;
+  position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  transform: translateY(calc((1 - var(--p)) * (100% - var(--launcher-head))));
+  padding-bottom: calc(48px + var(--foot));
 }
-.launcher .strip { pointer-events: auto; }
-.home.open .launcher :is(.drawer, .ai-panel) { pointer-events: auto; }
+.home:not(:has(> .bar)) .launcher-inner { padding-bottom: var(--foot); }
+.home.open .launcher :is(.launcher-frame, .drawer, .ai-panel) { pointer-events: auto; }
+/* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
+.home > .bar { transform: translateY(calc(var(--p) * var(--strip-height))); }
+.home.pill-below > .bar, .pull-screen > .bar { transform: none; }
 
-/*
- * The recent row heads the panel; as the launcher opens it closes towards the top: it moves up by its openness and
- * is clipped by as much from its top, so the icons (full size) disappear into its top edge - with transforms and a
- * clip only. The list under it rides up by the same amount.
- */
+/* A row of recent apps (recentwidget.tsx). */
 .strip {
   flex: none;
   height: var(--strip-height);
@@ -121,8 +131,6 @@
   scroll-padding: 0 4px;
   overscroll-behavior-x: contain;
   touch-action: pan-x;
-  transform: translateY(calc(var(--p) * -1 * var(--strip-height)));
-  clip-path: inset(calc(var(--p) * 100%) 0 0 0);
 }
 /* The apps share the row's width: all of them fit, at up to the strip's icon size. */
 .strip .app { flex: 0 0 calc((100% - 5 * 4px) / 6); min-width: 0; padding: 0; scroll-snap-align: start; }
@@ -187,7 +195,7 @@
   position: absolute;
   left: var(--edge);
   right: var(--edge);
-  bottom: 4px;
+  bottom: var(--pill-foot);
   /* Its own layer, always: the drawer's list scrolling by above it flickered it (a layer re-promoted, re-rastered). */
   will-change: transform;
   contain: paint;
@@ -218,23 +226,23 @@
 .grow.scrolls { overflow-y: auto; }
 
 /*
- * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it closes like a shutter - its bottom edge
- * rises to the bar, cutting the icons off; they keep their size and place. (Its height changes, so the stage above
- * resizes with it; home's grid doesn't re-measure meanwhile - grid.tsx - it's faded out under the launcher.)
+ * The dock: pinned apps under the bar (iOS's dock). As the launcher opens it gives way - down and out, faded by a
+ * third of the way - with its size and place in layout unchanged (the drawer is laid over its place).
  */
 .dock {
-  --dock-open: calc(1 - var(--p));
   position: relative;
   z-index: 3;
-  height: calc(var(--strip-height) * var(--dock-open));
+  height: var(--strip-height);
   margin: 0;
   overflow: hidden;
   display: flex;
   align-items: flex-start;
   padding: 0;
-  /* Its frame goes at the very end, so a closed dock leaves no line under the bar. */
-  border-width: calc(var(--frame) * min(1, var(--dock-open) * 8));
+  transform: translateY(calc(var(--p) * var(--strip-height)));
+  opacity: calc(1 - min(1, var(--p) * 3));
 }
+.home.pill-below .dock { transform: none; }
+.home.open .dock { pointer-events: none; }
 
 /*
  * Home's foot - the recent row (the launcher panel, closed), the bar and the dock - is one sheet: edge to edge, the
@@ -289,9 +297,6 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
   min-height: 0;
   display: flex;
   overflow: hidden;
-  /* Taller by the recent row, and riding up by as much as it closes: open, it reaches the panel's foot. */
-  margin-bottom: calc(-1 * var(--launcher-head));
-  transform: translateY(calc(var(--p) * -1 * var(--launcher-head)));
 }
 /* PowOS AI's pull-up panel (state.ts pullKind "ai"): its content in the drawer's place, scrolling; its cards on the
    panel's frost are a soft fill (a surface inside a surface). */
@@ -520,17 +525,8 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 
 /* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
 
-/*
- * The drawer's fade, one curve for the frost and what's on it: an ease-out, 1 - (1 - q)^3 with q = p / 0.8 - ~95%
- * there half-way, whole by 80% of the way; the rest of the travel is motion only. Closing, the same in reverse. The
- * compositor's blur under the frost fades with it (nativeglass.ts: a region's alpha is its opacity).
- */
-.home .launcher-frame, .drawer, .ai-panel {
-  --fade: calc(1 - min(1, var(--p) * 1.25));
-  opacity: calc(1 - var(--fade) * var(--fade) * var(--fade));
-}
 .recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
-.recents-face .strip { flex: 1; height: 100%; transform: none; clip-path: none; }
+.recents-face .strip { flex: 1; height: 100%; }
 .recents-face .strip .app { flex-basis: calc((100% - (var(--recent-n) - 1) * 4px) / var(--recent-n)); }
 .recents-face.rows .strip {
   display: grid;
@@ -1015,7 +1011,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-screen .ai-work-chip.on { background: var(--color-accent); }
 /* Its compose bar: the pill (.pill), where home's search sits. */
-.ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + 6px); }
+.ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--pill-foot)); }
 .ai-title { font-size: var(--text-item); font-weight: bold; }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
 .ai-state.busy { color: var(--color-accent); }

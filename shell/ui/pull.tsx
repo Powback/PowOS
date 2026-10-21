@@ -10,6 +10,7 @@
  * the page tells the host (pull.closed / pull.launched) and the window goes.
  */
 import { useEffect } from "preact/hooks";
+import { computed } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { closeDrawer, drawer, pullKind } from "../state.ts";
 import { Bar } from "./bar.tsx";
@@ -38,6 +39,9 @@ powos.on("pull.hide", () => {
   closeDrawer();
 });
 
+/** A finger on the panel: a render when that starts and ends, not one for every frame of the drag. */
+const pullDragging = computed(() => drawerDrag.value != null);
+
 /** How long the panel takes to settle shut (gesture.ts / shell.css --p transition) before the window can go. */
 const SETTLE_MS = 300;
 
@@ -51,10 +55,10 @@ export function Pull() {
     return () => clearTimeout(t);
   }, [open]);
   return (
-    <div class={`home pull-screen ${open ? "open" : ""} ${drawerDrag.value != null ? "dragging" : ""}`} {...homeGestures()}>
+    <div class={`home pull-screen ${open ? "open" : ""} ${pullDragging.value ? "dragging" : ""}`} {...homeGestures()}>
       <div class="stage">
-        <div class="launcher-frame tile" data-p ref={followOpenness} />
         <div class="launcher" data-p ref={followOpenness}>
+          <div class="launcher-frame tile" />
           <div class="launcher-inner">
             <div class="drawer-clip">
               {pullKind.value === "ai" ? (
