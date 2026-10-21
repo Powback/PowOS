@@ -33,7 +33,7 @@
    * shadow it casts.
    */
   --line: transparent;
-  --divider: color-mix(in srgb, var(--color-foreground) 7%, transparent);
+  --divider: color-mix(in srgb, var(--color-foreground) 4%, transparent);
   --soft-fill: color-mix(in srgb, var(--color-foreground) 8%, transparent);
   /* --lift's parts, for a surface made of several (a merged widget group, the foot): its top edge, its shadow. */
   --lift-ring: inset 0 0 0 1px rgb(255 255 255 / 6%);
@@ -60,7 +60,9 @@
   --glass-behind-tint: 58%;
   /* The tint: the theme's background lifted a little towards its foreground (a dark wallpaper reads as glass, not as
      a black slab), see-through by --glass-tint. */
-  --glass-base: color-mix(in srgb, var(--color-foreground) 12%, var(--color-background));
+  --glass-base: color-mix(in srgb, var(--color-foreground) 18%, var(--color-background));
+  /* The one darkening for a page that is mostly text (PowOS AI's): more of the same tint, nothing else. */
+  --glass-dim: 16%;
   --glass-fill: color-mix(in srgb, var(--glass-base) var(--glass-tint), transparent);
 
   --gap: 8px;
