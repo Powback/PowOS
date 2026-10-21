@@ -150,7 +150,8 @@ effect(() => void powos.store.set("pullOverApps", JSON.stringify(pullOverApps.va
  * GpuSpeech.kt SpeechEngines), so it's written there too.
  */
 export const speechEngine = stored("speechEngine", "gpu");
-effect(() => void powos.store.set("speech", JSON.stringify({ engine: speechEngine.value })).catch(() => {}));
+// The object itself: a string is stored quoted (ShellBridge store.set), and the app reads {"engine": ...}.
+effect(() => void powos.store.set("speech", { engine: speechEngine.value }).catch(() => {}));
 /** Opens the pull-up panel with [kind] in it (the pet's long press, a bubble's "more": "ai"). */
 export function openPanel(kind: "apps" | "ai") {
   pullKind.value = kind;
