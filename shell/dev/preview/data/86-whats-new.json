@@ -1,0 +1,7 @@
+{
+ "log": "# Changelog\n\n## Unreleased\n- Widgets size their text from the tile\n\n## 0.5.0 (versionCode 10) \u2013 2026-10-11\n- Home widgets fill their tiles at every size\n- The terminal widget opens full screen on a tap\n- Volume and media controls follow the hardware buttons\n- A slider on a widget keeps its drag from the home page's swipe\n- Fixed: the clock skipped a minute after the phone slept\n\n## 0.4.2 (versionCode 9) \u2013 2026-09-28\n- Notifications widget: clear one with x\n- Faster theme changes\n",
+ "sys": {
+  "launcher": "0.5.0",
+  "android": 15
+ }
+}

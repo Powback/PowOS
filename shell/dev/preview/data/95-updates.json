@@ -1,0 +1,3 @@
+{
+ "pending": "linux-aarch64 6.11.3-1 -> 6.11.4-1\nfirefox 131.0-1 -> 131.0.2-1\nmesa 1:24.2.4-1 -> 1:24.2.5-1\npipewire 1:1.2.5-1 -> 1:1.2.6-1\nkwin 6.2.0-1 -> 6.2.1-1\nplasma-workspace 6.2.0-1 -> 6.2.1-1\nopenssl 3.3.2-1 -> 3.4.0-1\n"
+}
