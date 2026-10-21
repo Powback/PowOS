@@ -1,6 +1,7 @@
 // CDP to the PowOS shell's WebView pages (run by tools/phone/cdp.sh inside powos-vadb's network, port 9333 forwarded).
 //   pages                      the pages (url, title)
 //   eval <suffix> <expr>       evaluate in the page whose url ends with <suffix> ("" = home: the url without ?mode)
+//   net [secs=10]               per page: WebSocket frames (by socket URL) and requests per second
 //   raster [secs=10]            the busiest renderer/GPU/viz trace events (what draws per frame at rest)
 //   idle [secs=20] [suffix]    what every page (or one) does while nothing happens: frames, paints, layouts, style
 //                              recalcs, script time, timers and the CSS/Web animations running - from a devtools.timeline
@@ -79,7 +80,7 @@ if (cmd === "idle") {
     if (d.method === "Tracing.tracingComplete") done();
   });
   const traced = await tracer.send("Tracing.start", {
-    categories: "devtools.timeline,disabled-by-default-devtools.timeline.frame,disabled-by-default-devtools.timeline,blink.animations,cc",
+    categories: "devtools.timeline,disabled-by-default-devtools.timeline.frame,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.stack,blink.animations,cc",
     transferMode: "ReportEvents",
   });
   if (traced.error) console.error("no trace:", traced.error.message, "(another devtools client tracing?)");
@@ -99,6 +100,14 @@ if (cmd === "idle") {
     const count = (name: string) => mine.filter((e) => e.name === name).length;
     const d = (n: string) => metric(after, n) - metric(before, n);
     const timers = new Map<string, number>();
+    // Who asks for frames and timers: the script location that requested them (the .stack category's stackTrace).
+    const askers = new Map<string, number>();
+    for (const e of mine) if (e.name === "RequestAnimationFrame" || e.name === "TimerInstall" || e.name === "ScheduleStyleRecalculation" || e.name === "InvalidateLayout") {
+      const st = e.args?.data?.stackTrace ?? e.args?.beginData?.stackTrace ?? [];
+      const at = st.slice(0, 2).map((f: any) => `${f.functionName || "?"}@${String(f.url).replace(/^.*shell\.powos\//, "")}:${f.lineNumber}`).join(" < ");
+      const k = `${e.name} ${at || "(no stack)"}`;
+      askers.set(k, (askers.get(k) ?? 0) + 1);
+    }
     for (const e of mine) if (e.name === "TimerFire" || e.name === "FireAnimationFrame" || e.name === "Paint") {
       const k = e.name === "Paint" ? `Paint node ${e.args?.data?.nodeId ?? "?"} ${JSON.stringify(e.args?.data?.clip?.slice?.(0, 2) ?? "")}` : `${e.name} ${e.args?.data?.timerId ?? e.args?.data?.id ?? ""}`;
       timers.set(k, (timers.get(k) ?? 0) + 1);
@@ -118,6 +127,7 @@ if (cmd === "idle") {
         scriptMs: per(d("ScriptDuration") * 1000),
       },
       busiest: [...timers].sort((a, b) => b[1] - a[1]).slice(0, 6),
+      askers: [...askers].sort((a, b) => b[1] - a[1]).slice(0, 8),
       runningAnimations: JSON.parse(anims || "[]"),
     });
   }
@@ -125,6 +135,46 @@ if (cmd === "idle") {
   const un = new Map<string, number>();
   for (const e of unattributed) un.set(e.name, (un.get(e.name) ?? 0) + 1);
   console.log(JSON.stringify({ secs, traceEvents: trace.length, pages: out, unattributedPerSec: Object.fromEntries([...un].map(([k, v]) => [k, +(v / secs).toFixed(2)])) }, null, 1));
+  process.exit(0);
+}
+if (cmd === "net") {
+  // net [secs=10]: per page, the network traffic it makes - WebSocket frames (by URL) and requests - observed through
+  // the Network domain over the window. Read-only.
+  const secs = Number(a1 ?? 10);
+  const out = await Promise.all(
+    pages.map(async (p) => {
+      const s = new Session(p.webSocketDebuggerUrl);
+      await s.open;
+      const sockets = new Map<string, string>();
+      const frames = new Map<string, { rx: number; tx: number; bytes: number }>();
+      const reqs = new Map<string, number>();
+      s.events.push((d) => {
+        const m = d.method, q = d.params;
+        if (m === "Network.webSocketCreated") sockets.set(q.requestId, q.url.replace(/[?].*/, ""));
+        if (m === "Network.webSocketFrameReceived" || m === "Network.webSocketFrameSent") {
+          const k = sockets.get(q.requestId) ?? q.requestId;
+          const f = frames.get(k) ?? { rx: 0, tx: 0, bytes: 0 };
+          m.endsWith("Received") ? f.rx++ : f.tx++;
+          f.bytes += q.response?.payloadData?.length ?? 0;
+          frames.set(k, f);
+        }
+        if (m === "Network.requestWillBeSent") {
+          const k = q.request.url.replace(/[?].*/, "").slice(0, 90);
+          reqs.set(k, (reqs.get(k) ?? 0) + 1);
+        }
+      });
+      await s.send("Network.enable");
+      await new Promise((r) => setTimeout(r, secs * 1000));
+      await s.send("Network.disable");
+      const per = (n: number) => +(n / secs).toFixed(2);
+      return {
+        page: short(p.url),
+        wsFramesPerSec: Object.fromEntries([...frames].map(([k, v]) => [k, { rx: per(v.rx), tx: per(v.tx), bytesPerSec: per(v.bytes) }])),
+        requestsPerSec: Object.fromEntries([...reqs].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => [k, per(v)])),
+      };
+    }),
+  );
+  console.log(JSON.stringify(out.filter((o) => Object.keys(o.wsFramesPerSec).length || Object.keys(o.requestsPerSec).length), null, 1));
   process.exit(0);
 }
 if (cmd === "raster") {

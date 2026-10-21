@@ -260,8 +260,10 @@ function frame() {
   if (text !== last) {
     last = text;
     still = 0;
-    counts.sent++;
-    if (!held) send(`b.r ${text}`);
+    if (!held) {
+      counts.sent++;
+      send(`b.r ${text}`);
+    }
   } else {
     still++;
   }
