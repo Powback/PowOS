@@ -37,8 +37,8 @@ import java.io.File
  * ([EdgeGestureClassifier]) - does what the settings say ([EdgeConfig], shell/ui/edge.tsx): Quick Tools by the thumb
  * ([QuickToolsHost]), Back, Home, the switcher, the shade, the assistant, an app...
  *
- * - On PowOS's gesture input ([GestureMonitor]), not a window: a finger down on a handle is taken at once
- *   ([GestureConsumer.takesOnDown]: the app and SystemUI's edge-back gesture under it get a cancel), so SystemUI's back
+ * - On PowOS's gesture input ([GestureMonitor]), not a window: a finger on a handle is taken at its first move
+ *   ([GestureConsumer.takesOnDown]: the app and SystemUI's edge-back gesture under it get a cancel), before SystemUI's back can decide, so it
  *   never races it there; everywhere else - above the handle, the bottom strip ([NavGesture]), the status bar (the
  *   shade's pull) - nothing changes. Back inside a handle is the handle's own action (straight in, by default).
  * - Not on the lock screen, while a shade (PowOS's or SystemUI's) or Quick Tools are open, with the keyboard up (its
@@ -227,6 +227,7 @@ class EdgeGestures(
                 return GestureConsumer.Verdict.DROP
             }
             MotionEvent.ACTION_CANCEL -> {
+                Log.i(TAG, "edge: cancelled (the touch was taken)")
                 finish()
                 endDrag(open = false)
                 return GestureConsumer.Verdict.DROP

@@ -47,15 +47,17 @@ class GestureMonitor private constructor(
                 cancelActive()
                 pilfered = false
                 active = consumers.firstOrNull { runCatching { it.onDown(e) }.onFailure { t -> Log.w(TAG, "gesture consumer failed", t) }.getOrDefault(false) }
-                // A consumer whose zone is all its own (the edge handles): taken on the down, before anything under it
-                // - SystemUI's edge-back gesture included - can decide it's theirs.
-                if (active?.takesOnDown == true) {
-                    pilfered = true
-                    runCatching { monitor.pilferPointers() }.onFailure { Log.w(TAG, "can't take the gesture from the windows", it) }
-                }
             }
             else -> {
                 val consumer = active ?: return
+                // A consumer whose zone is all its own (the edge handles): taken on the first event after the down, before
+                // anything under it - SystemUI's edge-back gesture included - can decide it's theirs. Not on the down
+                // itself: pilfered while the down is still being delivered, the dispatcher sent this monitor a second
+                // down and none of the moves after it (seen 2026-10-21 21:20, "edge: down" twice, no swipe).
+                if (consumer.takesOnDown && !pilfered && e.actionMasked != MotionEvent.ACTION_UP && e.actionMasked != MotionEvent.ACTION_CANCEL) {
+                    pilfered = true
+                    runCatching { monitor.pilferPointers() }.onFailure { Log.w(TAG, "can't take the gesture from the windows", it) }
+                }
                 val verdict = runCatching { consumer.onEvent(e) }.onFailure { Log.w(TAG, "gesture consumer failed", it) }.getOrDefault(GestureConsumer.Verdict.DROP)
                 when (verdict) {
                     GestureConsumer.Verdict.TAKE ->
@@ -144,8 +146,9 @@ interface GestureConsumer {
     }
 
     /**
-     * The gesture is taken from the windows (and the other monitors) as soon as [onDown] says it follows it, not once
-     * recognised: for a zone that's wholly the consumer's, where nothing under it may start a gesture of its own.
+     * The gesture is taken from the windows (and the other monitors) at its first move after [onDown] said it follows
+     * it, not once recognised: for a zone that's wholly the consumer's, where nothing under it may start a gesture of
+     * its own.
      */
     val takesOnDown: Boolean get() = false
 
