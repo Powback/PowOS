@@ -1,6 +1,7 @@
 // CDP to the PowOS shell's WebView pages (run by tools/phone/cdp.sh inside powos-vadb's network, port 9333 forwarded).
 //   pages                      the pages (url, title)
 //   eval <suffix> <expr>       evaluate in the page whose url ends with <suffix> ("" = home: the url without ?mode)
+//   raster [secs=10]            the busiest renderer/GPU/viz trace events (what draws per frame at rest)
 //   idle [secs=20] [suffix]    what every page (or one) does while nothing happens: frames, paints, layouts, style
 //                              recalcs, script time, timers and the CSS/Web animations running - from a devtools.timeline
 //                              trace and Performance.getMetrics deltas. An idle page should show 0 frames and 0 paints.
@@ -124,6 +125,43 @@ if (cmd === "idle") {
   const un = new Map<string, number>();
   for (const e of unattributed) un.set(e.name, (un.get(e.name) ?? 0) + 1);
   console.log(JSON.stringify({ secs, traceEvents: trace.length, pages: out, unattributedPerSec: Object.fromEntries([...un].map(([k, v]) => [k, +(v / secs).toFixed(2)])) }, null, 1));
+  process.exit(0);
+}
+if (cmd === "raster") {
+  // raster [secs=10]: the busiest trace events of the whole WebView (renderer + GPU/viz threads) over the window, by
+  // name and thread, with their total duration - what rasterizes or composites per frame at rest. Read-only.
+  const secs = Number(a1 ?? 10);
+  const tracer = new Session(pages[0].webSocketDebuggerUrl);
+  await tracer.open;
+  const trace: any[] = [];
+  let done!: () => void;
+  const ended = new Promise<void>((r) => (done = r));
+  tracer.events.push((d) => {
+    if (d.method === "Tracing.dataCollected") trace.push(...d.params.value);
+    if (d.method === "Tracing.tracingComplete") done();
+  });
+  const r = await tracer.send("Tracing.start", {
+    categories: "cc,viz,gpu,blink,devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame,toplevel",
+    transferMode: "ReportEvents",
+  });
+  if (r.error) (console.log("no trace:", r.error.message), process.exit(1));
+  await new Promise((res) => setTimeout(res, secs * 1000));
+  await tracer.send("Tracing.end");
+  await Promise.race([ended, new Promise((res) => setTimeout(res, 10000))]);
+  const threads = new Map<string, string>();
+  for (const e of trace) if (e.name === "thread_name") threads.set(`${e.pid}:${e.tid}`, e.args?.name);
+  const agg = new Map<string, { n: number; ms: number }>();
+  for (const e of trace) {
+    if (e.ph !== "X" && e.ph !== "B" && e.ph !== "I" && e.ph !== "i") continue;
+    const k = `${threads.get(`${e.pid}:${e.tid}`) ?? e.tid} ${e.name}`;
+    const a = agg.get(k) ?? { n: 0, ms: 0 };
+    a.n++;
+    a.ms += (e.dur ?? 0) / 1000;
+    agg.set(k, a);
+  }
+  const top = [...agg].sort((x, y) => y[1].ms - x[1].ms).slice(0, 30);
+  console.log(`${trace.length} events in ${secs}s; per second:`);
+  for (const [k, v] of top) console.log(`${(v.n / secs).toFixed(1).padStart(7)}/s ${(v.ms / secs).toFixed(1).padStart(7)} ms/s  ${k}`);
   process.exit(0);
 }
 console.log("usage: pages | eval <suffix> <expr> | idle [secs] [suffix]");
