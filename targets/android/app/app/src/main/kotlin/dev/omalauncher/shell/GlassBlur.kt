@@ -265,8 +265,13 @@ internal class GlassBlur(
     fun wholeWindow(radiusPx: Float): Boolean {
         if (checked == null && !broken) check()
         if (broken || checked != true) return false
-        if (whole == radiusPx) return true
-        whole = radiusPx
+        // The guard: home's whole window is blurred only while the switcher is up (its depth) - never left on over home
+        // by a lost settle or a stale animation ("home wallpaper randomly fully blurred", 2026-10-21).
+        val r = if (radiusPx >= 1f && !dev.omalauncher.system.Switcher.open) 0f.also {
+            Log.w(TAG, "whole-window blur ${radiusPx.toInt()} px refused: the switcher isn't up")
+        } else radiusPx
+        if (whole == r) return true
+        whole = r
         set(regions, -1)
         return true
     }
