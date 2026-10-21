@@ -201,6 +201,5 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   -webkit-backdrop-filter: none;
 }
 .glass-behind :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
-html[data-mode="assist"] { --glass-behind-tint: 84%; }
 
 .muted { color: var(--color-muted); }

@@ -87,7 +87,7 @@ const SCENES = [
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
   ["notifications", "home", "S.panel.value = 'notifications'; S.notif.value = true;", "wallpaper"],
   ["settings", "home", "(await U('./screens.ts')).openScreen('settings');", "wallpaper"],
-  ["assist", "assist", "", "app"],
+  ["assist", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
   ["shade", "shade", "", "blurred"],
   ["control", "shade", "S.panel.value = 'control';", "blurred"],
   ["switcher", "recents", "E.emit('recents.show', { open: true, from: 100, tasks: await (await U('./bridge.ts')).powos.tasks.list() });", "blurred"],
@@ -235,6 +235,8 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
             root.style.setProperty("--inset-top", `${insets.top}px`);
             root.style.setProperty("--inset-bottom", `${insets.bottom}px`);
             // What the window is over, drawn behind the page (the WebView's own background is the wallpaper/app).
+            // A stand-in app screen (the assistant's window is over one): a header, rows - drawn 1:1 behind the page.
+            window.__shotsApp = "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${innerWidth}" height="${innerHeight}"><rect width="100%" height="100%" fill="#f6f6f6"/><rect width="100%" height="110" fill="#3b6fb6"/><text x="20" y="80" font-family="sans-serif" font-size="28" fill="#fff">Inbox</text>${Array.from({ length: 9 }, (_, i) => `<rect x="20" y="${140 + i * 80}" width="${innerWidth - 40}" height="60" rx="8" fill="#e2e2e2"/><text x="36" y="${178 + i * 80}" font-family="sans-serif" font-size="18" fill="#333">Message ${i + 1}</text>`).join("")}</svg>`);
             const back = document.createElement("style");
             const pic = `url("${wp}") center / cover no-repeat fixed`;
             back.textContent =
@@ -242,7 +244,7 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
                 ? `html { background: ${pic}; }`
                 : behind === "blurred"
                   ? `html::before { content: ""; position: fixed; inset: -40px; z-index: -1; background: ${pic}; filter: blur(30px) brightness(.8); }`
-                  : `html { background: linear-gradient(#f4f4f4 0 12%, #fff 12%) ; }`;
+                  : `html { background: url("${window.__shotsApp}") 0 0 / 100% 100% no-repeat; }`;
             document.head.append(back);
             // Home's live glass, as the compositor draws it: each top-level glass surface blurs what's behind it.
             if (root.dataset.mode === "home") {
@@ -262,6 +264,9 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
         .catch((e) => errors.push(`setup: ${e.message.split("\n")[0]}`));
       step("setup");
       await sleep(900);
+      // SHOTS_PROBE: an expression evaluated in the page once it settled, its value printed (debugging a render).
+      if (process.env.SHOTS_PROBE)
+        console.log(`probe ${name}-${sizeName}:`, JSON.stringify(await page.evaluate(process.env.SHOTS_PROBE).catch((e) => e.message)));
       const out = path.join(OUT, `${name}-${sizeName}.png`);
       await page.screenshot({ path: out });
       // Contrast: the same frame without its text, under each run of text.

@@ -72,6 +72,12 @@ brings up the drawer, and a swipe up from the left half brings up PowOS AI's pan
   as before.
 - PowOS AI's sideways page stays either way.
 
+### The exception: the assistant overlay
+
+The side button's overlay (`?mode=assist`) shows the real screen 1:1 so it can be circled. It gets no glass, no
+tint over the shot, and a solid panel. Its styles are yesterday's (before `be049e7`), restored on 2026-10-21.
+`glass.ts` leaves this page alone.
+
 ## 4. Colour
 
 Colours come from the active theme only: `--color-*`, `--glass-*`, `--soft-fill`. No raw colours in

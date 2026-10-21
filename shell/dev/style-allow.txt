@@ -17,3 +17,7 @@ ui/shell.css .ai-unit.orphan { box-shadow: inset 3px 0 0 var(--color-accent); } 
 ui/shell.css background: rgb(0 0 0 / 0.55);  # AUDIT: the notification panel's page dim on home
 ui/shell.css background: rgb(0 0 0 / 0.25);  # AUDIT: the assistant's dim over the app
 ui/shell.css html[data-mode="lock"] { background: rgb(0 0 0 / calc(0.55  # AUDIT: the lock face's page dim
+ui/shell.css border: var(--frame) solid var(--color-border); }  # assist: yesterday's look restored (the exception: the real screen 1:1)
+ui/shell.css .assist-ask { display: flex;  # assist: yesterday's look restored (the exception)
+ui/shell.css .assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent);  # assist: yesterday's look restored (the exception)
+ui/shell.css .assist-live { font:  # assist: yesterday's look restored (the exception)

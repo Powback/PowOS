@@ -113,13 +113,14 @@ function refrost(): Promise<void> {
 /**
  * Which way each page gets its glass: home and the lock face stand on the wallpaper (the frosted copy); the shade's
  * and the switcher's windows have what's behind them blurred by the host (tint only); the assistant's is over an app
- * it circles on, not blurred (tint only, more of it). The rest (the screen-off clock, the glasses') have none.
+ * it circles on: none at all (the real screen 1:1). The rest (the screen-off clock, the glasses') have none.
  */
 const OVER_WALLPAPER = new Set(["home", "lock"]);
-const TINT_ONLY = new Set(["shade", "recents", "assist"]);
+// Not the assistant's: it shows the real screen 1:1 for circling - no glass, no tint (docs/DESIGN-LANGUAGE.md).
+const TINT_ONLY = new Set(["shade", "recents"]);
 
 function use(g: GlassSource | null) {
-  root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && (g != null || mode === "assist"));
+  root.classList.toggle("glass-behind", TINT_ONLY.has(mode) && g != null);
   source = OVER_WALLPAPER.has(mode) ? (g?.wallpaper?.url ?? null) : null;
   void refrost();
 }

@@ -1081,7 +1081,12 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
 .aod-apps { display: flex; gap: 10px; margin-top: 14px; }
 .aod-apps img { width: 22px; height: 22px; border-radius: 6px; opacity: 0.7; filter: grayscale(0.4); }
 
-/* PowOS AI over another app (assist.tsx): the app dimmed a little, the panel at the bottom above the keyboard. */
+/*
+ * PowOS AI over another app (assist.tsx) - the design language's one exception (docs/DESIGN-LANGUAGE.md): it shows the
+ * real screen 1:1 for circling, so no glass and no tint over the shot; its panel solid. These are yesterday's styles
+ * (before be049e7), restored after the glass work changed the overlay (2026-10-21: the screenshot drawn twice/zoomed -
+ * the APK's assist.tsx lost its .assist-shot sizing when the newer shell.css shipped without it).
+ * PowOS AI over another app (assist.tsx): the app dimmed a little, the panel at the bottom above the keyboard. */
 html[data-mode="assist"] .assist {
   position: fixed;
   inset: 0;
@@ -1093,19 +1098,33 @@ html[data-mode="assist"] .assist {
 }
 /* Solid: over another app, what's under it would show through the field. */
 .assist-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-height: 75%; background: var(--color-background); }
-/* The shared chat surface in the panel (assistant.ts): the conversation above, the home pill under it. */
-.assist-panel .chat { flex: 1 1 auto; min-height: 0; }
-.assist-panel .bar { flex: none; }
-.assist-attach { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid transparent; background: color-mix(in srgb, var(--color-accent) 16%, transparent); color: var(--color-accent); }
-.assist-attach .chip.off { border-color: var(--line); background: var(--soft-fill); color: var(--color-muted); }
-.assist-attach .chip { box-shadow: var(--lift); }
+.assist-head { display: flex; align-items: center; gap: 10px; }
+.assist-shot { width: 36px; height: 64px; object-fit: cover; border-radius: 6px; border: var(--frame) solid var(--color-border); }
+.assist-shot.blank { background: var(--color-surface); }
+.assist-title { font-weight: bold; }
+.assist-sub { flex: 1; font-size: var(--text-small); }
+.assist-open { font: var(--text-small) var(--font); color: var(--color-accent); }
+.assist-panel .ai-card { overflow-y: auto; min-height: 0; }
+.assist-ask { display: flex; align-items: center; gap: var(--gap); min-height: 46px; padding: 0 4px 0 10px; border: var(--frame) solid var(--color-border); border-radius: var(--radius); }
+.assist-ask input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--color-foreground); font: var(--text-item) var(--font); }
+.assist-ask .mic { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius); color: var(--color-foreground); touch-action: none; }
+.assist-ask .mic.on { background: var(--color-red); color: var(--color-background); }
+.assist-attach { display: flex; gap: 6px; flex-wrap: wrap; }
+.assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent); color: var(--color-accent); }
+.assist-attach .chip.off { border-color: var(--color-border); color: var(--color-muted); }
 /* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
 .assist-draw { position: absolute; inset: 0; touch-action: none; }
 .assist-panel { position: relative; z-index: 1; }
+/* Solid whatever the page's glass says (html.glass-behind tints tiles): nothing of the app shows through the panel. */
+html[data-mode="assist"] .assist-panel.tile { background: var(--color-background); backdrop-filter: none; -webkit-backdrop-filter: none; }
+/* The shared chat surface in the panel (assistant.ts), when the newer assist.tsx is in: the conversation, the pill. */
+.assist-panel .chat { flex: 1 1 auto; min-height: 0; }
+.assist-panel .bar { flex: none; }
 .assist-hint { font-size: var(--text-small); }
 .crop-stroke { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .crop-stroke polyline { fill: none; stroke: var(--color-accent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
+.assist-live { font: var(--text-small) var(--font); padding: 4px 10px; border-radius: 999px; border: var(--frame) solid var(--color-border); color: var(--color-foreground); }
+.assist-live.on { border-color: var(--color-red); color: var(--color-red); }
 /* Live mode: the app under it in use - no dimming, nothing but the bar takes touches. */
 html[data-mode="assist"] .assist.live { background: none; pointer-events: none; }
 .assist.live .assist-panel { pointer-events: auto; max-height: 45%; }
