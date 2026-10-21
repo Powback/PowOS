@@ -244,6 +244,10 @@ class ShellHost(
                 bootReady = true
                 return@probe
             }
+            if (bootError == null && after < BOOT_SLOW_MS) {
+                main.postDelayed({ checkBoot(serial, BOOT_SLOW_MS) }, BOOT_SLOW_MS - after)
+                return@probe
+            }
             bootFailed = true
             val cause = bootError ?: "no window.__powosAlive ${after / 1000} s after the page started loading, and no error reported"
             ShellErrors.notReady(context, mode ?: "home", "${after / 1000} s after load: $cause")
@@ -435,9 +439,13 @@ class ShellHost(
     companion object {
         private const val TAG = "PowosShell"
 
-        /** A page that reported an error has this long to be ready; one that didn't, [BOOT_MS]. */
+        /** A page that reported an error has this long to be ready; one that didn't, [BOOT_MS] - and if it's still not
+         *  up then with no error, [BOOT_SLOW_MS]: a slow start, not a broken one (a cold boot after the battery ran out:
+         *  load 13, the low-memory killer busy, a renderer restarted - five pages "not ready" at 8 s, all fine by 20 s,
+         *  2026-10-21). A broken page reports its error and is judged at [BOOT_ERROR_MS] as before. */
         private const val BOOT_ERROR_MS = 3_000L
         private const val BOOT_MS = 8_000L
+        private const val BOOT_SLOW_MS = 20_000L
 
         /** Where the page lives: never resolved, every request is answered from the app. */
         const val ORIGIN = ShellOrigin.SHELL
