@@ -292,6 +292,32 @@ internal class WallpaperBackdrop(
         /** Home's window surface, while home is up (ShellActivity sets it): left out of a display capture. */
         @Volatile var homeWindow: (() -> SurfaceControl?)? = null
 
+        /** The system bars' heights over home, px (top, bottom): painted over in a display capture's picture. */
+        @Volatile var homeBars: (() -> Pair<Int, Int>)? = null
+
+        /**
+         * The status and navigation bars in a display capture painted over with the wallpaper's pixels just inside
+         * them (each bar strip filled with the row next to it): a page drawing this picture under itself must not
+         * draw a second, blurred copy of the bars.
+         */
+        private fun fillBars(
+            b: Bitmap,
+            scale: Float,
+        ) {
+            val (top, bottom) = homeBars?.invoke() ?: return
+            val t = kotlin.math.ceil(top * scale).toInt().coerceIn(0, b.height / 3)
+            val u = kotlin.math.ceil(bottom * scale).toInt().coerceIn(0, b.height / 3)
+            val row = IntArray(b.width)
+            if (t > 0) {
+                b.getPixels(row, 0, b.width, 0, t, b.width, 1)
+                for (y in 0 until t) b.setPixels(row, 0, b.width, 0, y, b.width, 1)
+            }
+            if (u > 0) {
+                b.getPixels(row, 0, b.width, 0, b.height - u - 1, b.width, 1)
+                for (y in b.height - u until b.height) b.setPixels(row, 0, b.width, 0, y, b.width, 1)
+            }
+        }
+
         /** All but black: a 16 x 16 grid of its pixels darker than 8 in every channel. */
         fun black(b: Bitmap): Boolean {
             for (y in 0 until 16) for (x in 0 until 16) {
@@ -343,7 +369,10 @@ internal class WallpaperBackdrop(
                 val buffer = got!!
                 val hw = m.asBitmap.invoke(buffer) as Bitmap? ?: return null
                 runCatching { (m.hardwareBuffer.invoke(buffer) as android.hardware.HardwareBuffer).close() }
-                return hw.copy(Bitmap.Config.ARGB_8888, false).also { hw.recycle() }
+                return hw.copy(Bitmap.Config.ARGB_8888, true).also {
+                    hw.recycle()
+                    fillBars(it, scale)
+                }
             } catch (e: Throwable) {
                 Log.w(TAG, "no still of the display", e)
                 return null

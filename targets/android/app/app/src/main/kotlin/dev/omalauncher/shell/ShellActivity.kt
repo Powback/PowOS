@@ -54,7 +54,13 @@ class ShellActivity : Activity() {
         // The switcher is a layer of this page: the gestures and the overview button reach it here.
         val blur = WindowBlur(window, glass = host::wholeWindow)
         // Home's window, left out when the wallpaper's picture is taken from the display (WallpaperBackdrop.still).
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) WallpaperBackdrop.homeWindow = { if (inFront) host.windowSurface() else null }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            WallpaperBackdrop.homeWindow = { if (inFront) host.windowSurface() else null }
+            WallpaperBackdrop.homeBars = {
+                val bars = window.decorView.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())
+                (bars?.top ?: 0) to (bars?.bottom ?: 0)
+            }
+        }
         dev.omalauncher.system.Switcher.attach(host.bridge, { host.highRefresh?.boost(it) }, blur::set)
         // Opened from the agents' notification: the page opens the Agents screen.
         dev.omalauncher.AgentsSpool.opened(intent)
