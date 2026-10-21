@@ -18,15 +18,16 @@
 #        (Asleep/Dozing), or Awake with no touch for IDLE_S; exit 1 after MAX_S without that. The waiting runs ON THE
 #        PHONE (a local 5 s check) over one held adb connection - no VPN round trip per check. Agents never poll the
 #        phone in loops (docs/AGENT-HANDBOOK.md); this is what to call instead.
+#        AWAKE_ONLY=1: return only for Awake + idle (a check that needs the screen on waits through doze; never wakes it).
 here=$(dirname "$0")
 if [ "${1:-}" = "--wait" ]; then
-  need=${2:-60}; max=${3:-600}
+  need=${2:-60}; max=${3:-600}; awake=${AWAKE_ONLY:-0}
   "$0" >/dev/null   # starts the touch watcher if it isn't running
   out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $max )); while [ \$(date +%s) -lt \$end ]; do
       touch /data/local/tmp/powos-touchmon.ask
       w=\$(dumpsys power | grep -m1 mWakefulness= | cut -d= -f2)
       t=\$(( \$(date +%s) - \$(cat /data/local/tmp/powos-lasttouch 2>/dev/null || date +%s) ))
-      case \$w in Asleep|Dozing) echo idle=\$t screen=\$w; exit 0 ;; Awake) [ \$t -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
+      case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
       sleep 5
     done; echo timeout" 2>/dev/null | tr -d '\r' | tail -1)
   echo "$out"
