@@ -11,6 +11,15 @@ here=$(cd "$(dirname "$0")" && pwd)
 phone=$(cd "$here/../../../tools/phone" && pwd)
 secs=${1:-12}
 shift || true
+# One injected-touch test on the phone at a time (journey.sh's lock; ship-apk.sh won't install over it): agents
+# measuring in parallel would swipe into each other's runs. Waited for here on the Mac - nothing reaches the phone.
+L=$HOME/.cache/powos-verify.lock; n=0
+until mkdir "$L" 2>/dev/null; do
+  [ $n -ge 120 ] && { echo "drag-raster: verify lock busy for an hour: $(cat "$L/who" 2>/dev/null)"; exit 4; }
+  [ $n = 0 ] && echo "drag-raster: waiting for $(cat "$L/who" 2>/dev/null || echo another phone test)"
+  n=$((n + 1)); sleep 30
+done
+echo "drag-raster $* $(date +%T) (pid $$)" > "$L/who"; trap 'rm -rf "$L"' EXIT
 AWAKE_ONLY=1 "$phone/idle.sh" --wait 120 1800 || { echo "drag-raster: no free window"; exit 3; }
 fg=$("$phone/adb.sh" shell "dumpsys activity activities | grep -m1 topResumedActivity")
 [[ "$fg" == *HomeShell* ]] || { echo "drag-raster: home isn't in front ($fg)"; exit 3; }
