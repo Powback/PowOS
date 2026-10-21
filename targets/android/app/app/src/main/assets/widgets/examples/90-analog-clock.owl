@@ -9,21 +9,77 @@ widget "analog clock" {
   let m = num(fmtTime(now, "m"))
   let s = num(fmtTime(now, "s"))
 
-  // Drawing happens in dp; 0 degrees is 12 o'clock and angles run clockwise.
-  Canvas {
-    let cx = width / 2
-    let cy = height / 2
-    let r = min(width, height) / 2 - 4
+  // A round face leaves a non-square tile's sides (or top and bottom) empty: there the time and the date go beside it
+  // (a wide tile) or under it (a tall one), sized from the tile (monospace: 0.6 em a character, 1.4 em a line).
+  let iw = tileWidth == null ? 154 : tileWidth - 24
+  let ih = tileHeight == null ? 154 : tileHeight - 24
+  let wide = iw > ih * 1.2
+  let tall = ih > iw * 1.3
+  let d = wide ? ih : tall ? min(iw, ih * 0.6) : min(iw, ih)
+  let restW = wide ? iw - d - 12 : iw
+  let restH = tall ? ih - d - 8 : ih
+  // The date as "Wed 21 Oct", "21 Oct" where that's too wide, nothing where even that is.
+  let long = fmtTime(now, "EEE d MMM")
+  let short = fmtTime(now, "d MMM")
+  let day = restW / (len(long) * 0.6) >= 10 ? long : restW / (len(short) * 0.6) >= 9 ? short : ""
+  let ts1 = clamp(floor(min(restW / (5 * 0.6), (wide ? restH * 0.5 : restH * 0.6) / 1.4)), 12, 120)
+  let ds = day == "" ? 0 : clamp(floor(min(restW / (len(day) * 0.6), ts1 * 0.42)), 9, 40)
+  // A tall narrow tile: the time stacked (hours over minutes) where that's a third bigger.
+  let ts2 = clamp(floor(min(restW / (2 * 0.6), (restH - ds * 1.4) / 2.8)), 12, 160)
+  let stacked = tall && ts2 > ts1 * 1.3
+  let ts = stacked ? ts2 : ts1
 
-    circle(cx, cy, r, stroke: border, width: 2)
-    for i in range(12) {
-      rotate(i * 30, cx, cy) {
-        line(cx, cy - r + 4, cx, cy - r + (i % 3 == 0 ? 14 : 9), stroke: i % 3 == 0 ? foreground : muted, width: 2, cap: round)
+  // Drawing happens in dp; 0 degrees is 12 o'clock and angles run clockwise.
+  component Face(size) {
+    Canvas {
+      width: size
+      height: size
+
+      let cx = width / 2
+      let cy = height / 2
+      let r = min(width, height) / 2 - 4
+
+      circle(cx, cy, r, stroke: border, width: 2)
+      for i in range(12) {
+        rotate(i * 30, cx, cy) {
+          line(cx, cy - r + 4, cx, cy - r + (i % 3 == 0 ? 14 : 9), stroke: i % 3 == 0 ? foreground : muted, width: 2, cap: round)
+        }
+      }
+      rotate((h % 12 + m / 60) * 30, cx, cy) { line(cx, cy, cx, cy - r * 0.5, stroke: foreground, width: 5, cap: round) }
+      rotate((m + s / 60) * 6, cx, cy) { line(cx, cy, cx, cy - r * 0.75, stroke: foreground, width: 3, cap: round) }
+      rotate(s * 6, cx, cy) { line(cx, cy + r * 0.15, cx, cy - r * 0.85, stroke: red, width: 1.5, cap: round) }
+      circle(cx, cy, 4, fill: accent)
+    }
+  }
+
+  if wide {
+    Row {
+      gap: 12; align: center; fill: true
+      Face { size: d }
+      Column {
+        weight: 1; gap: 0; align: center
+        Text { text: fmtTime(now, "HH:mm"); fontSize: ts; align: center; maxLines: 1 }
+        if day != "" { Text { text: day; fontSize: ds; color: muted; align: center; maxLines: 1 } }
       }
     }
-    rotate((h % 12 + m / 60) * 30, cx, cy) { line(cx, cy, cx, cy - r * 0.5, stroke: foreground, width: 5, cap: round) }
-    rotate((m + s / 60) * 6, cx, cy) { line(cx, cy, cx, cy - r * 0.75, stroke: foreground, width: 3, cap: round) }
-    rotate(s * 6, cx, cy) { line(cx, cy + r * 0.15, cx, cy - r * 0.85, stroke: red, width: 1.5, cap: round) }
-    circle(cx, cy, 4, fill: accent)
+  } else {
+    if tall {
+      Column {
+        gap: 4; align: center; justify: center; fill: true
+        Face { size: d }
+        if stacked {
+          Text { text: fmtTime(now, "HH"); fontSize: ts; align: center; maxLines: 1 }
+          Text { text: fmtTime(now, "mm"); fontSize: ts; align: center; maxLines: 1 }
+        } else {
+          Text { text: fmtTime(now, "HH:mm"); fontSize: ts; align: center; maxLines: 1 }
+        }
+        if day != "" { Text { text: day; fontSize: ds; color: muted; align: center; maxLines: 1 } }
+      }
+    } else {
+      Box {
+        fill: true; align: center
+        Face { size: d }
+      }
+    }
   }
 }
