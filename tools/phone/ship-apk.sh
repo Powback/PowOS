@@ -41,7 +41,15 @@ until mkdir "$lock" 2>/dev/null; do
 done
 echo "$(git rev-parse --short HEAD) $(git branch --show-current) pid $$ $(date +%H:%M:%S)" > "$lock/who"
 trap 'rm -rf "$lock"' EXIT
-targets/android/build-app.sh 2>&1 | grep -E "^e: |BUILD|version code|refus|error:" 
+# The commit's own shell must load before it's built in: the APK ships it whole, and an install resets the overrides
+# that may have covered for it (17:09: 5130d98's home.tsx imported a gesture.ts export only a later commit added -
+# every page failed to boot after the install). The gate on HEAD alone: tsc + every page booted.
+if ! READY_MS=${READY_MS:-30000} IDLE_MS=0 bash shell/dev/gate.sh > "${TMPDIR:-/tmp}/ship-apk-gate.log" 2>&1; then
+  grep -vE "^ok " "${TMPDIR:-/tmp}/ship-apk-gate.log" | tail -8 >&2
+  echo "ship-apk: REFUSED - this commit's shell doesn't load (above); fix it on origin first" >&2
+  exit 3
+fi
+targets/android/build-app.sh 2>&1 | grep -E "^e: |BUILD|version code|refus|error:"
 apk=$HOME/Projects/android-app-dev/output/powos.apk
 if [ -z "$now" ]; then
   # Never install over an active user (it restarts their session): wait up to SHIP_WAIT_MIN (default 60) minutes for
