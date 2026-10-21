@@ -59,6 +59,8 @@ export interface Db {
   error?: string;
   /** Bumped on every (re)connect: a hook keyed on it resubscribes. */
   epoch: number;
+  /** Tables whose bindings don't match the server's (undecodable): not subscribed (see undecodable). */
+  stale?: string[];
 }
 
 interface Entry extends Db {
@@ -77,26 +79,107 @@ function changed(e: Entry) {
   for (const l of e.listeners) l();
 }
 
+/**
+ * A message the SDK couldn't decode (its rows don't fit the bindings: a module published with other tables than the
+ * bindings were generated from - local-pet's `overlay` column, 2026-10-21 - or a truncated message). The SDK throws it
+ * out of its socket handler, an unhandled rejection with no name on it. Instead: which tables differ from the server's
+ * (its schema over HTTP), reported with the database's name; those aren't subscribed again, and the database gets a
+ * new connection - everyone else on it resubscribes.
+ */
+async function undecodable(e: Entry, conn: unknown, err: unknown) {
+  if (e.conn !== conn) return;
+  try {
+    e.conn?.disconnect();
+  } catch {}
+  e.conn = null;
+  e.status = "error";
+  e.error = String((err as Error)?.message ?? err);
+  changed(e);
+  const stale: string[] = [];
+  try {
+    const s = await (await fetch(`${STDB_URL.replace("ws", "http")}/v1/database/${e.database}/schema?version=9`)).json();
+    for (const t of Object.values<any>(e.make.builder().remoteModule.tables)) {
+      const live = s.tables.find((x: any) => x.name === t.sourceName);
+      const want = live ? s.typespace.types[live.product_type_ref].Product.elements.map((c: any) => c.name.some) : [];
+      const have = Object.entries<any>(t.columns).map(([k, c]) => c.columnMetadata?.name ?? k);
+      if (want.join() !== have.join()) stale.push(`${t.sourceName} (bindings: ${have.join(", ")}; server: ${want.join(", ") || "no such table"})`);
+    }
+  } catch {}
+  e.stale = stale.map((t) => t.split(" ")[0]);
+  (window as any).__powosBoot?.report(
+    "stdb",
+    `${e.database}: a message didn't decode (${e.error}) - ` +
+      (stale.length ? `bindings stale for ${stale.join("; ")}: not subscribed` : "reconnecting"),
+  );
+  window.setTimeout(() => {
+    if (entries.get(e.database) === e && e.users > 0 && !e.conn) connect(e);
+  }, 3000);
+}
+
+/** The SDK's socket, its message handler in a try (undecodable): through the builder's public connection factory. */
+function guarded(b: any, e: Entry) {
+  const make = b.dbConnectionCtor;
+  let conn: unknown;
+  b.dbConnectionCtor = (cfg: any) =>
+    (conn = make({
+      ...cfg,
+      createWSFn: async (args: unknown) => {
+        const ws = await cfg.createWSFn(args);
+        return {
+          get protocol() {
+            return ws.protocol;
+          },
+          get readyState() {
+            return ws.readyState;
+          },
+          set onopen(f: any) {
+            ws.onopen = f;
+          },
+          set onclose(f: any) {
+            ws.onclose = f;
+          },
+          set onerror(f: any) {
+            ws.onerror = f;
+          },
+          set onmessage(f: any) {
+            ws.onmessage = (m: unknown) => {
+              try {
+                f(m);
+              } catch (err) {
+                void undecodable(e, conn, err);
+              }
+            };
+          },
+          send: (d: unknown) => ws.send(d),
+          close: () => ws.close(),
+        };
+      },
+    }));
+  return b;
+}
+
 function connect(e: Entry) {
   let token: string | undefined;
   try {
     token = localStorage.getItem(tokenKey(e.database)) ?? undefined;
   } catch {}
   e.status = "connecting";
-  e.conn = e.make
-    .builder()
+  const mine = (c: unknown) => c === e.conn;
+  e.conn = guarded(e.make.builder(), e)
     .withUri(STDB_URL)
     .withDatabaseName(e.database)
     .withToken(token)
     // A dropped socket (the screen off, Doze, a server restart - the supervisor's idle unload) comes back by itself,
     // its subscriptions with it.
     .withAutomaticReconnect()
-    .onAutomaticReconnect(() => {
+    .onAutomaticReconnect((c: unknown) => {
+      if (!mine(c)) return;
       e.status = "connected";
       e.error = undefined;
       changed(e);
     })
-    .onConnect((_c: unknown, _id: unknown, tok: string) => {
+    .onConnect((c: unknown, _id: unknown, tok: string) => {
+      if (!mine(c)) return;
       try {
         localStorage.setItem(tokenKey(e.database), tok);
       } catch {}
@@ -105,11 +188,14 @@ function connect(e: Entry) {
       e.epoch++;
       changed(e);
     })
-    .onDisconnect(() => {
+    // A replaced connection's callbacks (undecodable, new bindings) no longer speak for the database.
+    .onDisconnect((c: unknown) => {
+      if (!mine(c)) return;
       e.status = "disconnected";
       changed(e);
     })
-    .onConnectError((_c: unknown, err: Error) => {
+    .onConnectError((c: unknown, err: Error) => {
+      if (!mine(c)) return;
       // A token from another server (its keys changed): forget it and try anonymously once.
       if (token) {
         try {
@@ -155,6 +241,7 @@ function acquire(database: string, make: Builder, schema?: string): Entry {
     } catch {}
     e.make = make;
     e.schema = schema;
+    e.stale = undefined;
     connect(e);
   }
   clearTimeout(e.drop);
@@ -192,7 +279,7 @@ export function useDb(database: string, make: Builder, schema?: string): Db {
     };
   }, [database, visible, schema]);
   const e = ref.current;
-  return e ? { conn: e.conn, status: e.status, error: e.error, epoch: e.epoch } : { conn: null, status: "disconnected", epoch: 0 };
+  return e ? { conn: e.conn, status: e.status, error: e.error, epoch: e.epoch, stale: e.stale } : { conn: null, status: "disconnected", epoch: 0 };
 }
 
 /** A table's rows as [query] subscribes them, live: re-rendered on every insert, update and delete. */
@@ -202,7 +289,7 @@ const accessor = (conn: any, table: string) => conn.db[table] ?? conn.db[table.r
 export function useRows<T = any>(db: Db, table: string, query: string): T[] {
   const [rows, setRows] = useState<T[]>([]);
   useEffect(() => {
-    if (!db.conn || db.status !== "connected") return;
+    if (!db.conn || db.status !== "connected" || db.stale?.includes(table)) return;
     const t = accessor(db.conn, table);
     if (!t) return;
     const refresh = () => setRows([...t.iter()] as T[]);
@@ -235,7 +322,7 @@ export function watchRows<T = any>(database: string, make: Builder, table: strin
     detach?.();
     detach = null;
     const t = e?.conn ? accessor(e.conn, table) : null;
-    if (!e || !t || e.status !== "connected") return;
+    if (!e || !t || e.status !== "connected" || e.stale?.includes(table)) return;
     const refresh = () => onRows([...t.iter()] as T[]);
     t.onInsert(refresh);
     t.onDelete(refresh);
