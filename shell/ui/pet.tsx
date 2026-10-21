@@ -984,7 +984,7 @@ function PetLayer() {
         data-state={s}
         data-night={night(clock.value) ? "" : undefined}
         aria-label={`${name.value}: ${s} - tap to talk, hold for PowOS AI's page`}
-        style={phys ? undefined : { left: `${at.left}px`, top: `${at.top}px` }}
+        style={phys ? { left: "0px", top: "0px" } : { left: `${at.left}px`, top: `${at.top}px` }}
         onPointerDown={(e) => {
           e.stopPropagation();
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
