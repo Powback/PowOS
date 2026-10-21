@@ -13,7 +13,9 @@
   --color-background: #1f1f28;
   --color-surface: #2a2a37;
   --color-foreground: #dcd7ba;
-  --color-muted: #727169;
+  /* Secondary text: the foreground, a little see-through (app.tsx sets it from the theme the same way). */
+  --color-muted: color-mix(in srgb, var(--color-foreground) var(--muted-text), transparent);
+  --muted-text: 84%;
   --color-accent: #7e9cd8;
   --color-border: #54546d;
   --color-red: #e82424;
@@ -35,11 +37,10 @@
   --line: transparent;
   --soft-fill: color-mix(in srgb, var(--color-foreground) 8%, transparent);
   /* --lift's parts, for a surface made of several (a merged widget group, the foot): its top edge, its shadow. */
-  --lift-ring: inset 0 0 0 1px rgb(255 255 255 / 6%);
   --lift-edge: inset 0 1px 0 rgb(255 255 255 / 7%);
   --lift-shadow: 0 6px 20px -10px rgb(0 0 0 / 50%);
   --lift-shadow-up: 0 -6px 20px -12px rgb(0 0 0 / 50%);
-  --lift: var(--lift-ring), var(--lift-edge), var(--lift-shadow);
+  --lift: var(--lift-edge), var(--lift-shadow);
   /* What a control on a panel (a quick setting, a slider, a chip) is filled with: on glass, a soft fill instead. */
   --control-fill: var(--color-surface);
 

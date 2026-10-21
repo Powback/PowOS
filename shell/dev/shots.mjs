@@ -227,8 +227,9 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
             const root = document.documentElement;
             const css = { background: theme.bg, surface: theme.surface, overlay: `color-mix(in srgb, ${theme.bg} 90%, transparent)`, foreground: theme.fg,
               muted: theme.muted, accent: theme.accent, border: theme.border, red: theme.red, green: theme.green };
-            for (const [k, v] of Object.entries(css)) root.style.setProperty(`--color-${k}`, v);
-            root.dataset.light = String(theme.light);
+            // As the host would: through app.tsx's applyTheme (what it derives from the theme included).
+            window.__mockEvents.emit("theme.changed", { name: "shots", light: theme.light, css, colors: { background: theme.bg, foreground: theme.fg } });
+            await new Promise((r) => setTimeout(r, 300)); // the theme crossfade (html.theme-fade, 260 ms)
             root.style.setProperty("--inset-top", `${insets.top}px`);
             root.style.setProperty("--inset-bottom", `${insets.bottom}px`);
             // What the window is over, drawn behind the page (the WebView's own background is the wallpaper/app).
@@ -245,7 +246,7 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
             if (root.dataset.mode === "home") {
               root.classList.add("glass-native");
               const n = document.createElement("style");
-              n.textContent = `.glass-native :is(.tile, .notif-panel):not(:is(.tile, .notif-panel) *) { backdrop-filter: blur(var(--shots-native-blur, 22px)); }`;
+              n.textContent = `.glass-native :is(.tile, .notif-panel):not(:is(.tile, .notif-panel) *) { backdrop-filter: blur(var(--shots-native-blur, 30px)); }`;
               document.head.append(n);
             } else if (window.__glass) window.__glass.use(wp);
             const S = await importShim("./state.ts");

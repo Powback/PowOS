@@ -40,6 +40,9 @@ function applyTheme(t: ThemeColors | null) {
   }
   themed = key;
   for (const [k, v] of Object.entries(t.css)) root.setProperty(`--color-${k}`, v);
+  // Secondary text (--color-muted) is the theme's foreground a little see-through, never the theme's own muted grey:
+  // that one measured 1.5-3.7:1 on the glass, and text keeps >= 4.5:1 on every theme (docs/DESIGN-LANGUAGE.md).
+  root.setProperty("--color-muted", `color-mix(in srgb, ${t.css.foreground} var(--muted-text, 84%), transparent)`);
   for (let i = 0; i < 16; i++) if (t.colors[`color${i}`]) root.setProperty(`--term-color${i}`, t.colors[`color${i}`]);
   if (t.colors.cursor) root.setProperty("--term-cursor", t.colors.cursor);
   // Light or dark: what the glass's tint and frosting follow (theme.css, ui/glass.ts).

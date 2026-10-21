@@ -651,7 +651,7 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
   box-shadow: var(--lift);
 }
 .msg.tool, .msg.note, .msg.ask { font-size: var(--text-small); max-width: 100%; }
-.msg.tool .hint { opacity: 0.7; }
+.msg.tool .hint { color: var(--color-muted); }
 .msg.tool .ok { color: var(--color-accent); }
 .msg.tool .fail, .msg.note.error { color: var(--color-red); }
 .msg.ask { align-self: flex-end; }
@@ -1150,7 +1150,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-tile:active { filter: brightness(1.15); }
 .cc-label { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; }
 .cc-slider .cc-label, .cc-tile.big .cc-label { display: block; white-space: nowrap; text-overflow: ellipsis; }
-.cc-detail { opacity: 0.7; font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-detail { color: var(--color-muted); font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-sliders { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
 .cc-slider {
   position: relative;
