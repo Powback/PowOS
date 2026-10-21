@@ -13,6 +13,12 @@ while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --now) now=1; shi
 lock=$HOME/.cache/powos-ship.lock; mkdir -p "$HOME/.cache"
 # Never ship a build that lacks what's installed: the last shipped commit must be in HEAD (two agents' APKs
 # overwrote each other's work). Rebase onto worktree-powos-multiplatform first.
+# Ship only what's already on origin/worktree-powos-multiplatform: a build from an unpushed commit (8f2a606) left
+# every other agent's next build refused for lacking it.
+git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+if ! git merge-base --is-ancestor HEAD origin/worktree-powos-multiplatform 2>/dev/null; then
+  echo "ship-apk: REFUSED - HEAD isn't on origin/worktree-powos-multiplatform yet: fast-forward/rebase and push first" >&2; exit 3
+fi
 last=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
 if [ -n "$last" ] && ! git merge-base --is-ancestor "$last" HEAD 2>/dev/null; then
   echo "ship-apk: REFUSED - HEAD lacks the installed build's commit $last (git rebase worktree-powos-multiplatform)" >&2; exit 3
