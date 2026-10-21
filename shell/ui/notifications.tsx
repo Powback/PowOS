@@ -92,7 +92,21 @@ const DISMISS = 0.35;
 const FLICK = 0.6;
 const SLOP = 10;
 
-function Card({ n }: { n: PhoneNotification }) {
+interface CardProps {
+  n: PhoneNotification;
+  /** A tap: its own (opens the notification) unless given (a stack's: expand). */
+  onTap?: () => void;
+  /** Slid away: its own dismissal unless given (a stack's: the whole group). */
+  onDismiss?: () => void;
+  /** Whether it can be slid away (a stack: if any of its own can). */
+  clearable?: boolean;
+  /** Its head's name (a group's, "PowOS · updates") and the count of the others under it. */
+  name?: string;
+  more?: number;
+  class?: string;
+}
+
+function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, class: cls = "" }: CardProps) {
   const el = useRef<HTMLDivElement>(null);
   const drag = useRef<{
     x: number;
@@ -110,7 +124,7 @@ function Card({ n }: { n: PhoneNotification }) {
   return (
     <div
       ref={el}
-      class="notif tile"
+      class={`notif tile ${cls}`}
       onPointerDown={(e) => {
         drag.current = {
           x: e.clientX,
@@ -127,7 +141,7 @@ function Card({ n }: { n: PhoneNotification }) {
         const dx = e.clientX - d.x;
         const dy = e.clientY - d.y;
         if (d.sideways == null && Math.hypot(dx, dy) > SLOP) {
-          d.sideways = Math.abs(dx) > Math.abs(dy) && n.clearable;
+          d.sideways = Math.abs(dx) > Math.abs(dy) && clearable;
           if (d.sideways) el.current!.setPointerCapture(e.pointerId);
         }
         if (!d.sideways) return;
@@ -144,9 +158,10 @@ function Card({ n }: { n: PhoneNotification }) {
           const v = d.dx / Math.max(1, performance.now() - d.t);
           if (Math.abs(d.dx) > w * DISMISS || Math.abs(v) > FLICK) {
             settle(Math.sign(d.dx) * w);
-            setTimeout(() => powos.notifications.dismiss(n.key), 180);
+            setTimeout(() => (onDismiss ? onDismiss() : powos.notifications.dismiss(n.key)), 180);
           } else settle(0);
         } else if (d.sideways == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) {
+          if (onTap) return onTap();
           powos.notifications.open(n.key);
           notif.value = false;
         }
@@ -158,13 +173,104 @@ function Card({ n }: { n: PhoneNotification }) {
     >
       <div class="notif-head">
         {n.icon ? <img class="notif-icon" src={n.icon} alt="" /> : <span class="notif-icon blank" />}
-        <span class="notif-app">{n.app}</span>
+        <span class="notif-app">{name ?? n.app}</span>
+        {more > 0 && <span class="notif-more">+{more}</span>}
         <span class="notif-time muted">{ago(n.time)}</span>
       </div>
-      {n.title && <div class="notif-title">{n.title}</div>}
+      {/* PowOS's own: the sender is the group's name already ("PowOS · coder") - not again as its title. */}
+      {n.title && !(name && (name.toLowerCase().endsWith(`· ${n.title.trim().toLowerCase()}`) || (name === UPDATES && n.title.trim().toLowerCase() === "deploy"))) && (
+        <div class="notif-title">{n.title}</div>
+      )}
       {n.text && <div class="notif-text">{n.text}</div>}
       <Actions n={n} />
       {replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
+    </div>
+  );
+}
+
+/** PowOS's deploy notes, one group. */
+const UPDATES = "PowOS · updates";
+/** PowOS's own notifications (the app's agent mail and deploy notes): grouped by who sent them, not as one app. */
+const POWOS = new Set(["com.powos.app", "PowOS AI", "PowOS"]);
+
+interface Group {
+  id: string;
+  name: string;
+  items: PhoneNotification[];
+}
+
+/**
+ * The list as the panel shows it: conversations each on their own at the top (newest first), then one group per app
+ * - Android's group key when it has one (its bundle), PowOS's own per sender (deploy notes: "PowOS · updates") - the
+ * groups by their newest.
+ */
+function grouped(items: PhoneNotification[]): Group[] {
+  const own = (n: PhoneNotification) => POWOS.has(n.pkg ?? "") || POWOS.has(n.app);
+  const convos = items.filter((n) => n.conversation && !own(n)).sort((a, b) => b.time - a.time);
+  const map = new Map<string, Group>();
+  for (const n of items) {
+    if (n.conversation && !own(n)) continue;
+    let id: string;
+    let name = n.app;
+    if (own(n)) {
+      const from = n.title.trim().toLowerCase();
+      id = `powos:${from}`;
+      name = from === "deploy" ? UPDATES : `PowOS · ${n.title}`;
+    } else id = n.group ? `g:${n.pkg ?? n.app}:${n.group}` : `a:${n.pkg ?? n.app}`;
+    const g = map.get(id) ?? { id, name, items: [] };
+    g.items.push(n);
+    map.set(id, g);
+  }
+  const groups = [...map.values()];
+  for (const g of groups) g.items.sort((a, b) => b.time - a.time);
+  groups.sort((a, b) => b.items[0].time - a.items[0].time);
+  return [...convos.map((n) => ({ id: `c:${n.key}`, name: n.app, items: [n] })), ...groups];
+}
+
+/** The stacks open (expanded), by group: a tap on a stack opens it, a tap on its head closes it. */
+const expanded = signal<Set<string>>(new Set());
+const toggle = (id: string) => {
+  const s = new Set(expanded.value);
+  if (s.has(id)) s.delete(id);
+  else s.add(id);
+  expanded.value = s;
+};
+
+/**
+ * One group: a single notification is its card. More than one: a stack - its newest on top with the group's name and
+ * "+N", two slim cards peeking under it; a tap opens it in place (the others unfold under the newest, no jump), its
+ * head closes it again. Slid away, a closed stack dismisses the whole group; open, each card goes on its own.
+ */
+function Stack({ g }: { g: Group }) {
+  const [top, ...rest] = g.items;
+  if (!rest.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
+  const open = expanded.value.has(g.id);
+  const clearAll = () => g.items.filter((n) => n.clearable).forEach((n) => powos.notifications.dismiss(n.key));
+  return (
+    <div class={`notif-stack ${open ? "open" : ""}`} data-depth={Math.min(2, rest.length)}>
+      {open ? (
+        <button type="button" class="notif-group-head" onClick={() => toggle(g.id)}>
+          <span class="notif-app">{g.name}</span>
+          <span class="notif-more">{g.items.length}</span>
+          <span class="notif-fold" aria-label="collapse">⌃</span>
+        </button>
+      ) : null}
+      <Card
+        n={top}
+        name={g.name}
+        class={open ? "in-group" : ""}
+        more={open ? 0 : rest.length}
+        onTap={open ? undefined : () => toggle(g.id)}
+        onDismiss={open ? undefined : clearAll}
+        clearable={open ? top.clearable : g.items.some((n) => n.clearable)}
+      />
+      <div class="notif-rest">
+        <div>
+          {rest.map((n) => (
+            <Card key={n.key} n={n} name={g.name} class="in-group" />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -212,7 +318,7 @@ export function NotificationPanel() {
                     allow the launcher to show your notifications here →
                   </button>
                 ) : items.length ? (
-                  items.map((n) => <Card key={n.key} n={n} />)
+                  grouped(items).map((g) => <Stack key={g.id} g={g} />)
                 ) : (
                   <div class="notif-empty muted">nothing new</div>
                 )}

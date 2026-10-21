@@ -84,6 +84,18 @@ circled. Nothing is drawn over or behind that screen: no frost, no blur, no scal
 - Until the screenshot arrives, and in live mode, the panel is solid.
 - The panel's other styles are the ones from before `be049e7`, restored on 2026-10-21.
 
+### Notifications: grouped, calm
+
+The shade and home's notification panel show one stack per app. Our own notifications are grouped by sender
+instead: deploy notes go into a single "PowOS · updates" group.
+
+- **Grouping:** Android's group key is used when an app sets one. An app's summary notification never gets a
+  card of its own.
+- **Conversations:** shown on their own above the stacks, newest first.
+- **A stack:** its newest notification with the group's name, a "+N" count, and two slim cards peeking under it.
+  A tap unfolds it in place without a jump, and a tap on its head folds it again.
+- **Swipes:** swiping a folded stack dismisses the whole group. In an unfolded group, a swipe dismisses one card.
+
 ## 4. Colour
 
 Colours come from the active theme only: `--color-*`, `--glass-*`, `--soft-fill`. No raw colours in

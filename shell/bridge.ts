@@ -767,6 +767,7 @@ function mock(): Bridge {
           time: now - 120,
           clearable: true,
           profile: null,
+          conversation: true,
         },
         {
           key: "2",
@@ -792,6 +793,10 @@ function mock(): Bridge {
             { title: "Mark read", input: false },
           ],
         },
+        { key: "4", app: "Gmail", icon: null, title: "Weekly digest", text: "12 new posts in your groups.", time: now - 5400, clearable: true, profile: null },
+        { key: "5", app: "Gmail", icon: null, title: "Invoice #4411", text: "Your invoice is ready.", time: now - 9000, clearable: true, profile: null },
+        { key: "6", app: "PowOS AI", icon: null, title: "deploy", text: "Search can sit below the dock.", time: now - 300, clearable: true, profile: null },
+        { key: "7", app: "PowOS AI", icon: null, title: "deploy", text: "Chat in the drawer is easier to read.", time: now - 900, clearable: true, profile: null },
       ];
       const changed = () => events.emit("notifications.changed", { available: true, items });
       return {

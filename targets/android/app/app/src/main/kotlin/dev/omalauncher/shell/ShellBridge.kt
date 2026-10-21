@@ -449,7 +449,8 @@ class ShellBridge(
 
     /**
      * A notification as the page shows it: { key, app, icon, title, text, time, clearable, profile, actions: [{ title,
-     * input }], category } - the panel's, and the shade's heads-up banner's ("shade.peek").
+     * input }], category, pkg, group, conversation } - the panel's (grouped: notifications.tsx), and the shade's
+     * heads-up banner's ("shade.peek").
      */
     fun notificationJson(item: dev.omalauncher.widgets.runtime.Notifications.Item): JSONObject {
         // The app's drawer icon (its own profile's, badge and all, when it's from a work or cloned one).
@@ -465,6 +466,9 @@ class ShellBridge(
             .put("profile", item.profile ?: JSONObject.NULL)
             .put("actions", JSONArray(item.actions.map { JSONObject().put("title", it.title).put("input", it.input) }))
             .put("category", item.category ?: JSONObject.NULL)
+            .put("pkg", item.pkg)
+            .put("group", item.group ?: JSONObject.NULL)
+            .put("conversation", item.conversation)
     }
 
     /** Live mode's state for the page: on or not, frames kept. */

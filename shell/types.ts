@@ -170,6 +170,12 @@ export interface PhoneNotification {
   actions?: { title: string; input: boolean }[];
   /** Notification.category ("alarm", "call", "msg", ...): an alarm's or a call's banner stays up longer. */
   category?: string | null;
+  /** Its app's package (an older host: none). */
+  pkg?: string;
+  /** Android's group key (the app's bundle; its summary is never listed itself), null when it's in none. */
+  group?: string | null;
+  /** A conversation (a messaging-style one): shown on its own, above the groups. */
+  conversation?: boolean;
 }
 /**
  * A recent task, as the switcher (ui/recents.tsx) shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it

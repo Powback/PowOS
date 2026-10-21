@@ -54,3 +54,48 @@
 .ai-mail-clear { font: var(--text-small) var(--font); color: var(--color-accent); background: none; border: 0; padding: 2px 4px; }
 .ai-mail-head { display: flex; justify-content: space-between; align-items: center; }
 .ai-mail-x { font: 16px var(--font); color: var(--color-muted); background: none; border: 0; padding: 0 4px; line-height: 1; }
+
+/*
+ * Grouped notifications (notifications.tsx Stack): a stack is its newest card with two slim ones peeking under it -
+ * the same material, no lines; open, the others unfold under it in place (their height animates, nothing jumps).
+ */
+.notif-more { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--soft-fill); font-size: var(--text-small); }
+.notif-stack { position: relative; flex: none; display: flex; flex-direction: column; }
+.notif-stack > .notif { position: relative; z-index: 1; }
+/* The peeking cards: the stack's own pseudo layers under the top card, narrower and lower each. */
+.notif-stack:not(.open)::before, .notif-stack:not(.open)[data-depth="2"]::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -5px;
+  height: 12px;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--soft-fill);
+  box-shadow: var(--lift-shadow);
+}
+.notif-stack:not(.open)[data-depth="2"]::after { left: 20px; right: 20px; bottom: -10px; opacity: 0.6; }
+.notif-stack:not(.open)[data-depth="2"] { margin-bottom: 10px; }
+.notif-stack:not(.open)[data-depth="1"] { margin-bottom: 5px; }
+/* The rest: folded to nothing, unfolded to its height (a grid row from 0fr to 1fr - an animated auto height). */
+.notif-rest { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.notif-rest > div { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 6px; }
+.notif-stack.open .notif-rest { grid-template-rows: 1fr; }
+.notif-stack.open .notif-rest > div { padding-top: 6px; }
+.notif-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 6px;
+  font: var(--text-small) var(--font);
+  color: var(--color-foreground);
+  background: none;
+  border: 0;
+  text-align: left;
+}
+.notif-fold { flex: none; color: var(--color-muted); }
+/* Inside an open group the head is the group's: each card keeps only its time. */
+.notif.in-group .notif-icon, .notif.in-group .notif-app { display: none; }
+.notif.in-group { position: relative; }
+.notif.in-group .notif-head { position: absolute; top: 9px; right: 12px; }
+.notif.in-group .notif-title { margin-top: 0; padding-right: 40px; }

@@ -72,6 +72,10 @@ class Notifications(
         val actions: List<Action> = emptyList(),
         /** Notification.category: "alarm" and "call" keep a banner up longer. */
         val category: String? = null,
+        /** The app's group (Notification.getGroup, its bundle; the summary itself is never listed), null: none. */
+        val group: String? = null,
+        /** A conversation (MessagingStyle, or a shortcut-backed message): the shade shows it on its own. */
+        val conversation: Boolean = false,
     )
 
     data class Action(
@@ -94,6 +98,9 @@ class Notifications(
                 Action(a.title?.toString().orEmpty(), a.remoteInputs.orEmpty().any { it.allowFreeFormInput })
             },
             sbn.notification.category,
+            sbn.notification.group,
+            sbn.notification.extras.getString(Notification.EXTRA_TEMPLATE) == "android.app.Notification\$MessagingStyle" ||
+                (sbn.notification.category == Notification.CATEGORY_MESSAGE && sbn.notification.shortcutId != null),
         )
 
     /** Keys of what had a banner (the time it was posted), for once-only alerts' updates. */
