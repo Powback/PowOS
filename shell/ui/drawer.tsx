@@ -1,15 +1,15 @@
 /**
  * The drawer: every app A to Z in one grid, no headings or breaks between letters, with an A-Z bar to tap or slide along
- * (as PowOS's start menu; its "#", for names that don't start with a letter, only when there are any), and under it, by
- * the search pill (thumb reach), a fixed row of the apps opened lately. Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
- * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
+ * (as PowOS's start menu; its "#", for names that don't start with a letter, only when there are any). The apps opened
+ * lately are on the dock's second page and in the switcher, not here. Typing in the bar narrows it to matches, best
+ * first. It's the top of the launcher panel (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
 import { useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import { AppCell } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen } from "./gesture.ts";
-import { apps, byKey, chatting, query, recent } from "../state.ts";
+import { apps, chatting, query } from "../state.ts";
 import type { App } from "../types.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
@@ -48,25 +48,6 @@ export const matches = computed(() => {
     .sort((a, b) => a[0] - b[0] || collator.compare(a[1].label, b[1].label))
     .map(([, app]) => app);
 });
-
-/**
- * The apps opened lately, newest first (the switcher's and the dock's source): one row - as many as fit across, the
- * rest cut off (shell.css .drawer-recents), so folded and unfolded each get a full row.
- */
-function RecentRow() {
-  const shown = recent.value
-    .map((k) => byKey.value.get(k))
-    .filter((a) => a != null)
-    .slice(0, 8);
-  if (!shown.length) return null;
-  return (
-    <div class="grid drawer-recents">
-      {shown.map((app) => (
-        <AppCell key={app.key} app={app} draggable />
-      ))}
-    </div>
-  );
-}
 
 /** Tap a letter or slide along the bar: the list jumps there at once, every letter the finger crosses. */
 function LetterBar({ onPick }: { onPick: (letter: string) => void }) {
@@ -143,7 +124,6 @@ export function Drawer() {
         </div>
       )}
       {!searching && !asking && <LetterBar onPick={jump} />}
-      {!searching && !asking && <RecentRow />}
     </div>
   );
 }
