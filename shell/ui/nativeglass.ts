@@ -233,6 +233,8 @@ let running = false;
 const STILL_FRAMES = 6;
 /** Counters for CDP (`__glass.live.counts`): measured frames and region sets sent to the host. */
 const counts = { measured: 0, sent: 0, since: performance.now() };
+/** For CDP A/B only (`__glass.live.hold(true)`): measured as ever, but the regions not sent to the host. */
+let held = false;
 
 /**
  * Something that can move or fade glass: a surface itself, or an element holding one (its ancestors: the track, the
@@ -259,7 +261,7 @@ function frame() {
     last = text;
     still = 0;
     counts.sent++;
-    send(`b.r ${text}`);
+    if (!held) send(`b.r ${text}`);
   } else {
     still++;
   }
@@ -334,6 +336,7 @@ export const debug = {
   },
   measure,
   lag: (frames: number) => send(`b.lag ${frames}`),
+  hold: (on: boolean) => void (held = on),
   /** Measured frames and region sets sent per second since the last read (and reset). */
   get counts() {
     const secs = (performance.now() - counts.since) / 1000;
