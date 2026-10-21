@@ -146,17 +146,36 @@ const JOIN_OVERLAP = 0.5;
 
 const f = (n: number) => (Math.round(n * 10) / 10).toString();
 
-/** The regions as the host wants them: "x y w h tl tr br bl alpha radius" per surface on screen, CSS px. */
-function measure(): string {
-  if (shapesDirty) reshape();
-  const W = innerWidth;
-  const H = innerHeight;
+/** A surface's region before clipping: its box (joined sides reaching over), what clips it, its corners, its alpha. */
+interface Raw {
+  /** Left, top, right, bottom on screen (CSS px), the joined sides' overlap in. */
+  box: [number, number, number, number];
+  /** The element's own box (its corners are cut where a clip or the screen's edge cuts it). */
+  own: [number, number, number, number];
+  clips: [number, number, number, number][];
+  radii: number[];
+  alpha: number;
+  /** A square region (home's foot strip): no corners. */
+  square?: boolean;
+  /** The drawer follower (gesture.ts: a [data-p] element under a Web Animation) it moves with, during a drag. */
+  follower?: Element;
+  /** Which of its clips move with that follower. */
+  clipsFollow?: boolean[];
+}
+
+/** The theme's blur radius for the compositor, read when the theme or the shapes change (not every frame). */
+let blur = 28;
+function readBlur() {
   // The compositor's radius, not a Gaussian's sigma: its blur is ~0.15-0.3 of what it's given (measured on the phone,
   // 2026-10-21), so the theme says it on its own (--glass-blur-native); without it, --glass-blur.
   const css = getComputedStyle(root);
-  const blur = parseFloat(css.getPropertyValue("--glass-blur-native")) || parseFloat(css.getPropertyValue("--glass-blur")) || 28;
-  const out: string[] = [];
-  let n = 0;
+  blur = parseFloat(css.getPropertyValue("--glass-blur-native")) || parseFloat(css.getPropertyValue("--glass-blur")) || 28;
+}
+
+/** Every surface's region as laid out now (one layout read of each surface, its clips and its fading ancestors). */
+function measureRaw(followers: Element[] = []): Raw[] {
+  if (shapesDirty) (reshape(), readBlur());
+  const out: Raw[] = [];
   // Ancestors are shared (a page's tiles): each one's opacity read once a frame.
   const seen = new Map<Element, number>();
   const opacity = (e: Element) => {
@@ -164,46 +183,32 @@ function measure(): string {
     if (o === undefined) seen.set(e, (o = parseFloat(getComputedStyle(e).opacity) || 0));
     return o;
   };
+  const followerOf = (e: Element) => followers.find((f) => f.contains(e));
   for (const [el, s] of shapes) {
     if (!el.isConnected) continue;
-    let r = el.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) continue;
+    if (!el.checkVisibility({ visibilityProperty: true })) continue;
     // A side joined to a neighbour reaches half a CSS px into it: two regions meeting at a fractional device pixel each
     // antialias the shared edge, and unblurred wallpaper showed through between them as a hairline.
     const [jt, jr, jb, jl] = s.joined;
-    let x0 = r.left - JOIN_OVERLAP * jl;
-    let y0 = r.top - JOIN_OVERLAP * jt;
-    let x1 = r.right + JOIN_OVERLAP * jr;
-    let y1 = r.bottom + JOIN_OVERLAP * jb;
-    for (const c of s.clips) {
-      const k = c.getBoundingClientRect();
-      x0 = Math.max(x0, k.left);
-      y0 = Math.max(y0, k.top);
-      x1 = Math.min(x1, k.right);
-      y1 = Math.min(y1, k.bottom);
-    }
-    x0 = Math.max(x0, 0);
-    y0 = Math.max(y0, 0);
-    x1 = Math.min(x1, W);
-    y1 = Math.min(y1, H);
-    if (x1 - x0 < 1 || y1 - y0 < 1) continue;
-    if (!el.checkVisibility({ visibilityProperty: true })) continue;
     let alpha = 1;
     for (const a of s.chain) alpha *= opacity(a);
-    if (alpha < 0.01) continue;
     // Scaled (home's pages shrink a little as the drawer opens): the corners with it.
     const k = r.width / ((el as HTMLElement).offsetWidth || r.width);
-    // A corner cut by a clip is square there (a tile half under the screen's edge keeps its own corners on screen).
-    const [tl, tr, br, bl] = s.radii.map((v) => v * k);
-    const cut = (edge: boolean, v: number) => (edge ? 0 : v);
-    const L = x0 > r.left + 0.25;
-    const T = y0 > r.top + 0.25;
-    const R = x1 < r.right - 0.25;
-    const B = y1 < r.bottom - 0.25;
-    out.push(
-      `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} ${f(cut(L || T, tl))} ${f(cut(R || T, tr))} ${f(cut(R || B, br))} ${f(cut(L || B, bl))} ${alpha.toFixed(2)} ${blur}`,
-    );
-    n++;
+    const follower = followerOf(el);
+    out.push({
+      box: [r.left - JOIN_OVERLAP * jl, r.top - JOIN_OVERLAP * jt, r.right + JOIN_OVERLAP * jr, r.bottom + JOIN_OVERLAP * jb],
+      own: [r.left, r.top, r.right, r.bottom],
+      clips: s.clips.map((c) => {
+        const q = c.getBoundingClientRect();
+        return [q.left, q.top, q.right, q.bottom] as [number, number, number, number];
+      }),
+      radii: s.radii.map((v) => v * k),
+      alpha,
+      follower,
+      clipsFollow: follower ? s.clips.map((c) => follower.contains(c)) : undefined,
+    });
   }
   // The strip under the bar (home's ::after, the navigation bar's band): square, along the screen's foot.
   const home = document.querySelector<HTMLElement>(".home");
@@ -212,15 +217,179 @@ function measure(): string {
   if (home && foot && foot.display !== "none" && !home.classList.contains("editing")) {
     const h = parseFloat(foot.height) || 0;
     const r = home.getBoundingClientRect();
-    const x0 = Math.max(r.left, 0);
-    const w = Math.min(r.right, W) - x0;
-    // Off screen (home slid aside for PowOS AI's page): none.
-    if (h >= 1 && w >= 1) {
-      out.push(`${f(x0)} ${f(r.bottom - h)} ${f(w)} ${f(h)} 0 0 0 0 1 ${blur}`);
-      n++;
-    }
+    if (h >= 1) out.push({ box: [r.left, r.bottom - h, r.right, r.bottom], own: [r.left, r.bottom - h, r.right, r.bottom], clips: [], radii: [0, 0, 0, 0], alpha: 1, square: true });
   }
-  return `${devicePixelRatio} ${n}${out.length ? " " + out.join(" ") : ""}`;
+  return out;
+}
+
+/** The regions as the host wants them: "x y w h tl tr br bl alpha radius" per surface on screen, CSS px. */
+function format(raws: Raw[]): string {
+  const W = innerWidth;
+  const H = innerHeight;
+  const out: string[] = [];
+  for (const g of raws) {
+    if (g.alpha < 0.01) continue;
+    let [x0, y0, x1, y1] = g.box;
+    for (const k of g.clips) {
+      x0 = Math.max(x0, k[0]);
+      y0 = Math.max(y0, k[1]);
+      x1 = Math.min(x1, k[2]);
+      y1 = Math.min(y1, k[3]);
+    }
+    x0 = Math.max(x0, 0);
+    y0 = Math.max(y0, 0);
+    x1 = Math.min(x1, W);
+    y1 = Math.min(y1, H);
+    if (x1 - x0 < 1 || y1 - y0 < 1) continue;
+    if (g.square) {
+      out.push(`${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} 0 0 0 0 1 ${blur}`);
+      continue;
+    }
+    // A corner cut by a clip is square there (a tile half under the screen's edge keeps its own corners on screen).
+    const [tl, tr, br, bl] = g.radii;
+    const cut = (edge: boolean, v: number) => (edge ? 0 : v);
+    const L = x0 > g.own[0] + 0.25;
+    const T = y0 > g.own[1] + 0.25;
+    const R = x1 < g.own[2] - 0.25;
+    const B = y1 < g.own[3] - 0.25;
+    out.push(
+      `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} ${f(cut(L || T, tl))} ${f(cut(R || T, tr))} ${f(cut(R || B, br))} ${f(cut(L || B, bl))} ${g.alpha.toFixed(2)} ${blur}`,
+    );
+  }
+  return `${devicePixelRatio} ${out.length}${out.length ? " " + out.join(" ") : ""}`;
+}
+
+const measure = () => format(measureRaw());
+
+// ---- the drawer's drag, without measuring each frame ------------------------------------------------------------------
+/*
+ * While a finger drives the drawer, its followers (gesture.ts: each [data-p] element under a paused Web Animation of
+ * its transform and opacity, id "drawer"; let go, a settle animation of the same) are the only things that move. The
+ * glass is measured once as the animations appear, and each frame after that is computed from the animations' own
+ * keyframes at their currentTime: a follower's transform now against its transform then, about its transform-origin,
+ * moves the regions inside it; its opacity scales their alpha. No layout or style read per frame. 2026-10-22: the
+ * per-frame measure (a getBoundingClientRect of every surface and its clips, a getComputedStyle of every ancestor's
+ * opacity) was the drag's top script cost on the phone, 107 ms a second against gesture.ts's 2.
+ */
+interface Track {
+  anim: Animation;
+  el: Element;
+  /** Its keyframes, parsed: offset, matrix, opacity (linear between them, as gesture.ts makes them). */
+  frames: { at: number; m: DOMMatrix; o: number }[];
+  /** Its transform-origin on screen when measured (the point its matrix is about). */
+  origin: [number, number];
+  base: { m: DOMMatrix; o: number };
+}
+let tracks: Track[] | null = null;
+/** For CDP A/B (`__glass.live.compute(false)`): every drag frame measured from the page, as before. */
+let computing = true;
+let rawAtStart: Raw[] = [];
+
+const drawerAnims = () => document.getAnimations().filter((a) => a.id === "drawer" && (a.effect as KeyframeEffect | null)?.target);
+
+/** A track's transform and opacity at its animation's currentTime (or at the current computed style if it can't). */
+function sample(t: Track): { m: DOMMatrix; o: number } {
+  const dur = Number(t.anim.effect?.getTiming().duration) || 0;
+  const p = dur > 0 ? Math.min(1, Math.max(0, Number(t.anim.currentTime ?? 0) / dur)) : 1;
+  const fs = t.frames;
+  let i = 0;
+  while (i < fs.length - 2 && fs[i + 1].at < p) i++;
+  const a = fs[i];
+  const b = fs[Math.min(i + 1, fs.length - 1)];
+  const u = b.at > a.at ? Math.min(1, Math.max(0, (p - a.at) / (b.at - a.at))) : 0;
+  const mix = (x: number, y: number) => x + (y - x) * u;
+  const m = new DOMMatrix([mix(a.m.a, b.m.a), mix(a.m.b, b.m.b), mix(a.m.c, b.m.c), mix(a.m.d, b.m.d), mix(a.m.e, b.m.e), mix(a.m.f, b.m.f)]);
+  return { m, o: mix(a.o, b.o) };
+}
+
+/** Starts computing the drag's frames: the glass measured once, the followers' animations read. False: can't. */
+function track(anims: Animation[]): boolean {
+  const list: Track[] = [];
+  for (const anim of anims) {
+    const fx = anim.effect as KeyframeEffect;
+    const el = fx.target as HTMLElement;
+    const kf = fx.getKeyframes();
+    const frames: Track["frames"] = [];
+    for (const k of kf) {
+      const tf = typeof k.transform === "string" ? k.transform : "none";
+      let m: DOMMatrix;
+      try {
+        m = new DOMMatrix(tf === "none" ? undefined : tf);
+      } catch {
+        return false;
+      }
+      // 2D translate/scale only: anything else (a rotation, 3D) is measured each frame as before.
+      if (!m.is2D || Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6) return false;
+      frames.push({ at: Number(k.computedOffset ?? k.offset ?? 0), m, o: k.opacity == null ? 1 : parseFloat(String(k.opacity)) });
+    }
+    if (frames.length < 1) return false;
+    // Where its transform is about: its layout box (untransformed) plus transform-origin.
+    const cs = getComputedStyle(el);
+    const [ox, oy] = cs.transformOrigin.split(" ").map((v) => parseFloat(v) || 0);
+    const r = el.getBoundingClientRect();
+    const t: Track = { anim, el, frames, origin: [0, 0], base: { m: new DOMMatrix(), o: 1 } };
+    t.base = sample(t);
+    // Under scale s about origin O and translate T, a layout point L is on screen at O + T + s*(L - O); O is the
+    // layout box's corner plus transform-origin o. The box's corner on screen, r = O + T - s*o, gives O.
+    t.origin = [r.left - t.base.m.e + t.base.m.a * ox, r.top - t.base.m.f + t.base.m.d * oy];
+    list.push(t);
+  }
+  tracks = list;
+  rawAtStart = measureRaw(list.map((t) => t.el));
+  return true;
+}
+
+/** A point on screen moved from a track's base state to its state now (translate+scale about its origin). */
+function mover(t: Track) {
+  const now = sample(t);
+  const [Ox, Oy] = t.origin;
+  const b = t.base.m;
+  const n = now.m;
+  // screen = O + T + s*(L - O): from base to now, L = O + (screen - O - Tb)/sb.
+  const fx = (x: number) => Ox + n.e + n.a * ((x - Ox - b.e) / (b.a || 1));
+  const fy = (y: number) => Oy + n.f + n.d * ((y - Oy - b.f) / (b.d || 1));
+  return { fx, fy, k: (n.a || 1) / (b.a || 1), alpha: t.base.o > 0.001 ? now.o / t.base.o : null };
+}
+
+/** This frame's regions from the drag's start: none read from the page. Null: measure the page instead. */
+function computed(): string | null {
+  if (!tracks) return null;
+  const movers = new Map<Element, ReturnType<typeof mover>>();
+  for (const t of tracks) {
+    // A track's animation gone (cancelled at a settle's start, or done): measure again (a new set may be there).
+    if (t.anim.playState === "idle" || t.anim.playState === "finished") return (tracks = null);
+    movers.set(t.el, mover(t));
+  }
+  const out: Raw[] = [];
+  for (const g of rawAtStart) {
+    const mv = g.follower && movers.get(g.follower);
+    if (!mv) {
+      out.push(g);
+      continue;
+    }
+    // Faded from zero at the start (no ratio to scale by): measured from the page this frame.
+    if (mv.alpha == null) return (tracks = null);
+    const box = (q: [number, number, number, number]) => [mv.fx(q[0]), mv.fy(q[1]), mv.fx(q[2]), mv.fy(q[3])] as [number, number, number, number];
+    out.push({
+      ...g,
+      box: box(g.box),
+      own: box(g.own),
+      clips: g.clips.map((c, i) => (g.clipsFollow?.[i] ? box(c) : c)),
+      radii: g.radii.map((v) => v * mv.k),
+      alpha: g.alpha * mv.alpha,
+    });
+  }
+  return format(out);
+}
+
+/** This frame's regions: computed during the drawer's drag, measured otherwise. */
+function regions(): string {
+  if (!computing) return measure();
+  const c = computed();
+  if (c != null) return c;
+  const anims = drawerAnims();
+  if (anims.length && track(anims)) return computed() ?? measure();
+  return measure();
 }
 
 // ---- when ---------------------------------------------------------------------------------------------------------
@@ -256,7 +425,7 @@ function frame() {
     return;
   }
   counts.measured++;
-  const text = measure();
+  const text = regions();
   if (text !== last) {
     last = text;
     still = 0;
@@ -268,7 +437,8 @@ function frame() {
     still++;
   }
   // Still for a few frames: stop - unless glass is animating (a settle, a fade), which can be still between frames.
-  if (still < STILL_FRAMES || moving()) requestAnimationFrame(frame);
+  // (While tracking the drawer's animations, they are what's running: no scan of every animation for it.)
+  if (still < STILL_FRAMES || (tracks ? tracks.some((t) => t.anim.playState === "running") : moving())) requestAnimationFrame(frame);
   else running = false;
 }
 
@@ -293,6 +463,7 @@ function kick() {
 /** Surfaces came, went or restyled: their shapes again, then measured. */
 function changed() {
   shapesDirty = true;
+  tracks = null;
   kick();
 }
 
@@ -338,7 +509,7 @@ document.addEventListener(
   },
   { capture: true, passive: true },
 );
-for (const ev of ["theme.changed", "system.insets", "recents.begin", "recents.drag", "recents.end", "recents.show", "recents.hide"]) powos.on(ev, () => (why(ev), changed()));
+for (const ev of ["theme.changed", "system.insets", "recents.begin", "recents.drag", "recents.end", "recents.show", "recents.hide"]) powos.on(ev, () => (why(ev), (tracks = null), changed()));
 
 /** For CDP: on or off for this page (`__glass.native(false)`: the CSS glass), the regions as sent, the host's knob. */
 export const debug = {
@@ -348,8 +519,14 @@ export const debug = {
     return { native: nativeGlass.value, host: hostBlurs.value, port: !!native.value, last };
   },
   measure,
+  /** This frame's regions as sent (computed during a drawer drag) and whether a drag is being computed. */
+  regions,
+  get tracking() {
+    return !!tracks;
+  },
   lag: (frames: number) => send(`b.lag ${frames}`),
   hold: (on: boolean) => void (held = on),
+  compute: (on: boolean) => void ((computing = on), (tracks = null)),
   /** What set off the last measures (cause, element), oldest first. */
   get kicks() {
     return [...kicks];

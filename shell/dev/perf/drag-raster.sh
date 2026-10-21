@@ -5,6 +5,8 @@
 # that run only (removed at once after it). Leaves the drawer closed.
 #   shell/dev/perf/drag-raster.sh [secs=12] ["label=css" ...]
 #   TRACE=1: trace.ts instead of cdp.sh raster - Paint by DOM node, raster/decode tasks.
+#   "label=js:ON|OFF": a page setting instead of CSS (ON evaluated for the run, OFF after), e.g.
+#     "measured=js:__glass.live.compute(false)|__glass.live.compute(true)"
 #   e.g. drag-raster.sh 12 "cv=.drawer-list .app{content-visibility:auto}" "nohome=.home-content{display:none}"
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -29,6 +31,14 @@ run() {
   local label=$1 css=$2
   s=$("$phone/idle.sh"); i=${s#idle=}; i=${i%% *}
   [ "${i:-0}" -ge 120 ] || { echo "drag-raster: a finger came - stopped"; exit 4; }
+  # "label=js:ON|OFF": a variant that's a page setting instead of CSS - ON evaluated for the run, OFF right after.
+  local off=""
+  if [[ "$css" == js:* ]]; then
+    local js=${css#js:}
+    off=${js#*|}
+    "$phone/cdp.sh" eval home "${js%%|*}" >/dev/null
+    css=""
+  fi
   [ -n "$css" ] && "$phone/cdp.sh" eval home "(() => { const s = document.createElement('style'); s.id = 'drag-raster'; s.textContent = $(printf '%s' "$css" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))'); document.head.append(s); return 1; })()" >/dev/null
   echo "== $label${css:+ ($css)}"
   # SWIPES=updown (default, as perf-window.sh): up then down on the drawer; =up: up, then Back closes it (no finger
@@ -46,6 +56,7 @@ run() {
   "$phone/cpu.sh" $((secs - 2)) 8 | grep -E "com.powos.app|ocessService|surfaceflinger|total"
   wait $r $d
   "$phone/cdp.sh" eval home "document.getElementById('drag-raster')?.remove(), 1" >/dev/null
+  [ -n "$off" ] && "$phone/cdp.sh" eval home "$off" >/dev/null
   sleep 1
 }
 run base ""
