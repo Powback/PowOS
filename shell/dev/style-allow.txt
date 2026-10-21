@@ -10,6 +10,7 @@ ui/grid.tsx fill="#fff"  # an SVG mask's keep-area (mask semantics, not a colour
 ui/grid.tsx fill="#000" stroke="#000"  # an SVG mask's cut-out (mask semantics, not a colour)
 ui/grid.tsx fill="rgb(0 0 0 / 0.42)"  # a merged group's --lift-shadow drawn in SVG (one outline for the group)
 ui/owl.tsx || "#ddd"  # fallback before the theme's tokens exist (first frame)
+ui/owl.tsx return `rgb(${a.map((v, i) => Math.round(v * 0.35 + b[i] * 0.65)).join(",")})`;  # a canvas text colour mixed into the theme's foreground (canvasText: a canvas takes no CSS variable)
 apps/pages.ts || "#222"  # fallback before the theme's tokens exist (first frame)
 apps/pages.ts || "#ddd"  # fallback before the theme's tokens exist (first frame)
 apps/pages.ts fill="#567"  # a PowOS app's placeholder icon (an SVG data URL, no CSS)

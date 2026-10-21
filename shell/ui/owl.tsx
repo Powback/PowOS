@@ -10,7 +10,50 @@ import { powos } from "../bridge.ts";
 import { carry, selected } from "../state.ts";
 import { takeTap, tapTaken } from "./taps.ts";
 import { TerminalView } from "./terminal.tsx";
-import type { Cell, OwlNode, OwlOp, OwlRoot } from "../types.ts";
+import type { Cell, OwlNode, OwlOp, OwlRoot, ThemeColors } from "../types.ts";
+
+/**
+ * Text colours as the shell's tokens, so a widget's words read on the glass in every theme (docs/DESIGN-LANGUAGE.md:
+ * text >= 4.5:1). The engine resolves a widget's `color: muted` / `accent` / `green` to the theme palette's value
+ * (WidgetInstance.kt): the theme's own muted grey measured 1.5-3.7:1 and a raw hue as little as 1.04:1 on the glass.
+ * So a text colour that is the theme's muted becomes --color-muted, its accent --accent-text, its foreground the
+ * foreground; any other (a hue, or a palette that isn't the shell's) 35% its own, 65% the foreground (small text: a
+ * half-way mix still measured 2.9-3.6:1 on a light theme).
+ * Only text: rings, bars and fills keep the widget's colours.
+ */
+let palette: { muted?: string; accent?: string; foreground?: string } = {};
+const rgbKey = (c: string) => {
+  const m = c.match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+  if (m) return [m[1], m[2], m[3]].map((v) => Math.round(Number(v))).join(",");
+  const h = c.trim().match(/^#([0-9a-f]{6})/i);
+  if (h) {
+    const n = parseInt(h[1], 16);
+    return `${n >> 16},${(n >> 8) & 255},${n & 255}`;
+  }
+  return c.trim().toLowerCase();
+};
+function learnTheme(t: ThemeColors | null) {
+  if (!t) return;
+  palette = { muted: rgbKey(t.css.muted ?? ""), accent: rgbKey(t.css.accent ?? ""), foreground: rgbKey(t.css.foreground ?? "") };
+}
+powos.on("theme.changed", learnTheme);
+powos.theme.get().then(learnTheme, () => {});
+/** A text's colour: [c] (the engine's) as the token it stands for; none - [fallback]. */
+export function textColor(c: unknown, fallback: string) {
+  if (typeof c !== "string" || !c) return fallback;
+  const k = rgbKey(c);
+  if (k === palette.muted) return "var(--color-muted)";
+  if (k === palette.accent) return "var(--accent-text)";
+  if (k === palette.foreground) return "var(--color-foreground)";
+  return `color-mix(in srgb, ${c} 35%, var(--color-foreground))`;
+}
+/** The same for a canvas's text (no CSS variables there): [c] mixed into the foreground [fg] in JS. */
+function canvasText(c: string, fg: string) {
+  const a = rgbKey(c).split(",").map(Number);
+  const b = rgbKey(fg).split(",").map(Number);
+  if (a.length !== 3 || b.length !== 3 || [...a, ...b].some((v) => !Number.isFinite(v))) return c;
+  return `rgb(${a.map((v, i) => Math.round(v * 0.35 + b[i] * 0.65)).join(",")})`;
+}
 
 type Style = JSX.CSSProperties;
 type Props = Record<string, any>;
@@ -222,7 +265,7 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
             // Across its column; in a Row only as wide as its text (shrinking to an ellipsis) - Render.kt's fillMaxWidth
             // there takes all the room a weighted sibling was meant to share ("8° / 5°" and "21 oct" drawn 0 wide).
             ...(p.width == null && p.weight == null && p.fill == null ? (parent === "Row" ? { flex: "0 1 auto", minWidth: 0 } : { width: "100%" }) : {}),
-            color: p.color ?? (muted ? "var(--color-muted)" : "var(--color-foreground)"),
+            color: textColor(p.color, muted ? "var(--color-muted)" : "var(--color-foreground)"),
             font: `${p.italic ? "italic " : ""}${p.bold ? "bold " : ""}${num(p.fontSize, SIZES[p.style] ?? 13)}px ${FONTS[p.font] ?? "var(--font)"}`,
             textAlign: (({ center: "center", end: "end" } as Record<string, string>)[p.align] ?? "start") as any,
             whiteSpace: lines === 1 ? "nowrap" : "pre-wrap",
@@ -245,7 +288,7 @@ function Node({ node, ctx, parent }: { node: OwlNode; ctx: Ctx; parent: string }
             boxShadow: "var(--lift)",
             borderRadius: px(num(p.radius, 8)),
             padding: "6px 10px",
-            color: p.color ?? "var(--color-accent)",
+            color: textColor(p.color, "var(--accent-text)"),
             font: "13px var(--font)",
             whiteSpace: "nowrap",
             overflow: "hidden",
@@ -520,7 +563,7 @@ function draw(g: CanvasRenderingContext2D, ops: OwlOp[], ctx: Ctx) {
         break;
       }
       case "text":
-        g.fillStyle = brush(g, n.color) ?? brush(g, n.fill) ?? fg;
+        g.fillStyle = typeof (n.color ?? n.fill) === "string" ? canvasText((n.color ?? n.fill) as string, fg) : (brush(g, n.color) ?? brush(g, n.fill) ?? fg);
         g.font = `${n.bold ? "bold " : ""}${num(n.size, 13)}px ui-monospace, monospace`;
         g.textAlign = (({ center: "center", end: "end" } as Record<string, CanvasTextAlign>)[n.align] ?? "start");
         g.textBaseline = "middle";
