@@ -456,7 +456,8 @@ const GROUPS: Group[] = [
     id: "connect",
     label: "connect",
     icon: "bluetooth",
-    members: ["bt", "nfc", "app:com.oneplus.oshare", "app:com.google.android.gms", "app:com.oplus.linker", "app:com.microsoft.appmanager", GLASSES_ID, REMOTE_ID],
+    // Quick share: OnePlus's, else Google's - one member ("a|b": the first of them present).
+    members: ["bt", "nfc", "app:com.oneplus.oshare|app:com.google.android.gms", "app:com.oplus.linker", "app:com.microsoft.appmanager", GLASSES_ID, REMOTE_ID],
   },
   { id: "display", label: "display", icon: "themeLightDark", members: ["darkmode", "app:com.oplus.eyeprotect", "rotation"] },
   { id: "capture", label: "capture", icon: "cellphoneScreenshot", members: ["screenshot", "screenrecord", "qr_code_scanner"] },
@@ -466,9 +467,20 @@ const GROUPS: Group[] = [
   { id: "location", label: "location", icon: "mapMarker", members: ["location"] },
 ];
 
-const member = (tiles: QuickTile[], m: string) => (m.startsWith("app:") ? tiles.find((t) => t.app === m.slice(4)) : tiles.find((t) => t.id === m));
+const one = (tiles: QuickTile[], m: string) => (m.startsWith("app:") ? tiles.find((t) => t.app === m.slice(4)) : tiles.find((t) => t.id === m));
+/** A member's tile ("a|b": the first of them present). */
+const member = (tiles: QuickTile[], m: string) => m.split("|").map((x) => one(tiles, x)).find((t) => t != null);
+/** Every tile a member names, the ones it didn't pick too (so a skipped Google quick share isn't put under Tools). */
+const named = (tiles: QuickTile[], m: string) => m.split("|").map((x) => one(tiles, x)).filter((t): t is QuickTile => t != null);
 
 /** A short name for a member in a category's state line ("wi-fi · 5G", "bt · nfc"). */
+const SHORT_APP: Record<string, string> = {
+  "com.oneplus.oshare": "share",
+  "com.google.android.gms": "share",
+  "com.oplus.linker": "cast",
+  "com.microsoft.appmanager": "windows",
+  "com.oplus.eyeprotect": "eye",
+};
 const SHORT: Record<string, string> = { bt: "bt", nfc: "nfc", darkmode: "dark", rotation: "rotate", battery: "saver", flashlight: "torch", dnd: "on", location: "on", lockscreen: "lock" };
 
 /** What a category's tile says under its name: what's on inside it. */
@@ -484,7 +496,7 @@ function groupState(g: Group, ts: QuickTile[]): { on: boolean; detail: string } 
   }
   if (g.id === "capture") return { on: false, detail: "" };
   const on = ts.filter((t) => t.on);
-  const name = (t: QuickTile) => SHORT[t.id] ?? t.label.toLowerCase();
+  const name = (t: QuickTile) => (t.app && SHORT_APP[t.app]) || SHORT[t.id] || t.label.toLowerCase();
   return { on: !!first.on, detail: on.length ? on.map(name).join(" · ") : "off" };
 }
 
@@ -553,6 +565,8 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
 function Sub({ t }: { t: QuickTile }) {
   if (t.id === REMOTE_ID) return <RemoteTile t={t} />;
   if (t.id === GLASSES_ID) return <GlassesTile t={t} />;
+  // OnePlus Share and Google's Quick Share are one member: "quick share".
+  if (t.app === "com.oneplus.oshare" || t.app === "com.google.android.gms") return <Tile t={{ ...t, label: "quick share" }} />;
   return <Tile t={t} />;
 }
 
@@ -602,15 +616,15 @@ export function ControlCenter() {
   const { shown } = arranged(every);
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
-  const named = new Set<QuickTile>();
+  const placed = new Set<QuickTile>();
   const groups = GROUPS.map((g) => {
     const ts = g.members.map((m) => member(every, m)).filter((t): t is QuickTile => !!t);
-    ts.forEach((t) => named.add(t));
+    g.members.forEach((m) => named(every, m).forEach((t) => placed.add(t)));
     return { g, ts };
   });
   // Nothing is lost: a tile no category names (another app's, a new one) goes under Tools.
   const tools = groups.find((x) => x.g.id === "tools");
-  if (tools) tools.ts.push(...every.filter((t) => !named.has(t)));
+  if (tools) tools.ts.push(...every.filter((t) => !placed.has(t)));
   const live = groups.filter((x) => x.ts.length > 0);
   // The user's arrangement orders the eight, by where their primary tiles are in it.
   const pos = (id: string) => {

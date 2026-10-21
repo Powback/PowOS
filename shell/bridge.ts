@@ -696,6 +696,11 @@ function mock(): Bridge {
             ...tile("custom(com.oplus.eyeprotect/.services.EyeProtectTileService)", "Eye comfort", null),
             app: "com.oplus.eyeprotect",
           },
+          // The phone's other third-party tiles (its sysui_qs_tiles, 2026-10-21).
+          { ...tile("custom(com.oneplus.oshare/com.oplus.oshare.OshareTileService)", "OnePlus Share", false), app: "com.oneplus.oshare" },
+          { ...tile("custom(com.google.android.gms/.nearby.sharing.SharingTileService)", "Quick Share", null), app: "com.google.android.gms" },
+          { ...tile("custom(com.oplus.linker/.synergy.service.TVTileService)", "Screencast", null), app: "com.oplus.linker" },
+          { ...tile("custom(com.microsoft.appmanager/.quicksettings.WindowsLinkTileService)", "Link to Windows", null), app: "com.microsoft.appmanager" },
         ],
         brightness: { value: 0.6, auto: true },
         volume: { value: 0.4, ringer: 2 },
