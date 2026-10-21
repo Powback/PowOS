@@ -24,6 +24,8 @@ Environment=WHISPER__COMPUTE_TYPE=float16
 Environment=WHISPER_BEAM=1
 Environment=WHISPER_MIN_WINDOW=10
 Environment=WHISPER_VAD=1
+# Clips under 2 s decode with timestamps: without them a short word comes back repeated ("Yes. Yes. Yes.").
+Environment=WHISPER_SHORT_TIMESTAMPS_S=2
 Environment=MAX_UPLOAD_MB=500
 Environment=MAX_QUEUE=4
 Environment=OMP_NUM_THREADS=2

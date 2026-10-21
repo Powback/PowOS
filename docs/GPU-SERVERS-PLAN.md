@@ -206,6 +206,11 @@ anything OpenAI-compatible) never queue a voice turn: GPU0 stays the voice path'
 2 CPUs at cpu-shares 128. Settings: Silero VAD, timestamps on for audio over one 30 s window (without them
 faster-whisper drops the words at window boundaries: 84% of a 12 min recording's words came back instead of ~100%),
 500 MB uploads (413), 4 requests running or waiting (503; Traefik inFlightReq 4 -> 429), `stream=true` SSE.
+Audio with no speech (silence, or a clip VAD empties) answers 200 `{"text": ""}`. It was a 500 until 2026-10-21,
+because faster-whisper ran its language detection over an empty array, and the phone had to read the 500 as "nothing
+heard". Clips under 2 s decode with timestamps (`WHISPER_SHORT_TIMESTAMPS_S=2`): without them a 0.5 s "Yes." came
+back "Yes. Yes. Yes.". voice-stt has the same repetition on very short turns, but its setting stays off until it is
+measured on the voice path.
 
 | measured 2026-10-21 | |
 |---|---|
