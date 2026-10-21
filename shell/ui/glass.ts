@@ -118,7 +118,7 @@ function refrost(): Promise<void> {
  * screen moving under it), none. The rest (the screen-off clock, the glasses') have none.
  */
 const OVER_WALLPAPER = new Set(["home", "lock"]);
-const TINT_ONLY = new Set(["shade", "recents"]);
+const TINT_ONLY = new Set(["shade", "recents", "pull"]);
 
 let lastSource: GlassSource | null = null;
 /** The assistant's: the screen it was opened over (its screenshot), and whether it's live (then no picture). */

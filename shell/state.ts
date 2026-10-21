@@ -138,6 +138,12 @@ export const pullKind = signal<"apps" | "ai">("apps");
  * before. PowOS AI's page to the left of home stays either way.
  */
 export const pullPanels = stored("pullPanels", "on");
+/**
+ * The same corners over any app (ui/pull.tsx in the edge gestures' overlay window): read by the host from the shell's
+ * store (files/shell-data/pullOverApps.json), so it's written there too. Off: no corner is claimed over apps.
+ */
+export const pullOverApps = stored("pullOverApps", "on");
+effect(() => void powos.store.set("pullOverApps", JSON.stringify(pullOverApps.value)).catch(() => {}));
 /** Opens the pull-up panel with [kind] in it (the pet's long press, a bubble's "more": "ai"). */
 export function openPanel(kind: "apps" | "ai") {
   pullKind.value = kind;

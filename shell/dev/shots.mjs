@@ -80,6 +80,8 @@ const SCENES = [
   ["edit-theme", "home", "S.editing.value = true; await sleep(200); [...document.querySelectorAll('.edit-act')].find(b => b.textContent.trim() === 'theme')?.click();", "wallpaper"],
   ["edit-picker", "home", "S.editing.value = true; await sleep(150); (await U('./ui/appwidget.tsx')).picker.value = true;", "wallpaper"],
   ["drawer", "home", "S.drawer.value = 1;", "wallpaper"],
+  ["swipe-up-right", "home", "", "wallpaper", { from: [0.73, 0.72], to: [0.73, 0.28], ms: 220 }],
+  ["swipe-up-left", "home", "", "wallpaper", { from: [0.25, 0.72], to: [0.25, 0.28], ms: 220 }],
   ["search-widget", "home", "await (await U('./bridge.ts')).powos.home.addPanel('search', 0, { x: 0, y: 4, w: 6, h: 1 }); await sleep(300);", "wallpaper"],
   ["pill-below-dock", "home", "(await U('./ui/searchwidget.tsx')).footBelow.value = '1';", "wallpaper"],
   ["ai-panel", "home", "S.openPanel('ai');", "wallpaper"],
@@ -89,6 +91,8 @@ const SCENES = [
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],
   ["notifications", "home", "S.panel.value = 'notifications'; S.notif.value = true;", "wallpaper"],
   ["settings", "home", "(await U('./screens.ts')).openScreen('settings');", "wallpaper"],
+  ["pull-apps", "pull", "E.emit('pull.begin', { kind: 'apps' }); E.emit('pull.drag', { p: 0.6 }); E.emit('pull.end', { open: true });", "blurred"],
+  ["pull-ai", "pull", "E.emit('pull.begin', { kind: 'ai' }); E.emit('pull.end', { open: true });", "blurred"],
   ["assist", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
   ["shade", "shade", "S.panel.value = 'notifications'; S.notif.value = true;", "blurred"],
   ["control", "shade", "S.panel.value = 'control'; S.notif.value = true;", "blurred"],
@@ -188,11 +192,11 @@ const contrastOf = async (png, runs) => {
 
 
 try {
-  for (const [name, mode, setup, behind] of SCENES) {
+  for (const [name, mode, setup, behind, touch] of SCENES) {
     for (const [sizeName, size] of Object.entries(SIZES)) {
       let timer;
       const limit = new Promise((_, no) => (timer = setTimeout(() => no(new Error("timed out (40 s)")), 40000)));
-      await Promise.race([shoot(name, mode, setup, behind, sizeName, size), limit])
+      await Promise.race([shoot(name, mode, setup, behind, sizeName, size, touch), limit])
         .catch((e) => { console.log(`shot ${name}-${sizeName}: FAILED ${e.message}`); report.push({ shot: `${name}-${sizeName}`, errors: [e.message] }); })
         .finally(() => clearTimeout(timer));
     }
@@ -203,13 +207,13 @@ try {
   process.exit(0);
 }
 
-async function shoot(name, mode, setup, behind, sizeName, size) {
+async function shoot(name, mode, setup, behind, sizeName, size, touch) {
   {
     {
       const t0 = Date.now();
       const step = (what) => process.env.SHOTS_DEBUG && console.log(`  ${name}-${sizeName} ${what} +${Date.now() - t0} ms`);
       const page = await browser.newPage();
-      await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: SCALE });
+      await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: SCALE, hasTouch: true, isMobile: true });
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message.split("\n")[0]));
       page.on("console", (m) => m.type() === "error" && errors.push(m.text().split("\n")[0]));
@@ -265,6 +269,19 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
         )
         .catch((e) => errors.push(`setup: ${e.message.split("\n")[0]}`));
       step("setup");
+      await sleep(600);
+      // A finger's swipe (fractions of the screen), as the phone's touch events: the gestures' own path.
+      if (touch) {
+        const [x0, y0] = [touch.from[0] * size.width, touch.from[1] * size.height];
+        const [x1, y1] = [touch.to[0] * size.width, touch.to[1] * size.height];
+        const n = Math.max(4, Math.round(touch.ms / 16));
+        await page.touchscreen.touchStart(x0, y0);
+        for (let i = 1; i <= n; i++) {
+          await page.touchscreen.touchMove(x0 + ((x1 - x0) * i) / n, y0 + ((y1 - y0) * i) / n);
+          await sleep(touch.ms / n);
+        }
+        await page.touchscreen.touchEnd();
+      }
       await sleep(900);
       // SHOTS_PROBE: an expression evaluated in the page once it settled, its value printed (debugging a render).
       if (process.env.SHOTS_PROBE)
