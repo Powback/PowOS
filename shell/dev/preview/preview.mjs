@@ -113,7 +113,12 @@ function plan() {
     const size = (k) => src.match(new RegExp(`^\\s*${k}:\\s*(\\d+)x(\\d+)`, "m"))?.slice(1).map(Number);
     const id = f.replace(/\.owl$/, "");
     const name = src.match(/^\s*widget\s+"([^"]+)"/m)?.[1] ?? id;
-    widgets.push({ id, kind: "owl", title: `${name} (${f}, OWL)`, file: f, minSize: size("minSize") ?? [1, 1], screen: /^\s*screen\s*\{/m.test(src), terminal: /\bTerminal\s*\{/.test(src) });
+    const terminal = /\bTerminal\s*\{/.test(src);
+    widgets.push({ id, kind: "owl", title: `${name} (${f}, OWL)`, file: f, minSize: size("minSize") ?? [1, 1], screen: /^\s*screen\s*\{/m.test(src), terminal, term: terminal ? "full" : undefined });
+    // A terminal's ink is what its shell holds: measured as used (bridge.ts mockTranscript) - a screen full of output,
+    // and a short one (one command and the prompt).
+    if (terminal)
+      widgets.push({ id: `${id}-short`, kind: "owl", title: `${name}, a short session (${f}, OWL)`, file: f, minSize: size("minSize") ?? [1, 1], screen: false, terminal, term: "short" });
   }
   for (const app of fs.existsSync(APPS) ? fs.readdirSync(APPS).sort() : []) {
     const mf = path.join(APPS, app, "powos-app.json");
@@ -245,10 +250,11 @@ async function sheet(browser, w, t, max) {
   const { page, errors } = await boot(browser, t, { width: max, height: 900 }, true);
   dbg(w.id, t.name, "booted", errors.join("; "));
   await page.evaluate(async (spec) => {
+    window.__powosMockTerm = spec.term;
     const m = await importShim("./dev/preview/sheet.tsx");
     window.__pv = m;
     await m.mount(spec);
-  }, { title: w.title, kind: w.kind, app: w.app, entry: w.entry, panel: w.panel, data: w.data, agents: w.agents, cells: w.cells });
+  }, { title: w.title, kind: w.kind, app: w.app, entry: w.entry, panel: w.panel, data: w.data, agents: w.agents, term: w.term, cells: w.cells });
   dbg(w.id, t.name, "mounted", process.env.PREVIEW_DEBUG ? await page.evaluate(() => [...document.fonts].map((f) => `${f.family}:${f.status}`).join(" ")) : "");
   return { page, errors };
 }

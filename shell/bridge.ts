@@ -1077,6 +1077,47 @@ function mockTasks(icon: (name: string) => string, hue: (name: string) => number
  * Terminals for the mock: a tiny line-editing shell instead of a pty (echo, seq, size, colors, mouse, exit), with the host's
  * protocol - base64 both ways, output offsets, runs - so the page's terminal code runs as on the phone.
  */
+/**
+ * A shell as it's used, for the widget preview (dev/preview/data/45-terminal*.json "term"): "full" - ls, a git status
+ * with changes, a log, a line long enough to wrap and a journal that runs past any tile's height; "short" - one command
+ * and the prompt. Lines end CR LF, colours as a shell prints them.
+ */
+function mockTranscript(kind: string) {
+  const p = (dir: string) => `\x1b[32mmats@phone\x1b[0m:\x1b[34m${dir}\x1b[0m$ `;
+  if (kind === "short") return `${p("~")}uptime\r\n 23:41:07 up 16:36,  2 users,  load average: 0.42, 0.51, 0.47\r\n${p("~")}`;
+  const lines = [
+    `${p("~")}ls`,
+    "\x1b[34mDocuments\x1b[0m  \x1b[34mDownloads\x1b[0m  \x1b[34mProjects\x1b[0m  notes.md  todo.txt",
+    `${p("~")}cd Projects/powos && git status`,
+    "On branch worktree-powos-multiplatform",
+    "Your branch is up to date with 'origin/worktree-powos-multiplatform'.",
+    "",
+    "Changes not staged for commit:",
+    '  (use "git add <file>..." to update what will be committed)',
+    "\t\x1b[31mmodified:   shell/ui/owl.tsx\x1b[0m",
+    "\t\x1b[31mmodified:   shell/dev/preview/baseline.json\x1b[0m",
+    "",
+    'no changes added to commit (use "git add" and/or "git commit -a")',
+    `${p("~/Projects/powos")}git log --oneline -6`,
+    "\x1b[33mc5d21b8\x1b[0m Example widgets fit with real data at every size they allow",
+    "\x1b[33m696a0d1\x1b[0m OWL widget text follows the theme",
+    "\x1b[33m8409d27\x1b[0m Agents widget fills its tile at every size, empty included",
+    "\x1b[33m64893c3\x1b[0m home: a widget's slider or drag control wins over the page swipe",
+    "\x1b[33m5e597b3\x1b[0m powos app preview <dir|file.owl|widget-id>",
+    "\x1b[33m36116ff\x1b[0m Pet physics: left/top pinned to 0 while it's on",
+    `${p("~/Projects/powos")}head -c 300 README.md`,
+    "PowOS is a layered Linux that runs from RAM, keeps what you install and configure in a layer of its own and rolls each layer back on its own when an update or a package breaks something - the OS stays yours, the changes stay undoable.",
+    `${p("~/Projects/powos")}journalctl --user -n 40 --no-pager`,
+    ...Array.from({ length: 40 }, (_, i) => {
+      const t = `Oct 21 23:${String(10 + Math.floor(i / 2)).padStart(2, "0")}:${String((i * 17) % 60).padStart(2, "0")}`;
+      const what = ["powos-agentsd[812]: spool: 3 agents, 1 working", "pipewire[1204]: client 51 connected", "kwin_wayland[901]: output DSI-1 mode 2440x2268@120", "powos-shell[1330]: home: 0 frames at rest"][i % 4];
+      return `${t} cph2551 ${what}`;
+    }),
+    p("~/Projects/powos"),
+  ];
+  return lines.join("\r\n");
+}
+
 function mockTerm(events: Events): Bridge["term"] {
   const utf8 = new TextEncoder();
   const b64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
@@ -1133,7 +1174,10 @@ function mockTerm(events: Events): Bridge["term"] {
       if (!sh || (restart && sh.code != null)) {
         sh = { run: ++runs, out: [], line: "", cols, rows, code: null };
         shells.set(id, sh);
-        print(id, sh, `mock terminal \x1b[2m(${command ?? "login shell"})\x1b[0m\r\n` + prompt);
+        // The widget preview's transcripts (dev/preview: a terminal widget's data "term"): a shell as it's used.
+        const t = (window as unknown as { __powosMockTerm?: string }).__powosMockTerm;
+        if (t) print(id, sh, mockTranscript(t));
+        else print(id, sh, `mock terminal \x1b[2m(${command ?? "login shell"})\x1b[0m\r\n` + prompt);
       }
       return state(sh);
     },
