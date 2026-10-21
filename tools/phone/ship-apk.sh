@@ -30,7 +30,9 @@ if [ -z "$now" ]; then
   waited=0; ok=""
   while [ $waited -lt $(( ${SHIP_WAIT_MIN:-60} * 60 )) ]; do
     i2=$(tools/phone/idle.sh); s=${i2#idle=}; s=${s%% *}
-    case "$i2" in *screen=Awake*) [ "$s" -ge 60 ] && { ok=1; break; } ;; *) ok=1; break ;; esac
+    # Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s without a touch; anything else (an empty or
+    # unreadable state) = NOT safe - it installed over an active user once when the state came back empty.
+    case "$i2" in *screen=Asleep*|*screen=Dozing*) ok=1; break ;; *screen=Awake*) [ "$s" -ge 60 ] && { ok=1; break; } ;; esac
     sleep 15; waited=$((waited + 15))
   done
   echo "ship-apk: $i2"
