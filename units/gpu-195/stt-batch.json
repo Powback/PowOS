@@ -1,0 +1,50 @@
+{
+  "id": "stt-batch",
+  "name": "STT for files and dictation (whisper-fast, stt.pow)",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
+  "owner": "system:stt",
+  "purpose": "speech to text for everything but the realtime voice path: powos transcribe, PowOS AI's dictation, files; whisper-fast (VoiceAgent services/whisper-fast) with deepdml/faster-whisper-large-v3-turbo-ct2, float16, greedy, Silero VAD, on GPU1; OpenAI /v1/audio/transcriptions on :8001, served as http://stt.pow by Traefik on .100 (PowStation config/traefik/dynamic/stt.yml); 500 MB uploads, 4 requests running or waiting",
+  "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
+  "image": "localhost/voice-stt-fast:latest",
+  "ports": [
+    "8001/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.config/containers/systemd/stt-batch.container"
+  ],
+  "processes": [
+    {
+      "systemd": "stt-batch.service"
+    },
+    {
+      "container": "stt-batch"
+    }
+  ],
+  "limits": {
+    "memory": "6g",
+    "memory_swap": "6g",
+    "cpus": 2,
+    "pids": 512
+  },
+  "autosleep": "never",
+  "gpu": "nvidia.com/gpu=1",
+  "vramBudget": "3g",
+  "vramMeasured": "2.4 GiB",
+  "health": "http://192.168.50.195:8001/health",
+  "remove": {
+    "stop": [
+      "systemctl --user stop stt-batch.service"
+    ],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/stt-batch.container",
+      "systemctl --user daemon-reload"
+    ],
+    "keep": [
+      "/var/lib/powos/models/hf",
+      "localhost/voice-stt-fast:latest (voice-stt's image)"
+    ]
+  },
+  "vramNote": "GPU1 is the general pool (docs/GPU-SERVERS-PLAN.md); this resident ~2 GB is the only thing on it so far. Off GPU0 on purpose: the voice path never waits behind a file"
+}

@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""powos transcribe - speech to text on the GPU server (stt.pow), from any PowOS: desktop, phone, the Mac.
+
+Usage:
+  powos transcribe FILE|- [--lang xx] [--json] [--format F] [--prompt TEXT] [--url URL]
+  powos transcribe --health [--url URL]
+
+  FILE        audio or video in any common format (wav, mp3, m4a, ogg/opus, flac, webm, mp4...); - reads stdin
+  --lang xx   its language (ISO 639-1: en, de, fr...); default: detected
+  --json      the whole result as JSON: text, language, duration, segments with start/end seconds
+  --format F  text (default), json (= --json), srt or vtt (subtitles, timed)
+  --prompt T  words to expect: names, jargon, spelling ("PowOS, Mats, Bazzite")
+  --url URL   the server (default: $POWOS_STT_URL, else POWOS_STT_URL in /etc/powos/config, else http://stt.pow)
+  --health    is the server up: its model, queue, upload limit (exit 0 up, 2 not)
+
+Plain text comes as it's recognized (the server streams segments), so a long recording prints as it goes. A file over
+the server's upload limit (500 MB) is re-encoded to 16 kHz mono Opus and, if it's still too long, sent in 30 minute
+parts, one after another (needs ffmpeg; the parts' timestamps are shifted to the whole file's). A busy server (429/503:
+4 requests at a time) is retried for up to 2 minutes.
+
+Server: whisper-fast large-v3-turbo on the GPU box gpu-195's GPU1 (the stt-batch unit, OpenAI-compatible
+POST /v1/audio/transcriptions), LAN and VPN only. ~0.1 s for a short clip, ~12 s for 12 minutes of speech.
+Exit status: 0 done, 1 the server refused the audio (or there was no speech), 2 server unreachable / usage.
+"""
+import http.client
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+import uuid
+
+DEFAULT_URL = "http://stt.pow"
+CONFIG = os.environ.get("POWOS_CONFIG", "/etc/powos/config")
+BUSY_WAIT_S = 120
+TIMEOUT_S = float(os.environ.get("POWOS_STT_TIMEOUT", "1800"))
+PART_S = 1800
+
+
+def fail(msg, code=2):
+    print(f"powos transcribe: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def server_url(arg):
+    if arg:
+        return arg.rstrip("/")
+    if os.environ.get("POWOS_STT_URL"):
+        return os.environ["POWOS_STT_URL"].rstrip("/")
+    try:
+        with open(CONFIG) as f:
+            for line in f:
+                k, _, v = line.strip().partition("=")
+                if k.strip() == "POWOS_STT_URL" and v.strip():
+                    return v.strip().strip("\"'").rstrip("/")
+    except OSError:
+        pass
+    return DEFAULT_URL
+
+
+def connect(url):
+    u = urllib.parse.urlsplit(url)
+    cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+    return cls(u.hostname, u.port, timeout=TIMEOUT_S), u.path.rstrip("/")
+
+
+def health(url):
+    try:
+        c, base = connect(url)
+        c.timeout = 5
+        c.request("GET", base + "/health")
+        r = c.getresponse()
+        return json.loads(r.read()) if r.status == 200 else None
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
+
+
+def post(url, path, fields):
+    """POST [path] as multipart/form-data, the file streamed from disk; the response (status, headers, open body)."""
+    boundary = uuid.uuid4().hex
+    head = b"".join(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode() for k, v in fields.items()
+    )
+    head += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{os.path.basename(path)}"\r\n'
+             "Content-Type: application/octet-stream\r\n\r\n").encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
+    size = len(head) + os.path.getsize(path) + len(tail)
+    deadline = time.time() + BUSY_WAIT_S
+    while True:
+        c, base = connect(url)
+        c.putrequest("POST", base + "/v1/audio/transcriptions")
+        c.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+        c.putheader("Content-Length", str(size))
+        c.endheaders()
+        c.send(head)
+        with open(path, "rb") as f:
+            while chunk := f.read(1 << 20):
+                c.send(chunk)
+        c.send(tail)
+        r = c.getresponse()
+        if r.status in (429, 503) and time.time() < deadline:
+            r.read()
+            wait = int(r.getheader("Retry-After") or 5)
+            print(f"powos transcribe: server busy, retrying in {wait} s", file=sys.stderr)
+            time.sleep(wait)
+            continue
+        return r
+
+
+def error_of(r):
+    body = r.read().decode(errors="replace")
+    try:
+        return json.loads(body)["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        return body.strip()[:300] or r.reason
+
+
+def stream_text(url, path, fields, out):
+    """Plain text, segment by segment as the server decodes them (SSE); the whole text."""
+    r = post(url, path, {**fields, "response_format": "text", "stream": "true"})
+    if r.status != 200:
+        fail(f"{r.status}: {error_of(r)}", 1 if r.status < 500 else 2)
+    text, first = "", True
+    for raw in r:
+        line = raw.decode(errors="replace").strip()
+        if not line.startswith("data:"):
+            continue
+        ev = json.loads(line[5:])
+        if ev.get("type") == "transcript.text.delta":
+            d = ev["delta"].strip() if first else ev["delta"]
+            first = first and not d
+            out.write(d)
+            out.flush()
+            text += d
+        elif ev.get("type") == "error":
+            fail(ev.get("error", {}).get("message", "transcription failed"), 1)
+    return text
+
+
+def whole(url, path, fields, fmt):
+    r = post(url, path, {**fields, "response_format": fmt})
+    if r.status != 200:
+        fail(f"{r.status}: {error_of(r)}", 1 if r.status < 500 else 2)
+    body = r.read().decode()
+    return json.loads(body) if fmt == "verbose_json" else body
+
+
+def parts_of(path, limit, tmp):
+    """The file as uploads within [limit]: itself, or (ffmpeg) 16 kHz mono Opus in PART_S parts; (path, offset s)."""
+    if limit <= 0 or os.path.getsize(path) <= limit:
+        return [(path, 0.0)]
+    if not shutil.which("ffmpeg"):
+        fail(f"{os.path.getsize(path) >> 20} MB is over the server's {limit >> 20} MB limit, and there's no ffmpeg here to "
+             "shrink it (install ffmpeg, or convert it to 16 kHz mono first)")
+    pattern = os.path.join(tmp, "part%04d.ogg")
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", path, "-vn", "-ac", "1", "-ar", "16000",
+                    "-c:a", "libopus", "-b:a", "32k", "-f", "segment", "-segment_time", str(PART_S), "-reset_timestamps", "1", pattern], check=True)
+    parts = sorted(os.path.join(tmp, p) for p in os.listdir(tmp) if p.startswith("part"))
+    return [(p, i * PART_S) for i, p in enumerate(parts)]
+
+
+def stamp(t, sep):
+    ms = int(round(t * 1000))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d}{sep}{ms % 1000:03d}"
+
+
+def main(argv):
+    if not argv or argv[0] in ("help", "--help", "-h"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    src, lang, fmt, prompt, url, check = None, None, "text", None, None, False
+    it = iter(argv)
+    for a in it:
+        if a in ("--lang", "--language", "-l"):
+            lang = next(it, None) or fail("--lang needs a language (en, de...)")
+        elif a == "--json":
+            fmt = "json"
+        elif a == "--format":
+            fmt = next(it, None) or fail("--format needs text|json|srt|vtt")
+        elif a == "--prompt":
+            prompt = next(it, None) or fail("--prompt needs text")
+        elif a == "--url":
+            url = next(it, None) or fail("--url needs a URL")
+        elif a == "--health":
+            check = True
+        elif a == "-" or not a.startswith("-"):
+            src = a
+        else:
+            fail(f"unknown option {a} (powos transcribe --help)")
+    if fmt not in ("text", "json", "srt", "vtt"):
+        fail(f"--format {fmt}: text, json, srt or vtt")
+    url = server_url(url)
+    h = health(url)
+    if check:
+        if not h:
+            fail(f"{url} is not answering")
+        print(f"{url}: up - {h.get('model')}, {h.get('pending', 0)} running/waiting of {h.get('max_queue') or '-'}, "
+              f"uploads up to {h.get('max_upload_mb') or '-'} MB")
+        return 0
+    if not src:
+        fail("which file? (powos transcribe FILE|-, --help)")
+    if not h:
+        fail(f"{url} is not answering (LAN or VPN only; --url or POWOS_STT_URL for another server)")
+    fields = {"model": "whisper-1"}
+    if lang:
+        fields["language"] = lang
+    if prompt:
+        fields["prompt"] = prompt
+    limit = int(h.get("max_upload_mb") or 0) << 20
+    with tempfile.TemporaryDirectory(prefix="powos-transcribe-") as tmp:
+        if src == "-":
+            path = os.path.join(tmp, "stdin")
+            with open(path, "wb") as f:
+                shutil.copyfileobj(sys.stdin.buffer, f)
+        elif not os.path.isfile(src):
+            fail(f"{src}: no such file")
+        else:
+            path = src
+        parts = parts_of(path, limit, tmp)
+        if fmt == "text":
+            texts = []
+            for i, (p, _) in enumerate(parts):
+                if i:
+                    sys.stdout.write(" ")
+                texts.append(stream_text(url, p, fields, sys.stdout))
+            sys.stdout.write("\n")
+            return 0 if any(t.strip() for t in texts) else 1
+        if len(parts) == 1 and fmt in ("srt", "vtt"):
+            sys.stdout.write(whole(url, path, fields, fmt))
+            return 0
+        # json, or subtitles over several parts: the timed segments, shifted to the whole file.
+        segs, text, info = [], [], {}
+        for p, off in parts:
+            r = whole(url, p, fields, "verbose_json")
+            info.setdefault("language", r.get("language"))
+            info["duration"] = off + (r.get("duration") or 0)
+            text.append(r.get("text", "").strip())
+            segs += [{"id": len(segs) + j, "start": round(s["start"] + off, 2), "end": round(s["end"] + off, 2),
+                      "text": s["text"].strip()} for j, s in enumerate(r.get("segments", []))]
+        if fmt == "json":
+            json.dump({"text": " ".join(t for t in text if t), **info, "segments": segs}, sys.stdout, ensure_ascii=False)
+            sys.stdout.write("\n")
+            return 0 if any(text) else 1
+        sep = "." if fmt == "vtt" else ","
+        cues = [f"{stamp(s['start'], sep)} --> {stamp(s['end'], sep)}\n{s['text']}\n" for s in segs]
+        sys.stdout.write("WEBVTT\n\n" + "\n".join(cues) if fmt == "vtt" else "\n".join(f"{i}\n{c}" for i, c in enumerate(cues, 1)))
+        return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except (OSError, http.client.HTTPException) as e:
+        fail(f"{e}")
+    except subprocess.CalledProcessError as e:
+        fail(f"ffmpeg failed ({e.returncode})")

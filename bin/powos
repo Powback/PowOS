@@ -195,6 +195,7 @@ Dev & AI:
   glasses [status]    (phone) The smart glasses (Even G2/G1): connected, arms, worn, battery
   glasses show|clear|connect|disconnect|mic   (phone) Text on them, blank them, the link, the mic (powos glasses help)
   pet say "<text>" [--mood M]   (phone) Speak through the pet on home (powos pet help)
+  transcribe FILE|- [--lang xx] [--json]   Speech to text on the GPU server (stt.pow) (powos transcribe --help)
 
 ═══ EXPERIMENTAL (unvalidated — may not work) ═══════════════════════
 These features are half-built or hardware-only and are NOT part of the
@@ -3126,6 +3127,11 @@ case "${1:-}" in
         # The smart glasses the phone's PowOS app drives (lib/apps/powos-glasses, docs/GLASSES.md).
         shift
         exec python3 "$POWOS_LIB/apps/powos-glasses" "$@"
+        ;;
+    transcribe|stt)
+        # Speech to text on the GPU server, stt.pow (lib/apps/powos-transcribe; hosts/gpu-195 stt-batch unit).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-transcribe" "$@"
         ;;
     units|unit)
         # Everything installed or running on this host, with owner, purpose, limits and removal (lib/apps/powos-units).
