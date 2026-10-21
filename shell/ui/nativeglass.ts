@@ -34,12 +34,17 @@ const wanted = signal(true);
 export const nativeGlass = signal(false);
 
 /**
- * The liquid edges (LiquidGlass.kt) on this page: off. They bend a picture of the wallpaper, and OxygenOS's live video
- * wallpaper is never at the frame its screenshot caught (2026-10-21: the crystal ~225 px higher live than in the
- * picture), so the band showed another picture than the live blur next to it - a grey frame inside every surface, and
- * lines between joined ones. `__glass.live.liquid(true)` from CDP to look again.
+ * The liquid edges (LiquidGlass.kt): only from a host that bends the live wallpaper ("b.backdrop live":
+ * WallpaperBackdrop.kt, the compositor's capture of the wallpaper's own surface). An older one bent OxygenOS's
+ * screenshot of the video wallpaper, never the frame on screen - a grey frame inside every surface - so without that
+ * word, none. `__glass.live.liquid(false)` from CDP turns them off for this page.
  */
-const liquidWanted = signal(false);
+const liquidWanted = signal(true);
+const liveBackdrop = signal(false);
+fromNative.add((text) => {
+  if (text === "b.backdrop live") liveBackdrop.value = true;
+});
+liveBackdrop.subscribe(() => sendLook());
 
 /** Liquid glass's look, from the theme (theme.css --liquid-*), to the host: on with the live glass, again per theme. */
 function sendLook() {
@@ -50,7 +55,7 @@ function sendLook() {
     const v = parseFloat(css.getPropertyValue(name));
     return Number.isFinite(v) ? v : fallback;
   };
-  const on = liquidWanted.value;
+  const on = liquidWanted.value && liveBackdrop.value;
   send(`b.liquid ${devicePixelRatio} ${on ? n("--liquid-band", 14) : 0} ${n("--liquid-refraction", 9)} ${n("--liquid-rim", 0.5)} ${n("--liquid-dispersion", 0.25)}`);
 }
 powos.on("theme.changed", () => setTimeout(sendLook, 0));

@@ -42,8 +42,8 @@ import java.util.function.Consumer
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 internal class GlassBlur(
     private val view: View,
-    /** Tells the page whether the compositor blurs for it now. */
-    private val state: (Boolean) -> Unit,
+    /** To the page: "b.state 1|0" (the compositor blurs for it now), "b.backdrop live". */
+    private val state: (String) -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val windows = view.context.getSystemService(WindowManager::class.java)
@@ -81,7 +81,11 @@ internal class GlassBlur(
     private var liquidAllowed = true
     private var look = LiquidGlass.Look(0f, 0f, 0f, 0f)
     private var liquid: LiquidGlass? = null
-    private val pictureChanged: () -> Unit = { liquid?.let(::feed) }
+    /** The wallpaper live, for the liquid layer to bend: made with it. */
+    private var backdrop: WallpaperBackdrop? = null
+
+    /** Android's wallpaper changed: what's behind home is something else - captured again. */
+    private val pictureChanged: () -> Unit = { backdrop?.burst() }
 
     private val blurListener = Consumer<Boolean> { on -> compositorBlurs = on; update() }
 
@@ -131,24 +135,33 @@ internal class GlassBlur(
             }
         parent.addView(l, parent.indexOfChild(view), android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
         l.look(look)
-        l.onResize = { main.post { feed(l) } }
+        val b =
+            WallpaperBackdrop(
+                display = { view.display?.displayId ?: 0 },
+                frame = { sharp, soft -> l.frame(sharp, soft) },
+                // No live wallpaper to bend: no liquid glass (never a stale picture of it) - the plain blur stays.
+                failed = {
+                    liquidAllowed = false
+                    l.set(emptyList())
+                },
+            )
+        l.onShown = { b.burst() }
         ShellWallpaper.onChange.add(pictureChanged)
         liquid = l
-        main.post { feed(l) }
+        backdrop = b
+        b.burst()
         return l
     }
 
-    private fun feed(l: LiquidGlass) {
-        val p = ShellWallpaper.current()
-        if (p == null) {
-            ShellWallpaper.refresh(view.context)
-            return
-        }
-        l.picture(p.first, p.second)
-    }
-
     /** The page asked (again, on its reload): tell it. */
-    fun hello() = main.post { told = null; update() }
+    fun hello() =
+        main.post {
+            told = null
+            update()
+            // This host bends the live wallpaper (WallpaperBackdrop), never a stale picture of it: the page may ask
+            // for liquid edges.
+            state("b.backdrop live")
+        }
 
     private fun update() {
         if (checked == null && !broken) check()
@@ -156,7 +169,7 @@ internal class GlassBlur(
         if (!now && regions.isNotEmpty()) set(emptyList(), -1)
         if (told == now) return
         told = now
-        state(now)
+        state("b.state ${if (now) 1 else 0}")
     }
 
     /**
@@ -242,6 +255,7 @@ internal class GlassBlur(
 
     fun close() {
         ShellWallpaper.onChange.remove(pictureChanged)
+        backdrop?.close()
         runCatching { windows.removeCrossWindowBlurEnabledListener(blurListener) }
         main.post { if (regions.isNotEmpty()) set(emptyList(), -1) }
     }

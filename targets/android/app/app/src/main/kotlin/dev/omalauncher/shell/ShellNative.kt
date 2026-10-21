@@ -38,7 +38,8 @@ import android.widget.FrameLayout
  *   s.destroy <id> / s.reset           one tile / every tile (the page reloaded)
  *   n.req <json>                       PowOS apps' network capability ([ShellNet]): answered with n.res / n.ev / n.st
  *   b.hello                            the page's glass asks whether the compositor blurs for it: "b.state 1|0" back
- *                                      (again whenever that changes) - [GlassBlur]
+ *                                      (again whenever that changes) - [GlassBlur]; "b.backdrop live": liquid edges
+ *                                      bend the live wallpaper ([WallpaperBackdrop])
  *   b.r <dpr> <n> <region...>          the glass surfaces' rounded rectangles, blurred live by the compositor
  *   b.lag <frames>                     test knob: when the regions apply (-1 at once, 0 on the next draw, n later)
  *   b.liquid <dpr> <band> <refraction> <rim> <dispersion>   liquid glass's look (theme.css --liquid-*): [LiquidGlass]
@@ -68,7 +69,7 @@ class ShellNative(
     /** The glass's live blur (Android 13+: the window's surface control), for a page in a window. */
     internal val glass: GlassBlur? =
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            GlassBlur(web) { on -> port?.postMessage(WebMessage("b.state ${if (on) 1 else 0}")) }.also { g ->
+            GlassBlur(web) { text -> port?.postMessage(WebMessage(text)) }.also { g ->
                 g.holes = { synchronized(tiles) { tiles.values.mapNotNull { it.shownRect() } } }
             }
         } else {

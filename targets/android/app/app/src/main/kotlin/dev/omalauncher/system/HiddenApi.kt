@@ -41,6 +41,10 @@ object HiddenApi {
             "Landroid/view/SurfaceControl",
             // The framework's own blur-region encoding (GlassBlur.Codec): the OEM's region layout, never guessed.
             "Lcom/android/internal/graphics/drawable/BackgroundBlurDrawable",
+            // The live wallpaper behind home (shell/WallpaperBackdrop): its surface mirrored, captured by the compositor.
+            "Landroid/view/WindowManagerGlobal",
+            "Landroid/view/IWindowManager",
+            "Landroid/window/ScreenCapture",
         )
 
     @Volatile private var done = false
