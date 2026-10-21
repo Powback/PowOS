@@ -13,6 +13,6 @@ Rules:
   Keep each hold short (a run is ~1 min, a CPU sample ~3 min). Check the app pid before/after: a restart voids the run.
 - CDP only read-only (tools/phone/cdp.sh); no sudo through powos-run.sh; scratch on the phone under /data/local/tmp,
   deleted when done; restore what you changed (home page, opened apps, `powos sleep never --remove ...`).
-- Recordings and frames on the Mac under ~/.cache/ (Colima only shares $HOME); ffmpeg via a container.
+- Scripts: tools/phone/verify/ (journey.sh, frames.sh, bf-run.sh + the phone-side ones). Artefacts under ~/.cache/powos-verify/.
 Report one line per item: done / not done / new finding, with the evidence (timestamps in the recording, numbers,
 artefact paths) and whether a deploy or user input landed during the window.
