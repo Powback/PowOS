@@ -180,8 +180,10 @@ internal object NativeSpeech {
     /** How a recognizer that can't do what the intent asks refuses it (before hearing anything). */
     private val REFUSALS = setOf(SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_SERVER_DISCONNECTED)
 
-    /** The recognizer refused a segmented session once: plain sessions, restarted at each pause, from then on. */
+    /** The recognizer refused segmented sessions: plain sessions, restarted at each pause, from then on. */
     private var segmentedOff = false
+    private var segmentedRefusals = 0
+    private var segmentsSeen = false
 
     private enum class Kind { ON_DEVICE, REGULAR }
 
@@ -607,7 +609,10 @@ internal object NativeSpeech {
             override fun onPartialResults(partial: Bundle) {
                 if (!current) return
                 val t = partial.best()
-                if (t.isNotBlank()) heard = true
+                if (t.isNotBlank()) {
+                    heard = true
+                    segmentedRefusals = 0
+                }
                 if (t.isNotBlank() && !partialSeen) {
                     partialSeen = true
                     Log.i(TAG, "first words ${SystemClock.elapsedRealtime() - startedAt} ms after the start")
@@ -628,6 +633,11 @@ internal object NativeSpeech {
             // to the end - no restarts at all.
             override fun onSegmentResults(segmentResults: Bundle) {
                 if (!current) return
+                if (!segmentsSeen) {
+                    segmentsSeen = true
+                    Log.i(TAG, "segmented session: the recognizer sends segments (no restarts)")
+                }
+                segmentedRefusals = 0
                 heard = true
                 d.segment(segmentResults.best())
                 cb.onText(d.text)
@@ -643,8 +653,12 @@ internal object NativeSpeech {
                 Log.i(TAG, "error $code ($p)")
                 if (Build.VERSION.SDK_INT >= 33 && !segmentedOff && !heard && (code in REFUSALS || code > 15)) {
                     // A recognizer that won't take a segmented session as asked: plain sessions (restarted) from now on.
-                    Log.i(TAG, "no segmented sessions with this recognizer ($code): restarting segments instead")
-                    segmentedOff = true
+                    // Twice in a row, not once: a start right after a cancel gets a CLIENT error once too (a page
+                    // reloaded mid-summoning, 2026-10-21), and that turned segmenting off for good.
+                    if (++segmentedRefusals >= 2) {
+                        Log.i(TAG, "no segmented sessions with this recognizer ($code): restarting segments instead")
+                        segmentedOff = true
+                    }
                     return retry(p, 0) { "speech recognition failed ($code)" }
                 }
                 when (code) {
