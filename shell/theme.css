@@ -110,33 +110,27 @@
   --glass-veil: rgb(255 255 255 / 8%);
   --glass-behind-tint: 66%;
 }
-.glass, .glass-native { --glass-tint: 32%; }
-:is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }
-.glass, .glass-behind, .glass-native { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
+/* Over the wallpaper (glass.ts draws it): the reference's tint. */
+.wallpaper { --glass-tint: 32%; }
+.wallpaper[data-light="true"] { --glass-tint: 40%; }
+.wallpaper, .glass-behind { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }
 /*
- * A sheet: anything over home's own content - a widget's screen, a PowOS app's page, the widget picker, menus,
- * popovers: the reference material (--text-fill over --glass-veil), a .tile too (its region for the compositor, its
- * lift). The compositor's blur reaches only the wallpaper under the window, never home's tiles in it - so under a
- * page-sized sheet home's content steps out (shell.css: html:has(...)), and only the frosted wallpaper is behind it.
- * A small popover (.pop: a menu, the theme strip) leaves home in place and blurs what's under it itself.
+ * The wallpaper, the page's own bottom layer (ui/glass.ts: home, the lock face), positioned as Android crops it -
+ * centred, covering the screen - so a surface's backdrop blur has the real picture under it.
  */
-html:root :is(.tile.sheet, .sheet, .tile.pill) {
-  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+html.wallpaper body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--wallpaper) center / cover no-repeat;
+  pointer-events: none;
 }
-html:root .sheet.pop {
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
-}
-/* The picture glass (no compositor blur): the frosted wallpaper under it, as a tile's. */
-html.glass :is(.tile.sheet, .tile.pill) {
-  background:
-    linear-gradient(var(--text-fill), var(--text-fill)) border-box,
-    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
-}
-/* Where a glass surface is on the screen (ui/glass.ts), its own: not inherited, so setting one restyles one element. */
-@property --gx { syntax: "<length>"; inherits: false; initial-value: 0px; }
-@property --gy { syntax: "<length>"; inherits: false; initial-value: 0px; }
-@property --gb { syntax: "<length>"; inherits: false; initial-value: 0px; }
+/*
+ * A sheet: anything over home's own content - a widget's screen, a PowOS app's page, the widget picker, settings,
+ * menus, popovers. A pill: the one text field (bar.tsx's search, PowOS AI's compose). Both the reference material, as
+ * every surface (.tile, below).
+ */
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -160,38 +154,29 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
  */
 .surface { background: var(--soft-fill); border-radius: var(--radius); box-shadow: var(--lift); }
 
-/* A tile: what every home element is drawn on. */
+/*
+ * A tile: what every surface is drawn on - the reference material: its fill (--text-fill, over --glass-veil) over a
+ * live blur of whatever is behind it (the wallpaper glass.ts draws, and any UI under it). Home's pages blur once per
+ * page under all their tiles (shell.css .page-glass: one surface for a merged group, no seams), their tiles only tint.
+ */
+:is(.tile, .notif-panel, .sheet, .pill) {
+  background: linear-gradient(var(--glass-fill), var(--glass-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
 .tile {
-  background: var(--glass-fill);
   border: var(--frame) solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--lift);
 }
 .tile.focused { border-color: var(--color-accent); }
 
-/*
- * A surface on glass: the tint over the frosted wallpaper, that picture placed so its pixels sit where the wallpaper's
- * are (--gx/--gy: where the surface is on the screen). A surface inside another is only a soft fill on it; PowOS AI's
- * page is solid (shell.css). No live blur anywhere.
- */
-.glass :is(.tile, .notif-panel) {
-  background:
-    linear-gradient(var(--glass-fill), var(--glass-fill)) border-box,
-    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
-  backdrop-filter: none;
+/* A surface inside another (a card on a sheet, a chip on a tile): a soft fill on that one's glass, no blur of its own. */
+html :is(.tile, .notif-panel, .sheet, .pill) :is(.tile, .sheet, .pill) {
+  background: var(--soft-fill);
   -webkit-backdrop-filter: none;
-}
-.glass :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
-/*
- * Live glass (ui/nativeglass.ts, html.glass-native): the display compositor blurs what's behind each surface (the
- * wallpaper), the page only tints it - no picture, and no backdrop blur of its own.
- */
-.glass-native :is(.tile, .notif-panel) {
-  background: linear-gradient(var(--glass-fill), var(--glass-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
   backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
-.glass-native :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
 /*
  * Glass over what the host blurs behind the window (the shade's, the switcher's) or over an app (the assistant's
  * panel, which can't blur the app it circles on): the same surfaces, tinted only - --glass-behind-tint, more of it.
@@ -201,6 +186,6 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-.glass-behind :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
+html .glass-behind :is(.tile, .notif-panel) .tile { background: var(--soft-fill); }
 
 .muted { color: var(--color-muted); }

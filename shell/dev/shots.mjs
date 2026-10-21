@@ -241,18 +241,13 @@ async function shoot(name, mode, setup, behind, sizeName, size) {
             const pic = `url("${wp}") center / cover no-repeat fixed`;
             back.textContent =
               behind === "wallpaper"
-                ? `html { background: ${pic}; }`
+                ? "" // the page draws the wallpaper itself (glass.ts)
                 : behind === "blurred"
                   ? `html::before { content: ""; position: fixed; inset: -40px; z-index: -1; background: ${pic}; filter: blur(30px) brightness(.8); }`
                   : `html { background: url("${window.__shotsApp}") 0 0 / 100% 100% no-repeat; }`;
             document.head.append(back);
-            // Home's live glass, as the compositor draws it: each top-level glass surface blurs what's behind it.
-            if (root.dataset.mode === "home") {
-              root.classList.add("glass-native");
-              const n = document.createElement("style");
-              n.textContent = `.glass-native :is(.tile, .notif-panel):not(:is(.tile, .notif-panel) *) { backdrop-filter: blur(var(--shots-native-blur, 30px)); }`;
-              document.head.append(n);
-            } else if (window.__glass) window.__glass.use(wp);
+            if (window.__glass) window.__glass.use(wp);
+            await new Promise((r) => setTimeout(r, 200)); // the wallpaper decoded
             const S = await importShim("./state.ts");
             const U = (p) => importShim(p);
             const E = window.__mockEvents;
