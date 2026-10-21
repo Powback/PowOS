@@ -18,7 +18,7 @@ import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { Thread, ToolRun, toolLabel } from "./rich.tsx";
+import { Said, Thread, ToolRun, toolLabel } from "./rich.tsx";
 import { GrowField } from "./grow.tsx";
 
 const sessions = signal<AgentSession[]>([]);
@@ -63,7 +63,8 @@ function lastTurn(items: ChatItem[]) {
     // The question, not the screen text the assistant sends along with it (assist.tsx).
     asked: (items[at] as { text: string }).text.split("\n\n[What's on my screen right now")[0],
     steps: after.filter((i) => i.kind === "tool") as Extract<ChatItem, { kind: "tool" }>[],
-    answer: (after.filter((i) => i.kind === "assistant").at(-1) as { text: string } | undefined)?.text ?? null,
+    // The answer: what it said after its last step (a reply and the question it ends on are two items).
+    answer: after.slice(after.findLastIndex((i) => i.kind !== "assistant" && i.kind !== "note") + 1).filter((i) => i.kind === "assistant").map((i) => (i as { text: string }).text).join("\n\n") || null,
     notes: after.filter((i) => i.kind === "note") as Extract<ChatItem, { kind: "note" }>[],
   };
 }
@@ -79,7 +80,11 @@ export function Now() {
     <section class="ai-card tile">
       <div class="ai-asked">{turn.asked}</div>
       <ToolRun tools={turn.steps} />
-      {turn.answer && <div class="ai-answer">{turn.answer}</div>}
+      {turn.answer && (
+        <div class="ai-answer">
+          <Said text={turn.answer} reply={null} />
+        </div>
+      )}
       {turn.notes.map((n, i) => (
         <div key={i} class={`ai-note ${n.error ? "error" : "muted"}`}>
           {n.text}
@@ -102,7 +107,7 @@ function History() {
       </button>
       {open && (
         <div class="chat ai-history-list">
-          <Thread items={items} render={(item) => <Item item={item} />} />
+          <Thread items={items} render={(item, reply) => <Item item={item} reply={reply} />} />
         </div>
       )}
     </section>

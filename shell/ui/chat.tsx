@@ -6,19 +6,19 @@ import { useEffect, useRef } from "preact/hooks";
 import { chat, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import type { ChatItem } from "../types.ts";
-import { Thread, ToolRun } from "./rich.tsx";
+import { Said, Thread, ToolRun } from "./rich.tsx";
 
 /** How much of the conversation the launcher shows; the rest is in PowOS AI's page (left of home). */
 const SHOWN = 40;
 
 /** One line of the conversation: here, and in PowOS AI's page (its whole history). */
-export function Item({ item }: { item: ChatItem }) {
+export function Item({ item, reply = null }: { item: ChatItem; reply?: string | null }) {
   switch (item.kind) {
     case "user":
       // The question only: the screen the side button sent along with it (assist.tsx) isn't part of what was said.
       return <div class="msg user">{item.text.split("\n\n[What's on my screen right now")[0]}</div>;
     case "assistant":
-      return <div class="msg assistant">{item.text}</div>;
+      return <Said text={item.text} reply={reply} />;
     case "tool":
       return <ToolRun tools={[item]} />;
     case "note":
@@ -43,7 +43,7 @@ export function ChatView() {
           open ↗
         </button>
       </div>
-      <Thread items={items.slice(-SHOWN)} render={(item) => <Item item={item} />} />
+      <Thread items={items.slice(-SHOWN)} render={(item, reply) => <Item item={item} reply={reply} />} />
       {busy && <div class="msg tool muted thinking">thinking…</div>}
       {typed && !busy && <div class="msg ask muted">↵ ask “{typed}”</div>}
       {!items.length && !typed && <div class="msg muted">Type anything that isn't an app to ask PowOS AI.</div>}

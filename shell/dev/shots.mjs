@@ -76,6 +76,7 @@ const CHAT_SAMPLE = JSON.stringify([
   { kind: "tool", name: "Bash", hint: "df -h /var", ok: true, out: "Filesystem  Size  Used Avail Use%\n/dev/sda3   200G  182G   18G  91%" },
   { kind: "tool", name: "mcp__comms__send_message", hint: "devops", ok: false, out: "Error: devops inbox is full" },
   { kind: "assistant", text: "Mostly healthy. /var is at 91%: old container images take 40 GB." },
+  { kind: "assistant", text: "```choices\n" + JSON.stringify({ question: "Prune the old images?", options: ["Prune all 12", "Only the unused ones", "Not now"] }) + "\n```" },
 ]);
 
 /**

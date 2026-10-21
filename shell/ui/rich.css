@@ -59,3 +59,23 @@
   animation: tl-spin 0.9s linear infinite;
 }
 @keyframes tl-spin { to { transform: rotate(1turn); } }
+
+/* A question with options (```choices): the question as the assistant's line, the options as pills under it. */
+.choice { align-self: stretch; display: flex; flex-direction: column; gap: 6px; }
+.choice-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice-opt {
+  min-height: 36px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: var(--text-body);
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+  border: 0;
+  border-radius: 20px;
+}
+.choice-opt.on { color: var(--color-background); background: var(--color-accent); }
+.choice-opt.other { background: none; }
+
+/* On PowOS AI's page the latest answer is the card's text, not a bubble in it. */
+.ai-answer .msg.assistant { max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
+.ai-answer > * + * { margin-top: 8px; }

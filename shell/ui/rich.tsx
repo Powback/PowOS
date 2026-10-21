@@ -4,11 +4,16 @@
  *   Thread    the items, consecutive tool calls folded into one ToolRun
  *   ToolRun   a run of tool calls on one line - the newest (or the running one) and how many; a tap lists them all, a
  *             tap on one shows what it returned
+ *   Said      an assistant message: its prose, and the blocks the manager's comms tools put in it (manager.py
+ *             _rich_block: a fence named for the block, one JSON line) - ```choices: the question with tappable options
+ *             (a tap answers it: the next turn, in the user's words)
  */
 import { Fragment } from "preact";
 import { useState } from "preact/hooks";
 import type { ChatItem } from "../types.ts";
 import { Icon, type IconName } from "./icons.tsx";
+import { askQueued, openAssistant } from "./assistant.ts";
+import { powos } from "../bridge.ts";
 
 export type ToolItem = Extract<ChatItem, { kind: "tool" }>;
 
@@ -122,11 +127,137 @@ export function entries(items: ChatItem[]): Entry[] {
   return out;
 }
 
-/** The conversation: each item as [render] draws it, tool runs folded. */
-export function Thread({ items, render }: { items: ChatItem[]; render: (item: Exclude<ChatItem, ToolItem>) => preact.ComponentChild }) {
+/** What the user said next after entry [i] (a question's answer), null while nothing yet. */
+const replyAfter = (list: Entry[], i: number) => {
+  const next = list.slice(i + 1).find((e) => "item" in e && e.item.kind === "user") as { item: { text: string } } | undefined;
+  return next ? next.item.text : null;
+};
+
+/** The conversation: each item as [render] draws it (with what the user said next), tool runs folded. */
+export function Thread({
+  items,
+  render,
+}: {
+  items: ChatItem[];
+  render: (item: Exclude<ChatItem, ToolItem>, reply: string | null) => preact.ComponentChild;
+}) {
+  const list = entries(items);
   return (
     <>
-      {entries(items).map((e, i) => ("tools" in e ? <ToolRun key={i} tools={e.tools} /> : <Fragment key={i}>{render(e.item)}</Fragment>))}
+      {list.map((e, i) =>
+        "tools" in e ? <ToolRun key={i} tools={e.tools} /> : <Fragment key={i}>{render(e.item, replyAfter(list, i))}</Fragment>,
+      )}
+    </>
+  );
+}
+
+type Part = { text: string } | { block: string; body: string };
+
+/** Prose and fenced blocks, in order. A fence left open (a reply cut off) runs to the end. */
+export function parts(text: string): Part[] {
+  const out: Part[] = [];
+  const lines = text.split("\n");
+  let prose: string[] = [];
+  const flush = () => {
+    const t = prose.join("\n").trim();
+    if (t) out.push({ text: t });
+    prose = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*```\s*([\w-]*)/);
+    if (!m) {
+      prose.push(lines[i]);
+      continue;
+    }
+    flush();
+    const end = lines.findIndex((l, j) => j > i && /^\s*```\s*$/.test(l));
+    const stop = end < 0 ? lines.length : end;
+    out.push({ block: m[1], body: lines.slice(i + 1, stop).join("\n") });
+    i = stop;
+  }
+  flush();
+  return out;
+}
+
+const json = <T,>(body: string): T | null => {
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    return null;
+  }
+};
+
+interface Choices {
+  question: string;
+  options: string[];
+  multi?: boolean;
+  other?: boolean;
+}
+
+/** "other…": the one compose field - the chat surface's pill - with the keyboard up. */
+function answerOwnWords() {
+  openAssistant();
+  window.setTimeout(() => {
+    document.querySelector<HTMLTextAreaElement>(".bar textarea")?.focus();
+    powos.keyboard.show();
+  }, 60);
+}
+
+/** A question with options: a tap on one answers it (multi: tap several, then send). Once answered (the user's reply
+ *  shows right under it) only the question stays. */
+export function ChoiceCard({ c, reply }: { c: Choices; reply: string | null }) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const tap = (o: string) => {
+    if (!c.multi) return askQueued(o);
+    setPicked(picked.includes(o) ? picked.filter((p) => p !== o) : c.options.filter((x) => x === o || picked.includes(x)));
+  };
+  return (
+    <div class="choice">
+      {c.question && <div class="msg assistant">{c.question}</div>}
+      {reply === null && (
+        <div class="choice-opts" role="group">
+          {c.options.map((o) => (
+            <button type="button" key={o} class={`choice-opt ${picked.includes(o) ? "on" : ""}`} aria-pressed={picked.includes(o)} onClick={() => tap(o)}>
+              {o}
+            </button>
+          ))}
+          {c.other !== false && (
+            <button type="button" class="choice-opt other" onClick={answerOwnWords}>
+              other…
+            </button>
+          )}
+          {c.multi && picked.length > 0 && (
+            <button type="button" class="choice-opt on" onClick={() => askQueued(picked.join(", "))}>
+              send
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** An assistant message: prose as a bubble, its blocks as what they are; a code fence as code. */
+export function Said({ text, reply }: { text: string; reply: string | null }) {
+  return (
+    <>
+      {parts(text).map((p, i) => {
+        if ("text" in p)
+          return (
+            <div key={i} class="msg assistant">
+              {p.text}
+            </div>
+          );
+        if (p.block === "choices") {
+          const c = json<Choices>(p.body);
+          if (c && Array.isArray(c.options)) return <ChoiceCard key={i} c={c} reply={reply} />;
+        }
+        return (
+          <pre key={i} class="msg assistant code">
+            {p.body}
+          </pre>
+        );
+      })}
     </>
   );
 }
