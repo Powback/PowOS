@@ -91,7 +91,9 @@ shell/push.sh --vpn --reset 2>&1 | tail -2
 # shell file origin changed since the build commit, from origin's tip, through the gate as any push.
 git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
 newer=$(git diff --name-only HEAD origin/worktree-powos-multiplatform -- shell/ 2>/dev/null | grep -vE '^shell/(dev|test)/' |
-  while read -r f; do git cat-file -e "origin/worktree-powos-multiplatform:$f" 2>/dev/null && echo "${f#shell/}"; done)
+  while read -r f; do git cat-file -e "origin/worktree-powos-multiplatform:$f" 2>/dev/null && echo "${f#shell/}"; done || true)
+# (|| true: nothing newer - an APK built from the tip - makes grep exit 1, and set -e + pipefail ended the ship here,
+# skipping the checks below; 17:18, APK 29876595.)
 if [ -n "$newer" ]; then
   t=$(mktemp -d "$HOME/.cache/powos-reapply.XXXXXX")
   if git worktree add -q --detach "$t/tree" origin/worktree-powos-multiplatform 2>/dev/null; then
