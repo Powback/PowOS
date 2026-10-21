@@ -7,11 +7,13 @@ description: Use when working on PowOS's edge gestures (Good Lock-style handles,
 - GestureMonitor.kt: InputManager.monitorGestureInput (MONITOR_INPUT via the recents role). On each finger DOWN the
   consumers are asked in order (PowosRecentsService.startGestures): **CornerPull(NavGesture) -> EdgeGestures ->
   ShadeHost.pull**. The first whose onDown says true follows the gesture; TAKE pilfers (windows + other monitors get a
-  cancel). `takesOnDown` (EdgeGestures) pilfers on the DOWN itself.
+  cancel). `takesOnDown` (EdgeGestures) pilfers at the FIRST event after the down - never inside the DOWN's own
+  delivery: pilfered there, the dispatcher sent the monitor a second DOWN and none of the moves (Quick Tools dead,
+  "edge: down" logged twice; InputDispatcher: "pilfer points from a channel without any on-going pointer streams").
 - Order matters: ShadeHost.pull accepts any finger on home's body while homePull is on, so the bar's strip (nav,
   corners) and the edge handles must come first.
-- SystemUI's EdgeBackGestureHandler is also a spy monitor; whoever pilfers first wins. The edge handles pilfer on down
-  so Back never races them inside the handle; above/below the handle nothing is touched. Pilfering on down costs the
+- SystemUI's EdgeBackGestureHandler ("[Gesture Monitor] edge-swipe", OPlus "NoBackGesture" logs) is also a spy;
+  whoever pilfers first wins. The edge handles pilfer at the first move, before its threshold, so Back never wins inside the handle; above/below the handle nothing is touched. Pilfering on down costs the
   app the taps in that 18 dp strip (the same trade-off Good Lock makes).
 
 ## Edge gestures
@@ -46,6 +48,10 @@ description: Use when working on PowOS's edge gestures (Good Lock-style handles,
   -> gesture.ts asks shade.open on a swipe down. openPanel(control) opens it without a pull (edge actions).
 
 ## Pitfalls already paid for
+- A kept-warm overlay page reloaded while hidden (an install, a shell push) only boots once its window shows: armOpen
+  uses PageWatchdog.probeShown (3 s grace for "not rendered"), or the first pull after an install closed at once.
+- Kotlin pushes: `tools/phone/compile-check.sh && git push` - its exit code, never a grep of its output (0b3a702
+  broke origin's build that way).
 - A shell file pushed/overridden without what it imports breaks every page (17:09, 2026-10-21: home.tsx imported a
   gesture.ts export only a later commit added; every page failed after the install). Commit related shell files
   together; ship-apk now gates HEAD's own shell before building. gesture.ts is shared with the drawer and widgets.
@@ -57,5 +63,6 @@ description: Use when working on PowOS's edge gestures (Good Lock-style handles,
 - Unit: gradle `:app:testDebugUnitTest --tests "*EdgeGestureClassifierTest*"` (in the android builder image).
 - Shell: `shell/dev/gate.sh --tree`; renders: `SHOTS_ONLY='quicktools|gestures' shell/dev/gate.sh --tree --shots DIR`,
   review images via tools/phone/review-image.sh before shipping.
-- Device: `tools/phone/verify/edge.sh [home|edge|corner|all]` (waits for a free window itself), logcat tags PowosEdge,
+- Device: `tools/phone/verify/edge.sh [home|edge|corner|all]` (one AWAKE_ONLY idle wait, WAIT_S; goes home and checks
+  it's in front; window states snapshotted mid-gesture via motionevents; recordings as root into $OUT), logcat tags PowosEdge,
   PowosCornerPull, PowosOverlay, PowosShade, PowosGestures; `dumpsys window windows | grep 'PowOS '` for the windows.
