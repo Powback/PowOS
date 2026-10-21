@@ -49,9 +49,14 @@ strip only - not the cause when a drag in a tile fails.
   on release -> setGroup -> PUT clip/v2/resource/grouped_light/<id>). Columns from the width (~110 px a pill), whole
   rows; one room = a full-tile panel, radius min(pillH/2, 18). The page's first card "On the home widget" picks which
   rooms the widget shows (opt-in prefs).
-- Ship: copy changed files into ~/Projects/lights on the phone (keep owner: chown to the existing file's uid:gid),
-  then as the user: `powos app ui . --note "..."` (via /data/powos/powos-run.sh). Diff the phone's sources first:
-  someone may have changed them since your copy.
+- Work on any phone app (repo scripts only - ~/.cache scratch is pruned after 3 days, so a pulled copy is
+  disposable; pull again rather than trusting an old one):
+      tools/phone/app-src.sh pull lights [DIR]          # sources -> DIR (default ~/.cache/powos-apps/lights)
+      shell/dev/preview/build-app-ui.sh DIR             # widgets + pages -> DIR/out/ui (docker esbuild, no module)
+      shell/dev/preview.sh --no-defaults --app DIR --only '^local\.lights'
+      tools/phone/app-src.sh push lights DIR --note "what changed" ui/widgets/main.tsx [more files]
+  push keeps each file's owner, runs `powos app ui .` as the user, prints local vs phone md5, and refuses a file
+  the phone changed since the pull. The repo's own apps (apps/*) build with apps/build.sh, install with apps/install.sh.
 - NEVER drag a real room to test. Test with a mock room in the preview (data/local.lights.json) or CDP with the
   reducer/onDim stubbed. To set a value back if you must: call the pill's own handlers (element.l.pointerdownfalse /
   pointermovefalse / pointerupfalse with a fake event) - no input reaches the screen.
