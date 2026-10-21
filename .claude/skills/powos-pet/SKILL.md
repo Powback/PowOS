@@ -38,10 +38,17 @@ A spring rim of 10 points drawn as one path; rAF only while it settles; eyes on 
 - Inbox: `powos comms inbox --agent pet` CLEARS it - read with `--peek` or `watch` first.
 - The mock home's joined tiles: an edge under another tile isn't a floor (petperch trims it).
 
-## Review and test
-- Render: copy shell to ~/.cache/..., run a shots script (shell/dev/shots.mjs pattern) in `zenika/alpine-chrome:with-puppeteer`
-  with `window.__pet.force(state)` / `.perch(key)` / `.goto(where, say)`; SHOTS_SCALE=3, a phone theme (Matte Black:
-  bg #121212, fg #bebebe, accent #e68e0d). At rest: `document.getAnimations()` running = 0 and rAF calls stop.
-- Gate: `shell/dev/gate.sh --tree`; push: `shell/push.sh --vpn --note "..." <files>`.
-- Device (read-only): `~/.cache`-style cdp eval of `.pet` (outerHTML, getComputedStyle fill); `tools/phone/adb.sh shell "dumpsys
-  window windows | grep -A30 'PowOS pet}'"`, `logcat -d | grep PowosPet`; screencap only after one `idle.sh --wait`.
+## Review and test (all in the repo)
+- States: `shell/dev/petshots.sh [OUT]` (env PET_THEME=matte|gruvbox|kanagawa, PET_STATES, PET_SCALE, PET_PERCH) - a close-up per
+  state + OUT/sheet.png, and each state's rest check (running animations must be 0). Review hooks in the page:
+  `window.__pet.force(state)`, `.perch(key, fx)`, `.goto(where, say)`, `.edges()`.
+- Movement (powos-pet-physics's): `shell/dev/petrec.mjs` (frame strip + per-frame displacement + rAF at rest).
+- Whole shell renders: `shell/dev/gate.sh --shots DIR`; contact sheets of two runs: `shell/dev/sheet.mjs`.
+- Gate: `shell/dev/gate.sh --tree`; ship: commit, rebase, push origin, `shell/push.sh --vpn --note "..." <files>`.
+- Review upload: `tools/phone/adb.sh push FILE /data/local/tmp/`, then `tools/phone/root.sh` a script that moves it to
+  /data/powos/root/home/powos/pet-review/<step>/ and chowns it to the app's uid. Mail the manager and read its answer as the
+  session user: `tools/phone/user.sh SCRIPT` with `powos comms send manager "..." --from pet`, then
+  `powos comms watch --agent pet --timeout 2400` (one held call; `comms inbox` without --peek CLEARS it).
+- Device (read-only): `tools/phone/cdp.sh eval home '<js>'` on `.pet` (outerHTML, getComputedStyle fill, data-state);
+  `tools/phone/adb.sh shell "dumpsys window windows | grep -A30 'PowOS pet}'; logcat -d | grep PowosPet"`;
+  `tools/phone/cpu.sh 60` for CPU; a screencap only after one `tools/phone/idle.sh --wait 120 MAX_S`.
