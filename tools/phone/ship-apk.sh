@@ -73,5 +73,21 @@ git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
 # one consistent shell (a stale override of assistant.ts shadowing the new APK's assist.tsx froze home, the shade
 # and assist at 09:47). Uncommitted pushes are lost by design - commit before you push.
 shell/push.sh --vpn --reset 2>&1 | tail -2
+# ...but a shell push committed WHILE this APK built (or waited to install) isn't in it, and the reset just removed it
+# (15:58: a360435 committed 31 s after the build of 366aa8e started; the 15:59 install wiped it). Push again every
+# shell file origin changed since the build commit, from origin's tip, through the gate as any push.
+git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+newer=$(git diff --name-only HEAD origin/worktree-powos-multiplatform -- shell/ 2>/dev/null | grep -vE '^shell/(dev|test)/' |
+  while read -r f; do git cat-file -e "origin/worktree-powos-multiplatform:$f" 2>/dev/null && echo "${f#shell/}"; done)
+if [ -n "$newer" ]; then
+  t=$(mktemp -d "$HOME/.cache/powos-reapply.XXXXXX")
+  if git worktree add -q --detach "$t/tree" origin/worktree-powos-multiplatform 2>/dev/null; then
+    [ -d shell/node_modules ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
+    echo "ship-apk: re-pushing shell changes committed after the build: $(echo $newer)"
+    (cd "$t/tree/shell" && READY_MS=${READY_MS:-30000} ./push.sh --vpn --note "Restored the newest screen updates after the app update" $newer 2>&1 | tail -2)
+    git worktree remove --force "$t/tree" 2>/dev/null
+  fi
+  rm -rf "$t"
+fi
 sleep 15
 tools/phone/adb.sh shell "dumpsys package com.powos.app | grep -m1 versionCode; logcat -d -v time -T '$start.000' | grep -E 'gesture input on|Fatal signal|FATAL EXCEPTION' | tail -4"
