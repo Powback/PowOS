@@ -339,9 +339,10 @@ Voice path (`voice-bench.py ws`, n=10, median end of speech -> first audio byte)
 |---|---|---|---|
 | before (no pool) | 409 ms | 498 ms | **640 ms** |
 | pool running 4 streams on GPU1 the whole time | 421 ms | 517 ms | **665 ms** |
+| after, pool installed and idle | 424 ms | 521 ms | **664 ms** (min 606) |
 
-The voice turn is about 25 ms slower while GPU1 is busy, probably CPU contention (the box has 8 cores; GPU0 is
-untouched). It stays well under the 800 ms target. stt-batch kept answering `/health` throughout (stt.pow).
+The ~25 ms between the first row and the others is the same with the pool idle, so it is variance between runs, not
+the pool. Minimums: 610, 632 and 606 ms. No regression, and well under the 800 ms target. stt-batch kept answering `/health` throughout (stt.pow).
 
 Noise: a 3090 under the pool's full load runs at 100%, ~300 W, with its fan near 100%. The cards are ASUS blowers
 (subsystem 1043:87B3). The user stopped the load test because the box was loud.
