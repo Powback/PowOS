@@ -294,13 +294,26 @@ export function NotificationPanel() {
   }, [shown]);
   const { available, items } = list.value;
   const clearable = items.some((n) => n.clearable);
-  // Opened, or a new notification: the list at its foot, the newest in view (the top end is the older ones).
+  // The pull's ride (shell.css .notif-items): the room left under the cards and the panel's height, measured when they
+  // change size - never per frame (the finger moves --q only).
   const listEl = useRef<HTMLDivElement>(null);
-  const newest = items.reduce((m, n) => Math.max(m, n.time), 0);
+  const itemsEl = useRef<HTMLDivElement>(null);
+  const panelEl = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const l = listEl.current;
-    if (l && shown) l.scrollTop = l.scrollHeight;
-  }, [shown, newest, items.length]);
+    const c = itemsEl.current;
+    const p = panelEl.current;
+    if (!l || !c || !p) return;
+    const measure = () => {
+      p.style.setProperty("--free", `${Math.max(0, l.clientHeight - c.offsetHeight)}px`);
+      p.style.setProperty("--ph", `${p.offsetHeight}px`);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(l);
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, [panel.value]);
   return (
     <>
       <div
@@ -309,7 +322,15 @@ export function NotificationPanel() {
         ref={followNotif}
         onClick={() => (notif.value = false)}
       />
-      <div class={`notif-panel ${shown ? "shown" : ""}`} data-q ref={followNotif} aria-hidden={!shown}>
+      <div
+        class={`notif-panel ${shown ? "shown" : ""}`}
+        data-q
+        ref={(n) => {
+          panelEl.current = n;
+          followNotif(n);
+        }}
+        aria-hidden={!shown}
+      >
         <div class="panel-body">
           {panel.value === "control" ? (
             <ControlCenter />
@@ -331,22 +352,21 @@ export function NotificationPanel() {
                 </span>
               </div>
               {/*
-                * Bottom-aligned, near the thumb: the newest at the foot, older above it; few of them sit at the bottom
-                * (the space above), many fill up to the header and scroll under it - shown scrolled to the newest.
+                * Open: top-aligned, the newest first. Pulled down: the cards ride on the sheet's bottom edge (under the
+                * finger) until their top is where it ends up, then stay there - --ride (shell.css), from --q.
                 */}
               <div class="notif-list" ref={listEl}>
-                <span class="notif-spacer" aria-hidden="true" />
+                <div class="notif-items" ref={itemsEl}>
                 {!available ? (
                   <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>
                     allow the launcher to show your notifications here →
                   </button>
                 ) : items.length ? (
-                  grouped(items)
-                    .reverse()
-                    .map((g) => <Stack key={g.id} g={g} />)
+                  grouped(items).map((g) => <Stack key={g.id} g={g} />)
                 ) : (
                   <div class="notif-empty muted">nothing new</div>
                 )}
+                </div>
               </div>
             </>
           )}

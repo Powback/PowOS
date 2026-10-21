@@ -953,8 +953,14 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   flex-direction: column;
   gap: 6px;
 }
-/* Bottom-aligned (notifications.tsx): the spacer takes whatever room is left above the cards - none once they fill it. */
-.notif-spacer { flex: 1 0 0; }
+/*
+ * The pull (notifications.tsx): the cards ride on the sliding sheet's bottom edge - under the finger, nothing of them
+ * hidden above the screen - until their top reaches where it rests (top-aligned), then stay there: moved down by the
+ * part of the sheet still above the screen ((1 - q) x its height), at most the room left under them (--free). Only
+ * --q changes per frame; continuous, no jump. A list that fills the panel has no room: it slides with the sheet.
+ */
+.notif-items { display: flex; flex-direction: column; gap: 6px; flex: none; transform: translateY(min(calc((1 - var(--q)) * var(--ph, 0px)), var(--free, 0px))); }
+.notif-list:has(> .notif-items > .notif-empty) .notif-items { flex: 1; justify-content: center; }
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
 .notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }
 .notif-icon { width: 18px; height: 18px; border-radius: 5px; }
@@ -972,7 +978,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .notif-access { font: var(--text-small) var(--font); color: var(--color-accent); text-align: start; }
 .notif-empty { padding: 18px 2px; text-align: center; font-size: var(--text-small); }
 /* Nothing new: the message in the middle of the (now always full-height) panel. */
-.notif-list:has(> .notif-empty) { display: flex; align-items: center; justify-content: center; }
+.notif-list:has(> .notif-items > .notif-empty) { display: flex; }
 .notif-grip { align-self: center; width: 44px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--color-border); }
 
 /*
