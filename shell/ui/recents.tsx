@@ -451,7 +451,7 @@ function Menu() {
   return (
     <>
       <div class="recents-menu-scrim" onPointerDown={() => (menu.value = null)} />
-      <div class="recents-menu tile" style={{ left: `${m.left}px`, top: `${m.top}px` }}>
+      <div class="recents-menu tile sheet pop" style={{ left: `${m.left}px`, top: `${m.top}px` }}>
         {/* A PowOS app's card (negative id) is no Android task: no split, window, screenshot or app info for it. */}
         {t.id >= 0 && (
           <>

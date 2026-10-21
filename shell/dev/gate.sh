@@ -11,7 +11,8 @@
 # them), and the files being pushed, from the working tree, over that. Other agents' uncommitted edits elsewhere in
 # shell/ are not part of it, as they aren't part of the phone. --tree: the working tree as it is instead; --dir: DIR
 # as it is (nothing composed).
-#   1. tsc --noEmit over that shell (the folder's own tsconfig and node_modules);
+#   1. tsc --noEmit over that shell (the folder's own tsconfig and node_modules); the style lint (dev/lint-style.sh:
+#      a raw colour, a line or a shadow outside theme.css's tokens fails, dev/style-allow.txt the exceptions);
 #   2. every page of it (home, lock, shade, assist, aod, recents: each mode app.tsx renders) booted in a headless
 #      Chromium against the mock bridge, served as the phone's WebView serves it (shell/dev/gate.mjs): any uncaught
 #      error, failed module load, missing export or import-cycle error, or no ready (window.__powosAlive) in READY_MS
@@ -74,6 +75,8 @@ elif [ -x "$SHELL_DIR/node_modules/.bin/tsc" ]; then
 else
   echo "     tsc: skipped (no shell/node_modules - npm ci in shell/)"
 fi
+# 1b. The design language's style lint (docs/DESIGN-LANGUAGE.md): no raw colours, lines or shadows outside the tokens.
+if out=$("$SHELL_DIR/dev/lint-style.sh" "$S" 2>&1); then echo "$out"; else echo "$out" | head -30; fail=1; fi
 # 2. The pages, booted.
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
 mounts=(-v "$S:/shell:ro" -v "$SHELL_DIR/dev/gate.mjs:/usr/src/app/gate.mjs:ro")

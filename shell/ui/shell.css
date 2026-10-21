@@ -502,7 +502,7 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
 .tile-app .app-label,
 .strip .app-label {
   max-width: 100%;
-  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+  text-shadow: var(--label-shadow);
   color: var(--color-foreground);
 }
 .initials {
@@ -535,7 +535,7 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
   z-index: 20;
   pointer-events: none;
   transform: scale(1.06);
-  filter: drop-shadow(0 8px 16px rgb(0 0 0 / 0.4));
+  filter: var(--lift-drop);
 }
 
 .tile-actions {
@@ -560,7 +560,7 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
   height: 28px;
   border-radius: 50%;
   background: var(--color-accent);
-  border: 3px solid var(--color-background);
+  box-shadow: 0 0 0 3px var(--color-background);
   touch-action: none;
 }
 .resize-preview {
@@ -757,16 +757,11 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
 .screen-close { font: inherit; color: var(--color-muted); background: none; border: 0; padding: 4px 8px; }
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }
 
-/* Edit mode (editsheet.tsx, state.ts editing): the pages step back, outlined, the sheet under them. */
+/* Edit mode (editsheet.tsx, state.ts editing): the bar and the dock make way for the edit sheet; the pages stay as they are. */
 .home.editing .bar,
 .home.editing .dock,
 .home.editing .launcher,
 .home.editing .launcher-frame { visibility: hidden; }
-.home.editing .page {
-  outline: var(--frame) dashed color-mix(in srgb, var(--color-foreground) 30%, transparent);
-  outline-offset: -6px;
-  border-radius: var(--radius);
-}
 /* One slim bar where the search bar and the dock were, flush with the screen's foot (editsheet.tsx). */
 .edit-sheet {
   position: fixed;
@@ -839,7 +834,7 @@ html:has(.screen-scrim, .app-screen, .aw-scrim) :is(.stage, .bar, .dock, .ai-scr
   text-align: start;
   box-shadow: var(--lift);
 }
-.swatch.on { border: 2px solid var(--color-accent); }
+.swatch.on { box-shadow: inset 0 0 0 2px var(--color-accent); }
 .swatch.browse { justify-content: center; background: none; color: var(--color-muted); }
 .swatch-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .swatch-bars { display: flex; gap: 3px; }
@@ -1264,7 +1259,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-tile.edit .cc-icon { animation: cc-wobble 1.6s ease-in-out infinite; }
 .cc-tile.edit:nth-child(2n) .cc-icon { animation-delay: -0.8s; }
 .cc-tile.edit.dragging { z-index: 2; transition: none; }
-.cc-tile.edit.dragging .cc-icon { animation: none; box-shadow: 0 8px 24px rgb(0 0 0 / 45%); border-color: var(--color-accent); }
+.cc-tile.edit.dragging .cc-icon { animation: none; box-shadow: var(--lift-shadow), 0 0 0 2px var(--color-accent); }
 .cc-grid .cc-tile.edit:not(.dragging) { transition: transform 160ms ease; }
 .cc-badge {
   position: absolute;
@@ -1349,7 +1344,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   border-radius: var(--card-radius);
 }
 /* Shadows only while it's up: a closed layer costs the page nothing to keep. */
-.recents.open .task-shot { box-shadow: 0 10px 30px color-mix(in srgb, #000 35%, transparent); }
+.recents.open .task-shot { box-shadow: var(--lift-shadow); }
 .recents .task.pinned .task-label::after { content: " \00b7 pinned"; color: var(--color-accent); }
 /* The first card is where the app's window lands; the others slide in from the left with the finger. */
 .recents .task:not(:first-child) { transform: translateX(calc((var(--rp) - 1) * 0.45 * var(--screen-w, 100vw))); opacity: var(--rp); }
@@ -1374,7 +1369,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents-menu-scrim { position: fixed; inset: 0; z-index: 1; }
 .recents-menu {
   position: fixed; z-index: 2; width: 220px; display: flex; flex-direction: column; padding: 6px 0;
-  border-radius: 16px; background: var(--color-surface); box-shadow: 0 12px 32px color-mix(in srgb, #000 40%, transparent);
+  border-radius: var(--radius);
   animation: recents-menu-in 160ms cubic-bezier(0.2, 0.9, 0.2, 1);
   transform-origin: top left;
 }

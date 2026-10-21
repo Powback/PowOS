@@ -27,7 +27,7 @@
 .remote-target.picked { color: var(--color-foreground); border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 16%, transparent); }
 .remote-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-border); }
 .remote-dot.on { background: var(--color-accent); }
-.remote-dot.linked { background: var(--color-green, #76946a); }
+.remote-dot.linked { background: var(--color-green, var(--color-accent)); }
 
 .remote-status {
   display: flex;

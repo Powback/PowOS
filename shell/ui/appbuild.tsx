@@ -67,7 +67,7 @@ export function NewAppAsk() {
           placeholder="What should it do? e.g. a shared shopping list"
           enterKeyHint="go"
           autocomplete="off"
-          style={{ font: "inherit", padding: "10px 12px", borderRadius: "12px", border: "1px solid var(--color-border)", background: "transparent", color: "inherit" }}
+          style={{ font: "inherit", padding: "10px 12px", borderRadius: "12px", border: 0, outline: 0, background: "var(--soft-fill)", color: "inherit" }}
         />
         <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
           <button type="button" class="sheet-item" onClick={() => (newAppAsk.value = false)}>

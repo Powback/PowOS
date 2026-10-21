@@ -41,6 +41,10 @@
   --lift-shadow: 0 6px 20px -10px rgb(0 0 0 / 50%);
   --lift-shadow-up: 0 -6px 20px -12px rgb(0 0 0 / 50%);
   --lift: var(--lift-edge), var(--lift-shadow);
+  /* A thing held up by a finger (a carried tile), as a filter: its shadow, larger. */
+  --lift-drop: drop-shadow(0 8px 16px rgb(0 0 0 / 40%));
+  /* Labels straight on the wallpaper (home's app labels): the one text shadow, so they read on any picture. */
+  --label-shadow: 0 1px 3px rgb(0 0 0 / 80%);
   /* What a control on a panel (a quick setting, a slider, a chip) is filled with: on glass, a soft fill instead. */
   --control-fill: var(--color-surface);
 

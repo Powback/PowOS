@@ -398,9 +398,11 @@ function GroupShadow({ items, joined, id }: { items: HomeItem[]; joined: Map<str
         <filter id={`gs-${id}`} x="-10%" y="-10%" width="120%" height="120%">
           <feGaussianBlur stdDeviation="7" />
         </filter>
+        {/* The faces cut out stroked too: two faces meeting at a fractional pixel each antialias their shared edge, and the
+            shadow showed through between merged tiles as a dark hairline. */}
         <mask id={`gm-${id}`} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}>
           <rect width={W} height={H} fill="#fff" />
-          <path d={f.all} fill="#000" />
+          <path d={f.all} fill="#000" stroke="#000" stroke-width="1" />
         </mask>
       </defs>
       <g mask={`url(#gm-${id})`}>

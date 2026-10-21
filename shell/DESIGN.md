@@ -4,6 +4,8 @@ One UI for the phone's launcher (Omalauncher) and, later, PowOS's desktop shell 
 plain files that change at runtime: edit a file — by hand or by an agent — and the shell reloads it in place. No
 APK, no package, no build.
 
+How it looks - the one material, contrast, motion, what a change may add - is [docs/DESIGN-LANGUAGE.md](../docs/DESIGN-LANGUAGE.md).
+
 ## Why
 
 The Compose launcher is ~27k lines of Kotlin; every change is a Gradle build and an APK install. The goal is a fully
