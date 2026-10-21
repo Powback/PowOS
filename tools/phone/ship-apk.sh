@@ -7,6 +7,14 @@
 # never installs over an active user (exit 4 after SHIP_WAIT_MIN minutes). --now skips the wait (only for urgent fixes).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+# Always the shared, current rules: each worktree has its own copy of this script, and an old copy skipped the
+# "only the origin tip" check (an unmerged e89fb58 got installed). Re-run as origin's version unless it's this one.
+if [ -z "${SHIP_APK_CURRENT:-}" ]; then
+  git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+  cur=$(mktemp); git show origin/worktree-powos-multiplatform:tools/phone/ship-apk.sh > "$cur" 2>/dev/null || true
+  if [ -s "$cur" ] && ! cmp -s "$cur" "$0"; then SHIP_APK_CURRENT=1 exec bash "$cur" "$@"; fi
+  rm -f "$cur"
+fi
 note="" now=""
 while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --now) now=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
 [ -n "${note// }" ] || { echo "ship-apk: --note \"...\" required" >&2; exit 2; }
