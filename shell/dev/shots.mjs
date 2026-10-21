@@ -79,6 +79,35 @@ const CHAT_SAMPLE = JSON.stringify([
   { kind: "assistant", text: "```choices\n" + JSON.stringify({ question: "Prune the old images?", options: ["Prune all 12", "Only the unused ones", "Not now"] }) + "\n```" },
 ]);
 
+/** Two presented documents (```present): a Markdown plan and an HTML review sheet. */
+const PLAN_MD = [
+  "# Cleanup plan",
+  "Frees about **38 GB** on `/var`, nothing running is touched.",
+  "## Steps",
+  "1. Stop the idle containers (`powos containers autosleep status`)",
+  "2. Prune images older than 30 days",
+  "   - keeps the ones a unit names",
+  "3. Re-check `df -h /var`",
+  "| image | size | last used |",
+  "|---|---|---|",
+  "| spacetimedb:1.2 | 14 GB | 41 days |",
+  "| builder:old | 11 GB | 63 days |",
+  "| fex-rootfs | 9 GB | 90 days |",
+  "> Rollback: images can be pulled again; nothing else is deleted.",
+  "```",
+  "powos containers prune --older 30d",
+  "```",
+  "Details: [the units](https://powos.pow/units)",
+].join("\n");
+const SHEET_HTML = `<style>body{margin:0;font:13px system-ui}h1{font-size:18px;margin:0 0 10px}.g{display:grid;grid-template-columns:1fr 1fr;gap:10px}.c{border-radius:10px;padding:10px;background:color-mix(in srgb,currentColor 10%,transparent)}.c b{display:block;margin-bottom:6px}.sw{height:60px;border-radius:8px;background:linear-gradient(135deg,#3a5f8f,#c08050)}</style><h1>Review: chat cards</h1><div class="g"><div class="c"><b>Before</b><div class="sw"></div>raw tool lines</div><div class="c"><b>After</b><div class="sw" style="filter:saturate(1.6)"></div>one line per run</div></div>`;
+const PRESENT_SAMPLE = JSON.stringify([
+  { kind: "user", text: "plan the cleanup and show me the review sheet" },
+  { kind: "tool", name: "mcp__comms__present", hint: "", ok: true },
+  { kind: "assistant", text: "Here's the plan:" },
+  { kind: "assistant", text: "```present\n" + JSON.stringify({ title: "Cleanup plan", format: "md", body: PLAN_MD }) + "\n```" },
+  { kind: "assistant", text: "```present\n" + JSON.stringify({ title: "Review: chat cards", format: "html", body: SHEET_HTML }) + "\n```" },
+]);
+
 /**
  * The scenes: [name, mode, setup] - setup runs in the page once it's ready (S: state.ts, U: an import by path, E: the
  * mock's events, sleep). `behind`: what the window is over - "wallpaper" (home: native glass), "blurred" (the shade,
@@ -100,6 +129,9 @@ const SCENES = [
   ["ai", "home", "S.page.value = -1;", "wallpaper"],
   ["chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["chat-open", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelector('.chat .tl-row')?.click(); await sleep(100); document.querySelectorAll('.chat .tl-row.has-out')[0]?.click(); document.querySelectorAll('.chat .tl-row.has-out')[2]?.click();`, "wallpaper"],
+  ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
+  ["present-md", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[0]?.click();`, "wallpaper"],
+  ["present-html", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelectorAll('.chat .present')[1]?.click(); await sleep(200);`, "wallpaper"],
   ["ai-chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.page.value = -1;`, "wallpaper"],
   ["ai-compose", "home", "S.page.value = -1; await sleep(300); const f = document.querySelector('.ai-compose textarea, .ai-compose input'); f?.focus(); if (f) { f.value = 'summarise what the agents did overnight and what needs me'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   ["widget-screen", "home", "const w = S.home.value.items.find((i) => i.kind === 'widget'); S.screen.value = { key: w.key, title: 'weather' };", "wallpaper"],

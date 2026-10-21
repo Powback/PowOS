@@ -588,9 +588,9 @@ if AGENT_ID == "manager":
         "description": (
             "Show the user a document in the chat: a card they tap to read full screen. For plans, tables, "
             "comparisons, previews and review sheets - anything longer or more structured than a chat reply. "
-            "format 'md' (Markdown: headings, lists, tables, code, images by https URL) or 'html' (a whole page, "
-            "rendered in a sandbox: inline CSS/JS only, no network, keep it under 60 KB). Say in a sentence what it "
-            "is; don't repeat its content in prose."),
+            "format 'md' (Markdown: headings, lists, tables, code, images by https URL) or 'html' (a page or a "
+            "fragment with inline CSS, shown in a sandbox: scripts don't run, nothing loads but https/data: images; "
+            "under 60 KB). Say in a sentence what it is; don't repeat its content in prose."),
         "schema": {
             "type": "object",
             "properties": {

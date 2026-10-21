@@ -220,8 +220,15 @@ export function closeDrawer() {
   powos.keyboard.hide();
 }
 
+/** Open over everything (a presentation full screen: ui/rich.tsx): Back closes it before anything else. */
+export const topBack = signal<(() => void) | null>(null);
+
 /** Back: whatever is on top closes first - a widget's screen, a menu, a folder, a tile's edit, edit mode, the drawer. False when nothing was open. */
 export function back(): boolean {
+  if (topBack.value) {
+    topBack.value();
+    return true;
+  }
   // The switcher up: Back goes back to the app it was opened over (or closes it, over home).
   if (recentsBack()) return true;
   // A session open, or still shrinking back into its card: Back is its (a second Back meanwhile - the keyboard's and

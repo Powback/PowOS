@@ -73,3 +73,72 @@
 /* On PowOS AI's page the latest answer is the card's text, not a bubble in it. */
 .ai-answer .msg.assistant { max-width: none; padding: 0; background: none; border: 0; box-shadow: none; }
 .ai-answer > * + * { margin-top: 8px; }
+
+/* A presented document (```present): a card with its title and its beginning; a tap opens it full screen. */
+.present {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 0;
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+}
+.present-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.present-title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+/* Its beginning: still, untouchable, faded out at the foot. */
+.present-peek {
+  height: 140px;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(black 60%, transparent);
+  mask: linear-gradient(black 60%, transparent);
+}
+.present-frame { display: block; width: 100%; height: 100%; border: 0; background: none; }
+.present-peek .present-frame { height: 140px; }
+.present-peek .present-md { font-size: var(--text-small); }
+
+/* Full screen, over everything: the reference sheet, its title and × at the top, the document scrolling under. */
+.present-full {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--inset-top, 0px) var(--edge) var(--inset-bottom, 0px);
+}
+.present-full.tile { border: 0; border-radius: 0; box-shadow: none; }
+.present-full > * { width: 100%; max-width: 720px; margin-inline: auto; }
+.present-full .present-head { min-height: 48px; font-size: var(--text-item); }
+.present-close { display: grid; place-items: center; width: 40px; height: 40px; font-size: 20px; color: var(--color-foreground); background: none; border: 0; }
+.present-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; }
+.present-body .present-md { font-size: var(--text-body); }
+
+/* Markdown (md.ts): hierarchy by size and weight; code and tables on the soft fill; no lines. */
+.md { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; user-select: text; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md .md-table { margin: 0 0 8px; }
+.md h3, .md h4, .md h5 { margin: 12px 0 6px; line-height: 1.25; }
+.md h3 { font-size: 1.25em; }
+.md h4 { font-size: 1.1em; }
+.md h5 { font-size: 1em; }
+.md ul, .md ol { padding-left: 1.4em; }
+.md li { margin: 2px 0; }
+.md li > ul, .md li > ol { margin: 2px 0 0; }
+.md a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.md code { padding: 1px 4px; background: var(--soft-fill); border-radius: 4px; font: inherit; }
+.md pre { padding: 8px 10px; overflow-x: auto; background: var(--soft-fill); border-radius: 8px; white-space: pre; }
+.md pre code { padding: 0; background: none; }
+.md blockquote { margin-left: 0; margin-right: 0; padding: 6px 10px; background: var(--soft-fill); border-radius: 8px; }
+.md hr { height: 8px; margin: 4px 0; border: 0; }
+.md img { display: block; max-width: 100%; border-radius: 8px; }
+.md .md-table { overflow-x: auto; }
+.md table { border-collapse: collapse; font-size: 0.93em; }
+.md th, .md td { padding: 4px 10px 4px 0; text-align: left; vertical-align: top; }
+.md th { font-weight: 600; }
+.md tbody tr:nth-child(odd) td { background: var(--soft-fill); }

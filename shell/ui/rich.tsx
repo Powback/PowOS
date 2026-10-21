@@ -6,14 +6,18 @@
  *             tap on one shows what it returned
  *   Said      an assistant message: its prose, and the blocks the manager's comms tools put in it (manager.py
  *             _rich_block: a fence named for the block, one JSON line) - ```choices: the question with tappable options
- *             (a tap answers it: the next turn, in the user's words)
+ *             (a tap answers it: the next turn, in the user's words); ```present: a document (Markdown, or an HTML page)
+ *             as a card with its beginning, a tap opens it full screen
  */
-import { Fragment } from "preact";
+import { Fragment, render } from "preact";
 import { useState } from "preact/hooks";
 import type { ChatItem } from "../types.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { askQueued, openAssistant } from "./assistant.ts";
 import { powos } from "../bridge.ts";
+import { topBack } from "../state.ts";
+import { openLink } from "../apps/native.ts";
+import { md } from "./md.ts";
 
 export type ToolItem = Extract<ChatItem, { kind: "tool" }>;
 
@@ -237,6 +241,88 @@ export function ChoiceCard({ c, reply }: { c: Choices; reply: string | null }) {
   );
 }
 
+interface Presented {
+  title: string;
+  format: "md" | "html";
+  body: string;
+}
+
+/** A tap on a Markdown link: opened outside (the page itself never navigates). */
+export function onLink(e: MouseEvent) {
+  const a = (e.target as Element).closest?.("a[data-link]") as HTMLAnchorElement | null;
+  if (!a) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openLink(a.href);
+}
+
+/** The theme's colours as values (a sandboxed page can't read the shell's tokens). */
+function themeCss() {
+  const css = getComputedStyle(document.documentElement);
+  const fg = css.getPropertyValue("--color-foreground").trim();
+  const accent = css.getPropertyValue("--color-accent").trim();
+  // No color-scheme: one unlike the page's makes the frame paint an opaque canvas instead of showing the glass.
+  return `html{background:transparent;color:${fg};font:14px/1.45 system-ui,sans-serif}body{margin:12px}a{color:${accent}}img{max-width:100%}`;
+}
+
+/**
+ * An HTML page as the sandbox shows it: no scripts (the frame's sandbox - the app's JavaScript bridge reaches every
+ * frame, so a script there could drive the shell), no network but images (its CSP), the theme's text colour under its
+ * own styles. [still]: its animations off (a card in the chat never draws by itself).
+ */
+function sandboxed(html: string, still: boolean) {
+  const head = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; font-src data:"><meta name="viewport" content="width=device-width"><style>${themeCss()}${still ? "*{animation:none!important;transition:none!important}html{overflow:hidden}" : ""}</style>`;
+  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + head) : `<!doctype html><html><head>${head}</head><body>${html}</body></html>`;
+}
+
+function Doc({ p, peek }: { p: Presented; peek: boolean }) {
+  if (p.format === "html")
+    return <iframe class="present-frame" sandbox="" referrerpolicy="no-referrer" title={p.title} srcdoc={sandboxed(p.body, peek)} tabIndex={peek ? -1 : 0} />;
+  return <div class="md present-md" onClick={onLink} dangerouslySetInnerHTML={{ __html: md(p.body) }} />;
+}
+
+/** The document full screen, over everything (Back or × closes it): drawn into the page's body, out of the chat. */
+function openPresented(p: Presented) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const close = () => {
+    if (topBack.peek() === close) topBack.value = null;
+    render(null, host);
+    host.remove();
+  };
+  topBack.value = close;
+  render(
+    <div class="present-full tile sheet" role="dialog" aria-label={p.title}>
+      <div class="present-head">
+        <span class="present-title">{p.title}</span>
+        <button type="button" class="present-close" aria-label="close" onClick={close}>
+          <Icon name="close" />
+        </button>
+      </div>
+      <div class="present-body">
+        <Doc p={p} peek={false} />
+      </div>
+    </div>,
+    host,
+  );
+}
+
+/** A presented document in the chat: its title and its beginning; a tap opens it full screen. */
+export function PresentCard({ p }: { p: Presented }) {
+  const open = () => openPresented(p);
+  return (
+    <div class="present" role="button" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === "Enter" && open()}>
+      <div class="present-head">
+        <Icon name="openInNew" />
+        <span class="present-title">{p.title}</span>
+      </div>
+      <div class="present-peek" aria-hidden="true">
+        <Doc p={p} peek={true} />
+      </div>
+    </div>
+  );
+}
+
 /** An assistant message: prose as a bubble, its blocks as what they are; a code fence as code. */
 export function Said({ text, reply }: { text: string; reply: string | null }) {
   return (
@@ -251,6 +337,10 @@ export function Said({ text, reply }: { text: string; reply: string | null }) {
         if (p.block === "choices") {
           const c = json<Choices>(p.body);
           if (c && Array.isArray(c.options)) return <ChoiceCard key={i} c={c} reply={reply} />;
+        }
+        if (p.block === "present") {
+          const d = json<Presented>(p.body);
+          if (d && typeof d.body === "string") return <PresentCard key={i} p={d} />;
         }
         return (
           <pre key={i} class="msg assistant code">
