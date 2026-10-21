@@ -1,0 +1,61 @@
+/* The conversation's rich parts (rich.tsx). No surfaces of their own: quiet lines in the chat's flow; what opens
+   (a tool's output) is the soft fill inside the surface it's on. */
+
+/* A run of tool calls: one muted line, its count; open, a line per call. */
+.tl {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-small);
+  min-width: 0;
+}
+.tl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: var(--color-foreground);
+  background: none;
+  border: 0;
+}
+.tl-row .icon, .tl-spin { flex: none; width: 1.1em; height: 1.1em; }
+.tl-verb { flex: none; font-weight: 600; }
+.tl-arg { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tl-count { flex: none; }
+.tl-row .tl-fail { color: var(--color-red); }
+.tl-more {
+  align-self: flex-start;
+  padding: 4px 0;
+  font: inherit;
+  color: var(--color-foreground);
+  background: none;
+  border: 0;
+}
+/* What a call returned: its head, scrolled inside, selectable. */
+.tl-out {
+  margin: 2px 0 6px calc(1.1em + 8px);
+  padding: 6px 8px;
+  max-height: 30vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+  border-radius: 8px;
+  user-select: text;
+}
+/* Running: a quarter ring turning (only while a call runs: nothing moves at rest). */
+.tl-spin {
+  border-radius: 50%;
+  background: conic-gradient(currentColor 0 25%, transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), black 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), black 0);
+  animation: tl-spin 0.9s linear infinite;
+}
+@keyframes tl-spin { to { transform: rotate(1turn); } }

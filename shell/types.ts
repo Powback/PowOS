@@ -154,7 +154,7 @@ export interface AgentSession {
 /** One entry of PowOS AI's chat; a tool's ok is null while it runs. */
 export type ChatItem =
   | { kind: "user" | "assistant"; text: string }
-  | { kind: "tool"; name: string; hint: string; ok: boolean | null }
+  | { kind: "tool"; name: string; hint: string; ok: boolean | null; out?: string }
   | { kind: "note"; text: string; error: boolean };
 /** A notification as the panel shows it; [icon] its app's drawer icon, [time] Unix seconds. */
 export interface PhoneNotification {

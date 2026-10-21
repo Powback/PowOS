@@ -6,6 +6,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { chat, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import type { ChatItem } from "../types.ts";
+import { Thread, ToolRun } from "./rich.tsx";
 
 /** How much of the conversation the launcher shows; the rest is in PowOS AI's page (left of home). */
 const SHOWN = 40;
@@ -19,12 +20,7 @@ export function Item({ item }: { item: ChatItem }) {
     case "assistant":
       return <div class="msg assistant">{item.text}</div>;
     case "tool":
-      return (
-        <div class="msg tool muted">
-          <span class={item.ok === null ? "run" : item.ok ? "ok" : "fail"}>{item.ok === null ? "…" : item.ok ? "✓" : "✗"}</span>{" "}
-          {item.name} <span class="hint">{item.hint}</span>
-        </div>
-      );
+      return <ToolRun tools={[item]} />;
     case "note":
       return <div class={`msg note ${item.error ? "error" : "muted"}`}>{item.text}</div>;
   }
@@ -47,9 +43,7 @@ export function ChatView() {
           open ↗
         </button>
       </div>
-      {items.slice(-SHOWN).map((item, i) => (
-        <Item key={i} item={item} />
-      ))}
+      <Thread items={items.slice(-SHOWN)} render={(item) => <Item item={item} />} />
       {busy && <div class="msg tool muted thinking">thinking…</div>}
       {typed && !busy && <div class="msg ask muted">↵ ask “{typed}”</div>}
       {!items.length && !typed && <div class="msg muted">Type anything that isn't an app to ask PowOS AI.</div>}
