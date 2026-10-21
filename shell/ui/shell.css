@@ -1,5 +1,13 @@
 /* Home, the bar, the drawer, the dock: laid out from theme.css's tokens only. */
 
+/*
+ * Home and PowOS AI's page together (home.tsx): a box the screen's size. The switcher's swipe scales it (recents.tsx
+ * frame), and a transformed element is the containing block of its fixed children - with no box of its own (0 px
+ * tall) home and the AI page (top: 0; bottom: 0) collapsed to nothing for the whole swipe and popped back at its end.
+ * Absolute, not fixed: no stacking context at rest.
+ */
+.screens { position: absolute; inset: 0; }
+
 .home {
   /* The launcher's head: none - the recent apps are the dock's second page (home.tsx Dock), or a widget. */
   --launcher-head: 0px;
