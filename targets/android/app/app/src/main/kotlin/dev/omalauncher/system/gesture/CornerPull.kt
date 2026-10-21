@@ -49,7 +49,17 @@ class CornerPull(
     private var height = 1f
     private var velocity: VelocityTracker? = null
 
-    private fun on(): Boolean = runCatching { !switch.isFile || !switch.readText().contains("off") }.getOrDefault(true)
+    /**
+     * The switch: the store's JSON string "on" / "off" (missing: on). An older page wrote it encoded twice ("\"off\""),
+     * read too for one release.
+     */
+    private fun on(): Boolean =
+        runCatching {
+            if (!switch.isFile) return true
+            var v: Any? = org.json.JSONTokener(switch.readText()).nextValue()
+            if (v is String && v.startsWith("\"")) v = org.json.JSONTokener(v).nextValue()
+            v != "off"
+        }.getOrDefault(true)
 
     private fun screen(): Rect = runCatching { displayContext.getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds }.getOrElse { Rect(0, 0, 1080, 2400) }
 

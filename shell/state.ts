@@ -143,7 +143,8 @@ export const pullPanels = stored("pullPanels", "on");
  * store (files/shell-data/pullOverApps.json), so it's written there too. Off: no corner is claimed over apps.
  */
 export const pullOverApps = stored("pullOverApps", "on");
-effect(() => void powos.store.set("pullOverApps", JSON.stringify(pullOverApps.value)).catch(() => {}));
+// The plain value: store.set writes a string as a JSON string ("on" / "off"), what CornerPull.kt reads.
+effect(() => void powos.store.set("pullOverApps", pullOverApps.value).catch(() => {}));
 /**
  * Which engine dictates (settings -> voice): "gpu" - Whisper on the GPU server (stt.pow), on-device when it can't be
  * reached - or "ondevice" (Android's own). Read by the app from the shell's store (files/shell-data/speech.json,
