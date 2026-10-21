@@ -1,0 +1,15 @@
+{
+  "id": "local.pet",
+  "name": "Pet",
+  "version": "0.1.0",
+  "description": "The face of PowOS's agents: a small companion floating on home and the PowOS AI page - busy while they work, looking at you when something waits on you, worried at an error, sleepy at night, hungry on low battery. Tap it to talk to the manager; `powos pet say` speaks through it.",
+  "icon": "icon.svg",
+  "ui": { "dir": "out/ui/" },
+  "page": { "entry": "pages/main.js" },
+  "module": { "path": "module/", "lang": "rust", "database": "local-pet", "stdb": "2.12" },
+  "backend": null,
+  "widgets": [],
+  "surfaces": { "launcher": true, "desktop": true },
+  "permissions": [],
+  "budget": { "phone": { "memMB": 8, "idle": "unload" }, "desktop": { "memMB": 16 } }
+}

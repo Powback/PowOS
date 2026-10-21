@@ -382,6 +382,20 @@ Design and measurements: `docs/POWOS-APPS-FEASIBILITY.md` (§5.6 runtime, §8 th
 - Remove an app: `powos app remove <id> [--data]`. Remove everything: `rooted.sh system off`, then delete
   `/var/lib/powos/stdb`.
 
+### The pet - the agents' face on home (`local.pet`, apps/pet + shell/ui/pet.tsx)
+- A small creature floating over home and the PowOS AI page (draggable; its place is kept). Its look comes from live
+  data only: working (an agent is working - the agents' spool), looking at the user (an agent needs them, an approval
+  ask, a work-board task `waiting`, unread agent mail), worried (a shell error, a deploy note saying something failed
+  or was rolled back), sleepy (23-7, or home untouched 3 min), hungry (battery < 20% and not charging), a jump when a
+  task gets done. Still at rest: one short CSS animation per state change, no timers while hidden.
+- **Speak to the user through it:** `powos pet say "<text>" [--mood M] [--from ROLE]` - one short plain line in its
+  speech bubble (3-6 s, batched with others arriving together, a tap opens them all). Use it for "done, try it" and
+  "I need you" moments; it doesn't replace `notify_user` (deploy notes and agent mail already show in the bubble too,
+  alongside their notification). `powos pet mood <M> [--for S]`, `feed`, `name`, `status`, `log`, `hush`; `powos pet
+  help`. Moods: idle, happy, working, looking, worried, sleepy, hungry.
+- The user taps it to talk (the phone's recognizer -> the manager, as PowOS AI's chat sends; the answer streams into
+  its bubble); a long press opens PowOS AI. Removing the app (`powos app remove local.pet`) removes the pet.
+
 ### Smart glasses (Even Realities G2 / G1) - docs/GLASSES.md
 - The PowOS app drives the glasses over raw BLE (no Even app): `targets/android/app/.../glasses/` (G2: app-layer auth,
   heartbeat, teleprompter text, input, mic; G1: Nordic UART, text, 1-bit bitmaps, wear/battery events).

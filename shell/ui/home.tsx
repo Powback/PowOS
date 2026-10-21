@@ -24,6 +24,7 @@ import { Screens } from "./screens.tsx";
 import { EditSheet } from "./editsheet.tsx";
 import { NotificationPanel } from "./notifications.tsx";
 import { PowAiPage } from "./powai.tsx";
+import { Pet } from "./pet.tsx";
 import { Recents } from "./recents.tsx";
 import { byKey, carry, dock, dockAim, dockDrag, editing, menu, recent, setDock } from "../state.ts";
 
@@ -256,6 +257,8 @@ export function Home() {
           <NotificationPanel />
         </div>
       </div>
+      {/* The pet (the agents' face): over home and PowOS AI's page, outside their swipes; the screens below cover it. */}
+      <Pet />
       {/* Outside home: its touches never reach home's swipes. */}
       <ScreenPanel />
       <SessionScreen />
