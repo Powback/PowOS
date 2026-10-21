@@ -456,16 +456,24 @@ const GROUPS: Group[] = [
     id: "connect",
     label: "connect",
     icon: "bluetooth",
-    // Quick share: OnePlus's, else Google's - one member ("a|b": the first of them present).
-    members: ["bt", "nfc", "app:com.oneplus.oshare|app:com.google.android.gms", "app:com.oplus.linker", "app:com.microsoft.appmanager", GLASSES_ID, REMOTE_ID],
+    // Quick share: Google's, else OnePlus Share (the same thing twice: one of them, "a|b").
+    members: ["bt", "nfc", "app:com.google.android.gms|app:com.oneplus.oshare", "app:com.oplus.linker", GLASSES_ID, "location"],
   },
-  { id: "display", label: "display", icon: "themeLightDark", members: ["darkmode", "app:com.oplus.eyeprotect", "rotation"] },
-  { id: "capture", label: "capture", icon: "cellphoneScreenshot", members: ["screenshot", "screenrecord", "qr_code_scanner"] },
+  // Auto-rotate first: the tile's tap.
+  { id: "display", label: "display", icon: "screenRotation", members: ["rotation", "darkmode"] },
+  { id: "eye", label: "eye comfort", icon: "eyeOutline", members: ["app:com.oplus.eyeprotect"] },
   { id: "focus", label: "focus", icon: "minusCircleOutline", members: ["dnd"] },
-  { id: "power", label: "power", icon: "leaf", members: ["battery", "lockscreen"] },
-  { id: "tools", label: "tools", icon: "flashlight", members: ["flashlight", "calculator", "wallet", "controls"] },
-  { id: "location", label: "location", icon: "mapMarker", members: ["location"] },
+  { id: "battery", label: "battery", icon: "leaf", members: ["battery"] },
+  { id: "capture", label: "capture", icon: "cellphoneScreenshot", members: ["screenshot", "screenrecord"] },
+  // The torch first (one tap); then every utility tile the phone has (and anything no category names).
+  { id: "tools", label: "tools", icon: "flashlight", members: ["flashlight", "calculator", "qr_code_scanner", "wallet", "controls"] },
 ];
+/**
+ * Left out of the control center altogether (the user's curation, 2026-10-21): lock, link to windows, remote input -
+ * and OnePlus Share where Google's quick share is there. Settings is where they'd come back from, never a page here.
+ */
+const LEFT_OUT = new Set(["lockscreen", REMOTE_ID, "app:com.microsoft.appmanager"]);
+const leftOut = (t: QuickTile) => LEFT_OUT.has(t.id) || (!!t.app && LEFT_OUT.has(`app:${t.app}`));
 
 const one = (tiles: QuickTile[], m: string) => (m.startsWith("app:") ? tiles.find((t) => t.app === m.slice(4)) : tiles.find((t) => t.id === m));
 /** A member's tile ("a|b": the first of them present). */
@@ -495,6 +503,8 @@ function groupState(g: Group, ts: QuickTile[]): { on: boolean; detail: string } 
     return { on: !!wifi?.on, detail: parts.length ? parts.join(" · ") : "off" };
   }
   if (g.id === "capture") return { on: false, detail: "" };
+  if (g.id === "battery") return { on: !!first.on, detail: first.on ? "saver on" : "saver off" };
+  if (ts.length === 1) return { on: !!first.on, detail: first.on == null ? "" : first.on ? "on" : "off" };
   const on = ts.filter((t) => t.on);
   const name = (t: QuickTile) => (t.app && SHORT_APP[t.app]) || SHORT[t.id] || t.label.toLowerCase();
   return { on: !!first.on, detail: on.length ? on.map(name).join(" · ") : "off" };
@@ -539,7 +549,7 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
       }}
     >
       <span class="cc-icon">
-        <Icon name={g.id === "internet" && !st.on ? "wifiOff" : g.id === "tools" && !st.on ? "flashlightOff" : g.icon} />
+        <Icon name={g.id === "internet" && !st.on ? "wifiOff" : g.id === "tools" && !st.on ? "flashlightOff" : g.id === "display" && !st.on ? "screenRotationLock" : g.icon} />
         {several && (
           <span
             class="cc-more"
@@ -624,7 +634,7 @@ export function ControlCenter() {
   });
   // Nothing is lost: a tile no category names (another app's, a new one) goes under Tools.
   const tools = groups.find((x) => x.g.id === "tools");
-  if (tools) tools.ts.push(...every.filter((t) => !placed.has(t)));
+  if (tools) tools.ts.push(...every.filter((t) => !placed.has(t) && !leftOut(t)));
   const live = groups.filter((x) => x.ts.length > 0);
   // The user's arrangement orders the eight, by where their primary tiles are in it.
   const pos = (id: string) => {

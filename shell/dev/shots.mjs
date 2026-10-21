@@ -154,6 +154,7 @@ const SCENES = [
   ["control-home", "home", "S.panel.value = 'control'; S.notif.value = true;", "wallpaper"],
   ["control-open", "shade", "S.panel.value = 'control'; S.notif.value = true; await sleep(300); document.querySelectorAll('.cc-main .cc-more')[1]?.click(); await sleep(400);", "blurred"],
   ["control-open-display", "shade", "S.panel.value = 'control'; S.notif.value = true; await sleep(300); [...document.querySelectorAll('.cc-main .cc-tile')].find((t) => t.textContent.includes('display'))?.querySelector('.cc-more')?.click(); await sleep(400);", "blurred"],
+  ["control-tools-scrolled", "shade", "S.panel.value = 'control'; S.notif.value = true; await sleep(300); [...document.querySelectorAll('.cc-main .cc-tile')].find((t) => t.textContent.includes('tools'))?.querySelector('.cc-more')?.click(); await sleep(400); const r = document.querySelector('.cc-unfold.open .cc-subs'); if (r) r.scrollLeft = r.firstElementChild.offsetWidth + 6; await sleep(300);", "blurred"],
   ["control-open-row2", "shade", "S.panel.value = 'control'; S.notif.value = true; await sleep(300); [...document.querySelectorAll('.cc-main .cc-tile')].find((t) => t.textContent.includes('tools'))?.querySelector('.cc-more')?.click(); await sleep(400);", "blurred"],
   ["control", "shade", "S.panel.value = 'control'; S.notif.value = true;", "blurred"],
   ["switcher", "recents", "E.emit('recents.show', { open: true, from: 100, tasks: await (await U('./bridge.ts')).powos.tasks.list() });", "blurred"],

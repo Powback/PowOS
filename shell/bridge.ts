@@ -692,6 +692,7 @@ function mock(): Bridge {
           tile("battery", "Battery saver", false),
           tile("lockscreen", "Lock", null),
           tile("qr_code_scanner", "Scan QR code", null),
+          { ...tile("custom(com.coloros.alarmclock/.timer.TimerTileService)", "Timer", null), app: "com.coloros.alarmclock" },
           {
             ...tile("custom(com.oplus.eyeprotect/.services.EyeProtectTileService)", "Eye comfort", null),
             app: "com.oplus.eyeprotect",

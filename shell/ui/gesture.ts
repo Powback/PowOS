@@ -174,7 +174,7 @@ export function homeGestures() {
       notif: notif.value,
       inList: !!list,
       // A strip that scrolls sideways itself (the recent apps, the dock's pages): sideways is its own.
-      inStrip: !!target.closest?.(".strip, .dock-pages"),
+      inStrip: !!target.closest?.(".strip, .dock-pages, .cc-subs"),
       listTop: !list || list.scrollTop <= 0,
       listBottom: !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 1,
       target,
@@ -205,7 +205,7 @@ export function homeGestures() {
         if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
         // Sideways, not on a notification (a card slides away by itself): between the notifications and the
         // control center, as OnePlus's panels.
-        else if (Math.abs(dx) > Math.abs(dy) && !g.target.closest?.(".notif.tile:not(.notif-access)")) g.mode = "panel";
+        else if (Math.abs(dx) > Math.abs(dy) && !g.inStrip && !g.target.closest?.(".notif.tile:not(.notif-access)")) g.mode = "panel";
         else return (g = null);
       } else if (Math.abs(dy) > Math.abs(dx) && page.value === -1) {
         // PowOS AI's page: up and down are its own (it scrolls).

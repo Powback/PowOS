@@ -962,7 +962,8 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
  * part of the sheet still above the screen ((1 - q) x its height), at most the room left under them (--free). Only
  * --q changes per frame; continuous, no jump. A list that fills the panel has no room: it slides with the sheet.
  */
-.notif-items { display: flex; flex-direction: column; gap: 6px; flex: none; transform: translateY(min(calc((1 - var(--q)) * var(--ph, 0px)), var(--free, 0px))); }
+.notif-items { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.notif-panel.riding .notif-items { transform: translateY(min(calc((1 - var(--q)) * var(--ph, 0px)), var(--free, 0px))); }
 .notif-list:has(> .notif-items > .notif-empty) .notif-items { flex: 1; justify-content: center; }
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
 .notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }
@@ -1336,7 +1337,24 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-unfold > div { min-height: 0; overflow: hidden; }
 .cc-unfold.open { grid-template-rows: 1fr; }
 .cc-main > .cc-grid + .cc-unfold + .cc-grid { margin-top: 8px; }
-.cc-subs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 6px; margin-top: 8px; padding: 10px 4px; border-radius: calc(var(--radius) * 1.5); background: var(--soft-fill); }
+/* One row that scrolls sideways, a member at a time (snapping), about five in view and the next one peeking. */
+.cc-subs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 10px 4px;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--soft-fill);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 4px;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.cc-subs::-webkit-scrollbar { display: none; }
+.cc-subs > * { flex: 0 0 calc((100% - 4 * 6px) / 5.4); min-width: 0; scroll-snap-align: start; }
 /* Its members: small round toggles over their names. */
 .cc-subs .cc-tile { min-height: 0; padding: 0; background: none; box-shadow: none; border: 0; align-items: center; gap: 4px; text-align: center; color: var(--color-foreground); }
 .cc-subs .cc-tile .cc-icon {

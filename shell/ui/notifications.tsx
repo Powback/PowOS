@@ -6,16 +6,33 @@
  * (data-q).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { signal } from "@preact/signals";
+import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
 import { ControlCenter } from "./control.tsx";
 import { Icon } from "./icons.tsx";
-import { followNotif, notifOpen } from "./gesture.ts";
+import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
 import type { NotificationList, PhoneNotification } from "../types.ts";
 
 const list = signal<NotificationList>({ available: true, items: [] });
+
+/**
+ * Opening (pulled down from shut, until it's settled open): the cards ride on the sheet's bottom edge (shell.css
+ * .notif-panel.riding). Closing - or a pull that started from open - they stay at their open place and go up with the
+ * sheet. Decided per pull, so a pull that turns back keeps one rule all the way (no jump).
+ */
+const riding = signal(false);
+let lastShown = 0;
+let settleTimer = 0;
+effect(() => {
+  const q = notifShown();
+  clearTimeout(settleTimer);
+  if (lastShown === 0 && q > 0) riding.value = true;
+  // Let go: --q eases the rest of the way (shell.css [data-q], 280 ms) - the ride ends once it's there.
+  if (q >= 1 || q === 0) settleTimer = window.setTimeout(() => (riding.value = false), 320);
+  lastShown = q;
+});
 
 /** The card whose reply field is open, and which of its actions takes the text (the shade's banner opens one too). */
 export const replying = signal<{ key: string; index: number } | null>(null);
@@ -323,7 +340,7 @@ export function NotificationPanel() {
         onClick={() => (notif.value = false)}
       />
       <div
-        class={`notif-panel ${shown ? "shown" : ""}`}
+        class={`notif-panel ${shown ? "shown" : ""} ${riding.value ? "riding" : ""}`}
         data-q
         ref={(n) => {
           panelEl.current = n;
