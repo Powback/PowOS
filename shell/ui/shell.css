@@ -1103,6 +1103,8 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-work-fold { flex-direction: row; font-size: var(--text-small); }
 .ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
 .ai-mail { padding: 10px 12px; margin-bottom: 6px; font-size: var(--text-small); line-height: 1.4; }
+/* An agent's mail in full, its lines kept. */
+.ai-mail-text { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .ai-mail-head { margin-bottom: 3px; }
 
 /* The screen-off display (aod.tsx): black (an OLED panel's off pixels), dim, in the middle, drifting a little. */
@@ -1650,6 +1652,8 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .ag-report { overflow-wrap: anywhere; }
 .ag-comms { padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--text-small); line-height: 1.4; }
 .ag-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Opened: the whole message, its lines kept (the feed's line is only a preview). */
+.ag-msg.open { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .ag-body { color: var(--color-muted); }
 .ag-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
 .ag-say { flex: 1; min-width: 0; }

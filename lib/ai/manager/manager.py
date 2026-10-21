@@ -144,6 +144,8 @@ class Manager:
         self.proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=self._log, text=True, bufsize=1, env=env,
+            # UTF-8 whatever the locale: a C/latin-1 one would mis-decode claude's events (an agent's message, changed).
+            encoding="utf-8", errors="replace",
             cwd=self.cwd)
 
     # -- normalized event stream + sinks -------------------------------------
@@ -206,7 +208,8 @@ class Manager:
             self._send_event(text)
 
     def take_inbox(self):
-        """The manager's comms inbox as turn texts, oldest first, taken out of it."""
+        """The manager's comms inbox as turn texts, oldest first, taken out of it. Each body whole - the turn is the
+        only place the manager sees it (test-comms-fulltext.py holds it to that, byte for byte)."""
         if not self._comms_root or not self._agent_id:
             return []
         inbox = os.path.join(self._comms_root, "agents", self._agent_id, "inbox")
@@ -480,8 +483,11 @@ def main():
         return
     # Live output: line-buffer so a pipe/widget consumer sees each event as it
     # renders (a block-buffered pipe would swallow everything until exit).
+    # UTF-8 stdio whatever the locale (the phone's chat writes the turn as UTF-8; an emoji in mail must not kill the
+    # terminal sink).
     try:
-        sys.stdout.reconfigure(line_buffering=True)
+        sys.stdout.reconfigure(line_buffering=True, encoding="utf-8", errors="backslashreplace")
+        sys.stdin.reconfigure(encoding="utf-8")
     except Exception:
         pass
     m = Manager(args)

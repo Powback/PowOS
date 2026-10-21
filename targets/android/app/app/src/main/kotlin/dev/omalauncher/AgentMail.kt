@@ -113,7 +113,8 @@ class AgentMail private constructor(
             Thread({
                 val ok =
                     runCatching {
-                        RootedGuest.run("powos comms send ${shellQuote(agent)} ${shellQuote(text)}") == 0
+                        // "--": a reply that starts with "-" is still the message, not an option.
+                        RootedGuest.run("powos comms send ${shellQuote(agent)} -- ${shellQuote(text)}") == 0
                     }.getOrDefault(false)
                 if (ok) {
                     read(app, id)
@@ -312,8 +313,10 @@ class AgentMail private constructor(
                 Notification.Builder(context, channel(context, mail.priority))
                     .setSmallIcon(R.drawable.ic_notification)
                     .setContentTitle("PowOS AI · ${mail.from}")
-                    .setContentText(mail.text)
-                    .setStyle(Notification.BigTextStyle().bigText(mail.text))
+                    // Collapsed: the first line. Expanded: the text, as much as a notification holds; the tap opens
+                    // all of it in the chat ([opened]: the stored mail, never cut).
+                    .setContentText(firstLine(mail.text))
+                    .setStyle(Notification.BigTextStyle().bigText(expanded(mail.text)))
                     .setWhen(mail.time * 1000)
                     .setShowWhen(true)
                     .setContentIntent(open)
@@ -330,6 +333,25 @@ class AgentMail private constructor(
                     .build(),
             )
             if (urgent && !quiet) alertUrgent(context)
+        }
+
+        /**
+         * Android keeps at most 5 KiB characters of a notification's text (Notification.MAX_CHARSEQUENCE_LENGTH: the
+         * rest is dropped without a word); the expanded body stops short of it and says the tap has the rest.
+         */
+        private const val NOTIFICATION_TEXT_MAX = 5 * 1024
+        private const val EXPANDED_MAX = NOTIFICATION_TEXT_MAX - 200
+
+        /** The collapsed line: the text's first non-blank line (the system ellipsizes it to the width). */
+        fun firstLine(text: String): String = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: text
+
+        /** The expanded body: all of [text] if it fits a notification, else its start and how much the tap opens. */
+        fun expanded(text: String): String {
+            if (text.length <= EXPANDED_MAX) return text
+            // Not between a surrogate pair's halves (an emoji cut in two).
+            var cut = EXPANDED_MAX
+            if (Character.isHighSurrogate(text[cut - 1])) cut--
+            return text.substring(0, cut) + "\n\n… ${text.length - cut} more characters - tap to read it all"
         }
 
         /** Urgent mail with the screen off: the screen comes on (to the lock face, the mail on it) for a moment. */

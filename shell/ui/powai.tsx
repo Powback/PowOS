@@ -357,7 +357,7 @@ function FromAgents() {
               ×
             </button>
           </div>
-          <div>{m.text}</div>
+          <div class="ai-mail-text">{m.text}</div>
         </div>
       ))}
     </section>

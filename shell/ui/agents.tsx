@@ -320,7 +320,9 @@ function Asks() {
 
 const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
 
+/** The comms feed: a line each (its body's start); a tap opens the whole body there, every line of it, and closes it. */
 function Comms() {
+  const [opened, setOpened] = useState<string | null>(null);
   const list = [...messages.value].reverse();
   if (!list.length) return null;
   return (
@@ -328,7 +330,14 @@ function Comms() {
       <h3 class="ai-heading muted">comms</h3>
       <div class="ag-comms tile">
         {list.map((m) => (
-          <div key={m.id} class="ag-msg">
+          <div
+            key={m.id}
+            class={`ag-msg ${opened === m.id ? "open" : ""}`}
+            role="button"
+            tabIndex={0}
+            aria-expanded={opened === m.id}
+            onClick={() => setOpened(opened === m.id ? null : m.id)}
+          >
             <span class="muted">{clock(m.ts)}</span> {m.from} → {m.to}
             {m.kind !== "message" && <span class="muted"> {m.kind}</span>} <span class="ag-body">{m.body}</span>
           </div>

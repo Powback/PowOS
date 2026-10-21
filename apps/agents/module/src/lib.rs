@@ -525,7 +525,8 @@ pub fn sync(ctx: &ReducerContext, host: String, batch: String) -> Result<(), Str
                 kind: m.kind,
                 priority: m.priority,
                 ts: m.ts,
-                body: cut(m.body, 280),
+                // Whole: the view previews a line and opens the rest (a message is never cut on the way to the user).
+                body: m.body,
                 read: m.read,
             });
         }

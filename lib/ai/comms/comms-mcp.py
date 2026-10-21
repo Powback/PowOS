@@ -60,6 +60,23 @@ def log(*a):
     print(f"[{SERVER_NAME}]", *a, file=sys.stderr, flush=True)
 
 
+def _utf8_stdio():
+    """Messages are UTF-8 end to end, whatever the locale: a C/latin-1 locale's stdio would mis-decode what the MCP
+    client sends (silently changing the body) or fail to print an emoji (the watcher dying on it). stdout never fails:
+    something unprintable (a lone surrogate) comes out escaped, not as an exception."""
+    for stream, errors in ((sys.stdin, "strict"), (sys.stdout, "backslashreplace"), (sys.stderr, "backslashreplace")):
+        try:
+            stream.reconfigure(encoding="utf-8", errors=errors)
+        except (AttributeError, ValueError):
+            pass
+
+
+def _stdin_body():
+    """A message given as "-": all of stdin, as sent - only the one newline echo/heredoc add at the end is dropped."""
+    text = sys.stdin.read()
+    return text[:-1] if text.endswith("\n") else text
+
+
 # ---------------------------------------------------------------------------
 # Spool store
 # ---------------------------------------------------------------------------
@@ -226,7 +243,15 @@ def _list_agents():
 # Presentation
 # ---------------------------------------------------------------------------
 
+def _indent(text, first="    "):
+    """Every line of [text] indented four spaces (the first after [first]): a multi-line body stays visibly one
+    message, and dropping four characters from each line gives it back exactly."""
+    lines = str(text).split("\n")
+    return "\n".join([first + lines[0]] + ["    " + line for line in lines[1:]])
+
+
 def _fmt_msgs(msgs):
+    """The messages in full - every line of every body, never a preview (a watcher that cut them lost the rest)."""
     if not msgs:
         return "(no messages)"
     lines = []
@@ -234,11 +259,21 @@ def _fmt_msgs(msgs):
         tag = f"[{m.get('priority', 'normal')}]"
         kind = m.get("kind", "message")
         frm = m.get("from", "?")
-        lines.append(f"• {tag} from {frm} ({kind}) at {m.get('iso', '?')}")
-        lines.append(f"    {m.get('body', '')}")
+        lines.append(f"• {tag} from {frm} ({kind}) at {m.get('iso', '?')} [id {m.get('id', '?')}]")
+        lines.append(_indent(m.get("body", "")))
         if m.get("result"):
-            lines.append(f"    result: {m['result']}")
+            lines.append(_indent(m["result"], "    result: "))
     return "\n".join(lines)
+
+
+def _print_msgs(msgs, as_json):
+    """The CLI's output: the human form, or --json's one JSON object per message per line (the stored message as is:
+    the exact body for a script)."""
+    if as_json:
+        for m in msgs:
+            print(json.dumps(m, ensure_ascii=False))
+    else:
+        print(_fmt_msgs(msgs))
 
 
 def _idle_hint():
@@ -333,14 +368,15 @@ def _agents_queue():
 
 def _agents_note(payload):
     """The message as a row of the Agents view's comms feed (docs/AGENTS-VIEW-DESIGN.md §3 message): who to whom,
-    its kind and a preview - agentsd caps and scrubs it. Best-effort, never fatal; nothing when no agent reports."""
+    its kind and its body - agentsd scrubs it. Best-effort, never fatal; nothing when no agent reports."""
     try:
         q = _agents_queue()
         if not q:
             return
+        # The whole body: the view shows a preview line and opens the rest on a tap (agentsd scrubs secrets from it).
         rec = {"powos_agents": "message", "id": payload["id"], "from": payload["from"], "to": payload["to"],
                "kind": payload["kind"], "priority": payload["priority"], "ts": int(time.time() * 1000),
-               "body": payload["body"][:400]}
+               "body": payload["body"]}
         name = f"m{payload['id']}"
         with open(os.path.join(q, f".{name}.tmp"), "w") as f:
             json.dump(rec, f)
@@ -678,7 +714,7 @@ def run_cli(argv):
 
     ps = sub.add_parser("send", help="Send a message to an agent role.")
     ps.add_argument("to")
-    ps.add_argument("message", nargs="+")
+    ps.add_argument("message", nargs="+", help="The message; - reads it from stdin. After --, words may start with -.")
     ps.add_argument("--priority", choices=VALID_PRIORITIES, default="normal")
     ps.add_argument("--from", dest="frm", default=AGENT_ID or "user")
 
@@ -700,10 +736,12 @@ def run_cli(argv):
     pi.add_argument("--agent", default=AGENT_ID or "user")
     pi.add_argument("--peek", action="store_true",
                     help="Don't consume the messages.")
+    pi.add_argument("--json", action="store_true", help="One JSON object per message per line (the exact body).")
 
     pw = sub.add_parser("watch", help="Block until a message arrives, then drain.")
     pw.add_argument("--agent", default=AGENT_ID or "user")
     pw.add_argument("--timeout", type=float, default=300)
+    pw.add_argument("--json", action="store_true", help="One JSON object per message per line (the exact body).")
 
     sub.add_parser("agents", help="List known inboxes and their depth.")
 
@@ -711,7 +749,7 @@ def run_cli(argv):
 
     if a.cmd == "send":
         AGENT_ID = a.frm
-        text = " ".join(a.message)
+        text = _stdin_body() if a.message == ["-"] else " ".join(a.message)
         # An empty body is always a mistake upstream (an unset shell variable, a file that wasn't there): refuse it
         # rather than deliver a blank message the recipient can't act on.
         if not text.strip():
@@ -722,7 +760,7 @@ def run_cli(argv):
     elif a.cmd == "notify":
         AGENT_ID = a.frm
         # "-": the message from stdin (scripts passing text through layers of shell quoting).
-        text = sys.stdin.read().strip() if a.message == ["-"] else " ".join(a.message)
+        text = _stdin_body() if a.message == ["-"] else " ".join(a.message)
         if not text.strip():
             print("powos comms notify: refusing an empty message", file=sys.stderr)
             sys.exit(2)
@@ -740,8 +778,9 @@ def run_cli(argv):
     elif a.cmd == "inbox":
         msgs = _read_pending(a.agent, drain=not a.peek)
         verb = "Peek" if a.peek else "Inbox (cleared)"
-        print(f"{verb} for '{a.agent}': {len(msgs)} message(s)")
-        print(_fmt_msgs(msgs))
+        if not a.json:
+            print(f"{verb} for '{a.agent}': {len(msgs)} message(s)")
+        _print_msgs(msgs, a.json)
     elif a.cmd == "watch":
         AGENT_ID = a.agent
         print(f"Watching '{a.agent}' inbox (Ctrl-C to stop)...", file=sys.stderr)
@@ -749,7 +788,7 @@ def run_cli(argv):
         while time.time() < deadline:
             msgs = _read_pending(a.agent, drain=True)
             if msgs:
-                print(_fmt_msgs(msgs))
+                _print_msgs(msgs, a.json)
                 return 0
             time.sleep(0.5)
         print("(timed out, no messages)", file=sys.stderr)
@@ -764,6 +803,7 @@ def run_cli(argv):
 
 
 def main():
+    _utf8_stdio()
     if not AGENT_ID:
         log("warning: COMMS_AGENT_ID is empty — read_inbox/wait_for_message "
             "will refuse (this agent has no inbox), but sending still works.")
@@ -788,5 +828,6 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
+        _utf8_stdio()
         sys.exit(run_cli(sys.argv[1:]))
     main()

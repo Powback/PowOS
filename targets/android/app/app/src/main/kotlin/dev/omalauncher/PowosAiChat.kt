@@ -240,13 +240,20 @@ object PowosAiChat {
         }
     }
 
-    /** "[inbox message from agent 'coder' (normal)]: …" as "mail from coder: …" (its first line, shortened). */
+    /**
+     * "[inbox message from agent 'coder' (normal)]: …" as "mail from coder: …" - the whole message (several, when the
+     * turn is made of several: --once-inbox joins them), only the manager's instruction after each taken off.
+     */
     private fun inboxLine(text: String): String {
         val m = Regex("""\[inbox message from agent '([^']+)'[^\]]*\]:\s*(.*)""", RegexOption.DOT_MATCHES_ALL).find(text)
         val from = m?.groupValues?.get(1) ?: "an agent"
-        val body = (m?.groupValues?.get(2) ?: text).substringBefore("\n\nHandle this:").lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
-        return "mail from $from: ${body.take(140)}"
+        val body = (m?.groupValues?.get(2) ?: text).replace(HANDLE_THIS, "").trimEnd()
+        return "mail from $from: $body"
     }
+
+    /** What manager.py's take_inbox puts after each message for the model, not for the user. */
+    private val HANDLE_THIS =
+        Regex("""\n\nHandle this: fold it into what you tell me, and act or delegate if needed\.""")
 
     /**
      * Watches [runDir]/agent-wake for comms' "the manager has mail" markers (lib/ai/comms: _phone_wake) and runs the
