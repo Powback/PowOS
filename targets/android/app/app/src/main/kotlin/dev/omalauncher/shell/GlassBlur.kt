@@ -286,8 +286,14 @@ internal class GlassBlur(
                     .toTypedArray()
             // The liquid rims, drawn by a view in this window: on the same frame as the blur's transaction.
             val kept = regions.filter { r -> holes.none { h -> RectF.intersects(h, RectF(r.l, r.t, r.r, r.b)) } }
-            if (liquidOn && kept.isNotEmpty()) {
-                liquidView()?.set(kept.map { LiquidGlass.Rim(it.l, it.t, it.r, it.b, it.tl, it.tr, it.br, it.bl, it.alpha) })
+            // Not over the system bars: the backdrop may be the display's capture (WallpaperBackdrop DISPLAY), the bars
+            // in it - a rim there would bend the status icons or the gesture bar into the glass.
+            val bars = view.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())
+            val top = (bars?.top ?: 0).toFloat()
+            val bottom = view.height - (bars?.bottom ?: 0).toFloat()
+            val rims = kept.filter { it.t >= top && it.b <= bottom + 0.5f }
+            if (liquidOn && rims.isNotEmpty()) {
+                liquidView()?.set(rims.map { LiquidGlass.Rim(it.l, it.t, it.r, it.b, it.tl, it.tr, it.br, it.bl, it.alpha) })
             } else {
                 liquid?.set(emptyList())
             }

@@ -70,8 +70,10 @@ internal class WallpaperBackdrop(
                     return
                 }
                 val t0 = SystemClock.uptimeMillis()
+                backoff = 0
                 capture()
-                worker.postDelayed(this, (1000L / FPS - (SystemClock.uptimeMillis() - t0)).coerceAtLeast(0))
+                val wait = maxOf(backoff, 1000L / FPS - (SystemClock.uptimeMillis() - t0))
+                worker.postDelayed(this, wait.coerceAtLeast(0))
             }
         }
 
@@ -127,10 +129,27 @@ internal class WallpaperBackdrop(
             way = Way.DISPLAY
         }
         val (buffer, status) = displayShot(m, id, scale)
-        if (buffer != null) return bitmap(m, buffer)
-        give("display capture status $status")
+        if (buffer != null) {
+            misses = 0
+            return bitmap(m, buffer)
+        }
+        // Permission or not supported: for good. Anything else (no answer in time - the compositor busy, a
+        // transition, a secure layer up for a moment; home's window not there yet): this frame is skipped and the
+        // next one waits a little longer; only a long run of them gives up.
+        if (status == PERMISSION_DENIED || status == INVALID_OPERATION) {
+            give("display capture status $status")
+            return null
+        }
+        misses++
+        Log.w(TAG, "no frame this time (status $status, $misses in a row): trying again")
+        if (misses >= MAX_MISSES) give("$misses captures in a row without a frame, the last status $status")
+        backoff = (BACKOFF_MS shl (misses - 1).coerceAtMost(4)).coerceAtMost(1_000)
         return null
     }
+
+    /** Captures in a row that gave nothing, and how long the next waits for it. */
+    private var misses = 0
+    @Volatile private var backoff = 0L
 
     private fun mirrorShot(
         m: Methods,
@@ -143,7 +162,7 @@ internal class WallpaperBackdrop(
                 (m.mirror.invoke(m.wm, id) as SurfaceControl?).also {
                     mirror = it
                     mirrorDisplay = id
-                } ?: return null to -1
+                } ?: return null to NO_MIRROR
             }
         val args = m.layerArgs.newInstance(mir)
         m.setScale.invoke(args, scale)
@@ -155,7 +174,7 @@ internal class WallpaperBackdrop(
         id: Int,
         scale: Float,
     ): Pair<Any?, Int> {
-        val home = window() ?: return null to -2
+        val home = window() ?: return null to NO_WINDOW
         val args = m.argsBuilder.newInstance()
         m.setScale.invoke(args, scale)
         m.exclude.invoke(args, arrayOf(home))
@@ -165,15 +184,21 @@ internal class WallpaperBackdrop(
         }
     }
 
-    /** Asks with a listener and waits (at most [WAIT_MS]) for its buffer and status. */
+    /** Asks with a listener and waits (at most [WAIT_MS]) for its buffer and status ([NO_ANSWER] if none came). */
     private fun await(ask: (Any) -> Int): Pair<Any?, Int> {
         val m = methods!!
         val done = java.util.concurrent.CountDownLatch(1)
+        val late = java.util.concurrent.atomic.AtomicBoolean(false)
         var got: Any? = null
         var status = 0
         val listener =
             m.listener.newInstance(
                 java.util.function.ObjIntConsumer<Any?> { buffer, s ->
+                    // An answer after we stopped waiting: its buffer is nobody's - freed here.
+                    if (late.get()) {
+                        buffer?.let { b -> runCatching { (m.hardwareBuffer.invoke(b) as android.hardware.HardwareBuffer).close() } }
+                        return@ObjIntConsumer
+                    }
                     got = buffer
                     status = s
                     done.countDown()
@@ -181,7 +206,10 @@ internal class WallpaperBackdrop(
             )
         val asked = ask(listener)
         if (asked != 0) return null to asked
-        if (!done.await(WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) return null to -3
+        if (!done.await(WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            late.set(true)
+            return null to NO_ANSWER
+        }
         return (if (status == 0) got else null) to status
     }
 
@@ -225,6 +253,17 @@ internal class WallpaperBackdrop(
         const val FPS = 30
         const val BURST_MS = 3_000L
         const val WAIT_MS = 500L
+        const val BACKOFF_MS = 50L
+        const val MAX_MISSES = 40
+
+        /** The compositor's answers (status_t): the ones that won't change by asking again. */
+        const val PERMISSION_DENIED = -1
+        const val INVALID_OPERATION = -38
+
+        /** Ours: no answer within [WAIT_MS], no mirror to capture, no window of home's to leave out. */
+        const val NO_ANSWER = -1001
+        const val NO_MIRROR = -1002
+        const val NO_WINDOW = -1003
 
         /** The two sizes captured: lightly blurred by the scaling (the edge's), and as soft as the inside's blur. */
         const val SHARP = 0.25f
