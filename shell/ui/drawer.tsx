@@ -50,17 +50,17 @@ export const matches = computed(() => {
 });
 
 /**
- * The apps opened lately, newest first (the switcher's and the dock's source): one strip - as many as fit across at the
- * grid's cell size, the rest a sideways swipe away (shell.css .drawer-recents).
+ * The apps opened lately, newest first (the switcher's and the dock's source): one row - as many as fit across, the
+ * rest cut off (shell.css .drawer-recents), so folded and unfolded each get a full row.
  */
 function RecentRow() {
   const shown = recent.value
     .map((k) => byKey.value.get(k))
     .filter((a) => a != null)
-    .slice(0, 24);
+    .slice(0, 8);
   if (!shown.length) return null;
   return (
-    <div class="drawer-recents">
+    <div class="grid drawer-recents">
       {shown.map((app) => (
         <AppCell key={app.key} app={app} draggable />
       ))}
