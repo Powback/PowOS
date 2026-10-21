@@ -10,12 +10,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Base64
 import android.util.Log
 import dev.omalauncher.theme.ThemeStore
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -127,9 +125,18 @@ internal object ShellWallpaper {
             val stamp = andro.marchy.RootShell.run("stat -c %Y $path", null, 5_000)
             if (stamp.code == 0 && stamp.output.trim().isNotEmpty()) {
                 return Triple("shot-${info.component.flattenToShortString().hashCode()}-${stamp.output.trim()}", "screenshot") {
-                    val r = andro.marchy.RootShell.run("base64 -w 0 $path", null, 10_000)
-                    check(r.code == 0) { "base64 failed (${r.code})" }
-                    decode(ImageDecoder.createSource(ByteBuffer.wrap(Base64.decode(r.output.trim(), Base64.DEFAULT))))
+                    // Copied as a file into our cache (ours: owner, mode, SELinux label) and decoded from there - its bytes
+                    // through the root shell's output came back garbled (ImageDecoder: "Input contained an error").
+                    val dst = java.io.File(context.cacheDir, "wallpaper-shot.png")
+                    val uid = android.os.Process.myUid()
+                    val r =
+                        andro.marchy.RootShell.run(
+                            "cat '$path' > '${dst.path}' && chown $uid:$uid '${dst.path}' && chmod 600 '${dst.path}' && restorecon '${dst.path}'",
+                            null,
+                            10_000,
+                        )
+                    check(r.code == 0) { "copy failed (${r.code}): ${r.output.take(200)}" }
+                    decode(ImageDecoder.createSource(dst))
                 }
             }
         }

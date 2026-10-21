@@ -63,6 +63,10 @@
   bottom: calc(-1 * (48px + var(--strip-height) * (1 - var(--p)) + max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px))));
   top: calc((1 - var(--p)) * (100% - var(--launcher-head)));
 }
+/* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
+.home .launcher-frame.tile {
+  background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
+}
 .launcher {
   position: absolute;
   left: 0;
@@ -236,6 +240,27 @@
   pointer-events: none;
 }
 .home.editing::after { visibility: hidden; }
+/*
+ * On glass (theme.css, ui/glass.ts): the foot's filler is the frosted wallpaper at the screen's foot; the launcher's
+ * frame keeps its picture pinned at its bottom edge (its top rises with the drawer, --gb is where its foot is) and
+ * takes more tint as it opens, so the list stays readable; the notification panel a little more tint too.
+ */
+.glass .home::after {
+  background:
+    linear-gradient(var(--glass-fill), var(--glass-fill)),
+    var(--glass-image) left 0 bottom 0 / var(--glass-w) var(--glass-h) no-repeat;
+}
+.glass .home .launcher-frame.tile {
+  background:
+    linear-gradient(var(--text-fill), var(--text-fill)) border-box,
+    var(--glass-image) left calc(-1 * var(--gx)) bottom calc(-1 * var(--gb)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
+.glass .home .notif-panel {
+  --panel-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + 24%), transparent);
+  background:
+    linear-gradient(var(--panel-fill), var(--panel-fill)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
 
 /* The drawer: the panel under the recent row. */
 .drawer-clip {
@@ -262,7 +287,7 @@
   scrollbar-width: none;
   touch-action: pan-y;
 }
-html:root .ai-panel .tile { background: var(--soft-fill); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer {
   opacity: min(1, calc(var(--p) * 1.6));
   flex: 1;
@@ -413,6 +438,16 @@ html:root .ai-panel .tile { background: var(--soft-fill); -webkit-backdrop-filte
 .page { position: relative; flex: 0 0 100%; height: 100%; }
 /* PowOS apps' own controls (islands on home, their pages) get the shell's borderless look too: their buttons' and
    chips' outlines go (their styles are inline - hence !important), a bare one takes a soft fill. */
+/*
+ * Under a page-sized sheet (any .sheet but a .pop: a widget's screen, an app's page, the picker, settings) home's content steps
+ * out - faded, then hidden (the compositor drops its glass regions too) - so only the frosted wallpaper is behind it.
+ */
+.stage, .bar, .dock, .ai-screen .ai-scroll { transition: opacity 180ms ease-out, visibility 0s; }
+html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 180ms ease-out, visibility 0s 180ms;
+}
 /* The whole-screen sheets (an app's page, settings and its screens, agents, remote input): no corners, no edge. */
 :is(.app-screen, .scr, .ag-screen, .remote-screen).tile { border: 0; border-radius: 0; box-shadow: none; }
 :is(.island-face, .app-screen) button { border-color: transparent !important; }
@@ -422,17 +457,21 @@ html:root .ai-panel .tile { background: var(--soft-fill); -webkit-backdrop-filte
  * gesture.ts moves it against the track (same transition) so it holds still on screen as the page slides. The faces
  * themselves are only the tint over it.
  */
-.page-glass {
+.page-glass { display: none; position: absolute; inset: 0; pointer-events: none;
+  -webkit-mask: var(--glass-mask) 0 0 / var(--glass-mask-size) no-repeat; mask: var(--glass-mask) 0 0 / var(--glass-mask-size) no-repeat; }
+.glass .page-glass { display: block; }
+.page-glass-img {
   position: absolute;
-  inset: 0;
-  pointer-events: none;
-  -webkit-mask: var(--glass-mask) 0 0 / var(--glass-mask-size) no-repeat;
-  mask: var(--glass-mask) 0 0 / var(--glass-mask-size) no-repeat;
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  left: calc(-1 * var(--pg-left));
+  top: calc(-1 * var(--pg-top));
+  width: var(--glass-w);
+  height: var(--glass-h);
+  background: var(--glass-image) 0 0 / 100% 100% no-repeat;
+  will-change: transform;
+  transition: transform 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-/* The page's glass blurs under them: its tiles only tint. */
-html .page .home-tile > .tile { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.page-track.dragging .page-glass-img, .page-glass-img.sliding { transition: none; }
+.glass .page .home-tile > .tile { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
 /*
@@ -860,6 +899,9 @@ html .page .home-tile > .tile { -webkit-backdrop-filter: none; backdrop-filter: 
   display: flex;
   flex-direction: column;
   padding: calc(var(--inset-top, 0px) + 8px) var(--edge) 6px;
+  background: color-mix(in srgb, var(--color-background) calc(var(--glass) + 10%), transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   border-bottom: 0;
   border-radius: 0 0 calc(var(--radius) * 2) calc(var(--radius) * 2);
   transform: translateY(calc((var(--q) - 1) * 100%));
@@ -933,6 +975,7 @@ html .page .home-tile > .tile { -webkit-backdrop-filter: none; backdrop-filter: 
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
   border-color: transparent;
 }
+html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-screen .ai-work-chip.on { background: var(--color-accent); }
 /* Its compose bar: the pill (.pill), where home's search sits. */
 .ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + 6px); }
@@ -1090,8 +1133,22 @@ html[data-mode="assist"] .assist {
 /* Circling, always on (assist.tsx Draw): the screen above the panel takes strokes; the panel sits over it. */
 .assist-draw { position: absolute; inset: 0; touch-action: none; }
 .assist-panel { position: relative; z-index: 1; }
-/* Its chrome: solid (the exception, docs/DESIGN-LANGUAGE.md) - nothing of the app shows through, the screen 1:1. */
-html[data-mode="assist"] .assist-panel { background: var(--color-background); -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: var(--radius); box-shadow: var(--lift); }
+/*
+ * Its chrome is the reference material: the panel frosted from the screenshot of the screen under it (glass.ts), the
+ * text fill over it - the screen above the panel untouched, 1:1. Until the screenshot is in (and live): solid.
+ */
+html[data-mode="assist"] .assist-panel { background: var(--color-background); backdrop-filter: none; -webkit-backdrop-filter: none; }
+html.glass[data-mode="assist"] .assist-panel {
+  /* The theme's background as the tint, more of it than the reference: an app's screen is often light (the wallpaper
+     rarely) - its text keeps 4.5:1 over any app. */
+  --assist-fill: color-mix(in srgb, var(--color-background) 84%, transparent);
+  background:
+    linear-gradient(var(--assist-fill), var(--assist-fill)) border-box,
+    linear-gradient(var(--glass-veil), var(--glass-veil)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+  border-radius: var(--radius);
+  box-shadow: var(--lift);
+}
 /* What's on the panel: soft fills (a surface inside a surface), the pill too. */
 html:root .assist-panel .tile.pill { background: var(--soft-fill); }
 /* The shared chat surface in the panel (assistant.ts), when the newer assist.tsx is in: the conversation, the pill. */
