@@ -4,7 +4,7 @@
  * is round 2, docs/DESKTOP-SHELL.md).
  */
 html[data-mode="desktop"] {
-  --desk-column: 640px;
+  --desk-column: 720px;
 }
 html[data-mode="desktop"] .home > .bar {
   width: min(var(--desk-column), 100%);
@@ -17,10 +17,10 @@ html[data-mode="desktop"] .launcher {
   bottom: calc(-1 * (48px + var(--edge)));
 }
 /*
- * The launcher and its chat float as a column over the whole wallpaper (the phone's drawer is the screen's width):
- * a darker fill under their text. Measured (gate.sh --shots, 2026-10-21): the reference fill left 14 of 67 labels at
- * 3.5-4.4:1 over the phone's wallpaper and 51 over a light one; tint + 42% leaves 0-1, in gruvbox, kanagawa and
- * flexoki-light. --text-fill is redefined here because :root resolved it with its own --glass-dim.
+ * The launcher and its chat float as a column over the whole wallpaper: the reference fill with a deeper dim under
+ * their text. Measured (gate.sh --shots, blur emulated, 2026-10-21): the reference left 9-10 of 67 labels under 4.5:1
+ * over the phone's wallpaper and 54 over a light one; tint + 36%: 0-3 and 11-23; tint + 42%: 0 and 0-1 (gruvbox,
+ * kanagawa, flexoki-light). --text-fill is redefined here because :root resolved it with its own --glass-dim.
  */
 html[data-mode="desktop"] .launcher {
   --glass-dim: 42%;
@@ -35,4 +35,9 @@ html[data-mode="desktop"] .launcher-frame {
 }
 html[data-mode="desktop"] .mic {
   display: none;
+}
+/* The chat: as tall as its conversation, from the pill up (no empty frost over it), the screen's height at most. */
+html[data-mode="desktop"] .home.chatting .launcher {
+  top: auto;
+  max-height: 100%;
 }

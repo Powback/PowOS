@@ -118,8 +118,12 @@ const PRESENT_SAMPLE = JSON.stringify([
  * mock's events, sleep). `behind`: what the window is over - "wallpaper" (home: native glass), "blurred" (the shade,
  * the switcher: the host blurs the app under them), "app" (the assistant, over an app as it is).
  */
-/** The desktop's first home as hosts/desktop.ts makes it (no OWL widgets there): panels and apps, placed by the grid. */
-const DESKTOP_HOME = `{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); await B.home.addPanel('agents', 1, { x: 0, y: 0, w: 4, h: 3 }); await B.home.addPanel('recents', 1, { x: 0, y: 3, w: 4, h: 1 }); let x = 4; for (const k of ['l:konsole', 'l:dolphin', 'l:firefox']) await B.home.add(k, 1, { x: x++, y: 0, w: 1, h: 1 }); await sleep(300); S.home.value = { ...S.home.value, columns: Math.max(4, Math.round(innerWidth / 110)) }; await sleep(300); }`;
+/**
+ * The desktop's first home as hosts/desktop.ts makes it (no OWL widgets there; islands without STDB show their fault
+ * tile headless). The launcher's will-change dropped: as a backdrop root it kept the emulated blur from reaching the
+ * wallpaper (KWin blurs its region on the device).
+ */
+const DESKTOP_HOME = `{ const B = (await U('./bridge.ts')).powos; for (const i of (await B.home.get()).items) await B.home.remove(i.key); await B.home.addPanel('agents', 1, { x: 0, y: 0, w: 4, h: 3 }); await B.home.addPanel('app:local.lights/main', 1, { x: 4, y: 0, w: 4, h: 3 }); await B.home.addPanel('app:local.shopping/main', 1, { x: 8, y: 0, w: 4, h: 3 }); await sleep(300); S.home.value = { ...S.home.value, columns: Math.max(4, Math.round(innerWidth / 110)) }; const st = document.createElement('style'); st.textContent = '.launcher { will-change: auto !important; transform: none !important; }'; document.head.append(st); await sleep(300); }`;
 const SCENES = [
   ["home", "home", "", "wallpaper"],
   ["home-p2", "home", "S.page.value = 1;", "wallpaper"],

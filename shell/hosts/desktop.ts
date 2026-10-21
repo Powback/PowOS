@@ -12,10 +12,10 @@ const HOME = "desktop-home";
 const RECENT = "desktop-recent";
 
 /**
- * A first home: PowOS AI's work board, a PowOS app's island and the terminal and files, placed by the grid (no
- * cells: arrange puts each in the first free spot). Columns for a desktop's width: about 110 px each, 4 or more.
+ * A first home: PowOS AI's work board and PowOS apps' islands, a row across a desktop-wide grid (placed by the grid:
+ * no cells, arrange puts each in the first free spot). About 110 px a column, 4 or more. Apps stay in the drawer.
  */
-function firstHome(apps: App[]): Home {
+function firstHome(): Home {
   const columns = Math.max(4, Math.round(innerWidth / 110));
   const panel = (name: string, w: number, h: number): HomeItem => ({
     key: `panel:${name}`,
@@ -27,15 +27,7 @@ function firstHome(apps: App[]): Home {
     minSize: [2, 1],
     size: [Math.min(w, columns), h],
   });
-  const app = (key: string): HomeItem[] => {
-    const a = apps.find((x) => x.key === key);
-    return a ? [{ key: `linux:${key.slice(2)}`, kind: "app", page: 1, cell: null, resizable: false, minSize: [1, 1], size: [1, 1], label: a.label, app: key }] : [];
-  };
-  return {
-    columns,
-    pages: [1],
-    items: [panel("agents", 4, 2), panel("app:dev.powos.counter/count", 4, 2), ...app("l:org.kde.konsole"), ...app("l:org.kde.dolphin")],
-  };
+  return { columns, pages: [1], items: [panel("agents", 4, 3), panel("app:local.lights/main", 4, 3), panel("app:local.shopping/main", 4, 3)] };
 }
 
 export function desktop(n: Bridge): Bridge {
@@ -50,7 +42,7 @@ export function desktop(n: Bridge): Bridge {
     const [saved, list, last] = await Promise.all([n.store.get<Home>(HOME), n.apps.list().catch(() => []), n.store.get<string[]>(RECENT)]);
     apps = list;
     recent = Array.isArray(last) ? last : [];
-    Object.assign(home, saved && Array.isArray(saved.items) ? saved : firstHome(apps));
+    Object.assign(home, saved && Array.isArray(saved.items) ? saved : firstHome());
   })();
   const after =
     <A extends unknown[], R>(f: (...a: A) => Promise<R>) =>

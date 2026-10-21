@@ -8,6 +8,7 @@
  * The pill opens on a click (or "/" / Ctrl+Space while home has the keyboard); Escape or a click on home closes.
  */
 import { useEffect } from "preact/hooks";
+import { effect } from "@preact/signals";
 import { AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
@@ -17,7 +18,7 @@ import { Carried, Pages } from "./grid.tsx";
 import { Pet } from "./pet.tsx";
 import { AppScreen } from "./appscreen.tsx";
 import { Screens } from "./screens.tsx";
-import { back, closeDrawer, drawer, editing, pullKind } from "../state.ts";
+import { back, chatting, closeDrawer, drawer, editing, pullKind } from "../state.ts";
 
 // Its own stylesheet, here so the phone's pages never load it (hot.ts swaps it in place like the others).
 const css = document.createElement("link");
@@ -25,6 +26,11 @@ css.rel = "stylesheet";
 css.href = "./ui/desktop.css";
 css.dataset.hot = "";
 document.head.append(css);
+
+// The chat open: the pill asks ("ask PowOS AI", Enter sends - not the best app match), as over PowOS AI's panel.
+effect(() => {
+  if (chatting.value && drawer.value > 0 && pullKind.value !== "ai") pullKind.value = "ai";
+});
 
 function useKeys() {
   useEffect(() => {
@@ -48,7 +54,7 @@ export function Desktop() {
   useKeys();
   return (
     <>
-      <div class={`home ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""}`}>
+      <div class={`home ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${chatting.value ? "chatting" : ""}`}>
         {/* Open, only the launcher takes the pointer: a click beside it lands on the stage itself and closes it. */}
         <div class="stage" onClick={(e) => drawerOpen.value && e.target === e.currentTarget && closeDrawer()}>
           <div class="home-content" data-p ref={followOpenness}>
