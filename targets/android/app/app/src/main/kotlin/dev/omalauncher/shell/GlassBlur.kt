@@ -139,6 +139,7 @@ internal class GlassBlur(
             WallpaperBackdrop(
                 display = { view.display?.displayId ?: 0 },
                 window = { methods?.let { m -> runCatching { m.viewRoot.invoke(view)?.let { m.surface.invoke(it) as SurfaceControl? } }.getOrNull() } },
+                size = { android.graphics.Rect(0, 0, view.rootView.width.coerceAtLeast(1), view.rootView.height.coerceAtLeast(1)) },
                 frame = { sharp, soft -> l.frame(sharp, soft) },
                 // No live wallpaper to bend: no liquid glass (never a stale picture of it) - the plain blur stays.
                 failed = {
@@ -291,7 +292,7 @@ internal class GlassBlur(
             val bars = view.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())
             val top = (bars?.top ?: 0).toFloat()
             val bottom = view.height - (bars?.bottom ?: 0).toFloat()
-            val rims = kept.filter { it.t >= top && it.b <= bottom + 0.5f }
+            val rims = if (backdrop?.barsInFrames == true) kept.filter { it.t >= top && it.b <= bottom + 0.5f } else kept
             if (liquidOn && rims.isNotEmpty()) {
                 liquidView()?.set(rims.map { LiquidGlass.Rim(it.l, it.t, it.r, it.b, it.tl, it.tr, it.br, it.bl, it.alpha) })
             } else {

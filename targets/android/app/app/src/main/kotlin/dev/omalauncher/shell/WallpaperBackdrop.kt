@@ -33,6 +33,8 @@ internal class WallpaperBackdrop(
     private val display: () -> Int,
     /** Home's window surface: left out of a display capture. */
     private val window: () -> SurfaceControl?,
+    /** The screen's size in px: the mirror's crop (a mirror has no bounds of its own). */
+    private val size: () -> android.graphics.Rect,
     /** A new frame (main thread): the wallpaper at [SHARP] and [SOFT] of its size. */
     private val frame: (sharp: Bitmap, soft: Bitmap) -> Unit,
     /** It can't (no permission, no such call, nothing comes back): the liquid glass goes. */
@@ -80,12 +82,14 @@ internal class WallpaperBackdrop(
     /**
      * How it's captured. MIRROR: the wallpaper's own surface, mirrored (exactly the wallpaper). DISPLAY: the display
      * without home's window (the window manager's captureDisplay, our window excluded) - the wallpaper, and the
-     * system bars over it - where the mirror can't be captured (an offscreen layer: on OxygenOS 16 captureLayers
-     * returned nothing for it). Picked once: the first that gives a frame.
+     * system bars over it - where the mirror can't be captured. Picked once: the first that gives a frame.
      */
     private enum class Way { MIRROR, DISPLAY }
 
-    private var way = Way.MIRROR
+    @Volatile private var way = Way.MIRROR
+
+    /** The frames have the system bars in them (the display's capture): no rims over the bars. */
+    val barsInFrames get() = way == Way.DISPLAY
 
     /** On the worker. */
     private fun capture() {
@@ -166,6 +170,8 @@ internal class WallpaperBackdrop(
             }
         val args = m.layerArgs.newInstance(mir)
         m.setScale.invoke(args, scale)
+        // A mirror is boundless: without a crop the compositor answers BAD_VALUE (-22, seen on OxygenOS 16).
+        m.setCrop.invoke(args, size())
         return await { listener -> m.captureLayers.invoke(null, m.layerBuild.invoke(args), listener) as Int }
     }
 
@@ -242,6 +248,7 @@ internal class WallpaperBackdrop(
         val argsBuilder: java.lang.reflect.Constructor<*>,
         val argsBuild: java.lang.reflect.Method,
         val setScale: java.lang.reflect.Method,
+        val setCrop: java.lang.reflect.Method,
         val exclude: java.lang.reflect.Method,
         val captureDisplay: java.lang.reflect.Method,
         val asBitmap: java.lang.reflect.Method,
@@ -292,6 +299,7 @@ internal class WallpaperBackdrop(
                     argsBuilder.getConstructor(),
                     argsBuilder.getMethod("build"),
                     argsBuilder.getMethod("setFrameScale", Float::class.javaPrimitiveType),
+                    argsBuilder.getMethod("setSourceCrop", android.graphics.Rect::class.java),
                     argsBuilder.getMethod("setExcludeLayers", Array<SurfaceControl>::class.java),
                     iwm.getMethod("captureDisplay", Int::class.javaPrimitiveType, args, listener),
                     shb.getMethod("asBitmap"),
