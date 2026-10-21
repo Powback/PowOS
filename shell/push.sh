@@ -27,6 +27,21 @@ set -euo pipefail
 cd "$(dirname "$0")"
 force=""
 for a in "$@"; do [ "$a" = --force ] && force=1; done
+# Only origin's tip goes to the phone: a file is pushed whole, so a stale copy from one tree overwrites what another
+# agent pushed in the same file (16:24: a shell.css without the drawer's newest rules, pushed after them - the drawer
+# fell apart into one column on the phone). Each file must be exactly origin's version: commit, rebase, push to
+# origin, then push here. The gate-test page (test/) is exempt; --force overrides. Checked first, before either path.
+if [ -z "${POWOS_GATE_DONE:-}" ] && [ -z "$force" ] && [[ " $* " != *" --reset "* ]] && [[ " $* " != *" --errors "* ]]; then
+  git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+  stale=""; skip=""
+  for a in "$@"; do
+    [ -n "$skip" ] && { skip=""; continue; }
+    case "$a" in --note) skip=1; continue ;; --*) continue ;; test/*) continue ;; esac
+    [ -f "$a" ] || continue
+    git show "origin/worktree-powos-multiplatform:shell/$a" 2>/dev/null | cmp -s - "$a" || stale="$stale $a"
+  done
+  [ -z "$stale" ] || { echo "push.sh: refused - not origin's version:$stale (commit, rebase onto origin/worktree-powos-multiplatform, push to origin, then push here)" >&2; exit 1; }
+fi
 if [ "${1:-}" = "--vpn" ]; then
   shift
   addr=${POWOS_PHONE_ADDR:-10.13.13.7:5555}
