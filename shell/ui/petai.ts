@@ -283,6 +283,20 @@ export function* planner(world: World, p: Pet, goal: Goal): Generator<void, Rout
 }
 
 /**
+ * Off the screen's foot: the floor is never a place to stay. The goal is the nearest surface it can stand on (its
+ * nearest point; a little preference for the search pill, home's usual perch), or null when there's none.
+ */
+export function offFloor(world: World, p: Pet): Goal | null {
+  let best: { g: Goal; d: number } | null = null;
+  for (const r of world.rects) {
+    const x = inset(p, r, p.x);
+    const d = Math.hypot(x - p.x, r.t - p.y) - (r.key === "bar" ? 60 : 0);
+    if (!best || d < best.d) best = { g: { key: r.key, x }, d };
+  }
+  return best?.g ?? null;
+}
+
+/**
  * Plays a route live, closed loop: input() each fixed step. A hop that ends anywhere else, a surface gone, a goal
  * moved: it replans from where it stands (a few times; then it stops where it is).
  */

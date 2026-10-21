@@ -918,9 +918,10 @@ function PetLayer() {
       const list = edges();
       const from = perchWhere(cur, sz, list);
       if (!from) return;
-      // The nearest other edge (by where it'd stand), a random spot along it.
+      // The nearest other edge (by where it'd stand), higher ones preferred, a random spot along it.
       const others = list.filter((e) => e.key !== cur.key).map((e) => ({ e, at: placeOn(e, 0.2 + Math.random() * 0.6, sz) }));
-      const to = others.sort((a, b) => Math.hypot(a.at.left - from.left, a.at.top - from.top) - Math.hypot(b.at.left - from.left, b.at.top - from.top))[0];
+      const score = (o: { at: { left: number; top: number } }) => Math.hypot(o.at.left - from.left, o.at.top - from.top) + 0.8 * (o.at.top - from.top);
+      const to = others.sort((a, b) => score(a) - score(b))[0];
       if (!to) return;
       hopTo(to.e, (to.at.left + sz / 2 - to.e.left) / Math.max(1, to.e.right - to.e.left));
     };

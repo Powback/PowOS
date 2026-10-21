@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DT, FLOOR, MAX_STEP, NO_INPUT, T, makePet, scaleOf, standOn, step, atRest, type Input, type Pet, type Rect, type World } from "../ui/petphys.ts";
-import { Driver, plan } from "../ui/petai.ts";
+import { Driver, offFloor, plan } from "../ui/petai.ts";
 
 const SIZE = 64;
 
@@ -281,6 +281,27 @@ test("the phone's real home: today -> performance stays up on the tops (the reco
     sim(p, w, (q) => d.input(q, w), (q) => ((lowest = Math.max(lowest, q.y)), false), 120 * 10);
     assert.equal(reached, true, `from x=${x}`);
     assert.ok(lowest <= 114.01, `from x=${x}: never below the tops (lowest ${lowest.toFixed(0)})`);
+  }
+});
+
+test("the phone's real home: off the screen's foot to a perch within 2 s, from each corner and the middle", () => {
+  const w: World = {
+    w: 404,
+    h: 899,
+    top: 46,
+    rects: [
+      { key: "today", l: 12, t: 114, r: 202, b: 262 },
+      { key: "perf", l: 202, t: 114, r: 392, b: 194 },
+      { key: "bar", l: 36, t: 759, r: 368, b: 807 },
+    ],
+  };
+  for (const x of [20, 202, 384]) {
+    const p = makePet(x, 899, SIZE);
+    standOn(p, null, w);
+    const d = new Driver(offFloor(w, p)!, () => {}, 0.5);
+    const run = sim(p, w, (q) => d.input(q, w), (q) => q.ground != null && q.ground !== FLOOR, 120 * 2);
+    assert.ok(p.ground && p.ground !== FLOOR, `from x=${x}: on ${p.ground} after ${(run.steps * DT).toFixed(2)} s`);
+    console.log(`  floor x=${x} -> ${p.ground} in ${(run.steps * DT).toFixed(2)} s`);
   }
 });
 

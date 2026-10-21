@@ -9,7 +9,7 @@
  * frame while it runs, and whatever moved under it moves it (or drops it) the way petphys.ts does - never a jump.
  */
 import { DT, FLOOR, NO_INPUT, atRest, makePet, scaleOf, standOn, step, type Input, type Pet, type Rect, type World } from "./petphys.ts";
-import { Driver, type Goal } from "./petai.ts";
+import { Driver, offFloor, type Goal } from "./petai.ts";
 import { edges } from "./petperch.ts";
 
 /** How far its feet sit into an edge, as a share of its size (petperch.ts places it the same way). */
@@ -144,6 +144,7 @@ export class Mover {
   /** Something may have moved under it (a layout change): measured again, stepped until it's at rest. */
   wake() {
     this.calm = 0;
+    this.floorTried = false;
     if (this.raf || document.hidden || this.paused) return;
     this.last = 0;
     this.raf = requestAnimationFrame(this.frame);
@@ -166,6 +167,7 @@ export class Mover {
     else this.wake();
   }
   private paused = false;
+  private floorTried = false;
 
   /** On its way somewhere (a route playing). */
   busy() {
@@ -187,6 +189,14 @@ export class Mover {
       this.tick();
     }
     this.draw(this.acc / DT);
+    // On the screen's foot (a fall, a throw, a page whose tiles went): it doesn't stay - straight off it to the
+    // nearest surface, by its own moves. Once per landing there (an unreachable surface isn't retried until the
+    // layout changes).
+    if (this.p.ground === FLOOR && !this.driver && !this.hold && !this.floorTried) {
+      this.floorTried = true;
+      const g = offFloor(this.world, this.p);
+      if (g) this.goTo(g);
+    } else if (this.p.ground && this.p.ground !== FLOOR) this.floorTried = false;
     const g = !!this.p.ground;
     if (g !== this.wasGround) {
       this.wasGround = g;
