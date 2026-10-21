@@ -5,7 +5,6 @@ compose-multiplatform = "1.12.1"
 androidx-activity = "1.13.0"
 androidsvg = "1.4"
 commons-compress = "1.28.0"
-zxing = "3.5.4"
 junit = "4.13.2"
 org-json = "20260814"
 termux-terminal = "v0.118.1"
@@ -20,7 +19,6 @@ junit = { module = "junit:junit", version.ref = "junit" }
 org-json = { module = "org.json:json", version.ref = "org-json" }
 androidsvg = { module = "com.caverock:androidsvg-aar", version.ref = "androidsvg" }
 commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
-zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 hiddenapibypass = { module = "org.lsposed.hiddenapibypass:hiddenapibypass", version.ref = "hiddenapibypass" }
 termux-terminal-view = { module = "com.github.termux.termux-app:terminal-view", version.ref = "termux-terminal" }
 

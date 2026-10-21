@@ -101,7 +101,6 @@ object Licenses {
             ),
             Component("AndroidSVG", "draws SVG icons", APACHE, "Copyright 2013 Paul LeBeau, Cave Rock Software Ltd.", "https://bigbadaboom.github.io/androidsvg/"),
             Component("Termux terminal emulator and view", "draws PowOS terminals in home-screen tiles", APACHE, "Copyright Termux developers", "https://github.com/termux/termux-app"),
-            Component("ZXing", "draws the QR codes widgets are shared with", APACHE, "Copyright 2007-2025 ZXing authors", "https://github.com/zxing/zxing"),
             Component("JSON-java", "reads and writes JSON", "public-domain", "Public Domain.", "https://github.com/stleary/JSON-java"),
         )
 }
