@@ -19,19 +19,17 @@ const RECENT = "desktop-recent";
 function firstHome(): Home {
   const columns = Math.max(4, Math.round(innerWidth / 110));
   const w = columns >= 8 ? 3 : Math.max(2, Math.floor((columns - 1) / 2));
-  const h = 2;
   const across = Math.max(1, Math.floor((columns + 1) / (w + 1)));
-  const names = ["agents", "app:local.lights/main", "app:local.shopping/main"];
-  const items = names.map((name, i): HomeItem => ({
-    key: `panel:${name}`,
-    kind: "panel",
-    name,
-    page: 1,
-    cell: { x: (i % across) * (w + 1), y: Math.floor(i / across) * (h + 1), w, h },
-    resizable: true,
-    minSize: [2, 1],
-    size: [w, h],
-  }));
+  // As small as each shows its content (the preview tool's fill check: the board at one row is a 4-16% status strip).
+  const starters: [string, number][] = [["agents", 2], ["app:local.lights/main", 2], ["app:local.shopping/main", 2]];
+  let y = 0;
+  let rowH = 0;
+  const items = starters.map(([name, h], i): HomeItem => {
+    const col = i % across;
+    if (col === 0 && i > 0) (y += rowH + 1), (rowH = 0);
+    rowH = Math.max(rowH, h);
+    return { key: `panel:${name}`, kind: "panel", name, page: 1, cell: { x: col * (w + 1), y, w, h }, resizable: true, minSize: [2, 1], size: [w, h] };
+  });
   return { columns, pages: [1], items };
 }
 
