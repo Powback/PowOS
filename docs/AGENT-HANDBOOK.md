@@ -56,11 +56,13 @@ for (one line each).
 - Agents/board: `powos agents task list|add|done`, spool /run/powos-app/agents (agentsd).
 - In the shell, deploy notes and agents' mail to the user both arrive as "ai.mail" (AgentMail[], deploy notes `from: "deploy"`);
   the page's own errors are window error/unhandledrejection events (index.html's boot.report also keeps them in window.__powosBoot.errors).
-- A shell layer that needs a PowOS app's tables vendors its bindings: `apps/build.sh <app>`, esbuild-bundle
-  ui/bindings/index.ts (spacetimedb external) to shell/vendor/<db>.js + .d.ts, a line in vendor/VERSIONS; then
+- A shell layer that needs a PowOS app's tables vendors its bindings: `apps/vendor.sh <app>` -> shell/vendor/<db>.js
+  (+ a .d.ts, a line in vendor/VERSIONS); then
   useDb/useRows from shell/apps/stdb.ts (socket closed 5 s after the page hides). Example: shell/ui/pet.tsx.
-  A module change ships with its vendored bindings: publish it too (`apps/install.sh <app> publish`), or the shell can't
-  decode its rows - shell-errors then says `stdb: <db>: ... bindings stale for <table>` and that table isn't subscribed.
+  A module change ships with its vendored bindings (`apps/vendor.sh <app>`) and a publish (`apps/install.sh <app>
+  publish`): shell/push.sh and ship-apk compare the bindings with the phone's live modules (tools/phone/bindings-check.sh,
+  in their one phone call), publish this commit's module when the bindings are ahead of it, else refuse with the fix.
+  On home a stale table shows in shell-errors as `stdb: <db>: ... bindings stale for <table>` and isn't subscribed.
 - GPU box 192.168.50.195: voice stack units (hosts/gpu-195/, units/gpu-195/), voiceagent.pow; plan docs/GPU-SERVERS-PLAN.md.
 
 ## Native/hidden-API work (learned the hard way)

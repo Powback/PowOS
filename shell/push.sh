@@ -46,10 +46,12 @@ if [ "${1:-}" = "--vpn" ]; then
       # the phone's real shell couldn't go). Pulled once per install (cached by the APK's path and update time).
       cache="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/installed"
       mkdir -p "$cache"
+      # In the same call: the phone's live module schemas, for the bindings check below.
       if docker run --rm --network container:wireguard -v "$HOME/.android:/root/.android" -v "$ov:/ov" -v "$cache:/cache" \
-        -e ANDROID_SERIAL="$addr" android-app-dev-android-builder:latest bash -c '
+        -e ANDROID_SERIAL="$addr" -e SCHEMAS="$(../tools/phone/bindings-check.sh --remote-cmd)" android-app-dev-android-builder:latest bash -c '
           adb connect "$ANDROID_SERIAL" >/dev/null 2>&1
           adb -s "$ANDROID_SERIAL" exec-out "su -c \"cd /data/data/com.powos.app/files && tar -cf - shell\"" | tar -xf - -C /ov || exit 1
+          adb -s "$ANDROID_SERIAL" shell "$SCHEMAS" | tr -d "\r" > /ov/schemas.txt
           apk=$(adb -s "$ANDROID_SERIAL" shell pm path com.powos.app | tr -d "\r" | head -1 | sed "s/^package://")
           key=$(adb -s "$ANDROID_SERIAL" shell dumpsys package com.powos.app | tr -d "\r" | grep -m1 lastUpdateTime | tr -cd "0-9")
           [ -n "$apk" ] && [ -n "$key" ] || exit 0
@@ -83,6 +85,17 @@ if [ "${1:-}" = "--vpn" ]; then
         else
           echo "push.sh: this push adds:" >&2; echo "$added" >&2
         fi
+      fi
+      # The bindings the phone will run (these files, its overrides, the installed APK's) against its live modules: a
+      # table of another shape can't be decoded on home (local-pet, twice on 2026-10-21). Bindings ahead of the module
+      # are published from this commit's module when it builds them; anything else refuses the push with the fix.
+      if [ -s "$ov/schemas.txt" ]; then
+        mkdir -p "$ov/pushed"; for f in "${gf[@]}"; do case "$f" in vendor/*.js) cp "$f" "$ov/pushed/" ;; esac; done
+        bv=(--vendor "$ov/pushed" --vendor "$ov/shell/vendor")
+        [ -n "${key:-}" ] && [ -d "$cache/$key/shell/vendor" ] && bv+=(--vendor "$cache/$key/shell/vendor")
+        ../tools/phone/bindings-check.sh --schemas "$ov/schemas.txt" "${bv[@]}" --vendor vendor || gate=1
+      else
+        echo "push.sh: couldn't read the phone's module schemas - bindings not checked" >&2
       fi
       set -e
       rm -rf "$ov"
