@@ -95,6 +95,9 @@ function order(list: RecentTask[], over: number | null) {
   return mergeTasks(list, over);
 }
 
+/** Home's content at its faintest under the switcher: out of sight under the scrim and the cards, still drawn. */
+const HOME_FLOOR = 0.02;
+
 /**
  * A frame: [p] 0 (the app full screen, home as it was) .. 1 (the switcher up), the row moved by [x], [y] (CSS px).
  * Custom properties on the layer (its few nodes restyle) and an inline transform on home's content - no render.
@@ -111,7 +114,14 @@ function frame(p: number, x = 0, y = 0, home = 0) {
   if (s) {
     const shown = Math.max(1 - p, home);
     s.style.transform = shown < 1 ? `scale(${0.92 + 0.08 * shown})` : "";
-    s.style.opacity = shown < 1 ? String(shown) : "";
+    // A swipe up over an app: home stays in sight behind the window the whole way (it only recedes); it fades out
+    // under the cards only once the switcher is up (landed). Faded with the window's progress, a quick swipe home had
+    // it at nothing from the swipe's first frame.
+    const fade = phase.value === "drag" && from.value != null ? 1 : shown;
+    // HACK: never quite 0 - Chromium leaves a subtree at opacity 0 out of the frame and lets its tiles go; brought
+    // back, the page's frames wait for all of home to be rasterized again (~300-430 ms on the phone: the screen held
+    // on a frame without home, then home popped back). Real fix: none - WebView has no way to keep a hidden subtree rasterized.
+    s.style.opacity = fade < 1 ? String(Math.max(fade, HOME_FLOOR)) : "";
   }
 }
 
@@ -189,7 +199,8 @@ function close() {
 
 /** Held: the window is on the first card. Its fresh snapshot goes on the card; once it shows, the window may go. */
 async function landed(snapshot: string | null) {
-  settle(false);
+  // Home (in sight behind the window the whole swipe) fades out under the cards now.
+  settle(true);
   phase.value = "shown";
   frame(1);
   const id = from.value;
