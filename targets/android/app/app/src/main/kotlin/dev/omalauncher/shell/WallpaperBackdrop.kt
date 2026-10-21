@@ -287,7 +287,9 @@ internal class WallpaperBackdrop(
             scale: Float,
         ): Bitmap? {
             val m = methods ?: return null
-            val mir = (runCatching { m.mirror.invoke(m.wm, displayId) as SurfaceControl? }.getOrNull()) ?: return null
+            val mir =
+                runCatching { m.mirror.invoke(m.wm, displayId) as SurfaceControl? }.onFailure { Log.w(TAG, "no wallpaper mirror", it) }.getOrNull()
+                    ?: return null
             try {
                 val args = m.layerArgs.newInstance(mir)
                 m.setScale.invoke(args, scale)
@@ -303,8 +305,12 @@ internal class WallpaperBackdrop(
                             done.countDown()
                         },
                     )
-                if (m.captureLayers.invoke(null, m.layerBuild.invoke(args), listener) as Int != 0) return null
-                if (!done.await(WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS) || status != 0) return null
+                val asked = m.captureLayers.invoke(null, m.layerBuild.invoke(args), listener) as Int
+                val answered = asked == 0 && done.await(WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                if (!answered || status != 0 || got == null) {
+                    Log.w(TAG, "no still of the wallpaper: asked $asked, answered $answered, status $status (the screen off: nothing drawn)")
+                    return null
+                }
                 val buffer = got ?: return null
                 val hw = m.asBitmap.invoke(buffer) as Bitmap? ?: return null
                 runCatching { (m.hardwareBuffer.invoke(buffer) as android.hardware.HardwareBuffer).close() }

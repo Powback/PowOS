@@ -122,9 +122,11 @@ internal object ShellWallpaper {
             // ones only); OxygenOS keeps a screenshot of it for its own previews, read here as root. Real fix: none in
             // the platform API - on a ROM without that file, the wallpaper's thumbnail below.
             val path = "/data/system/users/${android.os.Process.myUid() / 100000}/wallpaper_screenshot.png"
-            val stamp = andro.marchy.RootShell.run("stat -c %Y $path", null, 5_000)
-            if (stamp.code == 0 && stamp.output.trim().isNotEmpty()) {
-                return Triple("shot-${info.component.flattenToShortString().hashCode()}-${stamp.output.trim()}", "screenshot") {
+            // Its time and size: OxygenOS sometimes leaves it empty (0 bytes, seen 2026-10-21) - then the thumbnail.
+            val stamp = andro.marchy.RootShell.run("stat -c '%Y %s' $path", null, 5_000)
+            val (time, size) = stamp.output.trim().split(' ').let { (it.getOrNull(0) ?: "") to (it.getOrNull(1)?.toLongOrNull() ?: 0L) }
+            if (stamp.code == 0 && time.isNotEmpty() && size > 0) {
+                return Triple("shot-${info.component.flattenToShortString().hashCode()}-$time", "screenshot") {
                     // Copied as a file into our cache (ours: owner, mode, SELinux label) and decoded from there - its bytes
                     // through the root shell's output came back garbled (ImageDecoder: "Input contained an error").
                     val dst = java.io.File(context.cacheDir, "wallpaper-shot.png")
