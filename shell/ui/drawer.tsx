@@ -1,6 +1,7 @@
 /**
- * The drawer: a row of the apps opened lately, then every app A to Z in one grid, no headings or breaks between letters,
- * with an A-Z bar to tap or slide along (as PowOS's start menu; its "#" is the top, the recent row). Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
+ * The drawer: every app A to Z in one grid, no headings or breaks between letters, with an A-Z bar to tap or slide along
+ * (as PowOS's start menu), and under it, by the search pill (thumb reach), a fixed row of the apps opened lately - the
+ * bar's "#". Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
  * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
 import { useRef, useState } from "preact/hooks";
@@ -105,7 +106,7 @@ export function Drawer() {
   const jump = (letter: string) => {
     // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
     // letter a sliding finger crosses lagged behind it.
-    if (letter === "#") return void (list.current!.scrollTop = 0);
+    if (letter === "#") return; // The recent row: always in view, under the list.
     const { first } = sorted.value;
     const i = ALPHABET.indexOf(letter);
     const l = ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x));
@@ -131,18 +132,16 @@ export function Drawer() {
               ))}
             </div>
           ) : (
-            <>
-              <RecentRow />
-              <div class="grid az">
-                {sorted.value.list.map((app) => (
-                  <AppCell key={app.key} app={app} draggable />
-                ))}
-              </div>
-            </>
+            <div class="grid az">
+              {sorted.value.list.map((app) => (
+                <AppCell key={app.key} app={app} draggable />
+              ))}
+            </div>
           )}
         </div>
       )}
       {!searching && !asking && <LetterBar onPick={jump} />}
+      {!searching && !asking && <RecentRow />}
     </div>
   );
 }

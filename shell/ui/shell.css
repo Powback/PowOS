@@ -62,8 +62,14 @@
   /* Down to the screen's foot, under the search pill, the closing dock and the navigation bar: one frost behind all of
      the drawer, no strip of bare wallpaper at its foot. */
   bottom: calc(-1 * (48px + var(--strip-height) * (1 - var(--p)) + max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px))));
-  top: calc((1 - var(--p)) * (100% - var(--launcher-head)));
+  top: calc(var(--shut) * (100% - var(--launcher-head)));
 }
+/*
+ * How far down the panel's top edge is, 0..1: it isn't a panel growing out of the screen's foot, so the open starts
+ * half-way up - the first frame past closed it's at 50% (fading in, .drawer) and travels the remaining half
+ * (gesture.ts maps the finger onto that half). Closed (--p 0) it's all the way down: nothing shows.
+ */
+.launcher-frame, .launcher { --shut: calc((1 - var(--p)) * 0.5 + (1 - min(1, var(--p) * 1000)) * 0.5); }
 /* The reference material (theme.css --text-fill); home's content fades out under it (.home-content), nothing to blur. */
 .home .launcher-frame.tile {
   background: linear-gradient(var(--text-fill), var(--text-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
@@ -76,7 +82,7 @@
   bottom: 0;
   display: flex;
   flex-direction: column;
-  clip-path: inset(calc((1 - var(--p)) * (100% - var(--launcher-head))) 0 0 0 round var(--radius) var(--radius) 0 0);
+  clip-path: inset(calc(var(--shut) * (100% - var(--launcher-head))) 0 0 0 round var(--radius) var(--radius) 0 0);
   /* Closed, only the recent apps take touches; the pages under the rest stay reachable. */
   pointer-events: none;
 }
@@ -85,7 +91,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  transform: translateY(calc((1 - var(--p)) * (100% - var(--launcher-head))));
+  transform: translateY(calc(var(--shut) * (100% - var(--launcher-head))));
 }
 .launcher .strip { pointer-events: auto; }
 .home.open .launcher :is(.drawer, .ai-panel) { pointer-events: auto; }
@@ -297,7 +303,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 }
 html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer {
-  /* No fade: the apps are there from the panel's first frame, riding up with its edge. */
+  opacity: min(1, calc(var(--p) * 1.6));
   flex: 1;
   /* Unfolded, a column of at most ~7 apps, centred with its A-Z bar: an A-Z section of three apps across 2268 px left
      most of the frost empty. */
@@ -306,7 +312,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr var(--letter-bar);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   padding: 0 4px 0 var(--edge);
 }
 
@@ -328,8 +334,9 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--cell), 1fr));
 }
-/* The recent row (drawer.tsx RecentRow): the first row of its grid only, as many as fit across; spacing, no line, under it. */
-.drawer-recents { grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; margin-bottom: 16px; }
+/* The recent row (drawer.tsx RecentRow): fixed under the scrolling list, by the search pill; the first row of its grid
+   only, as many as fit across, columns as the list's; spacing, no line, above it. */
+.drawer-recents { grid-column: 1; grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; margin-top: 16px; padding-right: var(--letter-bar); }
 /* Search results sit at the foot of the list, by the bar, and fill upward: the best match nearest the bar. */
 .drawer-list.results {
   display: flex;
