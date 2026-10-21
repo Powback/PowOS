@@ -350,6 +350,7 @@ class Gui(dbus.service.Object):
         self.desk = None  # the desktop shell's pid while frozen (also in self.frozen, for D-Bus to wake it)
         self.desk_timer = None
         self.screen = Screen(SCREEN_LOG, self.screen_changed)
+        self.desktop(self.screen.on)  # started while PowOS is off screen: the desktop shell sleeps too
 
     # the apps' units --------------------------------------------------------
     def rules(self):
@@ -479,6 +480,7 @@ class Gui(dbus.service.Object):
             return
         if DESKTOP_IDLE != "off":
             self.desk_timer = GLib.timeout_add(int(common.seconds(DESKTOP_IDLE) * 1000), self.desktop_sleep)
+            log(f"desktop shell: asleep in {DESKTOP_IDLE} unless PowOS comes back on screen")
 
     def desktop_sleep(self):
         self.desk_timer = None

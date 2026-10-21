@@ -331,11 +331,13 @@ class IdleSample:
 
     @staticmethod
     def screen_on():
-        for b in glob.glob("/sys/class/backlight/*/brightness"):
+        """A built-in panel (DSI) powered (DRM's dpms): the inner screen or the cover screen. The backlight files don't
+        say it on this phone (actual_brightness reads 0 with the screen on). An always-on display may count as on."""
+        for d in glob.glob("/sys/class/drm/card*-DSI-*/dpms"):
             try:
-                if int(open(b).read().strip() or 0) > 0:
+                if open(d).read().strip() == "On":
                     return True
-            except (OSError, ValueError):
+            except OSError:
                 pass
         return False
 
