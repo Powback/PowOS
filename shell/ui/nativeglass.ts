@@ -94,6 +94,8 @@ interface Shape {
   clips: Element[];
   /** Ancestors (and itself) whose opacity can fade it. */
   chain: Element[];
+  /** Sides joined to a neighbour (a merged widget group: --jt/--jr/--jb/--jl), top, right, bottom, left: 1 or 0. */
+  joined: [number, number, number, number];
 }
 let shapes = new Map<Element, Shape>();
 let shapesDirty = true;
@@ -108,7 +110,13 @@ function shapeOf(el: HTMLElement): Shape {
     const s = getComputedStyle(p);
     if (s.overflowX !== "visible" || s.overflowY !== "visible" || s.clipPath !== "none") clips.push(p);
   }
-  return { radii: [r(cs.borderTopLeftRadius), r(cs.borderTopRightRadius), r(cs.borderBottomRightRadius), r(cs.borderBottomLeftRadius)], clips, chain };
+  const j = (side: string) => (parseFloat(cs.getPropertyValue(`--j${side}`)) >= 1 ? 1 : 0);
+  return {
+    radii: [r(cs.borderTopLeftRadius), r(cs.borderTopRightRadius), r(cs.borderBottomRightRadius), r(cs.borderBottomLeftRadius)],
+    clips,
+    chain,
+    joined: el.parentElement?.classList.contains("joined") ? [j("t"), j("r"), j("b"), j("l")] : [0, 0, 0, 0],
+  };
 }
 
 function reshape() {
@@ -121,6 +129,9 @@ function reshape() {
   }
   shapes = next;
 }
+
+/** How far a joined side reaches into its neighbour (CSS px; ~1.4 device px at 2.76). */
+const JOIN_OVERLAP = 0.5;
 
 const f = (n: number) => (Math.round(n * 10) / 10).toString();
 
@@ -146,10 +157,13 @@ function measure(): string {
     if (!el.isConnected) continue;
     let r = el.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) continue;
-    let x0 = r.left;
-    let y0 = r.top;
-    let x1 = r.right;
-    let y1 = r.bottom;
+    // A side joined to a neighbour reaches half a CSS px into it: two regions meeting at a fractional device pixel each
+    // antialias the shared edge, and unblurred wallpaper showed through between them as a hairline.
+    const [jt, jr, jb, jl] = s.joined;
+    let x0 = r.left - JOIN_OVERLAP * jl;
+    let y0 = r.top - JOIN_OVERLAP * jt;
+    let x1 = r.right + JOIN_OVERLAP * jr;
+    let y1 = r.bottom + JOIN_OVERLAP * jb;
     for (const c of s.clips) {
       const k = c.getBoundingClientRect();
       x0 = Math.max(x0, k.left);
@@ -171,10 +185,10 @@ function measure(): string {
     // A corner cut by a clip is square there (a tile half under the screen's edge keeps its own corners on screen).
     const [tl, tr, br, bl] = s.radii.map((v) => v * k);
     const cut = (edge: boolean, v: number) => (edge ? 0 : v);
-    const L = x0 > r.left + 0.5;
-    const T = y0 > r.top + 0.5;
-    const R = x1 < r.right - 0.5;
-    const B = y1 < r.bottom - 0.5;
+    const L = x0 > r.left + 0.25;
+    const T = y0 > r.top + 0.25;
+    const R = x1 < r.right - 0.25;
+    const B = y1 < r.bottom - 0.25;
     out.push(
       `${f(x0)} ${f(y0)} ${f(x1 - x0)} ${f(y1 - y0)} ${f(cut(L || T, tl))} ${f(cut(R || T, tr))} ${f(cut(R || B, br))} ${f(cut(L || B, bl))} ${alpha.toFixed(2)} ${blur}`,
     );
@@ -182,8 +196,10 @@ function measure(): string {
   }
   // The strip under the bar (home's ::after, the navigation bar's band): square, along the screen's foot.
   const home = document.querySelector<HTMLElement>(".home");
-  if (home && !home.classList.contains("editing")) {
-    const h = parseFloat(getComputedStyle(home, "::after").height) || 0;
+  const foot = home && getComputedStyle(home, "::after");
+  // Hidden (display: none - home's foot without a slab), its computed height is still the inset's: no region then.
+  if (home && foot && foot.display !== "none" && !home.classList.contains("editing")) {
+    const h = parseFloat(foot.height) || 0;
     const r = home.getBoundingClientRect();
     const x0 = Math.max(r.left, 0);
     const w = Math.min(r.right, W) - x0;
