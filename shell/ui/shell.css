@@ -678,9 +678,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   box-shadow: var(--lift);
 }
 .msg.tool, .msg.note, .msg.ask { font-size: var(--text-small); max-width: 100%; }
-.msg.tool .hint { color: var(--color-muted); }
-.msg.tool .ok { color: var(--color-accent); }
-.msg.tool .fail, .msg.note.error { color: var(--color-red); }
+.msg.note.error { color: var(--color-red); }
 .msg.ask { align-self: flex-end; }
 
 /*

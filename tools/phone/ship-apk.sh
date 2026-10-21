@@ -19,6 +19,11 @@ git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
 if ! git merge-base --is-ancestor HEAD origin/worktree-powos-multiplatform 2>/dev/null; then
   echo "ship-apk: REFUSED - HEAD isn't on origin/worktree-powos-multiplatform yet: fast-forward/rebase and push first" >&2; exit 3
 fi
+# ...and it must BE that tip: the install resets every shell override, so a build missing a newer shell-only push (a
+# revert that brought the blur back, 10:15) silently undid it on the phone at 10:17.
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/worktree-powos-multiplatform)" ]; then
+  echo "ship-apk: REFUSED - HEAD is behind origin/worktree-powos-multiplatform: git pull --ff-only (or rebase) first" >&2; exit 3
+fi
 last=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
 if [ -n "$last" ] && ! git merge-base --is-ancestor "$last" HEAD 2>/dev/null; then
   echo "ship-apk: REFUSED - HEAD lacks the installed build's commit $last (git rebase worktree-powos-multiplatform)" >&2; exit 3
@@ -35,6 +40,9 @@ if [ -z "$now" ]; then
   # 60 s of idle (or the screen off); if none comes, leave the built APK for the next ship and exit 4 - don't install.
   waited=0; ok=""
   while [ $waited -lt $(( ${SHIP_WAIT_MIN:-60} * 60 )) ]; do
+    # A verifier's measurement window has priority (an install restarts the app mid-run and voids it):
+    # ~/.cache/powos-verify.lock (mkdir; who/why inside) holds the install until it's gone.
+    if [ -d "$HOME/.cache/powos-verify.lock" ]; then sleep 15; waited=$((waited + 15)); continue; fi
     i2=$(tools/phone/idle.sh); s=${i2#idle=}; s=${s%% *}
     # Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s without a touch; anything else (an empty or
     # unreadable state) = NOT safe - it installed over an active user once when the state came back empty.

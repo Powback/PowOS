@@ -18,6 +18,7 @@ import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
+import { Thread, ToolRun, toolLabel } from "./rich.tsx";
 import { GrowField } from "./grow.tsx";
 
 const sessions = signal<AgentSession[]>([]);
@@ -77,16 +78,7 @@ export function Now() {
   return (
     <section class="ai-card tile">
       <div class="ai-asked">{turn.asked}</div>
-      {turn.steps.length > 0 && (
-        <div class="ai-steps">
-          {turn.steps.slice(-6).map((t, i) => (
-            <div key={i} class="ai-step">
-              <span class={t.ok == null ? "run" : t.ok ? "ok" : "fail"}>{t.ok == null ? "…" : t.ok ? "✓" : "✗"}</span>{" "}
-              {t.name} <span class="muted">{t.hint}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <ToolRun tools={turn.steps} />
       {turn.answer && <div class="ai-answer">{turn.answer}</div>}
       {turn.notes.map((n, i) => (
         <div key={i} class={`ai-note ${n.error ? "error" : "muted"}`}>
@@ -110,9 +102,7 @@ function History() {
       </button>
       {open && (
         <div class="chat ai-history-list">
-          {items.map((item, i) => (
-            <Item key={i} item={item} />
-          ))}
+          <Thread items={items} render={(item) => <Item item={item} />} />
         </div>
       )}
     </section>
@@ -394,7 +384,7 @@ export function AiHeader() {
     <header class="ai-top">
       <span class="ai-title">PowOS AI</span>
       <span class={`ai-state ${busy ? "busy" : ""}`}>
-        {busy ? `working${step && step.kind === "tool" ? ` · ${step.name}` : "…"}` : "ready"}
+        {busy ? `working${step && step.kind === "tool" ? ` · ${toolLabel(step)}` : "…"}` : "ready"}
       </span>
       <button type="button" class="ai-open" onClick={() => powos.ai.open()}>
         open ↗

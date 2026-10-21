@@ -138,6 +138,24 @@ class StoreTests(unittest.TestCase):
         self.assertIn("No message arrived", out)
 
 
+class PresentTests(unittest.TestCase):
+    """present / present_choices: the manager's only (its stream is what a chat renders)."""
+
+    def setUp(self):
+        self.root = os.path.join(tempfile.mkdtemp(), "comms")
+
+    def test_only_the_manager_has_them(self):
+        self.assertIn("present_choices", load_server(self.root, "manager").TOOLS)
+        self.assertIn("present", load_server(self.root, "manager").TOOLS)
+        self.assertNotIn("present", load_server(self.root, "devops").TOOLS)
+
+    def test_choices_need_two_options(self):
+        mgr = load_server(self.root, "manager")
+        with self.assertRaises(ValueError):
+            mgr.tool_present_choices({"question": "q", "options": ["only"]})
+        self.assertIn("end your turn", mgr.tool_present_choices({"question": "q", "options": ["a", "b"]}))
+
+
 class StdioProtocolTests(unittest.TestCase):
     """Exercise the real newline-delimited JSON-RPC transport."""
 

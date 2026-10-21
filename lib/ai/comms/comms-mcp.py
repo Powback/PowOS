@@ -548,6 +548,60 @@ TOOLS = {
 }
 
 
+# What the manager shows the user in PowOS AI's chat. The chat draws these from the tool call itself (manager.py turns
+# it into a fenced block in the conversation), so here they only answer the model. Only the manager has them: its
+# stream is the one a chat renders.
+def tool_present_choices(args):
+    if len([o for o in args.get("options") or [] if str(o).strip()]) < 2:
+        raise ValueError("present_choices needs at least 2 options")
+    return ("Shown to the user as tappable options under your question. Their pick (or their own words) comes back "
+            "as their next message: end your turn now and wait for it.")
+
+
+def tool_present(args):
+    if not str(args.get("body", "")).strip():
+        raise ValueError("present needs a body")
+    return f"Shown to the user in the chat as a card, '{args.get('title', '')}'; a tap opens it full screen."
+
+
+if AGENT_ID == "manager":
+    TOOLS["present_choices"] = {
+        "fn": tool_present_choices,
+        "description": (
+            "Ask the user a question with options they tap, instead of listing options in prose. Use whenever you "
+            "need the user to pick (which approach, yes/no, which of these). 2-8 short options; multi=true lets them "
+            "pick several. They can always answer in their own words instead. Then end your turn: the answer is "
+            "their next message."),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The question, one or two sentences."},
+                "options": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 8,
+                            "description": "Short labels (a few words each)."},
+                "multi": {"type": "boolean", "default": False, "description": "Several may be picked."},
+            },
+            "required": ["question", "options"],
+        },
+    }
+    TOOLS["present"] = {
+        "fn": tool_present,
+        "description": (
+            "Show the user a document in the chat: a card they tap to read full screen. For plans, tables, "
+            "comparisons, previews and review sheets - anything longer or more structured than a chat reply. "
+            "format 'md' (Markdown: headings, lists, tables, code, images by https URL) or 'html' (a whole page, "
+            "rendered in a sandbox: inline CSS/JS only, no network, keep it under 60 KB). Say in a sentence what it "
+            "is; don't repeat its content in prose."),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "A short name for the card."},
+                "format": {"type": "string", "enum": ["md", "html"], "default": "md"},
+                "body": {"type": "string", "description": "The Markdown or the HTML page."},
+            },
+            "required": ["title", "body"],
+        },
+    }
+
 # ---------------------------------------------------------------------------
 # JSON-RPC / MCP stdio loop
 # ---------------------------------------------------------------------------
