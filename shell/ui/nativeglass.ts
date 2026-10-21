@@ -230,26 +230,41 @@ let last = "";
 /** Frames in a row the regions didn't change: the loop stops after a few (nothing moves). */
 let still = 0;
 let running = false;
-let fingers = 0;
-let transitions = 0;
 const STILL_FRAMES = 6;
+/** Counters for CDP (`__glass.live.counts`): measured frames and region sets sent to the host. */
+const counts = { measured: 0, sent: 0, since: performance.now() };
+
+/**
+ * Something that can move or fade glass: a surface itself, or an element holding one (its ancestors: the track, the
+ * launcher, home). Anything else - a widget's content, the pet, a button's press, an icon - moves no glass, and its
+ * style changes, transitions and animations measure nothing. 2026-10-21: every style write anywhere (the pet's
+ * transform each frame, the performance widget's numbers) set off a measured frame - a layout read of every surface.
+ */
+const carries = (t: EventTarget | Node | null | undefined): boolean => {
+  const e = t instanceof Element ? t : t instanceof Node ? t.parentElement : null;
+  // data-glass-ignore: an overlay that moves on its own and whose glass (the pet's bubble) the host doesn't blur.
+  return !!e && !e.closest("[data-glass-ignore]") && (e.matches(SURFACES) || !!e.querySelector(SURFACES));
+};
+/** A running animation (CSS or a Web Animation, scrubbed or playing) on something that carries glass. */
+const moving = () => document.getAnimations().some((a) => a.playState === "running" && carries((a.effect as KeyframeEffect | null)?.target));
 
 function frame() {
   if (!nativeGlass.value) {
     running = false;
     return;
   }
+  counts.measured++;
   const text = measure();
   if (text !== last) {
     last = text;
     still = 0;
+    counts.sent++;
     send(`b.r ${text}`);
   } else {
     still++;
   }
-  // A transition that never ended (its element went) can't keep the loop running.
-  if (still >= STILL_FRAMES && transitions > 0 && !document.getAnimations().some((a) => a.playState === "running")) transitions = 0;
-  if (still < STILL_FRAMES || fingers > 0 || transitions > 0) requestAnimationFrame(frame);
+  // Still for a few frames: stop - unless glass is animating (a settle, a fade), which can be still between frames.
+  if (still < STILL_FRAMES || moving()) requestAnimationFrame(frame);
   else running = false;
 }
 
@@ -272,46 +287,31 @@ const holds = (nodes: NodeList) => {
   for (const n of nodes) if (n instanceof Element && (n.matches(SURFACES) || n.querySelector(SURFACES))) return true;
   return false;
 };
-/**
- * Inside a surface, not the surface: its content (a widget's numbers and graph, a clock). That moves no glass - and if
- * it resizes the surface, the ResizeObserver says so. 2026-10-21: the performance widget's update every 2 s (~10
- * mutations) set off 6 measured frames each - ~17 rAF/s and the page repainting on an idle home.
- */
-const content = (n: Node) => {
-  const e = n instanceof Element ? n : n.parentElement;
-  const s = e?.closest(SURFACES);
-  return !!s && s !== e;
-};
-/**
- * An overlay that holds no glass and moves none (data-glass-ignore: the pet, fixed over home and drawn by a transform
- * every frame while it moves). 2026-10-21: each of its frames set off a glass measure here - one rAF of ours per pet
- * frame, and its class changes (perched, dragging) re-read every surface's shape: the UI lagged whenever it moved.
- */
-const ignored = (n: Node) => !!(n instanceof Element ? n : n.parentElement)?.closest("[data-glass-ignore]");
 new MutationObserver((records) => {
   if (!nativeGlass.value) return;
   let moved = false;
   for (const r of records) {
-    if (r.type === "attributes" && ignored(r.target)) continue;
-    if (r.type === "childList" ? holds(r.addedNodes) || holds(r.removedNodes) : !content(r.target) && (r.attributeName === "class" || (r.target as Element).matches(SURFACES))) return changed();
-    if (!content(r.target)) moved = true;
+    if (r.type === "childList") {
+      if (holds(r.addedNodes) || holds(r.removedNodes)) return changed();
+      continue;
+    }
+    if (!carries(r.target)) continue;
+    // A surface's own class (its corners, a join): its shape again. A holder's style or class: it may have moved.
+    if (r.attributeName === "class" && (r.target as Element).matches(SURFACES)) return changed();
+    moved = true;
   }
   if (moved) kick();
 }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class"] });
 
-// Fingers down: measured every frame until they're up (the event's own count - one lost end can't leave it running).
-const touch = (e: TouchEvent) => ((fingers = e.touches.length), kick());
+// A finger moving: measured until still again (a drag that scrubs a paused animation by currentTime writes no style;
+// its touchmoves are what says it moved). A finger resting moves nothing: the loop stops after STILL_FRAMES.
+const touch = () => kick();
 for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) addEventListener(ev, touch, { capture: true, passive: true });
 document.addEventListener("visibilitychange", () => {
-  fingers = 0;
-  transitions = 0;
   if (!document.hidden) changed();
 });
-addEventListener("transitionrun", () => (transitions++, kick()), { capture: true, passive: true });
-const settled = () => ((transitions = Math.max(0, transitions - 1)), kick());
-addEventListener("transitionend", settled, { capture: true, passive: true });
-addEventListener("transitioncancel", settled, { capture: true, passive: true });
-addEventListener("animationstart", kick, { capture: true, passive: true });
+const animated = (e: Event) => carries(e.target) && kick();
+for (const ev of ["transitionrun", "transitionend", "transitioncancel", "animationstart", "animationend"]) addEventListener(ev, animated, { capture: true, passive: true });
 addEventListener("resize", changed);
 // A scroll moves only what's in the scrolled box: the drawer's list holds no glass (the launcher's is its frame's), so
 // its scroll measures nothing - nothing re-sent, nothing re-read, a frame of the list is the list's alone.
@@ -334,4 +334,12 @@ export const debug = {
   },
   measure,
   lag: (frames: number) => send(`b.lag ${frames}`),
+  /** Measured frames and region sets sent per second since the last read (and reset). */
+  get counts() {
+    const secs = (performance.now() - counts.since) / 1000;
+    const out = { secs: +secs.toFixed(1), measuredPerSec: +(counts.measured / secs).toFixed(2), sentPerSec: +(counts.sent / secs).toFixed(2) };
+    counts.measured = counts.sent = 0;
+    counts.since = performance.now();
+    return out;
+  },
 };
