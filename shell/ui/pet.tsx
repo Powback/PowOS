@@ -52,7 +52,8 @@ const APP = "local.pet";
 
 type State = "idle" | "happy" | "working" | "looking" | "worried" | "sleepy" | "hungry" | "listening";
 
-const SIZE = 52;
+/** Its size (CSS px): a touch bigger unfolded (pet.css --pet-size says the same). */
+const size = () => (innerWidth >= 600 ? 72 : 64);
 const MARGIN = 10;
 /** Untouched this long (home shown): sleepy. */
 const IDLE_MS = 3 * 60_000;
@@ -75,8 +76,8 @@ const pos = () => {
   }
 };
 const toPx = (p: { x: number; y: number }) => ({
-  left: MARGIN + p.x * Math.max(0, innerWidth - SIZE - 2 * MARGIN),
-  top: MARGIN + p.y * Math.max(0, innerHeight - SIZE - 2 * MARGIN),
+  left: MARGIN + p.x * Math.max(0, innerWidth - size() - 2 * MARGIN),
+  top: MARGIN + p.y * Math.max(0, innerHeight - size() - 2 * MARGIN),
 });
 
 // ---- what it knows --------------------------------------------------------------------------------------------------
@@ -463,11 +464,11 @@ function nextNightEdge(t: number) {
 function Bubble({ at }: { at: { left: number; top: number } }) {
   const b = bubble.value;
   if (!b && !talk.value) return null;
-  const right = at.left + SIZE / 2 > innerWidth / 2;
+  const right = at.left + size() / 2 > innerWidth / 2;
   const below = at.top < 140;
   const style: Record<string, string> = {
-    [right ? "right" : "left"]: `${Math.max(MARGIN, right ? innerWidth - at.left - SIZE : at.left)}px`,
-    [below ? "top" : "bottom"]: below ? `${at.top + SIZE + 6}px` : `${innerHeight - at.top + 6}px`,
+    [right ? "right" : "left"]: `${Math.max(MARGIN, right ? innerWidth - at.left - size() : at.left)}px`,
+    [below ? "top" : "bottom"]: below ? `${at.top + size() + 6}px` : `${innerHeight - at.top + 6}px`,
   };
   if (talk.value) return <TalkBubble style={style} cls={`${right ? "right" : "left"} ${below ? "below" : "above"}`} />;
   if (!b) return null;
@@ -551,12 +552,30 @@ function PetLayer() {
       removeEventListener("pointercancel", away, { capture: true });
     };
   }, [shown]);
-  const press = useRef<{ x: number; y: number; dx: number; dy: number; lx: number; ly: number; moved: boolean; timer: number; long: boolean } | null>(null);
-  // A new "hello" each time home comes back: the state's animation plays once more.
-  const [hello, setHello] = useState(0);
+  // Alive at rest: a blink every 6-10 s (one short compositor animation; no timer while hidden or asleep).
   useEffect(() => {
-    if (shown) setHello((n) => n + 1);
+    if (!shown) return;
+    let t = 0;
+    const next = () => {
+      t = window.setTimeout(() => {
+        const s = state.peek();
+        if (s !== "sleepy" && s !== "happy") body.current?.blink();
+        next();
+      }, 6000 + Math.random() * 4000);
+    };
+    next();
+    return () => clearTimeout(t);
   }, [shown]);
+  // Listening: its ears glow with each word heard.
+  useEffect(
+    () =>
+      effect(() => {
+        const sp = speech.value;
+        if (sp.listening && (petListening.peek() || chatOpen.peek()) && sp.text) body.current?.pulse();
+      }),
+    [],
+  );
+  const press = useRef<{ x: number; y: number; dx: number; dy: number; lx: number; ly: number; moved: boolean; timer: number; long: boolean } | null>(null);
   // On the chat surface it's the chat's face (pet.css .face: by the pill); over the app list, menus, edit mode: away.
   const face = chatOpen.value;
   const hidden = (drawerOpen.value && !face) || editing.value || notifOpen.value || !!carry.value || !!menu.value;
@@ -610,7 +629,7 @@ function PetLayer() {
           if (!p) return;
           clearTimeout(p.timer);
           if (p.moved) {
-            const free = (n: number) => Math.max(1, n - SIZE - 2 * MARGIN);
+            const free = (n: number) => Math.max(1, n - size() - 2 * MARGIN);
             const x = (at.left + p.dx - MARGIN) / free(innerWidth);
             const y = (at.top + p.dy - MARGIN) / free(innerHeight);
             where.value = JSON.stringify({ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) });
@@ -639,8 +658,8 @@ function PetLayer() {
           }
         }}
       >
-        {/* The state's one-shot animation restarts on the wrapper (re-keyed); the body inside keeps its springs. */}
-        <span key={`${s}-${hello}`} class="pet-body">
+        {/* Not re-keyed: each state's move has its own animation name, so a new state replays it; the springs stay. */}
+        <span class="pet-body">
           <span class="pet-inner">
             <PetBody handle={body} />
           </span>

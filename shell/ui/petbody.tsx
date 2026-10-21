@@ -47,6 +47,10 @@ export interface BodyHandle {
   stretch(amount: number): void;
   /** Where the finger is, in page px (null: nowhere - the eyes go back to the middle). */
   look(x: number | null, y: number | null): void;
+  /** One blink (a 160 ms compositor animation of the eyes' layer). */
+  blink(): void;
+  /** The "ears" glow once (a word heard while listening). */
+  pulse(): void;
 }
 
 function ring(): P[] {
@@ -78,7 +82,10 @@ function pathOf(ps: P[]) {
 export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) {
   const svg = useRef<SVGSVGElement>(null);
   const shape = useRef<SVGPathElement>(null);
-  const eyes = useRef<SVGGElement>(null);
+  const clip = useRef<SVGPathElement>(null);
+  const hl = useRef<SVGPathElement>(null);
+  const face = useRef<SVGGElement>(null);
+  const eyes = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     const ps = ring();
     const eye = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -113,9 +120,12 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
       moved = Math.max(moved, Math.abs(ex - eye.x), Math.abs(ey - eye.y));
       eye.x = ex;
       eye.y = ey;
-      shape.current?.setAttribute("d", pathOf(ps));
-      // The face rides the body's centre of mass (a squash takes the eyes down with it).
-      eyes.current?.setAttribute("transform", `translate(${(mx - CX + eye.x).toFixed(2)} ${(my - CY + eye.y).toFixed(2)})`);
+      draw(ps);
+      // The face rides the body's centre of mass (a squash takes it down with it); the eyes also look.
+      face.current?.setAttribute("transform", `translate(${(mx - CX).toFixed(2)} ${(my - CY).toFixed(2)})`);
+      // Eyes: their own layer (an HTML box, composited) - viewBox units to its px.
+      const k = (eyes.current?.offsetWidth ?? BODY) / BODY;
+      if (eyes.current) eyes.current.style.transform = `translate(${((mx - CX + eye.x) * k).toFixed(2)}px, ${((my - CY + eye.y) * k).toFixed(2)}px)`;
       still = moved < STILL ? still + 1 : 0;
       if (still >= 6 || document.hidden) {
         raf = 0;
@@ -151,6 +161,16 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
         }
         wake();
       },
+      blink() {
+        eyes.current?.firstElementChild?.animate(
+          [{ transform: "scaleY(1)" }, { transform: "scaleY(0.1)" }, { transform: "scaleY(1)" }],
+          { duration: 160, easing: "ease-in-out" },
+        );
+      },
+      pulse() {
+        for (const e of svg.current?.querySelectorAll(".pet-ear") ?? [])
+          e.animate([{ opacity: 0.35 }, { opacity: 1 }, { opacity: 0.35 }], { duration: 380, easing: "ease-out" });
+      },
       look(x, y) {
         const r = svg.current?.getBoundingClientRect();
         if (x == null || y == null || !r) {
@@ -168,34 +188,68 @@ export function PetBody({ handle }: { handle: { current: BodyHandle | null } }) 
         wake();
       },
     };
-    shape.current?.setAttribute("d", pathOf(ps));
+    const draw = (pts: P[]) => {
+      const d = pathOf(pts);
+      shape.current?.setAttribute("d", d);
+      clip.current?.setAttribute("d", d);
+      hl.current?.setAttribute("d", d);
+    };
+    draw(ps);
     return () => {
       cancelAnimationFrame(raf);
       handle.current = null;
     };
   }, []);
   return (
-    <svg ref={svg} class="pet-svg" viewBox="0 0 52 52" width={BODY} height={BODY} aria-hidden="true">
-      {/* Feet: two small rounded nubs under it (still: the body squashes over them). */}
-      <ellipse class="pet-foot" cx="19" cy="46.5" rx="4" ry="2.2" />
-      <ellipse class="pet-foot" cx="33" cy="46.5" rx="4" ry="2.2" />
-      <path ref={shape} class="pet-shape" />
-      <g ref={eyes} class="pet-face">
-        <g class="pet-eyes">
-          <ellipse class="pet-eye open" cx="20" cy="27" rx="2.8" ry="3.4" />
-          <ellipse class="pet-eye open" cx="32" cy="27" rx="2.8" ry="3.4" />
-          <circle class="pet-glint" cx="21" cy="25.6" r="0.9" />
-          <circle class="pet-glint" cx="33" cy="25.6" r="0.9" />
-          <path class="pet-eye closed" d="M16.8 28q3.2 2.3 6.4 0M28.8 28q3.2 2.3 6.4 0" />
-          <path class="pet-eye glad" d="M16.8 28.4q3.2-3.6 6.4 0M28.8 28.4q3.2-3.6 6.4 0" />
+    <span class="pet-art">
+      <svg ref={svg} class="pet-svg" viewBox="0 0 52 52" aria-hidden="true">
+        <defs>
+          {/* The inner top highlight (theme.css --lift's light edge, on a round thing): the rim's stroke, light at the top, gone by the middle, inside the body only. */}
+          <linearGradient id="pet-hl-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" class="pet-hl-a" />
+            <stop offset="0.42" class="pet-hl-b" />
+          </linearGradient>
+          <clipPath id="pet-clip">
+            <path ref={clip} />
+          </clipPath>
+        </defs>
+        {/* Its soft shadow on whatever it stands on. */}
+        <ellipse class="pet-shadow" cx="26" cy="49.2" rx="15" ry="2.4" />
+        <ellipse class="pet-foot" cx="19" cy="46.5" rx="4" ry="2.2" />
+        <ellipse class="pet-foot" cx="33" cy="46.5" rx="4" ry="2.2" />
+        {/* Listening: two small "ears" that glow with the voice (pet.tsx pulses them as words come). */}
+        <circle class="pet-ear" cx="15" cy="14.5" r="2.2" />
+        <circle class="pet-ear" cx="37" cy="14.5" r="2.2" />
+        <path ref={shape} class="pet-shape" />
+        <path ref={hl} class="pet-hl" clip-path="url(#pet-clip)" />
+        <g ref={face} class="pet-face">
+          <path class="pet-brows" d="M16.5 22.8l5.5-1.8M35.5 22.8l-5.5-1.8" />
+          <path class="pet-mouth smile" d="M23.2 34q2.8 2.2 5.6 0" />
+          <path class="pet-mouth flat" d="M23.5 35h5" />
+          <path class="pet-mouth wavy" d="M22 35q1.7-1.6 3.4 0t3.4 0" />
+          <ellipse class="pet-mouth open" cx="26" cy="35" rx="2.2" ry="1.9" />
+          {/* Working: a tiny parcel it carries, softly lit. */}
+          <g class="pet-parcel">
+            <circle class="pet-parcel-glow" cx="38" cy="38" r="6" />
+            <rect class="pet-parcel-box" x="34.5" y="34.8" width="7" height="6.2" rx="1.6" />
+            <path class="pet-parcel-tie" d="M38 34.8v6.2M34.5 37.6h7" />
+          </g>
         </g>
-        <path class="pet-brows" d="M16.5 22.8l5.5-1.8M35.5 22.8l-5.5-1.8" />
-        <path class="pet-mouth smile" d="M23.2 34q2.8 2.2 5.6 0" />
-        <path class="pet-mouth flat" d="M23.5 35h5" />
-        <path class="pet-mouth wavy" d="M22 35q1.7-1.6 3.4 0t3.4 0" />
-        <ellipse class="pet-mouth open" cx="26" cy="35" rx="2.2" ry="1.9" />
-      </g>
-      <text class="pet-z" x="41" y="12">z</text>
-    </svg>
+        <text class="pet-z" x="41" y="12">z</text>
+      </svg>
+      {/* The eyes on a layer of their own: they look (a transform) and blink (pet.tsx: one short animation) on the compositor. */}
+      <span ref={eyes} class="pet-eyes-move">
+        <span class="pet-eyes-blink">
+          <svg class="pet-svg" viewBox="0 0 52 52" aria-hidden="true">
+            <ellipse class="pet-eye open" cx="20" cy="27" rx="2.8" ry="3.4" />
+            <ellipse class="pet-eye open" cx="32" cy="27" rx="2.8" ry="3.4" />
+            <circle class="pet-glint" cx="21" cy="25.6" r="0.9" />
+            <circle class="pet-glint" cx="33" cy="25.6" r="0.9" />
+            <path class="pet-eye closed" d="M16.8 28q3.2 2.3 6.4 0M28.8 28q3.2 2.3 6.4 0" />
+            <path class="pet-eye glad" d="M16.8 28.4q3.2-3.6 6.4 0M28.8 28.4q3.2-3.6 6.4 0" />
+          </svg>
+        </span>
+      </span>
+    </span>
   );
 }
