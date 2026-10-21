@@ -85,7 +85,7 @@ internal class GlassBlur(
     private var backdrop: WallpaperBackdrop? = null
 
     /** Android's wallpaper changed: what's behind home is something else - captured again. */
-    private val pictureChanged: () -> Unit = { backdrop?.burst() }
+    private val pictureChanged: () -> Unit = { if (liquidOn) backdrop?.burst() }
 
     private val blurListener = Consumer<Boolean> { on -> compositorBlurs = on; update() }
 
@@ -114,6 +114,8 @@ internal class GlassBlur(
         main.post {
             look = l
             liquid?.look(l)
+            // On again: the wallpaper may have changed while it was off.
+            if (liquidOn) backdrop?.burst()
             if (regions.isNotEmpty()) set(regions, -1)
         }
     }
@@ -147,7 +149,8 @@ internal class GlassBlur(
                     l.set(emptyList())
                 },
             )
-        l.onShown = { b.burst() }
+        // Only while liquid edges are on: off (the style, the theme, the page), nothing is captured at all.
+        l.onShown = { if (liquidOn) b.burst() }
         ShellWallpaper.onChange.add(pictureChanged)
         liquid = l
         backdrop = b
