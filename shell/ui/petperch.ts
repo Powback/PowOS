@@ -18,7 +18,12 @@ export interface Edge {
   top: number;
   /** The tile's bottom: its sides are walls from [top] to here (petpath.ts wall-jumps). */
   bottom?: number;
+  /** A line of text's: the tile it's in (it can stand on the line inside its own tile). */
+  owner?: string;
 }
+
+/** Lines of text it can stand on, at most this many (a page's widgets' text; measured only when edges are). */
+const TEXT_LINES = 30;
 
 export interface Perch {
   key: string;
@@ -33,12 +38,32 @@ export function edges(): Edge[] {
   const out: Edge[] = [];
   const W = innerWidth;
   const H = innerHeight;
+  // Room above an edge for the whole pet under the status bar (an edge at the screen's top: its head would be
+  // under the bar - the phone showed it cut off).
+  const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 24;
+  const minTop = inset + (innerWidth >= 600 ? 72 : 64) + 4;
   for (const el of document.querySelectorAll<HTMLElement>(".page:not(.away) .home-tile[data-key]")) {
     if (el.classList.contains("lifted")) continue;
     const r = el.getBoundingClientRect();
     // On screen, and wide enough to stand on.
-    if (r.width < 40 || r.right < 0 || r.left > W || r.top < 40 || r.top > H - 40) continue;
+    if (r.width < 40 || r.right < 0 || r.left > W || r.top < minTop || r.top > H - 40) continue;
     out.push({ key: el.dataset.key!, left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+  }
+  // Lines of text in the tiles (their rendered line boxes, Range.getClientRects): platforms too, inside their tile.
+  let n = 0;
+  const range = document.createRange();
+  for (const el of document.querySelectorAll<HTMLElement>(".page:not(.away) .home-tile[data-key]")) {
+    if (n >= TEXT_LINES) break;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t && n < TEXT_LINES; t = walker.nextNode()) {
+      if (!t.textContent?.trim() || t.parentElement?.closest("svg, canvas, input, textarea")) continue;
+      range.selectNodeContents(t);
+      for (const r of range.getClientRects()) {
+        if (r.width < 48 || r.height < 10 || r.top < minTop || r.top > H - 40 || r.right < 0 || r.left > W) continue;
+        out.push({ key: `text:${el.dataset.key}:${n}`, left: r.left, right: r.right, top: r.top, bottom: r.bottom, owner: el.dataset.key });
+        if (++n >= TEXT_LINES) break;
+      }
+    }
   }
   // An edge under another tile (a joined group: the lower tile's top is inside the upper one) isn't a floor: the part
   // that's open is kept, the covered rest cut off; an edge covered all along goes.
@@ -46,7 +71,7 @@ export function edges(): Edge[] {
   for (let i = out.length - 1; i >= 0; i--) {
     const e = out[i];
     for (const { key, r } of rects) {
-      if (key === e.key || !(e.top - 3 > r.top && e.top - 3 < r.bottom)) continue;
+      if (key === e.key || key === e.owner || !(e.top - 3 > r.top && e.top - 3 < r.bottom)) continue;
       // [r] covers the strip just above this edge from r.left to r.right: keep the longer open side.
       if (r.left <= e.left && r.right >= e.right) e.right = e.left; // all covered
       else if (r.left <= e.left) e.left = Math.max(e.left, r.right);

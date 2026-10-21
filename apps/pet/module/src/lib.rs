@@ -34,6 +34,14 @@ pub struct Pet {
     /** Over apps too (the PowOS app's pet window, docs/PET.md step d): `powos pet overlay on|off`. */
     #[default(true)]
     overlay: bool,
+    /** Where an agent sent it (`powos pet goto`): a tile's name or key, a CSS selector, or "x,y" (CSS px). */
+    #[default("")]
+    goto_target: String,
+    #[default("")]
+    goto_say: String,
+    /** When (ms): the shell goes once per new value. */
+    #[default(0u64)]
+    goto_at: u64,
 }
 
 #[spacetimedb::table(accessor = said, public)]
@@ -58,7 +66,7 @@ fn level_of(xp: u32) -> u32 {
 
 fn fresh(ctx: &ReducerContext) -> Pet {
     let t = now(ctx);
-    Pet { id: 0, name: "Pow".into(), mood: String::new(), mood_until: 0, energy: 80, fed: t, xp: 0, level: 1, updated: t, overlay: true }
+    Pet { id: 0, name: "Pow".into(), mood: String::new(), mood_until: 0, energy: 80, fed: t, xp: 0, level: 1, updated: t, overlay: true, goto_target: String::new(), goto_say: String::new(), goto_at: 0 }
 }
 
 /// The pet's row (made the first time), changed by [f] and written back.
@@ -174,4 +182,20 @@ pub fn hush(ctx: &ReducerContext) {
 #[spacetimedb::reducer]
 pub fn set_overlay(ctx: &ReducerContext, on: bool) {
     with_pet(ctx, |p, _| p.overlay = on);
+}
+
+/// Sends it somewhere on screen (the shell walks/jumps there and says [say] on arrival, if anything).
+#[spacetimedb::reducer]
+pub fn goto(ctx: &ReducerContext, target: String, say: String) -> Result<(), String> {
+    let target = target.trim().to_string();
+    if target.is_empty() || target.chars().count() > 200 {
+        return Err("target: 1..200 characters".into());
+    }
+    let say: String = say.trim().chars().take(MAX_TEXT).collect();
+    with_pet(ctx, |p, t| {
+        p.goto_target = target;
+        p.goto_say = say;
+        p.goto_at = t;
+    });
+    Ok(())
 }

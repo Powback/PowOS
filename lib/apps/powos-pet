@@ -32,6 +32,10 @@ Usage:
   powos pet status [--json]   Its name, level, xp, energy, mood.
   powos pet log [N] [--json]  The last N (default 10) lines said through it.
   powos pet hush          Forget what it said (the history).
+  powos pet goto <where> [--say TEXT]
+                          Send it somewhere on home: a widget's or app's name ("lights"), a tile key, a CSS
+                          selector (".bar"), or "x,y" in CSS px. It walks and jumps there (the nearest edge it
+                          can stand on) and says TEXT when it arrives.
   powos pet overlay on|off
                           Show it over apps too (a small window at a screen edge; on by default) or not.
 
@@ -164,6 +168,12 @@ def main(argv):
         call("rename", name)
     elif cmd == "hush":
         call("hush")
+    elif cmd == "goto":
+        words, f = opts(rest, ("--say",))
+        where = " ".join(words).strip()
+        if not where:
+            die('goto: powos pet goto <name|selector|x,y> [--say "..."]')
+        call("goto", where, (f.get("--say") or "")[:280])
     elif cmd == "overlay":
         if not rest or rest[0] not in ("on", "off"):
             die("overlay: powos pet overlay on|off")

@@ -134,7 +134,7 @@ const needsYou = computed(() => {
 });
 
 /** Its hop to an edge (PetLayer sets it while it's on screen; a no-op otherwise). */
-let hopTo: (e: Edge, fx: number, then?: () => void) => void = () => {};
+let hopTo: (e: Edge, fx: number, then?: () => void, retries?: number) => void = () => {};
 /** A tap on a tile it stands on (a deploy it brings): a short press of its body and a nudge of the tile. */
 function tapTile(key: string) {
   const tile = document.querySelector<HTMLElement>(`.page:not(.away) .home-tile[data-key="${CSS.escape(key)}"]`);
@@ -166,6 +166,54 @@ function carryToBoard() {
   hopTo(left, 0.12);
 }
 
+/** The last `powos pet goto` it went on (ms): an order from before isn't done again. */
+const gotoSeen = stored("pet.gotoAt", "0");
+
+/**
+ * Where "where" is on home: "x,y" (CSS px), a tile's key or its name ("lights", "Weather"), or a CSS selector - the
+ * edge it can stand on nearest that spot.
+ */
+function resolve(where: string): { e: Edge; fx: number } | null {
+  const list = edges();
+  const w = where.trim();
+  const xy = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/.exec(w);
+  let x: number | null = null;
+  let y: number | null = null;
+  if (xy) {
+    x = +xy[1];
+    y = +xy[2];
+  } else {
+    const low = w.toLowerCase();
+    const item = home.peek().items.find((i) => i.key === w || (i.name ?? i.label ?? "").toLowerCase() === low);
+    const direct = item && list.find((e) => e.key === item.key);
+    if (direct) return { e: direct, fx: 0.5 };
+    let el: Element | null = item ? document.querySelector(`.home-tile[data-key="${CSS.escape(item.key)}"]`) : null;
+    if (!el) {
+      try {
+        el = document.querySelector(w);
+      } catch {}
+    }
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    x = r.left + r.width / 2;
+    y = r.top;
+  }
+  const p = perchAt(x, y - 4, list);
+  const e = p && list.find((k) => k.key === p.key);
+  return e && p ? { e, fx: p.fx } : null;
+}
+
+/** say(), reached before its definition (hoisted function). */
+const sayIt = (l: { text: string; from: string }) => say(l);
+
+/** Goes where it's sent; says [say] when it's there (or, nowhere to stand there, says it where it is). */
+function goTo(where: string, say: string) {
+  const t = resolve(where);
+  const speak = () => say && sayIt({ text: say, from: "agent" });
+  if (t) hopTo(t.e, t.fx, speak);
+  else speak();
+}
+
 /** A state forced from outside (review renders, CDP: `__pet.force("worried")`, null to let go). */
 const forced = signal<State | null>(null);
 (window as unknown as { __pet?: object }).__pet = {
@@ -180,6 +228,8 @@ const forced = signal<State | null>(null);
     const e = edges().find((x) => x.key === key);
     if (e) hopTo(e, fx);
   },
+  /** `powos pet goto` from the page (review renders). */
+  goto: (where: string, say = "") => goTo(where, say),
   /** The plan it would take there (review). */
   plan: (key: string, fx = 0.5) => {
     const list = edges();
@@ -417,6 +467,10 @@ interface PetRow {
   moodUntil: bigint | number;
   /** Over apps too (`powos pet overlay on|off`); a module from before it: undefined = on. */
   overlay?: boolean;
+  /** Where an agent sent it (`powos pet goto`), what to say there, and when (ms). */
+  gotoTarget?: string;
+  gotoSay?: string;
+  gotoAt?: bigint | number;
 }
 interface SaidRow {
   id: bigint | number;
@@ -448,6 +502,12 @@ function PetFeed() {
     const p = pets[0];
     if (!p) return;
     name.value = p.name;
+    // Sent somewhere (`powos pet goto`): once per new order, while home shows.
+    const at = Number(p.gotoAt ?? 0);
+    if (at && at > (Number(gotoSeen.value) || 0)) {
+      gotoSeen.value = String(at);
+      if (Date.now() - at < 5 * 60_000) goTo(p.gotoTarget ?? "", p.gotoSay ?? "");
+    }
     // The pet over apps follows the module's switch (the CLI sets it there; the host keeps it).
     if (typeof p.overlay === "boolean") powos.pet?.overlay(p.overlay).catch(() => {});
     moodSet.value = { mood: p.mood, until: Number(p.moodUntil) };
@@ -710,32 +770,42 @@ function PetLayer() {
   }, [hasBubble]);
   // A hop from its perch to [e] at [fx] along it: a short arc (one compositor animation), a squash on landing.
   // [then]: after it landed (a tap on the tile, a bubble).
-  hopTo = (e: Edge, fx: number, then?: () => void) => {
+  hopTo = (e: Edge, fx: number, then?: () => void, retries = 2) => {
     const node = el.current;
     const sz = size();
     // Its laid-out place (left/top), not its rect: a pose or a squash transforms the rect, and the path's keyframes
     // are offsets from the layout.
     const r = node ? { left: parseFloat(node.style.left) || 0, top: parseFloat(node.style.top) || 0 } : null;
     if (!node || !r || document.hidden) return;
-    const to = placeOn(e, fx, sz);
+    // Platformer (petpath.ts): the way there over the edges - walks, jumps, wall-jumps up a tile's side - as one
+    // compositor animation. Out of reach: as close as it can get (the path ends there). No perch to start from: one
+    // direct hop.
+    const list = edges();
+    const target = list.find((x) => x.key === e.key) ?? e;
+    const cur = perch();
+    const curEdge = cur && list.find((x) => x.key === cur.key);
+    const tx = target.left + fx * (target.right - target.left);
+    const curX = curEdge && cur ? curEdge.left + cur.fx * (curEdge.right - curEdge.left) : 0;
+    const moves = curEdge && cur ? plan(list, { key: cur.key, x: curX }, { key: target.key, x: tx }, true) : null;
+    // Where it ends: the last move's edge and x (a partial path ends short of the target).
+    const last = moves?.at(-1);
+    const endEdge = last ? (list.find((x) => x.key === last.key) ?? target) : target;
+    const endX = last ? last.x : tx;
+    const endFx = (endX - endEdge.left) / Math.max(1, endEdge.right - endEdge.left);
+    const to = placeOn(endEdge, endFx, sz);
     const dx = to.left - r.left;
     const dy = to.top - r.top;
     if (Math.hypot(dx, dy) < 4) {
-      perchStored.value = JSON.stringify({ key: e.key, fx });
+      perchStored.value = JSON.stringify({ key: endEdge.key, fx: endFx });
       then?.();
       return;
     }
-    // Platformer (petpath.ts): the way there over the edges - walks, jumps, wall-jumps up a tile's side - as one
-    // compositor animation. No way found (no perch now, an unreachable edge): one direct hop, as before.
-    const list = edges();
-    const cur = perch();
-    const curEdge = cur && list.find((x) => x.key === cur.key);
-    const moves = curEdge && cur ? plan(list, { key: cur.key, x: curEdge.left + cur.fx * (curEdge.right - curEdge.left) }, { key: e.key, x: e.left + fx * (e.right - e.left) }) : null;
     let a: Animation;
     body.current?.stretch(0.5);
     node.classList.add("falling");
+    const layoutAt = layout.peek();
     if (moves && moves.length && curEdge && cur) {
-      const k = keyframes(list, { left: r.left, top: r.top }, cur.key, curEdge.left + cur.fx * (curEdge.right - curEdge.left), moves, sz);
+      const k = keyframes(list, { left: r.left, top: r.top }, cur.key, curX, moves, sz);
       a = node.animate(k.frames, { duration: k.duration, easing: "linear" });
     } else {
       const up = Math.min(r.top, to.top) - r.top - 36;
@@ -748,8 +818,15 @@ function PetLayer() {
       node.style.left = `${to.left}px`;
       node.style.top = `${to.top}px`;
       node.classList.remove("falling");
-      perchStored.value = JSON.stringify({ key: e.key, fx });
-      body.current?.squash(0.55);
+      perchStored.value = JSON.stringify({ key: endEdge.key, fx: endFx });
+      // Landed ON the edge: the contact shadow (perched) and a squash.
+      body.current?.squash(0.6);
+      // The layout moved under it on the way (a page settled, tiles moved): the edge it aimed at is somewhere else
+      // now - it goes on from where it is, a couple of times at most.
+      if (layout.peek() !== layoutAt && retries > 0 && endEdge.key === target.key) {
+        const now = edges().find((x) => x.key === target.key);
+        if (now && Math.abs(now.top - target.top) + Math.abs(now.left - target.left) > 6) return hopTo(now, fx, then, retries - 1);
+      }
       then?.();
     };
   };

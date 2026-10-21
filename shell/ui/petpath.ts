@@ -59,7 +59,7 @@ function hop(a: Edge, b: Edge): { move: Exclude<Move, { kind: "walk" }>; t: numb
  * The quickest way from [from] (an edge's key and an x on it) to [to] (key, x), over [edges]: the moves in order
  * (walks along an edge to the take-off point included), or null when it can't get there.
  */
-export function plan(edges: Edge[], from: Node, to: Node): Move[] | null {
+export function plan(edges: Edge[], from: Node, to: Node, partial = false): Move[] | null {
   const by = new Map(edges.map((e) => [e.key, e]));
   if (!by.has(from.key) || !by.has(to.key)) return null;
   // Dijkstra over edges (few: a page's tiles and the pill); a node's x is where it landed on that edge.
@@ -90,7 +90,19 @@ export function plan(edges: Edge[], from: Node, to: Node): Move[] | null {
       }
     }
   }
-  return null;
+  if (!partial) return null;
+  // Out of reach: as close as it can get - the reached edge whose nearest point is nearest the target.
+  const t = by.get(to.key)!;
+  let near: { k: string; d: number; x: number } | null = null;
+  for (const [k, v] of best) {
+    const e = by.get(k)!;
+    const x = Math.min(e.right - 12, Math.max(e.left + 12, to.x));
+    const d = Math.hypot(x - to.x, e.top - t.top);
+    if (!near || d < near.d) near = { k, d, x };
+  }
+  if (!near || near.k === from.key) return null;
+  const got = best.get(near.k)!;
+  return Math.abs(near.x - got.x) > 6 ? [...got.moves, { kind: "walk", key: near.k, x: near.x }] : got.moves;
 }
 
 /** A plan as keyframes for the pet's element: its top-left offsets from where it starts, and each frame's offset. */
