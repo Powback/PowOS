@@ -49,7 +49,11 @@
       if (!boot.ready) boot.failed = true;
       if (boot.errors.length < 50) boot.errors.push(e);
       try {
-        if (native()) native().error(JSON.stringify(e));
+        // The app's web message listener (postMessage: top frame, own origin only - ShellOrigin.kt); an older APK's
+        // JavaScript interface (error()).
+        const n = native();
+        if (n && n.postMessage) n.postMessage("error " + JSON.stringify(e));
+        else if (n) n.error(JSON.stringify(e));
         else console.error("powos-shell-error " + JSON.stringify(e));
       } catch (_) {}
     };
@@ -75,7 +79,7 @@
         alive = v;
         if (!v || boot.ready) return;
         boot.ready = true;
-        try { native() && native().ready(mode); } catch (_) {}
+        try { const n = native(); if (n && n.postMessage) n.postMessage("ready " + mode); else if (n) n.ready(mode); } catch (_) {}
       },
     });
     // The host's answers before bridge.ts has loaded (or for the page before a reload): dropped, counted - not an

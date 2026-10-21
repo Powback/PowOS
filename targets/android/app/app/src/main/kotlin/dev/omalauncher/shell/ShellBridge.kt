@@ -13,7 +13,6 @@ import android.os.Looper
 import android.util.Log
 import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
-import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
@@ -172,7 +171,7 @@ class ShellBridge(
         }
     }
 
-    @JavascriptInterface
+    /** One call from the page (PowosHost.postMessage, ShellHost.listen: its top frame at its own origin only). */
     fun call(
         id: Int,
         method: String,
