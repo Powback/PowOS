@@ -260,6 +260,10 @@ html:root .ai-panel .tile { background: var(--soft-fill); -webkit-backdrop-filte
 .drawer {
   opacity: min(1, calc(var(--p) * 1.6));
   flex: 1;
+  /* Unfolded, a column of at most ~7 apps, centred with its A-Z bar: an A-Z section of three apps across 2268 px left
+     most of the frost empty. */
+  max-width: 600px;
+  margin-inline: auto;
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr var(--letter-bar);
