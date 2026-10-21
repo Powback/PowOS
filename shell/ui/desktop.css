@@ -26,6 +26,10 @@ html[data-mode="desktop"] .launcher {
   --glass-dim: 42%;
   --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
 }
+/* The drawer clear of the pill, which floats a gap above the screen's foot here. */
+html[data-mode="desktop"] .launcher-inner {
+  padding-bottom: calc(48px + 2 * var(--edge));
+}
 html[data-mode="desktop"] .launcher-frame {
   border-radius: var(--radius);
 }
