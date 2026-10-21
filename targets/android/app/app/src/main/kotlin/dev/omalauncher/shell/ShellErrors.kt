@@ -25,8 +25,9 @@ import java.util.concurrent.Executors
  *   per [RATE_MS] (the same error on every page, or on every reload, is one message).
  *
  * And a page that fails to boot within [ROLLBACK_S] of a hot push (shell/push.sh's manifest, files/shell-push.json)
- * has that push rolled back: the files it pushed restored to what they were (files/shell-prev/) or removed (the APK's
- * own shell under them, the safe fallback), the pages reloaded, and the manager told what was rolled back and why.
+ * has what broke it rolled back ([rollback]: the push, when the error names one of its files or none; else the stale
+ * overrides the error names): files restored to what they were (files/shell-prev/) or removed (the APK's own shell
+ * under them, the safe fallback), the pages reloaded, and the manager told what was rolled back and why.
  */
 /** Called on the main thread only (the counters and the buffer aren't locked). */
 object ShellErrors {
@@ -72,8 +73,15 @@ object ShellErrors {
     ) = record(context, "not ready: $why", signature = "notready|$mode", mode = mode, detail = "")
 
     /**
-     * A page failed to boot: the last push rolled back, if it's recent enough and not rolled back already. Answers the
-     * files rolled back (empty: nothing to roll back), after telling the manager.
+     * A page failed to boot: what broke it rolled back. Blame goes to the files the error names (a module that threw, a
+     * module missing an export and the one importing it - "The requested module 'ui/assistant.ts' does not provide an
+     * export named 'x' (ui/assist.tsx:24)"):
+     * - one of them is in the last push (recent, not rolled back yet): that push is rolled back, as before;
+     * - none is, but some are overrides: those overrides go (the APK's own files, built together, under them) - a stale
+     *   override broke it, not the last push (2026-10-21: an innocent pet.tsx push was rolled back for a stale
+     *   assistant.ts override);
+     * - the error names no file: the last push, as before.
+     * Answers the files rolled back (empty: nothing to roll back), after telling the manager.
      */
     fun rollback(
         context: Context,
@@ -81,35 +89,60 @@ object ShellErrors {
         cause: String,
     ): List<String> {
         val files = context.filesDir
-        val manifestFile = File(files, "shell-push.json")
-        val manifest = runCatching { JSONObject(manifestFile.readText()) }.getOrNull() ?: return emptyList()
-        if (manifest.optBoolean("rolledBack")) return emptyList()
-        val age = System.currentTimeMillis() / 1000 - manifest.optLong("at")
-        if (age !in 0..ROLLBACK_S) return emptyList()
-        val pushed = manifest.optJSONArray("files") ?: return emptyList()
         val overrides = File(files, "shell")
         val prev = File(files, "shell-prev")
+        val named = namedFiles(cause)
+        val manifestFile = File(files, "shell-push.json")
+        val manifest = runCatching { JSONObject(manifestFile.readText()) }.getOrNull()
+        val age = manifest?.let { System.currentTimeMillis() / 1000 - it.optLong("at") } ?: -1
+        val recent = manifest != null && !manifest.optBoolean("rolledBack") && age in 0..ROLLBACK_S
+        val pushed = manifest?.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+        val pushBlamed = recent && (named.isEmpty() || named.any { it in pushed })
         val done = mutableListOf<String>()
-        for (i in 0 until pushed.length()) {
-            val path = pushed.optString(i)
-            if (path.isEmpty() || ".." in path.split('/')) continue
-            val target = File(overrides, path)
-            val before = File(prev, path)
-            runCatching {
-                if (before.isFile) before.copyTo(target, overwrite = true) else target.delete()
-                done += path
-            }.onFailure { Log.w(TAG, "can't roll back $path", it) }
+        val text: String
+        if (pushBlamed) {
+            for (path in pushed) {
+                if (path.isEmpty() || ".." in path.split('/')) continue
+                val target = File(overrides, path)
+                val before = File(prev, path)
+                runCatching {
+                    if (before.isFile) before.copyTo(target, overwrite = true) else target.delete()
+                    done += path
+                }.onFailure { Log.w(TAG, "can't roll back $path", it) }
+            }
+            manifest!!.put("rolledBack", true).put("rolledBackAt", System.currentTimeMillis() / 1000).put("rollbackCause", cause.take(500))
+            runCatching { manifestFile.writeText(manifest.toString()) }
+            text =
+                "shell $mode: rolled back ${done.joinToString(", ")} (pushed ${age}s before${manifest.optString("note").takeIf { it.isNotEmpty() }?.let { " - \"$it\"" } ?: ""}) " +
+                    "because the page didn't boot: $cause. The phone is on ${if (done.any { File(prev, it).isFile }) "the previous overrides" else "the APK's own files"} for them now; " +
+                    "fix and push again (shell/push.sh runs the gate)."
+        } else {
+            // The overrides the error names (not in the last push): stale against the APK's files - removed.
+            for (path in named) {
+                if (".." in path.split('/')) continue
+                val target = File(overrides, path)
+                if (!target.isFile) continue
+                runCatching { if (target.delete()) done += path }.onFailure { Log.w(TAG, "can't remove $path", it) }
+            }
+            if (done.isEmpty()) return emptyList()
+            text =
+                "shell $mode: removed the overrides ${done.joinToString(", ")} (the APK's own files under them now) because the page " +
+                    "didn't boot: $cause. The error names them, not the last push${if (pushed.isNotEmpty()) " (${pushed.joinToString(", ")})" else ""}; " +
+                    "push them again together with what they need (shell/push.sh runs the gate)."
         }
-        manifest.put("rolledBack", true).put("rolledBackAt", System.currentTimeMillis() / 1000).put("rollbackCause", cause.take(500))
-        runCatching { manifestFile.writeText(manifest.toString()) }
-        val text =
-            "shell $mode: rolled back ${done.joinToString(", ")} (pushed ${age}s before${manifest.optString("note").takeIf { it.isNotEmpty() }?.let { " - \"$it\"" } ?: ""}) " +
-                "because the page didn't boot: $cause. The phone is on ${if (done.any { File(prev, it).isFile }) "the previous overrides" else "the APK's own files"} for them now; " +
-                "fix and push again (shell/push.sh runs the gate)."
         log(context, mode, "ROLLBACK", text)
         send(context, text, test = isTest(context, mode), force = true)
         return done
     }
+
+    /** The shell files an error names: "ui/x.tsx:12", "'ui/y.ts'", ".../shell.powos/ui/z.tsx" - relative to the shell. */
+    internal fun namedFiles(cause: String): List<String> =
+        Regex("""(?:https?://[^/\s'"()]+/)?((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:tsx?|jsx?|css))""")
+            .findAll(cause)
+            .map { it.groupValues[1].removePrefix("./") }
+            .filter { !it.startsWith("vendor/") || it.startsWith("vendor/local-") || it.startsWith("vendor/powos-") }
+            .distinct()
+            .toList()
 
     private fun record(
         context: Context,
