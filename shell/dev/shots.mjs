@@ -88,8 +88,8 @@ const SCENES = [
   ["notifications", "home", "S.panel.value = 'notifications'; S.notif.value = true;", "wallpaper"],
   ["settings", "home", "(await U('./screens.ts')).openScreen('settings');", "wallpaper"],
   ["assist", "assist", "await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
-  ["shade", "shade", "", "blurred"],
-  ["control", "shade", "S.panel.value = 'control';", "blurred"],
+  ["shade", "shade", "S.panel.value = 'notifications'; S.notif.value = true;", "blurred"],
+  ["control", "shade", "S.panel.value = 'control'; S.notif.value = true;", "blurred"],
   ["switcher", "recents", "E.emit('recents.show', { open: true, from: 100, tasks: await (await U('./bridge.ts')).powos.tasks.list() });", "blurred"],
   ["lock", "lock", "", "wallpaper"],
 ].filter(([n]) => !ONLY || ONLY.test(n));

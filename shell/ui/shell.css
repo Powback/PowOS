@@ -974,6 +974,8 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .ai-state.busy { color: var(--color-accent); }
 .ai-state.busy::before { content: "● "; animation: icon-wait 0.9s ease-in-out infinite alternate; }
 .ai-open { font: var(--text-small) var(--font); color: var(--color-accent); }
+/* Unfolded, PowOS AI reads as a column, not a 2268 px line: its content capped and centred (the folded width is less). */
+.ai-screen > *, .ai-panel > * { width: 100%; max-width: 720px; margin-inline: auto; }
 .ai-scroll {
   flex: 1;
   min-height: 0;

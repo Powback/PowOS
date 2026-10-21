@@ -85,7 +85,8 @@
   --glass-base: color-mix(in srgb, var(--color-foreground) 18%, var(--color-background));
   /* The one darkening for a page that is mostly text (PowOS AI's): more of the same tint, nothing else. */
   --glass-dim: 20%;
-  --glass-fill: color-mix(in srgb, var(--glass-base) var(--glass-tint), transparent);
+  /* One material (docs/DESIGN-LANGUAGE.md): every surface is the reference fill - home's tiles as PowOS AI's cards. */
+  --glass-fill: var(--text-fill);
   /*
    * The reference material (docs/DESIGN-LANGUAGE.md: PowOS AI's page, 2026-10-21): the glass tint and --glass-dim more
    * of it, over --glass-veil. What a surface with text on it is filled with - PowOS AI's cards, and every sheet.
