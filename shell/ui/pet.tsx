@@ -101,7 +101,7 @@ const night = (t: number) => {
 };
 
 const busy = computed(() =>
-  agentIds.value.some((id) => {
+  (agentIds.value ?? []).some((id) => {
     const a = agent(id)?.value;
     return a?.state === "working" && !a.id.includes("/");
   }),
@@ -110,9 +110,9 @@ const needsYou = computed(() => {
   const t = clock.value;
   return (
     waiting.value > 0 ||
-    asks.value.some((a) => a.answer == null && a.expires > t) ||
-    agentIds.value.some((id) => agent(id)?.value.state === "needs_you") ||
-    mailNow.value.some((m) => m.from !== "deploy")
+    (asks.value ?? []).some((a) => a.answer == null && a.expires > t) ||
+    (agentIds.value ?? []).some((id) => agent(id)?.value.state === "needs_you") ||
+    (mailNow.value ?? []).some((m) => m?.from !== "deploy")
   );
 });
 
@@ -219,7 +219,7 @@ effect(() => {
 const reply = computed(() => {
   const t = talk.value;
   if (!t?.asked) return null;
-  const items = chat.value.items;
+  const items = chat.value.items ?? [];
   const at = items.findLastIndex((i) => i.kind === "user" && (i as { text: string }).text.startsWith(t.asked!));
   if (at < 0) return null;
   const a = items.slice(at + 1).findLast((i) => i.kind === "assistant") as { text: string } | undefined;
@@ -289,7 +289,7 @@ function TalkBubble({ style, cls }: { style: Record<string, string>; cls: string
 
 /** The chat's latest turn: its answer so far. */
 function latestAnswer() {
-  const items = chat.value.items;
+  const items = chat.value.items ?? [];
   const at = items.findLastIndex((i) => i.kind === "user");
   const answer = items.slice(at + 1).findLast((i) => i.kind === "assistant") as { text: string } | undefined;
   return answer?.text ?? "";
@@ -311,7 +311,9 @@ effect(() => {
 
 const FAILED = /\b(fail(ed|s|ure)?|rolled back|roll(ed)?back|broke(n)?|error)\b/i;
 let mailSeen: Set<string> | null = null;
-function gotMail(list: AgentMail[]) {
+function gotMail(got: AgentMail[] | null | undefined) {
+  // An older host answers nothing (or not a list): as no mail.
+  const list = Array.isArray(got) ? got : [];
   mailNow.value = list;
   const key = (m: AgentMail) => m.id ?? `${m.from}-${m.time}`;
   if (!mailSeen) {
@@ -368,7 +370,7 @@ function PetFeed() {
     moodSet.value = { mood: p.mood, until: Number(p.moodUntil) };
   }, [pets]);
   useEffect(() => {
-    if (!said.length) return;
+    if (!said?.length) return;
     const last = Number(saidSeen.value) || Date.now();
     const fresh = said.filter((s) => Number(s.at) > last).sort((a, b) => Number(a.id) - Number(b.id));
     for (const s of fresh) say({ text: s.text, from: s.from });
@@ -377,7 +379,7 @@ function PetFeed() {
   // The board: what waits on the user, and a task going done - a jump (once per task).
   const statuses = useRef<Map<string, string> | null>(null);
   useEffect(() => {
-    if (adb.status !== "connected" || !work.length) return;
+    if (adb.status !== "connected" || !work?.length) return;
     waiting.value = work.filter((w) => w.status === "waiting").length;
     const was = statuses.current;
     statuses.current = new Map(work.map((w) => [w.id, w.status]));
@@ -389,7 +391,7 @@ function PetFeed() {
     () =>
       effect(() => {
         const done = new Set<string>();
-        for (const l of tasks.value.values()) for (const t of l) if (t.status === "done") done.add(t.id);
+        for (const l of tasks.value?.values() ?? []) for (const t of l ?? []) if (t.status === "done") done.add(t.id);
         const was = spoolDone.current;
         spoolDone.current = done;
         if (was && [...done].some((id) => !was.has(id))) cheer();
@@ -539,7 +541,7 @@ function Bubble({ at }: { at: { left: number; top: number } }) {
  * app is installed (`powos app remove local.pet` takes it away, and its sockets and listeners with it).
  */
 export function Pet() {
-  return installedApps.value.some((a) => a.id === APP) ? <PetLayer /> : null;
+  return (installedApps?.value ?? []).some((a) => a.id === APP) ? <PetLayer /> : null;
 }
 
 function PetLayer() {
