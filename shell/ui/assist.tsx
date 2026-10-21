@@ -4,6 +4,9 @@
  * (hold to talk and send, tap to dictate) - and PowOS AI's answer as it comes. What's asked goes with the screen's text,
  * so "what's this?" means the screen. A tap above the panel puts it away.
  *
+ * Summoned, it listens at once, as a tap on the mic does: what's said goes into the field and a pause ends it, ready to
+ * send (or edit). Typing or tapping the field stops listening and keeps what was heard; so does the panel going away.
+ *
  * The screenshot always goes along (PowOS AI reads it: the host saves it where PowOS sees it, the question names the
  * path). Circling is always on, no mode: draw around anything on the screen above the panel and that part is cut out
  * of the screenshot and sent too, the whole screen with it for context. A tap there (no stroke) puts the panel away.
@@ -16,7 +19,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { stored } from "../state.ts";
-import { Mic, hearing, type MicTarget } from "./bar.tsx";
+import { Mic, dictate, hearing, interrupt, type MicTarget } from "./bar.tsx";
 import { Now } from "./powai.tsx";
 import type { AssistScreen } from "../types.ts";
 
@@ -34,13 +37,16 @@ const live = signal({ on: false, frames: 0 });
 powos.on("assist.live", (l: { on: boolean; frames: number }) => (live.value = l));
 
 powos.on("assist.context", (s: AssistScreen) => (screen.value = s));
-// Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go.
+// Summoned again (the page stays warm between summonings, AssistWeb): last time's question, answer and cut-out go,
+// and it listens.
 powos.on("assist.reset", () => {
   screen.value = null;
   asked.value = false;
   region.value = null;
   stroke.value = [];
+  dictate(mic);
 });
+powos.on("assist.hidden", () => interrupt(mic));
 
 /** The screen's text that goes along with a question, at most (the host caps it too). */
 const SCREEN_TEXT = 4000;
@@ -152,7 +158,12 @@ const mic: MicTarget = {
 export function Assist() {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    powos.assist.screen().then((s) => s && (screen.value = s));
+    // The page loaded during a summoning (not warm before it): no assist.reset came, so it listens now.
+    powos.assist.screen().then((s) => {
+      if (!s) return;
+      screen.value = s;
+      dictate(mic);
+    });
     powos.assist.liveState().then((l) => (live.value = l));
   }, []);
   const on = live.value.on;
@@ -211,8 +222,13 @@ export function Assist() {
         >
           <input
             value={hearing(mic) ?? draft.value}
-            onInput={(e) => (draft.value = (e.currentTarget as HTMLInputElement).value)}
-            onFocus={() => powos.keyboard.show()}
+            onInput={(e) => {
+              const typed = (e.currentTarget as HTMLInputElement).value;
+              interrupt(mic);
+              draft.value = typed;
+            }}
+            onPointerDown={() => interrupt(mic)}
+            onFocus={() => (interrupt(mic), powos.keyboard.show())}
             placeholder="ask about this screen"
             enterKeyHint="send"
             autocomplete="off"
