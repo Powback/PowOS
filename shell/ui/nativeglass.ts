@@ -28,8 +28,13 @@ const SURFACES = ".tile, .notif-panel, .ai-screen";
 
 /** The host blurs for this page (b.state 1). */
 const hostBlurs = signal(false);
-/** CDP's override for this page: false keeps the CSS glass whatever the host says. */
-const wanted = signal(true);
+/**
+ * CDP's override for this page: false keeps the CSS glass whatever the host says.
+ * OFF by default (2026-10-21 08:03): on this OxygenOS build the host's setBlurRegions call aborts the whole app
+ * (JNI: the native side reads 31 floats per region, GlassBlur sends 10) - home crash-looped to Settings. Back on
+ * once GlassBlur matches the device's BlurRegion layout.
+ */
+const wanted = signal(false);
 /** The live glass is on: ui/glass.ts leaves its picture off, theme.css tints only. */
 export const nativeGlass = signal(false);
 
