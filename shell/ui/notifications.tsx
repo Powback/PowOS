@@ -188,6 +188,12 @@ function Card({ n, onTap, onDismiss, clearable = n.clearable, name, more = 0, cl
   );
 }
 
+/**
+ * What grouping reads besides the basics (types.ts PhoneNotification has them; spelled out here too, so this file
+ * type-checks against an installed APK's older types.ts).
+ */
+type GroupedNotification = PhoneNotification & { pkg?: string; group?: string | null; conversation?: boolean };
+
 /** PowOS's deploy notes, one group. */
 const UPDATES = "PowOS · updates";
 /** PowOS's own notifications (the app's agent mail and deploy notes): grouped by who sent them, not as one app. */
@@ -204,8 +210,8 @@ interface Group {
  * - Android's group key when it has one (its bundle), PowOS's own per sender (deploy notes: "PowOS · updates") - the
  * groups by their newest.
  */
-function grouped(items: PhoneNotification[]): Group[] {
-  const own = (n: PhoneNotification) => POWOS.has(n.pkg ?? "") || POWOS.has(n.app);
+function grouped(items: GroupedNotification[]): Group[] {
+  const own = (n: GroupedNotification) => POWOS.has(n.pkg ?? "") || POWOS.has(n.app);
   const convos = items.filter((n) => n.conversation && !own(n)).sort((a, b) => b.time - a.time);
   const map = new Map<string, Group>();
   for (const n of items) {
