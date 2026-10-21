@@ -240,7 +240,9 @@ export function applyTrack() {
 
 /** Elements that follow the openness, newly mounted: given its current value. */
 export function followOpenness(el: HTMLElement | null) {
-  el?.style.setProperty("--p", String(drawerShown()));
+  // peek: a ref callback runs inside its component's render tracking - a read here subscribed Home (and all under it:
+  // the pages, their glass, every app cell, the pet) to drawerDrag, a re-render on every move of a drag.
+  el?.style.setProperty("--p", String(drawerDrag.peek() ?? (drawer.peek() > 0 ? 1 : 0)));
 }
 
 /** The same for the notification panel's (--q). */
