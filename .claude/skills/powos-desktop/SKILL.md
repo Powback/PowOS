@@ -38,6 +38,7 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
 - KWin scripts for window facts (workspace.stackingOrder: caption, resourceClass, dock, deleted, frameGeometry); their
   print() lands in /run/powos-app/hyprland.log (KWin's stdout, read via tools/phone/user.sh). Never call
   org.kde.KWin showDebugConsole: it opens a window on the desktop.
+- QtWebEngine draws classic scrollbars (the phone's WebView overlays its own): desktop.css hides them, scrolling stays.
 - Rest cost, measured 2026-10-21 over 60 s settled: host 3 ticks, renderer 0, zygotes 0; ~250 + 230 + 145 MB RSS.
 
 ## Renders and checks
@@ -53,8 +54,11 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
   reference fill left 54 of 67 labels under 4.5:1 over a light wallpaper. Contrast wins over the reference look;
   re-measure (both wallpapers, three themes) before changing it.
 - host.net (src/net.cpp, apps/net.ts's n.req over the native port) mirrors ShellNet.kt. Its secrets and pins are
-  the desktop's own (~/.local/share/powos/net): Lights shows "no secret hue" until it's paired here or the key is
-  brought over (the user's call - never pair or switch a light yourself).
+  the desktop's own (~/.local/share/powos/net, 0600, key "<app>/<name>"). On the phone the Hue key was copied from
+  the Android app's store with the user's say (2026-10-21), root-side and never printed:
+      sources/powos-shell/dev/net-secret.sh copy local.lights hue      # -> "copied"
+      sources/powos-shell/dev/net-secret.sh remove local.lights hue    # the way back -> "removed"
+  Lights then loads its rooms and scenes. Never pair, switch, toggle or dim a light yourself; read state only.
 - Shell files ship as usual: commit, rebase, push, `READY_MS=30000 shell/push.sh --vpn --note "..." <files>`; the
   desktop host's own copy of shell/ only changes with dev/phone.sh build.
 

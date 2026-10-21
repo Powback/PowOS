@@ -36,6 +36,8 @@ export interface Spec {
   panel?: string;
   /** island: the mock data its host answers with (rows by table, net responses by URL pattern). */
   data?: { rows?: Record<string, any[]>; net?: { match: string; status?: number; json?: unknown }[] };
+  /** panel agents: the mock's agents replaced (preview.mjs's nobody-running variants). */
+  agents?: { role: string; state: "working" | "idle" | "needs_you" | "blocked" | "paused" | "gone"; title: string; step: string; report: string; ago: number }[];
   cells: Cell[];
 }
 
@@ -91,6 +93,20 @@ function Panel({ spec, cell }: { spec: Spec; cell: Cell }) {
     const [file, name] = from[spec.panel!] ?? [];
     if (file) importShim(file).then((m) => setC(() => m[name]));
   }, []);
+  // A variant's agents (preview.mjs panel.agents-idle / -empty): the mock's replaced once the widget subscribed, and
+  // the mock's ticking coder kept quiet so it doesn't come back.
+  useEffect(() => {
+    if (!C || !spec.agents) return;
+    const w = window as unknown as { __mockEvents?: { emit(n: string, e: unknown): void }; __powosMockQuiet?: boolean };
+    w.__powosMockQuiet = true;
+    const now = Date.now();
+    const agents = spec.agents.map((a, i) => ({
+      id: `mac:v${i}`, host: "mac", parent: null, cwd: "PowOS", pid: 0, subs: 0, unread: 0, started: now - 3_600_000 - a.ago, rev: 1,
+      role: a.role, state: a.state, title: a.title, step: a.step, report: a.report, last: now - a.ago,
+    }));
+    const t = setTimeout(() => w.__mockEvents?.emit("agents.delta", { full: true, agents, tasks: [], messages: [], asks: [] }), 200);
+    return () => clearTimeout(t);
+  }, [C]);
   const item: HomeItem = { key: `panel:${spec.panel}`, kind: "panel", name: spec.panel, page: 1, cell: { x: 0, y: 0, w: cell.cols, h: cell.rows }, resizable: true, minSize: [2, 1], size: [cell.cols, cell.rows] };
   return C ? <C item={item} /> : null;
 }

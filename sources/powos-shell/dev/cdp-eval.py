@@ -5,7 +5,8 @@ the nested bench (dev/nested.sh) has no node or websocket module.
     cdp-eval.py 'document.querySelectorAll(".panel-task").length'
     cdp-eval.py 'document.querySelector(".panel-task:not(.active)").click()'
 
-    cdp-eval.py --shot out.png      the page as Chromium drew it (no compositor: KWin's blur and the wallpaper aren't in it)
+    cdp-eval.py --shot out.png      the page as Chromium drew it, transparent where it is (no compositor: KWin's blur
+                                    and the wallpaper aren't in it - dev/phone.sh page lays it over the wallpaper)
 
 Awaits a promise result; prints the value as JSON. PORT env: the DevTools port (9222). MODE env: the page whose
 ?mode= it is (any powos: page if unset). Read-only checks on a page someone may be looking at.
@@ -64,13 +65,21 @@ def recv():
 
 
 if sys.argv[1] == "--shot":
-    send({"id": 1, "method": "Page.captureScreenshot", "params": {"format": "png"}})
-    while True:
+    # Transparent where the page is (the wallpaper's place - a screenshot paints it white otherwise), for this
+    # capture only: the default background is put back right after.
+    send({"id": 1, "method": "Emulation.setDefaultBackgroundColorOverride", "params": {"color": {"r": 0, "g": 0, "b": 0, "a": 0}}})
+    # captureBeyondViewport: a frame drawn for the capture itself - a frozen session (no frame callbacks from KWin)
+    # draws none of its own, and the override's repaint never reached the screen's frame.
+    send({"id": 2, "method": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": True}})
+    send({"id": 3, "method": "Emulation.setDefaultBackgroundColorOverride", "params": {}})
+    pending = {2, 3}  # the screenshot answers after the reset: wait for both
+    while pending:
         msg = recv()
-        if msg.get("id") == 1:
+        if msg.get("id") == 2:
             open(sys.argv[2], "wb").write(base64.b64decode(msg["result"]["data"]))
             print(sys.argv[2])
-            sys.exit(0)
+        pending.discard(msg.get("id"))
+    sys.exit(0)
 
 send({"id": 1, "method": "Runtime.evaluate",
       "params": {"expression": sys.argv[1], "awaitPromise": True, "returnByValue": True}})

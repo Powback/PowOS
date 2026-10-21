@@ -6,8 +6,8 @@
 #                                                 to /usr/lib/powos/desktop-shell (units/phone/powos-desktop-shell.json)
 #   sources/powos-shell/dev/phone.sh start|stop   the desktop home in the session (as powos), or gone: Plasma as before
 #   sources/powos-shell/dev/phone.sh status       running?, RSS, CPU ticks, the log's tail
-#   sources/powos-shell/dev/phone.sh page NAME    the home page as Chromium drew it (DevTools) -> /home/powos/design-qa/
-#                                                 desktop-NAME.png, and ~/.cache/powos-desktop/desktop-NAME.png here
+#   sources/powos-shell/dev/phone.sh page NAME    the home page as Chromium drew it (DevTools), over Android's still of
+#                                                 the wallpaper -> /home/powos/design-qa/desktop-NAME.png (+ a copy here)
 #   sources/powos-shell/dev/phone.sh cdp 'JS'     evaluate in the home page (read-only checks)
 #   sources/powos-shell/dev/phone.sh shot NAME    KWin's whole output (spectacle); on the phone's Anland backend it
 #                                                 comes back empty (2026-10-21) - use page, or Android's screencap
@@ -60,8 +60,16 @@ EOF
   page)
     name=${2:?usage: phone.sh page NAME}
     out=/home/powos/design-qa/desktop-$name.png
-    as_user "mkdir -p ~/design-qa && PORT=9333 MODE=desktop $P/bin/powos-shell-cdp --shot $out"
-    "$adb" exec-out "su -c cat /data/powos/root$out" >"$cache/desktop-$name.png" && echo "here: $cache/desktop-$name.png"
+    as_user "mkdir -p ~/design-qa && PORT=9333 MODE=desktop $P/bin/powos-shell-cdp --shot /home/powos/.cache/powos-shell/page.png" >/dev/null
+    "$adb" exec-out "su -c cat /data/powos/root/home/powos/.cache/powos-shell/page.png" >"$cache/page.png"
+    # Over the wallpaper as the compositor puts it there (no blur: KWin's isn't in a page capture): Android's own still
+    # of the live wallpaper (what the phone shell's glass uses), cropped to the page from the top-left (KWin's
+    # output is the screen; the page stops above Plasma's panel).
+    "$adb" exec-out "su -c cat /data/system/users/0/wallpaper_screenshot.png" >"$cache/wallpaper.png"
+    ffmpeg -loglevel error -y -i "$cache/wallpaper.png" -i "$cache/page.png" -filter_complex \
+      "[0][1]scale2ref=w=iw:h=-1[wp][pg];[wp]crop=iw:ih:0:0[wpc];[wpc][pg]overlay=0:0:shortest=1" -frames:v 1 "$cache/desktop-$name.png"
+    "$repo/tools/phone/review-image.sh" "$cache/desktop-$name.png" | tail -1
+    echo "here: $cache/desktop-$name.png (a page capture over the wallpaper, not a compositor screenshot)"
     ;;
   stop) as_user "powos-desktop-shell stop" ;;
   status) as_user "powos-desktop-shell status" ;;

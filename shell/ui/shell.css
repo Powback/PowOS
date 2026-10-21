@@ -1628,9 +1628,47 @@ html.lock-settling .lock { transition: transform 220ms ease-out, opacity 220ms e
 .aw-desc { font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* The Agents view (agents.tsx): home's widget, a line per agent, and its screen over home. */
-.ag-panel { height: 100%; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; font-size: var(--text-small); }
-.ag-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; white-space: nowrap; }
+/* The widget fills its tile at every size (shell/dev/preview.sh): a size container, type from the tile (cqmin), the
+   agents as cards sharing the height (agents.tsx AgentsPanel picks the columns and rows that fit). */
+.ag-panel { height: 100%; container-type: size; overflow: hidden; }
+.ag-in {
+  height: 100%; box-sizing: border-box; padding: 0.55em 0.7em; display: flex; flex-direction: column; gap: 0.4em;
+  font-size: clamp(12px, 5.2cqmin, 19px);
+}
+.ag-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 0.6em; white-space: nowrap; flex: none; }
 .ag-head > :first-child { color: var(--color-foreground); font-weight: bold; }
+.ag-head > :last-child { font-size: 0.85em; }
+.ag-list { flex: 1; min-height: 0; display: grid; gap: 0.4em; overflow: hidden; }
+.ag-card {
+  overflow: hidden; min-width: 0; min-height: 0; box-sizing: border-box; padding: 0.35em 0.6em; border-radius: 0.7em;
+  background: color-mix(in srgb, currentColor 8%, transparent); color: var(--color-foreground);
+  display: flex; flex-direction: column; justify-content: center; gap: 0.15em; text-align: start; cursor: pointer;
+}
+.ag-card.gone { opacity: 0.7; }
+.ag-card.needs_you, .ag-card.blocked { background: color-mix(in srgb, var(--color-red) 16%, transparent); }
+.ag-c1 { display: flex; align-items: center; gap: 0.4em; white-space: nowrap; min-width: 0; }
+.ag-c1 .ag-who { flex: 1; min-width: 0; font-weight: bold; }
+.ag-c1 .ag-act { padding: 0.15em 0.7em; }
+.ag-c2, .ag-c3 { overflow-wrap: anywhere; line-height: 1.25; }
+.ag-c3 { font-size: 0.85em; }
+.ag-idle .ag-mark { color: var(--color-muted); }
+.ag-idle.big { align-items: center; text-align: center; }
+.ag-idle.big .ag-c1 { justify-content: center; }
+.ag-idle.big .ag-who { flex: none; }
+.ag-big { font-size: 2.2em; line-height: 1.2; color: var(--color-muted); }
+/* A one-row tile: the head beside the cards, its two parts stacked. */
+@container (max-height: 96px) {
+  .ag-in { flex-direction: row; align-items: stretch; padding: 0.3em 0.4em 0.3em 0.7em; }
+  .ag-list { flex: 1; min-width: 0; }
+  .ag-head { flex-direction: column; justify-content: center; align-items: flex-start; gap: 0.1em; }
+  .ag-ask-line { display: none !important; }
+}
+/* The smallest (a 2x1 on the cover screen): no room for a card beside the head - the head is the widget. */
+@container (max-height: 96px) and (max-width: 150px) {
+  .ag-list { display: none; }
+  .ag-head { flex: 1; padding: 0.35em 0.6em; border-radius: 0.7em; background: color-mix(in srgb, currentColor 8%, transparent); }
+  .ag-head > :last-child { font-size: 1em; white-space: normal; }
+}
 .ag-line, .ag-node {
   display: flex;
   align-items: baseline;

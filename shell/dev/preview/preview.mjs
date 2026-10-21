@@ -128,6 +128,13 @@ function plan() {
     }
   }
   for (const p of ["agents", "recents"]) widgets.push({ id: `panel.${p}`, kind: "panel", title: `${p} (shell panel)`, panel: p, minSize: [2, 1] });
+  // The Agents widget with nobody running, as home often is: only sessions that finished lately, and nothing at all.
+  // [agents]: the mock's agents replaced (sheet.tsx Panel) - role, state, title, step, report, ms ago.
+  const gone = (role, title, report, ago) => ({ role, state: "gone", title, step: "", report, ago });
+  widgets.push({ id: "panel.agents-idle", kind: "panel", title: "agents, nobody running (shell panel)", panel: "agents", minSize: [2, 1],
+    agents: [gone("coder", "hosted widgets", "pushed 3 commits, gate green", 1_500_000), gone("devops", "prune old images", "freed 106 GB", 5_400_000),
+      gone("reviewer", "review the drawer", "2 nits, approved", 9_000_000)] });
+  widgets.push({ id: "panel.agents-empty", kind: "panel", title: "agents, none at all (shell panel)", panel: "agents", minSize: [2, 1], agents: [] });
   const chosen = widgets.filter((w) => !ONLY || ONLY.test(w.id));
   for (const w of chosen) w.cells = cellsFor(w.id, w.minSize);
   fs.writeFileSync(path.join(WORK, "widgets.json"), JSON.stringify(chosen, null, 1));
@@ -241,7 +248,7 @@ async function sheet(browser, w, t, max) {
     const m = await importShim("./dev/preview/sheet.tsx");
     window.__pv = m;
     await m.mount(spec);
-  }, { title: w.title, kind: w.kind, app: w.app, entry: w.entry, panel: w.panel, data: w.data, cells: w.cells });
+  }, { title: w.title, kind: w.kind, app: w.app, entry: w.entry, panel: w.panel, data: w.data, agents: w.agents, cells: w.cells });
   dbg(w.id, t.name, "mounted", process.env.PREVIEW_DEBUG ? await page.evaluate(() => [...document.fonts].map((f) => `${f.family}:${f.status}`).join(" ")) : "");
   return { page, errors };
 }
