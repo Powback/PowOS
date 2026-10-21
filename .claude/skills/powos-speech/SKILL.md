@@ -43,15 +43,15 @@ and the latest start wins.
   error after words counts as a segment's end: the partial is committed, and the SAME recognizer listens again 250 ms
   later, with no retry spent. A new recognizer right after destroying the old got SERVER_DISCONNECTED (11) on every
   listen. Before this fix the replay kept only the last sentence.
-- stt.pow answers HTTP 500 to audio with no speech (silence, clips under ~0.5 s): GpuSession pads clips to 1 s and
-  reads a 500 as "nothing heard", failing over only after 3 in a row (a `HACK:`; the real fix is in stt-batch).
+- stt.pow gives 200 `{"text":""}` for silence and clips under 0.5 s (since 2df111b; it used to answer 500). GpuSession
+  tolerates a real 500 twice (no words from that request) and fails over on the third in a row.
 - Release with GPU: the last ~300 ms before release can be missing (partials are chunked).
 
 ## stt.pow facts
 stt-batch (whisper-fast large-v3-turbo, gpu-195 GPU1 :8001, Traefik `http://stt.pow`, LAN/VPN, no auth).
 OpenAI-compatible `POST /v1/audio/transcriptions` (multipart `file`, `model=whisper-1`, `response_format=verbose_json`
 gives `language`, `prompt`, `language`). `GET /health` returns `{"status":"ok",...}`. **No live streaming:**
-`stream=true` is SSE of the already-uploaded file only. No speech gives 500, not empty text. A 2-3 s clip takes ~60-150 ms; the phone (Wi-Fi) pings it at
+`stream=true` is SSE of the already-uploaded file only. No speech gives 200 with empty text. A 2-3 s clip takes ~60-150 ms; the phone (Wi-Fi) pings it at
 ~12 ms. Server-side VAD is on. "Thank you."-style hallucinations on silence are filtered in GpuSession.
 
 ## Logs and checks

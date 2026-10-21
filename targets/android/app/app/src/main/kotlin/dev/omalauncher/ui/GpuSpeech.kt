@@ -175,7 +175,7 @@ internal object SttServer {
         checkedAt = SystemClock.elapsedRealtime()
     }
 
-    /** stt.pow answered, but not 200. A 500 is mostly "no speech in this audio" (its VAD found none), not "down". */
+    /** stt.pow answered, but not 200 (no speech is 200 with empty text since 2df111b). */
     class HttpError(
         val code: Int,
     ) : IOException("HTTP $code")
@@ -459,8 +459,8 @@ internal class GpuSession(
     private var firstVoiceAt = 0L
     private var answers = 0
 
-    /** stt.pow's 500s in a row (its "no speech" answer, [SttServer.HttpError]); touched on the network thread only. */
-    @Volatile private var emptyRuns = 0
+    /** stt.pow's 500s in a row ([SttServer.HttpError]); touched on the network thread only. */
+    @Volatile private var errorRuns = 0
     private var inFlight = false
     private var inFlightSince = 0L
     private var partialUpTo = 0
@@ -547,8 +547,7 @@ internal class GpuSession(
         final: Boolean,
     ) {
         val to = if (final) s.end else recorded()
-        // At least 1 s: stt.pow answers 500 to a clip under ~0.5 s (2026-10-21); trailing silence doesn't change the words.
-        val audio = slice(s.start, to).let { if (it.size < 1000 * BYTES_PER_MS) it.copyOf(1000 * BYTES_PER_MS) else it }
+        val audio = slice(s.start, to)
         val prompt = segs.takeWhile { it !== s }.joinToString(" ") { it.text }
         val lang = language
         inFlight = true
@@ -559,12 +558,11 @@ internal class GpuSession(
                 runCatching {
                     if (failAfterFirst && answers > 0) throw IOException("test: made to fail")
                     try {
-                        SttServer.transcribe(audio, lang, prompt, if (final) FINAL_READ_MS else PARTIAL_READ_MS)
+                        SttServer.transcribe(audio, lang, prompt, if (final) FINAL_READ_MS else PARTIAL_READ_MS).also { errorRuns = 0 }
                     } catch (e: SttServer.HttpError) {
-                        // HACK: stt-batch answers 500 for audio its VAD finds no speech in (silence, a breath) instead
-                        // of {"text": ""}. Real fix: return empty text there (gpu-195 stt-batch). Until then a 500 is
-                        // "nothing heard" - it's up, it answered - and only three in a row count as failing.
-                        if (e.code != 500 || ++emptyRuns >= 3) throw e
+                        // A server error: one is tolerated (no words from this request, the next one tries again);
+                        // three in a row fail over to on-device.
+                        if (e.code != 500 || ++errorRuns >= 3) throw e
                         SttServer.Heard("", null)
                     }
                 }
@@ -572,7 +570,6 @@ internal class GpuSession(
                 inFlight = false
                 if (ended || inner != null) return@post
                 r.onSuccess { h ->
-                    if (h.text.isNotEmpty()) emptyRuns = 0
                     answers++
                     SttServer.markUp()
                     if (language == null && audio.size >= 1500 * BYTES_PER_MS) language = h.language
