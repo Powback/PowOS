@@ -36,6 +36,7 @@ import { installedApps } from "../apps/pages.ts";
 import { watchRegistry } from "../apps/registry.ts";
 import { PetBody, type BodyHandle } from "./petbody.tsx";
 import { edges, fall, perchAt, placeOn, where as perchWhere, type Edge, type Perch } from "./petperch.ts";
+import { keyframes, plan } from "./petpath.ts";
 import { DbConnection as PetDb } from "../vendor/local-pet.js";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
 import type { AgentMail } from "../types.ts";
@@ -174,6 +175,19 @@ const forced = signal<State | null>(null);
   edges,
   /** What an agent starting work makes it do (review renders). */
   carry: () => carryToBoard(),
+  /** Go to an edge by its key (review renders): the platformer path. */
+  go: (key: string, fx = 0.5) => {
+    const e = edges().find((x) => x.key === key);
+    if (e) hopTo(e, fx);
+  },
+  /** The plan it would take there (review). */
+  plan: (key: string, fx = 0.5) => {
+    const list = edges();
+    const cur = perch();
+    const a = cur && list.find((x) => x.key === cur.key);
+    const e = list.find((x) => x.key === key);
+    return a && cur && e ? plan(list, { key: cur.key, x: a.left + cur.fx * (a.right - a.left) }, { key, x: e.left + fx * (e.right - e.left) }) : null;
+  },
 };
 
 const state = computed<State>(() => {
@@ -699,7 +713,9 @@ function PetLayer() {
   hopTo = (e: Edge, fx: number, then?: () => void) => {
     const node = el.current;
     const sz = size();
-    const r = node?.getBoundingClientRect();
+    // Its laid-out place (left/top), not its rect: a pose or a squash transforms the rect, and the path's keyframes
+    // are offsets from the layout.
+    const r = node ? { left: parseFloat(node.style.left) || 0, top: parseFloat(node.style.top) || 0 } : null;
     if (!node || !r || document.hidden) return;
     const to = placeOn(e, fx, sz);
     const dx = to.left - r.left;
@@ -709,13 +725,25 @@ function PetLayer() {
       then?.();
       return;
     }
-    const up = Math.min(r.top, to.top) - r.top - 36;
+    // Platformer (petpath.ts): the way there over the edges - walks, jumps, wall-jumps up a tile's side - as one
+    // compositor animation. No way found (no perch now, an unreachable edge): one direct hop, as before.
+    const list = edges();
+    const cur = perch();
+    const curEdge = cur && list.find((x) => x.key === cur.key);
+    const moves = curEdge && cur ? plan(list, { key: cur.key, x: curEdge.left + cur.fx * (curEdge.right - curEdge.left) }, { key: e.key, x: e.left + fx * (e.right - e.left) }) : null;
+    let a: Animation;
     body.current?.stretch(0.5);
     node.classList.add("falling");
-    const a = node.animate(
-      [{ transform: "none" }, { transform: `translate(${dx / 2}px, ${up}px)`, offset: 0.45 }, { transform: `translate(${dx}px, ${dy}px)` }],
-      { duration: 560 + Math.min(400, Math.hypot(dx, dy)), easing: "cubic-bezier(0.35, 0, 0.45, 1)" },
-    );
+    if (moves && moves.length && curEdge && cur) {
+      const k = keyframes(list, { left: r.left, top: r.top }, cur.key, curEdge.left + cur.fx * (curEdge.right - curEdge.left), moves, sz);
+      a = node.animate(k.frames, { duration: k.duration, easing: "linear" });
+    } else {
+      const up = Math.min(r.top, to.top) - r.top - 36;
+      a = node.animate(
+        [{ transform: "none" }, { transform: `translate(${dx / 2}px, ${up}px)`, offset: 0.45 }, { transform: `translate(${dx}px, ${dy}px)` }],
+        { duration: 560 + Math.min(400, Math.hypot(dx, dy)), easing: "cubic-bezier(0.35, 0, 0.45, 1)" },
+      );
+    }
     a.onfinish = () => {
       node.style.left = `${to.left}px`;
       node.style.top = `${to.top}px`;

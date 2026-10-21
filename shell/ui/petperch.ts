@@ -16,6 +16,8 @@ export interface Edge {
   left: number;
   right: number;
   top: number;
+  /** The tile's bottom: its sides are walls from [top] to here (petpath.ts wall-jumps). */
+  bottom?: number;
 }
 
 export interface Perch {
@@ -36,7 +38,7 @@ export function edges(): Edge[] {
     const r = el.getBoundingClientRect();
     // On screen, and wide enough to stand on.
     if (r.width < 40 || r.right < 0 || r.left > W || r.top < 40 || r.top > H - 40) continue;
-    out.push({ key: el.dataset.key!, left: r.left, right: r.right, top: r.top });
+    out.push({ key: el.dataset.key!, left: r.left, right: r.right, top: r.top, bottom: r.bottom });
   }
   // An edge under another tile (a joined group: the lower tile's top is inside the upper one) isn't a floor: the part
   // that's open is kept, the covered rest cut off; an edge covered all along goes.
