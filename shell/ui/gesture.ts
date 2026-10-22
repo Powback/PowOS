@@ -18,6 +18,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
+import { ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
 import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
@@ -264,7 +265,7 @@ interface Gesture {
   last: [number, number, number];
   /** Velocity along the gesture's axis, px/ms. */
   v: number;
-  mode: "open" | "close" | "pages" | "notifClose" | "panel" | null;
+  mode: "open" | "close" | "pages" | "notifClose" | "panel" | "ccAll" | null;
   open: boolean;
   /** The notification panel was down when it started. */
   notif: boolean;
@@ -345,8 +346,13 @@ export function homeGestures() {
     if (!g.mode) {
       if (Math.hypot(dx, dy) < SLOP) return;
       if (g.notif) {
+        const vertical = Math.abs(dy) > Math.abs(dx);
+        const together = separatePanels.value !== "on" && notifDrag.value == null;
+        // The one panel open, at its top: down shows the control center's whole view, up folds it (ccexpand.ts) -
+        // before up shuts the panel.
+        if (together && vertical && g.listTop && (dy > 0 ? !ccExpanded.value : ccExpanded.value)) g.mode = "ccAll";
         // The notification panel down: up drags it shut (the list scrolls until its end); sideways is a card's.
-        if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
+        else if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
         // Sideways, not on a notification (a card slides away by itself): between the notifications and the
         // control center, as OnePlus's panels - when they're apart (one panel: nothing to swipe to).
         else if (separatePanels.value === "on" && Math.abs(dx) > Math.abs(dy) && !g.inStrip && !g.target.closest?.(".notif.tile:not(.notif-access)")) g.mode = "panel";
@@ -376,6 +382,7 @@ export function homeGestures() {
       dropKeyboard();
     }
     if (e?.cancelable) e.preventDefault();
+    if (g.mode === "ccAll") return stretchCc(dy);
     if (g.mode === "panel") {
       lastDx = dx;
       return panelBody()?.style.setProperty("--panel-dx", `${panelResist(dx)}px`);
@@ -395,6 +402,7 @@ export function homeGestures() {
   const end = () => {
     if (!g) return;
     const { mode, v, open, target, own, notif: wasNotif } = g;
+    const dy = g.last[1] - g.y0;
     g = null;
     // A clean tap (no gesture claimed) on the notification panel's or the control center's empty space: it closes,
     // with its own animation - as a tap beside the open launcher closes it.
@@ -416,6 +424,10 @@ export function homeGestures() {
       notifDrag.value = null;
       // A flick decides; otherwise where it was let go (as the drawer).
       notif.value = v > FLICK ? true : v < -FLICK ? false : q > CLOSE_KEEP;
+    } else if (mode === "ccAll") {
+      // Past the threshold, or a flick its way: committed; otherwise it springs back.
+      const down = !ccExpanded.value;
+      settleCc(down ? dy > EXPAND_AT || v > FLICK : dy < -EXPAND_AT || v < -FLICK);
     } else if (mode === "panel") {
       settlePanel(lastDx, v);
     } else if (mode === "pages") {

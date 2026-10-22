@@ -11,6 +11,7 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
 import { held, notifOpen } from "./gesture.ts";
+import { ccExpanded } from "./ccexpand.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
 import { openGlasses } from "../glasses/open.ts";
@@ -521,10 +522,12 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
   const several = ts.length > 1;
   const open = opened.value === g.id;
   const toggle = () => (opened.value = open ? null : g.id);
+  // The whole view (ccexpand.ts): its members inside it, under its name - small round toggles, no surface of their own.
+  const all = several && ccExpanded.value;
   return (
+    <div class={`cc-cell ${all ? "all" : ""}`} data-key={g.id}>
     <button
       type="button"
-      data-key={g.id}
       class={`cc-tile ${st.on ? "on" : ""} ${open ? "opened" : ""}`}
       aria-label={`${g.label}: ${st.detail}`}
       aria-expanded={several ? open : undefined}
@@ -538,7 +541,7 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
     >
       <span class="cc-icon">
         <Icon name={g.id === "internet" && !st.on ? "wifiOff" : g.id === "tools" && !st.on ? "flashlightOff" : g.id === "display" && !st.on ? "screenRotationLock" : g.icon} />
-        {several && (
+        {several && !all && (
           <span
             class="cc-more"
             role="button"
@@ -556,22 +559,33 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
       <span class="cc-label">{g.label}</span>
       {st.detail && <span class="cc-detail">{st.detail}</span>}
     </button>
+      {all && (
+        <div class="cc-cell-subs">
+          {ts.map((t) => (
+            <Face key={t.id} t={t} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
 /** A member under an open category: a small round toggle over its name (remote input and the glasses their own). */
 function Sub({ t }: { t: QuickTile }) {
-  let face;
-  if (t.id === REMOTE_ID) face = <RemoteTile t={t} />;
-  else if (t.id === GLASSES_ID) face = <GlassesTile t={t} />;
-  // OnePlus Share and Google's Quick Share are one member: "quick share".
-  else if (t.app === "com.oneplus.oshare" || t.app === "com.google.android.gms") face = <Tile t={{ ...t, label: "quick share" }} hold={false} />;
-  else face = <Tile t={t} hold={false} />;
   return (
     <div class="cc-sub" data-key={t.id}>
-      {face}
+      <Face t={t} />
     </div>
   );
+}
+
+/** A member's toggle (an open category's row, or inside its tile in the whole view). */
+function Face({ t }: { t: QuickTile }) {
+  if (t.id === REMOTE_ID) return <RemoteTile t={t} />;
+  if (t.id === GLASSES_ID) return <GlassesTile t={t} />;
+  // OnePlus Share and Google's Quick Share are one member: "quick share".
+  if (t.app === "com.oneplus.oshare" || t.app === "com.google.android.gms") return <Tile t={{ ...t, label: "quick share" }} hold={false} />;
+  return <Tile t={t} hold={false} />;
 }
 
 /** Dragged this far (px) before the long press, it's a scroll or a swipe, not a pickup. */
@@ -654,7 +668,7 @@ function useReorder(keys: string[], done: (keys: string[]) => void, still: (key:
     "data-reorder": "",
     onPointerDown: (e: PointerEvent) => {
       const el = (e.target as Element).closest<HTMLElement>("[data-key]");
-      if (!el || !own(el) || (e.target as Element).closest(".cc-more")) return;
+      if (!el || !own(el) || (e.target as Element).closest(".cc-more, .cc-cell-subs")) return;
       const key = el.dataset.key!;
       swallowClick.current = false;
       const r = el.getBoundingClientRect();
@@ -781,6 +795,7 @@ export function ControlCenter() {
       clearInterval(timer);
       picking.value = false;
       opened.value = null;
+      ccExpanded.value = false;
     };
   }, [open]);
   const q = quick.value;
@@ -874,7 +889,7 @@ export function ControlCenter() {
                 <GroupTile key={g.id} g={g} ts={ts} />
               ))}
             </div>
-            <Unfold group={row.find((x) => x.g.id === opened.value)} reorder={reorderMembers} />
+            <Unfold group={ccExpanded.value ? undefined : row.find((x) => x.g.id === opened.value)} reorder={reorderMembers} />
           </Fragment>
         ))}
       </div>
