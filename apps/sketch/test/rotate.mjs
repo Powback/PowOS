@@ -76,9 +76,10 @@ st = await state();
 ok(near(st.view.s, v3.s, 0.01) && near(st.view.ox - v3.ox, -120, 2) && near(st.view.oy - v3.oy, -160, 2), `two-finger pan moves the view (${Math.round(st.view.ox - v3.ox)}, ${Math.round(st.view.oy - v3.oy)} px)`);
 v3 = st.view;
 await two([195, 400], [205, 400], [5, 400], [395, 400]); await two([195, 400], [205, 400], [5, 400], [395, 400]);
-st = await state(); ok(st.view.s <= 16.001 && st.drawn < st.strokes, `max zoom ${st.view.s.toFixed(2)} (<= 16), off-screen strokes skipped (${st.drawn}/${st.strokes})`);
-await two([5, 400], [395, 400], [199, 400], [201, 400]); await two([5, 400], [395, 400], [199, 400], [201, 400]); await two([5, 400], [395, 400], [199, 400], [201, 400]);
-st = await state(); ok(st.view.s >= 0.0499, `min zoom ${st.view.s.toFixed(3)} (>= 0.05)`);
+await two([195, 400], [205, 400], [5, 400], [395, 400]);
+st = await state(); ok(st.view.s <= 100.001 && st.view.s > 99 && st.drawn < st.strokes, `max zoom ${st.view.s.toFixed(2)} (100), off-screen strokes skipped (${st.drawn}/${st.strokes})`);
+for (let i = 0; i < 4; i++) await two([5, 400], [395, 400], [199, 400], [201, 400]);
+st = await state(); ok(st.view.s >= 0.0199 && st.view.s < 0.021, `min zoom ${st.view.s.toFixed(3)} (0.02)`);
 await two([150, 400], [250, 400], [50, 400], [350, 400]);
 let n0 = (await state()).strokes;
 await drag([[60, 300], [120, 330]]);
@@ -127,6 +128,59 @@ const pl = await ink(); ok(pl > 30000, `legacy picture shown (${pl} px)`);
 await drag([[200, 500], [300, 600]]);
 st = JSON.parse(await page.evaluate(() => dump()));
 ok(st.drawing.length === 1 && st.drawing[0].key !== "" && st.drawing[0].base === png && st.stroke.length === 1, `legacy adopted: key set, base = old picture, 1 stroke`);
+
+
+// Crisp at any zoom: a test drawing (one red line), pinched to 10x and 50x. While the fingers move the last render is
+// only moved (a CSS translate + scale, no repaint); when they lift the strokes are re-rendered as vectors, so the
+// line's edge stays ~1 px wide (a scaled raster's edge would be ~10 / ~50 px of blur).
+const RED = []; for (let x = 300; x <= 500; x += 5) RED.push(x, 860.37, 6);
+await page.evaluate((r) => sessionStorage.setItem("seed", JSON.stringify({ drawing: [{ id: "1", title: "Test", image: "", width: 800, height: 1720, key: "t", base: "" }],
+  stroke: [{ id: "2", drawing: "1", uid: "r", color: "#ff5c5c", eraser: false, points: r, hidden: false }], viewport: [{ key: "t", cx: 400, cy: 860, zoom: 0.5, fit: false }], next: 9 })), RED);
+await page.reload(); await sleep(800);
+// The red channel down the canvas's centre column: how many pixels are part-way across an edge (anti-aliasing / blur).
+// raster = the control: the 1x render scaled up by `raster` (what zooming a picture would show), measured the same way.
+const blur = (raster = 0) => page.evaluate((k) => { let c = document.querySelector("canvas"), g = c.getContext("2d");
+  if (k) { const o = document.createElement("canvas"); o.width = c.width; o.height = c.height; const q = o.getContext("2d"); q.imageSmoothingEnabled = true;
+    q.drawImage(c, c.width / 2 * (1 - k), c.height / 2 * (1 - k), c.width * k, c.height * k); c = o; g = q; }
+  const d = g.getImageData(c.width >> 1, 0, 1, c.height).data;
+  let lo = 255, hi = 0; for (let i = 0; i < d.length; i += 4) (lo = Math.min(lo, d[i])), (hi = Math.max(hi, d[i]));
+  let mid = 0, on = 0; for (let i = 0; i < d.length; i += 4) { const t = (d[i] - lo) / (hi - lo || 1); if (t > 0.1 && t < 0.9) mid++; if (t >= 0.9) on++; } return { mid, on, lo, hi }; }, raster);
+const pinchHeld = async (a0, b0, a1, b1) => { // a pinch, read mid-way (fingers still down), then lifted
+  await touch("touchStart", [a0]); await touch("touchMove", [a0]); await touch("touchStart", [a0, b0]);
+  const p0 = (await state()).paints;
+  for (let i = 1; i <= 10; i++) { const t = i / 10, l = (p, q) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]; await touch("touchMove", [l(a0, a1), l(b0, b1)]); await sleep(16); }
+  await sleep(50);
+  const mid = await page.evaluate(() => document.querySelector("canvas").style.transform), p1 = (await state()).paints;
+  await touch("touchEnd", []); await sleep(250);
+  return { mid, painted: p1 - p0 };
+};
+st = await state(); ok(near(st.view.s, 1, 0.001), `test drawing at 1x (${st.view.s})`);
+const r10 = await blur(10), r50 = await blur(50);
+let g = await pinchHeld([190, 430], [210, 430], [100, 430], [300, 430]);
+ok(/^translate\([-\d.e]+px, [-\d.e]+px\) scale\([\d.e]+\)$/.test(g.mid) && g.painted === 0, `mid-pinch: the last render moved by "${g.mid}" (translate + scale, no rotation), ${g.painted} repaints`);
+st = await state(); const b10 = await blur();
+ok(near(st.view.s, 10, 0.05) && (await page.evaluate(() => document.querySelector("canvas").style.transform)) === "", `pinched to ${st.view.s.toFixed(2)}x, transform cleared on settle`);
+ok(b10.on >= 50 && b10.mid <= 4 && r10.mid >= 4 * Math.max(1, b10.mid), `crisp at 10x: ${b10.on} px solid line, ${b10.mid} edge px (the 1x render scaled: ${r10.mid})`);
+g = await pinchHeld([180, 430], [220, 430], [100, 430], [300, 430]);
+st = await state(); const b50 = await blur();
+ok(near(st.view.s, 50, 0.3) && b50.on >= 290 && b50.mid <= 4 && r50.mid >= 4 * Math.max(1, b50.mid), `crisp at ${st.view.s.toFixed(1)}x: ${b50.on} px solid, ${b50.mid} edge px (the 1x render scaled: ${r50.mid})`);
+// The background has no edge: at extreme pans and zooms every pixel away from a stroke is the background.
+const allBg = () => page.evaluate(() => { const c = document.querySelector("canvas"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+  let bad = 0; for (let i = 0; i < d.length; i += 4 * 97) if (Math.abs(d[i] - 0x12) > 2 || Math.abs(d[i + 1] - 0x12) > 2 || Math.abs(d[i + 2] - 0x16) > 2) bad++; return bad; });
+const pageBg = await page.evaluate(() => getComputedStyle(document.querySelector("canvas").parentElement).backgroundColor);
+ok(pageBg === "rgb(18, 18, 22)", `the page behind the canvas is the background too (${pageBg}): a pinch never shows a void`);
+for (const [cx, cy, zoom] of [[1e6, -1e6, 50], [-3e5, 4e5, 0.01], [400, 860 + 5000, 50], [-1e4, 860, 1]]) {
+  await page.evaluate(([cx, cy, zoom]) => { const s = JSON.parse(dump()); s.viewport = [{ key: "t", cx, cy, zoom, fit: false }]; sessionStorage.setItem("seed", JSON.stringify(s)); }, [cx, cy, zoom]);
+  await page.reload(); await sleep(600);
+  ok((await allBg()) === 0, `background fills the viewport at ${cx},${cy} zoom ${zoom} (scale ${(await state()).view.s.toFixed(2)})`);
+}
+// An older drawing's picture has no rectangle: around its corner at 10x, inside and outside read as the background.
+const legacy = await page.evaluate(() => { const c = document.createElement("canvas"); c.width = 800; c.height = 1720; const g = c.getContext("2d"); g.fillStyle = "#121216"; g.fillRect(0, 0, 800, 1720); g.fillStyle = "#fff"; g.fillRect(400, 400, 100, 100); return c.toDataURL("image/webp", 0.85); });
+await page.evaluate((png) => sessionStorage.setItem("seed", JSON.stringify({ drawing: [{ id: "1", title: "Old", image: png, width: 800, height: 1720, key: "o", base: png }], stroke: [], viewport: [{ key: "o", cx: 0, cy: 0, zoom: 5, fit: false }], next: 5 })), legacy);
+await page.reload(); await sleep(800);
+ok((await allBg()) === 0, `an older picture's edge never shows (its corner at 10x reads as the background)`);
+const data2 = JSON.parse(await page.evaluate(() => dump()));
+ok(data2.drawing[0].base === legacy && data2.drawing[0].image === legacy, `the older picture itself is unchanged`);
 
 ok(errs.length === 0, `no page errors ${errs.join(" | ")}`);
 await browser.close(); srv.close(); process.exit(fails ? 1 : 0);

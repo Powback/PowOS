@@ -1,6 +1,8 @@
 /**
  * Sketch's full-screen page: an unbounded canvas to draw on with a finger or a pen. Pen pressure sets the line width,
- * strokes are smoothed. Two fingers never draw: they pan, and pinch zooms around their centre; "fit all" shows the
+ * strokes are smoothed. Two fingers never draw: they pan, and pinch zooms (0.02x to 100x) around their centre - never
+ * rotate; while they move the last render is moved by a CSS transform (translate + scale only), and when they lift
+ * the strokes are re-rendered as vectors at the new zoom, so they're crisp at any level. "fit all" shows the
  * whole drawing, a double tap goes back to its page at 100%. Each drawing's view is saved (the viewport table), so a
  * restart or a rotation keeps the same spot; one that was never moved stays fitted whole.
  *
@@ -11,7 +13,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useApp, type Props } from "../lib/app";
-import { extent, fit, IDENTITY, paint, picture, pinch, place, save, shows } from "../lib/ink";
+import { extent, fit, IDENTITY, keyed, paint, picture, pinch, place, save, shows } from "../lib/ink";
 import type { Box, Ink, P2, Rect, Saved, Screen, View } from "../lib/ink";
 import { Outbox, uid, visible, type Call, type Op, type Row } from "../lib/outbox";
 import { attachPen, type Tool } from "../lib/pen";
@@ -57,8 +59,9 @@ const THUMB_MS = 1500;
 const fresh = (): Current => ({ key: uid(), id: null, box: null, chosen: true });
 
 const images = new Map<string, HTMLImageElement>();
-/** A data URL as a loaded image (cached), or null while it loads; `loaded` re-renders once it has. */
-function useImage(src: string, loaded: () => void): HTMLImageElement | null {
+const keyedOf = new WeakMap<HTMLImageElement, HTMLCanvasElement>();
+/** A data URL as a loaded image (cached) with its background keyed out (ink.ts keyed), or null while it loads. */
+function useImage(src: string, loaded: () => void): HTMLCanvasElement | null {
   const img = useMemo(() => {
     if (!src) return null;
     let i = images.get(src);
@@ -74,7 +77,10 @@ function useImage(src: string, loaded: () => void): HTMLImageElement | null {
     if (img.complete) loaded();
     else img.onload = loaded;
   }, [img]);
-  return img && img.complete ? img : null;
+  if (!img || !img.complete || !img.naturalWidth) return null;
+  let k = keyedOf.get(img);
+  if (!k) keyedOf.set(img, (k = keyed(img)));
+  return k;
 }
 
 /** The app's data: drawings, strokes, the outbox and a reducer caller that always uses the live connection. */
@@ -128,6 +134,8 @@ interface Look {
   view: View;
   free: Saved | null;
   moving: boolean;
+  /** The view the canvas's pixels were rendered at: while fingers move, a CSS transform shows them at `view`. */
+  shown: View;
 }
 
 /** The strokes plus what the pen holds unsaved (the stroke in progress, a tap). */
@@ -157,7 +165,7 @@ function nextView(k: Look, c: Screen, r: Rect | null, refit: boolean): View {
  */
 function useCanvas(scene: Scene, tool: Tool, end: (ink: Ink, box: Box) => void, onView: (v: Saved) => void) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const look = useRef<Look>({ view: IDENTITY, free: null, moving: false });
+  const look = useRef<Look>({ view: IDENTITY, free: null, moving: false, shown: IDENTITY });
   const live = useRef(scene);
   live.current = scene;
   const toolRef = useRef(tool);
@@ -172,7 +180,9 @@ function useCanvas(scene: Scene, tool: Tool, end: (ink: Ink, box: Box) => void, 
     const r = extent(box, all), k = look.current;
     k.view = nextView(k, screen(c), s.box || all.length ? r : null, refit);
     if (refit) pen.current?.reproject(k.view);
-    const drawn = paint(c.getContext("2d")!, k.view, { box, base: s.base, inks: all });
+    // Mid-pinch (a cancelled stroke, a stroke arriving) the pixels stay at the transform's base view.
+    if (!k.moving || refit) k.shown = k.view;
+    const drawn = paint(c.getContext("2d")!, k.shown, { box, base: s.base, inks: all });
     // What's drawn, for checks (tools/phone/verify/sketch-*.sh, apps/sketch/test): read only, never driven.
     (window as unknown as { __sketch?: unknown }).__sketch = {
       key: s.key, view: k.view, extent: r, strokes: all.length, drawn, size: [c.width, c.height],
@@ -214,6 +224,13 @@ function useViewControls({ canvas, look, live, onView, repaint, boxOf }: ViewDep
   const onViewRef = useRef(onView);
   onViewRef.current = onView;
   const v0 = useRef(IDENTITY);
+  /** The last render (at look.shown) shown as if at `v`: a CSS translate + scale only, so never a rotation. */
+  const show = (v: View | null) => {
+    const c = canvas.current!;
+    if (!v) return void (c.style.transform = "");
+    const b = look.current.shown, r = v.s / b.s, d = c.width / (c.clientWidth || c.width);
+    c.style.transform = `translate(${(v.ox - b.ox * r) / d}px, ${(v.oy - b.oy * r) / d}px) scale(${r})`;
+  };
   /** The user set the view: kept free (or fitted again), painted, saved. */
   const settle = (v: View, fitted: boolean) => {
     const c = canvas.current!, k = look.current;
@@ -224,12 +241,13 @@ function useViewControls({ canvas, look, live, onView, repaint, boxOf }: ViewDep
     repaint(false);
     onViewRef.current(sv);
   };
-  const soon = () => (frame.current ||= requestAnimationFrame(() => ((frame.current = 0), repaint(false))));
+  // While the fingers move: one transform per frame, no repaint (a huge drawing stays as fast as an empty one).
+  const soon = () => (frame.current ||= requestAnimationFrame(() => ((frame.current = 0), look.current.moving && show(look.current.view))));
   const gesture = (phase: "start" | "move" | "end", from: [P2, P2], to: [P2, P2]) => {
     const k = look.current;
-    if (phase === "start") ((v0.current = k.view), (k.moving = true));
+    if (phase === "start") ((v0.current = k.view), (k.shown = k.view), (k.moving = true));
     else if (phase === "move") ((k.view = pinch(v0.current, from, to)), soon());
-    else ((k.moving = false), settle(k.view, false));
+    else ((k.moving = false), settle(k.view, false), show(null));
   };
   const home = () => {
     const c = canvas.current!, b = boxOf(c);
@@ -478,7 +496,7 @@ function Gallery({ drawings, close, fresh, open, remove }: GalleryProps) {
 
 const S: Record<string, Record<string, string | number>> = {
   page: { position: "fixed", inset: 0, background: "#121216", color: "#eee", touchAction: "none", userSelect: "none" },
-  canvas: { position: "absolute", inset: 0, width: "100%", height: "100%", touchAction: "none" },
+  canvas: { position: "absolute", inset: 0, width: "100%", height: "100%", touchAction: "none", transformOrigin: "0 0" },
   bar: {
     position: "absolute", left: "12px", right: "12px", top: "calc(12px + env(safe-area-inset-top))", display: "flex", gap: "8px",
     alignItems: "center", padding: "8px", borderRadius: "16px", background: "rgba(30,30,38,0.85)", backdropFilter: "blur(10px)",

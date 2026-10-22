@@ -4,7 +4,7 @@
  * never scribble. Two quick taps in one spot are a double tap (its dots are dropped). Drawn live in canvas pixels;
  * recorded in the drawing's space.
  */
-import { BG, dot, segment, tail, toDrawing, type Ink, type View } from "./ink";
+import { BG, dot, quantum, segment, tail, toDrawing, type Ink, type View } from "./ink";
 import { uid } from "./outbox";
 
 export interface Tool {
@@ -31,13 +31,22 @@ type P3 = [number, number, number];
 /** A tap: shorter than this, moved less than TAP_PX css px; a second one within DOUBLE_MS and DOUBLE_PX is a double tap. */
 const TAP_MS = 250, TAP_PX = 10, DOUBLE_MS = 300, DOUBLE_PX = 40;
 
+/**
+ * Where the canvas sits, untransformed: its frame (the page it fills) and device px per CSS px. Not the canvas's own
+ * rect: during a pinch the canvas carries a CSS transform (the last render, scaled), which must not move the fingers.
+ */
+export function frame(c: HTMLCanvasElement) {
+  const r = (c.parentElement ?? c).getBoundingClientRect();
+  return { left: r.left, top: r.top, dpr: c.width / (c.clientWidth || c.width || 1) };
+}
+
 const xy = (c: HTMLCanvasElement, e: PointerEvent): P2 => {
-  const r = c.getBoundingClientRect(), dpr = c.width / r.width;
-  return [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr];
+  const r = frame(c);
+  return [(e.clientX - r.left) * r.dpr, (e.clientY - r.top) * r.dpr];
 };
 
 function point(c: HTMLCanvasElement, e: PointerEvent, size: number): P3 {
-  const r = c.getBoundingClientRect(), dpr = c.width / r.width;
+  const r = frame(c), dpr = r.dpr;
   const p = e.pointerType === "pen" ? e.pressure || 0.5 : e.pointerType === "mouse" ? 0.5 : 0.6;
   return [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr, size * dpr * (0.4 + p * 1.2)];
 }
@@ -56,8 +65,8 @@ class Live {
     return this.ink.eraser ? BG : this.ink.color;
   }
   private record(p: P3) {
-    const [x, y, w] = toDrawing(this.v, p[0], p[1], p[2]);
-    this.ink.points.push(Math.round(x * 10) / 10, Math.round(y * 10) / 10, Math.round(w * 10) / 10);
+    const [x, y, w] = toDrawing(this.v, p[0], p[1], p[2]), q = quantum(this.v.s);
+    this.ink.points.push(Math.round(x * q) / q, Math.round(y * q) / q, Math.round(w * q) / q);
   }
   /** The view changed mid-stroke (a rotation): carry on from the same point at its new place. */
   reproject(v: View) {
@@ -182,7 +191,7 @@ export function attachPen(c: HTMLCanvasElement, h: PenHooks) {
     const ink = live?.finish();
     live = null;
     if (!ink) return;
-    const dpr = c.width / (c.getBoundingClientRect().width || 1);
+    const dpr = frame(c).dpr;
     const tap = performance.now() - started.t < TAP_MS && started.far < TAP_PX * dpr;
     taps.ended(ink, tap ? { at: started.at, dpr } : null);
   };

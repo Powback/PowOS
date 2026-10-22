@@ -42,7 +42,8 @@ docker run --rm --platform linux/arm64 --cpus 6 --memory 8g -v powos-apps-cargo:
   chown -R $HOST_UID /app/out $B 2>/dev/null || true
   ls -la /app/out/module.wasm'
 fi
-# The UI: static files as they are, widgets (ui/widgets/*.tsx) bundled one ES module each with their bindings -
+# The UI: static files as they are, widgets and pages (ui/widgets/*.tsx, ui/pages/*.tsx) bundled one ES module each
+# with their bindings (pages were missed until 2026-10-23: a page change never shipped through here) -
 # Preact and the SpacetimeDB SDK stay imports, which the shell's import map resolves to its own (one copy per page).
 # Workers (ui/workers/*.ts) are bundled whole: a worker has no import map.
 if [ -d "$D/ui" ]; then
@@ -50,12 +51,12 @@ if [ -d "$D/ui" ]; then
     set -euo pipefail
     E=/cache/esbuild-0.25; [ -x $E/node_modules/.bin/esbuild ] || (mkdir -p $E && cd $E && npm i -s esbuild@0.25 >/dev/null 2>&1)
     rm -rf /app/out/ui && mkdir -p /app/out/ui
-    cd /app/ui && find . -type f ! -name "*.ts" ! -name "*.tsx" ! -path "./bindings/*" -exec cp --parents {} /app/out/ui/ \;
-    w=$(ls widgets/*.tsx 2>/dev/null || true)
+    cd /app/ui && find . -type f ! -name "*.ts" ! -name "*.tsx" ! -name "tsconfig.json" ! -path "./bindings/*" -exec cp --parents {} /app/out/ui/ \;
+    w=$(ls widgets/*.tsx pages/*.tsx 2>/dev/null || true)
     [ -z "$w" ] || $E/node_modules/.bin/esbuild $w --bundle --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact \
       --external:preact --external:preact/hooks --external:preact/jsx-runtime --external:@preact/signals --external:spacetimedb \
-      --minify --outdir=/app/out/ui/widgets --log-level=warning
+      --minify --outdir=/app/out/ui --outbase=/app/ui --log-level=warning
     k=$(ls workers/*.ts 2>/dev/null || true)
     [ -z "$k" ] || $E/node_modules/.bin/esbuild $k --bundle --format=esm --target=es2022 --minify --outdir=/app/out/ui/workers --log-level=warning
-    chown -R $HOST_UID /app/out/ui; ls -la /app/out/ui/widgets 2>/dev/null || true'
+    chown -R $HOST_UID /app/out/ui; ls -la /app/out/ui/widgets /app/out/ui/pages 2>/dev/null || true'
 fi

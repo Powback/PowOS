@@ -75,8 +75,8 @@ export interface Saved {
   fit: boolean;
 }
 
-/** Zoom limits, in canvas px per drawing unit (1 = the scale the drawing was started at). */
-export const MIN_S = 0.05, MAX_S = 16;
+/** Zoom limits, in canvas px per drawing unit (1 = the scale the drawing was started at): 0.02x to 100x. */
+export const MIN_S = 0.02, MAX_S = 100;
 export const clampS = (s: number) => Math.min(MAX_S, Math.max(MIN_S, s));
 
 /** A canvas: its backing store's size and device pixels per CSS px. */
@@ -127,6 +127,10 @@ export function shows(r: Rect, v: View, cw: number, ch: number): boolean {
   return v.ox + r.x0 * v.s >= -1 && v.oy + r.y0 * v.s >= -1 && v.ox + r.x1 * v.s <= cw + 1 && v.oy + r.y1 * v.s <= ch + 1;
 }
 
+/** The rounding step for a point recorded through scale `s`: about 0.1 canvas px, so a stroke drawn at 100x is as
+ * smooth as one drawn at 1x (a fixed 0.1 drawing unit would be 10 px steps there). */
+export const quantum = (s: number) => 10 ** Math.ceil(Math.log10(Math.max(s, 1e-6) * 10));
+
 /** Canvas pixels -> drawing space. */
 export const toDrawing = (v: View, x: number, y: number, w: number): [number, number, number] => [
   (x - v.ox) / v.s,
@@ -172,37 +176,77 @@ export function tail(g: CanvasRenderingContext2D, color: string, mid: [number, n
   g.stroke();
 }
 
-/** A whole stroke through a view, exactly as the pen drew it. */
+/** A piece of stroke through points `p` with width w touches canvas `c`. */
+function near(p: number[][], w: number, c: HTMLCanvasElement) {
+  const h = w / 2 + 1;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of p) ((x0 = Math.min(x0, q[0])), (y0 = Math.min(y0, q[1])), (x1 = Math.max(x1, q[0])), (y1 = Math.max(y1, q[1])));
+  return x1 + h >= 0 && y1 + h >= 0 && x0 - h <= c.width && y0 - h <= c.height;
+}
+
+/**
+ * A whole stroke through a view, exactly as the pen drew it: re-rendered from its points at the view's scale (crisp at
+ * any zoom). Each segment is stroked on its own, so the ones off the canvas are skipped (a long stroke seen at 100x).
+ */
 export function stroke(g: CanvasRenderingContext2D, k: Ink, v: View) {
   const color = k.eraser ? BG : k.color;
-  const p = k.points;
+  const p = k.points, cv = g.canvas;
   if (p.length < 3) return;
   const at = (i: number): [number, number, number] => [v.ox + p[i] * v.s, v.oy + p[i + 1] * v.s, p[i + 2] * v.s];
   let last = at(0);
   let mid: [number, number] = [last[0], last[1]];
-  dot(g, color, last);
+  if (near([last], last[2], cv)) dot(g, color, last);
   for (let i = 3; i + 2 < p.length; i += 3) {
     const q = at(i);
-    mid = segment(g, color, { mid, last }, q);
+    if (near([mid, last, q], Math.max(last[2], q[2]), cv)) mid = segment(g, color, { mid, last }, q);
+    else mid = [(last[0] + q[0]) / 2, (last[1] + q[1]) / 2];
     last = q;
   }
-  if (p.length > 3) tail(g, color, mid, last);
+  if (p.length > 3 && near([mid, last], last[2], cv)) tail(g, color, mid, last);
 }
 
 /** The whole drawing on a canvas: background, the base picture (an older drawing's raster) in its box, the strokes. */
 export interface Picture {
   box: Box;
-  base: HTMLImageElement | null;
+  /** An older drawing's raster with its background made transparent (`keyed`), so it has no edge on the canvas. */
+  base: HTMLCanvasElement | null;
   inks: Ink[];
 }
 
-/** Paints it through `v`; strokes wholly off the canvas are skipped. Returns how many were drawn. */
+/**
+ * An older drawing's picture as an overlay: its background pixels (BG, give or take the picture's compression) made
+ * transparent, so the rectangle it was saved as never shows against the unbounded background. Only how it's drawn:
+ * the saved picture is never changed.
+ */
+export function keyed(img: HTMLImageElement): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const g = c.getContext("2d", { willReadFrequently: true })!;
+  g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height), px = d.data;
+  const [br, bg, bb] = [0x12, 0x12, 0x16];
+  for (let i = 0; i < px.length; i += 4) {
+    const e = Math.max(Math.abs(px[i] - br), Math.abs(px[i + 1] - bg), Math.abs(px[i + 2] - bb));
+    if (e < 24) px[i + 3] = Math.round((px[i + 3] * Math.max(0, e - 8)) / 16);
+  }
+  g.putImageData(d, 0, 0);
+  return c;
+}
+
+/**
+ * Paints it through `v`: the background over the whole canvas (it has no edge: any pan, any zoom), the strokes
+ * re-rendered as vectors at the view's scale, the ones wholly off the canvas skipped. Returns how many were drawn.
+ */
 export function paint(g: CanvasRenderingContext2D, v: View, { box, base, inks }: Picture): number {
   const c = g.canvas;
   g.globalCompositeOperation = "source-over";
   g.fillStyle = BG;
   g.fillRect(0, 0, c.width, c.height);
-  if (base && base.naturalWidth) g.drawImage(base, v.ox, v.oy, box.w * v.s, box.h * v.s);
+  if (base && base.width) {
+    g.imageSmoothingQuality = "high";
+    g.drawImage(base, v.ox, v.oy, box.w * v.s, box.h * v.s);
+  }
   let n = 0;
   for (const k of inks) if (onCanvas(bbox(k), v, c.width, c.height)) (stroke(g, k, v), n++);
   return n;
