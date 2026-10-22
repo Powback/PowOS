@@ -226,6 +226,29 @@ def _batch_sent(key, mid):
         pass
 
 
+QUIET_KEEP = 500
+
+
+def _quiet_lines():
+    try:
+        with open(os.path.join(ROOT, "quiet.log"), encoding="utf-8") as f:
+            return f.read().splitlines()
+    except OSError:
+        return []
+
+
+def _quiet_log(text):
+    """notify --silent: a line in <root>/quiet.log (the last QUIET_KEEP kept) - logged, nobody told."""
+    os.makedirs(ROOT, exist_ok=True)
+    rec = {"ts": time.time(), "iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+           "from": AGENT_ID or "unknown", "text": text}
+    lines = (_quiet_lines() + [json.dumps(rec, ensure_ascii=False)])[-QUIET_KEEP:]
+    path = os.path.join(ROOT, "quiet.log")
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(path + ".tmp", path)
+
+
 def _list_agents():
     """Every known inbox role and its current unread depth."""
     base = os.path.join(ROOT, "agents")
@@ -727,6 +750,12 @@ def run_cli(argv):
                     help="Fold into the last notice with this key if it came within --window s: one notification, "
                          "the latest line first and all of them as a list (deploys: --batch deploy).")
     pn.add_argument("--window", type=float, default=120, help="--batch's window in seconds (default 120).")
+    pn.add_argument("--silent", action="store_true",
+                    help="Tell nobody: no inbox, no notification - only a line in the quiet log (`comms quiet`). "
+                         "For deploys the user can't see (refactors, lint, tooling).")
+
+    pq = sub.add_parser("quiet", help="The quiet log: what was deployed silently (notify --silent), newest last.")
+    pq.add_argument("-n", type=int, default=20, help="How many lines (default 20).")
 
     pr = sub.add_parser("read", help="Mark messages read by id: out of the inbox (the user's: off the phone too).")
     pr.add_argument("ids", nargs="+")
@@ -764,6 +793,10 @@ def run_cli(argv):
         if not text.strip():
             print("powos comms notify: refusing an empty message", file=sys.stderr)
             sys.exit(2)
+        if a.silent:
+            _quiet_log(text)
+            print("Logged quietly (no notification).")
+            return 0
         prev = None
         if a.batch:
             text, prev = _batched(a.batch, text, a.window)
@@ -796,6 +829,13 @@ def run_cli(argv):
     elif a.cmd == "read":
         n = _consume(a.agent, a.ids)
         print(f"Read {len(a.ids)} id(s); {n} were waiting in '{a.agent}'.")
+    elif a.cmd == "quiet":
+        for line in _quiet_lines()[-max(1, a.n):]:
+            try:
+                q = json.loads(line)
+                print(f"{q.get('iso', '?')}  {q.get('from', '?')}: {q.get('text', '')}")
+            except ValueError:
+                continue
     elif a.cmd == "agents":
         for row in _list_agents():
             print(f"{row['agent']:20s} {row['pending']} pending")

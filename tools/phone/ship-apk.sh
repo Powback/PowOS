@@ -3,6 +3,7 @@
 # (a lock: two builds at once overwrote the shared out/powos.apk), through install-app.sh (privapp allowlist
 # guard + app-data backup), then verify the app came back (gesture input, no new crash).
 #   tools/phone/ship-apk.sh --note "what changed, plain words" [--now]
+#   tools/phone/ship-apk.sh --silent [--now]    a change the user can't see (refactor, lint, tooling): no notification
 # Waits for the user to be idle >= 60 s (or the screen off) before installing - an install restarts the PowOS session;
 # never installs over an active user (exit 4 after SHIP_WAIT_MIN minutes). --now skips the wait (only for urgent fixes).
 set -euo pipefail
@@ -15,9 +16,11 @@ if [ -z "${SHIP_APK_CURRENT:-}" ]; then
   if [ -s "$cur" ] && ! cmp -s "$cur" "$0"; then SHIP_APK_CURRENT=1 exec bash "$cur" "$@"; fi
   rm -f "$cur"
 fi
-note="" now=""
-while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --now) now=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
-[ -n "${note// }" ] || { echo "ship-apk: --note \"...\" required" >&2; exit 2; }
+note="" now="" silent=""
+while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --silent) silent=1; shift;; --now) now=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
+[ -n "${note// }" ] || [ -n "$silent" ] || { echo "ship-apk: --note \"...\" (or --silent for a change the user can't see) required" >&2; exit 2; }
+# The note install-app.sh gets: the user's line, or --silent (only comms' quiet log).
+if [ -n "$silent" ]; then inote="--silent"; else inote="--note \"${note//\"/}\""; fi
 lock=$HOME/.cache/powos-ship.lock; mkdir -p "$HOME/.cache"
 # Never ship a build that lacks what's installed: the last shipped commit must be in HEAD (two agents' APKs
 # overwrote each other's work). Rebase onto worktree-powos-multiplatform first.
@@ -91,7 +94,7 @@ start=$(tools/phone/adb.sh shell 'date +%m-%d\ %H:%M:%S' | tr -d '\r')
 docker run --rm --network container:powos-vadb -v "$PWD/targets/android":/ta:ro -v "$apk":/powos.apk:ro --entrypoint bash \
   android-app-dev-android-builder:latest -c 'export PATH=$PATH:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/35.0.0
     adb connect 10.13.13.7:5555 >/dev/null; export ANDROID_SERIAL=10.13.13.7:5555
-    cp -r /ta /tmp/ta && cd /tmp/ta && ./install-app.sh /powos.apk --note "'"${note//\"/}"'"' 2>&1 | tail -4
+    cp -r /ta /tmp/ta && cd /tmp/ta && ./install-app.sh /powos.apk '"$inote"'' 2>&1 | tail -4
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
 # The shell it just installed decodes the phone's live modules only with bindings of their shape (home couldn't read
 # local-pet's rows twice on 2026-10-21): checked in one call; bindings ahead of a module that this commit builds are
@@ -114,7 +117,7 @@ if [ -n "$newer" ]; then
   if git worktree add -q --detach "$t/tree" origin/worktree-powos-multiplatform 2>/dev/null; then
     [ -d shell/node_modules ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
     echo "ship-apk: re-pushing shell changes committed after the build: $(echo $newer)"
-    (cd "$t/tree/shell" && READY_MS=${READY_MS:-30000} ./push.sh --vpn --note "Restored the newest screen updates after the app update" $newer 2>&1 | tail -2)
+    (cd "$t/tree/shell" && READY_MS=${READY_MS:-30000} ./push.sh --vpn --silent $newer 2>&1 | tail -2)
     git worktree remove --force "$t/tree" 2>/dev/null
   fi
   rm -rf "$t"

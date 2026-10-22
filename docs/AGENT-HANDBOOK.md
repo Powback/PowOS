@@ -57,6 +57,9 @@ the minimal change and tell them.
   frames, edge.sh, Broforce). Every helper an agent relies on lives in the repo, never in ~/.cache or job tmp (Rules).
 
 ## Shipping
+- Notes are only for what the user can SEE. A change they can't (refactor, lint, tooling, "behaviour unchanged")
+  ships with `--silent` instead of `--note` (shell/push.sh, ship-apk.sh, install-app.sh, deploy-note.sh): no
+  notification, only a line in comms' quiet log (`powos comms quiet`).
 ### Shell (web) files
 1. Commit, rebase onto origin/worktree-powos-multiplatform, push to origin. THEN
 2. `READY_MS=30000 shell/push.sh --vpn --note "plain words for the user" <files relative to shell/>`.
