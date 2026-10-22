@@ -257,6 +257,11 @@ try {
     runs.push(
       open(browser, `${ORIGIN}/index.html`, "pill").then(async (r) => {
         await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        // Not up in time (a busy Mac): said as the other pages say it, so push.sh's retry knows it for a timeout.
+        if (!(await r.page.evaluate(() => window.__powosAlive === true).catch(() => false))) {
+          r.problems.push(`not ready (window.__powosAlive) within ${Date.now() - r.started} ms`);
+          return { ...r, ready: false, ms: Date.now() - r.started };
+        }
         const out = await r.page
           .evaluate(async () => {
             const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));

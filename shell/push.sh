@@ -84,13 +84,15 @@ if [ "${1:-}" = "--vpn" ]; then
         echo "push.sh: couldn't pull the phone's overrides - gating the committed shell + these files only" >&2
       fi
       set +e
+      # The retry's wait: 30 s, or longer when asked (READY_MS=90000 shell/push.sh ... on a very busy Mac).
+      slow=$(( ${READY_MS:-0} > 30000 ? ${READY_MS:-0} : 30000 ))
       out=$(dev/gate.sh ${ga[@]+"${ga[@]}"} "${gf[@]}" 2>&1)
       gate=$?
       # Only "not ready" timeouts, no error at all: the Mac was loaded (concurrent builds/gates - 2026-10-21 every page
       # timed out at ~10 s while the same composition passed in 16 s a minute later). Once more with a longer wait.
       if [ $gate -ne 0 ] && ! echo "$out" | grep '^FAIL' | grep -qv 'not ready'; then
-        echo "push.sh: only boot timeouts - the Mac is busy? gating once more with READY_MS=30000" >&2
-        out=$(READY_MS=30000 dev/gate.sh ${ga[@]+"${ga[@]}"} "${gf[@]}" 2>&1)
+        echo "push.sh: only boot timeouts - the Mac is busy? gating once more with READY_MS=$slow" >&2
+        out=$(READY_MS=$slow dev/gate.sh ${ga[@]+"${ga[@]}"} "${gf[@]}" 2>&1)
         gate=$?
       fi
       echo "$out"
@@ -99,7 +101,7 @@ if [ "${1:-}" = "--vpn" ]; then
       # is the baseline (failures compared without their timings).
       if [ $gate -ne 0 ] && [ ${#ga[@]} -gt 0 ]; then
         norm() { grep '^FAIL' | sed 's/ within [0-9]* ms//; s/([0-9]* ms)//' | sort -u; }
-        base=$(READY_MS=30000 dev/gate.sh "${ga[@]}" 2>&1 | norm)
+        base=$(READY_MS=$slow dev/gate.sh "${ga[@]}" 2>&1 | norm)
         added=$(comm -13 <(echo "$base") <(echo "$out" | norm))
         if [ -z "$added" ]; then
           echo "push.sh: those failures are the phone's already (the same without these files) - this push adds none" >&2
