@@ -46,6 +46,12 @@ abstract class OverlayHost(
     private var params: WindowManager.LayoutParams? = null
     private var watchdog: PageWatchdog? = null
 
+    /** What the page was told since the window last went (by event name), for a page that reloaded meanwhile. */
+    private val told = linkedMapOf<String, Any?>()
+
+    /** A shell push's reload done while hidden ([OverlayReload]). */
+    private var reload: OverlayReload? = null
+
     /** The window shows (coming in, open, or settling shut). */
     var shown = false
         private set
@@ -62,6 +68,12 @@ abstract class OverlayHost(
 
     /** Something was launched from the page (pull.launched): the app switch shows, the overlay goes at once. */
     protected open fun onLaunched() = hide()
+
+    /** The page is up and can be seen (false while a shell push's reload runs: the window is at alpha 0). */
+    protected val pageReady: Boolean get() = reload?.reloading != true
+
+    /** The page came up after a reload while the window showed: what's behind it may be blurred now. */
+    protected open fun onPageReady() = Unit
 
     /** Hidden: no longer on screen (subclasses drop their blur). */
     protected open fun onHidden() = Unit
@@ -93,6 +105,14 @@ abstract class OverlayHost(
         r.visibility = View.GONE
         root = r
         params = layout().also { wm.addView(r, it) }
+        reload =
+            OverlayReload(title, wm, { host?.web }, { root?.let { v -> params?.let { v to it } } }, { shown }) {
+                // The pull came while the page reloaded: the new page hears the gesture so far, then the window counts.
+                for ((event, data) in told) host?.bridge?.emit(event, data)
+                onPageReady()
+                watchdog?.start()
+                if (wantOpen) armOpen()
+            }.also { g -> h.filesGate = g::changed }
         @Suppress("DEPRECATION")
         service.registerReceiver(closer, IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS).apply { addAction(Intent.ACTION_SCREEN_OFF) })
         Log.i(TAG, "$title ready")
@@ -112,7 +132,14 @@ abstract class OverlayHost(
     protected fun emit(
         event: String,
         data: Any?,
-    ) = host?.bridge?.emit(event, data)
+    ) {
+        // Kept from a gesture's start (some are told before the window shows) until the window goes.
+        told[event] = data
+        host?.bridge?.emit(event, data)
+    }
+
+    /** Settled open while the page was still reloading: opened once it's up. */
+    private var wantOpen = false
 
     /** Visible for the gesture, not touchable yet. */
     protected fun show() {
@@ -121,13 +148,19 @@ abstract class OverlayHost(
         if (shown) return
         shown = true
         open = false
+        wantOpen = false
         r.visibility = View.VISIBLE
         setFlags(touchable = false, focusable = false)
-        watchdog?.start()
+        // A page reloading (a shell push) stays invisible (alpha 0) until it's up; the watchdog starts then.
+        if (reload?.reloading != true) watchdog?.start()
     }
 
     /** Settled open: touchable and focused once the page answers it's alive. */
     protected fun armOpen() {
+        if (reload?.reloading == true) {
+            wantOpen = true
+            return
+        }
         val web = host?.web ?: return
         root?.removeCallbacks(shutGone)
         PageWatchdog.probeShown(web) { alive, why ->
@@ -167,9 +200,13 @@ abstract class OverlayHost(
         if (!shown) return
         shown = false
         open = false
-        r.visibility = View.GONE
+        wantOpen = false
+        told.clear()
+        // Mid-reload the window stays up (alpha 0) for the page to finish loading; it goes when that's done.
+        if (reload?.reloading != true) r.visibility = View.GONE
         setFlags(touchable = false, focusable = false)
         onHidden()
+        reload?.hidden()
     }
 
     private fun setFlags(

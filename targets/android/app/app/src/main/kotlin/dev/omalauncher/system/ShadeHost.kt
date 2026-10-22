@@ -169,6 +169,14 @@ class ShadeHost(
         root.visibility = View.GONE
         shade = root
         shadeParams = shadeLayout().also { shadeWm.addView(root, it) }
+        reload =
+            OverlayReload("shade", shadeWm, { host?.web }, { shade?.let { v -> shadeParams?.let { v to it } } }, { shown || peeking }) {
+                // A pull (or a banner) came while the page reloaded: the new page hears it so far, then it counts.
+                for ((event, data) in told) host?.bridge?.emit(event, data)
+                if (shown) blur.set(behind)
+                watchdog?.start()
+                if (wantOpen) armOpen()
+            }.also { g -> h.filesGate = g::changed }
         val strip = Edge(edgeContext)
         edge = strip
         stripHeight = statusBarHeight()
@@ -266,7 +274,7 @@ class ShadeHost(
     fun openPanel(control: Boolean): Boolean {
         val h = host ?: return false
         if (keyguard || lent) return false
-        h.bridge.emit("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
+        tell("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
         show()
         settle(true)
         return true
@@ -314,7 +322,7 @@ class ShadeHost(
                 // Down on home's body: the notifications, as a stock launcher's.
                 val control = from == From.STATUS_BAR && e.rawX > shadeWm.currentWindowMetrics.bounds.width() * CONTROL_SPLIT
                 pulling.fromHome = from == From.HOME
-                host?.bridge?.emit("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
+                tell("shade.panel", JSONObject().put("panel", if (control) "control" else "notifications"))
                 pulling.down(e)
                 return true
             }
@@ -367,13 +375,46 @@ class ShadeHost(
         if (shown) return
         shown = true
         peeking = false
+        wantOpen = false
         root.visibility = View.VISIBLE
         setFlags(touchable = false, focusable = false, height = ViewGroup.LayoutParams.MATCH_PARENT)
-        watchdog?.start()
+        // A page reloading (a shell push) stays invisible (alpha 0) until it's up; the watchdog starts then.
+        if (reload?.reloading != true) watchdog?.start()
+    }
+
+    /** A shell push's reload done while hidden ([OverlayReload]): never a pull onto a page still booting. */
+    private var reload: OverlayReload? = null
+
+    /** What the page was told since the window last went (by event name), for a page that reloaded meanwhile. */
+    private val told = linkedMapOf<String, Any?>()
+
+    /** Settled open while the page was still reloading: opened once it's up. */
+    private var wantOpen = false
+
+    /** How far what's behind is blurred by now; applied only while the page can be seen. */
+    private var behind = 0f
+
+    private fun blurBehind(amount: Float) {
+        behind = amount
+        blur.set(if (reload?.reloading == true) 0f else amount)
+    }
+
+    /** To the page, kept for a reload's new page while the window shows. */
+    private fun tell(
+        event: String,
+        data: Any?,
+    ) {
+        // Kept from a gesture's start (the panel is told before the window shows) until the window goes.
+        told[event] = data
+        host?.bridge?.emit(event, data)
     }
 
     /** The shade settled open: touchable and focused (Back reaches the page) once its page answers it's alive. */
     private fun armOpen() {
+        if (reload?.reloading == true) {
+            wantOpen = true
+            return
+        }
         val web = host?.web ?: return
         dev.omalauncher.shell.PageWatchdog.probeShown(web) { alive, why ->
             if (!shown) return@probeShown
@@ -430,9 +471,13 @@ class ShadeHost(
         if (!shown && !peeking) return
         shown = false
         peeking = false
-        blur.set(0f)
-        root.visibility = View.GONE
+        wantOpen = false
+        told.clear()
+        blurBehind(0f)
+        // Mid-reload the window stays up (alpha 0) for the page to finish loading; it goes when that's done.
+        if (reload?.reloading != true) root.visibility = View.GONE
         setFlags(touchable = false, focusable = false, height = ViewGroup.LayoutParams.MATCH_PARENT)
+        reload?.hidden()
     }
 
     /**
@@ -457,7 +502,7 @@ class ShadeHost(
             setFlags(touchable = false, focusable = false, height = stripHeight + (PEEK_HEIGHT_DP * service.resources.displayMetrics.density).toInt())
             watchdog?.start()
         }
-        h.bridge.emit("shade.peek", h.bridge.notificationJson(item))
+        tell("shade.peek", h.bridge.notificationJson(item))
         // The page puts the banner away itself (shade.closed); should it never, the strip mustn't stay over the top.
         root.removeCallbacks(peekGone)
         root.postDelayed(peekGone, PEEK_MAX_MS)
@@ -493,13 +538,13 @@ class ShadeHost(
     private val blur = dev.omalauncher.shell.WindowBlur({ shade }, SHADE_BLUR_DP)
 
     private fun drag(q: Double) {
-        if (shown) blur.set(q.toFloat())
-        host?.bridge?.emit("shade.drag", JSONObject().put("q", q))
+        if (shown) blurBehind(q.toFloat())
+        tell("shade.drag", JSONObject().put("q", q))
     }
 
     private fun settle(open: Boolean) {
-        if (shown) blur.set(if (open) 1f else 0f)
-        host?.bridge?.emit("shade.settle", JSONObject().put("open", open))
+        if (shown) blurBehind(if (open) 1f else 0f)
+        tell("shade.settle", JSONObject().put("open", open))
         if (!shown) return
         if (open) armOpen() else armShut()
     }
