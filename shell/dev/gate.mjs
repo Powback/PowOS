@@ -456,6 +456,86 @@ async function editSearchMoved() {
 }
 
 /**
+ * In the page: home's last page is the app library (the user, 2026-10-23) - every installed app in exactly one of its
+ * folders (the user's own as they are, a category's for the rest), a card for each.
+ */
+async function libraryCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const L = await importShim("./ui/library.tsx");
+  S.page.value = S.pages.value.length;
+  await sleep(500);
+  const lib = document.querySelector(".page-track > .page.library");
+  if (!lib || lib !== document.querySelector(".page-track").lastElementChild) return ["the app library isn't home's last page"];
+  const r = lib.getBoundingClientRect();
+  const fails = Math.abs(r.left) > 2 ? [`swiped to the last page, the app library is at x ${Math.round(r.left)}, not on screen`] : [];
+  const seen = L.library.value.flatMap((f) => f.apps.map((a) => a.app));
+  const twice = seen.filter((k, i) => seen.indexOf(k) !== i);
+  const missing = S.apps.value.filter((a) => !seen.includes(a.key)).map((a) => a.key);
+  if (twice.length || missing.length) fails.push(`the library: ${missing.length} apps in no folder (${missing.slice(0, 3)}), ${twice.length} in two (${twice.slice(0, 3)})`);
+  if (lib.querySelectorAll(".lib-card").length !== L.library.value.length) fails.push("the library shows a different number of folders than it has");
+  return fails;
+}
+
+/** In the page, on the app library (after libraryCheck): its search finds an app; an app installed or removed shows or goes at once. */
+async function libraryLiveCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const L = await importShim("./ui/library.tsx");
+  const { powos } = await importShim("./bridge.ts");
+  const lib = document.querySelector(".page.library");
+  const fails = [];
+  const input = lib.querySelector(".lib-search");
+  const one = S.apps.value[0];
+  input.value = one.label.slice(0, 4);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await sleep(200);
+  if (!lib.querySelector(`.lib-results .app[data-key="${one.key}"]`)) fails.push(`searching "${input.value}" doesn't find ${one.label}`);
+  input.value = "";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  const list = powos.apps.list;
+  const fake = { key: "a:org.gate.chess/.Main", label: "Gate Chess", icon: "", kind: "android", category: 0 };
+  powos.apps.list = async () => [...(await list()), fake];
+  window.__mockEvents.emit("apps.changed", null);
+  await sleep(400);
+  if (L.library.value.find((f) => f.apps.some((a) => a.app === fake.key))?.key !== "lib:games") fails.push("an app installed (Android category game) isn't in the library's Games folder");
+  powos.apps.list = list;
+  window.__mockEvents.emit("apps.changed", null);
+  await sleep(400);
+  if (L.library.value.some((f) => f.apps.some((a) => a.app === fake.key))) fails.push("an app removed stays in the library");
+  return fails;
+}
+
+/** In the page, on the app library: an app held in a folder card and dragged to the screen's side turns to a real page and lands on home where it's let go. */
+async function libraryDragCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const G = await importShim("./ui/grid.tsx");
+  const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 13, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
+  const onHome = new Set(S.home.value.items.map((i) => i.app).filter(Boolean));
+  const el = [...document.querySelectorAll(".page.library .lib-card .app")].find((e) => !onHome.has(e.dataset.key));
+  if (!el) return ["the library has no app that isn't on home already, to drag"];
+  const key = el.dataset.key;
+  const r = el.getBoundingClientRect();
+  const pages = document.querySelector(".pages");
+  fire(el, "pointerdown", r.left + r.width / 2, r.top + r.height / 2);
+  await sleep(520);
+  const g = G.geometry.value;
+  fire(pages, "pointermove", g.left + 4, r.top);
+  await sleep(1500);
+  if (S.page.value >= S.pages.value.length) return [`held at the side, the app library didn't turn to a home page (page ${S.page.value})`];
+  const spot = G.placeNewCells(1, 1);
+  const [x, y] = [g.left + g.pad + (spot.cell.x + 0.5) * g.cellW, g.top + g.pad + (spot.cell.y + 0.5) * g.cellH];
+  for (let k = 1; k <= 4; k++) fire(pages, "pointermove", g.left + 4 + ((x - g.left - 4) * k) / 4, r.top + ((y - r.top) * k) / 4);
+  await sleep(60);
+  fire(pages, "pointerup", x, y);
+  await sleep(600);
+  const c = S.home.value.items.find((i) => i.app === key)?.cell;
+  const at = c ? `${c.x},${c.y}` : "not on home";
+  return at === `${spot.cell.x},${spot.cell.y}` ? [] : [`${key} dragged from the library to ${spot.cell.x},${spot.cell.y} is ${at}`];
+}
+
+/**
  * In the page, edit mode (the user, 2026-10-22): a finger held on empty space then dragged draws the selection
  * rectangle and picks the two app tiles it touches; a quick sideways swipe there draws none (the page swipe's); out of
  * edit mode none either. Mock home only (synthetic pointers on the headless page).
@@ -1063,6 +1143,16 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `edit-search-${label}`, viewport).then((r) => whenReady(r, async () => [...(await r.page.evaluate(editSearchCheck)), ...(await r.page.evaluate(editSearchMoved))])));
+  // The app library: home's last page (the user, 2026-10-23). Both screens.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `library-${label}`, viewport).then((r) => whenReady(r, async () => {
+        for (const check of [libraryCheck, libraryLiveCheck, libraryDragCheck]) {
+          const fails = await r.page.evaluate(check);
+          if (fails.length) return fails;
+        }
+        return [];
+      })));
   // Edit mode: a rectangle drawn on empty space picks tiles, picked tiles move together (the user, 2026-10-22).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

@@ -384,7 +384,9 @@ class ShellBridge(
                     .put("kind", "android")
                     .put("work", app.work)
                     .put("clone", app.clone)
-                    .put("system", app.system),
+                    .put("system", app.system)
+                    // The app library's folders (shell/ui/library.ts): Android's own category, when the app says one.
+                    .putOpt("category", app.category.takeIf { it >= 0 }),
             )
         }
         for (app in runtime.linuxApps) {
@@ -393,7 +395,8 @@ class ShellBridge(
                     .put("key", "l:${app.id}")
                     .put("label", app.name)
                     .put("icon", icon("l:${app.id}"))
-                    .put("kind", "linux"),
+                    .put("kind", "linux")
+                    .putOpt("categories", app.categories),
             )
         }
         return list

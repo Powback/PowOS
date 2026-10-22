@@ -75,10 +75,13 @@ export function FolderFace({ item }: { item: HomeItem }) {
   );
 }
 
-type DragOut = (app: string, from: string, e: PointerEvent, grab: { x: number; y: number }) => void;
+export type DragOut = (app: string, from: string | undefined, e: PointerEvent, grab: { x: number; y: number }) => void;
 
-/** One app in the open folder: a tap opens it, a hold lifts it out (onDragOut). */
-function FolderApp({ a, from, onDragOut }: { a: { key: string; label: string; app: string }; from: string; onDragOut: DragOut }) {
+/**
+ * An app in a folder or the app library: a tap opens it (then [onLeave]), a hold lifts it out to put on home (onHold;
+ * [onLift] first - a popover closes). Lifted, the finger is the carry's: no scroll of the list it was in.
+ */
+export function AppPress({ a, from, onHold, onLeave, onLift, small }: { a: { key: string; label: string; app: string }; from?: string; onHold: DragOut; onLeave?: () => void; onLift?: () => void; small?: boolean }) {
   const press = useRef<{ x: number; y: number; timer: number; long: boolean } | null>(null);
   const app = byKey.value.get(a.app);
   const cancel = () => {
@@ -91,29 +94,33 @@ function FolderApp({ a, from, onDragOut }: { a: { key: string; label: string; ap
       data-key={a.key}
       onPointerDown={(e) => {
         if (e.button) return;
+        e.stopPropagation();
         const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const p = { x: e.clientX, y: e.clientY, timer: 0, long: false };
         p.timer = window.setTimeout(() => {
           p.long = true;
           navigator.vibrate?.(10);
-          folder.value = null;
-          onDragOut(a.app, from, e, { x: e.clientX - r.left, y: e.clientY - r.top });
+          onLift?.();
+          onHold(a.app, from, e, { x: e.clientX - r.left, y: e.clientY - r.top });
         }, HOLD_MS);
         press.current = p;
       }}
       onPointerMove={(e) => press.current && !press.current.long && Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y) > SLOP && cancel()}
-      onPointerUp={() => {
+      onPointerUp={(e) => {
         const p = press.current;
         cancel();
         if (!p || p.long) return;
-        folder.value = null;
+        e.stopPropagation();
+        onLeave?.();
         launch(a.app);
       }}
+      onTouchMove={(e) => press.current?.long && e.cancelable && e.preventDefault()}
+      onClick={(e) => e.stopPropagation()}
       onPointerCancel={cancel}
     >
       <div class="tile-app">
         {app ? <AppIcon src={app.icon} label={a.label} /> : <div class="app-icon initials">{a.label[0]}</div>}
-        <div class="app-label">{a.label}</div>
+        {!small && <div class="app-label">{a.label}</div>}
       </div>
     </div>
   );
@@ -138,7 +145,7 @@ export function FolderPanel({ onDragOut }: { onDragOut: DragOut }) {
         />
         <div class="folder-apps">
           {f.apps!.map((a) => (
-            <FolderApp key={a.key} a={a} from={f.key} onDragOut={onDragOut} />
+            <AppPress key={a.key} a={a} from={f.key} onHold={onDragOut} onLeave={() => (folder.value = null)} onLift={() => (folder.value = null)} />
           ))}
         </div>
       </div>

@@ -19,7 +19,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
-import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
@@ -410,8 +410,8 @@ function panelSwipe(gs: Gesture, dx: number, dy: number) {
 /** Home itself: up and down the drawer (or the shade), sideways the pages. */
 function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
   const vertical = Math.abs(dy) > Math.abs(dx);
-  // PowOS AI's page: up and down are its own (it scrolls).
-  if (vertical && page.value === -1) return null;
+  // PowOS AI's page and the app library: up and down are their own (they scroll).
+  if (vertical && (page.value === -1 || onLibrary())) return null;
   if (vertical) return claimVertical(gs, dy);
   return !gs.open && !gs.inStrip ? "pages" : null;
 }
@@ -459,7 +459,7 @@ function dragTo(gs: Gesture, dx: number, dy: number) {
 
 /** The pages under the finger: past the first and last page they resist. */
 function pageOffset(dx: number) {
-  const last = pages.value.length - 1;
+  const last = pageCount.value - 1;
   const edge = (page.value === -1 && dx > 0) || (page.value === last && dx < 0);
   return edge ? dx / 3 : dx;
 }
@@ -533,7 +533,7 @@ function settlePages(v: number) {
   const width = document.querySelector(".pages")?.clientWidth || innerWidth;
   const step = v < -FLICK || dx < -width / 4 ? 1 : v > FLICK || dx > width / 4 ? -1 : 0;
   // -1: PowOS AI's page, left of the first (not while editing home: the empty page is to the right).
-  page.value = Math.max(editing.value ? 0 : -1, Math.min(pages.value.length - 1, page.value + step));
+  page.value = Math.max(editing.value ? 0 : -1, Math.min(pageCount.value - 1, page.value + step));
 }
 
 /** Handlers for home's root element. */

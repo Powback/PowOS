@@ -21,6 +21,7 @@ import { byKey, carry, dockAim, editing, folder, home, launch, page, pages, sele
 import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen, held } from "./gesture.ts";
+import { LibraryPage } from "./library.tsx";
 import { FolderFace, FolderPanel, folderable, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
 import { OwlWidget } from "./owl.tsx";
@@ -150,8 +151,14 @@ async function dropFromFolder(c: Carry, target: Aim | null) {
 
 /** Where a drop at the finger would go: a free cell at the carried size, or an app or folder to group with. */
 function aim(c: Carry): Aim | null {
-  const g = geometry.value;
   const n = pages.value[page.value];
+  // The app library (the page after the last): nothing lands there.
+  return n == null ? null : aimOn(c, n);
+}
+
+/** [aim] on home page [n]. */
+function aimOn(c: Carry, n: number): Aim | null {
+  const g = geometry.value;
   const size = c.item?.resizable ? { w: c.item.cell!.w, h: c.item.cell!.h } : { w: 1, h: 1 };
   const others = itemsOn(n).filter((i) => i.key !== c.item?.key);
   const app = !c.item || c.item.kind === "app";
@@ -167,7 +174,7 @@ function aim(c: Carry): Aim | null {
 function partyAim(c: Carry): { party: HomeItem[]; cells: Map<string, Cell> | null; page: number } | null {
   const n = pages.value[page.value];
   const party = partyOf(c.item, itemsOn(c.item?.page ?? n));
-  if (!party) return null;
+  if (!party || n == null) return null;
   const g = geometry.value;
   const lead = c.item!;
   const x = Math.round((c.x - c.grab.x - g.pad) / g.cellW);
@@ -895,6 +902,8 @@ function marqueeFrom(p: EmptyPress, e: PointerEvent) {
   if (!editing.value || !(dwelt || Math.abs(e.clientY - p.y) > Math.abs(e.clientX - p.x))) return;
   const g = geometry.value;
   const n = pages.value[page.value];
+  // The app library has no tiles to pick.
+  if (n == null) return;
   startMarquee(e, p, { origin: { left: g.left, top: g.top }, items: () => itemsOn(n), boxOf: (i) => box(shown(i)) });
 }
 
@@ -990,7 +999,8 @@ export function Pages() {
   // Also each render: a page's glass layer just mounted takes the track's place at once.
   useEffect(() => applyTrack());
   const list = pages.value;
-  if (page.value >= list.length) page.value = list.length - 1;
+  // The app library is the page after them (ui/library.tsx).
+  if (page.value > list.length) page.value = list.length;
   // Widgets on the page on screen (and beside it) run their sources; the rest pause.
   useEffect(() => void powos.widgets.page(list[page.value] ?? 1), [page.value, list.join()]);
   return (
@@ -1015,6 +1025,7 @@ export function Pages() {
             })(itemsOn(n))}
           </div>
         ))}
+        <LibraryPage here={page.value === list.length} onHold={(app, from, e, grab) => startCarry({ app, fromFolder: from }, e, grab)} />
       </div>
       <Preview />
       <Marquee />

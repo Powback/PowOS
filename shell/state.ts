@@ -70,6 +70,9 @@ export const pages = computed(() => {
   const used = home.value.pages.length ? home.value.pages : [1];
   return carry.value || editing.value ? [...used, Math.max(...used) + 1] : used;
 });
+/** Home's pages on screen, the app library after them (ui/library.tsx): page.value === pages.value.length is it. */
+export const pageCount = computed(() => pages.value.length + 1);
+export const onLibrary = () => page.value === pages.value.length;
 /** A widget's screen open over home (its onTap's screen()); Back closes it first. */
 export const screen = signal<WidgetScreen>({ key: null });
 powos.on("widget.screen", (s: WidgetScreen) => (screen.value = s));

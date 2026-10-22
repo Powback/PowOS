@@ -14,6 +14,10 @@ export interface App {
   work?: boolean;
   clone?: boolean;
   system?: boolean;
+  /** Android: ApplicationInfo.category (0 game ... 8 accessibility), when the app says one (the app library's folders). */
+  category?: number | null;
+  /** Linux: its .desktop Categories ("Network;WebBrowser;"). */
+  categories?: string | null;
 }
 
 /** CSS px; [keyboard] is the soft keyboard's height (0 while it's down). */

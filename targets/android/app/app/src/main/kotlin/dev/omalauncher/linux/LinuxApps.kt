@@ -12,6 +12,8 @@ data class LinuxApp(
     val wmClass: String?,
     /** Icon= value: a theme icon name or an absolute guest path. */
     val icon: String? = null,
+    /** Categories= value ("Network;WebBrowser;"): the shell's app library sorts by it. */
+    val categories: String? = null,
 )
 
 /** Whether a window with Wayland [appId] belongs to this app: by desktop id, StartupWMClass, or reverse-DNS tail. */
@@ -49,7 +51,7 @@ fun loadPowosApps(dir: File): List<LinuxApp> {
         val f = line.split('\t')
         if (f.size < 4 || f[0].isEmpty() || f[2].isEmpty()) return@mapNotNull null
         val icon = File(icons, "${f[0]}.png").takeIf { it.isFile }?.path
-        LinuxApp(f[1], f[2], f[3] == "1", f[0], f.getOrNull(4)?.ifEmpty { null }, icon)
+        LinuxApp(f[1], f[2], f[3] == "1", f[0], f.getOrNull(4)?.ifEmpty { null }, icon, f.getOrNull(5)?.ifEmpty { null })
     }
 }
 
@@ -69,7 +71,7 @@ private fun parseDesktopEntry(file: File): LinuxApp? {
     if (fields["NoDisplay"] == "true" || fields["Hidden"] == "true") return null
     val name = fields["Name"] ?: return null
     val exec = fields["Exec"]?.replace(FIELD_CODE, "")?.trim() ?: return null
-    return LinuxApp(name, exec, fields["Terminal"] == "true", file.nameWithoutExtension, fields["StartupWMClass"], fields["Icon"])
+    return LinuxApp(name, exec, fields["Terminal"] == "true", file.nameWithoutExtension, fields["StartupWMClass"], fields["Icon"], fields["Categories"])
 }
 
 private val ICON_SIZES = listOf("256x256", "192x192", "128x128", "96x96", "72x72", "64x64", "48x48")
