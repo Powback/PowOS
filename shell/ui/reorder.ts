@@ -98,6 +98,20 @@ export function useReorder(
     follow();
   }, [order.join()]);
 
+  // Gone while something was lifted (the panel shut mid-drag): no copy left behind, no faint item, no timer.
+  useLayoutEffect(
+    () => () => {
+      const p = press.current;
+      if (!p) return;
+      clearTimeout(p.timer);
+      p.ghost?.remove();
+      item(p.key)?.classList.remove("lifted");
+      if (p.lifted) opts.onLand?.();
+      press.current = null;
+    },
+    [],
+  );
+
   const lift = (p: Press) => {
     const el = item(p.key);
     if (!el) return;
@@ -124,15 +138,23 @@ export function useReorder(
     setLive([...order]);
   };
 
-  const end = () => {
+  /** Let go ([cancel]: the system took the pointer, the panel went - the lift is dropped, the order as it was). */
+  const end = (cancel = false) => {
     const p = press.current;
     press.current = null;
     if (!p) return;
     clearTimeout(p.timer);
     if (!p.lifted) return;
-    swallow.current = true;
     p.ghost?.remove();
     item(p.key)?.classList.remove("lifted");
+    if (cancel) {
+      opts.onLand?.();
+      setLive(null);
+      return;
+    }
+    // The release's own click (if any) is swallowed; one that never comes doesn't eat a later tap.
+    swallow.current = true;
+    window.setTimeout(() => (swallow.current = false), 0);
     if (p.moved && live && live.join() !== keys.join()) {
       navigator.vibrate?.(10);
       done(live);
@@ -182,27 +204,32 @@ export function useReorder(
         return;
       }
       if (far) p.moved = true;
-      // The slot whose middle is nearest the finger is where it goes.
+      // The slot whose middle is nearest the finger is where it goes - measured from the laid-out boxes (rects, taken
+      // before each FLIP), not mid-ease, and only when it's nearer than the carried one's own slot by a tenth of an
+      // item: near a boundary it doesn't flip back and forth.
       const now = live ?? order;
+      const mid = (r: DOMRect) => Math.hypot(r.left + r.width / 2 - p.x, r.top + r.height / 2 - p.y);
       let best = -1;
       let dist = Infinity;
       now.forEach((k, i) => {
         if (k === p.key) return;
-        const r = item(k)?.getBoundingClientRect();
+        const r = rects.current.get(k);
         if (!r) return;
-        const dd = Math.hypot(r.left + r.width / 2 - p.x, r.top + r.height / 2 - p.y);
+        const dd = mid(r);
         if (dd < dist) ((dist = dd), (best = i));
       });
       const from = now.indexOf(p.key);
-      const r0 = best >= 0 ? item(now[best])?.getBoundingClientRect() : null;
-      if (best >= 0 && best !== from && r0 && dist < Math.max(r0.width, r0.height) * 0.6) {
+      const r0 = best >= 0 ? rects.current.get(now[best]) : undefined;
+      const own = rects.current.get(p.key);
+      const size = r0 ? Math.max(r0.width, r0.height) : 0;
+      if (best >= 0 && best !== from && r0 && dist < size * 0.6 && (!own || dist < mid(own) - size * 0.1)) {
         const next = now.filter((k) => k !== p.key);
         next.splice(best, 0, p.key);
         setLive(next);
       } else follow();
     },
-    onPointerUp: end,
-    onPointerCancel: end,
+    onPointerUp: () => end(),
+    onPointerCancel: () => end(true),
     // Carried: the page under it doesn't scroll (and so doesn't cancel the pointer).
     onTouchMove: (e: TouchEvent) => press.current?.lifted && e.cancelable && e.preventDefault(),
     // A lift's release isn't also a tap; in edit mode a tap on an item selects it, it doesn't switch or open.
