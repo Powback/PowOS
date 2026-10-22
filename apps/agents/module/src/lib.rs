@@ -130,6 +130,27 @@ pub struct Work {
     /// table migrates in place.
     #[default("")]
     project: String,
+    /// How far along: step [progress_done] of [progress_total] (0/0: no bar). `powos agents task set --progress 3/10`,
+    /// or counted from [steps]. These columns come last, with defaults, so the table migrates in place.
+    #[default(0u32)]
+    progress_done: u32,
+    #[default(0u32)]
+    progress_total: u32,
+    /// The current step, one line ("checking on device"); "" when none.
+    #[default("")]
+    step: String,
+    /// The steps in order, JSON `[{"text", "state": "done"|"current"|"next"}]` ("" = none): done ones are kept.
+    #[default("")]
+    steps: String,
+    /// Linked commits, JSON `[{"sha", "subject"}]`, oldest first ("" = none): `--commit`, or a commit mentioning the id.
+    #[default("")]
+    commits: String,
+    /// Review images (design-qa paths), JSON `["path", ...]` ("" = none).
+    #[default("")]
+    images: String,
+    /// The last activity on it (ms): any change, step or commit link. 0 on rows from before it (use `updated`).
+    #[default(0u64)]
+    activity: u64,
 }
 
 /// The unit registry's fleet view (lib/apps/powos-units, `powos units publish`): every unit on every host - what is
@@ -585,6 +606,13 @@ pub fn work_set(
                 created: o.created,
                 updated: now,
                 project: if project.is_empty() { o.project } else { cut(project, 64) },
+                progress_done: o.progress_done,
+                progress_total: o.progress_total,
+                step: o.step,
+                steps: o.steps,
+                commits: o.commits,
+                images: o.images,
+                activity: now,
             }
         }
         None => {
@@ -602,6 +630,13 @@ pub fn work_set(
                 created: now,
                 updated: now,
                 project: cut(project, 64),
+                progress_done: 0,
+                progress_total: 0,
+                step: String::new(),
+                steps: String::new(),
+                commits: String::new(),
+                images: String::new(),
+                activity: now,
             }
         }
     };
@@ -619,6 +654,101 @@ pub fn work_set(
             ctx.db.work().id().delete(id);
         }
     }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct StepIn {
+    text: String,
+    state: String,
+}
+
+#[derive(Deserialize)]
+struct CommitIn {
+    sha: String,
+    #[serde(default)]
+    subject: String,
+}
+
+const WORK_STEPS_MAX: usize = 100;
+const WORK_COMMITS_MAX: usize = 50;
+const WORK_IMAGES_MAX: usize = 20;
+
+/// A work item's progress, all of it at once (`powos agents task set --progress/--step/--plan/--commit/--image`: the
+/// CLI works out the step history from the row and writes the result). `steps`/`commits`/`images` are JSON arrays
+/// ("" = none), checked here and stored compact; the oldest past each cap go.
+#[spacetimedb::reducer]
+pub fn work_track(
+    ctx: &ReducerContext,
+    id: String,
+    progress_done: u32,
+    progress_total: u32,
+    step: String,
+    steps: String,
+    commits: String,
+    images: String,
+) -> Result<(), String> {
+    if ctx.db.reporter().identity().find(ctx.sender()).is_none() {
+        return Err("not a reporter".into());
+    }
+    let Some(o) = ctx.db.work().id().find(id.clone()) else {
+        return Err(format!("work_track: no work item '{id}'"));
+    };
+    if progress_done > progress_total {
+        return Err(format!("work_track: progress {progress_done}/{progress_total}"));
+    }
+    let one_line = |s: String, n: usize| cut(s.split_whitespace().collect::<Vec<_>>().join(" "), n);
+    let steps = if steps.trim().is_empty() {
+        String::new()
+    } else {
+        let mut v: Vec<StepIn> = serde_json::from_str(&steps).map_err(|e| format!("steps: {e}"))?;
+        if v.iter().any(|s| !["done", "current", "next"].contains(&s.state.as_str())) {
+            return Err("steps: a state is done|current|next".into());
+        }
+        if v.len() > WORK_STEPS_MAX {
+            v.drain(..v.len() - WORK_STEPS_MAX);
+        }
+        let out: Vec<serde_json::Value> =
+            v.into_iter().map(|s| serde_json::json!({"text": one_line(s.text, 200), "state": s.state})).collect();
+        serde_json::to_string(&out).map_err(|e| e.to_string())?
+    };
+    let commits = if commits.trim().is_empty() {
+        String::new()
+    } else {
+        let mut v: Vec<CommitIn> = serde_json::from_str(&commits).map_err(|e| format!("commits: {e}"))?;
+        if v.iter().any(|c| c.sha.is_empty() || !c.sha.chars().all(|ch| ch.is_ascii_hexdigit())) {
+            return Err("commits: a sha is hex".into());
+        }
+        if v.len() > WORK_COMMITS_MAX {
+            v.drain(..v.len() - WORK_COMMITS_MAX);
+        }
+        let out: Vec<serde_json::Value> =
+            v.into_iter().map(|c| serde_json::json!({"sha": cut(c.sha, 40), "subject": one_line(c.subject, 200)})).collect();
+        serde_json::to_string(&out).map_err(|e| e.to_string())?
+    };
+    let images = if images.trim().is_empty() {
+        String::new()
+    } else {
+        let mut v: Vec<String> = serde_json::from_str(&images).map_err(|e| format!("images: {e}"))?;
+        if v.len() > WORK_IMAGES_MAX {
+            v.drain(..v.len() - WORK_IMAGES_MAX);
+        }
+        let v: Vec<String> = v.into_iter().map(|p| cut(p, 300)).collect();
+        serde_json::to_string(&v).map_err(|e| e.to_string())?
+    };
+    let now = now_ms(ctx);
+    ctx.db.work().id().delete(id.clone());
+    ctx.db.work().insert(Work {
+        progress_done,
+        progress_total,
+        step: one_line(step, 200),
+        steps,
+        commits,
+        images,
+        activity: now,
+        updated: now,
+        ..o
+    });
     Ok(())
 }
 

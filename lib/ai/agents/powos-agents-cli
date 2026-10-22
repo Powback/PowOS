@@ -39,9 +39,22 @@ Usage:
                                    task with a very similar title - isn't added twice: its id is printed
                                    (use set to change it). No --project: inferred from owner and title.
   powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT] [--project P]
+                                   [--progress N/M] [--step TEXT] [--plan "a; b; c"] [--commit SHA]...
+                                   [--image PATH]...
                                    Change a task. <task>: its id, or words of its title (one match).
-  powos agents task done <task> [--note TEXT]
+  powos agents task done <task> [--note TEXT] [--commit SHA]...
                                    Mark it done (stays under "done recently" for a week).
+
+How far along (the page shows a bar, the steps done / now / next, the commits and when it last moved):
+  --progress N/M   step N of M (0/0 clears the bar). Without it, the count follows the steps (--plan/--step).
+  --step TEXT      what it's doing now, one line ("checking on device"). The step before it is kept as done;
+                   a planned step of that text becomes the current one.
+  --plan "a; b; c" the steps still to come, in order (replaces the planned ones; done ones are kept).
+  --commit SHA     link a commit (repeatable; its subject from the git repo you're in). Commits whose message
+                   mentions the task id (git log of the repo you're in, last 30 days) are linked by themselves
+                   on every add/set/done.
+  --image PATH     a review image for it (repeatable; e.g. /home/powos/design-qa/<file>.png).
+  task done marks the current step done and fills the bar.
   powos agents task rm <task>      Remove one (a duplicate, a mistake).
   powos agents task list [--all] [--json] [--project P]
                                    The open tasks, by project (--all: with the done ones).
@@ -56,6 +69,8 @@ Reuse a project name that's on the board (task list shows them) rather than a ne
 Examples:
   powos agents task add "Switcher follows finger" --owner switcher --project "PowOS · phone UI"
   powos agents task set switcher --status waiting --note "needs a test on the phone"
+  powos agents task set switcher --plan "follow the finger; settle; test on device" --step "follow the finger"
+  powos agents task set switcher --step "test on device" --commit 3f2a9c1
   powos agents task done "follows finger" --note "landed in the 0.9 shell push"
 """
 
@@ -195,10 +210,12 @@ def ago(ms):
 
 
 def opts(argv, spec):
-    """--flag VALUE pairs (spec: allowed names; bool flags end in '!'), the rest positional."""
+    """--flag VALUE pairs (spec: allowed names; bool flags end in '!', repeatable ones in '*': a list), the rest
+    positional."""
     got, rest, i = {}, [], 0
     bools = {s[:-1] for s in spec if s.endswith("!")}
-    vals = {s for s in spec if not s.endswith("!")}
+    lists = {s[:-1] for s in spec if s.endswith("*")}
+    vals = {s for s in spec if not s.endswith("!") and not s.endswith("*")} | lists
     while i < len(argv):
         a = argv[i]
         if a.startswith("--"):
@@ -211,7 +228,10 @@ def opts(argv, spec):
                     if i >= len(argv):
                         die(f"--{k} needs a value")
                     v = argv[i]
-                got[k] = v
+                if k in lists:
+                    got.setdefault(k, []).append(v)
+                else:
+                    got[k] = v
             else:
                 die(f"unknown option --{k} (powos agents help)")
         else:
@@ -220,11 +240,148 @@ def opts(argv, spec):
     return got, rest
 
 
+TRACK = ["progress", "step", "plan", "commit*", "image*", "commits-json"]
+
+
+def _jl(s):
+    """A JSON-array column ("" = none) as a list."""
+    try:
+        v = json.loads(s) if s else []
+        return v if isinstance(v, list) else []
+    except ValueError:
+        return []
+
+
+def _line(s):
+    return " ".join(str(s).split())
+
+
+def progress_of(s):
+    m = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", s or "")
+    if not m or int(m.group(1)) > int(m.group(2)) or int(m.group(2)) > 100000:
+        die(f"--progress is N/M with N <= M (got {s!r})")
+    return int(m.group(1)), int(m.group(2))
+
+
+def track(w, progress=None, step=None, plan=None, commits=(), images=(), done=False):
+    """The work row [w]'s progress columns after this change: the step history kept (the current step done when the
+    next one starts), the count following the steps unless --progress set it. None when nothing changes."""
+    steps = [{"text": _line(x.get("text", "")), "state": x.get("state", "next")} for x in _jl(w.get("steps", ""))
+             if isinstance(x, dict) and _line(x.get("text", ""))]
+    pd, pt = int(w.get("progress_done") or 0), int(w.get("progress_total") or 0)
+    # The count was the steps' (or there was none): it keeps following them.
+    auto = pt == 0 or (pt == len(steps) and pd == sum(1 for x in steps if x["state"] == "done"))
+    cur = _line(w.get("step", ""))
+    if plan is not None:
+        texts = [_line(t) for t in re.split(r"[;\n]", plan) if _line(t)]
+        keep = [x for x in steps if x["state"] != "next"]
+        have = {x["text"] for x in keep}
+        steps = keep + [{"text": t, "state": "next"} for t in texts if t not in have]
+    if step is not None and _line(step) and _line(step) != cur:
+        step = _line(step)
+        steps = [dict(x, state="done") if x["state"] == "current" else x for x in steps]
+        nxt = [x for x in steps if x["state"] == "next" and x["text"] == step]
+        if nxt:
+            nxt[0]["state"] = "current"
+        else:
+            at = next((i for i, x in enumerate(steps) if x["state"] == "next"), len(steps))
+            steps.insert(at, {"text": step, "state": "current"})
+        cur = step
+    if done:
+        steps = [dict(x, state="done") if x["state"] == "current" else x for x in steps]
+        cur = ""
+    if progress is not None:
+        pd, pt = progress
+    elif auto and steps:
+        pd, pt = sum(1 for x in steps if x["state"] == "done"), len(steps)
+    if done and pt:
+        pd = pt
+    cs = [c for c in _jl(w.get("commits", "")) if isinstance(c, dict) and c.get("sha")]
+    for c in commits:
+        sha = c["sha"].lower()
+        if not any(sha.startswith(x["sha"]) or x["sha"].startswith(sha) for x in cs):
+            cs.append({"sha": sha, "subject": _line(c.get("subject", ""))})
+    ims = [p for p in _jl(w.get("images", "")) if isinstance(p, str)]
+    ims += [p for p in images if p not in ims]
+    new = {"progress_done": pd, "progress_total": pt, "step": cur,
+           "steps": json.dumps(steps, ensure_ascii=False, separators=(",", ":")) if steps else "",
+           "commits": json.dumps(cs, ensure_ascii=False, separators=(",", ":")) if cs else "",
+           "images": json.dumps(ims, ensure_ascii=False, separators=(",", ":")) if ims else ""}
+    old = {k: w.get(k) or ("" if k not in ("progress_done", "progress_total") else 0) for k in new}
+    old["progress_done"], old["progress_total"] = int(old["progress_done"]), int(old["progress_total"])
+    return None if new == old else new
+
+
+def git_commits(shas, mention=None, days=30):
+    """[{sha, subject}] of [shas] (subjects from the git repo the caller is in, "" outside one) plus, with [mention],
+    the commits of the last [days] days whose message contains it."""
+    out = []
+
+    def git(*a):
+        try:
+            r = subprocess.run(["git", *a], capture_output=True, text=True, timeout=10)
+            return r.stdout if r.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+    for sha in shas:
+        if not re.fullmatch(r"[0-9a-fA-F]{4,40}", sha):
+            die(f"--commit takes a commit sha (got {sha!r})")
+        got = git("log", "-1", "--format=%H%x1f%s", sha)
+        full, _, subject = (got or "").strip().partition("\x1f")
+        out.append({"sha": (full or sha)[:12].lower(), "subject": subject})
+    if mention and len(mention) >= 4 and git("rev-parse", "--git-dir") is not None:
+        log = git("log", f"--since={days}.days", "--fixed-strings", "-i", f"--grep={mention}", "--format=%H%x1f%s") or ""
+        for line in log.splitlines()[::-1]:
+            full, _, subject = line.partition("\x1f")
+            if full and not any(full.startswith(c["sha"]) for c in out):
+                out.append({"sha": full[:12], "subject": subject})
+    return out
+
+
+def resolve_commits(argv):
+    """Before anything else (the command may run on another host, the phone, where the caller's repo isn't): the
+    --commit SHAs resolved here, in the caller's git repo, plus the commits there that mention the task's id (when the
+    command names it by id, or add makes it), into one --commits-json. argv: after "task"."""
+    if not argv or argv[0] not in ("add", "set", "done"):
+        return argv
+    verb = argv[0]
+    o, rest = opts(argv[1:], ["owner", "status", "note", "title", "project", "id"] + TRACK)
+    wid = o.get("id") or (slug(" ".join(rest)) if verb == "add" else " ".join(rest))
+    mention = wid if re.fullmatch(r"[a-z0-9][a-z0-9._-]{3,63}", wid or "") else None
+    commits = (json.loads(o["commits-json"]) if o.get("commits-json") else []) + git_commits(o.get("commit") or [], mention)
+    if not commits:
+        return argv
+    out, i = [], 1
+    while i < len(argv):
+        if argv[i] in ("--commit", "--commits-json"):
+            i += 2
+            continue
+        if argv[i].startswith(("--commit=", "--commits-json=")):
+            i += 1
+            continue
+        out.append(argv[i])
+        i += 1
+    return [verb] + out + ["--commits-json", json.dumps(commits)]
+
+
+def apply_track(w, o, done=False):
+    """The row's progress after the options [o] (and, on add/set/done, the commits that mention its id)."""
+    commits = json.loads(o["commits-json"]) if o.get("commits-json") else []
+    # Run where the repo is (a phone-side run has none; the caller's side resolved them already): its id's mentions.
+    commits += git_commits([], mention=w["id"])
+    new = track(w, progress_of(o["progress"]) if o.get("progress") else None, o.get("step"), o.get("plan"),
+                commits, o.get("image") or [], done=done)
+    if new:
+        call("work_track", w["id"], new["progress_done"], new["progress_total"], new["step"], new["steps"],
+             new["commits"], new["images"])
+
+
 def task(argv):
     verb = argv[0] if argv else "list"
     argv = argv[1:]
     if verb == "add":
-        o, rest = opts(argv, ["owner", "status", "note", "id", "project"])
+        o, rest = opts(argv, ["owner", "status", "note", "id", "project"] + TRACK)
         title = " ".join(rest).strip()
         if not title:
             die("usage: powos agents task add <title...> [--owner ROLE] [--status S] [--note TEXT]")
@@ -240,21 +397,27 @@ def task(argv):
         owner = o.get("owner", "")
         project = o.get("project") or infer_project(owner, wid, title)
         call("work_set", wid, title, owner, status_of(o.get("status")) or "working", o.get("note", ""), project)
+        w = next((w for w in rows() if w["id"] == wid), None)
+        if w:
+            apply_track(w, o)
         print(wid)
     elif verb == "set":
-        o, rest = opts(argv, ["owner", "status", "note", "title", "project"])
+        o, rest = opts(argv, ["owner", "status", "note", "title", "project"] + TRACK)
         if not rest:
             die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
         w = find(" ".join(rest))
-        call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), status_of(o.get("status")), o.get("note", ""),
+        st = status_of(o.get("status"))
+        call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), st, o.get("note", ""),
              o.get("project", ""))
+        apply_track(w, o, done=st == "done")
         print(w["id"])
     elif verb == "done":
-        o, rest = opts(argv, ["note"])
+        o, rest = opts(argv, ["note", "commit*", "image*", "commits-json"])
         if not rest:
             die("usage: powos agents task done <task> [--note TEXT]")
         w = find(" ".join(rest))
         call("work_set", w["id"], "", "", "done", o.get("note", ""), "")
+        apply_track(w, o, done=True)
         print(w["id"])
     elif verb in ("rm", "remove", "drop"):
         if not argv:
@@ -286,7 +449,12 @@ def task(argv):
                 print(f"== {last or '(no project)'}")
             owner = w["owner"] or "-"
             note = f"  - {w['note']}" if w["note"] else ""
-            print(f"{w['status']:<8} {w['title']}  ({owner}, {ago(w['updated'])})  [{w['id']}]{note}")
+            at = int(w.get("activity") or 0) or int(w["updated"])
+            bar = f" {w['progress_done']}/{w['progress_total']}" if int(w.get("progress_total") or 0) else ""
+            step = f" · {w['step']}" if w.get("step") else ""
+            print(f"{w['status']:<8} {w['title']}{bar}{step}  ({owner}, {ago(at)})  [{w['id']}]{note}")
+            for c in _jl(w.get("commits", "")):
+                print(f"           {c.get('sha', '')[:9]} {c.get('subject', '')}")
     else:
         die(f"unknown: task {verb} (powos agents help)")
 
@@ -317,6 +485,7 @@ def main(argv):
         if len(argv) > 1 and argv[1] in ("help", "--help", "-h"):
             print(HELP, end="")
             return 0
+        argv = argv[:1] + resolve_commits(argv[1:])
         try:
             task(argv[1:])
         except Down as e:
