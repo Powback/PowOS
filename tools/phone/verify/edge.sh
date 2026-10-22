@@ -57,7 +57,7 @@ if [ "$what" = home ] || [ "$what" = all ]; then
   echo "home page: $("$here/cdp.sh" eval "" "JSON.stringify({notifPanel: document.querySelectorAll('.notif-panel').length})")"
 fi
 if [ "$what" = edge ] || [ "$what" = all ]; then
-  run edge "$(drag $((W-3)) $((H*75/100)) -$((W*3/100)) -$((H*13/1000))); sleep 1; input tap $((W/5)) $((H*20/100)); sleep 1; echo '-- tapped outside:'; $win"
+  run edge "$(drag $((W-3)) $((H*75/100)) -$((W*3/100)) -$((W*3/100*85/100))); sleep 1; input tap $((W/5)) $((H*20/100)); sleep 1; echo '-- tapped outside:'; $win"
 fi
 if [ "$what" = shade ] || [ "$what" = all ]; then
   "$A" shell am start -n com.android.settings/.Settings >/dev/null 2>&1; sleep 2
