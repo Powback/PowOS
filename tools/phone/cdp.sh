@@ -7,4 +7,4 @@ here=$(cd "$(dirname "$0")" && pwd)
 pid=$("$here/adb.sh" shell pidof com.powos.app | tr -d '\r' | awk '{print $1}')
 [ -n "$pid" ] || { echo "com.powos.app isn't running" >&2; exit 1; }
 "$here/adb.sh" forward tcp:9333 "localabstract:webview_devtools_remote_$pid" >/dev/null
-exec docker run --rm -i --network container:powos-vadb -v "$here:/t:ro" oven/bun:1 bun /t/cdp.ts "$@"
+exec docker run --rm -i -e CDP_TIMEOUT_S --network container:powos-vadb -v "$here:/t:ro" oven/bun:1 bun /t/cdp.ts "$@"
