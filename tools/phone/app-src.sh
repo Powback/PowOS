@@ -45,4 +45,11 @@ adb shell "su -c 'set -e; o=\$(stat -c %u:%g $P); cd $tmp; for f in $*; do mkdir
   cp .inst.sh /data/powos/root/tmp/app-src-$$.sh; chmod 755 /data/powos/root/tmp/app-src-$$.sh;
   sh /data/powos/powos-run.sh \"bash /tmp/app-src-$$.sh\"; rm -f /data/powos/root/tmp/app-src-$$.sh; rm -rf $tmp'"
 for f in "$@"; do (cd "$D" && md5 -r "$f" 2>/dev/null || md5sum "$f"); done | sed 's/^/local /'
-adb shell "su -c 'cd $P && md5sum $*'" | tr -d '\r' | sed 's/^/phone /'
+after=$(adb shell "su -c 'cd $P && md5sum $*'" | tr -d '\r')
+echo "$after" | sed 's/^/phone /'
+# What the phone has now is this push's: a second push of the same files isn't "changed on the phone since the pull".
+for f in "$@"; do
+  sum=$(echo "$after" | grep "  $f\$" | cut -d' ' -f1 || true)
+  [ -n "$sum" ] || continue
+  { grep -v "  \./$f\$" "$D/.phone.md5" 2>/dev/null || true; echo "$sum  ./$f"; } > "$D/.phone.md5.new" && mv "$D/.phone.md5.new" "$D/.phone.md5"
+done
