@@ -11,7 +11,9 @@ if [ -n "${BF_ADB:-}" ]; then
     echo "-- $(date +%T) $1"; }
   return 0
 fi
-APP=274190 GLOG=/run/powos-app/powos-sleep-gui.log
+# APP / GAME / WIN_NAME: the game under test (default Broforce); td-launch-phone.sh sets Teardown's before sourcing.
+APP=${APP:-274190} GAME=${GAME:-Broforce} WIN_NAME=${WIN_NAME:-Broforce} GLOG=/run/powos-app/powos-sleep-gui.log
+export APP
 RESUME_MS=${RESUME_MS:-3000}  # resume -> the game's first new frame, at most
 LAUNCH_S=${LAUNCH_S:-360}     # a cold start's window (Steam + Proton under FEX), at most
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/powos-app} DISPLAY=${DISPLAY:-:0}
@@ -23,7 +25,7 @@ now() { date +%s.%N; }
 ms() { awk -v a="$1" -v b="$2" 'BEGIN {printf "%d", (b - a) * 1000}'; }
 irq() { awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}' /proc/interrupts; }
 I0=$(irq)
-close_mine() { ${ON_CLOSE:-:}; [ $mine = 1 ] && { pill "closing Broforce (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | head -1; mine=0; }; rm -rf "$T" /tmp/powos-verify-step; }
+close_mine() { ${ON_CLOSE:-:}; [ $mine = 1 ] && { pill "closing $GAME (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | head -1; mine=0; }; rm -rf "$T" /tmp/powos-verify-step; }
 touched() { [ "$(irq)" != "$I0" ] || return 1; echo "user input $(date +%T) - stopping"; close_mine; exit 3; }
 trap 'echo "stopped from outside $(date +%T)"; close_mine; exit 3' HUP TERM INT
 fail() { echo "FAIL $1: $2"; FAILS="$FAILS $1"; }
@@ -59,7 +61,7 @@ reapers() { pgrep -f "SteamLaunch AppId=$APP( |\$)"; }
 reaper() { local p; for p in $(reapers); do under "$p" "$(steam_pid)" && { echo "$p"; return; }; done; }  # Steam's own
 tree() { local t=("$1") o=() p; while ((${#t[@]})); do p=${t[0]}; t=("${t[@]:1}"); [ -n "$p" ] && o+=("$p") && t+=($(pgrep -P "$p")); done; echo "${o[*]}"; }
 ticks() { local n=0 p f; for p in "$@"; do f=$(cat "/proc/$p/stat" 2>/dev/null) || continue; f=${f##*) }; set -- $f; n=$((n + ${12} + ${13})); done; echo "$n"; }
-gamewin() { xwininfo -root -tree 2>/dev/null | awk '/"Broforce"/ && !/has no name/ {print $1; exit}'; }
+gamewin() { xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" 'index($0, n) && !/has no name/ {print $1; exit}'; }
 mapped() { xwininfo -id "$1" 2>/dev/null | awk '/Map State/ {print $3}'; }
 active() { printf '%d' "$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk '{print $NF}')" 2>/dev/null; }
 cg() { local c; c=$(cat "/proc/$(steam_pid)/cgroup" 2>/dev/null); case $c in *powos/sleep/*) echo "/sys/fs/cgroup${c#0::}" ;; esac; }
