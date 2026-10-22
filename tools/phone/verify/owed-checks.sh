@@ -6,17 +6,8 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"; ROOT=$(cd "$T/../.." && pwd)
 OUT=${OUT:-$HOME/.cache/powos-verify/owed-$(date +%m%d-%H%M)}; L=$HOME/.cache/powos-verify.lock; mkdir -p "$OUT"
-# The verify lock is local (no phone traffic): when another check holds it, wait for it (up to 5 min) and then for
-# the next free window again - at most 4 rounds.
-got=""
-for round in 1 2 3 4; do
-  s=$(AWAKE_ONLY=1 "$T/idle.sh" --wait 120 "${1:-10800}") || { echo "no free window: $s"; exit 4; }
-  for k in $(seq 30); do mkdir "$L" 2>/dev/null && { got=1; break; }; sleep 10; done
-  [ -n "$got" ] && break
-  echo "verify lock busy ($(cat "$L/who" 2>/dev/null)) - waiting for the next window"
-done
-[ -n "$got" ] || exit 4
-echo "powos-verify: owed screen checks $(date +%T), ~30 s" > "$L/who"; trap 'rm -rf "$L"' EXIT
+# A free window, then the verify lock (window-lock.sh; under queue.sh, LOCK_HELD=1: the runner holds both already).
+. "$here/window-lock.sh"; window_lock owed-checks 120 "${1:-10800}"
 # The Lights room's name on home's first page, in device pixels (read only).
 pos=$("$T/cdp.sh" eval home 'JSON.stringify((()=>{const e=[...document.querySelectorAll(".island-face *")].find(n=>n.children.length==0&&/room/i.test(n.textContent));if(!e)return [0,0];const r=e.getBoundingClientRect();if(r.y<0||r.y>innerHeight)return [0,0];return [Math.round((r.x+Math.min(r.width,60)/2)*devicePixelRatio),Math.round((r.y+r.height/2)*devicePixelRatio)]})())' 2>/dev/null | tr -dc '0-9,' | tr ',' ' ')
 echo "lights at: ${pos:-none}"

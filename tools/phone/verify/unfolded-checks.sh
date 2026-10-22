@@ -17,14 +17,10 @@ irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /p
 restore() {
   echo "== restore"
   sh_ "input keyevent 4; input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"
-  rm -rf "$L"
 }
-# One wait for a free screen-on window (never wakes it; AWAKE_ONLY), then the verify lock (shared with the others'
-# checks: held only for this injected run).
-w=$(AWAKE_ONLY=1 "$T/idle.sh" --wait 120 "${MAX_WAIT:-10800}") || { echo "no free window: $w"; exit 4; }
-for k in $(seq 30); do mkdir "$L" 2>/dev/null && break; sleep 10; done
-[ -d "$L" ] || { echo "verify lock busy: $(cat "$L/who" 2>/dev/null)"; exit 4; }
-echo "powos-verify: unfolded checks (inner screen forced) $(date +%T), ~2 min" > "$L/who"; trap restore EXIT
+# A free window, then the verify lock (window-lock.sh; under queue.sh, LOCK_HELD=1: the runner holds both already).
+. "$here/window-lock.sh"; window_lock unfolded-checks 120 "${MAX_WAIT:-10800}"
+trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
 shot() { "$T/shot.sh" "$OUT/$1.png" 2>&1 | tee -a "$OUT/log.txt"; }
@@ -71,7 +67,7 @@ set -- $(field assist); if [ "${1:-0}" -gt 0 ]; then
 else echo "no compose field found in the assist overlay"; fi
 sh_ "input keyevent 4"; sleep 0.8
 
-restore; trap - EXIT
+restore; trap - EXIT; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 attach() { local t=$1; shift; for f in "$@"; do [ -f "$OUT/$f" ] || continue
   "$T/review-image.sh" "$OUT/$f" >/dev/null && B task set "$t" --image "/home/powos/design-qa/$(basename "$f")" && echo "attached $f -> $t"; done; }
 for f in "$OUT"/*.png; do [ -f "$f" ] && mv "$f" "$OUT/unf-$(date +%H%M)-$(basename "$f")"; done
