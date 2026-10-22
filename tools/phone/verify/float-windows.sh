@@ -9,7 +9,9 @@
 # board task); then PowOS's frame (WindowFrame.kt): bar there, drag moves, grip resizes, maximise fills the area above
 # the bottom bar and again puts it back, minimise hides it, its app's launch brings it back, the dock's icon tap
 # minimises the window in front and brings it back, close closes; a full-screen task opened from recents (tasks.open)
-# comes back floating. Always restores: Calculator stopped, home,
+# comes back floating; a Linux app (qdbusviewer) opens as a floating task named by its app key in windows.list, a window
+# another app opens (kwrite started inside PowOS: KWin's export-new) floats too, their bars' close closes them.
+# Always restores: Calculator stopped, home,
 # `cmd device_state state reset` (the hinge decides again).
 # Exit: 0 all passed; 1 a step failed (FAIL: ...); 3 a real touch / no free window / screen not awake (re-queued);
 # 5 can't run (no screen size, keyguard with a PIN). Injected input only. A free window first, the lock only then (5a).
@@ -157,4 +159,40 @@ TID=$(sh_ "am stack list | grep -m1 $PKG" | grep -oE 'taskId=[0-9]+' | head -1 |
 r=$(hcall tasks.open "[$TID, null]" "v=>String(v)"); sleep 2; chk recents
 sh_ "dumpsys activity activities | grep -m1 -E \"Task\\{.*$PKG\" | grep -oE \"mode=[a-z-]+\"" | tee -a "$OUT/mode.txt" | grep -q mode=freeform &&
   pass "a full-screen task opened from recents floats" || fail "tasks.open ($r) left task $TID full screen"
+
+# A Linux app (KDE's D-Bus viewer: small, not one the user keeps open) opens as its own task (PowosWindowActivity,
+# WindowTasks) - floating too, with the frame, a dock entry by its app key and its bar's close closing it.
+LKEY=l:qdbusviewer
+lin() { sh_ "am stack list | grep PowosWindowActivity" | grep -oE 'taskId=[0-9]+' | tr -dc '0-9\n' | sort -n; }
+before=$(lin)
+r=$(hcall apps.launch "['$LKEY']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch $LKEY: $r"
+LT=""; for i in $(seq 1 20); do sleep 1; LT=$(comm -13 <(echo "$before") <(lin) | tail -1); [ -n "$LT" ] && break; done; chk linux
+[ -n "$LT" ] || fail "no task for $LKEY within 20 s (PowosWindowActivity)"
+sleep 1.5
+lmode=$(sh_ "dumpsys activity activities" | grep -m1 -E "Task\{[^ ]* #$LT " | grep -oE "mode=[a-z-]+")
+"$T/shot.sh" "$OUT/linux.png"
+[ "$lmode" = mode=freeform ] && pass "a Linux app opens as a floating window ($LKEY, task $LT)" || fail "$LKEY's task $LT is $lmode, not freeform"
+lw=$(hcall windows.list "[]" "l=>(l.find(w=>w.id===$LT)||{app:'none'}).app")
+[ "$lw" = "$LKEY" ] && pass "windows.list names its app ($lw): dock entry, dot, pages" || fail "windows.list has task $LT as app '$lw', not $LKEY"
+lb() { sh_ "am stack list | grep -E \"taskId=$LT:\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' '; }
+read -r LL LTOP LR LB <<<"$(lb)"
+# Opened from another app (as Dolphin opens an image in Gwenview): KDE's editor started inside PowOS, not from home -
+# KWin's export-new (kwin 0018) gives it a floating task too. An older KWin still running: said, not failed.
+printf '%s\n' 'nohup kwrite /tmp/powos-float-check.txt >/dev/null 2>&1 &' > "$OUT/kwrite.sh"
+before=$(lin); "$T/user.sh" "$OUT/kwrite.sh" >/dev/null 2>&1
+KT=""; for i in $(seq 1 15); do sleep 1; KT=$(comm -13 <(echo "$before") <(lin) | tail -1); [ -n "$KT" ] && break; done; chk child
+if [ -n "$KT" ]; then
+  kmode=$(sh_ "dumpsys activity activities" | grep -m1 -E "Task\{[^ ]* #$KT " | grep -oE "mode=[a-z-]+")
+  "$T/shot.sh" "$OUT/linux-child.png"
+  [ "$kmode" = mode=freeform ] && pass "a window another app opened floats too (task $KT)" || fail "the window another app opened is $kmode"
+  read -r KL KTOP KR KB <<<"$(sh_ "am stack list | grep -E \"taskId=$KT:\"" | grep -oE 'bounds=\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' | head -1 | tr -c '0-9\n' ' ')"
+  sh_ "input tap $((KR - $(px 19))) $((KTOP - $(px 13)))"; sleep 2; chk kclose
+  sh_ "am stack list | grep -cE \"taskId=$KT:\"" | grep -qx 0 && pass "its bar's close closes it" || fail "task $KT still open after its close"
+else
+  echo "SKIP: no task for a window another app opened in 15 s - KWin without export-new (0018) still running?" | tee -a "$OUT/log.txt"
+  printf '%s\n' 'pkill -f "kwrite /tmp/powos-float-check.txt"' > "$OUT/kwrite.sh"; "$T/user.sh" "$OUT/kwrite.sh" >/dev/null 2>&1
+fi
+# Its bar's close (19 dp from the right end, 13 dp above the window: the 26 dp bar's middle).
+sh_ "input tap $((LR - $(px 19))) $((LTOP - $(px 13)))"; sleep 2; chk lclose
+sh_ "am stack list | grep -cE \"taskId=$LT:\"" | grep -qx 0 && pass "its bar's close closes the Linux window's task" || fail "task $LT still open after its close"
 echo "all passed; artefacts: $OUT"
