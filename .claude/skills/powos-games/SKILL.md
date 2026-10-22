@@ -33,6 +33,8 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - `bf-run.sh` (~10 min, memory + SF pacing + KGSL stats): `queue.sh add <board-task> bf-run.sh`, don't wait.
 - Grab Xwayland's copy of the window (independent of what's on screen): `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`.
 - Corruption metric (half-drawn frames): isolated dark pixels, `c<30 && min4neighbours > c+50` (old kernel: ~57%).
+- Render bisect: `bf-checker.sh [variant]...` (~4 min each; TU_DEBUG via Proton user_settings.py, or dxvk.conf): 75 s of
+  loading+menu, X copy + screencaps -> black-checker score (bf-checker.py), menu fps, DXVK log (DXVK_LOG_PATH).
 - Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]` `Screenmanager Resolution Width/Height`, `Is Fullscreen mode`.
 - Steam login: a session crash can set `loginusers.vdf` AutoLogin 0 ("Service Unavailable") -> 1 with Steam off.
 
@@ -59,7 +61,6 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   /usr/lib/powos/game.sh is the facade on the phone.
 - Measure: `queue.sh add <task> bf-resume.sh` (cold vs thawed start to first new frame via x11grab framemd5, Steam
   tree CPU awake-hidden vs frozen, X/KWin latency while frozen, Steam connection_log after a 90 s freeze).
-  Open: whether wine's X windows report a host pid (_NET_WM_PID) - the watcher log shows if game windows map to Steam.
 
 ## Causes found (don't re-investigate)
 - Session killed while gaming: Xwayland dma-buf leak via KGSL forced commits (fixed c8ab446, xwayland-kgsl 0007).
@@ -95,6 +96,5 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 
 ## Xwayland package
 - `targets/android/build-pkgs.sh xwayland-kgsl` (BUILD_ON_ROOTFS: needs targets/android/out/powos-rootfs.tar.gz).
-  Install: copy the .pkg.tar.xz into PowOS, `pacman -U` (root.sh); takes effect at the next session start.
-  Smoke test without restarting the session: run the extracted binary as `:7 -rootless` in the session.
+  Install: .pkg.tar.xz into PowOS, `pacman -U` (root.sh); next session start. Smoke test: the binary as `:7 -rootless`.
 - Patches 0001-0004 lfdevs (Andromarchy pin), 0005/0006 Present hangs, 0007 leak, 0008 fence wait. HACK in 0007 (registry).
