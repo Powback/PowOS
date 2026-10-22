@@ -611,6 +611,34 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .home-tile.joined[style*="--jt: 0"] > .tile { box-shadow: var(--lift-edge); }
 .group-shadow { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 
+/*
+ * A PowOS app island's network failure, shared by every app (host.net.error's message): one calm muted line - on a
+ * narrow tile it breaks between words ("Hue bridge / offline"), never mid-word or cut - sized to the tile's width; a
+ * tap retries (host.net.useRetry), a long press shows the raw detail (the log has it too). .alone: nothing else to
+ * show - it takes the tile's free space, centred, a little bigger, the app's icon (.island-offline-icon) greyed above.
+ */
+.island-offline {
+  container-type: inline-size; display: flex; align-items: center; gap: 0.45em; flex: none; align-self: stretch; min-width: 0;
+  color: var(--color-muted); background: none; border: 0; padding: 0; font: inherit; text-align: start; cursor: pointer;
+}
+.island-offline > span {
+  min-width: 0; overflow-wrap: normal; word-break: keep-all; text-wrap: balance; line-height: 1.25;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  font-size: clamp(11px, 6.5cqw, 13px);
+}
+.island-offline::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+.island-offline.alone { container-type: size; flex: 1; flex-direction: column; justify-content: center; gap: 4px; }
+.island-offline.alone::before { display: none; }
+.island-offline.alone > span { font-size: clamp(11px, min(8cqw, 15cqh), 30px); text-align: center; }
+/* The app's own icon, greyed, above the line: what's offline at a glance (the line alone left a tile mostly blank). */
+.island-offline-icon { flex: none; width: min(50cqh, 38cqw); height: min(50cqh, 38cqw); max-width: none; max-height: none; opacity: 0.35; filter: grayscale(1); }
+/* A one-row phone tile: no room for the icon over two lines - the line alone, as big as the height allows. */
+@container (max-height: 70px) {
+  .island-offline-icon { display: none; }
+  .island-offline.alone > span { font-size: clamp(11px, min(7.5cqw, 30cqh), 20px); }
+}
+.island-stale { opacity: 0.45; filter: saturate(0.4); pointer-events: none; }
+
 /* The recent apps as a home widget (ui/recentwidget.tsx): a row (or rows) of icons, --recent-n to a row. */
 
 .recents-face { height: 100%; display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
