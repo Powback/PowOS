@@ -7,11 +7,12 @@
  * Loaded into the home page (index.html, the mock bridge) after it's ready; home itself is hidden under the sheet.
  */
 import { render, type ComponentType } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../../bridge.ts";
 import { OwlWidget } from "../../ui/owl.tsx";
 import { host as realHost } from "../../apps/stdb.ts";
 import { net } from "../../apps/net.ts";
+import { WidgetSheet } from "../../ui/widgetsheet.tsx";
 import type { HomeItem } from "../../types.ts";
 
 declare function importShim(url: string): Promise<any>;
@@ -42,6 +43,12 @@ export interface Spec {
     net?: { match: string; status?: number; json?: unknown; error?: string }[];
     /** The app's localStorage before it mounts (e.g. what it cached from an earlier visit). */
     storage?: Record<string, string>;
+    /**
+     * A long press on [press] in the first [pressCell] tile ("4x2", folded), once it's up: the widget's detail sheet
+     * (ui/widgetsheet.tsx) shows in the contact sheet. Held, then a pointercancel - never a release, never a tap.
+     */
+    press?: string;
+    pressCell?: string;
   };
   /** panel agents: the mock's agents replaced (preview.mjs's nobody-running variants). */
   agents?: { role: string; state: "working" | "idle" | "needs_you" | "blocked" | "paused" | "gone"; title: string; step: string; report: string; ago: number }[];
@@ -111,10 +118,24 @@ function Island({ spec, cell }: { spec: Spec; cell: Cell }) {
       (e) => setErr(String(e?.message ?? e)),
     );
   }, []);
+  const face = useRef<HTMLDivElement>(null);
+  const pressHere = !!spec.data?.press && spec.cells.find((c) => `${c.cols}x${c.rows}` === (spec.data?.pressCell ?? "4x2")) === cell;
+  useEffect(() => {
+    if (!C || !pressHere) return;
+    const t = window.setTimeout(() => {
+      const el = face.current?.querySelector(spec.data!.press!);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const ev = (type: string) => new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 9, pointerType: "touch", isPrimary: true, clientX: r.left + 20, clientY: r.top + r.height / 2, buttons: type === "pointerdown" ? 1 : 0 });
+      el.dispatchEvent(ev("pointerdown"));
+      window.setTimeout(() => el.dispatchEvent(ev("pointercancel")), 700);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [C]);
   if (err) return <div class="tile widget-face"><div class="widget-error">{err}</div></div>;
   if (!C) return <div class="tile island-face" />;
   return (
-    <div class="tile island-face">
+    <div class="tile island-face" ref={face}>
       <C host={mockHost(spec)} app={spec.app} cells={[cell.cols, cell.rows]} base={`./_app/${spec.app}/`} />
     </div>
   );
@@ -206,7 +227,13 @@ export async function mount(spec: Spec, settleMs = 900) {
   const st = document.createElement("style");
   st.textContent = STYLE;
   document.head.append(st);
-  render(<Sheet spec={spec} />, root);
+  render(
+    <>
+      <Sheet spec={spec} />
+      <WidgetSheet />
+    </>,
+    root,
+  );
   await new Promise((r) => setTimeout(r, settleMs));
 }
 

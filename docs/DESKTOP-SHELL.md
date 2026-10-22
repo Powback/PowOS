@@ -1,5 +1,9 @@
 # The desktop shell: the phone's shell/ on Plasma
 
+> **Paused by the user, 2026-10-22.** The desktop is the PowOS home as it works unfolded / widescreen; this separate
+> Plasma host (powos-shell) is kept in the tree but disabled on the phone (`powos-desktop-shell disable`).
+
+
 Goal: one codebase for a widget or a PowOS app on the phone and on the desktop. The desktop runs the same `shell/`
 (theme tokens, glass, widgets, PowOS apps' islands, PowOS AI's chat, the pet) as a native Plasma surface, not a
 browser tab. It is added to Plasma and can be switched off; it replaces nothing. The research behind it, and the

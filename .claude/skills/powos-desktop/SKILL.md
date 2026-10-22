@@ -3,6 +3,9 @@ name: powos-desktop
 description: Use when building, fixing, testing or shipping the PowOS desktop shell - powos-shell (sources/powos-shell, the Qt/QtWebEngine/LayerShellQt host), its desktop bridge (shell/hosts/desktop.ts, layout.ts), the desktop home (mode=desktop, shell/ui/desktop.tsx/.css), on the phone's Plasma session or x86 Plasma.
 ---
 
+**Paused by the user, 2026-10-22:** no work on the separate Plasma desktop (powos-shell); the desktop is the PowOS
+home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the code stays.
+
 The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's rules: docs/AGENT-HANDBOOK.md.
 
 ## How it fits

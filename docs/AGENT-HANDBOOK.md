@@ -161,6 +161,16 @@ Git and process
   guesses on 2026-10-21: "Chromium drops opacity-0 tiles" shipped and was reverted; the one-column drawer was "almost
   certainly" the recents strip - it was a stale shell.css pushed from another tree). Otherwise
   write "likely" and say what would confirm it.
+- DELIVERY RULES (manager for the user, 2026-10-22 19:38 - they override slower habits below):
+  1. Time box: every task ships a VISIBLE improvement to the phone within 30 min of pickup, or its board task shows
+     blocked + the reason. Big things ship in slices.
+  2. Report only shipped results or blockers - no "X owns Y" acks, no status chatter.
+  3. APK changes: ship-apk at least every 30 min while anything is pending; a 2-min idle is enough (don't wait for
+     long windows). Shell pushes go out immediately, batched per minute.
+  4. Mock review only for brand-NEW screens; everything else ships, the manager reviews the device screencap after.
+  5. Device checks are automated (read-only CDP + a screencap in a free window) - never wait on the user for what a
+     script can check.
+  6. Idle? Pick the next unowned board task yourself (`powos agents task list`), set yourself on it, go.
 - Speed (manager, 2026-10-22): experts work IN PARALLEL - never wait behind another expert's task unless you touch
   the same files. Bug fixes (alignment, scrolling, clipping, errors) SHIP as soon as they're gated and checked on the
   device - send a screencap after, no mock review; only NEW designs (layouts, new UI) wait for the manager's mock OK.

@@ -2126,3 +2126,25 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .panel-body.together .cc.v3 + .notif-bar { margin-top: 6px; padding-top: 14px; border-top: var(--frame) solid var(--line); }
 /* One strong frost under it: what's behind can't be read (the compositor's blur in the shade's window; here too). */
 .notif-panel:has(.cc.v3) { backdrop-filter: blur(48px) saturate(1.1); -webkit-backdrop-filter: blur(48px) saturate(1.1); }
+
+/*
+ * The widget detail sheet (ui/widgetsheet.tsx, apps/sheet.ts): a frosted popover anchored to a widget - the menus'
+ * material (.tile.sheet.pop) - its scrim (no dim) taking the touches outside it. Its body scrolls only when it's longer.
+ */
+.wsheet-scrim { position: fixed; inset: 0; z-index: 40; }
+.wsheet {
+  position: fixed; display: flex; flex-direction: column; box-sizing: border-box; padding: 6px 14px 14px; overflow: hidden;
+  touch-action: none; transition: transform 160ms ease-out; animation: wsheet-in 160ms ease-out both;
+}
+@keyframes wsheet-in { from { opacity: 0; transform: scale(0.96); } }
+.wsheet-head { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 10px; flex: none; }
+.wsheet-grab { width: 36px; height: 4px; border-radius: 2px; background: var(--soft-fill); }
+.wsheet-title { font: var(--text-item) var(--font); font-weight: bold; color: var(--color-foreground); }
+.wsheet-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 14px; }
+.wsheet-body.scrolls { touch-action: pan-y; }
+/* A coloured slider in a sheet (an island's Range with a track: colour temperature, hue): the gradient is the scale. */
+.wsheet-body input[type="range"][data-track] { -webkit-appearance: none; appearance: none; height: 22px; border-radius: 11px; }
+.wsheet-body input[type="range"][data-track]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--color-foreground); box-shadow: var(--lift);
+}

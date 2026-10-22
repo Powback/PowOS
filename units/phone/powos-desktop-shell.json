@@ -3,7 +3,7 @@
   "name": "PowOS desktop home (powos-shell)",
   "kind": "system",
   "owner": "powos-desktop (sources/powos-shell, docs/DESKTOP-SHELL.md)",
-  "purpose": "The web shell's home (grid, widgets, PowOS AI's pill and chat, the pet) as a layer surface under every window of the phone's Plasma session, beside plasmashell. Starts with the Plasma session; powos-desktop-shell start|stop|status|enable|disable. Built on the phone from the repo by sources/powos-shell/dev/phone.sh build against the rootfs's own Qt/QtWebEngine/LayerShellQt (no packages installed).",
+  "purpose": "PAUSED by the user 2026-10-22 (autostart disabled with powos-desktop-shell disable, not running; code kept). The web shell's home (grid, widgets, PowOS AI's pill and chat, the pet) as a layer surface under every window of the phone's Plasma session, beside plasmashell. Starts with the Plasma session; powos-desktop-shell start|stop|status|enable|disable. Built on the phone from the repo by sources/powos-shell/dev/phone.sh build against the rootfs's own Qt/QtWebEngine/LayerShellQt (no packages installed).",
   "installedBy": "sources/powos-shell/dev/phone.sh build",
   "files": [
     "/usr/lib/powos/desktop-shell/",
@@ -32,5 +32,6 @@
     "cpuPct": 25,
     "pids": 64
   },
-  "remove": "powos-desktop-shell disable; rm -f /etc/xdg/autostart/powos-desktop-shell.desktop; rm -rf /usr/lib/powos/desktop-shell /usr/bin/powos-desktop-shell /usr/share/applications/org.powos.shell.desktop /var/tmp/powos-shell-src /var/tmp/powos-shell-build /home/powos/.local/share/powos-shell /home/powos/.cache/powos-shell /home/powos/.local/share/powos/net (host.net's pins and app secrets) (shell-data's desktop-* files are the desktop's layout and chat)"
+  "remove": "powos-desktop-shell disable; rm -f /etc/xdg/autostart/powos-desktop-shell.desktop; rm -rf /usr/lib/powos/desktop-shell /usr/bin/powos-desktop-shell /usr/share/applications/org.powos.shell.desktop /var/tmp/powos-shell-src /var/tmp/powos-shell-build /home/powos/.local/share/powos-shell /home/powos/.cache/powos-shell /home/powos/.local/share/powos/net (host.net's pins and app secrets) (shell-data's desktop-* files are the desktop's layout and chat)",
+  "status": "disabled"
 }

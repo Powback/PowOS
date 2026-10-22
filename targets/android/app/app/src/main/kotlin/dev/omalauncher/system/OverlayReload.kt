@@ -2,7 +2,6 @@ package dev.omalauncher.system
 
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
@@ -85,22 +84,26 @@ internal class OverlayReload(
         // The old page marked, so the old page's answer isn't taken for the new one's.
         w.evaluateJavascript("window.__overlayStale = true", null)
         w.reload()
-        val until = SystemClock.uptimeMillis() + RELOAD_MAX_MS
-        fun ask() {
-            if (mine != serial) return
-            w.evaluateJavascript("window.__powosAlive === true && !window.__overlayStale") { ok ->
-                if (mine != serial) return@evaluateJavascript
-                when {
-                    ok == "true" -> done(true)
-                    SystemClock.uptimeMillis() > until -> done(false)
-                    else -> main.postDelayed({ ask() }, POLL_MS)
+        // Asked every POLL_MS on its own clock: an evaluateJavascript asked while the page navigates never answers (its
+        // callback is dropped with the old page) - waiting on answers left all three windows up at alpha 0 for good
+        // (2026-10-22 19:09). And a hard deadline that ends it whatever answers.
+        val poll =
+            object : Runnable {
+                override fun run() {
+                    if (mine != serial || !reloading) return
+                    w.evaluateJavascript("window.__powosAlive === true && !window.__overlayStale") { ok ->
+                        if (mine == serial && reloading && ok == "true") done(true)
+                    }
+                    main.postDelayed(this, POLL_MS)
                 }
             }
-        }
-        main.postDelayed({ ask() }, POLL_MS)
+        main.postDelayed(poll, POLL_MS)
+        main.postDelayed({ if (mine == serial && reloading) done(false) }, RELOAD_MAX_MS)
     }
 
     private fun done(ok: Boolean) {
+        if (!reloading) return
+        serial++
         reloading = false
         val (v, p) = window() ?: return
         p.alpha = 1f

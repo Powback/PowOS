@@ -305,6 +305,8 @@ class ShellHost(
                 val file = File(File(context.cacheDir, "assist"), path.removePrefix("_assist/").substringAfterLast('/'))
                 return if (file.isFile) WebResourceResponse("image/jpeg", null, file.inputStream()).apply { responseHeaders = mapOf("Cache-Control" to "no-store") } else notFound()
             }
+            // A review image for PowOS AI's page (QaFiles: a bare name of design-qa's, never decoded, checked inside it).
+            if (path.startsWith("_qa/")) return qaImage(url.encodedPath.orEmpty().substringAfter("/_qa/"))
             // A recent task's last frame, for the switcher (on the WebView's loader thread: the snapshot is a binder call).
             if (path.startsWith("_task/")) {
                 val jpeg = path.removePrefix("_task/").toIntOrNull()?.let { dev.omalauncher.system.Tasks.snapshot(it) } ?: return notFound()
@@ -420,6 +422,23 @@ class ShellHost(
                 else -> null
             } ?: return notFound()
         return WebResourceResponse("font/ttf", null, stream).apply { responseHeaders = mapOf("Cache-Control" to "max-age=3600", "Access-Control-Allow-Origin" to ORIGIN) }
+    }
+
+    /** When the root shell last refreshed the cache's copy of design-qa (at most every few seconds). */
+    @Volatile private var qaSynced = 0L
+
+    private fun qaImage(raw: String): WebResourceResponse {
+        val type = if (raw.endsWith(".png")) "image/png" else "image/jpeg"
+        val serve = { f: File -> WebResourceResponse(type, null, f.inputStream()).apply { responseHeaders = mapOf("Cache-Control" to "no-store") } }
+        // Readable as it is (the app's domain may read PowOS's files): straight from the folder.
+        QaFiles.resolve(File(QaFiles.DIR), raw)?.let { f -> runCatching { f.inputStream().close() }.onSuccess { return serve(f) } }
+        val cache = File(context.cacheDir, "qa")
+        QaFiles.resolve(cache, raw)?.let { return serve(it) }
+        if (System.currentTimeMillis() - qaSynced > 5_000) {
+            qaSynced = System.currentTimeMillis()
+            runCatching { andro.marchy.RootShell.run(QaFiles.sync(cache), null, 20_000) }
+        }
+        return QaFiles.resolve(cache, raw)?.let(serve) ?: notFound()
     }
 
     private fun notFound() = WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)))

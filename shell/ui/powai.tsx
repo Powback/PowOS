@@ -251,7 +251,7 @@ function NeedsYou() {
 }
 
 /** A review image as the page can load it (ShellHost's _qa/: design-qa's files by name), else null. */
-const qaUrl = (path: string) => (/^\/home\/powos\/design-qa\/[^/]+\.(png|jpe?g)$/i.test(path) ? `/_qa/${encodeURIComponent(path.split("/").pop()!)}` : null);
+const qaUrl = (path: string) => (/^\/home\/powos\/design-qa\/[A-Za-z0-9._-]+\.(png|jpg)$/.test(path) && !path.includes("..") ? `/_qa/${encodeURIComponent(path.split("/").pop()!)}` : null);
 const fileName = (path: string) => path.split("/").pop() ?? path;
 
 /** A review image: its picture (a tap: full screen), or its name where the page can't load it (an older host). */
