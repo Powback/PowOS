@@ -33,6 +33,7 @@ import type {
 import { mockScreens } from "./screens-mock.ts";
 import { homeLayout } from "./hosts/layout.ts";
 import { desktop } from "./hosts/desktop.ts";
+import { wide } from "./hosts/wide.ts";
 
 type Handler = (data: any) => void;
 
@@ -1228,8 +1229,9 @@ function mockTerm(events: Events): Bridge["term"] {
 
 export const powos: Bridge =
   window.powos ??
-  // The desktop's host (powos-shell) has fewer areas natively; hosts/desktop.ts adds the ones kept in the page.
-  (window.PowosHost ? (window.PowosHost.name === "powos" ? desktop(native(window.PowosHost)) : native(window.PowosHost)) : mock());
+  // The desktop's host (powos-shell) has fewer areas natively; hosts/desktop.ts adds the ones kept in the page (its
+  // own desktop-wide grid). The phone's (and the mock): two of home's pages side by side when unfolded (hosts/wide.ts).
+  (window.PowosHost ? (window.PowosHost.name === "powos" ? desktop(native(window.PowosHost)) : wide(native(window.PowosHost))) : wide(mock()));
 
 /**
  * The mock's agents (as the design's §1.3 sketch): the manager on the phone, a coder on the Mac with two subagents,
