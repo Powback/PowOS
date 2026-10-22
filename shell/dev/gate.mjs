@@ -250,6 +250,53 @@ try {
       runs.push(open(browser, url, mode).then((r) => settle(r, () => window.__powosAlive === true || window.__powosBoot?.failed === true)));
     }
   }
+  // The pill (bar.tsx, grow.tsx): every empty pill on home is one --pill-height tall - the foot's, PowOS AI's compose,
+  // and the search widget at every size (one row, two rows, narrow), also after it was measured narrow and widened
+  // again (2026-10-22: a pill measured narrow kept that height - three rows of placeholder - once wide again).
+  if (process.env.SHELL_PAGES !== "0") {
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "pill").then(async (r) => {
+        await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        const out = await r.page
+          .evaluate(async () => {
+            const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+            const frames = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+            const { powos } = await importShim("./bridge.ts");
+            const cells = [{ x: 0, y: 3, w: 6, h: 1 }, { x: 0, y: 5, w: 6, h: 2 }, { x: 0, y: 1, w: 2, h: 1 }];
+            for (const c of cells) await Promise.race([powos.home.addPanel("search", 0, c), sleep(800)]).catch(() => {});
+            await sleep(600);
+            const token = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--pill-height"));
+            const where = (p) => (p.closest(".search-face") ? `the search widget (${p.closest(".home-tile")?.getBoundingClientRect().height | 0} px cell)` : p.closest(".ai-compose") ? "PowOS AI's compose" : p.closest(".home > .bar") ? "home's search" : "a pill");
+            const check = (when) => {
+              const bad = [];
+              for (const p of document.querySelectorAll(".pill")) {
+                const g = p.querySelector(".grow");
+                if (!g || g.value || !p.getClientRects().length) continue;
+                if (Math.abs(p.clientHeight - token) > 1) bad.push(`${where(p)} is ${p.clientHeight} px tall empty${when}, not --pill-height ${token} px`);
+              }
+              return bad;
+            };
+            const fails = check("");
+            if (!document.querySelector(".search-face .pill")) fails.push("no search widget mounted to check (powos.home.addPanel)");
+            // Measured while narrow (a fold, a relayout: the field measures as its text changes), then wide again.
+            const S = await importShim("./state.ts");
+            for (const p of document.querySelectorAll(".pill")) p.style.width = "1px";
+            await frames();
+            S.query.value = "x";
+            await frames();
+            S.query.value = "";
+            await frames();
+            for (const p of document.querySelectorAll(".pill")) p.style.width = "";
+            await frames();
+            await sleep(300);
+            return [...fails, ...check(" after it was measured narrow and widened again")];
+          })
+          .catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
+        r.problems.push(...out);
+        return { ...r, ready: true, ms: Date.now() - r.started };
+      }),
+    );
+  }
   // The pet (ui/pet.tsx): home with local.pet installed, driven through what the user does - shown, touched, each
   // state, a talk bubble, a deploy note, a move - so an error in its effects and timers (2026-10-21: a TDZ in the hop
   // timer's effect threw on every show) fails here; the plain home run never mounts it (the mock has no local.pet).

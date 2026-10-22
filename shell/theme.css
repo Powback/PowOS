@@ -112,6 +112,9 @@
   --letter-bar: 22px;
   /* The pill's space above the screen's foot (over the navigation bar's inset): home's search, the drawer's, PowOS AI's compose. */
   --pill-foot: 6px;
+  /* The pill's height, empty: one row of its field (home's search - in the foot or as a widget anywhere - the drawer's,
+     PowOS AI's compose, the assistant's). It grows only with typed lines, up to 3 (grow.tsx); never with its cell. */
+  --pill-height: 40px;
 }
 
 /*

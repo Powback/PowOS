@@ -209,7 +209,7 @@
   display: flex;
   align-items: flex-end;
   gap: var(--gap);
-  min-height: 40px;
+  min-height: var(--pill-height);
   padding: 0 4px 0 var(--edge);
   border-radius: 20px;
 }
