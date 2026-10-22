@@ -69,3 +69,33 @@ description: Use when working on PowOS's edge gestures (Good Lock-style handles,
 - Device: `tools/phone/verify/edge.sh [home|edge|corner|all]` (one AWAKE_ONLY idle wait, WAIT_S; goes home and checks
   it's in front; window states snapshotted mid-gesture via motionevents; recordings as root into $OUT), logcat tags PowosEdge,
   PowosCornerPull, PowosOverlay, PowosShade, PowosGestures; `dumpsys window windows | grep 'PowOS '` for the windows.
+
+## Lock, overlays and reloads (facts)
+- Never over a locked phone: `DeviceLock.locked(ctx)` (lock face up or KeyguardManager.isKeyguardLocked) gates the edge
+  handles, Quick Tools, the shade pull and the pull-up panels. SystemUI's state bits are NOT enough: the PowOS lock face
+  makes the keyguard OCCLUDED, not SHOWING. Handles re-check on SCREEN_OFF/ON/USER_PRESENT.
+- Shell push reloads of hidden overlay pages are the host's (`OverlayReload`, `ShellHost.filesGate`): reload at alpha 0
+  while hidden, defer while shown, poll with a hard 8 s deadline (an evaluateJavascript during navigation never answers).
+- The shade pull maps the finger as the page does (`PanelPull`: q = dy*1.5/--drop, open > 0.15 or a flick); ShadeHost
+  reads the page's `--drop` once per height.
+- Home has NO notification panel of its own: home.tsx sends `shade.homePull(on)`; the host's monitor takes a down-drag
+  on home within 250 ms of the finger-down.
+
+## Keyboard for PowOS (Linux) text fields - task keyboard-follows-powos-text-fields
+- Wayland: KWin patches 0010/0012 (targets/android/pkgs/kwin) send OUTPUT_TYPE_KEYBOARD on text-input v2/v3 focus ->
+  engine SystemIME.setSystemKeyboardVisible; typed text returns as INPUT_TYPE_TEXT_INPUT. KWin logs
+  "Android keyboard shown/hidden - <why>" on its stderr.
+- Likely gap (unverified): X11 apps via Xwayland (Steam's CEF) signal no text focus; no IM framework, QT_IM_MODULE /
+  XMODIFIERS unset. Next step: measure with verify/keyboard.sh, then an IM bridge for Xwayland.
+- Open Linux apps for a check as the launcher does: `am start -n com.powos.app/dev.omalauncher.shell.ShellActivity --es
+  exec '<cmd>'` (debug builds); never type into the user's tmux sessions.
+
+## Device checks (all queued, never waited on)
+- `tools/phone/verify/queue.sh add <board-task> <script> [args]` then end the turn; result lands on the board.
+- Scripts: edge.sh [home|home-short|edge|shade|corner|locked|all], edge-more.sh (Back both edges, landscape, left edge;
+  restores rotation + edge config), overlay-reload.sh (push then pull), fold.sh (forces the other screen via
+  `cmd device_state state 0|3`, always reset), keyboard.sh. All take the verify lock only after a free window
+  (window-lock.sh), honour LOCK_HELD=1.
+- Test swipes: keep Quick Tools' in-and-up near 40 degrees on every screen shape (a flatter one is straight in = Back).
+  The lock face is a swipe up (no PIN); screenrecord only as root into /data/local/tmp; pull into an existing dir.
+- Compile before every Kotlin push: `tools/phone/compile-check.sh && git push` (exit code, retry on gradle's journal lock).
