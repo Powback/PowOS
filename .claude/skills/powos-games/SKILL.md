@@ -6,33 +6,28 @@ description: Use for games on the PowOS phone (OnePlus Open) - Steam/Proton unde
 Access, idle windows and on-device rules: the powos-phone and powos-verify skills. This is the games/kernel part.
 
 ## The stack a Proton game runs on
-- Steam = native ARM64 client (`~/.local/share/Steam` in PowOS). A Windows game launches as
-  steam-launch-wrapper -> reaper -> FEX-Emu `fex-compat-tool` -> SteamLinuxRuntime_4 `_v2-entry-point` -> Proton Experimental.
-  CompatToolMapping (config.vdf) forces proton_experimental for 274190 Broforce, 294100, 346010.
+- Steam = native ARM64 (`~/.local/share/Steam`). Game: steam-launch-wrapper -> reaper -> FEX `fex-compat-tool` -> SLR_4
+  `_v2-entry-point` -> Proton Experimental (CompatToolMapping in config.vdf: 274190 Broforce, 294100, 346010).
 - Vulkan: DXVK on Fedora's x86 Turnip 26.2 inside FEX's RootFS (`/usr/share/guestos/fex-mesa` -> Fedora_44);
   Steam's FEX has the Vulkan thunk OFF for games (compatdata/<id>/fex-emu/Config.json, empty ThunksDB).
 - X11: Xwayland `/usr/local/bin/Xwayland` = package `xwayland-kgsl` (targets/android/pkgs/xwayland-kgsl), glamor on
   KGSL surfaceless, no DRI3 syncobj. KWin output `anland-1` follows the Android surface (one mode, resized on fold/rotate).
-- Logs: Steam `~/.local/share/Steam/logs/{console_log,gameprocess_log,compat_log}.txt`; `/tmp/fex-compat-tool-<pid>.log`
-  (the launch env); session log `/run/powos-app/hyprland.log` (KWin session, name historic) with `Xwayland KGSL:` stats.
-  Proton log: `PROTON_LOG=1` via `Proton - Experimental/user_settings.py` (remove after) -> `~/steam-<appid>.log`.
+- Logs: Steam `logs/{console_log,gameprocess_log,compat_log}.txt`; `/tmp/fex-compat-tool-<pid>.log`; session
+  `/run/powos-app/hyprland.log` (`Xwayland KGSL:` stats); Proton: `PROTON_LOG=1` in user_settings.py -> `~/steam-<id>.log`.
 
 ## Run and check Broforce (tools/phone/verify, header of each says where it runs)
 - `bf-start.sh` / `bf-stop.sh` (session user via powos-run.sh): `powos sleep never steam` + `steam steam://rungameid/274190`;
   stop closes game + Steam and removes the never entry. `pgrep -f Broforce_beta.exe` also matches the launch chain:
   wait for the X window `"Broforce"` (xwininfo, DISPLAY=:0, XAUTHORITY from Xwayland's `-auth` arg) - ~1-2 min.
-- Frame numbers: `bf-pacing.sh [base|cap60|fifo|nolatency]...` (~4 min of screen per mode; queue it): per dxvk.conf
-  mode, 30 s of SurfaceFlinger present times (bf-present.sh, polled `--latency`, deduped) + a 20 s screenrecord ->
-  bf-frames.py: fps, frame-time p50/p95/p99/max, % at 16.7 ms, dup + stale-back frames (a frame equal to one 2-4
-  back), window size vs screen, the activity in front. Artefacts ~/.cache/powos-verify/bfp-<date>/<mode>/.
+- Frame numbers: `bf-pacing.sh [base|cap60|fifo|nolatency]...` (~4 min/mode; queue it): 30 s SurfaceFlinger presents
+  (bf-present.sh) + 20 s screenrecord -> bf-frames.py: fps, frame-time percentiles, % at 16.7 ms, dup/stale frames,
+  window vs screen, activity in front. Artefacts ~/.cache/powos-verify/bfp-<date>/<mode>/.
 - KWin opens every X/Wayland toplevel (the game too) as its own Android task, `PowosWindowActivity` (WindowTasks);
   never `am start andro.marchy.MainActivity` to "show the game": that's the PowOS home/AI page.
 - Output anland-1 runs at 119.97 Hz unfolded (2268x2440): a 60 fps game = every 2nd vsync. CPU governor: `uag`.
-- Steam launch-option prefixes run INSIDE the SLR_4 container under FEX: there is no xrandr/python3 there, only
-  `python3.13` (libX11 via ctypes works); /home is shared, /usr is the runtime's.
+- Launch-option prefixes run INSIDE SLR_4 under FEX: no xrandr/python3, only `python3.13` (ctypes libX11); /home shared.
 - `bf-run.sh` (~10 min, memory + SF pacing + KGSL stats): `queue.sh add <board-task> bf-run.sh`, don't wait.
-- Grab Xwayland's copy of the window (independent of what's on screen): `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`.
-- Corruption metric (half-drawn frames): isolated dark pixels, `c<30 && min4neighbours > c+50` (old kernel: ~57%).
+- Xwayland's copy of a window: `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`. Half-drawn metric: dark pixels `c<30 && min4neighbours > c+50`.
 - Render bisect: `bf-checker.sh [variant]...` (~4 min each; TU_DEBUG via Proton user_settings.py, or dxvk.conf): 75 s of
   loading+menu, X copy + screencaps -> black-checker score (bf-checker.py), menu fps, DXVK log (DXVK_LOG_PATH).
 - Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]` `Screenmanager Resolution Width/Height`, `Is Fullscreen mode`.
@@ -73,26 +68,31 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   Fix: `targets/android/steam/unity-screen` as the game's Steam LaunchOptions (`~/.local/share/powos/unity-screen
   %command%`) appends `-screen-fullscreen 1 -screen-width W -screen-height H` = the X root size at launch. Set with
   `unity-screen --install <appid>` / `--remove` in the session with Steam OFF (it rewrites localconfig.vdf on exit;
-  backup localconfig.vdf.powos-bak). Installed for 274190. Fold/rotate mid-game NOT followed (X window resized, game not).
+  backup localconfig.vdf.powos-bak). Installed for 274190. Fold/rotate mid-game: see Fold below.
+
+## Fold mid-game (kwin 3.21 = pkgs/kwin 0017; check: `queue.sh add --close <task> bf-fold.sh`)
+- Before: a fold resized the game's full-screen X window to anland-1's new size (Unity kept its own) and the window
+  task (patch 0013) cropped it. 0017: exported full-screen windows keep their geometry (QObject property
+  `powosKeepFullScreenGeometry` -> checkWorkspacePosition returns; ABI unchanged) and AnlandWindowTask::scale/viewport
+  fit them, centred, letterboxed (touch too); scale 1 when buffer == window. Every full-screen task letterboxes now.
+- bf-fold.sh: pacman -U (rollback tar /var/cache/powos/kwin-<ver>-files.tar), `android-request power logout` (never
+  with Broforce up), state 3->0->+25s->3. kwin_wayland: pgrep as root; "libkwin (deleted)" in maps = old one running.
+- Logcat and powos-sleep-gui.log don't survive a reboot; hyprland.log is appended across sessions (no timestamps).
 
 ## Kernel (targets/android/kernel, docs/PHONE-KERNEL-CONTAINERS.md)
-- Build: `STOCK_BOOT=<stock boot_b.img> JOBS=12 ./build-containers-kernel.sh` (~2 h; the full-LTO link is single-threaded
-  under Rosetta). Needs `out/vendor-modules` (extract-vendor-modules.sh) and the stock boot at
-  `targets/native/backup/8e5d600d/boot_b.img` (gitignored: copy/point from a checkout that has it). Docker volume
-  `powos-gki-cache` holds clang, the source tree and build dirs; patches = targets/native/patches/gki + kernel/patches.
+- Build: `STOCK_BOOT=targets/native/backup/8e5d600d/boot_b.img JOBS=12 ./build-containers-kernel.sh` (~2 h, LTO link
+  single-threaded; gitignored inputs: copy from a checkout that has them) + `out/vendor-modules`. Volume `powos-gki-cache`
+  = clang + tree + build dirs; patches = targets/native/patches/gki + kernel/patches.
 - Quick compile check of one file: worktree of the cache tree, apply all patches, `make O=<dir> drivers/dma-buf/dma-buf.o`.
 - Checks the script runs: config diff vs running, pahole layout diff (`OK - every shared type has the same layout`),
   kmi-check.py vs vendor modules (`OK - the modules accept this kernel`). Module.symvers identical = old modules load.
 - patches/0004 = DMA_BUF_IOCTL_EXPORT/IMPORT_SYNC_FILE backport (5.15 dma_resv excl/shared). Flashed to boot_b
   2026-10-22 (boot-powos-dmabuf.img d969681e, 5.15.180 #5). Test: a dma-heap buffer + both ioctls from Python as root.
-- Test boot (writes nothing): phone on the Mac's USB, `adb reboot bootloader`,
-  `~/Library/Android/sdk/platform-tools/fastboot -s 8e5d600d boot out/<img>` (Homebrew's fastboot is SIGKILLed at
-  launch). Verify uname -v, root, kwin/Xwayland/plasmashell, module count (549), 17 inputs, adb over the VPN (restart
-  powos-vadb's adb server if it says "closed").
+- Test boot (writes nothing, USB): `adb reboot bootloader`; `~/Library/Android/sdk/platform-tools/fastboot -s 8e5d600d boot
+  out/<img>` (not Homebrew's). Verify uname -v, root, kwin/Xwayland/plasmashell, 549 modules, 17 inputs, adb over VPN.
 - Flash: `fastboot -s 8e5d600d flash boot_b out/<img>` + reboot (USB). Only boot_b; never set-active slot a (older firmware,
   no _a dynamic partitions - no safe A/B fallback). Needs the user's explicit yes.
-- Rollback: `~/Projects/PowOS/backups/oneplus-open/2026-10-22-before-dmabuf-kernel/boot_b.img` (e8205808, containers
-  kernel) flashed the same way; a hang: hold power + volume-down -> bootloader -> flash it.
+- Rollback: flash `~/Projects/PowOS/backups/oneplus-open/2026-10-22-before-dmabuf-kernel/boot_b.img` (hang: power+vol-down).
 
 ## Xwayland package
 - `targets/android/build-pkgs.sh xwayland-kgsl` (BUILD_ON_ROOTFS: needs targets/android/out/powos-rootfs.tar.gz).
