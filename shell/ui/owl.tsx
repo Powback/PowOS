@@ -21,7 +21,9 @@ import type { Cell, OwlNode, OwlOp, OwlRoot, ThemeColors } from "../types.ts";
  * half-way mix still measured 2.9-3.6:1 on a light theme).
  * Only text: rings, bars and fills keep the widget's colours.
  */
-let palette: { muted: Set<string>; accent?: string; foreground?: string } = { muted: new Set() };
+// A signal: a tile drawn before the theme arrived (or before another one) draws its text again in the new one's tokens -
+// the phone's engine resends its trees on a theme change, a host that doesn't (the design shots) kept the old mapping.
+const palette = signal<{ muted: Set<string>; accent?: string; foreground?: string }>({ muted: new Set() });
 const rgbKey = (c: string) => {
   const m = c.match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
   if (m) return [m[1], m[2], m[3]].map((v) => Math.round(Number(v))).join(",");
@@ -38,7 +40,7 @@ function learnTheme(t: ThemeColors | null) {
   // widget's `muted` can be the palette's own muted): any of them is the muted token (kanagawa's measured 4.06:1 as
   // an unknown hue's mix).
   const named = (t.colors ?? {}) as Record<string, string | undefined>;
-  palette = {
+  palette.value = {
     muted: new Set([t.css.muted, named.muted, named.dark_foreground].filter((c): c is string => !!c).map(rgbKey)),
     accent: rgbKey(t.css.accent ?? ""),
     foreground: rgbKey(t.css.foreground ?? ""),
@@ -50,9 +52,10 @@ powos.theme.get().then(learnTheme, () => {});
 export function textColor(c: unknown, fallback: string) {
   if (typeof c !== "string" || !c) return fallback;
   const k = rgbKey(c);
-  if (palette.muted.has(k)) return "var(--color-muted)";
-  if (k === palette.accent) return "var(--accent-text)";
-  if (k === palette.foreground) return "var(--color-foreground)";
+  const p = palette.value;
+  if (p.muted.has(k)) return "var(--color-muted)";
+  if (k === p.accent) return "var(--accent-text)";
+  if (k === p.foreground) return "var(--color-foreground)";
   return `color-mix(in srgb, ${c} 35%, var(--color-foreground))`;
 }
 /** The same for a canvas's text (no CSS variables there): [c] mixed into the foreground [fg] in JS. */

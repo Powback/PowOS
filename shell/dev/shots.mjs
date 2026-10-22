@@ -52,7 +52,23 @@ const THEMES = {
     bg: "#fffcf0", surface: "#f2f0e5", fg: "#100f0f", muted: "#6f6e69", accent: "#205ea6", border: "#cecdc3", red: "#af3029", green: "#66800b",
   },
 };
-const THEME = THEMES[process.env.SHOTS_THEME || "gruvbox"] ?? THEMES.gruvbox;
+const THEME_NAME = THEMES[process.env.SHOTS_THEME] ? process.env.SHOTS_THEME : "gruvbox";
+const THEME = THEMES[THEME_NAME];
+/**
+ * The mock home's OWL trees, evaluated in the theme rendered (dev/sample-trees.sh writes one set per theme): served
+ * for dev/sample-trees.json. Trees of another theme carry its colours, which owl.tsx can't map to this theme's tokens
+ * (a gruvbox grey drawn in kanagawa measured 4.0:1 the phone doesn't have) - so a missing or mismatched set refuses
+ * the run, and every page checks what it was given.
+ */
+const TREES = path.join(ROOT, "dev/sample-trees", `${THEME_NAME}.json`);
+{
+  const t = fs.existsSync(TREES) ? JSON.parse(fs.readFileSync(TREES, "utf8"))._theme : null;
+  if (t !== THEME_NAME) {
+    console.error(`shots: the mock OWL trees for ${THEME_NAME} ${t ? `are ${t}'s` : "are missing"} (${TREES}) - run shell/dev/sample-trees.sh ${THEME_NAME}`);
+    process.exit(2);
+  }
+}
+let treesWrong = 0;
 
 function mime(p) {
   const ext = p.slice(p.lastIndexOf(".") + 1).toLowerCase();
@@ -187,6 +203,7 @@ function file(url) {
   const p = decodeURIComponent(u.pathname).replace(/^\/+/, "") || "index.html";
   if (p.split("/").includes("..")) return null;
   if (p === "__wallpaper.jpg" && WALLPAPER) return { path: WALLPAPER, name: p };
+  if (p === "dev/sample-trees.json") return { path: TREES, name: p };
   const f = path.join(ROOT, p);
   return fs.existsSync(f) && fs.statSync(f).isFile() ? { path: f, name: p } : null;
 }
@@ -301,7 +318,8 @@ try {
 } finally {
   fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify(report, null, 1));
   await browser.close();
-  process.exit(0);
+  if (treesWrong) console.error(`shots: ${treesWrong} shot(s) drew mock OWL trees of another theme than ${THEME_NAME}`);
+  process.exit(treesWrong ? 1 : 0);
 }
 
 async function shoot(name, mode, setup, behind, sizeName, size, touch) {
@@ -324,6 +342,12 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
       });
       await page.goto(`${ORIGIN}/index.html${mode === "home" ? "" : `?mode=${mode}`}`, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => window.__powosAlive === true, { timeout: 10000, polling: 50 }).catch(() => errors.push("not ready"));
+      // The trees this page draws are the rendered theme's (see TREES), or the shot says so and the run fails.
+      const treeTheme = await page.evaluate(() => fetch("./dev/sample-trees.json").then((r) => r.json()).then((j) => j._theme ?? null, () => null));
+      if (treeTheme !== THEME_NAME) {
+        errors.push(`mock OWL trees evaluated in ${treeTheme}, rendered in ${THEME_NAME}`);
+        treesWrong++;
+      }
       const wp = WALLPAPER ? `${ORIGIN}/__wallpaper.jpg` : FALLBACK_WP;
       await page
         .evaluate(
