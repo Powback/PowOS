@@ -20,6 +20,15 @@ rest. Keep the blur - make it cheap.
   ~/.local/state/powos-perf/idle.log.
 - Per-thread: /proc/<pid>/task/*/stat (utime+stime, HZ=100). Java hot spots: `simpleperf record -t <tid> -g
   --duration 15` then `simpleperf report --children --sort symbol`.
+- `cdp.sh profile [secs] [page]`: V8 CPU profile, self/inclusive ms/s per function and per component (blob modules
+  named by sourceURL). `cdp.sh net`: per-page WebSocket frames/requests. `cdp.sh idle` lists "askers" (who requested
+  each rAF/timer/restyle, from the .stack trace category). All read-only. Heavy traces (raster) inflate the IO/mojo
+  task counts themselves: judge "tasks/s" without tracing.
+- Glass knobs (CDP, home): `__glass.live.counts` (measures/sends per s, resets on read), `.kicks` (what started the
+  last measures), `.hold(true)` (measure but don't send), `.compute(false)` (drag frames measured, not computed).
+- Drawer drag cost on the phone: `shell/dev/perf/drag-raster.sh [secs] ["label=css" | "label=js:ON|OFF"]`, PROFILE=1
+  for per-function JS; takes the free window + verify lock itself, or LOCK_HELD=1 under `tools/phone/verify/queue.sh`.
+  Don't wait for windows yourself: `tools/phone/verify/queue.sh add <board-task> <script> [args]` and end the turn.
 - Finding what changes the DOM: a MutationObserver/rAF wrapper via `cdp.sh eval` - only inside a free idle window.
 - Headless: `shell/dev/gate.sh --tree` runs the idle check (2 s after a 3 s settle: no rAF, no layer paint, no
   endless animation). On a busy Mac `READY_MS=30000`. Drawer drag probes: shell/dev/perf/ (powos-drawer skill).
@@ -44,11 +53,32 @@ rest. Keep the blur - make it cheap.
 - WireGuard CPU is traffic: the phone's own `claude` uploads to claude-auth (tens of MB), agents' adb calls; not
   keepalive.
 
+- Every touch on home ran the full glass measure per frame (58/s in use): touches now measure only during a drawer
+  drag (tracks or .home.dragging). Drawer drags are computed from gesture.ts's "drawer" Web Animations' keyframes
+  (one measure at the start), and innerWidth/innerHeight/devicePixelRatio are read on resize only (each read forced
+  a style recalc mid-frame). Drag cost left: ~38 ms/s nativeglass (1/3 is the per-frame postMessage of regions) and
+  the WebView's own drawing; holding region sends changed nothing measurable - no host-side fade needed.
+- Baselines (2026-10-22): idle home app 4.3 + renderer 1.1-2.0 % of a core; drawer drag app ~105 / renderer ~97 /
+  SF ~62 (total ~356). Re-measure on kernel changes.
+
+## Delivery pipeline (Mac)
+- APK: build-app.sh uses the warm builder (targets/android/tools/warm-builder.sh, container powos-gradle-warm, unit
+  gradle-warm-mac): every worktree rsync'd into /work, Gradle daemon warm - 11-12 s end to end; falls back to the cold
+  android-app-dev `make build` (~2-8 min; POWOS_COLD_BUILD=1). `PUBLISH=0 warm-builder.sh build <app dir>` = timing
+  without touching output/. No BuildConfig in the app (a per-build versionCode in it recompiled javac every build):
+  the stamp goes to the manifest via androidComponents; read the version at runtime (AppVersion.kt).
+  targets/android/tools/profile-build.sh: Gradle --profile cold vs no-change inside the ship lock.
+- Gate: pages share one transpile (gate.mjs, cached by hash in ~/.cache/powos-gate/tx; GATE_SHARED_TX=0 = old way).
+- Mac load is mostly not ours (stickman train.py, the kernel builder's Rosetta clang LTO): leave the user's jobs.
+
 ## Pitfalls
 - touch IRQs don't see injected input: also check Android's lastUserActivity (`dumpsys power`).
 - A 2 s `top` catches periodic ticks and overstates them; sample 30-60 s.
 - My own probes show up (a stuck `tr` loop hit 100%): kill them, keep phone-side loops bounded.
 - An idle sample while another agent installs an APK or a page is broken is not a sample.
+- A bash -c '...' script must not contain an apostrophe (even in a comment); `set -o pipefail` + `sed ... missing-file
+  | head` exits non-zero - guard with `|| true`.
+- `docker run --rm` per call costs ~1 s; prefer a long-lived container + `docker exec` for repeated work.
 - Ship only pushed commits (ship-apk enforces it); commit, rebase, push, then ship.
 - Cross-cutting causes (endless animations, nativeglass MutationObserver, inherited custom properties): handbook
   "Rendering cost". Each new one found goes there, not only here.
