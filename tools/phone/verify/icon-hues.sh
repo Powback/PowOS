@@ -1,6 +1,6 @@
 #!/bin/bash
-# Themed icons slice 2 (board theme-recolor-icons) on the phone: ships ui/icontint.ts + ui/screens.tsx if the phone
-# still serves the old copy (push.sh refused while the phone was offline), then READ-ONLY: the served module has the
+# Themed icons slice 2 (board theme-recolor-icons) on the phone: asks the ship service for origin's tip if the
+# phone still serves an old ui/icontint.ts (waits up to 3 min), then READ-ONLY: the served module has the
 # "hue" mode, the user's current setting, how many icons are recoloured copies, and a screencap.
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
@@ -8,10 +8,9 @@ probe='fetch("ui/icontint.ts").then(r=>r.text()).then(t=>JSON.stringify({hue:t.i
   tint:localStorage.getItem("powos.icons.tint"),blobs:document.querySelectorAll("img[src^=\"blob:\"]").length}))'
 out=$(tools/phone/cdp.sh eval home "$probe" 2>&1)
 if ! grep -q 'hue.\{0,3\}:true' <<<"$out"; then
-  READY_MS=90000 shell/push.sh --note "Settings > style > icons: new 'theme hues' option recolours app icons into the theme's palette" \
-    shell/ui/icontint.ts shell/ui/screens.tsx || { echo "icon-hues: push failed"; exit 1; }
-  sleep 20
-  out=$(tools/phone/cdp.sh eval home "$probe" 2>&1)
+  # Only the ship service pushes (push.sh refuses checks since c93b8bc): ask it for origin's tip, wait for it served.
+  tools/phone/ship.sh request --silent --note "icon-hues check: phone serves an older icontint.ts" >/dev/null 2>&1
+  for _ in $(seq 18); do sleep 10; out=$(tools/phone/cdp.sh eval home "$probe" 2>&1); grep -q 'hue.\{0,3\}:true' <<<"$out" && break; done
 fi
 shot=$HOME/.cache/icons2/device-home.png
 mkdir -p "$(dirname "$shot")"
