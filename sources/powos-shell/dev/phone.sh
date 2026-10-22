@@ -37,7 +37,7 @@ set -e
 S=/var/tmp/powos-shell-src B=/var/tmp/powos-shell-build
 rm -rf \$S && mkdir -p \$S && tar -xzf /tmp/powos-shell-src.tgz -C \$S && rm -f /tmp/powos-shell-src.tgz
 cmake -S \$S/sources/powos-shell -B \$B -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=$P \
-  -DPOWOS_SHELL_WEB=\$S/shell -DPOWOS_SHELL_WEB_DEST=share/shell >/dev/null
+  -DPOWOS_SHELL_WEB=\$S/shell -DPOWOS_SHELL_WEB_DEST=share/shell -DPOWOS_SHELL_AUTOSTART=/etc/xdg/autostart >/dev/null
 ninja -C \$B 2>&1 | grep -E 'error|warning: unused|FAILED' || true
 ninja -C \$B >/dev/null
 rm -rf $P/share/shell && ninja -C \$B install >/dev/null

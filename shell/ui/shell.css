@@ -1932,3 +1932,22 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 /* A control on the wallpaper (the mail's "clear all"): a quiet pill of the same material - a halo isn't enough, it
    was 3.2:1 over the crystal. */
 .ai-screen .ai-mail-bar .ai-mail-clear { padding: 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--color-background) 90%, transparent); color: var(--accent-text); text-shadow: none; }
+
+/*
+ * The wide screen (the phone unfolded, 821 CSS px; hosts/wide.ts shows two of home's pages side by side at their
+ * folded size): the pill a column in the middle, not the screen's width; the dock's icons at their folded spacing in
+ * the middle, not spread across it. Height, type and the field stay the pill's own rules.
+ */
+@media (min-width: 700px) {
+  html[data-mode="home"] .home > .bar {
+    width: min(560px, calc(100% - 2 * var(--edge)));
+    margin-inline: auto;
+  }
+  html[data-mode="home"] .dock-page {
+    justify-content: center;
+    gap: 12px;
+  }
+  html[data-mode="home"] .dock .app {
+    flex: 0 0 72px;
+  }
+}
