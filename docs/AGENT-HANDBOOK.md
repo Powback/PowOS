@@ -45,6 +45,8 @@ minimal change and tell them.
 - Git: rebase only right before you commit/push, not before every command. Commit subject <= 72 chars, a short body.
 - No new process tooling (locks, gates, wrappers, handbook rules) unless something actually broke; say what broke.
 - Messages: shipped results or blockers only, one line.
+- A task is DONE the moment it's shipped and checked (manager, 2026-10-22): never leave it at "3/3 working". If the
+  device check is its last proof, queue it with `queue.sh add --close` so the pass closes the task.
 - Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules), `done <name>` once pushed (refuses
   unpushed/uncommitted work), `list`. Never leave a merged worktree behind.
 
