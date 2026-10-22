@@ -1959,3 +1959,63 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
     flex: 0 0 72px;
   }
 }
+
+/*
+ * The control center, v3 (control.tsx Controls, state.ts ccV3): one row of the most-used toggles, every control in a
+ * uniform labelled grid on a further pull, under quiet section names. A toggle: its icon on a round chip - the accent
+ * only when on - and one word under it. The sliders a calm fill of the foreground with an accent mark where they are.
+ */
+.cc3-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px 4px; position: relative; }
+.cc3-cell { position: relative; display: flex; justify-content: center; min-width: 0; }
+.cc3-t {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-foreground);
+  font: 11px var(--font);
+}
+.cc3-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  font-size: 22px;
+  background: var(--control-fill);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.cc3-t.on .cc3-chip { background: var(--color-accent); color: var(--color-background); }
+.cc3-t:active .cc3-chip { filter: brightness(1.15); }
+.cc3-word { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc3-all { display: flex; flex-direction: column; gap: 14px; }
+.cc3-sec { display: flex; flex-direction: column; gap: 8px; animation: cc-subs-in 220ms ease both; }
+.cc3-head { margin: 0; padding: 0 2px; font: var(--text-small) var(--font); font-weight: normal; color: var(--color-muted); }
+.cc3-cell.chosen .cc3-chip { outline: var(--frame) solid var(--color-accent); outline-offset: 2px; }
+/* Calm sliders: the foreground at low alpha for the level, the accent only as a mark at its end. */
+.cc.v3 .cc-slider {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-foreground) 22%, transparent) calc(var(--v) * 100%), var(--soft-fill) 0);
+  box-shadow: none;
+}
+.cc.v3 .cc-slider::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--v) * (100% - 18px) + 6px);
+  top: 9px;
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  pointer-events: none;
+}
+.cc.v3 .cc-slider-icon { mix-blend-mode: normal; color: var(--color-foreground); }
+/* The notifications after the controls: a hairline between, their header with room. */
+.panel-body.together .cc.v3 + .notif-bar { margin-top: 6px; padding-top: 14px; border-top: var(--frame) solid var(--line); }
+/* One strong frost under it: what's behind can't be read (the compositor's blur in the shade's window; here too). */
+.notif-panel:has(.cc.v3) { backdrop-filter: blur(48px) saturate(1.1); -webkit-backdrop-filter: blur(48px) saturate(1.1); }

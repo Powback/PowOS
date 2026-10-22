@@ -54,7 +54,13 @@ export function useReorder(
   keys: string[],
   done: (keys: string[]) => void,
   editing: Signal<boolean>,
-  opts: { onLift?: (key: string) => void; onLand?: () => void; onSelect?: (key: string) => void } = {},
+  opts: {
+    onLift?: (key: string) => void;
+    onLand?: () => void;
+    onSelect?: (key: string) => void;
+    /** A long press lifts only in edit mode (entered some other way): outside it, the item's own long press is its. */
+    onlyEditing?: boolean;
+  } = {},
 ): Reorder {
   const box = useRef<HTMLElement>(null);
   const [live, setLive] = useState<string[] | null>(null);
@@ -170,6 +176,7 @@ export function useReorder(
       if (e.button) return;
       const el = (e.target as Element).closest<HTMLElement>("[data-key]");
       if (!el || !ours(el) || (e.target as Element).closest("[data-no-lift]")) return;
+      if (opts.onlyEditing && !editing.value) return;
       swallow.current = false;
       const r = el.getBoundingClientRect();
       const p: Press = {

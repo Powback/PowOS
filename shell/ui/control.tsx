@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Fragment, type ComponentChildren } from "preact";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { notif, panel } from "../state.ts";
+import { ccV3, notif, panel } from "../state.ts";
 import { held, notifOpen } from "./gesture.ts";
 import { ccEditing, ccExpanded } from "./ccexpand.ts";
 import { useReorder } from "./reorder.ts";
@@ -665,7 +665,12 @@ function Members({ group, reorder }: { group: { g: Group; ts: QuickTile[] }; reo
   );
 }
 
+/** The control center: the v3 layout (state.ts ccV3), or the eight category tiles. */
 export function ControlCenter() {
+  return ccV3.value === "v3" ? <Controls /> : <Categories />;
+}
+
+function Categories() {
   // Shown: other apps' tiles listen (their state kept current), until it's shut or turned back to notifications.
   const open = notifOpen.value;
   useEffect(() => {
@@ -781,6 +786,202 @@ export function ControlCenter() {
         ))}
       </div>
       <RemotePick />
+    </div>
+  );
+}
+
+/*
+ * The v3 layout (state.ts ccV3): the header, the two sliders, the media; one row of the most-used toggles - one tap
+ * each, labelled; pulled further (ccexpand.ts), every control in one uniform labelled grid under quiet section names,
+ * no category tiles and nothing hanging under them. A long press is a toggle's own page; rearranging is edit mode's
+ * (the header's pencil, then a long press lifts - ui/reorder.ts), within a section or the row.
+ */
+
+/** The row the first pull shows: the most used, in this order unless rearranged. */
+const QUICK = ["wifi", "cell", "bt", "dnd", "app:com.oplus.eyeprotect", "rotation"];
+/** Every control by section, on a further pull; what none names goes under Tools. */
+const SECTIONS: { id: string; label: string; members: string[] }[] = [
+  {
+    id: "connect",
+    label: "connect",
+    members: ["wifi", "cell", "airplane", "hotspot", "bt", "nfc", "app:com.google.android.gms|app:com.oneplus.oshare", "app:com.oplus.linker", GLASSES_ID, "location"],
+  },
+  { id: "display", label: "display", members: ["rotation", "darkmode", "app:com.oplus.eyeprotect", "battery"] },
+  { id: "sound", label: "sound & focus", members: ["dnd"] },
+  { id: "tools", label: "tools", members: ["flashlight", "screenshot", "screenrecord", "calculator", "qr_code_scanner", "wallet", "controls"] },
+];
+/** Each control's one word. */
+const WORD: Record<string, string> = {
+  wifi: "wi-fi",
+  cell: "data",
+  airplane: "airplane",
+  hotspot: "hotspot",
+  bt: "bluetooth",
+  nfc: "nfc",
+  location: "location",
+  rotation: "rotate",
+  darkmode: "dark",
+  battery: "saver",
+  dnd: "focus",
+  flashlight: "torch",
+  screenshot: "screenshot",
+  screenrecord: "record",
+  calculator: "calculator",
+  qr_code_scanner: "scan",
+  wallet: "wallet",
+  controls: "devices",
+  [GLASSES_ID]: "glasses",
+  [REMOTE_ID]: "remote",
+};
+const WORD_APP: Record<string, string> = { "com.oplus.eyeprotect": "eye", "com.google.android.gms": "share", "com.oneplus.oshare": "share", "com.oplus.linker": "cast" };
+const word = (t: QuickTile) => WORD[t.id] ?? (t.app && WORD_APP[t.app]) ?? t.label.toLowerCase().split(/\s+/)[0];
+
+/** One control: its icon on a chip (the accent when on), its word under it. A long press opens its page. */
+function Toggle({ t }: { t: QuickTile }) {
+  const press = usePress(t, !ccEditing.value);
+  const special = t.id === GLASSES_ID ? openGlasses : t.id === REMOTE_ID ? openRemote : null;
+  return (
+    <div class={`cc3-cell ${ccEditing.value && chosen.value === t.id ? "chosen" : ""}`} data-key={t.id}>
+      <Chosen id={t.id} page={t.id} />
+      <button
+        type="button"
+        class={`cc3-t ${t.on ? "on" : ""}`}
+        aria-label={`${t.label}${t.on == null ? "" : t.on ? ": on" : ": off"}`}
+        aria-pressed={t.on == null ? undefined : t.on}
+        {...press}
+        onClick={special ? () => (shut(), special()) : press.onClick}
+      >
+        <span class="cc3-chip">
+          <Icon name={tileIcon(t)} />
+        </span>
+        <span class="cc3-word">{word(t)}</span>
+      </button>
+    </div>
+  );
+}
+
+/** A row or a section of toggles, rearranged in edit mode; [save] gets its new order. */
+function ToggleGrid({ ts, save, class: c = "" }: { ts: QuickTile[]; save: (ids: string[]) => void; class?: string }) {
+  const byId = new Map(ts.map((t) => [t.id, t]));
+  const r = useReorder(ts.map((t) => t.id), save, ccEditing, { ...editHooks, onlyEditing: true });
+  return (
+    <div class={`cc3-grid ${c}`} {...r.handlers}>
+      {r.order.map((id) => byId.get(id) && <Toggle key={id} t={byId.get(id)!} />)}
+    </div>
+  );
+}
+
+/** Saves a group's new order into the arrangement: the group's places in the whole order kept, filled in its new order. */
+function saveOrder(all: string[], ids: string[]) {
+  const pos = (id: string) => {
+    const i = layout.value.order.indexOf(id);
+    return i < 0 ? 1e6 + all.indexOf(id) : i;
+  };
+  const order = [...all].sort((a, b) => pos(a) - pos(b));
+  let k = 0;
+  const l = { order: order.map((id) => (ids.includes(id) ? ids[k++] : id)), hidden: layout.value.hidden };
+  layout.value = l;
+  powos.store.set("controls.layout", l);
+}
+
+function Controls() {
+  const open = notifOpen.value;
+  useEffect(() => {
+    if (!open) return;
+    loadLayout();
+    powos.qs.listening(true);
+    askRemote();
+    const timer = window.setInterval(() => document.hidden || askRemote(), 3000);
+    return () => {
+      powos.qs.listening(false);
+      clearInterval(timer);
+      picking.value = false;
+      ccExpanded.value = false;
+      ccEditing.value = false;
+      chosen.value = null;
+    };
+  }, [open]);
+  const q = quick.value;
+  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : [])].filter((t) => !leftOut(t));
+  const b = q.brightness ?? { value: 0.5, auto: false };
+  const v = q.volume ?? { value: 0.5, ringer: 2 };
+  // The user's order (controls.layout) within each group; the curated order after.
+  const pos = (id: string) => {
+    const i = layout.value.order.indexOf(id);
+    return i < 0 ? 1e6 : i;
+  };
+  const ordered = (ts: QuickTile[]) => ts.map((t, i) => ({ t, i })).sort((a, c) => pos(a.t.id) - pos(c.t.id) || a.i - c.i).map((x) => x.t);
+  const pick = (ms: string[]) => ms.map((m) => member(every, m)).filter((t): t is QuickTile => !!t);
+  const placed = new Set<QuickTile>();
+  const sections = SECTIONS.map((sec) => {
+    sec.members.forEach((m) => named(every, m).forEach((t) => placed.add(t)));
+    return { sec, ts: pick(sec.members) };
+  });
+  sections[sections.length - 1].ts.push(...every.filter((t) => !placed.has(t)));
+  const all = every.map((t) => t.id);
+  const row = ordered(pick(QUICK)).slice(0, 6);
+  const whole = ccExpanded.value;
+  return (
+    <div class={`cc v3 ${ccEditing.value ? "cc-editing" : ""} ${whole ? "whole" : ""}`}>
+      <div class="notif-bar cascade" style={{ "--i": 0 }}>
+        <Clock />
+        {ccEditing.value ? (
+          <button type="button" class="edit-act done" data-edit-ok onClick={() => (ccEditing.value = false)}>
+            done
+          </button>
+        ) : (
+          <span class="notif-actions icons">
+            <button type="button" aria-label="rearrange" onClick={() => (ccEditing.value = true)}>
+              <Icon name="pencilOutline" />
+            </button>
+            <button type="button" aria-label="settings" onClick={() => (shut(), powos.qs.open("settings"))}>
+              <Icon name="cogOutline" />
+            </button>
+          </span>
+        )}
+      </div>
+      <div class="cc-sliders cascade" style={{ "--i": 1 }}>
+        <Slider
+          name="brightness"
+          value={b.value}
+          label="brightness"
+          icon="brightness6"
+          end={
+            <button
+              type="button"
+              aria-label="auto brightness"
+              class={`cc-auto ${b.auto ? "on" : ""}`}
+              onClick={() => powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)}
+            >
+              A
+            </button>
+          }
+        />
+        <Slider
+          name="volume"
+          value={v.value}
+          label={`volume · ${RINGER[v.ringer] ?? "ring"}`}
+          icon={v.ringer === 0 ? "bellOffOutline" : v.ringer === 1 ? "vibrate" : v.value <= 0 ? "volumeOff" : "volumeHigh"}
+          onIcon={() => powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)}
+        />
+      </div>
+      <MediaCard i={2} />
+      {whole ? (
+        <div class="cc3-all cascade" style={{ "--i": 3 }}>
+          {sections
+            .filter((x) => x.ts.length)
+            .map(({ sec, ts }) => (
+              <section key={sec.id} class="cc3-sec">
+                <h4 class="cc3-head">{sec.label}</h4>
+                <ToggleGrid ts={ordered(ts)} save={(ids) => saveOrder(all, ids)} />
+              </section>
+            ))}
+        </div>
+      ) : (
+        <div class="cc3-quick cascade" style={{ "--i": 3 }}>
+          <ToggleGrid ts={row} save={(ids) => saveOrder(all, ids)} class="row" />
+        </div>
+      )}
     </div>
   );
 }
