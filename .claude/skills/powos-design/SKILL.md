@@ -37,6 +37,17 @@ description: How the PowOS phone shell's design is built and checked - the desig
   and flexoki-light. Any neutral fill: derive from --frost-*, never from --color-surface (warm in warm themes).
   Resolved on :root, so the per-surface frost swaps in shell.css don't move it. Check: render `icons-mixed` with
   SHOTS_THEME per theme + SHOTS_PROBE reading the `.app-icon-face.plate` background.
+- PowOS apps' pages (`.app-screen.tile.sheet`, appscreen.tsx) and the library's cards (`.lib-card.tile`) wear it too:
+  add a surface by listing it in the four frost selector lists in shell.css (vars, dark-over-dark base, background,
+  other-tone flip) - never a new fill. The plain `.tile.sheet` reference was the "brown slab": over a wallpaper of the
+  other tone `--glass-dim` 68% makes it 100% tint = opaque. The page background block is `html.glass-native` only, so
+  the picture-glass fallback keeps its frosted picture. Opt-out: manifest `page.background: "own"` drops `.tile` (no
+  compositor region under a page that paints its own ground, e.g. Sketch's canvas; Sketch is opaque anyway).
+- Lights/Shopping pages paint no root ground (the shell's is what shows); Sketch's page is `position: fixed` #121216,
+  its chrome inline in the app - the shell can't restyle it. Floating-window chrome is Kotlin only (WindowFrame.kt).
+- Scene `app-page` (shots.mjs) opens local.lights over home (empty headless: no registry) - the material check.
+  Test wallpapers: make light/dark JPGs with `uv run --with pillow python` (no PIL on the Mac); an exported tree for
+  /a renders needs shell/fonts/nerd_symbols.ttf linked (git archive drops it, shot.sh then exits silently).
 
 ## Shade (ui/shade.tsx, notifications.tsx NotificationPanel)
 - One panel by default: control center on top, notifications under it, one `.notif-list` scroll; Settings > Style >

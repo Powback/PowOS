@@ -180,6 +180,8 @@ const SCENES = [
   ["edit-add-app", "home", "S.editing.value = true; await sleep(300); [...document.querySelectorAll('.edit-act')].find((b) => b.textContent.trim() === '+ app').click(); await sleep(400);", "wallpaper"],
   ["edit-chosen", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 2).map((i) => i.key); await sleep(200);", "wallpaper"],
   ["folder-open", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 3).map((i) => i.key); await sleep(200); document.querySelector('.chosen-actions .group-folder')?.click(); await sleep(600); S.editing.value = false; await sleep(200);", "wallpaper"],
+  // A PowOS app's page (ui/appscreen.tsx) over home: its ground is the frost.
+  ["app-page", "home", "(await U('./apps/pages.ts')).openApp('local.lights'); await sleep(500);", "wallpaper"],
   // The app library, home's last page (ui/library.tsx), and a search in it.
   ["library", "home", "S.page.value = S.pages.value.length; await sleep(400);", "wallpaper"],
   ["library-open", "home", "S.page.value = S.pages.value.length; await sleep(400); document.querySelectorAll('.page.library .lib-card')[2]?.click(); await sleep(500);", "wallpaper"],

@@ -22,8 +22,11 @@ export const installedApps = signal<RegistryApp[]>([]);
 
 /** What the shell reads of an app's manifest (powos-app.json, kept whole in the registry). */
 export interface AppManifest {
-  /** Its full-screen page (an app with one is an app in the launcher): an ES module in its UI dir, as a widget. */
-  page?: { entry: string };
+  /**
+   * Its full-screen page (an app with one is an app in the launcher): an ES module in its UI dir, as a widget. It sits on
+   * the frost (shell.css); `background: "own"` for a page that paints its own ground (a canvas): no frost under it.
+   */
+  page?: { entry: string; background?: "own" };
   /** Its icon, a file in its UI dir. */
   icon?: string;
   surfaces?: { launcher?: boolean };

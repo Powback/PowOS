@@ -76,7 +76,8 @@ export function AppScreen() {
   const v = appView.value;
   const box = useRef<HTMLDivElement>(null);
   const app = v ? installedApps.value.find((a) => a.id === v.id) : undefined;
-  const entry = app ? manifestOf(app).page?.entry : undefined;
+  const page = app ? manifestOf(app).page : undefined;
+  const entry = page?.entry;
   const base = app && entry ? moduleUrl(app.id, entry, app.version) : null;
   const [tries, setTries] = useState(0);
   useEffect(() => setTries(0), [base]);
@@ -137,7 +138,7 @@ export function AppScreen() {
   return (
     <div
       ref={box}
-      class="app-screen tile sheet"
+      class={page?.background === "own" ? "app-screen sheet" : "app-screen tile sheet"}
       data-app={v.id}
       style={{
         position: "fixed",
