@@ -121,11 +121,18 @@ function usePress(t: QuickTile, hold = true) {
     shut();
     powos.qs.open(t.id).catch((e) => console.warn("qs: no page for", t.id, e));
   };
+  const from = useRef<[number, number]>([0, 0]);
   return {
-    onPointerDown: () => {
+    onPointerDown: (e: PointerEvent) => {
       held.current = false;
+      from.current = [e.clientX, e.clientY];
       // In a reorderable row the long press is the pickup's (useReorder); its page opens from a still hold there.
       if (hold) timer.current = window.setTimeout(open, HOLD);
+    },
+    // Moved: a pull or a scroll that started on it (the further pull down from the row), not a long press - a drag
+    // from the row held long enough opened Wi-Fi's settings.
+    onPointerMove: (e: PointerEvent) => {
+      if (Math.hypot(e.clientX - from.current[0], e.clientY - from.current[1]) > 10) clearTimeout(timer.current);
     },
     onPointerUp: () => clearTimeout(timer.current),
     onPointerCancel: () => clearTimeout(timer.current),
