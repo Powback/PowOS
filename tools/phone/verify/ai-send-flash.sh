@@ -19,16 +19,29 @@ I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
-sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\"" | grep -q true && { echo "locked - stopping"; exit 5; }
 WH=$(sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x([0-9]+).*/\2 \3/p' | tail -1)
 W=${WH% *}; H=${WH#* }
 DID=$(sh_ "dumpsys display" | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)",.* state ON,.*/\1/p' | head -1)
 [ -n "$DID" ] || { echo "no display is on"; exit 3; }
 echo "on: ${W}x${H} display $DID"
+# No PIN: the keyguard / PowOS lock face goes with a swipe up (as ai-wide.sh).
+up() { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
+sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\"" | grep -q true && { sh_ "wm dismiss-keyguard"; sleep 1.5; }
+sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\"" | grep -q true && up
+sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && up
+chk lock
+# Home may still be booting (a check before this one rotated the screen; 2026-10-23 the swipe landed on a page
+# whose widgets were still empty plates and this check failed "the field isn't showing"): wait for its page, then the
+# swipe to the AI page, once more if the first didn't land.
 home; chk home
-sh_ "input swipe $((W * 3 / 10)) $((H / 2)) $((W * 9 / 10)) $((H / 2)) 350"; sleep 1.5; chk page
-shown=$("$T/cdp.sh" eval home '!!document.querySelector(".ai-screen.shown .ai-compose textarea")' 2>&1 | tail -1)
-[ "$shown" = true ] || { echo "the AI page's field isn't showing ($shown)"; exit 5; }
+q='JSON.stringify({w:innerWidth,ai:!!document.querySelector(".ai-screen .ai-compose textarea"),shown:!!document.querySelector(".ai-screen.shown .ai-compose textarea")})'
+st() { "$T/cdp.sh" eval home "$q" 2>&1 | tail -1; }
+for i in 1 2 3 4 5 6; do s=$(st); case $s in *'\"ai\":true'*) break;; esac; sleep 2; done
+for i in 1 2; do
+  sh_ "input swipe $((W * 3 / 10)) $((H / 2)) $((W * 9 / 10)) $((H / 2)) 350"; sleep 1.5; chk page
+  s=$(st); case $s in *'\"shown\":true'*) break;; esac
+done
+case $s in *'\"shown\":true'*) ;; *) echo "the AI page's field isn't showing: $s"; exit 5;; esac
 since=$(sh_ "date +%m-%d\ %H:%M:%S.000")
 V=/data/local/tmp/ai-send-flash.mp4
 "$A" shell "su -c 'rm -f $V; screenrecord --display-id $DID --bit-rate 20000000 --time-limit 7 $V'" >/dev/null 2>&1 &
