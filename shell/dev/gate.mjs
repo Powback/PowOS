@@ -604,14 +604,20 @@ try {
               await until(still, "the row settled after the drop");
               const rowRects = () => order().slice(0, 6).map((k) => { const b = item(k).getBoundingClientRect(); return `${k}@${Math.round(b.left)},${Math.round(b.top)}`; }).join(" ");
               const first = rowRects();
+              // Each step waits on the state it needs: the list rendered in its new state (its .whole class, set by
+              // the render), then two frames (layout, then the ResizeObserver/FLIP pass after it), then no animation.
+              const rendered = async (whole, what) => {
+                await until(() => !!document.querySelector(".cc3-list.whole") === whole, what);
+                await frames(2);
+                await until(still, `${what}: settled`);
+              };
               X.setExpanded(true);
-              await until(() => order().length > 6, "the rest revealed");
-              await until(still, "the reveal settled");
+              await rendered(true, "the rest revealed");
+              if (order().length <= 6) fails.push(`the further pull shows only ${order().length} toggles`);
               if (rowRects() !== first) fails.push(`the first row moved on the further pull: ${first} -> ${rowRects()}`);
               X.setExpanded(false);
-              await until(() => order().length <= 6, "folded again").catch((e) => {
-                throw new Error(`${e.message} (expanded ${X.ccExpanded.value}, .whole ${!!document.querySelector(".cc3-list.whole")}, shown ${order().length}, panel ${document.querySelector(".notif-panel")?.className})`);
-              });
+              await rendered(false, "folded again");
+              if (order().length > 6) fails.push(`folded, ${order().length} toggles still show`);
               // Shut and opened again: still there.
               S.notif.value = false;
               await until(() => !document.querySelector(".notif-panel.shown"), "the panel shut", 5000).catch(() => {});
