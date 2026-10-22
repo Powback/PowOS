@@ -12,7 +12,9 @@
 #   - an id no longer needed fails until --prune rewrites the file (commit it with the refactor);
 #   - an id not in HEAD's baseline fails (no re-baselining past the limits; tier-1 checks history too).
 #
-#   targets/android/lint-complexity.sh [--prune] [--report N]
+#   targets/android/lint-complexity.sh [--prune] [--report N] [--only a.kt,b.kt]
+# --only: just those files (paths relative to targets/android/app; ~4 s instead of ~10), stale ids only theirs - the
+# pre-push hook's mode (tools/git-hooks/pre-push).
 # Exit 0 clean, 1 findings or couldn't run (fail closed), 2 only when skipped on purpose (GATE_LINT=0).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -25,12 +27,13 @@ CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/powos-lint
 JAR=$CACHE/detekt-cli-$VER-all.jar
 CFG=config/detekt-complexity.yml
 BASE=config/detekt-baseline.xml
-prune="" report=""
+prune="" report="" only=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --prune) prune=1; shift ;;
     --report) report=$2; shift 2 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    --only) only=$2; shift 2 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "unknown: $1" >&2; exit 2 ;;
   esac
 done
@@ -49,6 +52,7 @@ fi
 out=$(mktemp -d "$CACHE/run.XXXXXX"); trap 'rm -rf "$out"' EXIT
 inputs=app/src/main,owl/src/main
 [ -d "$APP/engine" ] && inputs+=,engine
+[ -n "$only" ] && inputs=$only
 detekt() {
   docker run --rm -v "$CACHE:/lint:ro" -v "$APP:/src:ro" -v "$out:/out" -w /src --entrypoint java "$IMAGE" \
     -jar "/lint/$(basename "$JAR")" --input "$inputs" --config "$CFG" --excludes '**/build/**,**/test/**' "$@"
@@ -81,11 +85,18 @@ if git -C "$ROOT" cat-file -e "HEAD:targets/android/app/$BASE" 2>/dev/null && [ 
   [ -z "$grew" ] || { echo "$grew" | head -20 | sed 's/^/FAIL kotlin complexity baseline grew (it only shrinks): /'; exit 1; }
 fi
 # 2. detekt against the baseline. Stale ids: detekt doesn't report them, so compare with a fresh baseline.
-detekt --create-baseline --baseline /out/now.xml >"$out/run.log" 2>&1
+rc=0; detekt --create-baseline --baseline /out/now.xml >"$out/run.log" 2>&1 || rc=$?
+# --only on files with no finding at all: detekt ran fine but writes no baseline.
+[ -n "$only" ] && [ $rc = 0 ] && [ ! -s "$out/now.xml" ] && grep -q 'number of kt files' "$out/run.log" && echo '<SmellBaseline/>' >"$out/now.xml"
 [ -s "$out/now.xml" ] || { echo "FAIL kotlin complexity: detekt didn't run"; tail -5 "$out/run.log"; exit 1; }
 ids() { sed -n 's|.*<ID>\(.*\)</ID>.*|\1|p' | sort -u; }
 new=$(comm -13 <(ids < "$APP/$BASE") <(ids < "$out/now.xml"))
 stale=$(comm -23 <(ids < "$APP/$BASE") <(ids < "$out/now.xml"))
+# --only: an id is stale only if it names one of the linted files (Rule:File.kt$...); the rest weren't looked at.
+if [ -n "$only" ] && [ -n "$stale" ]; then
+  names=$(echo "$only" | tr ',' '\n' | sed 's|.*/||')
+  stale=$(echo "$stale" | awk -F'[:$]' 'NR==FNR{n[$0]=1; next} ($2 in n)' <(echo "$names") -)
+fi
 if [ -n "$prune" ] && [ -n "$stale" ]; then
   python3 - "$APP/$BASE" "$stale" <<'PY'
 import sys
