@@ -21,6 +21,16 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - `bf-start.sh` / `bf-stop.sh` (session user via powos-run.sh): `powos sleep never steam` + `steam steam://rungameid/274190`;
   stop closes game + Steam and removes the never entry. `pgrep -f Broforce_beta.exe` also matches the launch chain:
   wait for the X window `"Broforce"` (xwininfo, DISPLAY=:0, XAUTHORITY from Xwayland's `-auth` arg) - ~1-2 min.
+- Frame numbers: `bf-pacing.sh [base|cap60|fifo|nolatency]...` (~4 min of screen per mode; queue it): per dxvk.conf
+  mode, 30 s of SurfaceFlinger present times (bf-present.sh, polled `--latency`, deduped) + a 20 s screenrecord ->
+  bf-frames.py: fps, frame-time p50/p95/p99/max, % at 16.7 ms, dup + stale-back frames (a frame equal to one 2-4
+  back), window size vs screen, the activity in front. Artefacts ~/.cache/powos-verify/bfp-<date>/<mode>/.
+- KWin opens every X/Wayland toplevel (the game too) as its own Android task, `PowosWindowActivity` (WindowTasks);
+  never `am start andro.marchy.MainActivity` to "show the game": that's the PowOS home/AI page (the 2026-10-22 ab.sh
+  base/fifo recordings show the AI page, not Broforce; the grab-newkernel x11grab PNGs were all empty files).
+- Output anland-1 runs at 119.97 Hz unfolded (2268x2440): a 60 fps game = every 2nd vsync. CPU governor: `uag`.
+- Steam launch-option prefixes run INSIDE the SLR_4 container under FEX: there is no xrandr/python3 there, only
+  `python3.13` (libX11 via ctypes works); /home is shared, /usr is the runtime's.
 - `bf-run.sh` (~10 min, memory + SF pacing + KGSL stats). Queue it, don't wait for a window yourself:
   `tools/phone/verify/queue.sh add <board-task> bf-run.sh` (result lands on the board task).
 - Grab Xwayland's copy of the window (independent of what's on screen): `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`.
@@ -37,7 +47,11 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - Stale/half-drawn frames: KGSL has no implicit sync; Mesa's X11 WSI never waits for Xwayland (x11_needs_wait_for_fences).
   Fix = kernel dma-buf sync_file ioctls (Mesa then imports its render fence into the dma-buf) + xwayland-kgsl 0008 (Present
   copy waits on the exported read fence; glFinish before idle). 0008 logs ENOTTY once on a kernel without the ioctls.
-- Resolution: Unity keeps its saved/launch size (1116x2484 portrait folded) when the output resizes; open.
+- Resolution: Unity 2017.4 starts at its saved size (user.reg 1116x2440, the folded cover) and doesn't follow the output.
+  Fix: `targets/android/steam/unity-screen` as the game's Steam LaunchOptions (`~/.local/share/powos/unity-screen
+  %command%`) appends `-screen-fullscreen 1 -screen-width W -screen-height H` = the X root size at launch. Set with
+  `unity-screen --install <appid>` / `--remove` in the session with Steam OFF (it rewrites localconfig.vdf on exit;
+  backup localconfig.vdf.powos-bak). Installed for 274190 on 2026-10-22. A fold/rotate mid-game still isn't followed.
 
 ## Kernel (targets/android/kernel, docs/PHONE-KERNEL-CONTAINERS.md)
 - Build: `STOCK_BOOT=<stock boot_b.img> JOBS=12 ./build-containers-kernel.sh` (~2 h; the full-LTO link is single-threaded
