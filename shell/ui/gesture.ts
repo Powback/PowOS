@@ -31,6 +31,11 @@ const OPEN_AT = 0.15;
 const CLOSE_KEEP = 0.5;
 /** The drawer moves this much faster than the finger (clamped at the top): it covers its rise in 2/3 of the swipe. */
 const GAIN = 1.5;
+/** The notification panel's / control center's open travel (shell.css --drop, px), as the drawer's --rise. */
+const dropOf = () => {
+  const p = document.querySelector<HTMLElement>(".notif-panel");
+  return (p && parseFloat(getComputedStyle(p).getPropertyValue("--drop"))) || innerHeight * 0.15;
+};
 /** What takes a tap in the launcher; a tap anywhere else in it closes it. */
 const TAPPABLE = ".app, .letter-bar, .msg, .chat-head, button, input, textarea, a, .menu, .tile, [role=button], [role=slider]";
 
@@ -375,7 +380,8 @@ export function homeGestures() {
       lastDx = dx;
       return panelBody()?.style.setProperty("--panel-dx", `${panelResist(dx)}px`);
     }
-    if (g.mode === "notifClose") notifDrag.value = clamp(1 + dy / (g.height * 0.6));
+    // Up, shutting the shade / control center: the finger on its short --drop at the drawer's gain (shell.css).
+    if (g.mode === "notifClose") notifDrag.value = clamp(1 + (dy * GAIN) / dropOf());
     else if (g.mode === "open") drawerDrag.value = clamp((-dy * GAIN) / g.travel);
     else if (g.mode === "close") drawerDrag.value = clamp(1 - (dy * GAIN) / g.travel);
     else {
@@ -409,7 +415,7 @@ export function homeGestures() {
       const q = notifDrag.value ?? 0;
       notifDrag.value = null;
       // A flick decides; otherwise where it was let go (as the drawer).
-      notif.value = v > FLICK ? true : v < -FLICK ? false : q > 0.67;
+      notif.value = v > FLICK ? true : v < -FLICK ? false : q > CLOSE_KEEP;
     } else if (mode === "panel") {
       settlePanel(lastDx, v);
     } else if (mode === "pages") {
