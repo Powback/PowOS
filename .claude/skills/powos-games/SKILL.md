@@ -40,6 +40,25 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - Steam login: a session crash can set `loginusers.vdf` AutoLogin 0 (logon "Service Unavailable") -> back to 1 with Steam off.
 - The cover pad (CoverPadActivity) starts in game mode when unfolded; it was the source of a session-killing ANR (fixed 425ac57).
 
+## Freeze + instant resume (Steam and its game; docs/UNIFIED-SLEEP.md, lib/apps/powos-sleep-gui)
+- cgroup v2 freezer works on the phone's 5.15 (/sys/fs/cgroup/powos/sleep/<key>, powos-sleepd as root); SIGSTOP not used.
+- units/phone/steam.json `sleepBusy.games: "pause"`: a game's windows map to Steam's root pid (app_pid: an ancestor's
+  cmdline has `SteamLaunch`), so the game out of sight 15 s = Steam's whole tree frozen (game inside it). Start grace
+  2m also from the game's reaper; the game's audio stream is ignored. Xwayland/KWin are CORE (never frozen).
+- Launch path: /usr/bin/steam (pkg `steam` pkgrel 20) on `steam://rungameid/<id>` with a running `reaper SteamLaunch
+  AppId=<id>` -> dbus-send `dev.powos.Sleep.Gui.Resume <id>` (thaw + raise via one-shot KWin script) and exit 0; Steam
+  never sees the launch. So a Broforce left running makes the next `bf-start.sh` a resume, not a cold start:
+  bf-stop.sh first for cold-start/Proton checks.
+- CLI: `powos game <name|appid> freeze|thaw|status` (lib/game.sh, any installed Steam game; not the mods registry);
+  `powos-sleep-gui resume|sleep <x>`. Watcher log `/run/powos-app/powos-sleep-gui.log` ("resumed", "frozen in").
+- Ship: build-pkgs.sh steam needs out/pkgs/{fex-emu,gtk2}*.pkg (copy from a worktree that has them) and
+  pkgs/steam/sysvipc-emu.tar.gz (sha 205ee32a, gitignored). sleep-gui: install to /usr/lib/powos/apps, restart it as
+  powos (`setsid -f powos-sleep-gui >> /run/powos-app/powos-sleep-gui.log`; TERM thaws everything it froze).
+  /usr/lib/powos/game.sh is the facade on the phone.
+- Measure: `queue.sh add <task> bf-resume.sh` (cold vs thawed start to first new frame via x11grab framemd5, Steam
+  tree CPU awake-hidden vs frozen, X/KWin latency while frozen, Steam connection_log after a 90 s freeze).
+  Open: whether wine's X windows report a host pid (_NET_WM_PID) - the watcher log shows if game windows map to Steam.
+
 ## Causes found (don't re-investigate)
 - Session killed while gaming: Xwayland dma-buf leak via KGSL forced commits (fixed c8ab446, xwayland-kgsl 0007).
 - Controller dead in games: Steam's virtual pad /dev/input/eventN is root:1004; PowOS `input` group = Android gid 1004
