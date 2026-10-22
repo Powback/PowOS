@@ -53,6 +53,9 @@ fi
 sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock" && { sh_ "input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300"; sleep 1.5; }
 chk lock
 sh_ "am force-stop $PKG; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
+# The fix's APK not installed yet (its tasks carry "floats" unfolded): no verdict, again next window (rc 3).
+fl=$(hcall tasks.list "[]" "l=>l.some(t=>t.floats)?'yes':'no'")
+[ "$fl" = yes ] || { echo "the installed APK has no floating-task data in tasks.list ($fl) - not shipped yet, again next window"; exit 3; }
 key=$(hcall apps.list "[]" "l=>(l.find(a=>/^a:$PKG\\//.test(a.key))||{}).key||'ERR not in the list'")
 case $key in a:$PKG/*) ;; *) fail "Calculator's key: $key" ;; esac
 r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "apps.launch: $r"
