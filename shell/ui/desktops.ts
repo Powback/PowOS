@@ -2,13 +2,14 @@
  * Home's pages as desktops (unfolded home, the user's design 2026-10-22): every floating app window belongs to a home
  * page, like a widget - the page on screen when it opened. Swiping pages switches desktops: that page's windows show,
  * the others leave the screen (the host minimises them, the task keeps running: WindowFrames.desktop). A window
- * brought back from the dock or the drawer ("windows.raised") takes home to its page. Folded, apps are full screen
+ * brought back from the dock or the drawer ("windows.raised") takes home to its page; one let go at the screen's side
+ * ("windows.edge") moves to the page that way, and home goes with it. Folded, apps are full screen
  * and the host lists no windows: nothing here acts.
  *
  * Kept in the store ("home.windows": task id -> page id, next to the dock's pins), so a reload of the page (an update,
  * a hot reload) puts each window back on its page. Page ids are the layout's (Home.pages; -1 is PowOS AI's page).
  */
-import { effect, signal } from "@preact/signals";
+import { batch, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { AppWindow } from "../types.ts";
 import { page, pages, windows } from "../state.ts";
@@ -63,6 +64,19 @@ export function moveTo(id: number, to: number) {
   save({ ...placed.value, [id]: to });
 }
 
+/**
+ * Window [id] let go at the screen's [side] edge (-1 left, 1 right): onto the page that way, home there too - in one
+ * step, so it never counts as another page's window (hidden) in between. No page that way: it stays.
+ */
+export function toEdge(id: number, side: number) {
+  const next = page.value + Math.sign(side);
+  if (page.value < 0 || next < 0 || next >= pages.value.length) return;
+  batch(() => {
+    moveTo(id, pages.value[next]);
+    page.value = next;
+  });
+}
+
 /** The windows of the other pages: out of sight. Sent only when it changes. */
 function hidden(): number[] {
   const cur = pageId();
@@ -87,6 +101,7 @@ export async function startDesktops() {
     sent = key;
     powos.floating.desktop(hide).catch(() => (sent = null));
   });
+  powos.on("windows.edge", (d: { id: number; side: number }) => toEdge(d.id, d.side));
   powos.on("windows.raised", (id: number) => {
     const p = placed.value[id];
     const i = p === undefined ? null : indexOf(p);

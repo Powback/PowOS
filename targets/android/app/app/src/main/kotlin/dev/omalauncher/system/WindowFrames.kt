@@ -65,7 +65,7 @@ class WindowFrames(
         val ids = show.map { it.id }.toSet()
         frames.keys.filter { it !in ids }.forEach { frames.remove(it)?.remove() }
         // Bottom-most first, so a new frame's windows stack over the ones under it.
-        show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, w.pkg, ::minimise) }.place(w.bounds) }
+        show.asReversed().forEach { w -> frames.getOrPut(w.id) { WindowFrame(context, w.id, w.pkg, ::minimise, ::edge) }.place(w.bounds) }
     }
 
     /** The windows (top-most first) whose title bar isn't under a window above them: a covered bar would float over it. */
@@ -75,6 +75,14 @@ class WindowFrames(
             val strip = Rect(w.bounds.left, w.bounds.top - bar, w.bounds.right, w.bounds.top)
             windows.take(i).none { Rect.intersects(it.bounds, strip) }
         }
+    }
+
+    /** Task [id]'s window let go at the screen's [side] edge: home takes it to the next page (shell windows.edge). */
+    private fun edge(
+        id: Int,
+        side: Int,
+    ) {
+        edges.value = Edge(id, side, (edges.value?.seq ?: 0) + 1)
     }
 
     /** Task [id]'s window off the screen, into the dock. */
@@ -133,6 +141,13 @@ class WindowFrames(
         if (next != running.value) running.value = next
     }
 
+    /** A window let go at a screen edge: [side] -1 left, 1 right; [seq] tells two drops apart. */
+    data class Edge(
+        val id: Int,
+        val side: Int,
+        val seq: Int,
+    )
+
     /** A floating window for the dock: its task, app, name and whether it's minimised. */
     data class Running(
         val id: Int,
@@ -161,5 +176,8 @@ class WindowFrames(
 
         /** The floating windows, top-most first, for the dock (home's page reads it: windows.list / windows.changed). */
         val running = mutableStateOf<List<Running>>(emptyList())
+
+        /** The last edge drop (home's page reads it: windows.edge). */
+        val edges = mutableStateOf<Edge?>(null)
     }
 }

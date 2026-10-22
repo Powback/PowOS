@@ -36,6 +36,8 @@ class WindowFrame(
     val id: Int,
     pkg: String?,
     private val onMinimise: (Int) -> Unit,
+    /** Let go at the screen's left (-1) or right (1) edge: the window goes to that home page (WindowFrames.edge). */
+    private val onEdge: (Int, Int) -> Unit = { _, _ -> },
 ) {
     private val wm = context.getSystemService(WindowManager::class.java)
     private val density = context.resources.displayMetrics.density
@@ -229,7 +231,7 @@ class WindowFrame(
 
     /** A finger on the bar (move) or the grip (resize): the frame follows at once, the task as fast as it can. */
     private inner class Drag(
-        private val move: Boolean,
+        val move: Boolean,
     ) : View.OnTouchListener {
         private var x0 = 0f
         private var y0 = 0f
@@ -256,12 +258,36 @@ class WindowFrame(
                     layout(target)
                     resize(target)
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (dragging) resize(Rect(bounds))
-                    dragging = false
-                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> release(e)
             }
             return true
+        }
+    }
+
+    /** The finger up: an edge drop sends the window to the next page, back whole on screen; else it stays put. */
+    private fun Drag.release(e: MotionEvent) {
+        val side = if (move && dragging && e.actionMasked == MotionEvent.ACTION_UP) edgeAt(e.rawX) else 0
+        if (side != 0) {
+            val (s, _) = screen()
+            val left = bounds.left.coerceIn(s.left, maxOf(s.left, s.right - bounds.width()))
+            val back = Rect(left, bounds.top, left + bounds.width(), bounds.bottom)
+            layout(back)
+            resize(back)
+            onEdge(id, side)
+        } else if (dragging) {
+            resize(Rect(bounds))
+        }
+        dragging = false
+    }
+
+    /** -1 at the screen's left edge, 1 at its right, else 0. */
+    private fun edgeAt(x: Float): Int {
+        val (s, _) = screen()
+        val edge = dp(EDGE_DP)
+        return when {
+            x <= s.left + edge -> -1
+            x >= s.right - edge -> 1
+            else -> 0
         }
     }
 
@@ -312,6 +338,9 @@ class WindowFrame(
         /** How far the grip reaches outside the window's corner. */
         private const val GRIP_OUT_DP = 12f
         private const val KEEP_DP = 96f
+
+        /** How near the screen's side a let-go is an edge drop (the next page). */
+        private const val EDGE_DP = 28f
         private const val MIN_W_DP = 280f
         private const val MIN_H_DP = 200f
 

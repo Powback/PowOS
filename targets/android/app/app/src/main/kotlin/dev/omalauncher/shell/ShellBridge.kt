@@ -155,6 +155,12 @@ class ShellBridge(
         scope.launch { runtime.refreshApps() }
         // A floating window opened, minimised, brought back or closed: the dock shows the windows again.
         scope.launch { snapshotFlow { dev.omalauncher.system.WindowFrames.running.value }.drop(1).collect { emit("windows.changed", windows()) } }
+        // A window let go at a screen edge: home moves it to the next page (ui/desktops.ts).
+        scope.launch {
+            snapshotFlow { dev.omalauncher.system.WindowFrames.edges.value }.drop(1).collect { d ->
+                if (d != null) emit("windows.edge", mapOf("id" to d.id, "side" to d.side))
+            }
+        }
         // The home screen changed (here, in the Compose launcher, or a widget file arriving): the page re-reads it.
         scope.launch { snapshotFlow { home.fingerprint() }.drop(1).collect { emit("home.changed", null) } }
         // PowOS AI's conversation (shared with its own app): every item and the busy flag, as they stream in.

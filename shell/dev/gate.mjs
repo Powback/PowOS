@@ -377,7 +377,8 @@ async function relayout(page, to, from) {
 /**
  * In the page: floating windows on home's pages (ui/desktops.ts) - the host stubbed (the mock has no floating
  * windows), two pages. A window opens on the page on screen; swiping pages hides the other page's windows
- * (floating.desktop's list); a window brought back from the dock (windows.raised) takes home to its page.
+ * (floating.desktop's list); a window brought back from the dock (windows.raised) takes home to its page; one let go
+ * at a screen edge (windows.edge) moves to the next page with home.
  */
 async function desktopsCheck() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -413,6 +414,35 @@ async function desktopsCheck() {
   const kept = await powos.store.get("home.windows");
   if (kept?.[101] !== p0 || kept?.[102] !== p1) fails.push(`not stored per page: ${JSON.stringify(kept)}`);
   S.page.value = 0;
+  return fails;
+}
+
+/** In the page, after desktopsCheck: a window let go at a screen edge (windows.edge) goes to the next page with home. */
+async function desktopsEdge() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const D = await importShim("./ui/desktops.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const [, p1] = S.pages.value;
+  const fails = [];
+  const expect = async (what, hid) => {
+    await sleep(150);
+    if ((window.__hid ?? "") !== hid) fails.push(`${what}: hidden [${window.__hid}], not [${hid}]`);
+  };
+  // Window 101 (page 1) let go at the right edge while page 1 shows: it and home go to page 2, never hidden on the way.
+  S.page.value = 0;
+  await expect("page 1 again", "102");
+  const sent = [];
+  powos.floating.desktop = async (h) => (sent.push(h.join()), (window.__hid = h.join()), true);
+  window.__mockEvents.emit("windows.edge", { id: 101, side: 1 });
+  await expect("101 dropped on the right edge", "");
+  if (S.page.value !== 1 || D.placed.value[101] !== p1) fails.push(`an edge drop left home on page ${S.page.value + 1}, the window on ${D.placed.value[101]}`);
+  if (sent.some((h) => h.split(",").includes("101"))) fails.push(`the dropped window was hidden on its way to the next page (${sent.join(" | ")})`);
+  window.__mockEvents.emit("windows.edge", { id: 101, side: 1 });
+  await sleep(150);
+  if (S.pages.value.length === 2 && S.page.value !== 1) fails.push("a drop at the right edge of the last page moved home");
+  window.__mockEvents.emit("windows.edge", { id: 101, side: -1 });
+  await expect("101 dropped on the left edge", "102");
   return fails;
 }
 
@@ -688,6 +718,7 @@ try {
     runs.push(
       open(browser, `${ORIGIN}/index.html`, "desktops", { width: 900, height: 1000 }).then(async (r) => {
         const s = await whenReady(r, () => r.page.evaluate(desktopsCheck));
+        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsEdge).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
