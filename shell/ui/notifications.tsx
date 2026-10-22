@@ -381,7 +381,12 @@ export function NotificationPanel() {
                     allow the launcher to show your notifications here →
                   </button>
                 ) : items.length ? (
-                  grouped(items).map((g) => <Stack key={g.id} g={g} />)
+                  grouped(items).map((g, i) => (
+                    // A row of the cascade (shell.css .cascade): it slides in after the one above it.
+                    <div key={g.id} class="cascade" style={{ "--i": i + 1 }}>
+                      <Stack g={g} />
+                    </div>
+                  ))
                 ) : (
                   <div class="notif-empty muted">nothing new</div>
                 )}

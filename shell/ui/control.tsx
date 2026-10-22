@@ -404,13 +404,13 @@ function askMedia() {
 }
 
 /** The media card, as OnePlus's: the track, its art, play/pause and skip, the output picker. Nothing playing: none. */
-function MediaCard() {
+function MediaCard({ i = 0 }: { i?: number }) {
   useEffect(askMedia, []);
   const m = media.value;
   if (!m?.available || !m.title) return null;
   const progress = m.duration ? Math.min(1, (m.position ?? 0) / m.duration) : 0;
   return (
-    <div class="cc-media" style={{ "--p": String(progress) }}>
+    <div class="cc-media cascade" style={{ "--p": String(progress), "--i": i }}>
       {m.art && <img class="cc-art" src={`/_media/${encodeURIComponent(m.art)}`} alt="" />}
       <button type="button" class="cc-track" onClick={() => (shut(), powos.media.control("open"))}>
         <span class="cc-label">{m.title}</span>
@@ -832,7 +832,7 @@ export function ControlCenter() {
   for (let i = 0; i < ordered.length; i += 4) rows.push(ordered.slice(i, i + 4));
   return (
     <div class="cc">
-      <div class="notif-bar">
+      <div class="notif-bar cascade" style={{ "--i": 0 }}>
         <Clock />
         <span class="notif-actions icons">
           <button type="button" aria-label="settings" onClick={() => (shut(), powos.qs.open("settings"))}>
@@ -840,7 +840,7 @@ export function ControlCenter() {
           </button>
         </span>
       </div>
-      <div class="cc-sliders">
+      <div class="cc-sliders cascade" style={{ "--i": 1 }}>
         <Slider
           name="brightness"
           value={b.value}
@@ -865,11 +865,11 @@ export function ControlCenter() {
           onIcon={() => powos.qs.set("ringer", ((v.ringer + 2) % 3) / 2).then(update)}
         />
       </div>
-      <MediaCard />
+      <MediaCard i={2} />
       <div class={`cc-main ${grid.dragging ? "dragging" : ""}`} {...grid.handlers}>
         {rows.map((row, r) => (
           <Fragment key={r}>
-            <div class="cc-grid">
+            <div class="cc-grid cascade" style={{ "--i": 3 + r }}>
               {row.map(({ g, ts }) => (
                 <GroupTile key={g.id} g={g} ts={ts} />
               ))}

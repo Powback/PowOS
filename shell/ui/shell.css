@@ -1034,6 +1034,17 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
  */
 .notif-items { display: flex; flex-direction: column; gap: 6px; flex: none; }
 .notif-panel.riding :is(.notif-items, .cc) { transform: translateY(min(calc((1 - var(--q)) * var(--drop)), var(--free, 0px))); }
+/*
+ * The cascade, opening: each row (a notification group, the control center's header, sliders, media, a row of tiles:
+ * .cascade, --i its place) comes down from 24 px + 5 px a row above where it rests and fades in, a row starting a
+ * little after the one above it - its own progress --r from the same --q: nothing per frame but --q.
+ */
+.notif-panel.riding .cascade {
+  --s: calc(min(var(--i, 0), 8) * 0.06);
+  --r: clamp(0, calc((var(--q) - var(--s)) / (1 - var(--s))), 1);
+  transform: translateY(calc((1 - var(--r)) * -1 * (24px + min(var(--i, 0), 8) * 5px)));
+  opacity: var(--r);
+}
 .notif-list:has(> .notif-items > .notif-empty) .notif-items { flex: 1; justify-content: center; }
 .notif { padding: 9px 12px; touch-action: pan-y; user-select: none; flex: none; }
 .notif-head { display: flex; align-items: center; gap: 6px; font-size: var(--text-small); }
