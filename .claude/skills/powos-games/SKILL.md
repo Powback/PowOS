@@ -24,9 +24,8 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
 - KWin shows every X toplevel (the game too) as its own Android task (PowosWindowActivity); never `am start andro.marchy.MainActivity` (PowOS home).
 - anland-1 119.97 Hz unfolded (2268x2440): 60 fps = every 2nd vsync; governor `uag`. `bf-run.sh` ~10 min (memory,
   SF pacing, KGSL stats). Launch-option prefixes run INSIDE SLR_4 under FEX: only `python3.13` (ctypes libX11).
-- Xwayland's copy of a window: `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`. Half-drawn metric: dark pixels `c<30 && min4neighbours > c+50`.
-- Render bisect: `bf-checker.sh [variant]...` (~4 min each; TU_DEBUG via Proton user_settings.py, or dxvk.conf): 75 s of
-  loading+menu, X copy + screencaps -> black-checker score (bf-checker.py), menu fps, DXVK log (DXVK_LOG_PATH).
+- Xwayland's copy of a window: `ffmpeg -f x11grab -window_id <id> -i :0 -frames:v 1`; half-drawn = dark px `c<30 && min4nb>c+50`.
+- Render bisect: `bf-checker.sh [variant]...` (~4 min each; TU_DEBUG via Proton user_settings.py / dxvk.conf): black-checker score, menu fps, DXVK log.
 - Unity prefs: pfx `user.reg` `[Software\\Free Lives\\Broforce]`. Steam login: a session crash can set loginusers.vdf
   AutoLogin 0 ("Service Unavailable") -> 1 with Steam off.
 
@@ -53,8 +52,9 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   reaper's tree in that cgroup + 0 CPU ticks in 2 s; resume = out of the cgroup, same reaper, window mapped, a new
   x11grab frame <= RESUME_MS (3000). A touch / stop closes what the check started (exit 3). Launch chains outside
   Steam's tree (ppid 1, a dead Steam's) are killed first: never frozen or resumed, they hold the prefix.
-- A game is never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold Proton start under FEX
-  outlasts the 2 min grace and was frozen mid-start ("the launch did nothing", 2026-10-22).
+- Never auto-frozen before its first window (sleep-gui GAME_WINDOW_S 600): a cold start outlasts the 2 min grace.
+- Launch time by stage: `bf-coldstart.sh [cold|steam|fexcache]...` -> "STAGES" lines (tap->reaper->pv->wineserver->exe->
+  window->frame, ms). fexcache = FEX_ENABLECODECACHINGWIP=1 via Proton user_settings.py (removed after) + FEXOfflineCompiler.
 - adb.sh mounts each pushed path's dirname: a path with `..` pushes nothing ("cannot stat") - resolve it first.
 
 ## Causes found (don't re-investigate)
