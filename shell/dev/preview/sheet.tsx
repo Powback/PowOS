@@ -306,9 +306,10 @@ const painted = (cs: CSSStyleDeclaration) =>
  * - a slider (a range, role=slider: a drag-to-dim pill) inside something that scrolls sideways;
  * - a sideways drag (touch-action none / pan-y) without the flag home's pager respects (role=slider, data-owns-gesture);
  * - hard border: a drawn 1px+ line round content (the design language: no lines).
- * An island's shared offline state (.island-offline.alone: the app can't reach its device, nothing to show) is
- * sparse by design - the user asked for one calm muted line, not a filled tile - so unfilled / small content don't
- * apply to it; everything else (clipped text above all) does.
+ * An island's shared offline state (.island-offline.alone: the app can't reach its device, nothing to show) and the
+ * Agents widget's compact empty line (.ag-idle-line: nobody running, a small tile / the desktop) are sparse by design -
+ * one calm muted line was asked for, not a filled tile - so unfilled / small content don't apply to them; everything
+ * else (clipped text above all) does.
  */
 /** How much of each tile its content covered, %, by tile key: the last check()'s. */
 export const fills: Record<string, number> = {};
@@ -426,7 +427,7 @@ export function check(EMPTY = 0.12, COVER = 0.25) {
     if (face.dataset.pvSheet) problems.push(...face.dataset.pvSheet.split("\n"));
     for (const t of clipped) problems.push(`clipped text "${t}"`);
     for (const t of cut) if (!clipped.has(t)) problems.push(`row cut in half "${t}"`);
-    if (face.querySelector(".island-offline.alone")) {
+    if (face.querySelector(".island-offline.alone, .ag-idle-line")) {
       if (!(ink.right > ink.left)) problems.push("nothing drawn");
     } else if (ink.right > ink.left) {
       const W = inner.right - inner.left;
