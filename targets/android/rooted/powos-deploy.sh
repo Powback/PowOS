@@ -24,7 +24,7 @@ install -m 755 $T/powos-android-app $R/usr/local/bin/powos-android-app
 install -m 755 $T/powos-android-tasks $R/usr/local/bin/powos-android-tasks
 # PowOS's apps for Android: the PowOS app's drawer, search and Android shortcuts (it runs this, rooted mode).
 install -m 755 $T/powos-apps-export $R/usr/local/bin/powos-apps-export
-# ...kept current from KSycoca's change signal (D-Bus, nothing polls), and Plasma itself as an app in that drawer.
+# ...kept current when kded6 rebuilds KSycoca (inotify, nothing polls), and Plasma itself as an app in that drawer.
 install -m 755 $T/powos-apps-watch $R/usr/local/bin/powos-apps-watch
 install -m 644 $T/powos-apps-watch.desktop $R/etc/xdg/autostart/powos-apps-watch.desktop
 install -Dm 644 $T/powos-plasma/org.powos.plasma.desktop $R/usr/share/applications/org.powos.plasma.desktop

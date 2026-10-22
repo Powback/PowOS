@@ -425,9 +425,10 @@ stays paused: the drawer entry opens Plasma's own shell, not ours.
 - Apps: KService's view of the menu. powos-apps-export reads the same XDG .desktop entries KService indexes, with
   Kickoff's rules (NoDisplay/Hidden/OnlyShowIn/NotShowIn, first id wins) and Plasma's icon theme. Exists; it ran only
   on app start and pacman calls from the app. Now event-driven: kded6 rebuilds KSycoca when an application dir
-  changes and kbuildsycoca broadcasts `org.kde.KSycoca.notifyDatabaseChanged` on the session bus; `powos-apps-watch`
-  (dbus-monitor on that one signal, blocked at rest) reruns the export, which renames apps.tsv into place; the app's
-  FileObserver on run/powos-apps sees the MOVED_TO and reloads the list -> `apps.changed` -> the drawer.
+  changes. KF6 (KService 6.31) no longer broadcasts `org.kde.KSycoca.notifyDatabaseChanged` on D-Bus (no emitter left,
+  measured); its clients watch the database file. So `powos-apps-watch` does too: one inotify watch on
+  ~/.cache (a new ksycoca6_*), blocked at rest -> the export -> the app's FileObserver on the export's last rename
+  (icons/.icon-names) reloads the list -> `apps.changed` -> the drawer.
 - Opening: exists. Runtime.openRooted -> `powos-open-task` -> KWin's org.powos.WindowTasks.show (pkgs/kwin 0013):
   an existing window comes back, else the app starts and its first window becomes its own Android task.
 - Window list: exists for the dot. powos-sleep-gui writes running/apps.json from KWin's window list (a KWin script,
@@ -446,10 +447,10 @@ stays paused: the drawer entry opens Plasma's own shell, not ours.
   "find my phone" from org.kde.kdeconnect.device later, only if the user wants them.
 
 **Slices**
-1. Plasma app in the drawer + the Linux list event-driven from KService's change signal, launched through KWin (this
+1. Plasma app in the drawer + the Linux list event-driven from KService's rebuilds, launched through KWin (this
    slice: org.powos.plasma.desktop, powos-apps-watch, the app's FileObserver and PLASMA_COMMAND; unit android-apps).
 2. Linux windows floating on home pages: WindowTasks freeform when unfolded, frames and the dock's windows for them.
 3. Plasma notifications (KDE Connect's included) in the shade.
 4. Clipboard both ways.
 
-Cost rule for every slice: zero CPU at rest. D-Bus signals and inotify only, no polling.
+Cost rule for every slice: zero CPU at rest. D-Bus signals and inotify only, no polling. (3) is D-Bus throughout.

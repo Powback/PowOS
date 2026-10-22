@@ -3,7 +3,7 @@
   "name": "Android apps in PowOS",
   "kind": "system",
   "owner": "system:powos-deploy",
-  "purpose": "Android apps as PowOS windows and PowOS apps as Android tasks: scrcpy over adb to the phone itself, the app list export (kept current from KSycoca's change signal) and Plasma as a drawer app, the task bridge",
+  "purpose": "Android apps as PowOS windows and PowOS apps as Android tasks: scrcpy over adb to the phone itself, the app list export (kept current when KSycoca is rebuilt, inotify) and Plasma as a drawer app, the task bridge",
   "installedBy": "targets/android/rooted/powos-deploy.sh",
   "packages": [
     "scrcpy",
@@ -31,10 +31,7 @@
       "match": "^adb .*fork-server"
     },
     {
-      "match": "^/bin/bash /usr/local/bin/powos-apps-watch"
-    },
-    {
-      "match": "^dbus-monitor --session type='signal',interface='org.kde.KSycoca'"
+      "match": "^python3 /usr/local/bin/powos-apps-watch"
     }
   ],
   "limits": {

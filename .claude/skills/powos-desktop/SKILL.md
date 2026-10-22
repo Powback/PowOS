@@ -27,10 +27,11 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
 ## Plasma as an app + the web launcher's Linux backend (plan: docs/DESKTOP-WEB-SHELL.md, last section)
 - Drawer "Plasma" = l:org.powos.plasma (session/plasma/org.powos.plasma.desktop, OnlyShowIn=X-PowOS so Kickoff hides
   it; the export accepts X-PowOS). Exec powos-plasma = PLASMA_COMMAND: Runtime.launch -> showDesktop() (MainActivity).
-- Linux list: powos-apps-export (KService's rules over XDG dirs) -> run/powos-apps. powos-apps-watch (autostart;
-  dbus-monitor on org.kde.KSycoca.notifyDatabaseChanged, kded6 -> kbuildsycoca6) reruns it; the app's FileObserver on
-  icons/.icon-names (MOVED_TO, the export's last step) -> refreshApps(export=false). Unit android-apps. Launch: powos-open-task.
-- Check: verify/plasma-app.sh (watcher idle, entry, emitted signal -> new export, apps.list, apps.launch -> MainActivity).
+- Linux list: powos-apps-export (KService's rules over XDG dirs) -> run/powos-apps. powos-apps-watch (autostart,
+  python inotify on ~/.cache ksycoca6_*, which kded6 rebuilds on an app dir change) reruns it; the app's FileObserver
+  on icons/.icon-names (the export's last rename) -> reloadPowosApps(). Unit android-apps. Launch: powos-open-task.
+- KF6 6.31 sends NO org.kde.KSycoca.notifyDatabaseChanged on D-Bus (kbuildsycoca6 measured silent): watch the file.
+- Check: verify/plasma-app.sh (watcher idle, entry, kbuildsycoca6 -> new export, apps.list, apps.launch -> MainActivity).
 
 ## Shot checks (shell/dev/shots.mjs, after each scene)
 - Errors per shot: overlapping tiles (>1 px), partial joins, uneven gutters on mode=desktop, missing glyphs.

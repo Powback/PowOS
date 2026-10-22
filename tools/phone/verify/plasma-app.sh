@@ -1,10 +1,10 @@
 #!/bin/bash
 # plasma-app.sh [OUT]: Plasma as a drawer app + the Linux app list from KSycoca's change signal (board task "Plasma as
 # app + backend for the web launcher", slice 1; docs/DESKTOP-WEB-SHELL.md). Steps:
-#   1. the session runs powos-apps-watch (its dbus-monitor on org.kde.KSycoca.notifyDatabaseChanged), idle at rest;
+#   1. the session runs powos-apps-watch (inotify on ~/.cache's ksycoca6_*), idle at rest;
 #   2. apps.tsv lists org.powos.plasma;
-#   3. the signal (emitted here, gdbus, as the session user; without kbuildsycoca6's string list, so KSycoca's own
-#      listeners ignore it) reruns the export (.icon-names renamed anew) - no file is created or changed by hand;
+#   3. a KSycoca rebuild (kbuildsycoca6, as kded6 runs it on an app dir change, as the session user) reruns the export
+#      (.icon-names renamed anew) - no file is created or changed by hand, only KService's own cache;
 #   4. home's bridge apps.list has "l:org.powos.plasma" (the app re-read the list itself);
 #   5. apps.launch of it (the drawer tap's call) brings the Plasma desktop (andro.marchy.MainActivity) in front.
 # Always restores: home. Exit: 0 passed; 1 FAIL; 3 a real touch / not awake (re-queued); 5 keyguard with a PIN.
@@ -31,7 +31,7 @@ hcall() {
 }
 
 # 1. The watcher, and that it sleeps (ticks of its processes over 5 s).
-pids=$(sh_ "pgrep -f -d, \"powos-apps-watch|dbus-monitor --session type=.signal.,interface=.org.kde.KSycoca\"")
+pids=$(sh_ "pgrep -f -d, \"^python3 /usr/local/bin/powos-apps-watch\"")
 [ -n "$pids" ] || fail "powos-apps-watch isn't running (rooted.sh deploy, then a new session start)"
 t() { sh_ "for p in ${pids//,/ }; do awk '{s+=\$14+\$15} END{print s}' /proc/\$p/stat; done" | awk '{s+=$1} END{print s}'; }
 t0=$(t); sleep 5; t1=$(t)
@@ -42,14 +42,14 @@ pass "watcher running ($pids), $((t1 - t0)) ticks in 5 s"
 sh_ "grep -c ^org.powos.plasma $RUN/apps.tsv" | grep -q '^1$' || fail "apps.tsv has no org.powos.plasma"
 pass "apps.tsv lists Plasma"
 
-# 3. KSycoca's signal -> a fresh export.
+# 3. A KSycoca rebuild -> a fresh export.
 first=$(sh_ "stat -c %y $RUN/icons/.icon-names")
 [ -n "$first" ] || fail "no icons/.icon-names (the export never ran)"
-us_ "gdbus emit --session --object-path / --signal org.kde.KSycoca.notifyDatabaseChanged" >/dev/null
+us_ "kbuildsycoca6 --noincremental >/dev/null 2>&1" >/dev/null
 sleep 4
 second=$(sh_ "stat -c %y $RUN/icons/.icon-names")
-[ "$first" != "$second" ] || fail "KSycoca's signal didn't rerun the export (.icon-names $first)"
-pass "the signal reran the export ($second)"
+[ "$first" != "$second" ] || fail "a KSycoca rebuild didn't rerun the export (.icon-names $first)"
+pass "the rebuild reran the export ($second)"
 
 # 4. The app's list (it re-read on that rename).
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
