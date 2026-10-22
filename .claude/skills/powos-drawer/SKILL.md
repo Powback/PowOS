@@ -1,72 +1,73 @@
 ---
 name: powos-drawer
-description: Load before changing or debugging the PowOS app drawer / launcher panel (shell/ui/drawer.tsx, gesture.ts drag, shell.css .launcher/.dock/.bar, the fade, recents row, A-Z bar, search pill spacing) or measuring its drag/scroll performance.
+description: Load before changing or debugging the PowOS app drawer / launcher panel (shell/ui/drawer.tsx, gesture.ts drag, shell.css .launcher/.dock/.bar, the fade, recents row, A-Z bar, search pill, dock's recent apps, themed app icons) or measuring its drag/scroll performance.
 ---
 
-## Architecture (2026-10-21)
-- Markup (home.tsx, same in pull.tsx): `.stage > .launcher[data-p] > (.launcher-frame.tile, .launcher-inner >
-  .drawer-clip > Drawer | .ai-panel)`; `.home > .bar[data-p]` and `.home > .dock[data-p]` follow it too.
-- Laid out ONCE at the open size: `.launcher` spans the stage top to the screen foot (bottom: -(48px + strip + foot);
-  no bar: -(strip + foot); pull page: -(48px + foot)); `.launcher-inner` padding-bottom keeps the drawer above the pill.
-  Nothing changes size during a drag: the dock slides down + fades (opacity 1 - min(1, 3p)), the bar slides down by
-  --strip-height (not in pill-below or the pull page), home-content fades/scales.
-- `--p` (0..1) is a registered, NON-inherited property; `--fade` too. Readers below a [data-p] element must inherit it
-  by name (only `.cc-media::after` does). The launcher: translateY((1-p)*100%), opacity 1-(1-min(1,p/0.8))^3 (one
-  ease-out for frost and content: 95% at half-way, whole by 80%).
-- Drag (gesture.ts): `follow(p)` gives each [data-p] element one paused WAAPI animation (id "drawer") whose keyframes
-  are its own computed transform/opacity at 41 values of --p (`tableOf`, cached per size/pill-below); the finger sets
-  currentTime. Release: `settle(p, to)` re-times the table along cubic-bezier(0.1,0.8,0.2,1) over 180 ms, --p set to
-  `to` underneath, animation cancelled at the end. Settle waits a microtask (drawerDrag=null and drawer= are two
-  writes). Without a finger (tap/Back/launch) --p's CSS transition (180 ms) does it.
-- Finger mapping: p = dy * GAIN(1.5) / launcher height. Open on flick >= 0.2 px/ms or p > 0.15; close keeps open
-  above 0.67. Pull over apps: Kotlin sends pull.drag p (pull.tsx), same follow/settle path.
-- Drawer: A-Z `.grid.az` in `.drawer-list` (padding-right = --letter-bar, so names clear the letters); RecentRow
-  (`.drawer-recents`, one grid row, extra rows height 0) fixed under the list by the pill; LetterBar "#" = the recent
-  row (no scroll). Pill: `.bar-pill` bottom = `--pill-foot` (theme.css), same token as PowOS AI's `.ai-compose`.
-- Native blur: nativeglass.ts sends regions ("b.r") for `.tile`s; the frame is the panel's region (others inside
-  .launcher skipped); region alpha = product of ancestor opacities. Host (GlassBlur.kt) has static regions + alpha
-  only - no transform, no alpha animation - so a moving/fading frost is re-sent per frame.
+## Architecture (2026-10-22)
+- Markup (home.tsx; pull.tsx the same): `.stage > .launcher-frame.tile[data-p]` (the frost, a sibling, to the screen
+  foot) + `.launcher-clip[data-p] > .launcher[data-p] > .launcher-inner > .drawer-clip > Drawer | .ai-panel`;
+  `.home > .bar[data-p]`, `.home > .dock[data-p]`, `.home-content[data-p]` follow too. desktop.tsx keeps the frost
+  inside .launcher and its own desktop.css: don't touch it.
+- Laid out ONCE at the open size; a drag changes only transforms/opacity. `--rise: 15vh` (registered <length>, on
+  .home) is THE knob for where the open starts (user: 30vh, then "further up"; "start half-way" + full travel both
+  tried and replaced). Frost + launcher: translateY((1-p)*--rise), opacity 1-(1-min(1,p/0.8))^3.
+- `.launcher-clip` is the drawer's window, cut at the search pill's top (bottom: 4px - strip) with a 12px mask fade;
+  it rides with the pill as the bar slides (clip translateY((p-1)*strip), launcher in it (1-p)*(rise+strip)) so no app
+  row is ever under the pill. `.launcher-clip .launcher-inner` padding-bottom 16px = last row 16px clear of the pill.
+  pill-below / pull / no-bar: static window. Check: `cdp.sh eval home "$(cat shell/dev/perf/geometry.js)"` (read-only).
+- Dock slides down + fades (1 - min(1,3p)); bar slides by --strip-height (not pill-below/pull).
+- `--p`, `--fade` registered NON-inherited; `.cc-media::after { --p: inherit }` is the only by-name reader.
+- Drag (gesture.ts): module functions startGesture/moveGesture/endGesture (claim by place, `dragTo` switch, one settle
+  per kind - under the complexity lint). `follow(p)`: each [data-p] element one paused WAAPI animation (id "drawer",
+  keyframes = its computed transform/opacity at 41 --p values, `tableOf` cached); finger sets currentTime. `settle`
+  re-times along cubic-bezier(0.1,0.8,0.2,1) 180 ms, then --p shows through. Settle waits a microtask (two writes).
+  Tap/Back/launch: --p's CSS transition.
+- Finger: p = dy*GAIN(1.5)/--rise px (gesture reads --rise). Open: flick >= 0.2 px/ms or p > 0.15. Close keeps it open
+  above CLOSE_KEEP 0.5 (~45 px of finger). Pull over apps: Kotlin pull.drag p, same path.
+- Drawer: A-Z `.grid.az` in `.drawer-list` (padding-right --letter-bar). RecentRow (`.drawer-recents`) is OFF by
+  default: `drawerRecents = stored("drawer.recents")`, "on" shows it; Settings > style > home > "recent apps in the
+  drawer". The check is inside RecentRow (Drawer itself is at the cyclomatic limit).
+- Pill: empty height = `--pill-height` 40px (theme.css; on screen 44 with borders), grows only with typed lines up to 3
+  (grow.tsx: empty = one row at any width, re-measured on width change - a narrow-measured empty pill stuck at 3 rows,
+  2026-10-22). `.bar-pill` bottom = `--pill-foot` 6px, same as `.ai-compose`. The gate's "pill" run asserts it (foot,
+  compose, search widget 6x1/6x2/2x1, after narrow->wide). Widths: wide home's cap is the desktop agent's.
+- Dock's recent apps (home.tsx Dock 2nd page `.dock-page.dock-recent`): `.dock .dock-recent .app` flex 0 0
+  calc((100cqw - 28px)/6), `.dock-pages` container-type inline-size. NOT 100vw: WebView's vw was 688 on the 404 cover.
+  Check: shell/dev/perf/dock-scroll.sh (one free window: swipe, scrollLeft, widths, screencap).
+
+## Themed icons (board theme-recolor-icons)
+- Slice 1 (8f5c995): ui/icontint.ts. `iconTint = stored("icons.tint")`: "" (apps' own) | "mono". Settings > style >
+  icons > "icon colours". AppIcon uses `tinted(src) ?? src`. Each icon redrawn ONCE in idle time on a canvas (<=192px):
+  per pixel HSL(accent hue, sat clamp 0.35-0.8, L 0.12+0.76*luminance), blob object URL, cached per mode|accent|src,
+  cleared on theme/mode change; `ready` signal bumps per batch of 8. Icons are same-origin (shell.powos/_icon/...),
+  canvas-readable. Near-black icons stay near-black (luminance kept). Style lint: no `hsl(` identifiers.
+- Slice 2 (next): mode "hue" - keep each icon's own saturation/lightness, map its hue onto the theme palette
+  (accent/red/green/yellow from --color-*: nearest-hue swap) so multi-colour icons stay multi-colour; a third
+  Segmented option; same cache. Then per-theme default (a theme can ask for mono).
 
 ## Pitfalls hit
-- Inherited --p restyled every app cell and widget per frame (3.3 ms headless). Unregistered intermediates
-  (`--fade: calc(...var(--p))`) inherit too - register them `inherits: false`.
-- `:is()` can't hold pseudo-elements: `.cc-media::after` needs its own selector.
-- Two rules setting `transition` on one element ([data-p] vs [data-q]) - the later wins, the other jumps.
-- Layout-affecting --p readers (dock height, frame top/bottom, clip-path) - each frame relaid the stage. Keep to
-  transform/opacity.
-- A component reading `drawerDrag.value` in render re-renders per frame (pull.tsx did, with all of Drawer) - use a
-  computed boolean.
-- "Start half-way up" was tried and reverted by the user: full travel from the bottom, faster (GAIN), front-loaded fade.
-- Frost at full alpha from frame 1 "popped": frost and content must share one fade.
-- A stale shell.css from another tree once clobbered the drawer on the phone (one column; first blamed on the recents
-  strip): push.sh now refuses files that aren't origin's (handbook Shipping). shell.css and gesture.ts are shared with
-  design/switcher/widgets/gestures: rebase right before you push them, then verify on the device.
-- Agents' CDP checks that set --p in the LIVE home opened the drawer on the user's screen: live CDP is read-only.
-- The gate times out ("not ready") when the Mac is loaded: READY_MS=30000.
+- Inherited --p (and unregistered intermediates like --fade) restyled every cell per frame: register inherits:false.
+- `:is()` can't hold pseudo-elements. Two rules setting `transition` on one element: the later wins.
+- Layout-affecting --p readers (dock height, frame top/bottom, clip-path) relaid the stage per frame.
+- A render reading `drawerDrag.value` re-renders per frame: use a computed boolean. A `useEffect` deps array reading
+  `drawerOpen.value` subscribes the component: Pages re-rendered every page's glass on each open/close (removed).
+- Frost at full alpha from frame 1 "popped": frost and content share one fade.
+- Same-specificity later rules win silently (`.dock .app { flex: 1 }` beat the recents width): read computed styles.
+- Stale shell.css from another tree clobbered the drawer once: push.sh refuses non-origin files. Rebase right before.
+- Live CDP is read-only; temporary UI (edit mode, open drawer, menus) may be closed with Back in a free window
+  (drag-raster.sh does it). A check that sets anything must restore in a trap/finally.
+- A `&&` chain after the gate doesn't stop on gate FAIL (grep exits 0): gate, look, THEN commit/push.
+- The Mac loaded (~24): pages boot in ~45 s - gate with READY_MS=90000 (push.sh's retry honours it).
 
 ## Test / measure
-- Renders: `READY_MS=30000 SHOTS_ONLY='^(drawer|home|pull-apps|pull-ai|ai|search-typing)$' shell/dev/gate.sh --tree
-  --shots DIR`; mid-drag: SHOTS_PROBE that sets `(await importShim("./ui/gesture.ts")).drawerDrag.value = 0.35`.
-- Headless perf/behaviour: `shell/dev/perf/run.sh <probe.js> [shell-dir] [scene]` - shots.mjs patched on the fly
-  to print Chromium's metrics (LayoutCount, RecalcStyleCount, durations) around the probe, both screens. For a
-  before/after, extract the old shell (`git archive <rev> shell | tar -x -C DIR`) and pass DIR/shell; run them back
-  to back (the Mac's load skews timings, not counts). Probes in shell/dev/perf/: slow.js (60-frame slow drag),
-  drag.js (per-frame forced style/layout), open.js (flick -> settled ms, from the drawn transform), scroll.js (blur
-  region sets / mutations per drawer-scroll frame), check.js (open and close settle to rest, 0 animations left).
-  Bisect a cost by injecting CSS or removing data-p at the top of a probe.
-- Device (screen on, home visible, user idle - one `tools/phone/idle.sh --wait 120 1800` first):
-  `shell/dev/perf/device.sh [slow2s.js]` - metrics 3 s at rest, then a 2 s slow drag + close (frames, dropped,
-  worst, Chromium metrics; devperf.ts in powos-vadb). Read-only checks any time: `tools/phone/cdp.sh eval "" '<js>'`
-  reading computed opacity/transform, `cdp.sh idle 3 ""`. Setting --p on [data-p] (transition none) to read values at
-  a given p ONLY inside that free window and restored in the same call - it shows on the user's screen.
-- What a drag costs to DRAW on the phone, one free window: `shell/dev/perf/drag-raster.sh [secs] ["label=css" ...]`
-  (injected swipes as perf-window.sh; cdp.sh raster + cpu.sh per run; each "label=css" is a <style> added for that
-  run only). TRACE=1: shell/dev/perf/trace.ts instead - Paint by page and DOM node, script time by url:line, raster
-  tasks. SWIPES=up: up + Back (no down swipe). The trace spans every page of the one renderer (shade, pull, ...).
-- Found 2026-10-21 (drag at 120 Hz, app ~130%, renderer ~100%, SF ~60%): the drawer itself ~2 ms/s script, no paints.
-  The cost is others': the pet riding the drawer's edge repaints the whole document ~65/s (pet hidden: 10/s, GPU
-  raster 192 -> 93 ms/s; will-change on .pet doesn't help - its art repaints); a DOWN swipe on the open drawer
-  makes the hidden shade page repaint full-screen ~73/s (200 Mpx/s); nativeglass's per-frame measure ~107 ms/s.
-  Own layers for home-content/dock/bar, content-visibility on the grid, no label shadows, no group fade: no change.
-- Baselines: headless 60-frame slow drag, style recalc 260 ms -> 64 (layout 64 -> 0) -> 37 ms (WAAPI). No device
-  drag numbers yet.
+- Renders: `READY_MS=90000 SHOTS_ONLY='^(drawer|home|pull-apps|search-typing)$' shell/dev/gate.sh --tree --shots DIR`;
+  mid-drag: SHOTS_PROBE setting `(await importShim("./ui/gesture.ts")).drawerDrag.value = 0.45`.
+- Headless: `shell/dev/perf/run.sh <probe> [shell-dir]` (Chromium metrics + layer paints). Probes: slow.js, drag.js,
+  open.js, scroll.js, check.js (open/close settle), pages.js (page swipe), geometry.js. Before/after: `git archive
+  <rev> shell | tar -x -C DIR`, pass DIR/shell, run back to back.
+- Device: `PROFILE=1 shell/dev/perf/drag-raster.sh 12` (verify lock, one free window, Back-reset) - JS ms/s per
+  function; TRACE=1 paints by page/node. device.sh + slow2s.js, dock-scroll.sh, geometry.js.
+- Drag cost found: drawer itself ~2 ms/s script, 0 paints. Others: pet (now off by default) repainted the document
+  ~65/s; a down swipe made the hidden shade repaint ~73/s; nativeglass measure ~30-107 ms/s. Device profile with the
+  15vh mask: app 57 / renderer 74 / SF 26 (% of a core; was 105/97/62, pet still on then). Headless 60-frame slow
+  drag style recalc 260 -> 37 ms, layout 64 -> 0.
