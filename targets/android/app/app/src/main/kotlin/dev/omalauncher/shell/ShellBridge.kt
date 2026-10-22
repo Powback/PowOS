@@ -445,7 +445,13 @@ class ShellBridge(
                 else -> android.app.ActivityOptions.makeBasic()
             }
         // Unfolded: a full-screen task comes back as a floating window, like any app opened there.
-        return dev.omalauncher.system.Tasks.open(context, id, dev.omalauncher.system.AppWindows.taskOptions(context, id, options))
+        val floats = dev.omalauncher.system.AppWindows.floating(context)
+        val ok = dev.omalauncher.system.Tasks.open(context, id, dev.omalauncher.system.AppWindows.taskOptions(context, id, options))
+        // A floating window leaves home in sight, so home never stops and "recents.hide" (Switcher.homeStopped) never
+        // comes: the switcher's layer - and the card grown over it - stayed behind the window, a full-screen ghost of
+        // the app (2026-10-23). The layer goes once the window is up over its card.
+        if (ok && floats) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ dev.omalauncher.system.Switcher.hide() }, WINDOW_UP_MS)
+        return ok
     }
 
     private fun density() = context.resources.displayMetrics.density
@@ -475,8 +481,13 @@ class ShellBridge(
         // A snapshot URL per task and per time it was last in front: the page's cache keeps a card's picture till the
         // task was used again (the switcher's own app gets a fresh one when its window lands, Switcher.settle).
         val stamp = System.currentTimeMillis()
+        // Unfolded, every task comes back as a floating window ("floats"); one that is a window already comes back where
+        // it is ("window", CSS px of this page): its card grows to there, never to the full screen.
+        val floats = dev.omalauncher.system.AppWindows.floating(context)
+        val windows = if (floats) dev.omalauncher.system.FreeformTasks.list(context).associateBy { it.id } else emptyMap()
         return JSONArray(
             dev.omalauncher.system.Tasks.list(context).map { t ->
+                val w = windows[t.id]?.bounds
                 val pkg = t.component?.packageName
                 val app = runtime.androidApps.apps.firstOrNull { it.component == t.component && it.profile == null } ?: runtime.androidApps.apps.firstOrNull { it.component.packageName == pkg && it.profile == null }
                 JSONObject()
@@ -484,7 +495,17 @@ class ShellBridge(
                     .put("label", t.label ?: app?.label ?: pkg ?: "")
                     .put("key", app?.let { "a:${it.key}" } ?: JSONObject.NULL)
                     .put("icon", app?.let { icon("a:${it.key}") } ?: JSONObject.NULL)
-                    .put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=${t.lastActive.takeIf { it > 0 } ?: stamp}")
+                    // A window's picture is taken fresh as it's served (ShellHost): its version names its bounds too,
+                    // so a window resized since is fetched again, not the cached one of its old size.
+                    .put("snapshot", "${ShellHost.ORIGIN}/_task/${t.id}?v=${t.lastActive.takeIf { it > 0 } ?: stamp}${w?.let { "-${it.width()}x${it.height()}" } ?: ""}")
+                    .apply {
+                        if (floats) put("floats", true)
+                        if (w != null) {
+                            val at = IntArray(2).also(web::getLocationOnScreen)
+                            val d = density()
+                            put("window", JSONObject().put("left", (w.left - at[0]) / d).put("top", (w.top - at[1]) / d).put("width", w.width() / d).put("height", w.height() / d))
+                        }
+                    }
             },
         )
     }
@@ -870,6 +891,9 @@ class ShellBridge(
 
     companion object {
         private const val TAG = "PowosShell"
+
+        /** A task opened as a floating window is up over its grown card by then: the switcher's layer may go. */
+        private const val WINDOW_UP_MS = 150L
 
         /** ShellActivity's request code for the mic permission. */
         const val MIC_REQUEST = 41

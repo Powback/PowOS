@@ -212,6 +212,10 @@ export interface RecentTask {
   key: string | null;
   icon: string | null;
   snapshot: string;
+  /** Unfolded: it comes back as a floating window (its card grows to [window], or the host opens it out of the card). */
+  floats?: boolean;
+  /** A floating window already: where it is (CSS px of the page), where it comes back. */
+  window?: { left: number; top: number; width: number; height: number };
 }
 /** [available]: the launcher may read them (it has notification access). */
 /**

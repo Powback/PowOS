@@ -55,7 +55,7 @@ const menu = signal<{ id: number; left: number; top: number } | null>(null);
 /** Split screen: the first app picked, waiting for the second. */
 const splitFirst = signal<number | null>(null);
 /** A card growing to the screen as its app opens. */
-const opening = signal<{ id: number; rect: Rect; src: string; radius: string } | null>(null);
+const opening = signal<{ id: number; rect: Rect; src: string; radius: string; to?: Rect } | null>(null);
 /** Apps kept from "clear all" (by app, as Android's lock: task ids don't outlive a reboot). */
 const pinned = signal<Set<string>>(new Set());
 /** The cards' snapshots are in the page (the switcher up, or on its way up or down); off at rest. */
@@ -214,6 +214,8 @@ async function landed(snapshot: string | null) {
 /**
  * Opens task [id] from its card: the card's frame grows to the screen (a spring), then the app is opened with no
  * animation of its own - it appears over its own snapshot. The layer stays till home is out of sight ("recents.hide").
+ * Unfolded the card grows to the app's floating window instead; home stays in sight, so the host sends "recents.hide"
+ * once the window is up (ShellBridge.openTask).
  */
 function open(id: number, shot?: HTMLElement) {
   menu.value = null;
@@ -231,7 +233,15 @@ function open(id: number, shot?: HTMLElement) {
     return;
   }
   const r = img.getBoundingClientRect();
-  opening.value = { id, rect: { left: r.left, top: r.top, width: r.width, height: r.height }, src: img.currentSrc || img.src, radius: getComputedStyle(img).borderTopLeftRadius };
+  const rect = { left: r.left, top: r.top, width: r.width, height: r.height };
+  // A full-screen task that comes back as a new floating window (unfolded): where it lands isn't known here, so the
+  // host opens it out of its card - never a full-screen frame of it. The host closes the layer once it's up.
+  if (t.floats && !t.window) {
+    powos.tasks.open(id, rect).then((ok) => void (ok || refresh()));
+    return;
+  }
+  // A floating window grows back to where it is, not to the screen (home stays in sight behind it).
+  opening.value = { id, rect, src: img.currentSrc || img.src, radius: getComputedStyle(img).borderTopLeftRadius, to: t.window };
 }
 
 /** The growing card reached the screen's edges: the app now. */
@@ -429,12 +439,15 @@ function Opening() {
   useLayoutEffect(() => {
     if (!o || !el.current) return;
     const { left, top, width, height } = o.rect;
-    const sx = width / size.value.w;
-    const sy = height / size.value.h;
+    // Its box is the screen, or the floating window it goes back to (its picture is that window's: covers it whole).
+    const to = o.to ?? { left: 0, top: 0, width: size.value.w, height: size.value.h };
+    if (o.to) Object.assign(el.current.style, { width: `${to.width}px`, height: `${to.height}px` });
+    const sx = width / to.width;
+    const sy = height / to.height;
     el.current.animate(
       [
         { transform: `translate(${left}px, ${top}px) scale(${sx}, ${sy})`, borderRadius: `${parseFloat(o.radius) / sx}px` },
-        { transform: "none", borderRadius: "0px" },
+        { transform: `translate(${to.left}px, ${to.top}px)`, borderRadius: "0px" },
       ],
       { duration: Math.min(spring.ms, 320), easing: "cubic-bezier(0.2, 0.9, 0.2, 1)", fill: "forwards" },
     ).onfinish = () => opened(o.id);

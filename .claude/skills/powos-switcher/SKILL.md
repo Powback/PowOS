@@ -25,6 +25,13 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   .home 0 px tall for the swipe (bare wallpaper). `.screens` is `position:absolute; inset:0`: any transformed ancestor
   of fixed UI needs a real box.
 - Over an app home stays fully opaque during the drag (only recedes by scale); fades under the cards only in landed().
+- Reopen ghost (2026-10-23): a card opened grows (`opening`, .recents-expand: screen-sized, object-fit cover) and the
+  layer stays till "recents.hide", which only comes from home STOPPING. A floating window leaves home in sight: the
+  grown card stayed behind the window as a zoomed full-screen copy. Now tasks() sends `floats` (unfolded) and
+  `window` (a freeform task's bounds, CSS px): the card grows to the window's box; a full-screen task that will float
+  opens straight out of its card (no grow); ShellBridge.openTask calls Switcher.hide() 150 ms after a floating open.
+- A visible floating window is never backgrounded, so the system's task snapshot of it is stale (full-screen time, old
+  size): ShellHost /_task/<id> takes it fresh (Tasks.capture) for a visible freeform task; its ?v= carries WxH.
 - Wallpaper loop: announcing a new picture must not re-look at the wallpaper (info(look=false)): a video loops.
 
 ## Verify: record + frame-step (tools/phone/record/)

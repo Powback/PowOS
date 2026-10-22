@@ -319,7 +319,13 @@ class ShellHost(
             }
             // A recent task's last frame, for the switcher (on the WebView's loader thread: the snapshot is a binder call).
             if (path.startsWith("_task/")) {
-                val jpeg = path.removePrefix("_task/").toIntOrNull()?.let { dev.omalauncher.system.Tasks.snapshot(it) } ?: return notFound()
+                val id = path.removePrefix("_task/").toIntOrNull() ?: return notFound()
+                // A floating window in sight is never sent to the back, so the system's snapshot of it is from long ago
+                // (its full-screen time, its size before a resize): taken now instead.
+                if (dev.omalauncher.system.AppWindows.floating(context) && dev.omalauncher.system.FreeformTasks.list(context).any { it.id == id && it.visible }) {
+                    dev.omalauncher.system.Tasks.capture(id)
+                }
+                val jpeg = dev.omalauncher.system.Tasks.snapshot(id) ?: return notFound()
                 // The URL names the snapshot's version (?v=, the task's last time in front, or a fresh capture's): kept.
                 return WebResourceResponse("image/jpeg", null, ByteArrayInputStream(jpeg)).apply { responseHeaders = mapOf("Cache-Control" to "max-age=86400") }
             }
