@@ -61,7 +61,15 @@ if ! READY_MS=${READY_MS:-30000} IDLE_MS=0 bash shell/dev/gate.sh > "${TMPDIR:-/
   echo "ship-apk: REFUSED - this commit's shell doesn't load (above); fix it on origin first" >&2
   exit 3
 fi
-targets/android/build-app.sh 2>&1 | grep -E "^e: |BUILD|version code|refus|error:"
+blog=${TMPDIR:-/tmp}/ship-apk-build.log
+# The build's output to a log, filtered after: piping it straight into grep under pipefail ended the script SILENTLY
+# when the build failed with no matching line (e.g. a tree outside ~/Projects, 2026-10-22).
+if ! targets/android/build-app.sh > "$blog" 2>&1; then
+  tail -15 "$blog" >&2
+  echo "ship-apk: REFUSED - build-app.sh failed (above; whole log $blog)" >&2
+  exit 5
+fi
+grep -E "^e: |BUILD|version code|refus|error:" "$blog" || true
 apk=$HOME/Projects/android-app-dev/output/powos.apk
 if [ -z "$now" ]; then
   # Never install over an active user (it restarts their session): wait up to SHIP_WAIT_MIN (default 60) minutes for
