@@ -37,6 +37,7 @@ set -- $at
 sh_ "screenrecord --display-id $DID --bit-rate 20000000 --time-limit 6 /data/local/tmp/folder-clip.mp4 >/dev/null 2>&1 &"
 sleep 1.2; sh_ "input tap $1 $2"; sleep 1.4; chk open
 [ "$(q '!!document.querySelector(".folder-view.open")')" = true ] || fail "the folder didn't open on a tap"
+[ "$(q '[...document.querySelectorAll(".folder-view.open [style]")].filter(e=>e.style.transform||e.style.transition).length')" = 0 ] || fail "the open folder kept its morph's inline styles (it never came to rest)"
 sh_ "input tap $((W / 2)) $((H / 14))"; sleep 1.4; chk close
 [ "$(q '!!document.querySelector(".folder-view")')" = false ] || fail "a tap outside didn't close the folder"
 sleep 2.5
