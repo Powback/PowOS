@@ -37,6 +37,7 @@ start() {
       # A new Gradle home: seeded once from the cold builder'"'"'s (downloaded dependencies and Gradle distributions), so
       # the first warm build downloads nothing.
       [ -d ~/.gradle/caches/modules-2 ] || { mkdir -p ~/.gradle/caches; cp -a /seed/caches/modules-2 ~/.gradle/caches/ 2>/dev/null || true; cp -a /seed/wrapper ~/.gradle/ 2>/dev/null || true; }
+      command -v rsync >/dev/null || { apt-get update -qq && apt-get install -y -qq rsync; } >/dev/null 2>&1
       mkdir -p ~/.gradle/init.d ~/.android
       printf "%s\n" "org.gradle.daemon.idletimeout=10800000" "org.gradle.caching=true" "org.gradle.configuration-cache=true" > ~/.gradle/gradle.properties
       printf "%s\n" "gradle.allprojects { layout.buildDirectory.set(File(\"/tmp/gradle-build/\${rootProject.name}/\${project.name}\")) }" > ~/.gradle/init.d/redirect-builddir.gradle.kts
@@ -50,7 +51,15 @@ build() {
   docker exec -e PROJECT="$project" -e PUBLISH="$publish" "$NAME" bash -c '
     set -euo pipefail
     touch /tmp/last-build
-    cd "'"$dir"'"
+    # One fixed place for every checkout: the app and the shell it packs, mirrored into /work with rsync (changed files
+    # only, deletions too; the Gradle state under app/.gradle and the build dirs kept). Gradle keys its incremental
+    # state and configuration cache by path, so builds from different worktrees (each agent ships from its own) reuse
+    # them instead of starting over in a new directory each time.
+    src="'"$dir"'"; repo=$(cd "$src/../../.." && pwd)
+    mkdir -p /work/PowOS/targets/android/app /work/PowOS/shell
+    rsync -a --delete --exclude=/.gradle --exclude=build/ --exclude=/local.properties --exclude=/app/version.properties "$repo/targets/android/app/" /work/PowOS/targets/android/app/
+    rsync -a --delete --exclude=/node_modules --exclude=/dev "$repo/shell/" /work/PowOS/shell/
+    cd /work/PowOS/targets/android/app
     echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
     # As build-gradle.sh: the version from the time (PowApps compares by it), in the gitignored version.properties.
     code=$(( $(date +%s) / 60 )); printf "versionCode=%s\nversionName=%s\n" "$code" "$(date +%Y.%m.%d-%H%M)" > app/version.properties

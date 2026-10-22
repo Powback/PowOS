@@ -83,8 +83,9 @@ the minimal change and tell them.
   re-pushes (from origin's tip, through the gate) every shell file origin changed since the build commit; prints
   versionCode + any crash. `--now` skips the wait: only when the user asked for an immediate install.
 - The build is warm: build-app.sh builds in `powos-gradle-warm` (targets/android/tools/warm-builder.sh, unit
-  units/mac/gradle-warm-mac.json), a long-lived builder whose Gradle daemon stays up - ~15 s for a Kotlin or shell
-  change against ~8 min cold (2026-10-22). Missing, stopped or failing, it falls back to android-app-dev's cold
+  units/mac/gradle-warm-mac.json), a long-lived builder whose Gradle daemon stays up, building every worktree from one
+  rsync'd copy in /work (shared incremental state) - 6-11 s for a Kotlin or shell change, from any worktree, against
+  ~8 min cold (2026-10-22). Missing, stopped or failing, it falls back to android-app-dev's cold
   `make build` by itself (`POWOS_COLD_BUILD=1` forces cold). Its own Gradle home and build dirs; android-app-dev's
   other projects keep the cold path. `warm-builder.sh stop` removes it; it ends itself after 6 h without a build.
 - So: an install wipes every override that isn't committed on origin. Uncommitted or unpushed shell pushes are lost
