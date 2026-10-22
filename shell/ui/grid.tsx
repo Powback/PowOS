@@ -22,7 +22,8 @@ import { addHome, dropOnDock, hoverDock } from "./dockdrop.ts";
 import { powos } from "../bridge.ts";
 import { applyTrack, drawerOpen, held } from "./gesture.ts";
 import { LibraryPage } from "./library.tsx";
-import { FolderFace, FolderPanel, folderable, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
+import { FolderView } from "./folderview.tsx";
+import { FolderFace, folderable, morphing, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
 import { OwlWidget } from "./owl.tsx";
 import { AppWidgetFace } from "./appwidget.tsx";
@@ -661,7 +662,7 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
   const b = box(shown(item));
   return (
     <div
-      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${isChosen(item.key) ? "chosen" : ""} ${lifted ? "lifted" : ""} ${join ? "joined" : ""}`}
+      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${isChosen(item.key) ? "chosen" : ""} ${morphing.value === item.key ? "opened" : ""} ${lifted ? "lifted" : ""} ${join ? "joined" : ""}`}
       /* Its key: what finds it from outside (the pet perches on a tile by it - ui/petperch.ts). */
       data-key={item.key}
       style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`, ...join }}
@@ -878,6 +879,9 @@ function Face({ item }: { item: HomeItem }) {
   );
 }
 
+/** The open folder (ui/folderview.tsx), over all of home as Carried is: its frost covers the whole screen. */
+export const Folders = () => <FolderView onHold={(app, from, e, grab) => startCarry({ app, fromFolder: from }, e, grab)} />;
+
 /**
  * The carried tile itself, under the finger: a layer over all of home (home.tsx), not inside the pages, which clip
  * at their foot - an app carried down to the dock stays in sight over it.
@@ -1049,7 +1053,6 @@ export function Pages() {
       <Preview />
       <Marquee />
       <ChosenActions />
-      <FolderPanel onDragOut={(app, from, e, grab) => startCarry({ app, fromFolder: from }, e, grab)} />
     </div>
   );
 }

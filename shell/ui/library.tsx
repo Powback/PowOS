@@ -10,8 +10,9 @@
  *   at the screen's side). Tap a folder's free space for all of it, in the folder popover.
  */
 import { computed, signal } from "@preact/signals";
-import { apps, folder, home } from "../state.ts";
-import { AppPress, folderName, type DragOut } from "./folders.tsx";
+import { apps, byKey, folder, home } from "../state.ts";
+import { AppIcon } from "./apps.tsx";
+import { AppPress, folderName, morphing, type DragOut } from "./folders.tsx";
 import type { App } from "../types.ts";
 
 /** ApplicationInfo.CATEGORY_* (0..8) -> the library's category. */
@@ -63,8 +64,12 @@ const NAMES: Record<string, string> = {
   other: "Other",
 };
 
+/** Helper entries packages add beside the real app (a terminal's client/server, avahi's browsers, v4l tools): System. */
+const HELPERS = new Set(["l:footclient", "l:foot-server", "l:bssh", "l:bvnc", "l:avahi-discover", "l:qvidcap", "l:qv4l2"]);
+
 /** The library's category of [a]. */
 export function categoryOf(a: App) {
+  if (HELPERS.has(a.key)) return "system";
   if (a.category != null && ANDROID[a.category]) return ANDROID[a.category];
   const said = new Set((a.categories ?? "").split(";").filter(Boolean));
   const linux = LINUX.find(([c]) => said.has(c));
@@ -83,8 +88,12 @@ export const library = computed<LibraryFolder[]>(() => {
   const own = home.value.items.filter((i) => i.kind === "folder");
   const inOwn = new Set(own.flatMap((f) => f.apps!.map((a) => a.app)));
   const groups = new Map<string, App[]>();
+  // One entry per name (the same app as an Android and a Linux one shows once).
+  const seen = new Set<string>();
   for (const a of apps.value) {
-    if (inOwn.has(a.key)) continue;
+    const name = a.label.trim().toLowerCase();
+    if (inOwn.has(a.key) || seen.has(name)) continue;
+    seen.add(name);
     const c = categoryOf(a);
     groups.set(c, [...(groups.get(c) ?? []), a]);
   }
@@ -96,45 +105,25 @@ export const library = computed<LibraryFolder[]>(() => {
 
 /** The search field's text. */
 export const libraryQuery = signal("");
-/** A category folder open in the popover (the user's own open as home's folder: state.ts folder). */
-export const libraryOpen = signal<string | null>(null);
 
 const matches = computed(() => {
   const q = libraryQuery.value.trim().toLowerCase();
   return q ? apps.value.filter((a) => a.label.toLowerCase().includes(q)).map(entry).sort(byLabel) : null;
 });
 
-/** A folder on the library: its name, its first apps to tap at once, the rest a tap on its free space away. */
-function Card({ f, onHold }: { f: LibraryFolder; onHold: DragOut }) {
-  const open = () => (f.own ? (folder.value = f.key) : (libraryOpen.value = f.key));
-  const shown = f.apps.length > 4 ? f.apps.slice(0, 3) : f.apps;
+/** A folder on the library: its name and count, its first four apps small in a 2x2; a tap anywhere opens it. */
+function Card({ f }: { f: LibraryFolder }) {
   return (
-    <div class="lib-card tile" data-key={f.key} onClick={open}>
-      <div class="lib-name">{f.name}</div>
-      <div class="lib-icons">
-        {shown.map((a) => (
-          <AppPress key={a.key} a={a} from={f.own ? f.key : undefined} onHold={onHold} small />
-        ))}
-        {f.apps.length > 4 && <div class="lib-more">+{f.apps.length - 3}</div>}
+    <div class={`lib-card tile ${morphing.value === f.key ? "opened" : ""}`} data-key={f.key} onClick={() => (folder.value = f.key)}>
+      <div class="lib-name">
+        <span>{f.name}</span>
+        <span class="lib-count">{f.apps.length}</span>
       </div>
-    </div>
-  );
-}
-
-/** A category folder open: all of its apps (not renamed: its name is its category's). */
-function LibraryPanel({ onHold }: { onHold: DragOut }) {
-  const f = library.value.find((x) => x.key === libraryOpen.value && !x.own);
-  if (!f) return null;
-  const close = () => (libraryOpen.value = null);
-  return (
-    <div class="folder-scrim" onClick={close}>
-      <div class="folder-panel tile sheet pop" data-key={f.key} onClick={(e) => e.stopPropagation()}>
-        <div class="folder-name">{f.name}</div>
-        <div class="folder-apps">
-          {f.apps.map((a) => (
-            <AppPress key={a.key} a={a} onHold={onHold} onLeave={close} onLift={close} />
-          ))}
-        </div>
+      <div class="lib-icons">
+        {f.apps.slice(0, 4).map((a) => {
+          const app = byKey.value.get(a.app);
+          return app ? <AppIcon key={a.key} src={app.icon} label={a.label} /> : <div key={a.key} class="app-icon initials">{a.label[0]}</div>;
+        })}
       </div>
     </div>
   );
@@ -164,12 +153,11 @@ export function LibraryPage({ onHold, here }: { onHold: DragOut; here: boolean }
         ) : (
           <div class="lib-grid">
             {library.value.map((f) => (
-              <Card key={f.key} f={f} onHold={onHold} />
+              <Card key={f.key} f={f} />
             ))}
           </div>
         )}
       </div>
-      <LibraryPanel onHold={onHold} />
     </div>
   );
 }

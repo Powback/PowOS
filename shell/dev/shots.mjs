@@ -181,6 +181,8 @@ const SCENES = [
   ["folder-open", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 3).map((i) => i.key); await sleep(200); document.querySelector('.chosen-actions .group-folder')?.click(); await sleep(600); S.editing.value = false; await sleep(200);", "wallpaper"],
   // The app library, home's last page (ui/library.tsx), and a search in it.
   ["library", "home", "S.page.value = S.pages.value.length; await sleep(400);", "wallpaper"],
+  ["library-open", "home", "S.page.value = S.pages.value.length; await sleep(400); document.querySelectorAll('.page.library .lib-card')[2]?.click(); await sleep(500);", "wallpaper"],
+  ["library-opening", "home", "S.page.value = S.pages.value.length; await sleep(400); document.querySelectorAll('.page.library .lib-card')[2]?.click(); await sleep(90);", "wallpaper"],
   ["edit-picker", "home", "S.editing.value = true; await sleep(150); (await U('./ui/appwidget.tsx')).picker.value = true;", "wallpaper"],
   ["drawer", "home", "S.drawer.value = 1;", "wallpaper"],
   // The running bar under icons (ui/running.ts; the mock: Chrome, Konsole, Spotify, Signal running, Dolphin and Steam

@@ -126,29 +126,5 @@ export function AppPress({ a, from, onHold, onLeave, onLift, small }: { a: { key
   );
 }
 
-/** The open folder (state.ts folder): its name to edit, its apps. A tap outside closes it. */
-export function FolderPanel({ onDragOut }: { onDragOut: DragOut }) {
-  const f = home.value.items.find((i) => i.key === folder.value && i.kind === "folder");
-  if (!f) return null;
-  return (
-    <div class="folder-scrim" onClick={() => (folder.value = null)}>
-      <div class="folder-panel tile sheet pop" data-key={f.key} onClick={(e) => e.stopPropagation()}>
-        <input
-          class="folder-name"
-          key={f.key}
-          value={folderNames.value[f.key] ?? ""}
-          placeholder="Folder"
-          aria-label="Folder name"
-          enterKeyHint="done"
-          onChange={(e) => nameFolder(f.key, (e.currentTarget as HTMLInputElement).value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-        />
-        <div class="folder-apps">
-          {f.apps!.map((a) => (
-            <AppPress key={a.key} a={a} from={f.key} onHold={onDragOut} onLeave={() => (folder.value = null)} onLift={() => (folder.value = null)} />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+/** The folder on screen open or still shrinking back (ui/folderview.tsx): its tile is hidden meanwhile - it IS the sheet. */
+export const morphing = signal<string | null>(null);

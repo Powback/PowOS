@@ -19,7 +19,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
-import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
+import { carry, closeDrawer, dockDrag, drawer, editing, folder, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
 /** px per ms: a flick, whatever the distance. */
@@ -308,7 +308,8 @@ function travelOf() {
 function startGesture(x: number, y: number, target: Element) {
   // A new touch while one is under way: the old one's end was lost.
   if (g) abandon();
-  if (carry.value || selected.value || menu.value) return;
+  // An open folder (ui/folderview.tsx) takes its own taps and swipes (down closes it).
+  if (carry.value || selected.value || menu.value || folder.value) return;
   g = {
     x0: x,
     y0: y,

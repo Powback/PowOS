@@ -14,7 +14,7 @@ import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
 import { drawerDragging, drawerOpen, followOpenness, homeGestures, shadeTakesHome } from "./gesture.ts";
-import { Carried, Pages, startCarry } from "./grid.tsx";
+import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
 import { carriedApp, shownLess } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
@@ -371,6 +371,8 @@ export function Home() {
       {/* The switcher: a layer over all of home (a swipe up over an app builds it; the overview button shows it). */}
       <Recents />
       {/* A tile or app carried by a finger, over everything it can be dropped on (the pages, the dock). */}
+      {/* An open folder: the tile grows into it, over everything (ui/folderview.tsx). */}
+      <Folders />
       <Carried />
     </>
   );

@@ -456,6 +456,50 @@ async function editSearchMoved() {
 }
 
 /**
+ * In the page: a folder opens as a morph (the user, 2026-10-23: "so jarring") - moving at first (the sheet drawn at the
+ * tile, easing out), then at rest with nothing left inline and no animation running, home's pages faded behind a
+ * page-sized frost; closed, it shrinks back and goes.
+ */
+async function folderMorphCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  S.page.value = S.pages.value.length;
+  await sleep(400);
+  const card = document.querySelector(".page.library .lib-card");
+  if (!card) return ["morph: no library card to open"];
+  card.click();
+  await sleep(40);
+  const bg = document.querySelector(".folder-view .folder-bg");
+  const fails = [];
+  if (!bg || !bg.style.transition.includes("transform")) fails.push("morph: opening, the sheet doesn't ease from the tile (no transform transition)");
+  await sleep(450);
+  const v = document.querySelector(".folder-view.open");
+  if (!v) return [...fails, "morph: the folder isn't open after 450 ms"];
+  const left = [...v.querySelectorAll("[style]")].filter((e) => e.style.transform || e.style.transition);
+  if (left.length) fails.push(`morph: at rest ${left.length} parts keep an inline transform or transition`);
+  // The sheet's own (an icon still loading pulses: icon-wait, not the morph's).
+  const running = v.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && a.animationName !== "icon-wait").length;
+  if (running) fails.push(`morph: at rest ${running} animations still running in the sheet`);
+  if (!v.querySelector(".folder-focus.tile")) fails.push("morph: no page-sized frost behind the sheet");
+  if (getComputedStyle(document.querySelector(".page-track > .page")).opacity !== "0") fails.push("morph: home's pages still show behind the open folder");
+  return fails;
+}
+
+/** In the page, after folderMorphCheck (a folder open): centred; closed, it shrinks back and goes. */
+async function folderCloseCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const sheet = document.querySelector(".folder-view .folder-sheet").getBoundingClientRect();
+  const fails = Math.abs(sheet.left + sheet.width / 2 - innerWidth / 2) > 4 ? ["morph: the sheet isn't centred"] : [];
+  S.folder.value = null;
+  await sleep(40);
+  if (!document.querySelector(".folder-view:not(.open)")) fails.push("morph: closing, the sheet doesn't shrink back (gone at once)");
+  await sleep(450);
+  if (document.querySelector(".folder-view")) fails.push("morph: closed, the folder view is still there after 450 ms");
+  return fails;
+}
+
+/**
  * In the page: home's last page is the app library (the user, 2026-10-23) - every installed app in exactly one of its
  * folders (the user's own as they are, a category's for the rest), a card for each.
  */
@@ -471,7 +515,9 @@ async function libraryCheck() {
   const fails = Math.abs(r.left) > 2 ? [`swiped to the last page, the app library is at x ${Math.round(r.left)}, not on screen`] : [];
   const seen = L.library.value.flatMap((f) => f.apps.map((a) => a.app));
   const twice = seen.filter((k, i) => seen.indexOf(k) !== i);
-  const missing = S.apps.value.filter((a) => !seen.includes(a.key)).map((a) => a.key);
+  // One per name: an app whose name another shows already is that one.
+  const names = new Set(L.library.value.flatMap((f) => f.apps.map((a) => a.label.trim().toLowerCase())));
+  const missing = S.apps.value.filter((a) => !seen.includes(a.key) && !names.has(a.label.trim().toLowerCase())).map((a) => a.key);
   if (twice.length || missing.length) fails.push(`the library: ${missing.length} apps in no folder (${missing.slice(0, 3)}), ${twice.length} in two (${twice.slice(0, 3)})`);
   if (lib.querySelectorAll(".lib-card").length !== L.library.value.length) fails.push("the library shows a different number of folders than it has");
   return fails;
@@ -513,8 +559,11 @@ async function libraryDragCheck() {
   const G = await importShim("./ui/grid.tsx");
   const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 13, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
   const onHome = new Set(S.home.value.items.map((i) => i.app).filter(Boolean));
-  const el = [...document.querySelectorAll(".page.library .lib-card .app")].find((e) => !onHome.has(e.dataset.key));
-  if (!el) return ["the library has no app that isn't on home already, to drag"];
+  const card = [...document.querySelectorAll(".page.library .lib-card")].find((c) => !c.dataset.key.startsWith("folder:"));
+  card?.click();
+  await sleep(450);
+  const el = [...document.querySelectorAll(".folder-view.open .folder-grid .app")].find((e) => !onHome.has(e.dataset.key));
+  if (!el) return ["the library's folder opened shows no app that isn't on home already, to drag"];
   const key = el.dataset.key;
   const r = el.getBoundingClientRect();
   const pages = document.querySelector(".pages");
@@ -803,7 +852,7 @@ async function folderCreateCheck() {
   if (f.apps.length !== 2 || !f.apps.some((x) => x.key === b.key)) fails.push(`folder: holds [${f.apps.map((x) => x.key)}], not ${a.key} and ${b.key}`);
   if (`${f.cell.x},${f.cell.y}` !== `${a.cell.x},${a.cell.y}`) fails.push(`folder: at ${f.cell.x},${f.cell.y}, not where ${a.key} was (${a.cell.x},${a.cell.y})`);
   if (document.querySelectorAll(`.home-tile[data-key="${f.key}"] .folder-face img, .home-tile[data-key="${f.key}"] .folder-face span`).length !== 2) fails.push("folder: its tile doesn't show its two apps' icons");
-  if (!document.querySelector(".folder-panel .folder-name")) fails.push("folder: not opened after it was made (no popover with its name)");
+  if (!document.querySelector(".folder-view.open .folder-name")) fails.push("folder: not opened after it was made (no popover with its name)");
   return fails;
 }
 
@@ -817,7 +866,7 @@ async function folderNameCheck() {
     for (const type of ["pointerdown", "pointerup"]) el.dispatchEvent(new PointerEvent(type, { pointerId: 11, pointerType: "touch", clientX: r.left + 8, clientY: r.top + 8, bubbles: true, isPrimary: true }));
   };
   const f = S.home.value.items.find((i) => i.key === S.folder.value);
-  const name = document.querySelector(".folder-panel .folder-name");
+  const name = document.querySelector(".folder-view .folder-name");
   const fails = [];
   name.value = "Gate test";
   name.dispatchEvent(new Event("change", { bubbles: true }));
@@ -828,8 +877,8 @@ async function folderNameCheck() {
   await sleep(200);
   tap(document.querySelector(`.home-tile[data-key="${f.key}"]`));
   await sleep(200);
-  if (document.querySelector(".folder-panel")?.dataset.key !== f.key) fails.push("folder: a tap on its tile doesn't open it");
-  else if (document.querySelector(".folder-panel .folder-name")?.value !== "Gate test") fails.push("folder: opened again, its name is gone");
+  if (document.querySelector(".folder-view.open")?.dataset.key !== f.key) fails.push("folder: a tap on its tile doesn't open it");
+  else if (document.querySelector(".folder-view .folder-name")?.value !== "Gate test") fails.push("folder: opened again, its name is gone");
   return fails;
 }
 
@@ -843,7 +892,7 @@ async function folderDissolveCheck() {
   const G = await importShim("./ui/grid.tsx");
   const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 10, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true }));
   const f = S.home.value.items.find((i) => i.key === S.folder.value);
-  const el = document.querySelector(".folder-panel .folder-apps .app");
+  const el = document.querySelector(".folder-view.open .folder-grid .app");
   if (!f || !el) return ["folder: not open for the drag-out"];
   const out = f.apps.find((x) => x.key === el.dataset.key);
   const rest = f.apps.find((x) => x !== out);
@@ -1308,7 +1357,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `library-${label}`, viewport).then((r) => whenReady(r, async () => {
-        for (const check of [libraryCheck, libraryLiveCheck, libraryDragCheck]) {
+        for (const check of [libraryCheck, libraryLiveCheck, folderMorphCheck, folderCloseCheck, libraryDragCheck]) {
           const fails = await r.page.evaluate(check);
           if (fails.length) return fails;
         }
