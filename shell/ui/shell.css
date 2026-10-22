@@ -1214,6 +1214,24 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   flex-direction: column;
   gap: 14px;
 }
+/*
+ * Wide (the page >= 700 px: unfolded, a wide window - powai.tsx useWide): two panes, each its own scroll. Left the
+ * conversation at reading width with the pill under it, right what needs the user, the board, the agents. The pair
+ * stays centred on a very wide window.
+ */
+.ai-screen.wide {
+  display: grid;
+  grid-template-columns: minmax(0, 70ch) minmax(300px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 24px;
+  row-gap: 10px;
+  padding-inline: max(var(--edge), calc((100% - 70ch - 40rem - 24px) / 2));
+}
+.ai-screen.wide > * { max-width: none; margin-inline: 0; }
+.ai-screen.wide > .ai-top { grid-column: 1 / -1; }
+.ai-screen.wide > .ai-talk { grid-column: 1; grid-row: 2; }
+.ai-screen.wide > .ai-compose { grid-column: 1; grid-row: 3; }
+.ai-screen.wide > .ai-side { grid-column: 2; grid-row: 2 / 4; margin-bottom: calc(var(--inset-bottom, 0px) + var(--pill-foot)); }
 /* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
 .ai-board { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
 html:root .ai-board .tile { background: none; box-shadow: none; }

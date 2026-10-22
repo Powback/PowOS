@@ -585,17 +585,21 @@ export function AiHeader() {
 /**
  * What PowOS AI shows (the page now, the AI panel next - the same content in whatever holds it): what needs the user
  * (only when something does), the conversation (the last exchange open, the earlier folded), the work board (in
- * progress; paused and done folded), units, the agents. [shown]: on screen - its feeds run only then.
+ * progress; paused and done folded), units, the agents. [shown]: on screen - its feeds run only then. [part]: the
+ * wide page's two panes - "talk" (the conversation) and "side" (needs you, the board, the agents); none = all of it,
+ * in one column.
  */
-export function AiContent({ shown }: { shown: boolean }) {
-  useAiRefresh(shown);
+export function AiContent({ shown, part }: { shown: boolean; part?: "talk" | "side" }) {
+  const talk = part !== "side";
+  const side = part !== "talk";
+  useAiRefresh(shown && side);
   return (
     <>
-      <NeedsYou />
-      <Earlier />
-      <Now />
+      {side && <NeedsYou />}
+      {talk && <Earlier />}
+      {talk && <Now />}
       {/* The board: work in progress, what's installed and running, the agents - one surface, its parts by spacing. */}
-      <section class="ai-board tile">
+      {side && <section class="ai-board tile">
         <Work shown={shown} />
         <Units shown={shown} />
         <button type="button" class="ai-session tile" onClick={() => openAgents()}>
@@ -605,9 +609,9 @@ export function AiContent({ shown }: { shown: boolean }) {
             <span class="ai-session-meta muted">what every agent is on: tree, tasks, tools, comms</span>
           </span>
         </button>
-      </section>
-      <AtWork />
-      <FromAgents />
+      </section>}
+      {side && <AtWork />}
+      {side && <FromAgents />}
     </>
   );
 }
@@ -637,14 +641,43 @@ export function AiCompose() {
   );
 }
 
+/** The page's width, not the device's, picks the layout: two panes from WIDE_PX (the inner screen, a wide window). */
+const WIDE_PX = 700;
+function useWide() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWide(el.clientWidth >= WIDE_PX));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, wide] as const;
+}
+
 export function PowAiPage() {
   const shown = page.value === -1;
+  const [ref, wide] = useWide();
+  // Wide: the conversation at reading width with its pill (left), what needs the user and the board (right), each
+  // pane its own scroll. Narrow (folded): one column.
   return (
-    <div class={`ai-screen ${shown ? "shown" : ""}`}>
+    <div ref={ref} class={`ai-screen ${shown ? "shown" : ""} ${wide ? "wide" : ""}`}>
       <AiHeader />
-      <div class="ai-scroll">
-        <AiContent shown={shown} />
-      </div>
+      {wide ? (
+        <>
+          <div class="ai-scroll ai-talk">
+            <AiContent shown={shown} part="talk" />
+          </div>
+          <div class="ai-scroll ai-side">
+            <AiContent shown={shown} part="side" />
+          </div>
+        </>
+      ) : (
+        <div class="ai-scroll">
+          <AiContent shown={shown} />
+        </div>
+      )}
       <AiCompose />
     </div>
   );

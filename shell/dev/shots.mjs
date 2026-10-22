@@ -35,6 +35,8 @@ const DESKTOP_SIZES = {
   plasma: { width: 558, height: 1198, insets: { top: 0, bottom: 0 } },
   laptop: { width: 1280, height: 800, insets: { top: 0, bottom: 0 } },
 };
+/** The phone's screens plus a wide desktop window: for pages whose layout follows their width (the AI page). */
+const WIDE_SIZES = { ...SIZES, window: { width: 1600, height: 1000, insets: { top: 0, bottom: 0 } } };
 
 /**
  * Themes as the host hands them over (ShellBridge.themeColors from ui/Theme.kt's palette: surface = lighter_background,
@@ -193,6 +195,7 @@ const SCENES = [
   ["progress-open", "home", board(false) + " [...document.querySelectorAll('.ai-item-row')].find((b) => /queued/i.test(b.textContent))?.click(); await sleep(300); document.querySelector('.ai-item-more')?.scrollIntoView({ block: 'center' }); await sleep(300);", "wallpaper"],
   ["test-now", "home", board(false) + TEST_NOW, "wallpaper"],
   ["test-now-testing", "home", board(false) + TEST_NOW + " document.querySelector('.ai-test')?.click(); await sleep(200);", "wallpaper"],
+  ["ai-wide", "home", board(true), "wallpaper", undefined, WIDE_SIZES],
   ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
   ["queued", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["queued-ai", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.page.value = -1;`, "wallpaper"],
@@ -515,8 +518,8 @@ const contrastOf = async (png, runs) => {
 
 
 try {
-  for (const [name, mode, setup, behind, touch] of SCENES) {
-    for (const [sizeName, size] of Object.entries(mode === "desktop" ? DESKTOP_SIZES : SIZES)) {
+  for (const [name, mode, setup, behind, touch, sizes] of SCENES) {
+    for (const [sizeName, size] of Object.entries(sizes ?? (mode === "desktop" ? DESKTOP_SIZES : SIZES))) {
       let timer;
       const limit = new Promise((_, no) => (timer = setTimeout(() => no(new Error("timed out (40 s)")), 40000)));
       await Promise.race([shoot(name, mode, setup, behind, sizeName, size, touch), limit])

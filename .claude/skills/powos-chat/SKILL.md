@@ -80,6 +80,13 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
   mail in shots.mjs, from shell/dev/sample-board.json (the live board, ages as offsets; refresh it from
   `powos agents task list --all --json` inside PowOS). shots.mjs serves /_qa/ from shell/dev/.qa/ (untracked: remove
   it before ship-apk - build-app refuses untracked files under shell/).
+- Wide (page >= 700 CSS px: unfolded 821, a desktop window; powai.tsx useWide = ResizeObserver on .ai-screen, never the
+  device): `.ai-screen.wide` is a grid - header across, left `.ai-talk` (Earlier + Now, <= 70ch) with the pill under
+  it, right `.ai-side` (NeedsYou, board, AtWork, FromAgents) the full height; each its own `.ai-scroll`. AiContent's
+  `part` ("talk" | "side") renders a pane; none = the one column (folded, the pull-up and drawer panels). Toggling
+  remounts the panes (open rows close) - only on fold/unfold. Shots: scene ai-wide (WIDE_SIZES adds a 1600x1000
+  window; a scene's 6th field = its sizes). Device: tools/phone/verify/ai-wide.sh (inner screen forced, read-only CDP).
+- shot.sh/gate.sh --shots DIR must be under $HOME (Colima shares only home; /tmp gives EACCES on /out).
 - Contrast: text on the AI page's frost reads ~4.0-4.4 over a bright wallpaper even in foreground - that's the frost
   (design owns it, token level); don't fix per text. Folds on the wallpaper get --on-wallpaper + --label-shadow.
 
