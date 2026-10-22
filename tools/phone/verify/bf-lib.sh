@@ -3,6 +3,14 @@
 # happened (the game's X window mapped + KWin's task, Steam's sleep cgroup frozen with the game's tasks in it and not
 # running, new frames after the resume) and prints "FAIL <step>: <evidence>" otherwise. A touch: what this check
 # started is closed, exit 3 (the queue retries in the next window).
+# Mac side (bf-pacing.sh, bf-run.sh, bf-checker.sh, bf-fold.sh): `BF_ADB=<tools/phone/adb.sh> . bf-lib.sh` defines
+# only pill <text>: the same step file, written over adb as the session user (at most 15 s), and the log line.
+if [ -n "${BF_ADB:-}" ]; then
+  pill() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
+    perl -e 'alarm shift; exec @ARGV' 15 "$BF_ADB" shell "su -c 'sh /data/powos/powos-run.sh \"umask 022; echo $b | base64 -d > /tmp/powos-verify-step\"'" >/dev/null 2>&1
+    echo "-- $(date +%T) $1"; }
+  return 0
+fi
 APP=274190 GLOG=/run/powos-app/powos-sleep-gui.log
 RESUME_MS=${RESUME_MS:-3000}  # resume -> the game's first new frame, at most
 LAUNCH_S=${LAUNCH_S:-360}     # a cold start's window (Steam + Proton under FEX), at most
@@ -20,8 +28,9 @@ touched() { [ "$(irq)" != "$I0" ] || return 1; echo "user input $(date +%T) - st
 trap 'echo "stopped from outside $(date +%T)"; close_mine; exit 3' HUP TERM INT
 fail() { echo "FAIL $1: $2"; FAILS="$FAILS $1"; }
 
-# pill <text>: the status pill's title ("Testing: <text>") while the queue runs this check: the runner's heartbeat
-# puts /tmp/powos-verify-step in place of the check's name (queue.sh put); the pill's file is rewritten now too.
+# pill <text>: the check's current sub-step while the queue runs it: the runner's heartbeat shows
+# /tmp/powos-verify-step under the check's name with its age ("waiting for the game window · 45 s", queue.sh put);
+# the pill's file is rewritten now too (its "prev" line = the step, "step"/"stepel" for newer APKs).
 pill() {
   printf '%s\n' "$1" > /tmp/powos-verify-step
   python3 - "$1" <<'PY' 2>/dev/null
@@ -33,7 +42,8 @@ for p in ("/run/powos-app/verify/status.json", "/run/powos-app/verify-status.jso
         continue
     if s.get("done") or "task" not in s:
         continue
-    s["name"] = sys.argv[1]
+    s["prev"] = sys.argv[1] + " · 0 s"
+    s["step"], s["stepel"] = sys.argv[1], 0
     t = p + ".bf"
     with open(t, "w") as f:
         json.dump(s, f)

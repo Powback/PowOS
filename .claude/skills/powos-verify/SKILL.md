@@ -23,8 +23,12 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   one adb call killed after 15 s. The pill ticks the elapsed time itself and hides with a "Phone test stopped"
   notification after 30 s without a beat. Its tap (every tap) writes /tmp/powos-verify-stop; the next beat sees it,
   the runner kills the check (TERM, KILL after 5 s): it stays queued, tries not counted. Check: test-now.sh.
-- Steps: a check writes its current step to PowOS's /tmp/powos-verify-step (plain text, as the session user); each
-  beat shows it as the pill's name ("Testing: freezing Broforce"); cleared at each job's start. bf-lib.sh pill().
+- Sub-steps: every beat carries the check's current step + how long it has run, shown on the pill's third line (the
+  json's "prev", also "step"/"stepel"): "waiting for the game window · 45 s · tap to stop" under "Testing: <check>"
+  and "k of N · m:ss". The step = PowOS's /tmp/powos-verify-step if the check wrote one (plain text, as the session
+  user, its mtime = its start; cleared at each job's start), else the log's last meaningful line (adb push/pull noise
+  dropped, <= 60 chars). Write steps with bf-lib.sh pill(): sourced on the phone, or Mac-side as
+  `BF_ADB=$A . bf-lib.sh` (only pill(), over adb) - bf-pacing/run/checker/fold do. No step: the line shows the last result.
 - Budget: `add --budget S` (job file `budget=`, default 300). Past it the runner kills the check: "FAIL timeout" on
   the board, the pill's next line (prev) and the summary. A runner TERM writes done too (the pill goes at once).
 - Clear a stuck pill (old APK): write `{"done":true}` to /run/powos-app/verify-status.json the way status() does.

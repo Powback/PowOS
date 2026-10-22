@@ -17,6 +17,8 @@ WL_TRAP='"$A" shell cmd device_state state reset >/dev/null 2>&1'
 . "$here/window-lock.sh"; window_lock bf-fold.sh 120
 trap '"$A" shell cmd device_state state reset >/dev/null 2>&1; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
 log() { echo "$(date +%T) $*" | tee -a "$OUT/run.txt"; }
+BF_ADB=$A . "$here/bf-lib.sh"   # pill <step>: the status pill's sub-step
+pill "checking KWin's version"
 "$A" push "$here/bf-fold-phone.sh" /data/local/tmp/powos-bf-fold-phone.sh >/dev/null
 "$A" push "$here/bf-stop.sh" /data/local/tmp/powos-bf-stop.sh >/dev/null
 "$A" shell "su -c 'cp /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh'"
@@ -32,6 +34,7 @@ have=$(printf 'pacman -Q kwin | cut -d" " -f2\n' > "$OUT/q.sh"; "$P/root.sh" "$O
 log "kwin installed $have, want $WANT ($PKG)"
 if [ "$have" != "$WANT" ]; then
   [ -f "$PKG" ] || { log "no package $PKG"; exit 1; }
+  pill "installing KWin $WANT"
   "$A" push "$PKG" /data/local/tmp/powos-kwin.pkg.tar.xz >/dev/null
   # The package goes in through Android's side (root.sh runs inside PowOS: /data/local/tmp isn't there).
   "$A" shell "su -c 'mv /data/local/tmp/powos-kwin.pkg.tar.xz /data/powos/root/var/tmp/'"
@@ -48,6 +51,7 @@ st="$(kwin) $(ph state)"; log "state: $st"
 if [[ $st != *kwin_new=1* ]]; then
   [[ $st == *reaper=-* ]] || { log "a Broforce runs on the old KWin (the user's?): not restarting the session now"; exit 3; }
   touched && exit 3
+  pill "fresh session for the new KWin"
   ph logout | tee -a "$OUT/run.txt"; sleep 20
   for _ in $(seq 40); do st="$(kwin) $(ph state 2>/dev/null)"; [[ $st == *kwin_new=1* && $st != *root=x* ]] && break; sleep 5; done
   log "after the fresh session: $st"
@@ -61,8 +65,9 @@ fi
 
 # 2. Broforce up.
 touched && exit 3
+pill "Broforce up (Steam, the window, 2 min sleep grace)"
 r=$(ph start); echo "$r" >> "$OUT/run.txt"; mine=$([[ $r == *mine=1* ]] && echo 1 || echo 0)
-stop() { [ "$mine" = 1 ] && ph_stop=$("$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tail -1) && log "closed the Broforce it started: $ph_stop"; }
+stop() { [ "$mine" = 1 ] && pill "closing the game" && ph_stop=$("$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tail -1) && log "closed the Broforce it started: $ph_stop"; }
 [[ $r == *"no Broforce window"* ]] && { log "FAIL: Broforce didn't come up"; stop; exit 1; }
 
 # SurfaceFlinger presents over 2 s, summed over the window tasks' SurfaceViews (the game's task is the busy one).
@@ -81,6 +86,7 @@ bars() {  # bars <png>: black rows/columns at each edge of a screencap (top bott
 fails=0; first=
 probe() {  # probe <label> [cover|inner]
   local st c f s
+  pill "$1: checking the game (window, frames, screen)"
   st="$(kwin) $(ph state)"; c=$(ph changes 3); f=$(sf)
   "$P/shot.sh" "$OUT/$1.png" >/dev/null 2>&1 && s=$(bars "$OUT/$1.png") || s="no screencap"
   log "$1: $st $c sf_presents_2s=$f screen: $s"
@@ -107,10 +113,10 @@ now=$("$A" shell cmd device_state print-state | tr -d '\r'); log "device state $
 [ "$now" = 3 ] || { "$A" shell cmd device_state state 3; sleep 6; }
 touched && { stop; exit 3; }
 probe unfolded inner
-"$A" shell cmd device_state state 0; sleep 6; log "forced CLOSED (cover)"
+pill "folding (forced CLOSED)"; "$A" shell cmd device_state state 0; sleep 6; log "forced CLOSED (cover)"
 probe folded cover
-sleep 20; probe folded-25s cover
-"$A" shell cmd device_state state 3; sleep 6; log "forced OPENED (inner)"
+pill "folded: 20 s past the sleep timer"; sleep 20; probe folded-25s cover
+pill "unfolding (forced OPENED)"; "$A" shell cmd device_state state 3; sleep 6; log "forced OPENED (inner)"
 probe unfolded-again inner
 "$A" shell cmd device_state state reset >/dev/null 2>&1
 ph sleeplog >> "$OUT/run.txt"

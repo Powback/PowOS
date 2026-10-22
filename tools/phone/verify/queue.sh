@@ -14,7 +14,8 @@
 # queued check in it with LOCK_HELD=1, then releases the lock. "Test now" on the AI page (VerifyRun.kt) writes the phone's
 # go flag (/tmp/powos-verify-go in PowOS: a task id or "all"): the wait returns at once and only that task's checks run.
 # While a check runs, the phone shows a status pill (VerifyRun.kt, fed /run/powos-app/verify/status.json): a heartbeat
-# every HB_S (4) s carries the check, k/N and elapsed time; no beat for 30 s and the pill hides itself. Its tap writes
+# every HB_S (4) s carries the check, k/N, elapsed time and the SUB-STEP with its own time ("waiting for the game window
+# · 45 s": the check's /tmp/powos-verify-step - bf-lib.sh pill - else its log's last line); no beat for 30 s and the pill hides itself. Its tap writes
 # /tmp/powos-verify-stop, which the next beat sees: the check is killed and stays queued. A check that exits 3 (a real touch, no window)
 # goes back on the queue for the next window, at most 3 tries (a stop from the pill doesn't count). A check that exits 0
 # but printed a line starting with FAIL is a FAIL. Each result goes onto the check's board task (`--step`, the log's
@@ -120,15 +121,31 @@ run)
   # status <job mark> <json> [more]: the pill's file (VerifyRun.kt watches /run/powos-app/verify/status.json; the old
   # verify-status.json too, for APKs before the heartbeat), the job mark, the stop flag cleared; [more]: more shell
   # (clearing the go flag). One adb call, at most 15 s.
-  status() { phone_sh "$(printf 'umask 022; %s; printf %%s %q > /tmp/powos-verify-job; rm -f /tmp/powos-verify-stop /tmp/powos-verify-step; %s' "$(put "$2")" "$1" "${3:-:}")" >/dev/null; }
-  # beat <json>: the heartbeat - the pill's file again; prints "stop" when the pill's tap wrote the stop flag.
-  beat() { phone_sh "$(printf 'umask 022; %s; [ -e /tmp/powos-verify-stop ] && echo stop; :' "$(put "$1")")" | tr -d '\r' | tail -1; }
-  # A check names its current step in PowOS's /tmp/powos-verify-step (plain text, cleared at each job's start): the
-  # pill says that instead of the check's name ("launching Broforce", "freezing Broforce", ...).
+  status() { phone_sh "$(printf 'umask 022; printf %%s %q > /tmp/powos-verify-job; rm -f /tmp/powos-verify-stop /tmp/powos-verify-step; %s; %s' "$1" "$(put "$2")" "${3:-:}")" >/dev/null; }
+  # beat <json> <step> <step s>: the heartbeat - the pill's file again; prints "stop" when the pill's tap wrote the stop flag.
+  beat() { phone_sh "$(printf 'umask 022; %s; [ -e /tmp/powos-verify-stop ] && echo stop; :' "$(put "$1" "$2" "$3")")" | tr -d '\r' | tail -1; }
+  # put <json> [step] [step s]: the pill's file. The SUB-STEP: the check's own (PowOS's /tmp/powos-verify-step, plain
+  # text, cleared at each job's start; its age = the file's mtime) if it wrote one, else <step> (the log's last
+  # meaningful line, logstep) and <step s>. It fills the json's @@STEP@@ / @@STEPEL@@, and @@HINT@@ (the pill's third
+  # line, "prev" - shown as "<prev> · tap to stop" by every APK) becomes "<step> · 45 s"; no step: the last result.
   put() { local f
-    printf 'J=%q; S=$(tr -d '"'"'"\\\\|'"'"' 2>/dev/null < /tmp/powos-verify-step | head -c 80); [ -n "$S" ] && J=$(printf %%s "$J" | sed "s|^{\\"name\\":\\"[^\\"]*\\"|{\\"name\\":\\"$S\\"|"); ' "$1"
+    printf 'J=%q; S=%q; E=%q; H=%q; ' "$1" "${2:-}" "${3:-0}" "$(js_hint)"
+    cat <<'EOS'
+F=$(head -1 /tmp/powos-verify-step 2>/dev/null | tr -d '\000-\037"\\|&' | cut -c1-80)
+[ -n "$F" ] && { S=$F; E=$(( $(date +%s) - $(stat -c %Y /tmp/powos-verify-step) )); }
+if [ -n "$S" ]; then [ "$E" -lt 60 ] && H="$S · $E s" || H="$S · $((E / 60)) min $(printf %02d $((E % 60))) s"; fi
+J=$(printf %s "$J" | sed "s|@@STEP@@|$S|; s|@@STEPEL@@|$E|; s|@@HINT@@|$H|")
+EOS
     for f in verify/status.json verify-status.json; do
       printf 'mkdir -p /run/powos-app/verify; printf %%s "$J" > /run/powos-app/%s.tmp && mv -f /run/powos-app/%s.tmp /run/powos-app/%s; ' "$f" "$f" "$f"; done; printf ':'; }
+  # js_hint: the hint when there's no step - the last result, made safe for put's sed and the json.
+  js_hint() { printf %s "${prev:-}" | tr -d '\000-\037"\\|&'; }
+  # logstep <log>: the log's last meaningful line (no adb push/pull noise, no blank or progress lines; bf-lib's
+  # "-- 12:00:00 " prefix dropped), safe for put, at most 60 chars.
+  logstep() { tail -c 6000 "$1" 2>/dev/null | perl -CSD -ne 's/\r/\n/g; for (split /\n/) { s/\e\[[0-9;?]*[A-Za-z]//g;
+      s/^-- \d\d:\d\d:\d\d //; s/[[:cntrl:]"\\|&]//g; s/^\s+|\s+$//g;
+      next if $_ eq "" || /\d+ files? (pushed|pulled|skipped)|bytes in [\d.]+ ?s\)|^\[\s*\d+%\]|^adb: |Broken pipe|^\d+(\.\d+)? [KM]B\/s/; $l = $_ }
+      END { $l //= ""; print length($l) > 60 ? substr($l, 0, 59) . "\x{2026}" : $l }'; }
   # phone_sh <script>: run it in PowOS as root; killed after 15 s (a hung adb never holds the runner).
   phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
     perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" 2>/dev/null; }
@@ -162,18 +179,20 @@ run)
         [ "$rel" = 1 ] && cwd=$VR/$cwd
         n=$(basename "$j" .job); log=$Q/done/$n.log; k=$((k + 1))
         echo "$(date +%T) run $n: ${cmd[*]}"
-        js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":%s}' "$(jstr "${name:-$task}")" \
-          "$(jstr "$task")" $k $N "$(jstr "$screen")" "$1" "$budget" "$(jstr "$prev")"; }
+        js() { printf '{"name":%s,"task":%s,"k":%s,"n":%s,"screen":%s,"el":%s,"budget":%s,"prev":"@@HINT@@","step":"@@STEP@@","stepel":@@STEPEL@@}' \
+          "$(jstr "${name:-$task}")" "$(jstr "$task")" $k $N "$(jstr "$screen")" "$1" "$budget"; }
         status "$n" "$(js 0)" "$([ $k = 1 ] && echo 'rm -f /tmp/powos-verify-go')"
         ( cd "$cwd" && unset VERIFY_GO && export LOCK_HELD=1 && exec "${cmd[@]}" ) > "$log" 2>&1 & jp=$!
         # The heartbeat: every HB_S s the pill hears check, k/N, elapsed; a tap's stop flag or the budget ends the check.
-        t0=$(date +%s); why=
+        # The sub-step: the check's own (put) or its log's last line, timed from when that line first showed.
+        t0=$(date +%s); why=; ls_=; lt=$t0
         while kill -0 $jp 2>/dev/null; do
           for _ in $(seq "${HB_S:-4}"); do kill -0 $jp 2>/dev/null || break; sleep 1; done
           kill -0 $jp 2>/dev/null || break
           el=$(( $(date +%s) - t0 ))
           [ $el -ge "$budget" ] && { why=timeout; break; }
-          [ "$(beat "$(js $el)")" = stop ] && { why=stop; break; }
+          l=$(logstep "$log"); [ "$l" = "$ls_" ] || { ls_=$l; lt=$(date +%s); }
+          [ "$(beat "$(js $el)" "$ls_" $(( $(date +%s) - lt )))" = stop ] && { why=stop; break; }
         done
         [ -n "$why" ] && endjob $jp
         wait $jp; rc=$?
