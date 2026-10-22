@@ -12,7 +12,9 @@ import type { Bridge, Cell, Home } from "../types.ts";
 
 /** Wider than this (CSS px) is two pages side by side: the inner display, never the cover screen. */
 const WIDE = 700;
-const isWide = () => innerWidth >= WIDE;
+/** Home's page only (index.html without ?mode=): the desktop's home has its own grid, the other pages have no pages. */
+const isHome = !new URLSearchParams(location.search).get("mode");
+const isWide = () => isHome && innerWidth >= WIDE;
 
 export function wide(n: Bridge): Bridge {
   const listeners = new Map<string, Set<(d: any) => void>>();

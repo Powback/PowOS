@@ -172,7 +172,8 @@ function DockRecents({ count }: { count: number }) {
 /** Which of the dock's pages shows (0 pinned, 1 recent): its dots follow it, told when a scroll ends - never per frame. */
 const dockPage = signal(0);
 
-function Dock() {
+/** Exported for the desktop's home (ui/desktop.tsx): the same dock under its pill. */
+export function Dock() {
   const el = useRef<HTMLDivElement>(null);
   const d = dockDrag.value;
   const aim = dockAim.value;

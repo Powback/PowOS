@@ -9,6 +9,8 @@ import type { App, Bridge, Home, HomeItem } from "../types.ts";
 import { homeLayout } from "./layout.ts";
 
 const HOME = "desktop-home";
+/** The dock's pins before the user pins any: the desktop's own core apps, those installed. */
+const DOCK_DEFAULT = ["l:org.kde.konsole", "l:org.kde.dolphin", "l:firefox", "l:chromium", "l:org.kde.kate", "l:systemsettings"];
 const RECENT = "desktop-recent";
 
 /** About 100 px a column, 4 or more: the desktop's grid follows its surface (a screen, folded or not). */
@@ -80,6 +82,15 @@ export function desktop(n: Bridge): Bridge {
       },
     },
     usage: { recent: async (limit) => (await ready, recent.slice(0, limit)) },
+    store: {
+      ...n.store,
+      get: async <T>(name: string) => {
+        const v = await n.store.get<T>(name);
+        if (name !== "dock" || v != null) return v;
+        await ready;
+        return DOCK_DEFAULT.filter((k) => apps.some((a) => a.key === k)) as T;
+      },
+    },
     home: {
       get: after(layout.get),
       place: after(layout.place),

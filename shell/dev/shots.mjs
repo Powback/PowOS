@@ -397,7 +397,9 @@ try {
   fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify(report, null, 1));
   await browser.close();
   if (treesWrong) console.error(`shots: ${treesWrong} shot(s) drew mock OWL trees of another theme than ${THEME_NAME}`);
-  process.exit(treesWrong ? 1 : 0);
+  const strict = strictFailed && process.env.SHOTS_STRICT === "1";
+  if (strict) console.error("shots: FAIL - overlapping tiles, uneven desktop gutters or missing glyphs (report.json)");
+  process.exit(treesWrong || strict ? 1 : 0);
 }
 
 async function shoot(name, mode, setup, behind, sizeName, size, touch) {
@@ -507,12 +509,27 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
               const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
               if (w > 1 && h > 1) overlaps.push(`${tiles[i].name} x ${tiles[j].name} (${Math.round(w)}x${Math.round(h)} px)`);
             }
+          // The desktop's grid: one even gutter between neighbouring tiles in a row (its tiles never merge or touch).
+          const gutters = [];
+          if (document.documentElement.dataset.mode === "desktop") {
+            const rows = new Map();
+            for (const t of tiles) {
+              const k = [...rows.keys()].find((y) => Math.abs(y - t.r.top) <= 2) ?? t.r.top;
+              rows.set(k, [...(rows.get(k) ?? []), t.r]);
+            }
+            const gaps = [];
+            for (const row of rows.values()) {
+              row.sort((a, b) => a.left - b.left);
+              for (let i = 1; i < row.length; i++) gaps.push(Math.round(row[i].left - row[i - 1].right));
+            }
+            if (gaps.length && Math.max(...gaps) - Math.min(...gaps) > 2) gutters.push(`uneven gutters: ${gaps.join(", ")} px`);
+          }
           const fonts = [...document.fonts].filter((f) => f.status === "error").map((f) => f.family);
           const missing = performance
             .getEntriesByType("resource")
             .filter((e) => e.responseStatus >= 400 && /font|\.ttf|\.woff/.test(e.name))
             .map((e) => e.name.replace(location.origin, ""));
-          return { overlaps, glyphs: [...new Set([...fonts, ...missing])] };
+          return { overlaps: [...overlaps, ...gutters], glyphs: [...new Set([...fonts, ...missing])] };
         })
         .catch(() => ({ overlaps: [], glyphs: [] }));
       for (const o of layout.overlaps) errors.push(`overlap: ${o}`);
