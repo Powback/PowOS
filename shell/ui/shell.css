@@ -1112,7 +1112,6 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   border-color: transparent;
 }
 html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
-.ai-screen .ai-work-chip.on { background: var(--color-accent); }
 /* Its compose bar: the pill (.pill), where home's search sits. */
 .ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + var(--pill-foot)); }
 .ai-title { font-size: var(--text-item); font-weight: bold; }
@@ -1174,22 +1173,14 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-work-line { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .ai-work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-work-meta { flex: none; font-size: var(--text-small); white-space: nowrap; }
-.ai-work.blocked .ai-work-status, .ai-dot.blocked { color: var(--color-red); background: var(--color-red); }
-.ai-work.blocked .ai-work-status { background: none; }
-.ai-work.waiting .ai-work-status { color: var(--accent-text); font-weight: bold; }
-.ai-dot.waiting { background: none; box-shadow: inset 0 0 0 2px var(--color-accent); }
 .ai-work.done .ai-work-title { color: var(--color-muted); }
 .ai-dot.done { background: var(--color-muted); }
 .ai-work-detail { display: flex; flex-direction: column; gap: 3px; padding-left: 17px; font-size: var(--text-small); line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 .ai-work-note { color: var(--color-foreground); }
-.ai-work-fold { flex-direction: row; font-size: var(--text-small); }
 .ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
 /* Project groups and the chips that show one project (powai.tsx Work). */
 /* Chips wrap rather than scroll: a sideways drag on home turns the page. On the tiles' own fill: readable over any
    wallpaper. */
-.ai-work-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
-.ai-work-chip { flex: none; font: var(--text-small) var(--font); padding: 6px 12px; border-radius: 999px; color: var(--color-foreground); white-space: nowrap; }
-.ai-work-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-background); font-weight: bold; }
 .ai-work-head { display: inline-block; padding: 4px 10px; border-radius: 999px; color: var(--color-foreground); }
 /* The task list is one home tile: its heading, chips and rows inside it. */
 .ai-work-list.tile { padding: 8px 6px 4px; }
@@ -1197,7 +1188,6 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-work-group + .ai-work-group { margin-top: 10px; }
 .ai-work-project .ai-work-title { font-weight: bold; }
 .ai-work-caret { flex: none; width: 8px; font-size: var(--text-small); }
-.ai-work-wait { color: var(--accent-text); font-weight: bold; }
 .ai-work-blocked { color: var(--color-red); }
 /* installed & running (units.tsx): orphans marked for the user to decide; asleep dimmed */
 .ai-unit.orphan { box-shadow: inset 3px 0 0 var(--color-accent); }
@@ -1205,14 +1195,10 @@ html:root .ai-board .tile { background: none; box-shadow: none; }
 .ai-unit-decide { color: var(--accent-text); }
 .ai-dot.asleep { background: color-mix(in srgb, var(--color-accent) 45%, transparent); }
 .ai-unit .ai-work-meta { max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
-.ai-work.blocked .ai-work-status { background: none; }
-.ai-work.waiting .ai-work-status { color: var(--accent-text); font-weight: bold; }
-.ai-dot.waiting { background: none; box-shadow: inset 0 0 0 2px var(--color-accent); }
 .ai-work.done .ai-work-title { color: var(--color-muted); }
 .ai-dot.done { background: var(--color-muted); }
 .ai-work-detail { display: flex; flex-direction: column; gap: 3px; padding-left: 17px; font-size: var(--text-small); line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 .ai-work-note { color: var(--color-foreground); }
-.ai-work-fold { flex-direction: row; font-size: var(--text-small); }
 .ai-work-empty { padding: 10px 12px; font-size: var(--text-small); }
 .ai-mail { padding: 10px 12px; margin-bottom: 6px; font-size: var(--text-small); line-height: 1.4; }
 /* An agent's mail in full, its lines kept. */
@@ -1896,4 +1882,3 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 }
 :root[data-light="false"][data-wallpaper="light"] .ai-screen .tile, :root[data-light="true"][data-wallpaper="dark"] .ai-screen .tile { --glass-dim: 68%; }
 /* "the whole conversation" sits on the wallpaper as a control: a quiet pill of the same material (a halo isn't enough). */
-.ai-history > .ai-work-fold { align-self: flex-start; width: auto; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--color-background) 90%, transparent); text-shadow: none; }

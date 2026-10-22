@@ -142,3 +142,32 @@
 .md th, .md td { padding: 4px 10px 4px 0; text-align: left; vertical-align: top; }
 .md th { font-weight: 600; }
 .md tbody tr:nth-child(odd) td { background: var(--soft-fill); }
+
+/* PowOS AI's page (powai.tsx): what needs you, then the conversation, then the board. */
+.ai-needs { display: flex; flex-direction: column; gap: 8px; }
+.ai-need { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; }
+.ai-need-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 0; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
+.ai-need-do { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.ai-need-what { font-size: var(--text-small); overflow-wrap: anywhere; }
+.ai-need-acts { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.ai-need-act { min-height: 32px; padding: 4px 14px; font: inherit; color: var(--color-foreground); background: var(--soft-fill); border: 0; border-radius: 20px; }
+.ai-need-act.on { color: var(--color-background); background: var(--color-accent); }
+.ai-need-act:not(.on) { background: none; }
+/* Folds on the wallpaper (not on a surface): a label's colour and shadow, as the page's headings. */
+.ai-screen .ai-fold:not(.tile *) { color: var(--on-wallpaper); text-shadow: var(--label-shadow); }
+
+/* The board's rows: a dot, the title up to two lines, an age only past a day. */
+.ai-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 12px; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
+.ai-item .ai-dot { margin-top: 0.45em; }
+.ai-item-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ai-item-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.35; overflow-wrap: anywhere; }
+.ai-item[aria-expanded="true"] .ai-item-title { -webkit-line-clamp: unset; }
+.ai-item-note { font-size: var(--text-small); line-height: 1.4; overflow-wrap: anywhere; }
+.ai-item-age { flex: none; font-size: var(--text-small); color: var(--color-muted); }
+.ai-item.done .ai-item-title { color: var(--color-muted); }
+.ai-group + .ai-group { margin-top: 6px; }
+.ai-group-name { padding: 6px 12px 2px; font-size: var(--text-small); color: var(--color-muted); }
+.ai-work-list { display: flex; flex-direction: column; }
+.ai-work-list > .ai-heading { margin: 4px 12px 2px; }
+/* A folded line: paused, done recently, the earlier conversation. */
+.ai-fold { align-self: flex-start; padding: 8px 12px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: none; border: 0; }
