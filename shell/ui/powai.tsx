@@ -121,7 +121,7 @@ function Earlier() {
         {open ? "▾" : "▸"} earlier · {before.filter((i) => i.kind === "user").length}
       </button>
       {open && (
-        <div class="chat ai-history-list">
+        <div class="chat ai-history-list tile">
           <Thread items={before} render={(item, reply) => <Item item={item} reply={reply} />} />
         </div>
       )}
@@ -159,7 +159,7 @@ function History() {
   return (
     <section class="ai-history">
       <div ref={top} />
-      <div class="chat ai-history-list">
+      <div class="chat ai-history-list tile">
         <Thread items={items.slice(from, end)} render={(item, reply) => <Item item={item} reply={reply} />} />
       </div>
     </section>

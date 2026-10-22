@@ -121,6 +121,10 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
   is flex column-reverse around one `.ai-talk-in` (margin-bottom auto = short content sits on top): it opens at the
   newest, stays there while a reply streams, holds still when older ones arrive - no scroll JS. Its scrollTop is 0 at
   the bottom, negative upward. Device: ai-wide.sh checks no fold + |scrollTop| < 4 (BOARD_TASK= picks the task).
+  The history list is ONE `.tile` (`.chat.ai-history-list.tile`: one native blur region, its messages soft fills on
+  it). Bare, its messages sat on the wallpaper, unreadable over a bright one (59bbb41's regression). ai-wide.sh fails
+  on any .msg in the talk pane without a frosted tile behind it (under glass-native the fill is background-IMAGE,
+  backgroundColor is transparent).
 
 ## Queued messages (one queue for every chat)
 - The app owns it: PowosAiChat.send while busy appends to `queued` (id, text, prompt) instead of dropping; at turn end

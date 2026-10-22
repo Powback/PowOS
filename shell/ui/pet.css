@@ -155,8 +155,9 @@
   .pet-inner { transition: none; }
 }
 
-/* PowOS AI's page: the whole conversation, folded under the latest turn. */
-.ai-history-list { max-height: none; overflow: visible; padding: 0; }
+/* PowOS AI's page: the conversation before the latest turn, on one frost surface as the latest's card (its messages soft
+   fills on it) - bare on the wallpaper it was unreadable over a bright one. */
+.ai-history-list { max-height: none; overflow: visible; padding: 12px 14px; }
 .pet-talk .pet-asked { font-size: var(--text-small); }
 .pet-talk .pet-reply { -webkit-line-clamp: 4; }
 /* Standing ON a tile's edge: a small, firmer contact shadow on it. */

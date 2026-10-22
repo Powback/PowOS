@@ -43,7 +43,7 @@ else
   sh_ "input swipe $((W * 3 / 10)) $((H / 2)) $((W * 9 / 10)) $((H / 2)) 350"; sleep 1.5; chk ai
   SEL='.ai-screen.shown'
 fi
-probe='JSON.stringify((()=>{const s=document.querySelector("'"$SEL"'"),q=(c)=>{const e=s&&s.querySelector(c);if(!e)return null;const r=e.getBoundingClientRect();return {l:Math.round(r.left),t:Math.round(r.top),r:Math.round(r.right),b:Math.round(r.bottom),o:getComputedStyle(e).overflowY}};return {w:innerWidth,shown:!!s,wide:!!s&&s.classList.contains("wide"),talk:q(".ai-talk"),side:q(".ai-side"),pill:q(".ai-compose"),hist:(()=>{const t=s&&s.querySelector(".ai-talk");return t&&{fold:!!t.querySelector(".ai-fold"),asks:t.querySelectorAll(".ai-history-list .msg.user").length,st:Math.round(t.scrollTop),sh:t.scrollHeight,ch:t.clientHeight}})()}})())'
+probe='JSON.stringify((()=>{const s=document.querySelector("'"$SEL"'"),q=(c)=>{const e=s&&s.querySelector(c);if(!e)return null;const r=e.getBoundingClientRect();return {l:Math.round(r.left),t:Math.round(r.top),r:Math.round(r.right),b:Math.round(r.bottom),o:getComputedStyle(e).overflowY}};return {w:innerWidth,shown:!!s,wide:!!s&&s.classList.contains("wide"),talk:q(".ai-talk"),side:q(".ai-side"),pill:q(".ai-compose"),hist:(()=>{const t=s&&s.querySelector(".ai-talk");return t&&{fold:!!t.querySelector(".ai-fold"),asks:t.querySelectorAll(".ai-history-list .msg.user").length,bare:[...t.querySelectorAll(".msg")].filter((m)=>{const c=m.closest(".tile"),k=c&&getComputedStyle(c);return !k||(k.backgroundImage==="none"&&/^(transparent|rgba\(0, 0, 0, 0\))$/.test(k.backgroundColor))}).length,st:Math.round(t.scrollTop),sh:t.scrollHeight,ch:t.clientHeight}})()}})())'
 p=$("$T/cdp.sh" eval home "$probe" 2>&1 | tr -d '\\' | tail -1)
 "$T/shot.sh" "$OUT/$IMG" >/dev/null 2>&1
 [ $MODE = page ] && { sh_ "input swipe $((W * 9 / 10)) $((H / 2)) $((W * 15 / 100)) $((H / 2)) 300"; sleep 1; }
@@ -63,6 +63,8 @@ bad = [m for ok, m in [
   (t and s and t["o"] == "auto" and s["o"] == "auto", "the panes don't scroll on their own"),
   # The whole conversation, no "earlier" fold; it opens at the newest (column-reverse: scrollTop 0 is the bottom).
   (h and not h["fold"], "the conversation is folded ('earlier')"),
+  # Every message on a frosted surface (2026-10-23: the history's sat bare on the wallpaper, unreadable over a bright one).
+  (h and not h.get("bare"), f"{h and h.get('bare')} messages have no frost surface behind them"),
   (h and (abs(h["st"]) < 4 or h["sh"] <= h["ch"]), f"the conversation isn't at the newest: {h}")] if not ok]
 print("FAIL: " + "; ".join(bad) if bad else f"PASS: the {sys.argv[2]}: two panes at {p['w']} px, the pill under the conversation, each pane scrolls, the whole conversation at the newest ({h and h['asks']} earlier asks drawn)")
 sys.exit(1 if bad else 0)
