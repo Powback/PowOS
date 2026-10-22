@@ -309,7 +309,8 @@ export function Tile({ t, big = false, hold = true }: { t: QuickTile; big?: bool
  * The user's arrangement of the tiles (kept from the earlier edit mode): their order and the ones taken out, in the store. Tiles it
  * doesn't name yet (a new app's tile) come after, in the phone's own order.
  */
-type Layout = { order: string[]; hidden: string[] };
+/** [v3]: saved by an edit in the v3 layout (its one list); without it, the classic layout's arrangement. */
+type Layout = { order: string[]; hidden: string[]; v3?: boolean };
 const layout = signal<Layout>({ order: [], hidden: [] });
 /** The arrangement from the store: at start, and each time the control center opens - the shade, home and Quick
  * Tools are separate pages, and one's rearranging must show in the others (nor be written over by their stale copy). */
@@ -878,17 +879,24 @@ function ToggleGrid({ ts, save, class: c = "" }: { ts: QuickTile[]; save: (ids: 
   );
 }
 
-/** Saves a group's new order into the arrangement: the group's places in the whole order kept, filled in its new order. */
-function saveOrder(all: string[], ids: string[]) {
-  const pos = (id: string) => {
-    const i = layout.value.order.indexOf(id);
-    return i < 0 ? 1e6 + all.indexOf(id) : i;
-  };
-  const order = [...all].sort((a, b) => pos(a) - pos(b));
-  let k = 0;
-  const l = { order: order.map((id) => (ids.includes(id) ? ids[k++] : id)), hidden: layout.value.hidden };
+/** Saves the list's new order (all of it, as shown and rearranged) as the user's own; ids it doesn't show kept after. */
+function saveOrder(ids: string[]) {
+  const l = { order: [...ids, ...layout.value.order.filter((id) => !ids.includes(id))], hidden: layout.value.hidden, v3: true };
   layout.value = l;
   powos.store.set("controls.layout", l);
+}
+
+/**
+ * Whether the stored arrangement is the user's own order for v3's list: one saved by a v3 edit, or a classic one in
+ * which the user moved something (its controls not in the eight categories' own order). A classic arrangement with no
+ * net move (saved by a drag put back) says nothing about the list: the curated row comes first.
+ */
+function ownOrder(every: QuickTile[]): boolean {
+  const l = layout.value;
+  if (l.v3) return true;
+  const curated = GROUPS.flatMap((g) => g.members.map((m) => member(every, m)?.id)).filter((id): id is string => !!id);
+  const saved = l.order.filter((id) => curated.includes(id));
+  return saved.length > 0 && saved.join() !== curated.filter((id) => saved.includes(id)).join();
 }
 
 function Controls() {
@@ -913,8 +921,9 @@ function Controls() {
   const b = q.brightness ?? { value: 0.5, auto: false };
   const v = q.volume ?? { value: 0.5, ringer: 2 };
   // The user's order (controls.layout) within each group; the curated order after.
+  const own = ownOrder(every);
   const pos = (id: string) => {
-    const i = layout.value.order.indexOf(id);
+    const i = own ? layout.value.order.indexOf(id) : -1;
     return i < 0 ? 1e6 : i;
   };
   const ordered = (ts: QuickTile[]) => ts.map((t, i) => ({ t, i })).sort((a, c) => pos(a.t.id) - pos(c.t.id) || a.i - c.i).map((x) => x.t);
@@ -925,7 +934,6 @@ function Controls() {
     return { sec, ts: pick(sec.members) };
   });
   sections[sections.length - 1].ts.push(...every.filter((t) => !placed.has(t)));
-  const all = every.map((t) => t.id);
   // The curated default: the most used first, then every other control by kind; the user's order over it.
   const quickTs = pick(QUICK);
   const list = ordered([...quickTs, ...sections.flatMap((x) => x.ts).filter((t) => !quickTs.includes(t))]);
@@ -980,7 +988,7 @@ function Controls() {
         * further pull only reveals the rest under them - the row never moves (the user: icons mustn't reorganize).
         */}
       <div class={`cc3-list cascade ${whole ? "whole" : ""}`} style={{ "--i": 3 }}>
-        <ToggleGrid ts={list} save={(ids) => saveOrder(all, ids)} />
+        <ToggleGrid ts={list} save={saveOrder} />
       </div>
     </div>
   );
