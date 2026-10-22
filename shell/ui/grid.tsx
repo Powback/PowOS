@@ -298,49 +298,70 @@ const boxed = (i: HomeItem) =>
  * gap there: the tile reaches its cells' edge) and which of its corners are inside a group (square) - only a group's
  * outer corners stay round. One pass over a grid of the page's cells; recomputed with the page's items.
  */
-function joins(items: HomeItem[]): Map<string, Record<string, number>> {
-  // The desktop's home (powos-shell under Plasma): widgets stay separate surfaces, like plasmoids - never merged.
-  if (document.documentElement.dataset.mode === "desktop") return new Map();
+/** Which tile covers each cell ("x,y" -> key): the boxed ones. */
+function cellOwners(items: HomeItem[]) {
   const at = new Map<string, string>();
-  for (const i of items) {
-    if (!boxed(i)) continue;
+  for (const i of items.filter(boxed)) {
     const c = shown(i);
     for (let y = c.y; y < c.y + c.h; y++) for (let x = c.x; x < c.x + c.w; x++) at.set(`${x},${y}`, i.key);
   }
-  // Merged per shared span (grid.tsx seams): a side covered WHOLE by neighbours reaches half the gutter towards them
-  // (--jX 1); a side touched over part of it keeps its edge where an unjoined one is (the user's steam-over-fetch: the
-  // wide tile's free half stays level with its neighbours), and the gutter along just the shared span is filled by a
-  // seam piece, with a rounded inner corner where the group turns. Corners are square where a neighbour continues.
-  const other = (i: HomeItem, x: number, y: number) => {
-    const k = at.get(`${x},${y}`);
-    return k != null && k !== i.key ? 1 : 0;
+  return at;
+}
+
+/** A tile's four outside edges as cell runs: top, right, bottom, left. */
+function edgesOf(c: Cell) {
+  return [
+    { x: c.x, y: c.y - 1, dx: 1, dy: 0, n: c.w },
+    { x: c.x + c.w, y: c.y, dx: 0, dy: 1, n: c.h },
+    { x: c.x, y: c.y + c.h, dx: 1, dy: 0, n: c.w },
+    { x: c.x - 1, y: c.y, dx: 0, dy: 1, n: c.h },
+  ];
+}
+
+/** How many cells of [e] another tile than [key] covers. */
+function coveredCells(at: Map<string, string>, key: string, e: { x: number; y: number; dx: number; dy: number; n: number }) {
+  let k = 0;
+  for (let i = 0; i < e.n; i++) {
+    const o = at.get(`${e.x + e.dx * i},${e.y + e.dy * i}`);
+    if (o != null && o !== key) k++;
+  }
+  return k;
+}
+
+/**
+ * Merged per shared span (grid.tsx seams): a side covered WHOLE by neighbours reaches half the gutter towards them
+ * (--jX 1); a side touched over part of it keeps its edge where an unjoined one is (the user's steam-over-fetch: the
+ * wide tile's free half stays level with its neighbours), and the gutter along just the shared span is filled by a
+ * seam piece, with a rounded inner corner where the group turns. Corners are square where a neighbour continues.
+ */
+function joinOf(at: Map<string, string>, i: HomeItem): Record<string, number> | null {
+  const c = shown(i);
+  const edges = edgesOf(c);
+  const cover = edges.map((e) => coveredCells(at, i.key, e));
+  if (!cover.some((k) => k > 0)) return null;
+  const other = (x: number, y: number) => (coveredCells(at, i.key, { x, y, dx: 0, dy: 0, n: 1 }) ? 1 : 0);
+  const [r, b] = [c.x + c.w, c.y + c.h];
+  const [jt, jr, jb, jl] = cover.map((k, n) => (k === edges[n].n ? 1 : 0));
+  return {
+    "--jt": jt,
+    "--jr": jr,
+    "--jb": jb,
+    "--jl": jl,
+    "--ctl": 1 - Math.max(other(c.x - 1, c.y), other(c.x, c.y - 1)),
+    "--ctr": 1 - Math.max(other(r, c.y), other(r - 1, c.y - 1)),
+    "--cbr": 1 - Math.max(other(r, b - 1), other(r - 1, b)),
+    "--cbl": 1 - Math.max(other(c.x - 1, b - 1), other(c.x, b)),
   };
-  const whole = (i: HomeItem, x0: number, y0: number, dx: number, dy: number, n: number) => {
-    for (let k = 0; k < n; k++) if (!other(i, x0 + dx * k, y0 + dy * k)) return 0;
-    return 1;
-  };
-  const any = (i: HomeItem, x0: number, y0: number, dx: number, dy: number, n: number) => {
-    for (let k = 0; k < n; k++) if (other(i, x0 + dx * k, y0 + dy * k)) return 1;
-    return 0;
-  };
+}
+
+function joins(items: HomeItem[]): Map<string, Record<string, number>> {
+  // The desktop's home (powos-shell under Plasma): widgets stay separate surfaces, like plasmoids - never merged.
+  if (document.documentElement.dataset.mode === "desktop") return new Map();
+  const at = cellOwners(items);
   const out = new Map<string, Record<string, number>>();
-  for (const i of items) {
-    if (!boxed(i)) continue;
-    const c = shown(i);
-    const r = c.x + c.w;
-    const b = c.y + c.h;
-    const touches = any(i, c.x, c.y - 1, 1, 0, c.w) || any(i, r, c.y, 0, 1, c.h) || any(i, c.x, b, 1, 0, c.w) || any(i, c.x - 1, c.y, 0, 1, c.h);
-    if (!touches) continue;
-    out.set(i.key, {
-      "--jt": whole(i, c.x, c.y - 1, 1, 0, c.w),
-      "--jr": whole(i, r, c.y, 0, 1, c.h),
-      "--jb": whole(i, c.x, b, 1, 0, c.w),
-      "--jl": whole(i, c.x - 1, c.y, 0, 1, c.h),
-      "--ctl": 1 - Math.max(other(i, c.x - 1, c.y), other(i, c.x, c.y - 1)),
-      "--ctr": 1 - Math.max(other(i, r, c.y), other(i, r - 1, c.y - 1)),
-      "--cbr": 1 - Math.max(other(i, r, b - 1), other(i, r - 1, b)),
-      "--cbl": 1 - Math.max(other(i, c.x - 1, b - 1), other(i, c.x, b)),
-    });
+  for (const i of items.filter(boxed)) {
+    const j = joinOf(at, i);
+    if (j) out.set(i.key, j);
   }
   return out;
 }
@@ -384,56 +405,70 @@ export interface Seam {
  * span only (both faces' extents: edges line up exactly with the faces), and at each end where one face goes on past
  * the other, a fillet rounding the inner corner of the L - so the group reads as one surface, its free edges level.
  */
-function seams(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined, half: number, radius: number): Seam[] {
-  const out: Seam[] = [];
-  const f = (n: number) => +n.toFixed(1);
-  const on = items.filter((i) => boxed(i) && i.key !== lifted && joined.has(i.key));
-  const rect = new Map(on.map((i) => [i.key, faceRect(i, joined.get(i.key)!, half)]));
-  const fillet = (px: number, py: number, sx: number, sy: number, r: number) => {
-    if (r < 1) return;
-    const x = sx > 0 ? px : px - r;
-    const y = sy > 0 ? py : py - r;
-    // A third tile already there (the corner is inside the group, not where it turns): no fillet over its face.
-    for (const q of rect.values()) if (q.x0 < x + r - 0.5 && x + 0.5 < q.x1 && q.y0 < y + r - 0.5 && y + 0.5 < q.y1) return;
-    const sweep = sx * sy < 0 ? 1 : 0;
-    out.push({
-      kind: "fillet", x, y, w: r, h: r, cx: sx > 0 ? r : 0, cy: sy > 0 ? r : 0,
-      d: `M${f(px)} ${f(py)}L${f(px + sx * r)} ${f(py)}A${f(r)} ${f(r)} 0 0 ${sweep} ${f(px)} ${f(py + sy * r)}Z`,
-    });
-  };
-  for (const A of on) {
-    const a = shown(A);
-    const fa = rect.get(A.key)!;
-    for (const B of on) {
-      if (B === A) continue;
-      const b = shown(B);
-      const fb = rect.get(B.key)!;
-      // B under A (a horizontal seam), or B right of A (a vertical one): the same with x and y swapped.
-      for (const vertical of [false, true]) {
-        const touch = vertical ? b.x === a.x + a.w && b.y < a.y + a.h && a.y < b.y + b.h : b.y === a.y + a.h && b.x < a.x + a.w && a.x < b.x + b.w;
-        if (!touch) continue;
-        // Along the seam (u) and across it (v).
-        const [a0, a1, b0, b1] = vertical ? [fa.y0, fa.y1, fb.y0, fb.y1] : [fa.x0, fa.x1, fb.x0, fb.x1];
-        const [aEnd, bStart] = vertical ? [fa.x1, fb.x0] : [fa.y1, fb.y0];
-        const u0 = Math.max(a0, b0);
-        const u1 = Math.min(a1, b1);
-        if (u1 - u0 < 1) continue;
-        const gap = bStart - aEnd;
-        if (gap > 0.5) {
-          const [x, y, w, h] = vertical ? [aEnd, u0, gap, u1 - u0] : [u0, aEnd, u1 - u0, gap];
-          out.push({ kind: "bridge", x, y, w, h, d: `M${f(x)} ${f(y)}H${f(x + w)}V${f(y + h)}H${f(x)}Z` });
-        }
-        // The ends: where A goes on past B, the inner corner is on B's side of A's edge; where B goes on, on A's side.
-        const r = Math.min(radius, Math.max(0, (u1 - u0) / 2));
-        for (const [end, s] of [[u0, -1], [u1, 1]] as const) {
-          const aOn = s < 0 ? a0 < u0 - 0.5 : a1 > u1 + 0.5;
-          const bOn = s < 0 ? b0 < u0 - 0.5 : b1 > u1 + 0.5;
-          if (aOn && !bOn) vertical ? fillet(aEnd, end, 1, s, r) : fillet(end, aEnd, s, 1, r);
-          if (bOn && !aOn) vertical ? fillet(bStart, end, -1, s, r) : fillet(end, bStart, s, -1, r);
-        }
-      }
-    }
+type Face = { x0: number; y0: number; x1: number; y1: number };
+const fx = (n: number) => +n.toFixed(1);
+
+/** A fillet rounding the inner corner at (px, py), opening towards (sx, sy) - none where a face already is. */
+function filletAt(p: { px: number; py: number; sx: number; sy: number; r: number }, faces: Face[]): Seam | null {
+  const { px, py, sx, sy, r } = p;
+  if (r < 1) return null;
+  const x = sx > 0 ? px : px - r;
+  const y = sy > 0 ? py : py - r;
+  // A third tile already there (the corner is inside the group, not where it turns): no fillet over its face.
+  if (faces.some((q) => q.x0 < x + r - 0.5 && x + 0.5 < q.x1 && q.y0 < y + r - 0.5 && y + 0.5 < q.y1)) return null;
+  const sweep = sx * sy < 0 ? 1 : 0;
+  const d = `M${fx(px)} ${fx(py)}L${fx(px + sx * r)} ${fx(py)}A${fx(r)} ${fx(r)} 0 0 ${sweep} ${fx(px)} ${fx(py + sy * r)}Z`;
+  return { kind: "fillet", x, y, w: r, h: r, cx: sx > 0 ? r : 0, cy: sy > 0 ? r : 0, d };
+}
+
+/** Do B's cells start where A's end, under A (or right of it when [vertical]), overlapping along the seam? */
+function meets(a: Cell, b: Cell, vertical: boolean) {
+  if (vertical) return b.x === a.x + a.w && b.y < a.y + a.h && a.y < b.y + b.h;
+  return b.y === a.y + a.h && b.x < a.x + a.w && a.x < b.x + b.w;
+}
+
+/** The pieces between faces A and B meeting over a seam: the gutter along the shared span, the inner corners' fillets. */
+function seamPieces(fa: Face, fb: Face, vertical: boolean, ctx: { radius: number; faces: Face[] }): Seam[] {
+  // Along the seam (u) and across it.
+  const [a0, a1, b0, b1] = vertical ? [fa.y0, fa.y1, fb.y0, fb.y1] : [fa.x0, fa.x1, fb.x0, fb.x1];
+  const [aEnd, bStart] = vertical ? [fa.x1, fb.x0] : [fa.y1, fb.y0];
+  const u0 = Math.max(a0, b0);
+  const u1 = Math.min(a1, b1);
+  if (u1 - u0 < 1) return [];
+  const out: (Seam | null)[] = [];
+  const gap = bStart - aEnd;
+  if (gap > 0.5) {
+    const [x, y, w, h] = vertical ? [aEnd, u0, gap, u1 - u0] : [u0, aEnd, u1 - u0, gap];
+    out.push({ kind: "bridge", x, y, w, h, d: `M${fx(x)} ${fx(y)}H${fx(x + w)}V${fx(y + h)}H${fx(x)}Z` });
   }
+  // The ends: where A goes on past B, the inner corner is on B's side of A's edge; where B goes on, on A's side.
+  const r = Math.min(ctx.radius, (u1 - u0) / 2);
+  const at = (end: number, across: number, sAcross: number, s: number) =>
+    filletAt(vertical ? { px: across, py: end, sx: sAcross, sy: s, r } : { px: end, py: across, sx: s, sy: sAcross, r }, ctx.faces);
+  const aOn = [a0 < u0 - 0.5, a1 > u1 + 0.5];
+  const bOn = [b0 < u0 - 0.5, b1 > u1 + 0.5];
+  [u0, u1].forEach((end, k) => {
+    const s = k ? 1 : -1;
+    if (aOn[k] && !bOn[k]) out.push(at(end, aEnd, 1, s));
+    if (bOn[k] && !aOn[k]) out.push(at(end, bStart, -1, s));
+  });
+  return out.filter((p): p is Seam => !!p);
+}
+
+/**
+ * The pieces that merge two faces touching over PART of an edge (joins): the gutter between them along the shared
+ * span only (both faces' extents: edges line up exactly with the faces), and at each end where one face goes on past
+ * the other, a fillet rounding the inner corner of the L - so the group reads as one surface, its free edges level.
+ */
+function seams(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined, geo: { half: number; radius: number }): Seam[] {
+  const on = items.filter((i) => boxed(i) && i.key !== lifted && joined.has(i.key));
+  const face = new Map(on.map((i) => [i.key, faceRect(i, joined.get(i.key)!, geo.half)]));
+  const ctx = { radius: geo.radius, faces: [...face.values()] };
+  const out: Seam[] = [];
+  for (const A of on)
+    for (const B of on)
+      for (const vertical of [false, true])
+        if (A !== B && meets(shown(A), shown(B), vertical)) out.push(...seamPieces(face.get(A.key)!, face.get(B.key)!, vertical, ctx));
   return out;
 }
 
@@ -461,7 +496,7 @@ function faces(items: HomeItem[], joined: Map<string, Record<string, number>>, l
     h = Math.max(h, Math.ceil(y1));
   }
   // The seam pieces are face too: the picture shows through them, the group's shadow falls round them.
-  for (const p of seams(items, joined, lifted, half, radius)) {
+  for (const p of seams(items, joined, lifted, { half, radius })) {
     paths.push(p.d);
     grouped.push(p.d);
   }
@@ -474,7 +509,7 @@ function Seams({ items, joined }: { items: HomeItem[]; joined: Map<string, Recor
   const css = getComputedStyle(document.documentElement);
   const half = (parseFloat(css.getPropertyValue("--gap")) || 8) / 2;
   const radius = parseFloat(css.getPropertyValue("--radius")) || 12;
-  const list = seams(items, joined, carry.value?.item?.key, half, radius);
+  const list = seams(items, joined, carry.value?.item?.key, { half, radius });
   return (
     <>
       {list.map((p) => (
