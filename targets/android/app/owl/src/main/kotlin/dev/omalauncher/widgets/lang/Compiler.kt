@@ -143,6 +143,15 @@ class Compiler private constructor(
         /** notification("...", key) commands. */
         val NOTIFICATION = setOf("open", "dismiss")
 
+        /** The actions whose constant first value must be one of a set, with what to say when it isn't. */
+        val ACTION_ARGS: Map<String, Pair<Set<String>, String>> =
+            mapOf(
+                "media" to (MEDIA to "media takes ${MEDIA.joinToString()}"),
+                "volume" to (VOLUME to "volume takes a level in percent, or ${VOLUME.joinToString()}"),
+                "torch" to (TORCH to "torch takes true, false, ${TORCH.joinToString()}"),
+                "notification" to (NOTIFICATION to "notification takes ${NOTIFICATION.joinToString()} and a notification's key"),
+            )
+
         /** The tile's size, readable anywhere a declaration of the same name doesn't shadow it. */
         val TILE = setOf("cols", "rows", "tileWidth", "tileHeight", "screenWidth", "screenHeight", "corners")
 
@@ -729,52 +738,8 @@ class Compiler private constructor(
         val stmts =
             h.stmts.map { s ->
                 when (s) {
-                    is Stmt.Assign -> {
-                        val slot = slots[s.name]
-                        if (slot == null || s.name !in states) {
-                            fail(if (slot == null) "unknown state '${s.name}'; declare it with: state ${s.name} = ..." else "'${s.name}' isn't a state and can't be assigned", s.pos)
-                        }
-                        val call = s.value as? Expr.Call
-                        if (call?.name == "run") {
-                            // result = run("..."): the output arrives later, when the command finishes.
-                            if (call.args.size != 1 || call.named.isNotEmpty()) fail("run takes one command", call.pos)
-                            val command = ex(call.args[0], inner)
-                            listCommand(call.args[0], command, inner, "run(…)")
-                            guest = true
-                            val run: (Env) -> Unit = { env -> env.host.runInto(command(env).toString(), slot) }
-                            return@map run
-                        }
-                        val v = ex(s.value, inner)
-                        val run: (Env) -> Unit = { env -> env.host.write(slot, v(env)) }
-                        run
-                    }
-                    is Stmt.Do -> {
-                        val call = s.call as Expr.Call
-                        val arity = Builtins.actions[call.name] ?: fail("'${call.name}' isn't an action (${Builtins.actions.keys.joinToString()})", call.pos)
-                        if (call.args.size !in arity) fail("${call.name} takes ${arity.first}-${arity.last} values", call.pos)
-                        val args = call.args.map { ex(it, inner) }
-                        if (call.name == "media") {
-                            (args[0].const as? Str)?.v?.let { c -> if (c !in MEDIA) fail("media takes ${MEDIA.joinToString()}", call.pos) }
-                        }
-                        if (call.name == "volume") {
-                            (args[0].const as? Str)?.v?.let { c -> if (c !in VOLUME && c.toDoubleOrNull() == null) fail("volume takes a level in percent, or ${VOLUME.joinToString()}", call.pos) }
-                        }
-                        if (call.name == "torch") {
-                            (args[0].const as? Str)?.v?.let { c -> if (c !in TORCH) fail("torch takes true, false, ${TORCH.joinToString()}", call.pos) }
-                        }
-                        if (call.name == "notification") {
-                            (args[0].const as? Str)?.v?.let { c -> if (c !in NOTIFICATION) fail("notification takes ${NOTIFICATION.joinToString()} and a notification's key", call.pos) }
-                        }
-                        since(call.name, call.pos)
-                        if (call.name == "screen" || call.name == "close") screenAction = screenAction ?: call.pos
-                        if (call.name in setOf("run", "terminal", "app")) {
-                            listCommand(call.args[0], args[0], inner, "${call.name}(…)")
-                            // A tap on terminal(...) or app(...) without Linux offers to install it; run(...) would fail unseen.
-                            if (call.name == "run") guest = true
-                        }
-                        val run: (Env) -> Unit = { env -> env.host.act(call.name, args.map { it(env) }) }
-                        run
-                    }
+                    is Stmt.Assign -> assignStmt(s, inner)
+                    is Stmt.Do -> doStmt(s, inner)
                 }
             }
         return Action(params) { env, values ->
@@ -786,6 +751,57 @@ class Compiler private constructor(
                 env.host.report("${h.name}: ${x.message ?: x}")
             }
         }
+    }
+
+    /** `state = value` in a handler (or `state = run("...")`: the output arrives later, when the command finishes). */
+    private fun assignStmt(
+        s: Stmt.Assign,
+        inner: Scope,
+    ): (Env) -> Unit {
+        val slot = slots[s.name]
+        if (slot == null || s.name !in states) {
+            fail(if (slot == null) "unknown state '${s.name}'; declare it with: state ${s.name} = ..." else "'${s.name}' isn't a state and can't be assigned", s.pos)
+        }
+        val call = s.value as? Expr.Call
+        if (call?.name == "run") {
+            if (call.args.size != 1 || call.named.isNotEmpty()) fail("run takes one command", call.pos)
+            val command = ex(call.args[0], inner)
+            listCommand(call.args[0], command, inner, "run(…)")
+            guest = true
+            return { env -> env.host.runInto(command(env).toString(), slot) }
+        }
+        val v = ex(s.value, inner)
+        return { env -> env.host.write(slot, v(env)) }
+    }
+
+    /** An action in a handler: checked (its arity, its first value where it's one of a set), then run on the host. */
+    private fun doStmt(
+        s: Stmt.Do,
+        inner: Scope,
+    ): (Env) -> Unit {
+        val call = s.call as Expr.Call
+        val arity = Builtins.actions[call.name] ?: fail("'${call.name}' isn't an action (${Builtins.actions.keys.joinToString()})", call.pos)
+        if (call.args.size !in arity) fail("${call.name} takes ${arity.first}-${arity.last} values", call.pos)
+        val args = call.args.map { ex(it, inner) }
+        (args.getOrNull(0)?.const as? Str)?.v?.let { c -> actionArgError(call.name, c)?.let { fail(it, call.pos) } }
+        since(call.name, call.pos)
+        if (call.name == "screen" || call.name == "close") screenAction = screenAction ?: call.pos
+        if (call.name in setOf("run", "terminal", "app")) {
+            listCommand(call.args[0], args[0], inner, "${call.name}(…)")
+            // A tap on terminal(...) or app(...) without Linux offers to install it; run(...) would fail unseen.
+            if (call.name == "run") guest = true
+        }
+        return { env -> env.host.act(call.name, args.map { it(env) }) }
+    }
+
+    /** What's wrong with an action's constant first value [c], or null (the actions that take one of a set). */
+    private fun actionArgError(
+        name: String,
+        c: String,
+    ): String? {
+        val (set, hint) = ACTION_ARGS[name] ?: return null
+        // volume also takes a level in percent.
+        return if (c in set || (name == "volume" && c.toDoubleOrNull() != null)) null else hint
     }
 
     // Expressions
@@ -823,12 +839,20 @@ class Compiler private constructor(
         when (e) {
             is Expr.Lit -> Ev.of(e.value)
             is Expr.Name -> name(e, s)
-            is Expr.Interp -> {
-                val parts = e.parts.map { ex(it, s) }
-                // Values are trimmed (command output ends in newlines); the literal text around them isn't.
-                val literal = e.parts.map { it is Expr.Lit && it.value is Str }
-                fold(parts) { env -> Str(parts.withIndex().joinToString("") { (i, p) -> p(env).let { v -> if (literal[i]) v.toString() else v.text() } }) }
-            }
+            is Expr.Call -> call(e, s)
+            is Expr.Unary -> unary(e, s)
+            is Expr.Binary -> binary(e, s)
+            is Expr.Cond -> cond(e, s)
+            else -> structural(e, s)
+        }
+
+    /** Strings with values in them, lists, maps, members, indexes, lambdas. */
+    private fun structural(
+        e: Expr,
+        s: Scope,
+    ): Ev =
+        when (e) {
+            is Expr.Interp -> interp(e, s)
             is Expr.ListLit -> {
                 val items = e.items.map { ex(it, s) }
                 fold(items) { env -> Lst(items.map { it(env) }) }
@@ -837,44 +861,6 @@ class Compiler private constructor(
                 val keys = e.entries.map { it.first }
                 val vals = e.entries.map { ex(it.second, s) }
                 fold(vals) { env -> Obj(LinkedHashMap<String, Value>().apply { keys.forEachIndexed { i, k -> put(k, vals[i](env)) } }) }
-            }
-            is Expr.Unary -> {
-                val a = ex(e.e, s)
-                if (e.op == "!") {
-                    fold(listOf(a)) { env -> bool(!a(env).truthy) }
-                } else {
-                    val slow = fold(listOf(a)) { env -> a(env).num()?.let { Num(-it) } ?: Null }
-                    if (numberish(a)) fastOf(a).let { x -> numeric(slow) { env -> -x.of(env) } } else slow
-                }
-            }
-            is Expr.Binary -> {
-                val a = ex(e.a, s)
-                val b = ex(e.b, s)
-                when (e.op) {
-                    // Like JS: `x || "none"` gives x when it's set.
-                    "&&" -> fold(listOf(a, b)) { env -> a(env).let { if (!it.truthy) it else b(env) } }
-                    "||" -> fold(listOf(a, b)) { env -> a(env).let { if (it.truthy) it else b(env) } }
-                    "??" -> fold(listOf(a, b)) { env -> a(env).let { if (it != Null) it else b(env) } }
-                    else -> {
-                        val op = Builtins.operator(e.op)
-                        arithmetic(e.op, a, b, fold(listOf(a, b)) { env -> op(a(env), b(env)) })
-                    }
-                }
-            }
-            is Expr.Cond -> {
-                val c = ex(e.c, s)
-                val a = ex(e.a, s)
-                val b = ex(e.b, s)
-                when {
-                    c.const != null -> if (c.const.truthy) a else b
-                    // `(j < 3 ? 2 : 1) * p` stays on the fast path: each branch is already a boundary of its own.
-                    numberish(a) && numberish(b) -> {
-                        val x = fastOf(a)
-                        val y = fastOf(b)
-                        Ev(null, { env -> if (c(env).truthy) a(env) else b(env) }, Fast { env -> if (c(env).truthy) x.of(env) else y.of(env) })
-                    }
-                    else -> Ev(null) { env -> if (c(env).truthy) a(env) else b(env) }
-                }
             }
             is Expr.Member -> {
                 val o = ex(e.e, s)
@@ -885,20 +871,97 @@ class Compiler private constructor(
                 val i = ex(e.index, s)
                 fold(listOf(o, i)) { env -> Builtins.index(o(env), i(env)) }
             }
-            is Expr.Call -> call(e, s)
-            is Expr.Lambda -> {
-                val inner = Scope(s, e.params)
-                val body = ex(e.body, inner)
-                val n = e.params.size
-                Ev(null) { env ->
-                    Fn(n) { args ->
-                        env.host.budget.tick()
-                        // Not env.child(*...): spreading would copy the array.
-                        body(Env(env.host, env, Array<Value>(n) { args.getOrElse(it) { Null } }))
-                    }
-                }
+            is Expr.Lambda -> lambda(e, s)
+            else -> error("unhandled expression ${e::class.simpleName}")
+        }
+
+    private fun interp(
+        e: Expr.Interp,
+        s: Scope,
+    ): Ev {
+        val parts = e.parts.map { ex(it, s) }
+        // Values are trimmed (command output ends in newlines); the literal text around them isn't.
+        val literal = e.parts.map { it is Expr.Lit && it.value is Str }
+        return fold(parts) { env -> Str(parts.withIndex().joinToString("") { (i, p) -> p(env).let { v -> if (literal[i]) v.toString() else v.text() } }) }
+    }
+
+    private fun unary(
+        e: Expr.Unary,
+        s: Scope,
+    ): Ev {
+        val a = ex(e.e, s)
+        if (e.op == "!") return fold(listOf(a)) { env -> bool(!a(env).truthy) }
+        val slow = fold(listOf(a)) { env -> a(env).num()?.let { Num(-it) } ?: Null }
+        return if (numberish(a)) fastOf(a).let { x -> numeric(slow) { env -> -x.of(env) } } else slow
+    }
+
+    private fun binary(
+        e: Expr.Binary,
+        s: Scope,
+    ): Ev {
+        val a = ex(e.a, s)
+        val b = ex(e.b, s)
+        return logical(e.op, a, b) ?: Builtins.operator(e.op).let { op -> arithmetic(e.op, a, b, fold(listOf(a, b)) { env -> op(a(env), b(env)) }) }
+    }
+
+    /** `&&`, `||`, `??` - like JS: `x || "none"` gives x when it's set. Null for any other operator. */
+    private fun logical(
+        op: String,
+        a: Ev,
+        b: Ev,
+    ): Ev? {
+        // Whether a's value is the result (else b is evaluated and is).
+        val keep: (Value) -> Boolean =
+            when (op) {
+                "&&" -> { v -> !v.truthy }
+                "||" -> { v -> v.truthy }
+                "??" -> { v -> v != Null }
+                else -> return null
+            }
+        return fold(listOf(a, b)) { env -> a(env).let { if (keep(it)) it else b(env) } }
+    }
+
+    private fun cond(
+        e: Expr.Cond,
+        s: Scope,
+    ): Ev {
+        val c = ex(e.c, s)
+        val a = ex(e.a, s)
+        val b = ex(e.b, s)
+        return when {
+            c.const != null -> if (c.const.truthy) a else b
+            // `(j < 3 ? 2 : 1) * p` stays on the fast path: each branch is already a boundary of its own.
+            numberish(a) && numberish(b) -> fastCond(c, a, b)
+            else -> Ev(null) { env -> if (c(env).truthy) a(env) else b(env) }
+        }
+    }
+
+    /** `c ? a : b` with numbers on both sides: the fast path too. */
+    private fun fastCond(
+        c: Ev,
+        a: Ev,
+        b: Ev,
+    ): Ev {
+        val x = fastOf(a)
+        val y = fastOf(b)
+        return Ev(null, { env -> if (c(env).truthy) a(env) else b(env) }, Fast { env -> if (c(env).truthy) x.of(env) else y.of(env) })
+    }
+
+    private fun lambda(
+        e: Expr.Lambda,
+        s: Scope,
+    ): Ev {
+        val inner = Scope(s, e.params)
+        val body = ex(e.body, inner)
+        val n = e.params.size
+        return Ev(null) { env ->
+            Fn(n) { args ->
+                env.host.budget.tick()
+                // Not env.child(*...): spreading would copy the array.
+                body(Env(env.host, env, Array<Value>(n) { args.getOrElse(it) { Null } }))
             }
         }
+    }
 
     private fun name(
         e: Expr.Name,
