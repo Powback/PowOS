@@ -112,19 +112,19 @@ class ShellWidgets(
     /**
      * What the Compose launcher's FrameClock does: `time` advances while an animated widget is on screen. Only then:
      * this ticked every frame for every widget on the page, animated or not and home shown or not - most of the
-     * launcher's idle CPU (~6% of a core with the screen off). A still one is looked at again each [STILL_MS] (its
-     * file saved again may animate); none while no home shows ([dev.omalauncher.widgets.WidgetEngine.visible]).
+     * launcher's idle CPU (~6% of a core with the screen off). A still one sleeps until its spec changes (a file saved
+     * again may animate) - it was looked at every second, 60 wakes a minute per tile on an idle home; none while no
+     * home shows ([dev.omalauncher.widgets.WidgetEngine.visible]).
      */
     private suspend fun clock(key: String) {
         val start = System.nanoTime()
+        // engine.specs is snapshot state, replaced on each reload: an observable "animated now" without polling.
+        fun animating() = engine.visible && engine.specs.firstOrNull { it.file.name == key }?.program?.animated == true
         while (true) {
-            if (!engine.visible) snapshotFlow { engine.visible }.first { it }
-            val inst = instance(key)
-            if (inst?.program?.animated == true) {
-                inst.time = (System.nanoTime() - start) / 1e9
+            snapshotFlow { animating() }.first { it }
+            while (animating()) {
+                instance(key)?.time = (System.nanoTime() - start) / 1e9
                 delay(FRAME_MS)
-            } else {
-                delay(STILL_MS)
             }
         }
     }
@@ -166,6 +166,5 @@ class ShellWidgets(
 
     private companion object {
         const val FRAME_MS = 33L
-        const val STILL_MS = 1000L
     }
 }

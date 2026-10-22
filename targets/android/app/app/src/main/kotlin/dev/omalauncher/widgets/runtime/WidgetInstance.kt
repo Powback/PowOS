@@ -523,15 +523,9 @@ class WidgetInstance(
                                 }
                             else -> {
                                 val seen = refreshes.value
-                                val start = System.currentTimeMillis()
                                 update(slot, g)
-                                // An interval of NaN ("NaN" is a number) would be 0: a % by zero for a clock, a busy loop otherwise.
-                                val wait = (g.every * 1000).toLong().coerceAtLeast(100)
-                                // Clocks tick on the second (or minute) boundary so displays change in step;
-                                // other intervals count from the start of the update, however long it took.
-                                val target = if (g.kind == "clock") wait - System.currentTimeMillis() % wait else (start + wait - System.currentTimeMillis()).coerceAtLeast(0)
                                 // Sleeps until the interval is up, or a refresh() wakes it early.
-                                withTimeoutOrNull(target) { refreshes.first { it != seen } }
+                                withTimeoutOrNull(nextWake(g.every, System.currentTimeMillis())) { refreshes.first { it != seen } }
                             }
                         }
                     }
@@ -799,6 +793,20 @@ class WidgetInstance(
     private val lastSample = HashMap<Int, Value>()
 
     companion object {
+        /**
+         * Milliseconds from [now] to a polled source's next update, [every] seconds apart: on the interval's wall-clock
+         * boundary, for every kind (clocks change in step), so sources whose intervals divide each other's - every
+         * widget's 5 s, 15 s, 1 m... - wake together, once, and their tiles reach the page in one frame instead of each
+         * on its own phase (an idle home woke for each, perf 2026-10-22). NaN or tiny intervals: at least 100 ms.
+         */
+        fun nextWake(
+            every: Double,
+            now: Long,
+        ): Long {
+            val wait = (every * 1000).toLong().coerceAtLeast(100)
+            return wait - Math.floorMod(now, wait)
+        }
+
         private const val SLOW_DRAW_NANOS = 4_000_000.0
 
         /** Draws at the start that aren't timed: about two seconds at full rate. */

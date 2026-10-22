@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Build
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -176,65 +178,75 @@ class Media(
      */
     fun updates(): Flow<Value> =
         callbackFlow {
-            var current: MediaController? = null
+            // Every active session is watched, not only the one shown: another one starting to play is an event. A 5 s
+            // ticker used to look instead - three binder calls into system_server each time, for the app's whole life
+            // once a control center had asked (perf, 2026-10-22).
+            val bound = HashMap<MediaSession.Token, MediaController>()
+            val playing = MutableStateFlow(false)
+
+            fun changed() {
+                playing.value = synchronized(bound) { bound.values.any { it.playbackState?.state == PlaybackState.STATE_PLAYING } }
+                trySend(Unit)
+            }
             val callback =
                 object : MediaController.Callback() {
-                    override fun onPlaybackStateChanged(state: PlaybackState?) {
-                        trySend(Unit)
-                    }
+                    override fun onPlaybackStateChanged(state: PlaybackState?) = changed()
 
-                    override fun onMetadataChanged(metadata: MediaMetadata?) {
-                        trySend(Unit)
-                    }
+                    override fun onMetadataChanged(metadata: MediaMetadata?) = changed()
 
-                    // The ticker below rebinds to whichever session is current.
-                    override fun onSessionDestroyed() {
-                        trySend(Unit)
-                    }
+                    override fun onSessionDestroyed() = changed()
                 }
 
-            fun rebind(next: MediaController?) {
-                if (next?.sessionToken == current?.sessionToken) return
-                current?.unregisterCallback(callback)
-                current = next
-                next?.registerCallback(callback, main)
-            }
-            val changed =
-                MediaSessionManager.OnActiveSessionsChangedListener {
-                    rebind(controller())
-                    trySend(Unit)
+            fun bind(list: List<MediaController>) =
+                synchronized(bound) {
+                    val tokens = list.mapTo(HashSet()) { it.sessionToken }
+                    bound.entries.removeAll { (token, c) -> (token !in tokens).also { gone -> if (gone) c.unregisterCallback(callback) } }
+                    for (c in list) if (bound.putIfAbsent(c.sessionToken, c) == null) c.registerCallback(callback, main)
+                }
+            val sessionsChanged =
+                MediaSessionManager.OnActiveSessionsChangedListener { list ->
+                    bind(list.orEmpty())
+                    changed()
                 }
             var listening = false
 
             fun listen() {
                 if (listening || !granted) return
-                listening = runCatching { sessions.addOnActiveSessionsChangedListener(changed, component, main) }.isSuccess
-                rebind(controller())
+                listening = runCatching { sessions.addOnActiveSessionsChangedListener(sessionsChanged, component, main) }.isSuccess
+                bind(runCatching { sessions.getActiveSessions(component) }.getOrNull().orEmpty())
             }
             listen()
-            trySend(Unit)
+            changed()
+            // Access granted (or taken away) later: Android binds (or unbinds) the notification listener - an event too.
+            val access =
+                launch {
+                    var connected = MediaListener.connected != null
+                    MediaListener.changes.collect {
+                        val now = MediaListener.connected != null
+                        if (now == connected) return@collect
+                        connected = now
+                        listen()
+                        changed()
+                    }
+                }
+            // Every second while something plays, so `position` moves; no wake at all otherwise.
             val ticker =
                 launch {
-                    var wasGranted = granted
-                    while (true) {
-                        // Every second while playing, for the position; otherwise only to notice access being granted
-                        // or a session that started playing without the active list changing order.
-                        delay(if (current?.playbackState?.state == PlaybackState.STATE_PLAYING) 1000 else 5000)
-                        val now = granted
-                        if (now != wasGranted) {
-                            wasGranted = now
-                            listen()
+                    playing.collectLatest { on ->
+                        while (on) {
+                            delay(1000)
                             trySend(Unit)
                         }
-                        // Another session may have started playing without the active list changing order.
-                        if (listening) rebind(controller())
-                        if (current?.playbackState?.state == PlaybackState.STATE_PLAYING) trySend(Unit)
                     }
                 }
             awaitClose {
+                access.cancel()
                 ticker.cancel()
-                current?.unregisterCallback(callback)
-                if (listening) sessions.removeOnActiveSessionsChangedListener(changed)
+                synchronized(bound) {
+                    bound.values.forEach { it.unregisterCallback(callback) }
+                    bound.clear()
+                }
+                if (listening) sessions.removeOnActiveSessionsChangedListener(sessionsChanged)
             }
         }.conflate().map { value() }.distinctUntilChanged()
 

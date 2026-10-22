@@ -3,11 +3,13 @@ widget "fetch" {
   order: 2
   size: 3x3
   minSize: 3x2
-  meta { description: "Your phone at a glance, fastfetch style, with or without Linux: CPU, memory, storage, battery and theme, plus Arch's packages once Linux is installed. Tap it for every detail"; version: "1.1"; license: "MIT"; category: "system"; owl: 5 }
+  meta { description: "Your phone at a glance, fastfetch style, with or without Linux: CPU, memory, storage, battery and theme, plus Arch's packages once Linux is installed. Tap it for every detail"; version: "1.2"; license: "MIT"; category: "system"; owl: 5 }
 
   // The phone, from Android: works without Linux.
   source dev = android.device
-  source sys = android.system every 5s
+  // Every 30 s: what it shows moves slowly (memory and disk in whole percent, uptime in minutes); each read is a
+  // binder call into system_server plus a re-evaluated tile (5 s was 12 of them a minute on an idle home, 2026-10-22).
+  source sys = android.system every 30s
   source bat = android.battery
   // The Arch side, once Linux is installed. Base tools only, so it doesn't make the widget need Linux.
   source lx = cmd("""

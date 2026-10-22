@@ -61,6 +61,23 @@ rest. Keep the blur - make it cheap.
 - Baselines (2026-10-22): idle home app 4.3 + renderer 1.1-2.0 % of a core; drawer drag app ~105 / renderer ~97 /
   SF ~62 (total ~356). Re-measure on kernel changes.
 
+## Widget engine wakes (Kotlin, 2026-10-22)
+- Idle home = the tiles in assets/widgets/*.owl (today, fetch, terminal, games, performance). Polled sources sleep
+  `WidgetInstance.nextWake(every, now)`: on the interval's wall-clock boundary, so 5 s / 15 s / 1 m / 30 m sources
+  wake at the SAME instant (one wake, tiles reach the page in one frame). Headless count: WakeScheduleTest (prints
+  "wakes/min": 12 aligned = the performance tile's 5 s; 13 on own phases, drifting apart by each update's length).
+  Engine total on an idle home: ~325 wakes/min before (5 tile clocks x 60 + media 12 + sources 13) -> 12. Unit tests in the warm container: rsync
+  the worktree to a private /tmp/<name>/PowOS (not /work), and ALSO pass `-I` an init script setting
+  `layout.buildDirectory` elsewhere - init.d puts every build in /tmp/gradle-build/<rootProject.name>, so a private
+  copy alone still clobbers the shared build dirs (done once, 2026-10-22).
+- Gone: ShellWidgets.clock looked at every watched tile each 1 s (60 wakes/min per tile, ~300 on home): now
+  snapshotFlow on engine.visible + spec.program.animated. Media.updates() ticked every 5 s with 3 binder calls
+  forever once a control center asked media.state: now callbacks on every active session + MediaListener.changes for
+  access; 1 s ticks only while something plays. fetch's android.system 5 s -> 30 s (binder + tile eval each).
+- Left: performance tile's own 5 s (its point); while music plays the 1 s position tick runs even screen off
+  (ShellMedia keeps listening) - gate on visibility if it shows up. Sources pause when no home activity is started
+  (WidgetEngine.visible = ShellActivity onStart/onStop; screen off stops it).
+
 ## Delivery pipeline (Mac)
 - APK: build-app.sh uses the warm builder (targets/android/tools/warm-builder.sh, container powos-gradle-warm, unit
   gradle-warm-mac): every worktree rsync'd into /work, Gradle daemon warm - 11-12 s end to end; falls back to the cold
