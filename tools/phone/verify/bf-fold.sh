@@ -1,0 +1,120 @@
+#!/bin/bash
+# bf-fold.sh: (Mac side; queue it: queue.sh add [--close] <board-task> bf-fold.sh) Broforce survives folding the phone
+# mid-game (skill powos-games). In one free window: KWin 3.21+ (pkgs/kwin 0017: a full-screen window task keeps its
+# size and is scaled to fit) installed and running (pacman -U + a fresh session if needed - never while a Broforce
+# runs on the old KWin: exit 3, next window), Broforce up and past its sleep grace, then unfolded -> forced CLOSED
+# (cmd device_state state 0) -> 25 s later (past the 15 s sleep timer) -> forced OPENED (state 3), each step: the
+# game's reaper + X window unchanged, its size kept, not frozen, its window changing (x11grab), SurfaceFlinger
+# presents of the window task, and a screencap's black bars (letterboxed on the cover). The forced state is always
+# reset; a Broforce it started is closed. Artefacts ~/.cache/powos-verify/bf-fold-<date>/. Exit 3 = no window/touched.
+#   KWIN_PKG=<pkg.tar.xz> (default: the newest targets/android/out/pkgs/kwin-*.pkg.tar.xz of this checkout)
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd); P=$here/..; A=$P/adb.sh; repo=$(cd "$here/../../.." && pwd)
+OUT=${OUT:-$HOME/.cache/powos-verify/bf-fold-$(date +%F_%H%M)}; mkdir -p "$OUT"
+PKG=${KWIN_PKG:-$(ls -t "$repo"/targets/android/out/pkgs/kwin-*.pkg.tar.xz 2>/dev/null | head -1)}
+WANT=$(basename "$PKG" | sed -E 's/^kwin-([^-]+-[^-]+)-.*/\1/')
+WL_TRAP='"$A" shell cmd device_state state reset >/dev/null 2>&1'
+. "$here/window-lock.sh"; window_lock bf-fold.sh 120
+trap '"$A" shell cmd device_state state reset >/dev/null 2>&1; [ "${WL_LOCK:-}" ] && rm -rf "$WL_LOCK"' EXIT
+log() { echo "$(date +%T) $*" | tee -a "$OUT/run.txt"; }
+"$A" push "$here/bf-fold-phone.sh" /data/local/tmp/powos-bf-fold-phone.sh >/dev/null
+"$A" push "$here/bf-stop.sh" /data/local/tmp/powos-bf-stop.sh >/dev/null
+"$A" shell "su -c 'cp /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/powos/root/var/tmp/; chmod 644 /data/powos/root/var/tmp/powos-bf-*.sh'"
+kwin() {  # kwin=<pid> kwin_new=<1|0>: 0 = it still runs a libkwin the package replaced (needs a fresh session)
+  printf '%s\n' 'k=$(pgrep -x kwin_wayland | head -1); n=0; [ -n "$k" ] && ! grep -q "libkwin.*(deleted)" /proc/$k/maps && n=1; echo "kwin=${k:--} kwin_new=$n"' > "$OUT/kw.sh"
+  "$P/root.sh" "$OUT/kw.sh" 2>/dev/null | tail -1 | tr -d '\r'; }
+ph() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-fold-phone.sh $*\"'" | tr -d '\r'; }
+irq() { "$A" shell "cat /proc/interrupts" | awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}'; }
+I0=$(irq); touched() { [ "$(irq)" != "$I0" ] && { log "user input - stopping"; return 0; }; return 1; }
+
+# 1. The KWin with the fix, installed and running.
+have=$(printf 'pacman -Q kwin | cut -d" " -f2\n' > "$OUT/q.sh"; "$P/root.sh" "$OUT/q.sh" 2>/dev/null | tail -1 | tr -d '\r')
+log "kwin installed $have, want $WANT ($PKG)"
+if [ "$have" != "$WANT" ]; then
+  [ -f "$PKG" ] || { log "no package $PKG"; exit 1; }
+  "$A" push "$PKG" /data/local/tmp/powos-kwin.pkg.tar.xz >/dev/null
+  # The package goes in through Android's side (root.sh runs inside PowOS: /data/local/tmp isn't there).
+  "$A" shell "su -c 'mv /data/local/tmp/powos-kwin.pkg.tar.xz /data/powos/root/var/tmp/'"
+  cat > "$OUT/install.sh" <<EOF
+set -e; mkdir -p /var/cache/powos
+# Rollback copy of the running KWin's files (no package of it is cached): tar -xf it over / to go back.
+pacman -Qlq kwin | while read -r f; do [ -f "\$f" ] && echo "\$f"; done | tar -cf /var/cache/powos/kwin-$have-files.tar -T -
+pacman -U --noconfirm /var/tmp/powos-kwin.pkg.tar.xz >/dev/null && rm -f /var/tmp/powos-kwin.pkg.tar.xz
+pacman -Q kwin
+EOF
+  "$P/root.sh" "$OUT/install.sh" 2>&1 | tail -2 | tee -a "$OUT/run.txt"
+fi
+st="$(kwin) $(ph state)"; log "state: $st"
+if [[ $st != *kwin_new=1* ]]; then
+  [[ $st == *reaper=-* ]] || { log "a Broforce runs on the old KWin (the user's?): not restarting the session now"; exit 3; }
+  touched && exit 3
+  ph logout | tee -a "$OUT/run.txt"; sleep 20
+  for _ in $(seq 40); do st="$(kwin) $(ph state 2>/dev/null)"; [[ $st == *kwin_new=1* && $st != *root=x* ]] && break; sleep 5; done
+  log "after the fresh session: $st"
+  if [[ $st != *kwin_new=1* ]]; then
+    log "KWin didn't come back: rolling back to $have"
+    printf 'tar -xf /var/cache/powos/kwin-%s-files.tar -C /\n' "$have" > "$OUT/rollback.sh"; "$P/root.sh" "$OUT/rollback.sh"
+    ph logout; exit 1
+  fi
+  sleep 15
+fi
+
+# 2. Broforce up.
+touched && exit 3
+r=$(ph start); echo "$r" >> "$OUT/run.txt"; mine=$([[ $r == *mine=1* ]] && echo 1 || echo 0)
+stop() { [ "$mine" = 1 ] && ph_stop=$("$A" shell "su -c 'sh /data/powos/powos-run.sh \"bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tail -1) && log "closed the Broforce it started: $ph_stop"; }
+[[ $r == *"no Broforce window"* ]] && { log "FAIL: Broforce didn't come up"; stop; exit 1; }
+
+# SurfaceFlinger presents over 2 s, summed over the window tasks' SurfaceViews (the game's task is the busy one).
+sf() { "$A" shell 'L=$(dumpsys SurfaceFlinger --list | sed -E "s/^RequestedLayerState\{//; s/ parentId=.*//" | grep -E "SurfaceView\[com.powos.app/andro.marchy.PowosWindowActivity\]" | grep -vE "Background|Bounds|ActivityRecord" | head -4)
+  echo "$L" | while read -r l; do [ -n "$l" ] || continue; a=$(dumpsys SurfaceFlinger --latency "$l" | awk "NR>1 && \$3>0 && \$3<9e18 {m=\$3} END{print m+0}")
+    echo "$l|$a"; done > /data/local/tmp/powos-sf0; sleep 2; n=0
+  while IFS="|" read -r l a; do c=$(dumpsys SurfaceFlinger --latency "$l" | awk -v a="$a" "NR>1 && \$3>a && \$3<9e18 {c++} END{print c+0}"); [ "$c" -gt "$n" ] && n=$c; done < /data/local/tmp/powos-sf0
+  rm -f /data/local/tmp/powos-sf0; echo "$n"' | tr -d '\r'; }
+bars() {  # bars <png>: black rows/columns at each edge of a screencap (top bottom left right) and the centre's brightness
+  local r c
+  r=$(ffmpeg -nostdin -loglevel error -i "$1" -vf "format=gray,scale=1:ih:flags=area" -f rawvideo - 2>/dev/null | od -An -v -tu1 | tr -s ' \n' ' ')
+  c=$(ffmpeg -nostdin -loglevel error -i "$1" -vf "format=gray,scale=iw:1:flags=area" -f rawvideo - 2>/dev/null | od -An -v -tu1 | tr -s ' \n' ' ')
+  awk -v r="$r" -v c="$c" 'function edge(s, rev,   a, n, i, k) { n = split(s, a, " "); for (k = 0; k < n; k++) {
+      i = rev ? n - k : k + 1; if (a[i] > 12) return k }; return n }
+    BEGIN { n = split(r, a, " "); printf "top=%d bottom=%d left=%d right=%d mid=%d\n", edge(r, 0), edge(r, 1), edge(c, 0), edge(c, 1), a[int(n / 2)] }'; }
+fails=0; first=
+probe() {  # probe <label> [cover|inner]
+  local st c f s
+  st="$(kwin) $(ph state)"; c=$(ph changes 3); f=$(sf)
+  "$P/shot.sh" "$OUT/$1.png" >/dev/null 2>&1 && s=$(bars "$OUT/$1.png") || s="no screencap"
+  log "$1: $st $c sf_presents_2s=$f screen: $s"
+  [ -z "$first" ] && first=$st
+  local bad=
+  [[ $st == *frozen=no* ]] || bad+=" frozen"
+  [[ $st == *reaper=-* ]] && bad+=" game-gone"
+  [ "${st%% *}" = "${first%% *}" ] || bad+=" kwin-restarted"
+  [ "$(echo "$st" | grep -o 'reaper=[^ ]*')" = "$(echo "$first" | grep -o 'reaper=[^ ]*')" ] || bad+=" game-restarted"
+  [ "$(echo "$st" | grep -o 'win=[^ ]* geom=[0-9x]*')" = "$(echo "$first" | grep -o 'win=[^ ]* geom=[0-9x]*')" ] || bad+=" window-changed"
+  [ "${c#changes=}" -ge 3 ] 2>/dev/null || bad+=" not-drawing"
+  [ "${f:-0}" -ge 20 ] 2>/dev/null || bad+=" not-on-screen"
+  local t=${s#*top=}; t=${t%% *}; local b=${s#*bottom=}; b=${b%% *}; local l=${s#*left=}; l=${l%% *}
+  if [ "${2:-}" = cover ]; then  # 2268x2440 fitted into 1116x2484: ~640 px bars above and below
+    [ "${t:-0}" -ge 300 ] 2>/dev/null && [ "${b:-0}" -ge 300 ] 2>/dev/null || bad+=" not-letterboxed"
+  else  # its own size on the inner screen: no bars expected (scale 1) - a note only, dark game art reads as bars too
+    [ "${t:-999}" -lt 80 ] 2>/dev/null && [ "${b:-999}" -lt 80 ] 2>/dev/null && [ "${l:-999}" -lt 80 ] 2>/dev/null \
+      || log "  $1 note: dark edges unfolded (bars? the task's buffer smaller than the game): $s"
+  fi
+  [ -n "$bad" ] && { fails=$((fails + 1)); log "  $1 bad:$bad"; }
+  return 0
+}
+now=$("$A" shell cmd device_state print-state | tr -d '\r'); log "device state $now"
+[ "$now" = 3 ] || { "$A" shell cmd device_state state 3; sleep 6; }
+touched && { stop; exit 3; }
+probe unfolded inner
+"$A" shell cmd device_state state 0; sleep 6; log "forced CLOSED (cover)"
+probe folded cover
+sleep 20; probe folded-25s cover
+"$A" shell cmd device_state state 3; sleep 6; log "forced OPENED (inner)"
+probe unfolded-again inner
+"$A" shell cmd device_state state reset >/dev/null 2>&1
+ph sleeplog >> "$OUT/run.txt"
+stop
+r="RESULT bf-fold: $([ $fails = 0 ] && echo PASS || echo "FAIL ($fails bad steps)") - game kept $(echo "$first" | grep -o 'geom=[^ ]*') through fold/unfold; artefacts $OUT"
+log "$r"
+[ $fails = 0 ]

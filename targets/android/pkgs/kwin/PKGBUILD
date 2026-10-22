@@ -12,6 +12,7 @@
 #               DPMS wakes when the app comes back to the front
 #   0015        ours: ANLAND_SOCKET may be an abstract-namespace socket ("@powos.display", rooted phones)
 #   0016        ours: X11 apps' text fields show the Android keyboard (D-Bus SetX11TextFocus, powos-ime-bridge)
+#   0017        ours: a full-screen window task keeps its size through output changes (fold) and is scaled to fit
 #
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
@@ -21,7 +22,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.20
+pkgrel=3.21
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -53,11 +54,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0013-backends-anland-windows-as-Android-tasks.patch
           0014-workspace-let-the-platform-take-window-operations-over.patch
           0015-backends-anland-display-daemon-in-the-abstract-namespace.patch
-          0016-backends-anland-keyboard-for-X11-text-fields.patch)
+          0016-backends-anland-keyboard-for-X11-text-fields.patch
+          0017-backends-anland-full-screen-window-tasks-keep-their-size.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver
