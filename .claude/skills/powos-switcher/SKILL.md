@@ -62,10 +62,24 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   launcher; startFlexibleWindowForRecentTasks makes a split "pocket", not a window; Settings is on OnePlus's
   no-floating list (pick Calculator for tests). Probe OEM framework calls with a d8'd class via
   `CLASSPATH=x.dex app_process /system/bin <Class>` as root, after dexdump of oplus-framework.jar.
-- OxygenOS draws NO caption/title bar for freeform tasks: move/resize/minimise need our own (next slice), as do the
-  running windows in the dock.
+- OxygenOS draws NO caption for freeform tasks: PowOS's own frames (system/WindowFrames.kt + WindowFrame.kt +
+  FreeformTasks.kt), owned by the recents service (created in onInitialize, like the pet).
+  - Per visible freeform task, two TYPE_APPLICATION_OVERLAY windows titled "PowOS window bar <id>" / "PowOS window
+    grip <id>": a 40 dp glass bar above the task's top (icon, label, minimise, close) and a 36 dp grip disc on its
+    lower-right corner. Glass = GlassBlur.wholeWindowOf(view, radius, corners) via WindowBlur(cornersDp) + 42% dark tint.
+  - Tracking: a hand-made ITaskStackListener Binder (any transaction = "changed", debounced 80 ms) -> getRunningTasks
+    (recents provider sees all) -> TaskInfo.configuration.windowConfiguration bounds/mode (reflected). A bar under a
+    higher window's bounds is hidden (overlays sit above every app). None while keyguard, Switcher.open (its setter
+    refreshes), or not AppWindows.floating.
+  - Drag: the frame moves at once, IActivityTaskManager.resizeTask(id, rect, RESIZE_MODE_USER=1) coalesced on one
+    worker thread. Close = Tasks.remove. Minimise = WindowContainerTransaction.reorder(TaskInfo.token, false) via
+    WindowOrganizer.applyTransaction (assumed: lands under home; unverified until the check passes).
+  - Dock: WindowFrames.running (Compose state) -> ShellBridge "windows.list"/"windows.changed"/"windows.restore";
+    shell state.ts `windows`, home.tsx `windowed` dot (.dock .app.windowed[.minimised]) + DockWindows (unpinned
+    apps with a window, after the pinned ones). ShellBridge.launch: an app with a window is restored, not relaunched.
 - Check: `tools/phone/verify/float-windows.sh` (forces the inner screen with `cmd device_state state 3`, swipes the
-  lock face, launches Calculator through home's powos.apps.launch over CDP, asserts mode=freeform, shot.sh, then
+  lock face, launches Calculator through home's powos.apps.launch over CDP, asserts mode=freeform; then the frame:
+  bar window, drag moves, grip resizes, minimise -> visible=false, launch restores, close; then
   `cmd device_state state reset`). Queue it: `tools/phone/verify/queue.sh add <task> float-windows.sh`.
 
 ## Device-check rules learned
