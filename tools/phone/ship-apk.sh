@@ -67,7 +67,13 @@ if [ -z "$now" ]; then
   while [ $waited -lt $(( ${SHIP_WAIT_MIN:-60} * 60 )) ]; do
     # A verifier's measurement window has priority (an install restarts the app mid-run and voids it):
     # ~/.cache/powos-verify.lock (mkdir; who/why inside) holds the install until it's gone.
-    if [ -d "$HOME/.cache/powos-verify.lock" ]; then sleep 15; waited=$((waited + 15)); continue; fi
+    # A verify lock is for an injected test (minutes). One older than 10 min is held through a wait (a check waiting for
+    # idle or for the user to fold - 2026-10-22, twice, blocking every APK for 20+ min): warn and don't wait on it.
+    vl="$HOME/.cache/powos-verify.lock"
+    if [ -d "$vl" ] && [ $(( $(date +%s) - $(stat -f %m "$vl" 2>/dev/null || stat -c %Y "$vl") )) -lt 600 ]; then
+      sleep 15; waited=$((waited + 15)); continue
+    fi
+    [ -d "$vl" ] && echo "ship-apk: ignoring a stale verify lock (held 10+ min by: $(cat "$vl/who" 2>/dev/null)) - locks are for injected tests, not waits" >&2
     # One held call that returns when the phone is free (the waiting runs on the phone: no poll over the VPN), in
     # 10-min chunks so the verify lock above is seen. Screen off (Asleep/Dozing) = safe at once; Awake = only after 60 s
     # without a touch; anything else (an empty or unreadable state) = NOT safe - it installed over an active user once
