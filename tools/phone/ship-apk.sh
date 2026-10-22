@@ -4,6 +4,8 @@
 # guard + app-data backup), then verify the app came back (gesture input, no new crash).
 #   tools/phone/ship-apk.sh --note "what changed, plain words" [--now]
 #   tools/phone/ship-apk.sh --silent [--now]    a change the user can't see (refactor, lint, tooling): no notification
+# Run by the ship service only (tools/phone/ship.sh: agents push, then `ship.sh request`); by hand only with --direct
+# (an emergency; logged to ~/.cache/powos-ship-queue/direct.log).
 # Waits for the user to be idle >= 60 s (or the screen off) before installing - an install restarts the PowOS session;
 # never installs over an active user (exit 4 after SHIP_WAIT_MIN minutes). --now skips the wait (only for urgent fixes).
 set -euo pipefail
@@ -16,9 +18,18 @@ if [ -z "${SHIP_APK_CURRENT:-}" ]; then
   if [ -s "$cur" ] && ! cmp -s "$cur" "$0"; then SHIP_APK_CURRENT=1 exec bash "$cur" "$@"; fi
   rm -f "$cur"
 fi
-note="" now="" silent=""
-while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --silent) silent=1; shift;; --now) now=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
+note="" now="" silent="" direct=""
+while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --silent) silent=1; shift;; --now) now=1; shift;; --direct) direct=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
 [ -n "${note// }" ] || [ -n "$silent" ] || { echo "ship-apk: --note \"...\" (or --silent for a change the user can't see) required" >&2; exit 2; }
+# One shipper: agents each shipping from their own worktree raced (2026-10-23: ~6 APKs and ~15 shell pushes in a night;
+# twice an APK from an older tip wiped newer shell pushes). Only the ship service (tools/phone/ship.sh) runs this.
+if [ -z "${POWOS_SHIP_SERVICE:-}" ]; then
+  [ -n "$direct" ] || { echo "ship-apk: REFUSED - agents don't ship: push to origin, then tools/phone/ship.sh request --note \"...\" (the ship service ships origin's tip; --direct only for an emergency, logged)" >&2; exit 3; }
+  dl=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}; mkdir -p "$dl"
+  echo "$(date '+%F %T') ship-apk --direct $(git rev-parse --short HEAD) $(basename "$PWD") pid $$: ${note:-(silent)}" >> "$dl/direct.log"
+  echo "ship-apk: --direct - outside the ship service (logged to $dl/direct.log)" >&2
+  export POWOS_SHIP_SERVICE=direct   # its own push.sh calls (the reset, the re-pushes) are part of this ship
+fi
 # The note install-app.sh gets: the user's line, or --silent (only comms' quiet log).
 if [ -n "$silent" ]; then inote="--silent"; else inote="--note \"${note//\"/}\""; fi
 lock=$HOME/.cache/powos-ship.lock; mkdir -p "$HOME/.cache"

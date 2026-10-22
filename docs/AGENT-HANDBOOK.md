@@ -40,6 +40,8 @@ minimal change and tell them.
   takes one free window for every queued check and writes the result onto the board task. Never `idle.sh --wait`,
   sleep, `until` loops or re-reading a background job's output yourself; for your own background command, use its
   completion notification.
+- Ships: push to origin, `tools/phone/ship.sh request --note "..."`, END YOUR TURN (Shipping). Never wait on an
+  install or run ship-apk.sh / push.sh yourself: one service ships the merged tip.
 - Read narrowly (grep, then `sed -n a,b`); never re-read a file you read. Change code with targeted edits (Edit), not
   whole-file heredocs.
 - Git: rebase only right before you commit/push, not before every command. Commit subject <= 72 chars, a short body.
@@ -90,12 +92,21 @@ minimal change and tell them.
   frames, edge.sh, Broforce). Every helper an agent relies on lives in the repo, never in ~/.cache or job tmp (Rules).
 
 ## Shipping
+- **Agents never ship themselves.** Commit, rebase, push to origin/worktree-powos-multiplatform, then
+  `tools/phone/ship.sh request --note "plain words for the user"` (or `--silent`) and END YOUR TURN - nothing else.
+  One ship service (launchd `com.powos.ship-runner`, unit ship-runner-mac, its own checkout
+  .claude/worktrees/ship-runner) waits until origin had no new commit for 60 s, then ships origin's TIP once:
+  ship-apk.sh when Kotlin/APK inputs changed since the installed build, else push.sh of exactly the shell files that
+  differ from what's live; every request's note in ONE notification. `ship.sh status` shows requests, what's live and
+  the last ships; a failed ship mails coder and waits for a fix on origin. ship-apk.sh and push.sh refuse to run
+  outside the service; `--direct` (from origin's tip, logged to ~/.cache/powos-ship-queue/direct.log) is only for an
+  emergency the user asked for. Why: per-agent ships raced (2026-10-23: ~6 APKs + ~15 pushes a night; an APK from an
+  older tip twice wiped newer shell pushes). Stop it: `tools/phone/ship-deploy.sh remove` (or `launchctl bootout
+  user/$(id -u)/com.powos.ship-runner`). Test: tools/phone/ship-queue-test.sh. What the service runs is below.
 - Notes are only for what the user can SEE. A change they can't (refactor, lint, tooling, "behaviour unchanged")
-  ships with `--silent` instead of `--note` (shell/push.sh, ship-apk.sh, install-app.sh, deploy-note.sh): no
+  ships with `--silent` instead of `--note` (ship.sh request, and what it runs: shell/push.sh, ship-apk.sh, install-app.sh, deploy-note.sh): no
   notification, only a line in comms' quiet log (`powos comms quiet`).
-### Shell (web) files
-1. Commit, rebase onto origin/worktree-powos-multiplatform, push to origin. THEN
-2. `READY_MS=30000 shell/push.sh --vpn --note "plain words for the user" <files relative to shell/>`.
+### Shell (web) files (what the service runs: `shell/push.sh --vpn --note "..." <files relative to shell/>`)
 - push.sh refuses any file that isn't byte-for-byte origin's version: a file is pushed whole, so a stale copy of a
   shared file (shell.css, gesture.ts, theme.css) from your tree overwrites another agent's newer push (16:24: the
   drawer fell apart into one column). Never `--force` past that; rebase and push again.
@@ -107,15 +118,15 @@ minimal change and tell them.
 - Then the bindings check (see SpacetimeDB below) in the same phone call.
 - `shell/push.sh --errors [N]` = the phone's shell errors; `--reset [files]` removes overrides. A page that fails to
   boot within 2 min of a push is rolled back by the app and the manager told.
-### APK
+### APK (what the service runs)
 - `tools/phone/ship-apk.sh --note "plain words"` is the ONLY way to build+install (never build-app.sh + install by
-  hand). It always re-executes origin's copy of itself, then: REFUSES (exit 3) unless HEAD == origin's tip and contains
+  hand), run by the ship service. It always re-executes origin's copy of itself, then: REFUSES (exit 3) unless HEAD == origin's tip and contains
   the last installed commit; takes the cross-agent lock (~/.cache/powos-ship.lock); runs the gate on HEAD's own shell
   (refuses if it doesn't load); builds (build-app.sh refuses a dirty shell/ or targets/android/app); waits for a free
   phone with `idle.sh --wait 60` in 10-min chunks (up to SHIP_WAIT_MIN=60, holding while ~/.cache/powos-verify.lock
   exists; no window = exit 4, APK kept, nothing installed); installs; runs bindings-check; RESETS ALL shell overrides;
   re-pushes every shell file origin changed since the build commit; prints
-  versionCode + any crash. `--now` skips the wait: only when the user asked for an immediate install.
+  versionCode + any crash. `--now` skips the wait: only with `--direct`, when the user asked for an immediate install.
 - Those newer shell files are gated BEFORE the install, at origin's tip (`push.sh --pre-gate`; fails = no install, exit 3), and pushed seconds after the reset with `--pre-gated=<stamp>` (only that file set at that tree); later ones are gated after (tools/phone/ship-order-test.sh).
 - The build is warm: build-app.sh builds in `powos-gradle-warm` (targets/android/tools/warm-builder.sh, unit
   units/mac/gradle-warm-mac.json), a long-lived builder whose Gradle daemon stays up, building every worktree from one

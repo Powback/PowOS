@@ -13,8 +13,8 @@ Rules:
   in /home/powos/pet-review/<step>/, mail the manager (`powos comms send manager ... --from pet`), push only after it approves.
 - A module change: additive columns only, re-vendor (`apps/vendor.sh pet`) AND publish (`apps/install.sh pet publish --note`)
   in the same change (powos-stdb skill); bindings without a publish break home (DataView decode error).
-- Commit first, rebase, fast-forward push to origin, then shell/push.sh --vpn (it only takes origin's versions); push a file with
-  every new file it imports. APKs only via tools/phone/ship-apk.sh from the origin tip; never build-app.sh by hand.
+- Commit a file with every new file it imports, rebase, fast-forward push to origin, then `tools/phone/ship.sh request
+  --note "..."`; never ship-apk.sh/push.sh/build-app.sh yourself (handbook Shipping).
 - CDP on live pages is read-only. No polling: one `tools/phone/idle.sh --wait 120 MAX_S`, `powos comms watch --timeout` (it consumes: keep its output).
 - Calm: 0 animations at rest, no timers while hidden, theme tokens only (no raw colours; the style lint must pass).
 Verify: the headless render (rest: no running animations, rAF stops), read-only CDP of `.pet` (classes, data-state, computed fill),

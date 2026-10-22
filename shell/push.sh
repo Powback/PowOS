@@ -31,6 +31,9 @@
 # A push refuses a file whose live copy on the phone came from a commit your HEAD doesn't contain (files/
 # shell-commits.txt on the phone: each pushed file's last commit): "<file> on the phone is from <sha> (newer than your
 # base): rebase first". --force pushes anyway.
+# Run by the ship service only (tools/phone/ship.sh: agents push to origin, then `ship.sh request`): anything else that
+# changes the phone is refused unless --direct (an emergency, from origin's tip; logged to
+# ~/.cache/powos-ship-queue/direct.log). --errors, --pre-gate and test/ pushes (--test) are free.
 set -euo pipefail
 cd "$(dirname "$0")"
 force="" pregate="" pregated=""
@@ -44,6 +47,19 @@ shell_files() {
   done
 }
 reset_or_errors() { [[ " $* " == *" --reset "* || " $* " == *" --errors "* ]]; }
+# One shipper (2026-10-23: agents pushing from their own worktrees raced each other and APK installs). Not inside the
+# --vpn container's re-run (POWOS_GATE_DONE): checked once, here.
+direct=""; da=(); for a in "$@"; do [ "$a" = --direct ] && direct=1 || da+=("$a"); done; set -- ${da[@]+"${da[@]}"}
+only_test() { local f n=0; for f in $(shell_files "$@"); do case "$f" in test/*) n=1 ;; *) return 1 ;; esac; done; [ $n = 1 ]; }
+if [ -z "${POWOS_GATE_DONE:-}" ] && [ -z "${POWOS_SHIP_SERVICE:-}" ] && [ -z "$pregate" ] && [[ " $* " != *" --errors "* ]] && ! only_test "$@"; then
+  [ -n "$direct" ] || { echo "push.sh: refused - agents don't ship: push to origin, then tools/phone/ship.sh request --note \"...\" (the ship service pushes origin's tip; --direct only for an emergency, logged)" >&2; exit 3; }
+  git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/worktree-powos-multiplatform 2>/dev/null)" ] ||
+    { echo "push.sh: --direct refused - HEAD isn't origin/worktree-powos-multiplatform's tip (git pull --ff-only first)" >&2; exit 3; }
+  dl=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}; mkdir -p "$dl"
+  echo "$(date '+%F %T') push.sh --direct $(git rev-parse --short HEAD) $(basename "$(git rev-parse --show-toplevel)") pid $$: $*" >> "$dl/direct.log"
+  echo "push.sh: --direct - outside the ship service (logged to $dl/direct.log)" >&2
+fi
 # A pre-gated push: the stamp must be for exactly these files at exactly this tree (HEAD's, the files unmodified) -
 # anything else was never gated, and gates as any push.
 if [ -n "$pregated" ] && [ -z "${POWOS_GATE_DONE:-}" ]; then

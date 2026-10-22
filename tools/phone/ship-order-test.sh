@@ -7,6 +7,8 @@ set -uo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/ship-order-test.XXXXXX"); trap 'rm -rf "$T"' EXIT
 export HOME=$T/home PHONE=$T/phone LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig
+# The ship service runs these (tools/phone/ship.sh); its own test is tools/phone/ship-queue-test.sh.
+export POWOS_SHIP_SERVICE=1
 mkdir -p "$HOME/.cache" "$PHONE/files/shell" "$PHONE/tmp" "$T/bin"
 git config --global user.email t@t; git config --global user.name t; git config --global init.defaultBranch main
 ts() { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }

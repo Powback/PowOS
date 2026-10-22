@@ -15,8 +15,7 @@ Rules:
   reaches every frame. Never add allow-scripts.
 - One chat surface: answers and taps go through assistant.ts askQueued / openAssistant; no second compose field.
 - Nothing animates at rest (a running step is a still dot); text >= 4.5:1 (gate --shots report.json).
-- Push with shell/push.sh only versions that are on origin (commit, rebase, push first), a page together with the
-  files it names; manager/comms reach the phone via targets/android/rooted/rooted.sh deploy; APKs via ship-apk.sh.
+- Commit a page together with the files it names; ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping); manager/comms reach the phone via targets/android/rooted/rooted.sh deploy.
 Verify: python3 test/tier1/test-manager.py and test-comms.py; shell/dev/gate.sh --tree --shots DIR with
 SHOTS_ONLY='^(chat|chat-open|ai-chat|present|present-md|present-html)$', look at the PNGs; review images to
 /home/powos/design-qa/ before each push. Work in your own worktree off worktree-powos-multiplatform, commit only your

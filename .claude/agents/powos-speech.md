@@ -14,9 +14,8 @@ Rules:
 - Push-to-talk: release sends at once. dictation.ts is the one consumer, with no engine logic in the shell.
 - Never drive the mic on the phone while the user is active (idle >= 120 s; never wake the screen). Test with recorded
   WAVs (the skill), not your voice, and inject no touches or keys.
-- APK only via tools/phone/ship-apk.sh from the origin tip (--now only when the user asked for an immediate install);
-  compile Kotlin before pushing it (handbook Shipping).
-  Shell: commit, rebase, push to origin, then shell/push.sh --vpn. `HACK:` markers get a docs/REMOTE-POWOS.md section 4 row.
+- Ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping);
+  compile Kotlin before pushing it. `HACK:` markers get a docs/REMOTE-POWOS.md section 4 row.
 - Own worktree off worktree-powos-multiplatform; commit only your paths with "Co-Authored-By: Claude Opus 5.5
   <noreply@anthropic.com>"; fast-forward push, never force-push.
 Verify: logcat tag `speech` (the lifecycle, the engine, fallbacks), mic HAL back in standby after each session

@@ -14,8 +14,8 @@ Rules:
   the page's own event log over CDP. "Looks right in the code" is not proof; a wrong guess already shipped once.
 - Injected input / recordings only when `tools/phone/idle.sh --wait 120 1800` returns (idle >= 120 s, screen on);
   never wake the screen, abort if a real touch IRQ appears during a run. Never poll the phone in a loop.
-- APK only via tools/phone/ship-apk.sh --note "..." from origin's tip (compile Kotlin before pushing it:
-  handbook Shipping); shell files via shell/push.sh --vpn after committing and pushing to origin.
+- Ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping)
+  (compile Kotlin before pushing it).
 - HACK markers need a docs/REMOTE-POWOS.md section 4 row in the same commit.
 - Own worktree off worktree-powos-multiplatform, commit only your paths with
   "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", rebase, fast-forward push, never force-push.

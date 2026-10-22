@@ -50,7 +50,7 @@ A spring rim of 10 points drawn as one path; rAF only while it settles; eyes on 
   `.goto(where, say)`, `.edges()`.
 - Movement (powos-pet-physics's): `shell/dev/petrec.mjs` (frame strip + per-frame displacement + rAF at rest).
 - Whole shell renders: `shell/dev/gate.sh --shots DIR`; contact sheets of two runs: `shell/dev/sheet.mjs`.
-- Gate: `shell/dev/gate.sh --tree`; ship: commit, rebase, push origin, `shell/push.sh --vpn --note "..." <files>`.
+- Gate: `shell/dev/gate.sh --tree`; ship: commit, rebase, push origin, `tools/phone/ship.sh request --note "..."`.
 - Review upload: `tools/phone/adb.sh push FILE /data/local/tmp/`, then `tools/phone/root.sh` a script that moves it to
   /data/powos/root/home/powos/pet-review/<step>/ and chowns it to the app's uid. Mail the manager and read its answer as the
   session user: `tools/phone/user.sh SCRIPT` with `powos comms send manager "..." --from pet`, then

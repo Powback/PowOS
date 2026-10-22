@@ -61,8 +61,7 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
 - Deploy notes arrive as mail `from: "deploy"`, low priority, `--batch deploy` (2 min window: one notification).
 
 ## Silent deploys (fb1ae36)
-- Notes only for what the user can see. Refactors/lint/tooling: `--silent` instead of `--note` on shell/push.sh,
-  tools/phone/ship-apk.sh, targets/android/install-app.sh, rooted.sh, targets/android/tools/deploy-note.sh.
+- Notes only for what the user can see. Refactors/lint/tooling: `--silent` instead of `--note` on tools/phone/ship.sh request, targets/android/install-app.sh, rooted.sh, targets/android/tools/deploy-note.sh.
 - Silent = `powos comms notify --silent`: no inbox, no agent-mail, no feed row; one JSON line in
   `$COMMS_ROOT/quiet.log` (last 500), read with `powos comms quiet [-n N]`. push manifest carries "silent":true.
 - The app needs nothing for it (it only notifies from comms mail). apps/install.sh still needs --note (the phone's

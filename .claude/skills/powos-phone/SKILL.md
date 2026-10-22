@@ -13,11 +13,11 @@ Tools (repo `tools/phone/`, all one adb call each):
   never wake it. To WAIT: ONE `idle.sh --wait 120 MAX_S` (the wait runs on the phone) - never a polling loop;
   `AWAKE_ONLY=1` in front when you need the screen on (it otherwise also returns when the screen is off).
 - `cdp.sh pages|eval <page> '<js>'|idle|raster` - WebView devtools, READ-ONLY on live pages.
-- `ship-apk.sh --note "..." [--now]` - the ONLY way to build+install the APK: origin's tip only, gate on HEAD, lock,
-  waits for a free phone, installs, bindings-check, resets every shell override, re-pushes shell files committed
-  since the build. Exit 3 = refused (read why), 4 = no free window (APK kept).
-- Shell files: commit -> rebase -> push to origin -> `READY_MS=30000 shell/push.sh --vpn --note "..." <files>` (only
-  origin's exact versions; gate + bindings check must pass). `shell/push.sh --errors` for the phone's shell errors.
+- Shipping (shell or APK): commit -> rebase -> push to origin -> `ship.sh request --note "..."` (or `--silent`), then
+  end your turn. ONE ship service (launchd com.powos.ship-runner) ships origin's tip after 60 s without new commits:
+  ship-apk.sh if Kotlin/APK inputs changed since the installed build, else push.sh of the shell files that differ
+  from what's live, all notes in one notification. `ship.sh status` = requests, live sha, last ships. ship-apk.sh and
+  push.sh refuse to run outside it (`--direct` = a logged emergency). `shell/push.sh --errors` = the phone's shell errors.
 - Also: cpu.sh, idle-sample.sh, review-image.sh, app-src.sh, bindings-check.sh, bridge-check.sh, record/, verify/.
 
 Never: poll the phone, mutate live pages over CDP, touch real devices (lights) without the user's say, sudo via

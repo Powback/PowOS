@@ -99,7 +99,7 @@ The plan, the bridge table and what's shared: docs/DESKTOP-SHELL.md. The phone's
       sources/powos-shell/dev/net-secret.sh copy local.lights hue      # -> "copied"
       sources/powos-shell/dev/net-secret.sh remove local.lights hue    # the way back -> "removed"
   Lights then loads its rooms and scenes. Never pair, switch, toggle or dim a light yourself; read state only.
-- Shell files ship as usual: commit, rebase, push, `READY_MS=30000 shell/push.sh --vpn --note "..." <files>`; the
+- Shell files ship as usual: commit, rebase, push to origin, `tools/phone/ship.sh request --note "..."`; the
   desktop host's own copy of shell/ only changes with dev/phone.sh build.
 
 ## Next

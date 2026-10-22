@@ -82,7 +82,7 @@ strip only - not the cause when a drag in a tile fails.
 - adb push DIR into an existing DIR nests it (dir/dir): rm -rf the target first, or push to /data/local/tmp/<new>.
   Then su cp + chown (u0_a359 for app files) + `restorecon -F`, and md5sum against the source.
 - .owl files on the phone: files/widgets/*.owl (= ~/.config/omalauncher/widgets), hot-reloaded.
-- Shell files: shell/push.sh --vpn --note "..." ui/x.ts refuses anything not origin's version; the phone's
+- Shell files: push to origin, then `tools/phone/ship.sh request --note "..."` (handbook Shipping); the phone's
   overrides are in /data/data/com.powos.app/files/shell - diff them against origin before pushing.
 - After a Colima restart powos-vadb may be stopped: `docker start powos-vadb`, then tools/phone/adb.sh connect
   10.13.13.7:5555.

@@ -12,7 +12,7 @@ Rules:
 - Every widget change passes `powos app preview` (or shell/dev/preview.sh) fit checks at every size before it ships;
   open the contact sheet PNG and look at it yourself before you report anything as done.
 - Never test against real devices (lights, Hue, anything physical) without the user's say: mock data or stubs.
-- shell/push.sh only pushes origin's versions: commit, rebase, push to origin first; diff the phone's override first.
+- Diff the phone's override first; then ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping).
 - CDP on live pages is read-only (a synthetic check only in a free idle window, restored in the same call, never one that
   reaches a real device); no touch injection while the user is active
   (tools/phone/idle.sh); never poll the phone in loops (idle.sh --wait instead).

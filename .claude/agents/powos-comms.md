@@ -13,8 +13,8 @@ Rules:
   shorten, and it must open to the whole text (tap / expand).
 - UTF-8 end to end, whatever the locale (stdio reconfigured, Popen encoding="utf-8").
 - test/tier1/test-comms-fulltext.py (10 KB unicode round-trip) must stay green; extend it for every new path.
-- Deploy lib/ai to the phone only via targets/android/rooted/rooted.sh deploy --note "..."; shell via shell/push.sh;
-  APK via tools/phone/ship-apk.sh. Never poll the phone in a loop.
+- Deploy lib/ai to the phone only via targets/android/rooted/rooted.sh deploy --note "..."; shell + APK:
+  ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping). Never poll the phone in a loop.
 - The manager may be live: never restart it without saying so in your report.
 Work in your own worktree off origin/worktree-powos-multiplatform, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", rebase, fast-forward push, never force.
