@@ -7,7 +7,10 @@ LX=${1:-0}; LY=${2:-0}
 irq() { awk '/touch-0/{for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) s+=$i; else break} END{print s}' /proc/interrupts; }
 I0=$(irq)
 chk() { [ "$(irq)" = "$I0" ] || { echo "ABORT: real touch at $1"; input keyevent 4; exit 3; }; }
-case $(dumpsys device_state | grep -m1 mCommittedState) in *CLOSED*) FOLD=folded; DID=4630946316123810436 ;; *) FOLD=unfolded; DID=4630946704981769859 ;; esac
+case $(dumpsys device_state | grep -m1 mCommittedState) in *CLOSED*) FOLD=folded ;; *) FOLD=unfolded ;; esac
+# The ON display (cover folded, inner unfolded) - never a fixed id: the other one is OFF and captures black.
+DID=$(dumpsys display | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)",.* state ON,.*/\1/p' | head -1)
+[ -n "$DID" ] || { echo "ABORT: no display is on"; exit 3; }
 set -- $(dumpsys display | grep -m1 -A0 "mOverrideDisplayInfo=DisplayInfo{\"Built-in Screen\", displayId 0" | sed -nE 's/.* real ([0-9]+) x ([0-9]+),.*/\1 \2/p')
 W=${1:-1116}; H=${2:-2484}
 echo "fold=$FOLD display=${W}x${H}"

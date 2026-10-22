@@ -4,10 +4,13 @@
 RUN=$1; D=/data/local/tmp/cv; mkdir -p $D
 irq() { awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}' /proc/interrupts; }
 I0=$(irq)
+# The ON display (cover folded, inner unfolded) - never a fixed id: the other one is OFF and captures black.
+DID=$(dumpsys display | grep -E "^  DisplayDeviceInfo" | sed -nE 's/.*uniqueId="local:([0-9]+)",.* state ON,.*/\1/p' | head -1)
+[ -n "$DID" ] || { echo "ABORT: no display is on"; exit 3; }
 chk() { if [ "$(irq)" != "$I0" ]; then echo "ABORT: real touch at step $1"; pkill -INT screenrecord; exit 3; fi; }
-shot() { screencap -d 4630946316123810436 -p $D/$RUN-$1.png; }
+shot() { screencap -d $DID -p $D/$RUN-$1.png; }
 mon() { echo "monitors[$1]: $(dumpsys input | grep -c 'name=\[Gesture Monitor\] powos-gestures')  focus: $(dumpsys window | grep -m1 mCurrentFocus | sed 's/.*u0 //;s/}//')"; }
-rec() { screenrecord --display-id 4630946316123810436 --bit-rate 40000000 --time-limit $2 $D/$1.mp4 & sleep 1.2; }
+rec() { screenrecord --display-id $DID --bit-rate 40000000 --time-limit $2 $D/$1.mp4 & sleep 1.2; }
 home_flick() { input swipe 558 2475 558 1300 140; }
 hold_up() { input motionevent DOWN 558 2475; input motionevent MOVE 558 2380; input motionevent MOVE 558 2250; input motionevent MOVE 558 2100; input motionevent MOVE 558 1950; input motionevent MOVE 558 1850; sleep 1.0; input motionevent UP 558 1850; }
 settings() { am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n com.android.settings/.Settings >/dev/null; }
