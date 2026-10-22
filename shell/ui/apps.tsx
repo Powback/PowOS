@@ -2,6 +2,7 @@
  * An app: its icon and label; a tap opens it, a long press shows its menu (AppMenu, one for the whole shell, drawn
  * over everything so no scrolling list clips it). In the drawer, holding an app and moving it drags it onto home.
  */
+import { tinted } from "./icontint.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, page, pages, setDocked } from "../state.ts";
 import { startCarry } from "./grid.tsx";
@@ -105,6 +106,8 @@ const ICON_GIVE_UP_MS = 4000;
  */
 export function AppIcon({ src, label }: { src: string; label?: string }) {
   const [missing, setMissing] = useState(false);
+  // In the theme's colours when that's on and its copy is made (ui/icontint.ts), else as the app draws it.
+  const shown = tinted(src) ?? src;
   const timer = useRef(0);
   const img = useRef<HTMLImageElement>(null);
   useEffect(() => {
@@ -122,7 +125,7 @@ export function AppIcon({ src, label }: { src: string; label?: string }) {
       {missing && (label ?? "?")[0]}
       <img
         ref={img}
-        src={src}
+        src={shown}
         alt=""
         draggable={false}
         decoding="sync"

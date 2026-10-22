@@ -307,6 +307,13 @@ class ShellHost(
             }
             // A review image for PowOS AI's page (QaFiles: a bare name of design-qa's, never decoded, checked inside it).
             if (path.startsWith("_qa/")) return qaImage(url.encodedPath.orEmpty().substringAfter("/_qa/"))
+            // An image sent to PowOS AI (its screen, the part circled, a share): the same checks, in the app's own run dir.
+            if (path.startsWith("_shared/")) {
+                val raw = url.encodedPath.orEmpty().substringAfter("/_shared/")
+                val file = QaFiles.resolve(File(context.filesDir, QaFiles.SHARED), raw) ?: return notFound()
+                val type = if (raw.endsWith(".png")) "image/png" else "image/jpeg"
+                return WebResourceResponse(type, null, file.inputStream()).apply { responseHeaders = mapOf("Cache-Control" to "max-age=86400") }
+            }
             // A recent task's last frame, for the switcher (on the WebView's loader thread: the snapshot is a binder call).
             if (path.startsWith("_task/")) {
                 val jpeg = path.removePrefix("_task/").toIntOrNull()?.let { dev.omalauncher.system.Tasks.snapshot(it) } ?: return notFound()

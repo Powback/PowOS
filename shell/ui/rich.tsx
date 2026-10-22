@@ -367,6 +367,7 @@ export function Queued() {
       {q.map((w) => (
         <div key={w.id} class="msg user queued">
           <span class="queued-text">{asked(w.text)}</span>
+          <SentImages text={w.text} />
           <span class="queued-mark">
             queued
             <button type="button" class="queued-x" aria-label="don't send" onClick={() => unqueue(w.id)}>
@@ -376,5 +377,41 @@ export function Queued() {
         </div>
       ))}
     </>
+  );
+}
+
+/**
+ * The images a message sent (the side button's screen and circled part, live frames, shares): their paths are in its
+ * stored text, so the history keeps them. The circled part alone when there is one (it's what the user meant).
+ */
+const SENT = /\/run\/powos-app\/powos-ai-shared\/([A-Za-z0-9._-]+\.(?:png|jpg))\b/g;
+export function sentImages(text: string): string[] {
+  const circled = text.match(/the part of the screen I circled: \/run\/powos-app\/powos-ai-shared\/([A-Za-z0-9._-]+\.(?:png|jpg))/);
+  if (circled) return [circled[1]];
+  return [...new Set([...text.matchAll(SENT)].map((m) => m[1]))].filter((n) => !n.includes(".."));
+}
+
+/** One sent image: a thumbnail (a tap: full screen), or a quiet "no longer available" once it's been cleaned up. */
+function Sent({ name }: { name: string }) {
+  const [gone, setGone] = useState(false);
+  const url = `/_shared/${encodeURIComponent(name)}`;
+  if (gone) return <span class="sent-gone">image no longer available</span>;
+  return (
+    <button type="button" class="sent-img" onClick={() => openFull("what you sent", <img class="ai-img-full" src={url} alt="" />)}>
+      <img src={url} alt="what you sent" loading="lazy" onError={() => setGone(true)} />
+    </button>
+  );
+}
+
+/** The images [text] sent, as thumbnails (nothing when it sent none). */
+export function SentImages({ text }: { text: string }) {
+  const names = sentImages(text);
+  if (!names.length) return null;
+  return (
+    <span class="sent-imgs">
+      {names.map((n) => (
+        <Sent key={n} name={n} />
+      ))}
+    </span>
   );
 }
