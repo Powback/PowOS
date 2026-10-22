@@ -16,25 +16,30 @@ description: How the PowOS phone shell's design is built and checked - the desig
   mirror black). Don't retry it without a phone screencap the manager approves.
 - Assist (mode=assist) is the exception: the screen 1:1, its panel solid, no glass.
 
-## Shade and notifications (shell/ui/notifications.tsx, notifications.css, shell.css .notif-*)
-- Grouping `grouped()`: conversations (`conversation`) on top, then one stack per app (`group` key; PowOS's own by
-  sender, deploy = "PowOS · updates"); host fields pkg/group/conversation (ShellBridge.notificationJson), typed locally
-  (`GroupedNotification`) so it checks against an older APK. A stack: newest + "+N" + 2 peeking cards; tap unfolds in
-  place (grid-template-rows 0fr->1fr), swipe folded = whole group. PowOS's own carry icons/powos.svg.
-- Open: TOP-aligned, newest first (a bottom-aligned brief was corrected the same hour). Pulling OPEN only (`riding`,
-  decided per pull, cleared 320 ms after settling): `.notif-items`/`.cc` translateY(min((1 - --q) * --ph, --free)) =
-  list top min(sheet bottom - height, its resting top), continuous; --free/--ph measured by ResizeObserver, never per
-  frame. Closing: no ride, it goes up with the sheet. The control center rides the same way.
-- Home's in-page panel is being removed (the shade window everywhere): work in ?mode=shade.
+## Frost (PowOS AI, its pull-up panel, the control center: shell.css "frost v2", theme.css --frost-*)
+- One material: the compositor's blur per surface (nativeglass.ts reads `--glass-blur-native` per element; 360 on
+  these, 140 elsewhere; the shade window's radius is the page's: `powos.shade.blur(dp)` in shade.tsx), a cool tint
+  (`--frost-base`/`--frost-fill`) at the reference strength. Over the OTHER tone of wallpaper it flips to that tone
+  (light glass + `--frost-ink` text) - never a heavier fill (an 84% fill read as "brown slab" and was rejected).
+- No text halos (read as highlighter on a light wallpaper). Labels on raw wallpaper = small frost pills with
+  `--lift-edge`. Inside the frost, secondary text is the ink itself, not a see-through grey.
+- Over pure black the blur is black: keep the glass visible with the sheen + lit edge (`--frost-sheen`).
 
-## Control center (shell/ui/control.tsx)
-- `GROUPS`: the user's curated eight (internet, connect, display, eye comfort, focus, battery, capture, tools); the
-  first member is the tap; `LEFT_OUT` (lock, remote input, Link to Windows, OnePlus Share when Google's is there);
-  anything unnamed falls into tools. Members: tile id, `app:<pkg>` for custom tiles, `a|b` = first present.
-- A category opens inline (`Unfold` under its row), its members one sideways-scrolling snapping row (`.cc-subs`,
-  excluded from the panel's sideways switch in gesture.ts via inStrip). Single members: no chevron.
-- The live phone's tiles: read `powos.qs.state()` over CDP - the mock (bridge.ts) lacked the real custom tiles once and
-  the review images were wrong; keep the mock in step with `settings get secure sysui_qs_tiles`.
+## Shade (ui/shade.tsx, notifications.tsx NotificationPanel)
+- One panel by default: control center on top, notifications under it, one `.notif-list` scroll; Settings > Style >
+  "separate notifications & controls" (`separatePanels`) restores the split; shade.tsx maps the host's "control" pull.
+- Open: short `--drop` (15vh) + cascade (`.cascade`, `--i` row index; CC rows first). Grouping `grouped()`; stacks.
+
+## Control center (ui/control.tsx; v3 = `Controls`, classic = `Categories`, flag `ccV3` key "ccLayout")
+- v3: ONE ordered list of toggles (`list`): first six = the first pull's row, a further pull (ccexpand.ts, rubber band
+  then commit, `ccExpanded`) only reveals the rest below - the row must not move (gate asserts it). No categories.
+- Order: curated (QUICK, then the rest) unless `ownOrder()`: a v3 edit (`v3: true` in controls.layout) or a classic
+  arrangement with a net move. Only drags write controls.layout; never reset it without the user saying so.
+- Long press = the toggle's own page (cancelled once the finger moves); rearranging = edit mode via the header pencil
+  (`ccEditing`), then a long press lifts (ui/reorder.ts, `onlyEditing`). Accent only on toggles that are on.
+- ui/reorder.ts (shared, widgets expert reviews): hit-test on container-relative laid-out boxes (FLIP cancelled first),
+  live order in a ref, cancel drops the lift. Home's grid.tsx is the widgets expert's - don't edit it.
+- Gate `cc-reorder` (gate.mjs) waits on states, never time; prove with `CC_THROTTLE=6` x20.
 
 ## Render, check, ship
 - Targeted renders: `shell/dev/shot.sh OUTDIR 'REGEX' [SHELL_DIR] [WALLPAPER]` (scenes at the top of shots.mjs;
@@ -52,5 +57,11 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - Style lint (in the gate): raw colours, coloured borders, shadows outside tokens fail; exceptions in style-allow.txt.
 - Gate base = the installed APK's own shell + the phone's overrides + your files (handbook Shipping); READY_MS=30000
   when the Mac is loaded. shell.css/theme.css are shared: push only origin's tip versions.
-- Phone: dual display, screencap needs `-d 4630946316123810436` (cover); idle.sh --wait for a window; review images with
-  `tools/phone/review-image.sh FILE...` (-> /home/powos/design-qa/) before each push.
+- Device checks: `tools/phone/verify/queue.sh add <board-task> <script>` and end the turn (never wait on the phone).
+  Read-only CDP (`tools/phone/cdp.sh eval shade '<js>'`) for state; screencaps only in a queued window. Folded vs
+  unfolded: read the size from `dumpsys window displays` (cur=WxH). Injected swipes must never launch apps (a page
+  swipe at 60% height opened Calculator unfolded); a drag starting on a toggle used to open its settings.
+- Verify lock (~/.cache/powos-verify.lock): take it only after the window is free, only for the injected part; never
+  delete one you don't hold. adb.sh pull needs an existing destination dir.
+- Review images: `tools/phone/review-image.sh FILE...` (-> /home/powos/design-qa/); mocks only for new screens.
+- Push notes are user-visible (shade + AI feed): plain words, never "x". Gate under load: READY_MS=60000.
