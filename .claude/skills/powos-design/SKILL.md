@@ -42,6 +42,11 @@ description: How the PowOS phone shell's design is built and checked - the desig
   report.json (each text's contrast vs the rendered pixels). The phone's own wallpaper for renders:
   `su -c cat /data/system/users/0/wallpaper_screenshot.png` when it isn't empty. Whole sweep: `shell/dev/gate.sh --tree --shots DIR
   --wallpaper FILE`. Contact sheet: shell/dev/sheet.mjs (/a before, /b after).
+- Renders in another theme need its mock widget trees: `shell/dev/sample-trees.sh <theme>` (shots refuse a theme
+  without them; gruvbox, kanagawa, flexoki-light exist). A light test wallpaper exposes contrast the dark one hides.
+- Contrast tokens: --color-muted (fg at --muted-text 90%), --accent-text, --label-shadow/--on-wallpaper (turned round
+  on html[data-wallpaper] of the other tone, glass.ts), widgets' --glass-dim 42% + muted = fg inside, owl.tsx maps a
+  theme's grey by any of its names. Fix a failure at the token, never per text.
 - Headless isn't the device: after the push, read the live element's computed display/rects over CDP (read-only:
   never inject or render into the live page) - a drawer strip once passed headless and broke on the device.
 - Style lint (in the gate): raw colours, coloured borders, shadows outside tokens fail; exceptions in style-allow.txt.
