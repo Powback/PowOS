@@ -183,6 +183,8 @@ minimal change and tell them.
 ## Rules that bite
 Git and process
 - Commit only your paths; never force-push; rebase often (several agents edit shell/ui at once).
+- `git push` runs tools/git-hooks/pre-push (core.hooksPath): the complexity lint on the pushed files; a failure is
+  yours to split, never `--no-verify` (e9af512's lint failure blocked every ship-apk, 2026-10-22).
 - `HACK:` markers need a row in docs/REMOTE-POWOS.md section 4 in the same commit (test-hack-registry).
 - Permission denials: never route around a permission-classifier or sandbox denial (no other tool, script, agent or
   settings edit to get the same effect). Only the user's own approval counts - their message, or their own tap on a

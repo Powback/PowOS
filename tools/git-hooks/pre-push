@@ -1,0 +1,25 @@
+#!/bin/bash
+# Refuses a push whose shell/apps TypeScript fails the complexity lint (shell/dev/lint-complexity.sh), so a broken tip
+# can't block every agent's ship-apk again (e9af512, 2026-10-22). Only the files changed in the pushed range; the lint
+# reads them from the working tree (push a clean tree). Wired for every worktree by `git config core.hooksPath
+# tools/git-hooks`. Skip once: GATE_LINT=0 git push.
+set -uo pipefail
+root=$(git rev-parse --show-toplevel)
+zero=0000000000000000000000000000000000000000
+files=() apps=""
+while read -r _lref lsha _rref rsha; do
+  [ "$lsha" = "$zero" ] && continue
+  base=$rsha
+  [ "$rsha" = "$zero" ] && base=$(git merge-base "$lsha" origin/worktree-powos-multiplatform 2>/dev/null || echo "$lsha")
+  while IFS= read -r f; do
+    case "$f" in
+      shell/*.ts|shell/*.tsx|shell/*.mjs|shell/*.js) files+=("${f#shell/}") ;;
+      apps/*/ui/*) apps=--apps ;;
+    esac
+  done < <(git diff --name-only --diff-filter=AM "$base" "$lsha" 2>/dev/null)
+done
+[ ${#files[@]} -gt 0 ] || [ -n "$apps" ] || exit 0
+s=0; "$root/shell/dev/lint-complexity.sh" $apps ${files[@]+"${files[@]}"} || s=$?
+[ $s = 1 ] && echo "pre-push: refused - the complexity lint fails on what you push (above)." >&2
+[ $s = 1 ] && exit 1
+exit 0
