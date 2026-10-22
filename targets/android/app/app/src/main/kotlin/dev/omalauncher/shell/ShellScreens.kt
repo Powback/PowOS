@@ -15,7 +15,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import dev.omalauncher.BuildConfig
 import dev.omalauncher.Runtime
 import dev.omalauncher.linux.AGENTS
 import dev.omalauncher.linux.JobState
@@ -202,7 +201,7 @@ class ShellScreens(
             .put("agent", runtime.agents.default?.name ?: JSONObject.NULL)
             .put("updates", if (installed) updates() else JSONObject.NULL)
             .put("setup", job(runtime.bootstrap.updates.value).takeIf { it != JSONObject.NULL && installed } ?: JSONObject.NULL)
-            .put("version", BuildConfig.VERSION_NAME)
+            .put("version", dev.omalauncher.AppVersion.name(context))
     }
 
     /** Pending pacman and agent updates, from the last check; "update all" runs them as one job. */
@@ -537,7 +536,7 @@ class ShellScreens(
 
     private fun licenses(): JSONObject =
         JSONObject()
-            .put("version", BuildConfig.VERSION_NAME)
+            .put("version", dev.omalauncher.AppVersion.name(context))
             .put("components", JSONArray(Licenses.COMPONENTS.map { c -> JSONObject().put("name", c.name).put("use", c.use).put("license", c.license).put("notice", c.notice).put("url", c.url).put("source", c.source ?: JSONObject.NULL) }))
 
     /** A license's text (the LGPL with the GPL 3.0 it adds to); null for the public domain. */

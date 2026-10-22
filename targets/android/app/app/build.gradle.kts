@@ -9,12 +9,9 @@ plugins {
 val uploadKey = rootProject.file("keystore.properties").takeIf { it.exists() }
     ?.let { f -> Properties().apply { f.inputStream().use(::load) } }
 
-// Version stamped by android-app-dev's build (scripts/build-gradle.sh writes app/version.properties, gitignored):
-// PowApps compares versionCode with the store's <project>.ver sidecar to offer updates.
-val versionProps = Properties().also { props ->
-    val f = rootProject.file("app/version.properties")
-    if (f.exists()) f.inputStream().use { props.load(it) }
-}
+// Version stamped by android-app-dev's build (scripts/build-gradle.sh, or tools/warm-builder.sh, writes
+// app/version.properties, gitignored): PowApps compares versionCode with the store's <project>.ver sidecar to offer
+// updates. It reaches the manifest only (androidComponents at the end), never BuildConfig.
 
 android {
     namespace = "dev.omalauncher"
@@ -29,14 +26,18 @@ android {
         // which running the PowOS rootfs without proot needs (the engine's lotfix-run). Consequence:
         // side-loaded, not on the Play Store. (Omalauncher targets 37 and runs proot from its APK instead.)
         targetSdk = 28
-        versionCode = versionProps.getProperty("versionCode")?.toInt() ?: 1
-        versionName = versionProps.getProperty("versionName") ?: "0.1.0-dev"
+        // The real version is set per variant output from version.properties (androidComponents at the end, read lazily
+        // so a new stamp doesn't invalidate the configuration cache).
+        versionCode = 1
+        versionName = "dev"
         ndk { abiFilters += "arm64-v8a" }
     }
 
     // aidl: SystemUI's recents provider interfaces (src/main/aidl: ILauncherProxy, ISystemUiProxy).
     buildFeatures {
-        buildConfig = true
+        // No BuildConfig: AGP writes each build's versionCode into it, and a new one per build recompiled what reads it.
+        // The app reads its version and debuggability at runtime (AppVersion.kt).
+        buildConfig = false
         aidl = true
     }
 
@@ -111,4 +112,19 @@ dependencies {
     testImplementation(libs.junit)
     // android.jar only has stubs of org.json.
     testImplementation(libs.org.json)
+}
+
+// The stamped version (version.properties) into each variant's manifest only - PowApps and the installer see it,
+// BuildConfig stays constant (defaultConfig above).
+// Read lazily (a provider of the file's text, not at configuration): a new stamp each build then doesn't invalidate the
+// configuration cache either.
+val stamped = providers.fileContents(rootProject.layout.projectDirectory.file("app/version.properties")).asText
+    .map { text -> Properties().apply { load(text.reader()) } }
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { out ->
+            out.versionCode.set(stamped.map { it.getProperty("versionCode")?.toInt() ?: 1 }.orElse(1))
+            out.versionName.set(stamped.map { it.getProperty("versionName") ?: "0.1.0-dev" }.orElse("0.1.0-dev"))
+        }
+    }
 }
