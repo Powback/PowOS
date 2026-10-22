@@ -1,6 +1,8 @@
 #!/bin/bash
 # Sketch's page in headless Chromium against a mock database (page.html: the module's reducers in JS): strokes saved as
-# vector data, a rotation redraws the whole drawing fitted (never cropped), undo/redo/clear, a restart redraws it, an
+# vector data, a rotation redraws the whole drawing fitted (never cropped), undo/redo/clear, a restart redraws it, the
+# infinite canvas (two-finger pan, pinch zoom around its centre with limits, culling, no frames at rest, fit all, double
+# tap to 100%, the view saved per drawing across rotation and restart, the strokes untouched by it), an
 # older raster drawing is adopted with its picture kept. Builds the UI first (shell/dev/preview/build-app-ui.sh).
 #   apps/sketch/test/rotate.sh
 set -euo pipefail

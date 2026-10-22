@@ -1,6 +1,8 @@
 /**
- * Sketch's full-screen page: a canvas to draw on with a finger or a pen. Pen pressure sets the line width, strokes are
- * smoothed, two fingers never draw (so the palm and zoom gestures don't scribble).
+ * Sketch's full-screen page: an unbounded canvas to draw on with a finger or a pen. Pen pressure sets the line width,
+ * strokes are smoothed. Two fingers never draw: they pan, and pinch zooms around their centre; "fit all" shows the
+ * whole drawing, a double tap goes back to its page at 100%. Each drawing's view is saved (the viewport table), so a
+ * restart or a rotation keeps the same spot; one that was never moved stays fitted whole.
  *
  * The drawing is its strokes (vector data in the drawing's own space, ../lib/ink.ts), each saved to the app's
  * database the moment it ends (../lib/outbox.ts), so a rotation, a fold, another screen or a restart never loses or
@@ -9,7 +11,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useApp, type Props } from "../lib/app";
-import { extent, fit, IDENTITY, paint, picture, shows, type Box, type Ink, type View } from "../lib/ink";
+import { extent, fit, IDENTITY, paint, picture, pinch, place, save, shows } from "../lib/ink";
+import type { Box, Ink, P2, Rect, Saved, Screen, View } from "../lib/ink";
 import { Outbox, uid, visible, type Call, type Op, type Row } from "../lib/outbox";
 import { attachPen, type Tool } from "../lib/pen";
 
@@ -25,6 +28,10 @@ interface Drawing {
 
 interface StrokeRow extends Row {
   drawing: bigint;
+}
+
+interface ViewRow extends Saved {
+  key: string;
 }
 
 /** The drawing on the canvas: its key, its row once the server has it, its box before then. */
@@ -75,6 +82,7 @@ function useData(host: Props["host"]) {
   const app = useApp(host);
   const drawings = app.useTable<Drawing>("drawing").sort((a, b) => Number(b.id - a.id));
   const strokes = app.useTable<StrokeRow>("stroke");
+  const views = app.useTable<ViewRow>("viewport");
   const [, bump] = useState(0);
   const [outbox] = useState(() => new Outbox(() => bump((n) => n + 1)));
   const appRef = useRef(app);
@@ -83,7 +91,7 @@ function useData(host: Props["host"]) {
   useEffect(() => {
     if (app.db.status === "connected") void outbox.flush(call);
   }, [app.db.status, app.db.epoch]);
-  return { drawings, strokes, outbox, call, connected: app.db.status === "connected" };
+  return { drawings, strokes, views, outbox, call, connected: app.db.status === "connected" };
 }
 
 /** Until the user picks: the latest drawing once the database answers (else a fresh page, as before). */
@@ -106,53 +114,141 @@ function useScene(d: ReturnType<typeof useData>, cur: Current, loaded: () => voi
   const box: Box | null = row ? { w: row.width, h: row.height } : cur.box;
   // An older drawing (no key yet) is its picture; once adopted, `base` keeps that picture under its strokes.
   const base = useImage(row ? row.base || (row.key === "" ? row.image : "") : "", loaded);
-  return { key: cur.key, row, inks, box, base };
+  // The view: one not sent yet, else the server's (none = fitted whole).
+  const op = d.outbox.ops.filter((o) => o.kind === "view" && o.key === cur.key).pop();
+  const vr = d.views.find((v) => v.key === cur.key);
+  const saved: Saved | null = op?.kind === "view" ? op.v : vr ? { cx: vr.cx, cy: vr.cy, zoom: vr.zoom, fit: vr.fit } : null;
+  return { key: cur.key, row, inks, box, base, saved };
 }
 
 type Scene = ReturnType<typeof useScene>;
 
+/** How the canvas is looked at: the view, "free" (the user's, kept as saved) or fitted, and fingers moving it. */
+interface Look {
+  view: View;
+  free: Saved | null;
+  moving: boolean;
+}
+
+/** The strokes plus what the pen holds unsaved (the stroke in progress, a tap). */
+const withHeld = (inks: Ink[], pen: { live(): Ink[] } | null) => {
+  const held = pen ? pen.live() : [];
+  return held.length ? [...inks, ...held] : inks;
+};
+
+const screen = (c: HTMLCanvasElement): Screen => ({ w: c.width, h: c.height, dpr: c.width / (c.clientWidth || c.width) });
+
 /**
- * The canvas: backing store sized to the element at device resolution, the view fitted to the whole drawing, a
- * repaint from the strokes on every change. Resizing never loses anything - the strokes are the state.
+ * The view for this paint: the free one placed again on a resize, else fitted to `r` (on a resize, or when strokes left
+ * it); `r` null = an empty new page (1:1).
  */
-function useCanvas(scene: Scene, tool: Tool, end: (ink: Ink, box: Box) => void) {
+function nextView(k: Look, c: Screen, r: Rect | null, refit: boolean): View {
+  if (k.free) return refit ? place(k.free, c) : k.view;
+  if (!r) return refit ? IDENTITY : k.view;
+  if (k.moving || (!refit && shows(r, k.view, c.w, c.h))) return k.view;
+  return fit(r, c.w, c.h);
+}
+
+/**
+ * The canvas: backing store sized to the element at device resolution, a repaint from the strokes on a change of the
+ * drawing or of the view only (one per frame at most while two fingers move, none at rest), strokes off the canvas
+ * skipped. The view is fitted to the whole drawing until the user pans or zooms; then it's theirs ("free": the same
+ * centre and zoom across a resize, saved through `onView`).
+ */
+function useCanvas(scene: Scene, tool: Tool, end: (ink: Ink, box: Box) => void, onView: (v: Saved) => void) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const view = useRef<View>(IDENTITY);
+  const look = useRef<Look>({ view: IDENTITY, free: null, moving: false });
   const live = useRef(scene);
   live.current = scene;
   const toolRef = useRef(tool);
   toolRef.current = tool;
   const pen = useRef<ReturnType<typeof attachPen> | null>(null);
-  const boxOf = (c: HTMLCanvasElement) => live.current.box ?? { w: c.width / view.current.s, h: c.height / view.current.s };
+  const paints = useRef(0);
+  const boxOf = (c: HTMLCanvasElement) => live.current.box ?? { w: c.width / look.current.view.s, h: c.height / look.current.view.s };
   const repaint = (refit: boolean) => {
     const c = canvas.current;
     if (!c || !c.width) return;
-    const s = live.current, box = boxOf(c), ink = pen.current?.live();
-    const all = ink ? [...s.inks, ink] : s.inks;
-    const r = extent(box, all);
-    if (refit || !shows(r, view.current, c.width, c.height)) {
-      view.current = s.box || all.length ? fit(r, c.width, c.height) : IDENTITY;
-      pen.current?.reproject(view.current);
-    }
-    paint(c.getContext("2d")!, view.current, { box, base: s.base, inks: all });
-    // What's drawn, for checks (tools/phone/verify/sketch-rotate.sh, apps/sketch/test): read only, never driven.
-    const dbg = { key: s.key, view: view.current, extent: r, strokes: all.length, size: [c.width, c.height] };
-    (window as unknown as { __sketch?: unknown }).__sketch = dbg;
+    const s = live.current, box = boxOf(c), all = withHeld(s.inks, pen.current);
+    const r = extent(box, all), k = look.current;
+    k.view = nextView(k, screen(c), s.box || all.length ? r : null, refit);
+    if (refit) pen.current?.reproject(k.view);
+    const drawn = paint(c.getContext("2d")!, k.view, { box, base: s.base, inks: all });
+    // What's drawn, for checks (tools/phone/verify/sketch-*.sh, apps/sketch/test): read only, never driven.
+    (window as unknown as { __sketch?: unknown }).__sketch = {
+      key: s.key, view: k.view, extent: r, strokes: all.length, drawn, size: [c.width, c.height],
+      mode: k.free ? "free" : "fit", saved: s.saved, paints: ++paints.current,
+    };
   };
   const repaintRef = useRef(repaint);
   repaintRef.current = repaint;
   useSize(canvas, () => repaintRef.current(true));
+  const ctl = useViewControls({ canvas, look, live, onView, repaint: (refit) => repaintRef.current(refit), boxOf });
   useEffect(() => {
     const c = canvas.current!;
     pen.current = attachPen(c, {
-      view: () => view.current,
+      view: () => look.current.view,
       tool: () => toolRef.current,
       end: (ink) => end(ink, boxOf(c)),
       cancel: () => repaintRef.current(false),
+      gesture: ctl.gesture,
+      doubleTap: ctl.home,
     });
-    return () => pen.current?.stop();
+    return () => (pen.current?.stop(), ctl.stop());
   }, []);
-  return { canvas, repaint };
+  return { canvas, repaint, fitAll: ctl.fitAll };
+}
+
+interface ViewDeps {
+  canvas: { current: HTMLCanvasElement | null };
+  look: { current: Look };
+  live: { current: Scene };
+  onView: (v: Saved) => void;
+  repaint: (refit: boolean) => void;
+  boxOf: (c: HTMLCanvasElement) => Box;
+}
+
+/** What moves the view: two fingers, "fit all", a double tap (the page at 100%), and a saved view arriving. */
+function useViewControls({ canvas, look, live, onView, repaint, boxOf }: ViewDeps) {
+  const touched = useRef(false);
+  const frame = useRef(0);
+  const onViewRef = useRef(onView);
+  onViewRef.current = onView;
+  const v0 = useRef(IDENTITY);
+  /** The user set the view: kept free (or fitted again), painted, saved. */
+  const settle = (v: View, fitted: boolean) => {
+    const c = canvas.current!, k = look.current;
+    touched.current = true;
+    k.view = v;
+    const sv = save(v, screen(c), fitted);
+    k.free = fitted ? null : sv;
+    repaint(false);
+    onViewRef.current(sv);
+  };
+  const soon = () => (frame.current ||= requestAnimationFrame(() => ((frame.current = 0), repaint(false))));
+  const gesture = (phase: "start" | "move" | "end", from: [P2, P2], to: [P2, P2]) => {
+    const k = look.current;
+    if (phase === "start") ((v0.current = k.view), (k.moving = true));
+    else if (phase === "move") ((k.view = pinch(v0.current, from, to)), soon());
+    else ((k.moving = false), settle(k.view, false));
+  };
+  const home = () => {
+    const c = canvas.current!, b = boxOf(c);
+    settle({ s: 1, ox: (c.width - b.w) / 2, oy: (c.height - b.h) / 2 }, false);
+  };
+  const fitAll = () => {
+    const c = canvas.current!, s = live.current;
+    settle(s.box || s.inks.length ? fit(extent(boxOf(c), s.inks), c.width, c.height) : IDENTITY, true);
+  };
+  // Another drawing, or its saved view arrived: take it, unless the user moved this one's view since it opened.
+  const opened = useRef("");
+  const scene = live.current;
+  const sig = scene.saved ? JSON.stringify(scene.saved) : "";
+  useEffect(() => {
+    if (opened.current !== scene.key) ((opened.current = scene.key), (touched.current = false));
+    if (!touched.current) look.current.free = scene.saved && !scene.saved.fit ? scene.saved : null;
+    repaint(true);
+  }, [scene.key, sig]);
+  return { gesture, home, fitAll, stop: () => cancelAnimationFrame(frame.current) };
 }
 
 /** Resizes the canvas's backing store to its element (device pixels) on any size or density change, then `after`. */
@@ -231,10 +327,16 @@ export default function Main({ host, close }: Props) {
   const onStroke = (ink: Ink, box: Box) => strokeEnded({ d, cur: curRef.current, row: scene.row, setCur, h }, ink, box);
   const strokeRef = useRef(onStroke);
   strokeRef.current = onStroke;
-  const { canvas, repaint } = useCanvas(scene, tool, (ink, box) => strokeRef.current(ink, box));
+  // A view is saved once there's a drawing to look at (panning an empty page keeps nothing).
+  const onView = (v: Saved) => {
+    const c = curRef.current;
+    if (scene.row || d.outbox.ops.some((o) => o.kind === "add" && o.key === c.key)) h.push({ kind: "view", key: c.key, v });
+  };
+  const viewRef = useRef(onView);
+  viewRef.current = onView;
+  const { canvas, repaint, fitAll } = useCanvas(scene, tool, (ink, box) => strokeRef.current(ink, box), (v) => viewRef.current(v));
   const sig = scene.inks.map((k) => k.uid).join();
   useEffect(() => repaint(false), [sig, scene.base, scene.box?.w, scene.box?.h]);
-  useEffect(() => repaint(true), [cur.key]);
   useLeave(() => h.thumbRef.current());
   const open = (next: Current) => (h.reset(), setCur(next), setGallery(false));
   const clear = () => {
@@ -251,6 +353,7 @@ export default function Main({ host, close }: Props) {
         undo={h.undo.current.length ? () => h.step(h.undo.current, h.redo.current, true) : null}
         redo={h.redo.current.length ? () => h.step(h.redo.current, h.undo.current, false) : null}
         clear={clear}
+        fitAll={fitAll}
         gallery={() => (h.thumbNow(), setGallery(true))}
       />
       {gallery && (
@@ -315,10 +418,11 @@ interface ToolsProps {
   undo: (() => void) | null;
   redo: (() => void) | null;
   clear: () => void;
+  fitAll: () => void;
   gallery: () => void;
 }
 
-function Tools({ tool, setTool, undo, redo, clear, gallery }: ToolsProps) {
+function Tools({ tool, setTool, undo, redo, clear, fitAll, gallery }: ToolsProps) {
   return (
     <div style={{ ...S.bar, top: "auto", bottom: "calc(12px + env(safe-area-inset-bottom))" }}>
       {SIZES.map((s) => (
@@ -330,6 +434,7 @@ function Tools({ tool, setTool, undo, redo, clear, gallery }: ToolsProps) {
       <button style={S.btn} disabled={!undo} onClick={() => undo?.()} aria-label="undo">↶</button>
       <button style={S.btn} disabled={!redo} onClick={() => redo?.()} aria-label="redo">↷</button>
       <button style={S.btn} onClick={clear} aria-label="clear">✕</button>
+      <button style={S.btn} onClick={fitAll} aria-label="fit all">⤢</button>
       <button style={S.btn} onClick={gallery} aria-label="drawings">▦</button>
     </div>
   );

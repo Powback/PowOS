@@ -3,14 +3,15 @@
  * time; kept (and in localStorage, so a restart while offline keeps them) until the reducer ran. The page draws the
  * server's strokes with these applied on top, so a stroke shows the moment it ends, connected or not.
  */
-import type { Ink } from "./ink";
+import type { Ink, Saved } from "./ink";
 
 export type Op =
   | { kind: "add"; key: string; ink: Ink; width: number; height: number }
   | { kind: "adopt"; key: string; id: string }
   | { kind: "hide"; key: string; uids: string[]; hidden: boolean }
   | { kind: "drop"; key: string; uids: string[] }
-  | { kind: "thumb"; key: string; image: string };
+  | { kind: "thumb"; key: string; image: string }
+  | { kind: "view"; key: string; v: Saved };
 
 export type Call = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
@@ -37,6 +38,8 @@ function args(op: Op): [string, Record<string, unknown>] {
       return ["drop_hidden", { key: op.key, uids: op.uids }];
     case "thumb":
       return ["thumb", { key: op.key, image: op.image }];
+    case "view":
+      return ["set_view", { key: op.key, v: op.v }];
   }
 }
 
@@ -74,8 +77,8 @@ export class Outbox {
   }
 
   push(op: Op, call: Call) {
-    // One picture per drawing is enough: the newest replaces any not sent yet.
-    if (op.kind === "thumb") this.ops = this.ops.filter((o) => !(o.kind === "thumb" && o.key === op.key));
+    // One picture (one view) per drawing is enough: the newest replaces any not sent yet.
+    if (op.kind === "thumb" || op.kind === "view") this.ops = this.ops.filter((o) => !(o.kind === op.kind && o.key === op.key));
     this.ops.push(op);
     this.keep();
     this.changed();

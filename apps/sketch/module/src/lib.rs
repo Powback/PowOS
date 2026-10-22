@@ -3,6 +3,8 @@
 //! the drawing was started: `width` x `height`), so any screen, rotation or fold redraws them whole - fitted, never
 //! cropped. Each stroke is written as it ends, so a restart loses nothing. `image` is only a picture of the whole
 //! drawing for the gallery and the home widget; `base` is the raster an older (pre-stroke) drawing started from.
+//! The canvas is unbounded: `viewport` is how each drawing was last looked at (pan + zoom), kept apart from the
+//! drawing itself so moving the view never touches a stroke.
 //!
 //! Hot reload: `powos app publish` (or `powos app dev`) swaps this module in place, clients connected throughout.
 //! Keep schema changes additive - a new table, or a new column at the END of a table with
@@ -57,6 +59,29 @@ pub struct Stroke {
     created: Timestamp,
 }
 
+/// How a drawing is looked at (one row per drawing key; none = fitted whole): the drawing-space point at the
+/// canvas's centre and the zoom (CSS px per drawing unit), so a rotation or another screen keeps the same spot.
+/// `fit` = the user asked to see everything: the page refits it on every resize instead.
+#[spacetimedb::table(accessor = viewport, public)]
+pub struct Viewport {
+    #[primary_key]
+    key: String,
+    cx: f64,
+    cy: f64,
+    zoom: f64,
+    fit: bool,
+    updated: Timestamp,
+}
+
+/// A view as the page sends it (Viewport without its key and time).
+#[derive(SpacetimeType)]
+pub struct ViewIn {
+    cx: f64,
+    cy: f64,
+    zoom: f64,
+    fit: bool,
+}
+
 /// A finished stroke as the page sends it; width x height = the canvas, used only when it starts a new drawing.
 #[derive(SpacetimeType)]
 pub struct StrokeIn {
@@ -96,6 +121,9 @@ pub fn remove(ctx: &ReducerContext, id: u64) {
     let ids: Vec<u64> = ctx.db.stroke().drawing().filter(id).map(|s| s.id).collect();
     for s in ids {
         ctx.db.stroke().id().delete(s);
+    }
+    if let Some(d) = ctx.db.drawing().id().find(id) {
+        ctx.db.viewport().key().delete(&d.key);
     }
     ctx.db.drawing().id().delete(id);
 }
@@ -222,5 +250,24 @@ pub fn thumb(ctx: &ReducerContext, key: String, image: String) -> Result<(), Str
     d.updated = ctx.timestamp;
     d.module = MODULE.into();
     ctx.db.drawing().id().update(d);
+    Ok(())
+}
+
+/// Where the drawing `key` is looked at (pan + zoom). Only the view: the drawing and its strokes stay as they are.
+#[spacetimedb::reducer]
+pub fn set_view(ctx: &ReducerContext, key: String, v: ViewIn) -> Result<(), String> {
+    if key.is_empty() || key.len() > 64 {
+        return Err("key: 1..64 characters".into());
+    }
+    let ViewIn { cx, cy, zoom, fit } = v;
+    if !cx.is_finite() || !cy.is_finite() || !zoom.is_finite() || zoom <= 0.0 || zoom > 1000.0 {
+        return Err("view: finite centre, zoom in (0, 1000]".into());
+    }
+    let v = Viewport { key, cx, cy, zoom, fit, updated: ctx.timestamp };
+    if ctx.db.viewport().key().find(&v.key).is_some() {
+        ctx.db.viewport().key().update(v);
+    } else {
+        ctx.db.viewport().insert(v);
+    }
     Ok(())
 }

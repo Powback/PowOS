@@ -5,13 +5,13 @@
 import { h, render } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import Main from "/app/pages/main.js";
-const seed = JSON.parse(sessionStorage.getItem("seed") || '{"drawing":[],"stroke":[],"next":1}');
+const seed = JSON.parse(sessionStorage.getItem("seed") || '{"drawing":[],"stroke":[],"viewport":[],"next":1}');
 const big = (r) => ({ ...r, id: BigInt(r.id), ...(r.drawing !== undefined ? { drawing: BigInt(r.drawing) } : {}) });
-const store = (window.store = { drawing: seed.drawing.map(big), stroke: seed.stroke.map(big), next: seed.next });
+const store = (window.store = { drawing: seed.drawing.map(big), stroke: seed.stroke.map(big), viewport: seed.viewport || [], next: seed.next });
 window.calls = [];
 const L = new Set();
 const notify = () => L.forEach((f) => f());
-window.dump = () => JSON.stringify({ drawing: store.drawing, stroke: store.stroke, next: store.next }, (k, v) => (typeof v === "bigint" ? String(v) : v));
+window.dump = () => JSON.stringify({ drawing: store.drawing, stroke: store.stroke, viewport: store.viewport, next: store.next }, (k, v) => (typeof v === "bigint" ? String(v) : v));
 const byKey = (key) => store.drawing.find((d) => d.key && d.key === key);
 const id = () => BigInt(store.next++);
 const reducers = {
@@ -27,9 +27,10 @@ const reducers = {
   async dropHidden({ key, uids }) { calls.push("drop_hidden"); const d = byKey(key); store.stroke = store.stroke.filter((s) => !(s.drawing === d.id && s.hidden && uids.includes(s.uid))); notify(); },
   async adopt({ id, key }) { calls.push("adopt"); const d = store.drawing.find((x) => x.id === id); d.key = key; d.base = d.image; notify(); },
   async thumb({ key, image }) { calls.push("thumb"); byKey(key).image = image; notify(); },
-  async remove({ id }) { calls.push("remove"); store.drawing = store.drawing.filter((d) => d.id !== id); notify(); },
+  async remove({ id }) { calls.push("remove"); const d = store.drawing.find((x) => x.id === id); store.viewport = store.viewport.filter((v) => v.key !== d?.key); store.drawing = store.drawing.filter((d) => d.id !== id); notify(); },
+  async setView({ key, v }) { calls.push("set_view"); store.viewport = [...store.viewport.filter((x) => x.key !== key), { key, ...v }]; notify(); },
 };
-const db = { conn: { reducers, db: { drawing: {}, stroke: {} } }, status: "connected", epoch: 1 };
+const db = { conn: { reducers, db: { drawing: {}, stroke: {}, viewport: {} } }, status: "connected", epoch: 1 };
 const host = {
   useDb: () => db,
   useRows: (_db, table) => {
