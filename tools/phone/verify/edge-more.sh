@@ -8,6 +8,12 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd); A=$here/adb.sh
 CFG=/data/data/com.powos.app/files/shell-data/edgeGestures.json
 OUT=${OUT:-$HOME/powos-rec/edge-more-$(date +%H%M%S)}; mkdir -p "$OUT"
+L=$HOME/.cache/powos-verify.lock; n=0
+until mkdir "$L" 2>/dev/null; do
+  [ $n -ge 120 ] && { echo "edge-more.sh: verify lock busy for an hour: $(cat "$L/who" 2>/dev/null)"; exit 4; }
+  n=$((n + 1)); sleep 30
+done
+echo "edge-more.sh $(date +%T) (pid $$)" > "$L/who"; trap 'rm -rf "$L"' EXIT
 s=$(AWAKE_ONLY=1 "$here/idle.sh" --wait 120 "${WAIT_S:-7200}") || { echo "no free window: $s"; exit 3; }
 echo "$s"
 sh_() { "$A" shell "$@" | tr -d '\r'; }
@@ -21,7 +27,7 @@ restore() {
   if [ "$had" = yes ]; then sh_ "su -c 'cp -p /data/local/tmp/edge-cfg.bak $CFG && rm /data/local/tmp/edge-cfg.bak'"; else sh_ "su -c 'rm -f $CFG'"; fi
   echo "restored: user_rotation=$(sh_ settings get system user_rotation) accelerometer_rotation=$(sh_ settings get system accelerometer_rotation) config=$(sh_ "su -c 'test -f $CFG && echo present || echo absent'")"
 }
-trap restore EXIT
+trap 'restore; rm -rf "$L"' EXIT
 touched() { [ "$(sh_ cat /data/local/tmp/powos-lasttouch)" != "$t0" ] && { echo "ABORT: the user touched the phone"; exit 4; }; return 1; }
 cfg() { sh_ "su -c 'echo '\''$1'\'' > $CFG && chown $owner $CFG'"; sleep 1; }
 focus() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity" | sed 's/.* \([^ ]*\/[^ ]*\) .*/\1/'; }

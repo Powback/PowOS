@@ -109,10 +109,10 @@ class CornerPull(
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         val v = velocity
                         velocity = null
-                        // px/ms upwards, in dp as the shell's own flick threshold (shadeOpens: the same rule as the shade's).
+                        // px/ms upwards, in dp as the shell's own flick thresholds (the drawer's: a short flick up opens it).
                         val vy = v?.let { it.computeCurrentVelocity(1); -it.yVelocity / density } ?: 0f
                         v?.recycle()
-                        val open = e.actionMasked == MotionEvent.ACTION_UP && shadeOpens(vy, openness(e).toDouble(), cancelled = false)
+                        val open = e.actionMasked == MotionEvent.ACTION_UP && PanelPull.opens(vy, openness(e).toDouble(), cancelled = false, openFlick = PanelPull.OPEN_FLICK)
                         Log.i(TAG, "corner pull: let go at ${"%.2f".format(openness(e))}, ${"%.2f".format(vy)} dp/ms -> ${if (open) "open" else "shut"}")
                         host.pullEnd(open)
                         state = State.NAV
@@ -137,15 +137,12 @@ class CornerPull(
         PullHost.current?.pullBegin(kind)
     }
 
-    private fun openness(e: MotionEvent) = ((y0 - e.rawY) / (height * SPAN)).coerceIn(0f, 1f)
+    private fun openness(e: MotionEvent) = PanelPull.openness(y0 - e.rawY, height)
 
     private companion object {
         const val TAG = "PowosCornerPull"
 
         /** The corner zones: this much of the width on each side of the bottom edge. */
         const val CORNER = 0.22f
-
-        /** As home's pull-up: the panel is all the way up after this much of the screen's height. */
-        const val SPAN = 0.6f
     }
 }

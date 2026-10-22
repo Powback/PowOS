@@ -26,7 +26,7 @@ import android.widget.FrameLayout
 import dev.omalauncher.App
 import dev.omalauncher.shell.ShellHost
 import dev.omalauncher.system.gesture.GestureConsumer
-import dev.omalauncher.system.gesture.shadeOpens
+import dev.omalauncher.system.gesture.PanelPull
 import dev.omalauncher.widgets.runtime.MediaListener
 import org.json.JSONObject
 import kotlin.math.abs
@@ -566,8 +566,8 @@ class ShadeHost(
 
     /**
      * The pull, wherever its touches come from (the monitor, or the strip as the fallback): a drag down from the top edge
-     * pulls the shade, the page following the finger as home's swipe does (openness = the distance over 60% of the
-     * screen; a flick or past a third opens it: [shadeOpens]).
+     * pulls the shade, the page following the finger as the page's own drags do ([PanelPull]: its short --drop at the
+     * drawer's gain, open past 15% or on a flick down; a flick up shuts it).
      */
     private inner class Pull {
         private val slop = ViewConfiguration.get(shadeContext).scaledTouchSlop
@@ -580,7 +580,22 @@ class ShadeHost(
         /** Started on home's body: only a swipe is a pull there - not a hold that then moves (a tile being picked up). */
         var fromHome = false
 
+        /** The page's --drop (shell.css .notif-panel, device px) as it last said; 0: not asked yet (15% of the height). */
+        private var dropPx = 0f
+        private var dropFor = 0
+
+        /** The page's own travel, read from its CSS once per window height - one knob for the page and the pull. */
+        private fun askDrop(height: Int) {
+            if (dropFor == height) return
+            dropFor = height
+            val web = host?.web ?: return
+            web.evaluateJavascript(
+                "(() => { const p = document.querySelector('.notif-panel'); return p ? parseFloat(getComputedStyle(p).getPropertyValue('--drop')) * devicePixelRatio : 0; })()",
+            ) { v -> v?.toFloatOrNull()?.takeIf { it > 0f }?.let { dropPx = it } }
+        }
+
         fun down(e: MotionEvent) {
+            askDrop(shade?.height?.takeIf { it > 0 } ?: service.resources.displayMetrics.heightPixels)
             x0 = e.rawX
             y0 = e.rawY
             dragging = false
@@ -606,7 +621,7 @@ class ShadeHost(
             }
             if (dragging) {
                 val height = shade?.height?.takeIf { it > 0 } ?: service.resources.displayMetrics.heightPixels
-                q = (dy / (height * PULL_SPAN)).toDouble().coerceIn(0.0, 1.0)
+                q = (if (dropPx > 0f) PanelPull.opennessOver(dy, dropPx) else PanelPull.openness(dy, height.toFloat())).toDouble()
                 drag(q)
             }
             return result
@@ -618,7 +633,7 @@ class ShadeHost(
             if (dragging) {
                 // px/ms of the screen, in CSS px as the page's flick threshold is.
                 val vy = v?.let { it.computeCurrentVelocity(1); it.yVelocity / service.resources.displayMetrics.density } ?: 0f
-                settle(shadeOpens(vy, q, cancelled = e.actionMasked != MotionEvent.ACTION_UP))
+                settle(PanelPull.opens(vy, q, cancelled = e.actionMasked != MotionEvent.ACTION_UP))
             }
             v?.recycle()
             dragging = false
@@ -683,8 +698,6 @@ class ShadeHost(
         private const val SYSUI_KEYGUARD_SHOWING = 1L shl 6
         private const val SYSUI_QUICK_SETTINGS_VISIBLE = 1L shl 11
 
-        /** As the page's: the pull's span (of the screen's height). A flick and the openness it opens at: [shadeOpens]. */
-        private const val PULL_SPAN = 0.6f
 
         private const val LEND_TIMEOUT_MS = 5000L
 
