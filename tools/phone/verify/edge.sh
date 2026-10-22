@@ -45,6 +45,8 @@ if [ "$what" = home ] || [ "$what" = all ]; then
   f=$("$A" shell "dumpsys window | grep -m1 mCurrentFocus" | tr -d '\r')
   case "$f" in *ShellActivity*|*HomeShell*) echo "home in front" ;; *) echo "home isn't in front ($f): the home check is skipped"; skip_home=1 ;; esac
   [ -z "${skip_home:-}" ] && run home "$(drag $((W/2)) $((H*30/100)) 1 $((H*4/100))); sleep 1; input swipe $((W/2)) $((H*80/100)) $((W/2)) $((H*15/100)) 250"
+  # A short pull (~3% of the height, ~70 px): the shade's travel is the page's --drop (15vh) at gain 1.5 - it opens.
+  [ -z "${skip_home:-}" ] && sleep 1.5 && run home-short "$(drag $((W/2)) $((H*30/100)) 0 $((H*3/1000))); sleep 1; input swipe $((W/2)) $((H*80/100)) $((W/2)) $((H*15/100)) 250"
   echo "home page: $("$here/cdp.sh" eval "" "JSON.stringify({notifPanel: document.querySelectorAll('.notif-panel').length})")"
 fi
 if [ "$what" = edge ] || [ "$what" = all ]; then
