@@ -17,7 +17,22 @@ OUT=${OUT:-$HOME/powos-rec/edge-$(date +%H%M%S)}; mkdir -p "$OUT"
 . "$(dirname "$0")/window-lock.sh"
 window_lock edge.sh 120
 focus=$("$A" shell "dumpsys window | grep -m1 mCurrentFocus" | tr -d '\r'); echo "$focus"
-case "$focus" in *Lock*|*Keyguard*|*NotificationShade*|*Bouncer*) echo "locked: skip"; exit 3 ;; esac
+# Locked (the lock face, Android's keyguard): the security check - no edge handle shown, no edge swipe reacting, no
+# shade pulled - then the lock face swiped away (it has no PIN; never enter a credential) and the rest goes on.
+locked_check() {
+  "$A" shell "logcat -c; dumpsys window windows | grep -E 'Window #.*PowOS edge handle' -A30 | grep -E 'Window #|mViewVisibility'" | tee "$OUT/locked.log"
+  local W H; read -r W H < <("$A" shell "dumpsys window displays | grep -m1 -o 'cur=[0-9]*x[0-9]*'" | tr -d '\r' | sed 's/cur=\([0-9]*\)x\([0-9]*\)/\1 \2/')
+  "$A" shell "input swipe $((W-3)) $((H*75/100)) $((W*70/100)) $((H*62/100)) 220; sleep 1.2; input swipe $((W/4)) 6 $((W/4)) $((H*50/100)) 300; sleep 1.2;
+    dumpsys window windows | grep -E 'Window #.*PowOS (quick tools|shade|pull-up panel)' -A25 | grep -E 'Window #|mViewVisibility';
+    logcat -d -v time | grep -E 'PowosEdge|PowosShade|PowosOverlay' | tail -6" | tee -a "$OUT/locked.log"
+  if grep -q "mViewVisibility=0x0" "$OUT/locked.log"; then echo "LOCKED: FAIL - a handle or panel is shown over the lock face"; else echo "LOCKED: pass - nothing shown or opened over the lock face"; fi
+  "$A" shell input swipe $((W/2)) $((H-20)) $((W/2)) $((H*30/100)) 250; sleep 1.5
+}
+case "$focus" in *Lock*|*Keyguard*|*NotificationShade*|*Bouncer*)
+  locked_check
+  focus=$("$A" shell "dumpsys window | grep -m1 mCurrentFocus" | tr -d '\r'); echo "after the lock face: $focus"
+  case "$focus" in *Lock*|*Keyguard*|*Bouncer*) echo "still locked: the rest skipped"; exit 3 ;; esac ;;
+esac
 comp=$(echo "$focus" | sed -n 's/.* \([A-Za-z0-9_.]*\/[A-Za-z0-9_.$]*\)}.*/\1/p')
 size=$("$A" shell wm size | tr -d '\r' | sed -n 's/.*: \([0-9]*\)x\([0-9]*\)$/\1 \2/p' | tail -1); W=${size% *}; H=${size#* }
 # Recorded as root (the shell user's screenrecord can't write /data/local/tmp or /sdcard here: "Permission denied").
