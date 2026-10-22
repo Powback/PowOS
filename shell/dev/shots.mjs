@@ -403,7 +403,7 @@ try {
   await browser.close();
   if (treesWrong) console.error(`shots: ${treesWrong} shot(s) drew mock OWL trees of another theme than ${THEME_NAME}`);
   const strict = strictFailed && process.env.SHOTS_STRICT === "1";
-  if (strict) console.error("shots: FAIL - overlapping tiles, uneven desktop gutters or missing glyphs (report.json)");
+  if (strict) console.error("shots: FAIL - overlapping tiles, partial joins, uneven desktop gutters or missing glyphs (report.json)");
   process.exit(treesWrong || strict ? 1 : 0);
 }
 
@@ -514,6 +514,31 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
               const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
               if (w > 1 && h > 1) overlaps.push(`${tiles[i].name} x ${tiles[j].name} (${Math.round(w)}x${Math.round(h)} px)`);
             }
+          // Merged tiles: an edge joined to a neighbour must be joined along all of it - a tile whose edge touches merged
+          // neighbours over part of it only draws that whole edge as joined, a ragged step at the seam (the user's
+          // circled games / fetch L, 2026-10-22).
+          const joinedTiles = [...document.querySelectorAll(".home-tile.joined")]
+            .map((t) => ({ name: (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24), r: t.getBoundingClientRect() }))
+            .filter(({ r }) => r.width > 0 && r.right > 0 && r.left < vw);
+          const cover = (lo, hi, spans) => {
+            let c = 0;
+            let at = lo;
+            for (const [a, b] of spans.sort((p, q) => p[0] - q[0])) {
+              const s0 = Math.max(a, at);
+              const s1 = Math.min(b, hi);
+              if (s1 > s0) (c += s1 - s0), (at = s1);
+            }
+            return c / Math.max(1, hi - lo);
+          };
+          for (const A of joinedTiles) {
+            const a = A.r;
+            const below = joinedTiles.filter((B) => B !== A && Math.abs(B.r.top - a.bottom) <= 1).map((B) => [B.r.left, B.r.right]);
+            const right = joinedTiles.filter((B) => B !== A && Math.abs(B.r.left - a.right) <= 1).map((B) => [B.r.top, B.r.bottom]);
+            const cb = cover(a.left, a.right, below.filter(([l, r]) => r > a.left + 1 && l < a.right - 1));
+            const cr = cover(a.top, a.bottom, right.filter(([t, b]) => b > a.top + 1 && t < a.bottom - 1));
+            if (cb > 0.01 && cb < 0.99) overlaps.push(`partial join: ${A.name} bottom edge ${Math.round(cb * 100)}% joined`);
+            if (cr > 0.01 && cr < 0.99) overlaps.push(`partial join: ${A.name} right edge ${Math.round(cr * 100)}% joined`);
+          }
           // The desktop's grid: one even gutter between neighbouring tiles in a row (its tiles never merge or touch).
           const gutters = [];
           if (document.documentElement.dataset.mode === "desktop") {

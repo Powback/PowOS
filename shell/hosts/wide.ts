@@ -5,7 +5,7 @@
  *
  * One layout for both screens: the host keeps its pages and cells as they are (ShellHome.kt, GRID_COLUMNS); this maps
  * them both ways at the bridge. Wide page n shows the host's pages 2n-1 and 2n in the order they come (pages [1, 3]:
- * 1 left, 3 right), x + columns on the right half. A tile moved or added on the wide page goes back to the half its
+ * 1 left, 3 right), x + columns + 1 on the right half (a free column between: the pages never merge into each other). A tile moved or added on the wide page goes back to the half its
  * middle is over, inside it - so folding again finds every tile where the folded screen can show it.
  */
 import type { Bridge, Cell, Home } from "../types.ts";
@@ -32,12 +32,13 @@ export function wide(n: Bridge): Bridge {
     if (!pairs.length) pairs = [[1]];
     const where = new Map<number, [number, number]>();
     pairs.forEach((p, i) => p.forEach((page, half) => where.set(page, [i + 1, half])));
+    // One free column between the halves: the two pages never touch, so their tiles never merge across the seam.
     return {
-      columns: cols * 2,
+      columns: cols * 2 + 1,
       pages: pairs.map((_, i) => i + 1),
       items: h.items.map((it) => {
         const [page, half] = where.get(it.page) ?? [1, 0];
-        return { ...it, page, cell: it.cell && { ...it.cell, x: it.cell.x + half * cols } };
+        return { ...it, page, cell: it.cell && { ...it.cell, x: it.cell.x + half * (cols + 1) } };
       }),
     };
   }
@@ -46,13 +47,13 @@ export function wide(n: Bridge): Bridge {
   function toHost(page: number, cell: Cell | null): [number, Cell | null] {
     if (!isWide()) return [page, cell];
     const pair = pairs[page - 1] ?? [];
-    const half = cell && cell.x + cell.w / 2 > cols ? 1 : 0;
+    const half = cell && cell.x + cell.w / 2 > cols + 0.5 ? 1 : 0;
     let host = pair[half];
     // No page there yet (an odd count): a new one after all of them.
     if (host == null) host = Math.max(0, ...pairs.flat()) + 1;
     if (!cell) return [host, null];
     const w = Math.min(cell.w, cols);
-    return [host, { ...cell, w, x: Math.max(0, Math.min(cols - w, cell.x - half * cols)) }];
+    return [host, { ...cell, w, x: Math.max(0, Math.min(cols - w, cell.x - half * (cols + 1))) }];
   }
 
   // Folded or unfolded: home is laid out again from the host's own layout.
