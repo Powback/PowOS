@@ -92,6 +92,22 @@ Access, idle windows and on-device rules: the powos-phone and powos-verify skill
   `unity-screen --install <appid>` / `--remove` in the session with Steam OFF (it rewrites localconfig.vdf on exit;
   backup localconfig.vdf.powos-bak). Installed for 274190. Fold/rotate mid-game: see Fold below.
 
+## Teardown (1167630; board task teardown-doesn-t-start)
+- Build 25295735 is D3D12 (D3D12/ Agility SDK, dxcompiler/dxil, WinPixEventRuntime, sentry/crashpad, mimalloc):
+  VKD3D-Proton, not GL. Prefix pfx registry is good ("WINE REGISTRY Version 2", powos-reg copy exists).
+- 2026-10-23 01:38/01:39 (local): two launches on x86 Proton Experimental under FEX, chain gone 8-9 s after
+  CreatingProcess, gameprocess_log "exit code -1", no window. FEX telemetry (compatdata/<id>/fex-emu/Telemetry, one
+  .telem per x86 program at exit, mtime = when) shows the last x86 program to exit was pv-locale-gen; python3 (Proton's
+  script), wineserver, wineboot, teardown.exe: no telem since the 10-16 install = the chain died inside pressure-vessel
+  before Proton ran. Read Telemetry mtimes first when a launch dies without logs: cheap "how far did it get".
+- After that someone set Teardown to `proton-experimental-arm64` (CompatToolMapping priority 250, 01:39:43): Steam
+  installed "Proton Experimental (ARM64)" (4427310; ships libarm64ecfex/libwow64fex) but it needs tool 4185400 (SLR 4
+  arm64), not yet installed: the next launch downloads it.
+- Steam's stdout (pressure-vessel, Proton, Wine stderr) is only kept when Steam was started from the session
+  (hyprland.log); a Steam started by powos-open-task / the drawer loses it. Check: `td-launch.sh [arm64|x86]...`
+  (queue, --budget 1500): starts Steam itself with stdout to a file, PROTON_LOG via user_settings.py, per-Proton
+  variant, puts the mapping back (KEEP=<variant> keeps it). bf-lib.sh/bf-stop.sh take APP/GAME/WIN_NAME.
+
 ## Fold mid-game (kwin 3.21 = pkgs/kwin 0017; check: `queue.sh add --close <task> bf-fold.sh`)
 - Before: a fold resized the game's full-screen X window to anland-1's new size (Unity kept its own) and the window
   task (patch 0013) cropped it. 0017: exported full-screen windows keep their geometry (QObject property
