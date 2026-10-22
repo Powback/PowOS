@@ -518,3 +518,29 @@ UI served, the count written to its data dir as the app's uid (10359), `/` read-
 hog OOM-killed with exit 137, a busy loop throttled 76 of 86 periods, forks refused at 32); paused after 30 s idle;
 a request while asleep **200 in 8 ms**, the count kept; `powos containers wake` 0.2 ms (146 ms CLI end to end).
 Tier 1: `test/tier1/test-powos-autosleep.py`.
+
+## 14. dma-buf sync_file ioctls (2026-10-22; built and checked, NOT flashed)
+
+`patches/0004-dma-buf-sync-file-import-export.patch` backports `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` /
+`DMA_BUF_IOCTL_IMPORT_SYNC_FILE` (Linux 6.0) to android13-5.15. Why: KGSL has no implicit sync, so a Vulkan client's
+rendering and Xwayland's copy of it were not ordered. Mesa's WSI attaches its fence to the dma-buf with IMPORT when
+the kernel has it, and xwayland-kgsl 0008 waits on EXPORT before the copy. Without it Proton games (Broforce) showed
+half-drawn and older frames. Only `dma-buf.c`'s static ioctl handler and the uapi header change.
+
+Build (`./build-containers-kernel.sh`, 123 min) on top of the containers kernel in boot_b:
+- config: identical to the running kernel's (`out/config`).
+- layout: `OK - every shared type has the same layout`.
+- KMI: `858 modules checked against 15424 kernel symbols ... OK - the modules accept this kernel`; `Module.symvers`
+  identical to the running kernel's, so the nftables modules already on the phone keep loading.
+- `out/boot-powos-dmabuf.img` (= `boot-powos-containers.img` of this build) `d969681e…`; kernel round-trips.
+
+Flash (user's decision; same route as §7–§9):
+1. Test first, nothing written: phone on the Mac's own USB-C, `adb reboot bootloader`,
+   `~/Library/Android/sdk/platform-tools/fastboot boot out/boot-powos-dmabuf.img`. Then check root, the session, and
+   that a dma-buf answers the new ioctl (Xwayland's log stops printing "no DMA_BUF_IOCTL_EXPORT_SYNC_FILE").
+2. Make it permanent: `fastboot flash boot_b out/boot-powos-dmabuf.img` (USB), or over the VPN with root
+   `dd if=boot-powos-dmabuf.img of=/dev/block/by-name/boot_b` (as the earlier kernels went in) + reboot. Only boot_b
+   changes; init_boot (Magisk), vendor_boot and vendor_dlkm are untouched.
+3. Undo: `backups/oneplus-open/2026-10-22-before-dmabuf-kernel/boot_b.img` (`e8205808…`, the containers kernel,
+   verified against the live boot_b) written back the same way; a boot that hangs: hold power + volume-down, then
+   `fastboot flash boot_b <that image>` over USB.
