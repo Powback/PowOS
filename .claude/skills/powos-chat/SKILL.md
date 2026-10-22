@@ -109,6 +109,10 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
   more subscription when the board comes into sight; not applied in 4 s -> a new connection. Scenes: test-now,
   test-now-testing.
 
+- Black flash on send = PowosAiActivity started (ai.send's recents arg true -> keepInRecents). app.tsx imports
+  assist.tsx in every mode, so assist registers setAskContext(withScreen, true) on Assist's mount, never at import.
+  Check: tools/phone/verify/ai-send-flash.sh (events log wm_create_activity/new_intent + black frames).
+
 ## Queued messages (one queue for every chat)
 - The app owns it: PowosAiChat.send while busy appends to `queued` (id, text, prompt) instead of dropping; at turn end
   the next one runs before the inbox's turn; `ai.chat` carries `queued`, `ai.unqueue(id)` takes one back. Lost on an
