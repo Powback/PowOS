@@ -676,18 +676,18 @@ function useWide() {
 export function PowAiPage() {
   const shown = page.value === -1;
   const [ref, wide] = useWide();
-  // Wide: the conversation at reading width with its pill (left), what needs the user and the board (right), each
-  // pane its own scroll. Narrow (folded): one column.
+  // Wide: what needs the user and the board (left), the conversation at reading width with its pill (right, by the
+  // right thumb), each pane its own scroll. Narrow (folded): one column.
   return (
     <div ref={ref} class={`ai-screen ${shown ? "shown" : ""} ${wide ? "wide" : ""}`}>
       <AiHeader />
       {wide ? (
         <>
-          <div class="ai-scroll ai-talk">
-            <AiContent shown={shown} part="talk" />
-          </div>
           <div class="ai-scroll ai-side">
             <AiContent shown={shown} part="side" />
+          </div>
+          <div class="ai-scroll ai-talk">
+            <AiContent shown={shown} part="talk" />
           </div>
         </>
       ) : (

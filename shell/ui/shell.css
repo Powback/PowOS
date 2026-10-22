@@ -1221,23 +1221,26 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
   gap: 14px;
 }
 /*
- * Wide (the page >= 700 px: unfolded, a wide window - powai.tsx useWide): two panes, each its own scroll. Left the
- * conversation at reading width with the pill under it, right what needs the user, the board, the agents. The pair
- * stays centred on a very wide window.
+ * Wide (the page >= 700 px: unfolded, a wide window - powai.tsx useWide): two panes, each its own scroll. Left what
+ * needs the user, the board, the agents; right the conversation at reading width with the pill under it, by the right
+ * thumb. Both panes start on one line and end on the pill's; the pair stays centred on a very wide window.
  */
 .ai-screen.wide {
+  --ai-foot: calc(max(var(--inset-bottom, 0px), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--pill-foot));
   display: grid;
-  grid-template-columns: minmax(0, 70ch) minmax(300px, 1fr);
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 70ch);
   grid-template-rows: auto minmax(0, 1fr) auto;
-  column-gap: 24px;
+  column-gap: 20px;
   row-gap: 10px;
-  padding-inline: max(var(--edge), calc((100% - 70ch - 40rem - 24px) / 2));
+  padding-inline: max(var(--edge), calc((100% - 70ch - 40rem - 20px) / 2));
 }
 .ai-screen.wide > * { max-width: none; margin-inline: 0; }
 .ai-screen.wide > .ai-top { grid-column: 1 / -1; }
-.ai-screen.wide > .ai-talk { grid-column: 1; grid-row: 2; }
-.ai-screen.wide > .ai-compose { grid-column: 1; grid-row: 3; }
-.ai-screen.wide > .ai-side { grid-column: 2; grid-row: 2 / 4; margin-bottom: calc(var(--inset-bottom, 0px) + var(--pill-foot)); }
+.ai-screen.wide > .ai-side { grid-column: 1; grid-row: 2 / 4; margin-bottom: var(--ai-foot); }
+.ai-screen.wide > .ai-talk { grid-column: 2; grid-row: 2; }
+.ai-screen.wide > .ai-compose { grid-column: 2; grid-row: 3; margin-bottom: var(--ai-foot); }
+/* Wide, "earlier" heads the conversation as "needs you" heads the board: the same pill, the panes' tops on one line. */
+.ai-screen.wide .ai-fold:not(.tile *) { margin: 0 0 0 2px; }
 /* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
 .ai-board { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
 html:root .ai-board .tile { background: none; box-shadow: none; }
@@ -2048,7 +2051,7 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
  * compositor's stronger blur on each surface (nativeglass.ts reads --glass-blur-native per surface; the shade's
  * window is blurred by its host: shade.tsx) and the cool tint; over the other tone it takes that tone. No halos.
  */
-.ai-screen .tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *) {
+.ai-screen .tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel:has(.cc.v3), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *) {
   /* Resolved here, from this surface's own --frost-base (a light frost swaps it below). */
   /* Secondary lines the foreground itself, as a widget's: their size says they're secondary. */
   --color-muted: var(--color-foreground);
@@ -2071,7 +2074,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
  * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
  * data-wallpaper) - not a heavier fill.
  */
-:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.ai-screen .tile, .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel:has(.cc.v3), .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *)) {
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.ai-screen .tile, .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel:has(.cc.v3), .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *)) {
   --frost-base: color-mix(in oklab, var(--frost-paper) 70%, var(--frost-swap-cool));
   --glass-veil: transparent;
   --color-foreground: var(--frost-ink);
@@ -2083,7 +2086,8 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
  * PowOS AI's labels on the wallpaper (its title and state, "open", the headings, "clear all", the empty line): each a
  * small pill of the frost with a lit edge - no halo (halos read as highlighter over a bright picture).
  */
-.ai-screen :is(.ai-top > *, .ai-heading:not(.ai-mail-bar), .ai-mail-bar > *, .ai-empty):not(.tile *) {
+.ai-screen :is(.ai-top > *, .ai-heading:not(.ai-mail-bar), .ai-mail-bar > *, .ai-empty):not(.tile *),
+.ai-screen.wide .ai-fold:not(.tile *) {
   --frost-fill: color-mix(in srgb, var(--frost-base) 82%, transparent);
   display: inline-flex;
   align-items: center;
