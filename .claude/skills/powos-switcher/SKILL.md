@@ -26,8 +26,6 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   of its position:fixed children, so .home/.ai-screen (top:0;bottom:0) became 0 px tall for the whole swipe and popped
   back when the transform was cleared. Symptom: bare wallpaper + "Clear all" + pet for 290-430 ms. `.screens` is now
   `position:absolute; inset:0`. Any transform on an ancestor of fixed UI needs a real box.
-- Wrong guess (366aa8e, reverted): "Chromium drops opacity-0 tiles" - an opacity floor changed nothing. Measure first:
-  the page's DOM state said visible while the screen showed nothing -> layout, not paint.
 - Over an app home stays fully opaque during the drag (only recedes by scale); fades under the cards only in landed().
 - Wallpaper loop (760cf6b): an announcement of a new picture must not re-look at the wallpaper (info(look=false));
   a live video wallpaper differs every frame and looped captures several times a second.
@@ -77,7 +75,7 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   - Dock: WindowFrames.running (Compose state) -> ShellBridge "windows.list"/"windows.changed"/"windows.restore";
     shell state.ts `windows`, home.tsx `windowed` dot (.dock .app.windowed[.minimised]) + DockWindows (unpinned
     apps with a window, after the pinned ones). ShellBridge.launch: an app with a window is restored, not relaunched.
-- Check: `tools/phone/verify/float-windows.sh` (forces the inner screen with `cmd device_state state 3` - folded,
+- Check: `verify/float-windows.sh` (forces the inner screen with `cmd device_state state 3` - folded,
   apps open full screen by design, so a folded "not freeform" proves nothing; swipes the lock face, launches
   Calculator through home's bridge call apps.launch over CDP, asserts mode=freeform; then the frame: bar window, drag
   moves, grip resizes, minimise -> visible=false, launch restores, close; always `cmd device_state state reset`).
@@ -86,12 +84,17 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   bridge as the page does: `PowosHost.postMessage(JSON.stringify([id, method, JSON.stringify(args)]))`, answer via
   `__powosHost.resolve(id, v)` (float-windows.sh `hcall` wraps it). Under queue.sh (LOCK_HELD=1) window_lock sets no
   EXIT trap, so WL_TRAP never runs: a check sets its own restore trap.
-- JS side: `powos.floating` (list/restore, the phone only); `powos.windows` is the desktop taskbar's (same wire name).
+- JS side: `powos.floating` (list/restore/desktop, the phone only); `powos.windows` is the desktop taskbar's.
+- One desktop per home page (shell ui/desktops.ts, started by app.tsx after load()): a window belongs to the page id
+  it opened on (`placed`, store "home.windows" task id -> page id; -1 = AI page; a gone page -> the page on screen).
+  Page change -> `floating.desktop(hideIds)` -> WindowFrames.desktop: the others minimised (reorder to bottom), no
+  frame, `away` in windows.list; the rest raised bottom-most first; a no-op folded. restore/launch -> "windows.raised"
+  -> home goes to its page. A bar let go within EDGE_DP (28) of a side -> WindowFrames.edges -> "windows.edge"
+  {id, side} -> toEdge: window + home to the next page in one batch() (never hidden on the way); no page there: stays.
+  Gate: desktops (gate.mjs desktopsCheck/Edge/Reloaded). Device: verify/float-desktops.sh (host events, no swipes).
 
 ## Device-check rules learned
-- One `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX` call to wait (never loop adb); the verify lock
-  (~/.cache/powos-verify.lock, verify/window-lock.sh) only after the wait; captures only via tools/phone/shot.sh
-  (picks the ON display: the inner screen id 4630946704981769859, the cover 4630946316123810436).
+- Captures only via tools/phone/shot.sh (picks the ON display: inner 4630946704981769859, cover 4630946316123810436).
 - Home's foreground activity is com.powos.app/andro.marchy.HomeShell (alias of ShellActivity); HomeDesktop when the
   engine's desktop is home. `dumpsys device_state` mCommittedState OPENED/CLOSED says folded or not.
-- shell/dev/gate.sh needs shell/node_modules (symlink it from a worktree that has one) or tsc is skipped.
+- shell/dev/gate.sh checks git HEAD (commit first), needs shell/node_modules; on a busy Mac READY_MS=40000.
