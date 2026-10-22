@@ -1,10 +1,12 @@
 #include "bridge.h"
 #include "net.h"
+#include "server.h"
 #include "services.h"
 
 #include <KWindowEffects>
 #include <QDesktopServices>
 #include <QFile>
+#include <QFileInfo>
 #include <QTimer>
 #include <QUrl>
 #include <QJsonDocument>
@@ -39,6 +41,12 @@ Bridge::Bridge(const Services &services, QObject *parent)
 void Bridge::native(const QString &message)
 {
     if (message == QLatin1String("b.hello")) {
+        // The page draws its own wallpaper (system.glass): KWin's blur behind the window would be under that picture,
+        // so the page frosts it itself (ui/glass.ts), as the phone's home without live blur does.
+        if (!desktopWallpaper().isEmpty()) {
+            Q_EMIT nativeMessage(QStringLiteral("b.state 0"));
+            return;
+        }
         // The compositor blurs behind this page's surfaces when KWin's blur effect is on (the page tints only, then).
         const bool blur = KWindowEffects::isEffectAvailable(KWindowEffects::BlurBehind);
         Q_EMIT nativeMessage(blur ? QStringLiteral("b.state 1") : QStringLiteral("b.state 0"));
@@ -115,6 +123,15 @@ QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
     if (method == QLatin1String("ai.send")) {
         m_services.ai->send(a.at(0).toString());
         return QJsonValue::Null;
+    }
+    if (method == QLatin1String("system.glass")) {
+        const QString file = desktopWallpaper();
+        if (file.isEmpty())
+            return QJsonObject{{QStringLiteral("wallpaper"), QJsonValue::Null}, {QStringLiteral("blurBehind"), false}};
+        const QString rev = QString::number(QFileInfo(file).lastModified().toMSecsSinceEpoch());
+        return QJsonObject{{QStringLiteral("wallpaper"), QJsonObject{{QStringLiteral("url"), QStringLiteral("./_wallpaper?r=") + rev},
+                                                                    {QStringLiteral("rev"), rev}, {QStringLiteral("source"), QStringLiteral("file")}}},
+                           {QStringLiteral("blurBehind"), false}};
     }
     // Agents' mail comes as comms notifications on this host (Plasma's), not into the page yet.
     if (method == QLatin1String("ai.mail"))

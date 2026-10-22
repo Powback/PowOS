@@ -63,6 +63,8 @@ void ShellServer::requestStarted(QWebEngineUrlRequestJob *job)
         return appFile(job, rel.mid(5));
     if (rel == QLatin1String("_font/symbols"))
         return symbols(job);
+    if (rel == QLatin1String("_wallpaper"))
+        return wallpaper(job);
     for (const QString &root : shellRoots()) {
         QFile file(root + QLatin1Char('/') + rel);
         if (!file.open(QIODevice::ReadOnly))
@@ -93,6 +95,38 @@ void ShellServer::appFile(QWebEngineUrlRequestJob *job, const QString &rest)
     auto *buffer = new QBuffer(job);
     buffer->setData(file.readAll());
     job->reply(mimeOf(name), buffer);
+}
+
+QString desktopWallpaper()
+{
+    const QString state = QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation);
+    for (const QString &ext : {QStringLiteral("jpg"), QStringLiteral("png"), QStringLiteral("webp")}) {
+        const QString own = state + QStringLiteral("/powos/desktop-wallpaper.") + ext;
+        if (QFileInfo(own).isFile())
+            return own;
+    }
+    const QString omarchy = QFileInfo(state + QStringLiteral("/omarchy/current/background")).canonicalFilePath();
+    if (!omarchy.isEmpty() && QFileInfo(omarchy).isFile())
+        return omarchy;
+    // Plasma's own: the desktop containment's Image= (plasma-org.kde.plasma.desktop-appletsrc), a file or a folder.
+    QFile rc(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/plasma-org.kde.plasma.desktop-appletsrc"));
+    if (rc.open(QIODevice::ReadOnly)) {
+        static const QRegularExpression image(QStringLiteral("^Image=(?:file://)?(.+)$"), QRegularExpression::MultilineOption);
+        const auto m = image.match(QString::fromUtf8(rc.readAll()));
+        if (m.hasMatch() && QFileInfo(m.captured(1).trimmed()).isFile())
+            return m.captured(1).trimmed();
+    }
+    return {};
+}
+
+void ShellServer::wallpaper(QWebEngineUrlRequestJob *job)
+{
+    QFile file(desktopWallpaper());
+    if (!file.open(QIODevice::ReadOnly))
+        return job->fail(QWebEngineUrlRequestJob::UrlNotFound);
+    auto *buffer = new QBuffer(job);
+    buffer->setData(file.readAll());
+    job->reply(mimeOf(file.fileName()), buffer);
 }
 
 void ShellServer::symbols(QWebEngineUrlRequestJob *job)
