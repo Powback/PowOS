@@ -307,50 +307,40 @@ function joins(items: HomeItem[]): Map<string, Record<string, number>> {
     const c = shown(i);
     for (let y = c.y; y < c.y + c.h; y++) for (let x = c.x; x < c.x + c.w; x++) at.set(`${x},${y}`, i.key);
   }
-  // An edge joins only where it's covered whole, and only to neighbours whose facing edge is covered whole too: a
-  // tile joined over part of an edge (games 6x3 over fetch 3x3, the right half) bridged the gutter along ALL of it, so
-  // the free half stuck half a gutter lower than the tiles beside it - a ragged step where merged tiles meet.
-  const full = new Map<string, { t: boolean; r: boolean; b: boolean; l: boolean }>();
-  const covered = (i: HomeItem, x0: number, y0: number, dx: number, dy: number, n: number) => {
-    const ks = new Set<string>();
-    for (let k = 0; k < n; k++) {
-      const o = at.get(`${x0 + dx * k},${y0 + dy * k}`);
-      if (o == null || o === i.key) return null;
-      ks.add(o);
-    }
-    return ks;
+  // Merged per shared span (grid.tsx seams): a side covered WHOLE by neighbours reaches half the gutter towards them
+  // (--jX 1); a side touched over part of it keeps its edge where an unjoined one is (the user's steam-over-fetch: the
+  // wide tile's free half stays level with its neighbours), and the gutter along just the shared span is filled by a
+  // seam piece, with a rounded inner corner where the group turns. Corners are square where a neighbour continues.
+  const other = (i: HomeItem, x: number, y: number) => {
+    const k = at.get(`${x},${y}`);
+    return k != null && k !== i.key ? 1 : 0;
   };
-  const sides = new Map<string, Record<"t" | "r" | "b" | "l", Set<string> | null>>();
-  for (const i of items) {
-    if (!boxed(i)) continue;
-    const c = shown(i);
-    const s = {
-      t: covered(i, c.x, c.y - 1, 1, 0, c.w),
-      r: covered(i, c.x + c.w, c.y, 0, 1, c.h),
-      b: covered(i, c.x, c.y + c.h, 1, 0, c.w),
-      l: covered(i, c.x - 1, c.y, 0, 1, c.h),
-    };
-    sides.set(i.key, s);
-    full.set(i.key, { t: !!s.t, r: !!s.r, b: !!s.b, l: !!s.l });
-  }
-  const facing = { t: "b", r: "l", b: "t", l: "r" } as const;
+  const whole = (i: HomeItem, x0: number, y0: number, dx: number, dy: number, n: number) => {
+    for (let k = 0; k < n; k++) if (!other(i, x0 + dx * k, y0 + dy * k)) return 0;
+    return 1;
+  };
+  const any = (i: HomeItem, x0: number, y0: number, dx: number, dy: number, n: number) => {
+    for (let k = 0; k < n; k++) if (other(i, x0 + dx * k, y0 + dy * k)) return 1;
+    return 0;
+  };
   const out = new Map<string, Record<string, number>>();
   for (const i of items) {
     if (!boxed(i)) continue;
-    const s = sides.get(i.key)!;
-    const e = (d: "t" | "r" | "b" | "l") => (s[d] && [...s[d]!].every((k) => full.get(k)?.[facing[d]]) ? 1 : 0);
-    const [t, r, b, l] = [e("t"), e("r"), e("b"), e("l")];
-    const j = {
-      "--jt": t,
-      "--jr": r,
-      "--jb": b,
-      "--jl": l,
-      "--ctl": 1 - Math.max(l, t),
-      "--ctr": 1 - Math.max(r, t),
-      "--cbr": 1 - Math.max(r, b),
-      "--cbl": 1 - Math.max(l, b),
-    };
-    if (t || r || b || l) out.set(i.key, j);
+    const c = shown(i);
+    const r = c.x + c.w;
+    const b = c.y + c.h;
+    const touches = any(i, c.x, c.y - 1, 1, 0, c.w) || any(i, r, c.y, 0, 1, c.h) || any(i, c.x, b, 1, 0, c.w) || any(i, c.x - 1, c.y, 0, 1, c.h);
+    if (!touches) continue;
+    out.set(i.key, {
+      "--jt": whole(i, c.x, c.y - 1, 1, 0, c.w),
+      "--jr": whole(i, r, c.y, 0, 1, c.h),
+      "--jb": whole(i, c.x, b, 1, 0, c.w),
+      "--jl": whole(i, c.x - 1, c.y, 0, 1, c.h),
+      "--ctl": 1 - Math.max(other(i, c.x - 1, c.y), other(i, c.x, c.y - 1)),
+      "--ctr": 1 - Math.max(other(i, r, c.y), other(i, r - 1, c.y - 1)),
+      "--cbr": 1 - Math.max(other(i, r, b - 1), other(i, r - 1, b)),
+      "--cbl": 1 - Math.max(other(i, c.x - 1, b - 1), other(i, c.x, b)),
+    });
   }
   return out;
 }
@@ -365,6 +355,86 @@ function joins(items: HomeItem[]): Map<string, Record<string, number>> {
  */
 const textured = (i: HomeItem) => boxed(i) || i.kind === "folder";
 
+/** A tile's face on the page: its box less the half gutter on each side not merged whole (grid.tsx joins). */
+function faceRect(i: HomeItem, j: Record<string, number>, half: number) {
+  const b = box(shown(i));
+  return {
+    x0: b.left + half * (1 - (j["--jl"] ?? 0)),
+    y0: b.top + half * (1 - (j["--jt"] ?? 0)),
+    x1: b.left + b.width - half * (1 - (j["--jr"] ?? 0)),
+    y1: b.top + b.height - half * (1 - (j["--jb"] ?? 0)),
+  };
+}
+
+/** A piece of a merged group between two faces: the gutter along a shared span, or an inner corner's fillet. */
+export interface Seam {
+  kind: "bridge" | "fillet";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** fillet: the circle's centre, from the piece's top-left (the corner it rounds is the opposite one). */
+  cx?: number;
+  cy?: number;
+  d: string;
+}
+
+/**
+ * The pieces that merge two faces touching over PART of an edge (joins): the gutter between them along the shared
+ * span only (both faces' extents: edges line up exactly with the faces), and at each end where one face goes on past
+ * the other, a fillet rounding the inner corner of the L - so the group reads as one surface, its free edges level.
+ */
+function seams(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined, half: number, radius: number): Seam[] {
+  const out: Seam[] = [];
+  const f = (n: number) => +n.toFixed(1);
+  const on = items.filter((i) => boxed(i) && i.key !== lifted && joined.has(i.key));
+  const rect = new Map(on.map((i) => [i.key, faceRect(i, joined.get(i.key)!, half)]));
+  const fillet = (px: number, py: number, sx: number, sy: number, r: number) => {
+    if (r < 1) return;
+    const x = sx > 0 ? px : px - r;
+    const y = sy > 0 ? py : py - r;
+    const sweep = sx * sy < 0 ? 1 : 0;
+    out.push({
+      kind: "fillet", x, y, w: r, h: r, cx: sx > 0 ? r : 0, cy: sy > 0 ? r : 0,
+      d: `M${f(px)} ${f(py)}L${f(px + sx * r)} ${f(py)}A${f(r)} ${f(r)} 0 0 ${sweep} ${f(px)} ${f(py + sy * r)}Z`,
+    });
+  };
+  for (const A of on) {
+    const a = shown(A);
+    const fa = rect.get(A.key)!;
+    for (const B of on) {
+      if (B === A) continue;
+      const b = shown(B);
+      const fb = rect.get(B.key)!;
+      // B under A (a horizontal seam), or B right of A (a vertical one): the same with x and y swapped.
+      for (const vertical of [false, true]) {
+        const touch = vertical ? b.x === a.x + a.w && b.y < a.y + a.h && a.y < b.y + b.h : b.y === a.y + a.h && b.x < a.x + a.w && a.x < b.x + b.w;
+        if (!touch) continue;
+        // Along the seam (u) and across it (v).
+        const [a0, a1, b0, b1] = vertical ? [fa.y0, fa.y1, fb.y0, fb.y1] : [fa.x0, fa.x1, fb.x0, fb.x1];
+        const [aEnd, bStart] = vertical ? [fa.x1, fb.x0] : [fa.y1, fb.y0];
+        const u0 = Math.max(a0, b0);
+        const u1 = Math.min(a1, b1);
+        if (u1 - u0 < 1) continue;
+        const gap = bStart - aEnd;
+        if (gap > 0.5) {
+          const [x, y, w, h] = vertical ? [aEnd, u0, gap, u1 - u0] : [u0, aEnd, u1 - u0, gap];
+          out.push({ kind: "bridge", x, y, w, h, d: `M${f(x)} ${f(y)}H${f(x + w)}V${f(y + h)}H${f(x)}Z` });
+        }
+        // The ends: where A goes on past B, the inner corner is on B's side of A's edge; where B goes on, on A's side.
+        const r = Math.min(radius, Math.max(0, (u1 - u0) / 2));
+        for (const [end, s] of [[u0, -1], [u1, 1]] as const) {
+          const aOn = s < 0 ? a0 < u0 - 0.5 : a1 > u1 + 0.5;
+          const bOn = s < 0 ? b0 < u0 - 0.5 : b1 > u1 + 0.5;
+          if (aOn && !bOn) vertical ? fillet(aEnd, end, 1, s, r) : fillet(end, aEnd, s, 1, r);
+          if (bOn && !aOn) vertical ? fillet(bStart, end, -1, s, r) : fillet(end, bStart, s, -1, r);
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /** The faces' rounded boxes on a page, as SVG path data: all of them, and those in a merged group; the extent. */
 function faces(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined) {
   const css = getComputedStyle(document.documentElement);
@@ -376,12 +446,8 @@ function faces(items: HomeItem[], joined: Map<string, Record<string, number>>, l
   const grouped: string[] = [];
   for (const i of items) {
     if (!textured(i) || i.key === lifted) continue;
-    const b = box(shown(i));
     const j = joined.get(i.key) ?? {};
-    const x0 = b.left + half * (1 - (j["--jl"] ?? 0));
-    const y0 = b.top + half * (1 - (j["--jt"] ?? 0));
-    const x1 = b.left + b.width - half * (1 - (j["--jr"] ?? 0));
-    const y1 = b.top + b.height - half * (1 - (j["--jb"] ?? 0));
+    const { x0, y0, x1, y1 } = faceRect(i, j, half);
     const [tl, tr, br, bl] = ["--ctl", "--ctr", "--cbr", "--cbl"].map((k) => radius * (j[k] ?? 1));
     const f = (n: number) => +n.toFixed(1);
     const d =
@@ -392,7 +458,38 @@ function faces(items: HomeItem[], joined: Map<string, Record<string, number>>, l
     w = Math.max(w, Math.ceil(x1));
     h = Math.max(h, Math.ceil(y1));
   }
+  // The seam pieces are face too: the picture shows through them, the group's shadow falls round them.
+  for (const p of seams(items, joined, lifted, half, radius)) {
+    paths.push(p.d);
+    grouped.push(p.d);
+  }
   return { all: paths.join(""), grouped: grouped.join(""), w, h };
+}
+
+/** The seam pieces as surfaces (a .tile each: the compositor's glass region and the tint, as a face's). */
+function Seams({ items, joined }: { items: HomeItem[]; joined: Map<string, Record<string, number>> }) {
+  if (!joined.size) return null;
+  const css = getComputedStyle(document.documentElement);
+  const half = (parseFloat(css.getPropertyValue("--gap")) || 8) / 2;
+  const radius = parseFloat(css.getPropertyValue("--radius")) || 12;
+  const list = seams(items, joined, carry.value?.item?.key, half, radius);
+  return (
+    <>
+      {list.map((p) => (
+        <div
+          key={`${p.kind}${p.x},${p.y}`}
+          class={`tile seam ${p.kind}`}
+          style={{
+            left: `${p.x}px`,
+            top: `${p.y}px`,
+            width: `${p.w}px`,
+            height: `${p.h}px`,
+            ...(p.kind === "fillet" ? { "--fx": `${p.cx}px`, "--fy": `${p.cy}px`, "--fr": `${p.w}px` } : {}),
+          }}
+        />
+      ))}
+    </>
+  );
 }
 
 function faceMask(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined) {
@@ -727,6 +824,7 @@ export function Pages() {
                 <>
                   <PageGlass items={on} joined={joined} index={i} />
                   <GroupShadow items={on} joined={joined} id={String(n)} />
+                  <Seams items={on} joined={joined} />
                   {on.map((item) => (
                     <Tile key={item.key} item={item} join={joined.get(item.key)} />
                   ))}

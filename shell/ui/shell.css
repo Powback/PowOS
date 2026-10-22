@@ -340,7 +340,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 /* Over a wallpaper of the other tone: nearly solid. */
 :root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] { --chat-fill: 94%; }
 /* Home's widgets: their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
-.page .home-tile > .tile {
+.page .home-tile > .tile, .page .seam {
   /* Measured over the crystal on the inner screen (the widgets' preview): 32% left plain text at 4.2:1, 42% reaches
      4.5; secondary text in a widget is the foreground itself - its size says it's secondary, a see-through colour
      there was 3.7:1. */
@@ -614,6 +614,17 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 }
 .home-tile.joined[style*="--jt: 0"] > .tile { box-shadow: var(--lift-edge); }
 .group-shadow { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+/*
+ * The pieces merging tiles that touch over part of an edge (grid.tsx seams): the gutter along the shared span, and a
+ * fillet rounding the group's inner corner (the tint cut to a quarter circle's outside). Surfaces like a face, nothing
+ * of their own: no edge light, no shadow, no touches.
+ */
+.seam { position: absolute; box-sizing: border-box; border: 0; border-radius: 0; box-shadow: none; pointer-events: none; }
+.seam.fillet {
+  -webkit-mask-image: radial-gradient(circle at var(--fx) var(--fy), transparent calc(var(--fr) - 0.5px), #000 var(--fr));
+  mask-image: radial-gradient(circle at var(--fx) var(--fy), transparent calc(var(--fr) - 0.5px), #000 var(--fr));
+}
+.glass .page .seam { background: var(--glass-fill); }
 
 /*
  * A PowOS app island's network failure, shared by every app (host.net.error's message): one calm muted line - on a

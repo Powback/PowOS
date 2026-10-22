@@ -125,10 +125,10 @@ async function transpiled(p) {
   return txRuns.get(key);
 }
 
-async function open(browser, url, name) {
+async function open(browser, url, name, viewport = { width: 412, height: 915 }) {
   // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
   const page = await (await browser.createBrowserContext()).newPage();
-  await page.setViewport({ width: 412, height: 915, deviceScaleFactor: 1 });
+  await page.setViewport({ ...viewport, deviceScaleFactor: 1 });
   const problems = [];
   const warnings = [];
   await page.setRequestInterception(true);
@@ -364,6 +364,62 @@ try {
         return { ...r, ready: true, ms: Date.now() - r.started };
       }),
     );
+  }
+  // Merged tiles touching over PART of an edge (grid.tsx joins/seams; the user's steam-over-fetch, 2026-10-22): a wide
+  // widget over a half-width one is ONE surface - the gutter along the shared span filled by a seam exactly between the
+  // two faces, an inner-corner fillet where the group turns - and the wide one's free edge stays level with an unjoined
+  // edge (half a gutter in from its row line: extending it whole was the ragged step). Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0") {
+    for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]])
+      runs.push(
+        open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then(async (r) => {
+          await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+          if (!(await r.page.evaluate(() => window.__powosAlive === true).catch(() => false))) {
+            r.problems.push(`not ready (window.__powosAlive) within ${Date.now() - r.started} ms`);
+            return { ...r, ready: false, ms: Date.now() - r.started };
+          }
+          const out = await r.page
+            .evaluate(async () => {
+              const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+              const S = await importShim("./state.ts");
+              const { powos } = await importShim("./bridge.ts");
+              const h = await powos.home.get();
+              for (const i of h.items) await powos.home.remove(i.key);
+              const w = Math.min(6, h.columns || 6);
+              // The wide one over the right half: steam (6x3) over fetch (3x3).
+              // Home's first page (pages are 1-based; the wide layout maps it to the left half).
+              const pg = h.pages[0] ?? 1;
+              await powos.home.addPanel("agents", pg, { x: 0, y: 0, w, h: 3 });
+              await powos.home.addPanel("recents", pg, { x: w - 3, y: 3, w: 3, h: 3 });
+              S.page.value = 0;
+              await sleep(800);
+              const half = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
+              const tiles = [...document.querySelectorAll(".page:not(.away) .home-tile")];
+              const bad = [];
+              if (tiles.length !== 2) return [`${tiles.length} tiles on the page, not the 2 placed`];
+              const [A, B] = tiles.map((t) => ({ t, cell: t.getBoundingClientRect(), face: t.querySelector(":scope > .tile").getBoundingClientRect() })).sort((p, q) => p.cell.top - q.cell.top);
+              if (!A.t.classList.contains("joined") || !B.t.classList.contains("joined")) bad.push("the two aren't merged (no .joined)");
+              // The wide one's bottom: where an unjoined edge is (its free half level), not half a gutter lower.
+              if (Math.abs(A.face.bottom - (A.cell.bottom - half)) > 1) bad.push(`the wide tile's bottom edge is ${Math.round(A.face.bottom - (A.cell.bottom - half))} px off its row line`);
+              // The narrow one under it reaches up to meet it, or a seam fills between them, exactly along the shared span.
+              const gap = B.face.top - A.face.bottom;
+              if (gap > 0.5) {
+                const ok = [...document.querySelectorAll(".page:not(.away) .seam.bridge")].some((e) => {
+                  const r = e.getBoundingClientRect();
+                  return Math.abs(r.top - A.face.bottom) <= 1 && Math.abs(r.bottom - B.face.top) <= 1 && Math.abs(r.left - Math.max(A.face.left, B.face.left)) <= 1 && Math.abs(r.right - Math.min(A.face.right, B.face.right)) <= 1;
+                });
+                if (!ok) bad.push(`a ${Math.round(gap)} px gutter between them along the shared span (not one surface)`);
+              }
+              // The right edges line up (both end on the same column).
+              if (Math.abs(A.face.right - B.face.right) > 1) bad.push(`their right edges differ by ${Math.round(A.face.right - B.face.right)} px`);
+              if (!document.querySelector(".page:not(.away) .seam.fillet")) bad.push("no rounded inner corner where the group turns");
+              return bad;
+            })
+            .catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
+          r.problems.push(...out);
+          return { ...r, ready: true, ms: Date.now() - r.started };
+        }),
+      );
   }
   // The control center's rearranging (ui/reorder.ts, control.tsx Controls): in edit mode a toggle held and carried onto
   // the first slot of the row lands there, is saved (the store holds it), and is still there after the panel shut and

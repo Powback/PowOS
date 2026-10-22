@@ -530,31 +530,38 @@ async function shoot(name, mode, setup, behind, sizeName, size, touch) {
               const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
               if (w > 1 && h > 1) overlaps.push(`${tiles[i].name} x ${tiles[j].name} (${Math.round(w)}x${Math.round(h)} px)`);
             }
-          // Merged tiles: an edge joined to a neighbour must be joined along all of it - a tile whose edge touches merged
-          // neighbours over part of it only draws that whole edge as joined, a ragged step at the seam (the user's
-          // circled games / fetch L, 2026-10-22).
+          // Merged tiles touching over PART of an edge (the user's steam-over-fetch, 2026-10-22) must still be one surface,
+          // their edges level: along the shared span the gutter is filled (the faces meet, or a .seam.bridge fills
+          // exactly between them), and a partly-joined edge keeps its face where an unjoined edge's is (half a gutter in
+          // from its cell line - a whole-edge extension there was the ragged step). Reported as "partial join: ...".
+          const halfGap = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
           const joinedTiles = [...document.querySelectorAll(".home-tile.joined")]
-            .map((t) => ({ name: (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24), r: t.getBoundingClientRect() }))
-            .filter(({ r }) => r.width > 0 && r.right > 0 && r.left < vw);
-          const cover = (lo, hi, spans) => {
-            let c = 0;
-            let at = lo;
-            for (const [a, b] of spans.sort((p, q) => p[0] - q[0])) {
-              const s0 = Math.max(a, at);
-              const s1 = Math.min(b, hi);
-              if (s1 > s0) (c += s1 - s0), (at = s1);
+            .map((t) => ({ name: (t.querySelector("[data-key], .owl, .island-face, .ag-panel") ?? t).className.toString().slice(0, 24), cell: t.getBoundingClientRect(), face: (t.querySelector(":scope > .tile") ?? t).getBoundingClientRect() }))
+            .filter(({ cell }) => cell.width > 0 && cell.right > 0 && cell.left < vw);
+          const bridges = [...document.querySelectorAll(".seam.bridge")].map((e) => e.getBoundingClientRect());
+          const filled = (x0, y0, x1, y1) => bridges.some((r) => Math.abs(r.left - x0) <= 1 && Math.abs(r.right - x1) <= 1 && Math.abs(r.top - y0) <= 1 && Math.abs(r.bottom - y1) <= 1);
+          for (const A of joinedTiles)
+            for (const B of joinedTiles) {
+              if (A === B) continue;
+              for (const vertical of [false, true]) {
+                // B under A (or right of A): their cell boxes meet, and they overlap along the seam.
+                const meet = vertical ? Math.abs(B.cell.left - A.cell.right) <= 1 : Math.abs(B.cell.top - A.cell.bottom) <= 1;
+                if (!meet) continue;
+                const [a0, a1, b0, b1] = vertical ? [A.face.top, A.face.bottom, B.face.top, B.face.bottom] : [A.face.left, A.face.right, B.face.left, B.face.right];
+                const u0 = Math.max(a0, b0);
+                const u1 = Math.min(a1, b1);
+                if (u1 - u0 < 2) continue;
+                const [aEnd, bStart] = vertical ? [A.face.right, B.face.left] : [A.face.bottom, B.face.top];
+                const side = vertical ? "right" : "bottom";
+                if (bStart - aEnd > 0.5 && !(vertical ? filled(aEnd, u0, bStart, u1) : filled(u0, aEnd, u1, bStart)))
+                  overlaps.push(`partial join: ${A.name} ${side} edge not merged with ${B.name} (${Math.round(bStart - aEnd)} px gap along the shared span)`);
+                // A partly-joined edge: its face where an unjoined one's is (level with its neighbours).
+                const aSpan = vertical ? [A.cell.top, A.cell.bottom] : [A.cell.left, A.cell.right];
+                const partial = u1 - u0 < aSpan[1] - aSpan[0] - 2 * halfGap - 2;
+                const want = (vertical ? A.cell.right : A.cell.bottom) - halfGap;
+                if (partial && Math.abs(aEnd - want) > 1) overlaps.push(`partial join: ${A.name} ${side} edge off its row line by ${Math.round(aEnd - want)} px`);
+              }
             }
-            return c / Math.max(1, hi - lo);
-          };
-          for (const A of joinedTiles) {
-            const a = A.r;
-            const below = joinedTiles.filter((B) => B !== A && Math.abs(B.r.top - a.bottom) <= 1).map((B) => [B.r.left, B.r.right]);
-            const right = joinedTiles.filter((B) => B !== A && Math.abs(B.r.left - a.right) <= 1).map((B) => [B.r.top, B.r.bottom]);
-            const cb = cover(a.left, a.right, below.filter(([l, r]) => r > a.left + 1 && l < a.right - 1));
-            const cr = cover(a.top, a.bottom, right.filter(([t, b]) => b > a.top + 1 && t < a.bottom - 1));
-            if (cb > 0.01 && cb < 0.99) overlaps.push(`partial join: ${A.name} bottom edge ${Math.round(cb * 100)}% joined`);
-            if (cr > 0.01 && cr < 0.99) overlaps.push(`partial join: ${A.name} right edge ${Math.round(cr * 100)}% joined`);
-          }
           // The desktop's grid: one even gutter between neighbouring tiles in a row (its tiles never merge or touch).
           const gutters = [];
           if (document.documentElement.dataset.mode === "desktop") {

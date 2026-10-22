@@ -22,3 +22,4 @@ ui/shell.css border: var(--frame) solid var(--color-border); }  # assist: yester
 ui/shell.css .assist-ask { display: flex;  # assist: yesterday's look restored (the exception)
 ui/shell.css .assist-attach .chip { font: var(--text-small) var(--font); padding: 5px 10px; border-radius: 999px; border: var(--frame) solid var(--color-accent);  # assist: yesterday's look restored (the exception)
 ui/shell.css .assist-live { font:  # assist: yesterday's look restored (the exception)
+ui/shell.css transparent calc(var(--fr) - 0.5px), #000 var(--fr));  # a CSS mask's keep-area (mask semantics, not a colour): the seam fillet's quarter-circle cut
