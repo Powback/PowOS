@@ -23,11 +23,15 @@ here=$(dirname "$0")
 if [ "${1:-}" = "--wait" ]; then
   need=${2:-60}; max=${3:-600}; awake=${AWAKE_ONLY:-0}
   "$0" >/dev/null   # starts the touch watcher if it isn't running
-  out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $max )); while [ \$(date +%s) -lt \$end ]; do
+  # Awake counts only once the screen has been ON for IDLE_S too: after a long sleep the last touch is hours old, so
+  # "no touch for IDLE_S" alone said free the moment the user woke the phone to use it.
+  out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $max )); on=0; while [ \$(date +%s) -lt \$end ]; do
       touch /data/local/tmp/powos-touchmon.ask
       w=\$(dumpsys power | grep -m1 mWakefulness= | cut -d= -f2)
       t=\$(( \$(date +%s) - \$(cat /data/local/tmp/powos-lasttouch 2>/dev/null || date +%s) ))
-      case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
+      [ \$w = Awake ] && { [ \$on = 0 ] && on=\$(date +%s); } || on=0
+      a=\$(( \$(date +%s) - on ))
+      case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && [ \$a -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
       sleep 5
     done; echo timeout" 2>/dev/null | tr -d '\r' | tail -1)
   echo "$out"
