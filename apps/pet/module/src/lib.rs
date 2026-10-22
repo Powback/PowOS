@@ -42,6 +42,10 @@ pub struct Pet {
     /** When (ms): the shell goes once per new value. */
     #[default(0u64)]
     goto_at: u64,
+    /** On at all (`powos pet on|off`, Settings > Style > Pet): off, the shell renders nothing and runs nothing for it.
+     *  Off by default (2026-10-22: the user turned it off). */
+    #[default(false)]
+    enabled: bool,
 }
 
 #[spacetimedb::table(accessor = said, public)]
@@ -66,7 +70,7 @@ fn level_of(xp: u32) -> u32 {
 
 fn fresh(ctx: &ReducerContext) -> Pet {
     let t = now(ctx);
-    Pet { id: 0, name: "Pow".into(), mood: String::new(), mood_until: 0, energy: 80, fed: t, xp: 0, level: 1, updated: t, overlay: true, goto_target: String::new(), goto_say: String::new(), goto_at: 0 }
+    Pet { id: 0, name: "Pow".into(), mood: String::new(), mood_until: 0, energy: 80, fed: t, xp: 0, level: 1, updated: t, overlay: true, goto_target: String::new(), goto_say: String::new(), goto_at: 0, enabled: false }
 }
 
 /// The pet's row (made the first time), changed by [f] and written back.
@@ -198,4 +202,10 @@ pub fn goto(ctx: &ReducerContext, target: String, say: String) -> Result<(), Str
         p.goto_at = t;
     });
     Ok(())
+}
+
+/// The pet on or off everywhere (home, over apps, the desktop).
+#[spacetimedb::reducer]
+pub fn set_enabled(ctx: &ReducerContext, on: bool) {
+    with_pet(ctx, |p, _| p.enabled = on);
 }

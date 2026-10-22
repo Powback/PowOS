@@ -264,6 +264,10 @@ try {
             const P = await importShim("./apps/pages.ts");
             P.installedApps.value = [...P.installedApps.value, { id: "local.pet", name: "Pet", version: "0.1.0", database: "local-pet", tier: 0, manifest: "{}" }];
             await sleep(600);
+            // Off by default (the module's enabled; no SpacetimeDB here): installed but off must render nothing.
+            if (document.querySelector(".pet")) return ["the pet rendered while it's off (enabled false)"];
+            window.__pet?.on?.(true);
+            await sleep(600);
             const pet = document.querySelector(".pet");
             if (!pet) return ["the pet didn't mount with local.pet installed"];
             const at = pet.getBoundingClientRect();

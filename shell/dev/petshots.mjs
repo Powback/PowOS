@@ -51,6 +51,9 @@ for (const state of STATES) {
       document.documentElement.style.background = "linear-gradient(160deg,#0b1020,#5a7fb0 55%,#c08050)";
       const P = await importShim("./apps/pages.ts");
       P.installedApps.value = [...P.installedApps.value, { id: "local.pet", name: "Pet", version: "0.1.0", database: "local-pet", tier: 0, manifest: "{}" }];
+      await sleep(300);
+      // Off by default (the module's enabled; no SpacetimeDB here): on for the render.
+      window.__pet.on?.(true);
       await sleep(600);
       window.__pet.perch(perch, 0.8);
       window.__pet.force(state);

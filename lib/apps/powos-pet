@@ -22,6 +22,8 @@ battery - all from live data, nothing to set. What you say through it shows in i
 (3-6 s, one at a time; a tap on the bubble opens the rest). Keep it to one short, plain line.
 
 Usage:
+  powos pet on|off        The pet at all, everywhere (home, over apps, the desktop); off by default. Off, it
+                          shows nothing and costs nothing; what it knows is kept. (Also: Settings > Style > Pet.)
   powos pet say <text...> [--mood M] [--from ROLE]
                           Say a line in its bubble (and its history). --mood shows M for 30 s.
                           --from: who's speaking (default: $POWOS_AGENTS_ROLE, else "agent").
@@ -168,6 +170,9 @@ def main(argv):
         call("rename", name)
     elif cmd == "hush":
         call("hush")
+    elif cmd in ("on", "off"):
+        call("set_enabled", cmd == "on")
+        print(f"pet {cmd}")
     elif cmd == "goto":
         words, f = opts(rest, ("--say",))
         where = " ".join(words).strip()

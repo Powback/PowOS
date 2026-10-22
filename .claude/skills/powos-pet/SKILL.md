@@ -3,6 +3,10 @@ name: powos-pet
 description: Load when changing or debugging the PowOS pet (shell/ui/pet*.tsx, pet.css, apps/pet, `powos pet`, system/PetOverlay.kt) - its architecture, the body interface, review renders and the mistakes already made.
 ---
 
+**Off by default since 2026-10-22 (the user's call):** the module's `enabled` (`powos pet on|off`, Settings > Style >
+Pet). Off, `PetSwitch` renders nothing (no element, timer, rAF, physics) and turns the over-apps window off; renders and
+the gate turn it on with `window.__pet.on(true)`.
+
 ## Architecture
 - **local.pet** (apps/pet): SpacetimeDB module `local-pet`. Table `pet` (row 0: name, mood + mood_until, energy/fed, xp/level,
   overlay, goto_target/goto_say/goto_at) and `said` (last 50 lines). Reducers say, set_mood, feed, cheer, rename, hush,

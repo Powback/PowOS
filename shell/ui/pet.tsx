@@ -230,10 +230,14 @@ function goTo(where: string, say: string) {
   else speak();
 }
 
+/** On regardless of the module (the gate's pet run and review renders: no SpacetimeDB there) - `__pet.on(true)`. */
+const testOn = signal(false);
+
 /** A state forced from outside (review renders, CDP: `__pet.force("worried")`, null to let go). */
 const forced = signal<State | null>(null);
 (window as unknown as { __pet?: object }).__pet = {
   force: (s: State | null) => (forced.value = s),
+  on: (v: boolean) => (testOn.value = v),
   /** Put it on a perch (a tile's key or "bar", 0..1 along the edge); null: floating. */
   perch: (key: string | null, fx = 0.5) => (perchStored.value = key ? JSON.stringify({ key, fx }) : ""),
   edges,
@@ -489,6 +493,8 @@ interface PetRow {
   gotoTarget?: string;
   gotoSay?: string;
   gotoAt?: bigint | number;
+  /** On at all (`powos pet on|off`); a module from before it: undefined = off. */
+  enabled?: boolean;
 }
 interface SaidRow {
   id: bigint | number;
@@ -721,7 +727,42 @@ function Bubble({ at }: { at: { left: number; top: number } }) {
  * app is installed (`powos app remove local.pet` takes it away, and its sockets and listeners with it).
  */
 export function Pet() {
-  return (installedApps?.value ?? []).some((a) => a.id === APP) ? <PetLayer /> : null;
+  return (installedApps?.value ?? []).some((a) => a.id === APP) ? <PetSwitch><PetLayer /></PetSwitch> : null;
+}
+
+/**
+ * The pet's on/off (the module's `enabled`: `powos pet on|off`, Settings > Style > Pet; off by default since
+ * 2026-10-22). Off - or not known yet - nothing renders: no element, no timer, no frame, no physics; only this one
+ * subscription to its row while home shows. It also tells the PowOS app to keep the over-apps window off.
+ */
+function PetSwitch({ children }: { children: preact.ComponentChildren }) {
+  const db = useDb("local-pet", PetDb);
+  const rows = useRows<PetRow>(db, "pet", "SELECT * FROM pet");
+  const on = rows[0]?.enabled === true || testOn.value;
+  const overlay = on && rows[0]?.overlay !== false;
+  useEffect(() => {
+    if (db.status !== "connected" || !rows.length) return;
+    powos.pet?.overlay(overlay).catch(() => {});
+  }, [overlay, db.status, rows.length]);
+  return on ? <>{children}</> : null;
+}
+
+/** Settings > Style > Pet: on or off (the module's `enabled`). */
+export function PetToggle(props: { render: (on: boolean, set: (on: boolean) => void) => preact.ComponentChildren }) {
+  // Not installed: no toggle (and no socket to a database that isn't there).
+  return (installedApps?.value ?? []).some((a) => a.id === APP) ? <PetToggleOn {...props} /> : null;
+}
+
+function PetToggleOn({ render }: { render: (on: boolean, set: (on: boolean) => void) => preact.ComponentChildren }) {
+  const db = useDb("local-pet", PetDb);
+  const rows = useRows<PetRow>(db, "pet", "SELECT * FROM pet");
+  if (!rows.length) return null;
+  const set = (on: boolean) => {
+    try {
+      db.conn?.reducers?.setEnabled?.({ on })?.catch?.(() => {});
+    } catch {}
+  };
+  return <>{render(rows[0].enabled === true, set)}</>;
 }
 
 function PetLayer() {
@@ -1139,9 +1180,19 @@ function useShown() {
  * the body (a wobble while dragged, a squash on a tap or a drop).
  */
 export function PetOver() {
-  const shown = useShown();
   // This page isn't home: the registry (is the pet installed?) is watched here too - its socket only while shown.
   useEffect(() => watchRegistry(), []);
+  if (!(installedApps?.value ?? []).some((a) => a.id === APP)) return null;
+  // Off (`powos pet off`): nothing at all - no clocks, no blink timer (they're all inside).
+  return (
+    <PetSwitch>
+      <PetOverOn />
+    </PetSwitch>
+  );
+}
+
+function PetOverOn() {
+  const shown = useShown();
   useClocks(shown);
   const body = useRef<BodyHandle | null>(null);
   useEffect(() => {
@@ -1174,7 +1225,10 @@ export function PetOver() {
       offs.forEach((off) => off());
     };
   }, [shown]);
-  if (!(installedApps?.value ?? []).some((a) => a.id === APP)) return null;
+  return <PetOverBody body={body} shown={shown} />;
+}
+
+function PetOverBody({ body, shown }: { body: { current: BodyHandle | null }; shown: boolean }) {
   const s = state.value;
   return (
     <>
