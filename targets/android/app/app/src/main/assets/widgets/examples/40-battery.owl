@@ -17,7 +17,7 @@ widget "battery" {
   let lsS = clamp(floor(min(iw / (max(len(status), 7) * 0.6), ih * 0.1)), 9, 30)
   let d = wide ? floor(min(ih, iw * 0.6)) : floor(min(iw * 0.95, ih - lsS * 1.5 - 24))
   let tw = wide ? iw - d - 12 : iw
-  let ls = wide ? clamp(floor(min(tw / (max(len(status), 7) * 0.6), ih * 0.22)), 9, 30) : lsS
+  let ls = wide ? clamp(floor(min(tw / (max(len(status), 7) * 0.6), ih * 0.22)), 9, 48) : lsS
   let ps = clamp(floor(d * 0.26), 10, 120)
 
   if wide {

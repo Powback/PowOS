@@ -119,6 +119,12 @@ function plan() {
     // and a short one (one command and the prompt).
     if (terminal)
       widgets.push({ id: `${id}-short`, kind: "owl", title: `${name}, a short session (${f}, OWL)`, file: f, minSize: size("minSize") ?? [1, 1], screen: false, terminal, term: "short" });
+    // Data variants: dev/preview/data/<id>~<variant>.json is the same widget measured again with those values - the
+    // widest ones a widget must still fit (-13°, 100%: a "13°" cut to "1…" on the phone passed with the mock's 5°).
+    for (const d of fs.existsSync(path.join(WORK, "data")) ? fs.readdirSync(path.join(WORK, "data")).sort() : []) {
+      const m = d.match(new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}~([\\w-]+)\\.json$`));
+      if (m) widgets.push({ id: `${id}~${m[1]}`, kind: "owl", title: `${name}, ${m[1]} (${f}, OWL)`, file: f, minSize: size("minSize") ?? [1, 1], screen: false, terminal });
+    }
   }
   for (const app of fs.existsSync(APPS) ? fs.readdirSync(APPS).sort() : []) {
     const mf = path.join(APPS, app, "powos-app.json");
