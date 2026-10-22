@@ -41,7 +41,9 @@ Usage:
   powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT] [--project P]
                                    [--progress N/M] [--step TEXT] [--plan "a; b; c"] [--commit SHA]...
                                    [--image PATH]... [--image-rm PATH]...
-                                   Change a task. <task>: its id, or words of its title (one match).
+                                   Change a task. <task>: its exact id, or whole words of its title
+                                   matching ONE task (an unknown id, a status word or
+                                   several matches is refused).
   powos agents task done <task> [--note TEXT] [--commit SHA]...
                                    Mark it done (stays under "done recently" for a week).
 
@@ -189,20 +191,32 @@ def status_of(s):
 
 
 def find(key):
+    """The ONE task <key> names: its exact id, or whole words of its title matching one open task (else one task at
+    all). Refused, never guessed (2026-10-23: a games agent scraped the status column, ran `task set working --step
+    ...` and the old substring match put its Broforce step on "Board shows real agent state (working only ...)"):
+    an id-shaped key (one token with a '-') that isn't an id, a key of only status words, more than one match."""
     all_ = rows()
+    key = key.strip()
     for w in all_:
         if w["id"] == key:
             return w
-    words = key.lower().split()
-    hits = [w for w in all_ if all(x in (w["id"] + " " + w["title"]).lower() for x in words)]
+    if not key:
+        die("no task given (powos agents task list)")
+    if " " not in key and "-" in key:
+        near = [w["id"] for w in all_ if w["id"].startswith(key) or key.startswith(w["id"])][:3]
+        die(f"no task has the id {key!r}" + (f" (did you mean {', '.join(near)}?)" if near else "")
+            + " - use the exact id from `powos agents task list --json`")
+    words = re.findall(r"[a-z0-9]+", key.lower())
+    if not words or all(x in STATES or x in ALIASES for x in words):
+        die(f"{key!r} is a status, not a task: name the task by its id (powos agents task list --json)")
+    hits = [w for w in all_ if set(words) <= set(re.findall(r"[a-z0-9]+", w["title"].lower()))]
     open_hits = [w for w in hits if w["status"] != "done"]
-    if len(open_hits) == 1:
-        return open_hits[0]
-    if len(hits) == 1:
-        return hits[0]
+    pick = open_hits if open_hits else hits
+    if len(pick) == 1:
+        return pick[0]
     if not hits:
         die(f"no task matches {key!r} (powos agents task list --all)")
-    die(f"{key!r} matches {len(hits)} tasks: " + ", ".join(w["id"] for w in hits))
+    die(f"{key!r} matches {len(pick)} tasks, name one by its id: " + ", ".join(w["id"] for w in pick))
 
 
 def ago(ms):

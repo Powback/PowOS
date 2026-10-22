@@ -208,6 +208,21 @@ class BoardTest(unittest.TestCase):
         self.cli("set", "plain", "--note", "just a note")
         self.assertEqual([n for n, _ in FakeStdb.calls], ["work_set", "work_set"])
 
+    def test_task_key_refused_unless_one_task(self):
+        """`task set working --step ..` (a scraped status column) must not land on a task with 'working' in it."""
+        self.cli("add", "Board shows real agent state (working only if an agent is live)", "--id", "board-live")
+        self.cli("add", "Games launch instantly", "--id", "games-launch-instantly")
+        self.cli("add", "Games freeze on resume", "--id", "games-freeze")
+        before = dict(self.row("board-live"))
+        for key in ("working", "Working", "games-launch", "games-launch-instantly-x", "Games", "stat", "nope"):
+            p = self.cli("set", key, "--step", "measuring Broforce", ok=False)
+            self.assertNotEqual(p.returncode, 0, key)
+        self.assertEqual(self.row("board-live"), before)
+        self.assertIn("games-launch-instantly", self.cli("set", "games-launch", "--step", "x", ok=False).stderr)
+        self.assertEqual(self.cli("set", "games-launch-instantly", "--step", "x").stdout.strip(), "games-launch-instantly")
+        self.assertEqual(self.cli("set", "agent state", "--step", "y").stdout.strip(), "board-live")
+        self.assertEqual(self.cli("done", "freeze resume").stdout.strip(), "games-freeze")
+
     def test_help_documents_it(self):
         out = subprocess.run([sys.executable, CLI, "help"], capture_output=True, text=True).stdout
         for flag in ("--progress N/M", "--step TEXT", "--plan", "--commit SHA", "--image PATH", "--image-rm PATH",
