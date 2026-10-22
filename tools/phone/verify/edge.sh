@@ -15,12 +15,13 @@ what=${1:-all}
 OUT=${OUT:-$HOME/powos-rec/edge-$(date +%H%M%S)}; mkdir -p "$OUT"
 # One injected-touch test on the phone at a time (the verify lock, as journey.sh / drag-raster.sh; ship-apk waits for it).
 L=$HOME/.cache/powos-verify.lock; n=0
-until mkdir "$L" 2>/dev/null; do
+# LOCK_HELD=1: a caller (verify/fold.sh) holds the verify lock already.
+[ "${LOCK_HELD:-0}" = 1 ] || until mkdir "$L" 2>/dev/null; do
   [ $n -ge 120 ] && { echo "edge.sh: verify lock busy for an hour: $(cat "$L/who" 2>/dev/null)"; exit 4; }
   [ $n = 0 ] && echo "edge.sh: waiting for $(cat "$L/who" 2>/dev/null || echo another phone test)"
   n=$((n + 1)); sleep 30
 done
-echo "edge.sh $* $(date +%T) (pid $$)" > "$L/who"; trap 'rm -rf "$L"' EXIT
+[ "${LOCK_HELD:-0}" = 1 ] || { echo "edge.sh $* $(date +%T) (pid $$)" > "$L/who"; trap 'rm -rf "$L"' EXIT; }
 # One wait, on the phone (one connection), for the screen on and nobody touching it: up to WAIT_S (default 7200).
 s=$(AWAKE_ONLY=1 "$here/idle.sh" --wait 120 "${WAIT_S:-7200}") || { echo "no free window: $s"; exit 3; }
 case "$s" in *screen=Awake*) ;; *) echo "free but the screen is off ($s): not waking it"; exit 3 ;; esac
