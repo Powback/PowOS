@@ -431,9 +431,9 @@ function seamProblems(A, B, vertical, { bridges, halfGap }) {
   const s = seamOf(A, B, vertical);
   if (!s) return [];
   const out = [];
-  const near = (r, x0, y0, x1, y1) => Math.abs(r.left - x0) <= 1 && Math.abs(r.right - x1) <= 1 && Math.abs(r.top - y0) <= 1 && Math.abs(r.bottom - y1) <= 1;
-  const span = vertical ? [s.aEnd, s.u0, s.bStart, s.u1] : [s.u0, s.aEnd, s.u1, s.bStart];
-  if (s.bStart - s.aEnd > 0.5 && !bridges.some((r) => near(r, ...span)))
+  const [x0, y0, x1, y1] = vertical ? [s.aEnd, s.u0, s.bStart, s.u1] : [s.u0, s.aEnd, s.u1, s.bStart];
+  const fills = (r) => Math.abs(r.left - x0) <= 1 && Math.abs(r.right - x1) <= 1 && Math.abs(r.top - y0) <= 1 && Math.abs(r.bottom - y1) <= 1;
+  if (s.bStart - s.aEnd > 0.5 && !bridges.some(fills))
     out.push(`partial join: ${A.name} ${s.side} edge not merged with ${B.name} (${Math.round(s.bStart - s.aEnd)} px gap along the shared span)`);
   const aSpan = vertical ? A.cell.bottom - A.cell.top : A.cell.right - A.cell.left;
   const want = (vertical ? A.cell.right : A.cell.bottom) - halfGap;
