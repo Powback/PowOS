@@ -6,7 +6,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { chat, query } from "../state.ts";
 import { powos } from "../bridge.ts";
 import type { ChatItem } from "../types.ts";
-import { Queued, Said, Thread, ToolRun } from "./rich.tsx";
+import { Queued, Said, SentImages, Thread, ToolRun } from "./rich.tsx";
 
 /** How much of the conversation the launcher shows; the rest is in PowOS AI's page (left of home). */
 const SHOWN = 40;
@@ -16,7 +16,12 @@ export function Item({ item, reply = null }: { item: ChatItem; reply?: string | 
   switch (item.kind) {
     case "user":
       // The question only: the screen the side button sent along with it (assist.tsx) isn't part of what was said.
-      return <div class="msg user">{item.text.split("\n\n[What's on my screen right now")[0]}</div>;
+      return (
+        <div class="msg user">
+          {item.text.split("\n\n[What's on my screen right now")[0]}
+          <SentImages text={item.text} />
+        </div>
+      );
     case "assistant":
       return <Said text={item.text} reply={reply} />;
     case "tool":

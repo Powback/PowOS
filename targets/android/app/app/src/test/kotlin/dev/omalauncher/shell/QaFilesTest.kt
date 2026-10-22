@@ -47,6 +47,31 @@ class QaFilesTest {
         assertNull(QaFiles.resolve(dir, "link.png"))
     }
 
+    /** The shared images' folder: the same rules, and it doesn't reach design-qa's files (or the other way round). */
+    private val shared = File(root, "run/powos-ai-shared").apply { mkdirs() }
+
+    @Test
+    fun theSharedFolderServesItsOwnNamesOnly() {
+        File(shared, "screen-1792684479387.jpg").writeText("jpg")
+        File(shared, "screen-1792532451757.png").writeText("png")
+        assertEquals(File(shared, "screen-1792684479387.jpg").canonicalFile, QaFiles.resolve(shared, "screen-1792684479387.jpg"))
+        assertEquals(File(shared, "screen-1792532451757.png").canonicalFile, QaFiles.resolve(shared, "screen-1792532451757.png"))
+        assertNull(QaFiles.resolve(shared, "shot-1.png"))
+        assertNull(QaFiles.resolve(dir, "screen-1792684479387.jpg"))
+        for (n in listOf("../../design-qa/shot-1.png", "..%2F..%2Fsecret.png", "%2e%2e%2fsecret.png", "screen 1.jpg", "IMG_1.jpeg", "screen-1.jpg/"))
+            assertNull(n, QaFiles.resolve(shared, n))
+    }
+
+    @Test
+    fun aSymlinkInTheSharedFolderIsRefused() {
+        val link = File(shared, "screen-link.png")
+        Files.createSymbolicLink(link.toPath(), outside.toPath())
+        assertNull(QaFiles.resolve(shared, "screen-link.png"))
+        val inner = File(shared, "screen-inner.png")
+        Files.createSymbolicLink(inner.toPath(), File(dir, "shot-1.png").toPath())
+        assertNull(QaFiles.resolve(shared, "screen-inner.png"))
+    }
+
     @Test
     fun theCopyCommandHasNoNameInIt() {
         val cmd = QaFiles.sync(File("/data/user/0/com.powos.app/cache/qa"))

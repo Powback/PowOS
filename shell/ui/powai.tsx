@@ -19,7 +19,7 @@ import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
 import { Item } from "./chat.tsx";
-import { Queued, Said, Thread, ToolRun, openFull, toolLabel } from "./rich.tsx";
+import { Queued, Said, SentImages, Thread, ToolRun, openFull, toolLabel } from "./rich.tsx";
 import { askQueued, openAssistant, waiting } from "./assistant.ts";
 
 const sessions = signal<AgentSession[]>([]);
@@ -63,6 +63,7 @@ function lastTurn(items: ChatItem[]) {
   return {
     // The question, not the screen text the assistant sends along with it (assist.tsx).
     asked: (items[at] as { text: string }).text.split("\n\n[What's on my screen right now")[0],
+    full: (items[at] as { text: string }).text,
     steps: after.filter((i) => i.kind === "tool") as Extract<ChatItem, { kind: "tool" }>[],
     // The answer: what it said after its last step (a reply and the question it ends on are two items).
     answer: after.slice(after.findLastIndex((i) => i.kind !== "assistant" && i.kind !== "note") + 1).filter((i) => i.kind === "assistant").map((i) => (i as { text: string }).text).join("\n\n") || null,
@@ -79,7 +80,10 @@ export function Now() {
   if (!turn) return <div class="ai-empty muted">Ask PowOS AI anything - about PowOS, the phone, your projects.</div>;
   return (
     <section class="ai-card tile">
-      <div class="ai-asked">{turn.asked}</div>
+      <div class="ai-asked">
+        {turn.asked}
+        <SentImages text={turn.full} />
+      </div>
       <ToolRun tools={turn.steps} />
       {turn.answer && (
         <div class="ai-answer">
