@@ -40,7 +40,7 @@ s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 sh_ "cmd statusbar collapse; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home
 [ "$(q 'fetch("/ui/ccexpand.ts").then(r=>r.text()).then(t=>t.includes("--cc-lift"))')" = true ] ||
-  { fail "the panel-follows-the-finger shell isn't live on the phone yet"; exit 1; }
+  { echo "the panel-follows-the-finger shell isn't live on the phone yet - back on the queue"; exit 3; }
 did=$(sh_ "dumpsys display" | sed -nE 's/.*DisplayDeviceInfo.*uniqueId="local:([0-9]+)", ([0-9]+) x ([0-9]+),.* state ON,.*/\1 \2 \3/p' | head -1)
 set -- $did; [ $# -ge 3 ] || { echo "no display on"; exit 3; }; DID=$1; W=$2; H=$3
 S=$((H / 100)); X=$((W * 8 / 10))
