@@ -63,6 +63,9 @@ description: Use when working on PowOS's edge gestures (Good Lock-style handles,
 - Unit: gradle `:app:testDebugUnitTest --tests "*EdgeGestureClassifierTest*"` (in the android builder image).
 - Shell: `shell/dev/gate.sh --tree`; renders: `SHOTS_ONLY='quicktools|gestures' shell/dev/gate.sh --tree --shots DIR`,
   review images via tools/phone/review-image.sh before shipping.
+- Device checks take the verify lock only AFTER the free window (handbook 5a): `. tools/phone/verify/window-lock.sh;
+  window_lock <name>` - never hold it through a wait (it blocks every ship-apk install). `verify/fold.sh` forces the
+  other screen (cmd device_state, always reset); `verify/overlay-reload.sh` the push-then-pull reload check.
 - Device: `tools/phone/verify/edge.sh [home|edge|corner|all]` (one AWAKE_ONLY idle wait, WAIT_S; goes home and checks
   it's in front; window states snapshotted mid-gesture via motionevents; recordings as root into $OUT), logcat tags PowosEdge,
   PowosCornerPull, PowosOverlay, PowosShade, PowosGestures; `dumpsys window windows | grep 'PowOS '` for the windows.

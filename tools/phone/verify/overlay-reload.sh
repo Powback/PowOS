@@ -7,14 +7,9 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd); A=$here/adb.sh; root=$(cd "$here/../.." && pwd)
 OUT=${OUT:-$HOME/powos-rec/overlay-reload-$(date +%H%M%S)}; mkdir -p "$OUT"
-L=$HOME/.cache/powos-verify.lock; n=0
-until mkdir "$L" 2>/dev/null; do
-  [ $n -ge 120 ] && { echo "overlay-reload.sh: verify lock busy for an hour"; exit 4; }
-  n=$((n + 1)); sleep 30
-done
-echo "overlay-reload.sh $(date +%T) (pid $$)" > "$L/who"; trap 'rm -rf "$L"' EXIT
-s=$(AWAKE_ONLY=1 "$here/idle.sh" --wait 120 "${WAIT_S:-7200}") || { echo "no free window: $s"; exit 3; }
-echo "$s"
+# A free window first, the verify lock only then (handbook 5a; window-lock.sh).
+. "$(dirname "$0")/window-lock.sh"
+window_lock overlay-reload.sh 120
 "$A" shell input keyevent KEYCODE_HOME; sleep 1.5
 read -r W H < <("$A" shell "dumpsys window displays | grep -m1 -o 'cur=[0-9]*x[0-9]*'" | tr -d '\r' | sed 's/cur=\([0-9]*\)x\([0-9]*\)/\1 \2/')
 "$A" shell logcat -c
