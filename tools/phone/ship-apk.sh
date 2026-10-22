@@ -41,6 +41,15 @@ until mkdir "$lock" 2>/dev/null; do
 done
 echo "$(git rev-parse --short HEAD) $(git branch --show-current) pid $$ $(date +%H:%M:%S)" > "$lock/who"
 trap 'rm -rf "$lock"' EXIT
+# Queued ships coalesce: each one builds the origin tip it saw, so a ship whose HEAD is already IN the installed build
+# (another ship took the lock first and built a newer tip) has nothing left to install - 3 ships queued behind one idle
+# wait each rebuilt and reinstalled the same code (2026-10-22). Skip it instead of an ~8 min build + install.
+inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
+git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+if [ -n "$inst" ] && git merge-base --is-ancestor HEAD "$inst" 2>/dev/null; then
+  echo "ship-apk: already shipped - the installed build $(git rev-parse --short "$inst") contains $(git rev-parse --short HEAD); nothing to do"
+  exit 0
+fi
 # The commit's own shell must load before it's built in: the APK ships it whole, and an install resets the overrides
 # that may have covered for it (17:09: 5130d98's home.tsx imported a gesture.ts export only a later commit added -
 # every page failed to boot after the install). The gate on HEAD alone: tsc + every page booted.
