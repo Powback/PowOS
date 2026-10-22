@@ -748,6 +748,17 @@ async function desktopsCheck() {
     await sleep(150);
     if ((window.__hid ?? "") !== hid) fails.push(`${what}: hidden [${window.__hid}], not [${hid}]`);
   };
+  // The wide part (900 px: the wide home, often one page of tiles): an empty desktop always follows the last page, and
+  // the app library is a desktop of its own (not page 1's). In here: page.evaluate sends this function alone.
+  const desktopsWide = async () => {
+    const last = S.pages.value[S.pages.value.length - 1];
+    if (S.home.value.items.some((i) => i.page === last)) fails.push(`no empty desktop after the last page (pages ${S.pages.value})`);
+    S.page.value = S.pages.value.length;
+    S.windows.value = [win(103), win(102), win(101)];
+    await expect("a window opened on the app library", "101,102");
+    if (D.placed.value[103] !== -2) fails.push(`a window opened on the app library was put on page ${D.placed.value[103]}, not the library's (-2)`);
+    S.windows.value = [win(102), win(101)];
+  };
   S.page.value = 0;
   S.windows.value = [win(101)];
   await expect("a window opened on page 1", "");
@@ -757,6 +768,7 @@ async function desktopsCheck() {
   S.windows.value = [win(102), win(101)];
   await expect("a window opened on page 2", "101");
   if (D.placed.value[102] !== p1) fails.push(`the window opened on page 2 was put on page ${D.placed.value[102]}, not ${p1}`);
+  await desktopsWide();
   S.page.value = 0;
   await expect("back on page 1", "102");
   window.__mockEvents.emit("windows.raised", 102);
@@ -790,11 +802,15 @@ async function desktopsEdge() {
   await expect("101 dropped on the right edge", "");
   if (S.page.value !== 1 || D.placed.value[101] !== p1) fails.push(`an edge drop left home on page ${S.page.value + 1}, the window on ${D.placed.value[101]}`);
   if (sent.some((h) => h.split(",").includes("101"))) fails.push(`the dropped window was hidden on its way to the next page (${sent.join(" | ")})`);
+  // Unfolded, past the last page with tiles there is always the empty desktop: the drop takes the window there.
   window.__mockEvents.emit("windows.edge", { id: 101, side: 1 });
   await sleep(150);
-  if (S.pages.value.length === 2 && S.page.value !== 1) fails.push("a drop at the right edge of the last page moved home");
-  window.__mockEvents.emit("windows.edge", { id: 101, side: -1 });
-  await expect("101 dropped on the left edge", "102");
+  if (S.page.value !== 2 || D.placed.value[101] !== S.pages.value[2]) fails.push(`a drop at the right edge of page 2 left home on page ${S.page.value + 1}, the window on ${D.placed.value[101]} (pages ${S.pages.value})`);
+  for (let i = 0; i < 3 && S.page.value > 0; i++) {
+    window.__mockEvents.emit("windows.edge", { id: 101, side: -1 });
+    await sleep(150);
+  }
+  await expect("101 dropped on the left edge back to page 1", "102");
   return fails;
 }
 

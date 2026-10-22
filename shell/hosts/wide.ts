@@ -241,7 +241,11 @@ export function wide(n: Bridge): Bridge {
       arrange: (columns, rows) => n.home.arrange(isWide() ? cols : columns, rows),
     },
     // The shown page's widgets stay live, and the next page's (the host's rule): its left half's page covers both.
-    widgets: { ...n.widgets, page: (page) => n.widgets.page(isWide() ? (pairs[page - 1]?.[0] ?? page) : page) },
+    // A desktop page after them (state.ts pages: no tiles yet) is a host page past all of them: nothing of theirs runs.
+    widgets: {
+      ...n.widgets,
+      page: (page) => n.widgets.page(isWide() ? (pairs[page - 1]?.[0] ?? Math.max(0, ...pairs.flat()) + page - pairs.length) : page),
+    },
     on: (event, handler) => {
       const off = n.on(event, handler);
       if (!listeners.has(event)) listeners.set(event, new Set());

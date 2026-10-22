@@ -91,7 +91,10 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   answer via `__powosHost.resolve(id, v)` (float-windows.sh `hcall`). Under queue.sh a check sets its own EXIT trap.
 - JS side: `powos.floating` (list/restore/desktop/minimise/maximise/area, phone only); `powos.windows` = desktop taskbar.
 - Unfolded, a home page is a wide page (hosts/wide.ts: one per pair of host pages; the user's layout = one page), so
-  page ids in "home.windows" are wide page ids; with one page every window lives there and no page swipe exists.
+  page ids in "home.windows" are wide page ids. Wide, state.ts pages = the tile pages + the pages live windows are on
+  (desktopPages, set by desktops.ts) + always ONE empty desktop after them (dynamic workspaces; 2026-10-23 the wide
+  home had page 1 + the library only, and the library counted as page 1: nothing hid). The app library is a desktop of
+  its own (id -2). Gate: desktopsWide.
 - One desktop per home page (shell ui/desktops.ts, started by app.tsx after load()): a window belongs to the page id
   it opened on (`placed`, store "home.windows" task id -> page id; -1 = AI page; a gone page -> the page on screen).
   Page change -> `floating.desktop(hideIds)` -> WindowFrames.desktop: the others minimised (reorder to bottom), no

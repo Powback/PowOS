@@ -11,6 +11,7 @@ import { backScreen, closeScreens } from "./screens.ts";
 import { recentsBack, recentsHome } from "./ui/recents.tsx";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WidgetScreen } from "./types.ts";
+import { wideHome } from "./hosts/wide.ts";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
@@ -65,10 +66,17 @@ export const carry = signal<Carry | null>(null);
  * there's an empty page after the last to fill - swiping to an empty page needs it.
  */
 export const editing = signal(false);
-/** Pages to show: the ones with items; editing or carrying a tile, an empty one after them. */
+/** Page ids that hold a live floating window (ui/desktops.ts): unfolded, a page of its own even with no tiles. */
+export const desktopPages = signal<number[]>([]);
+/**
+ * Pages to show: the ones with items; editing or carrying a tile, an empty one after them. Unfolded (the wide home,
+ * often ONE page of tiles) every page is a desktop too (ui/desktops.ts): the pages windows live on, and always an
+ * empty one after the last to swipe to and open new windows on - dynamic workspaces, the bottom bar fixed over them.
+ */
 export const pages = computed(() => {
   const used = home.value.pages.length ? home.value.pages : [1];
-  return carry.value || editing.value ? [...used, Math.max(...used) + 1] : used;
+  const desks = wideHome.value ? [...new Set([...used, ...desktopPages.value.filter((p) => p > 0)])].sort((a, b) => a - b) : used;
+  return carry.value || editing.value || wideHome.value ? [...desks, Math.max(...desks) + 1] : desks;
 });
 /** Home's pages on screen, the app library after them (ui/library.tsx): page.value === pages.value.length is it. */
 export const pageCount = computed(() => pages.value.length + 1);

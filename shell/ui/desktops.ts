@@ -12,7 +12,7 @@
 import { batch, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { AppWindow } from "../types.ts";
-import { launch, page, pages, windows } from "../state.ts";
+import { desktopPages, launch, page, pages, windows } from "../state.ts";
 
 const STORE = "home.windows";
 /** Window ids kept for closed tasks at most (folded, the list is empty but the windows aren't gone). */
@@ -24,14 +24,20 @@ let loaded = false;
 /** The hide list the host has; null: tell it whatever it is (it may still hide windows of an earlier page). */
 let sent: string | null = null;
 
-/** The page id on screen: the layout's id for the index, -1 for PowOS AI's page. */
+/** The app library's desktop (the page after the last, ui/library.tsx): a page of its own, not page 1's. */
+const LIBRARY = -2;
+
+/** The page id on screen: the layout's id for the index, -1 for PowOS AI's page, LIBRARY for the app library. */
 export function pageId(): number {
-  return page.value < 0 ? -1 : (pages.value[page.value] ?? pages.value[0] ?? 1);
+  if (page.value < 0) return -1;
+  if (page.value >= pages.value.length) return LIBRARY;
+  return pages.value[page.value] ?? pages.value[0] ?? 1;
 }
 
 /** The page index showing page id [id], or null when that page is gone. */
 function indexOf(id: number): number | null {
   if (id === -1) return -1;
+  if (id === LIBRARY) return pages.value.length;
   const i = pages.value.indexOf(id);
   return i < 0 ? null : i;
 }
@@ -91,6 +97,11 @@ export async function startDesktops() {
   effect(() => {
     const list = windows.value;
     if (powos.floating) place(list);
+  });
+  // The pages live windows are on stay pages of home (state.ts pages): unfolded, a desktop needs no tiles.
+  effect(() => {
+    const ids = [...new Set(windows.value.map((w) => placed.value[w.id]).filter((p) => p > 0))].sort((a, b) => a - b);
+    if (ids.join() !== desktopPages.peek().join()) desktopPages.value = ids;
   });
   effect(() => {
     const hide = hidden();
