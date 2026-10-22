@@ -166,7 +166,6 @@
     <ID>CognitiveComplexMethod:WidgetTree.kt$WidgetTree$private fun node( node: WNode, env: Env, id: String, out: JSONArray, )</ID>
     <ID>CognitiveComplexMethod:WindowBlur.kt$WindowBlur$fun set(amount: Float)</ID>
     <ID>CognitiveComplexMethod:WindowInput.kt$private fun handleMouse( wm: WindowManager, window: XdgToplevel, event: PointerEvent, previousButtons: Int, ): Int</ID>
-    <ID>CognitiveComplexMethod:WindowInput.kt$private suspend fun PointerInputScope.handlePointer( wm: WindowManager, window: XdgToplevel, touchSlop: Float, longPressMs: Long, )</ID>
     <ID>CyclomaticComplexMethod:AgentMail.kt$AgentMail.Companion$private fun post( context: Context, mail: Mail, quiet: Boolean, )</ID>
     <ID>CyclomaticComplexMethod:AgentsSpool.kt$AgentsSpool$fun start( context: Context, runDir: File, )</ID>
     <ID>CyclomaticComplexMethod:AgentsSpool.kt$AgentsSpool$private fun merge()</ID>
@@ -340,7 +339,6 @@
     <ID>CyclomaticComplexMethod:WidgetTree.kt$WidgetTree$private fun node( node: WNode, env: Env, id: String, out: JSONArray, )</ID>
     <ID>CyclomaticComplexMethod:WindowBlur.kt$WindowBlur$fun set(amount: Float)</ID>
     <ID>CyclomaticComplexMethod:WindowInput.kt$private fun handleMouse( wm: WindowManager, window: XdgToplevel, event: PointerEvent, previousButtons: Int, ): Int</ID>
-    <ID>CyclomaticComplexMethod:WindowInput.kt$private suspend fun PointerInputScope.handlePointer( wm: WindowManager, window: XdgToplevel, touchSlop: Float, longPressMs: Long, )</ID>
     <ID>CyclomaticComplexMethod:XdgShell.kt$XdgPositioner$fun position(): Geometry</ID>
     <ID>CyclomaticComplexMethod:XdgShell.kt$XdgSurface$override fun onCommit()</ID>
     <ID>LongMethod:AndroidApps.kt$AndroidAppCatalog$private fun reload(evict: String? = null)</ID>
@@ -362,7 +360,6 @@
     <ID>LongMethod:Speech.kt$NativeSpeech.Session.Listener$override fun onError(code: Int)</ID>
     <ID>LongMethod:TerminalTiles.kt$@Composable fun TerminalView( term: EmbeddedTerminal, modifier: Modifier, interactive: Boolean = true, textSize: Float? = null, focus: Boolean = false, )</ID>
     <ID>LongMethod:WidgetRecon.kt$WidgetRecon$private suspend fun shoot( /** The bound widget, or null to draw [info]'s initial layout on its own. */ id: Int?, info: AppWidgetProviderInfo, wDp: Int, hDp: Int, seconds: Int, out: File, notes: JSONArray, bound: String, configured: Boolean, )</ID>
-    <ID>LongMethod:WindowInput.kt$private suspend fun PointerInputScope.handlePointer( wm: WindowManager, window: XdgToplevel, touchSlop: Float, longPressMs: Long, )</ID>
     <ID>LongParameterList:AppWidgetColors.kt$WidgetColors$( context: Context, background: Int, surface: Int, foreground: Int, muted: Int, accent: Int, border: Int, magenta: Int?, light: Boolean, )</ID>
     <ID>LongParameterList:AppWidgets.kt$AppWidgets$( id: Int, action: String, x: Double, y: Double, wCss: Double, hCss: Double, )</ID>
     <ID>LongParameterList:AppWidgets.kt$AppWidgets$( providerName: String, page: Int, cell: JSONObject, wDp: Double, hDp: Double, )</ID>
