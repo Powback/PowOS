@@ -9,7 +9,7 @@ import { computed } from "@preact/signals";
 import { AppCell } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen } from "./gesture.ts";
-import { apps, byKey, chatting, query, recent } from "../state.ts";
+import { apps, byKey, chatting, query, recent, stored } from "../state.ts";
 import type { App } from "../types.ts";
 
 const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
@@ -53,7 +53,14 @@ export const matches = computed(() => {
  * The apps opened lately, newest first (the switcher's and the dock's source): one row - as many as fit across, the
  * rest cut off (shell.css .drawer-recents), so folded and unfolded each get a full row.
  */
+/**
+ * The drawer's recent row, off by default (Settings > style > home): the grid has the room, and the recent apps are on
+ * the dock's second page already. "on" shows it.
+ */
+export const drawerRecents = stored("drawer.recents", "");
+
 function RecentRow() {
+  if (drawerRecents.value !== "on") return null;
   const shown = recent.value
     .map((k) => byKey.value.get(k))
     .filter((a) => a != null)

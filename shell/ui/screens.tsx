@@ -33,6 +33,7 @@ import {
 import { Icon, type IconName } from "./icons.tsx";
 import { apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
+import { drawerRecents } from "./drawer.tsx";
 import { PetToggle } from "./pet.tsx";
 
 /** Its touches are its own: home's swipes under it don't see them. */
@@ -485,6 +486,9 @@ function StyleScreen() {
         </Option>
         <Option label="swipe up from a bottom corner over apps: apps, PowOS AI">
           <Segmented options={["on", "off"]} picked={pullOverApps.value === "on" ? 0 : 1} onPick={(i) => (pullOverApps.value = i === 0 ? "on" : "off")} />
+        </Option>
+        <Option label="recent apps in the drawer">
+          <Segmented options={["on", "off"]} picked={drawerRecents.value === "on" ? 0 : 1} onPick={(i) => (drawerRecents.value = i === 0 ? "on" : "")} />
         </Option>
         <Option label="separate notifications & controls">
           <Segmented options={["on", "off"]} picked={separatePanels.value === "on" ? 0 : 1} onPick={(i) => (separatePanels.value = i === 0 ? "on" : "off")} />
