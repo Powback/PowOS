@@ -164,9 +164,16 @@ strip only - not the cause when a drag in a tile fails.
   they are, every other app by category.
 - Library/folder icons (AppPress): touch-action pan-y in cards so the page scrolls; once lifted a touchmove
   preventDefault keeps the carry (else pointercancel). Popovers close on lift (onLift), the card stays mounted.
-- Gate: home-select-*, home-folder-*, library-* (synthetic PointerEvents dispatched on .pages - window-only dispatch
+- Open folder = ui/folderview.tsx, mounted at Home level (grid.tsx Folders, beside Carried): position fixed inside the
+  transformed .home-content left the status bar and dock unblurred. FLIP morph: .folder-bg (.tile, frost material via
+  the AI-page frost selectors) scales from the tile's box, the first 4 icons fly from the tile's minis, inline styles
+  cleared at rest (rest()); closing keeps the last sheet mounted MORPH_MS+40. Focus: .folder-focus (fullscreen .tile,
+  frost blur + dim) fades in; home's .page/.bar/.dock fade out via html:has(.folder-view.open) - the compositor never
+  blurs the page's own tiles. folder signal holds a home folder key or "lib:<cat>"; gesture.ts ignores home swipes
+  while it's set. Library cards: 2x2 AppIcon minis, a count, the card is the tap; dedupe by name; HELPERS -> System.
+- Gate: home-select-*, home-folder-*, library-* (incl. folderMorph/folderCloseCheck) (synthetic PointerEvents dispatched on .pages - window-only dispatch
   never reaches element handlers). Device: tools/phone/verify/home-select.sh (transient only: picks, library; no
-  layout change). Renders: shots edit-chosen, folder-open, library.
+  layout change); folder-clip.sh records a morph (BOARD_TASK=<id> attaches frames). Renders: shots edit-chosen, folder-open, library.
 
 ## Tools
 - shot.sh mounts the icon font and passes SHOTS_STRICT; idle.sh --wait re-holds a dropped adb connection;
