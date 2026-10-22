@@ -4,6 +4,8 @@
 # Returns once the phone is free (screen on, nobody touching it for idle_s) AND this script holds the lock (released on
 # exit: a trap). If another check holds the lock, it waits for it WITHOUT holding anything, then waits for a free window
 # again. Exit 3: no free window in max_s. LOCK_HELD=1: the caller holds the lock already (nothing done).
+# VERIFY_GO=1 (exported; queue.sh's runner): the phone's "test now" flag ends the wait at once; WL_GOT says what ended
+# it ("idle=... screen=..." or "go=<task|all> screen=...").
 window_lock() {
   local name=$1 need=${2:-120} max=${3:-${WAIT_S:-7200}} phone end s
   [ "${LOCK_HELD:-0}" = 1 ] && return 0
@@ -17,6 +19,7 @@ window_lock() {
     if mkdir "$WL_LOCK" 2>/dev/null; then
       echo "$name $(date +%T) (pid $$)" > "$WL_LOCK/who"
       trap 'rm -rf "$WL_LOCK"; '"${WL_TRAP:-:}" EXIT
+      WL_GOT=$s
       echo "$s"
       return 0
     fi
