@@ -297,164 +297,257 @@ function abandon() {
   pageDrag.value = null;
 }
 
+/** The drawer's way, closed to open: its rise (shell.css --rise, a length: px computed), not its height - it opens
+ * from just below where it rests. Without one (a page with no --rise), its height. */
+function travelOf() {
+  const l = document.querySelector<HTMLElement>(".launcher");
+  return (l && parseFloat(getComputedStyle(l).getPropertyValue("--rise"))) || l?.clientHeight || innerHeight;
+}
+
+/** A touch down on home: what's under it, and what the drawer and the panels are doing. */
+function startGesture(x: number, y: number, target: Element) {
+  // A new touch while one is under way: the old one's end was lost.
+  if (g) abandon();
+  if (carry.value || selected.value || menu.value) return;
+  g = {
+    x0: x,
+    y0: y,
+    last: [x, y, performance.now()],
+    v: 0,
+    mode: null,
+    open: drawer.value > 0,
+    notif: notif.value,
+    ...listUnder(target),
+    // A strip that scrolls sideways itself (the recent apps, the dock's pages): sideways is its own.
+    inStrip: !!target.closest?.(".strip, .dock-pages, .cc-subs"),
+    target,
+    own: !!target.closest?.(OWN),
+    height: document.querySelector(".home")?.clientHeight || innerHeight,
+    travel: travelOf(),
+  };
+}
+
+/**
+ * What takes its own drags: the A-Z bar, a slider, a widget's drag, the control center's edit mode (its tiles are
+ * dragged), an Android widget's list (appwidget.tsx). Any widget's slider or drag control too - a range, role=slider,
+ * or anything marked data-owns-gesture: its sideways drag is its own (a pill dimming a light), never a page swipe.
+ * (Home's swipes are touch events on .home: a control's pointerdown stopPropagation doesn't reach them.)
+ */
+const OWN = ".letter-bar, input[type=range], [role=slider], [data-owns-gesture], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls";
+
+/** The scrolling list under the finger - the drawer's, PowOS AI's chat, the notifications: it scrolls until its end. */
+function listUnder(target: Element) {
+  const list = target.closest?.(".drawer-list, .ai-panel, .chat, .notif-list");
+  if (!list) return { inList: false, listTop: true, listBottom: true };
+  return { inList: true, listTop: list.scrollTop <= 0, listBottom: list.scrollTop + list.clientHeight >= list.scrollHeight - 1 };
+}
+
+/** A finger moving: its velocity, the gesture's kind once it's clear (SLOP), then what follows it. */
+function moveGesture(x: number, y: number, e: Event | null) {
+  if (!g || g.own) return;
+  // An app picked up (onto home, or along the dock) has the finger now.
+  if (carry.value || dockDrag.value || held.value) return abandon();
+  const dx = x - g.x0;
+  const dy = y - g.y0;
+  track(g, x, y);
+  if (!g.mode && !claim(g, dx, dy)) return;
+  if (e?.cancelable) e.preventDefault();
+  dragTo(g, dx, dy);
+}
+
+/** Velocity along the gesture's axis (sideways for the pages and the panels), px/ms. */
+function track(gs: Gesture, x: number, y: number) {
+  const now = performance.now();
+  const [lx, ly, lt] = gs.last;
+  if (now > lt) gs.v = gs.mode === "pages" || gs.mode === "panel" ? (x - lx) / (now - lt) : (y - ly) / (now - lt);
+  gs.last = [x, y, now];
+}
+
+/** The gesture's kind, once the finger is past SLOP. False: not yet, or not home's at all (dropped). */
+function claim(gs: Gesture, dx: number, dy: number): boolean {
+  if (Math.hypot(dx, dy) < SLOP) return false;
+  const mode = gs.notif ? claimOnPanel(gs, dx, dy) : claimOnHome(gs, dx, dy);
+  if (!mode) {
+    g = null;
+    return false;
+  }
+  gs.mode = mode;
+  // A page swipe or an overlay change takes the keyboard down as it starts, not once it settles.
+  dropKeyboard();
+  return true;
+}
+
+/** The notification panel down. */
+function claimOnPanel(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
+  const vertical = Math.abs(dy) > Math.abs(dx);
+  if (vertical && ccAllWay(gs, dy)) return "ccAll";
+  // Up drags it shut (the list scrolls until its end); sideways is a card's.
+  if (dy < 0 && vertical && atListEnd(gs)) return "notifClose";
+  return panelSwipe(gs, dx, dy) ? "panel" : null;
+}
+
+/** The list scrolled to its end, or none under the finger. */
+const atListEnd = (gs: Gesture) => !gs.inList || gs.listBottom;
+
+/**
+ * The one panel open: down at its top shows the control center's whole view; with it shown, the list scrolls through
+ * it all and the notifications, and up at the end folds it (ccexpand.ts) - before up shuts the panel.
+ */
+function ccAllWay(gs: Gesture, dy: number) {
+  if (separatePanels.value === "on" || notifDrag.value != null) return false;
+  return dy > 0 ? !ccExpanded.value && gs.listTop : ccExpanded.value && atListEnd(gs);
+}
+
+/**
+ * Sideways, not on a notification (a card slides away by itself): between the notifications and the control center,
+ * as OnePlus's panels - when they're apart (one panel: nothing to swipe to).
+ */
+function panelSwipe(gs: Gesture, dx: number, dy: number) {
+  if (separatePanels.value !== "on" || gs.inStrip || Math.abs(dx) <= Math.abs(dy)) return false;
+  return !gs.target.closest?.(".notif.tile:not(.notif-access)");
+}
+
+/** Home itself: up and down the drawer (or the shade), sideways the pages. */
+function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
+  const vertical = Math.abs(dy) > Math.abs(dx);
+  // PowOS AI's page: up and down are its own (it scrolls).
+  if (vertical && page.value === -1) return null;
+  if (vertical) return claimVertical(gs, dy);
+  return !gs.open && !gs.inStrip ? "pages" : null;
+}
+
+function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
+  if (gs.open) return dy > 0 && (!gs.inList || gs.listTop) ? "close" : null;
+  // Editing home, up isn't the launcher (the sheet has the bottom), and down isn't the shade.
+  if (editing.value) return null;
+  if (dy < 0) {
+    // The pull-up corners (state.ts pullPanels): from the left half PowOS AI's panel, from the right the apps.
+    pullKind.value = pullPanels.value === "on" && gs.x0 < innerWidth / 2 ? "ai" : "apps";
+    return "open";
+  }
+  askShade();
+  return null;
+}
+
+/** Down on home: the shade's - the host's own pull (it takes the finger); without it, the shade is asked for. */
+function askShade() {
+  if (!shadeTakesHome.value && document.documentElement.dataset.mode === "home") void powos.shade.open();
+}
+
+/** What follows the finger, by the gesture's kind. */
+function dragTo(gs: Gesture, dx: number, dy: number) {
+  switch (gs.mode) {
+    case "ccAll":
+      return void stretchCc(dy);
+    case "panel":
+      lastDx = dx;
+      return void panelBody()?.style.setProperty("--panel-dx", `${panelResist(dx)}px`);
+    // Up, shutting the shade / control center: the finger on its short --drop at the drawer's gain (shell.css).
+    case "notifClose":
+      notifDrag.value = clamp(1 + (dy * GAIN) / dropOf());
+      return;
+    case "open":
+      drawerDrag.value = clamp((-dy * GAIN) / gs.travel);
+      return;
+    case "close":
+      drawerDrag.value = clamp(1 - (dy * GAIN) / gs.travel);
+      return;
+    default:
+      pageDrag.value = pageOffset(dx);
+  }
+}
+
+/** The pages under the finger: past the first and last page they resist. */
+function pageOffset(dx: number) {
+  const last = pages.value.length - 1;
+  const edge = (page.value === -1 && dx > 0) || (page.value === last && dx < 0);
+  return edge ? dx / 3 : dx;
+}
+
+/** The finger up: a tap, or the gesture settles. */
+function endGesture() {
+  if (!g) return;
+  const gs = g;
+  g = null;
+  if (!gs.mode) return tapAt(gs);
+  settleGesture(gs, gs.last[1] - gs.y0);
+}
+
+/** A clean tap (no gesture claimed). */
+function tapAt(gs: Gesture) {
+  if (gs.notif && tapOnPanel(gs)) return;
+  // On the open launcher's empty space (not an app, a message, a control): it closes, as tapping outside does.
+  if (gs.open && !gs.own && gs.target.closest?.(".launcher") && !gs.target.closest(TAPPABLE)) closeDrawer();
+}
+
+/** A tap on the notification panel / control center: true when it was theirs. */
+function tapOnPanel({ target, own }: Gesture) {
+  // The control center in edit mode: a tap beside its tiles leaves it (as a tap on home's empty space), the panel stays.
+  if (ccEditing.value && !target.closest?.(`${TAPPABLE}, [data-key], .tile-actions`)) {
+    ccEditing.value = false;
+    return true;
+  }
+  // On the notification panel's or the control center's empty space: it closes, with its own animation - as a tap
+  // beside the open launcher closes it.
+  if (notif.value && !own && !target.closest?.(`${TAPPABLE}, .notif, .cc-tile`)) {
+    notif.value = false;
+    return true;
+  }
+  return false;
+}
+
+function settleGesture(gs: Gesture, dy: number) {
+  const { mode, v } = gs;
+  if (mode === "open" || mode === "close") return settleDrawer(mode, v);
+  if (mode === "notifClose") return settleNotif(v);
+  // Past the threshold, or a flick its way: committed; otherwise it springs back.
+  if (mode === "ccAll") return settleCc(!ccExpanded.value ? dy > EXPAND_AT || v > FLICK : dy < -EXPAND_AT || v < -FLICK);
+  if (mode === "panel") return settlePanel(lastDx, v);
+  if (mode === "pages") settlePages(v);
+}
+
+function settleDrawer(mode: "open" | "close", v: number) {
+  const p = drawerDrag.value ?? 0;
+  drawerDrag.value = null;
+  if (drawerWanted(mode, v, p)) drawer.value = 1;
+  else closeDrawer();
+}
+
+/** A flick decides; otherwise where it was let go. */
+function drawerWanted(mode: "open" | "close", v: number, p: number) {
+  if (v < -(mode === "open" ? OPEN_FLICK : FLICK)) return true;
+  if (v > FLICK) return false;
+  return mode === "open" ? p > OPEN_AT : p > CLOSE_KEEP;
+}
+
+function settleNotif(v: number) {
+  const q = notifDrag.value ?? 0;
+  notifDrag.value = null;
+  // A flick decides; otherwise where it was let go (as the drawer).
+  notif.value = v > FLICK ? true : v < -FLICK ? false : q > CLOSE_KEEP;
+}
+
+function settlePages(v: number) {
+  const dx = pageDrag.value ?? 0;
+  pageDrag.value = null;
+  const width = document.querySelector(".pages")?.clientWidth || innerWidth;
+  const step = v < -FLICK || dx < -width / 4 ? 1 : v > FLICK || dx > width / 4 ? -1 : 0;
+  // -1: PowOS AI's page, left of the first (not while editing home: the empty page is to the right).
+  page.value = Math.max(editing.value ? 0 : -1, Math.min(pages.value.length - 1, page.value + step));
+}
+
 /** Handlers for home's root element. */
 export function homeGestures() {
-  const start = (x: number, y: number, target: Element) => {
-    // A new touch while one is under way: the old one's end was lost.
-    if (g) abandon();
-    if (carry.value || selected.value || menu.value) return;
-    // The scrolling list under the finger - the drawer's, PowOS AI's chat, the notifications: it scrolls until its end.
-    const list = target.closest?.(".drawer-list, .ai-panel, .chat, .notif-list") ?? null;
-    g = {
-      x0: x,
-      y0: y,
-      last: [x, y, performance.now()],
-      v: 0,
-      mode: null,
-      open: drawer.value > 0,
-      notif: notif.value,
-      inList: !!list,
-      // A strip that scrolls sideways itself (the recent apps, the dock's pages): sideways is its own.
-      inStrip: !!target.closest?.(".strip, .dock-pages, .cc-subs"),
-      listTop: !list || list.scrollTop <= 0,
-      listBottom: !list || list.scrollTop + list.clientHeight >= list.scrollHeight - 1,
-      target,
-      // The A-Z bar, a slider, a widget's drag, the control center's edit mode (its tiles are dragged), an Android
-      // widget's list (appwidget.tsx): theirs. Any widget's slider or drag control too - a range, role=slider, or
-      // anything marked data-owns-gesture: its sideways drag is its own (a pill dimming a light), never a page swipe.
-      // (Home's swipes are touch events on .home: a control's pointerdown stopPropagation doesn't reach them.)
-      own: !!target.closest?.(
-        ".letter-bar, input[type=range], [role=slider], [data-owns-gesture], .resize-handle, .menu, .mic, .cc-editing, .aw-face.scrolls",
-      ),
-      height: document.querySelector(".home")?.clientHeight || innerHeight,
-      // The drawer's rise (shell.css --rise, a length: px computed), not its height - it opens from just below where it
-      // rests. Without one (a page with no --rise), its height.
-      travel: ((l) => (l && parseFloat(getComputedStyle(l).getPropertyValue("--rise"))) || l?.clientHeight || innerHeight)(document.querySelector<HTMLElement>(".launcher")),
-    };
-  };
-
-  const move = (x: number, y: number, e: Event | null) => {
-    if (!g || g.own) return;
-    // An app picked up (onto home, or along the dock) has the finger now.
-    if (carry.value || dockDrag.value || held.value) return abandon();
-    const dx = x - g.x0;
-    const dy = y - g.y0;
-    const now = performance.now();
-    const [lx, ly, lt] = g.last;
-    if (now > lt) g.v = g.mode === "pages" || g.mode === "panel" ? (x - lx) / (now - lt) : (y - ly) / (now - lt);
-    g.last = [x, y, now];
-    if (!g.mode) {
-      if (Math.hypot(dx, dy) < SLOP) return;
-      if (g.notif) {
-        const vertical = Math.abs(dy) > Math.abs(dx);
-        const together = separatePanels.value !== "on" && notifDrag.value == null;
-        // The one panel open: down at its top shows the control center's whole view; with it shown, the list scrolls
-        // through it all and the notifications, and up at the end folds it (ccexpand.ts) - before up shuts the panel.
-        if (together && vertical && (dy > 0 ? !ccExpanded.value && g.listTop : ccExpanded.value && (!g.inList || g.listBottom))) g.mode = "ccAll";
-        // The notification panel down: up drags it shut (the list scrolls until its end); sideways is a card's.
-        else if (dy < 0 && Math.abs(dy) > Math.abs(dx) && (!g.inList || g.listBottom)) g.mode = "notifClose";
-        // Sideways, not on a notification (a card slides away by itself): between the notifications and the
-        // control center, as OnePlus's panels - when they're apart (one panel: nothing to swipe to).
-        else if (separatePanels.value === "on" && Math.abs(dx) > Math.abs(dy) && !g.inStrip && !g.target.closest?.(".notif.tile:not(.notif-access)")) g.mode = "panel";
-        else return (g = null);
-      } else if (Math.abs(dy) > Math.abs(dx) && page.value === -1) {
-        // PowOS AI's page: up and down are its own (it scrolls).
-        return (g = null);
-      } else if (Math.abs(dy) > Math.abs(dx)) {
-        // Editing home, up isn't the launcher: the sheet has the bottom.
-        if (!g.open && dy < 0 && !editing.value) {
-          g.mode = "open";
-          // The pull-up corners (state.ts pullPanels): from the left half PowOS AI's panel, from the right the apps.
-          pullKind.value = pullPanels.value === "on" && g.x0 < innerWidth / 2 ? "ai" : "apps";
-        }
-        else if (g.open && dy > 0 && (!g.inList || g.listTop)) g.mode = "close";
-        // Down on home: the shade's - the host's own pull (it takes the finger); without it, the shade is asked for.
-        else if (!g.open && dy > 0 && !editing.value) {
-          if (!shadeTakesHome.value && document.documentElement.dataset.mode === "home") void powos.shade.open();
-          return (g = null);
-        } else return (g = null); // the list scrolls
-      } else if (!g.open && !g.inStrip) {
-        g.mode = "pages";
-      } else {
-        return (g = null);
-      }
-      // A page swipe or an overlay change takes the keyboard down as it starts, not once it settles.
-      dropKeyboard();
-    }
-    if (e?.cancelable) e.preventDefault();
-    if (g.mode === "ccAll") return stretchCc(dy);
-    if (g.mode === "panel") {
-      lastDx = dx;
-      return panelBody()?.style.setProperty("--panel-dx", `${panelResist(dx)}px`);
-    }
-    // Up, shutting the shade / control center: the finger on its short --drop at the drawer's gain (shell.css).
-    if (g.mode === "notifClose") notifDrag.value = clamp(1 + (dy * GAIN) / dropOf());
-    else if (g.mode === "open") drawerDrag.value = clamp((-dy * GAIN) / g.travel);
-    else if (g.mode === "close") drawerDrag.value = clamp(1 - (dy * GAIN) / g.travel);
-    else {
-      // Past the first and last page it resists.
-      const last = pages.value.length - 1;
-      const edge = (page.value === -1 && dx > 0) || (page.value === last && dx < 0);
-      pageDrag.value = edge ? dx / 3 : dx;
-    }
-  };
-
-  const end = () => {
-    if (!g) return;
-    const { mode, v, open, target, own, notif: wasNotif } = g;
-    const dy = g.last[1] - g.y0;
-    g = null;
-    // The control center in edit mode: a tap beside its tiles leaves it (as a tap on home's empty space), the panel stays.
-    if (!mode && wasNotif && ccEditing.value && !target.closest?.(`${TAPPABLE}, [data-key], .tile-actions`)) {
-      ccEditing.value = false;
-      return;
-    }
-    // A clean tap (no gesture claimed) on the notification panel's or the control center's empty space: it closes,
-    // with its own animation - as a tap beside the open launcher closes it.
-    if (!mode && wasNotif && notif.value && !own && !target.closest?.(`${TAPPABLE}, .notif, .cc-tile`)) {
-      notif.value = false;
-      return;
-    }
-    // A tap on the open launcher's empty space (not an app, a message, a control): it closes, as tapping outside does.
-    if (!mode && open && !own && target.closest?.(".launcher") && !target.closest(TAPPABLE)) return closeDrawer();
-    if (mode === "open" || mode === "close") {
-      const p = drawerDrag.value ?? 0;
-      drawerDrag.value = null;
-      // A flick decides; otherwise where it was let go.
-      const open = v < -(mode === "open" ? OPEN_FLICK : FLICK) ? true : v > FLICK ? false : mode === "open" ? p > OPEN_AT : p > CLOSE_KEEP;
-      if (open) drawer.value = 1;
-      else closeDrawer();
-    } else if (mode === "notifClose") {
-      const q = notifDrag.value ?? 0;
-      notifDrag.value = null;
-      // A flick decides; otherwise where it was let go (as the drawer).
-      notif.value = v > FLICK ? true : v < -FLICK ? false : q > CLOSE_KEEP;
-    } else if (mode === "ccAll") {
-      // Past the threshold, or a flick its way: committed; otherwise it springs back.
-      const down = !ccExpanded.value;
-      settleCc(down ? dy > EXPAND_AT || v > FLICK : dy < -EXPAND_AT || v < -FLICK);
-    } else if (mode === "panel") {
-      settlePanel(lastDx, v);
-    } else if (mode === "pages") {
-      const dx = pageDrag.value ?? 0;
-      pageDrag.value = null;
-      const width = document.querySelector(".pages")?.clientWidth || innerWidth;
-      const step = v < -FLICK || dx < -width / 4 ? 1 : v > FLICK || dx > width / 4 ? -1 : 0;
-      // -1: PowOS AI's page, left of the first (not while editing home: the empty page is to the right).
-      page.value = Math.max(editing.value ? 0 : -1, Math.min(pages.value.length - 1, page.value + step));
-    }
-  };
-
   return {
     onTouchStart: (e: TouchEvent) =>
-      e.touches.length === 1 ? start(e.touches[0].clientX, e.touches[0].clientY, e.target as Element) : abandon(),
-    onTouchMove: (e: TouchEvent) => move(e.touches[0].clientX, e.touches[0].clientY, e),
-    onTouchEnd: end,
-    onTouchCancel: end,
+      e.touches.length === 1 ? startGesture(e.touches[0].clientX, e.touches[0].clientY, e.target as Element) : abandon(),
+    onTouchMove: (e: TouchEvent) => moveGesture(e.touches[0].clientX, e.touches[0].clientY, e),
+    onTouchEnd: endGesture,
+    onTouchCancel: endGesture,
     // A mouse (working on the shell in a desktop browser).
-    onPointerDown: (e: PointerEvent) => e.pointerType === "mouse" && start(e.clientX, e.clientY, e.target as Element),
-    onPointerMove: (e: PointerEvent) => e.pointerType === "mouse" && e.buttons && move(e.clientX, e.clientY, null),
-    onPointerUp: (e: PointerEvent) => e.pointerType === "mouse" && end(),
+    onPointerDown: (e: PointerEvent) => e.pointerType === "mouse" && startGesture(e.clientX, e.clientY, e.target as Element),
+    onPointerMove: (e: PointerEvent) => e.pointerType === "mouse" && e.buttons && moveGesture(e.clientX, e.clientY, null),
+    onPointerUp: (e: PointerEvent) => e.pointerType === "mouse" && endGesture(),
   };
 }
 

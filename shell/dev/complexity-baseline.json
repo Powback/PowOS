@@ -222,16 +222,10 @@
   },
   "ui/gesture.ts": {
     "complexity": {
-      "count": 4
-    },
-    "max-depth": {
-      "count": 1
-    },
-    "max-lines-per-function": {
       "count": 1
     },
     "sonarjs/cognitive-complexity": {
-      "count": 4
+      "count": 2
     }
   },
   "ui/glass.ts": {
