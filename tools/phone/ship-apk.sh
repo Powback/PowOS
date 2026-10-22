@@ -117,7 +117,15 @@ if [ -n "$newer" ]; then
   if git worktree add -q --detach "$t/tree" origin/worktree-powos-multiplatform 2>/dev/null; then
     [ -d shell/node_modules ] && ln -s "$PWD/shell/node_modules" "$t/tree/shell/node_modules"
     echo "ship-apk: re-pushing shell changes committed after the build: $(echo $newer)"
-    (cd "$t/tree/shell" && READY_MS=${READY_MS:-30000} ./push.sh --vpn --silent $newer 2>&1 | tail -2)
+    # The phone now runs the APK's (older) shell for these files: re-pushing them is not optional. A loaded Mac timed
+    # every page out at 30 s and the re-push was refused, leaving newer fixes off the phone (2026-10-22, 29878209):
+    # 60 s, one retry, and a loud line with the exact command if it still fails.
+    rp() { (cd "$t/tree/shell" && READY_MS=${READY_MS:-60000} ./push.sh --vpn --silent $newer 2>&1 | tail -3); }
+    out=$(rp); echo "$out"
+    if ! echo "$out" | grep -q "^pushed "; then
+      echo "ship-apk: re-push refused - retrying once" >&2; out=$(READY_MS=90000 rp); echo "$out"
+      echo "$out" | grep -q "^pushed " || echo "ship-apk: WARNING - newer shell files are NOT on the phone: (cd <origin-tip tree>/shell && ./push.sh --vpn --silent $newer)" >&2
+    fi
     git worktree remove --force "$t/tree" 2>/dev/null
   fi
   rm -rf "$t"
