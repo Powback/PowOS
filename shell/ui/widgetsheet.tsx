@@ -12,6 +12,21 @@ const EDGE = 12;
 /** A drag this far down closes it. */
 const CLOSE_PX = 70;
 
+/**
+ * The screen space a sheet may take: below the status bar, above home's foot (the search pill and the dock, wherever
+ * they are shown) and the navigation bar.
+ */
+function room() {
+  const css = getComputedStyle(document.documentElement);
+  const inset = (n: string) => parseFloat(css.getPropertyValue(n)) || 0;
+  let floor = innerHeight - Math.max(EDGE, inset("--inset-bottom") + EDGE);
+  for (const el of document.querySelectorAll<HTMLElement>(".home > .bar .bar-pill, .home .dock")) {
+    const r = el.getBoundingClientRect();
+    if (r.height > 0 && r.width > 0 && getComputedStyle(el).visibility !== "hidden") floor = Math.min(floor, r.top - EDGE);
+  }
+  return { top: Math.max(EDGE, inset("--inset-top") + EDGE), floor };
+}
+
 export function WidgetSheet() {
   const d = detailSheet.value;
   const close = useRef(() => {});
@@ -34,16 +49,18 @@ export function WidgetSheet() {
   if (!d) return null;
 
   const vw = innerWidth;
-  const vh = innerHeight;
   const a = d.anchor;
   const w = Math.min(vw - 2 * EDGE, Math.max(a.width, 320), 460);
   const left = Math.max(EDGE, Math.min(vw - w - EDGE, a.left + a.width / 2 - w / 2));
-  const below = vh - a.bottom - EDGE;
-  const above = a.top - EDGE;
+  const { top, floor } = room();
+  const below = floor - a.bottom - 8;
+  const above = a.top - top - 8;
+  // Under the widget when there's room for most of it there, else over it (a widget low on the page); never over the
+  // status bar, the search pill or the dock - the body scrolls inside when the controls are longer than that.
   const under = below >= 300 || below >= above;
   const place = under
-    ? { top: `${Math.round(a.bottom + 8)}px`, maxHeight: `${Math.round(below - 8)}px` }
-    : { bottom: `${Math.round(vh - a.top + 8)}px`, maxHeight: `${Math.round(above - 8)}px` };
+    ? { top: `${Math.round(a.bottom + 8)}px`, maxHeight: `${Math.round(below)}px` }
+    : { bottom: `${Math.round(innerHeight - a.top + 8)}px`, maxHeight: `${Math.round(above)}px` };
 
   const mine = (t: EventTarget | null) => !(t instanceof Element && t.closest("input, [role=slider], .wsheet-body [data-owns-gesture]"));
   const move = (dy: number) => {

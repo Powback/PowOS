@@ -240,7 +240,20 @@ private const val MAX_DP = 4000.0
 /** A padding in dp: Compose throws on a negative or NaN one. */
 private fun inset(n: Double) = (if (n >= 0) n.coerceAtMost(MAX_DP) else 0.0).dp
 
-@OptIn(ExperimentalLayoutApi::class)
+/** An element being drawn: its node, where its values come from, its props and modifier, and whether it's sized. */
+private class Ctx(
+    val el: WNode.Element,
+    val env: Env,
+    val inst: WidgetInstance,
+    val p: Props,
+    val mod: Modifier,
+    val sized: Boolean,
+)
+
+private val LAYOUTS = setOf("Column", "Row", "Flow", "Box", "Grid")
+private val GAUGES = setOf("Progress", "Ring", "Sparkline")
+private val PICTURES = setOf("Image", "Canvas", "Shader")
+
 @Composable
 private fun Element(
     el: WNode.Element,
@@ -250,183 +263,274 @@ private fun Element(
 ) {
     val p = remember(el, env) { Props(el, env, inst) }
     if (p.has("visible") && p.observe("visible")?.truthy == false) return
-    val mod = common(p, parent)
-    val sized = SIZING.any { p.has(it) }
+    val c = Ctx(el, env, inst, p, common(p, parent), SIZING.any { p.has(it) })
     when (el.kind) {
-        "Column" -> {
-            val gap = (p.observe("gap")?.num() ?: 4.0).dp
-            val align = p.observe("align")?.toString()
-            Column(
-                mod.then(if (p.observe("scroll")?.truthy == true) Modifier.verticalScroll(rememberScrollState()) else Modifier),
-                verticalArrangement = vertical(p.observe("justify")?.toString(), gap),
-                horizontalAlignment =
-                    when (align) {
-                        "center" -> Alignment.CenterHorizontally
-                        "end" -> Alignment.End
-                        else -> Alignment.Start
-                    },
-            ) { Nodes(el.children, env, inst, this) }
+        in LAYOUTS -> LayoutNode(c)
+        in GAUGES -> GaugeNode(c)
+        in PICTURES -> PictureNode(c)
+        else -> ControlNode(c)
+    }
+}
+
+@Composable
+private fun LayoutNode(c: Ctx) {
+    when (c.el.kind) {
+        "Column" -> ColumnNode(c)
+        "Row", "Flow" -> RowNode(c)
+        "Box" -> Box(c.mod, contentAlignment = boxAlign(c.p.observe("align")?.toString())) { Nodes(c.el.children, c.env, c.inst, this) }
+        "Grid" -> Grid(c.mod, (c.p.observe("columns")?.num() ?: 2.0).toInt().coerceIn(1, 12), (c.p.observe("gap")?.num() ?: 6.0).dp) { Nodes(c.el.children, c.env, c.inst, null) }
+    }
+}
+
+@Composable
+private fun ColumnNode(c: Ctx) {
+    val p = c.p
+    val gap = (p.observe("gap")?.num() ?: 4.0).dp
+    val align = p.observe("align")?.toString()
+    Column(
+        c.mod.then(if (p.observe("scroll")?.truthy == true) Modifier.verticalScroll(rememberScrollState()) else Modifier),
+        verticalArrangement = vertical(p.observe("justify")?.toString(), gap),
+        horizontalAlignment =
+            when (align) {
+                "center" -> Alignment.CenterHorizontally
+                "end" -> Alignment.End
+                else -> Alignment.Start
+            },
+    ) { Nodes(c.el.children, c.env, c.inst, this) }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RowNode(c: Ctx) {
+    val p = c.p
+    val gap = (p.observe("gap")?.num() ?: 8.0).dp
+    val vertical =
+        when (p.observe("align")?.toString()) {
+            "top", "start" -> Alignment.Top
+            "bottom", "end" -> Alignment.Bottom
+            else -> Alignment.CenterVertically
         }
-        "Row", "Flow" -> {
-            val gap = (p.observe("gap")?.num() ?: 8.0).dp
-            val vertical =
-                when (p.observe("align")?.toString()) {
-                    "top", "start" -> Alignment.Top
-                    "bottom", "end" -> Alignment.Bottom
-                    else -> Alignment.CenterVertically
-                }
-            val arr = horizontal(p.observe("justify")?.toString(), gap)
-            if (el.kind == "Flow" || p.observe("wrap")?.truthy == true) {
-                FlowRow(mod, horizontalArrangement = arr, verticalArrangement = Arrangement.spacedBy(gap), itemVerticalAlignment = vertical) {
-                    Nodes(el.children, env, inst, this)
-                }
-            } else {
-                Row(mod, horizontalArrangement = arr, verticalAlignment = vertical) { Nodes(el.children, env, inst, this) }
-            }
+    val arr = horizontal(p.observe("justify")?.toString(), gap)
+    if (c.el.kind == "Flow" || p.observe("wrap")?.truthy == true) {
+        FlowRow(c.mod, horizontalArrangement = arr, verticalArrangement = Arrangement.spacedBy(gap), itemVerticalAlignment = vertical) {
+            Nodes(c.el.children, c.env, c.inst, this)
         }
-        "Box" -> Box(mod, contentAlignment = boxAlign(p.observe("align")?.toString())) { Nodes(el.children, env, inst, this) }
-        "Grid" -> Grid(mod, (p.observe("columns")?.num() ?: 2.0).toInt().coerceIn(1, 12), (p.observe("gap")?.num() ?: 6.0).dp) { Nodes(el.children, env, inst, null) }
-        "Text" -> TextNode(p, mod)
-        "Button" -> {
-            val color = p.color("color") { Palette.accent }
-            val radius = p.float("radius", 8f * LauncherStyle.cornerScale)
-            Box(
-                mod
-                    .drawBehind {
-                        val w = 1.dp.toPx()
-                        val r = CornerRadius(radius().dp.toPx())
-                        drawRoundRect(color(), Offset(w / 2, w / 2), Size(size.width - w, size.height - w), r, style = Stroke(w))
-                    }.padding(horizontal = 10.dp, vertical = 6.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                BasicText(p.observe("text")?.text().orEmpty(), style = WidgetMono, maxLines = 1, overflow = TextOverflow.Ellipsis, color = ColorProducer { color() })
-            }
-        }
-        "Progress" -> {
-            val value = p.float("value", 0f)
-            val max = p.float("max", 100f)
-            val color = p.color("color") { Palette.accent }
-            val track = p.color("track") { Palette.surface }
-            Spacer(
-                mod.then(if (sized) Modifier else Modifier.fillMaxWidth().height(8.dp)).drawBehind {
-                    drawRect(track())
-                    val f = (value() / max().coerceAtLeast(1e-6f)).coerceIn(0f, 1f)
-                    drawRect(color(), size = Size(size.width * f, size.height))
-                },
-            )
-        }
-        "Ring" -> {
-            val value = p.float("value", 0f)
-            val max = p.float("max", 1f)
-            val thickness = p.float("thickness", 6f)
-            val start = p.float("start", 0f)
-            val sweep = p.float("sweep", 360f)
-            val color = p.color("color") { Palette.accent }
-            val track = p.color("track") { Palette.surface }
-            Spacer(
-                mod.then(if (sized) Modifier else Modifier.size(64.dp)).drawBehind {
-                    val t = thickness().dp.toPx()
-                    val d = min(size.width, size.height) - t
-                    val topLeft = Offset((size.width - d) / 2, (size.height - d) / 2)
-                    val arc = Size(d, d)
-                    drawArc(track(), start() - 90f, sweep(), false, topLeft, arc, style = Stroke(t, cap = StrokeCap.Round))
-                    val f = (value() / max().coerceAtLeast(1e-6f)).coerceIn(0f, 1f)
-                    if (f > 0f) drawArc(color(), start() - 90f, sweep() * f, false, topLeft, arc, style = Stroke(t, cap = StrokeCap.Round))
-                },
-            )
-        }
-        "Sparkline" -> {
-            val color = p.color("color") { Palette.accent }
-            val thickness = p.float("thickness", 2f)
-            Spacer(
-                mod.then(if (sized) Modifier else Modifier.fillMaxWidth().height(48.dp)).drawBehind {
-                    val points = items(p.now("values") ?: return@drawBehind).mapNotNull { it.num()?.toFloat() }
-                    if (points.size < 2) return@drawBehind
-                    val lo = p.now("min")?.num()?.toFloat() ?: 0f
-                    // Auto-scaled lines get headroom so the peak isn't glued to the top edge.
-                    val hi = p.now("max")?.num()?.toFloat() ?: (lo + (points.max() - lo) * 1.15f).coerceAtLeast(lo + 1f)
-                    val path = Path()
-                    points.forEachIndexed { i, v ->
-                        val x = size.width * i / (points.size - 1)
-                        val y = size.height * (1 - ((v - lo) / (hi - lo)).coerceIn(0f, 1f))
-                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-                    val c = color()
-                    val fill = p.now("area")
-                    if (fill != null && fill.truthy) {
-                        val area = Path().apply {
-                            addPath(path)
-                            lineTo(size.width, size.height)
-                            lineTo(0f, size.height)
-                            close()
-                        }
-                        drawPath(area, p.color(fill) ?: c.copy(alpha = 0.2f))
-                    }
-                    drawPath(path, c, style = Stroke(thickness().dp.toPx(), cap = StrokeCap.Round))
-                },
-            )
-        }
-        "Image" -> {
-            val src = p.observe("src")?.toString().orEmpty()
-            val bitmap =
-                if (src.startsWith("media:")) {
-                    // Album art isn't a file to watch: look again whenever a source (the media one) updates,
-                    // but recompose only when the art itself changed, not on every tick of every source.
-                    remember(src) {
-                        derivedStateOf(referentialEqualityPolicy()) {
-                            inst.updates.intValue
-                            inst.image(src)
-                        }
-                    }.value
-                } else {
-                    inst.image(src)
-                }
-            // An alpha-only image (an app icon's silhouette, with monochrome icons) needs a color to show.
-            val tint = p.observe("tint")?.let { p.color(it) } ?: Palette.foreground.takeIf { bitmap?.config == ImageBitmapConfig.Alpha8 }
-            if (bitmap != null) {
-                Image(
-                    bitmap,
-                    null,
-                    mod,
-                    contentScale =
-                        when (p.observe("fit")?.toString()) {
-                            "cover" -> ContentScale.Crop
-                            "fill" -> ContentScale.FillBounds
-                            else -> ContentScale.Fit
-                        },
-                    colorFilter = tint?.let { ColorFilter.tint(it) },
-                )
-            }
-        }
-        "Canvas" -> CanvasNode(p, mod.then(if (sized) Modifier else Modifier.fillMaxSize()))
+    } else {
+        Row(c.mod, horizontalArrangement = arr, verticalAlignment = vertical) { Nodes(c.el.children, c.env, c.inst, this) }
+    }
+}
+
+@Composable
+private fun GaugeNode(c: Ctx) {
+    when (c.el.kind) {
+        "Progress" -> ProgressNode(c.p, c.mod, c.sized)
+        "Ring" -> RingNode(c.p, c.mod, c.sized)
+        "Sparkline" -> SparklineNode(c.p, c.mod, c.sized)
+    }
+}
+
+@Composable
+private fun ProgressNode(
+    p: Props,
+    mod: Modifier,
+    sized: Boolean,
+) {
+    val value = p.float("value", 0f)
+    val max = p.float("max", 100f)
+    val color = p.color("color") { Palette.accent }
+    val track = p.color("track") { Palette.surface }
+    Spacer(
+        mod.then(if (sized) Modifier else Modifier.fillMaxWidth().height(8.dp)).drawBehind {
+            drawRect(track())
+            val f = (value() / max().coerceAtLeast(1e-6f)).coerceIn(0f, 1f)
+            drawRect(color(), size = Size(size.width * f, size.height))
+        },
+    )
+}
+
+@Composable
+private fun RingNode(
+    p: Props,
+    mod: Modifier,
+    sized: Boolean,
+) {
+    val value = p.float("value", 0f)
+    val max = p.float("max", 1f)
+    val thickness = p.float("thickness", 6f)
+    val start = p.float("start", 0f)
+    val sweep = p.float("sweep", 360f)
+    val color = p.color("color") { Palette.accent }
+    val track = p.color("track") { Palette.surface }
+    Spacer(
+        mod.then(if (sized) Modifier else Modifier.size(64.dp)).drawBehind {
+            val t = thickness().dp.toPx()
+            val d = min(size.width, size.height) - t
+            val topLeft = Offset((size.width - d) / 2, (size.height - d) / 2)
+            val arc = Size(d, d)
+            drawArc(track(), start() - 90f, sweep(), false, topLeft, arc, style = Stroke(t, cap = StrokeCap.Round))
+            val f = (value() / max().coerceAtLeast(1e-6f)).coerceIn(0f, 1f)
+            if (f > 0f) drawArc(color(), start() - 90f, sweep() * f, false, topLeft, arc, style = Stroke(t, cap = StrokeCap.Round))
+        },
+    )
+}
+
+@Composable
+private fun SparklineNode(
+    p: Props,
+    mod: Modifier,
+    sized: Boolean,
+) {
+    val color = p.color("color") { Palette.accent }
+    val thickness = p.float("thickness", 2f)
+    Spacer(
+        mod.then(if (sized) Modifier else Modifier.fillMaxWidth().height(48.dp)).drawBehind {
+            val points = items(p.now("values") ?: return@drawBehind).mapNotNull { it.num()?.toFloat() }
+            if (points.size < 2) return@drawBehind
+            val path = sparkPath(p, points, size)
+            val c = color()
+            val fill = p.now("area")
+            if (fill != null && fill.truthy) drawPath(sparkArea(path, size), p.color(fill) ?: c.copy(alpha = 0.2f))
+            drawPath(path, c, style = Stroke(thickness().dp.toPx(), cap = StrokeCap.Round))
+        },
+    )
+}
+
+/** A Sparkline's line through [points] in [size]: min (0) to max (the peak with headroom) bottom to top. */
+private fun sparkPath(
+    p: Props,
+    points: List<Float>,
+    size: Size,
+): Path {
+    val lo = p.now("min")?.num()?.toFloat() ?: 0f
+    // Auto-scaled lines get headroom so the peak isn't glued to the top edge.
+    val hi = p.now("max")?.num()?.toFloat() ?: (lo + (points.max() - lo) * 1.15f).coerceAtLeast(lo + 1f)
+    val path = Path()
+    points.forEachIndexed { i, v ->
+        val x = size.width * i / (points.size - 1)
+        val y = size.height * (1 - ((v - lo) / (hi - lo)).coerceIn(0f, 1f))
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    return path
+}
+
+/** The area under a Sparkline's line, down to the bottom edge. */
+private fun sparkArea(
+    path: Path,
+    size: Size,
+) = Path().apply {
+    addPath(path)
+    lineTo(size.width, size.height)
+    lineTo(0f, size.height)
+    close()
+}
+
+@Composable
+private fun PictureNode(c: Ctx) {
+    when (c.el.kind) {
+        "Image" -> ImageNode(c.p, c.mod, c.inst)
+        "Canvas" -> CanvasNode(c.p, c.mod.then(if (c.sized) Modifier else Modifier.fillMaxSize()))
         "Shader" -> {
-            val m = mod.then(if (sized) Modifier else Modifier.fillMaxSize())
+            val m = c.mod.then(if (c.sized) Modifier else Modifier.fillMaxSize())
             if (Build.VERSION.SDK_INT >= 33) {
-                ShaderNode(p, m)
+                ShaderNode(c.p, m)
             } else {
-                val fallback = p.color("fallback") { Palette.surface }
+                val fallback = c.p.color("fallback") { Palette.surface }
                 Spacer(m.drawBehind { drawRect(fallback()) })
             }
         }
-        "Spacer" -> Spacer(mod)
-        "Slider" -> SliderNode(p, mod, sized)
-        "Input" -> InputNode(p, mod, sized)
-        "Terminal" -> {
-            val command = p.observe("command")
-            val fontSize = p.observe("fontSize")?.num()
-            // owl 8: Terminals with the same session are one shell (a tile and its screen); interactive: false only
-            // shows it (taps go to the widget's onTap); textSize is its text in sp, as other widgets' text.
-            val session = p.observe("session")?.toString()
-            val interactive = p.observe("interactive")?.truthy != false
-            val textSize = p.observe("textSize")?.num()?.toFloat()
-            // In a screen, focus: typing at once (keyboard up), as an Input's focus.
-            val focus = LocalInputFocus.current && p.observe("focus")?.truthy == true
-            // A command built from a value still loading waits for it, rather than starting a shell and restarting.
-            if (command != Null) {
-                val term = remember(el, command, fontSize, session) { inst.terminal(el, command?.toString(), fontSize, session) }
-                TerminalView(term, mod.then(if (sized) Modifier else Modifier.fillMaxSize()), interactive, textSize, focus)
-            }
+    }
+}
+
+@Composable
+private fun ImageNode(
+    p: Props,
+    mod: Modifier,
+    inst: WidgetInstance,
+) {
+    val src = p.observe("src")?.toString().orEmpty()
+    val bitmap =
+        if (src.startsWith("media:")) {
+            // Album art isn't a file to watch: look again whenever a source (the media one) updates,
+            // but recompose only when the art itself changed, not on every tick of every source.
+            remember(src) {
+                derivedStateOf(referentialEqualityPolicy()) {
+                    inst.updates.intValue
+                    inst.image(src)
+                }
+            }.value
+        } else {
+            inst.image(src)
         }
+    // An alpha-only image (an app icon's silhouette, with monochrome icons) needs a color to show.
+    val tint = p.observe("tint")?.let { p.color(it) } ?: Palette.foreground.takeIf { bitmap?.config == ImageBitmapConfig.Alpha8 }
+    if (bitmap != null) {
+        Image(
+            bitmap,
+            null,
+            mod,
+            contentScale =
+                when (p.observe("fit")?.toString()) {
+                    "cover" -> ContentScale.Crop
+                    "fill" -> ContentScale.FillBounds
+                    else -> ContentScale.Fit
+                },
+            colorFilter = tint?.let { ColorFilter.tint(it) },
+        )
+    }
+}
+
+@Composable
+private fun ControlNode(c: Ctx) {
+    when (c.el.kind) {
+        "Text" -> TextNode(c.p, c.mod)
+        "Button" -> ButtonNode(c.p, c.mod)
+        "Spacer" -> Spacer(c.mod)
+        "Slider" -> SliderNode(c.p, c.mod, c.sized)
+        "Input" -> InputNode(c.p, c.mod, c.sized)
+        "Terminal" -> TerminalNode(c)
+    }
+}
+
+@Composable
+private fun ButtonNode(
+    p: Props,
+    mod: Modifier,
+) {
+    val color = p.color("color") { Palette.accent }
+    val radius = p.float("radius", 8f * LauncherStyle.cornerScale)
+    Box(
+        mod
+            .drawBehind {
+                val w = 1.dp.toPx()
+                val r = CornerRadius(radius().dp.toPx())
+                drawRoundRect(color(), Offset(w / 2, w / 2), Size(size.width - w, size.height - w), r, style = Stroke(w))
+            }.padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(p.observe("text")?.text().orEmpty(), style = WidgetMono, maxLines = 1, overflow = TextOverflow.Ellipsis, color = ColorProducer { color() })
+    }
+}
+
+@Composable
+private fun TerminalNode(c: Ctx) {
+    val p = c.p
+    val el = c.el
+    val inst = c.inst
+    val mod = c.mod
+    val sized = c.sized
+    val command = p.observe("command")
+    val fontSize = p.observe("fontSize")?.num()
+    // owl 8: Terminals with the same session are one shell (a tile and its screen); interactive: false only
+    // shows it (taps go to the widget's onTap); textSize is its text in sp, as other widgets' text.
+    val session = p.observe("session")?.toString()
+    val interactive = p.observe("interactive")?.truthy != false
+    val textSize = p.observe("textSize")?.num()?.toFloat()
+    // In a screen, focus: typing at once (keyboard up), as an Input's focus.
+    val focus = LocalInputFocus.current && p.observe("focus")?.truthy == true
+    // A command built from a value still loading waits for it, rather than starting a shell and restarting.
+    if (command != Null) {
+        val term = remember(el, command, fontSize, session) { inst.terminal(el, command?.toString(), fontSize, session) }
+        TerminalView(term, mod.then(if (sized) Modifier else Modifier.fillMaxSize()), interactive, textSize, focus)
     }
 }
 

@@ -294,6 +294,38 @@ class ManagerTests(Base):
         self.assertEqual([e["text"] for e in inbox], [self.expected("coder", BODY)])
 
 
+class SilentTests(Base):
+    """notify --silent (deploys the user can't see): nobody told - no inbox, no agent-mail, no feed - only the quiet log."""
+
+    def test_silent_notify_only_logs(self):
+        out = self.cli("notify", "-", "--from", "deploy", "--silent", "--priority", "low", "--batch", "deploy",
+                       stdin="shell push (silent): ui/gesture.ts\n")
+        self.assertIn("quietly", out)
+        self.assertEqual(self.inbox_json("user", "--peek"), [])
+        self.assertEqual(PhoneTests.agent_mail(self, self.run_dir), [])
+        self.assertEqual(glob.glob(os.path.join(self.queue, "*.ev")), [])
+        log = self.cli("quiet")
+        self.assertIn("deploy: shell push (silent): ui/gesture.ts", log)
+
+    def test_deploy_note_silent(self):
+        """deploy-note.sh --silent asks comms for --silent (a stand-in adb records the phone command)."""
+        bindir = os.path.join(self.tmp, "bin")
+        os.makedirs(bindir)
+        rec = os.path.join(self.tmp, "adb.log")
+        with open(os.path.join(bindir, "adb"), "w") as f:
+            f.write(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {rec}\n')
+        os.chmod(os.path.join(bindir, "adb"), 0o755)
+        script = os.path.join(REPO, "targets", "android", "tools", "deploy-note.sh")
+        env = dict(self.env, PATH=bindir + os.pathsep + os.environ["PATH"], ADB="adb")
+        subprocess.run(["bash", script, "--silent", "gesture.ts refactor"], env=env, check=True, timeout=30)
+        subprocess.run(["bash", script, "Switcher follows your finger"], env=env, check=True, timeout=30)
+        self.assertNotEqual(subprocess.run(["bash", script], env=env, capture_output=True).returncode, 0)
+        with open(rec) as f:
+            calls = f.read().splitlines()
+        self.assertIn("--silent", calls[0])
+        self.assertNotIn("--silent", calls[1])
+
+
 class PhoneTests(Base):
     """The phone's side of the boundary: what the app reads (agent-mail/) and the Agents view's feed."""
 

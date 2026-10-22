@@ -421,6 +421,288 @@
        "mirek": 300,
        "mirek_valid": true
       }
+     },
+     {
+      "id": "room-x0",
+      "type": "room",
+      "metadata": {
+       "name": "Bath",
+       "archetype": "other"
+      },
+      "children": [
+       {
+        "rid": "light-x0",
+        "rtype": "light"
+       }
+      ],
+      "services": [
+       {
+        "rid": "group-x0",
+        "rtype": "grouped_light"
+       }
+      ]
+     },
+     {
+      "id": "group-x0",
+      "type": "grouped_light",
+      "owner": {
+       "rid": "room-x0",
+       "rtype": "room"
+      },
+      "on": {
+       "on": true
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "light-x0",
+      "type": "light",
+      "metadata": {
+       "name": "Bath lamp"
+      },
+      "on": {
+       "on": true
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "room-x1",
+      "type": "room",
+      "metadata": {
+       "name": "Jonas",
+       "archetype": "other"
+      },
+      "children": [
+       {
+        "rid": "light-x1",
+        "rtype": "light"
+       }
+      ],
+      "services": [
+       {
+        "rid": "group-x1",
+        "rtype": "grouped_light"
+       }
+      ]
+     },
+     {
+      "id": "group-x1",
+      "type": "grouped_light",
+      "owner": {
+       "rid": "room-x1",
+       "rtype": "room"
+      },
+      "on": {
+       "on": false
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "light-x1",
+      "type": "light",
+      "metadata": {
+       "name": "Jonas lamp"
+      },
+      "on": {
+       "on": false
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "room-x2",
+      "type": "room",
+      "metadata": {
+       "name": "Toilet",
+       "archetype": "other"
+      },
+      "children": [
+       {
+        "rid": "light-x2",
+        "rtype": "light"
+       }
+      ],
+      "services": [
+       {
+        "rid": "group-x2",
+        "rtype": "grouped_light"
+       }
+      ]
+     },
+     {
+      "id": "group-x2",
+      "type": "grouped_light",
+      "owner": {
+       "rid": "room-x2",
+       "rtype": "room"
+      },
+      "on": {
+       "on": true
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "light-x2",
+      "type": "light",
+      "metadata": {
+       "name": "Toilet lamp"
+      },
+      "on": {
+       "on": true
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "room-x3",
+      "type": "room",
+      "metadata": {
+       "name": "Matija's nice carpet place",
+       "archetype": "other"
+      },
+      "children": [
+       {
+        "rid": "light-x3",
+        "rtype": "light"
+       }
+      ],
+      "services": [
+       {
+        "rid": "group-x3",
+        "rtype": "grouped_light"
+       }
+      ]
+     },
+     {
+      "id": "group-x3",
+      "type": "grouped_light",
+      "owner": {
+       "rid": "room-x3",
+       "rtype": "room"
+      },
+      "on": {
+       "on": false
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "light-x3",
+      "type": "light",
+      "metadata": {
+       "name": "Matija's nice carpet place lamp"
+      },
+      "on": {
+       "on": false
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "room-x4",
+      "type": "room",
+      "metadata": {
+       "name": "Hallway upstairs",
+       "archetype": "other"
+      },
+      "children": [
+       {
+        "rid": "light-x4",
+        "rtype": "light"
+       }
+      ],
+      "services": [
+       {
+        "rid": "group-x4",
+        "rtype": "grouped_light"
+       }
+      ]
+     },
+     {
+      "id": "group-x4",
+      "type": "grouped_light",
+      "owner": {
+       "rid": "room-x4",
+       "rtype": "room"
+      },
+      "on": {
+       "on": true
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "light-x4",
+      "type": "light",
+      "metadata": {
+       "name": "Hallway upstairs lamp"
+      },
+      "on": {
+       "on": true
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "room-x5",
+      "type": "room",
+      "metadata": {
+       "name": "Garden",
+       "archetype": "other"
+      },
+      "children": [
+       {
+        "rid": "light-x5",
+        "rtype": "light"
+       }
+      ],
+      "services": [
+       {
+        "rid": "group-x5",
+        "rtype": "grouped_light"
+       }
+      ]
+     },
+     {
+      "id": "group-x5",
+      "type": "grouped_light",
+      "owner": {
+       "rid": "room-x5",
+       "rtype": "room"
+      },
+      "on": {
+       "on": false
+      },
+      "dimming": {
+       "brightness": 53
+      }
+     },
+     {
+      "id": "light-x5",
+      "type": "light",
+      "metadata": {
+       "name": "Garden lamp"
+      },
+      "on": {
+       "on": false
+      },
+      "dimming": {
+       "brightness": 53
+      }
      }
     ]
    }

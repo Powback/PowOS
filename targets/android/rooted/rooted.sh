@@ -14,22 +14,22 @@
 #   widevine-l3 [remove]   Netflix etc. in SD on the unlocked phone (targets/native/widevine-l3.sh)
 #   module <zip>  stage the PowOS system module (system-module/build-module.sh's zip) in Magisk: on at the next reboot
 # install, deploy and module take --note "what changed, for the user" (required): the phone's quiet "update applied"
-# notification (tools/deploy-note.sh).
+# notification (tools/deploy-note.sh) - or --silent for a change the user can't see (only comms' quiet log).
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
 # powos-units: deploy - what this installs on the phone is checked against units/ (test/tier1/test-units-registry.py)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-NOTE="" ARGS=()
+NOTE="" SILENT="" ARGS=()
 while [ $# -gt 0 ]; do
-  case "$1" in --note) NOTE=${2:-}; shift 2 || shift ;; --note=*) NOTE=${1#--note=}; shift ;; *) ARGS+=("$1"); shift ;; esac
+  case "$1" in --silent) SILENT=1; shift ;; --note) NOTE=${2:-}; shift 2 || shift ;; --note=*) NOTE=${1#--note=}; shift ;; *) ARGS+=("$1"); shift ;; esac
 done
 set -- ${ARGS[@]+"${ARGS[@]}"}
 case "${1:-}" in
   install|deploy|module)
-    [ -n "${NOTE// }" ] || { echo "rooted.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2; exit 2; } ;;
+    [ -n "${NOTE// }" ] || [ -n "$SILENT" ] || { echo "rooted.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2; exit 2; } ;;
 esac
 # After a deploy: the phone's "update applied" notification (batched: install's own deploy makes the same one).
-noted() { ADB=adb "$HERE/../tools/deploy-note.sh" "$NOTE"; }
+noted() { ADB=adb "$HERE/../tools/deploy-note.sh" ${SILENT:+--silent} "${NOTE:-rooted deploy}"; }
 ROOTFS=${ROOTFS:-$HERE/../out/powos-rootfs.tar.gz}
 
 # Magisk's su: on PATH once Magisk finished its setup, always at /debug_ramdisk/su while it runs.
@@ -46,7 +46,7 @@ install)
   got=$(asu "sha256sum /data/local/tmp/powos-rootfs.tar.gz" | awk '{print $1}')
   [ "$want" = "$got" ] || { echo "CHECKSUM MISMATCH after push"; exit 1; }
   asu "mkdir -p /data/powos/root && tar -xzpf /data/local/tmp/powos-rootfs.tar.gz -C /data/powos/root --numeric-owner && rm /data/local/tmp/powos-rootfs.tar.gz"
-  "$0" deploy --note "$NOTE"
+  "$0" deploy ${SILENT:+--silent} --note "$NOTE"
   echo "installed: /data/powos/root ($(asu 'du -sh /data/powos/root' | awk '{print $1}')), boot service in /data/adb/service.d" ;;
 deploy)
   # The rooted-mode scripts (also part of install): the boot/mount script, the desktop session the PowOS app starts

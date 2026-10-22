@@ -6,22 +6,24 @@
 # targets/android/system-module/privapp-permissions.txt; a new entry only counts once the rebuilt module is installed
 # and the phone has booted with it (the check reads the live /system/etc/permissions file, not the module source).
 #
-# Usage: targets/android/install-app.sh [apk] --note "what changed, for the user" [--check]
+# Usage: targets/android/install-app.sh [apk] --note "what changed, for the user" | --silent [--check]
+#        (--silent: a change the user can't see - refactor, lint, tooling: no notification, only comms' quiet log)
 #        (default apk: android-app-dev's output/powos.apk; --check: no install, no note needed). The note becomes the
 #        phone's quiet "update applied" notification (tools/deploy-note.sh): plain words, never a commit hash.
 #        ANDROID_SERIAL picks the phone when several are connected. Needs adb and aapt (the android-builder image has both).
 set -euo pipefail
 cd "$(dirname "$0")"
-note="" check="" pos=()
+note="" check="" silent="" pos=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --note) note=${2:-}; shift 2 || shift ;;
+    --silent) silent=1; shift ;;
     --note=*) note=${1#--note=}; shift ;;
     --check) check=1; shift ;;
     *) pos+=("$1"); shift ;;
   esac
 done
-[ -n "$check" ] || [ -n "${note// }" ] ||
+[ -n "$check" ] || [ -n "${note// }" ] || [ -n "$silent" ] ||
   { echo "install-app.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2; exit 2; }
 apk="${pos[0]:-${APK:-$HOME/Projects/android-app-dev/output/powos.apk}}"
 [ -f "$apk" ] || { echo "install-app.sh: no apk at $apk" >&2; exit 1; }
@@ -73,4 +75,4 @@ adb shell "su -c 'setprop pm.dexopt.install ${was:-speed-profile}'" >/dev/null 2
 # A one-shot re-base of the app (pm uninstall-system-updates + reinstall, e.g. powos-idle-sysupdate.sh) reinstalls
 # /data/local/tmp/powos-current.apk: keep it the APK just installed, or it would put an older build back.
 adb push "$apk" /data/local/tmp/powos-current.apk >/dev/null && adb shell chmod 0644 /data/local/tmp/powos-current.apk
-ADB=adb tools/deploy-note.sh "$note"
+ADB=adb tools/deploy-note.sh ${silent:+--silent} "${note:-APK installed}"

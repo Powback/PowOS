@@ -4,6 +4,8 @@
 # only shows after a reset.
 #
 # Usage: shell/push.sh --note "what changed, for the user" <file>...   paths relative to shell/ (e.g. ui/drawer.js)
+#        shell/push.sh --silent <file>...   a change the user can't see (refactor, lint, tooling): no notification -
+#        the manifest says "silent":true and comms only logs it (`powos comms quiet`)
 #        shell/push.sh --reset [file...] remove overrides (all, or the files named)
 #        --vpn first: through the VPN instead of a local adb (the wireguard container's network, as the Mac reaches
 #        the phone: adb at 10.13.13.7:5555, or $POWOS_PHONE_ADDR).
@@ -133,21 +135,22 @@ if [ "${1:-}" = "--vpn" ]; then
     -e ANDROID_SERIAL="$addr" -e POWOS_GATE_DONE=1 android-app-dev-android-builder:latest \
     bash -c 'adb connect "$ANDROID_SERIAL" >/dev/null 2>&1; sleep 1; bash /shell/push.sh "$@"' _ "$@"
 fi
-note="" test="" test_to=""
+note="" test="" test_to="" silent=""
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --note) note=${2:-}; shift 2 || shift ;;
     --note=*) note=${1#--note=}; shift ;;
     --force) shift ;;
+    --silent) silent=1; shift ;;
     --test) test=1; test_to=shelltest; shift ;;
     --test=*) test=1; test_to=${1#--test=}; shift ;;
     *) args+=("$1"); shift ;;
   esac
 done
 set -- ${args[@]+"${args[@]}"}
-if [ $# -gt 0 ] && [ "$1" != "--reset" ] && [ "$1" != "--errors" ] && [ -z "${note// }" ]; then
-  echo "push.sh: --note \"what changed, for the user\" is required (the phone's update notification)" >&2
+if [ $# -gt 0 ] && [ "$1" != "--reset" ] && [ "$1" != "--errors" ] && [ -z "${note// }" ] && [ -z "$silent" ]; then
+  echo "push.sh: --note \"what changed, for the user\" is required (the phone's update notification), or --silent for a change the user can't see" >&2
   exit 2
 fi
 pkg=com.powos.app
@@ -200,7 +203,7 @@ fi
 # overrides it replaces kept (files/shell-prev/): what the app's rollback restores (ShellErrors.kt).
 files_json=$(printf '"%s",' "$@"); files_json="[${files_json%,}]"
 json_note=$(printf '%s' "$note" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g' | cut -c1-300)
-manifest=$(printf '{"at":%s,"files":%s,"note":"%s","from":"%s","test":%s,"testTo":"%s"}' "$(date +%s)" "$files_json" "$json_note" "$(hostname -s 2>/dev/null || echo mac)" "$([ -n "$test" ] && echo true || echo false)" "$test_to" | base64 | tr -d '\n')
+manifest=$(printf '{"at":%s,"files":%s,"note":"%s","from":"%s","test":%s,"testTo":"%s","silent":%s}' "$(date +%s)" "$files_json" "$json_note" "$(hostname -s 2>/dev/null || echo mac)" "$([ -n "$test" ] && echo true || echo false)" "$test_to" "$([ -n "$silent" ] && echo true || echo false)" | base64 | tr -d '\n')
 as_app "rm -rf files/shell-prev && echo $manifest | base64 -d > files/shell-push.json"
 # Atomic: every file staged on the phone first (one adb push of a tar, unpacked into files/shell-staging - the same
 # filesystem as files/shell), then all of them renamed into files/shell in one call, between files/shell/.pushing
@@ -226,6 +229,8 @@ adb shell "rm -f $tmp"
 for f in "$@"; do echo "pushed $f"; done
 # The phone's "update applied" notification (as targets/android/tools/deploy-note.sh, which this folder alone - the
 # --vpn container mounts only shell/ - can't reach): one su call, comms batches it with the other deploys.
+# --silent: nobody told, only comms' quiet log (what landed: the files).
+[ -n "$silent" ] && note="shell push (silent): $*"
 b=$(printf '%s' "$note" | base64 | tr -d '\n')
-adb shell "su -c \"sh /data/powos/powos-run.sh 'echo $b | base64 -d | powos comms notify --from deploy --priority low --batch deploy -'\"" >/dev/null ||
+adb shell "su -c \"sh /data/powos/powos-run.sh 'echo $b | base64 -d | powos comms notify --from deploy ${silent:+--silent} --priority low --batch deploy -'\"" >/dev/null ||
   echo "push.sh: the phone wasn't told (\"$note\")" >&2

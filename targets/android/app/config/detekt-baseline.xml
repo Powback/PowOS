@@ -27,8 +27,6 @@
     <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun call( e: Expr.Call, s: Scope, ): Ev</ID>
     <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun draw( it: Item.Call, scope: Scope, ): WNode.Draw</ID>
     <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun element( n: Item.Node, scope: Scope, ): WNode</ID>
-    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
-    <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun handler( h: Handler, scope: Scope, params: List&lt;String&gt; = HANDLER_PARAMS[h.name].orEmpty(), ): Action</ID>
     <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun numericCall( name: String, args: List&lt;Ev&gt;, slow: Ev, ): Ev</ID>
     <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun program(): Program</ID>
     <ID>CognitiveComplexMethod:Compiler.kt$Compiler$private fun shapes( e: Expr, s: Scope, ): List&lt;String&gt;?</ID>
@@ -109,7 +107,6 @@
     <ID>CognitiveComplexMethod:RemoteViewsDump.kt$RemoteViewsDump$private fun value( v: Any?, depth: Int, key: String = "", ): Any?</ID>
     <ID>CognitiveComplexMethod:Render.kt$@Composable private fun TextNode( p: Props, mod: Modifier, )</ID>
     <ID>CognitiveComplexMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
-    <ID>CognitiveComplexMethod:Render.kt$@OptIn(ExperimentalLayoutApi::class) @Composable private fun Element( el: WNode.Element, env: Env, inst: WidgetInstance, parent: Any?, )</ID>
     <ID>CognitiveComplexMethod:Review.kt$Review$fun markdown(): String</ID>
     <ID>CognitiveComplexMethod:Review.kt$Review$private fun run()</ID>
     <ID>CognitiveComplexMethod:Runtime.kt$Runtime$suspend fun refreshApps()</ID>
@@ -191,8 +188,6 @@
     <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun call( e: Expr.Call, s: Scope, ): Ev</ID>
     <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun draw( it: Item.Call, scope: Scope, ): WNode.Draw</ID>
     <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun element( n: Item.Node, scope: Scope, ): WNode</ID>
-    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
-    <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun handler( h: Handler, scope: Scope, params: List&lt;String&gt; = HANDLER_PARAMS[h.name].orEmpty(), ): Action</ID>
     <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun item( it: Item, scope: Scope, mode: Children, ): WNode</ID>
     <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun numericCall( name: String, args: List&lt;Ev&gt;, slow: Ev, ): Ev</ID>
     <ID>CyclomaticComplexMethod:Compiler.kt$Compiler$private fun program(): Program</ID>
@@ -268,7 +263,6 @@
     <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun Node( node: WNode, env: Env, inst: WidgetInstance, parent: Any?, )</ID>
     <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun TextNode( p: Props, mod: Modifier, )</ID>
     <ID>CyclomaticComplexMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
-    <ID>CyclomaticComplexMethod:Render.kt$@OptIn(ExperimentalLayoutApi::class) @Composable private fun Element( el: WNode.Element, env: Env, inst: WidgetInstance, parent: Any?, )</ID>
     <ID>CyclomaticComplexMethod:Review.kt$Review$private fun run()</ID>
     <ID>CyclomaticComplexMethod:Runtime.kt$Runtime$suspend fun refreshApps()</ID>
     <ID>CyclomaticComplexMethod:ShadeHost.kt$ShadeHost$fun start(): Boolean</ID>
@@ -343,8 +337,6 @@
     <ID>CyclomaticComplexMethod:XdgShell.kt$XdgSurface$override fun onCommit()</ID>
     <ID>LongMethod:AndroidApps.kt$AndroidAppCatalog$private fun reload(evict: String? = null)</ID>
     <ID>LongMethod:Canvas.kt$Painter$private fun DrawScope.draw( n: WNode.Draw, env: Env, )</ID>
-    <ID>LongMethod:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
-    <ID>LongMethod:Compiler.kt$Compiler$private fun handler( h: Handler, scope: Scope, params: List&lt;String&gt; = HANDLER_PARAMS[h.name].orEmpty(), ): Action</ID>
     <ID>LongMethod:Compiler.kt$Compiler$private fun program(): Program</ID>
     <ID>LongMethod:Json.kt$Json.Reader$fun value(): Value</ID>
     <ID>LongMethod:Parser.kt$Parser$private fun body(top: Boolean = false): Body</ID>
@@ -353,7 +345,6 @@
     <ID>LongMethod:PowosAiActivity.kt$PowosAiActivity$@Composable private fun Chat()</ID>
     <ID>LongMethod:PowosTerminalActivity.kt$PowosTerminalActivity$override fun onCreate(savedInstanceState: Bundle?)</ID>
     <ID>LongMethod:Render.kt$@Composable private fun common( p: Props, parent: Any?, ): Modifier</ID>
-    <ID>LongMethod:Render.kt$@OptIn(ExperimentalLayoutApi::class) @Composable private fun Element( el: WNode.Element, env: Env, inst: WidgetInstance, parent: Any?, )</ID>
     <ID>LongMethod:ShellBridge.kt$ShellBridge$private fun dispatch( method: String, a: JSONArray, ): Any?</ID>
     <ID>LongMethod:ShellNative.kt$ShellNative.Tile$fun draw(frame: String)</ID>
     <ID>LongMethod:ShellWords.kt$ShellWords$private fun segments(s: String): List&lt;String&gt;</ID>
@@ -408,7 +399,6 @@
     <ID>NestedBlockDepth:Bootstrap.kt$Bootstrap$private fun obtainTarball(): File</ID>
     <ID>NestedBlockDepth:Client.kt$Client$fun run()</ID>
     <ID>NestedBlockDepth:Client.kt$Client$private fun writeLoop()</ID>
-    <ID>NestedBlockDepth:Compiler.kt$Compiler$private fun ex( e: Expr, s: Scope, ): Ev</ID>
     <ID>NestedBlockDepth:G1Protocol.kt$G1Protocol$fun pages(text: String): List&lt;String&gt;</ID>
     <ID>NestedBlockDepth:G2Protocol.kt$G2Protocol$fun transcript(payload: ByteArray): Pair&lt;String, Boolean&gt;?</ID>
     <ID>NestedBlockDepth:HomeItems.kt$Shortcuts$private fun tidy()</ID>
