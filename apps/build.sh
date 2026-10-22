@@ -46,8 +46,21 @@ fi
 # with their bindings (pages were missed until 2026-10-23: a page change never shipped through here) -
 # Preact and the SpacetimeDB SDK stay imports, which the shell's import map resolves to its own (one copy per page).
 # Workers (ui/workers/*.ts) are bundled whole: a worker has no import map.
+# __POWOS_SCHEMA__: the bindings' fingerprint, as `powos app build` defines it (lib/apps/powos-app tree_hash, 16 hex):
+# a new schema makes the host reconnect with the new bindings.
 if [ -d "$D/ui" ]; then
-  docker run --rm --platform linux/arm64 -v powos-apps-cargo:/cache -v "$D:/app" -e HOST_UID="$(id -u)" node:22 bash -c '
+  SCHEMA=$(python3 - "$D/ui/bindings" <<'PY'
+import hashlib, os, sys
+d, h = sys.argv[1], hashlib.sha256()
+if not os.path.isdir(d): print("none"); sys.exit()
+for root, dirs, files in os.walk(d):
+    dirs[:] = sorted(dirs)
+    for f in sorted(files):
+        p = os.path.join(root, f); h.update(os.path.relpath(p, d).encode() + b"\0"); h.update(open(p, "rb").read())
+print(h.hexdigest()[:16])
+PY
+)
+  docker run --rm --platform linux/arm64 -v powos-apps-cargo:/cache -v "$D:/app" -e HOST_UID="$(id -u)" -e SCHEMA="$SCHEMA" node:22 bash -c '
     set -euo pipefail
     E=/cache/esbuild-0.25; [ -x $E/node_modules/.bin/esbuild ] || (mkdir -p $E && cd $E && npm i -s esbuild@0.25 >/dev/null 2>&1)
     rm -rf /app/out/ui && mkdir -p /app/out/ui
@@ -55,7 +68,7 @@ if [ -d "$D/ui" ]; then
     w=$(ls widgets/*.tsx pages/*.tsx 2>/dev/null || true)
     [ -z "$w" ] || $E/node_modules/.bin/esbuild $w --bundle --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact \
       --external:preact --external:preact/hooks --external:preact/jsx-runtime --external:@preact/signals --external:spacetimedb \
-      --minify --outdir=/app/out/ui --outbase=/app/ui --log-level=warning
+      --define:__POWOS_SCHEMA__="\"$SCHEMA\"" --minify --outdir=/app/out/ui --outbase=/app/ui --log-level=warning
     k=$(ls workers/*.ts 2>/dev/null || true)
     [ -z "$k" ] || $E/node_modules/.bin/esbuild $k --bundle --format=esm --target=es2022 --minify --outdir=/app/out/ui/workers --log-level=warning
     chown -R $HOST_UID /app/out/ui; ls -la /app/out/ui/widgets /app/out/ui/pages 2>/dev/null || true'

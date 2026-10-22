@@ -189,7 +189,14 @@ strip only - not the cause when a drag in a tile fails.
   raster drawing (key "") is adopted on its first new stroke: picture copied to `base`, drawn under the strokes.
 - Before 0.2.0 the page kept only canvas pixels (getImageData/putImageData at 0,0 on resize): rotating clipped the
   drawing at the landscape height and the clipped raster was what got saved.
-- Test: apps/sketch/test/rotate.sh (headless, mock db). Device: tools/phone/verify/sketch-rotate.sh (fresh test
-  drawing, deleted after; window.__sketch is its read-only state). Ship: app-src.sh push the sources, then
-  `powos app install ~/Projects/sketch` there (module builds on the Mac builder over ssh); apps/build.sh doesn't bundle
-  pages or define __POWOS_SCHEMA__, so the phone's own install is the deploy path.
+- Zoom 0.02x-100x (ink.ts MIN_S/MAX_S, canvas px per drawing unit). Mid-pinch the canvas only gets a CSS
+  translate+scale of the last render (look.shown = the view its pixels are at); on lift a vector repaint. So pen.ts
+  reads positions from the canvas's PARENT rect (`frame`), never the transformed canvas. Points are rounded to
+  ~0.1 canvas px at the drawing scale (`quantum`). Segments off screen are skipped (each is its own path).
+- A stroke's width is in drawing units: one drawn zoomed out is huge zoomed in (the user's "light void" on
+  2026-10-23 was two such white strokes). An older drawing's `base` is drawn keyed (BG -> transparent): no edge;
+  it's a raster, so it can't be crisp - only strokes are.
+- Test: apps/sketch/test/rotate.sh (headless, mock db; crispness vs the 1x render scaled, background at extreme
+  pans). Device: tools/phone/verify/sketch-rotate.sh, sketch-canvas.sh, sketch-zoom.sh (fresh test drawing, deleted
+  after; window.__sketch is read-only). Ship: apps/build.sh sketch (bundles pages + __POWOS_SCHEMA__ since
+  2026-10-23), then `ADB="docker exec powos-vadb adb -s 10.13.13.7:5555" apps/install.sh sketch ui --note ...`.
