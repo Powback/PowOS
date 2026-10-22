@@ -40,6 +40,8 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - ui/reorder.ts (shared, widgets expert reviews): hit-test on container-relative laid-out boxes (FLIP cancelled first),
   live order in a ref, cancel drops the lift. Home's grid.tsx is the widgets expert's - don't edit it.
 - Gate `cc-reorder` (gate.mjs) waits on states, never time; prove with `CC_THROTTLE=6` x20.
+- On the device: `tools/phone/verify/cc-toprow.sh` (queue it) - v3, no headings, the row's boxes equal before/after
+  the further pull. The saved order: /data/data/com.powos.app/files/shell-data/controls.layout.json (read only).
 
 ## Render, check, ship
 - Targeted renders: `shell/dev/shot.sh OUTDIR 'REGEX' [SHELL_DIR] [WALLPAPER]` (scenes at the top of shots.mjs;
