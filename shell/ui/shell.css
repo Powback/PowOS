@@ -1033,13 +1033,16 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
  * --q changes per frame; continuous, no jump. A list that fills the panel has no room: it slides with the sheet.
  */
 .notif-items { display: flex; flex-direction: column; gap: 6px; flex: none; }
-.notif-panel.riding :is(.notif-items, .cc) { transform: translateY(min(calc((1 - var(--q)) * var(--drop)), var(--free, 0px))); }
+/*
+ * (The ride - the cards hanging from the sheet's bottom edge - is gone with the short --drop: it cancelled the sheet's
+ * own move exactly, and the cards stood still on screen while the header came down. The cascade below is the motion.)
+ */
 /*
  * The cascade, opening: each row (a notification group, the control center's header, sliders, media, a row of tiles:
  * .cascade, --i its place) comes down from 24 px + 5 px a row above where it rests and fades in, a row starting a
  * little after the one above it - its own progress --r from the same --q: nothing per frame but --q.
  */
-.notif-panel.riding .cascade {
+.notif-panel.riding :is(.cascade, .panel-body > .notif-bar) {
   --s: calc(min(var(--i, 0), 8) * 0.06);
   --r: clamp(0, calc((var(--q) - var(--s)) / (1 - var(--s))), 1);
   transform: translateY(calc((1 - var(--r)) * -1 * (24px + min(var(--i, 0), 8) * 5px)));
