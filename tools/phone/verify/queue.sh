@@ -228,6 +228,9 @@ EOS
       [ -n "$go" ] && echo "$(date +%T) go from the phone: $go ($N checks)"
       for j in "${sel[@]}"; do
         [ -f "$j" ] || continue
+        # The checkout to origin's tip before EACH job, not just each window: a window can last an hour, and a check
+        # pushed after it began was missing ("No such file", rc 126/127, 2026-10-23).
+        verify_tree >/dev/null 2>&1 || true
         task=; close=0; tries=0; cwd=$PWD; rel=0; from=; name=; screen=; budget=300; cmd=(); . "$j"
         # A job from before repo-relative jobs: its worktree may be gone - run it in the verify checkout instead.
         if [ "$rel" != 1 ] && [[ "$cwd ${cmd[*]}" == *"$REPO/.claude/worktrees/"* ]]; then
