@@ -14,7 +14,7 @@ import { Pill, hearing, type MicTarget } from "./bar.tsx";
 import { ago } from "./time.ts";
 import { openAgents } from "../agents.ts";
 import { DbConnection as AgentsDb } from "../vendor/powos-agents.js";
-import { useDb, useRows } from "../apps/stdb.ts";
+import { checkAlive, useDb, useRows } from "../apps/stdb.ts";
 import type { AgentMail, AgentSession, ChatItem } from "../types.ts";
 import { AppBuild, NewAppAsk, newAppAsk } from "./appbuild.tsx";
 import { Units } from "./units.tsx";
@@ -183,10 +183,12 @@ const NEEDS_SHOWN = 3;
 const GROUP_OVER = 6;
 const sec = (ms: bigint | number) => Number(ms) / 1000;
 
+const WORK_QUERY = "SELECT * FROM work";
+
 /** Subscribed only while the page shows: the socket goes 5 s after it's left (apps/stdb.ts), so home holds none. */
 function WorkFeed() {
   const db = useDb("powos-agents", AgentsDb);
-  const rows = useRows<WorkRow>(db, "work", "SELECT * FROM work");
+  const rows = useRows<WorkRow>(db, "work", WORK_QUERY);
   useEffect(() => {
     if (db.status !== "connected") return;
     if (rows.length) {
@@ -205,7 +207,52 @@ function WorkFeed() {
   useEffect(() => {
     boardLive.value = db.status === "connected";
   }, [db.status]);
+  // Coming into sight on a connection that was already there: is it still alive (a socket Doze cut silently brought
+  // no update again - the board went stale after edits)?
+  useEffect(() => {
+    const look = () => document.hidden || checkAlive("powos-agents", WORK_QUERY);
+    look();
+    document.addEventListener("visibilitychange", look);
+    return () => document.removeEventListener("visibilitychange", look);
+  }, []);
   return null;
+}
+
+/**
+ * The verify queue's marker on a task (tools/phone/verify/queue.sh QUEUED_STEP): a phone check of it waits for a free
+ * window. "Test now" hands the phone over: the queue runs it at once (powos.ai.verifyGo); its result replaces the step
+ * ("verify PASS: ..." / "verify FAIL rc=N: ...", a FAIL with a screenshot as the task's last review image).
+ */
+const QUEUED_STEP = "phone check queued";
+const checkQueued = (w: WorkRow) => w.status === "working" && w.step === QUEUED_STEP;
+/** Tapped "test now" (task id, or "all"): when. "testing…" shows until the step changes, or this long. */
+const testing = signal<Record<string, number>>({});
+const TESTING_MS = 20 * 60_000;
+const testError = signal("");
+const isTesting = (w: WorkRow) =>
+  checkQueued(w) && [testing.value[w.id], testing.value.all].some((t) => t !== undefined && Date.now() - t < TESTING_MS);
+
+function testNow(id: string) {
+  testError.value = "";
+  testing.value = { ...testing.value, [id]: Date.now() };
+  const go = powos.ai.verifyGo;
+  const failed = () => {
+    const { [id]: _, ...rest } = testing.value;
+    testing.value = rest;
+    testError.value = "test now needs the newer app";
+  };
+  if (!go) return failed();
+  go(id).catch(failed);
+}
+
+function TestError() {
+  return testError.value ? <div class="ai-work-empty muted">{testError.value}</div> : null;
+}
+
+/** A check's result as the queue wrote it into the step: passed / failed and its one line (the log path dropped). */
+function resultOf(step: string): { ok: boolean; line: string } | null {
+  const m = /^verify (PASS|FAIL)(?: rc=\d+)?: ?(.*?)(?: \(log [^)]*\))?$/.exec(step);
+  return m ? { ok: m[1] === "PASS", line: m[2].replace(/^FAIL:?\s*/, "") } : null;
 }
 
 /**
@@ -272,6 +319,43 @@ function Review({ path }: { path: string }) {
   );
 }
 
+/** The step it's on; a queued phone check ("testing…" once test now was tapped), or a check's result in one line. */
+function StepLine({ w }: { w: WorkRow }) {
+  const result = resultOf(w.step ?? "");
+  if (checkQueued(w)) return <span class="ai-item-step muted">{isTesting(w) ? "testing… don't touch the phone" : QUEUED_STEP}</span>;
+  if (!result) return <span class="ai-item-step">{w.step}</span>;
+  return <span class={`ai-item-step ai-result ${result.ok ? "ok" : "bad"}`}>{result.ok ? "check passed" : `check failed: ${result.line}`}</span>;
+}
+
+/** Under a row: "test now" while its phone check is queued; a failed check's screenshot (its last verify-*.png). */
+function CheckActs({ w, images }: { w: WorkRow; images: string[] }) {
+  if (checkQueued(w))
+    return isTesting(w) ? null : (
+      <button type="button" class="ai-test" onClick={() => testNow(w.id)}>
+        test now
+      </button>
+    );
+  const shot = resultOf(w.step ?? "")?.ok === false ? images.filter((p) => /\/verify-[^/]*\.png$/.test(p)).pop() : undefined;
+  return shot ? (
+    <div class="ai-imgs ai-result-shot">
+      <Review path={shot} />
+    </div>
+  ) : null;
+}
+
+/** "test all" on the in-progress header while phone checks are queued ("testing…" once tapped). */
+function TestAll({ rows }: { rows: WorkRow[] }) {
+  const queued = rows.filter(checkQueued);
+  if (!queued.length) return null;
+  return queued.some((w) => !isTesting(w)) ? (
+    <button type="button" class="ai-test ai-test-all" onClick={() => testNow("all")}>
+      test all
+    </button>
+  ) : (
+    <span class="ai-test-all muted">testing…</span>
+  );
+}
+
 /**
  * One open item: a dot, its title (up to two lines); when it's tracked, a thin bar, the current step and "3/10 · 2
  * commits · 2h ago" (else its age past a day). A tap shows its note, the steps done / now / next, the commits in plain
@@ -299,11 +383,12 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
               <span style={{ width: `${(100 * done) / total}%` }} />
             </span>
           )}
-          {tracked && w.step && <span class="ai-item-step">{w.step}</span>}
+          {w.step && <StepLine w={w} />}
           {tracked ? <span class="ai-item-facts">{facts}</span> : <span class="ai-item-facts">{who}</span>}
         </span>
         {!tracked && Date.now() / 1000 - moved > DAY_S && <span class="ai-item-age">{ago(moved)}</span>}
       </button>
+      {!open && <CheckActs w={w} images={images} />}
       {open && (
         <div class="ai-item-more">
           {w.note && <p class="ai-item-note">{w.note}</p>}
@@ -320,9 +405,7 @@ function WorkLine({ w, open, onTap }: { w: WorkRow; open: boolean; onTap: () => 
           {commits.length > 0 && (
             <ul class="ai-commits">
               {commits.map((c) => (
-                <li key={c.sha}>
-                  {c.subject || "a change"}
-                </li>
+                <li key={c.sha}>{c.subject || "a change"}</li>
               ))}
             </ul>
           )}
@@ -377,7 +460,9 @@ function Work({ shown }: { shown: boolean }) {
       <h3 class="ai-heading">
         in progress
         {!boardLive.value && shown && <span> · connecting…</span>}
+        <TestAll rows={working} />
       </h3>
+      <TestError />
       {grouped
         ? [...groups].map(([p, ws]) => (
             <div key={p} class="ai-group">

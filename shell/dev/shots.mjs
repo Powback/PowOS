@@ -151,6 +151,11 @@ const board = (actions) =>
   ` P.board.value = B.map((r) => ({ ...r, note: A[r.id] ?? r.note, created: now - r.createdAgo, updated: now - r.updatedAgo, done: r.doneAgo ? now - r.doneAgo : 0, activity: r.activityAgo ? now - r.activityAgo : 0 }));` +
   ` P.boardSeen.value = true; S.chat.value = { busy: false, items: [{ kind: "user", text: "what changed overnight?" }, { kind: "assistant", text: "Three pushes: the shade, the pet, the speech fix." }, ...${CHAT_SAMPLE}] }; S.page.value = -1; await sleep(300);`;
 
+/** Rows with queued phone checks (queue.sh's marker), a failed check (its screenshot) and a passed one: "test now". */
+const TEST_NOW =
+  " const R = P.board.value; const w = R.filter((r) => r.status === 'working'); w[0].step = 'phone check queued'; w[1].step = 'phone check queued';" +
+  " w[2].step = 'verify FAIL rc=1: FAIL: not freeform (log ~/.cache/powos-verify-queue/done/x.log)'; w[2].images = JSON.stringify(['/home/powos/design-qa/verify-x.png']);" +
+  " w[3].step = 'verify PASS: 3 swipes ok (log ~/.cache/powos-verify-queue/done/y.log)'; P.board.value = [...R]; await sleep(200); document.querySelector('.ai-work-list').scrollIntoView();";
 /**
  * The scenes: [name, mode, setup] - setup runs in the page once it's ready (S: state.ts, U: an import by path, E: the
  * mock's events, sleep). `behind`: what the window is over - "wallpaper" (home: native glass), "blurred" (the shade,
@@ -186,6 +191,8 @@ const SCENES = [
   ["ai-v2-open", "home", board(true) + " document.querySelectorAll('.ai-work-list .ai-fold, .ai-history .ai-fold').forEach((b) => b.click()); await sleep(100); document.querySelector('.ai-screen .ai-item')?.click(); await sleep(100); document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
   ["progress", "home", board(false) + " document.querySelector('.ai-work-list').scrollIntoView();", "wallpaper"],
   ["progress-open", "home", board(false) + " [...document.querySelectorAll('.ai-item-row')].find((b) => /queued/i.test(b.textContent))?.click(); await sleep(300); document.querySelector('.ai-item-more')?.scrollIntoView({ block: 'center' }); await sleep(300);", "wallpaper"],
+  ["test-now", "home", board(false) + TEST_NOW, "wallpaper"],
+  ["test-now-testing", "home", board(false) + TEST_NOW + " document.querySelector('.ai-test')?.click(); await sleep(200);", "wallpaper"],
   ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
   ["queued", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["queued-ai", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.page.value = -1;`, "wallpaper"],

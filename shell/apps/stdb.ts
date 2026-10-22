@@ -252,6 +252,41 @@ function acquire(database: string, make: Builder, schema?: string): Entry {
   return e;
 }
 
+/**
+ * Whether [database]'s socket still answers: one more subscription to [query]; if it isn't applied within [ms], the
+ * database gets a new connection (every hook on it subscribes again). A socket Doze cut without a close event stays
+ * "connected" and never brings an update again - the AI page's board went stale like that after board edits. Call it
+ * when a view comes into sight (not on a timer).
+ */
+export function checkAlive(database: string, query: string, ms = 4000) {
+  const e = entries.get(database);
+  if (!e?.conn || e.status !== "connected") return;
+  const conn = e.conn;
+  let ok = false;
+  let sub: any = null;
+  try {
+    sub = conn
+      .subscriptionBuilder()
+      .onApplied(() => {
+        ok = true;
+        // Its rows are the live subscription's too: let this one go (after the SDK's own handler is done).
+        window.setTimeout(() => {
+          try {
+            sub?.unsubscribe();
+          } catch {}
+        }, 0);
+      })
+      .subscribe(query);
+  } catch {}
+  window.setTimeout(() => {
+    if (ok || e.conn !== conn || entries.get(database) !== e) return;
+    try {
+      conn.disconnect();
+    } catch {}
+    connect(e);
+  }, ms);
+}
+
 /** True while the page is shown (home on screen). */
 function useVisible() {
   const [v, setV] = useState(!document.hidden);

@@ -188,7 +188,13 @@
 .ai-group + .ai-group { margin-top: 6px; }
 .ai-group-name { padding: 6px 12px 2px; font-size: var(--text-small); color: var(--color-muted); }
 .ai-work-list { display: flex; flex-direction: column; }
-.ai-work-list > .ai-heading { margin: 4px 12px 2px; }
+.ai-work-list > .ai-heading { margin: 4px 12px 2px; display: flex; align-items: baseline; gap: 6px; }
+/* A queued phone check: a quiet "test now" under the row (the queue runs it at once); "test all" on the header. */
+.ai-test { align-self: flex-start; margin: -2px 12px 8px calc(12px + 8px + 10px); padding: 4px 12px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: var(--soft-fill); border: 0; border-radius: 999px; }
+.ai-heading .ai-test-all { margin: 0 0 0 auto; }
+.ai-heading span.ai-test-all { font-size: var(--text-small); }
+.ai-result.bad { color: var(--color-red); }
+.ai-result-shot { padding: 0 12px 10px calc(12px + 8px + 10px); }
 /* A folded line: paused, done recently, the earlier conversation. */
 .ai-fold { align-self: flex-start; padding: 8px 12px; font: inherit; font-size: var(--text-small); color: var(--color-foreground); background: none; border: 0; }
 

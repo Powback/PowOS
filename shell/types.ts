@@ -360,6 +360,11 @@ export interface Bridge {
     send(text: string, recents?: boolean): Promise<void>;
     /** Takes a queued message back before its turn: it's never sent (?: hosts from before the queue). */
     unqueue?(id: number): Promise<void>;
+    /**
+     * "Test now": the verify queue (tools/phone/verify/queue.sh, on the Mac) runs [task]'s queued phone checks at once
+     * ("all": every queued one), not waiting for the phone to sit idle. ?: hosts from before it.
+     */
+    verifyGo?(task: string): Promise<void>;
     /** Opens PowOS AI's own app. */
     open(): Promise<void>;
     /**
