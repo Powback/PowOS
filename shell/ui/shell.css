@@ -1239,6 +1239,25 @@ input.folder-title:focus { background: var(--soft-fill); }
  */
 .notif-panel:has(> .panel-body.together) { height: auto; max-height: 88%; }
 .notif-panel .panel-body.together { flex: 0 1 auto; }
+/*
+ * The one panel's edge follows the gesture: its frost, bottom edge and grip come down with the pull and go back up
+ * with the close (--q of its height, --ph: notifications.tsx measures it on a resize, never per frame), and the
+ * further pull lifts it by what's not shown yet (--cc-lift, ccexpand.ts). The panel moves up by that, its body back
+ * down by the same (nothing in it moves on screen), the part past the edge clipped. Translates only; at rest both 0.
+ */
+@property --cc-lift {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.notif-panel:has(> .panel-body.together) {
+  overflow-y: clip;
+  translate: 0 calc(-1 * ((1 - var(--q)) * var(--ph, 0px) + var(--cc-lift)));
+}
+.notif-panel > .panel-body.together {
+  --cc-lift: inherit;
+  translate: 0 calc((1 - var(--q)) * var(--ph, 0px) + var(--cc-lift));
+}
 .panel-body.together > .notif-list { gap: 10px; }
 .panel-body.together .cc { flex: none; overflow: visible; padding-bottom: 0; }
 .panel-body.together .cc + .notif-bar { padding-top: 10px; padding-bottom: 0; }

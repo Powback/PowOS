@@ -36,12 +36,15 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - One panel by default: control center on top, notifications under it, one `.notif-list` scroll; Settings > Style >
   "separate notifications & controls" (`separatePanels`) restores the split; shade.tsx maps the host's "control" pull.
 - Open: short `--drop` (15vh) + cascade (`.cascade`, `--i` row index; CC rows first). Grouping `grouped()`; stacks.
+- The one panel's EDGE follows too (shell.css `--cc-lift` block): the panel translates up by (1-q)*--ph + --cc-lift,
+  its body back down by the same, overflow-y clip; frost, edge and grip move, content doesn't. Gate shade-overpull
+  asserts edge/grip/no empty slab; device: tools/phone/verify/shade-panel.sh (recording + SF blur-region coverage).
 
 ## Control center (ui/control.tsx; v3 = `Controls`, classic = `Categories`, flag `ccV3` key "ccLayout")
 - v3: ONE ordered list (`list`): first six = the first pull's row; a further pull (ccexpand.ts) reveals the rest
   below, the row never moves. It lays the rest out once (`.cc3-grid.cc-peek`; never bare `.peek`, the banner's fixed
   class), puts what's under `.cc` back up by its height, then per frame only those translates + `--cc-k` on the grid
-  (inherits:false, cells inherit by name). Let go: eased, laid out. Gate `shade-overpull` drags it through gesture.ts.
+  (inherits:false, cells inherit by name) + the panel's `--cc-lift` (its growth G - shown, measured once per pull).
 - Order: curated (QUICK, then the rest) unless `ownOrder()`: a v3 edit (`v3: true` in controls.layout) or a classic
   arrangement with a net move. Only drags write controls.layout; never reset it without the user saying so.
 - Long press = the toggle's own page (cancelled once the finger moves); rearranging = edit mode via the header pencil
@@ -93,7 +96,9 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   region in one call (GlassBlur.wholeWindow); other windows use GlassBlur.wholeWindowOf (shade, switcher activity).
 - Radius: SF's blur is ~0.15-0.3 of the radius given. Home tiles: --glass-blur-native (140 CSS px). Shade: 360 dp
   default (ShadeHost SHADE_BLUR_DP), page-tunable with powos.shade.blur(dp) 0..600. No saturation/brightness: tint in CSS.
-- A window just shown has no valid surface yet: WindowBlur retries on the next frames (don't cache as done).
+- A window just shown has no valid surface yet: WindowBlur retries on the next frames (don't cache as done). A region
+  is the window's rect at send time: WindowBlur keys it by radius AND size and resends on a resize (a GONE window
+  shown again, the banner strip grown into the shade, kept a strip of blur). ShadeHost eases the blur on settle.
 - Respect Android's switch: WindowManager.isCrossWindowBlurEnabled (battery saver) -> no blur; never forced.
 - Page protocol (native port): b.hello -> b.state 1|0; b.r <dpr> <n> x y w h tl tr br bl alpha radius...; regions sent
   per frame only while something moves (touch, transition, resize of a surface), nothing at rest (perf-checked).

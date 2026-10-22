@@ -8,7 +8,10 @@
  * is put back up by the rest's height H with a translate - nothing moved on screen. Then per frame only that translate
  * and the list's --cc-k (0..1, registered inherits:false; the rest's toggles read it by name) change: the notifications
  * slide down under the finger and the rest's rows fade in a row at a time as they're uncovered; past H a rubber band.
- * Let go, the same two values ease to the end state, which is then laid out once (no jump: the translate was exactly
+ * The panel's own edge, its handle and its frost follow too: laid out whole the panel is taller by its growth G, so it's
+ * lifted by G - shown (--cc-lift on the panel, registered inherits:false; shell.css moves the panel up and its body
+ * back down by it - its bottom edge, the grip with it, sits under the notifications, no empty slab).
+ * Let go, the same values ease to the end state, which is then laid out once (no jump: the translate was exactly
  * the layout's difference). Nothing runs at rest.
  *
  * Classic (Categories): the rows below spread apart (a rubber band, translates only) and a commit lays the new state
@@ -37,6 +40,9 @@ type Pull = {
   /** v3's list and its grid (laid out whole while the pull lasts: the grid's "cc-peek"), or null: classic. */
   list: HTMLElement | null;
   grid: HTMLElement | null;
+  /** v3: the panel, and how much taller it is laid out whole than folded (px; less than [h] at its max height). */
+  panel: HTMLElement | null;
+  g: number;
   movers: Mover[];
   /** v3: the rest's height (px) - the row's bottom to the list's, laid out whole. */
   h: number;
@@ -78,10 +84,29 @@ function peekPull(): Pull | null {
   const list = list3();
   const grid = list?.querySelector<HTMLElement>(".cc3-grid");
   if (!list || !grid) return null;
-  grid.classList.add("cc-peek");
+  const panel = list.closest<HTMLElement>(".notif-panel");
+  const g = panel ? growth(panel, list, grid) : 0;
   const n = grid.querySelectorAll(".cc3-cell").length;
   grid.style.setProperty("--cc-rows", String(Math.max(1, Math.ceil((n - 6) / 6))));
-  return { list, grid, movers: below().map((el) => ({ el, gain: 1 })), h: restHeight(list), was: ccExpanded.value };
+  return { list, grid, panel, g, movers: below().map((el) => ({ el, gain: 1 })), h: restHeight(list), was: ccExpanded.value };
+}
+
+/**
+ * The panel's height folded, then with every toggle laid out (the grid left "cc-peek"): its edge's travel. Once per
+ * pull, two layouts. Folded for the measure even if it's shown whole now - its scroll put back (the shorter list
+ * clamped it).
+ */
+function growth(panel: HTMLElement, list: HTMLElement, grid: HTMLElement) {
+  const scroller = list.closest<HTMLElement>(".notif-list");
+  const st = scroller?.scrollTop ?? 0;
+  const whole = list.classList.contains("whole");
+  list.classList.remove("whole");
+  const folded = panel.offsetHeight;
+  if (whole) list.classList.add("whole");
+  grid.classList.add("cc-peek");
+  const g = Math.max(0, panel.offsetHeight - folded);
+  if (scroller) scroller.scrollTop = st;
+  return g;
 }
 
 /** Classic: the rows spread apart from the third (its --i 3), what's under them with the last. */
@@ -89,7 +114,7 @@ function classicPull(): Pull {
   const grids = [...document.querySelectorAll<HTMLElement>(".panel-body.together .cc-main > .cc-grid")];
   const gain = (el: HTMLElement) => ((Number(el.style.getPropertyValue("--i")) || 3) - 3) / 2;
   const movers = [...grids.map((el) => ({ el, gain: gain(el) })), ...below().map((el) => ({ el, gain: 1 }))];
-  return { list: null, grid: null, movers, h: 0, was: ccExpanded.value };
+  return { list: null, grid: null, panel: null, g: 0, movers, h: 0, was: ccExpanded.value };
 }
 
 /** v3: [r] of the rest shown (px, 0..h, past h the rubber band). Classic: [r] the spread. */
@@ -98,6 +123,7 @@ function place(p: Pull, r: number) {
     const k = p.h > 0 ? Math.min(1, Math.max(0, r / p.h)) : 1;
     p.grid.style.setProperty("--cc-k", String(k));
     for (const m of p.movers) m.el.style.translate = `0 ${r - p.h}px`;
+    p.panel?.style.setProperty("--cc-lift", `${Math.max(0, p.g - r)}px`);
     return;
   }
   for (const m of p.movers) {
@@ -130,6 +156,8 @@ function ease(p: Pull, r: number, on: boolean) {
   void inline(p)[0]?.offsetWidth;
   for (const m of p.movers) m.el.style.transition = `translate ${MS}ms ${EASE}`;
   p.grid?.style.setProperty("transition", `--cc-k ${MS}ms ${EASE}`);
+  // The panel's own --q keeps its transition (shell.css [data-q]); its lift eases with the rest.
+  p.panel?.style.setProperty("transition", `--q 280ms ${EASE}, --cc-lift ${MS}ms ${EASE}`);
   p.to = on;
   place(p, r);
   clearTimeout(doneTimer);
@@ -144,14 +172,20 @@ function finish(p: Pull, on: boolean) {
   ccExpanded.value = on;
   // Laid out now, not at the render (a microtask away): a pull begun right after measures the right state.
   p.list?.classList.toggle("whole", on);
+  clearInline(p);
+  // Folded at the list's end: the list is shorter, its scroll clamped - what's in it eases down from where it was.
+  if (scroller) slide([...scroller.children] as HTMLElement[], () => st - scroller.scrollTop);
+}
+
+/** What the pull wrote inline gone: the movers', the grid's (its peek too), the panel's lift. */
+function clearInline(p: Pull) {
   for (const el of inline(p)) {
     el.style.transition = "";
     el.style.translate = "";
     el.style.removeProperty("--cc-k");
   }
   p.grid?.classList.remove("cc-peek");
-  // Folded at the list's end: the list is shorter, its scroll clamped - what's in it eases down from where it was.
-  if (scroller) slide([...scroller.children] as HTMLElement[], () => st - scroller.scrollTop);
+  for (const k of ["--cc-lift", "transition"]) p.panel?.style.removeProperty(k);
 }
 
 /** [els] shown [by] px higher than laid out (0: not moved), eased to their place. */

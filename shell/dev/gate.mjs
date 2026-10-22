@@ -214,6 +214,14 @@ async function overpullKit() {
   const UNDER = ".panel-body.together .cc ~ .notif-bar";
   const under = () => document.querySelector(UNDER)?.getBoundingClientRect().top ?? NaN;
   const row = () => cells().slice(0, 6).map((e) => Math.round(e.getBoundingClientRect().top)).join();
+  // The panel's own edge on screen (its frost's bottom), its grip, and the last thing in it (the gap under that).
+  const edge = () => document.querySelector(".notif-panel")?.getBoundingClientRect().bottom ?? NaN;
+  const grip = () => document.querySelector(".notif-panel > .notif-grip")?.getBoundingClientRect().bottom ?? NaN;
+  const last = () => {
+    const els = [...document.querySelectorAll(".panel-body.together .notif-items > *")];
+    return els.length ? Math.max(...els.map((e) => e.getBoundingClientRect().bottom)) : NaN;
+  };
+  const gap = () => edge() - last();
   const still = () => !document.getAnimations().some((a) => a.playState === "running" && a.effect?.target?.closest?.(".notif-panel"));
   const at = { x: 0, y: 0 };
   const P = (type, y) =>
@@ -247,7 +255,7 @@ async function overpullKit() {
   } catch (e) {
     return [e.message];
   }
-  window.__op = { sleep, frames, shown, under, row, still, drag, n0: shown(), under0: under(), row0: row() };
+  window.__op = { sleep, frames, shown, under, row, still, drag, edge, grip, gap, n0: shown(), under0: under(), row0: row(), edge0: edge(), grip0: grip(), gap0: gap() };
   return [];
 }
 
@@ -260,7 +268,13 @@ async function overpullShort() {
     if (Math.abs(d - 30) > 3) fails.push(`pulled 30 px further, what's under the control center moved ${Math.round(d)} px`);
     if (o.shown() <= o.n0) fails.push(`pulled 30 px further, no more toggles show (${o.shown()})`);
     if (o.row() !== o.row0) fails.push(`the first row moved on the pull: ${o.row0} -> ${o.row()}`);
+    // The panel itself, not only what's in it: its edge and grip 30 px lower, no empty frost under the notifications.
+    const e = o.edge() - o.edge0;
+    if (Math.abs(e - 30) > 3) fails.push(`pulled 30 px further, the panel's edge moved ${Math.round(e)} px (a static slab)`);
+    if (Math.abs(o.grip() - o.grip0 - 30) > 3) fails.push(`pulled 30 px further, the panel's grip moved ${Math.round(o.grip() - o.grip0)} px`);
+    if (Math.abs(o.gap() - o.gap0) > 3) fails.push(`pulled 30 px further, ${Math.round(o.gap())} px of empty panel under the notifications (at rest ${Math.round(o.gap0)})`);
   });
+  if (Math.abs(o.edge() - o.edge0) > 1) fails.push(`let go short, the panel's edge is ${Math.round(o.edge() - o.edge0)} px off its place`);
   if (Math.abs(o.under() - o.under0) > 1) fails.push(`let go short, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place`);
   if (o.shown() !== o.n0) fails.push(`let go short, ${o.shown()} toggles show, not ${o.n0}`);
   return fails;
@@ -275,6 +289,8 @@ async function overpullExpand() {
   if (!document.querySelector(".cc3-list.whole")) fails.push("pulled 260 px further, the rest isn't shown");
   if (o.h < 40) fails.push(`expanded, what's under the control center moved only ${Math.round(o.h)} px`);
   if (o.row() !== o.row0) fails.push(`the first row moved on the expand: ${o.row0} -> ${o.row()}`);
+  // (At its max height the list scrolls: the notifications may go on under the edge - never empty frost under them.)
+  if (o.gap() - o.gap0 > 3) fails.push(`expanded, ${Math.round(o.gap())} px of empty panel under the notifications (at rest ${Math.round(o.gap0)})`);
   return fails;
 }
 
@@ -295,6 +311,35 @@ async function overpullFold() {
   await o.frames(2);
   if (Math.abs(o.under() - o.under0) > 1) fails.push(`folded, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place`);
   if (o.row() !== o.row0) fails.push(`folded, the first row isn't where it was: ${o.row0} -> ${o.row()}`);
+  if (Math.abs(o.edge() - o.edge0) > 1) fails.push(`folded, the panel's edge is ${Math.round(o.edge() - o.edge0)} px off its place`);
+  return fails;
+}
+
+/**
+ * Opening and closing (the host's pull: shade.drag q, then shade.settle): the panel's edge and grip come down with the
+ * pull - its frost no taller than the pull so far - and go back up with the close; settled, all where it was.
+ */
+async function panelTracksFinger() {
+  const o = window.__op;
+  const fails = [];
+  const ev = window.__mockEvents;
+  if (!ev) return ["no mock events to drive the shade's pull"];
+  const top = document.querySelector(".notif-panel").getBoundingClientRect().top;
+  const full = o.edge0 - Math.max(0, top);
+  const seen = [];
+  for (const q of [0.25, 0.5, 0.75]) {
+    ev.emit("shade.drag", { q });
+    await o.sleep(380);
+    const e = o.edge();
+    seen.push(Math.round(e));
+    if (e > o.edge0 - (1 - q) * full * 0.6) fails.push(`pulled to ${q}, the panel's edge is already at ${Math.round(e)} of ${Math.round(o.edge0)} (a static slab)`);
+    if (Math.abs(o.grip() - (o.grip0 - o.edge0 + e)) > 2) fails.push(`pulled to ${q}, the grip isn't at the panel's edge`);
+  }
+  if (!(seen[0] < seen[1] && seen[1] < seen[2])) fails.push(`the panel's edge didn't follow the pull down: ${seen.join(" -> ")}`);
+  ev.emit("shade.settle", { open: true });
+  await o.sleep(450);
+  await o.frames(2);
+  if (Math.abs(o.edge() - o.edge0) > 1) fails.push(`settled open, the panel's edge is ${Math.round(o.edge() - o.edge0)} px off its place`);
   return fails;
 }
 
@@ -302,7 +347,7 @@ async function overpullFold() {
 async function overpullRest() {
   const o = window.__op;
   await o.sleep(400);
-  const left = [...document.querySelectorAll(".notif-panel [style]")].filter((e) => e.style.translate || e.style.getPropertyValue("--cc-k"));
+  const left = [...document.querySelectorAll(".notif-panel, .notif-panel [style]")].filter((e) => e.style.translate || e.style.getPropertyValue("--cc-k") || e.style.getPropertyValue("--cc-lift") || e.style.transition);
   return [...(o.still() ? [] : ["an animation still runs in the panel at rest"]), ...(left.length ? [`the pull left inline values on ${left.length} elements`] : [])];
 }
 
@@ -1552,7 +1597,7 @@ try {
       open(browser, `${ORIGIN}/index.html?mode=shade`, "shade-overpull").then(async (r) => {
         await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
         const fails = [];
-        for (const step of [overpullKit, overpullShort, overpullExpand, overpullFold, overpullRest]) {
+        for (const step of [overpullKit, overpullShort, overpullExpand, overpullFold, panelTracksFinger, overpullRest]) {
           const out = await r.page.evaluate(step).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
           fails.push(...(out ?? []));
           if (fails.length) break;

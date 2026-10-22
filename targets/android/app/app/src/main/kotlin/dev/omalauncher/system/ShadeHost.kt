@@ -475,6 +475,7 @@ class ShadeHost(
         peeking = false
         wantOpen = false
         told.clear()
+        blurEase?.cancel()
         blurBehind(0f)
         // Mid-reload the window stays up (alpha 0) for the page to finish loading; it goes when that's done.
         if (reload?.reloading != true) root.visibility = View.GONE
@@ -540,12 +541,31 @@ class ShadeHost(
     private val blur = dev.omalauncher.shell.WindowBlur({ shade }, SHADE_BLUR_DP)
 
     private fun drag(q: Double) {
+        blurEase?.cancel()
         if (shown) blurBehind(q.toFloat())
         tell("shade.drag", JSONObject().put("q", q))
     }
 
+    /**
+     * Let go: the blur eases to its end as the page's panel does (shell.css [data-q]: --q over 280 ms, this curve).
+     * Set at once, a shut (a pull let go short, an assistant's close) took the blur away while the panel was still
+     * there, fading: home read straight through it (2026-10-23).
+     */
+    private var blurEase: android.animation.ValueAnimator? = null
+
+    private fun easeBlur(to: Float) {
+        blurEase?.cancel()
+        blurEase =
+            android.animation.ValueAnimator.ofFloat(behind, to).apply {
+                duration = SETTLE_MS
+                interpolator = android.view.animation.PathInterpolator(0.2f, 0.9f, 0.3f, 1f)
+                addUpdateListener { if (shown) blurBehind(it.animatedValue as Float) }
+                start()
+            }
+    }
+
     private fun settle(open: Boolean) {
-        if (shown) blurBehind(if (open) 1f else 0f)
+        if (shown) easeBlur(if (open) 1f else 0f)
         tell("shade.settle", JSONObject().put("open", open))
         if (!shown) return
         if (open) armOpen() else armShut()
@@ -727,6 +747,9 @@ class ShadeHost(
 
         /** What's behind the open shade blurred by this much (dp, the compositor's radius) until the page says. */
         private const val SHADE_BLUR_DP = 360f
+
+        /** The page's settle (shell.css [data-q] --q transition), ms. */
+        private const val SETTLE_MS = 280L
 
         /** The running shade host, for the bridge (system.notifications lends SystemUI's panel through it). */
         var current: ShadeHost? = null

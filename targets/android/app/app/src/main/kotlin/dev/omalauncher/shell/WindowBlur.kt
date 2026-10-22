@@ -32,6 +32,18 @@ internal class WindowBlur(
     private var radius = -1
     private var broken = false
 
+    /** The window's size ([key]) the region was last sent for: a region is the window's whole rect, at that size. */
+    private var sentFor = 0L
+
+    /** The view whose layout is watched: the window grown (a banner strip opened into the shade) sends it again. */
+    private var watched: View? = null
+    private val resized =
+        View.OnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+            if ((r - l != or - ol || b - t != ob - ot) && radius > 0) set(amount)
+        }
+
+    private fun key(v: View) = (v.rootView.width.toLong() shl 32) or v.rootView.height.toLong()
+
     /** Frames waited for the window to be ready. */
     private var retries = 0
 
@@ -59,7 +71,15 @@ internal class WindowBlur(
             android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S ||
                 runCatching { v.context.getSystemService(android.view.WindowManager::class.java).isCrossWindowBlurEnabled }.getOrDefault(true)
         val r = if (allowed) (amount.coerceIn(0f, 1f) * maxRadiusDp * v.resources.displayMetrics.density).toInt() else 0
-        if (r == radius) return
+        if (watched !== v) {
+            watched?.removeOnLayoutChangeListener(resized)
+            v.addOnLayoutChangeListener(resized)
+            watched = v
+        }
+        // Same radius at the same size: nothing to send. A region sent while the window was another size (the banner's
+        // strip, or the size before a GONE window was shown again and laid out) covered only that: the shade opened
+        // at once (a flick, the banner pulled) kept a strip of blur at the top and home read through (2026-10-23).
+        if (r == radius && key(v) == sentFor) return
         // A blur region over the window: the way this compositor blurs (the background
         // blur radius left home's widgets sharp under the shade, 2026-10-21). The page's own glass, on home, merges it.
         val handled: Boolean? =
@@ -76,6 +96,7 @@ internal class WindowBlur(
         retries = 0
         if (handled) {
             radius = r
+            sentFor = key(v)
             return
         }
         runCatching {
@@ -87,6 +108,7 @@ internal class WindowBlur(
             setBlur.invoke(t, surface, r)
             t.apply()
             radius = r
+            sentFor = key(v)
         }.onFailure {
             Log.w("PowosBlur", "no blur behind the window", it)
             broken = true
