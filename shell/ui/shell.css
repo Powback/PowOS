@@ -273,6 +273,7 @@
 .search-face { position: relative; height: 100%; }
 .search-face .bar { position: absolute; left: 0; right: 0; top: 50%; height: 24px; }
 .search-face .bar-pill { left: calc(var(--gap) / 2); right: calc(var(--gap) / 2); bottom: -20px; }
+.home.editing .search-face { pointer-events: none; }
 /* The fields that grow with their text (grow.tsx): their height animates, they scroll past their last row. */
 .grow {
   flex: 1;
@@ -937,7 +938,9 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }
 
 /* Edit mode (editsheet.tsx, state.ts editing): the bar and the dock make way for the edit sheet; the pages stay as they are. */
-.home.editing .bar,
+/* The search widget's pill (searchwidget.tsx, a tile on the grid) stays: it's a tile like any other - shown, lifted and
+   moved; its field doesn't take the press there (the tile's own press lifts it). */
+.home.editing .bar:not(.search-face .bar),
 .home.editing .dock,
 .home.editing .launcher,
 .home.editing .launcher-frame { visibility: hidden; }

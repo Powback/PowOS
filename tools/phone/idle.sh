@@ -25,7 +25,13 @@ if [ "${1:-}" = "--wait" ]; then
   "$0" >/dev/null   # starts the touch watcher if it isn't running
   # Awake counts only once the screen has been ON for IDLE_S too: after a long sleep the last touch is hours old, so
   # "no touch for IDLE_S" alone said free the moment the user woke the phone to use it.
-  out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $max )); on=0; while [ \$(date +%s) -lt \$end ]; do
+  # The held connection can drop (the VPN's adb, ~8 min in): it's held again for what's left, not given up on - an
+  # empty answer is a dropped connection, never "busy". The Awake streak restarts with it (conservative).
+  deadline=$(( $(date +%s) + max ))
+  while :; do
+  left=$(( deadline - $(date +%s) ))
+  [ $left -gt 0 ] || { out=timeout; break; }
+  out=$("$here/adb.sh" shell "end=\$(( \$(date +%s) + $left )); on=0; while [ \$(date +%s) -lt \$end ]; do
       touch /data/local/tmp/powos-touchmon.ask
       w=\$(dumpsys power | grep -m1 mWakefulness= | cut -d= -f2)
       t=\$(( \$(date +%s) - \$(cat /data/local/tmp/powos-lasttouch 2>/dev/null || date +%s) ))
@@ -34,6 +40,9 @@ if [ "${1:-}" = "--wait" ]; then
       case \$w in Asleep|Dozing) [ "$awake" = 1 ] || { echo idle=\$t screen=\$w; exit 0; } ;; Awake) [ \$t -ge $need ] && [ \$a -ge $need ] && { echo idle=\$t screen=\$w; exit 0; } ;; esac
       sleep 5
     done; echo timeout" 2>/dev/null | tr -d '\r' | tail -1)
+  [ -n "$out" ] && break
+  sleep 10
+  done
   echo "$out"
   case "$out" in idle=*) exit 0 ;; *) exit 1 ;; esac
 fi
