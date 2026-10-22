@@ -84,6 +84,14 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
   - Commits are resolved in the CALLER's git repo before the relay (resolve_commits), plus commits of the last 30
     days whose message mentions the task id.
 - Owners: experts take tasks with `--owner <expert>`; `--unowned` = owner "" or the generic "coder".
+- Task keys (find()): exact id, or WHOLE title words matching one open task (else one task at all). Refused: an
+  id-shaped key (one token with '-') that isn't an id (suggests prefix matches), a key of only status words, >1 match.
+  Why: a games agent took `task list | grep .. | grep -o '^[^ ]*'` = the STATUS column, ran `task set working --step`,
+  and the old substring match wrote its step + owner onto the one open task with "working" in its title. Scripts get
+  ids from `task list --json`, never the text columns. Fixing a wrong step: no CLI verb rewrites steps; call
+  work_set/work_track whole via the installed CLI module as the session user (tools/phone/user.sh).
+- lib/ai CLI changes reach the phone via rooted.sh deploy (ship.sh ships only shell + APK). The Mac has no `powos`:
+  run `python3 lib/ai/agents/powos-agents-cli task ...` (it relays argv to the phone's CLI, whose find() decides).
 - Live state (shell/agents.ts boardState): a `working` row SAYS "working" (lit dot) only while a live agent holds it -
   agentsd's agent row field `work` = the task id, set from the agent's own Bash `task set <id> --step/--progress/
   --plan/--commit` (work_of(); assigning with --owner/--note claims nothing), cleared by `task done <id>` or
