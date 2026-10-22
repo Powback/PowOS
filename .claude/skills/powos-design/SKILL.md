@@ -31,6 +31,12 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - No text halos (read as highlighter on a light wallpaper). Labels on raw wallpaper = small frost pills with
   `--lift-edge`. Inside the frost, secondary text is the ink itself, not a see-through grey.
 - Over pure black the blur is black: keep the glass visible with the sheen + lit edge (`--frost-sheen`).
+- Icon plate (`--icon-plate`, theme.css; the squircle behind irregular Linux icons): built from --color-surface +
+  accent it read as BROWN in gruvbox (warm surface #3c3836) - rejected. Now `--frost-base` 85% + `--frost-swap-cool`
+  (opaque, a step towards the other tone so dark glyphs like Konsole show): oklab chroma ~0.01 in gruvbox, kanagawa
+  and flexoki-light. Any neutral fill: derive from --frost-*, never from --color-surface (warm in warm themes).
+  Resolved on :root, so the per-surface frost swaps in shell.css don't move it. Check: render `icons-mixed` with
+  SHOTS_THEME per theme + SHOTS_PROBE reading the `.app-icon-face.plate` background.
 
 ## Shade (ui/shade.tsx, notifications.tsx NotificationPanel)
 - One panel by default: control center on top, notifications under it, one `.notif-list` scroll; Settings > Style >

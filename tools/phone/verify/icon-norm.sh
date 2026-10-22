@@ -11,7 +11,8 @@ TASK=${TASK:-uniform-app-icons-min-size-one-squircle-radius-e}
 [ -n "${LOCK_HELD:-}" ] || { echo "icon-norm: run it through tools/phone/verify/queue.sh add"; exit 3; }
 fg=$($p/adb.sh shell "dumpsys activity activities | grep -m1 topResumedActivity")
 [[ "$fg" == *HomeShell* ]] || { echo "icon-norm: home isn't in front"; exit 3; }
-served=$($p/cdp.sh eval home 'fetch("ui/iconshape.ts").then(r=>r.ok&&r.text()).then(t=>!!t&&t.includes("placement"))' | tr -d '"')
+# "after" = the shape (iconshape.ts) and the neutral frost plate (theme.css; the first plate was the brown surface tint).
+served=$($p/cdp.sh eval home 'Promise.all(["ui/iconshape.ts","theme.css"].map(u=>fetch(u).then(r=>r.ok?r.text():""))).then(([a,b])=>a.includes("placement")&&b.includes("--icon-plate: color-mix(in oklab, var(--frost-base)"))' | tr -d '"')
 [ "$served" = true ] && when=after || when=before
 probe='JSON.stringify({icons:document.querySelectorAll(".app-icon:not(.initials)").length,placed:document.querySelectorAll(".app-icon-face.placed").length,plate:document.querySelectorAll(".app-icon-face.plate").length})'
 OUT=$HOME/.cache/icon-norm-check; mkdir -p "$OUT"

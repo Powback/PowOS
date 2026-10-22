@@ -10,7 +10,7 @@
  *   the squircle itself, AndroidApps -, a rounded square with clear padding): trimmed to its box and filling the face,
  *   the face's corners clip a square one. No plate behind it (the dock rule).
  * - "plate": a transparent or irregular picture (most Linux icons: Konsole, Foot, Dolphin; a round legacy icon): its
- *   box trimmed and fitted to GLYPH of the face, centred on the theme-tinted plate (--icon-plate) of the same
+ *   box trimmed and fitted to GLYPH of the face, centred on the neutral frost plate (--icon-plate) of the same
  *   squircle, so its silhouette is the others'. A small one is scaled up, never shown small.
  */
 import { signal } from "@preact/signals";

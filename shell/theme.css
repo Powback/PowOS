@@ -126,9 +126,11 @@
   --icon: 48px;
   --strip-icon: 56px;
   /* Every app icon's one shape (ui/iconshape.ts, shell.css .app-icon-face): a squircle, the corner this much of its
-     edge (AndroidApps draws adaptive icons in the same one). Transparent / irregular icons sit on --icon-plate in it. */
+     edge (AndroidApps draws adaptive icons in the same one). Transparent / irregular icons sit on --icon-plate in it:
+     the frost's own neutral tint (never the theme's surface or accent - gruvbox's read as brown), opaque, lifted a
+     little towards the other tone so a dark or light glyph still shows on it. */
   --icon-radius: 22%;
-  --icon-plate: color-mix(in srgb, var(--color-accent) 16%, color-mix(in srgb, var(--color-foreground) 10%, var(--color-surface)));
+  --icon-plate: color-mix(in oklab, var(--frost-base) 85%, var(--frost-swap-cool));
   --strip-height: 76px;
   --letter-bar: 22px;
   /* The pill's space above the screen's foot (over the navigation bar's inset): home's search, the drawer's, PowOS AI's compose. */
