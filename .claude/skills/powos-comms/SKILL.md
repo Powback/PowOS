@@ -1,6 +1,6 @@
 ---
 name: powos-comms
-description: Use when working on PowOS inter-agent comms - `powos comms` (send/watch/inbox/read/notify), the comms MCP tools, the manager's inbox injection (manager.py --once-inbox / live), powos-agentsd and the agents module's message feed, or the phone's agent-mail notifications. The model, the truncation pitfalls, deploy and tests.
+description: Use when working on PowOS inter-agent comms - `powos comms` (send/watch/inbox/read/notify/quiet), the comms MCP tools, the work board (`powos agents task`, the agents module's `work` table), silent deploys, the manager's inbox injection (manager.py --once-inbox / live), powos-agentsd and the agents module's message feed, or the phone's agent-mail notifications. The model, the truncation pitfalls, deploy and tests.
 ---
 
 # PowOS comms: how it works and what bites
@@ -50,3 +50,49 @@ python3 test/tier1/test-comms.py; python3 test/tier1/test-manager.py; python3 te
 (`just test` / run-all.sh needs bash 4: CI/Linux; the Mac's bash 3.2 can't run run-all.sh.)
 Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; symlink another worktree's
 (`ln -s <other>/shell/node_modules shell/`; .gitignore's `node_modules` ignores the link, so the tree stays clean).
+
+## Mail notifications on the phone (AgentMail.kt)
+- notify -> `$XDG_RUNTIME_DIR/agent-mail/*.json` -> AgentMail posts it (channel per priority: urgent/high/normal/low,
+  versioned ids; urgent repeats within 10 min per sender collapse silently). Stored in files/powos-ai/agent-mail.json
+  until read; read = tap/reply/mark read/swipe, synced both ways with comms (`powos comms read --agent user <ids>`).
+- Android caps notification text at 5 KiB (MAX_CHARSEQUENCE_LENGTH) silently: collapsed = firstLine(), expanded =
+  expanded() (<= 4.9 KiB + "N more characters - tap to read it all"); the tap opens the stored mail WHOLE in the chat
+  (AgentMail.opened -> PowosAiChat.mail). Inline reply runs `powos comms send <agent> -- <text>`.
+- Deploy notes arrive as mail `from: "deploy"`, low priority, `--batch deploy` (2 min window: one notification).
+
+## Silent deploys (fb1ae36)
+- Notes only for what the user can see. Refactors/lint/tooling: `--silent` instead of `--note` on shell/push.sh,
+  tools/phone/ship-apk.sh, targets/android/install-app.sh, rooted.sh, targets/android/tools/deploy-note.sh.
+- Silent = `powos comms notify --silent`: no inbox, no agent-mail, no feed row; one JSON line in
+  `$COMMS_ROOT/quiet.log` (last 500), read with `powos comms quiet [-n N]`. push manifest carries "silent":true.
+- The app needs nothing for it (it only notifies from comms mail). apps/install.sh still needs --note (the phone's
+  `powos app --note` path). ship-apk's post-install re-push is always silent.
+
+## The work board (`powos agents task`, lib/ai/agents/powos-agents-cli)
+- Rows: agents module (apps/agents) table `work`, over STDB HTTP (127.0.0.1:3410, token ~/.config/spacetime/cli.toml).
+  Off the phone the CLI relays to the phone (remote(), HACK via powos-vadb); POWOS_AGENTS_REMOTE=0 disables.
+- Reducers: work_set(id,title,owner,status,note,project) - "" keeps a field; work_track(id, progress_done,
+  progress_total, step, steps, commits, images) writes the progress columns WHOLE (the CLI computes them from the
+  row); work_drop(id). Statuses working|blocked|waiting|done.
+- Progress columns (after `project`, all #[default]): progress_done/progress_total u32 (0/0 = no bar), step, steps
+  (JSON [{text, state: done|current|next}]), commits (JSON [{sha(12), subject}]), images (JSON [path]), activity u64
+  (0 on old rows -> use updated). "" = empty list. TS client keys: progressDone/progressTotal (camelCase).
+- CLI: `task add|new <title> [--id --owner --project --status --note]`, `task set <t> --progress N/M --step TEXT
+  --plan "a; b; c" --commit SHA... --image PATH... --image-rm PATH... --owner E`, `task done <t>`,
+  `task list [--all --json --project P --unowned --owner E]`, `task rm`, `task infer`.
+  - --step: the old current becomes done; a planned step of that text becomes current, else inserted before nexts.
+  - Count follows the steps unless --progress set it (explicit wins); done fills the bar.
+  - Commits are resolved in the CALLER's git repo before the relay (resolve_commits), plus commits of the last 30
+    days whose message mentions the task id.
+- Owners: experts take tasks with `--owner <expert>`; `--unowned` = owner "" or the generic "coder".
+- A schema change ships as: apps/build.sh agents; apps/vendor.sh agents (shell/vendor/powos-agents.js; the .d.ts is
+  generic); `ADB="docker exec powos-vadb adb" apps/install.sh agents publish --note/...`; shell/push.sh
+  vendor/powos-agents.js (bindings-check must say "matches"). A server with MORE columns than the shell's bindings
+  breaks decoding too (seen with local-pet), so publish + push together.
+- Rust limits: tools/lint/rust-complexity.sh [--report|--prune] agents (cognitive 10, 60 lines, 4 args, nesting 3);
+  sync() is split into sync_agents/tasks/asks/ring/messages; JSON columns go through json_list().
+- Tests: test/tier1/test-agents-board.py (stand-in STDB HTTP server modelling the reducers), test-agents.py.
+
+## Pitfalls seen
+- Shell gate under Mac load (~25): every page "not ready" - retry with READY_MS=60000 GATE_WIDGETS=0, never --force.
+- The worktree has no shell/node_modules: push.sh skips tsc; symlink another worktree's for `tsc --noEmit -p .`.
