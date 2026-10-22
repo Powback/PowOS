@@ -165,9 +165,9 @@ run)
   . "$here/window-lock.sh"
   board() {  # board <task> <text> [done] [image]: the result on the owner's task (closed too when done=1), as the session user
     local s; s=$(printf 'powos agents task set %q --step %q %s >/dev/null 2>&1 || true\n' "$1" "$2" "${4:+--image $(printf %q "$4")}"
-      # Mail only what needs acting on (a FAIL; QUEUE_MAIL_ALL=1 mails passes too): a pass is on the board already, and
+      # Mail only what needs acting on (a FAIL, not a PASS or SKIP; QUEUE_MAIL_ALL=1 mails passes too): a pass is on the board already, and
       # each mail wakes the coordinator for a full turn (the self-optimize round, 2026-10-23: the top token cost).
-      if [[ $2 != *PASS* ]] || [ "${QUEUE_MAIL_ALL:-0}" = 1 ]; then
+      if [[ $2 == *FAIL* ]] || [ "${QUEUE_MAIL_ALL:-0}" = 1 ]; then
         printf 'powos comms send %q %q --from verify-queue >/dev/null 2>&1 || true\n' "${QUEUE_MAIL_TO:-coder}" "$1: $2"; fi
       [ "${3:-0}" = 1 ] && printf 'powos agents task done %q >/dev/null 2>&1 || true\n' "$1")
     user_sh "$s" || echo "board update failed for $1: $2"; }
@@ -265,7 +265,7 @@ EOS
           pause "Phone checks paused: $pass passed, $fail failed, $((N - k + 1)) still queued"
           exit 4
         fi
-        if [ $rc = 3 ] && [ $tries -lt 2 ]; then
+        if [ $rc = 3 ] && [ $tries -lt 5 ]; then
           sed -i '' "s/^tries=.*/tries=$((tries + 1))/" "$j"; echo "$(date +%T) $n: no window / touched (rc 3), again next window"
           status "" "{\"done\":true,\"summary\":$(jstr "Phone checks wait for the next free window (the phone was touched): $pass passed, $fail failed")}"
           exit 4   # leave the window: the user is on the phone
@@ -273,10 +273,12 @@ EOS
         # A check that printed FAIL but exited 0 (float-windows did) failed.
         [ $rc = 0 ] && grep -q '^FAIL' "$log" && rc=1
         mv "$j" "$Q/done/$n.job"
-        r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); echo "$r: $(tail -1 "$log")" >> "$log"
+        # rc 3 six times = the user kept using the phone: a SKIP (no mail, not a fail), not a bug in the check.
+        if [ $rc = 3 ]; then r="SKIP phone in use"; else
+        r=$([ $rc = 0 ] && echo PASS || { [ "$why" = timeout ] && echo "FAIL timeout" || echo "FAIL rc=$rc"; }); fi; echo "$r: $(tail -1 "$log")" >> "$log"
         prev="${name:-$task}: $r"
         img=
-        if [ $rc != 0 ]; then
+        if [ $rc != 0 ] && [ $rc != 3 ]; then
           fail=$((fail + 1)); [ -n "$first" ] || first=${name:-$task}$([ "$why" = timeout ] && echo ": timeout")
           # What the screen showed when it failed: the board task's review image (the pill keeps out of screencaps).
           f=verify-$(printf %s "$n" | tr -c 'A-Za-z0-9._-' '-').png
