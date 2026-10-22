@@ -113,7 +113,9 @@ if [ -n "$newer" ]; then
   pg=$(cd "$t/tree/shell" && GATE_PRIORITY=ship READY_MS=${READY_MS:-60000} ./push.sh --pre-gate $newer 2>&1 || true)
   stamp=$(echo "$pg" | sed -n 's/^pre-gated //p' | tail -1)
   if [ -z "$stamp" ]; then
-    echo "$pg" | grep -vE "^ok " | tail -8 >&2
+    # Every FAIL line, not the last 8 lines: the pages' console noise (WebSocket retries) pushed the FAILs out (01:39).
+    gl=$sq/done/pregate-$(git rev-parse --short "$tip").log; mkdir -p "$sq/done"; echo "$pg" > "$gl"
+    { echo "$pg" | grep -E "^(FAIL|gate:)" | head -20; echo "  (whole gate output: $gl)"; } >&2
     echo "ship-apk: REFUSED - not installing: the shell files origin changed since the build don't load at its tip (above)," >&2
     echo "  and the install would leave the phone on this APK's older copies of them. Fix them on origin, ship again (APK built, kept)." >&2
     exit 3
