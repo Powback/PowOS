@@ -1364,9 +1364,11 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
 .pull-screen:has(.ai-panel.wide) > .stage > .launcher-clip { bottom: -48px; }
 .home:has(> .bar):has(.ai-panel.wide) > .stage > .launcher-clip .launcher-inner { padding-bottom: 0; }
 .ai-view.wide > .ai-side { grid-column: 1; grid-row: 2 / 4; margin-bottom: var(--ai-foot); }
-.ai-view.wide > .ai-talk { grid-column: 2; grid-row: 2; }
+.ai-view.wide > .ai-talk { grid-column: 2; grid-row: 2; flex-direction: column-reverse; }
+/* The whole conversation (powai.tsx History): reversed, the pane opens at the newest and holds it; short, it sits on top. */
+.ai-talk-in { display: flex; flex-direction: column; gap: 14px; margin-bottom: auto; }
 .ai-view.wide > .ai-compose { grid-column: 2; grid-row: 3; margin-bottom: var(--ai-foot); }
-/* Wide, "earlier" heads the conversation as "needs you" heads the board: the same pill, the panes' tops on one line. */
+/* Wide, a fold heading a pane ("needs you", "paused") sits on the panes' top line. */
 .ai-view.wide .ai-fold:not(.tile *) { margin: 0 0 0 2px; }
 /* The board (powai.tsx AiContent): one surface - what was a card each is a section on it, parted by spacing. */
 .ai-board { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }

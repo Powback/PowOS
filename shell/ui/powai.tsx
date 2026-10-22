@@ -4,7 +4,7 @@
  * the work in progress (the agents' tasks, live from the powos-agents module's work board: `powos agents task ...`),
  * the agents at work (PowOS's tmux sessions,
  * each with the task its pane's title names, a spinner's mark while it works; a tap opens its terminal), what they told
- * you lately, the whole conversation (folded), and a field to ask it (the mic: hold to talk and send, tap to dictate).
+ * you lately, the whole conversation (folded; wide, in full), and a field to ask it (the mic: hold to talk and send, tap to dictate).
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
@@ -125,6 +125,43 @@ function Earlier() {
           <Thread items={before} render={(item, reply) => <Item item={item} reply={reply} />} />
         </div>
       )}
+    </section>
+  );
+}
+
+/** Exchanges the wide page shows at first, and how many more each time its top comes near. */
+const HISTORY_STEP = 20;
+
+/**
+ * Wide, the conversation before the last exchange in full - no fold. Only the newest HISTORY_STEP exchanges are drawn;
+ * older ones as the top comes near (a sentinel, IntersectionObserver on the pane). The pane is column-reverse (CSS
+ * .ai-talk), so it opens at the newest, stays there as a reply streams in, and holds still when older ones arrive above.
+ */
+function History() {
+  const [count, setCount] = useState(HISTORY_STEP);
+  const top = useRef<HTMLDivElement>(null);
+  const items = chat.value.items;
+  const end = Math.max(0, items.findLastIndex((i) => i.kind === "user"));
+  const asks = items.slice(0, end).flatMap((i, at) => (i.kind === "user" ? [at] : []));
+  const from = asks.length > count ? asks[asks.length - count] : 0;
+  useEffect(() => {
+    const el = top.current;
+    const pane = el?.closest(".ai-scroll");
+    if (!el || !pane || from === 0) return;
+    const io = new IntersectionObserver((e) => e[0].isIntersecting && setCount((c) => c + HISTORY_STEP), {
+      root: pane,
+      rootMargin: "600px 0px 0px 0px",
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [from]);
+  if (!end) return null;
+  return (
+    <section class="ai-history">
+      <div ref={top} />
+      <div class="chat ai-history-list">
+        <Thread items={items.slice(from, end)} render={(item, reply) => <Item item={item} reply={reply} />} />
+      </div>
     </section>
   );
 }
@@ -668,7 +705,7 @@ function AiContent({ shown, part }: { shown: boolean; part?: "talk" | "side" }) 
   return (
     <>
       {side && <NeedsYou />}
-      {talk && <Earlier />}
+      {part === "talk" ? <History /> : talk && <Earlier />}
       {talk && <Now />}
       {/* The board: work in progress, what's installed and running, the agents - one surface, its parts by spacing. */}
       {side && <section class="ai-board tile">
@@ -746,7 +783,9 @@ export function AiView({ shown, cls, pill = true }: { shown: boolean; cls: strin
             <AiContent shown={shown} part="side" />
           </div>
           <div class="ai-scroll ai-talk">
-            <AiContent shown={shown} part="talk" />
+            <div class="ai-talk-in">
+              <AiContent shown={shown} part="talk" />
+            </div>
           </div>
         </>
       ) : (
