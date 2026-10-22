@@ -3,6 +3,8 @@
  *
  * - Up anywhere on home: the drawer slides up under the finger; released past 15% of the way, or flicked up (even a
  *   short flick), it opens, else it falls back.
+ * - Pulled on past open (or up again at the end of the open drawer's list): stage 2 (overpull.ts), the search and
+ *   the keyboard.
  * - Down on the open drawer - from the top of its list, or anywhere outside the list - drags it closed the same way.
  *   A list that's scrolled down just scrolls.
  * - Sideways on home: the pages slide under the finger and snap to the next one past a quarter of the width or a flick.
@@ -18,6 +20,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
+import { overPull, overRelease } from "./overpull.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
 import { carry, closeDrawer, dockDrag, drawer, editing, folder, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
@@ -265,7 +268,7 @@ interface Gesture {
   last: [number, number, number];
   /** Velocity along the gesture's axis, px/ms. */
   v: number;
-  mode: "open" | "close" | "pages" | "notifClose" | "panel" | "ccAll" | null;
+  mode: "open" | "close" | "over" | "pages" | "notifClose" | "panel" | "ccAll" | null;
   open: boolean;
   /** The notification panel was down when it started. */
   notif: boolean;
@@ -292,6 +295,7 @@ let g: Gesture | null = null;
  */
 function abandon() {
   g = null;
+  overRelease(false);
   drawerDrag.value = null;
   notifDrag.value = null;
   pageDrag.value = null;
@@ -418,7 +422,7 @@ function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
 }
 
 function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
-  if (gs.open) return dy > 0 && (!gs.inList || gs.listTop) ? "close" : null;
+  if (gs.open) return claimOnOpen(gs, dy);
   // Editing home, up isn't the launcher (the sheet has the bottom), and down isn't the shade.
   if (editing.value) return null;
   if (dy < 0) {
@@ -428,6 +432,15 @@ function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {
   }
   askShade();
   return null;
+}
+
+/**
+ * The drawer open: down from its list's top (or off the list) closes it; up at its list's end (or off the list) is
+ * the over-pull to stage 2 (overpull.ts). Within the list it scrolls.
+ */
+function claimOnOpen(gs: Gesture, dy: number): Gesture["mode"] {
+  if (dy > 0) return !gs.inList || gs.listTop ? "close" : null;
+  return pullKind.value === "apps" && atListEnd(gs) ? "over" : null;
 }
 
 /** Down on home: the shade's - the host's own pull (it takes the finger); without it, the shade is asked for. */
@@ -449,7 +462,9 @@ function dragTo(gs: Gesture, dx: number, dy: number) {
       return;
     case "open":
       drawerDrag.value = clamp((-dy * GAIN) / gs.travel);
-      return;
+      return overPull(-dy - gs.travel / GAIN);
+    case "over":
+      return overPull(-dy);
     case "close":
       drawerDrag.value = clamp(1 - (dy * GAIN) / gs.travel);
       return;
@@ -471,6 +486,7 @@ function endGesture() {
   const gs = g;
   g = null;
   if (!gs.mode) return tapAt(gs);
+  if (gs.mode === "over") return void overRelease();
   settleGesture(gs, gs.last[1] - gs.y0);
 }
 
@@ -510,7 +526,8 @@ function settleGesture(gs: Gesture, dy: number) {
 function settleDrawer(mode: "open" | "close", v: number) {
   const p = drawerDrag.value ?? 0;
   drawerDrag.value = null;
-  if (drawerWanted(mode, v, p)) drawer.value = 1;
+  // Let go past the over-pull: open, with the search focused and the keyboard up (overpull.ts).
+  if (overRelease() || drawerWanted(mode, v, p)) drawer.value = 1;
   else closeDrawer();
 }
 

@@ -24,6 +24,12 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   Tap/Back/launch: --p's CSS transition.
 - Finger: p = dy*GAIN(1.5)/--rise px (gesture reads --rise). Open: flick >= 0.2 px/ms or p > 0.15. Close keeps it open
   above CLOSE_KEEP 0.5 (~45 px of finger). Pull over apps: Kotlin pull.drag p, same path.
+- Stage 2 (ui/overpull.ts, board launcher-pull-further-up-search-keyboard): the "open" drag past the open place
+  (finger d = -dy - travel/GAIN) or, drawer open + apps kind, up at the list's end / off the list (mode "over",
+  claimOnOpen) lifts .launcher-inner on a rubber band (one paused WAAPI anim, max 48px, no style writes); past
+  max(120, 0.25*innerHeight) px a 10 ms vibrate; released there: foot textarea focus() + powos.keyboard.show() in the
+  touchend (ShellBridge -> showSoftInput, no Kotlin needed). Short of it: stage 1, no keyboard. Headless probe:
+  synthetic TouchEvents on .home via SHOTS_PROBE (~/.cache file, see verify/pullup-stage2.sh for the device check).
 - Drawer: A-Z `.grid.az` in `.drawer-list` (padding-right --letter-bar). RecentRow (`.drawer-recents`) is OFF by
   default: `drawerRecents = stored("drawer.recents")`, "on" shows it; Settings > style > home > "recent apps in the
   drawer". The check is inside RecentRow (Drawer itself is at the cyclomatic limit).
