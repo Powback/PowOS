@@ -18,6 +18,16 @@ class PullHost(
 ) : OverlayHost(service, "pull", "pull-up panel") {
     private val blur = WindowBlur({ root })
 
+    /** What's behind should be blurred by now (0..1); applied only while the page can be seen ([pageReady]). */
+    private var behind = 0f
+
+    private fun blurBehind(amount: Float) {
+        behind = amount
+        blur.set(if (pageReady) amount else 0f)
+    }
+
+    override fun onPageReady() = blur.set(behind)
+
     fun begin(): Boolean = start().also { if (it) current = this }
 
     override fun stop() {
@@ -36,7 +46,7 @@ class PullHost(
     /** [p] 0..1: how far up the panel is. */
     fun pullDrag(p: Float) {
         if (!shown) return
-        blur.set(p)
+        blurBehind(p)
         emit("pull.drag", JSONObject().put("p", p.coerceIn(0f, 1f).toDouble()))
     }
 
@@ -44,7 +54,7 @@ class PullHost(
         if (host == null) return
         emit("pull.end", JSONObject().put("open", open))
         if (!shown) return
-        blur.set(if (open) 1f else 0f)
+        blurBehind(if (open) 1f else 0f)
         if (open) armOpen() else armShut()
     }
 
@@ -55,7 +65,7 @@ class PullHost(
     override fun onDismiss() = pullEnd(false)
 
     override fun onHidden() {
-        blur.set(0f)
+        blurBehind(0f)
         emit("pull.hide", null)
     }
 

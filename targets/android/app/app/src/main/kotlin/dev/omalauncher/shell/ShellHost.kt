@@ -258,6 +258,12 @@ class ShellHost(
 
     /** The page again, from scratch (after a rollback: its modules as they are now) - only one that isn't up: a live
      * page reloads itself on the rollback's files.changed (hot.ts), or isn't affected at all (a test page's). */
+    /**
+     * A host whose window is kept warm hidden (the overlays: system/OverlayReload) does a shell push's reload itself:
+     * true from it for a changed path means the page isn't told (its hot.ts would reload only once shown).
+     */
+    var filesGate: ((String) -> Boolean)? = null
+
     internal fun reloadIfDown() {
         if (!bootReady) web.reload()
     }
@@ -559,7 +565,7 @@ private object HotReload {
         Log.i(TAG, "changed: $path (${hosts.size} pages)")
         // The test-only page: loaded off screen for the test (GateTest), never in a live page.
         if (path == GateTest.FILE && file.isFile) hosts.firstOrNull()?.appContext?.let(GateTest::changed)
-        for (h in hosts.toList()) h.bridge.emit("files.changed", mapOf("path" to path))
+        for (h in hosts.toList()) if (h.filesGate?.invoke(path) != true) h.bridge.emit("files.changed", mapOf("path" to path))
     }
 
     private const val PUSHING = ".pushing"
