@@ -18,7 +18,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
-import { ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
+import { ccEditing, ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
 import { carry, closeDrawer, dockDrag, drawer, editing, menu, notif, page, pages, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
 const SLOP = 10;
@@ -404,6 +404,11 @@ export function homeGestures() {
     const { mode, v, open, target, own, notif: wasNotif } = g;
     const dy = g.last[1] - g.y0;
     g = null;
+    // The control center in edit mode: a tap beside its tiles leaves it (as a tap on home's empty space), the panel stays.
+    if (!mode && wasNotif && ccEditing.value && !target.closest?.(`${TAPPABLE}, [data-key], .tile-actions`)) {
+      ccEditing.value = false;
+      return;
+    }
     // A clean tap (no gesture claimed) on the notification panel's or the control center's empty space: it closes,
     // with its own animation - as a tap beside the open launcher closes it.
     if (!mode && wasNotif && notif.value && !own && !target.closest?.(`${TAPPABLE}, .notif, .cc-tile`)) {

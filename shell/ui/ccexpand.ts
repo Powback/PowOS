@@ -9,6 +9,8 @@ import { signal } from "@preact/signals";
 
 /** Every category's members shown (only in the one panel, only while it's open). */
 export const ccExpanded = signal(false);
+/** The control center's edit mode (ui/reorder.ts, as home's): entered by a long press on a tile, left by its "done". */
+export const ccEditing = signal(false);
 
 /** The finger's travel (CSS px) to the rows' spread: easy at first, firmer the further it goes. */
 const band = (d: number) => Math.sign(d) * 120 * (1 - Math.exp(-Math.abs(d) / 200));

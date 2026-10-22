@@ -11,7 +11,8 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { notif, panel } from "../state.ts";
 import { held, notifOpen } from "./gesture.ts";
-import { ccExpanded } from "./ccexpand.ts";
+import { ccEditing, ccExpanded } from "./ccexpand.ts";
+import { useReorder } from "./reorder.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { openRemote } from "../remote.ts";
 import { openGlasses } from "../glasses/open.ts";
@@ -514,6 +515,20 @@ function groupState(g: Group, ts: QuickTile[]): { on: boolean; detail: string } 
 
 /** The category open in place (its members unfolded under its row). */
 const opened = signal<string | null>(null);
+/** Edit mode's selected item (a category or a member, by key): its actions over it, as a selected tile's on home. */
+const chosen = signal<string | null>(null);
+
+/** A selected item's actions in edit mode (home's .tile-actions): its own settings page, when it has one. */
+function Chosen({ id, page }: { id: string; page: string | null }) {
+  if (!ccEditing.value || chosen.value !== id || !page || NO_PAGE.has(page)) return null;
+  return (
+    <div class="tile-actions tile" data-edit-ok data-no-lift onPointerDown={(e) => e.stopPropagation()}>
+      <button type="button" onClick={() => (chosen.value = null, shut(), powos.qs.open(page).catch(() => {}))}>
+        settings
+      </button>
+    </div>
+  );
+}
 
 function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
   const first = ts[0];
@@ -525,7 +540,8 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
   // The whole view (ccexpand.ts): its members inside it, under its name - small round toggles, no surface of their own.
   const all = several && ccExpanded.value;
   return (
-    <div class={`cc-cell ${all ? "all" : ""}`} data-key={g.id}>
+    <div class={`cc-cell ${all ? "all" : ""} ${ccEditing.value && chosen.value === g.id ? "chosen" : ""}`} data-key={g.id}>
+      <Chosen id={g.id} page={several ? null : first.id} />
     <button
       type="button"
       class={`cc-tile ${st.on ? "on" : ""} ${open ? "opened" : ""}`}
@@ -545,6 +561,8 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
           <span
             class="cc-more"
             role="button"
+            data-edit-ok
+            data-no-lift
             aria-label={`${g.label}: ${open ? "close" : "open"}`}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
@@ -559,25 +577,43 @@ function GroupTile({ g, ts }: { g: Group; ts: QuickTile[] }) {
       <span class="cc-label">{g.label}</span>
       {st.detail && <span class="cc-detail">{st.detail}</span>}
     </button>
-      {all && (
-        <div class="cc-cell-subs">
-          {ts.map((t) => (
-            <Face key={t.id} t={t} />
-          ))}
-        </div>
-      )}
+      {all && <CellMembers g={g} ts={ts} />}
     </div>
   );
 }
 
 /** A member under an open category: a small round toggle over its name (remote input and the glasses their own). */
-function Sub({ t }: { t: QuickTile }) {
+function Sub({ t, class: c = "cc-sub" }: { t: QuickTile; class?: string }) {
   return (
-    <div class="cc-sub" data-key={t.id}>
+    <div class={`${c} ${ccEditing.value && chosen.value === t.id ? "chosen" : ""}`} data-key={t.id}>
+      <Chosen id={t.id} page={t.id} />
       <Face t={t} />
     </div>
   );
 }
+
+/** The members a category's tile shows in the whole view: reordered as its row's are (the first is its tap). */
+function CellMembers({ g, ts }: { g: Group; ts: QuickTile[] }) {
+  const byId = new Map(ts.map((t) => [t.id, t]));
+  const r = useReorder(ts.map((t) => t.id), (ids) => reorderMembers.current(g.id, ids), ccEditing, editHooks);
+  return (
+    <div class="cc-cell-subs" {...r.handlers}>
+      {r.order.map((id) => byId.get(id) && <Sub key={id} t={byId.get(id)!} class="cc-mini" />)}
+    </div>
+  );
+}
+
+/** Edit mode's hooks for every container in it: while one is carried the shade's own gestures hold off. */
+const editHooks = {
+  onLift: () => {
+    held.value = true;
+    chosen.value = null;
+  },
+  onLand: () => (held.value = false),
+  onSelect: (k: string) => (chosen.value = chosen.value === k ? null : k),
+};
+/** The current arrangement's member reorder (ControlCenter sets it each render; the cells' reorders call it). */
+const reorderMembers = { current: (_gid: string, _ids: string[]) => {} };
 
 /** A member's toggle (an open category's row, or inside its tile in the whole view). */
 function Face({ t }: { t: QuickTile }) {
@@ -586,156 +622,6 @@ function Face({ t }: { t: QuickTile }) {
   // OnePlus Share and Google's Quick Share are one member: "quick share".
   if (t.app === "com.oneplus.oshare" || t.app === "com.google.android.gms") return <Tile t={{ ...t, label: "quick share" }} hold={false} />;
   return <Tile t={t} hold={false} />;
-}
-
-/** Dragged this far (px) before the long press, it's a scroll or a swipe, not a pickup. */
-const PICK_SLOP = 8;
-
-/**
- * Long-press-drag reordering of a container's items (children with data-key, direct or in rows): held still for HOLD
- * a tile is picked up (a light haptic) and follows the finger; the others make room live - each eased from where it
- * was (a FLIP: its old place as a transform, played to none), nothing laid out by hand. Let go: the new order to
- * [done]. Held and let go without moving: [still] (a category's open/close, a member's page). While one is held the
- * finger is the control center's (gesture.ts held: the shade's close lets go), and the page doesn't scroll under it.
- */
-function useReorder(keys: string[], done: (keys: string[]) => void, still: (key: string) => void, onPick?: () => void) {
-  const box = useRef<HTMLDivElement>(null);
-  const [live, setLive] = useState<string[] | null>(null);
-  const d = useRef<{
-    key: string;
-    x0: number;
-    y0: number;
-    x: number;
-    y: number;
-    gx: number;
-    gy: number;
-    picked: boolean;
-    moved: boolean;
-    timer: number;
-  } | null>(null);
-  const swallowClick = useRef(false);
-  const order = live ?? keys;
-  const item = (k: string) => box.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(k)}"]`) ?? null;
-  const own = (el: Element | null) => el && el.closest("[data-reorder]") === box.current;
-  /** The held one under the finger: its offset from its slot (which moves as the order does). */
-  const place = () => {
-    const c = d.current;
-    const el = c?.picked ? item(c.key) : null;
-    if (!c || !el) return;
-    // A render rewrites its class: lifted again each time.
-    el.classList.add("held");
-    el.style.transform = "none";
-    const r = el.getBoundingClientRect();
-    el.style.transform = `translate(${c.x - c.gx - r.left}px, ${c.y - c.gy - r.top}px) scale(1.06)`;
-  };
-  // FLIP: every item that moved since the last order eases from its old place.
-  const rects = useRef(new Map<string, DOMRect>());
-  useLayoutEffect(() => {
-    const next = new Map<string, DOMRect>();
-    for (const k of order) {
-      const el = item(k);
-      if (!el) continue;
-      if (d.current?.picked && d.current.key === k) continue;
-      const r = el.getBoundingClientRect();
-      next.set(k, r);
-      const was = rects.current.get(k);
-      if (live && was && (Math.abs(was.left - r.left) > 0.5 || Math.abs(was.top - r.top) > 0.5))
-        el.animate([{ transform: `translate(${was.left - r.left}px, ${was.top - r.top}px)` }, { transform: "none" }], {
-          duration: 180,
-          easing: "cubic-bezier(0.2, 0.9, 0.3, 1)",
-        });
-    }
-    rects.current = next;
-    place();
-  }, [order.join()]);
-  const end = () => {
-    const c = d.current;
-    d.current = null;
-    if (!c) return;
-    clearTimeout(c.timer);
-    if (!c.picked) return;
-    held.value = false;
-    swallowClick.current = true;
-    const el = item(c.key);
-    el?.classList.remove("held");
-    if (el) el.style.transform = "";
-    if (!c.moved) still(c.key);
-    else if (live) done(live);
-    setLive(null);
-  };
-  const handlers = {
-    ref: box,
-    "data-reorder": "",
-    onPointerDown: (e: PointerEvent) => {
-      const el = (e.target as Element).closest<HTMLElement>("[data-key]");
-      if (!el || !own(el) || (e.target as Element).closest(".cc-more, .cc-cell-subs")) return;
-      const key = el.dataset.key!;
-      swallowClick.current = false;
-      const r = el.getBoundingClientRect();
-      const c = { key, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, gx: e.clientX - r.left, gy: e.clientY - r.top, picked: false, moved: false, timer: 0 };
-      c.timer = window.setTimeout(() => {
-        if (d.current !== c) return;
-        c.picked = true;
-        held.value = true;
-        onPick?.();
-        navigator.vibrate?.(8);
-        try {
-          box.current?.setPointerCapture(e.pointerId);
-        } catch {}
-        item(key)?.classList.add("held");
-        rects.current = new Map(order.map((k) => [k, item(k)?.getBoundingClientRect()]).filter((x): x is [string, DOMRect] => !!x[1]));
-        setLive([...order]);
-      }, HOLD);
-      d.current = c;
-    },
-    onPointerMove: (e: PointerEvent) => {
-      const c = d.current;
-      if (!c) return;
-      c.x = e.clientX;
-      c.y = e.clientY;
-      const far = Math.hypot(c.x - c.x0, c.y - c.y0) > PICK_SLOP;
-      if (!c.picked) {
-        // Moving before the hold: a scroll, a swipe, a tap that slid - not a pickup.
-        if (far) {
-          clearTimeout(c.timer);
-          d.current = null;
-        }
-        return;
-      }
-      if (far) c.moved = true;
-      // The slot whose middle is nearest the finger is where it goes.
-      const now = live ?? order;
-      let best = -1;
-      let dist = Infinity;
-      now.forEach((k, i) => {
-        if (k === c.key) return;
-        const r = item(k)?.getBoundingClientRect();
-        if (!r) return;
-        const dd = Math.hypot(r.left + r.width / 2 - c.x, r.top + r.height / 2 - c.y);
-        if (dd < dist) ((dist = dd), (best = i));
-      });
-      const from = now.indexOf(c.key);
-      const r0 = item(now[best])?.getBoundingClientRect();
-      if (best >= 0 && best !== from && r0 && dist < Math.max(r0.width, r0.height) * 0.6) {
-        const next = now.filter((k) => k !== c.key);
-        next.splice(best, 0, c.key);
-        setLive(next);
-      } else place();
-    },
-    onPointerUp: end,
-    onPointerCancel: end,
-    // Held: the page under it doesn't scroll (and so doesn't cancel the pointer).
-    onTouchMove: (e: TouchEvent) => d.current?.picked && e.cancelable && e.preventDefault(),
-    // A pickup's release isn't also a tap on what was held.
-    onClickCapture: (e: Event) => {
-      if (!swallowClick.current) return;
-      swallowClick.current = false;
-      e.stopPropagation();
-      e.preventDefault();
-    },
-    onContextMenu: (e: Event) => e.preventDefault(),
-  };
-  return { order, handlers, dragging: live != null };
 }
 
 /**
@@ -768,14 +654,9 @@ function Unfold({ group, reorder }: { group: { g: Group; ts: QuickTile[] } | und
 /** An open category's members: one sideways row; held and dragged, a member moves (first = the category's tap). */
 function Members({ group, reorder }: { group: { g: Group; ts: QuickTile[] }; reorder: (gid: string, ids: string[]) => void }) {
   const byId = new Map(group.ts.map((t) => [t.id, t]));
-  const { order, handlers, dragging } = useReorder(
-    group.ts.map((t) => t.id),
-    (ids) => reorder(group.g.id, ids),
-    // Held still: the member's own page, as its long press did.
-    (id) => !NO_PAGE.has(id) && (shut(), powos.qs.open(id).catch(() => {})),
-  );
+  const { order, handlers, carrying } = useReorder(group.ts.map((t) => t.id), (ids) => reorder(group.g.id, ids), ccEditing, editHooks);
   return (
-    <div class={`cc-subs ${dragging ? "dragging" : ""}`} {...handlers}>
+    <div class={`cc-subs ${carrying ? "dragging" : ""}`} {...handlers}>
       {order.map((id) => byId.get(id) && <Sub key={id} t={byId.get(id)!} />)}
     </div>
   );
@@ -796,6 +677,7 @@ export function ControlCenter() {
       picking.value = false;
       opened.value = null;
       ccExpanded.value = false;
+      ccEditing.value = false;
     };
   }, [open]);
   const q = quick.value;
@@ -830,30 +712,31 @@ export function ControlCenter() {
   const grid = useReorder(
     live.map((x) => x.g.id),
     (gids) => saveArrangement(gids.map((id) => byGid.get(id)!).filter(Boolean)),
-    // Held still: a category with members opens or closes (its long press); a single one opens its page.
-    (gid) => {
-      const x = byGid.get(gid);
-      if (!x) return;
-      if (x.ts.length > 1) opened.value = opened.value === gid ? null : gid;
-      else if (!NO_PAGE.has(x.ts[0].id)) (shut(), powos.qs.open(x.ts[0].id).catch(() => {}));
-    },
-    // Picked up: no category open (the rows move as one grid).
-    () => (opened.value = null),
+    ccEditing,
+    // Lifted: no category open (the rows move as one grid).
+    { ...editHooks, onLift: () => (editHooks.onLift(), (opened.value = null)) },
   );
   const ordered = grid.order.map((id) => byGid.get(id)).filter((x): x is (typeof live)[number] => !!x);
-  const reorderMembers = (gid: string, ids: string[]) =>
+  reorderMembers.current = (gid: string, ids: string[]) =>
     saveArrangement(ordered.map((x) => (x.g.id === gid ? { ...x, ts: ids.map((id) => x.ts.find((t) => t.id === id)!).filter(Boolean) } : x)));
   const rows: (typeof live)[] = [];
   for (let i = 0; i < ordered.length; i += 4) rows.push(ordered.slice(i, i + 4));
   return (
-    <div class="cc">
+    <div class={`cc ${ccEditing.value ? "cc-editing" : ""}`}>
       <div class="notif-bar cascade" style={{ "--i": 0 }}>
         <Clock />
-        <span class="notif-actions icons">
-          <button type="button" aria-label="settings" onClick={() => (shut(), powos.qs.open("settings"))}>
-            <Icon name="cogOutline" />
+        {ccEditing.value ? (
+          // Edit mode's way out, as home's edit bar's.
+          <button type="button" class="edit-act done" data-edit-ok onClick={() => (ccEditing.value = false)}>
+            done
           </button>
-        </span>
+        ) : (
+          <span class="notif-actions icons">
+            <button type="button" aria-label="settings" onClick={() => (shut(), powos.qs.open("settings"))}>
+              <Icon name="cogOutline" />
+            </button>
+          </span>
+        )}
       </div>
       <div class="cc-sliders cascade" style={{ "--i": 1 }}>
         <Slider
@@ -881,7 +764,7 @@ export function ControlCenter() {
         />
       </div>
       <MediaCard i={2} />
-      <div class={`cc-main ${grid.dragging ? "dragging" : ""}`} {...grid.handlers}>
+      <div class={`cc-main ${grid.carrying ? "dragging" : ""}`} {...grid.handlers}>
         {rows.map((row, r) => (
           <Fragment key={r}>
             <div class="cc-grid cascade" style={{ "--i": 3 + r }}>
@@ -889,7 +772,7 @@ export function ControlCenter() {
                 <GroupTile key={g.id} g={g} ts={ts} />
               ))}
             </div>
-            <Unfold group={ccExpanded.value ? undefined : row.find((x) => x.g.id === opened.value)} reorder={reorderMembers} />
+            <Unfold group={ccExpanded.value ? undefined : row.find((x) => x.g.id === opened.value)} reorder={reorderMembers.current} />
           </Fragment>
         ))}
       </div>

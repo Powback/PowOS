@@ -1476,9 +1476,17 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-subs::-webkit-scrollbar { display: none; }
 .cc-sub { display: flex; }
 .cc-sub > .cc-tile { width: 100%; }
-/* Drag to reorder (control.tsx useReorder): the held one lifted under the finger, over the others. */
-:is(.cc-main, .cc-subs) [data-key] { -webkit-touch-callout: none; user-select: none; }
-:is(.cc-main, .cc-subs) .held { position: relative; z-index: 3; transition: none; box-shadow: var(--lift-shadow); }
+/*
+ * Edit mode (ui/reorder.ts, as home's): the lifted item's place a faint ghost (home's .lifted), its copy under the
+ * finger (home's .carried: the same scale and drop shadow) - absolute in its row, so the row's rules still dress it;
+ * the selected one outlined, its actions over it (home's .tile-actions).
+ */
+[data-reorder] [data-key] { -webkit-touch-callout: none; user-select: none; }
+.cc-grid, .cc-subs, .cc-cell-subs, .cc-cell, .cc-sub, .cc-mini { position: relative; }
+[data-reorder] .lifted { opacity: 0.25; }
+[data-reorder] .carried { position: absolute; z-index: 5; margin: 0; }
+.cc-cell.chosen > .cc-tile, :is(.cc-sub, .cc-mini).chosen .cc-icon { outline: var(--frame) solid var(--color-accent); outline-offset: 2px; }
+.cc .tile-actions { z-index: 7; }
 .cc-subs.dragging { overflow-x: visible; }
 .cc-subs > * { flex: 0 0 calc((100% - 4 * 6px) / 5.4); min-width: 0; scroll-snap-align: start; }
 /* Its members: small round toggles over their names. */
