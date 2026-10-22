@@ -457,13 +457,29 @@ async function wideBar() {
   await new Promise((ok) => setTimeout(ok, 300));
   const fails = [];
   const box = (q) => document.querySelector(q)?.getBoundingClientRect();
-  const [dock, pill, tray] = [box(".home.wide > .dock:not(.dock-tray) .app"), box(".home.wide .bar-pill"), box(".home.wide > .dock-tray .app")];
+  const [dock, pill, tray] = [box(".home.wide > .dock:not(.dock-tray) .app"), box(".home.wide > .bar .bar-pill"), box(".home.wide > .dock-tray .app")];
   const lacks = [[dock, "the dock"], [pill, "the pill"], [tray, "the recent apps"]].filter(([r]) => !r).map(([, n]) => n);
   if (lacks.length) return [`the wide bar lacks ${lacks.join(", ")}`];
   if (!(dock.right <= pill.left && pill.right <= tray.left)) fails.push("the wide bar isn't dock | search | recent apps, left to right");
   const mid = (r) => r.top + r.height / 2;
   if (Math.abs(mid(dock) - mid(pill)) > 4 || Math.abs(mid(tray) - mid(pill)) > 4) fails.push("the wide bar's dock, pill and recent apps aren't on one line");
   return fails;
+}
+
+/** The user's search widget on the grid (the phone, 2026-10-23): the bar's own pill, parked, keeps the bar's middle. */
+async function wideBarParked() {
+  const S = await importShim("./state.ts");
+  const W = await importShim("./ui/searchwidget.tsx");
+  const { powos } = await importShim("./bridge.ts");
+  const box = () => document.querySelector(".home.wide > .bar .bar-pill")?.getBoundingClientRect();
+  const mid = (r) => r.top + r.height / 2;
+  const pill = box();
+  await powos.home.addPanel("search", S.pages.value[S.page.value] ?? 1, { x: 5, y: 0, w: 3, h: 1 });
+  await new Promise((ok) => setTimeout(ok, 400));
+  const parked = document.querySelector(".home.wide.search-parked") && box();
+  await W.putBackInBar();
+  if (!parked?.width) return ["search widget on the grid: the bar's pill lost its slot"];
+  return Math.abs(parked.left - pill.left) > 2 || Math.abs(mid(parked) - mid(pill)) > 2 ? ["search widget on the grid: the bar's pill moved out of the bar's middle"] : [];
 }
 
 /**
@@ -1543,7 +1559,7 @@ try {
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar))])));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideBarParked))])));
   // Home after an app at another size (Broforce in landscape, 2026-10-22: back on home the widgets were tiny and squashed
   // at the top). Laid out at [from] while hidden and shown again at [to], turned there and back, and relaid in its own
   // column count after the other's at the same size: the tiles must sit where a fresh layout at [to] puts them, and the

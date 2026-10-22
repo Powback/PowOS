@@ -38,10 +38,12 @@ home() {
   for _ in 1 2; do [ "$(q '!!document.querySelector(".home.open, .home.editing")')" = true ] || break; sh_ "input keyevent 4"; sleep 1; done
 }
 
-# The one bar, left to right on one line (wide only).
+# The one bar, left to right on one line (wide only): measured on the BAR's own pill, which keeps the middle slot also
+# while parked (the user's search widget on the grid; it shows with the launcher) - never the first .bar-pill on the
+# page, which is the widget's when there is one (2026-10-23: a widget a row above read as "not one line").
 bar() {
-  local r; r=$(q '(()=>{const b=(s)=>document.querySelector(s)?.getBoundingClientRect();const d=b(".home.wide > .dock:not(.dock-tray) .app"),p=b(".home.wide .bar-pill"),t=b(".home.wide > .dock-tray .app");if(!document.querySelector(".home.wide"))return "not wide";const sw=!!document.querySelector(".home-tile[data-key=\"panel:search\"]");if(sw&&d&&t)return d.right<=t.left&&Math.abs(d.top+d.height/2-(t.top+t.height/2))<=4?"ok":"dock and recents not dock | recents on one line";if(!p)return "no pill";const m=(r)=>r.top+r.height/2;const bad=[];if(d&&!(d.right<=p.left))bad.push("dock not left of the pill");if(t&&!(p.right<=t.left))bad.push("recents not right of the pill");for(const r of [d,t])if(r&&Math.abs(m(r)-m(p))>4)bad.push("not one line");return bad.join("; ")||"ok"})()')
-  echo "bar: $r" | tee -a "$OUT/log.txt"; [ "$r" = ok ] || fail "the wide bar: $r"
+  local r; r=$(q '(()=>{const b=(s)=>document.querySelector(s)?.getBoundingClientRect();if(!document.querySelector(".home.wide"))return "not wide";const d=b(".home.wide > .dock:not(.dock-tray) .app"),p=b(".home.wide > .bar .bar-pill"),t=b(".home.wide > .dock-tray .app");if(!p?.width)return "no pill in the bar";const m=(r)=>r.top+r.height/2;const bad=[];if(d&&!(d.right<=p.left))bad.push("dock not left of the pill");if(t&&!(p.right<=t.left))bad.push("recents not right of the pill");for(const r of [d,t])if(r&&Math.abs(m(r)-m(p))>4)bad.push("not one line");return bad.join("; ")||(document.querySelector(".home.wide.search-parked")?"ok (search widget on the grid: the bar pill parked)":"ok")})()')
+  echo "bar: $r" | tee -a "$OUT/log.txt"; [ "${r%% *}" = ok ] || fail "the wide bar: $r"
 }
 
 # Every host tile on the first two pages at its side-by-side place on the wide page (store home.wide), a backup kept.
