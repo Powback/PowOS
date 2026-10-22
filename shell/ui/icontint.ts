@@ -1,35 +1,42 @@
 /**
  * App icons in the theme's colours (Settings > style > icons > "icon colours"), optional: "" keeps every icon as the
  * app draws it; "mono" redraws each one in the theme's accent - its own light and dark kept, so its shape still reads,
- * the hue the theme's. Done ONCE per icon, theme and mode, on a canvas in idle time, and kept as an object URL
+ * the hue the theme's; "hue" keeps each icon's own light, dark and saturation and moves only its hues onto the theme's
+ * palette (accent, red, the terminal's green/yellow/blue/magenta/cyan: nearest hue), so a many-coloured icon stays
+ * many-coloured. Done ONCE per icon, theme and mode, on a canvas in idle time, and kept as an object URL
  * (AppIcon shows the original until its copy is ready) - never a filter redrawn per frame.
  */
 import { effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { stored } from "../state.ts";
 
-/** "" (the apps' own icons) or "mono" (the theme's accent). */
+/** "" (the apps' own icons), "hue" (the theme's palette) or "mono" (the theme's accent). */
 export const iconTint = stored("icons.tint", "");
 // The other pages (the pull-up over apps, the switcher): the setting as it changes on home.
 addEventListener("storage", (e) => {
   if (e.key === "powos.icons.tint") iconTint.value = e.newValue ?? "";
 });
 
-const accentNow = () => getComputedStyle(document.documentElement).getPropertyValue("--color-accent").trim();
-/** The theme's accent as the copies were made for it: a new theme makes new ones. */
-const accent = signal("");
-powos.on("theme.changed", () => setTimeout(() => (accent.value = accentNow()), 0));
+/** The theme's colours the copies are made from (accent first): a new theme makes new ones. */
+const PALETTE = ["--color-accent", "--color-red", ...[1, 2, 3, 4, 5, 6].map((i) => `--term-color${i}`)];
+const themeNow = () => {
+  const css = getComputedStyle(document.documentElement);
+  return PALETTE.map((v) => css.getPropertyValue(v).trim()).join(";");
+};
+const theme = signal("");
+powos.on("theme.changed", () => setTimeout(() => (theme.value = themeNow()), 0));
 
 /** Bumped as a batch of copies is ready: the icons showing originals look again. */
 const ready = signal(0);
 const cache = new Map<string, string>();
 const queued = new Set<string>();
-const queue: [key: string, src: string, rgb: [number, number, number], mode: string][] = [];
+type Rgb = [number, number, number];
+const queue: [key: string, src: string, palette: Rgb[], mode: string][] = [];
 
 // A different theme or mode: the old copies go (their memory with them).
 let made = "";
 effect(() => {
-  const now = `${iconTint.value}|${accent.value}`;
+  const now = `${iconTint.value}|${theme.value}`;
   if (made && now !== made) {
     for (const url of cache.values()) URL.revokeObjectURL(url);
     cache.clear();
@@ -43,16 +50,16 @@ effect(() => {
 export function tinted(src: string): string | undefined {
   const mode = iconTint.value;
   if (!mode || !src) return undefined;
-  if (!accent.value) accent.value = accentNow();
-  const key = `${mode}|${accent.value}|${src}`;
+  if (!theme.value) theme.value = themeNow();
+  const key = `${mode}|${theme.value}|${src}`;
   const hit = cache.get(key);
   if (hit) return hit;
   void ready.value; // re-rendered when a batch is in
   if (!queued.has(key)) {
-    const rgb = parseRgb(accent.value);
-    if (!rgb) return undefined;
+    const palette = theme.value.split(";").map(parseRgb);
+    if (!palette[0]) return undefined;
     queued.add(key);
-    queue.push([key, src, rgb, mode]);
+    queue.push([key, src, palette.filter((c): c is Rgb => !!c), mode]);
     if (queue.length === 1) schedule();
   }
   return undefined;
@@ -64,9 +71,9 @@ const schedule = () =>
 /** A few icons per idle moment, then the page told once (not a render per icon). */
 async function pump() {
   for (let n = 0; n < 8 && queue.length; n++) {
-    const [key, src, rgb, mode] = queue.shift()!;
+    const [key, src, palette, mode] = queue.shift()!;
     try {
-      const url = await recolour(src, rgb, mode);
+      const url = await recolour(src, palette, mode);
       if (url && queued.has(key)) cache.set(key, url);
     } catch {
       // Not readable (another origin, not drawn yet): it stays the original.
@@ -76,7 +83,7 @@ async function pump() {
   if (queue.length) schedule();
 }
 
-async function recolour(src: string, rgb: [number, number, number], mode: string): Promise<string | undefined> {
+async function recolour(src: string, palette: Rgb[], mode: string): Promise<string | undefined> {
   const img = new Image();
   img.src = src;
   await img.decode();
@@ -87,8 +94,9 @@ async function recolour(src: string, rgb: [number, number, number], mode: string
   g.drawImage(img, 0, 0, size, size);
   const data = g.getImageData(0, 0, size, size);
   const px = data.data;
-  if (mode === "mono") {
-    const [h, s] = toHueSatLight(rgb);
+  if (mode === "hue") toPalette(px, palette);
+  else if (mode === "mono") {
+    const [h, s] = toHueSatLight(palette[0]);
     const sat = Math.min(0.8, Math.max(0.35, s));
     for (let i = 0; i < px.length; i += 4) {
       if (!px[i + 3]) continue;
@@ -105,7 +113,28 @@ async function recolour(src: string, rgb: [number, number, number], mode: string
   return blob ? URL.createObjectURL(blob) : undefined;
 }
 
-function parseRgb(css: string): [number, number, number] | null {
+/** Each coloured pixel's hue swapped for the nearest of the palette's; its saturation and light its own. Greys stay. */
+function toPalette(px: Uint8ClampedArray, palette: Rgb[]) {
+  const hues = palette.map(toHueSatLight).filter(([, s]) => s > 0.15).map(([h]) => h);
+  if (!hues.length) return;
+  // Nearest palette hue for each of 360 degrees, once - not a search per pixel.
+  const near = new Float32Array(360);
+  for (let d = 0; d < 360; d++) {
+    const dist = (h: number) => Math.min(Math.abs(d / 360 - h), 1 - Math.abs(d / 360 - h));
+    near[d] = hues.reduce((a, b) => (dist(b) < dist(a) ? b : a));
+  }
+  for (let i = 0; i < px.length; i += 4) {
+    if (!px[i + 3]) continue;
+    const [h, s, l] = toHueSatLight([px[i], px[i + 1], px[i + 2]]);
+    if (s < 0.08) continue;
+    const [r, g, b] = fromHueSatLight(near[Math.round(h * 360) % 360], s, l);
+    px[i] = r;
+    px[i + 1] = g;
+    px[i + 2] = b;
+  }
+}
+
+function parseRgb(css: string): Rgb | null {
   const m = css.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/);
   if (m) return [+m[1], +m[2], +m[3]];
   const hex = css.match(/^#([0-9a-f]{6})$/i);
@@ -113,7 +142,7 @@ function parseRgb(css: string): [number, number, number] | null {
   return null;
 }
 
-function toHueSatLight([r, g, b]: [number, number, number]): [number, number, number] {
+function toHueSatLight([r, g, b]: Rgb): Rgb {
   r /= 255;
   g /= 255;
   b /= 255;
@@ -127,7 +156,7 @@ function toHueSatLight([r, g, b]: [number, number, number]): [number, number, nu
   return [h / 6, s, l];
 }
 
-function fromHueSatLight(h: number, s: number, l: number): [number, number, number] {
+function fromHueSatLight(h: number, s: number, l: number): Rgb {
   const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
   const p = 2 * l - q;
   const ch = (t: number) => {

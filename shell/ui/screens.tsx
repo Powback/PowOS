@@ -33,6 +33,9 @@ import {
 import { Icon, type IconName } from "./icons.tsx";
 import { apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine } from "../state.ts";
 import { iconTint } from "./icontint.ts";
+
+/** "icon colours" options after "the apps'": theme hues, the accent. */
+const TINTS = ["hue", "mono"];
 import { drawerRecents } from "./drawer.tsx";
 import { PetToggle } from "./pet.tsx";
 
@@ -506,9 +509,9 @@ function StyleScreen() {
         />
       </Section>
       <Section icon="apps" title="icons">
-        {/* The page's own (ui/icontint.ts): each icon redrawn once in the theme's accent, or as the app draws it. */}
+        {/* The page's own (ui/icontint.ts): each icon redrawn once - its hues the theme's, all the accent - or as drawn. */}
         <Option label="icon colours">
-          <Segmented options={["the apps'", "the theme's"]} picked={iconTint.value ? 1 : 0} onPick={(i) => (iconTint.value = i === 1 ? "mono" : "")} />
+          <Segmented options={["the apps'", "theme hues", "accent"]} picked={TINTS.indexOf(iconTint.value) + 1} onPick={(i) => (iconTint.value = TINTS[i - 1] ?? "")} />
         </Option>
         {s.flags.map((f) => (
           <Option key={f.key} label={f.label}>
