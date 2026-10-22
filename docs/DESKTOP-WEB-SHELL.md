@@ -391,3 +391,20 @@ minimise, close, the switcher.
    the user has the desktop open.
 5. Then: the switcher (Alt+Tab / a swipe) over `windows.*` with thumbnails (`KWin.ScreenShot2`), virtual desktops,
    grouping, and replacing Plasma's panel.
+
+### Change of direction (2026-10-22): native floating windows on the Android home
+
+The Plasma-hosted shell is parked (powos-shell autostart off, `powos-desktop-shell taskbar off`; the code above stays).
+The PowOS desktop is the unfolded Android home exactly as it is; apps float over it.
+
+- **Mechanism (spike, measured on the phone):** Android's own freeform windowing. OxygenOS 16 coerces
+  `--windowingMode 5` to full screen until the developer setting `enable_freeform_support` is 1 (global; set on the
+  phone 2026-10-22 20:46, no reboot needed; undo with `settings delete global enable_freeform_support`). With it on,
+  Calculator opened as a freeform window over home (bounds 565,272-1703,2294) and `am task resize` moved/resized it.
+  OnePlus's own APIs (`FlexibleWindowManager.startAnyActivity` / `calculateFlexibleWindowBounds`,
+  `startFlexibleWindowForRecentTasks`, `OplusZoomWindowManager.startZoomWindow`) opened apps full screen or as a
+  split pocket when called from outside its launcher; Settings is on OnePlus's no-floating list.
+- **Slice 1:** apps opened from home on the unfolded screen launch freeform (`system/AppWindows.kt`, cascaded,
+  half width x two thirds height); folded, full screen as before.
+- **Missing:** a title bar (OxygenOS draws no caption for freeform tasks), move/resize by touch, minimise to the
+  dock, running windows in the dock; then Linux (KWin) apps through the same model.

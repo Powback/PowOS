@@ -219,7 +219,7 @@ class AndroidAppCatalog(
             return
         }
         // Uninstalled or disabled since the list was loaded.
-        runCatching { launcherApps.startMainActivity(component, user, null, null) }
+        runCatching { launcherApps.startMainActivity(component, user, null, dev.omalauncher.system.AppWindows.launchOptions(context)) }
             .onFailure { Log.w(TAG, "cannot open $component in $user", it) }
     }
 
