@@ -52,12 +52,12 @@ if sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi "PowosLock"; then sh
 chk lock
 step "home: merged tiles"; sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home; shot home-unfolded
 
-field() { # page -> "x y" of the compose field's centre in device px (read only, CDP)
-  "$T/cdp.sh" eval "$1" 'JSON.stringify((()=>{const e=document.querySelector(".ai-compose textarea, .ai-compose input, textarea, input[type=text]");if(!e)return [0,0];const r=e.getBoundingClientRect();return [Math.round((r.x+r.width/2)*devicePixelRatio),Math.round((r.y+r.height/2)*devicePixelRatio)]})())' 2>/dev/null | tr -dc '0-9,' | tr ',' ' '
+field() { # page [need-ai] -> "x y" of the compose field's centre in device px, only if it is on screen (read only, CDP)
+  "$T/cdp.sh" eval "$1" 'JSON.stringify((()=>{const e=document.querySelector(".ai-compose textarea, .ai-compose input");if(!e)return [0,0];'"${2:+const a=e.closest(\".ai-screen\");if(a&&!a.classList.contains(\"shown\"))return [0,0];}"'const r=e.getBoundingClientRect();if(r.width<20||r.height<10||r.x<0||r.y<0||r.x+r.width>innerWidth+1||r.y+r.height>innerHeight+1)return [0,0];return [Math.round((r.x+r.width/2)*devicePixelRatio),Math.round((r.y+r.height/2)*devicePixelRatio)]})())' 2>/dev/null | tr -dc '0-9,' | tr ',' ' '
 }
 step "PowOS AI page + keyboard"; sh_ "input swipe $(x 300) $(y 500) $(x 900) $(y 500) 350"; sleep 1.5; chk ai
 shot ai-unfolded
-set -- $(field home); if [ "${1:-0}" -gt 0 ]; then
+set -- $(field home ai); if [ "${1:-0}" -gt 0 ]; then
   sh_ "input tap $1 $2"; sleep 1.5; chk kbd; shot ai-keyboard-unfolded; sh_ "input keyevent 4"; sleep 0.8
 else echo "no compose field found on the AI page"; fi
 step "chat thumbnails"; sh_ "input swipe $(x 500) $(y 400) $(x 500) $(y 750) 300"; sleep 1.2; chk chat; shot ai-chat-thumbnails-unfolded
