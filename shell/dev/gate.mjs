@@ -125,6 +125,147 @@ async function transpiled(p) {
   return txRuns.get(key);
 }
 
+/** Waits for [r]'s page to be up, then adds what [check] returns to its problems (a timeout said as the pages say it). */
+async function whenReady(r, check) {
+  await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+  if (!(await r.page.evaluate(() => window.__powosAlive === true).catch(() => false))) {
+    r.problems.push(`not ready (window.__powosAlive) within ${Date.now() - r.started} ms`);
+    return { ...r, ready: false, ms: Date.now() - r.started };
+  }
+  r.problems.push(...(await check().catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
+  return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** In the page: steam (6x3) over fetch (3x3, the right half) on home's first page - merged, level, one surface? */
+async function joinsCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const { powos } = await importShim("./bridge.ts");
+  const h = await powos.home.get();
+  for (const i of h.items) await powos.home.remove(i.key);
+  const w = Math.min(6, h.columns || 6);
+  // Home's first page (pages are 1-based; the wide layout maps it to the left half).
+  const pg = h.pages[0] ?? 1;
+  await powos.home.addPanel("agents", pg, { x: 0, y: 0, w, h: 3 });
+  await powos.home.addPanel("recents", pg, { x: w - 3, y: 3, w: 3, h: 3 });
+  S.page.value = 0;
+  await sleep(800);
+  const half = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
+  const tiles = [...document.querySelectorAll(".page:not(.away) .home-tile")];
+  if (tiles.length !== 2) return [`${tiles.length} tiles on the page, not the 2 placed`];
+  const [A, B] = tiles.map((t) => ({ t, cell: t.getBoundingClientRect(), face: t.querySelector(":scope > .tile").getBoundingClientRect() })).sort((p, q) => p.cell.top - q.cell.top);
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const seamBetween = [...document.querySelectorAll(".page:not(.away) .seam.bridge")].some((e) => {
+    const r = e.getBoundingClientRect();
+    return near(r.top, A.face.bottom) && near(r.bottom, B.face.top) && near(r.left, Math.max(A.face.left, B.face.left)) && near(r.right, Math.min(A.face.right, B.face.right));
+  });
+  const gap = B.face.top - A.face.bottom;
+  return [
+    !A.t.classList.contains("joined") || !B.t.classList.contains("joined") ? "the two aren't merged (no .joined)" : "",
+    // The wide one's bottom: where an unjoined edge is (its free half level), not half a gutter lower.
+    near(A.face.bottom, A.cell.bottom - half) ? "" : `the wide tile's bottom edge is ${Math.round(A.face.bottom - (A.cell.bottom - half))} px off its row line`,
+    gap > 0.5 && !seamBetween ? `a ${Math.round(gap)} px gutter between them along the shared span (not one surface)` : "",
+    near(A.face.right, B.face.right) ? "" : `their right edges differ by ${Math.round(A.face.right - B.face.right)} px`,
+    document.querySelector(".page:not(.away) .seam.fillet") ? "" : "no rounded inner corner where the group turns",
+  ].filter(Boolean);
+}
+
+/** The tiles on the page on screen, as "text@left,top,WxH", sorted. */
+const tileRects = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".page:not(.away) .home-tile")]
+      .map((t) => {
+        const b = t.getBoundingClientRect();
+        return `${(t.textContent || "").slice(0, 10)}@${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.width)}x${Math.round(b.height)}`;
+      })
+      .sort(),
+  );
+const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const viewTo = (page, v) => page.setViewport({ ...v, deviceScaleFactor: 1 });
+/** The page as hidden / shown (an app in front of home), as the WebView says it. */
+const hideAs = (page, hidden) =>
+  page.evaluate((h) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => h });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (h ? "hidden" : "visible") });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, hidden);
+/** Home's column count: the other's (the wide layout's, [wide]) or its own again. */
+const columnsAs = (page, wide) =>
+  page.evaluate(async (k) => {
+    const S = await importShim("./state.ts");
+    if (!window.__cols) window.__cols = S.home.value.columns;
+    S.home.value = { ...S.home.value, columns: k ? window.__cols * 2 + 1 : window.__cols };
+  }, wide);
+
+/** An app in front at [from]: home hidden, resized there and back (the way back with no resize event), then shown. */
+async function backFromApp(page, to, from) {
+  await hideAs(page, true);
+  await viewTo(page, from);
+  await pause(600);
+  await page.evaluate(() => {
+    window.__eatResize = (e) => e.stopImmediatePropagation();
+    addEventListener("resize", window.__eatResize, { capture: true });
+  });
+  await viewTo(page, to);
+  await pause(300);
+  await page.evaluate(() => removeEventListener("resize", window.__eatResize, { capture: true }));
+  await hideAs(page, false);
+  await pause(1200);
+}
+
+/** Shown again still at the app's size (its last frame), then the window back at [to] with no resize event. */
+async function shownAtAppSize(page, to, from) {
+  await hideAs(page, true);
+  await viewTo(page, from);
+  await pause(300);
+  await hideAs(page, false);
+  await pause(600);
+  await page.evaluate(() => {
+    window.__eatResize = (e) => e.stopImmediatePropagation();
+    addEventListener("resize", window.__eatResize, { capture: true });
+  });
+  await viewTo(page, to);
+  await pause(1200);
+  await page.evaluate(() => removeEventListener("resize", window.__eatResize, { capture: true }));
+}
+
+/** Relaid in the other column count while measured at a size, then in its own at that same size (the phone's race). */
+async function otherColumns(page, to) {
+  await columnsAs(page, true);
+  await viewTo(page, { width: to.width, height: to.height - 1 });
+  await pause(400);
+  await viewTo(page, to);
+  await pause(400);
+  await columnsAs(page, false);
+  await pause(600);
+}
+
+/** The relayout case: each way of getting back to [to] must give a fresh layout's tiles and a full-width grid. */
+async function relayout(page, to, from) {
+  await pause(800);
+  const fresh = await tileRects(page);
+  if (!fresh.length) return ["no tiles laid out"];
+  const steps = [
+    [`back from an app at ${from.width}x${from.height}`, () => backFromApp(page, to, from)],
+    [`turned ${from.width}x${from.height} and back`, async () => (await viewTo(page, from), await pause(800), await viewTo(page, to), await pause(1200))],
+    ["relaid in its own columns at the same size", () => otherColumns(page, to)],
+    [`shown at ${from.width}x${from.height}, then back with no resize event`, () => shownAtAppSize(page, to, from)],
+  ];
+  const bad = [];
+  for (const [what, step] of steps) {
+    await step();
+    const now = await tileRects(page);
+    if (now.join() !== fresh.join()) bad.push(`${what}: tiles not where a fresh layout puts them (${now.filter((x) => !fresh.includes(x)).slice(0, 2).join("; ")})`);
+  }
+  const cells = await page.evaluate(async () => {
+    const S = await importShim("./state.ts");
+    const g = (await importShim("./ui/grid.tsx")).geometry.value;
+    return { cols: S.home.value.columns, span: g.cellW * S.home.value.columns, across: g.width - 2 * g.pad };
+  });
+  if (Math.abs(cells.span - cells.across) > 1) bad.push(`the grid's cells span ${Math.round(cells.span)} px in ${cells.cols} columns, not its ${Math.round(cells.across)} px width`);
+  return bad;
+}
+
 async function open(browser, url, name, viewport = { width: 412, height: 915 }) {
   // A context (a window) of its own: tabs side by side in one window are hidden but the front one - no frames.
   const page = await (await browser.createBrowserContext()).newPage();
@@ -369,58 +510,20 @@ try {
   // widget over a half-width one is ONE surface - the gutter along the shared span filled by a seam exactly between the
   // two faces, an inner-corner fillet where the group turns - and the wide one's free edge stays level with an unjoined
   // edge (half a gutter in from its row line: extending it whole was the ragged step). Folded and unfolded.
-  if (process.env.SHELL_PAGES !== "0") {
+  if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 412, height: 915 }], ["unfolded", { width: 900, height: 1000 }]])
-      runs.push(
-        open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then(async (r) => {
-          await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
-          if (!(await r.page.evaluate(() => window.__powosAlive === true).catch(() => false))) {
-            r.problems.push(`not ready (window.__powosAlive) within ${Date.now() - r.started} ms`);
-            return { ...r, ready: false, ms: Date.now() - r.started };
-          }
-          const out = await r.page
-            .evaluate(async () => {
-              const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
-              const S = await importShim("./state.ts");
-              const { powos } = await importShim("./bridge.ts");
-              const h = await powos.home.get();
-              for (const i of h.items) await powos.home.remove(i.key);
-              const w = Math.min(6, h.columns || 6);
-              // The wide one over the right half: steam (6x3) over fetch (3x3).
-              // Home's first page (pages are 1-based; the wide layout maps it to the left half).
-              const pg = h.pages[0] ?? 1;
-              await powos.home.addPanel("agents", pg, { x: 0, y: 0, w, h: 3 });
-              await powos.home.addPanel("recents", pg, { x: w - 3, y: 3, w: 3, h: 3 });
-              S.page.value = 0;
-              await sleep(800);
-              const half = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 8) / 2;
-              const tiles = [...document.querySelectorAll(".page:not(.away) .home-tile")];
-              const bad = [];
-              if (tiles.length !== 2) return [`${tiles.length} tiles on the page, not the 2 placed`];
-              const [A, B] = tiles.map((t) => ({ t, cell: t.getBoundingClientRect(), face: t.querySelector(":scope > .tile").getBoundingClientRect() })).sort((p, q) => p.cell.top - q.cell.top);
-              if (!A.t.classList.contains("joined") || !B.t.classList.contains("joined")) bad.push("the two aren't merged (no .joined)");
-              // The wide one's bottom: where an unjoined edge is (its free half level), not half a gutter lower.
-              if (Math.abs(A.face.bottom - (A.cell.bottom - half)) > 1) bad.push(`the wide tile's bottom edge is ${Math.round(A.face.bottom - (A.cell.bottom - half))} px off its row line`);
-              // The narrow one under it reaches up to meet it, or a seam fills between them, exactly along the shared span.
-              const gap = B.face.top - A.face.bottom;
-              if (gap > 0.5) {
-                const ok = [...document.querySelectorAll(".page:not(.away) .seam.bridge")].some((e) => {
-                  const r = e.getBoundingClientRect();
-                  return Math.abs(r.top - A.face.bottom) <= 1 && Math.abs(r.bottom - B.face.top) <= 1 && Math.abs(r.left - Math.max(A.face.left, B.face.left)) <= 1 && Math.abs(r.right - Math.min(A.face.right, B.face.right)) <= 1;
-                });
-                if (!ok) bad.push(`a ${Math.round(gap)} px gutter between them along the shared span (not one surface)`);
-              }
-              // The right edges line up (both end on the same column).
-              if (Math.abs(A.face.right - B.face.right) > 1) bad.push(`their right edges differ by ${Math.round(A.face.right - B.face.right)} px`);
-              if (!document.querySelector(".page:not(.away) .seam.fillet")) bad.push("no rounded inner corner where the group turns");
-              return bad;
-            })
-            .catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
-          r.problems.push(...out);
-          return { ...r, ready: true, ms: Date.now() - r.started };
-        }),
-      );
-  }
+      runs.push(open(browser, `${ORIGIN}/index.html`, `joins-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(joinsCheck))));
+  // Home after an app at another size (Broforce in landscape, 2026-10-22: back on home the widgets were tiny and squashed
+  // at the top). Laid out at [from] while hidden and shown again at [to], turned there and back, and relaid in its own
+  // column count after the other's at the same size: the tiles must sit where a fresh layout at [to] puts them, and the
+  // grid's cells span its width in home's column count. Folded portrait <-> landscape, and unfolded <-> folded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, to, from] of [
+      ["landscape", { width: 404, height: 900 }, { width: 900, height: 404 }],
+      ["fold", { width: 404, height: 900 }, { width: 900, height: 1000 }],
+      ["unfold", { width: 900, height: 1000 }, { width: 404, height: 900 }],
+    ])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `relayout-${label}`, to).then((r) => whenReady(r, () => relayout(r.page, to, from))));
   // The control center's rearranging (ui/reorder.ts, control.tsx Controls): in edit mode a toggle held and carried onto
   // the first slot of the row lands there, is saved (the store holds it), and is still there after the panel shut and
   // opened again and after a reload; a carry cancelled (the system took the pointer) changes nothing. Every step waits

@@ -58,11 +58,25 @@ export function wide(n: Bridge): Bridge {
 
   // Folded or unfolded: home is laid out again from the host's own layout.
   let was = isWide();
-  addEventListener("resize", () => {
-    if (isWide() === was) return;
+  const recheck = () => {
+    if (document.hidden || isWide() === was) return;
     was = isWide();
     emit("home.changed", null);
+  };
+  // Every way the size can change: a resize, a rotation, a fold, and coming back to home (an app that ran in landscape
+  // - Broforce - left home hidden at its size: the resize while hidden was judged on that, and none came on return,
+  // so home stayed laid out wide - tiny cells squashed at the top). Hidden, nothing is decided; shown again, at once
+  // and once more after the window has its size.
+  addEventListener("resize", recheck);
+  addEventListener("orientationchange", recheck);
+  addEventListener("pageshow", recheck);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    recheck();
+    requestAnimationFrame(() => requestAnimationFrame(recheck));
+    setTimeout(recheck, 400);
   });
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(recheck).observe(document.documentElement);
 
   return {
     ...n,

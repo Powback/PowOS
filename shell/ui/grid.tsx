@@ -62,7 +62,9 @@ function measure(el: HTMLElement, columns: number) {
   // and its box on screen grows every frame of that - a new grid, every tile re-rendered, each frame.
   const r = el.getBoundingClientRect();
   const size = { width: el.offsetWidth, height: el.offsetHeight };
-  if (!size.width || !size.height) return;
+  // Hidden (an app in front, maybe at another size and orientation): never laid out at that size - measured again
+  // when home is shown (Pages).
+  if (!size.width || !size.height || document.hidden) return;
   const root = getComputedStyle(document.documentElement);
   const pad = parseFloat(root.getPropertyValue("--edge")) || 12;
   // The grid is laid out for home at rest, not for this frame: the dock folding away under the launcher and the
@@ -81,7 +83,9 @@ function measure(el: HTMLElement, columns: number) {
   const g = geometry.peek();
   // Within a pixel and a half: the layout height is whole pixels, the dock's folded height isn't - their sum wobbles by
   // a fraction each frame of the dock's animation.
-  const same = g.rows === next.rows && g.pad === next.pad && Math.abs(g.width - next.width) < 1.5 && Math.abs(g.height - next.height) < 1.5;
+  // The columns too (cellW): home relaid in another column count at the same size (wide <-> narrow, back from an app
+  // that ran in landscape) kept the other count's cell width - tiny tiles squashed at the top.
+  const same = g.rows === next.rows && g.pad === next.pad && Math.abs(g.cellW - next.cellW) < 0.5 && Math.abs(g.width - next.width) < 1.5 && Math.abs(g.height - next.height) < 1.5;
   if (!same) geometry.value = next;
   else {
     g.left = next.left;
@@ -822,14 +826,39 @@ function useEmptyPress() {
   };
 }
 
+/**
+ * The grid measured from the pages element: on a resize, and when home is shown again or turned/folded (back from an
+ * app that ran in landscape the pages had been measured at its size while hidden) - at once and after the window settles.
+ */
+function useMeasured(el: { current: HTMLDivElement | null }) {
+  useEffect(() => {
+    const again = () => el.current && measure(el.current, home.value.columns);
+    const ro = new ResizeObserver(again);
+    ro.observe(el.current!);
+    const shown = () => {
+      if (document.hidden) return;
+      again();
+      requestAnimationFrame(() => requestAnimationFrame(again));
+      setTimeout(again, 400);
+    };
+    document.addEventListener("visibilitychange", shown);
+    addEventListener("pageshow", shown);
+    addEventListener("orientationchange", shown);
+    addEventListener("resize", shown);
+    return () => {
+      ro.disconnect();
+      document.removeEventListener("visibilitychange", shown);
+      removeEventListener("pageshow", shown);
+      removeEventListener("orientationchange", shown);
+      removeEventListener("resize", shown);
+    };
+  }, []);
+}
+
 export function Pages() {
   const el = useRef<HTMLDivElement>(null);
   const emptyPress = useEmptyPress();
-  useEffect(() => {
-    const ro = new ResizeObserver(() => measure(el.current!, home.value.columns));
-    ro.observe(el.current!);
-    return () => ro.disconnect();
-  }, []);
+  useMeasured(el);
   // Tiles reaching further down add rows: re-measure then. (Not on the drawer opening or closing: nothing of home's
   // layout changes with it - shell.css .launcher - and reading drawerOpen here re-rendered every page, its glass mask
   // rebuilt, at each open and close.)
