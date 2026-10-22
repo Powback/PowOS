@@ -21,6 +21,7 @@ import type {
   NotificationList,
   PhoneNotification,
   RecentTask,
+  RunState,
   AppWindow,
   QuickState,
   TermState,
@@ -91,6 +92,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       launch: (key) => call("apps.launch", key),
       info: (key) => call("apps.info", key),
       uninstall: (key) => call("apps.uninstall", key),
+      running: () => call<Record<string, RunState>>("apps.running"),
     },
     usage: { recent: (limit) => call<string[]>("usage.recent", limit) },
     home: {
@@ -445,6 +447,8 @@ function mock(): Bridge {
       },
       info: async (key) => console.log("[mock] info", key),
       uninstall: async (key) => console.log("[mock] uninstall", key),
+      // A few running, Steam frozen (a game asleep with it) and Dolphin frozen (powos-sleep-gui).
+      running: async () => ({ "a:chrome": "running", "l:konsole": "running", "a:spotify": "running", "a:signal": "running", "l:dolphin": "frozen", "l:steam": "frozen" }),
     },
     usage: { recent: async (limit) => recent.slice(0, limit) },
     home: homeLayout(home, () => events.emit("home.changed", null), () => apps),

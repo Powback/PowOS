@@ -261,6 +261,9 @@ export interface Chat {
   queued?: { id: number; text: string }[];
 }
 
+/** An app that runs, or one frozen (asleep in RAM: powos-sleep-gui, a game frozen with Steam). */
+export type RunState = "running" | "frozen";
+
 export interface Bridge {
   /** "android" | "powos" | "mock" */
   host: string;
@@ -269,6 +272,12 @@ export interface Bridge {
     launch(key: string): Promise<void>;
     info(key: string): Promise<void>;
     uninstall(key: string): Promise<void>;
+    /**
+     * Which apps run, app key -> "running" | "frozen" (only those that do); "apps.running" carries it again on every
+     * change. Android: an app with a task in recents; Linux, Steam and its games: a window, frozen by powos-sleep-gui.
+     * Only where the host knows it.
+     */
+    running?(): Promise<Record<string, RunState>>;
   };
   usage: {
     /** Keys, last opened first. */

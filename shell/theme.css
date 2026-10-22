@@ -49,6 +49,8 @@
   /* Text straight on the wallpaper (home's app labels, PowOS AI's page header): the theme's foreground with a halo of
      its background - turned round over a wallpaper of the other tone (data-wallpaper, below), as iOS does. */
   --on-wallpaper: var(--color-foreground);
+  /* The running bar under an app icon (shell.css .app[data-run]): a hairline of the theme background - the tone the accent is made to stand on - so it reads on any wallpaper. */
+  --run-halo: 0 0 0 1px color-mix(in srgb, var(--color-background) 75%, transparent);
   --on-wallpaper-halo: var(--color-background);
   /* Text in the accent (links, "open ↗", a text button): the accent drawn a little towards the foreground - on glass
      over any wallpaper, in any theme, >= 4.5:1. Fills (an on tile, a switch) keep the accent itself. */

@@ -19,6 +19,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import dev.omalauncher.AgentMail
 import dev.omalauncher.PowosAiActivity
 import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.system.RunningApps
 import kotlin.concurrent.thread
 import dev.omalauncher.PowosAiChat
 import dev.omalauncher.Runtime
@@ -153,6 +154,10 @@ class ShellBridge(
             snapshotFlow { listOf(runtime.androidApps.apps.size, runtime.linuxApps.size, ShellIcons.version.intValue) }.drop(1).collect { emit("apps.changed", null) }
         }
         scope.launch { runtime.refreshApps() }
+        // An app's task opened or gone, a Linux app's window, or its freeze or thaw: the running dots (ui/running.ts).
+        scope.launch {
+            snapshotFlow { RunningApps.tasks.value to RunningApps.linux.value }.drop(1).collect { emit("apps.running", running()) }
+        }
         // A floating window opened, minimised, brought back or closed: the dock shows the windows again.
         scope.launch { snapshotFlow { dev.omalauncher.system.WindowFrames.running.value }.drop(1).collect { emit("windows.changed", windows()) } }
         // A window let go at a screen edge: home moves it to the next page (ui/desktops.ts).
@@ -248,6 +253,7 @@ class ShellBridge(
             "pull.launched" -> overlay?.launched()
             // The floating app windows for the dock (system/WindowFrames.kt), and one brought back.
             "windows.list" -> windows()
+            "apps.running" -> running()
             "windows.restore" -> (dev.omalauncher.system.WindowFrames.current?.restore(a.getInt(0)) ?: false).also { if (it) emit("windows.raised", a.getInt(0)) }
             // Home's pages are desktops (ui/desktops.ts): the windows of the pages not on screen, out of sight.
             "windows.desktop" -> dev.omalauncher.system.WindowFrames.current?.desktop(a.getJSONArray(0).let { h -> (0 until h.length()).map { h.getInt(it) }.toSet() }) ?: false
@@ -470,6 +476,9 @@ class ShellBridge(
             },
         )
     }
+
+    /** Which apps run, key -> "running" | "frozen" (RunningApps). */
+    private fun running(): JSONObject = RunningApps.shellMap(runtime.androidApps.apps.map { it.key to it.component.packageName }, runtime.linuxApps)
 
     /** The notification panel's list: { available, items: [notificationJson] }. */
     private fun notificationList(): JSONObject {

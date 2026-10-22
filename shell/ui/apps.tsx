@@ -3,6 +3,7 @@
  * over everything so no scrolling list clips it). In the drawer, holding an app and moving it drags it onto home.
  */
 import { tinted } from "./icontint.ts";
+import { running } from "./running.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, page, pages, setDocked } from "../state.ts";
 import { startCarry } from "./grid.tsx";
@@ -84,7 +85,7 @@ export function AppCell({ app, labels = true, draggable = false, onDrag, class: 
     onDrag ? (e) => onDrag(e, e.currentTarget as HTMLElement) : draggable ? (e) => dragHome(app.key, e) : null,
   );
   return (
-    <div class={`app ${cls}`} style={style} data-key={app.key} {...press}>
+    <div class={`app ${cls}`} style={style} data-key={app.key} data-run={running.value[app.key]} {...press}>
       <AppIcon src={app.icon} label={app.label} />
       {labels && <div class="app-label">{app.label}</div>}
     </div>

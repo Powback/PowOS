@@ -501,7 +501,27 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   transition: background 120ms;
 }
 .app:active { background: var(--color-surface); }
-.app-icon { display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: 22%; }
+.app-icon { position: relative; display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: 22%; }
+/*
+ * A running app (ui/running.ts: a task, a Linux window) or one with a floating window (the dock, unfolded): a short
+ * accent bar centred under its icon, bare (no plate) - in the dock, its recent apps and the drawer. Frozen (asleep in
+ * RAM: powos-sleep-gui, a game with Steam) or minimised: the same bar, faint. Static: no frames while nothing changes.
+ */
+.app[data-run] .app-icon::after,
+.dock .app.windowed .app-icon::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 50%;
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  translate: -50% 0;
+  background: var(--color-accent);
+  box-shadow: var(--run-halo);
+}
+.app[data-run="frozen"] .app-icon::after,
+.dock .app.windowed.minimised:not([data-run="running"]) .app-icon::after { opacity: 0.4; }
 .app-icon img { display: block; width: 100%; height: 100%; transition: opacity 160ms; }
 /* Not loaded yet (apps.tsx AppIcon): a pulsing tile in its place, not a broken image. */
 /* Pulses ~10 s, not forever: an app with no icon at all (a Linux app like lstopo) stays "loading", and an endless
@@ -859,20 +879,6 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   border-radius: var(--radius);
 }
 .dock.aimed { border-color: var(--color-accent); }
-/* An app with a floating window (unfolded home): a small dot under its icon; dimmer while the window is minimised. */
-.dock .app.windowed::after {
-  content: "";
-  position: absolute;
-  bottom: 2px;
-  left: 50%;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  translate: -50% 0;
-  background: var(--color-foreground);
-  opacity: 0.85;
-}
-.dock .app.windowed.minimised::after { opacity: 0.4; }
 .dock .app.swap-out { opacity: 0.35; scale: 0.8; transition: scale 120ms, opacity 120ms; }
 .dock.dock-ghost {
   position: fixed;

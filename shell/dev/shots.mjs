@@ -176,6 +176,10 @@ const SCENES = [
   ["edit-theme", "home", "S.editing.value = true; await sleep(200); [...document.querySelectorAll('.edit-act')].find(b => b.textContent.trim() === 'theme')?.click();", "wallpaper"],
   ["edit-picker", "home", "S.editing.value = true; await sleep(150); (await U('./ui/appwidget.tsx')).picker.value = true;", "wallpaper"],
   ["drawer", "home", "S.drawer.value = 1;", "wallpaper"],
+  // The running bar under icons (ui/running.ts; the mock: Chrome, Konsole, Spotify, Signal running, Dolphin and Steam
+  // frozen): the pinned dock, and the drawer with its recent row.
+  ["running-dock", "home", "S.dock.value = ['a:chrome', 'l:steam', 'a:maps', 'l:konsole', 'l:dolphin']; await sleep(200); document.querySelector('.dock-pages').scrollLeft = 0; await sleep(300);", "wallpaper"],
+  ["running-drawer", "home", "(await U('./ui/drawer.tsx')).drawerRecents.value = 'on'; S.drawer.value = 1; await sleep(200);", "wallpaper"],
   ["swipe-up-right", "home", "", "wallpaper", { from: [0.73, 0.72], to: [0.73, 0.28], ms: 220 }],
   ["swipe-up-left", "home", "", "wallpaper", { from: [0.25, 0.72], to: [0.25, 0.28], ms: 220 }],
   ["search-widget", "home", "await (await U('./bridge.ts')).powos.home.addPanel('search', 0, { x: 0, y: 4, w: 6, h: 1 }); await sleep(300);", "wallpaper"],

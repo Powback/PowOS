@@ -81,6 +81,7 @@ BUS, NAME = "dev.powos.Sleep", "dev.powos.Sleep"
 UNITS = os.environ.get("POWOS_UNITS_DIR", "/etc/powos/units.d")
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/run/powos-app")
 SCREEN_LOG = os.environ.get("POWOS_SLEEP_SCREEN_LOG", f"{RUN}/andromarchy.log")
+RUNNING_DIR = f"{RUN}/running"  # the PowOS app makes it (and watches it); none on the desktop, nothing written
 
 
 def log(msg):
@@ -684,6 +685,7 @@ class Gui(dbus.service.Object):
             self.idle_since[pid] = now
         self.active = None
         self._last = None
+        self.publish_running()
 
     def app_pids(self):
         return {w["pid"] for w in self.wins.values()} | set(self.tracked)
@@ -808,6 +810,7 @@ class Gui(dbus.service.Object):
         log(f"{cls} ({pid}): frozen in {r.get('ms')} ms (was {cpu:.1f}% CPU), "
             f"thaws on focus or D-Bus to {', '.join(self.frozen[pid]['names']) or '-'}")
         self.rebuild_monitor()
+        self.publish_running()
 
     def thaw(self, pid, why):
         if pid == self.desk:
@@ -821,6 +824,7 @@ class Gui(dbus.service.Object):
             log(f"{f['cls']} ({pid}): thawed in {r.get('ms')} ms, {(time.monotonic() - t) * 1000:.1f} ms with the "
                 f"request ({why})")
             self.rebuild_monitor()
+            self.publish_running()
         return r
 
     # D-Bus to a frozen app thaws it -------------------------------------------
@@ -913,6 +917,25 @@ class Gui(dbus.service.Object):
         if line != getattr(self, "_last", None):
             self._last = line
             self.sleepd.ask(line)
+        self.publish_running()
+
+    def publish_running(self):
+        """The apps with a window (or a unit's app without one) and whether each is frozen, for the phone shell's
+        running dots: RUN/running/apps.json, written only when it changes - the app watches it (RunningApps.kt)."""
+        classes = {}
+        for pid, cls in [(w["pid"], w["cls"]) for w in self.wins.values()] + list(self.tracked.items()):
+            if cls and not cls.lower().startswith("android-") and classes.get(cls.lower()) != "running":
+                classes[cls.lower()] = "frozen" if pid in self.frozen else "running"
+        text = json.dumps({"classes": classes}, sort_keys=True)
+        if text == getattr(self, "_running", None) or not os.path.isdir(RUNNING_DIR):
+            return
+        self._running = text
+        try:
+            with open(f"{RUNNING_DIR}/.apps.json", "w") as f:
+                f.write(text)
+            os.replace(f"{RUNNING_DIR}/.apps.json", f"{RUNNING_DIR}/apps.json")
+        except OSError as e:
+            log(f"can't write {RUNNING_DIR}/apps.json: {e}")
 
 
 # One-shot KWin scripts (Gui.kwin_run): a game's window up (un-minimized and focused) on Resume; an app's windows
