@@ -51,8 +51,12 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   bigger than the same app full screen (821 dp, tablet layout). Fix = a real per-task density:
   WindowContainerTransaction.setDensityDpi(task token, dpi) via WindowOrganizer.applyTransaction (FreeformTasks.density;
   what AOSP desktop mode does). AppWindows.windowDpi = 0.8 x screen dpi (354): 60% width = 615 dp, tablet layout.
-  WindowFrames.dense sets it once per new window and gives 0 (= screen's) back to a task that stops being a window
-  (folded, made full screen). From root: IActivityTaskManager.getTasks(n, false, false, 0) has the tokens.
+  WindowFrames.dense gives 0 (= screen's) back to a task that stops being a window (folded, made full screen).
+  Set on the first refresh after a launch it does NOT stick (2026-10-23, APK 29878432: call succeeds, task stays 442
+  dpi, 492 dp; the same WCT from root 3 s later -> 354 dpi), so dense reads the task's configuration.densityDpi back
+  (FreeformTasks.Window.dpi) and sets it again every 500 ms until it shows (8 tries; logcat PowosWindowFrames "task N
+  at X dpi: set Y"). Root probe: ~/.cache/powos-fwdpi/src/Dpi.java (d8'd, `CLASSPATH=.. app_process /system/bin Dpi
+  <task> [dpi]`); IActivityTaskManager.getTasks has the tokens. WOC CONTROLLABLE_CONFIGS here = 0x20003C00 (has density).
   Not used: `wm density` (per display); OnePlus flexible/zoom window scale (a scaled surface; its calls refuse
   non-launcher callers anyway); `am compat` downscale (per package, not per window; not tried).
 - Dock taps are a taskbar's (desktops.ts dockTap, AppCell onTap): the app of the window in front (first non-minimised,

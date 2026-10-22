@@ -75,20 +75,40 @@ class WindowFrames(
         if (floating) away.retainAll(ids)
         // Folded, apps aren't windows: the dock shows none.
         publish(if (floating) all else emptyList())
-        dense(if (floating) ids else emptySet())
+        dense(if (floating) all else emptyList())
         maximised.keys.retainAll { id -> all.any { it.id == id && it.bounds == maximised[id]?.second } }
     }
 
     /**
      * Every floating window's app at the windows' density (AppWindows.windowDpi: about its full-screen size, not the
-     * phone layout blown up), set once per window; a task that is no longer a window ([windows] = the floating ones'
-     * tasks; none folded) gets the screen's density back, so full screen is exactly as before.
+     * phone layout blown up); a task that is no longer a window ([windows] = the floating ones; none folded) gets the
+     * screen's density back, so full screen is exactly as before.
+     *
+     * HACK: set while the window is still opening (the first refresh after its launch), the density doesn't stick on
+     * OxygenOS 16 (measured 2026-10-23: the transaction succeeds, the task still says the screen's dpi; the same call
+     * 3 s later sticks). So it's read back from the task's configuration and set again until it shows, a few tries
+     * apart. Real fix: set it in the launch itself - needs WM Shell's desktop mode (SystemUI's), off on this ROM.
      */
-    private fun dense(windows: Set<Int>) {
+    private fun dense(windows: List<FreeformTasks.Window>) {
         val dpi = AppWindows.windowDpi(context)
-        (scaled - windows).forEach { FreeformTasks.density(context, it, 0) }
-        scaled.retainAll(windows)
-        (windows - scaled).forEach { if (FreeformTasks.density(context, it, dpi)) scaled.add(it) }
+        val ids = windows.map { it.id }.toSet()
+        (scaled - ids).forEach { FreeformTasks.density(context, it, 0) }
+        scaled.retainAll(ids)
+        denseTries.keys.retainAll(ids)
+        var again = false
+        for (w in windows) {
+            if (w.dpi == dpi) {
+                scaled.add(w.id)
+                continue
+            }
+            val n = denseTries.getOrDefault(w.id, 0)
+            if (n >= DENSE_TRIES) continue
+            denseTries[w.id] = n + 1
+            if (FreeformTasks.density(context, w.id, dpi)) scaled.add(w.id)
+            Log.i(TAG, "task ${w.id} at ${w.dpi} dpi: set $dpi (try ${n + 1})")
+            again = true
+        }
+        if (again) main.postDelayed(refreshNow, DENSE_RETRY_MS)
     }
 
     /**
@@ -199,6 +219,8 @@ class WindowFrames(
     companion object {
         private const val TAG = "PowosWindowFrames"
         private const val SETTLE_MS = 80L
+        private const val DENSE_TRIES = 8
+        private const val DENSE_RETRY_MS = 500L
         private const val SYSUI_KEYGUARD_SHOWING = 1L shl 6
         private const val SYSUI_KEYGUARD_OCCLUDED = 1L shl 9
 
@@ -211,6 +233,9 @@ class WindowFrames(
 
         /** Tasks whose density is the windows' (FreeformTasks.density): given back the screen's once not a window. */
         private val scaled = mutableSetOf<Int>()
+
+        /** How often each window's density was set so far ([dense]: until its task says it). */
+        private val denseTries = mutableMapOf<Int, Int>()
 
         /** Maximised windows: task -> (its bounds before, its maximised bounds). */
         private val maximised = mutableMapOf<Int, Pair<Rect, Rect>>()
