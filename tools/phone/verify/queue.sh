@@ -39,7 +39,7 @@ run)
       [ "${3:-0}" = 1 ] && printf 'powos agents task done %q >/dev/null 2>&1 || true\n' "$1"; } > "$s"
     "$phone/user.sh" "$s" >/dev/null 2>&1 || echo "board update failed for $1: $2"; rm -f "$s"; }
   while ls "$Q"/*.job >/dev/null 2>&1; do
-    ( window_lock verify-queue 120 "${WAIT_S:-7200}" >/dev/null || exit 3
+    ( window_lock verify-queue "${QUEUE_IDLE_S:-120}" "${WAIT_S:-7200}" >/dev/null || exit 3
       for j in "$Q"/*.job; do
         [ -f "$j" ] || continue
         task=; close=0; tries=0; cwd=$PWD; cmd=(); . "$j"

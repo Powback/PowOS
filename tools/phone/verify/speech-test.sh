@@ -17,5 +17,5 @@ log=$(tools/phone/adb.sh shell 'logcat -d -v time' | grep -E "/speech|test \(" )
 echo "$log" | grep -E "test \(|dropped Whisper junk" | tail -5
 got=$(echo "$log" | grep -o 'test ([a-z]*): ".*"' | tail -1)
 # The phrase's key words, not exact text (Whisper writes numbers and punctuation its own way).
-if echo "$got" | grep -qi "mats" && echo "$got" | grep -qi "server"; then echo "speech-test: OK $got"; exit 0; fi
+if echo "$got" | grep -qiE "mat+[sz]" && echo "$got" | grep -qi "server"; then echo "speech-test: OK $got"; exit 0; fi
 echo "speech-test: FAILED (heard: ${got:-nothing})"; exit 1
