@@ -154,7 +154,8 @@ export const separatePanels = stored("separatePanels", "off");
  * grid on a further pull (the default, approved 2026-10-22) - or "classic", the eight category tiles before it
  * (settings -> style -> home).
  */
-export const ccV3 = stored("ccV3", "v3");
+// Its own key: the experiment's "ccV3" was written "off" into every page's storage while it was off by default.
+export const ccV3 = stored("ccLayout", "v3");
 // The plain value: store.set writes a string as a JSON string ("on" / "off"), what CornerPull.kt reads.
 effect(() => void powos.store.set("pullOverApps", pullOverApps.value).catch(() => {}));
 /**
