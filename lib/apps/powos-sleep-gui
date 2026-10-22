@@ -348,6 +348,7 @@ class Gui(dbus.service.Object):
         self.active = None
         self.units, self.units_mtime = [], None
         self.desk = None  # the desktop shell's pid while frozen (also in self.frozen, for D-Bus to wake it)
+        self.home = None  # the desktop home's (powos-shell, its whole tree) while frozen, with the desktop shell
         self.desk_timer = None
         self.screen = Screen(SCREEN_LOG, self.screen_changed)
         self.desktop(self.screen.on)  # started while PowOS is off screen: the desktop shell sleeps too
@@ -441,6 +442,10 @@ class Gui(dbus.service.Object):
     def woken(self, pids):
         """powos-sleepd thawed these for someone else (`powos sleep wake`): awake here too, asleep again when idle."""
         for pid in pids:
+            if int(pid) == self.home:
+                self.home = None
+                self.frozen.pop(int(pid), None)
+                continue
             if int(pid) == self.desk:
                 self.desk = None
                 self.frozen.pop(int(pid), None)
@@ -477,37 +482,51 @@ class Gui(dbus.service.Object):
         if on or not self.screen.known:
             if self.desk is not None:
                 self.thaw(self.desk, "PowOS on screen")
+            if self.home is not None:
+                self.thaw(self.home, "PowOS on screen")
             return
         if DESKTOP_IDLE != "off":
             self.desk_timer = GLib.timeout_add(int(common.seconds(DESKTOP_IDLE) * 1000), self.desktop_sleep)
             log(f"desktop shell: asleep in {DESKTOP_IDLE} unless PowOS comes back on screen")
 
     def desktop_sleep(self):
+        """PowOS off screen for DESKTOP_IDLE: the desktop shell (plasmashell) and the desktop home (powos-shell, the web
+        shell's home under Plasma - its Chromium tree too) frozen, until PowOS is back or a drain is due."""
         self.desk_timer = None
-        if self.screen.on or self.desk is not None:
+        if self.screen.on:
             return False
         me = os.getuid()
-        pid = next((int(p) for p in os.listdir("/proc") if p.isdigit() and (stat(p) or {}).get("comm") == "plasmashell"
-                    and os.stat(f"/proc/{p}").st_uid == me), None)
-        if pid is None:
-            return False
-        r = self.sleepd.ask(f"gui-desktop-freeze {pid}")
-        if not r.get("ok"):
-            log(f"desktop shell ({pid}): not frozen: {r.get('refused') or r.get('error')}")
-            return False
-        self.desk = pid
-        self.frozen[pid] = {"cls": "plasmashell", "names": self.bus_names({pid}), "cpu": None, "pids": {pid}}
-        log(f"desktop shell ({pid}): frozen in {r.get('ms')} ms (PowOS off screen), "
-            f"thaws on screen or on D-Bus to {', '.join(self.frozen[pid]['names']) or '-'}")
-        self.rebuild_monitor()
-        # Awake for a moment every few minutes: it reads what KWin queued for it (title changes, ...).
-        self.desk_timer = GLib.timeout_add_seconds(DESKTOP_AWAKE, self.desktop_drain)
+        for comm in ("plasmashell", "powos-shell"):
+            if (self.desk if comm == "plasmashell" else self.home) is not None:
+                continue
+            pid = next((int(p) for p in os.listdir("/proc") if p.isdigit() and (stat(p) or {}).get("comm") == comm
+                        and os.stat(f"/proc/{p}").st_uid == me), None)
+            if pid is None:
+                continue
+            r = self.sleepd.ask(f"gui-desktop-freeze {pid}")
+            if not r.get("ok"):
+                log(f"{comm} ({pid}): not frozen: {r.get('refused') or r.get('error')}")
+                continue
+            if comm == "plasmashell":
+                self.desk = pid
+            else:
+                self.home = pid
+            pids = set(r.get("pids") or [pid])
+            self.frozen[pid] = {"cls": comm, "names": self.bus_names(pids), "cpu": None, "pids": pids}
+            log(f"{comm} ({pid}): frozen in {r.get('ms')} ms, {len(pids)} process(es) (PowOS off screen), "
+                f"thaws on screen or on D-Bus to {', '.join(self.frozen[pid]['names']) or '-'}")
+        if self.desk is not None or self.home is not None:
+            self.rebuild_monitor()
+            # Awake for a moment every few minutes: they read what KWin queued for them (title changes, ...).
+            self.desk_timer = GLib.timeout_add_seconds(DESKTOP_AWAKE, self.desktop_drain)
         return False
 
     def desktop_drain(self):
         self.desk_timer = None
         if self.desk is not None:
             self.thaw(self.desk, "draining its socket")
+        if self.home is not None:
+            self.thaw(self.home, "draining its socket")
         if not self.screen.on:
             self.desk_timer = GLib.timeout_add_seconds(DESKTOP_DRAIN, self.desktop_sleep)
         return False
@@ -528,6 +547,7 @@ class Gui(dbus.service.Object):
         log(f"powos-sleepd reconnected: {len(self.frozen)} app(s) it had thawed, counting from now")
         self.frozen.clear()
         self.desk = None
+        self.home = None
         self.rebuild_monitor()
         self.desktop(self.screen.on)
         now = time.time()
@@ -652,6 +672,8 @@ class Gui(dbus.service.Object):
     def thaw(self, pid, why):
         if pid == self.desk:
             self.desk = None
+        if pid == self.home:
+            self.home = None
         f = self.frozen.pop(pid, None)
         t = time.monotonic()
         r = self.sleepd.ask(f"gui-thaw {pid} {why}")

@@ -613,19 +613,21 @@ class Daemon:
         if pid in self.gui:
             return {"ok": True, "already": True}
         st = stat(pid)
-        if not st or st[0] != "plasmashell":
-            return {"refused": "not the desktop shell (plasmashell)"}
+        # plasmashell alone (the apps it launched are its children); the desktop home (powos-shell, the web shell's
+        # home under Plasma) with its whole tree - its Chromium renderer, GPU and zygotes are its children.
+        if not st or st[0] not in ("plasmashell", "powos-shell"):
+            return {"refused": "not a desktop shell (plasmashell, powos-shell)"}
         if cgroup_v2(pid) != "/":
             return {"refused": f"in Android's cgroup {cgroup_v2(pid)}"}
-        f = Frozen(f"gui-{pid}", pid, only=True)
+        f = Frozen(f"gui-{pid}", pid, only=st[0] == "plasmashell")
         try:
             ms = f.freeze()
         except OSError as e:
             return {"refused": str(e)}
-        self.gui[pid] = {"frozen": f, "name": "plasmashell", "since": time.time(), "sleepMs": round(ms, 1), "n": 1}
-        log(f"desktop shell ({pid}): frozen in {ms:.1f} ms (PowOS off screen)")
+        self.gui[pid] = {"frozen": f, "name": st[0], "since": time.time(), "sleepMs": round(ms, 1), "n": len(f.home)}
+        log(f"desktop shell {st[0]} ({pid}): frozen in {ms:.1f} ms, {len(f.home)} process(es) (PowOS off screen)")
         self.publish()
-        return {"ok": True, "ms": round(ms, 2), "pids": [pid]}
+        return {"ok": True, "ms": round(ms, 2), "pids": sorted(f.home)}
 
     def gui_thaw(self, pid, why):
         g = self.gui.pop(pid, None)
