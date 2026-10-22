@@ -26,6 +26,9 @@ at() { q "(()=>{const e=document.querySelector('$1');if(!e)return '';const r=e.g
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 home; sleep 1.5; chk home
+# Not shipped yet (the ship service ships origin's tip when it's quiet): back on the queue, nothing touched.
+has=$(q '(async()=>(await (await fetch("./ui/searchwidget.tsx")).text()).includes("putBackInBar"))()')
+[ "$has" = true ] || { echo "the phone doesn't serve the search fix yet (searchwidget.tsx) - not run"; exit 3; }
 WIDE=$(q '!!document.querySelector(".home.wide")'); WANT=$([ "$WIDE" = true ] && echo "" || echo 1)
 echo "wide=$WIDE" | tee -a "$OUT/log.txt"
 
