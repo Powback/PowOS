@@ -31,15 +31,16 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - Open: short `--drop` (15vh) + cascade (`.cascade`, `--i` row index; CC rows first). Grouping `grouped()`; stacks.
 
 ## Control center (ui/control.tsx; v3 = `Controls`, classic = `Categories`, flag `ccV3` key "ccLayout")
-- v3: ONE ordered list of toggles (`list`): first six = the first pull's row, a further pull (ccexpand.ts, rubber band
-  then commit, `ccExpanded`) only reveals the rest below - the row must not move (gate asserts it). No categories.
+- v3: ONE ordered list (`list`): first six = the first pull's row; a further pull (ccexpand.ts) reveals the rest
+  below, the row never moves. It lays the rest out once (`.cc3-grid.cc-peek`; never bare `.peek`, the banner's fixed
+  class), puts what's under `.cc` back up by its height, then per frame only those translates + `--cc-k` on the grid
+  (inherits:false, cells inherit by name). Let go: eased, laid out. Gate `shade-overpull` drags it through gesture.ts.
 - Order: curated (QUICK, then the rest) unless `ownOrder()`: a v3 edit (`v3: true` in controls.layout) or a classic
   arrangement with a net move. Only drags write controls.layout; never reset it without the user saying so.
 - Long press = the toggle's own page (cancelled once the finger moves); rearranging = edit mode via the header pencil
   (`ccEditing`), then a long press lifts (ui/reorder.ts, `onlyEditing`). Accent only on toggles that are on.
-- ui/reorder.ts (shared, widgets expert reviews): hit-test on container-relative laid-out boxes (FLIP cancelled first),
-  live order in a ref, cancel drops the lift. Home's grid.tsx is the widgets expert's - don't edit it.
-- Gate `cc-reorder` (gate.mjs) waits on states, never time; prove with `CC_THROTTLE=6` x20.
+- ui/reorder.ts (shared; the widgets expert reviews it and owns home's grid.tsx): hit-test on container-relative laid-out boxes (FLIP cancelled first),
+  live order in a ref, cancel drops the lift. Gate `cc-reorder` waits on states (prove: `CC_THROTTLE=6` x20).
 - On the device: `tools/phone/verify/cc-toprow.sh` (queue it) - v3, no headings, the row's boxes equal before/after
   the further pull. The saved order: /data/data/com.powos.app/files/shell-data/controls.layout.json (read only).
 
@@ -57,16 +58,15 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - Headless isn't the device: after the push, read the live element's computed display/rects over CDP (read-only:
   never inject or render into the live page) - a drawer strip once passed headless and broke on the device.
 - Style lint (in the gate): raw colours, coloured borders, shadows outside tokens fail; exceptions in style-allow.txt.
-- Gate base = the installed APK's own shell + the phone's overrides + your files (handbook Shipping); READY_MS=30000
+- Gate base = the installed APK's own shell + the phone's overrides + your files (handbook Shipping); READY_MS=60000
   when the Mac is loaded. shell.css/theme.css are shared: push only origin's tip versions.
 - Device checks: `tools/phone/verify/queue.sh add <board-task> <script>` and end the turn (never wait on the phone).
   Read-only CDP (`tools/phone/cdp.sh eval shade '<js>'`) for state; screencaps only in a queued window. Folded vs
   unfolded: read the size from `dumpsys window displays` (cur=WxH). Injected swipes must never launch apps (a page
   swipe at 60% height opened Calculator unfolded); a drag starting on a toggle used to open its settings.
-- Verify lock (~/.cache/powos-verify.lock): take it only after the window is free, only for the injected part; never
-  delete one you don't hold. adb.sh pull needs an existing destination dir.
-- Review images: `tools/phone/review-image.sh FILE...` (-> /home/powos/design-qa/); mocks only for new screens.
-- Push notes are user-visible (shade + AI feed): plain words, never "x". Gate under load: READY_MS=60000.
+- Verify lock: only after the window is free, only for the injected part; never delete one you don't hold.
+- Review images: `tools/phone/review-image.sh FILE...` (/home/powos/design-qa/); mocks only for new screens. Push
+  notes are user-visible (shade + AI feed): plain words, never "x".
 
 ## Native blur (compositor) - Kotlin side
 

@@ -198,6 +198,114 @@ const columnsAs = (page, wide) =>
   }, wide);
 
 /** An app in front at [from]: home hidden, resized there and back (the way back with no resize event), then shown. */
+/** The shade-overpull case's tools, on the page (window.__op): waits, what's measured, a finger's drag. */
+async function overpullKit() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const until = async (f, what, ms = 15000) => {
+    const t0 = performance.now();
+    while (!f()) {
+      if (performance.now() - t0 > ms) throw new Error(`timed out: ${what}`);
+      await sleep(20);
+    }
+  };
+  const frames = (n = 2) => new Promise((ok) => { const step = (k) => (k ? requestAnimationFrame(() => step(k - 1)) : ok()); step(n); });
+  const cells = () => [...document.querySelectorAll(".cc3-list .cc3-cell")];
+  const shown = () => cells().filter((e) => e.getClientRects().length && Number(getComputedStyle(e).opacity) > 0.05).length;
+  const UNDER = ".panel-body.together .cc ~ .notif-bar";
+  const under = () => document.querySelector(UNDER)?.getBoundingClientRect().top ?? NaN;
+  const row = () => cells().slice(0, 6).map((e) => Math.round(e.getBoundingClientRect().top)).join();
+  const still = () => !document.getAnimations().some((a) => a.playState === "running" && a.effect?.target?.closest?.(".notif-panel"));
+  const at = { x: 0, y: 0 };
+  const P = (type, y) =>
+    document.querySelector(".cc > .notif-bar").dispatchEvent(
+      new PointerEvent(type, { bubbles: true, clientX: at.x, clientY: y, pointerId: 1, isPrimary: true, pointerType: "mouse", buttons: type === "pointerup" ? 0 : 1 }),
+    );
+  // A finger down on the control center's header, moved [dy] in six frames, [check]ed there, held still, let go.
+  const drag = async (dy, check) => {
+    const b = document.querySelector(".cc > .notif-bar").getBoundingClientRect();
+    Object.assign(at, { x: b.left + b.width / 2, y: b.top + b.height / 2 });
+    P("pointerdown", at.y);
+    for (let i = 1; i <= 6; i++) {
+      P("pointermove", at.y + (dy * i) / 6);
+      await frames(1);
+    }
+    await frames(2);
+    await check?.();
+    await sleep(120);
+    P("pointermove", at.y + dy + Math.sign(dy));
+    P("pointerup", at.y + dy + Math.sign(dy));
+    await until(() => !document.querySelector(".cc3-grid.cc-peek"), "the pull let go");
+    await frames(2);
+    await until(still, "settled after the pull");
+  };
+  const S = await importShim("./state.ts");
+  S.ccV3.value = "v3";
+  S.notif.value = true;
+  try {
+    await until(() => shown() >= 6 && document.querySelector(UNDER), "the row and the notifications' header");
+    await until(still, "the panel open and settled");
+  } catch (e) {
+    return [e.message];
+  }
+  window.__op = { sleep, frames, shown, under, row, still, drag, n0: shown(), under0: under(), row0: row() };
+  return [];
+}
+
+/** Part of the way: under the control center follows the finger 1:1, the rest starts to show; let go, all back. */
+async function overpullShort() {
+  const o = window.__op;
+  const fails = [];
+  await o.drag(30, () => {
+    const d = o.under() - o.under0;
+    if (Math.abs(d - 30) > 3) fails.push(`pulled 30 px further, what's under the control center moved ${Math.round(d)} px`);
+    if (o.shown() <= o.n0) fails.push(`pulled 30 px further, no more toggles show (${o.shown()})`);
+    if (o.row() !== o.row0) fails.push(`the first row moved on the pull: ${o.row0} -> ${o.row()}`);
+  });
+  if (Math.abs(o.under() - o.under0) > 1) fails.push(`let go short, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place`);
+  if (o.shown() !== o.n0) fails.push(`let go short, ${o.shown()} toggles show, not ${o.n0}`);
+  return fails;
+}
+
+/** All the way: the rest shown and laid out, what's under it below the rest, the row still. */
+async function overpullExpand() {
+  const o = window.__op;
+  await o.drag(260);
+  o.h = o.under() - o.under0;
+  const fails = [];
+  if (!document.querySelector(".cc3-list.whole")) fails.push("pulled 260 px further, the rest isn't shown");
+  if (o.h < 40) fails.push(`expanded, what's under the control center moved only ${Math.round(o.h)} px`);
+  if (o.row() !== o.row0) fails.push(`the first row moved on the expand: ${o.row0} -> ${o.row()}`);
+  return fails;
+}
+
+/** Up at the list's end folds it: on the way what's under it follows the finger up; folded, all where it was. */
+async function overpullFold() {
+  const o = window.__op;
+  const fails = [];
+  const list = document.querySelector(".panel-body.together .notif-list");
+  list.scrollTop = list.scrollHeight;
+  await o.frames(2);
+  const from = o.under();
+  await o.drag(-80, () => {
+    const d = o.under() - from;
+    if (Math.abs(d + Math.min(80, o.h)) > 3) fails.push(`folding 80 px, what's under the control center moved ${Math.round(d)} px`);
+  });
+  if (document.querySelector(".cc3-list.whole") || o.shown() !== o.n0) fails.push(`pulled up 80 px, still ${o.shown()} toggles shown`);
+  list.scrollTop = 0;
+  await o.frames(2);
+  if (Math.abs(o.under() - o.under0) > 1) fails.push(`folded, what's under the control center is ${Math.round(o.under() - o.under0)} px off its place`);
+  if (o.row() !== o.row0) fails.push(`folded, the first row isn't where it was: ${o.row0} -> ${o.row()}`);
+  return fails;
+}
+
+/** At rest: no animation in the panel, nothing the pull left inline. */
+async function overpullRest() {
+  const o = window.__op;
+  await o.sleep(400);
+  const left = [...document.querySelectorAll(".notif-panel [style]")].filter((e) => e.style.translate || e.style.getPropertyValue("--cc-k"));
+  return [...(o.still() ? [] : ["an animation still runs in the panel at rest"]), ...(left.length ? [`the pull left inline values on ${left.length} elements`] : [])];
+}
+
 async function backFromApp(page, to, from) {
   await hideAs(page, true);
   await viewTo(page, from);
@@ -656,6 +764,24 @@ try {
       }),
     );
   }
+  // The shade's further pull (ccexpand.ts; the user, 2026-10-22: only "no notifications" moved, the rest stood still):
+  // driven through gesture.ts as a finger (a mouse's pointer events on the panel), the whole panel follows it - what's
+  // under the control center moves down by the finger's travel and the rest's toggles show under the row, the row
+  // itself still - let go short it goes back, past it the rest stays shown, a pull up folds it; nothing runs at rest.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html?mode=shade`, "shade-overpull").then(async (r) => {
+        await r.page.waitForFunction(() => window.__powosAlive === true || window.__powosBoot?.failed === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
+        const fails = [];
+        for (const step of [overpullKit, overpullShort, overpullExpand, overpullFold, overpullRest]) {
+          const out = await r.page.evaluate(step).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`]);
+          fails.push(...(out ?? []));
+          if (fails.length) break;
+        }
+        r.problems.push(...fails);
+        return { ...r, ready: true, ms: Date.now() - r.started };
+      }),
+    );
   // The pet (ui/pet.tsx): home with local.pet installed, driven through what the user does - shown, touched, each
   // state, a talk bubble, a deploy note, a move - so an error in its effects and timers (2026-10-21: a TDZ in the hop
   // timer's effect threw on every show) fails here; the plain home run never mounts it (the mock has no local.pet).

@@ -1535,10 +1535,17 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .cc-cell-subs .cc-tile.on { background: none; }
 .cc-cell-subs .cc-tile.on .cc-icon { background: var(--color-accent); color: var(--color-background); }
 .cc-cell-subs .cc-tile :is(.cc-label, .cc-detail, .cc-text) { display: none; }
-/* The finger pulling it (ccexpand.ts stretch): the rows below spread apart, the notifications with them - a translate. */
-.panel-body.together .cc-main > .cc-grid { translate: 0 calc(var(--cc-pull, 0px) * (var(--i, 3) - 3) / 2); }
-.panel-body.together .cc ~ * { translate: 0 var(--cc-pull, 0px); }
-.notif-panel:not(.cc-pulling) .panel-body.together :is(.cc-main > .cc-grid, .cc ~ *) { transition: translate 220ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+/*
+ * The finger pulling it further (ccexpand.ts): translates written on each mover (the rows, what's under them) and
+ * --cc-k (the pull's progress) on them or on v3's grid - registered, not inherited: on the panel, an inherited one
+ * restyled everything in it each frame. The few that read it inherit it by name.
+ */
+@property --cc-k {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+.cc-grid > .cc-cell, .cc-cell > .cc-cell-subs { --cc-k: inherit; }
 /* One row that scrolls sideways, a member at a time (snapping), about five in view and the next one peeking. */
 .cc-subs {
   display: flex;
@@ -2126,9 +2133,23 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 .cc3-t.on .cc3-chip { background: var(--color-accent); color: var(--color-background); }
 .cc3-t:active .cc3-chip { filter: brightness(1.15); }
 .cc3-word { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The first pull shows the list's first six; the further pull reveals the rest under them, growing in. */
-.cc3-list:not(.whole) .cc3-cell:nth-child(n + 7) { display: none; }
-.cc3-list.whole .cc3-cell:nth-child(n + 7) { animation: cc-subs-in 220ms ease both; }
+/*
+ * The first pull shows the list's first six; the further pull (ccexpand.ts) lays the rest out once (the grid's "cc-peek")
+ * and reveals it under the finger: each row of the rest ([--j] its place, of --cc-rows) fades and drops in from the
+ * pull's progress --cc-k as the notifications slide down off it. Transform and opacity only; nothing at rest.
+ */
+.cc3-list:not(.whole) .cc3-grid:not(.cc-peek) > .cc3-cell:nth-child(n + 7) { display: none; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 7) {
+  --cc-k: inherit;
+  --f: clamp(0, calc(var(--cc-k) * var(--cc-rows, 1) - var(--j, 0)), 1);
+  opacity: var(--f);
+  translate: 0 calc((var(--f) - 1) * 12px);
+}
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 13) { --j: 1; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 19) { --j: 2; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 25) { --j: 3; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 31) { --j: 4; }
+.cc3-grid.cc-peek > .cc3-cell:nth-child(n + 37) { --j: 5; }
 .cc3-all { display: flex; flex-direction: column; gap: 14px; }
 .cc3-sec { display: flex; flex-direction: column; gap: 8px; animation: cc-subs-in 220ms ease both; }
 .cc3-head { margin: 0; padding: 0 2px; font: var(--text-small) var(--font); font-weight: normal; color: var(--color-muted); }
