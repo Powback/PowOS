@@ -742,7 +742,7 @@ function AiCompose() {
         value={hearing(pageMic) ?? draft.value}
         onInput={(v: string) => (draft.value = v)}
         onFocus={() => powos.keyboard.show()}
-        placeholder="ask PowOS AI"
+        aria-label="Ask PowOS AI"
         enterKeyHint="send"
         autocomplete="off"
       />

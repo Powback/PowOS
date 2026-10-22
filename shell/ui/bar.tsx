@@ -109,8 +109,11 @@ export function Pill({
   inputRef?: Ref<HTMLTextAreaElement>;
   [attr: string]: any;
 }) {
+  // Empty and no status to say (listening, an error): the prompt glyph stands in for a placeholder (shell.css .prompt).
+  const empty = !field.value && !field.placeholder;
   return (
-    <div class={`${cls} pill tile ${sending ? "sending" : ""}`}>
+    <div class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
+      {empty && <span class="prompt" aria-hidden="true">&gt;</span>}
       <GrowField {...(field as { value: string; onInput: (v: string) => void })} />
       <Mic target={target} />
     </div>
@@ -141,7 +144,7 @@ function askHere(text: string) {
 
 /**
  * The search/ask bar: the pill PowOS AI's page asks in (shell.css .pill - the reference material, the field growing to
- * three rows upward over home without moving anything under it, the mic on its right), "search" its placeholder.
+ * three rows upward over home without moving anything under it, the mic on its right), the prompt glyph its placeholder.
  */
 export function Bar({ proxy = false }: { proxy?: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
@@ -185,7 +188,8 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
         }}
         onFocus={() => (takeOver(), setFocused(true))}
         onBlur={() => setFocused(false)}
-        placeholder={s.listening ? "listening…" : (s.error ?? (pullKind.value === "ai" && drawer.value > 0 ? "ask PowOS AI" : "search"))}
+        placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
+        aria-label={pullKind.value === "ai" && drawer.value > 0 ? "Ask PowOS AI" : "Search"}
         enterKeyHint={query.value.trim() && !matches.value.length ? "send" : "go"}
         autocomplete="off"
         autoCapitalize="off"

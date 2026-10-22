@@ -315,7 +315,8 @@ export function Assist() {
             }}
             onPointerDown={() => takeOver()}
             onFocus={() => (takeOver(), powos.keyboard.show())}
-            placeholder={speech.value.listening ? "listening…" : "ask about this screen"}
+            placeholder={speech.value.listening ? "listening…" : undefined}
+            aria-label="Ask about this screen"
             enterKeyHint="send"
             autocomplete="off"
           />

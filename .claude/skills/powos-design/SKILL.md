@@ -9,6 +9,11 @@ description: How the PowOS phone shell's design is built and checked - the desig
 - One material: `.tile` = `--glass-fill` (= `--text-fill`, the reference: PowOS AI's page at 912a284+3b9b5a3) over
   `--glass-veil`, `--lift` (top edge + shadow, no ring). Inside a surface only `--soft-fill`. Sheets `.tile.sheet`, the
   one text field `.tile.pill` (home search = AI compose, shell.css `.pill`). No borders, no dividers, no page dims.
+- The pill's empty face is a prompt glyph `>`, not words (bar.tsx Pill `.prompt`, shown while value and placeholder are
+  both empty; muted, var(--font) 3px over --text-item, zero-wide + -gap so the text starts where it sat; focused it
+  blinks in place of the hidden caret). Callers name the field with aria-label ("Search", "Ask PowOS AI"); a
+  placeholder is only a status ("listening…", an error) and replaces the glyph. Home pill, search widget (Bar proxy),
+  AI compose, assist compose all get it from Pill - never per caller.
 - Secondary text: `--color-muted` = the theme fg at `--muted-text` (88%), set in app.tsx applyTheme - never the
   theme's own grey (measured 1.5-3.7:1). Labels on the wallpaper: `--label-shadow`.
 - Home's blur is the native compositor (ui/nativeglass.ts regions, native-blur's). The in-page model (the page drawing
