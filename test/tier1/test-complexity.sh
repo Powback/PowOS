@@ -45,6 +45,22 @@ case $rc in
     *) bad "a function with 5 params and depth 4 passed the lint" ;;
 esac
 
+echo "== fail closed: a lint whose tool can't be had FAILS, never skips =="
+# An empty cache, an empty npm cache and an unreachable registry / Maven mirror: nothing to install from.
+neg=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/cxneg.XXXXXX")
+out=$(XDG_CACHE_HOME=$neg/c npm_config_cache=$neg/npm npm_config_registry=http://127.0.0.1:9/ npm_config_fetch_retries=0 \
+      npm_config_fetch_timeout=3000 bash "$ROOT/shell/dev/lint-complexity.sh" 2>&1); rc=$?
+[ $rc = 1 ] && echo "$out" | grep -q "FAIL complexity: npm ci" && ok "TS lint without eslint and no registry: exit 1, says why" \
+  || { bad "TS lint without eslint and no registry: exit $rc (must be 1)"; echo "$out" | head -5 | sed 's/^/       /'; }
+if command -v docker >/dev/null; then
+  out=$(XDG_CACHE_HOME=$neg/c DETEKT_MIRROR=http://127.0.0.1:9 bash "$ROOT/targets/android/lint-complexity.sh" 2>&1); rc=$?
+  [ $rc = 1 ] && echo "$out" | grep -q "couldn't fetch detekt" && ok "Kotlin lint without detekt and no network: exit 1, says why" \
+    || { bad "Kotlin lint without detekt and no network: exit $rc (must be 1)"; echo "$out" | head -5 | sed 's/^/       /'; }
+fi
+out=$(GATE_LINT=0 bash "$ROOT/shell/dev/lint-complexity.sh" 2>&1); rc=$?
+[ $rc = 2 ] && ok "GATE_LINT=0 is the only skip (exit 2)" || bad "GATE_LINT=0: exit $rc (want 2)"
+rm -rf "$neg"
+
 echo "== Kotlin (targets/android/app) =="
 out=$(bash "$ROOT/targets/android/lint-complexity.sh" 2>&1); rc=$?
 case $rc in

@@ -40,7 +40,8 @@ command -v docker >/dev/null || { echo "FAIL kotlin complexity: no docker (GATE_
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "FAIL kotlin complexity: no $IMAGE (build android-app-dev's builder; GATE_LINT=0 skips)"; exit 1; }
 if [ ! -f "$JAR" ]; then
   mkdir -p "$CACHE"
-  curl -sfLo "$JAR.part" "https://repo1.maven.org/maven2/io/gitlab/arturbosch/detekt/detekt-cli/$VER/detekt-cli-$VER-all.jar" \
+  # DETEKT_MIRROR: another Maven repo (tier-1 points it at nothing to prove a failed fetch fails the lint).
+  curl -sfL --max-time 120 -o "$JAR.part" "${DETEKT_MIRROR:-https://repo1.maven.org/maven2}/io/gitlab/arturbosch/detekt/detekt-cli/$VER/detekt-cli-$VER-all.jar" \
     || { echo "FAIL kotlin complexity: couldn't fetch detekt $VER (GATE_LINT=0 skips it explicitly)"; exit 1; }
   [ "$(shasum -a 256 "$JAR.part" | cut -d' ' -f1)" = "$SHA" ] || { rm -f "$JAR.part"; echo "FAIL kotlin complexity: detekt jar checksum mismatch"; exit 1; }
   mv "$JAR.part" "$JAR"
