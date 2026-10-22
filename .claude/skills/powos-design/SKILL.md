@@ -65,3 +65,35 @@ description: How the PowOS phone shell's design is built and checked - the desig
   delete one you don't hold. adb.sh pull needs an existing destination dir.
 - Review images: `tools/phone/review-image.sh FILE...` (-> /home/powos/design-qa/); mocks only for new screens.
 - Push notes are user-visible (shade + AI feed): plain words, never "x". Gate under load: READY_MS=60000.
+
+## Native blur (compositor) - Kotlin side
+
+Facts as of 2026-10-22 (OnePlus Open, OxygenOS 16). Code: targets/android/app/.../shell/GlassBlur.kt,
+WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativeglass.ts.
+- What works here: SurfaceFlinger blur REGIONS (`Transaction.setBlurRegions` on a window's ViewRootImpl SurfaceControl,
+  hidden API). They blur every layer BELOW that window (wallpaper, other windows, apps), never the window's own pixels.
+  A window's plain background blur radius did nothing visible here; don't rely on it.
+- Region layout: OxygenOS reads 31 floats per region (AOSP 10 + blur colour + OPlus params). A wrong length aborts the
+  app in JNI (home crash-looped once). Never build the array by hand: GlassBlur.Codec fills a
+  BackgroundBlurDrawable's FIELDS by reflection and calls BlurRegion(drawable).toFloatArray(); checked once
+  (valid()) before use; failure -> b.state 0, CSS fallback.
+- Pitfall: never call the drawable's setters (setBlurRadius/setAlpha/setCornerRadius). They register it with the
+  window's own blur aggregator, which then re-sends it every frame and OVERWRITES your regions (the shade had no blur;
+  a test rect showed on another window's layer).
+- One region list per layer: setBlurRegions replaces it. Home merges its tiles' regions + the switcher's whole-window
+  region in one call (GlassBlur.wholeWindow); other windows use GlassBlur.wholeWindowOf (shade, switcher activity).
+- Radius: SF's blur is ~0.15-0.3 of the radius given. Home tiles: --glass-blur-native (140 CSS px). Shade: 360 dp
+  default (ShadeHost SHADE_BLUR_DP), page-tunable with powos.shade.blur(dp) 0..600. No saturation/brightness: tint in CSS.
+- A window just shown has no valid surface yet: WindowBlur retries on the next frames (don't cache as done).
+- Respect Android's switch: WindowManager.isCrossWindowBlurEnabled (battery saver) -> no blur; never forced.
+- Page protocol (native port): b.hello -> b.state 1|0; b.r <dpr> <n> x y w h tl tr br bl alpha radius...; regions sent
+  per frame only while something moves (touch, transition, resize of a surface), nothing at rest (perf-checked).
+- Wallpaper picture (/_wallpaper, system.glass): WallpaperBackdrop.still - the wallpaper's mirror
+  (IWindowManager.mirrorWallpaperSurface + captureLayers WITH a source crop, else BAD_VALUE -22) comes back BLACK on this
+  build, so it falls back to captureDisplay excluding home's window (only while home is in front), bars painted over.
+  OxygenOS's wallpaper_screenshot.png can be 0 bytes. READ_FRAME_BUFFER comes from the recents role.
+- Liquid refraction (LiquidGlass.kt): OFF by default (user: "looks weird"); returns only after a design sign-off.
+- Check on device: open the shade from the page (`powos.shade.open()` via CDP, idle window), then
+  `dumpsys SurfaceFlinger` - the layer shows `blurRegions.size()=N` and `{radius=..u, ... rect=[...]}`; screencap
+  with `-d <id>` for the display in use (unfolded = the 2268-wide one) and pull inside powos-vadb (tools/phone/adb.sh
+  loses pulls to paths that don't exist yet). Logcat tags: PowosGlassBlur, PowosBackdrop, PowosWallpaper.
