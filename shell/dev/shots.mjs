@@ -180,6 +180,8 @@ const SCENES = [
   // frozen): the pinned dock, and the drawer with its recent row.
   ["running-dock", "home", "S.dock.value = ['a:chrome', 'l:steam', 'a:maps', 'l:konsole', 'l:dolphin']; await sleep(200); document.querySelector('.dock-pages').scrollLeft = 0; await sleep(300);", "wallpaper"],
   ["running-drawer", "home", "(await U('./ui/drawer.tsx')).drawerRecents.value = 'on'; S.drawer.value = 1; await sleep(200);", "wallpaper"],
+  // A finger held on the A-Z bar at M (drawer.tsx highlight): M's apps bright and lifted, the rest dim, M enlarged.
+  ["drawer-scrub", "home", `S.drawer.value = 1; await sleep(300); const m = [...document.querySelectorAll('.letter-bar span')].find((s) => s.textContent === 'M'); const r = m.getBoundingClientRect(); Element.prototype.setPointerCapture = () => {}; m.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, buttons: 1, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 })); await sleep(400);`, "wallpaper"],
   ["swipe-up-right", "home", "", "wallpaper", { from: [0.73, 0.72], to: [0.73, 0.28], ms: 220 }],
   ["swipe-up-left", "home", "", "wallpaper", { from: [0.25, 0.72], to: [0.25, 0.28], ms: 220 }],
   ["search-widget", "home", "await (await U('./bridge.ts')).powos.home.addPanel('search', 0, { x: 0, y: 4, w: 6, h: 1 }); await sleep(300);", "wallpaper"],

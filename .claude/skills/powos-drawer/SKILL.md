@@ -27,6 +27,12 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
 - Drawer: A-Z `.grid.az` in `.drawer-list` (padding-right --letter-bar). RecentRow (`.drawer-recents`) is OFF by
   default: `drawerRecents = stored("drawer.recents")`, "on" shows it; Settings > style > home > "recent apps in the
   drawer". The check is inside RecentRow (Drawer itself is at the cyclomatic limit).
+- A-Z scrub highlight (drawer.tsx highlight()): per LETTER change (not pointermove) `.grid.az[data-scrub]` + the
+  letter's cells `[data-lit]` (range first.get(l)..next letter's first); shell.css dims others to 0.4, lit get
+  scale 1.05 + translate -2px, 180 ms transitions; release clears. Data attributes on purpose: nativeglass/glass
+  MutationObservers watch only style/class, and Preact doesn't own them. Shots scene "drawer-scrub" (synthetic
+  pointerdown at M; setPointerCapture stubbed - it throws for a fake pointer); device: tools/phone/verify/az-scrub.sh
+  (input motionevent DOWN/UP on M, probe + screencap while held).
 - Pill: empty height = `--pill-height` 40px (theme.css; on screen 44 with borders), grows only with typed lines up to 3
   (grow.tsx: empty = one row at any width, re-measured on width change - a narrow-measured empty pill stuck at 3 rows,
   2026-10-22). `.bar-pill` bottom = `--pill-foot` 6px, same as `.ai-compose`. The gate's "pill" run asserts it (foot,

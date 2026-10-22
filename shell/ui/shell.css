@@ -470,7 +470,13 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 }
 /* The drawer's labels can sit over the brightest part of the wallpaper: the label shadow, as home's. */
 .drawer :is(.app-label, .heading), .letter-bar span { text-shadow: 0 0 2px var(--color-background), 0 0 4px var(--color-background), 0 0 7px var(--color-background), 0 0 12px color-mix(in srgb, var(--color-background) 70%, transparent); }
+.letter-bar span { transition: transform 160ms ease-out, color 160ms; }
 .letter-bar span.on { color: var(--accent-text); transform: scale(1.5); }
+/* Scrubbing the A-Z bar (drawer.tsx highlight): the letter's cells bright with a soft lift, the rest dim; eased in
+   and back. opacity/scale/translate only (composited, no layout), changed per letter, not per pointermove. */
+.grid.az .app { transition: background 120ms, opacity 180ms ease-out, scale 180ms ease-out, translate 180ms ease-out; }
+.grid.az[data-scrub] .app { opacity: 0.4; }
+.grid.az[data-scrub] .app[data-lit] { opacity: 1; scale: 1.05; translate: 0 -2px; }
 /* The letter under the finger, big, beside the bar. */
 .letter-bubble {
   position: absolute;

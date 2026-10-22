@@ -75,8 +75,26 @@ function RecentRow() {
   );
 }
 
+/**
+ * While the finger is on the A-Z bar: the cells of the letter it's on stay bright and lift, the rest dim (shell.css
+ * .az[data-scrub]). Data attributes, not classes: no glass re-measure (nativeglass observes style/class), and Preact
+ * leaves attributes it doesn't own alone. Set per letter change only, never per pointermove; null = released.
+ */
+let lit: Element[] = [];
+function highlight(grid: Element | null | undefined, letter: string | null) {
+  for (const el of lit) el.removeAttribute("data-lit");
+  lit = [];
+  if (!grid || letter == null) return grid?.removeAttribute("data-scrub");
+  grid.setAttribute("data-scrub", "");
+  const { list, first } = sorted.value;
+  const start = first.get(letter) ?? list.length;
+  const end = Math.min(...[...first.values(), list.length].filter((i) => i > start));
+  lit = [...grid.children].slice(start, end);
+  for (const el of lit) el.setAttribute("data-lit", "");
+}
+
 /** Tap a letter or slide along the bar: the list jumps there at once, every letter the finger crosses. */
-function LetterBar({ onPick }: { onPick: (letter: string) => void }) {
+function LetterBar({ onPick }: { onPick: (letter: string | null) => void }) {
   // "#" only when some name doesn't start with a letter: a "#" with nothing under it would do nothing.
   const letters = sorted.value.first.has("#") ? ALPHABET : ALPHABET.slice(1);
   const [current, setCurrent] = useState<string | null>(null);
@@ -100,8 +118,8 @@ function LetterBar({ onPick }: { onPick: (letter: string) => void }) {
         pick(e.clientY);
       }}
       onPointerMove={(e) => e.buttons && pick(e.clientY)}
-      onPointerUp={() => setCurrent(null)}
-      onPointerCancel={() => setCurrent(null)}
+      onPointerUp={() => (setCurrent(null), onPick(null))}
+      onPointerCancel={() => (setCurrent(null), onPick(null))}
     >
       {letters.map((l) => (
         <span class={l === current ? "on" : ""}>{l}</span>
@@ -113,12 +131,13 @@ function LetterBar({ onPick }: { onPick: (letter: string) => void }) {
 
 export function Drawer() {
   const list = useRef<HTMLDivElement>(null);
-  const jump = (letter: string) => {
+  const jump = (letter: string | null) => {
     // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
     // letter a sliding finger crosses lagged behind it.
     const { first } = sorted.value;
-    const i = ALPHABET.indexOf(letter);
-    const l = ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x));
+    const i = letter == null ? -1 : ALPHABET.indexOf(letter);
+    const l = i < 0 ? null : (ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x)));
+    highlight(list.current?.querySelector(".az"), l ?? null);
     const el = l != null ? list.current?.querySelector<HTMLElement>(`.az > :nth-child(${first.get(l)! + 1})`) : null;
     if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
