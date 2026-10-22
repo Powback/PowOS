@@ -1,17 +1,26 @@
 #!/bin/bash
-# tools/phone/verify/edge.sh [home|edge|corner|all]: one idle window's on-device check of the powos-gestures pieces
+# tools/phone/verify/edge.sh [home|edge|shade|corner|all]: one idle window's on-device check of the powos-gestures pieces
 # (skill: powos-gestures). Waits once with `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 7200` (never polls), runs only with the screen
 # Awake and nobody touching it, never wakes it; read-only apart from the injected swipes and a screenrecord.
 #   home   - a pull down on home opens the shade's WINDOW (dumpsys: "PowOS shade" visible); home's page has no
 #            .notif-panel (CDP, read-only); then swiped shut.
 #   edge   - right edge, lower half: in and up -> Quick Tools ("PowOS quick tools" window shown, PowosEdge log); a tap
 #            outside the card shuts it.
+#   shade  - over an app (Settings): a pull down from the status bar opens the shade's window; swiped shut.
 #   corner - over the app in front: up from the bottom-right corner -> the pull-up panel window (PowosCornerPull).
 # Out: $OUT (default ~/powos-rec/edge-<time>/): <check>.mp4 + logcat excerpts. Restores the app that was in front.
 set -uo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd); A=$here/adb.sh
 what=${1:-all}
 OUT=${OUT:-$HOME/powos-rec/edge-$(date +%H%M%S)}; mkdir -p "$OUT"
+# One injected-touch test on the phone at a time (the verify lock, as journey.sh / drag-raster.sh; ship-apk waits for it).
+L=$HOME/.cache/powos-verify.lock; n=0
+until mkdir "$L" 2>/dev/null; do
+  [ $n -ge 120 ] && { echo "edge.sh: verify lock busy for an hour: $(cat "$L/who" 2>/dev/null)"; exit 4; }
+  [ $n = 0 ] && echo "edge.sh: waiting for $(cat "$L/who" 2>/dev/null || echo another phone test)"
+  n=$((n + 1)); sleep 30
+done
+echo "edge.sh $* $(date +%T) (pid $$)" > "$L/who"; trap 'rm -rf "$L"' EXIT
 # One wait, on the phone (one connection), for the screen on and nobody touching it: up to WAIT_S (default 7200).
 s=$(AWAKE_ONLY=1 "$here/idle.sh" --wait 120 "${WAIT_S:-7200}") || { echo "no free window: $s"; exit 3; }
 case "$s" in *screen=Awake*) ;; *) echo "free but the screen is off ($s): not waking it"; exit 3 ;; esac
@@ -40,6 +49,10 @@ if [ "$what" = home ] || [ "$what" = all ]; then
 fi
 if [ "$what" = edge ] || [ "$what" = all ]; then
   run edge "$(drag $((W-3)) $((H*75/100)) -$((W*3/100)) -$((H*13/1000))); sleep 1; input tap $((W/5)) $((H*20/100)); sleep 1; echo '-- tapped outside:'; $win"
+fi
+if [ "$what" = shade ] || [ "$what" = all ]; then
+  "$A" shell am start -n com.android.settings/.Settings >/dev/null 2>&1; sleep 2
+  run shade "$(drag $((W/4)) 6 0 $((H*2/100))); sleep 1; input swipe $((W/2)) $((H*80/100)) $((W/2)) $((H*15/100)) 250"
 fi
 if [ "$what" = corner ] || [ "$what" = all ]; then
   # Over an app: the app that was in front, else Android's Settings.
