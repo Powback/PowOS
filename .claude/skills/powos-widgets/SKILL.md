@@ -78,3 +78,46 @@ strip only - not the cause when a drag in a tile fails.
 - CDP: tools/phone/cdp.sh eval "" '<js>' (home); read-only probes (sizes, aria-valuenow, .page-track transform).
   Dynamic import of shell modules from eval fails; use the DOM. Check tools/phone/idle.sh before any synthetic
   input (idle>=120, Awake); idle.sh --wait instead of loops.
+
+## Islands: network failures, retry, the detail sheet (2026-10-22)
+- host.net.error(e, status) -> NetError {kind offline|timeout|auth|other, message (calm), detail (raw, log only)};
+  host.net.fetch already throws NetError. Never put e.message on a tile (raw IPs wrapped and cut). Old PowOS apps lack
+  it: islands keep a local fallback (Lights hue.ts failOf, marked HACK).
+- host.net.useRetry(load, failing): backoff 5 s -> 5 min, at once on online / connection change / page shown; returns
+  retry() for a tap. Shared CSS: .island-offline (one muted line, wraps between words, never clips), .alone (fills the
+  tile, the app icon in .island-offline-icon greyed above), .island-stale (last state greyed; cache it in localStorage).
+- A hidden home releases the island's stdb connection (stdb.ts useVisible): never gate an island's whole UI on
+  db status - Lights showed "Lights …" forever. Gate only what needs the db (pairing).
+- host.DetailSheet (apps/sheet.ts, drawn by ui/widgetsheet.tsx, mounted in home.tsx and the preview): render it in the
+  island with children; it portals them into a .tile.sheet.pop popover anchored to the element, live with the
+  island's state. Tap outside / swipe down / Back -> onClose (unmount it). Height capped between status bar and
+  home's foot (.bar-pill/.dock), opens upward when low, body scrolls. Long-press: hold 450 ms in the control's own
+  pointerdown (it stopPropagation()s, so home's edit mode never starts), then the release does nothing; wrap
+  setPointerCapture in try (synthetic pointers throw). Coloured ranges: Range track + data-track (shell.css thumb).
+- Lights popup = every room (pill + switch), tap a room for temp/colour/scenes/lights (ui/lib/detail.tsx RoomDetail).
+
+## Preview variants and checks added
+- Island variants: data/<app>~<variant>.json (preview.mjs); data may carry net[].error (fetch rejects like the native
+  layer), storage {} (localStorage seed; each page gets an in-memory localStorage), press + pressCell (a held press,
+  then pointercancel - never a tap; the opened sheet is checked: on screen, last row visible or scrollable).
+  Existing: local.lights~offline, ~offline-stale, ~detail (12 rooms). OWL variants: <id>~extreme.json (-13°, 100%).
+- Fill checks skip .island-offline.alone and .ag-idle-line (sparse by request); clipping still applies.
+- Monospace sizing: budget 0.62 em/char (phone font ~0.575, preview 0.5), line height 1.4.
+
+## Home grid: merges, relayout
+- grid.tsx joins: a side covered WHOLE by neighbours extends half a gutter (--jX 1); a partially touched side stays at
+  its normal inset; seams() adds .tile.seam pieces - a bridge filling the gutter along the shared span and a fillet
+  (mask-cut quarter circle) at the inner corner, skipped where a third face sits. Seams are in faces() paths (page
+  glass, group shadow) and tint like faces (.page .seam). Gate: joins-folded/-unfolded (steam 6x3 over fetch 3x3);
+  shots.mjs "partial join" = not merged / off its row line / seam over a face.
+- Relayout: measure() never runs while document.hidden and compares cellW (column count) too; Pages useMeasured and
+  hosts/wide.ts recheck on visibilitychange (+2 frames, +400 ms), pageshow, orientationchange, resize, ResizeObserver.
+  Gate: relayout-landscape/-fold/-unfold. The mock can't reproduce the phone's stuck-wide state: verify on the device.
+- Gate cases go in dev/gate.mjs as small top-level helpers (whenReady, relayout...) - the complexity lint (60 lines,
+  cognitive 10) covers dev/*.mjs too; prune baselines (dev/lint-complexity.sh --prune, targets/android/lint-complexity.sh --prune).
+
+## Tools
+- shot.sh mounts the icon font and passes SHOTS_STRICT; idle.sh --wait re-holds a dropped adb connection;
+  app-src.sh push records the phone's md5s (a second push of the same file works). Device checks: queue them
+  (tools/phone/verify/queue.sh add <task> <script>) and end the turn. Screencap ids: cover 4630946316123810436,
+  inner 4630946704981769859 (a black frame = that display is off).
