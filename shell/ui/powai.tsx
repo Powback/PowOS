@@ -229,6 +229,22 @@ const checkQueued = (w: WorkRow) => w.status === "working" && w.step === QUEUED_
 const testing = signal<Record<string, number>>({});
 const TESTING_MS = 20 * 60_000;
 const testError = signal("");
+/**
+ * The host has verify.go (the APK with VerifyRun): asked once with an empty id, which a new host refuses as a bad id
+ * and an older one as "no such call" - nothing written either way. Until it says so, no "test now" / "test all".
+ */
+const canTest = signal(false);
+let probed = false;
+function probeTest() {
+  if (probed) return;
+  probed = true;
+  powos.ai
+    .verifyGo?.("")
+    .then(
+      () => (canTest.value = true),
+      (e) => (canTest.value = !/no such call/.test(String(e))),
+    );
+}
 const isTesting = (w: WorkRow) =>
   checkQueued(w) && [testing.value[w.id], testing.value.all].some((t) => t !== undefined && Date.now() - t < TESTING_MS);
 
@@ -330,7 +346,7 @@ function StepLine({ w }: { w: WorkRow }) {
 /** Under a row: "test now" while its phone check is queued; a failed check's screenshot (its last verify-*.png). */
 function CheckActs({ w, images }: { w: WorkRow; images: string[] }) {
   if (checkQueued(w))
-    return isTesting(w) ? null : (
+    return isTesting(w) || !canTest.value ? null : (
       <button type="button" class="ai-test" onClick={() => testNow(w.id)}>
         test now
       </button>
@@ -346,7 +362,8 @@ function CheckActs({ w, images }: { w: WorkRow; images: string[] }) {
 /** "test all" on the in-progress header while phone checks are queued ("testing…" once tapped). */
 function TestAll({ rows }: { rows: WorkRow[] }) {
   const queued = rows.filter(checkQueued);
-  if (!queued.length) return null;
+  useEffect(probeTest, []);
+  if (!queued.length || !canTest.value) return null;
   return queued.some((w) => !isTesting(w)) ? (
     <button type="button" class="ai-test ai-test-all" onClick={() => testNow("all")}>
       test all
