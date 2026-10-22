@@ -728,6 +728,7 @@ class ShellBridge(
                 val linux = linuxApp(it.id, it.pkg)
                 JSONObject().put("id", it.id).put("pkg", it.pkg ?: "").put("label", linux?.name ?: it.label).put("minimised", it.minimised).put("away", it.away)
                     .apply { if (linux != null) put("app", "l:${linux.id}") }
+                    .apply { it.bounds?.let { b -> put("bounds", JSONArray(listOf(b.left, b.top, b.right, b.bottom))) } }
             },
         )
 

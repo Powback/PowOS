@@ -154,6 +154,13 @@ export function appOf(w: AppWindow): string | undefined {
   return w.app ?? [...byKey.value.keys()].find((k) => k.startsWith(`a:${w.pkg}/`));
 }
 
+/** Whether CSS point ([x], [y]) on home is inside a floating window showing now (its bounds are device px). */
+export function inWindow(x: number, y: number): boolean {
+  const px = x * devicePixelRatio;
+  const py = y * devicePixelRatio;
+  return windows.value.some((w) => !w.minimised && !w.away && !!w.bounds && px >= w.bounds[0] && px < w.bounds[2] && py >= w.bounds[1] && py < w.bounds[3]);
+}
+
 /** The top of home's bottom bar (search pill, dock): the lowest edge a window may reach, told the host on change. */
 export function barTop(): number | null {
   let top = Infinity;

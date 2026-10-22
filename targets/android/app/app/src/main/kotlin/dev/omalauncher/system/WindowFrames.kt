@@ -197,7 +197,7 @@ class WindowFrames(
         val next =
             all.map { w ->
                 val label = w.pkg?.let { p -> runCatching { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() }.getOrNull() }
-                Running(w.id, w.pkg, label ?: w.pkg.orEmpty(), w.id in minimised, w.id in away)
+                Running(w.id, w.pkg, label ?: w.pkg.orEmpty(), w.id in minimised, w.id in away, w.bounds.takeIf { w.visible })
             }
         if (next != running.value) running.value = next
     }
@@ -217,6 +217,8 @@ class WindowFrames(
         val minimised: Boolean,
         /** On another home page (desktop): out of sight until home shows that page. */
         val away: Boolean = false,
+        /** Where it is on the screen (px) while it shows: home's gestures never start inside it. */
+        val bounds: Rect? = null,
     )
 
     companion object {

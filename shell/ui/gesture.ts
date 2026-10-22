@@ -21,6 +21,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { overPull, overRelease } from "./overpull.ts";
+import { inWindow } from "./desktops.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
 import { carry, closeDrawer, dockDrag, drawer, editing, folder, menu, notif, onLibrary, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
@@ -308,12 +309,17 @@ function travelOf() {
   return (l && parseFloat(getComputedStyle(l).getPropertyValue("--rise"))) || l?.clientHeight || innerHeight;
 }
 
+/** Home's own layers have the touch: a tile carried or picked, a menu, an open folder. */
+const busy = () => !!(carry.value || selected.value || menu.value || folder.value);
+
 /** A touch down on home: what's under it, and what the drawer and the panels are doing. */
 function startGesture(x: number, y: number, target: Element) {
   // A new touch while one is under way: the old one's end was lost.
   if (g) abandon();
   // An open folder (ui/folderview.tsx) takes its own taps and swipes (down closes it).
-  if (carry.value || selected.value || menu.value || folder.value) return;
+  // A touch inside a floating app window is the app's, always (a scroll in Chrome must never pull the launcher up or
+  // the shade down): home's swipes start only outside every window (ui/desktops.ts inWindow).
+  if (busy() || inWindow(x, y)) return;
   g = {
     x0: x,
     y0: y,

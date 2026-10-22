@@ -1298,6 +1298,42 @@ async function dockTapCheck() {
   return fails;
 }
 
+/**
+ * In the page: a touch inside a floating window is the app's (ui/gesture.ts startGesture, desktops.ts inWindow) - a
+ * swipe up there never opens the launcher, down never the shade; the same swipe outside every window still does.
+ */
+async function windowTouchCheck() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const S = await importShim("./state.ts");
+  const home = document.querySelector(".home");
+  const fails = [];
+  const dpr = devicePixelRatio;
+  const box = [100, 100, Math.round(innerWidth * 0.6), Math.round(innerHeight * 0.6)];
+  S.windows.value = [{ id: 301, pkg: "gate.win", label: "Win", minimised: false, bounds: box.map((v) => Math.round(v * dpr)) }];
+  const swipe = async (x, y0, y1) => {
+    const t = (y) => [new Touch({ identifier: 9, target: home, clientX: x, clientY: y })];
+    home.dispatchEvent(new TouchEvent("touchstart", { touches: t(y0), changedTouches: t(y0), bubbles: true, cancelable: true }));
+    for (let i = 1; i <= 8; i++) {
+      const y = y0 + ((y1 - y0) * i) / 8;
+      home.dispatchEvent(new TouchEvent("touchmove", { touches: t(y), changedTouches: t(y), bubbles: true, cancelable: true }));
+      await sleep(16);
+    }
+    home.dispatchEvent(new TouchEvent("touchend", { touches: [], changedTouches: t(y1), bubbles: true, cancelable: true }));
+    await sleep(400);
+  };
+  try {
+    await swipe(box[0] + 100, box[1] + 300, box[1] + 20);
+    if (S.drawer.value > 0) fails.push(`a swipe up inside a floating window opened the launcher (${S.drawer.value})`);
+    await swipe(box[0] + 100, box[1] + 40, box[1] + 320);
+    if (S.notif.value) fails.push("a swipe down inside a floating window pulled the shade down");
+    S.notif.value = false;
+    S.closeDrawer?.();
+  } finally {
+    S.windows.value = [];
+  }
+  return fails;
+}
+
 /** In the page, loaded afresh after desktopsCheck: the stored windows go back on their pages (page 2's hidden). */
 async function desktopsReloaded() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -1614,6 +1650,7 @@ try {
         const s = await whenReady(r, () => r.page.evaluate(desktopsCheck));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(desktopsEdge).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (!s.problems.length) s.problems.push(...(await r.page.evaluate(dockTapCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
+        if (!s.problems.length) s.problems.push(...(await r.page.evaluate(windowTouchCheck).catch((e) => [`evaluate: ${e.message.split("\n")[0]}`])));
         if (s.problems.length) return s;
         await r.page.reload().catch(() => {});
         return whenReady(r, () => r.page.evaluate(desktopsReloaded));
