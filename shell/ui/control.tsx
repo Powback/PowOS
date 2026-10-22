@@ -974,15 +974,12 @@ function Controls() {
       </div>
       <MediaCard i={2} />
       {whole ? (
+        // Every control in one grid, no sections (the user: "we don't need categories"), in the user's order - the
+        // sections' order where they haven't rearranged.
         <div class="cc3-all cascade" style={{ "--i": 3 }}>
-          {sections
-            .filter((x) => x.ts.length)
-            .map(({ sec, ts }) => (
-              <section key={sec.id} class="cc3-sec">
-                <h4 class="cc3-head">{sec.label}</h4>
-                <ToggleGrid ts={ordered(ts)} save={(ids) => saveOrder(all, ids)} />
-              </section>
-            ))}
+          <div class="cc3-sec">
+            <ToggleGrid ts={ordered(sections.flatMap((x) => x.ts))} save={(ids) => saveOrder(all, ids)} />
+          </div>
         </div>
       ) : (
         <div class="cc3-quick cascade" style={{ "--i": 3 }}>
