@@ -2,6 +2,10 @@ package dev.omalauncher.ui
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
@@ -32,6 +36,42 @@ fun iconMask(
     // The monochrome layer is already a mask; anything else keeps its detail as brightness.
     if (mono == null) brightnessToAlpha(bmp)
     return bmp.extractAlpha().also { bmp.recycle() }
+}
+
+/** PowOS's one icon shape: a rounded square, its corners this much of the edge (the shell's --icon-radius). */
+const val ICON_RADIUS = 0.22f
+
+/**
+ * [drawable] drawn [size] px square on [canvas]. An adaptive icon draws its own layers (background, foreground) in
+ * PowOS's one shape ([ICON_RADIUS]) rather than the system's mask, so every app's icon has the same silhouette on every
+ * surface (the shell's ui/iconshape.ts fits the rest to it); any other drawable as it is.
+ */
+fun drawShapedIcon(
+    drawable: Drawable,
+    canvas: Canvas,
+    size: Int,
+) {
+    val adaptive = drawable as? AdaptiveIconDrawable
+    if (adaptive == null) {
+        drawable.setBounds(0, 0, size, size)
+        drawable.draw(canvas)
+        return
+    }
+    val s = size.toFloat()
+    canvas.saveLayer(0f, 0f, s, s, null)
+    // Layers are 108dp with the 72dp shown: scaled so the shown part fills the square.
+    val inset = size / 4
+    for (layer in listOfNotNull(adaptive.background, adaptive.foreground)) {
+        layer.setBounds(-inset, -inset, size + inset, size + inset)
+        layer.draw(canvas)
+    }
+    // Everything outside the rounded square cleared, its edge anti-aliased (a clipPath would leave it jagged).
+    val outside = Path().apply {
+        addRoundRect(0f, 0f, s, s, s * ICON_RADIUS, s * ICON_RADIUS, Path.Direction.CW)
+        fillType = Path.FillType.INVERSE_WINDING
+    }
+    canvas.drawPath(outside, Paint(Paint.ANTI_ALIAS_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR) })
+    canvas.restore()
 }
 
 /** Silhouette of a plain bitmap (Linux icons). */

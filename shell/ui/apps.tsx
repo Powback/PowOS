@@ -3,6 +3,7 @@
  * over everything so no scrolling list clips it). In the drawer, holding an app and moving it drags it onto home.
  */
 import { tinted } from "./icontint.ts";
+import { placement, shapeOf, type Shape } from "./iconshape.ts";
 import { running } from "./running.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { closeDrawer, dock, launch, menu, page, pages, setDocked } from "../state.ts";
@@ -111,6 +112,8 @@ export function AppIcon({ src, label }: { src: string; label?: string }) {
   const [missing, setMissing] = useState(false);
   // In the theme's colours when that's on and its copy is made (ui/icontint.ts), else as the app draws it.
   const shown = tinted(src) ?? src;
+  // In the one shape at the one visual size (ui/iconshape.ts): placed in the squircle face, on the plate if it needs one.
+  const shape = shapeOf(src);
   const timer = useRef(0);
   const img = useRef<HTMLImageElement>(null);
   useEffect(() => {
@@ -121,25 +124,26 @@ export function AppIcon({ src, label }: { src: string; label?: string }) {
   // fade-in (a page reload, home recreated, a fold: every icon is in the WebView's cache by then).
   useLayoutEffect(() => {
     const i = img.current;
-    if (i && !(i.complete && i.naturalWidth)) i.parentElement!.classList.add("loading");
+    if (i && !(i.complete && i.naturalWidth)) i.closest(".app-icon")!.classList.add("loading");
   }, [src]);
   return (
     <span class={missing ? "app-icon initials" : "app-icon"}>
       {missing && (label ?? "?")[0]}
+      <span class={faceClass(shape, missing)}>
       <img
         ref={img}
         src={shown}
         alt=""
         draggable={false}
         decoding="sync"
-        style={missing ? { display: "none" } : undefined}
+        style={missing ? { display: "none" } : placement(shape)}
         onLoad={(e) => {
           clearTimeout(timer.current);
           setMissing(false);
-          e.currentTarget.parentElement!.classList.remove("loading");
+          e.currentTarget.closest(".app-icon")!.classList.remove("loading");
         }}
         onError={(e) => {
-          e.currentTarget.parentElement!.classList.add("loading");
+          e.currentTarget.closest(".app-icon")!.classList.add("loading");
           // HACK: a 404 can't tell "not drawn yet" from "this app has no icon", so a failure that lasts is taken as
           // the latter. Real fix: the host sends icon: null for an app whose lookup failed (ShellBridge.apps(), with
           // Runtime.refreshApps recording the failures) - not done here while ShellBridge has another change in flight.
@@ -148,9 +152,14 @@ export function AppIcon({ src, label }: { src: string; label?: string }) {
           timer.current = window.setTimeout(() => setMissing(true), ICON_GIVE_UP_MS);
         }}
       />
+      </span>
     </span>
   );
 }
+
+/** The face's classes: placed by its measure, on the plate when it needs one (ui/iconshape.ts). */
+const faceClass = (shape: Shape | null | undefined, missing: boolean) =>
+  `app-icon-face${shape ? " placed" : ""}${shape?.kind === "plate" && !missing ? " plate" : ""}`;
 
 /** The open app menu, under (or, near the bottom, over) the app it belongs to. */
 export function AppMenu() {

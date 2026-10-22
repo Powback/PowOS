@@ -125,6 +125,10 @@
   --cell: 76px;
   --icon: 48px;
   --strip-icon: 56px;
+  /* Every app icon's one shape (ui/iconshape.ts, shell.css .app-icon-face): a squircle, the corner this much of its
+     edge (AndroidApps draws adaptive icons in the same one). Transparent / irregular icons sit on --icon-plate in it. */
+  --icon-radius: 22%;
+  --icon-plate: color-mix(in srgb, var(--color-accent) 16%, color-mix(in srgb, var(--color-foreground) 10%, var(--color-surface)));
   --strip-height: 76px;
   --letter-bar: 22px;
   /* The pill's space above the screen's foot (over the navigation bar's inset): home's search, the drawer's, PowOS AI's compose. */

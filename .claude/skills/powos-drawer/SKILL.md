@@ -63,6 +63,17 @@ description: Load before changing or debugging the PowOS app drawer / launcher p
   mock), shots dir under $HOME and chmod 777 (Colima docker writes it; /tmp gave EACCES). Device:
   tools/phone/verify/icon-hues.sh (pushes if the phone serves the old module, then read-only probe + screencap).
 
+## Uniform icons (board "Uniform app icons")
+- ui/iconshape.ts measures each icon URL ONCE in idle time (96px canvas: alpha>24 box, solid share): "fill" (about
+  square, >=88% solid: adaptive, full-bleed, rounded square) fills the face; "plate" (Konsole, Foot, Dolphin, round
+  legacy icons) is fitted to GLYPH 0.76 on `--icon-plate`. Kept by URL in memory + localStorage `powos.icons.shape`
+  (URLs name pixels, never stale), so known icons lay out in the first frame. AppIcon: `.app-icon > .app-icon-face
+  (.placed/.plate, squircle, overflow hidden) > img` with inline left/top/width/height; tinted copies reuse the measure.
+  `.app-icon::after` (running bar) stays outside the clip. Failed/cross-origin: shown as is.
+- Kotlin: ui/IconMask.kt drawShapedIcon draws adaptive icons' own layers in the same 22% rounded square (not the
+  system mask), AndroidApps uses it - so Android icons arrive already in the one shape.
+- Sizes per context: --icon (grid/drawer), --strip-icon (dock/strip), 58% of a tile/folder cell, library 2x2.
+
 ## Running bar (board running-indicator)
 - AppCell (dock, dock recents, drawer, drawer recents, recent widget) sets `data-run` from ui/running.ts (`running`
   signal: app key -> "running" | "frozen", `powos.apps.running?.()` once + "apps.running" events, re-asked on

@@ -522,7 +522,17 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   transition: background 120ms;
 }
 .app:active { background: var(--color-surface); }
-.app-icon { position: relative; display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: 22%; }
+.app-icon { position: relative; display: block; width: var(--icon); height: var(--icon); pointer-events: none; border-radius: var(--icon-radius); }
+/*
+ * The one icon shape (ui/iconshape.ts): the face is the squircle, the img placed in it by its measure (trimmed of its
+ * clear padding, inline left/top/width/height) and clipped to it. A transparent or irregular icon sits on the plate;
+ * one that is a shape already has none (the dock rule). Static: laid out once, nothing per frame.
+ */
+/* In flow, sized as the img was (the icon's box keeps its intrinsic height where it's height: auto). */
+.app-icon-face { position: relative; display: block; width: 100%; height: 100%; aspect-ratio: 1; overflow: hidden; border-radius: var(--icon-radius); }
+.app-icon.initials .app-icon-face { position: absolute; inset: 0; }
+.app-icon-face.plate { background: var(--icon-plate); }
+.app-icon-face.placed img { position: absolute; max-width: none; }
 /*
  * A running app (ui/running.ts: a task, a Linux window) or one with a floating window (the dock, unfolded): a short
  * accent bar centred under its icon, bare (no plate) - in the dock, its recent apps and the drawer. Frozen (asleep in
@@ -544,10 +554,11 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 }
 .app[data-run="frozen"] .app-icon::after,
 .dock .app.windowed.minimised:not([data-run="running"]) .app-icon::after { opacity: 0.4; }
-.app-icon img { display: block; width: 100%; height: 100%; transition: opacity 160ms; }
+.app-icon img { display: block; width: 100%; height: 100%; object-fit: contain; transition: opacity 160ms; }
 /* Not loaded yet (apps.tsx AppIcon): a pulsing tile in its place, not a broken image. */
 /* Pulses ~10 s, not forever: an app with no icon at all (a Linux app like lstopo) stays "loading", and an endless
    animation kept the compositor drawing 60 frames a second on an idle home (app + renderer ~20% of a core). */
+.app-icon.initials { border-radius: var(--icon-radius); }
 .app-icon.loading { background: var(--color-surface); animation: icon-wait 1.2s ease-in-out 8 alternate; }
 .app-icon.loading img { opacity: 0; }
 @keyframes icon-wait { from { opacity: 0.35; } to { opacity: 0.8; } }
@@ -733,7 +744,9 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   justify-content: center;
   gap: 4px;
 }
-/* The icon takes what the cell leaves after its label; labels carry a shadow, to read on any wallpaper. */
+/* The icon takes what the cell leaves after its label; labels carry a shadow, to read on any wallpaper. The cell's
+   whole width (the icon's % is of it): the icon's face has no intrinsic size to widen it the way a bare img did. */
+.tile-app { width: 100%; }
 .tile-app .app-icon { width: min(var(--icon), 58%); height: auto; aspect-ratio: 1; }
 .tile-app .app-label,
 .strip .app-label {

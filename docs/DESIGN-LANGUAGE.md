@@ -12,7 +12,11 @@ If in doubt, take it out. Default to calm.
 - **Reduce.** A change removes elements, layers, surfaces or effects instead of adding them. Before adding a
   surface, plate, wrapper, shadow or effect, ask whether the same can be done with less. Usually it can, by
   deleting something.
-- No decoration that carries no content: no plates behind icons, no double backgrounds, no ornamental layers.
+- No decoration that carries no content: no extra plates behind icons, no double backgrounds, no ornamental layers.
+- App icons: one shape and one visual size everywhere (`ui/iconshape.ts`): a squircle (`--icon-radius`, 22%). An icon
+  that is a shape already (adaptive, full-bleed, a rounded square) fills it, trimmed of clear padding; a transparent
+  or irregular one (most Linux icons) is trimmed, fitted to ~76% and sits on the one plate (`--icon-plate`) of the
+  same squircle, so every silhouette matches. Never a second plate behind a shaped icon.
 
 ## 2. One material
 

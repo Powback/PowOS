@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.PathParser
+import dev.omalauncher.ui.drawShapedIcon
 import dev.omalauncher.ui.iconMask
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -310,8 +311,7 @@ class AndroidAppCatalog(
                                 runCatching {
                                     val d = info.getIcon(0)
                                     val bmp = Bitmap.createBitmap(iconPx, iconPx, Bitmap.Config.ARGB_8888)
-                                    d.setBounds(0, 0, iconPx, iconPx)
-                                    d.draw(Canvas(bmp))
+                                    drawShapedIcon(d, Canvas(bmp), iconPx)
                                     var mask = iconMask(d, iconPx)
                                     if (app.profile != null) mask = addBadge(bmp, mask, if (app.clone) cloneMark else briefcase)
                                     Triple(bmp, themed(bmp, palette), mask.asImageBitmap())
