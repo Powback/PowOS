@@ -38,6 +38,12 @@ the minimal change and tell them.
 - `tools/phone/user.sh <script>`: the same as the session user powos (its comms inbox, spacetime token, `powos ...`).
   One-liners as the session user: `tools/phone/adb.sh shell su -c "sh /data/powos/powos-run.sh '<cmd>'"`.
   NEVER `sudo` through powos-run.sh: it pops a password dialog on the user's screen.
+- Screencaps: ONLY `tools/phone/shot.sh OUT.png [--all]` (never a bare `screencap`). It takes the display that is ON
+  (cover folded, inner unfolded), refuses when the screen is off (exit 3, never wakes it) and flags an all-black
+  result (exit 4, with the likely reason: a FLAG_SECURE window, or a window still at alpha 0). The black caps of
+  2026-10-22: `screencap` without -d takes the FIRST display = the inner screen, black while folded; a hard-coded
+  cover id is black while unfolded; and a capture after the screen dozed is black. On-phone scripts: pick the ON id
+  from `dumpsys display` (DisplayDeviceInfo ... state ON), as tools/phone/verify/gest.sh does.
 - `tools/phone/idle.sh` -> `idle=<s> screen=<Awake|Dozing|Asleep> act=<s>` (idle = seconds since a touch-panel IRQ;
   act = lastUserActivity, NOT a user signal). Drive the phone (input, screenrecord, journeys, session-restarting
   installs) only at idle>=120 and screen=Awake. Never wake the screen with key events (refused - don't route around it).

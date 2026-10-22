@@ -26,6 +26,8 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
   `pidof com.powos.app` before/after (an install mid-run = void). Note the installed APK: `dumpsys package com.powos.app | grep lastUpdateTime`.
 
 ## Gesture journeys (`verify/journey.sh` runs `verify/gest.sh` on the phone as Android root)
+- Screencaps from the Mac: `tools/phone/shot.sh` (the ON display; refuses off/black). On the phone: the ON display id from
+  `dumpsys display` (`state ON`), never a fixed id - bare `screencap` takes the inner screen, black while folded.
 - Cover screen (folded, `dumpsys device_state` CLOSED): 1116x2484, display id from `dumpsys SurfaceFlinger --display-id`
   (cover = the active viewport in `dumpsys display`, port 132). `screenrecord --display-id <id> --bit-rate 40000000 --time-limit N out.mp4 &`;
   `screencap -d <id> -p x.png` at each step (multiple displays: always pass the id).
