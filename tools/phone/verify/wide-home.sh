@@ -46,6 +46,12 @@ bar() {
   echo "bar: $r" | tee -a "$OUT/log.txt"; [ "${r%% *}" = ok ] || fail "the wide bar: $r"
 }
 
+# The pinned dock never fades (folded, the user 2026-10-23): at rest on its pinned page, no edge fade over its icons.
+nofade() {
+  local r; r=$(q '(()=>{const e=document.querySelector(".home > .dock.paged:not(.dock-tray) .dock-pages");if(!e)return "ok (not paged)";if(e.scrollLeft>=1)return "ok (scrolled to the recents)";const c=getComputedStyle(e),l=c.getPropertyValue("--dock-fade-l").trim(),r=c.getPropertyValue("--dock-fade-r").trim();return l==="0px"&&r==="0px"?"ok":"faded at rest: left "+l+", right "+r})()')
+  echo "dock fade: $r" | tee -a "$OUT/log.txt"; [ "${r%% *}" = ok ] || fail "the pinned dock: $r"
+}
+
 # Every host tile on the first two pages at its side-by-side place on the wide page (store home.wide), a backup kept.
 migrated() {
   hcall home.get "[]" > "$OUT/host.json"; hcall store.get "['home.wide']" > "$OUT/wide.json"; hcall store.get "['home.wide.backup']" > "$OUT/backup.json"
@@ -90,7 +96,7 @@ for screen in inner cover; do
   step "$screen screen (device state $st)"; sh_ "cmd device_state state $st"; sleep 4; chk $screen
   unlock; chk "$screen-lock"; home; chk "$screen-home"
   "$T/shot.sh" "$OUT/home-$screen.png" 2>&1 | tee -a "$OUT/log.txt"
-  if [ $screen = inner ]; then bar; migrated; fi
+  if [ $screen = inner ]; then bar; migrated; else nofade; fi
   edit $screen
 done
 
