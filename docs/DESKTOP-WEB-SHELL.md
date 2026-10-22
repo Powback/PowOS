@@ -408,3 +408,48 @@ The PowOS desktop is the unfolded Android home exactly as it is; apps float over
   half width x two thirds height); folded, full screen as before.
 - **Missing:** a title bar (OxygenOS draws no caption for freeform tasks), move/resize by touch, minimise to the
   dock, running windows in the dock; then Linux (KWin) apps through the same model.
+
+## Plasma as an app and as the web launcher's backend (plan, 2026-10-22)
+
+The user likes Plasma's interface: it stays, as a PowOS app, and KWin/Plasma become the Linux-side backend the web
+home drives. Nothing is removed. Board task "Plasma as app + backend for the web launcher" (owner powos-desktop).
+
+**(1) Plasma, the app.** A "Plasma" entry in the drawer opens the full Plasma desktop (the engine's MainActivity, the
+"PowOS" activity, as OpenPowosApp and powos-open-task's "desktop" fallback already do). The paused powos-shell host
+stays paused: the drawer entry opens Plasma's own shell, not ours.
+- Data path: `org.powos.plasma.desktop` (OnlyShowIn=X-PowOS, so Kickoff never lists Plasma inside Plasma; Exec
+  `powos-plasma`) -> powos-apps-export -> apps.tsv -> Runtime.linuxApps -> `apps.list` (kind linux) -> drawer tap ->
+  `apps.launch` -> Runtime.launch sees PLASMA_COMMAND -> showDesktop().
+
+**(2) KWin/Plasma as the backend.**
+- Apps: KService's view of the menu. powos-apps-export reads the same XDG .desktop entries KService indexes, with
+  Kickoff's rules (NoDisplay/Hidden/OnlyShowIn/NotShowIn, first id wins) and Plasma's icon theme. Exists; it ran only
+  on app start and pacman calls from the app. Now event-driven: kded6 rebuilds KSycoca when an application dir
+  changes and kbuildsycoca broadcasts `org.kde.KSycoca.notifyDatabaseChanged` on the session bus; `powos-apps-watch`
+  (dbus-monitor on that one signal, blocked at rest) reruns the export, which renames apps.tsv into place; the app's
+  FileObserver on run/powos-apps sees the MOVED_TO and reloads the list -> `apps.changed` -> the drawer.
+- Opening: exists. Runtime.openRooted -> `powos-open-task` -> KWin's org.powos.WindowTasks.show (pkgs/kwin 0013):
+  an existing window comes back, else the app starts and its first window becomes its own Android task.
+- Window list: exists for the dot. powos-sleep-gui writes running/apps.json from KWin's window list (a KWin script,
+  signals only) -> RunningApps.linux -> `apps.running` -> ui/running.ts (5472a10's dot in the dock).
+- Missing: Linux windows as floating windows on home pages (2b31282/31634aa do Android's). KWin's exported window
+  tasks are Android tasks, so they can go through the same freeform path (AppWindows/WindowFrames, `windows.list`)
+  once WindowTasks opens them freeform on the unfolded screen; their page binding is desktops.ts's as is.
+
+**(3) Into the PowOS shade.** None exists yet.
+- Notifications: a session helper as a second org.freedesktop.Notifications *monitor* (BecomeMonitor on Notify /
+  NotificationClosed, never the server: plasmashell stays the server) -> a spool in the run dir (AgentsSpool's
+  pattern: FileObserver) -> the shade's notifications list, actions back over D-Bus ActionInvoked.
+- Clipboard: Klipper's org.kde.klipper.klipper clipboardHistoryUpdated signal -> getClipboardContents -> the app sets
+  Android's clip (and Android's clip -> setClipboardContents), one direction at a time to avoid echo loops.
+- KDE Connect: its devices' notifications already arrive as Plasma notifications, so (3a) covers them; battery and
+  "find my phone" from org.kde.kdeconnect.device later, only if the user wants them.
+
+**Slices**
+1. Plasma app in the drawer + the Linux list event-driven from KService's change signal, launched through KWin (this
+   slice: org.powos.plasma.desktop, powos-apps-watch, the app's FileObserver and PLASMA_COMMAND; unit android-apps).
+2. Linux windows floating on home pages: WindowTasks freeform when unfolded, frames and the dock's windows for them.
+3. Plasma notifications (KDE Connect's included) in the shade.
+4. Clipboard both ways.
+
+Cost rule for every slice: zero CPU at rest. D-Bus signals and inotify only, no polling.
