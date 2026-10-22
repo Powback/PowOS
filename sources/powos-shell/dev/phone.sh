@@ -9,6 +9,8 @@
 #   sources/powos-shell/dev/phone.sh page NAME    the home page as Chromium drew it (DevTools), over Android's still of
 #                                                 the wallpaper -> /home/powos/design-qa/desktop-NAME.png (+ a copy here)
 #   sources/powos-shell/dev/phone.sh cdp 'JS'     evaluate in the home page (read-only checks)
+#   sources/powos-shell/dev/phone.sh theme        the phone home's picked theme -> the session's Omarchy current theme
+#   sources/powos-shell/dev/phone.sh wallpaper    Android's wallpaper still -> the desktop home's own wallpaper
 #   sources/powos-shell/dev/phone.sh shot NAME    KWin's whole output (spectacle); on the phone's Anland backend it
 #                                                 comes back empty (2026-10-21) - use page, or Android's screencap
 #
@@ -51,6 +53,22 @@ EOF
     "$repo/tools/phone/root.sh" "$cache/build.sh"
     ;;
   start) as_user "$RUN $DEV powos-desktop-shell start" ;;
+  theme)
+    # The phone home's picked theme (read-only: its bridge's theme.get) as Omarchy's current theme in the session -
+    # what the desktop host reads (and watches) for the page's tokens. HACK: a copy, made by hand; real fix: the
+    # Android app writes ~/.local/state/omarchy/current/theme into the rooted session itself whenever a theme is
+    # picked, as GuestThemeConfig.kt does for proot.
+    "$repo/tools/phone/cdp.sh" eval home 'importShim("./bridge.ts").then(m => m.powos.theme.get()).then(t => JSON.stringify(t))' 2>/dev/null |
+      python3 "$here/theme-toml.py" >"$cache/theme.txt"
+    { echo 'D=~/.local/state/omarchy/current; mkdir -p $D/theme'; echo "cat >\$D/theme/colors.toml <<'TOML'"; tail -n +2 "$cache/theme.txt"; echo TOML
+      echo "printf '%s\n' '$(head -1 "$cache/theme.txt")' >\$D/theme.name; echo theme: \$(cat \$D/theme.name), \$(grep -c = \$D/theme/colors.toml) colors"; } >"$cache/theme.sh"
+    "$repo/tools/phone/user.sh" "$cache/theme.sh" 2>&1 | grep -v ' pushed'
+    ;;
+  wallpaper)
+    # The desktop home's own wallpaper (src/server.cpp desktopWallpaper): Android's still of its (live) wallpaper,
+    # copied root-side once - the session can't read Android's system files.
+    "$adb" shell "su -c 'mkdir -p /data/powos/root/home/powos/.local/state/powos && cp /data/system/users/0/wallpaper_screenshot.png /data/powos/root/home/powos/.local/state/powos/desktop-wallpaper.jpg && chown 10359:10359 /data/powos/root/home/powos/.local/state/powos/desktop-wallpaper.jpg && echo copied || echo failed'"
+    ;;
   cdp)
     # As base64 in a script file: the JS reaches the page as written (no shell quoting on the way).
     printf 'PORT=9333 MODE=desktop %s/bin/powos-shell-cdp "$(echo %s | base64 -d)"\n' "$P" \

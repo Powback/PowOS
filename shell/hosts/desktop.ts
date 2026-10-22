@@ -11,13 +11,16 @@ import { homeLayout } from "./layout.ts";
 const HOME = "desktop-home";
 const RECENT = "desktop-recent";
 
+/** About 100 px a column, 4 or more: the desktop's grid follows its surface (a screen, folded or not). */
+const columnsFor = (width: number) => Math.max(4, Math.round(width / 100));
+
 /**
  * A first home: PowOS AI's work board and PowOS apps' islands, side by side across a desktop-wide grid (about 110 px
  * a column, 4 or more), a free column and row between them - touching tiles merge into one surface on home, and these
  * are three. Apps stay in the drawer.
  */
 function firstHome(): Home {
-  const columns = Math.max(4, Math.round(innerWidth / 110));
+  const columns = columnsFor(innerWidth);
   const w = columns >= 8 ? 3 : Math.max(2, Math.floor((columns - 1) / 2));
   const across = Math.max(1, Math.floor((columns + 1) / (w + 1)));
   // As small as each shows its content (the preview tool's fill check: the board at one row is a 4-16% status strip).
@@ -46,7 +49,19 @@ export function desktop(n: Bridge): Bridge {
     apps = list;
     recent = Array.isArray(last) ? last : [];
     Object.assign(home, saved && Array.isArray(saved.items) ? saved : firstHome());
+    fit();
   })();
+  /** The columns for this width; a tile that no longer fits is placed again (the grid's arrange), never left over the edge. */
+  function fit(): boolean {
+    const cols = columnsFor(innerWidth);
+    if (home.columns === cols) return false;
+    home.columns = cols;
+    for (const i of home.items) if (i.cell && i.cell.x + i.cell.w > cols) i.cell = null;
+    return true;
+  }
+  addEventListener("resize", () => {
+    if (fit()) (n.store.set(HOME, home), emit("home.changed", null));
+  });
   const after =
     <A extends unknown[], R>(f: (...a: A) => Promise<R>) =>
     async (...a: A) => (await ready, f(...a));

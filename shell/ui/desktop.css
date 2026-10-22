@@ -45,3 +45,10 @@ html[data-mode="desktop"] .home.chatting .launcher {
 html[data-mode="desktop"] * {
   scrollbar-width: none;
 }
+/* The home's own wallpaper (desktop.tsx): over Plasma's desktop, under everything of home's. */
+html[data-mode="desktop"] .desk-wall {
+  position: fixed;
+  inset: 0;
+  background: var(--color-background) center / cover no-repeat;
+  pointer-events: none;
+}

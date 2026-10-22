@@ -14,6 +14,13 @@ class Windows;
 QStringList shellRoots();
 
 /**
+ * The desktop home's own wallpaper (it covers Plasma's desktop while it runs): ~/.local/state/powos/desktop-wallpaper.*
+ * (dev/phone.sh wallpaper copies Android's still there on the phone), Omarchy's current background, Plasma's
+ * configured image. Empty: none (the page keeps the theme's background).
+ */
+QString desktopWallpaper();
+
+/**
  * powos://shell/<path>: ~/.config/powos/shell/<path> if it's there, else the base ($POWOS_SHELL_DIR, or
  * /usr/share/powos/shell). powos://icon/<name>?s=<px>: a theme icon as PNG; powos://icon/_task/<id>: a window's.
  */
@@ -27,6 +34,7 @@ private:
     void icon(QWebEngineUrlRequestJob *job);
     void appFile(QWebEngineUrlRequestJob *job, const QString &rest);
     void symbols(QWebEngineUrlRequestJob *job);
+    void wallpaper(QWebEngineUrlRequestJob *job);
     Windows *m_windows;
 };
 

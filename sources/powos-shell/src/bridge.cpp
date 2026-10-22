@@ -1,10 +1,12 @@
 #include "bridge.h"
 #include "net.h"
+#include "server.h"
 #include "services.h"
 
 #include <KWindowEffects>
 #include <QDesktopServices>
 #include <QFile>
+#include <QFileInfo>
 #include <QTimer>
 #include <QUrl>
 #include <QJsonDocument>
@@ -115,6 +117,15 @@ QJsonValue Bridge::dispatch(const QString &method, const QJsonArray &a)
     if (method == QLatin1String("ai.send")) {
         m_services.ai->send(a.at(0).toString());
         return QJsonValue::Null;
+    }
+    if (method == QLatin1String("system.glass")) {
+        const QString file = desktopWallpaper();
+        if (file.isEmpty())
+            return QJsonObject{{QStringLiteral("wallpaper"), QJsonValue::Null}, {QStringLiteral("blurBehind"), false}};
+        const QString rev = QString::number(QFileInfo(file).lastModified().toMSecsSinceEpoch());
+        return QJsonObject{{QStringLiteral("wallpaper"), QJsonObject{{QStringLiteral("url"), QStringLiteral("./_wallpaper?r=") + rev},
+                                                                    {QStringLiteral("rev"), rev}, {QStringLiteral("source"), QStringLiteral("file")}}},
+                           {QStringLiteral("blurBehind"), false}};
     }
     // Agents' mail comes as comms notifications on this host (Plasma's), not into the page yet.
     if (method == QLatin1String("ai.mail"))

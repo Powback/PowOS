@@ -117,7 +117,8 @@ function refrost(): Promise<void> {
  * same screen, so what's under the panel is what its frost shows (docs/DESIGN-LANGUAGE.md, the exception); live (the
  * screen moving under it), none. The rest (the screen-off clock, the glasses') have none.
  */
-const OVER_WALLPAPER = new Set(["home", "lock"]);
+// The desktop's home (powos-shell) draws its own wallpaper (ui/desktop.tsx): its tiles frost that picture too.
+const OVER_WALLPAPER = new Set(["home", "lock", "desktop"]);
 const TINT_ONLY = new Set(["shade", "recents", "pull", "quicktools"]);
 
 let lastSource: GlassSource | null = null;

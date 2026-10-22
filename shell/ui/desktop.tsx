@@ -8,7 +8,9 @@
  * The pill opens on a click (or "/" / Ctrl+Space while home has the keyboard); Escape or a click on home closes.
  */
 import { useEffect } from "preact/hooks";
-import { effect } from "@preact/signals";
+import { effect, signal } from "@preact/signals";
+import { powos } from "../bridge.ts";
+import type { GlassSource } from "../types.ts";
 import { AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { Drawer } from "./drawer.tsx";
@@ -26,6 +28,15 @@ css.rel = "stylesheet";
 css.href = "./ui/desktop.css";
 css.dataset.hot = "";
 document.head.append(css);
+
+/**
+ * The home's own wallpaper while it runs: it owns the desktop (Plasma's desktop and its widgets are under it, as they
+ * were, when it stops). One static layer: the host's picture (system.glass), else the theme's background.
+ */
+const wall = signal<string | null>(null);
+const wallFrom = (g: GlassSource | null) => (wall.value = g?.wallpaper?.url ?? null);
+powos.system.glass().then(wallFrom, () => {});
+powos.on("system.glass", wallFrom);
 
 // The chat open: the pill asks ("ask PowOS AI", Enter sends - not the best app match), as over PowOS AI's panel.
 effect(() => {
@@ -54,6 +65,7 @@ export function Desktop() {
   useKeys();
   return (
     <>
+      <div class="desk-wall" style={wall.value ? { backgroundImage: `url("${wall.value}")` } : undefined} />
       <div class={`home ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${chatting.value ? "chatting" : ""}`}>
         {/* Open, only the launcher takes the pointer: a click beside it lands on the stage itself and closes it. */}
         <div class="stage" onClick={(e) => drawerOpen.value && e.target === e.currentTarget && closeDrawer()}>
