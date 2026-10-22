@@ -19,7 +19,7 @@ import dev.omalauncher.system.HiddenApi
 internal class WindowBlur(
     /** A view of the window (its root): the window's surface is its view root's. */
     private val view: () -> View?,
-    private val maxRadiusDp: Float = MAX_RADIUS_DP,
+    private var maxRadiusDp: Float = MAX_RADIUS_DP,
     /** The window's page glass (home's GlassBlur.wholeWindow), which keeps its surfaces' regions beside this one. */
     private val glass: ((Float) -> Boolean)? = null,
 ) {
@@ -28,7 +28,23 @@ internal class WindowBlur(
     private var radius = -1
     private var broken = false
 
+    /** The openness last set (0..1): applied again when the radius changes. */
+    private var amount = 0f
+
+    /**
+     * The radius at full openness, dp - the page's to tune (its material: "shade.blur"), 0..[MAX_TUNED_DP]; the
+     * current openness again at the new radius.
+     */
+    fun radius(dp: Float) {
+        val d = dp.coerceIn(0f, MAX_TUNED_DP)
+        if (d == maxRadiusDp) return
+        maxRadiusDp = d
+        radius = -1
+        set(amount)
+    }
+
     fun set(amount: Float) {
+        this.amount = amount
         if (broken) return
         val v = view() ?: return
         // Android's own switch (battery saver, the developer option): no blur while it says so - never forced.
@@ -68,6 +84,9 @@ internal class WindowBlur(
          * 28 dp, home's widgets under the shade stayed readable - "sharp straight through".
          */
         const val MAX_RADIUS_DP = 140f
+
+        /** The most a page may ask for (the compositor blurs only a fraction of its radius: text needs a lot). */
+        const val MAX_TUNED_DP = 600f
 
         private val setBlur: java.lang.reflect.Method by lazy {
             SurfaceControl.Transaction::class.java.getMethod("setBackgroundBlurRadius", SurfaceControl::class.java, Int::class.javaPrimitiveType)

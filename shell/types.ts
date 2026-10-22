@@ -517,6 +517,11 @@ export interface Bridge {
     /** The banner's bottom edge, CSS px from the top of the window. */
     peekHeight(px: number): Promise<void>;
     /**
+     * How strongly what's behind the shade's window is blurred when it's open: the compositor's radius at full openness,
+     * dp (0..600; default 140). The compositor's blur is only a fraction of its radius - text needs a lot.
+     */
+    blur(dp: number): Promise<void>;
+    /**
      * Home's page: a pull down on home is the shade's now ([on]: nothing open over home's pages). Resolves true when the
      * host takes that finger itself (its gesture input), false when it can't - then home asks [open] on a swipe down.
      */

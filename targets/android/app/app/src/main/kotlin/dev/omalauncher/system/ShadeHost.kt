@@ -156,6 +156,8 @@ class ShadeHost(
                 override fun expand() = expandPeek()
 
                 override fun peekHeight(px: Int) = sizePeek(px)
+
+                override fun blur(dp: Float) = blur.radius(dp)
             }
         host = h
         watchdog =
@@ -743,4 +745,7 @@ interface ShadeSlot {
 
     /** The heads-up banner is [px] (device px) tall from the window's top: the window as tall. */
     fun peekHeight(px: Int)
+
+    /** How strongly what's behind the shade is blurred when it's open: the radius at full openness, dp (the page's). */
+    fun blur(dp: Float) {}
 }

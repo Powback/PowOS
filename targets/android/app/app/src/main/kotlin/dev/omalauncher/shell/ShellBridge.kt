@@ -231,6 +231,7 @@ class ShellBridge(
             "shade.closed" -> shade?.closed()
             "shade.expand" -> shade?.expand()
             "shade.peekHeight" -> shade?.peekHeight((a.getDouble(0) * density()).toInt())
+            "shade.blur" -> shade?.blur(a.getDouble(0).toFloat())
             // Home's page: whether a pull down on it is the shade's now. True: PowOS's shade takes it (on the gesture input).
             "shade.homePull" -> homePull(a.getBoolean(0))
             // Home without the gesture input: the shade down, not following the finger.
