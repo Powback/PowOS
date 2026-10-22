@@ -15,28 +15,30 @@ now() { date +%s.%N; }
 ms() { awk -v a="$1" -v b="$2" 'BEGIN {printf "%d", (b - a) * 1000}'; }
 irq() { awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}' /proc/interrupts; }
 I0=$(irq)
-close_mine() { ${ON_CLOSE:-:}; [ $mine = 1 ] && { pill "closing Broforce (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | tail -2; mine=0; }; rm -rf "$T"; }
+close_mine() { ${ON_CLOSE:-:}; [ $mine = 1 ] && { pill "closing Broforce (this check started it)"; echo "== closing what this check started"; bash /var/tmp/powos-bf-stop.sh | tail -2; mine=0; }; rm -rf "$T" /tmp/powos-verify-step; }
 touched() { [ "$(irq)" != "$I0" ] || return 1; echo "user input $(date +%T) - stopping"; close_mine; exit 3; }
 trap 'echo "stopped from outside $(date +%T)"; close_mine; exit 3' HUP TERM INT
 fail() { echo "FAIL $1: $2"; FAILS="$FAILS $1"; }
 
-# pill <text>: the status pill's title ("Testing: <text>") while the queue runs this check (its file, task + k kept).
+# pill <text>: the status pill's title ("Testing: <text>") while the queue runs this check: the runner's heartbeat
+# puts /tmp/powos-verify-step in place of the check's name (queue.sh put); the pill's file is rewritten now too.
 pill() {
+  printf '%s\n' "$1" > /tmp/powos-verify-step
   python3 - "$1" <<'PY' 2>/dev/null
-import json, os, sys, time
-p = "/run/powos-app/verify-status.json"
-try:
-    s = json.load(open(p))
-except (OSError, ValueError):
-    sys.exit()
-if s.get("done"):
-    sys.exit()
-s["name"], s["ts"] = sys.argv[1], int(time.time())
-t = "/run/powos-app/.verify-status.bf"
-with open(t, "w") as f:
-    json.dump(s, f)
-os.chmod(t, 0o644)
-os.replace(t, p)
+import json, os, sys
+for p in ("/run/powos-app/verify/status.json", "/run/powos-app/verify-status.json"):
+    try:
+        s = json.load(open(p))
+    except (OSError, ValueError):
+        continue
+    if s.get("done") or "task" not in s:
+        continue
+    s["name"] = sys.argv[1]
+    t = p + ".bf"
+    with open(t, "w") as f:
+        json.dump(s, f)
+    os.chmod(t, 0o644)
+    os.replace(t, p)
 PY
   echo "-- $(date +%T) $1"
 }

@@ -120,12 +120,15 @@ run)
   # status <job mark> <json> [more]: the pill's file (VerifyRun.kt watches /run/powos-app/verify/status.json; the old
   # verify-status.json too, for APKs before the heartbeat), the job mark, the stop flag cleared; [more]: more shell
   # (clearing the go flag). One adb call, at most 15 s.
-  status() { phone_sh "$(printf 'umask 022; %s; printf %%s %q > /tmp/powos-verify-job; rm -f /tmp/powos-verify-stop; %s' "$(put "$2")" "$1" "${3:-:}")" >/dev/null; }
+  status() { phone_sh "$(printf 'umask 022; %s; printf %%s %q > /tmp/powos-verify-job; rm -f /tmp/powos-verify-stop /tmp/powos-verify-step; %s' "$(put "$2")" "$1" "${3:-:}")" >/dev/null; }
   # beat <json>: the heartbeat - the pill's file again; prints "stop" when the pill's tap wrote the stop flag.
   beat() { phone_sh "$(printf 'umask 022; %s; [ -e /tmp/powos-verify-stop ] && echo stop; :' "$(put "$1")")" | tr -d '\r' | tail -1; }
+  # A check names its current step in PowOS's /tmp/powos-verify-step (plain text, cleared at each job's start): the
+  # pill says that instead of the check's name ("launching Broforce", "freezing Broforce", ...).
   put() { local f
+    printf 'J=%q; S=$(tr -d '"'"'"\\\\|'"'"' 2>/dev/null < /tmp/powos-verify-step | head -c 80); [ -n "$S" ] && J=$(printf %%s "$J" | sed "s|^{\\"name\\":\\"[^\\"]*\\"|{\\"name\\":\\"$S\\"|"); ' "$1"
     for f in verify/status.json verify-status.json; do
-      printf 'mkdir -p /run/powos-app/verify; printf %%s %q > /run/powos-app/%s.tmp && mv -f /run/powos-app/%s.tmp /run/powos-app/%s; ' "$1" "$f" "$f" "$f"; done; printf ':'; }
+      printf 'mkdir -p /run/powos-app/verify; printf %%s "$J" > /run/powos-app/%s.tmp && mv -f /run/powos-app/%s.tmp /run/powos-app/%s; ' "$f" "$f" "$f"; done; printf ':'; }
   # phone_sh <script>: run it in PowOS as root; killed after 15 s (a hung adb never holds the runner).
   phone_sh() { local b; b=$(printf '%s\n' "$1" | base64 | tr -d '\n')
     perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "su -c 'sh /data/powos/powos-run.sh \"echo $b | base64 -d | bash\"'" 2>/dev/null; }
