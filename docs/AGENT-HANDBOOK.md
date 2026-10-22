@@ -161,6 +161,9 @@ Git and process
   guesses on 2026-10-21: "Chromium drops opacity-0 tiles" shipped and was reverted; the one-column drawer was "almost
   certainly" the recents strip - it was a stale shell.css pushed from another tree). Otherwise
   write "likely" and say what would confirm it.
+- A task waiting on the user gets a `--note` that is the ACTION, in plain imperative words ("Pull down on home to try
+  the single shade", "Plug the phone into the Mac for the kernel test"), never a status ("in installed APK; user to
+  try in edit mode"). The AI page shows the note as the card's action line (manager, 2026-10-22).
 - `shell/.gitignore` ignores `node_modules` (no trailing slash) so a SYMLINKED shell/node_modules (from another
   worktree, for tsc) is ignored too; `node_modules/` matched only a directory and the link made the tree dirty for
   build-app.sh. Write ignore rules that match a symlink when one may be linked.
@@ -187,7 +190,9 @@ The phone
   inject DOM or call actions that change what the user sees (2026-10-21: checks that set the drawer's --p and opened
   panels showed the drawer and the AI page opening on the user's screen, in a recording too). To exercise UI, use the
   headless gate (shell/dev/gate.sh --shots / --tree) or a separate offscreen page; on the phone only in a free window
-  (after `idle.sh --wait`), restored in the same call.
+  (after `idle.sh --wait`), restored in the same call. In such a free window you may close TRANSIENT UI yourself
+  before a test (home's edit mode, an open drawer, a menu or sheet - Back or the page's own exit), never settings or
+  home's layout (the user, 2026-10-22: "you could have just left it yourself").
 - Never drive real devices (lights, Hue, anything physical) without the user's say: a test once changed a real room
   light. Test with mock data (preview data/*.json) or stubbed reducers/handlers.
 - Headless passing is not the device working: the gate's mock and Chromium differ from the phone's WebView (a drawer
