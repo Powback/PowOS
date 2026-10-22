@@ -46,3 +46,32 @@ description: Use when working on PowOS's swipe-home / swipe-up-and-hold switcher
   every frame between the swipe and the settle must show home's content.
 - Logcat tags: PowosNavGesture (down/UP/outcome, lift, speed), PowosSwitcher (begin/show), PowosRecents
   ("gesture input on"), PowosRecentsWatchdog, PowosWallpaper (picture captures - count them), PowosGlassBlur.
+
+## Floating app windows on the unfolded home (system/AppWindows.kt)
+- The unfolded Android home, unchanged, is the PowOS desktop; apps float over it. The Plasma-hosted powos-shell is
+  parked (`powos-desktop-shell` disabled, `taskbar off`; its windows.close/android flags and panel code stay).
+- Mechanism: Android's own freeform (windowing mode 5). OxygenOS 16 coerces it to full screen unless the global
+  developer setting `enable_freeform_support` = 1 (set on the phone 2026-10-22; no reboot needed; undo:
+  `settings delete global enable_freeform_support`). Then `am start --windowingMode 5 -n <cmp>` gives
+  `mode=freeform` and `am task resize <id> l t r b` moves/resizes it.
+- In the app: AppWindows.launchOptions() -> Tasks.freeformOptions(bounds) (setLaunchBounds + hidden
+  setLaunchWindowingMode, reflected: HACK row Tasks.kt) on AndroidAppCatalog.open's startMainActivity, only when
+  smallestScreenWidthDp >= 600 and the setting is on; cascaded, half width x two thirds height. Folded: full screen.
+- Dead ends (measured): OnePlus FlexibleWindowManager.startAnyActivity / calculateFlexibleWindowBounds (bounds come
+  back empty) and OplusZoomWindowManager.startZoomWindow open apps full screen when called from outside OnePlus's
+  launcher; startFlexibleWindowForRecentTasks makes a split "pocket", not a window; Settings is on OnePlus's
+  no-floating list (pick Calculator for tests). Probe OEM framework calls with a d8'd class via
+  `CLASSPATH=x.dex app_process /system/bin <Class>` as root, after dexdump of oplus-framework.jar.
+- OxygenOS draws NO caption/title bar for freeform tasks: move/resize/minimise need our own (next slice), as do the
+  running windows in the dock.
+- Check: `tools/phone/verify/float-windows.sh` (forces the inner screen with `cmd device_state state 3`, swipes the
+  lock face, launches Calculator through home's powos.apps.launch over CDP, asserts mode=freeform, shot.sh, then
+  `cmd device_state state reset`). Queue it: `tools/phone/verify/queue.sh add <task> float-windows.sh`.
+
+## Device-check rules learned
+- One `AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX` call to wait (never loop adb); the verify lock
+  (~/.cache/powos-verify.lock, verify/window-lock.sh) only after the wait; captures only via tools/phone/shot.sh
+  (picks the ON display: the inner screen id 4630946704981769859, the cover 4630946316123810436).
+- Home's foreground activity is com.powos.app/andro.marchy.HomeShell (alias of ShellActivity); HomeDesktop when the
+  engine's desktop is home. `dumpsys device_state` mCommittedState OPENED/CLOSED says folded or not.
+- shell/dev/gate.sh needs shell/node_modules (symlink it from a worktree that has one) or tsc is skipped.
