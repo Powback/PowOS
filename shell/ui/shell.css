@@ -518,7 +518,8 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   border-radius: 2px;
   translate: -50% 0;
   background: var(--color-accent);
-  box-shadow: var(--run-halo);
+  /* A hairline of the theme background (the accent's own ground), so it reads on any wallpaper. */
+  box-shadow: 0 0 0 1px var(--color-background);
 }
 .app[data-run="frozen"] .app-icon::after,
 .dock .app.windowed.minimised:not([data-run="running"]) .app-icon::after { opacity: 0.4; }
