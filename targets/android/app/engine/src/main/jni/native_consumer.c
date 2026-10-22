@@ -67,6 +67,15 @@ struct consumer_state {
 
     int screen_w;
     int screen_h;
+    /* PowOS: a window consumer's buffers at this size (the screen's), not its surface's: a floating window resizes
+     * without new buffers (KWin draws the window at its real size from the top left; the crop shows the task's part).
+     * 0: the surface's size. */
+    int buffers_w;
+    int buffers_h;
+    /* The part of the buffers the surface shows (its size), queued as each buffer's crop - shown 1:1, never scaled.
+     * 0: the whole buffer. Set from Java (nativeSetWindowCrop), read by the render thread. */
+    volatile int crop_w;
+    volatile int crop_h;
 
     // Latest display refresh rate (milli-Hz) reported from Java. Read on
     // (re)connect to seed the producer; updated live by nativeSetRefreshRate.
@@ -444,7 +453,10 @@ static int do_connect(struct consumer_state *s)
     int ch = cfg_custom_height;
     pthread_mutex_unlock(&cfg_lock);
 
-    if (cw > 0 && ch > 0) {
+    if (s->buffers_w > 0 && s->buffers_h > 0) {
+        s->screen_w = s->buffers_w;
+        s->screen_h = s->buffers_h;
+    } else if (cw > 0 && ch > 0) {
         s->screen_w = cw;
         s->screen_h = ch;
     } else {
@@ -603,6 +615,20 @@ static void on_exit_fallback(void *userdata)
     (*g_jvm)->DetachCurrentThread(g_jvm);
 }
 
+/* AOSP system/window.h NATIVE_WINDOW_SET_CROP; its rect is android_native_rect_t (left, top, right, bottom). */
+#define ANW_SET_CROP 3
+
+/* The buffer's part the surface shows, set on the window before a queue (Surface keeps it per queue). */
+static void apply_crop(struct consumer_state *s)
+{
+    int w = s->crop_w, h = s->crop_h;
+    if (w <= 0 || h <= 0)
+        return;
+    int32_t rect[4] = { 0, 0, w < s->screen_w ? w : s->screen_w, h < s->screen_h ? h : s->screen_h };
+    struct anw_window *aw = (struct anw_window *)s->window;
+    aw->perform(aw, ANW_SET_CROP, rect);
+}
+
 static void *render_thread_func(void *arg)
 {
     struct consumer_state *s = arg;
@@ -664,6 +690,7 @@ static void *render_thread_func(void *arg)
          * before scanout -- this lets the producer submit before its GPU render
          * completes (no glFinish stall). rfence == -1 falls back to "ready now". */
         int rfence = refresh_done(s->ctx);
+        apply_crop(s);
         api.queueBuffer(s->window, anb, rfence);
     }
 
@@ -1053,7 +1080,7 @@ Java_andro_marchy_Native_nativeSetAudioKeepalive(
  * handle for the *Window* calls, 0 on failure. The connection retries on its own until KWin's producer answers. */
 JNIEXPORT jlong JNICALL
 Java_andro_marchy_Native_nativeStartWindow(
-    JNIEnv *env, jclass clazz, jobject surface, jint surfaceId)
+    JNIEnv *env, jclass clazz, jobject surface, jint surfaceId, jint buffersWidth, jint buffersHeight)
 {
     if (!api_loaded) {
         if (anw_api_load(&api) < 0) {
@@ -1067,6 +1094,8 @@ Java_andro_marchy_Native_nativeStartWindow(
         return 0;
     pthread_mutex_init(&s->lock, NULL);
     s->surface_id = (uint32_t)surfaceId;
+    s->buffers_w = buffersWidth > 0 ? buffersWidth : 0;
+    s->buffers_h = buffersHeight > 0 ? buffersHeight : 0;
     for (int i = 0; i < MAX_COLLECT_BUFS; i++)
         s->dmabuf_fds[i] = -1;
     s->window = ANativeWindow_fromSurface(env, surface);
@@ -1122,6 +1151,18 @@ static void push_to(jlong handle, struct InputEvent *ev)
     struct consumer_state *s = (struct consumer_state *)(intptr_t)handle;
     if (s && s->ctx)
         push_input_event(s->ctx, ev);
+}
+
+/* The part of the buffers window consumer [handle]'s surface shows: its size now (a floating window resized). */
+JNIEXPORT void JNICALL
+Java_andro_marchy_Native_nativeSetWindowCrop(
+    JNIEnv *env, jclass clazz, jlong handle, jint width, jint height)
+{
+    struct consumer_state *s = (struct consumer_state *)(intptr_t)handle;
+    if (!s)
+        return;
+    s->crop_w = width;
+    s->crop_h = height;
 }
 
 JNIEXPORT void JNICALL

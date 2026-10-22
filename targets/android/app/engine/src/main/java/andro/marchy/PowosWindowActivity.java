@@ -94,6 +94,10 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
         setTaskDescription(new ActivityManager.TaskDescription(title == null || title.isEmpty() ? null : title, icon));
     }
 
+    /** The size of the consumer's buffers (buffersFor), while [handle] is set. */
+    private int buffersW;
+    private int buffersH;
+
     /** KWin closed the window ("close"). */
     void closedByKWin() {
         closedByKWin = true;
@@ -122,18 +126,41 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-        // A new size (split screen, floating, fold) reconnects with buffers of that size; KWin resizes the window to
-        // them.
-        Log.i(TAG, "surface " + id + ": " + width + "x" + height);
+        // A window's buffers are the screen's size (a full-screen application's: the surface's - KWin scales it to
+        // fit them). A new size inside them - a floating window resized, step by step while its frame is dragged - is
+        // no new buffers: KWin resizes the window to it ("size", the client lays itself out and commits) and the
+        // surface shows that part of them, 1:1 from the top left (the crop) - live, never stretched. Buffers of
+        // another size (rotation, fold, full screen) reconnect.
+        int[] buffers = buffersFor(width, height);
+        if (WindowTasks.kwinCan("size"))
+            WindowTasks.sendLine("size\t" + id + "\t" + width + "\t" + height);
+        long running = handle;
+        if (running != 0 && buffers[0] == buffersW && buffers[1] == buffersH) {
+            Native.nativeSetWindowCrop(running, width, height);
+            return;
+        }
+        Log.i(TAG, "surface " + id + ": " + width + "x" + height + " in " + buffers[0] + "x" + buffers[1]);
         stopConsumer();
-        long h = Native.nativeStartWindow(holder.getSurface(), id);
+        long h = Native.nativeStartWindow(holder.getSurface(), id, buffers[0], buffers[1]);
         if (h == 0) {
             Log.e(TAG, "window consumer did not start");
             return;
         }
+        Native.nativeSetWindowCrop(h, width, height);
         if (getDisplay() != null)
             Native.nativeSetWindowRefreshRate(h, getDisplay().getRefreshRate());
+        buffersW = buffers[0];
+        buffersH = buffers[1];
         handle = h;
+    }
+
+    /** The consumer's buffer size for a surface of [width] x [height]: the screen's (as large as it can get). */
+    private int[] buffersFor(int width, int height) {
+        // An older KWin (no "size") fits the window to the buffers: the surface's size, as before.
+        if (getIntent().getBooleanExtra(EXTRA_FULLSCREEN, false) || !WindowTasks.kwinCan("size"))
+            return new int[] {width, height};
+        android.graphics.Rect max = getWindowManager().getMaximumWindowMetrics().getBounds();
+        return new int[] {Math.max(width, max.width()), Math.max(height, max.height())};
     }
 
     @Override

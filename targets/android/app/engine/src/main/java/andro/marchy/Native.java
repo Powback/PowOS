@@ -41,7 +41,10 @@ public final class Native {
     // PowOS: more surfaces - a PowOS window KWin exports to its own Android task (PowosWindowActivity), the display
     // daemon's surface [surfaceId] (docs/powos-window-tasks.md). Pixels and input only; the calls above stay the
     // desktop's. A handle is valid from nativeStartWindow (0 = failed) until nativeStopWindow.
-    public static native long nativeStartWindow(Surface surface, int surfaceId);
+    // buffersWidth/Height: the buffers' size, larger than the surface's (a floating window: the screen's, so it resizes
+    // without new ones), 0 = the surface's; nativeSetWindowCrop: the part of them the surface shows (its size).
+    public static native long nativeStartWindow(Surface surface, int surfaceId, int buffersWidth, int buffersHeight);
+    public static native void nativeSetWindowCrop(long handle, int width, int height);
     public static native void nativeStopWindow(long handle);
     public static native void nativeSetWindowRefreshRate(long handle, float hz);
     public static native void nativeSendWindowTouch(long handle, int action, float x, float y, int pointerId);

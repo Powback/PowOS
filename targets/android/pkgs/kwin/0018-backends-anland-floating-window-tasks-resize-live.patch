@@ -1,0 +1,361 @@
+From 5e0ec8f3b3383896acb5168e447c0b326858a622 Mon Sep 17 00:00:00 2001
+From: PowOS <mats@powback.com>
+Date: Fri, 23 Oct 2026 00:41:45 +0200
+Subject: [PATCH] backends/anland: floating window tasks resize live, new
+ windows and dialogs follow
+
+A floating window task (the unfolded home) is resized by its PowOS frame.
+The app keeps its buffers at the screen's size and tells the task's size
+("size <id> <w> <h>"): the window is configured to it at once and drawn
+at its real size from the top left as it commits - no new buffers per
+step, never stretched. Configure->commit latency is logged per resize.
+
+"export-new 1" (the app, unfolded): every new application window - one
+app opening another (Dolphin -> Gwenview), a second window - opens as its
+own task; turned on, the ones already on the desktop too. Dialogs and other
+transients are drawn into their parent's task, where KWin placed them, and
+take touch and focus. Closing such a task closes its window; one that asks
+first comes back as a task with its question.
+---
+ src/backends/anland/anland_window_task.cpp | 152 +++++++++++++++++++--
+ src/backends/anland/anland_window_task.h   |  22 +++
+ 2 files changed, 162 insertions(+), 12 deletions(-)
+
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index bfb90b2..92fa5d5 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -33,6 +33,7 @@
+ #include <QDBusConnection>
+ #include <QSocketNotifier>
+ 
++#include <algorithm>
+ #include <chrono>
+ #include <sys/eventfd.h>
+ #include <sys/socket.h>
+@@ -70,6 +71,19 @@ AnlandWindowTask::AnlandWindowTask(AnlandWindowTasks *tasks, Window *window, uin
+     m_retry.setSingleShot(true);
+     m_retry.setInterval(500);
+     connect(&m_retry, &QTimer::timeout, this, &AnlandWindowTask::requestConsumer);
++    m_resizeReport.setSingleShot(true);
++    m_resizeReport.setInterval(500);
++    connect(&m_resizeReport, &QTimer::timeout, this, [this]() {
++        if (m_resizeLatencies.isEmpty()) {
++            return;
++        }
++        QList<int> l = m_resizeLatencies;
++        std::sort(l.begin(), l.end());
++        qCInfo(KWIN_ANLAND) << "window task" << m_id << "resized:" << l.size() << "commits, configure->commit median"
++                            << l[l.size() / 2] << "ms, p90" << l[l.size() * 9 / 10] << "ms, max" << l.last() << "ms";
++        m_resizeLatencies.clear();
++    });
++    connect(window, &Window::frameGeometryChanged, this, &AnlandWindowTask::noteResized);
+     m_keepalive.setSingleShot(true);
+     m_keepalive.setInterval(s_keepaliveMs);
+     connect(&m_keepalive, &QTimer::timeout, this, [this]() {
+@@ -205,15 +219,13 @@ void AnlandWindowTask::goLive()
+         m_window->setProperty("powosKeepFullScreenGeometry", true); // Window::checkWorkspacePosition
+     }
+     watchWindow(m_window);
+-    for (Window *child : m_window->transients()) {
+-        if (child->isPopupWindow()) {
+-            watchWindow(child);
+-        }
+-    }
+-    // Menus and other popups it opens from now on are drawn into the task too.
++    attach(m_window);
++    // Menus, popups and dialogs it opens from now on are drawn into the task too (dialogs over it, where KWin placed
++    // them - centred on it), and moved with it: they live with it on the tasks desktop.
+     m_popupAdded = connect(workspace(), &Workspace::windowAdded, this, [this](Window *added) {
+-        if (added->isPopupWindow() && added->transientFor() == m_window) {
++        if (added->transientFor() && watching(added->transientFor())) {
+             watchWindow(added);
++            attach(added);
+         }
+     });
+     fitWindow();
+@@ -251,6 +263,27 @@ void AnlandWindowTask::watchWindow(Window *window)
+     scheduleRender();
+ }
+ 
++bool AnlandWindowTask::watching(const Window *window) const
++{
++    for (const Watched &w : m_watched) {
++        if (w.window == window) {
++            return true;
++        }
++    }
++    return false;
++}
++
++void AnlandWindowTask::attach(Window *window)
++{
++    // [window]'s transients (popups, menus, dialogs, theirs in turn), already open: drawn into the task with it.
++    for (Window *child : window->transients()) {
++        if (!child->isDeleted() && !watching(child)) {
++            watchWindow(child);
++            attach(child);
++        }
++    }
++}
++
+ void AnlandWindowTask::unwatchAll()
+ {
+     disconnect(m_popupAdded);
+@@ -368,19 +401,50 @@ RectF AnlandWindowTask::viewport() const
+     return RectF(client.topLeft(), size);
+ }
+ 
++QSize AnlandWindowTask::taskSize() const
++{
++    // Never past the buffers: what doesn't fit them can't be shown.
++    return m_taskSize.isEmpty() || m_bufferSize.isEmpty() ? m_bufferSize : m_taskSize.boundedTo(m_bufferSize);
++}
++
++void AnlandWindowTask::resizeTo(const QSize &taskSize)
++{
++    if (taskSize.isEmpty() || taskSize == m_taskSize) {
++        return;
++    }
++    m_taskSize = taskSize;
++    fitWindow();
++}
++
+ void AnlandWindowTask::fitWindow()
+ {
+     // A full-screen window keeps KWin's full-screen geometry (the screen's - what the immersive task shows).
+     if (!m_window || m_bufferSize.isEmpty() || m_window->isFullScreen()) {
+         return;
+     }
+-    // The window takes the task's size (split screen, floating window, fold): its client area fills the buffers.
+-    const QSizeF client = QSizeF(m_bufferSize) / scale();
++    // The window takes the task's size (split screen, floating window, fold): its client area fills the task. The
++    // latest size wins - KWin configures the client, which commits when it has laid itself out (render() draws
++    // whatever it has meanwhile, at its real size from the top left: never stretched).
++    const QSizeF client = QSizeF(taskSize()) / scale();
+     if (m_window->clientGeometry().size() != client) {
++        m_resizeAsked = std::chrono::steady_clock::now();
++        m_resizeWanted = client;
+         m_window->moveResize(RectF(m_window->frameGeometry().topLeft(), m_window->clientSizeToFrameSize(client)));
+     }
+ }
+ 
++void AnlandWindowTask::noteResized()
++{
++    // The client committed the size resizeTo asked for: how long it took (the log line after the resize).
++    if (!m_window || m_resizeWanted.isEmpty() || m_window->clientGeometry().size() != m_resizeWanted) {
++        return;
++    }
++    m_resizeWanted = QSizeF();
++    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_resizeAsked);
++    m_resizeLatencies.append(int(ms.count()));
++    m_resizeReport.start();
++}
++
+ QPointF AnlandWindowTask::mapToGlobal(const QPointF &taskPoint) const
+ {
+     return viewport().topLeft() + taskPoint / scale();
+@@ -492,12 +556,13 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+             const QList<Window *> windows = paintedWindows();
+             Window *target = m_window;
+             for (auto it = windows.crbegin(); it != windows.crend(); ++it) {
+-                if ((*it)->isPopupWindow() && (*it)->frameGeometry().contains(pos)) {
++                // The top-most of its popups and dialogs under the finger (they're drawn over it, in this order).
++                if (*it != m_window && (*it)->frameGeometry().contains(pos)) {
+                     target = *it;
+                     break;
+                 }
+             }
+-            if (target == m_window) {
++            if (!target->isPopupWindow()) {
+                 for (Window *w : windows) {
+                     if (w->isPopupWindow()) {
+                         w->popupDone();
+@@ -505,6 +570,9 @@ void AnlandWindowTask::processInputEvent(const InputEvent &ev)
+                 }
+             }
+             focus();
++            if (target != m_window && !target->isPopupWindow()) {
++                workspace()->requestFocus(target, true); // a dialog: its fields take the keys
++            }
+             if (seat->notifyTouchDown(target->surface(), target->bufferGeometry().topLeft(), id, pos)) {
+                 m_touches.insert(id);
+             }
+@@ -587,6 +655,9 @@ void AnlandWindowTasks::connectControl()
+     m_controlBuffer.clear();
+     m_controlNotifier = new QSocketNotifier(m_controlFd, QSocketNotifier::Read, this);
+     connect(m_controlNotifier, &QSocketNotifier::activated, this, &AnlandWindowTasks::onControlReadable);
++    // What this KWin understands beyond "closed"/"focus": the app only sends it then (an older KWin, buffers of the
++    // task's size as before).
++    send({QStringLiteral("caps"), QStringLiteral("size export-new")});
+ }
+ 
+ void AnlandWindowTasks::onControlReadable()
+@@ -631,6 +702,10 @@ void AnlandWindowTasks::handleLine(const QString &line)
+     if (f.size() < 2) {
+         return;
+     }
++    if (f[0] == QLatin1String("export-new")) {
++        setExportNew(f[1] == QLatin1String("1"));
++        return;
++    }
+     const uint32_t id = f[1].toUInt();
+     if (id == 0 && f[0] == QLatin1String("focus")) {
+         // The desktop's task is in front again: a window shown as its own task gives up KWin's focus to the
+@@ -646,10 +721,25 @@ void AnlandWindowTasks::handleLine(const QString &line)
+         return;
+     }
+     if (f[0] == QLatin1String("closed")) {
+-        // The task was closed for good: the window goes back on the desktop.
++        // The task was closed for good: the window goes back on the desktop. On the unfolded home nothing shows the
++        // desktop, so closing the task closes the window (its title bar's close, swiped from Recents); one that
++        // stays (it asks to save first) comes back as a task with its question.
++        Window *window = task->window();
++        const bool close = m_exportNew && !task->fullScreen() && window && !window->isDeleted();
+         remove(task);
++        if (close) {
++            window->closeWindow();
++            QTimer::singleShot(1500, this, [this, w = QPointer<Window>(window)]() {
++                if (w && !w->isDeleted()) {
++                    exportNew(w);
++                }
++            });
++        }
+     } else if (f[0] == QLatin1String("focus")) {
+         task->focus();
++    } else if (f[0] == QLatin1String("size") && f.size() >= 4) {
++        // A floating task resized (its frame dragged): the window follows, live.
++        task->resizeTo(QSize(f[2].toInt(), f[3].toInt()));
+     }
+ }
+ 
+@@ -700,6 +790,16 @@ void AnlandWindowTasks::integrate()
+         watchFullScreen(window);
+     }
+     connect(workspace(), &Workspace::windowAdded, this, &AnlandWindowTasks::watchFullScreen);
++    // The unfolded home ("export-new 1"): a new application window - another app's (Dolphin opening an image in
++    // Gwenview), a second window of its own - opens as its own task, a floating window on the home page on screen.
++    // Dialogs and popups aren't: their parent's task draws them (AnlandWindowTask::attach).
++    connect(workspace(), &Workspace::windowAdded, this, [this](Window *window) {
++        QMetaObject::invokeMethod(this, [this, w = QPointer<Window>(window)]() {
++            if (w) {
++                exportNew(w);
++            }
++        }, Qt::QueuedConnection);
++    });
+ 
+     // Something activated an exported window the desktop way (the PowOS taskbar, a notification): KWin switches to
+     // its desktop, focuses it, then reports it activated. Bring its task to the front, and stay on the desktop. A
+@@ -770,6 +870,34 @@ void AnlandWindowTasks::onFullScreenChanged(Window *window)
+     }
+ }
+ 
++void AnlandWindowTasks::setExportNew(bool on)
++{
++    if (on == m_exportNew) {
++        return;
++    }
++    m_exportNew = on;
++    qCInfo(KWIN_ANLAND) << "new windows as tasks:" << on;
++    if (!on || !workspace()) {
++        return;
++    }
++    // Turned on: the application windows already open on the desktop too - nothing shows the desktop now, so a
++    // window left there could never be reached (six Gwenview windows opened that way, 2026-10-23).
++    for (Window *window : workspace()->windows()) {
++        exportNew(window);
++    }
++}
++
++void AnlandWindowTasks::exportNew(Window *window)
++{
++    if (!m_exportNew || !window || window->isDeleted() || window->transientFor() || window->isFullScreen() || taskFor(window)) {
++        return;
++    }
++    if (window->isMinimized() || !exportable(window)) {
++        return;
++    }
++    show(window);
++}
++
+ bool AnlandWindowTasks::exportable(Window *window) const
+ {
+     // An application's own window: what the taskbar lists. Not the shell's (the app grid is a full-screen
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index d34faf9..4bd6a98 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -26,6 +26,8 @@
+ #include <QSet>
+ #include <QSize>
+ #include <QTimer>
++
++#include <chrono>
+ #include <memory>
+ 
+ extern "C" {
+@@ -69,6 +71,12 @@ public:
+     {
+         return m_fullScreen;
+     }
++    /**
++     * The task's size in its pixels ("size" from the app: a floating window being resized). Its buffers stay at the
++     * screen's size, so the window takes the new size at once - a configure, drawn at its real size top-left when it
++     * commits - with no new buffers per step. Before the app says one: the buffers' size.
++     */
++    void resizeTo(const QSize &taskSize);
+ 
+ private:
+     enum class State {
+@@ -90,13 +98,17 @@ private:
+     void scheduleRender();
+     void render(bool keepalive);
+     void watchWindow(Window *window);
++    bool watching(const Window *window) const;
++    void attach(Window *window);
+     void unwatchAll();
+     QList<Window *> paintedWindows() const;
+     QPointF mapToGlobal(const QPointF &taskPoint) const;
+     RectF viewport() const;
+     qreal scale() const;
+     bool fitsWindow() const;
++    QSize taskSize() const;
+     void fitWindow();
++    void noteResized();
+     void cancelTouches();
+ 
+     AnlandWindowTasks *m_tasks;
+@@ -116,6 +128,12 @@ private:
+     std::unique_ptr<GLFramebuffer> m_fbos[MAX_BUFS];
+     bool m_stale[MAX_BUFS] = {};
+     QSize m_bufferSize;
++    QSize m_taskSize; // resizeTo's, empty until the app says one
++    // Configure -> commit latency of resizeTo's steps (one log line per resize, 500 ms after its last step).
++    std::chrono::steady_clock::time_point m_resizeAsked;
++    QSizeF m_resizeWanted;
++    QList<int> m_resizeLatencies;
++    QTimer m_resizeReport;
+     bool m_offered = false; // the consumer handed us a buffer to fill (buf_ready) and waits for it
+     bool m_renderScheduled = false;
+ 
+@@ -185,6 +203,8 @@ private:
+     void connectControl();
+     void onControlReadable();
+     void handleLine(const QString &line);
++    void setExportNew(bool on);
++    void exportNew(Window *window);
+     void dropTasksDesktopIfUnused();
+ 
+     AnlandBackend *m_backend;
+@@ -195,6 +215,8 @@ private:
+     QByteArray m_controlBuffer;
+     QHash<uint32_t, AnlandWindowTask *> m_tasks;
+     uint32_t m_nextId = 1;
++    // The app's "export-new 1" (the unfolded home, apps float): every application window opens as its own task.
++    bool m_exportNew = false;
+     QPointer<VirtualDesktop> m_desktop;
+     QPointer<VirtualDesktop> m_returnDesktop; // where to go back to when something switched to the tasks desktop
+ };
+-- 
+2.50.1 (Apple Git-155)
+
