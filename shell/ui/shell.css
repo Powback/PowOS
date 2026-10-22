@@ -1207,8 +1207,15 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
   border-color: transparent;
 }
 html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
-/* Its compose bar: the pill (.pill), where home's search sits. */
-.ai-screen .ai-compose { margin: 0 0 calc(max(var(--inset-bottom, 0px), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--pill-foot)); }
+/*
+ * Its compose bar: the pill (.pill), where home's search sits, and as high above the keyboard (or the navigation
+ * handle) as home's: --ai-foot, one token for every AI compose and pane foot. The AI page is fixed and unpadded, so it
+ * carries the insets; inside home's or the pull-up's frame (.home pads the keyboard and the nav already) only the
+ * pill's own foot - the insets again there would lift the pill twice the keyboard's height.
+ */
+.ai-screen { --ai-foot: calc(max(var(--inset-bottom, 0px), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--pill-foot)); }
+.home { --ai-foot: var(--pill-foot); }
+.ai-compose { margin: 0 0 var(--ai-foot); }
 .ai-title { font-size: var(--text-item); font-weight: bold; }
 .ai-state { flex: 1; font-size: var(--text-small); color: var(--color-muted); }
 .ai-state.busy { color: var(--accent-text); }
@@ -1233,7 +1240,6 @@ html:not(.glass-native) .ai-screen .tile { background: var(--text-fill); }
  * thumb. Both panes start on one line and end on the pill's; the pair stays centred on a very wide window.
  */
 .ai-view.wide {
-  --ai-foot: calc(max(var(--inset-bottom, 0px), calc(var(--inset-keyboard, 0px) + var(--pill-foot))) + var(--pill-foot));
   display: grid;
   grid-template-columns: minmax(300px, 1fr) minmax(0, 70ch);
   grid-template-rows: auto minmax(0, 1fr) auto;

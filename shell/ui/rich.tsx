@@ -438,11 +438,22 @@ export function mailOf(text: string): { from: string; body: string } | null {
 /** Commit hashes and agent ids ("611b9f8a", "(ae943ed)") out of what a person reads. */
 const unhashed = (t: string) => t.replace(/\s*\((?:[0-9a-f]{7,40}(?:[,\s/]+)?)+\)/g, "").replace(/\b[0-9a-f]{7,40}\b/g, "").replace(/[ \t]{2,}/g, " ");
 
-/** Its first sentence, plain: what the mail is about. */
+/**
+ * Its first sentence, plain: what the mail is about - asides in brackets, review image paths and a status lead word
+ * ("SHIPPED:") out, the first letter capital; one line, so the card folds to who + this.
+ */
 const firstSentence = (body: string) => {
-  const t = unhashed(body).replace(/\s+/g, " ").replace(/^(ack|fyi|note)\s*[-:]\s*/i, "").trim();
+  const t = unhashed(body)
+    .replace(/\s+/g, " ")
+    .replace(/,?\s*(review\s+)?\/home\/powos\/design-qa\/[A-Za-z0-9._-]+\.(png|jpg)/g, "")
+    .replace(/\s*\([^()]{0,120}\)/g, "")
+    .replace(/^(ack|fyi|note)\s*[-:]\s*/i, "")
+    .replace(/^(SHIPPED|IN PROGRESS|BLOCKED|DONE|NEXT|WAITING ON YOU|WAITING)\b:?\s*(-\s*)?/, "")
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .trim();
   const m = t.match(/^(.{12,160}?[.!?])(\s|$)/);
-  return m ? m[1] : t.length > 140 ? `${t.slice(0, 140).trimEnd()}…` : t;
+  const one = (m ? m[1] : t.length > 140 ? `${t.slice(0, 140).trimEnd()}…` : t).replace(/[:;,]$/, "");
+  return one.charAt(0).toUpperCase() + one.slice(1);
 };
 
 /** The body as Markdown: "SHIPPED:" / "IN PROGRESS" / "X:" lead lines as quiet headers, " - " runs as a list. */
@@ -458,7 +469,10 @@ function mailMd(body: string) {
     .join("\n");
 }
 
-/** An agent's message in the chat: a compact card - who, what in one line; a tap opens it (Markdown, its images). */
+/**
+ * An agent's message in the chat: folded, one line - who and the gist, a chevron; a tap opens it (Markdown, its
+ * images), another folds it again.
+ */
 export function MailCard({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const mail = mailOf(text)!;
@@ -469,6 +483,7 @@ export function MailCard({ text }: { text: string }) {
         <span class="ai-dot on" />
         <span class="mail-from">{mail.from}</span>
         {!open && <span class="mail-sum">{firstSentence(mail.body)}</span>}
+        <span class="mail-chev" aria-hidden="true" />
       </button>
       {open && (
         <>

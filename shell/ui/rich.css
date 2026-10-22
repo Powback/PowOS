@@ -215,9 +215,14 @@
 .sent-gone { font-size: var(--text-small); font-weight: normal; }
 
 /* An agent's message: a compact card (who, the gist in one line); open, its Markdown with quiet section headers. */
-.mail { align-self: stretch; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: var(--radius); background: var(--soft-fill); }
-.mail-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 0; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
-.mail-head .ai-dot { align-self: center; }
+/* An agent's mail (rich.tsx MailCard): folded to one line - who, the gist, a chevron; open, its Markdown under it. */
+.mail { align-self: stretch; display: flex; flex-direction: column; gap: 6px; padding: 0 12px; border-radius: var(--radius); background: var(--soft-fill); }
+.mail.open { padding-bottom: 10px; }
+/* The whole line is the tap target (40 px tall), not only the words. */
+.mail-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 0; font: inherit; text-align: start; color: var(--color-foreground); background: none; border: 0; }
+/* Drawn, not a glyph (a font drew the arrow as an emoji): down folded, up open. */
+.mail-chev { flex: none; width: 6px; height: 6px; margin: 0 2px 3px auto; border: solid var(--color-muted); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.mail.open .mail-chev { margin-bottom: -3px; transform: rotate(-135deg); }
 .mail-from { flex: none; font-weight: 600; }
 .mail-sum { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-small); }
 .mail-body { font-size: var(--text-small); }
